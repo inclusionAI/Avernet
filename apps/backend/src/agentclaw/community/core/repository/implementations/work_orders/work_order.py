@@ -5,6 +5,10 @@ from __future__ import annotations
 import json
 
 from injector import inject
+from agentclaw.community.core.repository.implementations.spaces.knowledge_sync import (
+    record_membership_snapshot,
+)
+
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 
@@ -176,11 +180,12 @@ class WorkOrderRepository(
             if order is None:
                 raise WorkOrderNotFoundError("work order not found")
             if (
-                order.approval_mode
-                not in (None, WorkOrderApprovalMode.MANUAL.value)
+                order.approval_mode not in (None, WorkOrderApprovalMode.MANUAL.value)
                 or order.status != WorkOrderStatus.PENDING.value
             ):
-                raise WorkOrderAlreadyProcessedError("work order is not a pending MANUAL order")
+                raise WorkOrderAlreadyProcessedError(
+                    "work order is not a pending MANUAL order"
+                )
             approver = (
                 db.query(self._Approver)
                 .filter(
@@ -193,9 +198,7 @@ class WorkOrderRepository(
             )
             if approver is None:
                 raise WorkOrderAccessDeniedError("current user is not an approver")
-            if (
-                approver.status != WorkOrderApproverStatus.PENDING.value
-            ):
+            if approver.status != WorkOrderApproverStatus.PENDING.value:
                 raise WorkOrderAlreadyProcessedError("work order already processed")
             target = WorkOrderStatus(decision.value)
             updated = (
@@ -216,26 +219,33 @@ class WorkOrderRepository(
             )
             if updated != 1:
                 raise WorkOrderAlreadyProcessedError("approver already processed")
-            order_updated = db.query(self._WorkOrder).filter(
-                self._WorkOrder.id == work_order_id,
-                self._WorkOrder.env == env,
-                or_(
-                    self._WorkOrder.approval_mode.is_(None),
-                    self._WorkOrder.approval_mode == WorkOrderApprovalMode.MANUAL.value,
-                ),
-                self._WorkOrder.status == WorkOrderStatus.PENDING.value,
-            ).update(
-                {
-                    self._WorkOrder.status: target.value,
-                    self._WorkOrder.reviewer_user_id: reviewer_user_id,
-                    self._WorkOrder.review_remark: review_remark,
-                    self._WorkOrder.reviewed_at: now,
-                    self._WorkOrder.gmt_modified: now,
-                },
-                synchronize_session=False,
+            order_updated = (
+                db.query(self._WorkOrder)
+                .filter(
+                    self._WorkOrder.id == work_order_id,
+                    self._WorkOrder.env == env,
+                    or_(
+                        self._WorkOrder.approval_mode.is_(None),
+                        self._WorkOrder.approval_mode
+                        == WorkOrderApprovalMode.MANUAL.value,
+                    ),
+                    self._WorkOrder.status == WorkOrderStatus.PENDING.value,
+                )
+                .update(
+                    {
+                        self._WorkOrder.status: target.value,
+                        self._WorkOrder.reviewer_user_id: reviewer_user_id,
+                        self._WorkOrder.review_remark: review_remark,
+                        self._WorkOrder.reviewed_at: now,
+                        self._WorkOrder.gmt_modified: now,
+                    },
+                    synchronize_session=False,
+                )
             )
             if order_updated != 1:
-                raise WorkOrderAlreadyProcessedError("work order is not a pending MANUAL order")
+                raise WorkOrderAlreadyProcessedError(
+                    "work order is not a pending MANUAL order"
+                )
 
             # A unified SPACE_JOIN approval has a domain side effect in
             # addition to the generic work-order state transition: the
@@ -255,8 +265,11 @@ class WorkOrderRepository(
 
                 space = (
                     db.query(self._Space)
-                    .filter(self._Space.id == space_id, self._Space.env == env,
-                            self._Space.deleted_at.is_(None))
+                    .filter(
+                        self._Space.id == space_id,
+                        self._Space.env == env,
+                        self._Space.deleted_at.is_(None),
+                    )
                     .with_for_update()
                     .one_or_none()
                 )
@@ -290,6 +303,8 @@ class WorkOrderRepository(
                         created_by=reviewer_user_id,
                     )
                 )
+
+                record_membership_snapshot(db, space)
 
             db.query(self._Approver).filter(
                 self._Approver.work_order_id == work_order_id,
@@ -363,9 +378,7 @@ class WorkOrderRepository(
                 result_payload = {"text": result_text}
                 if review_remark is not None:
                     result_payload["review_remark"] = review_remark
-                result_content = json.dumps(
-                    result_payload, ensure_ascii=False
-                )
+                result_content = json.dumps(result_payload, ensure_ascii=False)
             db.add(
                 self._Notification(
                     work_order_id=work_order_id,
@@ -653,7 +666,8 @@ class WorkOrderRepository(
                     self._WorkOrder.id == work_order_id,
                     or_(
                         self._WorkOrder.approval_mode.is_(None),
-                        self._WorkOrder.approval_mode == WorkOrderApprovalMode.MANUAL.value,
+                        self._WorkOrder.approval_mode
+                        == WorkOrderApprovalMode.MANUAL.value,
                     ),
                     self._WorkOrder.status == WorkOrderStatus.PENDING.value,
                     self._WorkOrder.env == env,
@@ -718,8 +732,11 @@ class WorkOrderRepository(
             space_id = int(work_order.biz_id)
             space = (
                 db.query(self._Space)
-                .filter(self._Space.id == space_id, self._Space.env == env,
-                        self._Space.deleted_at.is_(None))
+                .filter(
+                    self._Space.id == space_id,
+                    self._Space.env == env,
+                    self._Space.deleted_at.is_(None),
+                )
                 .with_for_update()
                 .one_or_none()
             )
@@ -750,6 +767,7 @@ class WorkOrderRepository(
                         created_by=reviewer_user_id,
                     )
                 )
+                record_membership_snapshot(db, space)
 
             db.add(
                 self._Notification(

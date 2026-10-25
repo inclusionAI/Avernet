@@ -16,6 +16,7 @@ DDL by hand before the pods start), so it lives in ``core/`` and both plugins
 call it. ``core/`` is the lowest layer; ``plugins/`` depends on it, never the
 reverse.
 """
+
 from __future__ import annotations
 
 import logging
@@ -73,6 +74,7 @@ def import_all_models() -> None:
     import agentclaw.community.core.caller_identity.models  # noqa: F401  caller identity tables
     import agentclaw.community.core.bot_app_grant.models  # noqa: F401  ac_bot_app_grant / ac_bot_app_grant_log
     import agentclaw.community.core.user_list.models  # noqa: F401  ac_entity_user_list
+    import agentclaw.community.core.space_knowledge.repository.models  # noqa: F401
     import agentclaw.community.core.spaces.repository.models  # noqa: F401  ac_space / ac_space_member
     import agentclaw.community.core.market_favorites.repository.models  # noqa: F401  ac_market_favorite
     import agentclaw.community.core.bot_message_feedback.models  # noqa: F401  ac_bot_message_feedback
@@ -185,10 +187,15 @@ def prepare_for_mysql(metadata: MetaData) -> list[str]:
             if prefixes is None:
                 continue
             columns = list(constraint.columns)
-            name = constraint.name or f"uk_{table.name}_{'_'.join(c.name for c in columns)}"
+            name = (
+                constraint.name
+                or f"uk_{table.name}_{'_'.join(c.name for c in columns)}"
+            )
             table.constraints.discard(constraint)
             Index(name, *columns, unique=True, mysql_length=prefixes)
-            adjusted.append(f"{table.name}.{name} (unique constraint → prefixed unique index)")
+            adjusted.append(
+                f"{table.name}.{name} (unique constraint → prefixed unique index)"
+            )
 
         for index in table.indexes:
             already = index.dialect_options["mysql"].get("length") or {}

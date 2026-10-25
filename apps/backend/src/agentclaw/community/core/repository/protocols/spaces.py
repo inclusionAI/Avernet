@@ -6,8 +6,11 @@ from abc import abstractmethod
 from typing import ContextManager, Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
+    from agentclaw.community.plugin_api.space_membership import SpaceMembershipSnapshot
     from agentclaw.community.core.spaces.management_models import (
-        ManagedSpace, MemberPageQuery, SpacePageQuery,
+        ManagedSpace,
+        MemberPageQuery,
+        SpacePageQuery,
     )
     from agentclaw.community.core.spaces.models import (
         SpaceListScope,
@@ -47,7 +50,8 @@ class SpaceRepositoryProtocol(Protocol):
 
     @abstractmethod
     def create_team_transaction(
-        self, *,
+        self,
+        *,
         name: str,
         creator_id: str,
         creator_user_name: str | None,
@@ -128,19 +132,56 @@ class SpaceManagementRepositoryProtocol(Protocol):
     Batch operations lock the parent, check existence and commit atomically.
     Missing relations are no-ops on remove, but reject an entire role batch.
     """
+
     @abstractmethod
     def list_teams(self, *, query: SpacePageQuery, env: str) -> dict: ...
     @abstractmethod
     def get_team(self, *, space_id: int, env: str) -> ManagedSpace: ...
     @abstractmethod
-    def rename_team(self, *, space_id: int, name: str, actor_id: str, env: str) -> dict: ...
+    def rename_team(
+        self, *, space_id: int, name: str, actor_id: str, env: str
+    ) -> dict: ...
     @abstractmethod
     def delete_team(self, *, space_id: int, with_members: bool, env: str) -> dict: ...
     @abstractmethod
-    def list_members(self, *, space_id: int, query: MemberPageQuery, env: str) -> dict: ...
+    def list_members(
+        self, *, space_id: int, query: MemberPageQuery, env: str
+    ) -> dict: ...
     @abstractmethod
-    def add_members(self, *, space_id: int, members: dict[str, str | None], actor_id: str, env: str) -> dict: ...
+    def add_members(
+        self, *, space_id: int, members: dict[str, str | None], actor_id: str, env: str
+    ) -> dict: ...
     @abstractmethod
-    def remove_members(self, *, space_id: int, user_ids: list[str], env: str) -> dict: ...
+    def remove_members(
+        self, *, space_id: int, user_ids: list[str], env: str
+    ) -> dict: ...
     @abstractmethod
-    def set_member_roles(self, *, space_id: int, user_ids: list[str], role: str, env: str) -> dict: ...
+    def set_member_roles(
+        self, *, space_id: int, user_ids: list[str], role: str, env: str
+    ) -> dict: ...
+
+
+@runtime_checkable
+class SpaceKnowledgeSyncRepositoryProtocol(Protocol):
+    """Ordered immutable membership delivery, scoped to a fixed env and app."""
+
+    @abstractmethod
+    def activate(self, *, space_id: int, environment: str, app: str) -> None: ...
+
+    @abstractmethod
+    def progress(
+        self, *, space_id: int, environment: str, app: str
+    ) -> tuple[int, int, str] | None: ...
+
+    @abstractmethod
+    def next_snapshot(
+        self, *, space_id: int, environment: str, app: str
+    ) -> SpaceMembershipSnapshot | None: ...
+
+    @abstractmethod
+    def acknowledge(self, *, snapshot: SpaceMembershipSnapshot, app: str) -> None: ...
+
+    @abstractmethod
+    def repair_pending(
+        self, *, environment: str, app: str, after_space_id: int, limit: int
+    ) -> int: ...

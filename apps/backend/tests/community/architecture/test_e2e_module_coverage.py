@@ -28,6 +28,7 @@ from tests.community._flows.tc_file_upload_integrations.api_lifecycle import (
     TC_FILE_UPLOAD_INTEGRATION_FLOWS,
 )
 from tests.community._flows.user_list.api_lifecycle import USER_LIST_FLOWS
+from tests.community._flows.space_knowledge.api_lifecycle import SPACE_KNOWLEDGE_FLOWS
 from tests.community.framework.flow_coverage import (
     SINGLEBOX_E2E_EXEMPT,
     all_core_modules,
@@ -38,6 +39,7 @@ from tests.community.framework.flow_coverage import (
 # Plan C appends real flows here (or swaps for a registry). 新模块的流 import
 # 进来 extend 此列表。
 REGISTERED_FLOWS: list = [
+    *SPACE_KNOWLEDGE_FLOWS,
     *DIGITAL_EMPLOYEE_FLOWS,
     *API_LIFECYCLE_FLOWS,
     *ACCESS_LIFECYCLE_FLOWS,

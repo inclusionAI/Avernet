@@ -96,7 +96,6 @@ _ALLOWLIST: dict[str, str] = {
     "adapters/http/harness/router.py": "~2352 lines — harness router; patch/diagnose/templates/recordings.",
     "core/repository/implementations/skill_center/skill.py": "~1722 lines — unified ORM skill repository (covers all skill CRUD).",
     "core/bot_public/services/bot_public_service.py": "~1166 lines — bot-public / friend-bot discovery + approval service.",
-    "adapters/http/app.py": "~1002 lines — FastAPI app mounting all routers.",
     "core/task/task_context/task_trajectory/analyzer.py": "~1105 lines — trajectory analyzer inherited from origin/dev.",
 }
 

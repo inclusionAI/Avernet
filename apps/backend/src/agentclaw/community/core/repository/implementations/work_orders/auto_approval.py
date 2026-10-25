@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import json
 
+from agentclaw.community.core.repository.implementations.spaces.knowledge_sync import (
+    record_membership_snapshot,
+)
+
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -331,6 +335,7 @@ class _AutoApprovalWorkOrderRepository:
                 created_by=SYSTEM_REVIEWER_USER_ID,
             )
         )
+        record_membership_snapshot(db, space)
 
     def _insert_auto_result_notifications(
         self,

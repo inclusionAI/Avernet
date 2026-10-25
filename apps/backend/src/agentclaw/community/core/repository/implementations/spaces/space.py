@@ -9,6 +9,10 @@ from injector import inject
 from sqlalchemy import exists, func, or_
 from sqlalchemy.exc import IntegrityError
 
+from agentclaw.community.core.repository.implementations.spaces.knowledge_sync import (
+    lock_space,
+    record_membership_snapshot,
+)
 from agentclaw.community.core.repository.protocols.spaces import SpaceRepositoryProtocol
 from agentclaw.community.core.spaces.errors import (
     SpaceAlreadyExistsError,
@@ -503,10 +507,16 @@ class SpaceRepository(SpaceRepositoryProtocol):
             with self._db.transactional_orm_session() as db:
                 # Share the parent lock with maintenance deletion. Re-check in
                 # this transaction, not only in the calling permission service.
-                parent = db.query(self._Space.id).filter(
-                    self._Space.id == space_id, self._Space.env == env,
-                    self._Space.deleted_at.is_(None),
-                ).with_for_update().one_or_none()
+                parent = (
+                    db.query(self._Space)
+                    .filter(
+                        self._Space.id == space_id,
+                        self._Space.env == env,
+                        self._Space.deleted_at.is_(None),
+                    )
+                    .with_for_update()
+                    .one_or_none()
+                )
                 if parent is None:
                     raise SpaceNotFoundError(f"space {space_id} not found")
                 row = self._Member(
@@ -520,12 +530,16 @@ class SpaceRepository(SpaceRepositoryProtocol):
                 db.add(row)
                 db.flush()
                 db.refresh(row)
+                record_membership_snapshot(db, parent)
                 return row.to_record()
         except IntegrityError as exc:
             raise SpaceMemberAlreadyExistsError("space member already exists") from exc
 
     def delete_member(self, *, space_id: int, user_id: str, env: str) -> bool:
-        with self._db.orm_session() as db:
+        with self._db.transactional_orm_session() as db:
+            parent = lock_space(db, space_id, env)
+            if parent is None:
+                return False
             deleted = (
                 db.query(self._Member)
                 .filter(
@@ -536,12 +550,17 @@ class SpaceRepository(SpaceRepositoryProtocol):
                 )
                 .delete(synchronize_session=False)
             )
+            if deleted:
+                record_membership_snapshot(db, parent)
             return deleted > 0
 
     def update_member_role(
         self, *, space_id: int, user_id: str, role: SpaceRole, env: str
     ):
-        with self._db.orm_session() as db:
+        with self._db.transactional_orm_session() as db:
+            parent = lock_space(db, space_id, env)
+            if parent is None:
+                return None
             row = (
                 db.query(self._Member)
                 .filter(
@@ -558,4 +577,5 @@ class SpaceRepository(SpaceRepositoryProtocol):
             row.gmt_modified = func.now()
             db.flush()
             db.refresh(row)
+            record_membership_snapshot(db, parent)
             return row.to_record()

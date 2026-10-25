@@ -7,6 +7,7 @@ manually and must mirror this definition — including ``gmt_create`` /
 ``gmt_modified`` as ``DEFAULT CURRENT_TIMESTAMP [ON UPDATE CURRENT_TIMESTAMP]``
 so the database manages those audit columns.
 """
+
 import json
 
 from sqlalchemy import (
@@ -38,6 +39,7 @@ from agentclaw.community.utils.env_utils import get_current_env
 # KEY". BigInteger renders as "BIGINT" on SQLite, which breaks autoincrement.
 # with_variant() keeps BIGINT on MySQL/OceanBase but uses INTEGER on SQLite.
 AutoIncrementBigInteger = BigInteger().with_variant(Integer, "sqlite")
+
 
 def _binary_string(length: int):
     """``VARCHAR(length)`` that compares **byte-for-byte** on MySQL/OceanBase.
@@ -89,7 +91,9 @@ class TaskQueueModel(Base):
 
     # ── identity / payload ──────────────────────────────────────────────
     task_type = Column(TaskTypeString, nullable=False, comment="handler registry key")
-    payload = Column(Text, nullable=False, comment="JSON string; deserialized in to_record()")
+    payload = Column(
+        Text, nullable=False, comment="JSON string; deserialized in to_record()"
+    )
 
     # ── scheduling / claim state ────────────────────────────────────────
     status = Column(
@@ -204,7 +208,9 @@ class TaskQueueModel(Base):
         server_default=DEFAULT_APP,
         comment="app who owns the task; all queries that select work filter by app",
     )
-    gmt_create = Column(DateTime, default=func.now(), nullable=False, comment="first-enqueue audit time")
+    gmt_create = Column(
+        DateTime, default=func.now(), nullable=False, comment="first-enqueue audit time"
+    )
     gmt_modified = Column(
         DateTime,
         default=func.now(),
@@ -214,6 +220,14 @@ class TaskQueueModel(Base):
     )
 
     __table_args__ = (
+        Index(
+            "idx_task_queue_sync_history",
+            "env",
+            "app",
+            "task_type",
+            "idempotency_key",
+            "id",
+        ),
         # Claim scan: WHERE env=? AND status=? AND run_at<=? ORDER BY run_at.
         Index("idx_env_status_run_at", "env", "status", "run_at"),
         # Reclaim scan: env-scoped lookup of expired RUNNING leases.

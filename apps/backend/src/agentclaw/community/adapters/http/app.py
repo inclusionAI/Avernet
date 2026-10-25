@@ -28,6 +28,7 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from agentclaw.community.adapters.http.space_knowledge.registration import mount_resource_routers, mount_space_routers
 
 # ─── Phase 1: pre-DI bootstrap ───────────────────────────────────────────
 # No injector is built here. ``Injected(X)`` is a per-request lookup, so
@@ -147,9 +148,6 @@ from agentclaw.community.adapters.http.aicoding.router import router as aicoding
 from agentclaw.community.adapters.http.aicoding.data_proxy_router import router as aicoding_data_proxy_router  # noqa: E402
 from agentclaw.community.adapters.http.aicoding.workitem_noauth_router import router as workitem_noauth_router  # noqa: E402
 from agentclaw.community.adapters.http.enums.router import router as enums_router  # noqa: E402
-from agentclaw.community.adapters.http.resources import router as resources_router  # noqa: E402
-from agentclaw.community.adapters.http.session_resources import internal_router as session_resources_internal_router, router as session_resources_router  # noqa: E402
-from agentclaw.community.adapters.http.tc_file_upload_integrations.resource_context_router import router as tc_resource_context_router  # noqa: E402
 from agentclaw.community.adapters.http.mcp import router as mcp_router  # noqa: E402
 from agentclaw.community.adapters.http.cron import router as cron_router  # noqa: E402
 from agentclaw.community.adapters.http.cron.cron_noauth_router import router as cron_noauth_router  # noqa: E402
@@ -161,8 +159,6 @@ from agentclaw.community.adapters.http.caller_identity.router import router as c
 from agentclaw.community.adapters.http.acli_clis.router import router as acli_clis_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_dormant import router as bot_dormant_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_dormant.router import internal_router as bot_dormant_internal_router  # noqa: E402
-from agentclaw.community.adapters.http.spaces_internal import router as spaces_internal_router  # noqa: E402
-from agentclaw.community.adapters.http.spaces_management import router as spaces_management_router  # noqa: E402
 from agentclaw.community.adapters.http.service_bot.router_build import router as service_bot_router  # noqa: E402
 from agentclaw.community.adapters.http.service_bot.router_publish import router as service_bot_publish_router  # noqa: E402
 from agentclaw.community.adapters.http.service_bot.router_file_count import router as service_bot_file_count_router  # noqa: E402
@@ -943,12 +939,7 @@ app.include_router(desktop_bot_router)
 
 # 2. OpenClawEnterprise 路由（统一挂载到 /api 下）
 # 注意：OpenClaw 的路由前缀和 AgentClaw 不冲突
-# - AgentClaw: /api/v1/devices
-# - OpenClaw: /api/resources, /api/sessions, /api/chat, /api/skills, /api/skillsets
-app.include_router(resources_router)
-app.include_router(session_resources_router)
-app.include_router(session_resources_internal_router)
-app.include_router(tc_resource_context_router)
+mount_resource_routers(app)
 app.include_router(skills.router)
 app.include_router(skillsets.router)
 app.include_router(approvals_router)
@@ -963,8 +954,7 @@ app.include_router(caller_identity_router)
 app.include_router(acli_clis_router)
 app.include_router(bot_dormant_router.router)
 app.include_router(bot_dormant_internal_router)
-app.include_router(spaces_internal_router)
-app.include_router(spaces_management_router)
+mount_space_routers(app)
 app.include_router(service_bot_router)
 app.include_router(service_bot_publish_router)
 app.include_router(service_bot_file_count_router)
