@@ -49,16 +49,44 @@ from agentclaw.community.di.bbs_digest_config import (
     BbsDingTalkConfig,
     BbsLLMConfig,
 )
-from agentclaw.community.plugin_api.bbs_digest_notify import (
-    BbsDigestNotifyProvider,
-)
 from agentclaw.community.plugin_api.cache import CachePlugin
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.http_client import (
     QUALIFIER_GENERAL,
     HttpClient,
 )
+from agentclaw.community.plugin_api.notify_sender import (
+    QUALIFIER_BBS_DIGEST,
+    NotifySenderPlugin,
+)
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
+from agentclaw.community.log import get_logger
+from agentclaw.community.plugins.community.notify_sender import (
+    CommunityNotifySender,
+    DingTalkNotifySender,
+    DingTalkSenderConfig,
+)
+
+
+def _read_dingtalk_secret(
+    secret_resolver: SecretResolver,
+    secret_name: str,
+) -> str:
+    """Resolve the named BBS DingTalk secret without exposing it in config."""
+
+    try:
+        secret = secret_resolver.get_secret(secret_name)
+    except Exception as exc:  # noqa: BLE001 - the notification port never raises.
+        get_logger().warning(
+            "[bbs-digest-notify] DingTalk AK secret lookup failed: %s",
+            exc,
+        )
+        return ""
+
+    value = getattr(secret, "secret_value", None)
+    if value is None and isinstance(secret, str):
+        value = secret
+    return str(value).strip() if value is not None else ""
 
 
 class BbsDigestModule(Module):
@@ -67,20 +95,31 @@ class BbsDigestModule(Module):
     @singleton
     @provider
     @inject
-    def bbs_digest_notify_provider(
+    def bbs_digest_notify_sender(
         self,
         config: BbsDingTalkConfig,
         secret_resolver: SecretResolver,
-    ) -> BbsDigestNotifyProvider:
-        """Bind the BBS-owned card sender; discovery account holders stay unused."""
+    ) -> Annotated[NotifySenderPlugin, QUALIFIER_BBS_DIGEST]:
+        """Build the BBS-owned DingTalk card sender instance.
 
-        from agentclaw.community.plugins.community.bbs_digest_notify import (
-            BbsDingTalkNotifyProvider,
-        )
-
-        return BbsDingTalkNotifyProvider(
-            config=config,
-            secret_resolver=secret_resolver,
+        The bare ``NotifySenderPlugin`` continues to identify the task-discovery
+        and governance sender. This qualified binding owns the BBS application:
+        it never reads the discovery holders or ``TASK_DISCOVERY_*`` variables.
+        An empty config leaves the sender configured as unavailable, so strict
+        card delivery returns ``None``.
+        """
+        return DingTalkNotifySender(
+            CommunityNotifySender(),
+            config=DingTalkSenderConfig(
+                app_key=config.ak_id,
+                read_app_secret=lambda: _read_dingtalk_secret(
+                    secret_resolver,
+                    config.ak_secret_name,
+                ),
+                robot_code=config.robot_code,
+                card_template_id=config.card_template_id,
+            ),
+            strict_card=True,
         )
 
     @singleton

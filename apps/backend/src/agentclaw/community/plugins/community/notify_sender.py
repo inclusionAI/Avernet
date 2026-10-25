@@ -18,6 +18,8 @@ import json
 import os
 import time
 import uuid
+from collections.abc import Callable
+from dataclasses import dataclass
 
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.notify_sender import (
@@ -124,6 +126,21 @@ class CommunityNotifySender(NotifySenderPlugin):
         return msg_id
 
 
+@dataclass(frozen=True)
+class DingTalkSenderConfig:
+    """Instance-owned DingTalk account configuration.
+
+    A callback holds the secret credential so no member of this dataclass ever
+    stores a literal secret. Each configured sender owns its account and is
+    isolated from the task-discovery global holder/environment keys.
+    """
+
+    app_key: str
+    read_app_secret: Callable[[], str]
+    robot_code: str
+    card_template_id: str
+
+
 class DingTalkNotifySender(NotifySenderPlugin):
     """钉钉交互卡片通道 —— 装饰一个 ``inner`` 通道再额外投递一张钉钉交互卡片。
 
@@ -132,19 +149,33 @@ class DingTalkNotifySender(NotifySenderPlugin):
         ``NotifyMessagesProvider`` 端口(DI alias 到本实例),由 DI 在钉钉凭证就绪时
         绑定本类（凭证缺失则回退到纯 ``CommunityNotifySender``）—— 不把钉钉 SDK
         漏进 ``DiscoveryService``。
-      - 凭证来自部署配置（``TASK_DISCOVERY_DINGTALK_*`` 与
-        ``TASK_DISCOVERY_CARD_TEMPLATE_ID``），不使用部署 profile 专属回退。
+      - 默认凭证来自部署配置（``TASK_DISCOVERY_DINGTALK_*`` 与
+        ``TASK_DISCOVERY_CARD_TEMPLATE_ID``）；传入 ``DingTalkSenderConfig``
+        时改用实例级配置。``strict_card=True`` 只接受真实卡片结果。
       - corp 钉钉 SDK ``alipay_antdingopensdk_client`` **惰性导入**（在 ``send`` 内），
         未配置凭证时根本不导入；满足 ``send()`` 永不抛异常的 Protocol 约定。
       - 卡片载荷来自 ``NotifyMessage.extra``（``card_template_id`` / ``card_biz_id`` /
         ``card_data`` / ``session_url``），由 ``DiscoveryService._send_notification`` 填好。
     """
 
-    def __init__(self, inner: NotifySenderPlugin) -> None:
+    def __init__(
+        self,
+        inner: NotifySenderPlugin,
+        *,
+        config: DingTalkSenderConfig | None = None,
+        strict_card: bool = False,
+    ) -> None:
+        if strict_card and config is None:
+            raise ValueError("strict_card requires DingTalkSenderConfig")
+
         self._inner = inner
+        self._config = config
+        self._strict_card = strict_card
 
     @property
     def channels(self) -> frozenset[str]:
+        if self._strict_card:
+            return frozenset({"tc_card"})
         return self._inner.channels
 
     def send(
@@ -159,6 +190,26 @@ class DingTalkNotifySender(NotifySenderPlugin):
             message.recipient,
             channel,
         )
+        if self._strict_card:
+            if channel != "tc_card":
+                log.warning(
+                    "[DingTalkNotifySender] strict-card sender rejects channel=%s; "
+                    "supported=tc_card",
+                    channel,
+                )
+                return None
+            try:
+                return self._send_dingtalk_card(message)
+            except Exception as exc:  # 永不抛异常 —— strict card 结果就是发送结果。
+                log.warning(
+                    "[DingTalkNotifySender] strict DingTalk card failed "
+                    "(recipient=%s, title=%r): %s",
+                    message.recipient,
+                    message.title[:80],
+                    exc,
+                )
+                return None
+
         # 先照常走 inner 通道（日志/兜底），再额外投递钉钉卡片。两者同时进行。
         msg_id = self._inner.send(message, channel=channel)
         try:
@@ -176,9 +227,15 @@ class DingTalkNotifySender(NotifySenderPlugin):
             )
         return msg_id
 
-    @staticmethod
-    def _resolve(key: str, env_name: str, env_fallback: str) -> str:
-        """优先级：API holder > YAML holder > env。"""
+    def _resolve(self, key: str, env_name: str, env_fallback: str) -> str:
+        """优先级：实例 config 或 API holder > YAML holder > env。"""
+        if self._config is not None:
+            if key == "ak_secret":
+                return self._config.read_app_secret()
+            if key == "ak_id":
+                return self._config.app_key
+            return str(getattr(self._config, key, "") or "")
+
         log.info("[task_discovery] → DingTalkNotifySender._resolve(key=%s)", key)
         val = DingTalkCredentialHolder.get(key)
         if val:
@@ -196,27 +253,30 @@ class DingTalkNotifySender(NotifySenderPlugin):
         ("card_template_id", "TASK_DISCOVERY_CARD_TEMPLATE_ID", ""),
     ]
 
-    @classmethod
-    def _resolve_source(cls, key: str) -> str:
+    def _resolve_source(self, key: str) -> str:
         """Return the source name that resolved the credential (api/yaml/env/empty)."""
+        if self._config is not None:
+            return "sender_config"
+
         val = DingTalkCredentialHolder.get(key)
         if val:
             return "api"
         val = DingTalkYamlHolder.get(key)
         if val:
             return "yaml"
-        return "env" if _env(*cls._CRED_KEYS_MAP[key]) else "empty"
+        return "env" if _env(*self._CRED_KEYS_MAP[key]) else "empty"
 
     _CRED_KEYS_MAP: dict[str, tuple[str, str]] = {
         k: (e1, e2) for k, e1, e2 in _CRED_KEYS
     }
 
-    @classmethod
-    def _configured(cls) -> bool:
-        return all(cls._resolve(k, e1, e2) for k, e1, e2 in cls._CRED_KEYS)
+    def _configured(self) -> bool:
+        return all(self._resolve(k, e1, e2) for k, e1, e2 in self._CRED_KEYS)
 
     def _recipient_account_id(self, message: NotifyMessage) -> str:
-        """Resolve the DingTalk recipient account for the task-discovery sender."""
+        """Resolve the DingTalk recipient account for the active sender mode."""
+        if self._config is not None:
+            return message.recipient
         return _env("TASK_DISCOVERY_DINGTALK_ACCOUNT_ID") or message.recipient
 
     def _send_dingtalk_card(self, message: NotifyMessage) -> str | None:
