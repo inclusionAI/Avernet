@@ -1,6 +1,7 @@
-"""Delivery progress independent of ac_space; no FK or cascading deletion."""
+"""One immutable snapshot per space revision, with its delivery acknowledgement."""
 
-from sqlalchemy import BigInteger, Column, Index, String
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, Index, String, Text, func
+from sqlalchemy.dialects.mysql import MEDIUMTEXT
 
 from agentclaw.community.core.base import Base
 
@@ -10,15 +11,27 @@ class SpaceKnowledgeSyncModel(Base):
 
     env = Column(String(20), primary_key=True)
     space_id = Column(BigInteger, primary_key=True)
+    revision = Column(BigInteger, primary_key=True, autoincrement=False)
     app = Column(String(32), nullable=False)
-    revision = Column(BigInteger, nullable=False, default=0, server_default="0")
-    synced_revision = Column(BigInteger, nullable=False, default=0, server_default="0")
-    snapshot_hash = Column(String(64), nullable=False, default="", server_default="")
-    status = Column(
-        String(16), nullable=False, default="active", server_default="active"
+    # Full rosters can exceed MySQL TEXT's 64 KiB. Only this new table needs
+    # MEDIUMTEXT; shared queue tasks contain small space/revision pointers.
+    payload = Column(Text().with_variant(MEDIUMTEXT(), "mysql"), nullable=False)
+    snapshot_hash = Column(String(64), nullable=False)
+    status = Column(String(16), nullable=False)
+    acknowledged = Column(Boolean, nullable=False, default=False, server_default="0")
+    gmt_create = Column(DateTime, nullable=False, server_default=func.now())
+    gmt_modified = Column(
+        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
     __table_args__ = (
-        Index("idx_space_sync_owner", "env", "app", "space_id"),
+        Index(
+            "idx_space_sync_pending",
+            "env",
+            "app",
+            "acknowledged",
+            "space_id",
+            "revision",
+        ),
         {"mysql_engine": "InnoDB"},
     )

@@ -182,6 +182,8 @@ class SpaceKnowledgeSyncRepositoryProtocol(Protocol):
     def acknowledge(self, *, snapshot: SpaceMembershipSnapshot, app: str) -> None: ...
 
     @abstractmethod
-    def repair_pending(
+    def pending_revisions(
         self, *, environment: str, app: str, after_space_id: int, limit: int
-    ) -> int: ...
+    ) -> list[tuple[int, int]]:
+        """Return one pending head per space; never read shared queue history."""
+        ...

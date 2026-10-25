@@ -2,6 +2,9 @@
 
 from injector import Binder, Module, inject, provider, singleton
 
+from agentclaw.community.core.repository.protocols.platform import (
+    TaskQueueRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.spaces import (
     SpaceKnowledgeSyncRepositoryProtocol,
 )
@@ -60,8 +63,9 @@ class SpaceKnowledgeModule(Module):
         repository: SpaceKnowledgeSyncRepositoryProtocol,
         sink: SpaceMembershipSink,
         config: TaskQueueConfig,
+        queue: TaskQueueRepositoryProtocol,
     ) -> SpaceMembershipSynchronizer:
-        return SpaceMembershipSynchronizer(repository, sink, config.app)
+        return SpaceMembershipSynchronizer(repository, sink, config.app, queue)
 
     @singleton
     @provider

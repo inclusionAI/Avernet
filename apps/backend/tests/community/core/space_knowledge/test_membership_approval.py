@@ -18,7 +18,7 @@ from agentclaw.community.core.work_orders.repository.models import (
     WorkOrderApproverModel,
 )
 from tests.community.core.space_knowledge.test_membership_sync import setup as setup
-from tests.community.core.space_knowledge.test_membership_sync import tasks
+from tests.community.core.space_knowledge.test_membership_sync import snapshots
 
 
 @pytest.mark.parametrize("entrypoint", ["process_approval", "review_space_join"])
@@ -78,7 +78,7 @@ def test_approval_membership_delivery(setup, entrypoint, approved):
             ),
             env="pre",
         )
-    assert len(tasks(db)) == (2 if approved else 1)
+    assert len(snapshots(db)) == (2 if approved else 1)
     assert (
         spaces.get_member(space_id=7, user_id="alice", env="pre") is not None
     ) == approved
@@ -106,5 +106,5 @@ def test_auto_approval_also_records_membership(setup):
         source_event_type="SPACE_JOIN_REQUESTED",
         env="pre",
     )
-    assert len(tasks(db)) == 2
-    assert "alice" in {m["staff_no"] for m in tasks(db)[1]["members"]}
+    assert len(snapshots(db)) == 2
+    assert "alice" in {m["staff_no"] for m in snapshots(db)[1]["members"]}

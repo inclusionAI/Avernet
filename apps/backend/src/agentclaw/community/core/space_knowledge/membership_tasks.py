@@ -1,9 +1,10 @@
-"""Existing queue worker delivers changes; a bounded repair scan revives expired tasks."""
+"""Existing queue executes pointers; a bounded outbox scan dispatches pending heads."""
 
 import asyncio
 
 from agentclaw.community.core.space_knowledge.membership_sync import (
     SpaceMembershipSynchronizer,
+    TASK_TYPE,
 )
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.types import Complete, Retry
@@ -11,7 +12,7 @@ from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
-TASK_TYPE = "space.membership.sync"
+POLL_INTERVAL_SECONDS = 30
 
 
 class SpaceMembershipSyncTaskHandler:
@@ -25,6 +26,7 @@ class SpaceMembershipSyncTaskHandler:
             if (
                 not isinstance(payload, dict)
                 or type(payload.get("revision")) is not int
+                or payload["revision"] < 1
             ):
                 return Retry(error="invalid membership task")
             space_id = payload.get("_space_id")
@@ -82,7 +84,7 @@ class SpaceMembershipSyncLifecycle(LifecycleBase):
                 )
             except Exception:
                 logger.warning("membership repair pending; no payload logged")
-            await asyncio.sleep(30)
+            await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
     async def shutdown(self):
         if self._task is not None:

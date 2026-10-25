@@ -22,7 +22,7 @@ Validation failures use 422. Safe business errors: 400 INVALID_INPUT; 401 IDENTI
 - Public HTTP is a thin authenticated adapter, business work runs off the event loop.
 - Composition-root defaults fail closed; deployment adapters inject private clients/config.
 - Validate consumer contract, no-provider calls on denied/stale sync, HTTP identity spoofing, default DI, adapter conformance and controlled fixed-combination integration.
-- 2026-10-24: independent `ac_space_knowledge_sync` table and task-history lookup index required before deploying membership hooks (even with delivery disabled); no schema/model changes to `ac_space` or its member table. Public defaults remain disabled, not simulated success.
+- 2026-10-25: only the independent `ac_space_knowledge_sync` table is required before deploying membership hooks (even with delivery disabled). No schema/model/index changes to `ac_space`, its member table, or `ac_task_queue`. Public defaults remain disabled, not simulated success.
 
 
 ## Validation Boundary (2026-10-23)
@@ -43,8 +43,10 @@ integration is enabled. Disabled integration still reports unavailable. Activate
 persisted ACL; they do not push snapshots. Later changes are eventually consistent and can have unbounded
 revocation delay during a provider outage. First-create rechecks source membership after confirmation.
 
-The existing durable queue worker must be enabled. An independent bounded repair lifecycle revives
-terminal attempts from immutable history. Unacknowledged history must not be purged. Same-version calls
+The existing durable queue worker must be enabled. A bounded lifecycle scans the outbox every
+30 seconds and dispatches one pending head per space through the existing queue interface.
+Scheduling failures are retried from the outbox; terminal queue history may be purged normally.
+Unacknowledged outbox history must not be purged. Same-version calls
 may repeat after crashes/lease expiry; the sink must confirm exact scope/revision/hash. Existing externally
 seeded provider state without a matching local history needs a controlled baseline adoption, not an
 invented revision. Direct SQL changes outside the application writers are not captured.
@@ -53,10 +55,18 @@ Local producer tests include real TC repositories and the existing queue worker 
 HTTP adapter to provider routes + SQLite. They do not prove SSO/gateway, deployed topology, remote
 physical storage, OceanBase concurrency or mirror/gitlink compatibility.
 
-Large snapshots preserve the existing MySQL TEXT queue schema: UTF-8 data is stored as transactional
-36,000-byte fragments with bounded metadata, then reassembled into one full-snapshot request. A missing
-or corrupt fragment is not acknowledgement and cannot be replaced with a current roster. The receiver's
-2000-member / 1 MiB limits still apply; fragmentation does not bypass them.
+Only `ac_space_knowledge_sync` is introduced. Its primary key is `(env, space_id, revision)`; each
+row holds an immutable full `payload` (MySQL MEDIUMTEXT), `snapshot_hash`, source `status`, owning
+`app`, and mutable `acknowledged` delivery state. Latest revision and latest acknowledged revision
+provide progress without a separate cursor table. No cleanup is implemented; any future retention
+must retain pending revisions, the latest row and the last acknowledged row.
+
+Shared queue tasks hold only space/revision pointers. No queue schema, ORM, index, worker or
+retention change is permitted; no adopter reads historical queue payloads. Missing or corrupt
+outbox snapshots fail closed rather than being replaced with today's roster. The receiver's
+2000-member / 1 MiB limits still apply. This supersedes the earlier experimental progress-only
+table and fragmented queue-history design; that unpublished local schema needs an explicit
+state-preserving conversion before running this implementation.
 
 ## Scope reduction (2026-10-24)
 ECB automatic initialization compensation was explicitly removed from delivery. The existing single initialization, request idempotency, status projection and legacy ECB internal capabilities remain. This does not remove the separately approved durable TC membership delivery.

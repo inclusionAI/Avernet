@@ -1,5 +1,10 @@
 """First-use confirmation and ordered, idempotent membership delivery."""
 
+from agentclaw.community.core.repository.protocols.platform import (
+    TaskQueueRepositoryProtocol,
+)
+from agentclaw.community.log import get_logger
+
 from agentclaw.community.core.repository.protocols.spaces import (
     SpaceKnowledgeSyncRepositoryProtocol,
 )
@@ -10,14 +15,20 @@ from agentclaw.community.plugin_api.space_knowledge import (
 from agentclaw.community.plugin_api.space_membership import SpaceMembershipSink
 
 
+logger = get_logger()
+TASK_TYPE = "space.membership.sync"
+
+
 class SpaceMembershipSynchronizer:
     def __init__(
         self,
         repository: SpaceKnowledgeSyncRepositoryProtocol,
         sink: SpaceMembershipSink,
         app: str,
+        queue: TaskQueueRepositoryProtocol,
     ):
         self._repository, self._sink, self._app = repository, sink, app
+        self._queue = queue
 
     def is_enabled(self):
         return self._sink.is_enabled()
@@ -77,9 +88,31 @@ class SpaceMembershipSynchronizer:
 
     def repair_pending(self, *, environment, after_space_id=0):
         self._enabled()
-        return self._repository.repair_pending(
+        pending = self._repository.pending_revisions(
             environment=environment,
             app=self._app,
             after_space_id=after_space_id,
             limit=32,
         )
+        for space_id, _revision in pending:
+            try:
+                snapshot = self._repository.next_snapshot(
+                    space_id=space_id, environment=environment, app=self._app
+                )
+                if snapshot is None:
+                    continue
+                # The outbox already committed with the source mutation. Queue
+                # failures are retried from it; no distributed transaction or
+                # queue history/retention exception is required.
+                self._queue.enqueue(
+                    task_type=TASK_TYPE,
+                    payload={"_space_id": space_id, "revision": snapshot.revision},
+                    env=environment,
+                    app=self._app,
+                    delay_seconds=0,
+                    deadline_seconds=7 * 24 * 3600,
+                    idempotency_key=f"space:{self._app}:{space_id}:membership:{snapshot.revision}",
+                )
+            except Exception:
+                logger.warning("membership dispatch pending; no payload logged")
+        return pending[-1][0] if len(pending) == 32 else 0

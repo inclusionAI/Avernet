@@ -1,4 +1,4 @@
-"""Durable membership production using real SQLite transactions and queue records."""
+"""Single-table membership snapshots and unchanged generic queue scheduling."""
 
 from contextlib import contextmanager
 from threading import RLock
@@ -27,6 +27,9 @@ from agentclaw.community.core.spaces.repository.models import (
     SpaceMemberModel,
 )
 from agentclaw.community.core.task_queue.repository.models import TaskQueueModel
+from agentclaw.community.core.repository.implementations.platform.task_queue import (
+    TaskQueueRepository,
+)
 
 
 class Database:
@@ -72,11 +75,13 @@ def setup(tmp_path):
     )
 
 
-def tasks(db):
+def snapshots(db):
     with db.orm_session() as s:
         return [
             json.loads(r.payload)
-            for r in s.query(TaskQueueModel).order_by(TaskQueueModel.id)
+            for r in s.query(SpaceKnowledgeSyncModel).order_by(
+                SpaceKnowledgeSyncModel.revision
+            )
         ]
 
 
@@ -89,13 +94,13 @@ def test_no_activation_no_queue_then_full_first_snapshot(setup):
         creator_id="owner",
         env="pre",
     )
-    assert tasks(db) == []
+    assert snapshots(db) == []
     sync.activate(space_id=7, environment="pre", app="agentclaw")
     sync.activate(space_id=7, environment="pre", app="agentclaw")
-    snapshots = tasks(db)
-    assert len(snapshots) == 1
-    assert {m["staff_no"] for m in snapshots[0]["members"]} == {"owner", "alice"}
-    assert snapshots[0]["revision"] == 1
+    recorded = snapshots(db)
+    assert len(recorded) == 1
+    assert {m["staff_no"] for m in recorded[0]["members"]} == {"owner", "alice"}
+    assert recorded[0]["revision"] == 1
 
 
 def test_member_versions_and_noop_do_not_lose_remove_then_rejoin(setup):
@@ -115,8 +120,8 @@ def test_member_versions_and_noop_do_not_lose_remove_then_rejoin(setup):
     spaces.add_member(
         space_id=7, user_id="alice", role=SpaceRole.ADMIN, creator_id="owner", env="pre"
     )
-    assert [p["revision"] for p in tasks(db)] == [1, 2, 3, 4]
-    assert "alice" not in {m["staff_no"] for m in tasks(db)[2]["members"]}
+    assert [p["revision"] for p in snapshots(db)] == [1, 2, 3, 4]
+    assert "alice" not in {m["staff_no"] for m in snapshots(db)[2]["members"]}
 
 
 def test_physical_delete_keeps_disabled_payload_and_independent_state(setup):
@@ -125,8 +130,14 @@ def test_physical_delete_keeps_disabled_payload_and_independent_state(setup):
     management.delete_team(space_id=7, with_members=True, env="pre")
     with db.orm_session() as s:
         assert s.get(SpaceModel, 7) is None
-        assert s.query(SpaceKnowledgeSyncModel).one().status == "disabled"
-    assert tasks(db)[-1]["status"] == "disabled"
+        assert (
+            s.query(SpaceKnowledgeSyncModel)
+            .order_by(SpaceKnowledgeSyncModel.revision.desc())
+            .first()
+            .status
+            == "disabled"
+        )
+    assert snapshots(db)[-1]["status"] == "disabled"
 
 
 def test_transaction_failure_rolls_back_members_and_event(setup, monkeypatch):
@@ -139,7 +150,7 @@ def test_transaction_failure_rolls_back_members_and_event(setup, monkeypatch):
     def fail(*args, **kwargs):
         raise RuntimeError("outbox unavailable")
 
-    monkeypatch.setattr(knowledge_sync, "_enqueue", fail)
+    monkeypatch.setattr(knowledge_sync, "_save_snapshot", fail)
     with pytest.raises(RuntimeError, match="outbox unavailable"):
         spaces.add_member(
             space_id=7,
@@ -149,7 +160,7 @@ def test_transaction_failure_rolls_back_members_and_event(setup, monkeypatch):
             env="pre",
         )
     assert spaces.get_member(space_id=7, user_id="alice", env="pre") is None
-    assert len(tasks(db)) == 1
+    assert len(snapshots(db)) == 1
 
 
 class RecordingSink:
@@ -171,7 +182,9 @@ def coordinator(sync, sink):
         SpaceMembershipSynchronizer,
     )
 
-    return SpaceMembershipSynchronizer(sync, sink, "agentclaw")
+    return SpaceMembershipSynchronizer(
+        sync, sink, "agentclaw", TaskQueueRepository(sync._db)
+    )
 
 
 def test_real_producer_first_confirmation_reads_and_terminal_repair(setup):
@@ -179,7 +192,7 @@ def test_real_producer_first_confirmation_reads_and_terminal_repair(setup):
     sink = RecordingSink()
     sync = coordinator(repo, sink)
     assert sync.get_context(space_id=7, environment="pre") is None
-    assert tasks(db) == []
+    assert snapshots(db) == []
     context = sync.ensure_synced(space_id=7, environment="pre")
     assert context.revision == 1
     assert len(sink.calls) == 1
@@ -192,17 +205,20 @@ def test_real_producer_first_confirmation_reads_and_terminal_repair(setup):
     )
     assert sync.get_context(space_id=7, environment="pre").revision == 1
     assert len(sink.calls) == 1
+    sync.repair_pending(environment="pre")
     with db.orm_session() as s:
         row = (
             s.query(TaskQueueModel)
-            .filter_by(idempotency_key="space:7:membership:2")
+            .filter_by(idempotency_key="space:agentclaw:7:membership:2")
             .one()
         )
         row.status, row.active_idempotency_key = "TIMED_OUT", None
     # New repository + producer instance: no in-memory delivery state required.
     restarted = coordinator(SpaceKnowledgeSyncRepository(db), sink)
     restarted.repair_pending(environment="pre")
-    assert len(tasks(db)) == 3
+    assert len(snapshots(db)) == 2
+    with db.orm_session() as s:
+        assert s.query(TaskQueueModel).count() == 2
     restarted.deliver_next(space_id=7, environment="pre")
     assert repo.progress(space_id=7, environment="pre", app="agentclaw") == (
         2,
@@ -231,13 +247,13 @@ def test_failure_and_predecessor_order_do_not_lose_events(setup):
     from agentclaw.community.core.task_queue.types import Retry, Complete
 
     handler = SpaceMembershipSyncTaskHandler(sync, "pre")
-    assert isinstance(handler.handle(tasks(db)[1]), Retry)
+    assert isinstance(handler.handle({"_space_id": 7, "revision": 2}), Retry)
     assert len(sink.calls) == 1
-    result = handler.handle(tasks(db)[0])
+    result = handler.handle({"_space_id": 7, "revision": 1})
     assert isinstance(result, Retry) and "external diagnostic" not in result.error
     sink.fail = False
-    assert isinstance(handler.handle(tasks(db)[0]), Complete)
-    assert isinstance(handler.handle(tasks(db)[1]), Complete)
+    assert isinstance(handler.handle({"_space_id": 7, "revision": 1}), Complete)
+    assert isinstance(handler.handle({"_space_id": 7, "revision": 2}), Complete)
     assert [s.revision for s in sink.calls] == [1, 1, 1, 2]
 
 
@@ -257,7 +273,7 @@ def test_ack_cannot_skip_or_change_history_and_other_app_cannot_take_over(setup)
         repo.activate(space_id=7, environment="pre", app="other")
     assert repo.progress(space_id=7, environment="prod", app="agentclaw") is None
     assert repo.next_snapshot(space_id=7, environment="pre", app="other") is None
-    assert len(tasks(db)) == 1
+    assert len(snapshots(db)) == 1
 
 
 def test_batch_writes_roles_rename_and_noops(setup):
@@ -279,8 +295,8 @@ def test_batch_writes_roles_rename_and_noops(setup):
     management.rename_team(space_id=7, name="Renamed", actor_id="owner", env="pre")
     management.remove_members(space_id=7, user_ids=["alice", "bob"], env="pre")
     management.remove_members(space_id=7, user_ids=["alice"], env="pre")
-    assert [p["revision"] for p in tasks(db)] == [1, 2, 3, 4, 5]
-    assert tasks(db)[3]["name"] == "Renamed"
+    assert [p["revision"] for p in snapshots(db)] == [1, 2, 3, 4, 5]
+    assert snapshots(db)[3]["name"] == "Renamed"
 
 
 @pytest.mark.asyncio
@@ -293,6 +309,7 @@ async def test_lifecycle_registers_repairs_and_stops_symmetrically(setup):
 
     db, _, repo, _ = setup
     repo.activate(space_id=7, environment="pre", app="agentclaw")
+    coordinator(repo, RecordingSink()).repair_pending(environment="pre")
     with db.orm_session() as s:
         row = s.query(TaskQueueModel).one()
         row.status, row.active_idempotency_key = "FAILED", None
@@ -304,10 +321,13 @@ async def test_lifecycle_registers_repairs_and_stops_symmetrically(setup):
     assert registry.get("space.membership.sync") is not None
     await lifecycle.startup()
     for _ in range(100):
-        if len(tasks(db)) == 2:
-            break
+        with db.orm_session() as s:
+            if s.query(TaskQueueModel).count() == 2:
+                break
         await asyncio.sleep(0.01)
-    assert len(tasks(db)) == 2
+    with db.orm_session() as s:
+        assert s.query(TaskQueueModel).count() == 2
+    assert len(snapshots(db)) == 1
     await lifecycle.shutdown()
     assert lifecycle._task is None
 
@@ -346,9 +366,9 @@ def test_concurrent_first_use_and_changes_keep_all_revisions(setup):
 
     with ThreadPoolExecutor(max_workers=4) as pool:
         list(pool.map(change, range(8)))
-    snapshots = tasks(db)
-    assert [p["revision"] for p in snapshots] == list(range(1, 10))
-    assert len(snapshots[-1]["members"]) == 9
+    recorded = snapshots(db)
+    assert [p["revision"] for p in recorded] == list(range(1, 10))
+    assert len(recorded[-1]["members"]) == 9
 
 
 def test_unrelated_space_creation_does_not_activate_sync(setup):
@@ -357,7 +377,7 @@ def test_unrelated_space_creation_does_not_activate_sync(setup):
         name="New", creator_id="owner", creator_user_name="Owner", env="pre"
     ) as new_space:
         assert new_space.id != 7
-    assert tasks(db) == []
+    assert snapshots(db) == []
     with db.orm_session() as s:
         assert s.query(SpaceKnowledgeSyncModel).count() == 0
 
@@ -390,112 +410,95 @@ def test_two_deliverers_may_repeat_one_version_but_cannot_skip(setup):
         1,
         "active",
     )
-    assert len(tasks(db)) == 1
+    assert len(snapshots(db)) == 1
 
 
-def test_large_roster_keeps_existing_text_queue_and_roundtrips_all_members(setup):
+def test_large_roster_uses_one_mediumtext_snapshot_and_small_queue_pointer(setup):
     db, _, repo, _ = setup
     with db.orm_session() as s:
         s.add_all(
             [
                 SpaceMemberModel(
                     space_id=7,
-                    user_id=f"member-{index:06d}-" + "x" * 45,
+                    user_id=f"member-{i:06d}-" + "x" * 45,
                     role="MEMBER",
                     env="pre",
                     created_by="owner",
                 )
-                for index in range(1999)
+                for i in range(1999)
             ]
         )
     repo.activate(space_id=7, environment="pre", app="agentclaw")
-    raw = tasks(db)
-    assert len(raw) > 1
     with db.orm_session() as s:
-        assert all(len(r.payload.encode()) < 65535 for r in s.query(TaskQueueModel))
-        for row in s.query(TaskQueueModel):
-            row.status, row.active_idempotency_key = "TIMED_OUT", None
-    repo.repair_pending(environment="pre", app="agentclaw", after_space_id=0, limit=32)
-    assert len(tasks(db)) == 2 * len(raw)
+        row = s.query(SpaceKnowledgeSyncModel).one()
+        assert len(row.payload.encode()) > 65535
+        assert s.query(TaskQueueModel).count() == 0
+    sync = coordinator(repo, RecordingSink())
+    sync.repair_pending(environment="pre")
+    with db.orm_session() as s:
+        task = s.query(TaskQueueModel).one()
+        assert json.loads(task.payload) == {"_space_id": 7, "revision": 1}
+        assert len(task.payload.encode()) < 100
+        # Terminal history may be purged normally; no member data is lost.
+        s.delete(task)
+    restarted = coordinator(SpaceKnowledgeSyncRepository(db), RecordingSink())
+    restarted.repair_pending(environment="pre")
     snapshot = repo.next_snapshot(space_id=7, environment="pre", app="agentclaw")
     assert len(snapshot.body["members"]) == 2000
-    assert snapshot.revision == 1
     repo.acknowledge(snapshot=snapshot, app="agentclaw")
     assert repo.progress(space_id=7, environment="pre", app="agentclaw") == (
         1,
         1,
         "active",
     )
+    assert len(snapshots(db)) == 1
 
 
 @pytest.mark.parametrize(
-    "damage", ["missing", "base64", "scope", "revision", "count", "json"]
+    "damage",
+    ["missing", "hash", "revision", "status", "json", "members", "full_snapshot"],
 )
-def test_broken_fragment_never_delivers_acknowledges_or_replaces_history(setup, damage):
+def test_corrupt_or_missing_snapshot_never_delivers_or_replaces_history(setup, damage):
     from agentclaw.community.plugin_api.space_knowledge import SpaceKnowledgeError
 
-    db, _, repo, _ = setup
-    with db.orm_session() as s:
-        s.add_all(
-            [
-                SpaceMemberModel(
-                    space_id=7,
-                    user_id=f"member-{index:06d}-" + "x" * 45,
-                    role="MEMBER",
-                    env="pre",
-                    created_by="owner",
-                )
-                for index in range(700)
-            ]
-        )
+    db, spaces, repo, _ = setup
     repo.activate(space_id=7, environment="pre", app="agentclaw")
+    spaces.add_member(
+        space_id=7,
+        user_id="alice",
+        role=SpaceRole.MEMBER,
+        creator_id="owner",
+        env="pre",
+    )
     with db.orm_session() as s:
-        rows = s.query(TaskQueueModel).order_by(TaskQueueModel.id).all()
-        assert len(rows) > 1
-        for row in rows:
-            row.status, row.active_idempotency_key = "FAILED", None
-        damaged = rows[1]
+        row = s.query(SpaceKnowledgeSyncModel).filter_by(revision=1).one()
         if damage == "missing":
-            s.delete(damaged)
+            s.delete(row)
+        elif damage == "hash":
+            row.snapshot_hash = "0" * 64
         elif damage == "json":
-            damaged.payload = "{broken"
+            row.payload = "{broken"
         else:
-            data = json.loads(damaged.payload)
-            field, value = {
-                "base64": ("_data", "not base64!"),
-                "scope": ("_space_id", 99),
-                "revision": ("revision", 99),
-                "count": ("_parts", 999999999),
+            body = json.loads(row.payload)
+            body[damage] = {
+                "revision": 99,
+                "status": "disabled",
+                "members": [],
+                "full_snapshot": False,
             }[damage]
-            data[field] = value
-            damaged.payload = json.dumps(data)
-    before = len(tasks(db)) if damage != "json" else len(rows)
+            row.payload = json.dumps(body)
     sink = RecordingSink()
+    sync = coordinator(repo, sink)
     with pytest.raises(SpaceKnowledgeError):
-        coordinator(repo, sink).deliver_next(space_id=7, environment="pre")
+        sync.deliver_next(space_id=7, environment="pre")
+    sync.repair_pending(environment="pre")
     assert sink.calls == []
-    repo.repair_pending(environment="pre", app="agentclaw", after_space_id=0, limit=32)
-    with db.orm_session() as s:
-        assert s.query(TaskQueueModel).count() == before
     assert repo.progress(space_id=7, environment="pre", app="agentclaw")[1] == 0
-
-
-@pytest.mark.parametrize(
-    "payload", ['{"_parts":1000000000}', '{"_parts":true}', "[]", "{broken"]
-)
-def test_malformed_primary_history_cannot_break_repair_page(setup, payload):
-    from agentclaw.community.plugin_api.space_knowledge import SpaceKnowledgeError
-
-    db, _, repo, _ = setup
-    repo.activate(space_id=7, environment="pre", app="agentclaw")
     with db.orm_session() as s:
-        row = s.query(TaskQueueModel).one()
-        row.payload, row.status, row.active_idempotency_key = payload, "FAILED", None
-    repo.repair_pending(environment="pre", app="agentclaw", after_space_id=0, limit=32)
-    with pytest.raises(SpaceKnowledgeError):
-        repo.next_snapshot(space_id=7, environment="pre", app="agentclaw")
-    with db.orm_session() as s:
-        assert s.query(TaskQueueModel).count() == 1
+        assert s.query(TaskQueueModel).count() == 0
+        assert s.query(SpaceKnowledgeSyncModel).count() == (
+            1 if damage == "missing" else 2
+        )
 
 
 def test_first_use_rechecks_after_fourth_successful_delivery(setup):
@@ -515,3 +518,243 @@ def test_first_use_rechecks_after_fourth_successful_delivery(setup):
         == 4
     )
     assert [s.revision for s in sink.calls] == [1, 2, 3, 4]
+
+
+def test_snapshots_commit_without_any_queue_table(setup):
+    db, spaces, repo, _ = setup
+    TaskQueueModel.__table__.drop(db.engine)
+    repo.activate(space_id=7, environment="pre", app="agentclaw")
+    spaces.add_member(
+        space_id=7,
+        user_id="alice",
+        role=SpaceRole.MEMBER,
+        creator_id="owner",
+        env="pre",
+    )
+    with db.orm_session() as session:
+        rows = (
+            session.query(SpaceKnowledgeSyncModel)
+            .order_by(SpaceKnowledgeSyncModel.revision)
+            .all()
+        )
+        assert [row.revision for row in rows] == [1, 2]
+        assert all(not row.acknowledged for row in rows)
+        assert "alice" not in {
+            m["staff_no"] for m in json.loads(rows[0].payload)["members"]
+        }
+        assert "alice" in {
+            m["staff_no"] for m in json.loads(rows[1].payload)["members"]
+        }
+
+
+def test_shared_queue_has_no_knowledge_specific_index():
+    assert "idx_task_queue_sync_history" not in {
+        index.name for index in TaskQueueModel.__table__.indexes
+    }
+
+
+def test_queue_unavailable_does_not_rollback_or_lose_membership_snapshots(setup):
+    from agentclaw.community.core.space_knowledge.membership_sync import (
+        SpaceMembershipSynchronizer,
+    )
+
+    db, spaces, repo, _ = setup
+    repo.activate(space_id=7, environment="pre", app="agentclaw")
+
+    class UnavailableQueue:
+        def enqueue(self, **kwargs):
+            raise RuntimeError("queue unavailable")
+
+    spaces.add_member(
+        space_id=7,
+        user_id="alice",
+        role=SpaceRole.MEMBER,
+        creator_id="owner",
+        env="pre",
+    )
+    failed = SpaceMembershipSynchronizer(
+        repo, RecordingSink(), "agentclaw", UnavailableQueue()
+    )
+    failed.repair_pending(environment="pre")
+    assert spaces.get_member(space_id=7, user_id="alice", env="pre") is not None
+    assert [p["revision"] for p in snapshots(db)] == [1, 2]
+    restarted = coordinator(SpaceKnowledgeSyncRepository(db), RecordingSink())
+    restarted.repair_pending(environment="pre")
+    restarted.repair_pending(environment="pre")
+    with db.orm_session() as s:
+        # The existing active-key index deduplicates without a new index.
+        assert s.query(TaskQueueModel).count() == 1
+    assert restarted.deliver_next(space_id=7, environment="pre")
+    assert restarted.deliver_next(space_id=7, environment="pre")
+    assert repo.progress(space_id=7, environment="pre", app="agentclaw") == (
+        2,
+        2,
+        "active",
+    )
+
+
+def test_acknowledgement_loss_replays_identical_snapshot_before_next_version(
+    setup, monkeypatch
+):
+    db, spaces, repo, _ = setup
+    repo.activate(space_id=7, environment="pre", app="agentclaw")
+    spaces.add_member(
+        space_id=7,
+        user_id="alice",
+        role=SpaceRole.MEMBER,
+        creator_id="owner",
+        env="pre",
+    )
+    sink = RecordingSink()
+    sync = coordinator(repo, sink)
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            repo,
+            "acknowledge",
+            lambda **kwargs: (_ for _ in ()).throw(RuntimeError("ack lost")),
+        )
+        with pytest.raises(RuntimeError, match="ack lost"):
+            sync.deliver_next(space_id=7, environment="pre")
+    assert repo.progress(space_id=7, environment="pre", app="agentclaw")[1] == 0
+    sync.deliver_next(space_id=7, environment="pre")
+    sync.deliver_next(space_id=7, environment="pre")
+    assert [s.revision for s in sink.calls] == [1, 1, 2]
+    assert sink.calls[0].digest() == sink.calls[1].digest()
+
+
+def test_pending_scan_is_scoped_bounded_and_does_not_page_each_revision(setup):
+    db, spaces, repo, _ = setup
+    repo.activate(space_id=7, environment="pre", app="agentclaw")
+    for user in ["alice", "bob", "carol"]:
+        spaces.add_member(
+            space_id=7,
+            user_id=user,
+            role=SpaceRole.MEMBER,
+            creator_id="owner",
+            env="pre",
+        )
+    assert repo.pending_revisions(
+        environment="pre", app="agentclaw", after_space_id=0, limit=1
+    ) == [(7, 1)]
+    assert (
+        repo.pending_revisions(
+            environment="prod", app="agentclaw", after_space_id=0, limit=1
+        )
+        == []
+    )
+    assert (
+        repo.pending_revisions(
+            environment="pre", app="other", after_space_id=0, limit=1
+        )
+        == []
+    )
+    assert (
+        repo.pending_revisions(
+            environment="pre", app="agentclaw", after_space_id=7, limit=1
+        )
+        == []
+    )
+
+
+def test_migration_creates_only_the_outbox_and_supports_mysql_large_payload():
+    import re
+    from pathlib import Path
+    from sqlalchemy.schema import CreateTable
+    from sqlalchemy.dialects import mysql
+
+    sql = (
+        Path(__file__).parents[4]
+        / "src/agentclaw/community/core/spaces/sql/2026_10_24_space_knowledge_sync.sql"
+    ).read_text()
+    assert re.findall(r"CREATE TABLE(?: IF NOT EXISTS)? (\w+)", sql) == [
+        "ac_space_knowledge_sync"
+    ]
+    assert not re.search(r"(?:ALTER TABLE|CREATE INDEX)\s+", sql, re.I)
+    assert "ac_space_knowledge_sync_snapshot" not in Base.metadata.tables
+    assert "MEDIUMTEXT" in str(
+        CreateTable(SpaceKnowledgeSyncModel.__table__).compile(dialect=mysql.dialect())
+    )
+    assert [c.name for c in SpaceKnowledgeSyncModel.__table__.primary_key] == [
+        "env",
+        "space_id",
+        "revision",
+    ]
+
+
+def test_acknowledgement_cannot_skip_an_existing_predecessor(setup):
+    from agentclaw.community.plugin_api.space_knowledge import SpaceKnowledgeError
+    from agentclaw.community.plugin_api.space_membership import SpaceMembershipSnapshot
+
+    db, spaces, repo, _ = setup
+    repo.activate(space_id=7, environment="pre", app="agentclaw")
+    spaces.add_member(
+        space_id=7,
+        user_id="alice",
+        role=SpaceRole.MEMBER,
+        creator_id="owner",
+        env="pre",
+    )
+    with pytest.raises(SpaceKnowledgeError):
+        repo.acknowledge(
+            snapshot=SpaceMembershipSnapshot("pre", 7, snapshots(db)[1]),
+            app="agentclaw",
+        )
+    assert repo.progress(space_id=7, environment="pre", app="agentclaw")[1] == 0
+
+
+def test_full_pending_page_advances_by_space_and_returns_to_start(setup):
+    db, spaces, repo, _ = setup
+    for index in range(33):
+        with spaces.create_team_transaction(
+            name=f"Team-{index}",
+            creator_id="owner",
+            creator_user_name="Owner",
+            env="pre",
+        ) as space:
+            sid = space.id
+        repo.activate(space_id=sid, environment="pre", app="agentclaw")
+    sync = coordinator(repo, RecordingSink())
+    cursor = sync.repair_pending(environment="pre")
+    assert cursor > 0
+    assert sync.repair_pending(environment="pre", after_space_id=cursor) == 0
+    with db.orm_session() as s:
+        assert s.query(TaskQueueModel).count() == 33
+    sync.repair_pending(environment="pre")
+    with db.orm_session() as s:
+        assert s.query(TaskQueueModel).count() == 33
+
+
+def test_queue_queries_use_active_key_not_historical_idempotency_key(setup):
+    from sqlalchemy import event
+
+    db, _, repo, _ = setup
+    repo.activate(space_id=7, environment="pre", app="agentclaw")
+    statements = []
+
+    def capture(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement.lower())
+
+    event.listen(db.engine, "before_cursor_execute", capture)
+    try:
+        sync = coordinator(repo, RecordingSink())
+        sync.repair_pending(environment="pre")
+        sync.repair_pending(environment="pre")
+        sync.deliver_next(space_id=7, environment="pre")
+    finally:
+        event.remove(db.engine, "before_cursor_execute", capture)
+    selects = [
+        q
+        for q in statements
+        if q.lstrip().startswith("select") and "from ac_task_queue" in q
+    ]
+    assert selects
+    # On MySQL, IS TRUE/FALSE can force sorting over the version history;
+    # exact boolean equality uses the new outbox covering index end to end.
+    assert not any("ac_space_knowledge_sync.acknowledged is" in q for q in statements)
+    for query in selects:
+        where = query.split("where", 1)[1]
+        assert "ac_task_queue.idempotency_key" not in where
+        assert (
+            "ac_task_queue.active_idempotency_key" in where
+            or "ac_task_queue.id =" in where
+        )
