@@ -1298,9 +1298,11 @@ class BaasService:  # pragma: no cover
                 f"[BaasService.destroy_bot] "
                 f"HTTP error: {e.response.status_code} - {e.response.text}"
             )
-            raise BaasServiceError(
+            error = BaasServiceError(
                 f"BaaS API error: {e.response.status_code} - {e.response.text}"
             )
+            error.response = e.response
+            raise error from e
         except BaasServiceError:
             raise
         except Exception as e:
