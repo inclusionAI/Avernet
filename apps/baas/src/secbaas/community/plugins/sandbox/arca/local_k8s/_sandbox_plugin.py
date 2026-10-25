@@ -52,8 +52,8 @@ from secbaas.community.logger import get_logger
 from secbaas.community.plugins.sandbox.utils.arca_utils import ArcaUtils
 from secbaas.community.spi.sandbox.arca import ArcaSandbox, ArcaSandboxPlugin
 
+from . import _volumes
 from ._sandbox import LocalK8sArcaSandbox, _convert_outbound_rules
-from ._volumes import build_sidecar, build_volumes, resolve_mounts
 
 if TYPE_CHECKING:
     from kubernetes.client import ApiClient
@@ -552,7 +552,7 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
             resource_spec
         )
 
-        volumes, volume_mounts = build_volumes(
+        volumes, volume_mounts = _volumes.build_volumes(
             configmap_name, pvc_name, storage_id, mount_path, extra_mounts or []
         )
 
@@ -579,7 +579,7 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
             volume_mounts=volume_mounts,
         )
 
-        sidecar = build_sidecar(
+        sidecar = _volumes.build_sidecar(
             sidecar_image,
             _image_pull_policy(sidecar_image),
             _SIDECAR_CONTAINER_NAME,
@@ -731,7 +731,7 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         container_port = _container_port()
         resolved_image = _resolve_image(image)
         resolved_sidecar_image = _resolve_sidecar_image()
-        extra_mounts = resolve_mounts(
+        extra_mounts = _volumes.resolve_mounts(
             mount_points,
             json.loads(_env("LOCAL_K8S_PVC_MOUNT_MAPPINGS", "{}")),
             json.loads(_env("LOCAL_K8S_IMAGE_OWNED_MOUNTS", "[]")),
@@ -757,6 +757,7 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
 
         # 如果携带 storage_id，则在共享 PVC 中按 storage_id 分 subPath。
         mount_path = storage.path if storage and storage.path else _BOT_DATA_MOUNT_PATH
+        _volumes.validate_storage_mounts(storage_id, mount_path, extra_mounts)
         quota = (
             storage.quota if storage and storage.quota else _SHARED_BOT_DATA_PVC_SIZE
         )

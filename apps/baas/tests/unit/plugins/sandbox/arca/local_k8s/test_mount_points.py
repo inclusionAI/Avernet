@@ -119,7 +119,23 @@ def test_rejects_invalid_mapping_and_conflicts():
         )
 
 
-def test_mount_validation_precedes_kubernetes_writes(monkeypatch):
+@pytest.mark.parametrize(
+    "mounts,storage,metadata,error",
+    [
+        ([point("/missing")], None, None, "unsupported"),
+        (
+            [point(local="/home/admin/.openclaw/agents")],
+            Storage(storage_id="sessions", path="/home/admin/.openclaw/agents"),
+            None,
+            "conflict",
+        ),
+        ([point(local="/home/admin")], None, {"bot_id": "bot"}, "conflict"),
+        ([], Storage(storage_id="../escape"), None, "unsafe storage_id"),
+    ],
+)
+def test_mount_validation_precedes_kubernetes_writes(
+    monkeypatch, mounts, storage, metadata, error
+):
     monkeypatch.setenv("LOCAL_K8S_PVC_MOUNT_MAPPINGS", json.dumps(MAPPINGS))
     plugin = LocalK8sArcaSandboxPlugin(
         credentials=ArcaCredentials(
@@ -134,9 +150,13 @@ def test_mount_validation_precedes_kubernetes_writes(monkeypatch):
         patch("kubernetes.client.CoreV1Api") as core,
         patch("kubernetes.client.AppsV1Api") as apps,
     ):
-        with pytest.raises(ValueError, match="unsupported"):
+        with pytest.raises(ValueError, match=error):
             plugin.create_sync_sandbox(
-                template_id="test", image="test:1", mount_points=[point("/missing")]
+                template_id="test",
+                image="test:1",
+                mount_points=mounts,
+                storage=storage,
+                metadata=metadata,
             )
         core.assert_not_called()
         apps.assert_not_called()

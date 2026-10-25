@@ -92,6 +92,20 @@ def resolve_mounts(
     return resolved
 
 
+def validate_storage_mounts(
+    storage_id: str | None,
+    mount_path: str,
+    extra_mounts: list[tuple[str, str, bool]],
+) -> None:
+    """Validate effective per-bot storage before any Kubernetes resource writes."""
+    if not storage_id:
+        return
+    if PurePosixPath(storage_id).is_absolute() or ".." in storage_id.split("/"):
+        raise ValueError("local_k8s: unsafe storage_id")
+    if any(destination == mount_path for destination, _, _ in extra_mounts):
+        raise ValueError("local_k8s: mount conflicts with bot storage")
+
+
 def build_volumes(
     configmap_name: str,
     pvc_name: str | None,
@@ -99,6 +113,7 @@ def build_volumes(
     mount_path: str,
     extra_mounts: list[tuple[str, str, bool]],
 ) -> tuple[list[V1Volume], list[V1VolumeMount]]:
+    validate_storage_mounts(storage_id, mount_path, extra_mounts)
     from kubernetes.client import (
         V1ConfigMapVolumeSource,
         V1HostPathVolumeSource,
@@ -123,16 +138,12 @@ def build_volumes(
             )
         )
         if storage_id:
-            if PurePosixPath(storage_id).is_absolute() or ".." in storage_id.split("/"):
-                raise ValueError("local_k8s: unsafe storage_id")
             mounts.append(
                 V1VolumeMount(
                     name="bot-data", mount_path=mount_path, sub_path=storage_id
                 )
             )
         for destination, sub_path, read_only in extra_mounts:
-            if destination == mount_path and storage_id:
-                raise ValueError("local_k8s: mount conflicts with bot storage")
             mounts.append(
                 V1VolumeMount(
                     name="bot-data",
