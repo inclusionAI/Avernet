@@ -31,6 +31,7 @@ connection (local/test) stays safe without sacrificing handler parallelism.
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 import random
 import socket
@@ -405,4 +406,11 @@ class TaskWorker(LifecycleBase):
         floor = self._config.retry_backoff_min_seconds
         cap = self._config.retry_backoff_max_seconds
         exp = max(0, attempts - 1)
-        return min(floor * (2 ** exp), cap)
+        if floor == 0:
+            return min(floor, cap)
+        try:
+            return min(math.ldexp(floor, exp), cap)
+        except OverflowError:
+            # Attempts also count ordinary polls and are deadline-bounded, so
+            # a later Retry can legitimately arrive with a very large count.
+            return cap
