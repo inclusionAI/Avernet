@@ -225,9 +225,10 @@ async function runMigrations(db: IDatabase, dbType: DbType): Promise<void> {
         // Also tolerate the occasional "already exists" / "key column ... does not exist".
         // MySQL error 1091: "Can't DROP column" — column doesn't exist (fresh install).
         // MySQL rendering strips CREATE INDEX IF NOT EXISTS; retain its idempotency.
+        // ALTER TABLE ADD INDEX reports the same ER_DUP_KEYNAME ("Duplicate key
+        // name") when the index already exists — also an idempotent no-op.
         if (
-          (/^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s/i.test(ddl) &&
-            lower.includes("duplicate key name")) ||
+          lower.includes("duplicate key name") ||
           lower.includes("duplicate column name") ||
           lower.includes("no such column") ||
           lower.includes("already exists") ||
