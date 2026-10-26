@@ -1156,7 +1156,7 @@ Manifest 保持对修订版无感知（§1、§5.5），其语法也**不新增�
    （Manifest，或某次晋升）以及逐条目的结果；Bot 运行哪个修订版靠读取 Bot 来
    观察（§5.5），因此任何应用事实都不需要携带文档摘要。
 
-两个破坏完整性的 Manifest 缺陷已经修复：应用引擎整体拥有资源根目录（`data/`），
+两个破坏完整性的 Manifest 缺陷已经修复：应用引擎整体拥有资源根目录（即 workspace 根目录，减去 `core/workspace/protected_entries` 中的受保护条目），
 每次 apply 先清空再写入声明的内容，因此从文档中省略的资源——或 Bot 自己写进去的
 文件——都会被删除（[#2162](https://github.com/inclusionAI/Avernet/issues/2162)）；
 `script: null` 声明「没有脚本」，因此文档（或修订版）会删除 Bot 现有的脚本，而

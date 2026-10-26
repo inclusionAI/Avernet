@@ -38,11 +38,17 @@ no digest and no apply id; `applied_revision` and `by_apply_reference` are
 gone. The 409 a drifted bot answers to an automated promotion names
 `active` and the observed revision id.
 
-**The resources root.** The engine owns `data/` whole: a resources
-declaration clears the root and writes the declaration, so a path the
+**The resources root.** The bot's workspace root is the resources root, as
+the resources Open API already defines it (every path workspace-relative, no
+path meaning the root). An apply that declares resources clears every
+unprotected entry under it and writes the declaration, so a path the
 previous document declared and this one does not, and a file the bot wrote
-there itself, are removed (#2162). Both compilers refuse a resource path
-outside the root. `script: null` declares no script and removes one the bot
+there itself, are removed (#2162). The protected entries are one reviewed
+list, `core/workspace/protected_entries.py` — the identity files, `skills/`
+and `skills-pool/`, the engine's `state/`, `conf/` and `<engine>_conf/`,
+dotfiles — owned by other constructs or by the engine; the Open API's
+read-only policy, the clear and both compilers all read it, and both
+compilers refuse a resource path naming one. `script: null` declares no script and removes one the bot
 has; an absent `script` leaves it alone (#2862).
 
 Where [ADR 0019](0019-bot-genome-is-the-unit-of-evolution.md) and
@@ -65,9 +71,9 @@ and [`apps/backend/docs/bot-evolution/01-genome.md` §2.7, §5.5](../../apps/bac
 - Drift costs a capture (one read of the bot) whenever a caller asks;
   nothing is written. A bot whose state cannot be read cannot be said to be
   in step either (`CaptureRefused` propagates).
-- An apply that declares `resources` replaces everything under `data/`,
-  including files the bot wrote there; the root is the documented
-  ownership boundary, and nothing outside it is touched.
+- An apply that declares `resources` replaces every unprotected entry of
+  the workspace, including files the bot wrote there; the protected list is
+  the documented boundary, and nothing on it is touched.
 - The genome's promotion table changed shape before the feature went live
   (columns removed in the committed DDL rather than by a new migration).
 

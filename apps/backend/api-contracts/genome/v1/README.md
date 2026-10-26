@@ -768,8 +768,8 @@ character outside `A–Z a–z 0–9 . _ - /`, for example `how to.md`, which th
 console upload accepts) cannot be captured, because no compiled state
 could deliver it back. Capture refuses and names the path, rather than
 dropping the resource silently; the owner renames it first (§8). Capture
-reads resource files the platform has a row for, under the bot's `data/`
-directory; a skill installed from a `local://` package is stored as the
+reads resource files the platform has a row for, by their workspace-relative
+path; a skill installed from a `local://` package is stored as the
 `acm-tree-v1` tree of the files `SkillPackageValidator` keeps (§4.2), a
 Center skill as its pinned `center_version`, a shared-repository skill as
 its `repo_path`.

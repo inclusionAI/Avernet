@@ -14,7 +14,7 @@ the one mapping, because its keys are undecided (G-4, #2858).
 
 Invariants that today live in the Manifest grammar are checked here on
 construction: digest form, tree paths end with ``/`` and file paths do not,
-resource paths sit under :data:`RESOURCES_ROOT`, identities are unique within
+resource paths are workspace-relative and name no protected entry, identities are unique within
 a declaration. They are raised, not reported: a compiler that emits a
 malformed state has a bug, which is not something an apply report should
 carry.
@@ -27,13 +27,12 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Any, ClassVar, Collection, Generic, Mapping, Protocol, TypeVar
 
-from agentclaw.community.core.workspace.constants import RESOURCES_ROOT_DIR
+from agentclaw.community.core.workspace.protected_entries import protected_entry_refusal
 from agentclaw.community.core.apply_engine.constructs import Construct, Category, Section
 from agentclaw.community.core.apply_engine.paths import relative_path_refusal
 from agentclaw.community.core.content_store import DIGEST_RE
 
 __all__ = [
-    "RESOURCES_ROOT",
     "CenterSkillVersion",
     "Declaration",
     "DesiredCliTool",
@@ -60,9 +59,6 @@ __all__ = [
 
 #: The one directory under the bot's workspace that holds its resources.
 #: Declared resource paths sit under it; converging resources clears it and
-#: writes the declared entries back (spec § Terms, "Resources root").
-RESOURCES_ROOT = f"{RESOURCES_ROOT_DIR}/"
-
 
 def _require(condition: bool, message: str) -> None:
     if not condition:
@@ -234,8 +230,11 @@ def _check_resource_path(path: str, *, tree: bool) -> None:
     _require(refusal is None, refusal[1] if refusal else "")
     segments = path.rstrip("/").split("/")
     _require(all(segment not in ("", ".") for segment in segments), f"resource path {path!r} is not normalised")
-    _require(path.startswith(RESOURCES_ROOT), f"resource path {path!r} is outside {RESOURCES_ROOT!r}")
-    _require(len(path) > len(RESOURCES_ROOT), f"resource path {path!r} names the root itself")
+    # The workspace root is the resources root; what may not be a resource is the protected set
+    # (``core/workspace/protected_entries``: identity files, the skills trees, the engine's state and
+    # configuration, dotfiles), which other constructs or the engine own.
+    protected = protected_entry_refusal(path)
+    _require(protected is None, protected or "")
     if tree:
         _require(path.endswith("/"), f"directory resource path {path!r} must end with '/'")
     else:

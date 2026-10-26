@@ -1283,7 +1283,8 @@ Manifest side still gains, all backward compatible with schema v1 documents:
    (§5.5), so no apply fact needs to carry a document digest.
 
 Two Manifest gaps that broke totality are closed: the apply engine owns the
-resources root (`data/`) whole, clearing it and writing the declaration
+resources root whole — the workspace root, minus the protected entries of
+`core/workspace/protected_entries` — clearing it and writing the declaration
 each apply, so a resource left out of a document — or written there by the
 bot itself — is removed
 ([#2162](https://github.com/inclusionAI/Avernet/issues/2162)); and

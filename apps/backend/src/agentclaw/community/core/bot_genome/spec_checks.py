@@ -26,7 +26,7 @@ from agentclaw.community.core.content_store import (
     decode_tree_bytes,
 )
 from agentclaw.community.core.apply_engine.capabilities import Capabilities
-from agentclaw.community.core.apply_engine.desired_state import RESOURCES_ROOT
+from agentclaw.community.core.workspace.protected_entries import protected_entry_refusal
 from agentclaw.community.core.bot_config_manifest.schema._support import Context
 from agentclaw.community.core.apply_engine.identity_types import legal_identity_types
 from agentclaw.community.core.bot_config_manifest.schema.entries import (
@@ -258,9 +258,10 @@ def resource_reasons(spec: GenomeSpec, content: ContentReader) -> list[Reason]:
         if problem is not None:
             reasons.append(Reason("resource_paths", location, problem))
             continue
-        if not path.startswith(RESOURCES_ROOT) or path == RESOURCES_ROOT:
-            # The apply engine owns exactly this root: an entry outside it could never be delivered.
-            reasons.append(Reason("resource_paths", location, f"a resource path is under the resources root {RESOURCES_ROOT!r}"))
+        protected = protected_entry_refusal(path)
+        if protected is not None:
+            # The workspace root is the resources root; a protected entry belongs to another construct.
+            reasons.append(Reason("resource_paths", location, protected))
             continue
         blob = _read(content, entry.digest, location, reasons)
         if blob is None:

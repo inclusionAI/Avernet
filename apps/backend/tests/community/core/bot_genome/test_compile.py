@@ -243,7 +243,7 @@ def test_a_revision_the_state_model_refuses_is_not_appliable_rather_than_a_crash
             "persona": [],
             "skills": [],
             "memory": None,
-            "resources": [{"path": "docs/guide.md", "digest": "sha256:" + "ab" * 32}],
+            "resources": [{"path": "SOUL.md", "digest": "sha256:" + "ab" * 32}],
             "tools": {"mcp": []},
             "engine_config": {},
             "script": None,
@@ -251,7 +251,7 @@ def test_a_revision_the_state_model_refuses_is_not_appliable_rather_than_a_crash
     )
     with pytest.raises(NotAppliable) as caught:
         compile_spec(spec, BlobDir())
-    assert "'docs/guide.md' is outside 'data/'" in caught.value.reasons[0].message
+    assert "'SOUL.md' is an identity file" in caught.value.reasons[0].message
     assert caught.value.reasons[0].location == "spec"
 
     class _StaleRegistry:
@@ -259,7 +259,7 @@ def test_a_revision_the_state_model_refuses_is_not_appliable_rather_than_a_crash
             return compile_spec(spec, BlobDir())
 
     compiler = GenomeCompiler(registry=_StaleRegistry(), promotions=_Promotions(_row()), refs=_Refs(), env=lambda: "dev")
-    with pytest.raises(CompileRefused, match="outside 'data/'") as refused:
+    with pytest.raises(CompileRefused, match="is an identity file") as refused:
         asyncio.run(compiler.compile(make_context(engine_type="openclaw", bot_type="arca"), genome_state("p" * 32)))
     assert isinstance(refused.value.domain_error, NotAppliable)
     blobs = BlobDir()

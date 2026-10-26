@@ -10,10 +10,7 @@ from agentclaw.community.core.apply_engine.desired_state import (
     DesiredState,
     ContentRef,
 )
-from agentclaw.community.core.bot_config_manifest.compiler.entries.resources import (
-    OUTSIDE_ROOT_REASON,
-    compile_resources,
-)
+from agentclaw.community.core.bot_config_manifest.compiler.entries.resources import compile_resources
 from agentclaw.community.core.bot_config_manifest.compiler.session import digest_of
 from agentclaw.community.core.content_store import canonical_tree_bytes, decode_tree_bytes
 from tests.community.core.apply_engine._fakes import build_skill_tgz, oss_source
@@ -64,8 +61,8 @@ async def test_grammar_rules_are_re_asked_and_reported_per_entry() -> None:
     declared = await compile_resources(
         session,
         [
-            {"path": "notes/outside.txt", "content": "x"},
-            {"path": "data/", "content": "x"},
+            {"path": "SOUL.md", "content": "x"},
+            {"path": "skills/tidy/SKILL.md", "content": "x"},
             {"path": "../escape", "content": "x"},
             {"path": "data/dup.txt", "content": "x"},
             {"path": "data/dup.txt", "content": "y"},
@@ -78,8 +75,8 @@ async def test_grammar_rules_are_re_asked_and_reported_per_entry() -> None:
         content=content,
     )
     reasons = {f.identity: f.reason for f in declared.failures}
-    assert reasons["notes/outside.txt"] == OUTSIDE_ROOT_REASON
-    assert reasons["data/"] == OUTSIDE_ROOT_REASON
+    assert "identity file" in reasons["SOUL.md"]
+    assert "not a resources directory" in reasons["skills/tidy/SKILL.md"]
     assert "'..'" in reasons["../escape"]
     assert "more than once" in reasons["data/dup.txt"]
     assert "nests under" in reasons["data/tree/inner.txt"]

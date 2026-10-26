@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from agentclaw.community.core.ports.resource_rows_port import WrittenFile
-from agentclaw.community.core.apply_engine.desired_state import RESOURCES_ROOT
+from agentclaw.community.core.workspace.protected_entries import protected_entry_refusal
 from agentclaw.community.core.apply_engine.context import ApplyContext
 from agentclaw.community.core.apply_engine.capabilities import (
     resolve_capabilities,
@@ -1239,7 +1239,7 @@ class FakeResourceFileService:
         )
         if self.fail_list:
             raise RuntimeError("listing quoted a header with a token")
-        return tuple(sorted(p for p in self._exists if p.startswith(RESOURCES_ROOT)))
+        return tuple(sorted(p for p in self._exists if protected_entry_refusal(p) is None))
 
     async def clear_root(
         self,
@@ -1249,13 +1249,13 @@ class FakeResourceFileService:
         bot_id: str,
         engine_type: str,
     ) -> bool:
-        """The tree delete of ``data/``; ``fail_clear`` answers the transports' silent ``False``."""
+        """The clear of the workspace's unprotected entries; ``fail_clear`` answers the transports' silent ``False``."""
         self.clear_root_calls.append(
             {"entity_type": entity_type, "entity_id": entity_id, "bot_id": bot_id, "engine_type": engine_type}
         )
         if self.fail_clear:
             return False
-        under = {p for p in self._exists if p.startswith(RESOURCES_ROOT)}
+        under = {p for p in self._exists if protected_entry_refusal(p) is None}
         self._exists -= under
         self.deleted.extend(sorted(under))
         return bool(under)

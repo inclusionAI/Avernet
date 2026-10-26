@@ -593,6 +593,7 @@ consumed_by:
   - "core.apply_engine — the run service looks the ManifestCompiler up by MANIFEST_STATE's kind and compiles through it; di/modules/manifest_fetch_module.py builds the compiler beside the fetch pipeline (the content store root and the fetch_transport_allowlist via the store's and W2's pure parsers over config_module's seam; the allowlist reaches SourceCredentialService as endpoint_allow_hosts) and holds the one DeclaredSourceResolver over the object store, the content store (bound by content_store_module) and W3's credentials"
   - "adapters/http/openapi_v1/source_credentials — the public tenant credential register/rotate/read/delete surface (OPEN admission; app-operated — the edge requires an app credential, owner-app guarded)"
 internal_dependencies:
+  - agentclaw.community.core.workspace.protected_entries  # the one list of workspace entries that are never resources (the validator and the compiler refuse them)
   - agentclaw.community.core.apply_engine  # the engine the Manifest compiles for: the construct vocabulary and capabilities, DesiredState and the compiler contract, the apply run the creation flow starts, the fetch caps (unpack) and identity vocabulary
   - agentclaw.community.core.base
   - agentclaw.community.core.content_store  # the store Service API, scope, errors, DIGEST_RE and the acm-tree-v1 encoding (W11, moved out in #3064)

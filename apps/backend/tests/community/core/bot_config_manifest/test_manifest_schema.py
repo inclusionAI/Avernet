@@ -701,8 +701,10 @@ manifest:
 
 
 def test_a_dotdot_prefixed_directory_name_is_not_a_traversal():
-    """The check is per segment: ``..config`` is a legitimate directory name."""
-    _accept(
+    """The traversal check is per segment: ``..config`` is a name, not ``..``. It is still refused, as
+    every dot-prefixed name is — a dotfile is the workspace's own and never a resource — and that one
+    reason is the only one the validator gives."""
+    rejected = _reject(
         """schema_version: 1
 manifest:
   resources:
@@ -714,6 +716,7 @@ manifest:
         auth: oss-cred
 """
     )
+    assert rejected == [("manifest.resources[0].path", "resources_protected_entry")]
 
 
 def test_a_resource_nested_under_a_directory_entry_is_refused():
@@ -1475,21 +1478,24 @@ def test_one_mistake_on_a_source_field_is_one_violation():
         assert expected in violations[0].message, (raw, violations[0].message)
 
 
-def test_resources_live_under_the_resources_root():
-    """A resource path outside ``data/`` (or naming the root itself) is refused at PUT: converging
-    resources clears the root and writes the declared entries back, so nothing outside it could
-    ever be removed, and the root has no entry to be."""
+def test_resources_may_not_name_a_protected_workspace_entry():
+    """The workspace root is the resources root; a path naming a protected entry (an identity file, the
+    skills tree, a dotfile) is refused at PUT, because converging resources clears the root and those
+    entries belong to other constructs. Any other workspace-relative path is a resource."""
     outside = """schema_version: 1
 manifest:
   resources:
+    - path: SOUL.md
+      content: hi
+    - path: skills/tidy/SKILL.md
+      content: hi
+    - path: notes/.env
+      content: hi
     - path: notes/hello.txt
-      content: hi
-    - path: data/
-      content: hi
-    - path: data/notes/hello.txt
       content: hi
 """
     rejected = _reject(outside)
-    assert ("manifest.resources[0].path", "resources_outside_root") in rejected
-    assert ("manifest.resources[1].path", "resources_outside_root") in rejected
-    assert not any(code == "resources_outside_root" and "[2]" in loc for loc, code in rejected)
+    assert ("manifest.resources[0].path", "resources_protected_entry") in rejected
+    assert ("manifest.resources[1].path", "resources_protected_entry") in rejected
+    assert ("manifest.resources[2].path", "resources_protected_entry") in rejected
+    assert not any(code == "resources_protected_entry" and "[3]" in loc for loc, code in rejected)

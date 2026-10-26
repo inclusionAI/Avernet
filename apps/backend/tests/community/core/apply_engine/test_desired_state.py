@@ -11,7 +11,6 @@ from agentclaw.community.core.apply_engine.compiler import (
 )
 from agentclaw.community.core.apply_engine.constructs import Category, Section
 from agentclaw.community.core.apply_engine.desired_state import (
-    RESOURCES_ROOT,
     CenterSkillVersion,
     Declaration,
     DesiredCliTool,
@@ -47,17 +46,25 @@ def test_stored_content_requires_a_digest() -> None:
         ContentRef("md5:" + "ab" * 32)
 
 
-def test_resource_paths_follow_the_root_and_the_trailing_slash_rule() -> None:
-    DesiredResourceFile(RESOURCES_ROOT + "faq.csv", ContentRef(DIGEST))
-    DesiredResourceTree(RESOURCES_ROOT + "prices/", ContentRef(DIGEST))
-    with pytest.raises(ValueError, match="outside"):
-        DesiredResourceFile("notes/hello.txt", ContentRef(DIGEST))
+def test_resource_paths_are_workspace_relative_and_name_no_protected_entry() -> None:
+    """The workspace root is the resources root; the protected entries (``core/workspace/protected_entries``)
+    belong to other constructs and are refused, at the root only for the identity files."""
+    DesiredResourceFile("faq.csv", ContentRef(DIGEST))
+    DesiredResourceFile("data/faq.csv", ContentRef(DIGEST))
+    DesiredResourceTree("docs/prices/", ContentRef(DIGEST))
+    DesiredResourceFile("docs/SOUL.md", ContentRef(DIGEST))
+    with pytest.raises(ValueError, match="identity file"):
+        DesiredResourceFile("SOUL.md", ContentRef(DIGEST))
+    with pytest.raises(ValueError, match="not a resources directory"):
+        DesiredResourceTree("skills/quality-check/", ContentRef(DIGEST))
+    with pytest.raises(ValueError, match="not a resources directory"):
+        DesiredResourceFile("openclaw_conf/settings.json", ContentRef(DIGEST))
+    with pytest.raises(ValueError, match="dotfile"):
+        DesiredResourceFile("data/.env", ContentRef(DIGEST))
     with pytest.raises(ValueError, match="must not end with"):
-        DesiredResourceFile(RESOURCES_ROOT + "prices/", ContentRef(DIGEST))
+        DesiredResourceFile("docs/prices/", ContentRef(DIGEST))
     with pytest.raises(ValueError, match="must end with"):
-        DesiredResourceTree(RESOURCES_ROOT + "prices", ContentRef(DIGEST))
-    with pytest.raises(ValueError, match="names the root"):
-        DesiredResourceTree(RESOURCES_ROOT, ContentRef(DIGEST))
+        DesiredResourceTree("docs/prices", ContentRef(DIGEST))
 
 
 def test_entries_need_their_identity() -> None:
@@ -116,7 +123,7 @@ def test_state_declares_per_construct_and_none_means_untouched() -> None:
     state = DesiredState(
         script=Declaration((DesiredScript("echo hi"),)),
         mcp=Declaration(()),
-        resources=Declaration((DesiredResourceFile(RESOURCES_ROOT + "a.txt", ContentRef(DIGEST)),)),
+        resources=Declaration((DesiredResourceFile("data/a.txt", ContentRef(DIGEST)),)),
     )
     assert state.declaration(Section.SCRIPT).entries[0].body == "echo hi"
     assert state.declaration(Category.MCP).entries == ()
@@ -168,15 +175,15 @@ def test_resource_paths_are_normalised_workspace_relative_paths() -> None:
 
 
 def test_a_directory_entry_owns_its_subtree() -> None:
-    tree = DesiredResourceTree(RESOURCES_ROOT + "prices/", ContentRef(DIGEST))
-    nested = DesiredResourceFile(RESOURCES_ROOT + "prices/2026.csv", ContentRef(OTHER))
-    same = DesiredResourceFile(RESOURCES_ROOT + "prices", ContentRef(OTHER))
+    tree = DesiredResourceTree("data/prices/", ContentRef(DIGEST))
+    nested = DesiredResourceFile("data/prices/2026.csv", ContentRef(OTHER))
+    same = DesiredResourceFile("data/prices", ContentRef(OTHER))
     with pytest.raises(ValueError, match="nested under directory entry"):
         DesiredState(resources=Declaration((tree, nested)))
     with pytest.raises(ValueError, match="nested under directory entry"):
         DesiredState(resources=Declaration((same, tree)))
     DesiredState(
-        resources=Declaration((tree, DesiredResourceFile(RESOURCES_ROOT + "prices.csv", ContentRef(OTHER))))
+        resources=Declaration((tree, DesiredResourceFile("data/prices.csv", ContentRef(OTHER))))
     )
 
 

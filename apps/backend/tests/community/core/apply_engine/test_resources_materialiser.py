@@ -358,11 +358,12 @@ def _tgz(member: dict[str, bytes]) -> bytes:
 
 def test_fake_resource_service_records_uploads_and_the_root_clear():
     """The fake's contract, pinned where the suite leans on it: ``list_root``
-    and ``clear_root`` see the root and only the root, the clear empties the
-    presence set (so a later listing is honest), and ``fail_clear`` is the
-    transports' silent ``False`` with nothing removed."""
+    and ``clear_root`` see every unprotected workspace entry and nothing
+    protected, the clear empties the presence set (so a later listing is
+    honest), and ``fail_clear`` is the transports' silent ``False`` with
+    nothing removed."""
     svc = FakeResourceFileService()
-    svc.record_present("data/old.bin", "notes/outside.txt")
+    svc.record_present("data/old.bin", "SOUL.md", "skills/tidy/SKILL.md")
     ctx = make_context(engine_type="claude_code")
     coords = dict(entity_id=ctx.entity_id, bot_id=ctx.bot_id, engine_type=ctx.engine_type)
     _run(svc.upload_file(**coords, target_dir="data", filename="a.bin", data=b"hello"))
@@ -370,13 +371,13 @@ def test_fake_resource_service_records_uploads_and_the_root_clear():
     assert _run(svc.list_root(**coords)) == ("data/a.bin", "data/old.bin")
     assert _run(svc.clear_root(**coords)) is True
     assert svc.deleted == ["data/a.bin", "data/old.bin"]
-    # Outside the root is never the clear's business.
-    assert svc.present == {"notes/outside.txt"}
+    # A protected entry is never the clear's business.
+    assert svc.present == {"SOUL.md", "skills/tidy/SKILL.md"}
     assert _run(svc.list_root(**coords)) == ()
     svc.record_present("data/again.bin")
     svc.fail_clear = True
     assert _run(svc.clear_root(**coords)) is False
-    assert svc.present == {"notes/outside.txt", "data/again.bin"}
+    assert svc.present == {"SOUL.md", "skills/tidy/SKILL.md", "data/again.bin"}
 
 
 # --- file entries: a declared fetch and inline content (Task 2) ---
@@ -420,17 +421,18 @@ def test_file_entry_inline_content_never_fetches():
     assert stub.calls == []  # inline content: no fetch, ever
 
 
-def test_a_path_outside_the_resources_root_is_refused_at_resolve():
-    """Every resource lives under ``data/``: a bare-root path is the compiler's
-    grammar refusal, keyed to the entry, and never spends a fetch or a write."""
+def test_a_protected_workspace_entry_is_refused_at_resolve():
+    """The workspace root is the resources root, minus the protected entries: an
+    identity file is the compiler's grammar refusal, keyed to the entry, and
+    never spends a fetch or a write."""
     svc = FakeResourceFileService()
     stub = _StubDeclaredSourceResolver()
     m = _materialiser(svc, stub)
     ctx = make_context(engine_type="claude_code")
-    resolved = _run(m.resolve(ctx, [{"path": "notes/r.md", "content": "# rules"}]))
+    resolved = _run(m.resolve(ctx, [{"path": "SOUL.md", "content": "# rules"}]))
     assert not resolved.ok
-    assert resolved.failures[0].identity == "notes/r.md"
-    assert "'data/'" in resolved.failures[0].reason
+    assert resolved.failures[0].identity == "SOUL.md"
+    assert "identity file" in resolved.failures[0].reason
     assert stub.calls == [] and svc.writes == {}
 
 
@@ -628,8 +630,9 @@ def test_plan_makes_one_root_listing_and_no_presence_probes():
 
 def test_plan_removals_are_what_the_root_holds_and_the_declaration_does_not():
     """``removals`` is ``listed − declared``: the audit row for the root's
-    ownership rule, sorted, every file under ``data/`` the declaration does
-    not put back — whoever wrote it — and nothing from outside the root.
+    ownership rule, sorted, every unprotected file in the workspace the
+    declaration does not put back — whoever wrote it — and never a protected
+    entry.
     """
     archive = _tgz({"a.txt": b"AAA"})
     svc = FakeResourceFileService()
@@ -637,7 +640,7 @@ def test_plan_removals_are_what_the_root_holds_and_the_declaration_does_not():
         "data/established/a.txt",
         "data/established/stale.txt",
         "data/scratch.log",
-        "notes/outside.txt",
+        "skills/tidy/SKILL.md",
     )
     m = _materialiser(svc, _StubDeclaredSourceResolver(archive))
     ctx = make_context(engine_type="claude_code")
@@ -668,7 +671,7 @@ def test_plan_removals_are_what_the_root_holds_and_the_declaration_does_not():
         "data/fresh/a.txt": "created",
     }
     assert plan.removals == ("data/established/stale.txt", "data/scratch.log")
-    assert "notes/outside.txt" not in plan.removals
+    assert "skills/tidy/SKILL.md" not in plan.removals
     assert not plan.is_noop
 
 
@@ -749,17 +752,17 @@ def test_a_file_the_bot_wrote_under_the_root_is_removed_and_reported():
     assert [(r.identity, r.outcome.value) for r in results] == [("data/a.md", "created")]
 
 
-def test_a_file_outside_the_root_is_never_touched_or_reported():
-    """Nothing outside ``data/`` is the materialiser's to see: not listed,
-    not cleared, not in ``removals``."""
+def test_a_protected_entry_is_never_touched_or_reported():
+    """No protected entry (an identity file, the skills tree, a dotfile) is the
+    materialiser's to see: not listed, not cleared, not in ``removals``."""
     svc = FakeResourceFileService()
-    svc.record_present("notes/outside.txt", "identity/soul.md")
+    svc.record_present("SOUL.md", "skills/tidy/SKILL.md", ".git/HEAD")
     m = _materialiser(svc, _StubDeclaredSourceResolver())
     ctx = make_context(engine_type="claude_code")
     plan, _results = _write_through(m, ctx, [{"path": "data/a.md", "content": "A"}])
     assert plan.removals == ()
     assert svc.deleted == []
-    assert svc.present == {"notes/outside.txt", "identity/soul.md", "data/a.md"}
+    assert svc.present == {"SOUL.md", "skills/tidy/SKILL.md", ".git/HEAD", "data/a.md"}
 
 
 def test_the_rows_follow_the_written_files():
@@ -1397,10 +1400,10 @@ def test_a_declared_empty_category_clears_the_root_and_reports_every_removal():
     """``resources: []`` is a declaration, not an omission: the root converges
     to nothing. Every listed file is in ``removals`` (both shapes), the
     clear happens for real, nothing is delivered, the rows become ``[]`` —
-    and what is outside the root stays.
+    and a protected entry stays.
     """
     svc = FakeResourceFileService()
-    svc.record_present("data/gone/old.md", "data/x.csv", "notes/outside.txt")
+    svc.record_present("data/gone/old.md", "data/x.csv", "SOUL.md")
     factory, rows = resource_rows_for()
     engine = _resources_engine(svc, _StubDeclaredSourceResolver(), resource_rows=factory)
     ctx = make_context(engine_type="claude_code")
@@ -1429,7 +1432,7 @@ def test_a_declared_empty_category_clears_the_root_and_reports_every_removal():
     # The root was cleared for real, and nothing was delivered.
     assert svc.deleted == ["data/gone/old.md", "data/x.csv"]
     assert svc.writes == {}
-    assert svc.present == {"notes/outside.txt"}
+    assert svc.present == {"SOUL.md"}
     assert rows.replacements == [{"files": [], "owner_id": ctx.owner_id, "created_by": ctx.actor_id}]
 
 

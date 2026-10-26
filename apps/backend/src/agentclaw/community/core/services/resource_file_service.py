@@ -35,7 +35,7 @@ from injector import inject
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_config_surface.coords import BotConfigCoords
-from agentclaw.community.core.ports.resource_file_port import ResourceFilePort, RootListingFailed
+from agentclaw.community.core.ports.resource_file_port import ResourceFilePort, RootClearFailed, RootListingFailed
 from agentclaw.community.core.bot_management.services.engine_resolver import (
     resolve_runtime_engine_for_bot,
 )
@@ -62,7 +62,11 @@ from agentclaw.community.core.resources.services.file_service import (
     admission_refusal,
 )
 from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
-from agentclaw.community.core.workspace.constants import RESOURCES_ROOT_DIR, SUPPORTED_ENGINE_TYPES
+from agentclaw.community.core.workspace.protected_entries import (
+    PROTECTED_ROOT_DIRS,
+    PROTECTED_ROOT_FILES,
+    protected_entry_refusal,
+)
 from agentclaw.community.di.modules.skill_center_module import DeviceFilesystemDispatcher
 from agentclaw.community.log import get_logger
 
@@ -76,21 +80,12 @@ logger = get_logger()
 _SKILLS_LOCAL_RELPATH = "skills/skills-local"
 _POOL_SKILLS_LOCAL_RELPATH = "skills-pool/skills-local"
 
-# System files excluded from search/archive and protected from deletion.
-_HIDDEN_BASENAMES = {
-    "AGENTS.md", "RULES.md", "OKR.md", "SAFETY.md", "SOUL.md",
-    "OUTPUT.md", "MEMORY.md", "IDENTITY.md", "USER.md", "TOOLS.md",
-    "HEARTBEAT.md", "BOOTSTRAP.md",
-}
-
-# System directories excluded from search/archive.
-_HIDDEN_DIRNAMES = {
-    "state",
-    "skills",
-    "skills-pool",
-    "conf",
-    *(f"{engine}_conf" for engine in SUPPORTED_ENGINE_TYPES),
-}
+# System files excluded from search/archive and protected from deletion, and
+# system directories excluded from search/archive: the one list lives in
+# ``core/workspace/protected_entries.py`` (the apply engine's clear skips the
+# same entries); these names are kept for the routers that import them.
+_HIDDEN_BASENAMES = PROTECTED_ROOT_FILES
+_HIDDEN_DIRNAMES = PROTECTED_ROOT_DIRS
 
 
 def is_readonly(path: str) -> bool:
@@ -645,53 +640,41 @@ class ResourceFileService(ResourceFilePort):
         engine_type: str,
         runtime_context: DeviceContext | None = None,
     ) -> tuple[str, ...]:
-        """Every file under the resources root, as ``data/...`` paths; ``()`` when the root is absent.
+        """Every resource file in the workspace as a workspace-relative path; the protected entries left out.
 
-        Level by level, like the directory download — no engine's recursive
-        flag is trusted — but with none of its curation: dotfiles and system
-        names count, because everything under the root is the apply engine's
-        to replace. Nothing is skipped: the listing is what the apply engine
-        clears and rewrites the root on the strength of, so it is complete or
-        it raises.
-
-        A root that does not list is confirmed absent from its parent: a bot
-        that has had its identity applied has a workspace that lists, so a
-        workspace that does not is a transport that cannot list at all, and
-        a workspace that still names ``data`` is a root listing that failed
-        (or a file squatting on the root) — each raises ``RootListingFailed``
-        rather than answer ``()``, because teclaw's ``list_dir`` gives
-        ``None`` for an absent directory and a failed call alike. The same
-        holds one level down: a subdirectory the walk was just told about
-        and then cannot list is a failed listing, not an empty directory,
-        and an entry with no name at all is a listing the walk cannot read.
-        An entry that does not say ``is_dir`` is read as a file, as the
-        directory download reads it.
+        The workspace root is the resources root, and what this listing skips
+        (``protected_entries``: the identity files, the skills trees, the
+        engine's state and configuration, dotfiles) is exactly what
+        ``clear_root`` leaves alone, so the two agree on what "everything"
+        means. Level by level — no engine's recursive flag is trusted — and
+        complete or raising: the apply engine clears and rewrites on the
+        strength of this listing, so a workspace that does not list, a
+        subdirectory the walk was just told about and then cannot list, and
+        an entry with no name each raise ``RootListingFailed`` rather than
+        answer short (teclaw's ``list_dir`` gives ``None`` for an absent
+        directory and a failed call alike). An entry that does not say
+        ``is_dir`` is read as a file, as the directory download reads it.
         """
         ctx = runtime_context or self._resolve_ctx(bot_id=bot_id, entity_id=entity_id)
         device_fs = self._device_fs(
             ctx, entity_type=entity_type, entity_id=entity_id,
             bot_id=bot_id, engine_type=engine_type,
         )
-        root = await device_fs.list_dir(self._logical(RESOURCES_ROOT_DIR))
+        root = await device_fs.list_dir(self._logical(""))
         if root is None:
-            parent = await device_fs.list_dir(self._logical(""))
-            if parent is None:
-                raise RootListingFailed(f"the workspace of bot {bot_id} could not be listed")
-            named = self._named_in(parent, RESOURCES_ROOT_DIR)
-            if named is None:
-                return ()
-            if self._is_dir_flag(named) is False:
-                raise RootListingFailed(f"the resources root of bot {bot_id} is a file, not a directory")
-            raise RootListingFailed(f"the resources root of bot {bot_id} is present but could not be listed")
+            raise RootListingFailed(f"the workspace of bot {bot_id} could not be listed")
         files: list[str] = []
-        queue: list[tuple[str, list[dict[str, Any]]]] = [(RESOURCES_ROOT_DIR, root)]
+        queue: list[tuple[str, list[dict[str, Any]]]] = [("", root)]
         while queue:
             current, entries = queue.pop(0)
             for entry in sorted(entries, key=self._leaf):
                 if not self._leaf(entry):
-                    # Nameless: the listing is not one to clear a root on.
-                    raise RootListingFailed(f"{current} of bot {bot_id} listed an entry without a name")
+                    # Nameless: the listing is not one to clear a workspace on.
+                    where = current or "the workspace"
+                    raise RootListingFailed(f"{where} of bot {bot_id} listed an entry without a name")
                 rel = self._rel_path(current, entry)
+                if protected_entry_refusal(rel) is not None:
+                    continue
                 if self._is_dir_flag(entry):
                     sub = await device_fs.list_dir(self._logical(rel))
                     if sub is None:
@@ -710,17 +693,40 @@ class ResourceFileService(ResourceFilePort):
         engine_type: str,
         runtime_context: DeviceContext | None = None,
     ) -> bool:
-        """Delete the resources root tree; ``False`` when there was nothing to delete.
+        """Delete every unprotected entry of the workspace root; ``False`` when there was none to delete.
 
-        One ``delete_tree`` of ``workspace/data``: the engine's own tree
-        delete, which every transport routes to its recursive remove.
+        One delete per root entry — the engine's tree delete for a directory,
+        its file delete for a file — skipping the protected entries, so an
+        identity file or the skills tree is never on the list. A delete the
+        transport answers ``False`` for, on an entry the listing just showed,
+        is a refusal (every device filesystem catches its own errors and
+        answers ``False``) and raises ``RootClearFailed``; ``False`` from here
+        means only that the root held nothing to delete.
         """
         ctx = runtime_context or self._resolve_ctx(bot_id=bot_id, entity_id=entity_id)
         device_fs = self._device_fs(
             ctx, entity_type=entity_type, entity_id=entity_id,
             bot_id=bot_id, engine_type=engine_type,
         )
-        return await device_fs.delete_tree(self._logical(RESOURCES_ROOT_DIR))
+        root = await device_fs.list_dir(self._logical(""))
+        if root is None:
+            raise RootListingFailed(f"the workspace of bot {bot_id} could not be listed")
+        removed = False
+        for entry in sorted(root, key=self._leaf):
+            name = self._leaf(entry)
+            if not name:
+                raise RootListingFailed(f"the workspace of bot {bot_id} listed an entry without a name")
+            if protected_entry_refusal(name) is not None:
+                continue
+            logical = self._logical(name)
+            if self._is_dir_flag(entry):
+                done = await device_fs.delete_tree(logical)
+            else:
+                done = await device_fs.delete_file(logical)
+            if not done:
+                raise RootClearFailed(f"{name} of bot {bot_id} was listed but could not be deleted")
+            removed = True
+        return removed
 
     async def _is_dir(self, device_fs: Any, path: str) -> bool:
         """Whether *path* names a directory, asked of the parent's listing.

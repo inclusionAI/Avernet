@@ -1,4 +1,4 @@
-"""``resources`` → the resources root (``data/``), cleared then written in full.
+"""``resources`` → the workspace root, minus its protected entries, cleared then written in full.
 
 **The entry shape.** ``identity`` for this category is the entry's ``path``,
 verbatim including any trailing slash. The trailing slash is the **form
@@ -6,8 +6,9 @@ discriminator**: ``data/faq.csv`` is a file entry, ``data/prices/`` is a
 directory entry. Both arrive typed — ``DesiredResourceFile`` with its stored
 bytes, ``DesiredResourceTree`` with its stored ``acm-tree-v1`` blob — the
 compiler having read the grammar, fetched, unpacked and filed; every path is
-under the resources root, which the Manifest validator and both compilers
-enforce.
+workspace-relative and names no protected entry
+(``core/workspace/protected_entries``), which the Manifest validator and
+both compilers enforce.
 
 Three invariants:
 
@@ -17,14 +18,17 @@ Three invariants:
   engine. **This module must not import anything from
   ``agentclaw.community.kernel.bot_config``** (the artifact contract stays
   untouched).
-- **The root is owned whole: clear, then write.** An apply that declares
-  resources replaces everything under ``data/`` — a path the previous
-  document declared and this one no longer does, and a file the bot wrote
-  there itself, both go (#2162). The engine has no "who wrote this" ledger
-  and needs none: the root is the ownership boundary, stated in the schema
-  docs, and nothing outside it is ever touched. ``plan`` reports what the
-  clear will remove as ``removals`` (``listed − declared``), so a dry run
-  shows the bot-written file that is about to go.
+- **The root is owned whole: clear, then write.** The workspace root is the
+  resources root — the Open API's contract, where no path means the root —
+  and an apply that declares resources replaces every unprotected entry
+  under it: a path the previous document declared and this one no longer
+  does, and a file the bot wrote there itself, both go (#2162). The engine
+  has no "who wrote this" ledger and needs none; what it never touches is
+  the protected set (``core/workspace/protected_entries``: the identity
+  files, the skills trees, the engine's state and configuration, dotfiles),
+  which other constructs or the engine own. ``plan`` reports what the clear
+  will remove as ``removals`` (``listed − declared``), so a dry run shows
+  the bot-written file that is about to go.
 - **Replace, don't diff.** Every apply rewrites every member — a drifted
   file would survive a source-side comparison — so ``plan`` classifies for
   the report only (``created`` when the path was not listed under the root,
@@ -36,10 +40,9 @@ Two things are re-asked here rather than trusted:
 - **The write chain's admission predicate is re-asked in ``resolve``** —
   the same :func:`admission_refusal` ``upload_file`` raises (extension
   allow-list, size cap) — so an undeliverable member fails its category
-  before the root is cleared, with everything still standing. What is *not*
-  re-asked is the HTTP surface's read-only policy (dotfiles, reserved roots):
-  a manifest declaring ``data/.env`` is the owner's declaration, deliberately
-  broader than the console router's guard.
+  before the root is cleared, with everything still standing. The HTTP
+  surface's read-only policy is the same protected-entry rule the compilers
+  enforce, so a dotfile or an identity file never reaches this stage.
 - **The platform's resource rows follow the files.** After the members are
   written, the bot's file rows under the root are replaced with one row per
   written file (source ``manifest``) through ``ResourceRowsPort``, so the
@@ -50,10 +53,10 @@ Two things are re-asked here rather than trusted:
 The write window: the transport has no rename, so a stop between the clear
 and the last member leaves the root partly written; the member's result row
 says ``failed`` and the next apply converges it. Costs: one root listing in
-``plan`` (no per-member ``exists`` probes); one tree delete of the root
-(plus one more listing only when the plan found the root empty and the
-delete answered ``False``), one upload per member and one row rewrite in
-``write``.
+``plan`` (no per-member ``exists`` probes); one root listing and one delete
+per unprotected root entry in the clear (plus one more listing only when the
+plan found the root empty and the clear answered ``False``), one upload per
+member and one row rewrite in ``write``.
 """
 
 from __future__ import annotations

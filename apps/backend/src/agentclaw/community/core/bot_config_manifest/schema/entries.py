@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlsplit
 
-from agentclaw.community.core.apply_engine.desired_state import RESOURCES_ROOT
+from agentclaw.community.core.workspace.protected_entries import protected_entry_refusal
 from agentclaw.community.core.apply_engine.identity_types import RESERVED_IDENTITY_FILES, legal_identity_types
 from agentclaw.community.core.apply_engine.capabilities import (
     Category,
@@ -656,15 +656,14 @@ def validate_resource_entry(
     check_entry_keys(ctx, location, entry, Category.RESOURCES)
     path = entry.get("path")
     usable = check_relative_path(ctx, f"{location}.path", path, what="path")
-    if usable and (not str(path).startswith(RESOURCES_ROOT) or path == RESOURCES_ROOT):
-        # The resources root: converging resources clears it and writes the
-        # declared entries back, so a path outside it would never be removed
-        # and a path naming the root itself has no entry to be.
-        ctx.add(
-            f"{location}.path",
-            "resources_outside_root",
-            f"resource path must be under the resources root {RESOURCES_ROOT!r}",
-        )
+    protected = protected_entry_refusal(str(path)) if usable else None
+    if protected is not None:
+        # The workspace root is the resources root: converging resources
+        # clears it and writes the declared entries back. The protected
+        # entries (``core/workspace/protected_entries``) belong to other
+        # constructs or to the engine, so a path naming one is refused here
+        # rather than written and never converged.
+        ctx.add(f"{location}.path", "resources_protected_entry", protected)
         usable = False
     is_directory = isinstance(path, str) and path.endswith("/")
     source = resolve_source(ctx, location, entry, Category.RESOURCES)

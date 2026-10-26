@@ -31,7 +31,7 @@ import asyncio
 import logging
 from typing import Any, Optional
 
-from agentclaw.community.core.workspace.constants import RESOURCES_ROOT_DIR
+from agentclaw.community.core.workspace.protected_entries import protected_entry_refusal
 from agentclaw.community.core.apply_engine.managed_files.store import (
     CATEGORY_IDENTITY,
     CATEGORY_RESOURCES,
@@ -224,13 +224,13 @@ class PlatformResource(_StorePort, ResourceFilePort):
         bot_id: str,
         engine_type: str,
     ) -> tuple[str, ...]:
-        """Every resources-category object under ``workspace/data/``, as ``data/...`` paths."""
+        """Every resources-category object, as a workspace-relative path (the store holds no protected entry)."""
         rows = await asyncio.to_thread(
             self._store.list, self._scope(entity_type, entity_id, bot_id), category=CATEGORY_RESOURCES
         )
-        prefix = _workspace_path(RESOURCES_ROOT_DIR) + "/"
         namespace = len(WORKSPACE_NS) + 1
-        return tuple(sorted(row.rel_path[namespace:] for row in rows if row.rel_path.startswith(prefix)))
+        paths = (row.rel_path[namespace:] for row in rows)
+        return tuple(sorted(path for path in paths if protected_entry_refusal(path) is None))
 
     async def clear_root(
         self,
@@ -240,10 +240,15 @@ class PlatformResource(_StorePort, ResourceFilePort):
         bot_id: str,
         engine_type: str,
     ) -> bool:
-        """Delete every object under ``workspace/data/``; ``False`` when there were none — ``delete`` of the root."""
-        return await self.delete(
-            entity_type=entity_type, entity_id=entity_id, bot_id=bot_id, engine_type=engine_type, path=RESOURCES_ROOT_DIR
-        )
+        """Delete every resources-category object; ``False`` when there were none.
+
+        A delete that does not land raises; ``False`` never hides a refusal.
+        """
+        scope = self._scope(entity_type, entity_id, bot_id)
+        rows: list[ManagedFile] = await asyncio.to_thread(self._store.list, scope, category=CATEGORY_RESOURCES)
+        for row in rows:
+            await asyncio.to_thread(self._store.delete, scope, rel_path=row.rel_path)
+        return bool(rows)
 
 
 class PlatformSkillPackageUpload(_StorePort, SkillPackageUploadPort):

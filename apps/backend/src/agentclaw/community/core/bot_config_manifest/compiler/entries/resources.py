@@ -14,8 +14,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Mapping, Sequence
 
+from agentclaw.community.core.workspace.protected_entries import protected_entry_refusal
 from agentclaw.community.core.apply_engine.desired_state import (
-    RESOURCES_ROOT,
     Declaration,
     DesiredResource,
     DesiredResourceFile,
@@ -42,14 +42,10 @@ from agentclaw.community.core.bot_config_manifest.fetch.limits import FetchCateg
 from agentclaw.community.core.apply_engine.support_matrix import SourceKind
 from agentclaw.community.core.content_store import ContentStoreProtocol, canonical_tree_bytes
 
-__all__ = ["OUTSIDE_ROOT_REASON", "compile_resources"]
+__all__ = ["compile_resources"]
 
 _CATEGORY_FILE = FetchCategory.RESOURCES_FILE.value
 _CATEGORY_ARCHIVE = FetchCategory.RESOURCES_ARCHIVE.value
-
-#: The reason a resource path outside the root is refused with; the schema says the same at ``PUT``.
-OUTSIDE_ROOT_REASON = f"resource path must be under the resources root {RESOURCES_ROOT!r}"
-
 
 async def compile_resources(
     session: CompileSession,
@@ -74,8 +70,10 @@ async def compile_resources(
             failures.append(EntryFailure(path, "a resources path is declared more than once in this category"))
             continue
         seen.add(path)
-        if not path.startswith(RESOURCES_ROOT) or path == RESOURCES_ROOT:
-            failures.append(EntryFailure(path, OUTSIDE_ROOT_REASON))
+        protected = protected_entry_refusal(path)
+        if protected is not None:
+            # The schema refuses the same at ``PUT``; re-asked here because the compiler is the last word.
+            failures.append(EntryFailure(path, protected))
             continue
         usable.append((path, entry))
 

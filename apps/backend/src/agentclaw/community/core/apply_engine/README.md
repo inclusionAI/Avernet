@@ -22,7 +22,8 @@ what lets a revision be delivered with no Manifest document in between
 
 Extracted from `core/bot_config_manifest/apply/` by
 `apps/backend/specs/2026-10-23-apply-engine-desired-state/`, which also
-records the resources-root rule (`data/`, cleared then written on every
+records the resources-root rule (the workspace root minus
+`core/workspace/protected_entries`, cleared then written on every
 apply that declares resources) and the typed state reference an apply run
 starts from.
 
@@ -43,7 +44,6 @@ provides:
   - DesiredMcpServer  # McpOverride, McpHeader, McpTransport, McpEndpointEnv
   - DesiredCliTool
   - DesiredEngineConfig
-  - RESOURCES_ROOT  # data/ — the one directory resources live under
   - DesiredStateCompiler  # the compiler contract both producers implement
   - StateRef  # (kind, reference) — what an apply run converges to; each compiler registers its kind
   - Compiled

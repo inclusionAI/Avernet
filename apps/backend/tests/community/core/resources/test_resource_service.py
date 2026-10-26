@@ -552,10 +552,10 @@ class TestDeleteFileRecord:
 class TestReplaceManifestRows:
     """``ResourceRowsPort``: the apply engine's one write to these rows (#2162).
 
-    After an apply has rewritten the resources root, the rows under it must
-    say exactly what was written: every row under ``data/`` goes, one row per
-    written file comes back with ``source="manifest"``, and rows outside the
-    root are not touched.
+    After an apply has rewritten the workspace's resources, the bot's file rows
+    must say exactly what was written: every file row goes (the workspace root
+    is the resources root), one row per written file comes back with
+    ``source="manifest"``.
     """
 
     @staticmethod
@@ -568,15 +568,15 @@ class TestReplaceManifestRows:
         return repo
 
     @pytest.mark.asyncio
-    async def test_rows_under_the_root_are_replaced_and_rows_outside_it_kept(self):
-        repo = self._repo_with_rows("data/old.csv", "data/kb/faq.md", "notes/outside.txt")
+    async def test_every_file_row_is_replaced(self):
+        repo = self._repo_with_rows("data/old.csv", "data/kb/faq.md", "notes/elsewhere.txt")
         svc = _make_service(repo, bot_id="bot7")
 
         await svc.replace_rows(
             files=[WrittenFile("data/kb/faq.md", 3), WrittenFile("data/new.txt", 1)], owner_id="owner", created_by="u2"
         )
 
-        assert sorted(call.args[0] for call in repo.delete.call_args_list) == ["1", "2"]
+        assert sorted(call.args[0] for call in repo.delete.call_args_list) == ["1", "2", "3"]
         created = [call.args[0] for call in repo.create.call_args_list]
         assert [(row["attributes"]["path"], row["attributes"]["size"]) for row in created] == [
             ("data/kb/faq.md", 3),

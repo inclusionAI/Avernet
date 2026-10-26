@@ -110,7 +110,7 @@ are typed sources in the state, not Manifest grammar, and never reach
 | a file entry's bytes | resolved | `digest` of the bytes |
 | a directory entry's files | resolved | `digest` of the `acm-tree-v1` tree; M′: the stored tree by digest |
 | `unpack`, `strip_components` | resolved | Applied before encoding |
-| a resource removed from the document | maps | Absent from the revision, so absent from M′'s `resources` declaration; apply owns the resources root (`data/`) whole and removes it ([#2162](https://github.com/inclusionAI/Avernet/issues/2162)) |
+| a resource removed from the document | maps | Absent from the revision, so absent from M′'s `resources` declaration; apply owns the resources root (the workspace, minus the protected entries) whole and removes it ([#2162](https://github.com/inclusionAI/Avernet/issues/2162)) |
 
 ## `manifest.mcp`
 

@@ -28,12 +28,6 @@ DEFAULT_ENGINE_TYPE = "openclaw"
 # bucket 解析）仍需识别它们，故 SUPPORTED_ENGINE_TYPES 保持全集不动。
 INTERNAL_ENGINE_TYPES = frozenset({"aicoding"})
 
-# The one directory under a bot's workspace that the apply engine owns:
-# every Manifest / genome resource lives under it, and an apply that
-# declares resources clears it and rewrites it in full (#2162).
-RESOURCES_ROOT_DIR = "data"
-
-
 def _get_engine_types() -> list[str]:
     """从环境变量或默认列表获取引擎类型。
 

@@ -17,7 +17,7 @@ from typing import Optional, Protocol, Sequence, runtime_checkable
 
 @dataclass(frozen=True)
 class WrittenFile:
-    """One file the apply wrote under the resources root, as its row will describe it."""
+    """One file the apply wrote in the workspace, as its row will describe it."""
 
     #: Workspace-relative, root included: ``"data/kb/faq.md"``.
     path: str
@@ -27,7 +27,7 @@ class WrittenFile:
 
 @runtime_checkable
 class ResourceRowsPort(Protocol):
-    """The resource rows of one bot, replaced under the resources root."""
+    """The resource rows of one bot, replaced in the workspace."""
 
     @abstractmethod
     async def replace_rows(
@@ -37,7 +37,7 @@ class ResourceRowsPort(Protocol):
         owner_id: str,
         created_by: Optional[str],
     ) -> None:
-        """Replace the bot's file rows under ``data/`` with one row per written file.
+        """Replace the bot's file rows of the workspace with one row per written file.
 
         Deletes every file row under the root first, then inserts one row per
         ``files`` member. ``owner_id`` is the bot's owner: the rows are that

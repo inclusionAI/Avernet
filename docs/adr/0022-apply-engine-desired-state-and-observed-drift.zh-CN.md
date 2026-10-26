@@ -28,10 +28,14 @@
 晋升行不携带已编译文档、摘要或 apply id；`applied_revision` 与 `by_apply_reference`
 已删除。已漂移的 Bot 对自动晋升回答的 409 给出 `active` 与观察到的修订版 id。
 
-**资源根目录。** 引擎整体拥有 `data/`：一次资源声明先清空根目录再写入声明的内容，
-因此上一份文档声明而这一份没有的路径，以及 Bot 自己写进去的文件，都会被删除
-（#2162）。两个编译器都拒绝根目录之外的资源路径。`script: null` 声明「没有脚本」
-并删除 Bot 现有的脚本；省略 `script` 则不动它（#2862）。
+**资源根目录。** Bot 的 workspace 根目录就是资源根目录，与资源 Open API 的既有定义一致
+（路径一律相对 workspace，不传路径即为根）。声明了资源的 apply 先清空根目录下所有
+未受保护的条目，再写入声明的内容，于是上一份文档声明而这一份未声明的路径、以及 Bot
+自己写在那里的文件都会被移除（#2162）。受保护条目是一份集中维护的清单
+`core/workspace/protected_entries.py`——身份文件、`skills/` 与 `skills-pool/`、引擎的
+`state/`、`conf/`、`<engine>_conf/`、以及点文件——它们归其他 construct 或引擎所有；
+Open API 的只读策略、清空操作和两个编译器读的都是这份清单，两个编译器都会拒绝命名了
+其中条目的资源路径。
 
 [ADR 0019](0019-bot-genome-is-the-unit-of-evolution.zh-CN.md) 与
 [ADR 0020](0020-promotion-is-platform-owned.zh-CN.md) 中描述已编译文档摘要及其映射回
@@ -49,7 +53,7 @@
   新的物化器或对引擎的改动。
 - 每当有调用方询问，漂移的代价是一次捕获（读一次 Bot）；什么都不写。状态读不出来
   的 Bot 也无法说它是同步的（`CaptureRefused` 会向上传播）。
-- 声明了 `resources` 的 apply 会替换 `data/` 下的所有内容，包括 Bot 自己写进去的文件；
+- 声明了 `resources` 的 apply 会替换 workspace 下所有未受保护的条目，包括 Bot 自己写进去的文件；受保护清单就是文档化的边界，清单上的条目一概不碰。
   根目录是文档化的所有权边界，边界之外一概不碰。
 - 基因组的晋升表在功能上线前改变了形状（直接在已提交的 DDL 中删除列，而不是新增
   一个迁移）。

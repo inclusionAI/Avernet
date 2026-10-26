@@ -609,12 +609,16 @@ resources:
 **共同规则**：
 - `path` 是 workspace 相对的**逻辑路径**，不是引擎物理路径；寻址语义与
   现有 resources API 一致，物理位置由各引擎照现状决定。
-- **`path` 必须位于资源根目录 `data/` 之下**（`data/` 本身不是资源）。资源
-  根目录整体归 apply 引擎所有：每次声明了 `resources` 的 apply 都先清空
-  `data/`、再写入声明的全部内容，所以上一份文档声明而这一份省略的路径，以及
-  Bot 运行期自己写进 `data/` 的文件，都会被删除（#2162）；dry run 的 report 用
-  `removals` 列出将被清除的路径。`data/` 之外一概不碰。根目录之外的 `path`
-  在 PUT 时拒绝。
+- **资源根目录就是 workspace 根目录**（与资源 Open API 一致：不传路径即为根），
+  **`path` 不得命名受保护条目**：身份文件（`SOUL.md` 等）、`skills/`、
+  `skills-pool/`、引擎的 `state/`、`conf/`、`<engine>_conf/`、以及任何点文件
+  ——清单集中在 `core/workspace/protected_entries.py`，归其他 construct 或引擎
+  所有。资源根目录整体归 apply 引擎所有：每次声明了 `resources` 的 apply 都先
+  清空 workspace 下所有未受保护的条目、再写入声明的全部内容，所以上一份文档
+  声明而这一份省略的路径，以及 Bot 运行期自己写进 workspace 的文件，都会被
+  删除（#2162）；dry run 的 report 用 `removals` 列出将被清除的路径。受保护
+  条目一概不碰。命名了受保护条目的 `path` 在 PUT 时拒绝
+  （`resources_protected_entry`）。
 - 校验：白名单字符、禁止路径穿越（`../`、绝对路径）。
 
 **目录条目语义**（HTTP 没有目录语义，归档是把树运过来的约定形态）：
@@ -626,7 +630,7 @@ resources:
   只有当读这棵树比重写它更便宜时才值得做。
 - **目录级声明获胜**：`path` 下整棵树归 manifest 管辖——源中不存在的
   文件在 apply 时被清除（含手工添加的）。这是上面「资源根目录整体归 apply
-  引擎所有」这条规则的推论：清空的是整个 `data/`，不止目录条目。
+  引擎所有」这条规则的推论：清空的是整个 workspace（受保护条目除外），不止目录条目。
 - **替换只原子到传输层允许的程度**：平台侧解包到临时位置（保证一次失败的
   取源或一个坏归档永远到不了 bot），但下发只有 `delete_tree` + 逐文件写
   ——设备文件系统契约里没有 rename/move。所以 `path` 下的树存在一个真实的

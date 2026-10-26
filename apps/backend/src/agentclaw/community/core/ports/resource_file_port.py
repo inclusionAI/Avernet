@@ -93,11 +93,15 @@ class ResourceFilePort(Protocol):
         bot_id: str,
         engine_type: str,
     ) -> tuple[str, ...]:
-        """Every file under the resources root (``data/``), as workspace-relative paths; ``()`` when absent.
+        """Every resource file in the workspace as a workspace-relative path, the protected entries left out.
 
-        ``()`` is a confirmed absence, never a listing that could not be
-        made: an implementation that cannot tell the two apart raises
-        :class:`RootListingFailed` instead of answering empty.
+        The workspace root is the resources root; the entries left out are
+        ``core/workspace/protected_entries`` (identity files, the skills
+        trees, the engine's state and configuration, dotfiles), the same
+        ones ``clear_root`` leaves alone. ``()`` is a confirmed empty
+        workspace, never a listing that could not be made: an implementation
+        that cannot tell the two apart raises :class:`RootListingFailed`
+        instead of answering empty.
         """
         ...
 
@@ -110,7 +114,11 @@ class ResourceFilePort(Protocol):
         bot_id: str,
         engine_type: str,
     ) -> bool:
-        """Delete the resources root and everything under it; ``False`` when nothing was there."""
+        """Delete every unprotected entry of the workspace root; ``False`` when there was none.
+
+        A delete that does not land raises :class:`RootClearFailed`; ``False``
+        never hides a refusal.
+        """
         ...
 
 
@@ -127,4 +135,15 @@ class RootListingFailed(RuntimeError):
     """
 
 
-__all__ = ["ResourceFilePort", "RootListingFailed"]
+class RootClearFailed(RuntimeError):
+    """``clear_root`` found an entry it could not delete.
+
+    The device filesystems answer ``False`` for their own failures, and a
+    ``False`` on an entry the root listing just showed is a refusal, not
+    "nothing there". The apply engine reports the category not cleared and
+    writes nothing over the root; the next apply converges it.
+    """
+
+
+__all__ = ["ResourceFilePort", "RootClearFailed",
+    "RootListingFailed"]

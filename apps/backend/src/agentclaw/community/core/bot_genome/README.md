@@ -129,6 +129,7 @@ consumed_by:
   - "RSI-04 (direct delivery) — binds a real RevisionApplier; RSI-08 (evolution runs) records candidates through GenomeRegistryProtocol"
 internal_dependencies:
   - agentclaw.community.core.base
+  - agentclaw.community.core.workspace.protected_entries  # the one list of workspace entries that are never resources (spec_checks refuses them)
   - agentclaw.community.core.apply_engine.compiler  # Compiled, StateRef — the genome is one of the run service's compilers, under GENOME_STATE_KIND
   - agentclaw.community.core.apply_engine.constructs  # the construct vocabulary a creation half narrows a state by
   - agentclaw.community.core.apply_engine.context  # ApplyContext, the run the genome compiler compiles for (typing only)

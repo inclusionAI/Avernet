@@ -1044,7 +1044,7 @@ def test_a_dry_run_hears_the_compilers_own_refusal_not_the_workers(world):
 
 
 def test_a_dry_run_of_a_document_that_stopped_validating_raises_the_validators_error(world):
-    """The real road: the stored document fails the validator (a resource outside the root the engine owns),
+    """The real road: the stored document fails the validator (a resource naming a protected workspace entry),
     and the caller gets ``ManifestValidationError`` with its violations, as the route maps it."""
     from agentclaw.community.core.bot_config_manifest.schema import ManifestValidationError, validate_document
 
@@ -1058,7 +1058,7 @@ def test_a_dry_run_of_a_document_that_stopped_validating_raises_the_validators_e
 
     service, *_ = world
     service._compilers[MANIFEST_STATE.kind]._manifests = _ValidatingManifests(
-        "schema_version: 1\nmanifest:\n  resources:\n    - path: notes/outside.md\n      content: x\n"
+        "schema_version: 1\nmanifest:\n  resources:\n    - path: SOUL.md\n      content: x\n"
     )
     with pytest.raises(ManifestValidationError) as refused:
         _dry_run(service)

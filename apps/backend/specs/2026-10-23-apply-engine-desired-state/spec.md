@@ -58,13 +58,20 @@ promotions. The delivery seam stays unbound; binding it is RSI-04.
 - **Stored content.** Bytes in the content store, named by digest. Every
   file in a desired state is stored content; directories are one
   `acm-tree-v1` blob. A compiler has filed the bytes before it emits.
-- **Resources root.** The one directory under the bot's workspace that
-  holds its resources (`data/`: where the console's resource rows point,
-  where capture reads, and the prefix the genome contract's examples use).
-  Declared resource paths live under it. Converging resources means the
-  root holds exactly the declared entries afterwards; whatever else was
-  under it, including files the bot wrote there itself, is gone, because
-  nothing on the engine can tell them apart.
+- **Resources root.** The bot's workspace root, as the resources Open API
+  defines it (every path workspace-relative, no path meaning the root).
+  Declared resource paths are workspace-relative and may not name a
+  **protected entry**: the identity files at the root, `skills/` and
+  `skills-pool/`, the engine's `state/`, `conf/` and `<engine>_conf/`, and
+  dotfiles at any depth — one reviewed list in
+  `core/workspace/protected_entries.py`, read by the Open API's read-only
+  policy, the clear and both compilers. Converging resources means the
+  workspace holds exactly the declared entries afterwards, protected entries
+  aside; whatever else was there, including files the bot wrote itself, is
+  gone, because the engine cannot tell a platform upload from a bot-written
+  file and does not try. (Review round 2, 2026-10-26: `data/` was the
+  legacy console upload's directory, not a contract; the Open API never had
+  one.)
 - **Materialiser.** Unchanged in role (`resolve` → `plan` → `write`, per
   construct). `resolve` now takes typed entries and keeps only the checks
   that belong to the engine or its ports: engine capability, permission,
@@ -199,12 +206,12 @@ promotions. The delivery seam stays unbound; binding it is RSI-04.
 - [ ] `script: null` in a document is "declared, none": the compiler emits
       an empty script declaration and the apply removes the startup script
       (#2862). The validator accepts `null`; the schema docs say so.
-- [ ] The resources root is `data/` under the workspace. The Manifest
-      validator refuses a `resources` entry whose `path` is not under it
-      (`resources_outside_root`), and the Manifest compiler refuses the
-      same at apply time for a document stored before the rule. The genome
-      contract already writes resource paths under `data/` (examples and
-      capture); the schema states the rule.
+- [ ] The resources root is the workspace root. The Manifest validator
+      refuses a `resources` entry whose `path` names a protected entry
+      (`resources_protected_entry`), the Manifest compiler refuses the same
+      at apply time for a stored document, and the genome's spec checks
+      refuse it for a revision; the protected list is
+      `core/workspace/protected_entries.py` and the schema states the rule.
 - [ ] The resources materialiser converges by **clear then write**: it
       removes the resources root with the device road's existing tree
       delete (`DeviceFileSystem.delete_tree`, which every transport already
@@ -296,8 +303,10 @@ promotions. The delivery seam stays unbound; binding it is RSI-04.
   no new entry keys. The `/config-manifest` endpoints keep their paths and
   payloads.
 - Capture of platform-managed teclaw bots (RSI-03 follow-up).
-- The OpenAPI resources router's upload target (it writes to the workspace
-  root while its rows are read under `data/`): noted, tracked separately.
+- The deprecated `/api/resources/file` upload (it writes under
+  `workspace/data` and records rows relative to that directory, unlike the
+  Open API and the current internal file routes): capture reads such a row's
+  file where that layout put it; the route itself is left alone.
 
 ## Decisions taken with the issue owner (2026-10-23, incl. review round 1)
 
@@ -312,6 +321,16 @@ promotions. The delivery seam stays unbound; binding it is RSI-04.
    the promotion no longer records a compiled document or its digest.
 4. **This refactor lands before RSI-04**, which then binds the applier.
 5. **One pull request.**
+
+6. **The resources root is the workspace root, with one protected list**
+   (review round 2, 2026-10-26). The resources Open API already treats the
+   workspace as the root and refuses the identity files and dotfiles; the
+   apply engine follows the same contract and the same list, extended to the
+   system directories the Open API only hides (`skills/`, `skills-pool/`,
+   `state/`, `conf/`, `<engine>_conf/`). `data/` is dropped as a root; it is
+   an ordinary sub-directory where the deprecated console upload happened to
+   write. An engine-owned resources root (the engine excluding its own system
+   files) stays a possible later contract change, not part of this item.
 
 ## Decisions taken here, flagged for review
 
@@ -335,11 +354,8 @@ promotions. The delivery seam stays unbound; binding it is RSI-04.
 
 ## Open Questions
 
-- **Resources root confirmed as `data/`?** It is where the console's rows
-  point, where capture reads, and what the genome examples use; the cost is
-  a new validator rule that a stored document with a resource outside
-  `data/` fails. The alternative, the whole workspace, would wipe the bot's
-  working files on every apply that declares resources.
+- ~~**Resources root confirmed as `data/`?**~~ Resolved the other way:
+  decision 6.
 - **Bind the direct applier in this item?** Everything it needs exists
   after the apply run takes a `StateRef`; the binding itself is a provider
   and a thin applier. Left to RSI-04 as agreed, unless the owner prefers

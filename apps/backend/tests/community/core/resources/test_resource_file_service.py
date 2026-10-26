@@ -18,7 +18,7 @@ from agentclaw.community.core.resources.service import (
     DirectoryTooLargeError,
     ResourceNotFoundError,
 )
-from agentclaw.community.core.ports.resource_file_port import RootListingFailed
+from agentclaw.community.core.ports.resource_file_port import RootClearFailed, RootListingFailed
 from agentclaw.community.core.services import resource_file_service
 from agentclaw.community.core.services.resource_file_service import (
     ResourceFileService,
@@ -749,112 +749,69 @@ async def test_walk_aborts_on_a_read_error():
         await _collect(svc, "")
 
 
-# ── the resources root: list and clear ───────────────────────────────────────
+# ── the resources root: the workspace, minus its protected entries ──────────
+
+
+def _workspace(listing: dict[str, list[dict]]):
+    """A device filesystem whose ``list_dir`` answers from ``listing`` (``None`` for anything else)."""
+    device_fs = MagicMock()
+    device_fs.list_dir = AsyncMock(side_effect=lambda logical: listing.get(logical))
+    device_fs.delete_tree = AsyncMock(return_value=True)
+    device_fs.delete_file = AsyncMock(return_value=True)
+    return device_fs
+
+
+_ROOT = [
+    {"name": "kb", "is_dir": True, "relative_path": "kb"},
+    {"name": "data", "is_dir": True, "relative_path": "data"},
+    {"name": "faq.md", "is_dir": False, "relative_path": "faq.md"},
+    {"name": "SOUL.md", "is_dir": False, "relative_path": "SOUL.md"},
+    {"name": "skills", "is_dir": True, "relative_path": "skills"},
+    {"name": "openclaw_conf", "is_dir": True, "relative_path": "openclaw_conf"},
+    {"name": ".git", "is_dir": True, "relative_path": ".git"},
+]
 
 
 @pytest.mark.asyncio
-async def test_list_root_walks_data_level_by_level_and_keeps_dotfiles():
-    """Every file under ``data/`` as a workspace-relative path; dotfiles count, the
-    root is the apply engine's whole."""
-    device_fs = MagicMock()
-
-    async def list_dir(path):
-        return {
+async def test_list_root_walks_the_workspace_level_by_level_and_skips_the_protected_entries():
+    """Every unprotected file, workspace-relative; the identity file, the skills and
+    engine directories and the dotfiles are left out at the root, dotfiles at any depth,
+    and a protected name below the root is an ordinary file."""
+    device_fs = _workspace(
+        {
+            "workspace": _ROOT,
+            "workspace/kb": [{"name": "a.txt", "is_dir": False, "relative_path": "a.txt"}],
             "workspace/data": [
-                {"name": "kb", "is_dir": True, "relative_path": "kb"},
-                {"name": ".hidden", "is_dir": False, "relative_path": ".hidden"},
-                {"name": "faq.md", "is_dir": False, "relative_path": "faq.md"},
+                {"name": "x.csv", "is_dir": False, "relative_path": "x.csv"},
+                {"name": ".env", "is_dir": False, "relative_path": ".env"},
+                {"name": "SOUL.md", "is_dir": False, "relative_path": "SOUL.md"},
             ],
-            "workspace/data/kb": [{"name": "a.txt", "is_dir": False, "relative_path": "a.txt"}],
-        }[path]
-
-    device_fs.list_dir = AsyncMock(side_effect=list_dir)
+        }
+    )
     svc, _ = _svc(provider="baas", device_fs=device_fs)
-    assert await svc.list_root(**_COORDS) == ("data/.hidden", "data/faq.md", "data/kb/a.txt")
+    # Level by level: the root's files first, then each directory's, in listing order.
+    assert await svc.list_root(**_COORDS) == ("faq.md", "data/SOUL.md", "data/x.csv", "kb/a.txt")
+    listed = [c.args[0] for c in device_fs.list_dir.await_args_list]
+    assert not {"workspace/skills", "workspace/.git", "workspace/openclaw_conf"} & set(listed)
 
 
 @pytest.mark.asyncio
-async def test_list_root_answers_empty_for_a_root_its_parent_confirms_absent():
-    """``None`` for the root is absence only once the workspace lists without a ``data`` entry."""
-    device_fs = MagicMock()
-    device_fs.list_dir = AsyncMock(
-        side_effect=lambda logical: {"workspace": [{"name": "skills", "is_dir": True}]}.get(logical)
-    )
-    svc, _ = _svc(provider="baas", device_fs=device_fs)
+async def test_list_root_answers_empty_for_a_workspace_holding_only_protected_entries():
+    device_fs = _workspace({"workspace": [e for e in _ROOT if e["name"] in ("SOUL.md", "skills", ".git")]})
+    svc, _ = _svc(provider="teclaw", device_fs=device_fs)
     assert await svc.list_root(**_COORDS) == ()
-    assert [c.args[0] for c in device_fs.list_dir.await_args_list] == ["workspace/data", "workspace"]
-
-
-@pytest.mark.asyncio
-async def test_list_root_raises_when_the_root_does_not_list_but_the_parent_names_it():
-    """Teclaw's ``list_dir`` answers ``None`` for a failed call as for an
-    absent directory; a parent that still names ``data`` says which."""
-    device_fs = MagicMock()
-    device_fs.list_dir = AsyncMock(
-        side_effect=lambda logical: {"workspace": [{"name": "data", "is_dir": True}]}.get(logical)
-    )
-    svc, _ = _svc(provider="teclaw", device_fs=device_fs)
-    with pytest.raises(RootListingFailed, match="present but could not be listed"):
-        await svc.list_root(**_COORDS)
-
-
-@pytest.mark.asyncio
-async def test_list_root_names_a_file_squatting_on_the_root():
-    device_fs = MagicMock()
-    device_fs.list_dir = AsyncMock(
-        side_effect=lambda logical: {"workspace": [{"name": "data", "is_dir": False}]}.get(logical)
-    )
-    svc, _ = _svc(provider="teclaw", device_fs=device_fs)
-    with pytest.raises(RootListingFailed, match="is a file, not a directory"):
-        await svc.list_root(**_COORDS)
-
-
-@pytest.mark.asyncio
-async def test_list_root_reads_a_numeric_is_dir_as_the_engine_meant_it():
-    device_fs = MagicMock()
-    device_fs.list_dir = AsyncMock(
-        side_effect=lambda logical: {"workspace": [{"name": "data", "is_dir": 0}]}.get(logical)
-    )
-    svc, _ = _svc(provider="teclaw", device_fs=device_fs)
-    with pytest.raises(RootListingFailed, match="is a file, not a directory"):
-        await svc.list_root(**_COORDS)
 
 
 @pytest.mark.asyncio
 async def test_list_root_raises_on_a_nameless_entry_and_reads_an_unsaid_is_dir_as_a_file():
-    """A listing the walk cannot read whole is not one to clear a root on; an
+    """A listing the walk cannot read whole is not one to clear a workspace on; an
     entry that does not say ``is_dir`` is a file, as the download reads it,
     and ``relative_path`` names an entry as well as ``name`` does."""
-    device_fs = MagicMock()
-    device_fs.list_dir = AsyncMock(side_effect=lambda logical: {"workspace/data": [{"is_dir": False}]}.get(logical))
-    svc, _ = _svc(provider="teclaw", device_fs=device_fs)
+    svc, _ = _svc(provider="teclaw", device_fs=_workspace({"workspace": [{"is_dir": False}]}))
     with pytest.raises(RootListingFailed, match="listed an entry without a name"):
         await svc.list_root(**_COORDS)
-    device_fs.list_dir = AsyncMock(
-        side_effect=lambda logical: {"workspace/data": [{"name": "kb"}, {"relative_path": "a.txt"}]}.get(logical)
-    )
-    assert await svc.list_root(**_COORDS) == ("data/a.txt", "data/kb")
-
-
-@pytest.mark.asyncio
-async def test_list_root_finds_the_root_in_its_parent_by_relative_path_or_name():
-    """The parent listing is not recursive, so an entry's ``relative_path`` is
-    its name; an engine that gives only one of the two is read the same."""
-    for entry in ({"relative_path": "data", "is_dir": True}, {"name": "data", "relative_path": 7, "is_dir": True}):
-        device_fs = MagicMock()
-        device_fs.list_dir = AsyncMock(side_effect=lambda logical, e=entry: {"workspace": [e]}.get(logical))
-        svc, _ = _svc(provider="teclaw", device_fs=device_fs)
-        with pytest.raises(RootListingFailed, match="present but could not be listed"):
-            await svc.list_root(**_COORDS)
-
-
-@pytest.mark.asyncio
-async def test_list_root_does_not_call_a_root_a_file_when_the_engine_omits_is_dir():
-    device_fs = MagicMock()
-    device_fs.list_dir = AsyncMock(side_effect=lambda logical: {"workspace": [{"name": "data"}]}.get(logical))
-    svc, _ = _svc(provider="teclaw", device_fs=device_fs)
-    with pytest.raises(RootListingFailed, match="present but could not be listed"):
-        await svc.list_root(**_COORDS)
+    svc, _ = _svc(provider="teclaw", device_fs=_workspace({"workspace": [{"name": "kb"}, {"relative_path": "a.txt"}]}))
+    assert await svc.list_root(**_COORDS) == ("a.txt", "kb")
 
 
 @pytest.mark.asyncio
@@ -862,30 +819,52 @@ async def test_list_root_raises_when_a_subdirectory_it_was_told_about_does_not_l
     """The walk was just told ``kb`` is a directory; a ``None`` for it is a
     failed listing, not an empty directory — read as empty it would hide the
     files under it from ``removals`` and from the refused-clear check."""
-    device_fs = MagicMock()
-    device_fs.list_dir = AsyncMock(
-        side_effect=lambda logical: {
-            "workspace/data": [{"name": "kb", "is_dir": True, "relative_path": "kb"}],
-        }.get(logical)
-    )
+    device_fs = _workspace({"workspace": [{"name": "kb", "is_dir": True, "relative_path": "kb"}]})
     svc, _ = _svc(provider="teclaw", device_fs=device_fs)
-    with pytest.raises(RootListingFailed, match="data/kb .* could not be listed itself"):
+    with pytest.raises(RootListingFailed, match="kb .* could not be listed itself"):
         await svc.list_root(**_COORDS)
 
 
 @pytest.mark.asyncio
 async def test_list_root_raises_when_the_workspace_itself_does_not_list():
-    device_fs = MagicMock()
-    device_fs.list_dir = AsyncMock(return_value=None)
-    svc, _ = _svc(provider="teclaw", device_fs=device_fs)
+    svc, _ = _svc(provider="teclaw", device_fs=_workspace({}))
     with pytest.raises(RootListingFailed, match="workspace .* could not be listed"):
         await svc.list_root(**_COORDS)
 
 
 @pytest.mark.asyncio
-async def test_clear_root_is_one_tree_delete_of_workspace_data():
-    device_fs = MagicMock()
-    device_fs.delete_tree = AsyncMock(return_value=True)
+async def test_clear_root_deletes_each_unprotected_root_entry_and_skips_the_protected_ones():
+    """One delete per root entry — a tree delete for a directory, a file delete for
+    a file — and never the identity file, the skills or engine directories, or a dotfile."""
+    device_fs = _workspace({"workspace": _ROOT})
     svc, _ = _svc(provider="baas", device_fs=device_fs)
     assert await svc.clear_root(**_COORDS) is True
-    device_fs.delete_tree.assert_awaited_once_with("workspace/data")
+    assert sorted(c.args[0] for c in device_fs.delete_tree.await_args_list) == ["workspace/data", "workspace/kb"]
+    assert [c.args[0] for c in device_fs.delete_file.await_args_list] == ["workspace/faq.md"]
+
+
+@pytest.mark.asyncio
+async def test_clear_root_answers_false_when_the_root_holds_nothing_to_delete():
+    device_fs = _workspace({"workspace": [e for e in _ROOT if e["name"] in ("SOUL.md", "skills")]})
+    svc, _ = _svc(provider="baas", device_fs=device_fs)
+    assert await svc.clear_root(**_COORDS) is False
+    device_fs.delete_tree.assert_not_awaited()
+    device_fs.delete_file.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_clear_root_raises_when_a_delete_does_not_land():
+    """The transports answer ``False`` for their own failures; on an entry the
+    listing just showed that is a refusal, never "nothing there"."""
+    device_fs = _workspace({"workspace": _ROOT})
+    device_fs.delete_file = AsyncMock(return_value=False)
+    svc, _ = _svc(provider="baas", device_fs=device_fs)
+    with pytest.raises(RootClearFailed, match="faq.md .* could not be deleted"):
+        await svc.clear_root(**_COORDS)
+
+
+@pytest.mark.asyncio
+async def test_clear_root_raises_when_the_workspace_does_not_list():
+    svc, _ = _svc(provider="teclaw", device_fs=_workspace({}))
+    with pytest.raises(RootListingFailed, match="workspace .* could not be listed"):
+        await svc.clear_root(**_COORDS)

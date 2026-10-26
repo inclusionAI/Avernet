@@ -21,7 +21,6 @@ from agentclaw.community.core.resources.models import (
 )
 from agentclaw.community.core.ports.resource_rows_port import ResourceRowsPort
 from agentclaw.community.core.repository.protocols.platform import ResourceRepositoryProtocol
-from agentclaw.community.core.workspace.constants import RESOURCES_ROOT_DIR
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -419,11 +418,11 @@ class ResourceService(ResourceRowsPort):
         owner_id: str,
         created_by: Optional[str],
     ) -> None:
-        """Replace this bot's file rows under the resources root with the apply's written set.
+        """Replace this bot's file rows with the apply's written set.
 
         The rows are the console listing's and the publish pipeline's view of
-        the workspace, so after an apply has rewritten ``data/`` in full they
-        must say exactly that: every row under the root goes, and one row per
+        the workspace, so after an apply has rewritten the workspace's resources
+        in full they must say exactly that: every file row goes, and one row per
         written file comes back with ``source="manifest"``, owned by the
         bot's owner so the console's per-user listing and duplicate check see
         it, and stamped with the actor who applied. The repository offers no
@@ -432,9 +431,11 @@ class ResourceService(ResourceRowsPort):
         materialiser, which reports the category partially written and the
         next apply converges it.
         """
-        # The root's row and every row beneath it, the same subtree rule a
-        # directory delete uses.
-        await self.delete_file_record(path=RESOURCES_ROOT_DIR)
+        # Every file row of the bot: the workspace root is the resources root.
+        for item in self._repo.list_resources(
+            resource_type=ResourceType.FILE.value, parent_path=None, user_id=None, bolt_id=self._bot_id
+        ):
+            self._repo.delete(str(item.get("id")))
         for file in files:
             await self.record_uploaded_file(
                 path=file.path, size=file.size, user_id=owner_id, created_by=created_by, source="manifest"
