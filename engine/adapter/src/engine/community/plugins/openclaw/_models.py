@@ -10,8 +10,8 @@ log = logging.getLogger("openclaw-port")
 class _ModelsPortMixin:
     """Domain mixin: models and providers catalogue (token-agnostic)."""
 
-    async def model_config_snapshot(self) -> dict[str, Any]:
-        """Read the live source snapshot; never log or publish the payload."""
+    async def get_model_config(self) -> dict[str, Any]:
+        """Read configuration through config.get on each call; never log its payload."""
         client = await self._default_client()
         response = await client.send_request("config.get", {}, timeout=5)
         if not response.ok or not isinstance(response.payload, dict):

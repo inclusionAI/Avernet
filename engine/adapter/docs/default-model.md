@@ -25,11 +25,17 @@ OpenClaw implements the optional Plugin API `OpenClawDefaultModelPort` through
 the existing default gateway connection's `config.get` request. Core validates
 `exists`/`valid` and extracts `parsed.agents.defaults.model` (string) or its
 `primary` member. It does not use `config`/`runtimeConfig`, factory templates,
-catalogue flags, agent-local overrides or fallback lists. Invalid snapshots and
+catalogue flags, agent-local overrides or fallback lists. Invalid configuration responses and
 invalid field types fail; an absent source file or default field reads as null.
-The native snapshot stays inside the adapter boundary and must never be logged.
+The native config.get response stays inside the adapter boundary and must never be logged.
 
 Other engines implement the same optional core contract against their own
 authoritative default source. Engines that already define an implicit default
 may return that identifier. They must document that engine-specific meaning,
 and must not silently substitute a per-session model.
+
+The OpenClaw port reads configuration through `config.get` on every call; it
+does not retain a fixed snapshot. A failed gateway connection or RPC remains a
+read failure. There is no direct-file fallback: path selection, parsing and
+validation stay with the addressed OpenClaw gateway, avoiding a second source
+of configuration truth in the adapter.

@@ -184,7 +184,7 @@ class OpenClawModelsAdapter(ModelsService):
         if not isinstance(self._port, OpenClawDefaultModelPort):
             from engine.community.core.engine.capability import Capability
             raise CapabilityNotSupportedError("openclaw", Capability.MODEL_DEFAULT_GET)
-        return configured_default_model(await self._port.model_config_snapshot())
+        return configured_default_model(await self._port.get_model_config())
 
     async def list_models(
         self, auth: AuthContext | None = None,

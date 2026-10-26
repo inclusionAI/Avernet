@@ -1,16 +1,16 @@
-"""Extract the configured default from a validated source snapshot."""
+"""Extract the configured default from a validated configuration response."""
 from __future__ import annotations
 
 from typing import Any
 
 
-def configured_default_model(snapshot: dict[str, Any]) -> str | None:
-    """Preserve missing configuration, but refuse failed/malformed snapshots."""
-    if snapshot.get("exists") is False:
+def configured_default_model(config: dict[str, Any]) -> str | None:
+    """Preserve missing configuration, but refuse failed/malformed configuration responses."""
+    if config.get("exists") is False:
         return None
-    if snapshot.get("exists") is not True or snapshot.get("valid") is not True:
-        raise ValueError("invalid model configuration snapshot")
-    current = snapshot.get("parsed")
+    if config.get("exists") is not True or config.get("valid") is not True:
+        raise ValueError("invalid model configuration response")
+    current = config.get("parsed")
     for key in ("agents", "defaults", "model"):
         if not isinstance(current, dict):
             raise ValueError("invalid model configuration")
