@@ -119,6 +119,12 @@ pub(crate) async fn command(flow: &BcsMessageFlow, group: &Group, session: &str,
 pub(crate) async fn admit(flow: &BcsMessageFlow, command: AdmitMessageDeliveries) -> ServiceResult<PersistedMessageDelivery> {
     let service = flow.managed_deliveries.as_ref().ok_or_else(|| error("task queue unavailable"))?;
     let admitted = service.admit(command).await.map_err(|e| error(&format!("task queue admission failed: {e}")))?;
+    finish_admission(flow, admitted).await
+}
+
+pub(crate) async fn finish_admission(flow: &BcsMessageFlow,
+    admitted: bcs_service_api::port::repo::message_delivery::DeliveryAdmissionResult,
+) -> ServiceResult<PersistedMessageDelivery> {
     let row = admitted.deliveries.into_iter().next().ok_or_else(|| error("task queue target missing"))?;
     restore(flow, &row).await?;
     if !matches!(row.state.status, Status::Queued) {

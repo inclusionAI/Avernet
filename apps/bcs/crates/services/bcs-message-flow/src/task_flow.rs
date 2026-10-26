@@ -4,6 +4,8 @@ pub(crate) use support::{apply_session_participants};
 use support::*;
 #[path = "task_flow/dispatch.rs"]
 mod dispatch;
+#[path = "task_flow/output.rs"]
+mod output;
 pub use dispatch::handle_task_dispatch;
 
 use std::collections::BTreeMap;

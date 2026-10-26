@@ -123,7 +123,7 @@ pub async fn handle_task_dispatch(
             summary:message.chars().take(80).collect() };
         let admission = crate::queued_task::command(flow, &group, &manager_session_id, intent,
             &message, cmd.payload.get("attachments"), &name, drain).await?;
-        crate::queued_task::admit(flow, admission).await?;
+        output::admit_queued_dispatch(flow, &group, admission).await?;
         let entry = flow.task_store.get(&effective_task_id).await
             .ok_or_else(|| crate::queued_task::error("admitted task projection missing"))?;
         record_task_event(flow, "task.assigned", &entry, &cmd.driver_bot_id, now,
@@ -139,6 +139,9 @@ pub async fn handle_task_dispatch(
         return Ok(TaskDispatchOutcome { task_id:effective_task_id, status:"queued".into(),
             bot_deliveries:Vec::new(), frontend_deliveries:Vec::new() });
     }
+    let operation_id = output::admit_output(
+        flow, &group, &manager_session_id, &effective_task_id, &target_bot_id,
+    ).await?;
     let mut task_entry = new_task_entry(
         effective_task_id.clone(),
         group_id.clone(),
@@ -178,7 +181,7 @@ pub async fn handle_task_dispatch(
     if let Some(session_id) = task_entry.session_id.as_ref() {
         assignment_data.insert("session_id".to_string(), serde_json::json!(session_id));
     }
-    record_task_event(
+    if let Err(error) = record_task_event(
         flow,
         "task.assigned",
         &task_entry,
@@ -186,7 +189,10 @@ pub async fn handle_task_dispatch(
         now,
         assignment_data,
     )
-    .await?;
+    .await {
+        flow.release_output_runs(&operation_id, std::slice::from_ref(&effective_task_id)).await;
+        return Err(error);
+    }
     flow.task_store.register(task_entry).await;
 
     // Resolve driver_name with registry fallback: prefer
@@ -224,6 +230,7 @@ pub async fn handle_task_dispatch(
     let delivery_target = match flow.registry.resolve_delivery_target(&target_bot_id).await {
         Ok(target) => target,
         Err(error) => {
+            flow.release_output_runs(&operation_id, std::slice::from_ref(&effective_task_id)).await;
             let error_text = error.to_string();
             log_manager_worker_deliver_result(
                 &group_id,
@@ -258,7 +265,7 @@ pub async fn handle_task_dispatch(
         now,
     );
     let delivery_kind = BotDeliveryKind::TaskDispatch;
-    flow.register_send_context(
+    if let Err(error) = flow.register_send_context(
         DeliveryType::Send,
         &delivery_target,
         &frame,
@@ -268,7 +275,10 @@ pub async fn handle_task_dispatch(
         Some(&manager_session_id),
         &[],
     )
-    .await?;
+    .await {
+        flow.release_output_runs(&operation_id, std::slice::from_ref(&effective_task_id)).await;
+        return Err(error);
+    }
     let result = match flow
         .bot_delivery
         .deliver(BotDeliveryCommand {
@@ -311,6 +321,7 @@ pub async fn handle_task_dispatch(
             result
         }
         Ok(result) => {
+            flow.release_output_runs(&operation_id, std::slice::from_ref(&effective_task_id)).await;
             flow.discard_send_context(&effective_task_id).await?;
             log_manager_worker_deliver_result(
                 &group_id,
@@ -330,7 +341,8 @@ pub async fn handle_task_dispatch(
             });
         }
         Err(error) => {
-            flow.discard_send_context(&effective_task_id).await?;
+            // The Worker may have accepted the request. Keep BOTH output permit
+            // and ingress context so late callbacks retain their original Run.
             let error_text = error.to_string();
             log_manager_worker_deliver_result(
                 &group_id,

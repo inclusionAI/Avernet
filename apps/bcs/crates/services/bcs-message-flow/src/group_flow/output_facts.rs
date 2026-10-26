@@ -40,7 +40,7 @@ pub(super) async fn session_snapshot_for_freeze(
 /// from the Group strategy, producer row from the Session when the
 /// run's events will carry that Session (the same id the send
 /// registered into its send context), else from the Group.
-pub(super) async fn freeze_run_output_facts(
+pub(crate) async fn freeze_run_output_facts(
     flow: &BcsMessageFlow,
     group: &Group,
     session: Option<&bcs_service_api::Session>,

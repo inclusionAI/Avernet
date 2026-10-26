@@ -72,6 +72,20 @@ error. Equal/older versions do not replace current state.
 
 - Inline v1 and reference v2 coordination consumption through an injected resolver port.
 
+TaskDispatch output is admitted independently of the Manager's parent Run.
+Both direct and queued Worker dispatch freeze each subscribed connection's view
+and the Worker's producer facts before acceptance side effects. Queued dispatch
+preassigns its canonical Run and registers the output stream before committing
+admission; the scheduler never needs the submitting caller to bind it afterward.
+Explicit rejection and duplicate attempts release only unused fresh identities;
+unknown commit/transport outcomes retain permits (and direct callback ingress)
+until an existing terminal/connection cleanup. Worker frames use local permits,
+not per-frame authorization reads. Recipient resolution costs one batched call
+per TaskDispatch with subscribers, independent of delta count; producer freezing
+reuses the already loaded Session participants without an extra storage read.
+Task ledger resource notifications still authorize independently per event.
+This adds no durable replay guarantee, schema, configuration or queue-policy change.
+
 Queued messages and run-reply display companions share the existing persisted
 visibility classifier. Read-only delivery queries reuse the configured Chat
 history window for recorded join anchors (one bounded repository resolution per batch). ManagerWorker and

@@ -741,4 +741,5 @@ pub use delivery::{build_chat_abort_frame};
 pub(crate) use delivery::{ContextProjection, context_projection_for_delivery, frame_protocol_version, frontend_domain_for_group};
 use delivery::{frame_for_target, bot_delivery_kind, delivery_metric_kind, publish_web_user_message, publish_group_callback_event, publish_chat_abort_event, route_source_for_web_send, log_message_received, log_routing_digest, log_bot_deliver_result};
 mod output_facts;
-use output_facts::{freeze_run_output_facts, session_snapshot_for_freeze};
+pub(crate) use output_facts::freeze_run_output_facts;
+use output_facts::session_snapshot_for_freeze;
