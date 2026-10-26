@@ -195,3 +195,43 @@ def test_new_bad_experts_are_not_discoverable(catalog, tmp_path, change):
         == 1
     )
     assert catalog.categories(scope) == []
+
+
+def test_standard_skill_metadata_is_persisted_and_invalid_package_preserves_old_input(
+    catalog, tmp_path
+):
+    scope = ExpertScope("tenant-a", "dev", "aiworkbench")
+    scanner = ExpertScanner(catalog)
+    expert = write_expert(tmp_path)
+    other = write_expert(tmp_path, "other")
+    package = expert / "skills" / "writing-review"
+    package.mkdir(parents=True)
+    (package / "SKILL.md").write_text(
+        "---\nname: writing-review\ndescription: 检查写作质量与逻辑。\n---\n\n# 写作评审\n\n先检查事实，再评审结构。\n"
+    )
+    manifest = expert / "manifest.yaml"
+    manifest.write_text(
+        manifest.read_text()
+        + "  skills:\n    - name: writing-review\n      from: aiworkbench\n      subpath: agents/writer/skills/writing-review\n"
+    )
+    result = scanner.scan(tmp_path, source_commit="a" * 40, scope=scope)
+    assert (result.valid, result.invalid) == (2, 0)
+    detail = catalog.get(scope, "writer")
+    assert detail["skills"] == [
+        {"name": "writing-review", "description": "检查写作质量与逻辑。"}
+    ]
+    assert any(
+        reference["path"].endswith("/writing-review/SKILL.md")
+        for reference in detail["references"]
+    )
+    (package / "SKILL.md").write_text(
+        "---\nname: wrong-name\ndescription: 不能冒充原声明。\n---\n"
+    )
+    (other / "AGENTS.md").write_text("其他合法专家继续更新")
+    result = scanner.scan(tmp_path, source_commit="b" * 40, scope=scope)
+    assert (result.valid, result.invalid) == (1, 1)
+    assert catalog.get(scope, "writer")["skills"] == detail["skills"]
+    assert catalog.get(scope, "writer")["source_commit"] == "a" * 40
+    assert (
+        catalog.get(scope, "other")["identity"][0]["content"] == "其他合法专家继续更新"
+    )
