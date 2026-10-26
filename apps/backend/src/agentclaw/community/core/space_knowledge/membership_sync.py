@@ -94,24 +94,28 @@ class SpaceMembershipSynchronizer:
             after_space_id=after_space_id,
             limit=32,
         )
-        for space_id, _revision in pending:
+        for space_id, revision in pending:
             try:
-                snapshot = self._repository.next_snapshot(
+                progress = self._repository.progress(
                     space_id=space_id, environment=environment, app=self._app
                 )
-                if snapshot is None:
+                if progress is None or revision <= progress[1]:
                     continue
+                if revision != progress[1] + 1:
+                    raise SpaceKnowledgeError("SPACE_NOT_SYNCED")
+                # Dispatch metadata only. The worker validates the exact head's
+                # payload and hash before any Sink call; corrupt heads retry.
                 # The outbox already committed with the source mutation. Queue
                 # failures are retried from it; no distributed transaction or
                 # queue history/retention exception is required.
                 self._queue.enqueue(
                     task_type=TASK_TYPE,
-                    payload={"_space_id": space_id, "revision": snapshot.revision},
+                    payload={"_space_id": space_id, "revision": revision},
                     env=environment,
                     app=self._app,
                     delay_seconds=0,
                     deadline_seconds=7 * 24 * 3600,
-                    idempotency_key=f"space:{self._app}:{space_id}:membership:{snapshot.revision}",
+                    idempotency_key=f"space:{self._app}:{space_id}:membership:{revision}",
                 )
             except Exception:
                 logger.warning("membership dispatch pending; no payload logged")

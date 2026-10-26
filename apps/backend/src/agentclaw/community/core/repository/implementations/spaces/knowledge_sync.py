@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 
 from injector import inject
-from sqlalchemy import false, func, true
+from sqlalchemy import false, true
 
 from agentclaw.community.core.repository.implementations.spaces.source_lock import (
     lock_source_space,
@@ -19,7 +19,9 @@ from agentclaw.community.core.repository.implementations.spaces.source_lock impo
 from agentclaw.community.core.repository.protocols.spaces import (
     SpaceKnowledgeSyncRepositoryProtocol,
 )
-from agentclaw.community.core.space_knowledge.capture_guard import SpaceKnowledgeCaptureGuard
+from agentclaw.community.core.space_knowledge.capture_guard import (
+    SpaceKnowledgeCaptureGuard,
+)
 from agentclaw.community.core.space_knowledge.repository.models import (
     SpaceKnowledgeSyncModel as Snapshot,
 )
@@ -46,10 +48,24 @@ def _latest(db, space_id, environment, *, lock=False):
     return (query.with_for_update() if lock else query).first()
 
 
+def _latest_state(db, space_id, environment, *, lock=False):
+    query = (
+        db.query(Snapshot.revision, Snapshot.app, Snapshot.status)
+        .filter(Snapshot.env == environment, Snapshot.space_id == space_id)
+        .order_by(Snapshot.revision.desc())
+    )
+    return (query.with_for_update() if lock else query).first()
+
+
 def _acknowledged(db, space_id, environment, app, *, lock=False):
     query = (
-        _rows(db, space_id, environment)
-        .filter(Snapshot.app == app, Snapshot.acknowledged == true())
+        db.query(Snapshot.revision)
+        .filter(
+            Snapshot.env == environment,
+            Snapshot.space_id == space_id,
+            Snapshot.app == app,
+            Snapshot.acknowledged == true(),
+        )
         .order_by(Snapshot.revision.desc())
     )
     row = (query.with_for_update() if lock else query).first()
@@ -177,7 +193,7 @@ class SpaceKnowledgeSyncRepository(SpaceKnowledgeSyncRepositoryProtocol):
             space = lock_space(db, space_id, environment)
             if space is None:
                 raise SpaceKnowledgeError("RESOURCE_NOT_FOUND")
-            latest = _latest(db, space_id, environment, lock=True)
+            latest = _latest_state(db, space_id, environment, lock=True)
             if latest is None:
                 record_membership_snapshot(db, space, app=app)
             elif latest.app != app or latest.status != "active":
@@ -186,7 +202,7 @@ class SpaceKnowledgeSyncRepository(SpaceKnowledgeSyncRepositoryProtocol):
     def progress(self, *, space_id, environment, app):
         with self._db.orm_session() as db:
             self._capture.require_enabled(db)
-            latest = _latest(db, space_id, environment)
+            latest = _latest_state(db, space_id, environment)
             if latest is None or latest.app != app:
                 return None
             return (
@@ -198,7 +214,7 @@ class SpaceKnowledgeSyncRepository(SpaceKnowledgeSyncRepositoryProtocol):
     def next_snapshot(self, *, space_id, environment, app):
         with self._db.orm_session() as db:
             self._capture.require_enabled(db)
-            latest = _latest(db, space_id, environment)
+            latest = _latest_state(db, space_id, environment)
             if latest is None or latest.app != app:
                 return None
             acknowledged = _acknowledged(db, space_id, environment, app)
@@ -218,40 +234,66 @@ class SpaceKnowledgeSyncRepository(SpaceKnowledgeSyncRepositoryProtocol):
     def acknowledge(self, *, snapshot, app):
         with self._db.transactional_orm_session() as db:
             self._capture.require_enabled(db)
-            latest = _latest(db, snapshot.space_id, snapshot.environment, lock=True)
+            latest = _latest_state(
+                db, snapshot.space_id, snapshot.environment, lock=True
+            )
             if latest is None or latest.app != app:
                 raise SpaceKnowledgeError("SPACE_NOT_SYNCED")
             acknowledged = _acknowledged(
                 db, snapshot.space_id, snapshot.environment, app, lock=True
             )
             row = (
-                _rows(db, snapshot.space_id, snapshot.environment)
-                .filter(Snapshot.revision == snapshot.revision, Snapshot.app == app)
+                db.query(Snapshot.snapshot_hash, Snapshot.status)
+                .filter(
+                    Snapshot.env == snapshot.environment,
+                    Snapshot.space_id == snapshot.space_id,
+                    Snapshot.revision == snapshot.revision,
+                    Snapshot.app == app,
+                )
                 .with_for_update()
                 .one_or_none()
             )
-            if row is None or _decode(row).body != snapshot.body:
+            # Payloads are immutable. Compare the delivered content's canonical hash
+            # and envelope to the locked row without reloading the full roster.
+            if (
+                row is None
+                or type(snapshot.revision) is not int
+                or snapshot.body.get("full_snapshot") is not True
+                or row.status != snapshot.body.get("status")
+                or row.snapshot_hash != snapshot.digest()
+            ):
                 raise SpaceKnowledgeError("SPACE_NOT_SYNCED")
             if snapshot.revision <= acknowledged:
                 return
             if snapshot.revision != acknowledged + 1:
                 raise SpaceKnowledgeError("SPACE_NOT_SYNCED")
-            row.acknowledged = True
+            _rows(db, snapshot.space_id, snapshot.environment).filter(
+                Snapshot.revision == snapshot.revision, Snapshot.app == app
+            ).update({Snapshot.acknowledged: True}, synchronize_session=False)
 
     def pending_revisions(self, *, environment, app, after_space_id, limit):
         with self._db.orm_session() as db:
             self._capture.require_enabled(db)
-            rows = (
-                db.query(Snapshot.space_id, func.min(Snapshot.revision))
-                .filter(
-                    Snapshot.env == environment,
-                    Snapshot.app == app,
-                    Snapshot.acknowledged == false(),
-                    Snapshot.space_id > after_space_id,
+            result = []
+            cursor = after_space_id
+            # The existing (env, app, acknowledged, space_id, revision) index
+            # seeks directly past each space's backlog. GROUP BY/MIN would
+            # visit every pending revision even with a small result LIMIT.
+            for _ in range(min(max(limit, 0), 32)):
+                row = (
+                    db.query(Snapshot.space_id, Snapshot.revision)
+                    .filter(
+                        Snapshot.env == environment,
+                        Snapshot.app == app,
+                        Snapshot.acknowledged == false(),
+                        Snapshot.space_id > cursor,
+                    )
+                    .order_by(Snapshot.space_id, Snapshot.revision)
+                    .limit(1)
+                    .first()
                 )
-                .group_by(Snapshot.space_id)
-                .order_by(Snapshot.space_id)
-                .limit(limit)
-                .all()
-            )
-            return [(space_id, revision) for space_id, revision in rows]
+                if row is None:
+                    break
+                result.append((row.space_id, row.revision))
+                cursor = row.space_id
+            return result

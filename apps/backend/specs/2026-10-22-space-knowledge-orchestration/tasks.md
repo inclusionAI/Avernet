@@ -47,19 +47,19 @@
 - **Depends on:** Task 3。
 - **AC:** AC1、AC4、AC5、AC7、AC8。
 
-## Task 5 [~]: Bound pending candidate discovery and avoid payload reads
+## Task 5 [x]: Bound pending candidate discovery and avoid payload reads
 - **Goal:** 修正已复现的深积压扫描放大，只改知识模块内部。
 - **Files:** `core/repository/implementations/spaces/knowledge_sync.py`、`core/repository/protocols/spaces.py`、`core/space_knowledge/membership_sync.py`、`tests/community/core/space_knowledge/test_pending_scan_bounds.py` 及原有同步测试。
 - **Done when:**
-  - [ ] 最多 32 个 Space 候选，最多 33 次有界索引查找，有跨 Space 的继续游标。
-  - [ ] 1/1000/100000 单 Space pending 探针不再按全部版本线性扫描；已确认历史被排除。
-  - [ ] 调度/progress/ack 元数据查询不读取 payload；真正投递只取严格下一版。
-  - [ ] 缺失/损坏队头仍 fail closed；FIFO/hash/queue pointer 语义不变。
-  - [ ] 明确 SQL 往返权衡；不声称 SQLite 计划证明 MySQL/OceanBase 通过。
+  - [x] 最多 32 个 Space 候选，最多 33 次有界索引查找，有跨 Space 的继续游标。
+  - [x] 1/1000/100000 单 Space pending 探针不再按全部版本线性扫描；已确认历史被排除。
+  - [x] 调度/progress/ack 元数据查询不读取 payload；真正投递只取严格下一版。
+  - [x] 缺失/损坏队头仍 fail closed；FIFO/hash/queue pointer 语义不变。
+  - [x] 明确 SQL 往返权衡；不声称 SQLite 计划证明 MySQL/OceanBase 通过。
 - **Depends on:** Task 4。
 - **AC:** AC4、AC6、AC8。
 
-## Task 6: Guard the dependency boundary and reconcile documentation
+## Task 6 [~]: Guard the dependency boundary and reconcile documentation
 - **Goal:** 将隔离要求固定为架构与合同守卫，防止回退。
 - **Files:** `tests/community/architecture/test_space_persistence_boundary.py`；`core/repository/README.md`、`core/space_knowledge/README.md`、本目录 `contract.md`、`spec.md`、`plan.md`、`tasks.md`，部署说明。
 - **Done when:**
@@ -80,6 +80,8 @@
   - [ ] 企业装配、MySQL/OceanBase、部署/DDL、远端 CI 未验证时明确列出；无授权不推送/提交 PR/执行线上操作。
 - **Depends on:** Task 6。
 - **AC:** AC1–AC8。
+
+Task 5 evidence (2026-10-26): new bounds tests RED (3 failed/1 passed), then 59 sync/race tests and 7 focused bounds/hash tests passed; metadata dispatch validates payload at execution; SQLite only, no remote DB claim.
 
 Task 4 evidence (2026-10-26): 19 missing-table cases, 31 enabled/recovery cases, and 1068 broad repository/service regressions passed locally; no remote/Singlebox claim.
 

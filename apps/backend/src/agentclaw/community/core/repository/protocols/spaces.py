@@ -185,5 +185,9 @@ class SpaceKnowledgeSyncRepositoryProtocol(Protocol):
     def pending_revisions(
         self, *, environment: str, app: str, after_space_id: int, limit: int
     ) -> list[tuple[int, int]]:
-        """Return one pending head per space; never read shared queue history."""
+        """Return at most min(limit, 32) heads, ordered by space_id > cursor.
+
+        Index seeks skip each space's remaining versions. Metadata only;
+        next_snapshot validates payload/hash before delivery. No queue reads.
+        """
         ...

@@ -495,10 +495,20 @@ def test_corrupt_or_missing_snapshot_never_delivers_or_replaces_history(setup, d
     with pytest.raises(SpaceKnowledgeError):
         sync.deliver_next(space_id=7, environment="pre")
     sync.repair_pending(environment="pre")
+    if damage != "missing":
+        from agentclaw.community.core.space_knowledge.membership_tasks import (
+            SpaceMembershipSyncTaskHandler,
+        )
+        from agentclaw.community.core.task_queue.types import Retry
+
+        # Metadata dispatch may enqueue a corrupt-but-present head, but the
+        # real handler must fail closed before Sink or acknowledgement.
+        handler = SpaceMembershipSyncTaskHandler(sync, "pre")
+        assert isinstance(handler.handle({"_space_id": 7, "revision": 1}), Retry)
     assert sink.calls == []
     assert repo.progress(space_id=7, environment="pre", app="agentclaw")[1] == 0
     with db.orm_session() as s:
-        assert s.query(TaskQueueModel).count() == 0
+        assert s.query(TaskQueueModel).count() == (0 if damage == "missing" else 1)
         assert s.query(SpaceKnowledgeSyncModel).count() == (
             1 if damage == "missing" else 2
         )
