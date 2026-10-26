@@ -111,6 +111,15 @@ The adapter owns WebSocket streams, `mpsc::Sender`, connection registries,
 frontend envelope stamping, and disconnect cleanup. It does not own routing or
 message lifecycle business decisions.
 
+Legacy Bot events with a registered Group Run restore an omitted Session from
+the accepted Run context before the unregistered-event default-Session fallback.
+Group-only Runs retain their original Group-as-session identity; real Session
+ids remain exact. Explicit Session or Bot/Group mismatches are rejected, never
+repaired by borrowing the accepted scope. This reuses the existing one Run
+context read per legacy frame (Memory or configured cache); it adds no DB,
+authority or extra cache lookup. Unregistered legacy events, direct A2A session
+keys and the V3 protocol keep their existing normalization rules.
+
 Successful send ACKs are passed to the message-flow application before alias
 projection. The application owns durable delivery/run identity correlation;
 the adapter does not update delivery tables.

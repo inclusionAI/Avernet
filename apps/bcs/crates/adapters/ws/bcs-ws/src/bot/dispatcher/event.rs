@@ -28,30 +28,48 @@ fn legacy_default_session_id(group_id: &str) -> Option<String> {
 }
 
 
+/// Resolve wire compatibility against the original accepted Run. An omitted
+/// legacy Session is not a request to switch to a synthesized default Session.
+fn registered_event_scope(
+    context: BotRunContext,
+    bot_id: &str,
+    wire_group_id: &str,
+    explicit_session_id: Option<&str>,
+) -> Result<(String, Option<String>)> {
+    let wire_scope = unwrap_outbound_group_id(wire_group_id, explicit_session_id);
+    if context.group_id.is_empty() {
+        // Direct A2A uses its caller-supplied session key in the legacy group
+        // field; preserve this separate protocol contract.
+        return Ok(if context.bot_id == bot_id {
+            (String::new(), context.bcs_session_id.or(wire_scope.1))
+        } else { wire_scope });
+    }
+    let session = context.bcs_session_id.unwrap_or_else(|| context.group_id.clone());
+    let wire_group = unwrap_outbound_group_id(wire_group_id, None).0;
+    if context.bot_id != bot_id || wire_group != context.group_id
+        || wire_scope.0 != context.group_id
+        || wire_scope.1.as_ref().is_some_and(|id| id != &session)
+    {
+        return Err(BotWsDispatchError::InvalidFrameFormat(
+            "legacy event run/Bot/Group/Session identity mismatch".into(),
+        ));
+    }
+    // Some(group_id) is the existing Group-only Run identity. Preserve it as
+    // well as real Session ids so later fallback cannot rewrite accepted scope.
+    Ok((context.group_id, Some(session)))
+}
+
 async fn resolve_bot_event_scope(
     state: &BotDispatchState,
     bot_id: &str,
     run_id: &str,
     wire_group_id: &str,
     explicit_session_id: Option<&str>,
-) -> (String, Option<String>) {
-    let wire_scope = unwrap_outbound_group_id(wire_group_id, explicit_session_id);
+) -> Result<(String, Option<String>)> {
     let Some(context) = state.bot_run_context.get_context(run_id).await else {
-        return wire_scope;
+        return Ok(unwrap_outbound_group_id(wire_group_id, explicit_session_id));
     };
-    if !context.group_id.is_empty() || context.bot_id != bot_id {
-        return wire_scope;
-    }
-
-    let session_id = context.bcs_session_id.or(wire_scope.1);
-    info!(
-        bot_id = %bot_id,
-        run_id = %run_id,
-        wire_group_id = %wire_group_id,
-        bcs_session_id = ?session_id,
-        "Direct A2A Bot event scope restored from run context"
-    );
-    (String::new(), session_id)
+    registered_event_scope(context, bot_id, wire_group_id, explicit_session_id)
 }
 
 /// V3 帳本校验：外层 frame seq 与 payload seq 一致、run 存在、身份匹配。
@@ -231,7 +249,7 @@ pub(super) async fn handle_event_frame(
             &bcs_group_id,
             explicit_session_id,
         )
-        .await
+        .await?
     };
     if !is_v3 && bcs_session_id.is_none() {
         if let Some(mapped_session_id) = state.run_channels.session_for_run(&run_id).await {
@@ -640,3 +658,7 @@ fn normalize_legacy_event(event: &EventFrame) -> Option<NormalizedBotEvent> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+#[path = "event_scope_tests.rs"]
+mod scope_tests;
