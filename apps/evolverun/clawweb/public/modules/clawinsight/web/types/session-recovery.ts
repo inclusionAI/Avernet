@@ -1,6 +1,7 @@
 export type SessionRecoveryTermination = { status: 'remote_stopped' | 'remote_stop_failed' | 'stop_pending'; aisJobId: string | null };
 export type SessionRecoveryTask = {
   taskId: string;
+  final_summary?: string;
   shared: boolean;
   canOperate: boolean;
   canManageShare: boolean;

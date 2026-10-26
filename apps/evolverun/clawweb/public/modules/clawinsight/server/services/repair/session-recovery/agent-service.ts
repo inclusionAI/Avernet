@@ -462,14 +462,14 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       await this.release(task, true);
     } else if (body.kind === "assessment") {
       if (task.simulation) await this.deps.business().assessSimulation(task.taskId, task.version,
-        { decision: body.decision, summary: body.summary, evidence_ids: body.evidence_ids, ...(body.knowledge === undefined ? {} : { knowledge: body.knowledge }), ...(body.message === undefined ? {} : { message: body.message }) } as RecoverySimulationAssessment);
-      else await this.deps.business().assess(task.taskId, task.version, { decision: body.decision as "message" | "environment" | "observe", summary: body.summary as string, evidence_ids: body.evidence_ids as string[] });
+        { decision: body.decision, summary: body.summary, evidence_ids: body.evidence_ids, ...(body.knowledge === undefined ? {} : { knowledge: body.knowledge }), ...(body.message === undefined ? {} : { message: body.message }) } as RecoverySimulationAssessment, body.final_summary);
+      else await this.deps.business().assess(task.taskId, task.version, { decision: body.decision as "message" | "environment" | "observe", summary: body.summary as string, evidence_ids: body.evidence_ids as string[] }, body.final_summary);
     } else if (body.kind === "observation") {
       const judgment = body.judgment as RecoveryJudgment;
       if (!judgment || !["confirmed", "unconfirmed"].includes(judgment.delivery) || !["acted", "replied", "none", "unknown"].includes(judgment.response)
         || !["recovered", "not_recovered", "unknown"].includes(judgment.effect) || typeof judgment.summary !== "string" || !Array.isArray(judgment.evidence_ids)) fail(422, "效果回报格式无效");
       if (judgment.delivery === "confirmed" && !task.timeline.some(event => event.kind === "operation" && (event.payload.result as Record<string, unknown>)?.delivery_confirmed === true && (event.payload.result as Record<string, unknown>)?.delivery_key === this.latestDeliveryKey(task))) fail(422, "触达确认必须来自受控会话或轨迹读取核实的本次实际用户消息");
-      await this.deps.business().observe(task.taskId, task.version, judgment, []);
+      await this.deps.business().observe(task.taskId, task.version, judgment, [], body.final_summary);
     } else if (body.kind === "plan") {
       const plan = body.plan as RecoveryPlan;
       if (Array.isArray(plan?.actions)) for (const action of plan.actions) {
@@ -478,22 +478,22 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
         if (task.request.target.engine === "TE" && !action.engineOperation && !action.operationScope) fail(422, "TE 方案动作必须声明 operationScope 或参考 Engine 请求");
         if (action.engineOperation) BotEngineOperations.validate(task.runtimeTarget?.target.activeEngine ?? { OC: "openclaw", CC: "claude_code", TE: "teclaw" }[task.request.target.engine] as "openclaw" | "claude_code" | "teclaw", action.engineOperation, true);
       }
-      await this.deps.business().plan(task.taskId, task.version, plan);
+      await this.deps.business().plan(task.taskId, task.version, plan, body.final_summary);
     }
     else if (body.kind === "apply") {
       if (typeof body.applicable !== "boolean" || typeof body.success !== "boolean" || typeof body.summary !== "string") fail(422, "执行回报格式无效");
-      await this.deps.business().finishApply(task.taskId, task.version, { applicable: body.applicable, success: body.success, summary: body.summary });
+      await this.deps.business().finishApply(task.taskId, task.version, { applicable: body.applicable, success: body.success, summary: body.summary }, body.final_summary);
     } else if (body.kind === "blocked" && typeof body.summary === "string") {
       if (task.simulation && body.reason === "user_continued") await this.deps.business().assessSimulation(task.taskId, task.version,
-        { decision: "user_continued", summary: body.summary, evidence_ids: body.evidence_ids as string[] });
+        { decision: "user_continued", summary: body.summary, evidence_ids: body.evidence_ids as string[] }, body.final_summary);
       else if (body.reason === "user_continued") await this.deps.business().finishForUserContinuation(task.taskId, task.version,
-        { summary: body.summary, evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId });
+        { summary: body.summary, evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId }, body.final_summary);
       else if (body.reason === "mcp_permission_required") await this.deps.business().finishForMcpPermission(task.taskId, task.version,
-        { summary: body.summary, evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId });
+        { summary: body.summary, evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId }, body.final_summary);
       else if (body.reason === "target_unavailable") await this.deps.business().finishForTargetUnavailable(task.taskId, task.version,
-        { summary: body.summary, evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId });
+        { summary: body.summary, evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId }, body.final_summary);
       else if (body.reason !== undefined) fail(422, "未知的结束原因。普通受阻请省略 reason，保留 kind=blocked、当前 phase 和原因 summary；不要改为 message 决策。user_continued 仅用于已核实的用户续聊，target_unavailable 需要 Provider 明确的目标不可用证据；mcp_permission_required 仅用于已核实、需 Owner 自行处理的 MCP 服务权限问题。");
-      else await this.deps.business().executionFailure(task.taskId, redactPersistableText(body.summary, 8000), task.execution!.executionId);
+      else await this.deps.business().executionFailure(task.taskId, redactPersistableText(body.summary, 8000), task.execution!.executionId, false, body.final_summary);
     }
     else fail(422, "未知业务回报类型");
     return { ok: true };

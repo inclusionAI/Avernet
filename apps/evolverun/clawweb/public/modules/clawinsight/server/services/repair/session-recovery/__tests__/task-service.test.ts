@@ -214,3 +214,46 @@ it("persists the service instance identity and fences later requests from switch
   await expect(service.create({ ...input, target: { ...input.target, runtime_identity: { ...runtimeIdentity, deviceUuid: "DEVICE-" + "b".repeat(32) } } }, actor)).rejects.toMatchObject({ status: 409 });
   expect(recoveryTargetSnapshot({ ...target, deviceUuid: "DEVICE-" + "b".repeat(32) }).fingerprint).not.toBe(task.runtimeTarget!.fingerprint);
 });
+
+describe("task final summary", () => {
+  it.each(["recovered", "not_recovered"] as const)("saves the overall summary with a terminal %s judgment and exposes it in detail", async effect => {
+    const { service, records } = setup();
+    const { task_id } = await service.create(request, actor);
+    const value = records.get(task_id)!;
+    value.phase = "verify";
+    value.evidence = [{ evidence_id: "proof", tool_call_id: "read", source: "session_read", location: "line:1", excerpt: "原任务执行结果" }];
+    const finalSummary = "用户要读取文档并总结。核实后发现调用格式错误，已通过恢复消息纠正调用；原任务的实际进展见结果。";
+    await service.observe(task_id, value.version, { delivery: "confirmed", response: "acted", effect, summary: "完整的效果判断与证据", evidence_ids: ["proof"] }, [], finalSummary);
+    expect((await service.detail(task_id, actor)).final_summary).toBe(finalSummary);
+    expect(records.get(task_id)!.judgment?.summary).toBe("完整的效果判断与证据");
+  });
+  it("does not publish a first-stage summary as the final task summary", async () => {
+    const { service, records } = setup();
+    const { task_id } = await service.create(request, actor);
+    const value = records.get(task_id)!; value.phase = "observe";
+    value.evidence = [{ evidence_id: "proof", tool_call_id: "read", source: "session_read", location: "line:1", excerpt: "原任务仍受阻" }];
+    await service.observe(task_id, value.version, { delivery: "unconfirmed", response: "none", effect: "not_recovered", summary: "需要完整方案", evidence_ids: ["proof"] }, [], "尚未执行的初步判断");
+    expect(records.get(task_id)!.phase).toBe("plan");
+    expect(records.get(task_id)!.final_summary).toBeUndefined();
+  });
+  it.each([undefined, "", 42, "x".repeat(2001), ["Authorization:", "Bearer", "unit-test"].join(" ")])("keeps the main result when optional summary is invalid: %s", async finalSummary => {
+    const { service, records } = setup();
+    const { task_id } = await service.create(request, actor);
+    const value = records.get(task_id)!; value.phase = "verify";
+    value.evidence = [{ evidence_id: "proof", tool_call_id: "read", source: "session_read", location: "line:1", excerpt: "结果" }];
+    await service.observe(task_id, value.version, { delivery: "unconfirmed", response: "unknown", effect: "recovered", summary: "原任务已继续", evidence_ids: ["proof"] }, [], finalSummary);
+    expect(records.get(task_id)!).toMatchObject({ status: "completed", judgment: { effect: "recovered" } });
+    expect(records.get(task_id)!.final_summary).toBeUndefined();
+  });
+});
+
+it("clears a paused summary when the same task resumes observation", async () => {
+  const { service, records } = setup();
+  const { task_id } = await service.create(request, actor);
+  const value = records.get(task_id)!; value.phase = "observe"; value.observationDeadlineAt = 99;
+  await service.observe(task_id, value.version, { delivery: "unconfirmed", response: "unknown", effect: "unknown", summary: "等待新的执行证据", evidence_ids: [] }, [], "已发送指引，观察到期仍无法核实原任务恢复，等待后续证据。");
+  expect(records.get(task_id)!).toMatchObject({ status: "waiting_effect", final_summary: expect.stringContaining("等待后续证据") });
+  await service.resume(task_id);
+  expect(records.get(task_id)!).toMatchObject({ status: "running", requiresFreshObservation: true });
+  expect(records.get(task_id)!.final_summary).toBeUndefined();
+});
