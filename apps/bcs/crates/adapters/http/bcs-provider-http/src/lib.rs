@@ -2747,12 +2747,12 @@ Connection: keep-alive\r\n\
             after: None,
             limit: None,
             timeout_ms: 1_000,
-            extensions: Some(serde_json::json!({"caller_execution_token":{"type":"iam-token","token":"synthetic-caller-marker"}, "other":"keep"})),
+            extensions: Some(serde_json::json!({"caller_execution_token":{"type":"iam-token","token":"test-token"}, "other":"keep"})),
         };
 
         let logged = provider_body_log(&body);
 
-        assert!(!logged.contains("synthetic-caller-marker"));
+        assert!(!logged.contains("test-token"));
         assert!(logged.contains("keep"));
         assert!(logged.contains("\"url\":\"<redacted>\""));
         assert!(!logged.contains("token=secret"));

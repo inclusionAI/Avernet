@@ -15,7 +15,7 @@ async fn caller_extensions_reach_callback_and_sse_without_replacing_provider_aut
         transport.set_ingest(Arc::new(RecordingMessageFlow::default()), Arc::new(RecordingRunContext::default()));
         let extensions = json!({
             "caller_context": {"subject": {"kind": "human", "ref": "staff-1"}},
-            "caller_execution_token": {"type": "iam-token", "token": "synthetic-caller-marker"},
+            "caller_execution_token": {"type": "iam-token", "token": "test-token"},
             "caller_wait_mode": "detached"
         });
         let result = transport.deliver(BotDeliveryCommand {
@@ -33,7 +33,7 @@ async fn caller_extensions_reach_callback_and_sse_without_replacing_provider_aut
         assert_eq!(request.authorization.as_deref(), Some("Bearer secret-b2p"));
         assert_eq!(request.body["extensions"], extensions);
         assert_eq!(request.transport.as_deref(), Some(if sse { "sse" } else { "callback" }));
-        assert!(!request.body["message"].to_string().contains("synthetic-caller-marker"));
+        assert!(!request.body["message"].to_string().contains("test-token"));
         server.abort();
     }
 }

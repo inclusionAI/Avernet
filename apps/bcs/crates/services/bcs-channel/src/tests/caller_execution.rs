@@ -23,7 +23,7 @@ async fn caller_binding_create_update_and_runtime_reject_group() -> TestResult {
     // Bypass the management API to simulate malformed existing configuration.
     harness.binding_repo.set_config(&binding.id, config).await?;
     let mut message = inbound("conv", "u1", None, "msg");
-    message.execution_token = Some(ExecutionToken::new("private-marker".into(), "iam-token".into()));
+    message.execution_token = Some(ExecutionToken::new("test-token".into(), "iam-token".into()));
     let error = harness.service.handle_inbound(message).await.unwrap_err();
     assert_eq!(error.kind, ChannelInboundFailureKind::CallerExecutionUnavailable);
     assert!(harness.message_flow.web_sends.lock().await.is_empty());
@@ -40,19 +40,19 @@ async fn caller_bot_binding_supports_dm_and_at_group_and_does_not_change_default
             let mut message = if group_chat { group_inbound("conv", "u1", None, "msg", true) }
                 else { inbound("conv", "u1", None, "msg") };
             message.is_at_bot = group_chat;
-            message.execution_token = Some(ExecutionToken::new("private-marker".into(), "iam-token".into()));
+            message.execution_token = Some(ExecutionToken::new("test-token".into(), "iam-token".into()));
             harness.service.handle_inbound(message).await?;
             let sends = harness.message_flow.web_sends.lock().await;
             assert_eq!(sends.len(), 1);
             assert_eq!(sends[0].caller_execution.is_some(), caller);
             if let Some(context) = &sends[0].caller_execution {
-                assert_eq!(context.token.expose(), "private-marker");
+                assert_eq!(context.token.expose(), "test-token");
                 assert_eq!(context.user_id, "u1");
                 assert_eq!(context.binding_id, binding.id);
                 assert_eq!(context.target_bot_id, "target_bot");
                 assert_eq!(context.source_message_id, "msg");
             }
-            assert!(!format!("{:?}", sends[0]).contains("private-marker"));
+            assert!(!format!("{:?}", sends[0]).contains("test-token"));
         }
     }
     Ok(())
