@@ -122,9 +122,15 @@ describe('TaskPanelV2 壳', () => {
     expect(screen.getByText(/节点数据缺失/)).toBeTruthy();
   });
 
-  it('顶部不再渲染旧任务标题与任务切换器', () => {
+  it('多任务切换器槽位渲染在「任务总览」上方', () => {
     render(<TaskPanelV2 {...baseProps({ switcher: <div data-testid="switcher-bar">bar</div> })} />);
-    expect(screen.queryByTestId('switcher-bar')).toBeNull();
+    const switcherNode = screen.getByTestId('switcher-bar');
+    const overviewTitle = screen.getByText('任务总览');
+    expect(switcherNode.compareDocumentPosition(overviewTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('未注入多任务切换器时顶部仍直接展示「任务总览」', () => {
+    render(<TaskPanelV2 {...baseProps()} />);
     const overviewTitle = screen.getByText('任务总览');
     expect(overviewTitle).toBeTruthy();
     expect(overviewTitle.closest('[data-task-panel-root]')?.getAttribute('data-task-panel-root')).toBe('true');

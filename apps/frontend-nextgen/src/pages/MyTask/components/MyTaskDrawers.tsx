@@ -1,10 +1,10 @@
 import { TaskPanel } from '@/assets/TaskPanel';
-import { TaskSwitcherBar } from '@/assets/TaskPanel/v2/TaskSwitcherBar';
+import { TaskSwitcherControl } from '@/assets/TaskPanel/v2/TaskSwitcherControl';
 import { Drawer, DrawerContent } from '@/components/ui/Drawer';
 import { Empty } from '@/components/ui/Empty';
 import type { TaskListItem } from '@/domain/tasks/models';
 import { useTaskPanelNavBinding } from '@/hooks/taskPanelNavBinding';
-import { toSwitcherItem } from '@/hooks/useTaskSwitcherTasks';
+import { useTaskSwitcherTasks } from '@/hooks/useTaskSwitcherTasks';
 import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import type { ScheduledRoutineRecord, ScheduledRoutineRunRecord } from '@/services/scheduledTasks';
 import { TASK_API_BASE, TASK_READ_API_BASE } from '@/services/tasks/taskConfig';
@@ -58,8 +58,12 @@ export function MyTaskDrawers({
   // V2 导航按 taskId 分片缝合 taskSidePanelStore(抽屉/聊天两挂载点共享导航语义)。
   const navBinding = useTaskPanelNavBinding(selectedTaskId ?? '');
   const nav = selectedTaskId ? navBinding : undefined;
-  // V2 多任务切换条:记录列表已在宿主侧加载,同映射复用;切换由宿主(setSelectedTaskId)承载。
-  const switcherItems = useMemo(() => (taskRecords ?? []).map(toSwitcherItem), [taskRecords]);
+  // V2 多任务切换条:独立读取全量任务并按 selectedTaskId 的主会话过滤，
+  // 避免只用列表当前分页或把其它会话任务混入切换菜单。
+  const { items: switcherItems } = useTaskSwitcherTasks(ownerUserId, {
+    currentTaskId: selectedTaskId ?? undefined,
+    enabled: Boolean(selectedTaskId),
+  });
   const handleSelectTask = useMemo(() => {
     if (!onSelectTask) return undefined;
     return (taskId: string) => {
@@ -68,8 +72,12 @@ export function MyTaskDrawers({
     };
   }, [onSelectTask]);
   const switcher =
-    switcherItems.length && handleSelectTask ? (
-      <TaskSwitcherBar items={switcherItems} activeTaskId={selectedTaskId ?? switcherItems[0].taskId} onSelectTask={handleSelectTask} />
+    switcherItems.length > 1 && handleSelectTask ? (
+      <TaskSwitcherControl
+        items={switcherItems}
+        activeTaskId={selectedTaskId ?? switcherItems[0].taskId}
+        onSelectTask={handleSelectTask}
+      />
     ) : null;
   const selectedTask = selectedTaskId ? taskRecords.find((record) => record.task_id === selectedTaskId) : null;
   const taskInfoFallback = selectedTask
