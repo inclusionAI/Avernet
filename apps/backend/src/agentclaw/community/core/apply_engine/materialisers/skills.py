@@ -207,7 +207,7 @@ class SkillsMaterialiser(Materialiser):
 
         planned = [
             (
-                PlannedEntry(intent, EntryOutcome.SKIPPED.value)
+                PlannedEntry(intent, EntryOutcome.SKIPPED.value, reason=intent.value.reason)
                 if isinstance(intent.value, _NotDelivered)
                 else PlannedEntry(
                     intent,
@@ -247,7 +247,7 @@ class SkillsMaterialiser(Materialiser):
                 if isinstance(package, _NotDelivered):
                     results.append(
                         EntryResult(
-                            self.construct, planned.intent.identity, EntryOutcome.SKIPPED, reason=package.reason
+                            self.construct, planned.intent.identity, EntryOutcome.SKIPPED, reason=planned.reason
                         )
                     )
                     continue

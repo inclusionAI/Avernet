@@ -52,8 +52,8 @@ class ConfigManifestApplyEntry(BaseModel):
     )
     action: str = Field(
         description="`created` / `updated` / `unchanged` / `skipped` / `failed`. "
-        "`skipped` means the entry was not written because its category was "
-        "aborted — never that it was optional."
+        "`skipped` means the entry was not written: its category was aborted, or its "
+        "materialiser declined to deliver it (`error` says which) — never that it was optional."
     )
     error: str | None = Field(
         default=None, description="Why, when `action` is `failed` or `skipped`."

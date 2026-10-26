@@ -519,7 +519,17 @@ def test_a_non_local_skill_is_skipped_not_failed_and_not_removed(caplog):
     assert any("does not deliver" in record.getMessage() and "3103" in record.getMessage() for record in caplog.records)
     plan = _run(raw.plan(ctx, resolved.intents))
     assert [(p.intent.identity, p.outcome, p.requires_write) for p in plan.entries] == [("triage", "skipped", False)]
+    assert "3103" in (plan.entries[0].reason or "")
     assert plan.removals == ()
+    assert plan.is_noop, "a deliberate skip writes nothing, so a plan of skips alone is a no-op"
+    # The dry run's projection keeps the reason: the skip is known before any write.
+    from agentclaw.community.core.apply_engine.orchestrator import ApplyOrchestrator
+
+    projected = ApplyOrchestrator({}, steps=lambda phase: ())._projected(raw.construct, plan)
+    assert [(e.identity, e.outcome.value, "3103" in (e.reason or "")) for e in projected.entries] == [
+        ("triage", "skipped", True)
+    ]
+    assert projected.aborted is False
     written = _run(raw.write(ctx, plan))
     assert [(entry.identity, entry.outcome.value) for entry in written] == [("triage", "skipped")]
     assert "3103" in (written[0].reason or "")

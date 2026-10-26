@@ -65,13 +65,15 @@ class EntryOutcome(StrEnum):
     Consumed by: ``outcomes.derive_status``, and ``EntryResult.as_dict`` as the
     wire field ``action``.
 
-    ``SKIPPED`` means *"not written because its category was aborted"* — the
-    all-or-nothing rule refusing to write a partial set. It does not mean "the
-    author allowed this one to be missing": under category overwrite, "skip
-    this entry" would mean "delete it", the opposite of the name.
-
-    The entry that *caused* an abort is ``FAILED``; its blameless neighbours in
-    the same category are ``SKIPPED``.
+    ``SKIPPED`` means *"not written"*, for one of two stated reasons: the
+    category was aborted (the all-or-nothing rule refusing to write a partial
+    set; the entry that *caused* the abort is ``FAILED``, its blameless
+    neighbours ``SKIPPED``), or the materialiser declined to deliver the entry
+    (a skill origin this build does not deliver; its name still counts as
+    declared, so nothing of that name is removed). The entry's ``reason`` says
+    which. It never means "the author allowed this one to be missing": under
+    category overwrite, "skip this entry" would mean "delete it", the opposite
+    of the name.
     """
 
     CREATED = "created"

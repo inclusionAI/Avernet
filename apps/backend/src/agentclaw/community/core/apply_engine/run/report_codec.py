@@ -37,9 +37,10 @@ def report_from_payload(
     """Rebuild the in-memory report from what was stored.
 
     The stored JSON is the wire shape, so this is its inverse. Entry outcomes
-    round-trip through the enum rather than being carried as raw strings: a
-    value the enum does not know is a corrupted row, and failing here is better
-    than serving it onward as if it meant something.
+    round-trip through the enum rather than being carried as raw strings, and
+    so do the source modes: a value an enum does not know is a corrupted row,
+    and failing here is better than serving it onward as if it meant something
+    (a silently dropped ``strict`` mode would disarm the pin it records).
     """
     categories: list[CategoryResult] = []
     by_category: dict[str, list[EntryResult]] = {}
@@ -90,7 +91,7 @@ def report_from_payload(
                 name=source.get("name", ""),
                 url=source.get("url"),
                 ref=source.get("ref"),
-                mode=_source_mode(source.get("mode")),
+                mode=SourceMode(source["mode"]) if source.get("mode") is not None else None,
                 resolved_sha=source.get("resolved_sha"),
                 auth=source.get("auth"),
             )
@@ -98,19 +99,6 @@ def report_from_payload(
         ),
         notes=tuple(str(note) for note in payload.get("notes") or ()),
     )
-
-
-def _source_mode(value: Any) -> SourceMode | None:
-    """The stored mode, or ``None`` for a row that carries none or one outside the enum.
-
-    ``None`` is what the baselines already treat as "no opinion" for that
-    row; refusing the whole report over one unreadable mode would hide every
-    other row of the bot's apply history.
-    """
-    try:
-        return SourceMode(value) if value is not None else None
-    except ValueError:
-        return None
 
 
 def _construct_of(name: Any) -> Category | Section | None:

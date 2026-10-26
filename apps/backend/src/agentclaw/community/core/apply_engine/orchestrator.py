@@ -268,15 +268,16 @@ class ApplyOrchestrator:
         """A dry run's answer: the plan, shaped as the result it predicts.
 
         Each :class:`~...registry.PlannedEntry` becomes an
-        :class:`~...outcomes.EntryResult` carrying the same outcome, with no
-        ``reason`` and no ``note`` — a projection cannot know what a write
-        would have reported. ``aborted`` is ``False``: a plan that could be
-        computed is not a failure.
+        :class:`~...outcomes.EntryResult` carrying the same outcome and no
+        ``note`` — a projection cannot know what a write would have reported.
+        A planned ``skipped`` keeps the reason its materialiser gave, since
+        that is known before any write. ``aborted`` is ``False``: a plan that
+        could be computed is not a failure.
         """
         return CategoryResult(
             construct=construct,
             entries=tuple(
-                EntryResult(construct, planned.intent.identity, EntryOutcome(planned.outcome))
+                EntryResult(construct, planned.intent.identity, EntryOutcome(planned.outcome), reason=planned.reason)
                 for planned in plan.entries
             ),
             removals=plan.removals,

@@ -223,6 +223,9 @@ class PlannedEntry:
     #: Internal convergence can require a source transition even when the
     #: public effective state remains unchanged (for example SkillSet → Direct).
     requires_write: bool = False
+    #: Why, for a planned ``"skipped"``: the materialiser's reason, carried into
+    #: the dry-run projection and its own ``write`` result. ``None`` otherwise.
+    reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -272,7 +275,7 @@ class CategoryPlan:
         writes**, and that is observable only if the plan can say so.
         """
         return not (self.removal_writes if self.removal_writes is not None else self.removals) and all(
-            entry.outcome == "unchanged" and not entry.requires_write
+            entry.outcome in ("unchanged", "skipped") and not entry.requires_write
             for entry in self.entries
         )
 
