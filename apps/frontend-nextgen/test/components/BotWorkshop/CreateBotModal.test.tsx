@@ -271,9 +271,8 @@ test('归属空间可选择，提供服务沿原引擎能力', () => {
   expect(baseRow).toHaveClass('grid', 'sm:grid-cols-2');
   expect(serviceLabel.closest('.grid')).toBe(baseRow);
 
-  // 归属空间：只读展示当前空间，非下拉
-  expect(screen.getByText('当前研发空间')).toBeInTheDocument();
-  expect(screen.getByRole('combobox', { name: '归属空间' })).toHaveValue('10002');
+  // 归属空间：使用统一 Select 显示当前值并允许选择。
+  expect(screen.getByRole('combobox', { name: '归属空间' })).toHaveTextContent('当前研发空间');
   expect(screen.getByRole('combobox', { name: '归属空间' })).toBeEnabled();
 
   // 提供服务：开关字段
@@ -322,7 +321,8 @@ test('详情入口固定专家，202后留弹窗等待原任务，Apply成功后
     />,
   );
   expect(screen.queryByRole('button', { name: '空白创建' })).not.toBeInTheDocument();
-  fireEvent.change(screen.getByRole('combobox', { name: '归属空间' }), { target: { value: '20' } });
+  fireEvent.keyDown(screen.getByRole('combobox', { name: '归属空间' }), { key: 'Enter' });
+  fireEvent.click(screen.getByRole('option', { name: '研发空间' }));
   fireEvent.click(screen.getByRole('button', { name: '创建云端 Bot' }));
   fireEvent.click(screen.getByRole('button', { name: '创建云端 Bot' }));
   await screen.findByText('Bot 创建及配置已完成');
