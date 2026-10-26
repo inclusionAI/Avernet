@@ -1702,32 +1702,6 @@ impl A2aChatRunService for NoopA2aChatRunService {
     }
 }
 
-pub struct NoopGroupProposalService;
-
-#[async_trait]
-impl GroupProposalService for NoopGroupProposalService {
-    async fn create_proposal(
-        &self,
-        _cmd: GroupProposalCreateCommand,
-    ) -> Result<GroupProposalCreateResult, GroupUseCaseError> {
-        Err(service_not_configured("group proposal service").into())
-    }
-
-    async fn confirm_proposal(
-        &self,
-        _cmd: GroupProposalConfirmCommand,
-    ) -> Result<GroupProposalConfirmResult, GroupUseCaseError> {
-        Err(service_not_configured("group proposal service").into())
-    }
-
-    async fn preview_proposal(
-        &self,
-        _cmd: GroupProposalPreviewCommand,
-    ) -> Result<GroupProposalPreviewResult, GroupUseCaseError> {
-        Err(service_not_configured("group proposal service").into())
-    }
-}
-
 pub struct NoopGroupQueryService;
 
 #[async_trait]

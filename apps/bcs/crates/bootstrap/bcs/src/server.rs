@@ -6916,10 +6916,6 @@ impl IntoResponse for crate::BcsError {
                 StatusCode::BAD_REQUEST,
                 format!("Invalid frame format: {}", msg),
             ),
-            Self::ProposalNotFound(id) => (
-                StatusCode::NOT_FOUND,
-                format!("Proposal not found or expired: {}", id),
-            ),
             Self::BotDirectoryNotFound(path) => (
                 StatusCode::NOT_FOUND,
                 format!("Bot directory not found: {}", path),

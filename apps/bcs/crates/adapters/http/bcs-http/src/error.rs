@@ -64,7 +64,6 @@ impl HttpAdapterError {
             Self::Service(ServiceError::SessionInvalidParams(_)) => StatusCode::BAD_REQUEST,
             Self::Service(ServiceError::MessageLimitReached(_)) => StatusCode::TOO_MANY_REQUESTS,
             Self::Service(ServiceError::ProviderNotFound(_)) => StatusCode::NOT_FOUND,
-            Self::Service(ServiceError::ProposalNotFound(_)) => StatusCode::NOT_FOUND,
             Self::Service(ServiceError::FriendRequestNotFound(_)) => StatusCode::NOT_FOUND,
             Self::Service(ServiceError::BotNotRegistered(_)) => StatusCode::NOT_FOUND,
             Self::Service(ServiceError::BotNotConnected(_)) => StatusCode::SERVICE_UNAVAILABLE,

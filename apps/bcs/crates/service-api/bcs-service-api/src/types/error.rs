@@ -32,9 +32,6 @@ pub enum ServiceError {
     #[error("Group '{0}' not found")]
     GroupNotFound(String),
 
-    /// Proposal not found.
-    #[error("Proposal '{0}' not found or expired")]
-    ProposalNotFound(String),
 
     /// Invalid operation on a specific request.
     #[error("Invalid operation on request {request_id}: {message}", request_id = request_id.as_deref().unwrap_or("unknown"))]
@@ -177,7 +174,6 @@ impl ServiceError {
                 serde_json::json!({ "bot_id": bot_id, "method": method })
             }
             Self::GroupNotFound(id) => serde_json::json!({ "group_id": id }),
-            Self::ProposalNotFound(id) => serde_json::json!({ "proposal_id": id }),
             Self::InvalidOperation { message, request_id } => {
                 serde_json::json!({ "message": message, "request_id": request_id })
             }
