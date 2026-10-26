@@ -245,6 +245,10 @@ def client(
     class _M(Module):
         def configure(self, binder):
             binder.bind(BotServiceProtocol, to=svc)
+            from agentclaw.community.core.bot_inventory.protocols import BotInventoryTemplatePort
+            templates = MagicMock()
+            templates.list_template_configs_by_bot_ids.return_value = {}
+            binder.bind(BotInventoryTemplatePort, to=templates)
             binder.bind(BotQuotaServiceProtocol, to=quota)
             binder.bind(BotSpaceServiceProtocol, to=bot_space)
             binder.bind(PolicyServiceProtocol, to=policy)
@@ -427,6 +431,10 @@ def test_list_bots_survives_a_space_resolution_refusal(svc, startup_script):
         def configure(self, binder):
             binder.bind(BotServiceProtocol, to=svc)
             binder.bind(BusinessSpaceContextProtocol, to=_RefusingSpace())
+            from agentclaw.community.core.repository.protocols.bot import BotRepository
+            from agentclaw.community.core.bot_inventory.protocols import BotInventoryTemplatePort
+            binder.bind(BotRepository, to=MagicMock())
+            binder.bind(BotInventoryTemplatePort, to=MagicMock())
 
     app = FastAPI()
     app.include_router(router)
@@ -500,6 +508,9 @@ def test_search_bot_metadata_returns_only_display_fields(client, svc):
                 "engine": "teclaw",
                 "bot_type": "personal",
                 "status": "ACTIVE",
+                "online_available": None,
+                "live_version": None,
+                "conversation_stage": "draft",
             }
         ],
     }

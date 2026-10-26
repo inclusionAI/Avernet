@@ -48,6 +48,8 @@ from agentclaw.community.core.expert_chat.services.expert_chat_owned_session imp
     ExpertChatOwnedSessionMixin,
 )
 from agentclaw.community.core.expert_chat.services.bot_lookup import ExpertChatBotLookupMixin
+from agentclaw.community.core.expert_chat.services.chat_stage import ExpertChatStageMixin
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterTransport,
@@ -108,7 +110,7 @@ class BotInfoProvider(Protocol):
 # ============ Service Implementation ============
 
 
-class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMixin, ExpertChatServiceProtocol):
+class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMixin, ExpertChatStageMixin, ExpertChatServiceProtocol):
     """用户与专家Bot对话业务逻辑"""
 
     @inject
@@ -122,6 +124,7 @@ class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, E
         collaborator_service: CollaboratorService,
         transport: DeviceAdapterTransport,
         instance_service: ExpertChatInstanceService,
+        publish_repository: BotPublishRepositoryProtocol,
     ):
         """Initialise.
 
@@ -151,6 +154,7 @@ class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, E
         self._collaborator_service = collaborator_service
         self._transport = transport
         self._instance_service = instance_service
+        self._publish_repository = publish_repository
 
     # ============ Public Methods ============
 
@@ -185,7 +189,11 @@ class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, E
             raise BotNotActiveError(f"Bot未激活: {bot_id}")
 
         # 2. 校验 Bot 是否已绑定设备
-        binding_id = bot.get("binding_id")
+        binding_id = (
+            self._online_chat_binding(bot)
+            if bot.get("bot_type") == "service"
+            else bot.get("binding_id")
+        )
         if not binding_id:
             logger.warning(f"[ExpertChatService] Bot not bound to device: {bot_id}")
             raise BotNotPublishedError(f"Bot未绑定设备: {bot_id}")

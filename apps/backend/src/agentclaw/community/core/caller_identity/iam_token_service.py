@@ -74,6 +74,7 @@ class CallerIamTokenService(CallerIamTokenServiceProtocol):
         entity_id: str | None,
         is_test_exchange: bool,
         session_key: str | None = None,
+        friend_user_id: str | None = None,
     ) -> CallerIamTokenOutcome:
         if not iam_token:
             return CallerIamTokenOutcome(iam_token="", error="IAM_TOKEN cookie not found")
@@ -103,6 +104,8 @@ class CallerIamTokenService(CallerIamTokenServiceProtocol):
             return CallerIamTokenOutcome(iam_token="", error=CALLER_CREDENTIAL_REQUEST_INVALID)
         try:
             identity = await self._auth_plugin.resolve_user_from_request(auth_request)
+            if friend_user_id is not None and identity.staffId != friend_user_id:
+                raise CallerIdentityPermissionError
             if is_test_exchange:
                 self._caller_identity.authorize_iam_token_exchange(
                     caller_user_id=identity.staffId,
@@ -125,13 +128,27 @@ class CallerIamTokenService(CallerIamTokenServiceProtocol):
                 logger.info("caller_token_exchange_succeeded bot_id=%s stage=%s", bot_id, stage.value)
                 return CallerIamTokenOutcome(iam_token=iam_token)
 
-            targets = await asyncio.to_thread(
-                self._resolve_refresh_targets,
-                bot_id=bot_id,
-                owner_id=context.owner_id,
-                actor_user_id=identity.staffId,
-                stage=stage,
-            )
+            if friend_user_id is not None:
+                # The delivery boundary verified friendship and session ownership.
+                # Refresh only this caller's chat instance, never the owner's
+                # service (even when the caller also happens to own the Bot).
+                target = await asyncio.to_thread(
+                    self._runtime_bindings.resolve,
+                    RuntimeBindingRequest(
+                        bot_id=bot_id, owner_id=context.owner_id,
+                        actor_user_id=friend_user_id, stage=stage.value,
+                        target=RuntimeBindingTarget.CALLER_INSTANCE,
+                    ),
+                )
+                targets = [target]
+            else:
+                targets = await asyncio.to_thread(
+                    self._resolve_refresh_targets,
+                    bot_id=bot_id,
+                    owner_id=context.owner_id,
+                    actor_user_id=identity.staffId,
+                    stage=stage,
+                )
             for target in targets:
                 await asyncio.to_thread(
                     self._session_validator.validate, bot_id=bot_id,

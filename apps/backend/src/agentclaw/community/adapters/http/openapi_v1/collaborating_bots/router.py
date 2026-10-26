@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Annotated, Any
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import RuntimeStage
 
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 from agentclaw.community.adapters.http.openapi_v1.clusters import cluster_for_engine
@@ -26,7 +27,7 @@ from agentclaw.community.core.bot_inventory.protocols import (
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.di import Injected
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 
 from .schemas import CollaboratingBot, CollaborationSummary
 
@@ -108,6 +109,7 @@ async def list_collaborating_bots(
     page_params: PageParamsDep,
     user_id: UserIdDep,
     caller: ActingCallerDep,
+    stage: Annotated[RuntimeStage | None, Query(description="Filter service Bots by runtime stage before pagination. Other Bot kinds are unchanged; omission preserves the unfiltered listing.")] = None,
     bot_repo: BotRepository = Injected(BotRepository),
     collaborators: CollaboratorServiceProtocol = Injected(
         CollaboratorServiceProtocol
@@ -141,6 +143,7 @@ async def list_collaborating_bots(
         entity_pairs=list(granted_pairs) if granted_pairs is not None else None,
         page=page_params.page,
         page_size=page_params.page_size,
+        **({"stage": stage.value} if stage is not None else {}),
     )
     template_configs, row_spaces = await asyncio.gather(
         asyncio.to_thread(_resolve_template_configs, rows, template_port),

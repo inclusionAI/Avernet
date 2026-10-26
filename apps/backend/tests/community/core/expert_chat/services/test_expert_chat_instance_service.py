@@ -147,8 +147,8 @@ def _make_service(
 def _wire_publish(publish_repo, record=None):
     """Wire publish_repo to return a success publish record."""
     publish_record = record or MockPublishRecord()
-    publish_repo.get_by_publish_bot_id = MagicMock(
-        return_value=publish_record
+    publish_repo.list_by_source_bot = MagicMock(
+        return_value=[publish_record]
     )
     publish_repo.get_by_id = MagicMock(return_value=publish_record)
 
@@ -276,13 +276,13 @@ class TestResolveBuildArtifact:
     def test_no_success_publish_raises_not_published(self):
         """Lines 267, 271: No success publish record raises BotNotPublishedError."""
         svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
-        publish_repo.get_by_publish_bot_id = MagicMock(return_value=None)
+        publish_repo.list_by_source_bot = MagicMock(return_value=[])
 
         with pytest.raises(BotNotPublishedError) as exc_info:
             svc._resolve_build_artifact(BOT_ID, OWNER_ID)
 
         assert "no success publish order" in str(exc_info.value).lower()
-        publish_repo.get_by_publish_bot_id.assert_called_once()
+        publish_repo.list_by_source_bot.assert_called_once()
 
     def test_success_returns_record_and_migration_path(self):
         """Successful resolution returns (record, migration_path)."""
@@ -292,7 +292,7 @@ class TestResolveBuildArtifact:
             version=2,
             ext={"migration_path": "/nas/custom/path"}
         )
-        publish_repo.get_by_publish_bot_id = MagicMock(return_value=record)
+        publish_repo.list_by_source_bot = MagicMock(return_value=[record])
 
         result_record, migration_path = svc._resolve_build_artifact(BOT_ID, OWNER_ID)
 
@@ -305,7 +305,7 @@ class TestResolveBuildArtifact:
         record = MockPublishRecord(id=789, version=1, ext=None)
         # Override __post_init__ effect
         record.ext = None
-        publish_repo.get_by_publish_bot_id = MagicMock(return_value=record)
+        publish_repo.list_by_source_bot = MagicMock(return_value=[record])
 
         result_record, migration_path = svc._resolve_build_artifact(BOT_ID, OWNER_ID)
 
@@ -318,7 +318,7 @@ class TestResolveBuildArtifact:
         record = MockPublishRecord(id=999, version=None, ext={"migration_path": "/nas/path"})
         # Ensure version is None
         record.version = None
-        publish_repo.get_by_publish_bot_id = MagicMock(return_value=record)
+        publish_repo.list_by_source_bot = MagicMock(return_value=[record])
 
         result_record, migration_path = svc._resolve_build_artifact(BOT_ID, OWNER_ID)
 
@@ -689,7 +689,7 @@ class TestGetCallerConnection:
         instance_repo.upsert_instance = MagicMock(
             return_value={"id": 1, "status": "init", "ext": None}
         )
-        publish_repo.get_by_publish_bot_id = MagicMock(return_value=None)
+        publish_repo.list_by_source_bot = MagicMock(return_value=[])
 
         with pytest.raises(BotNotPublishedError):
             await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID)
@@ -1387,7 +1387,7 @@ class TestGetCallerConnectionEdgeCases:
             },
         )
         record.version = None
-        publish_repo.get_by_publish_bot_id = MagicMock(return_value=record)
+        publish_repo.list_by_source_bot = MagicMock(return_value=[record])
         publish_repo.get_by_id = MagicMock(return_value=record)
         ws_info = _make_ws_info()
         baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)

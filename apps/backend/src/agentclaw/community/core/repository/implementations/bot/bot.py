@@ -45,8 +45,8 @@ from typing import Any, Dict, List, Optional
 from injector import inject
 from agentclaw.community.core.repository.implementations.bot.mutations import (
     BotMutationRepositoryMixin,
-    _UPDATE_ALLOWED_FIELDS,
-    _JSON_FIELDS,
+    _UPDATE_ALLOWED_FIELDS as _UPDATE_ALLOWED_FIELDS,
+    _JSON_FIELDS as _JSON_FIELDS,
 )
 from sqlalchemy import DateTime, and_, func, or_, select, type_coerce
 
@@ -356,6 +356,7 @@ class BotRepository(
         page: int = 1,
         page_size: int = 20,
         bot_ids: Optional[List[str]] = None,
+        stage: str | None = None,
     ) -> tuple[int, List[Dict[str, Any]]]:
         with self._db.orm_session() as db:
             query = db.query(self.Model).filter(self.Model.is_delete == 0, self._env())
@@ -386,6 +387,10 @@ class BotRepository(
                 query = query.filter(self.Model.active_engine == engine)
             if status:
                 query = query.filter(self.Model.status == status)
+            if stage is not None:
+                from .stage_catalog import apply_stage_filter
+
+                query = apply_stage_filter(db, query, self.Model, stage)
             total = query.count()
             bots = (
                 query.order_by(self.Model.gmt_create.desc())
@@ -460,7 +465,9 @@ class BotRepository(
                 .limit(page_size)
                 .all()
             )
-            return total, [bot.to_dict() for bot in bots]
+            from .stage_catalog import attach_stage_metadata
+
+            return total, attach_stage_metadata(db, bots)
 
     def list_by_search(
         self,

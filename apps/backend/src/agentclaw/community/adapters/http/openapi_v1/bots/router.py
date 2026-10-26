@@ -58,6 +58,9 @@ from agentclaw.community.adapters.http.openapi_v1.creation_grant import (
     withdraw_the_creation_grant,
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import OwnerIdDep
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import RuntimeStage
+from .dependencies_stage_listing import list_stage_bots
+from agentclaw.community.core.bot_inventory.protocols import BotInventoryTemplatePort
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     accepted,
     created,
@@ -294,6 +297,9 @@ def _to_bot_metadata(d: dict[str, Any]) -> BotMetadata:
         engine=d.get("active_engine") or "",
         bot_type=d.get("bot_type") or "",
         status=d.get("status") or "",
+        online_available=d.get("online_available"),
+        live_version=d.get("live_version"),
+        conversation_stage=d.get("conversation_stage") or "draft",
     )
 
 
@@ -570,6 +576,7 @@ async def list_bots(
     page_params: PageParamsDep,
     owner_id: UserIdDep,
     caller: ActingCallerDep,
+    stage: Annotated[RuntimeStage | None, Query(description="Filter service Bots by runtime stage before pagination. Other Bot kinds are unchanged; omission preserves the unfiltered listing.")] = None,
     keyword: Annotated[
         str | None,
         Query(description="Filter: bots whose name contains this text."),
@@ -586,6 +593,8 @@ async def list_bots(
         ),
     ] = None,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    bot_repo: BotRepository = Injected(BotRepository),
+    template_port: BotInventoryTemplatePort = Injected(BotInventoryTemplatePort),
     space_context: BusinessSpaceContextProtocol = Injected(
         BusinessSpaceContextProtocol
     ),
@@ -608,7 +617,7 @@ async def list_bots(
     granted = caller.granted_bot_ids(owned_by_delegator=True)
     if granted is not None and not granted:
         return page(0, [], request)
-    result = bot_service.list_bots_by_conditions(
+    filters = dict(
         owner_id=owner_id,
         bot_name=keyword,
         engine=engine,
@@ -617,6 +626,12 @@ async def list_bots(
         page_size=page_params.page_size,
         bot_ids=sorted(granted) if granted is not None else None,
     )
+    if stage is None:
+        result = await asyncio.to_thread(bot_service.list_bots_by_conditions, **filters)
+    else:
+        result = await asyncio.to_thread(
+            list_stage_bots, bot_repo, template_port, stage=stage.value, **filters,
+        )
     rows = result["items"]
     # Off the event loop: the resolution issues synchronous space-service
     # reads, one per distinct space on the page — a page over many spaces
@@ -659,7 +674,8 @@ async def query_bot_metadata(
     """
     del user_id  # UserIdDep has already enforced equality with the Principal.
     pairs = list(dict.fromkeys((item.bot_id, item.owner_id) for item in body.bots))
-    result = bot_service.list_bots_by_owner_bot_pairs(
+    result = await asyncio.to_thread(
+        bot_service.list_bots_by_owner_bot_pairs,
         page=page_params.page,
         page_size=page_params.page_size,
         pairs=pairs,
