@@ -24,7 +24,9 @@ from tests.community.adapters.http.openapi_v1.engine_runtime.conftest import Fak
 
 @pytest.fixture
 def friend_iam():
-    service = SimpleNamespace(get_iam_token=AsyncMock(return_value=CallerIamTokenOutcome("iam")))
+    service = SimpleNamespace(
+        get_iam_token=AsyncMock(return_value=CallerIamTokenOutcome("iam")),
+    )
     expert, friendships = FakeExpertChat(), FakeFriendships()
     expert.resolve_chat_stage = Mock(return_value="online")
     friendships.allowed = True
