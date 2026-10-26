@@ -51,7 +51,7 @@ it.each([false, true])('discards only a confirmed foreign task and leaves unrela
   const path = '/workflows/workspace?workflowId=wf-1&tab=evolution' + (linked ? '&repairTaskId=OLD' : '')
   const first = open(path)
   await screen.findByText('原任务不属于当前工作流，已返回当前工作流的问题列表。')
-  expect(screen.getByLabelText('task-location')).not.toHaveTextContent('repairTaskId=')
+  await waitFor(() => expect(screen.getByLabelText('task-location')).not.toHaveTextContent('repairTaskId='))
   await waitFor(() => expect(JSON.parse(sessionStorage.getItem('workflow-repair:wf-1')!)).toMatchObject({ selectedTaskId: '', includeHistorical: true }))
   expect(sessionStorage.getItem('workflow-repair:wf-2')).toBe(other)
   first.unmount()
