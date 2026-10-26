@@ -144,6 +144,10 @@ class GenomeCompiler:
 
     def _revision_of(self, ctx: ApplyContext, ref: StateRef) -> str:
         """The revision id the promotion delivers; a missing, never-started or superseded promotion is refused."""
+        if not ref.reference:
+            # ``genome_state`` never builds one; a hand-built or mis-decoded reference is refused here rather
+            # than asked of the repository as ``promotion_id=None``.
+            raise RevisionNotFound("promotion reference missing from the genome state reference")
         axes = dict(env=self._env(), entity_id=ctx.entity_id, bot_id=ctx.bot_id)
         row = self._promotions.get(**axes, promotion_id=ref.reference)
         if row is None:

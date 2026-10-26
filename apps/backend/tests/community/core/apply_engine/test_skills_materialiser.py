@@ -502,8 +502,9 @@ def test_a_non_local_skill_is_skipped_not_failed_and_not_removed(caplog):
     """A Center or repository skill is not delivered yet (#3103): a warning, nothing written, nothing removed.
 
     The active skill of that name stays — the state declares it, so the
-    removal pass never sees it as undeclared — and the report says what
-    happened on the entry itself rather than failing the category.
+    removal pass never sees it as undeclared — and the entry reports
+    ``skipped`` with the reason rather than failing the category or claiming
+    it converged.
     """
     import logging
 
@@ -517,11 +518,12 @@ def test_a_non_local_skill_is_skipped_not_failed_and_not_removed(caplog):
     assert resolved.ok and resolved.failures == ()
     assert any("does not deliver" in record.getMessage() and "3103" in record.getMessage() for record in caplog.records)
     plan = _run(raw.plan(ctx, resolved.intents))
-    assert [(p.intent.identity, p.outcome, p.requires_write) for p in plan.entries] == [("triage", "unchanged", False)]
+    assert [(p.intent.identity, p.outcome, p.requires_write) for p in plan.entries] == [("triage", "skipped", False)]
     assert plan.removals == ()
     written = _run(raw.write(ctx, plan))
-    assert [(entry.identity, entry.outcome.value) for entry in written] == [("triage", "unchanged")]
-    assert "3103" in (written[0].note or "")
+    assert [(entry.identity, entry.outcome.value) for entry in written] == [("triage", "skipped")]
+    assert "3103" in (written[0].reason or "")
+    assert written[0].note is None
     assert uploads.uploads == []
     assert activation.writes == 0
 

@@ -1258,8 +1258,8 @@ Manifest side still gains, all backward compatible with schema v1 documents:
 1. **Direct delivery of a compiled revision.** The apply engine takes one
    typed desired state (§2.7) from either of two compilers — the Manifest's
    or the genome's — and the run service looks the compiler up by the
-   state reference an apply carries (`ManifestStateRef`, or a
-   `GenomeStateRef` naming a promotion). The materialisers read bytes from
+   state reference an apply carries (`StateRef("manifest")`, or a
+   `StateRef("genome", promotion_id)` naming a promotion). The materialisers read bytes from
    the content store and resolve Center and repo skills from the typed
    entries; a compiled revision is fully reproducible. The compilers and
    the engine are in place; RSI-04 binds the promotion's applier to an
@@ -1921,7 +1921,7 @@ applier.preflight(bot, state)                          # the delivery seam refus
 promotions.start(row, expected_active=current_active, expected_statuses=PROMOTABLE, moved_at=now)   # one transaction: previous <- active,
                                                        # active <- r42 (CAS), r42 promoted, the promotion row
 await applier.start(bot, state, actor=actor, reason=reason)   # direct delivery (RSI-04): an apply run whose state
-                                                       # reference is GenomeStateRef(promotion_id); the genome
+                                                       # reference is StateRef("genome", promotion_id); the genome
                                                        # compiler resolves it back to r42 while the promotion is current
 # The Manifest knows nothing about r42; no digest is recorded anywhere — drift is read off the bot.
 ```

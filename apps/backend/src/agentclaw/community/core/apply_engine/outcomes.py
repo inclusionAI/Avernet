@@ -49,7 +49,9 @@ class EntryOutcome(StrEnum):
     ``created``     The entry was not in the bot's area; it was written.
     ``updated``     It was there with different content; it was overwritten.
     ``unchanged``   It was there and already matched; no write was made.
-    ``skipped``     Its category was aborted by *another* entry's failure.
+    ``skipped``     Not written: its category was aborted by *another* entry's
+                    failure, or its materialiser declined to deliver it (the
+                    ``reason`` says which).
     ``failed``      This entry itself could not be resolved or written.
     ==============  ==========================================================
 
@@ -57,8 +59,9 @@ class EntryOutcome(StrEnum):
 
         EntryOutcome.CREATED.value == "created"
 
-    Created by: each materialiser's ``plan`` and ``write`` for the first three;
-    ``apply/orchestrator`` assigns ``FAILED`` and ``SKIPPED``.
+    Created by: each materialiser's ``plan`` and ``write`` for the first three
+    (and ``SKIPPED`` for a deliberate non-delivery); ``apply/orchestrator``
+    assigns ``FAILED`` and the cascade's ``SKIPPED``.
     Consumed by: ``outcomes.derive_status``, and ``EntryResult.as_dict`` as the
     wire field ``action``.
 

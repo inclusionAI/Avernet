@@ -1139,7 +1139,7 @@ Manifest 保持对修订版无感知（§1、§5.5），其语法也**不新增�
 
 1. **已编译修订版的直接投递。** 应用引擎从两个编译器之一——Manifest 的或
    基因组的——接收同一种类型化期望状态（§2.7），运行服务按 apply 携带的状态
-   引用（`ManifestStateRef`，或指明某次晋升的 `GenomeStateRef`）查找编译器。
+   引用（`StateRef("manifest")`，或指明某次晋升的 `StateRef("genome", promotion_id)`）查找编译器。
    各物化器从内容存储读取字节，并按类型化条目解析 Center 技能与仓库技能；
    已编译的修订版是完全可复现的。编译器和引擎已经就位；RSI-04 把晋升的 applier
    绑定到一次 apply 运行，并解析 Center 与仓库技能（P1；RSI-04）。
@@ -1747,7 +1747,7 @@ applier.preflight(bot, state)                          # the delivery seam refus
 promotions.start(row, expected_active=current_active, expected_statuses=PROMOTABLE, moved_at=now)   # one transaction: previous <- active,
                                                        # active <- r42 (CAS), r42 promoted, the promotion row
 await applier.start(bot, state, actor=actor, reason=reason)   # direct delivery (RSI-04): an apply run whose state
-                                                       # reference is GenomeStateRef(promotion_id); the genome
+                                                       # reference is StateRef("genome", promotion_id); the genome
                                                        # compiler resolves it back to r42 while the promotion is current
 # The Manifest knows nothing about r42; no digest is recorded anywhere — drift is read off the bot.
 ```

@@ -48,8 +48,8 @@ import shutil
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Optional
 
-from agentclaw.community.core.apply_engine.outcomes import SourceMode
 from agentclaw.community.core.apply_engine.outcomes import (
+    SourceMode,
     SourceResolution,
 )
 from agentclaw.community.core.bot_config_manifest.fetch.git_source import (

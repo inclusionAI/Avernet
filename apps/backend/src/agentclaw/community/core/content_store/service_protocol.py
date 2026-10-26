@@ -11,10 +11,10 @@ transport stack into importers that only want to store).
 from __future__ import annotations
 
 from abc import abstractmethod
-
-from agentclaw.community.core.content_store.reader import ContentReader
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
+
+from agentclaw.community.core.content_store.reader import ContentReader
 
 if TYPE_CHECKING:
     from agentclaw.community.core.content_store.models import (

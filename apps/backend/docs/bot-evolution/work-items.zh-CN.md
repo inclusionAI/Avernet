@@ -115,7 +115,7 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
   RSI-04，因此 singlebox 故事止步于这次拒绝。
 - **此后已落地**（`apps/backend/specs/2026-10-23-apply-engine-desired-state/`）：
   apply 引擎成为独立组件（`core/apply_engine/`），从两个编译器——Manifest 的与
-  基因组的（`compile_spec`，按 `GenomeStateRef` 查找的 `GenomeCompiler`）——接收
+  基因组的（`compile_spec`，以 `genome` 种类注册的 `GenomeCompiler`）——接收
   同一种类型化期望状态；契约里的 `compiled.yaml` 基准被一个把每个用例按两条路
   各编译一次的等价性测试取代；漂移通过读取 Bot 来观察（`GenomeRegistry.drift`），
   晋升行不再携带已编译文档、其摘要或 apply id；资源根目录每次 apply 先清空再
@@ -131,7 +131,7 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 - **目标**：通过 apply 引擎把已晋升的修订版直接投递到 Bot 运行时，中间不再
   经过 Manifest 文档。引擎、其类型化期望状态和基因组编译器已经存在
   （`core/apply_engine/`、`core/bot_genome/compile.py`；运行服务按 apply 的状态
-  引用查找编译器）。剩下的是绑定：一个以 `GenomeStateRef(promotion_id)` 启动
+  引用查找编译器）。剩下的是绑定：一个以 `StateRef("genome", promotion_id)` 启动
   apply 运行、并把结果回写到晋升行的 `RevisionApplier`，取代
   `PendingDeliveryApplier`；各物化器解析 `CenterSkillVersion` 与 `RepoSkillPath`
   （今天只投递本地包）；服务型 Bot 发布路径；以及 singlebox 故事。Manifest 语法

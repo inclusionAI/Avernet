@@ -215,8 +215,10 @@ class PlannedEntry:
 
     intent: Intent
     #: The plain **string** value of an :class:`~...outcomes.EntryOutcome`, not
-    #: the enum: ``"created"``, ``"updated"`` or ``"unchanged"``. Never
-    #: ``"failed"`` or ``"skipped"``, which are the orchestrator's to assign.
+    #: the enum: ``"created"``, ``"updated"`` or ``"unchanged"``; or ``"skipped"``
+    #: for an entry the materialiser deliberately does not deliver (its
+    #: ``write`` then reports the reason). Never ``"failed"``, which is the
+    #: orchestrator's to assign.
     outcome: str
     #: Internal convergence can require a source transition even when the
     #: public effective state remains unchanged (for example SkillSet → Direct).

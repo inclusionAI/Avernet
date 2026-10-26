@@ -158,7 +158,7 @@ class ConfigManifestApply(BaseModel):
                 "result": "SUCCEEDED",
                 "started_at": "2026-08-31T09:12:04+00:00",
                 "finished_at": "2026-08-31T09:12:06+00:00",
-                "state": {"kind": "manifest", "promotion_id": None},
+                "state": {"kind": "manifest", "reference": None},
                 "sources": [],
                 "categories": [
                     {"category": "mcp", "aborted": False, "removed": ["mcp.old"]}

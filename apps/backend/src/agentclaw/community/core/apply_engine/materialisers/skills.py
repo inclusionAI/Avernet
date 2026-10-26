@@ -9,8 +9,9 @@ names report ``created``—package equality is deliberately not probed.
 A declared Skill Center or shared-repository skill is **skipped** for now
 (inclusionAI/Avernet#3103 tracks its delivery): it is logged at warning,
 written nowhere, counted as declared so nothing of that name is removed, and
-reported ``unchanged`` with a note saying so. Rewriting it as a local package
-would copy a governed asset into bot-owned storage, so that road is not taken.
+reported ``skipped`` with the reason, so the apply's summary still says that
+not everything declared was delivered. Rewriting it as a local package would
+copy a governed asset into bot-owned storage, so that road is not taken.
 
 When the section is present, every omitted effective Skill is removed and every
 omitted Bot-owned Local asset is additionally unreferenced, physically deleted,
@@ -72,11 +73,12 @@ class _NotDelivered:
 
     origin: SkillOrigin
 
-
-_SKIP_NOTE = (
-    "not delivered: a {origin} skill is skipped by this build (inclusionAI/Avernet#3103); "
-    "nothing was written or removed"
-)
+    @property
+    def reason(self) -> str:
+        return (
+            f"not delivered: a {self.origin.value} skill is skipped by this build (inclusionAI/Avernet#3103); "
+            "nothing was written or removed"
+        )
 
 
 class _SkillPackage:
@@ -164,8 +166,7 @@ class SkillsMaterialiser(Materialiser):
                     entry.origin.value,
                     ctx.bot_id,
                 )
-                note = _SKIP_NOTE.format(origin=entry.origin.value)
-                intents.append(Intent(name, _NotDelivered(entry.origin), note=note))
+                intents.append(Intent(name, _NotDelivered(entry.origin)))
                 continue
             try:
                 tree = await asyncio.to_thread(self._content.read, entry.source.tree.digest)
@@ -206,7 +207,7 @@ class SkillsMaterialiser(Materialiser):
 
         planned = [
             (
-                PlannedEntry(intent, EntryOutcome.UNCHANGED.value)
+                PlannedEntry(intent, EntryOutcome.SKIPPED.value)
                 if isinstance(intent.value, _NotDelivered)
                 else PlannedEntry(
                     intent,
@@ -246,7 +247,7 @@ class SkillsMaterialiser(Materialiser):
                 if isinstance(package, _NotDelivered):
                     results.append(
                         EntryResult(
-                            self.construct, planned.intent.identity, EntryOutcome.UNCHANGED, note=planned.intent.note
+                            self.construct, planned.intent.identity, EntryOutcome.SKIPPED, reason=package.reason
                         )
                     )
                     continue

@@ -90,7 +90,7 @@ def build_apply_task_payload(
             "lock_token": "lk_3f9c...",
             "started_at": "2026-03-01T09:00:00+00:00",
             "phase": "pre_container",        # or "on_container", or None
-            "state": {"kind": "manifest"},   # or {"kind": "genome", "promotion_id": ...}
+            "state": {"kind": "manifest", "reference": None},   # or {"kind": "genome", "reference": <promotion id>}
             "carry_from_apply_id": None,     # or an earlier phase's apply_id
             "engine_type": "claude_code",    # only read when there is no
             "bot_type": "arca",              # bot record yet

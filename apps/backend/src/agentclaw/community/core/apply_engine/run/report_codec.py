@@ -90,7 +90,7 @@ def report_from_payload(
                 name=source.get("name", ""),
                 url=source.get("url"),
                 ref=source.get("ref"),
-                mode=SourceMode(source["mode"]) if source.get("mode") is not None else None,
+                mode=_source_mode(source.get("mode")),
                 resolved_sha=source.get("resolved_sha"),
                 auth=source.get("auth"),
             )
@@ -98,6 +98,19 @@ def report_from_payload(
         ),
         notes=tuple(str(note) for note in payload.get("notes") or ()),
     )
+
+
+def _source_mode(value: Any) -> SourceMode | None:
+    """The stored mode, or ``None`` for a row that carries none or one outside the enum.
+
+    ``None`` is what the baselines already treat as "no opinion" for that
+    row; refusing the whole report over one unreadable mode would hide every
+    other row of the bot's apply history.
+    """
+    try:
+        return SourceMode(value) if value is not None else None
+    except ValueError:
+        return None
 
 
 def _construct_of(name: Any) -> Category | Section | None:

@@ -130,7 +130,7 @@ the rest.
 - **Landed since** (`apps/backend/specs/2026-10-23-apply-engine-desired-state/`):
   the apply engine is its own component (`core/apply_engine/`) taking one
   typed desired state from two compilers, the Manifest's and the genome's
-  (`compile_spec`, `GenomeCompiler` keyed by `GenomeStateRef`); the
+  (`compile_spec`, `GenomeCompiler` registered under the `genome` kind); the
   contract's `compiled.yaml` oracles are replaced by an equivalence test
   that compiles every case both ways; drift is observed by reading the bot
   (`GenomeRegistry.drift`), and the promotion row carries neither a
@@ -153,7 +153,7 @@ the rest.
   (`core/apply_engine/`, `core/bot_genome/compile.py`; the run service
   looks the compiler up by the apply's state reference). What remains is
   binding: a `RevisionApplier` that starts an apply run with
-  `GenomeStateRef(promotion_id)` and reports its outcome on the promotion
+  `StateRef("genome", promotion_id)` and reports its outcome on the promotion
   row, in place of `PendingDeliveryApplier`; the materialisers resolving a
   `CenterSkillVersion` and a `RepoSkillPath` (today only a local package
   is delivered); the service-bot publish path; and the singlebox story.
