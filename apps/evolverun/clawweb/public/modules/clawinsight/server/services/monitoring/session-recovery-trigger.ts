@@ -3,8 +3,9 @@ import type { SessionRecoveryApi } from "../repair/session-recovery/contracts.js
 import { SessionRecoveryError } from "../repair/session-recovery/errors.js";
 import { parseRequest } from "../repair/session-recovery/validation.js";
 import {
-  DIAGNOSIS_V3_VERSION, MonitoringError, type DiagnosisEvent, type MonitoringRecoveryConfigStore, type MonitoringRecoveryTrigger, type MonitoringTarget,
+  DIAGNOSIS_V3_VERSION, DIAGNOSIS_V4_VERSION, MonitoringError, type DiagnosisEvent, type MonitoringRecoveryConfigStore, type MonitoringRecoveryTrigger, type MonitoringTarget,
 } from "./contracts.js";
+import { ACTION_POLICY_VERSION, recoverySkipReason } from "./action-policy.js";
 import { target, targetKey } from "./target.js";
 
 export const SESSION_RECOVERY_ALLOWLIST_KEY = "session_recovery_allowlist";
@@ -35,7 +36,7 @@ function parseAllowlist(value: unknown): MonitoringTarget[] {
 /** Caller-side mapping only; semantic/device validation remains owned by recovery. */
 export function buildRecoveryTarget(event: DiagnosisEvent) {
   const original = { bot_id: event.botId, entity_id: event.entityId, env: event.env, engine: event.engine };
-  if (event.schemaVersion !== DIAGNOSIS_V3_VERSION || event.engine !== "OC") return original;
+  if ((event.schemaVersion !== DIAGNOSIS_V3_VERSION && event.schemaVersion !== DIAGNOSIS_V4_VERSION) || event.engine !== "OC") return original;
   const identity = event.runtimeIdentity;
   if (!identity || !identity.BOT_ID || !identity.OWNER_ID || identity.BOT_ID !== event.botId) return null;
   return { ...original, bot_id: identity.BOT_ID, entity_id: identity.OWNER_ID,
@@ -48,7 +49,11 @@ export function createMonitoringRecoveryTrigger(input: {
 }): MonitoringRecoveryTrigger {
   return {
     async trigger(event) {
-      if (event.decision !== "ALERT" || event.handlerName !== "NOT_COMPLETED") return;
+      const reason = recoverySkipReason(event);
+      if (reason) {
+        console.info("[monitoring] recovery skipped", { eventId: event.eventId, policy: ACTION_POLICY_VERSION, reason });
+        return;
+      }
       let allowed: MonitoringTarget[];
       try {
         const row = await input.config.findByKey(SESSION_RECOVERY_ALLOWLIST_KEY);
