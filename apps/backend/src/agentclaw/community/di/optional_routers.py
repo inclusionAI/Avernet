@@ -16,7 +16,6 @@ binding key without creating a ``di/ -> api/`` cycle. The actual router
 modules under ``api/local/`` are imported lazily inside the local-mode
 provider, so prod never loads them.
 """
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field

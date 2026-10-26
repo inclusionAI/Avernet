@@ -16,7 +16,6 @@ DDL by hand before the pods start), so it lives in ``core/`` and both plugins
 call it. ``core/`` is the lowest layer; ``plugins/`` depends on it, never the
 reverse.
 """
-
 from __future__ import annotations
 
 import logging
@@ -189,15 +188,10 @@ def prepare_for_mysql(metadata: MetaData) -> list[str]:
             if prefixes is None:
                 continue
             columns = list(constraint.columns)
-            name = (
-                constraint.name
-                or f"uk_{table.name}_{'_'.join(c.name for c in columns)}"
-            )
+            name = constraint.name or f"uk_{table.name}_{'_'.join(c.name for c in columns)}"
             table.constraints.discard(constraint)
             Index(name, *columns, unique=True, mysql_length=prefixes)
-            adjusted.append(
-                f"{table.name}.{name} (unique constraint → prefixed unique index)"
-            )
+            adjusted.append(f"{table.name}.{name} (unique constraint → prefixed unique index)")
 
         for index in table.indexes:
             already = index.dialect_options["mysql"].get("length") or {}
