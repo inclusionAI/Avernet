@@ -253,3 +253,6 @@ POST /api/insight/v1/monitoring/session-recoveries/:taskId/terminate
 `effect` 保留已有证据结论，缺少判断时为 `unknown`；`intervention_status` 继续由任务全量审计生成，已有干预不会被让路抹除。
 页面和群通知显示“用户已接手，自愈已让路”。统计单列该结束原因，不计为执行故障，也不能将 `completed` 直接计为恢复成功。
 没有该原因的既有 `blocked` 仍表示无法继续，沿用原失败流程；未知原因拒绝。先部署支持新字段的发送／接收后端，再更新自愈包。没有新建数据库表、字段或 AIS Base 配置。
+
+回报引用了不存在的证据 ID，或 `message` 判断缺少已保存的投递／拟发送记录时，返回 HTTP 422 并说明可纠正字段。纠错保留已核实的业务判断，证据引用必须使用工具返回的完整 ID。普通 `blocked` 省略 `reason`；执行归属、阶段或版本冲突继续返回 HTTP 409。
+

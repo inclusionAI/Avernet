@@ -6,7 +6,7 @@ import { SessionRecoveryError } from "./errors.js";
 import { parseRequest } from "./validation.js";
 import { recoveryHandbook } from "./handbook.js";
 import { parseRecoverySimulationBatch, simulationReadTools, validateSimulationKnowledge, type RecoverySimulation, type RecoverySimulationAssessment } from "./simulation.js";
-import { decideRecoveryPlan, observeRecovery, recoveryTaskResult, resumeRecoveryObservation, submitRecoveryPlan, terminateRecoveryTask } from "./task-state.js";
+import { decideRecoveryPlan, validateRecoveryEvidenceReferences, observeRecovery, recoveryTaskResult, resumeRecoveryObservation, submitRecoveryPlan, terminateRecoveryTask } from "./task-state.js";
 import type { RecoveryActionNotifier, RecoveryActor, RecoveryAcknowledgment, RecoveryExecutionView, RecoveryRequest, RecoveryResult, RecoveryTaskView, RecoveryTermination, SessionRecoveryTaskApi } from "./contracts.js";
 import type { RecoveryEvidence, RecoveryJudgment, RecoveryLevel, RecoveryPlan, RecoveryTaskResult, RecoveryTimelineEvent, RecoveryStoredTask, RecoveryTaskStore } from "./task-contracts.js";
 
@@ -114,10 +114,10 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       if (value.simulation) this.fail(409, "仿真必须提交拟议决策");
       if (value.status !== "running" || value.phase !== "assess") this.fail(409, "当前不能提交初始判断");
       if (!["message", "environment", "observe"].includes(input.decision) || typeof input.summary !== "string" || !input.summary.trim()
-        || input.summary.length > 8000 || containsSecret(input.summary) || !Array.isArray(input.evidence_ids) || !input.evidence_ids.length
-        || input.evidence_ids.some(id => !value.evidence.some(item => item.evidence_id === id))) this.fail(422, "初始判断需要决策、理由及已保存的证据");
+        || input.summary.length > 8000 || containsSecret(input.summary) || !Array.isArray(input.evidence_ids) || !input.evidence_ids.length) this.fail(422, "初始判断需要决策、理由及已保存的证据");
+      validateRecoveryEvidenceReferences(value, input.evidence_ids);
       if (input.decision === "message" && !value.delivery && !(value.level === "debug" && value.timeline.some(event =>
-        event.kind === "operation" && (event.payload.result as Record<string, unknown>)?.dry_run === true))) this.fail(409, "尚未留存 Agent 的初始消息或拟发送内容");
+        event.kind === "operation" && (event.payload.result as Record<string, unknown>)?.dry_run === true))) this.fail(422, "message 决策需要已留存的初始消息或拟发送内容。若 retry_message 在投递前失败且无法继续，请保留受阻结论并返回 blocked；不要改写为已发送，也不要盲目重发结果未知的消息。");
       const debugFinished = value.level === "debug" && input.decision !== "environment";
       return { ...value, version: value.version + 1, phase: input.decision === "environment" ? "plan" : "observe",
         ...(debugFinished ? { status: "completed" as const, judgment: { delivery: "unconfirmed" as const, response: "unknown" as const, effect: "not_intervened" as const, summary: input.summary, evidence_ids: input.evidence_ids } } : {}),
