@@ -3,8 +3,9 @@
  */
 import type { BotChatSessionView } from '@/services/workspace/botSessionService';
 import { sessionHasSidePaneContent, useChatHeaderPanels } from '@/pages/Workspace/Chat/hooks/useChatHeaderPanels';
-import type { ChatMessage, PanelHandle } from '@tc-chat/core';
+import { useTaskConversationNavigationStore } from '@/stores/taskConversationNavigationStore';
 import { beforeEach, expect, it, jest } from '@jest/globals';
+import type { ChatMessage, PanelHandle } from '@tc-chat/core';
 import { act, renderHook } from '@testing-library/react';
 
 function makeSession(overrides: Partial<BotChatSessionView> = {}): BotChatSessionView {
@@ -62,6 +63,8 @@ function makeOptions(overrides: { messages?: ChatMessage[]; panelRef?: React.Ref
 
 beforeEach(() => {
   jest.clearAllMocks();
+  useTaskConversationNavigationStore.getState().resetAll();
+  window.history.pushState({}, '', '/workspace/chat?bot=bot-1&session=sess-1');
 });
 
 it('定位历史消息时收起覆盖面板，露出会话中的高亮消息', () => {
@@ -106,6 +109,31 @@ it('切会话镜像态复位：副屏被 useBotChat closePanelForce 强关，Mon
   rerender({ session: makeSession({ sessionId: 'sess-2' }) });
   expect(result.current.sidePaneOpen).toBe(false);
   expect(result.current.openPanel).toBeNull();
+});
+
+it('任务节点真实路由切会话时保留 TaskPanel 的头部开合镜像态', () => {
+  const { options } = makeOptions({ messages: makePanelMessages() });
+  const { result, rerender } = renderHook(({ session }) => useChatHeaderPanels({ ...options, session }), {
+    initialProps: { session: makeSession() as BotChatSessionView | null },
+  });
+  act(() => result.current.onSidePaneIsOpenChange(true));
+
+  window.history.pushState({}, '', '/workspace/chat?bot=bot-2&session=sess-2');
+  const store = useTaskConversationNavigationStore.getState();
+  store.rememberTaskTab('t1', {
+    id: 'task-t1',
+    title: 'Task',
+    type: 'taskPanel.TaskLoopView',
+    params: { taskId: 't1' },
+  });
+  const navigationId = store.beginNavigation('t1', '/workspace/chat', 'sess-2');
+  store.markRouteCommitted(navigationId);
+
+  rerender({ session: makeSession({ sessionId: 'sess-2', botId: 'bot-2' }) });
+
+  expect(result.current.sidePaneOpen).toBe(true);
+  expect(result.current.openPanel).toBeNull();
+  expect(useTaskConversationNavigationStore.getState().navigation?.routeHydrated).toBe(true);
 });
 
 it('副屏判空：无 <AixUI type="panel"> 时 Monitor 禁用且 toggle 空转，出现副屏消息后解除', () => {

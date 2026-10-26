@@ -75,10 +75,12 @@ export interface HelpLink {
 /**
  * 任务副屏 V2 会话联动目标(P4,spec §3.2):节点 → 关联会话跳转。
  * kind=group 应尽量带 groupId；kind=bot/friend 应尽量带 botId。
- * Open Core 默认实现:在会话宿主内原位联动左侧会话内容，宿主外再走站内路由。
+ * Open Core 默认实现通过真实站内路由切换，使 URL、目录选中态与消息内容保持一致。
  */
 export interface TaskSessionJumpTarget {
   sessionId: string;
+  /** 根节点恢复任务最初宿主会话时使用的精确站内地址。 */
+  routeUrl?: string;
   kind: 'group' | 'bot' | 'friend' | 'unknown';
   groupId?: string | null;
   botId?: string | null;

@@ -3,6 +3,7 @@ import { Empty } from '@/components/ui';
 import { ChatMessageSkeleton } from '@/components/Workspace/ChatPanel/ChatMessageSkeleton';
 import { ChatPanelHeader } from '@/components/Workspace/ChatPanel/ChatPanelHeader';
 import { ChatLayoutPanelSlot } from '@/components/Workspace/ChatLayoutPanelSlot';
+import { usePersistentChatLayoutPanelHost } from '@/components/Workspace/PersistentChatLayoutPanelHost';
 import { SidePanelCollapseButton } from '@/components/Workspace/SidePanelCollapseButton';
 import { TaskLinkedSession } from '@/components/Workspace/TaskLinkedSession';
 import { MessageEditBar, MessageQuoteBar } from '@/components/Workspace/MessageInteractionToolbar';
@@ -65,6 +66,7 @@ export function ChatPanel({
   onToggleSidePane,
   onSidePaneIsOpenChange,
 }: ChatPanelProps) {
+  const persistentPanelHost = usePersistentChatLayoutPanelHost();
   const linkedSession = useTaskSidePanelStore((state) => state.linkedSession);
   const closeLinkedSession = useTaskSidePanelStore((state) => state.closeLinkedSession);
   const messageInteractions = useMessageInteractions({
@@ -282,7 +284,9 @@ export function ChatPanel({
         />
       </ChatLayout>
       {/* 副屏右上「收起」钮：真实开合态开时悬于副屏 TopBar 右侧，点按关闭。 */}
-      {sidePaneOpen && onToggleSidePane ? <SidePanelCollapseButton onClick={onToggleSidePane} /> : null}
+      {!persistentPanelHost && sidePaneOpen && onToggleSidePane ? (
+        <SidePanelCollapseButton onClick={onToggleSidePane} />
+      ) : null}
     </section>
   );
 }

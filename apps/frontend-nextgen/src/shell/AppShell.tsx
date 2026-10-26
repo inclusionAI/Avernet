@@ -1,4 +1,5 @@
 import { Drawer, DrawerContent, DrawerTitle, IconButton } from '@/components/ui';
+import { PersistentChatLayoutPanelViewport } from '@/components/Workspace/PersistentChatLayoutPanelViewport';
 import { PrimaryNavContext, type PrimaryNavApi } from '@/components/Workspace/PrimaryNav';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import { useMinWidth } from '@/hooks/useMediaQuery';
@@ -116,7 +117,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <IconButton label="打开导航" icon={<Menu className="h-4 w-4" />} onClick={openNav} />
               </div>
             )}
-            <main className="relative min-h-0 min-w-0 flex-1 overflow-hidden">{children}</main>
+            <main className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
+              {children}
+              <PersistentChatLayoutPanelViewport />
+            </main>
           </div>
         </div>
         {/* <lg 一级导航抽屉：≥lg 内流侧栏可见；<lg 由页头内联入口或兜底条带的汉堡钮触发本抽屉。 */}

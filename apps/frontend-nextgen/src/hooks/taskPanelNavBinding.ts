@@ -1,6 +1,7 @@
-import { useCallback } from 'react';
-
+import { isCurrentTaskConversationOrigin } from '@/services/tasks/taskConversationNavigation';
+import { useTaskConversationNavigationStore } from '@/stores/taskConversationNavigationStore';
 import { useTaskSidePanelStore, type TaskNavRecord, type TaskNavTarget } from '@/stores/taskSidePanelStore';
+import { useCallback } from 'react';
 
 /**
  * 资产层 TaskPanelNav 的结构类型（结构即契约，资产层 v2/taskPanelNav.ts 落地后如有
@@ -24,7 +25,9 @@ export function useTaskPanelNavBinding(taskId: string): TaskPanelNav {
 
   const selectRootNode = useCallback(
     (nodeId: string) => {
-      useTaskSidePanelStore.getState().selectRootNode(taskId, nodeId);
+      const origin = useTaskConversationNavigationStore.getState().originsByTask[taskId];
+      const restoreTarget = origin && !isCurrentTaskConversationOrigin(origin) ? origin : null;
+      useTaskSidePanelStore.getState().selectRootNode(taskId, nodeId, restoreTarget);
     },
     [taskId],
   );

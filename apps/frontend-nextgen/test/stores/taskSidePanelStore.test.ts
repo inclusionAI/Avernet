@@ -76,6 +76,22 @@ describe('taskSidePanelStore', () => {
     expect(after.nodeScrollSignal).toBe(0);
   });
 
+  it('selectRootNode 可发出恢复原宿主会话的真实路由目标', () => {
+    useTaskSidePanelStore
+      .getState()
+      .selectRootNode(
+        't1',
+        'n-root',
+        target('sess-origin', { routeUrl: '/workspace/chat?bot=bot-1&session=sess-origin' }),
+      );
+
+    expect(useTaskSidePanelStore.getState().pendingNavigation).toMatchObject({
+      taskId: 't1',
+      sessionId: 'sess-origin',
+      routeUrl: '/workspace/chat?bot=bot-1&session=sess-origin',
+    });
+  });
+
   it('selectRootNode 退出其他节点的联动会话并取消待消费跳转', () => {
     useTaskSidePanelStore.getState().selectNode('t1', 'n-other', target('sess-other'));
     useTaskSidePanelStore.getState().openLinkedSession({

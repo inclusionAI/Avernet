@@ -132,12 +132,15 @@ TaskPanelV2（壳：面包屑两级栈 + 收起/展开 + 多任务切换条；�
   口是演示脚手架，**不产品化**；真实入口 = 发起任务时的自动切换 + 副屏横条手动切换。
 - **跳转/下钻分离**与 demo 语义一致：点整卡 = `selectNode`（选中 + 高亮 + 触发
   `pendingNavigation`）；下钻按钮 = `drillInto`（仅 run_mode 为协作群的节点有热区）。
-- **消息定位（契约不变决策下的派生方案）**：选中节点后由宿主切换到该节点关联会话并
-  滚动至关联消息。会话解析规则（纯前端）：`run_mode=single_bot` 节点 → `main_session`；
-  `run_mode=coop_group/bbs` 节点 → `derived_session_ids` 中按 `assignee`/`source_group_id`
-  匹配，无法唯一定位时回退跳 `main_session`。消息定位：无消息级 nodeId 契约，用该节点
-  `start_time..end_time` 时间窗 + 任务生命周期系统消息兜底定位，做"定位到该节点的
-  时间窗"而非"精确最后一条"。
+- **会话导航与消息定位（契约不变决策下的派生方案）**：选中节点后通过真实
+  `/workspace/chat` 或 `/workspace/collaboration` 路由切换关联会话，使 URL、左侧 Bot/群与
+  Session 选中态、中央消息内容由既有 route hydration 同源更新。任务节点导航期间保留当前
+  TaskPanel；普通侧栏切换仍关闭旧副屏。首次离开任务宿主时记录其会话，根节点在其他联动
+  会话中恢复原宿主，在原宿主中点击则保持当前内容不变。会话解析规则（纯前端）：
+  `run_mode=single_bot` 节点 → `main_session`；`run_mode=coop_group/bbs` 节点 →
+  `derived_session_ids` 中按 `assignee`/`source_group_id` 匹配，无法唯一定位时回退跳
+  `main_session`。消息定位：无消息级 nodeId 契约，用该节点 `start_time..end_time` 时间窗 +
+  任务生命周期系统消息兜底定位，做"定位到该节点的时间窗"而非"精确最后一条"。
 
 ### 3.3 状态与边语义映射（mapper 层，契约不变 ⇒ 全部为前端派生，即正式方案）
 
@@ -229,7 +232,7 @@ TaskPanelV2（壳：面包屑两级栈 + 收起/展开 + 多任务切换条；�
 | `TaskNodePanel.tsx` | `v2/TaskNodePanelV2.tsx`（三区 + 内嵌 `GroupSessionView` 吸收 grp 群下钻;子任务走既有 onOpenSubTask） |
 | `TaskSwitcherBar` / `TaskSwitcherFloat` | `v2/TaskSwitcherBar.tsx`(产品化);Float 演示脚手架不落地(spec §6) |
 | `coopTaskDemoV2.ts`（数据模型） | `contract.ts`（+产物 Descriptor 契约）+ `taskPanelMapper.ts`（接线）+ `statusDerivation.ts` / `artifactDescriptor.ts` / `sessionResolution.ts`（派生收口） |
-| `CoopV2SessionMain.tsx`（会话侧） | capability `navigateToConversation`（站内会话路由）+ `src/pages/Workspace/Chat/hooks/taskSessionNavigation.ts`（rootContainer 全局观察者）+ `messageWindowLocate.ts`（时间窗定位） |
+| `CoopV2SessionMain.tsx`（会话侧） | capability `navigateToConversation`（真实站内会话路由）+ `src/pages/Workspace/Chat/hooks/taskSessionNavigation.ts`（rootContainer 全局观察者）+ `src/stores/taskConversationNavigationStore.ts` / `src/services/tasks/taskConversationNavigation.ts`（原宿主恢复与 TaskPanel 跨会话保活）+ `messageWindowLocate.ts`（时间窗定位） |
 
 退役（P3/P5 清理）:`TaskProgressTab` / `NodeDetailDrawer` / `TaskSubTaskPanel` / `TaskArtifactsTab` / `TaskPanelHeader` / `NodeListView` / `useResizableRail` / `GroupDrillDownPanel`。
 

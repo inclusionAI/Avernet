@@ -1,4 +1,5 @@
 import { ChatLayoutPanelSlot } from '@/components/Workspace/ChatLayoutPanelSlot';
+import { usePersistentChatLayoutPanelHost } from '@/components/Workspace/PersistentChatLayoutPanelHost';
 import { SidePanelCollapseButton } from '@/components/Workspace/SidePanelCollapseButton';
 import { TaskLinkedSession } from '@/components/Workspace/TaskLinkedSession';
 import { filterVisibleGroupMessages } from '@/pages/Workspace/hooks/groupChatHistoryUtils';
@@ -75,6 +76,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     userIdentityId,
     userIdentityName,
   } = props;
+  const persistentPanelHost = usePersistentChatLayoutPanelHost();
   const linkedSession = useTaskSidePanelStore((state) => state.linkedSession);
   const closeLinkedSession = useTaskSidePanelStore((state) => state.closeLinkedSession);
 
@@ -270,8 +272,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
         ) : null}
           </>
         )}
-        {/* 协作群副屏口径：加宽至 480（不动 WORKSPACE_RIGHT_PANEL_LAYOUT 共用宽度）；
-            不随点外收起，仅顶栏「副屏」钮/悬浮「收起」钮关闭。 */}
+        {/* 协作群副屏加宽至 480，且仅由顶栏或悬浮按钮关闭。 */}
         <ChatLayoutPanelSlot
           ref={panelRef}
           onAction={handlePanelAction}
@@ -281,8 +282,9 @@ export function GroupChatPane(props: GroupChatPaneProps) {
           onOpenStateChange={onSidePaneIsOpenChange}
         />
       </ChatLayout>
-      {/* 副屏右上「收起」钮：真实开合态开时悬于副屏 TopBar 右侧，点按关闭。 */}
-      {sidePaneOpen && onToggleSidePane ? <SidePanelCollapseButton onClick={onToggleSidePane} /> : null}
+      {!persistentPanelHost && sidePaneOpen && onToggleSidePane ? (
+        <SidePanelCollapseButton onClick={onToggleSidePane} />
+      ) : null}
       {session && (
         <FuseSlot
           group={group}

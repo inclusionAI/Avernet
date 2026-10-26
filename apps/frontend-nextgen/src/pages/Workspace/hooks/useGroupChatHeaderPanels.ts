@@ -16,9 +16,13 @@
 import type { SessionView } from '@/domain/collaboration';
 import type { UseSessionHistorySearchModel } from '@/pages/Workspace/Chat/hooks/useChatHeaderPanels';
 import { reopenSidePaneTabsFromMessages, sessionHasSidePaneContent } from '@/pages/Workspace/Chat/hooks/useChatHeaderPanels';
+import {
+  markTaskNavigationRouteHydrated,
+  shouldPreserveTaskPanelForSession,
+} from '@/services/tasks/taskConversationNavigation';
 import { searchConversationMessages } from '@/services/workspace/conversationSearchService';
 import type { ChatMessage, PanelHandle } from '@tc-chat/core';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 export interface GroupChatFavoritesModel {
   favorite: boolean;
@@ -98,10 +102,13 @@ export function useGroupChatHeaderPanels(options: UseGroupChatHeaderPanelsOption
   const [sessionEpoch, setSessionEpoch] = useState(0);
   if (lastSessionIdRef.current !== sessionId) {
     lastSessionIdRef.current = sessionId;
-    setSidePaneOpen(false);
+    if (!shouldPreserveTaskPanelForSession(sessionId, '/workspace/collaboration')) setSidePaneOpen(false);
     setHighlightMessageId(null);
     setSessionEpoch((epoch) => epoch + 1);
   }
+  useEffect(() => {
+    markTaskNavigationRouteHydrated(sessionId, '/workspace/collaboration');
+  }, [sessionId]);
 
   // 副屏判空：无内容时禁用 Monitor（openPanel 只会被 SDK autoCloseWhenEmpty 弹回）。
   const sidePaneDisabled = useMemo(() => !sessionHasSidePaneContent(messages), [messages]);
