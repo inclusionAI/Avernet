@@ -84,13 +84,13 @@ test('creates from an expert using the original BotCreate body and polls the ori
   expect(request).toHaveBeenLastCalledWith('/openapi/v1/experts/product%2Fmanager/bots', {
     method: 'POST',
     data: body,
-    injectUserId: true,
+    params: {},
   });
   request.mockResolvedValueOnce({ code: 200000, data: { bot_id: 'bot-1', state: 'APPLYING' } });
   await expect(getExpertBotCreationStatus('bot-1')).resolves.toMatchObject({ state: 'APPLYING' });
   expect(request).toHaveBeenLastCalledWith('/openapi/v1/bots/bot-1/with-manifest/status', {
     method: 'GET',
-    injectUserId: true,
+    params: {},
   });
 });
 

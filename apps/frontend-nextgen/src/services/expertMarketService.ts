@@ -1,11 +1,13 @@
-import type { ExpertDetail, ExpertPage, ExpertQuery } from '@/domain/expertMarket';
+import type { ExpertDetail, ExpertPage, ExpertQuery, ExpertBotAccepted, ExpertBotCreationStatus } from '@/domain/expertMarket';
 import {
   EXPERT_ENDPOINT,
   requestExpertCategories,
   requestExpertDetail,
   requestExpertPage,
+  requestExpertBotCreation,
+  requestExpertBotCreationStatus,
 } from './backendApi/expertController';
-import { backendRequest, BackendRequestError } from './backendApi/httpClient';
+import { BackendRequestError } from './backendApi/httpClient';
 import { type BackendApiEnvelope, isEnvelopeSuccess } from './backendApi/types';
 
 function catalogData<T>(response: BackendApiEnvelope<T>, path: string): T {
@@ -35,25 +37,7 @@ export async function getExpert(expertId: string, signal?: AbortSignal): Promise
   return catalogData(await requestExpertDetail(expertId, signal), `${EXPERT_ENDPOINT}/${encodeURIComponent(expertId)}`);
 }
 
-export interface ExpertBotAccepted {
-  bot_id: string;
-  iframe_url: string;
-  redirect_url: string;
-}
-export interface ExpertBotCreationStatus extends ExpertBotAccepted {
-  state:
-    | 'AWAITING_AUTHORIZATION'
-    | 'CREATING'
-    | 'APPLYING'
-    | 'READY'
-    | 'CREATE_FAILED'
-    | 'APPLY_FAILED'
-    | 'AUTHORIZATION_REJECTED'
-    | 'AUTHORIZATION_EXPIRED';
-  message?: string;
-  bot?: Record<string, unknown> | null;
-  apply?: Record<string, unknown> | null;
-}
+export type { ExpertBotAccepted, ExpertBotCreationStatus } from '@/domain/expertMarket';
 
 export async function createExpertBot(
   expertId: string,
@@ -61,18 +45,14 @@ export async function createExpertBot(
 ): Promise<ExpertBotAccepted> {
   const path = `${EXPERT_ENDPOINT}/${encodeURIComponent(expertId)}/bots`;
   return catalogData(
-    await backendRequest<BackendApiEnvelope<ExpertBotAccepted>>(path, {
-      method: 'POST',
-      data: body,
-      injectUserId: true,
-    }),
+    await requestExpertBotCreation(expertId, body),
     path,
   );
 }
 export async function getExpertBotCreationStatus(botId: string): Promise<ExpertBotCreationStatus> {
   const path = `/openapi/v1/bots/${encodeURIComponent(botId)}/with-manifest/status`;
   return catalogData(
-    await backendRequest<BackendApiEnvelope<ExpertBotCreationStatus>>(path, { method: 'GET', injectUserId: true }),
+    await requestExpertBotCreationStatus(botId),
     path,
   );
 }

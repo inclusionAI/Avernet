@@ -25,3 +25,23 @@ export interface ExpertPage {
   total: number;
   items: ExpertSummary[];
 }
+
+export interface ExpertBotAccepted {
+  bot_id: string;
+  iframe_url: string;
+  redirect_url: string;
+}
+export interface ExpertBotCreationStatus extends ExpertBotAccepted {
+  state:
+    | 'AWAITING_AUTHORIZATION'
+    | 'CREATING'
+    | 'APPLYING'
+    | 'READY'
+    | 'CREATE_FAILED'
+    | 'APPLY_FAILED'
+    | 'AUTHORIZATION_REJECTED'
+    | 'AUTHORIZATION_EXPIRED';
+  message?: string;
+  bot?: Record<string, unknown> | null;
+  apply?: Record<string, unknown> | null;
+}
