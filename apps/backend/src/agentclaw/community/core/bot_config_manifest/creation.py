@@ -310,6 +310,12 @@ class BotCreationManifestSeam(ManifestCreationSeam):
         )
         return entity_id
 
+    def verify_binding(self, *, entity_id: str, bot_id: str, manifest_digest: str) -> None:
+        from agentclaw.community.core.bot_config_manifest.binding import verify_bound_document
+
+        record = self._manifests.get(entity_id=entity_id, bot_id=bot_id)
+        verify_bound_document(record.document if record else None, manifest_digest)
+
     def apply_pre_container(
         self,
         *,
@@ -320,6 +326,7 @@ class BotCreationManifestSeam(ManifestCreationSeam):
         engine_type: Optional[str],
         bot_type: Optional[str],
         bot: Optional[dict[str, Any]] = None,
+        expected_manifest_digest: str | None = None,
     ) -> Optional[str]:
         """Apply the pre-container phase. Returns its ``apply_id``.
 
@@ -352,6 +359,7 @@ class BotCreationManifestSeam(ManifestCreationSeam):
                 state=MANIFEST_STATE,
                 trigger=CREATE_PRE_CONTAINER_TRIGGER,
                 phase=ApplyPhase.PRE_CONTAINER,
+                **({"expected_manifest_digest": expected_manifest_digest} if expected_manifest_digest else {}),
                 engine_type=engine_type,
                 bot_type=bot_type,
             )
@@ -381,6 +389,19 @@ class BotCreationManifestSeam(ManifestCreationSeam):
         is reading its status: enqueueing earlier would only mean a first run
         that finds nothing and reschedules.
         """
+        if spec.get("expert_origin"):
+            from agentclaw.community.core.bot_config_manifest.create_job import create_job_idempotency_key
+
+            origin = dict(spec["expert_origin"])
+            origin["creation_task_key"] = create_job_idempotency_key(
+                tenant=get_current_avernet_tenant(), entity_id=entity_id, bot_id=bot_id
+            )
+            spec = {**spec, "expert_origin": origin, "manifest_binding": {
+                "entity_id": entity_id, "bot_id": bot_id,
+                "tenant": get_current_avernet_tenant(), "env": get_current_env(),
+                "manifest_digest": origin["manifest_digest"],
+                "digest_encoding": "sha256-json-v1",
+            }}
         self._start_job(
             bot_id=bot_id,
             entity_id=entity_id,

@@ -114,6 +114,7 @@ class Bot(BaseModel):
         "lifecycle is not managed through this API."
     )
     status: str = Field(description=_BOT_STATUS_DESC)
+    expert_name: str | None = Field(default=None, description="Read-only source expert name for a bot created from the expert market; null for ordinary bots.")
     owner_entity_id: str = Field(
         description="The user who owns the bot — echoes the user_id the request named."
     )

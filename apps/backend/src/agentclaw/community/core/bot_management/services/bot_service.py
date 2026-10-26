@@ -130,6 +130,7 @@ from agentclaw.community.core.devices.errors import (
     DeviceAllocateError,
     DeviceServiceError,
 )
+from agentclaw.community.core.bot_management.expert_origin import reject_expert_origin_update
 from agentclaw.community.core.devices.models import AllocatedDevice, DeviceAllocationMode, DeviceBindingStatus, OperatorContext, SynlinkMappingInfo
 from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
@@ -3148,6 +3149,7 @@ class BotService(BotServiceProtocol):
             raise BotServiceError("User ID is required for updating bot")
 
         # Get bot by bot_id and owner_id (user_id)
+        reject_expert_origin_update(ext)
         bot = self._repository.get_by_id_and_owner(bot_id, user_id)
         if not bot:
             raise BotNotFoundError(f"Bot not found: {bot_id}")
@@ -6304,6 +6306,7 @@ class BotService(BotServiceProtocol):
             user_id: 用户 ID（用于权限检查）
             ext_update: 要更新的 ext 字段内容
         """
+        reject_expert_origin_update(ext_update)
         bot = self.get_bot(bot_id, user_id)
         ext = bot.get("ext") or {}
         if isinstance(ext, str):

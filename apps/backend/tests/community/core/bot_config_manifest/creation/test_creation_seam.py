@@ -246,6 +246,7 @@ def test_the_contract_names_the_whole_seam():
         "persist",
         "preflight",
         "start_job",
+        "verify_binding",
     ]
 
 
@@ -284,3 +285,14 @@ def test_every_declared_operation_keeps_the_contract_signature(operation):
             f"{operation} requires {name!r}, which no caller holding the "
             "Protocol can pass"
         )
+
+
+def test_bound_document_mismatch_stops_without_overwriting_user_document():
+    from types import SimpleNamespace
+    manifests = _Manifests()
+    manifests.get = lambda **kwargs: SimpleNamespace(document='{"schema_version": 1, "manifest": {"identity": []}}')
+    seam = _seam(manifests=manifests)
+    with pytest.raises(ValueError, match="bound Manifest"):
+        seam.verify_binding(entity_id="e", bot_id="b", manifest_digest="0" * 64)
+    assert manifests.puts == []
+    assert manifests.deletes == []

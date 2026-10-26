@@ -76,6 +76,7 @@ from agentclaw.community.core.bot_config_manifest.creation import (
 from agentclaw.community.core.bot_inventory.protocols import (
     BusinessSpaceContextProtocol,
 )
+from agentclaw.community.core.bot_management.expert_origin import ExpertOrigin
 from agentclaw.community.core.bot_management.create_flow import (
     BotCreateContext,
     BotCreateDeploymentMode,
@@ -200,6 +201,22 @@ async def create_bot_with_manifest(
     creates, so the status poll and every later operation on the bot find an
     ordinary bot grant in place.
     """
+    return await submit_manifest_creation(
+        body=body, request=request, owner_id=owner_id, owner_name=owner_name,
+        caller=caller, bot_service=bot_service, bot_repo=bot_repo,
+        passport_plugin=passport_plugin, skill_set_factory=skill_set_factory,
+        space_context=space_context, manifest_seam=manifest_seam,
+    )
+
+
+async def submit_manifest_creation(
+    *, body: BotCreateWithManifest, request: Request, owner_id: str, owner_name: str,
+    caller, bot_service: BotServiceProtocol, bot_repo: BotRepository,
+    passport_plugin: PassportPlugin, skill_set_factory: SkillSetServiceFactoryProtocol,
+    space_context: BusinessSpaceContextProtocol, manifest_seam: ManifestCreationSeam,
+    expert_origin: ExpertOrigin | None = None,
+) -> Envelope[BotCreateWithManifestAccepted]:
+    """One adapter mapping for both ordinary and expert Manifest submissions."""
     _require_publicly_creatable_engine(body.engine)
     validate_engine_cluster(body.engine, body.cluster_name)
     _require_service_capable_engine(body.bot_type, body.engine)
@@ -220,6 +237,7 @@ async def create_bot_with_manifest(
             document=body.config_manifest,
             modifier=owner_id,
             spec=BotCreateSpec(
+                expert_origin=expert_origin,
                 entity_id=owner_id,
                 engine_type=body.engine,
                 bot_type=body.bot_type,
@@ -546,6 +564,8 @@ def _message(state: CreationState, job) -> str:
         return str(getattr(job, "last_error", "") or "authorization was declined")
     if state is CreationState.AUTHORIZATION_EXPIRED:
         return "the authorization window elapsed before the user responded"
+    if state is CreationState.APPLY_FAILED and "bound Manifest" in str(getattr(job, "last_error", "") or ""):
+        return "bound Manifest has changed; creation stopped without replacing the stored document"
     if state is CreationState.CREATE_FAILED:
         return str(
             getattr(job, "last_error", "") or "the bot could not be provisioned"

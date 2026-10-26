@@ -365,12 +365,30 @@ class BotCreateWithManifestHandler:
         bot_id = str(payload["bot_id"])
         entity_id = str(payload["entity_id"])
 
+        binding = payload["spec"].get("manifest_binding")
+        if binding:
+            if (binding["entity_id"] != entity_id or binding["bot_id"] != bot_id
+                    or binding["tenant"] != str(payload.get("tenant") or "")
+                    or binding["env"] != str(payload["env"])):
+                return Fail(f"{BOT_COULD_NOT_BE_PROVISIONED}: bound Manifest storage reference does not match creation")
+            try:
+                self._seam_provider().verify_binding(
+                    entity_id=entity_id, bot_id=bot_id,
+                    manifest_digest=binding["manifest_digest"],
+                )
+            except ValueError as exc:
+                return Fail(f"{BOT_COULD_NOT_BE_PROVISIONED}: {exc}")
         bot = self._bots_provider().get_by_id_and_entity(bot_id, entity_id)
         if bot is None:
             return self._before_the_bot_exists(payload)
         if self._sequence(payload) is CreationSequence.RECORD_APPLY_PROVISION:
             return self._after_the_record_exists(payload, bot)
         return self._after_the_bot_exists(payload, bot)
+
+    @staticmethod
+    def _binding_kwargs(payload: dict) -> dict:
+        binding = payload["spec"].get("manifest_binding")
+        return {"expected_manifest_digest": binding["manifest_digest"]} if binding else {}
 
     def _sequence(self, payload: dict) -> CreationSequence:
         # Frozen at submission (W8): the sequence the creation started under
@@ -449,6 +467,7 @@ class BotCreateWithManifestHandler:
                 actor_id=user_id,
                 engine_type=payload["spec"].get("engine_type"),
                 bot_type=payload["spec"].get("bot_type"),
+                **self._binding_kwargs(payload),
             )
             return Reschedule(POLL_DELAY_SECONDS)
         if pre_container.status is ApplyStatus.RUNNING:
@@ -489,6 +508,7 @@ class BotCreateWithManifestHandler:
                     engine_type=spec.get("engine_type"),
                     bot_type=spec.get("bot_type"),
                     bot=bot,
+                    **self._binding_kwargs(payload),
                 )
                 return Reschedule(POLL_DELAY_SECONDS)
             if pre_container.status is ApplyStatus.RUNNING:
@@ -638,6 +658,7 @@ class BotCreateWithManifestHandler:
                 state=MANIFEST_STATE,
                 trigger=CREATE_ON_CONTAINER_TRIGGER,
                 phase=ApplyPhase.ON_CONTAINER,
+                **self._binding_kwargs(payload),
                 carry_from_apply_id=self._pre_container_apply_id(
                     entity_id=entity_id, bot_id=bot_id
                 ),

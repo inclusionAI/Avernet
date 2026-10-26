@@ -21,3 +21,7 @@ class ScanResult:
 
 class ExpertNotFoundError(LookupError):
     """The expert is not discoverable in the caller's scope."""
+
+
+class ExpertCreationError(ValueError):
+    """An expert cannot be adapted safely for the requested creation."""

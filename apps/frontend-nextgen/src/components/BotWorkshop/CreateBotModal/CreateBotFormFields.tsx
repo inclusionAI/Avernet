@@ -185,15 +185,22 @@ export function CreateBotFormFields({
           <span id="create-bot-space-label" className="block">
             归属空间
           </span>
-          <div
+          <select
             aria-labelledby="create-bot-space-label"
-            className="flex h-9 w-full items-center truncate rounded-md border border-input bg-muted/30 px-3 text-xs font-normal text-foreground"
+            value={values.spaceId}
+            disabled={creating || isLocal}
+            className="h-9 rounded-md border border-input bg-background px-3 text-xs"
+            onChange={(event) => {
+              const space = spaces.find((item) => item.id === event.target.value);
+              if (space) setValues((current) => ({ ...current, spaceId: space.id, ownership: space.ownership }));
+            }}
           >
-            {spaces[0]?.name ?? '当前空间不可用'}
-          </div>
-          <span className="block text-[10px] font-normal text-muted-foreground">
-            跟随当前工作空间，不支持在创建时切换
-          </span>
+            {spaces.map((space) => (
+              <option key={space.id} value={space.id} disabled={!space.canCreate}>
+                {space.name}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="flex flex-col gap-2 text-xs font-medium text-foreground">

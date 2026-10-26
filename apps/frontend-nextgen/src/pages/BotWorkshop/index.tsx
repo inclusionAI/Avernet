@@ -16,9 +16,9 @@ import { Empty } from '@/components/ui/Empty';
 import { Pagination } from '@/components/ui/Pagination';
 import { useBotWorkshop } from '@/hooks/useBotWorkshop';
 import { getGeneralConfigAvailability, type BotDomain } from '@/services/botWorkshop';
-import React, { useState } from 'react';
 import { Points } from '@/tracking/points';
 import { Tracert } from '@/utils/tracert';
+import React, { useState } from 'react';
 
 const BotWorkshopPage: React.FC = () => {
   const workshop = useBotWorkshop();
@@ -168,6 +168,7 @@ const BotWorkshopPage: React.FC = () => {
           authorization={workshop.createAuthorization}
           onClose={workshop.closeCreate}
           onSubmit={workshop.submitCreate}
+          onExpertCreated={() => void workshop.retry()}
         />
         <BotAccessModal
           mode={workshop.access.mode}

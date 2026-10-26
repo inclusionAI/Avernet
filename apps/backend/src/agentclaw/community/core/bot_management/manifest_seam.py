@@ -85,6 +85,10 @@ class ManifestCreationSeam(Protocol):
         """Store the document and return the ``entity_id`` it was keyed by."""
         ...
 
+    def verify_binding(self, *, entity_id: str, bot_id: str, manifest_digest: str) -> None:
+        """Refuse a changed or missing task-bound document without modifying it."""
+        ...
+
     def apply_pre_container(
         self,
         *,
@@ -95,6 +99,7 @@ class ManifestCreationSeam(Protocol):
         engine_type: str | None,
         bot_type: str | None,
         bot: dict[str, Any] | None = None,
+        expected_manifest_digest: str | None = None,
     ) -> str | None:
         """Run the pre-container phase. Never raises; ``None`` if it never started."""
         ...

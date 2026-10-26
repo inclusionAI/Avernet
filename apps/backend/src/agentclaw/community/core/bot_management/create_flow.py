@@ -23,6 +23,7 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Mapping
 
+from agentclaw.community.core.bot_management.expert_origin import ExpertOrigin
 from agentclaw.community.core.bot_management.create_context import (
     BotCreateContext,
     BotCreateDeploymentMode as BotCreateDeploymentMode,
@@ -333,10 +334,13 @@ def _apply_passport(
 
 
 def _build_ext(
-    *, avatar_url: str | None, agent_code: str | None, issued: bool = False
+    *, avatar_url: str | None, agent_code: str | None, issued: bool = False,
+    expert_origin: ExpertOrigin | None = None,
 ) -> dict[str, Any] | None:
     """Assemble the bot's ``ext`` payload; ``None`` when there is nothing to store."""
     ext: dict[str, Any] = {}
+    if expert_origin is not None:
+        ext["expert_origin"] = expert_origin.as_payload()
     if avatar_url:
         ext["avatar_url"] = avatar_url
     if agent_code:
@@ -531,7 +535,7 @@ def create_bot_with_authorization(
             "entity_type": spec.entity_type,
             "share_policy": spec.share_policy,
             "engine_type": spec.engine_type,
-            "ext": _build_ext(avatar_url=spec.avatar_url, agent_code=agent_code),
+            "ext": _build_ext(avatar_url=spec.avatar_url, agent_code=agent_code, expert_origin=spec.expert_origin),
             "bot_id": bot_id,
             "bot_type": spec.bot_type,
             "template_type": spec.template_type,
@@ -792,6 +796,7 @@ def creation_spec_to_payload(
         "template_validation_mode": spec.template_validation_mode.value,
         "space_id": spec.space_id,
         "engine_properties": spec.engine_properties,
+        "expert_origin": spec.expert_origin.as_payload() if spec.expert_origin else None,
         **context.as_payload(),
     }
 
@@ -817,6 +822,7 @@ def creation_spec_from_payload(
             ),
             space_id=payload.get("space_id"),
             engine_properties=payload.get("engine_properties") or {},
+            expert_origin=ExpertOrigin.from_payload(payload["expert_origin"]) if payload.get("expert_origin") else None,
         ),
         BotCreateContext.from_payload(payload),
     )
@@ -935,7 +941,7 @@ def complete_bot_authorization(
             "share_policy": spec.share_policy,
             "engine_type": spec.engine_type,
             "ext": _build_ext(
-                avatar_url=spec.avatar_url, agent_code=agent_code, issued=True
+                avatar_url=spec.avatar_url, agent_code=agent_code, issued=True, expert_origin=spec.expert_origin
             ),
             "bot_type": spec.bot_type,
             "template_type": spec.template_type,

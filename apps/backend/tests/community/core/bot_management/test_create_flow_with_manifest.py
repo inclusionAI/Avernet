@@ -228,3 +228,14 @@ def test_the_background_job_preserves_space_quota_enforcement():
 
     assert restored_spec == _SPEC
     assert restored_context == context
+
+
+def test_trusted_expert_origin_survives_durable_creation_spec_round_trip():
+    from dataclasses import replace
+    from agentclaw.community.core.bot_management.expert_origin import ExpertOrigin
+    origin = ExpertOrigin("source", "writer", "Writer", "a" * 40, "b" * 64, "c" * 64)
+    original = replace(_SPEC, expert_origin=origin)
+    frozen = creation_spec_to_payload(original, _CONTEXT)
+    restored, context = creation_spec_from_payload(frozen)
+    assert restored.expert_origin == origin
+    assert context == _CONTEXT

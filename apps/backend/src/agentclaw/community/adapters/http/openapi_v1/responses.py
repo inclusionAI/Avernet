@@ -379,10 +379,11 @@ def deleted(request: Request) -> Envelope[Deleted]:
 # identifiers and internal-language text never leak to external callers, and
 # (b) the two 404-mapped errors are byte-for-byte identical — a caller cannot
 # tell "exists but not yours/other tenant" from "does not exist".
-from agentclaw.community.core.expert_market.models import ExpertNotFoundError
+from agentclaw.community.core.expert_market.models import ExpertNotFoundError, ExpertCreationError
 
 ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     ExpertNotFoundError: (404, "Not found"),
+    ExpertCreationError: (422, "Expert cannot be created"),
     EngineVersionStageUnsupportedError: (409, "Engine version inspection supports draft only"),
     EngineVersionInstanceSelectionError: (409, "Select an existing workspace instance"),
     IamTokenUnavailableError: (401, "IAM credential is unavailable"),

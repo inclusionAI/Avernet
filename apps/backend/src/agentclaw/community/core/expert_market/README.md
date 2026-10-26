@@ -33,7 +33,8 @@ consumed_by:
   - "core.skill_center.services.git_sync — existing synchronization lifecycle"
   - "adapters.http.openapi_v1.experts — authenticated discovery DTOs"
 internal_dependencies:
-  - agentclaw.community.core.apply_engine  # the capability resolution and the CLI-tool verifier a template is checked against
+  - agentclaw.community.core.apply_engine  # capability resolution and CLI verifier
+  - agentclaw.community.core.bot_management
   - agentclaw.community.core.base
   - agentclaw.community.core.repository
   - agentclaw.community.core.bot_config_manifest
@@ -66,3 +67,21 @@ A complete commit without an `agents` entry is a legitimate empty catalogue
 (Git does not retain empty directories). An `agents` blob or symlink is invalid
 structure and cannot withdraw prior entries. Failed fetch/tree enumeration never
 reconciles removals.
+
+## Creation
+
+`POST /openapi/v1/experts/{expert_id}/bots` accepts the original `BotCreate` body
+and delegates to the original Manifest submission policy, quota and Passport
+flow. The deployment supplies `user_config.expert_market.creation_source.url`
+(a credential-free HTTPS Git URL) and optional `auth` (an existing Manifest
+source-credential name). GitSync's secret URL is deliberately not reused: its
+transport credential and the Manifest resolver credential have different owners.
+The configured source must correspond to the catalogue's `source_repo_id`.
+
+The original task spec binds the final stored Manifest key and canonical digest;
+its workers verify before each read and never reconstruct from the latest Git.
+An internal `ExpertOrigin` travels into the initial Bot INSERT with avatar and
+Passport ext fields. Ordinary Bot metadata updates reject that system key.
+The public Bot DTO exposes only `expert_name`; internal provenance remains in
+`ext.expert_origin`. Teclaw expert creation is explicitly refused until runtime
+consumption can be proven for that identity adapter.

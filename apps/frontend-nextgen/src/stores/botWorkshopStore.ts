@@ -3,6 +3,7 @@ import { create } from 'zustand';
 
 export interface BotWorkshopState {
   spaceId: string;
+  highlightBotId?: string;
   keyword: string;
   engine: string;
   deployment?: BotDeployment;

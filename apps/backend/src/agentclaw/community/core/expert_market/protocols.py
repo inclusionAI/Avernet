@@ -1,6 +1,9 @@
 """Transport-neutral expert catalogue service contract."""
 
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from agentclaw.community.core.expert_market.creation import CompiledExpert
 
 
 @runtime_checkable
@@ -45,3 +48,10 @@ class ExpertScannerProtocol(Protocol):
     """Existing GitSync supplies one verified commit to the expert reconciler."""
 
     def scan_git(self, bare_repo, *, source_commit: str, scope): ...
+
+
+@runtime_checkable
+class ExpertCreationServiceProtocol(Protocol):
+    def compile(self, *, tenant: str, expert_id: str, engine: str) -> "CompiledExpert":
+        """Bind the latest valid content to a controlled source and target engine."""
+        ...
