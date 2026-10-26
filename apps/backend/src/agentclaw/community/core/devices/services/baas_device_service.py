@@ -8,7 +8,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Protocol, override
 
 from agentclaw.community.core.bot_management.engines import resolve_provisioning
-from agentclaw.community.core.devices.errors import DeviceServiceError
+from agentclaw.community.core.devices.errors import DeviceServiceError, InvalidDeviceStatusError
 from agentclaw.community.core.devices.models import (
     AllocatedDevice,
     DeviceConnectionInfo,
@@ -840,12 +840,17 @@ class BaasDeviceService(DeviceService):
 
         Raises:
             DeviceNotFoundError: 设备绑定不存在
+            InvalidDeviceStatusError: 已释放的绑定不再请求 BaaS 连接信息
             BaasDeviceServiceError: 获取连接信息失败
         """
         logger.info(f"[BaasDeviceService.get_device_connection] Getting connection for binding_id={binding_id}, device_uuid={device_uuid}")
 
         # 延迟导入避免循环依赖
         from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
+
+        record = self._repo.get_by_id(binding_id)
+        if record is not None and record.status == DeviceBindingStatus.RELEASED.value:
+            raise InvalidDeviceStatusError("cannot get connection for released device")
 
         try:
             ws_info = self._baas_service.get_ws_info(
