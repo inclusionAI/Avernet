@@ -3,7 +3,7 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from fastapi.responses import JSONResponse
 
 from src.bootstrap.application_context import ApplicationContext
@@ -107,7 +107,9 @@ def _register_health_routes(app: FastAPI, context: ApplicationContext) -> None:
             )
 
 
-def create_bcsfuse_app(context: ApplicationContext) -> FastAPI:
+def create_bcsfuse_app(
+    context: ApplicationContext, *, search_router: APIRouter | None = None,
+) -> FastAPI:
     """Create the FastAPI application from an explicitly assembled context."""
     context.registry.require("config")
     context.registry.require("secret_provider")
@@ -184,6 +186,11 @@ def create_bcsfuse_app(context: ApplicationContext) -> FastAPI:
 
     # Store context in app state
     app.state.context = context
+
+    # The host explicitly supplies a shared router with its authenticated
+    # business service. Existing callers keep the complete TC v1 surface.
+    if search_router is not None:
+        app.include_router(search_router)
 
     _register_health_routes(app, context)
 

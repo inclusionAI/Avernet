@@ -17,8 +17,8 @@ BCSFuse is a collaboration control plane for AI worker management, providing tas
 # Using uv (recommended)
 uv sync
 
-# Or using pip
-pip install -e .
+# Or using pip, from apps/bcsfuse in a complete repository checkout
+pip install -e ../../middleware/python/avernet-search -e .
 ```
 
 ### Start Server

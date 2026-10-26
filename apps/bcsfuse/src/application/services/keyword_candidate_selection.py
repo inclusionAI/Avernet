@@ -3,6 +3,8 @@
 import logging
 from dataclasses import replace
 
+from avernet_search.core.ranking import reciprocal_rank_fusion
+
 from src.application.services.fragment_candidate_selection import (
     select_rerank_candidates,
 )
@@ -148,18 +150,15 @@ def fuse_candidates(
                 fragments=previous.fragments
                 + [f for f in candidate.fragments if f.fragment_id not in ids],
             )
+    # Core only sees opaque identities. TC retains its historical score scale,
+    # eligibility threshold, Profile merge and exact Worker ID priority.
+    rank_scores = {
+        hit.item_id: hit.score
+        for hit in reciprocal_rank_fusion([list(dense_rank), list(lexical_rank)])
+    }
     results = []
     for key, candidate in merged.items():
-        score = (
-            0.99
-            * 61
-            / 2
-            * sum(
-                1 / (60 + ranks[key])
-                for ranks in (dense_rank, lexical_rank)
-                if key in ranks
-            )
-        )
+        score = 0.99 * 61 / 2 * rank_scores[key]
         if candidate.metadata.get("_keyword_exact_id"):
             score = 1.0
         results.append(replace(candidate, aggregated_score=score))

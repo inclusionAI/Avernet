@@ -16,7 +16,7 @@ ApplicationContext(
     registry: ProviderRegistry,
 )
 
-create_bcsfuse_app(context: ApplicationContext) -> FastAPI
+create_bcsfuse_app(context: ApplicationContext, *, search_router=None) -> FastAPI
 ```
 
 `ApplicationContext` is an explicit, already-assembled dependency container.
@@ -26,6 +26,13 @@ or read internal configuration in order to complete the provider graph.
 `create_opensource_app(mode)` remains the compatibility entry point for the
 public deployment. It builds the public provider registry and delegates to
 `create_bcsfuse_app`.
+
+An explicitly supplied `search_router` adds the shared v2 search/recommendation
+API. The host constructs it with `TcSearchApplication`, authentication and an
+owned executor. Omitting it preserves the existing v1 route surface. Existing
+public and internal entrypoints do not opt in automatically. See
+[shared search boundaries](search-core-boundary.md) and the
+[public v2 contract](../../../../middleware/python/avernet-search/docs/search-api.md).
 
 ## Runtime business logging
 

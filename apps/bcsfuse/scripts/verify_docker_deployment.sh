@@ -56,7 +56,8 @@ log_skip() {
 
 # Get script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+cd "$REPO_ROOT"
 
 echo "============================================================"
 echo "BCSFuse Open-Core Docker Deployment Verification"
@@ -70,7 +71,7 @@ echo "============================================================"
 log_info "Building Docker image bcsfuse-opencore:p1-g8..."
 
 BUILD_START=$(date +%s)
-if docker build -t bcsfuse-opencore:p1-g8 . > /tmp/docker_build.log 2>&1; then
+if docker build -f apps/bcsfuse/Dockerfile -t bcsfuse-opencore:p1-g8 . > /tmp/docker_build.log 2>&1; then
     BUILD_END=$(date +%s)
     BUILD_DURATION=$((BUILD_END - BUILD_START))
     IMAGE_ID=$(docker images -q bcsfuse-opencore:p1-g8 | head -n1)

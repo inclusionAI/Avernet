@@ -61,6 +61,20 @@ wheels = [
 ]
 
 [[package]]
+name = "avernet-search"
+version = "0.1.0"
+source = { editable = "../../middleware/python/avernet-search" }
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", marker = "extra == 'http'", specifier = ">=0.100.0" },
+    { name = "httpx", marker = "extra == 'test'", specifier = ">=0.24.0" },
+    { name = "pydantic", marker = "extra == 'http'", specifier = ">=2.0.0" },
+    { name = "pytest", marker = "extra == 'test'", specifier = ">=7" },
+]
+provides-extras = ["http", "test"]
+
+[[package]]
 name = "backports-asyncio-runner"
 version = "1.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -75,6 +89,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "apscheduler" },
+    { name = "avernet-search" },
     { name = "faiss-cpu" },
     { name = "fastapi" },
     { name = "httpx" },
@@ -103,6 +118,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "apscheduler", specifier = ">=3.10.0" },
+    { name = "avernet-search", editable = "../../middleware/python/avernet-search" },
     { name = "faiss-cpu", specifier = "==1.8.0" },
     { name = "fastapi", specifier = ">=0.100.0" },
     { name = "httpx", specifier = ">=0.24.0" },

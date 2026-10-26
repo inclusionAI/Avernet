@@ -23,6 +23,7 @@ classifiers = [
 ]
 
 dependencies = [
+    "avernet-search==0.1.0",
     # Core Web Framework
     "fastapi>=0.100.0",
     "uvicorn[standard]>=0.23.0",
@@ -62,3 +63,6 @@ include = ["src*", "tests.smoke*"]
 
 [tool.setuptools.package-data]
 "*" = ["*.yaml", "*.json", "*.md"]
+
+[tool.uv.sources]
+avernet-search = { path = "../../middleware/python/avernet-search", editable = true }
