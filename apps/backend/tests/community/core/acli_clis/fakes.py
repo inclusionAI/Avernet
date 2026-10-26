@@ -148,6 +148,8 @@ class Engine:
         self.active: dict[str, str] = {}
         self.op_stage: dict[str, str] = {}
         self.calls: list[tuple] = []
+        #: The ``AcliRuntime.engine`` of every call, in order.
+        self.engines: list[str] = []
         #: When set, a submitted operation ends at once with this outcome.
         self.autorun: str | None = "succeeded"
         self.errors: dict[str, list[AcliPortError]] = {}
@@ -159,6 +161,7 @@ class Engine:
             raise queue.pop(0)
 
     async def submit(self, runtime: AcliRuntime, *, action: str, name: str) -> EngineOperation:
+        self.engines.append(runtime.engine)
         self.calls.append(("submit", runtime.stage, action, name))
         self._raise("submit")
         active = self.active.get(runtime.stage)
@@ -175,11 +178,13 @@ class Engine:
         return self.ops[op.id]
 
     async def get_operation(self, runtime: AcliRuntime, operation_id: str):
+        self.engines.append(runtime.engine)
         self.calls.append(("get", runtime.stage, operation_id))
         self._raise("get")
         return self.ops.get(operation_id)
 
     async def cancel(self, runtime: AcliRuntime, *, action: str, name: str) -> EngineOperation:
+        self.engines.append(runtime.engine)
         self.calls.append(("cancel", runtime.stage, action, name))
         self._raise("cancel")
         active = self.active.get(runtime.stage)
@@ -190,6 +195,7 @@ class Engine:
         return self.ops[op.id]
 
     async def list_tools(self, runtime: AcliRuntime) -> list[AcliTool]:
+        self.engines.append(runtime.engine)
         self.calls.append(("list", runtime.stage))
         self._raise("list")
         return [
