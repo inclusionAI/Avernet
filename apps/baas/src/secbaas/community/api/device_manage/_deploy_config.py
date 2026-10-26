@@ -414,7 +414,7 @@ class DeployConfig(BaseModel):
     # === Docker-specific fields ===
     docker_image: str | None = Field(
         default=None,
-        description="Docker 镜像名称，覆盖 template 中的默认镜像",
+        description="本次部署的 Docker 镜像覆盖值；更新、扩容或设备更新时省略/null 将清空旧覆盖值，使用模板/平台默认镜像",
     )
     docker_container_port: int | None = Field(
         default=None,
