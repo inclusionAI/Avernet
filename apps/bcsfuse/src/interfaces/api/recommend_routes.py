@@ -310,7 +310,7 @@ async def recommend_bots(request: BotRecommendationRequest) -> BotRecommendation
         "vector_min_score": vector_min_score,
         "rerank_min_score": rerank_min_score,
         "enable_rerank": enable_rerank,
-        "reranker_model": runtime_config.get("reranker_model") if enable_rerank else None,
+        "reranker_model": metadata.get("reranker_model", runtime_config.get("reranker_model")) if enable_rerank else None,
         "expand_factor": runtime_config.get("expand_factor", 2),
 
         # Phase F: Backward Compatibility 信息

@@ -36,8 +36,8 @@ class HttpReranker(Reranker):
     """
 
     # Qwen3-Reranker-4B: Chat 格式模板
-    CHAT_PREFIX = "<|im_start|>system\nJudge whether the Document meets the requirements based on the Query and the Instruct provided. Note that the answer can only be yes or no.。\n<|im_start|>user\n"
-    CHAT_SUFFIX = "。\n<|im_start|>assistant\n得分\n\n。\n"
+    CHAT_PREFIX = "<|im_start|>system\nJudge whether the Document meets the requirements based on the Query and the Instruct provided. Note that the answer can only be yes or no.<|im_end|>\n<|im_start|>user\n"
+    CHAT_SUFFIX = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
     CHAT_INSTRUCTION = "根据用户问题，找出最相关的文档。"
 
     # 支持的模型列表
@@ -46,12 +46,12 @@ class HttpReranker(Reranker):
     # 默认模型
     DEFAULT_MODEL = "bge-reranker-v2-m3"
 
-    def __init__(self):
+    def __init__(self, model: str | None = None):
         self.base_url = os.getenv("RERANKER_BASE_URL", os.getenv(
             "EMBEDDING_BASE_URL", ""))
         self.api_key = os.getenv("RERANKER_API_KEY", os.getenv(
             "EMBEDDING_AUTH_TOKEN", ""))
-        self.model = os.getenv("RERANKER_MODEL", self.DEFAULT_MODEL)
+        self.model = model if model is not None else os.getenv("RERANKER_MODEL", self.DEFAULT_MODEL)
         self.timeout = int(os.getenv("RERANKER_TIMEOUT", "30"))
 
         # 模型名称归一化（支持大小写不敏感）
@@ -223,6 +223,6 @@ class HttpReranker(Reranker):
         return scores
 
 
-def get_reranker() -> Reranker:
-    """获取默认 Reranker 实例"""
-    return HttpReranker()
+def get_reranker(model: str | None = None) -> Reranker:
+    """Explicit request model wins; omitted model uses the process default."""
+    return HttpReranker(model=model)
