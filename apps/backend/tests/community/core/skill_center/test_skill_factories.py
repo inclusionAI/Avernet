@@ -346,6 +346,81 @@ def test_teclaw_legacy_locator_cleanup_reapplies_workspace_adapter(test_injector
     assert storage._device_directory == "workspace/skills-local/reviewer"
 
 
+def test_openclaw_engine_locator_cleanup_targets_current_bot_directory(test_injector):
+    factory = test_injector.get(SkillServiceFactory)
+    factory._pool_layout_paths = lambda *_: None
+    calls = []
+    factory._device_fs_dispatcher.for_bot = lambda *args: calls.append(args) or object()
+    factory._path_factory.get_bot_skills_local_dir = (
+        lambda entity_id, bot_id, *_args, **_kwargs: Path(
+            f"/bots/{entity_id}/{bot_id}/skills-local"
+        )
+    )
+
+    storage = factory.local_skill_package_storage_for_locator(
+        entity_id="owner-7", owner_id="owner-7", bot_id="bot-1",
+        engine_type="openclaw", entity_type="staff", is_desktop=False,
+        is_teclaw=False,
+        locator="/home/admin/.openclaw/workspace/skills/skills-local/reviewer",
+        skill_name="reviewer",
+    )
+
+    assert storage.directory == "/bots/owner-7/bot-1/skills-local/reviewer"
+    assert calls == [("bot-1", "owner-7")]
+
+
+@pytest.mark.parametrize("locator", [
+    "/home/admin/.openclaw/workspace/skills/skills-local/other",
+    "/home/admin/.openclaw/workspace/skills/skills-local/../reviewer",
+    "/home/admin/.openclaw/workspace/skills-pool/skills-local/reviewer",
+    "/home/admin/.hermes/workspace/skills/skills-local/reviewer",
+    "/bots/owner-7/another-bot/skills-local/reviewer",
+])
+def test_openclaw_cleanup_rejects_unrelated_locators_before_device_io(
+    test_injector, locator,
+):
+    factory = test_injector.get(SkillServiceFactory)
+    factory._pool_layout_paths = lambda *_: None
+    calls = []
+    factory._device_fs_dispatcher.for_bot = lambda *args: calls.append(args) or object()
+    factory._path_factory.get_bot_skills_local_dir = (
+        lambda *_args, **_kwargs: Path("/bots/owner-7/bot-1/skills-local")
+    )
+
+    with pytest.raises(ValueError, match="escapes skills-local"):
+        factory.local_skill_package_storage_for_locator(
+            entity_id="owner-7", owner_id="owner-7", bot_id="bot-1",
+            engine_type="openclaw", entity_type="staff", is_desktop=False,
+            is_teclaw=False, locator=locator, skill_name="reviewer",
+        )
+    assert calls == []
+
+
+@pytest.mark.parametrize("pool_enabled,is_teclaw", [(True, False), (False, True)])
+def test_openclaw_legacy_alias_does_not_bypass_pool_or_teclaw_roots(
+    test_injector, pool_enabled, is_teclaw,
+):
+    factory = test_injector.get(SkillServiceFactory)
+    factory._pool_layout_paths = lambda *_: (
+        ("/pool/active", "/pool/local", "/pool/repo") if pool_enabled else None
+    )
+    factory._path_factory.get_bot_skills_local_dir = (
+        lambda *_args, **_kwargs: Path("skills-local")
+    )
+    calls = []
+    factory._device_fs_dispatcher.for_bot = lambda *args: calls.append(args) or object()
+
+    with pytest.raises(ValueError, match="escapes skills-local"):
+        factory.local_skill_package_storage_for_locator(
+            entity_id="owner-7", owner_id="owner-7", bot_id="bot-1",
+            engine_type="openclaw", entity_type="staff", is_desktop=False,
+            is_teclaw=is_teclaw,
+            locator="/home/admin/.openclaw/workspace/skills/skills-local/reviewer",
+            skill_name="reviewer",
+        )
+    assert calls == []
+
+
 def test_legacy_local_skill_packages_are_isolated_for_same_name_across_bots(
     test_injector,
 ):
