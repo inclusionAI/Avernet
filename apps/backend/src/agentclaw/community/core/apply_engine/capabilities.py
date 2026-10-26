@@ -55,8 +55,8 @@ from typing import TYPE_CHECKING, Any, Callable, Iterable, Protocol, runtime_che
 from agentclaw.community.core.apply_engine.constructs import (
     Construct,
     ConstructKind,
-    ManifestCategory,
-    ManifestSection,
+    Category,
+    Section,
     kind_of,
     parse_category,  # noqa: F401 - re-exported for the parser until the move completes
 )
@@ -67,7 +67,7 @@ from agentclaw.community.core.workspace.constants import (
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     # One-way dependency, deferred so it stays one way: ``support_matrix`` is
-    # built ON this module's ``ManifestCategory``, so importing it here at
+    # built ON this module's ``Category``, so importing it here at
     # module scope would close the cycle. ``resolve_capabilities`` imports it
     # inside the call, where the module is already initialised.
     from agentclaw.community.core.apply_engine.support_matrix import (
@@ -115,16 +115,16 @@ _REASON_UNKNOWN_ENGINE = (
 
 @runtime_checkable
 class CapabilityResolver(Protocol):
-    """What the apply run asks of the Manifest service: the bot's capabilities, by record or by engine and type.
+    """What the apply run asks for a bot's capabilities: by its record, or by its engine and type.
 
-    Declared here so the run service names no Manifest module; the Manifest
-    service satisfies it with the two entry points this module's own
+    The engine declares the port; the service that owns a bot's configuration
+    answers it with the two entry points this module's own
     ``resolve_capabilities`` / ``capabilities_for_bot`` back.
     """
 
-    def resolve_capabilities(self, *, active_engine: str | None, bot_type: str | None) -> ManifestCapabilities: ...
+    def resolve_capabilities(self, *, active_engine: str | None, bot_type: str | None) -> Capabilities: ...
 
-    def capabilities_for_bot(self, bot: dict[str, Any]) -> ManifestCapabilities: ...
+    def capabilities_for_bot(self, bot: dict[str, Any]) -> Capabilities: ...
 
 
 @dataclass(frozen=True)
@@ -160,7 +160,7 @@ class SourceCell:
     and the one a 422 used to be the only way to answer.
     """
 
-    category: ManifestCategory
+    category: Category
     protocol: SourceKind
     supported: bool
     reason: str
@@ -175,7 +175,7 @@ class SourceCell:
 
 
 @dataclass(frozen=True)
-class ManifestCapabilities:
+class Capabilities:
     """Every construct's verdict for one (engine type, bot type) pair."""
 
     engine_type: str
@@ -187,7 +187,7 @@ class ManifestCapabilities:
     source_matrix: tuple[SourceCell, ...] = ()
 
     def cell(
-        self, category: ManifestCategory, protocol: SourceKind
+        self, category: Category, protocol: SourceKind
     ) -> SourceCell | None:
         """The verdict for one combination, or ``None`` if it has no row."""
         for entry in self.source_matrix:
@@ -233,10 +233,13 @@ class ManifestCapabilities:
 
 def resolve_capabilities(
     *,
+    # Both optional on purpose: a bot record predating the fields carries
+    # neither, and the answer for an unknown engine is a verdict (every
+    # construct unsupported, with the reason) rather than an exception.
     active_engine: str | None,
     bot_type: str | None,
     is_teclaw: Callable[[str | None], bool],
-) -> ManifestCapabilities:
+) -> Capabilities:
     """Verdicts for every construct, from the engine and bot type alone.
 
     Args:
@@ -253,7 +256,7 @@ def resolve_capabilities(
             W13 call it with no injector in reach.
     """
     # Imported here, not at module scope: ``support_matrix`` imports this
-    # module for ``ManifestCategory``. The dependency runs one way — the table
+    # module for ``Category``. The dependency runs one way — the table
     # is built ON the vocabulary — and a top-level import here would close the
     # cycle. The same lazy-import reasoning ``legal_identity_types`` records.
     from agentclaw.community.core.apply_engine.support_matrix import (
@@ -283,19 +286,19 @@ def resolve_capabilities(
         return Capability(construct, True, "")
 
     blocked: dict[Construct, str | None] = {
-        ManifestCategory.MCP: None,
+        Category.MCP: None,
         # Materialised since W6, through the one write chain
         # (`ResourceFileService`'s dispatcher) with tree-replacement
         # semantics for directory entries — see the resources materialiser.
-        ManifestCategory.RESOURCES: None,
-        ManifestCategory.SKILLS: None,
-        ManifestCategory.ENGINE_CONFIG: _REASON_ENGINE_CONFIG,
-        ManifestCategory.IDENTITY: None,
+        Category.RESOURCES: None,
+        Category.SKILLS: None,
+        Category.ENGINE_CONFIG: _REASON_ENGINE_CONFIG,
+        Category.IDENTITY: None,
         # Materialised since W9, through ``CliToolService`` — the one
         # component the management API also installs through. Always
         # platform-managed, independent of the teclaw switch, as ``mcp`` is.
-        ManifestCategory.CLI_TOOLS: None,
-        ManifestSection.SCRIPT: _script_reason(teclaw=teclaw, desktop=desktop),
+        Category.CLI_TOOLS: None,
+        Section.SCRIPT: _script_reason(teclaw=teclaw, desktop=desktop),
         # Whether a *form* can be resolved at all. Which (category, protocol)
         # COMBINATIONS are open is a different question, answered by
         # ``source_matrix`` below — these flat rows structurally cannot express
@@ -303,7 +306,7 @@ def resolve_capabilities(
         # removed. Every form resolves; the matrix says where.
     }
 
-    def cell(category: ManifestCategory, protocol: SourceKind) -> SourceCell:
+    def cell(category: Category, protocol: SourceKind) -> SourceCell:
         """A cell, narrowed by this bot's own refusals.
 
         Two independent verdicts, intersected: the deployment-wide one (a
@@ -324,13 +327,13 @@ def resolve_capabilities(
             return SourceCell(category, protocol, False, refusal.reason)
         return SourceCell(category, protocol, True, "")
 
-    return ManifestCapabilities(
+    return Capabilities(
         engine_type=engine,
         bot_type=bot,
         schema_versions=SUPPORTED_SCHEMA_VERSIONS,
         source_matrix=tuple(
             cell(category, protocol)
-            for category in ManifestCategory
+            for category in Category
             for protocol in SourceKind
         ),
         # Every member of every construct enum, in declaration order. Built by
@@ -346,8 +349,8 @@ def resolve_capabilities(
 
 def _all_constructs() -> Iterable[Construct]:
     """Every construct, categories first, then sections."""
-    yield from ManifestCategory
-    yield from ManifestSection
+    yield from Category
+    yield from Section
 
 
 def _script_reason(*, teclaw: bool, desktop: bool) -> str | None:
@@ -365,7 +368,7 @@ def _script_reason(*, teclaw: bool, desktop: bool) -> str | None:
 
 def capabilities_for_bot(
     bot: dict[str, Any], is_teclaw: Callable[[str | None], bool]
-) -> ManifestCapabilities:
+) -> Capabilities:
     """The same answer, for a bot that already has a record.
 
     The whole body is the two-field read: the moment this does anything else,

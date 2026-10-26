@@ -337,9 +337,9 @@ the metadata table.
 ```diff
 # core/bot_config_manifest/apply/delivery.py — TeclawDelivery.phase_of
      def phase_of(self, step: ApplyStep) -> ApplyPhase:
-         if step.construct == ManifestSection.SCRIPT:
+         if step.construct == Section.SCRIPT:
              return step.phase
-+        if step.construct == ManifestCategory.CLI_TOOLS:
++        if step.construct == Category.CLI_TOOLS:
 +            # The artifact is teclaw's delivery and it is composed before
 +            # provisioning; a teclaw creation has no phase B at all under the
 +            # switch-on sequence. So this category is PRE_CONTAINER whatever
@@ -387,7 +387,7 @@ ADMIN write) and carries its own `ADMISSION` line; the contract lives in
 ```python
 # core/bot_config_manifest/apply/materialisers/cli_tools.py (new)
 class CliToolsMaterialiser(Materialiser):
-    construct = ManifestCategory.CLI_TOOLS
+    construct = Category.CLI_TOOLS
 
     def __init__(self, tools: CliToolService) -> None: ...
 

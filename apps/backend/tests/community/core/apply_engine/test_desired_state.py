@@ -5,11 +5,11 @@ from __future__ import annotations
 import pytest
 
 from agentclaw.community.core.apply_engine.compiler import (
-    GenomeStateRef,
-    ManifestStateRef,
+    LEGACY_STATE,
+    StateRef,
     state_ref_from_payload,
 )
-from agentclaw.community.core.apply_engine.constructs import ManifestCategory, ManifestSection
+from agentclaw.community.core.apply_engine.constructs import Category, Section
 from agentclaw.community.core.apply_engine.desired_state import (
     RESOURCES_ROOT,
     CenterSkillVersion,
@@ -31,7 +31,7 @@ from agentclaw.community.core.apply_engine.desired_state import (
     McpTransport,
     RepoSkillPath,
     SkillOrigin,
-    StoredContent,
+    ContentRef,
     UnpackKind,
 )
 
@@ -40,41 +40,41 @@ OTHER = "sha256:" + "cd" * 32
 
 
 def test_stored_content_requires_a_digest() -> None:
-    assert StoredContent(DIGEST).digest == DIGEST
+    assert ContentRef(DIGEST).digest == DIGEST
     with pytest.raises(ValueError, match="not a content digest"):
-        StoredContent("sha256:short")
+        ContentRef("sha256:short")
     with pytest.raises(ValueError, match="not a content digest"):
-        StoredContent("md5:" + "ab" * 32)
+        ContentRef("md5:" + "ab" * 32)
 
 
 def test_resource_paths_follow_the_root_and_the_trailing_slash_rule() -> None:
-    DesiredResourceFile(RESOURCES_ROOT + "faq.csv", StoredContent(DIGEST))
-    DesiredResourceTree(RESOURCES_ROOT + "prices/", StoredContent(DIGEST))
+    DesiredResourceFile(RESOURCES_ROOT + "faq.csv", ContentRef(DIGEST))
+    DesiredResourceTree(RESOURCES_ROOT + "prices/", ContentRef(DIGEST))
     with pytest.raises(ValueError, match="outside"):
-        DesiredResourceFile("notes/hello.txt", StoredContent(DIGEST))
+        DesiredResourceFile("notes/hello.txt", ContentRef(DIGEST))
     with pytest.raises(ValueError, match="must not end with"):
-        DesiredResourceFile(RESOURCES_ROOT + "prices/", StoredContent(DIGEST))
+        DesiredResourceFile(RESOURCES_ROOT + "prices/", ContentRef(DIGEST))
     with pytest.raises(ValueError, match="must end with"):
-        DesiredResourceTree(RESOURCES_ROOT + "prices", StoredContent(DIGEST))
+        DesiredResourceTree(RESOURCES_ROOT + "prices", ContentRef(DIGEST))
     with pytest.raises(ValueError, match="names the root"):
-        DesiredResourceTree(RESOURCES_ROOT, StoredContent(DIGEST))
+        DesiredResourceTree(RESOURCES_ROOT, ContentRef(DIGEST))
 
 
 def test_entries_need_their_identity() -> None:
     with pytest.raises(ValueError, match="server_code"):
         DesiredMcpServer("")
     with pytest.raises(ValueError, match="needs a type"):
-        DesiredIdentityFile("", StoredContent(DIGEST))
+        DesiredIdentityFile("", ContentRef(DIGEST))
     with pytest.raises(ValueError, match="needs a name"):
-        DesiredSkill("", LocalSkillPackage(StoredContent(DIGEST)))
+        DesiredSkill("", LocalSkillPackage(ContentRef(DIGEST)))
     with pytest.raises(ValueError, match="needs a name"):
-        DesiredCliTool("", StoredContent(DIGEST))
+        DesiredCliTool("", ContentRef(DIGEST))
     with pytest.raises(ValueError, match="needs a version"):
         CenterSkillVersion("")
     with pytest.raises(ValueError, match="needs a path"):
         RepoSkillPath("")
     with pytest.raises(ValueError, match="not a content digest"):
-        DesiredCliTool("rg", StoredContent(DIGEST), pin="sha256:nope")
+        DesiredCliTool("rg", ContentRef(DIGEST), pin="sha256:nope")
 
 
 def test_a_declaration_refuses_duplicate_identities() -> None:
@@ -87,7 +87,7 @@ def test_a_declaration_refuses_duplicate_identities() -> None:
 
 
 def test_skill_origin_is_read_off_the_source() -> None:
-    assert DesiredSkill("a", LocalSkillPackage(StoredContent(DIGEST))).origin is SkillOrigin.LOCAL
+    assert DesiredSkill("a", LocalSkillPackage(ContentRef(DIGEST))).origin is SkillOrigin.LOCAL
     assert DesiredSkill("b", CenterSkillVersion("v7")).origin is SkillOrigin.CENTER
     assert DesiredSkill("c", RepoSkillPath("team/weather")).origin is SkillOrigin.REPO
 
@@ -116,55 +116,67 @@ def test_state_declares_per_construct_and_none_means_untouched() -> None:
     state = DesiredState(
         script=Declaration((DesiredScript("echo hi"),)),
         mcp=Declaration(()),
-        resources=Declaration((DesiredResourceFile(RESOURCES_ROOT + "a.txt", StoredContent(DIGEST)),)),
+        resources=Declaration((DesiredResourceFile(RESOURCES_ROOT + "a.txt", ContentRef(DIGEST)),)),
     )
-    assert state.declaration(ManifestSection.SCRIPT).entries[0].body == "echo hi"
-    assert state.declaration(ManifestCategory.MCP).entries == ()
-    assert state.declaration(ManifestCategory.SKILLS) is None
-    assert state.declared == (ManifestSection.SCRIPT, ManifestCategory.RESOURCES, ManifestCategory.MCP)
+    assert state.declaration(Section.SCRIPT).entries[0].body == "echo hi"
+    assert state.declaration(Category.MCP).entries == ()
+    assert state.declaration(Category.SKILLS) is None
+    assert state.declared == (Section.SCRIPT, Category.RESOURCES, Category.MCP)
     assert DesiredState.EMPTY.declared == ()
     # A section has one fixed identity, so a second entry is a duplicate by construction.
     with pytest.raises(ValueError, match="duplicate entry 'script'"):
         DesiredState(script=Declaration((DesiredScript("a"), DesiredScript("b"))))
     engine = DesiredState(engine_config=Declaration((DesiredEngineConfig({"model": "x"}),)))
-    assert engine.declaration(ManifestCategory.ENGINE_CONFIG).entries[0].identity == "engine_config"
+    assert engine.declaration(Category.ENGINE_CONFIG).entries[0].identity == "engine_config"
 
 
 def test_cli_tool_pin_and_unpack() -> None:
-    tool = DesiredCliTool("rg", StoredContent(DIGEST), pin=OTHER, subpath="bin/rg", unpack=UnpackKind.TAR_GZ)
+    tool = DesiredCliTool("rg", ContentRef(DIGEST), pin=OTHER, subpath="bin/rg", unpack=UnpackKind.TAR_GZ)
     assert tool.identity == "rg"
     assert tool.pin == OTHER
     assert UnpackKind("tar.gz") is UnpackKind.TAR_GZ
 
 
 def test_state_reference_payloads_round_trip() -> None:
-    assert ManifestStateRef().to_payload() == {"kind": "manifest"}
-    assert GenomeStateRef("p1").to_payload() == {"kind": "genome", "promotion_id": "p1"}
-    assert state_ref_from_payload(None) == ManifestStateRef()
-    assert state_ref_from_payload({"kind": "manifest"}) == ManifestStateRef()
-    assert state_ref_from_payload({"kind": "genome", "promotion_id": "p1"}) == GenomeStateRef("p1")
-    with pytest.raises(ValueError, match="unknown state reference kind"):
-        state_ref_from_payload({"kind": "svn"})
+    assert StateRef("manifest").to_payload() == {"kind": "manifest", "reference": None}
+    assert StateRef("genome", "p1").to_payload() == {"kind": "genome", "reference": "p1"}
+    assert state_ref_from_payload(None) == LEGACY_STATE == StateRef("manifest")
+    assert state_ref_from_payload({"kind": "manifest", "reference": None}) == StateRef("manifest")
+    assert state_ref_from_payload({"kind": "genome", "reference": "p1"}) == StateRef("genome", "p1")
+    # The engine carries any kind; which kinds exist is the compiler map's business.
+    assert state_ref_from_payload({"kind": "svn"}) == StateRef("svn")
+    with pytest.raises(ValueError, match="needs a kind"):
+        state_ref_from_payload({"reference": "p1"})
+    with pytest.raises(ValueError, match="needs a kind"):
+        StateRef("")
+
+
+def test_the_producers_build_their_own_references() -> None:
+    from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import MANIFEST_STATE
+    from agentclaw.community.core.bot_genome.compile import GENOME_STATE_KIND, genome_state
+
+    assert MANIFEST_STATE == LEGACY_STATE, "rows that predate the reference were Manifest applies"
+    assert genome_state("p1") == StateRef(GENOME_STATE_KIND, "p1")
     with pytest.raises(ValueError, match="promotion id"):
-        GenomeStateRef("")
+        genome_state("")
 
 
 def test_resource_paths_are_normalised_workspace_relative_paths() -> None:
     for bad in ("data/../SOUL.md", "data//x", "data/./x", "/data/x", "data/a b"):
         with pytest.raises(ValueError):
-            DesiredResourceFile(bad, StoredContent(DIGEST))
+            DesiredResourceFile(bad, ContentRef(DIGEST))
 
 
 def test_a_directory_entry_owns_its_subtree() -> None:
-    tree = DesiredResourceTree(RESOURCES_ROOT + "prices/", StoredContent(DIGEST))
-    nested = DesiredResourceFile(RESOURCES_ROOT + "prices/2026.csv", StoredContent(OTHER))
-    same = DesiredResourceFile(RESOURCES_ROOT + "prices", StoredContent(OTHER))
+    tree = DesiredResourceTree(RESOURCES_ROOT + "prices/", ContentRef(DIGEST))
+    nested = DesiredResourceFile(RESOURCES_ROOT + "prices/2026.csv", ContentRef(OTHER))
+    same = DesiredResourceFile(RESOURCES_ROOT + "prices", ContentRef(OTHER))
     with pytest.raises(ValueError, match="nested under directory entry"):
         DesiredState(resources=Declaration((tree, nested)))
     with pytest.raises(ValueError, match="nested under directory entry"):
         DesiredState(resources=Declaration((same, tree)))
     DesiredState(
-        resources=Declaration((tree, DesiredResourceFile(RESOURCES_ROOT + "prices.csv", StoredContent(OTHER))))
+        resources=Declaration((tree, DesiredResourceFile(RESOURCES_ROOT + "prices.csv", ContentRef(OTHER))))
     )
 
 
@@ -189,11 +201,11 @@ def test_only_keeps_the_named_constructs_declared_and_undeclares_the_rest() -> N
     state is narrowed to that half without recompiling."""
     state = DesiredState(
         script=Declaration((DesiredScript("echo"),)),
-        identity=Declaration((DesiredIdentityFile("SOUL.md", StoredContent(DIGEST)),)),
+        identity=Declaration((DesiredIdentityFile("SOUL.md", ContentRef(DIGEST)),)),
         mcp=Declaration(()),
     )
-    half = state.only({ManifestSection.SCRIPT, ManifestCategory.MCP})
-    assert half.declared == (ManifestSection.SCRIPT, ManifestCategory.MCP)
+    half = state.only({Section.SCRIPT, Category.MCP})
+    assert half.declared == (Section.SCRIPT, Category.MCP)
     assert half.script == state.script and half.mcp == state.mcp and half.identity is None
     assert state.only(()) == DesiredState.EMPTY
     assert state.only(state.declared) == state

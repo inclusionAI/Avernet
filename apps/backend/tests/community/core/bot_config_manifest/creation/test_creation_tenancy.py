@@ -158,7 +158,7 @@ def _real_apply_service(manifests):
 
     db = _Db()
     return ApplyRunService(
-        manifest_service=manifests,
+        capabilities=manifests,
         apply_repository=BotConfigManifestApplyRepository(db),
         lock_repository=BotConfigManifestApplyLockRepository(db),
         compilers=manifest_compilers(manifests=manifests),

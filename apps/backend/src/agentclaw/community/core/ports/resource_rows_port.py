@@ -11,7 +11,18 @@ the materialiser needs this one operation and nothing of the CRUD surface.
 from __future__ import annotations
 
 from abc import abstractmethod
+from dataclasses import dataclass
 from typing import Optional, Protocol, Sequence, runtime_checkable
+
+
+@dataclass(frozen=True)
+class WrittenFile:
+    """One file the apply wrote under the resources root, as its row will describe it."""
+
+    #: Workspace-relative, root included: ``"data/kb/faq.md"``.
+    path: str
+    #: The bytes written, which the console listing shows as the file's size.
+    size: int
 
 
 @runtime_checkable
@@ -19,22 +30,24 @@ class ResourceRowsPort(Protocol):
     """The resource rows of one bot, replaced under the resources root."""
 
     @abstractmethod
-    async def replace_manifest_rows(
+    async def replace_rows(
         self,
         *,
-        files: Sequence[tuple[str, int]],
+        files: Sequence[WrittenFile],
         owner_id: str,
         created_by: Optional[str],
     ) -> None:
-        """Replace the bot's file rows under ``data/`` with one row per ``(path, size)``, source ``manifest``.
+        """Replace the bot's file rows under ``data/`` with one row per written file.
 
-        Deletes every file row under the root first, then inserts the given
-        rows, owned by ``owner_id`` (the bot's owner, whose console listing
-        these rows are) and stamped ``created_by`` (the actor who applied).
-        A failure raises: a row write that did not land is never reported as
-        success.
+        Deletes every file row under the root first, then inserts one row per
+        ``files`` member. ``owner_id`` is the bot's owner: the rows are that
+        user's console listing, so they are owned by the owner whoever
+        applied. ``created_by`` is the actor who ran the apply, stamped on each
+        row for the audit trail (``None`` when the apply had no acting user,
+        e.g. a job). A failure raises: a row write that did not land is never
+        reported as success.
         """
         ...
 
 
-__all__ = ["ResourceRowsPort"]
+__all__ = ["ResourceRowsPort", "WrittenFile"]

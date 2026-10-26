@@ -14,9 +14,7 @@ from agentclaw.community.core.apply_engine.run.service_protocol import (
     ApplyPhase,
     ApplyReport,
     ApplyRunServiceProtocol,
-    GenomeStateRef,
-    ManifestApplyInProgressError,
-    ManifestStateRef,
+    ApplyInProgressError,
     StateRef,
 )
 
@@ -25,8 +23,6 @@ __all__ = [
     "ApplyPhase",
     "ApplyReport",
     "ApplyRunServiceProtocol",
-    "GenomeStateRef",
-    "ManifestApplyInProgressError",
-    "ManifestStateRef",
+    "ApplyInProgressError",
     "StateRef",
 ]

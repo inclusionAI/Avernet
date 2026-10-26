@@ -30,17 +30,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
+from agentclaw.community.core.apply_engine.outcomes import SourceMode
 from agentclaw.community.core.apply_engine.support_matrix import SourceKind
 
 #: ``mode`` selects what happens when a ref resolves somewhere new
 #: (work-items §3.2). Declared on the **source**, never on an entry: the
 #: property is "may this ref move under me", which belongs to the thing holding
 #: the ref.
-VALID_SOURCE_MODES: frozenset[str] = frozenset({"strict", "non_strict"})
+VALID_SOURCE_MODES: frozenset[str] = frozenset(mode.value for mode in SourceMode)
 
 #: The default. Someone who writes ``ref: main`` rather than a SHA is asking for
 #: the ref to move; ``strict`` is how they say otherwise.
-DEFAULT_SOURCE_MODE = "non_strict"
+DEFAULT_SOURCE_MODE = SourceMode.NON_STRICT
 
 #: Keys every source may carry, whatever its protocol.
 _COMMON_KEYS: frozenset[str] = frozenset({"protocol", "auth"})
@@ -172,7 +173,7 @@ class SourceDecl:
     #: The **name** of a stored credential. Never a value — the manifest has no
     #: vocabulary for one, at any depth.
     auth: str | None = None
-    mode: str = DEFAULT_SOURCE_MODE
+    mode: SourceMode = DEFAULT_SOURCE_MODE
 
     @property
     def is_git(self) -> bool:
@@ -359,7 +360,7 @@ def parse_source(
             ref=ref,
             subpath=subpath,
             auth=auth,
-            mode=str(mode),
+            mode=SourceMode(mode),
         ),
         (),
     )

@@ -78,7 +78,7 @@ from agentclaw.community.core.ports.activation_port import (
     ActivationPort,
 )
 from agentclaw.community.core.apply_engine.context import ApplyContext
-from agentclaw.community.core.apply_engine.content import ContentReader
+from agentclaw.community.core.content_store import ContentReader
 from agentclaw.community.core.ports.identity_file_port import (
     IdentityFilePort,
 )
@@ -89,7 +89,7 @@ from agentclaw.community.core.ports.resource_rows_port import ResourceRowsPort
 from agentclaw.community.core.ports.skill_package_upload_port import (
     SkillPackageUploadPort,
 )
-from agentclaw.community.core.apply_engine.capabilities import ManifestCategory
+from agentclaw.community.core.apply_engine.capabilities import Category
 from agentclaw.community.core.apply_engine.cli_tools.service import (
     CliToolService,
 )
@@ -113,7 +113,7 @@ from agentclaw.community.core.apply_engine.outcomes import (
     ApplyConstruct,
     ApplyReport,
 )
-from agentclaw.community.core.apply_engine.capabilities import ManifestSection
+from agentclaw.community.core.apply_engine.capabilities import Section
 from agentclaw.community.core.apply_engine.delivery_mode import (
     TECLAW_PLATFORM_MANAGED_KEY,
     TeclawDeliveryMode,
@@ -360,13 +360,13 @@ class DeliveryStrategy(Protocol):
 #: The container family's phase per construct. ``script`` is the only
 #: construct that needs no container; everything else lands after it is up.
 _ARCA_PHASES: Mapping[ApplyConstruct, ApplyPhase] = MappingProxyType({
-    ManifestSection.SCRIPT: ApplyPhase.PRE_CONTAINER,
-    ManifestCategory.IDENTITY: ApplyPhase.ON_CONTAINER,
-    ManifestCategory.RESOURCES: ApplyPhase.ON_CONTAINER,
-    ManifestCategory.SKILLS: ApplyPhase.ON_CONTAINER,
-    ManifestCategory.MCP: ApplyPhase.ON_CONTAINER,
-    ManifestCategory.ENGINE_CONFIG: ApplyPhase.ON_CONTAINER,
-    ManifestCategory.CLI_TOOLS: ApplyPhase.ON_CONTAINER,
+    Section.SCRIPT: ApplyPhase.PRE_CONTAINER,
+    Category.IDENTITY: ApplyPhase.ON_CONTAINER,
+    Category.RESOURCES: ApplyPhase.ON_CONTAINER,
+    Category.SKILLS: ApplyPhase.ON_CONTAINER,
+    Category.MCP: ApplyPhase.ON_CONTAINER,
+    Category.ENGINE_CONFIG: ApplyPhase.ON_CONTAINER,
+    Category.CLI_TOOLS: ApplyPhase.ON_CONTAINER,
 })
 
 #: Platform-managed teclaw: the artifact is the delivery and it is composed
@@ -389,8 +389,8 @@ _TECLAW_PLATFORM_PHASES: Mapping[ApplyConstruct, ApplyPhase] = MappingProxyType(
 #: phase B at all, where an ``ON_CONTAINER`` ``cli_tools`` would never run.
 _TECLAW_DEVICE_PHASES: Mapping[ApplyConstruct, ApplyPhase] = MappingProxyType({
     **_ARCA_PHASES,
-    ManifestSection.SCRIPT: ApplyPhase.PRE_CONTAINER,
-    ManifestCategory.CLI_TOOLS: ApplyPhase.PRE_CONTAINER,
+    Section.SCRIPT: ApplyPhase.PRE_CONTAINER,
+    Category.CLI_TOOLS: ApplyPhase.PRE_CONTAINER,
 })
 
 # The no-drift assertion ``source_fetchers.FETCHER_TYPES`` and ``fetch/limits``

@@ -13,15 +13,15 @@ is its own component, and its only input is a typed **desired state**
 undeclared (`None`: the apply leaves the bot's state for it alone) or
 declared with a tuple of typed entries, an empty tuple declaring "none",
 which the engine converges to by removing what is there. Every entry names
-bytes already in the content store by digest (`StoredContent`), or a Skill
+bytes already in the content store by digest (`ContentRef`), or a Skill
 Center version, or a shared-repository path. The engine never sees a
 Manifest document and never fetches.
 
 **Two compilers, no translation.** What produces a desired state is a
 *compiler*, looked up by the apply run from the state reference an apply
-carries: `ManifestStateRef` → the Manifest compiler
+carries: `StateRef("manifest")` → the Manifest compiler
 (`core/bot_config_manifest/compiler/`, which validates, fetches, unpacks
-and files), `GenomeStateRef(promotion_id)` → the genome compiler
+and files), `StateRef("genome", promotion_id)` → the genome compiler
 (`core/bot_genome/compile.py`, which reads a stored revision while the
 promotion is current). A revision is not translated into a Manifest
 document, and a Manifest document is not translated into a revision. The
@@ -57,7 +57,7 @@ and [`apps/backend/docs/bot-evolution/01-genome.md` §2.7, §5.5](../../apps/bac
 ## Consequences
 
 - RSI-04 shrinks to binding: a `RevisionApplier` that starts an apply run
-  with `GenomeStateRef(promotion_id)`, materialisers that resolve a Center
+  with `StateRef("genome", promotion_id)`, materialisers that resolve a Center
   version and a repository path, the service-bot publish path, singlebox.
 - A new source of desired state (a template, a future format) is a new
   compiler and a new state reference, never a new materialiser or a change

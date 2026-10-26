@@ -28,7 +28,7 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Optional, Protocol, runtime_checkable
 
-from agentclaw.community.core.apply_engine.compiler import GenomeStateRef, ManifestStateRef, StateRef
+from agentclaw.community.core.apply_engine.compiler import StateRef
 from agentclaw.community.core.apply_engine.delivery import DeliveryStrategy
 from agentclaw.community.core.apply_engine.order import ApplyPhase
 from agentclaw.community.core.apply_engine.outcomes import (
@@ -38,7 +38,7 @@ from agentclaw.community.core.apply_engine.outcomes import (
 )
 
 
-class ManifestApplyInProgressError(RuntimeError):
+class ApplyInProgressError(RuntimeError):
     """Another apply already holds this bot's lock.
 
     Retryable, and the message says so. Raised **before** an ``apply_id`` is
@@ -71,9 +71,7 @@ __all__ = [
     "ApplyPhase",
     "ApplyReport",
     "ApplyRunServiceProtocol",
-    "GenomeStateRef",
-    "ManifestApplyInProgressError",
-    "ManifestStateRef",
+    "ApplyInProgressError",
     "StateRef",
 ]
 
@@ -101,10 +99,11 @@ class ApplyRunServiceProtocol(Protocol):
     ) -> ApplyAccepted:
         """Take the lock, check, record ``RUNNING``, start the work, return.
 
-        ``state`` names what to apply — ``ManifestStateRef()`` for the bot's
-        stored document, ``GenomeStateRef(promotion_id)`` for a promotion's
-        revision — and its type picks the compiler the worker compiles it
-        with. Stated at every call site, never defaulted, for the reason
+        ``state`` names what to apply — a producer's kind and reference: the
+        Manifest's ``MANIFEST_STATE`` for the bot's stored document, the
+        genome's ``genome_state(promotion_id)`` for a promotion's revision —
+        and its kind picks the compiler the worker compiles it with. Stated
+        at every call site, never defaulted, for the reason
         ``phase`` is: what an apply applies must not be inherited.
 
         ``bot`` is optional for one caller: W13 applies the pre-container phase
@@ -151,7 +150,7 @@ class ApplyRunServiceProtocol(Protocol):
                 ``state`` is of a type no compiler is registered for. A
                 programming error at a call site, raised before the lock is
                 taken and before an ``apply_id`` exists.
-            ManifestApplyInProgressError: Another apply holds this bot's lock.
+            ApplyInProgressError: Another apply holds this bot's lock.
             ManifestValidationError: The stored document no longer validates for
                 this bot. Re-validated rather than trusted from the ``PUT`` that
                 accepted it, because a bot's engine can change afterwards and

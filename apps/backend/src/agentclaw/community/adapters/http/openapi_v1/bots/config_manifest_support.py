@@ -14,11 +14,11 @@ from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.api.apply_run_service import (
     ApplyReport,
     ApplyRunServiceProtocol,
-    ManifestApplyInProgressError,
-    ManifestStateRef,
+    ApplyInProgressError,
 )
 from agentclaw.community.api.bot_config_manifest_service import (
-    ManifestCapabilities,
+    MANIFEST_STATE,
+    Capabilities,
     ManifestWriteResult,
 )
 from agentclaw.community.core.apply_engine.delivery import DeliveryStrategy
@@ -198,10 +198,10 @@ def start_put_apply(
             owner_id=owner_id,
             actor_id=actor_id,
             audit_actor=audit,
-            state=ManifestStateRef(),
+            state=MANIFEST_STATE,
             trigger=PUT_TRIGGER,
         )
-    except ManifestApplyInProgressError:
+    except ApplyInProgressError:
         return ConfigManifestApplyStarted(
             apply_id="", result="NOT_STARTED", reason="apply_in_progress"
         )
@@ -219,7 +219,7 @@ def start_put_apply(
 
 
 def capabilities_payload(
-    bot_id: str, capabilities: ManifestCapabilities
+    bot_id: str, capabilities: Capabilities
 ) -> ConfigManifestCapabilities:
     """Shape the resolver's answer as the response model."""
     return ConfigManifestCapabilities(

@@ -11,12 +11,12 @@
 `Declaration`——`script`、`identity`、`resources`、`skills`、`mcp`、`engine_config`、
 `cli_tools`——要么未声明（`None`：apply 不动 Bot 在该构造上的状态），要么以一组
 类型化条目声明，空元组即声明「没有」，引擎通过删除现有内容来收敛到它。每个条目
-以摘要（`StoredContent`）指向内容存储中已有的字节，或 Skill Center 的版本，或共享
+以摘要（`ContentRef`）指向内容存储中已有的字节，或 Skill Center 的版本，或共享
 仓库的路径。引擎从不看到 Manifest 文档，也从不拉取。
 
 **两个编译器，互不转换。** 产生期望状态的是*编译器*，apply 运行按 apply 携带的状态
-引用查找：`ManifestStateRef` → Manifest 编译器（`core/bot_config_manifest/compiler/`，
-负责校验、拉取、解包、归档），`GenomeStateRef(promotion_id)` → 基因组编译器
+引用查找：`StateRef("manifest")` → Manifest 编译器（`core/bot_config_manifest/compiler/`，
+负责校验、拉取、解包、归档），`StateRef("genome", promotion_id)` → 基因组编译器
 （`core/bot_genome/compile.py`，在晋升仍然有效时读取已存储的修订版）。修订版不转换
 成 Manifest 文档，Manifest 文档也不转换成修订版。契约里的 `compiled.yaml` 基准被一个
 等价性测试取代：把每个示例用例按两条路各编译一次并比较状态
@@ -42,7 +42,7 @@
 
 ## 后果
 
-- RSI-04 缩减为绑定：一个以 `GenomeStateRef(promotion_id)` 启动 apply 运行的
+- RSI-04 缩减为绑定：一个以 `StateRef("genome", promotion_id)` 启动 apply 运行的
   `RevisionApplier`、能解析 Center 版本与仓库路径的物化器、服务型 Bot 发布路径、
   singlebox。
 - 新的期望状态来源（模板、未来的格式）是一个新编译器加一个新状态引用，从不是

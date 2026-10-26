@@ -27,8 +27,8 @@ installed plus an ``old`` server the document no longer declares::
 
     # 3. write(ctx, plan) -> Sequence[EntryResult]
     #    Executes it. "unchanged" calls nothing; removals are deactivated.
-    (EntryResult(ManifestCategory.MCP, "gh", EntryOutcome.UNCHANGED),
-     EntryResult(ManifestCategory.MCP, "slack", EntryOutcome.CREATED))
+    (EntryResult(Category.MCP, "gh", EntryOutcome.UNCHANGED),
+     EntryResult(Category.MCP, "slack", EntryOutcome.CREATED))
 
 Had ``slack`` been unpermitted, ``resolve`` would have answered
 ``ResolveResult(intents=(...gh...), failures=(ResolveFailure("slack", "this
@@ -49,7 +49,7 @@ from abc import abstractmethod
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Optional, Protocol, Sequence, TypeVar, runtime_checkable
 
-from agentclaw.community.core.apply_engine.content import ContentReader
+from agentclaw.community.core.content_store import ContentReader
 from agentclaw.community.core.apply_engine.context import ApplyContext
 
 if TYPE_CHECKING:  # pragma: no cover — the registry stays import-light; see below
@@ -299,7 +299,7 @@ class Materialiser(Protocol[E]):
     succeeded.
     """
 
-    #: Which construct this materialises, e.g. ``ManifestCategory.MCP``. Also
+    #: Which construct this materialises, e.g. ``Category.MCP``. Also
     #: the key :func:`build_materialisers` files the instance under, so a
     #: materialiser cannot be registered under the wrong one.
     construct: ApplyConstruct
@@ -371,15 +371,15 @@ def build_materialisers(
     """The registry, built from injected services::
 
         {
-            ManifestSection.SCRIPT:          ScriptMaterialiser(...),
-            ManifestCategory.MCP:            McpMaterialiser(...),
-            ManifestCategory.IDENTITY:       IdentityMaterialiser(...),
-            ManifestCategory.SKILLS:         SkillsMaterialiser(...),
-            ManifestCategory.RESOURCES:      ResourcesMaterialiser(...),
-            ManifestCategory.CLI_TOOLS:      CliToolsMaterialiser(...),
+            Section.SCRIPT:          ScriptMaterialiser(...),
+            Category.MCP:            McpMaterialiser(...),
+            Category.IDENTITY:       IdentityMaterialiser(...),
+            Category.SKILLS:         SkillsMaterialiser(...),
+            Category.RESOURCES:      ResourcesMaterialiser(...),
+            Category.CLI_TOOLS:      CliToolsMaterialiser(...),
         }
 
-    Six keys, and ``ManifestCategory.ENGINE_CONFIG`` deliberately absent: a
+    Six keys, and ``Category.ENGINE_CONFIG`` deliberately absent: a
     document declaring it takes the orchestrator's no-materialiser path, which
     is an expected state rather than a gap.
 

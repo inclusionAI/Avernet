@@ -686,7 +686,7 @@ class DesiredState:
 `identity`、`resources`、`skills`、`mcp` 和 `script`，空列表即声明「没有」，
 引擎会通过删除现有内容来收敛到它——修订版从不覆盖的两个类别（`cli_tools`、
 `engine_config`）保持未声明。每个条目以摘要指向内容存储中的字节
-（`StoredContent`），Skill Center 技能以固定版本表示，共享仓库技能以路径表示；
+（`ContentRef`），Skill Center 技能以固定版本表示，共享仓库技能以路径表示；
 精选记忆在引擎记忆投影落地（§7，RSI-05）之前不投递。Bot Config Manifest 文档
 通过自己的编译器编译成同一种状态，两者之间从不互相转换：契约测试把每个示例
 用例按两条路各编译一次并比较
@@ -696,10 +696,10 @@ class DesiredState:
 # 示意：r42 编译出的结果
 DesiredState(
     script=Declaration(()),                                             # 修订版没有脚本：删除现有脚本
-    identity=Declaration((DesiredIdentityFile("SOUL.md", StoredContent("sha256:3f9a…")),)),
-    skills=Declaration((DesiredSkill("quality-check", LocalSkillPackage(StoredContent("sha256:0c55…"))),
+    identity=Declaration((DesiredIdentityFile("SOUL.md", ContentRef("sha256:3f9a…")),)),
+    skills=Declaration((DesiredSkill("quality-check", LocalSkillPackage(ContentRef("sha256:0c55…"))),
                         DesiredSkill("refund-policy", CenterSkillVersion("v7")))),                # §8 第 6 项
-    resources=Declaration((DesiredResourceTree("data/kb/", StoredContent("sha256:d4a7…")),)),
+    resources=Declaration((DesiredResourceTree("data/kb/", ContentRef("sha256:d4a7…")),)),
     mcp=Declaration(()),
     engine_config=None, cli_tools=None,                                 # 从不在修订版中：保持原样
 )

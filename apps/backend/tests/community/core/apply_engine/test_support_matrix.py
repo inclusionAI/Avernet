@@ -11,7 +11,7 @@ import pytest
 
 from agentclaw.community.core.apply_engine import support_matrix
 from agentclaw.community.core.apply_engine.capabilities import (
-    ManifestCategory,
+    Category,
 )
 from agentclaw.community.core.apply_engine.support_matrix import (
     ARCHIVE_FIELDS,
@@ -25,13 +25,13 @@ from agentclaw.community.core.apply_engine.support_matrix import (
     supports,
 )
 
-_ALL_CELLS = [(c, k) for c in ManifestCategory for k in SourceKind]
+_ALL_CELLS = [(c, k) for c in Category for k in SourceKind]
 
 
 def test_every_cell_of_the_cartesian_product_has_a_verdict():
     """The point of the table: no combination resolves to "nobody said"."""
     assert set(MATRIX) == set(_ALL_CELLS)
-    assert len(MATRIX) == len(ManifestCategory) * len(SourceKind)
+    assert len(MATRIX) == len(Category) * len(SourceKind)
 
 
 def test_a_category_added_without_a_verdict_fails_at_import():
@@ -42,7 +42,7 @@ def test_a_category_added_without_a_verdict_fails_at_import():
     protocol column at once.
     """
     verdicts = dict(support_matrix._VERDICTS)
-    del verdicts[(ManifestCategory.SKILLS, SourceKind.GIT)]
+    del verdicts[(Category.SKILLS, SourceKind.GIT)]
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(support_matrix, "_VERDICTS", verdicts)
         with pytest.raises(KeyError):
@@ -62,7 +62,7 @@ def test_a_verdict_for_a_cell_that_no_longer_exists_is_refused():
 
 @pytest.mark.parametrize(("category", "kind"), _ALL_CELLS)
 def test_a_refusal_carries_a_code_and_a_reason(
-    category: ManifestCategory, kind: SourceKind
+    category: Category, kind: SourceKind
 ):
     """A cell is supported, or it says why not in words a caller can act on.
 
@@ -89,16 +89,16 @@ def test_the_matrix_is_the_contract_the_spec_publishes():
     written down independently of the implementation.
     """
     supported = {
-        (ManifestCategory.IDENTITY, SourceKind.CONTENT),
-        (ManifestCategory.IDENTITY, SourceKind.OSS),
-        (ManifestCategory.IDENTITY, SourceKind.GIT),
-        (ManifestCategory.RESOURCES, SourceKind.CONTENT),
-        (ManifestCategory.RESOURCES, SourceKind.OSS),
-        (ManifestCategory.RESOURCES, SourceKind.GIT),
-        (ManifestCategory.SKILLS, SourceKind.OSS),
-        (ManifestCategory.SKILLS, SourceKind.GIT),
-        (ManifestCategory.CLI_TOOLS, SourceKind.OSS),
-        (ManifestCategory.CLI_TOOLS, SourceKind.GIT),
+        (Category.IDENTITY, SourceKind.CONTENT),
+        (Category.IDENTITY, SourceKind.OSS),
+        (Category.IDENTITY, SourceKind.GIT),
+        (Category.RESOURCES, SourceKind.CONTENT),
+        (Category.RESOURCES, SourceKind.OSS),
+        (Category.RESOURCES, SourceKind.GIT),
+        (Category.SKILLS, SourceKind.OSS),
+        (Category.SKILLS, SourceKind.GIT),
+        (Category.CLI_TOOLS, SourceKind.OSS),
+        (Category.CLI_TOOLS, SourceKind.GIT),
     }
     assert {cell for cell in _ALL_CELLS if supports(*cell)} == supported
 
@@ -111,11 +111,11 @@ def test_digest_is_required_exactly_where_bytes_are_executable_and_unpinned():
     written inline or reached by ``from:``.
     """
     assert DIGEST_REQUIRED == {
-        (ManifestCategory.SKILLS, SourceKind.OSS),
-        (ManifestCategory.CLI_TOOLS, SourceKind.OSS),
+        (Category.SKILLS, SourceKind.OSS),
+        (Category.CLI_TOOLS, SourceKind.OSS),
     }
-    assert not digest_required(ManifestCategory.CLI_TOOLS, SourceKind.GIT)
-    assert not digest_required(ManifestCategory.SKILLS, SourceKind.GIT)
+    assert not digest_required(Category.CLI_TOOLS, SourceKind.GIT)
+    assert not digest_required(Category.SKILLS, SourceKind.GIT)
     # Every cell that requires a digest is a cell that is supported at all —
     # a mandatory field on a refused combination is unreachable vocabulary.
     for cell in DIGEST_REQUIRED:
@@ -140,6 +140,6 @@ def test_the_matrix_cannot_be_edited_through_its_public_handle():
     """It is read by two subsystems on every request; a writable mapping is a
     module-global one of them could mutate for the lifetime of the process."""
     with pytest.raises(TypeError):
-        MATRIX[(ManifestCategory.MCP, SourceKind.GIT)] = None  # type: ignore[index]
+        MATRIX[(Category.MCP, SourceKind.GIT)] = None  # type: ignore[index]
     with pytest.raises(TypeError):
         ARCHIVE_FIELDS_BY_KIND[SourceKind.GIT] = frozenset()  # type: ignore[index]

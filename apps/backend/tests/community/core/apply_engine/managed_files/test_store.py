@@ -210,7 +210,7 @@ _REQ = ComposeRequest(entity_id="u1", bot_id="bot7", user_id="u1", engine_type="
 
 def _reader(store, document):
     return ManagedFilesComposeReader(
-        store=store, manifest_service_provider=lambda: _Manifests(document)
+        store=store, declared_state_provider=lambda: _Manifests(document)
     )
 
 

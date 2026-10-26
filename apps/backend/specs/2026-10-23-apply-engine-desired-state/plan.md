@@ -26,7 +26,7 @@ Three moves, in dependency order.
    to `PendingDeliveryApplier`.
 
 Names are kept where a rename would be churn without a behaviour change:
-`ManifestCategory`, `ManifestSection`, `ApplyReport`, `ApplyContext`, the
+`Category`, `Section`, `ApplyReport`, `ApplyContext`, the
 HTTP paths and the table names. The service and protocol are renamed
 (`ApplyRunService`, `ApplyRunServiceProtocol`) because "config manifest
 apply service" would be a lie once it runs genome states; #3072 renamed the
@@ -68,23 +68,23 @@ contract, never serialised; the apply engine's report types are dataclasses
 already).
 
 ```python
-class StoredContent:            digest: str                      # sha256:<hex64>
+class ContentRef:            digest: str                      # sha256:<hex64>
 class EntryFailure:             identity: str; reason: str       # what the compiler could not compile
 class Declaration(Generic[E]):  entries: tuple[E, ...]; failures: tuple[EntryFailure, ...] = ()
 
 class DesiredScript:            body: str                        # substituted, inline
-class DesiredIdentityFile:      type: str; content: StoredContent; note: str | None = None
+class DesiredIdentityFile:      type: str; content: ContentRef; note: str | None = None
 
 class SkillOrigin(StrEnum):     LOCAL, CENTER, REPO
-class LocalSkillPackage:        tree: StoredContent              # acm-tree-v1 of the package files, SKILL.md inside
+class LocalSkillPackage:        tree: ContentRef              # acm-tree-v1 of the package files, SKILL.md inside
 class CenterSkillVersion:       version: str
 class RepoSkillPath:            path: str
 class DesiredSkill:             name: str; source: LocalSkillPackage | CenterSkillVersion | RepoSkillPath
                                 note: str | None = None
                                 @property origin -> SkillOrigin
 
-class DesiredResourceFile:      path: str; content: StoredContent; note: str | None = None
-class DesiredResourceTree:      path: str  # ends with "/"; tree: StoredContent; note: str | None = None
+class DesiredResourceFile:      path: str; content: ContentRef; note: str | None = None
+class DesiredResourceTree:      path: str  # ends with "/"; tree: ContentRef; note: str | None = None
 DesiredResource = DesiredResourceFile | DesiredResourceTree     # paths are under RESOURCES_ROOT ("data/")
 
 class McpTransport(StrEnum):    SSE, STREAMABLE_HTTP
@@ -96,7 +96,7 @@ class McpOverride:              url: str | None; headers: tuple[McpHeader, ...]
 class DesiredMcpServer:         server_code: str; override: McpOverride | None
 
 class UnpackKind(StrEnum):      ZIP = "zip", TAR_GZ = "tar.gz"
-class DesiredCliTool:           name: str; content: StoredContent; pin: str | None   # declared digest; None over git
+class DesiredCliTool:           name: str; content: ContentRef; pin: str | None   # declared digest; None over git
                                 subpath: str | None; unpack: UnpackKind | None; version: str | None
                                 note: str | None = None
 class DesiredEngineConfig:      config: Mapping[str, Any]        # keys undecided (G-4, #2858)
@@ -162,7 +162,7 @@ entry's identity (`type`, `path`, `name`, `server_code`, `"script"`).
 
 `plan` and `write` are unchanged except resources (§ Totality) and
 cli_tools (`CliToolService._acquire` reads `decl.content` from the store;
-`CliToolDecl.entry` goes, `CliToolDecl.content: StoredContent | None`
+`CliToolDecl.entry` goes, `CliToolDecl.content: ContentRef | None`
 replaces it, `None` on the upload road).
 
 ## Compilers
@@ -207,7 +207,7 @@ type is a `ValueError` at `start_apply`, like a phase/trigger mismatch.
 - `entries/identity.py` — inline `content:` → `store_produced(origin=
   "manifest/inline", category=identity, entry_identity=type)`; fetched →
   resolver + `single()` + `file()`; emits `DesiredIdentityFile(type,
-  StoredContent(digest), note=delivery.note())`.
+  ContentRef(digest), note=delivery.note())`.
 - `entries/skills.py` — fetch; tree vs blob road; subtree selection; package
   validation (`SkillPackageValidator`) for the per-entry refusal; files the
   package as **acm-tree-v1** under the delivery's receipt URL (today the git
@@ -294,7 +294,7 @@ stripping `note`. The `compiled.yaml` files are deleted and
 - `ResourcesMaterialiser.write`: `clear_root()` (a failure fails the
   category with nothing written), then upload every member in declaration
   order with the existing per-entry outcomes, then
-  `ResourceService.replace_manifest_rows(bot, written_paths)` (delete the
+  `ResourceService.replace_rows(bot, written_paths)` (delete the
   bot's file rows under the root, insert one row per written file with
   source `manifest`). A row write failure is a category failure, never
   swallowed.
@@ -373,8 +373,8 @@ In the compiler (`declared.py`); see above.
 `__init__.py`, `README.md` (`## Context Boundary`), `desired_state.py`
 (+ `RESOURCES_ROOT`), `compiler.py` (`DesiredStateCompiler`, `StateRef`
 union, `Compiled`), `constructs.py` (from
-`bot_config_manifest/capabilities.py`: `ManifestCategory`,
-`ManifestSection`, `Construct`, `ManifestCapabilities`,
+`bot_config_manifest/capabilities.py`: `Category`,
+`Section`, `Construct`, `Capabilities`,
 `resolve_capabilities`, `SourceCell`), `delivery_mode.py`, `context.py`,
 `order.py`, `outcomes.py` (+ `state` on `ApplyReport`, `as_payload`),
 `registry.py`, `orchestrator.py`, `materialisers/{script,mcp,identity,
@@ -406,7 +406,7 @@ engine_config}.py`; `sources/` (moved funnel); `schema/validator.py`
 ### Repository and resources
 `protocols/bot/{config_manifest_apply,genome}.py`,
 `implementations/bot/{config_manifest_apply,genome}.py`;
-`core/resources/service.py` (`replace_manifest_rows`),
+`core/resources/service.py` (`replace_rows`),
 `core/services/resource_file_service.py` (`list_root`, `clear_root`),
 `core/ports/resource_file_port.py`.
 
@@ -436,7 +436,7 @@ carrying the grammar/fetch refusal cases lifted from the materialiser
 tests), `test_equivalence.py`; `apply_engine/test_desired_state.py`;
 `bot_genome/test_compile.py` (rewritten), `test_registry_service.py`
 (`drift`), `test_promotion_service.py`; `core/resources` tests for
-`replace_manifest_rows`; `di/test_apply_engine_module_wiring.py`.
+`replace_rows`; `di/test_apply_engine_module_wiring.py`.
 
 ## Testing Strategy
 
@@ -496,6 +496,6 @@ tests), `test_equivalence.py`; `apply_engine/test_desired_state.py`;
 
 - Resources root confirmed as `data/` (spec § Open Questions).
 - Bind the direct applier now or in RSI-04 (spec § Open Questions).
-- Whether `ManifestCategory`/`ManifestSection` should be renamed to
+- Whether `Category`/`Section` should be renamed to
   `Category`/`Section` now that they live in `apply_engine`. Left as is;
   a rename is a mechanical follow-up.

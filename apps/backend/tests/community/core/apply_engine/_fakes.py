@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
 
+from agentclaw.community.core.ports.resource_rows_port import WrittenFile
 from agentclaw.community.core.apply_engine.desired_state import RESOURCES_ROOT
 from agentclaw.community.core.apply_engine.context import ApplyContext
 from agentclaw.community.core.apply_engine.capabilities import (
@@ -1074,13 +1075,13 @@ class FakeResourceRows:
         self.replacements: list[dict[str, Any]] = []
         self.fail = fail
 
-    async def replace_manifest_rows(self, *, files, owner_id, created_by):
+    async def replace_rows(self, *, files, owner_id, created_by):
         if self.fail:
             raise RuntimeError("rows unavailable")
         self.replacements.append({"files": list(files), "owner_id": owner_id, "created_by": created_by})
 
     @property
-    def rows(self) -> list[tuple[str, int]]:
+    def rows(self) -> list[WrittenFile]:
         """The rows as the last replacement left them."""
         return list(self.replacements[-1]["files"]) if self.replacements else []
 
@@ -1556,7 +1557,7 @@ def manifest_compilers(*, manifests, applies=None, content=None, resolver=None, 
     the suite's document declares no sources. The content store and funnel
     default to empty fakes for the same reason.
     """
-    from agentclaw.community.core.apply_engine.compiler import ManifestStateRef
+    from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import MANIFEST_STATE
     from agentclaw.community.core.bot_config_manifest.sources.source_resolver import DeclaredSourceResolver
 
     content = content or FakeManifestContent()
@@ -1564,7 +1565,7 @@ def manifest_compilers(*, manifests, applies=None, content=None, resolver=None, 
     compiler = manifest_compiler(
         manifests=manifests, applies=applies, content=content, resolver=resolver, git=git, validator=validator
     )
-    return {ManifestStateRef: compiler}
+    return {MANIFEST_STATE.kind: compiler}
 
 
 def manifest_compiler(*, content, resolver, validator=None, git=None, applies=None, manifests=None):

@@ -36,7 +36,7 @@ from agentclaw.community.core.bot_config_manifest.sources.source_resolver import
     DeclaredSourceResolver,
 )
 from agentclaw.community.core.apply_engine.capabilities import (
-    ManifestCategory,
+    Category,
     resolve_capabilities,
 )
 from agentclaw.community.core.bot_config_manifest.schema.validator import (
@@ -363,10 +363,10 @@ async def test_combined_full_replace_dry_run_and_apply_use_real_persistence():
     orchestrator = EngineRig(
         ApplyOrchestrator(
             {
-                ManifestCategory.SKILLS: SkillsMaterialiser(
+                Category.SKILLS: SkillsMaterialiser(
                     uploads, activation, reader, real_validator(), content
                 ),
-                ManifestCategory.MCP: McpMaterialiser(
+                Category.MCP: McpMaterialiser(
                     activation, _Center(), _McpConfig(), reader
                 ),
             },
@@ -410,11 +410,11 @@ manifest:
 
     dry_categories = {category.construct: category for category in dry_run.categories}
     assert dry_run.status is ApplyStatus.SUCCEEDED
-    assert dry_categories[ManifestCategory.SKILLS].entries[0].outcome is EntryOutcome.UPDATED
-    assert dry_categories[ManifestCategory.MCP].removals == ("mcp.omit",)
+    assert dry_categories[Category.SKILLS].entries[0].outcome is EntryOutcome.UPDATED
+    assert dry_categories[Category.MCP].removals == ("mcp.omit",)
     dry_dependency = next(
         entry
-        for entry in dry_categories[ManifestCategory.MCP].entries
+        for entry in dry_categories[Category.MCP].entries
         if entry.identity == "mcp.dep"
     )
     assert dry_dependency.outcome is EntryOutcome.UPDATED
@@ -437,11 +437,11 @@ manifest:
 
     categories = {category.construct: category for category in report.categories}
     assert report.status is ApplyStatus.SUCCEEDED
-    assert categories[ManifestCategory.SKILLS].entries[0].outcome is EntryOutcome.UPDATED
-    assert categories[ManifestCategory.MCP].removals == ("mcp.omit",)
+    assert categories[Category.SKILLS].entries[0].outcome is EntryOutcome.UPDATED
+    assert categories[Category.MCP].removals == ("mcp.omit",)
     dependency = next(
         entry
-        for entry in categories[ManifestCategory.MCP].entries
+        for entry in categories[Category.MCP].entries
         if entry.identity == "mcp.dep"
     )
     assert dependency.outcome is EntryOutcome.UPDATED

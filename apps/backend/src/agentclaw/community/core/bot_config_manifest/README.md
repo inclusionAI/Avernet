@@ -518,7 +518,7 @@ below.
 purpose: Own a bot's configuration manifest — its storage, its schema v1 validation, the compiler that turns the stored document into the apply engine's typed DesiredState (grammar, named sources, the fetch funnel, filing bytes in the content store), and the creation flow that applies a document in two phases around container provisioning. What happens after a desired state exists — materialisers, orchestrator, delivery, the apply run — is core.apply_engine's.
 provides:
   - FetchContext  # exactly what a fetch reads off its caller's context (W9 gave it a second caller)
-  - ManifestCompiler  # the DesiredStateCompiler for ManifestStateRef: the stored document → the apply engine's DesiredState
+  - ManifestCompiler  # the DesiredStateCompiler for MANIFEST_STATE (kind "manifest"): the stored document → the apply engine's DesiredState
   - CompileSession
   - declared_entries
   - BotCreationManifestSeam (the ManifestCreationSeam implementation; only DI names it)
@@ -590,7 +590,7 @@ consumes:
 consumed_by:
   - "adapters/http/openapi_v1/bots — the public read/replace/clear/capabilities surface, and the create-with-manifest pair (W13), which reaches the seam and never the task queue"
   - "core.bot_management create_flow — submission calls the creation seam (preflight, persist, start the job); the dependency runs one way, so the seam is handed its job operations at construction rather than importing them"
-  - "core.apply_engine — the run service looks the ManifestCompiler up by ManifestStateRef and compiles through it; di/modules/manifest_fetch_module.py builds the compiler beside the fetch pipeline (the content store root and the fetch_transport_allowlist via the store's and W2's pure parsers over config_module's seam; the allowlist reaches SourceCredentialService as endpoint_allow_hosts) and holds the one DeclaredSourceResolver over the object store, the content store (bound by content_store_module) and W3's credentials"
+  - "core.apply_engine — the run service looks the ManifestCompiler up by MANIFEST_STATE's kind and compiles through it; di/modules/manifest_fetch_module.py builds the compiler beside the fetch pipeline (the content store root and the fetch_transport_allowlist via the store's and W2's pure parsers over config_module's seam; the allowlist reaches SourceCredentialService as endpoint_allow_hosts) and holds the one DeclaredSourceResolver over the object store, the content store (bound by content_store_module) and W3's credentials"
   - "adapters/http/openapi_v1/source_credentials — the public tenant credential register/rotate/read/delete surface (OPEN admission; app-operated — the edge requires an app credential, owner-app guarded)"
 internal_dependencies:
   - agentclaw.community.core.apply_engine  # the engine the Manifest compiles for: the construct vocabulary and capabilities, DesiredState and the compiler contract, the apply run the creation flow starts, the fetch caps (unpack) and identity vocabulary

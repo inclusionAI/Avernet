@@ -15,6 +15,14 @@ __all__ = ["compile_mcp"]
 
 
 def compile_mcp(entries: Sequence[Mapping[str, Any]]) -> Declaration[DesiredMcpServer]:
+    """``manifest.mcp`` entries → servers by code, with their typed override.
+
+    ``entries`` is the validated document's ``manifest.mcp`` list, e.g.::
+
+        {"server_code": "gh"}
+        {"server_code": "meet", "config": {"url": "https://…/mcp", "headers": {"X-Project": "a"},
+                                           "transport_protocol": "STREAMABLE_HTTP", "endpoint_env": "PRE"}}
+    """
     desired: list[DesiredMcpServer] = []
     failures: list[EntryFailure] = []
     seen: set[str] = set()

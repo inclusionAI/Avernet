@@ -20,8 +20,8 @@ from enum import StrEnum
 
 from agentclaw.community.core.apply_engine.outcomes import ApplyConstruct
 from agentclaw.community.core.apply_engine.capabilities import (
-    ManifestCategory,
-    ManifestSection,
+    Category,
+    Section,
 )
 
 
@@ -65,8 +65,8 @@ class ApplyPhase(StrEnum):
 class ApplyStep:
     """One construct's place in the order::
 
-        ApplyStep(ManifestSection.SCRIPT, 0)
-        ApplyStep(ManifestCategory.IDENTITY, 1)
+        ApplyStep(Section.SCRIPT, 0)
+        ApplyStep(Category.IDENTITY, 1)
 
     A pure ordering record: which construct, and where in the walk. The phase
     it lands in is **not** here, because it is not a property of the step — it
@@ -100,13 +100,13 @@ class ApplyStep:
 #: manifest declares (§2.12). #1508 removes the restriction in iteration 2 by
 #: delivering everything before the container starts.
 APPLY_ORDER: tuple[ApplyStep, ...] = (
-    ApplyStep(ManifestSection.SCRIPT, 0),
-    ApplyStep(ManifestCategory.IDENTITY, 1),
-    ApplyStep(ManifestCategory.RESOURCES, 2),
-    ApplyStep(ManifestCategory.SKILLS, 3),
-    ApplyStep(ManifestCategory.MCP, 4),
-    ApplyStep(ManifestCategory.ENGINE_CONFIG, 5),
-    ApplyStep(ManifestCategory.CLI_TOOLS, 6),
+    ApplyStep(Section.SCRIPT, 0),
+    ApplyStep(Category.IDENTITY, 1),
+    ApplyStep(Category.RESOURCES, 2),
+    ApplyStep(Category.SKILLS, 3),
+    ApplyStep(Category.MCP, 4),
+    ApplyStep(Category.ENGINE_CONFIG, 5),
+    ApplyStep(Category.CLI_TOOLS, 6),
 )
 
 __all__ = ["APPLY_ORDER", "ApplyPhase", "ApplyStep"]

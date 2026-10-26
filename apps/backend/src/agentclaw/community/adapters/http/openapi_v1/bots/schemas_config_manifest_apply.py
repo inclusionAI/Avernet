@@ -15,6 +15,8 @@ reach a caller without being named here first.
 """
 from __future__ import annotations
 
+from typing import Literal
+
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -134,9 +136,13 @@ class ConfigManifestApplyCategory(BaseModel):
 class ConfigManifestApplyState(BaseModel):
     """What the apply applied: the bot's stored Manifest, or a genome promotion's revision."""
 
-    kind: str = Field(description="`manifest` for the stored document, `genome` for a promotion's revision.")
-    promotion_id: str | None = Field(
-        default=None, description="The promotion whose revision was applied. Only for `genome`."
+    kind: Literal["manifest", "genome"] = Field(
+        description="`manifest` for the stored document, `genome` for a promotion's revision."
+    )
+    reference: str | None = Field(
+        default=None,
+        description="The producer's reference within the kind: the promotion id for `genome`; `null` for "
+        "`manifest`, which has one state per bot.",
     )
 
 

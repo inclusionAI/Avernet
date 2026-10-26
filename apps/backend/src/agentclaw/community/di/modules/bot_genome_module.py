@@ -19,7 +19,7 @@ from injector import Binder, Injector, Module, inject, multiprovider, provider, 
 
 from agentclaw.community.api.bot_genome_promotion_service import GenomePromotionServiceProtocol
 from agentclaw.community.api.bot_genome_registry_service import GenomeRegistryProtocol
-from agentclaw.community.core.apply_engine.compiler import GenomeStateRef, StateCompilers
+from agentclaw.community.core.apply_engine.compiler import StateCompilers
 from agentclaw.community.core.content_store import ContentStoreProtocol
 from agentclaw.community.core.apply_engine.delivery_mode import TeclawDeliveryMode
 from agentclaw.community.core.bot_genome.capture import BotStateReader
@@ -29,7 +29,7 @@ from agentclaw.community.core.bot_genome.promotion import (
     PendingDeliveryApplier,
     RevisionApplier,
 )
-from agentclaw.community.core.bot_genome.compile import GenomeCompiler
+from agentclaw.community.core.bot_genome.compile import GENOME_STATE_KIND, GenomeCompiler
 from agentclaw.community.core.bot_genome.registry import GenomeRegistryService
 from agentclaw.community.core.bot_genome.spec_checks import SpecChecks
 from agentclaw.community.core.bot_startup_script.bot_startup_script_service_protocol import (
@@ -150,7 +150,7 @@ class BotGenomeModule(Module):
     @inject
     def genome_state_compiler(self, compiler: GenomeCompiler) -> StateCompilers:
         """The genome row of the run service's compiler map; RSI-04 is its first caller."""
-        return {GenomeStateRef: compiler}
+        return {GENOME_STATE_KIND: compiler}
 
     @singleton
     @provider

@@ -222,7 +222,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_public.bot_discover_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_public.bot_public_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol  # Protocol defined in its owning core module, re-exported here
-  - agentclaw.community.core.apply_engine.compiler  # StateRef / ManifestStateRef / GenomeStateRef — the typed state reference apply_run_service's start_apply takes, re-exported beside the Protocol
+  - agentclaw.community.core.apply_engine.compiler  # StateRef — the (kind, reference) pair apply_run_service's start_apply takes, re-exported beside the Protocol; each producer declares its own (MANIFEST_STATE via bot_config_manifest_service, genome_state in core.bot_genome.compile)
   - agentclaw.community.core.apply_engine.run.service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_genome.genome_registry_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_genome.promotion.promotion_service_protocol  # Protocol defined in its owning core module, re-exported here

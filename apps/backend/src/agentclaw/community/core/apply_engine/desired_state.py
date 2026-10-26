@@ -28,7 +28,7 @@ from types import MappingProxyType
 from typing import Any, ClassVar, Collection, Generic, Mapping, Protocol, TypeVar
 
 from agentclaw.community.core.workspace.constants import RESOURCES_ROOT_DIR
-from agentclaw.community.core.apply_engine.constructs import Construct, ManifestCategory, ManifestSection
+from agentclaw.community.core.apply_engine.constructs import Construct, Category, Section
 from agentclaw.community.core.apply_engine.paths import relative_path_refusal
 from agentclaw.community.core.content_store import DIGEST_RE
 
@@ -54,7 +54,7 @@ __all__ = [
     "McpTransport",
     "RepoSkillPath",
     "SkillOrigin",
-    "StoredContent",
+    "ContentRef",
     "UnpackKind",
 ]
 
@@ -70,8 +70,16 @@ def _require(condition: bool, message: str) -> None:
 
 
 @dataclass(frozen=True)
-class StoredContent:
-    """Bytes in the content store, by address."""
+class ContentRef:
+    """A reference to bytes in the content store: their address, not the bytes.
+
+    ``digest`` is ``sha256:<64 hex>``, the store's content address. A
+    materialiser reads the bytes back through ``ContentReader`` at apply time;
+    the state itself carries only the reference, which is what makes it small,
+    comparable and free of fetching. Example::
+
+        ContentRef("sha256:3f9a…")   # the stored SOUL.md, filed by a compiler
+    """
 
     digest: str
 
@@ -81,14 +89,30 @@ class StoredContent:
 
 @dataclass(frozen=True)
 class EntryFailure:
-    """An entry the compiler could not compile, with the reason an apply report shows."""
+    """An entry the compiler could not compile, with the reason an apply report shows.
+
+    It sits on the construct's declaration beside the entries that did
+    compile, so one bad entry fails its category without hiding the rest.
+    ``identity`` is the entry's key as the report names it — not the
+    construct — e.g. ``"SOUL.md"`` for an identity file, ``"data/kb/"`` for a
+    resource, ``"quality-check"`` for a skill, ``"gh"`` for an MCP server,
+    ``"script"`` for the script::
+
+        EntryFailure("data/kb/", "the git tree contains nothing under subpath 'kb/'")
+    """
 
     identity: str
     reason: str
 
 
 class HasIdentity(Protocol):
-    """What every desired entry exposes: the key the report and the materialiser address it by."""
+    """What every desired entry exposes: ``identity``, the key the report and the materialiser address it by.
+
+    The key is the construct's natural one, not a generated id: an identity
+    file's ``type`` (``"SOUL.md"``), a resource's ``path`` (``"data/faq.csv"``),
+    a skill's ``name``, an MCP server's ``server_code``, a CLI tool's ``name``;
+    the script and the engine config, being single, use their construct's name.
+    """
 
     @property
     def identity(self) -> str: ...
@@ -126,15 +150,20 @@ class DesiredScript:
     """The startup script's body, after the compiler's placeholder substitution."""
 
     body: str
-    identity: ClassVar[str] = ManifestSection.SCRIPT.value
+    #: A bot has one script, so its report key is the construct's own name, ``"script"``: a class-level
+    #: constant rather than a field, since no instance could have a different one.
+    identity: ClassVar[str] = Section.SCRIPT.value
 
 
 @dataclass(frozen=True)
 class DesiredIdentityFile:
     """One identity file (persona file) by its engine-legal type, e.g. ``SOUL.md``."""
 
+    #: The file's type, which is also its file name: ``"SOUL.md"``, ``"RULES.md"``, ``"CLAUDE.md"`` …
     type: str
-    content: StoredContent
+    #: The file's bytes, in the content store.
+    content: ContentRef
+    #: Fetch provenance a compiler may attach for the report (e.g. "ref moved; kept last"); never affects the write.
     note: str | None = None
 
     def __post_init__(self) -> None:
@@ -155,7 +184,7 @@ class SkillOrigin(StrEnum):
 class LocalSkillPackage:
     """A bot-owned skill: the ``acm-tree-v1`` blob of its files, ``SKILL.md`` inside."""
 
-    tree: StoredContent
+    tree: ContentRef
 
 
 @dataclass(frozen=True)
@@ -215,10 +244,13 @@ def _check_resource_path(path: str, *, tree: bool) -> None:
 
 @dataclass(frozen=True)
 class DesiredResourceFile:
-    """One workspace file under the resources root."""
+    """One workspace file under the resources root, e.g. ``DesiredResourceFile("data/faq.csv", ContentRef(…))``."""
 
+    #: Workspace-relative, root included, no trailing slash: ``"data/faq.csv"``, ``"data/kb/returns.md"``.
     path: str
-    content: StoredContent
+    #: The file's bytes, in the content store.
+    content: ContentRef
+    #: Fetch provenance for the report; never affects the write.
     note: str | None = None
 
     def __post_init__(self) -> None:
@@ -231,10 +263,17 @@ class DesiredResourceFile:
 
 @dataclass(frozen=True)
 class DesiredResourceTree:
-    """One directory under the resources root: its path (ending in ``/``) and its tree blob."""
+    """One directory under the resources root, e.g. ``DesiredResourceTree("data/kb/", ContentRef(…))``.
 
+    The materialiser writes every file of the tree under ``path``; the
+    directory owns its subtree, so no other entry may sit under it.
+    """
+
+    #: Workspace-relative, root included, trailing slash: ``"data/kb/"``.
     path: str
-    tree: StoredContent
+    #: The directory's files as one stored ``acm-tree-v1`` blob (``canonical_tree_bytes``): paths and bytes.
+    tree: ContentRef
+    #: Fetch provenance for the report; never affects the write.
     note: str | None = None
 
     def __post_init__(self) -> None:
@@ -271,14 +310,19 @@ class McpHeader:
 class McpOverride:
     """A bot's override of an MCP server's registered configuration.
 
-    Every member is optional: an absent member means "not overridden", which
-    is why each is ``None`` (or an empty tuple) rather than a default value.
+    Every member is optional **by design**: a bot overrides only what its
+    document says, and the rest stays the server's registered configuration.
+    So ``None`` on a member means "not overridden" and is a valid, common
+    value — not a missing input — which is why none of them is required.
     """
 
+    #: ``None`` = the server's registered URL stays; a string replaces it.
     url: str | None = None
     #: ``None`` = headers not overridden; ``()`` = overridden to none (clears persisted headers).
     headers: tuple[McpHeader, ...] | None = None
+    #: ``None`` = the registered endpoint environment stays.
     endpoint_env: McpEndpointEnv | None = None
+    #: ``None`` = the registered transport stays.
     transport: McpTransport | None = None
 
     def __post_init__(self) -> None:
@@ -341,7 +385,7 @@ class DesiredCliTool:
     """
 
     name: str
-    content: StoredContent
+    content: ContentRef
     pin: str | None = None
     subpath: str | None = None
     unpack: UnpackKind | None = None
@@ -365,7 +409,7 @@ class DesiredEngineConfig:
     """The ``engine_config`` mapping; no materialiser applies it yet (G-4, #2858)."""
 
     config: Mapping[str, Any]
-    identity: ClassVar[str] = ManifestCategory.ENGINE_CONFIG.value
+    identity: ClassVar[str] = Category.ENGINE_CONFIG.value
 
     def __post_init__(self) -> None:
         # A private, read-only copy: the frozen promise holds for the mapping too (it is not hashable).
@@ -415,13 +459,13 @@ def _check_resource_layout(entries: tuple[DesiredResource, ...]) -> None:
 
 
 _FIELD_BY_CONSTRUCT: dict[Construct, str] = {
-    ManifestSection.SCRIPT: "script",
-    ManifestCategory.IDENTITY: "identity",
-    ManifestCategory.RESOURCES: "resources",
-    ManifestCategory.SKILLS: "skills",
-    ManifestCategory.MCP: "mcp",
-    ManifestCategory.ENGINE_CONFIG: "engine_config",
-    ManifestCategory.CLI_TOOLS: "cli_tools",
+    Section.SCRIPT: "script",
+    Category.IDENTITY: "identity",
+    Category.RESOURCES: "resources",
+    Category.SKILLS: "skills",
+    Category.MCP: "mcp",
+    Category.ENGINE_CONFIG: "engine_config",
+    Category.CLI_TOOLS: "cli_tools",
 }
 
 DesiredState.EMPTY = DesiredState()

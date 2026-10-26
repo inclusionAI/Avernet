@@ -26,7 +26,7 @@ from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_pr
     ManifestWriteResult,
 )
 from agentclaw.community.core.apply_engine.capabilities import (
-    ManifestCapabilities,
+    Capabilities,
     capabilities_for_bot,
     resolve_capabilities,
 )
@@ -83,7 +83,7 @@ class BotConfigManifestService(BotConfigManifestServiceProtocol):
 
     def resolve_capabilities(
         self, *, active_engine: str | None, bot_type: str | None
-    ) -> ManifestCapabilities:
+    ) -> Capabilities:
         """Which constructs this engine and bot type accept.
 
         The entry point W13 uses: no bot record is needed, because none exists
@@ -95,7 +95,7 @@ class BotConfigManifestService(BotConfigManifestServiceProtocol):
             is_teclaw=self._teclaw_engine_test_provider().is_teclaw,
         )
 
-    def capabilities_for_bot(self, bot: dict[str, Any]) -> ManifestCapabilities:
+    def capabilities_for_bot(self, bot: dict[str, Any]) -> Capabilities:
         """The same answer for a bot that already has a record."""
         return capabilities_for_bot(bot, self._teclaw_engine_test_provider().is_teclaw)
 

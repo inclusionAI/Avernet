@@ -21,7 +21,7 @@ from agentclaw.community.core.apply_engine.desired_state import (
     DesiredResourceFile,
     DesiredResourceTree,
     EntryFailure,
-    StoredContent,
+    ContentRef,
 )
 from agentclaw.community.core.apply_engine.paths import relative_path_refusal
 from agentclaw.community.core.bot_config_manifest.sources.entry_delivery import archive_refusal
@@ -117,10 +117,10 @@ async def _file(
         digest = await file_produced(
             session, content, inline.encode("utf-8"), origin=ORIGIN_INLINE, category=_CATEGORY_FILE, identity=path
         )
-        return DesiredResourceFile(path, StoredContent(digest))
+        return DesiredResourceFile(path, ContentRef(digest))
     delivery = await fetch(session, resolver, entry=entry, category=_CATEGORY_FILE, identity=path)
     data = await file_single(session, content, delivery, category=_CATEGORY_FILE, identity=path)
-    return DesiredResourceFile(path, StoredContent(digest_of(data)), note=delivery.note())
+    return DesiredResourceFile(path, ContentRef(digest_of(data)), note=delivery.note())
 
 
 async def _directory(
@@ -148,4 +148,4 @@ async def _directory(
         raise EntryFetchError(members)
     tree = canonical_tree_bytes(members)
     digest = await file_tree(session, content, delivery, tree, category=_CATEGORY_ARCHIVE, identity=path)
-    return DesiredResourceTree(path, StoredContent(digest), note=delivery.note())
+    return DesiredResourceTree(path, ContentRef(digest), note=delivery.note())

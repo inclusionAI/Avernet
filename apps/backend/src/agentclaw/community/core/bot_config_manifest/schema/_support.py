@@ -12,7 +12,7 @@ from typing import Any, Iterable
 from urllib.parse import urlsplit
 
 from agentclaw.community.core.apply_engine.capabilities import (
-    ManifestCapabilities,
+    Capabilities,
 )
 from agentclaw.community.core.bot_config_manifest.schema.limits import (
     MAX_SOURCE_URL_CHARS,
@@ -46,7 +46,7 @@ class Context:
     one problem at a time.
     """
 
-    capabilities: ManifestCapabilities
+    capabilities: Capabilities
     violations: list[Violation] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     #: Names declared under top-level ``sources``, for ``from`` to resolve

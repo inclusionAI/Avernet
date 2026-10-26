@@ -719,7 +719,7 @@ covers is declared — `identity`, `resources`, `skills`, `mcp` and `script`,
 an empty list declaring "none", which the engine converges to by removing
 what is there — and the two a revision never covers (`cli_tools`,
 `engine_config`) stay undeclared. Each entry names its bytes in the content
-store by digest (`StoredContent`), a Skill Center skill by its pinned
+store by digest (`ContentRef`), a Skill Center skill by its pinned
 version and a shared-repository skill by its path; curated memory is not
 delivered until the engine memory projection lands (§7, RSI-05). A Bot
 Config Manifest document compiles into the same state through its own
@@ -731,10 +731,10 @@ tests compile every example case both ways and compare
 # Illustrative: what r42 compiles to
 DesiredState(
     script=Declaration(()),                                             # the revision has no script: remove one
-    identity=Declaration((DesiredIdentityFile("SOUL.md", StoredContent("sha256:3f9a…")),)),
-    skills=Declaration((DesiredSkill("quality-check", LocalSkillPackage(StoredContent("sha256:0c55…"))),
+    identity=Declaration((DesiredIdentityFile("SOUL.md", ContentRef("sha256:3f9a…")),)),
+    skills=Declaration((DesiredSkill("quality-check", LocalSkillPackage(ContentRef("sha256:0c55…"))),
                         DesiredSkill("refund-policy", CenterSkillVersion("v7")))),                # §8 item 6
-    resources=Declaration((DesiredResourceTree("data/kb/", StoredContent("sha256:d4a7…")),)),
+    resources=Declaration((DesiredResourceTree("data/kb/", ContentRef("sha256:d4a7…")),)),
     mcp=Declaration(()),
     engine_config=None, cli_tools=None,                                 # never in a revision: left as they are
 )

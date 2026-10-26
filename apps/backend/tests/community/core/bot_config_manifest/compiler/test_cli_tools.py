@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentclaw.community.core.apply_engine.desired_state import StoredContent, UnpackKind
+from agentclaw.community.core.apply_engine.desired_state import ContentRef, UnpackKind
 from agentclaw.community.core.bot_config_manifest.compiler.entries.cli_tools import compile_cli_tools
 from agentclaw.community.core.bot_config_manifest.compiler.session import digest_of
 from tests.community.core.apply_engine._fakes import OSS_BUCKET, oss_source
@@ -27,7 +27,7 @@ async def test_pinned_tools_are_fetched_once_and_carry_the_install_shape() -> No
     first = await compile_cli_tools(session, [entry], resolver=resolver, content=content)
     assert first.failures == ()
     (tool,) = first.entries
-    assert tool.content == StoredContent(digest_of(BINARY))
+    assert tool.content == ContentRef(digest_of(BINARY))
     assert tool.pin == digest_of(BINARY)
     assert tool.unpack is UnpackKind.TAR_GZ and tool.subpath == "bin/jq" and tool.version == "1.7"
     assert tool.declared_address == f"{OSS_BUCKET}/jq.tgz"

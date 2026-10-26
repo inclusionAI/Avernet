@@ -1,6 +1,6 @@
 """``ManifestCompiler``: the bot's stored document → a ``DesiredState``.
 
-The one ``DesiredStateCompiler`` for ``ManifestStateRef``. Per compile it
+The one ``DesiredStateCompiler`` for ``MANIFEST_STATE`` (kind ``manifest``). Per compile it
 re-reads and re-validates the stored document (capabilities resolve from the
 bot's engine, which can change after a document is accepted), opens a
 ``CompileSession`` (budget, named sources, git baselines), compiles each
@@ -18,8 +18,8 @@ from __future__ import annotations
 import json
 from typing import Any, Callable, Collection, Mapping
 
-from agentclaw.community.core.apply_engine.compiler import Compiled, CompileRefused, ManifestStateRef
-from agentclaw.community.core.apply_engine.constructs import ApplyConstruct, ManifestCategory, ManifestSection
+from agentclaw.community.core.apply_engine.compiler import Compiled, CompileRefused, StateRef
+from agentclaw.community.core.apply_engine.constructs import ApplyConstruct, Category, Section
 from agentclaw.community.core.apply_engine.desired_state import DesiredState
 from agentclaw.community.core.apply_engine.context import ApplyContext
 from agentclaw.community.core.apply_engine.outcomes import ApplyReport, ApplyStatus
@@ -52,7 +52,7 @@ __all__ = ["ManifestCompiler"]
 
 
 class ManifestCompiler:
-    """Compiles ``ManifestStateRef``: the bot's stored Manifest document."""
+    """Compiles ``MANIFEST_STATE`` (kind ``manifest``): the bot's stored Manifest document."""
 
     def __init__(
         self,
@@ -71,7 +71,7 @@ class ManifestCompiler:
         self._git = git_client_provider
         self._applies = applies
 
-    def check(self, ctx: ApplyContext, ref: ManifestStateRef) -> None:
+    def check(self, ctx: ApplyContext, ref: StateRef) -> None:
         """Re-validate the stored document for the bot as it is now; raises ``ManifestValidationError``.
 
         Called for its exception: a document that cannot be applied is
@@ -84,7 +84,7 @@ class ManifestCompiler:
         self._parsed_or_empty(ctx)
 
     async def compile(
-        self, ctx: ApplyContext, ref: ManifestStateRef, *, only: Collection[ApplyConstruct] | None = None
+        self, ctx: ApplyContext, ref: StateRef, *, only: Collection[ApplyConstruct] | None = None
     ) -> Compiled:
         """The stored document's state; a document that does not validate is ``CompileRefused``.
 
@@ -135,15 +135,15 @@ class ManifestCompiler:
                 return None
             return declared_entries(parsed, construct)
 
-        script = declared(ManifestSection.SCRIPT)
-        identity = declared(ManifestCategory.IDENTITY)
-        resources = declared(ManifestCategory.RESOURCES)
-        skills = declared(ManifestCategory.SKILLS)
-        mcp = declared(ManifestCategory.MCP)
-        cli_tools = declared(ManifestCategory.CLI_TOOLS)
+        script = declared(Section.SCRIPT)
+        identity = declared(Category.IDENTITY)
+        resources = declared(Category.RESOURCES)
+        skills = declared(Category.SKILLS)
+        mcp = declared(Category.MCP)
+        cli_tools = declared(Category.CLI_TOOLS)
         manifest = parsed.get("manifest")
         engine_config_declared = (
-            (only is None or ManifestCategory.ENGINE_CONFIG in only)
+            (only is None or Category.ENGINE_CONFIG in only)
             and isinstance(manifest, Mapping)
             and "engine_config" in manifest
         )

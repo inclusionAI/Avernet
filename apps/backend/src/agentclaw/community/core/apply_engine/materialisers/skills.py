@@ -1,10 +1,16 @@
-"""Materialise the Manifest's complete Skill and Bot-owned Local snapshot.
+"""Materialise the desired skills as the bot's complete Skill and Bot-owned Local snapshot.
 
-Every declared package is validated and fully written through the normal Local
-package road, then converted to a Direct claim. Ordinary SkillSet memberships
-with the same runtime name are detached; Default supply is excluded. Existing
-effective names report ``updated`` and inactive or absent names report
-``created``—package equality is deliberately not probed.
+Every declared local package is validated and fully written through the normal
+Local package road, then converted to a Direct claim. Ordinary SkillSet
+memberships with the same runtime name are detached; Default supply is
+excluded. Existing effective names report ``updated`` and inactive or absent
+names report ``created``—package equality is deliberately not probed.
+
+A declared Skill Center or shared-repository skill is **skipped** for now
+(inclusionAI/Avernet#3103 tracks its delivery): it is logged at warning,
+written nowhere, counted as declared so nothing of that name is removed, and
+reported ``unchanged`` with a note saying so. Rewriting it as a local package
+would copy a governed asset into bot-owned storage, so that road is not taken.
 
 When the section is present, every omitted effective Skill is removed and every
 omitted Bot-owned Local asset is additionally unreferenced, physically deleted,
@@ -15,11 +21,13 @@ cleanup discoverable on a later Apply.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any, Sequence
+from dataclasses import dataclass
+from typing import Any, Sequence
 
-from agentclaw.community.core.apply_engine.content import ContentReader
+from agentclaw.community.core.content_store import ContentReader
 from agentclaw.community.core.apply_engine.skill_validation import PackageRefusal, validate_package
-from agentclaw.community.core.apply_engine.desired_state import DesiredSkill, LocalSkillPackage
+from agentclaw.community.core.apply_engine.context import ApplyContext
+from agentclaw.community.core.apply_engine.desired_state import DesiredSkill, LocalSkillPackage, SkillOrigin
 from agentclaw.community.core.content_store import decode_tree_bytes
 from agentclaw.community.core.content_store.errors import ContentStoreError
 from agentclaw.community.core.apply_engine.outcomes import (
@@ -36,7 +44,7 @@ from agentclaw.community.core.apply_engine.registry import (
     ResolveResult,
 )
 from agentclaw.community.core.apply_engine.capabilities import (
-    ManifestCategory,
+    Category,
 )
 from agentclaw.community.core.ports.activation_port import ActivationPort
 from agentclaw.community.core.ports.skill_package_upload_port import (
@@ -56,12 +64,20 @@ from agentclaw.community.core.skill_center.skill_package import (
 )
 from agentclaw.community.log import get_logger
 
-if TYPE_CHECKING:
-    from agentclaw.community.core.apply_engine.context import (
-        ApplyContext,
-    )
-
 logger = get_logger()
+
+@dataclass(frozen=True)
+class _NotDelivered:
+    """The intent of a skill this build does not deliver: carried through the plan so its name counts as declared."""
+
+    origin: SkillOrigin
+
+
+_SKIP_NOTE = (
+    "not delivered: a {origin} skill is skipped by this build (inclusionAI/Avernet#3103); "
+    "nothing was written or removed"
+)
+
 
 class _SkillPackage:
     """One entry's validated, upload-ready package — the intent's value.
@@ -106,11 +122,11 @@ class SkillsMaterialiser(Materialiser):
         plan    -> CategoryPlan(
                        entries=(PlannedEntry(<that intent>, "created"),),
                        removals=("retired-skill",))
-        write   -> (EntryResult(ManifestCategory.SKILLS, "quality-check",
+        write   -> (EntryResult(Category.SKILLS, "quality-check",
                                 EntryOutcome.CREATED),)
     """
 
-    construct = ManifestCategory.SKILLS
+    construct = Category.SKILLS
 
     def __init__(
         self,
@@ -126,28 +142,30 @@ class SkillsMaterialiser(Materialiser):
         self._validator = validator
         self._content = content
 
-    async def resolve(self, ctx: "ApplyContext", entries: Sequence[DesiredSkill]) -> ResolveResult:
+    async def resolve(self, ctx: ApplyContext, entries: Sequence[DesiredSkill]) -> ResolveResult:
         """Desired entries → validated packages, every refusal up front.
 
         A local package's stored tree goes through ``validate_directory`` —
         the same validator the manual upload service runs, so limits and
         layout stay one rule — and its canonical zip is what the upload takes.
-        A Skill Center or shared-repository skill is a shape the grammar
-        cannot declare and nothing here delivers yet: refused by name, so the
-        category is untouched rather than half-written.
+        A Skill Center or shared-repository skill is skipped (see the module
+        docstring): a warning, a placeholder intent, and the rest of the
+        category proceeds.
         """
         intents: list[Intent] = []
         failures: list[ResolveFailure] = []
         for entry in entries:
             name = entry.name
             if not isinstance(entry.source, LocalSkillPackage):
-                failures.append(
-                    ResolveFailure(
-                        name,
-                        f"a {entry.origin.value} skill cannot be delivered by this build; direct delivery of Skill "
-                        "Center and shared-repository skills lands with RSI-04",
-                    )
+                logger.warning(
+                    "[apply] skill %r is a %s skill, which this build does not deliver; skipped for bot %s "
+                    "(nothing written or removed; inclusionAI/Avernet#3103)",
+                    name,
+                    entry.origin.value,
+                    ctx.bot_id,
                 )
+                note = _SKIP_NOTE.format(origin=entry.origin.value)
+                intents.append(Intent(name, _NotDelivered(entry.origin), note=note))
                 continue
             try:
                 tree = await asyncio.to_thread(self._content.read, entry.source.tree.digest)
@@ -179,7 +197,7 @@ class SkillsMaterialiser(Materialiser):
         return ResolveResult(intents=tuple(intents), failures=tuple(failures))
 
     async def plan(
-        self, ctx: "ApplyContext", intents: Sequence[Intent]
+        self, ctx: ApplyContext, intents: Sequence[Intent]
     ) -> CategoryPlan:
         """Classify against effective names and include inactive Local cleanup."""
         area = self._area(ctx)
@@ -187,14 +205,18 @@ class SkillsMaterialiser(Materialiser):
         declared = {intent.identity for intent in intents}
 
         planned = [
-            PlannedEntry(
-                intent,
-                (
-                    EntryOutcome.UPDATED.value
-                    if intent.identity in area
-                    else EntryOutcome.CREATED.value
-                ),
-                requires_write=True,
+            (
+                PlannedEntry(intent, EntryOutcome.UNCHANGED.value)
+                if isinstance(intent.value, _NotDelivered)
+                else PlannedEntry(
+                    intent,
+                    (
+                        EntryOutcome.UPDATED.value
+                        if intent.identity in area
+                        else EntryOutcome.CREATED.value
+                    ),
+                    requires_write=True,
+                )
             )
             for intent in intents
         ]
@@ -213,7 +235,7 @@ class SkillsMaterialiser(Materialiser):
         return CategoryPlan(entries=tuple(planned), removals=removals)
 
     async def write(
-        self, ctx: "ApplyContext", plan: CategoryPlan
+        self, ctx: ApplyContext, plan: CategoryPlan
     ) -> Sequence[EntryResult]:
         """Fully write declarations, establish Direct claims, then clean omissions."""
         results: list[EntryResult] = []
@@ -221,6 +243,13 @@ class SkillsMaterialiser(Materialiser):
         try:
             for planned in plan.entries:
                 package = planned.intent.value
+                if isinstance(package, _NotDelivered):
+                    results.append(
+                        EntryResult(
+                            self.construct, planned.intent.identity, EntryOutcome.UNCHANGED, note=planned.intent.note
+                        )
+                    )
+                    continue
                 uploaded = await self._uploads.upload_local_skill(
                     bot_id=ctx.bot_id,
                     owner_id=ctx.entity_id,
@@ -291,7 +320,7 @@ class SkillsMaterialiser(Materialiser):
         self._refresh_actual_dependency_codes(ctx)
         return tuple(results)
 
-    def _area(self, ctx: "ApplyContext") -> dict[str, Any]:
+    def _area(self, ctx: ApplyContext) -> dict[str, Any]:
         """The active set by name — the reader's flush-then-read for this bot."""
         return {
             asset.name: asset
@@ -300,7 +329,7 @@ class SkillsMaterialiser(Materialiser):
             )
         }
 
-    def _local_assets(self, ctx: "ApplyContext") -> dict[str, Any]:
+    def _local_assets(self, ctx: ApplyContext) -> dict[str, Any]:
         return {
             asset.name: asset
             for asset in self._reader.local_skill_assets(
@@ -308,10 +337,10 @@ class SkillsMaterialiser(Materialiser):
             )
         }
 
-    def _assets_for_removal(self, ctx: "ApplyContext") -> dict[str, Any]:
+    def _assets_for_removal(self, ctx: ApplyContext) -> dict[str, Any]:
         return {**self._area(ctx), **self._local_assets(ctx)}
 
-    def _refresh_actual_dependency_codes(self, ctx: "ApplyContext") -> None:
+    def _refresh_actual_dependency_codes(self, ctx: ApplyContext) -> None:
         """Never let a failed write leave the Dry-run projection in context."""
         ctx.capability_state.final_skill_dependency_codes = None
         try:

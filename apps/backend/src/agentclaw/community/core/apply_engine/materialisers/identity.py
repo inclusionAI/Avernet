@@ -65,9 +65,10 @@ property only this category has an opinion about.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any, Optional, Sequence
+from typing import Any, Optional, Sequence
 
-from agentclaw.community.core.apply_engine.content import ContentReader
+from agentclaw.community.core.content_store import ContentReader
+from agentclaw.community.core.apply_engine.context import ApplyContext
 from agentclaw.community.core.apply_engine.desired_state import DesiredIdentityFile
 from agentclaw.community.core.content_store.errors import ContentStoreError
 from agentclaw.community.core.apply_engine.outcomes import (
@@ -83,17 +84,12 @@ from agentclaw.community.core.apply_engine.registry import (
     ResolveResult,
 )
 from agentclaw.community.core.apply_engine.capabilities import (
-    ManifestCategory,
+    Category,
 )
 from agentclaw.community.core.apply_engine.identity_types import (
     RESERVED_IDENTITY_FILES,
     legal_identity_types,
 )
-
-if TYPE_CHECKING:
-    from agentclaw.community.core.apply_engine.context import (
-        ApplyContext,
-    )
 
 def _decode_utf8(body: bytes) -> Optional[str]:
     """Both roads hand back bytes; only this category decides they must be
@@ -118,7 +114,7 @@ class IdentityMaterialiser(Materialiser):
         plan    -> CategoryPlan(
                        entries=(PlannedEntry(<that intent>, "updated"),),
                        removals=("OKR.md",))
-        write   -> (EntryResult(ManifestCategory.IDENTITY, "SOUL.md",
+        write   -> (EntryResult(Category.IDENTITY, "SOUL.md",
                                 EntryOutcome.UPDATED),)
 
     A removal is an **empty write**, not a delete: the domain reads absent and
@@ -126,13 +122,13 @@ class IdentityMaterialiser(Materialiser):
     name (``MEMORY.md``, ``IDENTITY.md``) never receives even that.
     """
 
-    construct = ManifestCategory.IDENTITY
+    construct = Category.IDENTITY
 
     def __init__(self, identity_service: Any, content: ContentReader) -> None:
         self._identity = identity_service
         self._content = content
 
-    async def resolve(self, ctx: "ApplyContext", entries: Sequence[DesiredIdentityFile]) -> ResolveResult:
+    async def resolve(self, ctx: ApplyContext, entries: Sequence[DesiredIdentityFile]) -> ResolveResult:
         """Desired entries → intents: one text body per file, read from the store.
 
         The engine's legal set is **re-asked here** rather than trusted from
@@ -185,7 +181,7 @@ class IdentityMaterialiser(Materialiser):
         return ResolveResult(intents=tuple(intents), failures=tuple(failures))
 
     async def plan(
-        self, ctx: "ApplyContext", intents: Sequence[Intent]
+        self, ctx: ApplyContext, intents: Sequence[Intent]
     ) -> CategoryPlan:
         """Classify each intent against the file set; compute removals."""
         entity_type, entity_id = _coords(ctx)
@@ -222,7 +218,7 @@ class IdentityMaterialiser(Materialiser):
         return CategoryPlan(entries=tuple(planned), removals=removals)
 
     async def write(
-        self, ctx: "ApplyContext", plan: CategoryPlan
+        self, ctx: ApplyContext, plan: CategoryPlan
     ) -> Sequence[EntryResult]:
         """Execute the plan: write each changed file, empty each removal.
 
@@ -272,7 +268,7 @@ class IdentityMaterialiser(Materialiser):
         return tuple(results)
 
 
-def _coords(ctx: "ApplyContext") -> tuple[str, str]:
+def _coords(ctx: ApplyContext) -> tuple[str, str]:
     """The entity pair every identity addressing uses, the router's own way.
 
     ``identity_coords_from_record`` is imported lazily for the cycle reason

@@ -1,7 +1,7 @@
 """Compile a revision into the apply engine's ``DesiredState`` — the genome's compiler.
 
 The mapping is ``api-contracts/genome/v1/manifest-v1-compatibility.md``: every
-stored file becomes a ``StoredContent`` by its digest, a local skill its
+stored file becomes a ``ContentRef`` by its digest, a local skill its
 ``acm-tree-v1`` tree, a Skill Center skill its pinned version, a
 shared-repository skill its path, MCP entries their typed override, and the
 script's stored body is read back. A revision is total (contract §4.3), so
@@ -10,7 +10,7 @@ the engine converges to by removing what is there — and the two it never
 covers (``cli_tools``, ``engine_config``) are left undeclared, so an apply
 leaves them as they are. ``memory`` is not delivered until RSI-05.
 
-``GenomeCompiler`` is the ``DesiredStateCompiler`` for ``GenomeStateRef``: a
+``GenomeCompiler`` is the ``DesiredStateCompiler`` for the ``genome`` kind (``genome_state(promotion_id)``): a
 promotion id resolves to the promotion row, whose revision compiles — while
 the promotion is current. The row is ``applying`` while the delivery seam
 answers and ``applied`` as soon as it has (before the apply run that delivers
@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Callable, Collection, NoReturn
 
-from agentclaw.community.core.apply_engine.compiler import Compiled, CompileRefused, GenomeStateRef
+from agentclaw.community.core.apply_engine.compiler import Compiled, CompileRefused, StateRef
 from agentclaw.community.core.apply_engine.constructs import ApplyConstruct
 from agentclaw.community.core.apply_engine.desired_state import (
     CenterSkillVersion,
@@ -42,7 +42,7 @@ from agentclaw.community.core.apply_engine.desired_state import (
     LocalSkillPackage,
     McpOverride,
     RepoSkillPath,
-    StoredContent,
+    ContentRef,
 )
 from agentclaw.community.core.bot_genome.errors import NotAppliable, Reason, RevisionNotFound
 from agentclaw.community.core.bot_genome.models import BotRef, ContentReader
@@ -75,13 +75,13 @@ def _skill_source(entry: SkillEntry) -> LocalSkillPackage | CenterSkillVersion |
         return CenterSkillVersion(entry.center_version)
     if isinstance(entry, RepoSkill):
         return RepoSkillPath(entry.repo_path)
-    return LocalSkillPackage(StoredContent(entry.digest))
+    return LocalSkillPackage(ContentRef(entry.digest))
 
 
 def _resource(entry: ResourceEntry) -> DesiredResource:
     if entry.path.endswith("/"):
-        return DesiredResourceTree(entry.path, StoredContent(entry.digest))
-    return DesiredResourceFile(entry.path, StoredContent(entry.digest))
+        return DesiredResourceTree(entry.path, ContentRef(entry.digest))
+    return DesiredResourceFile(entry.path, ContentRef(entry.digest))
 
 
 def _mcp(entry: McpServerEntry) -> DesiredMcpServer:
@@ -106,7 +106,7 @@ def compile_spec(spec: GenomeSpec, content: ContentReader) -> DesiredState:
             script = Declaration(())
         return DesiredState(
             script=script,
-            identity=Declaration(tuple(DesiredIdentityFile(e.type, StoredContent(e.digest)) for e in spec.persona)),
+            identity=Declaration(tuple(DesiredIdentityFile(e.type, ContentRef(e.digest)) for e in spec.persona)),
             resources=Declaration(tuple(_resource(e) for e in spec.resources)),
             skills=Declaration(tuple(DesiredSkill(e.name, _skill_source(e)) for e in spec.skills)),
             mcp=Declaration(tuple(_mcp(e) for e in spec.tools.mcp)),
@@ -115,8 +115,19 @@ def compile_spec(spec: GenomeSpec, content: ContentReader) -> DesiredState:
         raise NotAppliable([Reason("not_appliable", "spec", f"the revision cannot be delivered as recorded: {exc}")]) from exc
 
 
+#: The kind the genome registers its compiler under.
+GENOME_STATE_KIND = "genome"
+
+
+def genome_state(promotion_id: str) -> StateRef:
+    """The state reference that applies a promotion's revision (the promotion row holds the revision id)."""
+    if not promotion_id:
+        raise ValueError("a genome state reference needs a promotion id")
+    return StateRef(GENOME_STATE_KIND, promotion_id)
+
+
 class GenomeCompiler:
-    """Compiles ``GenomeStateRef``: the revision the named promotion delivers."""
+    """Compiles the ``genome`` kind: the revision the referenced promotion delivers."""
 
     def __init__(
         self,
@@ -131,30 +142,30 @@ class GenomeCompiler:
         self._refs = refs
         self._env = env
 
-    def _revision_of(self, ctx: ApplyContext, ref: GenomeStateRef) -> str:
+    def _revision_of(self, ctx: ApplyContext, ref: StateRef) -> str:
         """The revision id the promotion delivers; a missing, never-started or superseded promotion is refused."""
         axes = dict(env=self._env(), entity_id=ctx.entity_id, bot_id=ctx.bot_id)
-        row = self._promotions.get(**axes, promotion_id=ref.promotion_id)
+        row = self._promotions.get(**axes, promotion_id=ref.reference)
         if row is None:
-            raise RevisionNotFound(f"promotion {ref.promotion_id}")
+            raise RevisionNotFound(f"promotion {ref.reference}")
         if row.status not in _DELIVERABLE:
             allowed = " or ".join(sorted(_DELIVERABLE))
-            _refuse(f"promotion {ref.promotion_id} is {row.status!r}; only an {allowed} promotion is delivered")
+            _refuse(f"promotion {ref.reference} is {row.status!r}; only an {allowed} promotion is delivered")
         current = self._refs.get(**axes, name=row.ref)
         if current is None or current.revision_id != row.revision_id:
             now = current.revision_id if current is not None else None
             _refuse(
-                f"promotion {ref.promotion_id} moved {row.ref} to {row.revision_id}, but {row.ref} is {now!r} now; "
+                f"promotion {ref.reference} moved {row.ref} to {row.revision_id}, but {row.ref} is {now!r} now; "
                 "a superseded promotion is not delivered"
             )
         return row.revision_id
 
-    def check(self, ctx: ApplyContext, ref: GenomeStateRef) -> None:
+    def check(self, ctx: ApplyContext, ref: StateRef) -> None:
         """Raises the genome's own errors (``RevisionNotFound``, ``NotAppliable``), which its HTTP surface maps."""
         self._revision_of(ctx, ref)
 
     async def compile(
-        self, ctx: ApplyContext, ref: GenomeStateRef, *, only: Collection[ApplyConstruct] | None = None
+        self, ctx: ApplyContext, ref: StateRef, *, only: Collection[ApplyConstruct] | None = None
     ) -> Compiled:
         """The promotion's revision as a desired state; what ``check`` would refuse is ``CompileRefused`` here.
 
@@ -175,7 +186,7 @@ class GenomeCompiler:
         try:
             revision = self._revision_of(ctx, ref)
         except RevisionNotFound as exc:
-            raise CompileRefused(f"promotion {ref.promotion_id} is not there to deliver", domain_error=exc) from exc
+            raise CompileRefused(f"promotion {ref.reference} is not there to deliver", domain_error=exc) from exc
         except NotAppliable as exc:
             raise CompileRefused(str(exc), domain_error=exc) from exc
         try:

@@ -72,13 +72,14 @@ def test_the_manifest_compiler_is_the_compiler_maps_manifest_row(test_injector) 
     """The run service looks its compiler up by reference type; the Manifest
     row is contributed here, beside the fetch pipeline it compiles through,
     over the same resolver and content store singletons."""
-    from agentclaw.community.core.apply_engine.compiler import ManifestStateRef, StateCompilers
+    from agentclaw.community.core.apply_engine.compiler import StateCompilers
+    from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import MANIFEST_STATE
     from agentclaw.community.core.bot_config_manifest.sources.source_resolver import DeclaredSourceResolver
     from agentclaw.community.core.bot_config_manifest.compiler import ManifestCompiler
     from agentclaw.community.core.content_store.service_protocol import ContentStoreProtocol
 
     compilers = test_injector.get(StateCompilers)
-    compiler = compilers[ManifestStateRef]
+    compiler = compilers[MANIFEST_STATE.kind]
     assert isinstance(compiler, ManifestCompiler)
     assert compiler is test_injector.get(ManifestCompiler)
     assert compiler._resolver is test_injector.get(DeclaredSourceResolver)

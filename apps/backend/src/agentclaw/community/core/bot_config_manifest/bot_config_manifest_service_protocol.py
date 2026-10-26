@@ -33,8 +33,9 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Any, Optional, Protocol, TYPE_CHECKING, runtime_checkable
 
+from agentclaw.community.core.apply_engine.compiler import StateRef
 from agentclaw.community.core.apply_engine.capabilities import (
-    ManifestCapabilities,
+    Capabilities,
 )
 from agentclaw.community.core.bot_config_manifest.schema import (
     MAX_DOCUMENT_BYTES,
@@ -69,10 +70,15 @@ class ManifestWriteResult:
     declares_script: bool = False
 
 
+#: The state reference that applies a bot's stored Manifest document. A bot has one document, so the reference
+#: carries no identifier; the Manifest compiler registers under its ``kind``.
+MANIFEST_STATE = StateRef("manifest")
+
 __all__ = [
     "BotConfigManifestServiceProtocol",
+    "MANIFEST_STATE",
     "MAX_DOCUMENT_BYTES",
-    "ManifestCapabilities",
+    "Capabilities",
     "ManifestNotEncodableError",
     "ManifestTooLargeError",
     "ManifestValidationError",
@@ -139,11 +145,11 @@ class BotConfigManifestServiceProtocol(Protocol):
     @abstractmethod
     def resolve_capabilities(
         self, *, active_engine: str | None, bot_type: str | None
-    ) -> ManifestCapabilities:
+    ) -> Capabilities:
         """Which constructs this engine and bot type accept."""
         ...
 
     @abstractmethod
-    def capabilities_for_bot(self, bot: dict[str, Any]) -> ManifestCapabilities:
+    def capabilities_for_bot(self, bot: dict[str, Any]) -> Capabilities:
         """The same answer for a bot that already has a record."""
         ...

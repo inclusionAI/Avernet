@@ -7,8 +7,9 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from agentclaw.community.core.apply_engine.compiler import CompileRefused, ManifestStateRef
-from agentclaw.community.core.apply_engine.constructs import ManifestCategory, ManifestSection
+from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import MANIFEST_STATE
+from agentclaw.community.core.apply_engine.compiler import CompileRefused
+from agentclaw.community.core.apply_engine.constructs import Category, Section
 from agentclaw.community.core.apply_engine.desired_state import DesiredState
 from agentclaw.community.core.bot_config_manifest.sources.source_resolver import DeclaredSourceResolver
 from agentclaw.community.core.apply_engine.capabilities import resolve_capabilities
@@ -87,7 +88,7 @@ def _compiler(document: str | None, objects: dict[str, bytes] | None = None):
 @pytest.mark.asyncio
 async def test_a_stored_document_compiles_to_a_complete_state() -> None:
     compiler, content = _compiler(DOCUMENT, {"fixtures/qc.zip": PACKAGE})
-    compiled = await compiler.compile(make_context(), ManifestStateRef())
+    compiled = await compiler.compile(make_context(), MANIFEST_STATE)
     state = compiled.state
     assert compiled.sources == ()
     assert state.script.entries[0].body == "echo dev"
@@ -97,11 +98,11 @@ async def test_a_stored_document_compiles_to_a_complete_state() -> None:
     assert [e.server_code for e in state.mcp.entries] == ["gh"]
     assert state.engine_config is None and state.cli_tools is None
     assert state.declared == (
-        ManifestSection.SCRIPT,
-        ManifestCategory.IDENTITY,
-        ManifestCategory.RESOURCES,
-        ManifestCategory.SKILLS,
-        ManifestCategory.MCP,
+        Section.SCRIPT,
+        Category.IDENTITY,
+        Category.RESOURCES,
+        Category.SKILLS,
+        Category.MCP,
     )
     for digest in (state.identity.entries[0].content.digest, state.resources.entries[0].content.digest):
         assert content.is_reachable(None, digest, produced_by="manifest")
@@ -110,11 +111,11 @@ async def test_a_stored_document_compiles_to_a_complete_state() -> None:
 @pytest.mark.asyncio
 async def test_no_document_compiles_to_the_empty_state_and_null_script_declares_none() -> None:
     compiler, _ = _compiler(None)
-    assert (await compiler.compile(make_context(), ManifestStateRef())).state == DesiredState.EMPTY
+    assert (await compiler.compile(make_context(), MANIFEST_STATE)).state == DesiredState.EMPTY
     compiler, _ = _compiler("schema_version: 1\nscript: null\n")
-    state = (await compiler.compile(make_context(), ManifestStateRef())).state
+    state = (await compiler.compile(make_context(), MANIFEST_STATE)).state
     assert state.script is not None and state.script.entries == ()
-    assert state.declared == (ManifestSection.SCRIPT,)
+    assert state.declared == (Section.SCRIPT,)
 
 
 @pytest.mark.asyncio
@@ -142,8 +143,8 @@ async def test_only_narrows_the_compile_to_a_phases_constructs_and_fetches_nothi
         git_client_provider=FakeGitClient,
         applies=_Applies(),
     )
-    state = (await compiler.compile(make_context(), ManifestStateRef(), only={ManifestSection.SCRIPT})).state
-    assert state.declared == (ManifestSection.SCRIPT,)
+    state = (await compiler.compile(make_context(), MANIFEST_STATE, only={Section.SCRIPT})).state
+    assert state.declared == (Section.SCRIPT,)
     assert state.skills is None and state.identity is None
     assert objects.calls == []
 
@@ -162,8 +163,8 @@ async def test_a_document_that_stopped_validating_is_refused_in_compile_and_rais
 
     compiler._manifests = _Refusing("schema_version: 1\nmanifest:\n  mcp: []\n")
     with pytest.raises(ManifestValidationError):
-        compiler.check(make_context(), ManifestStateRef())
+        compiler.check(make_context(), MANIFEST_STATE)
     with pytest.raises(CompileRefused, match="no longer validates") as refused:
-        await compiler.compile(make_context(), ManifestStateRef())
+        await compiler.compile(make_context(), MANIFEST_STATE)
     assert isinstance(refused.value.domain_error, ManifestValidationError)
     assert refused.value.__cause__ is refused.value.domain_error

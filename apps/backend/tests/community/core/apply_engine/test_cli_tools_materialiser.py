@@ -22,7 +22,7 @@ import pytest
 
 from agentclaw.community.core.apply_engine.desired_state import (
     DesiredCliTool,
-    StoredContent,
+    ContentRef,
     UnpackKind,
 )
 from agentclaw.community.core.apply_engine.context import ApplyContext
@@ -34,7 +34,7 @@ from agentclaw.community.core.apply_engine.outcomes import EntryOutcome
 from agentclaw.community.core.bot_config_manifest.sources.source_resolver import (
     DeclaredSourceResolver,
 )
-from agentclaw.community.core.apply_engine.capabilities import ManifestCategory
+from agentclaw.community.core.apply_engine.capabilities import Category
 from agentclaw.community.core.apply_engine.cli_tools import (
     CliToolDecl,
     CliToolStatus,
@@ -181,7 +181,7 @@ async def test_a_desired_tool_becomes_the_services_declaration() -> None:
     and the address the document wrote rides along only to be echoed."""
     rig = _Rig()
     desired = DesiredCliTool(
-        "mycli", StoredContent(_DIGEST), pin=_DIGEST, subpath="bin/mycli",
+        "mycli", ContentRef(_DIGEST), pin=_DIGEST, subpath="bin/mycli",
         unpack=UnpackKind.ZIP, version="1.4.2", note="moved", declared_address="https://x/t.git",
     )
     resolved = await rig.mat.materialiser.resolve(_ctx(), [desired])
@@ -189,7 +189,7 @@ async def test_a_desired_tool_becomes_the_services_declaration() -> None:
     assert intent.identity == "mycli" and intent.note == "moved"
     assert intent.value == CliToolDecl(
         name="mycli", digest=_DIGEST, subpath="bin/mycli", unpack="zip", version="1.4.2",
-        content=StoredContent(_DIGEST), declared_address="https://x/t.git",
+        content=ContentRef(_DIGEST), declared_address="https://x/t.git",
     )
 
 
@@ -374,7 +374,7 @@ def test_the_materialiser_is_registered_under_its_own_construct() -> None:
         package_validator=object(), content=object(),
         resource_service=object(), resource_rows=object(), cli_tool_service=object(),
     )
-    assert isinstance(registry[ManifestCategory.CLI_TOOLS], CliToolsMaterialiser)
+    assert isinstance(registry[Category.CLI_TOOLS], CliToolsMaterialiser)
 
 
 def test_no_materialiser_names_an_engine() -> None:

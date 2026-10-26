@@ -7,7 +7,7 @@ architecture.
 
 The service fetches nothing. A manifest tool's bytes were fetched and filed
 by the Manifest compiler, and the declaration names them in the content store
-(:class:`StoredContent`); the service's whole acquisition is one ``read`` of
+(:class:`ContentRef`); the service's whole acquisition is one ``read`` of
 that address. The store here is :class:`FakeToolContent`, seeded the way a
 compile leaves it.
 """
@@ -20,7 +20,7 @@ import zipfile
 
 import pytest
 
-from agentclaw.community.core.apply_engine.desired_state import StoredContent
+from agentclaw.community.core.apply_engine.desired_state import ContentRef
 from agentclaw.community.core.apply_engine.cli_tools import (
     CliToolContext,
     CliToolDecl,
@@ -140,7 +140,7 @@ def _decl(**kwargs) -> CliToolDecl:
     base = {"name": "mycli", "digest": _DIGEST, "declared_address": "tools/mycli"}
     base.update(kwargs)
     if "content" not in base:
-        base["content"] = StoredContent(base["digest"])
+        base["content"] = ContentRef(base["digest"])
     return CliToolDecl(**base)
 
 
@@ -706,7 +706,7 @@ def test_the_declared_address_is_echoed_but_never_resolved() -> None:
 def test_a_declaration_without_a_digest_has_no_convergence_key() -> None:
     """The git road's declaration: the commit is its pin, so nothing on the
     row can say "already installed" — see ``CliToolDecl.convergence_key``."""
-    assert _decl(digest="", content=StoredContent(_DIGEST)).convergence_key is None
+    assert _decl(digest="", content=ContentRef(_DIGEST)).convergence_key is None
     assert _decl(subpath="bin/x").convergence_key == (_DIGEST, "bin/x")
 
 

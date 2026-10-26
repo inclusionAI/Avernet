@@ -26,6 +26,7 @@ from typing import Any
 
 import pytest
 
+from agentclaw.community.core.ports.resource_rows_port import WrittenFile
 from agentclaw.community.core.bot_config_manifest.sources.entry_delivery import (
     BlobDelivery,
     EntryFetchError,
@@ -730,7 +731,7 @@ def test_a_path_the_previous_apply_wrote_and_this_one_omits_is_removed():
     assert svc.present == {"data/a.md"}
     assert "data/b.md" in svc.deleted
     assert [(r.identity, r.outcome.value) for r in results] == [("data/a.md", "updated")]
-    assert rows.rows == [("data/a.md", 1)]
+    assert rows.rows == [WrittenFile("data/a.md", 1)]
 
 
 def test_a_file_the_bot_wrote_under_the_root_is_removed_and_reported():
@@ -780,13 +781,17 @@ def test_the_rows_follow_the_written_files():
     )
     assert len(rows.replacements) == 1
     assert rows.replacements[-1] == {
-        "files": [("data/notes/r.md", 7), ("data/wrap/a.txt", 3), ("data/wrap/sub/b.txt", 2)],
+        "files": [
+            WrittenFile("data/notes/r.md", 7),
+            WrittenFile("data/wrap/a.txt", 3),
+            WrittenFile("data/wrap/sub/b.txt", 2),
+        ],
         "owner_id": ctx.owner_id,
         "created_by": "u_actor",
     }
     # Owned by the bot's owner (whose listing these rows are), stamped with the actor who applied.
     assert rows.replacements[-1]["created_by"] == ctx.actor_id != ctx.owner_id
-    assert {path for path, _ in rows.rows} == set(svc.present)
+    assert {row.path for row in rows.rows} == set(svc.present)
 
 
 def test_a_silently_failed_clear_fails_every_member_and_writes_nothing():
@@ -1020,7 +1025,7 @@ def test_write_is_player_setup_convergent():
     assert svc.deleted == ["data/wrap/a.txt"]
     assert len(svc.clear_root_calls) == 2
     assert len(rows.replacements) == 2
-    assert rows.rows == [("data/wrap/a.txt", 3)]
+    assert rows.rows == [WrittenFile("data/wrap/a.txt", 3)]
 
 
 def test_write_failure_yields_failed_entry_per_member():
@@ -1053,7 +1058,7 @@ def test_write_failure_yields_failed_entry_per_member():
     assert [r.reason for r in results if r.outcome.value == "failed"] == ["resource delivery failed"]
     assert svc.writes == {("data/wrap", "a.txt"): b"A"}
     # The rows describe what landed, not what was declared.
-    assert rows.rows == [("data/wrap/a.txt", 1)]
+    assert rows.rows == [WrittenFile("data/wrap/a.txt", 1)]
 
 
 # --- registration: the fifth materialiser, and the artifact contract (Task 6) ---
@@ -1088,7 +1093,7 @@ def test_build_materialisers_registers_six():
         build_materialisers,
     )
     from agentclaw.community.core.apply_engine.capabilities import (
-        ManifestCategory,
+        Category,
     )
 
     registry = build_materialisers(
@@ -1105,7 +1110,7 @@ def test_build_materialisers_registers_six():
         resource_rows=resource_rows_for()[0],
         cli_tool_service=object(),
     )
-    assert ManifestCategory.RESOURCES in registry
+    assert Category.RESOURCES in registry
     assert len(registry) == 6
 
 
@@ -1385,7 +1390,7 @@ def test_dry_run_and_apply_report_the_same_resources_shape():
     assert svc.writes == {("data/notes", "r.md"): b"# rules", ("data/wrap", "a.txt"): b"AAA"}
     assert svc.deleted == ["data/stale.md"]
     assert svc.present == {"data/notes/r.md", "data/wrap/a.txt"}
-    assert rows.rows == [("data/wrap/a.txt", 3), ("data/notes/r.md", 7)]
+    assert rows.rows == [WrittenFile("data/wrap/a.txt", 3), WrittenFile("data/notes/r.md", 7)]
 
 
 def test_a_declared_empty_category_clears_the_root_and_reports_every_removal():

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentclaw.community.core.apply_engine.desired_state import McpEndpointEnv, McpHeader, StoredContent
+from agentclaw.community.core.apply_engine.desired_state import McpEndpointEnv, McpHeader, ContentRef
 from agentclaw.community.core.bot_config_manifest.compiler.entries.engine_config import compile_engine_config
 from agentclaw.community.core.bot_config_manifest.compiler.entries.identity import compile_identity
 from agentclaw.community.core.bot_config_manifest.compiler.entries.mcp import compile_mcp
@@ -61,7 +61,7 @@ async def test_identity_files_inline_content_and_fetches_declared_sources() -> N
         content=content,
     )
     assert [e.type for e in declared.entries] == ["SOUL.md", "AGENTS.md"]
-    assert declared.entries[0].content == StoredContent(digest_of(b"# fetched soul\n"))
+    assert declared.entries[0].content == ContentRef(digest_of(b"# fetched soul\n"))
     assert content.read(declared.entries[1].content.digest) == b"# inline\n"
     assert content.is_reachable(session.scope, declared.entries[1].content.digest, produced_by="manifest")
     reasons = {f.identity: f.reason for f in declared.failures}

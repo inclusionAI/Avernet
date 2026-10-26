@@ -39,8 +39,8 @@ from agentclaw.community.core.apply_engine.order import (
     ApplyPhase,
 )
 from agentclaw.community.core.apply_engine.capabilities import (
-    ManifestCategory,
-    ManifestSection,
+    Category,
+    Section,
 )
 
 
@@ -79,13 +79,13 @@ _IS_TECLAW = lambda engine: (engine or "").lower() == "teclaw"  # noqa: E731
 def test_arca_phases_are_the_strategys_own_table() -> None:
     arca = _arca()
     assert [(s.construct, arca.phase_of(s)) for s in APPLY_ORDER] == [
-        (ManifestSection.SCRIPT, ApplyPhase.PRE_CONTAINER),
-        (ManifestCategory.IDENTITY, ApplyPhase.ON_CONTAINER),
-        (ManifestCategory.RESOURCES, ApplyPhase.ON_CONTAINER),
-        (ManifestCategory.SKILLS, ApplyPhase.ON_CONTAINER),
-        (ManifestCategory.MCP, ApplyPhase.ON_CONTAINER),
-        (ManifestCategory.ENGINE_CONFIG, ApplyPhase.ON_CONTAINER),
-        (ManifestCategory.CLI_TOOLS, ApplyPhase.ON_CONTAINER),
+        (Section.SCRIPT, ApplyPhase.PRE_CONTAINER),
+        (Category.IDENTITY, ApplyPhase.ON_CONTAINER),
+        (Category.RESOURCES, ApplyPhase.ON_CONTAINER),
+        (Category.SKILLS, ApplyPhase.ON_CONTAINER),
+        (Category.MCP, ApplyPhase.ON_CONTAINER),
+        (Category.ENGINE_CONFIG, ApplyPhase.ON_CONTAINER),
+        (Category.CLI_TOOLS, ApplyPhase.ON_CONTAINER),
     ]
     for step in APPLY_ORDER:
         assert arca.phase_of(step) is _ARCA_PHASES[step.construct]
@@ -93,7 +93,7 @@ def test_arca_phases_are_the_strategys_own_table() -> None:
         sorted(APPLY_ORDER, key=lambda s: s.position)
     )
     assert [s.construct for s in arca.steps_for(ApplyPhase.PRE_CONTAINER)] == [
-        ManifestSection.SCRIPT
+        Section.SCRIPT
     ]
     assert arca.creation_sequence is CreationSequence.CREATE_BETWEEN_PHASES
     assert arca.needs_container()
@@ -124,13 +124,13 @@ def test_the_platform_shape_puts_every_construct_before_the_container() -> None:
     teclaw = _platform()
     pre = teclaw.steps_for(ApplyPhase.PRE_CONTAINER)
     assert {s.construct for s in pre} == {
-        ManifestSection.SCRIPT,
-        ManifestCategory.IDENTITY,
-        ManifestCategory.RESOURCES,
-        ManifestCategory.SKILLS,
-        ManifestCategory.MCP,
-        ManifestCategory.ENGINE_CONFIG,
-        ManifestCategory.CLI_TOOLS,
+        Section.SCRIPT,
+        Category.IDENTITY,
+        Category.RESOURCES,
+        Category.SKILLS,
+        Category.MCP,
+        Category.ENGINE_CONFIG,
+        Category.CLI_TOOLS,
     }
     assert teclaw.steps_for(ApplyPhase.ON_CONTAINER) == ()
     # Position order survives the re-phasing.
@@ -151,11 +151,11 @@ def test_the_device_shape_is_the_pre_w8_shape() -> None:
     assert {s.construct for s in on} == {
         s.construct
         for s in APPLY_ORDER
-        if s.construct not in (ManifestSection.SCRIPT, ManifestCategory.CLI_TOOLS)
+        if s.construct not in (Section.SCRIPT, Category.CLI_TOOLS)
     }
     assert [s.construct for s in teclaw.steps_for(ApplyPhase.PRE_CONTAINER)] == [
-        ManifestSection.SCRIPT,
-        ManifestCategory.CLI_TOOLS,
+        Section.SCRIPT,
+        Category.CLI_TOOLS,
     ]
     assert teclaw.creation_sequence is CreationSequence.CREATE_BETWEEN_PHASES
     assert teclaw.needs_container()
@@ -165,7 +165,7 @@ def test_the_device_shape_is_the_pre_w8_shape() -> None:
 def test_cli_tools_is_on_container_on_arca() -> None:
     """W9 did not change the ARCA reading: an ARCA tool is a write into a live
     container."""
-    step = next(s for s in APPLY_ORDER if s.construct is ManifestCategory.CLI_TOOLS)
+    step = next(s for s in APPLY_ORDER if s.construct is Category.CLI_TOOLS)
     assert _arca().phase_of(step) is ApplyPhase.ON_CONTAINER
 
 
@@ -181,7 +181,7 @@ def test_cli_tools_is_pre_container_on_either_teclaw_shape(build) -> None:
     platform-managed sequence has no phase B at all, where an ON_CONTAINER
     ``cli_tools`` would simply never run.
     """
-    step = next(s for s in APPLY_ORDER if s.construct is ManifestCategory.CLI_TOOLS)
+    step = next(s for s in APPLY_ORDER if s.construct is Category.CLI_TOOLS)
     assert build().phase_of(step) is ApplyPhase.PRE_CONTAINER
 
 
@@ -197,7 +197,7 @@ def test_a_teclaw_creation_installs_tools_before_it_composes(build) -> None:
     either shape.
     """
     pre = build().steps_for(ApplyPhase.PRE_CONTAINER)
-    assert ManifestCategory.CLI_TOOLS in {s.construct for s in pre}
+    assert Category.CLI_TOOLS in {s.construct for s in pre}
 
 
 def test_the_device_shape_substitutes_the_teclaw_cli_port() -> None:
@@ -247,7 +247,7 @@ def test_the_arca_table_itself_is_untouched_by_w9() -> None:
     """The per-family rule lives in the teclaw tables; ARCA's own still says
     ``ON_CONTAINER``, and the position is the shared one. A change here would
     silently re-phase ARCA too."""
-    step = next(s for s in APPLY_ORDER if s.construct is ManifestCategory.CLI_TOOLS)
+    step = next(s for s in APPLY_ORDER if s.construct is Category.CLI_TOOLS)
     assert (_ARCA_PHASES[step.construct], step.position) == (
         ApplyPhase.ON_CONTAINER,
         6,
@@ -260,10 +260,10 @@ def test_script_is_pre_container_on_either_teclaw_shape(build) -> None:
     and answered from the family's own table, since ``ApplyStep`` carries none.
     A step that fell out of both phases would be skipped silently instead of
     walking the orchestrator's no-support path and being reported."""
-    step = next(s for s in APPLY_ORDER if s.construct is ManifestSection.SCRIPT)
+    step = next(s for s in APPLY_ORDER if s.construct is Section.SCRIPT)
     strategy = build()
     assert strategy.phase_of(step) is ApplyPhase.PRE_CONTAINER
-    assert ManifestSection.SCRIPT in {
+    assert Section.SCRIPT in {
         s.construct for s in strategy.steps_for(ApplyPhase.PRE_CONTAINER)
     }
 

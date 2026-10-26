@@ -29,7 +29,7 @@ from agentclaw.community.core.apply_engine.triggers import (
     ALL_TRIGGERS,
     TRIGGER_COLUMN_WIDTH,
 )
-from agentclaw.community.core.apply_engine.capabilities import ManifestSection
+from agentclaw.community.core.apply_engine.capabilities import Section
 async def _no_redeliver(ctx) -> None:
     """The closing step, doing nothing — this test is not about it."""
     return None
@@ -42,15 +42,15 @@ def _ports() -> MaterialiserPorts:
 def test_on_arca_the_script_is_the_only_pre_container_construct() -> None:
     arca = ArcaDelivery(_ports)
     pre = arca.steps_for(ApplyPhase.PRE_CONTAINER)
-    assert [s.construct for s in pre] == [ManifestSection.SCRIPT]
+    assert [s.construct for s in pre] == [Section.SCRIPT]
     on = arca.steps_for(ApplyPhase.ON_CONTAINER)
-    assert ManifestSection.SCRIPT not in {s.construct for s in on}
+    assert Section.SCRIPT not in {s.construct for s in on}
     # Between them the two phases walk the whole table, once each.
     assert len(pre) + len(on) == len(APPLY_ORDER)
 
 
 def test_on_arca_the_script_runs_first() -> None:
-    script = next(s for s in APPLY_ORDER if s.construct == ManifestSection.SCRIPT)
+    script = next(s for s in APPLY_ORDER if s.construct == Section.SCRIPT)
     assert script.position == 0
     assert all(s.position > 0 for s in APPLY_ORDER if s is not script)
 

@@ -64,7 +64,7 @@ from agentclaw.community.api.bot_config_manifest_service import (
     ManifestValidationError,
 )
 from agentclaw.community.api.apply_run_service import (
-    ManifestApplyInProgressError,
+    ApplyInProgressError,
 )
 from agentclaw.community.api.bot_cli_tool_service import (
     CliToolConflictError,
@@ -678,7 +678,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # holds the lock is an ordinary, retryable state — not an internal error.
     # Unregistered, ``@envelope_errors`` re-raised it and the caller got a 500
     # where the route's own documentation promises a 409.
-    ManifestApplyInProgressError: (409, "An apply is already running for this bot"),
+    ApplyInProgressError: (409, "An apply is already running for this bot"),
     # W9's CLI tools. ``Refused`` is 422 rather than 400 for the reason the
     # manifest's own validation error is: the request was well-formed and the
     # platform refused what it *named* — an unmatched digest, an absent archive
@@ -846,7 +846,7 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     LocalSkillStorageError: 502101,
     SkillParameterValidationError: 422101,
     ManifestValidationError: 422109,
-    ManifestApplyInProgressError: 409109,
+    ApplyInProgressError: 409109,
     CliToolConflictError: 409110,
     CliToolUnsupportedError: 409111,
     CliToolRefusedError: 422110,

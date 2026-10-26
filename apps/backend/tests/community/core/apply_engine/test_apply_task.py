@@ -32,7 +32,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from agentclaw.community.core.apply_engine.compiler import ManifestStateRef
+from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import MANIFEST_STATE
 from agentclaw.community.core.apply_engine.apply_task import (
     APPLY_TASK_DEADLINE_SECONDS,
     APPLY_TASK_TYPE,
@@ -166,7 +166,7 @@ def _service(db, *, scripts, manifests=None, queue=None):
     # materialisers read back by digest what the compiler filed.
     content = FakeManifestContent()
     return ApplyRunService(
-        manifest_service=manifests,
+        capabilities=manifests,
         apply_repository=BotConfigManifestApplyRepository(db),
         lock_repository=BotConfigManifestApplyLockRepository(db),
         task_queue_provider=lambda: queue,
@@ -208,7 +208,7 @@ def _start(service):
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
-        state=ManifestStateRef(),
+        state=MANIFEST_STATE,
     )
 
 
@@ -235,13 +235,13 @@ def test_the_payload_carries_identifiers_and_not_the_document():
         lock_token="tok",
         started_at="2026-09-01T00:00:00",
         phase=None,
-        state=ManifestStateRef().to_payload(),
+        state=MANIFEST_STATE.to_payload(),
     )
     assert "document" not in payload and "parsed" not in payload
     assert "bot" not in payload
     # What *is* carried is the reference the worker re-compiles from — its
     # identifiers, never a serialised state.
-    assert payload["state"] == {"kind": "manifest"}
+    assert payload["state"] == {"kind": "manifest", "reference": None}
     # The tenant *is* carried: the queue has no tenant column, and no request
     # context survives to handler time.
     assert payload["tenant"] == "t1"
@@ -258,7 +258,7 @@ def test_the_payload_states_the_phase_and_round_trips_it():
             apply_id="a1", entity_id=_ENTITY, bot_id=_BOT, owner_id=_ENTITY,
             actor_id=_ENTITY, env="dev", tenant="t1", trigger="explicit",
             lock_token="tok", started_at="2026-09-01T00:00:00", phase=phase,
-            state=ManifestStateRef().to_payload(),
+            state=MANIFEST_STATE.to_payload(),
         )
 
     whole = payload_for(None)

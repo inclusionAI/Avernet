@@ -48,6 +48,7 @@ import shutil
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Optional
 
+from agentclaw.community.core.apply_engine.outcomes import SourceMode
 from agentclaw.community.core.apply_engine.outcomes import (
     SourceResolution,
 )
@@ -123,7 +124,7 @@ class SourceSession:
     #: its first resolution and ``keep_last`` has no baseline receipt to reuse —
     #: which is exactly what an edited ``ref`` produces, and why re-pinning the
     #: document is how a strict source is advanced.
-    baselines: Mapping[tuple[str, str, str], str]
+    baselines: Mapping[tuple[str, str, SourceMode], str]
     #: The git transport; injected so tests script it and production gets the
     #: subprocess client via the DI provider.
     git: GitSourceClient
@@ -245,7 +246,7 @@ class SourceSession:
             # _resolutions now ends with
             SourceResolution(name="content",
                              url="https://code.example.com/team/content.git",
-                             ref="v1.2.0", mode="strict",
+                             ref="v1.2.0", mode=SourceMode.STRICT,
                              resolved_sha="4f2a9c1b8e7d6a5c4b3a2918f7e6d5c4b3a29187",
                              auth="git-prod")
 
@@ -282,7 +283,7 @@ class SourceSession:
         git source, which includes every object-store-only document."""
         return tuple(self._resolutions)
 
-    def baseline(self, url: str, ref: str, mode: str) -> Optional[str]:
+    def baseline(self, url: str, ref: str, mode: SourceMode) -> Optional[str]:
         """The SHA the last apply that resolved this ``(url, ref, mode)``
         found, or ``None``.
 

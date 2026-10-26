@@ -79,7 +79,7 @@ from agentclaw.community.core.apply_engine.registry import (
     PlannedEntry,
     ResolveResult,
 )
-from agentclaw.community.core.apply_engine.capabilities import ManifestCategory
+from agentclaw.community.core.apply_engine.capabilities import Category
 from agentclaw.community.core.apply_engine.cli_tools.context import (
     CliToolContext,
 )
@@ -176,11 +176,11 @@ class CliToolsMaterialiser(Materialiser):
         plan    -> CategoryPlan(
                        entries=(PlannedEntry(<that intent>, "created"),),
                        removals=("retired-tool",))
-        write   -> (EntryResult(ManifestCategory.CLI_TOOLS, "mycli",
+        write   -> (EntryResult(Category.CLI_TOOLS, "mycli",
                                 EntryOutcome.CREATED),)
     """
 
-    construct = ManifestCategory.CLI_TOOLS
+    construct = Category.CLI_TOOLS
 
     def __init__(self, cli_tool_service: CliToolService) -> None:
         self._tools = cli_tool_service

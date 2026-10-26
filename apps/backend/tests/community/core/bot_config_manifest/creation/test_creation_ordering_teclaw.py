@@ -148,7 +148,7 @@ def _build(db):
         )
 
     applies = ApplyRunService(
-        manifest_service=_Manifests(),
+        capabilities=_Manifests(),
         apply_repository=BotConfigManifestApplyRepository(db),
         lock_repository=BotConfigManifestApplyLockRepository(db),
         compilers=manifest_compilers(manifests=_Manifests(), content=content, resolver=fetcher()),

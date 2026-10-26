@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Iterable
 
+from agentclaw.community.core.apply_engine.outcomes import SourceMode
 from agentclaw.community.core.apply_engine.outcomes import ApplyReport
 
 __all__ = ["BASELINE_HISTORY_APPLIES", "last_resolutions"]
@@ -28,7 +29,7 @@ def last_resolutions(reports: Iterable[ApplyReport]) -> dict[tuple[str, str, str
     report backwards. A row with no ``ref`` reads ``"HEAD"``; one missing
     ``url`` or ``mode`` yields no opinion, nor do empty reports.
     """
-    baselines: dict[tuple[str, str, str], str] = {}
+    baselines: dict[tuple[str, str, SourceMode], str] = {}
     for report in reports:
         for source in reversed(report.sources):
             if source.url is None or source.mode is None or source.resolved_sha is None:

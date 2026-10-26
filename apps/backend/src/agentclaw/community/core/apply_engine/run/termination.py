@@ -17,7 +17,7 @@ import json
 from datetime import datetime
 from typing import Optional
 
-from agentclaw.community.core.apply_engine.compiler import ManifestStateRef, StateRef, state_ref_from_payload
+from agentclaw.community.core.apply_engine.compiler import LEGACY_STATE, StateRef, state_ref_from_payload
 from agentclaw.community.core.apply_engine.outcomes import (
     ApplyReport,
     ApplyStatus,
@@ -56,7 +56,7 @@ def record_engine_failure(report: ApplyReport, exc: Exception) -> None:
 
 
 def _state_of(payload: dict) -> StateRef:
-    """The payload's state reference, or the Manifest when the payload cannot say.
+    """The payload's state reference, or ``LEGACY_STATE`` when the payload cannot say.
 
     This runs on the path that terminates an apply whose rebuild failed —
     possibly *because* the reference was unreadable — so it must not raise
@@ -65,7 +65,7 @@ def _state_of(payload: dict) -> StateRef:
     try:
         return state_ref_from_payload(payload.get("state"))
     except ValueError:
-        return ManifestStateRef()
+        return LEGACY_STATE
 
 
 def terminate_unstartable(

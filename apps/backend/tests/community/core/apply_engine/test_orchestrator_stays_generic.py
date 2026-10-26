@@ -16,8 +16,8 @@ from agentclaw.community.core.apply_engine import (
 )
 from agentclaw.community.core.apply_engine.materialisers import mcp
 from agentclaw.community.core.apply_engine.capabilities import (
-    ManifestCategory,
-    ManifestSection,
+    Category,
+    Section,
 )
 
 def _code_of(module, *, strip_strings: bool = False) -> str:
@@ -50,13 +50,13 @@ def _category_special_cases(module) -> list[str]:
     ``failed_by_identity`` — ordinary variables naming an *entry's* identity,
     not the ``identity`` category. A guard that cries wolf is a guard the next
     person deletes, so it looks for the two forms a real special case actually
-    takes: ``ManifestCategory.X`` and a bare ``"x"`` literal.
+    takes: ``Category.X`` and a bare ``"x"`` literal.
     """
     source = _code_of(module)
     found: list[str] = []
-    for category in ManifestCategory:
-        if re.search(rf"\bManifestCategory\.{category.name}\b", source):
-            found.append(f"ManifestCategory.{category.name}")
+    for category in Category:
+        if re.search(rf"\bCategory\.{category.name}\b", source):
+            found.append(f"Category.{category.name}")
         if re.search(rf"""['"]{category.value}['"]""", source):
             found.append(f'"{category.value}"')
     return found
@@ -94,7 +94,7 @@ def test_the_category_guard_would_catch_a_real_special_case():
 def test_the_order_table_covers_every_construct_the_vocabulary_defines():
     """A construct with no row is one an apply would silently walk past."""
     declared = {step.construct for step in order.APPLY_ORDER}
-    expected = set(ManifestCategory) | set(ManifestSection)
+    expected = set(Category) | set(Section)
     assert declared == expected, (
         "APPLY_ORDER must name every category and section. Missing: "
         f"{sorted(c.value for c in expected - declared)}"
@@ -139,7 +139,7 @@ def test_script_is_alone_in_the_phase_that_needs_no_container():
         for step in order.APPLY_ORDER
         if delivery._ARCA_PHASES[step.construct] is order.ApplyPhase.PRE_CONTAINER
     ]
-    assert pre == [ManifestSection.SCRIPT]
+    assert pre == [Section.SCRIPT]
 
 
 def test_phase_b_keeps_the_declared_category_order():
@@ -150,10 +150,10 @@ def test_phase_b_keeps_the_declared_category_order():
         if delivery._ARCA_PHASES[step.construct] is order.ApplyPhase.ON_CONTAINER
     ]
     assert on_container[:4] == [
-        ManifestCategory.IDENTITY,
-        ManifestCategory.RESOURCES,
-        ManifestCategory.SKILLS,
-        ManifestCategory.MCP,
+        Category.IDENTITY,
+        Category.RESOURCES,
+        Category.SKILLS,
+        Category.MCP,
     ]
 
 

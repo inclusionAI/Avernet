@@ -10,8 +10,8 @@ from __future__ import annotations
 import pytest
 
 from agentclaw.community.core.apply_engine.capabilities import (
-    ManifestCategory,
-    ManifestSection,
+    Category,
+    Section,
 )
 from agentclaw.community.core.bot_config_manifest.creation import (
     declared_constructs,
@@ -34,10 +34,10 @@ from agentclaw.community.core.bot_config_manifest.schema.validator import (
 # last materialiser landed.
 _LANDED = frozenset(
     {
-        ManifestSection.SCRIPT,
-        ManifestCategory.MCP,
-        ManifestCategory.IDENTITY,
-        ManifestCategory.SKILLS,
+        Section.SCRIPT,
+        Category.MCP,
+        Category.IDENTITY,
+        Category.SKILLS,
     }
 )
 
@@ -119,7 +119,7 @@ def test_registering_the_materialiser_makes_the_same_document_acceptable():
     with pytest.raises(ManifestValidationError):
         _preflight(_UNMATERIALISED)
     parsed = _preflight(
-        _UNMATERIALISED, materialised=_LANDED | {ManifestCategory.RESOURCES}
+        _UNMATERIALISED, materialised=_LANDED | {Category.RESOURCES}
     )
     assert parsed
 

@@ -44,7 +44,7 @@ from typing import Mapping
 
 from agentclaw.community.core.apply_engine.capabilities import (
     REASON_ENGINE_CONFIG,
-    ManifestCategory,
+    Category,
 )
 
 
@@ -110,45 +110,45 @@ _CLI_TOOL_IS_AN_EXECUTABLE = SourceRefusal(
 #: Every cell, written out. Listed rather than defaulted: a table whose
 #: unwritten cells mean anything at all is a table that answers questions
 #: nobody ruled on.
-_VERDICTS: dict[tuple[ManifestCategory, SourceKind], SourceRefusal | None] = {
+_VERDICTS: dict[tuple[Category, SourceKind], SourceRefusal | None] = {
     # Identity files are single text bodies. Every protocol can carry one, and
     # inline is the common case.
-    (ManifestCategory.IDENTITY, SourceKind.CONTENT): None,
-    (ManifestCategory.IDENTITY, SourceKind.OSS): None,
-    (ManifestCategory.IDENTITY, SourceKind.GIT): None,
+    (Category.IDENTITY, SourceKind.CONTENT): None,
+    (Category.IDENTITY, SourceKind.OSS): None,
+    (Category.IDENTITY, SourceKind.GIT): None,
     # Workspace files and trees. ``git`` is what this change opens (D1): a
     # tree arrives as a tree, with no packaging step in the middle.
-    (ManifestCategory.RESOURCES, SourceKind.CONTENT): None,
-    (ManifestCategory.RESOURCES, SourceKind.OSS): None,
-    (ManifestCategory.RESOURCES, SourceKind.GIT): None,
+    (Category.RESOURCES, SourceKind.CONTENT): None,
+    (Category.RESOURCES, SourceKind.OSS): None,
+    (Category.RESOURCES, SourceKind.GIT): None,
     # A skill is a package; only a fetch can deliver one.
-    (ManifestCategory.SKILLS, SourceKind.CONTENT): _SKILL_IS_A_PACKAGE,
-    (ManifestCategory.SKILLS, SourceKind.OSS): None,
-    (ManifestCategory.SKILLS, SourceKind.GIT): None,
+    (Category.SKILLS, SourceKind.CONTENT): _SKILL_IS_A_PACKAGE,
+    (Category.SKILLS, SourceKind.OSS): None,
+    (Category.SKILLS, SourceKind.GIT): None,
     # A tool is an executable file; same reasoning, different noun.
-    (ManifestCategory.CLI_TOOLS, SourceKind.CONTENT): _CLI_TOOL_IS_AN_EXECUTABLE,
-    (ManifestCategory.CLI_TOOLS, SourceKind.OSS): None,
-    (ManifestCategory.CLI_TOOLS, SourceKind.GIT): None,
+    (Category.CLI_TOOLS, SourceKind.CONTENT): _CLI_TOOL_IS_AN_EXECUTABLE,
+    (Category.CLI_TOOLS, SourceKind.OSS): None,
+    (Category.CLI_TOOLS, SourceKind.GIT): None,
     # Neither of these has a source axis at all, for two different reasons —
     # both stated, because "unsupported" without the reason is what sends a
     # caller looking for a workaround that does not exist.
-    (ManifestCategory.MCP, SourceKind.CONTENT): _MCP_HAS_NO_SOURCE,
-    (ManifestCategory.MCP, SourceKind.OSS): _MCP_HAS_NO_SOURCE,
-    (ManifestCategory.MCP, SourceKind.GIT): _MCP_HAS_NO_SOURCE,
-    (ManifestCategory.ENGINE_CONFIG, SourceKind.CONTENT): (
+    (Category.MCP, SourceKind.CONTENT): _MCP_HAS_NO_SOURCE,
+    (Category.MCP, SourceKind.OSS): _MCP_HAS_NO_SOURCE,
+    (Category.MCP, SourceKind.GIT): _MCP_HAS_NO_SOURCE,
+    (Category.ENGINE_CONFIG, SourceKind.CONTENT): (
         _ENGINE_CONFIG_HAS_NO_MATERIALISER
     ),
-    (ManifestCategory.ENGINE_CONFIG, SourceKind.OSS): (
+    (Category.ENGINE_CONFIG, SourceKind.OSS): (
         _ENGINE_CONFIG_HAS_NO_MATERIALISER
     ),
-    (ManifestCategory.ENGINE_CONFIG, SourceKind.GIT): (
+    (Category.ENGINE_CONFIG, SourceKind.GIT): (
         _ENGINE_CONFIG_HAS_NO_MATERIALISER
     ),
 }
 
 
 def _build_matrix() -> Mapping[
-    tuple[ManifestCategory, SourceKind], SourceRefusal | None
+    tuple[Category, SourceKind], SourceRefusal | None
 ]:
     """Every cell of the cartesian product, or an import-time failure.
 
@@ -159,7 +159,7 @@ def _build_matrix() -> Mapping[
     """
     cells = {
         (category, kind): _VERDICTS[(category, kind)]
-        for category in ManifestCategory
+        for category in Category
         for kind in SourceKind
     }
     stale = set(_VERDICTS) - set(cells)
@@ -174,7 +174,7 @@ def _build_matrix() -> Mapping[
 #: The contract. ``None`` means the combination is accepted at ``PUT`` and
 #: delivered at apply; a :class:`SourceRefusal` means both refuse it, with that
 #: code and that message.
-MATRIX: Mapping[tuple[ManifestCategory, SourceKind], SourceRefusal | None] = (
+MATRIX: Mapping[tuple[Category, SourceKind], SourceRefusal | None] = (
     _build_matrix()
 )
 
@@ -186,10 +186,10 @@ MATRIX: Mapping[tuple[ManifestCategory, SourceKind], SourceRefusal | None] = (
 #: the job a digest does, and a ``sha256`` over git-sourced bytes has no stable
 #: meaning across the checkout / archive / canonical-zip roads. Whether the ref
 #: may move between applies is ``mode: strict``'s question, not a digest's.
-DIGEST_REQUIRED: frozenset[tuple[ManifestCategory, SourceKind]] = frozenset(
+DIGEST_REQUIRED: frozenset[tuple[Category, SourceKind]] = frozenset(
     {
-        (ManifestCategory.SKILLS, SourceKind.OSS),
-        (ManifestCategory.CLI_TOOLS, SourceKind.OSS),
+        (Category.SKILLS, SourceKind.OSS),
+        (Category.CLI_TOOLS, SourceKind.OSS),
     }
 )
 
@@ -216,18 +216,18 @@ ARCHIVE_FIELDS: frozenset[str] = frozenset(
 
 
 def refusal_for(
-    category: ManifestCategory, kind: SourceKind
+    category: Category, kind: SourceKind
 ) -> SourceRefusal | None:
     """The cell. ``None`` when the combination is supported."""
     return MATRIX[(category, kind)]
 
 
-def supports(category: ManifestCategory, kind: SourceKind) -> bool:
+def supports(category: Category, kind: SourceKind) -> bool:
     """Whether this build accepts and delivers the combination."""
     return MATRIX[(category, kind)] is None
 
 
-def digest_required(category: ManifestCategory, kind: SourceKind) -> bool:
+def digest_required(category: Category, kind: SourceKind) -> bool:
     """Whether an entry in this cell must declare a ``digest``."""
     return (category, kind) in DIGEST_REQUIRED
 

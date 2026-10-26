@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Sequence
 
-from agentclaw.community.core.apply_engine.constructs import ApplyConstruct, ManifestSection
+from agentclaw.community.core.apply_engine.constructs import ApplyConstruct, Section
 
 __all__ = ["declared_entries"]
 
@@ -21,13 +21,13 @@ def declared_entries(parsed: Mapping[str, Any], construct: ApplyConstruct) -> Se
             "manifest": {"mcp": [{"server_code": "gh"}], "skills": []},
         }
 
-        declared_entries(parsed, ManifestSection.SCRIPT)
+        declared_entries(parsed, Section.SCRIPT)
         # -> [{"body": "echo hi"}]      a section arrives as a one-entry list
-        declared_entries(parsed, ManifestCategory.MCP)
+        declared_entries(parsed, Category.MCP)
         # -> [{"server_code": "gh"}]
-        declared_entries(parsed, ManifestCategory.SKILLS)
+        declared_entries(parsed, Category.SKILLS)
         # -> []                         declared empty: remove everything
-        declared_entries(parsed, ManifestCategory.RESOURCES)
+        declared_entries(parsed, Category.RESOURCES)
         # -> None                       not declared: do not touch the area
 
     The distinction this returns is the load-bearing one, and it is why the
@@ -45,7 +45,7 @@ def declared_entries(parsed: Mapping[str, Any], construct: ApplyConstruct) -> Se
     the top level, a category under ``manifest``. Which of the two a construct
     is, is its type — this function does not carry a list of names.
     """
-    if isinstance(construct, ManifestSection):
+    if isinstance(construct, Section):
         if construct.value not in parsed:
             return None
         section = parsed[construct.value]

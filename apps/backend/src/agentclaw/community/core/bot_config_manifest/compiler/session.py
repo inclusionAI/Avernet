@@ -43,6 +43,9 @@ class CompileSession:
     tenant: str
     engine_type: str
     actor_id: str
+    #: The apply this compile serves, carried from ``ApplyContext.apply_id``. ``None`` when the context
+    #: predates an apply id: the synchronous ``check`` before one is minted, and a dry run, which never mints
+    #: one. Set in the worker's compile, where every fetch receipt the content store files is stamped with it.
     apply_id: Optional[str]
     budget: ApplyFetchBudget
     source_session: SourceSession

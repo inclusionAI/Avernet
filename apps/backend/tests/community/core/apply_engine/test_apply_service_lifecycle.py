@@ -16,7 +16,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from agentclaw.community.core.apply_engine.compiler import CompileRefused, ManifestStateRef
+from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import MANIFEST_STATE
+from agentclaw.community.core.apply_engine.compiler import CompileRefused
 from agentclaw.community.core.apply_engine.outcomes import (
     ApplyStatus,
 )
@@ -26,7 +27,7 @@ from agentclaw.community.core.bot_config_manifest.sources.source_session import 
 from agentclaw.community.core.apply_engine.order import ApplyPhase
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.apply_engine.run.service_protocol import (
-    ManifestApplyInProgressError,
+    ApplyInProgressError,
 )
 
 # Imported for side effect: registers the models on Base.metadata so
@@ -173,7 +174,7 @@ def world():
     locks = BotConfigManifestApplyLockRepository(db)
     manifests = _ManifestService(_DOCUMENT)
     service = ApplyRunService(
-        manifest_service=manifests,
+        capabilities=manifests,
         apply_repository=applies,
         lock_repository=locks,
         task_queue_provider=lambda: queue,
@@ -203,7 +204,7 @@ def _start(service):
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
-        state=ManifestStateRef(),
+        state=MANIFEST_STATE,
     )
 
 
@@ -213,7 +214,7 @@ def _dry_run(service):
 
     return asyncio.run(
         service.dry_run(
-            entity_id=_ENTITY, bot_id=_BOT, bot=_BOT_RECORD, owner_id=_ENTITY, actor_id=_ENTITY, state=ManifestStateRef()
+            entity_id=_ENTITY, bot_id=_BOT, bot=_BOT_RECORD, owner_id=_ENTITY, actor_id=_ENTITY, state=MANIFEST_STATE
         )
     )
 
@@ -293,7 +294,7 @@ def test_two_applies_serialize_and_the_second_is_refused_before_an_id(world):
     )
     assert held is not None
 
-    with pytest.raises(ManifestApplyInProgressError):
+    with pytest.raises(ApplyInProgressError):
         _start(service)
 
     # Nothing was recorded: the refusal happened before the row was written.
@@ -437,7 +438,7 @@ def test_the_audit_label_is_recorded_without_becoming_the_principal(world):
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
-        state=ManifestStateRef(),
+        state=MANIFEST_STATE,
         audit_actor=label,
     )
     report = _drain(service)
@@ -461,7 +462,7 @@ def test_the_audit_label_defaults_to_the_principal(world):
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
-        state=ManifestStateRef(),
+        state=MANIFEST_STATE,
     )
     _drain(service)
 
@@ -557,7 +558,7 @@ def test_an_enqueue_that_fails_terminates_the_report_and_frees_the_lock(
             bot=_BOT_RECORD,
             owner_id=_ENTITY,
             actor_id=_ENTITY,
-            state=ManifestStateRef(),
+            state=MANIFEST_STATE,
         )
 
     # The report is terminal, not stranded RUNNING.
@@ -573,7 +574,7 @@ def test_an_enqueue_that_fails_terminates_the_report_and_frees_the_lock(
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
-        state=ManifestStateRef(),
+        state=MANIFEST_STATE,
     )
     assert accepted.status is ApplyStatus.RUNNING
 
@@ -692,7 +693,7 @@ def test_a_phase_on_a_non_creation_trigger_is_refused_before_anything_is_minted(
             bot=_BOT_RECORD,
             owner_id=_ENTITY,
             actor_id=_ENTITY,
-            state=ManifestStateRef(),
+            state=MANIFEST_STATE,
             trigger="explicit",
             phase=ApplyPhase.PRE_CONTAINER,
         )
@@ -702,14 +703,14 @@ def test_a_phase_on_a_non_creation_trigger_is_refused_before_anything_is_minted(
         is None
     ), "an apply record exists for a call that was refused"
     # The lock is free: the next apply starts rather than raising
-    # ManifestApplyInProgressError for 30 minutes of stale-lock TTL.
+    # ApplyInProgressError for 30 minutes of stale-lock TTL.
     accepted = service.start_apply(
         entity_id=_ENTITY,
         bot_id=_BOT,
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
-        state=ManifestStateRef(),
+        state=MANIFEST_STATE,
     )
     assert accepted.apply_id
 
@@ -730,7 +731,7 @@ def test_a_creation_trigger_with_no_phase_is_refused_the_same_way(world):
             bot=_BOT_RECORD,
             owner_id=_ENTITY,
             actor_id=_ENTITY,
-            state=ManifestStateRef(),
+            state=MANIFEST_STATE,
             trigger="create:pre_container",
         )
 
@@ -744,7 +745,7 @@ def test_a_creation_trigger_with_no_phase_is_refused_the_same_way(world):
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
-        state=ManifestStateRef(),
+        state=MANIFEST_STATE,
         trigger="create:on_container",
         phase=ApplyPhase.ON_CONTAINER,
     )
@@ -760,7 +761,7 @@ def test_the_second_phase_report_carries_the_first_phases_categories(world):
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
-        state=ManifestStateRef(),
+        state=MANIFEST_STATE,
         trigger="create:pre_container",
         phase=ApplyPhase.PRE_CONTAINER,
     )
@@ -770,7 +771,7 @@ def test_the_second_phase_report_carries_the_first_phases_categories(world):
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
-        state=ManifestStateRef(),
+        state=MANIFEST_STATE,
         trigger="create:on_container",
         phase=ApplyPhase.ON_CONTAINER,
         carry_from_apply_id=first.apply_id,
@@ -803,7 +804,7 @@ def test_a_missing_carry_id_is_ignored_rather_than_failing_the_apply(world):
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
-        state=ManifestStateRef(),
+        state=MANIFEST_STATE,
         trigger="create:on_container",
         phase=ApplyPhase.ON_CONTAINER,
         carry_from_apply_id="does-not-exist",
@@ -844,7 +845,7 @@ def test_a_failed_first_phase_survives_the_merge_and_re_derives_the_summary(worl
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
-        state=ManifestStateRef(),
+        state=MANIFEST_STATE,
         trigger="create:pre_container",
         phase=ApplyPhase.PRE_CONTAINER,
     )
@@ -861,7 +862,7 @@ def test_a_failed_first_phase_survives_the_merge_and_re_derives_the_summary(worl
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
-        state=ManifestStateRef(),
+        state=MANIFEST_STATE,
         trigger="create:on_container",
         phase=ApplyPhase.ON_CONTAINER,
         carry_from_apply_id=first.apply_id,
@@ -912,22 +913,22 @@ def test_registering_a_materialiser_widens_it_with_no_edit_to_any_caller(world):
     """
     service, *_ = world
     from agentclaw.community.core.apply_engine.capabilities import (
-        ManifestCategory,
+        Category,
     )
 
     real = service._build_materialisers
 
     class _StubResourcesMaterialiser:
-        construct = ManifestCategory.RESOURCES
+        construct = Category.RESOURCES
 
     def _widened(strategy):
         built = dict(real(strategy))
-        built[ManifestCategory.RESOURCES] = _StubResourcesMaterialiser()
+        built[Category.RESOURCES] = _StubResourcesMaterialiser()
         return built
 
     service._build_materialisers = _widened
     try:
-        assert ManifestCategory.RESOURCES in service.materialised_constructs()
+        assert Category.RESOURCES in service.materialised_constructs()
     finally:
         service._build_materialisers = real
 
@@ -951,13 +952,13 @@ def test_an_apply_that_cannot_be_rebuilt_terminates_instead_of_looping(world):
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
-        state=ManifestStateRef(),
+        state=MANIFEST_STATE,
     )
     # A second apply, whose compile will fail.
     async def _refuse(*_args, **_kwargs):
         raise RuntimeError("the stored document no longer validates")
 
-    service._compilers[ManifestStateRef].compile = _refuse
+    service._compilers[MANIFEST_STATE.kind].compile = _refuse
     payload = {
         "apply_id": "apply-that-cannot-start",
         "entity_id": _ENTITY,
@@ -1019,7 +1020,7 @@ def test_a_compile_refused_in_the_worker_is_a_failed_report_with_the_reason(worl
     words, and no category was touched. An engine exception, by contrast, is
     recorded without its text (``record_engine_failure``)."""
     service, applies, locks, scripts, _ = world
-    service._compilers = {ManifestStateRef: _RefusingCompiler()}
+    service._compilers = {MANIFEST_STATE.kind: _RefusingCompiler()}
     accepted = _start(service)
     report = _drain(service)
     assert report.apply_id == accepted.apply_id
@@ -1035,7 +1036,7 @@ def test_a_dry_run_hears_the_compilers_own_refusal_not_the_workers(world):
     error the compiler carries (mapped to 422 / 404 / 409 by its surface);
     ``CompileRefused`` itself is what only the worker records."""
     service, applies, _locks, _scripts, _ = world
-    service._compilers = {ManifestStateRef: _RefusingCompiler()}
+    service._compilers = {MANIFEST_STATE.kind: _RefusingCompiler()}
     with pytest.raises(_DomainRefusal, match="superseded") as raised:
         _dry_run(service)
     assert raised.value.__context__ is None, "the worker-only refusal is not on the domain error's chain"
@@ -1056,7 +1057,7 @@ def test_a_dry_run_of_a_document_that_stopped_validating_raises_the_validators_e
             )
 
     service, *_ = world
-    service._compilers[ManifestStateRef]._manifests = _ValidatingManifests(
+    service._compilers[MANIFEST_STATE.kind]._manifests = _ValidatingManifests(
         "schema_version: 1\nmanifest:\n  resources:\n    - path: notes/outside.md\n      content: x\n"
     )
     with pytest.raises(ManifestValidationError) as refused:

@@ -19,7 +19,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from agentclaw.community.core.apply_engine.compiler import ManifestStateRef
+from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import MANIFEST_STATE
 from agentclaw.community.core.apply_engine.delivery import MaterialiserPorts
 from agentclaw.community.core.bot_config_manifest.sources.source_resolver import DeclaredSourceResolver
 from agentclaw.community.core.apply_engine.order import ApplyPhase
@@ -222,7 +222,7 @@ def _build(db):
 
     queue = _InlineQueue()
     applies = ApplyRunService(
-        manifest_service=_Manifests(),
+        capabilities=_Manifests(),
         apply_repository=BotConfigManifestApplyRepository(db),
         lock_repository=BotConfigManifestApplyLockRepository(db),
         compilers=manifest_compilers(manifests=_Manifests(), content=content, resolver=fetcher()),
@@ -246,7 +246,7 @@ def _build(db):
     # binds; a DEVICE one binds ``EngineOwnedComposeReader`` instead and owns
     # no compose at all.
     reader = ManagedFilesComposeReader(
-        store=store, manifest_service_provider=_Manifests
+        store=store, declared_state_provider=_Manifests
     )
     skill_set_service = MagicMock()
     skill_set_service.get_active_skills.side_effect = lambda **_kw: [
@@ -297,7 +297,7 @@ def test_the_first_artifact_carries_the_manifest(world):
 
     # The deferred creation's single phase, against the record.
     accepted = applies.start_apply(
-        entity_id=_ENTITY, bot_id=_BOT, bot=dict(_RECORD), owner_id=_OWNER, actor_id=_OWNER, state=ManifestStateRef(),
+        entity_id=_ENTITY, bot_id=_BOT, bot=dict(_RECORD), owner_id=_OWNER, actor_id=_OWNER, state=MANIFEST_STATE,
         trigger=CREATE_PRE_CONTAINER_TRIGGER, phase=ApplyPhase.PRE_CONTAINER,
     )
     report = applies.last_apply(entity_id=_ENTITY, bot_id=_BOT)

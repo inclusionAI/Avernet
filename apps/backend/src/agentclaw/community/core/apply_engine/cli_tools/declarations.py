@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Mapping, Optional
 
-from agentclaw.community.core.apply_engine.desired_state import StoredContent
+from agentclaw.community.core.apply_engine.desired_state import ContentRef
 from agentclaw.community.core.apply_engine.cli_tools.models import (
     BotCliToolRecord,
 )
@@ -78,7 +78,7 @@ class CliToolDecl:
     #: The stored bytes the install reads — **the manifest road's payload**.
     #: ``None`` on the upload road, whose entry point carries the bytes
     #: instead and never reaches a store read.
-    content: Optional[StoredContent] = None
+    content: Optional[ContentRef] = None
     #: How the document named the source, for the row and the report to echo.
     #: **Read by nobody that acquires.** Deliberately whatever the document
     #: *said* — a ``from`` name, a git URL, an empty string on the upload

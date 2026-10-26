@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agentclaw.community.core.ports.resource_rows_port import WrittenFile
 from agentclaw.community.core.resources.models import ResourceType
 from agentclaw.community.core.resources.service import DuplicateResourceError, ResourceService
 from agentclaw.community.core.resources.services.file_service import FileService
@@ -571,8 +572,8 @@ class TestReplaceManifestRows:
         repo = self._repo_with_rows("data/old.csv", "data/kb/faq.md", "notes/outside.txt")
         svc = _make_service(repo, bot_id="bot7")
 
-        await svc.replace_manifest_rows(
-            files=[("data/kb/faq.md", 3), ("data/new.txt", 1)], owner_id="owner", created_by="u2"
+        await svc.replace_rows(
+            files=[WrittenFile("data/kb/faq.md", 3), WrittenFile("data/new.txt", 1)], owner_id="owner", created_by="u2"
         )
 
         assert sorted(call.args[0] for call in repo.delete.call_args_list) == ["1", "2"]
@@ -589,7 +590,7 @@ class TestReplaceManifestRows:
     @pytest.mark.asyncio
     async def test_an_empty_written_set_clears_the_root_rows_and_the_roots_own_row(self):
         repo = self._repo_with_rows("data", "data/old.csv")
-        await _make_service(repo).replace_manifest_rows(files=[], owner_id="owner", created_by=None)
+        await _make_service(repo).replace_rows(files=[], owner_id="owner", created_by=None)
         assert sorted(call.args[0] for call in repo.delete.call_args_list) == ["1", "2"]
         repo.create.assert_not_called()
 
@@ -598,4 +599,6 @@ class TestReplaceManifestRows:
         repo = self._repo_with_rows()
         repo.create.side_effect = RuntimeError("db down")
         with pytest.raises(RuntimeError):
-            await _make_service(repo).replace_manifest_rows(files=[("data/a.txt", 1)], owner_id="owner", created_by=None)
+            await _make_service(repo).replace_rows(
+                files=[WrittenFile("data/a.txt", 1)], owner_id="owner", created_by=None
+            )

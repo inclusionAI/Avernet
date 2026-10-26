@@ -15,7 +15,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from agentclaw.community.core.apply_engine.compiler import ManifestStateRef, StateRef
+from agentclaw.community.core.apply_engine.compiler import LEGACY_STATE, StateRef
 from agentclaw.community.core.apply_engine.constructs import ApplyConstruct
 
 #: What a construct is, for the purposes of applying it: one of the six
@@ -24,13 +24,13 @@ from agentclaw.community.core.apply_engine.constructs import ApplyConstruct
 #: Always an enum member, never a bare string. ``.value`` is both the wire form
 #: and the manifest key::
 #:
-#:     ManifestCategory.SKILLS         # .value == "skills"
-#:     ManifestCategory.RESOURCES      # .value == "resources"
-#:     ManifestCategory.IDENTITY       # .value == "identity"
-#:     ManifestCategory.MCP            # .value == "mcp"
-#:     ManifestCategory.CLI_TOOLS      # .value == "cli_tools"
-#:     ManifestCategory.ENGINE_CONFIG  # .value == "engine_config"
-#:     ManifestSection.SCRIPT          # .value == "script"
+#:     Category.SKILLS         # .value == "skills"
+#:     Category.RESOURCES      # .value == "resources"
+#:     Category.IDENTITY       # .value == "identity"
+#:     Category.MCP            # .value == "mcp"
+#:     Category.CLI_TOOLS      # .value == "cli_tools"
+#:     Category.ENGINE_CONFIG  # .value == "engine_config"
+#:     Section.SCRIPT          # .value == "script"
 #:
 #: Created by: ``apply/order.APPLY_ORDER`` (one row per construct) and each
 #: materialiser's own ``construct`` class attribute.
@@ -152,7 +152,7 @@ class EntryResult:
     abort::
 
         EntryResult(
-            construct=ManifestCategory.RESOURCES,
+            construct=Category.RESOURCES,
             identity="data/faq.csv",
             outcome=EntryOutcome.FAILED,
             reason="the git tree has no file at subpath 'kb/faq.csv'",
@@ -162,7 +162,7 @@ class EntryResult:
     A blameless neighbour in that same aborted category::
 
         EntryResult(
-            construct=ManifestCategory.RESOURCES,
+            construct=Category.RESOURCES,
             identity="data/prices/",
             outcome=EntryOutcome.SKIPPED,
             reason=(
@@ -175,7 +175,7 @@ class EntryResult:
     A success carrying a note::
 
         EntryResult(
-            construct=ManifestSection.SCRIPT,
+            construct=Section.SCRIPT,
             identity="script",
             outcome=EntryOutcome.CREATED,
             reason=None,
@@ -253,8 +253,8 @@ class CategoryResult:
     A converged category::
 
         CategoryResult(
-            construct=ManifestCategory.MCP,
-            entries=(EntryResult(ManifestCategory.MCP, "gh",
+            construct=Category.MCP,
+            entries=(EntryResult(Category.MCP, "gh",
                                  EntryOutcome.CREATED),),
             removals=("old-server",),
             aborted=False,
@@ -264,7 +264,7 @@ class CategoryResult:
     One aborted in ``resolve``, before any write::
 
         CategoryResult(
-            construct=ManifestCategory.RESOURCES,
+            construct=Category.RESOURCES,
             entries=(<the FAILED entry>, <its SKIPPED neighbours>),
             removals=(),
             aborted=True,
@@ -336,6 +336,19 @@ class CategoryResult:
         }
 
 
+class SourceMode(StrEnum):
+    """How a git source's ref may move between applies. A lowercase string on the wire and in the document.
+
+    ``strict``: the ref is a pin — once an apply has resolved it to a commit,
+    a later apply that finds it elsewhere refuses rather than delivers.
+    ``non_strict`` (the default): the ref may move; each apply delivers what
+    it finds. Declared on the source, never on an entry.
+    """
+
+    STRICT = "strict"
+    NON_STRICT = "non_strict"
+
+
 @dataclass(frozen=True)
 class SourceResolution:
     """A git source this apply resolved, and the commit it landed on.
@@ -345,7 +358,7 @@ class SourceResolution:
 
         SourceResolution(name="content",
                          url="https://code.example.com/team/content.git",
-                         ref="v1.2.0", mode="strict",
+                         ref="v1.2.0", mode=SourceMode.STRICT,
                          resolved_sha="7c1d…", auth="gh-readonly")
 
     An inline git source has no ``from`` name, so it is named by the repository
@@ -353,7 +366,7 @@ class SourceResolution:
 
         SourceResolution(name="https://code.example.com/team/content.git@main",
                          url="https://code.example.com/team/content.git",
-                         ref="main", mode="non_strict",
+                         ref="main", mode=SourceMode.NON_STRICT,
                          resolved_sha="9e8d…", auth=None)
 
     ``name`` is the **display**: one row per declaration, so two names pointing
@@ -390,15 +403,15 @@ class SourceResolution:
     ref: str | None = None
     #: The 40-character commit id the ref actually resolved to.
     resolved_sha: str | None = None
-    #: The ``mode`` this resolution was made under, ``"strict"`` or
-    #: ``"non_strict"``. The last third of the baseline key, and load-bearing
+    #: The ``mode`` this resolution was made under. The last third of the
+    #: baseline key, and load-bearing
     #: rather than informational: a pin may only be advanced by an apply that
     #: stood behind it under the *same* mode. Were it left out, a document
     #: naming one ``(url, ref)`` twice — once ``strict``, once ``non_strict`` —
     #: would let the lax declaration record a moved sha that the pinned one had
     #: just refused, and the next apply would hand the pinned entry the very
     #: commit it rejected: "refuse each move once, then deliver it".
-    mode: str | None = None
+    mode: SourceMode | None = None
     #: The credential's name, never its value. ``None`` for an anonymous fetch.
     auth: str | None = None
 
@@ -428,9 +441,9 @@ class ApplyReport:
             started_at=datetime(2026, 3, 1, 9, 0, 0, tzinfo=timezone.utc),
             finished_at=datetime(2026, 3, 1, 9, 0, 4, tzinfo=timezone.utc),
             categories=(
-                CategoryResult(ManifestCategory.MCP, entries=(...,)),
+                CategoryResult(Category.MCP, entries=(...,)),
                 CategoryResult(
-                    ManifestCategory.RESOURCES,
+                    Category.RESOURCES,
                     entries=(...,),
                     aborted=True,
                 ),
@@ -475,7 +488,9 @@ class ApplyReport:
     #: What was applied: the Manifest (the bot's stored document) or a genome
     #: promotion's revision. Inside the report rather than a column: a report
     #: without it, written before the field existed, reads as the Manifest.
-    state: StateRef = field(default_factory=ManifestStateRef)
+    #: What this apply converged the bot to. The run service stamps it; a report built before that (the
+    #: orchestrator's) and a row that predates the field carry ``LEGACY_STATE``.
+    state: StateRef = LEGACY_STATE
     #: Apply-level notes belonging to no category. Two producers: the delivery
     #: strategy's closing step (a teclaw redeliver that failed after every
     #: category was written is recorded here rather than raised), and a
@@ -503,7 +518,7 @@ class ApplyReport:
                 "result": "PARTIAL",
                 "started_at": "2026-03-01T09:00:00+00:00",
                 "finished_at": "2026-03-01T09:00:04+00:00",
-                "state": {"kind": "manifest"},
+                "state": {"kind": "manifest", "reference": None},
                 "sources": [{"name": "content",
                              "url": "https://code.example.com/team/content.git",
                              "ref": "v1.2.0", "mode": "strict",
@@ -635,6 +650,7 @@ __all__ = [
     "EntryOutcome",
     "EntryResult",
     "NO_MATERIALISER_REASON",
+    "SourceMode",
     "SourceResolution",
     "derive_status",
     "entry_identity",

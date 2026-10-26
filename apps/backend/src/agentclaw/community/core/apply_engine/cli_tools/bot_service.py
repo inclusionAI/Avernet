@@ -38,7 +38,7 @@ from abc import abstractmethod
 from typing import Any, Callable, Optional, Protocol, Sequence
 
 from agentclaw.community.core.apply_engine.capabilities import (
-    ManifestCategory,
+    Category,
     capabilities_for_bot,
 )
 from agentclaw.community.core.apply_engine.cli_tools.context import (
@@ -185,9 +185,9 @@ class BotCliToolService(BotCliToolServiceProtocol):
         engine = bot.get("active_engine") or ""
         if require_support:
             caps = capabilities_for_bot(bot, self._is_teclaw)
-            if not caps.supports(ManifestCategory.CLI_TOOLS):
+            if not caps.supports(Category.CLI_TOOLS):
                 raise CliToolUnsupportedError(
-                    caps.reason_for(ManifestCategory.CLI_TOOLS)
+                    caps.reason_for(Category.CLI_TOOLS)
                     or "this bot's engine cannot take CLI tools"
                 )
 

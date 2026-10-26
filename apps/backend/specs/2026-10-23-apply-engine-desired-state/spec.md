@@ -133,7 +133,7 @@ promotions. The delivery seam stays unbound; binding it is RSI-04.
       set (construct, skill origin, MCP transport and endpoint env, unpack
       kind); objects for every entry; no `dict[str, Any]` except
       `engine_config.config`, whose keys are undecided (G-4, #2858).
-- [ ] File content is `StoredContent(digest)`; a skill is a local package
+- [ ] File content is `ContentRef(digest)`; a skill is a local package
       (an `acm-tree-v1` blob), a Skill Center skill (name + pinned
       version) or a shared-repository skill (name + path); a directory
       resource is a path ending in `/` plus a tree blob; an MCP server is a

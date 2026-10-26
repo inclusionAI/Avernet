@@ -14,7 +14,7 @@ from agentclaw.community.core.apply_engine.desired_state import (
     Declaration,
     DesiredIdentityFile,
     EntryFailure,
-    StoredContent,
+    ContentRef,
 )
 from agentclaw.community.core.bot_config_manifest.sources.source_resolver import DeclaredSourceResolver
 from agentclaw.community.core.bot_config_manifest.compiler.entries._fetch import (
@@ -41,6 +41,15 @@ async def compile_identity(
     resolver: DeclaredSourceResolver,
     content: ContentStoreProtocol,
 ) -> Declaration[DesiredIdentityFile]:
+    """``manifest.identity`` entries → one stored file per type.
+
+    ``entries`` is the validated document's ``manifest.identity`` list, each
+    entry a mapping with the file's ``type`` and either inline ``content`` or
+    a source, e.g.::
+
+        {"type": "SOUL.md", "from": "content", "subpath": "bots/support-agent/soul.md"}
+        {"type": "SAFETY.md", "content": "# 安全边界\n…"}
+    """
     desired: list[DesiredIdentityFile] = []
     failures: list[EntryFailure] = []
     seen: set[str] = set()
@@ -71,7 +80,7 @@ async def compile_identity(
             except EntryFetchError as exc:
                 failures.append(EntryFailure(file_type, exc.reason))
                 continue
-            desired.append(DesiredIdentityFile(file_type, StoredContent(digest)))
+            desired.append(DesiredIdentityFile(file_type, ContentRef(digest)))
             continue
         if "from" not in entry and "source" not in entry:
             failures.append(EntryFailure(file_type, "an identity entry must declare 'source', 'from' or 'content'"))
@@ -84,5 +93,5 @@ async def compile_identity(
             # raises when nothing selected one file out of it.
             failures.append(EntryFailure(file_type, exc.reason))
             continue
-        desired.append(DesiredIdentityFile(file_type, StoredContent(digest_of(body)), note=delivery.note()))
+        desired.append(DesiredIdentityFile(file_type, ContentRef(digest_of(body)), note=delivery.note()))
     return Declaration(tuple(desired), failures=tuple(failures))

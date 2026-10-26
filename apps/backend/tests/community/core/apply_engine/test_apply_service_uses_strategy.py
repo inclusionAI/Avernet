@@ -14,7 +14,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from agentclaw.community.core.apply_engine.compiler import ManifestStateRef
+from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import MANIFEST_STATE
 from agentclaw.community.core.apply_engine.delivery import (
     ArcaDelivery,
     DeliveryStrategyFactory,
@@ -181,7 +181,7 @@ def _world(*, bot, mode, platform_activation=None, redeliver=None):
         )
     )
     service = ApplyRunService(
-        manifest_service=_Manifests(),
+        capabilities=_Manifests(),
         apply_repository=BotConfigManifestApplyRepository(db),
         lock_repository=BotConfigManifestApplyLockRepository(db),
         compilers=manifest_compilers(manifests=_Manifests()),
@@ -207,7 +207,7 @@ def _apply(service, bot, phase):
         bot_id=bot["bot_id"],
         bot=bot,
         owner_id=_ENTITY,
-        actor_id=_ENTITY, state=ManifestStateRef(),
+        actor_id=_ENTITY, state=MANIFEST_STATE,
         trigger=(
             triggers.CREATE_PRE_CONTAINER
             if phase is ApplyPhase.PRE_CONTAINER
@@ -323,7 +323,7 @@ async def test_dry_run_runs_through_the_strategy_and_writes_nothing() -> None:
         bot=_TECLAW_BOT, mode=TeclawDeliveryMode.PLATFORM, redeliver=redeliver
     )
     report = await service.dry_run(
-        entity_id=_ENTITY, bot_id=_BOT, bot=_TECLAW_BOT, owner_id=_ENTITY, actor_id=_ENTITY, state=ManifestStateRef()
+        entity_id=_ENTITY, bot_id=_BOT, bot=_TECLAW_BOT, owner_id=_ENTITY, actor_id=_ENTITY, state=MANIFEST_STATE
     )
     assert [c.construct.value for c in report.categories] == ["mcp"]
     assert platform_activation.activated == []
@@ -489,19 +489,19 @@ def test_the_folded_category_order_is_untouched() -> None:
         CategoryResult,
     )
     from agentclaw.community.core.apply_engine.capabilities import (
-        ManifestCategory,
-        ManifestSection,
+        Category,
+        Section,
     )
 
-    script = CategoryResult(construct=ManifestSection.SCRIPT)
-    mcp = CategoryResult(construct=ManifestCategory.MCP)
-    skills = CategoryResult(construct=ManifestCategory.SKILLS)
+    script = CategoryResult(construct=Section.SCRIPT)
+    mcp = CategoryResult(construct=Category.MCP)
+    skills = CategoryResult(construct=Category.SKILLS)
     merged = _folded(
         _phase_report("a", "create:pre_container", categories=[script]),
         _phase_report("b", "create:on_container", categories=[mcp, skills]),
     )
     assert [c.construct for c in merged.categories] == [
-        ManifestSection.SCRIPT,
-        ManifestCategory.MCP,
-        ManifestCategory.SKILLS,
+        Section.SCRIPT,
+        Category.MCP,
+        Category.SKILLS,
     ]

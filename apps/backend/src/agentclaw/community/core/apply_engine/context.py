@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from agentclaw.community.core.apply_engine.capabilities import (
-    ManifestCapabilities,
+    Capabilities,
 )
 
 
@@ -44,7 +44,7 @@ class ApplyContext:
             engine_type="claude_code",
             bot_type="arca",
             bot={...},                       # the bot record; see below
-            capabilities=ManifestCapabilities(...),
+            capabilities=Capabilities(...),
             apply_id="ap_01HZX8",            # None on a dry run
         )
 
@@ -102,7 +102,7 @@ class ApplyContext:
     bot: dict[str, Any]
     #: Which constructs this bot can actually take, resolved from
     #: ``engine_type`` and ``bot_type``. A materialiser asks it two things:
-    #: ``capabilities.supports(ManifestSection.SCRIPT)`` and, when that is
+    #: ``capabilities.supports(Section.SCRIPT)`` and, when that is
     #: false, ``capabilities.reason_for(...)`` for the refusal string it puts
     #: on the entry's report row.
     #:
@@ -111,7 +111,7 @@ class ApplyContext:
     #: trusted from the ``PUT`` that accepted the document: a bot's engine can
     #: change after a manifest is stored, and the construct that was appliable
     #: then may not be now.
-    capabilities: ManifestCapabilities
+    capabilities: Capabilities
     #: This apply's own id, e.g. ``"ap_01HZX8"``, stamped into every receipt the
     #: fetch pipeline files so "what did apply X fetch" is an indexed read.
     #: ``None`` only for a dry run, which mints no id by the same rule that

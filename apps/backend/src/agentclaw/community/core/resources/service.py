@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence
 
+from agentclaw.community.core.ports.resource_rows_port import WrittenFile
 from agentclaw.community.core.resources.models import (
     Resource,
     ResourceType,
@@ -411,10 +412,10 @@ class ResourceService(ResourceRowsPort):
                 removed = self._repo.delete(str(item.get("id"))) or removed
         return removed
 
-    async def replace_manifest_rows(
+    async def replace_rows(
         self,
         *,
-        files: Sequence[tuple[str, int]],
+        files: Sequence[WrittenFile],
         owner_id: str,
         created_by: Optional[str],
     ) -> None:
@@ -434,8 +435,10 @@ class ResourceService(ResourceRowsPort):
         # The root's row and every row beneath it, the same subtree rule a
         # directory delete uses.
         await self.delete_file_record(path=RESOURCES_ROOT_DIR)
-        for path, size in files:
-            await self.record_uploaded_file(path=path, size=size, user_id=owner_id, created_by=created_by, source="manifest")
+        for file in files:
+            await self.record_uploaded_file(
+                path=file.path, size=file.size, user_id=owner_id, created_by=created_by, source="manifest"
+            )
 
     async def record_uploaded_file(
         self,

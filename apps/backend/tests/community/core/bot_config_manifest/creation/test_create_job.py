@@ -28,7 +28,7 @@ from agentclaw.community.core.bot_config_manifest.create_job import (
     enqueue_create_job,
 )
 from agentclaw.community.core.apply_engine.run.service_protocol import (
-    ManifestApplyInProgressError,
+    ApplyInProgressError,
 )
 from agentclaw.community.core.bot_config_manifest.schema import (
     ManifestValidationError,
@@ -632,7 +632,7 @@ def test_an_apply_already_in_flight_is_waited_out_not_failed():
 
     class _LockedApplies(_Applies):
         def start_apply(self, **kwargs):
-            raise ManifestApplyInProgressError("someone else is applying")
+            raise ApplyInProgressError("someone else is applying")
 
     applies = _LockedApplies(
         _Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED)

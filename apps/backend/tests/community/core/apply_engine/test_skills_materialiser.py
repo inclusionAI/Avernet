@@ -46,6 +46,7 @@ from agentclaw.community.core.bot_config_manifest.fetch.errors import (
 from agentclaw.community.core.apply_engine.registry import (
     ConfirmedPartialWriteError,
 )
+from agentclaw.community.core.apply_engine.desired_state import CenterSkillVersion, DesiredSkill
 from agentclaw.community.core.content_store import decode_tree_bytes
 
 from ._fakes import (
@@ -495,6 +496,34 @@ def test_a_declared_name_matching_a_non_local_active_skill_becomes_local_direct(
     assert resolved.ok
     assert [entry.outcome.value for entry in written] == ["updated"]
     assert uploads.uploads
+
+
+def test_a_non_local_skill_is_skipped_not_failed_and_not_removed(caplog):
+    """A Center or repository skill is not delivered yet (#3103): a warning, nothing written, nothing removed.
+
+    The active skill of that name stays — the state declares it, so the
+    removal pass never sees it as undeclared — and the report says what
+    happened on the entry itself rather than failing the category.
+    """
+    import logging
+
+    materialiser, uploads, activation, _, _, _ = skill_rig(
+        assets=[skill_asset(9, "triage", git_path="git://default/x")],
+    )
+    raw = materialiser.materialiser
+    ctx = _ctx()
+    with caplog.at_level(logging.WARNING):
+        resolved = _run(raw.resolve(ctx, [DesiredSkill("triage", CenterSkillVersion("1.0.0"))]))
+    assert resolved.ok and resolved.failures == ()
+    assert any("does not deliver" in record.getMessage() and "3103" in record.getMessage() for record in caplog.records)
+    plan = _run(raw.plan(ctx, resolved.intents))
+    assert [(p.intent.identity, p.outcome, p.requires_write) for p in plan.entries] == [("triage", "unchanged", False)]
+    assert plan.removals == ()
+    written = _run(raw.write(ctx, plan))
+    assert [(entry.identity, entry.outcome.value) for entry in written] == [("triage", "unchanged")]
+    assert "3103" in (written[0].note or "")
+    assert uploads.uploads == []
+    assert activation.writes == 0
 
 
 def test_undeclared_members_of_the_area_are_removed_by_name():

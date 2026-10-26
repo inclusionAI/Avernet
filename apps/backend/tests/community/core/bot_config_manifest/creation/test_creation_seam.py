@@ -31,11 +31,11 @@ class _Applies:
 
     def materialised_constructs(self):
         from agentclaw.community.core.apply_engine.capabilities import (
-            ManifestCategory,
-            ManifestSection,
+            Category,
+            Section,
         )
 
-        return frozenset({ManifestSection.SCRIPT, ManifestCategory.MCP})
+        return frozenset({Section.SCRIPT, Category.MCP})
 
     def start_apply(self, **kwargs):
         self.calls.append(kwargs)

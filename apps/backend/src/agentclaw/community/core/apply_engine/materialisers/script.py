@@ -54,11 +54,11 @@ from agentclaw.community.core.apply_engine.registry import (
     ResolveFailure,
     ResolveResult,
 )
-from agentclaw.community.core.apply_engine.capabilities import ManifestSection
+from agentclaw.community.core.apply_engine.capabilities import Section
 
 #: How a script entry names itself in a report. It has no entity key of its own
 #: — there is one script — so the section's own name is used.
-_IDENTITY = ManifestSection.SCRIPT.value
+_IDENTITY = Section.SCRIPT.value
 
 #: What the response tells a caller about timing. Phrased in the terms the
 #: mechanism actually has: the row is delivered now and executed at the next
@@ -81,7 +81,7 @@ class ScriptMaterialiser(Materialiser):
                        identity="script", value="#!/bin/sh\necho prod\n"),))
         plan    -> CategoryPlan(
                        entries=(PlannedEntry(<that intent>, "created"),))
-        write   -> (EntryResult(ManifestSection.SCRIPT, "script",
+        write   -> (EntryResult(Section.SCRIPT, "script",
                                 EntryOutcome.CREATED, note=DELIVERY_NOTE),)
 
     A declared-empty section inverts that: ``resolve`` answers
@@ -94,7 +94,7 @@ class ScriptMaterialiser(Materialiser):
     wrote anything.
     """
 
-    construct = ManifestSection.SCRIPT
+    construct = Section.SCRIPT
 
     def __init__(self, script_service: BotStartupScriptServiceProtocol) -> None:
         self._scripts = script_service
@@ -107,9 +107,9 @@ class ScriptMaterialiser(Materialiser):
         stored, and a teclaw or desktop bot gets no start command from the
         shared sequence, so a script written there would never execute.
         """
-        if not ctx.capabilities.supports(ManifestSection.SCRIPT):
+        if not ctx.capabilities.supports(Section.SCRIPT):
             return ResolveResult(
-                failures=(ResolveFailure(_IDENTITY, ctx.capabilities.reason_for(ManifestSection.SCRIPT)),)
+                failures=(ResolveFailure(_IDENTITY, ctx.capabilities.reason_for(Section.SCRIPT)),)
             )
         if not entries:
             # ``script: null`` — declared, and declared to be nothing. The area

@@ -20,7 +20,7 @@ from urllib.parse import urlsplit
 from agentclaw.community.core.apply_engine.desired_state import RESOURCES_ROOT
 from agentclaw.community.core.apply_engine.identity_types import RESERVED_IDENTITY_FILES, legal_identity_types
 from agentclaw.community.core.apply_engine.capabilities import (
-    ManifestCategory,
+    Category,
 )
 from agentclaw.community.core.bot_config_manifest.schema._support import (
     Context,
@@ -71,14 +71,14 @@ _COMMON_SOURCE_KEYS: frozenset[str] = frozenset(
 #: Every key a category's entry may carry. Closed: an unknown key is refused
 #: rather than ignored, because an ignored key is a caller believing they
 #: configured something.
-CATEGORY_ENTRY_KEYS: dict[ManifestCategory, frozenset[str]] = {
-    ManifestCategory.RESOURCES: _COMMON_SOURCE_KEYS
+CATEGORY_ENTRY_KEYS: dict[Category, frozenset[str]] = {
+    Category.RESOURCES: _COMMON_SOURCE_KEYS
     | {"path", "unpack", "strip_components"},
-    ManifestCategory.SKILLS: _COMMON_SOURCE_KEYS | {"name", "unpack"},
-    ManifestCategory.IDENTITY: _COMMON_SOURCE_KEYS | {"type"},
-    ManifestCategory.CLI_TOOLS: _COMMON_SOURCE_KEYS | {"name", "version", "unpack"},
+    Category.SKILLS: _COMMON_SOURCE_KEYS | {"name", "unpack"},
+    Category.IDENTITY: _COMMON_SOURCE_KEYS | {"type"},
+    Category.CLI_TOOLS: _COMMON_SOURCE_KEYS | {"name", "version", "unpack"},
     # A registry reference with an optional Bot-scoped connection override.
-    ManifestCategory.MCP: frozenset({"server_code", "config"}),
+    Category.MCP: frozenset({"server_code", "config"}),
 }
 
 _MCP_CONFIG_KEYS = frozenset({"url", "headers", "endpoint_env", "transport_protocol"})
@@ -92,7 +92,7 @@ _SOURCE_SELECTORS = ("from", "source", "content")
 
 
 def check_entry_keys(
-    ctx: Context, location: str, entry: dict[str, Any], category: ManifestCategory
+    ctx: Context, location: str, entry: dict[str, Any], category: Category
 ) -> None:
     """Refuse any key the category does not define."""
     allowed = CATEGORY_ENTRY_KEYS[category]
@@ -115,7 +115,7 @@ def resolve_source(
     ctx: Context,
     location: str,
     entry: dict[str, Any],
-    category: ManifestCategory,
+    category: Category,
 ) -> SourceDecl | None:
     """Settle which source an entry uses, and refuse the illegal combinations.
 
@@ -533,7 +533,7 @@ def validate_mcp_entry(ctx: Context, location: str, entry: dict[str, Any]) -> No
     bot type alone so that W13 can run it before a bot record exists. A registry
     lookup would need a tenant-scoped service that leg does not have.
     """
-    check_entry_keys(ctx, location, entry, ManifestCategory.MCP)
+    check_entry_keys(ctx, location, entry, Category.MCP)
     server_code = entry.get("server_code")
     if not isinstance(server_code, str) or not server_code:
         ctx.add(
@@ -653,7 +653,7 @@ def validate_resource_entry(
     ctx: Context, location: str, entry: dict[str, Any]
 ) -> str | None:
     """A workspace resource. Returns its ``path`` when the path is usable."""
-    check_entry_keys(ctx, location, entry, ManifestCategory.RESOURCES)
+    check_entry_keys(ctx, location, entry, Category.RESOURCES)
     path = entry.get("path")
     usable = check_relative_path(ctx, f"{location}.path", path, what="path")
     if usable and (not str(path).startswith(RESOURCES_ROOT) or path == RESOURCES_ROOT):
@@ -667,7 +667,7 @@ def validate_resource_entry(
         )
         usable = False
     is_directory = isinstance(path, str) and path.endswith("/")
-    source = resolve_source(ctx, location, entry, ManifestCategory.RESOURCES)
+    source = resolve_source(ctx, location, entry, Category.RESOURCES)
     # Git carries directory structure natively, so a tree needs no packaging
     # (schema §2.2); only an object store does, because one HTTPS GET fetches
     # one object and a tree has to travel inside it.
@@ -697,10 +697,10 @@ def validate_resource_entry(
 
 def validate_skill_entry(ctx: Context, location: str, entry: dict[str, Any]) -> str | None:
     """A local skill. Returns its ``name`` when the name is usable."""
-    check_entry_keys(ctx, location, entry, ManifestCategory.SKILLS)
+    check_entry_keys(ctx, location, entry, Category.SKILLS)
     name = entry.get("name")
     usable = check_name(ctx, f"{location}.name", name, what="a skill name")
-    source = resolve_source(ctx, location, entry, ManifestCategory.SKILLS)
+    source = resolve_source(ctx, location, entry, Category.SKILLS)
     check_unpack(ctx, location, entry, source=source, archive_expected=True)
     # A skills entry over ``oss`` always unpacks — a skill IS a package — so
     # ``subpath`` always has an archive to select within.
@@ -720,7 +720,7 @@ def validate_identity_entry(
     ctx: Context, location: str, entry: dict[str, Any], *, engine_type: str
 ) -> None:
     """An identity file, checked against this engine's own legal set."""
-    check_entry_keys(ctx, location, entry, ManifestCategory.IDENTITY)
+    check_entry_keys(ctx, location, entry, Category.IDENTITY)
     file_type = entry.get("type")
     legal = legal_identity_types(engine_type)
     if not isinstance(file_type, str) or file_type not in legal:
@@ -741,7 +741,7 @@ def validate_identity_entry(
             "writes it and never removes it, so a manifest declaring it could "
             "never converge",
         )
-    source = resolve_source(ctx, location, entry, ManifestCategory.IDENTITY)
+    source = resolve_source(ctx, location, entry, Category.IDENTITY)
     # An identity file is one text body and is never an archive, so on ``oss``
     # there is nothing a ``subpath`` could select within.
     check_source_subpath(
@@ -763,10 +763,10 @@ def validate_cli_tool_entry(
     implemented here either. What remains is the ordinary source machinery plus
     the two rules below.
     """
-    check_entry_keys(ctx, location, entry, ManifestCategory.CLI_TOOLS)
+    check_entry_keys(ctx, location, entry, Category.CLI_TOOLS)
     name = entry.get("name")
     name_ok = check_name(ctx, f"{location}.name", name, what="a tool name")
-    source = resolve_source(ctx, location, entry, ManifestCategory.CLI_TOOLS)
+    source = resolve_source(ctx, location, entry, Category.CLI_TOOLS)
     check_unpack(
         ctx, location, entry, source=source, archive_expected="unpack" in entry
     )

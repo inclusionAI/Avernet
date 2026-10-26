@@ -476,7 +476,7 @@ def apply_while_locked_is_a_409():
     """Applies are serialized per bot, and contention is retryable — not a 500.
 
     The route's own documentation promises this 409, but
-    ``ManifestApplyInProgressError`` was not registered in the envelope's error
+    ``ApplyInProgressError`` was not registered in the envelope's error
     map, so ``@envelope_errors`` re-raised it and the caller got a 500. Pinned
     through the assembled app rather than at the service, because the defect was
     entirely in the mapping: the service raised the right exception all along.

@@ -88,6 +88,7 @@ from typing import Any, Mapping, Optional, Protocol, runtime_checkable
 
 import httpx
 
+from agentclaw.community.core.apply_engine.outcomes import SourceMode
 from agentclaw.community.core.bot_config_manifest.sources.entry_delivery import (
     BlobDelivery,
     EntryDelivery,
@@ -212,7 +213,7 @@ class DeclaredFetch:
             decl=SourceDecl(protocol=SourceKind.GIT,
                             url="https://code.example.com/team/content.git",
                             ref="v1.2.0", subpath="kb", auth="git-prod",
-                            mode="non_strict"),
+                            mode=SourceMode.NON_STRICT),
             entry={"path": "data/faq.csv", "from": "content",
                    "subpath": "faq.csv"},
             category=FetchCategory.RESOURCES_FILE,
@@ -625,7 +626,7 @@ class GitSourceFetcher(SourceFetcher):
 
         baseline = session.baseline(spec.url, spec.ref, spec.mode)
         if (
-            spec.mode == "strict"
+            spec.mode == SourceMode.STRICT
             and baseline is not None
             and baseline != checkout.sha
         ):

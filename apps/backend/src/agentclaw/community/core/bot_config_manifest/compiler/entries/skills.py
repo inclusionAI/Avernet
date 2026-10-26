@@ -21,7 +21,7 @@ from agentclaw.community.core.apply_engine.desired_state import (
     DesiredSkill,
     EntryFailure,
     LocalSkillPackage,
-    StoredContent,
+    ContentRef,
 )
 from agentclaw.community.core.bot_config_manifest.sources.entry_delivery import EntryDelivery
 from agentclaw.community.core.bot_config_manifest.sources.source_resolver import DeclaredSourceResolver
@@ -66,7 +66,15 @@ async def compile_skills(
     content: ContentStoreProtocol,
     validator: SkillPackageValidator,
 ) -> Declaration[DesiredSkill]:
-    """Every refusal up front: name conflicts before any bytes are spent, then the fetch, then the package."""
+    """Every refusal up front: name conflicts before any bytes are spent, then the fetch, then the package.
+
+    ``entries`` is the validated document's ``manifest.skills`` list, each
+    entry a mapping as the author wrote it, e.g.::
+
+        {"name": "quality-check", "from": "content", "subpath": "skills/quality-check/"}
+        {"name": "order-lookup", "from": "order-lookup", "digest": "sha256:…", "unpack": "zip"}
+        {"name": "triage", "source": {"protocol": "git", "url": "…", "ref": "v1", "subpath": "triage/"}}
+    """
     desired: list[DesiredSkill] = []
     failures: list[EntryFailure] = []
     seen: set[str] = set()
@@ -121,7 +129,7 @@ async def compile_skills(
         except EntryFetchError as exc:
             failures.append(EntryFailure(name, exc.reason))
             continue
-        desired.append(DesiredSkill(name, LocalSkillPackage(StoredContent(digest)), note=delivery.note()))
+        desired.append(DesiredSkill(name, LocalSkillPackage(ContentRef(digest)), note=delivery.note()))
     return Declaration(tuple(desired), failures=tuple(failures))
 
 

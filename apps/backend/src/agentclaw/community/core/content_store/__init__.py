@@ -8,6 +8,7 @@ filed. See each module for its half:
 
 - ``service.py`` — the one funnel: store/read/records, digest as address.
 - ``service_protocol.py`` — the contract both consumers inject.
+- ``reader.py`` — the read half alone, for consumers that only read back.
 - ``models.py`` — ORM row + records + the bot scope.
 - ``limits.py`` — the address grammar and the audit identity width.
 - ``tree.py`` — acm-tree-v1, the framing a stored tree is.
@@ -30,6 +31,7 @@ from agentclaw.community.core.content_store.models import (
     ManifestContentModel,
     StoredContentRecord,
 )
+from agentclaw.community.core.content_store.reader import ContentReader
 from agentclaw.community.core.content_store.service import (
     ContentStoreService,
 )
@@ -49,6 +51,7 @@ from agentclaw.community.core.content_store.tree import (
 __all__ = [
     "ContentIntegrityError",
     "ContentMissingError",
+    "ContentReader",
     "ContentScope",
     "ContentStoreError",
     "ContentStoreFault",

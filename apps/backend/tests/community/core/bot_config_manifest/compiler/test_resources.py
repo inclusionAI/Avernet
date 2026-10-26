@@ -8,7 +8,7 @@ from agentclaw.community.core.apply_engine.desired_state import (
     DesiredResourceFile,
     DesiredResourceTree,
     DesiredState,
-    StoredContent,
+    ContentRef,
 )
 from agentclaw.community.core.bot_config_manifest.compiler.entries.resources import (
     OUTSIDE_ROOT_REASON,
@@ -34,7 +34,7 @@ async def test_files_inline_and_fetched_land_in_the_store_under_the_root() -> No
     )
     assert declared.failures == ()
     fetched, inline = declared.entries
-    assert fetched == DesiredResourceFile("data/faq.csv", StoredContent(digest_of(b"q,a\n")), note=None)
+    assert fetched == DesiredResourceFile("data/faq.csv", ContentRef(digest_of(b"q,a\n")), note=None)
     assert isinstance(inline, DesiredResourceFile) and content.read(inline.content.digest) == b"hello\n"
     DesiredState(resources=declared)  # the model accepts what the compiler emits
 

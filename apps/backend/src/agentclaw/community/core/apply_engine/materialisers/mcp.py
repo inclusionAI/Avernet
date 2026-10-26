@@ -29,7 +29,7 @@ from agentclaw.community.core.apply_engine.registry import (
     ResolveFailure,
     ResolveResult,
 )
-from agentclaw.community.core.apply_engine.capabilities import ManifestCategory
+from agentclaw.community.core.apply_engine.capabilities import Category
 from agentclaw.community.core.mcp.mcp_auth_service_protocol import (
     MCPAuthServiceProtocol,
 )
@@ -69,13 +69,13 @@ class McpMaterialiser(Materialiser):
         plan    -> CategoryPlan(
                        entries=(PlannedEntry(Intent("gh", {"headers": {}}), "updated"),),
                        removals=("old",))
-        write   -> (EntryResult(ManifestCategory.MCP, "gh", EntryOutcome.UPDATED),)
+        write   -> (EntryResult(Category.MCP, "gh", EntryOutcome.UPDATED),)
 
     ``plan`` compares both the installed set and persisted override, so it can
     answer ``created``, ``updated`` or ``unchanged``.
     """
 
-    construct = ManifestCategory.MCP
+    construct = Category.MCP
 
     def __init__(
         self,

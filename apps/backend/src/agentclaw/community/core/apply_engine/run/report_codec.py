@@ -16,6 +16,7 @@ from typing import Any
 
 from agentclaw.community.core.apply_engine.compiler import state_ref_from_payload
 from agentclaw.community.core.apply_engine.outcomes import (
+    SourceMode,
     ApplyReport,
     ApplyStatus,
     CategoryResult,
@@ -24,8 +25,8 @@ from agentclaw.community.core.apply_engine.outcomes import (
     SourceResolution,
 )
 from agentclaw.community.core.apply_engine.capabilities import (
-    ManifestCategory,
-    ManifestSection,
+    Category,
+    Section,
     parse_category,
 )
 
@@ -89,7 +90,7 @@ def report_from_payload(
                 name=source.get("name", ""),
                 url=source.get("url"),
                 ref=source.get("ref"),
-                mode=source.get("mode"),
+                mode=SourceMode(source["mode"]) if source.get("mode") is not None else None,
                 resolved_sha=source.get("resolved_sha"),
                 auth=source.get("auth"),
             )
@@ -99,13 +100,13 @@ def report_from_payload(
     )
 
 
-def _construct_of(name: Any) -> ManifestCategory | ManifestSection | None:
+def _construct_of(name: Any) -> Category | Section | None:
     """A stored category name back into its construct, or ``None`` if unknown."""
     category = parse_category(name)
     if category is not None:
         return category
     try:
-        return ManifestSection(name)
+        return Section(name)
     except ValueError:
         return None
 

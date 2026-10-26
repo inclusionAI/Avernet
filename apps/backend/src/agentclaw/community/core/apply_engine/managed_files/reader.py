@@ -51,11 +51,15 @@ SERVED_ENGINE = "teclaw"
 
 
 @runtime_checkable
-class ManifestPresence(Protocol):
-    """The one Manifest question the reader asks: does this bot carry a stored document?
+class DeclaredStateSource(Protocol):
+    """Whether the platform holds a declared state for a bot: the one question ownership turns on.
 
-    The Manifest service answers it with its ``get``; declared here so the
-    engine names no Manifest module.
+    A bot whose state the platform declared (today: a bot that carries a
+    stored configuration document; the creation job applied it before the
+    container was provisioned) gets its first artifact from the platform; a
+    bot created without one keeps the engine's own files. The service that
+    owns that declaration answers with its ``get``; the engine names no such
+    service, only this port.
     """
 
     def get(self, *, entity_id: str, bot_id: str) -> object | None: ...
@@ -73,10 +77,10 @@ class ManagedFilesComposeReader(PlatformOwnershipReader, ManagedFilesReader):
         self,
         *,
         store: ManagedFilesStore,
-        manifest_service_provider: Callable[[], ManifestPresence],
+        declared_state_provider: Callable[[], DeclaredStateSource],
     ) -> None:
         self._store = store
-        self._manifests = manifest_service_provider
+        self._declared = declared_state_provider
 
     # ── PlatformOwnershipReader ──────────────────────────────────────────
 
@@ -100,7 +104,7 @@ class ManagedFilesComposeReader(PlatformOwnershipReader, ManagedFilesReader):
         if req.occasion is ComposeOccasion.MANIFEST_APPLY:
             return True
         if req.occasion is ComposeOccasion.PROVISION:
-            return self._manifests().get(entity_id=req.entity_id, bot_id=req.bot_id) is not None
+            return self._declared().get(entity_id=req.entity_id, bot_id=req.bot_id) is not None
         return False
 
     # ── ManagedFilesReader ───────────────────────────────────────────────

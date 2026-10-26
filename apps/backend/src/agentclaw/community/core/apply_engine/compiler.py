@@ -1,17 +1,18 @@
 """The compiler contract: what turns something else into a ``DesiredState``.
 
-An apply run starts from a **state reference**, typed: ``ManifestStateRef``
-(the bot's stored Manifest document; a bot has one, so it carries nothing) or
-``GenomeStateRef`` (the revision the named promotion delivers). The run
-service picks the compiler by the reference's type and re-compiles from it in
-the worker; no serialised state travels, the task payload carries the
-reference's identifiers only.
+An apply run starts from a **state reference**: a producer's *kind* and the
+producer's own *reference* within it. The run service looks the kind up in
+the compiler map it was built with — each producer's module contributes its
+own row — and re-compiles from the reference in the worker; no serialised
+state travels, the task payload carries the reference only. The engine names
+no kind: what ``"manifest"`` or ``"genome"`` means is the business of the
+module that registered it.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, Collection, Dict, Mapping, Protocol, TypeVar, runtime_checkable
+from typing import TYPE_CHECKING, Any, Collection, Dict, Mapping, Protocol, runtime_checkable
 
 from agentclaw.community.core.apply_engine.constructs import ApplyConstruct
 
@@ -25,8 +26,7 @@ __all__ = [
     "Compiled",
     "CompileRefused",
     "DesiredStateCompiler",
-    "GenomeStateRef",
-    "ManifestStateRef",
+    "LEGACY_STATE",
     "StateCompilers",
     "StateRef",
     "state_ref_from_payload",
@@ -34,43 +34,49 @@ __all__ = [
 
 
 @dataclass(frozen=True)
-class ManifestStateRef:
-    """The bot's stored Manifest document."""
+class StateRef:
+    """What an apply run converges a bot to: a producer's kind, and the producer's reference within it.
 
-    kind: ClassVar[str] = "manifest"
+    ``kind`` is the name a compiler registered under (``StateCompilers`` is
+    keyed by it). ``reference`` is that producer's own identifier for the
+    state — ``None`` for a kind with exactly one state per bot, where there
+    is nothing to pick. The two producers today::
 
-    def to_payload(self) -> dict[str, Any]:
-        return {"kind": self.kind}
+        StateRef("manifest")                 # the bot's stored configuration document
+        StateRef("genome", promotion_id)     # the revision a promotion delivers
 
+    Each is built by its own module (the Manifest's ``MANIFEST_STATE``, the
+    genome's ``genome_state(...)``); the engine only carries them.
+    """
 
-@dataclass(frozen=True)
-class GenomeStateRef:
-    """The revision the named promotion delivers (the promotion row holds the revision id)."""
-
-    kind: ClassVar[str] = "genome"
-    promotion_id: str
+    kind: str
+    reference: str | None = None
 
     def __post_init__(self) -> None:
-        if not self.promotion_id:
-            raise ValueError("a genome state reference needs a promotion id")
+        if not self.kind:
+            raise ValueError("a state reference needs a kind")
 
     def to_payload(self) -> dict[str, Any]:
-        return {"kind": self.kind, "promotion_id": self.promotion_id}
+        """The wire shape, in a task payload and a stored report: ``{"kind": ..., "reference": ...}``."""
+        return {"kind": self.kind, "reference": self.reference}
 
 
-StateRef = ManifestStateRef | GenomeStateRef
+#: What an apply recorded before reports and task payloads carried a reference is read as. There was one
+#: producer then — the bot's stored configuration document — so an absent reference means that kind. Read on
+#: the legacy decode path only, and the default a report is born with before the run service stamps the
+#: reference it applied; every record the service writes says what it applied.
+LEGACY_STATE = StateRef("manifest")
 
 
 def state_ref_from_payload(payload: Mapping[str, Any] | None) -> StateRef:
-    """The reference a task payload or a persisted report carries; absent means the Manifest."""
+    """The reference a task payload or a persisted report carries; absent is ``LEGACY_STATE``."""
     if payload is None:
-        return ManifestStateRef()
+        return LEGACY_STATE
     kind = payload.get("kind")
-    if kind == ManifestStateRef.kind:
-        return ManifestStateRef()
-    if kind == GenomeStateRef.kind:
-        return GenomeStateRef(promotion_id=str(payload.get("promotion_id") or ""))
-    raise ValueError(f"unknown state reference kind: {kind!r}")
+    if not isinstance(kind, str) or not kind:
+        raise ValueError(f"a state reference needs a kind: {payload!r}")
+    reference = payload.get("reference")
+    return StateRef(kind, str(reference) if reference is not None else None)
 
 
 @dataclass(frozen=True)
@@ -79,9 +85,6 @@ class Compiled:
 
     state: DesiredState
     sources: tuple[SourceResolution, ...] = ()
-
-
-R = TypeVar("R", ManifestStateRef, GenomeStateRef, contravariant=True)
 
 
 class CompileRefused(Exception):
@@ -110,7 +113,7 @@ class CompileRefused(Exception):
 
 
 @runtime_checkable
-class DesiredStateCompiler(Protocol[R]):
+class DesiredStateCompiler(Protocol):
     """Compile one kind of state reference into a desired state.
 
     Fetching, grammar and content filing all happen inside ``compile``; what
@@ -121,7 +124,7 @@ class DesiredStateCompiler(Protocol[R]):
     failed apply.
     """
 
-    def check(self, ctx: ApplyContext, ref: R) -> None:
+    def check(self, ctx: ApplyContext, ref: StateRef) -> None:
         """Refuse now what ``compile`` would refuse later, so the caller hears it before an apply id exists.
 
         Synchronous and cheap: the Manifest compiler re-validates the stored
@@ -136,18 +139,25 @@ class DesiredStateCompiler(Protocol[R]):
         """
         ...
 
-    async def compile(self, ctx: ApplyContext, ref: R, *, only: Collection[ApplyConstruct] | None = None) -> Compiled:
+    async def compile(
+        self, ctx: ApplyContext, ref: StateRef, *, only: Collection[ApplyConstruct] | None = None
+    ) -> Compiled:
         """The desired state the reference names, fetched and filed.
 
-        ``only`` is the set of constructs this run will apply — a creation
-        phase's half — and a compiler leaves every other construct out of the
-        state, declared or not, so no fetch is spent on a construct the run
-        cannot touch and no failure is reported for one it will not reach.
-        ``None`` compiles every declared construct.
+        ``only`` narrows the compile to a subset of constructs. The one caller
+        that passes it is bot creation, which applies in two phases: the
+        pre-container phase can deliver only the startup script (it is baked
+        into the container's start command), and the on-container phase
+        delivers everything else once the container runs. Each phase compiles
+        with ``only`` = its own constructs, so the pre-container phase spends
+        no fetch budget on skills it cannot deliver yet and reports no failure
+        for them; the compiler leaves every other construct undeclared in the
+        state. ``None`` — every other caller — compiles every construct the
+        reference declares.
         """
         ...
 
 
 #: The run service's lookup: one compiler per reference type. A map
 #: multibinding, so each compiler's module contributes its own row.
-StateCompilers = Dict[type, DesiredStateCompiler]
+StateCompilers = Dict[str, DesiredStateCompiler]

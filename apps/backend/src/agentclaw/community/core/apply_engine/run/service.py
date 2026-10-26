@@ -4,9 +4,9 @@ Owns the lifecycle around the orchestrator: the lock, the pre-apply check,
 the record's two writes, and handing the work to the queue that runs it.
 
 **An apply starts from a state reference, not a document.** ``start_apply``
-takes a :class:`~...apply_engine.compiler.StateRef` — the bot's stored
-Manifest, or a genome promotion's revision — looks the reference's compiler
-up in the map it was built with, and the worker compiles then applies. This
+takes a :class:`~...apply_engine.compiler.StateRef` — a producer's kind and
+its reference within it — looks the kind's compiler up in the map it was
+built with, and the worker compiles then applies. This
 service reads no document and names no construct: what a reference means is
 its compiler's business, and the orchestrator applies whatever came out.
 
@@ -88,7 +88,7 @@ from agentclaw.community.core.apply_engine.run.lock_reaper import (
 from agentclaw.community.core.apply_engine.run.service_protocol import (
     ApplyAccepted,
     ApplyRunServiceProtocol,
-    ManifestApplyInProgressError,
+    ApplyInProgressError,
 )
 from agentclaw.community.core.apply_engine.capabilities import CapabilityResolver
 from agentclaw.community.core.repository.protocols.bot import BotRepository
@@ -145,7 +145,7 @@ class ApplyRunService(ApplyRunServiceProtocol):
     # builds this service with an explicit provider instead.
     def __init__(
         self,
-        manifest_service: CapabilityResolver,
+        capabilities: CapabilityResolver,
         apply_repository: BotConfigManifestApplyRepositoryProtocol,
         lock_repository: BotConfigManifestApplyLockRepositoryProtocol,
         task_queue_provider: Callable[[], "TaskQueueService"],
@@ -156,7 +156,7 @@ class ApplyRunService(ApplyRunServiceProtocol):
     ) -> None:
         # Read for capabilities only (``_context``): what a document may be is
         # the Manifest compiler's question now, asked when it compiles.
-        self._manifests = manifest_service
+        self._capabilities = capabilities
         self._applies = apply_repository
         self._locks = lock_repository
         # The queue that now runs the work, and the reader that rebuilds what the
@@ -180,7 +180,7 @@ class ApplyRunService(ApplyRunServiceProtocol):
         # container ports silently. A service that cannot be built without the
         # seam cannot be built wrong.
         self._strategies = delivery_strategies
-        # One compiler per state reference type, contributed by each
+        # One compiler per state kind, contributed by each
         # compiler's own module. Required for the same reason the seam is: a
         # service with no compiler could start nothing.
         self._compilers = dict(compilers)
@@ -215,7 +215,7 @@ class ApplyRunService(ApplyRunServiceProtocol):
 
         **What runs where, and why the split is here.** Everything above the
         enqueue is synchronous on the caller's thread — the lock (so a concurrent
-        apply still raises ``ManifestApplyInProgressError``), the compiler's
+        apply still raises ``ApplyInProgressError``), the compiler's
         check (so a stored document that no longer validates still raises *to
         the caller*), the ``apply_id`` and the ``RUNNING`` row. Only the work
         is handed off — the compile included, because it fetches. That
@@ -253,12 +253,12 @@ class ApplyRunService(ApplyRunServiceProtocol):
             if not reap_stale_lock(
                 self._locks, env=env, entity_id=entity_id, bot_id=bot_id
             ):
-                raise ManifestApplyInProgressError(bot_id)
+                raise ApplyInProgressError(bot_id)
             lock = self._locks.acquire(
                 env=env, entity_id=entity_id, bot_id=bot_id, holder_user_id=actor_id
             )
             if lock is None:
-                raise ManifestApplyInProgressError(bot_id)
+                raise ApplyInProgressError(bot_id)
 
         try:
             # Called for its **exception**: what cannot be applied is refused
@@ -346,7 +346,7 @@ class ApplyRunService(ApplyRunServiceProtocol):
             # identical state, so it keeps the identical answer — and that answer
             # is the better one: without the terminal write a poller sees a
             # lock-less RUNNING row, and the next apply waits out the stale-lock
-            # TTL (30 minutes of ManifestApplyInProgressError) for work that never
+            # TTL (30 minutes of ApplyInProgressError) for work that never
             # ran. The apply is terminally FAILED here, the lock released for the
             # next attempt, and the caller hears the original failure.
             terminate_on_launch_failure(
@@ -768,9 +768,9 @@ class ApplyRunService(ApplyRunServiceProtocol):
             bot_type=kind,
             bot=record,
             capabilities=(
-                self._manifests.capabilities_for_bot(bot)
+                self._capabilities.capabilities_for_bot(bot)
                 if bot is not None
-                else self._manifests.resolve_capabilities(
+                else self._capabilities.resolve_capabilities(
                     active_engine=engine, bot_type=kind
                 )
             ),
@@ -778,11 +778,11 @@ class ApplyRunService(ApplyRunServiceProtocol):
         )
 
     def _compiler_for(self, state: StateRef) -> DesiredStateCompiler:
-        """The compiler registered for this reference's type; a missing one is a wiring error, not a bot state."""
+        """The compiler registered for this reference's kind; a missing one is a wiring error, not a bot state."""
         try:
-            return self._compilers[type(state)]
+            return self._compilers[state.kind]
         except KeyError:
-            raise ValueError(f"no compiler is registered for a {type(state).__name__} state reference") from None
+            raise ValueError(f"no compiler is registered for state kind {state.kind!r}") from None
 
     def _to_report(
         self, record: Any, *, entity_id: str, bot_id: str

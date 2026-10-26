@@ -25,7 +25,8 @@ from typing import Callable, Mapping
 
 from injector import Injector, Module, inject, multiprovider, provider, singleton
 
-from agentclaw.community.core.apply_engine.compiler import ManifestStateRef, StateCompilers
+from agentclaw.community.core.apply_engine.compiler import StateCompilers
+from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import MANIFEST_STATE
 from agentclaw.community.core.bot_config_manifest.compiler import ManifestCompiler
 from agentclaw.community.core.repository.protocols.bot.config_manifest_apply import (
     BotConfigManifestApplyRepositoryProtocol,
@@ -125,7 +126,7 @@ _COMPOSE_READER_BY_MODE: Mapping[
     ],
 ] = MappingProxyType({
     TeclawDeliveryMode.PLATFORM: lambda store, manifests: ManagedFilesComposeReader(
-        store=store, manifest_service_provider=manifests
+        store=store, declared_state_provider=manifests
     ),
     TeclawDeliveryMode.DEVICE: lambda store, manifests: EngineOwnedComposeReader(),
 })
@@ -438,7 +439,7 @@ class ManifestFetchModule(Module):
     @inject
     def manifest_state_compiler(self, compiler: ManifestCompiler) -> StateCompilers:
         """The Manifest row of the run service's compiler map; the genome contributes its own."""
-        return {ManifestStateRef: compiler}
+        return {MANIFEST_STATE.kind: compiler}
 
     @singleton
     @provider

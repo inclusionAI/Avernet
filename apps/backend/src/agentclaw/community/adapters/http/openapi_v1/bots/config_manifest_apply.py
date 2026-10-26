@@ -36,8 +36,8 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 )
 from agentclaw.community.api.apply_run_service import (
     ApplyRunServiceProtocol,
-    ManifestStateRef,
 )
+from agentclaw.community.api.bot_config_manifest_service import MANIFEST_STATE
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.di import Injected
 
@@ -178,7 +178,7 @@ async def apply_bot_config_manifest(
             # A dry run writes no record, so it has no audit column to fill and
             # needs only the principal.
             actor_id=actor_id,
-            state=ManifestStateRef(),
+            state=MANIFEST_STATE,
         )
         return envelope(apply_payload(report), request)
 
@@ -197,7 +197,7 @@ async def apply_bot_config_manifest(
         audit_actor=audit,
         # This API applies the bot's stored document; a promotion's revision
         # starts from the genome routes.
-        state=ManifestStateRef(),
+        state=MANIFEST_STATE,
     )
     return envelope(
         ConfigManifestApplyAccepted(

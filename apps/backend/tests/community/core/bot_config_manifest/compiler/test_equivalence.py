@@ -32,7 +32,7 @@ import pytest
 import yaml
 
 from agentclaw.community.core.apply_engine.capabilities import resolve_capabilities
-from agentclaw.community.core.apply_engine.constructs import ApplyConstruct, ManifestCategory, ManifestSection
+from agentclaw.community.core.apply_engine.constructs import ApplyConstruct, Category, Section
 from agentclaw.community.core.apply_engine.desired_state import Declaration, DesiredState
 from agentclaw.community.core.bot_config_manifest.compiler import ManifestCompiler
 from agentclaw.community.core.bot_config_manifest.fetch.git_source import GitCheckout, GitSourceClient
@@ -60,11 +60,11 @@ OBJECTS = {
     ("cms-assets", "kb/knowledge-base.zip"): "oss-cms-assets-knowledge-base.zip",
 }
 COMPARED: tuple[ApplyConstruct, ...] = (
-    ManifestSection.SCRIPT,
-    ManifestCategory.IDENTITY,
-    ManifestCategory.RESOURCES,
-    ManifestCategory.SKILLS,
-    ManifestCategory.MCP,
+    Section.SCRIPT,
+    Category.IDENTITY,
+    Category.RESOURCES,
+    Category.SKILLS,
+    Category.MCP,
 )
 
 
@@ -124,7 +124,7 @@ def _comparable(declaration: Declaration[Any] | None) -> list[Any] | None:
 
 def _as_set_where_order_is_free(construct: ApplyConstruct, entries: list[Any]) -> Any:
     """A revision keeps its categories sorted by key; a document keeps its author's order. The script is one entry."""
-    return entries if construct is ManifestSection.SCRIPT else set(entries)
+    return entries if construct is Section.SCRIPT else set(entries)
 
 
 @pytest.mark.parametrize("case", CASES, ids=lambda p: p.name)
@@ -155,7 +155,7 @@ def test_the_cases_cover_every_construct_the_two_compilers_share() -> None:
     for case in CASES:
         parsed = yaml.safe_load((case / "manifest.yaml").read_text(encoding="utf-8")) or {}
         manifest = parsed.get("manifest") or {}
-        declared.update(ManifestCategory(name) for name in manifest if name in {c.value for c in ManifestCategory})
+        declared.update(Category(name) for name in manifest if name in {c.value for c in Category})
         if "script" in parsed:
-            declared.add(ManifestSection.SCRIPT)
+            declared.add(Section.SCRIPT)
     assert set(COMPARED) <= declared

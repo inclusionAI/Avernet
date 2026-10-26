@@ -85,7 +85,7 @@ provides:
   - RefMover
   - GenomeDiff
   - GeneChange
-  - GenomeCompiler  # the DesiredStateCompiler for GenomeStateRef (compile.py); compile_spec renders a spec
+  - GenomeCompiler  # the DesiredStateCompiler for the "genome" kind (compile.py); compile_spec renders a spec
   - Drift
   - ContentReceipt
   - ApplyResult
@@ -129,12 +129,12 @@ consumed_by:
   - "RSI-04 (direct delivery) — binds a real RevisionApplier; RSI-08 (evolution runs) records candidates through GenomeRegistryProtocol"
 internal_dependencies:
   - agentclaw.community.core.base
-  - agentclaw.community.core.apply_engine.compiler  # Compiled, GenomeStateRef — the genome is one of the run service's compilers
+  - agentclaw.community.core.apply_engine.compiler  # Compiled, StateRef — the genome is one of the run service's compilers, under GENOME_STATE_KIND
   - agentclaw.community.core.apply_engine.constructs  # the construct vocabulary a creation half narrows a state by
   - agentclaw.community.core.apply_engine.context  # ApplyContext, the run the genome compiler compiles for (typing only)
   - agentclaw.community.core.apply_engine.desired_state  # the DesiredState a revision compiles to
   - agentclaw.community.core.apply_engine.identity_types  # legal_identity_types — the persona types the bot's engine accepts
-  - agentclaw.community.core.apply_engine.capabilities  # ManifestCapabilities, for the Manifest's MCP entry rules
+  - agentclaw.community.core.apply_engine.capabilities  # Capabilities, for the Manifest's MCP entry rules
   - agentclaw.community.core.bot_config_manifest.fetch.limits  # the fetch-time caps the contract mirrors
   - agentclaw.community.core.bot_config_manifest.schema  # limits, legal_identity_types, placeholders, the MCP entry rules
   - agentclaw.community.core.bot_startup_script  # the script body capture reads

@@ -33,8 +33,8 @@ from agentclaw.community.core.apply_engine.registry import (
     build_materialisers,
 )
 from agentclaw.community.core.apply_engine.capabilities import (
-    ManifestCategory,
-    ManifestSection,
+    Category,
+    Section,
 )
 from agentclaw.community.core.bot_config_manifest.sources.source_resolver import (
     DeclaredSourceResolver,
@@ -294,7 +294,7 @@ async def test_an_empty_category_empties_its_area_and_absence_does_not():
     )
     assert untouched.installed == {"gh", "other"}
     assert untouched.writes == 0
-    assert [c.construct for c in report.categories] == [ManifestSection.SCRIPT]
+    assert [c.construct for c in report.categories] == [Section.SCRIPT]
 
 
 @pytest.mark.asyncio
@@ -608,7 +608,7 @@ script:
     assert report.status is ApplyStatus.PARTIAL
 
     engine_config = next(
-        c for c in report.categories if c.construct is ManifestCategory.ENGINE_CONFIG
+        c for c in report.categories if c.construct is Category.ENGINE_CONFIG
     )
     assert engine_config.aborted is True
     assert engine_config.removals == ()
@@ -640,7 +640,7 @@ manifest:
     )
 
     identity = next(
-        c for c in report.categories if c.construct is ManifestCategory.IDENTITY
+        c for c in report.categories if c.construct is Category.IDENTITY
     )
     assert identity.aborted is True
     assert all(e.outcome is EntryOutcome.FAILED for e in identity.entries)
@@ -664,7 +664,7 @@ async def test_dry_run_returns_the_plan_and_writes_nothing():
         "gh": EntryOutcome.CREATED,
     }
     # The plan predicts the removal without performing it.
-    mcp = next(c for c in report.categories if c.construct is ManifestCategory.MCP)
+    mcp = next(c for c in report.categories if c.construct is Category.MCP)
     assert mcp.removals == ("drop",)
     assert (scripts.writes, activations.writes) == (0, 0)
     assert activations.installed == {"drop"}
@@ -685,7 +685,7 @@ async def test_phase_a_applies_only_the_script():
 
     assert _outcomes(report) == {"script": EntryOutcome.CREATED}
     assert activations.writes == 0
-    assert [c.construct for c in report.categories] == [ManifestSection.SCRIPT]
+    assert [c.construct for c in report.categories] == [Section.SCRIPT]
 
 
 @pytest.mark.asyncio
@@ -740,8 +740,8 @@ async def test_both_phases_together_preserve_the_declared_order():
     """
     report = await _apply(_engine(), _MCP_AND_SCRIPT)
     assert [c.construct for c in report.categories] == [
-        ManifestSection.SCRIPT,
-        ManifestCategory.MCP,
+        Section.SCRIPT,
+        Category.MCP,
     ]
 
 
@@ -1095,8 +1095,8 @@ async def test_failed_skill_write_refreshes_actual_dependencies_before_mcp():
     )
 
     by_construct = {category.construct: category for category in report.categories}
-    skills = by_construct[ManifestCategory.SKILLS]
-    mcp = by_construct[ManifestCategory.MCP]
+    skills = by_construct[Category.SKILLS]
+    mcp = by_construct[Category.MCP]
     assert skills.aborted is True
     assert skills.partially_written is True
     assert mcp.removals == ()
@@ -1218,7 +1218,7 @@ script:
     # identity aborted on the failed RULES fetch — nothing written there;
     # RULES itself failed, its neighbour was skipped, and SOUL.md not written.
     by_construct = {c.construct: c for c in report.categories}
-    identity_category = by_construct[ManifestCategory.IDENTITY]
+    identity_category = by_construct[Category.IDENTITY]
     assert identity_category.aborted is True
     outcomes = _outcomes(report)
     assert outcomes["RULES.md"] is EntryOutcome.FAILED
@@ -1227,9 +1227,9 @@ script:
 
     # skills delivered, after identity per APPLY_ORDER position (1 < 3).
     assert [c.construct for c in report.categories] == [
-        ManifestSection.SCRIPT,
-        ManifestCategory.IDENTITY,
-        ManifestCategory.SKILLS,
+        Section.SCRIPT,
+        Category.IDENTITY,
+        Category.SKILLS,
     ]
     assert outcomes["quality-check"] is EntryOutcome.CREATED
     assert uploads.uploads[0]["name"] == "quality-check"

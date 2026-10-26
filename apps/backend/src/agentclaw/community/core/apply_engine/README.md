@@ -34,7 +34,7 @@ provides:
   - DesiredState  # the typed input; one Declaration per construct, None when not declared
   - Declaration
   - EntryFailure
-  - StoredContent
+  - ContentRef
   - DesiredScript
   - DesiredIdentityFile
   - DesiredSkill  # LocalSkillPackage | CenterSkillVersion | RepoSkillPath
@@ -45,11 +45,11 @@ provides:
   - DesiredEngineConfig
   - RESOURCES_ROOT  # data/ — the one directory resources live under
   - DesiredStateCompiler  # the compiler contract both producers implement
-  - StateRef  # ManifestStateRef | GenomeStateRef — what an apply run converges to
+  - StateRef  # (kind, reference) — what an apply run converges to; each compiler registers its kind
   - Compiled
-  - ContentReader  # the engine's read port; ContentStoreProtocol satisfies it
-  - ManifestCategory  # the construct vocabulary (constructs.py)
-  - ManifestSection
+  - ContentReader  # imported from core/content_store; ContentStoreProtocol inherits it
+  - Category  # the construct vocabulary (constructs.py)
+  - Section
   - Construct
   - ApplyConstruct
   - kind_of
@@ -75,7 +75,7 @@ provides:
   - APPLY_TASK_TYPE
   - build_apply_task_payload
   - BotConfigManifestApplyRecord  # the persisted apply row (table keeps its historical name)
-  - ManifestCapabilities  # which constructs a bot can be told to have (capabilities.py); resolve_capabilities, capabilities_for_bot, CapabilityResolver
+  - Capabilities  # which constructs a bot can be told to have (capabilities.py); resolve_capabilities, capabilities_for_bot, CapabilityResolver
   - SourceKind  # and source_matrix: which (construct, source kind) pairs are open (support_matrix.py)
   - legal_identity_types  # and RESERVED_IDENTITY_FILES (identity_types.py)
   - unpack_archive  # UnpackedTree, UnpackError, ARCHIVE_MEMBER_LIMIT, ARCHIVE_UNPACKED_LIMIT — the guarded archive unpack
@@ -93,8 +93,8 @@ consumes:
   - "BotConfigManifestApplyRepositoryProtocol and the lock repository (core.repository) — the persisted apply run"
   - "TaskQueue (core.task_queue) — the apply task"
 consumed_by:
-  - "core.bot_config_manifest — compiles a stored document into a DesiredState and starts apply runs with ManifestStateRef; the creation flow applies its two phases through ApplyRunService"
-  - "core.bot_genome — compiles a revision into a DesiredState (RSI-04 starts apply runs with GenomeStateRef)"
+  - "core.bot_config_manifest — compiles a stored document into a DesiredState and starts apply runs with MANIFEST_STATE, kind 'manifest'; the creation flow applies its two phases through ApplyRunService"
+  - "core.bot_genome — compiles a revision into a DesiredState (RSI-04 starts apply runs with genome_state(promotion_id), kind 'genome')"
   - "adapters/http/openapi_v1/bots — the apply, last-apply and create-with-manifest routes"
   - "di/modules/apply_engine_module, bot_management_module — binds ports, strategies, compilers and the run service"
   - "plugins/community/agentswarm — reads a bot's last apply"

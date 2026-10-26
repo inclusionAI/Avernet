@@ -18,7 +18,7 @@ from agentclaw.community.core.apply_engine.desired_state import (
     Declaration,
     DesiredCliTool,
     EntryFailure,
-    StoredContent,
+    ContentRef,
     UnpackKind,
 )
 from agentclaw.community.core.bot_config_manifest.sources.source_resolver import (
@@ -97,7 +97,7 @@ async def compile_cli_tools(
             desired.append(
                 DesiredCliTool(
                     name,
-                    StoredContent(pin),
+                    ContentRef(pin),
                     pin=pin,
                     subpath=subpath,
                     unpack=kind,
@@ -117,7 +117,7 @@ async def compile_cli_tools(
         desired.append(
             DesiredCliTool(
                 name,
-                StoredContent(digest_of(data)),
+                ContentRef(digest_of(data)),
                 pin=pin,
                 subpath=None if delivery.is_tree() else subpath,
                 unpack=kind,

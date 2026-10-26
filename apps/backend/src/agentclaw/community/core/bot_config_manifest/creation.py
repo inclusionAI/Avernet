@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
-from agentclaw.community.core.apply_engine.compiler import ManifestStateRef
+from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import MANIFEST_STATE
 from agentclaw.community.core.apply_engine.triggers import (
     CREATE_ON_CONTAINER_TRIGGER,
     CREATE_PRE_CONTAINER_TRIGGER,
@@ -349,7 +349,7 @@ class BotCreationManifestSeam(ManifestCreationSeam):
                 bot=bot,
                 owner_id=owner_id,
                 actor_id=actor_id,
-                state=ManifestStateRef(),
+                state=MANIFEST_STATE,
                 trigger=CREATE_PRE_CONTAINER_TRIGGER,
                 phase=ApplyPhase.PRE_CONTAINER,
                 engine_type=engine_type,

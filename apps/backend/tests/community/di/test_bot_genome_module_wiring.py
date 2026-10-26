@@ -39,7 +39,9 @@ def test_the_genome_compiler_is_the_compiler_maps_genome_row() -> None:
     """The run service looks its compiler up by reference type; the genome row
     is contributed here, over the same registry and promotion repository the
     promotion service uses."""
-    from agentclaw.community.core.apply_engine.compiler import GenomeStateRef, ManifestStateRef, StateCompilers
+    from agentclaw.community.core.apply_engine.compiler import StateCompilers
+    from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import MANIFEST_STATE
+    from agentclaw.community.core.bot_genome.compile import GENOME_STATE_KIND
     from agentclaw.community.core.bot_genome.compile import GenomeCompiler
     from agentclaw.community.core.repository.protocols.bot.genome import (
         GenomePromotionRepositoryProtocol,
@@ -48,9 +50,9 @@ def test_the_genome_compiler_is_the_compiler_maps_genome_row() -> None:
 
     injector = build_injector(profile=DeployProfile.TEST)
     compilers = injector.get(StateCompilers)
-    compiler = compilers[GenomeStateRef]
+    compiler = compilers[GENOME_STATE_KIND]
     assert isinstance(compiler, GenomeCompiler) and compiler is injector.get(GenomeCompiler)
     assert compiler._registry is injector.get(GenomeRegistryProtocol)
     assert compiler._promotions is injector.get(GenomePromotionRepositoryProtocol)
     assert compiler._refs is injector.get(GenomeRefRepositoryProtocol)
-    assert ManifestStateRef in compilers, "both rows land in one map"
+    assert MANIFEST_STATE.kind in compilers, "both rows land in one map"

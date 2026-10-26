@@ -202,7 +202,7 @@ def _build(db, *, scripts=None):
     # materialisers read back by digest what the compiler filed.
     content = FakeManifestContent()
     applies = ApplyRunService(
-        manifest_service=manifests,
+        capabilities=manifests,
         apply_repository=BotConfigManifestApplyRepository(db),
         lock_repository=BotConfigManifestApplyLockRepository(db),
         task_queue_provider=lambda: queue,

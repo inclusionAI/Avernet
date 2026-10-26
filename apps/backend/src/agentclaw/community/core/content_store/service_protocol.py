@@ -11,6 +11,8 @@ transport stack into importers that only want to store).
 from __future__ import annotations
 
 from abc import abstractmethod
+
+from agentclaw.community.core.content_store.reader import ContentReader
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
 
@@ -28,7 +30,7 @@ if TYPE_CHECKING:
 
 
 @runtime_checkable
-class ContentStoreProtocol(Protocol):
+class ContentStoreProtocol(ContentReader, Protocol):
     """内容存储服务接口(§2.8).
 
     One mechanism behind three consumers — audit, delivery, ``keep_last`` —

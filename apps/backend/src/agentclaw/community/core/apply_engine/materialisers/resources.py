@@ -61,11 +61,11 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Callable, Sequence
 
-from agentclaw.community.core.apply_engine.content import ContentReader
+from agentclaw.community.core.content_store import ContentReader
 from agentclaw.community.core.apply_engine.desired_state import (
     DesiredResource,
     DesiredResourceTree,
-    StoredContent,
+    ContentRef,
 )
 from agentclaw.community.core.apply_engine.context import ApplyContext
 from agentclaw.community.core.content_store import decode_tree_bytes
@@ -84,9 +84,9 @@ from agentclaw.community.core.apply_engine.registry import (
     ResolveResult,
 )
 from agentclaw.community.core.apply_engine.capabilities import (
-    ManifestCategory,
+    Category,
 )
-from agentclaw.community.core.ports.resource_rows_port import ResourceRowsPort
+from agentclaw.community.core.ports.resource_rows_port import ResourceRowsPort, WrittenFile
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 
 #: The reason the category aborts with when the root could not be listed in ``plan``.
@@ -153,7 +153,7 @@ class ResourcesMaterialiser(Materialiser):
     member, so the category is never ``is_noop``.
     """
 
-    construct = ManifestCategory.RESOURCES
+    construct = Category.RESOURCES
 
     def __init__(
         self,
@@ -253,7 +253,7 @@ class ResourcesMaterialiser(Materialiser):
         coords = dict(entity_type=entity_type, entity_id=entity_id, bot_id=ctx.bot_id, engine_type=engine)
         await self._clear(coords, plan)
         results: list[EntryResult] = []
-        written: list[tuple[str, int]] = []
+        written: list[WrittenFile] = []
         for planned in plan.entries:
             identity = planned.intent.identity
             data = planned.intent.value
@@ -266,12 +266,12 @@ class ResourcesMaterialiser(Materialiser):
                 # error can quote a header, a header can carry a token).
                 results.append(EntryResult(self.construct, identity, EntryOutcome.FAILED, "resource delivery failed"))
                 continue
-            written.append((identity, len(data)))
+            written.append(WrittenFile(identity, len(data)))
             results.append(
                 EntryResult(self.construct, identity, EntryOutcome(planned.outcome), note=planned.intent.note)
             )
         try:
-            await self._rows(ctx.bot_id).replace_manifest_rows(
+            await self._rows(ctx.bot_id).replace_rows(
                 files=written, owner_id=ctx.owner_id, created_by=ctx.actor_id
             )
         except Exception as exc:
@@ -313,7 +313,7 @@ class ResourcesMaterialiser(Materialiser):
             raise ResourcesRootNotCleared() from exc
 
 
-def _stored(entry: DesiredResource) -> StoredContent:
+def _stored(entry: DesiredResource) -> ContentRef:
     """The one stored blob a resource names: its tree for a directory, its content for a file."""
     return entry.tree if isinstance(entry, DesiredResourceTree) else entry.content
 
