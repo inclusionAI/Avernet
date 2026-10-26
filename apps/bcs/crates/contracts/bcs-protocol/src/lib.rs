@@ -6,7 +6,7 @@
 //! - Streaming frame layer (`BcsFrame`, `RequestFrame`, `ResponseFrame`, `EventFrame`)
 //! - Bot connect / status / onboard frame payloads
 //! - Chat event wire types
-//! - HTTP DTOs (bot capabilities, onboard, status, friend requests, group create, fusion, proposal)
+//! - HTTP DTOs (bot capabilities, onboard, status, friend requests, group create, fusion)
 //!
 //! Previously split between `bcs-client/src/protocol.rs` and the top of
 //! `bcs-client/src/lib.rs`. The retired `bcs-client` crate's shared DTOs now

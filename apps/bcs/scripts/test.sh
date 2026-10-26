@@ -17,7 +17,6 @@
 #   bcs-group     - 群组服务实现
 #   bcs-routing   - 消息路由服务实现
 #   bcs-fusion    - 上下文融合服务实现
-#   bcs-proposal  - 提案服务实现
 #
 # bcs-cli 主要命令：
 #   onboard               - Bot 注册到 BCS (需要先通过 WebSocket 连接获取 token)

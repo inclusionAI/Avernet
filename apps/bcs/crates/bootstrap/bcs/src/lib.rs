@@ -1,7 +1,7 @@
 //! Bot Coordination Service (BCS) for Multi-Bot Collaboration
 //!
 //! This crate provides:
-//! - **BCS Server**: Bot registry, proposal generation, group management
+//! - **BCS Server**: Bot registry, group management
 //! - **WebSocket Support**: Bot connections via WebSocket protocol
 //! - **DingTalk Integration**: DingTalk channel support
 //!
@@ -18,7 +18,6 @@
 //! │                                                             │
 //! │  Services:                                                  │
 //! │  • Bot registry (bot_uuid → bot with TTL)                   │
-//! │  • Proposal generation (HTTP request → proposal)            │
 //! │  • Group management (Agent/Fusion modes)                    │
 //! │  • Context fusion (reads files, single LLM call)            │
 //! │  • Message routing (to driver or @mentioned bot)            │

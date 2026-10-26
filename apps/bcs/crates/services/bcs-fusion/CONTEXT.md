@@ -36,7 +36,7 @@
 
 ## Runtime ownership
 
-The crate owns local context loading and local fallback fusion behavior. It does not own group membership, proposal confirmation, transport sessions, or provider selection.
+The crate owns local context loading and local fallback fusion behavior. It does not own group membership, transport sessions, or provider selection.
 
 ## Parking status
 

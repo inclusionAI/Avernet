@@ -213,8 +213,7 @@ async fn build_session_files_service(
     // otherwise ignorant of the backend roster (adding OSS/NAS later is one
     // factory arm here + its crate). See design-baas-plugin §「落地前置改造」.
 
-    // Prefer the configured external endpoint, then bind:port, mirroring
-    // `proposal_base_url` above.
+    // Prefer the configured external endpoint, then bind:port.
     let bcs_base_url = config
         .bcs_endpoint
         .clone()

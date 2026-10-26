@@ -755,7 +755,7 @@ pub struct BcsConfig {
     pub strict_container_validation: bool,
 
     /// External endpoint URL for BCS (e.g. "https://bcs.example.com").
-    /// Used to generate confirm URLs in group proposals.
+    /// Used as the public base URL for share links and storage plugins.
     /// Falls back to http://{bind}:{port} if not set.
     #[serde(default)]
     pub bcs_endpoint: Option<String>,
