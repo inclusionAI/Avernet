@@ -211,6 +211,21 @@ def test_a_missing_never_started_unknown_or_superseded_promotion_is_refused() ->
         assert refused.value.__cause__ is refused.value.domain_error, "chained for the worker's log too"
 
 
+def test_a_genome_reference_without_a_promotion_id_is_refused_before_the_repository_is_asked() -> None:
+    """``genome_state`` never builds one; a hand-built or mis-decoded ``StateRef("genome")`` is refused as
+    ``RevisionNotFound`` up front rather than queried as ``promotion_id=None``."""
+    from agentclaw.community.core.apply_engine.compiler import StateRef
+
+    ctx = make_context(engine_type="openclaw", bot_type="arca")
+    compiler, _, promotions = _compiler(_row())
+    with pytest.raises(RevisionNotFound, match="reference missing"):
+        compiler.check(ctx, StateRef("genome"))
+    with pytest.raises(CompileRefused, match="is not there to deliver") as refused:
+        asyncio.run(compiler.compile(ctx, StateRef("genome", "")))
+    assert isinstance(refused.value.domain_error, RevisionNotFound)
+    assert promotions.calls == []
+
+
 def test_currency_is_judged_against_the_ref_the_promotion_moved() -> None:
     """A canary promotion (RSI-16) moves ``canary``, not ``active``; it is current while ``canary`` points at it."""
     compiler, registry, _ = _compiler(_row("applied", ref="canary"))

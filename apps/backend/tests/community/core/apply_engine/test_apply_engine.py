@@ -816,6 +816,37 @@ def test_the_report_payload_names_every_field_it_emits():
     }
 
 
+def test_a_stored_source_mode_outside_the_enum_reads_as_no_opinion_and_the_rest_decodes():
+    """The one lenient field of the codec, pinned.
+
+    The Manifest compiler decodes the last reports on every compile for its
+    baselines; one historical row with an unreadable ``mode`` must cost that
+    row its baseline opinion (``None``), not stop the bot from ever applying
+    again. A later tidy back to ``SourceMode(...)`` would undo exactly this.
+    """
+    from types import SimpleNamespace
+
+    from agentclaw.community.core.apply_engine.outcomes import SourceMode
+    from agentclaw.community.core.apply_engine.run.report_codec import report_from_payload
+
+    started = datetime.now()
+    record = SimpleNamespace(apply_id="a", bot_id="b", trigger="explicit", started_at=started, finished_at=started)
+    payload = {
+        "state": {"kind": "manifest", "reference": None},
+        "sources": [
+            {"name": "content", "url": "https://git.example/c.git", "ref": "v1",
+             "mode": "bogus", "resolved_sha": "1" * 40},
+            {"name": "docs", "url": "https://git.example/d.git", "ref": "main",
+             "mode": "strict", "resolved_sha": "2" * 40},
+        ],
+        "entries": [{"category": "mcp", "name": "gh", "action": "created"}],
+        "categories": [{"category": "mcp", "aborted": False, "partially_written": False, "removed": []}],
+    }
+    report = report_from_payload(payload, record=record, status=ApplyStatus.SUCCEEDED)
+    assert [source.mode for source in report.sources] == [None, SourceMode.STRICT]
+    assert [(entry.identity, entry.outcome.value) for entry in report.entries] == [("gh", "created")]
+
+
 # ── platform-owned MCP codes ────────────────────────────────────────────────
 
 
