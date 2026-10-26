@@ -3,7 +3,7 @@
 **The Service API surface.** A flat collection of modules, one per
 public service, that re-export the `@runtime_checkable Protocol` any
 consumer (HTTP, CLI, in-process embedder) calls against. FastAPI routers
-live next door under [`adapters/http/`](../adapters/http/README.md); they
+live next door under `adapters/http/`; they
 Inject a Protocol from this layer rather than the concrete service class
 in `core/`.
 
@@ -56,6 +56,8 @@ api/
 
 ## Enforcement
 
+Current conventions and authority: [Backend development guide](../../../../README.md).
+
 Five gates under `tests/community/architecture/`:
 
 - `test_protocol_base_ordering.py` — a Protocol base never precedes a
@@ -103,7 +105,7 @@ purpose: "Service API Protocols — transport-agnostic contracts between adapter
 provides:
   - BuildIgnoreServiceProtocol
   - "One Protocol per public service / factory"
-  - "Structural conformance gate via tests/architecture/test_service_api_conformance.py"
+  - "Structural conformance gate via tests/community/architecture/test_service_api_conformance.py"
   - BotRuntimeProjectorProtocol
   - SkillVersionMaterializerProtocol
   - SpaceSkillPublicationServiceProtocol

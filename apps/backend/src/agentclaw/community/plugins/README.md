@@ -8,7 +8,9 @@ bootstrap based on the deploy profile.
 plugins/
 ├── local/       singlebox / dev  (SQLite, in-memory cache, noop transports)
 ├── community/   the community distribution
-└── http_client.py
+├── unavailable/ explicit unavailable capability implementations
+├── http_client.py
+└── local_skill_storage.py
 ```
 
 ## What belongs here
@@ -18,10 +20,11 @@ different implementations**. Rule 20 makes that concrete: every plugin contract
 carries paired local and prod implementations, and `test_plugin_pairing` enforces
 it.
 
-`http_client.py` is the one implementation at this level rather than inside a
-profile package: `HttpxClient` is the shared default, paired with
-`local/http_client.py` and overridden again by
-`di/modules/infrastructure/test/http_client.py`.
+Shared implementations may live at this level: `HttpxClient` in
+`http_client.py` is the default HTTP client, overridden by the test
+infrastructure column. `local_skill_storage.py` supplies the configured and
+community-runtime Local Skill storage resolvers. Read the bindings under
+`di/modules/` to determine which implementation a profile actually selects.
 
 ## What does not belong here — repositories
 
@@ -42,16 +45,16 @@ Do not add a repository here. If you are adding a component and are unsure which
 layer it belongs to, ask whether a *second* implementation would ever be selected
 by profile. If the answer is no, it is not a plugin.
 
-See `specs/2026-08-05-core-repository-consolidation/` for the move, and its
-`path-map.md` for old → new module paths.
+See [core repository](../core/repository/README.md) for the current contracts
+and bodies. Historical migration specs explain the move, not current paths.
 
-## Out of scope (owned by other modules)
+## Neighboring runtimes
 
-| Capability | Where it lives |
-| --- | --- |
-| engine | `ocb/src/engine/` (Adapter module) |
-| bcs | `ocb/src/bcs/` (Rust coordination service) |
-| bcn | engine-side BCN plugin |
+Backend plugins provide client capabilities; they do not own engine or BCS
+servers. The public adapter lives at repository `engine/adapter/`, and public BCS
+at `apps/bcs/`. Enterprise runtime ownership and forwarding belong to the host's
+current integration contract; do not infer them from old `ocb/src/*` paths.
 
-The backend only ever holds *client-side* contracts for these in
-`agentclaw/community/plugin_api/`; their servers are owned by those modules.
+Start at the [Backend development guide](../../../../README.md) for authority,
+profile selection and checks. Enterprise implementations are supplied by the
+host's `agentclaw.corp` package, not copied into this public tree.
