@@ -370,18 +370,40 @@ SubscriptionItem:
 |---|---|---|
 | `owner_user_id` | 是 | 订阅发起人 = 该 Bot 的 owner 工号（后端不查登录态，由前端/调用方显式传） |
 
-请求 body（可空体）：
+请求 body（可空体）只支持：
 
 ```json
 {
-  "mode": "framework",
-  "note": "每天 11 点逛一次"
+  "note": "每小时自动逛一次"
 }
 ```
 
-参数 `mode` 默认 `framework`（框架 cron）；可选 `openclaw`（OpenClaw 内置 cron）。当前**实际生效的就是 framework cron**（详见切换讨论，本次未对 cron 基础设施做改动）。
+订阅固定使用 `mode=openclaw`（OpenClaw Bot 侧 cron），不接受调用方选择触发模式。
 
-return：`Envelope<SubscriptionItem>`。
+行为分两种：
+
+1. 已存在 `openclaw` 订阅：同步保存备注，返回 `200`；后台幂等修复两条 Bot 侧
+   cron。
+2. 新订阅或从历史 `framework` 订阅切换：立即返回 **`202`（业务码 `202000`）**。
+   后台依次装配固定名 `bbs-browse-loop` 与 `bbs-digest-loop`，并推送 BBS Skill
+   安装消息；成功后才写订阅表。装配失败则不写库，调用方/用户重试即可。
+
+周期契约：
+
+| Bot cron | dev / pre | prod |
+|---|---|---|
+| `bbs-browse-loop` | `0 * * * *` | `0 * * * *` |
+| `bbs-digest-loop` | `0 * * * *`，触发 `$forum-digest-handler`，command 以 `[FORUM-DIGEST-COLLECT]` 开头 | `0 20 * * *`（Asia/Shanghai），触发 `$bbs-digest-handler`，command 以 `[BBS-DIGEST-COLLECT]` 开头 |
+
+技能安装集合：`dev` / `pre` 为 `forum-browse`、`forum-create-topic`、
+`forum-topic-handler`、`forum-digest-handler`；prod 为 `bbs-browse`、
+`bbs-create-topic`、`bbs-topic-handler`、`bbs-digest-handler`。
+
+`202` 的响应 data 是临时 `SubscriptionItem` 投影，不代表数据库开关已经落库。前端可以
+乐观展示为打开；刷新列表后如果装配失败会回到关闭状态。
+
+return：新装配返回 `Envelope<SubscriptionItem>` + `202`；已存在订阅更新返回
+`Envelope<SubscriptionItem>` + `200`。
 
 ### 4.4 退出订阅 `DELETE /openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription`
 

@@ -13,8 +13,8 @@ const renderValue = (value: unknown) => {
 function Value({ title, value }: { title: string; value: unknown }) {
   return (
     <section>
-      <h4 className="mb-2 text-sm font-semibold text-[var(--color-fg)]">{title}</h4>
-      <pre className="app-scrollbar max-h-[300px] overflow-auto whitespace-pre-wrap break-all rounded-xl border border-[var(--color-border)] bg-white p-4 text-xs leading-6 text-[var(--color-fg)]">
+      <h4 className="mb-2 text-sm font-semibold text-foreground">{title}</h4>
+      <pre className="app-scrollbar max-h-[300px] overflow-auto whitespace-pre-wrap break-all rounded-xl border border-border bg-card p-4 text-xs leading-6 text-foreground">
         {renderValue(value)}
       </pre>
     </section>
@@ -23,11 +23,11 @@ function Value({ title, value }: { title: string; value: unknown }) {
 
 function iconFor(selection: BotChatSelection) {
   if (selection.kind === 'trace')
-    return <Zap className="size-4 fill-[var(--color-primary)] text-[var(--color-primary)]" />;
+    return <Zap className="size-4 fill-primary text-primary" />;
   return selection.item.type.toUpperCase() === 'GENERATION' || selection.item.type.toUpperCase() === 'LLM' ? (
-    <Bot className="size-4 text-[var(--color-primary)]" />
+    <Bot className="size-4 text-primary" />
   ) : (
-    <Terminal className="size-4 text-[var(--color-primary)]" />
+    <Terminal className="size-4 text-primary" />
   );
 }
 
@@ -39,40 +39,40 @@ export function BotChatNodeDetails({ detail, selection }: { detail: BotChatDetai
   const type = isTrace ? 'TRACE' : selection.item.type;
 
   return (
-    <section className="flex min-h-[560px] min-w-0 flex-col bg-white">
-      <header className="border-b border-[var(--color-border)] px-5 py-4">
+    <section className="flex min-h-[560px] min-w-0 flex-col bg-card">
+      <header className="border-b border-border px-5 py-4">
         <div className="flex items-center gap-2">
-          <span className="flex size-6 items-center justify-center rounded bg-[var(--color-primary-soft)]">
+          <span className="flex size-6 items-center justify-center rounded bg-primary/10">
             {iconFor(selection)}
           </span>
-          <h3 className="m-0 min-w-0 flex-1 truncate text-base font-semibold text-[var(--color-fg)]">{title}</h3>
+          <h3 className="m-0 min-w-0 flex-1 truncate text-base font-semibold text-foreground">{title}</h3>
           <Badge tone={isTrace ? 'primary' : type === 'TOOL' ? 'warning' : 'neutral'}>{type}</Badge>
         </div>
-        <p className="mt-2 font-mono text-[11px] text-[var(--color-muted)]">
+        <p className="mt-2 font-mono text-[11px] text-muted-foreground">
           {isTrace ? detail.id : selection.item.id}
         </p>
-        <dl className="mt-4 grid gap-3 text-xs text-[var(--color-muted)] sm:grid-cols-2 xl:grid-cols-4">
+        <dl className="mt-4 grid gap-3 text-xs text-muted-foreground sm:grid-cols-2 xl:grid-cols-4">
           <div>
             <dt>模型</dt>
-            <dd className="text-[var(--color-fg)]">
+            <dd className="text-foreground">
               {isTrace ? detail.model || '-' : selection.item.modelName || '-'}
             </dd>
           </div>
           <div>
             <dt>耗时</dt>
-            <dd className="text-[var(--color-fg)]">{data.latencyMs.toFixed(0)} ms</dd>
+            <dd className="text-foreground">{data.latencyMs.toFixed(0)} ms</dd>
           </div>
           <div>
             <dt>Token</dt>
-            <dd className="text-[var(--color-fg)]">{data.totalTokens}</dd>
+            <dd className="text-foreground">{data.totalTokens}</dd>
           </div>
           <div>
             <dt>成本</dt>
-            <dd className="text-[var(--color-fg)]">${data.totalCost.toFixed(6)}</dd>
+            <dd className="text-foreground">${data.totalCost.toFixed(6)}</dd>
           </div>
         </dl>
       </header>
-      <div className="border-b border-[var(--color-border)] px-5 py-3">
+      <div className="border-b border-border px-5 py-3">
         <Segmented
           value={tab}
           options={[

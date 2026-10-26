@@ -10,6 +10,8 @@ import { MarkdownReport } from './StepOutput';
 import { formatCompactNumber, formatTokenUsage } from './benchToken';
 import { ErrorBox, EvolutionHeader, JsonView, Section, StatusBadge, useResource } from './shared';
 import { useEvolutionContext } from './useEvolutionContext';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 
 function BenchRunDetailContent() {
   const { benchRunId = '' } = useParams<{ benchRunId: string }>();
@@ -123,7 +125,10 @@ function BenchRunDetailContent() {
             <div className="space-y-3">
               {cases.data?.map((item) => (
                 <details key={item.resultId} className="rounded-lg border border-border p-3">
-                  <summary className="cursor-pointer break-words text-sm">
+                  <summary
+                    className="cursor-pointer break-words text-sm"
+                    onClick={() => Tracert.click(Points.evolution.viewBenchReport, { task_id: item.taskId || undefined })}
+                  >
                     {item.taskName || item.taskId} · {item.score ?? '—'} / {item.maxScore ?? '—'} ·{' '}
                     <StatusBadge status={item.status} />
                   </summary>

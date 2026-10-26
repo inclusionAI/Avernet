@@ -2,12 +2,14 @@ import { sanitizeMarkdownHtml } from '@/assets/TaskPanel/sanitizeHtml';
 import { SafeHtml } from '@/assets/TaskPanel/SafeHtml';
 import { Button } from '@/components/ui/Button';
 import type { JsonObject } from '@/domain/evolution/types';
-import { history } from '@umijs/max';
+import { history, useParams } from '@umijs/max';
 import { ArrowUpRight } from 'lucide-react';
 import MarkdownIt from 'markdown-it';
 import { useMemo, type ReactNode } from 'react';
 import { displayValue } from './presentation';
 import { Hint } from './shared';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 
 const markdown = new MarkdownIt({ html: false, breaks: true, linkify: true });
 export function MarkdownReport({ content }: { content: string }) {
@@ -53,6 +55,9 @@ export function ResultCard({
   );
 }
 export function RunLink({ runId }: { runId: unknown }) {
+  // 查看评测运行(add-spm-tracking):进化任务详情 /tasks/:taskId 路由下携带 task_id;
+  // 其余挂载页(领域 runs 等)上报参数缺省,由平台侧按点位分桶。
+  const { taskId } = useParams<{ taskId: string }>();
   if (typeof runId !== 'string' || !runId) return null;
   return (
     <Hint content={runId}>
@@ -61,7 +66,10 @@ export function RunLink({ runId }: { runId: unknown }) {
         size="sm"
         className="max-w-full px-0 text-primary"
         aria-label={`评估结果 · ${runId}`}
-        onClick={() => history.push(`/evolution-factory/bench/runs/${encodeURIComponent(runId)}`)}
+        onClick={() => {
+          Tracert.click(Points.evolution.openBenchRun, { task_id: taskId });
+          history.push(`/evolution-factory/bench/runs/${encodeURIComponent(runId)}`);
+        }}
       >
         查看评测结果
         <ArrowUpRight size={14} className="ml-1 shrink-0" />

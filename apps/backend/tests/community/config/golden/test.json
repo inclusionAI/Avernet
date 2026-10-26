@@ -42,6 +42,9 @@
       "retry_count": 3,
       "timeout": 30
     },
+    "community_identity": {
+      "passport_mode": "self_issued"
+    },
     "cors": {
       "allow_origin_regex": [],
       "allow_origins": [

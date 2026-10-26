@@ -76,6 +76,11 @@ def _make_session() -> DiscoverySession:
     )
 
 
+
+def _legacy_dingtalk_sender() -> DingTalkNotifySender:
+    return DingTalkNotifySender(CommunityNotifySender())
+
+
 # ===========================================================================
 # DingTalkNotifySender
 # ===========================================================================
@@ -89,14 +94,14 @@ class TestDingTalkNotifySender:
         assert dt.channels == inner.channels
 
     def test_configured_false_without_env(self):
-        assert DingTalkNotifySender._configured() is False
+        assert _legacy_dingtalk_sender()._configured() is False
 
     def test_configured_true_with_all_env(self, monkeypatch):
         monkeypatch.setenv("TASK_DISCOVERY_DINGTALK_AK_ID", "ak")
         monkeypatch.setenv("TASK_DISCOVERY_DINGTALK_AK_SECRET", "sk")
         monkeypatch.setenv("TASK_DISCOVERY_DINGTALK_ROBOT_CODE", "rc")
         monkeypatch.setenv("TASK_DISCOVERY_CARD_TEMPLATE_ID", "tpl")
-        assert DingTalkNotifySender._configured() is True
+        assert _legacy_dingtalk_sender()._configured() is True
 
     def test_env_helper_falls_back_to_singlebox(self, monkeypatch):
         monkeypatch.delenv("MY_VAR", raising=False)
@@ -154,7 +159,12 @@ class TestDingTalkNotifySender:
         """_resolve returns from DingTalkCredentialHolder when set (line 169)."""
         DingTalkCredentialHolder.set("ak", "sk", "rc", "tpl")
         try:
-            assert DingTalkNotifySender._resolve("ak_id", "NOPE_AK", "NOPE_AK2") == "ak"
+            assert (
+                _legacy_dingtalk_sender()._resolve(
+                    "ak_id", "NOPE_AK", "NOPE_AK2"
+                )
+                == "ak"
+            )
         finally:
             DingTalkCredentialHolder.clear()
 
@@ -170,7 +180,7 @@ class TestDingTalkNotifySender:
                 DingTalkCredentialHolder.set(api_value, "sk", "robot", "template")
             DingTalkYamlHolder.set({"ak_id": yaml_value})
 
-            assert DingTalkNotifySender._resolve_source("ak_id") == expected
+            assert _legacy_dingtalk_sender()._resolve_source("ak_id") == expected
         finally:
             DingTalkCredentialHolder.clear()
             DingTalkYamlHolder.clear()
@@ -262,7 +272,7 @@ class TestDingTalkNotifySender:
         try:
             assert DingTalkYamlHolder.get("ak_id") == "yaml-ak"
             assert DingTalkYamlHolder.get("empty_val") == ""
-            assert DingTalkNotifySender._resolve(
+            assert _legacy_dingtalk_sender()._resolve(
                 "ak_id", "TASK_DISCOVERY_DINGTALK_AK_ID", "SINGLEBOX_DINGTALK_AK_ID"
             ) == "yaml-ak"
         finally:
@@ -523,7 +533,7 @@ class TestCommunityNotifyModule:
             DingTalkCredentialHolder,
         )
         DingTalkCredentialHolder.clear()
-        assert DingTalkNotifySender._configured() is True
+        assert _legacy_dingtalk_sender()._configured() is True
 
     def test_dingtalk_not_configured_without_creds(self, monkeypatch):
         """_configured() returns False when no creds available."""
@@ -533,7 +543,7 @@ class TestCommunityNotifyModule:
             DingTalkCredentialHolder,
         )
         DingTalkCredentialHolder.clear()
-        assert DingTalkNotifySender._configured() is False
+        assert _legacy_dingtalk_sender()._configured() is False
 
     def test_notify_sender_loads_yaml_creds(self, monkeypatch):
         """DI reads task_discovery_dingtalk block from YAML config and sets

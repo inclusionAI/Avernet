@@ -1,7 +1,7 @@
 import { appendRecoveryResult } from "./monitoring-recovery-results.js";
 import type { MonitoringRecoveryResult } from "../services/monitoring/contracts.js";
 import type { IDatabase, Row } from "@avernet/clawweb-shared/server/db";
-import { CHECK_VERSION, DIAGNOSIS_VERSION, DIAGNOSIS_V3_VERSION, MonitoringError, type BotCheck, type DiagnosisEvent, type DiagnosisItem,
+import { CHECK_VERSION, DIAGNOSIS_VERSION, DIAGNOSIS_V3_VERSION, DIAGNOSIS_V4_VERSION, MonitoringError, type BotCheck, type DiagnosisEvent, type DiagnosisItem,
   type DiagnosisPage, type DiagnosisQuery, type MonitoringStore, type MonitoringTarget, type ResolvedReport, type MonitoringWindow } from "../services/monitoring/contracts.js";
 import { parseCheck, parseDiagnosis } from "../services/monitoring/validation.js";
 import { CHECKS_TABLE, DIAGNOSES_TABLE, verifyMonitoringSchema } from "./monitoring-schema-check.js";
@@ -31,7 +31,7 @@ function eventFromRow(row: Row): DiagnosisEvent {
   for (const [key, col] of Object.entries(fields)) event[key] = row[col];
   // Read-only projection of historical v1 rows; HTTP validators still reject v1.
   if (event.schemaVersion === "claw-monitoring/diagnosis-event/v1") event.schemaVersion = DIAGNOSIS_VERSION;
-  if (event.schemaVersion === DIAGNOSIS_V3_VERSION) {
+  if (event.schemaVersion === DIAGNOSIS_V3_VERSION || event.schemaVersion === DIAGNOSIS_V4_VERSION) {
     event.runtimeIdentity = row.runtime_identity == null ? null : JSON.parse(String(row.runtime_identity));
   } else {
     delete event.runtimeIdentity;
@@ -50,7 +50,7 @@ function checkFromRow(row: Row): BotCheck {
     checkedAt: iso(row.checked_at_ms), lastSuccessfulCheckAt: iso(row.last_successful_check_at_ms), status: row.status }, integer(row.checked_at_ms));
 }
 function item(event: DiagnosisEvent): DiagnosisItem {
-  const { schemaVersion: _version, eventId: _event, engine: _engine, runtimeIdentity: _runtimeIdentity, ...result } = event;
+  const { eventId: _event, engine: _engine, runtimeIdentity: _runtimeIdentity, ...result } = event;
   return result;
 }
 function isDuplicate(error: unknown): boolean {

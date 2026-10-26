@@ -2,9 +2,6 @@
 
 基于本地 Kubernetes 集群（colima / k3d / kind / minikube 等）模拟 Arca 沙箱生命周期。
 使用 kubeconfig 连接集群，通过 Deployment + NodePort Service 暴露 bot runtime。
-in-cluster 模式下通过 ClusterIP + Service 端口供集群内部访问；
-out-of-cluster 模式下通过 localhost + NodePort 访问。
-所有 local_k8s 专用参数默认从环境变量读取，避免修改 API 模型。
 
 环境变量：
 
@@ -17,8 +14,6 @@ out-of-cluster 模式下通过 localhost + NodePort 访问。
 | LOCAL_K8S_CONTAINER_PORT | 20003 | 否 | 容器暴露端口 |
 | LOCAL_K8S_CPU_REQUEST | 500m | 否 | CPU request |
 | LOCAL_K8S_CPU_LIMIT | 1 | 否 | CPU limit |
-| LOCAL_K8S_MEMORY_REQUEST | 1Gi | 否 | 内存 request |
-| LOCAL_K8S_MEMORY_LIMIT | 2Gi | 否 | 内存 limit |
 | LOCAL_K8S_IMAGE_PULL_POLICY | - | 否 | 显式镜像拉取策略；未设置时，镜像 tag 为 ``latest`` 或为空则默认 ``Always``，否则默认 ``IfNotPresent`` |
 | LOCAL_K8S_NODE_PORT | - | 否 | 固定 NodePort；不填则由 K8s 自动分配 |
 | LOCAL_K8S_EXTRA_ENVS | - | 否 | JSON 对象，注入到 Pod 容器的环境变量（可被 envs 入参覆盖） |
@@ -29,11 +24,7 @@ out-of-cluster 模式下通过 localhost + NodePort 访问。
 | LOCAL_K8S_SHARED_PVC_HOST_MOUNT_PATH | - | 否 | 插件 Pod 上共享 PVC 的挂载路径；配置后 delete_storage 会删除该 bot 的 subPath 目录 |
 | LOCAL_K8S_APPARMOR_PROFILE | arca-fuse | 否 | privileged bot runtime 使用的 host AppArmor profile；必须允许 FUSE mount 且保持 enforce |
 
-colima + k3s 最小示例（NodePort，无需额外映射端口）：
-::
-
-    export LOCAL_K8S_KUBECONFIG="$HOME/.kube/config"
-    export LOCAL_K8S_CONTEXT="colima"
+Mount mapping configuration is documented in the adjacent README.md.
 """
 
 from __future__ import annotations
@@ -61,6 +52,7 @@ from secbaas.community.logger import get_logger
 from secbaas.community.plugins.sandbox.utils.arca_utils import ArcaUtils
 from secbaas.community.spi.sandbox.arca import ArcaSandbox, ArcaSandboxPlugin
 
+from . import _volumes
 from ._sandbox import LocalK8sArcaSandbox, _convert_outbound_rules
 
 if TYPE_CHECKING:
@@ -82,8 +74,6 @@ _DEFAULT_SIDECAR_IMAGE = "avernet-engine-sidecar:latest"
 _DEFAULT_CONTEXT = "colima"
 
 _SIDECAR_CONTAINER_NAME = "envoy-sidecar"
-_SIDECAR_PROXY_PORT = 38080
-_SIDECAR_ADMIN_PORT = 38081
 _SIDECAR_HEADER_RULES_PATH = "/etc/sidecar/header-rules/header-rules.yaml"
 
 _BOT_DATA_MOUNT_PATH = "/home/admin"
@@ -533,27 +523,21 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         pvc_name: str | None = None,
         storage_id: str | None = None,
         mount_path: str = _BOT_DATA_MOUNT_PATH,
+        extra_mounts: list[tuple[str, str, bool]] | None = None,
     ) -> None:
         """创建包含 bot-runtime 与 envoy-sidecar 的双容器 Deployment。"""
         from kubernetes.client import (
             AppsV1Api,
             V1AppArmorProfile,
-            V1Capabilities,
-            V1ConfigMapVolumeSource,
             V1Container,
             V1Deployment,
             V1DeploymentSpec,
-            V1EnvVar,
-            V1HostPathVolumeSource,
             V1LabelSelector,
             V1ObjectMeta,
-            V1PersistentVolumeClaimVolumeSource,
             V1PodSpec,
             V1PodTemplateSpec,
             V1ResourceRequirements,
             V1SecurityContext,
-            V1Volume,
-            V1VolumeMount,
         )
 
         namespace = _namespace()
@@ -568,20 +552,9 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
             resource_spec
         )
 
-        volume_mounts: list[V1VolumeMount] = [
-            V1VolumeMount(
-                name="fuse-device",
-                mount_path="/opt/dev/fuse",
-            )
-        ]
-        if pvc_name and storage_id:
-            volume_mounts.append(
-                V1VolumeMount(
-                    name="bot-data",
-                    mount_path=mount_path,
-                    sub_path=storage_id,
-                )
-            )
+        volumes, volume_mounts = _volumes.build_volumes(
+            configmap_name, pvc_name, storage_id, mount_path, extra_mounts or []
+        )
 
         container = V1Container(
             name=self.CONTAINER_NAME,
@@ -606,59 +579,11 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
             volume_mounts=volume_mounts,
         )
 
-        sidecar = V1Container(
-            name=_SIDECAR_CONTAINER_NAME,
-            image=sidecar_image,
-            image_pull_policy=_image_pull_policy(sidecar_image),
-            ports=[
-                {"containerPort": _SIDECAR_PROXY_PORT},  # type: ignore[arg-type]
-                {"containerPort": _SIDECAR_ADMIN_PORT},  # type: ignore[arg-type]
-            ],
-            env=[
-                V1EnvVar(
-                    name="HEADER_RULES",
-                    value=_SIDECAR_HEADER_RULES_PATH,
-                )
-            ],
-            volume_mounts=[
-                V1VolumeMount(
-                    name="header-rules",
-                    mount_path="/etc/sidecar/header-rules",
-                    read_only=True,
-                )
-            ],
-            resources=V1ResourceRequirements(
-                requests={"cpu": "50m", "memory": "64Mi"},
-                limits={"cpu": "200m", "memory": "256Mi"},
-            ),
-            security_context=V1SecurityContext(
-                capabilities=V1Capabilities(add=["NET_ADMIN"])
-            ),
-        )
-
-        volumes = [
-            V1Volume(
-                name="header-rules",
-                config_map=V1ConfigMapVolumeSource(name=configmap_name),
-            )
-        ]
-        if pvc_name:
-            volumes.append(
-                V1Volume(
-                    name="bot-data",
-                    persistent_volume_claim=V1PersistentVolumeClaimVolumeSource(
-                        claim_name=pvc_name
-                    ),
-                )
-            )
-        volumes.append(
-            V1Volume(
-                name="fuse-device",
-                host_path=V1HostPathVolumeSource(
-                    path="/dev/fuse",
-                    type="CharDevice",
-                ),
-            )
+        sidecar = _volumes.build_sidecar(
+            sidecar_image,
+            _image_pull_policy(sidecar_image),
+            _SIDECAR_CONTAINER_NAME,
+            _SIDECAR_HEADER_RULES_PATH,
         )
 
         deployment = V1Deployment(
@@ -806,6 +731,11 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         container_port = _container_port()
         resolved_image = _resolve_image(image)
         resolved_sidecar_image = _resolve_sidecar_image()
+        extra_mounts = _volumes.resolve_mounts(
+            mount_points,
+            json.loads(_env("LOCAL_K8S_PVC_MOUNT_MAPPINGS", "{}")),
+            json.loads(_env("LOCAL_K8S_IMAGE_OWNED_MOUNTS", "[]")),
+        )
 
         # 合并环境变量。优先级：调用方 envs > LOCAL_K8S_EXTRA_ENVS > metadata 默认值
         merged_envs = _resolve_extra_envs()
@@ -827,10 +757,13 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
 
         # 如果携带 storage_id，则在共享 PVC 中按 storage_id 分 subPath。
         mount_path = storage.path if storage and storage.path else _BOT_DATA_MOUNT_PATH
+        _volumes.validate_storage_mounts(storage_id, mount_path, extra_mounts)
         quota = (
             storage.quota if storage and storage.quota else _SHARED_BOT_DATA_PVC_SIZE
         )
-        pvc_name = self._create_shared_bot_data_pvc() if storage_id else None
+        pvc_name = (
+            self._create_shared_bot_data_pvc() if storage_id or extra_mounts else None
+        )
         effective_storage = (
             Storage(
                 storage_id=storage_id,
@@ -858,6 +791,7 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
             pvc_name=pvc_name,
             storage_id=storage_id,
             mount_path=mount_path,
+            extra_mounts=extra_mounts,
         )
         self._create_service(deployment_name, container_port)
         pod_name = self._wait_for_pod(deployment_name, ready_timeout_in_seconds)

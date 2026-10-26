@@ -237,7 +237,10 @@ class ActingCaller:
             raise GrantNotResolvableError(
                 f"app {self.app_id} holds no live grant for the requested bot"
             )
-        return record.owner_id
+        # Repository matched this locator to the grant's stable entity. Keep
+        # the request locator for downstream consistency checks; authorization
+        # independently resolves the Bot's live owner.
+        return owner_id
 
     def granted_bot_ids(
         self, *, owned_by_delegator: bool = False
@@ -269,11 +272,14 @@ class ActingCaller:
         return frozenset(
             record.bot_id
             for record in records
-            if not owned_by_delegator or record.owner_id == self.user_id
+            if not owned_by_delegator or record.current_owner_id == self.user_id
         )
 
     def granted_bot_owner_pairs(self) -> frozenset[tuple[str, str]] | None:
         """Exact Bot identities to which an application has been delegated.
+
+        The legacy method name now denotes stable (bot_id, entity_id) pairs.
+        Current personnel ownership is a separate live projection.
 
         A bare ``bot_id`` is insufficient for collaborator listings because
         legacy ids such as ``default`` may exist under more than one owner.

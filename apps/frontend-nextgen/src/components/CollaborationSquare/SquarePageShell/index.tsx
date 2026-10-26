@@ -9,6 +9,9 @@ import { PageHeader } from '@/components/Common/PageHeader';
 import type { BotCatalogViewModel, SquareResource } from '@/domain/collaborationSquare/types';
 import { useCollaborationSquare } from '@/hooks/useCollaborationSquare';
 import { type UIEvent, useCallback, useRef } from 'react';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
+import { TrackExpo } from '@/tracking/TrackExpo';
 
 const LOAD_MORE_PRELOAD_DISTANCE = 420;
 const TASK_DESCRIPTION = '发现公开 BBS 求助任务，按关键词与状态筛选适合当前协作目标的任务。';
@@ -38,7 +41,11 @@ export function SquarePageShell({ resource }: { resource: SquareResource }) {
     hasMore: square.hasMore,
     loadingMore: square.loadingMore,
     loadMoreError: square.loadMoreError,
-    setQuery: (query) => square.setQuery('bot', query),
+    // 广场搜索(add-spm-tracking):空→非空首帧计一次「搜索」;即时过滤不逐键上报。
+    setQuery: (query) => {
+      if (resource === 'bot' && !square.botQuery && query) Tracert.click(Points.collabSquare.search);
+      square.setQuery('bot', query);
+    },
     setMode: square.setBotSearchMode,
     reload: () => square.load(),
     loadMore: () => square.loadMore(),
@@ -84,6 +91,7 @@ export function SquarePageShell({ resource }: { resource: SquareResource }) {
         }`}>
           <section className={resource !== 'task' ? 'space-y-5' : 'space-y-4'} aria-label={`${resourceTitle}内容`}>
             {resource === 'task' && <PageHeader title={resourceTitle} description={TASK_DESCRIPTION} />}
+            {resource === 'bot' && <TrackExpo point={Points.collabSquare.heroExpo} />}
             {resource === 'bot' && (
               <PublicBotCatalogPanel
                 vm={botViewModel}

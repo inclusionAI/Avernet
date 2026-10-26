@@ -128,6 +128,7 @@ consumes:
   - "A small number of core dataclass / schema types used to type Protocol method signatures (see internal_dependencies)"
 internal_dependencies:
   - agentclaw.community.core.bot_knowledge
+  - agentclaw.community.core.bot_management.owner_handoff.contracts
   - agentclaw.community.core.bot_management.engine_version.protocol
   - agentclaw.community.core.bot_inventory.local_progress
   - agentclaw.community.core.resources.link_workflow

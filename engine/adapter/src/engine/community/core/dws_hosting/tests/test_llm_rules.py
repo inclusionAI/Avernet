@@ -21,6 +21,40 @@ from .test_reply_review import Reviewer, candidate
 MULTI_RULE = "郭欣、仰望、运海发给我的消息进行托管，其他人的消息不托管，由本人回复。"
 
 
+@pytest.mark.parametrize("sender_id", ["same-name-first", "same-name-second"])
+async def test_same_name_accounts_share_name_rule_not_conversation(tmp_path, sender_id):
+    from engine.community.core.dws_hosting.name_rules import NAME_RULE_CONTRACT
+    from engine.community.core.dws_hosting.scope import SCOPE_CONTRACT
+    from engine.community.core.dws_hosting.reply_review import REVIEW_CONTRACT
+    from engine.community.core.dws_hosting.execution import OUTPUT_CONTRACT
+
+    state, ledger, turn, path = setup_turn(tmp_path, "只托管郭欣发来的消息", sender=sender_id, name="郭欣")
+    directory = Directory()
+    directory.rows[("contact", "user", "search", "--query", "郭欣")] = [
+        {"openDingTalkId": "same-name-first", "nick": "郭欣"},
+        {"openDingTalkId": "same-name-second", "name": "郭欣"},
+    ]
+    class Scoped(Engine):
+        async def classify_scope(self, data, prompt):
+            assert NAME_RULE_CONTRACT in prompt
+            sender = data["directory_facts"]["sender"]
+            assert sender["identity_verified"] is True
+            assert sender["open_id"] == sender_id
+            assert sender["name_resolution"]["郭欣"] == "ambiguous"
+            return {"decision": "allow", "reason_code": "inside_rule"}
+
+    model = Scoped()
+    result = await HostingExecutor(state, ledger, model, context_provider(directory)).execute("binding", turn.turn_id)
+    assert result.state == "resolved" and result.decision.action == "reply"
+    assert model.calls[0].hosting_context.sender.open_id == sender_id
+    assert NAME_RULE_CONTRACT in model.calls[0].instructions
+    assert NAME_RULE_CONTRACT in model.reviews[0].instructions
+    for prompt in (SCOPE_CONTRACT, REVIEW_CONTRACT, OUTPUT_CONTRACT):
+        assert NAME_RULE_CONTRACT in prompt
+        assert "only unique/confirmed" not in prompt
+    assert SqliteHostingOutbox(path).enqueue("binding", turn.turn_id, now_ms=10000).delivery.purpose == "reply"
+
+
 @pytest.mark.parametrize(
     "name,action",
     [("郭欣", "reply"), ("仰望", "reply"), ("运海", "reply"), ("其他人", "ignore")],

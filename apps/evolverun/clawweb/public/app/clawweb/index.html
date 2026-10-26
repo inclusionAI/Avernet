@@ -4,8 +4,93 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AgentEvolve</title>
+    <!-- This classic inline guard must run independently of the module graph.
+         No CSP is currently set here. Future CSP must allow this script (hash/nonce)
+         and the minimal inline status style; do not move it into the entry bundle.
+         Keep this guard in parity with the other ClawWeb host's startup tests. -->
+    <script id="clawweb-startup-guard">
+      (function () {
+        var committed = false;
+        var failed = false;
+        var reason = '';
+        var bound = false;
+        var timer = window.setTimeout(function () { fail('timeout'); }, 20000);
+
+        function update() {
+          var status = document.getElementById('clawweb-startup');
+          if (!status) return; // The guard runs before body and Vite's head requests.
+          var title = document.getElementById('clawweb-startup-title');
+          var message = document.getElementById('clawweb-startup-message');
+          var reload = document.getElementById('clawweb-startup-reload');
+          if (!bound) {
+            reload.addEventListener('click', function () { window.location.reload(); });
+            bound = true;
+          }
+          status.hidden = committed && !failed;
+          if (!reason || status.hidden) return;
+          status.setAttribute('role', 'alert');
+          status.setAttribute('aria-live', 'assertive');
+          title.textContent = 'ClawWeb 未能完成加载';
+          message.textContent = reason === 'timeout'
+            ? '启动耗时比预期更长。请检查网络连接，稍候片刻，或重新加载页面。'
+            : reason === 'preload'
+              ? '应用的部分内容未能加载。请先保存可保存的工作，再重新加载页面重试。'
+              : '应用代码未能加载或启动。请检查网络连接，然后重新加载页面重试。';
+          reload.hidden = false;
+        }
+
+        function fail(cause) {
+          window.clearTimeout(timer);
+          // A slow boot can still succeed; a failed module needs manual recovery.
+          if (cause !== 'timeout') failed = true;
+          reason = cause;
+          update();
+        }
+
+        window.__clawwebStartup = {
+          commit: function () {
+            committed = true;
+            window.clearTimeout(timer);
+            update();
+          }
+        };
+        // Interactive readiness does not wait for deferred module requests.
+        if (document.readyState === 'loading') {
+          document.addEventListener('readystatechange', update, { once: true });
+        }
+        window.addEventListener('DOMContentLoaded', update, { once: true });
+        update();
+        window.addEventListener('error', function (event) {
+          var target = event.target;
+          if (!committed && (target === window ||
+              (target && target.tagName === 'SCRIPT' && target.type === 'module') ||
+              (target && target.tagName === 'LINK' &&
+                (target.rel === 'modulepreload' || target.rel === 'stylesheet')))) {
+            fail('load');
+          }
+        }, true);
+        window.addEventListener('unhandledrejection', function () {
+          if (!committed) fail('load');
+        });
+        window.addEventListener('vite:preloadError', function () {
+          fail('preload');
+          // Do not preventDefault: preserve the rejection for React error boundaries.
+          // Recovery is manual only, so repeated failures cannot cause reload loops.
+        });
+      }());
+    </script>
   </head>
   <body>
+    <section id="clawweb-startup" role="status" aria-live="polite" aria-atomic="true"
+      aria-labelledby="clawweb-startup-title" aria-describedby="clawweb-startup-message"
+      style="position: sticky; top: 0; z-index: 10000; padding: 1rem; background: Canvas; color: CanvasText;">
+      <h1 id="clawweb-startup-title">正在启动 ClawWeb…</h1>
+      <p id="clawweb-startup-message">正在加载应用，请稍候。</p>
+      <button id="clawweb-startup-reload" type="button" hidden>重新加载页面</button>
+    </section>
+    <noscript>
+      <p role="alert">ClawWeb 需要启用 JavaScript。请在浏览器中启用 JavaScript，然后重新加载页面。</p>
+    </noscript>
     <div id="root"></div>
     <script type="module" src="/web/main.tsx"></script>
   </body>

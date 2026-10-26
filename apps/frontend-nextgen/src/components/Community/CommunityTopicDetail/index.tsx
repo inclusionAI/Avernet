@@ -10,7 +10,6 @@ import { Floor } from './Floor';
 import { PollTypeIcon } from '../PollTypeIcon';
 import { PollPanel } from './PollPanel';
 import { buildReplyGroups } from './model';
-import { ReplyComposer } from './ReplyComposer';
 
 export interface CommunityTopicDetailProps {
   topic: CommunityTopic | null;
@@ -27,13 +26,6 @@ export interface CommunityTopicDetailProps {
   replyPageCount: number;
   replyPageSize: number;
   onGoToReplyPage: (page: number) => void;
-  replyTargetPostId: string | null;
-  replyPublishing: boolean;
-  hasVoted: boolean;
-  onStartReply: (postId: string) => void;
-  onCancelReply: () => void;
-  onSubmitReply: (body: string) => Promise<boolean>;
-  onSubmitVote: (optionIndices: number[]) => Promise<boolean>;
 }
 
 export function CommunityTopicDetail({
@@ -50,13 +42,6 @@ export function CommunityTopicDetail({
   replyPageCount,
   replyPageSize,
   onGoToReplyPage,
-  replyTargetPostId,
-  replyPublishing,
-  hasVoted,
-  onStartReply,
-  onCancelReply,
-  onSubmitReply,
-  onSubmitVote,
 }: CommunityTopicDetailProps) {
   const [expandedReplyIds, setExpandedReplyIds] = useState<Record<string, boolean>>({});
   const replyElementsRef = useRef(new Map<string, HTMLElement | null>());
@@ -66,16 +51,6 @@ export function CommunityTopicDetail({
     () => buildReplyGroups(replies, replyOffset + 1),
     [replies, replyOffset],
   );
-  const floorByPostId = useMemo(() => {
-    const floors = new Map<string, number>();
-    floorGroups.forEach(({ reply, floorNo, children }) => {
-      floors.set(reply.id, floorNo);
-      children.forEach(({ reply: childReply }) => floors.set(childReply.id, floorNo));
-    });
-    return floors;
-  }, [floorGroups]);
-  const replyTargetFloor = replyTargetPostId ? floorByPostId.get(replyTargetPostId) ?? null : null;
-
   const registerReplyElement = useCallback(
     (postId?: string) =>
       (element: HTMLElement | null) => {
@@ -210,9 +185,6 @@ export function CommunityTopicDetail({
                   status={topic.status}
                   poll={topic.topicConfig?.poll}
                   pollStats={topic.analysis?.pollStats}
-                  hasVoted={hasVoted}
-                  publishing={replyPublishing}
-                  onVote={onSubmitVote}
                 />
               ) : null}
               {floorGroups.map(({ reply, floorNo, children }) => (
@@ -225,7 +197,6 @@ export function CommunityTopicDetail({
                   author={reply.author}
                   body={reply.body}
                   createdAt={reply.createdAt}
-                  onReply={onStartReply}
                   threadReplies={children}
                   expanded={!!expandedReplyIds[reply.id]}
                   onToggleThreadReplies={() => toggleThreadReplies(reply.id)}
@@ -233,15 +204,6 @@ export function CommunityTopicDetail({
                   registerElement={registerReplyElement}
                 />
               ))}
-              {topic.status === 'open' && topic.topicType !== 'poll' ? (
-                <ReplyComposer
-                  replyTargetFloor={replyTargetFloor}
-                  replyTargetPostId={replyTargetPostId}
-                  publishing={replyPublishing}
-                  onCancelReply={onCancelReply}
-                  onSubmitReply={onSubmitReply}
-                />
-              ) : null}
               {!replies.length && !replyLoading && <p className="py-6 text-center text-sm text-muted-foreground">暂时还没有回复</p>}
               {replyLoading && (
                 <p aria-live="polite" className="py-3 text-center text-xs text-muted-foreground">

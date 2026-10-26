@@ -1,10 +1,11 @@
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { Empty } from '@/components/ui/Empty';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
+import { Pagination } from '@/components/ui/Pagination';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { BotChatDetailSelection, BotChatPage } from '@/domain/botChats';
-import { ChevronLeft, ChevronRight, Eye, Target } from 'lucide-react';
+import { Eye, Target } from 'lucide-react';
 
 interface Props {
   page?: BotChatPage;
@@ -24,14 +25,20 @@ const preview = (value: unknown, length = 96) => {
 const cost = (value: number) => (value > 0 ? `$${value.toFixed(6)}` : '-');
 const statusTone = (status: string) => (status === 'SUCCESS' ? 'success' : status === 'RUNNING' ? 'primary' : 'error');
 
-function Identifier({ value }: { value?: string }) {
+function Identifier({ value, muted }: { value?: string; muted?: boolean }) {
   const rendered = value || '-';
 
   return (
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className="block max-w-full truncate font-mono text-xs text-[var(--color-fg)]">{rendered}</span>
+          <span
+            className={`block max-w-full truncate font-mono text-xs ${
+              muted ? 'text-[11px] text-muted-foreground' : 'text-foreground'
+            }`}
+          >
+            {rendered}
+          </span>
         </TooltipTrigger>
         <TooltipContent side="top" className="max-w-sm break-all font-mono text-[11px]">
           {rendered}
@@ -50,7 +57,7 @@ function Preview({ value, accent }: { value: unknown; accent?: boolean }) {
         <TooltipTrigger asChild>
           <span
             className={`block max-w-full overflow-hidden text-ellipsis [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] break-words leading-5 ${
-              accent ? 'text-[var(--color-fg)]' : 'text-[var(--color-muted)]'
+              accent ? 'text-foreground' : 'text-muted-foreground'
             }`}
           >
             {preview(value)}
@@ -66,154 +73,134 @@ function Preview({ value, accent }: { value: unknown; accent?: boolean }) {
 
 export function BotChatList({ page, onOpen, onPage, onPageSize }: Props) {
   if (!page?.items.length) return <Empty compact title="暂无日志" description="调整筛选条件后重试。" />;
-  const pageCount = Math.max(1, Math.ceil(page.total / page.limit));
+
+  // 列结构精编（design-extension §3 修订）：二级标识不再平铺成五面 ID 墙，
+  // 而是降为簇内堆叠元数据——traceID 一枝独醒作行首锚点，输入/输出载荷成为视觉前景。
+  const columns: DataTableColumn<BotChatPage['items'][number]>[] = [
+    {
+      id: 'traceId',
+      header: 'traceID',
+      width: 'w-[160px]',
+      cell: (item) => <Identifier value={item.id} />,
+    },
+    {
+      id: 'biz',
+      header: '业务场景 / 任务',
+      width: 'w-[180px]',
+      cell: (item) => (
+        <div className="min-w-0 space-y-0.5">
+          <div className="block truncate text-xs">{item.bizScene ?? '-'}</div>
+          {item.bizTaskId ? <Identifier value={item.bizTaskId} muted /> : null}
+          {item.groupId ? <Identifier value={`群 ${item.groupId}`} muted /> : null}
+        </div>
+      ),
+    },
+    {
+      id: 'session',
+      header: 'sessionID / Key',
+      width: 'w-[190px]',
+      cell: (item) => (
+        <div className="min-w-0 space-y-0.5">
+          <Identifier value={item.sessionId} />
+          {item.sessionKey ? <Identifier value={item.sessionKey} muted /> : null}
+        </div>
+      ),
+    },
+    {
+      id: 'input',
+      header: '输入',
+      width: 'w-[220px]',
+      cell: (item) => (
+        <span className="flex min-w-0 items-start gap-1">
+          <Target className="mt-0.5 size-3.5 shrink-0 text-destructive" />
+          <Preview value={item.input} accent />
+        </span>
+      ),
+    },
+    {
+      id: 'output',
+      header: '输出',
+      width: 'w-[220px]',
+      cell: (item) => <Preview value={item.outputPreview} />,
+    },
+    {
+      id: 'model',
+      header: '模型',
+      width: 'w-[120px]',
+      cell: (item) => <span className="block truncate">{item.model ?? '-'}</span>,
+    },
+    {
+      id: 'cost',
+      header: '消耗 / Token',
+      width: 'w-[110px]',
+      align: 'end',
+      cell: (item) => (
+        <span className="block font-mono text-xs tabular-nums">
+          {cost(item.totalCost)}
+          <span className="mt-1 block text-[11px] text-muted-foreground">{item.totalTokens} tokens</span>
+        </span>
+      ),
+    },
+    {
+      id: 'status',
+      header: '状态',
+      width: 'w-[84px]',
+      cell: (item) => <Badge tone={statusTone(item.status)}>{item.status}</Badge>,
+    },
+    {
+      id: 'timestamp',
+      header: '时间',
+      width: 'w-[150px]',
+      cell: (item) => (
+        <span className="whitespace-nowrap text-xs text-muted-foreground">
+          {item.timestamp ? new Date(item.timestamp).toLocaleString() : '-'}
+        </span>
+      ),
+    },
+    {
+      id: 'actions',
+      header: '操作',
+      width: 'w-[120px]',
+      // sticky 右置操作列（首页 useBotTableColumns 同款语法，表头底色与其对齐）。
+      className: 'sticky right-0 z-10 bg-card group-hover:bg-muted/40',
+      headerClassName: 'sticky right-0 z-10 bg-muted/50 border-l border-border/60',
+      cell: (item) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-primary"
+          leftIcon={<Eye className="size-4" />}
+          onClick={() => onOpen({ traceId: item.id, sessionId: item.sessionId, botId: item.botId })}
+        >
+          详情
+        </Button>
+      ),
+    },
+  ];
+
   return (
     <>
-      <div className="app-scrollbar overflow-x-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] shadow-sm">
-        <table className="w-full min-w-[1280px] table-fixed border-collapse text-left text-sm">
-          <colgroup>
-            <col className="w-[170px]" />
-            <col className="w-[104px]" />
-            <col className="w-[110px]" />
-            <col className="w-[170px]" />
-            <col className="w-[170px]" />
-            <col className="w-[230px]" />
-            <col className="w-[230px]" />
-            <col className="w-[230px]" />
-            <col className="w-[120px]" />
-            <col className="w-[110px]" />
-            <col className="w-[86px]" />
-            <col className="w-[150px]" />
-            <col className="w-[90px]" />
-          </colgroup>
-          <thead className="bg-[var(--color-panel-muted)] text-[var(--color-muted)]">
-            <tr>
-              {[
-                'traceID',
-                '业务场景',
-                '业务任务',
-                '群ID',
-                'sessionID',
-                'sessionKey',
-                '输入(INPUT)',
-                '输出(OUTPUT)',
-                '模型',
-                '消耗/成本',
-                '状态',
-                '时间',
-              ].map((label) => (
-                <th
-                  key={label}
-                  className="whitespace-nowrap border-b border-[var(--color-border)] px-4 py-3 font-medium"
-                >
-                  {label}
-                </th>
-              ))}
-              <th className="sticky right-0 z-10 whitespace-nowrap border-b border-l border-[var(--color-border)] bg-[var(--color-panel-muted)] px-4 py-3 font-medium">
-                操作
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {page.items.map((item) => (
-              <tr
-                key={item.id}
-                className="group border-b border-[var(--color-border)] last:border-0 hover:bg-[var(--color-panel-muted)]"
-              >
-                <td className="px-4 py-3 align-top">
-                  <Identifier value={item.id} />
-                </td>
-                <td className="truncate px-4 py-3 align-top">{item.bizScene ?? '-'}</td>
-                <td className="px-4 py-3 align-top">
-                  <Identifier value={item.bizTaskId} />
-                </td>
-                <td className="px-4 py-3 align-top">
-                  <Identifier value={item.groupId} />
-                </td>
-                <td className="px-4 py-3 align-top">
-                  <Identifier value={item.sessionId} />
-                </td>
-                <td className="px-4 py-3 align-top">
-                  <Identifier value={item.sessionKey} />
-                </td>
-                <td className="px-4 py-3 align-top">
-                  <span className="flex min-w-0 items-start gap-1">
-                    <Target className="mt-0.5 size-3.5 shrink-0 text-[var(--color-error)]" />
-                    <Preview value={item.input} accent />
-                  </span>
-                </td>
-                <td className="px-4 py-3 align-top">
-                  <Preview value={item.outputPreview} />
-                </td>
-                <td className="truncate px-4 py-3 align-top">{item.model ?? '-'}</td>
-                <td className="px-4 py-3 align-top font-mono text-xs">
-                  {cost(item.totalCost)}
-                  <div className="mt-1 text-[var(--color-muted)]">{item.totalTokens} tokens</div>
-                </td>
-                <td className="px-4 py-3 align-top">
-                  <Badge tone={statusTone(item.status)}>{item.status}</Badge>
-                </td>
-                <td className="whitespace-nowrap px-4 py-3 align-top text-xs text-[var(--color-muted)]">
-                  {item.timestamp ? new Date(item.timestamp).toLocaleString() : '-'}
-                </td>
-                <td className="sticky right-0 border-l border-[var(--color-border)] bg-[var(--color-card)] px-3 py-3 align-top group-hover:bg-[var(--color-panel-muted)]">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-[var(--color-primary)]"
-                    leftIcon={<Eye className="size-4" />}
-                    onClick={() => onOpen({ traceId: item.id, sessionId: item.sessionId, botId: item.botId })}
-                  >
-                    详情
-                  </Button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {/* 结果面板：与首页嵌套语法一致（外卡内 round-[10px] 有边结果面板）。 */}
+      <div className="overflow-hidden rounded-[10px] border border-border/60 bg-card">
+        <DataTable
+          ariaLabel="Bot 对话日志列表"
+          columns={columns}
+          rows={page.items}
+          getRowKey={(item) => item.id}
+          rowHeight="h-18"
+          minWidth="min-w-[1554px]"
+        />
       </div>
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs text-[var(--color-muted)]">
-        <span>共 {page.total} 条</span>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="secondary"
-            size="icon"
-            aria-label="上一页"
-            disabled={page.page <= 1}
-            onClick={() => onPage(page.page - 1)}
-          >
-            <ChevronLeft className="size-4" />
-          </Button>
-          <span>
-            {page.page} / {pageCount}
-          </span>
-          <Button
-            variant="secondary"
-            size="icon"
-            aria-label="下一页"
-            disabled={!page.hasMore}
-            onClick={() => onPage(page.page + 1)}
-          >
-            <ChevronRight className="size-4" />
-          </Button>
-        </div>
-        <div className="flex items-center gap-2">
-          <span id="bot-chat-page-size">每页</span>
-          <Select value={String(page.limit)} onValueChange={(value) => onPageSize(Number(value))}>
-            <SelectTrigger className="h-8 w-20" aria-labelledby="bot-chat-page-size">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {[20, 50, 100].map((size) => (
-                <SelectItem key={size} value={String(size)}>
-                  {size}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <span>条</span>
-        </div>
-      </div>
+      <Pagination
+        current={page.page}
+        pageSize={page.limit}
+        total={page.total}
+        pageSizeOptions={[20, 50, 100]}
+        onChange={onPage}
+        onPageSizeChange={onPageSize}
+        layout="between"
+        className="mt-4"
+      />
     </>
   );
 }

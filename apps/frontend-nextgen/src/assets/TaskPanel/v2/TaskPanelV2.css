@@ -1,0 +1,8 @@
+/*
+ * ChatLayout 的 SidePanel 会在业务内容外再渲染一层 Tab TopBar，其中包含任务标题。
+ * TaskPanel 自己已经提供“任务总览 / 节点”标题行，因此仅在当前活动内容为 TaskPanel 时
+ * 隐藏 SDK TopBar；其他副屏类型以及独立挂载的 TaskPanel 不受影响。
+ */
+.workspace-sdk-panel:has([data-task-panel-root='true']) > [class*='PanelRoot'] > [class*='TopBarRoot'] {
+  display: none;
+}

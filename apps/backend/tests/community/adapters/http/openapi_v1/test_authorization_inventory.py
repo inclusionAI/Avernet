@@ -319,7 +319,7 @@ def test_scaffolding_burn_down_is_reported():
 
 
 #: The exact operations that may still be ``ServiceChecked`` once this feature
-#: lands — twenty-seven of them, deferred for seven reasons recorded in
+#: lands — twenty-eight of them, deferred for seven reasons recorded in
 #: ``spec.md``'s *Out of Scope*. It was ten when the plan was written; the
 #: engine-runtime and bot-chat traces added the rest, each for a reason the
 #: table could not have shown. That is what this set is for.
@@ -371,9 +371,10 @@ _DEFERRED_OPERATIONS = frozenset(
         # relocate it. The seam adjudicates one level; this is a disjunction,
         # and expressing it is not a question this feature settles.
         #
-        # The six *file* operations under the same prefix are not here: they
-        # call ``resolve_operable_bot`` directly, with no fallback, and did
-        # migrate.
+        # File-list reads now have the same disjunction: authorize_file_list
+        # checks MEMBER or BCN friendship plus Backend-owned session identity.
+        # The other five file operations keep Check(MEMBER).
+        ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files"),
         ("GET", "/openapi/v1/bots/{bot_id}/sessions"),
         ("POST", "/openapi/v1/bots/{bot_id}/sessions"),
         ("GET", "/openapi/v1/bots/{bot_id}/sessions/favorites"),

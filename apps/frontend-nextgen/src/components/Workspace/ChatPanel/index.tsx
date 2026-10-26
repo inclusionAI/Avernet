@@ -277,6 +277,7 @@ export function ChatPanel({
           ref={panelRef}
           onAction={onPanelAction}
           bridge={chatBridge}
+          dismissOnOutside={false}
           onOpenStateChange={onSidePaneIsOpenChange}
         />
       </ChatLayout>

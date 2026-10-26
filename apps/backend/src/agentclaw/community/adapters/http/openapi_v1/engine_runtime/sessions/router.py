@@ -51,6 +51,7 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.schema
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.converter_creation import reconcile_created_session
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.dependencies_session_files import OpenApiSessionFileAdapter
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.file_access import authorize_file_list
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import RuntimeStage
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
     DeviceUuidQuery,
@@ -204,7 +205,7 @@ async def list_sessions(
                 session_key=session_key, limit=params["limit"],
                 offset=params["offset"],
                 iam_token=request.cookies.get("IAM_TOKEN") or None,
-                bcn_friend_authorized=True,
+                bcn_friend_authorized=True, actor_user_id=user_id,
             )
         except Exception as error:
             _raise_expert_error(error)
@@ -330,7 +331,7 @@ async def list_session_favorites(
                 user_id=f_user_id, bot_id=bot_id, owner_id=owner_id,
                 favorite_only=True, limit=window["limit"], offset=window["offset"],
                 iam_token=request.cookies.get("IAM_TOKEN") or None,
-                bcn_friend_authorized=True,
+                bcn_friend_authorized=True, actor_user_id=user_id,
             )
         except Exception as error:
             _raise_expert_error(error)
@@ -390,7 +391,7 @@ async def get_session(
             item = await expert.get_owned_chat_session(
                 f_user_id, bot_id, owner_id, session_id,
                 request.cookies.get("IAM_TOKEN") or None,
-                bcn_friend_authorized=True,
+                bcn_friend_authorized=True, actor_user_id=user_id,
             )
         except Exception as error:
             _raise_expert_error(error)
@@ -771,12 +772,16 @@ async def list_ready_session_files(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
+    expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
     adapter: OpenApiSessionFileAdapter = Injected(OpenApiSessionFileAdapter),
 ) -> Envelope[SessionFileList]:
-    await resolve_operable_bot(
-        relay, bot_id, caller_id=user_id, owner_id=owner_id, stage=stage.value,
-        surface="sessions",
+    await authorize_file_list(
+        request=request, bot_id=bot_id, session_id=session_id, user_id=user_id,
+        owner_id=owner_id, stage=stage, friend_user_id=f_user_id,
+        relay=relay, friendships=friendships, expert=expert,
     )
     try:
         records = adapter.list_ready(
@@ -916,7 +921,7 @@ async def list_session_messages(
                 f_user_id, bot_id, owner_id, session_id,
                 limit=window["limit"], offset=0,
                 iam_token=request.cookies.get("IAM_TOKEN") or None,
-                bcn_friend_authorized=True,
+                bcn_friend_authorized=True, actor_user_id=user_id,
             )
         except Exception as error:
             _raise_expert_error(error)

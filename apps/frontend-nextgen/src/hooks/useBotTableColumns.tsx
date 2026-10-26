@@ -79,6 +79,7 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
             bot={bot}
             progressExpanded={expandedProgressIds.has(bot.id)}
             onToggleProgress={() => toggleProgress(bot.id)}
+            onManagePublication={onAction ? onManagePublication : undefined}
           />
         ),
       },
@@ -173,7 +174,6 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
                 collaborationMode={getCollaborationMode?.(bot)}
                 lockedByOther={bot.lock?.status === 'other'}
                 onAction={onAction}
-                onManagePublication={onManagePublication}
                 onHealthCheck={onHealthCheck}
                 healthCheckAvailability={getHealthCheckAvailability?.(bot)}
                 onOpenTaskInstances={onOpenTaskInstances}

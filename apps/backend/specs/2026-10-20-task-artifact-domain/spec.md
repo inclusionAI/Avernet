@@ -373,14 +373,35 @@ CREATE TABLE IF NOT EXISTS `task_artifact` (
 
 ---
 
-## 7. 读侧最小暴露(本期唯一读侧改动)
+## 7. Dashboard 可见性与会话文件协调
 
-原则:消费路径不切换(下游/Judge/OpenAPI 仍读 output dict),只让产物**可见**:
+原则:消费路径不切换(下游/Judge/OpenAPI 仍读 output dict),让产物**可见**;同时
+dashboard 作为中间产物发现入口,在返回清单前协调 BCS session files:
 
 - `TaskNodeDTO`(`adapters/http/task/schemas.py:305`)新增 optional `artifacts: list[TaskArtifactDescriptorDTO]`,由 dashboard 读路径按 `(task_id, node_id)` 读时富化(取该节点全部 attempt 的产物,attempt 倒序)——协议仍是"只转协议",富化在 service 层;
 - Descriptor 只含安全字段:`artifact_id / artifact_name / kind / content(kind-tagged 引用元数据:File 分支 storage_type+storage_id+file_name+file_id+file_type;UrlLink 分支 url+type;Code 分支 code_base_name+code_base_address+pr_link+pr_desc)/ attempt / creator / created_at`;
 - 轨迹 HTML(`trajectory_html.py`)的「产物」块按 Descriptor 渲染文件名,不渲染任何 URL/下载链接(前端自拼);
 - **OpenAPI v1 面的精确口径(方案取舍)**:共享的 `graph_to_dto` 同时供内部看板路由与 `GET /openapi/v1/collaboration/tasks/dashboard`(`openapi_v1/task/router.py:111/:135`)使用,`TaskNodeDTO` 加字段即**自动**出现在公开 OpenAPI 响应模型中——本方案接受这一**附加可选字段**的公开可见(与"看板产物清单可见"是同一诉求),不加新端点、不改任何既有字段的语义;OpenAPI 导出快照与相关导出测试在**同一变更内**更新。若评审认为公开面必须零变更,则替代方案是给 openapi_v1 路由派生独立 DTO——本期不选,理由:使读侧工作量翻倍且两条演化路径在阶段二必然合流。
+- **dashboard session-file 协调**:公开
+  `GET /openapi/v1/collaboration/tasks/dashboard`、内部
+  `GET /api/v1/collaboration/tasks/dashboard` 与
+  `GET /api/v1/collaboration/tasks/{task_id}` 在首次读取数据库产物清单前,遍历当前
+  dashboard graph 中所有带 `run_info.extend_props.session_id` 的节点,经
+  `BcsSessionFilesClient.list_files(status="Ready")` 分页读取 Ready 文件元数据;
+  caller Bearer 的持有者取值与轨迹会话读取一致:`driver_bot_id` 优先、`assignee`
+  兜底。
+- 每条 Ready session file 映射成 `FileContent(storage_type=session_file,
+  storage_id=session_id,file_type=mime_type,file_name,file_id)`;
+  `mime_type` 缺失时使用 `application/octet-stream`,缺 `file_id`/`file_name` 或非
+  Ready 行跳过。以**完整 `FileContent` 值**与该 task 的完整数据库 manifest 做
+  task-wide 比较:任一字段不同均视为新增;完整相同表示已识别,忽略。单次请求内不同
+  节点重复发现的相同 `FileContent` 也只 append 一次。
+- 新发现文件按发现节点的 `node_id`、当前 `harness_retries` attempt、session scope 与
+  assignee creator 追加为 FILE artifact。只要发生 append,必须重新查询数据库后再返回
+  dashboard 产物;没有 append 时复用首次完整 manifest 查询并按 dashboard 响应 limit
+  截取。BCS 文件列表/调用者 token 读取失败按 session 记 WARNING 并降级到已有数据库
+  manifest;数据库读取或 append 失败继续上抛,不得伪装成功。因此这三条 dashboard 路由
+  不再是严格只读接口,而是一个受限的“外部观察 + append-only 补录”边界。
 
 ---
 
@@ -388,7 +409,8 @@ CREATE TABLE IF NOT EXISTS `task_artifact` (
 
 语雀文档的三阶段迁移在本方案的语境下:
 
-- **阶段一(本方案)**:引入 Artifact + 回调契约 + 双轨记录(写侧 + 只读可见);
+- **阶段一(本方案)**:引入 Artifact + 回调契约 + 双轨记录(写侧 + dashboard 可见),
+  并在 dashboard 访问时把尚未识别的 Ready session files 补录进 manifest;
 - **阶段二(后续)**:读侧切换——下游节点按 artifact 解析上游输入、Judge 消费 Descriptor、RuntimeInfo.output 退化为投影、OpenAPI 导出产物列表;
 - **阶段三(后续)**:停止产出文本约定键、`Structured`/`Collection` 内容分支、`supersedes` 修订链、按需的字节物化/提取(文本提取产物,`derived_from` 血缘)。
 
@@ -404,6 +426,8 @@ CREATE TABLE IF NOT EXISTS `task_artifact` (
 - [ ] 事务:产物写失败 → 图变更整体失败(需构造 repo 异常注入的测试);contextvar 暂存跨重放正确清理;
 - [ ] 持久化:SQL 与 ORM 同步(singlebox 可建表)、repository 契约测试、README provides/Boundary 增补、DI 绑定;
 - [ ] 读侧:`TaskNodeDTO.artifacts` 富化 + HTML 产物块无 URL;OpenAPI 导出快照同步更新(附加可选字段);
+- [ ] dashboard session files:三条 dashboard 路由均先扫描节点 session;Ready 分页完整;
+  完整 `FileContent` task-wide 去重;新增 append 后二次查库;BCS/token 失败降级、DB 写失败上抛;
 - [ ] 领域语义:文本归约器含 `{"output": <str>}` 主通道形态;`skipped`/`notify_result` 产生 TEXT 产物(text=canonical JSON)且每 attempt 不超过 1+1 条;`file_type` 缺省推断与兜底值;
 - [ ] 契约变更:`save_graph` 新增可选参后,全部现存实现/测试替身同步(检索所有以 `save_graph` 为签名的 stub);
 - [ ] 缺席态:graph 仓储未接线(内存-only)时不发布、不报错;

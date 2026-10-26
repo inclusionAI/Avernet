@@ -40,12 +40,8 @@ export function useCommunity() {
   );
 
   const replies = useCommunityReplies({
-    currentUserId,
-    authorName: identity?.displayName || '我',
-    authorAvatarUrl: identity?.avatarUrl,
     selectedTopic: store.selectedTopic,
     setReplies: store.setReplies,
-    refreshTopic: fetchTopicWithViewer,
   });
   const { resetReplies, openFirstReplyPage } = replies;
 

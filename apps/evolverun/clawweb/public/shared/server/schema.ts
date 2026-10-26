@@ -2559,7 +2559,7 @@ END`,
 
       `CREATE TABLE IF NOT EXISTS suggestion_outcomes (
   id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
-  lesson_id INTEGER NOT NULL COMMENT '关联的lessons.id',
+  lesson_id BIGINT NOT NULL COMMENT '关联的lessons.id',
   workflow_id VARCHAR(255) NOT NULL COMMENT '工作流ID',
   node_id VARCHAR(255) NOT NULL DEFAULT '' COMMENT '节点ID',
   failure_signature VARCHAR(256) NOT NULL COMMENT '失败签名',
@@ -2574,8 +2574,7 @@ END`,
   UNIQUE INDEX uk_outcome_lesson_wf_node_lesson (lesson_id, workflow_id, node_id),
   INDEX idx_outcome_lesson (lesson_id),
   INDEX idx_outcome_sig (failure_signature),
-  INDEX idx_outcome_verdict (verdict, gmt_create),
-  CONSTRAINT fk_outcome_lesson FOREIGN KEY (lesson_id) REFERENCES lessons(id) ON DELETE CASCADE
+  INDEX idx_outcome_verdict (verdict, gmt_create)
 ) COMMENT='强化信号表: 跨快慢两环的成绩单'`,
 
       `CREATE TABLE IF NOT EXISTS failure_signatures (

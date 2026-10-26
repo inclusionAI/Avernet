@@ -29,11 +29,8 @@ import {
   TooltipTrigger,
 } from '@/components/ui';
 import { CapabilitySetViewer } from '@/components/Workspace/CapabilitySetViewer';
-import type { ComposerCapabilitySetsState } from '@/components/Workspace/CapabilitySetViewer/types';
 import { MenuRow, SelectionChip } from '@/components/Workspace/TaskComposerMenu/ComposerMenuPrimitives';
 import { WorkflowSubPanel, type WorkflowPanelItem } from '@/components/Workspace/TaskComposerMenu/WorkflowSubPanel';
-import type { UseTaskExecutionResult } from '@/hooks/useTaskExecution';
-import type { ComposerSelection, WorkflowSelection } from '@/services/tasks/taskMapper';
 import { composerSelectionKey } from '@/services/tasks/taskMapper';
 import { cn } from '@/utils/cn';
 import { ChevronDown, FileUp, FolderOpen, ImageDown, Plus, Sparkles, Workflow } from 'lucide-react';
@@ -42,29 +39,10 @@ import { useEffect, useRef, useState } from 'react';
 /** 功能开关。clawweb 内部环境 /api/workflows 已实测可用（restore-design-chat-page-b2-b3 design.md D4 回填），开闸。 */
 const WORKFLOW_TASK_ENABLED = true;
 
-export interface ComposerCapabilitiesMenuProps {
-  execution?: UseTaskExecutionResult;
-  onUpload?: () => void;
-  /** 添加图片回调（打开文件选择器）。单聊设计稿未含此项；群域传入时仍保留「添加图片」行。 */
-  onAddImage?: () => void;
-  /** 文件管理回调（单聊头部资源面板承接，见 chat-header-panels）。传入时保留「文件管理」行（群域）。 */
-  onManageFiles?: () => void;
-  enableWorkflow?: boolean;
-  disabled?: boolean;
-  disabledReason?: string | null;
-  /** 可叠加选中项（胶囊 chips）：workflow 按 workflowId 去重、动态任务至多一个。 */
-  selections?: ComposerSelection[];
-  onWorkflowSelected?: (w: WorkflowSelection) => void;
-  onDynamicSelected?: () => void;
-  /** 清除指定胶囊（key 见 composerSelectionKey：'dynamic' | workflowId）。 */
-  onRemoveSelection?: (key: string) => void;
-  /** 能力集只读查看装配（useBotCapabilitySets；单聊 我的/团队 Bot 传入）。
-   * 不传时「通用协作能力」文案区不渲染——好友 Bot 会话与协作群即此形态，＋ 区独立保留。 */
-  capabilitySets?: ComposerCapabilitySetsState | null;
-  /** 调试会话仅复用附件与能力集入口，不暴露任务创建菜单。 */
-  showTaskEntries?: boolean;
-  className?: string;
-}
+import type { ComposerCapabilitiesMenuProps } from './composerCapabilitiesMenuTypes';
+
+export type { ComposerCapabilitiesMenuProps } from './composerCapabilitiesMenuTypes';
+
 
 /** 菜单主体：单行三项（上传文件/动态任务/工作流任务）；工作流行 hover 延迟展开右侧子面板。 */
 function MenuBody({
@@ -194,6 +172,7 @@ export function ComposerCapabilitiesMenu({
   capabilitySets,
   showTaskEntries = true,
   className,
+  onOpened,
 }: ComposerCapabilitiesMenuProps) {
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
@@ -216,7 +195,13 @@ export function ComposerCapabilitiesMenu({
         {/* ＋区（aria「添加附件」）：打开原混排菜单（附件行 + 任务行），行为与拆分前完全一致。
          * 胶囊常驻（多胶囊语义）：有选中项时 chips 并列其右，仍可继续点击添加。
          * 总开关 disabled 只禁用子项并呈现 disabledReason，触发器保持可开（spec Scenario「不可会话态」）。 */}
-        <Popover open={open} onOpenChange={setOpen}>
+        <Popover
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next);
+          if (next) onOpened?.();
+        }}
+      >
           <PopoverTrigger asChild>
             <Button
               variant="ghost"

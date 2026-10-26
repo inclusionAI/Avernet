@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
+from agentclaw.community.core.execution_identity.contracts import (
+    OwnerHandoffExecutionPlan,
+)
+
 
 @runtime_checkable
 class RuntimePassportTokenUpdaterProtocol(Protocol):
@@ -14,6 +18,15 @@ class RuntimePassportTokenUpdaterProtocol(Protocol):
 
 @runtime_checkable
 class ExecutionIdentityServiceProtocol(Protocol):
+    def plan_owner_handoff(self, *, bot_pk: int, new_owner_id: str) -> OwnerHandoffExecutionPlan:
+        """Preserve an ACTIVE independent executor; otherwise follow the new Owner.
+
+        Refuse personal/default Bots and concurrent PENDING identity changes.
+        The future handoff orchestrator must revalidate under its Bot lock and
+        persist/reconcile the remote operation; this method has no side effects.
+        """
+        ...
+
     def change_execution_identity(
         self,
         *,

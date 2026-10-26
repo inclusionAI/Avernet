@@ -21,6 +21,9 @@ from agentclaw.community.adapters.http.task.router import router as task_interna
 from agentclaw.community.adapters.http.openapi_v1.task.router import router as task_router
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
+from agentclaw.community.api.task.task_artifact_service import (
+    TaskArtifactApiServiceProtocol,
+)
 from agentclaw.community.core.repository.protocols.task import TaskArtifactRepositoryProtocol
 from agentclaw.community.core.repository.protocols.task import TaskInfoRepositoryProtocol
 from agentclaw.community.core.task.domain.models import (
@@ -67,6 +70,15 @@ class _StubDiscoverModule(Module):
                 return []
 
         return _EmptyArtifactRepo()
+
+    @singleton
+    @provider
+    def artifact_service(self) -> TaskArtifactApiServiceProtocol:
+        class _EmptyArtifactService:
+            async def sync_session_files_and_list(self, graph, *, limit=200):
+                return []
+
+        return _EmptyArtifactService()
 
     @provider
     def task_info_repo(self) -> TaskInfoRepositoryProtocol:

@@ -12,6 +12,8 @@ import type { PanelHandle } from '@tc-chat/core';
 import type { SenderRef } from '@tc-chat/ui/es/Sender';
 import type { ReactNode, RefObject } from 'react';
 import type { ConversationInteractiveChatModel } from './hooks/useConversationInteractiveChat';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 
 /** ChatPanel 以非空 RefObject 声明 ref prop;实际均为 useRef<T>(null) 形态的静态换形。 */
 const asPanelRef = (ref: RefObject<PanelHandle | null>): RefObject<PanelHandle> => ref as RefObject<PanelHandle>;
@@ -92,6 +94,7 @@ export function ConversationInteractiveStage(props: {
           }
           taskComposer={
             <ComposerCapabilitiesMenu
+              onOpened={() => Tracert.click(Points.workspaceChat.openWorkflowMenu)}
               execution={taskExecution}
               enableWorkflow
               onUpload={model.desktopFileFeaturesHidden ? undefined : fileFeature.openUpload}

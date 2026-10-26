@@ -125,3 +125,18 @@ it('clears the displayed workflow versions after browser Back leaves a different
   expect(screen.getByLabelText('workspace-location')).not.toHaveTextContent('baseline=')
   expect(screen.getByLabelText('workspace-location')).not.toHaveTextContent('current=')
 })
+
+it('drops workflow-specific deep links when switching and preserves the original link on browser Back', async () => {
+  renderWorkspace('/workflows/workspace?workflowId=wf-1&tab=evolution&repairTaskId=FIX-A&runId=RUN-A&analysisId=AN-A&issueSignature=timeout&baseline=1&current=2')
+  await userEvent.click(screen.getByRole('button', { name: /切换工作流.*示例工作流/ }))
+  await userEvent.click(screen.getByRole('button', { name: /备用工作流.*wf-2/ }))
+  const location = screen.getByLabelText('workspace-location')
+  expect(location).toHaveTextContent('workflowId=wf-2')
+  expect(location).toHaveTextContent('tab=evolution')
+  for (const name of ['repairTaskId', 'runId', 'analysisId', 'issueSignature', 'baseline', 'current']) {
+    expect(location).not.toHaveTextContent(`${name}=`)
+  }
+  await userEvent.click(screen.getByRole('button', { name: '浏览器后退' }))
+  expect(location).toHaveTextContent('workflowId=wf-1')
+  expect(location).toHaveTextContent('repairTaskId=FIX-A')
+})

@@ -612,12 +612,9 @@ class AiohttpBotServicePlugin(BotServicePlugin):
                             cookie=f"IAM_TOKEN={credential.token}",
                         )
                     else:
-                        paas_device_id = self._extract_caller_paas_device_id(
-                            caller_data, request_id
-                        )
                         await self._append_agentpaas_caller_token(
                             credential=credential,
-                            paas_device_id=paas_device_id,
+                            paas_device_id=sandbox_id,
                         )
                     logger.info(
                         "[bot-service] caller-connection ready: request_id=%s "
@@ -722,21 +719,6 @@ class AiohttpBotServicePlugin(BotServicePlugin):
             )
         return result.data
 
-    @staticmethod
-    def _extract_caller_paas_device_id(
-        data: CallerConnectionData, request_id: str
-    ) -> str:
-        """Extract the PaaS device ID required by the outbound-rule append API."""
-        connection = data.connection
-        paas_device_id = connection.paas_device_id if connection is not None else None
-        if not paas_device_id:
-            raise PaasError(
-                ErrorCode.PLATFORM_ERROR,
-                "caller-connection response missing connection.paas_device_id "
-                f"(request_id={request_id})",
-            )
-        return paas_device_id
-
     async def _append_agentpaas_caller_token(
         self,
         *,
@@ -767,7 +749,7 @@ class AiohttpBotServicePlugin(BotServicePlugin):
                 mode=OutBoundOperationRuleUpdatedMode.APPEND,
             )
         except Exception as e:
-            logger.warning(
+            logger.error(
                 "[bot-service] AgentPaaS caller outbound-rule append failed: "
                 "paas_device_id=%s credential_type=%s error_type=%s",
                 paas_device_id,

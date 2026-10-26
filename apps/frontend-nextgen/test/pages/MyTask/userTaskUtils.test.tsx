@@ -1,4 +1,9 @@
-import { getUserTaskAcceptanceText, getUserTaskGoal, matchUserTaskScope } from '@/pages/MyTask/userTaskUtils';
+import {
+  getUserTaskAcceptanceText,
+  getUserTaskGoal,
+  getUserTaskTitle,
+  matchUserTaskScope,
+} from '@/pages/MyTask/userTaskUtils';
 import { describe, expect, it } from '@jest/globals';
 
 describe('MyTask status compatibility', () => {
@@ -14,6 +19,18 @@ describe('MyTask status compatibility', () => {
 });
 
 describe('MyTask task column text', () => {
+  it('任务标题优先读取 context.title', () => {
+    expect(
+      getUserTaskTitle({
+        task_id: 'task-1',
+        task_spec: {
+          context: { title: '上下文标题' },
+          metadata: { title: '旧标题' },
+        },
+      }),
+    ).toBe('上下文标题');
+  });
+
   it('目标字段只取 goal.objective', () => {
     expect(
       getUserTaskGoal({

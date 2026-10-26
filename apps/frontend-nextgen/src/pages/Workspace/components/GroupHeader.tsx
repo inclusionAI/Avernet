@@ -22,6 +22,8 @@ import { useRef, useState } from 'react';
 import { GroupAvatarStack } from './GroupSidebar/GroupItem';
 import { GroupSessionIdPill } from './GroupSessionIdPill';
 import { SharePopover } from './ManagePanel/SharePopover';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 
 export type GroupPanelKind = 'none' | 'members' | 'manage' | 'sessionManage' | 'resources' | 'history';
 
@@ -217,7 +219,14 @@ export function GroupHeader({
                   label={selectedSession ? '分享会话' : '分享协作群'}
                   icon={<Share2 className="size-4" aria-hidden />}
                   active={shareOpen}
-                  onClick={selectedSession ? handleShareSession : handleShareGroup}
+                  onClick={() => {
+                    if (!selectedSession) {
+                      // 协作群分享=邀请入口(add-spm-tracking:协作群聚焦页-邀请成员)
+                      Tracert.click(Points.groupFocus.inviteMember, { group_id: selectedGroup?.groupId });
+                    }
+                    if (selectedSession) handleShareSession();
+                    else handleShareGroup();
+                  }}
                 />
               </span>
             ) : null}

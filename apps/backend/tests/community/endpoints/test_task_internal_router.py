@@ -34,6 +34,10 @@ from agentclaw.community.core.task.domain.models import (
 )
 from agentclaw.community.core.task.task_discovery.discovery_service import DiscoveryService
 from agentclaw.community.core.task.task_discovery.scheduler import TaskDiscoveryScheduler
+from agentclaw.community.core.task.task_runner.client.ports import (
+    BotSendResult,
+    OpenApiBotPort,
+)
 from tests.community.framework import (
     CaseInput,
     ExpectError,
@@ -710,4 +714,75 @@ def internal_revoke_happy():
     expect=ExpectError(status=401),
 )
 def internal_revoke_unauthenticated():
+    pass
+
+
+# ── 最终结果回写(不鉴权;按 root 节点 session 续写,不改任务态) ──────────────
+class _WritebackBotPort:
+    """OpenApiBotPort 替身:runner world 里该 Port 解析为 None(可选注入),
+    不能用 bind_overrides(对 None 无法建子类),直接 binder.bind 完整实例。"""
+
+    async def send_message(self, *, bot_id, message, metadata, message_id=None):
+        return BotSendResult(run_id="wb-run-endpoint-1", session_id="sess-endpoint-1")
+
+
+def _seed_writeback(world) -> None:
+    root = TaskNode(
+        node_id="task-endpoint-1",
+        task_id="task-endpoint-1",
+        status=Status.RUNNING,
+        task_spec=_DOMAIN_TASK_SPEC,
+        run_info=RuntimeInfo(
+            assignee="bot-endpoint-1",
+            extend_props={"session_id": "sess-endpoint-1", "assignee_owner_id": "owner-1"},
+        ),
+        node_run_graph=None,
+    )
+    graph = TaskExecutionGraph(
+        run_id=1,
+        loop_round=0,
+        status=Status.RUNNING,
+        tasks=[root],
+        task_id="task-endpoint-1",
+    )
+
+    def get_task_dashboard(_self, _task_id, _node_id=None, *, include_action_log=False):
+        return graph
+
+    bind_overrides(world, TaskServiceProtocol, {"get_task_dashboard": get_task_dashboard})
+    world.injector.binder.bind(OpenApiBotPort, to=_WritebackBotPort(), scope=None)
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/result_writeback",
+    scenario="happy_ok",
+    seed=_seed_writeback,
+    input=CaseInput(
+        json_body={"task_id": "task-endpoint-1", "message": "任务最终结果:已完成"},
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "task_id": "task-endpoint-1",
+                "session_id": "sess-endpoint-1",
+                "run_id": "wb-run-endpoint-1",
+            },
+        },
+    ),
+)
+def result_writeback_happy():
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/result_writeback",
+    scenario="err_invalid_body",
+    input=CaseInput(json_body={}),
+    expect=ExpectError(status=422),
+)
+def result_writeback_error():
     pass

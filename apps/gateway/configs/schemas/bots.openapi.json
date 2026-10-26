@@ -493,19 +493,58 @@
       "AgentDetailDTO": {
         "properties": {
           "agent_id": {
-            "title": "Agent Id",
-            "type": "string"
+            "type": "string",
+            "title": "Agent Id"
           },
-          "attempt_ledger": {
-            "items": {
-              "$ref": "#/components/schemas/AgentAttemptDetailDTO"
-            },
-            "title": "Attempt Ledger",
-            "type": "array"
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "parent_agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Agent Id"
+          },
+          "depth": {
+            "type": "integer",
+            "title": "Depth"
+          },
+          "spawn_round": {
+            "type": "integer",
+            "title": "Spawn Round"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "title": "Idempotency Key"
           },
           "attempts": {
-            "title": "Attempts",
-            "type": "integer"
+            "type": "integer",
+            "title": "Attempts"
           },
           "bot_id": {
             "anyOf": [
@@ -529,21 +568,6 @@
             ],
             "title": "Bot State"
           },
-          "depth": {
-            "title": "Depth",
-            "type": "integer"
-          },
-          "ended_at": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ended At"
-          },
           "error": {
             "anyOf": [
               {
@@ -555,25 +579,6 @@
             ],
             "title": "Error"
           },
-          "idempotency_key": {
-            "title": "Idempotency Key",
-            "type": "string"
-          },
-          "kind": {
-            "title": "Kind",
-            "type": "string"
-          },
-          "messages": {
-            "items": {
-              "$ref": "#/components/schemas/AgentMessageDetailDTO"
-            },
-            "title": "Messages",
-            "type": "array"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
           "output": {
             "anyOf": [
               {},
@@ -582,42 +587,6 @@
               }
             ],
             "title": "Output"
-          },
-          "parent_agent_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Parent Agent Id"
-          },
-          "result": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AgentResultDetailDTO"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "role": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Role"
-          },
-          "spawn_round": {
-            "title": "Spawn Round",
-            "type": "integer"
           },
           "started_at": {
             "anyOf": [
@@ -630,11 +599,53 @@
             ],
             "title": "Started At"
           },
-          "status": {
-            "title": "Status",
-            "type": "string"
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentResultDetailDTO"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "attempt_ledger": {
+            "items": {
+              "$ref": "#/components/schemas/AgentAttemptDetailDTO"
+            },
+            "type": "array",
+            "title": "Attempt Ledger"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/AgentMessageDetailDTO"
+            },
+            "type": "array",
+            "title": "Messages"
+          },
+          "authorization": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BotAuthorizationDTO"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
+        "type": "object",
         "required": [
           "agent_id",
           "name",
@@ -645,8 +656,7 @@
           "idempotency_key",
           "attempts"
         ],
-        "title": "AgentDetailDTO",
-        "type": "object"
+        "title": "AgentDetailDTO"
       },
       "AgentKind": {
         "enum": [
@@ -31867,6 +31877,40 @@
           "PERSONAL",
           "TEAM"
         ]
+      },
+      "BotAuthorizationDTO": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "iframe_url": {
+            "type": "string",
+            "title": "Iframe Url"
+          },
+          "redirect_url": {
+            "type": "string",
+            "title": "Redirect Url"
+          },
+          "deadline": {
+            "type": "string",
+            "title": "Deadline"
+          },
+          "application_id": {
+            "type": "string",
+            "title": "Application Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "state",
+          "iframe_url",
+          "redirect_url",
+          "deadline",
+          "application_id"
+        ],
+        "title": "BotAuthorizationDTO",
+        "description": "Pending human-authorization gate for one agent's bot (additive).\n\nPresent on an agent exactly while its bot sits at the human gate\n(``state=AWAITING_AUTHORIZATION``): ``iframe_url``/``redirect_url``\nare the tcauthmng consent surfaces, ``deadline`` the window horizon as\nthe ISO-8601 spelling the creation-job payload itself carries —\nempty strings when the payload cannot answer a fact.\n``application_id`` is the passport application's identifier so a\nconsumer can address the decision surface from this read alone."
       }
     }
   },

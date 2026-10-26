@@ -9,6 +9,8 @@ import { BotManagementConfirmDialog } from './BotManagementConfirmDialog';
 import { BotManagementRuntimeItems } from './BotManagementRuntimeItems';
 import { actionIcon, actionLabel, type BotCardManagementAction } from './config';
 import { ActionHelp, MenuSection } from './menuPrimitives';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 interface BotManagementMenuProps {
   bot: BotDomain;
   open?: boolean;
@@ -144,6 +146,7 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
                 leftIcon={<ClipboardList className="size-4" />}
                 aria-label={`查看 ${bot.name} 任务实例`}
                 onClick={() => {
+                  Tracert.click(Points.botWorkshop.viewTaskInstance, { bot_id: bot.id });
                   setOpen(false);
                   onOpenTaskInstances(bot);
                 }}
@@ -160,6 +163,7 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
                 aria-label={`${bot.name} 健康检查`}
                 disabled={lockedByOther || !healthCheckAvailability.enabled}
                 onClick={() => {
+                  Tracert.click(Points.botWorkshop.runHealthCheck, { bot_id: bot.id });
                   setOpen(false);
                   onHealthCheck(bot);
                 }}

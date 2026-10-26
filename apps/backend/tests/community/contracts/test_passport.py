@@ -15,6 +15,7 @@ Plugin-hit assertion: the consumer's call surface returns a token
 matching the local impl's fingerprint. A consumer bypassing the
 plugin would not produce that exact string.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -115,3 +116,49 @@ def test_community_unfreeze_leaves_runtime_token_queryable(community_world) -> N
         plugin.query_token("bot_community", "alice")
         == "community-passport-bot_community"
     )
+
+
+def test_handoff_consumer_refuses_local_capability_before_freezing(world, monkeypatch):
+    """Consumer invokes the DI-bound Plugin API; unsupported is fail closed."""
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from agentclaw.community.core.bot_management.owner_handoff.service import (
+        OwnerHandoffService,
+    )
+    from agentclaw.community.core.bot_management.owner_handoff.contracts import (
+        HandoffError,
+        OwnerHandoffPolicy,
+    )
+
+    plugin = world.get(PassportPlugin)
+    called = []
+    actual = plugin.owner_handoff_supported
+
+    def capability(**kwargs):
+        called.append(kwargs)
+        return actual(**kwargs)
+
+    monkeypatch.setattr(plugin, "owner_handoff_supported", capability)
+    bots, repository, staff = Mock(), Mock(), Mock()
+    bots.get_by_pk.return_value = {
+        "id": 1,
+        "bot_id": "service",
+        "owner_id": "A",
+        "entity_id": "A",
+    }
+    staff.get_user_by_work_no.return_value = SimpleNamespace(
+        work_no="B", display_name="B", full_name=None, username=None
+    )
+    consumer = OwnerHandoffService(
+        repository,
+        plugin,
+        Mock(),
+        staff,
+        bots,
+        Mock(),
+        OwnerHandoffPolicy(enabled=True, recovery_enabled=True),
+    )
+    with pytest.raises(HandoffError, match="UNSUPPORTED"):
+        consumer.create(bot_pk=1, actor_id="A", new_owner_id="B", request_key="request")
+    assert called == [{"bot_id": "service", "owner_workno": "A", "entity_id": "A"}]
+    repository.begin.assert_not_called()

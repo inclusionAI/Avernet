@@ -99,7 +99,7 @@ class FakeGrants:
             app_name="partner-platform",
             bot_id=bot_id,
             user_id=user_id,
-            owner_id=owner,
+            owner_id=owner, current_owner_id=owner,
             avernet_tenant="teamclaw",
             env="test",
             gmt_create=__import__("datetime").datetime(2026, 8, 10),

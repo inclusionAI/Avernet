@@ -28,6 +28,7 @@ import type {
   SearchedUser,
   ShellVisibility,
   TaskClaimGrantStrategy,
+  TrackerAdapter,
   UserProfilePresentation,
   UserSearchCapability,
 } from './types';
@@ -83,6 +84,7 @@ export type {
   SearchedUser,
   ShellVisibility,
   TaskClaimGrantStrategy,
+  TrackerAdapter,
   UserProfilePresentation,
   UserSearchCapability,
 };

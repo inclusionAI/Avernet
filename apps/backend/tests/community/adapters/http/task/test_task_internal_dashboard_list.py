@@ -11,6 +11,9 @@ from injector import Injector, Module, provider, singleton
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.adapters.http.task.router import router as task_internal_router
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
+from agentclaw.community.api.task.task_artifact_service import (
+    TaskArtifactApiServiceProtocol,
+)
 from agentclaw.community.core.repository.protocols.task import (
     TaskArtifactRepositoryProtocol,
 )
@@ -95,6 +98,16 @@ class _StubArtifactRepo:
         ][:limit]
 
 
+class _StubArtifactApiService:
+    def __init__(self, artifact_repo):
+        self._artifact_repo = artifact_repo
+        self.calls = []
+
+    async def sync_session_files_and_list(self, graph, *, limit=200):
+        self.calls.append(graph)
+        return self._artifact_repo.list_by_task(graph.task_id, limit=limit)
+
+
 def _task_record(task_id="T-1", status=Status.RUNNING):
     return TaskInfoRecord(
         id=1,
@@ -138,6 +151,7 @@ class _StubModule(Module):
         super().__init__()
         self._task_service = task_service
         self._artifact_repo = artifact_repo
+        self._artifact_service = _StubArtifactApiService(artifact_repo)
 
     @singleton
     @provider
@@ -148,6 +162,11 @@ class _StubModule(Module):
     @provider
     def artifact_repo(self) -> TaskArtifactRepositoryProtocol:
         return self._artifact_repo
+
+    @singleton
+    @provider
+    def artifact_service(self) -> TaskArtifactApiServiceProtocol:
+        return self._artifact_service
 
 
 def _client(task_service, artifact_repo) -> TestClient:

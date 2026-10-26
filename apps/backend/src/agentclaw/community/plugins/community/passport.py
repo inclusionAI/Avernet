@@ -11,6 +11,7 @@ persisted (``bot.ext.passport``) and re-read; the token is an inert bearer
 placeholder (the community sandbox runs ``auth.mode=none`` and the corp egress
 gateways it would target do not exist), so any stable opaque value suffices.
 """
+
 from __future__ import annotations
 
 from typing import Any, Optional
@@ -112,8 +113,16 @@ class SelfIssuedPassportPlugin(PassportPlugin):
         bot_desc: Optional[str] = None,
         engine_type: Optional[str] = None,
         target_env: Optional[str] = None,
+        handoff_operation_id: str | None = None,
+        expected_credential_id: str | None = None,
     ) -> Optional[dict[str, Any]]:
         validate_passport_target_env(target_env)
+        if handoff_operation_id is not None or expected_credential_id is not None:
+            from agentclaw.community.plugin_api.passport import PassportError
+
+            raise PassportError(
+                "Derived community credentials do not support generation retirement"
+            )
         result = self._issue(bot_id)
         result.update(
             status="ISSUED",
@@ -121,6 +130,26 @@ class SelfIssuedPassportPlugin(PassportPlugin):
             execution_workno=execution_workno,
         )
         return result
+
+    def owner_handoff_supported(
+        self, *, bot_id: str, owner_workno: str, entity_id: str
+    ) -> bool:
+        return False
+
+    def retire_agent_credentials(
+        self,
+        *,
+        bot_id: str,
+        owner_workno: str,
+        entity_id: str,
+        keep_credential_id: str,
+        handoff_operation_id: str,
+    ) -> None:
+        from agentclaw.community.plugin_api.passport import PassportError
+
+        raise PassportError(
+            "Derived community credentials cannot retire selected generations"
+        )
 
     def destroy_passport(self, bot_id: str, owner_workno: str) -> None:
         # Nothing to revoke — credentials are derived, not stored externally.
@@ -183,7 +212,8 @@ class SelfIssuedPassportPlugin(PassportPlugin):
         logger.debug(
             "[SelfIssuedPassportPlugin] save_sub_resources → no-op "
             "(bot_id=%s, count=%d)",
-            bot_id, len(sub_resources),
+            bot_id,
+            len(sub_resources),
         )
         return True
 

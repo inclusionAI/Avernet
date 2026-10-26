@@ -1,9 +1,10 @@
 import { CapabilityPanel } from '@/components/BotWorkshop/Editor/CapabilityPanel';
 import { ChannelConfigPanel } from '@/components/BotWorkshop/Editor/ChannelConfigPanel';
-import { DebugChatPanel } from '@/components/BotWorkshop/Editor/DebugChatPanel';
+import { DetailDebugChat } from './DetailDebugChat';
+import { DwsHostingPanel } from '@/components/BotWorkshop/Editor/DwsHostingPanel';
 import { IdentityConfigPanel } from '@/components/BotWorkshop/Editor/IdentityConfigPanel';
 import { LinkPanel } from '@/components/BotWorkshop/Editor/LinkPanel';
-import { MoreConfigPanel, type MoreConfigTab } from '@/components/BotWorkshop/Editor/MoreConfigPanel';
+import { MoreConfigPanel } from '@/components/BotWorkshop/Editor/MoreConfigPanel';
 import { RenderScreenPanel } from '@/components/BotWorkshop/Editor/RenderScreenPanel';
 import { ResourcePanel } from '@/components/BotWorkshop/Editor/ResourcePanel';
 import { RoutinePanel } from '@/components/BotWorkshop/Editor/RoutinePanel';
@@ -19,15 +20,16 @@ import { useBotWorkshopDetail } from '@/hooks/useBotWorkshopDetail';
 import { useBotWorkshopEditorIdentity } from '@/hooks/useBotWorkshopEditorIdentity';
 import { useDesktopFolder } from '@/hooks/useDesktopFolder';
 import { useSpaceContext } from '@/hooks/useSpaceContext';
-import { desktopCapabilityPolicy } from '@/services/botWorkshop/desktopCapabilityPolicy';
 import { isServiceVerification } from '@/services/botWorkshop/botPolicy';
+import { desktopCapabilityPolicy } from '@/services/botWorkshop/desktopCapabilityPolicy';
 import { cn } from '@/utils/cn';
 import { useLocation } from '@umijs/max';
 import React, { useEffect, useState } from 'react';
 import { DetailHeader } from './DetailHeader';
 import { DetailNavigation } from './DetailNavigation';
-import { mainTabs, moreTabs, type MainTab } from './detailTabs';
-
+import { moreTabs } from './detailTabs';
+import { useHostingTabs } from './useHostingTabs';
+import { Points } from '@/tracking/points';import { Tracert } from '@/utils/tracert';
 const BotWorkshopDetailPage: React.FC = () => {
   const params = new URLSearchParams(useLocation().search);
   const id = params.get('id');
@@ -42,7 +44,9 @@ const BotWorkshopDetailPage: React.FC = () => {
   const currentSpaceId = useSpaceContext((state) => state.currentSpaceId);
   const requestIdentity = useBotWorkshopEditorIdentity();
   const detail = useBotWorkshopDetail(id, requestedEditable, requestIdentity.ready, ownerId, requestIdentity.userId);
-  const verifying = !!detail.bot && detail.bot.serviceMode === 'service' &&
+  const verifying =
+    !!detail.bot &&
+    detail.bot.serviceMode === 'service' &&
     (runtimeStage === 'verify' || isServiceVerification(detail.bot));
   const editable = requestedEditable && !verifying;
   const addressedOwnerId = ownerId ?? detail.bot?.ownerId;
@@ -65,16 +69,15 @@ const BotWorkshopDetailPage: React.FC = () => {
     desktopPolicy.markdown,
     desktopPolicy.channels,
   );
-  const [tab, setTab] = useState<MainTab>('capability');
-  const [more, setMore] = useState<MoreConfigTab>();
-  const [debugOpen, setDebugOpen] = useState(true);
-  const [debugFullscreen, setDebugFullscreen] = useState(false);
+  const { tab, setTab, more, setMore, hostingAllowed, visibleMainTabs } = useHostingTabs(
+    id,
+    requestIdentity.userId,
+    detail.bot,
+    isOwner,
+    desktopPolicy.routines,
+  );
+  const [debugOpen, setDebugOpen] = useState(true); const [debugFullscreen, setDebugFullscreen] = useState(false);
   useEffect(() => {
-    if (!isOwner && more === 'engine') setMore(undefined);
-  }, [isOwner, more]);
-  useEffect(() => {
-    setTab('capability');
-    setMore(undefined);
     setDebugOpen(true);
     setDebugFullscreen(false);
   }, [id]);
@@ -105,7 +108,6 @@ const BotWorkshopDetailPage: React.FC = () => {
       />
     );
   const bot = detail.bot;
-  const visibleMainTabs = mainTabs.filter((item) => item.key !== 'routine' || desktopPolicy.routines);
   const visibleMoreTabs = moreTabs.filter(
     (item) =>
       ({
@@ -114,7 +116,7 @@ const BotWorkshopDetailPage: React.FC = () => {
         node: desktopPolicy.nodes,
         channel: desktopPolicy.channels,
         screen: desktopPolicy.screens,
-      })[item.key],
+      }[item.key]),
   );
   return (
     <main className="bot-editor-shell flex h-full min-h-0 flex-col bg-background">
@@ -126,7 +128,9 @@ const BotWorkshopDetailPage: React.FC = () => {
         saving={detail.saving}
         onBack={detail.back}
         onOpenDebug={() => setDebugOpen(true)}
-        onSaveBasic={detail.save}
+        onSaveBasic={async (input) => {
+          Tracert.click(Points.botWorkshop.saveConfig, { bot_id: id }); await detail.save(input);
+        }}
         onReload={() => void detail.retry()}
       />
       <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -152,133 +156,136 @@ const BotWorkshopDetailPage: React.FC = () => {
             debugFullscreen && 'hidden',
           )}
         >
-          {verifying ? <p className="border-b border-border bg-muted px-6 py-3 text-sm text-muted-foreground">预发验证中，配置已锁定；请在右侧对话区验证 Bot。</p> : null}
-          <fieldset disabled={verifying} className={cn('min-w-0 border-0 p-0', verifying && 'pointer-events-none opacity-50')}>
-          {editor.loading ? (
-            <Spin tip="加载编辑配置…" />
-          ) : more === 'md' ? (
-            <IdentityConfigPanel
-              files={advanced.files}
-              editable={editable}
-              getFile={advanced.getFile}
-              onSave={advanced.saveFile}
-            />
-          ) : more === 'channel' ? (
-            <ChannelConfigPanel
-              channels={advanced.channels}
-              editable={editable}
-              serviceBot={bot.serviceMode === 'service'}
-              onCreate={advanced.createChannel}
-              onUpdate={advanced.updateChannel}
-              onToggle={advanced.toggleChannel}
-              onDelete={advanced.deleteChannel}
-            />
-          ) : more === 'screen' ? (
-            <RenderScreenPanel
-              screens={editor.screens}
-              editable={editable}
-              onSave={editor.saveScreen}
-              onDelete={editor.deleteScreen}
-            />
-          ) : more === 'engine' && editor.engineConfigLoading ? (
-            <Spin tip="正在加载引擎配置…" />
-          ) : more ? (
-            <MoreConfigPanel
-              tab={more}
-              config={editor.engineConfig}
-              editable={editable}
-              engineStatus={editor.engineStatus}
-              restoringDefaults={editor.restoringDefaultEngineConfig}
-              onConfigChange={editor.setEngineConfig}
-              onSave={editor.saveEngineConfig}
-              onRestoreDefaults={editor.restoreDefaultEngineConfig}
-            />
-          ) : tab === 'capability' ? (
-            <CapabilityPanel
-              compact={debugOpen && !debugFullscreen}
-              desktop={bot.deployment === 'local'}
-              onLocalToggle={editor.toggleSkill}
-              onLocalDelete={editor.deleteSkill}
-              onLocalUpload={editor.uploadSkill}
-              botId={bot.id}
-              ownerId={bot.ownerId}
-              skillSets={editor.skillSets}
-              mySkills={editor.skills.filter((skill) => skill.source === 'local')}
-              availableMcps={editor.availableMcps}
-              marketSkills={editor.marketSkills}
-              skillCenterSkills={editor.skillCenterSkills}
-              workshopSkills={editor.workshopSkills}
-              editable={editable}
-              onCreate={editor.createSkillSet}
-              onDelete={editor.deleteSkillSet}
-              onActive={editor.setSkillSetActive}
-              pendingSkillSetToggle={editor.pendingSkillSetToggle}
-              onSkill={editor.setSkillSetSkill}
-              onSkillCenterReferences={editor.addSkillCenterReferences}
-              onUploadSkillFolder={editor.uploadSkillFolder}
-              onLoadCandidates={editor.loadCapabilityCandidates}
-              candidatesLoading={editor.candidatesLoading}
-              onMcp={editor.setSkillSetMcp}
-              mcpCallTypes={editor.mcpCallTypes}
-              callerContextEditable={editable && editor.callerContextEditable}
-              mcpIdentityDisabledReason={
-                bot.serviceMode === 'service' ? undefined : '个人 Bot 固定使用 Owner 模式，不支持切换 MCP 访问方式'
-              }
-              updatingCallType={editor.updatingCallType}
-              onMcpCallType={editor.updateMcpCallType}
-            />
-          ) : tab === 'resource' ? (
-            <>
-              <ResourcePanel
-                desktop={bot.deployment === 'local'}
-                onOpenFolder={openDesktopFolder}
-                resources={editor.resources}
-                editable={editable && desktopPolicy.resourceWritable}
-                onCreateDirectory={editor.createDirectory}
-                onDelete={editor.deleteResource}
-                onUpload={editor.uploadResource}
-                onPreview={editor.previewResource}
-                onCopyPath={editor.copyResourcePath}
-                onDownload={editor.downloadResource}
-                onLoadDirectory={editor.loadResourceDirectory}
-                loadingPaths={editor.resourceLoadingPaths}
+          {verifying ? (
+            <p className="border-b border-border bg-muted px-6 py-3 text-sm text-muted-foreground">
+              预发验证中，配置已锁定；请在右侧对话区验证 Bot。
+            </p>
+          ) : null}
+          <fieldset
+            disabled={verifying}
+            className={cn('min-w-0 border-0 p-0', verifying && 'pointer-events-none opacity-50')}
+          >
+            {editor.loading ? (
+              <Spin tip="加载编辑配置…" />
+            ) : more === 'md' ? (
+              <IdentityConfigPanel
+                files={advanced.files}
+                editable={editable}
+                getFile={advanced.getFile}
+                onSave={advanced.saveFile}
               />
-              {bot.deployment === 'local' ? <LinkPanel botId={bot.id} editable={editable && isOwner} /> : null}
-            </>
-          ) : tab === 'routine' ? (
-            <RoutinePanel
-              routines={editor.routines}
-              editable={editable}
-              onLoadModels={editor.loadRoutineModels}
-              onSave={editor.saveRoutine}
-              onToggle={editor.toggleRoutine}
-              onDelete={editor.deleteRoutine}
-            />
-          ) : (
-            <TaskEscort bot={bot} />
-          )}
+            ) : more === 'channel' ? (
+              <ChannelConfigPanel
+                channels={advanced.channels}
+                editable={editable}
+                serviceBot={bot.serviceMode === 'service'}
+                onCreate={advanced.createChannel}
+                onUpdate={advanced.updateChannel}
+                onToggle={advanced.toggleChannel}
+                onDelete={advanced.deleteChannel}
+              />
+            ) : more === 'screen' ? (
+              <RenderScreenPanel
+                screens={editor.screens}
+                editable={editable}
+                onSave={editor.saveScreen}
+                onDelete={editor.deleteScreen}
+              />
+            ) : more === 'engine' && editor.engineConfigLoading ? (
+              <Spin tip="正在加载引擎配置…" />
+            ) : more ? (
+              <MoreConfigPanel
+                tab={more}
+                config={editor.engineConfig}
+                editable={editable}
+                engineStatus={editor.engineStatus}
+                restoringDefaults={editor.restoringDefaultEngineConfig}
+                onConfigChange={editor.setEngineConfig}
+                onSave={editor.saveEngineConfig}
+                onRestoreDefaults={editor.restoreDefaultEngineConfig}
+              />
+            ) : tab === 'hosting' && hostingAllowed ? (
+              <DwsHostingPanel key={`${bot.id}:${bot.ownerId}`} botId={bot.id} />
+            ) : tab === 'capability' ? (
+              <CapabilityPanel
+                compact={debugOpen && !debugFullscreen}
+                desktop={bot.deployment === 'local'}
+                onLocalToggle={editor.toggleSkill}
+                onLocalDelete={editor.deleteSkill}
+                onLocalUpload={editor.uploadSkill}
+                botId={bot.id}
+                ownerId={bot.ownerId}
+                skillSets={editor.skillSets}
+                mySkills={editor.skills.filter((skill) => skill.source === 'local')}
+                availableMcps={editor.availableMcps}
+                marketSkills={editor.marketSkills}
+                skillCenterSkills={editor.skillCenterSkills}
+                workshopSkills={editor.workshopSkills}
+                editable={editable}
+                onCreate={editor.createSkillSet}
+                onDelete={editor.deleteSkillSet}
+                onActive={editor.setSkillSetActive}
+                pendingSkillSetToggle={editor.pendingSkillSetToggle}
+                onSkill={editor.setSkillSetSkill}
+                onSkillCenterReferences={editor.addSkillCenterReferences}
+                onUploadSkillFolder={editor.uploadSkillFolder}
+                onLoadCandidates={editor.loadCapabilityCandidates}
+                candidatesLoading={editor.candidatesLoading}
+                onMcp={editor.setSkillSetMcp}
+                mcpCallTypes={editor.mcpCallTypes}
+                callerContextEditable={editable && editor.callerContextEditable}
+                mcpIdentityDisabledReason={
+                  bot.serviceMode === 'service' ? undefined : '个人 Bot 固定使用 Owner 模式，不支持切换 MCP 访问方式'
+                }
+                updatingCallType={editor.updatingCallType}
+                onMcpCallType={editor.updateMcpCallType}
+              />
+            ) : tab === 'resource' ? (
+              <>
+                <ResourcePanel
+                  desktop={bot.deployment === 'local'}
+                  onOpenFolder={openDesktopFolder}
+                  resources={editor.resources}
+                  editable={editable && desktopPolicy.resourceWritable}
+                  onCreateDirectory={editor.createDirectory}
+                  onDelete={editor.deleteResource}
+                  onUpload={editor.uploadResource}
+                  onPreview={editor.previewResource}
+                  onCopyPath={editor.copyResourcePath}
+                  onDownload={editor.downloadResource}
+                  onLoadDirectory={editor.loadResourceDirectory}
+                  loadingPaths={editor.resourceLoadingPaths}
+                />
+                {bot.deployment === 'local' ? <LinkPanel botId={bot.id} editable={editable && isOwner} /> : null}
+              </>
+            ) : tab === 'routine' ? (
+              <RoutinePanel
+                routines={editor.routines}
+                editable={editable}
+                onLoadModels={editor.loadRoutineModels}
+                onSave={editor.saveRoutine}
+                onToggle={editor.toggleRoutine}
+                onDelete={editor.deleteRoutine}
+              />
+            ) : (
+              <TaskEscort bot={bot} />
+            )}
           </fieldset>
         </section>
         {debugOpen ? (
-          <div
-            className={cn(
-              'hidden min-w-0 flex-1 transition-[flex-basis,width] duration-200 ease-out lg:flex',
-              debugFullscreen && 'flex',
-            )}
-          >
-            <DebugChatPanel
-              key={`${bot.id}:${verifying ? 'verify' : runtimeStage ?? bot.lifecycle}`}
-              bot={bot}
-              runtimeStage={verifying ? 'verify' : runtimeStage}
-              ownerId={addressedOwnerId}
-              fullscreen={debugFullscreen}
-              onClose={() => {
-                setDebugOpen(false);
-                setDebugFullscreen(false);
-              }}
-              onToggleFullscreen={() => setDebugFullscreen((current) => !current)}
-            />
-          </div>
+          <DetailDebugChat
+            authenticatedUserId={requestIdentity.ready ? requestIdentity.userId ?? null : null}
+            key={`${bot.id}:${verifying ? 'verify' : runtimeStage ?? bot.lifecycle}`}
+            bot={bot}
+            runtimeStage={verifying ? 'verify' : runtimeStage}
+            ownerId={addressedOwnerId}
+            fullscreen={debugFullscreen}
+            onClose={() => {
+              setDebugOpen(false);
+              setDebugFullscreen(false);
+            }}
+            onToggleFullscreen={() => setDebugFullscreen((current) => !current)}
+          />
         ) : null}
       </div>
     </main>

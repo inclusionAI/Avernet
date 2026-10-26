@@ -9,6 +9,7 @@
  * - DELETE /openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription → {deleted}，无 owner query；后端卸下定时触发；幂等。
  *
  * enabled 不进领域类型，由调用方按「订阅是否存在」推导（订阅项出现即视作已开启）。
+ * 新订阅 POST 返回 202 后可先做本地乐观展示；后台装配失败时不落库，刷新列表后回到关闭状态。
  */
 
 /** 后端 SubscriptionItem 原始（snake_case）。mode 由后端返回（openapi 加入/更新后恒为 openclaw）。 */

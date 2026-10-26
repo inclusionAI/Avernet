@@ -114,6 +114,24 @@ class AgentResultDetailDTO(BaseModel):
     routed_at: int
 
 
+class BotAuthorizationDTO(BaseModel):
+    """Pending human-authorization gate for one agent's bot (additive).
+
+    Present on an agent exactly while its bot sits at the human gate
+    (``state=AWAITING_AUTHORIZATION``): ``iframe_url``/``redirect_url``
+    are the tcauthmng consent surfaces, ``deadline`` the window horizon as
+    the ISO-8601 spelling the creation-job payload itself carries —
+    empty strings when the payload cannot answer a fact.
+    ``application_id`` is the passport application's identifier so a
+    consumer can address the decision surface from this read alone.
+    """
+    state: str
+    iframe_url: str
+    redirect_url: str
+    deadline: str
+    application_id: str
+
+
 class AgentAttemptDetailDTO(BaseModel):
     claim_epoch: int
     slice_retry_index: int
@@ -166,6 +184,7 @@ class AgentDetailDTO(BaseModel):
     result: AgentResultDetailDTO | None = None
     attempt_ledger: list[AgentAttemptDetailDTO] = Field(default_factory=list)
     messages: list[AgentMessageDetailDTO] = Field(default_factory=list)
+    authorization: BotAuthorizationDTO | None = None
 
 
 class RoundDetailDTO(BaseModel):

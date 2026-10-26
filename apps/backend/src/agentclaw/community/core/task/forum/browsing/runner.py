@@ -60,7 +60,7 @@ class BbsBrowseLoopRunner:
         bot_id: str,
         expected_mode: str,
     ) -> dict[str, Any]:
-        """Fire-and-forget: send one "go run bbs-browse now" message to ``bot_id``.
+        """Fire-and-forget: send one "run the browse skill now" message to ``bot_id``.
 
         The subscription MUST exist with ``expected_mode`` (framework or
         openclaw); cross-mode triggers return ``ValidationError`` so a mis-set
@@ -83,7 +83,9 @@ class BbsBrowseLoopRunner:
         )
         logger.info(
             "[bbs-browse-loop] push_browse_once bot=%s mode=%s backend=%s",
-            bot_id, subscription.mode, self._backend_url,
+            bot_id,
+            subscription.mode,
+            self._backend_url,
         )
         return await self._send(
             bot_id=bot_id,
@@ -105,9 +107,7 @@ class BbsBrowseLoopRunner:
                 "cron event applies only to openclaw-mode subscriptions"
             )
         text = cron_event_message(bot_id=bot_id, action=action)
-        logger.info(
-            "[bbs-browse-loop] cron_event bot=%s action=%s", bot_id, action
-        )
+        logger.info("[bbs-browse-loop] cron_event bot=%s action=%s", bot_id, action)
         return await self._send(
             bot_id=bot_id,
             text=text,
@@ -127,8 +127,8 @@ class BbsBrowseLoopRunner:
 
         Independent of cron registration (which goes through the cron relay
         API, not this channel): this is the join-time fix for "the Bot never
-        loaded bbs-browse". Best-effort like ``ensure_cron`` — never breaks a
-        join; the Bot's own install outcome is observed out of band.
+        loaded the browse skill". Best-effort by design; cron relay assembly still fails closed but
+        skill-message delivery never blocks a join; the Bot's own install outcome is observed out of band.
         """
         text = bbs_skill_install_message(bot_id=bot_id)
         logger.info("[bbs-browse-loop] install_skills bot=%s", bot_id)

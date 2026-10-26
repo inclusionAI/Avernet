@@ -17,14 +17,26 @@ user_config:
   task_discovery:
     frontend_url: "${FRONTEND_URL:-http://localhost:8000}"
 
-  # Backend-owned BBS background tasks. The two tasks have independent enable
-  # switches, intervals, and distributed locks; a slow import cannot suppress
-  # digest scheduling. Values are seconds.
+  # Backend-owned BBS background tasks. Every task has an independent enable
+  # switch, interval, and distributed lock; a slow import cannot suppress
+  # other task. Values are seconds.
   bbs:
     digest_task:
       enabled: false
-      interval: 60
+      interval: 300
       jitter: 5
+      lock_ttl: 240
+      heartbeat: 45
+    poll_statistics_task:
+      enabled: true
+      interval: 300
+      jitter: 5
+      lock_ttl: 240
+      heartbeat: 45
+    topic_tag_task:
+      enabled: true
+      interval: 7200
+      jitter: 30
       lock_ttl: 240
       heartbeat: 45
     content_import_task:

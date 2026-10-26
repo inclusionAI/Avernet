@@ -10,7 +10,14 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
+from time import perf_counter
 from typing import Any
+
+from agentclaw.community.core.access import admin_scopes
+from agentclaw.community.core.bot_collaborator.collaborator_service_protocol import (
+    CollaboratorServiceProtocol, PermissionLevel,
+)
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.devices.errors import (
@@ -91,11 +98,13 @@ class DeviceInstanceService:
         providers: dict[str, DeviceService],
         publish_repo: BotPublishRepositoryProtocol | None,
         bot_repo: BotRepository | None,
+        collaborator_service_factory: Callable[[], CollaboratorServiceProtocol | None] | None = None,
     ) -> None:
         self._repo = repository
         self._providers = providers
         self._publish_repo = publish_repo
         self._bot_repo = bot_repo
+        self._collaborator_service_factory = collaborator_service_factory
 
     # ── 入口解析 ────────────────────────────────────────────────
 
@@ -449,47 +458,84 @@ class DeviceInstanceService:
         device_uuid: str,
         operator: OperatorContext,
     ) -> dict[str, Any]:
-        """指定设备重启（binding_id 入口，仅 owner）。
+        """指定设备重启（Owner、超级管理员或显式协作者）。
 
-        校验 binding → owner 权限校验 → 取 bot_uuid → 调 PR1 已就绪的
+        校验 binding → 重启权限校验 → 取 bot_uuid → 调 PR1 已就绪的
         ``baas_service.restart_devices``（BaaS ``/update-devices``）。
 
         Args:
             binding_id: 设备绑定主键。
             device_uuid: 要重启的实例 uuid（来自实例列表 §1）。
-            operator: 操作者上下文；仅 binding owner 可重启（admin 由 router 兜底）。
+            operator: 操作者上下文；保留真实调用者用于授权与下游审计。
 
         Returns:
             ``{"publish_id": int}``：BaaS 发布工作流 ID。
 
         Raises:
             BindingNotFoundError: binding 校验不通过。
-            InvalidDeviceStatusError: operator 非 owner。
+            InvalidDeviceStatusError: operator 无重启权限。
             DeviceServiceError: BaasService 不可用。
         """
-        record, bot_uuid = self._validate_binding_for_instances(binding_id)
+        started = perf_counter()
+        fields = "system=backend operation=restart_device binding_id=%s device_uuid=%s actor_id=%s"
+        context = (binding_id, device_uuid, operator.staff_id)
+        logger.info("device.restart.request " + fields, *context)
+        try:
+            record, bot_uuid = self._validate_binding_for_instances(binding_id)
+            self._check_restart_permission(record, operator)
+            baas_service = self._get_baas_service()
+            if baas_service is None:
+                raise DeviceServiceError("BaasService not available for device restart")
 
-        # 权限校验：仅 owner 可重启（admin 权限由 router 层兜底）。
-        if record.entity_id != operator.staff_id:
-            raise InvalidDeviceStatusError("仅 Bot 所有者可重启设备实例")
-
-        baas_service = self._get_baas_service()
-        if baas_service is None:
-            raise DeviceServiceError("BaasService not available for device restart")
-
-        # (#197) Deterministic, correlation-only request id (was uuid4): stable
-        # across retries of the same logical restart so a BaaS log line traces
-        # back to the exact binding + device. request_id is not a BaaS dedup key.
-        # Must satisfy BaaS's request_id contract (32-64 chars, ^[A-Za-z0-9_-]$):
-        # underscores, not dots — device_uuid ("BOT-"+32 hex) keeps it in range.
-        request_id = f"restart_dev_b{binding_id}_{device_uuid}"
-        data = baas_service.restart_devices(
-            bot_uuid,
-            device_uuids=[device_uuid],
-            operator=operator.staff_id,
-            request_id=request_id,
+            # Correlation only; BaaS does not use request_id for deduplication.
+            request_id = f"restart_dev_b{binding_id}_{device_uuid}"
+            data = baas_service.restart_devices(
+                bot_uuid,
+                device_uuids=[device_uuid],
+                operator=operator.staff_id,
+                request_id=request_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "device.restart.failed " + fields + " error_type=%s elapsed_ms=%.2f",
+                *context, type(exc).__name__, (perf_counter() - started) * 1000,
+            )
+            raise
+        logger.info(
+            "device.restart.success " + fields + " publish_id=%s elapsed_ms=%.2f",
+            *context, data.get("publish_id"), (perf_counter() - started) * 1000,
         )
         return {"publish_id": data.get("publish_id")}
+
+    def _check_restart_permission(
+        self, record: DeviceBindingRecord, operator: OperatorContext,
+    ) -> None:
+        # COSEC: only Owner, configured super admin or explicit target-Bot editor.
+        if record.entity_id == operator.staff_id:
+            logger.info("device.restart.authorized binding_id=%s actor_id=%s role=owner", record.id, operator.staff_id)
+            return
+        if operator.staff_id in admin_scopes.super_admin():
+            logger.info("device.restart.authorized binding_id=%s actor_id=%s role=super_admin", record.id, operator.staff_id)
+            return
+        bolt_id = (record.device_props or {}).get("bolt_id")
+        bot = (
+            self._bot_repo.get_by_id_and_owner(bolt_id, record.entity_id)
+            if self._bot_repo is not None and bolt_id else None
+        )
+        collaborator_service = (
+            self._collaborator_service_factory()
+            if self._collaborator_service_factory is not None else None
+        )
+        if bot and bot.get("bot_id") and bot.get("owner_id") and collaborator_service is not None:
+            result = collaborator_service.check_collaborator_permission(
+                bot_id=bot["bot_id"], owner_id=bot["owner_id"],
+                user_id=operator.staff_id, required_level=PermissionLevel.MEMBER,
+                env=record.env, explicit=True,
+            )
+            if result.get("has_permission") is True:
+                logger.info("device.restart.authorized binding_id=%s actor_id=%s role=collaborator", record.id, operator.staff_id)
+                return
+        raise InvalidDeviceStatusError("仅 Bot 所有者、超级管理员或协作者可重启设备实例")
 
     def restart_device_by_bot(
         self,

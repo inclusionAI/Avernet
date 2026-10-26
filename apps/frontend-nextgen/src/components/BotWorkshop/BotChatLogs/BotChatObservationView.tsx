@@ -30,7 +30,7 @@ function RelationSegmented({
 }) {
   return (
     <div className="flex flex-wrap items-center gap-3">
-      <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--color-muted)]">关联维度</span>
+      <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">关联维度</span>
       <Segmented
         value={value}
         options={[
@@ -81,27 +81,27 @@ export function BotChatObservationView({
 
   return (
     <Card className="overflow-hidden shadow-sm">
-      <div className="flex flex-wrap items-center gap-4 border-b border-[var(--color-border)] px-4 py-3">
-        <div className="flex items-center gap-2 text-xs text-[var(--color-muted)]">
+      <div className="flex flex-wrap items-center gap-4 border-b border-border px-4 py-3">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span>sessionID：</span>
-          <strong className="max-w-[220px] truncate font-mono text-[var(--color-fg)]">
+          <strong className="max-w-[220px] truncate font-mono text-foreground">
             {detail.sessionId || detail.sessionKey || '-'}
           </strong>
         </div>
-        <div className="flex items-center gap-2 text-xs text-[var(--color-muted)]">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span>任务ID：</span>
-          <strong className="max-w-[220px] truncate font-mono text-[var(--color-fg)]">{detail.bizTaskId || '-'}</strong>
+          <strong className="max-w-[220px] truncate font-mono text-foreground">{detail.bizTaskId || '-'}</strong>
         </div>
-        <div className="flex items-center gap-2 text-xs text-[var(--color-muted)]">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span>群ID：</span>
-          <strong className="max-w-[220px] truncate font-mono text-[var(--color-fg)]">{detail.groupId || '-'}</strong>
+          <strong className="max-w-[220px] truncate font-mono text-foreground">{detail.groupId || '-'}</strong>
         </div>
-        <div className="ml-auto flex items-center gap-2 text-xs text-[var(--color-muted)]">
+        <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
           <span>关联 Trace：{related?.total ?? 0}</span>
           <span>Observation：{countObservations(detail.observations)}</span>
         </div>
       </div>
-      <div className="border-b border-[var(--color-border)] px-4 py-3">
+      <div className="border-b border-border px-4 py-3">
         <RelationSegmented detail={detail} value={relationScope} onChange={onRelation} />
       </div>
       <div className="grid lg:grid-cols-[280px_300px_minmax(0,1fr)]">

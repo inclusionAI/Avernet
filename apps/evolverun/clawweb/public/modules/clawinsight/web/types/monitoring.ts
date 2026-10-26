@@ -1,6 +1,7 @@
 /** Read-only browser contract. Never import server runtime or reporting credentials here. */
 export type Decision = 'ALERT' | 'PASS' | 'UNRESOLVED';
 export type DiagnosisItem = {
+  schemaVersion?: string; // Missing version is legacy/unknown, never assumed v4.
   diagnosisId: string; botId: string; decision: Decision;
   occurredAt: string | null; diagnosedAt: string;
   sessionKey: string | null; sessionId: string | null; traceId: string | null;

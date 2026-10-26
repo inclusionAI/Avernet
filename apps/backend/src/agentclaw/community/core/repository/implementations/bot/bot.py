@@ -27,8 +27,7 @@ SQLite twin (flagged in the PR):
 ``insert`` is a **plain INSERT** (``db.add`` + ``db.flush``) — the
 table has no unique key; never an upsert. ``update_by_owner`` /
 ``soft_delete_by_owner`` are **single conditional UPDATEs** guarded
-by ``is_delete=0 AND env`` with ``rowcount==0 → None/False`` (no
-SELECT-first); soft-delete is an ``is_delete=1`` UPDATE, never a
+by ``is_delete=0 AND env`` with ``rowcount==0 → None/False`` after a Bot aggregate lock and maintenance check; soft-delete is an ``is_delete=1`` UPDATE, never a
 DELETE. ``gmt_modified=func.now()`` DB-side on every UPDATE (prod's
 literal ``NOW()`` / model ``onupdate``). Return shaping reuses
 ``BotModel.to_dict()``; ``search_bots`` returns the full ``to_dict()``
@@ -44,6 +43,11 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from injector import inject
+from agentclaw.community.core.repository.implementations.bot.mutations import (
+    BotMutationRepositoryMixin,
+    _UPDATE_ALLOWED_FIELDS,
+    _JSON_FIELDS,
+)
 from sqlalchemy import DateTime, and_, func, or_, select, type_coerce
 
 from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
@@ -56,7 +60,9 @@ from agentclaw.community.core.repository.implementations.bot.initial_layout impo
 from agentclaw.community.core.repository.implementations.bot.reachability import (
     BotReachabilityQueries,
 )
-from agentclaw.community.core.repository.implementations.bot.quota import BotQuotaQueries
+from agentclaw.community.core.repository.implementations.bot.quota import (
+    BotQuotaQueries,
+)
 from agentclaw.community.core.repository.implementations.bot.explicit_env import (
     BotExplicitEnvQueries,
 )
@@ -74,23 +80,8 @@ logger = get_logger()
 # Prod's exact ``update_by_owner`` allowlist. Any field not here
 # (e.g. engine_types, creator_id, entity_id) is silently ignored —
 # faithful prod parity.
-_UPDATE_ALLOWED_FIELDS = (
-    "bot_name",
-    "bot_desc",
-    "owner_name",
-    "modifier_id",
-    "share_policy",
-    "status",
-    "binding_id",
-    "device_id",
-    "active_engine",
-    "public",
-    "ext",
-    "bot_type",
-)
 # Only allowlisted JSON columns are reachable; engine_types is NOT
 # in _UPDATE_ALLOWED_FIELDS (prod parity — it is silently dropped).
-_JSON_FIELDS = ("share_policy", "ext")
 
 
 def _as_naive(dt: datetime) -> datetime:
@@ -99,6 +90,7 @@ def _as_naive(dt: datetime) -> datetime:
 
 
 class BotRepository(
+    BotMutationRepositoryMixin,
     BotInitialLayoutRepositoryMixin,
     BotDeviceProviderQueries,
     BotReachabilityQueries,
@@ -523,7 +515,10 @@ class BotRepository(
                     self._env(),
                 )
                 .update(
-                    {self.Model.status: "PROVISIONING", self.Model.gmt_modified: func.now()},
+                    {
+                        self.Model.status: "PROVISIONING",
+                        self.Model.gmt_modified: func.now(),
+                    },
                     synchronize_session=False,
                 )
             )
@@ -550,7 +545,9 @@ class BotRepository(
                     self.Model.gmt_modified <= cutoff,
                     self._env(),
                 )
-                .update({self.Model.gmt_modified: func.now()}, synchronize_session=False)
+                .update(
+                    {self.Model.gmt_modified: func.now()}, synchronize_session=False
+                )
             )
             if rowcount == 1:
                 logger.warning(
@@ -560,131 +557,6 @@ class BotRepository(
                     reclaim_after_seconds,
                 )
         return rowcount == 1
-
-    def update_by_owner(
-        self, bot_id: str, owner_id: str, update_data: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
-        values: dict = {}
-        for field in _UPDATE_ALLOWED_FIELDS:
-            if field in update_data:
-                v = update_data[field]
-                if field in _JSON_FIELDS and v is not None:
-                    v = json.dumps(v)
-                values[getattr(self.Model, field)] = v
-
-        if not values:
-            return self.get_by_id_and_owner(bot_id, owner_id)
-
-        values[self.Model.gmt_modified] = func.now()
-        with self._db.orm_session() as db:
-            rowcount = (
-                db.query(self.Model)
-                .filter(
-                    self.Model.bot_id == bot_id,
-                    self.Model.owner_id == owner_id,
-                    self.Model.is_delete == 0,
-                    self._env(),
-                )
-                .update(values, synchronize_session=False)
-            )
-        if rowcount == 0:
-            return None
-        return self.get_by_id_and_owner(bot_id, owner_id)
-
-    def update_space_by_owner(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        space_id: int,
-        env: Optional[str] = None,
-    ) -> Optional[Dict[str, Any]]:
-        """Update only ``space_id`` without widening the generic allowlist.
-
-        The generic ``update_by_owner`` intentionally mirrors the historical
-        production allowlist. Space assignment is a newer structured mutation,
-        so it gets an explicit repository operation instead of silently changing
-        the semantics of every existing caller.
-        """
-        with self._db.orm_session() as db:
-            rowcount = (
-                db.query(self.Model)
-                .filter(
-                    self.Model.bot_id == bot_id,
-                    self.Model.owner_id == owner_id,
-                    self.Model.is_delete == 0,
-                    self._env(env=env),
-                )
-                .update(
-                    {
-                        self.Model.space_id: space_id,
-                        self.Model.modifier_id: owner_id,
-                        self.Model.gmt_modified: func.now(),
-                    },
-                    synchronize_session=False,
-                )
-            )
-        if rowcount == 0:
-            return None
-        return self.get_by_id_and_owner(bot_id, owner_id, env=env)
-
-    def compare_and_set_ext(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        expected_ext: Optional[Dict[str, Any]],
-        ext: Dict[str, Any],
-    ) -> Optional[Dict[str, Any]]:
-        """Whole-column ``ext`` CAS scoped by owner, env, and live row."""
-        expected_json = json.dumps(expected_ext, ensure_ascii=False) if expected_ext is not None else None
-        ext_json = json.dumps(ext, ensure_ascii=False)
-        with self._db.orm_session() as db:
-            query = db.query(self.Model).filter(
-                self.Model.bot_id == bot_id,
-                self.Model.owner_id == owner_id,
-                self.Model.is_delete == 0,
-                self._env(),
-            )
-            if expected_json is None:
-                query = query.filter(self.Model.ext.is_(None))
-            else:
-                query = query.filter(self.Model.ext.in_((expected_json, json.dumps(expected_ext))))
-            affected = query.update(
-                {
-                    self.Model.ext: ext_json,
-                    self.Model.gmt_modified: func.now(),
-                },
-                synchronize_session=False,
-            )
-        logger.info(
-            "[bot.ext_cas] operation=compare_and_set_ext bot_id=%s affected_rows=%s "
-            "expected_ext_is_null=%s serialization=unicode",
-            bot_id, affected, expected_ext is None,
-        )
-        if affected == 0:
-            return None
-        return self.get_by_id_and_owner(bot_id, owner_id)
-
-    def soft_delete_by_owner(self, bot_id: str, owner_id: str) -> bool:
-        with self._db.orm_session() as db:
-            rowcount = (
-                db.query(self.Model)
-                .filter(
-                    self.Model.bot_id == bot_id,
-                    self.Model.owner_id == owner_id,
-                    self.Model.is_delete == 0,
-                    self._env(),
-                )
-                .update(
-                    {
-                        self.Model.is_delete: 1,
-                        self.Model.gmt_modified: func.now(),
-                    },
-                    synchronize_session=False,
-                )
-            )
-            return rowcount > 0
 
     # ── counts / existence (env-scoped) ─────────────────────────
 

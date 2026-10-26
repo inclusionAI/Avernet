@@ -53,6 +53,9 @@ def build_execution(tmp_path, *, text="hello"):
 
 
 class Engine:
+    async def classify_scope(self, data, prompt):
+        return {"decision": "allow", "reason_code": "inside_rule"}
+
     def __init__(self, *, text=None, ended=False, failure=None):
         self.calls = []
         self.reviews = []
@@ -82,7 +85,7 @@ class Engine:
 
     async def review_reply(self, request):
         self.reviews.append(request)
-        return result_json('{"verdict":"approve"}')
+        return result_json('{"verdict":"approve","reason_code":"approved","reason":"Permitted and relevant."}')
 
 
 def ready_more(state, chat="chat"):

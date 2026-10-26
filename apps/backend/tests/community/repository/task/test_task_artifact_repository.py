@@ -75,9 +75,10 @@ def test_list_by_task_aggregates_all_nodes(seeded):
     assert len(records) == 4
 
 
-def test_limit_applies(seeded):
+def test_limit_applies_and_none_returns_complete_manifest(seeded):
     repo = TaskArtifactRepository(seeded)
     assert len(repo.list_by_task("t-1", limit=2)) == 2
+    assert len(repo.list_by_task("t-1", limit=None)) == 4
     assert len(repo.list_by_task_node("t-1", "n-1", limit=1)) == 1
 
 

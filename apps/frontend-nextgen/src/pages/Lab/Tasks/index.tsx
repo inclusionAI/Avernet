@@ -1,13 +1,14 @@
 import { PageHeader } from '@/components/Common/PageHeader';
 import { Button } from '@/components/ui/Button';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
-import { useOwnedBots } from '@/pages/Workspace/hooks/useOwnedBots';
-import { MyTaskDrawers } from '@/pages/MyTask/components/MyTaskDrawers';
+import type { UserTaskOwnerBotOption } from '@/pages/MyTask/components/userTaskFilters';
 import { UserTaskTab } from '@/pages/MyTask/components/UserTaskTab';
-import type { UserTaskStatusFilter } from '@/pages/MyTask/userTaskUtils';
 import { useMyTaskTasks } from '@/pages/MyTask/hooks/useMyTaskTasks';
+import type { UserTaskStatusFilter } from '@/pages/MyTask/userTaskUtils';
+import { useOwnedBots } from '@/pages/Workspace/hooks/useOwnedBots';
 import { history } from '@umijs/max';
 import { useMemo, useState } from 'react';
+import { TaskArtifactsDrawer } from './TaskArtifactsDrawer';
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 10;
@@ -20,8 +21,8 @@ function normalizeBotNameKey(value?: string | null): string {
  * 实验室「任务」体验页(PRD:TeamClaw-demo /tasks):
  * 查看跨Bot、跨群的协同任务,可在对话或协作群中发起此类任务。
  * 与「我的任务」不同,本页不做身份切换(定时任务是 Bot 管理侧能力,与本页无关),
- * 恒以登录人工号拉取用户协同任务;表格/类别筛选/详情副屏复用 MyTask 现有组件
- * (详情抽屉即 TaskPanel V2:面包屑两级栈/下钻/产物)。
+ * 恒以登录人工号拉取用户协同任务;表格/类别筛选复用 MyTask 现有组件，
+ * 仅在实验室展示模式下调整列布局，并通过 TaskPanel 产物组件展示任务产物。
  */
 export default function LabTasksPage() {
   const { identity: humanIdentity } = useHumanIdentity();
@@ -32,13 +33,13 @@ export default function LabTasksPage() {
   const [statusFilter, setStatusFilter] = useState<UserTaskStatusFilter>('all');
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
-  const {
-    taskRecords,
-    total,
-    loading,
-    error,
-    refresh,
-  } = useMyTaskTasks(ownerUserId, page, pageSize, statusFilter, Boolean(ownerUserId));
+  const { taskRecords, total, loading, error, refresh } = useMyTaskTasks(
+    ownerUserId,
+    page,
+    pageSize,
+    statusFilter,
+    Boolean(ownerUserId),
+  );
   const { chatBots, isLoading: ownedBotsLoading } = useOwnedBots(ownerUserId || null, Boolean(ownerUserId));
   const botNameMap = useMemo(() => {
     const map: Record<string, string> = {};
@@ -50,6 +51,22 @@ export default function LabTasksPage() {
       if (realBotIdKey) map[realBotIdKey] = botName;
     });
     return map;
+  }, [chatBots]);
+  const ownerBotOptions = useMemo<UserTaskOwnerBotOption[]>(() => {
+    const options = new Map<string, UserTaskOwnerBotOption>();
+    chatBots.forEach((bot) => {
+      const botId = normalizeBotNameKey(bot.botId);
+      const realBotId = normalizeBotNameKey(bot.realBotId);
+      const value = realBotId || botId;
+      if (!value) return;
+      const aliases = Array.from(new Set([botId, realBotId].filter(Boolean)));
+      options.set(value, {
+        value,
+        label: bot.displayName || bot.botId,
+        aliases,
+      });
+    });
+    return Array.from(options.values()).sort((left, right) => left.label.localeCompare(right.label, 'zh-CN'));
   }, [chatBots]);
 
   return (
@@ -100,28 +117,11 @@ export default function LabTasksPage() {
             setPage(DEFAULT_PAGE);
           }}
           botNameMap={botNameMap}
+          ownerBotOptions={ownerBotOptions}
+          displayVariant="lab"
         />
       </div>
-      <MyTaskDrawers
-        selectedTaskId={selectedTaskId}
-        onCloseTask={() => setSelectedTaskId(null)}
-        onSelectTask={setSelectedTaskId}
-        taskRecords={taskRecords}
-        ownerUserId={ownerUserId}
-        selectedRoutine={null}
-        selectedRoutineKey={null}
-        onCloseRoutine={() => {}}
-        selectedRoutineRuns={[]}
-        selectedRoutineRunsLoading={false}
-        selectedRoutineRunsError={null}
-        selectedRoutineHistoryId={null}
-        onCloseRoutineHistory={() => {}}
-        historyRuns={[]}
-        historyLoading={false}
-        historyError={null}
-        onOpenRoutineFromHistory={() => {}}
-        botNameMap={botNameMap}
-      />
+      <TaskArtifactsDrawer taskId={selectedTaskId} ownerUserId={ownerUserId} onClose={() => setSelectedTaskId(null)} />
     </main>
   );
 }

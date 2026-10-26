@@ -340,4 +340,12 @@ export const defaultCapabilities: AppCapabilities = {
     status: 'available',
     value: null,
   }),
+  // SPM 埋点 adapter(add-spm-tracking):Open Core 默认 no-op——零上报、
+  // 不加载任何埋点 SDK;internal overlay 注入真实 Tracert 实现(码表在 overlay 侧维护,
+  // 开源仓库只见语义点位常量 src/tracking/points.ts)。
+  trackerAdapter: {
+    click: () => {},
+    expo: () => {},
+    config: () => {},
+  },
 };

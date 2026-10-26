@@ -12,7 +12,7 @@ import { EvolveRepository } from "@avernet/clawevolve/server/repositories/evolve
 import { SessionRecoveryTaskRepository } from "../../repositories/repair/session-recovery-task-repository.js";
 import { SessionRecoveryTaskService } from "../../services/repair/session-recovery/task-service.js";
 import { createMonitoringRecoveryTrigger, SESSION_RECOVERY_ALLOWLIST_KEY } from "../../services/monitoring/session-recovery-trigger.js";
-import { DIAGNOSIS_V3_VERSION } from "../../services/monitoring/contracts.js";
+import { DIAGNOSIS_V3_VERSION, DIAGNOSIS_V4_VERSION } from "../../services/monitoring/contracts.js";
 import { runtimeIdentity } from "../../services/monitoring/__tests__/runtime-identity-fixture.js";
 import { MonitoringError } from "../../services/monitoring/contracts.js";
 import type { MonitoringRecoveryTrigger } from "../../services/monitoring/contracts.js";
@@ -179,7 +179,7 @@ describe("monitoring HTTP -> module schema -> repository -> GET", () => {
     expect(body).toMatchObject({ total: 2, counts: { all: 2, alert: 1, pass: 1, unresolved: 0 } });
     expect(body.items.map((x: { humanIntervention: boolean }) => x.humanIntervention)).toEqual([false, true]);
     expect(body.items[0]).not.toHaveProperty("notificationStatus");
-    for (const field of ["schemaVersion", "eventId", "engine"]) expect(body.items[0]).not.toHaveProperty(field);
+    for (const field of ["eventId", "engine"]) expect(body.items[0]).not.toHaveProperty(field);
     expect((await db.query("SELECT event_id FROM insight_monitoring_diagnose")).length).toBe(3);
     expect((await get("mock-bot-oc")).body.items[0].occurredAt).toBeNull();
   });
@@ -397,7 +397,7 @@ describe("diagnosis report -> allowlist -> durable recovery task", () => {
     recovery = createMonitoringRecoveryTrigger({ config, service });
     await start();
     return { config, tasks, service, agent, artifacts,
-      input: { ...alert, botId, env: "prod", handlerName: "NOT_COMPLETED", sessionKey: "agent:main:session:original:user:001234" } };
+      input: { ...alert, botId, schemaVersion: DIAGNOSIS_V4_VERSION, runtimeIdentity: null, humanIntervention: false, env: "prod", handlerName: "NOT_COMPLETED", sessionKey: "agent:main:session:original:user:001234" } };
   }
 
   it("keeps the diagnosis on task storage failure, then creates exactly one task on duplicate retry", async () => {
@@ -418,6 +418,29 @@ describe("diagnosis report -> allowlist -> durable recovery task", () => {
     expect(await db.query("SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery'")).toHaveLength(1);
   });
 
+  it.each([
+    { humanIntervention: true },
+    { decision: "PASS", handlerName: "COMPLETED" },
+    { decision: "PASS", tcFaultLabel: null, confidence: null },
+    { schemaVersion: "claw-monitoring/diagnosis-event/v3" },
+  ])("stores valid ineligible reports without creating recovery: %j", async patch => {
+    const { input, agent } = await automaticRecovery();
+    const value = { ...input, ...patch };
+    expect((await post(value)).status).toBe(201);
+    expect((await post(value)).body.duplicate).toBe(true);
+    expect(await db.query("SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery'")).toHaveLength(0);
+    expect(agent.start).not.toHaveBeenCalled();
+    const rows = await db.query("SELECT schema_version, tc_fault_label, decision FROM insight_monitoring_diagnose");
+    expect(rows[0]).toMatchObject({ schema_version: value.schemaVersion, tc_fault_label: value.tcFaultLabel, decision: value.decision });
+    expect((await post({ ...check, env: "prod", botId: input.botId }, "bot-checks")).status).toBe(200);
+    principal.allowedTargetEnvs = ["test", "prod"];
+    const { createMonitoringReferences } = await import('../../services/monitoring/target-ref.js');
+    const ref = createMonitoringReferences().encode({ botId: input.botId, entityId: input.entityId, env: 'prod' }, 'test');
+    const page = await call(`/monitoring/targets/${ref}/diagnoses?start=all&end=all`);
+    expect(page.status).toBe(200);
+    expect(page.body.items[0]).toMatchObject({ schemaVersion: value.schemaVersion, tcFaultLabel: value.tcFaultLabel, confidence: value.confidence, humanIntervention: value.humanIntervention });
+  });
+
   it("deduplicates concurrent reports and retries after an acknowledgment is lost", async () => {
     const { input, agent } = await automaticRecovery();
     const responses = await Promise.all(Array.from({ length: 10 }, () => post(input)));
@@ -428,9 +451,9 @@ describe("diagnosis report -> allowlist -> durable recovery task", () => {
     await vi.waitFor(() => expect(agent.start).toHaveBeenCalledTimes(1));
   });
 
-  it("creates one durable OC v3 recovery task with normalized instance locators", async () => {
+  it("creates one durable OC v4 recovery task with normalized instance locators", async () => {
     const { input, tasks, agent } = await automaticRecovery("mock-bot-oc");
-    const event = { ...input, schemaVersion: DIAGNOSIS_V3_VERSION, engine: "OC",
+    const event = { ...input, schemaVersion: DIAGNOSIS_V4_VERSION, engine: "OC",
       runtimeIdentity: { ...runtimeIdentity, BOT_ID: input.botId, OWNER_ID: input.entityId } };
     expect((await post(event)).status).toBe(201);
     expect((await post(event)).body.duplicate).toBe(true);

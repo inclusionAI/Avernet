@@ -733,7 +733,7 @@ describe('Agent Coding Bot row actions', () => {
     expect(onConversation).toHaveBeenCalledWith(bot);
   });
 
-  test('generalCC 服务 Bot 草稿态展示发布与阶段推进', () => {
+  test('服务 Bot 从状态下拉进入发布管理，更多菜单不再重复入口', () => {
     const bot = mapBotDto({
       bot_id: 'general-service-draft',
       bot_name: 'GeneralCC 服务 Bot',
@@ -745,15 +745,21 @@ describe('Agent Coding Bot row actions', () => {
       actions: ['chat', 'restart', 'delete'],
     }).item;
 
+    const onManagePublication = jest.fn();
     renderTable(bot, {
       onConversation: noop,
       onAction: jest.fn().mockResolvedValue(undefined),
-      onManagePublication: noop,
+      onManagePublication,
       getInventoryActions: () => ({ chat: { action: 'chat', visible: true, enabled: true } }),
     });
 
     fireEvent.click(screen.getByRole('button', { name: '管理 GeneralCC 服务 Bot' }));
-    expect(screen.getByText('发布与阶段推进')).toBeInTheDocument();
+    expect(screen.queryByText('发布与阶段推进')).not.toBeInTheDocument();
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    fireEvent.click(screen.getByRole('button', { name: 'GeneralCC 服务 Bot 发布状态' }));
+    expect(onManagePublication).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '发布与阶段推进' }));
+    expect(onManagePublication).toHaveBeenCalledWith(bot);
   });
 
   test('Bot 成员点击 Coding Bot 去使用时进入 Coding Chat', () => {

@@ -7,6 +7,23 @@ import type { ComponentType } from 'react';
 
 export type CapabilityStatus = 'available' | 'unsupported';
 
+/**
+ * SPM 埋点上报 adapter（add-spm-tracking）。
+ * 开源侧消费方只经 `Tracert` facade（src/utils/tracert.ts）传「语义点位常量」
+ * （src/tracking/points.ts 声明，值为平台注册的中文点位名），不出现任何 SPM 码；
+ * Open Core 默认 no-op（不上报、不加载任何 SDK），internal overlay 注入真实实现
+ * （语义常量 → c/d 码映射由 overlay 的 src/internal/tracking 维护，经 window.Tracert 上报）。
+ * 接口必须全同步吞错：埋点失败绝不影响业务主流程。
+ */
+export interface TrackerAdapter {
+  /** 手动点击上报；params 为平台点位注册过的扩展参数（bot_id/session_id 等）。 */
+  click: (pointKey: string, params?: Record<string, unknown>) => void;
+  /** 手动/区块曝光上报；页面级 PV 由 B 位机制自动采集，不走本接口。 */
+  expo: (pointKey: string, params?: Record<string, unknown>) => void;
+  /** 运行期重配（如临时切换 B 位；常规流程由插件按路由 spmBPos 自动维护，业务不主动调用）。 */
+  config: (options: Record<string, unknown>) => void;
+}
+
 export interface CapabilityResult<T> {
   status: CapabilityStatus;
   value: T;
@@ -578,4 +595,10 @@ export interface AppCapabilities {
    * 选中实例经 conversationStore.setBotInstanceSelection 写入(代次/缓存失效走 Store 既有机制)。
    */
   getConversationInstanceScope: () => CapabilityResult<ConversationInstanceScopeCapability | null>;
+  /**
+   * SPM 埋点上报 adapter（见 `TrackerAdapter`）。
+   * Open Core 默认 no-op（零上报、零内部资源）；internal overlay 注入真实 Tracert 实现。
+   * 消费方统一经 `Tracert` facade 调用，禁止业务代码直取本 capability。
+   */
+  trackerAdapter: TrackerAdapter;
 }

@@ -1,7 +1,8 @@
 import {
-  CHECK_VERSION, DIAGNOSIS_VERSION, DIAGNOSIS_V3_VERSION, MonitoringError,
+  CHECK_VERSION, DIAGNOSIS_VERSION, DIAGNOSIS_V3_VERSION, DIAGNOSIS_V4_VERSION, MonitoringError,
   type BotCheck, type DiagnosisEvent, type DiagnosisQuery, type RuntimeIdentity,
 } from "./contracts.js";
+import { validActionEvent } from "./action-policy.js";
 import { id, target } from "./target.js";
 export { id } from "./target.js";
 
@@ -67,26 +68,27 @@ export function parseRuntimeIdentity(input: unknown): RuntimeIdentity | null {
 }
 export function parseDiagnosis(input: unknown, key: string | undefined): DiagnosisEvent {
   const v = record(input, [...diagnosisKeys, "runtimeIdentity"]);
-  const version = v.schemaVersion === DIAGNOSIS_V3_VERSION ? DIAGNOSIS_V3_VERSION : DIAGNOSIS_VERSION;
+  const version = v.schemaVersion === DIAGNOSIS_V4_VERSION ? DIAGNOSIS_V4_VERSION : v.schemaVersion === DIAGNOSIS_V3_VERSION ? DIAGNOSIS_V3_VERSION : DIAGNOSIS_VERSION;
   const identity = reportIdentity(v, version);
+  if (version === DIAGNOSIS_V4_VERSION && [...diagnosisKeys, "runtimeIdentity"].some(k => !(k in v))) invalid("v4 必须包含完整标签及身份字段。");
   if (version === DIAGNOSIS_VERSION && "runtimeIdentity" in v) invalid("包含未约定的字段。");
-  const runtimeIdentity = version === DIAGNOSIS_V3_VERSION ? parseRuntimeIdentity(v.runtimeIdentity) : null;
+  const runtimeIdentity = version !== DIAGNOSIS_VERSION ? parseRuntimeIdentity(v.runtimeIdentity) : null;
   const eventId = id(v.eventId);
   if (id(v.diagnosisId) !== eventId || key !== eventId) invalid();
   const engine = oneOf(v.engine, ["OC", "TE"]);
   const decision = oneOf(v.decision, ["ALERT", "PASS", "UNRESOLVED"]);
   const confidence = v.confidence ?? null;
   if (confidence !== null && (typeof confidence !== "number" || !Number.isFinite(confidence) || confidence < 0 || confidence > 1)) invalid();
-  if (decision !== "ALERT" && confidence !== null) invalid();
+  if (version !== DIAGNOSIS_V4_VERSION && decision !== "ALERT" && confidence !== null) invalid();
   const tcFaultLabel = nullableText(v.tcFaultLabel, 128);
-  if (decision === "PASS" && tcFaultLabel !== null) invalid();
+  if (version !== DIAGNOSIS_V4_VERSION && decision === "PASS" && tcFaultLabel !== null) invalid();
   const sessionKey = nullableText(v.sessionKey, 1024);
   const sessionId = nullableText(v.sessionId, 255);
   const traceId = nullableText(v.traceId, 255);
   if ([sessionKey, sessionId, traceId].some((s) => s !== null && !s.trim()) || (engine === "TE" && !traceId)) invalid();
   if (typeof v.humanIntervention !== "boolean") invalid();
-  return {
-    ...(version === DIAGNOSIS_V3_VERSION ? { schemaVersion: version, runtimeIdentity } : { schemaVersion: version }),
+  const event: DiagnosisEvent = {
+    ...(version !== DIAGNOSIS_VERSION ? { schemaVersion: version, runtimeIdentity } : { schemaVersion: version }),
     eventId, diagnosisId: eventId, ...identity, engine,
     sessionKey, sessionId, traceId, occurredAt: v.occurredAt == null ? null : timestamp(v.occurredAt),
     diagnosedAt: timestamp(v.diagnosedAt), decision, tcFaultLabel, confidence,
@@ -95,6 +97,8 @@ export function parseDiagnosis(input: unknown, key: string | undefined): Diagnos
     systemDiagnosis: nullableText(v.systemDiagnosis, 8000), businessDiagnosis: nullableText(v.businessDiagnosis, 8000),
     handlerName: nullableText(v.handlerName, 128), humanIntervention: v.humanIntervention,
   };
+  if (version === DIAGNOSIS_V4_VERSION && !validActionEvent(event)) invalid("诊断标签与告警判定不一致。");
+  return event;
 }
 export function parseCheck(input: unknown, now: number): BotCheck {
   const v = record(input, ["schemaVersion", "botId", "entityId", "env", "engine", "checkedAt", "lastSuccessfulCheckAt", "status"]);

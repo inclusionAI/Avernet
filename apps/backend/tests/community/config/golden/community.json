@@ -36,7 +36,7 @@
       "digest_task": {
         "enabled": false,
         "heartbeat": 45,
-        "interval": 60,
+        "interval": 300,
         "jitter": 5,
         "lock_ttl": 240
       },
@@ -45,6 +45,20 @@
         "model": "${BBS_LLM_MODEL:-glm-5.2}",
         "secret_name": "BBS_LLM_AUTH_TOKEN",
         "timeout_ms": "${BBS_LLM_TIMEOUT_MS:-180000}"
+      },
+      "poll_statistics_task": {
+        "enabled": true,
+        "heartbeat": 45,
+        "interval": 300,
+        "jitter": 5,
+        "lock_ttl": 240
+      },
+      "topic_tag_task": {
+        "enabled": true,
+        "heartbeat": 45,
+        "interval": 7200,
+        "jitter": 30,
+        "lock_ttl": 240
       }
     },
     "bcn": {
@@ -82,6 +96,9 @@
     },
     "cache": {
       "redis_url": "${REDIS_URL:-}"
+    },
+    "community_identity": {
+      "passport_mode": "self_issued"
     },
     "cors": {
       "allow_origin_regex": [],

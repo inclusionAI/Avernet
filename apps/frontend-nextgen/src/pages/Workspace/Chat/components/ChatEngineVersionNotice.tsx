@@ -5,6 +5,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { engineVersionTooltip, engineVersionUiState } from '@/domain/botEngineVersion';
 import type { BotEngineVersionState } from '@/hooks/useBotEngineVersions';
 import { X } from 'lucide-react';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 
 export interface ChatEngineVersionNoticeProps {
   state: BotEngineVersionState;
@@ -23,7 +25,7 @@ export function ChatEngineVersionNotice({ state, onOpen, onDismiss }: ChatEngine
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-auto rounded-full p-0" aria-label={label} onClick={onOpen}>
+            <Button variant="ghost" size="sm" className="h-auto rounded-full p-0" aria-label={label} onClick={() => { Tracert.click(Points.workspaceChat.engineUpdateEntry); onOpen(); }}>
               <Badge tone="warning" className="cursor-pointer">
                 {label}
               </Badge>

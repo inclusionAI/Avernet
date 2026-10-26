@@ -38,6 +38,21 @@ internal_dependencies:
 
 Schema changes require SQLite migration. Cross-domain dependencies make refactors risky — start with read-only impact analysis.
 
+### Owner inspection of friend sessions
+
+The OpenAPI friend-session read routes (list/favorites/detail/messages and file
+list) separate the session subject (`f_user_id`) from the authenticated actor
+(`user_id`). The subject continues to select the Backend-owned session index;
+it must never be replaced with the owner while filtering sessions. Reads pass
+the verified actor to ExpertChat as `actor_user_id`. Omission preserves the
+legacy subject-as-actor behavior. A different actor is accepted only for the
+Bot owner after explicit BCN friendship authorization. For shared runtimes the
+connection resolver uses that owner actor; ordinary friends retain their own
+identity and do not gain device-management permission. Caller-mode allocation
+and connection identity remain tied to the subject's independent instance.
+This does not grant owner-on-friend session mutation or broaden public Bot
+visibility. Existing clients need no new query parameter.
+
 ### Application Caller connection policy
 
 The BaaS-authenticated `POST /api/v1/expert-chats/app-caller-connection`

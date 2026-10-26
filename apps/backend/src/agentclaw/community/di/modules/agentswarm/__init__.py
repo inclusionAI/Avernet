@@ -110,6 +110,7 @@ class AgentSwarmModule(Module):
         result_repo: AgentResultRepository,
         attempt_repo: AgentAttemptRepository,
         config: AgentSwarmConfig,
+        injector: Injector,
     ) -> AgentSwarmService:
         return AgentSwarmService(
             run_repo=run_repo,
@@ -121,7 +122,39 @@ class AgentSwarmModule(Module):
             result_repo=result_repo,
             attempt_repo=attempt_repo,
             config=config,
+            authorization_source=self._authorization_source(injector),
         )
+
+    @staticmethod
+    def _authorization_source(injector: Injector):
+        """The run surfaces' read-only tower into the pending passport gate.
+
+        Same fail-clear shape as ``bot_platform`` below: profiles that can
+        resolve the manifest seam and the passport plugin get the
+        human-gate descriptor join on run detail and SSE — presence keyed
+        off the facade's live PENDING status; profiles that cannot keep
+        the pre-change reads (parked agents surface their ``bot_state``
+        with ``None`` gate fields, and nothing else changes).
+        """
+        try:
+            from agentclaw.community.core.bot_management.manifest_seam import (
+                ManifestCreationSeam,
+            )
+            from agentclaw.community.plugin_api.passport import PassportPlugin
+            from agentclaw.community.plugins.community.agentswarm.bot_authorization import (
+                ManifestBotAuthorizationSource,
+            )
+            return ManifestBotAuthorizationSource(
+                manifest_seam=injector.get(ManifestCreationSeam),
+                passport_plugin=injector.get(PassportPlugin),
+            )
+        except Exception:
+            logger.warning(
+                "[agentswarm] authorization source resolution failed — run "
+                "surfaces degrade to pre-change reads (parked agents surface "
+                "no consent URLs)",
+            )
+            return None
 
     @singleton
     @provider

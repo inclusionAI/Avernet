@@ -85,6 +85,27 @@ bcs-bridge stop
 - One instance runs per user: `start`, `status` and `stop` share
   `~/.bcn-bridge/bridge.lock` and a private control socket.
 
+### Plugin stop and restart
+
+`start --daemon` reports local process initialization, not successful Bot login.
+Check `status --json`: the process can be `running` while `health` is
+`connecting` or `degraded`. Each Plugin Bot must reach `online` before it can
+receive work (`ready` also includes Gateway Providers that are `listening`).
+
+On stop, the Plugin client sends a normal WebSocket Close, waits up to 2 seconds
+for the peer, and attempts TCP/TLS shutdown for up to another 500 ms. The same
+cleanup runs after rejected/interrupted login and identity persistence failures.
+The instance lock remains held through connection and engine cleanup, so `stop`
+does not release the local owner while the Close handshake is still pending.
+Unresponsive/broken peers are logged and dropped after the bounded cleanup;
+`stop` confirms local shutdown, not that remote application occupancy has expired.
+
+If a subsequent `bot.connect` reports `already_connected`, BCS still considers
+that identity occupied. This does not by itself prove another local process is
+alive. Check other bridge instances, the close timeout/failure logs, and remote
+connection expiry. Keep the saved identity and session database; deleting them
+or repeatedly restarting is not a connection-release mechanism.
+
 Configuration written by `register` (gateway example):
 
 ```toml

@@ -3,7 +3,7 @@
  * GroupSessionView —— coop_group 节点的执行详情：群成员 + 群消息明细。
  * V2 起由副屏 L2(TaskNodePanelV2)整体吸收内嵌;旧的左侧并列 Tab rail 容器(GroupDrillDownPanel)已退役。
  */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ArrowLeft } from './icons';
 import { Empty, SectionCard } from './theme';
 import { C } from './tokens';
@@ -473,7 +473,8 @@ export const GroupSessionView: React.FC<{
   userId?: string;
   onBack: () => void;
   backLabel?: string;
-}> = ({ node, bcsBaseUrl, apiBaseUrl, userId, onBack, backLabel = '返回任务节点' }) => {
+  refreshVersion?: number;
+}> = ({ node, bcsBaseUrl, apiBaseUrl, userId, onBack, backLabel = '返回任务节点', refreshVersion = 0 }) => {
   const groupId = node.groupId;
   const sessionId = node.sessionId;
   // 下钻通道按物理 session 形态判定:协作群 session_id 形如 bcs_grp_xxx:round 或存在 groupId。
@@ -485,18 +486,44 @@ export const GroupSessionView: React.FC<{
   const [messages, setMessages] = useState<GroupMessage[]>([]);
   const [membersExpanded, setMembersExpanded] = useState(false);
   const [noMessagePermission, setNoMessagePermission] = useState(false);
+  const loadScopeRef = useRef('');
+  const hasSnapshotRef = useRef(false);
 
   const assignee = node.assignee;
+  const loadScope = JSON.stringify([
+    groupId,
+    sessionId,
+    isGroup,
+    assignee,
+    node.assigneeName,
+    node.executor,
+    bcsBaseUrl,
+    apiBaseUrl,
+    userId,
+  ]);
   useEffect(() => {
     if (!sessionId) {
+      loadScopeRef.current = '';
+      hasSnapshotRef.current = false;
       setError('节点缺少 session_id，无法下钻');
       setLoading(false);
       return;
     }
     let cancelled = false;
-    setLoading(true);
-    setError(null);
-    setNoMessagePermission(false);
+    const sameScope = loadScopeRef.current === loadScope;
+    const backgroundRefresh = sameScope && hasSnapshotRef.current;
+    if (!sameScope) {
+      loadScopeRef.current = loadScope;
+      hasSnapshotRef.current = false;
+      setGroup(null);
+      setMessages([]);
+      setMembersExpanded(false);
+    }
+    if (!backgroundRefresh) {
+      setLoading(true);
+      setError(null);
+      setNoMessagePermission(false);
+    }
     // group_id 非空（群执行）→ 查群成员（预发 OpenAPI；传入 bcsBaseUrl 时兼容 BCS raw）
     // group_id 空时（单 bot，或群信息缺失）：本地用节点执行者兜底合成一条成员。
     // 后端 dashboard 返回单 bot 信息尚未实现；不兜底会导致单 bot（根节点）下钻「执行者（0）」错显。
@@ -575,17 +602,31 @@ export const GroupSessionView: React.FC<{
         if (cancelled) return;
         setNoMessagePermission(noMessagePerm);
         setMessages(sortMessagesByTimestamp(filterGroupMessages(msgs)));
+        setError(null);
+        hasSnapshotRef.current = true;
       } catch (err) {
-        if (cancelled) return;
+        if (cancelled || backgroundRefresh) return;
         setError(err instanceof Error ? err.message : '加载执行会话信息失败');
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && !backgroundRefresh) setLoading(false);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [groupId, sessionId, bcsBaseUrl, apiBaseUrl, assignee, userId]);
+  }, [
+    apiBaseUrl,
+    assignee,
+    bcsBaseUrl,
+    groupId,
+    isGroup,
+    loadScope,
+    node.assigneeName,
+    node.executor,
+    refreshVersion,
+    sessionId,
+    userId,
+  ]);
 
   const memberCount = group?.participants.length ?? 0;
   const msgCount = messages.length;

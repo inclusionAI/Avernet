@@ -169,9 +169,13 @@ export const botSessionFileService = {
     sessionId: string,
     userId: string,
     ownerId?: string,
+    friendUserId?: string,
   ): Promise<DomainResult<BotSessionFileListResult>> {
     try {
-      const data = await listReadyApi(botId, sessionId, buildParams(userId, ownerId));
+      const data = await listReadyApi(botId, sessionId, {
+        ...buildParams(userId, ownerId),
+        ...(friendUserId ? { f_user_id: resolveUserId(friendUserId) } : {}),
+      });
       const items = (data.files ?? []).map(mapView);
       return { ok: true, data: { items, total: items.length } };
     } catch (err) {

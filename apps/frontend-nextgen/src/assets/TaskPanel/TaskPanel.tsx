@@ -81,6 +81,7 @@ export const TaskPanel: React.FC<TaskPanelProps> = ({
 
           return (
             <div
+              data-task-panel-root="true"
               className={className}
               style={{
                 display: 'flex',

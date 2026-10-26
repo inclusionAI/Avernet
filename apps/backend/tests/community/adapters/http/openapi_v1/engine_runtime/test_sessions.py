@@ -1016,6 +1016,7 @@ def test_owner_can_address_one_bcn_friend_without_device_wide_access(
     assert friendships.calls[0]["human_id"] == "friend-1"
     list_call = next(call for call in expert.calls if call[0] == "list_chat_sessions")
     assert list_call[2]["user_id"] == "friend-1"
+    assert list_call[2]["actor_user_id"] == OWNER
 
 
 def test_collaborator_cannot_address_another_friend(
