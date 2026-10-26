@@ -635,7 +635,10 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         resource as one tree while the applied bot holds its member files
         and records one row each, which the platform reader answers as file
         entries. So an unchanged bot reads as in step whichever form its
-        reader answers, and ``observed`` is the id capture would record. No
+        reader answers, and ``observed`` is the id capture would record. The
+        observation is not bounded by the per-category limit a revision may
+        hold (``bounded=False``): a directory resource of more files than
+        that is one revision entry but one row each on the bot. No
         ``active`` means nothing to drift from. ``CaptureRefused``
         propagates: a bot whose state cannot be read cannot be said to be
         in step either.
@@ -643,7 +646,7 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         active = self._active(bot)
         if active is None:
             return None
-        captured = await capture_spec(self._state_reader(), bot, validator=self._validator)
+        captured = await capture_spec(self._state_reader(), bot, validator=self._validator, bounded=False)
         policy = self._policy_of(active)
         observed = revision_id(captured.spec, policy)
         stored = GenomeSpec.from_json(loads_strict(active.content)["spec"])

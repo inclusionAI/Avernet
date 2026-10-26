@@ -33,6 +33,7 @@ from agentclaw.community.core.bot_genome.models import (
     RunScope,
 )
 from agentclaw.community.core.bot_genome.patch_models import GenomePatch, parse_ops
+from agentclaw.community.core.bot_genome.limits import MAX_ENTRIES_PER_CATEGORY
 from agentclaw.community.core.bot_genome.registry import DEFAULT_POLICY
 from agentclaw.community.core.bot_genome.spec_models import GenomePolicy
 from tests.community.core.bot_genome.example_blobs import (
@@ -542,6 +543,32 @@ async def test_drift_compares_a_directory_resource_as_the_files_the_bot_holds(wo
     world.reader._resources = world.reader._resources[:-1]
     drift = await world.registry.drift(BOT)
     assert drift is not None and drift.active == recorded.revision.revision.id
+
+
+@pytest.mark.asyncio
+async def test_drift_observes_a_directory_of_more_files_than_a_category_may_hold(world: World) -> None:
+    """One directory entry in the revision; on the applied bot, one row per member, more than the 50 a
+    revision's category holds. Drift still observes the bot (it compares, it records nothing); a recording
+    capture of that bot is refused by the limit as before."""
+    await _capture_support_bot(world)
+    members = [(f"{i:03d}.md", f"# {i}\n".encode()) for i in range(MAX_ENTRIES_PER_CATEGORY + 1)]
+    tree = canonical_tree_bytes(members)
+    world.registry.put_content(BOT, tree, provenance=OWNER)
+    patch = load_patch("08-resource-add.json").model_copy(
+        update={
+            "ops": parse_ops([{"op": "resource.add", "path": "data/big/", "content": {"digest": sha256_digest(tree)}}])
+        }
+    )
+    recorded = await world.registry.commit_patch(BOT, patch, created_by=OWNER, status=RevisionStatus.DRAFT)
+    await _promote_first(world, recorded.revision.revision.id)
+    world.reader._resources = world.reader._resources + tuple(
+        CapturedResource("data/big/" + name, (CapturedFile(name, data),)) for name, data in members
+    )
+    assert await world.registry.drift(BOT) is None
+    with pytest.raises(CaptureRefused):
+        await world.registry.capture(BOT, created_by=OWNER)
+    world.reader._resources = world.reader._resources[:-1]
+    assert await world.registry.drift(BOT) is not None
 
 
 @pytest.mark.asyncio
