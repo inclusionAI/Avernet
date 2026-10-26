@@ -232,7 +232,7 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
         const timestamp = typeof result.recorded_at_ms === "number" ? result.recorded_at_ms : typeof call.gmtCreate === "number" ? call.gmtCreate * 1000 : Date.parse(call.gmtCreate);
         task.timeline.push({ event_id: call.callId, at_ms: timestamp, kind: "operation", actor: "agent", summary: String(request.purpose ?? call.toolName), payload: {
           tool_call_id: call.callId, request, result: { delivery_confirmed: result.delivery_confirmed, session_id: result.session_id, delivery_key: result.delivery_key,
-            message: result.message, initial_message: result.initial_message, dry_run: result.dry_run }, status: call.status, evidence_id: evidenceId, raw_tool_call_id: call.callId } });
+            message: result.message, initial_message: result.initial_message, dry_run: result.dry_run, error: result.error }, status: call.status, evidence_id: evidenceId, raw_tool_call_id: call.callId } });
       }
       if (calls.length < 500) break;
     }

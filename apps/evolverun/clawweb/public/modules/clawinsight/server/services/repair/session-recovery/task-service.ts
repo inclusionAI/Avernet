@@ -293,6 +293,30 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     this.notifyGroup(task, "result");
   }
 
+  async finishForTargetUnavailable(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string }): Promise<void> {
+    const task = await this.mutate(taskId, version, value => {
+      if (value.simulation || value.status !== "running" || value.execution?.executionId !== input.executionId || value.execution.state === "ended") this.fail(409, "当前不能结束自愈任务");
+      if (typeof input.summary !== "string" || !input.summary.trim() || input.summary.length > 8000 || containsSecret(input.summary)
+        || !Array.isArray(input.evidence_ids) || !input.evidence_ids.length) this.fail(422, "目标不可用需要原因和受控工具证据");
+      validateRecoveryEvidenceReferences(value, input.evidence_ids);
+      const confirmed = value.evidence.some(item => input.evidence_ids.includes(item.evidence_id)
+        && ["session_read", "runtime_inspect"].includes(item.source)
+        && value.timeline.some(event => event.kind === "operation" && event.payload.status === "failed"
+          && (event.payload.raw_tool_call_id ?? event.payload.tool_call_id) === item.tool_call_id
+          && ((event.payload.result as Record<string, unknown>)?.error as Record<string, unknown>)?.code === "target_unavailable"));
+      if (!confirmed) this.fail(422, "目标不可用需要 Provider 明确的 target_unavailable 回执；普通404、会话缺失和超时不证明目标已销毁");
+      return { ...value, status: "completed", completionReason: "target_unavailable", version: value.version + 1,
+        observationDeadlineAt: null, ownerDeadlineAt: null, requiresFreshObservation: false,
+        ...(value.executionRetry ? { executionRetry: { ...value.executionRetry, retryAt: 0 } } : {}),
+        judgment: { delivery: value.judgment?.delivery ?? "unconfirmed", response: value.judgment?.response ?? "unknown",
+          effect: "unknown", summary: input.summary, evidence_ids: input.evidence_ids },
+        timeline: [...value.timeline, this.event("termination", "agent", input.summary,
+          { completion_reason: "target_unavailable", evidence_ids: input.evidence_ids })] };
+    });
+    await this.deps.agent.release(task);
+    this.notifyGroup(task, "result");
+  }
+
   async executionFailure(taskId: string, reason: string, executionId?: string, retryable = false): Promise<void> {
     const previous = await this.required(taskId);
     if (!this.ownsTask(previous) || previous.status !== "running" || (executionId && (previous.execution?.executionId !== executionId || previous.execution.state === "ended"))) return;

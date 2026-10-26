@@ -30,7 +30,7 @@ export function parseRecoveryResult(input: unknown): MonitoringRecoveryResult {
   requireValue(result.waiting_reason === (result.status === "waiting_effect" ? "effect" : null));
   requireValue(["recovered", "not_recovered", "unknown", "not_intervened"].includes(result.effect as string) && text(result.effect));
   if (Object.hasOwn(result, "intervention_status")) requireValue(text(result.intervention_status) && ["none", "performed", "unknown"].includes(result.intervention_status));
-  if (Object.hasOwn(result, "completion_reason")) requireValue(result.completion_reason === "user_continued" && result.status === "completed");
+  if (Object.hasOwn(result, "completion_reason")) requireValue(["user_continued", "target_unavailable"].includes(String(result.completion_reason)) && result.status === "completed");
   requireValue(text(result.result_text));
   requireValue(Array.isArray(result.evidence_ids) && result.evidence_ids.every(text));
   if (Object.hasOwn(result, "error")) requireValue(nullableText(result.error));

@@ -6,11 +6,12 @@ import { createHash, randomUUID } from "node:crypto";
 import type { EvolveRepository } from "@avernet/clawevolve/server/repositories/evolve-repository";
 import type { AisExecutor } from "@avernet/clawevolve/server/contracts/ais-executor";
 import type { AisStatusHandler } from "@avernet/clawevolve/server/services/ais/status-handler";
-import { BotEngineOperations } from "@avernet/clawweb-shared/server/services/bot-runtime";
+import { BotEngineOperations, BotRuntimeError } from "@avernet/clawweb-shared/server/services/bot-runtime";
 import type { BotSessionTrajectoryReader as RecoveryTrajectoryReader } from "@avernet/clawweb-shared/server/services/bot-runtime";
 import type { BotRuntime, BotTarget, BotTargetResolver, ResolvedBotTarget, EngineOperation } from "@avernet/clawweb-shared/server/services/bot-runtime";
 import { AgentToolCallRepository } from "../../../repositories/repair/agent-tool-call-repository.js";
 import { sameAgentExecutionReport, AgentExecutionService, createAgentExecutionStep, agentExecutionContract } from "../common/agent-execution.js";
+import { AgentToolError } from "../common/agent-tools/errors.js";
 import { AgentRuntimeTool } from "../common/agent-tools/runtime-tool.js";
 import type { AgentLogTool } from "../common/agent-tools/log-tool.js";
 import type { AgentToolContext, AgentRuntimeInspectInput, AgentRuntimeTargetSnapshot, AgentPlanAction } from "../common/agent-tools/contracts.js";
@@ -487,7 +488,9 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
         { decision: "user_continued", summary: body.summary, evidence_ids: body.evidence_ids as string[] });
       else if (body.reason === "user_continued") await this.deps.business().finishForUserContinuation(task.taskId, task.version,
         { summary: body.summary, evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId });
-      else if (body.reason !== undefined) fail(422, "未知的结束原因。普通受阻请省略 reason，保留 kind=blocked、当前 phase 和原因 summary；不要改为 message 决策。user_continued 仅用于已核实的用户续聊。");
+      else if (body.reason === "target_unavailable") await this.deps.business().finishForTargetUnavailable(task.taskId, task.version,
+        { summary: body.summary, evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId });
+      else if (body.reason !== undefined) fail(422, "未知的结束原因。普通受阻请省略 reason，保留 kind=blocked、当前 phase 和原因 summary；不要改为 message 决策。user_continued 仅用于已核实的用户续聊，target_unavailable 需要 Provider 明确的目标不可用证据。");
       else await this.deps.business().executionFailure(task.taskId, redactPersistableText(body.summary, 8000), task.execution!.executionId);
     }
     else fail(422, "未知业务回报类型");
@@ -566,7 +569,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       else if ((result as Record<string, unknown>)?.status === "unknown") status = "unknown";
     } catch (error) {
       status = write && dispatched ? "unknown" : "failed";
-      result = { dispatched, error: error instanceof SessionRecoveryError ? { code: error.code, message: redactPersistableText(error.message, 1000) }
+      result = { dispatched, error: error instanceof SessionRecoveryError || error instanceof BotRuntimeError || error instanceof AgentToolError ? { code: error.code, message: redactPersistableText(error.message, 1000) }
         : { code: "controlled_operation_unconfirmed", message: "受控操作未确认，需核对现场与审计" } };
     }
     result = { ...result as Record<string, unknown>, recorded_at_ms: this.now() };

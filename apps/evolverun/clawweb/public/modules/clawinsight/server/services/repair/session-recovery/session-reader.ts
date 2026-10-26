@@ -1,3 +1,4 @@
+import { BotRuntimeError } from "@avernet/clawweb-shared/server/services/bot-runtime";
 import type { BotRuntime, ResolvedBotTarget } from "@avernet/clawweb-shared/server/services/bot-runtime";
 import { redactEvidenceValue } from "@avernet/clawweb-shared/server/services/redaction";
 import { SessionRecoveryError } from "./errors.js";
@@ -124,7 +125,8 @@ export class RecoverySessionReader {
     // Compress the fixed read-only program so runtime-user wrapping stays within BaaS's command limit.
     const loader = `eval(require("node:zlib").gunzipSync(Buffer.from("${gzipSync(HEADER + (input.target.activeEngine === "claude_code" ? CC_PROGRAM : OC_PROGRAM) + FOOTER).toString("base64")}","base64")).toString())`;
     const result = await this.runtime.executeShell({ target: input.target, command: `node -e ${quote(loader)} ${quote(encoded)}`, timeoutMs: 30000 })
-      .catch((error: unknown) => { const cause = error as { stderr?: string; code?: string }; throw unavailable(cause?.stderr || cause?.code || "受控 Shell 请求失败"); });
+      .catch((error: unknown) => { if (error instanceof BotRuntimeError && error.code === "target_unavailable") throw new SessionRecoveryError(410, error.code, "目标运行环境已不可用");
+        const cause = error as { stderr?: string; code?: string }; throw unavailable(cause?.stderr || cause?.code || "受控 Shell 请求失败"); });
     if (result.status !== "success" || result.exitCode !== 0) throw unavailable(result.stderr || `Shell exit=${result.exitCode}, status=${result.status}`);
     try { return redactEvidenceValue(JSON.parse(result.stdout)) as Record<string, unknown>; }
     catch { throw new SessionRecoveryError(503, "original_session_unavailable", "原会话记录格式无效"); }
