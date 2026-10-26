@@ -19,6 +19,7 @@ from agentclaw.community.core.repository.implementations.spaces.source_lock impo
 from agentclaw.community.core.repository.protocols.spaces import (
     SpaceKnowledgeSyncRepositoryProtocol,
 )
+from agentclaw.community.core.space_knowledge.capture_guard import SpaceKnowledgeCaptureGuard
 from agentclaw.community.core.space_knowledge.repository.models import (
     SpaceKnowledgeSyncModel as Snapshot,
 )
@@ -166,11 +167,13 @@ def record_membership_snapshot(db, space, *, disabled=False, app=None):
 
 class SpaceKnowledgeSyncRepository(SpaceKnowledgeSyncRepositoryProtocol):
     @inject
-    def __init__(self, db: DatabasePlugin):
+    def __init__(self, db: DatabasePlugin, capture: SpaceKnowledgeCaptureGuard):
         self._db = db
+        self._capture = capture
 
     def activate(self, *, space_id, environment, app):
         with self._db.transactional_orm_session() as db:
+            self._capture.require_enabled(db)
             space = lock_space(db, space_id, environment)
             if space is None:
                 raise SpaceKnowledgeError("RESOURCE_NOT_FOUND")
@@ -182,6 +185,7 @@ class SpaceKnowledgeSyncRepository(SpaceKnowledgeSyncRepositoryProtocol):
 
     def progress(self, *, space_id, environment, app):
         with self._db.orm_session() as db:
+            self._capture.require_enabled(db)
             latest = _latest(db, space_id, environment)
             if latest is None or latest.app != app:
                 return None
@@ -193,6 +197,7 @@ class SpaceKnowledgeSyncRepository(SpaceKnowledgeSyncRepositoryProtocol):
 
     def next_snapshot(self, *, space_id, environment, app):
         with self._db.orm_session() as db:
+            self._capture.require_enabled(db)
             latest = _latest(db, space_id, environment)
             if latest is None or latest.app != app:
                 return None
@@ -212,6 +217,7 @@ class SpaceKnowledgeSyncRepository(SpaceKnowledgeSyncRepositoryProtocol):
 
     def acknowledge(self, *, snapshot, app):
         with self._db.transactional_orm_session() as db:
+            self._capture.require_enabled(db)
             latest = _latest(db, snapshot.space_id, snapshot.environment, lock=True)
             if latest is None or latest.app != app:
                 raise SpaceKnowledgeError("SPACE_NOT_SYNCED")
@@ -234,6 +240,7 @@ class SpaceKnowledgeSyncRepository(SpaceKnowledgeSyncRepositoryProtocol):
 
     def pending_revisions(self, *, environment, app, after_space_id, limit):
         with self._db.orm_session() as db:
+            self._capture.require_enabled(db)
             rows = (
                 db.query(Snapshot.space_id, func.min(Snapshot.revision))
                 .filter(

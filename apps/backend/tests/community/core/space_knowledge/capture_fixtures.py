@@ -74,3 +74,24 @@ def missing_knowledge_graph(tmp_path, monkeypatch):
     yield graph, db
     assert not inspect(db._engine).has_table("ac_space_knowledge_sync")
     db._engine.dispose()
+
+
+def enabled_capture(database):
+    """Explicit recording policy for standalone producer contract/race tests."""
+    from agentclaw.community.core.repository.implementations.spaces.knowledge_effects import (
+        KnowledgeSpacePersistenceEffects,
+    )
+    from agentclaw.community.core.space_knowledge.capture_lifecycle import (
+        SpaceKnowledgeCaptureLifecycle,
+    )
+    from agentclaw.community.plugins.unavailable.space_knowledge import (
+        DisabledSpaceMembershipSink,
+    )
+
+    return SpaceKnowledgeCaptureLifecycle(
+        database,
+        KnowledgeSpacePersistenceEffects(),
+        DisabledSpaceMembershipSink(),
+        enabled=True,
+        environment="pre",
+    )

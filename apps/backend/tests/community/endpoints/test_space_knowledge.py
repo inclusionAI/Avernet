@@ -5,6 +5,7 @@ on the full application. These cases do not claim remote provisioning coverage.
 """
 
 from dataclasses import asdict
+from agentclaw.community.di.space_knowledge_capture_config import SpaceKnowledgeCaptureConfig
 
 from agentclaw.community.api.space_knowledge_service import (
     SpaceKnowledgeServiceProtocol,
@@ -87,6 +88,7 @@ class _Provider:
 
 
 def _seed_space(world):
+    world.injector.binder.bind(SpaceKnowledgeCaptureConfig, to=SpaceKnowledgeCaptureConfig(enabled=True))
     world.get(SpaceServiceProtocol).create_team(
         name="Knowledge team", creator_id=_ACTOR
     )

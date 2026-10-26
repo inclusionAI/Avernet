@@ -15,6 +15,9 @@ from agentclaw.community.core.repository.implementations.spaces.persistence_effe
 from agentclaw.community.core.repository.implementations.spaces.knowledge_effects import (
     KnowledgeSpacePersistenceEffects,
 )
+from agentclaw.community.core.space_knowledge.capture_guard import (
+    SpaceKnowledgeCaptureGuard,
+)
 from agentclaw.community.core.space_knowledge.capture_lifecycle import (
     SpaceKnowledgeCaptureLifecycle,
 )
@@ -114,6 +117,14 @@ class SpaceKnowledgeModule(Module):
     def persistence_effects(
         self, capture: SpaceKnowledgeCaptureLifecycle
     ) -> SpacePersistenceEffects:
+        return capture
+
+    @singleton
+    @provider
+    @inject
+    def capture_guard(
+        self, capture: SpaceKnowledgeCaptureLifecycle
+    ) -> SpaceKnowledgeCaptureGuard:
         return capture
 
     @singleton

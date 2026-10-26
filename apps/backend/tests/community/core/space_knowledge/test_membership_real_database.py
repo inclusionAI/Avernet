@@ -1,6 +1,7 @@
 """Regression tests use deployable file SQLite, never the fixture's RLock."""
 
 
+from tests.community.core.space_knowledge.capture_fixtures import enabled_capture
 from agentclaw.community.core.repository.implementations.spaces.knowledge_effects import KnowledgeSpacePersistenceEffects
 from concurrent.futures import ThreadPoolExecutor
 import json
@@ -118,7 +119,7 @@ class BoundedSink:
 
 def synchronizer(db, sink):
     return SpaceMembershipSynchronizer(
-        SpaceKnowledgeSyncRepository(db), sink, "agentclaw", TaskQueueRepository(db)
+        SpaceKnowledgeSyncRepository(db, enabled_capture(db)), sink, "agentclaw", TaskQueueRepository(db)
     )
 
 
@@ -281,7 +282,7 @@ def test_two_real_connections_can_activate_same_space(database, monkeypatch):
         with ThreadPoolExecutor(max_workers=2) as pool:
             futures = [
                 pool.submit(
-                    SpaceKnowledgeSyncRepository(db).activate,
+                    SpaceKnowledgeSyncRepository(db, enabled_capture(db)).activate,
                     space_id=space_id,
                     environment="pre",
                     app="agentclaw",
@@ -293,7 +294,7 @@ def test_two_real_connections_can_activate_same_space(database, monkeypatch):
     finally:
         other._engine.dispose()
     assert len(history(database, space_id)) == 1
-    assert SpaceKnowledgeSyncRepository(database).progress(
+    assert SpaceKnowledgeSyncRepository(database, enabled_capture(database)).progress(
         space_id=space_id, environment="pre", app="agentclaw"
     ) == (1, 0, "active")
 
@@ -308,7 +309,7 @@ def test_unrelated_activation_integrity_failure_is_not_swallowed(database, monke
 
     monkeypatch.setattr(knowledge_sync, "_save_snapshot", fail)
     with pytest.raises(IntegrityError):
-        SpaceKnowledgeSyncRepository(database).activate(
+        SpaceKnowledgeSyncRepository(database, enabled_capture(database)).activate(
             space_id=space_id, environment="pre", app="agentclaw"
         )
     assert history(database, space_id) == []
@@ -494,6 +495,7 @@ def test_first_activation_is_idempotent_across_real_processes(database, tmp_path
     space_id, _ = create_space(database)
     worker = textwrap.dedent("""\
         from pathlib import Path
+        from tests.community.core.space_knowledge.capture_fixtures import enabled_capture
         import os
         import sys
         import time
@@ -513,7 +515,7 @@ def test_first_activation_is_idempotent_across_real_processes(database, tmp_path
             return lock_space(*args, **kwargs)
         knowledge_sync.lock_space = race
         try:
-            knowledge_sync.SpaceKnowledgeSyncRepository(database).activate(
+            knowledge_sync.SpaceKnowledgeSyncRepository(database, enabled_capture(database)).activate(
                 space_id=int(sys.argv[2]), environment="pre", app="agentclaw"
             )
         finally:
@@ -541,6 +543,6 @@ def test_first_activation_is_idempotent_across_real_processes(database, tmp_path
                 process.communicate()
     assert len(list(barrier.iterdir())) == 2
     assert len(history(database, space_id)) == 1
-    assert SpaceKnowledgeSyncRepository(database).progress(
+    assert SpaceKnowledgeSyncRepository(database, enabled_capture(database)).progress(
         space_id=space_id, environment="pre", app="agentclaw"
     ) == (1, 0, "active")

@@ -126,3 +126,92 @@ def test_library_writer_without_lifespan_cannot_commit_past_history_guard(databa
             pytest.fail("guard must reject before caller receives identity")
     with database.orm_session() as session:
         assert session.query(SpaceModel).count() == 0
+
+
+def test_library_producer_rejects_disabled_capture_before_snapshot_or_sink(database):
+    from injector import Module
+    from agentclaw.community.di import DeployProfile, build_injector
+    from agentclaw.community.di.space_knowledge_capture_config import (
+        SpaceKnowledgeCaptureConfig,
+    )
+    from agentclaw.community.plugin_api.database import DatabasePlugin
+    from agentclaw.community.plugin_api.space_membership import SpaceMembershipSink
+    from agentclaw.community.core.space_knowledge.membership_sync import (
+        SpaceMembershipSynchronizer,
+    )
+    from agentclaw.community.core.spaces.repository.models import (
+        SpaceModel,
+        SpaceMemberModel,
+    )
+
+    class Sink:
+        calls = 0
+
+        def is_enabled(self):
+            return True
+
+        def apply_snapshot(self, snapshot):
+            self.calls += 1
+
+    sink = Sink()
+
+    class ProducerGraph(Module):
+        def configure(self, binder):
+            binder.bind(DatabasePlugin, to=database)
+            binder.bind(SpaceMembershipSink, to=sink)
+            binder.bind(SpaceKnowledgeCaptureConfig, to=SpaceKnowledgeCaptureConfig())
+
+    with database.orm_session() as session:
+        session.add(
+            SpaceModel(
+                id=7,
+                space_code="s7",
+                space_type="TEAM",
+                name="Team",
+                env="pre",
+                created_by="owner",
+                updated_by="owner",
+            )
+        )
+        session.add(
+            SpaceMemberModel(
+                space_id=7, user_id="owner", role="ADMIN", env="pre", created_by="owner"
+            )
+        )
+    graph = build_injector(profile=DeployProfile.TEST, extra_modules=[ProducerGraph()])
+    with pytest.raises(RuntimeError, match="capture"):
+        graph.get(SpaceMembershipSynchronizer).ensure_synced(
+            space_id=7, environment="pre"
+        )
+    with database.orm_session() as session:
+        assert session.query(Snapshot).count() == 0
+    assert sink.calls == 0
+
+
+@pytest.mark.parametrize("operation", ["activate", "next_snapshot"])
+def test_library_repository_cannot_bypass_capture_with_a_disabled_sink(
+    database, operation
+):
+    from injector import Module
+    from agentclaw.community.di import DeployProfile, build_injector
+    from agentclaw.community.di.space_knowledge_capture_config import (
+        SpaceKnowledgeCaptureConfig,
+    )
+    from agentclaw.community.plugin_api.database import DatabasePlugin
+    from agentclaw.community.core.repository.protocols.spaces import (
+        SpaceKnowledgeSyncRepositoryProtocol,
+    )
+
+    class ExistingDatabase(Module):
+        def configure(self, binder):
+            binder.bind(DatabasePlugin, to=database)
+            binder.bind(SpaceKnowledgeCaptureConfig, to=SpaceKnowledgeCaptureConfig())
+
+    graph = build_injector(
+        profile=DeployProfile.TEST, extra_modules=[ExistingDatabase()]
+    )
+    repository = graph.get(SpaceKnowledgeSyncRepositoryProtocol)
+    with pytest.raises(RuntimeError, match="producer requires capture"):
+        getattr(repository, operation)(space_id=7, environment="pre", app="agentclaw")
+    with database.orm_session() as session:
+        assert session.query(Snapshot).count() == 0

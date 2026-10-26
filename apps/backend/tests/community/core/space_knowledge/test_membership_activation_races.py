@@ -1,6 +1,7 @@
 """First activation must serialize with source writers, not just other activators."""
 
 
+from tests.community.core.space_knowledge.capture_fixtures import enabled_capture
 from agentclaw.community.core.repository.implementations.spaces.knowledge_effects import KnowledgeSpacePersistenceEffects
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
@@ -210,7 +211,7 @@ def test_sqlite_guard_contention_propagates_bounded_failure(database):
         with database.transactional_orm_session() as session:
             knowledge_sync.lock_space(session, space_id, "pre")
             with pytest.raises(OperationalError, match="locked"):
-                knowledge_sync.SpaceKnowledgeSyncRepository(other).activate(
+                knowledge_sync.SpaceKnowledgeSyncRepository(other, enabled_capture(other)).activate(
                     space_id=space_id, environment="pre", app="agentclaw"
                 )
     finally:

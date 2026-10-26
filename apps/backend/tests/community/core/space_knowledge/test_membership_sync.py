@@ -1,6 +1,7 @@
 """Single-table membership snapshots and unchanged generic queue scheduling."""
 
 
+from tests.community.core.space_knowledge.capture_fixtures import enabled_capture
 from agentclaw.community.core.repository.implementations.spaces.knowledge_effects import KnowledgeSpacePersistenceEffects
 from contextlib import contextmanager
 from threading import RLock
@@ -72,7 +73,7 @@ def setup(tmp_path):
     return (
         db,
         SpaceRepository(db, KnowledgeSpacePersistenceEffects()),
-        SpaceKnowledgeSyncRepository(db),
+        SpaceKnowledgeSyncRepository(db, enabled_capture(db)),
         SpaceManagementRepository(db),
     )
 
@@ -216,7 +217,7 @@ def test_real_producer_first_confirmation_reads_and_terminal_repair(setup):
         )
         row.status, row.active_idempotency_key = "TIMED_OUT", None
     # New repository + producer instance: no in-memory delivery state required.
-    restarted = coordinator(SpaceKnowledgeSyncRepository(db), sink)
+    restarted = coordinator(SpaceKnowledgeSyncRepository(db, enabled_capture(db)), sink)
     restarted.repair_pending(environment="pre")
     assert len(snapshots(db)) == 2
     with db.orm_session() as s:
@@ -399,7 +400,7 @@ def test_two_deliverers_may_repeat_one_version_but_cannot_skip(setup):
 
     sink = RacingSink()
     first = coordinator(repo, sink)
-    second = coordinator(SpaceKnowledgeSyncRepository(db), sink)
+    second = coordinator(SpaceKnowledgeSyncRepository(db, enabled_capture(db)), sink)
     with ThreadPoolExecutor(max_workers=2) as pool:
         futures = [
             pool.submit(s.deliver_next, space_id=7, environment="pre")
@@ -443,7 +444,7 @@ def test_large_roster_uses_one_mediumtext_snapshot_and_small_queue_pointer(setup
         assert len(task.payload.encode()) < 100
         # Terminal history may be purged normally; no member data is lost.
         s.delete(task)
-    restarted = coordinator(SpaceKnowledgeSyncRepository(db), RecordingSink())
+    restarted = coordinator(SpaceKnowledgeSyncRepository(db, enabled_capture(db)), RecordingSink())
     restarted.repair_pending(environment="pre")
     snapshot = repo.next_snapshot(space_id=7, environment="pre", app="agentclaw")
     assert len(snapshot.body["members"]) == 2000
@@ -580,7 +581,7 @@ def test_queue_unavailable_does_not_rollback_or_lose_membership_snapshots(setup)
     failed.repair_pending(environment="pre")
     assert spaces.get_member(space_id=7, user_id="alice", env="pre") is not None
     assert [p["revision"] for p in snapshots(db)] == [1, 2]
-    restarted = coordinator(SpaceKnowledgeSyncRepository(db), RecordingSink())
+    restarted = coordinator(SpaceKnowledgeSyncRepository(db, enabled_capture(db)), RecordingSink())
     restarted.repair_pending(environment="pre")
     restarted.repair_pending(environment="pre")
     with db.orm_session() as s:

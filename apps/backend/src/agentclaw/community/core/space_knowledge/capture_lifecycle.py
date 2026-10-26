@@ -79,6 +79,13 @@ class SpaceKnowledgeCaptureLifecycle(LifecycleBase):
                 )
         self._validated = True
 
+    def require_enabled(self, session: Session) -> None:
+        self._validate(session)
+        if not self._enabled:
+            raise RuntimeError(
+                "space knowledge producer requires capture to be enabled"
+            )
+
     async def startup(self) -> None:
         with self._database.orm_session() as session:
             self._validate(session)

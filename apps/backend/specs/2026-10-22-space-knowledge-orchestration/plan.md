@@ -129,6 +129,16 @@ class KnowledgeSpacePersistenceEffects:
 
 更新相应 Protocol 方法和 membership_sync.py:89-118；有损坏/缺失版本仍由精确队头读取拒绝，不能假定最小 pending 就一定是可投递版本。
 
+### Group A review correction
+
+```python
+# core/space_knowledge/capture_guard.py (new internal protocol)
+class SpaceKnowledgeCaptureGuard(Protocol):
+    def require_enabled(self, session: Session) -> None: ...
+```
+
+同一个 lifecycle 对象也提供 producer guard。`SpaceKnowledgeSyncRepository` 必需注入它，在 activation/读取待投递快照/ack 等既有事务内验证，再进行持久化或允许 Sink 调用。否则无 lifespan 的调用方可以绕过 source writer 的验证。已补真实 DI producer RED→GREEN 和直接 repository bypass 回归；不改变外部协议。
+
 ## Dependencies
 
 None. 不增加包、数据库服务、事件总线或共享队列改造。
