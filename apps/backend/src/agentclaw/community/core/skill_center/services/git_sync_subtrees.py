@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import tempfile
 from typing import Any
 
 from agentclaw.community.log import get_logger
@@ -85,6 +86,16 @@ class GitSyncSubtreeIO:
             text=True
         )
         if result.returncode != 0:
+            if name == "agents":
+                listing = subprocess.run(
+                    ["git", "ls-tree", "-z", "FETCH_HEAD", "--", source_path],
+                    cwd=bare_repo, capture_output=True,
+                )
+                if listing.returncode == 0 and not listing.stdout:
+                    # Successful full-commit lookup proves the agents tree was
+                    # removed. Export an empty managed subtree and let the
+                    # expert scanner reconcile the same immutable commit.
+                    return self._sync_absent_agents(subtree)
             return {"success": False, "error": f"Cannot resolve {source_path}", "updated": False}
 
         remote_sha = result.stdout.strip()
@@ -208,3 +219,17 @@ class GitSyncSubtreeIO:
             return None
         return normalized[: -len("/SKILL.md")]
 
+    def _sync_absent_agents(self, subtree: dict[str, Any]) -> dict[str, Any]:
+        target = subtree["target_dir"]
+        version = target / subtree["version_file"]
+        unchanged = version.is_file() and version.read_text().strip() == "absent"
+        target.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="agents-empty-") as empty:
+            result = subprocess.run(
+                ["rsync", "-a", "--delete", empty + "/", str(target) + "/"],
+                capture_output=True,
+            )
+        if result.returncode:
+            return {"success": False, "updated": False, "error": "Empty agents export failed"}
+        version.write_text("absent")
+        return {"success": True, "updated": not unchanged, "absent": True, "renames": {}}

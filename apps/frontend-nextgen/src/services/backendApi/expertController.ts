@@ -6,7 +6,7 @@ export const EXPERT_ENDPOINT = '/openapi/v1/experts';
 
 export function requestExpertPage(query: ExpertQuery, signal?: AbortSignal) {
   return backendRequest<BackendApiEnvelope<ExpertPage>>(EXPERT_ENDPOINT, {
-    method: 'GET', params: { ...query }, injectUserId: false, signal,
+    method: 'GET', params: { ...query, category: query.category || undefined }, injectUserId: false, signal,
   });
 }
 

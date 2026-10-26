@@ -46,3 +46,22 @@ The additive MySQL migration is `sql/2026_10_27_expert_catalog.sql`; local schem
 bootstrap imports the same ORM model. Disable the expert entry point/sync to roll
 back while retaining catalogue timestamps and source history. No ordinary Bot or
 Skill data is migrated or cleared.
+
+### PostgreSQL legacy JSON parsing
+
+PostgreSQL stores historical `ac_bots.ext` as TEXT. The same-version
+`sql/2026_10_27_expert_json_postgresql.sql` installs
+`ac_expert_try_jsonb(text)` for safe extraction, including malformed legacy
+values. Automatic `core.schema.create_all` executes this exact migration before
+bootstrapping tables on PostgreSQL; deployments with `create_schema=false` must
+apply it and `sql/2026_10_27_expert_catalog_postgresql.sql` as schema-owner
+migrations before exposing expert discovery. Runtime
+needs only schema USAGE, function EXECUTE and its ordinary table SELECT grants.
+The helper is STRICT/IMMUTABLE/SECURITY INVOKER, has a fixed `pg_catalog` search
+path and performs no dynamic SQL or data access. Conversion errors become NULL,
+not inferred origin facts. This avoids a PostgreSQL-16-only parser assumption.
+
+A complete commit without an `agents` entry is a legitimate empty catalogue
+(Git does not retain empty directories). An `agents` blob or symlink is invalid
+structure and cannot withdraw prior entries. Failed fetch/tree enumeration never
+reconciles removals.

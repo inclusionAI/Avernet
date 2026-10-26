@@ -228,6 +228,11 @@ def create_all(engine: Engine, *, mysql: bool = False) -> None:
     """
     import_all_models()
     metadatas = _metadatas()
+    from agentclaw.community.core.expert_market.postgres_schema import (
+        install_postgres_expert_json,
+    )
+
+    install_postgres_expert_json(engine)
     lock_name = "agentclaw_schema_bootstrap"
     conn = None
     acquired = False

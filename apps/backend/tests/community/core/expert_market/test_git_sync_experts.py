@@ -2,6 +2,9 @@
 
 import asyncio
 import subprocess
+import shutil
+import pytest
+
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -114,5 +117,76 @@ def test_real_git_bootstrap_unchanged_sync_and_update(catalog, tmp_path, monkeyp
         assert (
             catalog.get(scope, "writer")["identity"][0]["content"] == "updated from Git"
         )
+        # Replacing the agents tree with a blob or symlink is a structural
+        # failure, not an authoritative empty catalogue.
+        shutil.rmtree(root / "agents")
+        (root / "agents").write_text("not a tree")
+        git("add", "-A")
+        git(
+            "-c",
+            "user.name=Expert test",
+            "-c",
+            "user.email=expert@example.test",
+            "commit",
+            "-m",
+            "agents blob",
+        )
+        with pytest.raises(ValueError, match="agents must be a Git tree"):
+            ExpertScanner(catalog).scan_git(
+                root, source_commit=git("rev-parse", "HEAD"), scope=scope
+            )
+        assert catalog.get(scope, "writer") is not None
+        assert not asyncio.run(service.sync())["success"]
+        assert catalog.get(scope, "writer") is not None
+        (root / "agents").unlink()
+        (root / "agents").symlink_to("skills", target_is_directory=True)
+        git("add", "-A")
+        git(
+            "-c",
+            "user.name=Expert test",
+            "-c",
+            "user.email=expert@example.test",
+            "commit",
+            "-m",
+            "agents symlink",
+        )
+        with pytest.raises(ValueError, match="agents must be a Git tree"):
+            ExpertScanner(catalog).scan_git(
+                root, source_commit=git("rev-parse", "HEAD"), scope=scope
+            )
+        assert catalog.get(scope, "writer") is not None
+        assert not asyncio.run(service.sync())["success"]
+        assert catalog.get(scope, "writer") is not None
+        # Git cannot retain an empty directory. Its absence in a completely
+        # enumerated commit means the last expert really was removed.
+        (root / "agents").unlink()
+        git("add", "-A")
+        git(
+            "-c",
+            "user.name=Expert test",
+            "-c",
+            "user.email=expert@example.test",
+            "commit",
+            "-m",
+            "remove last expert",
+        )
+        result = asyncio.run(service.sync())
+        assert result["success"], result
+        assert catalog.get(scope, "writer") is None
+        write_expert(root)
+        git("add", "-A")
+        git(
+            "-c",
+            "user.name=Expert test",
+            "-c",
+            "user.email=expert@example.test",
+            "commit",
+            "-m",
+            "restore expert",
+        )
+        assert asyncio.run(service.sync())["success"]
+        service.config.remote_name = "unavailable-remote"
+        assert not asyncio.run(service.sync())["success"]
+        assert catalog.get(scope, "writer") is not None
     finally:
         service._executor.shutdown(wait=True)

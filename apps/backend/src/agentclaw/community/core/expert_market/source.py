@@ -83,8 +83,12 @@ class GitExpertSource:
                 continue
             metadata, path = record.split(b"\t", 1)
             self._modes[path.decode("utf-8", errors="surrogateescape")] = metadata.split()[0].decode()
-        # An absent tree is different from a successfully enumerated empty tree.
-        self._git("rev-parse", self.commit + ":agents")
+        entry = self._git("ls-tree", "-z", self.commit, "--", "agents")
+        if entry and not entry.startswith(b"040000 tree "):
+            raise ValueError("agents must be a Git tree")
+        # A completely enumerated valid commit may omit agents when its last
+        # expert was deleted. That is authoritative absence, unlike a blob,
+        # symlink, failed fetch or failed enumeration.
         return tuple(self._modes)
 
     def read(self, path: str) -> bytes:

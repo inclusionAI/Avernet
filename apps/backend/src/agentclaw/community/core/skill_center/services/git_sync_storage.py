@@ -331,4 +331,3 @@ class GitSyncStorageIO:
             f"[GitSyncService] Meta JSON refreshed: {meta_oss_path} "
             f"url={meta_url[:120]}... etag={meta_etag}"
         )
-

@@ -25,4 +25,3 @@ export interface ExpertPage {
   total: number;
   items: ExpertSummary[];
 }
-

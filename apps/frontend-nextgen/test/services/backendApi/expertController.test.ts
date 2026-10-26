@@ -40,3 +40,13 @@ test('categories and detail use the same authenticated source and encode the ide
     method: 'GET', params: undefined, injectUserId: false, signal: undefined,
   });
 });
+
+
+test('the all-categories query omits the category filter instead of requesting an empty category', async () => {
+  request.mockResolvedValue({ code: 200000, data: { total: 1, items: [] } });
+  await listExperts({ keyword: '', category: '', sort: 'hot', page_num: 1, page_size: 20 });
+  expect(request).toHaveBeenLastCalledWith('/openapi/v1/experts', {
+    method: 'GET', params: { keyword: '', category: undefined, sort: 'hot', page_num: 1, page_size: 20 },
+    injectUserId: false, signal: undefined,
+  });
+});
