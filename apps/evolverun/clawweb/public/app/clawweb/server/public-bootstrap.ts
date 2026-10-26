@@ -2,8 +2,7 @@ import express from "express";
 import { withWorkflowBackgroundContext } from '@avernet/clawweb-shared/server/services/workflow-background-log';
 import compression from "compression";
 import cookieParser from "cookie-parser";
-import { existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClawevolveModule } from "@avernet/clawevolve";
 import { createInsightRuntime, createInsightRouter, createSessionRecoveryRouter, type SessionRecoveryRuntime } from "@avernet/clawinsight";
@@ -42,6 +41,8 @@ import { AdminUserRepository } from "@avernet/clawweb-shared/server/repositories
 import { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import { getClawWebPublicBaseUrl } from "@avernet/clawweb-shared/server/env";
 import type { ClawWebBootstrap } from "./bootstrap.js";
+import { closeHttpServer } from "./shutdown.js";
+import { mountStaticFrontend } from "./static-frontend.js";
 import { createAuthMeHandler, resolveAuthMeIdentity } from "./auth-me.js";
 import { createWorkflowRepairRuntime } from "./repair-workbench-runtime.js";
 import { AistudioService, resolveAistudioConfig } from "@avernet/clawinsight/server/services/aistudio-service";
@@ -222,20 +223,14 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
       }));
 
       const staticDir = resolve(dirname(fileURLToPath(import.meta.url)), "../web");
-      if (existsSync(staticDir)) {
-        app.use(express.static(staticDir));
-        app.get("{*path}", (request, response) => {
-          if (request.path.startsWith("/api/")) return response.status(404).json({ error: "Not Found" });
-          return response.sendFile(join(staticDir, "index.html"));
-        });
-      }
+      mountStaticFrontend(app, staticDir);
       const server = app.listen(port, "127.0.0.1", () => {
         console.info(`[clawweb] Public runner listening on http://127.0.0.1:${port}`);
       });
       return {
         stop: async () => {
           if (repairPoll) clearInterval(repairPoll);
-          await new Promise<void>((done) => server.close(() => done()));
+          await closeHttpServer(server);
           await clawevolve.stop();
           await closeDatabase();
         },
