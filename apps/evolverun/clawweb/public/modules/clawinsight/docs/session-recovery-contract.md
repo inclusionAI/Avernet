@@ -51,6 +51,14 @@ Repair and self-healing use separate Skills and business adapters. Shared contai
 
 Base owns package startup, the outer hard timeout and its three archives. Business wrappers keep their heartbeat, waiting and reporting protocol. Heartbeat and decision polling use 20 seconds. Credentials are removed from Base's archived task input and passed via a private file outside archive roots; business packages must not echo them into outputs.
 
+### Task-level LLM parameters
+
+The generic Base dispatch envelope accepts optional `runtime.llm: { model?: string, max_tokens?: number }`. When present, `max_tokens` must be an integer from 8,192 through 131,072. Omitted fields inherit the Base configuration; the override applies only to that task execution and does not change global configuration.
+
+Session recovery sends `runtime.llm: { max_tokens: 16384 }` for every dispatch, including resumed executions and simulations, regardless of diagnostic category. It leaves `model` unset so the configured Base model remains in use. This reserves a bounded output-token budget while retaining the existing package, workload ticket, callback and business-state contracts.
+
+Before deploying this ClawWeb caller, update the AIS Base snapshot to support `runtime.llm` and upload the rebuilt recovery Skill package containing the consumer validation. Repair/recovery overrides require the Base's complete `llm` configuration (`model`, `base_url`, and inline `api_key`); the package rejects Snapshot-only or environment-key-only defaults instead of silently ignoring task parameters. Credentials remain deployment-owned and are never supplied in `runtime.llm`. Updating the recovery Skill package alone does not provide Base support. No database migration or global model-default change is required.
+
 ## Persistence and delivery contracts
 
 Creation stores the exact event/delivery identity and request fingerprint in the existing task. Same-key changed requests return 409. Initial and subsequent sends use the existing tool audit claims; an unknown outcome cannot authorize blind replay. Bot message idempotency remains in the tool ledger. Task result delivery uses compact pending references in the existing Task configuration.

@@ -96,7 +96,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
         ...(task.simulation ? { simulation: true } : {}),
         toolsBaseUrl: `${this.deps.publicBaseUrl}/api/insight/v1/internal/monitoring/session-recoveries/${encodeURIComponent(task.taskId)}/executions/${issued.execution.executionId}`,
         credentials: { executionTicket: issued.ticket } },
-      runtime: { clawwebUrl: this.deps.publicBaseUrl, package: { packageId: this.deps.packageId ?? "clawevolve-session-recovery" } } };
+      runtime: { clawwebUrl: this.deps.publicBaseUrl, package: { packageId: this.deps.packageId ?? "clawevolve-session-recovery" }, llm: { max_tokens: 16384 } } };
     let jobId: string;
     try { jobId = await this.deps.ais.execute(task.request.target.entity_id, { "${clawevolve_params}": JSON.stringify(envelope) }, this.deps.snapshotId); }
     catch (error) {
