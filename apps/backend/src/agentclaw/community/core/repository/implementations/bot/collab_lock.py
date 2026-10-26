@@ -84,7 +84,7 @@ class BotCollabLockRepository(
             gmt_create=func.now(),
             gmt_modified=func.now(),
         )
-        with self._db.orm_session() as db:
+        with self._db.transactional_orm_session() as db:
             if db.get_bind().dialect.name == "sqlite":
                 from sqlalchemy.dialects.sqlite import insert
 

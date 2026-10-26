@@ -31,6 +31,9 @@ class InMemorySqliteDB:
         finally:
             db.close()
 
+    def transactional_orm_session(self):
+        return self.orm_session()
+
 
 @pytest.fixture
 def repo():
@@ -161,6 +164,24 @@ def test_steal_does_not_swallow_database_failures(repo, monkeypatch):
     BotCollabLockModel.__table__.drop(repo._db._engine)
     with pytest.raises(OperationalError):
         repo.steal("bot:owner", "new-holder")
+
+
+def test_steal_requires_real_transaction_instead_of_autocommit(monkeypatch):
+    class TransactionOnlyDB(InMemorySqliteDB):
+        def orm_session(self):
+            raise AssertionError("ordinary corp sessions run in AUTOCOMMIT")
+
+        transactional_orm_session = InMemorySqliteDB.orm_session
+
+    monkeypatch.setenv("SERVER_ENV", "dev")
+    engine = create_engine("sqlite:///:memory:")
+    BotCollabLockModel.__table__.create(engine)
+    repository = BotCollabLockRepository(TransactionOnlyDB(engine))
+    try:
+        assert repository.steal("bot:owner", "first").holder_user_id == "first"
+        assert repository.steal("bot:owner", "second").holder_user_id == "second"
+    finally:
+        engine.dispose()
 
 def test_get_by_key_returns_lock_when_exists(repo, monkeypatch):
     """Test that get_by_key returns lock record."""
