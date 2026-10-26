@@ -64,6 +64,7 @@ async def test_grammar_rules_are_re_asked_and_reported_per_entry() -> None:
             {"path": "SOUL.md", "content": "x"},
             {"path": "skills/tidy/SKILL.md", "content": "x"},
             {"path": "../escape", "content": "x"},
+            {"path": "data//faq.csv", "content": "x"},
             {"path": "data/dup.txt", "content": "x"},
             {"path": "data/dup.txt", "content": "y"},
             {"path": "data/tree/", "source": oss_source("x")},
@@ -78,9 +79,10 @@ async def test_grammar_rules_are_re_asked_and_reported_per_entry() -> None:
     assert "identity file" in reasons["SOUL.md"]
     assert "not a resources directory" in reasons["skills/tidy/SKILL.md"]
     assert "'..'" in reasons["../escape"]
+    assert "not normalised" in reasons["data//faq.csv"], "an entry failure, never a crash of the compile"
     assert "more than once" in reasons["data/dup.txt"]
     assert "nests under" in reasons["data/tree/inner.txt"]
-    assert "'path'" in reasons["[7]"]
+    assert "'path'" in reasons["[8]"]
     assert "data/missing.bin" in reasons
     # The oss directory without 'unpack' is refused before any fetch.
     assert "unpack" in reasons["data/tree/"]

@@ -1193,6 +1193,12 @@ def test_relative_path_refusal_is_the_one_rule_both_sides_ask():
         ("a\\b.md", "invalid_path"),
         ("a b.md", "invalid_path"),
         ("", "invalid_path"),
+        # Not normalised: the desired state refuses these on construction, so the
+        # schema must refuse them first or an accepted document crashes the compile.
+        ("data//faq.csv", "invalid_path"),
+        ("data/./x", "invalid_path"),
+        ("data/kb//", "invalid_path"),
+        (".", "invalid_path"),
     ]
     for value, code in refused:
         refusal = relative_path_refusal(value)
@@ -1203,7 +1209,7 @@ def test_relative_path_refusal_is_the_one_rule_both_sides_ask():
     # predicate refuses it as invalid rather than assuming str.
     assert relative_path_refusal(123)[0] == "invalid_path"
     # The legitimate shapes, including the per-segment '..' reading.
-    for value in ("data/..config", "data/a.md", "top/sub/b.txt", "${BASE}/k.md"):
+    for value in ("data/..config", "data/a.md", "top/sub/b.txt", "${BASE}/k.md", "data/kb/"):
         assert relative_path_refusal(value) is None, value
 
 

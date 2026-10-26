@@ -228,8 +228,6 @@ class DesiredSkill:
 def _check_resource_path(path: str, *, tree: bool) -> None:
     refusal = relative_path_refusal(path, what="resource path")
     _require(refusal is None, refusal[1] if refusal else "")
-    segments = path.rstrip("/").split("/")
-    _require(all(segment not in ("", ".") for segment in segments), f"resource path {path!r} is not normalised")
     # The workspace root is the resources root; what may not be a resource is the protected set
     # (``core/workspace/protected_entries``: identity files, the skills trees, the engine's state and
     # configuration, dotfiles), which other constructs or the engine own.

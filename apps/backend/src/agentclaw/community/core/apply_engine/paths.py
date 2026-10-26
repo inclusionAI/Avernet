@@ -24,7 +24,9 @@ def relative_path_refusal(value: Any, *, what: str = "path") -> tuple[str, str] 
     """``(code, message)`` for a value the workspace cannot accept, or ``None`` when it is usable.
 
     ``..`` is checked **per segment**, not as a substring: a directory named
-    ``..config`` is legitimate and contains the two characters.
+    ``..config`` is legitimate and contains the two characters. A path is
+    normalised: no empty segment (``a//b``) and no ``.`` segment (``a/./b``),
+    one trailing ``/`` allowed, since it marks a directory entry.
     """
     if not isinstance(value, str) or not value:
         return "invalid_path", f"{what} must be a non-empty string"
@@ -35,6 +37,8 @@ def relative_path_refusal(value: Any, *, what: str = "path") -> tuple[str, str] 
     segments = value.split("/")
     if any(segment == ".." for segment in segments):
         return "path_traversal", f"{what} must not contain a '..' segment"
+    if any(segment in ("", ".") for segment in (value[:-1] if value.endswith("/") else value).split("/")):
+        return "invalid_path", f"{what} {value!r} is not normalised: an empty or '.' segment"
     if not PATH_CHARS_RE.match(value):
         return (
             "invalid_path",
