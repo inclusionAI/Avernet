@@ -9,7 +9,7 @@ import {
 
 jest.mock('@/services/backendApi/httpClient', () => ({
   backendRequest: jest.fn(),
-  BackendRequestError: class extends Error {},
+  BackendRequestError: jest.requireActual('@/services/backendApi/httpClient').BackendRequestError,
 }));
 const request = jest.mocked(backendRequest);
 
@@ -92,4 +92,13 @@ test('creates from an expert using the original BotCreate body and polls the ori
     method: 'GET',
     injectUserId: true,
   });
+});
+
+
+test('Service classifies definite rejection separately from unknown submission outcomes', () => {
+  const { classifyExpertSubmissionFailure } = jest.requireActual('@/services/expertMarketService');
+  const { BackendRequestError } = jest.requireActual('@/services/backendApi/httpClient');
+  expect(classifyExpertSubmissionFailure(new BackendRequestError('duplicate', { status: 409, apiPath: '/experts' }))).toBe('rejected');
+  expect(classifyExpertSubmissionFailure(new BackendRequestError('upstream failed', { status: 500, apiPath: '/experts' }))).toBe('unknown');
+  expect(classifyExpertSubmissionFailure(new Error('connection lost'))).toBe('unknown');
 });

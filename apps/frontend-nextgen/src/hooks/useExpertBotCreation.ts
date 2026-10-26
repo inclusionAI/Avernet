@@ -1,9 +1,9 @@
-import { BackendRequestError } from '@/services/backendApi/httpClient';
 import type { BotCreateInput } from '@/services/botWorkshop';
 import { botAvatarService } from '@/services/botWorkshop/botAvatarService';
 import { toBotCreateRequest } from '@/services/botWorkshop/botCreatePolicy';
 import {
   createExpertBot,
+  classifyExpertSubmissionFailure,
   getExpertBotCreationStatus,
   type ExpertBotAccepted,
   type ExpertBotCreationStatus,
@@ -82,11 +82,7 @@ export function useExpertBotCreation(open: boolean) {
         setAccepted(result);
       } catch (failure) {
         // 明确的请求校验拒绝允许用户修正；连接中断/5xx/无句柄不能推断未创建。
-        const rejected =
-          failure instanceof BackendRequestError &&
-          failure.status !== undefined &&
-          failure.status >= 400 &&
-          failure.status < 500;
+        const rejected = classifyExpertSubmissionFailure(failure) === 'rejected';
         setUnknown(!rejected);
         locked.current = !rejected;
         setError(failure instanceof Error ? failure.message : '创建结果未知');

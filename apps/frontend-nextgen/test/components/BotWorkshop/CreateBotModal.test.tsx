@@ -331,7 +331,7 @@ test('详情入口固定专家，202后留弹窗等待原任务，Apply成功后
     '/openapi/v1/experts/product-manager/bots',
     expect.objectContaining({
       data: {
-        bot_name: '产品经理',
+        bot_name: '我的产品经理',
         bot_desc: '梳理需求',
         engine: 'openclaw',
         cluster_name: 'ACRA',
@@ -366,7 +366,7 @@ test('管理入口两份草稿独立，换专家保留自定义名称和职责',
   fireEvent.change(screen.getByLabelText(/Bot 名称/), { target: { value: '空白草稿' } });
   fireEvent.click(screen.getByRole('button', { name: '从专家模板创建' }));
   fireEvent.click(await screen.findByRole('button', { name: '产品经理' }));
-  expect(screen.getByLabelText(/Bot 名称/)).toHaveValue('产品经理');
+  expect(screen.getByLabelText(/Bot 名称/)).toHaveValue('我的产品经理');
   fireEvent.change(screen.getByLabelText(/Bot 名称/), { target: { value: '我的助手' } });
   fireEvent.change(screen.getByPlaceholderText('简要说明这个 Bot 能帮助你完成什么'), {
     target: { value: '自定义职责' },
@@ -445,7 +445,7 @@ test('同名409保留表单与用户输入，允许修正再提交', async () =>
   );
   fireEvent.click(screen.getByRole('button', { name: '创建云端 Bot' }));
   await screen.findByText('Bot名称已存在');
-  expect(screen.getByLabelText(/Bot 名称/)).toHaveValue('产品经理');
+  expect(screen.getByLabelText(/Bot 名称/)).toHaveValue('我的产品经理');
   expect(screen.getByRole('button', { name: '创建云端 Bot' })).toBeEnabled();
 });
 
@@ -512,7 +512,7 @@ test('模板切换只替换自动预填字段，取消和关闭重开不会保�
   fireEvent.click(screen.getByRole('button', { name: '从专家模板创建' }));
   fireEvent.click(await screen.findByRole('button', { name: '产品经理' }));
   fireEvent.click(screen.getByRole('button', { name: '架构师' }));
-  expect(screen.getByLabelText(/Bot 名称/)).toHaveValue('架构师');
+  expect(screen.getByLabelText(/Bot 名称/)).toHaveValue('我的架构师');
   expect(screen.getByPlaceholderText('简要说明这个 Bot 能帮助你完成什么')).toHaveValue('设计架构');
   fireEvent.click(screen.getByRole('button', { name: '取消' }));
   expect(props.onClose).toHaveBeenCalledTimes(1);
@@ -521,4 +521,11 @@ test('模板切换只替换自动预填字段，取消和关闭重开不会保�
   view.rerender(<CreateBotModal {...props} scenario="cloud" />);
   expect(screen.getByLabelText(/Bot 名称/)).toHaveValue('');
   expect(screen.getByRole('button', { name: '空白创建' })).toHaveAttribute('aria-pressed', 'true');
+});
+
+
+test('详情与模板入口自动名称使用我的前缀且总长最多40字符', async () => {
+  const props = { spaces: [{ id: '10', name: '个人空间', ownership: 'personal' as const, canCreate: true }], creating: false, onClose: jest.fn(), onSubmit: jest.fn() };
+  render(<CreateBotModal {...props} scenario="cloud" expert={{ ...identityExpert, name: '长'.repeat(40) }} />);
+  expect(screen.getByLabelText(/Bot 名称/)).toHaveValue('我的' + '长'.repeat(38));
 });

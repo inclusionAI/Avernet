@@ -2,7 +2,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import type { ExpertSummary } from '@/domain/expertMarket';
 import { useExpertCatalog } from '@/hooks/useExpertCatalog';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 export function ExpertTemplatePicker({
   selected,
@@ -13,7 +13,14 @@ export function ExpertTemplatePicker({
 }) {
   const [keyword, setKeyword] = useState('');
   const [page, setPage] = useState(1);
-  const catalog = useExpertCatalog({ keyword, category: '', sort: 'hot', page_num: page, page_size: 20 });
+  const [queryKeyword, setQueryKeyword] = useState('');
+  const [composing, setComposing] = useState(false);
+  useEffect(() => {
+    if (composing || keyword.trim() === queryKeyword) return;
+    const timer = setTimeout(() => { setQueryKeyword(keyword.trim()); setPage(1); }, 300);
+    return () => clearTimeout(timer);
+  }, [keyword, queryKeyword, composing]);
+  const catalog = useExpertCatalog({ keyword: queryKeyword, category: '', sort: 'hot', page_num: page, page_size: 20 });
   return (
     <section aria-label="选择专家模板" className="space-y-2 rounded-lg border border-input p-3">
       <Input
@@ -23,8 +30,9 @@ export function ExpertTemplatePicker({
         value={keyword}
         onChange={(event) => {
           setKeyword(event.target.value);
-          setPage(1);
         }}
+        onCompositionStart={() => setComposing(true)}
+        onCompositionEnd={(event) => { setKeyword(event.currentTarget.value); setComposing(false); }}
       />
       {catalog.loading ? (
         <p role="status">正在加载专家…</p>

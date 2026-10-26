@@ -76,3 +76,10 @@ export async function getExpertBotCreationStatus(botId: string): Promise<ExpertB
     path,
   );
 }
+
+
+/** Service owns transport error interpretation; presentation consumes only the outcome category. */
+export function classifyExpertSubmissionFailure(failure: unknown): 'rejected' | 'unknown' {
+  return failure instanceof BackendRequestError && failure.status !== undefined && failure.status >= 400 && failure.status < 500
+    ? 'rejected' : 'unknown';
+}

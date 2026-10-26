@@ -24,6 +24,8 @@ interface CreateBotModalProps {
   onSubmit: (input: BotCreateInput) => Promise<void>;
 }
 
+const expertBotName = (expert?: ExpertSummary): string => expert ? `我的${expert.name}`.slice(0, 40) : '';
+
 const initialValues = (scenario: BotCreateScenario, spaces: BotCreateSpace[]): BotCreateInput => {
   const firstSpace = spaces[0] ?? { id: '', ownership: 'personal' as const };
   return {
@@ -82,7 +84,7 @@ const CreateBotModal: React.FC<CreateBotModalProps> = ({
   const selectExpert = (next: ExpertSummary) => {
     setValues((current) => ({
       ...current,
-      name: !current.name || current.name === selectedExpert?.name.slice(0, 40) ? next.name.slice(0, 40) : current.name,
+      name: !current.name || current.name === expertBotName(selectedExpert) ? expertBotName(next) : current.name,
       description:
         !current.description || current.description === selectedExpert?.description.slice(0, 200)
           ? next.description.slice(0, 200)
@@ -106,7 +108,7 @@ const CreateBotModal: React.FC<CreateBotModalProps> = ({
       const initial = initialValues(scenario, suppliedSpaces.length ? suppliedSpaces : spaces);
       setValues(
         fixedExpert
-          ? { ...initial, name: fixedExpert.name.slice(0, 40), description: fixedExpert.description.slice(0, 200) }
+          ? { ...initial, name: expertBotName(fixedExpert), description: fixedExpert.description.slice(0, 200) }
           : initial,
       );
       setSelectedExpert(fixedExpert);
@@ -226,7 +228,7 @@ const CreateBotModal: React.FC<CreateBotModalProps> = ({
                         setValues(
                           (mode ? templateDraft.current : blankDraft.current) || {
                             ...values,
-                            name: mode ? selectedExpert?.name || '' : '',
+                            name: mode ? expertBotName(selectedExpert) : '',
                             description: mode ? selectedExpert?.description || '' : '',
                           },
                         );
