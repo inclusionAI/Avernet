@@ -5,7 +5,8 @@
 # It does NOT include internal dependencies (bcsfuse_internal, ant-sofapy-base, etc.)
 #
 # Build:
-#   docker build -t bcsfuse-opencore:p1-g8 .
+#   docker build -f apps/bcsfuse/Dockerfile -t bcsfuse-opencore:p1-g8 .
+# Run the build from the repository root so the shared package uses the same revision.
 #
 # Run:
 #   docker run -d -p 8765:8765 -e BCSFUSE_PROVIDER_MODE=dev_smoke bcsfuse-opencore:p1-g8
@@ -29,21 +30,22 @@ RUN useradd --create-home --shell /bin/bash appuser
 WORKDIR /app
 
 # Copy dependency files first for better layer caching
-COPY pyproject.toml README.md ./
+COPY middleware/python/avernet-search /opt/avernet-search
+COPY apps/bcsfuse/pyproject.toml apps/bcsfuse/README.md ./
 
 # Install dependencies
 RUN python -m pip install --no-cache-dir --upgrade pip \
-    && python -m pip install --no-cache-dir -e ".[dev]"
+    && python -m pip install --no-cache-dir /opt/avernet-search -e ".[dev]"
 
 # Copy application code
-COPY src ./src
-COPY tests ./tests
-COPY schemas ./schemas
-COPY configs ./configs
-COPY main.py ./
+COPY apps/bcsfuse/src ./src
+COPY apps/bcsfuse/tests ./tests
+COPY apps/bcsfuse/schemas ./schemas
+COPY apps/bcsfuse/configs ./configs
+COPY apps/bcsfuse/main.py ./
 
 # Copy documentation and legal
-COPY LEGAL.md FUSE_API_LOGIC.md ./
+COPY apps/bcsfuse/LEGAL.md apps/bcsfuse/FUSE_API_LOGIC.md ./
 
 # Set ownership to non-root user
 RUN chown -R appuser:appuser /app

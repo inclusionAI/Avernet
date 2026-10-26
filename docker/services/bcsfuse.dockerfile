@@ -1,10 +1,10 @@
 # BCSFuse Runtime Image for ACK / Aliyun Deployment
 #
-# Build context: repository root (so we can SELECTIVELY copy only apps/bcsfuse).
+# Build context: repository root (TC and its shared search package).
 # This keeps internal modules and other secrets out of the bcsfuse image.
 #
 # Usage from repo root:
-#   docker build -f docker/bcsfuse.Dockerfile -t bcsfuse:local .
+#   docker build -f docker/services/bcsfuse.dockerfile -t bcsfuse:local .
 #
 # Run smoke check:
 #   docker run --rm -p 8765:8765 -e BCSFUSE_PROVIDER_MODE=dev_smoke bcsfuse:local
@@ -42,11 +42,13 @@ WORKDIR /app
 
 # Copy package metadata first for layer caching.
 COPY apps/bcsfuse/pyproject.toml apps/bcsfuse/README.md ./
+COPY middleware/python/avernet-search/pyproject.toml middleware/python/avernet-search/README.md /opt/avernet-search/
+COPY middleware/python/avernet-search/src /opt/avernet-search/src
 
 # Install package in editable mode with dev extras (tests are kept in image
 # for optional container self-verification; they are not run at startup).
 RUN python -m pip install --no-cache-dir --upgrade pip \
-    && python -m pip install --no-cache-dir -e ".[dev]"
+    && python -m pip install --no-cache-dir /opt/avernet-search -e ".[dev]"
 
 # Copy only the public bcsfuse source tree. We intentionally avoid copying
 # apps/backend, apps/bcs, apps/frontend, or any sibling internal modules.

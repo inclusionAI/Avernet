@@ -2,6 +2,8 @@
 
 import logging
 
+from avernet_search.core.selection import select_rank_union
+
 from src.application.services.worker_vector_match_types import FragmentProfileCandidate
 from src.domain.services.retrieval_logging import log_rows
 
@@ -26,24 +28,15 @@ def select_rerank_candidates(
     max_quota, weighted_quota = (budget + 1) // 2, budget // 2
     max_head = {c.profile_key for c in by_max[:max_quota]}
     weighted_head = {c.profile_key for c in weighted[:weighted_quota]}
-    selected = max_head | weighted_head
     decisions = {
-        key: "both_heads" if key in max_head & weighted_head
-        else "max_head" if key in max_head else "weighted_head"
-        for key in selected
+        key: reason.replace("primary", "max").replace("secondary", "weighted")
+        for key, reason in select_rank_union(
+            [c.profile_key for c in by_max], [c.profile_key for c in weighted],
+            budget=budget,
+        ).items()
     }
-    initial_count = len(selected)
-    tails = [(iter(by_max[max_quota:]), "max_refill"),
-             (iter(weighted[weighted_quota:]), "weighted_refill")]
-    while len(selected) < min(budget, len(candidates)):
-        for tail, reason in tails:
-            for candidate in tail:
-                if candidate.profile_key not in selected:
-                    selected.add(candidate.profile_key)
-                    decisions[candidate.profile_key] = reason
-                    break
-            if len(selected) >= min(budget, len(candidates)):
-                break
+    selected = set(decisions)
+    initial_count = len(max_head | weighted_head)
 
     max_ranks = {c.profile_key: i for i, c in enumerate(by_max, 1)}
     weighted_ranks = {c.profile_key: i for i, c in enumerate(weighted, 1)}

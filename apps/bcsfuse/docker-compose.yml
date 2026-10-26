@@ -18,8 +18,8 @@ version: '3.8'
 services:
   bcsfuse:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: apps/bcsfuse/Dockerfile
     image: bcsfuse-opencore:p1-g8
     container_name: bcsfuse-opencore-g8
     ports:
