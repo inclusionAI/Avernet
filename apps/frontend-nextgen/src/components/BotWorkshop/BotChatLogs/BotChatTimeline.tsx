@@ -11,8 +11,8 @@ const formatLatency = (value: number) => (value >= 1000 ? `${(value / 1000).toFi
 const iconFor = (type: string) => {
   const upper = type.toUpperCase();
   if (upper === 'GENERATION' || upper === 'LLM')
-    return <span className="size-2 rounded-full bg-[var(--color-primary)]" />;
-  return <Terminal className="size-3 text-[var(--color-primary)]" />;
+    return <span className="size-2 rounded-full bg-primary" />;
+  return <Terminal className="size-3 text-primary" />;
 };
 
 function ObservationNode({
@@ -31,15 +31,15 @@ function ObservationNode({
   return (
     <div>
       <div className="relative">
-        {level > 0 ? <span className="absolute left-[-16px] top-1/2 h-px w-4 bg-[var(--color-border)]" /> : null}
+        {level > 0 ? <span className="absolute left-[-16px] top-1/2 h-px w-4 bg-border" /> : null}
         <Button
           variant="ghost"
           size="sm"
           className={cn(
             'h-auto w-full justify-start gap-2 rounded-lg border px-3 py-2 text-left text-xs font-normal',
             selectedId === item.id
-              ? 'border-[var(--color-primary-weak)] bg-[var(--color-primary-soft)] text-[var(--color-primary)]'
-              : 'border-transparent hover:bg-[var(--color-panel-muted)]',
+              ? 'border-primary/50 bg-primary/10 text-primary'
+              : 'border-transparent hover:bg-muted',
           )}
           style={{ marginLeft: level * 16, width: `calc(100% - ${level * 16}px)` }}
           onClick={(event) => {
@@ -54,20 +54,20 @@ function ObservationNode({
           {hasChildren ? (
             <span data-observation-toggle className="flex size-4 shrink-0 items-center justify-center">
               {expanded ? (
-                <ChevronDown className="size-3 text-[var(--color-muted)]" />
+                <ChevronDown className="size-3 text-muted-foreground" />
               ) : (
-                <ChevronRight className="size-3 text-[var(--color-muted)]" />
+                <ChevronRight className="size-3 text-muted-foreground" />
               )}
             </span>
           ) : (
             <span className="size-4 shrink-0" />
           )}
-          <span className="flex size-4 shrink-0 items-center justify-center rounded bg-[var(--color-panel-strong)]">
+          <span className="flex size-4 shrink-0 items-center justify-center rounded bg-secondary">
             {iconFor(item.type)}
           </span>
           <span className="min-w-0 flex-1 truncate font-medium">{item.name || item.type}</span>
-          <span className="shrink-0 text-[11px] text-[var(--color-success)]">✓</span>
-          <span className="shrink-0 font-mono text-[10px] text-[var(--color-muted)]">
+          <span className="shrink-0 text-[11px] text-success">✓</span>
+          <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
             {formatLatency(item.latencyMs)}
           </span>
         </Button>
@@ -95,31 +95,31 @@ interface Props {
 
 export function BotChatTimeline({ detail, selection, onSelect }: Props) {
   return (
-    <section className="flex min-h-[560px] min-w-0 flex-col border-b border-[var(--color-border)] bg-[var(--color-panel-muted)] lg:border-b-0 lg:border-r">
-      <div className="border-b border-[var(--color-border)] px-4 py-3">
-        <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--color-muted)]">Timeline</div>
-        <div className="mt-1 truncate text-xs text-[var(--color-muted)]">当前：{detail.name || detail.id}</div>
+    <section className="flex min-h-[560px] min-w-0 flex-col border-b border-border bg-muted lg:border-b-0 lg:border-r">
+      <div className="border-b border-border px-4 py-3">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Timeline</div>
+        <div className="mt-1 truncate text-xs text-muted-foreground">当前：{detail.name || detail.id}</div>
       </div>
       <div className="app-scrollbar min-h-0 flex-1 overflow-auto p-3">
-        <div className="relative space-y-0 before:absolute before:bottom-3 before:left-[21px] before:top-4 before:w-px before:bg-[var(--color-border)]">
+        <div className="relative space-y-0 before:absolute before:bottom-3 before:left-[21px] before:top-4 before:w-px before:bg-border">
           <Button
             variant="ghost"
             size="sm"
             className={cn(
               'relative z-10 h-auto w-full justify-start gap-3 rounded-lg border px-3 py-2 text-left',
               selection.kind === 'trace'
-                ? 'border-[var(--color-primary-weak)] bg-white shadow-sm'
-                : 'border-transparent hover:bg-white/70',
+                ? 'border-primary/50 bg-card shadow-sm'
+                : 'border-transparent hover:bg-card/70',
             )}
             onClick={() => onSelect({ kind: 'trace' })}
           >
-            <span className="flex size-4 shrink-0 items-center justify-center rounded bg-[var(--color-primary-soft)]">
-              <Zap className="size-3 fill-[var(--color-primary)] text-[var(--color-primary)]" />
+            <span className="flex size-4 shrink-0 items-center justify-center rounded bg-primary/10">
+              <Zap className="size-3 fill-primary text-primary" />
             </span>
-            <span className="min-w-0 flex-1 truncate text-xs font-semibold text-[var(--color-fg)]">
+            <span className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">
               {detail.name || detail.id}
             </span>
-            <span className="shrink-0 font-mono text-[10px] text-[var(--color-muted)]">
+            <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
               {formatLatency(detail.latencyMs)}
             </span>
           </Button>
@@ -133,7 +133,7 @@ export function BotChatTimeline({ detail, selection, onSelect }: Props) {
             />
           ))}
           {!detail.observations.length ? (
-            <div className="relative z-10 flex items-center gap-2 px-3 py-5 text-xs text-[var(--color-muted)]">
+            <div className="relative z-10 flex items-center gap-2 px-3 py-5 text-xs text-muted-foreground">
               <Circle className="size-3" />
               暂无 Observation 数据
             </div>
