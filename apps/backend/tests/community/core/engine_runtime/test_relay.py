@@ -29,6 +29,7 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineDeviceNotReadyError,
     EngineResourceNotFoundError,
     EngineStageNotLiveError,
+    EngineDefaultModelNotConfiguredError,
     EngineUpstreamError,
 )
 from agentclaw.community.core.engine_runtime.relay import EngineRuntimeRelay
@@ -349,6 +350,34 @@ async def test_success_false_inside_http_200_raises():
     with pytest.raises(EngineUpstreamError):
         await _relay(transport=transport).call(
             bot_id=BOT, owner_id=OWNER, stage="draft", method="GET", path="/api/sessions"
+        )
+
+
+@pytest.mark.asyncio
+async def test_default_model_not_configured_is_its_own_error():
+    """A failure envelope flagged ``error: default_model_not_configured`` is the
+    engine saying its config names no default model — an operator-side gap,
+    distinguished from a generic upstream failure so the public surface can
+    answer 409 instead of 502."""
+    transport = _Transport(
+        {
+            "success": False,
+            "error": "default_model_not_configured",
+            "message": "agents.defaults.model is not set",
+        }
+    )
+    with pytest.raises(EngineDefaultModelNotConfiguredError):
+        await _relay(transport=transport).call(
+            bot_id=BOT, owner_id=OWNER, stage="draft", method="GET", path="/api/models/default"
+        )
+
+
+@pytest.mark.asyncio
+async def test_other_error_discriminators_stay_upstream_errors():
+    transport = _Transport({"success": False, "error": "tool_not_found", "message": "x"})
+    with pytest.raises(EngineUpstreamError):
+        await _relay(transport=transport).call(
+            bot_id=BOT, owner_id=OWNER, stage="draft", method="GET", path="/api/models/default"
         )
 
 

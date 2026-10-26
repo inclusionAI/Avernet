@@ -15,7 +15,8 @@ from engine.community.api.models.schemas import ModelsListResponse
 from engine.community.api.response import ApiResponse
 from engine.community.core.engine.capability import Capability
 from engine.community.core.engine.exceptions import CapabilityNotSupportedError
-from engine.community.core.models.models import Model
+from engine.community.core.models.exceptions import DefaultModelNotConfiguredError
+from engine.community.core.models.models import DefaultModel, Model
 
 router = APIRouter(prefix="/api/models", tags=["models"])
 
@@ -71,6 +72,17 @@ def _model_to_dict(model: Model) -> dict:
     return result
 
 
+def _default_model_to_dict(default: DefaultModel) -> dict:
+    """``/api/models/default`` payload: a ``/api/models`` entry plus ``fallbacks``.
+
+    The model keys are exactly those of a ``/api/models`` entry so a client
+    can map both with one function.
+    """
+    result = _model_to_dict(default.model)
+    result["fallbacks"] = list(default.fallbacks)
+    return result
+
+
 def _models_plugin():
     """Resolve the active engine's ModelsService via EngineManager."""
     from engine.community.manager import EngineManager
@@ -101,6 +113,48 @@ async def list_models() -> ModelsListResponse:
             "models": [_model_to_dict(m) for m in models],
             "total": len(models),
         },
+        warning=warning,
+    )
+
+
+@router.get("/default", response_model=ApiResponse)
+async def get_default_model() -> ApiResponse:
+    """The model the engine uses when a session / run names none.
+
+    Declared before ``/{model_id:path}`` so the literal ``default`` segment
+    wins; a model whose id is literally ``default`` is unreachable through
+    the single-model route (no engine ships one). Answers:
+
+    * 200 ``data`` = a ``/api/models`` entry plus ``fallbacks``;
+    * 200 ``success: false`` with ``error: "default_model_not_configured"``
+      when the engine cannot name a default — an engine-side
+      misconfiguration, flagged by the ``error`` discriminator so the caller
+      can tell it from a transport failure without a second status code;
+    * 501 when the engine does not declare ``model.default.get``.
+    """
+    warning = check_capability(Capability.MODEL_DEFAULT_GET)
+    try:
+        plugin = _models_plugin()
+        default = await plugin.get_default_model()
+    except CapabilityNotSupportedError as e:
+        raise HTTPException(status_code=501, detail=str(e)) from e
+    except DefaultModelNotConfiguredError as e:
+        return ApiResponse(
+            success=False,
+            error="default_model_not_configured",
+            message=f"引擎未配置默认模型: {e}",
+            warning=warning,
+        )
+    except Exception as e:  # noqa: BLE001 — surface as failure response
+        return ApiResponse(
+            success=False,
+            message=f"获取默认模型失败: {e}",
+            warning=warning,
+        )
+
+    return ApiResponse(
+        success=True,
+        data=_default_model_to_dict(default),
         warning=warning,
     )
 

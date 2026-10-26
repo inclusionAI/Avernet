@@ -27,4 +27,25 @@ class Model(BaseModel):
     provider: str = Field(description="Provider name; may be empty.")
 
 
-__all__ = ["Model"]
+class DefaultModel(Model):
+    """The model the bot's engine uses when a session names none."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "model_id": "openai/gpt-5.3",
+                "name": "GPT-5.3",
+                "provider": "openai",
+                "fallbacks": ["anthropic/claude-sonnet-4-5"],
+            }
+        }
+    )
+
+    fallbacks: list[str] = Field(
+        default_factory=list,
+        description="Models the engine tries, in order, when the default "
+        "fails a request. Empty for engines without a fallback chain.",
+    )
+
+
+__all__ = ["DefaultModel", "Model"]

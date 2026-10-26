@@ -17,7 +17,8 @@ from engine.community.api.models.router import router as models_router
 from engine.community.core.engine.base import BaseEngine
 from engine.community.core.engine.capability import Capability, EngineCapabilities
 from engine.community.core.engine.registry import EngineRegistry
-from engine.community.core.models.models import Model, ModelCapabilities, ModelPricing
+from engine.community.core.models.exceptions import DefaultModelNotConfiguredError
+from engine.community.core.models.models import DefaultModel, Model, ModelCapabilities, ModelPricing
 from engine.community.manager import EngineManager
 
 
@@ -26,7 +27,11 @@ class _EngineWithModels(BaseEngine):
     version = "1.0.0"
 
     _CAPABILITIES = EngineCapabilities(
-        supported={Capability.MODEL_LIST, Capability.MODEL_SWITCH},
+        supported={
+            Capability.MODEL_LIST,
+            Capability.MODEL_SWITCH,
+            Capability.MODEL_DEFAULT_GET,
+        },
     )
 
     @property
@@ -201,3 +206,81 @@ class TestGetModel:
     def test_unsupported_engine_returns_501(self, lean_manager, client):
         resp = client.get("/api/models/openai/gpt-5.3")
         assert resp.status_code == 501
+
+
+class TestGetDefaultModel:
+    def test_returns_model_entry_plus_fallbacks(self, rich_manager, client):
+        plugin = MagicMock()
+        plugin.list_models = AsyncMock(return_value=_sample_models())
+        plugin.get_default_model = AsyncMock(return_value=DefaultModel(
+            model=_sample_models()[0],
+            fallbacks=["anthropic/claude-3.5-sonnet"],
+        ))
+        rich_manager._active_engine._models = plugin
+
+        resp = client.get("/api/models/default")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["success"] is True
+        data = body["data"]
+        # Same keys as a /api/models entry …
+        assert data["id"] == "openai/gpt-5.3"
+        assert data["provider"] == "openai"
+        assert data["provider_id"] == "gpt-5.3"
+        assert data["display_name"] == "OpenAI GPT-5.3"
+        assert data["capabilities"]["vision"] is True
+        # … plus the fallback chain, and nothing about where it was read from.
+        assert data["fallbacks"] == ["anthropic/claude-3.5-sonnet"]
+        assert "source" not in data
+        assert "source_detail" not in data
+        plugin.get_default_model.assert_awaited_once()
+        # The literal segment is routed to the default handler, not to
+        # get_model("default") — the catalogue is never scanned here.
+        plugin.list_models.assert_not_awaited()
+
+    def test_not_configured_is_a_flagged_refusal(self, rich_manager, client):
+        plugin = MagicMock()
+        plugin.get_default_model = AsyncMock(
+            side_effect=DefaultModelNotConfiguredError("agents.defaults.model is not set"),
+        )
+        rich_manager._active_engine._models = plugin
+
+        resp = client.get("/api/models/default")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["success"] is False
+        assert body["error"] == "default_model_not_configured"
+        assert "agents.defaults.model is not set" in body["message"]
+
+    def test_upstream_failure_is_reported_not_raised(self, rich_manager, client):
+        plugin = MagicMock()
+        plugin.get_default_model = AsyncMock(side_effect=RuntimeError("gateway down"))
+        rich_manager._active_engine._models = plugin
+
+        resp = client.get("/api/models/default")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["success"] is False
+        assert body["error"] is None          # transport failure, not a refusal
+        assert "gateway down" in body["message"]
+
+    def test_unsupported_engine_returns_501(self, lean_manager, client):
+        resp = client.get("/api/models/default")
+        assert resp.status_code == 501
+
+    def test_engine_with_list_but_without_default_capability_returns_501(self, client):
+        class _ListOnly(_EngineWithModels):
+            name = "list-only"
+            _CAPABILITIES = EngineCapabilities(supported={Capability.MODEL_LIST})
+
+        m = _install_manager(_ListOnly)
+        try:
+            plugin = MagicMock()
+            plugin.get_default_model = AsyncMock()
+            m._active_engine._models = plugin
+            resp = client.get("/api/models/default")
+            assert resp.status_code == 501
+            plugin.get_default_model.assert_not_awaited()
+        finally:
+            EngineManager.reset_instance()

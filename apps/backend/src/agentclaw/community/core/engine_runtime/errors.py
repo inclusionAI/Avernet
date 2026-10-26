@@ -98,6 +98,18 @@ class EngineResourceNotFoundError(EngineRuntimeError):
     """
 
 
+class EngineDefaultModelNotConfiguredError(EngineRuntimeError):
+    """The engine answered ``/api/models/default`` but could not name a model.
+
+    The engine reports this as a flagged refusal — ``success: false`` with
+    ``error: "default_model_not_configured"`` (``api/models/router.py``) — so
+    the relay can tell it from a transport failure. It means the bot's engine
+    config has no default (OpenClaw with ``agents.defaults.model`` unset, a
+    relay too old to answer), which the operator fixes on the device; a
+    generic upstream error would send them chasing an outage instead.
+    """
+
+
 class EngineUpstreamError(EngineRuntimeError):
     """The device answered, but not with a usable success.
 
@@ -111,6 +123,7 @@ __all__ = [
     "EngineRuntimeError",
     "EngineBotTypeNotSupportedError",
     "EngineCapabilityUnsupportedError",
+    "EngineDefaultModelNotConfiguredError",
     "EngineDeviceNotReadyError",
     "EngineHistoryDepthExceededError",
     "EngineResourceNotFoundError",

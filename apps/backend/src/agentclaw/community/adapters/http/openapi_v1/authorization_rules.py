@@ -333,6 +333,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         PermissionLevel.MEMBER
     ),
     ("GET", "/openapi/v1/bots/{bot_id}/models"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bots/{bot_id}/models/default"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/models/{model_id:path}"): Check(
         PermissionLevel.MEMBER
     ),

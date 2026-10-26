@@ -20,7 +20,13 @@ import logging
 from typing import Any
 
 from engine.community.core.engine.context import AuthContext
-from engine.community.core.models.models import Model, ModelCapabilities, Provider
+from engine.community.core.models.models import (
+    DefaultModel,
+    Model,
+    ModelCapabilities,
+    Provider,
+    find_catalogue_model,
+)
 from engine.community.core.models.protocol import ModelsService
 from engine.community.plugin_api.openclaw.models_port import OpenClawModelsPort
 
@@ -204,6 +210,47 @@ class OpenClawModelsAdapter(ModelsService):
             except Exception as e:  # noqa: BLE001
                 log.warning(f"[list_providers] convert failed: {e}")
         return out
+
+    async def get_default_model(
+        self, auth: AuthContext | None = None,
+    ) -> DefaultModel:
+        """``agents.defaults.model`` as a catalogue-shaped entry.
+
+        The port returns the configured value as a primitive dict, e.g. for
+        an ``openclaw.json`` carrying::
+
+            {"agents": {"defaults": {"model": {
+                "primary": "openai-compatible/glm-5.2",
+                "fallbacks": ["openai/gpt-4"]}}}}
+
+        ``raw`` is ``{"model": "openai-compatible/glm-5.2",
+        "fallbacks": ["openai/gpt-4"]}`` (the plain-string form
+        ``"model": "openai-compatible/glm-5.2"`` yields the same dict with
+        ``fallbacks == []``). The configured id is matched against the
+        catalogue so the answer carries the same ``display_name`` /
+        capabilities the picker shows; an id the catalogue does not know (a
+        model configured but not yet advertised by ``models.list``) is
+        returned as a minimal entry. Raises
+        ``DefaultModelNotConfiguredError`` (from the port) when OpenClaw has
+        no default configured.
+        """
+        raw = await self._port.default_model()
+        configured = str(raw["model"])
+        provider = configured.split("/", 1)[0] if "/" in configured else "unknown"
+        model_id = _normalize_model_id(configured, provider)
+        match = find_catalogue_model(model_id, await self.list_models(auth))
+        model = match or Model(
+            id=model_id,
+            provider=provider,
+            provider_id=configured,
+            name=configured.rsplit("/", 1)[-1],
+            display_name=configured.rsplit("/", 1)[-1],
+            capabilities=_DEFAULT_CAPABILITIES,
+        )
+        return DefaultModel(
+            model=model,
+            fallbacks=[str(f) for f in raw.get("fallbacks") or []],
+        )
 
 
 __all__ = ["OpenClawModelsAdapter"]

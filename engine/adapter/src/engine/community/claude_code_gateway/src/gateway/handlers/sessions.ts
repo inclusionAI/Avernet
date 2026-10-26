@@ -41,38 +41,56 @@ function resolveClaudeConfigDir(): string {
   return path.join(home, '.claude');
 }
 
+/** Where `resolveDefaultSessionModelDetail` found the default model. */
+export type DefaultSessionModelSource = 'env' | 'settings.json' | 'model-provider-settings-source' | 'fallback';
+
+export type DefaultSessionModelDetail = {
+  /** The resolved model id, exactly as it flows into `binding.model`. */
+  model: string;
+  /** Which step of the priority chain produced `model`. */
+  source: DefaultSessionModelSource;
+  /** The file the value was read from, when `source` names a file. */
+  path?: string;
+};
+
 /**
  * Resolve the default Claude model id for a freshly-seeded session binding when
  * neither `session.new` nor `chat.send` specifies one. Priority chain:
  *   1. `RELAY_DEFAULT_MODEL` env var (explicit relay override);
  *   2. `settings.json`'s `env.ANTHROPIC_MODEL` (keeps relay in sync with the
  *      Claude config the SDK / CLI subprocess reads — see `resolveClaudeConfigDir`);
- *   3. the hard-coded fallback `claude-sonnet-4-5`.
+ *   3. `RELAY_MODEL_SETTINGS_SOURCE`'s `env.ANTHROPIC_MODEL` (singlebox's
+ *      declared model-provider source when the role config dir has no settings);
+ *   4. the hard-coded fallback `claude-sonnet-4-5`.
  *
  * The model id flows to Claude SDK / CLI via the routing layer
  * (`claude-code-router.ts`), which maps it to provider-specific env vars.
  *
  * `settings.json` reading is fully defensive: missing file, corrupt JSON,
- * missing field, or a non-string value all fall back to `claude-sonnet-4-5`. It never
- * throws, so it can never block relay startup or session creation.
+ * missing field, or a non-string value all fall through to the next step. It
+ * never throws, so it can never block relay startup or session creation.
+ *
+ * The detail form also reports *where* the value came from; the `models.default`
+ * gateway method forwards it so the engine adapter can show the operator the
+ * bot's effective default model and its provenance.
  */
-export function resolveDefaultSessionModel(): string {
+export function resolveDefaultSessionModelDetail(): DefaultSessionModelDetail {
   const fromEnv = process.env.RELAY_DEFAULT_MODEL?.trim();
   if (fromEnv) {
     // 排查日志：默认模型来自 RELAY_DEFAULT_MODEL env 覆盖
     log.debug('default session model resolved', { model: fromEnv, source: 'env' });
-    return fromEnv;
+    return { model: fromEnv, source: 'env' };
   }
 
+  const settingsPath = path.join(resolveClaudeConfigDir(), 'settings.json');
   try {
-    const settingsPath = path.join(resolveClaudeConfigDir(), 'settings.json');
     const parsed = JSON.parse(readFileSync(settingsPath, 'utf8'));
     const fromSettings = parsed?.env?.ANTHROPIC_MODEL;
     if (typeof fromSettings === 'string' && fromSettings.trim()) {
       const model = fromSettings.trim();
       // 排查日志：默认模型来自 settings.json 的 env.ANTHROPIC_MODEL
       log.debug('default session model resolved', { model, source: 'settings.json', settingsPath });
-      return model;
+      return { model, source: 'settings.json', path: settingsPath };
     }
   } catch (err) {
     // 排查日志：settings.json 读取/解析失败（文件不存在/损坏/字段缺失/非字符串），回落到 fallback
@@ -84,12 +102,21 @@ export function resolveDefaultSessionModel(): string {
   if (fromModelProviderSource?.trim()) {
     const model = fromModelProviderSource.trim();
     log.debug('default session model resolved', { model, source: 'model-provider-settings-source' });
-    return model;
+    return {
+      model,
+      source: 'model-provider-settings-source',
+      path: process.env.RELAY_MODEL_SETTINGS_SOURCE?.trim(),
+    };
   }
 
   // 排查日志：默认模型回落到硬编码兜底
   log.debug('default session model resolved', { model: FALLBACK_SESSION_MODEL, source: 'fallback' });
-  return FALLBACK_SESSION_MODEL;
+  return { model: FALLBACK_SESSION_MODEL, source: 'fallback' };
+}
+
+/** The resolved default model id alone — see `resolveDefaultSessionModelDetail`. */
+export function resolveDefaultSessionModel(): string {
+  return resolveDefaultSessionModelDetail().model;
 }
 
 /**

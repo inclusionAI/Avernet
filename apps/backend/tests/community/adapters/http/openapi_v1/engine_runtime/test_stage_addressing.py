@@ -487,9 +487,9 @@ def test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations():
     # The original 16 operations also answer at their former addresses while
     # callers migrate. The three newly added favorite operations have only
     # their bot-first address; engine restart, default-config and nodes also
-    # have no legacy alias. Session File is OpenAPI-only, yielding 28 current
-    # + 16 retiring operations.
-    assert len(engine_runtime) == 44
+    # have no legacy alias, and neither does the default-model read. Session
+    # File is OpenAPI-only, yielding 29 current + 16 retiring operations.
+    assert len(engine_runtime) == 45
     assert sorted(carrying_stage) == sorted(
         set(engine_runtime) | _STAGE_ADDRESSED_ELSEWHERE
     ), (
@@ -552,6 +552,7 @@ def test_friend_user_id_is_optional_and_only_on_human_chat_capable_operations():
         ("delete", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/favorite"),
         ("get", "/openapi/v1/bots/{bot_id}/connection"),
         ("get", "/openapi/v1/bots/{bot_id}/models"),
+        ("get", "/openapi/v1/bots/{bot_id}/models/default"),
         ("get", "/openapi/v1/bots/{bot_id}/models/{model_id}"),
         # Retiring component-first aliases re-register the same endpoint
         # functions, so the optional selector is visible there as well. Calls

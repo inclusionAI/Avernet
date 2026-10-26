@@ -97,4 +97,50 @@ class Provider(BaseModel):
     models: list[Model] = Field(default_factory=list)
 
 
-__all__ = ["Model", "ModelCapabilities", "ModelPricing", "Provider"]
+class DefaultModel(BaseModel):
+    """The model an engine routes to when a session / run names none.
+
+    ``model`` is the catalogue entry when the configured id matches one
+    (so the caller gets ``display_name`` / capabilities for free), else a
+    minimal :class:`Model` synthesised from the configured id. Its ``id`` is
+    in the same namespace as :meth:`ModelsService.list_models` ids, so a
+    picker can pre-select it by equality.
+
+    ``fallbacks`` is the engine's configured fallback chain — the models it
+    tries, in order, when the default fails (OpenClaw
+    ``agents.defaults.model.fallbacks``). Engines without such a chain leave
+    it empty.
+    """
+
+    model: Model
+    fallbacks: list[str] = Field(default_factory=list)
+
+
+def find_catalogue_model(model_id: str, models: list[Model]) -> Model | None:
+    """Return the catalogue entry that names ``model_id``, or ``None``.
+
+    Exact ``id`` match first, then an entry whose upstream-native
+    ``provider_id`` is ``model_id``. A bare id (no ``provider/`` prefix) also
+    matches a prefixed catalogue entry by its bare segment, but only when
+    exactly one entry has that segment — two providers listing the same
+    model name is ambiguous and must not pre-select either. A prefixed id
+    never matches another provider's entry. ``None`` → the caller synthesises
+    a minimal entry.
+    """
+    for m in models:
+        if m.id == model_id or (m.provider_id or "") == model_id:
+            return m
+    if "/" in model_id:
+        return None
+    bare_hits = [m for m in models if m.id.rsplit("/", 1)[-1] == model_id]
+    return bare_hits[0] if len(bare_hits) == 1 else None
+
+
+__all__ = [
+    "DefaultModel",
+    "Model",
+    "ModelCapabilities",
+    "ModelPricing",
+    "Provider",
+    "find_catalogue_model",
+]

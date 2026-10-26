@@ -15,6 +15,8 @@ from engine.community.core.adapters.openclaw.models import (
     OpenClawModelsAdapter,
     _capabilities_from_payload,
 )
+from engine.community.core.models.exceptions import DefaultModelNotConfiguredError
+from engine.community.core.models.models import Model, find_catalogue_model
 
 
 class _FakeModelsPort:
@@ -22,11 +24,18 @@ class _FakeModelsPort:
         self,
         models_raw: list[dict[str, Any]] | None = None,
         providers_raw: list[dict[str, Any]] | None = None,
+        default_raw: dict[str, Any] | None = None,
     ) -> None:
         self._models_raw = models_raw or []
         self._providers_raw = providers_raw or []
+        self._default_raw = default_raw
         self.models_list_calls = 0
         self.providers_list_calls = 0
+
+    async def default_model(self) -> dict[str, Any]:
+        if self._default_raw is None:
+            raise DefaultModelNotConfiguredError("agents.defaults.model is not set")
+        return self._default_raw
 
     async def models_list(self) -> list[dict[str, Any]]:
         self.models_list_calls += 1
@@ -276,3 +285,89 @@ async def test_list_providers_uses_id_when_name_missing():
     adapter = OpenClawModelsAdapter(port)
     providers = await adapter.list_providers()
     assert providers[0].name == "p1"
+
+
+# ── get_default_model ──────────────────────────────────────────────────────────
+
+
+def _default_raw(model: str, fallbacks: list[str] | None = None) -> dict[str, Any]:
+    return {"model": model, "fallbacks": fallbacks or []}
+
+
+async def test_default_model_propagates_not_configured():
+    adapter = OpenClawModelsAdapter(_FakeModelsPort(default_raw=None))
+    with pytest.raises(DefaultModelNotConfiguredError):
+        await adapter.get_default_model()
+
+
+async def test_default_model_uses_catalogue_entry_when_id_matches():
+    port = _FakeModelsPort(
+        models_raw=[
+            {"id": "glm-5.2", "provider": "openai-compatible", "name": "GLM 5.2",
+             "input": ["text", "image"], "contextWindow": 200000},
+            {"id": "gpt-4", "provider": "openai"},
+        ],
+        default_raw=_default_raw("openai-compatible/glm-5.2", ["openai/gpt-4"]),
+    )
+    out = await OpenClawModelsAdapter(port).get_default_model()
+    assert out.model.id == "openai-compatible/glm-5.2"
+    assert out.model.provider == "openai-compatible"
+    assert out.model.display_name == "GLM 5.2"      # catalogue, not synthesised
+    assert out.model.capabilities.vision is True     # catalogue capabilities
+    assert out.fallbacks == ["openai/gpt-4"]
+    assert port.models_list_calls == 1
+
+
+async def test_default_model_synthesises_entry_when_not_in_catalogue():
+    port = _FakeModelsPort(
+        models_raw=[{"id": "gpt-4", "provider": "openai"}],
+        default_raw=_default_raw("bailian/qwen3.8-flash"),
+    )
+    out = await OpenClawModelsAdapter(port).get_default_model()
+    assert out.model.id == "bailian/qwen3.8-flash"
+    assert out.model.provider == "bailian"
+    assert out.model.provider_id == "bailian/qwen3.8-flash"
+    assert out.model.display_name == "qwen3.8-flash"
+    assert out.fallbacks == []
+
+
+async def test_default_model_bare_id_gets_unknown_provider():
+    # A bare id (no provider segment) can't be attributed; mirrors
+    # _normalize_model_id's synthesised prefix for catalogue entries.
+    port = _FakeModelsPort(default_raw=_default_raw("some-model"))
+    out = await OpenClawModelsAdapter(port).get_default_model()
+    assert out.model.id == "unknown/some-model"
+    assert out.model.provider == "unknown"
+
+
+# ── find_catalogue_model ───────────────────────────────────────────────────────
+
+
+def _m(model_id: str, provider_id: str | None = None) -> Model:
+    return Model(id=model_id, provider=model_id.split("/", 1)[0], provider_id=provider_id)
+
+
+def test_find_exact_id_wins():
+    cat = [_m("azure/gpt-5"), _m("openai/gpt-5")]
+    assert find_catalogue_model("openai/gpt-5", cat) is cat[1]
+
+
+def test_find_prefixed_id_never_matches_another_provider():
+    # Configured openai/gpt-5, catalogue only has azure/gpt-5: no match, the
+    # caller synthesises rather than pre-selecting the wrong provider.
+    assert find_catalogue_model("openai/gpt-5", [_m("azure/gpt-5")]) is None
+
+
+def test_find_matches_upstream_provider_id():
+    cat = [_m("glink/claude-opus-4-6", provider_id="claude-opus-4-6")]
+    assert find_catalogue_model("claude-opus-4-6", cat) is cat[0]
+
+
+def test_find_bare_id_matches_single_prefixed_entry():
+    cat = [_m("anthropic/claude-sonnet-4-5"), _m("openai/gpt-5")]
+    assert find_catalogue_model("claude-sonnet-4-5", cat) is cat[0]
+
+
+def test_find_bare_id_ambiguous_across_providers_returns_none():
+    cat = [_m("azure/gpt-5"), _m("openai/gpt-5")]
+    assert find_catalogue_model("gpt-5", cat) is None

@@ -59,6 +59,7 @@ class TestOpenClawEngineMetadata:
         caps = OpenClawEngine(client=_fake_client()).capabilities
         assert caps.supports(Capability.MODEL_LIST)
         assert caps.supports(Capability.MODEL_SWITCH)
+        assert caps.supports(Capability.MODEL_DEFAULT_GET)
 
 
 class TestOpenClawEngineWiring:

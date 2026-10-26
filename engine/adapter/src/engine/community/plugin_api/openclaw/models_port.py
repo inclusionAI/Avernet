@@ -35,5 +35,22 @@ class OpenClawModelsPort(Protocol):
         """
         ...
 
+    async def default_model(self) -> dict[str, Any]:
+        """The gateway's configured default model (``agents.defaults.model``).
+
+        Reads the live config through the ``config.get`` RPC first and falls
+        back to ``~/.openclaw/openclaw.json`` on disk when the RPC is
+        unavailable. Returns a primitive dict with exactly two keys::
+
+            {"model": "openai-compatible/glm-5.2", "fallbacks": ["openai/gpt-4"]}
+
+        ``model`` is the raw ``provider/model`` string as configured
+        (``agents.defaults.model.primary``, or the plain-string form);
+        ``fallbacks`` is ``agents.defaults.model.fallbacks`` or ``[]``.
+        Raises ``DefaultModelNotConfiguredError`` when neither the gateway
+        nor the file names a model.
+        """
+        ...
+
 
 __all__ = ["OpenClawModelsPort"]

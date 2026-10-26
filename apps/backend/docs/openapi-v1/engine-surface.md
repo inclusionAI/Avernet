@@ -199,6 +199,7 @@ Two things about this group are not the shape a reader would assume:
 |---|---|---|---|
 | GET | `…/{bot_id}/models` | `GET /api/models` | `Envelope[Page[Model]]` |
 | GET | `…/{bot_id}/models/{model_id}` | `GET /api/models/{model_id:path}` | **model ids contain slashes** (`openai/gpt-5.3`). The engine uses a `:path` converter; the public route must settle URL-encoding vs. a `:path` converter and document it |
+| GET | `…/{bot_id}/models/default` | `GET /api/models/default` | `Envelope[DefaultModel]` = `Model` + `fallbacks`. Declared before the `:path` route on both sides. The engine flags "no default configured" as `success:false` + `error: "default_model_not_configured"`; the relay raises `EngineDefaultModelNotConfiguredError` → **409** (not 404: the route exists, the device needs configuring). Contract: `engine/adapter/docs/default-model-api.md` |
 
 ### nodes (1) — engine `/api/nodes`
 

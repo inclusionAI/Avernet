@@ -12,6 +12,7 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.models import (
 )
 from agentclaw.community.core.engine_runtime.errors import (
     EngineCapabilityUnsupportedError,
+    EngineDefaultModelNotConfiguredError,
     EngineDeviceNotReadyError,
 )
 from agentclaw.community.core.engine_runtime.models import EngineResult
@@ -214,6 +215,50 @@ def test_unknown_model_is_404(models_client, relay):
     )
 
 
+# ── models/default ───────────────────────────────────────────────────────────
+
+
+def test_default_model_is_served_from_the_engines_default_route(models_client, relay):
+    """``/models/default`` reaches the engine's own default route, not
+    ``/api/models/default`` read as a model id — the public and engine routes
+    are both declared ahead of their ``:path`` catch-alls."""
+    relay.results = [
+        EngineResult(
+            data={
+                "id": "openai-compatible/glm-5.2",
+                "provider": "openai-compatible",
+                "name": "GLM 5.2",
+                "display_name": "GLM 5.2",
+                "fallbacks": ["openai/gpt-4"],
+            }
+        )
+    ]
+    data = ok(models_client.get(f"/openapi/v1/bots/{BOT}/models/default"))
+    assert data == {
+        "model_id": "openai-compatible/glm-5.2",
+        "name": "GLM 5.2",
+        "provider": "openai-compatible",
+        "fallbacks": ["openai/gpt-4"],
+    }
+    assert relay.calls[0]["path"] == "/api/models/default"
+
+
+def test_default_model_without_a_fallback_chain(models_client, relay):
+    relay.results = [EngineResult(data={"id": "claude-sonnet-4-5", "provider": ""})]
+    data = ok(models_client.get(f"/openapi/v1/bots/{BOT}/models/default"))
+    assert data["model_id"] == "claude-sonnet-4-5"
+    assert data["fallbacks"] == []
+
+
+def test_an_engine_without_a_default_model_is_409_not_404(models_client, relay):
+    """The engine flags ``error: default_model_not_configured``; the relay
+    turns that into the dedicated error so the caller learns the device needs
+    configuring rather than that something is missing or down."""
+    relay.raises = EngineDefaultModelNotConfiguredError("unset")
+    body = fails(models_client.get(f"/openapi/v1/bots/{BOT}/models/default"), 409)
+    assert body["message"] == "The bot's engine has no default model configured"
+
+
 # ── shared behaviour ─────────────────────────────────────────────────────────
 
 
@@ -253,6 +298,7 @@ def test_relay_errors_are_enveloped(models_client, relay, exc, status):
         ("engine_client", f"/openapi/v1/bots/{BOT}/engine/capabilities"),
         ("engine_client", f"/openapi/v1/bots/{BOT}/engine/available"),
         ("models_client", f"/openapi/v1/bots/{BOT}/models"),
+        ("models_client", f"/openapi/v1/bots/{BOT}/models/default"),
         ("models_client", f"/openapi/v1/bots/{BOT}/models/openai/gpt-5.3"),
     ],
 )

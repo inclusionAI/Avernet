@@ -45,6 +45,7 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
 )
 from agentclaw.community.core.engine_runtime.errors import (
     EngineCapabilityUnsupportedError,
+    EngineDefaultModelNotConfiguredError,
     EngineDeviceNotReadyError,
     EngineResourceNotFoundError,
     EngineStageNotLiveError,
@@ -463,6 +464,15 @@ stage.resolve_stage_bind_id`'s rule, shared with the connection service so a
                 path,
                 raw.get("message"),
             )
+            # The envelope's ``error`` is the engine's machine-readable refusal
+            # discriminator (``api/response.py``). The one value the public
+            # surface distinguishes today is a default-model lookup against an
+            # engine that has none configured: an operator-side config gap,
+            # not an outage.
+            if raw.get("error") == "default_model_not_configured":
+                raise EngineDefaultModelNotConfiguredError(
+                    f"engine has no default model configured ({path})"
+                )
             raise EngineUpstreamError(f"engine reported failure for {path}")
 
         if not enveloped:

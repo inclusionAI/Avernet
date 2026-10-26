@@ -11,8 +11,8 @@ from agentclaw.community.adapters.http.openapi_v1 import (
 from tests.community.adapters.http.openapi_v1.conftest import public_document
 
 #: sessions 10 + session files 6 + engine 5 (default-config joined the reads)
-#: + models 2 + nodes 1 + approvals 3 + connection 1
-_EXPECTED_ROUTE_COUNT = 28
+#: + models 3 + nodes 1 + approvals 3 + connection 1
+_EXPECTED_ROUTE_COUNT = 29
 
 _BOTS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/"
 

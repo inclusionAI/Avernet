@@ -2,7 +2,7 @@ import { strict as assert } from 'node:assert';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { resolveDefaultSessionModel } from '../apps/gateway/handlers/sessions.js';
+import { resolveDefaultSessionModel, resolveDefaultSessionModelDetail } from '../src/gateway/handlers/sessions.js';
 
 // resolveDefaultSessionModel priority chain:
 //   RELAY_DEFAULT_MODEL (env) > settings.json env.ANTHROPIC_MODEL > 'claude-sonnet-4-5'
@@ -73,5 +73,28 @@ describe('resolveDefaultSessionModel', () => {
     writeSettings(JSON.stringify({ env: { ANTHROPIC_MODEL: 'GLM-X' } }));
     process.env.RELAY_DEFAULT_MODEL = '   ';
     assert.equal(resolveDefaultSessionModel(), 'GLM-X');
+  });
+
+  // Detail form reports the provenance the `models.default` method forwards.
+  it('detail: env override reports source=env without a path', () => {
+    process.env.RELAY_DEFAULT_MODEL = 'GLM-ENV';
+    assert.deepEqual(resolveDefaultSessionModelDetail(), { model: 'GLM-ENV', source: 'env' });
+  });
+
+  it('detail: settings.json reports source=settings.json and the file path', () => {
+    writeSettings(JSON.stringify({ env: { ANTHROPIC_MODEL: ' GLM-X ' } }));
+    const detail = resolveDefaultSessionModelDetail();
+    assert.equal(detail.model, 'GLM-X');
+    assert.equal(detail.source, 'settings.json');
+    assert.equal(detail.path, path.join(tmpDir, 'settings.json'));
+  });
+
+  it('detail: hard-coded fallback reports source=fallback', () => {
+    assert.deepEqual(resolveDefaultSessionModelDetail(), { model: 'claude-sonnet-4-5', source: 'fallback' });
+  });
+
+  it('detail: string form stays in sync with the detail form', () => {
+    writeSettings(JSON.stringify({ env: { ANTHROPIC_MODEL: 'GLM-X' } }));
+    assert.equal(resolveDefaultSessionModel(), resolveDefaultSessionModelDetail().model);
   });
 });

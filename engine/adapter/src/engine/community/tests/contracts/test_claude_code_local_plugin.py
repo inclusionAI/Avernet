@@ -59,6 +59,7 @@ async def test_local_claude_code_plugin_contract_smoke():
     # models: list + providers
     assert (await plugin.models_list())[0]["id"] == "claude-sonnet-4-5"
     assert (await plugin.models_list_providers())[0]["id"] == "anthropic"
+    assert (await plugin.models_default())["model"] == "claude-sonnet-4-5"
 
     # file: upload -> read -> list_dir
     await plugin.file_upload("/tmp/a.txt", b"hello")

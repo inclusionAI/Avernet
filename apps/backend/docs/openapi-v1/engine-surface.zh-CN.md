@@ -154,6 +154,7 @@ C1 的权威清单是 `apps/frontend/src/requestConfig.ts:189-205` 里的 proxyp
 |---|---|---|---|
 | GET | `…/{bot_id}/models` | `GET /api/models` | `Envelope[Page[Model]]` |
 | GET | `…/{bot_id}/models/{model_id}` | `GET /api/models/{model_id:path}` | **模型 id 里带斜杠**（`openai/gpt-5.3`）。engine 用 `:path` 转换器；公共路由必须在「URL 编码」与「`:path` 转换器」之间定下来并写进文档 |
+| GET | `…/{bot_id}/models/default` | `GET /api/models/default` | `Envelope[DefaultModel]` = `Model` + `fallbacks`。两侧都声明在 `:path` 路由之前。engine 无默认模型时返回 `success:false` + `error: "default_model_not_configured"`，relay 抛 `EngineDefaultModelNotConfiguredError` → **409**（不是 404：路由存在，是设备需要配置）。契约见 `engine/adapter/docs/default-model-api.md` |
 
 ### nodes（1）—— engine `/api/nodes`
 

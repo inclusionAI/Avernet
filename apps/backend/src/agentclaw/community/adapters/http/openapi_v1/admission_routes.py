@@ -551,6 +551,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "GET",
+        "/openapi/v1/bots/{bot_id}/models/default",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
         "/openapi/v1/bots/{bot_id}/models/{model_id:path}",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (

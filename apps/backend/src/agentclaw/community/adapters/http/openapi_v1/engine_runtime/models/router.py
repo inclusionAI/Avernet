@@ -19,6 +19,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     PageParamsDep,
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.models.schemas import (
+    DefaultModel,
     Model,
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
@@ -71,6 +72,16 @@ def _map_model(data: dict[str, Any]) -> Model:
         model_id=str(data.get("id", "")),
         name=str(data.get("name") or ""),
         provider=str(data.get("provider") or ""),
+    )
+
+
+def _map_default_model(data: dict[str, Any]) -> DefaultModel:
+    raw_fallbacks = data.get("fallbacks")
+    return DefaultModel(
+        **_map_model(data).model_dump(),
+        fallbacks=[str(f) for f in raw_fallbacks]
+        if isinstance(raw_fallbacks, list)
+        else [],
     )
 
 
@@ -133,6 +144,64 @@ async def list_models(
     total = reported if isinstance(reported, int) else len(mapped)
     start = (page.page - 1) * page.page_size
     return page_envelope(total, mapped[start : start + page.page_size], request)
+
+
+@router.get("/default", response_model=Envelope[DefaultModel])
+@envelope_errors
+async def get_default_model(
+    bot_id: BotIdPath,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    request: Request,
+    stage: StageQuery = RuntimeStage.DRAFT,
+    device_uuid: DeviceUuidQuery = None,
+    f_user_id: FriendUserIdQuery = None,
+    relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    friendships: HumanBotFriendshipServiceProtocol = Injected(
+        HumanBotFriendshipServiceProtocol
+    ),
+) -> Envelope[DefaultModel]:
+    """Get the model this bot's engine uses when a session names none.
+
+    The engine reads the value from its own configuration. When that
+    configuration names no model the answer is 409, not 404: the route exists,
+    the bot's engine needs configuring. `fallbacks` lists the models the engine
+    tries, in order, when the default fails; it is empty for engines without a
+    fallback chain.
+    """
+    if f_user_id is not None:
+        if stage is not RuntimeStage.DRAFT:
+            raise EngineResourceNotFoundError(
+                "friend models are available only in draft"
+            )
+        await authorize_friend_chat(
+            request=request,
+            bot_id=bot_id,
+            caller_id=user_id,
+            owner_id=owner_id,
+            friend_user_id=f_user_id,
+            friendships=friendships,
+        )
+    facts = await resolve_operable_bot(
+        relay,
+        bot_id,
+        caller_id=owner_id if f_user_id is not None else user_id,
+        owner_id=owner_id,
+        stage=stage.value,
+        surface="models",
+    )
+    result = await relay.call(
+        bot_id=bot_id,
+        owner_id=owner_id,
+        facts=facts,
+        stage=stage.value,
+        **({"device_uuid": device_uuid} if device_uuid is not None else {}),
+        method="GET",
+        path="/api/models/default",
+    )
+    if not isinstance(result.data, dict):
+        raise EngineResourceNotFoundError("engine returned no default model")
+    return envelope(_map_default_model(result.data), request)
 
 
 @router.get("/{model_id:path}", response_model=Envelope[Model])

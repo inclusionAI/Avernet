@@ -16,6 +16,8 @@ Selection semantics
 ``MODEL_SWITCH`` — there is no dedicated ``switch`` RPC; the caller sets
 ``chat.send`` ``model`` per-request, so "switch" is effectively stateless.
 Declaring the capability tells the frontend the picker is functional.
+``MODEL_DEFAULT_GET`` — :meth:`get_default_model` returns the model used when
+a session / run names none.
 
 See ``src/engine/docs/heterogeneous-engine-architecture.md`` for the
 plugin-first engine architecture rationale.
@@ -25,7 +27,7 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 from engine.community.core.engine.context import AuthContext
-from engine.community.core.models.models import Model, Provider
+from engine.community.core.models.models import DefaultModel, Model, Provider
 
 
 @runtime_checkable
@@ -50,6 +52,20 @@ class ModelsService(Protocol):
 
         This is a convenience view for UIs that group by vendor; the flat
         :meth:`list_models` result is the canonical source.
+        """
+        ...
+
+    async def get_default_model(
+        self, auth: AuthContext | None = None,
+    ) -> DefaultModel:
+        """Return the engine's default model.
+
+        "Default" is the model the engine uses when a session / run does not
+        name one — read from the engine's own config, never guessed by the
+        adapter. Every engine is expected to resolve one; when it cannot
+        (nothing configured, relay too old to answer) raise
+        :class:`~engine.community.core.models.exceptions.DefaultModelNotConfiguredError`.
+        Other upstream failures raise as they are.
         """
         ...
 

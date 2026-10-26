@@ -31,7 +31,7 @@ const SUPPORTED_METHODS = [
   'interaction.resolve', 'interaction.pending.list', 'mode_transition.resolve',
   'sessions.list', 'sessions.patch', 'sessions.delete', 'sessions.reset',
   'session.new', 'session.attach', 'session.detach', 'session.status',
-  'health.claude', 'providers.available', 'providers.list', 'models.list',
+  'health.claude', 'providers.available', 'providers.list', 'models.list', 'models.default',
   'cron.list', 'cron.get', 'cron.status',
   'cron.add', 'cron.update', 'cron.remove',
   'cron.run', 'cron.runs',

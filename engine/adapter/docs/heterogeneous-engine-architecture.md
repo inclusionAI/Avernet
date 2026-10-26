@@ -445,6 +445,7 @@ class Capability(Enum):
     # ── Model 能力 ──────────────────────────────────────
     MODEL_LIST = "model.list"
     MODEL_SWITCH = "model.switch"
+    MODEL_DEFAULT_GET = "model.default.get"   # 引擎默认模型（会话未指定 model 时生效）
 
 
 @dataclass
@@ -646,6 +647,7 @@ class BaseEngine(ABC):
 | **Model** |
 | | model.list | ✅ | ✅ | ✅ | |
 | | model.switch | ✅ | ✅ | ⚠️ 重启 | |
+| | model.default.get | ✅ | ✅ | ✅ | OpenClaw 读 `agents.defaults.model`；Claude Code 走 relay `models.default`。见 `docs/default-model-api.md` |
 | **Health** |
 | | health.check | ✅ | ✅ | ✅ | 基础健康检查 |
 | | health.components | ✅ | ✅ | ⚠️ 有限 | 组件级健康状态 |
@@ -694,7 +696,7 @@ OPENCLAW_CAPABILITIES = EngineCapabilities(
         Capability.CRON_LIST, Capability.CRON_CREATE, Capability.CRON_UPDATE,
         Capability.CRON_DELETE, Capability.CRON_RUN, Capability.CRON_HISTORY,
         # Model
-        Capability.MODEL_LIST, Capability.MODEL_SWITCH,
+        Capability.MODEL_LIST, Capability.MODEL_SWITCH, Capability.MODEL_DEFAULT_GET,
     },
     limited={
         Capability.MCP_START: "通过 mcporter 命令启动",
@@ -721,7 +723,7 @@ CLAUDE_CODE_CAPABILITIES = EngineCapabilities(
         # File
         Capability.FILE_READ, Capability.FILE_WRITE, Capability.FILE_LIST,
         # Model
-        Capability.MODEL_LIST,
+        Capability.MODEL_LIST, Capability.MODEL_DEFAULT_GET,
     },
     limited={
         Capability.SESSION_LIST: "只能列出当前会话",

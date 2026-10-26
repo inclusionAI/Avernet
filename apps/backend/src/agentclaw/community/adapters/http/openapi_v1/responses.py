@@ -201,6 +201,7 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineBotTypeNotSupportedError,
     EngineHistoryDepthExceededError,
     EngineCapabilityUnsupportedError,
+    EngineDefaultModelNotConfiguredError,
     EngineDeviceNotReadyError,
     EngineResourceNotFoundError,
     EngineRuntimeError,
@@ -744,6 +745,14 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     EngineHistoryDepthExceededError: (
         422,
         "Requested page is deeper than the message history this endpoint serves",
+    ),
+    # The engine answered but its config names no default model. A 409 like
+    # the other runtime-state conflicts: the request is well-formed and the
+    # bot is the caller's, the fix is on the device (set the engine's default
+    # model), and a 502 would send the operator chasing an outage.
+    EngineDefaultModelNotConfiguredError: (
+        409,
+        "The bot's engine has no default model configured",
     ),
     # Byte-identical to the other 404s above, so an engine-side missing resource
     # cannot be distinguished from a bot that is not the caller's.

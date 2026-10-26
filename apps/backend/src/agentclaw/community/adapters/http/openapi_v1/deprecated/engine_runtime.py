@@ -112,6 +112,10 @@ models: APIRouter = relocate(
     legacy_router("/openapi/v1/bots/models", "models"),
     bot_first_to_component_first("models"),
     transform=_without_instance,
+    # The default-model read was added after bot-first addressing and never had
+    # a component-first public address; no deprecated alias is manufactured
+    # for it (same reasoning as engine/restart above).
+    skip=lambda method, path: method == "GET" and path.endswith("/models/default"),
 )
 
 sessions: APIRouter = relocate(

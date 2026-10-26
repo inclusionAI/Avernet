@@ -63,6 +63,7 @@ async def test_local_openclaw_plugin_stateful_ports_and_error_branches():
     assert (await plugin.approvals_set("s", "manual"))["payload"]["mode"] == "manual"
     assert (await plugin.models_list())[0]["id"] == "local-model"
     assert (await plugin.providers_list())[0]["id"] == "local"
+    assert (await plugin.default_model())["model"] == "local/local-model"
     assert (await plugin.get_default_config())["path"] == "local://default-config"
 
     # Cron CRUD and failure branches.

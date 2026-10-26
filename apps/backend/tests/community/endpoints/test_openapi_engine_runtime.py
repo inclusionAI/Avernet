@@ -5,7 +5,8 @@ models — sat on ``coverage_baseline.txt`` as frozen debt for the reason the
 sibling files record: the case runner authenticates with ``x-user-id``,
 ``require_principal`` accepts only a gateway-signed token, and the harness had
 no minter, so a case could assert nothing but a 401. The engine's
-default-config read joined later and comes with its cases from the start.
+default-config read joined later and comes with its cases from the start, as
+does the default-model read (``GET …/models/default``).
 
 ``test_openapi_session_files.py`` retired that reason by minting a principal
 inside the test tree — ``init_principal_verifier_config`` is pointed at a local
@@ -166,6 +167,14 @@ _ENGINE_PAYLOADS: dict[str, object] = {
         "name": "GPT-5.3",
         "provider": "openai",
     },
+    # One ``/api/models`` entry plus the engine's fallback chain; the public
+    # route keeps ``fallbacks`` and projects the rest like a listed model.
+    "/api/models/default": {
+        "id": _MODEL_ID,
+        "name": "GPT-5.3",
+        "provider": "openai",
+        "fallbacks": ["anthropic/claude-sonnet-4-5"],
+    },
 }
 
 
@@ -312,6 +321,16 @@ _HAPPY_CASES = (
         ),
         200,
     ),
+    # Declared before the ``{model_id:path}`` route; on the wire the literal
+    # segment must reach the default handler, not ``get_model("default")``.
+    (
+        "GET",
+        f"{_BOTS}/models/default",
+        CaseInput(
+            path_params=_PATH_PARAMS, query_params=_query(), headers=_HEADERS
+        ),
+        200,
+    ),
     (
         "GET",
         f"{_BOTS}/models/{{model_id:path}}",
@@ -364,6 +383,14 @@ _HAPPY_BODIES: dict[tuple[str, str], dict] = {
     },
     ("GET", f"{_BOTS}/models"): {
         "data": {"total": 1, "items": [{"model_id": _MODEL_ID, "provider": "openai"}]}
+    },
+    ("GET", f"{_BOTS}/models/default"): {
+        "data": {
+            "model_id": _MODEL_ID,
+            "name": "GPT-5.3",
+            "provider": "openai",
+            "fallbacks": ["anthropic/claude-sonnet-4-5"],
+        }
     },
     ("GET", f"{_BOTS}/models/{{model_id:path}}"): {
         "data": {"model_id": _MODEL_ID, "name": "GPT-5.3", "provider": "openai"}
