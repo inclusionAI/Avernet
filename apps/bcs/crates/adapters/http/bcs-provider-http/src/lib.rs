@@ -1555,6 +1555,9 @@ fn provider_body_log(body: &ProviderWebhookRequest) -> String {
         Ok(value) => value,
         Err(error) => return format!("{{\"serialize_error\":\"{}\"}}", error),
     };
+    if let Some(token) = redacted.pointer_mut("/extensions/caller_execution_token") {
+        *token = serde_json::json!("<redacted>");
+    }
     if let Some(attachments) = redacted
         .get_mut("attachments")
         .and_then(Value::as_array_mut)
@@ -2744,11 +2747,13 @@ Connection: keep-alive\r\n\
             after: None,
             limit: None,
             timeout_ms: 1_000,
-            extensions: None,
+            extensions: Some(serde_json::json!({"caller_execution_token":{"type":"iam-token","token":"synthetic-caller-marker"}, "other":"keep"})),
         };
 
         let logged = provider_body_log(&body);
 
+        assert!(!logged.contains("synthetic-caller-marker"));
+        assert!(logged.contains("keep"));
         assert!(logged.contains("\"url\":\"<redacted>\""));
         assert!(!logged.contains("token=secret"));
         assert_eq!(

@@ -76,6 +76,19 @@ pub(super) async fn handle_web_send_with_result(
         }
     }
 
+    if let Some(caller) = &cmd.caller_execution {
+        // A channel caller is never a general-purpose credential for routing fan-out.
+        if group.group_strategy != GroupStrategy::Chat || decision.targets.len() != 1
+            || decision.targets[0].bot_uuid != caller.target_bot_id
+            || decision.targets[0].delivery_type != DeliveryType::Send
+            || !flow.registry.resolve_delivery_target(&caller.target_bot_id).await?.is_http_provider() {
+            return Err(ServiceError::InvalidOperation {
+                message: "caller execution requires one direct HTTP provider Bot".into(), request_id: None,
+            });
+        }
+        crate::caller_execution::store(flow, &cmd).await?;
+    }
+
     log_routing_digest(
         &cmd,
         &decision,
@@ -253,7 +266,7 @@ pub(super) async fn handle_web_send_with_result(
                 continue;
             }
         };
-        let frame = frame_for_target(
+        let mut frame = frame_for_target(
             flow,
             &group,
             &cmd,
@@ -271,6 +284,11 @@ pub(super) async fn handle_web_send_with_result(
         // gateway-issued task_id, but downstream still sees run_id. Tracked
         // in the Phase-5 follow-up list (Modify semantics completeness).
 
+        if let Some(scope) = crate::caller_execution::ExecutionRef::from_command(&cmd) {
+            crate::caller_execution::apply(flow, &scope, &delivery_target, &target_bot_id,
+                &cmd.group_id, cmd.session_id.as_deref().unwrap_or_default(),
+                cmd.source_im_message_id.as_deref(), &mut frame).await?;
+        }
         let delivery_kind = bot_delivery_kind(delivery_type);
         let source_im_message_id = cmd.source_im_message_id.as_deref().filter(|message_id| {
             delivery_type == DeliveryType::Send && !message_id.trim().is_empty()

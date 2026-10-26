@@ -632,6 +632,7 @@ fn group_delete_cmd() -> GroupDeleteCommand {
 
 fn web_send_cmd() -> WebSendCommand {
     WebSendCommand {
+        caller_execution: None,
         caller: CallerContext::Public,
         group_id: "group-wrapper".to_string(),
         session_id: None,

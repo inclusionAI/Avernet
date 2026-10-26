@@ -482,6 +482,18 @@ impl ChannelProvider for RecordingProvider {
         Ok(())
     }
 
+    fn validate_binding_config(&self, config: &serde_json::Value, target: &BindingTarget) -> ChannelProviderResult<()> {
+        self.validate_config(config)?;
+        if self.requires_caller_execution(config)? && !matches!(target, BindingTarget::Bot { .. }) {
+            return Err(ChannelProviderError::InvalidConfig("caller requires a Bot binding".into()));
+        }
+        Ok(())
+    }
+
+    fn requires_caller_execution(&self, config: &serde_json::Value) -> ChannelProviderResult<bool> {
+        Ok(config.get("execution_mode").and_then(|v| v.as_str()) == Some("caller"))
+    }
+
     fn redact_config(&self, config: &serde_json::Value) -> serde_json::Value {
         let mut redacted = config.clone();
         if let Some(object) = redacted.as_object_mut() {

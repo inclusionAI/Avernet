@@ -13,7 +13,7 @@ pub enum ProviderTransportPreference {
     Callback,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct BotDeliveryCommand {
     pub target: BotDeliveryTarget,
     /// Canonical logical run identity. HTTP Provider chat.send uses this as
@@ -30,6 +30,14 @@ pub struct BotDeliveryCommand {
     /// Opaque inbound HTTP headers explicitly allowlisted by BCS configuration
     /// for forwarding to HTTP provider webhooks. Empty for non-HTTP ingress.
     pub provider_bypass_headers: Vec<(String, String)>,
+}
+
+impl std::fmt::Debug for BotDeliveryCommand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BotDeliveryCommand").field("target", &self.target)
+            .field("run_id", &self.run_id).field("delivery_kind", &self.delivery_kind)
+            .field("frame", &"<request payload redacted>").finish_non_exhaustive()
+    }
 }
 
 impl BotDeliveryCommand {

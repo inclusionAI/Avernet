@@ -37,6 +37,8 @@ pub enum ChatEventState {
 
 #[derive(Debug, Clone)]
 pub struct WebSendCommand {
+    /// Request-only credential; only the bound direct provider may consume it.
+    pub caller_execution: Option<super::caller_execution::CallerExecution>,
     pub caller: CallerContext,
     pub group_id: String,
     pub session_id: Option<String>,

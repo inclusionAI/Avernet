@@ -612,3 +612,18 @@ async def test_dispatch_chat_abort_propagates_run_terminated_error() -> None:
     assert exc_info.value.http_status == 410
     assert exc_info.value.error_code == "run_terminated"
     assert exc_info.value.retryable is False
+
+
+def test_chat_send_request_accepts_channel_iam_caller_contract() -> None:
+    body = _chat_send_body()
+    body["extensions"] = {
+        "caller_context": {"subject": {"kind": "human", "ref": "123456"}},
+        "caller_execution_token": {"type": "iam-token", "token": "synthetic-marker"},
+    }
+    request = ChatSendRequest.model_validate(body)
+    assert request.extensions is not None
+    assert request.extensions.caller_context is not None
+    assert request.extensions.caller_execution_token is not None
+    assert request.extensions.caller_context.subject.ref == "123456"
+    assert request.extensions.caller_execution_token.type == "iam-token"
+    assert request.extensions.caller_execution_token.token == "synthetic-marker"

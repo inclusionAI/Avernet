@@ -171,6 +171,7 @@ impl ChannelService for BcsChannelService {
                 );
                 return Ok(());
             }
+            let caller_execution = self.caller_execution_for(&binding, &msg)?;
             let ctx = self
                 .resolve_inbound_context(&binding, &msg, &actor_id)
                 .await
@@ -194,6 +195,10 @@ impl ChannelService for BcsChannelService {
             );
             self.maybe_execute_stale_reset(&ctx, &msg).await;
 
+            if caller_execution.is_some() && ctx.state_machine_trigger {
+                return Err(ChannelInboundError::new(ChannelInboundFailureKind::InvalidInbound, false,
+                    "caller execution does not support state-machine targets"));
+            }
             if ctx.state_machine_trigger {
                 return self
                     .start_state_machine_from_inbound(&ctx, &msg, &actor_id)
@@ -292,6 +297,7 @@ impl ChannelService for BcsChannelService {
             let outcome = self
                 .message_flow
                 .handle_web_send(WebSendCommand {
+                    caller_execution,
                     caller,
                     group_id: dispatch_group_id.clone(),
                     session_id: Some(dispatch_session_id.clone()),
@@ -539,7 +545,7 @@ impl ChannelService for BcsChannelService {
         };
         let provider = self.provider_for(&cmd.channel_type)?;
         provider
-            .validate_config(&cmd.config)
+            .validate_binding_config(&cmd.config, &target)
             .map_err(provider_error)?;
         validate_group_chat_session_config(&cmd.config)?;
         validate_group_context_delivery_config(&cmd.config)?;
@@ -677,7 +683,7 @@ impl ChannelService for BcsChannelService {
             return Err(ChannelUseCaseError::NotFound(id.to_string()));
         };
         let provider = self.provider_for(&binding.channel_type)?;
-        provider.validate_config(&config).map_err(provider_error)?;
+        provider.validate_binding_config(&config, &binding.target).map_err(provider_error)?;
         validate_group_chat_session_config(&config)?;
         validate_group_context_delivery_config(&config)?;
         validate_forward_sender_identity_config(&binding.target, &config)?;

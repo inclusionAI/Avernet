@@ -145,6 +145,7 @@ async fn ordinary_group_system_and_relay_sends_keep_provider_session_tags() {
         match source {
             "group" => {
                 f.flow.handle_web_send(bcs_service_api::WebSendCommand {
+                    caller_execution: None,
                     caller:CallerContext::Human(HumanActor { actor_id:"human_1".into(), staff_no:"1".into() }),
                     group_id:"group-1".into(), session_id:Some(SESSION.into()), from_actor_id:"human_1".into(),
                     from_name:None, message:"@Observer check".into(), mentions:vec!["bot-observer".into()], attachments:None,
