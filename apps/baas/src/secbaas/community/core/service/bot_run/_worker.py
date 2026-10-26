@@ -254,9 +254,9 @@ class BotRequestWorker:
                     continue
                 # owner 已 down：先写结果终态再 force_done。否则队列置 DONE 后
                 # recovery/reset_stale_running 不再命中（按 RUNNING 过滤），
-                # baas_bot_run 会永远停在 PENDING/RUNNING。update_error 幂等。
+                # baas_bot_run 会永远停在 PENDING/RUNNING。update_timeout 幂等。
                 with contextlib.suppress(Exception):
-                    self._run_repository.update_error(
+                    self._run_repository.update_timeout(
                         record.run_id, "worker lost (stale heartbeat)"
                     )
                 with contextlib.suppress(Exception):
@@ -269,12 +269,12 @@ class BotRequestWorker:
                     record.assigned_worker,
                 )
             else:
-                # PENDING 超时：走 executor 标 FAILED + force_done
+                # PENDING 超时：走 executor 标 TIME_OUT + force_done
                 await self._executor.execute(record)
                 with contextlib.suppress(Exception):
                     self._queue.force_done(record.run_id)
                 logger.warning(
-                    "[BotRequestWorker] timeout scan: run_id=%s status=%s marked failed",
+                    "[BotRequestWorker] timeout scan: run_id=%s status=%s marked timeout",
                     record.run_id,
                     record.status,
                 )
@@ -713,7 +713,7 @@ class BotRequestWorker:
     async def _terminate_local_timeout(self, record: BotRunQueueRecord) -> None:
         """本机超时终结：cancel 本机 task + force_done 队列行 + 触发回调。
 
-        结果终态（FAILED）由被 cancel 的 executor 链（ResultGuardExecutor 的
+        结果终态（TIME_OUT）由被 cancel 的 executor 链（ResultGuardExecutor 的
         CancelledError 分支）负责；这里补齐队列终态与回调，避免本机超时后队列行
         停在 RUNNING（占并发额度）且回调丢失。force_done/回调均幂等。
         """
