@@ -296,7 +296,16 @@ def _rust_assignment(content: str, assignment: re.Match[str]) -> tuple[bool, boo
         # following a literal is not a mapping key.
         following = expression[match.end():].lstrip()
         mapping_key = following.startswith(":") and not following.startswith("::")
-        index_key = expression[:match.start()].rstrip().endswith("[") and following.startswith("]")
+        # A bracket alone can start an array literal. Only exempt simple
+        # identifier/chained-index receivers; other receivers stay conservative.
+        receiver = re.search(r"(?P<name>[A-Za-z_]\w*|\])\s*\[\s*$", expression[:match.start()])
+        index_key = bool(
+            receiver and following.startswith("]")
+            and receiver.group("name") not in {
+                "return", "break", "yield", "else", "in", "loop", "move",
+                "const", "unsafe", "async",
+            }
+        )
         if not (mapping_key or index_key):
             suspicious |= _looks_like_plaintext_value(value)
         return "LITERAL"

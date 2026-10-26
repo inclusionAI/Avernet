@@ -75,3 +75,17 @@ def test_known_credentials_are_not_exempted_by_rust_expression_detection() -> No
         findings = _findings(_diff(line, path="example.rs"))
         assert findings
         assert all(secret not in finding.content for finding in findings)
+
+
+def test_rust_array_elements_are_not_exempted_as_index_keys() -> None:
+    secret = "a-real-looking-" + "secret-value-12345"
+    for expression in [
+        'String::from(["VALUE"][0])',
+        'String::from([["VALUE"]][0][0])',
+        'String::from(vec!["VALUE"][0])',
+        'String::from({ return ["VALUE"]; })',
+    ]:
+        line = 'let token = ' + expression.replace('VALUE', secret) + ';'
+        findings = _findings(_diff(line, path="example.rs"))
+        assert findings, expression
+        assert all(secret not in finding.content for finding in findings)
