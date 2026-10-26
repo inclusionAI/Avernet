@@ -122,7 +122,6 @@ pub use bcs_bot::BotCore;
 pub use bcs_fusion::LocalFusionService;
 pub use bcs_group::GroupStore;
 pub use bcs_group_store::GroupBuilder;
-pub use bcs_proposal::{ProposalBuilder, ProposalStore};
 pub use bcs_routing::MessageRouter;
 
 // Server modules

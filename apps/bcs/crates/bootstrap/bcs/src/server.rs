@@ -97,7 +97,6 @@ use bcs_message_flow::{A2aChat, BcsGroupFusion, BcsGroupMessageHistory, BcsMessa
 use bcs_message_store::{MemoryMessageRepo, MySqlMessageStore};
 use bcs_organization::{OrganizationCore, OrganizationManagement};
 use bcs_organization_store::{DbOrganizationStore, MemoryOrganizationRepo};
-use bcs_proposal::ProposalStore;
 use bcs_relation::RelationCore;
 use bcs_relation_store::DbRelationStore;
 use bcs_route_security::OutboundUrlGuard;
@@ -2242,7 +2241,6 @@ impl Default for BcsServerState {
         );
         let router = Arc::new(MessageRouter::new());
         let fusion = Arc::new(LocalFusionService::new(config.bots_base_dir.clone()));
-        let proposals = Arc::new(ProposalStore::new());
         let friend_repo = Arc::new(MemoryFriendRepo::new());
         let friend_store: Arc<FriendCore> =
             Arc::new(FriendCore::with_repo(friend_repo).with_relation(
@@ -2641,7 +2639,6 @@ impl Default for BcsServerState {
             .group(sessions)
             .routing(router)
             .fusion(fusion)
-            .proposal(proposals)
             .friend(friend_store)
             .relation(relation_store)
             .bot_delivery(bot_delivery)
@@ -3850,8 +3847,7 @@ impl BcsServer {
             GroupCore::with_repo(group_repo).with_collaboration_registry(bot_registry.clone()).with_policy_gate(provider_repos.memory_store.as_ref().expect("memory Provider store").policy_gate()).with_event_record_factory(group_event_factory.clone()),
         );
         let router = Arc::new(MessageRouter::new());
-        let proposals = Arc::new(ProposalStore::new());
-        let friend_repo = Arc::new(MemoryFriendRepo::with_data_dir(
+                let friend_repo = Arc::new(MemoryFriendRepo::with_data_dir(
             config.bots_base_dir.clone(),
         ));
         let friend_store: Arc<FriendCore> =
@@ -4238,7 +4234,6 @@ impl BcsServer {
             .group(sessions)
             .routing(router)
             .fusion(fusion)
-            .proposal(proposals)
             .friend(friend_store)
             .relation(relation_store)
             .bot_delivery(bot_delivery)
@@ -4478,8 +4473,7 @@ impl BcsServer {
 
         // Create other service implementations
         let router = Arc::new(MessageRouter::new());
-        let proposals = Arc::new(ProposalStore::new());
-
+        
         let (fusion, fuse_client) = create_fusion_service(&config);
         register_late_lifecycles(&lifecycle, fuse_client.as_ref());
 
@@ -5183,7 +5177,6 @@ impl BcsServer {
             .group(sessions)
             .routing(router)
             .fusion(fusion)
-            .proposal(proposals)
             .friend(friend_svc)
             .relation(relation_svc)
             .bot_delivery(bot_delivery)

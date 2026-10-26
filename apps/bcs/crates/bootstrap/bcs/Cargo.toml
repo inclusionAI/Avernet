@@ -127,7 +127,6 @@ bcs-security-gateway-local = { workspace = true }
 bcs-fusion      = { workspace = true }
 bcs-fuse-client = { workspace = true }
 bcs-leader-election = { workspace = true }
-bcs-proposal    = { workspace = true }
 bcs-friend      = { workspace = true }
 bcs-relation    = { workspace = true }
 bcs-system-message = { workspace = true }
