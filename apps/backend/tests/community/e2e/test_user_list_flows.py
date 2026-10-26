@@ -9,8 +9,12 @@ from tests.community.framework.flow_runner import run_flow
 
 @pytest.mark.e2e
 @pytest.mark.parametrize("case", USER_LIST_FLOWS, ids=lambda case: case.name)
-def test_user_list_flow(case, app_with_testing_modules, world):
+def test_user_list_flow(case, app_with_testing_modules, world, monkeypatch):
     """Run the membership write/read lifecycle through the HTTP application."""
+    from agentclaw.community.core.access import admin_scopes
+
+    # Corrections require super-admin; the flow runner acts as ``e2e_user``.
+    monkeypatch.setattr(admin_scopes, "super_admin", lambda: frozenset({"e2e_user"}))
     ctx = run_flow(case, app_with_testing_modules, world)
     assert ctx is not None
 
@@ -80,13 +84,15 @@ def test_user_list_correction_super_admin_boundary(
     assert check.json()["data"]["in_whitelist"] is expected_enabled
 
 
-def test_user_list_correction_logs_write_failure(app_with_testing_modules, world, caplog):
+def test_user_list_correction_logs_write_failure(app_with_testing_modules, world, caplog, monkeypatch):
     from fastapi.testclient import TestClient
 
+    from agentclaw.community.core.access import admin_scopes
     from agentclaw.community.core.repository.protocols.identity import UserListRepositoryProtocol
     from tests.community.factories.access import make_staff_user
     from tests.community.framework import bind_failing_method
 
+    monkeypatch.setattr(admin_scopes, "super_admin", lambda: frozenset({"correction_operator"}))
     make_staff_user(world, user_id="correction_operator")
     bind_failing_method(
         world, UserListRepositoryProtocol, "set_membership", RuntimeError("synthetic persistence unavailable"),
