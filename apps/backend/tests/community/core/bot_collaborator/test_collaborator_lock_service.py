@@ -330,14 +330,14 @@ def test_make_lock_key():
 def test_steal_lock_success_when_not_held(service, lock_repo):
     """Test steal_lock succeeds when lock is not held."""
     lock_repo.get_by_key.return_value = None  # No existing lock
-    lock_repo.acquire.return_value = _make_lock_record("bot-123", "owner-001", "user-001")
+    lock_repo.steal.return_value = _make_lock_record("bot-123", "owner-001", "user-001")
 
     lock = service.steal_lock("bot-123", "owner-001", "user-001")
 
     assert lock is not None
     assert lock.lock_key == "bot-123:owner-001"
     assert lock.holder_user_id == "user-001"
-    lock_repo.acquire.assert_called_once_with("bot-123:owner-001", "user-001")
+    lock_repo.steal.assert_called_once_with("bot-123:owner-001", "user-001")
     # Should NOT call release when no existing lock
     lock_repo.release.assert_not_called()
 
@@ -347,16 +347,16 @@ def test_steal_lock_steals_from_other_user(service, lock_repo):
     # Existing lock held by user-002
     lock_repo.get_by_key.return_value = _make_lock_record("bot-123", "owner-001", "user-002")
     lock_repo.release.return_value = True
-    lock_repo.acquire.return_value = _make_lock_record("bot-123", "owner-001", "user-001")
+    lock_repo.steal.return_value = _make_lock_record("bot-123", "owner-001", "user-001")
 
     lock = service.steal_lock("bot-123", "owner-001", "user-001")
 
     assert lock is not None
     assert lock.holder_user_id == "user-001"
-    # Should release the existing lock first
-    lock_repo.release.assert_called_once_with("bot-123:owner-001")
-    # Then acquire new lock
-    lock_repo.acquire.assert_called_once_with("bot-123:owner-001", "user-001")
+    # The atomic replacement must not delete the existing row
+    lock_repo.release.assert_not_called()
+    # Replace the holder in one repository operation
+    lock_repo.steal.assert_called_once_with("bot-123:owner-001", "user-001")
 
 
 def test_steal_lock_steals_own_lock(service, lock_repo):
@@ -364,16 +364,16 @@ def test_steal_lock_steals_own_lock(service, lock_repo):
     # Existing lock held by same user
     lock_repo.get_by_key.return_value = _make_lock_record("bot-123", "owner-001", "user-001")
     lock_repo.release.return_value = True
-    lock_repo.acquire.return_value = _make_lock_record("bot-123", "owner-001", "user-001")
+    lock_repo.steal.return_value = _make_lock_record("bot-123", "owner-001", "user-001")
 
     lock = service.steal_lock("bot-123", "owner-001", "user-001")
 
     assert lock is not None
     assert lock.holder_user_id == "user-001"
-    # Should release the existing lock first
-    lock_repo.release.assert_called_once_with("bot-123:owner-001")
-    # Then acquire new lock
-    lock_repo.acquire.assert_called_once_with("bot-123:owner-001", "user-001")
+    # The atomic replacement must not delete the existing row
+    lock_repo.release.assert_not_called()
+    # Replace the holder in one repository operation
+    lock_repo.steal.assert_called_once_with("bot-123:owner-001", "user-001")
 
 
 # --- single-box harden: real in-mem SQLite reentrant/release e2e ------------
@@ -568,30 +568,30 @@ def test_release_session_lock_force_by_non_holder(service, lock_repo):
 # --- steal_session_lock -----------------------------------------------------
 
 def test_steal_session_lock_when_not_held(service, lock_repo):
-    """无锁时抢锁 -> 直接 acquire，不调用 release。"""
+    """无锁时也使用原子抢锁操作。"""
     lock_repo.get_by_key.return_value = None
-    lock_repo.acquire.return_value = _make_session_lock_record("user-001")
+    lock_repo.steal.return_value = _make_session_lock_record("user-001")
 
     lock = service.steal_session_lock("bot-123", "owner-001", "sess-abc", "user-001")
 
     assert lock is not None
     assert lock.holder_user_id == "user-001"
     lock_repo.release.assert_not_called()
-    lock_repo.acquire.assert_called_once_with(SESSION_KEY, "user-001")
+    lock_repo.steal.assert_called_once_with(SESSION_KEY, "user-001")
 
 
 def test_steal_session_lock_from_other(service, lock_repo):
-    """他人持有时抢锁 -> 先 release 再 acquire。"""
+    """他人持有时也不得先删除锁。"""
     lock_repo.get_by_key.return_value = _make_session_lock_record("user-002")
     lock_repo.release.return_value = True
-    lock_repo.acquire.return_value = _make_session_lock_record("user-001")
+    lock_repo.steal.return_value = _make_session_lock_record("user-001")
 
     lock = service.steal_session_lock("bot-123", "owner-001", "sess-abc", "user-001")
 
     assert lock is not None
     assert lock.holder_user_id == "user-001"
-    lock_repo.release.assert_called_once_with(SESSION_KEY)
-    lock_repo.acquire.assert_called_once_with(SESSION_KEY, "user-001")
+    lock_repo.release.assert_not_called()
+    lock_repo.steal.assert_called_once_with(SESSION_KEY, "user-001")
 
 
 # --- get_session_lock_info --------------------------------------------------

@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import List, Optional
 
 from injector import inject
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.bot_collaborator.models import (
@@ -73,6 +74,35 @@ class BotCollabLockRepository(
                     lock_key, env
                 )
                 raise
+
+    def steal(self, lock_key: str, holder_user_id: str) -> BotCollabLockRecord:
+        """Replace a holder without a delete/insert gap for concurrent callers."""
+        env = get_current_env()
+        values = dict(lock_key=lock_key, holder_user_id=holder_user_id, env=env)
+        updates = dict(
+            holder_user_id=holder_user_id,
+            gmt_create=func.now(),
+            gmt_modified=func.now(),
+        )
+        with self._db.orm_session() as db:
+            if db.get_bind().dialect.name == "sqlite":
+                from sqlalchemy.dialects.sqlite import insert
+
+                statement = insert(self._Lock).values(**values)
+                statement = statement.on_conflict_do_update(
+                    index_elements=["lock_key", "env"], set_=updates
+                )
+            else:
+                from sqlalchemy.dialects.mysql import insert
+
+                statement = insert(self._Lock).values(**values)
+                statement = statement.on_duplicate_key_update(**updates)
+            db.execute(statement)
+            row = db.query(self._Lock).filter(
+                self._Lock.lock_key == lock_key,
+                self._Lock.env == env,
+            ).one()
+            return row.to_record()
 
     # ========================================================================
     # Query Operations

@@ -82,6 +82,86 @@ def test_acquire_auto_saves_without_explicit_commit(repo, monkeypatch):
 
 # --- get_by_key tests -------------------------------------------------------
 
+@pytest.mark.parametrize("initial_holder", [None, "other-user", "new-holder"])
+def test_steal_creates_or_replaces_holder(repo, monkeypatch, initial_holder):
+    monkeypatch.setenv("SERVER_ENV", "dev")
+    if initial_holder is not None:
+        repo.acquire("bot:owner", initial_holder)
+
+    record = repo.steal("bot:owner", "new-holder")
+
+    assert record.holder_user_id == "new-holder"
+    assert record.lock_key == "bot:owner"
+    assert record.env == "dev"
+    assert repo.get_by_key("bot:owner") == record
+    with pytest.raises(IntegrityError):
+        repo.acquire("bot:owner", "ordinary-acquirer")
+
+
+def test_steal_preserves_other_keys_and_environments(repo, monkeypatch):
+    monkeypatch.setenv("SERVER_ENV", "pre")
+    repo.acquire("bot:owner", "pre-holder")
+    monkeypatch.setenv("SERVER_ENV", "prod")
+    repo.acquire("bot:owner", "old-holder")
+    repo.acquire("other-bot:owner", "other-holder")
+
+    assert repo.steal("bot:owner", "new-holder").holder_user_id == "new-holder"
+    assert repo.get_by_key("other-bot:owner").holder_user_id == "other-holder"
+    monkeypatch.setenv("SERVER_ENV", "pre")
+    assert repo.get_by_key("bot:owner").holder_user_id == "pre-holder"
+
+
+def test_steal_resets_acquisition_time(repo, monkeypatch):
+    from datetime import datetime
+
+    monkeypatch.setenv("SERVER_ENV", "dev")
+    old = repo.acquire("bot:owner", "old-holder")
+    with repo._db.orm_session() as db:
+        db.query(BotCollabLockModel).filter_by(id=old.id).update({
+            "gmt_create": datetime(2000, 1, 1),
+            "gmt_modified": datetime(2000, 1, 1),
+        })
+    new = repo.steal("bot:owner", "new-holder")
+    assert new.gmt_create > datetime(2000, 1, 1)
+    assert new.gmt_modified > datetime(2000, 1, 1)
+
+
+def test_concurrent_steals_leave_one_lock(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    monkeypatch.setenv("SERVER_ENV", "dev")
+    engine = create_engine(f"sqlite:///{tmp_path / 'locks.db'}", connect_args={"timeout": 20})
+    BotCollabLockModel.__table__.create(engine)
+    repository = BotCollabLockRepository(InMemorySqliteDB(engine))
+    repository.acquire("bot:owner", "initial")
+    barrier = Barrier(8)
+
+    def steal(index):
+        barrier.wait(timeout=20)
+        holder = f"holder-{index}"
+        record = repository.steal("bot:owner", holder)
+        assert record.holder_user_id == holder
+        return holder
+
+    try:
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            holders = list(executor.map(steal, range(8)))
+        assert repository.get_by_key("bot:owner").holder_user_id in holders
+        with repository._db.orm_session() as db:
+            assert db.query(BotCollabLockModel).count() == 1
+    finally:
+        engine.dispose()
+
+
+def test_steal_does_not_swallow_database_failures(repo, monkeypatch):
+    from sqlalchemy.exc import OperationalError
+
+    monkeypatch.setenv("SERVER_ENV", "dev")
+    BotCollabLockModel.__table__.drop(repo._db._engine)
+    with pytest.raises(OperationalError):
+        repo.steal("bot:owner", "new-holder")
+
 def test_get_by_key_returns_lock_when_exists(repo, monkeypatch):
     """Test that get_by_key returns lock record."""
     monkeypatch.setenv("SERVER_ENV", "dev")
