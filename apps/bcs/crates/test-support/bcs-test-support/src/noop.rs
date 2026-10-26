@@ -174,28 +174,6 @@ impl FriendRequestCoreService for NoopFriendRequestCoreService {
 }
 
 #[derive(Debug, Default)]
-pub struct NoopProposalCoreService;
-
-#[async_trait]
-impl ProposalCoreService for NoopProposalCoreService {
-    async fn store(&self, proposal: GroupChatProposal) -> String {
-        proposal.token
-    }
-
-    async fn get(&self, _token: &str) -> Option<GroupChatProposal> {
-        None
-    }
-
-    async fn take(&self, _token: &str) -> Option<GroupChatProposal> {
-        None
-    }
-
-    async fn cleanup_expired(&self) -> usize {
-        0
-    }
-}
-
-#[derive(Debug, Default)]
 pub struct NoopBotRegistryCoreService;
 
 #[async_trait]

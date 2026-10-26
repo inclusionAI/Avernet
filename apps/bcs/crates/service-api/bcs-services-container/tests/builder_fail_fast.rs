@@ -9,7 +9,7 @@ use bcs_test_support::{
     NoopFrontendDeliveryPort, NoopFusionCoreService, NoopGroupContextService, NoopGroupCoreService,
     NoopGroupFusionService, NoopGroupManagementService, NoopGroupMessageHistoryService,
     NoopGroupQueryService, NoopHumanActorService, NoopMessageFlowService,
-    NoopOrganizationManagementService, NoopProposalCoreService, NoopProviderBotCoreService,
+    NoopOrganizationManagementService, NoopProviderBotCoreService,
     NoopProviderBotEventService, NoopProviderCoreService, NoopProviderManagementService,
     NoopRelationCoreService, NoopRoutingCoreService, NoopSecretService, NoopSessionFileService,
     NoopSessionLaunchService, NoopSessionManagementService, NoopSystemMessageService,
@@ -42,7 +42,6 @@ fn build_succeeds_when_all_required_services_set() {
         .group(Arc::new(NoopGroupCoreService))
         .routing(Arc::new(NoopRoutingCoreService))
         .fusion(Arc::new(NoopFusionCoreService))
-        .proposal(Arc::new(NoopProposalCoreService))
         .friend(Arc::new(NoopFriendCoreService))
         .relation(Arc::new(NoopRelationCoreService))
         .message_flow(Arc::new(NoopMessageFlowService))
@@ -90,7 +89,6 @@ fn fully_wired_builder_without_organization_management() -> ServicesBuilder {
         .group(Arc::new(NoopGroupCoreService))
         .routing(Arc::new(NoopRoutingCoreService))
         .fusion(Arc::new(NoopFusionCoreService))
-        .proposal(Arc::new(NoopProposalCoreService))
         .friend(Arc::new(NoopFriendCoreService))
         .relation(Arc::new(NoopRelationCoreService))
         .message_flow(Arc::new(NoopMessageFlowService))

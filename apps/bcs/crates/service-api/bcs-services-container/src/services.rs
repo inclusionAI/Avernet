@@ -15,7 +15,7 @@ use bcs_service_api::{
     FusionCoreService, Group, GroupCoreService, GroupFusionService, GroupManagementService,
     GroupMessageHistoryService, GroupQueryService, HumanActorService,
     MessageFlowService, OrganizationManagementService,
-    ProposalCoreService, ProviderBotCoreService, ProviderCoreService,
+    ProviderBotCoreService, ProviderCoreService,
     ProviderBotEventService, ProviderManagementService, RelationCoreService, RoutingCoreService,
     SecretService, SessionFileService, SessionLaunchService, SessionManagementService,
     SystemMessageService, WorkbenchSessionService, backfill_bot_names,
@@ -42,8 +42,6 @@ pub struct Services {
     pub routing: Arc<dyn RoutingCoreService>,
     /// Fusion service.
     pub fusion: Arc<dyn FusionCoreService>,
-    /// Proposal service.
-    pub proposal: Arc<dyn ProposalCoreService>,
     /// Friend relationship service.
     pub friend: Arc<dyn FriendCoreService>,
     /// Relation graph service (Human Actor V1, see `bcs_actor_relations`).
@@ -139,7 +137,6 @@ pub struct ServicesBuilder {
     group: Option<Arc<dyn GroupCoreService>>,
     routing: Option<Arc<dyn RoutingCoreService>>,
     fusion: Option<Arc<dyn FusionCoreService>>,
-    proposal: Option<Arc<dyn ProposalCoreService>>,
     friend: Option<Arc<dyn FriendCoreService>>,
     relation: Option<Arc<dyn RelationCoreService>>,
     message_flow: Option<Arc<dyn MessageFlowService>>,
@@ -205,12 +202,6 @@ impl ServicesBuilder {
     /// Set the fusion service.
     pub fn fusion(mut self, service: Arc<dyn FusionCoreService>) -> Self {
         self.fusion = Some(service);
-        self
-    }
-
-    /// Set the proposal service.
-    pub fn proposal(mut self, service: Arc<dyn ProposalCoreService>) -> Self {
-        self.proposal = Some(service);
         self
     }
 
@@ -452,7 +443,6 @@ impl ServicesBuilder {
             group: required(self.group, "group")?,
             routing: required(self.routing, "routing")?,
             fusion: required(self.fusion, "fusion")?,
-            proposal: required(self.proposal, "proposal")?,
             friend: required(self.friend, "friend")?,
             relation: required(self.relation, "relation")?,
             message_flow: required(self.message_flow, "message_flow")?,
@@ -512,7 +502,7 @@ impl ServicesBuilder {
             NoopGroupQueryService, NoopHumanActorService,
             NoopCollaborationRuntimeService, NoopCollaborationTemplateService,
             NoopInteractionService, NoopMessageFlowService, NoopOrganizationManagementService,
-            NoopProposalCoreService, NoopProviderBotCoreService, NoopProviderBotEventService,
+            NoopProviderBotCoreService, NoopProviderBotEventService,
             NoopProviderCoreService,
             NoopProviderManagementService, NoopRelationCoreService, NoopRoutingCoreService,
             NoopSecretService, NoopSessionFileService, NoopSessionLaunchService,
@@ -531,9 +521,6 @@ impl ServicesBuilder {
             fusion: self
                 .fusion
                 .unwrap_or_else(|| Arc::new(NoopFusionCoreService)),
-            proposal: self
-                .proposal
-                .unwrap_or_else(|| Arc::new(NoopProposalCoreService)),
             friend: self
                 .friend
                 .unwrap_or_else(|| Arc::new(NoopFriendCoreService)),

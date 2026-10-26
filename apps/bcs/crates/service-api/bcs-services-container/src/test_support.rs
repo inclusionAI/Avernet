@@ -12,7 +12,7 @@ use bcs_test_support::{
     NoopFusionCoreService, NoopGroupCoreService, NoopGroupFusionService,
     NoopGroupManagementService, NoopGroupMessageHistoryService,
     NoopGroupQueryService, NoopHumanActorService, NoopMessageFlowService,
-    NoopOrganizationManagementService, NoopProposalCoreService,
+    NoopOrganizationManagementService,
     NoopProviderBotCoreService, NoopProviderBotEventService, NoopProviderCoreService,
     NoopProviderManagementService, NoopRelationCoreService, NoopRoutingCoreService,
     NoopSessionLaunchService, NoopSessionManagementService, NoopSystemMessageService,
@@ -29,7 +29,6 @@ pub fn with_all_noop() -> ServicesBuilder {
         .group(Arc::new(NoopGroupCoreService))
         .routing(Arc::new(NoopRoutingCoreService))
         .fusion(Arc::new(NoopFusionCoreService))
-        .proposal(Arc::new(NoopProposalCoreService))
         .friend(Arc::new(NoopFriendCoreService))
         .relation(Arc::new(NoopRelationCoreService))
         .message_flow(Arc::new(NoopMessageFlowService))
