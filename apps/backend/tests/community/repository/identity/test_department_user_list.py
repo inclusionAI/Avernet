@@ -74,6 +74,9 @@ def test_mysql_department_parameters_remain_strings(nocase_repository, monkeypat
         statements.append(query.statement)
         return None
 
+    # Select the MySQL-specific repository path without opening a remote DB.
+    with nocase_repository._db.orm_session() as session:
+        monkeypatch.setattr(session.get_bind().dialect, "name", "mysql")
     monkeypatch.setattr(Query, "first", capture_query)
     path = "集团/AI平台"
     if candidate_query:
