@@ -156,7 +156,7 @@ impl BotAuthorityRepoPort for MemoryBotRepo {
     ) -> ServiceResult<Option<BotAccessRelation>> {
         let env = resolve_env();
         if self.deleted_bot_ids.read().await.contains(bot_id)
-            || !self.bots.read().await.contains_key(bot_id)
+            || !self.bots.read().await.get(bot_id).is_some_and(|bot| bot.actor_kind == bcs_service_api::ActorKind::Bot)
         {
             return Ok(None); // missing / deleted bot denies
         }
@@ -186,7 +186,7 @@ impl BotAuthorityRepoPort for MemoryBotRepo {
                     .await
                     .get(bot_id)
                     .and_then(|bot| bot.created_by.clone());
-                if creator.as_deref() == user_id.strip_prefix("human_") {
+                if user_id.strip_prefix("human_").is_some_and(|user| creator.as_deref() == Some(user)) {
                     return Ok(Some(BotAccessRelation::Owner));
                 }
             }
@@ -241,7 +241,7 @@ impl BotAuthorityRepoPort for MemoryBotRepo {
         let mut results = Vec::with_capacity(queries.len());
         for query in queries {
             if self.deleted_bot_ids.read().await.contains(&query.bot_id)
-                || !self.bots.read().await.contains_key(&query.bot_id)
+                || !self.bots.read().await.get(&query.bot_id).is_some_and(|bot| bot.actor_kind == bcs_service_api::ActorKind::Bot)
             {
                 results.push(None);
                 continue;

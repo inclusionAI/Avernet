@@ -5,6 +5,14 @@ pub(super) async fn publish_incoming_event(
     cmd: &BotEventCommand,
     task_id: Option<&str>,
 ) -> ServiceResult<Vec<FrontendDeliveryResult>> {
+    // Run output is not an independent resource notification. A missing local
+    // producer binding (including cleaned canonical/alias identities) must not
+    // trigger fresh admission for subscribers that arrived after completion.
+    let binding = flow.message_tracker.output_binding(&cmd.run_id).await;
+    if flow.output_admission.is_some() && binding.is_none() {
+        return Ok(Vec::new());
+    }
+    let operation_id = binding.flatten();
     let frontend_event = workbench_event_name(&cmd.event_type, &cmd.state);
     let frame = serde_json::json!({
         "type": "event",
@@ -39,7 +47,6 @@ pub(super) async fn publish_incoming_event(
     // terminal frame below still drains to them. Runs outside an
     // admitted operation (internal drains, relay/task continuations)
     // carry no tag and authorize per event against current facts.
-    let operation_id = flow.message_tracker.operation_of_run(&cmd.run_id).await;
     let result = flow
         .frontend_delivery
         .publish(FrontendDeliveryCommand {

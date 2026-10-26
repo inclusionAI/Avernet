@@ -279,7 +279,7 @@ pub async fn handle_persistent_group_send(
         caller_execution: None,
         caller: cmd.caller.clone(),
         group_id: cmd.group_id.clone(),
-        session_id: None,
+        session_id: resolved_session.clone(),
         from_actor_id: cmd.sender.clone(),
         from_name: Some(sender_display_name.clone()),
         message: cmd.content.clone(),
@@ -367,10 +367,10 @@ pub async fn handle_persistent_group_send(
     // cache the trusted operation tag, freeze each producer's output
     // facts from the admission-time snapshot, and hand the complete
     // set to the delivery adapter (Run terminal ≠ operation
-    // complete). Events of this path carry no Session anchor (the
-    // send context below registers none), so the Group participant
-    // rows decide the frozen producer facts. Only Send targets
-    // produce callbacks (Inject never registers a run context).
+    // complete). Freeze the same Session used by admission and callbacks;
+    // truly Group-only sends retain Group participant facts. Only Send
+    // targets produce callbacks (Inject never registers a run context).
+    let freeze_session = session_snapshot_for_freeze(flow, resolved_session.as_deref()).await;
     if let Some(operation_id) = output_operation_id.as_deref() {
         let mut operation_run_ids: Vec<String> = Vec::new();
         for plan in &plans {
@@ -380,7 +380,7 @@ pub async fn handle_persistent_group_send(
             flow.message_tracker
                 .cache_run_operation(&plan.run_id, operation_id)
                 .await;
-            freeze_run_output_facts(flow, &group, None, &plan.run_id, &plan.target_bot_id)
+            freeze_run_output_facts(flow, &group, freeze_session.as_ref(), &plan.run_id, &plan.target_bot_id)
                 .await;
             operation_run_ids.push(plan.run_id.clone());
         }
@@ -422,7 +422,7 @@ pub async fn handle_persistent_group_send(
                 &run_id,
                 &target_bot_id,
                 &cmd.group_id,
-                None,
+                resolved_session.as_deref(),
                 &[],
             )
             .await

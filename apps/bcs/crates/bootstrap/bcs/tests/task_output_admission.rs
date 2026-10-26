@@ -449,3 +449,6 @@ async fn cancellation_of_the_transition_caller_does_not_cancel_committed_cleanup
         while f.permits(&op, &run, conn).await { tokio::task::yield_now().await; }
     }).await.expect("retained post-commit task must finish cleanup without its caller");
 }
+
+#[path = "task_output_admission/output_terminal_scope.rs"]
+mod output_terminal_scope;

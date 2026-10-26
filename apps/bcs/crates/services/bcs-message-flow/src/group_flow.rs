@@ -404,10 +404,14 @@ impl BcsMessageFlow {
                 })
                 .await?;
         }
+        // Explicitly distinguish live internal/relay Runs from a retired Run
+        // whose operation binding was cleaned up. Never recreate this at ingress.
+        self.message_tracker.register_independent_output_run(run_id).await;
         Ok(())
     }
 
     pub(crate) async fn discard_send_context(&self, run_id: &str) -> ServiceResult<()> {
+        self.message_tracker.cleanup_output_run(run_id).await;
         let Some(run_context) = self.bot_run_context.as_ref() else {
             return Ok(());
         };
@@ -639,7 +643,7 @@ impl MessageFlowService for BcsMessageFlow {
             || self.task_store.resolve_task_id(run_id).await.is_some_and(|id| id != task_id) {
             return Ok(TaskRunAliasRegistration::Rejected);
         }
-        if self.message_tracker.operation_of_run(task_id).await.is_some() {
+        if self.message_tracker.output_binding(task_id).await.is_some() {
             let scope = if let Some(entry) = task {
                 Some(BotRunScope {
                     session_id: entry.session_id.unwrap_or_else(|| entry.group_id.clone()),

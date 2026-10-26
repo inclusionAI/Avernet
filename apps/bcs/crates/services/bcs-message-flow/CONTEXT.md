@@ -258,3 +258,17 @@ policy readiness, cancellation uncertainty and the v3 HTTP/CLI contract.
 ## Provider collaboration scope
 
 Direct A2A and group caller authorization enforce Provider collaboration scope before legacy public/friend/organization exemptions; the authenticated caller and all group participants are checked.
+
+Nonqueued persistent sends carry the resolved eventing Session through outbound
+frames, Run registration and frozen producer facts, matching output admission.
+True Group-only sends retain their original scope. Producer snapshots require
+one Session read per send, not per target or output frame.
+
+Output lineage distinguishes an admitted operation, an explicitly registered
+live independent Run, and missing/retired identity. With protected admission
+configured, missing Run lineage never falls back to per-event authorization;
+independent resource notifications keep their separate publisher. Internal/relay
+sends register independent Runs before transport; terminal/rejection cleanup
+removes the marker and aliases. This uses the existing local Run map with no
+terminal tombstone cache, TTL, eviction loophole or frame-time database read.
+Task terminal publication precedes output binding cleanup, including errors.

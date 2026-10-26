@@ -69,6 +69,9 @@ async fn resolve_bot_event_scope(
     let Some(context) = state.bot_run_context.get_context(run_id).await else {
         return Ok(unwrap_outbound_group_id(wire_group_id, explicit_session_id));
     };
+    if context.terminal || context.deadline_ms <= bcs_protocol::now_ms() {
+        return Err(BotWsDispatchError::InvalidFrameFormat("legacy event run is terminal or expired".into()));
+    }
     registered_event_scope(context, bot_id, wire_group_id, explicit_session_id)
 }
 
@@ -627,6 +630,21 @@ fn normalize_legacy_event(event: &EventFrame) -> Option<NormalizedBotEvent> {
         "agent" => {
             let (run_id, group_id, stream) = parse_agent_event(&event.payload)?;
             let is_final = matches!(stream, AgentStream::Error);
+            if is_final {
+                // Match V3: a terminal agent error is a chat error throughout
+                // queue settlement, task completion, output and Run cleanup.
+                let raw = event.payload.as_ref()?;
+                let mut normalized = crate::bot::run_event_v3::normalize_agent_error(
+                    run_id, None, None, raw.get("ts").and_then(Value::as_u64).unwrap_or(0),
+                    raw.get("data").cloned().unwrap_or(Value::Null),
+                );
+                normalized.1 = group_id.clone();
+                normalized.3["bcs_group_id"] = Value::String(group_id);
+                if let Some(session) = raw.get("bcs_session_id") {
+                    normalized.3["bcs_session_id"] = session.clone();
+                }
+                return Some(normalized);
+            }
             Some((
                 run_id,
                 group_id,

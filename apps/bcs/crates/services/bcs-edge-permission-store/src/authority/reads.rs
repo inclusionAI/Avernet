@@ -441,7 +441,7 @@ impl DbBotAuthorityStore {
                 DbStatement::with_params(
                     &format!(
                         "SELECT bot_uuid, ownership_version FROM bcs_bots \
-                         WHERE {} AND env = ? \
+                         WHERE {} AND env = ? AND actor_kind = 'bot' \
                            AND COALESCE(is_deleted, 0) = 0 LIMIT 1",
                         self.bot_id_eq()
                     ),
@@ -472,7 +472,7 @@ impl DbBotAuthorityStore {
                     format!(
                         "SELECT bot_uuid, ownership_version FROM bcs_bots \
                          WHERE env = ? AND COALESCE(is_deleted, 0) = 0 \
-                           AND {}",
+                           AND actor_kind = 'bot' AND {}",
                         self.bot_id_in(bots.len())
                     )
                     .as_str(),

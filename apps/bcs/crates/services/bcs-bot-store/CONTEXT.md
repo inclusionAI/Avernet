@@ -113,3 +113,10 @@ boundary; a failed post-commit cleanup returns
 `retirement_cleanup_pending` and stays retriable without new audit rows.
 The authority read-side same-record pin (profile port, memory mode) holds
 for both dialects.
+
+Ordinary Bot retirement rejects Human targets in the repository, not just the
+application hook. SQL checks actor_kind again under the existing Bot row lock;
+Memory checks it under the shared authority write lock. This API does not delete
+Humans, so registration/transfer cannot race it into orphaning an owner. No new
+Human lifecycle API, query, migration or owner scan is introduced. Authority
+role/fallback reads accept only physical Bot targets (scalar and batch).

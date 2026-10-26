@@ -387,6 +387,14 @@ pub async fn handle_bot_event(
             flow.complete_send_context(&cmd.run_id).await?;
             flow.frontend_delivery.unregister_run(&cmd.run_id).await?;
         }
+        // The task terminal must retain its producer binding until its final
+        // frontend publication; cleanup inside task handling loses that lineage.
+        if is_terminal_state(&cmd.state) && matches!(cmd.event_type.as_str(), "chat" | "chat.event")
+            && flow.task_store.get(&task_id).await.is_some_and(|entry|
+                entry.target_bot == cmd.bot_id && entry.status != TaskLedgerStatus::Dispatched) {
+            flow.message_tracker.cleanup_run(&cmd.run_id).await;
+            flow.message_tracker.cleanup_run(&crate::run_reply::chat_key(&cmd)).await;
+        }
         notify_terminal_observer(flow, &cmd).await;
         return Ok(BotEventOutcome {
             bot_deliveries,

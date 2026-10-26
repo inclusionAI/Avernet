@@ -104,6 +104,8 @@ pub trait BotRepoPort: Send + Sync {
     }
 
     /// Atomic ordinary-Bot retirement (bot authority spec §7.1).
+    /// Only physical Bot targets are supported. Human actors are rejected
+    /// independently of caller authorization, including owners of live Bots.
     ///
     /// ONE transaction commits the Bot tombstone, the owner/
     /// manager edge revocation, the pending-transfer closure

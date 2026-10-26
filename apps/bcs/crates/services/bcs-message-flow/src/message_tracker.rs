@@ -104,9 +104,10 @@ pub struct MessageTracker {
     /// path creates the run (before the bot can emit its first
     /// event) and cleared with the run's terminal cleanup. Runs
     /// created outside an admitted operation (internal drains,
-    /// relay/task continuations) simply have no entry: their events
-    /// authorize per event against current facts.
-    run_operations: Mutex<HashMap<String, String>>,
+    /// relay continuations) explicitly register a None value: their events
+    /// authorize per event against current facts. A missing entry is NOT an
+    /// independent producer and cannot publish protected Run output.
+    run_operations: Mutex<HashMap<String, Option<String>>>,
     output_aliases: Mutex<OutputAliases>,
 }
 
@@ -138,11 +139,23 @@ impl MessageTracker {
             .lock()
             .await
             .entry(run_id.to_string())
-            .or_insert_with(|| operation_id.to_string());
+            .or_insert_with(|| Some(operation_id.to_string()));
     }
 
     /// The operation a run was admitted under, if any.
     pub async fn operation_of_run(&self, run_id: &str) -> Option<String> {
+        self.run_operations.lock().await.get(run_id).cloned().flatten()
+    }
+
+    /// Explicit independent producer registration, never inferred from a missing
+    /// operation. Only trusted send preparation may create this live marker.
+    pub async fn register_independent_output_run(&self, run_id: &str) {
+        self.run_operations.lock().await.entry(run_id.to_string()).or_insert(None);
+    }
+
+    /// Missing means unknown/retired, Some(None) is a live independent Run,
+    /// and Some(Some(id)) belongs to an admitted operation.
+    pub async fn output_binding(&self, run_id: &str) -> Option<Option<String>> {
         self.run_operations.lock().await.get(run_id).cloned()
     }
 
@@ -447,6 +460,26 @@ fn tool_start_expired(info: &ToolCallStartInfo, now_ms: u64) -> bool {
 mod tests {
     use super::{MessageTracker, ToolCallStartInfo};
     use serde_json::Value;
+
+    #[tokio::test]
+    async fn output_lineage_distinguishes_independent_admitted_and_retired_runs() {
+        let tracker = MessageTracker::new();
+        assert_eq!(tracker.output_binding("run").await, None);
+        tracker.cache_run_operation("run", "operation").await;
+        tracker.register_independent_output_run("run").await;
+        assert_eq!(tracker.output_binding("run").await, Some(Some("operation".into())));
+        let scope = bcs_service_api::BotRunScope { bot_id:"bot".into(), group_id:"group".into(), session_id:"session".into() };
+        assert!(tracker.register_output_alias("run", "alias", scope.clone()).await);
+        tracker.register_independent_output_run("independent").await;
+        assert_eq!(tracker.output_binding("independent").await, Some(None));
+        tracker.cleanup_output_run("run").await;
+        assert_eq!(tracker.output_binding("run").await, None);
+        assert_eq!(tracker.canonical_output_run("alias", &scope).await.unwrap(), None);
+        assert!(!tracker.register_output_alias("run", "alias", scope).await);
+        assert_eq!(tracker.output_binding("independent").await, Some(None));
+        tracker.cleanup_output_run("independent").await;
+        assert_eq!(tracker.output_binding("independent").await, None);
+    }
 
     #[tokio::test]
     async fn channel_source_message_ids_are_scoped_to_run_and_cleaned_up() {

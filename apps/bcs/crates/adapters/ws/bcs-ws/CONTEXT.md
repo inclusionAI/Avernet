@@ -150,3 +150,10 @@ credential revocation. Clients retain credentials and use their existing
 reconnect/backoff policy through the master-routing ingress. Promotion creates a
 fresh epoch and never revives cancelled sockets. There is no cross-replica
 forwarding or replay guarantee for in-flight messages. API/frame DTOs are unchanged.
+
+Legacy ingress rejects registered terminal/expired Runs using its existing
+context read, without an additional authorization lookup. Missing output lineage
+also fails closed in MessageFlow, including cleaned aliases. Legacy agent/error
+normalizes to the same chat error command as V3, so settlement, task failure,
+terminal backpressure and per-stream permit cleanup share one lifecycle. No
+extra chat final is required; running sibling streams retain their permits.

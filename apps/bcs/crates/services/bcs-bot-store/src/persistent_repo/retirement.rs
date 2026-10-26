@@ -50,7 +50,7 @@ impl PersistentBotRepo {
             // Pre-read is parameter preparation only (spec §7).
             let rows = self
                 .db_query(
-                    "SELECT is_deleted, provider_id, ownership_version \
+                    "SELECT is_deleted, provider_id, ownership_version, actor_kind \
                      FROM bcs_bots WHERE bot_uuid = ? AND env = ?",
                     vec![Value::from(bot_id), Value::from(env.as_str())],
                 )
@@ -59,6 +59,11 @@ impl PersistentBotRepo {
             let (pre_tombstoned, provider_managed, authority_initialized) =
                 match rows.as_slice() {
                     [row] => {
+                        let actor_kind: String = bcs_db_api::db_get_column(row, "actor_kind")
+                            .map_err(|_| compose::retire_failed())?;
+                        if actor_kind != "bot" {
+                            return Err(ServiceError::Forbidden("Bot retirement cannot delete a Human actor".into()));
+                        }
                         let is_deleted: i64 =
                             bcs_db_api::db_get_column(
                                 row,
@@ -182,7 +187,7 @@ impl PersistentBotRepo {
                         "SELECT t.c AS ok FROM \
                          (SELECT COUNT(*) AS c FROM bcs_bots \
                           WHERE bot_uuid = ? AND env = ? \
-                          AND is_deleted = ? AND provider_id IS NULL) t \
+                          AND is_deleted = ? AND provider_id IS NULL AND actor_kind = 'bot') t \
                           WHERE t.c = 1{lock_suffix}"
                     )
                     .as_str(),

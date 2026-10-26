@@ -105,6 +105,12 @@ impl MemoryBotRepo {
         // Lock order (this module's documented order):
         // authority → bots → tokens → deleted IDs.
         let mut state_guard = self.authority.write().await;
+        // Bot retirement is not a Human lifecycle command. Refuse under the
+        // same authority lock used by ownership registration and transfers.
+        if self.bots.read().await.get(bot_id)
+            .is_some_and(|bot| bot.actor_kind != bcs_service_api::ActorKind::Bot) {
+            return Err(ServiceError::Forbidden("Bot retirement cannot delete a Human actor".into()));
+        }
         let mut staged = state_guard.clone();
 
         // 事务内复验 Bot liveness: two racing retirements

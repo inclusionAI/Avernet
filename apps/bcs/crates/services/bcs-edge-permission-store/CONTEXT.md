@@ -70,3 +70,8 @@ SQL text. The environment is resolved once at construction.
 - Plan §6 MySQL gate: `cargo test -p bcs-edge-permission-store
   --test authority_mysql authority_mysql_conformance -- --ignored
   --exact --nocapture` (needs `BCS_TEST_MYSQL_URL`, fresh empty DB).
+
+Authority role lookup excludes Human management targets before owner/fallback
+resolution, in both scalar and batched Bot-state queries. Actor kind is an
+additional predicate on the existing statements; query counts and chunk bounds
+are unchanged. A Human row with created_by is never a legacy-owned physical Bot.
