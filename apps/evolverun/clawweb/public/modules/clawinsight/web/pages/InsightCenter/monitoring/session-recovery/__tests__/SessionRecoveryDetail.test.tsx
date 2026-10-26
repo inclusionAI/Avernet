@@ -441,3 +441,31 @@ it('shows simulation decisions and the complete proposed message with only asses
   expect(screen.getByText('请核对原调用参数并继续原任务，避免重复已完成操作。')).toBeVisible();
   expect(screen.queryByRole('button', { name: /确认完整方案|拒绝方案|保存标注|创建仿真/ })).toBeNull();
 });
+
+
+it('shows target unavailability as an ended workflow with unknown recovery effect', async () => {
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'completed', completionReason: 'target_unavailable',
+    judgment: { effect: 'unknown', summary: 'Provider确认目标沙箱已销毁', evidence_ids: [] } } as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  await screen.findAllByText('目标不可用');
+  expect(screen.getByText('目标运行环境已不可用，本次自愈已结束；')).toBeVisible();
+  expect(screen.getByText('原任务恢复效果未知。')).toBeVisible();
+  expect(screen.queryByText('原任务已恢复，可查看下方处理过程和判断依据。')).toBeNull();
+  expect(screen.queryByRole('button', { name: /停止任务|确认完整方案|拒绝方案/ })).toBeNull();
+});
+
+
+it.each([true, false])('shows Owner permission instructions without continuing or claiming an unconfirmed notification: %s', async sent => {
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'completed', phase: 'assess', completionReason: 'mcp_permission_required', plan: null,
+    judgment: { delivery: 'unconfirmed', response: 'unknown', effect: 'not_recovered', summary: '请在能力集中申请目标 MCP 服务权限，获批后自行继续原任务。', evidence_ids: ['evidence'] },
+    timeline: [{ event_id: 'notice', at_ms: 1, kind: 'notification', actor: 'service', summary: sent ? '钉钉通知已发送' : '钉钉通知未确认', payload: { kind: 'result', sent } }],
+  } as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  await screen.findByRole('region', { name: 'Owner 处理指引' });
+  expect(within(screen.getByRole('region', { name: 'Owner 处理指引' })).getByText(/请在能力集中申请目标 MCP 服务权限/)).toBeVisible();
+  if (sent) expect(screen.getAllByText('已通知 Owner 自行处理').length).toBeGreaterThan(0);
+  else expect(screen.queryByText('已通知 Owner 自行处理')).toBeNull();
+  expect(screen.queryByRole('button', { name: /确认完整方案|拒绝方案|停止任务|查看方案/ })).toBeNull();
+  expect(sessionRecoveryApi.decide).not.toHaveBeenCalled();
+  expect(screen.queryByText('人工复核')).toBeNull();
+});

@@ -4,9 +4,9 @@ import { containsSecret } from "@avernet/clawweb-shared/server/services/redactio
 import { createHash, randomUUID } from "node:crypto";
 import { SessionRecoveryError } from "./errors.js";
 import { parseRequest } from "./validation.js";
-import { recoveryHandbook } from "./handbook.js";
+import { recoveryHandbook, resolveRecoveryHandbook, type RecoveryHandbookConfigStore } from "./handbook.js";
 import { parseRecoverySimulationBatch, simulationReadTools, validateSimulationKnowledge, type RecoverySimulation, type RecoverySimulationAssessment } from "./simulation.js";
-import { decideRecoveryPlan, observeRecovery, recoveryTaskResult, resumeRecoveryObservation, submitRecoveryPlan, terminateRecoveryTask } from "./task-state.js";
+import { decideRecoveryPlan, validateRecoveryEvidenceReferences, observeRecovery, recoveryTaskResult, resumeRecoveryObservation, submitRecoveryPlan, terminateRecoveryTask } from "./task-state.js";
 import type { RecoveryActionNotifier, RecoveryActor, RecoveryAcknowledgment, RecoveryExecutionView, RecoveryRequest, RecoveryResult, RecoveryTaskView, RecoveryTermination, SessionRecoveryTaskApi } from "./contracts.js";
 import type { RecoveryEvidence, RecoveryJudgment, RecoveryLevel, RecoveryPlan, RecoveryTaskResult, RecoveryTimelineEvent, RecoveryStoredTask, RecoveryTaskStore } from "./task-contracts.js";
 
@@ -38,6 +38,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     observationMs: number;
     now?: () => number;
     resolveTarget?: (request: RecoveryRequest) => Promise<AgentRuntimeTargetSnapshot>;
+    handbookConfig?: RecoveryHandbookConfigStore;
   }) { this.now = deps.now ?? Date.now; }
 
   async create(raw: unknown, actor: RecoveryActor): Promise<RecoveryAcknowledgment & { task_id: string }> {
@@ -59,7 +60,6 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
 
   private async createTask(request: RecoveryRequest, actor: RecoveryActor, level: RecoveryLevel, simulation?: RecoverySimulation): Promise<RecoveryAcknowledgment & { task_id: string }> {
     if (actor.userId !== request.target.entity_id && !actor.isAdmin) this.fail(403, "无权发起目标自愈");
-    const handbook = recoveryHandbook(request.tc_fault_label);
     const taskId = `SR-${createHash("sha256").update(JSON.stringify(simulation
       ? ["simulation", simulation.batchId, request.event_id, request.delivery_key] : [request.event_id, request.delivery_key])).digest("hex").slice(0, 48)}`;
     const existing = await this.deps.tasks.find(taskId);
@@ -67,6 +67,8 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       if (JSON.stringify(existing.request) !== JSON.stringify(request) || existing.simulation?.inputDigest !== simulation?.inputDigest) this.fail(409, "同一投递标识的请求内容不一致");
       return { event_id: request.event_id, delivery_key: request.delivery_key, status: "accepted", task_id: taskId };
     }
+    const handbook = this.deps.handbookConfig ? await resolveRecoveryHandbook(request, this.deps.handbookConfig)
+      : recoveryHandbook(request.tc_fault_label);
     const runtimeTarget = simulation ? undefined : await this.deps.resolveTarget?.(request);
     const task: RecoveryStoredTask = { schemaVersion: "session-recovery-task/v1", taskId, request, level, controlPlaneEnvironment: this.deps.controlPlaneEnvironment,
       status: "running", phase: "assess", version: 1, shared: false, observationDeadlineAt: null, ownerDeadlineAt: null,
@@ -114,10 +116,10 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       if (value.simulation) this.fail(409, "仿真必须提交拟议决策");
       if (value.status !== "running" || value.phase !== "assess") this.fail(409, "当前不能提交初始判断");
       if (!["message", "environment", "observe"].includes(input.decision) || typeof input.summary !== "string" || !input.summary.trim()
-        || input.summary.length > 8000 || containsSecret(input.summary) || !Array.isArray(input.evidence_ids) || !input.evidence_ids.length
-        || input.evidence_ids.some(id => !value.evidence.some(item => item.evidence_id === id))) this.fail(422, "初始判断需要决策、理由及已保存的证据");
+        || input.summary.length > 8000 || containsSecret(input.summary) || !Array.isArray(input.evidence_ids) || !input.evidence_ids.length) this.fail(422, "初始判断需要决策、理由及已保存的证据");
+      validateRecoveryEvidenceReferences(value, input.evidence_ids);
       if (input.decision === "message" && !value.delivery && !(value.level === "debug" && value.timeline.some(event =>
-        event.kind === "operation" && (event.payload.result as Record<string, unknown>)?.dry_run === true))) this.fail(409, "尚未留存 Agent 的初始消息或拟发送内容");
+        event.kind === "operation" && (event.payload.result as Record<string, unknown>)?.dry_run === true))) this.fail(422, "message 决策需要已留存的初始消息或拟发送内容。若 retry_message 在投递前失败且无法继续，请保留受阻结论并返回 blocked；不要改写为已发送，也不要盲目重发结果未知的消息。");
       const debugFinished = value.level === "debug" && input.decision !== "environment";
       return { ...value, version: value.version + 1, phase: input.decision === "environment" ? "plan" : "observe",
         ...(debugFinished ? { status: "completed" as const, judgment: { delivery: "unconfirmed" as const, response: "unknown" as const, effect: "not_intervened" as const, summary: input.summary, evidence_ids: input.evidence_ids } } : {}),
@@ -288,6 +290,53 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
           evidence_ids: [...new Set([...(value.judgment?.evidence_ids ?? []), ...input.evidence_ids])] },
         timeline: [...value.timeline, this.event("termination", "agent", input.summary,
           { completion_reason: "user_continued", evidence_ids: input.evidence_ids })] };
+    });
+    await this.deps.agent.release(task);
+    this.notifyGroup(task, "result");
+  }
+
+  async finishForMcpPermission(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string }): Promise<void> {
+    const task = await this.mutate(taskId, version, value => {
+      if (value.simulation || value.level === "debug" || value.status !== "running" || value.execution?.executionId !== input.executionId
+        || value.execution.state === "ended" || value.phase === "apply") this.fail(409, "当前不能转交 Owner 处理 MCP 权限");
+      if (typeof input.summary !== "string" || !input.summary.trim() || input.summary.length > 8000 || containsSecret(input.summary)
+        || !Array.isArray(input.evidence_ids) || !input.evidence_ids.length) this.fail(422, "MCP 权限转交需要已核实原因、Owner 处理指引及现场证据");
+      validateRecoveryEvidenceReferences(value, input.evidence_ids);
+      if (!value.evidence.some(item => input.evidence_ids.includes(item.evidence_id)
+        && ["session_read", "trajectory_read", "runtime_inspect"].includes(item.source))) this.fail(422, "MCP 权限转交必须引用受控现场读取，不能只引用诊断描述");
+      return { ...value, status: "completed", completionReason: "mcp_permission_required", version: value.version + 1,
+        observationDeadlineAt: null, ownerDeadlineAt: null, requiresFreshObservation: false,
+        ...(value.executionRetry ? { executionRetry: { ...value.executionRetry, retryAt: 0 } } : {}),
+        judgment: { delivery: value.judgment?.delivery ?? "unconfirmed", response: value.judgment?.response ?? "unknown",
+          effect: "not_recovered", summary: input.summary, evidence_ids: input.evidence_ids },
+        timeline: [...value.timeline, this.event("termination", "agent", input.summary,
+          { completion_reason: "mcp_permission_required", evidence_ids: input.evidence_ids, phase: value.phase })] };
+    });
+    // Terminal state prevents another Agent turn; the existing Owner notification records its own receipt.
+    try { await this.notify(task, "result", input.summary); }
+    finally { await this.deps.agent.release(task); }
+    this.notifyGroup(await this.required(taskId), "result");
+  }
+
+  async finishForTargetUnavailable(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string }): Promise<void> {
+    const task = await this.mutate(taskId, version, value => {
+      if (value.simulation || value.status !== "running" || value.execution?.executionId !== input.executionId || value.execution.state === "ended") this.fail(409, "当前不能结束自愈任务");
+      if (typeof input.summary !== "string" || !input.summary.trim() || input.summary.length > 8000 || containsSecret(input.summary)
+        || !Array.isArray(input.evidence_ids) || !input.evidence_ids.length) this.fail(422, "目标不可用需要原因和受控工具证据");
+      validateRecoveryEvidenceReferences(value, input.evidence_ids);
+      const confirmed = value.evidence.some(item => input.evidence_ids.includes(item.evidence_id)
+        && ["session_read", "runtime_inspect"].includes(item.source)
+        && value.timeline.some(event => event.kind === "operation" && event.payload.status === "failed"
+          && (event.payload.raw_tool_call_id ?? event.payload.tool_call_id) === item.tool_call_id
+          && ((event.payload.result as Record<string, unknown>)?.error as Record<string, unknown>)?.code === "target_unavailable"));
+      if (!confirmed) this.fail(422, "目标不可用需要 Provider 明确的 target_unavailable 回执；普通404、会话缺失和超时不证明目标已销毁");
+      return { ...value, status: "completed", completionReason: "target_unavailable", version: value.version + 1,
+        observationDeadlineAt: null, ownerDeadlineAt: null, requiresFreshObservation: false,
+        ...(value.executionRetry ? { executionRetry: { ...value.executionRetry, retryAt: 0 } } : {}),
+        judgment: { delivery: value.judgment?.delivery ?? "unconfirmed", response: value.judgment?.response ?? "unknown",
+          effect: "unknown", summary: input.summary, evidence_ids: input.evidence_ids },
+        timeline: [...value.timeline, this.event("termination", "agent", input.summary,
+          { completion_reason: "target_unavailable", evidence_ids: input.evidence_ids })] };
     });
     await this.deps.agent.release(task);
     this.notifyGroup(task, "result");

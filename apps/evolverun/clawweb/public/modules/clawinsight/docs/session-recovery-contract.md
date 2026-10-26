@@ -27,9 +27,9 @@ Owner waiting and effect waiting have separate deadlines. Owner expiry releases 
 
 ## Handbook and Agent assessment
 
-Handbook content has one source: OCB `clawevolve-recovery-handbook/SKILL.md` and its topic directories, including `mcp/handbook.md` and `file-download/handbook.md`. It is packaged into the AIS Agent workspace only, not installed in the target Bot. The public catalog retains references without internal professional content. Each diagnostic category can select several candidate chapters, and several categories can share the same chapter. The Agent reads the applicable content based on the diagnosis and actual failure; a category match is not evidence of a particular cause.
+Handbook content has one source: OCB `clawevolve-recovery-handbook/SKILL.md` and its topic directories, including `common/mcp/handbook.md`, `common/file-download/handbook.md` and scoped `custom/<team_key>/` content. It is packaged into the AIS Agent workspace only, not installed in the target Bot. The public catalog retains references without internal professional content. Each diagnostic category can select several candidate chapters, and several categories can share the same chapter. The Agent reads the applicable content based on the diagnosis and actual failure; a category match is not evidence of a particular cause.
 
-Creation freezes the catalog's `handbookVersion`, category and `chapters` list in the existing task history. Bootstrap reuses this snapshot on resume, without rerouting through the current catalog. Legacy v1 snapshots with a single `chapter` are exposed as a one-element list, or an empty list for null; their saved version and references are preserved, and missing snapshots are not backfilled. An empty candidate list has no generic-retry fallback; the Agent assesses the actual evidence independently. No diagnosis request fields or database schema change.
+Creation freezes the catalog's `handbookVersion`, `teamKey`, category and `chapters` list in the existing task history. Bootstrap reuses this snapshot on resume, without rerouting through the current catalog. Legacy v1 snapshots with a single `chapter` are exposed as a one-element list, or an empty list for null; their saved version and references are preserved, and missing snapshots are not backfilled. An empty candidate list has no generic-retry fallback; the Agent assesses the actual evidence independently. No diagnosis request fields or database schema change. Team mappings and custom routes use the existing `ce_app_config` key `session_recovery_handbooks`; see [team handbook specification](session-recovery-team-handbooks-spec.md) for matching, configuration validation, runtime file scope and rollout compatibility.
 
 There is no direct-intervention mode or category allowlist. Initial assessment cannot modify the environment. The Agent composes the advice; the original Bot receives that text, without being instructed to install or read the handbook. Initial messages use the upstream delivery key; stable tool retries return the saved receipt. Maintenance does not generate advice.
 
@@ -150,3 +150,12 @@ the Owner. Task detail and operation authorization remain unchanged.
 When a real user continues the original conversation after the fault, the worker reports `kind=blocked`, `reason=user_continued`, the current `phase`, a `summary` and successful controlled-read `evidence_ids`. This explicit reason completes the self-healing task normally with `status=completed` and `completionReason=user_continued`, ending the current execution and clearing wait/retry deadlines. It does not run recovery actions or imply business recovery. Existing effect evidence and task-wide intervention auditing are preserved.
 
 List and callback projections include optional `completion_reason=user_continued`. The monitoring receiver accepts it only for completed tasks, preserves it in existing history JSON and remains compatible with old payloads. UI, notifications and statistics distinguish this normal handoff from failure and from `effect=recovered`. Other blocked reports retain failure semantics; unknown reasons and unsupported read evidence are rejected. Roll out sender/receiver support before the updated worker package. No task-status enum or database schema change is required.
+
+### Cron delivery identity
+
+A direct OpenClaw Cron execution key can differ from its persisted conversation key.
+Before delivery, resolve the indexed job-level key only when it still points to the
+frozen physical Session ID. A separately indexed run key remains usable when its
+identity matches. Missing/replaced entries fail closed; historical transcripts do
+not authorize creating a new conversation. Preserve the original diagnosis key
+and Session ID, and audit the resolved delivery key with the receipt.

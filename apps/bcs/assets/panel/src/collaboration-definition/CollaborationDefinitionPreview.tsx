@@ -8,6 +8,7 @@ import React, {
 } from 'react';
 import styled from 'styled-components';
 import CollaborationDefinitionGraph from './CollaborationDefinitionGraph';
+import HighlightedYaml from './HighlightedYaml';
 import {
   CollaborationDefinitionSnapshotError,
 } from './snapshot';
@@ -54,6 +55,7 @@ const Header = styled.header`
 
   h2 {
     margin: 0;
+    overflow-wrap: anywhere;
     color: #0f172a;
     font-size: 18px;
     line-height: 1.4;
@@ -65,6 +67,22 @@ const Header = styled.header`
     color: #64748b;
     font-size: 12px;
   }
+`;
+
+const HeaderTop = styled.div`
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+
+  h2 {
+    flex: 1;
+    min-width: 0;
+  }
+`;
+
+const ValidationStatus = styled.span`
+  color: hsl(var(--success, 161 94% 20%));
+  white-space: nowrap;
 `;
 
 const Section = styled.section`
@@ -118,6 +136,20 @@ const Toolbar = styled.div`
   margin-top: 14px;
 `;
 
+const LaunchButton = styled(Button)`
+  flex-shrink: 0;
+  border-color: transparent;
+  padding: 8px 14px;
+  color: hsl(var(--primary-foreground, 0 0% 100%));
+  background: hsl(var(--primary, 221.2 83.2% 53.3%));
+  font-size: 14px;
+  font-weight: 600;
+
+  &:hover:not(:disabled) {
+    background: hsl(var(--primary, 221.2 83.2% 53.3%) / 0.9);
+  }
+`;
+
 const Tabs = styled.div`
   display: flex;
   gap: 4px;
@@ -135,6 +167,7 @@ const Tab = styled(Button)<{ $active: boolean }>`
 
 const TabContent = styled.div`
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   gap: 16px;
 
@@ -162,6 +195,14 @@ const Source = styled.pre`
   font-size: 12px;
   line-height: 1.6;
   white-space: pre;
+
+  code { font: inherit; }
+  .hljs-attr { color: #7dd3fc; }
+  .hljs-string { color: #a7f3d0; }
+  .hljs-number { color: #fdba74; }
+  .hljs-literal { color: #c4b5fd; }
+  .hljs-comment { color: #94a3b8; font-style: italic; }
+  .hljs-meta, .hljs-type, .hljs-template-variable { color: #fcd34d; }
 `;
 
 const Notice = styled.div<{ $tone?: 'success' | 'warning' | 'danger' }>`
@@ -380,9 +421,7 @@ function Participants({
 function ValidationResult({ result }: { result: CollaborationDefinitionValidationResult }) {
   return (
     <>
-      <Notice $tone={result.valid ? 'success' : 'danger'}>
-        {result.valid ? '定义校验通过' : '定义校验未通过'}
-      </Notice>
+      {!result.valid ? <Notice $tone="danger">定义校验未通过</Notice> : null}
       {result.valid && result.graph ? (
         <CollaborationDefinitionGraph
           graph={result.graph}
@@ -431,6 +470,7 @@ export default function CollaborationDefinitionPreview(
   }, [props]);
   const [state, setState] = useState<PreviewState>({ status: 'validating' });
   const [copied, setCopied] = useState(false);
+  const [launchError, setLaunchError] = useState('');
   const [activeTab, setActiveTab] = useState<'preview' | 'source'>('preview');
   const tabId = useId();
   const [loaded, setLoaded] = useState<{ key: string; source: StoredDefinition }>();
@@ -487,6 +527,7 @@ export default function CollaborationDefinitionPreview(
 
   useEffect(() => {
     setActiveTab('preview');
+    setLaunchError('');
     setCopied(false);
     void runValidation();
     return () => {
@@ -494,6 +535,7 @@ export default function CollaborationDefinitionPreview(
       requestIdRef.current += 1;
     };
   }, [identityKey]);
+
 
   const source = snapshot?.schemaVersion === 1 ? snapshot : loaded?.key === identityKey ? loaded.source : undefined;
   const copySource = async () => {
@@ -513,8 +555,26 @@ export default function CollaborationDefinitionPreview(
     <Container>
       <Content>
         <Header>
-          <h2>{source?.title || '自定义协作'}</h2>
-          <p>{snapshot?.schemaVersion === 2 ? `固定版本 ${snapshot.revision} · 只读预览` : 'YAML 快照 · 只读预览'}</p>
+          <HeaderTop>
+            <h2>{source?.title || '自定义协作'}</h2>
+            {snapshot?.schemaVersion === 2 ? <LaunchButton type="button"
+              disabled={!source || visibleState.status !== 'complete' || !visibleState.result.valid}
+              onClick={() => {
+                if (snapshot.schemaVersion !== 2) return;
+                if (!props.onOpenCreateGroup) {
+                  setLaunchError('当前宿主尚未接入建群入口，可继续预览和复制源码。');
+                  return;
+                }
+                try { props.onOpenCreateGroup({ draft: { ...snapshot } }); setLaunchError(''); }
+                catch { setLaunchError('建群浮层未能打开，请稍后重试'); }
+              }}>发起协作</LaunchButton> : null}
+          </HeaderTop>
+          <p>
+            {snapshot?.schemaVersion === 2 ? `固定版本 ${snapshot.revision} · 只读预览` : 'YAML 快照 · 只读预览'}
+            {visibleState.status === 'complete' && visibleState.result.valid ? (
+              <ValidationStatus> · 定义校验通过</ValidationStatus>
+            ) : null}
+          </p>
           <Toolbar>
             <Tabs role="tablist" aria-label="协作定义视图" onKeyDown={(event) => {
               let next: 'preview' | 'source';
@@ -531,16 +591,14 @@ export default function CollaborationDefinitionPreview(
                   aria-selected={activeTab === tab} aria-controls={`${tabId}-${tab}-panel`}
                   tabIndex={activeTab === tab ? 0 : -1} $active={activeTab === tab}
                   onClick={() => setActiveTab(tab)}>
-                  {tab === 'preview' ? '预览' : '源码'}
+                  {tab === 'preview' ? '协作预览' : '查看定义'}
                 </Tab>
               ))}
             </Tabs>
-            <Button type="button" aria-label="复制源码" disabled={!source} onClick={() => void copySource()}>
-              {copied ? '已复制' : '复制源码'}
-            </Button>
           </Toolbar>
         </Header>
 
+        {launchError ? <Notice role="alert">{launchError}</Notice> : null}
         {visibleState.status === 'validating' ? <Loading>正在读取并校验协作定义…</Loading> : null}
         {visibleState.status === 'empty' ? (
           <Notice>YAML 为空，已保留原文且未向服务端提交校验。</Notice>
@@ -567,8 +625,13 @@ export default function CollaborationDefinitionPreview(
           aria-labelledby={`${tabId}-source`} tabIndex={0} hidden={activeTab !== 'source'}>
           {activeTab === 'source' && source ? (
             <Section>
-              <SectionTitle><h3>原始 YAML</h3></SectionTitle>
-              <Source>{source.definitionYaml}</Source>
+              <SectionTitle>
+                <h3>协作定义 YAML</h3>
+                <Button type="button" aria-label="复制源码" onClick={() => void copySource()}>
+                  {copied ? '已复制' : '复制源码'}
+                </Button>
+              </SectionTitle>
+              <Source><HighlightedYaml source={source.definitionYaml} /></Source>
               <SourceDetails>
                 {snapshot ? <p>{snapshot.schemaVersion === 2 ? '存储版本' : '快照'} {definitionVersionKey(snapshot)}</p> : null}
                 {loaded?.key === identityKey ? <p>SHA-256 {loaded.source.contentHash} · {loaded.source.sizeBytes} 字节</p> : null}

@@ -131,3 +131,39 @@ and BCS build. Explicit failures produce `NOT_READY`; missing evidence stays
 `UNKNOWN`. The table lists exact versions and the blocking stage, and a
 non-ready result fails the final job. This reports compatibility signals, not
 a guarantee of every BCS capability.
+
+## DingTalk daily report
+
+Scheduled and manually dispatched runs send one Markdown report after
+all compatibility jobs finish, on both success and failure. Push runs do not
+send group messages. The report includes exact engine/plugin versions and tested BCS/bridge commit, fixed
+versus latest selection, smoke/E2E readiness, blocking stages, unsuccessful
+jobs and the Actions run link. Package versions and the BCS/bridge commit compare with the most recent
+prior completed scheduled run on the same branch (not necessarily yesterday).
+Missing/expired previous artifacts are labelled as no baseline. Missing current
+evidence is UNKNOWN, never a successful result.
+
+Create a group custom robot using the official
+[DingTalk setup](https://open.dingtalk.com/document/robots/custom-robot-access)
+and configure these repository **Actions
+Secrets** directly in GitHub, never in chat, code, workflow inputs or logs:
+
+| Secret | Value |
+| --- | --- |
+| `BCS_ENGINE_COMPAT_DINGTALK_WEBHOOK` | Full custom robot Webhook for the destination group |
+| `BCS_ENGINE_COMPAT_DINGTALK_SIGN_SECRET` | Optional: signing secret, required only when the robot enables signing |
+
+If the robot also requires a keyword, use `BCS` (present in every report).
+The notifier uses HTTPS, adds a timestamp/HMAC-SHA256 signature when a signing
+secret is configured, checks DingTalk's
+application-level response, does not follow redirects, and never prints the
+Webhook, signing secret, response body or transport exception. Only the Webhook is always required. Missing configuration or a rejected/failed send fails only the
+notification job; compatibility gates remain unchanged. Automatic retries are
+avoided because a timeout can occur after delivery; explicitly rerunning the
+notification job can send a duplicate. No @all mention is sent.
+
+Use **Run workflow** after configuring Secrets to verify real delivery from a
+GitHub-hosted runner; this also performs the paid engine checks. Local tests use
+mock HTTP responses only. Cancellation of the entire workflow or a GitHub outage
+can prevent notification; this is completion reporting, not an independent
+monitor of missing scheduled runs.

@@ -7,6 +7,7 @@ import Database from "better-sqlite3";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { SqliteDatabase, runMigrations } from "@avernet/clawweb-shared/server/db";
 import { EvolveRepository } from "@avernet/clawevolve/server/repositories/evolve-repository";
+import { BotRuntimeError } from "@avernet/clawweb-shared/server/services/bot-runtime";
 import type { BotRuntime, ResolvedBotTarget } from "@avernet/clawweb-shared/server/services/bot-runtime";
 import { SessionRecoveryTaskRepository } from "../../../../repositories/repair/session-recovery-task-repository.js";
 import { AgentToolCallRepository } from "../../../../repositories/repair/agent-tool-call-repository.js";
@@ -113,4 +114,77 @@ it("rejects a stale execution's user handoff after another execution takes owner
   await expect(agent.report(stale, { kind: "blocked", reason: "user_continued", phase: "assess", summary: "用户已继续", evidence_ids: [read.evidenceId] })).rejects.toMatchObject({ status: 409 });
   expect(await current(stale.taskId)).toMatchObject({ status: "running", execution: { executionId: "replacement-execution" } });
   expect(callbacks).toHaveLength(0);
+});
+
+
+it("ends normally for a proven destroyed target, preserving audit and unknown business effect", async () => {
+  let task = await create();
+  vi.mocked(runtime.request).mockRejectedValueOnce(new BotRuntimeError(410, "target_unavailable", "目标运行环境已销毁"));
+  const read = await agent.inspect(task, { clientRequestId: "destroyed-status", purpose: "核查目标状态", operation: "engine_read", request: { method: "GET", path: "/api/engine/status" } });
+  expect(read).toMatchObject({ status: "failed", result: { error: { code: "target_unavailable" } } });
+  task = await current(task.taskId);
+  await agent.report(task, { kind: "blocked", phase: "assess", reason: "target_unavailable", summary: "目标已销毁，无法继续调查或干预", evidence_ids: [read.evidenceId] });
+  task = await current(task.taskId);
+  expect(task).toMatchObject({ status: "completed", completionReason: "target_unavailable", interventionStatus: "none", judgment: { effect: "unknown" }, execution: { state: "ended" } });
+  await service.reportResults();
+  expect(callbacks.at(-1)).toMatchObject({ status: "completed", completion_reason: "target_unavailable", effect: "unknown", intervention_status: "none" });
+  await service.executionFailure(task.taskId, "late failed callback", task.execution!.executionId, true);
+  await service.maintenance();
+  expect(submissions).toHaveLength(1); expect(runtime.sendMessage).not.toHaveBeenCalled();
+});
+
+it("does not accept model-only target loss or an ordinary HTTP 404 as destroyed-target evidence", async () => {
+  let task = await create();
+  vi.mocked(runtime.request).mockResolvedValueOnce({ status: 404, body: { detail: "Session not found" } });
+  const read = await agent.inspect(task, { clientRequestId: "ordinary-404", purpose: "核查状态", operation: "engine_read", request: { method: "GET", path: "/api/engine/status" } });
+  task = await current(task.taskId);
+  for (const evidence_ids of [[], [read.evidenceId]]) {
+    await expect(agent.report(task, { kind: "blocked", phase: "assess", reason: "target_unavailable", summary: "推测目标已销毁", evidence_ids })).rejects.toMatchObject({ status: 422 });
+  }
+  expect(await current(task.taskId)).toMatchObject({ status: "running", phase: "assess" });
+});
+
+
+it.each(["assess", "observe"] as const)("notifies the Owner and ends an MCP permission case in %s without a plan or continuation", async phase => {
+  let task = phase === "observe" ? await toObserve(await create()) : await create();
+  const read = await inspect(task, "permission-evidence"); task = await current(task.taskId);
+  const summary = "## MCP 权限问题\n\n目标服务明确拒绝当前身份访问。\n\n## 请 Owner 处理\n\n在能力集中申请该 MCP 服务权限，获批后自行继续原任务。";
+  await agent.report(task, { kind: "blocked", phase, reason: "mcp_permission_required", summary, evidence_ids: [read.evidenceId] });
+  task = await current(task.taskId);
+  expect(task).toMatchObject({ status: "completed", phase, completionReason: "mcp_permission_required", plan: null,
+    ownerDeadlineAt: null, observationDeadlineAt: null, execution: { state: "ended" }, judgment: { effect: "not_recovered", summary } });
+  expect(notifier.notify).toHaveBeenCalledExactlyOnceWith({ ownerId: "owner", taskId: task.taskId, kind: "result", summary });
+  expect(task.timeline.some(event => event.kind === "notification" && event.payload.kind === "result" && event.payload.sent === true)).toBe(true);
+  expect(task.timeline.some(event => event.kind === "plan" || event.kind === "owner_decision")).toBe(false);
+  await service.reportResults();
+  expect(callbacks.at(-1)).toMatchObject({ status: "completed", completion_reason: "mcp_permission_required", effect: "not_recovered", intervention_status: phase === "observe" ? "performed" : "none" });
+  await service.executionFailure(task.taskId, "late AIS callback", task.execution!.executionId, true);
+  await service.maintenance();
+  expect(submissions).toHaveLength(1);
+  await expect(agent.report(task, { kind: "blocked", phase, reason: "mcp_permission_required", summary, evidence_ids: [read.evidenceId] })).rejects.toMatchObject({ status: 409 });
+  expect(notifier.notify).toHaveBeenCalledTimes(1);
+});
+
+it.each(["disabled", "failed"])("ends without claiming Owner notification when the channel is %s", async state => {
+  let task = await create(); const read = await inspect(task); task = await current(task.taskId);
+  if (state === "disabled") notifier.notify.mockResolvedValue(false);
+  else notifier.notify.mockRejectedValue(new Error("notification unavailable"));
+  await agent.report(task, { kind: "blocked", phase: "assess", reason: "mcp_permission_required", summary: "已核实 MCP 服务权限不足，请 Owner 在能力集中申请权限。", evidence_ids: [read.evidenceId] });
+  task = await current(task.taskId);
+  expect(task).toMatchObject({ status: "completed", completionReason: "mcp_permission_required", execution: { state: "ended" } });
+  expect(task.timeline.some(event => event.kind === "notification" && event.payload.sent === true)).toBe(false);
+  if (state === "failed") expect(task.timeline.some(event => event.kind === "notification" && event.payload.sent === false)).toBe(true);
+  await service.maintenance(); expect(submissions).toHaveLength(1);
+});
+
+it("requires saved scene evidence and never notifies from Debug or an in-progress apply", async () => {
+  let task = await create();
+  await expect(agent.report(task, { kind: "blocked", phase: "assess", reason: "mcp_permission_required", summary: "仅有诊断推测", evidence_ids: [] })).rejects.toMatchObject({ status: 422 });
+  const read = await inspect(task); task = await current(task.taskId);
+  task = (await tasks.update(task.taskId, task.version, value => ({ ...value, phase: "apply", version: value.version + 1 })))!;
+  await expect(agent.report(task, { kind: "blocked", phase: "apply", reason: "mcp_permission_required", summary: "不得中途转交", evidence_ids: [read.evidenceId] })).rejects.toMatchObject({ status: 409 });
+  const debug = await create("debug", { event_id: "debug-owner-notice", delivery_key: "debug-owner-notice" });
+  const evidence = await inspect(debug);
+  await expect(agent.report(await current(debug.taskId), { kind: "blocked", phase: "assess", reason: "mcp_permission_required", summary: "Debug不得发通知", evidence_ids: [evidence.evidenceId] })).rejects.toMatchObject({ status: 409 });
+  expect(notifier.notify).not.toHaveBeenCalled();
 });

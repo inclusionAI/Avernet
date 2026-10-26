@@ -1,5 +1,7 @@
 """Work-order event and business regression cases split by responsibility."""
 
+
+from agentclaw.community.core.repository.implementations.spaces.persistence_effects import NoKnowledgeSpacePersistenceEffects
 import json
 import pytest
 from agentclaw.community.core.bot_collaborator.models import BotCollaboratorModel
@@ -124,7 +126,7 @@ def test_auto_finalize_records_system_reviewer_without_approver_rows(db) -> None
 def test_skill_editor_review_atomically_controls_manager_grant(
     db, target_status, manager_expected
 ) -> None:
-    spaces = SpaceRepository(db)
+    spaces = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
     team, skill_id = _space_skill(db, spaces)
     repository = _work_orders(db)
     order = repository.create_skill_editor_request(
@@ -175,7 +177,7 @@ def test_skill_editor_review_atomically_controls_manager_grant(
 
 
 def test_skill_editor_request_persists_display_name_and_work_no(db) -> None:
-    spaces = SpaceRepository(db)
+    spaces = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
     team, skill_id = _space_skill(db, spaces)
     spaces.add_member(
         space_id=team.id,
@@ -212,7 +214,7 @@ def test_skill_editor_request_persists_display_name_and_work_no(db) -> None:
 
 
 def test_skill_editor_request_rejects_personal_space(db) -> None:
-    spaces = SpaceRepository(db)
+    spaces = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
     with spaces.create_personal_transaction(
         user_id="owner-1", creator_user_name=None, env="dev"
     ) as personal:
@@ -259,7 +261,7 @@ def test_skill_editor_request_rejects_personal_space(db) -> None:
 
 
 def test_skill_editor_request_rejects_non_member(db) -> None:
-    spaces = SpaceRepository(db)
+    spaces = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
     team, skill_id = _space_skill(db, spaces)
 
     with pytest.raises(WorkOrderAccessDeniedError):
@@ -276,7 +278,7 @@ def test_skill_editor_request_rejects_non_member(db) -> None:
 def test_skill_editor_approval_is_idempotent_when_manager_grant_already_exists(
     db,
 ) -> None:
-    spaces = SpaceRepository(db)
+    spaces = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
     team, skill_id = _space_skill(db, spaces)
     work_orders = _work_orders(db)
     order = work_orders.create_skill_editor_request(
@@ -323,7 +325,7 @@ def test_skill_editor_approval_is_idempotent_when_manager_grant_already_exists(
 
 
 def test_skill_editor_pending_reviewer_follows_current_owner(db) -> None:
-    spaces = SpaceRepository(db)
+    spaces = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
     team, skill_id = _space_skill(db, spaces)
     spaces.add_member(
         space_id=team.id,
@@ -377,7 +379,7 @@ def test_skill_editor_pending_reviewer_follows_current_owner(db) -> None:
 
 
 def test_skill_editor_approval_rechecks_active_membership_and_rolls_back(db) -> None:
-    spaces = SpaceRepository(db)
+    spaces = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
     team, skill_id = _space_skill(db, spaces)
     work_orders = _work_orders(db)
     order = work_orders.create_skill_editor_request(
@@ -432,7 +434,7 @@ def test_skill_editor_approval_rechecks_active_membership_and_rolls_back(db) -> 
 def test_bot_editor_request_approval_grants_admin_without_changing_existing_roles(
     db, existing_role
 ) -> None:
-    spaces = SpaceRepository(db)
+    spaces = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
     team = _team(spaces)
     spaces.add_member(
         space_id=team.id,
@@ -550,7 +552,7 @@ def test_bot_editor_request_approval_grants_admin_without_changing_existing_role
 def test_friend_approval_context_and_reviewed_event_use_original_applied_event(
     db,
 ) -> None:
-    repository = WorkOrderRepository(db, _skill_editor_requests(db))
+    repository = WorkOrderRepository(db, _skill_editor_requests(db), effects=NoKnowledgeSpacePersistenceEffects())
     created = repository.create_work_order_event(
         event_category=NotificationCategory.APPROVAL,
         biz_type=WorkOrderBizType.BOT_FRIEND.value,
@@ -606,7 +608,7 @@ def test_friend_approval_context_and_reviewed_event_use_original_applied_event(
 
 
 def test_friend_rejection_persists_status_specific_content(db) -> None:
-    repository = WorkOrderRepository(db, _skill_editor_requests(db))
+    repository = WorkOrderRepository(db, _skill_editor_requests(db), effects=NoKnowledgeSpacePersistenceEffects())
     created = repository.create_work_order_event(
         event_category=NotificationCategory.APPROVAL,
         biz_type=WorkOrderBizType.BOT_FRIEND.value,
@@ -655,7 +657,7 @@ def test_friend_rejection_persists_status_specific_content(db) -> None:
 
 
 def test_get_approval_context_rejects_missing_order(db) -> None:
-    repository = WorkOrderRepository(db, _skill_editor_requests(db))
+    repository = WorkOrderRepository(db, _skill_editor_requests(db), effects=NoKnowledgeSpacePersistenceEffects())
 
     with pytest.raises(WorkOrderNotFoundError):
         repository.get_approval_context(
@@ -666,7 +668,7 @@ def test_get_approval_context_rejects_missing_order(db) -> None:
 
 
 def test_get_approval_context_rejects_non_approver(db) -> None:
-    repository = WorkOrderRepository(db, _skill_editor_requests(db))
+    repository = WorkOrderRepository(db, _skill_editor_requests(db), effects=NoKnowledgeSpacePersistenceEffects())
     created = repository.create_work_order_event(
         event_category=NotificationCategory.APPROVAL,
         biz_type=WorkOrderBizType.BOT_FRIEND.value,

@@ -918,7 +918,9 @@ mod tests {
         let config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../../configs/bcs-config-local.toml");
         let content = std::fs::read_to_string(config_path).unwrap();
-        let config: crate::config::BcsConfig = toml::from_str(&content).unwrap();
+        let mut value = parse_config_content("toml", &content, "local config").unwrap();
+        expand_env_vars(&mut value).unwrap();
+        let config: crate::config::BcsConfig = serde_json::from_value(value).unwrap();
 
         assert_eq!(
             config.logging.tags.get("bcs_chat_digest").map(String::as_str),
@@ -942,7 +944,9 @@ mod tests {
         let config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../../configs/bcs-config-local.toml");
         let content = std::fs::read_to_string(config_path).unwrap();
-        let config: crate::config::BcsConfig = toml::from_str(&content).unwrap();
+        let mut value = parse_config_content("toml", &content, "local config").unwrap();
+        expand_env_vars(&mut value).unwrap();
+        let config: crate::config::BcsConfig = serde_json::from_value(value).unwrap();
 
         assert_eq!(config.secret.provider, "env");
         assert_eq!(
@@ -956,7 +960,9 @@ mod tests {
         let config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../../configs/bcs-config-local.toml");
         let content = std::fs::read_to_string(config_path).unwrap();
-        let config: crate::config::BcsConfig = toml::from_str(&content).unwrap();
+        let mut value = parse_config_content("toml", &content, "local config").unwrap();
+        expand_env_vars(&mut value).unwrap();
+        let config: crate::config::BcsConfig = serde_json::from_value(value).unwrap();
 
         let common_error = config
             .logging

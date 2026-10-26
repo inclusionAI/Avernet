@@ -13,6 +13,9 @@ from agentclaw.community.core.bot_management.services.bot_space_service import (
     BotSpaceService,
 )
 from agentclaw.community.core.repository.implementations.bot.bot import BotRepository
+from agentclaw.community.core.repository.implementations.spaces.persistence_effects import (
+    NoKnowledgeSpacePersistenceEffects,
+)
 from agentclaw.community.core.repository.implementations.spaces.space import (
     SpaceRepository,
 )
@@ -53,7 +56,9 @@ def move_to_new_space(db, scope):
     quota = MagicMock()
     quota.guard_add.side_effect = lambda **_: nullcontext()
     result = BotSpaceService(
-        BotRepository(db), SpaceAccessService(SpaceRepository(db)), quota
+        BotRepository(db),
+        SpaceAccessService(SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())),
+        quota,
     ).change_space(
         bot_id=scope.bot_id, owner_id=scope.owner_id, space_id=2, env=scope.env
     )

@@ -100,6 +100,8 @@ export interface CollaborationDefinitionValidationResult {
 }
 
 export interface CollaborationDefinitionComponentProps {
+  /** Injected by the host; only a user click opens the existing group modal. */
+  onOpenCreateGroup?: (options?: { draft?: import('./reference').CollaborationDefinitionReference }) => void;
   apiBaseUrl?: string;
   baseUrl?: string;
   data?: Record<string, any>;

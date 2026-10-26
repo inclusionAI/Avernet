@@ -50,8 +50,8 @@ export type RecoveryTaskState = {
   request: RecoveryRequest;
   level: RecoveryLevel;
   status: RecoveryTaskStatus;
-  /** Normal completion because a real user resumed the original conversation. */
-  completionReason?: "user_continued";
+  /** Normal completion after handoff, Owner-only MCP permission handling, or confirmed target loss. */
+  completionReason?: "user_continued" | "target_unavailable" | "mcp_permission_required";
   phase: RecoveryPhase;
   version: number;
   /** Absent on legacy tasks; never inferred from the target Bot environment. */
@@ -81,7 +81,7 @@ export type RecoveryTaskResult = {
   status: "waiting_effect" | "completed" | "failed" | "canceled";
   phase: RecoveryPhase;
   waiting_reason: "effect" | null;
-  completion_reason?: "user_continued";
+  completion_reason?: "user_continued" | "target_unavailable" | "mcp_permission_required";
   effect: RecoveryEffect;
   /** Whether any intervention is confirmed; independent of business recovery. Omitted by legacy senders. */
   intervention_status?: RecoveryInterventionStatus;

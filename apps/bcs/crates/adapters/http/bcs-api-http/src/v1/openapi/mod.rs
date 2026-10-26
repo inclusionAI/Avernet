@@ -1,5 +1,5 @@
 pub(crate) mod dto;
-mod routes;
+pub(crate) mod routes;
 mod session_file_url;
 
 use axum::Router;

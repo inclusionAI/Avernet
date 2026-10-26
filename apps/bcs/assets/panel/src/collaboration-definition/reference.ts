@@ -73,7 +73,14 @@ async function request(baseUrl: string, reference: CollaborationDefinitionRefere
       throw new DraftReadError('引用不可用：版本不存在、分享已撤销或读取凭据不匹配');
     }
     if (!response.ok) throw new DraftReadError(`版本服务请求失败（HTTP ${response.status}）`);
-    return await response.json();
+    const result = await response.json();
+    if (result && typeof result === 'object' && 'code' in result) {
+      if (result.code !== 20000 || !result.data || typeof result.data !== 'object') {
+        throw new DraftReadError('版本服务响应格式无效');
+      }
+      return result.data;
+    }
+    return result;
   } catch (error) {
     if (error instanceof DraftReadError) throw error;
     throw new DraftReadError(controller.signal.aborted ? '版本请求已取消或超时' : '版本服务网络错误或响应格式无效');

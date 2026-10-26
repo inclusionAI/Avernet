@@ -92,7 +92,7 @@ async fn list_public_groups(
         .into_response())
 }
 
-async fn create_group(
+pub(crate) async fn create_group(
     State(state): State<ApiState>,
     Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,

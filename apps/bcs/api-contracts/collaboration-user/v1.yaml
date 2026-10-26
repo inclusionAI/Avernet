@@ -1,0 +1,51 @@
+openapi: 3.1.0
+info:
+  title: BCS Human browser API
+  version: 1.0.0
+  description: >-
+    Native BCS browser entry for hosts without a Gateway hop. Bootstrap selects
+    the existing BCS Human cookie authentication chain (or explicitly configured
+    local Human auth); never a fallback for failed Gateway authentication.
+    Authorization, Actor, Bot, Gateway Principal and Draft-read headers are
+    rejected. Verified Bot principals cannot become their owner Human.
+    All responses are no-store. Cross-site fetches are rejected; POST requires
+    X-BCS-Expected-User, compared against authenticated identity before dispatch.
+    Existing invite gating, V1 DTOs, ownership and Group application policy apply.
+    This entry does not expose other V1 routes or change /openapi authentication.
+paths:
+  /collaboration/user/me:
+    get:
+      $ref: '../v1/openapi/human.yaml#/CurrentUserPath/get'
+      x-avernet-security: {user: required}
+  /collaboration/user/bots/mine:
+    parameters:
+      - $ref: '../v1/openapi/human.yaml#/ExpectedUser'
+    get:
+      $ref: '../v1/openapi/bots.yaml#/MyBotsPath/get'
+      x-avernet-security: {user: required}
+      responses:
+        $ref: '../v1/openapi/bots.yaml#/MyBotsPath/get/responses'
+        '401': {$ref: '../v1/openapi/human.yaml#/CurrentUserPath/get/responses/401'}
+        '403': {$ref: '../v1/openapi/human.yaml#/UserContextRejected'}
+  /collaboration/user/bots/{bot_id}/candidates:
+    parameters:
+      - $ref: '../v1/openapi/human.yaml#/ExpectedUser'
+    get:
+      $ref: '../v1/openapi/bots.yaml#/BotCandidatesPath/get'
+      x-avernet-security: {user: required}
+      responses:
+        $ref: '../v1/openapi/bots.yaml#/BotCandidatesPath/get/responses'
+        '401': {$ref: '../v1/openapi/human.yaml#/CurrentUserPath/get/responses/401'}
+        '403': {$ref: '../v1/openapi/human.yaml#/UserContextRejected'}
+  /collaboration/user/groups:
+    parameters:
+      - $ref: '../v1/openapi/human.yaml#/ExpectedUser'
+        required: true
+    post:
+      $ref: '../v1/openapi/groups.yaml#/GroupsPath/post'
+      x-avernet-security: {user: required}
+      x-bcn-identity-policy: human
+      responses:
+        $ref: '../v1/openapi/groups.yaml#/GroupsPath/post/responses'
+        '401': {$ref: '../v1/openapi/human.yaml#/CurrentUserPath/get/responses/401'}
+        '403': {$ref: '../v1/openapi/human.yaml#/UserContextRejected'}

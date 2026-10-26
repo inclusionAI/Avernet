@@ -16,6 +16,9 @@ from agentclaw.community.core.repository.implementations.bot.bot import BotRepos
 from agentclaw.community.core.repository.implementations.bot.collaborator import (
     CollaboratorRepository,
 )
+from agentclaw.community.core.repository.implementations.spaces.persistence_effects import (
+    NoKnowledgeSpacePersistenceEffects,
+)
 from agentclaw.community.core.repository.implementations.spaces.space import (
     SpaceRepository,
 )
@@ -160,7 +163,7 @@ def native_editor(db, *, personal):
         BotRepository(db),
         Mock(),
         Mock(),
-        SpaceAccessService(SpaceRepository(db)),
+        SpaceAccessService(SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())),
     )
     native.add_editor(
         bot_id="bot",

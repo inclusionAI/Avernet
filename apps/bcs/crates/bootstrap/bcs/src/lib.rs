@@ -150,6 +150,7 @@ mod delivery_metrics;
 pub mod plugins;
 pub mod server;
 mod principal_state;
+mod browser_principal;
 pub mod state_machine_timeout_scanner;
 pub mod state_machine_progression_scanner;
 mod recovery_backoff;

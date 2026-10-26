@@ -1,0 +1,75 @@
+RevisionPath:
+  parameters:
+    - $ref: '../../collaboration-drafts/v1.yaml#/components/parameters/DraftId'
+    - $ref: '../../collaboration-drafts/v1.yaml#/components/parameters/Revision'
+  get:
+    operationId: read_draft_revision
+    tags: ["Collaboration / Drafts"]
+    summary: Read an immutable revision using its share capability.
+    description: >-
+      Exactly one X-BCS-Draft-Read-Token is required. No ambient User, Bot or
+      Gateway credential fallback. No-store on success and errors. No management
+      aliases exist. Uses the same application service as native Draft reads.
+    x-avernet-security: {}
+    security: [{RevisionReadToken: []}]
+    responses:
+      '200':
+        description: Exact stored source and metadata, in the V1 envelope.
+        content:
+          application/json:
+            schema:
+              $ref: '#/RevisionEnvelope'
+      '400': {$ref: '#/DraftError'}
+      '404': {$ref: '#/DraftError'}
+      '503': {$ref: '#/DraftError'}
+
+ValidatePath:
+  parameters:
+    - $ref: '../../collaboration-drafts/v1.yaml#/components/parameters/DraftId'
+    - $ref: '../../collaboration-drafts/v1.yaml#/components/parameters/Revision'
+  post:
+    operationId: validate_draft_revision
+    tags: ["Collaboration / Drafts"]
+    summary: Validate the stored revision with current BCS capabilities.
+    description: >-
+      Empty body only; the caller cannot substitute source. Capability-only
+      authorization and no-store match the revision read. Invalid bodies are
+      rejected without echoing their content.
+    x-avernet-security: {}
+    security: [{RevisionReadToken: []}]
+    responses:
+      '200':
+        description: Validation bound to the immutable source hash.
+        content:
+          application/json:
+            schema:
+              $ref: '#/RevisionEnvelope'
+              properties:
+                code: {type: integer, const: 20000}
+                message: {type: string}
+                request_id: {$ref: '../shared.yaml#/RequestId'}
+                data:
+                  $ref: '../../collaboration-drafts/v1.yaml#/paths/~1collaboration~1drafts~1{draftId}~1revisions~1{revision}~1validate/post/responses/200/content/application~1json/schema'
+      '400': {$ref: '#/DraftError'}
+      '404': {$ref: '#/DraftError'}
+      '503': {$ref: '#/DraftError'}
+
+RevisionEnvelope:
+  type: object
+  additionalProperties: false
+  required: [code, message, data, request_id]
+  properties:
+    code: {type: integer, const: 20000}
+    message: {type: string}
+    request_id: {$ref: '../shared.yaml#/RequestId'}
+    data: {$ref: '../../collaboration-drafts/v1.yaml#/components/schemas/StoredRevision'}
+
+DraftError:
+  description: >-
+    400 DRAFT_INPUT; 404 DRAFT_REFERENCE_UNAVAILABLE for missing, mismatched,
+    revoked or deleted references; 503 DRAFT_SERVICE_UNAVAILABLE. No credentials
+    or source in errors.
+  x-error-codes: [DRAFT_INPUT, DRAFT_REFERENCE_UNAVAILABLE, DRAFT_SERVICE_UNAVAILABLE]
+  content:
+    application/json:
+      schema: {$ref: '../shared.yaml#/ErrorEnvelope'}

@@ -18,6 +18,7 @@ from scripts.validate_openapi_contract import load_contract  # noqa: E402
 HTTP_METHODS = {"get", "post", "put", "patch", "delete", "head", "options", "trace"}
 
 EXPECTED_OPERATIONS = {
+    ("get", "/openapi/v1/collaboration/me"),
     ("get", "/openapi/v1/auth/url"),
     ("get", "/openapi/v1/auth/callback/{provider}"),
     ("get", "/openapi/v1/auth/user"),

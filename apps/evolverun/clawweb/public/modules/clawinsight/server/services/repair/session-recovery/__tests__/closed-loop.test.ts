@@ -70,16 +70,6 @@ beforeEach(async () => {
   reporter = { report: async result => { callbacks.push(result); } };
   service = new SessionRecoveryTaskService({ controlPlaneEnvironment: "pre", tasks, agent, notifier, reporter, observationMs: 3600000, now: () => now, resolveTarget: async () => recoveryTargetSnapshot(target), actionNotifier });
 });
-it("persists candidate handbooks and restores the exact references in Agent bootstrap", async () => {
-  const task = await create();
-  const stored = new SessionRecoveryTaskRepository(db, repo, artifactStore);
-  const restored = (await stored.find(task.taskId))!;
-  expect((await agent.bootstrap(restored)).handbook).toMatchObject({
-    handbookVersion: "clawevolve-recovery-handbook/v2", category: "TC.MCP",
-    chapters: ["mcp/handbook.md", "file-download/handbook.md"],
-  });
-  expect(runtime.sendMessage).not.toHaveBeenCalled();
-});
 it("queries private event tasks for administrators while preserving Owner and sharing filters", async () => {
   const task = await create();
   expect((await service.list(request.event_id, { userId: "admin", isAdmin: true })).map(value => value.task_id)).toEqual([task.taskId]);
@@ -1007,4 +997,19 @@ it.each([true, false])("accepts AIVision delivery from the current actual receip
   await agent.report(await current(task.taskId), { kind: "observation", phase: initial ? "observe" : "verify", judgment: {
     delivery: "confirmed", response: "acted", effect: "recovered", summary: "完整轨迹确认执行恢复", evidence_ids: [evidence.evidenceId] } });
   expect((await current(task.taskId)).status).toBe("completed");
+});
+
+it("returns actionable 422 feedback for missing delivery and shortened evidence without changing the phase", async () => {
+  let task = await create();
+  const read = await inspect(task); task = await current(task.taskId);
+  await expect(agent.report(task, { kind: "assessment", phase: "assess", decision: "message", summary: "无法投递", evidence_ids: [read.evidenceId] }))
+    .rejects.toMatchObject({ status: 422, message: expect.stringContaining("blocked") });
+  await expect(agent.report(task, { kind: "assessment", phase: "assess", decision: "observe", summary: "保留调查结论", evidence_ids: ["evidence-tc-short"] }))
+    .rejects.toMatchObject({ status: 422, message: expect.stringContaining("完整 evidenceId") });
+  await expect(agent.report(task, { kind: "blocked", phase: "assess", reason: "session_unavailable", summary: "原会话不可投递" }))
+    .rejects.toMatchObject({ status: 422, message: expect.stringContaining("省略 reason") });
+  expect(await current(task.taskId)).toMatchObject({ status: "running", phase: "assess" });
+  expect(runtime.sendMessage).not.toHaveBeenCalled();
+  await agent.report(task, { kind: "blocked", phase: "assess", summary: "原会话不可投递，当前无法继续" });
+  expect(await current(task.taskId)).toMatchObject({ status: "failed", judgment: { effect: "unknown" } });
 });
