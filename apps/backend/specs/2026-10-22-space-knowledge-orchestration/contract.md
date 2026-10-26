@@ -1,12 +1,12 @@
 # Space knowledge orchestration v1
 
-> **2026-10-26 accepted follow-up (not implemented at the pinned PR head):**
-> A deployment that has never enabled knowledge must keep all legacy Space,
-> membership, approval and Skill Space creation paths working without
-> `ac_space_knowledge_sync`. See [spec.md](spec.md), [plan.md](plan.md), and
-> [tasks.md](tasks.md). Once implemented, this supersedes the global DDL
-> prerequisite below for never-enabled deployments only. Retained-history
-> deployments must preserve capture even while delivery is paused.
+> **2026-10-26 isolation amendment (local implementation; delivery pending):**
+> Never-enabled deployments keep legacy Space/member/approval/Skill Space
+> creation working without `ac_space_knowledge_sync`, with auto-create disabled.
+> Capture is explicitly configured, default false, independently of Sink delivery.
+> Retained same-environment history forbids switching capture off. This amendment
+> supersedes earlier global DDL prerequisites below; see [spec.md](spec.md),
+> [plan.md](plan.md), [tasks.md](tasks.md) and the capture deployment README.
 
 ## Summary
 Authenticated Space members create/query canonical knowledge assets using a configured provider. No local knowledge asset/content/ACL mirror; immutable membership delivery snapshots are retained until acknowledged. Ordinary members can create; provider makes the actual authenticated creator Owner. No Bot installation, grant or enablement side effects.
@@ -30,7 +30,7 @@ Validation failures use 422. Safe business errors: 400 INVALID_INPUT; 401 IDENTI
 - Public HTTP is a thin authenticated adapter, business work runs off the event loop.
 - Composition-root defaults fail closed; deployment adapters inject private clients/config.
 - Validate consumer contract, no-provider calls on denied/stale sync, HTTP identity spoofing, default DI, adapter conformance and controlled fixed-combination integration.
-- 2026-10-25: only the independent `ac_space_knowledge_sync` table is required before deploying membership hooks (even with delivery disabled). No schema/model/index changes to `ac_space`, its member table, or `ac_task_queue`. Public defaults remain disabled, not simulated success.
+- 2026-10-25: the independent `ac_space_knowledge_sync` table is required only for explicitly enabled capture; never-enabled deployments do not require it. No schema/model/index changes to `ac_space`, its member table, or `ac_task_queue`. Public defaults remain disabled, not simulated success.
 
 
 ## Validation Boundary (2026-10-23)
@@ -148,7 +148,8 @@ modules without changing pytest collection mode or excluding any tests.
 
 No `ac_space`, `ac_space_member`, outbox or shared-queue schema/model/index is
 changed by the repair; the original independent outbox migration is still the
-only DDL prerequisite (including before SQLite Space creation). No receiver DTO,
+only knowledge DDL prerequisite for capture-enabled deployments, including
+before their SQLite Space creation. Never-enabled deployments require no sync DDL. No receiver DTO,
 revision/hash encoding, provider key, queue pointer or ACL ownership changes.
 The additive safe error and capacity rejection are the intended observable
 behavior changes. SQLite-generated IDs are opaque and may now have gaps; clients
@@ -166,3 +167,32 @@ bugs; pause knowledge-enabled membership/approval and SQLite creation during suc
 rollback rather than serving them with the unfixed writer. Local file-SQLite
 regressions do not prove MySQL/OceanBase concurrency, remote receiver operation,
 gateway/SSO, deployed revocation timing or an online migration.
+
+
+## Internal persistence isolation (2026-10-26)
+
+Space writers consume `SpacePersistenceEffects`, a caller-Session internal
+contract (not a public Service/Plugin API). Defaults are no-op capture and
+identity protection, retaining neutral source locking. The composition root
+strictly validates optional `user_config.space_knowledge_capture.enabled` (bool,
+default false; no unknown keys). A shared lifecycle/producer guard performs
+schema/history checks after bootstrap or before first protected library use,
+not in constructors. Existing history in the current environment, **any app**,
+rejects capture=false; missing table with capture=false is valid. DB failures
+propagate, never become an implicit no-op fallback.
+
+Enablement sequence: migrate the original outbox → roll all source writers,
+workers and direct library callers to capture=true → verify assembly → allow
+first activation. Do not activate during mixed no-op/capture rolling deployment.
+Pause delivery by stopping the Sink, not capture. Restart drains retained
+remove/rejoin/role/disabled revisions in order. A rollback with history must
+preserve capture or pause the affected writes. No source/shared-queue tables or
+indexes change; no event bus or second progress table is added.
+
+Pending discovery uses at most 32 indexed Space-head seeks and a continuation
+cursor, not GROUP BY over all pending revisions. Dispatch/progress/ack metadata
+exclude payload. The worker reads the exact next immutable payload and validates
+hash/envelope before Sink invocation. A corrupt-but-present head can be queued,
+but delivery/ack fail closed; missing predecessors are not queued. FIFO, wire
+encoding, exact hash acknowledgement, queue pointers and public DTOs do not change.
+Corporate assembly, remote databases and online rollout need separate validation.

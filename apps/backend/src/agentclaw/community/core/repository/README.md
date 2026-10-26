@@ -10,9 +10,8 @@ core/repository/
 └── implementations/  the ORM bodies — each declaring its Protocol(s) as a base
 ```
 
-Repositories are not plugins. Each has exactly one implementation, and the only
-per-profile difference is the `DatabasePlugin` injected into its constructor — one
-layer below, where the swap belongs. See `plugins/README.md` for the test that
+Repositories are not plugins. Each has exactly one implementation, and database selection remains the `DatabasePlugin` injected into the constructor.
+Space writers additionally share the narrow transaction extension described below. See `plugins/README.md` for the test that
 puts them here rather than there.
 
 ## Domains
@@ -98,11 +97,37 @@ Hence the rule, enforced by the guard: `from __future__ import annotations` plus
 evaluated at runtime uses the typeshed `= ...` idiom with the real default named
 in a comment, rather than an exception to the rule.
 
+## Space persistence effects (internal transaction contract)
+
+`SpacePersistenceEffects` is not a public Service API, remote Plugin API, event
+bus or generic unit of work. Space, maintenance, work-order approval and the
+Skill Space creator receive the same singleton policy from the composition root.
+It only locks the source, records membership, or reserves a new Space identity
+using the **caller-owned Session**. It never commits independently or performs
+network/queue I/O. Permission checks and Skill publication/grant policy stay with
+their existing owners.
+
+`NoKnowledgeSpacePersistenceEffects` is the default: source locking only, no
+knowledge imports, outbox queries, capture UPDATE or identity effects.
+`KnowledgeSpacePersistenceEffects` reuses the original source write guard,
+snapshot admission and retained-ID protection. The lifecycle wrapper validates
+configuration/history after DB bootstrap or before the first library writer;
+constructors perform no I/O. Its producer guard uses the same policy instance,
+so calling synchronization without HTTP lifespan cannot bypass validation.
+
+All members of this internal protocol are abstract, implementations explicitly
+inherit it, and domain imports in the protocol are type-only like other
+repository contracts. Behavioral tests cover missing-table business operations,
+no-op effects without a DB, and real same-transaction capture rollback.
+`test_space_persistence_boundary.py` rejects direct knowledge implementation
+imports in the finite set of legacy writers. There is no new CI exemption.
+
 ## Context Boundary
 
 ```yaml
 purpose: "Every repository contract (protocols/) and implementation (implementations/) in the backend, grouped by domain. Persistence only — no services, no routers, no domain policy."
 provides:
+  - SpacePersistenceEffects
   - SpaceKnowledgeSyncRepository
   - SpaceKnowledgeSyncRepositoryProtocol
   - BuildIgnoreRepository
@@ -315,6 +340,7 @@ consumes:
   - get_server_host               # ditto
   - get_current_avernet_tenant    # tenant scoping (utils.avernet_tenant)
 internal_dependencies:
+  - agentclaw.community.core.space_knowledge.capture_guard
   - agentclaw.community.core.space_knowledge.repository
   - agentclaw.community.plugin_api.space_knowledge
   - agentclaw.community.plugin_api.space_membership
@@ -373,3 +399,7 @@ intended cost.
 Moving a repository between domains changes a module path that `corp/ocb` imports.
 `specs/2026-08-05-core-repository-consolidation/path-map.md` is the artifact those
 rewrites are driven from.
+
+Changing the Space persistence constructor affects direct library callers and
+corporate composition roots: pass an explicit policy, never an optional fallback.
+See `core/space_knowledge/README.md` for capture/delivery rollout and rollback.

@@ -12,6 +12,9 @@ from sqlalchemy.orm import Session
 from agentclaw.community.core.repository.protocols.space_persistence_effects import (
     SpacePersistenceEffects,
 )
+from agentclaw.community.core.space_knowledge.capture_guard import (
+    SpaceKnowledgeCaptureGuard,
+)
 from agentclaw.community.core.space_knowledge.repository.models import (
     SpaceKnowledgeSyncModel as Snapshot,
 )
@@ -21,7 +24,9 @@ from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.space_membership import SpaceMembershipSink
 
 
-class SpaceKnowledgeCaptureLifecycle(LifecycleBase):
+class SpaceKnowledgeCaptureLifecycle(
+    LifecycleBase, SpacePersistenceEffects, SpaceKnowledgeCaptureGuard
+):
     def __init__(
         self,
         database: DatabasePlugin,

@@ -2,13 +2,17 @@
 
 from sqlalchemy.orm import Session
 
+from agentclaw.community.core.repository.protocols.space_persistence_effects import (
+    SpacePersistenceEffects,
+)
+
 from agentclaw.community.core.repository.implementations.spaces.source_lock import (
     lock_source_space,
 )
 from agentclaw.community.core.spaces.repository.models import SpaceModel
 
 
-class NoKnowledgeSpacePersistenceEffects:
+class NoKnowledgeSpacePersistenceEffects(SpacePersistenceEffects):
     def lock_space(
         self, session: Session, *, space_id: int, environment: str
     ) -> SpaceModel | None:

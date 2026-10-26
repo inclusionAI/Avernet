@@ -2,7 +2,8 @@
 Knowledge assets and their members are held by the canonical provider, never mirrored here.
 The current authenticated actor must be a live Space member, not necessarily an Admin.
 The durable producer activates only on first knowledge creation. Ordinary reads never publish snapshots.
-Member changes and immutable outbox snapshots commit together; the sink is disabled until configured.
+When capture is explicitly enabled, member changes and immutable outbox snapshots
+commit together; the Sink controls delivery separately and is disabled until configured.
 
 ## Single-table delivery
 
@@ -51,14 +52,68 @@ Other SQL dialects retain their native allocation. Retired outbox scope identiti
 must remain retained even after acknowledgement. See the spec's 2026-10-25 repair
 section for upgrade preflight, existing-corruption limitations and rollback gates.
 
-### Rollout
+### Capture, delivery and rollout
 
-Apply `core/spaces/sql/2026_10_24_space_knowledge_sync.sql` before enabling the
-producer. The earlier progress-only schema was an unpublished experiment; do not
-run CREATE IF NOT EXISTS against that incompatible shape and assume it upgrades
-it. Preserve its snapshots/progress with an explicit local migration if it exists.
-No existing application table is altered. Public HTTP and provider contracts are
-unchanged; only the internal sync repository and composition root change.
+```yaml
+# user_config (optional; omitted means false)
+space_knowledge_capture:
+  enabled: false
+```
+
+This block rejects unknown keys and non-boolean values. Selection happens only
+in the composition root; writers do not inspect Sink state or environment flags.
+
+| Deployment | Required behavior |
+| --- | --- |
+| Never enabled, no history | Default no-op effects; legacy Space/member/approval/Skill Space paths work without the sync table, including `create_schema=false`. No outbox SELECT, knowledge write guard, remote calls or scan. |
+| Capture enabled, Space not activated | Table required; ordinary mutations check activation but create no snapshots and have no receiver admission limit. |
+| Activated, delivering | Same-transaction immutable snapshots, FIFO and exact hash acknowledgement. |
+| Activated, delivery paused | Keep capture enabled; continue removal/role/delete history and retired-ID protection. Resume the Sink to drain in order after restart. |
+| Capture disabled with retained same-environment history | Startup/first library writer rejects the unsafe downgrade, including history owned by another app because source Spaces and SQLite IDs are shared. |
+
+The lifecycle validates after DB bootstrap (or on first protected library
+transaction); it does no DB I/O during DI construction. Missing table with
+capture disabled is valid; permissions/connection errors and incompatible tables
+are not silently treated as absence. The same lifecycle guard protects raw
+producer transactions before a Sink call, including callers without HTTP lifespan.
+Validation success is cached per graph. Changing capture/Sink bindings requires
+restart; this is not dynamic per-request fail-open selection.
+
+**Never-enabled deployments require no knowledge DDL.** To first enable capture,
+apply `core/spaces/sql/2026_10_24_space_knowledge_sync.sql`, then roll out
+`capture=true` to **all** writers (API instances, workers and library users)
+before allowing any first activation. Mixed capture/no-op writers are unsafe;
+a one-time local history check is not a distributed rollout coordinator.
+
+The earlier progress-only schema was an unpublished experiment; `CREATE IF NOT
+EXISTS` does not upgrade it. Preserve snapshots/progress with an explicit
+state-preserving migration if it exists. No source or shared-queue schema/index
+changes are introduced here. Rollback with history must preserve capture or
+pause affected writes; never delete history or disable capture to bypass startup.
+Corporate composition roots must wire the new required transaction policy and
+producer guard before enabling real knowledge. Public tests do not prove that
+external assembly, MySQL/OceanBase or online migration is deployed.
+
+### Bounded metadata dispatch
+
+Each 30-second scan performs at most **32 covering-index seeks**, one per
+candidate Space, jumping over that Space's remaining pending revisions. A scalar
+progress check (latest + last acknowledged) ensures a candidate is exactly the
+next revision. Thus discovery plus progress uses at most **96 SELECTs** per
+full scan, independent of single-Space backlog depth; queue operations retain
+their existing bounded per-candidate cost. Empty scans do one seek and no writes.
+SQL round trips increase from a single aggregate to up to 32 seeks to avoid
+linear enumeration of deep pending history. Instances multiply this cost; the
+loop is serial and sleeps 30 seconds after completion, not an overlapping timer.
+
+Dispatch/progress/acknowledgement use scalar metadata, never full rosters. Only
+`next_snapshot` loads the exact next payload and verifies its envelope/hash before
+Sink invocation. Corrupt-but-present heads may have queue pointers but always
+retry without delivery or acknowledgement; a missing predecessor is not queued.
+Acknowledgement compares the delivered envelope and canonical content hash to
+the locked immutable row. Source no-op equality still reads the previous payload.
+Local 1/1000/100000-pending probes and SQLite EXPLAIN verify this shape and the
+existing covering index, not MySQL/OceanBase latency or plans.
 
 ## Context Boundary
 ```yaml
@@ -66,7 +121,11 @@ purpose: "Orchestrate canonical Space knowledge creation and provisioning lookup
 provides:
   - SpaceKnowledgeService
   - SpaceKnowledgeServiceProtocol
+  - SpaceKnowledgeCaptureLifecycle
+  - SpaceKnowledgeCaptureGuard
 consumes:
+  - DatabasePlugin
+  - SpacePersistenceEffects
   - SpaceAccessServiceProtocol
   - SpaceKnowledgeSync
   - SpaceKnowledgeProvider
@@ -81,6 +140,7 @@ internal_dependencies:
   - agentclaw.community.core.task_queue
   - agentclaw.community.kernel.lifecycle
   - agentclaw.community.log
+  - agentclaw.community.plugin_api.database
   - agentclaw.community.plugin_api.space_membership
   - agentclaw.community.plugin_api.space_knowledge
 ```

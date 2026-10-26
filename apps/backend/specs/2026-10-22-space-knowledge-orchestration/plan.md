@@ -4,7 +4,7 @@
 
 通过一个 Space 持久化内部事务扩展隔离快照副作用。默认空实现不认识同步表；启用的实现复用现有快照/身份算法。保持所有事实写入同事务，不增加事件总线、表或通用框架。先用创建/成员写入 pilot 证明缺表隔离，再迁移维护与审批入口。
 
-本方案等待 tasks 评审后实施；下列类型和文件是拟新增/修改内容，不是已实现接口。
+用户已批准并开始实施；下列类型/文件已在本地实现，最终验证与远端交付边界见 tasks.md / verification.md。
 
 ## Affected Components
 
@@ -42,7 +42,7 @@ class SpaceKnowledgeCaptureConfig:
 ```
 
 ```yaml
-# user_config: proposed strictly validated optional block
+# user_config: strictly validated optional block
 space_knowledge_capture:
   enabled: false
 ```
@@ -168,7 +168,7 @@ None. 不增加包、数据库服务、事件总线或共享队列改造。
 回滚：有历史时不得切空策略；按受控回滚流程暂停相关写入，绝不删除历史来绕过检查。
 ```
 
-不执行线上操作。原 contract.md 的全局 DDL 前置说法在本隔离变更完成后被限定为启用记录的部署；修复尚未完成时不能将新规格当成当前行为。
+不执行线上操作。原 contract.md 的全局 DDL 前置说法在本隔离变更完成后被限定为启用记录的部署；本地验证结果不等于远端 PR 或部署已经切换。
 
 ## Test Strategy
 
@@ -191,3 +191,17 @@ def test_legacy_writers_do_not_import_knowledge_persistence(): ...
 ```
 
 参数化覆盖 spec AC1 的所有业务入口；HTTP 保留已有身份/权限依赖和响应 envelope。补真实 DB AUTO Service 容量失败断言，区别 repository rollback 与 Service 后续 FAILED/通知。保留真实 file-SQLite、跨连接/进程竞态与原有身份生命周期测试。测试产物不能替代统一 Singlebox、企业 adapter/DI、远端数据库及部署证据。
+
+### Group C implementation notes
+
+Candidate discovery uses at most 32 seeks (no extra exhaustion seek needed).
+Metadata dispatch performs up to two scalar progress reads per Space, rejects
+missing predecessors and skips stale candidates. Payload/hash validation moves
+to execution for corrupt-but-present heads; worker failure remains Retry with no
+Sink call or acknowledgement. Ack verifies the delivered full_snapshot envelope,
+status and canonical hash against a locked immutable row without a second payload
+read. No-op source equality retains its full-payload read.
+
+Repository architecture gates require @abstractmethod, type-only domain imports
+and declared implementation bases also for this internal contract; these are
+implemented without exemptions. The lifecycle declares both internal contracts.

@@ -32,7 +32,7 @@
   - [x] 默认 graph 使用空扩展；真实 producer 必须与启用记录装配一致。
   - [x] 未启用且缺表时完整启动成功，不以预建同步表满足测试。
   - [x] DB bootstrap 后验证持久模式；生命周期异常不被 discovery 吞掉，验证前不得放行源写入。
-  - [x] 当前 env/app 有历史时禁止关闭 capture；Sink 暂停不影响 capture。
+  - [x] 当前 env 有任意 app 历史时禁止关闭 capture；Sink 暂停不影响 capture。
 - **Depends on:** Task 2。
 - **AC:** AC1、AC2、AC3、AC5。
 
@@ -59,18 +59,18 @@
 - **Depends on:** Task 4。
 - **AC:** AC4、AC6、AC8。
 
-## Task 6 [~]: Guard the dependency boundary and reconcile documentation
+## Task 6 [x]: Guard the dependency boundary and reconcile documentation
 - **Goal:** 将隔离要求固定为架构与合同守卫，防止回退。
 - **Files:** `tests/community/architecture/test_space_persistence_boundary.py`；`core/repository/README.md`、`core/space_knowledge/README.md`、本目录 `contract.md`、`spec.md`、`plan.md`、`tasks.md`，部署说明。
 - **Done when:**
-  - [ ] 守卫拒绝既有 writer 直接导入知识快照/身份实现；scope 只约束本次有限边界。
-  - [ ] 新 contract/no-op/启用实现有行为测试；不扩 CI allowlist，不削弱原门禁。
-  - [ ] 文档区分从未启用、启用但未激活、暂停投递、有历史禁止关闭记录；取消全局 DDL 前置表述。
-  - [ ] 说明 rollout 全 writer 切换前不能激活，以及回滚/企业装配边界。
+  - [x] 守卫拒绝既有 writer 直接导入知识快照/身份实现；scope 只约束本次有限边界。
+  - [x] 新 contract/no-op/启用实现有行为测试；不扩 CI allowlist，不削弱原门禁。
+  - [x] 文档区分从未启用、启用但未激活、暂停投递、有历史禁止关闭记录；取消全局 DDL 前置表述。
+  - [x] 说明 rollout 全 writer 切换前不能激活，以及回滚/企业装配边界。
 - **Depends on:** Task 5。
 - **AC:** AC3、AC5、AC7。
 
-## Task 7: Run verification and report delivery boundaries
+## Task 7 [~]: Run verification and report delivery boundaries
 - **Goal:** 用新实现的新证据逐条验收。
 - **Done when:**
   - [ ] AC1–AC8 全部映射到结果；配置/装配、原成员/维护/审批、Skill Repository、协议与架构回归通过。
@@ -80,6 +80,8 @@
   - [ ] 企业装配、MySQL/OceanBase、部署/DDL、远端 CI 未验证时明确列出；无授权不推送/提交 PR/执行线上操作。
 - **Depends on:** Task 6。
 - **AC:** AC1–AC8。
+
+Task 6 evidence (2026-10-26): finite AST import guard and same-transaction/no-op behavioral contracts added; existing repository contract gates caught and fixed abstract/type-only import metadata without any exemptions; final verification follows Task 7.
 
 Task 5 evidence (2026-10-26): new bounds tests RED (3 failed/1 passed), then 59 sync/race tests and 7 focused bounds/hash tests passed; metadata dispatch validates payload at execution; SQLite only, no remote DB claim.
 
