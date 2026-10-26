@@ -24,7 +24,8 @@
 
 **漂移靠观察。** Bot 是否持有其 `active` 修订版，靠读取 Bot 得出——
 `GenomeRegistry.drift` 像 `capture` 那样捕获其状态，计算该状态在 `active` 的策略配置下
-会记录成的修订版 id 并比较——从不靠记录投递了什么。apply 报告不携带文档摘要；
+会记录成的修订版 id 并与 `active` 比较，比较前先把两边的规格化为同一种表示（目录资源在
+修订版里是一棵树，在已应用的 Bot 上则是逐个成员文件、每个一行）——从不靠记录投递了什么。apply 报告不携带文档摘要；
 晋升行不携带已编译文档、摘要或 apply id；`applied_revision` 与 `by_apply_reference`
 已删除。已漂移的 Bot 对自动晋升回答的 409 给出 `active` 与观察到的修订版 id。
 

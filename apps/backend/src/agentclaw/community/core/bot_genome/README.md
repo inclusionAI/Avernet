@@ -48,7 +48,9 @@ the `/config-manifest` endpoints keep working as before and are unrelated.
 "Which revision does this bot run" is observed, never recorded:
 `GenomeRegistryProtocol.drift` captures the bot's state as `capture` would,
 computes the revision id it would record under `active`'s policy and compares
-it with `active`. A promotion by an automated actor asks first and is
+it with `active`, both specs put in one representation first (a directory
+resource is one tree in a revision but its member files, one row each, on the
+applied bot). A promotion by an automated actor asks first and is
 refused (`Drifted`) while the bot holds something else; an owner's is how the
 owner reconciles.
 

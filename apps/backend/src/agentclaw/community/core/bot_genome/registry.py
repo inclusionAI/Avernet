@@ -17,7 +17,13 @@ import re
 from collections.abc import Callable
 from datetime import datetime, timezone
 
-from agentclaw.community.core.content_store import DIGEST_RE, ContentScope, ContentStoreError, ContentStoreProtocol
+from agentclaw.community.core.content_store import (
+    DIGEST_RE,
+    ContentScope,
+    ContentStoreError,
+    ContentStoreProtocol,
+    decode_tree_bytes,
+)
 from agentclaw.community.core.bot_genome import contract
 from agentclaw.community.core.apply_engine.desired_state import DesiredState
 from agentclaw.community.core.bot_genome.canonical import canonicalize, loads_strict, revision_id, sha256_digest
@@ -72,7 +78,7 @@ from agentclaw.community.core.bot_genome.repository.models import (
     GenomeRevisionRow,
 )
 from agentclaw.community.core.bot_genome.spec_checks import SpecCheckContext, SpecChecks, policy_path_reasons
-from agentclaw.community.core.bot_genome.spec_models import GenomePolicy, GenomeSpec
+from agentclaw.community.core.bot_genome.spec_models import GenomePolicy, GenomeSpec, ResourceEntry
 from agentclaw.community.core.repository.protocols.bot.genome import (
     GenomePatchRepositoryProtocol,
     GenomePromotionRepositoryProtocol,
@@ -623,18 +629,48 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         The comparison is the bot against the revision: capture the bot's
         state as ``capture`` would (nothing is recorded — the captured blobs
         are dropped), compute the revision id it would record under
-        ``active``'s policy, and compare with ``active``. No ``active`` means
-        nothing to drift from. ``CaptureRefused`` propagates: a bot whose
-        state cannot be read cannot be said to be in step either.
+        ``active``'s policy, and compare with ``active``'s id under the same
+        policy; both specs are first put in one representation
+        (:meth:`_in_file_form`), because a revision records a directory
+        resource as one tree while the applied bot holds its member files
+        and records one row each, which the platform reader answers as file
+        entries. So an unchanged bot reads as in step whichever form its
+        reader answers, and ``observed`` is the id capture would record. No
+        ``active`` means nothing to drift from. ``CaptureRefused``
+        propagates: a bot whose state cannot be read cannot be said to be
+        in step either.
         """
         active = self._active(bot)
         if active is None:
             return None
         captured = await capture_spec(self._state_reader(), bot, validator=self._validator)
-        observed = revision_id(captured.spec, self._policy_of(active))
-        if observed == active.revision_id:
+        policy = self._policy_of(active)
+        observed = revision_id(captured.spec, policy)
+        stored = GenomeSpec.from_json(loads_strict(active.content)["spec"])
+        produced = {blob.digest: blob.data for blob in captured.writes}
+        if self._in_file_form(bot, captured.spec, produced) == self._in_file_form(bot, stored, {}):
             return None
         return Drift(active=active.revision_id, observed=observed)
+
+    def _in_file_form(self, bot: BotRef, spec: GenomeSpec, produced: dict[str, bytes]) -> GenomeSpec:
+        """``spec`` with every directory resource replaced by its member files, one entry each, digested as a
+        file's bytes are: the form the two sides of a drift comparison share. A tree's bytes come from
+        ``produced`` (what capture just read) or else the bot's content store, which raises
+        ``ContentNotReachable`` for a blob it no longer holds; a recorded revision's tree decodes, since it
+        passed the spec checks.
+        """
+        resources: list[ResourceEntry] = []
+        for entry in spec.resources:
+            if not entry.path.endswith("/"):
+                resources.append(entry)
+                continue
+            blob = produced.get(entry.digest)
+            members = decode_tree_bytes(blob if blob is not None else self._reader(bot).read(entry.digest))
+            if members is None:
+                raise RuntimeError(f"resources/{entry.path} ({entry.digest}) is not an acm-tree-v1 blob")
+            for name, data in members:
+                resources.append(ResourceEntry(path=entry.path + name, digest=sha256_digest(data)))
+        return spec.model_copy(update={"resources": sorted(resources, key=lambda e: e.path)})
 
 
 # ---------------------------------------------------------------------------------------------

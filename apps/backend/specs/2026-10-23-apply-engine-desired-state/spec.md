@@ -237,7 +237,9 @@ promotions. The delivery seam stays unbound; binding it is RSI-04.
       registry no longer depends on the Manifest apply service.
 - [ ] `GenomeRegistryProtocol.drift(bot)` reads the bot's current state the
       way capture does, without recording, and answers `None` when the state
-      equals `active` (same revision id under `active`'s policy) or
+      equals `active` (same revision id under `active`'s policy, both specs
+      first put in one representation: a directory resource is one tree in a
+      revision but its member files, one row each, on the applied bot) or
       `Drift(active, observed)` otherwise. When the bot cannot be read at
       all (the same cases in which capture refuses: a platform-managed
       teclaw bot with no device, a resource row whose file cannot be read),

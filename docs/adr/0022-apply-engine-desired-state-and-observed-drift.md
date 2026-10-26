@@ -32,7 +32,10 @@ compiles every example case both ways and compares the states
 **Drift is observed.** Whether a bot holds its `active` revision is found
 by reading the bot — `GenomeRegistry.drift` captures its state as
 `capture` would, computes the revision id it would record under `active`'s
-policy and compares — never by recording what was delivered. Apply reports
+policy and compares with `active`, both specs put in one representation
+first (a directory resource is one tree in a revision but its member files,
+one row each, on the applied bot) — never by recording what was delivered.
+Apply reports
 carry no document digest; the promotion row carries no compiled document,
 no digest and no apply id; `applied_revision` and `by_apply_reference` are
 gone. The 409 a drifted bot answers to an automated promotion names

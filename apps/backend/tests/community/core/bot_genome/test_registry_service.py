@@ -10,8 +10,9 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from agentclaw.community.core.content_store import MAX_AUDIT_ACTOR_CHARS, ContentScope
+from agentclaw.community.core.content_store import MAX_AUDIT_ACTOR_CHARS, ContentScope, canonical_tree_bytes
 from agentclaw.community.core.bot_genome.canonical import canonicalize, revision_id, sha256_digest
+from agentclaw.community.core.bot_genome.capture import CapturedFile, CapturedResource
 from agentclaw.community.core.bot_genome.errors import (
     CaptureRefused,
     ContentNotReachable,
@@ -515,6 +516,32 @@ async def test_drift_names_active_and_what_the_bot_would_record_now(world: World
     assert drift.observed == captured.revision.revision.id, "observed is the id capture records for this state"
     assert drift.observed == revision_id(captured.revision.spec, first.revision.policy)
     assert world.registry.list_revisions(BOT).total == 2, "drift itself recorded nothing"
+
+
+@pytest.mark.asyncio
+async def test_drift_compares_a_directory_resource_as_the_files_the_bot_holds(world: World) -> None:
+    """A revision records a directory as one tree; the applied bot holds the member files and records one row
+    each, which capture reads as file entries. An unchanged bot is in step; a member gone is drift."""
+    await _capture_support_bot(world)
+    members = [("a.md", b"# a\n"), ("sub/b.md", b"# b\n")]
+    tree = canonical_tree_bytes(members)
+    world.registry.put_content(BOT, tree, provenance=OWNER)
+    patch = load_patch("08-resource-add.json").model_copy(
+        update={
+            "ops": parse_ops([{"op": "resource.add", "path": "data/faq/", "content": {"digest": sha256_digest(tree)}}])
+        }
+    )
+    recorded = await world.registry.commit_patch(BOT, patch, created_by=OWNER, status=RevisionStatus.DRAFT)
+    assert "data/faq/" in [e.path for e in recorded.revision.spec.resources]
+    await _promote_first(world, recorded.revision.revision.id)
+    applied = tuple(
+        CapturedResource("data/faq/" + name, (CapturedFile(name.rsplit("/", 1)[-1], data),)) for name, data in members
+    )
+    world.reader._resources = world.reader._resources + applied
+    assert await world.registry.drift(BOT) is None, "the member files are the directory, in the bot's representation"
+    world.reader._resources = world.reader._resources[:-1]
+    drift = await world.registry.drift(BOT)
+    assert drift is not None and drift.active == recorded.revision.revision.id
 
 
 @pytest.mark.asyncio
