@@ -77,11 +77,11 @@ def _skill_editor_requests(db):
 
 
 def _work_orders(db):
-    return WorkOrderRepository(db, _skill_editor_requests(db))
+    return WorkOrderRepository(db, _skill_editor_requests(db), effects=NoKnowledgeSpacePersistenceEffects())
 
 
 def _space_skills(db):
-    return SpaceSkillRepository(db, _skill_editor_requests(db))
+    return SpaceSkillRepository(db, _skill_editor_requests(db), effects=NoKnowledgeSpacePersistenceEffects())
 
 
 def _space_skill(db):

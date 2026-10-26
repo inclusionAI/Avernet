@@ -80,11 +80,11 @@ def _skill_editor_requests(db) -> SkillEditorRequestRepository:
 
 
 def _work_orders(db) -> WorkOrderRepository:
-    return WorkOrderRepository(db, _skill_editor_requests(db))
+    return WorkOrderRepository(db, _skill_editor_requests(db), effects=NoKnowledgeSpacePersistenceEffects())
 
 
 def _space_skills(db) -> SpaceSkillRepository:
-    return SpaceSkillRepository(db, _skill_editor_requests(db))
+    return SpaceSkillRepository(db, _skill_editor_requests(db), effects=NoKnowledgeSpacePersistenceEffects())
 
 
 def _review_notification(

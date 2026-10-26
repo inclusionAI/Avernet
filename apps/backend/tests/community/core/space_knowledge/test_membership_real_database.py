@@ -149,7 +149,7 @@ def test_limit_rejection_is_atomic_and_remove_rejoin_disable_can_drain(database,
     sink = BoundedSink()
     sync = synchronizer(database, sink)
     sync.ensure_synced(space_id=space_id, environment="pre")
-    spaces, management = SpaceRepository(database, KnowledgeSpacePersistenceEffects()), SpaceManagementRepository(database)
+    spaces, management = SpaceRepository(database, KnowledgeSpacePersistenceEffects()), SpaceManagementRepository(database, effects=KnowledgeSpacePersistenceEffects())
     with pytest.raises(SpaceKnowledgeError, match="SPACE_MEMBERSHIP_LIMIT_EXCEEDED"):
         if batch:
             management.add_members(
@@ -219,7 +219,7 @@ def test_overlimit_approval_rolls_back_members_order_approver_and_notices(
                 env="pre",
             )
         )
-    repo = WorkOrderRepository(database, Mock())
+    repo = WorkOrderRepository(database, Mock(), effects=KnowledgeSpacePersistenceEffects())
     with pytest.raises(SpaceKnowledgeError, match="SPACE_MEMBERSHIP_LIMIT_EXCEEDED"):
         if entrypoint == "auto":
             repo.complete_auto_approval(
@@ -321,7 +321,7 @@ def test_new_space_does_not_reuse_deleted_outbox_identity(database, personal):
     sink = BoundedSink()
     sync = synchronizer(database, sink)
     sync.ensure_synced(space_id=old_id, environment="pre")
-    SpaceManagementRepository(database).delete_team(
+    SpaceManagementRepository(database, effects=KnowledgeSpacePersistenceEffects()).delete_team(
         space_id=old_id, with_members=True, env="pre"
     )
     new_id, new_code = create_space(database, owner="new-owner", personal=personal)
@@ -362,7 +362,7 @@ def test_utf8_byte_limit_rolls_back_bulk_write_and_still_allows_revocation(
     sync.ensure_synced(space_id=space_id, environment="pre")
     original = history(database, space_id)[0]
     assert len(json.dumps(original, ensure_ascii=False).encode()) < 1024 * 1024
-    management = SpaceManagementRepository(database)
+    management = SpaceManagementRepository(database, effects=KnowledgeSpacePersistenceEffects())
     additions = {f"new{i}" + "😀" * 124: None for i in range(5)}
     with pytest.raises(SpaceKnowledgeError, match="SPACE_MEMBERSHIP_LIMIT_EXCEEDED"):
         management.add_members(
@@ -387,7 +387,7 @@ def test_concurrent_new_spaces_skip_retired_scope_across_connections(database):
     old_id, _ = create_space(database)
     sync = synchronizer(database, BoundedSink())
     sync.ensure_synced(space_id=old_id, environment="pre")
-    SpaceManagementRepository(database).delete_team(
+    SpaceManagementRepository(database, effects=KnowledgeSpacePersistenceEffects()).delete_team(
         space_id=old_id, with_members=True, env="pre"
     )
     other = CommunityDatabase(database._url)
@@ -418,7 +418,7 @@ def test_new_identity_and_members_rollback_if_creation_caller_fails(database):
     old_id, _ = create_space(database)
     sync = synchronizer(database, BoundedSink())
     sync.ensure_synced(space_id=old_id, environment="pre")
-    SpaceManagementRepository(database).delete_team(
+    SpaceManagementRepository(database, effects=KnowledgeSpacePersistenceEffects()).delete_team(
         space_id=old_id, with_members=True, env="pre"
     )
     with pytest.raises(RuntimeError, match="creation failed"):
@@ -462,10 +462,10 @@ def test_additive_repository_creation_also_skips_retired_identity(database):
     old_id, _ = create_space(database)
     sync = synchronizer(database, BoundedSink())
     sync.ensure_synced(space_id=old_id, environment="pre")
-    SpaceManagementRepository(database).delete_team(
+    SpaceManagementRepository(database, effects=KnowledgeSpacePersistenceEffects()).delete_team(
         space_id=old_id, with_members=True, env="pre"
     )
-    created = SpaceSkillRepository(database, Mock()).create_space(
+    created = SpaceSkillRepository(database, Mock(), effects=KnowledgeSpacePersistenceEffects()).create_space(
         {
             "space_code": "additive-code",
             "space_type": "TEAM",

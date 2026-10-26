@@ -4,11 +4,6 @@ from __future__ import annotations
 
 import json
 
-from agentclaw.community.core.repository.implementations.spaces.knowledge_sync import (
-    lock_space,
-    record_membership_snapshot,
-)
-
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -306,7 +301,7 @@ class _AutoApprovalWorkOrderRepository:
             space_id = int(order.biz_id)
         except (TypeError, ValueError) as exc:
             raise WorkOrderNotFoundError("invalid Space id in work order") from exc
-        space = lock_space(db, space_id, env)
+        space = self._effects.lock_space(db, space_id=space_id, environment=env)
         if space is None:
             raise WorkOrderNotFoundError("work-order Space not found")
         member = (
@@ -331,7 +326,7 @@ class _AutoApprovalWorkOrderRepository:
                 created_by=SYSTEM_REVIEWER_USER_ID,
             )
         )
-        record_membership_snapshot(db, space)
+        self._effects.record_membership(db, space)
 
     def _insert_auto_result_notifications(
         self,

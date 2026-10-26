@@ -36,18 +36,18 @@
 - **Depends on:** Task 2。
 - **AC:** AC1、AC2、AC3、AC5。
 
-## Task 4 [~]: Migrate maintenance, approval, and Skill Space creators
+## Task 4 [x]: Migrate maintenance, approval, and Skill Space creators
 - **Goal:** 移除既有 writer 对知识 helper 的直接依赖，不改业务权限或事务边界。
 - **Files:** `core/repository/implementations/spaces/management.py`、`work_orders/{work_order,auto_approval}.py`、`skill_center/space_skill.py`；`di/modules/{spaces_module,space_skill_repository_bindings,work_orders_module}.py` 按真实绑定需要调整；原有相关 tests/fixtures。
 - **Done when:**
-  - [ ] 所有已受影响源 writer 使用同一策略实例，不遗漏创建入口或审批分支。
-  - [ ] 所有缺表回归 GREEN，已激活时事务失败/容量拒绝仍原子。
-  - [ ] MANUAL/PENDING/审批人/Owner 检查及 Skill 业务原样保留。
-  - [ ] AUTO 真实 DB Service 测试断言最终 FAILED、失败通知、无成员/无新快照，不误用 Repository 中间态。
+  - [x] 所有已受影响源 writer 使用同一策略实例，不遗漏创建入口或审批分支。
+  - [x] 所有缺表回归 GREEN，已激活时事务失败/容量拒绝仍原子。
+  - [x] MANUAL/PENDING/审批人/Owner 检查及 Skill 业务原样保留。
+  - [x] AUTO 真实 DB Service 测试断言最终 FAILED、失败通知、无成员/无新快照，不误用 Repository 中间态。
 - **Depends on:** Task 3。
 - **AC:** AC1、AC4、AC5、AC7、AC8。
 
-## Task 5: Bound pending candidate discovery and avoid payload reads
+## Task 5 [~]: Bound pending candidate discovery and avoid payload reads
 - **Goal:** 修正已复现的深积压扫描放大，只改知识模块内部。
 - **Files:** `core/repository/implementations/spaces/knowledge_sync.py`、`core/repository/protocols/spaces.py`、`core/space_knowledge/membership_sync.py`、`tests/community/core/space_knowledge/test_pending_scan_bounds.py` 及原有同步测试。
 - **Done when:**
@@ -80,6 +80,8 @@
   - [ ] 企业装配、MySQL/OceanBase、部署/DDL、远端 CI 未验证时明确列出；无授权不推送/提交 PR/执行线上操作。
 - **Depends on:** Task 6。
 - **AC:** AC1–AC8。
+
+Task 4 evidence (2026-10-26): 19 missing-table cases, 31 enabled/recovery cases, and 1068 broad repository/service regressions passed locally; no remote/Singlebox claim.
 
 ## Groups
 

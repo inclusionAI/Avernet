@@ -51,7 +51,7 @@ def harness(monkeypatch):
     staff = MagicMock()
     staff.get_profile_by_work_no.return_value.nick_name = "Employee"
     service = SpaceManagementService(
-        SpaceManagementRepository(db),
+        SpaceManagementRepository(db, effects=NoKnowledgeSpacePersistenceEffects()),
         SpaceRepository(db, NoKnowledgeSpacePersistenceEffects()),
         sc,
         staff,

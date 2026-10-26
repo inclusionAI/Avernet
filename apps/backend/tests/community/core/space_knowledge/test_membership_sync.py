@@ -74,7 +74,7 @@ def setup(tmp_path):
         db,
         SpaceRepository(db, KnowledgeSpacePersistenceEffects()),
         SpaceKnowledgeSyncRepository(db, enabled_capture(db)),
-        SpaceManagementRepository(db),
+        SpaceManagementRepository(db, effects=KnowledgeSpacePersistenceEffects()),
     )
 
 

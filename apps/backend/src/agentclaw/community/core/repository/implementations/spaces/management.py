@@ -1,13 +1,12 @@
 """Atomic, environment-scoped persistence for maintenance operations."""
 
 from injector import inject
-from agentclaw.community.core.repository.implementations.spaces.knowledge_sync import (
-    lock_space,
-    record_membership_snapshot,
-)
 
 from sqlalchemy import func
 
+from agentclaw.community.core.repository.protocols.space_persistence_effects import (
+    SpacePersistenceEffects,
+)
 from agentclaw.community.core.repository.protocols.spaces import (
     SpaceManagementRepositoryProtocol,
 )
@@ -26,17 +25,20 @@ from agentclaw.community.plugin_api.database import DatabasePlugin
 
 class SpaceManagementRepository(SpaceManagementRepositoryProtocol):
     @inject
-    def __init__(self, db: DatabasePlugin) -> None:
+    def __init__(self, db: DatabasePlugin, effects: SpacePersistenceEffects) -> None:
         self._db = db
+        self._effects = effects
 
-    @staticmethod
-    def _space(db, space_id: int, env: str, *, lock: bool = False):
+    def _space(self, db, space_id: int, env: str, *, lock: bool = False):
         query = db.query(SpaceModel).filter(
             SpaceModel.id == space_id,
             SpaceModel.env == env,
             SpaceModel.deleted_at.is_(None),
         )
-        space = lock_space(db, space_id, env) if lock else query.one_or_none()
+        space = (
+            self._effects.lock_space(db, space_id=space_id, environment=env)
+            if lock else query.one_or_none()
+        )
         if space is None:
             raise ManagementError("SPACE_NOT_FOUND")
         if space.space_type != "TEAM":
@@ -117,7 +119,7 @@ class SpaceManagementRepository(SpaceManagementRepositoryProtocol):
                 db.flush()
                 db.refresh(space)
             if changed:
-                record_membership_snapshot(db, space)
+                self._effects.record_membership(db, space)
             return dict(space=self._detail(db, space, env), changed=changed)
 
     def delete_team(self, *, space_id: int, with_members: bool, env: str) -> dict:
@@ -129,7 +131,7 @@ class SpaceManagementRepository(SpaceManagementRepositoryProtocol):
                 raise ManagementError(
                     "SPACE_HAS_MEMBERS", space_id=space_id, member_count=count
                 )
-            record_membership_snapshot(db, space, disabled=True)
+            self._effects.record_membership(db, space, disabled=True)
             removed = members.delete(synchronize_session=False) if with_members else 0
             db.delete(space)
             db.flush()
@@ -213,7 +215,7 @@ class SpaceManagementRepository(SpaceManagementRepositoryProtocol):
                     row.gmt_modified = func.now()
                     result["reactivated_user_ids"].append(user_id)
             db.flush()
-            record_membership_snapshot(db, space)
+            self._effects.record_membership(db, space)
             return result
 
     def remove_members(self, *, space_id: int, user_ids: list[str], env: str) -> dict:
@@ -225,7 +227,7 @@ class SpaceManagementRepository(SpaceManagementRepositoryProtocol):
             found = {row.user_id for row in rows.all()}
             rows.delete(synchronize_session=False)
             if found:
-                record_membership_snapshot(db, space)
+                self._effects.record_membership(db, space)
             return dict(
                 space_id=space_id,
                 removed_user_ids=[uid for uid in user_ids if uid in found],
@@ -261,7 +263,7 @@ class SpaceManagementRepository(SpaceManagementRepositoryProtocol):
                     updated.append(uid)
             db.flush()
             if updated:
-                record_membership_snapshot(db, space)
+                self._effects.record_membership(db, space)
             return dict(
                 space_id=space_id,
                 role=role,

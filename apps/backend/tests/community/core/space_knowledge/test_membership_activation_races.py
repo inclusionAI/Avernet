@@ -91,11 +91,11 @@ def test_activation_roster_and_source_mutation_are_one_serial_order(
                 env="pre",
             )
         elif mutation == "delete":
-            SpaceManagementRepository(other).delete_team(
+            SpaceManagementRepository(other, effects=KnowledgeSpacePersistenceEffects()).delete_team(
                 space_id=space_id, with_members=True, env="pre"
             )
         else:
-            WorkOrderRepository(other, Mock()).complete_auto_approval(
+            WorkOrderRepository(other, Mock(), effects=KnowledgeSpacePersistenceEffects()).complete_auto_approval(
                 work_order_id=order_id,
                 recipient_user_ids=["new-member"],
                 source_event_type="SPACE_JOIN_REQUESTED",
@@ -168,7 +168,7 @@ def test_source_deleted_before_activation_guard_is_not_resurrected(
             )
             try:
                 assert before_guard.wait(timeout=5)
-                SpaceManagementRepository(other).delete_team(
+                SpaceManagementRepository(other, effects=KnowledgeSpacePersistenceEffects()).delete_team(
                     space_id=space_id, with_members=True, env="pre"
                 )
             finally:

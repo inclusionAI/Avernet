@@ -76,7 +76,7 @@ def setup():
         session.add(bot)
         session.flush()
         bot_pk = bot.id
-    repo = WorkOrderRepository(db, SkillEditorRequestRepository(db))
+    repo = WorkOrderRepository(db, SkillEditorRequestRepository(db), effects=NoKnowledgeSpacePersistenceEffects())
     request = dict(
         bot_pk=bot_pk,
         bot_id="bot-1",

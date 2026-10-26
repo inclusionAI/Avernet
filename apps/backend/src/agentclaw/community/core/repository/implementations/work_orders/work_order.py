@@ -5,10 +5,6 @@ from __future__ import annotations
 import json
 
 from injector import inject
-from agentclaw.community.core.repository.implementations.spaces.knowledge_sync import (
-    lock_space,
-    record_membership_snapshot,
-)
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -21,6 +17,9 @@ from agentclaw.community.core.repository.implementations.work_orders.bot_editor 
 )
 from agentclaw.community.core.repository.implementations.work_orders.creation import (
     _WorkOrderCreationRepository,
+)
+from agentclaw.community.core.repository.protocols.space_persistence_effects import (
+    SpacePersistenceEffects,
 )
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillEditorRequestRepositoryProtocol,
@@ -84,8 +83,10 @@ class WorkOrderRepository(
         self,
         db: DatabasePlugin,
         skill_editor_requests: SkillEditorRequestRepositoryProtocol,
+        effects: SpacePersistenceEffects,
     ) -> None:
         self._db = db
+        self._effects = effects
         self._WorkOrder = WorkOrderModel
         self._Notification = WorkOrderNotificationModel
         self._Approver = WorkOrderApproverModel
@@ -264,7 +265,7 @@ class WorkOrderRepository(
                         "invalid Space id in work order"
                     ) from exc
 
-                space = lock_space(db, space_id, env)
+                space = self._effects.lock_space(db, space_id=space_id, environment=env)
                 if space is None:
                     raise WorkOrderNotFoundError("work-order business object not found")
 
@@ -296,7 +297,7 @@ class WorkOrderRepository(
                     )
                 )
 
-                record_membership_snapshot(db, space)
+                self._effects.record_membership(db, space)
 
             db.query(self._Approver).filter(
                 self._Approver.work_order_id == work_order_id,
@@ -722,7 +723,7 @@ class WorkOrderRepository(
             )
 
             space_id = int(work_order.biz_id)
-            space = lock_space(db, space_id, env)
+            space = self._effects.lock_space(db, space_id=space_id, environment=env)
             if space is None:
                 raise WorkOrderNotFoundError("work-order business object not found")
 
@@ -750,7 +751,7 @@ class WorkOrderRepository(
                         created_by=reviewer_user_id,
                     )
                 )
-                record_membership_snapshot(db, space)
+                self._effects.record_membership(db, space)
 
             db.add(
                 self._Notification(

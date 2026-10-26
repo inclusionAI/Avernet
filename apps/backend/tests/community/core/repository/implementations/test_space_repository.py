@@ -404,7 +404,7 @@ def test_space_repository_accessible_scope_filters_by_active_membership_and_pagi
 
 def test_space_repository_marks_pending_join_request_as_applying(db) -> None:
     spaces = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
-    work_orders = WorkOrderRepository(db, SkillEditorRequestRepository(db))
+    work_orders = WorkOrderRepository(db, SkillEditorRequestRepository(db), effects=NoKnowledgeSpacePersistenceEffects())
     team = _team(spaces)
     other_team = _team(spaces, name="Other Team", creator="owner-2")
 

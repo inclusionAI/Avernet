@@ -94,7 +94,7 @@ def setup():
                 env="dev",
             )
         )
-    repository = WorkOrderRepository(db, SkillEditorRequestRepository(db))
+    repository = WorkOrderRepository(db, SkillEditorRequestRepository(db), effects=NoKnowledgeSpacePersistenceEffects())
     yield db, repository, space_id, bot_pk, skill_id
     reset_for_tests()
 

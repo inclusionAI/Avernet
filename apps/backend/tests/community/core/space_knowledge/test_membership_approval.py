@@ -1,5 +1,7 @@
 """Both approval repository entrypoints produce membership events atomically."""
 
+
+from agentclaw.community.core.repository.implementations.spaces.knowledge_effects import KnowledgeSpacePersistenceEffects
 from unittest.mock import Mock
 
 import pytest
@@ -47,7 +49,7 @@ def test_approval_membership_delivery(setup, entrypoint, approved):
                 env="pre",
             )
         )
-    repo = WorkOrderRepository(db, Mock())
+    repo = WorkOrderRepository(db, Mock(), effects=KnowledgeSpacePersistenceEffects())
     if entrypoint == "process_approval":
         repo.process_approval(
             work_order_id=order_id,
@@ -100,7 +102,7 @@ def test_auto_approval_also_records_membership(setup):
         s.add(order)
         s.flush()
         order_id = order.id
-    WorkOrderRepository(db, Mock()).complete_auto_approval(
+    WorkOrderRepository(db, Mock(), effects=KnowledgeSpacePersistenceEffects()).complete_auto_approval(
         work_order_id=order_id,
         recipient_user_ids=["alice"],
         source_event_type="SPACE_JOIN_REQUESTED",

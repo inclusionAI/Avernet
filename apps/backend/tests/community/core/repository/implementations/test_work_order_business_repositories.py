@@ -552,7 +552,7 @@ def test_bot_editor_request_approval_grants_admin_without_changing_existing_role
 def test_friend_approval_context_and_reviewed_event_use_original_applied_event(
     db,
 ) -> None:
-    repository = WorkOrderRepository(db, _skill_editor_requests(db))
+    repository = WorkOrderRepository(db, _skill_editor_requests(db), effects=NoKnowledgeSpacePersistenceEffects())
     created = repository.create_work_order_event(
         event_category=NotificationCategory.APPROVAL,
         biz_type=WorkOrderBizType.BOT_FRIEND.value,
@@ -608,7 +608,7 @@ def test_friend_approval_context_and_reviewed_event_use_original_applied_event(
 
 
 def test_friend_rejection_persists_status_specific_content(db) -> None:
-    repository = WorkOrderRepository(db, _skill_editor_requests(db))
+    repository = WorkOrderRepository(db, _skill_editor_requests(db), effects=NoKnowledgeSpacePersistenceEffects())
     created = repository.create_work_order_event(
         event_category=NotificationCategory.APPROVAL,
         biz_type=WorkOrderBizType.BOT_FRIEND.value,
@@ -657,7 +657,7 @@ def test_friend_rejection_persists_status_specific_content(db) -> None:
 
 
 def test_get_approval_context_rejects_missing_order(db) -> None:
-    repository = WorkOrderRepository(db, _skill_editor_requests(db))
+    repository = WorkOrderRepository(db, _skill_editor_requests(db), effects=NoKnowledgeSpacePersistenceEffects())
 
     with pytest.raises(WorkOrderNotFoundError):
         repository.get_approval_context(
@@ -668,7 +668,7 @@ def test_get_approval_context_rejects_missing_order(db) -> None:
 
 
 def test_get_approval_context_rejects_non_approver(db) -> None:
-    repository = WorkOrderRepository(db, _skill_editor_requests(db))
+    repository = WorkOrderRepository(db, _skill_editor_requests(db), effects=NoKnowledgeSpacePersistenceEffects())
     created = repository.create_work_order_event(
         event_category=NotificationCategory.APPROVAL,
         biz_type=WorkOrderBizType.BOT_FRIEND.value,
