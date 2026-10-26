@@ -117,6 +117,17 @@ here. Test discovery and default acceptance exclusions are in `pytest.ini`;
 external-service opt-ins are defined by the test fixtures. A default suite
 passing does not demonstrate a live external service path.
 
+### Test conventions
+
+Service unit tests mock external Protocol dependencies rather than the tested
+class's private methods. Keep cases focused on observable behavior and share
+fixtures through the appropriate `conftest.py`, without importing another
+module's conftest. Router tests inject test service bindings through the test
+application/injector. Persistence integration tests exercise the actual local
+database with isolated state; do not replace the database with a mock when
+claiming storage behavior. Select the suite's existing external-service markers
+for tests that need remote infrastructure.
+
 For a public standalone stack, use the repository's [singlebox commands](../../CLAUDE.md#singlebox--the-only-local-entry-point).
 For enterprise functional or cross-service validation, follow the matching
 superproject's simulator instructions, build the intended public and enterprise

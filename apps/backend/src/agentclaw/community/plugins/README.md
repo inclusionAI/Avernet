@@ -16,9 +16,13 @@ plugins/
 ## What belongs here
 
 A component belongs in the plugin layer when **different runtime profiles need
-different implementations**. Rule 20 makes that concrete: every plugin contract
-carries paired local and prod implementations, and `test_plugin_pairing` enforces
-it.
+different implementations**. Constitution Rule 20 requires an appropriate
+non-production strategy, such as a local implementation, fake, simulator, stub
+or noop. This does not require two production-equivalent implementations for
+every capability. The public contract gate lives in
+`tests/community/architecture/test_protocol_contracts.py`; an enterprise host
+may additionally enforce local/prod pairing for its registered plugins. Check
+that host gate and its scope separately.
 
 Shared implementations may live at this level: `HttpxClient` in
 `http_client.py` is the default HTTP client, overridden by the test
