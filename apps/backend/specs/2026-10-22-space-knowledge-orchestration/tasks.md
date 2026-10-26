@@ -70,16 +70,18 @@
 - **Depends on:** Task 5。
 - **AC:** AC3、AC5、AC7。
 
-## Task 7 [~]: Run verification and report delivery boundaries
+## Task 7 [x]: Run verification and report delivery boundaries
 - **Goal:** 用新实现的新证据逐条验收。
 - **Done when:**
-  - [ ] AC1–AC8 全部映射到结果；配置/装配、原成员/维护/审批、Skill Repository、协议与架构回归通过。
-  - [ ] file-SQLite 跨连接/进程、暂停重启、ID tombstone、超限原子性测试通过。
-  - [ ] changed-file lint、所有修改 source ≤1000 行、git diff --check 通过。
-  - [ ] 尝试适用的统一 Singlebox gate；无法运行时记录实际阻塞，不用 focused 结果替代。
-  - [ ] 企业装配、MySQL/OceanBase、部署/DDL、远端 CI 未验证时明确列出；无授权不推送/提交 PR/执行线上操作。
+  - [x] AC1–AC8 全部映射到结果；配置/装配、原成员/维护/审批、Skill Repository、协议与架构回归通过。
+  - [x] file-SQLite 跨连接/进程、暂停重启、ID tombstone、超限原子性测试通过。
+  - [x] changed-file lint、所有修改 source ≤1000 行、git diff --check 通过。
+  - [x] 尝试适用的统一 Singlebox gate；无法运行时记录实际阻塞，不用 focused 结果替代。
+  - [x] 企业装配、MySQL/OceanBase、部署/DDL、远端 CI 未验证时明确列出；无授权不推送/提交 PR/执行线上操作。
 - **Depends on:** Task 6。
 - **AC:** AC1–AC8。
+
+Task 7 evidence (2026-10-26): 2900 passed / 10 skipped across non-overlapping final suites; 20 focused missing-table/wiring cases passed. Ruff/SAST/source-size/diff checks passed. Unified Singlebox attempted but dependency download timed out; verifier confirms canonical artifacts missing. See verification.md; no remote delivery claim.
 
 Task 6 evidence (2026-10-26): finite AST import guard and same-transaction/no-op behavioral contracts added; existing repository contract gates caught and fixed abstract/type-only import metadata without any exemptions; final verification follows Task 7.
 

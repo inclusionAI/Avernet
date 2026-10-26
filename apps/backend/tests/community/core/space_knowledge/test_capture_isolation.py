@@ -249,3 +249,41 @@ def test_no_knowledge_pilot_creates_and_mutates_without_outbox(
     )
     assert spaces.delete_member(space_id=sid, user_id="carol", env="pre")
     assert spaces.get_member(space_id=sid, user_id="carol", env="pre") is None
+
+
+def test_default_full_graph_shares_one_guard_and_constructs_without_db_io(
+    missing_knowledge_graph,
+):
+    from agentclaw.community.core.repository.protocols.space_persistence_effects import (
+        SpacePersistenceEffects,
+    )
+    from agentclaw.community.core.repository.protocols.spaces import (
+        SpaceKnowledgeSyncRepositoryProtocol,
+    )
+    from agentclaw.community.core.space_knowledge.capture_guard import (
+        SpaceKnowledgeCaptureGuard,
+    )
+    from agentclaw.community.core.space_knowledge.capture_lifecycle import (
+        SpaceKnowledgeCaptureLifecycle,
+    )
+
+    graph, db = missing_knowledge_graph
+    statements = []
+
+    def capture(_conn, _cursor, statement, _params, _context, _many):
+        statements.append(statement)
+
+    event.listen(db._engine, "before_cursor_execute", capture)
+    try:
+        lifecycle = graph.get(SpaceKnowledgeCaptureLifecycle)
+        assert graph.get(SpacePersistenceEffects) is lifecycle
+        assert graph.get(SpaceKnowledgeCaptureGuard) is lifecycle
+        for contract in (
+            SpaceRepositoryProtocol, SpaceManagementRepositoryProtocol,
+            WorkOrderRepositoryProtocol, SpaceSkillRepository,
+        ):
+            assert graph.get(contract)._effects is lifecycle
+        assert graph.get(SpaceKnowledgeSyncRepositoryProtocol)._capture is lifecycle
+        assert statements == []
+    finally:
+        event.remove(db._engine, "before_cursor_execute", capture)
