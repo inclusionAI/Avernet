@@ -44,8 +44,8 @@ path meaning the root). An apply that declares resources clears every
 unprotected entry under it and writes the declaration, so a path the
 previous document declared and this one does not, and a file the bot wrote
 there itself, are removed (#2162). The protected entries are one reviewed
-list, `core/workspace/protected_entries.py` — the identity files, `skills/`
-and `skills-pool/`, the engine's `state/`, `conf/` and `<engine>_conf/`,
+list, `core/workspace/protected_entries.py` — the identity files, `skills/`,
+`skills-pool/` and `skills-local/`, the engine's `state/`, `conf/` and `<engine>_conf/`,
 dotfiles — owned by other constructs or by the engine; the Open API's
 read-only policy, the clear and both compilers all read it, and both
 compilers refuse a resource path naming one. `script: null` declares no script and removes one the bot

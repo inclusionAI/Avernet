@@ -59,6 +59,8 @@ def test_resource_paths_are_workspace_relative_and_name_no_protected_entry() -> 
         DesiredResourceTree("skills/quality-check/", ContentRef(DIGEST))
     with pytest.raises(ValueError, match="not a resources directory"):
         DesiredResourceFile("openclaw_conf/settings.json", ContentRef(DIGEST))
+    with pytest.raises(ValueError, match="not a resources directory"):
+        DesiredResourceFile("skills-local/tidy/SKILL.md", ContentRef(DIGEST))
     with pytest.raises(ValueError, match="dotfile"):
         DesiredResourceFile("data/.env", ContentRef(DIGEST))
     with pytest.raises(ValueError, match="identity file"):

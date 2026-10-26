@@ -11,7 +11,8 @@ The entries below are the exceptions, because they belong to other owners:
 * the identity files at the root, written by the ``identity`` construct
   (every engine's accepted types together; ``core/services/identity.py``
   narrows the set per engine);
-* ``skills/`` and ``skills-pool/``, written by the ``skills`` construct;
+* ``skills/``, ``skills-pool/`` and ``skills-local/`` (teclaw keeps a bot's
+  local skills flat at the root), written by the ``skills`` construct;
 * ``state/``, ``conf/`` and ``<engine>_conf/``, the engine's own runtime
   state and configuration;
 * dotfiles and dot-directories, the workspace's housekeeping.
@@ -69,12 +70,14 @@ IDENTITY_FILE_NAMES: frozenset[str] = frozenset(
 #: Files at the workspace root that are never resources: today exactly the identity vocabulary.
 PROTECTED_ROOT_FILES: frozenset[str] = IDENTITY_FILE_NAMES
 
-#: Directories at the workspace root that other owners write: the skills trees (``skills`` construct), the
+#: Directories at the workspace root that other owners write: the skills trees (``skills`` construct; teclaw
+#: keeps local skills flat at ``skills-local/``, ``core/config_compose/teclaw_paths.LOCAL_SKILLS_DIRNAME``), the
 #: engine's state and configuration directories.
 PROTECTED_ROOT_DIRS: frozenset[str] = frozenset(
     {
         "skills",
         "skills-pool",
+        "skills-local",
         "state",
         "conf",
         *(f"{engine}_conf" for engine in SUPPORTED_ENGINE_TYPES),

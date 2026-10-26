@@ -32,7 +32,7 @@
 （路径一律相对 workspace，不传路径即为根）。声明了资源的 apply 先清空根目录下所有
 未受保护的条目，再写入声明的内容，于是上一份文档声明而这一份未声明的路径、以及 Bot
 自己写在那里的文件都会被移除（#2162）。受保护条目是一份集中维护的清单
-`core/workspace/protected_entries.py`——身份文件、`skills/` 与 `skills-pool/`、引擎的
+`core/workspace/protected_entries.py`——身份文件、`skills/`、`skills-pool/` 与 `skills-local/`、引擎的
 `state/`、`conf/`、`<engine>_conf/`、以及点文件——它们归其他 construct 或引擎所有；
 Open API 的只读策略、清空操作和两个编译器读的都是这份清单，两个编译器都会拒绝命名了
 其中条目的资源路径。

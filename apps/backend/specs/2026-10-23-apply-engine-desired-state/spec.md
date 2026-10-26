@@ -61,8 +61,8 @@ promotions. The delivery seam stays unbound; binding it is RSI-04.
 - **Resources root.** The bot's workspace root, as the resources Open API
   defines it (every path workspace-relative, no path meaning the root).
   Declared resource paths are workspace-relative and may not name a
-  **protected entry**: the identity files at the root, `skills/` and
-  `skills-pool/`, the engine's `state/`, `conf/` and `<engine>_conf/`, and
+  **protected entry**: the identity files at the root, `skills/`,
+  `skills-pool/` and `skills-local/`, the engine's `state/`, `conf/` and `<engine>_conf/`, and
   dotfiles at any depth — one reviewed list in
   `core/workspace/protected_entries.py`, read by the Open API's read-only
   policy, the clear and both compilers. Converging resources means the
@@ -327,7 +327,7 @@ promotions. The delivery seam stays unbound; binding it is RSI-04.
    workspace as the root and refuses the identity files and dotfiles; the
    apply engine follows the same contract and the same list, extended to the
    system directories the Open API only hides (`skills/`, `skills-pool/`,
-   `state/`, `conf/`, `<engine>_conf/`). `data/` is dropped as a root; it is
+   `skills-local/`, `state/`, `conf/`, `<engine>_conf/`). `data/` is dropped as a root; it is
    an ordinary sub-directory where the deprecated console upload happened to
    write. An engine-owned resources root (the engine excluding its own system
    files) stays a possible later contract change, not part of this item.
