@@ -183,6 +183,9 @@ export interface CollaborationDefinitionValidationResponse {
 
 /** 创建群聊响应 */
 export interface CreateGroupResponse {
+  /** 创建时生成的初始会话，用于直接进入协作群。 */
+  initial_session_id?: string | null;
+  session_id?: string | null;
   context_injected: number;
   driver_bot: string;
   id: string;
