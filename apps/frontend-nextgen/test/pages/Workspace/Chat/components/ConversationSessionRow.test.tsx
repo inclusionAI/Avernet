@@ -341,3 +341,37 @@ describe('ConversationSessionRow 恢复的会话操作菜单（PR 454,平齐形�
     expect(screen.queryByRole('button', { name: '会话更多操作' })).not.toBeInTheDocument();
   });
 });
+
+describe('ConversationSessionRow Bot 回复中指示（#2990 还原）', () => {
+  it('replyingSessionId 命中当前行:渲染旋转指示(role=status),绝对定位不挤标题', () => {
+    const { container } = render(
+      <ConversationSessionRow session={session} selected onSelect={jest.fn()} replyingSessionId="session-1" />,
+    );
+    const status = screen.getByRole('status', { name: 'Bot 正在回复' });
+    // 40-54px 缩进区,标题起点 60px 不随 loading 出现跳动。
+    expect(status).toHaveClass('left-[40px]', 'top-1/2', 'z-10');
+    const spinner = status.querySelector('svg');
+    expect(spinner).toHaveClass('animate-spin');
+    // 标题热区让位不受影响:标题起点仍为 52px margin。
+    expect(screen.getByRole('button', { name: '对话会话' })).toHaveClass('ml-[52px]');
+    expect(container.firstElementChild).not.toBeNull();
+  });
+
+  it('未命中行不渲染指示;只读行即使命中也不渲染', () => {
+    const { unmount } = render(
+      <ConversationSessionRow session={session} selected={false} onSelect={jest.fn()} replyingSessionId="other" />,
+    );
+    expect(screen.queryByRole('status', { name: 'Bot 正在回复' })).not.toBeInTheDocument();
+    unmount();
+    render(
+      <ConversationSessionRow
+        session={session}
+        selected={false}
+        readOnly
+        onSelect={jest.fn()}
+        replyingSessionId="session-1"
+      />,
+    );
+    expect(screen.queryByRole('status', { name: 'Bot 正在回复' })).not.toBeInTheDocument();
+  });
+});

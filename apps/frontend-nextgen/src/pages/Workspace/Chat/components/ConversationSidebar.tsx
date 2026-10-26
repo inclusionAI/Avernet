@@ -33,6 +33,11 @@ export interface ConversationSidebarProps {
   onOpenBotWorkshop(): void;
   /** AgentCoding Bot 使用专用 coding-chat;与 Bot 工坊「去使用」保持一致。 */
   onOpenAgentCodingBot(bot: ConversationBotView['bot']): void;
+  /** 「Bot 管理」菜单项回调(#2990 还原):带该 Bot 所属空间上下文跳转 Bot 管理页;
+   *  好友 Bot 不提供(装配层只经 ManagedItem 传导,菜单项不渲染)。 */
+  onOpenBotManagement?(bot: ConversationBotView['bot']): void;
+  /** Bot 正在回复中的会话 id(#2990 还原):仅当前打开的会话;会话行标题左侧渲染 loading 指示。 */
+  replyingSessionId: string | null;
 }
 
 /** 空态文案内跳转链接:文案即入口,点击直达对应菜单路由(2026-10-14 体验修复)。 */
@@ -139,6 +144,7 @@ export function ConversationSidebarContent(props: ConversationSidebarProps) {
                 isSearching={isSearching}
                 renderItem={(view) => <ManagedItem key={view.bot.botId} view={view} props={props} />}
                 collapsible
+                infoHint="通过团队成员身份获取的 Bot"
                 collapsed={!isSearching && props.store.collapsedBotGroups.team === true}
                 onToggleCollapsed={() =>
                   props.store.setBotGroupCollapsed('team', props.store.collapsedBotGroups.team !== true)

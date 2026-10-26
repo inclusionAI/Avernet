@@ -20,7 +20,7 @@ import { Badge, Button, IconButton } from '@/components/ui';
 import type { BotChatSessionView } from '@/services/workspace/botSessionService';
 import { formatRelativeTime } from '@/utils/format';
 import { cn } from '@/utils/cn';
-import { Star } from 'lucide-react';
+import { Loader2, Star } from 'lucide-react';
 import React from 'react';
 import type { ConversationSessionRowActions } from '../hooks/useConversationSessionMenu';
 import { ConversationSessionActions } from './ConversationSessionActions';
@@ -33,6 +33,8 @@ export interface ConversationSessionRowProps {
   onSelect(): void;
   onToggleFavorite?(): void;
   favoritePending?: boolean;
+  /** Bot 正在回复中的会话 id(#2990 还原):命中当前行时标题左侧缩进区渲染 loading 旋转指示。 */
+  replyingSessionId?: string | null;
   /** 恢复的单聊会话操作(编辑标题/清除上下文/删除会话);只读行不传。 */
   actions?: ConversationSessionRowActions;
 }
@@ -44,6 +46,7 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
   onSelect,
   onToggleFavorite,
   favoritePending = false,
+  replyingSessionId,
   actions,
 }: ConversationSessionRowProps) {
   const favorite = session.favorite === true;
@@ -65,6 +68,18 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
             : 'bg-muted/60 opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-within/row:opacity-100 [@media(hover:none)]:opacity-100',
         )}
       />
+      {/* Bot 正在回复中(#2990 还原,2026-10-26 适配 52px 行几何):仅命中行渲染,
+          标题左侧缩进区(40-54px,标题起点 60px)绝对定位旋转指示,不占 flex 流,
+          标题起点不随 loading 出现跳动;只读行不渲染。 */}
+      {!readOnly && replyingSessionId === session.sessionId && (
+        <span
+          role="status"
+          aria-label="Bot 正在回复"
+          className="absolute left-[40px] top-1/2 z-10 -translate-y-1/2"
+        >
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-hidden="true" />
+        </span>
+      )}
       <Button
         variant="ghost"
         aria-current={selected ? 'page' : undefined}

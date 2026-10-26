@@ -93,3 +93,44 @@ it('blocks pagination, favorites and additional menus while a session action is 
   expect(screen.getByRole('button', { name: '取消收藏' })).toBeDisabled();
   expect(screen.getByRole('button', { name: '会话更多操作' })).toBeDisabled();
 });
+
+describe('ConversationSessionList replyingSessionId 透传（#2990 还原）', () => {
+  const sessionOf = (sessionId: string) => ({
+    sessionId,
+    botId: 'b1',
+    title: '会话',
+    messageCount: 0,
+    gmtCreate: '',
+    gmtModified: '',
+  });
+
+  it('命中行渲染「Bot 正在回复」指示,未传时缺省不渲染', () => {
+    const { unmount } = render(
+      <ConversationSessionList
+        sessions={firstPageOf([sessionOf('s1'), sessionOf('s2')], 20)}
+        selectedSessionId="s1"
+        onSelectSession={jest.fn()}
+        onLoadMore={jest.fn()}
+        onToggleFavorite={jest.fn()}
+        isFavoritePending={() => false}
+        replyingSessionId="s2"
+      />,
+    );
+    const statuses = screen.getAllByRole('status', { name: 'Bot 正在回复' });
+    expect(statuses).toHaveLength(1);
+    expect(statuses[0].className).toContain('left-[40px]');
+    unmount();
+
+    render(
+      <ConversationSessionList
+        sessions={firstPageOf([sessionOf('s1')], 20)}
+        selectedSessionId="s1"
+        onSelectSession={jest.fn()}
+        onLoadMore={jest.fn()}
+        onToggleFavorite={jest.fn()}
+        isFavoritePending={() => false}
+      />,
+    );
+    expect(screen.queryByRole('status', { name: 'Bot 正在回复' })).not.toBeInTheDocument();
+  });
+});
