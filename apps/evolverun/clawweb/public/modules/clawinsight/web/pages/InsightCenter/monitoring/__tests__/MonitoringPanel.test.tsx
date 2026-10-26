@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import MonitoringPanel from '../MonitoringPanel';
@@ -34,12 +34,60 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe('MonitoringPanel', () => {
-  it('preserves completed PASS attribution and identifies the new policy', async () => {
+  it('shows the approved heading and three filters while retaining PASS records in ALL', async () => {
+    const items = Array.from({ length: 11 }, (_, i) => ({ ...item, diagnosisId: `diag-${i}`, traceId: `trace-${i}`,
+      decision: (i < 3 ? 'ALERT' : i < 10 ? 'PASS' : 'UNRESOLVED') as DiagnosisItem['decision'] }));
+    api.targetDiagnoses.mockResolvedValue({ ...page(), total: 11, totalPages: 1,
+      counts: { all: 11, alert: 3, pass: 7, unresolved: 1 }, items });
+    const { container } = render(<MonitoringPanel />);
+    expect(screen.getByRole('heading', { name: 'Agent 诊断治愈' })).toBeInTheDocument();
+    expect(screen.getByText('实时监测 Bot 任务执行状态，诊断会话异常，助力“罢工”的 Bot 恢复运行')).toBeInTheDocument();
+    const filters = within(await screen.findByRole('group', { name: '诊断结果筛选' }));
+    await filters.findByRole('button', { name: '全部 11' });
+    expect(filters.getAllByRole('button').map(button => button.textContent)).toEqual(['全部 11', '异常告警 3', '诊断失败 1']);
+    expect(filters.getByRole('button', { name: '全部 11' })).toHaveAttribute('aria-pressed', 'true');
+    expect(container.querySelectorAll('.record')).toHaveLength(11);
+    expect(container.querySelectorAll('.decision-symbol.pass')).toHaveLength(7);
+    expect(api.targetDiagnoses.mock.lastCall?.[1].decision).toBe('ALL');
+  });
+  it.each([['异常告警', 'ALERT'], ['诊断失败', 'UNRESOLVED']])('resets page for %s while preserving other filters', async (label, decision) => {
+    render(<MonitoringPanel />);
+    await screen.findByText('1 / 2 页');
+    fireEvent.change(screen.getByLabelText('搜索诊断记录'), { target: { value: 'trace' } });
+    await waitFor(() => expect(api.targetDiagnoses.mock.lastCall?.[1].keyword).toBe('trace'));
+    fireEvent.click(screen.getByRole('button', { name: '筛选问题类型' }));
+    fireEvent.change(screen.getByLabelText('业务问题类型'), { target: { value: '外部服务异常' } });
+    fireEvent.change(screen.getByLabelText('业务问题子类型'), { target: { value: '数据获取失败' } });
+    fireEvent.click(screen.getByRole('button', { name: '应用筛选' }));
+    await screen.findByText('1 / 2 页');
+    fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+    await screen.findByText('2 / 2 页');
+    const previous = api.targetDiagnoses.mock.lastCall?.[1];
+    fireEvent.click(screen.getByRole('button', { name: `${label} 10` }));
+    await waitFor(() => expect(api.targetDiagnoses.mock.lastCall?.[1]).toEqual({ ...previous, decision, page: 1 }));
+    expect(await screen.findByRole('button', { name: `${label} 10` })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: '全部 30' })).toHaveAttribute('aria-pressed', 'false');
+  });
+  it('clears cached records when a status refresh reports NOT_ENROLLED', async () => {
+    render(<MonitoringPanel />);
+    fireEvent.click(await screen.findByRole('button', { name: /外部服务异常/ }));
+    api.targetStatus.mockResolvedValue({ ...option('bot-te'), enrollmentState: 'NOT_ENROLLED', monitoring: null });
+    api.targetDiagnoses.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: '刷新' }));
+    await screen.findByRole('heading', { name: '此 Bot 尚未纳入监控范围。' });
+    expect(screen.queryByText('trace-1')).not.toBeInTheDocument();
+    expect(screen.queryByText('是否人工纠错')).not.toBeInTheDocument();
+    expect(api.targetDiagnoses).not.toHaveBeenCalled();
+    expect(api.enroll).not.toHaveBeenCalled();
+  });
+
+  it('preserves completed PASS attribution without a redundant policy row', async () => {
     api.targetDiagnoses.mockResolvedValue({ ...page(), items: [{ ...item,
       schemaVersion: 'claw-monitoring/diagnosis-event/v4', decision: 'PASS', handlerName: 'COMPLETED' }] });
     render(<MemoryRouter><MonitoringPanel /></MemoryRouter>);
     fireEvent.click(await screen.findByRole('button', { name: /外部服务异常/ }));
-    expect(screen.getByText(/告警判定：不告警.*统一口径 v1/)).toBeInTheDocument();
+    expect(screen.queryByText(/告警判定：|统一口径 v1/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /外部服务异常 · 数据获取失败/ })).toHaveTextContent('TC.MCP.DATA');
     expect(screen.getByText('诊断置信度').nextElementSibling).toHaveTextContent('86.0%');
     expect(screen.getByText('任务是否完成').nextElementSibling).toHaveTextContent('是');
     expect(screen.getByText('是否人工纠错').nextElementSibling).toHaveTextContent('是');
@@ -49,7 +97,7 @@ describe('MonitoringPanel', () => {
       schemaVersion: 'claw-monitoring/diagnosis-event/v4', decision: 'UNRESOLVED',
       handlerName: null, humanIntervention: false }] });
     render(<MemoryRouter><MonitoringPanel /></MemoryRouter>);
-    fireEvent.click(await screen.findByRole('button', { name: /外部服务异常/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /诊断失败.*trace-1/ }));
     expect(screen.getByText('任务是否完成').nextElementSibling).toHaveTextContent('未判定');
     expect(screen.getByText('是否人工纠错').nextElementSibling).toHaveTextContent('未判定');
   });
@@ -158,8 +206,8 @@ describe('MonitoringPanel', () => {
     await screen.findByRole('button', { name: /外部服务异常/ });
     fireEvent.click(screen.getByRole('button', { name: '下一页' }));
     await waitFor(() => expect(api.targetDiagnoses.mock.lastCall?.[1].page).toBe(2));
-    await screen.findByRole('button', { name: '告警 10' });
-    fireEvent.click(screen.getByRole('button', { name: '告警 10' }));
+    await screen.findByRole('button', { name: '异常告警 10' });
+    fireEvent.click(screen.getByRole('button', { name: '异常告警 10' }));
     await waitFor(() => expect(api.targetDiagnoses.mock.lastCall?.[1]).toMatchObject({ decision: 'ALERT', page: 1 }));
     fireEvent.change(screen.getByLabelText('每页条数'), { target: { value: '20' } });
     await waitFor(() => expect(api.targetDiagnoses.mock.lastCall?.[1].pageSize).toBe(20));
@@ -391,9 +439,11 @@ describe('MonitoringPanel', () => {
   it('never requests diagnosis history for an unmonitored directory Bot', async () => {
     api.targetStatus.mockResolvedValue({ ...option('bot-te'), enrollmentState: 'NOT_ENROLLED', monitoring: null });
     render(<MonitoringPanel />);
-    await screen.findByRole('button', { name: '加入监控' });
+    await screen.findByRole('heading', { name: '此 Bot 尚未纳入监控范围。' });
     expect(api.targetDiagnoses).not.toHaveBeenCalled();
     expect(screen.queryByLabelText('诊断记录分页')).not.toBeInTheDocument();
+    expect(api.enroll).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: '加入监控' })).not.toBeInTheDocument();
   });
 
   it('removes cached history if enrollment disappears between status and diagnosis requests', async () => {
@@ -402,10 +452,12 @@ describe('MonitoringPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /外部服务异常/ }));
     api.targetDiagnoses.mockRejectedValue({ status: 409, body: JSON.stringify({ error: { code: 'MONITORING_NOT_ENROLLED' } }) });
     await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
-    expect(screen.getByRole('button', { name: '加入监控' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '此 Bot 尚未纳入监控范围。' })).toBeInTheDocument();
     expect(screen.queryByText('是否人工纠错')).not.toBeInTheDocument();
     expect(screen.queryByText('trace-1')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('诊断记录分页')).not.toBeInTheDocument();
+    expect(api.enroll).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: '加入监控' })).not.toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 

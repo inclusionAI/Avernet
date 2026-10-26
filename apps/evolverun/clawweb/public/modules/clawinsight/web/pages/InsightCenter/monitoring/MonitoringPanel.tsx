@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { monitoringApi, monitoringErrorCode, monitoringErrorText } from '../../../api/monitoring';
 import type { BotOption, DiagnosisPage, MonitoringQuery } from '../../../types/monitoring';
-import { DiagnosisRecord, decisionLabels as labels, displayTime, timeParts } from './DiagnosisRecord';
+import { DiagnosisRecord, displayTime, timeParts } from './DiagnosisRecord';
 import { beijingDateRange, MonitoringControls } from './MonitoringControls';
 import { MonitoringIcon as Icon } from './MonitoringIcon';
 import './monitoring.css';
@@ -11,6 +11,11 @@ import { MonitoringPagination } from './MonitoringPagination';
 
 export { displayTime } from './DiagnosisRecord';
 const initialQuery = (): MonitoringQuery => ({ ...beijingDateRange(1), decision: 'ALL', keyword: '', page: 1, pageSize: 20 });
+const diagnosisFilters = [
+  { value: 'ALL', label: '全部', countKey: 'all' },
+  { value: 'ALERT', label: '异常告警', countKey: 'alert' },
+  { value: 'UNRESOLVED', label: '诊断失败', countKey: 'unresolved' },
+] as const;
 const states = { HEALTHY: '监控正常', ERROR: '检查异常', UNKNOWN: '状态未知', PAUSED: '已暂停' };
 
 export default function MonitoringPanel({ isAdmin = false }: { isAdmin?: boolean }) {
@@ -114,14 +119,13 @@ export default function MonitoringPanel({ isAdmin = false }: { isAdmin?: boolean
   }, [botRef, query, queryKey, revision, invalidDates]);
 
   const change = (patch: Partial<MonitoringQuery>) => { pageCorrectionUsed.current = false; setError(''); setQuery(current => ({ ...current, ...patch, page: patch.page ?? 1 })); };
-  const countKey = { ALL: 'all', ALERT: 'alert', PASS: 'pass', UNRESOLVED: 'unresolved' } as const;
 
   const filtered = Boolean(query.businessProblemCategory || query.businessProblemSubtype || query.startDate || query.endDate || query.keyword || query.decision !== 'ALL');
   const clearFilters = () => { setKeywordInput(''); change({ ...initialQuery(), businessProblemCategory: '', businessProblemSubtype: '', pageSize: query.pageSize }); };
   const lastCheck = timeParts(status?.monitoring?.lastSuccessfulCheckAt ?? null);
   const healthClass = statusError ? 'unknown' : status?.monitoring?.status === 'HEALTHY' ? '' : status?.monitoring?.status.toLowerCase() ?? 'unknown';
   return <div className="insight-monitoring">
-    <div className="page-heading"><div><h1>Agent 监控自愈</h1><p>关注运行异常，查看每一次会话诊断。</p></div></div>
+    <div className="page-heading"><div><h1>Agent 诊断治愈</h1><p>实时监测 Bot 任务执行状态，诊断会话异常，助力“罢工”的 Bot 恢复运行</p></div></div>
     <MonitoringControls selected={selected} isAdmin={isAdmin} revision={botsRevision} loading={loading} startDate={query.startDate} endDate={query.endDate}
       onBotChange={bot => { if (bot.botRef !== botRef) { setSelected(bot); setStatus(null); change({}); } }} onDatesChange={change}
       onUnavailable={failure => { ++requestSequence.current; setLoading(false); setSelected(null); setStatus(null); setLoadedPage(null); setOpenIds(new Set()); setStatusError(monitoringErrorText(failure)); }}
@@ -136,12 +140,12 @@ export default function MonitoringPanel({ isAdmin = false }: { isAdmin?: boolean
     </MonitoringControls>
     {!botRef && <p className="monitoring-empty">选择一个 Bot，查看监控状态和诊断结果。</p>}
     {!botRef && (statusError || error) && <p role="alert" className="error-banner">{statusError || error}</p>}
-    {status?.enrollmentState === 'NOT_ENROLLED' && selected && <MonitoringEnrollment key={botRef} bot={status} onRefresh={() => setRevision(x => x + 1)} />}
+    {status?.enrollmentState === 'NOT_ENROLLED' && selected && <MonitoringEnrollment key={botRef} bot={status} />}
     {botRef && status?.enrollmentState === 'ENROLLED' && <>
       <div className="records-title"><h2>诊断记录</h2><span className="sort-note" title="按会话时间倒序排列，时间未知的记录在最后"><Icon name="sort" />最新会话优先</span></div>
       <section aria-label="诊断记录" className="records-panel" aria-busy={loading}>
         <div className="records-toolbar">
-          <div role="group" aria-label="诊断结果筛选" className="result-tabs">{(Object.keys(labels) as (keyof typeof labels)[]).map(value => <button type="button" aria-pressed={query.decision === value} key={value} onClick={() => change({ decision: value })} className={query.decision === value ? 'active' : ''}>{labels[value]} <span className="number">{pageData ? pageData.counts[countKey[value]] : '—'}</span></button>)}</div>
+          <div role="group" aria-label="诊断结果筛选" className="result-tabs">{diagnosisFilters.map(({ value, label, countKey }) => <button type="button" aria-pressed={query.decision === value} key={value} onClick={() => change({ decision: value })} className={query.decision === value ? 'active' : ''}>{label} <span className="number">{pageData ? pageData.counts[countKey] : '—'}</span></button>)}</div>
           <ProblemTypeFilter key={`${botRef}:${query.startDate}:${query.endDate}`} options={pageData?.problemTypes ?? []}
             category={query.businessProblemCategory ?? ''} subtype={query.businessProblemSubtype ?? ''}
             onApply={(businessProblemCategory, businessProblemSubtype) => change({ businessProblemCategory, businessProblemSubtype })} />
