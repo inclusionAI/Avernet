@@ -88,7 +88,7 @@ def test_create_personal_transaction_translates_unique_race() -> None:
 
 
 def test_initialize_personal_recovers_after_concurrent_unique_race() -> None:
-    repository = SpaceRepository(MagicMock())
+    repository = SpaceRepository(MagicMock(), NoKnowledgeSpacePersistenceEffects())
     winner = object()
     repository.get_personal_space = MagicMock(side_effect=[None, winner])
 
@@ -108,7 +108,7 @@ def test_initialize_personal_recovers_after_concurrent_unique_race() -> None:
 
 
 def test_initialize_personal_reraises_race_when_winner_is_not_visible() -> None:
-    repository = SpaceRepository(MagicMock())
+    repository = SpaceRepository(MagicMock(), NoKnowledgeSpacePersistenceEffects())
     repository.get_personal_space = MagicMock(side_effect=[None, None])
 
     @contextmanager
