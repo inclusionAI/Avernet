@@ -65,7 +65,7 @@ from agentclaw.community.core.repository.protocols.publishing import BotPublishR
 from agentclaw.community.core.workspace.protected_entries import (
     PROTECTED_ROOT_DIRS,
     PROTECTED_ROOT_FILES,
-    protected_entry_refusal,
+    is_protected_root_entry,
 )
 from agentclaw.community.di.modules.skill_center_module import DeviceFilesystemDispatcher
 from agentclaw.community.log import get_logger
@@ -640,13 +640,15 @@ class ResourceFileService(ResourceFilePort):
         engine_type: str,
         runtime_context: DeviceContext | None = None,
     ) -> tuple[str, ...]:
-        """Every resource file in the workspace as a workspace-relative path; the protected entries left out.
+        """Every resource file in the workspace as a workspace-relative path; the protected root entries left out.
 
         The workspace root is the resources root, and what this listing skips
-        (``protected_entries``: the identity files, the skills trees, the
-        engine's state and configuration, dotfiles) is exactly what
-        ``clear_root`` leaves alone, so the two agree on what "everything"
-        means. Level by level — no engine's recursive flag is trusted — and
+        (``protected_entries.is_protected_root_entry``: the identity files, the
+        skills trees, the engine's state and configuration, dotfiles — at the
+        root) is exactly what ``clear_root`` leaves alone, so the two agree on
+        what "everything" means; below the root every entry belongs to its
+        parent, dot-entries included, as the Open API's directory delete
+        treats them. Level by level — no engine's recursive flag is trusted — and
         complete or raising: the apply engine clears and rewrites on the
         strength of this listing, so a workspace that does not list, a
         subdirectory the walk was just told about and then cannot list, and
@@ -673,7 +675,7 @@ class ResourceFileService(ResourceFilePort):
                     where = current or "the workspace"
                     raise RootListingFailed(f"{where} of bot {bot_id} listed an entry without a name")
                 rel = self._rel_path(current, entry)
-                if protected_entry_refusal(rel) is not None:
+                if not current and is_protected_root_entry(rel):
                     continue
                 if self._is_dir_flag(entry):
                     sub = await device_fs.list_dir(self._logical(rel))
@@ -696,8 +698,9 @@ class ResourceFileService(ResourceFilePort):
         """Delete every unprotected entry of the workspace root; ``False`` when there was none to delete.
 
         One delete per root entry — the engine's tree delete for a directory,
-        its file delete for a file — skipping the protected entries, so an
-        identity file or the skills tree is never on the list. A delete the
+        its file delete for a file — skipping the protected root entries, so an
+        identity file or the skills tree is never on the list; an unprotected
+        directory goes whole, as the Open API's own directory delete takes it. A delete the
         transport answers ``False`` for, on an entry the listing just showed,
         is a refusal (every device filesystem catches its own errors and
         answers ``False``) and raises ``RootClearFailed``; ``False`` from here
@@ -716,7 +719,7 @@ class ResourceFileService(ResourceFilePort):
             name = self._leaf(entry)
             if not name:
                 raise RootListingFailed(f"the workspace of bot {bot_id} listed an entry without a name")
-            if protected_entry_refusal(name) is not None:
+            if is_protected_root_entry(name):
                 continue
             logical = self._logical(name)
             if self._is_dir_flag(entry):

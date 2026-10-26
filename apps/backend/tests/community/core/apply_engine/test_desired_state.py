@@ -61,6 +61,8 @@ def test_resource_paths_are_workspace_relative_and_name_no_protected_entry() -> 
         DesiredResourceFile("openclaw_conf/settings.json", ContentRef(DIGEST))
     with pytest.raises(ValueError, match="dotfile"):
         DesiredResourceFile("data/.env", ContentRef(DIGEST))
+    with pytest.raises(ValueError, match="identity file"):
+        DesiredResourceFile("CLAUDE.md", ContentRef(DIGEST))
     with pytest.raises(ValueError, match="must not end with"):
         DesiredResourceFile("docs/prices/", ContentRef(DIGEST))
     with pytest.raises(ValueError, match="must end with"):

@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from agentclaw.community.core.ports.resource_rows_port import WrittenFile
-from agentclaw.community.core.workspace.protected_entries import protected_entry_refusal
+from agentclaw.community.core.workspace.protected_entries import is_protected_root_entry
 from agentclaw.community.core.apply_engine.context import ApplyContext
 from agentclaw.community.core.apply_engine.capabilities import (
     resolve_capabilities,
@@ -1239,7 +1239,7 @@ class FakeResourceFileService:
         )
         if self.fail_list:
             raise RuntimeError("listing quoted a header with a token")
-        return tuple(sorted(p for p in self._exists if protected_entry_refusal(p) is None))
+        return tuple(sorted(p for p in self._exists if not is_protected_root_entry(p.split("/", 1)[0])))
 
     async def clear_root(
         self,
@@ -1255,7 +1255,7 @@ class FakeResourceFileService:
         )
         if self.fail_clear:
             return False
-        under = {p for p in self._exists if protected_entry_refusal(p) is None}
+        under = {p for p in self._exists if not is_protected_root_entry(p.split("/", 1)[0])}
         self._exists -= under
         self.deleted.extend(sorted(under))
         return bool(under)

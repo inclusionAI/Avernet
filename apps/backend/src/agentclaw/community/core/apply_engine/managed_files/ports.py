@@ -31,7 +31,7 @@ import asyncio
 import logging
 from typing import Any, Optional
 
-from agentclaw.community.core.workspace.protected_entries import protected_entry_refusal
+from agentclaw.community.core.workspace.protected_entries import is_protected_root_entry
 from agentclaw.community.core.apply_engine.managed_files.store import (
     CATEGORY_IDENTITY,
     CATEGORY_RESOURCES,
@@ -230,7 +230,7 @@ class PlatformResource(_StorePort, ResourceFilePort):
         )
         namespace = len(WORKSPACE_NS) + 1
         paths = (row.rel_path[namespace:] for row in rows)
-        return tuple(sorted(path for path in paths if protected_entry_refusal(path) is None))
+        return tuple(sorted(path for path in paths if not is_protected_root_entry(path.split("/", 1)[0])))
 
     async def clear_root(
         self,

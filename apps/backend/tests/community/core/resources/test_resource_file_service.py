@@ -775,8 +775,9 @@ _ROOT = [
 @pytest.mark.asyncio
 async def test_list_root_walks_the_workspace_level_by_level_and_skips_the_protected_entries():
     """Every unprotected file, workspace-relative; the identity file, the skills and
-    engine directories and the dotfiles are left out at the root, dotfiles at any depth,
-    and a protected name below the root is an ordinary file."""
+    engine directories and the dotfiles are left out at the root only: below the root an
+    entry belongs to its parent, a dotfile and a protected name alike, and the clear takes
+    the parent whole — so the listing names them as what the clear will remove."""
     device_fs = _workspace(
         {
             "workspace": _ROOT,
@@ -790,7 +791,7 @@ async def test_list_root_walks_the_workspace_level_by_level_and_skips_the_protec
     )
     svc, _ = _svc(provider="baas", device_fs=device_fs)
     # Level by level: the root's files first, then each directory's, in listing order.
-    assert await svc.list_root(**_COORDS) == ("faq.md", "data/SOUL.md", "data/x.csv", "kb/a.txt")
+    assert await svc.list_root(**_COORDS) == ("faq.md", "data/.env", "data/SOUL.md", "data/x.csv", "kb/a.txt")
     listed = [c.args[0] for c in device_fs.list_dir.await_args_list]
     assert not {"workspace/skills", "workspace/.git", "workspace/openclaw_conf"} & set(listed)
 
