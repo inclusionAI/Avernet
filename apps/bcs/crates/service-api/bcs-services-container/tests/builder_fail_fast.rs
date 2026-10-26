@@ -8,7 +8,7 @@ use bcs_test_support::{
     NoopCollaborationTemplateService, NoopFriendCoreService, NoopFriendService,
     NoopFrontendDeliveryPort, NoopFusionCoreService, NoopGroupContextService, NoopGroupCoreService,
     NoopGroupFusionService, NoopGroupManagementService, NoopGroupMessageHistoryService,
-    NoopGroupProposalService, NoopGroupQueryService, NoopHumanActorService, NoopMessageFlowService,
+    NoopGroupQueryService, NoopHumanActorService, NoopMessageFlowService,
     NoopOrganizationManagementService, NoopProposalCoreService, NoopProviderBotCoreService,
     NoopProviderBotEventService, NoopProviderCoreService, NoopProviderManagementService,
     NoopRelationCoreService, NoopRoutingCoreService, NoopSecretService, NoopSessionFileService,
@@ -70,7 +70,6 @@ fn build_succeeds_when_all_required_services_set() {
         .group_query(Arc::new(NoopGroupQueryService))
         .group_management(Arc::new(NoopGroupManagementService))
         .workbench_sessions(Arc::new(NoopWorkbenchSessionService))
-        .group_proposals(Arc::new(NoopGroupProposalService))
         .group_message_history(Arc::new(NoopGroupMessageHistoryService))
         .group_context(Arc::new(NoopGroupContextService))
         .system_message(Arc::new(NoopSystemMessageService))
@@ -118,7 +117,6 @@ fn fully_wired_builder_without_organization_management() -> ServicesBuilder {
         .group_query(Arc::new(NoopGroupQueryService))
         .group_management(Arc::new(NoopGroupManagementService))
         .workbench_sessions(Arc::new(NoopWorkbenchSessionService))
-        .group_proposals(Arc::new(NoopGroupProposalService))
         .group_message_history(Arc::new(NoopGroupMessageHistoryService))
         .group_context(Arc::new(NoopGroupContextService))
         .system_message(Arc::new(NoopSystemMessageService))

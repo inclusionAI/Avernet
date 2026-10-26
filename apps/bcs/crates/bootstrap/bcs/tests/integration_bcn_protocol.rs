@@ -263,51 +263,6 @@ async fn test_bot_responds_with_chat_event() {
     bot.send_chat_event(&group_id, &request_id, "Hello back!").await;
 }
 
-// ── Test 6: Proposal flow end-to-end ─────────────────────────────────────────
-
-/// Full proposal flow: request → confirm → group context broadcast to participants.
-#[tokio::test(flavor = "multi_thread")]
-async fn test_proposal_flow_end_to_end() {
-    let _ = tracing_subscriber::fmt::try_init();
-    let tmp = create_temp_bots_dir();
-    let (addr, _srv) = start_test_server(&tmp.path().to_path_buf()).await;
-    tokio::time::sleep(Duration::from_millis(50)).await;
-
-    let mut bot1 = MockBot::connect(addr).await;
-    bot1.register("Requester", &["coordination"], addr).await;
-
-    let mut bot2 = MockBot::connect(addr).await;
-    bot2.register("Expert", &["database"], addr).await;
-
-    // The backend proposal contract remains available independently of the CLI.
-    let http = reqwest::Client::new();
-    let proposal: serde_json::Value = http
-        .post(format!("http://{addr}/groups/request"))
-        .bearer_auth(&bot1.token)
-        .json(&serde_json::json!({
-            "topic": "Need database expert help",
-            "suggested_participants": [&bot2.bot_id],
-        }))
-        .send().await.unwrap()
-        .error_for_status().unwrap()
-        .json().await.unwrap();
-    let confirm_url = reqwest::Url::parse(proposal["confirm_url"].as_str().unwrap()).unwrap();
-    // The test server binds a random port; use the returned path on that server.
-    let confirmed: serde_json::Value = http
-        .post(format!("http://{addr}{}", confirm_url.path()))
-        .send().await.unwrap()
-        .error_for_status().unwrap()
-        .json().await.unwrap();
-    assert!(confirmed["group_id"].as_str().is_some_and(|id| !id.is_empty()));
-    assert!(confirmed["session_id"].as_str().is_some_and(|id| !id.is_empty()));
-    for bot in [&mut bot1, &mut bot2] {
-        let frame = bot.recv_frame().await.expect("Participant should receive group context");
-        let action = frame_action(&frame);
-        assert!(action == "chat.send" || action == "chat.inject",
-            "Participant should receive group context frame, got: {frame}");
-    }
-}
-
 // ── Test 7: Heartbeat (bot.status) ───────────────────────────────────────────
 
 /// Verifies BCS responds ok to bot.status heartbeat frames (BCN heartbeat loop).

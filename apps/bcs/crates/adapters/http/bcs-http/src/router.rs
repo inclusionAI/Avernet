@@ -252,12 +252,6 @@ fn build_api_routes() -> Router<HttpAppState> {
         .route("/groupcontext/update", post(routes::group_context::update))
         .route("/groupcontext/list", post(routes::group_context::list))
         .route("/groupcontext/get", post(routes::group_context::get))
-        .route("/groups/request", post(routes::group_requests::group_request))
-        .route(
-            "/groups/{token}/confirm",
-            get(routes::group_requests::confirm_group_page)
-                .post(routes::group_requests::confirm_group),
-        )
         .route(
             "/groups/{id}/members",
             post(routes::groups::add_group_member),

@@ -119,14 +119,6 @@ pub(crate) async fn build_http_app_state(state: Arc<BcsServerState>) -> HttpAppS
             bots_base_dir: config.bots_base_dir.clone(),
             registry: state.services.registry.clone(),
         }))
-        .with_group_request_config(
-            config.bcs_endpoint.clone(),
-            config.bind.clone(),
-            config.port,
-            config.max_groups_as_driver,
-            config.max_group_members,
-            config.max_groups_as_member,
-        )
         .with_strict_container_validation(config.strict_container_validation)
         .with_onboard_policy(
             config.onboard_binding_enabled,
