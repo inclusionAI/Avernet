@@ -54,8 +54,6 @@ paths:
     $ref: ./openapi/collaboration-definitions.yaml#/CollaborationDefinitionValidatePath
 components:
   securitySchemes:
-    RevisionReadToken:
-      $ref: ../collaboration-drafts/v1.yaml#/components/securitySchemes/RevisionReadToken
     AgentIdentityBearer:
       type: http
       scheme: bearer

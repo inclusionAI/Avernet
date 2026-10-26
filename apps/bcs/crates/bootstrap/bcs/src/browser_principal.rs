@@ -14,7 +14,7 @@ impl PrincipalVerifier for BrowserPrincipalVerifier {
     async fn verify(&self, headers: &HeaderMap) -> Result<AuthenticatedCaller, PrincipalVerificationError> {
         // This cookie-only surface must not turn Bot/session credentials into their owner.
         for header in ["authorization", "actor", "x-bcs-bot-token", "x-avernet-bot-token",
-            "x-avernet-principal", "x-bcs-draft-read-token"] {
+            "x-avernet-principal"] {
             if headers.contains_key(header) {
                 return Err(PrincipalVerificationError::Invalid("Human browser login required".into()));
             }

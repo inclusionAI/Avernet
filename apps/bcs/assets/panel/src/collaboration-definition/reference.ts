@@ -7,7 +7,6 @@ export interface CollaborationDefinitionReference {
   schemaVersion: 2;
   draftId: string;
   revision: number;
-  readToken: string;
 }
 export type CollaborationDefinitionPayload = CollaborationDefinitionSnapshot | CollaborationDefinitionReference;
 
@@ -32,17 +31,15 @@ function validUnicode(value: string): boolean {
 
 export function decodeCollaborationDefinitionReference(input: unknown): CollaborationDefinitionReference {
   const value = input as Record<string, unknown> | null;
-  const fields = ['schemaVersion', 'draftId', 'revision', 'readToken'];
   if (!value || typeof value !== 'object' || Array.isArray(value)
-    || Object.keys(value).length !== 4 || Object.keys(value).some((key) => !fields.includes(key))
     || value.schemaVersion !== 2
     || typeof value.draftId !== 'string'
     || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value.draftId)
-    || typeof value.revision !== 'number' || !Number.isSafeInteger(value.revision) || value.revision < 1
-    || typeof value.readToken !== 'string' || !/^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/.test(value.readToken)) {
+    || typeof value.revision !== 'number' || !Number.isSafeInteger(value.revision) || value.revision < 1) {
     throw new CollaborationDefinitionSnapshotError('invalid_field', '协作版本引用无效');
   }
-  return value as unknown as CollaborationDefinitionReference;
+  // Normalize historical cards too; extra fields are never forwarded.
+  return { schemaVersion: 2, draftId: value.draftId, revision: value.revision };
 }
 
 export function decodeCollaborationDefinitionPayload(input: unknown): CollaborationDefinitionPayload {
@@ -65,12 +62,11 @@ async function request(baseUrl: string, reference: CollaborationDefinitionRefere
   try {
     const response = await fetch(collaborationApiUrl(baseUrl, `drafts/${reference.draftId}/revisions/${reference.revision}${validate ? '/validate' : ''}`), {
       method: validate ? 'POST' : 'GET',
-      headers: { 'X-BCS-Draft-Read-Token': reference.readToken },
       credentials: 'same-origin', cache: 'no-store', redirect: 'error',
       signal: controller.signal,
     });
     if (response.status === 404 || response.status === 401 || response.status === 403) {
-      throw new DraftReadError('引用不可用：版本不存在、分享已撤销或读取凭据不匹配');
+      throw new DraftReadError('引用不可用：版本不存在或分享已撤销');
     }
     if (!response.ok) throw new DraftReadError(`版本服务请求失败（HTTP ${response.status}）`);
     const result = await response.json();

@@ -8,7 +8,7 @@ import type { CreateGroupParams } from '../../types';
 
 const fixture = JSON.parse(readFileSync(path.resolve(__dirname, '../../../../../../bcs/tests/fixtures/collaboration-definition-draft/indentation-regression.json'), 'utf8'));
 const validation = { warnings: [], errors: [], ...JSON.parse(readFileSync(path.resolve(__dirname, '../../../../../../bcs/assets/panel/test/fixtures/incident-loop-preview.json'), 'utf8')) };
-const reference = { schemaVersion: 2 as const, draftId: '750c52c6-60e2-4249-8ee5-1fb8cb9402ab', revision: 1, readToken: 'A'.repeat(43) };
+const reference = { schemaVersion: 2 as const, draftId: '750c52c6-60e2-4249-8ee5-1fb8cb9402ab', revision: 1 };
 const revision = { ...fixture.revision, draft_id: reference.draftId };
 const user = { user_id: 'alice', display_name: 'Alice' };
 const params: CreateGroupParams = { driver_bot: 'alice-bot', originator: 'alice-bot', label: '稿件协作', context: '审稿并发表',
@@ -47,7 +47,6 @@ it('submits current form bytes and bindings exactly once without reloading a Dra
   const pending = operation.submit({ user, params }); expect(await operation.submit({ user, params })).toBeUndefined();
   for (let i = 0; i < 30 && !resolvePost; i++) await new Promise(resolve => { setTimeout(resolve, 5); });
   expect(posts()).toHaveLength(1); expect(calls.some(call => call.url.includes('/drafts/'))).toBe(false);
-  expect(JSON.stringify(calls)).not.toContain(reference.readToken);
   expect(posts()[0].options.headers['X-BCS-Expected-User']).toBe('alice');
   const body = JSON.parse(posts()[0].options.body);
   expect(body.originator).toBe('alice-bot'); expect(body.driver_bot_uuid).toBe('alice-bot');
@@ -99,9 +98,9 @@ it.each(['chat', 'manager_worker'] as const)('uses ordinary form parameters for 
   expect(operation.state.result).toEqual(result);
   expect(groupLink(GROUP_CREATION_HOST, user, result)).toBe('/bcn/chat/detail?id=group&session=session&bot_uuid=friend');
 });
-it('reads initial source with its capability without any group write', async () => {
+it('reads initial source without credentials or any group write', async () => {
   const source = await readStoredDefinition(BCS_API_BASE, reference, new AbortController().signal);
-  expect(source.definitionYaml).toBe(revision.definition_yaml); expect(calls[0].options.headers['X-BCS-Draft-Read-Token']).toBe(reference.readToken); expect(posts()).toHaveLength(0);
+  expect(source.definitionYaml).toBe(revision.definition_yaml); expect(calls[0].options.headers).toBeUndefined(); expect(posts()).toHaveLength(0);
 });
 it.each(['revoked', 'corrupt', 'hash-mismatch'])('rejects %s initial content', async failure => {
   mode = failure; await expect(readStoredDefinition(BCS_API_BASE, reference, new AbortController().signal)).rejects.toThrow(); expect(posts()).toHaveLength(0);
@@ -114,7 +113,7 @@ it('accepts empty open events and initial Drafts but rejects identity overrides'
   expect(decodeOpenCreateGroupOptions()).toEqual({}); expect(decodeOpenCreateGroupOptions({})).toEqual({});
   expect(decodeOpenCreateGroupOptions({ draft: reference })).toEqual({ draft: reference });
   expect(() => decodeOpenCreateGroupOptions({ userId: 'alice' })).toThrow();
-  expect(() => decodeOpenCreateGroupOptions({ draft: { ...reference, owner: 'alice' } })).toThrow();
+  expect(decodeOpenCreateGroupOptions({ draft: { ...reference, owner: 'alice', readToken: 'obsolete' } })).toEqual({ draft: reference });
 });
 it('preserves advanced fields and deduplicates participants', () => {
   const body = groupCreationBody({ ...params, opening_message: '{{bcs.run_id}}\n', participants: [...params.participants, params.participants[0]] }, validation);

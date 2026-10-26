@@ -124,25 +124,25 @@ class Story:
         self.check(saved["revision"] == 1 and saved["content_hash"] == digest, "saved immutable source")
         reference = self.request("assistant obtains share card", "GET", self.draft + "/revisions/1/reference",
                                  headers=self.credentials(author))
-        grant = [("X-BCS-Draft-Read-Token", reference["readToken"])]
+        self.check(set(reference) == {"schemaVersion", "draftId", "revision", "readToken"},
+                   "reference remains compatible with the deployed CLI")
+        self.check(reference["readToken"] == "A" * 43, "legacy field is a fixed non-secret placeholder")
         revision = "/api/v1" + self.draft + "/revisions/1"
-        opened = self.request("V1 host opens shared card", "GET", revision, headers=grant, envelope=True)
+        opened = self.request("V1 host opens shared card", "GET", revision, envelope=True)
         self.check(opened["definition_yaml"].encode() == source.encode(), "V1 preview preserves all original bytes")
         self.check(opened["content_hash"] == digest and opened["revision"] == 1, "V1 preview pins hash and revision")
         validated = self.request("V1 host validates stored revision", "POST", revision + "/validate",
-                                 headers=grant, envelope=True)
+                                 envelope=True)
         self.check(validated["validation"]["valid"] is True, "shared source is valid")
         self.check(validated["content_hash"] == digest and validated["revision"] == 1, "validation binds the same revision")
 
         for method, suffix in (("GET", ""), ("POST", "/validate")):
-            for label, headers in (("missing grant", []), ("wrong grant", [(grant[0][0], "invalid")]),
-                                   ("duplicate grant", grant + grant), ("non-ASCII grant", [(grant[0][0], "\xff")])):
-                self.request(label, method, revision + suffix, headers=headers, status=404,
-                             error="DRAFT_REFERENCE_UNAVAILABLE", envelope=True)
+            self.request("missing revision", method, revision.replace("/revisions/1", "/revisions/2") + suffix,
+                         status=404, error="DRAFT_REFERENCE_UNAVAILABLE", envelope=True)
         self.request("invalid revision", "GET", revision.rsplit("/", 1)[0] + "/invalid",
-                     headers=grant, status=400, error="DRAFT_INPUT", envelope=True)
+                     status=400, error="DRAFT_INPUT", envelope=True)
         self.request("validation cannot replace the stored YAML", "POST", revision + "/validate",
-                     headers=grant, body={"definition_yaml": "replacement"}, status=400,
+                     body={"definition_yaml": "replacement"}, status=400,
                      error="DRAFT_INPUT", envelope=True)
 
         user = self.browser("read current Human", "GET", "/me")
@@ -177,9 +177,9 @@ class Story:
             ("duplicate expected user", expected + expected, "user_context_changed"),
         ):
             self.browser(label, "POST", "/groups", body=body, headers=headers, status=403, error=error)
-        for header in (self.credentials(author)[0], grant[0], ("Actor", driver["bot_uuid"]),
+        for header in (self.credentials(author)[0], ("Actor", driver["bot_uuid"]),
                        ("X-Avernet-Principal", "invalid")):
-            self.browser("Bot/share credentials cannot impersonate a Human", "POST", "/groups",
+            self.browser("Bot credentials cannot impersonate a Human", "POST", "/groups",
                          body=body, headers=expected + [header], status=401, error="unauthenticated")
 
         created = self.browser("Human creates edited collaboration", "POST", "/groups",
@@ -194,12 +194,12 @@ class Story:
         self.check({role: value["bot_ids"] for role, value in definition["participant_bindings"].items()}
                    == {"writer": [self.driver], "publisher": [self.driver], "reviewer": [reviewer["bot_uuid"]]},
                    "group persists the chosen role bindings, without substituting the author Bot")
-        reopened = self.request("historical card remains unchanged", "GET", revision, headers=grant, envelope=True)
+        reopened = self.request("historical card remains unchanged", "GET", revision, envelope=True)
         self.check(reopened["definition_yaml"] == source, "editing the group does not mutate the Draft")
         self.request("author revokes the shared revision", "DELETE", self.draft + "/revisions/1/share",
                      headers=self.credentials(author), status=204)
         for method, suffix in (("GET", ""), ("POST", "/validate")):
-            self.request("revoked V1 reference is unavailable", method, revision + suffix, headers=grant,
+            self.request("revoked V1 reference is unavailable", method, revision + suffix,
                          status=404, error="DRAFT_REFERENCE_UNAVAILABLE", envelope=True)
 
     def cleanup(self):

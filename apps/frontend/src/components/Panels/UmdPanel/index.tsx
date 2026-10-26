@@ -125,8 +125,7 @@ export function UmdPanel({
       const options = decodeOpenCreateGroupOptions(value);
       setGroupRequest(current => {
         const previous = current?.options.draft, next = options.draft;
-        if (current && previous?.draftId === next?.draftId && previous?.revision === next?.revision
-          && previous?.readToken === next?.readToken) return current;
+        if (current && previous?.draftId === next?.draftId && previous?.revision === next?.revision) return current;
         return { options, sequence: (current?.sequence || 0) + 1 };
       });
       setGroupOpen(true);

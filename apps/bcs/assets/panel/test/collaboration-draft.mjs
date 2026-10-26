@@ -16,21 +16,17 @@ const { CollaborationDefinitionCard, CollaborationDefinitionPreview, decodeColla
 const fixture = JSON.parse(readFileSync(new URL('../../../tests/fixtures/collaboration-definition-draft/indentation-regression.json', import.meta.url), 'utf8'));
 // Validator response for the unchanged 2,174-byte incident YAML above.
 const incidentValidation = JSON.parse(readFileSync(new URL('./fixtures/incident-loop-preview.json', import.meta.url), 'utf8'));
-const reference = { schemaVersion: 2, draftId: '750c52c6-60e2-4249-8ee5-1fb8cb9402ab', revision: 1, readToken: 'A'.repeat(43) };
+const reference = { schemaVersion: 2, draftId: '750c52c6-60e2-4249-8ee5-1fb8cb9402ab', revision: 1 };
 assert.deepEqual(decodeCollaborationDefinitionReference(reference), reference);
 for (const bad of [
-  { ...reference, readToken: 'A'.repeat(42) + 'B' },
-  { ...reference, readToken: undefined },
-  { ...reference, revision: Number.MAX_SAFE_INTEGER + 1 },
-  { ...reference, revision: 0 },
-  { ...reference, title: 'forbidden' },
-  { ...reference, url: 'https://untrusted.example' },
-  { ...reference, apiBaseUrl: 'https://untrusted.example' },
-  { ...reference, userApiBaseUrl: '/untrusted-user' },
-  { ...reference, groupUrlTemplate: '/untrusted-group' },
-  { ...reference, groupListUrl: '/untrusted-list' },
-  { ...reference, definitionYaml: 'inline' },
+  null, [], { ...reference, schemaVersion: 3 }, { ...reference, draftId: 'invalid' },
+  { ...reference, revision: Number.MAX_SAFE_INTEGER + 1 }, { ...reference, revision: 0 },
 ]) assert.throws(() => decodeCollaborationDefinitionReference(bad));
+assert.deepEqual(decodeCollaborationDefinitionReference({ ...reference, readToken: 'obsolete',
+  url: 'https://untrusted.example', apiBaseUrl: '/untrusted', definitionYaml: 'inline' }), reference,
+  'historical or extra fields are discarded before opening or forwarding a reference');
+assert.deepEqual(decodeCollaborationDefinitionReference({ ...reference, readToken: 'A'.repeat(43) }), reference,
+  'cards emitted by the deployed CLI with the compatibility placeholder remain readable');
 assert.equal(decodeCollaborationDefinitionReference({ ...reference, revision: Number.MAX_SAFE_INTEGER }).revision, Number.MAX_SAFE_INTEGER);
 
 const opened = [], closed = [], requests = [];
@@ -46,13 +42,13 @@ assert.equal(opened.length, 0);
 await act(async () => container.querySelector('button').click());
 assert.equal(opened.length, 1);
 assert(!('apiBaseUrl' in opened[0].params.data), 'an unconfigured card must allow the preview host to inject its base');
-assert(!opened[0].id.includes(reference.readToken));
+assert.deepEqual(opened[0].params.data.snapshot, reference);
 await act(async () => container.querySelector('button').click());
 assert.equal(opened[0].id, opened[1].id);
-await act(async () => root.render(React.createElement(CollaborationDefinitionCard, { ...reference, readToken: 'B'.repeat(42) + 'A' })));
-assert.equal(closed.length, 1, 'credential changes close stale preview');
+await act(async () => root.render(React.createElement(CollaborationDefinitionCard, { ...reference, readToken: 'obsolete' })));
+assert.equal(closed.length, 0, 'obsolete fields do not change the fixed preview');
 await act(async () => container.querySelector('button').click());
-assert.equal(opened.at(-1).id, opened[0].id, 'capability never forms part of tab identity');
+assert.equal(opened.at(-1).id, opened[0].id, 'only the fixed revision forms the tab identity');
 await act(async () => root.unmount());
 
 const revision = { ...fixture.revision, draft_id: reference.draftId, revision: 1 };
@@ -64,10 +60,9 @@ const validation = {
 let mode = 'valid';
 globalThis.fetch = async (url, options) => {
   requests.push({ url, options });
-  assert.equal(options.headers['X-BCS-Draft-Read-Token'], reference.readToken);
+  assert.equal(options.headers, undefined, 'public reads must not add custom headers');
   assert.equal(options.cache, 'no-store');
   assert.equal(options.redirect, 'error');
-  assert(!url.includes(reference.readToken));
   if (mode === 'revoked') return new Response('{}', { status: 404 });
   if (url.endsWith('/validate')) {
     assert.equal(options.method, 'POST');
@@ -262,4 +257,4 @@ await act(async () => {
 });
 assert.match(panel.textContent, /定义校验通过/);
 await act(async () => baseRoot.unmount());
-console.log('Draft Panel: strict references, capability isolation, preview/source tabs, incident bytes/copy, fixed validation, unavailable and integrity states passed.');
+console.log('Draft Panel: normalized references, header-free reads, preview/source tabs, incident bytes/copy, fixed validation, unavailable and integrity states passed.');

@@ -1,7 +1,8 @@
 # 固定版本协作定义与只读分享
 
 Draft 保存协作定义原文。它不属于聊天 Session，不创建群、不绑定 Bot、不启动 Run。
-管理身份是当前认证 Bot；卡片携带的 readToken 仅能读取和校验该固定版。转发卡片同时转发读取权。
+管理身份沿用当前认证 Bot；读取和校验固定版本不需要凭据或自定义请求头。卡片只携带 schemaVersion、draftId、revision，可直接转发。
+新服务的引用接口为已部署 CLI 保留固定 `readToken` 占位字段，不落库、不鉴权；旧 CLI 可继续使用，新 CLI 生成卡片时丢弃它。副屏忽略旧卡片的该字段。
 
 ```bash
 # 为本次请求保留一个规范 UUID；创建未知时仍复用它。
@@ -40,5 +41,5 @@ delete 删除原文并保留 ID 删除标记，迟到创建不能复活。不能
 共享 Bot 不提供不同私聊用户间的工具侧管理隔离。
 
 沿用现有地址/认证发现，不新增 app_id、用户委托、轮次凭据或聊天 sessionId；
-不要读取或打印 Bot token。readToken 可随卡片分享，Bot token 绝不进入消息。
+不要读取或打印 Bot token；Bot token 绝不进入消息。
 旧 `collaboration preview <file>` 是离线 schema 1 消费兼容，不用于新的帮助工作流。

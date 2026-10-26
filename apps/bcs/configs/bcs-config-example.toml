@@ -109,7 +109,7 @@ type = "mysql"
 # Disabled by default, including when this section or enabled is omitted.
 # Restart to apply. Disabled Draft endpoints report DRAFT_SERVICE_UNAVAILABLE.
 # Set enabled = true for SQLite or MySQL; no Draft signing keys are required.
-# Revision read grants persist in the database across replicas and restarts.
+# Revision availability persists in the database across replicas and restarts.
 enabled = false
 
 # Select a linked secret backend in deployments that do not use environment

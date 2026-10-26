@@ -83,7 +83,7 @@ type = "sqlite"
 path = "bcs.db"
 
 [collaboration_drafts]
-# Keep local previews available; revision read grants persist in the database.
+# Keep local previews available; revision availability persist in the database.
 enabled = true
 
 [secret]

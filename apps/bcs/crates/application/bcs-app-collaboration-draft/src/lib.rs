@@ -71,12 +71,11 @@ impl CollaborationDraftService for CollaborationDraftApplication {
     }
     async fn read(
         &self,
-        access: DraftAccess,
         id: &str,
         revision: u64,
     ) -> Result<DraftRevision, DraftError> {
         self.core
-            .read(access, id, revision)
+            .read(id, revision)
             .await
             .map_err(application_error)
     }
@@ -93,13 +92,12 @@ impl CollaborationDraftService for CollaborationDraftApplication {
     }
     async fn validate(
         &self,
-        access: DraftAccess,
         id: &str,
         revision: u64,
     ) -> Result<DraftValidation, DraftError> {
         let content = self
             .core
-            .read(access, id, revision)
+            .read(id, revision)
             .await
             .map_err(application_error)?;
         let validation = self

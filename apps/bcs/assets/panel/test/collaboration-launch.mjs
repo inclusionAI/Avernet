@@ -12,13 +12,13 @@ const { createRoot } = await import('react-dom/client');
 const { CollaborationDefinitionPreview } = createRequire(import.meta.url)('..');
 const fixture = JSON.parse(readFileSync(new URL('../../../tests/fixtures/collaboration-definition-draft/indentation-regression.json', import.meta.url)));
 const validation = JSON.parse(readFileSync(new URL('./fixtures/incident-loop-preview.json', import.meta.url)));
-const reference = { schemaVersion: 2, draftId: '750c52c6-60e2-4249-8ee5-1fb8cb9402ab', revision: 1, readToken: 'A'.repeat(43) };
+const reference = { schemaVersion: 2, draftId: '750c52c6-60e2-4249-8ee5-1fb8cb9402ab', revision: 1 };
 const revision = { ...fixture.revision, draft_id: reference.draftId };
 let mode = 'valid', calls = [], received = [];
 globalThis.fetch = async (url, options) => {
   calls.push(url);
   assert(url.includes('/drafts/'), 'preview must not query users, Bots or create groups');
-  assert.equal(options.headers['X-BCS-Draft-Read-Token'], reference.readToken);
+  assert.equal(options.headers, undefined, 'public reads must not add custom headers');
   if (mode === 'revoked') return new Response('{}', { status: 404 });
   if (url.endsWith('/validate')) return Response.json({ draft_id: reference.draftId, revision: 1,
     content_hash: revision.content_hash, validated_at: '2026-10-22T00:00:00Z', validator: 'test', validation });

@@ -1047,7 +1047,6 @@ name = "bcs-collaboration-draft"
 version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
- "base64 0.22.1",
  "bcs-app-collaboration-draft",
  "bcs-collaboration-runtime",
  "bcs-collaboration-store",
@@ -1061,10 +1060,8 @@ dependencies = [
  "chrono",
  "hex",
  "mysql_async",
- "rand 0.8.7",
  "serde_json",
  "sha2",
- "subtle",
  "tempfile",
  "tokio",
  "uuid",

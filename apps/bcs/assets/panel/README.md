@@ -61,7 +61,7 @@ bcs-cli collaboration draft create workflow.yaml --draft-id "$draft_id" --title 
 ```
 
 The CLI returns a short `message` using `bcsPanel.CollaborationDefinitionCard`.
-Schema 2 contains only `schemaVersion`, `draftId`, `revision`, and `readToken`.
+Schema 2 contains only `schemaVersion`, `draftId`, and `revision`.
 The card loads no YAML until opened. The existing host bridge and Agent resource
 binding supply `bcsPanel`; no frontend registration changes are required.
 The preview uses the host's `apiBaseUrl` or `baseUrl` (top-level props take
@@ -72,14 +72,19 @@ back to `/bcnproxy` when no host base is supplied. Requests append
 `/collaboration/drafts/...` or `/collaboration/definitions/validate` to a BCS root
 base; a base already ending in `/collaboration`, such as `/api/v1/collaboration`,
 uses `/drafts/...` or `/definitions/validate` without duplicating the namespace.
-Host configuration is separate from the strict four-field reference and must
+Host configuration is separate from the three-field reference and must
 expose the requested API; configuring a base does not mount service routes.
-The fixed revision is read with
-`X-BCS-Draft-Read-Token`, rejects redirects, and verifies UTF-8 length and SHA-256.
+The fixed revision is read without credentials or custom request headers. The
+preview rejects redirects and verifies UTF-8 length and SHA-256.
 Validation requests use the stored version, never a substituted source body.
 Validation outages preserve already verified source for copying. References are
-transferable and revocable; reopening/refreshing reauthenticates without a
-persistent cache. Tokens never enter tab IDs or URLs.
+transferable and revocable; reopening/refreshing reads the current availability
+without a persistent cache. Historical cards are normalized to the three fields;
+obsolete extra fields are ignored and never forwarded.
+Deployed CLI versions can keep emitting four-field cards: the native reference
+endpoint retains a fixed, non-secret `readToken` placeholder for their strict
+decoder. Panel 1.7.1 discards it and never sends the former read-token header.
+The BCS API and Panel/host need updating; upgrading the CLI is optional.
 
 Opening a card selects **协作预览**. **查看定义** shows the read-only original;
 **复制源码** appears beside **协作定义 YAML** only in that tab and copies the
@@ -101,7 +106,7 @@ read-only behavior. Opening a preview never creates groups, drafts, or Runs.
 
 Schema 2 previews offer a primary **发起协作** button in the upper right. An explicit click calls the trusted
 host's generic `onOpenCreateGroup({ draft: reference })`, where `reference` has
-exactly `{schemaVersion: 2, draftId, revision, readToken}`. Other panels can call
+exactly `{schemaVersion: 2, draftId, revision}`. Other panels can call
 `onOpenCreateGroup()` to guide ordinary group creation without a Draft. The event
 only opens configuration; it never submits. The BCS Panel owns preview and source
 copying, not a separate creation form or Human API client. Schema 1 stays read-only;
@@ -124,7 +129,7 @@ Bot clears members and bindings; searching or paging preserves selections.
 The same `CreateGroupParams` feed normal and Human creation. Submission snapshots
 the current form, rechecks the Human, and validates the **current edited YAML**
 for state-machine groups. It never reloads a Draft over edits. YAML bytes and
-bindings travel separately; read tokens are only used for the initial read.
+bindings travel separately; Draft reads need only the fixed ID and revision.
 
 **建群并开始协作** explicitly starts a state-machine group. The other group types
 use **创建协作群**. Unknown outcomes block repeat submission. Closing/reopening the

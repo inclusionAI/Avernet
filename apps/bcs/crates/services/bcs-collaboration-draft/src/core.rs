@@ -1,13 +1,10 @@
 use async_trait::async_trait;
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use bcs_service_api::{
     core::collaboration_draft::*,
     port::repo::collaboration_draft::{CollaborationDraftRepoPort, DraftRepoError},
 };
-use rand::{RngCore, rngs::OsRng};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
-use subtle::ConstantTimeEq;
 
 pub struct CollaborationDraftCore {
     repo: Arc<dyn CollaborationDraftRepoPort>,
@@ -71,10 +68,6 @@ impl CollaborationDraftCore {
         {
             return Err(DraftCoreError::Invalid);
         }
-        let mut nonce = [0u8; 32];
-        OsRng
-            .try_fill_bytes(&mut nonce)
-            .map_err(|_| DraftCoreError::Storage)?;
         Ok(StoredDraftRevision {
             content: DraftRevision {
                 draft_id: id.into(),
@@ -86,7 +79,6 @@ impl CollaborationDraftCore {
                 created_by: owner.into(),
                 created_at: chrono::Utc::now().to_rfc3339(),
             },
-            read_token: URL_SAFE_NO_PAD.encode(nonce),
             revoked: false,
         })
     }
@@ -173,38 +165,14 @@ impl CollaborationDraftCoreService for CollaborationDraftCore {
 
     async fn read(
         &self,
-        access: DraftAccess,
         id: &str,
         revision: u64,
     ) -> Result<DraftRevision, DraftCoreError> {
-        match access {
-            DraftAccess::Owner(owner) => {
-                if self.owned(&owner, id).await?.deleted {
-                    return Err(DraftCoreError::Unavailable);
-                }
-                Ok(self.stored(id, revision).await?.content)
-            }
-            DraftAccess::ReadToken(token) => {
-                // Uniform errors for malformed, missing, revoked and wrong-version references.
-                if valid_id(id).is_err() || valid_revision(revision).is_err() {
-                    return Err(DraftCoreError::Unavailable);
-                }
-                let bytes = URL_SAFE_NO_PAD
-                    .decode(&token)
-                    .map_err(|_| DraftCoreError::Unavailable)?;
-                if bytes.len() != 32 || URL_SAFE_NO_PAD.encode(&bytes) != token {
-                    return Err(DraftCoreError::Unavailable);
-                }
-                let r = self.stored(id, revision).await?;
-                if r.revoked {
-                    return Err(DraftCoreError::Unavailable);
-                }
-                if !bool::from(r.read_token.as_bytes().ct_eq(token.as_bytes())) {
-                    return Err(DraftCoreError::Unavailable);
-                }
-                Ok(r.content)
-            }
+        let r = self.stored(id, revision).await?;
+        if r.revoked {
+            return Err(DraftCoreError::Unavailable);
         }
+        Ok(r.content)
     }
 
     async fn reference(
@@ -224,7 +192,6 @@ impl CollaborationDraftCoreService for CollaborationDraftCore {
             schema_version: 2,
             draft_id: id.into(),
             revision,
-            read_token: r.read_token,
         })
     }
 

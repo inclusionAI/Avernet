@@ -91,7 +91,7 @@ export function useGroupCreation({ selectOriginator, initialDraft, open, query }
       if (!controller.signal.aborted) setInitialDefinition(source);
     }).catch(e => { if (!controller.signal.aborted) setSourceError((e as Error).message); });
     return () => controller.abort();
-  }, [initialDraft?.draftId, initialDraft?.revision, initialDraft?.readToken, definitionAttempt]);
+  }, [initialDraft?.draftId, initialDraft?.revision, definitionAttempt]);
   useEffect(() => () => operation.current?.dispose(), []);
   const mine = useGroupBotPage(user, null, selectOriginator && open, '', identityChanged);
   const candidates = useGroupBotPage(user, originator?.bot_id ?? null,
