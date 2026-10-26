@@ -188,16 +188,20 @@ async def test_resources_are_the_bots_file_rows_read_from_the_device() -> None:
         SimpleNamespace(path=None, is_directory=False),  # a URL resource
         SimpleNamespace(path="kb", is_directory=True),  # a folder row has no bytes
         SimpleNamespace(path="kb/notes.md", is_directory=False),
+        SimpleNamespace(path="data/old.md", is_directory=False),  # the deprecated upload, parent_path="data"
     ]
-    files = FakeResourceFiles({"faq.csv": b"q,a\n", "data/kb/notes.md": b"# n\n"})
+    files = FakeResourceFiles({"faq.csv": b"q,a\n", "data/kb/notes.md": b"# n\n", "data/data/old.md": b"o"})
     resources = await _reader(resource_services=FakeResourceServices(rows), resource_files=files).resources(BOT)
     # A row's path is workspace-relative (the Open API's); a row the deprecated upload wrote is relative to
     # ``workspace/data``, so a workspace-relative miss is looked for there and the path captured is the real one.
     assert [(r.path, r.files) for r in resources] == [
         ("faq.csv", (("faq.csv", b"q,a\n"),)),
         ("data/kb/notes.md", (("notes.md", b"# n\n"),)),
+        ("data/data/old.md", (("old.md", b"o"),)),
     ]
-    assert [c["path"] for c in files.calls] == ["faq.csv", "kb/notes.md", "data/kb/notes.md"]
+    assert [c["path"] for c in files.calls] == [
+        "faq.csv", "kb/notes.md", "data/kb/notes.md", "data/old.md", "data/data/old.md",
+    ]
     assert files.calls[0] == {
         "entity_type": "staff",
         "entity_id": "staff_u1",

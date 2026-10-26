@@ -634,14 +634,21 @@ class ConfigComposerInputCollector(ComposeInputCollector):
 
         Input — ``ResourceService.list_resources`` returns ``Resource`` rows of
         mixed types. For a FILE resource the useful fields are ``r.name`` and
-        ``r.path`` (a path *relative* to the bot's data dir, e.g. ``"docs/a.md"``);
-        ``r.source`` is just an origin label (``"upload"``), NOT a path. The bot's
-        ``svc.data_dir`` (from ``path_factory``) is the absolute root, e.g.
-        ``/aidesktop/aidesktop_prod/bolt_data/staff_u1/bot7/openclaw/workspace/data``.
+        ``r.path`` (a path *relative* to the bot's workspace root, e.g.
+        ``"docs/a.md"``, as the Open API records it and the apply engine writes
+        it); ``r.source`` is just an origin label (``"upload"``), NOT a path. The
+        bot's ``svc.data_dir`` (from ``path_factory``) is the absolute
+        ``workspace/data`` directory, e.g.
+        ``/aidesktop/aidesktop_prod/bolt_data/staff_u1/bot7/openclaw/workspace/data``,
+        so its parent is the workspace root.
 
-        Conversion — join ``data_dir`` + ``r.path`` into the absolute container
-        path (the exact location the device write/delete targets), and skip
-        non-file resources (URL/link/node have no ``r.path``). e.g. given::
+        Conversion — join the workspace root + ``r.path`` into the absolute
+        container path (the exact location the device write/delete targets); a
+        row the deprecated ``/api/resources/file`` upload wrote is relative to
+        ``workspace/data`` instead, so when no file sits at the workspace-relative
+        path and one sits under ``data/``, that one is taken (the rule capture
+        applies). Skip non-file resources (URL/link/node have no ``r.path``).
+        e.g. given::
 
             Resource(name="a.md", type=file, attributes={"path": "docs/a.md"}, source="upload")
             Resource(name="wiki", type=url,  attributes={"url": "https://..."})   # no path
@@ -649,13 +656,13 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         Output (only the file row survives)::
 
             [CollectedFile(name="a.md",
-                           source=".../staff_u1/bot7/openclaw/workspace/data/docs/a.md")]
+                           source=".../staff_u1/bot7/openclaw/workspace/docs/a.md")]
 
-        teclaw note: these ``ac_resource`` file rows live under the bot's
-        ``workspace/data`` subtree — the same tree the running teclaw container
-        owns and that the promotion gather lists under ``/workspace``. So for
-        teclaw this returns ``[]`` (no DB mirror); the files reach the next
-        version's artifact via the engine gather at promotion, not from here.
+        teclaw note: these ``ac_resource`` file rows live in the bot's workspace
+        — the tree the running teclaw container owns and that the promotion
+        gather lists under ``/workspace``. So for teclaw this returns ``[]`` (no
+        DB mirror); the files reach the next version's artifact via the engine
+        gather at promotion, not from here.
         """
         if req.engine_type == "teclaw":
             return self._teclaw_resources(req)
@@ -671,25 +678,29 @@ class ConfigComposerInputCollector(ComposeInputCollector):
             engine_type=req.engine_type,
             entity_type=req.entity_type,
         )
-        # Emit each file resource as a bot-data ref: the bot's resource ``data_dir``
-        # joined with the resource's stored relative ``path``, then made store-relative
-        # (``_bot_data_relpath``). This is the same location the device write/delete
-        # targets (``ResourceService`` delete joins ``data_dir + resource.path`` too),
-        # so the artifact ref key == the teclaw write key.
+        # Emit each file resource as a bot-data ref: the bot's workspace root joined
+        # with the row's workspace-relative ``path``, then made store-relative
+        # (``_bot_data_relpath``). This is the location the Open API and the apply
+        # engine write; a row the deprecated upload wrote is relative to
+        # ``workspace/data`` (``svc.data_dir``), so a workspace-relative path with no
+        # file behind it is looked for there, as capture does, and the ref names the
+        # file that exists.
         #
         # ``r.source`` is only an *origin label* ('upload'/'filesystem'/'manual',
         # set at resource_service.py) — never a resolvable path — so it must not be
         # used here. Non-file resources (URL/link/node) have no ``path`` and are not
         # device files, so they are skipped.
-        return [
-            CollectedFile(
-                name=r.name,
-                store="bot-data",
-                path=self._bot_data_relpath(str(svc.data_dir / r.path.lstrip("/"))),
-            )
-            for r in svc.list_resources(user_id=req.user_id)
-            if r.path
-        ]
+        workspace = svc.data_dir.parent
+        files: list[CollectedFile] = []
+        for r in svc.list_resources(user_id=req.user_id):
+            if not r.path:
+                continue
+            rel = r.path.lstrip("/")
+            host = workspace / rel
+            if not host.exists() and (svc.data_dir / rel).exists():
+                host = svc.data_dir / rel
+            files.append(CollectedFile(name=r.name, store="bot-data", path=self._bot_data_relpath(str(host))))
+        return files
 
     def _teclaw_resources(self, req: ComposeRequest) -> list[CollectedFile]:
         """teclaw: the platform's resources when it owns the compose (W8).

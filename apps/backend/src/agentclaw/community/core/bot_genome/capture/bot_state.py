@@ -157,11 +157,12 @@ class PlatformBotStateReader(BotStateReader):
             if not resource.path or resource.is_directory:
                 continue  # URL, link and node resources are not workspace files; a folder row has no bytes
             # A row's path is workspace-relative, as the Open API records it. A row the deprecated upload
-            # wrote is relative to ``workspace/data`` instead; when the workspace-relative read finds nothing,
-            # the file is looked for where that layout put it.
+            # wrote is relative to ``workspace/data`` instead, whatever the row's own first segment (a
+            # legacy ``data/notes.md`` sits at ``data/data/notes.md``); when the workspace-relative read
+            # finds nothing, the file is looked for where that layout put it.
             path = resource.path.lstrip("/")
             data = await self._read_resource(bot, path)
-            if data is None and not path.startswith(LEGACY_DATA_DIR):
+            if data is None:
                 legacy = LEGACY_DATA_DIR + path
                 data = await self._read_resource(bot, legacy)
                 if data is not None:
