@@ -19,10 +19,25 @@ function parseConfig(raw: string): HandbookConfig {
   let value: unknown;
   try { value = JSON.parse(raw); } catch { invalid(); }
   if (!record(value) || Object.keys(value).some(key => !["bot_teams", "team_routes"].includes(key))
-    || !Array.isArray(value.bot_teams) || !record(value.team_routes)) invalid();
+    || !record(value.team_routes)) invalid();
   const teamKey = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+  const botTeams: unknown[] = [];
+  if (Array.isArray(value.bot_teams)) botTeams.push(...value.bot_teams);
+  else {
+    if (!record(value.bot_teams)) invalid();
+    for (const [team, identities] of Object.entries(value.bot_teams)) {
+      if (!teamKey.test(team) || !Object.hasOwn(value.team_routes, team) || !Array.isArray(identities)) invalid();
+      for (const identity of identities) {
+        if (typeof identity !== "string") invalid();
+        const parts = identity.split("|");
+        if (parts.length !== 3) invalid();
+        const [env, bot_id, owner_id] = parts;
+        botTeams.push({ env, bot_id, owner_id, team_key: team });
+      }
+    }
+  }
   const targets = new Set<string>();
-  for (const item of value.bot_teams) {
+  for (const item of botTeams) {
     if (!record(item) || Object.keys(item).length !== 4
       || Object.keys(item).some(key => !["env", "bot_id", "owner_id", "team_key"].includes(key))
       || item.env !== "pre" && item.env !== "prod"
@@ -43,7 +58,7 @@ function parseConfig(raw: string): HandbookConfig {
         || new Set(paths).size !== paths.length) invalid();
     }
   }
-  return value as HandbookConfig;
+  return { bot_teams: botTeams as BotTeam[], team_routes: value.team_routes as HandbookConfig["team_routes"] };
 }
 
 /** Content is owned by the AIS Agent Skill; this catalog contains references only. */

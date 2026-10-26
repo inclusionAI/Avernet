@@ -38,11 +38,11 @@ it("freezes DB team routes through production assembly, SQLite persistence, boot
       chapters: ["common/mcp/handbook.md", "common/file-download/handbook.md"],
     });
     await config.create({ config_key: SESSION_RECOVERY_HANDBOOKS_KEY, config_json: JSON.stringify({
-      bot_teams: [{ env: "prod", bot_id: "default", owner_id: "owner", team_key: "team-a" }],
-      team_routes: { "team-a": { "TC.MCP": ["skill/handbook.md"] } },
+      bot_teams: { "97": ["prod|default|owner"] },
+      team_routes: { "97": { "TC.MCP": ["skill/handbook.md"] } },
     }) });
-    const task = await create("team"), expected = { teamKey: "team-a",
-      chapters: ["custom/team-a/skill/handbook.md", "common/mcp/handbook.md", "common/file-download/handbook.md"] };
+    const task = await create("team"), expected = { teamKey: "97",
+      chapters: ["custom/97/skill/handbook.md", "common/mcp/handbook.md", "common/file-download/handbook.md"] };
     expect((await recovery.agent!.bootstrap((await stored.find(task.task_id))!)).handbook).toMatchObject(expected);
     await config.update(SESSION_RECOVERY_HANDBOOKS_KEY, { config_json: JSON.stringify({ invalid: true }) });
     expect(await recovery.service.create({ ...request, event_id: "team", delivery_key: "team" }, actor)).toMatchObject({ task_id: task.task_id });
