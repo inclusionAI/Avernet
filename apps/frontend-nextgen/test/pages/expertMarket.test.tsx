@@ -99,9 +99,11 @@ test('cards keep filters in detail links and category/sort changes return to the
   expect(target.get('keyword')).toBe('PRD');
   expect(target.get('page_num')).toBe('2');
   expect(target.get('expert_id')).toBe('reviewer');
-  fireEvent.change(screen.getByRole('combobox', { name: '专家分类' }), { target: { value: '' } });
+  fireEvent.keyDown(screen.getByRole('combobox', { name: '专家分类' }), { key: 'Enter' });
+  fireEvent.click(screen.getByRole('option', { name: '全部分类' }));
   expect(new URL(mockPush.mock.calls[0][0], 'https://example.test').searchParams.get('page_num')).toBe('1');
-  fireEvent.change(screen.getByRole('combobox', { name: '专家排序' }), { target: { value: 'newest' } });
+  fireEvent.keyDown(screen.getByRole('combobox', { name: '专家排序' }), { key: 'Enter' });
+  fireEvent.click(screen.getByRole('option', { name: '最新' }));
   const sorted = new URL(mockPush.mock.calls[1][0], 'https://example.test').searchParams;
   expect(sorted.get('page_num')).toBe('1');
   expect(sorted.get('sort')).toBe('newest');

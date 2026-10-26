@@ -1,6 +1,7 @@
 import { SquareNavigation } from '@/components/CollaborationSquare/SquareNavigation';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { useExpertCatalog } from '@/hooks/useExpertCatalog';
 import { useExpertCategories } from '@/hooks/useExpertCategories';
 import type { ExpertQuery } from '@/domain/expertMarket';
@@ -82,16 +83,19 @@ export default function ExpertMarketPage() {
                 onCompositionStart={() => setComposing(true)}
                 onCompositionEnd={(event) => { setKeyword(event.currentTarget.value); setComposing(false); }}
               />
-              <select aria-label="专家分类" className={SELECT_CLASS} value={query.category}
-                onChange={(event) => changeQuery({ category: event.target.value, page_num: '1' })}>
-                <option value="">全部分类</option>
-                {query.category && !categories.includes(query.category) && <option value={query.category}>{query.category}</option>}
-                {categories.map((category) => <option key={category} value={category}>{category}</option>)}
-              </select>
-              <select aria-label="专家排序" className={SELECT_CLASS} value={query.sort}
-                onChange={(event) => changeQuery({ sort: event.target.value, page_num: '1' })}>
-                <option value="hot">热门</option><option value="newest">最新</option>
-              </select>
+              <Select value={query.category ? `category:${query.category}` : 'all'}
+                onValueChange={(value) => changeQuery({ category: value === 'all' ? '' : value.slice('category:'.length), page_num: '1' })}>
+                <SelectTrigger aria-label="专家分类" className={SELECT_CLASS}><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部分类</SelectItem>
+                  {query.category && !categories.includes(query.category) && <SelectItem value={`category:${query.category}`}>{query.category}</SelectItem>}
+                  {categories.map((category) => <SelectItem key={category} value={`category:${category}`}>{category}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={query.sort} onValueChange={(value) => changeQuery({ sort: value, page_num: '1' })}>
+                <SelectTrigger aria-label="专家排序" className={SELECT_CLASS}><SelectValue /></SelectTrigger>
+                <SelectContent><SelectItem value="hot">热门</SelectItem><SelectItem value="newest">最新</SelectItem></SelectContent>
+              </Select>
             </div>
             {categoryError && <div role="alert" className="text-sm text-destructive">分类加载失败：{categoryError}
               <Button className="ml-2" variant="outline" onClick={reloadCategories}>重试分类</Button>
