@@ -28,7 +28,7 @@ class HttpReranker(Reranker):
     环境变量配置：
     - RERANKER_BASE_URL: API 基础 URL (required)
     - RERANKER_API_KEY: API 密钥
-    - RERANKER_MODEL: 模型名称 (默认: bge-reranker-v2-m3)
+    - RERANKER_MODEL: 模型名称 (默认: Qwen3-Reranker-4B)
 
     支持模型：
     - bge-reranker-v2-m3: 原始 query 和 document 文本
@@ -45,7 +45,7 @@ class HttpReranker(Reranker):
     SUPPORTED_MODELS = ["bge-reranker-v2-m3", "Qwen3-Reranker-4B"]
 
     # 默认模型
-    DEFAULT_MODEL = "bge-reranker-v2-m3"
+    DEFAULT_MODEL = "Qwen3-Reranker-4B"
 
     def __init__(self, model: str | None = None):
         self.base_url = os.getenv("RERANKER_BASE_URL", os.getenv(

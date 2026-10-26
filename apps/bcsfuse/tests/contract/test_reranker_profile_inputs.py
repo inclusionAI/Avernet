@@ -247,3 +247,67 @@ def test_valid_profile_keeps_failure_descriptions_and_excludes_score_and_identit
     item.fragments[-1].content = "名称：UCT20值班助手\n描述：排查无法查询日志问题\n目标：定位事件策略日志为空\n无配置，无法提供能力。"
     text = FragmentRerankerService()._extract_description(item)
     assert text == "名称：UCT20值班助手\n描述：排查无法查询日志问题\n目标：定位事件策略日志为空"
+
+
+def test_http_default_uses_qwen_without_model_configuration(monkeypatch, wire):
+    monkeypatch.delenv("RERANKER_MODEL", raising=False)
+    result = HttpReranker().rerank(QUERY, [{"id": "bot:1", "text": "名称: UCT20值班助手"}], 1)
+    assert result[0].score == 0.8
+    assert wire[0]["model"] == "Qwen3-Reranker-4B"
+    assert wire[0]["query"].startswith(PREFIX)
+    assert wire[0]["documents"] == ["名称: UCT20值班助手" + SUFFIX]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("endpoint", ["recommend", "profiles"])
+@pytest.mark.parametrize("configured,requested,enabled,expected", [
+    (None, None, True, "Qwen3-Reranker-4B"),
+    ("bge-reranker-v2-m3", None, True, "bge-reranker-v2-m3"),
+    ("Qwen3-Reranker-4B", "bge-reranker-v2-m3", True, "bge-reranker-v2-m3"),
+    ("bge-reranker-v2-m3", "Qwen3-Reranker-4B", True, "Qwen3-Reranker-4B"),
+    (None, None, False, None),
+])
+async def test_api_model_default_preserves_overrides_and_disable(
+    monkeypatch, endpoint, configured, requested, enabled, expected,
+):
+    from types import SimpleNamespace
+    from src.domain.models.bot_recommendation import BotRecommendationRequest
+    from src.domain.models.candidate_recommendation import CandidateRecommendationResponse
+    from src.domain.models.retrieval_mode import RetrievalMode
+    from src.interfaces.api import profile_routes, recommend_routes
+
+    if configured is None:
+        monkeypatch.delenv("RERANKER_MODEL", raising=False)
+    else:
+        monkeypatch.setenv("RERANKER_MODEL", configured)
+    calls = []
+
+    class Service:
+        _vector_match_service = object()
+        _embedding_generator = object()
+
+        def recommend(self, **kwargs):
+            calls.append(kwargs["runtime_config"])
+            return CandidateRecommendationResponse(
+                question=kwargs["question"], mode=RetrievalMode.EXPERT_DIAGNOSIS,
+                recommendations=[], total_candidates=0, selected_candidates=0,
+            )
+
+        def match(self, **kwargs):
+            calls.append(kwargs["runtime_config"])
+            return []
+
+    if endpoint == "recommend":
+        monkeypatch.setattr(recommend_routes, "get_candidate_recommendation_service", Service)
+        response = await recommend_routes.recommend_bots(BotRecommendationRequest(
+            question=QUERY, enable_rerank=enabled, reranker_model=requested,
+        ))
+        assert response.metadata["reranker_model"] == expected
+    else:
+        monkeypatch.setattr(profile_routes, "_get_vector_match_service", Service)
+        monkeypatch.setattr(profile_routes, "_get_embedding_generator", lambda: SimpleNamespace(embed=lambda _: [1.0]))
+        response = await profile_routes.search_profiles(profile_routes.SearchRequest(
+            query=QUERY, enable_rerank=enabled, reranker_model=requested,
+        ))
+        assert response.config_applied["reranker_model"] == expected
+    assert calls[0]["reranker_model"] == expected

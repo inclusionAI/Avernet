@@ -162,7 +162,7 @@ export EMBEDDING_DIMENSION="1024"
 # Reranker Provider (optional)
 export RERANKER_BASE_URL="http://your-reranker-service:19998"
 export RERANKER_API_KEY="your-reranker-key-here"
-export RERANKER_MODEL="rerank-1"
+export RERANKER_MODEL="Qwen3-Reranker-4B"
 
 # LLM Provider (optional)
 export LLM_BASE_URL="http://your-llm-service:19998"
@@ -173,6 +173,11 @@ export LLM_REASONING_MODEL="claude-3-5-sonnet-20241022"
 ```
 
 ### Reranker Inputs
+
+When reranking is enabled, the built-in default model is `Qwen3-Reranker-4B`.
+An explicit request model takes precedence over `RERANKER_MODEL`, which takes
+precedence over the built-in default. BGE remains available through either
+override. Disabling reranking still bypasses the model.
 
 The reranker receives the Bot name and valid profile text. Default capabilities,
 skill sets, generated worker IDs, retrieval scores, and empty configuration

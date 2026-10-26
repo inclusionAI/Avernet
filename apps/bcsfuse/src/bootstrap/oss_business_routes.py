@@ -1459,7 +1459,7 @@ def include_oss_business_routes(app) -> None:
 
             # --- Build runtime_config (aligned with internal) ---
             runtime_config = {}
-            reranker_model = os.getenv("RERANKER_MODEL", "bge-reranker-v2-m3")
+            reranker_model = os.getenv("RERANKER_MODEL", "Qwen3-Reranker-4B")
             if reranker_model:
                 runtime_config["reranker_model"] = reranker_model
 

@@ -98,7 +98,7 @@ def _enrich_trust_level(response: BotRecommendationResponse) -> None:
 **默认行为**:
 - `enable_rerank`: 默认为 `true`（开启精排）
 - `expand_factor`: 默认为 `3`
-- `reranker_model`: 默认使用环境变量 `RERANKER_MODEL` 或 `bge-reranker-v2-m3`
+- `reranker_model`: 默认使用环境变量 `RERANKER_MODEL` 或 `Qwen3-Reranker-4B`
 
 **示例请求**:
 ```json
@@ -260,7 +260,7 @@ async def recommend_bots(request: BotRecommendationRequest) -> BotRecommendation
     runtime_config["expand_factor"] = request.expand_factor
 
     # 处理 Reranker 配置（默认开启）
-    default_reranker_model = os.getenv("RERANKER_MODEL", "bge-reranker-v2-m3")
+    default_reranker_model = os.getenv("RERANKER_MODEL", "Qwen3-Reranker-4B")
 
     if enable_rerank:
         runtime_config["reranker_model"] = request.reranker_model or default_reranker_model
