@@ -30,7 +30,7 @@ RUN useradd --create-home --shell /bin/bash appuser
 WORKDIR /app
 
 # Copy dependency files first for better layer caching
-COPY middleware/python/avernet-search /opt/avernet-search
+COPY apps/bcsfuse/packages/avernet-search /opt/avernet-search
 COPY apps/bcsfuse/pyproject.toml apps/bcsfuse/README.md ./
 
 # Install dependencies

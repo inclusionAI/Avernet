@@ -1,7 +1,9 @@
 # Shared search: first extraction
 
-TC and Agent Search are separate applications using one public package:
-`middleware/python/avernet-search`. OCB supplies internal providers and deployment
+The BCSFuse module owns the shared search package at
+`apps/bcsfuse/packages/avernet-search`. TC and Agent Search install it as an
+independent distribution; its location does not introduce a dependency on TC
+business code. OCB supplies internal providers and deployment
 composition. The core has no dependency on TC, Agent Search, OCB, HTTP, databases,
 models or environment variables.
 

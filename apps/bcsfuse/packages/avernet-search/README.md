@@ -1,11 +1,12 @@
 # Avernet Search
 
-Shared in-process search contracts and ranking. TC and Agent Search own their
+The BCSFuse module owns this independently installable public package.
+It provides shared in-process search contracts and ranking. TC and Agent Search own their
 business rules; this package does not import either application. HTTP support is
 an optional extra. No database, model, environment or background task is opened
 on import.
 
-Install from this repository: `uv pip install -e 'middleware/python/avernet-search[http,test]'`.
+Install from this repository: `uv pip install -e 'apps/bcsfuse/packages/avernet-search[http,test]'`.
 Run this package's tests from its directory with `python -m pytest tests`.
 Applications must install this package from the **same source revision** until
 there is a published distribution; do not resolve an unpinned remote branch.

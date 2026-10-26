@@ -17,7 +17,7 @@ test = ["pytest>=7", "httpx>=0.24.0"]
 where = ["src"]
 
 [tool.uv.sources]
-avernet-search = { path = "../../middleware/python/avernet-search", editable = true }
+avernet-search = { path = "../bcsfuse/packages/avernet-search", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
