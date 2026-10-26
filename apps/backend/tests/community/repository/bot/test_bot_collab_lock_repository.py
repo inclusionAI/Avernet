@@ -183,6 +183,28 @@ def test_steal_requires_real_transaction_instead_of_autocommit(monkeypatch):
     finally:
         engine.dispose()
 
+
+@pytest.mark.parametrize("backend", ["postgresql", "mysql"])
+def test_steal_uses_supported_database_dialect(backend, monkeypatch):
+    from unittest.mock import MagicMock
+    from sqlalchemy.dialects import mysql, postgresql
+
+    monkeypatch.setenv("SERVER_ENV", "dev")
+    dialect = postgresql.dialect() if backend == "postgresql" else mysql.dialect()
+    session = MagicMock()
+    session.get_bind.return_value.dialect = dialect
+    database = MagicMock()
+    database.transactional_orm_session.return_value.__enter__.return_value = session
+
+    BotCollabLockRepository(database).steal("bot:owner", "new-holder")
+
+    statement = session.execute.call_args.args[0]
+    compiled = statement.compile(dialect=dialect)
+    clause = "ON CONFLICT (lock_key, env) DO UPDATE SET" if backend == "postgresql" else "ON DUPLICATE KEY UPDATE"
+    assert clause in str(compiled)
+    assert {"bot:owner", "new-holder", "dev"} <= set(compiled.params.values())
+    database.orm_session.assert_not_called()
+
 def test_get_by_key_returns_lock_when_exists(repo, monkeypatch):
     """Test that get_by_key returns lock record."""
     monkeypatch.setenv("SERVER_ENV", "dev")

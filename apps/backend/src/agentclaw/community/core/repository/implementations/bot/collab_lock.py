@@ -92,6 +92,13 @@ class BotCollabLockRepository(
                 statement = statement.on_conflict_do_update(
                     index_elements=["lock_key", "env"], set_=updates
                 )
+            elif db.get_bind().dialect.name == "postgresql":
+                from sqlalchemy.dialects.postgresql import insert
+
+                statement = insert(self._Lock).values(**values)
+                statement = statement.on_conflict_do_update(
+                    index_elements=["lock_key", "env"], set_=updates
+                )
             else:
                 from sqlalchemy.dialects.mysql import insert
 
