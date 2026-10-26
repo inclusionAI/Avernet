@@ -47,7 +47,7 @@ export function useBotSessionFilesFeature(
   const sessionId = session?.sessionId ?? null;
   const ownerId = bot?.ownerId;
 
-  const files = useBotSessionFiles(botId, sessionId, userId, ownerId);
+  const files = useBotSessionFiles(botId, sessionId, userId, ownerId, bot?.isFriendBot ? userId ?? undefined : undefined);
   const upload = useBotSessionFileUpload(botId, sessionId, userId, ownerId);
   const skillsState = useBotSkills(bot, userId);
   // 「通用协作能力」能力集装配：好友 Bot / 不可会话 Bot 为 null（文案区随之隐藏）。

@@ -20,6 +20,8 @@ export interface TaskPanelNav {
   selectedNodeId: string | null;
   /** 下钻栈:空 = Level1;顶 = 当前 Level2 节点 id */
   drillStack: string[];
+  /** 选中任务根节点并恢复宿主当前会话，不打开任务联动会话。 */
+  selectRootNode: (nodeId: string) => void;
   selectNode: (nodeId: string, target: ResolvedSessionTarget | null) => void;
   drillInto: (nodeId: string, target: ResolvedSessionTarget | null) => void;
   backToOverview: () => void;
@@ -31,11 +33,15 @@ const emptyRecord: TaskNavRecord = { drillStack: [], selectedNodeId: null };
 
 /**
  * nav 未注入时的本地降级(直接以 assets 组件独立使用/单测场景)。
- * 语义与 taskSidePanelStore 一致:select 记录选中;drill 去重 push 封顶;返回清栈不清选中。
+ * 语义与 taskSidePanelStore 一致:root/select 记录选中;drill 去重 push 封顶;返回清栈不清选中。
  * 本地降级无宿主消费会话跳转,target 参数仅保形不落地。
  */
 export function useLocalTaskPanelNav(): TaskPanelNav {
   const [record, setRecord] = useState<TaskNavRecord>(emptyRecord);
+
+  const selectRootNode = useCallback((nodeId: string) => {
+    setRecord((r) => ({ ...r, selectedNodeId: nodeId }));
+  }, []);
 
   const selectNode = useCallback((nodeId: string, target: ResolvedSessionTarget | null) => {
     void target; // 本地降级无宿主消费跳转,target 仅保形
@@ -58,5 +64,12 @@ export function useLocalTaskPanelNav(): TaskPanelNav {
     setRecord((r) => ({ ...r, drillStack: [] }));
   }, []);
 
-  return { selectedNodeId: record.selectedNodeId, drillStack: record.drillStack, selectNode, drillInto, backToOverview };
+  return {
+    selectedNodeId: record.selectedNodeId,
+    drillStack: record.drillStack,
+    selectRootNode,
+    selectNode,
+    drillInto,
+    backToOverview,
+  };
 }

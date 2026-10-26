@@ -11,6 +11,7 @@ Mock 策略:
   此处 mock SkillSetRepository + BotRepository。
 """
 from __future__ import annotations
+from tests.community.bot_address_fakes import support_legacy_locator
 
 from unittest.mock import MagicMock
 
@@ -86,6 +87,8 @@ def _bind_skill_deps(app):
 
     # BotRepository 由 _get_path_params 调用，mock 以避免数据库访问
     mock_bot_repo = MagicMock(spec=BotRepository)
+    support_legacy_locator(mock_bot_repo)
+    mock_bot_repo.get_by_id_and_entity.side_effect = lambda bid, eid: mock_bot_repo.get_by_id_and_owner(bid, eid)
     mock_bot_repo.get_by_id_and_owner.return_value = None
     bind_mock_service(BotRepository, mock_bot_repo, app)
 
@@ -118,6 +121,8 @@ def _bind_skillset_active_deps(app):
 
     # BotRepository 由 _get_path_params 调用
     mock_bot_repo = MagicMock(spec=BotRepository)
+    support_legacy_locator(mock_bot_repo)
+    mock_bot_repo.get_by_id_and_entity.side_effect = lambda bid, eid: mock_bot_repo.get_by_id_and_owner(bid, eid)
     mock_bot_repo.get_by_id_and_owner.return_value = None
     bind_mock_service(BotRepository, mock_bot_repo, app)
     control = MagicMock()

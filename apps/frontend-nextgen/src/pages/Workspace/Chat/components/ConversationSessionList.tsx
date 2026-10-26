@@ -3,6 +3,9 @@ import { ListErrorState } from '../../components/ListErrorState';
 import type { ConversationSessionListActions } from '../hooks/useConversationSessionActions';
 import { ConversationLoadMore } from './ConversationLoadMore';
 import { ConversationSessionRow } from './ConversationSessionRow';
+import { Points } from '@/tracking/points';
+import { TrackExpo } from '@/tracking/TrackExpo';
+import { Tracert } from '@/utils/tracert';
 import { ConversationSessionRowsSkeleton } from './ConversationSkeletons';
 
 /** 我发起 / 好友 Bot 的交互式 Session 列表(选中 / 加载更多均来自 Hook 模型)。 */
@@ -31,6 +34,7 @@ export function ConversationSessionList(props: {
     // 指向行尾「+」入口(列表装配层不增建会话回调,入口即引导,不造死胡同 CTA)。
     return (
       <div className="mx-4 my-2 flex flex-col items-center gap-1 rounded-lg bg-muted/40 px-3 py-3 text-center">
+        <TrackExpo point={Points.workspaceChat.emptyGuideExpo} />
         <p className="text-xs font-normal text-content-soft">还没有会话</p>
         <p className="max-w-[180px] text-[11px] font-normal leading-4 text-content-hint">
           点击 Bot 行尾的「＋」按钮，创建第一个会话
@@ -46,7 +50,10 @@ export function ConversationSessionList(props: {
             key={session.sessionId}
             session={session}
             selected={selectedSessionId === session.sessionId}
-            onSelect={() => onSelectSession(session.sessionId)}
+            onSelect={() => {
+              Tracert.click(Points.workspaceChat.switchSession, { bot_id: session.botId });
+              onSelectSession(session.sessionId);
+            }}
             onToggleFavorite={onToggleFavorite ? () => onToggleFavorite(session.sessionId) : undefined}
             favoritePending={isFavoritePending(session.sessionId)}
             actions={

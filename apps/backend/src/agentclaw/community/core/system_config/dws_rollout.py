@@ -4,6 +4,7 @@ from typing import Annotated, Literal
 import unicodedata
 
 from pydantic import BaseModel, ConfigDict, Field
+from agentclaw.community.plugin_api.dws_identity import DwsRolloutIdentity
 
 CATEGORY = "dws_hosting"
 KEY = "rollout"
@@ -17,16 +18,20 @@ class DwsRollout(BaseModel):
         Field(max_length=10000),
     ] = Field(default_factory=list)
 
-    def allows(self, actor: str) -> bool:
-        return bool(actor) and (
-            self.mode == "all" or (self.mode == "allowlist" and actor in self.staff_ids)
+    def allows(self, actor: str, identity: DwsRolloutIdentity = DwsRolloutIdentity()) -> bool:
+        key = identity.key(actor)
+        return bool(key) and (
+            self.mode == "all" or (
+                self.mode == "allowlist"
+                and any(identity.key(staff) == key for staff in self.staff_ids)
+            )
         )
 
 
-def is_allowed(store, actor: str, env: str) -> bool:
+def is_allowed(store, actor: str, env: str, identity: DwsRolloutIdentity = DwsRolloutIdentity()) -> bool:
     try:
         value = store.get_config(category=CATEGORY, config_key=KEY, env=env)
-        return DwsRollout.model_validate(value).allows(actor)
+        return DwsRollout.model_validate(value).allows(actor, identity)
     except Exception:
         return False
 

@@ -22,6 +22,8 @@ import type { ConversationTarget } from '@/services/workspace/workspaceModel';
 import type { ChatBridge, PanelAction, PanelHandle, ResourceReference } from '@tc-chat/core';
 import type { SenderRef, SubmitContext } from '@tc-chat/ui/es/Sender';
 import { useCallback, useEffect, useMemo, useState, type RefObject } from 'react';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 
 /** 交互式主舞台依赖的既有会话操作(来自 useBotSessions,按结构最小面收窄)。 */
 export interface ConversationInteractiveSessionOperations {
@@ -161,6 +163,7 @@ export function useConversationInteractiveChat(
       await sessions.renameSessionOnFirstMessage(selectedChatBot, selectedSession, content);
     },
     sendMessage: (content, context) => {
+      Tracert.click(Points.workspaceChat.sendMessage, { bot_id: selectedChatBot?.botId });
       const refs = context?.fileRefs;
       if (refs && refs.length > 0) {
         botChat.send(context?.resolvedContent ?? content, {

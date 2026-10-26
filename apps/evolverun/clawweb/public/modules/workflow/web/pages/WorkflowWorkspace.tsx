@@ -83,8 +83,7 @@ export default function WorkflowWorkspace() {
     const next = new URLSearchParams(searchParams)
     next.set('workflowId', id)
     if (id !== selectedWorkflow?.workflow_id) {
-      next.delete('baseline')
-      next.delete('current')
+      for (const key of ['baseline', 'current', 'repairTaskId', 'runId', 'analysisId', 'issueSignature']) next.delete(key)
     }
     if (activeView === 'dashboard') {
       next.set('tab', 'evolution')

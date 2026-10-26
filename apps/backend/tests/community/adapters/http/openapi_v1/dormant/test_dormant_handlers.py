@@ -280,7 +280,7 @@ def test_application_grant_is_checked_against_exact_owner(
                 app_name="partner",
                 bot_id="b1",
                 user_id="u1",
-                owner_id="u1",
+                owner_id="u1", current_owner_id="u1",
                 avernet_tenant="teamclaw",
                 env="test",
                 gmt_create=datetime(2026, 9, 11),

@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DIAGNOSIS_VERSION, DIAGNOSIS_V3_VERSION, type DiagnosisEvent } from "../contracts.js";
+import { DIAGNOSIS_VERSION, DIAGNOSIS_V3_VERSION, DIAGNOSIS_V4_VERSION, type DiagnosisEvent } from "../contracts.js";
 import { createMonitoringRecoveryTrigger, SESSION_RECOVERY_ALLOWLIST_KEY } from "../session-recovery-trigger.js";
 import { SessionRecoveryError } from "../../repair/session-recovery/errors.js";
 
 import { runtimeIdentity } from "./runtime-identity-fixture.js";
 const bot = { bot_id: "default", entity_id: "001234", env: "prod" };
 const event: DiagnosisEvent = {
-  schemaVersion: DIAGNOSIS_VERSION, eventId: "event-1", diagnosisId: "event-1", botId: "default",
+  schemaVersion: DIAGNOSIS_V4_VERSION, runtimeIdentity: { ...runtimeIdentity, OWNER_ID: bot.entity_id }, eventId: "event-1", diagnosisId: "event-1", botId: "default",
   entityId: "001234", env: "prod", engine: "OC", sessionKey: "agent:main:session:original",
   sessionId: "physical-session", traceId: null, occurredAt: null, diagnosedAt: "2026-10-15T00:00:00.000Z",
   decision: "ALERT", tcFaultLabel: "TC.MCP.PERMISSION", confidence: 0.2,
@@ -24,11 +24,13 @@ beforeEach(() => { vi.restoreAllMocks(); });
 describe("monitoring automatic recovery", () => {
   it.each(["OC", "TE"] as const)("maps %s diagnostics to the existing approval flow without inferring a location", async engine => {
     const { config, service, trigger } = setup();
-    await trigger.trigger({ ...event, engine, humanIntervention: true });
+    await trigger.trigger({ ...event, engine });
     expect(config.findByKey).toHaveBeenCalledWith(SESSION_RECOVERY_ALLOWLIST_KEY);
     const [request, actor] = service.create.mock.calls[0];
     expect(request).toEqual({
-      event_id: event.eventId, tc_fault_label: event.tcFaultLabel, target: { ...bot, engine },
+      event_id: event.eventId, tc_fault_label: event.tcFaultLabel, target: { ...bot, engine, ...(engine === "OC" ? { runtime_identity: {
+        stage: "online", deviceUuid: runtimeIdentity.CLIENT_ID, version: "V16",
+      } } : {}) },
       session_key: event.sessionKey, session_id: event.sessionId, delivery_key: expect.any(String),
       diagnosis: `业务诊断：${event.businessDiagnosis}\n系统诊断：${event.systemDiagnosis}`,
     });
@@ -39,7 +41,8 @@ describe("monitoring automatic recovery", () => {
 
   it.each([
     { decision: "PASS" }, { decision: "UNRESOLVED" },
-    { handlerName: "COMPLETED" }, { handlerName: null },
+    { handlerName: "COMPLETED" }, { handlerName: null }, { humanIntervention: true },
+    { tcFaultLabel: null }, { schemaVersion: DIAGNOSIS_VERSION }, { schemaVersion: DIAGNOSIS_V3_VERSION },
   ])("does not trigger for an ineligible diagnostic %j", async patch => {
     const { config, service, trigger } = setup();
     await trigger.trigger({ ...event, ...patch } as DiagnosisEvent);
@@ -101,7 +104,7 @@ describe("monitoring automatic recovery", () => {
     expect(warning).toHaveBeenCalledWith("[monitoring] recovery skipped", expect.objectContaining({ eventId: event.eventId, reason: "invalid_recovery_input" }));
   });
 
-  it("preserves legacy diagnostics without a physical Session ID", async () => {
+  it("preserves v4 diagnostics without a physical Session ID", async () => {
     const { service, trigger } = setup();
     await trigger.trigger({ ...event, sessionId: null });
     expect(service.create.mock.calls[0][0]).not.toHaveProperty("session_id");
@@ -116,10 +119,10 @@ describe("monitoring automatic recovery", () => {
 });
 
 
-it("uses the real recovery parser to normalize v3 locators without forwarding credentials", async () => {
+it("uses the real recovery parser to normalize v4 locators without forwarding credentials", async () => {
   const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
   const { service, trigger } = setup();
-  await trigger.trigger({ ...event, schemaVersion: DIAGNOSIS_V3_VERSION,
+  await trigger.trigger({ ...event, schemaVersion: DIAGNOSIS_V4_VERSION,
     runtimeIdentity: { ...runtimeIdentity, OWNER_ID: event.entityId } });
   expect(service.create).toHaveBeenCalledTimes(1);
   const [request, actor] = service.create.mock.calls[0];
@@ -132,23 +135,36 @@ it("uses the real recovery parser to normalize v3 locators without forwarding cr
   expect(warning).not.toHaveBeenCalled();
 });
 
-it("does not downgrade missing or mismatched v3 identity to old recovery", async () => {
+it("does not downgrade missing or mismatched v4 identity to old recovery", async () => {
   const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
   const { service, trigger } = setup();
   for (const identity of [null, { ...runtimeIdentity, BOT_ID: "wrong" }, { ...runtimeIdentity, OWNER_ID: "" }]) {
-    await trigger.trigger({ ...event, schemaVersion: DIAGNOSIS_V3_VERSION, runtimeIdentity: identity });
+    await trigger.trigger({ ...event, schemaVersion: DIAGNOSIS_V4_VERSION, runtimeIdentity: identity });
   }
   expect(service.create).not.toHaveBeenCalled();
   expect(warning).toHaveBeenCalledTimes(3);
 });
 
-it.each([{}, { STAGE: "" }])("creates recovery for a v3 personal Bot without a service stage: %j", async fields => {
+it.each([{}, { STAGE: "" }])("creates recovery for a v4 personal Bot without a service stage: %j", async fields => {
   const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
   const { service, trigger } = setup();
   const { STAGE: _stage, ...identity } = runtimeIdentity;
-  await trigger.trigger({ ...event, schemaVersion: DIAGNOSIS_V3_VERSION,
+  await trigger.trigger({ ...event, schemaVersion: DIAGNOSIS_V4_VERSION,
     runtimeIdentity: { ...identity, BOT_TYPE: "personal", OWNER_ID: event.entityId, ...fields } });
   expect(service.create).toHaveBeenCalledTimes(1);
   expect(service.create.mock.calls[0][0].target).toEqual({ ...bot, engine: "OC" });
   expect(warning).not.toHaveBeenCalled();
+});
+
+// Cron/session interpretation belongs to the unmodified recovery parser.
+it("preserves the physical Cron session ID and defers inconsistent locators to recovery validation", async () => {
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  const { service, trigger } = setup();
+  const cron = { ...event, sessionKey: "agent:main:cron:daily-job:run:cron-run-1", sessionId: "cron-run-1" };
+  await trigger.trigger(cron);
+  expect(service.create).toHaveBeenCalledTimes(1);
+  expect(service.create.mock.calls[0][0]).toMatchObject({ session_key: cron.sessionKey, session_id: cron.sessionId });
+  await trigger.trigger({ ...cron, sessionId: "different-run" });
+  expect(service.create).toHaveBeenCalledTimes(1);
+  expect(warning).toHaveBeenCalledWith("[monitoring] recovery skipped", expect.objectContaining({ reason: "invalid_recovery_input" }));
 });

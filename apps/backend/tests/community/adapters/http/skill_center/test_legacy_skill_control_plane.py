@@ -43,6 +43,13 @@ from agentclaw.community.core.skill_center.skill_set_batch import (
 
 
 class _Bots:
+    def list_matches_by_legacy_locator(self, bot_id, locator):
+        row = self.get_by_id_and_owner(bot_id, locator)
+        return [dict(id=1, bot_id=bot_id, owner_id=locator, entity_id=locator, **row)] if row else []
+
+    def get_by_id_and_entity(self, bot_id, entity_id):
+        return self.get_by_id_and_owner(bot_id, entity_id)
+
     def get_by_id_and_owner(self, bot_id: str, owner_id: str):
         assert (bot_id, owner_id) == ("bot", "owner")
         return {"active_engine": "openclaw", "bot_type": "personal"}
@@ -76,6 +83,13 @@ class _Catalog:
 
 
 class _AddressedBots:
+    def list_matches_by_legacy_locator(self, bot_id, locator):
+        row = self.get_by_id_and_owner(bot_id, locator)
+        return [dict(id=1, bot_id=bot_id, owner_id=locator, entity_id=locator, **row)] if row else []
+
+    def get_by_id_and_entity(self, bot_id, entity_id):
+        return self.get_by_id_and_owner(bot_id, entity_id)
+
     def get_by_id_and_owner(self, bot_id: str, owner_id: str):
         assert (bot_id, owner_id) == ("persisted-bot", "owner")
         return {

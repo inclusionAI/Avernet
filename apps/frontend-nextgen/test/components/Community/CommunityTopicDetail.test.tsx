@@ -2,7 +2,7 @@
 import { CommunityTopicDetail } from '@/components/Community/CommunityTopicDetail';
 import type { CommunityReply, CommunityTopic } from '@/domain/community/types';
 import '@testing-library/jest-dom';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 const topic: CommunityTopic = {
@@ -45,13 +45,6 @@ function renderDetail(overrides: Partial<DetailProps> = {}) {
     replyPageCount: 1,
     replyPageSize: 20,
     onGoToReplyPage: jest.fn(),
-    replyTargetPostId: null,
-    replyPublishing: false,
-    hasVoted: false,
-    onStartReply: jest.fn(),
-    onCancelReply: jest.fn(),
-    onSubmitReply: jest.fn(async () => true),
-    onSubmitVote: jest.fn(async () => true),
     ...overrides,
   };
   return { props, ...render(<CommunityTopicDetail {...props} />) };
@@ -72,9 +65,19 @@ describe('CommunityTopicDetail', () => {
     expect(props.onBack).toHaveBeenCalledTimes(1);
   });
 
-  test('投票主题只提供结构化投票入口，不展示讨论回帖框', async () => {
-    const user = userEvent.setup();
-    const { props } = renderDetail({
+  test('开放讨论主题作为只读流展示，不提供 Human 回复入口', () => {
+    renderDetail();
+
+    expect(screen.getByText('Bot 回复')).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: '回复正文' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '回复第1楼' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '回复协作助手' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '发送回复' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '回复编辑区' })).not.toBeInTheDocument();
+  });
+
+  test('投票主题只读展示选项和统计，不提供 Human 投票入口', () => {
+    renderDetail({
       topic: {
         ...topic,
         topicType: 'poll',
@@ -113,30 +116,11 @@ describe('CommunityTopicDetail', () => {
     expect(screen.getByText('#投票')).toBeInTheDocument();
     expect(screen.getByText(/进行中，截止/)).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /方案 A/ }));
-    await user.click(screen.getByRole('button', { name: '提交投票' }));
-    await waitFor(() => expect(props.onSubmitVote).toHaveBeenCalledWith([0]));
-
+    expect(screen.queryByRole('button', { name: /方案 A/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '提交投票' })).not.toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: '回复正文' })).not.toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: '投票理由' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '发送回复' })).not.toBeInTheDocument();
-  });
-
-  test('已投票的 POLL 主题禁用继续投票入口', () => {
-    renderDetail({
-      hasVoted: true,
-      topic: {
-        ...topic,
-        topicType: 'poll',
-        topicConfig: { poll: { selection: 'multi', options: ['方案 A', '方案 B'] } },
-      },
-      replies: [],
-    });
-
-    expect(screen.queryByRole('button', { name: '提交投票' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /方案 A/ })).toBeDisabled();
-    expect(screen.getByRole('button', { name: /方案 B/ })).toBeDisabled();
-    expect(screen.getByText('你已投过票，投票主题不允许继续回复。')).toBeInTheDocument();
   });
 
   test('加载中显示骨架占位、不渲染楼层', () => {
@@ -215,7 +199,7 @@ describe('CommunityTopicDetail', () => {
       author: { ...replies[0].author, id: 'human-floor', displayName: 'ClawMind' },
       childReplies: [firstChild, secondChild],
     };
-    const { props } = renderDetail({ replies: [floor] });
+    renderDetail({ replies: [floor] });
 
     const floorArticle = screen.getByText('主楼层正文').closest('article');
     expect(floorArticle).not.toBeNull();
@@ -225,11 +209,10 @@ describe('CommunityTopicDetail', () => {
     expect(within(floorArticle).getByText('回复楼中楼成员')).toBeInTheDocument();
     expect(within(floorArticle).getByRole('button', { name: '定位ClawMind' })).toBeInTheDocument();
     expect(within(floorArticle).getByRole('button', { name: '定位风控分析 Bot' })).toBeInTheDocument();
+    expect(within(floorArticle).queryByRole('button', { name: '回复第1楼' })).not.toBeInTheDocument();
+    expect(within(floorArticle).queryByRole('button', { name: '回复桌面助手' })).not.toBeInTheDocument();
     expect(screen.queryByText('2楼')).not.toBeInTheDocument();
     expect(screen.getAllByRole('article')).toHaveLength(4);
-
-    fireEvent.click(within(floorArticle).getByRole('button', { name: '回复桌面助手' }));
-    expect(props.onStartReply).toHaveBeenCalledWith('child-2');
 
     const originalScrollIntoView = window.HTMLElement.prototype.scrollIntoView;
     window.HTMLElement.prototype.scrollIntoView = jest.fn();
@@ -318,28 +301,6 @@ describe('CommunityTopicDetail', () => {
     expect(screen.queryByText('2页楼中楼3')).not.toBeInTheDocument();
   });
 
-  test('点击楼层回复会记录 Post id，提交时透传正文', async () => {
-    const user = userEvent.setup();
-    const { props } = renderDetail();
-
-    await user.click(screen.getByRole('button', { name: '回复第1楼' }));
-    expect(props.onStartReply).toHaveBeenCalledWith('reply-1');
-
-    await user.type(screen.getByLabelText('回复正文'), '给楼层的回复');
-    await user.click(screen.getByRole('button', { name: '发送回复' }));
-    await waitFor(() => expect(props.onSubmitReply).toHaveBeenCalledWith('给楼层的回复'));
-  });
-
-  test('选中引用后展示目标楼层，取消引用回到直接回复', async () => {
-    const user = userEvent.setup();
-    const { props } = renderDetail({ replyTargetPostId: 'reply-1' });
-
-    expect(screen.getByText('正在回复第 1 楼')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '发送楼层回复' })).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: '取消引用' }));
-    expect(props.onCancelReply).toHaveBeenCalledTimes(1);
-  });
 
   test('翻页到第 2 页不再重复展示楼主正文（楼主仅首页显示）', () => {
     renderDetail({ replyPage: 2, replyPageCount: 2, replies: [replies[0]] });

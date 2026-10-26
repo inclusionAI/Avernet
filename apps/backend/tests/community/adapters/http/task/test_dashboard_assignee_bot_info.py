@@ -17,6 +17,9 @@ from agentclaw.community.adapters.http.openapi_v1.principal import require_user_
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.api.task.task_artifact_service import (
+    TaskArtifactApiServiceProtocol,
+)
 from agentclaw.community.core.repository.protocols.task import (
     TaskArtifactRepositoryProtocol,
     TaskCallbackRepositoryProtocol, TaskInfoRepositoryProtocol,
@@ -111,6 +114,15 @@ class _StubModule(Module):
                 return []
 
         return _EmptyArtifactRepo()
+
+    @singleton
+    @provider
+    def artifact_service(self) -> TaskArtifactApiServiceProtocol:
+        class _EmptyArtifactService:
+            async def sync_session_files_and_list(self, graph, *, limit=200):
+                return []
+
+        return _EmptyArtifactService()
 
 
 @pytest.fixture

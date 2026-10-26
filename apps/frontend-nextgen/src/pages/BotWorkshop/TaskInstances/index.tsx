@@ -1,11 +1,10 @@
-import { PageHeader } from '@/components/Common/PageHeader';
+import { BotSubpageShell } from '@/components/BotWorkshop/BotSubpageShell';
 import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { MyTaskDrawers } from '@/pages/MyTask/components/MyTaskDrawers';
 import { RoutineTaskTab } from '@/pages/MyTask/components/RoutineTaskTab';
 import { makeRoutineKey, useRoutineTasks, type RoutineBotTarget } from '@/pages/MyTask/hooks/useRoutineTasks';
 import { history, useLocation } from '@umijs/max';
-import { ArrowLeft } from 'lucide-react';
 import React, { useMemo, useState } from 'react';
 
 const DEFAULT_PAGE = 1;
@@ -15,6 +14,7 @@ const DEFAULT_PAGE_SIZE = 10;
  * 从 Bot 管理列表进入的受限任务实例页。
  * 列表、执行、详情和运行历史均复用原「任务列表」的定时任务实现；请求仍由
  * `/openapi/v1/bots/{bot_id}/routines` 的 MEMBER 权限校验，URL 不是授权凭据。
+ * 页面壳走 BotSubpageShell（D6：RoutineTaskTab 内部不改，仅壳层白卡包裹）。
  */
 const BotTaskInstancesPage: React.FC = () => {
   const params = new URLSearchParams(useLocation().search);
@@ -60,18 +60,13 @@ const BotTaskInstancesPage: React.FC = () => {
   }
 
   return (
-    <main className="app-scrollbar h-full min-h-0 overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 px-4 py-4 sm:px-6 sm:py-6 2xl:px-8">
-        <div className="flex items-start gap-3">
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="返回 Bot 管理"
-            onClick={() => history.push('/bot-workshop')}
-            leftIcon={<ArrowLeft className="size-4" />}
-          />
-          <PageHeader title="任务实例" description={`仅展示 Bot「${botName}」的定时任务与执行实例`} />
-        </div>
+    <BotSubpageShell
+      onBack={() => history.push('/bot-workshop')}
+      botName={botName}
+      title="任务实例"
+      subtitle={`Bot「${botName}」的定时任务与执行实例`}
+    >
+      <section className="rounded-xl border border-border/60 bg-card p-4 sm:p-6">
         <RoutineTaskTab
           routines={routines}
           total={total}
@@ -96,7 +91,7 @@ const BotTaskInstancesPage: React.FC = () => {
           }}
           botNameMap={{ [botId.toLowerCase()]: botName }}
         />
-      </div>
+      </section>
       <MyTaskDrawers
         selectedTaskId={null}
         onCloseTask={() => {}}
@@ -119,7 +114,7 @@ const BotTaskInstancesPage: React.FC = () => {
         }}
         botNameMap={{ [botId.toLowerCase()]: botName }}
       />
-    </main>
+    </BotSubpageShell>
   );
 };
 

@@ -37,7 +37,7 @@ export function listBrowseSubscriptions(ownerUserId: string, signal?: AbortSigna
 
 /**
  * 加入/更新逛论坛订阅（§4.3）。owner_user_id(query, 必填, 声明订阅 owner，不取自登录人)
- * + body 只 {note}；httpClient 另行自动注入 user_id（OPEN/NoCheck，多余无害）。新订阅 201，更新 200。
+ * + body 只 {note}；httpClient 另行自动注入 user_id（OPEN/NoCheck，多余无害）。新订阅返回 202，表示后端异步装配；装配合流成功后才写入订阅记录。
  */
 export function upsertBrowseSubscription(input: UpsertSubscriptionInput, signal?: AbortSignal) {
   return backendRequest<BotConfigEnvelope<BrowseSubscriptionDto>>(

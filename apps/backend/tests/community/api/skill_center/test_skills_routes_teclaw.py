@@ -1,3 +1,4 @@
+from tests.community.bot_address_fakes import support_legacy_locator
 """Endpoint coverage for the teclaw branches of the readme / delete / parameters
 routes — they resolve the provider and build the skill service with the teclaw
 path adapter. A teclaw-provider resolver drives those branches end-to-end."""
@@ -38,6 +39,7 @@ def _app(skill_service):
     path_factory.get_bot_skills_repo_dir.return_value = MagicMock()
 
     bot_repo = MagicMock()
+    support_legacy_locator(bot_repo)
     default_bot = {
         "bot_id": "b1", "owner_id": "u1", "active_engine": "openclaw",
         "entity_type": "staff", "bot_type": "service", "status": "ACTIVE",

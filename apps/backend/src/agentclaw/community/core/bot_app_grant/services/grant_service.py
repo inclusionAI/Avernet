@@ -24,8 +24,9 @@ one already exists, and what a withdrawal means when one does not.
 
 from __future__ import annotations
 
-from injector import inject
-
+from agentclaw.community.core.bot_app_grant.bot_app_grant_service_protocol import (
+    BotAppGrantServiceProtocol,
+)
 from agentclaw.community.core.bot_app_grant.errors import (
     GrantBotNotLiveError,
     GrantIdentityTooLongError,
@@ -36,12 +37,14 @@ from agentclaw.community.core.bot_app_grant.models import (
     IDENTITY_MAX_LENGTH,
     BotAppGrantRecord,
 )
+from agentclaw.community.core.bot_management.addressing import BotAddressResolver
+from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
 from agentclaw.community.core.repository.protocols.bot import (
     BotAppGrantRepositoryProtocol,
     BotRepository,
 )
 from agentclaw.community.log import get_logger
-from agentclaw.community.core.bot_app_grant.bot_app_grant_service_protocol import BotAppGrantServiceProtocol
+from injector import inject
 
 logger = get_logger()
 
@@ -70,9 +73,9 @@ class BotAppGrantService(BotAppGrantServiceProtocol):
         """Authorize ``app_id`` to act as ``user_id`` on ``bot_id``.
 
         ``user_id`` is the delegating user — whoever is lending their access —
-        and ``owner_id`` is the **resolved** owner of the bot, which is a
-        different person whenever the bot is shared. Both are resolved by the
-        caller and ``app_id`` comes off the verified App principal, so none of
+        and ``owner_id`` is a compatible Bot locator, normalized to the immutable
+        entity before persistence. The caller already authorized that Bot and
+        ``app_id`` comes off the verified App principal, so none of
         the three is a value the request chose. That is what stops a grant being
         pointed at someone else's bot, at another application, or at an
         authority the delegator does not have.
@@ -103,7 +106,11 @@ class BotAppGrantService(BotAppGrantServiceProtocol):
                     f"{label} exceeds {IDENTITY_MAX_LENGTH} characters, which a "
                     "grant cannot store or later resolve"
                 )
-        if not self._bots.filter_live_bots([(bot_id, owner_id)]):
+        try:
+            context = BotAddressResolver(self._bots).resolve(
+                bot_id=bot_id, legacy_owner_id=owner_id
+            )
+        except BotAddressNotFoundError:
             # Resolved earlier in the request, deleted since. The caller's
             # adjudication was correct when it ran, so this is the only place
             # the change can be noticed before a row is written for a bot that
@@ -127,7 +134,7 @@ class BotAppGrantService(BotAppGrantServiceProtocol):
                 "app_name": app_name[:APP_NAME_MAX_LENGTH],
                 "bot_id": bot_id,
                 "user_id": user_id,
-                "owner_id": owner_id,
+                "owner_id": context.entity_id,
             }
         )
 
@@ -334,13 +341,13 @@ class BotAppGrantService(BotAppGrantServiceProtocol):
         if not granted:
             # Skip the bot query entirely when there is nothing to filter.
             return []
-        live = self._bots.filter_live_bots(
+        owners = self._bots.get_live_bot_owners_by_entity(
             [(record.bot_id, record.owner_id) for record in granted]
         )
         return [
-            record
+            record.model_copy(update={"current_owner_id": owners[(record.bot_id, record.owner_id)]})
             for record in granted
-            if (record.bot_id, record.owner_id) in live
+            if (record.bot_id, record.owner_id) in owners
         ]
 
 

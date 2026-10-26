@@ -18,6 +18,7 @@ The covered device-sync and device-filesystem endpoints resolve a
 """
 
 from __future__ import annotations
+from tests.community.bot_address_fakes import support_legacy_locator
 
 from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock
@@ -165,6 +166,8 @@ def _skills_router_app(mock_ctx, tmp_path):
     skill_set_service_factory.create.return_value = skill_set_service
 
     bot_repo = MagicMock()
+    support_legacy_locator(bot_repo)
+    bot_repo.get_by_id_and_entity.side_effect = lambda bid, eid: bot_repo.get_by_id_and_owner(bid, eid)
     bot_repo.get_by_id_and_owner.return_value = {
         "bot_id": "bot-1",
         "owner_id": "user-1",
@@ -233,6 +236,8 @@ def _skillsets_router_app(mock_ctx, tmp_path):
     skill_set_service_factory.create.return_value = skill_set_service
 
     bot_repo = MagicMock()
+    support_legacy_locator(bot_repo)
+    bot_repo.get_by_id_and_entity.side_effect = lambda bid, eid: bot_repo.get_by_id_and_owner(bid, eid)
     bot_repo.get_by_id_and_owner.return_value = {
         "bot_id": "bot-1",
         "owner_id": "user-1",
@@ -350,6 +355,8 @@ def _identity_router_app(mock_ctx, tmp_path, monkeypatch):
     dispatcher.dispatch_addressed.return_value = device_fs
 
     bot_repo = MagicMock()
+    support_legacy_locator(bot_repo)
+    bot_repo.get_by_id_and_entity.side_effect = lambda bid, eid: bot_repo.get_by_id_and_owner(bid, eid)
     bot_repo.get_by_id_and_owner.return_value = {
         "bot_id": "bot-1",
         "owner_id": "user-1",
@@ -455,6 +462,8 @@ def _resources_router_app(mock_ctx, tmp_path):
     dispatcher.dispatch.return_value = device_fs
 
     bot_repo = MagicMock()
+    support_legacy_locator(bot_repo)
+    bot_repo.get_by_id_and_entity.side_effect = lambda bid, eid: bot_repo.get_by_id_and_owner(bid, eid)
     # Force non-arca / non-baas (local) so we hit the device_fs branch.
     bot_repo.get_device_provider_by_bot_id_and_owner.return_value = {
         "device_provider": "local",
@@ -602,6 +611,8 @@ def _file_router_app(mock_ctx, tmp_path):
     dispatcher.dispatch.return_value = device_fs
 
     bot_repo = MagicMock()
+    support_legacy_locator(bot_repo)
+    bot_repo.get_by_id_and_entity.side_effect = lambda bid, eid: bot_repo.get_by_id_and_owner(bid, eid)
     bot_repo.get_device_provider_by_bot_id_and_owner.return_value = {
         "device_provider": "local",
         "sandbox_id": None,
@@ -612,6 +623,8 @@ def _file_router_app(mock_ctx, tmp_path):
         "active_engine": "openclaw",
         "bot_type": "personal",
     }
+
+    bot_repo = support_legacy_locator(bot_repo)
 
     path_factory = _make_mock_path_factory(tmp_path)
     baas_service = MagicMock()

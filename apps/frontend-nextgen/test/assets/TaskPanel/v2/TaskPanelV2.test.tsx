@@ -20,6 +20,7 @@ const baseTask = {
   sourceLabel: '',
   ownerBotName: '规划师',
   ownerBotId: 'bot-1',
+  ownerUserId: 'user-1',
   createdAt: '',
   finishedAt: null,
   loopRound: 1,
@@ -57,12 +58,13 @@ const baseTask = {
   dagEdges: [],
 } as unknown as TaskView;
 
-const makeNav = (): TaskPanelNav & { calls: { select: string[]; drill: string[]; back: number[] } } => {
-  const calls = { select: [] as string[], drill: [] as string[], back: [] as number[] };
+const makeNav = (): TaskPanelNav & { calls: { root: string[]; select: string[]; drill: string[]; back: number[] } } => {
+  const calls = { root: [] as string[], select: [] as string[], drill: [] as string[], back: [] as number[] };
   return {
     selectedNodeId: null,
     drillStack: [],
     calls,
+    selectRootNode: (id: string) => calls.root.push(id),
     selectNode: (id: string) => calls.select.push(id),
     drillInto: (id: string) => calls.drill.push(id),
     backToOverview: () => calls.back.push(1),
@@ -120,11 +122,12 @@ describe('TaskPanelV2 壳', () => {
     expect(screen.getByText(/节点数据缺失/)).toBeTruthy();
   });
 
-  it('switcher 槽渲染在面包屑上方', () => {
+  it('顶部不再渲染旧任务标题与任务切换器', () => {
     render(<TaskPanelV2 {...baseProps({ switcher: <div data-testid="switcher-bar">bar</div> })} />);
-    const switcherNode = screen.getByTestId('switcher-bar');
-    const headerNode = screen.getByText('任务总览');
-    expect(switcherNode.compareDocumentPosition(headerNode) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByTestId('switcher-bar')).toBeNull();
+    const overviewTitle = screen.getByText('任务总览');
+    expect(overviewTitle).toBeTruthy();
+    expect(overviewTitle.closest('[data-task-panel-root]')?.getAttribute('data-task-panel-root')).toBe('true');
   });
 });
 
@@ -136,6 +139,9 @@ describe('useLocalTaskPanelNav(nav 未注入的本地降级)', () => {
   it('本地 nav 可下钻/返回,selectNode 记录选中', () => {
     const { result } = renderHook(() => useLocalTaskPanelNav());
     const target: ResolvedSessionTarget | null = { sessionId: 's-1', kind: 'bot' };
+
+    act(() => result.current.selectRootNode('n-root'));
+    expect(result.current.selectedNodeId).toBe('n-root');
 
     act(() => result.current.selectNode('n1', target));
     act(() => result.current.drillInto('n1', target));

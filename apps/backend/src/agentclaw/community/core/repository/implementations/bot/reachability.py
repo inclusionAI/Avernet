@@ -23,13 +23,44 @@ from __future__ import annotations
 
 from typing import List
 
-from sqlalchemy import or_
-
 from agentclaw.community.utils.env_utils import get_current_env
+from sqlalchemy import or_, tuple_
 
 
 class BotReachabilityQueries:
     """Liveness and reach queries for :class:`BotRepository`."""
+
+    def page_live_bots_by_pks(
+        self, bot_pks: List[int], *, exclude_owner_id: str, entity_pairs: List[tuple[str, str]] | None,
+        page: int, page_size: int,
+    ) -> tuple[int, list[dict]]:
+        if not bot_pks or entity_pairs == []:
+            return 0, []
+        with self._db.orm_session() as db:
+            query = db.query(self.Model).filter(
+                self.Model.id.in_(set(bot_pks)), self.Model.is_delete == 0, self._env(),
+                self.Model.owner_id != exclude_owner_id,
+            )
+            if entity_pairs is not None:
+                query = query.filter(tuple_(self.Model.bot_id, self.Model.entity_id).in_(set(entity_pairs)))
+            total = query.count()
+            rows = query.order_by(self.Model.gmt_create.desc(), self.Model.id.desc()).offset(
+                (page - 1) * page_size
+            ).limit(page_size).all()
+            return total, [row.to_dict() for row in rows]
+
+
+    def get_live_bot_owners_by_entity(self, pairs: List[tuple[str, str]]) -> dict[tuple[str, str], str]:
+        """Project current responsibility separately from the immutable grant address."""
+        if not pairs:
+            return {}
+        with self._db.orm_session() as db:
+            rows = db.query(self.Model.bot_id, self.Model.entity_id, self.Model.owner_id).filter(
+                tuple_(self.Model.bot_id, self.Model.entity_id).in_(set(pairs)),
+                self.Model.is_delete == 0,
+                self._env(),
+            ).all()
+            return {(row[0], row[1]): row[2] for row in rows}
 
     def filter_live_bots(
         self, pairs: List[tuple[str, str]]
@@ -66,7 +97,9 @@ class BotReachabilityQueries:
         COSEC: SQLAlchemy binds the request-derived id; never interpolate it
         into a raw SQL expression.
         """
-        from agentclaw.community.core.bot_collaborator.models import BotCollaboratorModel
+        from agentclaw.community.core.bot_collaborator.models import (
+            BotCollaboratorModel,
+        )
 
         env = get_current_env()
         return (

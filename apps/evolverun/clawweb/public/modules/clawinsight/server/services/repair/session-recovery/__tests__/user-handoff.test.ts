@@ -7,6 +7,7 @@ import Database from "better-sqlite3";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { SqliteDatabase, runMigrations } from "@avernet/clawweb-shared/server/db";
 import { EvolveRepository } from "@avernet/clawevolve/server/repositories/evolve-repository";
+import { BotRuntimeError } from "@avernet/clawweb-shared/server/services/bot-runtime";
 import type { BotRuntime, ResolvedBotTarget } from "@avernet/clawweb-shared/server/services/bot-runtime";
 import { SessionRecoveryTaskRepository } from "../../../../repositories/repair/session-recovery-task-repository.js";
 import { AgentToolCallRepository } from "../../../../repositories/repair/agent-tool-call-repository.js";
@@ -113,4 +114,32 @@ it("rejects a stale execution's user handoff after another execution takes owner
   await expect(agent.report(stale, { kind: "blocked", reason: "user_continued", phase: "assess", summary: "用户已继续", evidence_ids: [read.evidenceId] })).rejects.toMatchObject({ status: 409 });
   expect(await current(stale.taskId)).toMatchObject({ status: "running", execution: { executionId: "replacement-execution" } });
   expect(callbacks).toHaveLength(0);
+});
+
+
+it("ends normally for a proven destroyed target, preserving audit and unknown business effect", async () => {
+  let task = await create();
+  vi.mocked(runtime.request).mockRejectedValueOnce(new BotRuntimeError(410, "target_unavailable", "目标运行环境已销毁"));
+  const read = await agent.inspect(task, { clientRequestId: "destroyed-status", purpose: "核查目标状态", operation: "engine_read", request: { method: "GET", path: "/api/engine/status" } });
+  expect(read).toMatchObject({ status: "failed", result: { error: { code: "target_unavailable" } } });
+  task = await current(task.taskId);
+  await agent.report(task, { kind: "blocked", phase: "assess", reason: "target_unavailable", summary: "目标已销毁，无法继续调查或干预", evidence_ids: [read.evidenceId] });
+  task = await current(task.taskId);
+  expect(task).toMatchObject({ status: "completed", completionReason: "target_unavailable", interventionStatus: "none", judgment: { effect: "unknown" }, execution: { state: "ended" } });
+  await service.reportResults();
+  expect(callbacks.at(-1)).toMatchObject({ status: "completed", completion_reason: "target_unavailable", effect: "unknown", intervention_status: "none" });
+  await service.executionFailure(task.taskId, "late failed callback", task.execution!.executionId, true);
+  await service.maintenance();
+  expect(submissions).toHaveLength(1); expect(runtime.sendMessage).not.toHaveBeenCalled();
+});
+
+it("does not accept model-only target loss or an ordinary HTTP 404 as destroyed-target evidence", async () => {
+  let task = await create();
+  vi.mocked(runtime.request).mockResolvedValueOnce({ status: 404, body: { detail: "Session not found" } });
+  const read = await agent.inspect(task, { clientRequestId: "ordinary-404", purpose: "核查状态", operation: "engine_read", request: { method: "GET", path: "/api/engine/status" } });
+  task = await current(task.taskId);
+  for (const evidence_ids of [[], [read.evidenceId]]) {
+    await expect(agent.report(task, { kind: "blocked", phase: "assess", reason: "target_unavailable", summary: "推测目标已销毁", evidence_ids })).rejects.toMatchObject({ status: 422 });
+  }
+  expect(await current(task.taskId)).toMatchObject({ status: "running", phase: "assess" });
 });

@@ -69,7 +69,7 @@ class ForumPollStatisticsService(ForumPollStatisticsServiceProtocol):
         )
 
     def _close_if_expired(self, topic: ForumTopicRecord) -> bool:
-        """Close one expired Poll through the 60-second digest task."""
+        """Close one expired Poll through the five-minute poll-statistics task."""
         poll = None if topic.topic_config is None else topic.topic_config.poll
         if (
             topic.status != TOPIC_STATUS_OPEN

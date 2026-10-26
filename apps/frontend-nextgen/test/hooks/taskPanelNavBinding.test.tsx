@@ -28,6 +28,18 @@ describe('useTaskPanelNavBinding(taskId)', () => {
     expect(useTaskSidePanelStore.getState().navByTask['t1']?.drillStack).toEqual([]);
   });
 
+  it('根节点回调绑定当前 task，并退出任务联动会话', () => {
+    const { result } = renderHook(() => useTaskPanelNavBinding('t1'));
+    useTaskSidePanelStore.getState().openLinkedSession({ sessionId: 'sess-other', kind: 'bot', botId: 'bot-9' });
+
+    act(() => result.current.selectRootNode('n-root'));
+
+    const s = useTaskSidePanelStore.getState();
+    expect(s.navByTask['t1']?.selectedNodeId).toBe('n-root');
+    expect(s.pendingNavigation).toBeNull();
+    expect(s.linkedSession).toBeNull();
+  });
+
   it('回调在 taskId 间不串场(闭包绑定实例 taskId)', () => {
     const a = renderHook(() => useTaskPanelNavBinding('tA')).result;
     const b = renderHook(() => useTaskPanelNavBinding('tB')).result;

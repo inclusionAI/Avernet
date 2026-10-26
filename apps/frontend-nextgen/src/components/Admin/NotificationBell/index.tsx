@@ -3,6 +3,8 @@
 // list 端点、未读 badge_count、WorkOrderDto 均共用。
 // 视觉规格：docs/specs/2026-08-17-admin-module/prd-visual-spec.md §4（Popover 约 360 宽）。
 import { Button, Empty, IconButton, Popover, PopoverContent, PopoverTrigger, Skeleton } from '@/components/ui';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 import type { NotificationSummary, WorkOrderCategory } from '@/domain/admin/models';
 import { useNotifications } from '@/hooks/useNotifications';
 import { cn } from '@/utils/cn';
@@ -44,7 +46,13 @@ export function NotificationBell({ size = 'md', className }: { size?: 'sm' | 'md
   };
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        if (next) Tracert.click(Points.shell.notifyOpen);
+        setOpen(next);
+      }}
+    >
       <PopoverTrigger asChild>
         <span className="relative inline-flex">
           <IconButton

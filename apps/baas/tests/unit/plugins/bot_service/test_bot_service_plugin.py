@@ -1492,8 +1492,10 @@ class TestAiohttpBotServicePluginGetCallerConnection:
 
         assert result == "sbx-agentpaas"
         mock_get.assert_not_called()
+        # append 目标是 target 剥离 ARCA_/:20003 后的 sandbox_id，而非
+        # connection.paas_device_id 字段
         mock_facade.update_outbound_operation_rule.assert_awaited_once_with(
-            paas_device_id="<paas-device-id>",
+            paas_device_id="sbx-agentpaas",
             outbound_operation_rule=(
                 mock_facade.update_outbound_operation_rule.await_args.kwargs[
                     "outbound_operation_rule"

@@ -271,7 +271,7 @@ def test_strict_runtime_policy_context_propagates_provider_failure(tmp_path):
 def test_strict_runtime_policy_context_propagates_template_lookup_failure(tmp_path):
     db = _Database()
     service = _service(db, tmp_path, ext_info_provider=lambda _bot_id: None)
-    service._bot_repo.get_by_id_and_owner.side_effect = RuntimeError(
+    service._bot_repo.get_by_id_and_entity.side_effect = RuntimeError(
         "bot repository unavailable"
     )
 
@@ -287,7 +287,7 @@ def test_strict_runtime_policy_context_propagates_template_lookup_failure(tmp_pa
 def test_display_read_still_degrades_when_template_lookup_fails(tmp_path):
     db = _Database()
     service = _service(db, tmp_path, ext_info_provider=lambda _bot_id: None)
-    service._bot_repo.get_by_id_and_owner.side_effect = RuntimeError(
+    service._bot_repo.get_by_id_and_entity.side_effect = RuntimeError(
         "bot repository unavailable"
     )
 

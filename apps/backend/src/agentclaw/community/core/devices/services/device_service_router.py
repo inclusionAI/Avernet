@@ -779,6 +779,7 @@ class DeviceServiceRouter(DeviceProviderRouterMixin, DeviceService):
                 providers=self._providers,
                 publish_repo=self._publish_repo,
                 bot_repo=self._bot_repo,
+                collaborator_service_factory=self._get_collaborator_service,
             )
         return self._instance_svc
 
@@ -873,7 +874,7 @@ class DeviceServiceRouter(DeviceProviderRouterMixin, DeviceService):
         device_uuid: str,
         operator: OperatorContext,
     ) -> dict[str, Any]:
-        """指定设备重启（binding_id 入口，仅 owner）。委托 DeviceInstanceService。"""
+        """指定设备重启（Owner、超级管理员或显式协作者）。委托 DeviceInstanceService。"""
         return self._instance_service().restart_device(
             binding_id=binding_id,
             device_uuid=device_uuid,

@@ -414,7 +414,7 @@ def test_private_storage_and_delete_journal(state_dir):
     assert path.stat().st_mode & 0o777 == 0o600
     with sqlite3.connect(path) as db:
         assert db.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 7
         assert db.execute("PRAGMA application_id").fetchone()[0] == 0x44575348
 
 

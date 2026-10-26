@@ -12,8 +12,8 @@ CREATE TABLE ac_bot_execution_identity_binding (
     modifier_id VARCHAR(1024) NOT NULL,
     env VARCHAR(20) NOT NULL,
     avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw',
-    gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    gmt_create TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     KEY idx_bot_execution_identity_state (bot_pk, env, status)
 ) COMMENT='Persistent AgentPass execution identity transition';

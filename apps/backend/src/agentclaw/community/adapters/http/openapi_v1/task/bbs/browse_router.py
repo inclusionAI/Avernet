@@ -29,6 +29,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.responses import (
+    accepted,
     created,
     envelope,
     envelope_errors,
@@ -39,7 +40,13 @@ from agentclaw.community.core.task.forum.browsing import (
     BbsBrowseLoopRunner,
     BbsBrowseLoopScheduler,
 )
-from agentclaw.community.core.task.forum.browsing.cron_setup import BbsBrowseCronManager
+from agentclaw.community.core.task.forum.browsing.cron_setup import (
+    BbsBrowseCronManager,
+    BbsDigestCronManager,
+)
+from agentclaw.community.core.task.forum.browsing.subscription_provisioner import (
+    BbsBrowseSubscriptionProvisioner,
+)
 from agentclaw.community.core.task.forum.models import (
     BROWSE_MODE_FRAMEWORK,
     BROWSE_MODE_OPENCLAW,
@@ -66,6 +73,12 @@ browse_open_router = APIRouter(
     response_model=Envelope[SubscriptionItem],
     operation_id="upsert_bbs_browse_subscription",
     dependencies=[Depends(require_principal)],
+    responses={
+        202: {
+            "model": Envelope[SubscriptionItem],
+            "description": "新订阅已接受，异步装配成功后才持久化",
+        }
+    },
 )
 @envelope_errors
 async def upsert_bbs_browse_subscription(
@@ -88,34 +101,31 @@ async def upsert_bbs_browse_subscription(
     request: Request,
     response: Response,
     body: BrowsSubscriptionJoinRequest | None = Body(default=None),
-    service: ForumServiceProtocol = Injected(ForumServiceProtocol),
-    cron_manager: BbsBrowseCronManager = Injected(BbsBrowseCronManager),
-    scheduler: BbsBrowseLoopScheduler = Injected(BbsBrowseLoopScheduler),
-    runner: BbsBrowseLoopRunner = Injected(BbsBrowseLoopRunner),  # noqa: B008
+    provisioner: BbsBrowseSubscriptionProvisioner = Injected(
+        BbsBrowseSubscriptionProvisioner
+    ),
 ) -> Envelope[SubscriptionItem]:
     """加入或刷新一个 Bot 的「逛论坛」订阅（统一 B 方案）。
 
-    mode 后端恒定 OpenClaw cron，不暴露触发模式选择；订阅发起人取自必填的
-    owner_user_id query（不取自登录态，由调用方作为必填参数显式声明）。请求体
-    只携带可选备注。若该 Bot 此前在旧框架轮询下注册过，一并卸下旧触发，保证
-    任意时刻仅一份触发。创建返回 201，更新已存在订阅返回 200。
+    新订阅先返回 202 并异步装配 Browse 与 Digest 两条 Bot 侧 cron；装配成功后才写入
+    订阅记录，装配失败则不留下数据库开关。已存在的 OpenClaw 订阅同步保存备注并后台
+    修复 cron。
     """
     note = body.note if body is not None else None
-    old = service.get_subscription(bot_id=bot_id)
-    result = service.upsert_subscription(
+    result = provisioner.join_or_refresh(
         bot_id=bot_id,
         owner_user_id=owner_user_id,
-        mode=BROWSE_MODE_OPENCLAW,
         note=note,
     )
-    sub = result.subscription
-    await cron_manager.ensure_cron(bot_id=bot_id, owner_user_id=owner_user_id)
-    await runner.push_install_bbs_skills(bot_id=bot_id)
-    if old is not None and old.mode == BROWSE_MODE_FRAMEWORK:
-        scheduler.unregister_bot(bot_id=bot_id)
-    payload = SubscriptionItem.from_record(sub)
-    response.status_code = 201 if result.created else 200
-    return created(payload, request) if result.created else envelope(payload, request)
+    payload = SubscriptionItem.from_record(result.subscription)
+    if result.persisted:
+        response.status_code = 201 if result.created else 200
+        return (
+            created(payload, request) if result.created else envelope(payload, request)
+        )
+
+    response.status_code = 202
+    return accepted(payload, request)
 
 
 @browse_open_router.delete(
@@ -130,13 +140,21 @@ async def delete_bbs_browse_subscription(
     request: Request,
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
     cron_manager: BbsBrowseCronManager = Injected(BbsBrowseCronManager),
+    digest_cron_manager: BbsDigestCronManager = Injected(BbsDigestCronManager),
     scheduler: BbsBrowseLoopScheduler = Injected(BbsBrowseLoopScheduler),
+    provisioner: BbsBrowseSubscriptionProvisioner = Injected(
+        BbsBrowseSubscriptionProvisioner
+    ),
 ) -> Envelope[SubscriptionDeleted]:
     """退出逛论坛订阅（不存在也返回 deleted=false，幂等）；同时卸下定时触发。"""
+    await provisioner.cancel_pending(bot_id=bot_id)
     sub = service.get_subscription(bot_id=bot_id)
     if sub is not None:
         if sub.mode == BROWSE_MODE_OPENCLAW:
             await cron_manager.remove_cron(
+                bot_id=bot_id, owner_user_id=sub.owner_user_id
+            )
+            await digest_cron_manager.remove_cron(
                 bot_id=bot_id, owner_user_id=sub.owner_user_id
             )
         else:

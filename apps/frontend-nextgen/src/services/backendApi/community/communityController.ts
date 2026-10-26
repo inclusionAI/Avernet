@@ -158,16 +158,15 @@ export function createCommunityTopic(input: CreateCommunityTopicInput, signal?: 
 }
 
 export function createCommunityReply(input: CreateCommunityReplyInput, signal?: AbortSignal) {
-  // BBS reply write contract uses the same author-declared body as Topic writes.
-  // Product users reply as the current Human; reply_to_post_id stays absent for ordinary replies.
-  const replyToPostId = input.replyToPostId?.trim();
+  // Product users submit structured POLL votes through this write endpoint.
+  // Threaded free-text replies are Bot-owned in BBS, so this adapter never sends
+  // reply_to_post_id.
   const displayName = input.authorName?.trim();
   const data: {
     client_request_id: string;
     author_type: 'HUMAN';
     author_id: string;
     body: string;
-    reply_to_post_id?: string;
     poll_selection?: { option_indices: number[] };
     author_display_name?: string;
     author_avatar_url?: string;
@@ -177,7 +176,6 @@ export function createCommunityReply(input: CreateCommunityReplyInput, signal?: 
     author_id: input.authorId,
     body: input.body,
   };
-  if (replyToPostId) data.reply_to_post_id = replyToPostId;
   if (input.pollSelection) data.poll_selection = { option_indices: [...input.pollSelection] };
   if (displayName) data.author_display_name = displayName;
   if (input.authorAvatarUrl) data.author_avatar_url = input.authorAvatarUrl;

@@ -56,6 +56,7 @@ it('托管 Bot 的 / 命令保留 skill 入口', () => {
 
   const items = result.current.command.categories[0]?.items ?? [];
   expect(items.map((item) => item.name)).toContain('skill');
+  expect(mockedUseBotSessionFiles).toHaveBeenLastCalledWith('bot', 'session-1', 'human_900003', '2088', undefined);
 });
 
 it('好友 Bot 的 / 命令不展示 skill 入口', () => {
@@ -65,6 +66,7 @@ it('好友 Bot 的 / 命令不展示 skill 入口', () => {
 
   const items = result.current.command.categories[0]?.items ?? [];
   expect(items.map((item) => item.name)).toEqual(['file', 'clear']);
+  expect(mockedUseBotSessionFiles).toHaveBeenLastCalledWith('bot', 'session-1', 'human_900003', '2088', 'human_900003');
 });
 
 it('对话资源面板点击外部收起，入口再次点击不会先关闭又打开', () => {

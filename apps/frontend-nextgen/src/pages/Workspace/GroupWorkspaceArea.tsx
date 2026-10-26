@@ -220,7 +220,7 @@ export function GroupWorkspaceArea({
           onLeaveGroup={handleLeaveGroup}
           onAddGroupMember={groupManage.addMember}
           onRemoveGroupMember={groupManage.removeMember}
-          onShareGroup={groupManage.createShare}
+          onShareGroup={handleShareGroup}
           onSaveDingTalk={groupManage.saveDingTalk}
           onToggleDingTalkActive={groupManage.toggleDingTalkActive}
           onDeleteDingTalk={groupManage.deleteDingTalk}
@@ -231,7 +231,7 @@ export function GroupWorkspaceArea({
           onLeaveSession={handleLeaveSession}
           onAddSessionMember={sessionManage.addMember}
           onRemoveSessionMember={sessionManage.removeMember}
-          onShareSession={sessionManage.createShare}
+          onShareSession={handleShareSession}
         />
         {activePanel === 'resources' && sessions.selectedSession && (
           /* 会话局部覆盖层：资源管理与单聊侧共用容器。 */

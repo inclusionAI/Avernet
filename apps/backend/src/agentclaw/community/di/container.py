@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from agentclaw.community.di.modules.owner_handoff_module import OwnerHandoffModule
+
 from injector import Injector, Module
 
 from agentclaw.community.core.skill_center.canonical_center_store import (
@@ -189,6 +191,7 @@ def build_injector(
         CommonConfigModule(),
         BotManagementModule(),
         ExecutionIdentityModule(),
+        OwnerHandoffModule(),
         DigitalEmployeeModule(),
         AgentSwarmModule(),
         BotQuotaModule(),
@@ -269,6 +272,11 @@ def build_injector(
     # surfaced inside `discover_lifecycle_participants` would silently drop the
     # TaskWorker binding — an app that boots clean and never runs a queued task.
     # Resolving it here makes a bad owner name fail the boot on every profile.
+    from agentclaw.community.core.bot_management.owner_handoff.contracts import (
+        OwnerHandoffPolicy,
+    )
+
+    _app_injector.get(OwnerHandoffPolicy)
     _app_injector.get(TaskQueueConfig)
     _app_injector.get(SpaceKnowledgeCaptureConfig)
     _app_injector.get(CanonicalCenterStoreConfig)

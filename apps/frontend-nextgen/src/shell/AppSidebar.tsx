@@ -5,6 +5,8 @@ import { PanelLeftClose, PanelLeftOpen, Search } from 'lucide-react';
 import { useState } from 'react';
 import { AccountBadge, type AccountUser } from './AccountBadge';
 import { GlobalSearchDialog } from './GlobalSearch';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 import { HelpMenu } from './HelpMenu';
 import type { NavigationItem } from './navigation';
 import { LegacyVersionSwitch } from './LegacyVersionSwitch';
@@ -59,7 +61,10 @@ export function AppSidebar({
             className="text-muted-foreground"
             label="搜索"
             icon={<Search className="h-4 w-4" />}
-            onClick={() => setSearchOpen(true)}
+            onClick={() => {
+              Tracert.click(Points.shell.globalSearchOpen);
+              setSearchOpen(true);
+            }}
           />
           {notificationBell && <NotificationBell size="sm" className="text-muted-foreground" />}
           {onToggleCollapsed && (
@@ -76,7 +81,10 @@ export function AppSidebar({
         <div className="flex h-[52px] items-center px-3">
           <brand.Logo compact />
           <span className="ml-auto flex shrink-0 items-center gap-0">
-            <IconButton label="搜索" icon={<Search className="h-4 w-4" />} onClick={() => setSearchOpen(true)} />
+            <IconButton label="搜索" icon={<Search className="h-4 w-4" />} onClick={() => {
+              Tracert.click(Points.shell.globalSearchOpen);
+              setSearchOpen(true);
+            }} />
             {notificationBell && <NotificationBell />}
             {onToggleCollapsed && (
               <IconButton label="折叠导航" icon={<PanelLeftClose className="h-4 w-4" />} onClick={onToggleCollapsed} />

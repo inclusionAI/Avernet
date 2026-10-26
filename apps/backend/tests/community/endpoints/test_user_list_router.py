@@ -19,8 +19,7 @@ _ENTITY_ID = "caller_rollout_user"
 _OTHER_ENTITY_ID = "another_user"
 _USER_LIST_TYPE = "caller_identity"
 _CORRECTION_TARGET = "corrected_rollout_user"
-_CORRECTION_ACTOR = "first_authenticated_corrector"
-_SECOND_CORRECTION_ACTOR = "second_authenticated_corrector"
+_CORRECTION_ACTOR = "100000"
 
 
 def _seed_user(world) -> None:
@@ -93,7 +92,7 @@ def _seed_manual_correction_actor(world) -> None:
 
 
 def _seed_second_correction_actor_with_member(world) -> None:
-    make_staff_user(world, user_id=_SECOND_CORRECTION_ACTOR)
+    make_staff_user(world, user_id=_CORRECTION_ACTOR)
     with world.get(DatabasePlugin).orm_session() as session:
         session.add(
             EntityUserListModel(
@@ -310,8 +309,8 @@ def user_list_check_requires_an_entity_id():
     ),
     extra_assertions=(_assert_ctoken_not_exposed,),
 )
-def user_list_correction_allows_an_operator_to_add():
-    """An operator may enable a current-environment entry."""
+def user_list_correction_allows_a_super_admin_to_add():
+    """A super admin may enable a current-environment entry."""
 
 
 @endpoint_test(
@@ -319,7 +318,7 @@ def user_list_correction_allows_an_operator_to_add():
     path="/api/v1/user-lists/correct",
     scenario="authenticated_user_removes_member",
     input=CaseInput(
-        headers={"x-user-id": _SECOND_CORRECTION_ACTOR},
+        headers={"x-user-id": _CORRECTION_ACTOR},
         json_body={
             "entity_id": _CORRECTION_TARGET,
             "user_list_type": _USER_LIST_TYPE,
@@ -332,8 +331,8 @@ def user_list_correction_allows_an_operator_to_add():
         json_contains={"success": True, "data": {"in_whitelist": False}},
     ),
 )
-def user_list_correction_allows_another_operator_to_remove():
-    """Another operator may disable an exact entry."""
+def user_list_correction_allows_a_super_admin_to_remove():
+    """A super admin may disable an exact entry."""
 
 
 @endpoint_test(
@@ -382,7 +381,7 @@ def user_list_correction_rejects_invalid_environment():
 @endpoint_test(
     method="PUT",
     path="/api/v1/user-lists/correct",
-    scenario="non_operator_cannot_add_member",
+    scenario="non_super_admin_cannot_add_member",
     input=CaseInput(
         headers={"x-user-id": _ENTITY_ID},
         json_body={
@@ -394,7 +393,7 @@ def user_list_correction_rejects_invalid_environment():
     seed=_seed_non_correction_user,
     expect=ExpectError(status=403),
 )
-def user_list_correction_rejects_non_operator():
+def user_list_correction_rejects_non_super_admin():
     """Authentication alone does not authorize membership writes."""
 
 

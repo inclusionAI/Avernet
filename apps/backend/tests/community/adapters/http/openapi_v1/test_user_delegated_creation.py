@@ -161,7 +161,7 @@ class _BotGrants:
                 app_name=app_name,
                 bot_id=bot_id,
                 user_id=user_id,
-                owner_id=owner_id,
+                owner_id=owner_id, current_owner_id=owner_id,
                 avernet_tenant="teamclaw",
                 env="test",
                 gmt_create=datetime(2026, 9, 17),

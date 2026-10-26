@@ -112,3 +112,40 @@ substituted for this failed unified gate.
   First enablement requires the original table migration and **all writers** on
   capture=true before any activation. Paused delivery must keep capture=true;
   rollback with history must preserve capture or pause affected writes.
+
+## Post-integration conflict verification (2026-10-26)
+
+Merged `dev@cf9d2a0184fd0845afcad5a863a0ecb129d5cdfc` into the feature
+branch after `1ee9d746956ae7f8e1ebbbe5f90de03c73548422`, preserving all existing
+feature commits (no rebase/force push). This is feature-branch integration, not
+merging PR #3091 into dev.
+
+Only two files required manual resolution: API and repository Context Boundary
+READMEs. They had adjacent additions, not incompatible policies. Preserve both
+knowledge capture declarations and upstream Owner Handoff contracts/repository
+exports/dependencies, plus upstream B5 stable-entity ownership notes. Owner
+Handoff production sources match dev; knowledge capture production sources match
+the pre-merge feature. The automatically merged DI container retains both modules
+and both eager configuration checks. No business behavior or schema was invented
+to resolve these documentation conflicts.
+
+Fresh integrated-tree validation:
+
+- **1528 passed**: the previous architecture/Space/approval/repository/knowledge
+  regression scope plus B5, B6, owner-handoff service/delivery/resource suites.
+- **153 passed**: registered endpoint runner `-k 'spaces or work-orders or
+  owner-handoff'`, including knowledge and upstream Owner Handoff commands;
+  1483 unrelated cases deselected.
+- **1309 passed, 10 skipped**: full Skill Center core tests.
+- Non-overlapping total: **2990 passed, 10 skipped**. Missing-table real DB/HTTP
+  regressions remain in the first run, not counted twice.
+- Changed-PR Python Ruff, both-side boundary-entry preservation assertions and
+  `git diff --check origin/dev` pass. PR production-source maximum is now
+  **1000 lines** (`adapters/http/app.py` after upstream integration), within the
+  unchanged limit. No new size exemption.
+
+The earlier full-merge diff includes whitespace warnings already present in
+upstream-only files; they are absent from the PR-versus-dev diff and are not
+cleaned as part of this focused resolution. Full Backend CI, Singlebox and
+corporate/remote DB deployment evidence were not rerun here; the earlier
+Singlebox dependency blocker remains an unverified gate, not a success.

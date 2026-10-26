@@ -25,7 +25,6 @@ from agentclaw.community.core.bot_collaborator.services.collaborator_service imp
     CollaboratorService,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
-from agentclaw.community.core.caller_identity.models import McpCallType
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
@@ -439,6 +438,7 @@ class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, E
         iam_token: Optional[str] = None,
         *,
         bcn_friend_authorized: bool = False,
+        actor_user_id: str | None = None,
     ) -> Dict[str, Any]:
         """List one user's sessions for one expert Bot.
 
@@ -470,6 +470,7 @@ class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, E
             owner_id,
             iam_token,
             bcn_friend_authorized=bcn_friend_authorized,
+            actor_user_id=actor_user_id,
         )
         if favorite_only and need_poll:
             return {"total": 0, "items": [], "need_poll": True}
@@ -748,59 +749,6 @@ class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, E
         if not bcn_friend_authorized:
             self._check_chat_access(bot, user_id)
         return bot
-
-    async def _prepare_chat_connection(
-        self,
-        bot: Dict[str, Any],
-        user_id: str,
-        owner_id: str,
-        iam_token: Optional[str],
-        *,
-        bcn_friend_authorized: bool = False,
-    ) -> tuple[Optional[Dict[str, Any]], bool]:
-        """Resolve caller/owner binding and return Adapter connection data."""
-        bot_id = bot["bot_id"]
-        bot_call_type = McpCallType.parse(bot.get("call_type") or None)
-        logger.info(
-            "[ExpertChatService] Bot call_type: bot=%s, call_type=%s, parsed=%s",
-            bot_id,
-            bot.get("call_type"),
-            bot_call_type,
-        )
-        if bot_call_type == McpCallType.CALLER:
-            result = await self._instance_service.get_caller_connection(
-                user_id=user_id,
-                bot_id=bot_id,
-                owner_id=owner_id,
-                iam_token=iam_token,
-            )
-            if result.get("need_poll", False):
-                logger.info(
-                    "[ExpertChatService] Caller instance not ready: bot=%s, user=%s",
-                    bot_id,
-                    user_id,
-                )
-                return result.get("connection"), True
-            instance = result.get("instance", {})
-            ext = instance.get("ext") or {}
-            bot["binding_id"] = ext.get("binding_id")
-        elif bot.get("bot_type", "personal") == "service":
-            from agentclaw.community.core.service_bot.repository.models import (
-                PublishStatus,
-            )
-
-            bot["binding_id"] = self._baas_service.get_bind_id(
-                bot_id=bot_id,
-                owner_id=owner_id,
-                bot_type="service",
-                publish_status=PublishStatus.SUCCESS.value,
-            )
-
-        return self._get_connection(
-            bot,
-            user_id,
-            bcn_friend_authorized=bcn_friend_authorized,
-        ), False
 
     async def _list_owned_adapter_sessions(
         self,

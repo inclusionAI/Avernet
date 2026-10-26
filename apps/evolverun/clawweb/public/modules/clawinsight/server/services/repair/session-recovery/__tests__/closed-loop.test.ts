@@ -1008,3 +1008,18 @@ it.each([true, false])("accepts AIVision delivery from the current actual receip
     delivery: "confirmed", response: "acted", effect: "recovered", summary: "完整轨迹确认执行恢复", evidence_ids: [evidence.evidenceId] } });
   expect((await current(task.taskId)).status).toBe("completed");
 });
+
+it("returns actionable 422 feedback for missing delivery and shortened evidence without changing the phase", async () => {
+  let task = await create();
+  const read = await inspect(task); task = await current(task.taskId);
+  await expect(agent.report(task, { kind: "assessment", phase: "assess", decision: "message", summary: "无法投递", evidence_ids: [read.evidenceId] }))
+    .rejects.toMatchObject({ status: 422, message: expect.stringContaining("blocked") });
+  await expect(agent.report(task, { kind: "assessment", phase: "assess", decision: "observe", summary: "保留调查结论", evidence_ids: ["evidence-tc-short"] }))
+    .rejects.toMatchObject({ status: 422, message: expect.stringContaining("完整 evidenceId") });
+  await expect(agent.report(task, { kind: "blocked", phase: "assess", reason: "session_unavailable", summary: "原会话不可投递" }))
+    .rejects.toMatchObject({ status: 422, message: expect.stringContaining("省略 reason") });
+  expect(await current(task.taskId)).toMatchObject({ status: "running", phase: "assess" });
+  expect(runtime.sendMessage).not.toHaveBeenCalled();
+  await agent.report(task, { kind: "blocked", phase: "assess", summary: "原会话不可投递，当前无法继续" });
+  expect(await current(task.taskId)).toMatchObject({ status: "failed", judgment: { effect: "unknown" } });
+});

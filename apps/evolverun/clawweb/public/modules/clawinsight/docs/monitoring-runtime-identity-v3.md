@@ -1,5 +1,7 @@
 # Monitoring Runtime Identity v3
 
+> 2026-10-23 补充：新诊断 Action/v4 见 `monitoring-diagnosis-actions-v4.md`。本文记录 v3 历史契约；身份与保密约束继续沿用，新事件语义不再以本文 v3 版本表为准。
+
 更新：2026-10-22。状态：监控侧已实现，本地测试覆盖；**尚未完成新版自愈服务联调，不是上线确认**。
 自愈对接依据为双方确认的 `session-recovery-runtime-identity.md`；本文记录监控侧实现与交付边界，不重新定义自愈业务规则。
 

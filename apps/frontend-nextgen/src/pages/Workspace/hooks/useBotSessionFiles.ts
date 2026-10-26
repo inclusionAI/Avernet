@@ -20,6 +20,7 @@ export function useBotSessionFiles(
   sessionId: string | null,
   userId: string | null,
   ownerId?: string,
+  friendUserId?: string,
 ): UseBotSessionFilesResult {
   const store = useBotSessionFileStore();
   const { setIsLoadingList, setReadyFiles, resetForSession } = store;
@@ -37,12 +38,12 @@ export function useBotSessionFiles(
     }
     const requestId = ++requestIdRef.current;
     setIsLoadingList(true);
-    const readyRes = await botSessionFileService.loadReady(botId, sessionId, userId, ownerId);
+    const readyRes = await botSessionFileService.loadReady(botId, sessionId, userId, ownerId, friendUserId);
     if (requestIdRef.current !== requestId) return;
     setIsLoadingList(false);
     if (readyRes.ok) setReadyFiles(readyRes.data.items);
     else toast.error(readyRes.error.friendlyMessage);
-  }, [botId, sessionId, userId, ownerId, setIsLoadingList, setReadyFiles]);
+  }, [botId, sessionId, userId, ownerId, friendUserId, setIsLoadingList, setReadyFiles]);
 
   useEffect(() => {
     // 懒加载(2026-10-21):进入会话不再默认调 file 接口(选会话≠有查看文件清单的诉求);
@@ -52,7 +53,7 @@ export function useBotSessionFiles(
       requestIdRef.current++;
       setIsLoadingList(false);
     };
-  }, [botId, sessionId, userId, resetForSession, setIsLoadingList]);
+  }, [botId, sessionId, userId, ownerId, friendUserId, resetForSession, setIsLoadingList]);
 
   const deleteFile = useCallback(
     async (file: BotSessionFileView) => {

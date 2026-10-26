@@ -34,6 +34,26 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe('MonitoringPanel', () => {
+  it('preserves completed PASS attribution and identifies the new policy', async () => {
+    api.targetDiagnoses.mockResolvedValue({ ...page(), items: [{ ...item,
+      schemaVersion: 'claw-monitoring/diagnosis-event/v4', decision: 'PASS', handlerName: 'COMPLETED' }] });
+    render(<MemoryRouter><MonitoringPanel /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: /外部服务异常/ }));
+    expect(screen.getByText(/告警判定：不告警.*统一口径 v1/)).toBeInTheDocument();
+    expect(screen.getByText('诊断置信度').nextElementSibling).toHaveTextContent('86.0%');
+    expect(screen.getByText('任务是否完成').nextElementSibling).toHaveTextContent('是');
+    expect(screen.getByText('是否人工纠错').nextElementSibling).toHaveTextContent('是');
+  });
+  it('does not display failed placeholder tags as confirmed user labels', async () => {
+    api.targetDiagnoses.mockResolvedValue({ ...page(), items: [{ ...item,
+      schemaVersion: 'claw-monitoring/diagnosis-event/v4', decision: 'UNRESOLVED',
+      handlerName: null, humanIntervention: false }] });
+    render(<MemoryRouter><MonitoringPanel /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: /外部服务异常/ }));
+    expect(screen.getByText('任务是否完成').nextElementSibling).toHaveTextContent('未判定');
+    expect(screen.getByText('是否人工纠错').nextElementSibling).toHaveTextContent('未判定');
+  });
+
   it.each([
     ['COMPLETED', '是'], ['NOT_COMPLETED', '否'], [null, '未知'], ['historical-handler', '未知'],
   ])('displays task completion for %s without treating old handler data as completion', async (handlerName, label) => {
@@ -126,7 +146,7 @@ describe('MonitoringPanel', () => {
   it('loads discovered IDs, expands diagnosis safely, and omits unsupported actions', async () => {
     const { container } = render(<MonitoringPanel />);
     fireEvent.click(await screen.findByRole('button', { name: /外部服务异常/ }));
-    expect(screen.getByText('是否人工干预').nextElementSibling).toHaveTextContent('是');
+    expect(screen.getByText('是否人工纠错').nextElementSibling).toHaveTextContent('是');
     expect(screen.getByText('诊断置信度').nextElementSibling).toHaveTextContent('86.0%');
     expect(screen.getByText('<script>alert(1)</script>')).toBeInTheDocument();
     expect(container.querySelector('script')).toBeNull();
@@ -188,7 +208,7 @@ describe('MonitoringPanel', () => {
     await screen.findByText('状态未更新');
     expect(screen.queryByText('监控正常')).not.toBeInTheDocument();
     expect(screen.getByText(/当前保留上次结果/)).toBeInTheDocument();
-    expect(screen.getByText('是否人工干预')).toBeInTheDocument();
+    expect(screen.getByText('是否人工纠错')).toBeInTheDocument();
     expect(screen.queryByText('没有符合当前条件的诊断记录。')).not.toBeInTheDocument();
   });
   it('distinguishes an empty bot list from service failure', async () => {
@@ -274,7 +294,7 @@ describe('MonitoringPanel', () => {
     const record = await screen.findByRole('button', { name: /外部服务异常/ });
     expect(record).toHaveTextContent('TC.MCP.DATA');
     expect(record).toHaveTextContent('2026-09-09');
-    expect(record).not.toHaveTextContent('人工干预：是');
+    expect(record).not.toHaveTextContent('人工纠错：是');
     expect(record).not.toHaveTextContent('告警');
     fireEvent.click(record);
     fireEvent.click(screen.getByRole('button', { name: '复制Trace ID' }));
@@ -334,7 +354,7 @@ describe('MonitoringPanel', () => {
     const input = screen.getByLabelText('跳转页码'); input.focus(); fireEvent.change(input, { target: { value: '1' } });
     await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
     expect(api.targetDiagnoses.mock.lastCall?.[1].page).toBe(2);
-    expect(screen.getByText('是否人工干预')).toBeInTheDocument();
+    expect(screen.getByText('是否人工纠错')).toBeInTheDocument();
     expect(input).toHaveFocus(); expect(input).toHaveValue('1');
   });
   it('resets to page one after size/target changes but preserves the chosen page size', async () => {
@@ -362,7 +382,7 @@ describe('MonitoringPanel', () => {
     fireEvent.click(await screen.findByRole('button', { name: /外部服务异常/ }));
     api.options.mockRejectedValue({ status: 401 });
     fireEvent.click(screen.getByRole('button', { name: '监控 Bot bot-te' }));
-    await waitFor(() => expect(screen.queryByText('是否人工干预')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText('是否人工纠错')).not.toBeInTheDocument());
     expect(screen.queryByText('trace-1')).not.toBeInTheDocument();
     expect(screen.queryByText('监控正常')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '监控 Bot bot-te' })).not.toBeInTheDocument();
@@ -383,7 +403,7 @@ describe('MonitoringPanel', () => {
     api.targetDiagnoses.mockRejectedValue({ status: 409, body: JSON.stringify({ error: { code: 'MONITORING_NOT_ENROLLED' } }) });
     await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
     expect(screen.getByRole('button', { name: '加入监控' })).toBeInTheDocument();
-    expect(screen.queryByText('是否人工干预')).not.toBeInTheDocument();
+    expect(screen.queryByText('是否人工纠错')).not.toBeInTheDocument();
     expect(screen.queryByText('trace-1')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('诊断记录分页')).not.toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();

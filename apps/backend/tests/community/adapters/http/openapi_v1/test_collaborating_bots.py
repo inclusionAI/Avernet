@@ -14,6 +14,7 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import require_pr
 from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.principal import require_acting_caller
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
 from agentclaw.community.core.bot_collaborator.models import CollaboratorRecord
 from agentclaw.community.core.bot_inventory.protocols import (
@@ -27,7 +28,7 @@ from tests.community.adapters.http.openapi_v1.conftest import user_scoped_client
 def _relation(*, bot_id: str = "shared-1", owner_id: str = "owner-1"):
     return CollaboratorRecord(
         id=17,
-        bot_pk=91,
+        bot_pk=92 if owner_id == "owner-2" else 91,
         bot_id=bot_id,
         owner_id=owner_id,
         user_id="collab-1",
@@ -48,9 +49,13 @@ def _client(*, bots, collaborators, caller=None, template_port=None, space_conte
         space_context = MagicMock()
         space_context.bot_space.return_value = None
 
+    legacy_result = bots.list_bots_by_owner_bot_pairs.return_value
+    bots.page_live_bots_by_pks.return_value = (legacy_result["total"], legacy_result["items"])
+
     class _M(Module):
         def configure(self, binder):
             binder.bind(BotServiceProtocol, to=bots)
+            binder.bind(BotRepository, to=bots)
             binder.bind(CollaboratorServiceProtocol, to=collaborators)
             binder.bind(BotInventoryTemplatePort, to=template_port)
             binder.bind(BusinessSpaceContextProtocol, to=space_context)
@@ -136,8 +141,8 @@ def test_lists_only_collaborations_and_keeps_entity_and_owner_separate():
         current_space=None,
     )
     collaborators.list_user_collaborations.assert_called_once_with("collab-1")
-    bots.list_bots_by_owner_bot_pairs.assert_called_once_with(
-        pairs=[("shared-1", "owner-1")], page=2, page_size=7
+    bots.page_live_bots_by_pks.assert_called_once_with(
+        bot_pks=[91], exclude_owner_id="collab-1", entity_pairs=None, page=2, page_size=7
     )
 
 
@@ -152,7 +157,7 @@ def test_empty_collaborations_do_not_query_bots():
 
     assert response.status_code == 200, response.json()
     assert response.json()["data"] == {"total": 0, "items": []}
-    bots.list_bots_by_owner_bot_pairs.assert_not_called()
+    bots.page_live_bots_by_pks.assert_not_called()
 
 
 def test_application_filter_uses_exact_bot_and_owner_pair():
@@ -174,6 +179,6 @@ def test_application_filter_uses_exact_bot_and_owner_pair():
     ).get("/openapi/v1/bots/collaborations")
 
     assert response.status_code == 200, response.json()
-    bots.list_bots_by_owner_bot_pairs.assert_called_once_with(
-        pairs=[("default", "owner-2")], page=1, page_size=20
+    bots.page_live_bots_by_pks.assert_called_once_with(
+        bot_pks=[91, 92], exclude_owner_id="collab-1", entity_pairs=[("default", "owner-2")], page=1, page_size=20
     )

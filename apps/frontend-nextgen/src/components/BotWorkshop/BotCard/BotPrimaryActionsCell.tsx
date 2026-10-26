@@ -3,6 +3,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import type { BotActionAvailability, BotDomain } from '@/services/botWorkshop';
 import { isServiceVerification } from '@/services/botWorkshop/botPolicy';
 import React from 'react';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 
 export interface BotPrimaryActionsCellProps {
   bot: BotDomain;
@@ -129,7 +131,10 @@ const BotPrimaryActionsCell: React.FC<BotPrimaryActionsCellProps> = ({
       className={linkClass}
       aria-label={`查看 ${bot.name} 日志`}
       disabled={!logAction?.enabled}
-      onClick={() => onOpenLogs?.(bot)}
+      onClick={() => {
+        Tracert.click(Points.botWorkshop.viewLogs, { bot_id: bot.id });
+        onOpenLogs?.(bot);
+      }}
     >
       日志
     </Button>

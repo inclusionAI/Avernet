@@ -1,0 +1,30 @@
+-- OceanBase/MySQL. Deploy before enabling owner_handoff recovery or initiation.
+-- No existing Bot/resource owner columns are rewritten by this DDL.
+CREATE TABLE IF NOT EXISTS ac_bot_owner_handoff (
+  operation_id varchar(32) NOT NULL,
+  bot_pk bigint NOT NULL,
+  bot_id varchar(256) NOT NULL,
+  entity_id varchar(1024) NOT NULL,
+  old_owner_id varchar(1024) NOT NULL,
+  new_owner_id varchar(1024) NOT NULL,
+  new_owner_name varchar(256) NOT NULL,
+  actor_id varchar(1024) NOT NULL,
+  request_key varchar(64) NOT NULL,
+  phase varchar(32) NOT NULL,
+  execution_workno varchar(1024) NOT NULL,
+  binding_id bigint DEFAULT NULL,
+  old_credential_id varchar(256) DEFAULT NULL,
+  credential_id varchar(256) DEFAULT NULL,
+  authorization_id varchar(256) DEFAULT NULL,
+  agent_id varchar(1200) DEFAULT NULL,
+  error_code varchar(64) DEFAULT NULL,
+  worker varchar(32) DEFAULT NULL,
+  lease_until timestamp DEFAULT NULL,
+  env varchar(20) NOT NULL,
+  avernet_tenant varchar(64) NOT NULL DEFAULT 'teamclaw',
+  gmt_create timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  gmt_modified timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (operation_id),
+  UNIQUE KEY uk_bot_owner_handoff_request (avernet_tenant, env, bot_pk, request_key),
+  KEY idx_bot_owner_handoff_recovery (env, phase, gmt_modified)
+) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;

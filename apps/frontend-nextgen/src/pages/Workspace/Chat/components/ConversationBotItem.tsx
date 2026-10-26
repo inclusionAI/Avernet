@@ -26,6 +26,8 @@ import { ConversationOriginFilter } from './ConversationOriginFilter';
 import { ConversationSessionIdSearchInput } from './ConversationSessionIdSearchInput';
 import { ConversationSessionList } from './ConversationSessionList';
 import { ConversationSessionSearchIconButton } from './ConversationSessionSearchIconButton';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 
 export type { ConversationBotItemOthers } from './ConversationBotOthersArea';
 
@@ -208,6 +210,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
                 className="h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
                 onClick={(event) => {
                   event.stopPropagation();
+                  Tracert.click(Points.workspaceChat.newSession, { bot_id: bot.botId });
                   onCreateSession();
                 }}
               />

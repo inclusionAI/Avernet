@@ -7,6 +7,7 @@ Bot lifecycle, creation policy, repository, engine resolution, render-screen mod
 ```yaml
 purpose: "Bot lifecycle, creation policy, repository, engine resolution, render-screen models, and skill-set switching."
 provides:
+  - "OwnerHandoffServiceProtocol and durable OwnerHandoffService"
   - "BotService"
   - "BotCreateContext"
   - "BotCreateDeploymentMode"
@@ -46,6 +47,8 @@ consumes:
   - "CachePlugin quota lock"
   - "CapabilityDesiredStateRepositoryProtocol"
 internal_dependencies:
+  - agentclaw.community.core.execution_identity.protocols
+  - agentclaw.community.plugin_api.staff_dept
   - agentclaw.community.core.bot_inventory
   - agentclaw.community.core.engine_runtime
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
@@ -231,3 +234,10 @@ Fastdisk detection, configuration, command execution and OSS request constructio
 remain in `engines/aicoding/`. DI assembly may reference the concrete coding
 implementation; the shared build service imports only the neutral registry.
 This is a selection refactor, not a script protocol change (schema 6 is unchanged).
+
+
+The owner_handoff subcomponent owns the feature-gated responsibility-transfer
+journal and TaskQueue coordinator. It preserves Bot/entity/tenant/environment
+identity and commits mutable Owner responsibility only after fenced credential
+and runtime cutover. See [its contract](owner_handoff/README.md). Legacy resource
+addressing remains shared with normal Bot lifecycle callers.
