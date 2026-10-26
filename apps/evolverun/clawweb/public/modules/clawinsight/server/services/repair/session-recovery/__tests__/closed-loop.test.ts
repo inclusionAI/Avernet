@@ -250,30 +250,6 @@ it("non-MCP goes to one environment plan without any initial retry message", asy
   await agent.retryMessage(await current(task.taskId), { clientRequestId: "retry-skill", purpose: "修复后继续原任务", message: "局部错误已修正，请继续原任务" });
   expect(runtime.sendMessage).toHaveBeenCalledTimes(1);
 });
-it("Agent can observe existing progress without sending, and an unknown send is never replayed", async () => {
-  let task = await create("automatic", { tc_fault_label: null }); const read = await inspect(task, "read-progress");
-  await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "observe", summary: "原任务正在推进，先观察", evidence_ids: [read.evidenceId] });
-  expect((await current(task.taskId)).observationDeadlineAt).toBe(now + 3600000); expect(runtime.sendMessage).not.toHaveBeenCalled();
-  task = await create("approval", { event_id: "second-event", delivery_key: "second-initial" });
-  vi.mocked(runtime.sendMessage).mockRejectedValueOnce(new Error("transport outcome unknown"));
-  const body = { clientRequestId: "unknown-advice", purpose: "纠正操作后继续", message: "请按真实返回修正原操作" };
-  const send = await agent.retryMessage(task, body); expect(send.status).toBe("unknown");
-  expect((await current(task.taskId)).delivery!.delivery.status).toBe("unknown");
-  await agent.retryMessage(await current(task.taskId), body); expect(runtime.sendMessage).toHaveBeenCalledTimes(1);
-  await expect(agent.retryMessage(await current(task.taskId), { ...body, clientRequestId: "blind-repeat" })).rejects.toMatchObject({ status: 409 });
-});
-it("historical intervention cannot confirm this delivery but existing recovery can complete without a new message", async () => {
-  let task = await create();
-  await appendFile(sessionFile, JSON.stringify({ type: "message", id: "old-advice", message: { role: "user", content: "[会话自愈：old-delivery]\n继续" } }) + "\n");
-  const read = await inspect(task, "historical-read");
-  await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "observe", summary: "原任务此前已恢复", evidence_ids: [read.evidenceId] });
-  task = await current(task.taskId);
-  const judgment = { delivery: "confirmed", response: "acted", effect: "recovered", summary: "原任务已恢复，本次未发消息", evidence_ids: [read.evidenceId] };
-  await expect(agent.report(task, { kind: "observation", phase: "observe", judgment })).rejects.toMatchObject({ status: 422 });
-  await agent.report(task, { kind: "observation", phase: "observe", judgment: { ...judgment, delivery: "unconfirmed" } });
-  expect((await current(task.taskId)).status).toBe("completed");
-  expect(runtime.sendMessage).not.toHaveBeenCalled();
-});
 it("trajectory content paging stays within the task scope and preserves the audited result", async () => {
   const read = vi.fn(async () => ({ source: "aivision_tclog", content: "正文片段", next_content_offset: 100 }));
   (agent as any).deps.trajectory = { read };

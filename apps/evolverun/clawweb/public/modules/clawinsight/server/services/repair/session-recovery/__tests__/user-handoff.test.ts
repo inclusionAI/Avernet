@@ -68,6 +68,27 @@ beforeEach(async () => {
 });
 afterEach(async () => { await db.close(); await rm(directory, { recursive: true, force: true }); });
 
+it.each(["acted", "replied"] as const)("rejects %s attribution without confirmed guidance, then accepts independent recovery", async response => {
+  let task = await create();
+  const read = await inspect(task);
+  await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "observe", summary: "Bot 已自行恢复，无需发送消息", evidence_ids: [read.evidenceId] });
+  task = await current(task.taskId);
+  const judgment = { delivery: "unconfirmed", response, effect: "recovered", summary: "Bot 已自行完成原任务", evidence_ids: [read.evidenceId] };
+  await expect(agent.report(task, { kind: "observation", phase: "observe", judgment })).rejects.toMatchObject({ status: 422 });
+  expect(await current(task.taskId)).toMatchObject({ status: "running", phase: "observe", version: task.version });
+  await agent.report(task, { kind: "observation", phase: "observe", judgment: { ...judgment, response: "none" } });
+  expect(await current(task.taskId)).toMatchObject({ status: "completed", interventionStatus: "none", judgment: { delivery: "unconfirmed", response: "none", effect: "recovered" } });
+  expect(runtime.sendMessage).not.toHaveBeenCalled();
+});
+
+it.each(["acted", "replied"] as const)("accepts %s attribution with controlled evidence of current guidance delivery", async response => {
+  let task = await toObserve(await create());
+  const read = await inspect(task); task = await current(task.taskId);
+  await agent.report(task, { kind: "observation", phase: "observe", judgment: { delivery: "confirmed", response, effect: "recovered", summary: "Bot 收到本次指引后继续原任务", evidence_ids: [read.evidenceId] } });
+  expect(await current(task.taskId)).toMatchObject({ status: "completed", judgment: { delivery: "confirmed", response, effect: "recovered" } });
+  expect(runtime.sendMessage).toHaveBeenCalledOnce();
+});
+
 it.each(["assess", "observe", "plan", "apply", "verify"] as const)("normally completes %s after user continuation without retries or a recovery claim", async phase => {
   let task = await create();
   await appendFile(sessionFile, JSON.stringify({ type: "message", id: "user-follow-up", message: { role: "user", content: "请继续只读检查，我来处理" } }) + "\n");
@@ -260,4 +281,29 @@ it("keeps ordinary blocked for a proven failed delivery and an unrepairable plan
   const planning = await toPlan(await create("approval", { event_id: "unrepairable-plan", delivery_key: "unrepairable-plan" }));
   await agent.report(planning, { kind: "blocked", phase: "plan", summary: "已独立调查，当前授权和能力下没有可行修复，保留具体依据" });
   expect(await current(planning.taskId)).toMatchObject({ status: "failed", phase: "plan" });
+});
+
+it("Agent can observe existing progress without sending, and an unknown send is never replayed", async () => {
+  let task = await create("automatic", { tc_fault_label: null }); const read = await inspect(task, "read-progress");
+  await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "observe", summary: "原任务正在推进，先观察", evidence_ids: [read.evidenceId] });
+  expect((await current(task.taskId)).observationDeadlineAt).toBe(now + 3600000); expect(runtime.sendMessage).not.toHaveBeenCalled();
+  task = await create("approval", { event_id: "second-event", delivery_key: "second-initial" });
+  vi.mocked(runtime.sendMessage).mockRejectedValueOnce(new Error("transport outcome unknown"));
+  const body = { clientRequestId: "unknown-advice", purpose: "纠正操作后继续", message: "请按真实返回修正原操作" };
+  const send = await agent.retryMessage(task, body); expect(send.status).toBe("unknown");
+  expect((await current(task.taskId)).delivery!.delivery.status).toBe("unknown");
+  await agent.retryMessage(await current(task.taskId), body); expect(runtime.sendMessage).toHaveBeenCalledTimes(1);
+  await expect(agent.retryMessage(await current(task.taskId), { ...body, clientRequestId: "blind-repeat" })).rejects.toMatchObject({ status: 409 });
+});
+it("historical intervention cannot confirm this delivery but existing recovery can complete without a new message", async () => {
+  let task = await create();
+  await appendFile(sessionFile, JSON.stringify({ type: "message", id: "old-advice", message: { role: "user", content: "[会话自愈：old-delivery]\n继续" } }) + "\n");
+  const read = await inspect(task, "historical-read");
+  await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "observe", summary: "原任务此前已恢复", evidence_ids: [read.evidenceId] });
+  task = await current(task.taskId);
+  const judgment = { delivery: "confirmed", response: "acted", effect: "recovered", summary: "原任务已恢复，本次未发消息", evidence_ids: [read.evidenceId] };
+  await expect(agent.report(task, { kind: "observation", phase: "observe", judgment })).rejects.toMatchObject({ status: 422 });
+  await agent.report(task, { kind: "observation", phase: "observe", judgment: { ...judgment, delivery: "unconfirmed", response: "none" } });
+  expect((await current(task.taskId)).status).toBe("completed");
+  expect(runtime.sendMessage).not.toHaveBeenCalled();
 });

@@ -61,6 +61,8 @@ Before deploying this ClawWeb caller, update the AIS Base snapshot to support `r
 
 ## Persistence and delivery contracts
 
+Observation `response` describes the Bot's response to this recovery message, not independent work or a reply to the user. `acted` and `replied` require `delivery=confirmed`, backed by the existing controlled read for the current delivery key; contradictory reports return 422 without changing task state. No message means `response=none`; insufficient attribution evidence means `unknown`. Recovery effect remains independent: an undelivered intervention does not prevent evidence-backed `effect=recovered`. A real user confirmation after the original fault follows the existing `user_continued` handoff even when it is part of the expected business workflow. Merely waiting for that input remains subject to the ordinary fault-recovery criteria.
+
 Creation stores the exact event/delivery identity and request fingerprint in the existing task. Same-key changed requests return 409. Initial and subsequent sends use the existing tool audit claims; an unknown outcome cannot authorize blind replay. Bot message idempotency remains in the tool ledger. Task result delivery uses compact pending references in the existing Task configuration.
 
 Only transitions into `waiting_effect`, `completed`, `failed` or `canceled` create an immutable result snapshot. Owner waiting (including expiry), approvals, notifications, annotations and other phase changes do not generate callbacks. Repeated annotations after task completion do not create another final result.
