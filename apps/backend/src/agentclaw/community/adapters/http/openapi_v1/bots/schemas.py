@@ -867,6 +867,11 @@ class BusinessSpace(BaseModel):
 class BotInventoryItem(BaseModel):
     """Unified card for a personal cloud, local, or service bot."""
 
+    expert_name: str | None = Field(
+        default=None,
+        description="Read-only source expert name for a bot created from the expert market; null for ordinary bots.",
+        json_schema_extra={"readOnly": True},
+    )
     bot_id: str = Field(description="Unique identifier of the bot.")
     card_id: str = Field(
         description="Stable card identity; service cards include the publication id."

@@ -2416,6 +2416,19 @@
       "BotInventoryItem": {
         "description": "Unified card for a personal cloud, local, or service bot.",
         "properties": {
+        "expert_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Read-only source expert name for a bot created from the expert market; null for ordinary bots.",
+          "readOnly": true,
+          "title": "Expert Name"
+        },
           "actions": {
             "description": "Actions currently available for this bot.",
             "items": {

@@ -38,6 +38,7 @@ def to_inventory_item(item: CoreItem) -> BotInventoryItem:
         bot_id=item.bot_id,
         card_id=item.card_id,
         bot_name=item.bot_name,
+        expert_name=item.expert_name,
         bot_desc=item.bot_desc,
         engine=item.engine,
         bot_type=item.bot_type,

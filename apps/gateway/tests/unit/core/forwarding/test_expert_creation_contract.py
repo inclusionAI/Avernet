@@ -27,3 +27,13 @@ def test_expert_creation_uses_original_bot_create_and_accepted_contract():
         {"type": "null"},
     ]
     assert "expert_name" not in bot["required"]
+
+
+def test_inventory_publishes_only_optional_read_only_expert_name():
+    spec = json.loads((_GATEWAY / "configs/schemas/bots.openapi.json").read_text())
+    schema = spec["components"]["schemas"]["BotInventoryItem"]
+    assert schema["properties"]["expert_name"]["readOnly"] is True
+    assert "expert_name" not in schema["required"]
+    assert "expert_origin" not in schema["properties"]
+    operation = spec["paths"]["/openapi/v1/bots/all"]["get"]
+    assert "BotInventoryItem" in str(operation["responses"]["200"])
