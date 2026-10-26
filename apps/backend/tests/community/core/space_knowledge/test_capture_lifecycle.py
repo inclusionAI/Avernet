@@ -97,3 +97,32 @@ def test_sink_cannot_enable_delivery_without_recording(database):
 
     with pytest.raises(RuntimeError, match="delivery requires capture"):
         asyncio.run(capture(database, sink=EnabledSink()).startup())
+
+
+def test_library_writer_without_lifespan_cannot_commit_past_history_guard(database):
+    from agentclaw.community.core.repository.implementations.spaces.space import (
+        SpaceRepository,
+    )
+    from agentclaw.community.core.spaces.repository.models import SpaceModel
+
+    with database.orm_session() as session:
+        session.add(
+            Snapshot(
+                env="pre",
+                space_id=7,
+                revision=1,
+                app="agentclaw",
+                payload="{}",
+                snapshot_hash="x" * 64,
+                status="disabled",
+                acknowledged=True,
+            )
+        )
+    spaces = SpaceRepository(database, capture(database))
+    with pytest.raises(RuntimeError, match="keep capture enabled"):
+        with spaces.create_team_transaction(
+            name="Must rollback", creator_id="owner", creator_user_name=None, env="pre"
+        ):
+            pytest.fail("guard must reject before caller receives identity")
+    with database.orm_session() as session:
+        assert session.query(SpaceModel).count() == 0
