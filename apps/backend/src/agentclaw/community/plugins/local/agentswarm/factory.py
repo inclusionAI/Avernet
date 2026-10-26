@@ -38,12 +38,20 @@ class DefaultSubagentFactory:
     def __init__(self, llm: LLMProvider,
                  platform: BotPlatform | None = None,
                  attempt_repo: AgentAttemptRepository | None = None,
-                 setup_timeout: float = _DEFAULT_SETUP_TIMEOUT_SECONDS
+                 setup_timeout: float = _DEFAULT_SETUP_TIMEOUT_SECONDS,
+                 setup_ceiling: float | None = None,
+                 subagent_setup_delay: float = 0.0,
                  ) -> None:
         self._llm = llm
         self._platform = platform
         self._attempt_repo = attempt_repo
         self._setup_timeout = float(setup_timeout)
+        # Without a deployment-provided ceiling the ready-poll budget can
+        # only stay at or below the configured timeout — the DI root wires
+        # the true slice room (slice_max_seconds - per_attempt_timeout).
+        self._setup_ceiling = (float(setup_ceiling)
+                               if setup_ceiling else self._setup_timeout)
+        self._subagent_setup_delay = float(subagent_setup_delay)
 
     def create(self, spec: AgentSpec, run: Run,
                agent_id: AgentId, attempt: int = 1) -> Subagent:
@@ -68,10 +76,19 @@ class DefaultSubagentFactory:
                     "carries no caller identity to provision bots under"
                 )
             from agentclaw.community.plugins.community.agentswarm.bot_subagent import AvernetSubagent
+            opts = getattr(run, "run_options", None)
+            ready_poll = (
+                self._setup_timeout if opts is None
+                else opts.resolved_setup_timeout(self._setup_timeout,
+                                                 self._setup_ceiling)
+            )
             return AvernetSubagent(spec, run, self._platform,
-                                   agent_id=agent_id, attempt=attempt)
+                                   agent_id=agent_id, attempt=attempt,
+                                   ready_poll_timeout=ready_poll,
+                                   setup_delay_seconds=self._subagent_setup_delay)
         return LLMBackedSubagent(spec, run, self._llm, agent_id,
-                                 attempt=attempt)
+                                 attempt=attempt,
+                                 setup_delay_seconds=self._subagent_setup_delay)
 
     def destroy_run_agents_bots(self, run: Run, agents) -> list[str]:
         """Run-terminal reconciliation (D-M): ledger first, then the belt.

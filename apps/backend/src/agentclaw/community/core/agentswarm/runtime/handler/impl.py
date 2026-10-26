@@ -296,7 +296,7 @@ class SwarmRunHandler:
             self._run_repo.update_status,
             run_id, tenant, RunStatus.RUNNING, claim_epoch=claim_epoch,
         )
-        deadline = self._deadline()
+        deadline = self._deadline(run)
 
         try:
             await self._runtime.start()
@@ -412,8 +412,13 @@ class SwarmRunHandler:
         )
         return "reschedule"
 
-    def _deadline(self) -> float:
-        return time.monotonic() + self._config.orchestration.slice_max_seconds
+    def _deadline(self, run) -> float:
+        opts = getattr(run, "run_options", None)
+        budget = (opts.resolved_slice_max(
+                      self._config.orchestration.slice_max_seconds)
+                  if opts is not None
+                  else float(self._config.orchestration.slice_max_seconds))
+        return time.monotonic() + budget
 
     async def _release_claim(self, run_id: RunId, tenant: TenantId, claim_epoch: int,
                              note: str) -> None:
