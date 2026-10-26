@@ -252,7 +252,7 @@ POST /api/insight/v1/monitoring/session-recoveries/:taskId/terminate
 控制面要求引用成功的 `session_read`／`trajectory_read` 审计，正常收口为 `completed`，记录 `completionReason=user_continued`，结束当前执行并清除等待／重试期限；不新增业务任务状态、不进入方案、不重放动作。
 `effect` 保留已有证据结论，缺少判断时为 `unknown`；`intervention_status` 继续由任务全量审计生成，已有干预不会被让路抹除。
 页面和群通知显示“用户已接手，自愈已让路”。统计单列该结束原因，不计为执行故障，也不能将 `completed` 直接计为恢复成功。
-没有该原因的既有 `blocked` 仍表示无法继续，沿用原失败流程；未知原因拒绝。先部署支持新字段的发送／接收后端，再更新自愈包。没有新建数据库表、字段或 AIS Base 配置。
+没有该原因的既有 `blocked` 表示自愈工作流本身无法继续，不表示原业务未恢复。真实非 Debug 任务在 `assess` 已有 `accepted`／`unknown` 的初始消息投递记录时，普通 `blocked` 返回 HTTP 422，要求回报 `assessment`、`decision=message` 后进入效果回收；不重发消息、不把未知投递当作触达。`observe`／`verify` 的普通 `blocked` 同样返回 HTTP 422，要求以 `observation` 如实回报 `recovered`／`not_recovered`／`unknown`。原业务未恢复在 `observe` 进入完整方案，在 `verify` 结束处理；证据不足保持 `unknown`。投递前受阻或明确投递失败、方案分析后确实无法修复等仍可按原失败流程回报普通 `blocked`；用户续聊、明确目标不可用及手册要求的 Owner 转交不受此限制。未知原因拒绝。先部署结果校验后端，再更新自愈包；没有新建数据库表、字段或 AIS Base 配置。
 
 回报引用了不存在的证据 ID，或 `message` 判断缺少已保存的投递／拟发送记录时，返回 HTTP 422 并说明可纠正字段。纠错保留已核实的业务判断，证据引用必须使用工具返回的完整 ID。普通 `blocked` 省略 `reason`；执行归属、阶段或版本冲突继续返回 HTTP 409。
 

@@ -214,3 +214,50 @@ it("still advances ordinary unrecovered message intervention into a complete pla
   await agent.report(task, { kind: "plan", phase: "plan", plan });
   expect(await current(task.taskId)).toMatchObject({ status: "waiting_owner", phase: "apply" });
 });
+
+it.each(["accepted", "unknown"] as const)("requires phase results after %s message delivery instead of ordinary blocked", async receiptStatus => {
+  const task = await create();
+  if (receiptStatus === "unknown") {
+    const send = vi.mocked(runtime.sendMessage).getMockImplementation()!;
+    vi.mocked(runtime.sendMessage).mockImplementationOnce(async input => { await send(input); throw new Error("receipt lost"); });
+  }
+  const sent = await agent.retryMessage(task, { clientRequestId: "retry-failed-operation", purpose: "重试原失败步骤", message: "请重试原工具调用并如实报告" });
+  await appendFile(sessionFile, JSON.stringify({ type: "message", id: "retry-result", message: { role: "toolResult", content: "原工具调用重试仍失败" } }) + "\n");
+  const read = await inspect(await current(task.taskId), "retry-effect");
+  const assessed = await current(task.taskId);
+  expect(assessed.delivery?.delivery.status).toBe(receiptStatus);
+  const blocked = { kind: "blocked", phase: "assess", summary: "已发出指引并重试，原故障仍存在，没有可直接执行的修复动作", evidence_ids: [read.evidenceId] };
+  await expect(agent.report(assessed, blocked)).rejects.toMatchObject({ status: 422, message: expect.stringContaining("assessment") });
+  expect(await current(task.taskId)).toMatchObject({ version: assessed.version, status: "running", phase: "assess", judgment: null, execution: assessed.execution });
+  expect(actionNotifier.after).not.toHaveBeenCalledWith(expect.objectContaining({ kind: "result" }));
+  await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "message", summary: "已留存消息投递，进入效果回收", evidence_ids: [sent.evidenceId] });
+  await expect(agent.report(await current(task.taskId), { ...blocked, phase: "observe" })).rejects.toMatchObject({ status: 422, message: expect.stringContaining("observation") });
+  await agent.report(await current(task.taskId), { kind: "observation", phase: "observe", judgment: { delivery: "confirmed", response: "acted", effect: "not_recovered", summary: "实际重试仍失败", evidence_ids: [read.evidenceId] } });
+  expect(await current(task.taskId)).toMatchObject({ status: "running", phase: "plan", judgment: { effect: "not_recovered" } });
+  expect(runtime.sendMessage).toHaveBeenCalledTimes(1);
+  expect(notifier.notify).not.toHaveBeenCalled();
+});
+
+it.each(["recovered", "not_recovered", "unknown"] as const)("requires an observation result for verification effect %s", async effect => {
+  let task = await toPlan(await create("automatic"));
+  await agent.report(task, { kind: "plan", phase: "plan", plan });
+  task = await current(task.taskId);
+  await service.finishApply(task.taskId, task.version, { applicable: true, success: true, summary: "方案执行结束" });
+  const read = await inspect(await current(task.taskId), "verify-effect");
+  task = await current(task.taskId);
+  await expect(agent.report(task, { kind: "blocked", phase: "verify", summary: "原任务执行结果" })).rejects.toMatchObject({ status: 422 });
+  expect(await current(task.taskId)).toMatchObject({ status: "running", phase: "verify", version: task.version });
+  await agent.report(task, { kind: "observation", phase: "verify", judgment: { delivery: "confirmed", response: "acted", effect, summary: "依据实际执行回报效果", evidence_ids: [read.evidenceId] } });
+  expect(await current(task.taskId)).toMatchObject({ phase: "verify", status: effect === "recovered" ? "completed" : effect === "not_recovered" ? "failed" : "running", judgment: { effect } });
+});
+
+it("keeps ordinary blocked for a proven failed delivery and an unrepairable plan", async () => {
+  const beforeDelivery = await create();
+  vi.mocked(runtime.sendMessage).mockResolvedValueOnce({ status: "failed", error: "delivery rejected" });
+  await agent.retryMessage(beforeDelivery, { clientRequestId: "rejected-delivery", purpose: "发送具体指引", message: "继续原失败操作" });
+  await agent.report(await current(beforeDelivery.taskId), { kind: "blocked", phase: "assess", summary: "投递被明确拒绝，无法继续干预" });
+  expect(await current(beforeDelivery.taskId)).toMatchObject({ status: "failed", phase: "assess" });
+  const planning = await toPlan(await create("approval", { event_id: "unrepairable-plan", delivery_key: "unrepairable-plan" }));
+  await agent.report(planning, { kind: "blocked", phase: "plan", summary: "已独立调查，当前授权和能力下没有可行修复，保留具体依据" });
+  expect(await current(planning.taskId)).toMatchObject({ status: "failed", phase: "plan" });
+});

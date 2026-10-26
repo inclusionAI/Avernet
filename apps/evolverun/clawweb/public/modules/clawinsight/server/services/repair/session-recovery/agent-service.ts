@@ -496,7 +496,13 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       else if (body.reason === "target_unavailable") await this.deps.business().finishForTargetUnavailable(task.taskId, task.version,
         { summary: body.summary, evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId }, body.final_summary);
       else if (body.reason !== undefined) fail(422, "未知的结束原因。普通受阻请省略 reason，保留 kind=blocked、当前 phase 和原因 summary；不要改为 message 决策。user_continued 仅用于已核实的用户续聊，target_unavailable 需要 Provider 明确的目标不可用证据。符合手册转交条件时使用 kind=owner_handoff，并提供处理指引和现场 evidence_ids。");
-      else await this.deps.business().executionFailure(task.taskId, redactPersistableText(body.summary, 8000), task.execution!.executionId, false, body.final_summary);
+      else {
+        if (!task.simulation && task.level !== "debug") {
+          if (task.phase === "assess" && task.delivery && task.delivery.delivery.status !== "failed") fail(422, "已有初始消息投递记录，不能用普通 blocked 跳过效果回收。请回报 kind=assessment、decision=message 进入 observe；保留实际投递和执行事实，不重复发送。投递结果未知不代表已触达，随后按读取证据判断。");
+          if (task.phase === "observe" || task.phase === "verify") fail(422, "当前阶段需要 kind=observation，分别回报触达、响应及 recovered / not_recovered / unknown 效果；原任务未恢复不等于自愈执行失败，不能用普通 blocked 代替效果判断。证据不足用 unknown，不能补造恢复或未恢复。observe 中确认未恢复将进入完整方案；verify 中确认未恢复将结束处理。");
+        }
+        await this.deps.business().executionFailure(task.taskId, redactPersistableText(body.summary, 8000), task.execution!.executionId, false, body.final_summary);
+      }
     }
     else fail(422, "未知业务回报类型");
     return { ok: true };
