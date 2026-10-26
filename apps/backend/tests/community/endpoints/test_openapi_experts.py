@@ -20,7 +20,7 @@ from tests.community.framework import (
 )
 
 
-def seed_expert(world):
+def seed_expert(world, *, tenant="test"):
     _boot_verifier()
     with TemporaryDirectory() as folder:
         root = Path(folder)
@@ -45,7 +45,7 @@ def seed_expert(world):
         world.get(ExpertScanner).scan_git(
             root,
             source_commit=git("rev-parse", "HEAD"),
-            scope=ExpertScope("test", "dev", "aiworkbench"),
+            scope=ExpertScope(tenant, "dev", "aiworkbench"),
         )
 
 
@@ -138,7 +138,9 @@ def expert_detail_error():
 def seed_creation(world):
     from agentclaw.community.core.expert_market.creation import ExpertCreationConfig
     from tests.community.endpoints.test_openapi_create_with_manifest import _seed_verifier
-    seed_expert(world)
+    from agentclaw.community.utils.avernet_tenant import DEFAULT_AVERNET_TENANT
+    # The original create principal is user-only and resolves the default tenant.
+    seed_expert(world, tenant=DEFAULT_AVERNET_TENANT)
     _seed_verifier(world)
     world.injector.binder.bind(ExpertCreationConfig, to=ExpertCreationConfig("https://example.com/experts.git"))
 
