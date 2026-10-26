@@ -97,6 +97,7 @@ class AvernetSubagent:
         self._delete_call_timeout = delete_call_timeout
         self._ready_poll_timeout = ready_poll_timeout
         self._setup_delay_seconds = setup_delay_seconds
+        self._prov_delay_fired = False
         # Per-chat cancel registry: the in-flight chat's cooperative-unwind
         # event, reachable by ``halt()`` from off the awaiting coroutine.
         self._chat_registry_lock = threading.Lock()
@@ -111,8 +112,6 @@ class AvernetSubagent:
         # once per bound identity; every park recheck from here is a cheap
         # status poll.
         if self._bot_id is None:
-            if self._setup_delay_seconds > 0:
-                await asyncio.sleep(self._setup_delay_seconds)
             # Per-attempt persona (D-J): the idempotency key carries the in-slice
             # retry index, so a torn-down attempt's row (live or soft-deleted)
             # can never collide with the retry's create; a cross-slice replay of
@@ -247,6 +246,9 @@ class AvernetSubagent:
             if state == BotState.READY.value:
                 return state
             if state == BotState.AWAITING_AUTHORIZATION.value:
+                # The human gate: reset the provisioning-delay marker so
+                # the post-gate boot simulation fires once per gate cycle.
+                self._prov_delay_fired = False
                 # The human gate: the passport application is
                 # pending inside its window and only a human can move it, so
                 # burning the poll budget against this deadline is guaranteed
@@ -273,6 +275,20 @@ class AvernetSubagent:
                 raise NonRetryableProvisioningError(
                     f"bot {bot_id} creation failed: {state}",
                     bot_id=bot_id, bot_state=state,)
+            if (state not in _TERMINAL_FAILURE
+                    and state != ""
+                    and not self._prov_delay_fired
+                    and self._setup_delay_seconds > 0):
+                # PRE parity: after the passport resolves (gate clears),
+                # the persona's container takes ~180s to boot on ARCA.
+                # Locally the container is up in <5s, so inject the
+                # observed PRE provisioning depth here — once per gate
+                # resolution — to exercise the real setup budget.
+                self._prov_delay_fired = True
+                logger.info(
+                    "[agentswarm][bot] simulating PRE provisioning: "
+                    "%.0fs for bot %s", self._setup_delay_seconds, bot_id)
+                await asyncio.sleep(self._setup_delay_seconds)
             if state in _TERMINAL_FAILURE:
                 # A terminal-failure state will not become READY by polling
                 # longer, so stop the poll now; the pool decides whether the
