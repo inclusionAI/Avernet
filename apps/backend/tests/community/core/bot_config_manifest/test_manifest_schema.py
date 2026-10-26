@@ -684,6 +684,8 @@ manifest:
         ("/etc/passwd", "absolute_path"),
         ("../../etc/passwd", "path_traversal"),
         ("data/../../etc/passwd", "path_traversal"),
+        ("data//faq.csv", "invalid_path"),
+        ("data/./faq.csv", "invalid_path"),
     ],
 )
 def test_an_escaping_resource_path_is_refused(path, code):
@@ -1193,12 +1195,6 @@ def test_relative_path_refusal_is_the_one_rule_both_sides_ask():
         ("a\\b.md", "invalid_path"),
         ("a b.md", "invalid_path"),
         ("", "invalid_path"),
-        # Not normalised: the desired state refuses these on construction, so the
-        # schema must refuse them first or an accepted document crashes the compile.
-        ("data//faq.csv", "invalid_path"),
-        ("data/./x", "invalid_path"),
-        ("data/kb//", "invalid_path"),
-        (".", "invalid_path"),
     ]
     for value, code in refused:
         refusal = relative_path_refusal(value)
@@ -1211,6 +1207,24 @@ def test_relative_path_refusal_is_the_one_rule_both_sides_ask():
     # The legitimate shapes, including the per-segment '..' reading.
     for value in ("data/..config", "data/a.md", "top/sub/b.txt", "${BASE}/k.md", "data/kb/"):
         assert relative_path_refusal(value) is None, value
+    # Normalisation is not this rule's: a fetch key or subpath is an address in
+    # another namespace (an object-store key may contain ``//``).
+    for value in ("a//b", "./skills/foo"):
+        assert relative_path_refusal(value) is None, value
+
+
+def test_resource_path_refusal_adds_normalisation_for_the_paths_the_engine_writes():
+    """The resources schema check, the compiler and the desired-state model ask this one, so a path the
+    schema accepts never fails the model: an accepted document cannot crash the compile."""
+    from agentclaw.community.core.apply_engine.paths import resource_path_refusal
+
+    for value in ("data//faq.csv", "data/./x", "data/kb//", "."):
+        refusal = resource_path_refusal(value)
+        assert refusal is not None and refusal[0] == "invalid_path", value
+        assert "not normalised" in refusal[1]
+    assert resource_path_refusal("../x")[0] == "path_traversal"
+    for value in ("data/a.md", "data/kb/", "data/..config"):
+        assert resource_path_refusal(value) is None, value
 
 
 # ── the rules that must survive the protocol axis ──────────────────────────

@@ -18,6 +18,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from agentclaw.community.core.workspace.protected_entries import protected_entry_refusal
+from agentclaw.community.core.apply_engine.paths import resource_path_refusal
 from agentclaw.community.core.apply_engine.identity_types import RESERVED_IDENTITY_FILES, legal_identity_types
 from agentclaw.community.core.apply_engine.capabilities import (
     Category,
@@ -655,7 +656,13 @@ def validate_resource_entry(
     """A workspace resource. Returns its ``path`` when the path is usable."""
     check_entry_keys(ctx, location, entry, Category.RESOURCES)
     path = entry.get("path")
-    usable = check_relative_path(ctx, f"{location}.path", path, what="path")
+    # The engine writes this path, so it asks the engine's own rule (the
+    # shared relative-path rule plus normalisation): what passes here never
+    # fails the desired-state model the compiler builds from it.
+    refusal = resource_path_refusal(path, what="path")
+    usable = refusal is None
+    if refusal is not None:
+        ctx.add(f"{location}.path", refusal[0], refusal[1])
     protected = protected_entry_refusal(str(path)) if usable else None
     if protected is not None:
         # The workspace root is the resources root: converging resources

@@ -29,7 +29,7 @@ from typing import Any, ClassVar, Collection, Generic, Mapping, Protocol, TypeVa
 
 from agentclaw.community.core.workspace.protected_entries import protected_entry_refusal
 from agentclaw.community.core.apply_engine.constructs import Construct, Category, Section
-from agentclaw.community.core.apply_engine.paths import relative_path_refusal
+from agentclaw.community.core.apply_engine.paths import resource_path_refusal
 from agentclaw.community.core.content_store import DIGEST_RE
 
 __all__ = [
@@ -226,7 +226,7 @@ class DesiredSkill:
 
 
 def _check_resource_path(path: str, *, tree: bool) -> None:
-    refusal = relative_path_refusal(path, what="resource path")
+    refusal = resource_path_refusal(path, what="resource path")
     _require(refusal is None, refusal[1] if refusal else "")
     # The workspace root is the resources root; what may not be a resource is the protected set
     # (``core/workspace/protected_entries``: identity files, the skills trees, the engine's state and

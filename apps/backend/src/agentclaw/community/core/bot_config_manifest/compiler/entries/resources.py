@@ -23,7 +23,7 @@ from agentclaw.community.core.apply_engine.desired_state import (
     EntryFailure,
     ContentRef,
 )
-from agentclaw.community.core.apply_engine.paths import relative_path_refusal
+from agentclaw.community.core.apply_engine.paths import resource_path_refusal
 from agentclaw.community.core.bot_config_manifest.sources.entry_delivery import archive_refusal
 from agentclaw.community.core.bot_config_manifest.sources.source_resolver import (
     DeclaredSourceResolver,
@@ -62,7 +62,7 @@ async def compile_resources(
         if not isinstance(path, str) or not path:
             failures.append(EntryFailure(f"[{index}]", "a resources entry must declare a 'path'"))
             continue
-        refusal = relative_path_refusal(path, what="path")
+        refusal = resource_path_refusal(path, what="path")
         if refusal is not None:
             failures.append(EntryFailure(path, refusal[1]))
             continue
