@@ -24,19 +24,19 @@
 - **Depends on:** Task 1。
 - **AC:** AC2、AC4、AC5、AC7。
 
-## Task 3 [~]: Wire explicit capture configuration and safe lifecycle checks
+## Task 3 [x]: Wire explicit capture configuration and safe lifecycle checks
 - **Goal:** 完整默认装配无知识表可用；记录与投递独立，并防止有历史时误切空实现。
 - **Files:** `di/space_knowledge_capture_config.py`、`di/modules/space_knowledge_module.py`、`di/container.py`、`core/space_knowledge/capture_lifecycle.py`、配置/DI/lifespan 测试及相关配置示例。
 - **Done when:**
-  - [ ] 缺省 capture=false，拒绝未知键/错误类型；纯配置校验在所有 profile eager 执行。
-  - [ ] 默认 graph 使用空扩展；真实 producer 必须与启用记录装配一致。
-  - [ ] 未启用且缺表时完整启动成功，不以预建同步表满足测试。
-  - [ ] DB bootstrap 后验证持久模式；生命周期异常不被 discovery 吞掉，验证前不得放行源写入。
-  - [ ] 当前 env/app 有历史时禁止关闭 capture；Sink 暂停不影响 capture。
+  - [x] 缺省 capture=false，拒绝未知键/错误类型；纯配置校验在所有 profile eager 执行。
+  - [x] 默认 graph 使用空扩展；真实 producer 必须与启用记录装配一致。
+  - [x] 未启用且缺表时完整启动成功，不以预建同步表满足测试。
+  - [x] DB bootstrap 后验证持久模式；生命周期异常不被 discovery 吞掉，验证前不得放行源写入。
+  - [x] 当前 env/app 有历史时禁止关闭 capture；Sink 暂停不影响 capture。
 - **Depends on:** Task 2。
 - **AC:** AC1、AC2、AC3、AC5。
 
-## Task 4: Migrate maintenance, approval, and Skill Space creators
+## Task 4 [~]: Migrate maintenance, approval, and Skill Space creators
 - **Goal:** 移除既有 writer 对知识 helper 的直接依赖，不改业务权限或事务边界。
 - **Files:** `core/repository/implementations/spaces/management.py`、`work_orders/{work_order,auto_approval}.py`、`skill_center/space_skill.py`；`di/modules/{spaces_module,space_skill_repository_bindings,work_orders_module}.py` 按真实绑定需要调整；原有相关 tests/fixtures。
 - **Done when:**

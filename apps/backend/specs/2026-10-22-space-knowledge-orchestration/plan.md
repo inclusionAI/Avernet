@@ -97,11 +97,11 @@ class KnowledgeSpacePersistenceEffects:
 # apps/backend/src/agentclaw/community/core/space_knowledge/capture_lifecycle.py (new)
 # After Database bootstrap, before serving requests/allowing source writes:
 # disabled + missing table -> safe no-op, no SQL against the absent table
-# disabled + table exists + current env/app history -> reject unsafe downgrade
+# disabled + table exists + same-environment history (any app) -> reject unsafe downgrade
 # enabled -> validate original outbox schema; no silent fallback on errors
 ```
 
-启动验证使用 DatabasePlugin 的 session/bind；不得窥探 CommunityDatabase 私有 engine。DI configure/constructor 不做 DB I/O。必须保证验证异常被正常 lifespan 传播，不靠会吞 provider 异常的 lifecycle discovery；校验未完成前不得放行可能丢事件的源写入。沿用公共 Lifecycle，不修改它的阶段语义。若 startup 使用者涉及提前写入，先验证这一顺序，不以默认已就绪绕过。
+启动验证使用 DatabasePlugin 的 session/bind；不得窥探 CommunityDatabase 私有 engine。DI configure/constructor 不做 DB I/O。必须保证验证异常被正常 lifespan 传播，不靠会吞 provider 异常的 lifecycle discovery；校验未完成前不得放行可能丢事件的源写入。沿用公共 Lifecycle，不修改它的阶段语义。若 startup 使用者涉及提前写入，先验证这一顺序，不以默认已就绪绕过。实现采用同一个幂等 validation guard：正常 startup 在 DB bootstrap 后验证，startup writer/库调用在首个受保护事务内验证，失败在外部副作用或提交前传播，不以已就绪默认值跳过。
 
 ```python
 # apps/backend/src/agentclaw/community/di/container.py:271 (modify)

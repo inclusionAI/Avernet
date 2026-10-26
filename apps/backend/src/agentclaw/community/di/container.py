@@ -110,6 +110,7 @@ from agentclaw.community.di.modules.skill_center_group4_module import (
 from agentclaw.community.di.modules.skill_version_module import SkillVersionModule
 from agentclaw.community.di.modules.skills_pool_module import SkillsPoolModule
 from agentclaw.community.di.modules.space_knowledge_module import SpaceKnowledgeModule
+from agentclaw.community.di.space_knowledge_capture_config import SpaceKnowledgeCaptureConfig
 from agentclaw.community.di.modules.spaces_module import SpacesModule
 from agentclaw.community.di.modules.system_config_module import SystemConfigModule
 from agentclaw.community.di.modules.task_discovery_module import TaskDiscoveryModule
@@ -269,6 +270,7 @@ def build_injector(
     # TaskWorker binding — an app that boots clean and never runs a queued task.
     # Resolving it here makes a bad owner name fail the boot on every profile.
     _app_injector.get(TaskQueueConfig)
+    _app_injector.get(SpaceKnowledgeCaptureConfig)
     _app_injector.get(CanonicalCenterStoreConfig)
     _app_injector.get(DraftContentStoreConfig)
     _app_injector.get(DesktopSkillRecoveryConfig)
