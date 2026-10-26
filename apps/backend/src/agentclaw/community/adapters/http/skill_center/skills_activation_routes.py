@@ -275,7 +275,7 @@ async def activate_skill_set(
 
     Args:
         skill_set_id: 要激活的能力集 ID
-        proxy_token: agentclawproxy token，用于同步软链到远程设备
+        proxy_token: Proxy token used to sync symlinks to remote devices.
     """
     # Get effective path parameters from request body
     (
@@ -335,7 +335,7 @@ async def deactivate_skill_set(
 
     Args:
         skill_set_id: 要取消激活的能力集 ID
-        proxy_token: agentclawproxy token，用于同步软链到远程设备
+        proxy_token: Proxy token used to sync symlinks to remote devices.
     """
     # Get effective path parameters from request body
     (

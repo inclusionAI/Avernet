@@ -586,7 +586,7 @@ async def test_projection_logs_agentpass_scope_success_without_snapshot_secret(c
     class _TokenBearingPassport(_RuntimePassport):
         def query_agent_passport(self, bot_id: str, owner_id: str) -> dict:
             snapshot = super().query_agent_passport(bot_id, owner_id)
-            return {**snapshot, "token": "passport-token-secret"}
+            return {**snapshot, "token": "test-token"}
 
     runtime = BotRuntimeProjector(
         factory=_RuntimeFactory(),
@@ -610,7 +610,7 @@ async def test_projection_logs_agentpass_scope_success_without_snapshot_secret(c
     assert "agentpass_runtime_scope_update_succeeded" in logged
     assert "status=succeeded" in logged
     assert "duration_ms" in logged
-    assert "passport-token-secret" not in logged
+    assert "test-token" not in logged
 
 
 @pytest.mark.asyncio
@@ -619,7 +619,7 @@ async def test_projection_logs_agentpass_snapshot_failure_without_secret(caplog)
 
     class _FailingPassport(_RuntimePassport):
         def query_agent_passport(self, bot_id: str, owner_id: str) -> dict:
-            raise RuntimeError("passport-token-secret")
+            raise RuntimeError("test-token")
 
     runtime = BotRuntimeProjector(
         factory=_RuntimeFactory(),
@@ -646,7 +646,7 @@ async def test_projection_logs_agentpass_snapshot_failure_without_secret(caplog)
     assert "stage=snapshot" in logged
     assert "error_type=RuntimeError" in logged
     assert "duration_ms" in logged
-    assert "passport-token-secret" not in logged
+    assert "test-token" not in logged
 
 
 @pytest.mark.asyncio
@@ -655,7 +655,7 @@ async def test_projection_logs_agentpass_update_failure_without_secret(caplog):
 
     class _FailingPassport(_RuntimePassport):
         def update_passport(self, **kwargs) -> None:
-            raise RuntimeError("passport-token-secret")
+            raise RuntimeError("test-token")
 
     runtime = BotRuntimeProjector(
         factory=_RuntimeFactory(),
@@ -681,7 +681,7 @@ async def test_projection_logs_agentpass_update_failure_without_secret(caplog):
     assert "stage=update" in caplog.text
     assert "error_type=RuntimeError" in caplog.text
     assert "duration_ms=" in caplog.text
-    assert "passport-token-secret" not in caplog.text
+    assert "test-token" not in caplog.text
 
 
 @pytest.mark.asyncio

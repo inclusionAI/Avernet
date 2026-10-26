@@ -68,18 +68,18 @@ class Passport:
             "authorization_id": "aac",
         }
         if self.timeout_after_issue:
-            raise RuntimeError("do not expose credential-secret")
-        return {**self.current, "token": "credential-secret"}
+            raise RuntimeError("do not expose test-token")
+        return {**self.current, "token": "test-token"}
 
     def query_auth_status(self, *args, **kwargs):
         return {
             "status": self.status,
-            "token": "credential-secret" if self.status == "ISSUED" else None,
+            "token": "test-token" if self.status == "ISSUED" else None,
         }
 
     def retire_agent_credentials(self, **kwargs):
         if self.retire_fail:
-            raise RuntimeError("retire failed credential-secret")
+            raise RuntimeError("retire failed test-token")
         assert kwargs["keep_credential_id"] == self.current["credential_id"]
         self.retired.append(kwargs)
 
@@ -90,11 +90,11 @@ class Runtime:
 
     def hot_update_passport_token_to_device(self, **kwargs):
         if self.fail:
-            raise RuntimeError("runtime rejected credential-secret")
+            raise RuntimeError("runtime rejected test-token")
         self.calls.append(kwargs)
         return {
             "bindings": [{"binding_id": 1, "type": "draft", "device_count": 1}],
-            "token_prefix": "credential-secret",
+            "token_prefix": "test-token",
         }
 
 
@@ -197,7 +197,7 @@ def test_full_handoff_preserves_b6_resource_identity_and_other_collaborators(wor
         assert [r.user_id for r in db.query(BotCollaboratorModel).all()] == ["C"]
         assert db.query(BotExecutionIdentityBindingModel).count() == 0
         assert db.query(BotCollabLockModel).count() == 0
-    assert "credential-secret" not in str(world.repo.get(op)) + str(world.queue.calls)
+    assert "test-token" not in str(world.repo.get(op)) + str(world.queue.calls)
     assert "credential_id" not in world.service().get(operation_id=op, actor_id="B")
 
 
@@ -268,7 +268,7 @@ def test_failed_boundary_keeps_old_owner_and_retries_same_generation(world, boun
     for _ in range(7):
         world.service().step(op)
     assert world.bots.get_by_pk(world.bot["id"])["owner_id"] == "A"
-    assert "credential-secret" not in str(world.repo.get(op))
+    assert "test-token" not in str(world.repo.get(op))
     world.runtime.fail = world.passport.retire_fail = False
     drain(world, op)
     assert len(world.passport.issues) == 1
@@ -395,7 +395,7 @@ def test_worker_lease_and_fact_allowlist(world):
     with pytest.raises(HandoffError, match="LEASE_LOST"):
         world.repo.advance(op, "second", "SUCCEEDED")
     with pytest.raises(ValueError, match="non-secret"):
-        world.repo.advance(op, "first", "QUEUED", token="credential-secret")
+        world.repo.advance(op, "first", "QUEUED", token="test-token")
 
 
 def test_generation_drift_does_not_inject_or_commit(world):
@@ -436,7 +436,7 @@ def test_authorization_metadata_is_executor_only_and_never_contains_token(world)
     world.service().step(op)
     result = world.service().authorization(operation_id=op, actor_id="B")
     assert set(result) == {"status", "redirect_url", "iframe_url"}
-    assert "credential-secret" not in str(result)
+    assert "test-token" not in str(result)
     with pytest.raises(HandoffError, match="ACCESS_DENIED"):
         world.service().authorization(operation_id=op, actor_id="A")
 
