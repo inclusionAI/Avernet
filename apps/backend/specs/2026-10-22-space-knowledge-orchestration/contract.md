@@ -1,5 +1,13 @@
 # Space knowledge orchestration v1
 
+> **2026-10-26 accepted follow-up (not implemented at the pinned PR head):**
+> A deployment that has never enabled knowledge must keep all legacy Space,
+> membership, approval and Skill Space creation paths working without
+> `ac_space_knowledge_sync`. See [spec.md](spec.md), [plan.md](plan.md), and
+> [tasks.md](tasks.md). Once implemented, this supersedes the global DDL
+> prerequisite below for never-enabled deployments only. Retained-history
+> deployments must preserve capture even while delivery is paused.
+
 ## Summary
 Authenticated Space members create/query canonical knowledge assets using a configured provider. No local knowledge asset/content/ACL mirror; immutable membership delivery snapshots are retained until acknowledged. Ordinary members can create; provider makes the actual authenticated creator Owner. No Bot installation, grant or enablement side effects.
 
