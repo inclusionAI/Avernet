@@ -79,10 +79,11 @@ export function ConversationBotItemActions(props: ConversationBotItemActionsProp
   return (
     <div
       className={cn(
-        'absolute top-1/2 right-[34px] z-10 flex -translate-y-1/2 items-center gap-0.5 pl-5',
+        'absolute top-1/2 right-2 z-10 flex -translate-y-1/2 items-center gap-0.5 pl-5',
         'mask-[linear-gradient(to_right,transparent,black_20px)]',
         // 遮盖底撤除:按钮 hover 自带 muted 底,操作区不再叠一层与行底不一致的底色;
-        // right-[34px] 使行尾箭头与操作区最右按钮之间保持与按钮间(gap-0.5)一致的 2px 等宽间隙。
+        // right-2 贴行右缘(#2990 紧凑单行形态:行尾不再保留展开箭头位,折叠角标为
+        // 名称行内元素;按钮间保持 gap-0.5 一致的 2px 间隙)。
         'opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100',
         // 展开或任一筛选(归属/范围/会话ID检索)激活时钉住可见;
         // 生效中的检索在 Bot 收起时仍可见(🔍 按钮激活态圆点);

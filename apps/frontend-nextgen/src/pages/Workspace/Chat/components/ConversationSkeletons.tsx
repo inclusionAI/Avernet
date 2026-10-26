@@ -14,7 +14,7 @@ const BOT_NAME_LAYOUTS: Array<{ name: string; chip?: string }> = [
   { name: 'w-[29%]' },
 ];
 
-/** 一级 Bot 目录行骨架:回声 52px 行、36px 头像槽(内 32px 头像)、双行名称;块间无分隔线(与实装行 2026-10-22 同构)。 */
+/** 一级 Bot 目录行骨架:回声 40px 行、36px 头像槽(内 24px 头像)、名称与引擎徽章同行(与实装行 #2990 紧凑单行同构)。 */
 export function ConversationBotRowsSkeleton({ rows = 3 }: { rows?: number }) {
   return (
     <div aria-hidden="true" className="flex flex-col gap-1 overflow-hidden">
@@ -22,11 +22,11 @@ export function ConversationBotRowsSkeleton({ rows = 3 }: { rows?: number }) {
         const layout = BOT_NAME_LAYOUTS[index % BOT_NAME_LAYOUTS.length];
         return (
           <div key={index}>
-            <div className="flex min-h-13 items-center gap-2 pr-4 pl-[17px]">
+            <div className="flex min-h-10 items-center gap-2 pr-4 pl-[17px]">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center">
-                <Skeleton.Block className="h-8 w-8 rounded-full" />
+                <Skeleton.Block className="h-6 w-6 rounded-full" />
               </span>
-              <div className="flex min-w-0 flex-1 flex-col gap-1">
+              <div className="flex min-w-0 flex-1 items-center gap-1.5">
                 <Skeleton.Block className={cn('h-3.5 rounded-full', layout.name)} />
                 {layout.chip && <Skeleton.Block className={cn('h-4 rounded', layout.chip)} />}
               </div>
