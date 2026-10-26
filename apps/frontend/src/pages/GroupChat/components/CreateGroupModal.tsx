@@ -56,7 +56,6 @@ import {
   Workflow,
   X,
 } from 'lucide-react';
-import { history } from '@umijs/max';
 import React, {
   useCallback,
   useEffect,
@@ -629,7 +628,8 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
     if (groupUrl) {
       onClose();
       chatBridge.closePanelForce();
-      history.push(groupUrl);
+      // 同页 SPA 跳转会保留旧 Bot 视角；重新加载后按 URL 中的新群主 Bot 初始化。
+      window.location.assign(groupUrl);
     }
     return null;
   };

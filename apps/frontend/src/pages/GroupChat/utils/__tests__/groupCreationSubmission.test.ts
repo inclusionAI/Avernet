@@ -55,8 +55,8 @@ it('submits current form bytes and bindings exactly once without reloading a Dra
   expect(Buffer.byteLength(body.collaboration.definition.content_yaml)).toBe(2174);
   expect(body.collaboration.participant_bindings).toHaveLength(3);
   resolvePost!(); const result = await pending;
-  expect(result).toEqual({ group_id: 'group', initial_session_id: 'session' });
-  expect(groupLink(GROUP_CREATION_HOST, user, result)).toBe('/bcn/chat/detail?id=group&session=session&bot_uuid=human_alice');
+  expect(result).toEqual({ group_id: 'group', initial_session_id: 'session', driver_bot_uuid: 'alice-bot' });
+  expect(groupLink(GROUP_CREATION_HOST, user, result)).toBe('/bcn/chat/detail?id=group&session=session&bot_uuid=alice-bot');
   expect(calls[calls.length - 1].url).toMatch(/\/me$/);
   expect(operation.state.phase).toBe('success'); expect(await operation.submit({ user, params })).toBeUndefined(); expect(posts()).toHaveLength(1);
 });
@@ -87,11 +87,17 @@ it('does not return a navigation result after the modal is disposed during creat
 it.each(['chat', 'manager_worker'] as const)('uses ordinary form parameters for %s without a Draft', async group_strategy => {
   const ordinary: CreateGroupParams = { driver_bot: 'friend', originator: 'alice-bot', participants: [{ bot_uuid: 'friend' }, { bot_uuid: 'alice-bot' }],
     label: '用户自己的协作群', group_strategy, routing_policy: { default_bot_final_delivery: 'inject_observers' } };
-  const operation = new GroupCreationSubmission(() => {}); await operation.submit({ user, params: ordinary });
+  const operation = new GroupCreationSubmission(() => {});
+  const pending = operation.submit({ user, params: ordinary });
+  ordinary.driver_bot = 'later-selection';
+  const result = await pending;
   const body = JSON.parse(posts()[0].options.body);
   expect(body.collaboration.strategy).toBe(group_strategy); expect(body.driver_bot_uuid).toBe('friend');
   expect(body.participants.find((p: any) => p.actor_id === 'friend').role).toBe(group_strategy === 'chat' ? 'driver' : 'manager');
   expect(calls.some(call => /drafts|validate/.test(call.url))).toBe(false); expect(operation.state.phase).toBe('success');
+  expect(result?.driver_bot_uuid).toBe('friend');
+  expect(operation.state.result).toEqual(result);
+  expect(groupLink(GROUP_CREATION_HOST, user, result)).toBe('/bcn/chat/detail?id=group&session=session&bot_uuid=friend');
 });
 it('reads initial source with its capability without any group write', async () => {
   const source = await readStoredDefinition(BCS_API_BASE, reference, new AbortController().signal);
@@ -114,7 +120,7 @@ it('preserves advanced fields and deduplicates participants', () => {
   const body = groupCreationBody({ ...params, opening_message: '{{bcs.run_id}}\n', participants: [...params.participants, params.participants[0]] }, validation);
   expect(body.opening_message).toBe('{{bcs.run_id}}\n'); expect(body.participants).toHaveLength(4);
 });
-it('navigates to the real group/session in the current Human perspective', () => {
-  expect(groupLink(GROUP_CREATION_HOST, user, { group_id: 'group', initial_session_id: 'group:session' })).toBe('/bcn/chat/detail?id=group&session=group%3Asession&bot_uuid=human_alice');
+it('navigates to the created group/session as its driver, keeping the fallback list in Human perspective', () => {
+  expect(groupLink(GROUP_CREATION_HOST, user, { group_id: 'group', initial_session_id: 'group:session', driver_bot_uuid: 'bot-b:entity' })).toBe('/bcn/chat/detail?id=group&session=group%3Asession&bot_uuid=bot-b%3Aentity');
   expect(groupLink(GROUP_CREATION_HOST, user)).toBe('/bcn/chat/list?bot_uuid=human_alice');
 });

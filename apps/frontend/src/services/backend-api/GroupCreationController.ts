@@ -17,7 +17,8 @@ export interface GroupBot {
   status: string; reachability: string; summary?: string;
 }
 export interface BotPage { items: GroupBot[]; total: number; offset: number; limit: number }
-export interface GroupCreationResult { group_id: string; initial_session_id: string }
+/** Created group identifiers plus the submitted driver used for navigation. */
+export interface GroupCreationResult { group_id: string; initial_session_id: string; driver_bot_uuid: string }
 export class UserApiError extends Error {
   constructor(message: string, public code = '', public unknownOutcome = false) { super(message); }
 }
@@ -25,7 +26,7 @@ export class UserApiError extends Error {
 // This frontend exposes native BCS through its existing same-origin proxy.
 export const GROUP_CREATION_HOST: GroupCreationHost = {
   userApiBaseUrl: '/bcnproxy/collaboration/user',
-  groupUrlTemplate: '/bcn/chat/detail?id={groupId}&session={sessionId}&bot_uuid={humanActorId}',
+  groupUrlTemplate: '/bcn/chat/detail?id={groupId}&session={sessionId}&bot_uuid={driverBotId}',
   groupListUrl: '/bcn/chat/list?bot_uuid={humanActorId}',
 };
 export const BCS_API_BASE = '/bcnproxy';
@@ -45,7 +46,7 @@ export function groupLink(host: GroupCreationHost, user: GroupUser, result?: Gro
   }
   return sameOrigin(template.replace(/\{groupId\}/g, encodeURIComponent(result.group_id))
     .replace(/\{sessionId\}/g, encodeURIComponent(result.initial_session_id))
-    .replace(/\{humanActorId\}/g, encodeURIComponent(`human_${user.user_id}`)));
+    .replace(/\{driverBotId\}/g, encodeURIComponent(result.driver_bot_uuid)));
 }
 
 async function request(host: GroupCreationHost, path: string, signal: AbortSignal, user?: GroupUser, body?: unknown): Promise<any> {
@@ -162,7 +163,7 @@ export async function createGroup(host: GroupCreationHost, user: GroupUser, body
   if (typeof data.group_id !== 'string' || !data.group_id || typeof data.initial_session_id !== 'string' || !data.initial_session_id) {
     throw new UserApiError('服务未返回完整的群和初始会话标识', '', true);
   }
-  return { group_id: data.group_id, initial_session_id: data.initial_session_id };
+  return { group_id: data.group_id, initial_session_id: data.initial_session_id, driver_bot_uuid: body.driver_bot_uuid };
 }
 
 export interface CollaborationDefinitionReference {
