@@ -295,22 +295,22 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     this.notifyGroup(task, "result");
   }
 
-  async finishForMcpPermission(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string }, finalSummary?: unknown): Promise<void> {
+  async finishForOwnerHandoff(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string }, finalSummary?: unknown): Promise<void> {
     const task = await this.mutate(taskId, version, value => {
       if (value.simulation || value.level === "debug" || value.status !== "running" || value.execution?.executionId !== input.executionId
-        || value.execution.state === "ended" || value.phase === "apply") this.fail(409, "当前不能转交 Owner 处理 MCP 权限");
+        || value.execution.state === "ended" || value.phase === "apply") this.fail(409, "当前不能转交 Owner 处理");
       if (typeof input.summary !== "string" || !input.summary.trim() || input.summary.length > 8000 || containsSecret(input.summary)
-        || !Array.isArray(input.evidence_ids) || !input.evidence_ids.length) this.fail(422, "MCP 权限转交需要已核实原因、Owner 处理指引及现场证据");
+        || !Array.isArray(input.evidence_ids) || !input.evidence_ids.length) this.fail(422, "Owner 转交需要已核实原因、Owner 处理指引及现场证据");
       validateRecoveryEvidenceReferences(value, input.evidence_ids);
       if (!value.evidence.some(item => input.evidence_ids.includes(item.evidence_id)
-        && ["session_read", "trajectory_read", "runtime_inspect"].includes(item.source))) this.fail(422, "MCP 权限转交必须引用受控现场读取，不能只引用诊断描述");
-      return { ...value, status: "completed", completionReason: "mcp_permission_required", version: value.version + 1,
+        && ["session_read", "trajectory_read", "runtime_inspect"].includes(item.source))) this.fail(422, "Owner 转交必须引用受控现场读取，不能只引用诊断描述");
+      return { ...value, status: "completed", completionReason: "owner_handoff", version: value.version + 1,
         observationDeadlineAt: null, ownerDeadlineAt: null, requiresFreshObservation: false,
         ...(value.executionRetry ? { executionRetry: { ...value.executionRetry, retryAt: 0 } } : {}),
         judgment: { delivery: value.judgment?.delivery ?? "unconfirmed", response: value.judgment?.response ?? "unknown",
           effect: "not_recovered", summary: input.summary, evidence_ids: input.evidence_ids },
         timeline: [...value.timeline, this.event("termination", "agent", input.summary,
-          { completion_reason: "mcp_permission_required", evidence_ids: input.evidence_ids, phase: value.phase })] };
+          { completion_reason: "owner_handoff", evidence_ids: input.evidence_ids, phase: value.phase })] };
     }, finalSummary);
     // Terminal state prevents another Agent turn; the existing Owner notification records its own receipt.
     try { await this.notify(task, "result", input.summary); }

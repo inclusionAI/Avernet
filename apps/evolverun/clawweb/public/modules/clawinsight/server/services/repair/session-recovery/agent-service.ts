@@ -456,6 +456,8 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     return { ok: true };
   }
   async report(task: RecoveryStoredTask, body: Record<string, unknown>) {
+    // Compatibility for packages deployed before the generic handoff result.
+    if (body.kind === "blocked" && body.reason === "mcp_permission_required") body = { ...body, kind: "owner_handoff" };
     if (body.phase !== task.phase) fail(409, "回报不对应当前阶段，请重新读取任务");
     if (task.simulation && !["assessment", "plan", "blocked", "release"].includes(String(body.kind))) fail(403, "仿真只接受拟议判断和方案，不接受执行或效果回报");
     if (body.kind === "release") {
@@ -483,16 +485,17 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     else if (body.kind === "apply") {
       if (typeof body.applicable !== "boolean" || typeof body.success !== "boolean" || typeof body.summary !== "string") fail(422, "执行回报格式无效");
       await this.deps.business().finishApply(task.taskId, task.version, { applicable: body.applicable, success: body.success, summary: body.summary }, body.final_summary);
+    } else if (body.kind === "owner_handoff") {
+      await this.deps.business().finishForOwnerHandoff(task.taskId, task.version,
+        { summary: body.summary as string, evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId }, body.final_summary);
     } else if (body.kind === "blocked" && typeof body.summary === "string") {
       if (task.simulation && body.reason === "user_continued") await this.deps.business().assessSimulation(task.taskId, task.version,
         { decision: "user_continued", summary: body.summary, evidence_ids: body.evidence_ids as string[] }, body.final_summary);
       else if (body.reason === "user_continued") await this.deps.business().finishForUserContinuation(task.taskId, task.version,
         { summary: body.summary, evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId }, body.final_summary);
-      else if (body.reason === "mcp_permission_required") await this.deps.business().finishForMcpPermission(task.taskId, task.version,
-        { summary: body.summary, evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId }, body.final_summary);
       else if (body.reason === "target_unavailable") await this.deps.business().finishForTargetUnavailable(task.taskId, task.version,
         { summary: body.summary, evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId }, body.final_summary);
-      else if (body.reason !== undefined) fail(422, "未知的结束原因。普通受阻请省略 reason，保留 kind=blocked、当前 phase 和原因 summary；不要改为 message 决策。user_continued 仅用于已核实的用户续聊，target_unavailable 需要 Provider 明确的目标不可用证据；mcp_permission_required 仅用于已核实、需 Owner 自行处理的 MCP 服务权限问题。");
+      else if (body.reason !== undefined) fail(422, "未知的结束原因。普通受阻请省略 reason，保留 kind=blocked、当前 phase 和原因 summary；不要改为 message 决策。user_continued 仅用于已核实的用户续聊，target_unavailable 需要 Provider 明确的目标不可用证据。符合手册转交条件时使用 kind=owner_handoff，并提供处理指引和现场 evidence_ids。");
       else await this.deps.business().executionFailure(task.taskId, redactPersistableText(body.summary, 8000), task.execution!.executionId, false, body.final_summary);
     }
     else fail(422, "未知业务回报类型");

@@ -258,16 +258,20 @@ POST /api/insight/v1/monitoring/session-recoveries/:taskId/terminate
 
 `blocked.reason=target_unavailable` 将自愈流程正常结束为 `completed`，同时回传 `completion_reason=target_unavailable`、`effect=unknown`。该结论必须引用已留存的受控工具证据，且对应审计中有 Provider 明确返回的 `target_unavailable` 错误；普通 HTTP 404、会话缺失、超时或模型断言均不足以成立。页面显示“目标不可用”，不算自愈执行故障，也不宣称业务恢复；是否干预仍由实际工具审计判断。
 
-### 已核实的 MCP 服务权限问题转交 Owner
+### 按手册转交 Owner 自行处理
 
-Agent 对当前现场确认 MCP 服务权限不足、后续仅需 Owner 自行处理时，直接回报
-`{"kind":"blocked","phase":"assess","reason":"mcp_permission_required","summary":"问题、现场依据、具体 MCP 服务及 Owner 处理指引（Markdown）","evidence_ids":["工具返回的完整证据 ID"]}`。
-已有观察／判断阶段也可按当前 phase 回报；不能在执行环境动作中途切换，Debug／仿真不发送真实通知。不能仅凭诊断标签、普通 404、链接解析失败或未明原因的工具错误认定权限问题。
+Agent 根据适用手册及当前现场，确认剩余阻塞满足“转交 Owner 自行处理并结束”的条件，且没有其他待调查或修复事项时，回报
+`{"kind":"owner_handoff","phase":"当前阶段","summary":"已核实的剩余阻塞、手册处理依据、具体对象及 Owner 处理指引（Markdown）","evidence_ids":["受控现场读取返回的完整证据 ID"]}`。
+此结果表示处置决定，不使用普通 `blocked` 的错误原因表达；控制面不识别具体故障类别。`assess`、`observe`、`plan`、`verify` 均可提交，不能在 `apply` 执行环境动作中途切换，Debug／仿真禁止真实转交。
 
-服务复用现有 Owner 钉钉通知，将处理指引直接发给目标 Owner，并记录发送回执。
+服务校验当前任务、执行归属、版本及已保存的现场读取证据，复用现有 Owner 通知发送指引并记录回执。
 不创建方案、不进入等待确认／配合、不再执行或验证，结束为 `status=completed`、
-`completion_reason=mcp_permission_required`、`effect=not_recovered`；干预情况仍由实际审计计算，通知不算干预。
+`completion_reason=owner_handoff`、`effect=not_recovered`；已有触达／响应结论保留，干预情况仍由实际审计计算，通知不算干预。
 通知失败或禁用时同样结束，但页面不得显示“已通知”；成功时显示“已通知 Owner 自行处理”。通知回执与任务结束均保存在原时间线，无新增数据库字段或配置。
+
+其他需要 Owner 配合的情况仍进入完整方案；普通消息干预后的 `observe.effect=not_recovered` 仍推进 `plan`，不自动转交 Owner。
+
+兼容与发布顺序：先部署支持 `owner_handoff` 的结果发送／接收后端和页面，再更新自愈包。旧包的 `blocked.reason=mcp_permission_required` 在 Agent 回报入口转换为同一个通用转交处理，之后生成 `completion_reason=owner_handoff`；历史任务与待发送结果中的旧原因仍可读取、展示及回传，不迁移既有记录。新 Skill／Wrapper 不再输出或依赖 MCP 专属原因。回滚自愈包可继续使用旧输入；已产生新结果后不应先回滚接收端。
 
 ## 任务整体摘要
 

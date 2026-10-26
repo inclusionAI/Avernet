@@ -455,14 +455,15 @@ it('shows target unavailability as an ended workflow with unknown recovery effec
 });
 
 
-it.each([true, false])('shows Owner permission instructions without continuing or claiming an unconfirmed notification: %s', async sent => {
-  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'completed', phase: 'assess', completionReason: 'mcp_permission_required', plan: null,
-    judgment: { delivery: 'unconfirmed', response: 'unknown', effect: 'not_recovered', summary: '请在能力集中申请目标 MCP 服务权限，获批后自行继续原任务。', evidence_ids: ['evidence'] },
+it.each(['owner_handoff', 'mcp_permission_required'].flatMap(reason => [true, false].map(sent => ({ reason, sent }))))('shows Owner instructions with accurate notification status: $reason / $sent', async ({ reason, sent }) => {
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'completed', phase: 'assess', completionReason: reason, plan: null,
+    judgment: { delivery: 'unconfirmed', response: 'unknown', effect: 'not_recovered', summary: '请 Owner 在管理页面恢复已停用的业务资源，再继续原任务。', evidence_ids: ['evidence'] },
     timeline: [{ event_id: 'notice', at_ms: 1, kind: 'notification', actor: 'service', summary: sent ? '钉钉通知已发送' : '钉钉通知未确认', payload: { kind: 'result', sent } }],
   } as never);
   render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
   await screen.findByRole('region', { name: 'Owner 处理指引' });
-  expect(within(screen.getByRole('region', { name: 'Owner 处理指引' })).getByText(/请在能力集中申请目标 MCP 服务权限/)).toBeVisible();
+  expect(screen.queryByText(/MCP 服务权限需要 Owner/)).toBeNull();
+  expect(within(screen.getByRole('region', { name: 'Owner 处理指引' })).getByText(/请 Owner 在管理页面恢复已停用的业务资源/)).toBeVisible();
   if (sent) expect(screen.getAllByText('已通知 Owner 自行处理').length).toBeGreaterThan(0);
   else expect(screen.queryByText('已通知 Owner 自行处理')).toBeNull();
   expect(screen.queryByRole('button', { name: /确认完整方案|拒绝方案|停止任务|查看方案/ })).toBeNull();
