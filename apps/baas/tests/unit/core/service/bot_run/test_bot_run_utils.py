@@ -830,7 +830,11 @@ class TestResolveBindingNormalOnly:
         resolver = BotBindingResolver(plugin)
         info = await resolver.resolve_binding(
             bot_id=f"{BOT_ID}:{ENTITY_ID}",
-            metadata={"caller_token": "iam-value", "type": "iam-token", "user_id": "u-1"},
+            metadata={
+                "caller_token": "iam-value",
+                "type": "iam-token",
+                "user_id": "u-1",
+            },
         )
         assert info is not None
         assert info.device_provider == "teclaw"
@@ -855,7 +859,8 @@ class TestIsCallerMode:
         """binding_info 缺失时无法确认引擎，保守判 False（不拉容器）。"""
         assert (
             is_caller_mode(
-                {"caller_token": "iam-value", "type": "iam-token", "user_id": "u-1"}, None
+                {"caller_token": "iam-value", "type": "iam-token", "user_id": "u-1"},
+                None,
             )
             is False
         )
