@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 # Real HTTP/CLI journey: author once, share exact bytes, revise and revoke.
 E2E_TESTS_STORIES+=(story_collaboration_draft_delivery)
+if [[ -n "$(mock_view_base_url)" ]]; then
+    E2E_TESTS_STORIES+=(story_collaboration_draft_group_launch)
+fi
+
+story_collaboration_draft_group_launch() {
+    info "Story: a Human opens a shared Draft and launches it with their own Bots"
+    local result=0
+    python3 "$SCRIPT_DIR/collaboration_draft_group_story.py" \
+        --base-url "$BCS_API_BASE_URL" --human "$BCS_MOCK_USER_ID" \
+        --mock-sink-url "$(mock_sink_base_url)" || result=$?
+    assert_eq "shared Draft preview and Human group creation journey" "$result" "0"
+}
 
 story_collaboration_draft_delivery() {
     info "Story: an author delivers immutable YAML revisions without a chat Session"
