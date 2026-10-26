@@ -31,7 +31,7 @@ export interface SessionRecoveryTaskApi extends SessionRecoveryApi {
   createSimulations(body: unknown, actor: RecoveryActor): Promise<{ batch_id: string; items: Array<RecoveryAcknowledgment & { task_id: string }> }>;
   assessSimulation(taskId: string, version: number, input: import("./simulation.js").RecoverySimulationAssessment): Promise<void>;
   create(body: unknown, actor: RecoveryActor): Promise<RecoveryAcknowledgment & { task_id: string }>;
-  list(eventId: string, actor: RecoveryActor): Promise<Array<{ task_id: string; status: RecoveryStoredTask["status"]; phase: RecoveryStoredTask["phase"]; effect: RecoveryJudgment["effect"]; completion_reason?: "user_continued" | "target_unavailable" }>>;
+  list(eventId: string, actor: RecoveryActor): Promise<Array<{ task_id: string; status: RecoveryStoredTask["status"]; phase: RecoveryStoredTask["phase"]; effect: RecoveryJudgment["effect"]; completion_reason?: "user_continued" | "target_unavailable" | "mcp_permission_required" }>>;
   detail(taskId: string, actor: RecoveryActor): Promise<RecoveryTaskView>;
   setTaskShared(taskId: string, shared: boolean, actor: RecoveryActor): Promise<RecoveryTaskView>;
   terminate(taskId: string, actor: RecoveryActor, reason?: unknown): Promise<RecoveryTaskView & { termination: RecoveryTermination }>;
@@ -43,6 +43,7 @@ export interface SessionRecoveryTaskApi extends SessionRecoveryApi {
   plan(taskId: string, version: number, plan: RecoveryPlan): Promise<void>;
   finishApply(taskId: string, version: number, input: { applicable: boolean; success: boolean; summary: string }): Promise<void>;
   finishForUserContinuation(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string }): Promise<void>;
+  finishForMcpPermission(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string }): Promise<void>;
   finishForTargetUnavailable(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string }): Promise<void>;
   executionFailure(taskId: string, reason: string, executionId?: string, retryable?: boolean): Promise<void>;
   maintenance(): Promise<void>;

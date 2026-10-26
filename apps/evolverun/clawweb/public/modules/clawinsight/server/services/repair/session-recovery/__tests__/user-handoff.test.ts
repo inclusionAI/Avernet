@@ -143,3 +143,48 @@ it("does not accept model-only target loss or an ordinary HTTP 404 as destroyed-
   }
   expect(await current(task.taskId)).toMatchObject({ status: "running", phase: "assess" });
 });
+
+
+it.each(["assess", "observe"] as const)("notifies the Owner and ends an MCP permission case in %s without a plan or continuation", async phase => {
+  let task = phase === "observe" ? await toObserve(await create()) : await create();
+  const read = await inspect(task, "permission-evidence"); task = await current(task.taskId);
+  const summary = "## MCP 权限问题\n\n目标服务明确拒绝当前身份访问。\n\n## 请 Owner 处理\n\n在能力集中申请该 MCP 服务权限，获批后自行继续原任务。";
+  await agent.report(task, { kind: "blocked", phase, reason: "mcp_permission_required", summary, evidence_ids: [read.evidenceId] });
+  task = await current(task.taskId);
+  expect(task).toMatchObject({ status: "completed", phase, completionReason: "mcp_permission_required", plan: null,
+    ownerDeadlineAt: null, observationDeadlineAt: null, execution: { state: "ended" }, judgment: { effect: "not_recovered", summary } });
+  expect(notifier.notify).toHaveBeenCalledExactlyOnceWith({ ownerId: "owner", taskId: task.taskId, kind: "result", summary });
+  expect(task.timeline.some(event => event.kind === "notification" && event.payload.kind === "result" && event.payload.sent === true)).toBe(true);
+  expect(task.timeline.some(event => event.kind === "plan" || event.kind === "owner_decision")).toBe(false);
+  await service.reportResults();
+  expect(callbacks.at(-1)).toMatchObject({ status: "completed", completion_reason: "mcp_permission_required", effect: "not_recovered", intervention_status: phase === "observe" ? "performed" : "none" });
+  await service.executionFailure(task.taskId, "late AIS callback", task.execution!.executionId, true);
+  await service.maintenance();
+  expect(submissions).toHaveLength(1);
+  await expect(agent.report(task, { kind: "blocked", phase, reason: "mcp_permission_required", summary, evidence_ids: [read.evidenceId] })).rejects.toMatchObject({ status: 409 });
+  expect(notifier.notify).toHaveBeenCalledTimes(1);
+});
+
+it.each(["disabled", "failed"])("ends without claiming Owner notification when the channel is %s", async state => {
+  let task = await create(); const read = await inspect(task); task = await current(task.taskId);
+  if (state === "disabled") notifier.notify.mockResolvedValue(false);
+  else notifier.notify.mockRejectedValue(new Error("notification unavailable"));
+  await agent.report(task, { kind: "blocked", phase: "assess", reason: "mcp_permission_required", summary: "已核实 MCP 服务权限不足，请 Owner 在能力集中申请权限。", evidence_ids: [read.evidenceId] });
+  task = await current(task.taskId);
+  expect(task).toMatchObject({ status: "completed", completionReason: "mcp_permission_required", execution: { state: "ended" } });
+  expect(task.timeline.some(event => event.kind === "notification" && event.payload.sent === true)).toBe(false);
+  if (state === "failed") expect(task.timeline.some(event => event.kind === "notification" && event.payload.sent === false)).toBe(true);
+  await service.maintenance(); expect(submissions).toHaveLength(1);
+});
+
+it("requires saved scene evidence and never notifies from Debug or an in-progress apply", async () => {
+  let task = await create();
+  await expect(agent.report(task, { kind: "blocked", phase: "assess", reason: "mcp_permission_required", summary: "仅有诊断推测", evidence_ids: [] })).rejects.toMatchObject({ status: 422 });
+  const read = await inspect(task); task = await current(task.taskId);
+  task = (await tasks.update(task.taskId, task.version, value => ({ ...value, phase: "apply", version: value.version + 1 })))!;
+  await expect(agent.report(task, { kind: "blocked", phase: "apply", reason: "mcp_permission_required", summary: "不得中途转交", evidence_ids: [read.evidenceId] })).rejects.toMatchObject({ status: 409 });
+  const debug = await create("debug", { event_id: "debug-owner-notice", delivery_key: "debug-owner-notice" });
+  const evidence = await inspect(debug);
+  await expect(agent.report(await current(debug.taskId), { kind: "blocked", phase: "assess", reason: "mcp_permission_required", summary: "Debug不得发通知", evidence_ids: [evidence.evidenceId] })).rejects.toMatchObject({ status: 409 });
+  expect(notifier.notify).not.toHaveBeenCalled();
+});

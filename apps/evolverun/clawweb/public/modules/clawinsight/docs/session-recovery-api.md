@@ -257,3 +257,14 @@ POST /api/insight/v1/monitoring/session-recoveries/:taskId/terminate
 回报引用了不存在的证据 ID，或 `message` 判断缺少已保存的投递／拟发送记录时，返回 HTTP 422 并说明可纠正字段。纠错保留已核实的业务判断，证据引用必须使用工具返回的完整 ID。普通 `blocked` 省略 `reason`；执行归属、阶段或版本冲突继续返回 HTTP 409。
 
 `blocked.reason=target_unavailable` 将自愈流程正常结束为 `completed`，同时回传 `completion_reason=target_unavailable`、`effect=unknown`。该结论必须引用已留存的受控工具证据，且对应审计中有 Provider 明确返回的 `target_unavailable` 错误；普通 HTTP 404、会话缺失、超时或模型断言均不足以成立。页面显示“目标不可用”，不算自愈执行故障，也不宣称业务恢复；是否干预仍由实际工具审计判断。
+
+### 已核实的 MCP 服务权限问题转交 Owner
+
+Agent 对当前现场确认 MCP 服务权限不足、后续仅需 Owner 自行处理时，直接回报
+`{"kind":"blocked","phase":"assess","reason":"mcp_permission_required","summary":"问题、现场依据、具体 MCP 服务及 Owner 处理指引（Markdown）","evidence_ids":["工具返回的完整证据 ID"]}`。
+已有观察／判断阶段也可按当前 phase 回报；不能在执行环境动作中途切换，Debug／仿真不发送真实通知。不能仅凭诊断标签、普通 404、链接解析失败或未明原因的工具错误认定权限问题。
+
+服务复用现有 Owner 钉钉通知，将处理指引直接发给目标 Owner，并记录发送回执。
+不创建方案、不进入等待确认／配合、不再执行或验证，结束为 `status=completed`、
+`completion_reason=mcp_permission_required`、`effect=not_recovered`；干预情况仍由实际审计计算，通知不算干预。
+通知失败或禁用时同样结束，但页面不得显示“已通知”；成功时显示“已通知 Owner 自行处理”。通知回执与任务结束均保存在原时间线，无新增数据库字段或配置。

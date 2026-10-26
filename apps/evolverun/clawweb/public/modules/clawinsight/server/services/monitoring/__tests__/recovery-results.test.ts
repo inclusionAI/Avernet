@@ -145,3 +145,13 @@ it.each([{ completion_reason: "other", status: "completed", waiting_reason: null
   { completion_reason: "user_continued" }])("rejects an invalid normal completion reason: %j", patch => {
   expect(() => parseRecoveryResult({ ...result, ...patch })).toThrowError(expect.objectContaining({ code: "INVALID_RESULT" }));
 });
+
+
+it("persists Owner-required completion independently from business recovery and intervention", async () => {
+  const input = { ...result, result_version: 8, status: "completed" as const, waiting_reason: null,
+    completion_reason: "mcp_permission_required" as const, effect: "not_recovered" as const, intervention_status: "none" as const,
+    result_text: "MCP 权限需 Owner 自行处理，本次自愈已结束" };
+  expect(parseRecoveryResult(input)).toEqual(input);
+  expect(await repo.appendRecoveryResult(input)).toBe(true);
+  expect(await history()).toEqual([input]);
+});

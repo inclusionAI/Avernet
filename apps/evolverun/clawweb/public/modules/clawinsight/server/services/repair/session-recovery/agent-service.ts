@@ -488,9 +488,11 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
         { decision: "user_continued", summary: body.summary, evidence_ids: body.evidence_ids as string[] });
       else if (body.reason === "user_continued") await this.deps.business().finishForUserContinuation(task.taskId, task.version,
         { summary: body.summary, evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId });
+      else if (body.reason === "mcp_permission_required") await this.deps.business().finishForMcpPermission(task.taskId, task.version,
+        { summary: body.summary, evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId });
       else if (body.reason === "target_unavailable") await this.deps.business().finishForTargetUnavailable(task.taskId, task.version,
         { summary: body.summary, evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId });
-      else if (body.reason !== undefined) fail(422, "未知的结束原因。普通受阻请省略 reason，保留 kind=blocked、当前 phase 和原因 summary；不要改为 message 决策。user_continued 仅用于已核实的用户续聊，target_unavailable 需要 Provider 明确的目标不可用证据。");
+      else if (body.reason !== undefined) fail(422, "未知的结束原因。普通受阻请省略 reason，保留 kind=blocked、当前 phase 和原因 summary；不要改为 message 决策。user_continued 仅用于已核实的用户续聊，target_unavailable 需要 Provider 明确的目标不可用证据；mcp_permission_required 仅用于已核实、需 Owner 自行处理的 MCP 服务权限问题。");
       else await this.deps.business().executionFailure(task.taskId, redactPersistableText(body.summary, 8000), task.execution!.executionId);
     }
     else fail(422, "未知业务回报类型");

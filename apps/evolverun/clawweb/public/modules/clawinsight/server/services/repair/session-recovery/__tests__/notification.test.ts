@@ -278,3 +278,16 @@ it("notifies user handoff after intervention without claiming business recovery"
   expect(sender.send.mock.calls[0][0].text).not.toContain("原任务已恢复");
   expect(sender.send.mock.calls[0][0].text).not.toContain("任务执行失败");
 });
+
+
+it("reuses the direct Owner DingTalk channel for ended permission cases without an approval link label", async () => {
+  const sender = { sendNotification: vi.fn().mockResolvedValue(undefined) };
+  const config = { findByKey: vi.fn().mockResolvedValue({ enabled: 1, config_json: "{}" }) };
+  const notifier = new SessionRecoveryNotifier(sender, "https://service.invalid", config);
+  await expect(notifier.notify({ ownerId: "owner-fixture", taskId: "SR-permission", kind: "result", summary: "请在能力集中申请 MCP 服务权限。" })).resolves.toBe(true);
+  expect(sender.sendNotification).toHaveBeenCalledExactlyOnceWith({ recipientUserId: "owner-fixture", title: "会话自愈需要人工处理",
+    text: expect.stringContaining("查看处理指引、证据及任务时间线") });
+  expect(sender.sendNotification.mock.calls[0][0].text).toContain("请在能力集中申请 MCP 服务权限");
+  expect(sender.sendNotification.mock.calls[0][0].text).not.toContain("查看完整方案");
+  expect(sender.sendNotification.mock.calls[0][0].text).toContain("本次自愈已结束，后续请自行处理。");
+});

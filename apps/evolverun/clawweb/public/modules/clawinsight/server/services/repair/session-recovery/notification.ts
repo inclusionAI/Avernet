@@ -22,7 +22,7 @@ export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
     const url = new URL("/insight", this.publicBaseUrl);
     url.searchParams.set("module", "monitoring"); url.searchParams.set("recoveryTaskId", input.taskId);
     await this.sender.sendNotification({ recipientUserId: input.ownerId, title,
-      text: `${input.summary}\n\n[查看完整方案、证据及任务时间线](${url.href})` });
+      text: `${input.summary}${input.kind === "result" ? "\n\n本次自愈已结束，后续请自行处理。" : ""}\n\n[${input.kind === "plan" ? "查看完整方案、证据及任务时间线" : "查看处理指引、证据及任务时间线"}](${url.href})` });
     return true;
   }
 }

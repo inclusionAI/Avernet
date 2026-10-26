@@ -26,8 +26,8 @@ export function RecoveryTaskLinks({ eventId }: { eventId: string }) {
   return <section className="recovery-task-links" aria-label="对应的自愈任务">
     <span className="recovery-task-label">自愈任务</span>
     <div className="recovery-task-item">
-      <span className={`health ${statusClasses[task.status]}`}><span className="dot" />{task.completion_reason === 'target_unavailable' ? '目标不可用' : task.completion_reason === 'user_continued' ? '已让路' : statusLabels[task.status]}</span>
-      <Link className="recovery-task-link" title={task.task_id} aria-label={`查看自愈任务 ${task.completion_reason === 'target_unavailable' ? '目标不可用' : task.completion_reason === 'user_continued' ? '已让路' : statusLabels[task.status]} ${task.task_id}`} to={`/insight?module=monitoring&recoveryTaskId=${encodeURIComponent(task.task_id)}`}>
+      <span className={`health ${statusClasses[task.status]}`}><span className="dot" />{task.completion_reason === 'mcp_permission_required' ? '需 Owner 自行处理' : task.completion_reason === 'target_unavailable' ? '目标不可用' : task.completion_reason === 'user_continued' ? '已让路' : statusLabels[task.status]}</span>
+      <Link className="recovery-task-link" title={task.task_id} aria-label={`查看自愈任务 ${task.completion_reason === 'mcp_permission_required' ? '需 Owner 自行处理' : task.completion_reason === 'target_unavailable' ? '目标不可用' : task.completion_reason === 'user_continued' ? '已让路' : statusLabels[task.status]} ${task.task_id}`} to={`/insight?module=monitoring&recoveryTaskId=${encodeURIComponent(task.task_id)}`}>
         查看任务<span aria-hidden="true">↗</span>
       </Link>
     </div>
