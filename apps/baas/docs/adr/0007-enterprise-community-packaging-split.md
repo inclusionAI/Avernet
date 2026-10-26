@@ -37,8 +37,10 @@ Rules:
   plugin implementations and their wiring;
 - enterprise joins via the sanctioned seam: `plugin_registry.register_plugin_option`
   deferred factories (ADR-0003);
-- both editions share this ADR set and documentation byte-for-byte (see
-  `docs/adr/README.md` mirroring rules);
+- each repo owns its ADR documentation: this set records the platform
+  (including the two-edition relationship); the internal monorepo keeps a
+  separate enterprise-focused set for the `secbaas.enterprise` overlay
+  architecture (see `docs/adr/README.md` scope rules);
 - contribution protocol: the Avernet repo is authoritative on GitHub
   (`inclusionAI/Avernet`); internal mirrors are fetch-only; enterprise
   changes flow through the same public review, then the consuming monorepo
