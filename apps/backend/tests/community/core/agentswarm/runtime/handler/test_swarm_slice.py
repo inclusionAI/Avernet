@@ -9,6 +9,7 @@ D16/D34 (slice-lost retry + resume), D31 (result XOR via artifact routing).
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 import json
 import threading
 import time
@@ -16,7 +17,7 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from contextlib import contextmanager
@@ -62,18 +63,57 @@ WORKER = "worker-1"
 class _TestDB:
     def __init__(self, engine):
         self._factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+        # StaticPool shares one DBAPI connection across lease and slice threads.
+        # Match SqliteDB: serialize each entire transaction, including cleanup.
+        self._session_lock = threading.RLock()
 
     @contextmanager
     def orm_session(self):
-        db = self._factory()
-        try:
-            yield db
-            db.commit()
-        except Exception:
-            db.rollback()
-            raise
-        finally:
-            db.close()
+        with self._session_lock:
+            db = self._factory()
+            try:
+                yield db
+                db.commit()
+            except Exception:
+                db.rollback()
+                raise
+            finally:
+                db.close()
+
+
+def test_test_db_concurrent_commit_does_not_commit_rolled_back_session():
+    engine = create_engine(
+        "sqlite:///:memory:", poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
+    database = _TestDB(engine)
+    with database.orm_session() as session:
+        session.execute(text("CREATE TABLE transaction_probe (id INTEGER PRIMARY KEY)"))
+    attempted = threading.Event()
+
+    def commit_second():
+        attempted.set()
+        with database.orm_session() as session:
+            session.execute(text("INSERT INTO transaction_probe VALUES (2)"))
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            with pytest.raises(ValueError, match="rollback first"):
+                with database.orm_session() as session:
+                    session.execute(text("INSERT INTO transaction_probe VALUES (1)"))
+                    future = pool.submit(commit_second)
+                    assert attempted.wait(2)
+                    try:
+                        future.result(timeout=0.2)
+                    except FutureTimeoutError:
+                        pass  # The concurrent transaction waits for this rollback.
+                    raise ValueError("rollback first")
+            future.result(timeout=2)
+        with database.orm_session() as session:
+            rows = session.execute(text("SELECT id FROM transaction_probe ORDER BY id")).scalars().all()
+        assert rows == [2]
+    finally:
+        engine.dispose()
 
 
 @pytest.fixture()
