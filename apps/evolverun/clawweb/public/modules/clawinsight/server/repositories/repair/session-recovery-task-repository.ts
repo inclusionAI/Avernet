@@ -4,7 +4,7 @@ import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 import { nowForDb } from "@avernet/clawweb-shared/server/db";
 import { EvolveRepository } from "@avernet/clawevolve/server/repositories/evolve-repository";
 import type { ObjectStore } from "../../services/object-storage/oss-object-store.js";
-import type { RecoveryStoredTask, RecoveryTaskStore, RecoveryTimelineEvent } from "../../services/repair/session-recovery/task-contracts.js";
+import type { RecoveryStoredTask, RecoveryTaskState, RecoveryTaskStore, RecoveryTimelineEvent } from "../../services/repair/session-recovery/task-contracts.js";
 import { containsSecret } from "@avernet/clawweb-shared/server/services/redaction";
 import { AgentToolCallRepository, type AgentToolCall } from "./agent-tool-call-repository.js";
 import { recoveryInterventionStatus } from "../../services/repair/session-recovery/result.js";
@@ -36,11 +36,26 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
       await tx.exec("UPDATE ce_steps SET output_json = ?, status = 'running' WHERE step_id = ?", [JSON.stringify(report), stepId]);
     });
   }
-  async listForMaintenance(limit: number, afterTaskId = ""): Promise<RecoveryStoredTask[]> {
+  async listForMaintenance(limit: number, afterTaskId: string, controlPlaneEnvironment: AgentControlPlaneEnvironment, now = Date.now()): Promise<{ tasks: RecoveryStoredTask[]; nextTaskId: string }> {
     this.limit(limit);
-    const rows = await this.db.query<{ task_id: string }>(
-      "SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery' AND task_id > ? AND status IN ('pending','running','waiting_owner','waiting_effect') ORDER BY task_id ASC LIMIT ?", [afterTaskId, limit]);
-    return (await Promise.all(rows.map(row => this.find(row.task_id)))).filter((task): task is RecoveryStoredTask => !!task);
+    const rows = await this.db.query<{ task_id: string; config_json: string }>(
+      "SELECT task_id, config_json FROM ce_tasks WHERE task_type = 'session_recovery' AND task_id > ? AND status IN ('pending','running') ORDER BY task_id ASC LIMIT ?", [afterTaskId, limit]);
+    const tasks: RecoveryStoredTask[] = [];
+    for (const row of rows) {
+      try {
+        const state = JSON.parse(row.config_json) as RecoveryTaskState;
+        if (state.status !== "running" || resolveTaskControlPlaneEnvironment(state) !== controlPlaneEnvironment) continue;
+        const retryAt = state.executionRetry?.retryAt ?? 0;
+        const needsRelease = retryAt > 0 && state.execution?.state !== "ended";
+        const needsStart = (!state.execution || state.execution.state === "ended" || retryAt > 0) && retryAt <= now;
+        const needsObservation = ["observe", "verify"].includes(state.phase) && state.observationDeadlineAt !== null
+          && state.observationDeadlineAt <= now && !state.requiresFreshObservation;
+        if (!needsRelease && !needsStart && !needsObservation) continue;
+        const task = await this.find(row.task_id);
+        if (task) tasks.push(task);
+      } catch { console.error("[session-recovery] maintenance candidate unavailable", row.task_id); }
+    }
+    return { tasks, nextTaskId: rows.length === limit ? rows[rows.length - 1].task_id : "" };
   }
   async listForReporting(limit: number, afterTaskId: string, controlPlaneEnvironment: AgentControlPlaneEnvironment): Promise<{ tasks: RecoveryStoredTask[]; nextTaskId: string }> {
     this.limit(limit);

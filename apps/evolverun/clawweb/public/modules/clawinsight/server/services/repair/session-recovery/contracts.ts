@@ -44,8 +44,8 @@ export interface SessionRecoveryTaskApi extends SessionRecoveryApi {
   finishApply(taskId: string, version: number, input: { applicable: boolean; success: boolean; summary: string }): Promise<void>;
   finishForUserContinuation(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string }): Promise<void>;
   executionFailure(taskId: string, reason: string, executionId?: string, retryable?: boolean): Promise<void>;
-  maintenance(): Promise<void>;
-  reportResults(): Promise<void>;
+  maintenance(isActive?: () => Promise<boolean>): Promise<void>;
+  reportResults(isActive?: () => Promise<boolean>): Promise<void>;
 }
 /** Worker Service API; the factory supplies the existing Agent service. */
 export interface SessionRecoveryAgentApi {
@@ -87,6 +87,6 @@ export type SessionRecoveryRuntime = {
   service: SessionRecoveryApi;
   tasks?: SessionRecoveryTaskApi;
   agent?: SessionRecoveryAgentApi;
-  maintenance?: () => Promise<void>;
-  reportResults?: () => Promise<void>;
+  maintenance?: (isActive?: () => Promise<boolean>) => Promise<void>;
+  reportResults?: (isActive?: () => Promise<boolean>) => Promise<void>;
 };

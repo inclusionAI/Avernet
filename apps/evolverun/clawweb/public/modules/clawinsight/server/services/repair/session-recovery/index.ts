@@ -55,5 +55,5 @@ export function createSessionRecoveryRuntime(options: {
       if (target.environment !== request.target.env || target.ownerId !== request.target.entity_id || target.botId !== request.target.bot_id || target.activeEngine !== expected) throw new SessionRecoveryError(422, "invalid_recovery_target", "目标快照与请求身份或引擎不一致");
       return recoveryTargetSnapshot(target);
     } });
-  return { service: tasks, tasks, agent, maintenance: () => tasks.maintenance(), reportResults: () => tasks.reportResults() };
+  return { service: tasks, tasks, agent, maintenance: isActive => tasks.maintenance(isActive), reportResults: isActive => tasks.reportResults(isActive) };
 }

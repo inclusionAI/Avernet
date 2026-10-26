@@ -150,3 +150,25 @@ the Owner. Task detail and operation authorization remain unchanged.
 When a real user continues the original conversation after the fault, the worker reports `kind=blocked`, `reason=user_continued`, the current `phase`, a `summary` and successful controlled-read `evidence_ids`. This explicit reason completes the self-healing task normally with `status=completed` and `completionReason=user_continued`, ending the current execution and clearing wait/retry deadlines. It does not run recovery actions or imply business recovery. Existing effect evidence and task-wide intervention auditing are preserved.
 
 List and callback projections include optional `completion_reason=user_continued`. The monitoring receiver accepts it only for completed tasks, preserves it in existing history JSON and remains compatible with old payloads. UI, notifications and statistics distinguish this normal handoff from failure and from `effect=recovered`. Other blocked reports retain failure semantics; unknown reasons and unsupported read evidence are rejected. Roll out sender/receiver support before the updated worker package. No task-status enum or database schema change is required.
+
+## Background scan efficiency
+
+Repair and recovery continue to share Agent execution reconciliation and retain
+their own status handlers. Reconciliation processes at most four records
+concurrently and refills free slots across page boundaries. An unavailable AIS
+status never establishes a business failure. Maintenance filters compact
+candidate state and loads artifacts only for due work; its page cursor follows
+candidates even when every record in a page is filtered out. Failure reports for
+the same execution reuse the existing retry marker and do not consume another
+retry while release is pending.
+
+The existing timers and local in-flight guards remain. Hosts can inject the
+existing Backend-style cache operations: an atomic lock scoped by control-plane
+environment and background job, plus a shared last-scan timestamp. Deployed
+execution reconciliation, recovery maintenance and result reporting use separate
+locks. A 60-second lock renews every 20 seconds; the timestamp limits scan starts
+to once per 20 seconds across staggered timers. Ownership loss stops new work;
+Task transitions and result reservations continue to guard individual actions.
+Cache failures skip the round instead of starting independent scans. Standalone
+local callers can omit the cache. No schema migration is required, and Agent
+heartbeat/execution leases and retry policy are unchanged.
