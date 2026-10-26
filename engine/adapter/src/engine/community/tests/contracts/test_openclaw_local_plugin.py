@@ -189,3 +189,25 @@ async def test_local_openclaw_plugin_stateful_ports_and_error_branches():
     await shell.write(b"def")
     assert await shell.read() == b"abcdef"
     assert await shell.read() == b""
+
+
+async def test_local_default_model_uses_real_adapter_and_ignores_session_override():
+    from engine.community.core.adapters.openclaw.models import OpenClawModelsAdapter
+
+    plugin = LocalOpenClawPluginImpl()
+    await plugin.session_create("s-default", model="override-model")
+    adapter = OpenClawModelsAdapter(plugin)
+    assert (await adapter.get_default_model()).id == (await adapter.list_models())[0].id
+    assert (await plugin.sessions_list())[0]["model"] == "override-model"
+
+
+async def test_local_default_model_failure_does_not_fall_back_to_catalog(monkeypatch):
+    import pytest
+    from engine.community.core.adapters.openclaw.models import OpenClawModelsAdapter
+
+    plugin = LocalOpenClawPluginImpl()
+    async def unavailable():
+        raise TimeoutError("default resolver unavailable")
+    monkeypatch.setattr(plugin, "default_model", unavailable)
+    with pytest.raises(TimeoutError):
+        await OpenClawModelsAdapter(plugin).get_default_model()

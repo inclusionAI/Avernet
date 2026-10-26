@@ -178,14 +178,27 @@ Two things about this group are not the shape a reader would assume:
   status under-describes it. Narrowing that mapping is a separate change.
   _Decided 2026-09-03._
 
-### engine (4) — engine `/api/engine`
+### engine (5) — engine `/api/engine`
 
 | Method | Public path | Engine route | Notes |
 |---|---|---|---|
 | GET | `…/{bot_id}/engine/status` | `GET /api/engine/status` | process / transition phase / connection count |
 | GET | `…/{bot_id}/engine/capabilities` | `GET /api/engine/capabilities` | **the most important endpoint in Track C** — see *Capabilities* below |
 | GET | `…/{bot_id}/engine/available` | `GET /api/engine/list` | **divergence:** `list` is a verb path; public uses a noun. Registered engines + active flag + version |
+| GET | `…/{bot_id}/engine/default-model` | `GET /api/engine/default-model` | `Envelope[{model_id: string}]`; effective new-session default |
 | POST | `…/{bot_id}/engine/restart` | `POST /api/engine/restart` | restarts the engine process only; distinct from the bot-level restart that re-provisions the container |
+
+
+`default-model` uses the addressed Bot/stage runtime's ordinary new-session
+default, including its inheritance rules. It does not read an existing session's
+model override or report failure fallback. The engine resolves the model; Backend
+only validates and projects its nonblank `id` to `model_id`. No session or
+configuration is created or changed. Model identifiers are engine-owned.
+
+The route uses the same member authorization, owner, stage and optional
+`device_uuid` addressing as the other engine reads. Unsupported engines return
+501; malformed upstream defaults return 502. Existing transport/readiness errors
+retain their engine-surface mapping. Model catalogue APIs remain unchanged.
 
 > **`POST /api/engine/switch` remains deliberately unwrapped.** PR #494 made
 > `engine` immutable on `PUT /openapi/v1/bots/{bot_id}`

@@ -135,7 +135,8 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     # Advisory visibility and operation eligibility differ. A single raising
     # Check would hide the normal not_applicable result from visible readers.
     ("GET", "/openapi/v1/bots/{bot_id}/engine-version"): ServiceChecked(
-        PermissionLevel.MEMBER, "agentclaw.community.core.bot_management.engine_version.service"
+        PermissionLevel.MEMBER,
+        "agentclaw.community.core.bot_management.engine_version.service",
     ),
     ("GET", "/openapi/v1/bots/{bot_id}/cli-tools"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/cli-tools"): Check(PermissionLevel.ADMIN),
@@ -237,6 +238,9 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         PermissionLevel.MEMBER, explicit=True
     ),
     ("GET", "/openapi/v1/bots/{bot_id}/engine/status"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bots/{bot_id}/engine/default-model"): Check(
+        PermissionLevel.MEMBER
+    ),
     ("POST", "/openapi/v1/bots/{bot_id}/harness/apply"): ServiceChecked(
         PermissionLevel.ADMIN, "…openapi_v1.harness.router"
     ),

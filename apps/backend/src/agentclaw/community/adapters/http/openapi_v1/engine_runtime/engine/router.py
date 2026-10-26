@@ -33,6 +33,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .default_model import EngineDefaultModel, get_engine_default_model
+
 from fastapi import APIRouter, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
@@ -316,3 +318,11 @@ async def restart_bot_engine(
         ),
         request,
     )
+
+
+router.add_api_route(
+    "/default-model",
+    get_engine_default_model,
+    methods=["GET"],
+    response_model=Envelope[EngineDefaultModel],
+)

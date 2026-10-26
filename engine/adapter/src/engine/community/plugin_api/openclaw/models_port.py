@@ -10,6 +10,7 @@ NOTE: this module is named `models_port.py` (not `models.py`) to avoid
 shadowing the pre-existing `plugin_api/openclaw/models.py` shared-types module.
 The Port class is exported as `OpenClawModelsPort` in `__init__` and port.py.
 """
+
 from __future__ import annotations
 
 from typing import Any, Protocol
@@ -17,6 +18,10 @@ from typing import Any, Protocol
 
 class OpenClawModelsPort(Protocol):
     """Native model-catalogue operations over the OpenClaw gateway."""
+
+    async def default_model(self) -> dict[str, Any]:
+        """Read `models.default`; no config or session writes, failures propagate."""
+        ...
 
     async def models_list(self) -> list[dict[str, Any]]:
         """Raw model entries from `models.list` RPC (timeout 5s).

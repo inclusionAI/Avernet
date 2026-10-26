@@ -97,6 +97,9 @@ class LocalOpenClawPluginImpl(OpenClawPlugin):
     async def approvals_set(self, session_key: str, mode: str, token: str | None = None) -> dict[str, Any]:
         return {"ok": True, "payload": {"mode": mode, "sessionKey": session_key}}
 
+    async def default_model(self) -> dict[str, Any]:
+        return {"id": "local/local-model"}
+
     async def models_list(self) -> list[dict[str, Any]]:
         return [{"id": "local-model", "name": "Local Model", "provider": "local"}]
 

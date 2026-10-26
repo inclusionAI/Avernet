@@ -12,6 +12,9 @@ with call sites that already speak in generic vocabulary.
 
 Selection semantics
 -------------------
+``MODEL_DEFAULT_GET`` — :meth:`get_default_model` returns the effective ordinary
+new-session model, including engine inheritance and excluding session overrides
+and failure fallback. It must not mutate state. Unsupported engines fail closed.
 ``MODEL_LIST`` — :meth:`list_models` returns the catalogue.
 ``MODEL_SWITCH`` — there is no dedicated ``switch`` RPC; the caller sets
 ``chat.send`` ``model`` per-request, so "switch" is effectively stateless.
@@ -20,20 +23,31 @@ Declaring the capability tells the frontend the picker is functional.
 See ``src/engine/docs/heterogeneous-engine-architecture.md`` for the
 plugin-first engine architecture rationale.
 """
+
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
 from engine.community.core.engine.context import AuthContext
-from engine.community.core.models.models import Model, Provider
+from engine.community.core.models.models import DefaultModel, Model, Provider
 
 
 @runtime_checkable
 class ModelsService(Protocol):
     """Backend talks to the model catalogue through this Protocol."""
 
+    async def get_default_model(self) -> DefaultModel:
+        """Resolve the new-session default; unsupported implementations fail closed."""
+        from engine.community.core.engine.capability import Capability
+        from engine.community.core.engine.exceptions import CapabilityNotSupportedError
+
+        raise CapabilityNotSupportedError(
+            type(self).__name__, Capability.MODEL_DEFAULT_GET
+        )
+
     async def list_models(
-        self, auth: AuthContext | None = None,
+        self,
+        auth: AuthContext | None = None,
     ) -> list[Model]:
         """Return every model the engine can route to.
 
@@ -44,7 +58,8 @@ class ModelsService(Protocol):
         ...
 
     async def list_providers(
-        self, auth: AuthContext | None = None,
+        self,
+        auth: AuthContext | None = None,
     ) -> list[Provider]:
         """Return the providers, each nesting its supported models.
 

@@ -1,4 +1,5 @@
 """_ModelsPortMixin — models_list and providers_list port methods."""
+
 from __future__ import annotations
 
 import logging
@@ -9,6 +10,16 @@ log = logging.getLogger("openclaw-port")
 
 class _ModelsPortMixin:
     """Domain mixin: models and providers catalogue (token-agnostic)."""
+
+    async def default_model(self) -> dict[str, Any]:
+        """Use the gateway's runtime resolver, never catalogue default flags."""
+        client = await self._default_client()
+        response = await client.send_request("models.default", {}, timeout=5)
+        if not response.ok:
+            raise RuntimeError("OpenClaw default-model query failed")
+        if not isinstance(response.payload, dict):
+            raise ValueError("invalid default-model response")
+        return {"id": response.payload.get("id")}
 
     async def models_list(self) -> list[dict[str, Any]]:
         """Flat model-entry dicts: `models.list` first, fallback `providers.list`.
@@ -31,7 +42,8 @@ class _ModelsPortMixin:
                     # field — a non-empty list of unconvertible dicts (missing id/model)
                     # must not skip the providers.list fallback (FIX 3).
                     usable = [
-                        e for e in entries
+                        e
+                        for e in entries
                         if isinstance(e, dict) and (e.get("id") or e.get("model"))
                     ]
                     if usable:
@@ -60,9 +72,7 @@ class _ModelsPortMixin:
                                 entry = dict(m)
                                 entry.setdefault("provider", provider_id)
                                 # Surface provider-level enabled/default flags
-                                entry.setdefault(
-                                    "enabled", p.get("enabled", True)
-                                )
+                                entry.setdefault("enabled", p.get("enabled", True))
                                 out.append(entry)
                             elif m:
                                 out.append(

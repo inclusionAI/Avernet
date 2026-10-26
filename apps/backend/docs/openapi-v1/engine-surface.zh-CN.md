@@ -134,14 +134,25 @@ C1 的权威清单是 `apps/frontend/src/requestConfig.ts:189-205` 里的 proxyp
   —— relay 把除 404/501 之外的 engine 4xx 一律映射为 `EngineUpstreamError`；请求
   被安全拒绝，但状态码描述不足。收窄该映射属于另一个改动。_2026-09-03 决定。_
 
-### engine（4）—— engine `/api/engine`
+### engine（5）—— engine `/api/engine`
 
 | 方法 | 公共路径 | engine 路由 | 说明 |
 |---|---|---|---|
 | GET | `…/{bot_id}/engine/status` | `GET /api/engine/status` | 进程 / 切换阶段 / 连接数 |
 | GET | `…/{bot_id}/engine/capabilities` | `GET /api/engine/capabilities` | **Track C 里最重要的端点** —— 见下文《能力》 |
 | GET | `…/{bot_id}/engine/available` | `GET /api/engine/list` | **差异：** `list` 是动词路径，公共面改用名词。已注册引擎 + active 标记 + 版本 |
+| GET | `…/{bot_id}/engine/default-model` | `GET /api/engine/default-model` | `Envelope[{model_id: string}]`；新建会话的有效默认模型 |
 | POST | `…/{bot_id}/engine/restart` | `POST /api/engine/restart` | 只重启 engine 进程；不同于会重新置备容器的 Bot 级 restart |
+
+
+`default-model` 返回目标 Bot/stage 的普通新会话在未指定模型时实际采用的默认模型，
+包含引擎继承规则，不读取已有会话的模型覆盖，也不代表故障 fallback。模型由引擎解析，
+Backend 只校验其非空 `id` 并投影为 `model_id`；查询不创建会话或修改配置。模型标识
+保留引擎原有命名。
+
+接口沿用其他 engine 读取接口的成员权限、owner、stage 与可选 `device_uuid` 寻址。
+不支持的引擎返回 501；上游默认值格式错误返回 502；传输和就绪错误沿用现有映射。
+既有模型列表接口保持不变。
 
 > **`POST /api/engine/switch` 仍刻意不包装。** PR #494 已经让 `engine` 在
 > `PUT /openapi/v1/bots/{bot_id}` 上不可变
