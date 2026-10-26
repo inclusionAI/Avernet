@@ -207,3 +207,45 @@ def test_default_graph_legacy_commands_persist_without_knowledge_table(
             assert session.get(SpaceModel, 1) is None
     assert not any("FROM ac_space_knowledge_sync" in sql for sql in statements)
     assert not any("UPDATE ac_space SET id=ac_space.id" in sql for sql in statements)
+
+
+@pytest.mark.parametrize("personal", [False, True])
+def test_no_knowledge_pilot_creates_and_mutates_without_outbox(
+    missing_knowledge_graph, personal
+):
+    from agentclaw.community.core.repository.implementations.spaces.space import (
+        SpaceRepository,
+    )
+    from agentclaw.community.core.repository.implementations.spaces.persistence_effects import (
+        NoKnowledgeSpacePersistenceEffects,
+    )
+
+    _, db = missing_knowledge_graph
+    spaces = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
+    transaction = (
+        spaces.create_personal_transaction(
+            user_id="bob", creator_user_name=None, env="pre"
+        )
+        if personal
+        else spaces.create_team_transaction(
+            name="Pilot", creator_id="bob", creator_user_name=None, env="pre"
+        )
+    )
+    with transaction as created:
+        sid = created.id
+    spaces.add_member(
+        space_id=sid,
+        user_id="carol",
+        role=SpaceRole.MEMBER,
+        creator_id="bob",
+        env="pre",
+    )
+    spaces.update_member_role(
+        space_id=sid, user_id="carol", role=SpaceRole.ADMIN, env="pre"
+    )
+    assert (
+        spaces.get_member(space_id=sid, user_id="carol", env="pre").role
+        == SpaceRole.ADMIN
+    )
+    assert spaces.delete_member(space_id=sid, user_id="carol", env="pre")
+    assert spaces.get_member(space_id=sid, user_id="carol", env="pre") is None

@@ -1,5 +1,7 @@
 """Real HTTP → service → repository → SQLite test composition."""
 
+
+from agentclaw.community.core.repository.implementations.spaces.persistence_effects import NoKnowledgeSpacePersistenceEffects
 import asyncio
 from unittest.mock import MagicMock
 
@@ -50,7 +52,7 @@ def harness(monkeypatch):
     staff.get_profile_by_work_no.return_value.nick_name = "Employee"
     service = SpaceManagementService(
         SpaceManagementRepository(db),
-        SpaceRepository(db),
+        SpaceRepository(db, NoKnowledgeSpacePersistenceEffects()),
         sc,
         staff,
         get_current_env,

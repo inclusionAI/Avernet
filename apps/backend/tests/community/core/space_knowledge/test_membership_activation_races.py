@@ -1,5 +1,7 @@
 """First activation must serialize with source writers, not just other activators."""
 
+
+from agentclaw.community.core.repository.implementations.spaces.knowledge_effects import KnowledgeSpacePersistenceEffects
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 from unittest.mock import Mock
@@ -35,7 +37,7 @@ def test_activation_roster_and_source_mutation_are_one_serial_order(
     database, monkeypatch, mutation
 ):
     space_id, _ = create_space(database)
-    SpaceRepository(database).add_member(
+    SpaceRepository(database, KnowledgeSpacePersistenceEffects()).add_member(
         space_id=space_id,
         user_id="victim",
         role=SpaceRole.MEMBER,
@@ -76,7 +78,7 @@ def test_activation_roster_and_source_mutation_are_one_serial_order(
             write_attempted.set()
 
     def mutate():
-        spaces = SpaceRepository(other)
+        spaces = SpaceRepository(other, KnowledgeSpacePersistenceEffects())
         if mutation == "remove":
             assert spaces.delete_member(space_id=space_id, user_id="victim", env="pre")
         elif mutation == "add":

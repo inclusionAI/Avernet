@@ -13,18 +13,18 @@
 - **Depends on:** —
 - **AC:** AC1、AC2、AC7、AC8。
 
-## Task 2 [~]: Pilot the internal persistence extension on Space creation and membership
+## Task 2 [x]: Pilot the internal persistence extension on Space creation and membership
 - **Goal:** 引入窄内部 contract、空实现和知识实现，先让小范围写入完成 RED→GREEN。
 - **Files:** `core/repository/protocols/space_persistence_effects.py`、`implementations/spaces/{source_lock,persistence_effects,knowledge_effects}.py`、`implementations/spaces/{space,identity,knowledge_sync}.py`、相应 pilot fixtures（源码均位于 apps/backend/src/agentclaw/community）。
 - **Done when:**
-  - [ ] 通用源锁不依赖知识表；未启用的创建和成员变更不查询知识表、不执行知识 write guard。
-  - [ ] 启用实现仍在调用者同一 session/事务记录快照和保护 retired ID。
-  - [ ] Constructor contract 必需且明确，无 Optional/静默默认覆盖遗漏装配。
-  - [ ] 首次激活/成员竞态和 ID 生命周期测试保持通过，pilot 缺表测试 GREEN。
+  - [x] 通用源锁不依赖知识表；未启用的创建和成员变更不查询知识表、不执行知识 write guard。
+  - [x] 启用实现仍在调用者同一 session/事务记录快照和保护 retired ID。
+  - [x] Constructor contract 必需且明确，无 Optional/静默默认覆盖遗漏装配。
+  - [x] 首次激活/成员竞态和 ID 生命周期测试保持通过，pilot 缺表测试 GREEN。
 - **Depends on:** Task 1。
 - **AC:** AC2、AC4、AC5、AC7。
 
-## Task 3: Wire explicit capture configuration and safe lifecycle checks
+## Task 3 [~]: Wire explicit capture configuration and safe lifecycle checks
 - **Goal:** 完整默认装配无知识表可用；记录与投递独立，并防止有历史时误切空实现。
 - **Files:** `di/space_knowledge_capture_config.py`、`di/modules/space_knowledge_module.py`、`di/container.py`、`core/space_knowledge/capture_lifecycle.py`、配置/DI/lifespan 测试及相关配置示例。
 - **Done when:**

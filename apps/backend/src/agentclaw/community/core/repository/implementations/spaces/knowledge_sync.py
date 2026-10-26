@@ -13,6 +13,9 @@ import json
 from injector import inject
 from sqlalchemy import false, func, true
 
+from agentclaw.community.core.repository.implementations.spaces.source_lock import (
+    lock_source_space,
+)
 from agentclaw.community.core.repository.protocols.spaces import (
     SpaceKnowledgeSyncRepositoryProtocol,
 )
@@ -20,7 +23,6 @@ from agentclaw.community.core.space_knowledge.repository.models import (
     SpaceKnowledgeSyncModel as Snapshot,
 )
 from agentclaw.community.core.spaces.repository.models import (
-    SpaceModel,
     SpaceMemberModel,
 )
 from agentclaw.community.log import get_logger
@@ -73,25 +75,9 @@ def _decode(row):
 
 
 def lock_space(db, space_id, environment):
-    query = db.query(SpaceModel).filter(
-        SpaceModel.id == space_id,
-        SpaceModel.env == environment,
-        SpaceModel.deleted_at.is_(None),
+    return lock_source_space(
+        db, space_id=space_id, environment=environment, sqlite_write_guard=True
     )
-    if db.get_bind().dialect.name == "sqlite":
-        # FOR UPDATE is ignored by SQLite. Acquire its cross-process write
-        # reservation BEFORE reading the source or deciding sync is inactive.
-        # Suppress onupdate: this guard changes neither identity nor timestamps.
-        # Even a zero-row UPDATE acquires the reservation; the following read
-        # then observes a source deleted before the guard as absent.
-        query.update(
-            {
-                SpaceModel.id: SpaceModel.id,
-                SpaceModel.gmt_modified: SpaceModel.gmt_modified,
-            },
-            synchronize_session=False,
-        )
-    return query.with_for_update().one_or_none()
 
 
 def _save_snapshot(db, *, environment, space_id, app, body):

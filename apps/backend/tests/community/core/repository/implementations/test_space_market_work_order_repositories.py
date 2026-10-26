@@ -1,5 +1,7 @@
 """SQLite-backed unit tests for the new unified ORM repositories."""
 
+
+from agentclaw.community.core.repository.implementations.spaces.persistence_effects import NoKnowledgeSpacePersistenceEffects
 import asyncio
 import json
 
@@ -264,7 +266,7 @@ def test_unified_work_order_create_and_approval_lifecycle(db) -> None:
 
 
 def test_unified_space_join_approval_adds_member_in_same_transaction(db) -> None:
-    spaces = SpaceRepository(db)
+    spaces = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
     repository = _work_orders(db)
     team = _team(spaces, name="Unified Join Team", creator="owner-unified")
 
@@ -333,7 +335,7 @@ def test_unified_space_join_approval_adds_member_in_same_transaction(db) -> None
 
 
 def test_unified_space_join_rejection_does_not_add_member(db) -> None:
-    spaces = SpaceRepository(db)
+    spaces = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
     repository = _work_orders(db)
     team = _team(spaces, name="Unified Reject Team", creator="owner-reject")
     record = repository.create_space_join_request(
@@ -370,7 +372,7 @@ def test_unified_space_join_rejection_does_not_add_member(db) -> None:
 
 
 def test_unified_space_join_approval_rolls_back_when_member_already_exists(db) -> None:
-    spaces = SpaceRepository(db)
+    spaces = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
     repository = _work_orders(db)
     team = _team(spaces, name="Unified Rollback Team", creator="owner-rollback")
     record = repository.create_space_join_request(
@@ -505,7 +507,7 @@ def test_unified_notice_work_order_does_not_create_approvers(db) -> None:
 
 
 def test_market_favorite_repository_is_idempotent_and_searchable(db) -> None:
-    spaces = SpaceRepository(db)
+    spaces = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
     space = _team(spaces)
     repository = MarketFavoriteRepository(db)
 
@@ -589,7 +591,7 @@ def test_market_favorite_repository_is_idempotent_and_searchable(db) -> None:
 
 
 def test_work_order_repository_approve_and_notification_lifecycle(db) -> None:
-    spaces = SpaceRepository(db)
+    spaces = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
     space = _team(spaces)
     repository = _work_orders(db)
 
@@ -856,7 +858,7 @@ def test_work_order_repository_approve_and_notification_lifecycle(db) -> None:
 
 
 def test_work_order_repository_rejects_and_requires_reviewer(db) -> None:
-    spaces = SpaceRepository(db)
+    spaces = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
     no_owner = SpaceModel(
         space_code="spc-no-owner",
         space_type=SpaceType.TEAM.value,
@@ -932,7 +934,7 @@ def test_work_order_repository_rejects_and_requires_reviewer(db) -> None:
 
 
 def test_badge_counts_distinct_pending_work_orders(db) -> None:
-    spaces = SpaceRepository(db)
+    spaces = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
     space = _team(spaces, name="Badge Team")
     repository = _work_orders(db)
     record = repository.create_space_join_request(

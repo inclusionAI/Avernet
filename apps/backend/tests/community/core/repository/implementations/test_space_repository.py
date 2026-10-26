@@ -1,5 +1,7 @@
 """SQLite-backed tests for Space repository persistence behavior."""
 
+
+from agentclaw.community.core.repository.implementations.spaces.persistence_effects import NoKnowledgeSpacePersistenceEffects
 import asyncio
 from contextlib import contextmanager
 from datetime import datetime
@@ -57,7 +59,7 @@ def test_create_personal_transaction_preserves_unrelated_integrity_error() -> No
     session = db.transactional_orm_session.return_value.__enter__.return_value
     original = IntegrityError("insert", {}, RuntimeError("write failed"))
     session.flush.side_effect = original
-    repository = SpaceRepository(db)
+    repository = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
     repository.get_personal_space = MagicMock(return_value=None)
 
     with pytest.raises(IntegrityError) as raised:
@@ -75,7 +77,7 @@ def test_create_personal_transaction_translates_unique_race() -> None:
     session.flush.side_effect = IntegrityError(
         "insert", {}, RuntimeError("duplicate personal owner")
     )
-    repository = SpaceRepository(db)
+    repository = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
     repository.get_personal_space = MagicMock(return_value=object())
 
     with pytest.raises(SpaceAlreadyExistsError, match="personal space already exists"):
@@ -123,7 +125,7 @@ def test_initialize_personal_reraises_race_when_winner_is_not_visible() -> None:
 
 
 def test_personal_sc_binding_rejects_missing_space(db) -> None:
-    repository = SpaceRepository(db)
+    repository = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
 
     with pytest.raises(SpaceNotFoundError, match="personal space 999 not found"):
         with repository.personal_sc_team_binding_transaction(space_id=999, env="dev"):
@@ -131,7 +133,7 @@ def test_personal_sc_binding_rejects_missing_space(db) -> None:
 
 
 def test_space_creation_persists_creator_user_name_and_lists_it(db) -> None:
-    repository = SpaceRepository(db)
+    repository = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
     with repository.create_personal_transaction(
         user_id="personal-1", creator_user_name="Personal Creator", env="dev"
     ) as personal:
@@ -174,7 +176,7 @@ def test_space_creation_persists_creator_user_name_and_lists_it(db) -> None:
 def test_get_team_space_by_name_filters_creator_environment_type_and_deleted_rows(
     db,
 ) -> None:
-    repository = SpaceRepository(db)
+    repository = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
     matching = _team(repository, name="Same", creator="owner-1")
     _team(repository, name="Same", creator="owner-2")
     _team(repository, name="Same", creator="owner-1", suffix="-duplicate")
@@ -220,7 +222,7 @@ def test_get_team_space_by_name_filters_creator_environment_type_and_deleted_row
 
 
 def test_space_repository_full_member_lifecycle(db) -> None:
-    repository = SpaceRepository(db)
+    repository = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
 
     personal, created = repository.initialize_personal(user_id="user-1", env="dev")
     same, created_again = repository.initialize_personal(user_id="user-1", env="dev")
@@ -355,7 +357,7 @@ def test_space_repository_full_member_lifecycle(db) -> None:
 
 
 def test_space_repository_accessible_scope_filters_by_active_membership_and_paginates(db) -> None:
-    spaces = SpaceRepository(db)
+    spaces = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
     personal, _ = spaces.initialize_personal(user_id="user-1", env="dev")
     joined = _team(spaces, name="Joined", creator="owner-1")
     pending = _team(spaces, name="Pending", creator="owner-2")
@@ -401,7 +403,7 @@ def test_space_repository_accessible_scope_filters_by_active_membership_and_pagi
 
 
 def test_space_repository_marks_pending_join_request_as_applying(db) -> None:
-    spaces = SpaceRepository(db)
+    spaces = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
     work_orders = WorkOrderRepository(db, SkillEditorRequestRepository(db))
     team = _team(spaces)
     other_team = _team(spaces, name="Other Team", creator="owner-2")
@@ -448,7 +450,7 @@ def test_space_repository_marks_pending_join_request_as_applying(db) -> None:
 
 
 def test_space_repository_backfills_only_live_unbound_team_in_same_env(db) -> None:
-    repository = SpaceRepository(db)
+    repository = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
     target = SpaceModel(
         space_code="spc-repair-target",
         space_type=SpaceType.TEAM.value,
@@ -554,7 +556,7 @@ def test_space_repository_backfills_only_live_unbound_team_in_same_env(db) -> No
 @pytest.mark.parametrize("parent_state", ["missing", "foreign_env", "deleted"])
 def test_add_member_rechecks_parent_before_insert(db, parent_state):
     """The old writer must not insert an orphan alongside maintenance deletion."""
-    spaces = SpaceRepository(db)
+    spaces = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
     space = _team(spaces)
     space_id = space.id
     if parent_state == "missing":

@@ -1,5 +1,7 @@
 """Regression tests use deployable file SQLite, never the fixture's RLock."""
 
+
+from agentclaw.community.core.repository.implementations.spaces.knowledge_effects import KnowledgeSpacePersistenceEffects
 from concurrent.futures import ThreadPoolExecutor
 import json
 from threading import Barrier
@@ -60,7 +62,7 @@ def database(tmp_path):
 
 
 def create_space(db, *, owner="owner", personal=False, env="pre"):
-    spaces = SpaceRepository(db)
+    spaces = SpaceRepository(db, KnowledgeSpacePersistenceEffects())
     if personal:
         transaction = spaces.create_personal_transaction(
             user_id=owner, creator_user_name=None, env=env
@@ -132,7 +134,7 @@ def test_first_activation_rejects_unreceivable_roster_without_outbox(
     assert history(database, space_id) == []
     assert sink.calls == []
     assert (
-        SpaceRepository(database).list_members(
+        SpaceRepository(database, KnowledgeSpacePersistenceEffects()).list_members(
             space_id=space_id, env="pre", keyword=None, offset=0, limit=1
         )[0]
         == count
@@ -146,7 +148,7 @@ def test_limit_rejection_is_atomic_and_remove_rejoin_disable_can_drain(database,
     sink = BoundedSink()
     sync = synchronizer(database, sink)
     sync.ensure_synced(space_id=space_id, environment="pre")
-    spaces, management = SpaceRepository(database), SpaceManagementRepository(database)
+    spaces, management = SpaceRepository(database, KnowledgeSpacePersistenceEffects()), SpaceManagementRepository(database)
     with pytest.raises(SpaceKnowledgeError, match="SPACE_MEMBERSHIP_LIMIT_EXCEEDED"):
         if batch:
             management.add_members(
@@ -256,7 +258,7 @@ def test_overlimit_approval_rolls_back_members_order_approver_and_notices(
         assert session.query(WorkOrderApproverModel).one().status == "PENDING"
         assert session.query(WorkOrderNotificationModel).count() == 0
     assert (
-        SpaceRepository(database).get_member(
+        SpaceRepository(database, KnowledgeSpacePersistenceEffects()).get_member(
             space_id=space_id, user_id="overflow", env="pre"
         )
         is None
@@ -325,7 +327,7 @@ def test_new_space_does_not_reuse_deleted_outbox_identity(database, personal):
     assert new_code != old_code
     assert new_id != old_id
     sync.ensure_synced(space_id=new_id, environment="pre")
-    SpaceRepository(database).add_member(
+    SpaceRepository(database, KnowledgeSpacePersistenceEffects()).add_member(
         space_id=new_id,
         user_id="new-member",
         role=SpaceRole.MEMBER,
@@ -368,7 +370,7 @@ def test_utf8_byte_limit_rolls_back_bulk_write_and_still_allows_revocation(
     assert "payload_bytes=" in caplog.text
     assert "😀" not in caplog.text  # no rejected content / identities in diagnostics
     assert history(database, space_id) == [original]
-    spaces = SpaceRepository(database)
+    spaces = SpaceRepository(database, KnowledgeSpacePersistenceEffects())
     assert all(
         spaces.get_member(space_id=space_id, user_id=uid, env="pre") is None
         for uid in additions
@@ -419,7 +421,7 @@ def test_new_identity_and_members_rollback_if_creation_caller_fails(database):
         space_id=old_id, with_members=True, env="pre"
     )
     with pytest.raises(RuntimeError, match="creation failed"):
-        with SpaceRepository(database).create_team_transaction(
+        with SpaceRepository(database, KnowledgeSpacePersistenceEffects()).create_team_transaction(
             name="Failed", creator_id="new-owner", creator_user_name=None, env="pre"
         ) as failed:
             assert failed.id != old_id
@@ -435,7 +437,7 @@ def test_new_identity_and_members_rollback_if_creation_caller_fails(database):
 def test_unactivated_space_membership_is_not_capped_or_activated(database):
     space_id, _ = create_space(database)
     populate(database, space_id, 2000)
-    SpaceRepository(database).add_member(
+    SpaceRepository(database, KnowledgeSpacePersistenceEffects()).add_member(
         space_id=space_id,
         user_id="one-more",
         role=SpaceRole.MEMBER,
@@ -444,7 +446,7 @@ def test_unactivated_space_membership_is_not_capped_or_activated(database):
     )
     assert history(database, space_id) == []
     assert (
-        SpaceRepository(database).list_members(
+        SpaceRepository(database, KnowledgeSpacePersistenceEffects()).list_members(
             space_id=space_id, env="pre", keyword=None, offset=0, limit=1
         )[0]
         == 2001
@@ -472,7 +474,7 @@ def test_additive_repository_creation_also_skips_retired_identity(database):
         }
     )
     assert created["id"] != old_id
-    SpaceRepository(database).add_member(
+    SpaceRepository(database, KnowledgeSpacePersistenceEffects()).add_member(
         space_id=created["id"],
         user_id="new-owner",
         role=SpaceRole.ADMIN,

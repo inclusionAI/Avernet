@@ -1,5 +1,7 @@
 """Single-table membership snapshots and unchanged generic queue scheduling."""
 
+
+from agentclaw.community.core.repository.implementations.spaces.knowledge_effects import KnowledgeSpacePersistenceEffects
 from contextlib import contextmanager
 from threading import RLock
 import json
@@ -69,7 +71,7 @@ def setup(tmp_path):
         )
     return (
         db,
-        SpaceRepository(db),
+        SpaceRepository(db, KnowledgeSpacePersistenceEffects()),
         SpaceKnowledgeSyncRepository(db),
         SpaceManagementRepository(db),
     )
