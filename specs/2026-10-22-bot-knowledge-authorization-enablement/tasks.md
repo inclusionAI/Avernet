@@ -40,3 +40,21 @@ DDL execution and deployment remain unauthorized.
 - [ ] 用户决定是否提交、推送及后续 PR 更新；本轮均未执行。
 
 详见 `review-repair-validation.md`。单独 Backend、单元/架构测试的通过不代表统一全栈门禁通过。
+
+## Final OB schema alignment (2026-10-26)
+
+- [x] Record the approved table DDL with gmt_create/gmt_modified TIMESTAMP,
+      unchanged business/index columns, GLOBAL indexes and Chinese comments.
+- [x] Align portable ORM timestamp server defaults, modification behavior and
+      BIGINT revision; keep the HTTP response shape unchanged.
+- [x] Move the two ac_bot_publish index statements to a separate DEFERRED,
+      NOT executed script; target DB inspection and execution remain postponed.
+- [x] New schema/default/timestamp/response regressions: 4 failed before changes,
+      then 4 passed after changes, using isolated local SQLite only.
+- [x] Python 3.12 focused/core/catalog/HTTP/DI/boot and complete community architecture:
+      438 passed. Singlebox infrastructure: 31 passed. Ruff and diff checks passed.
+- PR commit/push and description update are authorized; target-database execution
+  remains out of scope. Full shared-stack/real OB validation was not rerun here.
+
+No target-database DDL or deployment is authorized by this PR update. Historical
+local-only status above describes earlier snapshots, not this delivery request.

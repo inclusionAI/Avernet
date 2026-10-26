@@ -74,3 +74,25 @@ configuration still fails closed; production and unit-test profiles ignore the
 fixture variable. This is an external-catalog double, not real remote-platform
 integration evidence. Full shared-stack acceptance and artifact verification
 must be reported separately from an isolated Backend run.
+
+## Reviewed schema and deferred indexes (2026-10-26)
+
+The approved OceanBase MySQL-mode table definition is
+`apps/backend/sql/2026_10_22_bot_knowledge.sql`. It adds database-defaulted
+`gmt_create TIMESTAMP`, uses `TIMESTAMP` for `gmt_modified`, retains signed
+`BIGINT` IDs/revision and the original business columns/index keys, and supplies
+Chinese comments plus OB `GLOBAL` secondary indexes. The portable ORM mirrors
+these columns, timestamp defaults and BIGINT revision; it does not emit OB-only
+`GLOBAL` syntax. The deployment script supplies database-side `ON UPDATE
+CURRENT_TIMESTAMP`; the ORM also sets modification time for local SQLite writes.
+Neither timestamp is added to the HTTP response contract.
+
+The two existing-table publication indexes are **deferred and not executed**.
+They are recorded separately in
+`apps/backend/sql/2026_10_22_bot_knowledge_publish_indexes.sql`, not in the table
+creation script. Inspect actual target indexes and query plans and obtain
+separate deployment approval before applying them. The ORM still declares these
+indexes for fresh local schemas; that is not evidence they exist in an already
+running database. Deferring them does not change draft-check correctness, but
+production query/lock cost without them remains unverified. No automatic
+existing-database migration, production DDL, or deployment is performed here.
