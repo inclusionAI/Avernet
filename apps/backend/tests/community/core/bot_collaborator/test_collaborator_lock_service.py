@@ -403,6 +403,9 @@ class _InMemSqliteDB:
         finally:
             db.close()
 
+    def transactional_orm_session(self):
+        return self.orm_session()
+
 
 @pytest.fixture
 def real_lock_service(monkeypatch):
