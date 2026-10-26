@@ -263,6 +263,56 @@ def _python_reference_is_safe(content: str, assignment: re.Match[str]) -> bool:
     ) and safe(node)
 
 
+# Deliberately a small lexical recognizer, not a Rust parser. Unknown syntax
+# retains the conservative assignment rule. Literals are checked before any
+# expression exemption, including literals nested in constructors/macros.
+RUST_STRING_RE = re.compile(r'(?:b?r(?P<hashes>\#*)"(?P<raw>.*?)"(?P=hashes)|b?"(?P<escaped>(?:\\.|[^"\\])*)")')
+RUST_TYPE_FIELD_RE = re.compile(
+    r"^\s*pub(?:\(crate\))?\s+\w+\s*:\s*"
+    r"(?:[A-Za-z_]\w*::)*[A-Z]\w*(?:<(?:[A-Za-z_]\w*::)*[A-Z]\w*>)?\s*,?\s*$"
+)
+
+
+def _rust_assignment(content: str, assignment: re.Match[str]) -> tuple[bool, bool]:
+    """Return (recognized nonliteral expression, suspicious nested literal)."""
+    if assignment.group("quoted") is not None:
+        return False, False
+    expression = content[assignment.start("bare"):].strip()
+    suspicious = False
+
+    def replace_literal(match: re.Match[str]) -> str:
+        nonlocal suspicious
+        value = match.group("raw")
+        if value is None:
+            escaped = match.group("escaped")
+            try:
+                # Decode the shared Python/Rust escape subset. Unsupported Rust
+                # escapes fail closed rather than silently exempting a literal.
+                value = ast.literal_eval('"' + escaped + '"')
+            except (SyntaxError, ValueError):
+                suspicious = True
+                return "LITERAL"
+        # Mapping keys are field names, not credential values. A Rust :: path
+        # following a literal is not a mapping key.
+        following = expression[match.end():].lstrip()
+        mapping_key = following.startswith(":") and not following.startswith("::")
+        index_key = expression[:match.start()].rstrip().endswith("[") and following.startswith("]")
+        if not (mapping_key or index_key):
+            suspicious |= _looks_like_plaintext_value(value)
+        return "LITERAL"
+
+    skeleton = RUST_STRING_RE.sub(replace_literal, expression)
+    if suspicious:
+        return False, True
+    if RUST_TYPE_FIELD_RE.fullmatch(content):
+        return True, False
+    # Require a path/member access or call: an arbitrary bare high-entropy
+    # identifier must never be mistaken for a runtime expression.
+    runtime = re.match(r"^&?[A-Za-z_]\w*(?:::|\.|\(|!\(|\[)", skeleton)
+    supported = re.fullmatch(r"[A-Za-z0-9_\s.:,;(){}\[\]<>!?&|=+*\-]+", skeleton)
+    return bool(runtime and supported), False
+
+
 def _findings(diff: str) -> list[Finding]:
     findings: list[Finding] = []
     for path, line, content in _added_lines(diff):
@@ -284,6 +334,18 @@ def _findings(diff: str) -> list[Finding]:
                         or (assignment.group("quoted") is None
                             and PYTHON_ATTRIBUTE_RE.fullmatch(value))
                     ):
+                        continue
+                    rust_safe, rust_literal = (
+                        _rust_assignment(content, assignment)
+                        if path.endswith(".rs") else (False, False)
+                    )
+                    if rust_literal:
+                        # Do not print Rust literals here: Python tokenization
+                        # cannot reliably mask raw/escaped Rust strings.
+                        findings.append(Finding(path, line, rule, "<Rust credential literal redacted>"))
+                        detected = True
+                        break
+                    if rust_safe:
                         continue
                     if _looks_like_plaintext_value(value):
                         findings.append(Finding(path, line, rule, _redact_content(content)))
