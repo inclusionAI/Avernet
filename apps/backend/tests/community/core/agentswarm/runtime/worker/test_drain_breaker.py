@@ -569,6 +569,7 @@ class TestRealHandlerDrain:
         assert reclaim[0]["claim_epoch"] == state["claim_epoch"] + 1
 
     def test_within_grace_real_slice_completes(self, real_db):
+        gate = asyncio.Event()
         env = _build_env(
             real_db,
             [
@@ -576,7 +577,7 @@ class TestRealHandlerDrain:
                 _wait_decision("a1"),
                 _finish_decision("drained"),
             ],
-            FakeFactory(scripts={"a1": [{"n": 1}]}),
+            FakeFactory(scripts={"a1": [{"n": 1}]}, gate=gate),
             config=_real_drain_config(grace=3.0),
         )
         run = _mk_run()
@@ -588,8 +589,28 @@ class TestRealHandlerDrain:
                 config=env.cfg, handler=env.handler, dispatch_repo=env.dispatch_repo,
             )
             await worker.startup()
-            await asyncio.sleep(0.03)   # the real slice holds the turn loop
-            await worker.shutdown()
+
+            # A fixed 30ms sleep races slow CI workers that have not claimed
+            # the dispatch yet. Wait until the slice is genuinely in flight,
+            # then release it shortly after drain starts so the real handler
+            # completes inside its 3s grace window.
+            deadline = time.monotonic() + 3.0
+            while not worker._inflight_snapshot():
+                if time.monotonic() > deadline:
+                    await worker.shutdown()
+                    raise AssertionError("worker did not claim the run in time")
+                await asyncio.sleep(0.01)
+
+            async def release_slice():
+                await asyncio.sleep(0.1)
+                gate.set()
+
+            release = asyncio.create_task(release_slice())
+            try:
+                await worker.shutdown()
+            finally:
+                release.cancel()
+                await asyncio.gather(release, return_exceptions=True)
 
         asyncio.run(main())
 

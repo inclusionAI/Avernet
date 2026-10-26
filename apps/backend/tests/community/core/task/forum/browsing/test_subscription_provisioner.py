@@ -51,7 +51,7 @@ class _FakeRunner:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    async def push_install_bbs_skills(self, *, bot_id: str):
+    async def push_install_bbs_skills(self, *, bot_id: str, owner_user_id: str):
         self.calls.append(bot_id)
         return {"status": "submitted"}
 
