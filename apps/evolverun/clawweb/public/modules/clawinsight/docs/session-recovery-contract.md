@@ -150,3 +150,12 @@ the Owner. Task detail and operation authorization remain unchanged.
 When a real user continues the original conversation after the fault, the worker reports `kind=blocked`, `reason=user_continued`, the current `phase`, a `summary` and successful controlled-read `evidence_ids`. This explicit reason completes the self-healing task normally with `status=completed` and `completionReason=user_continued`, ending the current execution and clearing wait/retry deadlines. It does not run recovery actions or imply business recovery. Existing effect evidence and task-wide intervention auditing are preserved.
 
 List and callback projections include optional `completion_reason=user_continued`. The monitoring receiver accepts it only for completed tasks, preserves it in existing history JSON and remains compatible with old payloads. UI, notifications and statistics distinguish this normal handoff from failure and from `effect=recovered`. Other blocked reports retain failure semantics; unknown reasons and unsupported read evidence are rejected. Roll out sender/receiver support before the updated worker package. No task-status enum or database schema change is required.
+
+### Cron delivery identity
+
+A direct OpenClaw Cron execution key can differ from its persisted conversation key.
+Before delivery, resolve the indexed job-level key only when it still points to the
+frozen physical Session ID. A separately indexed run key remains usable when its
+identity matches. Missing/replaced entries fail closed; historical transcripts do
+not authorize creating a new conversation. Preserve the original diagnosis key
+and Session ID, and audit the resolved delivery key with the receipt.

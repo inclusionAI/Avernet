@@ -407,15 +407,19 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       const currentTarget = await this.deps.targets.resolve({ environment: task.request.target.env, ownerId: task.request.target.entity_id, botId: task.request.target.bot_id, ...(task.request.target.runtime_identity ? { runtimeIdentity: task.request.target.runtime_identity } : {}) });
       if (recoveryTargetSnapshot(currentTarget).fingerprint !== task.runtimeTarget!.fingerprint) fail(409, "目标运行位置已变化，不能投递旧方案的重试消息");
       const originalId = this.originalSessionId(task);
-      if (originalId && task.request.target.engine !== "TE") await this.reader.read({ target: task.runtimeTarget!.target, sessionKey: task.request.session_key,
-        deliveryKey: this.latestDeliveryKey(task), expectedSessionId: originalId, requireIndex: true, limit: 1 });
+      let deliverySessionKey = task.request.session_key;
+      if (originalId && task.request.target.engine !== "TE") {
+        const original = await this.reader.read({ target: task.runtimeTarget!.target, sessionKey: task.request.session_key,
+          deliveryKey: this.latestDeliveryKey(task), expectedSessionId: originalId, requireIndex: true, limit: 1 });
+        if (typeof original.session_key === "string") deliverySessionKey = original.session_key;
+      }
       const marker = `[会话自愈：${key}]`;
       const startedAt = this.now();
       const message = `${marker}\n${body.message}`;
       markDispatched();
-      const receipt = await this.deps.runtime.sendMessage({ target: task.runtimeTarget!.target, expectedEngine: { OC: "openclaw", CC: "claude_code", TE: "teclaw" }[task.request.target.engine] as "openclaw" | "claude_code" | "teclaw", sessionKey: task.request.session_key,
+      const receipt = await this.deps.runtime.sendMessage({ target: task.runtimeTarget!.target, expectedEngine: { OC: "openclaw", CC: "claude_code", TE: "teclaw" }[task.request.target.engine] as "openclaw" | "claude_code" | "teclaw", sessionKey: deliverySessionKey,
         deliveryKey: key, messageMarker: marker, message }).catch(() => ({ status: "unknown" as const }));
-      return { ...receipt, delivery_key: key, message, initial_message: initial, started_at_ms: startedAt, finished_at_ms: this.now() };
+      return { ...receipt, session_key: deliverySessionKey, delivery_key: key, message, initial_message: initial, started_at_ms: startedAt, finished_at_ms: this.now() };
     });
   }
   async toolGet(task: RecoveryStoredTask, id: string) {

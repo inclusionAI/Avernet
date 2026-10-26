@@ -57,3 +57,15 @@ it.each([true, false])("investigates the original Cron run without creating a me
   expect(send).toMatchObject({ status: "failed", result: { dispatched: false, error: { code: "original_session_unavailable" } } });
   expect(runtime.sendMessage).not.toHaveBeenCalled();
 });
+
+it("delivers to the verified persisted Cron conversation and retains the upstream identity", async () => {
+  const base = "agent:main:cron:daily";
+  await writeFile(join(home, "agents/main/sessions/sessions.json"), JSON.stringify({ [base]: { sessionId } }));
+  vi.mocked(runtime.sendMessage).mockResolvedValue({ status: "accepted", platformMessageId: "delivered" });
+  const { task_id } = await service.create({ ...request, session_id: sessionId }, { userId: "owner", isAdmin: false });
+  await vi.waitFor(async () => expect((await tasks.find(task_id))!.execution?.jobId).toBe("job"));
+  const sent = await agent.retryMessage((await tasks.find(task_id))!, { clientRequestId: "send", purpose: "Continue original", message: "Continue" });
+  expect(sent).toMatchObject({ status: "succeeded", result: { session_key: base } });
+  expect(runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ sessionKey: base, deliveryKey: request.delivery_key }));
+  expect((await tasks.find(task_id))!.request).toMatchObject({ session_key: sessionKey, session_id: sessionId });
+});

@@ -2,7 +2,7 @@ import type { BotRuntime, ResolvedBotTarget } from "@avernet/clawweb-shared/serv
 import { redactEvidenceValue } from "@avernet/clawweb-shared/server/services/redaction";
 import { SessionRecoveryError } from "./errors.js";
 import { gzipSync } from "node:zlib";
-import { cronRunSessionId } from "./session-identity.js";
+import { cronRunSessionId, cronConversationKey } from "./session-identity.js";
 
 const HEADER = String.raw`
 const fs=require('node:fs'), path=require('node:path'), readline=require('node:readline');
@@ -60,7 +60,11 @@ const OC_PROGRAM = String.raw`  const match=/^agent:([A-Za-z0-9_-]+):.+/.exec(in
   const state=process.env.OPENCLAW_STATE_DIR||path.join(process.env.HOME||'/home/admin','.openclaw');
   const root=fs.realpathSync(path.join(state,'agents',match[1],'sessions'));
   const indexPath=path.join(root,'sessions.json');
-  let entry=fs.existsSync(indexPath)?JSON.parse(fs.readFileSync(indexPath,'utf8'))[input.sessionKey]:undefined;
+  const store=fs.existsSync(indexPath)?JSON.parse(fs.readFileSync(indexPath,'utf8')):{};
+  let indexedKey=input.sessionKey, entry=store[indexedKey];
+  if(input.requireIndex&&input.conversationKey!==indexedKey&&store[input.conversationKey]?.sessionId===input.expectedSessionId){
+    indexedKey=input.conversationKey;entry=store[indexedKey];
+  }
   if(input.cutoff&&input.expectedSessionId&&entry?.sessionId!==input.expectedSessionId)entry=undefined;
   if(input.requireIndex&&!entry) throw Error('original session is not indexed for message delivery');
   const sessionId=entry?entry.sessionId:input.expectedSessionId;
@@ -89,10 +93,10 @@ const OC_PROGRAM = String.raw`  const match=/^agent:([A-Za-z0-9_-]+):.+/.exec(in
     else { before.push(item); beforeSize+=lineBytes; while(before.length>10||beforeSize>8000){const removed=before.shift(); beforeSize-=Buffer.byteLength(JSON.stringify(removed.record),'utf8');} }
   }}finally{reader.close();stream.destroy()}
   if(!headerVerified) throw Error('missing session header');
-  const after=fs.existsSync(indexPath)?JSON.parse(fs.readFileSync(indexPath,'utf8'))[input.sessionKey]:undefined;
+  const after=fs.existsSync(indexPath)?JSON.parse(fs.readFileSync(indexPath,'utf8'))[indexedKey]:undefined;
   if(entry?after?.sessionId!==sessionId:after&&after.sessionId!==sessionId) throw Error('session changed while reading');
   if(!input.fromLine&&!found) messages=before;
-  console.log(JSON.stringify({session_id:sessionId,source:file,delivery:located,messages,
+  console.log(JSON.stringify({session_id:sessionId,session_key:indexedKey,source:file,delivery:located,messages,
     failure_context:input.fromLine?[]:before,next_line:line+1,delivery_confirmed:!!located,delivery_matches:matches}));
 `;
 const FOOTER = String.raw`})().catch(error=>{console.error(String(error.code||'')+': '+String(error.message||'original session unavailable or changed'));process.exitCode=1});
@@ -116,7 +120,7 @@ export class RecoverySessionReader {
     const cronId = input.target.activeEngine === "openclaw" ? cronRunSessionId(input.sessionKey) : undefined;
     if (cronId && input.expectedSessionId && cronId !== input.expectedSessionId) throw unavailable("Cron session ID mismatch");
     const encoded = gzipSync(Buffer.from(JSON.stringify({ sessionKey: input.sessionKey, engine: input.target.activeEngine, marker: `[会话自愈：${input.deliveryKey}]`,
-      expectedSessionId: input.expectedSessionId ?? cronId, requireIndex: input.requireIndex, fromLine: input.fromLine, limit, deliveryKey: input.deliveryKey, ...(input.cutoff ? { cutoff: input.cutoff } : {}) }))).toString("base64");
+      expectedSessionId: input.expectedSessionId ?? cronId, conversationKey: cronConversationKey(input.sessionKey, input.expectedSessionId ?? cronId), requireIndex: input.requireIndex, fromLine: input.fromLine, limit, deliveryKey: input.deliveryKey, ...(input.cutoff ? { cutoff: input.cutoff } : {}) }))).toString("base64");
     // Compress the fixed read-only program so runtime-user wrapping stays within BaaS's command limit.
     const loader = `eval(require("node:zlib").gunzipSync(Buffer.from("${gzipSync(HEADER + (input.target.activeEngine === "claude_code" ? CC_PROGRAM : OC_PROGRAM) + FOOTER).toString("base64")}","base64")).toString())`;
     const result = await this.runtime.executeShell({ target: input.target, command: `node -e ${quote(loader)} ${quote(encoded)}`, timeoutMs: 30000 })

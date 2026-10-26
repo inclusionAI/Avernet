@@ -79,3 +79,20 @@ it("cuts historical pages at the original node even after index rotation and sub
   await expect(reader.read({ ...bounded, cutoff: { messageId: 'missing', atMs: 10000 } })).rejects.toMatchObject({ code: 'original_session_unavailable' });
   await expect(reader.read({ ...bounded, cutoff: { messageId: 'fault', atMs: 8000 } })).rejects.toMatchObject({ code: 'original_session_unavailable' });
 });
+
+it("resolves a direct Cron execution to the indexed original conversation before delivery", async () => {
+  const base = "agent:main:cron:daily";
+  await writeFile(join(directory, "sessions.json"), JSON.stringify({ [base]: { sessionId: id }, [key]: { sessionId: "wrong-alias" } }));
+  const before = await readFile(join(directory, "sessions.json"), "utf8");
+  expect(await reader.read({ ...input, requireIndex: true })).toMatchObject({ session_key: base, session_id: id });
+  expect(await readFile(join(directory, "sessions.json"), "utf8")).toBe(before);
+});
+it("retains a genuinely indexed run key when no matching job-level conversation exists", async () => {
+  await writeFile(join(directory, "sessions.json"), JSON.stringify({ [key]: { sessionId: id } }));
+  expect(await reader.read({ ...input, requireIndex: true })).toMatchObject({ session_key: key, session_id: id });
+});
+it("does not strip a nested subagent key or redirect it to a Cron conversation", async () => {
+  await writeFile(join(directory, "sessions.json"), JSON.stringify({ "agent:main:cron:daily": { sessionId: id } }));
+  await expect(reader.read({ ...input, sessionKey: key + ":subagent:worker", expectedSessionId: id, requireIndex: true }))
+    .rejects.toMatchObject({ code: "original_session_unavailable" });
+});
