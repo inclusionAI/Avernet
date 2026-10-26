@@ -63,7 +63,7 @@ wheels = [
 [[package]]
 name = "avernet-search"
 version = "0.1.0"
-source = { editable = "../../middleware/python/avernet-search" }
+source = { editable = "packages/avernet-search" }
 
 [package.metadata]
 requires-dist = [
@@ -118,7 +118,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "apscheduler", specifier = ">=3.10.0" },
-    { name = "avernet-search", editable = "../../middleware/python/avernet-search" },
+    { name = "avernet-search", editable = "packages/avernet-search" },
     { name = "faiss-cpu", specifier = "==1.8.0" },
     { name = "fastapi", specifier = ">=0.100.0" },
     { name = "httpx", specifier = ">=0.24.0" },

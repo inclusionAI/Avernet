@@ -12,7 +12,7 @@ Unsupported filters, extensions and scenes fail explicitly. Empty authorized
 scope is never interpreted as unrestricted access.
 
 Install from the repository root:
-`uv pip install -e 'middleware/python/avernet-search[http]' -e 'apps/agent-search[test]'`.
+`uv pip install -e 'apps/bcsfuse/packages/avernet-search[http]' -e 'apps/agent-search[test]'`.
 From this directory run `python -m pytest tests`.
 
 ## Context Boundary

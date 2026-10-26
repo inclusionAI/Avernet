@@ -65,4 +65,4 @@ include = ["src*", "tests.smoke*"]
 "*" = ["*.yaml", "*.json", "*.md"]
 
 [tool.uv.sources]
-avernet-search = { path = "../../middleware/python/avernet-search", editable = true }
+avernet-search = { path = "packages/avernet-search", editable = true }

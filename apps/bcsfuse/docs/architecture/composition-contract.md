@@ -32,7 +32,7 @@ API. The host constructs it with `TcSearchApplication`, authentication and an
 owned executor. Omitting it preserves the existing v1 route surface. Existing
 public and internal entrypoints do not opt in automatically. See
 [shared search boundaries](search-core-boundary.md) and the
-[public v2 contract](../../../../middleware/python/avernet-search/docs/search-api.md).
+[public v2 contract](../../packages/avernet-search/docs/search-api.md).
 
 ## Runtime business logging
 

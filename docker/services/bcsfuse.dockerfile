@@ -42,8 +42,8 @@ WORKDIR /app
 
 # Copy package metadata first for layer caching.
 COPY apps/bcsfuse/pyproject.toml apps/bcsfuse/README.md ./
-COPY middleware/python/avernet-search/pyproject.toml middleware/python/avernet-search/README.md /opt/avernet-search/
-COPY middleware/python/avernet-search/src /opt/avernet-search/src
+COPY apps/bcsfuse/packages/avernet-search/pyproject.toml apps/bcsfuse/packages/avernet-search/README.md /opt/avernet-search/
+COPY apps/bcsfuse/packages/avernet-search/src /opt/avernet-search/src
 
 # Install package in editable mode with dev extras (tests are kept in image
 # for optional container self-verification; they are not run at startup).
