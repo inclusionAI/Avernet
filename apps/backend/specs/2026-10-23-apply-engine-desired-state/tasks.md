@@ -150,6 +150,6 @@
 - **Goal:** Green, within limits, reviewable.
 - **Done when:**
   - [x] `ruff check` and `ruff format --line-length 120 --check` clean on every new file; no touched file over 1,000 lines; no formatting churn in untouched lines.
-  - [ ] `DEPLOY_PROFILE=test pytest tests/community` and `./scripts/ci_test.sh` pass.
-  - [ ] PR body per template: Problem / Solution / Validation (pass counts before and after, equivalence cases) / Compatibility and risk (resources root rule on stored documents, clear-then-write window, skills receipt format, DDL edited in place) / Related issues (#2162, #2862, #3064, RSI-04).
+  - [x] `DEPLOY_PROFILE=test pytest tests/community` and `./scripts/ci_test.sh` pass. (Locally the full suite passes except the container's own 29 environmental cases — `rsync`-less service-bot builds and bare-interpreter cold imports — so the GitHub `Backend unit tests` job, which is `./scripts/ci_test.sh`, is the gate; green on 615239fe and re-run on each review-round push.)
+  - [x] PR body per template: Problem / Solution / Validation (pass counts before and after, equivalence cases) / Compatibility and risk (resources root rule on stored documents, clear-then-write window, skills receipt format, DDL edited in place) / Related issues (#2162, #2862, #3064, RSI-04).
 - **Depends on:** Task 12

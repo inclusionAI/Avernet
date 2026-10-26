@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from agentclaw.community.log import get_logger
 from agentclaw.community.core.apply_engine.compiler import state_ref_from_payload
 from agentclaw.community.core.apply_engine.outcomes import (
     SourceMode,
@@ -31,16 +32,22 @@ from agentclaw.community.core.apply_engine.capabilities import (
 )
 
 
+logger = get_logger()
+
 def report_from_payload(
     payload: dict, *, record: Any, status: ApplyStatus
 ) -> ApplyReport:
     """Rebuild the in-memory report from what was stored.
 
     The stored JSON is the wire shape, so this is its inverse. Entry outcomes
-    round-trip through the enum rather than being carried as raw strings, and
-    so do the source modes: a value an enum does not know is a corrupted row,
-    and failing here is better than serving it onward as if it meant something
-    (a silently dropped ``strict`` mode would disarm the pin it records).
+    round-trip through the enum rather than being carried as raw strings: a
+    value the enum does not know is a corrupted row, and failing here is better
+    than serving it onward as if it meant something. A source ``mode`` the
+    enum does not know is the one field read leniently (``None``, logged at
+    warning): the Manifest compiler decodes the last reports on **every**
+    compile for its baselines, so a loud failure there would stop the bot from
+    ever applying again over one unreadable row of immutable history, while
+    ``None`` costs that row its baseline opinion and nothing else.
     """
     categories: list[CategoryResult] = []
     by_category: dict[str, list[EntryResult]] = {}
@@ -91,7 +98,7 @@ def report_from_payload(
                 name=source.get("name", ""),
                 url=source.get("url"),
                 ref=source.get("ref"),
-                mode=SourceMode(source["mode"]) if source.get("mode") is not None else None,
+                mode=_source_mode(source.get("mode"), apply_id=record.apply_id, name=source.get("name")),
                 resolved_sha=source.get("resolved_sha"),
                 auth=source.get("auth"),
             )
@@ -99,6 +106,23 @@ def report_from_payload(
         ),
         notes=tuple(str(note) for note in payload.get("notes") or ()),
     )
+
+
+def _source_mode(value: Any, *, apply_id: str, name: Any) -> SourceMode | None:
+    """The stored mode, or ``None`` (logged) for a value outside the enum; see ``report_from_payload``."""
+    if value is None:
+        return None
+    try:
+        return SourceMode(value)
+    except ValueError:
+        logger.warning(
+            "[manifest_apply] stored report %s carries source %r with an unreadable mode %r; "
+            "read as no baseline opinion",
+            apply_id,
+            name,
+            value,
+        )
+        return None
 
 
 def _construct_of(name: Any) -> Category | Section | None:

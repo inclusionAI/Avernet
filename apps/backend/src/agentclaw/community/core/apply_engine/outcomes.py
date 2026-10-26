@@ -616,7 +616,12 @@ def derive_status(categories: tuple[CategoryResult, ...]) -> ApplyStatus:
       whose manifest declares no category, applied everything it was asked to.
     * Every entry ``created`` / ``updated`` / ``unchanged`` ⇒ ``SUCCEEDED``.
     * Some delivered and some not ⇒ ``PARTIAL``.
-    * Nothing delivered ⇒ ``FAILED``.
+    * Nothing delivered ⇒ ``FAILED`` — when something *failed*: a ``failed``
+      entry, an aborted category. An apply whose only undelivered entries are
+      deliberate skips (a materialiser declined them, with a reason) is
+      ``PARTIAL`` even with nothing delivered: not everything declared is on
+      the bot, but nothing went wrong, and a caller reading ``FAILED`` would
+      look for a failure that is not there.
 
     An aborted category **with no entries of its own** has to be counted
     directly, not inferred from entries, because it produced none to inspect.
@@ -644,7 +649,14 @@ def derive_status(categories: tuple[CategoryResult, ...]) -> ApplyStatus:
     total = len(entries) + silent_failures
     if ok == total:
         return ApplyStatus.SUCCEEDED
-    return ApplyStatus.PARTIAL if ok else ApplyStatus.FAILED
+    if ok:
+        return ApplyStatus.PARTIAL
+    failed_outright = silent_failures or any(
+        entry.outcome is EntryOutcome.FAILED or category.aborted
+        for category in categories
+        for entry in category.entries
+    )
+    return ApplyStatus.FAILED if failed_outright else ApplyStatus.PARTIAL
 
 
 __all__ = [

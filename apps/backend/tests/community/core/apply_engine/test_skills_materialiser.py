@@ -522,18 +522,33 @@ def test_a_non_local_skill_is_skipped_not_failed_and_not_removed(caplog):
     assert "3103" in (plan.entries[0].reason or "")
     assert plan.removals == ()
     assert plan.is_noop, "a deliberate skip writes nothing, so a plan of skips alone is a no-op"
-    # The dry run's projection keeps the reason: the skip is known before any write.
-    from agentclaw.community.core.apply_engine.orchestrator import ApplyOrchestrator
+    # The real dry run: the projection keeps the reason (the skip is known before any write), no category is
+    # aborted, and the summary says PARTIAL (something declared is not on the bot), never FAILED: nothing failed.
+    from datetime import datetime
 
-    projected = ApplyOrchestrator({}, steps=lambda phase: ())._projected(raw.construct, plan)
-    assert [(e.identity, e.outcome.value, "3103" in (e.reason or "")) for e in projected.entries] == [
+    from agentclaw.community.core.apply_engine import order
+    from agentclaw.community.core.apply_engine.desired_state import Declaration, DesiredState
+    from agentclaw.community.core.apply_engine.orchestrator import ApplyOrchestrator
+    from agentclaw.community.core.apply_engine.outcomes import ApplyStatus, derive_status
+
+    orchestrator = ApplyOrchestrator({raw.construct: raw}, steps=lambda phase: order.APPLY_ORDER)
+    state = DesiredState(skills=Declaration((DesiredSkill("triage", CenterSkillVersion("1.0.0")),)))
+    preview = _run(
+        orchestrator.apply(ctx, state, apply_id="", trigger="dry_run", started_at=datetime.now(), dry_run=True)
+    )
+    assert [(e.identity, e.outcome.value, "3103" in (e.reason or "")) for e in preview.entries] == [
         ("triage", "skipped", True)
     ]
-    assert projected.aborted is False
+    assert all(not category.aborted for category in preview.categories)
+    assert preview.status is ApplyStatus.PARTIAL
     written = _run(raw.write(ctx, plan))
     assert [(entry.identity, entry.outcome.value) for entry in written] == [("triage", "skipped")]
     assert "3103" in (written[0].reason or "")
     assert written[0].note is None
+    from agentclaw.community.core.apply_engine.outcomes import CategoryResult
+
+    only_skips = (CategoryResult(construct=raw.construct, entries=tuple(written), removals=(), aborted=False),)
+    assert derive_status(only_skips) is ApplyStatus.PARTIAL
     assert uploads.uploads == []
     assert activation.writes == 0
 

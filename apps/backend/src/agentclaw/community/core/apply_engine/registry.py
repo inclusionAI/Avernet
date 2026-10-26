@@ -239,7 +239,8 @@ class CategoryPlan:
         )
 
         # A converged document: nothing to write, nothing to remove.
-        # ``is_noop`` is True here and only here.
+        # ``is_noop`` is True here, and for a plan whose only other entries
+        # are deliberate ``skipped`` ones, which write nothing either.
         CategoryPlan(
             entries=(PlannedEntry(Intent("gh", "gh"), "unchanged"),),
             removals=(),
@@ -272,7 +273,9 @@ class CategoryPlan:
 
         The convergence criterion depends on this: re-applying an unchanged
         document must not merely produce equal output, it must make **no
-        writes**, and that is observable only if the plan can say so.
+        writes**, and that is observable only if the plan can say so. A
+        deliberate ``skipped`` entry writes nothing, so it does not break a
+        no-op; it is not thereby converged, which the entry's own outcome says.
         """
         return not (self.removal_writes if self.removal_writes is not None else self.removals) and all(
             entry.outcome in ("unchanged", "skipped") and not entry.requires_write
