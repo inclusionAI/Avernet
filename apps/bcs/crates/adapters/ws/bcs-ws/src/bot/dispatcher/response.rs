@@ -355,6 +355,32 @@ async fn handle_accepted_run_id_response(
         .and_then(|v| v.as_str())
     {
         if sub_run_id != run_id {
+            // Install the application-side canonical output binding before
+            // exposing the downstream alias to concurrent event ingestion.
+            let task_alias_registration = match registered_bot_id.as_deref() {
+                Some(bot_id) => match state
+                    .message_flow
+                    .register_task_run_alias(run_id, sub_run_id, bot_id)
+                    .await
+                {
+                    Ok(registration) => registration,
+                    Err(error) => {
+                        warn!(
+                            request_id = %bcs_observability::CurrentRequestId,
+                            task_id = %run_id,
+                            sub_bot_run_id = %sub_run_id,
+                            bot_id = %bot_id,
+                            error = %error,
+                            "master_slave: failed to register sub bot run_id alias"
+                        );
+                        TaskRunAliasRegistration::Rejected
+                    }
+                },
+                None => TaskRunAliasRegistration::Rejected,
+            };
+            if matches!(task_alias_registration, TaskRunAliasRegistration::Rejected) {
+                return;
+            }
             if let Err(error) = state
                 .bot_run_context
                 .bind_downstream_run_id(run_id, sub_run_id)
@@ -384,27 +410,6 @@ async fn handle_accepted_run_id_response(
                     );
                     false
                 }
-            };
-            let task_alias_registration = match registered_bot_id.as_deref() {
-                Some(bot_id) => match state
-                    .message_flow
-                    .register_task_run_alias(run_id, sub_run_id, bot_id)
-                    .await
-                {
-                    Ok(registration) => registration,
-                    Err(error) => {
-                        warn!(
-                            request_id = %bcs_observability::CurrentRequestId,
-                            task_id = %run_id,
-                            sub_bot_run_id = %sub_run_id,
-                            bot_id = %bot_id,
-                            error = %error,
-                            "master_slave: failed to register sub bot run_id alias"
-                        );
-                        TaskRunAliasRegistration::Rejected
-                    }
-                },
-                None => TaskRunAliasRegistration::Rejected,
             };
             let run_channel_alias_registered = match task_alias_registration {
                 TaskRunAliasRegistration::Registered | TaskRunAliasRegistration::NotTask => {

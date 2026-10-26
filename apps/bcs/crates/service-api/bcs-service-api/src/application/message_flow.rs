@@ -431,6 +431,8 @@ pub trait MessageFlowService: Send + Sync {
     ) -> ServiceResult<Option<ChatAbortScope>> {
         Ok(None)
     }
+    /// Legacy Runs move the IM source to the accepted identity. Admitted output
+    /// Runs retain it on the canonical identity used by event normalization.
     async fn rebind_channel_source_message(
         &self,
         _source_run_id: &str,
@@ -438,6 +440,10 @@ pub trait MessageFlowService: Send + Sync {
     ) -> ServiceResult<bool> {
         Ok(false)
     }
+    /// Register an authenticated Bot acceptance alias. In addition to Task
+    /// correlation, an admitted output Run (including NotTask) retains its
+    /// canonical operation, producer scope and terminal identity. Conflicting
+    /// aliases and wrong-Bot acceptances must be rejected before publication.
     async fn register_task_run_alias(
         &self,
         task_id: &str,

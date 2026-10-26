@@ -1,6 +1,13 @@
 use std::collections::{HashMap, HashSet};
 
 use bcs_domain::{CoordinationSurface, MessageVisibilityDomain, Participant};
+use bcs_service_api::{BotRunScope, ServiceError, ServiceResult};
+
+#[derive(Default)]
+struct OutputAliases {
+    by_alias: HashMap<String, (String, BotRunScope)>,
+    by_run: HashMap<String, Vec<String>>,
+}
 use serde_json::Value;
 use tokio::sync::Mutex;
 
@@ -100,6 +107,7 @@ pub struct MessageTracker {
     /// relay/task continuations) simply have no entry: their events
     /// authorize per event against current facts.
     run_operations: Mutex<HashMap<String, String>>,
+    output_aliases: Mutex<OutputAliases>,
 }
 
 impl MessageTracker {
@@ -115,6 +123,7 @@ impl MessageTracker {
             channel_sender_info: Mutex::new(HashMap::new()),
             channel_source_message_ids: Mutex::new(HashMap::new()),
             run_operations: Mutex::new(HashMap::new()),
+            output_aliases: Mutex::new(OutputAliases::default()),
         }
     }
 
@@ -137,11 +146,39 @@ impl MessageTracker {
         self.run_operations.lock().await.get(run_id).cloned()
     }
 
-    /// Drop a run → operation binding: a transport failure proved
-    /// the run produces nothing under that operation, so stray later
-    /// events under its id must not inherit the operation tag.
-    pub async fn uncache_run_operation(&self, run_id: &str) {
+    /// Retire only this Run's output facts/aliases. Unsent terminal cleanup
+    /// never scans other Runs' tool-call state or pending streaming buffers.
+    pub async fn cleanup_output_run(&self, run_id: &str) {
+        self.bot_event_run_info.lock().await.remove(run_id);
         self.run_operations.lock().await.remove(run_id);
+        let mut aliases = self.output_aliases.lock().await;
+        if let Some(names) = aliases.by_run.remove(run_id) {
+            for name in names { aliases.by_alias.remove(&name); }
+        }
+    }
+
+    /// Only called for an authenticated acceptance of a known output Run.
+    /// Alias routing is process-local and never performs frame-time DB/cache I/O.
+    pub async fn register_output_alias(&self, run: &str, alias: &str, scope: BotRunScope) -> bool {
+        if run == alias { return true; }
+        let operations = self.run_operations.lock().await;
+        if !operations.contains_key(run) || operations.contains_key(alias) { return false; }
+        let mut aliases = self.output_aliases.lock().await;
+        if let Some(existing) = aliases.by_alias.get(alias) {
+            return existing == &(run.to_string(), scope);
+        }
+        aliases.by_alias.insert(alias.to_string(), (run.to_string(), scope));
+        aliases.by_run.entry(run.to_string()).or_default().push(alias.to_string());
+        true
+    }
+
+    pub async fn canonical_output_run(&self, run: &str, scope: &BotRunScope) -> ServiceResult<Option<String>> {
+        let aliases = self.output_aliases.lock().await;
+        match aliases.by_alias.get(run) {
+            Some((canonical, accepted_scope)) if accepted_scope == scope => Ok(Some(canonical.clone())),
+            Some(_) => Err(ServiceError::Forbidden("output Run alias scope mismatch".into())),
+            None => Ok(None),
+        }
     }
 
     // -- Tool call lifecycle --
@@ -390,8 +427,7 @@ impl MessageTracker {
         self.channel_sender_info.lock().await.remove(run_id);
         self.channel_source_message_ids.lock().await.remove(run_id);
         self.coordination_surfaces.lock().await.remove(run_id);
-        self.bot_event_run_info.lock().await.remove(run_id);
-        self.run_operations.lock().await.remove(run_id);
+        self.cleanup_output_run(run_id).await;
         self.streaming_chat_buf.lock().await.remove(run_id)
     }
 }

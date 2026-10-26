@@ -428,12 +428,24 @@ impl BcsMessageFlow {
     /// the operation complete on its surviving streams (spec §8.2).
     pub(crate) async fn release_output_runs(&self, operation_id: &str, run_ids: &[String]) {
         for run_id in run_ids {
-            self.message_tracker.uncache_run_operation(run_id).await;
+            self.message_tracker.cleanup_output_run(run_id).await;
         }
         if let Some(output_admission) = self.output_admission.as_ref() {
             let _ = output_admission
                 .release_operation_runs(operation_id, run_ids.to_vec())
                 .await;
+        }
+    }
+
+    /// A durable terminal for a never-sent Send has no Bot callback to close
+    /// its stream. No TTL: queued/unknown/running work retains its permit.
+    pub(crate) async fn release_unsent_output(&self, row: &bcs_domain::message_delivery::PersistedMessageDelivery) {
+        if row.state.kind != DeliveryType::Send || row.state.may_have_been_sent || !row.state.status.is_terminal() {
+            return;
+        }
+        let Some(run) = &row.run_id else { return; };
+        if let Some(operation) = self.message_tracker.operation_of_run(run).await {
+            self.release_output_runs(&operation, std::slice::from_ref(run)).await;
         }
     }
 
@@ -604,6 +616,11 @@ impl MessageFlowService for BcsMessageFlow {
         source_run_id: &str,
         accepted_run_id: &str,
     ) -> ServiceResult<bool> {
+        // Admitted aliases normalize to their source Run at event ingress;
+        // keep its IM destination under that same canonical identity.
+        if self.message_tracker.operation_of_run(source_run_id).await.is_some() {
+            return Ok(self.message_tracker.channel_source_message_id(source_run_id).await.is_some());
+        }
         Ok(self
             .message_tracker
             .rebind_channel_source_message_id(source_run_id, accepted_run_id)
@@ -616,10 +633,29 @@ impl MessageFlowService for BcsMessageFlow {
         run_id: &str,
         bot_id: &str,
     ) -> ServiceResult<TaskRunAliasRegistration> {
-        let result = self
-            .task_store
-            .register_alias_for_dispatched_target(task_id, run_id, bot_id)
-            .await;
+        let task = self.task_store.get(task_id).await;
+        if task.as_ref().is_some_and(|entry| entry.target_bot != bot_id
+            || entry.status != crate::task_store::TaskLedgerStatus::Dispatched)
+            || self.task_store.resolve_task_id(run_id).await.is_some_and(|id| id != task_id) {
+            return Ok(TaskRunAliasRegistration::Rejected);
+        }
+        if self.message_tracker.operation_of_run(task_id).await.is_some() {
+            let scope = if let Some(entry) = task {
+                Some(BotRunScope {
+                    session_id: entry.session_id.unwrap_or_else(|| entry.group_id.clone()),
+                    group_id: entry.group_id, bot_id: entry.target_bot,
+                })
+            } else if let Some(contexts) = &self.bot_run_context {
+                contexts.find_active_run(task_id).await?.map(|context| context.scope)
+            } else { None };
+            let Some(scope) = scope.filter(|scope| scope.bot_id == bot_id) else {
+                return Ok(TaskRunAliasRegistration::Rejected);
+            };
+            if !self.message_tracker.register_output_alias(task_id, run_id, scope).await {
+                return Ok(TaskRunAliasRegistration::Rejected);
+            }
+        }
+        let result = self.task_store.register_alias_for_dispatched_target(task_id, run_id, bot_id).await;
         Ok(match result {
             Some(true) => TaskRunAliasRegistration::Registered,
             Some(false) => TaskRunAliasRegistration::Rejected,

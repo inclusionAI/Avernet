@@ -57,6 +57,15 @@ pub async fn handle_bot_event(
     cmd: BotEventCommand,
 ) -> ServiceResult<BotEventOutcome> {
     let mut cmd = cmd;
+    // Resolve only aliases installed by authenticated acceptance. Everything
+    // below (locks, producer facts, persistence and terminal) uses ONE identity.
+    let scope = bcs_service_api::BotRunScope {
+        group_id: cmd.group_id.clone(), bot_id: cmd.bot_id.clone(),
+        session_id: cmd.bcs_session_id.clone().unwrap_or_else(|| cmd.group_id.clone()),
+    };
+    if let Some(canonical) = flow.message_tracker.canonical_output_run(&cmd.run_id, &scope).await? {
+        cmd.run_id = canonical;
+    }
     let task_intent_eligible = cmd
         .event_payload
         .as_object_mut()

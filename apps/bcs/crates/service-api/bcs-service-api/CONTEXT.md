@@ -31,6 +31,13 @@ own terminal. A terminal that cannot enqueue within the bounded backpressure
 budget retires the saturated connection (observable transport failure),
 leaving no silent final-less stream.
 
+Bot-view delivery admission consumes the existing batched `BotAuthorityPort::roles_for`
+contract (one result per input in order), including fail-closed length/error checks.
+SQL implementations read actual identity pairs in bounded chunks, never scalar
+`can_manage` per viewer. Accepted Run aliases enter MessageFlow under their
+canonical output identity after authenticated Bot/scope validation; no transport
+or database details enter that contract.
+
 MessageFlowService::publish_state_machine_result accepts the original one-shot
 result command. Success acknowledges durable Group admission for managed targets
 and synchronous acceptance for legacy targets, never Bot completion. Publication

@@ -25,10 +25,14 @@ mod ws_support;
 
 const SESSION: &str = "group-1:task";
 
+#[derive(Default)]
+struct CleanupGate { entered: tokio::sync::Notify, resume: tokio::sync::Notify }
+
 struct OutputProbe {
     inner: WorkbenchOutputAdmission,
     managed: Arc<ManagedMessageDelivery>,
     runs: Mutex<Vec<(String, String)>>,
+    release_gate: Mutex<Option<Arc<CleanupGate>>>,
 }
 #[async_trait::async_trait]
 impl OutputAdmissionPort for OutputProbe {
@@ -45,6 +49,11 @@ impl OutputAdmissionPort for OutputProbe {
         self.inner.register_operation_runs(operation, runs).await
     }
     async fn release_operation_runs(&self, operation: &str, runs: Vec<String>) -> ServiceResult<()> {
+        let gate = self.release_gate.lock().unwrap().take();
+        if let Some(gate) = gate {
+            gate.entered.notify_one();
+            gate.resume.notified().await;
+        }
         self.inner.release_operation_runs(operation, runs).await
     }
 }
@@ -83,7 +92,7 @@ impl Fixture {
         let frontend = Arc::new(WorkbenchFrontendDelivery::new(registry.clone(), runs));
         let output = Arc::new(OutputProbe {
             inner: WorkbenchOutputAdmission::new(registry.clone(), resolver.clone()),
-            managed: managed.clone(), runs: Mutex::new(Vec::new()),
+            managed: managed.clone(), runs: Mutex::new(Vec::new()), release_gate: Mutex::new(None),
         });
         let contexts = Arc::new(MemoryBotRunContextStore::default());
         let mut flow = BcsMessageFlow::new(support.group.clone(), support.routing.clone(), support.registry.clone(),
@@ -96,6 +105,7 @@ impl Fixture {
         flow.delivery_policy = Some(live.clone());
         let flow = Arc::new(flow);
         flow.retain_terminal_events();
+        managed.bind_output_cleanup(Arc::downgrade(&flow)).unwrap();
         let mut policy = bcs_config_api::message_delivery::DeliveryPolicy::default();
         policy.flow_enabled.task = queued;
         policy.defaults.mode = bcs_config_api::message_delivery::BotDeliveryMode::Enforce;
@@ -264,4 +274,178 @@ async fn legacy_transport_uncertainty_keeps_ingress_but_explicit_rejection_relea
             assert_eq!(f.resolver.call_count(), baseline);
         }
     }
+}
+#[tokio::test]
+async fn legacy_accepted_alias_preserves_frozen_admission() {
+    let f = Fixture::new(false, 100).await;
+    let (conn, mut frames) = f.subscribe("bot-driver").await;
+    let task = f.dispatch().await.unwrap();
+    let (operation, run) = f.latest();
+    let alias = "engine-accepted-run";
+    f.flow.message_tracker.cache_channel_source_message_id(&run, "im-source").await;
+    assert!(f.flow.rebind_channel_source_message(&run, alias).await.unwrap());
+    assert_eq!(f.flow.message_tracker.channel_source_message_id(&run).await.as_deref(), Some("im-source"));
+    f.contexts.bind_downstream_run_id(&run, alias).await.unwrap();
+    assert_eq!(f.flow.register_task_run_alias(&task.task_id, alias, "bot-observer").await.unwrap(), TaskRunAliasRegistration::Registered);
+    drain(&mut frames);
+    f.resolver.admit_only_instances(&[]);
+    let baseline = f.resolver.call_count();
+    for _ in 0..100 {
+        f.emit(alias, ChatEventState::Delta).await;
+        assert!(matches!(frames.try_recv().unwrap(), OutboundFrame::Data { .. }));
+    }
+    assert_eq!(f.resolver.call_count(), baseline, "accepted alias must retain original operation, not reauthorize each delta");
+    f.emit(alias, ChatEventState::Final).await;
+    let mut terminal = false;
+    while let Ok(frame) = frames.try_recv() { terminal |= matches!(frame, OutboundFrame::Terminal { .. }); }
+    assert!(terminal);
+    assert!(!f.permits(&operation, &run, conn).await, "alias final closes the canonical stream");
+    assert!(f.contexts.get_context(&run).await.unwrap().terminal);
+    assert!(f.flow.message_tracker.channel_source_message_id(&run).await.is_none());
+}
+
+#[tokio::test]
+async fn queued_cancellation_releases_output_permit() {
+    let f = Fixture::new(true, 100).await;
+    let (conn, mut frames) = f.subscribe("bot-observer").await;
+    let changes = f.managed.subscribe();
+    let (shutdown, rx) = tokio::sync::watch::channel(false);
+    let job = tokio::spawn(bcs_message_flow::delivery_notifications::run(Arc::downgrade(&f.flow), changes, rx));
+    f.dispatch().await.unwrap();
+    let (op, run) = f.latest();
+    let row = f.row().await;
+    let cancelled = f.managed.transition(DeliveryTransitionCommand {
+        delivery_id: row.delivery_id, expected_state_version: row.state.state_version,
+        event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::CancelRequested,
+        now_ms: chrono::Utc::now().timestamp_millis(), request_id: None, actor_id: Some("human_user".into()),
+        reply: None, transport_context_json: None, deadline_at_ms: None,
+    }).await.unwrap();
+    assert_eq!(cancelled.state.status, bcs_domain::message_delivery::MessageDeliveryStatus::Cancelled);
+    // Wait until the actual notification consumer observed the committed terminal.
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            let frame = frames.recv().await.unwrap();
+            if let OutboundFrame::Data { payload } = frame {
+                if payload.contains("message.delivery.updated") && payload.contains("cancelled") { break; }
+            }
+        }
+    }).await.unwrap();
+    shutdown.send(true).unwrap(); job.await.unwrap();
+    assert!(!f.permits(&op, &run, conn).await, "a never-sent cancelled Run must no longer retain live output permits");
+}
+
+#[tokio::test]
+async fn output_alias_rejects_conflicting_run_and_wrong_producer_scope() {
+    let f = Fixture::new(false, 100).await;
+    let (_, mut frames) = f.subscribe("bot-driver").await;
+    let first = f.dispatch().await.unwrap().task_id;
+    let second = f.dispatch().await.unwrap().task_id;
+    assert_eq!(f.flow.register_task_run_alias(&first, &second, "bot-observer").await.unwrap(), TaskRunAliasRegistration::Rejected);
+    assert_eq!(f.flow.register_task_run_alias(&first, "worker-alias", "bot-driver").await.unwrap(), TaskRunAliasRegistration::Rejected);
+    assert_eq!(f.flow.register_task_run_alias(&first, "worker-alias", "bot-observer").await.unwrap(), TaskRunAliasRegistration::Registered);
+    assert_eq!(f.flow.register_task_run_alias(&second, "worker-alias", "bot-observer").await.unwrap(), TaskRunAliasRegistration::Rejected);
+    for (bot, group, session) in [("other", "group-1", SESSION), ("bot-observer", "other", SESSION),
+        ("bot-observer", "group-1", "other-session")] {
+        drain(&mut frames);
+        let baseline = f.resolver.call_count();
+        let result = f.flow.handle_bot_event(BotEventCommand {
+            bot_id: bot.into(), run_id: "worker-alias".into(), group_id: group.into(), bcs_session_id: Some(session.into()),
+            state: ChatEventState::Delta, event_type: "chat.event".into(), event_payload: json!({"delta_text":"forged"}),
+        }).await;
+        assert!(matches!(result, Err(ServiceError::Forbidden(_))));
+        assert!(frames.try_recv().is_err());
+        assert_eq!(f.resolver.call_count(), baseline, "scope mismatch must not fall back to independent event authorization");
+    }
+}
+
+#[path = "../../../services/bcs-message-flow/tests/support/operation_output.rs"]
+mod operation_output;
+
+#[tokio::test]
+async fn ordinary_nonqueued_send_alias_uses_the_same_canonical_output_path() {
+    let f = Fixture::new(false, 100).await;
+    let (conn, mut frames) = f.subscribe("bot-driver").await;
+    let sent = f.flow.handle_web_send(operation_output::web_send("group-1", "human_1", Some(SESSION), &["bot-driver"])).await.unwrap();
+    let run = sent.active_run_ids.iter().find(|run| f.output.runs.lock().unwrap().iter().any(|(_, id)| id == *run)).unwrap();
+    let context = f.contexts.get_context(run).await.unwrap();
+    let operation = f.flow.message_tracker.operation_of_run(run).await.unwrap();
+    assert_eq!(f.flow.register_task_run_alias(run, "chat-alias", &context.bot_id).await.unwrap(), TaskRunAliasRegistration::NotTask);
+    drain(&mut frames);
+    f.resolver.admit_only_instances(&[]);
+    let baseline = f.resolver.call_count();
+    f.flow.handle_bot_event(BotEventCommand {
+        bot_id: context.bot_id, run_id: "chat-alias".into(), group_id: "group-1".into(), bcs_session_id: Some(SESSION.into()),
+        state: ChatEventState::Delta, event_type: "chat.event".into(), event_payload: json!({"delta_text":"normal chat"}),
+    }).await.unwrap();
+    assert_eq!(f.resolver.call_count(), baseline);
+    assert!(matches!(frames.try_recv().unwrap(), OutboundFrame::Data { .. }));
+    // A participant view still obeys this producer's original audience.
+    assert!(f.permits(&operation, run, conn).await);
+}
+
+#[tokio::test]
+async fn unsent_terminal_cleanup_does_not_depend_on_status_notification_delivery() {
+    use bcs_service_api::core::message_delivery::DeliveryLifecycleEvent as Event;
+    for event in [Event::CancelRequested, Event::PreparationFailed, Event::QueueExpired] {
+        let f = Fixture::new(true, 100).await;
+        let (conn, _) = f.subscribe("bot-driver").await;
+        f.dispatch().await.unwrap();
+        let (op, run) = f.latest();
+        let row = f.row().await;
+        // Deliberately no notification subscriber: this is post-commit cleanup.
+        let terminal = f.managed.transition(DeliveryTransitionCommand {
+            delivery_id: row.delivery_id, expected_state_version: row.state.state_version, event,
+            now_ms: chrono::Utc::now().timestamp_millis(), request_id: None, actor_id: None, reply: None,
+            transport_context_json: None, deadline_at_ms: None,
+        }).await.unwrap();
+        assert!(terminal.state.status.is_terminal());
+        assert!(!f.permits(&op, &run, conn).await);
+        assert!(f.flow.message_tracker.operation_of_run(&run).await.is_none());
+    }
+}
+
+#[tokio::test]
+async fn cancelling_a_started_run_keeps_output_until_its_callback_terminal() {
+    use bcs_service_api::core::message_delivery::DeliveryLifecycleEvent as Event;
+    let f = Fixture::new(true, 100).await;
+    let (conn, _) = f.subscribe("bot-driver").await;
+    f.dispatch().await.unwrap();
+    let (op, run) = f.latest();
+    f.start().await;
+    let row = f.row().await;
+    let pending = f.managed.transition(DeliveryTransitionCommand {
+        delivery_id: row.delivery_id, expected_state_version: row.state.state_version, event: Event::CancelRequested,
+        now_ms: chrono::Utc::now().timestamp_millis(), request_id: None, actor_id: None, reply: None,
+        transport_context_json: None, deadline_at_ms: None,
+    }).await.unwrap();
+    assert_eq!(pending.state.status, bcs_domain::message_delivery::MessageDeliveryStatus::Cancelling);
+    assert!(f.permits(&op, &run, conn).await);
+}
+
+#[tokio::test]
+async fn cancellation_of_the_transition_caller_does_not_cancel_committed_cleanup() {
+    let f = Fixture::new(true, 100).await;
+    let (conn, _) = f.subscribe("bot-driver").await;
+    f.dispatch().await.unwrap();
+    let (op, run) = f.latest();
+    let row = f.row().await;
+    let gate = Arc::new(CleanupGate::default());
+    *f.output.release_gate.lock().unwrap() = Some(gate.clone());
+    let service = f.managed.clone();
+    let caller = tokio::spawn(async move {
+        service.transition(DeliveryTransitionCommand {
+            delivery_id: row.delivery_id, expected_state_version: row.state.state_version,
+            event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::CancelRequested,
+            now_ms: chrono::Utc::now().timestamp_millis(), request_id: None, actor_id: None, reply: None,
+            transport_context_json: None, deadline_at_ms: None,
+        }).await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(3), gate.entered.notified()).await.unwrap();
+    assert!(f.row().await.state.status.is_terminal(), "cleanup starts only after commit");
+    caller.abort();
+    assert!(caller.await.unwrap_err().is_cancelled());
+    gate.resume.notify_one();
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        while f.permits(&op, &run, conn).await { tokio::task::yield_now().await; }
+    }).await.expect("retained post-commit task must finish cleanup without its caller");
 }

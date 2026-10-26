@@ -27,6 +27,7 @@ use bcs_service_api::application::v1::{
 use bcs_service_api::core::SessionAuthorizationCoreService;
 use bcs_service_api::port::bot_authority::BotAuthorityPort;
 use bcs_service_api::types::authorization_snapshot::ParticipantAuthorizationSnapshot;
+use bcs_service_api::types::bot_authority::BotRoleQuery;
 use bcs_service_api::{ActorKind, GroupCoreService, GroupStrategy};
 
 /// Edge case: the strict application facts could not be read
@@ -148,19 +149,17 @@ impl DeliveryAdmissionService for DeliveryAdmissionServiceImpl {
             .map(|candidate| (candidate.user_id.as_str(), candidate.view_actor_id.as_str()))
             .collect();
         let mut denied_bot_views: HashSet<(&str, &str)> = HashSet::new();
-        for (user_id, bot_id) in bot_views.iter().copied() {
-            let authorized = match self.bot_authority.as_ref() {
-                Some(hook) => hook.can_manage(user_id, bot_id).await,
-                None => Err(bcs_service_api::ServiceError::InternalError(
-                    "bot authority hook is not wired".to_string(),
-                )),
-            };
-            match authorized {
-                Ok(true) => {}
-                Ok(false) => {
-                    denied_bot_views.insert((user_id, bot_id));
-                }
-                Err(_) => return Err(Self::internal_read()),
+        if !bot_views.is_empty() {
+            let hook = self.bot_authority.as_ref().ok_or_else(Self::internal_read)?;
+            let queries: Vec<_> = bot_views.iter().map(|(user, bot)| BotRoleQuery {
+                user_id: (*user).to_string(), bot_id: (*bot).to_string(),
+            }).collect();
+            let roles = hook.roles_for(&queries).await.map_err(Self::invalid_read)?;
+            if roles.len() != queries.len() {
+                return Err(Self::internal_read());
+            }
+            for (view, role) in bot_views.iter().zip(roles) {
+                if role.is_none() { denied_bot_views.insert(*view); }
             }
         }
 

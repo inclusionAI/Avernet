@@ -43,6 +43,9 @@ struct TestHook {
     managed: Mutex<BTreeSet<(String, String)>>,
     fail: AtomicBool,
     can_manage_calls: AtomicU64,
+    batch_calls: AtomicU64,
+    batch_queries: AtomicU64,
+    malformed_batch: AtomicBool,
 }
 
 impl TestHook {
@@ -77,9 +80,17 @@ impl BotAuthorityPort for TestHook {
 
     async fn roles_for(
         &self,
-        _queries: &[BotRoleQuery],
+        queries: &[BotRoleQuery],
     ) -> ServiceResult<Vec<Option<BotAccessRelation>>> {
-        Err(ServiceError::InternalError("unimplemented".into()))
+        self.batch_calls.fetch_add(1, Ordering::SeqCst);
+        self.batch_queries.fetch_add(queries.len() as u64, Ordering::SeqCst);
+        if self.fail.load(Ordering::SeqCst) {
+            return Err(ServiceError::InternalError("authority read failed".into()));
+        }
+        if self.malformed_batch.load(Ordering::SeqCst) { return Ok(Vec::new()); }
+        let managed = self.managed.lock().expect("hook set");
+        Ok(queries.iter().map(|q| managed.contains(&(q.user_id.clone(), q.bot_id.clone()))
+            .then_some(BotAccessRelation::Manager)).collect())
     }
 
     async fn can_manage(&self, user_id: &str, bot_id: &str) -> ServiceResult<bool> {
@@ -293,7 +304,7 @@ async fn one_batch_admits_each_candidate_with_its_frozen_scope() {
         MessageViewScope::Full,
         "Bot participants default to the Full view in this fixture"
     );
-    assert_eq!(fixture.hook.calls(), 1, "one authority edge read per Bot-view candidate");
+    assert_eq!(fixture.hook.batch_calls.load(Ordering::SeqCst), 1, "one authority edge read per Bot-view candidate");
 }
 
 /// A revoked management edge drops ONLY that Bot-view candidate;
@@ -357,7 +368,7 @@ async fn a_session_scope_is_never_repaired_from_the_group_seed() {
         .await
         .expect("resolution");
     assert!(admitted.is_empty(), "the live edge does not substitute the resource");
-    assert_eq!(fixture.hook.calls(), 1, "the edge is still consulted (and passes)");
+    assert_eq!(fixture.hook.batch_calls.load(Ordering::SeqCst), 1, "the edge is still consulted (and passes)");
 }
 
 /// A session-scoped admission whose recorded Group disagrees with
@@ -634,7 +645,7 @@ async fn one_resolution_reads_once_for_the_whole_batch() {
         "the whole batch shares ONE Group snapshot read"
     );
     // distinct (user, bot) pairs: (a,worker), (a,driver), (b,driver), (b,worker)
-    assert_eq!(hook.calls(), 4, "authority reads dedupe per distinct Bot view");
+    assert_eq!(hook.batch_queries.load(Ordering::SeqCst), 4, "authority reads dedupe per distinct Bot view");
     // bot-driver has no edge for either user → both dropped; the rest
     // admitted.
     let admitted_ids: BTreeSet<u64> = admitted
@@ -642,4 +653,33 @@ async fn one_resolution_reads_once_for_the_whole_batch() {
         .map(|recipient| recipient.connection_instance_id)
         .collect();
     assert_eq!(admitted_ids, BTreeSet::from([1, 2, 3, 6, 7, 8]));
+}
+#[tokio::test]
+async fn one_hundred_subscribers_use_batched_authority() {
+    let (f, group, session) = admission_fixture().await;
+    let mut candidates = Vec::new();
+    for i in 0..100 {
+        let user = format!("viewer-{i}");
+        f.hook.grant(&user, "bot-worker");
+        candidates.push(binding(&user, &group, Some(&session), "bot-worker", i));
+    }
+    let recipients = f.service.resolve_recipient_views(&DeliveryScope {
+        group_id: group, session_id: Some(session),
+    }, &candidates).await.unwrap();
+    assert_eq!(recipients.len(), 100);
+    assert_eq!(f.hook.batch_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(f.hook.batch_queries.load(Ordering::SeqCst), 100);
+    assert_eq!(f.hook.calls(), 0, "a batch must not invoke individual can_manage reads for every subscriber");
+}
+
+#[tokio::test]
+async fn malformed_authority_batch_never_partially_admits_recipients() {
+    let (f, group, session) = admission_fixture().await;
+    f.hook.malformed_batch.store(true, Ordering::SeqCst);
+    let result = f.service.resolve_recipient_views(&DeliveryScope {
+        group_id: group.clone(), session_id: Some(session.clone()),
+    }, &[binding("user-a", &group, Some(&session), "bot-worker", 1)]).await;
+    assert!(result.is_err());
+    assert_eq!(f.hook.batch_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(f.hook.calls(), 0);
 }

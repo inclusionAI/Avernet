@@ -18,7 +18,10 @@ pub trait BotAuthorityPort: Send + Sync {
     /// hook's bound environment.
     async fn role(&self, user_id: &str, bot_id: &str) -> ServiceResult<Option<BotAccessRelation>>;
 
-    /// Batch role read; same length and order as `queries`.
+    /// Batch role read; same length and order as `queries`. Presence means
+    /// owner/manager authorization, exactly like `can_manage`. Implementations
+    /// must batch the actual distinct (Human, Bot) pairs, not loop scalar reads
+    /// or fetch their Cartesian product; storage/integrity errors fail the batch.
     async fn roles_for(
         &self,
         queries: &[BotRoleQuery],

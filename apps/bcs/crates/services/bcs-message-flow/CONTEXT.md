@@ -86,6 +86,21 @@ reuses the already loaded Session participants without an extra storage read.
 Task ledger resource notifications still authorize independently per event.
 This adds no durable replay guarantee, schema, configuration or queue-policy change.
 
+Authenticated Bot acceptance aliases are installed in the local MessageTracker
+before the WS adapter publishes the downstream alias. Event entry validates the
+accepted Bot/Group/Session scope and normalizes to the canonical Run before
+locks, producer facts, persistence and terminal cleanup. IM source correlation
+for admitted Runs stays on that canonical identity. Alias frames add no remote
+identity or authorization reads; aliases are removed with their source Run.
+
+Managed delivery composition binds weak output-lifecycle cleanup. A committed
+terminal Send that was never sent (cancellation, expiry, preparation failure)
+releases its output stream without waiting for a nonexistent Bot callback.
+Cleanup runs after the DB transaction inside the existing cancellation-retained
+persistence task, independent of lossy status notifications (which also perform
+idempotent cleanup). It adds no SQL, scanner or TTL. Running/uncertain Sends and
+callback-driven terminals retain their permit until normal output draining.
+
 Queued messages and run-reply display companions share the existing persisted
 visibility classifier. Read-only delivery queries reuse the configured Chat
 history window for recorded join anchors (one bounded repository resolution per batch). ManagerWorker and

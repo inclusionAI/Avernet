@@ -82,6 +82,7 @@ pub async fn wire_with_leader(
     flow = flow.with_managed_deliveries(service.clone());
     let flow = Arc::new(flow);
     flow.retain_terminal_events();
+    service.bind_output_cleanup(Arc::downgrade(&flow))?;
     // Durable storage always installs an idle scheduler, even when all policy
     // switches are off. Only the current master's epoch may consume work.
     if !durable {

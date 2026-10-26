@@ -171,6 +171,9 @@ async fn publish_status(
         if let Some(direct) = &flow.direct_chat { direct.reconcile_direct(row).await?; }
         return Ok(());
     }
+    // Idempotent fallback for independently composed notification consumers;
+    // production also performs this inside the retained post-commit task.
+    flow.release_unsent_output(row).await;
     crate::queued_task::restore(flow, row).await?;
     use bcs_service_api::{
         FrontendDeliveryCommand, FrontendDeliveryKind, FrontendDeliveryTarget, ServiceError,

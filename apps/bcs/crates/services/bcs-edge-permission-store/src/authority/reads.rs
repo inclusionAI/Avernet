@@ -136,7 +136,9 @@ impl BotAuthorityRepoPort for DbBotAuthorityStore {
         // consulted only for version-0 rows by the final mapping.
         let mut legacy_creators: HashMap<String, String> = HashMap::new();
         if self.legacy_created_by_fallback {
-            for bot_chunk in chunked(&bot_order) {
+            let legacy_bots: Vec<_> = bot_order.iter().copied()
+                .filter(|bot| states.get(*bot) == Some(&0)).collect();
+            for bot_chunk in chunked(&legacy_bots) {
                 for (bot_id, creator) in self.legacy_creators_in(&bot_chunk).await? {
                     if let Some(creator) = creator {
                         legacy_creators.insert(bot_id, creator);
@@ -145,19 +147,16 @@ impl BotAuthorityRepoPort for DbBotAuthorityStore {
             }
         }
 
-        // matched[(user, bot)] = relations; ≤2 per bot per user.
-        let mut matched: HashMap<(&str, String), Vec<BotAccessRelation>> = HashMap::new();
-        for &user in &user_order {
-            for bot_chunk in chunked(&bot_order) {
-                let edges = self.management_edges_for_chunk(user, &bot_chunk).await?;
-                for (bot_id, relation) in edges {
-                    // Own the bot key: chunk row strings may not
-                    // outlive the loop.
-                    matched
-                        .entry((user, bot_id.clone()))
-                        .or_default()
-                        .push(relation);
-                }
+        // Read only the requested pairs, never the Cartesian product of all
+        // users and Bots. Two identity parameters per pair, bounded by CHUNK.
+        let pairs: Vec<(&str, &str)> = queries.iter()
+            .map(|q| (q.user_id.as_str(), q.bot_id.as_str()))
+            .collect::<HashSet<_>>().into_iter().collect();
+        let mut matched: HashMap<(String, String), BotAccessRelation> = HashMap::new();
+        for pairs in pairs.chunks(CHUNK / 2) {
+            for (user, bot, relation) in self.management_edges_for_pairs(pairs).await? {
+                let current = matched.entry((user, bot)).or_insert(relation);
+                if relation == BotAccessRelation::Owner { *current = relation; }
             }
         }
 
@@ -174,10 +173,7 @@ impl BotAuthorityRepoPort for DbBotAuthorityStore {
                 results.push(None); // missing / deleted bot denies
                 continue;
             };
-            let edges = matched
-                .get(&(query.user_id.as_str(), query.bot_id.clone()))
-                .cloned()
-                .unwrap_or_default();
+            let relation = matched.get(&(query.user_id.clone(), query.bot_id.clone())).copied();
             if version == 0 {
                 // Migration-window shim: a version-0 Bot answers the
                 // legacy created_by arm; a miss denies as before.
@@ -200,15 +196,11 @@ impl BotAuthorityRepoPort for DbBotAuthorityStore {
                 results.push(legacy);
                 continue;
             }
-            if edges.is_empty() || !live_humans.contains(query.user_id.as_str()) {
+            if !live_humans.contains(query.user_id.as_str()) {
                 results.push(None); // no edge / no live Human denies
                 continue;
             }
-            results.push(Some(if edges.contains(&BotAccessRelation::Owner) {
-                BotAccessRelation::Owner
-            } else {
-                BotAccessRelation::Manager
-            }));
+            results.push(relation);
         }
         Ok(results)
     }
@@ -689,41 +681,29 @@ impl DbBotAuthorityStore {
         edges_from_rows(&rows)
     }
 
-    /// Per-actor edges for a chunk of bots (≤2 rows per (bot,
-    /// user): the (from,to,env,kind,ref) unique key bounds this).
-    async fn management_edges_for_chunk(
+    /// Exact requested (Human, Bot) pairs; ≤ CHUNK identity parameters and
+    /// ≤ 2 management edges per pair. Preserve binary identity and env scope.
+    async fn management_edges_for_pairs(
         &self,
-        actor_id: &str,
-        bots: &[&str],
-    ) -> ServiceResult<Vec<(String, BotAccessRelation)>> {
+        pairs: &[(&str, &str)],
+    ) -> ServiceResult<Vec<(String, String, BotAccessRelation)>> {
         let mut params = vec![self.env_param()];
-        for bot in bots {
+        for (user, bot) in pairs {
+            params.push(DbValue::from(*user));
             params.push(DbValue::from(*bot));
         }
-        params.push(DbValue::from(actor_id));
-        let rows = self
-            .query(
-                "authority_edges_chunk",
-                DbStatement::with_params(
-                    format!(
-                        "SELECT to_id, grant_kind FROM edge_grants \
-                         WHERE env = ? AND {} AND {} AND {}",
-                        Self::MANAGEMENT_EDGE_PREDICATE,
-                        self.to_id_in(bots.len()),
-                        self.from_id_eq()
-                    )
-                    .as_str(),
-                    params,
-                ),
-            )
-            .await?;
-        let mut edges = Vec::with_capacity(rows.len());
-        for row in &rows {
-            let bot_id = crate::required_string(row, "to_id")?;
-            let kind = parse_management_kind(&crate::required_string(row, "grant_kind")?)?;
-            edges.push((bot_id, kind));
-        }
-        Ok(edges)
+        let predicate = format!("({} AND {})", self.from_id_eq(), self.to_id_eq());
+        let predicates = vec![predicate; pairs.len()].join(" OR ");
+        let rows = self.query("authority_edges_pairs", DbStatement::with_params(
+            format!("SELECT from_id, to_id, grant_kind FROM edge_grants \
+                WHERE env = ? AND {} AND ({predicates})", Self::MANAGEMENT_EDGE_PREDICATE).as_str(),
+            params,
+        )).await?;
+        rows.iter().map(|row| Ok((
+            crate::required_string(row, "from_id")?,
+            crate::required_string(row, "to_id")?,
+            parse_management_kind(&crate::required_string(row, "grant_kind")?)?,
+        ))).collect()
     }
 
     /// Project one transfer row with the read-time effective

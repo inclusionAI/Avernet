@@ -42,6 +42,21 @@
 - `bootstrap/bcs`, `adapters/*`, transport/framework crates, and any
   raw environment/catalog access outside constructor parameters.
 
+## Batch read cost
+
+`roles_for` deduplicates requested (Human actor, Bot) pairs and reads those exact
+pairs in chunks of 64 (at most 128 identity parameters plus the bound env per
+statement), not one query per user and not the Cartesian product. Returned
+management rows are bounded by two per pair. Bot state/owner completeness and
+Human liveness remain chunked at 128 distinct ids; legacy creator reads touch
+only version-0 Bots when fallback is enabled. For initialized Bots, round trips
+are `2*ceil(B/128) + ceil(P/64) + ceil(H/128)` for B Bots, H Humans and P distinct
+pairs; 100 users viewing one initialized Bot therefore use 5 SQL reads, not
+400 scalar-role reads. Duplicate inputs preserve output order without more reads.
+Storage/integrity failures still fail the whole batch. No positive cache, write
+or transaction is added. MySQL uses the existing binary identity predicates;
+SQLite query/row counts do not establish MySQL EXPLAIN or lock/contention results.
+
 ## Runtime ownership
 
 Authority writes are the only permission-scope writers here; audit rows
