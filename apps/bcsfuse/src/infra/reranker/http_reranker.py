@@ -2,7 +2,7 @@
 HTTP Reranker 实现
 
 支持模型：
-- bge-reranker-v2-m3: BGE 官方格式（简洁，高区分度）
+- bge-reranker-v2-m3: 原始 query 和 document 文本
 - Qwen3-Reranker-4B: Chat 格式（带 prompt 模板）
 """
 
@@ -31,14 +31,15 @@ class HttpReranker(Reranker):
     - RERANKER_MODEL: 模型名称 (默认: bge-reranker-v2-m3)
 
     支持模型：
-    - bge-reranker-v2-m3: 使用 BGE 官方格式
+    - bge-reranker-v2-m3: 原始 query 和 document 文本
     - Qwen3-Reranker-4B: 使用 Chat Prompt 格式
     """
 
     # Qwen3-Reranker-4B: Chat 格式模板
-    CHAT_PREFIX = "<|im_start|>system\nJudge whether the Document meets the requirements based on the Query and the Instruct provided. Note that the answer can only be yes or no.<|im_end|>\n<|im_start|>user\n"
+    CHAT_PREFIX = '<|im_start|>system\nJudge whether the Document meets the requirements based on the Query and the Instruct provided. Note that the answer can only be "yes" or "no".<|im_end|>\n<|im_start|>user\n'
     CHAT_SUFFIX = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
-    CHAT_INSTRUCTION = "根据用户问题，找出最相关的文档。"
+    # Default instruction from the Qwen model card; keep task wording stable.
+    CHAT_INSTRUCTION = "Given a web search query, retrieve relevant passages that answer the query"
 
     # 支持的模型列表
     SUPPORTED_MODELS = ["bge-reranker-v2-m3", "Qwen3-Reranker-4B"]
@@ -63,7 +64,7 @@ class HttpReranker(Reranker):
             self.model = "Qwen3-Reranker-4B"
             self._use_bge_format = False
         else:
-            # 默认使用 BGE 格式（更简洁高效）
+            # 未识别的模型保留原始文本。
             self._use_bge_format = True
             if self.model not in self.SUPPORTED_MODELS:
                 logger.warning(f"Unknown model '{self.model}', using BGE format by default")
@@ -74,19 +75,14 @@ class HttpReranker(Reranker):
         """
         根据模型类型选择格式化方式
 
-        bge-reranker-v2-m3: BGE 官方格式
-          - query: "question\n"
-          - documents: ["Passage: doc1", "Passage: doc2", ...]
+        bge-reranker-v2-m3: 原始文本，不添加前后缀或修改正文空白符。
 
         Qwen3-Reranker-4B: Chat Prompt 格式
           - query: <|im_start|>system...<Instruct>...<Query>...<Document>:
           - documents: ["doc1<suffix>", "doc2<suffix>", ...]
         """
         if self._use_bge_format:
-            # BGE 官方格式（简洁，高区分度）
-            formatted_query = query + "\n"
-            formatted_docs = [f"Passage: {doc}" for doc in documents]
-            return formatted_query, formatted_docs
+            return query, documents
         else:
             # Qwen3 Chat 格式（带完整 prompt 模板）
             formatted_query = (

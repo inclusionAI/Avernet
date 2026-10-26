@@ -14,7 +14,7 @@ from src.infra.reranker.http_reranker import HttpReranker
 
 
 QUERY = "UCT2.0 事件策略日志为空"
-PREFIX = "<|im_start|>system\nJudge whether the Document meets the requirements based on the Query and the Instruct provided. Note that the answer can only be yes or no.<|im_end|>\n<|im_start|>user\n"
+PREFIX = '<|im_start|>system\nJudge whether the Document meets the requirements based on the Query and the Instruct provided. Note that the answer can only be "yes" or "no".<|im_end|>\n<|im_start|>user\n'
 SUFFIX = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
 
 
@@ -90,17 +90,22 @@ def test_qwen_wire_uses_exact_platform_template_and_clean_profile(monkeypatch, w
         RerankRequest(QUERY, [candidate()], 1)
     )
     assert result[0].final_score == 0.8
-    assert wire[0]["query"] == PREFIX + "<Instruct>: 根据用户问题，找出最相关的文档。\n<Query>: UCT2.0 事件策略日志为空\n<Document>: "
+    assert wire[0]["query"] == PREFIX + "<Instruct>: Given a web search query, retrieve relevant passages that answer the query\n<Query>: UCT2.0 事件策略日志为空\n<Document>: "
     assert wire[0]["documents"] == ["名称: UCT20值班助手" + SUFFIX]
 
 
-def test_default_bge_call_keeps_legacy_format(monkeypatch, wire):
+@pytest.mark.parametrize("query,documents", [
+    (QUERY, ["名称: UCT20值班助手"]),
+    ("  查询\n下一行  ", ["  多行\n正文\t保留  ", "Passage: 原文自带前缀"]),
+])
+def test_bge_wire_preserves_original_query_and_documents(monkeypatch, wire, query, documents):
     monkeypatch.setenv("RERANKER_MODEL", "bge-reranker-v2-m3")
-    result = HttpReranker().rerank(QUERY, [{"id": "bot:1", "text": "名称: UCT20值班助手"}], 1)
+    result = HttpReranker().rerank(
+        query, [{"id": str(i), "text": text} for i, text in enumerate(documents)], 1,
+    )
     assert result[0].score == 0.8
     assert wire[0] == {
-        "model": "bge-reranker-v2-m3", "query": QUERY + "\n",
-        "documents": ["Passage: 名称: UCT20值班助手"],
+        "model": "bge-reranker-v2-m3", "query": query, "documents": documents,
     }
 
 
