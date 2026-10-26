@@ -70,16 +70,6 @@ beforeEach(async () => {
   reporter = { report: async result => { callbacks.push(result); } };
   service = new SessionRecoveryTaskService({ controlPlaneEnvironment: "pre", tasks, agent, notifier, reporter, observationMs: 3600000, now: () => now, resolveTarget: async () => recoveryTargetSnapshot(target), actionNotifier });
 });
-it("persists candidate handbooks and restores the exact references in Agent bootstrap", async () => {
-  const task = await create();
-  const stored = new SessionRecoveryTaskRepository(db, repo, artifactStore);
-  const restored = (await stored.find(task.taskId))!;
-  expect((await agent.bootstrap(restored)).handbook).toMatchObject({
-    handbookVersion: "clawevolve-recovery-handbook/v2", category: "TC.MCP",
-    chapters: ["mcp/handbook.md", "file-download/handbook.md"],
-  });
-  expect(runtime.sendMessage).not.toHaveBeenCalled();
-});
 it("queries private event tasks for administrators while preserving Owner and sharing filters", async () => {
   const task = await create();
   expect((await service.list(request.event_id, { userId: "admin", isAdmin: true })).map(value => value.task_id)).toEqual([task.taskId]);

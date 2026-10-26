@@ -4,7 +4,7 @@ import { containsSecret } from "@avernet/clawweb-shared/server/services/redactio
 import { createHash, randomUUID } from "node:crypto";
 import { SessionRecoveryError } from "./errors.js";
 import { parseRequest } from "./validation.js";
-import { recoveryHandbook } from "./handbook.js";
+import { recoveryHandbook, resolveRecoveryHandbook, type RecoveryHandbookConfigStore } from "./handbook.js";
 import { parseRecoverySimulationBatch, simulationReadTools, validateSimulationKnowledge, type RecoverySimulation, type RecoverySimulationAssessment } from "./simulation.js";
 import { decideRecoveryPlan, observeRecovery, recoveryTaskResult, resumeRecoveryObservation, submitRecoveryPlan, terminateRecoveryTask } from "./task-state.js";
 import type { RecoveryActionNotifier, RecoveryActor, RecoveryAcknowledgment, RecoveryExecutionView, RecoveryRequest, RecoveryResult, RecoveryTaskView, RecoveryTermination, SessionRecoveryTaskApi } from "./contracts.js";
@@ -38,6 +38,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     observationMs: number;
     now?: () => number;
     resolveTarget?: (request: RecoveryRequest) => Promise<AgentRuntimeTargetSnapshot>;
+    handbookConfig?: RecoveryHandbookConfigStore;
   }) { this.now = deps.now ?? Date.now; }
 
   async create(raw: unknown, actor: RecoveryActor): Promise<RecoveryAcknowledgment & { task_id: string }> {
@@ -59,7 +60,6 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
 
   private async createTask(request: RecoveryRequest, actor: RecoveryActor, level: RecoveryLevel, simulation?: RecoverySimulation): Promise<RecoveryAcknowledgment & { task_id: string }> {
     if (actor.userId !== request.target.entity_id && !actor.isAdmin) this.fail(403, "无权发起目标自愈");
-    const handbook = recoveryHandbook(request.tc_fault_label);
     const taskId = `SR-${createHash("sha256").update(JSON.stringify(simulation
       ? ["simulation", simulation.batchId, request.event_id, request.delivery_key] : [request.event_id, request.delivery_key])).digest("hex").slice(0, 48)}`;
     const existing = await this.deps.tasks.find(taskId);
@@ -67,6 +67,8 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       if (JSON.stringify(existing.request) !== JSON.stringify(request) || existing.simulation?.inputDigest !== simulation?.inputDigest) this.fail(409, "同一投递标识的请求内容不一致");
       return { event_id: request.event_id, delivery_key: request.delivery_key, status: "accepted", task_id: taskId };
     }
+    const handbook = this.deps.handbookConfig ? await resolveRecoveryHandbook(request, this.deps.handbookConfig)
+      : recoveryHandbook(request.tc_fault_label);
     const runtimeTarget = simulation ? undefined : await this.deps.resolveTarget?.(request);
     const task: RecoveryStoredTask = { schemaVersion: "session-recovery-task/v1", taskId, request, level, controlPlaneEnvironment: this.deps.controlPlaneEnvironment,
       status: "running", phase: "assess", version: 1, shared: false, observationDeadlineAt: null, ownerDeadlineAt: null,

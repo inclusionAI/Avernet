@@ -10,14 +10,14 @@ const task = (timeline: RecoveryTimelineEvent[]) => ({ timeline } as RecoverySto
 describe("recovery handbook references", () => {
   it("routes one category to multiple candidate topics without embedding advice", () => {
     expect(recoveryHandbook("TC.MCP.PERMISSION")).toEqual({
-      skillName: "clawevolve-recovery-handbook", handbookVersion: "clawevolve-recovery-handbook/v2", category: "TC.MCP",
-      chapters: ["mcp/handbook.md", "file-download/handbook.md"],
+      skillName: "clawevolve-recovery-handbook", handbookVersion: "clawevolve-recovery-handbook/v3", category: "TC.MCP", teamKey: null,
+      chapters: ["common/mcp/handbook.md", "common/file-download/handbook.md"],
       verificationReference: expect.any(String),
     });
   });
   it.each(["TC.MODEL.DATA", "TC.TOOL.PERMISSION", "TC.SKILL.EXECUTION", "TC.SESSION_CONTEXT.DATA"])(
     "shares the file topic with %s", code => {
-      expect(recoveryHandbook(code).chapters).toEqual(["file-download/handbook.md"]);
+      expect(recoveryHandbook(code).chapters).toEqual(["common/file-download/handbook.md"]);
     });
   it.each([null, "TC.NEW.CATEGORY", "TC.MCPX.DATA", "TC.MCP-PERMISSION", "other"])(
     "does not select a fallback topic for %s", code => {
@@ -25,7 +25,7 @@ describe("recovery handbook references", () => {
     });
   it("does not let one task modify the next task's candidate list", () => {
     recoveryHandbook("TC.MCP.DATA").chapters.pop();
-    expect(recoveryHandbook("TC.MCP.DATA").chapters).toEqual(["mcp/handbook.md", "file-download/handbook.md"]);
+    expect(recoveryHandbook("TC.MCP.DATA").chapters).toEqual(["common/mcp/handbook.md", "common/file-download/handbook.md"]);
   });
   it("restores the saved list instead of rebuilding it from the current catalog", () => {
     const saved = { ...recoveryHandbook("TC.MCP.DATA"), chapters: ["mcp/handbook.md"] };
