@@ -1587,3 +1587,6 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
   `/skills/active` 路由，改用列表的可选 `active` 过滤条件。同时定案了 Bot 范围的
   原始 ZIP 上传、同名替换、owner 与协作者语义、离线可读、变更操作的 Bot ready 闸口，
   以及运行时同步失败时的补偿。Skill Center 发布和租户级可复用 Skill 仍属于后续契约。
+
+
+专家模板的独立目录、字面搜索、分类和详情合同见[专家模板发现 API](expert-market.zh-CN.md)。

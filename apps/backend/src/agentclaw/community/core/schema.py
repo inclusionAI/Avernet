@@ -79,6 +79,7 @@ def import_all_models() -> None:
     import_module("agentclaw.community.core.bot_knowledge.repository.models")
     import agentclaw.community.core.space_knowledge.repository.models  # noqa: F401
     import agentclaw.community.core.spaces.repository.models  # noqa: F401  ac_space / ac_space_member
+    import agentclaw.community.core.expert_market.orm  # noqa: F401  ac_experts
     import agentclaw.community.core.market_favorites.repository.models  # noqa: F401  ac_market_favorite
     import agentclaw.community.core.bot_message_feedback.models  # noqa: F401  ac_bot_message_feedback
     import agentclaw.community.core.work_orders.repository.models  # noqa: F401  ac_work_order / ac_work_order_notification

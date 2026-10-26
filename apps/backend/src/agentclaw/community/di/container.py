@@ -69,6 +69,7 @@ from agentclaw.community.di.modules.engine_version_module import EngineVersionMo
 from agentclaw.community.di.modules.engine_config_module import EngineConfigModule
 from agentclaw.community.di.modules.engine_runtime_module import EngineRuntimeModule
 from agentclaw.community.di.modules.expert_chat_module import ExpertChatModule
+from agentclaw.community.di.modules.expert_market_module import ExpertMarketModule
 from agentclaw.community.di.modules.execution_identity_module import (
     ExecutionIdentityModule,
 )
@@ -205,6 +206,7 @@ def build_injector(
         BotInventoryModule(),
         SkillsPoolModule(),
         BotPublicModule(),
+        ExpertMarketModule(),
         TaskModule(),
         DevicesModule(),
         McpModule(),

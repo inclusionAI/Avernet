@@ -8,7 +8,7 @@ jest.mock('@umijs/max', () => ({
   Link: ({ to, children, ...props }: { to: string; children: ReactNode }) => <a href={to} {...props}>{children}</a>,
 }));
 
-test('两个 Tab 使用浅蓝选中背景和蓝字，不再渲染下划线', () => {
+test('发现导航保留公开Bot/群并提供专家市场', () => {
   const { rerender } = render(<SquareNavigation active="bot" />);
   const bot = screen.getByRole('link', { name: '公开Bot' });
   const group = screen.getByRole('link', { name: '公开协作群' });
@@ -23,4 +23,13 @@ test('两个 Tab 使用浅蓝选中背景和蓝字，不再渲染下划线', () 
   expect(group).toHaveAttribute('aria-current', 'page');
   expect(bot).not.toHaveClass('bg-primary/10');
   expect(bot).not.toHaveAttribute('aria-current');
+});
+
+
+test('专家市场使用独立可访问路由与选中状态', () => {
+  render(<SquareNavigation active="expert" />);
+  const expert = screen.getByRole('link', { name: '专家市场' });
+  expect(expert).toHaveAttribute('href', '/collaboration-square/experts');
+  expect(expert).toHaveAttribute('aria-current', 'page');
+  expect(screen.getByRole('link', { name: '公开Bot' })).not.toHaveAttribute('aria-current');
 });

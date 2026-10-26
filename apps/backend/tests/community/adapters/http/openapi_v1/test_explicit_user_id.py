@@ -280,6 +280,10 @@ def _without_request_id(response) -> dict:
 #: between "this operation has no user dimension" and "somebody found the
 #: parameter inconvenient".
 _NO_USER_DIMENSION = {
+    # Expert discovery is tenant-wide, selected by the verified principal.
+    ("get", f"{PUBLIC_API_PREFIX}/experts"),
+    ("get", f"{PUBLIC_API_PREFIX}/experts/categories"),
+    ("get", f"{PUBLIC_API_PREFIX}/experts/{{expert_id}}"),
     # The minimal classification is tenant-wide, not owner-scoped.
     ("get", f"{PUBLIC_API_PREFIX}/bots/{{bot_id}}/classification"),
     # Name uniqueness is checked across the tenant, not within one user's bots.
@@ -582,7 +586,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # The genome registry (RSI-03) adds thirteen path-addressed, user-scoped
 # operations under /bots/{bot_id}/genome: path 198 -> 211.
 # The configured engine default-model read adds one Bot-path operation: 211 -> 212.
-_BOT_ID_PLACEMENT = {"path": 212, "query": 1, "none": 126}
+_BOT_ID_PLACEMENT = {"path": 212, "query": 1, "none": 129}
 
 
 def _schema() -> dict:
