@@ -81,49 +81,6 @@ fn overlay_forced_inject(overlay: &RouteParticipantOverlay) -> bool {
         || overlay.status == ActorStatus::Hidden
 }
 
-fn is_unified_ideograph(ch: char) -> bool {
-    matches!(
-        ch,
-        '\u{3400}'..='\u{4DBF}'
-            | '\u{4E00}'..='\u{9FFF}'
-            | '\u{F900}'..='\u{FAFF}'
-            | '\u{20000}'..='\u{2FA1F}'
-    )
-}
-
-fn is_display_name_mention_boundary(remainder: &str) -> bool {
-    let Some(next) = remainder.chars().next() else {
-        return true;
-    };
-    next.is_whitespace()
-        || matches!(
-            next,
-            ',' | '，'
-                | '.'
-                | '。'
-                | '!'
-                | '！'
-                | '?'
-                | '？'
-                | ';'
-                | '；'
-                | '、'
-                | '：'
-                | '@'
-                | '*'
-                | '`'
-                | '"'
-                | '\''
-                | ')'
-                | '）'
-                | ']'
-                | '】'
-                | '}'
-                | '》'
-        )
-        || is_unified_ideograph(next)
-}
-
 // ---------------------------------------------------------------------------
 // Structured Routing Types
 // ---------------------------------------------------------------------------
@@ -242,63 +199,6 @@ impl MessageRouter {
             mention_regex: Regex::new(r"@([-\w\p{Unified_Ideograph}:]+)")
                 .expect("Invalid mention regex"),
         }
-    }
-
-    fn resolve_mentions(&self, session: &Group, message: &str) -> Vec<String> {
-        let mut resolved_mentions = Vec::new();
-        for (at_index, _) in message.match_indices('@') {
-            let after_at = &message[at_index + 1..];
-            let matched_participant = session
-                .participants
-                .iter()
-                .filter_map(|participant| {
-                    let name = participant.bot_name.as_deref()?;
-                    if name.is_empty() || !after_at.starts_with(name) {
-                        return None;
-                    }
-                    let remainder = &after_at[name.len()..];
-                    if is_display_name_mention_boundary(remainder) {
-                        Some((participant, name))
-                    } else {
-                        None
-                    }
-                })
-                .max_by_key(|(_, name)| name.len());
-
-            if let Some((participant, name)) = matched_participant {
-                if !resolved_mentions.contains(&participant.bot_uuid) {
-                    debug!(target: MSG_LOG_TARGET, mention = %name, resolved_to = %participant.bot_uuid, "routing full display-name mention match");
-                    resolved_mentions.push(participant.bot_uuid.clone());
-                }
-                continue;
-            }
-
-            let at_mention = &message[at_index..];
-            let Some(captures) = self.mention_regex.captures(at_mention) else {
-                continue;
-            };
-            if captures.get(0).map_or(true, |value| value.start() != 0) {
-                continue;
-            }
-            let Some(mention) = captures.get(1).map(|value| value.as_str()) else {
-                continue;
-            };
-            let result = session.get_participant(mention).map(|p| p.bot_uuid.clone());
-            debug!(target: MSG_LOG_TARGET, mention = %mention, matched = result.is_some(), resolved_to = ?result, "routing mention match");
-            if let Some(bot_uuid) = result {
-                if !resolved_mentions.contains(&bot_uuid) {
-                    resolved_mentions.push(bot_uuid);
-                }
-            }
-        }
-
-        resolved_mentions
-    }
-
-    /// Check if message contains @ALL mention.
-    fn has_all_mention(&self, message: &str) -> bool {
-        let lower = message.to_lowercase();
-        lower.contains("@all") || lower.contains("@所有人")
     }
 }
 
@@ -961,8 +861,69 @@ impl RoutingCoreService for MessageRouter {
     }
 }
 
-mod sender_route;
-pub use sender_route::build_sender_route_decision;
+/// Build a RoutingDecision based on sender_routes configuration.
+///
+/// Targets in `target_ids` receive `DeliveryType::Send`, all other participants
+/// receive `DeliveryType::Inject`. The sender is always excluded.
+/// Targets not in the group are skipped with a warning log.
+pub fn build_sender_route_decision(
+    session: &Group,
+    sender_bot_id: &str,
+    target_ids: &[String],
+) -> RoutingDecision {
+    let participant_set: HashSet<&str> = session
+        .participants
+        .iter()
+        .map(|p| p.bot_uuid.as_str())
+        .collect();
+
+    // Filter targets to only those in the group
+    let valid_targets: HashSet<&str> = target_ids
+        .iter()
+        .filter(|t| {
+            if !participant_set.contains(t.as_str()) {
+                warn!(
+                    target: MSG_LOG_TARGET,
+                    group_id = %session.id,
+                    phase = "route",
+                    route_target = %t,
+                    "sender_route target not in group, skipping"
+                );
+                false
+            } else {
+                true
+            }
+        })
+        .map(|t| t.as_str())
+        .collect();
+
+    let targets: Vec<RoutingTarget> = session
+        .participants
+        .iter()
+        .filter(|p| p.is_bot() && p.bot_uuid != sender_bot_id)
+        .map(|p| RoutingTarget {
+            bot_uuid: p.bot_uuid.clone(),
+            url: String::new(),
+            is_driver: is_lead_participant(session.group_strategy, p),
+            delivery_type: if valid_targets.contains(p.bot_uuid.as_str()) {
+                DeliveryType::Send
+            } else {
+                DeliveryType::Inject
+            },
+        })
+        .collect();
+
+    let mentions: Vec<String> = valid_targets.iter().map(|s| s.to_string()).collect();
+
+    RoutingDecision {
+        targets,
+        mentions,
+        cleaned_message: String::new(),
+        hidden_mentions: vec![],
+    }
+}
+
+mod mentions;
 
 #[cfg(test)]
 mod tests;
