@@ -6,3 +6,15 @@
 .workspace-sdk-panel:has([data-task-panel-root='true']) > [class*='PanelRoot'] > [class*='TopBarRoot'] {
   display: none;
 }
+
+/*
+ * TaskPanel 标题行高度必须按“真实渲染出来的切换入口”判断：
+ * adapter 恒注入 switcher 节点，但加载失败/空任务时其实际渲染为 null。
+ * CSS 由悬浮开关标记反推，避免用 React 元素真值误判导致 8px 错位。
+ */
+[data-task-panel-root] > header {
+  height: 48px;
+}
+[data-task-panel-root]:has([data-task-switcher-control='true']) > header {
+  height: 40px;
+}

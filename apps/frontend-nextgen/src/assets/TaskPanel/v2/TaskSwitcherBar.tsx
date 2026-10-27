@@ -1,6 +1,6 @@
 // @asset-migrated: teamclaw 自研资产
 /**
- * TaskSwitcherBar —— 副屏顶部多任务切换横条(PRD #6,数据源 listTasks,宿主注入)。
+ * TaskSwitcherBar —— 副屏顶部任务切换横条(PRD #6,数据源 listTasks,宿主注入)。
  * 横条:任务小标 + 当前任务名 + 状态 tag + 任务总数徽章;点击展开下拉切换。
  * demo 的全屏拖拽能力不产品化，副屏内入口由 TaskSwitcherControl 承载。
  */
@@ -51,8 +51,7 @@ const Tag: React.FC<{ item: TaskSwitcherItem }> = ({ item }) => {
 
 export const TaskSwitcherBar: React.FC<TaskSwitcherProps> = ({ items, activeTaskId, onSelectTask, defaultOpen }) => {
   const [open, setOpen] = useState(defaultOpen ?? false);
-  // PRD 的切换横条只服务多任务会话；单任务继续保持「任务总览」直接置顶。
-  if (items.length <= 1) return null;
+  if (items.length === 0) return null;
 
   const active = items.find((i) => i.taskId === activeTaskId) ?? items[0];
 

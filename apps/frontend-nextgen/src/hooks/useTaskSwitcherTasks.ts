@@ -57,7 +57,7 @@ export function buildTaskConversationNavigationTarget(record: TaskListItem): Tas
 }
 
 /**
- * 多任务切换必须以当前任务的主会话为边界，不能把用户的全部任务混进下拉列表。
+ * 任务切换必须以当前任务的主会话为边界，不能把用户的全部任务混进下拉列表。
  * 当前任务没有会话标识时只返回自身，避免把所有无会话历史任务错误聚合在一起。
  */
 export function filterTasksForCurrentConversation(
@@ -98,7 +98,7 @@ export function toSwitcherItem(record: TaskListItem): TaskSwitcherItem {
 }
 
 /**
- * 多任务切换条数据源(spec §3.2:listTasks 现有 list API)。
+ * 任务切换条数据源(spec §3.2:listTasks 现有 list API)。
  * 失败静默空列表;enabled=false 或缺 userId 不发查询;60s 慢刷新。
  */
 export function useTaskSwitcherTasks(

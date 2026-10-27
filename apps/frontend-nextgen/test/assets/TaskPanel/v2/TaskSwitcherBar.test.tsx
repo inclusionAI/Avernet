@@ -67,10 +67,15 @@ describe('TaskSwitcherBar', () => {
     expect(screen.queryByText('任务')).toBeNull();
   });
 
-  it('只有一个任务时不渲染横条,保持任务总览头部简洁', () => {
+  it('只有一个任务时仍渲染横条,可查看当前任务', () => {
     render(<TaskSwitcherBar items={[items[0]]} activeTaskId="t-1" onSelectTask={() => {}} />);
-    expect(screen.queryByText('任务')).toBeNull();
-    expect(screen.queryByText('竞品分析')).toBeNull();
+    expect(screen.getByText('任务')).toBeTruthy();
+    expect(screen.getByText('竞品分析')).toBeTruthy();
+    expect(screen.getByTitle('任务总数').textContent).toBe('1');
+
+    fireEvent.click(screen.getByTitle('展开任务切换'));
+    expect(screen.getByTestId('task-switcher-dropdown')).toBeTruthy();
+    expect(screen.queryByText('周报生成')).toBeNull();
   });
 });
 
@@ -151,10 +156,14 @@ describe('TaskSwitcherControl', () => {
     expect(screen.getByRole('button', { name: '显示任务切换' })).toBeTruthy();
   });
 
-  it('单任务会话既不展示切换条,也不展示悬浮开关', () => {
+  it('单任务会话仍展示悬浮开关,点击后可查看当前任务', () => {
     render(<TaskSwitcherControl {...props({ items: [items[0]] })} />);
 
-    expect(screen.queryByRole('button', { name: '显示任务切换' })).toBeNull();
+    expect(screen.getByRole('button', { name: '显示任务切换' })).toBeTruthy();
     expect(screen.queryByText('竞品分析')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '显示任务切换' }));
+    expect(screen.getByText('竞品分析')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '隐藏任务切换' })).toBeTruthy();
   });
 });

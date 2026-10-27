@@ -1,7 +1,7 @@
 // @asset-migrated: teamclaw 自研资产
 /**
- * TaskSwitcherControl —— 副屏内可拖拽的多任务切换入口。
- * 默认仅展示悬浮按钮，点击控制顶部 TaskSwitcherBar 显隐；拖拽限制在 TaskPanel 内。
+ * TaskSwitcherControl —— 副屏内可拖拽的任务切换入口。
+ * 默认仅展示悬浮按钮，点击控制顶部 TaskSwitcherBar 显隐；单任务也可查看当前项；拖拽限制在 TaskPanel 内。
  */
 import React, { useEffect, useRef, useState } from 'react';
 
@@ -15,7 +15,7 @@ interface DragPosition {
 }
 
 interface TaskSwitcherControlProps extends TaskSwitcherProps {
-  /** 仅影响首帧；多任务聊天副屏用 true 让历史任务立即可见。 */
+  /** 仅影响首帧；聊天副屏用 true 让当前会话任务立即可见。 */
   defaultVisible?: boolean;
 }
 
@@ -82,7 +82,7 @@ export const TaskSwitcherControl: React.FC<TaskSwitcherControlProps> = (props) =
     };
   }, [hasCustomPosition]);
 
-  if (props.items.length <= 1) return null;
+  if (props.items.length === 0) return null;
 
   const label = visible ? '隐藏任务切换' : '显示任务切换';
 
@@ -98,6 +98,7 @@ export const TaskSwitcherControl: React.FC<TaskSwitcherControlProps> = (props) =
       ) : null}
       <button
         type="button"
+        data-task-switcher-control="true"
         title={label}
         aria-label={label}
         aria-pressed={visible}

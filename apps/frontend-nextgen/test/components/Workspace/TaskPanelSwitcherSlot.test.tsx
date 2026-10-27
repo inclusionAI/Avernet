@@ -117,16 +117,16 @@ describe('TaskPanelSwitcherSlot(聊天宿主)', () => {
     expect(screen.queryByTestId('task-switcher-dropdown')).toBeNull();
   });
 
-  it('同会话只有一个任务时不渲染切换条', () => {
+  it('同会话只有一个任务时仍渲染切换开关', () => {
     mockUseTaskSwitcherTasks.mockReturnValueOnce({
       items: [{ taskId: 'task-current', title: '当前任务', status: 'running', statusLabel: '执行中' }],
       records: [currentRecord],
       loading: false,
     });
-    const { container } = render(
-      <TaskPanelSwitcherSlot currentTaskId="task-current" params={{ taskId: 'task-current' }} />,
-    );
-    expect(container.firstChild).toBeNull();
+    render(<TaskPanelSwitcherSlot currentTaskId="task-current" params={{ taskId: 'task-current' }} />);
+
+    expect(screen.getByRole('button', { name: '隐藏任务切换' })).toBeTruthy();
+    expect(screen.getAllByText('当前任务').length).toBeGreaterThan(0);
   });
 });
 

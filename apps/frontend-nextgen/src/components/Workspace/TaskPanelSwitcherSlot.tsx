@@ -13,7 +13,7 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import React from 'react';
 
 /**
- * chat 宿主的多任务切换条挂件(业务层装配,经 TaskPanelAdapter.switcher 注入副屏):
+ * chat 宿主的任务切换条挂件(业务层装配,经 TaskPanelAdapter.switcher 注入副屏):
  * - 数据:listTasks 经 useTaskSwitcherTasks(登录人工号);
  * - 活跃:taskSidePanelStore.activeTaskId(发起任务自动切换写入),未设置时以当前 tab 任务为准;
  * - 切换:先请求任务时间窗导航,再 chatBridge.openPanelTab 幂等 upsert——已存在 `task-${id}` tab
@@ -38,7 +38,7 @@ export const TaskPanelSwitcherSlot: React.FC<{
   // I4:横条「当前」以本面板实例的任务为准——全局 activeTaskId 只服务发起任务后的 tab
   // 自动聚焦语义,不得让非活跃任务面板在自己的横条里显示别的任务为"当前"。
   const effectiveActive = currentTaskId || activeTaskId || items[0]?.taskId || '';
-  if (items.length <= 1) return null;
+  if (items.length === 0) return null;
 
   return (
     <TaskSwitcherControl
