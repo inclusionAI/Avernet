@@ -42,7 +42,7 @@ pub(crate) enum CcMap {
     /// the task stopped, and the CLI has queued the notification it will
     /// hand the model later. Recorded so the wake that delivers it can
     /// release exactly one wait; see `CcTurnMapper::enqueued`.
-    BackgroundEnqueued { task_id: Option<String>, tool_use_id: Option<String>, status: String },
+    BackgroundEnqueued { task_id: Option<String>, tool_use_id: Option<String> },
     /// A background-task completion **delivered to the model** — a user-type
     /// line whose plain-string content is the `<task-notification>` payload
     /// the CLI injects when it wakes the agent. Only a delivered notification
@@ -383,7 +383,6 @@ pub(super) fn map_system(v: &Value) -> CcMap {
             CcMap::BackgroundEnqueued {
                 task_id: non_empty(v.get("task_id").and_then(|x| x.as_str())).map(str::to_string),
                 tool_use_id: non_empty(v.get("tool_use_id").and_then(|x| x.as_str())).map(str::to_string),
-                status: status.to_string(),
             }
         }
         _ => CcMap::Ignore,

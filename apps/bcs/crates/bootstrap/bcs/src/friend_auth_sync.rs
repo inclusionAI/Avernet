@@ -6,8 +6,10 @@
 use async_trait::async_trait;
 use bcs_api_http::v1::gateway_principal::GatewayPrincipalReSigner;
 use bcs_service_api::port::{
-    FriendAuthSyncAction, FriendAuthSyncCommand, FriendAuthSyncPort,
+    FriendAuthSyncCommand, FriendAuthSyncPort,
 };
+#[cfg(test)]
+use bcs_service_api::port::FriendAuthSyncAction;
 use bcs_service_api::{ServiceError, ServiceResult};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;

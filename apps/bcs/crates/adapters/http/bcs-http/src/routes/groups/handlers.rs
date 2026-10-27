@@ -540,11 +540,6 @@ pub async fn update_group_label(
     })))
 }
 
-#[derive(Debug, Deserialize)]
-pub struct UpdateVisibilityRequest {
-    pub visibility: String,
-}
-
 pub async fn update_group_visibility(
     State(state): State<HttpAppState>,
     Path(id): Path<String>,
