@@ -138,3 +138,35 @@ def test_h2_invalidation_stages_notice_for_actual_openapi_applicant():
     assert repo.row.phase == "NEEDS_ATTENTION"
     assert json.loads(repo.row.workflow_json)["notices"]["INPUT_INVALID"]["status"] == "pending"
     assert repo.row.notification_due_at == datetime(2026, 1, 1)
+
+
+def test_concurrent_reclaimed_worker_does_not_lose_first_approval_puid():
+    from threading import Event, Thread
+    repo = MemoryRepository(row())
+    sent, resume = Event(), Event()
+    def submit(record, on_started):
+        sent.set()
+        assert resume.wait(5)
+        on_started({"puid": "p1"})
+        return "approval"
+    advance = RiskAdvance(repo, lambda _: True, submit, lambda: datetime(2026, 1, 1))
+    thread = Thread(target=advance.advance, args=("dev", "a"))
+    thread.start()
+    assert sent.wait(5)
+    advance.advance("dev", "a")
+    resume.set()
+    thread.join(5)
+    assert not thread.is_alive()
+    assert repo.row.phase == "APPROVING" and repo.row.approval_puid == "p1"
+
+
+def test_approval_target_write_failure_is_recorded_without_restarting_approval():
+    repo = MemoryRepository(row())
+    def submit(record, on_started):
+        on_started({"puid": "p1"})
+        raise RuntimeError("target write failed")
+    advance = RiskAdvance(repo, lambda _: True, submit, lambda: datetime(2026, 1, 1))
+    advance.advance("dev", "a")
+    assert repo.row.approval_puid == "p1"
+    assert repo.row.phase == "NEEDS_ATTENTION"
+    assert json.loads(repo.row.workflow_json)["error"] == "APPROVAL_TARGET_NOT_READY"

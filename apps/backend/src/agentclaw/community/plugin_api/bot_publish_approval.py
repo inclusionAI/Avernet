@@ -93,6 +93,7 @@ class BotPublishCallbacks:
         [Dict[str, Any], Optional["OperatorContext"]], Dict[str, str]
     ]
     replay_risk_approval: Optional[Callable[..., bool]] = None
+    mark_risk_target_ready: Optional[Callable[[str, str], None]] = None
 
 
 class BotPublishApprovalPlugin(Plugin, Protocol):

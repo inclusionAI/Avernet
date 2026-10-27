@@ -54,11 +54,19 @@ class RiskAdvance:
                 raise ValueError("approval PUID is required")
             for _ in range(3):
                 latest = self.repo.get(env=env, risk_check_id=risk_check_id)
-                if latest is None or latest.current_target_key is None or latest.phase != "ADVANCING":
+                if latest is None or latest.current_target_key is None:
                     raise RuntimeError("risk application no longer current")
-                pending = json.loads(latest.workflow_json).get("pending_approval")
+                workflow = json.loads(latest.workflow_json)
+                if latest.phase == "NEEDS_ATTENTION" and workflow.get("error") == "APPROVAL_OUTCOME_UNKNOWN":
+                    if self.check_h2(latest) is not True:
+                        raise RuntimeError("risk eligibility changed before approval association")
+                    workflow.pop("error", None)
+                elif latest.phase != "ADVANCING":
+                    raise RuntimeError("risk application no longer advancing")
+                pending = workflow.get("pending_approval")
                 if self.repo.update_current(env=env, risk_check_id=risk_check_id, row_version=latest.row_version,
                                             changes={"phase": "APPROVING", "approval_puid": puid,
+                                                     "workflow_json": json.dumps(workflow),
                                                      "next_action_at": self.clock() if pending else None}):
                     return
             raise RuntimeError("approval association could not be saved")
@@ -69,6 +77,9 @@ class RiskAdvance:
             latest = self.repo.get(env=env, risk_check_id=risk_check_id)
             if latest is not None and latest.current_target_key is not None and latest.phase == "ADVANCING":
                 self._attention(latest, "APPROVAL_OUTCOME_UNKNOWN")
+            elif (latest is not None and latest.current_target_key is not None and latest.phase == "APPROVING"
+                  and not json.loads(latest.workflow_json).get("approval_target_ready")):
+                self._attention(latest, "APPROVAL_TARGET_NOT_READY")
             return
         latest = self.repo.get(env=env, risk_check_id=risk_check_id)
         if latest is None or latest.current_target_key is None:
@@ -127,6 +138,13 @@ class RiskPendingHandler:
         with avernet_tenant_scope(tenant):
             row = self.repo.get(env=env, risk_check_id=risk_id)
             if row is None or row.current_target_key is None or row.phase != "APPROVING":
+                return Complete()
+            workflow = json.loads(row.workflow_json)
+            if (workflow.get("callback_claim") or {}).get("status") == "processing":
+                workflow["error"] = "CALLBACK_OUTCOME_UNKNOWN"
+                self.repo.update_current(env=env, risk_check_id=risk_id, row_version=row.row_version,
+                                         changes={"phase": "NEEDS_ATTENTION", "next_action_at": None,
+                                                  "workflow_json": json.dumps(workflow)})
                 return Complete()
             bot = self.bots.get_by_pk(row.bot_pk)
             if not bot:

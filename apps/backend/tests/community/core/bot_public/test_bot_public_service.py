@@ -2865,3 +2865,60 @@ def test_legacy_owner_risk_publish_passes_stable_identity_to_approval_plugin():
     assert kwargs["approval_biz_id"] == "risk-a"
     assert kwargs["risk_check_id"] == "a"
     assert kwargs["on_approval_started"] is handoff
+
+
+def test_callback_between_puid_and_bcs_target_waits_until_target_is_ready():
+    from threading import Event, Thread, Lock
+    from dataclasses import replace
+    from agentclaw.community.core.bot_public_risk.approval_guard import RiskApprovalGuard
+    from agentclaw.community.core.bot_public_risk.repository import RiskCheck
+
+    class Repository:
+        def __init__(self):
+            self.lock = Lock()
+            self.row = RiskCheck(risk_check_id="risk-a", env="dev", bot_pk=42, owner_id="u1", operator_id="op_user",
+                client_scope="openapi:op_user", client_request_id="req", public_scope="user", target_json="{}",
+                request_hash="h", input_json="{}", input_hash="h", approval_biz_id="risk-a", phase="ADVANCING",
+                security_status="PASS", current_target_key="current", workflow_json='{"approval_intent":true}')
+        def get(self, **_):
+            with self.lock:
+                return self.row
+        def update_current(self, *, row_version, changes, **_):
+            with self.lock:
+                if self.row.row_version != row_version:
+                    return False
+                self.row = replace(self.row, **changes, row_version=row_version + 1)
+                return True
+    repo = Repository()
+    started, resume = Event(), Event()
+    bot_repo = MagicMock()
+    bot_repo.get_by_id_and_owner.return_value = _make_bot("b1", "u1")
+    bcn = MagicMock()
+    bcn.get_attributes.return_value = {"friend_ext": {"public_user_approval": {"puid": "p1", "visibility": "public"}}}
+    process = MagicMock()
+    process.start_approval.return_value = {"success": True, "puid": "p1", "state": "PROCESSING"}
+    service = _make_service(bot_repository=bot_repo, bcn_service=bcn, process_service=process)
+    service._risk_approval_guard = RiskApprovalGuard(repo, lambda _: True)
+    def handoff(_):
+        assert repo.update_current(row_version=repo.row.row_version, changes={"phase": "APPROVING", "approval_puid": "p1"})
+    def persist(**_):
+        started.set()
+        assert resume.wait(5)
+    with patch.object(service, "_persist_public_approval", side_effect=persist):
+        errors = []
+        def publish():
+            try:
+                service.public_bcs_bot("b1:u1", "u1", "user", _make_operator(), visibility="public",
+                    approval_biz_id="risk-a", risk_check_id="risk-a", on_approval_started=handoff)
+            except Exception as exc:
+                errors.append(exc)
+        thread = Thread(target=publish)
+        thread.start()
+        assert started.wait(5)
+        result = service.handle_public_approval_callback("b1:u1", "u1", "p1", "AGREE", "user", risk_check_id="risk-a")
+        assert result["message"] == "risk callback deferred"
+        bcn.patch_attributes.assert_not_called()
+        resume.set()
+        thread.join(5)
+        assert not thread.is_alive() and not errors
+    bcn.patch_attributes.assert_called_once()

@@ -706,6 +706,7 @@ class BotPublicService(BotPublicServiceProtocol):
         # forwarded to the callback (no reverse round-trip needed).
         replayed = False
         if risk_check_id:
+            self._risk_approval_guard.mark_target_ready(get_current_env(), risk_check_id, approval_result["puid"])
             replayed = self._risk_approval_guard.replay(
                 get_current_env(), risk_check_id,
                 lambda puid, decision: self.handle_public_approval_callback(
@@ -782,6 +783,9 @@ class BotPublicService(BotPublicServiceProtocol):
             refetch_bot=self._bot_repository.get_by_id_and_owner,
             build_approval_context=self._build_public_approval_context,
             replay_risk_approval=self._replay_risk_approval,
+            mark_risk_target_ready=lambda risk_id, puid: self._risk_approval_guard.mark_target_ready(
+                get_current_env(), risk_id, puid
+            ),
         )
 
     def _replay_risk_approval(self, bot_id: str, owner_id: str, risk_check_id: str) -> bool:
@@ -1034,7 +1038,7 @@ class BotPublicService(BotPublicServiceProtocol):
         }
 
     def _apply_callback_decision(
-        self, *, bot_uid: str, public_scope: str, last_operate: str,
+        self, *, bot_uid: str, public_scope: str, last_operate: str, expected_puid: str | None = None,
     ) -> Dict[str, Any]:
         """审批回调落 BCS: 更新 sub-block status; AGREE 时再把 BCS 可见性字段翻转。
 
@@ -1065,6 +1069,8 @@ class BotPublicService(BotPublicServiceProtocol):
             }
         friend_ext = dict(attrs.get("friend_ext") or {})
         block = dict(friend_ext.get(key) or {})
+        if expected_puid is not None and block.get("puid") != expected_puid:
+            return {"success": False, "public": None, "message": "risk approval PUID mismatch"}
         block["status"] = (last_operate or "").upper()
         friend_ext[key] = block
         body: Dict[str, Any] = {"friend_ext": friend_ext}
@@ -1093,7 +1099,7 @@ class BotPublicService(BotPublicServiceProtocol):
             "message": f"public_scope={public_scope} callback status={block['status']}",
         }
 
-    def handle_public_approval_callback(self, bot_id: str, owner_id: str, puid: str, last_operate: str, public_scope: str | None = None, *, risk_check_id: str | None = None) -> Dict[str, Any]:
+    def handle_public_approval_callback(self, bot_id: str, owner_id: str, puid: str, last_operate: str, public_scope: str | None = None, *, risk_check_id: str | None = None, _risk_guarded: bool = False) -> Dict[str, Any]:
         """
         处理 Bot 公开审批回调。
 
@@ -1108,13 +1114,13 @@ class BotPublicService(BotPublicServiceProtocol):
         Returns:
             操作结果字典 {"success": bool, "public": str|None, "message": str}
         """
-        if self._risk_repository is not None and puid:
+        if not _risk_guarded and self._risk_repository is not None and puid:
             associated = self._risk_repository.find_approval(env=get_current_env(), puid=puid)
             if associated is not None:
                 if risk_check_id and risk_check_id != associated.risk_check_id:
                     return {"success": False, "message": "risk callback association mismatch"}
                 risk_check_id = associated.risk_check_id
-        if risk_check_id:
+        if risk_check_id and not _risk_guarded:
             guard = self._risk_approval_guard
             if guard is None:
                 return {"success": False, "message": "risk callback guard unavailable"}
@@ -1125,7 +1131,19 @@ class BotPublicService(BotPublicServiceProtocol):
             result = guard.check(get_current_env(), risk_check_id, owner_id, bot["id"], puid,
                                  (last_operate or "").upper(), public_scope or "legacy")
             if result != "ALLOW":
-                return {"success": result == "DEFERRED", "message": f"risk callback {result.lower()}"}
+                return {"success": result in {"DEFERRED", "ALREADY_APPLIED"}, "message": f"risk callback {result.lower()}"}
+            try:
+                applied = self.handle_public_approval_callback(
+                    bot_id, owner_id, puid, last_operate, public_scope,
+                    risk_check_id=risk_check_id, _risk_guarded=True,
+                )
+            except Exception:
+                guard.finish(get_current_env(), risk_check_id, puid, (last_operate or "").upper(), False)
+                raise
+            message = str(applied.get("message", "")).lower()
+            success = applied.get("success") is True and not any(word in message for word in ("skipped", "mismatch", "noop"))
+            guard.finish(get_current_env(), risk_check_id, puid, (last_operate or "").upper(), success)
+            return applied if success else {"success": False, "message": "risk callback outcome unavailable"}
         # New-version publish (public_scope non-empty, e.g. "user"/"agent"): the
         # bot's visibility is delegated to BCS, so this callback must NOT flip
         # ac_bots.public or run the passport / auth-relationship / device-sync
@@ -1137,9 +1155,12 @@ class BotPublicService(BotPublicServiceProtocol):
             # public_agent_approval) 写 status = last_operate → PATCH 回。
             try:
                 return self._apply_callback_decision(
-                    bot_uid=bot_id, public_scope=public_scope, last_operate=last_operate
+                    bot_uid=bot_id, public_scope=public_scope, last_operate=last_operate,
+                    **({"expected_puid": puid} if _risk_guarded else {}),
                 )
             except Exception as exc:  # noqa: BLE001 — callback must not crash antprocess
+                if _risk_guarded:
+                    raise
                 logger.warning(
                     "[handle_public_approval_callback] BCS friend_ext update failed: %s", exc
                 )
