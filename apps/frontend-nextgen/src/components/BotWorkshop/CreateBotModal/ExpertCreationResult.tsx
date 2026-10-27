@@ -19,6 +19,8 @@ export function ExpertCreationResult({
   botId,
   status,
   error,
+  initializing,
+  afterCreateError,
   unknown,
   input,
   onClose,
@@ -26,6 +28,8 @@ export function ExpertCreationResult({
   botId?: string;
   status?: ExpertBotCreationStatus;
   error?: string;
+  initializing?: boolean;
+  afterCreateError?: string;
   unknown: boolean;
   input: BotCreateInput;
   onClose: () => void;
@@ -53,6 +57,8 @@ export function ExpertCreationResult({
         <p className="text-sm text-muted-foreground">服务 Bot 草稿已创建，配置进度单独显示；发布请沿原发布流程操作。</p>
       )}
       {status?.message && <p className="whitespace-pre-wrap text-sm">{status.message}</p>}
+      {initializing && <p role="status">Bot 已创建，正在执行模板初始化…</p>}
+      {afterCreateError && <p role="alert" className="text-sm text-destructive">Bot 已创建，但模板初始化未完成：{afterCreateError}</p>}
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error}

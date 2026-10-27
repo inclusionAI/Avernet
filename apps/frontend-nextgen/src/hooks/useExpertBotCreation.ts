@@ -1,6 +1,9 @@
 import type { BotCreateInput } from '@/services/botWorkshop';
 import { botAvatarService } from '@/services/botWorkshop/botAvatarService';
 import { toBotCreateRequest } from '@/services/botWorkshop/botCreatePolicy';
+import { runAfterCreateActions } from '@/services/botWorkshop/agentCodingAfterCreateService';
+import type { AgentCodingTemplate } from '@/services/botWorkshop/agentCodingTemplateService';
+import { mapBotDto } from '@/services/botWorkshop/botMapper';
 import {
   createExpertBot,
   classifyExpertSubmissionFailure,
@@ -19,8 +22,12 @@ export function useExpertBotCreation(open: boolean) {
   const [error, setError] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
   const [unknown, setUnknown] = useState(false);
+  const [initializing, setInitializing] = useState(false);
+  const [afterCreateError, setAfterCreateError] = useState<string>();
   const locked = useRef(false);
   const avatar = useRef<string>();
+  const submitted = useRef<BotCreateInput>();
+  const afterCreateStartedFor = useRef<string>();
   useEffect(() => {
     if (open) return;
     setAccepted(undefined);
@@ -28,6 +35,10 @@ export function useExpertBotCreation(open: boolean) {
     setError(undefined);
     setUnknown(false);
     setSubmitting(false);
+    setInitializing(false);
+    setAfterCreateError(undefined);
+    submitted.current = undefined;
+    afterCreateStartedFor.current = undefined;
     locked.current = false;
   }, [open]);
   useEffect(() => {
@@ -41,9 +52,30 @@ export function useExpertBotCreation(open: boolean) {
         setStatus(next);
         setError(undefined);
         if (TERMINAL.has(next.state)) {
-          if (next.bot && avatar.current) {
+          const submittedAvatar = avatar.current;
+          if (next.bot && ['READY', 'APPLY_FAILED'].includes(next.state) && afterCreateStartedFor.current !== next.bot_id) {
+            afterCreateStartedFor.current = next.bot_id;
+            const agentCoding = submitted.current?.agentCoding;
+            if (agentCoding?.template) {
+              setInitializing(true);
+              try {
+                const failures = await runAfterCreateActions({
+                  botId: next.bot_id,
+                  ownerId: mapBotDto(next.bot, next.bot_id).item.ownerId,
+                  template: agentCoding.template as AgentCodingTemplate,
+                  values: agentCoding.values,
+                });
+                if (active && failures.length) setAfterCreateError(failures.map((failure) => failure.error.message).join('；'));
+              } catch (failure) {
+                if (active) setAfterCreateError(failure instanceof Error ? failure.message : '模板初始化失败');
+              } finally {
+                if (active) setInitializing(false);
+              }
+            }
+          }
+          if (next.bot && submittedAvatar) {
             try {
-              await botAvatarService.save(next.bot_id, avatar.current);
+              await botAvatarService.save(next.bot_id, submittedAvatar);
             } catch {
               if (active) setError('Bot 已创建，但头像保存失败，可在 Bot 管理中修改头像。');
             }
@@ -68,10 +100,13 @@ export function useExpertBotCreation(open: boolean) {
     error,
     submitting,
     unknown,
+    initializing,
+    afterCreateError,
     locked: submitting || Boolean(accepted) || unknown,
     async submit(expertId: string, input: BotCreateInput) {
       if (locked.current) return;
       const body = toBotCreateRequest(input);
+      submitted.current = input;
       avatar.current = input.avatarUrl;
       locked.current = true;
       setSubmitting(true);

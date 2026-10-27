@@ -529,3 +529,27 @@ test('详情与模板入口自动名称使用我的前缀且总长最多40字符
   render(<CreateBotModal {...props} scenario="cloud" expert={{ ...identityExpert, name: '长'.repeat(40) }} />);
   expect(screen.getByLabelText(/Bot 名称/)).toHaveValue('我的' + '长'.repeat(38));
 });
+
+test('专家创建的模板初始化失败与 Manifest 完成分开展示', async () => {
+  extendCapabilities({ getBotEngineOptions: () => ({ status: 'available', value: [
+    { value: 'openclaw', label: 'OpenClaw' },
+    { value: 'aicoding', label: 'AgentCoding', createPanel: 'agent-coding' },
+  ] }) });
+  templateList.mockResolvedValue([{ ...makeTemplate(), config: { architect_name: '业务域' }, raw: { afterCreate: ['architect_name'] } }]);
+  jest.mocked(backendRequest).mockImplementation(async (path) => {
+    if (path.endsWith('/experts/product-manager/bots')) return { code: 200000, data: { bot_id: 'expert-init', iframe_url: '', redirect_url: '' } };
+    if (path.endsWith('/with-manifest/status')) return { code: 200000, data: { bot_id: 'expert-init', state: 'READY', bot: { bot_id: 'expert-init', owner_id: '001', engine: 'claude_code' } } };
+    if (path.endsWith('/ext')) throw new Error('架构域写入失败');
+    return { code: 200000, data: {} };
+  });
+  const ordinaryCreate = jest.fn();
+  render(<CreateBotModal scenario="cloud" expert={identityExpert} spaces={[
+    { id: '10', name: '个人空间', ownership: 'personal', canCreate: true },
+  ]} creating={false} onClose={jest.fn()} onSubmit={ordinaryCreate} />);
+  fireEvent.click(screen.getByRole('button', { name: 'AgentCoding' }));
+  fireEvent.click(await screen.findByRole('button', { name: /架构 Bot/ }));
+  fireEvent.click(screen.getByRole('button', { name: '创建云端 Bot' }));
+  await screen.findByText('Bot 已创建，但模板初始化未完成：架构域写入失败');
+  expect(screen.getByText('Bot 创建及配置已完成')).toBeInTheDocument();
+  expect(ordinaryCreate).not.toHaveBeenCalled();
+});
