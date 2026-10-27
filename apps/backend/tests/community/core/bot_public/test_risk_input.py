@@ -23,8 +23,8 @@ BOT = {
 
 
 class Reader:
-    def active_skill_assets(self, **kwargs):
-        return ()
+    def active_capabilities(self, **kwargs):
+        return SimpleNamespace(owner_id="entity", skills=(), installed_mcp_server_codes=frozenset())
 
 
 class Mcps:
@@ -76,8 +76,8 @@ def test_active_skills_use_existing_local_and_external_center_identity():
     )
 
     class Skills:
-        def active_skill_assets(self, **kwargs):
-            return (
+        def active_capabilities(self, **kwargs):
+            skills = (
                 SimpleNamespace(skill_id=1, name="Local", git_path="local://one"),
                 SimpleNamespace(skill_id=2, name="Missing", git_path="local://two"),
                 SimpleNamespace(
@@ -89,6 +89,7 @@ def test_active_skills_use_existing_local_and_external_center_identity():
                 ),
                 SimpleNamespace(skill_id=4, name="Git", git_path="git://repo"),
             )
+            return SimpleNamespace(owner_id="entity", skills=skills, installed_mcp_server_codes=frozenset())
 
     class Observations:
         def get_observed_incarnation_id(self, **scope):
@@ -135,7 +136,7 @@ def test_passport_fallback_and_read_failure_are_not_empty_success():
     assert data["agent_info"]["agentCode"] == "from-passport"
 
     class Broken:
-        def active_skill_assets(self, **kwargs):
+        def active_capabilities(self, **kwargs):
             raise RuntimeError("database unavailable")
 
     with pytest.raises(RuntimeError, match="database unavailable"):
@@ -182,3 +183,84 @@ def test_sensitive_projection_and_missing_required_config_fail_closed():
             RiskInputBuilder(
                 Reader(), Mcps(), Identities(), None, None, projector
             ).build(bot=BOT, target={"visibility": "public"})
+
+
+def test_mcp_uses_one_stable_owner_capability_snapshot():
+    snapshot = SimpleNamespace(bot_id="default", owner_id="entity", skills=(), installed_mcp_server_codes=frozenset({"active"}))
+
+    class SnapshotReader:
+        def active_capabilities(self, **kwargs):
+            assert kwargs["owner_id"] == "owner"
+            assert kwargs["bot"] == BOT
+            return snapshot
+
+    class ScopedMcps:
+        def collect_bot_active_mcps(self, **kwargs):
+            assert kwargs["user_id"] == "entity"
+            assert kwargs["capability_snapshot"] is snapshot
+            return []
+
+    RiskInputBuilder(SnapshotReader(), ScopedMcps(), Identities(), None, None, Projector()).build(
+        bot=BOT, target={"visibility": "public"}
+    )
+
+
+def test_capability_read_failure_is_not_an_empty_mcp_list():
+    class BrokenReader:
+        def active_capabilities(self, **kwargs):
+            raise RuntimeError("capability read failed")
+
+    with pytest.raises(RuntimeError, match="capability read failed"):
+        RiskInputBuilder(BrokenReader(), Mcps(), Identities(), None, None, Projector()).build(
+            bot=BOT, target={"visibility": "public"}
+        )
+
+
+def test_real_collector_exclusions_are_scoped_to_resource_owner(monkeypatch):
+    from unittest.mock import MagicMock
+    from agentclaw.community.core.skill_center.services import skill_set_mcps as module
+
+    collector = module.SkillSetMcpCollection()
+    collector._reader = MagicMock()
+    collector.engine_type = "openclaw"
+    collector.skill_set_repo = MagicMock()
+    collector.skill_set_repo.get_all_excluded_mcps.side_effect = (
+        lambda user, bot: ["default"] if user == "entity" else []
+    )
+    collector._run_effective_mcp_stage = lambda *, operation, **kwargs: operation()
+    collector._get_default_capabilities_ext_info = lambda *a, **k: None
+    collector._get_default_capabilities_template_type = lambda *a, **k: None
+    collector._get_all_active_skill_sets_with_default_fallback = lambda **k: []
+    collector._default_set_mcp_rows = lambda *a, **k: []
+    collector._non_default_effective_mcp_entries = lambda **k: []
+    monkeypatch.setattr(module, "get_default_mcp_servers", lambda *a, **k: [{"server_code": "default"}])
+    snapshot = SimpleNamespace(bot_id="default", owner_id="entity", skills=(), installed_mcp_server_codes=frozenset())
+
+    class SnapshotReader:
+        def active_capabilities(self, **kwargs):
+            return snapshot
+
+    data, _ = RiskInputBuilder(SnapshotReader(), collector, Identities(), None, None, Projector()).build(
+        bot=BOT, target={"visibility": "public"}
+    )
+    assert data["agent_info"]["resourceManifest"] == []
+    collector.skill_set_repo.get_all_excluded_mcps.assert_called_once_with("entity", "default")
+
+
+def test_real_collector_does_not_swallow_snapshot_read_failure():
+    from unittest.mock import MagicMock
+    from agentclaw.community.core.skill_center.errors import LocalSkillNotFoundError
+    from agentclaw.community.core.skill_center.services.skill_set_mcps import SkillSetMcpCollection
+
+    collector = SkillSetMcpCollection()
+    collector._reader = MagicMock()
+    collector._bot_repo = MagicMock()
+    collector._bot_repo.get_by_id_and_entity.return_value = BOT
+    collector._reader.active_skill_assets.side_effect = LocalSkillNotFoundError("read failed")
+    # Demonstrates the legacy collector's fallback; risk must avoid it.
+    assert collector._active_skill_assets(entity_id="entity", bot_id="default", user_id="owner") == ()
+    collector._reader.active_capabilities.side_effect = LocalSkillNotFoundError("read failed")
+    with pytest.raises(LocalSkillNotFoundError, match="read failed"):
+        RiskInputBuilder(collector._reader, collector, Identities(), None, None, Projector()).build(
+            bot=BOT, target={"visibility": "public"}
+        )

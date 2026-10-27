@@ -129,10 +129,14 @@ class RiskInputBuilder:
         if visibility not in {"PUBLIC", "AUTHORIZED"}:
             raise ValueError("invalid target visibility")
         modes = self.identities.list_draft_call_types(int(_text(bot, "id")), engine)
+        snapshot = self.capabilities.active_capabilities(
+            bot_id=bot_id, owner_id=owner, bot=bot
+        )
         entries = self.mcps.collect_bot_active_mcps(
             entity_id=entity,
             bot_id=bot_id,
-            user_id=owner,
+            user_id=snapshot.owner_id,
+            capability_snapshot=snapshot,
             entity_type=bot.get("entity_type") or "staff",
             engine_type=engine,
             strict_policy_context=True,
@@ -167,9 +171,7 @@ class RiskInputBuilder:
                 }
             )
         missing = []
-        for asset in self.capabilities.active_skill_assets(
-            bot_id=bot_id, owner_id=owner, bot=bot
-        ):
+        for asset in snapshot.skills:
             path = asset.git_path or ""
             if path.startswith("local://"):
                 if self.observations is None:
