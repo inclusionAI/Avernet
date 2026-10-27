@@ -77,7 +77,6 @@ describe('CommunityPage 滚动容器结构', () => {
     render(<CommunityPage />);
 
     const topicTypeGroup = screen.getByRole('group', { name: '主题类型' });
-    const scopeGroup = screen.getByRole('group', { name: '主题范围' });
     const searchInput = screen.getByRole('textbox', { name: '搜索社区主题' });
     const personalCenterButton = screen.getByRole('button', { name: '个人中心' });
     const publishButton = screen.getByRole('button', { name: '发帖' });
@@ -89,9 +88,9 @@ describe('CommunityPage 滚动容器结构', () => {
       '投票',
       '求助',
     ]);
-    expect(within(scopeGroup).getAllByRole('button')).toHaveLength(2);
-    expect(topicTypeGroup.compareDocumentPosition(scopeGroup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(scopeGroup.compareDocumentPosition(searchInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByRole('group', { name: '主题范围' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '我的' })).not.toBeInTheDocument();
+    expect(topicTypeGroup.compareDocumentPosition(searchInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(searchInput.compareDocumentPosition(personalCenterButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(personalCenterButton).toBeDisabled();
     expect(

@@ -22,8 +22,7 @@ const topicTypeOptions: Array<{ value: CommunityTopicFilter; label: string }> = 
 export function CommunityPage() {
   const community = useCommunity();
   const [publishOpen, setPublishOpen] = useState(false);
-  const hasFilter =
-    !!community.query.trim() || community.scope === 'mine' || community.topicType !== 'all';
+  const hasFilter = !!community.query.trim() || community.topicType !== 'all';
   const scrollRootRef = useRef<HTMLElement>(null);
 
   if (community.selectedTopic) {
@@ -84,16 +83,6 @@ export function CommunityPage() {
               options={topicTypeOptions}
               className="h-9"
             />
-            <Segmented
-              value={community.scope}
-              onChange={community.setScope}
-              aria-label="主题范围"
-              options={[
-                { value: 'all', label: '全部' },
-                { value: 'mine', label: '我的' },
-              ]}
-              className="h-9"
-            />
             <div className="relative w-full min-w-[160px] sm:ml-auto sm:w-40 sm:flex-none">
               <Search
                 className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
@@ -144,7 +133,6 @@ export function CommunityPage() {
               onRetry={() => void community.load()}
               onClearFilter={() => {
                 community.setQuery('');
-                community.setScope('all');
                 community.setTopicType('all');
               }}
               onPublish={() => setPublishOpen(true)}
