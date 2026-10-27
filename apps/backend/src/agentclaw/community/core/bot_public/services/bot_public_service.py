@@ -1050,6 +1050,7 @@ class BotPublicService(BotPublicServiceProtocol):
 
     def _apply_callback_decision(
         self, *, bot_uid: str, public_scope: str, last_operate: str, expected_puid: str | None = None,
+        expected_target: dict | None = None,
     ) -> Dict[str, Any]:
         """审批回调落 BCS: 更新 sub-block status; AGREE 时再把 BCS 可见性字段翻转。
 
@@ -1082,13 +1083,26 @@ class BotPublicService(BotPublicServiceProtocol):
         block = dict(friend_ext.get(key) or {})
         if expected_puid is not None and block.get("puid") != expected_puid:
             return {"success": False, "public": None, "message": "risk approval PUID mismatch"}
+        if expected_puid is not None and block.get("visibility") not in {"public", "protected"}:
+            return {"success": False, "public": None, "message": "risk approval target unavailable"}
+        if expected_puid is not None:
+            try:
+                actual_depts = sorted({str(item["deptNo"]) for item in block.get("view_friend_deps", [])})
+                expected_depts = sorted({str(item["deptNo"]) for item in expected_target["view_depts"]})
+                same_target = block["visibility"] == expected_target["visibility"] and actual_depts == expected_depts
+            except (KeyError, TypeError):
+                same_target = False
+            if not same_target:
+                return {"success": False, "public": None, "message": "risk approval target mismatch"}
         block["status"] = (last_operate or "").upper()
         friend_ext[key] = block
         body: Dict[str, Any] = {"friend_ext": friend_ext}
         if block["status"] == "AGREE":
             field = _BCS_VISIBILITY_FIELD_BY_SCOPE.get(public_scope)
             if field:
-                if public_scope == "user":
+                if expected_puid is not None:
+                    body[field] = block["visibility"]
+                elif public_scope == "user":
                     # user: user_visibility 直接取 block 里存的 visibility 字段
                     body[field] = block.get("visibility") or "protected"
                 else:  # agent: 由 BCS friend_check_in_strategy 决断
@@ -1110,7 +1124,7 @@ class BotPublicService(BotPublicServiceProtocol):
             "message": f"public_scope={public_scope} callback status={block['status']}",
         }
 
-    def handle_public_approval_callback(self, bot_id: str, owner_id: str, puid: str, last_operate: str, public_scope: str | None = None, *, risk_check_id: str | None = None, _risk_guarded: bool = False) -> Dict[str, Any]:
+    def handle_public_approval_callback(self, bot_id: str, owner_id: str, puid: str, last_operate: str, public_scope: str | None = None, *, risk_check_id: str | None = None, _risk_guarded: bool = False, _risk_target: dict | None = None) -> Dict[str, Any]:
         """
         处理 Bot 公开审批回调。
 
@@ -1151,9 +1165,13 @@ class BotPublicService(BotPublicServiceProtocol):
             if result != "ALLOW":
                 return {"success": result in {"DEFERRED", "ALREADY_APPLIED"}, "message": f"risk callback {result.lower()}"}
             try:
+                risk_row = guard.repo.get(env=get_current_env(), risk_check_id=risk_check_id)
+                if risk_row is None:
+                    raise BotPublicServiceError("risk callback record unavailable")
+                risk_target = json.loads(risk_row.target_json)
                 applied = self.handle_public_approval_callback(
                     bot_id, owner_id, puid, last_operate, public_scope,
-                    risk_check_id=risk_check_id, _risk_guarded=True,
+                    risk_check_id=risk_check_id, _risk_guarded=True, _risk_target=risk_target,
                 )
             except Exception:
                 guard.finish(get_current_env(), risk_check_id, puid, (last_operate or "").upper(), False)
@@ -1174,7 +1192,7 @@ class BotPublicService(BotPublicServiceProtocol):
             try:
                 return self._apply_callback_decision(
                     bot_uid=bot_id, public_scope=public_scope, last_operate=last_operate,
-                    **({"expected_puid": puid} if _risk_guarded else {}),
+                    **({"expected_puid": puid, "expected_target": _risk_target} if _risk_guarded else {}),
                 )
             except Exception as exc:  # noqa: BLE001 — callback must not crash antprocess
                 if _risk_guarded:
@@ -1223,6 +1241,13 @@ class BotPublicService(BotPublicServiceProtocol):
         if stored_puid != puid:
             logger.error(f"[bot_service.handle_public_approval_callback] PUID mismatch after {max_retries} retries: bot_id={bot_id}, stored={stored_puid}, received={puid}")
             return {"success": True, "public": None, "message": "PUID mismatch"}
+        if _risk_guarded and (
+            not isinstance(_risk_target, dict)
+            or public_approval.get("public") != "1"
+            or public_approval.get("permission_owner") != _risk_target.get("permission_owner")
+            or public_approval.get("friend_approval") != _risk_target.get("friend_approval")
+        ):
+            return {"success": False, "public": None, "message": "risk approval target mismatch"}
         last_operate_upper = last_operate.upper() if last_operate else ""
         if last_operate_upper == "AGREE":
             public_value = public_approval.get("public", bot.get("public", "1"))

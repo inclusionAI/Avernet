@@ -122,3 +122,18 @@ def test_concurrent_callbacks_claim_once_and_late_decision_cannot_overwrite():
     guard.finish("dev", "risk-a", "puid-a", "AGREE", True)
     assert guard.check("dev", "risk-a", "owner", 42, "puid-a", "AGREE", "user") == "ALREADY_APPLIED"
     assert guard.check("dev", "risk-a", "owner", 42, "puid-a", "CANCEL", "user") == "DENIED"
+
+
+def test_late_target_ready_rechecks_eligibility_and_recovers_same_approval():
+    repo = MagicMock()
+    repo.get.return_value = _record(phase="NEEDS_ATTENTION", approval_puid="puid-a", workflow_json=json.dumps({
+        "approval_intent": True, "error": "APPROVAL_TARGET_NOT_READY", "pending_approval": {"puid": "puid-a", "decision": "AGREe"}
+    }))
+    repo.update_current.return_value = True
+    h3 = MagicMock(return_value=True)
+    guard = RiskApprovalGuard(repo, h3)
+    guard.mark_target_ready("dev", "risk-a", "puid-a")
+    changes = repo.update_current.call_args.kwargs["changes"]
+    assert changes["phase"] == "APPROVING"
+    assert json.loads(changes["workflow_json"])["approval_target_ready"] is True
+    h3.assert_called_once()

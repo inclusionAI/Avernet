@@ -212,3 +212,22 @@ def test_target_not_ready_without_pending_event_is_recovered_without_new_approva
     assert repo.row.phase == "NEEDS_ATTENTION"
     assert json.loads(repo.row.workflow_json)["error"] == "APPROVAL_TARGET_NOT_READY"
     public.public_bcs_bot.assert_not_called()
+
+
+def test_concurrent_reclaimed_worker_preserves_direct_publication_result():
+    from threading import Event, Thread
+    repo = MemoryRepository(row(public_scope="legacy"))
+    sent, resume = Event(), Event()
+    def submit(record, on_started):
+        sent.set()
+        assert resume.wait(5)
+        return "published"
+    advance = RiskAdvance(repo, lambda _: True, submit, lambda: datetime(2026, 1, 1))
+    thread = Thread(target=advance.advance, args=("dev", "a"))
+    thread.start()
+    assert sent.wait(5)
+    advance.advance("dev", "a")
+    resume.set()
+    thread.join(5)
+    assert not thread.is_alive()
+    assert repo.row.phase == "PUBLISHED"

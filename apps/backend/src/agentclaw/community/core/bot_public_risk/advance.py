@@ -86,9 +86,16 @@ class RiskAdvance:
             return
         if outcome == "approval" and latest.phase == "APPROVING" and latest.approval_puid:
             return
-        if outcome == "published" and latest.phase == "ADVANCING":
+        workflow = json.loads(latest.workflow_json)
+        recovered_direct = (latest.phase == "NEEDS_ATTENTION"
+                            and workflow.get("error") == "APPROVAL_OUTCOME_UNKNOWN")
+        if outcome == "published" and (latest.phase == "ADVANCING" or recovered_direct):
+            if recovered_direct and self.check_h2(latest) is not True:
+                return
+            workflow.pop("error", None)
             self.repo.update_current(env=env, risk_check_id=risk_check_id, row_version=latest.row_version,
-                                     changes={"phase": "PUBLISHED", "next_action_at": None})
+                                     changes={"phase": "PUBLISHED", "next_action_at": None,
+                                              "workflow_json": json.dumps(workflow)})
             return
         if latest.phase == "ADVANCING":
             self._attention(latest, "APPROVAL_OUTCOME_UNKNOWN")

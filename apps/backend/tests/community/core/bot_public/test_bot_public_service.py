@@ -2884,7 +2884,7 @@ def test_callback_between_puid_and_bcs_target_waits_until_target_is_ready():
         def __init__(self):
             self.lock = Lock()
             self.row = RiskCheck(risk_check_id="risk-a", env="dev", bot_pk=42, owner_id="u1", operator_id="op_user",
-                client_scope="openapi:op_user", client_request_id="req", public_scope="user", target_json="{}",
+                client_scope="openapi:op_user", client_request_id="req", public_scope="user", target_json='{"visibility":"public","view_depts":[]}',
                 request_hash="h", input_json="{}", input_hash="h", approval_biz_id="risk-a", phase="ADVANCING",
                 security_status="PASS", current_target_key="current", workflow_json='{"approval_intent":true}')
         def get(self, **_):
@@ -2960,3 +2960,39 @@ def test_risk_publication_does_not_mark_ready_when_bcs_persistence_is_skipped():
         service.public_bcs_bot("b1:u1", "u1", "user", _make_operator(), visibility="public",
             approval_biz_id="risk-a", risk_check_id="risk-a", on_approval_started=lambda _: None)
     guard.mark_target_ready.assert_not_called()
+
+
+def test_risk_agent_callback_applies_the_approved_target_visibility():
+    bots = MagicMock()
+    bots.get_by_id_and_entity.return_value = _make_bot("b1", "u1")
+    bcn = MagicMock()
+    bcn.get_attributes.return_value = {"friend_check_in_strategy": "OPEN", "friend_ext": {
+        "public_agent_approval": {"puid": "p1", "visibility": "protected"}
+    }}
+    bcn.patch_attributes.return_value = {}
+    service = _make_service(bot_repository=bots, bcn_service=bcn)
+    service._risk_approval_guard = MagicMock()
+    service._risk_approval_guard.check.return_value = "ALLOW"
+    from types import SimpleNamespace
+    service._risk_approval_guard.repo.get.return_value = SimpleNamespace(target_json='{"visibility":"protected","view_depts":[]}')
+    assert service.handle_public_approval_callback("b1:u1", "u1", "p1", "AGREE", "agent", risk_check_id="risk-a")["success"]
+    assert bcn.patch_attributes.call_args.kwargs["body"]["visibility"] == "protected"
+
+
+def test_risk_callback_rejects_puid_matching_but_changed_target():
+    from types import SimpleNamespace
+    bots = MagicMock()
+    bots.get_by_id_and_entity.return_value = _make_bot("b1", "u1")
+    bcn = MagicMock()
+    bcn.get_attributes.return_value = {"friend_ext": {"public_user_approval": {
+        "puid": "p1", "visibility": "public", "view_friend_deps": []
+    }}}
+    service = _make_service(bot_repository=bots, bcn_service=bcn)
+    guard = MagicMock()
+    guard.check.return_value = "ALLOW"
+    guard.repo.get.return_value = SimpleNamespace(target_json='{"visibility":"protected","view_depts":[{"deptNo":"1"}]}')
+    service._risk_approval_guard = guard
+    result = service.handle_public_approval_callback("b1:u1", "u1", "p1", "AGREE", "user", risk_check_id="risk-a")
+    assert result["success"] is False
+    bcn.patch_attributes.assert_not_called()
+    assert guard.finish.call_args.args[-1] is False
