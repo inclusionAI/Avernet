@@ -17,9 +17,19 @@ export function ConversationSessionList(props: {
   onLoadMore(): void;
   onToggleFavorite?(sessionId: string): void;
   isFavoritePending(sessionId: string): boolean;
+  /** Bot 正在回复中的会话 id(#2990 还原):透传行组件渲染 loading 指示。 */
+  replyingSessionId?: string | null;
 }) {
-  const { actions, sessions, selectedSessionId, onSelectSession, onLoadMore, onToggleFavorite, isFavoritePending } =
-    props;
+  const {
+    actions,
+    sessions,
+    selectedSessionId,
+    onSelectSession,
+    onLoadMore,
+    onToggleFavorite,
+    isFavoritePending,
+    replyingSessionId,
+  } = props;
   // 未加载 ≠ 空列表:无缓存、或首拉在途(loading 且尚无 items)都只给行骨架,
   // 不闪「暂无会话」;已在途刷量(loading 但保留旧 items)继续展示旧行。
   if (!sessions || (sessions.loading && sessions.items.length === 0)) {
@@ -56,6 +66,7 @@ export function ConversationSessionList(props: {
             }}
             onToggleFavorite={onToggleFavorite ? () => onToggleFavorite(session.sessionId) : undefined}
             favoritePending={isFavoritePending(session.sessionId)}
+            replyingSessionId={replyingSessionId}
             actions={
               actions
                 ? {
