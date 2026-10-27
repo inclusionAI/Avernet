@@ -108,3 +108,16 @@ def test_injector_registers_advance_and_replay_with_fail_closed_inputs():
     assert lifecycle.registry.get(REPLAY) is not None
     with pytest.raises(McpProjectionUnavailable, match="MCP risk projection is not configured"):
         injector.get(RiskInputBuilder).build(bot={}, target={})
+
+
+def test_application_risk_service_resolves_with_real_fail_closed_builder():
+    import pytest
+    from agentclaw.community.di.container import build_injector
+    from agentclaw.community.di.profile import DeployProfile
+    from agentclaw.community.api.bot_public_risk_service import BotPublicRiskServiceProtocol
+    from agentclaw.community.core.bot_public_risk.application import RiskInputBuilder
+    from agentclaw.community.core.bot_public_risk.input_builder import McpProjectionUnavailable
+    injector = build_injector(profile=DeployProfile.TEST)
+    assert injector.get(BotPublicRiskServiceProtocol) is not None
+    with pytest.raises(McpProjectionUnavailable):
+        injector.get(RiskInputBuilder).build(bot={}, target={})

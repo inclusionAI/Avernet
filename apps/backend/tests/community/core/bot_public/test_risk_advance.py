@@ -170,3 +170,17 @@ def test_approval_target_write_failure_is_recorded_without_restarting_approval()
     assert repo.row.approval_puid == "p1"
     assert repo.row.phase == "NEEDS_ATTENTION"
     assert json.loads(repo.row.workflow_json)["error"] == "APPROVAL_TARGET_NOT_READY"
+
+
+def test_recovery_marks_interrupted_callback_unknown_without_reapplying():
+    from agentclaw.community.core.bot_public_risk.advance import RiskPendingHandler
+    state = {"approval_target_ready": True, "callback_claim": {
+        "event": {"puid": "p1", "decision": "AGREE"}, "status": "processing"}}
+    repo = MemoryRepository(row(phase="APPROVING", approval_puid="p1", workflow_json=json.dumps(state)))
+    public, guard = MagicMock(), MagicMock()
+    handler = RiskPendingHandler(repo, MagicMock(), public, guard, lambda: "dev")
+    handler.handle({"tenant": "teamclaw", "env": "dev", "risk_check_id": "a"})
+    assert repo.row.phase == "NEEDS_ATTENTION"
+    assert json.loads(repo.row.workflow_json)["error"] == "CALLBACK_OUTCOME_UNKNOWN"
+    public.handle_public_approval_callback.assert_not_called()
+    guard.replay.assert_not_called()
