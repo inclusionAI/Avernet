@@ -1,28 +1,45 @@
-"""Local dense and lexical retrieval over the same persisted point snapshot."""
+"""Dense and lexical retrieval through Qdrant Local or Server."""
 
-from threading import RLock
-
+from search_core.config.qdrant import LOCAL_QDRANT, QdrantConnection
 from search_core.plugin_api.vector_point import VectorPoint
+from search_core.providers.index_lock import IndexLock
 from search_core.providers.keyword import QdrantKeywordIndex
-from search_core.providers.qdrant import QdrantLocalVectorStore
 from search_core.providers.qdrant_ids import _logical_id_from_result
+from search_core.providers.qdrant_server import dense_store
 
 
 class QdrantRetrievalIndex:
-    """One application owns one local path; no Worker-ID lookup or model calls.
+    """One owner per index; no Worker-ID lookup or model calls.
 
-    Qdrant persists points. The sparse index is rebuilt from their payloads on
-    startup. Mutations and searches share a lock because this is Local mode.
+    Local rebuilds its sparse index from dense payloads at startup. Server keeps
+    both collections persistent and allows concurrent reads; writes are exclusive.
     """
 
-    def __init__(self, *, path: str, dimension: int, collection_name: str = "search"):
-        self._lock = RLock()
-        self._dense = QdrantLocalVectorStore(
-            path=path, dimension=dimension, collection_name=collection_name
+    def __init__(
+        self,
+        *,
+        path: str,
+        dimension: int,
+        collection_name: str = "search",
+        connection: QdrantConnection = LOCAL_QDRANT,
+    ):
+        self.connection = connection
+        self._lock = IndexLock(concurrent_reads=connection.mode == "server")
+        self._dense = dense_store(
+            connection=connection,
+            path=path,
+            dimension=dimension,
+            collection_name=collection_name,
         )
-        self._keyword = QdrantKeywordIndex()
+        self._keyword = QdrantKeywordIndex(
+            connection=connection,
+            collection_name=collection_name + "_keywords",
+        )
         try:
             self._dense._ensure_client()
+            self._keyword._ensure_client()
+            if connection.mode == "server":
+                return
             offset = None
             while True:
                 records, offset = self._dense._client.scroll(
@@ -74,7 +91,7 @@ class QdrantRetrievalIndex:
     def vector_search(self, vector, limit, filters, allowed_ids):
         if allowed_ids == frozenset() or any(not values for values in filters.values()):
             return []
-        with self._lock:
+        with self._lock.read():
             return self._dense.search(
                 vector,
                 top_k=limit,
@@ -84,7 +101,7 @@ class QdrantRetrievalIndex:
     def keyword_search(self, query, limit, filters, allowed_ids):
         if allowed_ids == frozenset() or any(not values for values in filters.values()):
             return []
-        with self._lock:
+        with self._lock.read():
             return self._keyword.search(
                 query,
                 limit,

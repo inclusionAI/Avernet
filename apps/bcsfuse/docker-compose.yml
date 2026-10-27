@@ -27,8 +27,13 @@ services:
     environment:
       - BCSFUSE_PROVIDER_MODE=dev_smoke
       - BCSFUSE_PORT=8765
+      - QDRANT_MODE=server
+      - QDRANT_URL=http://qdrant:6333
+      - QDRANT_GRPC_PORT=6334
+    depends_on:
+      - qdrant
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8765/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8765/ready')"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -36,9 +41,25 @@ services:
     volumes:
       # Mount tests for execution (read-only)
       - ./tests:/app/tests:ro
+      - bcsfuse-data:/app/data
     restart: unless-stopped
     networks:
       - bcsfuse-network
+
+  qdrant:
+    image: qdrant/qdrant:v1.20.0
+    environment:
+      - QDRANT__TELEMETRY_DISABLED=true
+      - QDRANT__LOG_LEVEL=WARN
+    volumes:
+      - qdrant-data:/qdrant/storage
+    restart: unless-stopped
+    networks:
+      - bcsfuse-network
+
+volumes:
+  bcsfuse-data:
+  qdrant-data:
 
 networks:
   bcsfuse-network:

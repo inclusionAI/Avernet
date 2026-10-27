@@ -6,16 +6,19 @@ VectorStoreAdapter protocol.
 
 Architecture:
 - MySQL (bcsfuse_vector_points): durable source of truth
-- Qdrant Local: disposable local index for fast ANN search
+- Qdrant Local or Server: rebuildable vector and keyword indexes
 - Write-through: MySQL first, then Qdrant
 - Rebuild: page durable vectors into Qdrant on startup/request
 """
 from __future__ import annotations
 
 import logging
-import threading
 import time
 from typing import Any, List, Optional
+
+from search_core.config.qdrant import LOCAL_QDRANT, QdrantConnection
+from search_core.providers.index_lock import IndexLock
+from search_core.providers.qdrant_server import QdrantServerVectorStore
 
 from app.domain.models.vector_point import VectorPoint
 from app.domain.models.vector_search_hit import VectorSearchHit
@@ -44,7 +47,7 @@ logger = logging.getLogger(__name__)
 
 
 class QdrantMySQLVectorStore(VectorStoreAdapter):
-    """Write-through durable vector store with a local Qdrant index.
+    """Write-through durable vector store with configurable Qdrant indexes.
 
     MySQL remains the default durable backend. Internal compositions may inject
     another implementation of the same persistence contract.
@@ -62,17 +65,23 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
         mysql_password: Optional[str] = None,
         mysql_database: Optional[str] = None,
         persistence_backend: VectorPersistenceBackend | None = None,
+        connection: QdrantConnection = LOCAL_QDRANT,
     ):
         self.collection_name = collection_name
         self.dimension = dimension
         self.distance = distance
 
-        self._qdrant = QdrantLocalVectorStore(
-            collection_name=collection_name,
-            path=qdrant_path,
-            dimension=dimension,
-            distance=distance,
-        )
+        self.connection = connection
+        if connection.mode == "server":
+            self._qdrant = QdrantServerVectorStore(
+                connection=connection, collection_name=collection_name,
+                dimension=dimension, distance=distance,
+            )
+        else:
+            self._qdrant = QdrantLocalVectorStore(
+                collection_name=collection_name, path=qdrant_path,
+                dimension=dimension, distance=distance,
+            )
 
         self._persistence = persistence_backend or MySQLVectorPersistenceBackend(
             host=mysql_host,
@@ -87,13 +96,19 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
         # Compatibility alias for existing diagnostics and tests.
         self._mysql = self._persistence
         self._last_sync_time = 0.0
-        self._index_lock = threading.RLock()
-        self._keywords = QdrantKeywordIndex()
+        self._index_lock = IndexLock(concurrent_reads=connection.mode == "server")
+        self._keywords = self._new_keyword_index()
         self._keywords_ready = True
 
         logger.info(
             "[QdrantMySQLVectorStore] Initialized collection=%s dimension=%d distance=%s",
             collection_name, dimension, distance,
+        )
+
+    def _new_keyword_index(self):
+        return QdrantKeywordIndex(
+            connection=self.connection,
+            collection_name=self.collection_name + "_keywords",
         )
 
     # ------------------------------------------------------------------
@@ -119,7 +134,7 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
         """Insert or update vector points.
 
         Write-through: durable MySQL first, then local Qdrant index.
-        Qdrant index failures are logged but not raised (index can be rebuilt).
+        Qdrant index failures are reported after the durable write succeeds.
         """
         if not points:
             return
@@ -277,7 +292,7 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
         pass them through directly. Do NOT re-wrap them via dict .get() -- the
         results are objects, not dicts.
         """
-        with self._index_lock:
+        with self._index_lock.read():
             self._ensure_client()
             return self._qdrant.search(vector, top_k, filter=filters)
 
@@ -293,6 +308,17 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
     # ------------------------------------------------------------------
     # Misc protocol methods
     # ------------------------------------------------------------------
+
+    def check_ready(self) -> None:
+        """Probe both Server collections; a running Python process is insufficient."""
+        with self._index_lock.read():
+            if not self._keywords_ready:
+                raise RuntimeError("keyword index requires rebuild")
+            if self.connection.mode == "server":
+                self._ensure_client()
+                self._keywords._ensure_client()
+                self._qdrant._client.get_collection(self.collection_name)
+                self._keywords._client.get_collection(self._keywords.collection_name)
 
     def size(self) -> int:
         self._ensure_client()
@@ -332,7 +358,7 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
         filters: Optional[dict] = None,
     ) -> List[VectorSearchHit]:
         """Search the derived sparse index with filters applied before top-k."""
-        with self._index_lock:
+        with self._index_lock.read():
             if not self._keywords_ready:
                 raise RuntimeError("keyword index requires rebuild")
             return self._keywords.search(query, top_k, filters)
@@ -384,7 +410,7 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
 
         with self._index_lock:
             self._ensure_client()
-            keywords = QdrantKeywordIndex()
+            keywords = self._new_keyword_index()
             old_keywords = self._keywords
             self._keywords_ready = False
             swapped_keywords = False
@@ -392,6 +418,7 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
             total_indexed = 0
             try:
                 stale_ids = set(self._qdrant.get_vector_ids())
+                stale_ids.update(keywords.get_vector_ids())
                 for points in self._persistence.iter_batches(batch_size):
                     if not points or len(points) > batch_size:
                         raise ValueError("persistence backend yielded an invalid vector page")
@@ -403,6 +430,7 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
                 for point_id in stale_ids:
                     self._qdrant.delete(point_id)
 
+                keywords.delete(list(stale_ids))
                 self._keywords = keywords
                 swapped_keywords = True
                 if supports_incremental_sync:
@@ -469,20 +497,12 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
         }
 
     def clear(self) -> None:
-        """Clear both Qdrant and MySQL data. Use with caution."""
-        try:
-            self._ensure_client()
-            self._qdrant.clear()
-            self._keywords.close()
-            self._keywords = QdrantKeywordIndex()
-        except Exception as e:
-            logger.warning("[QdrantMySQLVectorStore] Failed to clear Qdrant: %s", e)
-        try:
-            ids = self._persistence.load_all()
+        """Delete durable records first, then rebuild both derived indexes."""
+        with self._index_lock:
+            ids = [p.id for p in self._persistence.load_all()]
             if ids:
-                self._persistence.delete_batch([p.id for p in ids])
-        except Exception as e:
-            logger.warning("[QdrantMySQLVectorStore] Failed to clear MySQL: %s", e)
+                self._persistence.delete_batch(ids)
+            self.rebuild_from_backend()
 
     def close(self) -> None:
         self._keywords.close()

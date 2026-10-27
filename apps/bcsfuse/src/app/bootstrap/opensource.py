@@ -3,10 +3,12 @@ OpenSource Provider Builder
 
 Builds provider registry for OSS deployments in different modes.
 """
-import os
 import logging
+import os
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
+
+from search_core.config.qdrant import QdrantConnection
 
 if TYPE_CHECKING:
     from app.bootstrap.provider_registry import ProviderRegistry
@@ -241,10 +243,11 @@ def _build_runtime_providers(registry: "ProviderRegistry", config: "YamlEnvConfi
     registry.register("worker_audit_log_store", worker_audit_log_store)
 
     # Qdrant + MySQL durable vector store
-    # Local Qdrant is the disposable index; MySQL is the durable source of truth.
+    # Qdrant is the rebuildable index; MySQL is the durable source of truth.
     from app.infra.config.data_paths import resolve_data_path
     qdrant_path = os.getenv("QDRANT_LOCAL_PATH") or resolve_data_path("data/qdrant_storage")
     vector_store = QdrantMySQLVectorStore(
+        connection=QdrantConnection.from_mapping(os.environ, default_mode="server"),
         collection_name=config.get("vector.qdrant.collection", "bcsfuse_profiles"),
         qdrant_path=qdrant_path,
         dimension=config.get_int("embedding.dimension", 4096),
@@ -324,6 +327,7 @@ def _build_dev_providers(registry: "ProviderRegistry", config: "YamlEnvConfigPro
     # Qdrant Local + SQLite vector store
     vector_db_path = os.getenv("BCSFUSE_VECTOR_SQLITE_PATH") or config.get("vector.sqlite.db_path", "data/vector_embeddings.db")
     vector_store = QdrantSQLiteVectorStore(
+        connection=QdrantConnection.from_mapping(os.environ),
         dimension=config.get_int("embedding.dimension", 4096),
         db_path=vector_db_path,
         qdrant_path=os.getenv("QDRANT_LOCAL_PATH") or config.get("vector.qdrant.path"),
@@ -490,6 +494,7 @@ def _build_dev_smoke_providers(registry: "ProviderRegistry", config: "YamlEnvCon
     # Qdrant Local + SQLite vector store
     vector_db_path = os.getenv("BCSFUSE_VECTOR_SQLITE_PATH") or config.get("vector.sqlite.db_path", "data/vector_embeddings.db")
     vector_store = QdrantSQLiteVectorStore(
+        connection=QdrantConnection.from_mapping(os.environ),
         dimension=config.get_int("embedding.dimension", 4096),
         db_path=vector_db_path,
         qdrant_path=os.getenv("QDRANT_LOCAL_PATH") or config.get("vector.qdrant.path"),

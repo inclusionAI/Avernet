@@ -61,9 +61,15 @@ def _register_health_routes(app: FastAPI, context: ApplicationContext) -> None:
             vector_store_info = {}
             try:
                 vector_store = context.registry.get("vector_store")
-                if vector_store:
+                if vector_store is not None:
+                    check_ready = getattr(vector_store, "check_ready", None)
+                    if check_ready is not None:
+                        from starlette.concurrency import run_in_threadpool
+                        await run_in_threadpool(check_ready)
+                    connection = getattr(vector_store, "connection", None)
                     vector_store_info = {
                         "vector_store_available": True,
+                        "qdrant_mode": getattr(connection, "mode", None),
                         "vector_store_type": type(vector_store).__name__,
                         "vector_store_instance_id": id(vector_store),
                         "qdrant_collection_name": getattr(
@@ -74,6 +80,7 @@ def _register_health_routes(app: FastAPI, context: ApplicationContext) -> None:
                 else:
                     vector_store_info = {"vector_store_available": False}
             except Exception as error:
+                is_ready = False
                 vector_store_info = {
                     "vector_store_error": type(error).__name__,
                 }

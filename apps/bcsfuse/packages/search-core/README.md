@@ -32,9 +32,12 @@ and filter metadata from its own Profile/Card. No Worker-ID matching, TC fragmen
 aggregation, Fuse, Card parsing or audience policy is implicit in this pipeline.
 Failures propagate as `SearchUnavailable`; fallback policy is not invented here.
 
-The current index is Qdrant **Local**, with serialized index access. Its persisted
-payloads rebuild the disposable sparse index on startup. It is a reusable local
-implementation, not a validated Alipay high-QPM deployment or Qdrant Server adapter.
+`QdrantRetrievalIndex` supports Local (default) and Server through an explicit
+`QdrantConnection`. Local serializes access and rebuilds its sparse index from
+persisted dense payloads. Server persists both collections and permits concurrent
+reads, with exclusive mutations. One application owns each collection pair;
+sharing a pair across independent writers is not supported by the process-local lock.
+No connection failure falls back to Local. This is not a high-QPM capacity claim.
 Applications own startup, shutdown, admission limits, model quotas and update jobs.
 Async orchestration keeps blocking providers off the event loop, but cancellation
 cannot kill an already running sync model request; transport timeouts still apply.
