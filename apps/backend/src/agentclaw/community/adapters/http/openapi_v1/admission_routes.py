@@ -703,6 +703,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # New-version bcs publish-to-users: auth baseline only, no grant check; authz deferred.
     # Served at the external contract path the gateway verbatim-forwards here.
     ("POST", "/openapi/v1/collaboration/bots/{bot_uuid}/public"): AdmissionMode.OPEN,
+    ("POST", "/openapi/v1/collaboration/bots/{bot_id}/public/risk-checks"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/collaboration/bots/{bot_id}/public/risk-checks/current"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/collaboration/bots/{bot_id}/public/risk-checks/{risk_check_id}"): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/collaboration/bots/{bot_id}/public/risk-checks/{risk_check_id}/refresh"): AdmissionMode.REFUSED,
     **TASK_PUBLIC_ADMISSION,
     # Department directory search — a tenant-wide catalogue read, not a user's.
     # ── Source credentials (W3, #1471) — OPEN, application-operated ─────────

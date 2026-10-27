@@ -33,6 +33,10 @@ from agentclaw.community.core.repository.protocols.bot import BotFriendRepositor
 from agentclaw.community.core.bot_public.services.bot_discover_service import BotDiscoverService
 from agentclaw.community.core.bot_public.services.bot_public_service import BotPublicService
 from agentclaw.community.core.bot_public_risk.repository import BotPublicRiskRepository
+from agentclaw.community.core.bot_public_risk.application import RiskApplication, RiskInputBuilder
+from agentclaw.community.core.bot_public_risk.tasks import RiskTasks
+from agentclaw.community.api.bot_public_risk_service import BotPublicRiskServiceProtocol, BotPublicRiskQueryProtocol
+from agentclaw.community.core.bot_public_risk.query import RiskQuery
 from agentclaw.community.core.bot_public.services.bot_catalog_metadata_service import (
     BcsBotCatalogMetadataService,
 )
@@ -166,3 +170,20 @@ class BotPublicModule(Module):
     @inject
     def _bot_discover_service_protocol(self, svc: BotDiscoverService) -> BotDiscoverServiceProtocol:
         return svc
+
+    @singleton
+    @provider
+    @inject
+    def public_risk_application(
+        self, repository: BotPublicRiskRepository, tasks: RiskTasks,
+        inputs: RiskInputBuilder,
+    ) -> BotPublicRiskServiceProtocol:
+        return RiskApplication(repository, tasks, inputs)
+
+    @singleton
+    @provider
+    @inject
+    def public_risk_query(
+        self, repository: BotPublicRiskRepository,
+    ) -> BotPublicRiskQueryProtocol:
+        return RiskQuery(repository)

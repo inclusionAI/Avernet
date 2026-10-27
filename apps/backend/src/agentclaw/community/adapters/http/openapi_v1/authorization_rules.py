@@ -344,6 +344,10 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/nodes"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/passport"): OWNER_SCOPED,
     ("POST", "/openapi/v1/collaboration/bots/{bot_uuid}/public"): OWNER_SCOPED,
+    ("POST", "/openapi/v1/collaboration/bots/{bot_id}/public/risk-checks"): ServiceChecked(PermissionLevel.ADMIN, "agentclaw.community.core.bot_public_risk.access"),
+    ("GET", "/openapi/v1/collaboration/bots/{bot_id}/public/risk-checks/current"): ServiceChecked(PermissionLevel.ADMIN, "agentclaw.community.core.bot_public_risk.access"),
+    ("GET", "/openapi/v1/collaboration/bots/{bot_id}/public/risk-checks/{risk_check_id}"): ServiceChecked(PermissionLevel.ADMIN, "agentclaw.community.core.bot_public_risk.access"),
+    ("POST", "/openapi/v1/collaboration/bots/{bot_id}/public/risk-checks/{risk_check_id}/refresh"): ServiceChecked(PermissionLevel.ADMIN, "agentclaw.community.core.bot_public_risk.access"),
     ("GET", "/openapi/v1/bots/{bot_id}/render-screens"): NoCheck(
         "share and group viewers must render panels without an Editor relation"
     ),
