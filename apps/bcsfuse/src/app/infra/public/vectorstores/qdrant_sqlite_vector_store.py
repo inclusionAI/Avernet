@@ -3,6 +3,8 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from search_core.config.qdrant import LOCAL_QDRANT, QdrantConnection
+
 from app.infra.public.vectorstores.qdrant_mysql_vector_store import (
     QdrantMySQLVectorStore,
 )
@@ -19,6 +21,7 @@ class QdrantSQLiteVectorStore(QdrantMySQLVectorStore):
         *,
         qdrant_path: str | None = None,
         auto_load: bool = True,
+        connection: QdrantConnection = LOCAL_QDRANT,
     ):
         self._db_path = db_path
         self._temporary_index = None
@@ -32,6 +35,7 @@ class QdrantSQLiteVectorStore(QdrantMySQLVectorStore):
                 qdrant_path = db_path + ".qdrant"
         super().__init__(
             dimension=dimension,
+            connection=connection,
             qdrant_path=qdrant_path,
             persistence_backend=SQLiteVectorPersistenceBackend(db_path=db_path),
         )

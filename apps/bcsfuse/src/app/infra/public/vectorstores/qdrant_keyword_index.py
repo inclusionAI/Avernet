@@ -1,13 +1,16 @@
 """TC keyword text and Worker-ID priority around shared sparse retrieval."""
 
+from search_core.config.qdrant import LOCAL_QDRANT, QdrantConnection
 from search_core.plugin_api.vector_point import VectorPoint
 from search_core.providers.keyword import QdrantKeywordIndex as SharedKeywordIndex
 from search_core.providers.keyword import normalize, sparse
 
 
 class QdrantKeywordIndex(SharedKeywordIndex):
-    def __init__(self):
-        super().__init__(exact_match_field="_keyword_worker_id")
+    def __init__(self, *, connection: QdrantConnection = LOCAL_QDRANT,
+                 collection_name: str = "keywords"):
+        super().__init__(exact_match_field="_keyword_worker_id",
+                         connection=connection, collection_name=collection_name)
 
     def upsert(self, points: list[VectorPoint]) -> None:
         prepared = []

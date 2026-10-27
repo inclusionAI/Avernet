@@ -27,9 +27,10 @@ pip install -e packages/search-core -e .
 ### Start Server
 
 ```bash
-# Runtime mode (requires MySQL)
+# Runtime mode (requires MySQL and Qdrant Server)
 export BCSFUSE_AUTH_TOKEN="your-token-here"
 export BCSFUSE_PROVIDER_MODE="runtime"
+export QDRANT_URL="http://127.0.0.1:6333"
 python main.py
 
 # Dev mode (SQLite + Qdrant Local)
@@ -65,7 +66,7 @@ curl -H "Authorization: Bearer your-token-here" http://localhost:8765/providers
 
 | Mode | Database | Vector Store | HTTP Providers | Auth | Use Case |
 |------|----------|--------------|----------------|------|----------|
-| `runtime` | MySQL | QdrantLocal | Real HTTP | Required | Production deployment |
+| `runtime` | MySQL | Qdrant Server | Real HTTP | Required | Production deployment |
 | `dev` | SQLite | Qdrant Local + SQLite | Real HTTP | Required | Local development |
 | `dev_smoke` | SQLite | Qdrant Local + SQLite | Fake/Noop | Required | Offline testing |
 | `test` | InMemory | InMemory | Fake/Noop | Required | CI/CD testing |
@@ -136,8 +137,9 @@ export MYSQL_DATABASE="bcsfuse_oss"
 export MYSQL_USER="bcsfuse"
 export MYSQL_PASSWORD="<YOUR_PASSWORD_HERE>"
 
-# Qdrant Local
-export QDRANT_LOCAL_PATH="/var/lib/bcsfuse/qdrant"
+# Qdrant Server (separate process)
+export QDRANT_MODE="server"
+export QDRANT_URL="http://127.0.0.1:6333"
 export QDRANT_COLLECTION_NAME="worker_profiles"
 
 # Server
@@ -220,17 +222,13 @@ provider is an error; fusion must not fall back to a separate SQLite profile sto
 -- - worker_profiles_raw (raw profile storage)
 ```
 
-### QdrantLocal (Runtime Mode)
+### Qdrant Server (Runtime and Docker)
 
-Vector storage uses Qdrant in embedded mode:
-
-```bash
-# Data directory
-export QDRANT_LOCAL_PATH="/var/lib/bcsfuse/qdrant"
-
-# Collection name
-export QDRANT_COLLECTION_NAME="worker_profiles"
-```
+Runtime and Docker use Qdrant Server for both dense and keyword retrieval.
+Set `QDRANT_URL`; gRPC is preferred by default (`QDRANT_GRPC_PORT=6334`).
+The public Compose file starts a separate Qdrant container. Direct local `dev`
+and `dev_smoke` startup still defaults to Qdrant Local.
+See [Qdrant deployment modes](docs/qdrant-modes.md) for startup, ownership and recovery.
 
 ### SQLite (Dev Mode)
 
