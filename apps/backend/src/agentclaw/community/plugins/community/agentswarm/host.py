@@ -104,6 +104,7 @@ from agentclaw.community.core.bot_management.manifest_seam import (
 from agentclaw.community.core.bot_inventory.protocols import (
     BusinessSpaceContextProtocol,
 )
+from agentclaw.community.plugin_api.passport import PassportError
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.task_queue.types import (
     TERMINAL_STATUSES, TaskStatus,
@@ -840,7 +841,8 @@ class AvernetBotPlatform(BotPlatform):
             try:
                 return await self._connect_engine_once(ws_url, token)
             except ConnectionError as e:
-                if i == 3: raise
+                if i == 3:
+                    raise
                 logger.warning("[agentswarm][host] engine connect %d/4: %s", i + 1, e)
                 await asyncio.sleep(15.0 * (2 ** i))
 
