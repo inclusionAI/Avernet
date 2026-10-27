@@ -3012,7 +3012,7 @@ def test_unknown_reserved_risk_puid_cannot_fall_through_to_legacy_callback():
     bcn.patch_attributes.assert_not_called()
 
 
-@pytest.mark.parametrize("failure", ["withdrawn", "skipped"])
+@pytest.mark.parametrize("failure", ["withdrawn", "skipped", "get_skipped"])
 def test_risk_callback_does_not_report_applied_for_withdrawal_or_skipped_patch(failure):
     from types import SimpleNamespace
     bots = MagicMock()
@@ -3020,6 +3020,8 @@ def test_risk_callback_does_not_report_applied_for_withdrawal_or_skipped_patch(f
     bcn = MagicMock()
     bcn.get_attributes.return_value = {"friend_ext": {"public_user_approval": {
         "puid": "p1", "visibility": "public", "view_friend_deps": []}}}
+    if failure == "get_skipped":
+        bcn.get_attributes.return_value = {"skipped": True}
     bcn.patch_attributes.return_value = {"skipped": True} if failure == "skipped" else {}
     service = _make_service(bot_repository=bots, bcn_service=bcn)
     guard = MagicMock()
@@ -3029,7 +3031,7 @@ def test_risk_callback_does_not_report_applied_for_withdrawal_or_skipped_patch(f
     service._risk_approval_guard = guard
     result = service.handle_public_approval_callback("b1:u1", "u1", "p1", "AGREE", "user", risk_check_id="risk-a")
     assert result["success"] is False
-    if failure == "withdrawn":
+    if failure in {"withdrawn", "get_skipped"}:
         bcn.patch_attributes.assert_not_called()
     assert guard.finish.call_args.args[-1] is False
 

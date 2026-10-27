@@ -1085,6 +1085,8 @@ class BotPublicService(BotPublicServiceProtocol):
         """
         attrs = self._bcn_service.get_attributes(bot_uuid=bot_uid)
         if attrs.get("skipped"):
+            if expected_puid is not None:
+                return {"success": False, "public": None, "message": "risk callback BCS read skipped"}
             return {
                 "success": True, "public": None,
                 "message": f"public_scope={public_scope} callback skipped (BCS creds)",
