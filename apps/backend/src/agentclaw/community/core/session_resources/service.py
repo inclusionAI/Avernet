@@ -11,6 +11,7 @@ from agentclaw.community.core.repository.protocols.bot import BotFriendRepositor
 from agentclaw.community.core.bot_public.repository.models import BotFriendStatus
 from agentclaw.community.core.devices.services.device_context import (
     DeviceContext,
+    DeviceConnectionUnavailableError,
     DeviceNotBoundError,
 )
 from agentclaw.community.core.devices.services.device_context_resolver import (
@@ -18,6 +19,7 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
 )
 from agentclaw.community.core.session_resources.baas_client import (
     SessionResourceBaasClient,
+    SessionFileUpstreamUnavailableError,
 )
 from agentclaw.community.core.repository.protocols.platform import SessionResourceRepositoryProtocol
 from agentclaw.community.core.session_resources.types import (
@@ -78,13 +80,16 @@ class SessionResourceService(SessionResourceServiceProtocol):
         content_hash: str | None = None,
     ) -> SessionUploadIntent:
         safe_filename = self._safe_filename(filename)
-        context, binding_id = self._resolve_upload_context(
-            bot_id=bot_id,
-            requester_id=owner_id,
-            target_entity_id=target_entity_id,
-            scope_type=scope_type,
-            binding_id=binding_id,
-        )
+        try:
+            context, binding_id = self._resolve_upload_context(
+                bot_id=bot_id,
+                requester_id=owner_id,
+                target_entity_id=target_entity_id,
+                scope_type=scope_type,
+                binding_id=binding_id,
+            )
+        except DeviceConnectionUnavailableError as exc:
+            raise SessionFileUpstreamUnavailableError() from exc
         raw_tenant = context.conn_info.get("tenant")
         raw_bot_uuid = context.conn_info.get("bot_uuid")
         provider = (
