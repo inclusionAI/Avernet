@@ -2,15 +2,33 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
 import venv
 from pathlib import Path
+from typing import Any
 
 _GATEWAY_DIR = Path(__file__).resolve().parents[3]
 _SCRIPT = _GATEWAY_DIR / "scripts" / "dump_and_publish.sh"
+_BCS_DIR = _GATEWAY_DIR.parent / "bcs"
+_spec = importlib.util.spec_from_file_location(
+    "bcn_contract_validator", _BCS_DIR / "scripts" / "validate_openapi_contract.py"
+)
+assert _spec is not None and _spec.loader is not None
+_contract_validator = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_contract_validator)
 _HTTP_METHODS = {"get", "put", "post", "delete", "options", "head", "patch", "trace"}
+
+
+def _operation_catalog(document: dict[str, Any]) -> set[tuple[str, str]]:
+    return {
+        (path, method)
+        for path, path_item in document["paths"].items()
+        for method in path_item
+        if method in _HTTP_METHODS
+    }
 
 
 def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) -> None:
@@ -40,16 +58,12 @@ def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) ->
 
     assert result.returncode == 0, result.stdout + result.stderr
     document = json.loads((tmp_path / "bcn.openapi.json").read_text(encoding="utf-8"))
-    # 69 collaboration operations (including current-user lookup) plus five
-    # auth operations. Path-level parameters are metadata, not operations.
-    assert (
-        sum(
-            method in _HTTP_METHODS
-            for path_item in document["paths"].values()
-            for method in path_item
-        )
-        == 74
-    )
+    # Compare exact operation catalogs with this checkout's authoritative source:
+    # additive contracts on the merge target must not stale a fixed count.
+    # Path-level parameters are metadata, not operations.
+    contract_root = _BCS_DIR / "api-contracts" / "v1"
+    public_contract = _contract_validator.load_contract(contract_root)
+    assert _operation_catalog(document) == _operation_catalog(public_contract)
     assert "get" in document["paths"]["/openapi/v1/collaboration/me"]
     assert (
         "get"
@@ -106,14 +120,10 @@ def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) ->
     internal = json.loads(
         (tmp_path / "bcn-internal.openapi.json").read_text(encoding="utf-8")
     )
-    assert (
-        sum(
-            method in _HTTP_METHODS
-            for path_item in internal["paths"].values()
-            for method in path_item
-        )
-        == 27
+    internal_contract = _contract_validator.load_contract(
+        contract_root, entrypoint="internal.yaml"
     )
+    assert _operation_catalog(internal) == _operation_catalog(internal_contract)
     revision_path = "/api/v1/collaboration/drafts/{draftId}/revisions/{revision}"
     assert "get" in internal["paths"][revision_path]
     assert "post" in internal["paths"][f"{revision_path}/validate"]
@@ -144,26 +154,14 @@ def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) ->
         "post" in internal["paths"]["/api/v1/collaboration/sessions/{session_id}/files"]
     )
     assert "post" in internal["paths"]["/api/v1/collaboration/definitions/validate"]
-    # Keep explicit operation assertions alongside the count so catalog drift
+    # Keep explicit operation assertions alongside the catalog comparison so catalog drift
     # identifies the missing route instead of only reporting a different total.
     assert (
         "post"
         in internal["paths"]["/api/v1/collaboration/state-machine-runs/{run_id}/reruns"]
     )
-    assert [tag["name"] for tag in document["tags"]] == [
-        "Collaboration / Users",
-        "Authentication",
-        "Collaboration / Bots",
-        "Collaboration / Friendships",
-        "Collaboration / Groups",
-        "Collaboration / Sessions",
-        "Collaboration / Register",
-        "Collaboration / Invitations",
-        "Collaboration / Invite Codes",
-        "Collaboration / Channels",
-        "Collaboration / Event Subscriptions",
-        "Group Context",
-    ]
+    assert document["tags"] == public_contract["tags"]
+    assert "Collaboration / Users" in [tag["name"] for tag in document["tags"]]
     assert document["paths"]["/openapi/v1/collaboration/sessions/{session_id}/token"][
         "post"
     ]["tags"] == ["Collaboration / Sessions"]
