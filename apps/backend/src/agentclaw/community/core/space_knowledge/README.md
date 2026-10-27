@@ -60,7 +60,9 @@ space_knowledge_capture:
   enabled: false
 ```
 
-This block rejects unknown keys and non-boolean values. Selection happens only
+This block accepts only a boolean `enabled`. A malformed block keeps capture
+disabled with a warning instead of aborting boot; it never guesses an enabled
+value from an invalid shape. Selection happens only
 in the composition root; writers do not inspect Sink state or environment flags.
 
 | Deployment | Required behavior |
@@ -71,15 +73,17 @@ in the composition root; writers do not inspect Sink state or environment flags.
 | Activated, delivery paused | Keep capture enabled; continue removal/role/delete history and retired-ID protection. Resume the Sink to drain in order after restart. |
 | Capture disabled with retained same-environment history | Startup and ordinary library writes remain available; history does not enable capture or get rewritten. Knowledge producers still require enabled capture. |
 
-The lifecycle validates only capture/delivery configuration. It opens no DB
-session at startup and never inspects table existence, columns, primary keys or
-history, whether capture is enabled or disabled. Actual enabled-capture SQL
+The lifecycle performs no configuration or capture/delivery validation at
+startup. It opens no DB session at startup and never inspects table existence,
+columns, primary keys or history, whether capture is enabled or disabled.
+Capture-disabled deployments with an enabled Sink start normally; the first
+delivery use surfaces its real runtime error. Actual enabled-capture SQL
 surfaces schema/connection errors at runtime in the caller transaction; errors
 are not treated as absent history or successful synchronization. No explicit
 primary-key/type compatibility probe is performed at runtime either. The guard
 still rejects disabled producers, including callers without HTTP lifespan.
-Configuration validation success is cached per graph. Changing capture/Sink
-bindings requires restart; this is not per-request fail-open selection.
+Changing capture/Sink bindings requires restart; this is not per-request
+fail-open selection.
 
 **Never-enabled deployments require no knowledge DDL.** To first enable capture,
 apply `core/spaces/sql/2026_10_24_space_knowledge_sync.sql`, then roll out

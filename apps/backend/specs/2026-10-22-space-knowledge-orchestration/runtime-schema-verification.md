@@ -4,9 +4,10 @@
 
 Remove sync-table schema preflight entirely, not merely when capture is disabled.
 The capture lifecycle opens no DB session and probes no table existence, columns,
-primary key or history during startup or first library use. It validates only the
-capture/delivery configuration relationship. Producers still require enabled
-capture. Constructor parameters remain compatible with existing callers.
+primary key or history during startup or first library use. As of the 2026-10-27
+startup decoupling below, it performs no configuration-format or capture/delivery
+validation at startup either. Producers still require enabled capture at runtime.
+Constructor parameters remain compatible with existing callers.
 
 Actual enabled-capture SQL is unchanged: database errors propagate in the original
 caller transaction, or are handled by existing task retry boundaries. No fallback,
@@ -14,6 +15,30 @@ automatic table creation, successful acknowledgement or history rewriting is
 introduced. Ordinary capture-disabled source writes do not touch the outbox.
 This supersedes the intermediate schema-check behavior recorded in
 `history-availability-verification.md` without changing its historical results.
+
+## 2026-10-27 startup decoupling
+
+Configuration-format and capture/delivery consistency checks no longer block boot
+either. A malformed `space_knowledge_capture` block fails closed to disabled
+capture with a warning instead of raising at composition time; capture-disabled
+deployments with an enabled sink start normally, and the full FastAPI lifespan
+serves traffic while the background membership scan logs its real runtime errors.
+Producer operations still reject disabled capture at runtime, and delivery without
+recording never fabricates snapshots. No SQL error is swallowed, no failed
+transaction is force-committed, and no disabled sink is treated as successful
+synchronization.
+
+Evidence for this round, same environment as below:
+
+- Focused lifecycle/configuration/HTTP run: **46 passed**, covering malformed
+  configuration fail-closed boot, valid explicit enablement, disabled-capture
+  startup with an enabled sink, and the full lifespan with delivery enabled and
+  capture disabled.
+- Full space_knowledge directory: **143 passed**. Architecture, boundary,
+  protocol and Space persistence isolation: **389 passed**. Adjacent Space, Work
+  Order and HTTP regression: **618 passed**. Counts overlap; do not add.
+- Ruff check and format on all five changed Python files, plus
+  `git diff --check`: **passed**.
 
 ## Evidence
 

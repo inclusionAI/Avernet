@@ -28,11 +28,11 @@
 - **Goal:** 完整默认装配无知识表可用；记录与投递独立。2026-10-27 起显式空策略不再因保留历史而阻断启动/普通写入；一致性风险显式记录。
 - **Files:** `di/space_knowledge_capture_config.py`、`di/modules/space_knowledge_module.py`、`di/container.py`、`core/space_knowledge/capture_lifecycle.py`、配置/DI/lifespan 测试及相关配置示例。
 - **Done when:**
-  - [x] 缺省 capture=false，拒绝未知键/错误类型；纯配置校验在所有 profile eager 执行。
+  - [x] 缺省 capture=false；非法形状（未知键/非 bool）按关闭处理并告警，不阻断启动；typed 配置在所有 profile eager 解析。
   - [x] 默认 graph 使用空扩展；真实 producer 必须与启用记录装配一致。
   - [x] 未启用且缺表时完整启动成功，不以预建同步表满足测试。
-  - [x] 生命周期只校验 capture/Sink 配置，不访问数据库或预检同步表；实际 SQL 的失败在运行时传播并回滚。
-  - [x] 当前 env 任意 app 的历史不阻断显式 capture=false 启动/普通写入；producer/配置检查仍保留，schema 预检已移除；Sink 暂停不改变 capture。
+  - [x] 生命周期启动不做任何配置校验（含 capture/Sink 组合），不访问数据库或预检同步表；实际 SQL 的失败在运行时传播并回滚；producer 运行时仍拒绝未启用 capture。
+  - [x] 当前 env 任意 app 的历史不阻断显式 capture=false 启动/普通写入；capture=false + delivery=true 正常启动，schema 预检与配置预检均已移除；Sink 暂停不改变 capture。
 - **Depends on:** Task 2。
 - **AC:** AC1、AC2、AC3、AC5。
 

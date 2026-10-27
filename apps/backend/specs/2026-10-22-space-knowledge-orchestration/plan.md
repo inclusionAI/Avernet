@@ -42,12 +42,12 @@ class SpaceKnowledgeCaptureConfig:
 ```
 
 ```yaml
-# user_config: strictly validated optional block
+# user_config: optional block; malformed values fail closed to disabled
 space_knowledge_capture:
   enabled: false
 ```
 
-缺省为 false；拒绝未知键和非 bool。Sink.is_enabled 继续只控制投递。公共配置在专用小模块定义，避免扩大现有 config.py。
+缺省为 false；非法形状（未知键/非 bool）按关闭处理并告警，不阻断启动。Sink.is_enabled 继续只控制投递。公共配置在专用小模块定义，避免扩大现有 config.py。
 
 ## Key Files & Functions
 
@@ -95,17 +95,18 @@ class KnowledgeSpacePersistenceEffects:
 
 ```python
 # apps/backend/src/agentclaw/community/core/space_knowledge/capture_lifecycle.py (new)
-# Startup validates configuration only, with no DB session or schema reflection.
+# Startup performs no configuration validation, with no DB session or schema reflection.
 # disabled -> ordinary no-op effects, regardless of outbox schema/history
 # enabled -> actual SQL uses the existing transaction; DB errors propagate
 # No explicit schema preflight; producer still rejects disabled capture
 ```
 
-2026-10-27 后续修订：启动仅验证 capture/Sink 配置，不打开 DB session，不反射同步表结构；普通库调用同样不进行预检。构造函数参数保持兼容，guard 仅保护配置与 producer 启用关系。真实 SQL 留在原 repository/effects 及调用者事务内执行，错误正常传播/回滚，不降级为空实现。其他 DB bootstrap 行为不变，不能承诺其他基础设施错误不阻断启动。
+2026-10-27 后续修订：启动不打开 DB session，不反射同步表结构；普通库调用同样不进行预检。2026-10-27 startup 解耦修订：启动也不再校验配置格式或 capture/Sink 组合，非法配置块按关闭处理并告警，capture=false + delivery=true 组合正常启动。构造函数参数保持兼容，guard 仅在运行时保护 producer 启用关系。真实 SQL 留在原 repository/effects 及调用者事务内执行，错误正常传播/回滚，不降级为空实现。其他 DB bootstrap 行为不变，不能承诺其他基础设施错误不阻断启动。
 
 ```python
 # apps/backend/src/agentclaw/community/di/container.py:271 (modify)
-# Eagerly validate typed capture configuration on every profile (no DB I/O).
+# Eagerly resolve typed capture configuration on every profile (no DB I/O);
+# malformed blocks fail closed to disabled capture with a warning.
 # Existing spaces_module.py / space_skill_repository_bindings.py retain contracts;
 # wire effects once and verify WorkOrdersModule shares the same singleton policy.
 ```

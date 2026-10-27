@@ -134,3 +134,24 @@ def test_full_lifespan_and_legacy_http_with_retained_knowledge_history(
             assert (row.space_id, row.revision, row.app) == (7, 1, owner_app)
     finally:
         Snapshot.__table__.drop(db._engine)
+
+
+def test_full_lifespan_starts_with_delivery_enabled_and_capture_disabled(
+    missing_knowledge_graph, monkeypatch
+):
+    from agentclaw.community.plugin_api.space_membership import SpaceMembershipSink
+
+    class EnabledSink:
+        def is_enabled(self):
+            return True
+
+        def apply_snapshot(self, snapshot):
+            raise AssertionError("disabled capture must not deliver snapshots")
+
+    graph, _db = missing_knowledge_graph
+    graph.binder.bind(SpaceMembershipSink, to=EnabledSink())
+    monkeypatch.setattr(app.state, "injector", graph)
+    with TestClient(app) as client:
+        response = client.get("/api/spaces/1")
+        assert response.status_code == 200, response.text
+        assert response.json()["data"]["member_count"] == 2

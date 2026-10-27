@@ -7,7 +7,11 @@
 > **2026-10-27 availability amendment:** Retained history does not block startup
 > or ordinary writes with capture explicitly disabled; producers still require
 > capture. Startup performs no sync-table schema preflight in either mode; actual
-> SQL surfaces runtime database errors. This amendment
+> SQL surfaces runtime database errors. **2026-10-27 startup-decoupling amendment:**
+> Neither the configuration format nor the capture/delivery combination blocks
+> boot: malformed blocks fail closed to disabled capture, and disabled capture
+> with an enabled sink starts normally while producer operations still reject
+> disabled capture at runtime. This amendment
 > supersedes earlier global DDL prerequisites below; see [spec.md](spec.md),
 > [plan.md](plan.md), [tasks.md](tasks.md) and the capture deployment README.
 
@@ -176,10 +180,11 @@ gateway/SSO, deployed revocation timing or an online migration.
 
 Space writers consume `SpacePersistenceEffects`, a caller-Session internal
 contract (not a public Service/Plugin API). Defaults are no-op capture and
-identity protection, retaining neutral source locking. The composition root
-strictly validates optional `user_config.space_knowledge_capture.enabled` (bool,
-default false; no unknown keys). A shared lifecycle/producer guard performs
-configuration checks without database access. No table-existence, column,
+identity protection, retaining neutral source locking. The composition root reads
+optional `user_config.space_knowledge_capture.enabled` (bool, default false); a
+malformed block fails closed to disabled capture instead of aborting boot. A
+shared producer guard requires enabled capture at runtime, without database
+access and without blocking startup. No table-existence, column,
 primary-key or history inspection is performed at startup or before library use.
 Retained history in the current environment, **any app**, does not reject
 capture=false or ordinary source writes. Explicit knowledge producers still

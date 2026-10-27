@@ -41,6 +41,7 @@ from agentclaw.community.core.space_knowledge.membership_tasks import (
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.di.config import TaskQueueConfig
 from agentclaw.community.plugin_api.space_membership import SpaceMembershipSink
+from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
 
 from agentclaw.community.api.space_knowledge_service import (
@@ -56,6 +57,8 @@ from agentclaw.community.plugins.unavailable.space_knowledge import (
     DisabledSpaceKnowledgeSync,
     DisabledSpaceMembershipSink,
 )
+
+logger = get_logger()
 
 
 class SpaceKnowledgeModule(Module):
@@ -80,14 +83,14 @@ class SpaceKnowledgeModule(Module):
     @provider
     def capture_config(self) -> SpaceKnowledgeCaptureConfig:
         raw = read_user_config().get("space_knowledge_capture", {})
-        if not isinstance(raw, dict) or set(raw) - {"enabled"}:
-            raise ValueError(
-                "space_knowledge_capture must be a mapping with only enabled"
-            )
-        enabled = raw.get("enabled", False)
-        if type(enabled) is not bool:
-            raise ValueError("space_knowledge_capture.enabled must be a boolean")
-        return SpaceKnowledgeCaptureConfig(enabled=enabled)
+        if isinstance(raw, dict) and set(raw) <= {"enabled"}:
+            enabled = raw.get("enabled", False)
+            if type(enabled) is bool:
+                return SpaceKnowledgeCaptureConfig(enabled=enabled)
+        # A malformed block must not abort boot. Fail closed to disabled capture
+        # instead of guessing an enabled value from an invalid shape.
+        logger.warning("invalid space_knowledge_capture block; capture disabled")
+        return SpaceKnowledgeCaptureConfig(enabled=False)
 
     @singleton
     @provider

@@ -188,13 +188,16 @@ def test_runtime_schema_error_rolls_back_member_change(
     assert spaces.get_member(space_id=7, user_id="owner", env="pre") is not None
 
 
-def test_sink_cannot_enable_delivery_without_recording(database):
+def test_enabled_sink_does_not_block_disabled_capture_startup(database):
     class EnabledSink:
         def is_enabled(self):
             return True
 
-    with pytest.raises(RuntimeError, match="delivery requires capture"):
-        asyncio.run(capture(database, sink=EnabledSink()).startup())
+    guard = capture(database, sink=EnabledSink())
+    asyncio.run(guard.startup())
+    # Delivery without recording still cannot produce snapshots at runtime.
+    with pytest.raises(RuntimeError, match="producer requires capture"):
+        guard.require_enabled(None)
 
 
 @pytest.mark.parametrize("owner_app", ["agentclaw", "other-app"])
