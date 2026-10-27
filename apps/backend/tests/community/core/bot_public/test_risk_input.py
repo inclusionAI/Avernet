@@ -130,7 +130,7 @@ def test_passport_fallback_and_read_failure_are_not_empty_success():
         def collect_bot_active_mcps(self, **kwargs):
             return []
 
-    builder = RiskInputBuilder(Reader(), NoMcps(), Identities(), None, Passport(), None)
+    builder = RiskInputBuilder(Reader(), NoMcps(), Identities(), None, Passport(), Projector())
     data, _ = builder.build(bot={**BOT, "ext": None}, target={"visibility": "public"})
     assert data["agent_info"]["agentCode"] == "from-passport"
 
@@ -140,7 +140,7 @@ def test_passport_fallback_and_read_failure_are_not_empty_success():
 
     with pytest.raises(RuntimeError, match="database unavailable"):
         RiskInputBuilder(
-            Broken(), NoMcps(), Identities(), None, Passport(), None
+            Broken(), NoMcps(), Identities(), None, Passport(), Projector()
         ).build(bot={**BOT, "ext": None}, target={"visibility": "public"})
 
 

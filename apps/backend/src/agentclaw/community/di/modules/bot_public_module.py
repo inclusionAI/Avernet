@@ -34,6 +34,11 @@ from agentclaw.community.core.bot_public.services.bot_discover_service import Bo
 from agentclaw.community.core.bot_public.services.bot_public_service import BotPublicService
 from agentclaw.community.core.bot_public_risk.repository import BotPublicRiskRepository
 from agentclaw.community.core.bot_public_risk.application import RiskApplication, RiskInputBuilder
+from agentclaw.community.core.bot_public_risk.input_builder import RiskInputBuilder as CurrentRiskInputBuilder
+from agentclaw.community.core.mcp.services.repositories import BotMCPProvider
+from agentclaw.community.core.repository.protocols.identity import CallerIdentityRepositoryProtocol
+from agentclaw.community.core.repository.protocols.local_skill_security_observation import LocalSkillSecurityObservationRepositoryProtocol
+from agentclaw.community.core.skill_center.capability_state_contract import BotCapabilityStateReaderProtocol
 from agentclaw.community.core.bot_public_risk.tasks import RiskTasks
 from agentclaw.community.api.bot_public_risk_service import BotPublicRiskServiceProtocol, BotPublicRiskQueryProtocol
 from agentclaw.community.core.bot_public_risk.query import RiskQuery
@@ -187,3 +192,20 @@ class BotPublicModule(Module):
         self, repository: BotPublicRiskRepository,
     ) -> BotPublicRiskQueryProtocol:
         return RiskQuery(repository)
+
+    @singleton
+    @provider
+    @inject
+    def public_risk_inputs(
+        self,
+        capabilities: BotCapabilityStateReaderProtocol,
+        mcps: BotMCPProvider,
+        identities: CallerIdentityRepositoryProtocol,
+        observations: LocalSkillSecurityObservationRepositoryProtocol,
+        passport: PassportPlugin,
+    ) -> RiskInputBuilder:
+        # No safe MCP projection has been established yet. The builder fails
+        # closed until an implementation is bound here.
+        return CurrentRiskInputBuilder(
+            capabilities, mcps, identities, observations, passport, mcp_projector=None
+        )

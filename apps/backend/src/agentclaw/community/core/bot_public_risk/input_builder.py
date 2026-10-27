@@ -115,6 +115,8 @@ class RiskInputBuilder:
     def build(
         self, *, bot: Mapping[str, Any], target: dict[str, Any]
     ) -> tuple[dict[str, Any], str]:
+        if self.mcp_projector is None:
+            raise McpProjectionUnavailable("MCP risk projection is not configured")
         bot_id, entity, env = (
             _text(bot, "bot_id"),
             _text(bot, "entity_id"),
@@ -147,10 +149,6 @@ class RiskInputBuilder:
             mode = str(getattr(raw_mode, "value", raw_mode)).upper()
             if mode not in {"OWNER", "CALLER"}:
                 raise ValueError("invalid MCP call identity")
-            if self.mcp_projector is None:
-                raise McpProjectionUnavailable(
-                    f"MCP {code} requires a verified projection"
-                )
             config = _safe_mapping(
                 self.mcp_projector.project(bot=bot, entry=entry, call_type=mode)
             )
