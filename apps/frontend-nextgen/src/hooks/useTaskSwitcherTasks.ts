@@ -2,6 +2,7 @@ import type { TaskListItem } from '@/domain/tasks/models';
 import { TASK_STATUS_TONES } from '@/assets/TaskPanel/tokens';
 import type { TaskSwitcherItem } from '@/assets/TaskPanel/v2/TaskSwitcherBar';
 import { isEnvelopeFailure, listMyTasks, normalizeMyTaskPage } from '@/services/myTask';
+import type { TaskNavTarget } from '@/stores/taskSidePanelStore';
 import { normalizeTaskStatus } from '@/shared/taskStatus';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -16,6 +17,43 @@ export function resolveTaskMainSessionId(record: TaskListItem): string | null {
   if (modern) return modern;
   const legacy = record.task_spec?.context?.extend_props?.teamclaw_context?.main_session_id?.trim();
   return legacy || null;
+}
+
+function parseTaskTime(value: string | undefined): number | null {
+  if (!value?.trim()) return null;
+  // 后端历史列表仍返回 `YYYY-MM-DD HH:mm:ss`。补 T 后交给 Date 解析，避免 Safari 对空格格式返回 NaN。
+  const normalized = value.includes('T') ? value : value.replace(' ', 'T');
+  const timestamp = Date.parse(normalized);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+/**
+ * 任务级会话导航目标：复用节点导航的时间窗消费器。
+ * 任务创建..最后更新时间覆盖任务发起与执行消息，作为无消息级 task_id 契约下的定位兜底。
+ */
+export function buildTaskConversationNavigationTarget(record: TaskListItem): TaskNavTarget | null {
+  const sessionId = resolveTaskMainSessionId(record);
+  if (!sessionId) return null;
+  const isGroup = record.source_type === 'coop_group' || sessionId.startsWith('bcs_grp_');
+  const rawGroupId =
+    record.execution_config?.source_group_id?.trim() ||
+    record.task_spec.context.extend_props.teamclaw_context?.source_group_id?.trim() ||
+    null;
+  const botId =
+    record.owner_bot_id?.trim() && record.owner_user_id?.trim()
+      ? `${record.owner_bot_id.trim()}:${record.owner_user_id.trim()}`
+      : record.owner_bot_id?.trim() || null;
+  return {
+    taskId: record.task_id,
+    sessionId,
+    kind: isGroup ? 'group' : 'bot',
+    groupId: isGroup
+      ? rawGroupId ?? (sessionId.includes(':') ? sessionId.slice(0, sessionId.lastIndexOf(':')) : sessionId)
+      : null,
+    botId: isGroup ? null : botId,
+    startTime: parseTaskTime(record.gmt_create),
+    endTime: parseTaskTime(record.gmt_modified),
+  };
 }
 
 /**
@@ -66,10 +104,11 @@ export function toSwitcherItem(record: TaskListItem): TaskSwitcherItem {
 export function useTaskSwitcherTasks(
   userId?: string,
   options?: { enabled?: boolean; currentTaskId?: string },
-): { items: TaskSwitcherItem[]; loading: boolean } {
+): { items: TaskSwitcherItem[]; records: TaskListItem[]; loading: boolean } {
   const enabled = options?.enabled !== false;
   const currentTaskId = options?.currentTaskId?.trim() ?? '';
   const [items, setItems] = useState<TaskSwitcherItem[]>([]);
+  const [records, setRecords] = useState<TaskListItem[]>([]);
   const [loading, setLoading] = useState(false);
   const requestIdRef = useRef(0);
 
@@ -77,6 +116,7 @@ export function useTaskSwitcherTasks(
     const requestId = ++requestIdRef.current;
     if (!enabled || !userId || !currentTaskId) {
       setItems([]);
+      setRecords([]);
       setLoading(false);
       return;
     }
@@ -91,10 +131,15 @@ export function useTaskSwitcherTasks(
       const records = Array.isArray(result.data)
         ? result.data
         : normalizeMyTaskPage(result.data).items;
-      setItems(filterTasksForCurrentConversation(records, currentTaskId).map(toSwitcherItem));
+      const conversationRecords = filterTasksForCurrentConversation(records, currentTaskId);
+      setRecords(conversationRecords);
+      setItems(conversationRecords.map(toSwitcherItem));
     } catch {
       // 契约:失败静默为空列表,切换条不出现,不打扰主流程
-      if (requestId === requestIdRef.current) setItems([]);
+      if (requestId === requestIdRef.current) {
+        setItems([]);
+        setRecords([]);
+      }
     } finally {
       if (requestId === requestIdRef.current) setLoading(false);
     }
@@ -109,5 +154,5 @@ export function useTaskSwitcherTasks(
     };
   }, [refresh]);
 
-  return { items, loading };
+  return { items, records, loading };
 }

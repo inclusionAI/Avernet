@@ -1,6 +1,6 @@
 import { TaskSwitcherControl } from '@/assets/TaskPanel/v2/TaskSwitcherControl';
 import { getCapabilities } from '@/capabilities';
-import { useTaskSwitcherTasks } from '@/hooks/useTaskSwitcherTasks';
+import { buildTaskConversationNavigationTarget, useTaskSwitcherTasks } from '@/hooks/useTaskSwitcherTasks';
 import { chatBridge } from '@/services/workspace/chatBridge';
 import { resolveTaskPanelDefaultWidth } from '@/services/workspace/panelWidthMemory';
 import { useTaskConversationNavigationStore } from '@/stores/taskConversationNavigationStore';
@@ -12,7 +12,8 @@ import React from 'react';
  * chat 宿主的多任务切换条挂件(业务层装配,经 TaskPanelAdapter.switcher 注入副屏):
  * - 数据:listTasks 经 useTaskSwitcherTasks(登录人工号);
  * - 活跃:taskSidePanelStore.activeTaskId(发起任务自动切换写入),未设置时以当前 tab 任务为准;
- * - 切换:chatBridge.openPanelTab 幂等 upsert——已存在 `task-${id}` tab 则更新数据并聚焦,
+ * - 切换:先请求任务时间窗导航,再 chatBridge.openPanelTab 幂等 upsert——已存在 `task-${id}` tab
+ *   则更新数据并聚焦,
  *   不存在则按当前面板 params 形状新建同组件 tab(openTab 的既有语义,见 taskPanelMessage.ts 注释)。
  */
 export const TaskPanelSwitcherSlot: React.FC<{
@@ -23,7 +24,7 @@ export const TaskPanelSwitcherSlot: React.FC<{
   useWorkspaceStore((s) => s.identities);
   const human = getCapabilities().getHumanIdentity();
   const userId = human.status === 'available' ? human.value?.userId?.trim() || undefined : undefined;
-  const { items } = useTaskSwitcherTasks(userId, { currentTaskId, enabled: Boolean(currentTaskId) });
+  const { items, records } = useTaskSwitcherTasks(userId, { currentTaskId, enabled: Boolean(currentTaskId) });
   const activeTaskId = useTaskSidePanelStore((s) => s.activeTaskId);
   // I4:横条「当前」以本面板实例的任务为准——全局 activeTaskId 只服务发起任务后的 tab
   // 自动聚焦语义,不得让非活跃任务面板在自己的横条里显示别的任务为"当前"。
@@ -34,6 +35,8 @@ export const TaskPanelSwitcherSlot: React.FC<{
     <TaskSwitcherControl
       items={items}
       activeTaskId={effectiveActive}
+      defaultVisible
+      defaultOpen
       onSelectTask={(taskId) => {
         if (taskId === effectiveActive) return;
         // 同一会话任务共享原始宿主。若当前已联动到节点会话，切任务前继承 origin，
@@ -41,7 +44,11 @@ export const TaskPanelSwitcherSlot: React.FC<{
         const conversationNavigation = useTaskConversationNavigationStore.getState();
         const currentOrigin = conversationNavigation.originsByTask[effectiveActive];
         if (currentOrigin) conversationNavigation.rememberOrigin(taskId, currentOrigin);
+        const task = records.find((record) => record.task_id === taskId);
+        const navigationTarget = task ? buildTaskConversationNavigationTarget(task) : null;
         useTaskSidePanelStore.getState().setActiveTask(taskId);
+        // setActiveTask 会清理旧 pending；先切任务，再写入目标，确保全局 observer 消费本次导航。
+        if (navigationTarget) useTaskSidePanelStore.getState().requestTaskNavigation(navigationTarget);
         const target = items.find((i) => i.taskId === taskId);
         chatBridge.openPanelTab({
           id: `task-${taskId}`,

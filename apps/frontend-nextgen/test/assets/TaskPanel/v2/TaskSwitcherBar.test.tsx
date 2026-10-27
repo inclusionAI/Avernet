@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-// TaskSwitcherBar/Control:多任务切换横条默认隐藏,由副屏内悬浮开关显隐。
+// TaskSwitcherBar/Control:默认保留旧行为；聊天副屏可传 defaultVisible/defaultOpen 首帧展开。
 import {
   TaskSwitcherBar,
   type TaskSwitcherItem,
@@ -81,6 +81,14 @@ describe('TaskSwitcherControl', () => {
     expect(screen.getByRole('button', { name: '显示任务切换' })).toBeTruthy();
     expect(screen.queryByText('竞品分析')).toBeNull();
     expect(screen.queryByText('任务')).toBeNull();
+  });
+
+  it('defaultVisible=true 首帧展示切换条,defaultOpen=true 首帧展开历史任务', () => {
+    render(<TaskSwitcherControl {...props()} defaultVisible defaultOpen />);
+
+    expect(screen.getAllByText('竞品分析').length).toBeGreaterThan(0);
+    expect(screen.getByText('周报生成')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '隐藏任务切换' }).getAttribute('aria-pressed')).toBe('true');
   });
 
   it('点击悬浮开关显示切换条,再次点击后隐藏', () => {

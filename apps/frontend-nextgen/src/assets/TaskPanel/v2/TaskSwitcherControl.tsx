@@ -14,6 +14,11 @@ interface DragPosition {
   y: number;
 }
 
+interface TaskSwitcherControlProps extends TaskSwitcherProps {
+  /** 仅影响首帧；多任务聊天副屏用 true 让历史任务立即可见。 */
+  defaultVisible?: boolean;
+}
+
 interface TaskSwitcherDragState extends DragPosition {
   pointerId: number;
   startClientX: number;
@@ -28,8 +33,8 @@ interface TaskSwitcherDragState extends DragPosition {
 const DRAG_MARGIN = 8;
 const DRAG_THRESHOLD = 4;
 
-export const TaskSwitcherControl: React.FC<TaskSwitcherProps> = (props) => {
-  const [visible, setVisible] = useState(false);
+export const TaskSwitcherControl: React.FC<TaskSwitcherControlProps> = (props) => {
+  const [visible, setVisible] = useState(props.defaultVisible ?? false);
   const [dragging, setDragging] = useState(false);
   const [position, setPosition] = useState<DragPosition | null>(null);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
@@ -83,7 +88,14 @@ export const TaskSwitcherControl: React.FC<TaskSwitcherProps> = (props) => {
 
   return (
     <>
-      {visible ? <TaskSwitcherBar {...props} /> : null}
+      {visible ? (
+        <TaskSwitcherBar
+          items={props.items}
+          activeTaskId={props.activeTaskId}
+          onSelectTask={props.onSelectTask}
+          defaultOpen={props.defaultOpen}
+        />
+      ) : null}
       <button
         type="button"
         title={label}

@@ -20,6 +20,8 @@ export interface TaskSwitcherProps {
   items: TaskSwitcherItem[];
   activeTaskId: string;
   onSelectTask: (taskId: string) => void;
+  /** 仅影响首帧；后续仍由用户点击横条控制。 */
+  defaultOpen?: boolean;
 }
 
 const STATUS_TONE: Record<TaskSwitcherItem['status'], { color: string; bg: string }> = {
@@ -47,8 +49,8 @@ const Tag: React.FC<{ item: TaskSwitcherItem }> = ({ item }) => {
   );
 };
 
-export const TaskSwitcherBar: React.FC<TaskSwitcherProps> = ({ items, activeTaskId, onSelectTask }) => {
-  const [open, setOpen] = useState(false);
+export const TaskSwitcherBar: React.FC<TaskSwitcherProps> = ({ items, activeTaskId, onSelectTask, defaultOpen }) => {
+  const [open, setOpen] = useState(defaultOpen ?? false);
   // PRD 的切换横条只服务多任务会话；单任务继续保持「任务总览」直接置顶。
   if (items.length <= 1) return null;
 

@@ -2,6 +2,7 @@
 // useTaskSwitcherTasks:listTasks 数据源 → 三桶状态映射;失败静默空列表。
 import type { TaskListItem } from '@/domain/tasks/models';
 import {
+  buildTaskConversationNavigationTarget,
   filterTasksForCurrentConversation,
   resolveTaskMainSessionId,
   useTaskSwitcherTasks,
@@ -99,6 +100,7 @@ describe('useTaskSwitcherTasks', () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     expect(result.current.items.map((record) => record.taskId)).toEqual(['t1', 't2']);
+    expect(result.current.records.map((record) => record.task_id)).toEqual(['t1', 't2']);
   });
 
   it('历史任务可回退使用 teamclaw_context.main_session_id', () => {
@@ -131,6 +133,7 @@ describe('useTaskSwitcherTasks', () => {
     const { result } = renderHook(() => useTaskSwitcherTasks('u1', { currentTaskId: 't1' }));
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.items).toEqual([]);
+    expect(result.current.records).toEqual([]);
   });
 
   it('enabled=false、无 userId 或无 currentTaskId 时不发起查询', async () => {
@@ -141,5 +144,43 @@ describe('useTaskSwitcherTasks', () => {
     const { result: missingTaskResult } = renderHook(() => useTaskSwitcherTasks('u1'));
     expect(missingTaskResult.current.loading).toBe(false);
     expect(mockListMyTasks).not.toHaveBeenCalled();
+  });
+});
+
+describe('buildTaskConversationNavigationTarget', () => {
+  it('单聊任务映射主会话、完整 bot id 与任务时间窗', () => {
+    const record = item('t1', 'EXECUTING', '当前任务', { sessionId: 'session-a' });
+
+    expect(buildTaskConversationNavigationTarget(record)).toEqual({
+      taskId: 't1',
+      sessionId: 'session-a',
+      kind: 'bot',
+      groupId: null,
+      botId: 'b1:u1',
+      startTime: Date.parse('2026-10-20T10:00:00'),
+      endTime: Date.parse('2026-10-20T10:00:00'),
+    });
+  });
+
+  it('协作群任务映射 groupId，历史会话形态可从 session id 前缀兜底', () => {
+    const base = item('t1', 'EXECUTING', '群任务', { sessionId: 'bcs_grp_group-1:1' });
+    const record = {
+      ...base,
+      source_type: 'coop_group' as const,
+      execution_config: {
+        ...base.execution_config,
+        source_group_id: undefined,
+      },
+    };
+
+    expect(buildTaskConversationNavigationTarget(record)).toMatchObject({
+      kind: 'group',
+      groupId: 'bcs_grp_group-1',
+      botId: null,
+    });
+  });
+
+  it('缺少主会话时返回 null，不发起盲跳转', () => {
+    expect(buildTaskConversationNavigationTarget(item('t1', 'EXECUTING', '无会话任务', {}))).toBeNull();
   });
 });

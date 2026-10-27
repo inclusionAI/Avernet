@@ -58,6 +58,7 @@ export interface TaskSidePanelState {
   setActiveTask: (taskId: string) => void;
   selectRootNode: (taskId: string, nodeId: string, target?: TaskNavTarget | null) => void;
   selectNode: (taskId: string, nodeId: string, target: TaskNavTarget | null) => void;
+  requestTaskNavigation: (target: TaskNavTarget) => void;
   drillInto: (taskId: string, nodeId: string, target: TaskNavTarget | null) => void;
   backToOverview: (taskId: string) => void;
   consumePendingNavigation: () => void;
@@ -119,6 +120,7 @@ export const useTaskSidePanelStore = create<TaskSidePanelState>((set) => ({
       const prev = s.navByTask[taskId] ?? emptyRecord;
       return { navByTask: { ...s.navByTask, [taskId]: { ...prev, drillStack: [] } } };
     }),
+  requestTaskNavigation: (target) => set({ pendingNavigation: target }),
   consumePendingNavigation: () => set({ pendingNavigation: null }),
   openLinkedSession: (target) => set({ linkedSession: target }),
   closeLinkedSession: () => set({ linkedSession: null }),
