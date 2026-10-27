@@ -320,3 +320,112 @@ def test_real_queue_reclaims_crashed_submission_without_second_post():
     assert repo.get(env="dev", risk_check_id="a").phase == "NEEDS_ATTENTION"
     assert not queue_repo.complete(task_id=claimed[0].id, worker_id="first")
     assert queue_repo.complete(task_id=claimed[0].id, worker_id="second")
+
+
+def test_reject_notice_only_to_openapi_operator_and_deduplicated():
+    from agentclaw.community.core.bot_public_risk.notices import RiskNoticeDelivery
+
+    tasks, repo, _, provider, now, record = make()
+    record = replace(record, client_scope="openapi:operator")
+    tasks.start(record)
+    tasks.submit(env="dev", risk_check_id="a")
+    provider.report = SecurityReport("REJECT", "https://example.test/report")
+    tasks.poll(env="dev", risk_check_id="a", manual=True)
+    tasks.poll(env="dev", risk_check_id="a", manual=True)
+    calls = []
+    delivery = RiskNoticeDelivery(repo, lambda **kw: calls.append(kw), lambda: now[0])
+    delivery.deliver(env="dev", risk_check_id="a")
+    delivery.deliver(env="dev", risk_check_id="a")
+    assert len(calls) == 1
+    assert calls[0]["recipient"] == "operator"
+    assert calls[0]["reason"] == "REJECT"
+    assert calls[0]["detail_url"] == "https://example.test/report"
+
+
+def test_failed_notice_retries_even_after_record_replaced():
+    from agentclaw.community.core.bot_public_risk.notices import RiskNoticeDelivery
+
+    tasks, repo, _, provider, now, record = make()
+    record = replace(record, client_scope="openapi:operator")
+    tasks.start(record)
+    tasks.submit(env="dev", risk_check_id="a")
+    provider.report = SecurityReport("REJECT")
+    tasks.poll(env="dev", risk_check_id="a", manual=True)
+
+    def fail(**kwargs):
+        raise RuntimeError("unavailable")
+
+    delivery = RiskNoticeDelivery(repo, fail, lambda: now[0])
+    delivery.deliver(env="dev", risk_check_id="a")
+    repo.create_or_replay(replace(record, risk_check_id="b", client_request_id="other"))
+    now[0] += timedelta(minutes=2)
+    assert [r.risk_check_id for r in repo.list_notice_due(env="dev", now=now[0])] == [
+        "a"
+    ]
+    calls = []
+    delivery = RiskNoticeDelivery(repo, lambda **kw: calls.append(kw), lambda: now[0])
+    delivery.deliver(env="dev", risk_check_id="a")
+    assert len(calls) == 1
+    assert repo.list_notice_due(env="dev", now=now[0] + timedelta(minutes=5)) == ()
+
+
+def test_legacy_events_never_notify():
+    tasks, repo, queue, provider, now, record = make()
+    tasks.start(replace(record, client_scope="legacy:operator"))
+    tasks.submit(env="dev", risk_check_id="a")
+    provider.report = SecurityReport("REJECT")
+    tasks.poll(env="dev", risk_check_id="a", manual=True)
+    now[0] += timedelta(hours=2)
+    tasks.poll(env="dev", risk_check_id="a")
+    assert repo.get(env="dev", risk_check_id="a").notification_due_at is None
+    assert not any(e[0][0] == "bot_public_risk_notice" for e in queue.entries)
+
+
+def test_notice_delivery_uses_existing_work_order_contract():
+    from agentclaw.community.core.bot_public_risk.notices import (
+        WorkOrderRiskNoticeSender,
+    )
+    from agentclaw.community.core.work_orders.models import NotificationCategory
+
+    calls = []
+
+    class Service:
+        def create_work_order_event(self, **kwargs):
+            calls.append(kwargs)
+
+    sender = WorkOrderRiskNoticeSender(Service())
+    sender(
+        recipient="applicant",
+        reason="REJECT",
+        risk_check_id="risk-1",
+        detail_url="https://example.test/r",
+    )
+    assert calls[0]["recipient_user_ids"] == ["applicant"]
+    assert calls[0]["applicant_user_id"] is None
+    assert calls[0]["event_category"] == NotificationCategory.NOTICE
+    assert calls[0]["event_type"] == "BOT_PUBLIC_RISK"
+    assert calls[0]["content"]["detail_url"] == "https://example.test/r"
+    assert "summary" not in calls[0]["content"]
+
+
+def test_unknown_creation_and_timeout_stage_distinct_notices():
+    tasks, repo, _, provider, now, record = make()
+    tasks.start(replace(record, client_scope="openapi:operator"))
+
+    def fail(_):
+        raise TimeoutError()
+
+    provider.submit_agent_scan = fail
+    tasks.submit(env="dev", risk_check_id="a")
+    import json
+
+    notice = json.loads(repo.get(env="dev", risk_check_id="a").workflow_json)["notices"]
+    assert set(notice) == {"CREATION_UNKNOWN"}
+
+    tasks, repo, _, provider, now, record = make()
+    tasks.start(replace(record, client_scope="openapi:operator"))
+    tasks.submit(env="dev", risk_check_id="a")
+    now[0] += timedelta(minutes=5)
+    tasks.poll(env="dev", risk_check_id="a")
+    notice = json.loads(repo.get(env="dev", risk_check_id="a").workflow_json)["notices"]
+    assert set(notice) == {"WINDOW_ENDED"}

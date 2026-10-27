@@ -8,12 +8,14 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from hashlib import sha256
 import json
+import logging
 from typing import Callable, Protocol
 
 from agentclaw.community.core.bot_public_risk.repository import (
     BotPublicRiskRepository,
     RiskCheck,
 )
+from agentclaw.community.core.bot_public_risk.notices import stage_notice
 from agentclaw.community.core.task_queue.types import Complete, Reschedule, Retry
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.utils.avernet_tenant import (
@@ -38,6 +40,8 @@ SUBMIT = "bot_public_risk_submit"
 DETECTING = "bot_public_risk_detecting"
 REJECT = "bot_public_risk_reject"
 ADVANCE = "bot_public_risk_advance"
+NOTICE = "bot_public_risk_notice"
+logger = logging.getLogger(__name__)
 
 
 class RiskTasks:
@@ -81,12 +85,40 @@ class RiskTasks:
         return saved, created
 
     def _update(self, row: RiskCheck, changes: dict) -> bool:
-        return self.repo.update_current(
+        workflow = json.loads(changes.get("workflow_json", row.workflow_json))
+        if changes.get("security_status") == "REJECT":
+            stage_notice(row, workflow, "REJECT", self.clock(), changes)
+        if changes.get("auto_poll_paused") is True and not row.auto_poll_paused:
+            stage_notice(row, workflow, "WINDOW_ENDED", self.clock(), changes)
+        if workflow.get("error") == "SUBMISSION_OUTCOME_UNKNOWN":
+            stage_notice(row, workflow, "CREATION_UNKNOWN", self.clock(), changes)
+        if "notification_due_at" in changes:
+            changes["workflow_json"] = json.dumps(workflow)
+        updated = self.repo.update_current(
             env=row.env,
             risk_check_id=row.risk_check_id,
             row_version=row.row_version,
             changes=changes,
         )
+        if updated and "notification_due_at" in changes:
+            try:
+                self._enqueue(row, NOTICE)
+            except Exception:
+                # Durable due timestamp remains for the recovery scanner.
+                logger.warning(
+                    "risk notice enqueue failed; recovery will retry", exc_info=True
+                )
+        return updated
+
+    def recover_notices(
+        self, *, env: str, now: datetime, after_id: str = "", limit: int = 100
+    ) -> str | None:
+        rows = self.repo.list_notice_due(
+            env=env, now=now, after_id=after_id, limit=limit
+        )
+        for row in rows:
+            self._enqueue(row, NOTICE)
+        return rows[-1].risk_check_id if len(rows) == limit else None
 
     def submit(self, *, env: str, risk_check_id: str) -> None:
         row = self.repo.get(env=env, risk_check_id=risk_check_id)

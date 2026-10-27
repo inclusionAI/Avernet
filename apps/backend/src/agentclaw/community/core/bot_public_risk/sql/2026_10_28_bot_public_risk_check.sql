@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS ac_bot_public_risk_check (
   approval_biz_id VARCHAR(128) NOT NULL,
   approval_puid VARCHAR(128) NULL,
   detail_url VARCHAR(2048) NULL,
+  notification_due_at TIMESTAMP NULL,
   workflow_json MEDIUMTEXT NOT NULL,
   current_target_key VARCHAR(64) NULL,
   row_version BIGINT NOT NULL DEFAULT 1,
@@ -30,5 +31,6 @@ CREATE TABLE IF NOT EXISTS ac_bot_public_risk_check (
   PRIMARY KEY (risk_check_id),
   UNIQUE KEY uk_risk_request (avernet_tenant, env, client_scope, client_request_id),
   UNIQUE KEY uk_risk_current (avernet_tenant, env, current_target_key),
+  KEY idx_risk_notice_due (env, notification_due_at, avernet_tenant),
   KEY idx_risk_recovery (env, phase, auto_poll_paused, next_action_at, avernet_tenant)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;

@@ -52,6 +52,7 @@ class RiskCheck:
     check_id: str | None = None
     approval_puid: str | None = None
     detail_url: str | None = None
+    notification_due_at: datetime | None = None
     workflow_json: str = "{}"
     current_target_key: str | None = None
     row_version: int = 1
@@ -83,6 +84,7 @@ class RiskCheckModel(Base):
     approval_biz_id = Column(String(128), nullable=False)
     approval_puid = Column(String(128))
     detail_url = Column(String(2048))
+    notification_due_at = Column(TIMESTAMP)
     workflow_json = Column(Text, nullable=False)
     current_target_key = Column(String(64))
     row_version = Column(BigInteger, nullable=False, default=1)
@@ -106,6 +108,7 @@ class RiskCheckModel(Base):
         UniqueConstraint(
             "avernet_tenant", "env", "current_target_key", name="uk_risk_current"
         ),
+        Index("idx_risk_notice_due", "env", "notification_due_at", "avernet_tenant"),
         Index(
             "idx_risk_recovery",
             "env",
@@ -246,6 +249,7 @@ class BotPublicRiskRepository:
             "check_id",
             "approval_puid",
             "detail_url",
+            "notification_due_at",
             "workflow_json",
             "input_json",
             "input_hash",
@@ -320,6 +324,55 @@ class BotPublicRiskRepository:
                     RiskCheckModel.auto_poll_paused.is_(False),
                     RiskCheckModel.next_action_at.isnot(None),
                     RiskCheckModel.next_action_at <= now,
+                )
+                .order_by(RiskCheckModel.risk_check_id)
+                .limit(limit)
+                .all()
+            )
+            return tuple(_view(row) for row in rows)
+
+    def update_notice(
+        self,
+        *,
+        env: str,
+        risk_check_id: str,
+        row_version: int,
+        workflow_json: str,
+        notification_due_at: datetime | None,
+    ) -> bool:
+        """CAS notice state even after a record is no longer current."""
+        with self._db.transactional_orm_session() as session:
+            count = (
+                session.query(RiskCheckModel)
+                .filter_by(
+                    env=env,
+                    risk_check_id=risk_check_id,
+                    row_version=row_version,
+                )
+                .update(
+                    {
+                        RiskCheckModel.workflow_json: workflow_json,
+                        RiskCheckModel.notification_due_at: notification_due_at,
+                        RiskCheckModel.row_version: RiskCheckModel.row_version + 1,
+                    },
+                    synchronize_session=False,
+                )
+            )
+            return count == 1
+
+    def list_notice_due(
+        self, *, env: str, now: datetime, after_id: str = "", limit: int = 100
+    ) -> tuple[RiskCheck, ...]:
+        if not 1 <= limit <= 500:
+            raise ValueError("invalid page size")
+        with self._db.orm_session() as session:
+            rows = (
+                session.query(RiskCheckModel)
+                .filter(
+                    RiskCheckModel.env == env,
+                    RiskCheckModel.risk_check_id > after_id,
+                    RiskCheckModel.notification_due_at.isnot(None),
+                    RiskCheckModel.notification_due_at <= now,
                 )
                 .order_by(RiskCheckModel.risk_check_id)
                 .limit(limit)
