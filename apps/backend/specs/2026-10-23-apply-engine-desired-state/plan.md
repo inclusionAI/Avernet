@@ -287,6 +287,11 @@ stripping `note`. The `compiled.yaml` files are deleted and
   local through the adapter's `/api/file/list` and `/api/file/rmtree`,
   teclaw through its `/api/v1/file/list` and `/api/v1/file/remove`).
   `PlatformResource` lists and deletes its resources category.
+  *Revised (owner review, 2026-10-27): no root-specific methods — the port
+  is `list_entries(prefix, recursive, publish_id, device_uuid)` and
+  `delete_dir(path, …)`, general and stage-addressable, with the
+  protected-entry policy applied by the materialiser, which clears the
+  unprotected root entries concurrently.*
 - `ResourcesMaterialiser.plan`: one `list_root()`; entries classified
   against it (`updated` when the path is listed, else `created`; trees by
   prefix); `removals = sorted(listed − declared member paths)`; the

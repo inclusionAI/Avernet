@@ -52,11 +52,10 @@ Two things are re-asked here rather than trusted:
 
 The write window: the transport has no rename, so a stop between the clear
 and the last member leaves the root partly written; the member's result row
-says ``failed`` and the next apply converges it. Costs: one root listing in
-``plan`` (no per-member ``exists`` probes); one root listing and one delete
-per unprotected root entry in the clear (plus one more listing only when the
-plan found the root empty and the clear answered ``False``), one upload per
-member and one row rewrite in ``write``.
+says ``failed`` and the next apply converges it. Costs: one recursive listing
+of the workspace in ``plan`` (no per-member ``exists`` probes); one listing
+of the root and one delete per unprotected root entry, run concurrently, in
+the clear; one upload per member and one row rewrite in ``write``.
 """
 
 from __future__ import annotations
@@ -89,8 +88,10 @@ from agentclaw.community.core.apply_engine.registry import (
 from agentclaw.community.core.apply_engine.capabilities import (
     Category,
 )
+from agentclaw.community.core.ports.resource_file_port import WorkspaceEntry
 from agentclaw.community.core.ports.resource_rows_port import ResourceRowsPort, WrittenFile
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
+from agentclaw.community.core.workspace.protected_entries import is_protected_root_entry
 
 #: The reason the category aborts with when the root could not be listed in ``plan``.
 ROOT_NOT_LISTED_REASON = "resources root could not be listed"
@@ -113,17 +114,17 @@ class ResourcesRootNotListed(RuntimeError):
 
 
 class ResourcesRootNotCleared(RuntimeError):
-    """The root's tree delete did not land, so nothing was written over it.
+    """The root could not be listed for the clear, or one of its entries did not delete.
 
     Raised out of ``write`` on purpose: the orchestrator then reports the
     category aborted, every member failed and the removals *not* made, and
     marks it partially written. That is the conservative reading for a
-    refusal as much as for a raise: the platform road deletes object by
-    object, and a device ``rmtree`` that errors part-way has already taken
-    what it reached before the transport answered ``False`` — so "re-apply
-    to converge" is the only honest advice. The message is the stage's own
-    words, never the transport's (a transport error can quote a header, a
-    header can carry a token).
+    refusal as much as for a raise: the deletes run concurrently, the
+    platform road deletes object by object, and a device ``rmtree`` that
+    errors part-way has already taken what it reached before the transport
+    answered ``False`` — so "re-apply to converge" is the only honest advice.
+    The message is the stage's own words, never the transport's (a transport
+    error can quote a header, a header can carry a token).
     """
 
     def __init__(self) -> None:
@@ -212,11 +213,13 @@ class ResourcesMaterialiser(Materialiser):
         return ResolveResult(intents=tuple(intents), failures=tuple(failures))
 
     async def plan(self, ctx: ApplyContext, intents: Sequence[Intent]) -> CategoryPlan:
-        """Classify against one listing of the root; what the listing has and the declaration lacks is ``removals``.
+        """Classify against one recursive listing of the workspace; what it has and the declaration lacks is ``removals``.
 
-        A listing that cannot be made raises ``ResourcesRootNotListed``: the
-        category aborts untouched rather than plan against a root it cannot
-        see.
+        The listing is the port's, which knows no policy; the protected root
+        entries (``core/workspace/protected_entries``) are left out here, so
+        ``removals`` names exactly what the clear will remove. A listing that
+        cannot be made raises ``ResourcesRootNotListed``: the category aborts
+        untouched rather than plan against a workspace it cannot see.
 
         Never ``unchanged`` — every apply rewrites every member, so
         classifying anything as unchanged would be a claim the write stage
@@ -225,13 +228,16 @@ class ResourcesMaterialiser(Materialiser):
         """
         entity_type, entity_id, engine = _coords(ctx)
         try:
-            listed = frozenset(
-                await self._resources.list_root(
-                    entity_type=entity_type, entity_id=entity_id, bot_id=ctx.bot_id, engine_type=engine
-                )
+            entries = await self._resources.list_entries(
+                entity_type=entity_type, entity_id=entity_id, bot_id=ctx.bot_id, engine_type=engine, recursive=True
             )
         except Exception as exc:  # noqa: BLE001 — the report gets the stage's words, the log gets the cause
             raise ResourcesRootNotListed() from exc
+        listed = frozenset(
+            entry.path
+            for entry in entries
+            if not entry.is_dir and not is_protected_root_entry(entry.path.split("/", 1)[0])
+        )
         planned = tuple(
             PlannedEntry(intent=intent, outcome="updated" if intent.identity in listed else "created")
             for intent in intents
@@ -254,7 +260,7 @@ class ResourcesMaterialiser(Materialiser):
         """
         entity_type, entity_id, engine = _coords(ctx)
         coords = dict(entity_type=entity_type, entity_id=entity_id, bot_id=ctx.bot_id, engine_type=engine)
-        await self._clear(coords, plan)
+        await self._clear(coords)
         results: list[EntryResult] = []
         written: list[WrittenFile] = []
         for planned in plan.entries:
@@ -283,37 +289,32 @@ class ResourcesMaterialiser(Materialiser):
             ) from exc
         return tuple(results)
 
-    async def _clear(self, coords: dict[str, str], plan: CategoryPlan) -> None:
-        """Clear the root, or raise ``ResourcesRootNotCleared`` (the transport's error chained as its cause).
+    async def _clear(self, coords: dict[str, str]) -> None:
+        """Delete every unprotected root entry, concurrently, or raise ``ResourcesRootNotCleared``.
 
-        ``False`` from the port is ambiguous in the write chain's own
-        contract: both "there was no root to delete" (a first apply — fine)
-        and the transports' only failure signal (every device filesystem
-        catches its own errors and answers ``False``). The plan's own
-        listing tells them apart first: a root that listed anything (a
-        removal, or a member classified ``updated``) had something to
-        delete, so a ``False`` there is a refusal — read conservatively,
-        since the one way to be wrong is the bot emptying its own root in
-        the moment between ``plan`` and ``write`` (a second apply cannot: the
-        run lock admits one per bot), and that costs a report the next apply
-        converges, never an upload over an uncleared root. A root the plan
-        found empty is listed once more, because a file the bot wrote in
-        that same moment would otherwise survive a refused clear unseen (the
-        port raises rather than answer ``()`` for a listing it could not
-        make). A port that raises is a failed clear outright; the raise is
-        kept as the cause for the server log, never as the report's words.
+        One listing of the root names what is there; the protected entries
+        (``core/workspace/protected_entries``) are skipped, and the rest go in
+        one ``asyncio.gather`` — a directory by the port's tree delete, a file
+        by its delete. A root with nothing unprotected is already clear (a
+        first apply). The transports' one failure signal is a ``False``, and
+        on an entry the listing just showed it is a refusal; a port that
+        raises, for the listing or a delete, is a failed clear outright. The
+        raise is kept as the cause for the server log, never as the report's
+        words.
         """
         try:
-            if await self._resources.clear_root(**coords):
-                return
-            if plan.removals or any(planned.outcome == "updated" for planned in plan.entries):
-                raise ResourcesRootNotCleared()
-            if await self._resources.list_root(**coords):
-                raise ResourcesRootNotCleared()
-        except ResourcesRootNotCleared:
-            raise
+            entries = await self._resources.list_entries(**coords)
+            targets = [entry for entry in entries if not is_protected_root_entry(entry.path)]
+            done = await asyncio.gather(*(self._remove(coords, entry) for entry in targets))
         except Exception as exc:  # noqa: BLE001 — the report gets the stage's words, the log gets the cause
             raise ResourcesRootNotCleared() from exc
+        if not all(done):
+            raise ResourcesRootNotCleared()
+
+    async def _remove(self, coords: dict[str, str], entry: WorkspaceEntry) -> bool:
+        if entry.is_dir:
+            return await self._resources.delete_dir(**coords, path=entry.path)
+        return await self._resources.delete(**coords, path=entry.path)
 
 
 def _stored(entry: DesiredResource) -> ContentRef:

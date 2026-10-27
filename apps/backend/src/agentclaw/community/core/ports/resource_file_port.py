@@ -1,13 +1,13 @@
 """A bot's workspace resource files, named by what the caller needs of them.
 
 An outbound port (see this package's README): the ``resources`` materialiser
-uploads, deletes and probes a bot's workspace files, and this names exactly
-those three operations.
+uploads, deletes, probes, lists and clears a bot's workspace files, and this
+names exactly those operations.
 
-**It is a narrowing.** ``ResourceFileService`` has seven public methods —
-``list_dir``, ``read_file``, ``iter_directory_files``, ``create_directory``
-alongside these three. The materialiser needs three; handed the service it
-could reach the rest.
+**It is a narrowing.** ``ResourceFileService`` has more public methods —
+``list_dir`` (the console's projected listing), ``read_file``,
+``iter_directory_files``, ``create_directory`` alongside these. The
+materialiser needs five; handed the service it could reach the rest.
 
 **Two implementations, split on where the write lands** — the same axis the
 delivery families split on everywhere else:
@@ -17,6 +17,11 @@ delivery families split on everywhere else:
 * ``PlatformResource`` (platform-managed teclaw) writes objects under the
   store's ``workspace`` namespace and never touches a container; the composed
   artifact is the delivery.
+
+**The port knows no policy.** ``list_entries`` lists what is there and
+``delete_dir`` deletes what it is told; which workspace entries a resources
+apply leaves alone (``core/workspace/protected_entries``) is the apply
+engine's rule, applied by the materialiser over this port's answers.
 
 Members are ``@abstractmethod`` on purpose, and every implementation —
 ``ResourceFileService`` included — **inherits** this port rather than merely
@@ -30,7 +35,16 @@ class is the check now.
 from __future__ import annotations
 
 from abc import abstractmethod
+from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
+
+
+@dataclass(frozen=True)
+class WorkspaceEntry:
+    """One entry of a workspace listing: its workspace-relative path and whether it is a directory."""
+
+    path: str
+    is_dir: bool
 
 
 @runtime_checkable
@@ -41,9 +55,11 @@ class ResourceFilePort(Protocol):
     exactly and only what the materialiser passes, every one present on the
     real ``ResourceFileService`` method with the same declared default. The
     real service is a deliberate keyword **superset** (``preserve_structure``
-    is the console router's folder-upload vocabulary; ``publish_id`` /
-    ``device_uuid`` address a bound instance): a superset satisfies a
-    structurally-checked protocol, so the port stays narrow on purpose. A
+    is the console router's folder-upload vocabulary; ``runtime_context`` a
+    resolved device): a superset satisfies a structurally-checked protocol,
+    so the port stays narrow on purpose. ``publish_id`` / ``device_uuid``
+    address a service bot's verify or online stage instance, the way the
+    console's listing does; a draft bot passes neither. A
     ``runtime_checkable`` isinstance only checks method *presence* — the
     reflection test in the materialiser's suite is what pins the mirror
     against drift (alongside the fake, which copies these shapes).
@@ -85,65 +101,61 @@ class ResourceFilePort(Protocol):
     ) -> bool: ...
 
     @abstractmethod
-    async def list_root(
+    async def list_entries(
         self,
         *,
         entity_type: str = "staff",
         entity_id: str,
         bot_id: str,
         engine_type: str,
-    ) -> tuple[str, ...]:
-        """Every resource file in the workspace as a workspace-relative path, the protected entries left out.
+        prefix: str = "",
+        recursive: bool = False,
+        publish_id: str | None = None,
+        device_uuid: str | None = None,
+    ) -> tuple[WorkspaceEntry, ...]:
+        """The entries under ``prefix`` (``""`` is the workspace root), workspace-relative, sorted by path.
 
-        The workspace root is the resources root; the entries left out are
-        ``core/workspace/protected_entries`` (identity files, the skills
-        trees, the engine's state and configuration, dotfiles), the same
-        ones ``clear_root`` leaves alone. ``()`` is a confirmed empty
-        workspace, never a listing that could not be made: an implementation
-        that cannot tell the two apart raises :class:`RootListingFailed`
-        instead of answering empty.
+        ``recursive`` asks for every descendant in one query (the engines'
+        own ``recursive`` listing), else the one level. ``()`` is a confirmed
+        empty directory, never a listing that could not be made: an
+        implementation that cannot tell the two apart raises
+        :class:`ListingFailed` instead of answering empty, because the apply
+        engine clears and rewrites a workspace on the strength of this
+        answer.
         """
         ...
 
     @abstractmethod
-    async def clear_root(
+    async def delete_dir(
         self,
         *,
         entity_type: str = "staff",
         entity_id: str,
         bot_id: str,
         engine_type: str,
+        path: str,
+        publish_id: str | None = None,
+        device_uuid: str | None = None,
     ) -> bool:
-        """Delete every unprotected entry of the workspace root; ``False`` when there was none.
+        """Delete the directory at ``path`` and everything under it; ``False`` when the transport did not.
 
-        A delete that does not land raises :class:`RootClearFailed`; ``False``
-        never hides a refusal.
+        No probe: the caller says it is a directory (a listing just did).
+        ``False`` is the device filesystems' one failure signal (they catch
+        their own errors), so on a directory a listing just showed it is a
+        refusal, which the caller treats as one.
         """
         ...
 
 
-class RootListingFailed(RuntimeError):
-    """``list_root`` could not list the root and could not confirm it absent.
+class ListingFailed(RuntimeError):
+    """``list_entries`` could not list the directory and could not confirm it absent.
 
-    The apply engine clears and rewrites the root on the strength of this
-    listing (what it removes, and whether a refused clear found anything to
-    refuse), so a listing that failed must never come back as "nothing
-    there". The device transports do not all distinguish the two — teclaw's
-    ``list_dir`` answers ``None`` for both — which is why the implementation
-    confirms absence from the parent directory and raises this when that
-    confirmation is not available.
+    The apply engine clears and rewrites the workspace on the strength of a
+    listing (what it removes, and what there is to clear), so a listing that
+    failed must never come back as "nothing there". The device transports do
+    not all distinguish the two — teclaw's ``list_dir`` answers ``None`` for
+    both — which is why this is raised rather than an empty answer.
     """
 
 
-class RootClearFailed(RuntimeError):
-    """``clear_root`` found an entry it could not delete.
-
-    The device filesystems answer ``False`` for their own failures, and a
-    ``False`` on an entry the root listing just showed is a refusal, not
-    "nothing there". The apply engine reports the category not cleared and
-    writes nothing over the root; the next apply converges it.
-    """
-
-
-__all__ = ["ResourceFilePort", "RootClearFailed",
-    "RootListingFailed"]
+__all__ = ["ListingFailed", "ResourceFilePort", "WorkspaceEntry"]

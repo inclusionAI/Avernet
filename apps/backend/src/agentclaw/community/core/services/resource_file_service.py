@@ -35,7 +35,7 @@ from injector import inject
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_config_surface.coords import BotConfigCoords
-from agentclaw.community.core.ports.resource_file_port import ResourceFilePort, RootClearFailed, RootListingFailed
+from agentclaw.community.core.ports.resource_file_port import ListingFailed, ResourceFilePort, WorkspaceEntry
 from agentclaw.community.core.bot_management.services.engine_resolver import (
     resolve_runtime_engine_for_bot,
 )
@@ -65,7 +65,6 @@ from agentclaw.community.core.repository.protocols.publishing import BotPublishR
 from agentclaw.community.core.workspace.protected_entries import (
     PROTECTED_ROOT_DIRS,
     PROTECTED_ROOT_FILES,
-    is_protected_root_entry,
 )
 from agentclaw.community.di.modules.skill_center_module import DeviceFilesystemDispatcher
 from agentclaw.community.log import get_logger
@@ -352,8 +351,17 @@ class ResourceFileService(ResourceFilePort):
 
     @staticmethod
     def _leaf(entry: Mapping[str, Any]) -> str:
-        """The path an entry goes by under the listed directory: ``relative_path`` where the engine gives one, else
-        ``name``; ``""`` for neither."""
+        """The name a listing entry goes by under the directory that was listed.
+
+        The engines do not agree on the key: arca / baas / local give
+        ``relative_path`` (the entry's path relative to the listed directory,
+        ``a.txt`` for a child, ``sub/a.txt`` deeper down a recursive listing),
+        teclaw gives ``name`` only. This reads whichever is there, so the
+        console listing, the archive walk and ``_named_in`` ask one question;
+        ``""`` means the entry names nothing. ``_listed_path`` is the same
+        question for the apply engine's listing, which also reads teclaw's
+        ``path``.
+        """
         for key in ("relative_path", "name"):
             value = entry.get(key)
             if isinstance(value, str) and value:
@@ -631,105 +639,108 @@ class ResourceFileService(ResourceFilePort):
             return await device_fs.delete_tree(logical)
         return await device_fs.delete_file(logical)
 
-    async def list_root(
+    async def list_entries(
         self,
         *,
         entity_type: str = "staff",
         entity_id: str,
         bot_id: str,
         engine_type: str,
+        prefix: str = "",
+        recursive: bool = False,
+        publish_id: str | None = None,
+        device_uuid: str | None = None,
         runtime_context: DeviceContext | None = None,
-    ) -> tuple[str, ...]:
-        """Every resource file in the workspace as a workspace-relative path; the protected root entries left out.
+    ) -> tuple[WorkspaceEntry, ...]:
+        """The entries under ``prefix`` of the workspace (``""`` is the root), workspace-relative, sorted by path.
 
-        The workspace root is the resources root, and what this listing skips
-        (``protected_entries.is_protected_root_entry``: the identity files, the
-        skills trees, the engine's state and configuration, dotfiles — at the
-        root) is exactly what ``clear_root`` leaves alone, so the two agree on
-        what "everything" means; below the root every entry belongs to its
-        parent, dot-entries included, as the Open API's directory delete
-        treats them. Level by level — no engine's recursive flag is trusted — and
-        complete or raising: the apply engine clears and rewrites on the
-        strength of this listing, so a workspace that does not list, a
-        subdirectory the walk was just told about and then cannot list, and
-        an entry with no name each raise ``RootListingFailed`` rather than
-        answer short (teclaw's ``list_dir`` gives ``None`` for an absent
-        directory and a failed call alike). An entry that does not say
-        ``is_dir`` is read as a file, as the directory download reads it.
+        One query: ``recursive`` is handed to the engine, which lists every
+        descendant itself. Complete or raising: the apply engine clears and
+        rewrites a workspace on the strength of this listing, so a directory
+        that does not list raises ``ListingFailed`` rather than answering
+        empty (teclaw's ``list_dir`` gives ``None`` for an absent directory
+        and a failed call alike), and so does an entry that names nothing. An
+        entry that does not say ``is_dir`` is read as a file, with a warning.
+        ``publish_id`` / ``device_uuid`` address a service bot's verify or
+        online stage instance, as ``list_dir`` does. No policy: which entries
+        a resources apply leaves alone is the apply engine's rule.
         """
-        ctx = runtime_context or self._resolve_ctx(bot_id=bot_id, entity_id=entity_id)
+        ctx = runtime_context or self._resolve_ctx(
+            bot_id=bot_id, entity_id=entity_id, publish_id=publish_id, device_uuid=device_uuid,
+        )
         device_fs = self._device_fs(
             ctx, entity_type=entity_type, entity_id=entity_id,
             bot_id=bot_id, engine_type=engine_type,
         )
-        root = await device_fs.list_dir(self._logical(""))
-        if root is None:
-            raise RootListingFailed(f"the workspace of bot {bot_id} could not be listed")
-        files: list[str] = []
-        queue: list[tuple[str, list[dict[str, Any]]]] = [("", root)]
-        while queue:
-            current, entries = queue.pop(0)
-            for entry in sorted(entries, key=self._leaf):
-                if not self._leaf(entry):
-                    # Nameless: the listing is not one to clear a workspace on.
-                    where = current or "the workspace"
-                    raise RootListingFailed(f"{where} of bot {bot_id} listed an entry without a name")
-                rel = self._rel_path(current, entry)
-                if not current and is_protected_root_entry(rel):
-                    continue
-                if self._is_dir_flag(entry):
-                    sub = await device_fs.list_dir(self._logical(rel))
-                    if sub is None:
-                        raise RootListingFailed(f"{rel} of bot {bot_id} was listed but could not be listed itself")
-                    queue.append((rel, sub))
-                    continue
-                files.append(rel)
-        return tuple(files)
+        prefix = prefix.strip("/")
+        entries = await device_fs.list_dir(self._logical(prefix), recursive=recursive)
+        if entries is None:
+            raise ListingFailed(f"{prefix or 'the workspace'} of bot {bot_id} could not be listed")
+        listed: list[WorkspaceEntry] = []
+        for entry in entries:
+            path = self._listed_path(prefix, entry)
+            if path is None:
+                raise ListingFailed(f"{prefix or 'the workspace'} of bot {bot_id} listed an entry without a name")
+            is_dir = self._is_dir_flag(entry)
+            if is_dir is None:
+                logger.warning(
+                    "[%s.list_entries] bot %s: entry %r does not say is_dir; treated as a file",
+                    type(self).__name__, bot_id, path,
+                )
+            listed.append(WorkspaceEntry(path, bool(is_dir)))
+        return tuple(sorted(listed, key=lambda e: e.path))
 
-    async def clear_root(
+    async def delete_dir(
         self,
         *,
         entity_type: str = "staff",
         entity_id: str,
         bot_id: str,
         engine_type: str,
+        path: str,
+        publish_id: str | None = None,
+        device_uuid: str | None = None,
         runtime_context: DeviceContext | None = None,
     ) -> bool:
-        """Delete every unprotected entry of the workspace root; ``False`` when there was none to delete.
+        """Delete the directory at ``path`` with everything under it; ``False`` when the transport did not.
 
-        One delete per root entry — the engine's tree delete for a directory,
-        its file delete for a file — skipping the protected root entries, so an
-        identity file or the skills tree is never on the list; an unprotected
-        directory goes whole, as the Open API's own directory delete takes it. A delete the
-        transport answers ``False`` for, on an entry the listing just showed,
-        is a refusal (every device filesystem catches its own errors and
-        answers ``False``) and raises ``RootClearFailed``; ``False`` from here
-        means only that the root held nothing to delete.
+        The engine's tree delete, with no probe: the caller says it is a
+        directory (a listing just did). ``delete`` is the probing twin for a
+        path whose kind the caller does not know. ``False`` is the device
+        filesystems' one failure signal (they catch their own errors and
+        answer it), so on a directory a listing just showed it is a refusal.
         """
-        ctx = runtime_context or self._resolve_ctx(bot_id=bot_id, entity_id=entity_id)
+        ctx = runtime_context or self._resolve_ctx(
+            bot_id=bot_id, entity_id=entity_id, publish_id=publish_id, device_uuid=device_uuid,
+        )
         device_fs = self._device_fs(
             ctx, entity_type=entity_type, entity_id=entity_id,
             bot_id=bot_id, engine_type=engine_type,
         )
-        root = await device_fs.list_dir(self._logical(""))
-        if root is None:
-            raise RootListingFailed(f"the workspace of bot {bot_id} could not be listed")
-        removed = False
-        for entry in sorted(root, key=self._leaf):
-            name = self._leaf(entry)
-            if not name:
-                raise RootListingFailed(f"the workspace of bot {bot_id} listed an entry without a name")
-            if is_protected_root_entry(name):
-                continue
-            logical = self._logical(name)
-            if self._is_dir_flag(entry):
-                done = await device_fs.delete_tree(logical)
-            else:
-                done = await device_fs.delete_file(logical)
-            if not done:
-                raise RootClearFailed(f"{name} of bot {bot_id} was listed but could not be deleted")
-            removed = True
-        return removed
+        return await device_fs.delete_tree(self._logical(path.strip("/")))
+
+    @staticmethod
+    def _listed_path(prefix: str, entry: Mapping[str, Any]) -> str | None:
+        """A listing entry's workspace-relative path, or ``None`` when the entry names nothing.
+
+        ``relative_path`` (relative to the listed directory) where the engine
+        gives it, which keeps a recursive listing right; else the engine's own
+        ``path`` when it is one of the workspace namespace (teclaw:
+        ``/workspace/sub/x.csv``), which a recursive teclaw listing needs
+        since it carries no ``relative_path``; else ``name``, right for a
+        non-recursive listing.
+        """
+        rel = entry.get("relative_path")
+        if isinstance(rel, str) and rel:
+            return f"{prefix}/{rel}" if prefix else rel
+        engine_path = entry.get("path")
+        marker = f"/{WORKSPACE_NS}/"
+        if isinstance(engine_path, str) and engine_path.startswith(marker) and len(engine_path) > len(marker):
+            return engine_path[len(marker):].strip("/")
+        name = entry.get("name")
+        if isinstance(name, str) and name:
+            return f"{prefix}/{name}" if prefix else name
+        return None
 
     async def _is_dir(self, device_fs: Any, path: str) -> bool:
         """Whether *path* names a directory, asked of the parent's listing.

@@ -14,6 +14,7 @@ from agentclaw.community.core.apply_engine.managed_files import (
     ManagedFileScope,
     ManagedFilesStore,
 )
+from agentclaw.community.core.ports.resource_file_port import WorkspaceEntry
 from agentclaw.community.core.apply_engine.managed_files.ports import (
     PlatformIdentity,
     PlatformResource,
@@ -153,18 +154,35 @@ def test_resource_tree_delete_is_a_prefix_delete_over_the_store() -> None:
     assert len(oss.objects) == 1
 
 
-def test_platform_resource_lists_and_clears_every_resource_object() -> None:
-    """The workspace root is the resources root: ``list_root`` names every resources-category object as a
-    workspace-relative path, ``clear_root`` deletes them all and answers whether there were any."""
+def test_platform_resource_lists_like_a_device_and_deletes_a_directory() -> None:
+    """``list_entries`` shows the store's objects as a device listing would — a directory per intermediate
+    segment, one level or every descendant — with no policy of its own; ``delete_dir`` removes every object
+    under a path and answers whether there was any."""
     store, oss = _store()
     port = PlatformResource(store)
     coords = dict(entity_id="u_owner", bot_id="b_1", engine_type="teclaw")
     _run(port.upload_file(**coords, target_dir="data/kb", filename="faq.md", data=b"q"))
     _run(port.upload_file(**coords, target_dir="data", filename="notes.txt", data=b"n"))
-    _run(port.upload_file(**coords, target_dir="other", filename="keep.txt", data=b"k"))
+    _run(port.upload_file(**coords, target_dir="", filename="top.txt", data=b"t"))
 
-    assert _run(port.list_root(**coords)) == ("data/kb/faq.md", "data/notes.txt", "other/keep.txt")
-    assert _run(port.clear_root(**coords)) is True
-    assert _run(port.list_root(**coords)) == ()
-    assert store.list(_SCOPE, category=CATEGORY_RESOURCES) == []
-    assert _run(port.clear_root(**coords)) is False
+    assert _run(port.list_entries(**coords)) == (WorkspaceEntry("data", True), WorkspaceEntry("top.txt", False))
+    assert _run(port.list_entries(**coords, recursive=True)) == (
+        WorkspaceEntry("data", True),
+        WorkspaceEntry("data/kb", True),
+        WorkspaceEntry("data/kb/faq.md", False),
+        WorkspaceEntry("data/notes.txt", False),
+        WorkspaceEntry("top.txt", False),
+    )
+    assert _run(port.list_entries(**coords, prefix="data")) == (
+        WorkspaceEntry("data/kb", True),
+        WorkspaceEntry("data/notes.txt", False),
+    )
+    assert _run(port.delete_dir(**coords, path="data/kb")) is True
+    assert _run(port.list_entries(**coords, recursive=True)) == (
+        WorkspaceEntry("data", True),
+        WorkspaceEntry("data/notes.txt", False),
+        WorkspaceEntry("top.txt", False),
+    )
+    assert _run(port.delete_dir(**coords, path="data/kb")) is False
+    assert _run(port.delete_dir(**coords, path="data")) is True
+    assert [r.rel_path for r in store.list(_SCOPE, category=CATEGORY_RESOURCES)] == ["workspace/top.txt"]

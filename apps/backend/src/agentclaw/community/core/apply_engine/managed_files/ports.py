@@ -31,7 +31,6 @@ import asyncio
 import logging
 from typing import Any, Optional
 
-from agentclaw.community.core.workspace.protected_entries import is_protected_root_entry
 from agentclaw.community.core.apply_engine.managed_files.store import (
     CATEGORY_IDENTITY,
     CATEGORY_RESOURCES,
@@ -45,7 +44,7 @@ from agentclaw.community.core.apply_engine.managed_files.store import (
     ManagedFilesStore,
 )
 from agentclaw.community.core.ports.identity_file_port import IdentityFilePort
-from agentclaw.community.core.ports.resource_file_port import ResourceFilePort
+from agentclaw.community.core.ports.resource_file_port import ResourceFilePort, WorkspaceEntry
 from agentclaw.community.core.ports.skill_package_upload_port import (
     SkillPackageUploadPort,
 )
@@ -216,39 +215,63 @@ class PlatformResource(_StorePort, ResourceFilePort):
         )
         return any(row.rel_path == rel or row.rel_path.startswith(rel + "/") for row in rows)
 
-    async def list_root(
+    async def list_entries(
         self,
         *,
         entity_type: str = OWNER_ENTITY_TYPE,
         entity_id: str,
         bot_id: str,
         engine_type: str,
-    ) -> tuple[str, ...]:
-        """Every resources-category object, as a workspace-relative path (the store holds no protected entry)."""
-        rows = await asyncio.to_thread(
+        prefix: str = "",
+        recursive: bool = False,
+        publish_id: str | None = None,
+        device_uuid: str | None = None,
+    ) -> tuple[WorkspaceEntry, ...]:
+        """The resources objects under ``prefix``, as a device listing would show them.
+
+        The store holds files only, so a directory is every intermediate
+        segment of an object's path: one level of them for a plain listing,
+        all of them for a recursive one. ``publish_id`` / ``device_uuid``
+        address nothing here — the store is the platform's own.
+        """
+        rows: list[ManagedFile] = await asyncio.to_thread(
             self._store.list, self._scope(entity_type, entity_id, bot_id), category=CATEGORY_RESOURCES
         )
         namespace = len(WORKSPACE_NS) + 1
-        paths = (row.rel_path[namespace:] for row in rows)
-        return tuple(sorted(path for path in paths if not is_protected_root_entry(path.split("/", 1)[0])))
+        base = f"{prefix.strip('/')}/" if prefix.strip("/") else ""
+        entries: dict[str, bool] = {}
+        for row in rows:
+            path = row.rel_path[namespace:]
+            if base and not path.startswith(base):
+                continue
+            segments = path[len(base):].split("/")
+            if recursive:
+                for depth in range(1, len(segments)):
+                    entries[base + "/".join(segments[:depth])] = True
+                entries[path] = False
+            else:
+                entries[base + segments[0]] = len(segments) > 1
+        return tuple(WorkspaceEntry(path, is_dir) for path, is_dir in sorted(entries.items()))
 
-    async def clear_root(
+    async def delete_dir(
         self,
         *,
         entity_type: str = OWNER_ENTITY_TYPE,
         entity_id: str,
         bot_id: str,
         engine_type: str,
+        path: str,
+        publish_id: str | None = None,
+        device_uuid: str | None = None,
     ) -> bool:
-        """Delete every resources-category object; ``False`` when there were none.
-
-        A delete that does not land raises; ``False`` never hides a refusal.
-        """
+        """Delete every object under ``path``; ``False`` when there was none. A delete that does not land raises."""
         scope = self._scope(entity_type, entity_id, bot_id)
+        rel = _workspace_path(path.strip("/"))
         rows: list[ManagedFile] = await asyncio.to_thread(self._store.list, scope, category=CATEGORY_RESOURCES)
-        for row in rows:
+        under = [row for row in rows if row.rel_path == rel or row.rel_path.startswith(rel + "/")]
+        for row in under:
             await asyncio.to_thread(self._store.delete, scope, rel_path=row.rel_path)
-        return bool(rows)
+        return bool(under)
 
 
 class PlatformSkillPackageUpload(_StorePort, SkillPackageUploadPort):

@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from agentclaw.community.core.ports.resource_rows_port import WrittenFile
-from agentclaw.community.core.workspace.protected_entries import is_protected_root_entry
+from agentclaw.community.core.ports.resource_file_port import WorkspaceEntry
 from agentclaw.community.core.apply_engine.context import ApplyContext
 from agentclaw.community.core.apply_engine.capabilities import (
     resolve_capabilities,
@@ -1097,23 +1097,25 @@ class FakeResourceFileService:
 
     ``ResourceFileService`` is v1's single write chain for manifest resources
     (its dispatcher covers the arca / baas / teclaw transports uniformly), so
-    the fake needs only the apply-side entry points: ``list_root`` for the
-    plan stage's one listing, ``clear_root`` and ``upload_file`` for the
-    write stage, plus ``delete`` / ``exists`` for the other materialisers
-    and the older contract checks. Signatures mirror the port's apply-side
+    the fake needs only the apply-side entry points: ``list_entries`` for the
+    plan stage's one recursive listing and the clear's root listing,
+    ``delete_dir`` / ``delete`` and ``upload_file`` for the write stage, plus
+    ``exists`` for the other materialisers and the older contract checks. Signatures mirror the port's apply-side
     surface (every parameter the materialiser passes; the router-only
     extras such as ``preserve_structure`` are deliberately absent), so a
     drift shows up as a TypeError in these tests before it shows up
     mid-apply in production.
 
     Presence is the workspace as the bot would see it: ``record_present``
-    seeds it, uploads add to it, ``clear_root`` empties everything under
-    ``data/`` and ``delete`` a path or subtree. ``fail_clear`` makes
-    ``clear_root`` answer the transports' silent ``False`` with presence
-    untouched — the real device filesystems catch their own errors and
-    return ``False`` rather than raise — which is what the materialiser's
-    plan-against-listing reading of a ``False`` is tested with; a path in
-    ``fail_deletes`` does the same for ``delete``.
+    seeds it, uploads add to it, ``delete_dir`` and ``delete`` remove a
+    subtree or a path. ``fail_clear`` makes every delete answer the
+    transports' silent ``False`` with presence untouched — the real device
+    filesystems catch their own errors and return ``False`` rather than
+    raise — which is what the materialiser's reading of a ``False`` on an
+    entry the listing just showed is tested with; a path in ``fail_deletes``
+    does the same for one path. ``clear_calls`` records each listing of the
+    root the clear starts with, ``listing_calls`` each recursive listing the
+    plan makes, both by their addressing.
     """
 
     def __init__(
@@ -1130,12 +1132,14 @@ class FakeResourceFileService:
         self.exists_probes: list[dict[str, Any]] = []
         self._exists = set(exists_paths or ())
         self._fail_deletes = set(fail_deletes or ())
-        self.list_root_calls: list[dict[str, Any]] = []
-        self.clear_root_calls: list[dict[str, Any]] = []
-        #: When set, ``clear_root`` answers ``False`` and removes nothing — the
+        self.list_calls: list[dict[str, Any]] = []
+        self.listing_calls: list[dict[str, Any]] = []
+        self.clear_calls: list[dict[str, Any]] = []
+        self.delete_dir_calls: list[dict[str, Any]] = []
+        #: When set, every delete answers ``False`` and removes nothing — the
         #: transports' one failure signal.
         self.fail_clear = False
-        #: When set, ``list_root`` raises — the port's answer for a listing it could not make.
+        #: When set, ``list_entries`` raises — the port's answer for a listing it could not make.
         self.fail_list = False
 
     @property
@@ -1189,7 +1193,7 @@ class FakeResourceFileService:
                 "path": path,
             }
         )
-        if path in self._fail_deletes:
+        if self.fail_clear or path in self._fail_deletes:
             # Silent refusal: the transport answered, nothing was removed,
             # presence still reports the tree — an exists re-probe sees it.
             return False
@@ -1226,39 +1230,61 @@ class FakeResourceFileService:
         )
         return path in self._exists
 
-    async def list_root(
+    async def list_entries(
         self,
         *,
         entity_type: str = "staff",
         entity_id: str,
         bot_id: str,
         engine_type: str,
-    ) -> tuple[str, ...]:
-        self.list_root_calls.append(
-            {"entity_type": entity_type, "entity_id": entity_id, "bot_id": bot_id, "engine_type": engine_type}
-        )
+        prefix: str = "",
+        recursive: bool = False,
+        publish_id: str | None = None,
+        device_uuid: str | None = None,
+    ) -> tuple[WorkspaceEntry, ...]:
+        coords = {"entity_type": entity_type, "entity_id": entity_id, "bot_id": bot_id, "engine_type": engine_type}
+        self.list_calls.append({**coords, "prefix": prefix, "recursive": recursive})
+        if recursive:
+            self.listing_calls.append(coords)
+        elif not prefix:
+            self.clear_calls.append(coords)
         if self.fail_list:
             raise RuntimeError("listing quoted a header with a token")
-        return tuple(sorted(p for p in self._exists if not is_protected_root_entry(p.split("/", 1)[0])))
+        base = f"{prefix}/" if prefix else ""
+        entries: dict[str, bool] = {}
+        for present in sorted(self._exists):
+            if base and not present.startswith(base):
+                continue
+            segments = present[len(base):].split("/")
+            if recursive:
+                for depth in range(1, len(segments)):
+                    entries[base + "/".join(segments[:depth])] = True
+                entries[present] = False
+            else:
+                entries[base + segments[0]] = len(segments) > 1
+        return tuple(WorkspaceEntry(path, is_dir) for path, is_dir in sorted(entries.items()))
 
-    async def clear_root(
+    async def delete_dir(
         self,
         *,
         entity_type: str = "staff",
         entity_id: str,
         bot_id: str,
         engine_type: str,
+        path: str,
+        publish_id: str | None = None,
+        device_uuid: str | None = None,
     ) -> bool:
-        """The clear of the workspace's unprotected entries; ``fail_clear`` answers the transports' silent ``False``."""
-        self.clear_root_calls.append(
-            {"entity_type": entity_type, "entity_id": entity_id, "bot_id": bot_id, "engine_type": engine_type}
+        """The port's tree delete; ``fail_clear`` answers the transports' silent ``False``."""
+        self.delete_dir_calls.append(
+            {"entity_type": entity_type, "entity_id": entity_id, "bot_id": bot_id, "engine_type": engine_type,
+             "path": path}
         )
-        if self.fail_clear:
+        if self.fail_clear or path in self._fail_deletes:
             return False
-        under = {p for p in self._exists if not is_protected_root_entry(p.split("/", 1)[0])}
-        self._exists -= under
-        self.deleted.extend(sorted(under))
-        return bool(under)
+        self.deleted.append(path)
+        self._exists = {p for p in self._exists if p != path and not p.startswith(f"{path}/")}
+        return True
 
 
 # ── the delivery seam (W8) ───────────────────────────────────────────────

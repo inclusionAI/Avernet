@@ -585,12 +585,11 @@ def _seed_bot_with_resource_manifest(world) -> None:
     listed: list[int] = []
     clears: list[int] = []
 
-    async def list_root(_self, **_kwargs):
-        listed.append(1)
+    async def list_entries(_self, **kwargs):
+        (listed if kwargs.get("recursive") else clears).append(1)
         return ()
 
-    async def clear_root(_self, **_kwargs):
-        clears.append(1)
+    async def delete_dir(_self, **_kwargs):
         return True
 
     # The object store is doubled BEFORE the fetch funnel is first resolved:
@@ -605,8 +604,8 @@ def _seed_bot_with_resource_manifest(world) -> None:
             "upload_file": upload_file,
             "delete": delete,
             "exists": exists,
-            "list_root": list_root,
-            "clear_root": clear_root,
+            "list_entries": list_entries,
+            "delete_dir": delete_dir,
         },
     )
     # The stubs only record; the materialiser under test still decides what

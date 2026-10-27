@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from agentclaw.community.core.ports.resource_file_port import ResourceFilePort
+from agentclaw.community.core.ports.resource_file_port import ResourceFilePort, WorkspaceEntry
 
 if TYPE_CHECKING:  # pragma: no cover — see the module docstring
     from agentclaw.community.core.services.resource_file_service import (
@@ -56,11 +56,13 @@ class DeviceResource(ResourceFilePort):
                           engine_type="claude_code",
                           path="data/faq.csv")     # -> True | False
 
-        await port.list_root(entity_id="ent_7", bot_id="bot_42",
-                             engine_type="claude_code")  # -> ("data/faq.csv", ...)
+        await port.list_entries(entity_id="ent_7", bot_id="bot_42",
+                                engine_type="claude_code",
+                                recursive=True)   # -> (WorkspaceEntry("data", True), ...)
 
-        await port.clear_root(entity_id="ent_7", bot_id="bot_42",
-                              engine_type="claude_code")  # -> True | False
+        await port.delete_dir(entity_id="ent_7", bot_id="bot_42",
+                              engine_type="claude_code",
+                              path="data")        # -> True | False
 
     ``entity_type`` defaults to ``"staff"`` on all five; apply never passes
     anything else.
@@ -119,30 +121,39 @@ class DeviceResource(ResourceFilePort):
         )
 
 
-    async def list_root(
+    async def list_entries(
         self,
         *,
         entity_type: str = "staff",
         entity_id: str,
         bot_id: str,
         engine_type: str,
-    ) -> tuple[str, ...]:
-        return await self._inner.list_root(
+        prefix: str = "",
+        recursive: bool = False,
+        publish_id: str | None = None,
+        device_uuid: str | None = None,
+    ) -> tuple[WorkspaceEntry, ...]:
+        return await self._inner.list_entries(
             entity_type=entity_type, entity_id=entity_id, bot_id=bot_id,
-            engine_type=engine_type,
+            engine_type=engine_type, prefix=prefix, recursive=recursive,
+            publish_id=publish_id, device_uuid=device_uuid,
         )
 
-    async def clear_root(
+    async def delete_dir(
         self,
         *,
         entity_type: str = "staff",
         entity_id: str,
         bot_id: str,
         engine_type: str,
+        path: str,
+        publish_id: str | None = None,
+        device_uuid: str | None = None,
     ) -> bool:
-        return await self._inner.clear_root(
+        return await self._inner.delete_dir(
             entity_type=entity_type, entity_id=entity_id, bot_id=bot_id,
-            engine_type=engine_type,
+            engine_type=engine_type, path=path,
+            publish_id=publish_id, device_uuid=device_uuid,
         )
 
 
