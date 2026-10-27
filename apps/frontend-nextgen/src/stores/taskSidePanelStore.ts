@@ -55,6 +55,9 @@ export interface TaskSidePanelState {
   nodeScrollSignal: number;
   /** 会话宿主左侧 ChatArea 的联动会话；null = 展示宿主当前真实会话 */
   linkedSession: TaskLinkedSessionTarget | null;
+  /** 已消费过任务下拉默认展开的会话；panel 重建后仍保持收缩。 */
+  switcherAutoOpenConsumedBySession: Record<string, true>;
+  markSwitcherAutoOpenConsumed: (sessionId: string) => void;
   setActiveTask: (taskId: string) => void;
   selectRootNode: (taskId: string, nodeId: string, target?: TaskNavTarget | null) => void;
   selectNode: (taskId: string, nodeId: string, target: TaskNavTarget | null) => void;
@@ -78,6 +81,7 @@ const initial = {
   pendingNavigation: null,
   nodeScrollSignal: 0,
   linkedSession: null as TaskLinkedSessionTarget | null,
+  switcherAutoOpenConsumedBySession: {} as Record<string, true>,
 };
 
 export const useTaskSidePanelStore = create<TaskSidePanelState>((set) => ({
@@ -124,5 +128,9 @@ export const useTaskSidePanelStore = create<TaskSidePanelState>((set) => ({
   consumePendingNavigation: () => set({ pendingNavigation: null }),
   openLinkedSession: (target) => set({ linkedSession: target }),
   closeLinkedSession: () => set({ linkedSession: null }),
+  markSwitcherAutoOpenConsumed: (sessionId) =>
+    set((state) => ({
+      switcherAutoOpenConsumedBySession: { ...state.switcherAutoOpenConsumedBySession, [sessionId]: true },
+    })),
   resetAll: () => set(initial),
 }));

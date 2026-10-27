@@ -69,7 +69,7 @@ export const TaskPanelV2: React.FC<TaskPanelV2Props> = ({
           display: 'flex',
           alignItems: 'center',
           gap: 4,
-          height: 40,
+          height: switcher ? 40 : 48,
           padding: '0 12px',
           flexShrink: 0,
           borderBottom: `1px solid ${C.border}`,

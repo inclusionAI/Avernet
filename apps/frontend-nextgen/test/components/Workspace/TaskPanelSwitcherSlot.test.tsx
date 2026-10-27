@@ -43,6 +43,7 @@ const mockUseTaskSwitcherTasks = jest.fn(() => ({
   loading: false,
 }));
 jest.mock('@/hooks/useTaskSwitcherTasks', () => ({
+  resolveTaskMainSessionId: (record: TaskListItem) => record.execution_config.main_session_id,
   useTaskSwitcherTasks: (...args: unknown[]) => mockUseTaskSwitcherTasks(...args),
   buildTaskConversationNavigationTarget: (record: TaskListItem) => ({
     taskId: record.task_id,
@@ -99,6 +100,21 @@ describe('TaskPanelSwitcherSlot(聊天宿主)', () => {
     rerender(<TaskPanelSwitcherSlot currentTaskId="task-switched" params={{ taskId: 'task-switched' }} />);
 
     expect(screen.getByRole('button', { name: '隐藏任务切换' })).toBeTruthy();
+  });
+
+  it('手动选择任务后重建 panel 不再默认展开下拉', () => {
+    const { unmount } = render(
+      <TaskPanelSwitcherSlot currentTaskId="task-current" params={{ taskId: 'task-current' }} />,
+    );
+    expect(screen.getByTestId('task-switcher-dropdown')).toBeTruthy();
+
+    fireEvent.click(screen.getByText('别的面板的任务'));
+    expect(useTaskSidePanelStore.getState().switcherAutoOpenConsumedBySession['session-shared']).toBe(true);
+
+    // openPanelTab 会切换/重建任务面板；新实例必须继承“已手动选择”状态，保持下拉收起。
+    unmount();
+    render(<TaskPanelSwitcherSlot currentTaskId="task-other" params={{ taskId: 'task-other' }} />);
+    expect(screen.queryByTestId('task-switcher-dropdown')).toBeNull();
   });
 
   it('同会话只有一个任务时不渲染切换条', () => {

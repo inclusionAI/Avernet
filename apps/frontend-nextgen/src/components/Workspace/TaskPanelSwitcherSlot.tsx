@@ -1,6 +1,10 @@
 import { TaskSwitcherControl } from '@/assets/TaskPanel/v2/TaskSwitcherControl';
 import { getCapabilities } from '@/capabilities';
-import { buildTaskConversationNavigationTarget, useTaskSwitcherTasks } from '@/hooks/useTaskSwitcherTasks';
+import {
+  buildTaskConversationNavigationTarget,
+  resolveTaskMainSessionId,
+  useTaskSwitcherTasks,
+} from '@/hooks/useTaskSwitcherTasks';
 import { chatBridge } from '@/services/workspace/chatBridge';
 import { resolveTaskPanelDefaultWidth } from '@/services/workspace/panelWidthMemory';
 import { useTaskConversationNavigationStore } from '@/stores/taskConversationNavigationStore';
@@ -26,6 +30,11 @@ export const TaskPanelSwitcherSlot: React.FC<{
   const userId = human.status === 'available' ? human.value?.userId?.trim() || undefined : undefined;
   const { items, records } = useTaskSwitcherTasks(userId, { currentTaskId, enabled: Boolean(currentTaskId) });
   const activeTaskId = useTaskSidePanelStore((s) => s.activeTaskId);
+  const switcherRecord = records.find((record) => record.task_id === currentTaskId) ?? records[0];
+  const switcherSessionId = switcherRecord ? resolveTaskMainSessionId(switcherRecord) : null;
+  const autoOpenConsumed = useTaskSidePanelStore((state) =>
+    switcherSessionId ? Boolean(state.switcherAutoOpenConsumedBySession[switcherSessionId]) : false,
+  );
   // I4:横条「当前」以本面板实例的任务为准——全局 activeTaskId 只服务发起任务后的 tab
   // 自动聚焦语义,不得让非活跃任务面板在自己的横条里显示别的任务为"当前"。
   const effectiveActive = currentTaskId || activeTaskId || items[0]?.taskId || '';
@@ -36,7 +45,7 @@ export const TaskPanelSwitcherSlot: React.FC<{
       items={items}
       activeTaskId={effectiveActive}
       defaultVisible
-      defaultOpen
+      defaultOpen={!autoOpenConsumed}
       onSelectTask={(taskId) => {
         if (taskId === effectiveActive) return;
         // 同一会话任务共享原始宿主。若当前已联动到节点会话，切任务前继承 origin，
@@ -50,6 +59,7 @@ export const TaskPanelSwitcherSlot: React.FC<{
         // setActiveTask 会清理旧 pending；先切任务，再写入目标，确保全局 observer 消费本次导航。
         if (navigationTarget) useTaskSidePanelStore.getState().requestTaskNavigation(navigationTarget);
         const target = items.find((i) => i.taskId === taskId);
+        if (switcherSessionId) useTaskSidePanelStore.getState().markSwitcherAutoOpenConsumed(switcherSessionId);
         chatBridge.openPanelTab({
           id: `task-${taskId}`,
           title: target?.title ?? '任务',
