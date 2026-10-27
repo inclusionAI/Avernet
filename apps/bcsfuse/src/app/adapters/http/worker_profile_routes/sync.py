@@ -410,7 +410,13 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
                             f"binding_store_class={type(binding_store).__name__}, method=bind_profile, "
                             f"success=False, exception_type={type(e_bind).__name__}, exception_preview={str(e_bind)[:200]}"
                         )
-                        logger.warning(f"[Workers R3 Sync] Failed to sync profile binding: {e_bind}")
+                        raise HTTPException(
+                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail={
+                                "code": "PROFILE_BINDING_FAILED",
+                                "message": "Profile binding failed; retry the sync request",
+                            },
+                        ) from e_bind
                 elif req.profile.activate:
                     logger.warning(
                         f"[SYNC_PROFILE_BINDING] worker_id={worker_id}, profile_key={worker_id}:{profile_id}, "
