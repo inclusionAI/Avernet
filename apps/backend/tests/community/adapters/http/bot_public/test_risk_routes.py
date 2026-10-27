@@ -204,7 +204,9 @@ def test_injector_constructs_application_with_test_builder_and_security_provider
         TaskQueueService,
     )
     from agentclaw.community.di.modules.bot_public_module import BotPublicModule
-    from agentclaw.community.di.modules.bot_public_risk_module import BotPublicRiskModule
+    from agentclaw.community.di.modules.bot_public_risk_module import (
+        BotPublicRiskModule,
+    )
 
     class Security:
         def submit_agent_scan(self, agent_info):
@@ -248,3 +250,129 @@ def test_injector_constructs_application_with_test_builder_and_security_provider
         },
     )
     assert created and row.client_scope == "openapi:u1"
+
+
+def test_authorized_other_bot_cannot_read_or_refresh_record():
+    class TwoBots(Bots):
+        def get_by_id_and_entity(self, bot_id, entity_id):
+            if (bot_id, entity_id) == ("other", "entity"):
+                return {
+                    "id": 6,
+                    "bot_id": bot_id,
+                    "entity_id": entity_id,
+                    "owner_id": "u1",
+                    "env": "dev",
+                }
+            return super().get_by_id_and_entity(bot_id, entity_id)
+
+    client, _, tasks = client_for()
+    client.app.state.injector.binder.bind(BotRepository, to=TwoBots())
+    base = "/openapi/v1/collaboration/bots/default:entity/public/risk-checks"
+    created = client.post(
+        base + "?user_id=u1",
+        json={
+            "client_request_id": "record",
+            "public_scope": "user",
+            "visibility": "public",
+        },
+    )
+    record_id = created.json()["data"]["risk_check_id"]
+    other = (
+        f"/openapi/v1/collaboration/bots/other:entity/public/risk-checks/{record_id}"
+    )
+    assert client.get(other + "?user_id=u1").status_code == 404
+    assert client.post(other + "/refresh?user_id=u1").status_code == 404
+    assert tasks.polls == 0
+
+
+def test_risk_operations_are_enforced_by_collaboration_check_gate():
+    from agentclaw.community.adapters.http.openapi_v1.authorization_rules import (
+        AUTHORIZATION,
+        Check,
+    )
+    from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+
+    base = "/openapi/v1/collaboration/bots/{bot_id}/public/risk-checks"
+    for method, suffix in (
+        ("POST", ""),
+        ("GET", "/current"),
+        ("GET", "/{risk_check_id}"),
+        ("POST", "/{risk_check_id}/refresh"),
+    ):
+        rule = AUTHORIZATION[(method, base + suffix)]
+        assert isinstance(rule, Check)
+        assert (
+            rule.level == PermissionLevel.ADMIN
+            and rule.explicit
+            and rule.address_type == "collaboration"
+        )
+
+
+def test_collaboration_gate_refuses_stranger_before_handler(monkeypatch):
+    from agentclaw.community.adapters.http.bot_public import risk_routes
+
+    reached = []
+
+    def bypass_handler(*args, **kwargs):
+        reached.append(True)
+        raise AssertionError("handler must not run")
+
+    monkeypatch.setattr(risk_routes, "_authorize", bypass_handler)
+    client, _, _ = client_for("stranger")
+    response = client.get(
+        "/openapi/v1/collaboration/bots/default:entity/public/risk-checks/current?user_id=stranger&public_scope=user"
+    )
+    assert response.status_code == 404
+    assert not reached
+
+
+def test_owner_handoff_allows_reads_but_refuses_submit_and_refresh():
+    class FrozenBots(Bots):
+        def get_by_id_and_entity(self, bot_id, entity_id):
+            bot = super().get_by_id_and_entity(bot_id, entity_id)
+            if bot:
+                return {**bot, "ext": {"owner_handoff": {"status": "IN_PROGRESS"}}}
+            return None
+
+    client, _, tasks = client_for()
+    base = "/openapi/v1/collaboration/bots/default:entity/public/risk-checks"
+    body = {
+        "client_request_id": "record",
+        "public_scope": "user",
+        "visibility": "public",
+    }
+    record_id = client.post(base + "?user_id=u1", json=body).json()["data"][
+        "risk_check_id"
+    ]
+    client.app.state.injector.binder.bind(BotRepository, to=FrozenBots())
+    assert client.get(base + "/current?user_id=u1&public_scope=user").status_code == 200
+    assert client.get(base + f"/{record_id}?user_id=u1").status_code == 200
+    assert (
+        client.post(
+            base + "?user_id=u1", json={**body, "client_request_id": "new"}
+        ).status_code
+        == 404
+    )
+    assert client.post(base + f"/{record_id}/refresh?user_id=u1").status_code == 404
+    assert tasks.polls == 0
+
+
+def test_legacy_owner_handoff_allows_reads_and_refuses_submit():
+    class FrozenBots(Bots):
+        def get_by_id_and_entity(self, bot_id, entity_id):
+            bot = super().get_by_id_and_entity(bot_id, entity_id)
+            return (
+                {**bot, "ext": {"owner_handoff": {"status": "IN_PROGRESS"}}}
+                if bot
+                else None
+            )
+
+    client, repo, _ = client_for()
+    client.app.state.injector.binder.bind(BotRepository, to=FrozenBots())
+    base = "/api/bots/default/public/risk-checks"
+    assert client.get(base + "/current").status_code == 200
+    assert (
+        client.post(base, json={"client_request_id": "r", "public": "1"}).status_code
+        == 404
+    )
+    assert repo.row is None

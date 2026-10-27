@@ -328,15 +328,20 @@ def _assert_check_rows_are_enforceable(
         resolve_owner_id,
     )
 
+    from agentclaw.community.adapters.http.openapi_v1.principal import require_user_id
+
     divergent = sorted(
         f"{method} {path}"
         for (method, path), endpoint in checked_handlers
-        if not _consumes(endpoint, resolve_owner_id)
+        if not _consumes(
+            endpoint,
+            require_user_id if AUTHORIZATION[(method, path)].address_type == "collaboration" else resolve_owner_id,
+        )
     )
     if divergent:
         raise PublicRouteNotAuthorized(
             "these operations declare Check but their handler does not take "
-            "OwnerIdDep, so the gate would adjudicate the addressed owner while "
+            "OwnerIdDep or UserIdDep for the declared address, so the gate would adjudicate a different identity while "
             "the handler acted on a different one (see bot_access's contract): "
             + ", ".join(divergent)
         )

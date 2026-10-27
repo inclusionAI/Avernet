@@ -58,6 +58,20 @@ def _authorize(bots, collaborators, *, bot_id, actor_id, surface, owner_id=None)
         raise HTTPException(status_code=404, detail="Not found") from exc
 
 
+def _require_mutable(bot):
+    from agentclaw.community.core.bot_management.owner_handoff.contracts import (
+        HandoffError,
+    )
+    from agentclaw.community.core.bot_management.owner_handoff.guard import (
+        assert_bot_mutable,
+    )
+
+    try:
+        assert_bot_mutable(bot.bot)
+    except HandoffError as exc:
+        raise HTTPException(status_code=404, detail="Not found") from exc
+
+
 def _view(record):
     target = json.loads(record.target_json)
     workflow = json.loads(record.workflow_json)
@@ -213,6 +227,7 @@ async def create_legacy(
             surface="legacy",
             owner_id=req.owner_id,
         )
+        _require_mutable(bot)
         record, _ = service.submit(
             bot=bot, actor_id=user.staffId, surface="legacy", body=req.model_dump()
         )
@@ -313,6 +328,7 @@ async def refresh_legacy(
             surface="legacy",
             owner_id=owner_id,
         )
+        _require_mutable(bot)
         record = _record(query, bot, risk_check_id)
         try:
             outcome, record = service.refresh(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 
@@ -41,6 +42,7 @@ class Check:
     level: PermissionLevel
     edit_lock: _EditLock | None = None
     explicit: bool = False
+    address_type: Literal["legacy", "collaboration"] = "legacy"
 
     def __post_init__(self) -> None:
         """Refuse ``NONE``, which would be a gate that never refuses.
@@ -58,6 +60,16 @@ class Check:
                 "Check(PermissionLevel.NONE) is not a bar — it admits every "
                 "caller the gate would otherwise refuse. Name the level the "
                 "operation actually requires."
+            )
+        if self.address_type not in {"legacy", "collaboration"}:
+            raise ValueError("unsupported Bot address type")
+        if self.address_type == "collaboration" and (
+            self.level != PermissionLevel.ADMIN
+            or not self.explicit
+            or self.edit_lock is not None
+        ):
+            raise ValueError(
+                "collaboration Check requires explicit ADMIN and no edit lock"
             )
         if self.edit_lock not in (None, EDIT_LOCK):
             raise ValueError(

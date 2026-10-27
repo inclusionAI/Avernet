@@ -101,6 +101,9 @@ def require_check(rule: Check) -> Callable[..., AsyncIterator[None]]:
     resolution and not a second lookup.
     """
 
+    if rule.address_type == "collaboration":
+        return _require_collaboration_check(rule)
+
     async def gate(
         request: Request,
         bot_id: BotIdPath,
@@ -193,6 +196,36 @@ def require_check(rule: Check) -> Callable[..., AsyncIterator[None]]:
                 route=_route_of(request),
             )
 
+    return gate
+
+
+def _require_collaboration_check(rule: Check) -> Callable[..., AsyncIterator[None]]:
+    """Adjudicate the full Bot/entity path identity, not a legacy owner alias."""
+    async def gate(request: Request, bot_id: BotIdPath, caller_id: UserIdDep) -> AsyncIterator[None]:
+        from agentclaw.community.core.bot_public_risk.access import (
+            RiskAccessDenied, authorize_risk_bot,
+        )
+        bots = _service(request, BotRepository)
+        collaborators = _service(request, CollaboratorServiceProtocol)
+        if bots is None or collaborators is None:
+            raise BotAccessRefusedError("Bot access unavailable")
+        try:
+            resolved = await asyncio.to_thread(
+                authorize_risk_bot, bots, collaborators, bot_id=bot_id,
+                actor_id=caller_id, surface="openapi",
+            )
+        except RiskAccessDenied as exc:
+            raise BotAccessRefusedError("Bot access unavailable") from exc
+        if request.method not in _READ_METHODS:
+            from agentclaw.community.core.bot_management.owner_handoff.guard import assert_bot_mutable
+            from agentclaw.community.core.bot_management.owner_handoff.contracts import HandoffError
+            try:
+                assert_bot_mutable(resolved.bot)
+            except HandoffError as exc:
+                raise BotAccessRefusedError("Bot is temporarily read-only") from exc
+        yield
+        if _succeeded(request) and _is_audited(request) and caller_id != resolved.current_owner_id:
+            await _audit(request, bot_id=resolved.bot_id, owner_id=resolved.entity_id, actor_id=caller_id, route=_route_of(request))
     return gate
 
 
