@@ -44,7 +44,10 @@ def handle_approval_callback(
         logger.error("[回调] global_unique_id 为空")
         return {"success": False, "message": "global_unique_id is empty"}
 
+    risk_check_id = (data.get("risk_check_id") or "").strip()
+    risk_args = {"risk_check_id": risk_check_id} if risk_check_id else {}
     return bot_public_service.handle_public_approval_callback(
         bot_id=bot_id, owner_id=owner_id, puid=global_unique_id,
         last_operate=last_operate, public_scope=public_scope,
+        **risk_args,
     )

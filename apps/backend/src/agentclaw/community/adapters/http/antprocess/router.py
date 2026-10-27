@@ -104,6 +104,7 @@ async def approval_callback(
         "owner_id": data.get("ownerId"),
         "bot_id": data.get("botId"),
         "public_scope": data.get("publicScope") or data.get("public_scope") or "",
+        "risk_check_id": data.get("riskCheckId") or data.get("risk_check_id") or "",
     }
 
     return handle_approval_callback(callback_data, bot_public_service)

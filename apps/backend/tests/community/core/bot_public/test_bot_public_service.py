@@ -2785,3 +2785,32 @@ def test_withdrawal_does_not_invalidate_newer_replacement_after_race():
     service = _make_service(bot_repository=bots, risk_repository=repository)
     service.public_bcs_bot("b1:u1", "u1", "user", _make_operator(), visibility="private")
     repository.invalidate_if_current.assert_called_once_with(env="dev", risk_check_id="risk-a", row_version=4)
+
+
+def test_risk_callback_guard_denial_never_changes_bcs():
+    bot = _make_bot(bot_id="b1", owner_id="u1")
+    bots = MagicMock()
+    bots.get_by_id_and_owner.return_value = bot
+    bcn = MagicMock()
+    guard = MagicMock()
+    guard.check.return_value = "DENIED"
+    service = _make_service(bot_repository=bots, bcn_service=bcn)
+    service._risk_approval_guard = guard
+    result = service.handle_public_approval_callback("b1:u1", "u1", "p1", "AGREE", "user", risk_check_id="risk-a")
+    assert result["success"] is False
+    bcn.patch_attributes.assert_not_called()
+
+
+def test_risk_publication_sends_callback_marker_and_replays_deferred_event():
+    process = MagicMock()
+    process.start_approval.return_value = {"success": True, "puid": "p-risk", "state": "PROCESSING"}
+    service = _make_service(process_service=process)
+    guard = MagicMock()
+    guard.replay.return_value = False
+    service._risk_approval_guard = guard
+    service.public_bcs_bot(
+        "b1", "u1", "user", _make_operator(), visibility="public",
+        approval_biz_id="risk-123", on_approval_started=lambda _: None, risk_check_id="risk-a",
+    )
+    assert process.start_approval.call_args.kwargs["context"]["risk_check_id"] == "risk-a"
+    guard.replay.assert_called_once()
