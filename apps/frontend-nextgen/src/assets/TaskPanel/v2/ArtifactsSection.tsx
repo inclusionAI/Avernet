@@ -6,6 +6,7 @@
 import React, { useState } from 'react';
 
 import { artifactViewHref } from '../artifactDescriptor';
+import { formatArtifactUpdatedAt } from '../artifactTime';
 import { downloadTaskArtifact, type TaskArtifactAccessContext } from '../hooks/useTaskArtifactPreview';
 import { ExternalLink } from '../icons';
 import { Empty as StateEmpty } from '../theme';
@@ -102,7 +103,7 @@ export const ArtifactsSection: React.FC<ArtifactsSectionProps> = ({
             {artifacts.map((a) => {
               const badge = a.kind ? ARTIFACT_KIND_LABELS[a.kind] ?? a.kind : ARTIFACT_TYPE_LABELS[a.type] ?? a.type;
               const href = artifactViewHref(a);
-              const time = a.updatedAt ? a.updatedAt.replace('T', ' ').slice(0, 16) : '';
+              const time = formatArtifactUpdatedAt(a.updatedAt);
               const isFileArtifact = a.kind === 'file' && a.fileRef !== null && a.fileRef !== undefined;
               const isInlineArtifact = a.kind === 'text';
               const isDetailArtifact =

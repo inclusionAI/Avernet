@@ -204,7 +204,7 @@ describe('useTaskSessionNavigationObserver', () => {
     });
     expect(el.scrollIntoView).toHaveBeenCalled();
 
-    // 降级路径:清空 DOM 后再触发一次,未命中仅 console.info,不抛错
+    // 降级路径:清空 DOM 后等完整重试窗口,未命中仅 console.info。
     document.body.innerHTML = '';
     const before = infoSpy.mock.calls.length;
     act(() => {
@@ -217,10 +217,38 @@ describe('useTaskSessionNavigationObserver', () => {
       });
     });
     act(() => {
-      jest.advanceTimersByTime(1000);
+      jest.advanceTimersByTime(6_500);
     });
     expect(infoSpy.mock.calls.length).toBeGreaterThan(before);
     infoSpy.mockRestore();
+  });
+
+  it('时间窗未立即命中时等待消息挂载并重试定位', () => {
+    render(<Harness />);
+
+    act(() => {
+      useTaskSidePanelStore.getState().selectNode('t1', 'n1', {
+        taskId: 't1',
+        sessionId: 'agent:main:session:s-1',
+        kind: 'bot',
+        botId: 'bot-9',
+        startTime: 1700000000000,
+        endTime: 1700000005000,
+      });
+    });
+    act(() => {
+      jest.advanceTimersByTime(900);
+    });
+
+    const el = document.createElement('div');
+    el.setAttribute('data-ts', '1700000001000');
+    el.scrollIntoView = jest.fn();
+    document.body.appendChild(el);
+
+    act(() => {
+      jest.advanceTimersByTime(500);
+    });
+    expect(el.scrollIntoView).toHaveBeenCalled();
   });
 
   it('无时间窗:不注册 DOM 探测或任意超时失效定时器', () => {

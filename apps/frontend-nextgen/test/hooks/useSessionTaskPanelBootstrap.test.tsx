@@ -101,6 +101,24 @@ describe('useSessionTaskPanelBootstrap', () => {
     expect(openTab).toHaveBeenCalledTimes(1);
   });
 
+  it('已有活跃任务面板时，返回原会话不重新 bootstrap 当前副屏', async () => {
+    const { ref, openTab } = makePanelRef();
+    useTaskSidePanelStore.getState().setActiveTask('task-current');
+    mockListMyTasks.mockResolvedValue({
+      code: 0,
+      data: [taskRecord('task-new', '2026-10-27 11:30:00')],
+    });
+
+    renderHook(() =>
+      useSessionTaskPanelBootstrap({ sessionId: 'sess-1', userId: 'u1', panelRef: ref }),
+    );
+    await act(async () => Promise.resolve());
+
+    expect(mockListMyTasks).not.toHaveBeenCalled();
+    expect(openTab).not.toHaveBeenCalled();
+    expect(useTaskSidePanelStore.getState().activeTaskId).toBe('task-current');
+  });
+
   it('没有命中当前会话的任务时不打开副屏', async () => {
     const { ref, openTab } = makePanelRef();
     mockListMyTasks.mockResolvedValue({ code: 0, data: [taskRecord('task-old', '2026-10-27 10:00:00')] });

@@ -51,11 +51,15 @@ export interface TaskSidePanelState {
   navByTask: Record<string, TaskNavRecord>;
   /** 待宿主消费的会话跳转；消费方调 consumePendingNavigation 置空 */
   pendingNavigation: TaskNavTarget | null;
+  /** 一次 openTab 的显式来源标记，用于区分用户切换与历史消息恢复。 */
+  taskPanelOpenIntentTaskId: string | null;
   /** 选中信号计数器（+1 = 消息流滚动定位一次），demo nodeScrollSignal 同源 */
   nodeScrollSignal: number;
   /** 会话宿主左侧 ChatArea 的联动会话；null = 展示宿主当前真实会话 */
   linkedSession: TaskLinkedSessionTarget | null;
   setActiveTask: (taskId: string) => void;
+  markTaskPanelOpenIntent: (taskId: string) => void;
+  consumeTaskPanelOpenIntent: (taskId: string) => boolean;
   selectRootNode: (taskId: string, nodeId: string, target?: TaskNavTarget | null) => void;
   selectNode: (taskId: string, nodeId: string, target: TaskNavTarget | null) => void;
   requestTaskNavigation: (target: TaskNavTarget) => void;
@@ -76,13 +80,21 @@ const initial = {
   activeTaskId: null,
   navByTask: {} as Record<string, TaskNavRecord>,
   pendingNavigation: null,
+  taskPanelOpenIntentTaskId: null,
   nodeScrollSignal: 0,
   linkedSession: null as TaskLinkedSessionTarget | null,
 };
 
-export const useTaskSidePanelStore = create<TaskSidePanelState>((set) => ({
+export const useTaskSidePanelStore = create<TaskSidePanelState>((set, get) => ({
   ...initial,
-  setActiveTask: (taskId) => set({ activeTaskId: taskId, pendingNavigation: null }),
+  setActiveTask: (taskId) =>
+    set({ activeTaskId: taskId, pendingNavigation: null, taskPanelOpenIntentTaskId: null }),
+  markTaskPanelOpenIntent: (taskId) => set({ taskPanelOpenIntentTaskId: taskId }),
+  consumeTaskPanelOpenIntent: (taskId) => {
+    const matched = get().taskPanelOpenIntentTaskId === taskId;
+    if (matched) set({ taskPanelOpenIntentTaskId: null });
+    return matched;
+  },
   selectRootNode: (taskId, nodeId, target = null) =>
     set((s) => {
       const prev = s.navByTask[taskId] ?? emptyRecord;

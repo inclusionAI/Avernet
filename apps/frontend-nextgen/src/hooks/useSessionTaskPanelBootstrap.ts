@@ -69,6 +69,9 @@ export function useSessionTaskPanelBootstrap({
 
   useEffect(() => {
     if (!sessionId || !userId) return undefined;
+    // 正在展示的任务面板优先于“会话最新任务”自动恢复。任务节点会话导航会往返重挂
+    // 会话页，此组件 ref 不应作为唯一记忆；已有 activeTaskId 时继续沿用当前副屏。
+    if (useTaskSidePanelStore.getState().activeTaskId) return undefined;
     const bootstrapKey = `${userId}:${sessionId}`;
     if (bootstrapKeyRef.current === bootstrapKey) return undefined;
     bootstrapKeyRef.current = bootstrapKey;

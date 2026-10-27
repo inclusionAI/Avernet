@@ -52,6 +52,7 @@ export const TaskPanelSwitcherSlot: React.FC<{
         // setActiveTask 会清理旧 pending；先切任务，再写入目标，确保全局 observer 消费本次导航。
         if (navigationTarget) useTaskSidePanelStore.getState().requestTaskNavigation(navigationTarget);
         const target = items.find((i) => i.taskId === taskId);
+        useTaskSidePanelStore.getState().markTaskPanelOpenIntent(taskId);
         chatBridge.openPanelTab({
           id: `task-${taskId}`,
           title: target?.title ?? '任务',

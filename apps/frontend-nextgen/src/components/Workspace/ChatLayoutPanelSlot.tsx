@@ -27,7 +27,8 @@ import {
 } from '@/services/tasks/taskConversationNavigation';
 import { persistPanelWidthPercent, TASK_PANEL_INITIAL_WIDTH } from '@/services/workspace/panelWidthMemory';
 import { useTaskConversationNavigationStore } from '@/stores/taskConversationNavigationStore';
-import type { PanelHandle } from '@tc-chat/core';
+import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
+import type { PanelHandle, PanelTab } from '@tc-chat/core';
 import { ChatLayout } from '@tc-chat/ui/es/ChatLayout';
 import { PanelRegistryContext } from '@tc-chat/ui/es/ChatLayout/context';
 import type { ChatLayoutPanelProps } from '@tc-chat/ui/es/ChatLayout/types';
@@ -62,9 +63,33 @@ const ChatLayoutPanelWithInjectedProps = ChatLayout.Panel as unknown as React.Co
   ChatLayoutPanelProps & ChatLayoutPanelInjectedProps & React.RefAttributes<PanelHandle>
 >;
 
+function taskPanelTaskId(tab: PanelTab): string | null {
+  if (tab.type !== 'taskPanel.TaskLoopView' || !tab.id.startsWith('task-')) return null;
+  const taskId = tab.id.slice('task-'.length);
+  return taskId || null;
+}
+
+function shouldKeepTaskPanelActiveTask(tab: PanelTab): boolean {
+  const store = useTaskConversationNavigationStore.getState();
+  if (!store.navigation || !shouldPreserveTaskPanelDuringNavigation()) return false;
+  const taskId = taskPanelTaskId(tab);
+  if (taskId === null) return false;
+
+  // 显式切换任务先登记 intent；对应 tab 的这一次 openTab 是用户来源，必须放行。
+  // 其余 openTab 均视为会话历史恢复，不得抢占或重渲染当前选中的 TaskPanel。
+  if (useTaskSidePanelStore.getState().consumeTaskPanelOpenIntent(taskId)) return false;
+  return true;
+}
+
 function taskNavigationAwareHandle(handle: PanelHandle): PanelHandle {
   return {
-    openTab: (tab) => handle.openTab(tab),
+    // 返回根会话时，历史面板消息可能随 hydration 重新 openTab 旧任务 tab。任务节点
+    // handoff 本身已经复用持久 Panel；除用户在切换条显式选择的任务外，会话历史
+    // 驱动的 openTab 不能抢占当前选中的 TaskPanel 任务。
+    openTab: (tab) => {
+      if (shouldKeepTaskPanelActiveTask(tab)) return;
+      handle.openTab(tab);
+    },
     closeTab: (id) => {
       const store = useTaskConversationNavigationStore.getState();
       if (store.navigation?.tab?.id === id) store.completeNavigation(store.navigation.id);

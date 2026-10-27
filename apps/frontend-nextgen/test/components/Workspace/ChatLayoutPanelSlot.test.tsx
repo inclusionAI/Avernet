@@ -186,6 +186,66 @@ describe('ChatLayoutPanelSlot', () => {
     expect(useTaskConversationNavigationStore.getState().navigation?.id).toBe(navigationId);
   });
 
+  it('返回根会话时，历史面板消息不能把 TaskPanel 抢到其他任务', () => {
+    const ref = React.createRef<import('@tc-chat/core').PanelHandle>();
+    const selectedTaskTab = {
+      id: 'task-t-selected',
+      title: 'Selected',
+      type: 'taskPanel.TaskLoopView',
+      params: { taskId: 't-selected' },
+    };
+    render(
+      <PersistentPanelHarness>
+        <ChatLayoutPanelSlot ref={ref} {...asRootInjected({ bridge: 'bridge' })} />
+      </PersistentPanelHarness>,
+    );
+
+    const store = useTaskConversationNavigationStore.getState();
+    let navigationId = 0;
+    act(() => {
+      navigationId = store.beginNavigation('t-selected', '/workspace/chat', 's1');
+      store.markRouteCommitted(navigationId);
+      store.markRouteHydrated(navigationId);
+      useTaskSidePanelStore.getState().setActiveTask('t-selected');
+    });
+
+    // 根会话 hydration 可能重新发出历史任务面板消息，例如最新任务 t-latest。
+    // 用户已经显式选中 t-selected，这个历史驱动 openTab 不能切换当前 TaskPanel。
+    act(() =>
+      ref.current?.openTab({
+        id: 'task-t-latest',
+        title: 'Latest',
+        type: 'taskPanel.TaskLoopView',
+        params: { taskId: 't-latest' },
+      }),
+    );
+    expect(mockRawHandle.openTab).not.toHaveBeenCalled();
+
+    // 同一个选中任务的重复 openTab 也要忽略，避免根会话历史消息触发 TaskPanel 重渲染。
+    act(() => ref.current?.openTab(selectedTaskTab));
+    expect(mockRawHandle.openTab).not.toHaveBeenCalled();
+
+    // 用户通过下拉框显式切换任务时先更新 activeTaskId。此时该任务的 openTab 必须放行。
+    act(() => {
+      const taskStore = useTaskSidePanelStore.getState();
+      taskStore.setActiveTask('t-user-picked');
+      taskStore.markTaskPanelOpenIntent('t-user-picked');
+      ref.current?.openTab({
+        id: 'task-t-user-picked',
+        title: 'User Picked',
+        type: 'taskPanel.TaskLoopView',
+        params: { taskId: 't-user-picked' },
+      });
+    });
+    expect(mockRawHandle.openTab).toHaveBeenCalledTimes(1);
+    expect(mockRawHandle.openTab).toHaveBeenCalledWith({
+      id: 'task-t-user-picked',
+      title: 'User Picked',
+      type: 'taskPanel.TaskLoopView',
+      params: { taskId: 't-user-picked' },
+    });
+  });
+
   it('退出任务导航目标路由后，AppShell 释放信号强制关闭旧 TaskPanel 并清理任务状态', () => {
     const ref = React.createRef<import('@tc-chat/core').PanelHandle>();
     const { rerender } = render(

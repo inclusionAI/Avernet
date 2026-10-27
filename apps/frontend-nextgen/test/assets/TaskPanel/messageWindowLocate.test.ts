@@ -9,26 +9,26 @@ import { describe, expect, it, jest } from '@jest/globals';
 describe('locateMessageWindowTimestamp', () => {
   const msgs = [10, 20, 30, 40, 50].map((ts) => ({ ts }));
 
-  it('窗口命中 → 返回窗口内最后一条的 ts', () => {
-    expect(locateMessageWindowTimestamp(msgs, 20, 45)).toBe(40);
+  it('窗口命中 → 返回窗口内第一条的 ts', () => {
+    expect(locateMessageWindowTimestamp(msgs, 20, 45)).toBe(20);
     expect(locateMessageWindowTimestamp(msgs, 30, 30)).toBe(30);
   });
 
-  it('窗口未命中 → 该节点时间窗之前的最近一条', () => {
-    // (25, 28) 窗口内无消息,前move最近是 20
-    expect(locateMessageWindowTimestamp(msgs, 25, 28)).toBe(20);
+  it('窗口未命中 → 定位到时间窗之后的第一条消息', () => {
+    // (25, 28) 窗口内无消息,任务开始处应取 30,而不是上一条 20。
+    expect(locateMessageWindowTimestamp(msgs, 25, 28)).toBe(30);
   });
 
-  it('窗口全在最早消息之前 → null(不存在可定位锚点)', () => {
-    expect(locateMessageWindowTimestamp(msgs, 5, 8)).toBeNull();
+  it('窗口全在最早消息之前 → 定位到最早消息', () => {
+    expect(locateMessageWindowTimestamp(msgs, 5, 8)).toBe(10);
   });
 
   it('无时间窗(均为 null)→ null', () => {
     expect(locateMessageWindowTimestamp(msgs, null, null)).toBeNull();
   });
 
-  it('只有 endTime → 以 endTime 截尾取最后一条', () => {
-    expect(locateMessageWindowTimestamp(msgs, null, 35)).toBe(30);
+  it('只有 endTime → 定位到 endTime 后的第一条消息', () => {
+    expect(locateMessageWindowTimestamp(msgs, null, 35)).toBe(40);
   });
 
   it('空消息 → null', () => {
