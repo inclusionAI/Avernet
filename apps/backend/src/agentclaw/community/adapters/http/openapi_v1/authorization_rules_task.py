@@ -33,6 +33,13 @@ TASK_PUBLIC_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
 #: BBS, Browse-Loop, feedback, and trajectory rows.
 TASK_BBS_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     # ── BBS content routes (community iteration) ──────────────────────────
+    ("POST", "/openapi/v1/collaboration/tasks/bbs/attachments"): NoCheck(
+        "public BBS attachment upload; author declared in the multipart body, no addressed bot"
+    ),
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/bbs/attachments/{attachment_id}/content",
+    ): NoCheck("tenant-wide BBS attachment download; no addressed bot"),
     ("GET", "/openapi/v1/collaboration/tasks/bbs/topics"): NoCheck(
         "tenant-wide BBS Topic catalogue; no addressed bot"
     ),

@@ -3,8 +3,8 @@ import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
-import type { CommunityReply, CommunityTopic } from '@/domain/community/types';
-import { ArrowLeft } from 'lucide-react';
+import type { CommunityAttachment, CommunityReply, CommunityTopic } from '@/domain/community/types';
+import { ArrowLeft, CircleHelp, Download, Paperclip } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Floor } from './Floor';
 import { PollTypeIcon } from '../PollTypeIcon';
@@ -19,6 +19,7 @@ export interface CommunityTopicDetailProps {
   closing: boolean;
   onBack: () => void;
   onCloseTopic: () => Promise<boolean>;
+  onDownloadAttachment: (attachment: CommunityAttachment) => void | Promise<void>;
   // 回帖分页
   replyLoading: boolean;
   replyError: string | null;
@@ -26,6 +27,12 @@ export interface CommunityTopicDetailProps {
   replyPageCount: number;
   replyPageSize: number;
   onGoToReplyPage: (page: number) => void;
+}
+
+function formatFileSize(sizeBytes: number): string {
+  if (sizeBytes < 1024) return `${sizeBytes} B`;
+  if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(1)} KiB`;
+  return `${(sizeBytes / 1024 / 1024).toFixed(1)} MiB`;
 }
 
 export function CommunityTopicDetail({
@@ -36,6 +43,7 @@ export function CommunityTopicDetail({
   closing,
   onBack,
   onCloseTopic,
+  onDownloadAttachment,
   replyLoading,
   replyError,
   replyPage,
@@ -101,8 +109,17 @@ export function CommunityTopicDetail({
         <div className="flex shrink-0 flex-col items-end gap-2">
           <div className="flex items-center gap-2">
             {topic?.topicType === 'poll' && <PollTypeIcon className="size-4" />}
+            {topic?.topicType === 'share' && (
+              <Paperclip className="size-4 text-muted-foreground" role="img" aria-label="分享附件" />
+            )}
+            {topic?.topicType === 'help' && <Badge tone="warning">求助</Badge>}
             {topic?.topicType === 'notice' && <Badge tone="warning">通知</Badge>}
-            {topic?.status === 'closed' && <Badge tone="outline">已结帖</Badge>}
+            {topic?.status === 'closed' && topic.topicType === 'help' && (
+              <Badge tone="success">已解决</Badge>
+            )}
+            {topic?.status === 'closed' && topic.topicType !== 'help' && (
+              <Badge tone="outline">已结帖</Badge>
+            )}
             {topic?.canClose && (
               <ConfirmDialog
                 title="确认结帖？"
@@ -179,14 +196,58 @@ export function CommunityTopicDetail({
                   registerElement={registerReplyElement}
                 />
               )}
-              {topic ? (
-                <PollPanel
-                  topicType={topic.topicType}
-                  status={topic.status}
-                  poll={topic.topicConfig?.poll}
-                  pollStats={topic.analysis?.pollStats}
-                />
+              {topic.topicType === 'share' && topic.topicConfig?.share?.attachments.length ? (
+                <section
+                  aria-label="分享附件"
+                  className="mb-4 rounded-xl border border-border bg-card p-4"
+                >
+                  <header className="flex items-center gap-2">
+                    <Paperclip className="size-4 text-muted-foreground" aria-hidden />
+                    <h3 className="m-0 text-sm font-semibold text-foreground">附件</h3>
+                  </header>
+                  <ul className="mt-3 space-y-2">
+                    {topic.topicConfig.share.attachments.map((attachment) => (
+                      <li
+                        key={attachment.id}
+                        className="flex items-center gap-3 rounded-lg border border-border bg-background px-3 py-2"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="m-0 truncate text-sm font-medium text-foreground">
+                            {attachment.filename}
+                          </p>
+                          <p className="m-0 text-xs text-muted-foreground">
+                            {formatFileSize(attachment.sizeBytes)}
+                          </p>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          leftIcon={<Download className="size-3.5" aria-hidden />}
+                          onClick={() => void onDownloadAttachment(attachment)}
+                        >
+                          下载
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
               ) : null}
+              {topic.topicType === 'help' && topic.topicConfig?.help?.expectedTime ? (
+                <section
+                  aria-label="求助设置"
+                  className="mb-4 flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-3"
+                >
+                  <CircleHelp className="size-4 text-warning" aria-hidden />
+                  <span className="text-xs font-medium text-muted-foreground">期望解决时间</span>
+                  <span className="text-sm text-foreground">{topic.topicConfig.help.expectedTime}</span>
+                </section>
+              ) : null}
+              <PollPanel
+                topicType={topic.topicType}
+                status={topic.status}
+                poll={topic.topicConfig?.poll}
+                pollStats={topic.analysis?.pollStats}
+              />
               {floorGroups.map(({ reply, floorNo, children }) => (
                 <Floor
                   key={reply.id}

@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from agentclaw.community.core.task.forum.models import (
         BrowseFeedPage,
         BrowseReportCreateResult,
+        ForumAttachmentRecord,
         ForumTopicConfig,
         ForumPollProjectionCalculator,
         ForumPollSelection,
@@ -70,10 +71,29 @@ class ForumRepositoryProtocol(Protocol):
         """Create a Topic, or replay the first request.
 
         ``topic_config`` is the Topic-type-specific structured configuration.
-        Only ``topic_config.poll`` is defined today; it is required for POLL
-        Topics and rejected for other types.
+        POLL uses ``poll``, SHARE uses ``share``, HELP may use ``help``, and
+        other Topic types reject structured configuration.
         """
 
+    @abstractmethod
+    def create_attachment(
+        self,
+        *,
+        attachment_id: str,
+        author_type: str,
+        author_id: str,
+        filename: str,
+        content_type: str,
+        size_bytes: int,
+        object_key: str,
+    ) -> ForumAttachmentRecord:
+        """Persist metadata for one uploaded, currently unbound attachment."""
+
+    @abstractmethod
+    def get_attachment(
+        self, attachment_id: str
+    ) -> ForumAttachmentRecord | None:
+        """Return tenant-scoped attachment metadata, or ``None`` if absent."""
 
     @abstractmethod
     def create_reply(

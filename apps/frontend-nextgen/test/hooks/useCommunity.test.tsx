@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 import { notifyError, notifySuccess } from '@/components/ui/notify';
-import type { CommunityReply, CommunityTopic } from '@/domain/community/types';
+import type { CommunityAttachment, CommunityReply, CommunityTopic } from '@/domain/community/types';
 import { COMMUNITY_PAGE_SIZE, COMMUNITY_REPLY_PAGE_SIZE, useCommunity } from '@/hooks/useCommunity';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import { communityService } from '@/services/community';
@@ -12,6 +12,8 @@ jest.mock('@/services/community', () => ({
     listTopics: jest.fn(),
     getTopic: jest.fn(),
     listReplies: jest.fn(),
+    uploadAttachment: jest.fn(),
+    downloadAttachment: jest.fn(),
     createReply: jest.fn(),
     createTopic: jest.fn(),
     closeTopic: jest.fn(),
@@ -95,12 +97,25 @@ describe('useCommunity', () => {
     expect(mockedService.listTopics).toHaveBeenCalledWith({
       search: '  Bot  ',
       scope: 'mine',
+      topicType: 'all',
       authorId: '900003',
       offset: 0,
       limit: COMMUNITY_PAGE_SIZE,
     });
     expect(result.current.topics).toEqual([topic]);
     expect(result.current.hasMore).toBe(false);
+  });
+
+  test('类型筛选随列表请求下发', async () => {
+    useCommunityStore.setState({ topicType: 'share' });
+    const { result } = renderHook(() => useCommunity());
+
+    await flushDebouncedLoad();
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(mockedService.listTopics).toHaveBeenCalledWith(
+      expect.objectContaining({ topicType: 'share', offset: 0, limit: COMMUNITY_PAGE_SIZE }),
+    );
   });
 
   test('使用当前 Human 身份发布主题，成功后加入列表并提示', async () => {
@@ -127,6 +142,99 @@ describe('useCommunity', () => {
     });
     expect(result.current.topics[0]).toEqual(topic);
     expect(notifySuccess).toHaveBeenCalledWith('主题发布成功');
+  });
+
+  test('当前类型筛选不匹配时发布成功但不插入列表', async () => {
+    const sharedTopic: CommunityTopic = {
+      ...topic,
+      id: 'share-1',
+      topicType: 'share',
+      topicConfig: { share: { attachmentIds: ['attachment-1'], attachments: [] } },
+    };
+    useCommunityStore.setState({ topicType: 'help' });
+    mockedService.listTopics.mockResolvedValue({ items: [], total: 0 });
+    mockedService.createTopic.mockResolvedValue(sharedTopic);
+    const { result } = renderHook(() => useCommunity());
+    await flushDebouncedLoad();
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      expect(
+        await result.current.publishTopic({
+          title: '分享资料',
+          body: '请查收',
+          topicType: 'share',
+          share: { attachmentIds: ['attachment-1'] },
+        }),
+      ).toBe(true);
+    });
+
+    expect(result.current.topics).toEqual([]);
+    expect(notifySuccess).toHaveBeenCalledWith('主题发布成功');
+  });
+
+  test('上传附件使用当前 Human 身份', async () => {
+    const attachment: CommunityAttachment = {
+      id: 'attachment-1',
+      filename: 'guide.pdf',
+      contentType: 'application/pdf',
+      sizeBytes: 5,
+    };
+    mockedService.uploadAttachment.mockResolvedValue(attachment);
+    const { result } = renderHook(() => useCommunity());
+    await flushDebouncedLoad();
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const file = new File(['guide'], 'guide.pdf', { type: 'application/pdf' });
+
+    await expect(result.current.uploadAttachment(file)).resolves.toEqual(attachment);
+    expect(mockedService.uploadAttachment).toHaveBeenCalledWith(file, '900003');
+  });
+
+  test('下载附件生成临时链接并触发浏览器下载', async () => {
+    const attachment: CommunityAttachment = {
+      id: 'attachment-1',
+      filename: 'guide.pdf',
+      contentType: 'application/pdf',
+      sizeBytes: 5,
+    };
+    const blob = new Blob(['guide'], { type: 'application/pdf' });
+    mockedService.downloadAttachment.mockResolvedValue(blob);
+    const createObjectURL = jest.fn(() => 'blob:guide');
+    const revokeObjectURL = jest.fn();
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL });
+    const click = jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    const { result } = renderHook(() => useCommunity());
+    await flushDebouncedLoad();
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.downloadAttachment(attachment);
+    });
+
+    expect(mockedService.downloadAttachment).toHaveBeenCalledWith('attachment-1');
+    expect(createObjectURL).toHaveBeenCalledWith(blob);
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:guide');
+    click.mockRestore();
+  });
+
+  test('下载附件失败时展示错误提示', async () => {
+    mockedService.downloadAttachment.mockRejectedValue(new Error('下载被拒绝'));
+    const { result } = renderHook(() => useCommunity());
+    await flushDebouncedLoad();
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.downloadAttachment({
+        id: 'attachment-1',
+        filename: 'guide.pdf',
+        contentType: 'application/pdf',
+        sizeBytes: 5,
+      });
+    });
+
+    expect(notifyError).toHaveBeenCalledWith('下载被拒绝', { title: '下载失败' });
   });
 
   test('发布投票主题时透传 Topic 级 poll 配置', async () => {
@@ -166,7 +274,8 @@ describe('useCommunity', () => {
     });
   });
 
-  test('打开详情加载主题与第 1 页回复（page=1/pageSize=COMMUNITY_REPLY_PAGE_SIZE），结帖带 author_id：优先主题作者', async () => {
+  test('打开详情加载主题与第 1 页回复（每页 10 条），结帖带 author_id：优先主题作者', async () => {
+    expect(COMMUNITY_REPLY_PAGE_SIZE).toBe(10);
     mockedService.getTopic.mockResolvedValue(topic);
     const { result } = renderHook(() => useCommunity());
     await flushDebouncedLoad();

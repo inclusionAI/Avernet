@@ -1,10 +1,13 @@
 import type {
+  CommunityAttachment,
   CommunityAuthor,
+  CommunityHelp,
   CommunityPoll,
   CommunityPollSelection,
   CommunityPollStats,
   CommunityPollStatsOption,
   CommunityReply,
+  CommunityShare,
   CommunityTopic,
   CommunityTopicType,
 } from './types';
@@ -16,8 +19,29 @@ export interface CommunityAuthorDto {
   avatar_url?: string | null;
 }
 
+export interface CommunityAttachmentDto {
+  attachment_id?: string;
+  filename?: string;
+  content_type?: string;
+  size_bytes?: number;
+  [key: string]: unknown;
+}
+
+export interface CommunityShareDto {
+  attachment_ids?: string[] | null;
+  attachments?: CommunityAttachmentDto[] | null;
+  [key: string]: unknown;
+}
+
+export interface CommunityHelpDto {
+  expected_time?: string | null;
+  [key: string]: unknown;
+}
+
 export interface CommunityTopicConfigDto {
   poll?: CommunityPollDto | null;
+  share?: CommunityShareDto | null;
+  help?: CommunityHelpDto | null;
   [key: string]: unknown;
 }
 
@@ -37,7 +61,6 @@ export interface CommunityTopicAnalysisDto {
   summary?: CommunityTopicSummaryDto | null;
   tags?: string[] | null;
   poll_stats?: CommunityPollStatsDto | null;
-
   [key: string]: unknown;
 }
 
@@ -55,6 +78,8 @@ export interface CommunityTopicDto {
   author_type?: string;
   author_id?: string;
   author?: CommunityAuthorDto;
+  display_name?: string;
+  avatar_url?: string | null;
   reply_count?: number;
   latest_activity_at?: string;
   updated_at?: string;
@@ -75,6 +100,8 @@ export interface CommunityReplyDto {
   author_type?: string;
   author_id?: string;
   author?: CommunityAuthorDto;
+  display_name?: string;
+  avatar_url?: string | null;
   created_at?: string;
   updated_at?: string;
   [key: string]: unknown;
@@ -88,8 +115,6 @@ function asAuthorDto(dto: {
   avatar_url?: string | null;
 }): CommunityAuthorDto {
   if (dto.author) return dto.author;
-  // openapi §4.1 列表项把 author_type/author_id/display_name/avatar_url 平铺（详情/楼层接口无此平铺）；
-  // 透传 display_name/avatar_url，避免后端 enrich 后前端拿不到展示名/头像（mapAuthor 兜底 id/匿名）。
   return {
     actor_type: dto.author_type,
     actor_id: dto.author_id,
@@ -120,9 +145,20 @@ export interface CommunityPollDto {
   [key: string]: unknown;
 }
 
+export function mapCommunityAttachmentDto(dto: CommunityAttachmentDto): CommunityAttachment {
+  return {
+    id: dto.attachment_id?.trim() || '',
+    filename: dto.filename?.trim() || '未命名附件',
+    contentType: dto.content_type?.trim() || 'application/octet-stream',
+    sizeBytes: typeof dto.size_bytes === 'number' ? dto.size_bytes : 0,
+  };
+}
+
 function mapTopicType(value: string | undefined): CommunityTopicType {
   const normalized = value?.trim().toLowerCase();
+  if (normalized === 'share') return 'share';
   if (normalized === 'poll') return 'poll';
+  if (normalized === 'help') return 'help';
   if (normalized === 'notice') return 'notice';
   return 'discussion';
 }
@@ -140,6 +176,23 @@ function mapPoll(value: CommunityPollDto | null | undefined): CommunityPoll | un
     options,
     deadlineAt: value.deadline_at?.trim() || undefined,
   };
+}
+
+function mapShare(value: CommunityShareDto | null | undefined): CommunityShare | undefined {
+  if (!value) return undefined;
+  const attachmentIds = (Array.isArray(value.attachment_ids) ? value.attachment_ids : [])
+    .map((id) => id.trim())
+    .filter(Boolean);
+  const attachments = (Array.isArray(value.attachments) ? value.attachments : [])
+    .map(mapCommunityAttachmentDto)
+    .filter((attachment) => attachment.id);
+  if (!attachmentIds.length && !attachments.length) return undefined;
+  return { attachmentIds, attachments };
+}
+
+function mapHelp(value: CommunityHelpDto | null | undefined): CommunityHelp | undefined {
+  if (!value) return undefined;
+  return { expectedTime: value.expected_time?.trim() || undefined };
 }
 
 function mapPollStats(
@@ -180,9 +233,7 @@ function mapPollStats(
 }
 
 function mapTags(value: string[] | null | undefined): string[] {
-  return (Array.isArray(value) ? value : [])
-    .map((tag) => tag.trim())
-    .filter(Boolean);
+  return (Array.isArray(value) ? value : []).map((tag) => tag.trim()).filter(Boolean);
 }
 
 function mapTopicViewer(value: CommunityTopicViewerDto | null | undefined) {
@@ -200,7 +251,13 @@ function mapTopicViewer(value: CommunityTopicViewerDto | null | undefined) {
 
 function mapTopicConfig(value: CommunityTopicConfigDto | null | undefined) {
   if (!value) return undefined;
-  return { poll: mapPoll(value.poll) };
+  const config = {
+    poll: mapPoll(value.poll),
+    share: mapShare(value.share),
+    help: mapHelp(value.help),
+  };
+  if (!config.poll && !config.share && !config.help) return undefined;
+  return config;
 }
 
 function mapTopicSummary(value: CommunityTopicSummaryDto | null | undefined) {
@@ -237,10 +294,7 @@ export function mapCommunityTopicDto(dto: CommunityTopicDto): CommunityTopic {
   const body = dto.body ?? dto.body_preview ?? '';
   const latestActivityAt = dto.latest_activity_at ?? dto.updated_at ?? dto.created_at ?? undefined;
   const topicConfig = mapTopicConfig(dto.topic_config);
-  const analysis = mapTopicAnalysis(
-    dto.analysis,
-    topicConfig?.poll?.options ?? [],
-  );
+  const analysis = mapTopicAnalysis(dto.analysis, topicConfig?.poll?.options ?? []);
   return {
     id: dto.topic_id?.trim() || '',
     title: dto.title?.trim() || '未命名主题',

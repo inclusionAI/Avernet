@@ -39,11 +39,12 @@ function renderDetail(overrides: Partial<DetailProps> = {}) {
     closing: false,
     onBack: jest.fn(),
     onCloseTopic: jest.fn(),
+    onDownloadAttachment: jest.fn(),
     replyLoading: false,
     replyError: null,
     replyPage: 1,
     replyPageCount: 1,
-    replyPageSize: 20,
+    replyPageSize: 10,
     onGoToReplyPage: jest.fn(),
     ...overrides,
   };
@@ -121,6 +122,45 @@ describe('CommunityTopicDetail', () => {
     expect(screen.queryByRole('textbox', { name: '回复正文' })).not.toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: '投票理由' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '发送回复' })).not.toBeInTheDocument();
+  });
+
+  test('分享主题展示真实附件 metadata 并触发下载', () => {
+    const attachment = {
+      id: 'attachment-1',
+      filename: '方案.pdf',
+      contentType: 'application/pdf',
+      sizeBytes: 2048,
+    };
+    const { props } = renderDetail({
+      topic: {
+        ...topic,
+        topicType: 'share',
+        topicConfig: { share: { attachmentIds: [attachment.id], attachments: [attachment] } },
+      },
+    });
+
+    expect(screen.getByRole('region', { name: '分享附件' })).toBeInTheDocument();
+    expect(screen.getByText('方案.pdf')).toBeInTheDocument();
+    expect(screen.getByText('2.0 KiB')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '下载' }));
+    expect(props.onDownloadAttachment).toHaveBeenCalledWith(attachment);
+  });
+
+  test('求助主题展示期望时间，关闭后显示已解决', () => {
+    renderDetail({
+      topic: {
+        ...topic,
+        status: 'closed',
+        canClose: false,
+        topicType: 'help',
+        topicConfig: { help: { expectedTime: '希望本周内' } },
+      },
+    });
+
+    expect(screen.getByText('求助')).toHaveClass('text-warning');
+    expect(screen.getByText('已解决')).toHaveClass('text-success');
+    expect(screen.getByText('希望本周内')).toBeInTheDocument();
+    expect(screen.queryByText('已结帖')).not.toBeInTheDocument();
   });
 
   test('加载中显示骨架占位、不渲染楼层', () => {

@@ -1,5 +1,8 @@
 import type { CommunityGateway } from '../../../src/services/community/communityGateway';
-import { CommunityService } from '../../../src/services/community/communityService';
+import {
+  MAX_COMMUNITY_ATTACHMENT_BYTES,
+  CommunityService,
+} from '../../../src/services/community/communityService';
 
 function gateway(overrides: Partial<CommunityGateway> = {}): CommunityGateway {
   return {
@@ -18,6 +21,13 @@ function gateway(overrides: Partial<CommunityGateway> = {}): CommunityGateway {
       canClose: true,
     })),
     listReplies: jest.fn(async () => ({ items: [], total: 0 })),
+    uploadAttachment: jest.fn(async (file) => ({
+      id: 'attachment-1',
+      filename: file.name,
+      contentType: file.type || 'application/octet-stream',
+      sizeBytes: file.size,
+    })),
+    downloadAttachment: jest.fn(async () => new Blob(['content'])),
     createReply: jest.fn(async () => 'created-reply'),
     createTopic: jest.fn(async (input) => ({
       id: 'created',
@@ -223,6 +233,125 @@ describe('CommunityService', () => {
       },
       undefined,
     );
+  });
+
+
+  test('validates attachment size and forwards upload/download', async () => {
+    const uploaded = {
+      id: 'attachment-1',
+      filename: 'guide.pdf',
+      contentType: 'application/pdf',
+      sizeBytes: 3,
+    };
+    const uploadAttachment = jest.fn(async () => uploaded);
+    const downloaded = new Blob(['guide'], { type: 'application/pdf' });
+    const downloadAttachment = jest.fn(async () => downloaded);
+    const service = new CommunityService(gateway({ uploadAttachment, downloadAttachment }));
+
+    await expect(service.uploadAttachment(new File([], 'empty.txt'), 'u1')).rejects.toThrow('不能上传空文件');
+    const oversized = new File(['x'], 'huge.bin');
+    Object.defineProperty(oversized, 'size', { value: MAX_COMMUNITY_ATTACHMENT_BYTES + 1 });
+    await expect(service.uploadAttachment(oversized, 'u1')).rejects.toThrow('单个附件不能超过 20 MiB');
+    expect(uploadAttachment).not.toHaveBeenCalled();
+
+    const file = new File(['pdf'], 'guide.pdf', { type: 'application/pdf' });
+    await expect(service.uploadAttachment(file, 'u1')).resolves.toEqual(uploaded);
+    expect(uploadAttachment).toHaveBeenCalledWith(file, 'u1', undefined);
+
+    await expect(service.downloadAttachment('attachment-1')).resolves.toBe(downloaded);
+    expect(downloadAttachment).toHaveBeenCalledWith('attachment-1', undefined);
+  });
+
+  test('normalizes share attachment ids and rejects missing, duplicate, or excessive attachments', async () => {
+    const createTopic = jest.fn(async (input) => ({
+      id: 'share-topic',
+      title: input.title,
+      body: input.body,
+      status: 'open' as const,
+      topicType: 'share' as const,
+      topicConfig: { share: { attachmentIds: input.share?.attachmentIds ?? [], attachments: [] } },
+      author: { type: 'human' as const, id: input.authorId, displayName: input.authorName },
+      replyCount: 0,
+      latestActivityAt: '',
+      createdAt: '',
+      isMine: true,
+      canClose: true,
+    }));
+    const service = new CommunityService(gateway({ createTopic }));
+    const base = {
+      title: ' 分享资料 ',
+      body: ' 正文 ',
+      topicType: 'share' as const,
+      authorId: 'u1',
+      authorName: '我',
+    };
+
+    await expect(service.createTopic({ ...base, share: { attachmentIds: [] } })).rejects.toThrow(
+      '分享主题需要上传 1–5 个附件',
+    );
+    await expect(
+      service.createTopic({ ...base, share: { attachmentIds: ['attachment-1', ' attachment-1 '] } }),
+    ).rejects.toThrow('分享附件不能重复');
+    await expect(
+      service.createTopic({
+        ...base,
+        share: { attachmentIds: ['a1', 'a2', 'a3', 'a4', 'a5', 'a6'] },
+      }),
+    ).rejects.toThrow('分享主题需要上传 1–5 个附件');
+
+    await service.createTopic({ ...base, share: { attachmentIds: [' attachment-1 ', 'attachment-2'] } });
+    expect(createTopic).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        title: '分享资料',
+        body: '正文',
+        share: { attachmentIds: ['attachment-1', 'attachment-2'] },
+      }),
+      undefined,
+    );
+  });
+
+  test('enforces poll option limit and trims optional help expected time', async () => {
+    const createTopic = jest.fn(async (input) => ({
+      id: 'topic-created',
+      title: input.title,
+      body: input.body,
+      status: 'open' as const,
+      topicType: input.topicType ?? ('discussion' as const),
+      author: { type: 'human' as const, id: input.authorId, displayName: input.authorName },
+      replyCount: 0,
+      latestActivityAt: '',
+      createdAt: '',
+      isMine: true,
+      canClose: true,
+    }));
+    const service = new CommunityService(gateway({ createTopic }));
+    const common = { title: '标题', body: '正文', authorId: 'u1', authorName: '我' };
+
+    await expect(
+      service.createTopic({
+        ...common,
+        topicType: 'poll',
+        poll: { selection: 'single', options: Array.from({ length: 11 }, (_, index) => `选项 ${index + 1}`) },
+      }),
+    ).rejects.toThrow('投票选项最多 10 个');
+
+    await service.createTopic({
+      ...common,
+      topicType: 'help',
+      help: { expectedTime: ' 希望本周内 ' },
+    });
+    expect(createTopic).toHaveBeenLastCalledWith(
+      expect.objectContaining({ help: { expectedTime: '希望本周内' } }),
+      undefined,
+    );
+
+    await expect(
+      service.createTopic({
+        ...common,
+        topicType: 'help',
+        help: { expectedTime: 'x'.repeat(129) },
+      }),
+    ).rejects.toThrow('期望解决时间不能超过 128 个字符');
   });
 
   test('closeTopic 透传 author_id 到网关', async () => {

@@ -15,18 +15,23 @@ from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     CreateReplyRequestUnified,
     PollSelectionRequest,
     CreateTopicRequestUnified,
+    HelpConfigRequest,
     PollConfigRequest,
+    ShareConfigRequest,
     TopicConfigRequest,
     TopicDetail,
 )
 from agentclaw.community.core.errors import Conflict, Forbidden, NotFound
 from agentclaw.community.core.task.forum.models import (
+    ForumAttachmentRecord,
+    ForumHelpConfig,
     ForumPollConfig,
     ForumPollSelection,
     ForumPollResultOptionRecord,
     ForumPollResultRecord,
     ForumPostRecord,
     ForumReplyCreateResult,
+    ForumShareConfig,
     ForumTopicCreateResult,
     ForumTopicRecord,
     ForumTopicAnalysisRecord,
@@ -223,6 +228,143 @@ async def test_create_topic_unified_translates_topic_config():
             deadline_at=_NOW,
         )
     )
+
+
+@pytest.mark.asyncio
+async def test_create_topic_unified_translates_share_config():
+    service = _write_service(_topic_result(True))
+
+    await create_topic_unified(
+        body=CreateTopicRequestUnified(
+            author_type="HUMAN",
+            author_id="user-a",
+            client_request_id="req-share",
+            title="share",
+            body="Download the reference",
+            topic_type="SHARE",
+            topic_config=TopicConfigRequest(
+                share=ShareConfigRequest(
+                    attachment_ids=["attachment_1", "attachment_2"]
+                )
+            ),
+        ),
+        request=_request("POST", "/openapi/v1/collaboration/tasks/bbs/topics"),
+        response=Response(),
+        service=service,
+    )
+
+    assert service.calls[0]["topic_config"] == ForumTopicConfig(
+        share=ForumShareConfig(
+            attachment_ids=("attachment_1", "attachment_2")
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_topic_unified_translates_help_config():
+    service = _write_service(_topic_result(True))
+
+    await create_topic_unified(
+        body=CreateTopicRequestUnified(
+            author_type="HUMAN",
+            author_id="user-a",
+            client_request_id="req-help",
+            title="help",
+            body="How can I debug this?",
+            topic_type="HELP",
+            topic_config=TopicConfigRequest(
+                help=HelpConfigRequest(expected_time="希望本周内")
+            ),
+        ),
+        request=_request("POST", "/openapi/v1/collaboration/tasks/bbs/topics"),
+        response=Response(),
+        service=service,
+    )
+
+    assert service.calls[0]["topic_config"] == ForumTopicConfig(
+        help=ForumHelpConfig(expected_time="希望本周内")
+    )
+
+
+def test_topic_detail_returns_share_attachment_metadata_in_config_order():
+    attachments = tuple(
+        ForumAttachmentRecord(
+            attachment_id=f"attachment_{index}",
+            author_type="HUMAN",
+            author_id="user-a",
+            topic_id="topic_share",
+            filename=f"file-{index}.txt",
+            content_type="text/plain",
+            size_bytes=index,
+            object_key=f"bbs/attachments/scope/attachment_{index}",
+            created_at=_NOW,
+        )
+        for index in (1, 2)
+    )
+    payload = TopicDetail.from_record(
+        ForumTopicRecord(
+            topic_id="topic_share",
+            author_type="HUMAN",
+            author_id="user-a",
+            title="Share",
+            body="Reference files",
+            status="OPEN",
+            topic_type="SHARE",
+            topic_config=ForumTopicConfig(
+                share=ForumShareConfig(
+                    attachment_ids=("attachment_1", "attachment_2")
+                )
+            ),
+            attachments=attachments,
+            analysis=ForumTopicAnalysisRecord(),
+            created_at=_NOW,
+            updated_at=_NOW,
+        )
+    )
+
+    assert payload.topic_config is not None
+    assert payload.topic_config.share is not None
+    assert payload.topic_config.share.model_dump() == {
+        "attachment_ids": ["attachment_1", "attachment_2"],
+        "attachments": [
+            {
+                "attachment_id": "attachment_1",
+                "filename": "file-1.txt",
+                "content_type": "text/plain",
+                "size_bytes": 1,
+            },
+            {
+                "attachment_id": "attachment_2",
+                "filename": "file-2.txt",
+                "content_type": "text/plain",
+                "size_bytes": 2,
+            },
+        ],
+    }
+
+
+def test_topic_detail_returns_help_expected_time():
+    payload = TopicDetail.from_record(
+        ForumTopicRecord(
+            topic_id="topic_help",
+            author_type="HUMAN",
+            author_id="user-a",
+            title="Help",
+            body="Need help",
+            status="OPEN",
+            topic_type="HELP",
+            topic_config=ForumTopicConfig(
+                help=ForumHelpConfig(expected_time="希望本周内")
+            ),
+            analysis=ForumTopicAnalysisRecord(),
+            created_at=_NOW,
+            updated_at=_NOW,
+        )
+    )
+
+    assert payload.topic_config is not None
+    assert payload.topic_config.help is not None
+    assert payload.topic_config.help.expected_time == "希望本周内"
 
 
 def test_topic_detail_returns_topic_config_and_analysis():

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from typing import Annotated
+from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Path, Query, Request, Response
+from fastapi import APIRouter, Depends, File, Form, Path, Query, Request, Response, UploadFile
+from fastapi.responses import Response as BinaryResponse
 
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
@@ -21,9 +23,13 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 )
 from agentclaw.community.core.errors import Forbidden
 from agentclaw.community.core.task.forum.models import (
+    MAX_ATTACHMENT_BYTES,
     MAX_AUTHOR_ID_LENGTH,
     MAX_AUTHOR_TYPE_LENGTH,
     MAX_SEARCH_KEYWORD_LENGTH,
+)
+from agentclaw.community.core.task.forum.attachment_service_protocol import (
+    ForumAttachmentServiceProtocol,
 )
 from agentclaw.community.core.task.forum.service_protocol import ForumServiceProtocol
 from agentclaw.community.di import Injected
@@ -32,6 +38,7 @@ from agentclaw.community.adapters.http.task.bbs.author_enricher import (
     enrich_bot_display_names,
 )
 
+from .attachment_schemas import AttachmentUploaded
 from .schemas import (
     BrowseReportCreated,
     CloseTopicRequestUnified,
@@ -65,6 +72,63 @@ TopicIdPath = Annotated[
     ),
 ]
 
+@read_router.post(
+    "/attachments",
+    response_model=Envelope[AttachmentUploaded],
+    status_code=201,
+    dependencies=[Depends(require_principal)],
+)
+@envelope_errors
+async def upload_attachment(
+    request: Request,
+    author_type: str = Form(..., max_length=MAX_AUTHOR_TYPE_LENGTH),
+    author_id: str = Form(..., max_length=MAX_AUTHOR_ID_LENGTH),
+    file: UploadFile = File(...),
+    service: ForumAttachmentServiceProtocol = Injected(
+        ForumAttachmentServiceProtocol
+    ),
+) -> Envelope[AttachmentUploaded]:
+    """Store one real file and return the opaque id used by SHARE Topics."""
+    filename = file.filename or ""
+    content_type = file.content_type
+    try:
+        content = await file.read(MAX_ATTACHMENT_BYTES + 1)
+    finally:
+        await file.close()
+    attachment = service.upload_attachment(
+        author_type=author_type,
+        author_id=author_id,
+        filename=filename,
+        content_type=content_type,
+        content=content,
+    )
+    return created(AttachmentUploaded.from_record(attachment), request)
+
+
+@read_router.get(
+    "/attachments/{attachment_id}/content",
+    dependencies=[Depends(require_principal)],
+)
+@envelope_errors
+async def download_attachment(
+    attachment_id: str,
+    request: Request,
+    service: ForumAttachmentServiceProtocol = Injected(
+        ForumAttachmentServiceProtocol
+    ),
+) -> BinaryResponse:
+    """Download the real stored bytes for one tenant-scoped attachment."""
+    result = service.download_attachment(attachment_id=attachment_id)
+    filename = quote(result.attachment.filename, safe="")
+    return BinaryResponse(
+        content=result.content,
+        media_type=result.attachment.content_type,
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{filename}"
+        },
+    )
+
+
 @read_router.get(
     "/topics",
     response_model=Envelope[Page[TopicListItem]],
@@ -87,7 +151,7 @@ async def list_topics(
     topic_type: str | None = Query(
         default=None,
         max_length=16,
-        description="Optional Topic type: DISCUSSION, POLL, or NOTICE.",
+        description="Optional Topic type: DISCUSSION, SHARE, POLL, HELP, or NOTICE.",
     ),
     author_id: str | None = Query(
         default=None,

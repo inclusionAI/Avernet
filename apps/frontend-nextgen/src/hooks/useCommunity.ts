@@ -7,6 +7,7 @@ import { communityService } from '@/services/community';
 import { useCommunityStore } from '@/stores/communityStore';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useBotAuthorEnricher } from './useBotAuthorEnricher';
+import { useCommunityAttachments } from './useCommunityAttachments';
 import { useCommunityReplies } from './useCommunityReplies';
 import { useHumanIdentity } from './useHumanIdentity';
 
@@ -16,12 +17,12 @@ export function useCommunity() {
   const store = useCommunityStore();
   const { identity } = useHumanIdentity();
   const currentUserId = identity?.userId.trim() ?? '';
+  const { uploadAttachment, downloadAttachment } = useCommunityAttachments(currentUserId);
   // BOT 作者名兜底：后端 §4.1 不返 BOT作者 display_name 时，用本人 owned bots 的 bot_name 兜底。
   const { enrichTopicBotAuthor, botNameById } = useBotAuthorEnricher(currentUserId);
 
   const [publishing, setPublishing] = useState(false);
   const [closing, setClosing] = useState(false);
-  // 列表无限滚动
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
@@ -54,6 +55,7 @@ export function useCommunity() {
       const page = await communityService.listTopics({
         search: store.query,
         scope: store.scope,
+        topicType: store.topicType,
         // “我的”走 openapi §2.4 author_id 真分页：下发本人工号，后端过滤、total 为过滤后行数。
         ...(store.scope === 'mine' && currentUserId ? { authorId: currentUserId } : {}),
         offset: 0,
@@ -79,6 +81,7 @@ export function useCommunity() {
     store.setTopics,
     store.query,
     store.scope,
+    store.topicType,
   ]);
 
   useEffect(() => {
@@ -111,6 +114,7 @@ export function useCommunity() {
       const page = await communityService.listTopics({
         search: store.query,
         scope: store.scope,
+        topicType: store.topicType,
         ...(store.scope === 'mine' && currentUserId ? { authorId: currentUserId } : {}),
         offset: previousCount,
         limit: COMMUNITY_PAGE_SIZE,
@@ -132,6 +136,7 @@ export function useCommunity() {
     store.appendTopics,
     store.query,
     store.scope,
+    store.topicType,
     store.topics.length,
   ]);
 
@@ -181,7 +186,9 @@ export function useCommunity() {
           authorAvatarUrl: author.avatarUrl,
         });
         // 新发布的主题必为本人 → isMine/canClose 直接置真，无需依赖后端未返的 is_mine。
-        store.prependTopic(enrichOwnership(topic, currentUserId));
+        if (store.topicType === 'all' || store.topicType === topic.topicType) {
+          store.prependTopic(enrichOwnership(topic, currentUserId));
+        }
         notifySuccess('主题发布成功');
         return true;
       } catch (error) {
@@ -191,7 +198,13 @@ export function useCommunity() {
         setPublishing(false);
       }
     },
-    [currentUserId, identity?.avatarUrl, identity?.displayName, store.prependTopic],
+    [
+      currentUserId,
+      identity?.avatarUrl,
+      identity?.displayName,
+      store.prependTopic,
+      store.topicType,
+    ],
   );
 
   const closeTopic = useCallback(async () => {
@@ -211,8 +224,7 @@ export function useCommunity() {
     } finally {
       setClosing(false);
     }
-  }, [currentUserId, store.markTopicClosed, store.selectedTopic]);
-
+  }, [store.markTopicClosed, store.selectedTopic]);
 
   return {
     ...store,
@@ -226,6 +238,8 @@ export function useCommunity() {
     openTopic,
     closeDetail,
     publishTopic,
+    uploadAttachment,
+    downloadAttachment,
     closeTopic,
     publishing,
     closing,

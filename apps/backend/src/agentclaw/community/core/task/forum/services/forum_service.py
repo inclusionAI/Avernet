@@ -25,8 +25,10 @@ from agentclaw.community.core.task.forum.models import (
     MAX_AUTHOR_DISPLAY_NAME_LENGTH,
     MAX_AUTHOR_AVATAR_URL_LENGTH,
     MAX_ID_LENGTH,
+    MAX_HELP_EXPECTED_TIME_LENGTH,
     MAX_POLL_OPTION_COUNT,
     MAX_POLL_OPTION_LENGTH,
+    MAX_SHARE_ATTACHMENT_COUNT,
     MIN_POLL_OPTION_COUNT,
     MAX_SEARCH_KEYWORD_LENGTH,
     MAX_TITLE_LENGTH,
@@ -36,10 +38,14 @@ from agentclaw.community.core.task.forum.models import (
     TOPIC_STATUSES,
     TOPIC_STATUS_CLOSED,
     TOPIC_STATUS_LOCKED,
+    TOPIC_TYPE_HELP,
     TOPIC_TYPE_POLL,
+    TOPIC_TYPE_SHARE,
     TOPIC_TYPES,
+    ForumHelpConfig,
     ForumPollConfig,
     ForumPollSelection,
+    ForumShareConfig,
     ForumTopicConfig,
     ForumPostPage,
     ForumReplyCreateResult,
@@ -163,16 +169,10 @@ class ForumService(ForumServiceProtocol):
         normalized_body = self._required_text(body, "body", MAX_BODY_LENGTH)
         normalized_topic_type = self._topic_type(topic_type) or "DISCUSSION"
         normalized_config = self._topic_config(topic_config)
-        if normalized_topic_type == TOPIC_TYPE_POLL and (
-            normalized_config is None or normalized_config.poll is None
-        ):
-            raise ValidationError(
-                "topic_config.poll is required when topic_type is POLL"
-            )
-        if normalized_topic_type != TOPIC_TYPE_POLL and normalized_config is not None:
-            raise ValidationError(
-                "topic_config is only allowed when topic_type is POLL"
-            )
+        self._validate_topic_config_for_type(
+            normalized_topic_type,
+            normalized_config,
+        )
         normalized_display_name = self._optional_text(
             author_display_name, "author_display_name",
             MAX_AUTHOR_DISPLAY_NAME_LENGTH,
@@ -361,9 +361,90 @@ class ForumService(ForumServiceProtocol):
             return None
         if not isinstance(value, ForumTopicConfig):
             raise ValidationError("topic_config must be a topic configuration object")
-        if set(value.__dict__) - {"poll"}:
+        if set(value.__dict__) - {"poll", "share", "help"}:
             raise ValidationError("topic_config contains unsupported fields")
-        return ForumTopicConfig(poll=cls._poll_config(value.poll))
+        normalized = ForumTopicConfig(
+            poll=cls._poll_config(value.poll),
+            share=cls._share_config(value.share),
+            help=cls._help_config(value.help),
+        )
+        configured_sections = sum(
+            section is not None
+            for section in (normalized.poll, normalized.share, normalized.help)
+        )
+        if configured_sections > 1:
+            raise ValidationError("topic_config must contain exactly one section")
+        return None if configured_sections == 0 else normalized
+
+    @staticmethod
+    def _validate_topic_config_for_type(
+        topic_type: str,
+        config: ForumTopicConfig | None,
+    ) -> None:
+        if topic_type == TOPIC_TYPE_POLL:
+            if config is None or config.poll is None:
+                raise ValidationError(
+                    "topic_config.poll is required when topic_type is POLL"
+                )
+            return
+        if topic_type == TOPIC_TYPE_SHARE:
+            if config is None or config.share is None:
+                raise ValidationError(
+                    "topic_config.share is required when topic_type is SHARE"
+                )
+            return
+        if topic_type == TOPIC_TYPE_HELP:
+            if config is not None and config.help is None:
+                raise ValidationError(
+                    "only topic_config.help is allowed when topic_type is HELP"
+                )
+            return
+        if config is not None:
+            raise ValidationError(
+                "topic_config is only allowed for POLL, SHARE, or HELP topics"
+            )
+
+    @classmethod
+    def _share_config(cls, value: ForumShareConfig | None) -> ForumShareConfig | None:
+        if value is None:
+            return None
+        if not isinstance(value, ForumShareConfig):
+            raise ValidationError("share must be a share configuration")
+        raw_attachment_ids = value.attachment_ids
+        if not isinstance(raw_attachment_ids, (list, tuple)):
+            raise ValidationError("share.attachment_ids must be a list")
+        if not 1 <= len(raw_attachment_ids) <= MAX_SHARE_ATTACHMENT_COUNT:
+            raise ValidationError(
+                "share.attachment_ids must contain between 1 and "
+                f"{MAX_SHARE_ATTACHMENT_COUNT} entries"
+            )
+        attachment_ids = tuple(
+            cls._required_text(
+                attachment_id,
+                "share.attachment_ids",
+                MAX_ID_LENGTH,
+            )
+            for attachment_id in raw_attachment_ids
+        )
+        if len(attachment_ids) != len(set(attachment_ids)):
+            raise ValidationError(
+                "share.attachment_ids must not contain duplicates"
+            )
+        return ForumShareConfig(attachment_ids=attachment_ids)
+
+    @classmethod
+    def _help_config(cls, value: ForumHelpConfig | None) -> ForumHelpConfig | None:
+        if value is None:
+            return None
+        if not isinstance(value, ForumHelpConfig):
+            raise ValidationError("help must be a help configuration")
+        return ForumHelpConfig(
+            expected_time=cls._optional_text(
+                value.expected_time,
+                "help.expected_time",
+                MAX_HELP_EXPECTED_TIME_LENGTH,
+            )
+        )
 
     @classmethod
     def _poll_config(cls, value: ForumPollConfig | None) -> ForumPollConfig | None:

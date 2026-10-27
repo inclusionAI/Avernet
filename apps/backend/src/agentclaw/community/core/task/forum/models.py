@@ -14,6 +14,11 @@ MAX_BODY_LENGTH = 20_000
 MAX_AUTHOR_DISPLAY_NAME_LENGTH = 256
 MAX_AUTHOR_AVATAR_URL_LENGTH = 1024
 MAX_SEARCH_KEYWORD_LENGTH = 256
+MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
+MAX_ATTACHMENT_FILENAME_UTF8_BYTES = 255
+MAX_ATTACHMENT_CONTENT_TYPE_LENGTH = 255
+MAX_SHARE_ATTACHMENT_COUNT = 5
+MAX_HELP_EXPECTED_TIME_LENGTH = 128
 
 AUTHOR_TYPE_BOT = "BOT"
 AUTHOR_TYPE_HUMAN = "HUMAN"
@@ -28,14 +33,24 @@ TOPIC_STATUSES = frozenset(
 
 TOPIC_TYPE_DISCUSSION = "DISCUSSION"
 TOPIC_TYPE_POLL = "POLL"
+TOPIC_TYPE_SHARE = "SHARE"
+TOPIC_TYPE_HELP = "HELP"
 TOPIC_TYPE_NOTICE = "NOTICE"
-TOPIC_TYPES = frozenset({TOPIC_TYPE_DISCUSSION, TOPIC_TYPE_POLL, TOPIC_TYPE_NOTICE})
+TOPIC_TYPES = frozenset(
+    {
+        TOPIC_TYPE_DISCUSSION,
+        TOPIC_TYPE_SHARE,
+        TOPIC_TYPE_POLL,
+        TOPIC_TYPE_HELP,
+        TOPIC_TYPE_NOTICE,
+    }
+)
 
 POLL_SELECTION_SINGLE = "SINGLE"
 POLL_SELECTION_MULTI = "MULTI"
 POLL_SELECTIONS = frozenset({POLL_SELECTION_SINGLE, POLL_SELECTION_MULTI})
 MIN_POLL_OPTION_COUNT = 2
-MAX_POLL_OPTION_COUNT = 20
+MAX_POLL_OPTION_COUNT = 10
 MAX_POLL_OPTION_LENGTH = 128
 
 TOPIC_TAG_SOURCE_LLM = "LLM"
@@ -56,6 +71,43 @@ class ForumPollConfig:
     selection: str
     options: tuple[str, ...]
     deadline_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class ForumShareConfig:
+    """Opaque attachment ids bound when a SHARE Topic is created."""
+
+    attachment_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ForumHelpConfig:
+    """Optional product hint for when help is expected."""
+
+    expected_time: str | None = None
+
+
+@dataclass(frozen=True)
+class ForumAttachmentRecord:
+    """Tenant-scoped metadata for one real object-storage attachment."""
+
+    attachment_id: str
+    author_type: str
+    author_id: str
+    topic_id: str | None
+    filename: str
+    content_type: str
+    size_bytes: int
+    object_key: str
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class ForumAttachmentContent:
+    """Metadata plus downloaded bytes returned by the attachment service."""
+
+    attachment: ForumAttachmentRecord
+    content: bytes
 
 
 @dataclass(frozen=True)
@@ -80,6 +132,8 @@ class ForumTopicConfig:
     """
 
     poll: ForumPollConfig | None = None
+    share: ForumShareConfig | None = None
+    help: ForumHelpConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -199,6 +253,7 @@ class ForumTopicRecord:
     display_name: str | None = None
     avatar_url: str | None = None
     viewer: ForumTopicViewerRecord | None = None
+    attachments: tuple[ForumAttachmentRecord, ...] = ()
 
 
 @dataclass(frozen=True)

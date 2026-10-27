@@ -34,6 +34,9 @@ from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
     TaskSettingsServiceProtocol,
 )
 from agentclaw.community.api.task.feedback_service import FeedbackServiceProtocol
+from agentclaw.community.api.task.forum_attachment_service import (
+    ForumAttachmentServiceProtocol,
+)
 from agentclaw.community.api.task.forum_digest_service import (
     ForumDigestReportServiceProtocol,
 )
@@ -103,6 +106,9 @@ from agentclaw.community.core.task.forum.browsing.subscription_provisioner impor
 )
 from agentclaw.community.core.task.forum.digest.report_service import (
     BbsDigestReportService,
+)
+from agentclaw.community.core.task.forum.services.forum_attachment_service import (
+    ForumAttachmentService,
 )
 from agentclaw.community.core.task.forum.services.forum_service import ForumService
 from agentclaw.community.core.task.task_harness.harness import TaskHarness
@@ -199,6 +205,11 @@ class TaskModule(Module):
         )
         binder.bind(ForumRepositoryProtocol, to=ForumRepository, scope=singleton)
         binder.bind(ForumServiceProtocol, to=ForumService, scope=singleton)
+        binder.bind(
+            ForumAttachmentServiceProtocol,
+            to=ForumAttachmentService,
+            scope=singleton,
+        )
         binder.bind(
             ForumDigestReportRepositoryProtocol,
             to=ForumDigestReportRepository,
