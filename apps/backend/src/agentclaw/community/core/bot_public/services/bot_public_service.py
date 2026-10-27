@@ -591,8 +591,13 @@ class BotPublicService(BotPublicServiceProtocol):
         # 更新的字段随 public_scope 联动 (agent→visibility, user→user_visibility)。
         if visibility == "private":
             if self._risk_repository is not None:
-                backend_bot_id = bot_uid.split(":")[0]
-                bot = self._bot_repository.get_by_id_and_owner(backend_bot_id, owner_id)
+                backend_bot_id, separator, entity_id = bot_uid.rpartition(":")
+                if separator and backend_bot_id and entity_id:
+                    bot = self._bot_repository.get_by_id_and_entity(backend_bot_id, entity_id)
+                else:
+                    # Preserve the legacy bare-BCS-identity path for callers
+                    # outside the collaboration Bot addressing contract.
+                    bot = self._bot_repository.get_by_id_and_owner(bot_uid, owner_id)
                 if bot:
                     self._invalidate_observed_risk(bot, public_scope)
             return self._apply_visibility_direct(

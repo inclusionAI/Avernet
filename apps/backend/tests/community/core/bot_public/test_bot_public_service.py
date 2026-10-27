@@ -2749,6 +2749,7 @@ def test_withdrawal_invalidates_only_observed_risk_record_before_publish(scope):
     repository.invalidate_if_current.return_value = True
     bots = MagicMock()
     bots.get_by_id_and_owner.return_value = _make_bot(bot_id="b1", owner_id="u1")
+    bots.get_by_id_and_entity.return_value = _make_bot(bot_id="b1", owner_id="u1")
     service = _make_service(bot_repository=bots, risk_repository=repository)
     if scope == "legacy":
         with patch.object(service, "_publish_directly", return_value={}):
@@ -2764,6 +2765,7 @@ def test_withdrawal_database_failure_stops_external_publish():
     repository.get_current.side_effect = RuntimeError("database unavailable")
     bots = MagicMock()
     bots.get_by_id_and_owner.return_value = _make_bot(bot_id="b1", owner_id="u1")
+    bots.get_by_id_and_entity.return_value = _make_bot(bot_id="b1", owner_id="u1")
     bcn = MagicMock()
     service = _make_service(bot_repository=bots, bcn_service=bcn, risk_repository=repository)
     with pytest.raises(RuntimeError, match="database unavailable"):
@@ -2782,6 +2784,7 @@ def test_withdrawal_does_not_invalidate_newer_replacement_after_race():
     repository.invalidate_if_current.return_value = False
     bots = MagicMock()
     bots.get_by_id_and_owner.return_value = _make_bot(bot_id="b1", owner_id="u1")
+    bots.get_by_id_and_entity.return_value = _make_bot(bot_id="b1", owner_id="u1")
     service = _make_service(bot_repository=bots, risk_repository=repository)
     service.public_bcs_bot("b1:u1", "u1", "user", _make_operator(), visibility="private")
     repository.invalidate_if_current.assert_called_once_with(env="dev", risk_check_id="risk-a", row_version=4)
@@ -2832,3 +2835,18 @@ def test_callback_without_marker_still_blocks_known_risk_approval():
     assert result["success"] is False
     guard.check.assert_called_once()
     bcn.patch_attributes.assert_not_called()
+
+
+def test_new_withdrawal_uses_full_identity_to_select_risk_record():
+    from types import SimpleNamespace
+    bots = MagicMock()
+    bots.get_by_id_and_owner.return_value = {**_make_bot(bot_id='default', owner_id='owner'), 'id': 42, 'entity_id': 'entity-a'}
+    bots.get_by_id_and_entity.return_value = {**_make_bot(bot_id='default', owner_id='owner'), 'id': 77, 'entity_id': 'entity-b'}
+    repository = MagicMock()
+    repository.get_current.return_value = SimpleNamespace(risk_check_id='risk-b', row_version=4)
+    repository.invalidate_if_current.return_value = True
+    service = _make_service(bot_repository=bots, risk_repository=repository)
+    service.public_bcs_bot('default:entity-b', 'owner', 'user', _make_operator(), visibility='private')
+    bots.get_by_id_and_entity.assert_called_once_with('default', 'entity-b')
+    repository.get_current.assert_called_once_with(env='dev', bot_pk=77, public_scope='user')
+    repository.invalidate_if_current.assert_called_once_with(env='dev', risk_check_id='risk-b', row_version=4)
