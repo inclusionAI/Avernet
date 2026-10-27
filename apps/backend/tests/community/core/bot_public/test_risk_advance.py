@@ -84,7 +84,8 @@ def test_early_callback_keeps_recovery_due_until_replayed():
         return "approval"
     RiskAdvance(repo, lambda _: True, submit, lambda: now).advance("dev", "a")
     assert repo.row.phase == "APPROVING"
-    assert repo.row.next_action_at == now
+    from datetime import timedelta
+    assert repo.row.next_action_at == now + timedelta(minutes=2)
 
 
 def test_advance_handler_binds_tenant_and_rejects_wrong_environment():
@@ -116,7 +117,7 @@ def test_recovery_enqueues_pending_approval_callback():
 def test_pending_handler_replays_against_original_bot_and_applicant():
     from agentclaw.community.core.bot_public_risk.advance import RiskPendingHandler
     repo = MagicMock()
-    repo.get.return_value = row(phase="APPROVING", approval_puid="p1", workflow_json='{"pending_approval":{}}')
+    repo.get.return_value = row(phase="APPROVING", approval_puid="p1", workflow_json='{"approval_target_ready":true,"pending_approval":{}}')
     bots = MagicMock()
     bots.get_by_pk.return_value = {"bot_id": "b", "entity_id": "e"}
     guard = MagicMock()
@@ -184,3 +185,30 @@ def test_recovery_marks_interrupted_callback_unknown_without_reapplying():
     assert json.loads(repo.row.workflow_json)["error"] == "CALLBACK_OUTCOME_UNKNOWN"
     public.handle_public_approval_callback.assert_not_called()
     guard.replay.assert_not_called()
+
+
+def test_recovery_waits_for_live_callback_claim_before_marking_unknown():
+    from datetime import timedelta
+    from agentclaw.community.core.bot_public_risk.advance import RiskPendingHandler
+    from agentclaw.community.core.task_queue.types import Reschedule
+    now = datetime(2026, 1, 1)
+    state = {"approval_target_ready": True, "callback_claim": {
+        "event": {"puid": "p1", "decision": "AGREE"}, "status": "processing"}}
+    repo = MemoryRepository(row(phase="APPROVING", approval_puid="p1", next_action_at=now + timedelta(seconds=30), workflow_json=json.dumps(state)))
+    handler = RiskPendingHandler(repo, MagicMock(), MagicMock(), MagicMock(), lambda: "dev", clock=lambda: now)
+    outcome = handler.handle({"tenant": "teamclaw", "env": "dev", "risk_check_id": "a"})
+    assert isinstance(outcome, Reschedule) and outcome.delay_seconds == 30
+    assert repo.row.phase == "APPROVING"
+
+
+def test_target_not_ready_without_pending_event_is_recovered_without_new_approval():
+    from agentclaw.community.core.bot_public_risk.advance import RiskPendingHandler
+    now = datetime(2026, 1, 1)
+    repo = MemoryRepository(row(phase="APPROVING", approval_puid="p1", next_action_at=now,
+                                workflow_json='{"approval_intent":true}'))
+    public, guard = MagicMock(), MagicMock()
+    handler = RiskPendingHandler(repo, MagicMock(), public, guard, lambda: "dev", clock=lambda: now)
+    handler.handle({"tenant": "teamclaw", "env": "dev", "risk_check_id": "a"})
+    assert repo.row.phase == "NEEDS_ATTENTION"
+    assert json.loads(repo.row.workflow_json)["error"] == "APPROVAL_TARGET_NOT_READY"
+    public.public_bcs_bot.assert_not_called()

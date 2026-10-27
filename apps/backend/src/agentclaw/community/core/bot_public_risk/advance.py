@@ -1,6 +1,7 @@
 """One-shot handoff of a validated security result to the publish service."""
 
 import json
+from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 from agentclaw.community.core.bot_public_risk.repository import BotPublicRiskRepository, RiskCheck
@@ -63,11 +64,10 @@ class RiskAdvance:
                     workflow.pop("error", None)
                 elif latest.phase != "ADVANCING":
                     raise RuntimeError("risk application no longer advancing")
-                pending = workflow.get("pending_approval")
                 if self.repo.update_current(env=env, risk_check_id=risk_check_id, row_version=latest.row_version,
                                             changes={"phase": "APPROVING", "approval_puid": puid,
                                                      "workflow_json": json.dumps(workflow),
-                                                     "next_action_at": self.clock() if pending else None}):
+                                                     "next_action_at": self.clock() + timedelta(minutes=2)}):
                     return
             raise RuntimeError("approval association could not be saved")
 
@@ -119,13 +119,14 @@ class RiskAdvanceHandler:
 class RiskPendingHandler:
     task_type = "bot_public_risk_callback_replay"
 
-    def __init__(self, repository, bots, public_service, guard, env_provider):
+    def __init__(self, repository, bots, public_service, guard, env_provider, clock=None):
         self.repo, self.bots, self.public_service, self.guard, self.env_provider = (
             repository, bots, public_service, guard, env_provider
         )
+        self.clock = clock or (lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
     def handle(self, payload: dict | None):
-        from agentclaw.community.core.task_queue.types import Complete
+        from agentclaw.community.core.task_queue.types import Complete, Reschedule
         from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
         if not isinstance(payload, dict):
@@ -140,7 +141,17 @@ class RiskPendingHandler:
             if row is None or row.current_target_key is None or row.phase != "APPROVING":
                 return Complete()
             workflow = json.loads(row.workflow_json)
+            if workflow.get("approval_target_ready") is not True:
+                if row.next_action_at is not None and row.next_action_at > self.clock():
+                    return Reschedule(delay_seconds=(row.next_action_at - self.clock()).total_seconds())
+                workflow["error"] = "APPROVAL_TARGET_NOT_READY"
+                self.repo.update_current(env=env, risk_check_id=risk_id, row_version=row.row_version,
+                                         changes={"phase": "NEEDS_ATTENTION", "next_action_at": None,
+                                                  "workflow_json": json.dumps(workflow)})
+                return Complete()
             if (workflow.get("callback_claim") or {}).get("status") == "processing":
+                if row.next_action_at is not None and row.next_action_at > self.clock():
+                    return Reschedule(delay_seconds=(row.next_action_at - self.clock()).total_seconds())
                 workflow["error"] = "CALLBACK_OUTCOME_UNKNOWN"
                 self.repo.update_current(env=env, risk_check_id=risk_id, row_version=row.row_version,
                                          changes={"phase": "NEEDS_ATTENTION", "next_action_at": None,
@@ -160,6 +171,9 @@ class RiskPendingHandler:
                 current = self.repo.get(env=env, risk_check_id=risk_id)
                 if current is not None and current.current_target_key is not None and current.phase == "APPROVING":
                     workflow = json.loads(current.workflow_json)
+                    if ((workflow.get("callback_claim") or {}).get("status") == "processing"
+                            and current.next_action_at is not None and current.next_action_at > self.clock()):
+                        return Reschedule(delay_seconds=(current.next_action_at - self.clock()).total_seconds())
                     if workflow.get("pending_approval"):
                         workflow["error"] = "CALLBACK_REPLAY_BLOCKED"
                         self.repo.update_current(env=env, risk_check_id=risk_id, row_version=current.row_version,

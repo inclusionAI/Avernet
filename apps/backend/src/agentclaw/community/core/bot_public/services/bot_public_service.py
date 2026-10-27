@@ -611,7 +611,15 @@ class BotPublicService(BotPublicServiceProtocol):
         # bot_uid is the BCS bot identity ("{backend_bot_id}:{entity_id}"); the
         # bot / skills lookup keys on the backend bot_id, so split on ':'.
         backend_bot_id = bot_uid.split(":")[0]
-        bot = self._bot_repository.get_by_id_and_owner(backend_bot_id, owner_id)
+        if risk_check_id:
+            backend_bot_id, separator, entity_id = bot_uid.rpartition(":")
+            if not separator or not backend_bot_id or not entity_id:
+                raise BotPublicServiceError("risk publication requires full bot identity")
+            bot = self._bot_repository.get_by_id_and_entity(backend_bot_id, entity_id)
+            if bot and str(bot.get("owner_id")) != owner_id:
+                raise BotNotFoundError(f"Bot not found: {bot_uid}")
+        else:
+            bot = self._bot_repository.get_by_id_and_owner(backend_bot_id, owner_id)
         if not bot:
             raise BotNotFoundError(f"Bot not found: {bot_uid}")
         operator_id = operator.staff_id if operator else owner_id
@@ -685,7 +693,7 @@ class BotPublicService(BotPublicServiceProtocol):
         # 记录工单信息到 BCS friend_ext.public_user_approval (PROCESSING):
         # GET→merge→PATCH (Provider 管理 API, 同 BcnService 鉴权). 失败不中断已建工单.
         try:
-            self._persist_public_approval(
+            persisted = self._persist_public_approval(
                 bot_uid=bot_uid,
                 public_scope=public_scope,
                 puid=approval_result.get("puid"),
@@ -693,6 +701,8 @@ class BotPublicService(BotPublicServiceProtocol):
                 view_depts=view_depts,
                 visibility=visibility,
             )
+            if risk_check_id and persisted is not True:
+                raise BotPublicServiceError("risk approval target was not persisted")
         except Exception as exc:  # noqa: BLE001 — must not abort a started approval
             if risk_check_id:
                 raise BotPublicServiceError("risk approval association could not be persisted") from exc
@@ -980,7 +990,7 @@ class BotPublicService(BotPublicServiceProtocol):
         approval_url: Optional[str],
         view_depts: Optional[List[Dict[str, str]]],
         visibility: Optional[str] = None,
-    ) -> None:
+    ) -> bool:
         """工单创建后把工单信息记到 BCS friend_ext.public_user_approval(PROCESSING)。
 
         GET /providers/{provider_id}/bots/{bot_uid}/attributes 拿当前 friend_ext,
@@ -990,7 +1000,7 @@ class BotPublicService(BotPublicServiceProtocol):
         """
         attrs = self._bcn_service.get_attributes(bot_uuid=bot_uid)
         if attrs.get("skipped"):
-            return
+            return False
         friend_ext = dict(attrs.get("friend_ext") or {})
         block: Dict[str, Any] = {
             "puid": puid,
@@ -1001,9 +1011,10 @@ class BotPublicService(BotPublicServiceProtocol):
         if visibility:
             block["visibility"] = visibility
         friend_ext[_BCS_APPROVAL_KEY_BY_SCOPE[public_scope]] = block
-        self._bcn_service.patch_attributes(
+        result = self._bcn_service.patch_attributes(
             bot_uuid=bot_uid, body={"friend_ext": friend_ext}
         )
+        return not (isinstance(result, dict) and result.get("skipped"))
 
     def _apply_visibility_direct(
         self,
@@ -1124,8 +1135,15 @@ class BotPublicService(BotPublicServiceProtocol):
             guard = self._risk_approval_guard
             if guard is None:
                 return {"success": False, "message": "risk callback guard unavailable"}
-            backend_bot_id = bot_id.split(":")[0] if public_scope else bot_id
-            bot = self._bot_repository.get_by_id_and_owner(backend_bot_id, owner_id)
+            if public_scope:
+                backend_bot_id, separator, entity_id = bot_id.rpartition(":")
+                if not separator or not backend_bot_id or not entity_id:
+                    return {"success": False, "message": "risk callback bot identity invalid"}
+                bot = self._bot_repository.get_by_id_and_entity(backend_bot_id, entity_id)
+            else:
+                bot = self._bot_repository.get_by_id_and_owner(bot_id, owner_id)
+            if bot and str(bot.get("owner_id")) != owner_id:
+                return {"success": False, "message": "risk callback owner changed"}
             if not bot:
                 return {"success": False, "message": "risk callback bot unavailable"}
             result = guard.check(get_current_env(), risk_check_id, owner_id, bot["id"], puid,

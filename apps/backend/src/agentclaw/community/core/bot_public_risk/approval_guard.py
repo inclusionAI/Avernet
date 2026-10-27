@@ -64,11 +64,20 @@ class RiskApprovalGuard:
     def mark_target_ready(self, env: str, risk_id: str, puid: str) -> None:
         for _ in range(3):
             row = self.repo.get(env=env, risk_check_id=risk_id)
-            if row is None or row.current_target_key is None or row.phase != "APPROVING" or row.approval_puid != puid:
+            if row is None or row.current_target_key is None or row.approval_puid != puid:
                 raise RuntimeError("risk approval association unavailable")
             workflow = json.loads(row.workflow_json)
+            recovered = row.phase == "NEEDS_ATTENTION" and workflow.get("error") == "APPROVAL_TARGET_NOT_READY"
+            if row.phase != "APPROVING" and not recovered:
+                raise RuntimeError("risk approval is not awaiting its target")
+            if recovered:
+                if self.check_h3(row) is not True:
+                    raise RuntimeError("risk eligibility changed before target recovery")
+                workflow.pop("error", None)
             workflow["approval_target_ready"] = True
             changes = {"workflow_json": json.dumps(workflow), "next_action_at": None}
+            if recovered:
+                changes["phase"] = "APPROVING"
             if workflow.get("pending_approval"):
                 changes["next_action_at"] = self.clock()
             if self.repo.update_current(env=env, risk_check_id=risk_id, row_version=row.row_version, changes=changes):

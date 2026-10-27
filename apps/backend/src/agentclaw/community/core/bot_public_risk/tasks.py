@@ -329,7 +329,8 @@ class RiskTasks:
                 self._enqueue(row, ADVANCE)
             elif row.phase == "APPROVING":
                 workflow = json.loads(row.workflow_json)
-                if workflow.get("pending_approval") or (workflow.get("callback_claim") or {}).get("status") == "processing":
+                if (workflow.get("approval_target_ready") is not True or workflow.get("pending_approval")
+                        or (workflow.get("callback_claim") or {}).get("status") == "processing"):
                     self._enqueue(row, REPLAY)
         return rows[-1].risk_check_id if len(rows) == limit else None
 
