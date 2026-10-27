@@ -20,6 +20,7 @@ from sqlalchemy import (
     UniqueConstraint,
     false,
 )
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql import func
 
@@ -303,12 +304,16 @@ class BotPublicRiskRepository:
             )
             return count == 1
 
-    def invalidate_if_current(self, *, env: str, risk_check_id: str, row_version: int) -> bool:
+    def invalidate_if_current(
+        self, *, env: str, risk_check_id: str, row_version: int
+    ) -> bool:
         """Invalidate the observed current record only, never a newer request."""
         with self._db.transactional_orm_session() as session:
             count = (
                 session.query(RiskCheckModel)
-                .filter_by(env=env, risk_check_id=risk_check_id, row_version=row_version)
+                .filter_by(
+                    env=env, risk_check_id=risk_check_id, row_version=row_version
+                )
                 .filter(RiskCheckModel.current_target_key.isnot(None))
                 .update(
                     {
@@ -391,3 +396,15 @@ class BotPublicRiskRepository:
                 .all()
             )
             return tuple(_view(row) for row in rows)
+
+    def list_recovery_tenants(self, *, env: str) -> tuple[str, ...]:
+        """Discover tenant identifiers only; each scan then enters that tenant's scope."""
+        columns = RiskCheckModel.__table__.c
+        with self._db.orm_session() as session:
+            result = session.execute(
+                select(columns.avernet_tenant)
+                .where(columns.env == env)
+                .distinct()
+                .execution_options(skip_avernet_tenant_guard=True)
+            )
+            return tuple(sorted(row[0] for row in result))

@@ -429,3 +429,21 @@ def test_unknown_creation_and_timeout_stage_distinct_notices():
     tasks.poll(env="dev", risk_check_id="a")
     notice = json.loads(repo.get(env="dev", risk_check_id="a").workflow_json)["notices"]
     assert set(notice) == {"WINDOW_ENDED"}
+
+
+def test_unavailable_provider_is_known_failure_not_unknown_submission():
+    import json
+    from agentclaw.community.di.modules.bot_public_risk_module import (
+        UnavailableRiskProvider,
+    )
+
+    tasks, repo, _, _, _, record = make()
+    tasks.provider = UnavailableRiskProvider()
+    tasks.start(replace(record, client_scope="openapi:operator"))
+    tasks.submit(env="dev", risk_check_id="a")
+    row = repo.get(env="dev", risk_check_id="a")
+    assert row.phase == "NEEDS_ATTENTION"
+    state = json.loads(row.workflow_json)
+    assert state["error"] == "SECURITY_PROVIDER_UNAVAILABLE"
+    assert "CREATION_FAILED" in state["notices"]
+    assert "CREATION_UNKNOWN" not in state["notices"]

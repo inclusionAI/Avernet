@@ -229,3 +229,14 @@ def test_idempotency_lookup_is_tenant_environment_and_caller_scoped(repo):
     assert repo.get_by_request(env="dev", client_scope="new:other", client_request_id="req-a") is None
     with avernet_tenant_scope("other"):
         assert repo.get_by_request(env="dev", client_scope="new:operator", client_request_id="req-a") is None
+
+
+def test_recovery_discovers_tenants_without_leaking_records(repo):
+    from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
+
+    repo.create_or_replay(record())
+    with avernet_tenant_scope("other"):
+        repo.create_or_replay(record("other-id"))
+        assert repo.get(env="dev", risk_check_id="a") is None
+        assert repo.list_recovery_tenants(env="dev") == ("other", "teamclaw")
+    assert repo.list_recovery_tenants(env="prod") == ()

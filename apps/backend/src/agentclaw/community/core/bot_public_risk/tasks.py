@@ -31,6 +31,10 @@ class SecurityReport:
     valid_pass: bool = False
 
 
+class SecurityProviderUnavailable(RuntimeError):
+    """No external submission was attempted because no provider is configured."""
+
+
 class SecurityProvider(Protocol):
     def submit_agent_scan(self, agent_info: dict) -> str: ...
     def get_agent_check_report(self, check_id: str) -> SecurityReport: ...
@@ -92,6 +96,8 @@ class RiskTasks:
             stage_notice(row, workflow, "WINDOW_ENDED", self.clock(), changes)
         if workflow.get("error") == "SUBMISSION_OUTCOME_UNKNOWN":
             stage_notice(row, workflow, "CREATION_UNKNOWN", self.clock(), changes)
+        if workflow.get("error") == "SECURITY_PROVIDER_UNAVAILABLE":
+            stage_notice(row, workflow, "CREATION_FAILED", self.clock(), changes)
         if "notification_due_at" in changes:
             changes["workflow_json"] = json.dumps(workflow)
         updated = self.repo.update_current(
@@ -149,6 +155,17 @@ class RiskTasks:
             )
             if not isinstance(check_id, str) or not check_id.strip():
                 raise ValueError("missing check id")
+        except SecurityProviderUnavailable:
+            workflow["error"] = "SECURITY_PROVIDER_UNAVAILABLE"
+            self._update(
+                row,
+                {
+                    "phase": "NEEDS_ATTENTION",
+                    "next_action_at": None,
+                    "workflow_json": json.dumps(workflow),
+                },
+            )
+            return
         except Exception:
             workflow["error"] = "SUBMISSION_OUTCOME_UNKNOWN"
             self._update(
