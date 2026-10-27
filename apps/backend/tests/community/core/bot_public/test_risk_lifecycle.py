@@ -91,3 +91,20 @@ def test_community_injector_resolves_unavailable_provider():
     injector = build_injector(profile=DeployProfile.COMMUNITY)
     assert isinstance(injector.get(SecurityProvider), UnavailableRiskProvider)
     assert injector.get(RiskTaskLifecycle) is not None
+
+
+def test_injector_registers_advance_and_replay_with_fail_closed_inputs():
+    import pytest
+    from agentclaw.community.di.container import build_injector
+    from agentclaw.community.di.profile import DeployProfile
+    from agentclaw.community.core.bot_public_risk.application import RiskInputBuilder
+    from agentclaw.community.core.bot_public_risk.tasks import ADVANCE, REPLAY
+    from agentclaw.community.core.bot_public_risk.input_builder import McpProjectionUnavailable
+
+    injector = build_injector(profile=DeployProfile.TEST)
+    lifecycle = injector.get(RiskTaskLifecycle)
+    asyncio.run(lifecycle.bootstrap())
+    assert lifecycle.registry.get(ADVANCE) is not None
+    assert lifecycle.registry.get(REPLAY) is not None
+    with pytest.raises(McpProjectionUnavailable, match="MCP risk projection is not configured"):
+        injector.get(RiskInputBuilder).build(bot={}, target={})

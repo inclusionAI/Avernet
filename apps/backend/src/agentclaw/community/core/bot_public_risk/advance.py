@@ -4,6 +4,7 @@ import json
 from typing import Callable
 
 from agentclaw.community.core.bot_public_risk.repository import BotPublicRiskRepository, RiskCheck
+from agentclaw.community.core.bot_public_risk.notices import stage_notice
 
 
 class RiskAdvance:
@@ -21,9 +22,12 @@ class RiskAdvance:
     def _attention(self, row: RiskCheck, reason: str) -> None:
         workflow = json.loads(row.workflow_json)
         workflow["error"] = reason
+        changes = {"phase": "NEEDS_ATTENTION", "next_action_at": None}
+        if reason == "INPUT_OR_PERMISSION_INVALID":
+            stage_notice(row, workflow, "INPUT_INVALID", self.clock(), changes)
+        changes["workflow_json"] = json.dumps(workflow)
         self.repo.update_current(env=row.env, risk_check_id=row.risk_check_id, row_version=row.row_version,
-                                 changes={"phase": "NEEDS_ATTENTION", "next_action_at": None,
-                                          "workflow_json": json.dumps(workflow)})
+                                 changes=changes)
 
     def advance(self, env: str, risk_check_id: str) -> None:
         row = self.repo.get(env=env, risk_check_id=risk_check_id)

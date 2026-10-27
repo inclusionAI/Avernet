@@ -42,6 +42,7 @@ from agentclaw.community.core.skill_center.capability_state_contract import BotC
 from agentclaw.community.core.bot_public_risk.tasks import RiskTasks
 from agentclaw.community.api.bot_public_risk_service import BotPublicRiskServiceProtocol, BotPublicRiskQueryProtocol
 from agentclaw.community.core.bot_public_risk.query import RiskQuery
+from agentclaw.community.core.bot_public_risk.approval_guard import RiskApprovalGuard
 from agentclaw.community.core.bot_public.services.bot_catalog_metadata_service import (
     BcsBotCatalogMetadataService,
 )
@@ -142,6 +143,7 @@ class BotPublicModule(Module):
         bcsfuse_config: cfg.BcsFuseConfig,
         catalog_metadata_service: BotCatalogMetadataServiceProtocol,
         risk_repository: BotPublicRiskRepository,
+        risk_approval_guard: RiskApprovalGuard,
     ) -> BotPublicService:
         # Explicit provider (not ``binder.bind``): BotPublicService types
         # ``skill_set_service_factory`` under TYPE_CHECKING to avoid a
@@ -162,6 +164,7 @@ class BotPublicModule(Module):
             bcsfuse_config=bcsfuse_config,
             catalog_metadata_service=catalog_metadata_service,
             risk_repository=risk_repository,
+            risk_approval_guard=risk_approval_guard,
         )
 
     @singleton

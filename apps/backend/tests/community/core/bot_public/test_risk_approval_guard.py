@@ -60,4 +60,17 @@ def test_deferred_callback_remains_pending_if_h3_is_unavailable():
     callback = MagicMock()
     assert RiskApprovalGuard(repo, lambda _: False).replay("dev", "risk-a", callback) is False
     callback.assert_not_called()
-    repo.update_current.assert_not_called()
+    changes = repo.update_current.call_args.kwargs["changes"]
+    assert json.loads(changes["workflow_json"])["pending_approval"]["puid"] == "puid-a"
+
+
+def test_h3_input_failure_stages_applicant_notification():
+    from datetime import datetime
+    repo = MagicMock()
+    repo.get.return_value = _record(phase="APPROVING", approval_puid="puid-a")
+    repo.update_current.return_value = True
+    guard = RiskApprovalGuard(repo, lambda _: False, clock=lambda: datetime(2026, 1, 1))
+    assert guard.check("dev", "risk-a", "owner", 42, "puid-a", "AGREE", "user") == "DENIED"
+    changes = repo.update_current.call_args.kwargs["changes"]
+    assert changes["phase"] == "NEEDS_ATTENTION"
+    assert json.loads(changes["workflow_json"])["notices"]["INPUT_INVALID"]["status"] == "pending"

@@ -1,15 +1,19 @@
 """Guard risk-linked approval callbacks and preserve early deliveries."""
 
 import json
+from datetime import datetime, timezone
 from typing import Callable
 
+from agentclaw.community.core.bot_public_risk.notices import stage_notice
 from agentclaw.community.core.bot_public_risk.repository import BotPublicRiskRepository, RiskCheck
 
 
 class RiskApprovalGuard:
-    def __init__(self, repository: BotPublicRiskRepository, check_h3: Callable[[RiskCheck], bool]):
+    def __init__(self, repository: BotPublicRiskRepository, check_h3: Callable[[RiskCheck], bool],
+                 clock: Callable[[], datetime] | None = None):
         self.repo = repository
         self.check_h3 = check_h3
+        self.clock = clock or (lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
     def check(self, env: str, risk_id: str, owner: str, bot_pk: int, puid: str, decision: str, scope: str) -> str:
         if not puid or decision not in {"AGREE", "DISAGREE", "CANCEL"}:
@@ -22,7 +26,15 @@ class RiskApprovalGuard:
             if row.approval_puid:
                 if row.phase != "APPROVING" or row.approval_puid != puid:
                     return "DENIED"
-                return "ALLOW" if self.check_h3(row) is True else "DENIED"
+                if self.check_h3(row) is True:
+                    return "ALLOW"
+                workflow = json.loads(row.workflow_json)
+                workflow["error"] = "INPUT_OR_PERMISSION_INVALID"
+                changes = {"phase": "NEEDS_ATTENTION", "next_action_at": None}
+                stage_notice(row, workflow, "INPUT_INVALID", self.clock(), changes)
+                changes["workflow_json"] = json.dumps(workflow)
+                self.repo.update_current(env=env, risk_check_id=risk_id, row_version=row.row_version, changes=changes)
+                return "DENIED"
             workflow = json.loads(row.workflow_json)
             if row.phase != "ADVANCING" or workflow.get("approval_intent") is not True:
                 return "DENIED"

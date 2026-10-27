@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Callable
 
 from agentclaw.community.core.bot_public_risk.notices import RiskNoticeTaskHandler
+from agentclaw.community.core.bot_public_risk.advance import RiskAdvanceHandler
 from agentclaw.community.core.bot_public_risk.tasks import (
     DETECTING,
     REJECT,
@@ -30,6 +31,8 @@ class RiskTaskLifecycle(LifecycleBase):
         worker_enabled: bool,
         clock: Callable[[], datetime],
         interval_seconds: int = 60,
+        advance=None,
+        pending_handler=None,
     ):
         self.registry, self.tasks, self.delivery, self.repo = (
             registry,
@@ -43,6 +46,7 @@ class RiskTaskLifecycle(LifecycleBase):
             clock,
         )
         self.interval_seconds, self.loop_task = interval_seconds, None
+        self.advance, self.pending_handler = advance, pending_handler
 
     async def bootstrap(self):
         for kind in (SUBMIT, DETECTING, REJECT):
@@ -54,6 +58,10 @@ class RiskTaskLifecycle(LifecycleBase):
             RiskNoticeTaskHandler(self.delivery, self.env_provider),
             wake_on_enqueue=True,
         )
+        if self.advance is not None:
+            self.registry.register(RiskAdvanceHandler(self.advance, self.env_provider), wake_on_enqueue=True)
+        if self.pending_handler is not None:
+            self.registry.register(self.pending_handler, wake_on_enqueue=True)
 
     def reconcile_once(self):
         env, now = self.env_provider(), self.clock()

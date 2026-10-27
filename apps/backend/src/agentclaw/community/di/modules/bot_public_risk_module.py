@@ -2,14 +2,22 @@
 
 from datetime import datetime, timezone
 
-from injector import Binder, Module, inject, provider, singleton
+from injector import Binder, Injector, Module, inject, provider, singleton
 
+from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
+from agentclaw.community.core.bot_collaborator.protocols import CollaboratorServiceProtocol
+from agentclaw.community.core.bot_public_risk.advance import RiskAdvance, RiskPendingHandler
+from agentclaw.community.core.bot_public_risk.application import RiskInputBuilder
+from agentclaw.community.core.bot_public_risk.approval_guard import RiskApprovalGuard
+from agentclaw.community.core.bot_public_risk.eligibility import RiskEligibility
 from agentclaw.community.core.bot_public_risk.lifecycle import RiskTaskLifecycle
 from agentclaw.community.core.bot_public_risk.notices import (
     RiskNoticeDelivery,
     WorkOrderRiskNoticeSender,
 )
 from agentclaw.community.core.bot_public_risk.repository import BotPublicRiskRepository
+from agentclaw.community.core.bot_public_risk.publish_adapter import RiskPublishAdapter
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_public_risk.tasks import (
     RiskTasks,
     SecurityProvider,
@@ -37,6 +45,13 @@ class UnavailableRiskProvider:
     def get_agent_check_report(self, check_id: str):
         raise SecurityProviderUnavailable("risk security provider unavailable")
 
+
+class LazyRiskInputs:
+    def __init__(self, injector: Injector):
+        self.injector = injector
+
+    def build(self, *, bot, target):
+        return self.injector.get(RiskInputBuilder).build(bot=bot, target=target)
 
 class BotPublicRiskModule(Module):
     def configure(self, binder: Binder):
@@ -66,6 +81,24 @@ class BotPublicRiskModule(Module):
 
     @singleton
     @provider
+    def risk_eligibility(self, bots: BotRepository, collaborators: CollaboratorServiceProtocol,
+                         injector: Injector) -> RiskEligibility:
+        return RiskEligibility(bots, collaborators, LazyRiskInputs(injector))
+
+    @singleton
+    @provider
+    def risk_approval_guard(self, repo: BotPublicRiskRepository,
+                            eligibility: RiskEligibility) -> RiskApprovalGuard:
+        return RiskApprovalGuard(repo, eligibility, utc_now)
+
+    @singleton
+    @provider
+    def risk_advance(self, repo: BotPublicRiskRepository, eligibility: RiskEligibility,
+                     bots: BotRepository, public: BotPublicServiceProtocol) -> RiskAdvance:
+        return RiskAdvance(repo, eligibility, RiskPublishAdapter(bots, public), utc_now)
+
+    @singleton
+    @provider
     @inject
     def risk_lifecycle(
         self,
@@ -74,6 +107,10 @@ class BotPublicRiskModule(Module):
         delivery: RiskNoticeDelivery,
         repo: BotPublicRiskRepository,
         config: TaskQueueWorkerConfig,
+        advance: RiskAdvance,
+        bots: BotRepository,
+        public: BotPublicServiceProtocol,
+        guard: RiskApprovalGuard,
     ) -> RiskTaskLifecycle:
         return RiskTaskLifecycle(
             registry=registry,
@@ -83,4 +120,6 @@ class BotPublicRiskModule(Module):
             env_provider=get_current_env,
             worker_enabled=config.enabled,
             clock=utc_now,
+            advance=advance,
+            pending_handler=RiskPendingHandler(repo, bots, public, guard, get_current_env),
         )

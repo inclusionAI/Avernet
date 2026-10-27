@@ -130,3 +130,11 @@ def test_pending_handler_replays_against_original_bot_and_applicant():
     kwargs = public.handle_public_approval_callback.call_args.kwargs
     assert kwargs["bot_id"] == "b:e" and kwargs["owner_id"] == "owner"
     assert kwargs["risk_check_id"] == "a" and kwargs["puid"] == "p1"
+
+
+def test_h2_invalidation_stages_notice_for_actual_openapi_applicant():
+    repo = MemoryRepository(row())
+    RiskAdvance(repo, lambda _: False, MagicMock(), lambda: datetime(2026, 1, 1)).advance("dev", "a")
+    assert repo.row.phase == "NEEDS_ATTENTION"
+    assert json.loads(repo.row.workflow_json)["notices"]["INPUT_INVALID"]["status"] == "pending"
+    assert repo.row.notification_due_at == datetime(2026, 1, 1)
