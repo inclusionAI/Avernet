@@ -1,7 +1,7 @@
 // @asset-migrated: teamclaw 自研资产
 /**
  * ArtifactsSection —— 产物区(PRD #产物):任务级聚合(或 L2 按 node 过滤)后的产物卡列表。
- * Descriptor 四种形态均支持站内预览；file 使用既有 session_files / bot workspace 服务下载，链接/代码保留外链入口。
+ * Descriptor file/text 走站内预览与下载；链接/代码为外链型产物，仅保留跳转入口。
  */
 import React, { useState } from 'react';
 
@@ -110,7 +110,10 @@ export const ArtifactsSection: React.FC<ArtifactsSectionProps> = ({
                 a.kind === 'url_link' ||
                 a.kind === 'code' ||
                 ((a.kind === null || a.kind === undefined) && a.type === 'link');
+              const isExternalOnlyArtifact =
+                a.kind === 'url_link' || a.kind === 'code' || a.type === 'link';
               const hasPreviewActions = isInlineArtifact || isFileArtifact || isDetailArtifact;
+              const hasPreviewButton = hasPreviewActions && !isExternalOnlyArtifact;
               const hasDownloadAction = isInlineArtifact || isFileArtifact;
               return (
                 <li
@@ -172,14 +175,16 @@ export const ArtifactsSection: React.FC<ArtifactsSectionProps> = ({
                   </div>
                   {hasPreviewActions ? (
                     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-                      <button
-                        type="button"
-                        aria-label={`预览产物 ${a.name}`}
-                        onClick={() => setSelectedArtifactId(a.id)}
-                        style={actionStyle}
-                      >
-                        预览
-                      </button>
+                      {hasPreviewButton ? (
+                        <button
+                          type="button"
+                          aria-label={`预览产物 ${a.name}`}
+                          onClick={() => setSelectedArtifactId(a.id)}
+                          style={actionStyle}
+                        >
+                          预览
+                        </button>
+                      ) : null}
                       {hasDownloadAction ? (
                         <button
                           type="button"
