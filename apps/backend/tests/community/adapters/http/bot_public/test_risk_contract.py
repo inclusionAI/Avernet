@@ -1,7 +1,7 @@
 from pydantic import ValidationError
 import pytest
 
-from agentclaw.community.adapters.http.bot_public.risk_contract import (
+from agentclaw.community.adapters.http.bot_public.schemas_risk import (
     LegacyRiskRequest, OpenApiRiskRequest, RiskRecordResponse,
 )
 
@@ -34,7 +34,7 @@ def test_response_never_leaks_input_or_summary():
 
 
 def test_collaboration_address_resolves_full_identity_and_requires_manage_permission():
-    from agentclaw.community.adapters.http.bot_public.risk_access import authorize_risk_bot, RiskAccessDenied
+    from agentclaw.community.core.bot_public_risk.access import authorize_risk_bot, RiskAccessDenied
     from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 
     class Bots:
@@ -52,7 +52,7 @@ def test_collaboration_address_resolves_full_identity_and_requires_manage_permis
 
 
 def test_legacy_owner_locator_does_not_replace_authenticated_actor():
-    from agentclaw.community.adapters.http.bot_public.risk_access import authorize_risk_bot, RiskAccessDenied
+    from agentclaw.community.core.bot_public_risk.access import authorize_risk_bot, RiskAccessDenied
     from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 
     bot = {"id": 5, "bot_id": "default", "entity_id": "entity", "owner_id": "owner", "env": "dev"}

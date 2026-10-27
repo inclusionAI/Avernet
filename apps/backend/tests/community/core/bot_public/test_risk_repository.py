@@ -218,3 +218,14 @@ def test_conditional_withdrawal_does_not_invalidate_replacement_or_changed_recor
     assert repo.get_current(env="dev", bot_pk=7, public_scope="user").risk_check_id == "b"
     assert repo.invalidate_if_current(env="dev", risk_check_id="b", row_version=b.row_version)
     assert repo.get_current(env="dev", bot_pk=7, public_scope="user") is None
+
+
+def test_idempotency_lookup_is_tenant_environment_and_caller_scoped(repo):
+    from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
+
+    repo.create_or_replay(record())
+    assert repo.get_by_request(env="dev", client_scope="new:operator", client_request_id="req-a").risk_check_id == "a"
+    assert repo.get_by_request(env="prod", client_scope="new:operator", client_request_id="req-a") is None
+    assert repo.get_by_request(env="dev", client_scope="new:other", client_request_id="req-a") is None
+    with avernet_tenant_scope("other"):
+        assert repo.get_by_request(env="dev", client_scope="new:operator", client_request_id="req-a") is None

@@ -215,6 +215,18 @@ class BotPublicRiskRepository:
             session.flush()
             return _view(row), True
 
+    def get_by_request(
+        self, *, env: str, client_scope: str, client_request_id: str
+    ) -> RiskCheck | None:
+        """Look up an idempotent request within the current tenant and environment."""
+        with self._db.orm_session() as session:
+            row = (
+                session.query(RiskCheckModel)
+                .filter_by(env=env, client_scope=client_scope, client_request_id=client_request_id)
+                .one_or_none()
+            )
+            return _view(row) if row else None
+
     def get(self, *, env: str, risk_check_id: str) -> RiskCheck | None:
         with self._db.orm_session() as session:
             row = (
