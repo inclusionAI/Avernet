@@ -163,7 +163,7 @@ def test_late_report_cannot_advance_replaced_record():
 
     provider.get_agent_check_report = delayed
     tasks.poll(env="dev", risk_check_id="a", manual=True)
-    assert repo.get(env="dev", risk_check_id="a").phase == "CHECKING"
+    assert repo.get(env="dev", risk_check_id="a").phase == "CLOSED"
     assert not any(entry[0][0] == "bot_public_risk_advance" for entry in queue.entries)
 
 
@@ -558,7 +558,7 @@ def test_late_check_id_does_not_revive_withdrawn_or_replaced_application():
             env="dev", risk_check_id="a", check_id="check-1"
         )
         old = repo.get(env="dev", risk_check_id="a")
-        assert old.current_target_key is None and old.phase == "NEEDS_ATTENTION"
+        assert old.current_target_key is None and old.phase == "CLOSED"
         assert old.check_id is None
         assert not any(
             entry[0][0] == "bot_public_risk_detecting" for entry in queue.entries

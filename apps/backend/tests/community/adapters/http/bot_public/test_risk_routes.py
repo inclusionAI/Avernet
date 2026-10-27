@@ -478,3 +478,16 @@ def test_other_openapi_user_id_bypass_contract_remains_available():
     from agentclaw.community.adapters.http.openapi_v1.principal import require_user_id
     principal = VerifiedCaller(principals=(UserPrincipal(subject=GatewayUser(id='real', username='real')),))
     assert asyncio.run(require_user_id(principal, 'u1', frozenset({'u1'}))) == 'u1'
+
+
+def test_response_exposes_persisted_invalidation_reason_without_internal_workflow():
+    from agentclaw.community.adapters.http.bot_public.risk_routes import _view
+    from agentclaw.community.core.bot_public_risk.repository import RiskCheck
+    row = RiskCheck(risk_check_id="a", env="dev", bot_pk=5, owner_id="u1", operator_id="u1",
+        client_scope="legacy:u1", client_request_id="req", public_scope="legacy",
+        target_json='{"public_scope":"legacy","visibility":"PUBLIC","view_depts":[]}',
+        request_hash="r", input_json="{}", input_hash="h", approval_biz_id="risk-a", phase="CLOSED",
+        workflow_json='{"invalidation_reason":"REPLACED","internal_detail":"private"}')
+    data = _view(row).model_dump()
+    assert data["invalidation_reason"] == "REPLACED" and data["phase"] == "CLOSED"
+    assert "internal_detail" not in data

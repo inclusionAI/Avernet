@@ -7,6 +7,7 @@ No external call is made while a transaction is held.
 from dataclasses import dataclass, fields
 from datetime import datetime
 from hashlib import sha256
+import json
 
 from injector import inject
 from sqlalchemy import (
@@ -188,17 +189,21 @@ class BotPublicRiskRepository:
                 ):
                     raise RequestConflict("request ID reused with different intent")
                 return _view(previous_request), False
-            session.query(RiskCheckModel).filter_by(
+            previous = session.query(RiskCheckModel).filter_by(
                 avernet_tenant=tenant,
                 env=record.env,
                 current_target_key=key,
-            ).update(
-                {
-                    RiskCheckModel.current_target_key: None,
-                    RiskCheckModel.row_version: RiskCheckModel.row_version + 1,
-                },
-                synchronize_session=False,
-            )
+            ).with_for_update().one_or_none()
+            if previous is not None:
+                workflow = json.loads(previous.workflow_json)
+                workflow["invalidation_reason"] = "REPLACED"
+                previous.workflow_json = json.dumps(workflow)
+                previous.current_target_key = None
+                previous.row_version += 1
+                previous.next_action_at = None
+                if previous.phase != "PUBLISHED":
+                    previous.phase = "CLOSED"
+                session.flush()
             values = {
                 f.name: getattr(record, f.name)
                 for f in fields(RiskCheck)
@@ -314,28 +319,26 @@ class BotPublicRiskRepository:
 
     def invalidate_current(self, *, env: str, bot_pk: int, public_scope: str) -> bool:
         """Withdraw current eligibility without modifying historical outcome."""
-        with self._db.transactional_orm_session() as session:
-            count = (
-                session.query(RiskCheckModel)
-                .filter_by(
-                    env=env,
-                    current_target_key=_target_key(bot_pk, public_scope),
-                )
-                .update(
-                    {
-                        RiskCheckModel.current_target_key: None,
-                        RiskCheckModel.row_version: RiskCheckModel.row_version + 1,
-                    },
-                    synchronize_session=False,
-                )
-            )
-            return count == 1
+        row = self.get_current(env=env, bot_pk=bot_pk, public_scope=public_scope)
+        if row is None:
+            return False
+        return self.invalidate_if_current(env=env, risk_check_id=row.risk_check_id, row_version=row.row_version)
 
     def invalidate_if_current(
         self, *, env: str, risk_check_id: str, row_version: int
     ) -> bool:
         """Invalidate the observed current record only, never a newer request."""
         with self._db.transactional_orm_session() as session:
+            row = (
+                session.query(RiskCheckModel)
+                .filter_by(env=env, risk_check_id=risk_check_id, row_version=row_version)
+                .filter(RiskCheckModel.current_target_key.isnot(None))
+                .one_or_none()
+            )
+            if row is None:
+                return False
+            workflow = json.loads(row.workflow_json)
+            workflow["invalidation_reason"] = "WITHDRAWN"
             count = (
                 session.query(RiskCheckModel)
                 .filter_by(
@@ -346,6 +349,9 @@ class BotPublicRiskRepository:
                     {
                         RiskCheckModel.current_target_key: None,
                         RiskCheckModel.row_version: RiskCheckModel.row_version + 1,
+                        RiskCheckModel.workflow_json: json.dumps(workflow),
+                        RiskCheckModel.next_action_at: None,
+                        RiskCheckModel.phase: "PUBLISHED" if row.phase == "PUBLISHED" else "CLOSED",
                     },
                     synchronize_session=False,
                 )

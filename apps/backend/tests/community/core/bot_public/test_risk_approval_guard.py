@@ -2,6 +2,8 @@ import json
 from dataclasses import replace
 from unittest.mock import MagicMock
 
+import pytest
+
 from agentclaw.community.core.bot_public_risk.approval_guard import RiskApprovalGuard
 from agentclaw.community.core.bot_public_risk.repository import RiskCheck
 
@@ -164,3 +166,44 @@ def test_inline_completed_event_survives_h3_exception_for_recovery():
         guard.replay("dev", "risk-a", MagicMock())
     assert json.loads(repo.row.workflow_json)["pending_approval"]["decision"] == "AGREE"
     assert repo.row.next_action_at == now
+
+
+def test_confirmed_approval_callback_updates_phase_and_is_idempotent():
+    from dataclasses import replace
+    class Repo:
+        def __init__(self):
+            self.row = _record(phase="APPROVING", approval_puid="puid-a", workflow_json=json.dumps({
+                "approval_target_ready": True, "callback_claim": {"event": {"puid": "puid-a", "decision": "AGREE"}, "status": "processing"}
+            }))
+        def get(self, **_):
+            return self.row
+        def update_current(self, *, row_version, changes, **_):
+            if self.row.row_version != row_version:
+                return False
+            self.row = replace(self.row, **changes, row_version=row_version + 1)
+            return True
+    repo = Repo()
+    guard = RiskApprovalGuard(repo, lambda _: True)
+    guard.finish("dev", "risk-a", "puid-a", "AGREE", True)
+    assert repo.row.phase == "PUBLISHED"
+    assert guard.check("dev", "risk-a", "owner", 42, "puid-a", "AGREE", "user") == "ALREADY_APPLIED"
+    assert guard.check("dev", "risk-a", "owner", 42, "puid-a", "CANCEL", "user") == "DENIED"
+
+
+@pytest.mark.parametrize("decision", ["DISAGREE", "CANCEL"])
+def test_declined_approval_closes_application_without_claiming_publication(decision):
+    from dataclasses import replace
+    class Repo:
+        def __init__(self):
+            self.row = _record(phase="APPROVING", approval_puid="puid-a", workflow_json=json.dumps({
+                "callback_claim": {"event": {"puid": "puid-a", "decision": decision}, "status": "processing"}
+            }))
+        def get(self, **_):
+            return self.row
+        def update_current(self, *, row_version, changes, **_):
+            self.row = replace(self.row, **changes, row_version=row_version + 1)
+            return True
+    repo = Repo()
+    RiskApprovalGuard(repo, lambda _: True).finish("dev", "risk-a", "puid-a", decision, True)
+    assert repo.row.phase == "CLOSED"
+    assert json.loads(repo.row.workflow_json)["approval_decision"] == decision

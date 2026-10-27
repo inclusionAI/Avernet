@@ -25,6 +25,10 @@ class RiskApprovalGuard:
                 return "DENIED"
             workflow = json.loads(row.workflow_json)
             if row.approval_puid:
+                claim = workflow.get("callback_claim") or {}
+                event = {"puid": puid, "decision": decision}
+                if claim.get("status") == "applied" and claim.get("event") == event and row.approval_puid == puid:
+                    return "ALREADY_APPLIED"
                 recovered_pending = row.phase == "NEEDS_ATTENTION" and workflow.get("error") == "APPROVAL_TARGET_NOT_READY"
                 if (row.phase != "APPROVING" and not recovered_pending) or row.approval_puid != puid:
                     return "DENIED"
@@ -97,9 +101,11 @@ class RiskApprovalGuard:
                 raise RuntimeError("risk callback claim lost")
             claim["status"] = "applied" if success else "unknown"
             changes = {"workflow_json": json.dumps(workflow), "next_action_at": None}
-            if success and row.phase == "NEEDS_ATTENTION" and workflow.get("error") == "CALLBACK_OUTCOME_UNKNOWN":
+            if success:
                 workflow.pop("error", None)
-                changes.update({"phase": "APPROVING", "workflow_json": json.dumps(workflow)})
+                workflow["approval_decision"] = decision
+                changes.update({"phase": "PUBLISHED" if decision == "AGREE" else "CLOSED",
+                                "workflow_json": json.dumps(workflow)})
             if not success:
                 workflow["error"] = "CALLBACK_OUTCOME_UNKNOWN"
                 changes.update({"phase": "NEEDS_ATTENTION", "next_action_at": None,

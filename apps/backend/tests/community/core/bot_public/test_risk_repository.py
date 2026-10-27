@@ -95,7 +95,7 @@ def test_cas_cannot_update_replaced_record_or_stale_version(repo):
         row_version=a.row_version,
         changes={"phase": "ADVANCING"},
     )
-    assert repo.get(env="dev", risk_check_id="a").phase == "CHECKING"
+    assert repo.get(env="dev", risk_check_id="a").phase == "CLOSED"
 
 
 def test_tenant_and_environment_isolation(repo):
@@ -251,3 +251,22 @@ def test_find_approval_by_puid_identifies_early_and_superseded_records(repo):
     assert repo.find_approval(env="dev", puid="antprocess-agentclaw_botpublic_unrelated") is None
     with pytest.raises(ValueError):
         repo.find_approval(env="dev", puid="")
+
+
+def test_replaced_and_withdrawn_applications_expose_invalidation_reason(repo):
+    import json
+    a, _ = repo.create_or_replay(record())
+    b, _ = repo.create_or_replay(record("b", "req-b"))
+    previous = repo.get(env="dev", risk_check_id=a.risk_check_id)
+    assert previous.phase == "CLOSED"
+    assert json.loads(previous.workflow_json)["invalidation_reason"] == "REPLACED"
+    assert repo.invalidate_if_current(env="dev", risk_check_id=b.risk_check_id, row_version=b.row_version)
+    withdrawn = repo.get(env="dev", risk_check_id=b.risk_check_id)
+    assert withdrawn.phase == "CLOSED"
+    assert json.loads(withdrawn.workflow_json)["invalidation_reason"] == "WITHDRAWN"
+
+
+def test_replacement_preserves_published_history(repo):
+    a, _ = repo.create_or_replay(record(phase="PUBLISHED"))
+    repo.create_or_replay(record("b", "req-b"))
+    assert repo.get(env="dev", risk_check_id=a.risk_check_id).phase == "PUBLISHED"
