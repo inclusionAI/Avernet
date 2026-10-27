@@ -147,7 +147,7 @@ class RiskTasks:
         if not self._update(row, {"workflow_json": json.dumps(workflow)}):
             return
         row = self.repo.get(env=env, risk_check_id=risk_check_id)
-        if row is None or row.current_target_key is None:
+        if row is None or row.current_target_key is None or row.phase != "PREPARING":
             return
         try:
             check_id = self.provider.submit_agent_scan(
@@ -177,20 +177,50 @@ class RiskTasks:
                 },
             )
             return
-        now = self.clock()
-        workflow["detecting_deadline"] = (now + timedelta(minutes=5)).isoformat()
-        if self._update(
-            row,
-            {
-                "workflow_json": json.dumps(workflow),
-                "phase": "CHECKING",
-                "security_status": "DETECTING",
-                "check_id": check_id,
-                "next_action_at": now + timedelta(seconds=30),
-                "auto_poll_until": now + timedelta(minutes=5),
-            },
-        ):
-            self._enqueue(row, DETECTING, 30)
+        self._record_submission_result(
+            env=env, risk_check_id=risk_check_id, check_id=check_id
+        )
+
+    def _record_submission_result(
+        self, *, env: str, risk_check_id: str, check_id: str
+    ) -> None:
+        # A reclaimed lease may already have marked this same attempt unknown.
+        # A real response is stronger evidence; retain it without repeating POST.
+        # Do not revive a replaced/withdrawn application or overwrite another ID.
+        for _ in range(3):
+            row = self.repo.get(env=env, risk_check_id=risk_check_id)
+            if (
+                row is None
+                or row.current_target_key is None
+                or row.check_id is not None
+            ):
+                return
+            workflow = json.loads(row.workflow_json)
+            if workflow.get("submission_intent") is not True:
+                return
+            if row.phase == "NEEDS_ATTENTION":
+                if workflow.get("error") != "SUBMISSION_OUTCOME_UNKNOWN":
+                    return
+                del workflow["error"]
+            elif row.phase != "PREPARING":
+                return
+            now = self.clock()
+            workflow["detecting_deadline"] = (now + timedelta(minutes=5)).isoformat()
+            if self._update(
+                row,
+                {
+                    "workflow_json": json.dumps(workflow),
+                    "phase": "CHECKING",
+                    "security_status": "DETECTING",
+                    "check_id": check_id,
+                    "next_action_at": now + timedelta(seconds=30),
+                    "auto_poll_until": now + timedelta(minutes=5),
+                },
+            ):
+                self._enqueue(row, DETECTING, 30)
+                return
+        # The returned ID must not be silently dropped on repeated contention.
+        raise RuntimeError("could not persist security check result after contention")
 
     def poll(self, *, env: str, risk_check_id: str, manual: bool = False):
         row = self.repo.get(env=env, risk_check_id=risk_check_id)

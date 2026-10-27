@@ -447,3 +447,142 @@ def test_unavailable_provider_is_known_failure_not_unknown_submission():
     assert state["error"] == "SECURITY_PROVIDER_UNAVAILABLE"
     assert "CREATION_FAILED" in state["notices"]
     assert "CREATION_UNKNOWN" not in state["notices"]
+
+
+def test_reclaimed_submit_keeps_late_valid_check_id_without_reposting(tmp_path):
+    from threading import Event, Thread
+    from sqlalchemy import func
+    from agentclaw.community.core.repository.implementations.platform.task_queue import (
+        TaskQueueRepository,
+    )
+    from agentclaw.community.core.task_queue.repository.models import TaskQueueModel
+    from agentclaw.community.core.bot_public_risk.tasks import RiskTaskHandler, SUBMIT
+
+    tasks, _, _, provider, now, record = make()
+    db = Db.__new__(Db)
+    db.engine = create_engine(f"sqlite:///{tmp_path / 'risk.db'}")
+    RiskCheckModel.__table__.create(db.engine)
+    TaskQueueModel.__table__.create(db.engine)
+    db.sessions = sessionmaker(bind=db.engine)
+    tasks.repo = BotPublicRiskRepository(db)
+    queue = TaskQueueRepository(db)
+
+    class RealQueue:
+        def enqueue(
+            self,
+            kind,
+            payload,
+            deadline_seconds,
+            *,
+            delay_seconds=0,
+            idempotency_key=None,
+        ):
+            return queue.enqueue(
+                task_type=kind,
+                payload=payload,
+                env="dev",
+                app="agentclaw",
+                deadline_seconds=deadline_seconds,
+                delay_seconds=delay_seconds,
+                idempotency_key=idempotency_key,
+            )
+
+    tasks.queue = RealQueue()
+    entered, release = Event(), Event()
+
+    def blocked(payload):
+        provider.submissions.append(payload)
+        entered.set()
+        assert release.wait(10)
+        return "check-1"
+
+    provider.submit_agent_scan = blocked
+    tasks.start(record)
+    first = queue.claim_batch(
+        worker_id="first", env="dev", app="agentclaw", limit=1, lease_seconds=30
+    )[0]
+    handler = RiskTaskHandler(tasks, SUBMIT, lambda: "dev")
+    thread = Thread(target=lambda: handler.handle(first.payload))
+    thread.start()
+    assert entered.wait(10)
+    with db.orm_session() as session:
+        session.query(TaskQueueModel).filter_by(id=first.id).update(
+            {TaskQueueModel.lease_expires_at: func.datetime("now", "-1 minute")},
+            synchronize_session=False,
+        )
+    second = queue.claim_batch(
+        worker_id="second", env="dev", app="agentclaw", limit=1, lease_seconds=30
+    )[0]
+    handler.handle(second.payload)
+    assert tasks.repo.get(env="dev", risk_check_id="a").phase == "NEEDS_ATTENTION"
+    release.set()
+    thread.join(10)
+    assert not thread.is_alive()
+    row = tasks.repo.get(env="dev", risk_check_id="a")
+    assert row.phase == "CHECKING" and row.check_id == "check-1"
+    assert row.auto_poll_until == now[0] + timedelta(minutes=5)
+    assert len(provider.submissions) == 1
+
+
+def test_late_check_id_does_not_revive_withdrawn_or_replaced_application():
+    for change in ("withdraw", "replace"):
+        tasks, repo, queue, provider, now, record = make()
+        tasks.start(record)
+        original = repo.get(env="dev", risk_check_id="a")
+        assert repo.update_current(
+            env="dev",
+            risk_check_id="a",
+            row_version=original.row_version,
+            changes={
+                "phase": "NEEDS_ATTENTION",
+                "workflow_json": '{"submission_intent":true,"error":"SUBMISSION_OUTCOME_UNKNOWN"}',
+            },
+        )
+        if change == "withdraw":
+            assert repo.invalidate_current(env="dev", bot_pk=7, public_scope="user")
+        else:
+            repo.create_or_replay(
+                replace(record, risk_check_id="b", client_request_id="req-b")
+            )
+        tasks._record_submission_result(
+            env="dev", risk_check_id="a", check_id="check-1"
+        )
+        old = repo.get(env="dev", risk_check_id="a")
+        assert old.current_target_key is None and old.phase == "NEEDS_ATTENTION"
+        assert old.check_id is None
+        assert not any(
+            entry[0][0] == "bot_public_risk_detecting" for entry in queue.entries
+        )
+        if change == "replace":
+            assert (
+                repo.get_current(env="dev", bot_pk=7, public_scope="user").risk_check_id
+                == "b"
+            )
+
+
+def test_late_check_id_cannot_revive_other_failure_or_replace_existing_check():
+    tasks, repo, queue, provider, now, record = make()
+    tasks.start(record)
+    row = repo.get(env="dev", risk_check_id="a")
+    assert repo.update_current(
+        env="dev",
+        risk_check_id="a",
+        row_version=row.row_version,
+        changes={
+            "phase": "NEEDS_ATTENTION",
+            "workflow_json": '{"submission_intent":true,"error":"INPUT_OR_PERMISSION_INVALID"}',
+        },
+    )
+    tasks._record_submission_result(env="dev", risk_check_id="a", check_id="check-1")
+    assert repo.get(env="dev", risk_check_id="a").check_id is None
+    current = repo.get(env="dev", risk_check_id="a")
+    assert repo.update_current(
+        env="dev",
+        risk_check_id="a",
+        row_version=current.row_version,
+        changes={"phase": "CHECKING", "check_id": "original-check"},
+    )
+    tasks._record_submission_result(
+        env="dev", risk_check_id="a", check_id="other-check"
+    )
+    assert repo.get(env="dev", risk_check_id="a").check_id == "original-check"
