@@ -138,6 +138,12 @@ class ConnectionResult:
     expires_at: str
     sockets: list[SocketInfo] = field(default_factory=list)
     transport_mode: str = ""
+    a2a_withheld: bool = False
+    """服务端治理后明确拒绝签发 A2A 面（用户灰度未命中）。
+
+    客户端据此禁用 ws 推导兜底与 A2A 探测——"没有地址"与"明确拒绝"
+    不同：前者允许直连拓扑的推导兜底，后者是用户级控制的负结果。
+    """
 
 
 __all__ = ["BotFacts", "ConnectionResult", "EngineResult", "SocketInfo"]

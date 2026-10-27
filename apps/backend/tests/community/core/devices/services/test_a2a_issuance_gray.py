@@ -42,7 +42,7 @@ class _FakeConfigService:
 # ===========================================================================
 
 
-@pytest.mark.parametrize("raw", [None, "", "  ", {}, {"enabled": False}])
+@pytest.mark.parametrize("raw", [None, "", "  ", {"enabled": False}])
 def test_unconfigured_or_disabled_means_no_gate(raw):
     assert parse_gray_config(raw) is None
 
@@ -112,6 +112,12 @@ def test_percent_valid(raw):
         {"enabled": True, "mode": "percent", "percent": "50"},
         {"enabled": True, "mode": "percent"},
         {"enabled": "yes", "mode": "percent", "percent": 10},
+        # review F3：配置对象已存在而缺 enabled / enabled 为 null——不是
+        # "未配置"（键不存在），是结构残缺，必须 fail-closed 而非全量放行。
+        {},
+        {"mode": "percent", "percent": 10},
+        {"enabled": None, "mode": "percent", "percent": 10},
+        {"mode": "whitelist", "users": ["240841"]},
     ],
 )
 def test_malformed_config_fails_closed(raw):

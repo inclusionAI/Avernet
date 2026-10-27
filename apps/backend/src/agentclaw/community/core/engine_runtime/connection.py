@@ -276,7 +276,10 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
                         transport_mode="direct",
                     )
             else:
-                info = self._get_connection(binding_id, operator, chat_path, device_uuid)
+                info = self._get_connection(
+                    binding_id, operator, chat_path, device_uuid,
+                    caller_id=caller_id,
+                )
         except BaasNoActiveDevicesError as exc:
             raise EngineDeviceNotReadyError(
                 f"device unavailable for bot={bot_id}"
@@ -331,6 +334,9 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
             transport_mode=self._desktop_connections.config.mode
             if facts.bot_type == "desktop"
             else "",
+            # 用户灰度负结果的显式信号:withheld 时客户端禁用 ws 推导兜底,
+            # 否则直连拓扑下名单外用户仍能探测到同源 A2A 绕开灰度。
+            a2a_withheld=bool(getattr(info, "a2a_withheld", False)),
         )
 
     def _stage_binding_id(
@@ -395,10 +401,16 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
 
     def _get_connection(
         self, binding_id: int, operator: OperatorContext, chat_path: str,
-        device_uuid: str | None = None,
+        device_uuid: str | None = None, caller_id: str | None = None,
     ) -> object:
-        """Ask the provider for this device's connection."""
-        selection = {"device_uuid": device_uuid} if device_uuid is not None else {}
+        """Ask the provider for this device's connection.
+
+        ``caller_id`` is the authenticated user — gray-gate identity. The
+        ``operator`` argument is deliberately the resolved owner.
+        """
+        selection = (
+            {"device_uuid": device_uuid} if device_uuid is not None else {}
+        )
         return self._device_service.get_device_connection(
             **selection,
             binding_id=binding_id,
@@ -427,6 +439,11 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
             # appends the engine path itself rather than trusting the provider to
             # have applied it.
             path=chat_path,
+            # ``operator`` above is deliberately the resolved owner (routing and
+            # permission-compat); user-level gray decisions must key on the
+            # authenticated caller instead, or collaborators would inherit the
+            # owner's gray bucket.
+            caller_id=caller_id,
         )
 
     # ── composition ───────────────────────────────────────────────────────

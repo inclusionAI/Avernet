@@ -41,16 +41,23 @@ A2A 迁移主干已合入 dev，但放量缺一个**用户粒度**灰度载体�
 - `percent`：`sha256("a2a-gray:" + staff_id)` 前 8 字节整数 `% 100 < percent`
   （稳定 hash，同用户永远同侧，跨设备/跨会话粘性由构造保证）。
 
-语义矩阵（fail 方向对每条明确）：
+语义矩阵（fail 方向对每条明确；**R1 评审修订**：配置对象已存在而缺 `enabled`/`enabled:null` 也按非法 fail-closed——"解除门控"只有键不存在或显式 `enabled:false` 两个正形）：
 
 | 状态 | 结果 |
 |---|---|
-| 配置键不存在 / `enabled:false` | **不门控**（face 照常签发——维持阶段二加性面，存量行为零变化） |
+| 配置**键**不存在 / 显式 `enabled:false` | **不门控**（face 照常签发——维持阶段二加性面，存量行为零变化） |
+| 配置对象存在但缺 `enabled` / `enabled:null` / 非布尔 | **fail-closed 等价空名单**（全部拒发）——运营贴了配置却漏字段绝不能静默全量放行 |
 | `whitelist` 合法 | 名单内签发，名单外拒发 |
 | `percent` 合法（0-100） | 按分桶命中 |
 | 配置存在但 JSON/结构非法 | **fail-closed 等价空名单**（全部拒发）+ 告警日志 |
 | 配置读取异常（DB 故障） | **fail-closed 本次拒发** + 告警日志 |
-| `staff_id` 为空 | fail-closed 不签 |
+| 身份（`caller_id`，缺席回退 `operator.staff_id`）为空 | fail-closed 不签 |
+
+**身份（R1 评审修订）**：灰度键取**经认证的实际访问用户**。engine_runtime 连接面有意把 operator 重标为 resolved owner（权限兼容 + 实例亲和，见 `connection.py` 的 operator 构造注释），该面必须通过 `caller_id` 参数把认证用户传到门控；operator 本身就是 caller 的面（devices HTTP 面）回退 `operator.staff_id`。协作者不继承 owner 的灰度桶。
+
+**明确拒绝协议（R2 评审修订）**：门拒发时签发 `a2a_withheld=true`（不只有空地址）。空串 = 旧服务端/无地址（客户端 ws 推导兜底**保留**）；`a2a_withheld` = 治理后明确拒绝（客户端禁用推导、探测与缓存命中构造，`bootstrap.ts` 两大构建入口拦截）。`resolveA2aUrls` 的 send-ban 遗留键查询不受影响——回滚换轨窗口的在途任务禁令必须继续生效。
+
+**生效边界（R2 评审遗留确认）**：配置只在**下次连接签发**时重新读取；已初始化会话复用 provider，不重读灰度配置。"清空名单"的秒级回滚对**新连接**成立，对**在线会话**是软着陆（在途 A2A 任务继续跑完/由遗留任务面收尾）——运营 sensitivity 在灰度收放节奏上考虑，不承诺在线即断。
 
 回滚与放量操作形态（无需重发镜像、下次签发即时生效）：
 

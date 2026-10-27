@@ -97,6 +97,8 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
    * 不出该 socket，ws 推导行为逐字节保持）；A2A bootstrap 与发送禁令的门键均
    * 以它为权威来源（见 bootstrap.ts resolveA2aUrls/isSendBannedForSession）。 */
   private a2aBaseUrl: string | null = null;
+  /** 用户灰度负结果（服务端 a2a_withheld）——bootstrap 拦截推导/探测/构造 */
+  private a2aWithheld = false;
   /** B12 取消四态的宿主订阅面（A2AProvider.onCancelOutcome → useBotChat toast 消费） */
   private readonly cancelOutcomeListeners = new Set<(outcome: CancelOutcome) => void>();
   private unsubscribeInnerConnection?: () => void;
@@ -172,14 +174,16 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
     }
   }
 
-  private fetchIamToken(): Promise<string> {
+private fetchIamToken(): Promise<string> {
     const params = withFriendBotRequestParams(this.options.bot, this.options.userId, {
       user_id: resolveUserId(this.options.userId),
     });
     return this.getIamTokenFn(this.options.bot.realBotId, params.user_id, this.options.bot.ownerId, params.stage);
   }
 
-  private async getChatUrl(): Promise<{ url: string; a2aBaseUrl: string | null }> {
+  private async getChatUrl(): Promise<{
+    url: string; a2aBaseUrl: string | null; a2aWithheld: boolean;
+  }> {
     const resp = await getBotConnection(
       this.options.bot.realBotId,
       withFriendBotRequestParams(this.options.bot, this.options.userId, {
@@ -194,7 +198,14 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
     // B17：服务端签发的 A2A base 原样收下（签发方承诺浏览器可达）；
     // 缺席 = null = 既有 ws 推导兜底，不做任何本地代填。
     const a2aBase = resp.data?.sockets?.find((s) => s.kind === 'a2a')?.url;
-    return { url: socket.url, a2aBaseUrl: a2aBase ? String(a2aBase) : null };
+    // 用户灰度负结果（服务端治理后明确拒绝）：与"没有地址"是两个语义——
+    // 明确拒绝禁止推导/探测/缓存命中构造，见 A2aBootstrapConfig.a2aWithheld。
+    const a2aWithheld = resp.data?.a2a_withheld === true;
+    return {
+      url: socket.url,
+      a2aBaseUrl: a2aBase ? String(a2aBase) : null,
+      a2aWithheld,
+    };
   }
 
   private ensureInitialized(): Promise<OpenClawProvider> {
@@ -209,9 +220,10 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
 
   private async initialize(): Promise<OpenClawProvider> {
     this.setState({ phase: 'preparing', error: null });
-    const { url, a2aBaseUrl } = await this.getChatUrl();
+    const { url, a2aBaseUrl, a2aWithheld } = await this.getChatUrl();
     this.wsUrl = url;
     this.a2aBaseUrl = a2aBaseUrl;
+    this.a2aWithheld = a2aWithheld;
     // 连接凭证(URL query token,管 WS 握手)与请求身份凭证(x-iam-token,管 chat.send 帧)是两套:
     // URL 已内含握手凭证;此处须单独拉取 IAM token 并注入 SDK,否则发送会被服务端拒(身份不明)。
     this.iamToken = this.directDesktop
@@ -238,6 +250,8 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
       // B17：服务端签发的 A2A base 随 cfg 透传——A2A bootstrap 在场即权威，
       // v3 OpenClawProvider 对多出的成员幂等忽略（ws 面不改一字）。
       ...(this.a2aBaseUrl ? { a2aBaseUrl: this.a2aBaseUrl } : {}),
+      // 用户灰度明确拒绝同链透传：bootstrap 拦截推导/探测/缓存构造。
+      ...(this.a2aWithheld ? { a2aWithheld: true } : {}),
       sessionKey: this.options.sessionId,
       xIAMToken: this.iamToken,
       immediateConnect: true,
@@ -416,6 +430,7 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
     const probeCfg = {
       url: this.wsUrl,
       ...(this.a2aBaseUrl ? { a2aBaseUrl: this.a2aBaseUrl } : {}),
+      ...(this.a2aWithheld ? { a2aWithheld: true } : {}),
       sessionKey: this.options.sessionId,
     } as A2aBootstrapConfig;
     if (takeCachedA2AProvider(probeCfg)) return;    // 当下选择仍 A2A——复用

@@ -26,6 +26,14 @@ export interface A2aBootstrapConfig extends A2aOpenClawProviderConfig {
    * 直连拓扑的兜底，网关 relay topo 下派生地址路由不到 card（404）。
    */
   a2aBaseUrl?: string;
+  /**
+   * 服务端明确拒绝本用户的 A2A 访问（用户灰度未命中，连接响应
+   * a2a_withheld=true）。与"没有 a2aBaseUrl"是两个语义：缺席允许推导
+   * 兜底（旧服务端/直连拓扑）；refusal 禁止推导、探测与缓存命中构造，
+   * 稳定落 v3。注意它**不**影响 send-ban 遗留键的推导查询——回滚换轨
+   * 在途任务的发送禁令必须继续生效。
+   */
+  a2aWithheld?: boolean;
 }
 
 // ─── 常量（UI/键位单源） ──────────────────────────────────────────────────

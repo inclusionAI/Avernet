@@ -243,6 +243,31 @@ def test_relay_mode_is_requested_so_the_provider_returns_a_finished_url():
     assert devices.kwargs["ws_conn_mode"] == "relay"
 
 
+def test_the_authenticated_caller_travels_alongside_the_owner_operator():
+    """The operator stays the resolved owner (the rule pinned above); the
+    user-level gray gate must not inherit that bucket. Collaborator sessions
+    key on the authenticated caller, or "owner in whitelist, collaborator
+    out" would leak the face and the reverse would deny legit members."""
+    devices = _Devices()
+    collaborators = _Collaborators({(100, "collab-1"): PermissionLevel.ADMIN})
+    _build(
+        _svc(devices=devices, collaborators=collaborators), caller_id="collab-1"
+    )
+    assert devices.kwargs["operator"].staff_id == OWNER
+    assert devices.kwargs["caller_id"] == "collab-1"
+
+
+def test_withheld_a2a_reaches_the_result_as_an_explicit_refusal():
+    """A face withheld by the gray gate must surface as ``a2a_withheld`` —
+    the client distinguishes it from "no address available" and disables
+    ws-derivation/probing so out-of-list users stay on v3 even in direct
+    topologies where a derived address would answer."""
+    devices = _Devices(a2a_base_url="", a2a_withheld=True)
+    result = _build(_svc(devices=devices))
+    assert result.a2a_withheld is True
+    assert {s.kind for s in result.sockets} == {"chat"}
+
+
 def test_the_engines_socket_path_is_requested_from_the_provider():
     """The relay URL is built server-side *around* this path, so it has to be
     the bot's own engine. The provider default is openclaw's, and the engine
@@ -658,13 +683,19 @@ def test_result_exposes_no_field_beside_the_url_to_compose_with():
     """The target and the credential do travel inside the URL — a browser can
     carry them nowhere else. What the result must not hand over is the *pieces*:
     a separate target, connection type, or token field would let a caller build
-    an address of its own, which is the hand-off this surface replaces."""
+    an address of its own, which is the hand-off this surface replaces.
+
+    ``a2a_withheld`` is pinned as an allowed exception: it is not address
+    material but its inverse — a governance signal ordering the caller NOT to
+    derive or reuse an A2A address (user-level gray release). ``transport_mode``
+    set the precedent for non-material operational metadata."""
     result = _build(_svc())
     assert {f.name for f in dataclasses.fields(result)} == {
         "engine",
         "expires_at",
         "sockets",
         "transport_mode",
+        "a2a_withheld",
     }
     assert {f.name for f in dataclasses.fields(result.sockets[0])} == {"kind", "url"}
 

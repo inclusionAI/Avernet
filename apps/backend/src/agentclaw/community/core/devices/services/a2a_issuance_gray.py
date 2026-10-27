@@ -68,10 +68,15 @@ def parse_gray_config(raw: Any) -> A2aIssuanceGrayConfig | None:
         data = raw
     if not isinstance(data, dict):
         return _closed_gate()
-    enabled = data.get("enabled")
+    # 配置对象已存在而缺 ``enabled``（或 null）= 结构非法，fail-closed：
+    # 运营贴了这条配置却漏了关键字段，绝不能静默解读成"全量放行"。
+    # 解除门控只有两个正形：配置键不存在，或显式 ``enabled: false``。
+    if "enabled" not in data or data["enabled"] is None:
+        return _closed_gate()
+    enabled = data["enabled"]
     # 布尔之外不允许任何隐式真值（"yes"/1 等按 fail-closed 关门）；
     # 显式 false 是运营的解除门控操作（全量形态），非失效状态。
-    if enabled is False or enabled is None:
+    if enabled is False:
         return None
     if enabled is not True:
         return _closed_gate()

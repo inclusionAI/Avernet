@@ -476,6 +476,7 @@ class TestGetDeviceConnection:
         result = svc.get_device_connection(binding_id=7, operator=_operator("u001"))
 
         assert result.a2a_base_url == "http://bot-a1b2-vc.stable.alipay.net:32196"
+        assert result.a2a_withheld is False
 
     def test_gate_denies_operator_signs_an_empty_face(self):
         """名单外用户拿到空 a2a face：下游不装 a2a socket，前端探针落 v3。"""
@@ -488,8 +489,11 @@ class TestGetDeviceConnection:
         result = svc.get_device_connection(binding_id=7, operator=_operator("u001"))
 
         assert result.a2a_base_url == ""
+        assert result.a2a_withheld is True
 
-    def test_gate_is_judged_on_the_callers_staff_id(self):
+    def test_gate_is_judged_on_the_caller_not_the_owner_operator(self):
+        """engine_runtime 面传下来的 operator 是 resolved owner（权限兼容
+        +实例亲和），灰度身份必须取 caller_id——协作者不继承 owner 的桶。"""
         baas = MagicMock()
         baas.get_ws_info.return_value = self._ws_info_with_a2a_face()
         svc = _make_service(
@@ -497,11 +501,19 @@ class TestGetDeviceConnection:
             a2a_issuance_gate=self._gate({"u001": False, "u002": True}),
         )
 
-        svc.get_device_connection(binding_id=7, operator=_operator("u001"))
-        svc.get_device_connection(binding_id=7, operator=_operator("u002"))
+        denied = svc.get_device_connection(
+            binding_id=7, operator=_operator("u001"), caller_id="u002"
+        )
+        allowed = svc.get_device_connection(
+            binding_id=7, operator=_operator("u001"), caller_id=None,
+        )
 
         judged = [c.args[0] for c in svc._a2a_issuance_gate.allows_face.call_args_list]
-        assert judged == ["u001", "u002"]
+        # caller_id 在场即覆盖 operator.staff_id；缺席则回退 operator（operator
+        # 本身就是 caller 的面，如 devices HTTP 面）。
+        assert judged == ["u002", "u001"]
+        assert denied.a2a_base_url != ""
+        assert allowed.a2a_base_url == ""
 
     def test_gate_failure_withholds_rather_than_breaks_the_connection(self):
         """门读配置抛异常也只收敛 a2a face：v3 面照常签发。"""

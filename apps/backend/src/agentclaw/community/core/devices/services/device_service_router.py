@@ -565,6 +565,7 @@ class DeviceServiceRouter(DeviceProviderRouterMixin, DeviceService):
         device_uuid: str | None = None,
         ws_conn_mode: str | None = None,
         path: str | None = None,
+        caller_id: str | None = None,
     ):
         """获取设备连接信息 - 根据 binding_id 路由.
 
@@ -573,11 +574,15 @@ class DeviceServiceRouter(DeviceProviderRouterMixin, DeviceService):
 
         ``path`` 透传给 provider,仅对"由服务端拼出完整 URL"的链路(BaaS relay)
         有意义;其余 provider 忽略。
+
+        ``caller_id`` 是经认证的实际访问用户，供用户级灰度门判定;operator 在
+        engine_runtime 连接面被有意重标为 owner，不能作为灰度身份。
         """
         service = self._get_provider_for_binding(binding_id)
         return service.get_device_connection(
             binding_id=binding_id, operator=operator, port=port, ttl=ttl,
             device_uuid=device_uuid, ws_conn_mode=ws_conn_mode, path=path,
+            caller_id=caller_id,
         )
 
     @override

@@ -153,9 +153,11 @@ def test_no_capability_probe_is_needed(client, relay):
 
 def test_payload_never_exposes_routing_internals(client, relay):
     """No target, type, or bare token field — that hand-off is what this
-    endpoint exists to replace."""
+    endpoint exists to replace. ``a2a_withheld`` is the allowed governance
+    exception: it carries no address material, it *orders the caller not to
+    derive or reuse one* (user-level gray release)."""
     data = ok(client.get(URL))
-    assert set(data) == {"engine", "expires_at", "sockets"}
+    assert set(data) == {"engine", "expires_at", "sockets", "a2a_withheld"}
     for socket in data["sockets"]:
         # ``url`` is the only field. The credential rides inside it — a browser
         # can carry one nowhere else on a handshake — and a second copy in a
@@ -208,6 +210,7 @@ def test_explicit_friend_connection_is_session_scoped(
     assert data == {
         "engine": "openclaw",
         "expires_at": "2026-09-07T08:09:09+00:00",
+        "a2a_withheld": False,
         "sockets": [
             {
                 "kind": "chat",

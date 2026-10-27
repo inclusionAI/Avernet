@@ -504,3 +504,35 @@ describe('app 级单例（context 级生存期）', () => {
     expect(SEND_BAN_UI_TEXT).toBe('该会话暂不可发送（底层执行停止未确认）');
   });
 });
+
+describe('服务端明确拒绝（a2aWithheld = 用户灰度未命中）', () => {
+  it('maybeBuild：null + 零 fetch + 缓存不动——拒绝不是探测结论', async () => {
+    const cache = new TransportChoiceCache();
+    const result = await maybeBuildA2AProvider(
+      { ...CONFIG, a2aWithheld: true },
+      { choiceCache: cache, switchOn: () => true, fetchImpl: mustNotFetch },
+    );
+    expect(result).toBeNull();
+    expect(cache.get(A2A_CHOICE_SESSION_KEY, URLS.rpcUrl)).toBeUndefined();
+  });
+
+  it('takeCached：命中缓存的 a2a 也不构造——回滚后页面残留选择不得复活', () => {
+    const cache = new TransportChoiceCache();
+    cache.set(A2A_CHOICE_SESSION_KEY, URLS.rpcUrl, 'a2a');
+    const result = takeCachedA2AProvider(
+      { ...CONFIG, a2aWithheld: true },
+      { choiceCache: cache, switchOn: () => true },
+    );
+    expect(result).toBeNull();
+  });
+
+  it('未标记拒绝时推导兜底保持原语义（缺席 ≠ 拒绝）', () => {
+    const cache = new TransportChoiceCache();
+    cache.set(A2A_CHOICE_SESSION_KEY, URLS.rpcUrl, 'a2a');
+    const result = takeCachedA2AProvider(
+      { ...CONFIG },
+      { choiceCache: cache, switchOn: () => true },
+    );
+    expect(result).toBeInstanceOf(A2AProvider);
+  });
+});
