@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Annotated, Literal
 
@@ -44,9 +45,10 @@ openapi_router = APIRouter(
 )
 
 
-def _authorize(bots, collaborators, *, bot_id, actor_id, surface, owner_id=None):
+async def _authorize(bots, collaborators, *, bot_id, actor_id, surface, owner_id=None):
     try:
-        return authorize_risk_bot(
+        return await asyncio.to_thread(
+            authorize_risk_bot,
             bots,
             collaborators,
             bot_id=bot_id,
@@ -92,10 +94,13 @@ def _view(record):
     )
 
 
-def _record(query, bot, risk_check_id):
+async def _record(query, bot, risk_check_id):
     try:
-        return query.get(
-            env=bot.bot["env"], bot_pk=bot.bot_pk, risk_check_id=risk_check_id
+        return await asyncio.to_thread(
+            query.get,
+            env=bot.bot["env"],
+            bot_pk=bot.bot_pk,
+            risk_check_id=risk_check_id,
         )
     except RiskRecordNotFound as exc:
         raise HTTPException(status_code=404, detail="Not found") from exc
@@ -116,12 +121,16 @@ async def create_openapi(
     collaborators: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
     service: BotPublicRiskServiceProtocol = Injected(BotPublicRiskServiceProtocol),
 ):
-    bot = _authorize(
+    bot = await _authorize(
         bots, collaborators, bot_id=bot_id, actor_id=actor_id, surface="openapi"
     )
     try:
-        record, created = service.submit(
-            bot=bot, actor_id=actor_id, surface="openapi", body=req.model_dump()
+        record, created = await asyncio.to_thread(
+            service.submit,
+            bot=bot,
+            actor_id=actor_id,
+            surface="openapi",
+            body=req.model_dump(),
         )
     except RequestConflict as exc:
         raise HTTPException(
@@ -147,11 +156,11 @@ async def current_openapi(
     collaborators: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
     query: BotPublicRiskQueryProtocol = Injected(BotPublicRiskQueryProtocol),
 ):
-    bot = _authorize(
+    bot = await _authorize(
         bots, collaborators, bot_id=bot_id, actor_id=actor_id, surface="openapi"
     )
-    row = query.current(
-        env=bot.bot["env"], bot_pk=bot.bot_pk, public_scope=public_scope
+    row = await asyncio.to_thread(
+        query.current, env=bot.bot["env"], bot_pk=bot.bot_pk, public_scope=public_scope
     )
     return envelope(_view(row) if row else None, request)
 
@@ -169,10 +178,10 @@ async def get_openapi(
     collaborators: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
     query: BotPublicRiskQueryProtocol = Injected(BotPublicRiskQueryProtocol),
 ):
-    bot = _authorize(
+    bot = await _authorize(
         bots, collaborators, bot_id=bot_id, actor_id=actor_id, surface="openapi"
     )
-    return envelope(_view(_record(query, bot, risk_check_id)), request)
+    return envelope(_view(await _record(query, bot, risk_check_id)), request)
 
 
 @openapi_router.post(
@@ -189,10 +198,10 @@ async def refresh_openapi(
     query: BotPublicRiskQueryProtocol = Injected(BotPublicRiskQueryProtocol),
     service: BotPublicRiskServiceProtocol = Injected(BotPublicRiskServiceProtocol),
 ):
-    bot = _authorize(
+    bot = await _authorize(
         bots, collaborators, bot_id=bot_id, actor_id=actor_id, surface="openapi"
     )
-    record = _record(query, bot, risk_check_id)
+    record = await _record(query, bot, risk_check_id)
     try:
         outcome, record = service.refresh(bot=bot, actor_id=actor_id, record=record)
     except LookupError as exc:
@@ -219,7 +228,7 @@ async def create_legacy(
     service: BotPublicRiskServiceProtocol = Injected(BotPublicRiskServiceProtocol),
 ):
     try:
-        bot = _authorize(
+        bot = await _authorize(
             bots,
             collaborators,
             bot_id=bot_id,
@@ -228,8 +237,12 @@ async def create_legacy(
             owner_id=req.owner_id,
         )
         _require_mutable(bot)
-        record, _ = service.submit(
-            bot=bot, actor_id=user.staffId, surface="legacy", body=req.model_dump()
+        record, _ = await asyncio.to_thread(
+            service.submit,
+            bot=bot,
+            actor_id=user.staffId,
+            surface="legacy",
+            body=req.model_dump(),
         )
         return ApiResponse(
             success=True, message="操作成功", data=_view(record).model_dump(mode="json")
@@ -254,7 +267,7 @@ async def current_legacy(
     query: BotPublicRiskQueryProtocol = Injected(BotPublicRiskQueryProtocol),
 ):
     try:
-        bot = _authorize(
+        bot = await _authorize(
             bots,
             collaborators,
             bot_id=bot_id,
@@ -262,8 +275,8 @@ async def current_legacy(
             surface="legacy",
             owner_id=owner_id,
         )
-        row = query.current(
-            env=bot.bot["env"], bot_pk=bot.bot_pk, public_scope="legacy"
+        row = await asyncio.to_thread(
+            query.current, env=bot.bot["env"], bot_pk=bot.bot_pk, public_scope="legacy"
         )
         return ApiResponse(
             success=True,
@@ -288,7 +301,7 @@ async def get_legacy(
     query: BotPublicRiskQueryProtocol = Injected(BotPublicRiskQueryProtocol),
 ):
     try:
-        bot = _authorize(
+        bot = await _authorize(
             bots,
             collaborators,
             bot_id=bot_id,
@@ -296,7 +309,7 @@ async def get_legacy(
             surface="legacy",
             owner_id=owner_id,
         )
-        row = _record(query, bot, risk_check_id)
+        row = await _record(query, bot, risk_check_id)
         return ApiResponse(
             success=True, message="查询成功", data=_view(row).model_dump(mode="json")
         )
@@ -320,7 +333,7 @@ async def refresh_legacy(
     service: BotPublicRiskServiceProtocol = Injected(BotPublicRiskServiceProtocol),
 ):
     try:
-        bot = _authorize(
+        bot = await _authorize(
             bots,
             collaborators,
             bot_id=bot_id,
@@ -329,10 +342,10 @@ async def refresh_legacy(
             owner_id=owner_id,
         )
         _require_mutable(bot)
-        record = _record(query, bot, risk_check_id)
+        record = await _record(query, bot, risk_check_id)
         try:
-            outcome, record = service.refresh(
-                bot=bot, actor_id=user.staffId, record=record
+            outcome, record = await asyncio.to_thread(
+                service.refresh, bot=bot, actor_id=user.staffId, record=record
             )
         except LookupError as exc:
             raise HTTPException(status_code=404, detail="Not found") from exc
