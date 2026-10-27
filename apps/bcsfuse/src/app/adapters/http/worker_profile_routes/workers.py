@@ -5,6 +5,7 @@ from fastapi import Request, HTTPException, status
 from app.adapters.http.schemas.worker_management_schemas import (
     WorkerBatchQueryRequest,
     WorkerBatchQueryResponse,
+    WorkerBatchQueryItem,
     WorkerAvailabilityUpdate,
     WorkerAvailabilityResponse,
     WorkerTrustLevelUpdate,
@@ -52,6 +53,7 @@ async def batch_query_workers(request: Request, req: WorkerBatchQueryRequest):
                 logger.warning(f"[Workers R3] Failed to get worker {wid}: {e}")
 
         workers = []
+        data = {}
         not_found_ids = []
 
         for worker_id in req.worker_ids:
@@ -65,10 +67,18 @@ async def batch_query_workers(request: Request, req: WorkerBatchQueryRequest):
                 else:
                     worker_dict = dict(worker)
                 workers.append(worker_dict)
+                state = worker_dict["state"]
+                data[worker_id] = WorkerBatchQueryItem(
+                    name=worker_dict["identity"]["name"],
+                    runtime_state=state["runtime_state"],
+                    availability=state["availability"],
+                    profile_tags={"trust_level": state["trust_level"]},
+                )
             else:
                 not_found_ids.append(worker_id)
 
         return WorkerBatchQueryResponse(
+            data=data,
             workers=workers,
             not_found_ids=not_found_ids,
             total=len(workers),

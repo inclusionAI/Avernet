@@ -53,15 +53,29 @@ class WorkerBatchQueryRequest(BaseModel):
     )
 
 
+class WorkerBatchQueryItem(BaseModel):
+    """Worker summary consumed by the BCN batch client."""
+
+    name: str
+    runtime_state: str
+    availability: str
+    profile_tags: dict[str, str]
+
+
 class WorkerBatchQueryResponse(BaseModel):
     """
     Worker batch query response.
 
     Attributes:
+        success: Whether the lookup completed successfully
+        data: Worker summaries keyed by ID for BCN clients
         workers: List of worker data
         not_found_ids: Worker IDs not found
         total: Total workers found
     """
+
+    success: Literal[True] = True
+    data: dict[str, WorkerBatchQueryItem] = Field(default_factory=dict)
 
     workers: list[dict[str, Any]] = Field(
         default_factory=list,
