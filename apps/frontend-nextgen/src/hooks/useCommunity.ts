@@ -8,6 +8,7 @@ import { useCommunityStore } from '@/stores/communityStore';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useBotAuthorEnricher } from './useBotAuthorEnricher';
 import { useCommunityReplies } from './useCommunityReplies';
+import { useCommunityResolutionActions } from './useCommunityResolutionActions';
 import { useHumanIdentity } from './useHumanIdentity';
 
 export { COMMUNITY_PAGE_SIZE, COMMUNITY_REPLY_PAGE_SIZE } from '@/domain/community/constants';
@@ -20,8 +21,6 @@ export function useCommunity() {
   const { enrichTopicBotAuthor, botNameById } = useBotAuthorEnricher(currentUserId);
 
   const [publishing, setPublishing] = useState(false);
-  const [closing, setClosing] = useState(false);
-  const [helpfulPostId, setHelpfulPostId] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
@@ -44,6 +43,12 @@ export function useCommunity() {
     setReplies: store.setReplies,
   });
   const { resetReplies, openFirstReplyPage, goToReplyPage, replyPage } = replies;
+  const resolutionActions = useCommunityResolutionActions({
+    selectedTopic: store.selectedTopic,
+    markTopicClosed: store.markTopicClosed,
+    goToReplyPage,
+    replyPage,
+  });
 
   const load = useCallback(async () => {
     const requestId = ++requestRef.current;
@@ -206,57 +211,10 @@ export function useCommunity() {
     ],
   );
 
-  const closeTopic = useCallback(async () => {
-    const topic = store.selectedTopic;
-    if (!topic?.canClose) return false;
-    setClosing(true);
-    try {
-      // openapi §2.3 写口 body 由 controller 补 author_type('HUMAN')；author_id 取主题作者。
-      // canClose 守卫已确保作者=当前登录人，无需 'unknown' 回退。
-      await communityService.closeTopic(topic.id, topic.author.id);
-      store.markTopicClosed(topic.id);
-      notifySuccess(topic.topicType === 'help' ? '求助已标记为已解决' : '主题已结帖');
-      return true;
-    } catch (error) {
-      const helpTopic = topic.topicType === 'help';
-      notifyError(communityErrorMessage(error, helpTopic ? '标记已解决失败' : '结帖失败'), {
-        title: helpTopic ? '标记已解决失败' : '结帖失败',
-      });
-      return false;
-    } finally {
-      setClosing(false);
-    }
-  }, [store.markTopicClosed, store.selectedTopic]);
-
-  const setPostHelpful = useCallback(
-    async (postId: string, helpful: boolean) => {
-      const topic = store.selectedTopic;
-      if (!topic?.isMine || topic.topicType !== 'help') return false;
-      setHelpfulPostId(postId);
-      try {
-        await communityService.setPostHelpful(
-          topic.id,
-          postId,
-          topic.author.type === 'bot' ? 'BOT' : 'HUMAN',
-          topic.author.id,
-          helpful,
-        );
-        await goToReplyPage(replyPage);
-        notifySuccess(helpful ? '已标记为有帮助' : '已取消有帮助');
-        return true;
-      } catch (error) {
-        notifyError(communityErrorMessage(error, '有帮助状态更新失败'), { title: '操作失败' });
-        return false;
-      } finally {
-        setHelpfulPostId(null);
-      }
-    },
-    [goToReplyPage, replyPage, store.selectedTopic],
-  );
-
   return {
     ...store,
     ...replies,
+    ...resolutionActions,
     currentUserId,
     load,
     loadMore,
@@ -266,10 +224,6 @@ export function useCommunity() {
     openTopic,
     closeDetail,
     publishTopic,
-    closeTopic,
-    setPostHelpful,
     publishing,
-    closing,
-    helpfulPostId,
   };
 }

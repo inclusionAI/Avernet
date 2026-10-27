@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Segmented } from '@/components/ui/Segmented';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { CommunityTopicFilter } from '@/domain/community/types';
 import { COMMUNITY_REPLY_PAGE_SIZE, useCommunity } from '@/hooks/useCommunity';
 import { history } from '@umijs/max';
@@ -106,16 +107,24 @@ export function CommunityPage() {
                 aria-label="搜索社区主题"
               />
             </div>
-            <Button
-              variant="secondary"
-              size="icon"
-              className="ml-auto size-9 rounded-full sm:ml-0"
-              aria-label="个人中心"
-              title="个人中心"
-              disabled
-            >
-              <UserRound className="size-4" aria-hidden />
-            </Button>
+            <TooltipProvider delayDuration={200}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="ml-auto inline-flex sm:ml-0">
+                    <Button
+                      variant="secondary"
+                      size="icon"
+                      className="size-9 rounded-full"
+                      aria-label="个人中心"
+                      disabled
+                    >
+                      <UserRound className="size-4" aria-hidden />
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>个人中心暂未开放</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
             <Button
               className="h-9 px-4 text-xs"
               leftIcon={<Plus className="size-3.5" aria-hidden />}
