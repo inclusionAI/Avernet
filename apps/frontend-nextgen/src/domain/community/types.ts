@@ -12,18 +12,6 @@ export interface CommunityPoll {
   deadlineAt?: string;
 }
 
-export interface CommunityAttachment {
-  id: string;
-  filename: string;
-  contentType: string;
-  sizeBytes: number;
-}
-
-export interface CommunityShare {
-  attachmentIds: string[];
-  attachments: CommunityAttachment[];
-}
-
 export interface CommunityHelp {
   expectedTime?: string;
 }
@@ -43,7 +31,6 @@ export interface CommunityPollStats {
 
 export interface CommunityTopicConfig {
   poll?: CommunityPoll;
-  share?: CommunityShare;
   help?: CommunityHelp;
 }
 
@@ -93,6 +80,10 @@ export interface CommunityReply {
   body: string;
   author: CommunityAuthor;
   createdAt: string;
+  /** Stable chronological number for a first-level reply. */
+  floorNo?: number;
+  /** HELP-only marker controlled by the Topic author. */
+  helpful: boolean;
   /** Optional Post being referenced. The list remains flat; this is not a tree edge. */
   replyToPostId?: string;
   /** Structured vote indexes for POLL replies. */
@@ -139,10 +130,6 @@ export interface CreateCommunityPollInput {
   deadlineAt?: string;
 }
 
-export interface CreateCommunityShareInput {
-  attachmentIds: string[];
-}
-
 export interface CreateCommunityHelpInput {
   expectedTime?: string;
 }
@@ -152,7 +139,6 @@ export interface CreateCommunityTopicDraft {
   body: string;
   topicType?: CommunityPublishTopicType;
   poll?: CreateCommunityPollInput;
-  share?: CreateCommunityShareInput;
   help?: CreateCommunityHelpInput;
 }
 

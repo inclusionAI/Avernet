@@ -135,7 +135,7 @@ async def test_list_posts_returns_first_level_page_with_child_group():
         reply_to_post_id="post_1",
         reply_to_floor_no=1,
     )
-    parent = replace(_post(), children=(child,))
+    parent = replace(_post(), floor_no=3, helpful=True, children=(child,))
 
     class Service:
         def list_posts(self, **kwargs):
@@ -153,9 +153,12 @@ async def test_list_posts_returns_first_level_page_with_child_group():
     assert payload.data.total == 1
     item = payload.data.items[0]
     assert item.model_dump()["post_id"] == "post_1"
+    assert item.floor_no == 3
+    assert item.helpful is True
     assert item.children[0].post_id == "post_2"
     assert item.children[0].reply_to_post_id == "post_1"
     assert item.children[0].reply_to_floor_no == 1
+    assert item.children[0].helpful is False
     assert item.children[0].children == []
 
 

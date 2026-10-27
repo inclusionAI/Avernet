@@ -3,8 +3,8 @@ import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
-import type { CommunityAttachment, CommunityReply, CommunityTopic } from '@/domain/community/types';
-import { ArrowLeft, CircleHelp, Download, Paperclip } from 'lucide-react';
+import type { CommunityReply, CommunityTopic } from '@/domain/community/types';
+import { ArrowLeft, CircleHelp, Share2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Floor } from './Floor';
 import { PollTypeIcon } from '../PollTypeIcon';
@@ -17,9 +17,10 @@ export interface CommunityTopicDetailProps {
   loading: boolean;
   error: string | null;
   closing: boolean;
+  helpfulPostId: string | null;
   onBack: () => void;
   onCloseTopic: () => Promise<boolean>;
-  onDownloadAttachment: (attachment: CommunityAttachment) => void | Promise<void>;
+  onSetPostHelpful: (postId: string, helpful: boolean) => Promise<boolean>;
   // 回帖分页
   replyLoading: boolean;
   replyError: string | null;
@@ -29,21 +30,16 @@ export interface CommunityTopicDetailProps {
   onGoToReplyPage: (page: number) => void;
 }
 
-function formatFileSize(sizeBytes: number): string {
-  if (sizeBytes < 1024) return `${sizeBytes} B`;
-  if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(1)} KiB`;
-  return `${(sizeBytes / 1024 / 1024).toFixed(1)} MiB`;
-}
-
 export function CommunityTopicDetail({
   topic,
   replies,
   loading,
   error,
   closing,
+  helpfulPostId,
   onBack,
   onCloseTopic,
-  onDownloadAttachment,
+  onSetPostHelpful,
   replyLoading,
   replyError,
   replyPage,
@@ -55,6 +51,7 @@ export function CommunityTopicDetail({
   const replyElementsRef = useRef(new Map<string, HTMLElement | null>());
 
   const replyOffset = (replyPage - 1) * replyPageSize;
+  const isHelpTopic = topic?.topicType === 'help';
   const floorGroups = useMemo(
     () => buildReplyGroups(replies, replyOffset + 1),
     [replies, replyOffset],
@@ -110,7 +107,10 @@ export function CommunityTopicDetail({
           <div className="flex items-center gap-2">
             {topic?.topicType === 'poll' && <PollTypeIcon className="size-4" />}
             {topic?.topicType === 'share' && (
-              <Paperclip className="size-4 text-muted-foreground" role="img" aria-label="分享附件" />
+              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                <Share2 className="size-4" aria-hidden />
+                分享
+              </span>
             )}
             {topic?.topicType === 'help' && <Badge tone="warning">求助</Badge>}
             {topic?.topicType === 'notice' && <Badge tone="warning">通知</Badge>}
@@ -122,16 +122,20 @@ export function CommunityTopicDetail({
             )}
             {topic?.canClose && (
               <ConfirmDialog
-                title="确认结帖？"
-                description="结帖后该主题将显示为已结束，本期暂不支持重新打开。"
-                confirmText="确认结帖"
+                title={isHelpTopic ? '确认标记为已解决？' : '确认结帖？'}
+                description={
+                  isHelpTopic
+                    ? '标记后该求助将显示为已解决，本期暂不支持重新打开。'
+                    : '结帖后该主题将显示为已结束，本期暂不支持重新打开。'
+                }
+                confirmText={isHelpTopic ? '确认标记' : '确认结帖'}
                 loading={closing}
                 onConfirm={async () => {
                   await onCloseTopic();
                 }}
               >
                 <Button variant="outline" size="sm" className="h-8 px-3 text-xs">
-                  结帖
+                  {isHelpTopic ? '标记已解决' : '结帖'}
                 </Button>
               </ConfirmDialog>
             )}
@@ -196,42 +200,6 @@ export function CommunityTopicDetail({
                   registerElement={registerReplyElement}
                 />
               )}
-              {topic.topicType === 'share' && topic.topicConfig?.share?.attachments.length ? (
-                <section
-                  aria-label="分享附件"
-                  className="mb-4 rounded-xl border border-border bg-card p-4"
-                >
-                  <header className="flex items-center gap-2">
-                    <Paperclip className="size-4 text-muted-foreground" aria-hidden />
-                    <h3 className="m-0 text-sm font-semibold text-foreground">附件</h3>
-                  </header>
-                  <ul className="mt-3 space-y-2">
-                    {topic.topicConfig.share.attachments.map((attachment) => (
-                      <li
-                        key={attachment.id}
-                        className="flex items-center gap-3 rounded-lg border border-border bg-background px-3 py-2"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <p className="m-0 truncate text-sm font-medium text-foreground">
-                            {attachment.filename}
-                          </p>
-                          <p className="m-0 text-xs text-muted-foreground">
-                            {formatFileSize(attachment.sizeBytes)}
-                          </p>
-                        </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          leftIcon={<Download className="size-3.5" aria-hidden />}
-                          onClick={() => void onDownloadAttachment(attachment)}
-                        >
-                          下载
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              ) : null}
               {topic.topicType === 'help' && topic.topicConfig?.help?.expectedTime ? (
                 <section
                   aria-label="求助设置"
@@ -258,6 +226,12 @@ export function CommunityTopicDetail({
                   author={reply.author}
                   body={reply.body}
                   createdAt={reply.createdAt}
+                  helpful={reply.helpful}
+                  canToggleHelpful={topic.topicType === 'help' && topic.isMine}
+                  helpfulLoading={helpfulPostId === reply.id}
+                  onToggleHelpful={() => {
+                    void onSetPostHelpful(reply.id, !reply.helpful);
+                  }}
                   threadReplies={children}
                   expanded={!!expandedReplyIds[reply.id]}
                   onToggleThreadReplies={() => toggleThreadReplies(reply.id)}

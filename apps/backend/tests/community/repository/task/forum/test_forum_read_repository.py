@@ -7,6 +7,7 @@ import pytest
 from agentclaw.community.core.errors import NotFound
 from agentclaw.community.core.task.forum.models import (
     TOPIC_STATUS_CLOSED,
+    TOPIC_TYPE_HELP,
     TOPIC_TYPE_NOTICE,
     TOPIC_TYPE_POLL,
     ForumPollConfig,
@@ -263,6 +264,7 @@ def test_list_posts_returns_reference_and_two_level_floor_groups(db):
 
     assert first_page.total == 2
     assert [item.post_id for item in first_page.items] == [first_floor.post_id]
+    assert first_page.items[0].floor_no == 1
     assert [
         item.post_id for item in first_page.items[0].children
     ] == [child.post_id, grandchild.post_id]
@@ -273,9 +275,59 @@ def test_list_posts_returns_reference_and_two_level_floor_groups(db):
     assert first_page.items[0].children[1].reply_to_floor_no is None
 
     assert second_page.items[0].post_id == second_floor.post_id
+    assert second_page.items[0].floor_no == 2
     assert second_page.items[0].children == ()
     assert beyond.total == 2
     assert beyond.items == ()
+
+
+def test_list_posts_prioritizes_helpful_before_paging_without_renumbering_floors(db):
+    repo = ForumRepository(db)
+    topic = _topic(repo, "help-topic", title="help", topic_type=TOPIC_TYPE_HELP)
+    first = _reply(repo, topic.topic_id, "help-post-1", "ordinary first")
+    second = _reply(repo, topic.topic_id, "help-post-2", "helpful second")
+    child = _reply(
+        repo,
+        topic.topic_id,
+        "help-post-child",
+        "child of helpful second",
+        reply_to_post_id=second.post_id,
+    )
+    third = _reply(repo, topic.topic_id, "help-post-3", "helpful third")
+    fourth = _reply(repo, topic.topic_id, "help-post-4", "ordinary fourth")
+    base = datetime(2026, 9, 20, 8, 0, tzinfo=timezone.utc)
+    times = {
+        first.post_id: base,
+        second.post_id: base.replace(minute=1),
+        child.post_id: base.replace(minute=2),
+        third.post_id: base.replace(minute=3),
+        fourth.post_id: base.replace(minute=4),
+    }
+    with db.orm_session() as session:
+        rows = session.query(ForumPostModel).filter_by(topic_id=topic.topic_id).all()
+        for row in rows:
+            row.gmt_create = times[row.post_id]
+        session.query(ForumPostModel).filter(
+            ForumPostModel.post_id.in_([second.post_id, third.post_id])
+        ).update(
+            {ForumPostModel.post_config: {"helpful": {"marked": True}}},
+            synchronize_session=False,
+        )
+
+    first_page = repo.list_posts(topic_id=topic.topic_id, offset=0, limit=2)
+    second_page = repo.list_posts(topic_id=topic.topic_id, offset=2, limit=2)
+
+    assert first_page.total == 4
+    assert [item.post_id for item in first_page.items] == [second.post_id, third.post_id]
+    assert [item.floor_no for item in first_page.items] == [2, 3]
+    assert [item.helpful for item in first_page.items] == [True, True]
+    assert first_page.items[0].children[0].post_id == child.post_id
+    assert first_page.items[0].children[0].reply_to_floor_no == 2
+    assert first_page.items[0].children[0].helpful is False
+
+    assert [item.post_id for item in second_page.items] == [first.post_id, fourth.post_id]
+    assert [item.floor_no for item in second_page.items] == [1, 4]
+    assert [item.helpful for item in second_page.items] == [False, False]
 
 
 def test_list_topics_orders_by_latest_reply_activity(db):

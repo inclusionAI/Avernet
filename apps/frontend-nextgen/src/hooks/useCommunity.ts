@@ -7,7 +7,6 @@ import { communityService } from '@/services/community';
 import { useCommunityStore } from '@/stores/communityStore';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useBotAuthorEnricher } from './useBotAuthorEnricher';
-import { useCommunityAttachments } from './useCommunityAttachments';
 import { useCommunityReplies } from './useCommunityReplies';
 import { useHumanIdentity } from './useHumanIdentity';
 
@@ -17,12 +16,12 @@ export function useCommunity() {
   const store = useCommunityStore();
   const { identity } = useHumanIdentity();
   const currentUserId = identity?.userId.trim() ?? '';
-  const { uploadAttachment, downloadAttachment } = useCommunityAttachments(currentUserId);
   // BOT 作者名兜底：后端 §4.1 不返 BOT作者 display_name 时，用本人 owned bots 的 bot_name 兜底。
   const { enrichTopicBotAuthor, botNameById } = useBotAuthorEnricher(currentUserId);
 
   const [publishing, setPublishing] = useState(false);
   const [closing, setClosing] = useState(false);
+  const [helpfulPostId, setHelpfulPostId] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
@@ -44,7 +43,7 @@ export function useCommunity() {
     selectedTopic: store.selectedTopic,
     setReplies: store.setReplies,
   });
-  const { resetReplies, openFirstReplyPage } = replies;
+  const { resetReplies, openFirstReplyPage, goToReplyPage, replyPage } = replies;
 
   const load = useCallback(async () => {
     const requestId = ++requestRef.current;
@@ -216,15 +215,44 @@ export function useCommunity() {
       // canClose 守卫已确保作者=当前登录人，无需 'unknown' 回退。
       await communityService.closeTopic(topic.id, topic.author.id);
       store.markTopicClosed(topic.id);
-      notifySuccess('主题已结帖');
+      notifySuccess(topic.topicType === 'help' ? '求助已标记为已解决' : '主题已结帖');
       return true;
     } catch (error) {
-      notifyError(communityErrorMessage(error, '结帖失败'), { title: '结帖失败' });
+      const helpTopic = topic.topicType === 'help';
+      notifyError(communityErrorMessage(error, helpTopic ? '标记已解决失败' : '结帖失败'), {
+        title: helpTopic ? '标记已解决失败' : '结帖失败',
+      });
       return false;
     } finally {
       setClosing(false);
     }
   }, [store.markTopicClosed, store.selectedTopic]);
+
+  const setPostHelpful = useCallback(
+    async (postId: string, helpful: boolean) => {
+      const topic = store.selectedTopic;
+      if (!topic?.isMine || topic.topicType !== 'help') return false;
+      setHelpfulPostId(postId);
+      try {
+        await communityService.setPostHelpful(
+          topic.id,
+          postId,
+          topic.author.type === 'bot' ? 'BOT' : 'HUMAN',
+          topic.author.id,
+          helpful,
+        );
+        await goToReplyPage(replyPage);
+        notifySuccess(helpful ? '已标记为有帮助' : '已取消有帮助');
+        return true;
+      } catch (error) {
+        notifyError(communityErrorMessage(error, '有帮助状态更新失败'), { title: '操作失败' });
+        return false;
+      } finally {
+        setHelpfulPostId(null);
+      }
+    },
+    [goToReplyPage, replyPage, store.selectedTopic],
+  );
 
   return {
     ...store,
@@ -238,10 +266,10 @@ export function useCommunity() {
     openTopic,
     closeDetail,
     publishTopic,
-    uploadAttachment,
-    downloadAttachment,
     closeTopic,
+    setPostHelpful,
     publishing,
     closing,
+    helpfulPostId,
   };
 }

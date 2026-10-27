@@ -15,6 +15,7 @@ from agentclaw.community.adapters.http.task.bbs.router import (
     list_topics_internal,
     read_router,
     router,
+    set_post_helpful_internal,
 )
 from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     CloseTopicRequestUnified,
@@ -22,6 +23,7 @@ from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     PollSelectionRequest,
     CreateTopicRequestUnified,
     PollConfigRequest,
+    SetPostHelpfulRequest,
     TopicConfigRequest,
 )
 from agentclaw.community.adapters.http.openapi_v1.contracts import PageParams
@@ -83,12 +85,6 @@ def test_internal_router_mirrors_all_bbs_operations():
     }
 
     assert operations == {
-        # Real attachment content for SHARE Topics.
-        ("POST", "/api/v1/collaboration/tasks/bbs/attachments"),
-        (
-            "GET",
-            "/api/v1/collaboration/tasks/bbs/attachments/{attachment_id}/content",
-        ),
         # Content surface (Topic + Post) — reads.
         ("GET", "/api/v1/collaboration/tasks/bbs/topics"),
         ("GET", "/api/v1/collaboration/tasks/bbs/topics/{topic_id}"),
@@ -96,6 +92,10 @@ def test_internal_router_mirrors_all_bbs_operations():
         # Content surface — unified writes (author declared in the body).
         ("POST", "/api/v1/collaboration/tasks/bbs/topics"),
         ("POST", "/api/v1/collaboration/tasks/bbs/topics/{topic_id}/posts"),
+        (
+            "PUT",
+            "/api/v1/collaboration/tasks/bbs/topics/{topic_id}/posts/{post_id}/helpful",
+        ),
         ("POST", "/api/v1/collaboration/tasks/bbs/topics/{topic_id}/close"),
         # BBS Browse Loop — subscription (per Bot) + actor-aware feed.
         ("GET", "/api/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription"),
@@ -474,6 +474,43 @@ async def test_internal_reply_create_passes_body_author_as_human_author():
         "reply_to_post_id": " post_1 ",
         "poll_selection": None,
     }
+
+
+@pytest.mark.asyncio
+async def test_set_post_helpful_internal_delegates_declared_author_and_state():
+    class Service:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def set_post_helpful(self, **kwargs):
+            self.calls.append(kwargs)
+            return dataclasses.replace(_post(), helpful=False)
+
+    service = Service()
+    payload = await set_post_helpful_internal(
+        body=SetPostHelpfulRequest(
+            author_type="BOT", author_id="bot-a", helpful=False
+        ),
+        topic_id="topic_1",
+        post_id="post_1",
+        request=_request(
+            "PUT",
+            "/api/v1/collaboration/tasks/bbs/topics/topic_1/posts/post_1/helpful",
+        ),
+        service=service,
+    )
+
+    assert service.calls == [
+        {
+            "topic_id": "topic_1",
+            "post_id": "post_1",
+            "author_type": "BOT",
+            "author_id": "bot-a",
+            "helpful": False,
+        }
+    ]
+    assert payload.data is not None
+    assert payload.data.model_dump() == {"post_id": "post_1", "helpful": False}
 
 
 # ---------------------------------------------------------------------------

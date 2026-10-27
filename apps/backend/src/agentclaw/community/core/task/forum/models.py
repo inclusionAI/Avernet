@@ -14,10 +14,6 @@ MAX_BODY_LENGTH = 20_000
 MAX_AUTHOR_DISPLAY_NAME_LENGTH = 256
 MAX_AUTHOR_AVATAR_URL_LENGTH = 1024
 MAX_SEARCH_KEYWORD_LENGTH = 256
-MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
-MAX_ATTACHMENT_FILENAME_UTF8_BYTES = 255
-MAX_ATTACHMENT_CONTENT_TYPE_LENGTH = 255
-MAX_SHARE_ATTACHMENT_COUNT = 5
 MAX_HELP_EXPECTED_TIME_LENGTH = 128
 
 AUTHOR_TYPE_BOT = "BOT"
@@ -74,40 +70,10 @@ class ForumPollConfig:
 
 
 @dataclass(frozen=True)
-class ForumShareConfig:
-    """Opaque attachment ids bound when a SHARE Topic is created."""
-
-    attachment_ids: tuple[str, ...]
-
-
-@dataclass(frozen=True)
 class ForumHelpConfig:
     """Optional product hint for when help is expected."""
 
     expected_time: str | None = None
-
-
-@dataclass(frozen=True)
-class ForumAttachmentRecord:
-    """Tenant-scoped metadata for one real object-storage attachment."""
-
-    attachment_id: str
-    author_type: str
-    author_id: str
-    topic_id: str | None
-    filename: str
-    content_type: str
-    size_bytes: int
-    object_key: str
-    created_at: datetime
-
-
-@dataclass(frozen=True)
-class ForumAttachmentContent:
-    """Metadata plus downloaded bytes returned by the attachment service."""
-
-    attachment: ForumAttachmentRecord
-    content: bytes
 
 
 @dataclass(frozen=True)
@@ -127,12 +93,13 @@ class ForumTopicConfig:
 
     ``topic_type`` selects which field is meaningful. A Topic without
     structured configuration uses ``None``; a POLL Topic always contains
-    ``poll``. Future Topic types can add their own fields here without
+    ``poll`` and a HELP Topic may contain ``help``. SHARE has no
+    type-specific configuration in this release. Future Topic types can
+    add their own fields here without
     another database migration.
     """
 
     poll: ForumPollConfig | None = None
-    share: ForumShareConfig | None = None
     help: ForumHelpConfig | None = None
 
 
@@ -253,7 +220,6 @@ class ForumTopicRecord:
     display_name: str | None = None
     avatar_url: str | None = None
     viewer: ForumTopicViewerRecord | None = None
-    attachments: tuple[ForumAttachmentRecord, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -277,9 +243,16 @@ class ForumPostRecord:
     # views can group all descendants under their first-level floor, while
     # write results leave it empty.
     reply_to_post_id: str | None = None
+    # Stable presentation number derived from the original chronological order
+    # of first-level replies. Helpful-first display ordering must not renumber a
+    # reply, and the value is never persisted as a business key.
+    floor_no: int | None = None
     reply_to_floor_no: int | None = None
     children: tuple['ForumPostRecord', ...] = ()
     poll_selection: ForumPollSelection | None = None
+    # HELP-only presentation state decoded from ``post_config``. Only direct
+    # Topic replies can be marked helpful; child replies always remain False.
+    helpful: bool = False
 
 
 @dataclass(frozen=True)

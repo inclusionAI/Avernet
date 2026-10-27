@@ -1,5 +1,4 @@
 import type {
-  CommunityAttachment,
   CommunityAuthor,
   CommunityHelp,
   CommunityPoll,
@@ -7,7 +6,6 @@ import type {
   CommunityPollStats,
   CommunityPollStatsOption,
   CommunityReply,
-  CommunityShare,
   CommunityTopic,
   CommunityTopicType,
 } from './types';
@@ -19,20 +17,6 @@ export interface CommunityAuthorDto {
   avatar_url?: string | null;
 }
 
-export interface CommunityAttachmentDto {
-  attachment_id?: string;
-  filename?: string;
-  content_type?: string;
-  size_bytes?: number;
-  [key: string]: unknown;
-}
-
-export interface CommunityShareDto {
-  attachment_ids?: string[] | null;
-  attachments?: CommunityAttachmentDto[] | null;
-  [key: string]: unknown;
-}
-
 export interface CommunityHelpDto {
   expected_time?: string | null;
   [key: string]: unknown;
@@ -40,7 +24,6 @@ export interface CommunityHelpDto {
 
 export interface CommunityTopicConfigDto {
   poll?: CommunityPollDto | null;
-  share?: CommunityShareDto | null;
   help?: CommunityHelpDto | null;
   [key: string]: unknown;
 }
@@ -93,6 +76,8 @@ export interface CommunityReplyDto {
   post_id?: string;
   topic_id?: string;
   body?: string;
+  floor_no?: number | null;
+  helpful?: boolean | null;
   reply_to_post_id?: string | null;
   reply_to_floor_no?: number | null;
   poll_selection?: { option_indices?: number[] | null } | null;
@@ -145,15 +130,6 @@ export interface CommunityPollDto {
   [key: string]: unknown;
 }
 
-export function mapCommunityAttachmentDto(dto: CommunityAttachmentDto): CommunityAttachment {
-  return {
-    id: dto.attachment_id?.trim() || '',
-    filename: dto.filename?.trim() || '未命名附件',
-    contentType: dto.content_type?.trim() || 'application/octet-stream',
-    sizeBytes: typeof dto.size_bytes === 'number' ? dto.size_bytes : 0,
-  };
-}
-
 function mapTopicType(value: string | undefined): CommunityTopicType {
   const normalized = value?.trim().toLowerCase();
   if (normalized === 'share') return 'share';
@@ -176,18 +152,6 @@ function mapPoll(value: CommunityPollDto | null | undefined): CommunityPoll | un
     options,
     deadlineAt: value.deadline_at?.trim() || undefined,
   };
-}
-
-function mapShare(value: CommunityShareDto | null | undefined): CommunityShare | undefined {
-  if (!value) return undefined;
-  const attachmentIds = (Array.isArray(value.attachment_ids) ? value.attachment_ids : [])
-    .map((id) => id.trim())
-    .filter(Boolean);
-  const attachments = (Array.isArray(value.attachments) ? value.attachments : [])
-    .map(mapCommunityAttachmentDto)
-    .filter((attachment) => attachment.id);
-  if (!attachmentIds.length && !attachments.length) return undefined;
-  return { attachmentIds, attachments };
 }
 
 function mapHelp(value: CommunityHelpDto | null | undefined): CommunityHelp | undefined {
@@ -253,10 +217,9 @@ function mapTopicConfig(value: CommunityTopicConfigDto | null | undefined) {
   if (!value) return undefined;
   const config = {
     poll: mapPoll(value.poll),
-    share: mapShare(value.share),
     help: mapHelp(value.help),
   };
-  if (!config.poll && !config.share && !config.help) return undefined;
+  if (!config.poll && !config.help) return undefined;
   return config;
 }
 
@@ -320,6 +283,8 @@ export function mapCommunityReplyDto(dto: CommunityReplyDto): CommunityReply {
     body: dto.body ?? '',
     author: mapAuthor(asAuthorDto(dto)),
     createdAt: dto.created_at ?? '',
+    floorNo: typeof dto.floor_no === 'number' ? dto.floor_no : undefined,
+    helpful: dto.helpful === true,
     replyToPostId: dto.reply_to_post_id?.trim() || undefined,
     replyToFloorNo: typeof dto.reply_to_floor_no === 'number' ? dto.reply_to_floor_no : undefined,
     pollSelection: Array.isArray(dto.poll_selection?.option_indices)

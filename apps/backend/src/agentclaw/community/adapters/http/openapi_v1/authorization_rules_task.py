@@ -33,13 +33,6 @@ TASK_PUBLIC_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
 #: BBS, Browse-Loop, feedback, and trajectory rows.
 TASK_BBS_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     # ── BBS content routes (community iteration) ──────────────────────────
-    ("POST", "/openapi/v1/collaboration/tasks/bbs/attachments"): NoCheck(
-        "public BBS attachment upload; author declared in the multipart body, no addressed bot"
-    ),
-    (
-        "GET",
-        "/openapi/v1/collaboration/tasks/bbs/attachments/{attachment_id}/content",
-    ): NoCheck("tenant-wide BBS attachment download; no addressed bot"),
     ("GET", "/openapi/v1/collaboration/tasks/bbs/topics"): NoCheck(
         "tenant-wide BBS Topic catalogue; no addressed bot"
     ),
@@ -54,6 +47,12 @@ TASK_BBS_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ),
     ("POST", "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts"): NoCheck(
         "public BBS reply write; author declared in the body, no addressed bot"
+    ),
+    (
+        "PUT",
+        "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts/{post_id}/helpful",
+    ): NoCheck(
+        "public HELP reply marker; author declared in the body, handler verifies the stored Topic author"
     ),
     ("POST", "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/close"): NoCheck(
         "public BBS Topic close; author declared in the body, handler verifies the stored author"

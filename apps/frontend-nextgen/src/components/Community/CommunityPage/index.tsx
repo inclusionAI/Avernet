@@ -4,7 +4,7 @@ import { Segmented } from '@/components/ui/Segmented';
 import type { CommunityTopicFilter } from '@/domain/community/types';
 import { COMMUNITY_REPLY_PAGE_SIZE, useCommunity } from '@/hooks/useCommunity';
 import { history } from '@umijs/max';
-import { ArrowLeft, Plus, Search } from 'lucide-react';
+import { ArrowLeft, Plus, Search, UserRound } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { CommunityTopicDetail } from '../CommunityTopicDetail';
 import { CommunityTopicList } from '../CommunityTopicList';
@@ -33,9 +33,10 @@ export function CommunityPage() {
         loading={community.detailLoading}
         error={community.detailError}
         closing={community.closing}
+        helpfulPostId={community.helpfulPostId}
         onBack={community.closeDetail}
         onCloseTopic={community.closeTopic}
-        onDownloadAttachment={community.downloadAttachment}
+        onSetPostHelpful={community.setPostHelpful}
         replyLoading={community.replyLoading}
         replyError={community.replyError}
         replyPage={community.replyPage}
@@ -56,7 +57,6 @@ export function CommunityPage() {
               publishing={community.publishing}
               onOpenChange={setPublishOpen}
               onPublish={community.publishTopic}
-              onUploadAttachment={community.uploadAttachment}
             />
           </div>
         </main>
@@ -76,19 +76,6 @@ export function CommunityPage() {
           </header>
 
           <section className="mt-4 flex flex-wrap items-center gap-3" aria-label="社区主题筛选">
-            <div className="relative min-w-[200px] flex-1">
-              <Search
-                className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-                aria-hidden
-              />
-              <Input
-                className="h-9 rounded-lg border-border bg-muted/30 pl-10 pr-4 text-sm"
-                value={community.query}
-                onChange={(event) => community.setQuery(event.target.value)}
-                placeholder="搜索主题..."
-                aria-label="搜索社区主题"
-              />
-            </div>
             <Segmented<CommunityTopicFilter>
               value={community.topicType}
               onChange={community.setTopicType}
@@ -106,12 +93,35 @@ export function CommunityPage() {
               ]}
               className="h-9"
             />
+            <div className="relative w-full min-w-[160px] sm:ml-auto sm:w-40 sm:flex-none">
+              <Search
+                className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+                aria-hidden
+              />
+              <Input
+                className="h-9 rounded-lg border-border bg-muted/30 pl-10 pr-4 text-sm"
+                value={community.query}
+                onChange={(event) => community.setQuery(event.target.value)}
+                placeholder="搜索主题..."
+                aria-label="搜索社区主题"
+              />
+            </div>
             <Button
-              className="ml-auto h-9 px-4 text-xs"
+              variant="secondary"
+              size="icon"
+              className="ml-auto size-9 rounded-full sm:ml-0"
+              aria-label="个人中心"
+              title="个人中心"
+              disabled
+            >
+              <UserRound className="size-4" aria-hidden />
+            </Button>
+            <Button
+              className="h-9 px-4 text-xs"
               leftIcon={<Plus className="size-3.5" aria-hidden />}
               onClick={() => setPublishOpen(true)}
             >
-              发布主题
+              发帖
             </Button>
           </section>
 

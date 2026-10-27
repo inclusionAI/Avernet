@@ -3,28 +3,22 @@ import { Input } from '@/components/ui/Input';
 import { Segmented } from '@/components/ui/Segmented';
 import { Textarea } from '@/components/ui/Textarea';
 import type {
-  CommunityAttachment,
   CommunityPollSelection,
   CommunityPublishTopicType,
   CreateCommunityTopicDraft,
 } from '@/domain/community/types';
-import {
-  MAX_COMMUNITY_POLL_OPTIONS,
-  MAX_COMMUNITY_SHARE_ATTACHMENTS,
-} from '@/services/community/communityService';
+import { MAX_COMMUNITY_POLL_OPTIONS } from '@/services/community/communityService';
 import { ArrowLeft, CircleHelp, FileText, MessageSquare, Share2 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { HelpEditor } from './HelpEditor';
 import { PollEditor } from './PollEditor';
-import { ShareAttachmentEditor } from './ShareAttachmentEditor';
-import { attachmentValidationError, type AttachmentDraft, type DraftErrors } from './model';
+import type { DraftErrors } from './model';
 
 interface PublishTopicModalProps {
   open: boolean;
   publishing: boolean;
   onOpenChange: (open: boolean) => void;
   onPublish: (draft: CreateCommunityTopicDraft) => Promise<boolean>;
-  onUploadAttachment: (file: File) => Promise<CommunityAttachment>;
 }
 
 const topicTypeOptions = [
@@ -34,13 +28,12 @@ const topicTypeOptions = [
   { value: 'help' as const, label: '求助', icon: <CircleHelp className="size-3.5" aria-hidden /> },
 ];
 
-/** 发布讨论、分享、投票和求助主题；分享附件在发布前完成真实上传。 */
+/** 发布讨论、分享、投票和求助主题。 */
 export function PublishTopicModal({
   open,
   publishing,
   onOpenChange,
   onPublish,
-  onUploadAttachment,
 }: PublishTopicModalProps) {
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
@@ -49,9 +42,7 @@ export function PublishTopicModal({
   const [pollOptions, setPollOptions] = useState<string[]>(['', '']);
   const [pollDeadline, setPollDeadline] = useState('');
   const [helpExpectedTime, setHelpExpectedTime] = useState('');
-  const [attachments, setAttachments] = useState<AttachmentDraft[]>([]);
   const [errors, setErrors] = useState<DraftErrors>({});
-  const attachmentKeyRef = useRef(0);
 
   const resetDraft = () => {
     setTitle('');
@@ -61,7 +52,6 @@ export function PublishTopicModal({
     setPollOptions(['', '']);
     setPollDeadline('');
     setHelpExpectedTime('');
-    setAttachments([]);
     setErrors({});
   };
 
@@ -71,52 +61,6 @@ export function PublishTopicModal({
 
   const clearError = (key: keyof DraftErrors) => {
     setErrors((current) => ({ ...current, [key]: undefined }));
-  };
-
-  const uploadAttachment = async (draft: AttachmentDraft) => {
-    setAttachments((current) =>
-      current.map((item) =>
-        item.key === draft.key ? { ...item, status: 'uploading', error: undefined } : item,
-      ),
-    );
-    try {
-      const attachment = await onUploadAttachment(draft.file);
-      setAttachments((current) =>
-        current.map((item) =>
-          item.key === draft.key ? { ...item, status: 'uploaded', attachment, error: undefined } : item,
-        ),
-      );
-      clearError('shareAttachments');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '附件上传失败';
-      setAttachments((current) =>
-        current.map((item) => (item.key === draft.key ? { ...item, status: 'error', error: message } : item)),
-      );
-    }
-  };
-
-  const addFiles = (files: File[]) => {
-    if (!files.length) return;
-    if (attachments.length + files.length > MAX_COMMUNITY_SHARE_ATTACHMENTS) {
-      setErrors((current) => ({
-        ...current,
-        shareAttachments: `每个分享最多上传 ${MAX_COMMUNITY_SHARE_ATTACHMENTS} 个附件`,
-      }));
-      return;
-    }
-    const drafts = files.map((file) => {
-      attachmentKeyRef.current += 1;
-      const validationError = attachmentValidationError(file);
-      return {
-        key: `attachment-${attachmentKeyRef.current}`,
-        file,
-        status: validationError ? ('error' as const) : ('uploading' as const),
-        error: validationError,
-      };
-    });
-    setAttachments((current) => [...current, ...drafts]);
-    clearError('shareAttachments');
-    drafts.filter((draft) => !draft.error).forEach((draft) => void uploadAttachment(draft));
   };
 
   const handleSubmit = async () => {
@@ -138,12 +82,6 @@ export function PublishTopicModal({
       }
     }
 
-    const uploadedAttachments = attachments.flatMap((item) =>
-      item.status === 'uploaded' && item.attachment ? [item.attachment] : [],
-    );
-    if (topicType === 'share' && attachments.some((item) => item.status !== 'uploaded')) {
-      nextErrors.shareAttachments = '请等待附件上传完成，并处理上传失败的文件';
-    }
     if (topicType === 'help' && helpExpectedTime.trim().length > 128) {
       nextErrors.helpExpectedTime = '期望解决时间不能超过 128 个字符';
     }
@@ -163,9 +101,6 @@ export function PublishTopicModal({
             },
           }
         : {}),
-      ...(topicType === 'share'
-        ? { share: { attachmentIds: uploadedAttachments.map((attachment) => attachment.id) } }
-        : {}),
       ...(topicType === 'help'
         ? { help: { ...(helpExpectedTime.trim() ? { expectedTime: helpExpectedTime.trim() } : {}) } }
         : {}),
@@ -174,8 +109,6 @@ export function PublishTopicModal({
   };
 
   if (!open) return null;
-  const shareUploadBlocked = attachments.some((attachment) => attachment.status !== 'uploaded');
-
   return (
     <section className="app-scrollbar flex h-full flex-col overflow-y-auto" aria-label="发布主题编辑区">
       <header className="sticky top-0 z-10 flex items-center gap-2 border-b border-border bg-background/95 px-6 py-4 backdrop-blur">
@@ -191,7 +124,6 @@ export function PublishTopicModal({
             size="sm"
             className="px-4 text-xs"
             loading={publishing}
-            disabled={topicType === 'share' && shareUploadBlocked}
             onClick={() => void handleSubmit()}
           >
             发布
@@ -235,15 +167,6 @@ export function PublishTopicModal({
         />
         {errors.body ? <p className="m-0 text-xs text-destructive">{errors.body}</p> : null}
 
-        {topicType === 'share' ? (
-          <ShareAttachmentEditor
-            attachments={attachments}
-            error={errors.shareAttachments}
-            onAddFiles={addFiles}
-            onRetry={(draft) => void uploadAttachment(draft)}
-            onRemove={(key) => setAttachments((current) => current.filter((item) => item.key !== key))}
-          />
-        ) : null}
         {topicType === 'poll' ? (
           <PollEditor
             selection={pollSelection}

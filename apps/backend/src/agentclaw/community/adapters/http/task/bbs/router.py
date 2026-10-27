@@ -9,14 +9,8 @@ cannot drift.
 from __future__ import annotations
 
 from typing import Annotated, Any
-from urllib.parse import quote
+from fastapi import APIRouter, Body, Path, Query, Request, Response
 
-from fastapi import APIRouter, Body, File, Form, Path, Query, Request, Response, UploadFile
-from fastapi.responses import Response as BinaryResponse
-
-from agentclaw.community.adapters.http.openapi_v1.task.bbs.attachment_schemas import (
-    AttachmentUploaded,
-)
 from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     BrowseFeedTopicItem,
     BrowseReportCreated,
@@ -25,7 +19,9 @@ from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     CreateReplyRequestUnified,
     domain_poll_selection,
     CreateTopicRequestUnified,
+    PostHelpfulUpdated,
     PostItem,
+    SetPostHelpfulRequest,
     domain_topic_config,
     ReplyCreated,
     SubscriptionDeleted,
@@ -50,7 +46,6 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     page as page_envelope,
 )
 from agentclaw.community.core.task.forum.models import (
-    MAX_ATTACHMENT_BYTES,
     MAX_AUTHOR_ID_LENGTH,
     MAX_AUTHOR_TYPE_LENGTH,
     MAX_ID_LENGTH,
@@ -70,9 +65,6 @@ from agentclaw.community.core.task.forum.models import (
     BROWSE_MODE_OPENCLAW,
 )
 from agentclaw.community.core.errors import Forbidden, NotFound
-from agentclaw.community.core.task.forum.attachment_service_protocol import (
-    ForumAttachmentServiceProtocol,
-)
 from agentclaw.community.core.task.forum.service_protocol import ForumServiceProtocol
 from agentclaw.community.di import Injected
 from agentclaw.community.adapters.http.task.bbs.author_enricher import (
@@ -101,59 +93,6 @@ TopicIdPath = Annotated[
         description="Stable topic id exactly as returned by BBS APIs.",
     ),
 ]
-
-
-@read_router.post(
-    "/attachments",
-    response_model=Envelope[AttachmentUploaded],
-    status_code=201,
-)
-@envelope_errors
-async def upload_attachment_internal(
-    request: Request,
-    author_type: str = Form(..., max_length=MAX_AUTHOR_TYPE_LENGTH),
-    author_id: str = Form(..., max_length=MAX_AUTHOR_ID_LENGTH),
-    file: UploadFile = File(...),
-    service: ForumAttachmentServiceProtocol = Injected(
-        ForumAttachmentServiceProtocol
-    ),
-) -> Envelope[AttachmentUploaded]:
-    """Store one real file and return the opaque id used by SHARE Topics."""
-    filename = file.filename or ""
-    content_type = file.content_type
-    try:
-        content = await file.read(MAX_ATTACHMENT_BYTES + 1)
-    finally:
-        await file.close()
-    attachment = service.upload_attachment(
-        author_type=author_type,
-        author_id=author_id,
-        filename=filename,
-        content_type=content_type,
-        content=content,
-    )
-    return created(AttachmentUploaded.from_record(attachment), request)
-
-
-@read_router.get("/attachments/{attachment_id}/content")
-@envelope_errors
-async def download_attachment_internal(
-    attachment_id: str,
-    request: Request,
-    service: ForumAttachmentServiceProtocol = Injected(
-        ForumAttachmentServiceProtocol
-    ),
-) -> BinaryResponse:
-    """Download the real stored bytes for one tenant-scoped attachment."""
-    result = service.download_attachment(attachment_id=attachment_id)
-    filename = quote(result.attachment.filename, safe="")
-    return BinaryResponse(
-        content=result.content,
-        media_type=result.attachment.content_type,
-        headers={
-            "Content-Disposition": f"attachment; filename*=UTF-8''{filename}"
-        },
-    )
 
 
 @read_router.get("/topics", response_model=Envelope[Page[TopicListItem]])
@@ -308,6 +247,38 @@ async def create_reply_internal(
     payload = ReplyCreated(post_id=result.post.post_id)
     response.status_code = 201 if result.created else 200
     return created(payload, request) if result.created else envelope(payload, request)
+
+
+@read_router.put(
+    "/topics/{topic_id}/posts/{post_id}/helpful",
+    response_model=Envelope[PostHelpfulUpdated],
+)
+@envelope_errors
+async def set_post_helpful_internal(
+    body: SetPostHelpfulRequest,
+    topic_id: TopicIdPath,
+    post_id: Annotated[
+        str,
+        Path(
+            min_length=1,
+            max_length=MAX_ID_LENGTH,
+            description="Stable Post id exactly as returned by BBS APIs.",
+        ),
+    ],
+    request: Request,
+    service: ForumServiceProtocol = Injected(ForumServiceProtocol),
+) -> Envelope[PostHelpfulUpdated]:
+    """Mark or unmark one direct HELP reply as the declared Topic author."""
+    post = service.set_post_helpful(
+        topic_id=topic_id,
+        post_id=post_id,
+        author_type=body.author_type,
+        author_id=body.author_id,
+        helpful=body.helpful,
+    )
+    return envelope(
+        PostHelpfulUpdated(post_id=post.post_id, helpful=post.helpful), request
+    )
 
 
 @read_router.post("/topics/{topic_id}/close", response_model=Envelope[TopicClosed])

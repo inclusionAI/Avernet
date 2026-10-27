@@ -1,21 +1,12 @@
 /** @jest-environment jsdom */
 import { PublishTopicModal } from '@/components/Community/PublishTopicModal';
-import type { CommunityAttachment } from '@/domain/community/types';
-import { MAX_COMMUNITY_ATTACHMENT_BYTES } from '@/services/community/communityService';
 import '@testing-library/jest-dom';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 Element.prototype.hasPointerCapture ??= () => false;
 Element.prototype.setPointerCapture ??= () => undefined;
 Element.prototype.releasePointerCapture ??= () => undefined;
-
-const uploadedAttachment: CommunityAttachment = {
-  id: 'attachment-1',
-  filename: '方案.pdf',
-  contentType: 'application/pdf',
-  sizeBytes: 1024,
-};
 
 function renderEditor(
   overrides: Partial<React.ComponentProps<typeof PublishTopicModal>> = {},
@@ -25,7 +16,6 @@ function renderEditor(
     publishing: false,
     onOpenChange: jest.fn(),
     onPublish: jest.fn().mockResolvedValue(true),
-    onUploadAttachment: jest.fn().mockResolvedValue(uploadedAttachment),
     ...overrides,
   };
   return { props, ...render(<PublishTopicModal {...props} />) };
@@ -85,60 +75,7 @@ describe('PublishTopicModal', () => {
       title: '分享经验',
       body: '正文内容',
       topicType: 'share',
-      share: { attachmentIds: [] },
     });
-  });
-
-  test('分享主题立即上传真实文件，成功后使用 attachment id 发布', async () => {
-    const user = userEvent.setup();
-    const { props } = renderEditor();
-    const file = new File(['real bytes'], '方案.pdf', { type: 'application/pdf' });
-
-    await user.click(screen.getByRole('button', { name: '分享' }));
-    expect(screen.getByRole('button', { name: '发布' })).toBeEnabled();
-    await user.upload(screen.getByLabelText('选择分享附件'), file);
-
-    await waitFor(() => expect(props.onUploadAttachment).toHaveBeenCalledWith(file));
-    await waitFor(() => expect(screen.getByText(/上传成功/)).toBeInTheDocument());
-    expect(screen.getByRole('button', { name: '发布' })).toBeEnabled();
-
-    await user.type(screen.getByLabelText('主题标题'), '分享方案');
-    await user.type(screen.getByLabelText('正文'), '供大家下载');
-    await user.click(screen.getByRole('button', { name: '发布' }));
-
-    expect(props.onPublish).toHaveBeenCalledWith({
-      title: '分享方案',
-      body: '供大家下载',
-      topicType: 'share',
-      share: { attachmentIds: ['attachment-1'] },
-    });
-  });
-
-  test('空文件、超限文件和上传失败文件不能发布，失败文件可以重试', async () => {
-    const user = userEvent.setup();
-    const onUploadAttachment = jest
-      .fn()
-      .mockRejectedValueOnce(new Error('对象存储不可用'))
-      .mockResolvedValueOnce(uploadedAttachment);
-    renderEditor({ onUploadAttachment });
-    await user.click(screen.getByRole('button', { name: '分享' }));
-
-    const tooLarge = new File(['x'], 'large.zip');
-    Object.defineProperty(tooLarge, 'size', { value: MAX_COMMUNITY_ATTACHMENT_BYTES + 1 });
-    await user.upload(screen.getByLabelText('选择分享附件'), tooLarge);
-    expect(screen.getByText(/单个附件不能超过 20 MiB/)).toBeInTheDocument();
-    expect(onUploadAttachment).not.toHaveBeenCalled();
-    await user.click(screen.getByRole('button', { name: '移除附件 large.zip' }));
-
-    const valid = new File(['content'], 'retry.txt', { type: 'text/plain' });
-    await user.upload(screen.getByLabelText('选择分享附件'), valid);
-    await waitFor(() => expect(screen.getByText(/对象存储不可用/)).toBeInTheDocument());
-    expect(screen.getByRole('button', { name: '发布' })).toBeDisabled();
-
-    await user.click(screen.getByRole('button', { name: '重试上传 retry.txt' }));
-    await waitFor(() => expect(screen.getByText(/上传成功/)).toBeInTheDocument());
-    expect(onUploadAttachment).toHaveBeenCalledTimes(2);
-    expect(screen.getByRole('button', { name: '发布' })).toBeEnabled();
   });
 
   test('创建多选投票，第三个选项开始可删除，最多十项', async () => {

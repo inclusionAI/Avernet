@@ -1,8 +1,5 @@
+import { CommunityService } from '../../../src/services/community/communityService';
 import type { CommunityGateway } from '../../../src/services/community/communityGateway';
-import {
-  MAX_COMMUNITY_ATTACHMENT_BYTES,
-  CommunityService,
-} from '../../../src/services/community/communityService';
 
 function gateway(overrides: Partial<CommunityGateway> = {}): CommunityGateway {
   return {
@@ -21,13 +18,6 @@ function gateway(overrides: Partial<CommunityGateway> = {}): CommunityGateway {
       canClose: true,
     })),
     listReplies: jest.fn(async () => ({ items: [], total: 0 })),
-    uploadAttachment: jest.fn(async (file) => ({
-      id: 'attachment-1',
-      filename: file.name,
-      contentType: file.type || 'application/octet-stream',
-      sizeBytes: file.size,
-    })),
-    downloadAttachment: jest.fn(async () => new Blob(['content'])),
     createReply: jest.fn(async () => 'created-reply'),
     createTopic: jest.fn(async (input) => ({
       id: 'created',
@@ -43,6 +33,7 @@ function gateway(overrides: Partial<CommunityGateway> = {}): CommunityGateway {
       canClose: true,
     })),
     closeTopic: jest.fn(async () => undefined),
+    setPostHelpful: jest.fn(async () => undefined),
     ...overrides,
   };
 }
@@ -54,6 +45,7 @@ function reply(id: string, createdAt: string) {
     body: id === '1' ? '先' : '后',
     author: { type: 'human' as const, id: 'u', displayName: 'U' },
     createdAt,
+    helpful: false,
   };
 }
 
@@ -98,7 +90,7 @@ describe('CommunityService', () => {
     expect(result.items.map((item) => item.id)).toEqual(['new', 'old']);
   });
 
-  test('sorts replies chronologically (返回 {items,total}) and rejects blank publish input', async () => {
+  test('preserves backend helpful-first reply order (返回 {items,total}) and rejects blank publish input', async () => {
     const listReplies = jest.fn(async () => ({
       total: 2,
       items: [reply('2', '2026-10-06T12:00:00Z'), reply('1', '2026-10-06T10:00:00Z')],
@@ -108,7 +100,7 @@ describe('CommunityService', () => {
 
     const result = await service.listReplies('t');
     expect(listReplies).toHaveBeenCalledWith('t', {}, undefined);
-    expect(result.items.map((item) => item.id)).toEqual(['1', '2']);
+    expect(result.items.map((item) => item.id)).toEqual(['2', '1']);
     expect(result.total).toBe(2);
 
     await expect(service.createTopic({ title: ' ', body: '正文', authorId: 'u', authorName: '我' })).rejects.toThrow(
@@ -236,40 +228,13 @@ describe('CommunityService', () => {
   });
 
 
-  test('validates attachment size and forwards upload/download', async () => {
-    const uploaded = {
-      id: 'attachment-1',
-      filename: 'guide.pdf',
-      contentType: 'application/pdf',
-      sizeBytes: 3,
-    };
-    const uploadAttachment = jest.fn(async () => uploaded);
-    const downloaded = new Blob(['guide'], { type: 'application/pdf' });
-    const downloadAttachment = jest.fn(async () => downloaded);
-    const service = new CommunityService(gateway({ uploadAttachment, downloadAttachment }));
-
-    await expect(service.uploadAttachment(new File([], 'empty.txt'), 'u1')).rejects.toThrow('不能上传空文件');
-    const oversized = new File(['x'], 'huge.bin');
-    Object.defineProperty(oversized, 'size', { value: MAX_COMMUNITY_ATTACHMENT_BYTES + 1 });
-    await expect(service.uploadAttachment(oversized, 'u1')).rejects.toThrow('单个附件不能超过 20 MiB');
-    expect(uploadAttachment).not.toHaveBeenCalled();
-
-    const file = new File(['pdf'], 'guide.pdf', { type: 'application/pdf' });
-    await expect(service.uploadAttachment(file, 'u1')).resolves.toEqual(uploaded);
-    expect(uploadAttachment).toHaveBeenCalledWith(file, 'u1', undefined);
-
-    await expect(service.downloadAttachment('attachment-1')).resolves.toBe(downloaded);
-    expect(downloadAttachment).toHaveBeenCalledWith('attachment-1', undefined);
-  });
-
-  test('allows attachment-free shares and normalizes optional attachment ids', async () => {
+  test('allows title-and-body-only shares', async () => {
     const createTopic = jest.fn(async (input) => ({
       id: 'share-topic',
       title: input.title,
       body: input.body,
       status: 'open' as const,
       topicType: 'share' as const,
-      topicConfig: { share: { attachmentIds: input.share?.attachmentIds ?? [], attachments: [] } },
       author: { type: 'human' as const, id: input.authorId, displayName: input.authorName },
       replyCount: 0,
       latestActivityAt: '',
@@ -278,35 +243,20 @@ describe('CommunityService', () => {
       canClose: true,
     }));
     const service = new CommunityService(gateway({ createTopic }));
-    const base = {
-      title: ' 分享资料 ',
+
+    await service.createTopic({
+      title: ' 分享经验 ',
       body: ' 正文 ',
-      topicType: 'share' as const,
+      topicType: 'share',
       authorId: 'u1',
       authorName: '我',
-    };
+    });
 
-    await service.createTopic({ ...base, share: { attachmentIds: [] } });
-    expect(createTopic).toHaveBeenLastCalledWith(
-      expect.objectContaining({ share: { attachmentIds: [] } }),
-      undefined,
-    );
-    await expect(
-      service.createTopic({ ...base, share: { attachmentIds: ['attachment-1', ' attachment-1 '] } }),
-    ).rejects.toThrow('分享附件不能重复');
-    await expect(
-      service.createTopic({
-        ...base,
-        share: { attachmentIds: ['a1', 'a2', 'a3', 'a4', 'a5', 'a6'] },
-      }),
-    ).rejects.toThrow('分享主题最多上传 5 个附件');
-
-    await service.createTopic({ ...base, share: { attachmentIds: [' attachment-1 ', 'attachment-2'] } });
-    expect(createTopic).toHaveBeenLastCalledWith(
+    expect(createTopic).toHaveBeenCalledWith(
       expect.objectContaining({
-        title: '分享资料',
+        title: '分享经验',
         body: '正文',
-        share: { attachmentIds: ['attachment-1', 'attachment-2'] },
+        topicType: 'share',
       }),
       undefined,
     );
@@ -361,6 +311,22 @@ describe('CommunityService', () => {
     const service = new CommunityService(gateway({ closeTopic }));
     await service.closeTopic('topic-1', 'u1');
     expect(closeTopic).toHaveBeenCalledWith('topic-1', 'u1', undefined);
+  });
+
+  test('setPostHelpful 透传 Topic、Post、作者类型和目标状态到网关', async () => {
+    const setPostHelpful = jest.fn(async () => undefined);
+    const service = new CommunityService(gateway({ setPostHelpful }));
+
+    await service.setPostHelpful('topic-1', 'post-2', 'BOT', 'bot-1', true);
+
+    expect(setPostHelpful).toHaveBeenCalledWith(
+      'topic-1',
+      'post-2',
+      'BOT',
+      'bot-1',
+      true,
+      undefined,
+    );
   });
 
   test('getTopic 透传 viewer 身份参数且不改写网关结果', async () => {

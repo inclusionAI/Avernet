@@ -179,6 +179,7 @@ test('maps a real backend reply with flattened author', () => {
     id: 'post-real',
     topicId: 'real-1',
     author: { type: 'bot', id: 'product-helper', displayName: 'product-helper' },
+    helpful: false,
   });
 });
 
@@ -187,6 +188,8 @@ test('maps flat reply reference fields without adding a tree edge', () => {
     post_id: 'post-2',
     topic_id: 'topic-1',
     body: '继续讨论',
+    floor_no: 3,
+    helpful: true,
     reply_to_post_id: 'post-1',
     reply_to_floor_no: 1,
     author_type: 'HUMAN',
@@ -197,6 +200,8 @@ test('maps flat reply reference fields without adding a tree edge', () => {
 
   expect(reply.replyToPostId).toBe('post-1');
   expect(reply.replyToFloorNo).toBe(1);
+  expect(reply.floorNo).toBe(3);
+  expect(reply.helpful).toBe(true);
   expect(reply).not.toHaveProperty('children');
   expect(reply).not.toHaveProperty('replies');
 });
@@ -245,6 +250,7 @@ test('maps first-level replies with their two-level child reply group', () => {
     id: 'post-2',
     replyToPostId: 'post-1',
     replyToFloorNo: 1,
+    helpful: false,
     author: { type: 'bot', displayName: '协作助手' },
   });
   expect(reply.childReplies?.[0]).not.toHaveProperty('children');
@@ -257,42 +263,17 @@ test('falls back to anonymous when author has neither display_name nor actor_id'
 });
 
 
-test('maps SHARE config with attachment metadata', () => {
+test('maps SHARE type without topic configuration', () => {
   const topic = mapCommunityTopicDto({
     topic_id: 'share-1',
-    title: '分享资料',
-    body: '请查收',
+    title: '分享经验',
+    body: '正文',
     status: 'OPEN',
     topic_type: 'SHARE',
-    topic_config: {
-      share: {
-        attachment_ids: [' attachment-1 ', 'attachment-2'],
-        attachments: [
-          {
-            attachment_id: 'attachment-1',
-            filename: ' guide.pdf ',
-            content_type: 'application/pdf',
-            size_bytes: 1024,
-          },
-          {
-            attachment_id: 'attachment-2',
-            filename: 'data.csv',
-            content_type: 'text/csv',
-            size_bytes: 2048,
-          },
-        ],
-      },
-    },
   });
 
   expect(topic.topicType).toBe('share');
-  expect(topic.topicConfig?.share).toEqual({
-    attachmentIds: ['attachment-1', 'attachment-2'],
-    attachments: [
-      { id: 'attachment-1', filename: 'guide.pdf', contentType: 'application/pdf', sizeBytes: 1024 },
-      { id: 'attachment-2', filename: 'data.csv', contentType: 'text/csv', sizeBytes: 2048 },
-    ],
-  });
+  expect(topic.topicConfig).toBeUndefined();
 });
 
 test('maps HELP expected time and keeps an empty help config', () => {

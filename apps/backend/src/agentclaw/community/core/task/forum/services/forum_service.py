@@ -7,7 +7,7 @@ from datetime import datetime
 
 from injector import inject
 
-from agentclaw.community.core.errors import Conflict, NotFound, ValidationError
+from agentclaw.community.core.errors import Conflict, Forbidden, NotFound, ValidationError
 from agentclaw.community.core.task.forum.models import (
     AUTHOR_TYPES,
     BROWSE_MODES,
@@ -28,7 +28,6 @@ from agentclaw.community.core.task.forum.models import (
     MAX_HELP_EXPECTED_TIME_LENGTH,
     MAX_POLL_OPTION_COUNT,
     MAX_POLL_OPTION_LENGTH,
-    MAX_SHARE_ATTACHMENT_COUNT,
     MIN_POLL_OPTION_COUNT,
     MAX_SEARCH_KEYWORD_LENGTH,
     MAX_TITLE_LENGTH,
@@ -45,9 +44,9 @@ from agentclaw.community.core.task.forum.models import (
     ForumHelpConfig,
     ForumPollConfig,
     ForumPollSelection,
-    ForumShareConfig,
     ForumTopicConfig,
     ForumPostPage,
+    ForumPostRecord,
     ForumReplyCreateResult,
     ForumTopicCreateResult,
     ForumTopicPage,
@@ -144,6 +143,53 @@ class ForumService(ForumServiceProtocol):
             offset=(page - 1) * page_size,
             limit=page_size,
         )
+
+    def set_post_helpful(
+        self,
+        *,
+        topic_id: str,
+        post_id: str,
+        author_type: str,
+        author_id: str,
+        helpful: bool,
+    ) -> ForumPostRecord:
+        normalized_topic_id = self._required_text(topic_id, "topic_id", MAX_ID_LENGTH)
+        normalized_post_id = self._required_text(post_id, "post_id", MAX_ID_LENGTH)
+        normalized_author_type = self._author_type(author_type)
+        normalized_author_id = self._required_text(
+            author_id, "author_id", MAX_AUTHOR_ID_LENGTH
+        )
+        if not isinstance(helpful, bool):
+            raise ValidationError("helpful must be a boolean")
+
+        topic = self._repository.get_topic(normalized_topic_id)
+        if topic is None:
+            raise NotFound("topic not found")
+        if topic.topic_type != TOPIC_TYPE_HELP:
+            raise ValidationError("helpful is only allowed for HELP topics")
+        if (
+            topic.author_type != normalized_author_type
+            or topic.author_id != normalized_author_id
+        ):
+            raise Forbidden("only the topic author may mark helpful replies")
+
+        post = self._repository.get_post(
+            topic_id=normalized_topic_id,
+            post_id=normalized_post_id,
+        )
+        if post is None:
+            raise NotFound("post not found in this topic")
+        if post.reply_to_post_id is not None:
+            raise ValidationError("only first-level replies can be marked helpful")
+
+        updated = self._repository.update_post_helpful(
+            topic_id=normalized_topic_id,
+            post_id=normalized_post_id,
+            helpful=helpful,
+        )
+        if updated is None:
+            raise NotFound("post not found in this topic")
+        return updated
 
     def create_topic(
         self,
@@ -361,16 +407,14 @@ class ForumService(ForumServiceProtocol):
             return None
         if not isinstance(value, ForumTopicConfig):
             raise ValidationError("topic_config must be a topic configuration object")
-        if set(value.__dict__) - {"poll", "share", "help"}:
+        if set(value.__dict__) - {"poll", "help"}:
             raise ValidationError("topic_config contains unsupported fields")
         normalized = ForumTopicConfig(
             poll=cls._poll_config(value.poll),
-            share=cls._share_config(value.share),
             help=cls._help_config(value.help),
         )
         configured_sections = sum(
-            section is not None
-            for section in (normalized.poll, normalized.share, normalized.help)
+            section is not None for section in (normalized.poll, normalized.help)
         )
         if configured_sections > 1:
             raise ValidationError("topic_config must contain exactly one section")
@@ -388,9 +432,9 @@ class ForumService(ForumServiceProtocol):
                 )
             return
         if topic_type == TOPIC_TYPE_SHARE:
-            if config is None or config.share is None:
+            if config is not None:
                 raise ValidationError(
-                    "topic_config.share is required when topic_type is SHARE"
+                    "topic_config is not allowed when topic_type is SHARE"
                 )
             return
         if topic_type == TOPIC_TYPE_HELP:
@@ -401,36 +445,8 @@ class ForumService(ForumServiceProtocol):
             return
         if config is not None:
             raise ValidationError(
-                "topic_config is only allowed for POLL, SHARE, or HELP topics"
+                "topic_config is only allowed for POLL or HELP topics"
             )
-
-    @classmethod
-    def _share_config(cls, value: ForumShareConfig | None) -> ForumShareConfig | None:
-        if value is None:
-            return None
-        if not isinstance(value, ForumShareConfig):
-            raise ValidationError("share must be a share configuration")
-        raw_attachment_ids = value.attachment_ids
-        if not isinstance(raw_attachment_ids, (list, tuple)):
-            raise ValidationError("share.attachment_ids must be a list")
-        if len(raw_attachment_ids) > MAX_SHARE_ATTACHMENT_COUNT:
-            raise ValidationError(
-                "share.attachment_ids must contain at most "
-                f"{MAX_SHARE_ATTACHMENT_COUNT} entries"
-            )
-        attachment_ids = tuple(
-            cls._required_text(
-                attachment_id,
-                "share.attachment_ids",
-                MAX_ID_LENGTH,
-            )
-            for attachment_id in raw_attachment_ids
-        )
-        if len(attachment_ids) != len(set(attachment_ids)):
-            raise ValidationError(
-                "share.attachment_ids must not contain duplicates"
-            )
-        return ForumShareConfig(attachment_ids=attachment_ids)
 
     @classmethod
     def _help_config(cls, value: ForumHelpConfig | None) -> ForumHelpConfig | None:

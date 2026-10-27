@@ -22,10 +22,8 @@ from agentclaw.community.core.task.forum.models import (
     TOPIC_TYPE_DISCUSSION,
     BrowseReportRecord,
     BrowseSubscriptionRecord,
-    ForumAttachmentRecord,
     ForumHelpConfig,
     ForumPollConfig,
-    ForumShareConfig,
     ForumPollResultOptionRecord,
     ForumPollResultRecord,
     ForumPollSelection,
@@ -131,26 +129,40 @@ def _poll_result_options_from_row(
     return tuple(options)
 
 
-def _poll_selection_from_post_config(
+def _post_config_from_row(
     value: object | None,
-) -> ForumPollSelection | None:
-    """Decode one Post's structured vote selection from its generic config.
+) -> tuple[ForumPollSelection | None, bool]:
+    """Decode the one supported structured extension on a Post.
 
-    ``post_config`` is the storage-level extension container. The reply
-    contract currently defines only the ``poll_selection`` key; future
-    structured Post variants can add further keys without another column.
+    POLL selections and HELP helpful markers are mutually exclusive because a
+    Post belongs to exactly one Topic type. Keeping the outer object generic
+    preserves the existing extension column without exposing storage details
+    through the public contract.
     """
 
     if value is None:
-        return None
+        return None, False
     if not isinstance(value, dict):
         raise ValueError("ac_forum_post.post_config must be a JSON object or null")
-    if set(value) != {"poll_selection"}:
+    if len(value) != 1 or not set(value).issubset({"poll_selection", "helpful"}):
         raise ValueError(
-            "ac_forum_post.post_config may contain only poll_selection"
+            "ac_forum_post.post_config must contain one supported section"
         )
 
-    selection = value.get("poll_selection")
+    if "helpful" in value:
+        helpful = value["helpful"]
+        if not isinstance(helpful, dict) or set(helpful) != {"marked"}:
+            raise ValueError(
+                "ac_forum_post.post_config.helpful must contain only marked"
+            )
+        marked = helpful.get("marked")
+        if marked is not True:
+            raise ValueError(
+                "ac_forum_post.post_config.helpful.marked must be true"
+            )
+        return None, True
+
+    selection = value["poll_selection"]
     if not isinstance(selection, dict):
         raise ValueError(
             "ac_forum_post.post_config.poll_selection must be a JSON object"
@@ -180,18 +192,21 @@ def _poll_selection_from_post_config(
             "ac_forum_post.post_config.poll_selection.option_indices must not "
             "contain duplicates"
         )
-    return ForumPollSelection(option_indices=tuple(indices))
+    return ForumPollSelection(option_indices=tuple(indices)), False
 
 
-def _share_from_row(value: object) -> ForumShareConfig:
-    if not isinstance(value, dict) or set(value) != {"attachment_ids"}:
-        raise ValueError("topic_config.share must contain only attachment_ids")
-    attachment_ids = value.get("attachment_ids")
-    if not isinstance(attachment_ids, list) or not all(
-        isinstance(attachment_id, str) for attachment_id in attachment_ids
-    ):
-        raise ValueError("topic_config.share.attachment_ids must be a string array")
-    return ForumShareConfig(attachment_ids=tuple(attachment_ids))
+def _poll_selection_from_post_config(
+    value: object | None,
+) -> ForumPollSelection | None:
+    """Return the POLL selection, if this Post stores that extension."""
+
+    return _post_config_from_row(value)[0]
+
+
+def _helpful_from_post_config(value: object | None) -> bool:
+    """Return whether this HELP reply is marked helpful."""
+
+    return _post_config_from_row(value)[1]
 
 
 def _help_from_row(value: object) -> ForumHelpConfig:
@@ -210,12 +225,10 @@ def _topic_config_from_row(value: object | None) -> ForumTopicConfig | None:
         return None
     if not isinstance(value, dict):
         raise ValueError("ac_forum_topic.topic_config must be a JSON object or null")
-    if len(value) != 1 or not set(value).issubset({"poll", "share", "help"}):
+    if len(value) != 1 or not set(value).issubset({"poll", "help"}):
         raise ValueError("ac_forum_topic.topic_config must contain one supported section")
     if "poll" in value:
         return ForumTopicConfig(poll=_poll_from_row(value["poll"]))
-    if "share" in value:
-        return ForumTopicConfig(share=_share_from_row(value["share"]))
     return ForumTopicConfig(help=_help_from_row(value["help"]))
 
 
@@ -414,58 +427,6 @@ class ForumTopicModel(Base):
         )
 
 
-class ForumAttachmentModel(Base):
-    __tablename__ = "ac_forum_attachment"
-
-    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False)
-    attachment_id = Column(_binary_string(128), nullable=False)
-    author_type = Column(_AUTHOR_TYPE, nullable=False)
-    author_id = Column(_AUTHOR_ID, nullable=False)
-    topic_id = Column(_TOPIC_ID, nullable=True)
-    object_key = Column(String(512), nullable=False)
-    filename = Column(String(255), nullable=False)
-    content_type = Column(String(255), nullable=False)
-    size_bytes = Column(BigInteger, nullable=False)
-    env = Column(String(20), nullable=False, default=get_current_env)
-    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
-    gmt_create = Column(DateTime, nullable=False, server_default=func.now())
-    gmt_modified = Column(
-        DateTime,
-        nullable=False,
-        server_default=func.now(),
-        onupdate=func.now(),
-    )
-
-    __table_args__ = (
-        Index("uk_forum_attachment_id", "attachment_id", unique=True),
-        Index(
-            "idx_forum_attachment_owner",
-            "avernet_tenant",
-            "env",
-            "author_type",
-            "author_id",
-            "topic_id",
-        ),
-        Index("idx_forum_attachment_topic", "topic_id"),
-    )
-
-    def to_record(self) -> ForumAttachmentRecord:
-        return ForumAttachmentRecord(
-            attachment_id=self.attachment_id,
-            author_type=self.author_type,
-            author_id=self.author_id,
-            topic_id=self.topic_id,
-            filename=self.filename,
-            content_type=self.content_type,
-            size_bytes=int(self.size_bytes),
-            object_key=self.object_key,
-            created_at=self.gmt_create,
-        )
-
-
-register_avernet_tenant_guard(ForumAttachmentModel)
-
-
 class ForumPostModel(Base):
     __tablename__ = "ac_forum_post"
 
@@ -485,7 +446,10 @@ class ForumPostModel(Base):
     author_display_name = Column(String(256), nullable=True)
     author_avatar_url = Column(String(1024), nullable=True)
     body = Column(Text, nullable=False)
-    post_config = Column(JSON, nullable=True)
+    # ``None`` is domain absence, not the JSON literal ``null``. Persist it as
+    # SQL NULL so clearing a HELP marker restores the same empty storage state
+    # as a Post that never carried structured configuration.
+    post_config = Column(JSON(none_as_null=True), nullable=True)
     client_request_id = Column(_REQUEST_ID, nullable=False)
     gmt_create = Column(DateTime, nullable=False, server_default=func.now())
     gmt_modified = Column(
@@ -520,6 +484,7 @@ class ForumPostModel(Base):
     )
 
     def to_record(self) -> ForumPostRecord:
+        poll_selection, helpful = _post_config_from_row(self.post_config)
         return ForumPostRecord(
             post_id=self.post_id,
             topic_id=self.topic_id,
@@ -529,7 +494,8 @@ class ForumPostModel(Base):
             display_name=self.author_display_name,
             avatar_url=self.author_avatar_url,
             body=self.body,
-            poll_selection=_poll_selection_from_post_config(self.post_config),
+            poll_selection=poll_selection,
+            helpful=helpful,
             created_at=self.gmt_create,
             updated_at=self.gmt_modified,
         )
