@@ -278,3 +278,42 @@ def test_late_original_worker_can_finish_after_lookup_finds_same_puid():
     thread.join(5)
     assert not thread.is_alive() and repo.row.phase == "APPROVING" and repo.row.approval_puid == "p1"
     lookup.assert_called_once()
+
+
+def test_timeout_persistently_schedules_one_bounded_recovery_without_reposting():
+    now = datetime(2026, 1, 1)
+    repo = MemoryRepository(row())
+    submit = MagicMock(side_effect=TimeoutError("response lost"))
+    recovery = MagicMock(return_value=None)
+    advance = RiskAdvance(repo, lambda _: True, submit, lambda: now, recovery=recovery)
+    advance.advance("dev", "a")
+    assert repo.row.phase == "NEEDS_ATTENTION" and repo.row.next_action_at == now
+    advance.advance("dev", "a")
+    advance.advance("dev", "a")
+    assert recovery.call_count == 1
+    assert submit.call_count == 1
+    assert repo.row.phase == "NEEDS_ATTENTION" and repo.row.next_action_at is None
+
+
+def test_recovery_scanner_enqueues_unknown_approval_lookup():
+    from agentclaw.community.core.bot_public_risk.tasks import ADVANCE, RiskTasks
+    now = datetime(2026, 1, 1)
+    pending = row(phase="NEEDS_ATTENTION", next_action_at=now,
+                  workflow_json='{"approval_intent":true,"error":"APPROVAL_OUTCOME_UNKNOWN"}')
+    repo, queue = MagicMock(), MagicMock()
+    repo.list_due.return_value = (pending,)
+    RiskTasks(repo, queue, MagicMock(), lambda: now).recover(env="dev", now=now)
+    assert queue.enqueue.call_args.args[0] == ADVANCE
+
+
+def test_crash_during_lookup_keeps_explicit_unknown_without_reposting():
+    repo = MemoryRepository(row(workflow_json='{"approval_intent":true}'))
+    submit = MagicMock()
+    lookup = MagicMock(side_effect=SystemExit())
+    advance = RiskAdvance(repo, lambda _: True, submit, lambda: datetime(2026, 1, 1), recovery=lookup)
+    with pytest.raises(SystemExit):
+        advance.advance("dev", "a")
+    assert repo.row.phase == "NEEDS_ATTENTION" and repo.row.next_action_at is None
+    assert json.loads(repo.row.workflow_json)["error"] == "APPROVAL_OUTCOME_UNKNOWN"
+    advance.advance("dev", "a")
+    assert lookup.call_count == 1 and submit.call_count == 0

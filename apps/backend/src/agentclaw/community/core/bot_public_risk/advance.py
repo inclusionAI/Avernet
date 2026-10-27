@@ -36,6 +36,9 @@ class RiskAdvance:
         workflow = json.loads(row.workflow_json)
         workflow["error"] = reason
         changes = {"phase": "NEEDS_ATTENTION", "next_action_at": None}
+        if (reason == "APPROVAL_OUTCOME_UNKNOWN" and self.recovery is not None
+                and not workflow.get("approval_recovery_attempted")):
+            changes["next_action_at"] = self.clock()
         if reason == "INPUT_OR_PERMISSION_INVALID":
             stage_notice(row, workflow, "INPUT_INVALID", self.clock(), changes)
         changes["workflow_json"] = json.dumps(workflow)
@@ -44,9 +47,15 @@ class RiskAdvance:
 
     def advance(self, env: str, risk_check_id: str) -> None:
         row = self.repo.get(env=env, risk_check_id=risk_check_id)
-        if row is None or row.current_target_key is None or row.phase != "ADVANCING" or row.security_status != "PASS":
+        if row is None or row.current_target_key is None or row.security_status != "PASS":
             return
         workflow = json.loads(row.workflow_json)
+        if row.phase == "NEEDS_ATTENTION" and workflow.get("error") == "APPROVAL_OUTCOME_UNKNOWN":
+            if not workflow.get("approval_recovery_attempted"):
+                self._recover_unknown(row)
+            return
+        if row.phase != "ADVANCING":
+            return
         if workflow.get("approval_intent"):
             self._recover_unknown(row)
             return
@@ -120,8 +129,10 @@ class RiskAdvance:
             self._attention(row, "APPROVAL_OUTCOME_UNKNOWN")
             return
         workflow["approval_recovery_attempted"] = True
+        workflow["error"] = "APPROVAL_OUTCOME_UNKNOWN"
         if not self.repo.update_current(env=row.env, risk_check_id=row.risk_check_id, row_version=row.row_version,
-                                        changes={"workflow_json": json.dumps(workflow)}):
+                                        changes={"phase": "NEEDS_ATTENTION", "next_action_at": None,
+                                                 "workflow_json": json.dumps(workflow)}):
             return
         current = self.repo.get(env=row.env, risk_check_id=row.risk_check_id)
         if current is None or current.current_target_key is None:

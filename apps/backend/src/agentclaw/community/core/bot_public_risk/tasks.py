@@ -363,6 +363,10 @@ class RiskTasks:
                 )
             elif row.phase == "ADVANCING":
                 self._enqueue(row, ADVANCE)
+            elif row.phase == "NEEDS_ATTENTION":
+                workflow = json.loads(row.workflow_json)
+                if workflow.get("error") == "APPROVAL_OUTCOME_UNKNOWN" and not workflow.get("approval_recovery_attempted"):
+                    self._enqueue(row, ADVANCE)
             elif row.phase == "APPROVING":
                 workflow = json.loads(row.workflow_json)
                 if (
