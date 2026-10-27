@@ -47,7 +47,7 @@ task 模块中节点"产物"的现状是 `RuntimeInfo.output: dict[str, Any]`(`c
 
 ### 1.4 反目标(做了即算失败)
 
-- Artifact 里出现临时下载 URL、token、对象存储 handle 或后端实现细节;**(2026-10-26 修订)OBJECT_FILE 不破例**:产物行只存**稳定对象 key**(`{prefix}/{task_id}/{sha256}{ext}`,内容寻址引用),下载能力由后端逐次校验签发,任何临时 token/签名 URL 依旧不落产物内容行;
+- Artifact 里出现临时下载 URL、token、对象存储 handle 或后端实现细节;**(2026-10-26 修订)OBJECT_FILE 不破例**:产物行只存**稳定对象 key**(`{prefix}/{task_id}/{node_id}/{file_name}`,命名寻址引用,2026-10-27 改版),下载能力由后端逐次校验签发,任何临时 token/签名 URL 依旧不落产物内容行;
 - 为记录产物而破坏现有回调/图变更的幂等与版本重放语义;
 - output dict 与产物对象出现"双首领"(产物写失败但图写成功且不报错,或反之);
 
@@ -236,7 +236,7 @@ class CodeContent(ArtifactContent):
 | | BOT_WORKSPACE(单 bot 工作区) | SESSION_FILE(协作群会话文件) | OBJECT_FILE(对象存储产物,2026-10-26 新增) |
 |---|---|---|---|
 | `storage_type` | `"bot_workspace"` | `"session_file"` | `"object_file"` |
-| `storage_id` | `"reports/analysis-report.md"`(工作区相对路径,读口 `GET /api/resources/files/preview?path={storage_id}`) | `"sess-xxx"`(文件所在会话 id,读口 `GET /sessions/{storage_id}/files/{file_id}/content`) | `"task-artifacts/{task_id}/{sha256}{ext}"`(服务端上传时派生的稳定 key,读口 `GET /api/v1/collaboration/tasks/artifacts/{artifact_id}/content`,§13.2) |
+| `storage_id` | `"reports/analysis-report.md"`(工作区相对路径,读口 `GET /api/resources/files/preview?path={storage_id}`) | `"sess-xxx"`(文件所在会话 id,读口 `GET /sessions/{storage_id}/files/{file_id}/content`) | `"task-artifacts/{task_id}/{node_id}/{file_name}"`(服务端上传时按 task/node/文件名派生的稳定 key,2026-10-27 改版;读口 `GET /api/v1/collaboration/tasks/artifacts/{artifact_id}/content`,§13.2) |
 | `file_id` | `null`(工作区按路径寻址,无文件 id) | `"f-987"`(BCS session file 的 file_id,必填) | `null`(对象按 key 寻址) |
 | `file_type` | 按扩展名推断(`.md`→`text/markdown`) | 缺省按 `file_name` 扩展名推断(`.pdf`→`application/pdf`,推不出为 `application/octet-stream`) | 上传 multipart 报送,缺省同左推断规则 |
 | `file_name` | `"analysis-report.md"`(物理文件名,同时是 artifact_name 的回落值) | `"analysis-report.pdf"` | 同左(展示名 + 下载 Content-Disposition 文件名) |
@@ -537,7 +537,7 @@ dashboard 作为中间产物发现入口,在返回清单前协调 BCS session fi
 
 ### 13.3 key 与失败语义(方案取舍)
 
-- **内容寻址 key**:`{key_prefix}/{task_id}/{sha256(字节).hex}{ext}`——同字节重传同 key → 同 `FileContent` → 既有 select-first dedupe(§5.3)收敛为一行;key 前缀天然按任务分域,支撑下载侧前缀域校验与未来的按任务清理。
+- **命名寻址 key(2026-10-27 改版)**:`{key_prefix}/{task_id}/{node_id}/{file_name}`——按 (task,node,文件名) 落位,`file_name` 取 basename、剥路径/控制字符防注入;同 key 重传(含不同 attempt)OSS 后传覆盖前次字节、行侧仍 append,dedupe 退化为按 storage_id → 同 `FileContent` 收敛。key 前缀天然按任务分域,支撑下载侧前缀域校验与未来的按任务清理。原内容寻址 key(`{sha256}{ext}`)留作可选未来能力,本期不再据此去重。
 - **单向失败安全**:put 成功后行写失败 → 至多遗留无引用对象(可被清理回收),**决不出现"行在、字节无"的引用悬空行**;行写失败如实上抛(不吞)。
 - 单字节面(无分块)本期封顶 `max_upload_mb`(缺省 64,corp 建议 200);更大文件留后续 optional capability(如 presign/分块),不改基础缝。
 

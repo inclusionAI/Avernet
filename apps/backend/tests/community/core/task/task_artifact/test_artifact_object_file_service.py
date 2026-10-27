@@ -1,8 +1,6 @@
 """OBJECT_FILE 上传/下载编排服务:key 派生、单向失败安全、逐次校验下载。"""
 from __future__ import annotations
 
-import hashlib
-
 import pytest
 
 from agentclaw.community.core.task.domain.errors import (
@@ -150,9 +148,7 @@ def test_upload_happy_path_registers_object_file_row():
         payload=_PAYLOAD,
         creator="user-123",
     )
-    expected_key = (
-        f"task-artifacts/t-1/{hashlib.sha256(_PAYLOAD).hexdigest()}.pdf"
-    )
+    expected_key = "task-artifacts/t-1/n-1/analysis-report.pdf"
     assert record.kind == "file"
     assert record.storage == "object_file"
     assert record.artifact_name == "analysis-report.pdf"
@@ -177,7 +173,7 @@ def test_upload_same_bytes_derives_same_key_same_content():
         task_id="t-1", node_id="n-1", attempt=2,
         file_name="a.pdf", payload=_PAYLOAD, creator="u",
     )
-    # 内容寻址:同字节 → 同 key → 同 content → 既有 select-first dedupe 收敛为一行。
+    # 命名寻址:同 (task,node,文件名) → 同 key → 同 content → 选次收敛为一行。
     assert first.content == second.content
     assert first.content_hash == second.content_hash
 
@@ -246,6 +242,33 @@ def test_upload_content_type_inferred_from_extension():
         file_name="notes.MD", payload=b"# hi", creator="u",
     )
     assert record.content.file_type == "text/markdown"
+
+
+def test_upload_key_is_prefix_task_node_file_name():
+    """key 落位 = {key_prefix}/{task_id}/{node_id}/{file_name}(2026-10-27 命名寻址)。"""
+    repo = _StubArtifactRepo()
+    storage = _StubObjectStorage()
+    svc = _service(storage, repo=repo)
+    record = svc.upload_object_file(
+        task_id="t-1", node_id="n-1", attempt=2,
+        file_name="report.md", payload=b"# hi", creator="u",
+    )
+    assert record.content.storage_id == "task-artifacts/t-1/n-1/report.md"
+    assert storage.objects == {"task-artifacts/t-1/n-1/report.md": b"# hi"}
+
+
+def test_upload_key_strips_path_segments_from_file_name():
+    """file_name 用户可控,须取 basename 防 key 注入/路径逃逸。"""
+    repo = _StubArtifactRepo()
+    storage = _StubObjectStorage()
+    svc = _service(storage, repo=repo)
+    record = svc.upload_object_file(
+        task_id="t-1", node_id="n-1", attempt=2,
+        file_name="../../etc/secret.pdf", payload=_PAYLOAD, creator="u",
+    )
+    assert record.content.storage_id == "task-artifacts/t-1/n-1/secret.pdf"
+    assert "etc" not in record.content.storage_id
+    assert ".." not in record.content.storage_id
 
 
 # ------------------------------------------------------------------ 下载

@@ -9,8 +9,10 @@ spec 2026-10-20-task-artifact-domain §1.3 的 2026-10-26 修订:OBJECT_FILE 介
 
 - 归属交叉校验(§4 规则 3/4):task/node 不存在即 404 域错误;``attempt`` 必须等于图上
   ``harness_retries`` 快照(拒绝而非采纳,幂等键不被误导)。
-- **内容寻址 key**:{``key_prefix``}/{task_id}/{sha256(字节).hex}{ext} —— 同一字节重复
-  上传得到同一 key → 同一 ``FileContent`` → 既有 select-first dedupe(§5.3)收敛为同一行。
+- **命名寻址 key**:{``key_prefix``}/{task_id}/{node_id}/{file_name} —— 按任务/节点/
+  文件名落位,``file_name`` 取 basename 并剥路径/控制字符防注入。同 (task,node,文件名)
+  重传:OSS 同 key 后传覆盖前次字节(跨 attempt 不隔离,最新为准),行侧仍 append 一行新
+  产物记录(§5.3 select-first dedupe 改为按 (storage_id → 同 FileContent) 收敛)。
 - **单向失败安全**:``put_object`` 失败(显式 False)时**不登记产品行**;行写失败至多遗留
   一个无引用对象,决不出现"行在、字节无"的引用悬空。
 - 下载逐次校验:按 artifact_id 查行 → 校验 key 落在本任务前缀域内 → 取字节;FOUND/NOT_FOUND/
@@ -21,7 +23,6 @@ Repo pattern:Protocol 定义于本(core)模块,``api/task/task_artifact_object_f
 """
 from __future__ import annotations
 
-import hashlib
 import logging
 import time
 from dataclasses import dataclass
@@ -66,6 +67,7 @@ from agentclaw.community.core.task.task_context.relay_attempt import (
 logger = logging.getLogger("task.artifact")
 
 _DEFAULT_FILE_TYPE = "application/octet-stream"
+_DEFAULT_FILE_NAME = "artifact.bin"
 _EXT_FILE_TYPES: dict[str, str] = {
     ".md": "text/markdown",
     ".txt": "text/plain",
@@ -202,7 +204,7 @@ class TaskArtifactObjectFileService(TaskArtifactObjectFileServiceProtocol):
                 f"attempt={graph_attempt} 不一致 (node_id={node_id})"
             )
 
-        key = self._derive_key(task_id, payload, file_name)
+        key = self._derive_key(task_id, node_id, file_name)
         content = FileContent(
             storage_type=StorageType.OBJECT_FILE,
             storage_id=key,
@@ -280,11 +282,29 @@ class TaskArtifactObjectFileService(TaskArtifactObjectFileServiceProtocol):
 
     # ------------------------------------------------------------- helpers
 
-    def _derive_key(self, task_id: str, payload: bytes, file_name: str) -> str:
-        """内容寻址 key:{prefix}/{task_id}/{sha256}{ext}——同字节同 key,天然幂等。"""
-        digest = hashlib.sha256(payload).hexdigest()
-        ext = self._extension_of(file_name)
-        return f"{self._config.key_prefix}/{task_id}/{digest}{ext}"
+    def _derive_key(self, task_id: str, node_id: str, file_name: str) -> str:
+        """命名寻址 key:{prefix}/{task_id}/{node_id}/{file_name}。
+
+        按任务+节点+文件名落位,同 (task,node,文件名) 重传覆盖前次字节(跨 attempt
+        不隔离,最新 attempt 为准)。``file_name`` 经 ``_sanitize_file_name`` 取
+        basename、剥路径/控制字符防 key 注入;最终结构与前缀域归属校验分别由
+        ``_validate_object_key`` 与下载侧 ``expected_prefix`` 兜底。
+        """
+        return (
+            f"{self._config.key_prefix}/{task_id}/{node_id}/"
+            f"{self._sanitize_file_name(file_name)}"
+        )
+
+    @staticmethod
+    def _sanitize_file_name(file_name: str) -> str:
+        """取末段 basename(剥任一侧斜杠目录)、去控制字符与首尾空白;空则回落缺省名。
+
+        ``file_name`` 来自 HTTP 上传的 ``file.filename``,完全用户可控,故必取 basename
+        以防 ``../``、``sub/x`` 之类把 key 挪出预期段位;结构兜底仍在 _validate_object_key。
+        """
+        name = file_name.replace("\\", "/").rsplit("/", 1)[-1]
+        name = "".join(ch for ch in name if ord(ch) >= 0x20).strip()
+        return name or _DEFAULT_FILE_NAME
 
     @staticmethod
     def _extension_of(file_name: str) -> str:
