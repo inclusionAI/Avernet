@@ -16,6 +16,7 @@ BOT = {
     "owner_id": "owner",
     "creator_id": "creator",
     "bot_name": "Bot",
+    "bot_desc": "description",
     "active_engine": "openclaw",
     "ext": '{"passport":{"agent_code":"agent1"}}',
 }
@@ -52,6 +53,8 @@ def test_effective_mcp_and_bot_identity_are_built_from_current_metadata():
     agent = data["agent_info"]
     assert agent["platformAgentCode"] == "default:entity:dev"
     assert agent["version"] == "V1.0" and agent["visibility"] == "PUBLIC"
+    assert agent["agentDesc"] == "description"
+    assert "agentDescription" not in agent
     assert agent["resourceManifest"][0]["resourceCode"] == "default"
     assert agent["resourceManifest"][0]["resourceConfig"] == {"identityMode": "CALLER"}
     assert len(digest) == 64

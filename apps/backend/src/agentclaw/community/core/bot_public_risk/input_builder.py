@@ -137,7 +137,7 @@ class RiskInputBuilder:
         )
         resources, seen = [], set()
         for entry in entries:
-            code = entry.get("server_code")
+            code = entry.get("server_code") or entry.get("serverCode")
             if not isinstance(code, str) or not code.strip():
                 raise ValueError("effective MCP lacks server_code")
             if code in seen:
@@ -164,7 +164,7 @@ class RiskInputBuilder:
                     "resourcePlatform": "teamclaw",
                     "resourceCode": code,
                     "resourceVersion": "V1.0",
-                    "resourceName": entry.get("name") or code,
+                    "resourceName": entry.get("name") or entry.get("server_name") or code,
                     "resourceConfig": config,
                 }
             )
@@ -246,7 +246,7 @@ class RiskInputBuilder:
             "platformAgentCode": f"{bot_id}:{entity}:{env}",
             "agentCode": agent_code,
             "agentName": _text(bot, "bot_name"),
-            "agentDescription": bot.get("bot_desc") or "",
+            "agentDesc": bot.get("bot_desc") or "",
             "agentOwner": owner,
             "agentModifier": str(modifier),
             "version": "V1.0",
