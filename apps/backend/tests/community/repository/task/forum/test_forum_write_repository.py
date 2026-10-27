@@ -142,6 +142,22 @@ def _create_attachment(
     )
 
 
+def test_create_share_topic_without_attachments(db):
+    repo = ForumRepository(db)
+    config = ForumTopicConfig(share=ForumShareConfig(attachment_ids=()))
+
+    result = _create_topic(
+        repo,
+        request_id="req-share-empty",
+        topic_type=TOPIC_TYPE_SHARE,
+        topic_config=config,
+    )
+
+    assert result.created is True
+    assert result.topic.topic_config == config
+    assert result.topic.attachments == ()
+
+
 def test_create_share_topic_binds_attachments_in_config_order(db):
     repo = ForumRepository(db)
     second = _create_attachment(repo, attachment_id="attachment_2")

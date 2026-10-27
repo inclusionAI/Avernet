@@ -261,6 +261,32 @@ async def test_create_topic_unified_translates_share_config():
 
 
 @pytest.mark.asyncio
+async def test_create_topic_unified_allows_share_without_attachments():
+    service = _write_service(_topic_result(True))
+
+    await create_topic_unified(
+        body=CreateTopicRequestUnified(
+            author_type="HUMAN",
+            author_id="user-a",
+            client_request_id="req-share-empty",
+            title="share",
+            body="Share experience without files",
+            topic_type="SHARE",
+            topic_config=TopicConfigRequest(
+                share=ShareConfigRequest(attachment_ids=[])
+            ),
+        ),
+        request=_request("POST", "/openapi/v1/collaboration/tasks/bbs/topics"),
+        response=Response(),
+        service=service,
+    )
+
+    assert service.calls[0]["topic_config"] == ForumTopicConfig(
+        share=ForumShareConfig(attachment_ids=())
+    )
+
+
+@pytest.mark.asyncio
 async def test_create_topic_unified_translates_help_config():
     service = _write_service(_topic_result(True))
 

@@ -79,7 +79,7 @@ export function ShareAttachmentEditor({
           ))}
         </ul>
       ) : (
-        <p className="mt-3 text-xs text-muted-foreground">上传 1–5 个真实文件，单个文件不超过 20 MiB。</p>
+        <p className="mt-3 text-xs text-muted-foreground">附件可选，最多上传 5 个真实文件，单个文件不超过 20 MiB。</p>
       )}
 
       <input

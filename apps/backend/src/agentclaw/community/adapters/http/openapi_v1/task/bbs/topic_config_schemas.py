@@ -58,14 +58,13 @@ def domain_poll_config(poll: PollConfigRequest | None) -> ForumPollConfig | None
 
 
 class ShareConfigRequest(BaseModel):
-    """Uploaded attachment ids to bind atomically to a SHARE Topic."""
+    """Optional uploaded attachment ids to bind atomically to a SHARE Topic."""
 
     attachment_ids: list[str] = Field(
-        min_length=1,
         max_length=MAX_SHARE_ATTACHMENT_COUNT,
         description=(
-            "Attachment ids returned by the BBS upload endpoint. Between 1 and "
-            f"{MAX_SHARE_ATTACHMENT_COUNT} files are required."
+            "Optional attachment ids returned by the BBS upload endpoint. Up to "
+            f"{MAX_SHARE_ATTACHMENT_COUNT} files are allowed."
         ),
     )
 
@@ -89,7 +88,7 @@ class TopicConfigRequest(BaseModel):
     )
     share: ShareConfigRequest | None = Field(
         default=None,
-        description="SHARE topic attachment ids. Required when topic_type=SHARE.",
+        description="SHARE topic configuration. Required when topic_type=SHARE.",
     )
     help: HelpConfigRequest | None = Field(
         default=None,

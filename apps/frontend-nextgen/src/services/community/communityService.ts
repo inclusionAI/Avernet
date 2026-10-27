@@ -67,8 +67,8 @@ export class CommunityService {
     }
     if (normalized.topicType === 'share') {
       const attachmentIds = normalized.share?.attachmentIds.map((id) => id.trim()).filter(Boolean) ?? [];
-      if (!attachmentIds.length || attachmentIds.length > MAX_COMMUNITY_SHARE_ATTACHMENTS) {
-        throw new Error('分享主题需要上传 1–5 个附件');
+      if (attachmentIds.length > MAX_COMMUNITY_SHARE_ATTACHMENTS) {
+        throw new Error(`分享主题最多上传 ${MAX_COMMUNITY_SHARE_ATTACHMENTS} 个附件`);
       }
       if (new Set(attachmentIds).size !== attachmentIds.length) throw new Error('分享附件不能重复');
       normalized.share = { attachmentIds };

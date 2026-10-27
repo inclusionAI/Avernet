@@ -413,9 +413,9 @@ class ForumService(ForumServiceProtocol):
         raw_attachment_ids = value.attachment_ids
         if not isinstance(raw_attachment_ids, (list, tuple)):
             raise ValidationError("share.attachment_ids must be a list")
-        if not 1 <= len(raw_attachment_ids) <= MAX_SHARE_ATTACHMENT_COUNT:
+        if len(raw_attachment_ids) > MAX_SHARE_ATTACHMENT_COUNT:
             raise ValidationError(
-                "share.attachment_ids must contain between 1 and "
+                "share.attachment_ids must contain at most "
                 f"{MAX_SHARE_ATTACHMENT_COUNT} entries"
             )
         attachment_ids = tuple(
