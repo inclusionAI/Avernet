@@ -3,7 +3,6 @@ name: Shared search contracts
 on:
   pull_request:
     paths:
-      - 'apps/agent-search/**'
       - 'apps/bcsfuse/**'
       - '.github/workflows/search-core.yml'
   workflow_dispatch:
@@ -20,9 +19,9 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install public packages from this checkout
-        run: python -m pip install -e 'apps/bcsfuse/packages/avernet-search[http,test]' -e 'apps/agent-search[test]' -e 'apps/bcsfuse[dev]'
+        run: python -m pip install -e 'apps/bcsfuse/packages/avernet-search[http,test]' -e 'apps/bcsfuse/agent-search[test]' -e 'apps/bcsfuse[dev]'
       - name: Core and Agent application contracts
-        run: python -m pytest apps/bcsfuse/packages/avernet-search/tests apps/agent-search/tests -q
+        run: python -m pytest apps/bcsfuse/packages/avernet-search/tests apps/bcsfuse/agent-search/tests -q
       - name: TC compatibility contracts
         working-directory: apps/bcsfuse
         run: >-

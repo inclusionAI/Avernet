@@ -7,6 +7,20 @@ business code. OCB supplies internal providers and deployment
 composition. The core has no dependency on TC, Agent Search, OCB, HTTP, databases,
 models or environment variables.
 
+Both applications belong to the BCSFuse module:
+
+```text
+apps/bcsfuse/
+├── packages/avernet-search/   Shared, independently installable package
+├── src/                      Existing TC application, management and Fuse
+└── agent-search/              Independently composed Agent application
+    └── src/agent_search/
+```
+
+Agent Search keeps its own package and application factory. It depends on
+`avernet-search`, and does not import the sibling TC `src` package. Internal
+providers and deployment selection remain OCB's responsibility.
+
 | Owner | Implemented in this batch | Intentionally retained / deferred |
 | --- | --- | --- |
 | Shared package | Neutral request/result contracts; reciprocal rank fusion; bounded union of ranked candidates; authenticated, optional HTTP v2 routes | Production asynchronous retrieval, provider adapters, fragment aggregation and reranker validation follow in the retrieval extraction |

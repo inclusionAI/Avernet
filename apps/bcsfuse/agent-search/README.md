@@ -1,6 +1,6 @@
 # Agent Search
 
-An independently composed search application. The host supplies a real
+An independently composed search application within the BCSFuse module. The host supplies a real
 `RetrievalService`, authentication and (when needed) an ASGI lifespan that starts
 and closes its resources. There is deliberately no implicit in-memory catalogue,
 TC dependency, model connection or database connection.
@@ -12,7 +12,7 @@ Unsupported filters, extensions and scenes fail explicitly. Empty authorized
 scope is never interpreted as unrestricted access.
 
 Install from the repository root:
-`uv pip install -e 'apps/bcsfuse/packages/avernet-search[http]' -e 'apps/agent-search[test]'`.
+`uv pip install -e 'apps/bcsfuse/packages/avernet-search[http]' -e 'apps/bcsfuse/agent-search[test]'`.
 From this directory run `python -m pytest tests`.
 
 ## Context Boundary
