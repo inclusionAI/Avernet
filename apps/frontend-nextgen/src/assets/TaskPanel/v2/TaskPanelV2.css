@@ -13,7 +13,7 @@
  * CSS 由悬浮开关标记反推，避免用 React 元素真值误判导致 8px 错位。
  */
 [data-task-panel-root] > header {
-  height: 48px;
+  height: 56px;
 }
 [data-task-panel-root]:has([data-task-switcher-control='true']) > header {
   height: 40px;
