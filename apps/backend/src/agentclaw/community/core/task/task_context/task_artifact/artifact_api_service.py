@@ -11,8 +11,11 @@ spec 2026-10-20-task-artifact-domain 之外的**独立 API 写口**:relay 回调
   compose 辅助——capture、手动登记与 session-file 补录共用单一事实源。
 - 幂等(§5.3):``TaskArtifactRepositoryProtocol.append`` select-first 查重,
   与 ``save_graph`` 内嵌写同键同口径;重复登记返回既有行,不插第二行。
-- dashboard 返回 manifest 前先观察节点 BCS session 的 Ready files,按完整
+- ``sync_session_files_and_list``:观察节点 BCS session 的 Ready files,按完整
   ``FileContent`` task-wide 去重并 append 新引用;BCS 失败降级,DB 失败上抛。
+  **2026-10-27:**dashboard 三个读口(``GET /dashboard`` 内外两副本 + ``GET /{task_id}``)
+  不再触发本方法,改为 ``(await)list_artifacts`` 纯收 DB 行;本方法作为独立能力保留,
+  仍由其单测覆盖,后续若需 BCS 回填可另行接入。
 
 Repo pattern(api/README"Where a Protocol is defined"):Protocol 定义于本(core)
 模块,实现继承之,``api/task/task_artifact_service.py`` 仅 re-export;

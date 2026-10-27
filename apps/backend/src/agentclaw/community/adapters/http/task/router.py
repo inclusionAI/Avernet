@@ -771,7 +771,8 @@ async def get_task_internal(
     """Return one task dashboard for authenticated Goal clients."""
     del user
     graph = service.get_task_dashboard(task_id)
-    artifact_rows = await artifact_service.sync_session_files_and_list(graph)
+    # 产物清单纯读库(2026-10-27):不再先去 BCS 查 session_file 回填,直接收 DB 行。
+    artifact_rows = artifact_service.list_artifacts(graph.task_id)
     return envelope(
         graph_to_dto(
             graph,

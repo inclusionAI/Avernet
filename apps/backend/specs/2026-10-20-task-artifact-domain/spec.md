@@ -376,7 +376,8 @@ CREATE TABLE IF NOT EXISTS `task_artifact` (
 ## 7. Dashboard 可见性与会话文件协调
 
 原则:消费路径不切换(下游/Judge/OpenAPI 仍读 output dict),让产物**可见**;同时
-dashboard 作为中间产物发现入口,在返回清单前协调 BCS session files:
+dashboard 作为中间产物发现入口,在返回清单前协调 BCS session files
+(**2026-10-27 修订:此 BCS session-file 协调从 dashboard 三个读口移除,改回纯收数据库 manifest——见下文 §7 末注**):
 
 - `TaskNodeDTO`(`adapters/http/task/schemas.py:305`)新增 optional `artifacts: list[TaskArtifactDescriptorDTO]`,由 dashboard 读路径按 `(task_id, node_id)` 读时富化(取该节点全部 attempt 的产物,attempt 倒序)——协议仍是"只转协议",富化在 service 层;
 - Descriptor 只含安全字段:`artifact_id / artifact_name / kind / content(kind-tagged 引用元数据:File 分支 storage_type+storage_id+file_name+file_id+file_type;UrlLink 分支 url+type;Code 分支 code_base_name+code_base_address+pr_link+pr_desc)/ attempt / creator / created_at`;
@@ -403,6 +404,9 @@ dashboard 作为中间产物发现入口,在返回清单前协调 BCS session fi
   manifest;数据库读取或 append 失败继续上抛,不得伪装成功。因此这三条 dashboard 路由
   不再是严格只读接口,而是一个受限的“外部观察 + append-only 补录”边界。
 
+- **2026-10-27 修订(dashboard 退回纯读库)**:上述 BCS session-file 协调**不再由 dashboard 触发**。
+  三条 dashboard 路由(公开 `GET /openapi/v1/collaboration/tasks/dashboard`、内部 `GET /api/v1/collaboration/tasks/dashboard`、`GET /api/v1/collaboration/tasks/{task_id}`)在返回 manifest 前改回仅调 ``TaskArtifactApiService.list_artifacts(task_id)`` 收数据库行,不再观察 BCS / append。``sync_session_files_and_list`` 方法本身保留为独立能力(其单测不变),后续如需 reintroduce BCS 回填另行接入。三条路由因此退回**严格只读**。
+
 ---
 
 ## 8. 演进路线(本方案在整体迁移中的位置)
@@ -428,13 +432,14 @@ dashboard 作为中间产物发现入口,在返回清单前协调 BCS session fi
 - [ ] 读侧:`TaskNodeDTO.artifacts` 富化 + HTML 产物块无 URL;OpenAPI 导出快照同步更新(附加可选字段);
 - [ ] dashboard session files:三条 dashboard 路由均先扫描节点 session;Ready 分页完整;
   完整 `FileContent` task-wide 去重;新增 append 后二次查库;BCS/token 失败降级、DB 写失败上抛;
+  **(2026-10-27 修订:dashboard 已退回纯读库,本条不再适用于 dashboard;`sync_session_files_and_list` 作为独立能力保留,见 §7 末注)**
 - [ ] 领域语义:文本归约器含 `{"output": <str>}` 主通道形态;`skipped`/`notify_result` 产生 TEXT 产物(text=canonical JSON)且每 attempt 不超过 1+1 条;`file_type` 缺省推断与兜底值;
 - [ ] 契约变更:`save_graph` 新增可选参后,全部现存实现/测试替身同步(检索所有以 `save_graph` 为签名的 stub);
 - [ ] 缺席态:graph 仓储未接线(内存-only)时不发布、不报错;
 - [ ] 架构守卫:`test_repository_contracts` / `test_task_module_responsibility_guards` / README provides 测试全绿;
 - [ ] 回归:`uv run pytest tests/community/core/task tests/community/repository/task tests/community/adapters/http/task`(apps/backend 下,uv 环境)全绿;ruff changed files 清洁;
 - [ ] 兼容:无 `artifacts` 字段的旧回调行为逐字节不变;output dict 内容与现状一致(剥离仅发生在产物块范围内);
-- [x] **OBJECT_FILE(2026-10-26 修订,§13)**:模型三枚举分支 + key 结构校验矩阵(含 file_id 恒 None);**上传单向失败安全**(put 失败/超上限/未接线 → 无行)与内容寻址 key 幂等(同字节同 key → 既有 dedupe 收敛);**下载三态映射**(FOUND/NOT_FOUND/FAILED → 200/404/502)与 413/503 配置位;key 前缀域校验(跨任务伪造拒绝);协议契约套件(Rule 25)+ 两新路由 endpoint happy/error 声明 + `test_service_api_conformance` 登记;两既有介质行为零变化。
+- [x] **OBJECT_FILE(2026-10-26 修订,§13)**:模型三枚举分支 + key 结构校验矩阵(含 file_id 恒 None);**上传单向失败安全**(put 失败/超上限/未接线 → 无行)与命名寻址 key(`{key_prefix}/{task_id}/{node_id}/{file_name}`,2026-10-27 改版;同 key 重传覆盖前次字节);**下载三态映射**(FOUND/NOT_FOUND/FAILED → 200/404/502)与 413/503 配置位;key 前缀域校验(跨任务伪造拒绝);协议契约套件(Rule 25)+ 两新路由 endpoint happy/error 声明 + `test_service_api_conformance` 登记;两既有介质行为零变化。
 
 ---
 
