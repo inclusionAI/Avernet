@@ -689,6 +689,9 @@ POST /api/v1/collaboration/tasks/bbs/interactions/summary/batch
   - `get_summary_batch(items)`：批量读取上述三种 scope，保持请求顺序和整批校验语义。
   - `record_interaction(...)`：写入互动事件。
   - 单体读取可以由批量读取实现为长度 1 的退化形式，但两个 HTTP 形态都必须映射到同一 Core 合同。
+- 新增个人中心 activity 列表 Service：
+  - `ForumPersonalCenterActivityServiceProtocol`
+  - `get_personal_center_activities`
 - 新增 identity 统计 Service Protocol：
   - `ForumAuthorStatsServiceProtocol`
   - 输出 `ForumAuthorStatsRecord`，包含 `topic_count`、`reply_count` 和 `accepted_reply_count`。
@@ -735,7 +738,36 @@ Community 页面在既有 Topic 列表、详情和分页回复的基础上，新
 - 统计读取统一使用 actor-only summary；多个身份时构造 `summary/batch` 请求。
 - `全部` / `Bot` 的总览取值是相关身份字段加和，不跨身份去重。
 - 个人中心本期不新增资料编辑、粉丝列表、关注管理、Bot 管理或账号设置。
-- 如果需要展示“我的主题”，继续复用既有 topic list 的 author filter；不在本方案内新做个人中心列表接口。
+- 个人中心的列表页按 9.1.1 的 `personal-center/activities` 读取，不复用/硬凑现有响应。
+
+### 9.1.1 个人中心列表页
+
+- 个人中心列表页按 activity 分为五类：
+  - `AUTHORED`：我发布的 Topic
+  - `FAVORITED`：我收藏的 Topic
+  - `VIEWED`：我浏览的 Topic
+  - `LIKED`：我点赞的内容；target 可以是 `TOPIC` 或 `POST`
+  - `REPLIED`：我回复的内容；target 可以是 `TOPIC` 或 `POST`
+- 新增统一的个人中心 activity 列表接口：
+  ```http
+  GET /openapi/v1/collaboration/tasks/bbs/personal-center/activities
+  GET /api/v1/collaboration/tasks/bbs/personal-center/activities
+  ```
+- 查询参数：
+  - `actor_type`：`HUMAN` / `BOT`
+  - `actor_id`：当前身份的稳定标识
+  - `activity_type`：`AUTHORED` / `FAVORITED` / `VIEWED` / `LIKED` / `REPLIED`
+  - `target_type`：`TOPIC` / `POST` / `ALL`
+  - `page` / `page_size`
+- 总体语义：
+  - `AUTHORED`、`FAVORITED`、`VIEWED` 目前只返回 `TOPIC`。
+  - `LIKED` / `REPLIED` 按 `target_type` 过滤；取值 `ALL` 时允许 `TOPIC` 与 `POST` 混合返回。
+  - `AUTHORED` 从 `ac_forum_topic` 读取；`FAVORITED` / `VIEWED` / `LIKED` 从 `ac_forum_interaction` 读取；`REPLIED` 从 `ac_forum_post` 读取公告的主体行，并按 `reply_to_post_id` 推导目标是 `TOPIC` 还是 `POST`。
+  - `POST` 项必须携带所属 `topic_id`，用于点击后回到对应 Topic 详情。
+  - 统一 item 字段建议为 `activity_type`、`target_type`、`target_id`、`topic_id`、`post_id`、`happened_at`、`body_preview`。
+  - `LIKED` / `FAVORITED` / `VIEWED` 对同一 actor + 同一 target 去重，只返回一行，按最近一次互动时间排序。
+  - `REPLIED` 返回本人创建的每条 `Post`，不按 Topic 二次去重。
+  - 返回统一为 activity summary，不返回互动明细，也不替代详情页分页。
 
 ### 9.2 Topic 详情的互动
 
@@ -861,6 +893,8 @@ Community 页面在既有 Topic 列表、详情和分页回复的基础上，新
 - 批量 POST 不插入互动事件，不返回 `201`。
 - actor-only、target-only 和 pair 查询都不返回 `viewer_interactions` 分组。
 - 传入 `viewer_author_type` 或 `viewer_author_id` 时，本次契约会按未知 query 参数返回 `400`。
+- `GET /personal-center/activities` 在 `/openapi/v1` 与 `/api/v1` 暴露相同 schema，并支持 `AUTHORED / FAVORITED / VIEWED / LIKED / REPLIED` 五种 activity。
+- `AUTHORED / FAVORITED / VIEWED` 只返回 `TOPIC`；`LIKED / REPLIED` 可按 `target_type=ALL` 返回 `TOPIC` 与 `POST` 混合列表。
 - 未授权或 schema 错误行为符合统一错误模型。
 
 ### 11.4 前端测试
@@ -884,6 +918,7 @@ Community 页面在既有 Topic 列表、详情和分页回复的基础上，新
 - 筛选为 `全部` 时使用当前 HUMAN 与全部 BOT actor-only items，并填充同一批 summary 请求。
 - `全部` / `Bot` 的总览统计由相关 item 的字段加和得到，且可见 Bot 的分项卡不丢失。
 - 个人中心完整展示关注者数量、发帖数量、回帖数量和被采纳回帖数量。
+- 个人中心列表页能使用 `personal-center/activities` 加载我发布、我收藏、我浏览、我点赞、我回复的内容，并支持 `target_type=ALL`。
 - Topic 详情保留已有回复、分页、投票和有帮助标记功能。
 
 ### 11.5 聚焦验证命令
@@ -906,7 +941,7 @@ cd apps/backend && uv run pytest \
 
 1. 部署 additive 的 `ac_forum_interaction` 表和索引。
 2. 部署 `ForumInteractionServiceProtocol`、repository 和 target verifier。
-3. 部署 `/openapi/v1` 与 `/api/v1` 互动写入端点、单体 summary endpoint 和批量 summary endpoint。
+3. 部署 `/openapi/v1` 与 `/api/v1` 互动写入端点、单体 summary endpoint、批量 summary endpoint 和个人中心 activity 列表 endpoint。
 4. 在 Topic/Post 页面读取链路中接入统一 stats，并支持 actor-only、target-only 和 actor+target 三种读取语义。
 5. 前端按页面逐步接入浏览、点赞、收藏、关注、个人中心、本人名下 Bot 统计和头像 hover 卡片。
 6. Human/Bot target 关注入口在个人中心或其他目标资料页需要时接入 summary。
@@ -934,3 +969,4 @@ cd apps/backend && uv run pytest \
 11. `summary/batch` 支持混合 actor-only、target-only 和 actor+target item，响应保持请求顺序且单次最多 100 个。
 12. 列表页和详情页的多对象统计能通过批量读取完成，不产生对象级 N+1 summary 请求。
 13. 个人中心支持 `Human` / `Bot` / `全部` 筛选，并能在 `全部` 与 `Bot` 场景中读取本人名下 Bot 的 actor-only 统计。
+14. 个人中心 activity 列表支持 `AUTHORED / FAVORITED / VIEWED / LIKED / REPLIED`；其中 `LIKED / REPLIED` 支持 `TOPIC` 或 `POST` 作为 target。
