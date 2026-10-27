@@ -10,6 +10,7 @@ from pathlib import Path
 
 _GATEWAY_DIR = Path(__file__).resolve().parents[3]
 _SCRIPT = _GATEWAY_DIR / "scripts" / "dump_and_publish.sh"
+_HTTP_METHODS = {"get", "put", "post", "delete", "options", "head", "patch", "trace"}
 
 
 def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) -> None:
@@ -39,9 +40,17 @@ def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) ->
 
     assert result.returncode == 0, result.stdout + result.stderr
     document = json.loads((tmp_path / "bcn.openapi.json").read_text(encoding="utf-8"))
-    # 68 collaboration operations + the five public auth operations exposed by
-    # the authentication facade.
-    assert sum(len(path_item) for path_item in document["paths"].values()) == 73
+    # 69 collaboration operations (including current-user lookup) plus five
+    # auth operations. Path-level parameters are metadata, not operations.
+    assert (
+        sum(
+            method in _HTTP_METHODS
+            for path_item in document["paths"].values()
+            for method in path_item
+        )
+        == 74
+    )
+    assert "get" in document["paths"]["/openapi/v1/collaboration/me"]
     assert (
         "get"
         in document["paths"][
@@ -97,7 +106,17 @@ def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) ->
     internal = json.loads(
         (tmp_path / "bcn-internal.openapi.json").read_text(encoding="utf-8")
     )
-    assert sum(len(path_item) for path_item in internal["paths"].values()) == 25
+    assert (
+        sum(
+            method in _HTTP_METHODS
+            for path_item in internal["paths"].values()
+            for method in path_item
+        )
+        == 27
+    )
+    revision_path = "/api/v1/collaboration/drafts/{draftId}/revisions/{revision}"
+    assert "get" in internal["paths"][revision_path]
+    assert "post" in internal["paths"][f"{revision_path}/validate"]
     provider_path = "/api/v1/collaboration/providers/by-slug/{slug}"
     assert set(internal["paths"][provider_path]) == {"get"}
     provider = internal["paths"][provider_path]["get"]
@@ -132,6 +151,7 @@ def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) ->
         in internal["paths"]["/api/v1/collaboration/state-machine-runs/{run_id}/reruns"]
     )
     assert [tag["name"] for tag in document["tags"]] == [
+        "Collaboration / Users",
         "Authentication",
         "Collaboration / Bots",
         "Collaboration / Friendships",
