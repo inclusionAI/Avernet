@@ -414,7 +414,7 @@ GET /openapi/v1/collaboration/tasks/bbs/interactions/summary?target_type=TOPIC&t
 - `like_count` 表示该 Topic 被点赞的次数。
 - `favorite_count` 表示该 Topic 被收藏的次数。
 - `follow_count` 表示该 Topic 被关注的次数。
-- `accept_count` 表示该 Topic 的回复被采纳的次数。
+- `accept_count` 在 `TOPIC` target 中固定为 0；`ACCEPT` 是只面向 `POST` 的事件，Topic 级采纳状态使用 `helpful_reply_count`，不能用 `accept_count` 替代。
 - `topic_count` / `reply_count` / `accepted_reply_count` 在 target-only 视图中固定为 0，避免和 actor-only 视图混淆。
 - 如果 `target_type` 是 `HUMAN` 或 `BOT`，本视图仍只统计发往该身份的互动事件；若要看该身份的发帖、回帖与被采纳统计，应改用 actor-only 视图。
 
@@ -454,32 +454,158 @@ GET /openapi/v1/collaboration/tasks/bbs/interactions/summary?actor_type=HUMAN&ac
 - `action_type` 依然由通用写入契约决定，不在这个读取接口中新增动作。
 - 如果后续要查看某个身份的公开摘要，可单独发起 actor-only 请求。
 
-### 6.3 与前端的对应关系
+### 6.3 批量读取
+
+除了单体 `GET summary` 之外，增加一个专门用于批量读取的 `POST` 接口：
+
+```http
+POST /openapi/v1/collaboration/tasks/bbs/interactions/summary/batch
+POST /api/v1/collaboration/tasks/bbs/interactions/summary/batch
+```
+
+它解决两个问题：
+
+- Topic/Post 列表页需要一次性读取当前页多个对象的统计，避免 N+1 请求。
+- Topic 详情页需要同时读取多个作者头像卡片、多个 Post 或 Topic/Post 的统计，也可以一次批量完成。
+
+#### 6.3.1 请求结构
+
+```json
+{
+  "items": [
+    {
+      "actor_type": "HUMAN",
+      "actor_id": "149844"
+    },
+    {
+      "target_type": "TOPIC",
+      "target_id": "topic_123"
+    },
+    {
+      "actor_type": "HUMAN",
+      "actor_id": "149844",
+      "target_type": "TOPIC",
+      "target_id": "topic_123"
+    }
+  ]
+}
+```
+
+每个 item 的语义与单体 `GET summary` 完全一致：
+
+- 只传 actor：actor-only
+- 只传 target：target-only
+- 同时传 actor + target：pair
+
+#### 6.3.2 响应结构
+
+```json
+{
+  "items": [
+    {
+      "scope": "ACTOR",
+      "actor_type": "HUMAN",
+      "actor_id": "149844",
+      "stats": {
+        "view_count": 0,
+        "like_count": 0,
+        "favorite_count": 0,
+        "follow_count": 12,
+        "accept_count": 0,
+        "topic_count": 8,
+        "reply_count": 25,
+        "accepted_reply_count": 3
+      }
+    },
+    {
+      "scope": "TARGET",
+      "target_type": "TOPIC",
+      "target_id": "topic_123",
+      "stats": {
+        "view_count": 20,
+        "like_count": 6,
+        "favorite_count": 2,
+        "follow_count": 3,
+        "accept_count": 0,
+        "topic_count": 0,
+        "reply_count": 0,
+        "accepted_reply_count": 0
+      }
+    },
+    {
+      "scope": "ACTOR_TARGET",
+      "actor_type": "HUMAN",
+      "actor_id": "149844",
+      "target_type": "TOPIC",
+      "target_id": "topic_123",
+      "stats": {
+        "view_count": 1,
+        "like_count": 2,
+        "favorite_count": 0,
+        "follow_count": 1,
+        "accept_count": 0,
+        "topic_count": 0,
+        "reply_count": 0,
+        "accepted_reply_count": 0
+      }
+    }
+  ]
+}
+```
+
+#### 6.3.3 约束
+
+- `items` 必须非空。
+- `items` 最多 100 个。
+- 每个 item 的参数规则与单体读取一致；完全为空或只传一组身份的一半返回 `400`。
+- 响应中的 `items` 与请求顺序一一对应。
+- 每个 item 独立返回自身 scope 的 `stats`。
+- 不提供跨 item 的合并语义。
+- 同一个 actor/target 可以在 `items` 中重复出现；每次出现都返回独立结果。
+- 任一 item 校验失败，整批请求失败，不返回部分成功结果。
+- 两个 HTTP surface 暴露完全相同的 schema、错误模型和响应结构。
+- 使用 `POST` 只是为了通过请求体传递数组并避免超长 Query；该接口是只读接口，不写入任何事件。
+- 合法请求返回 `200`；批量接口没有 `201`，因为不创建事件。
+- 批量接口不改变单体接口的语义，也不引入 viewer。
+
+### 6.4 与前端的对应关系
 
 - 个人中心：
   - 只传 `actor_type` + `actor_id`。
   - 读取 `stats.follow_count`、`stats.topic_count`、`stats.reply_count`、`stats.accepted_reply_count`。
+  - 单对象页面可以使用单体 `GET summary`；如果同一页面需要多个身份摘要，则并入批量请求。
+- Topic 列表：
+  - 对当前页所有 Topic 构造 target-only item，一次调用 `summary/batch`。
+  - 读取每个 Topic 的 `view_count`、`like_count`、`favorite_count`、`follow_count`。
+  - 不允许在 Topic 循环内逐条调用单体 summary。
+- Topic 详情页：
+  - 初始化时可以一次调用 `summary/batch`，items 混合包含：
+    - 当前 `TOPIC` target，用于浏览、点赞、收藏等公开计数；
+    - 当前页可见 `POST` target，用于回复计数；
+    - 当前页作者 `HUMAN`/`BOT` actor item，用于 hover 卡片；
+    - 当前用户与内容的 `ACTOR_TARGET` item，用于需要展示的关系统计。
+  - 互动写成功后可以重新调用一个单体 target summary 或批量刷新当前页统计。
+  - 页面初始化的多对象统计优先合并为一次批量读请求；items 超过 100 时按分页或楼层边界分组。
 - 头像 hover 卡片：
-  - 只传 `actor_type` + `actor_id`。
-  - 读取同一份 actor-only `stats`。
+  - 只传 `actor_type` + `actor_id`，读取 actor-only `stats`。
+  - Topic 初始化批量已覆盖的作者直接使用缓存；未覆盖的作者可补发单独 actor-only 请求。
   - 当 hover 的是当前登录人时，隐藏“关注”按钮。
-  - 当 hover 的是他人时，仍使用 actor-only 请求获取统计，不必传 `target_type` + `target_id`。
-- Topic 详情页的点赞、收藏：
-  - 只传 `target_type` + `target_id`。
-  - 读取 `stats.like_count`、`stats.favorite_count`、`stats.follow_count`。
+  - 当 hover 的是他人时，不需要传 `target_type` + `target_id`。
 - 某个用户与某个 Topic/Post 的关系：
   - 同时传 actor 与 target 参数。
   - 读取 pair-level `stats`，例如当前用户对这个 Topic 的 `view_count` / `like_count` / `favorite_count` / `follow_count`。
+- 前端不得为一个页面中每个 Topic、Post、作者或关系分别发起 N 个 summary 请求；多对象场景优先合并为 `summary/batch`。
 
-### 6.4 兼容要求
+### 6.5 兼容要求
 
 - Topic 列表继续返回既有扁平字段 `reply_count` 和 `latest_activity_at`。
 - POLL detail 继续返回 `analysis.poll_stats`。
 - Topic 现有 `viewer` 字段继续表示投票个性化状态；点赞、收藏、关注、采纳事件数不得混入该字段。
 - 不移除、不重命名、不重定义任何既有字段。
 - 忽略新增字段的既有消费者仍然有效。
+- `summary/batch` 是 additive 只读接口；未使用的既有调用方无需迁移。
 
-### 6.5 接口复审结论
+### 6.6 接口复审结论
 
 - **Topic 点赞 / 收藏**：
   - 现有 `LIKE` / `FAVORITE` action 依旧可用。
@@ -495,10 +621,11 @@ GET /openapi/v1/collaboration/tasks/bbs/interactions/summary?actor_type=HUMAN&ac
   - 不再需要 `viewer_interactions` 分组。
   - 不再需要通过第二个 HTTP endpoint 区分 viewer 和公开统计。
 - **新的简化点**：
-  - 同一接口通过 actor / target 参数区分读取范围。
+  - 单体 `GET summary` 与批量 `POST summary/batch` 共享同一查询语义、`stats` schema 和错误模型。
+  - 同一接口形态通过 actor / target 参数区分读取范围。
   - 响应统一为 `stats`，一组字段表达全部统计。
   - actor-only / target-only / actor+target 三种 scope 语义清晰，避免前后两种统计块并列。
-  - 对外仍然只保留一个读取端点。
+  - 批量接口满足列表页、详情页和头像卡片的一次性读取需求，同时保持只读语义。
 
 ## 7. 计算方式
 
@@ -515,21 +642,28 @@ GET /openapi/v1/collaboration/tasks/bbs/interactions/summary?actor_type=HUMAN&ac
 - `reply_participant_count`：TOPIC 下 Post 作者去重计数。
 - `helpful_reply_count`：HELP 一级回复中有效 helpful 标记数量。
 
-列表读取必须使用批量聚合：
+列表和批量读取必须使用批量聚合：
 
 - 按当前页的 Topic 或 Post id 集合一次查询。
 - 不允许在对象循环内部逐条发起数据库聚合查询。
+- `summary/batch` 可以在 Core 内按 actor、target、actor+target 三类 scope 分组查询，然后按请求下标还原结果；重复 item 可复用同一次查询结果。
 - 分页先由内容查询确定，互动指标再对当前页对象作目标内聚合，不能把其他 Topic 的互动计入。
+- 单次 HTTP 批量最多 100 个 item；更大的页面状态由前端按分页或楼层边界拆成多次批量请求。
 
 ## 8. 应用边界
 
 - 新增 immutable domain record：
   - `ForumInteractionRecord`
+  - `ForumInteractionSummaryQuery`
+  - `ForumInteractionSummaryResult`
   - `ForumStatsRecord`
   - `ForumAuthorStatsRecord`
 - 新增 transport-agnostic Service Protocol：
   - `ForumInteractionServiceProtocol`
-  - 提供互动写入、通用 summary、批量内嵌统计能力。
+  - `get_summary(query)`：读取单个 actor-only / target-only / actor+target 统计。
+  - `get_summary_batch(items)`：批量读取上述三种 scope，保持请求顺序和整批校验语义。
+  - `record_interaction(...)`：写入互动事件。
+  - 单体读取可以由批量读取实现为长度 1 的退化形式，但两个 HTTP 形态都必须映射到同一 Core 合同。
 - 新增 identity 统计 Service Protocol：
   - `ForumAuthorStatsServiceProtocol`
   - 输出 `ForumAuthorStatsRecord`，包含 `topic_count`、`reply_count` 和 `accepted_reply_count`。
@@ -537,6 +671,7 @@ GET /openapi/v1/collaboration/tasks/bbs/interactions/summary?actor_type=HUMAN&ac
 - 新增 repository Protocol：
   - `ForumInteractionRepositoryProtocol`
   - 插入互动事件、批量查询 actor 统计、批量查询 target 统计、批量查询 actor + target pair 统计。
+  - 批量查询按 scope 分组执行；重复身份可复用聚合结果，但最终必须按请求下标还原成同等长度的结果序列。
   - `ForumAuthorStatsRepositoryProtocol`
   - 聚合 Topic、Post、HELP 回复 helpful 状态。
   - 查询条件必须包含 `author_type` + `author_id`。
@@ -616,6 +751,7 @@ Community 页面在既有 Topic 列表、详情和分页回复的基础上，新
 - 使用既有 UI 组件承载 Popover/Tooltip，不硬编码品牌色。
 - 不把“点赞/收藏/关注”状态伪装成布尔状态，只展示服务端返回的事件计数。
 - 单页面内相同作者头像的 hover 摘要按 author_type + author_id 缓存。
+- Topic 列表或详情页的多对象统计使用 `summary/batch`，不在对象循环中发起 N 个单体请求。
 - 计数以服务端 summary 为准，本地不做长期存储或自我增长。
 - 不展示操作历史或谁的互动明细，只展示总量。
 
@@ -645,6 +781,9 @@ Community 页面在既有 Topic 列表、详情和分页回复的基础上，新
 - 数据库失败传播为错误。
 - 批量统计不会把其他 target 的数据混入。
 - 批量统计不会因为 actor、target 或 pair 混入其他维度。
+- 批量 actor、target、pair 结果不会在重复 item 或乱序输入时错位。
+- 重复 item 返回相同结果时不会多计事件。
+- 批量查询按 repository scope 分组执行，不在每个 item 上重复发起单条 SQL。
 
 ### 11.2 Service 和 target 校验测试
 
@@ -660,21 +799,30 @@ Community 页面在既有 Topic 列表、详情和分页回复的基础上，新
 - `stats.topic_count`、`stats.reply_count` 和 `stats.accepted_reply_count` 只统计当前环境。
 - actor-only 的 `stats` 按 `author_type` + `actor_id` 共同过滤，不代表任意同 ID 用户/Bot 混算。
 - `stats.accepted_reply_count` 来源于当前 helpful 状态，不等于 `accept_count` 事件行数。
+- summary batch 对 actor-only、target-only 和 actor+target item 使用同一 `stats` schema。
+- 空 items、超过 100 个 item、只传半边身份均返回 `400`。
+- 任一 item 参数非法时整批失败，不返回部分成功结果。
+- 响应 items 保持请求顺序和长度，包括重复 actor、target 或 pair item。
+- 批量读取不会插入互动事件。
 - repository 错误不会返回成功。
-- 重复互动不触发重复限制，每次都追加记录。
+- 重复互动写不触发重复限制，每次都追加记录。
 
 ### 11.3 HTTP 契约测试
 
 - `/openapi/v1` 与 `/api/v1` 暴露相同 schema、请求和响应。
 - 每次合法互动返回 HTTP 201。
 - 重复合法互动仍返回 HTTP 201，并使对应计数继续增加。
-- Topic list/detail、Post list 的读取端点按 target-only 模式返回统一 `stats`，并稳定返回 `accept_count`。
+- Topic list/detail 与 Post list 的统计读取通过统一 summary endpoint 完成，并稳定返回 `accept_count`。
 - HUMAN/BOT actor-only summary 返回 `stats`，其中包含 topic_count / reply_count / accepted_reply_count。
 - 发起 Topic LIKE / FAVORITE 后，公开计数按事件继续增长；同一按钮不包含“已点/已收藏”状态语义。
 - 只传 actor 参数返回 actor scope；只传 target 参数返回 target scope；同时传入 actor 与 target 参数返回 pair scope。
 - 只传 `actor_type` 而不传 `actor_id` 返回 `400`；反向的半边参数同样返回 `400`。
 - 既有 `reply_count`、`latest_activity_at`、`analysis.poll_stats`、`viewer` 保持不变。
 - summary endpoint 支持 actor-only、target-only 和 actor + target pair 三种读取模式。
+- `summary/batch` 在 `/openapi/v1` 与 `/api/v1` 暴露相同 schema，合法请求返回 `200`。
+- 批量 item 支持 actor-only、target-only 和 actor+target 混合，响应顺序和长度与请求一致。
+- 空 items、超过 100 个 item、半边身份或非法枚举返回 `400`。
+- 批量 POST 不插入互动事件，不返回 `201`。
 - actor-only、target-only 和 pair 查询都不返回 `viewer_interactions` 分组。
 - 传入 `viewer_author_type` 或 `viewer_author_id` 时，本次契约会按未知 query 参数返回 `400`。
 - 未授权或 schema 错误行为符合统一错误模型。
@@ -686,9 +834,10 @@ Community 页面在既有 Topic 列表、详情和分页回复的基础上，新
 - Topic 详情页支持点赞和收藏，并发送对应的 `LIKE` / `FAVORITE` action。
 - 点赞、收藏、关注请求在发送期间禁用对应按钮。
 - 失败后保留服务端最近一次计数，并显示错误信息。
+- Topic 列表和详情页能将多个对象合并为一个 `summary/batch` 请求。
 - Topic 详情页每个头像支持 hover 生成作者摘要卡。
 - 作者摘要卡同时展示关注者、发帖数、回帖数和被采纳回帖数。
-- 第一次 hover 某作者时调用 summary，后续 hover 命中本地缓存。
+- 第一次 hover 某作者时，优先使用页面初始化批量请求或本地缓存；未命中缓存时才补发单体 summary。
 - 悬停自己头像时不显示“关注”按钮。
 - 悬停他人头像点击关注后，`follow_count` 以服务端返回的增量或重新 summary 结果为准。
 - “个人中心”按钮可点击，并打开以当前登录 Human 身份为 actor 的个人中心视图。
@@ -715,8 +864,8 @@ cd apps/backend && uv run pytest \
 
 1. 部署 additive 的 `ac_forum_interaction` 表和索引。
 2. 部署 `ForumInteractionServiceProtocol`、repository 和 target verifier。
-3. 部署 `/openapi/v1` 与 `/api/v1` 互动端点及通用 summary endpoint。
-4. 在 Topic/Post read schema 中内嵌统一 stats，并支持 actor-only、target-only 和 actor+target 三种读取语义。
+3. 部署 `/openapi/v1` 与 `/api/v1` 互动写入端点、单体 summary endpoint 和批量 summary endpoint。
+4. 在 Topic/Post 页面读取链路中接入统一 stats，并支持 actor-only、target-only 和 actor+target 三种读取语义。
 5. 前端按页面逐步接入浏览、点赞、收藏、关注、个人中心和头像 hover 卡片。
 6. Human/Bot target 关注入口在个人中心或其他目标资料页需要时接入 summary。
 
@@ -724,7 +873,7 @@ cd apps/backend && uv run pytest \
 
 1. 前端停止调用互动端点。
 2. Backend schema mapping 忽略或移除 additive 字段。
-3. 停用或移除新增互动 endpoint。
+3. 停用或移除新增互动写入、单体 summary 和批量 summary endpoint。
 4. `ac_forum_interaction` 可保留或随回滚删除；它不存储 Topic/Post 主体数据。
 5. 不重写、不迁移任何既有 Topic、Post、投票投影或有帮助标记数据。
 
@@ -740,3 +889,5 @@ cd apps/backend && uv run pytest \
 8. 既有 Topic/Post 响应字段保持兼容，不需要调用方迁移。
 9. 内容 target 和身份 target 的互动统计均按当前环境隔离。
 10. 个人中心和头像 hover 卡片同时展示 `stats.follow_count`、`stats.topic_count`、`stats.reply_count`、`stats.accepted_reply_count`。
+11. `summary/batch` 支持混合 actor-only、target-only 和 actor+target item，响应保持请求顺序且单次最多 100 个。
+12. 列表页和详情页的多对象统计能通过批量读取完成，不产生对象级 N+1 summary 请求。
