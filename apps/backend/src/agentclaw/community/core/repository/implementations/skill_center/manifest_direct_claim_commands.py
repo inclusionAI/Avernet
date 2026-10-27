@@ -9,6 +9,11 @@ they are not used by the UI or ordinary OpenAPI activation routes.
 
 from __future__ import annotations
 
+from agentclaw.community.core.skill_center.manifest_defaults import (
+    ManifestDefaults,
+    ManifestDefaultsConflictError,
+)
+
 from sqlalchemy import or_
 
 from agentclaw.community.core.models.mcp import SkillSetMCPServer
@@ -33,7 +38,9 @@ from agentclaw.community.core.skill_center.errors import (
 )
 from agentclaw.community.core.skill_center.offline_policy import require_skill_online
 from agentclaw.community.utils.env_utils import get_current_env
-from agentclaw.community.core.models.skill_installation_source import SkillInstallationSourceKind
+from agentclaw.community.core.models.skill_installation_source import (
+    SkillInstallationSourceKind,
+)
 
 
 class ManifestDirectClaimCommands:
@@ -130,9 +137,14 @@ class ManifestDirectClaimCommands:
         platform_default_codes: frozenset[str],
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
+        expected_defaults: ManifestDefaults | None = None,
     ) -> DesiredStateMutation:
         """Convert every reachable explicit source into one Direct MCP claim."""
         with self._db.transactional_orm_session() as session:
+            if expected_defaults is not None:
+                default_exclusions.lock_bot_exclusions(
+                    session, bot_id=bot_id, owner_id=owner_id
+                )
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             was_installed = server_code in self._mcp_installations(
                 session, bot_id, owner_id
@@ -145,7 +157,38 @@ class ManifestDirectClaimCommands:
                 default_engine_types=default_engine_types,
                 locked=True,
             )
-            if server_code in platform_default_codes and not any(
+            if expected_defaults is not None:
+                protected = self._check_manifest_defaults(
+                    session,
+                    expected=expected_defaults,
+                    sets=sets,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    platform_default_codes=platform_default_codes,
+                )
+                if server_code in protected.mcp_codes:
+                    old = self._snapshot(
+                        session, bot_id, owner_id, engine_type=engine_type
+                    )
+                    changed = bot_mcp_configs.replace(
+                        session,
+                        bot_id=bot_id,
+                        owner_id=owner_id,
+                        env=get_current_env(),
+                        server_code=server_code,
+                        config=config,
+                    )
+                    session.flush()
+                    return DesiredStateMutation(
+                        {},
+                        changed,
+                        old,
+                        updated_mcp_codes=frozenset({server_code})
+                        if changed
+                        else frozenset(),
+                    )
+
+            if expected_defaults is None and server_code in platform_default_codes and not any(
                 row.is_default for row in sets
             ):
                 raise SkillSetControlPlaneNotFoundError()
@@ -235,9 +278,14 @@ class ManifestDirectClaimCommands:
         platform_default_codes: frozenset[str],
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
+        expected_defaults: ManifestDefaults | None = None,
     ) -> DesiredStateMutation:
         """Remove explicit supply while retaining any Default exclusion."""
         with self._db.transactional_orm_session() as session:
+            if expected_defaults is not None:
+                default_exclusions.lock_bot_exclusions(
+                    session, bot_id=bot_id, owner_id=owner_id
+                )
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             sets = self._bot_sets(
                 session,
@@ -247,7 +295,38 @@ class ManifestDirectClaimCommands:
                 default_engine_types=default_engine_types,
                 locked=True,
             )
-            if server_code in platform_default_codes and not any(
+            if expected_defaults is not None:
+                protected = self._check_manifest_defaults(
+                    session,
+                    expected=expected_defaults,
+                    sets=sets,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    platform_default_codes=platform_default_codes,
+                )
+                if server_code in protected.mcp_codes:
+                    old = self._snapshot(
+                        session, bot_id, owner_id, engine_type=engine_type
+                    )
+                    changed = bot_mcp_configs.replace(
+                        session,
+                        bot_id=bot_id,
+                        owner_id=owner_id,
+                        env=get_current_env(),
+                        server_code=server_code,
+                        config=None,
+                    )
+                    session.flush()
+                    return DesiredStateMutation(
+                        {},
+                        changed,
+                        old,
+                        updated_mcp_codes=frozenset({server_code})
+                        if changed
+                        else frozenset(),
+                    )
+
+            if expected_defaults is None and server_code in platform_default_codes and not any(
                 row.is_default for row in sets
             ):
                 raise SkillSetControlPlaneNotFoundError()
@@ -292,20 +371,26 @@ class ManifestDirectClaimCommands:
                     changed = True
                     transitions.add(("skill_set", "none"))
 
-            removed = mcp_installations.uninstall(
-                session,
-                bot_id=bot_id,
-                owner_id=owner_id,
-                env=get_current_env(),
-                server_codes={server_code},
-            ) > 0
-            override_removed = bot_mcp_configs.delete(
-                session,
-                bot_id=bot_id,
-                owner_id=owner_id,
-                env=get_current_env(),
-                server_codes={server_code},
-            ) > 0
+            removed = (
+                mcp_installations.uninstall(
+                    session,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    env=get_current_env(),
+                    server_codes={server_code},
+                )
+                > 0
+            )
+            override_removed = (
+                bot_mcp_configs.delete(
+                    session,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    env=get_current_env(),
+                    server_codes={server_code},
+                )
+                > 0
+            )
             if removed and not transitions:
                 transitions.add(("direct", "none"))
             session.flush()
@@ -330,9 +415,14 @@ class ManifestDirectClaimCommands:
         skill_id: str,
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
+        expected_defaults: ManifestDefaults | None = None,
     ) -> DesiredStateMutation:
         """Replace same-runtime-name Set/Default supply with a Direct Skill."""
         with self._db.transactional_orm_session() as session:
+            if expected_defaults is not None:
+                default_exclusions.lock_bot_exclusions(
+                    session, bot_id=bot_id, owner_id=owner_id
+                )
             sets = self._bot_sets(
                 session,
                 bot_id=bot_id,
@@ -341,6 +431,18 @@ class ManifestDirectClaimCommands:
                 default_engine_types=default_engine_types,
                 locked=True,
             )
+            if expected_defaults is not None:
+                protected = self._check_manifest_defaults(
+                    session,
+                    expected=expected_defaults,
+                    sets=sets,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    platform_default_codes=self._manifest_platform_codes(
+                        expected_defaults
+                    ),
+                )
+
             target = (
                 self._scope(session.query(Skill), Skill)
                 .filter(Skill.id == int(skill_id))
@@ -353,6 +455,14 @@ class ManifestDirectClaimCommands:
                 and str(target.user_id) == owner_id
             ):
                 raise SkillSetControlPlaneNotFoundError()
+            if (
+                expected_defaults is not None
+                and target is not None
+                and target.name in protected.skill_names
+            ):
+                raise ManifestDefaultsConflictError(
+                    "Declared Skill conflicts with effective Default"
+                )
             require_skill_online(target)
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             same_name = (
@@ -417,13 +527,16 @@ class ManifestDirectClaimCommands:
                     changed = True
                     transitions.add(("skill_set", "direct"))
 
-            removed = skill_installations.uninstall(
-                session,
-                bot_id=bot_id,
-                owner_id=owner_id,
-                env=get_current_env(),
-                skill_ids=candidate_ids - {int(target.id)},
-            ) > 0
+            removed = (
+                skill_installations.uninstall(
+                    session,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    env=get_current_env(),
+                    skill_ids=candidate_ids - {int(target.id)},
+                )
+                > 0
+            )
             installed = skill_installations.install(
                 session,
                 bot_id=bot_id,
@@ -459,9 +572,14 @@ class ManifestDirectClaimCommands:
         remove_inactive_memberships: bool,
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
+        expected_defaults: ManifestDefaults | None = None,
     ) -> DesiredStateMutation:
         """Remove one effective Skill; Local cleanup may detach dormant refs."""
         with self._db.transactional_orm_session() as session:
+            if expected_defaults is not None:
+                default_exclusions.lock_bot_exclusions(
+                    session, bot_id=bot_id, owner_id=owner_id
+                )
             sets = self._bot_sets(
                 session,
                 bot_id=bot_id,
@@ -470,6 +588,18 @@ class ManifestDirectClaimCommands:
                 default_engine_types=default_engine_types,
                 locked=True,
             )
+            if expected_defaults is not None:
+                protected = self._check_manifest_defaults(
+                    session,
+                    expected=expected_defaults,
+                    sets=sets,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    platform_default_codes=self._manifest_platform_codes(
+                        expected_defaults
+                    ),
+                )
+
             skill = (
                 self._scope(session.query(Skill), Skill)
                 .filter(Skill.id == int(skill_id))
@@ -477,6 +607,10 @@ class ManifestDirectClaimCommands:
                 .one_or_none()
             )
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
+            if expected_defaults is not None and str(skill_id) in protected.skill_ids:
+                raise ManifestDefaultsConflictError(
+                    "Cannot remove protected Default Skill"
+                )
             if skill is None:
                 return DesiredStateMutation({}, False, old)
             identity = [SkillSetSkill.skill_id == int(skill.id)]
@@ -513,13 +647,16 @@ class ManifestDirectClaimCommands:
                     session.delete(membership)
                     changed = True
                     transitions.add(("skill_set", "none"))
-            removed = skill_installations.uninstall(
-                session,
-                bot_id=bot_id,
-                owner_id=owner_id,
-                env=get_current_env(),
-                skill_ids={int(skill.id)},
-            ) > 0
+            removed = (
+                skill_installations.uninstall(
+                    session,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    env=get_current_env(),
+                    skill_ids={int(skill.id)},
+                )
+                > 0
+            )
             if removed and not transitions:
                 transitions.add(("direct", "none"))
             dependencies = skill_projection_mcp_dependency_codes(
@@ -527,7 +664,9 @@ class ManifestDirectClaimCommands:
             )
             session.flush()
             return DesiredStateMutation(
-                {}, changed or removed, old,
+                {},
+                changed or removed,
+                old,
                 mcp_codes=dependencies if changed or removed else frozenset(),
                 source_transitions=tuple(sorted(transitions)),
             )

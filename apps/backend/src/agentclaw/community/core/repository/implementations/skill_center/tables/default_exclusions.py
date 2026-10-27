@@ -187,35 +187,35 @@ def replace_all(
     session.flush()
 
 
-def excluded_skill_ids(session, *, bot_id: str, owner_id: str, set_id: int) -> set[int]:
+def excluded_skill_ids(
+    session, *, bot_id: str, owner_id: str, set_id: int, locked: bool = False
+) -> set[int]:
     """The addressed Bot owner's Skill exclusions from a shared Default."""
+    query = session.query(DefaultSkillsetSkillExclusion.skill_id).filter(
+        DefaultSkillsetSkillExclusion.avernet_tenant == get_current_avernet_tenant(),
+        DefaultSkillsetSkillExclusion.user_id == owner_id,
+        DefaultSkillsetSkillExclusion.bot_id == bot_id,
+        DefaultSkillsetSkillExclusion.skill_set_id == set_id,
+    )
+
     return {
-        int(value[0])
-        for value in session.query(DefaultSkillsetSkillExclusion.skill_id)
-        .filter(
-            DefaultSkillsetSkillExclusion.avernet_tenant
-            == get_current_avernet_tenant(),
-            DefaultSkillsetSkillExclusion.user_id == owner_id,
-            DefaultSkillsetSkillExclusion.bot_id == bot_id,
-            DefaultSkillsetSkillExclusion.skill_set_id == set_id,
-        )
-        .all()
+        int(value[0]) for value in (query.with_for_update() if locked else query).all()
     }
 
 
-def excluded_mcp_codes(session, *, bot_id: str, owner_id: str, set_id: int) -> set[str]:
+def excluded_mcp_codes(
+    session, *, bot_id: str, owner_id: str, set_id: int, locked: bool = False
+) -> set[str]:
     """The addressed Bot owner's MCP exclusions from a shared Default."""
+    query = session.query(DefaultSkillsetMcpExclusion.server_code).filter(
+        DefaultSkillsetMcpExclusion.avernet_tenant == get_current_avernet_tenant(),
+        DefaultSkillsetMcpExclusion.user_id == owner_id,
+        DefaultSkillsetMcpExclusion.bot_id == bot_id,
+        DefaultSkillsetMcpExclusion.skill_set_id == set_id,
+    )
+
     return {
-        str(value[0])
-        for value in session.query(DefaultSkillsetMcpExclusion.server_code)
-        .filter(
-            DefaultSkillsetMcpExclusion.avernet_tenant
-            == get_current_avernet_tenant(),
-            DefaultSkillsetMcpExclusion.user_id == owner_id,
-            DefaultSkillsetMcpExclusion.bot_id == bot_id,
-            DefaultSkillsetMcpExclusion.skill_set_id == set_id,
-        )
-        .all()
+        str(value[0]) for value in (query.with_for_update() if locked else query).all()
     }
 
 
@@ -265,3 +265,13 @@ def lock_skill_exclusions(
         .all()
     )
     return {int(row.skill_set_id) for row in rows}
+
+
+def lock_bot_exclusions(session, *, bot_id: str, owner_id: str) -> None:
+    """Serialize protected Manifest reads before acquiring any Set row locks."""
+    for model in (DefaultSkillsetSkillExclusion, DefaultSkillsetMcpExclusion):
+        session.query(model).filter(
+            model.avernet_tenant == get_current_avernet_tenant(),
+            model.user_id == owner_id,
+            model.bot_id == bot_id,
+        ).order_by(model.id).with_for_update().all()

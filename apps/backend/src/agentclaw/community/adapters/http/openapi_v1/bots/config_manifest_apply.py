@@ -134,7 +134,10 @@ async def apply_bot_config_manifest(
 
     **A declared category is overwritten to equal the declaration.** Anything in
     that category's area that the manifest does not declare is **removed** —
-    including MCP servers enabled by hand through the console. A category the
+    including MCP servers enabled by hand through the console. With the v1
+    `apply_policy.<skills|mcp>.preserve_defaults: true` policy, effective Default
+    supply and provenance survive Replace; omitted Default MCP Bot overrides
+    are still cleared. A category the
     manifest does not mention is not touched at all, and deleting a manifest
     therefore deletes nothing.
 

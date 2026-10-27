@@ -11,9 +11,12 @@ that genuinely needs a coordinate imports ``CONFIG_SURFACE`` directly, and
 lazily: that table indexes six core packages, one of which reaches the DI
 container at import time.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from agentclaw.community.core.skill_center.manifest_defaults import ManifestDefaults
+from agentclaw.community.core.bot_config_manifest.capabilities import ManifestCategory
 from typing import Any, Optional
 
 from agentclaw.community.core.bot_config_manifest.apply.budget import (  # noqa: F401
@@ -31,7 +34,12 @@ from agentclaw.community.core.bot_config_manifest.capabilities import (
 class CapabilityApplyState:
     """The one cross-category fact Skills hands to the later MCP wave."""
 
+    policy_notes: list[str] = field(default_factory=list)
     final_skill_dependency_codes: frozenset[str] | None = None
+    default_snapshots: dict[ManifestCategory, ManifestDefaults] = field(
+        default_factory=dict
+    )
+
 
 @dataclass(frozen=True)
 class ApplyContext:
@@ -142,6 +150,7 @@ class ApplyContext:
     #: rather than fetching anonymously.
     source_session: Optional[SourceSession] = None
     capability_state: CapabilityApplyState = field(default_factory=CapabilityApplyState)
+    preserve_default_categories: frozenset[ManifestCategory] = frozenset()
 
 
 __all__ = ["ApplyContext", "CapabilityApplyState"]

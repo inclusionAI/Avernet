@@ -6,6 +6,10 @@ from abc import abstractmethod
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.skill_center.manifest_defaults import (
+        ManifestDefaults,
+        PackageWriteGuard,
+    )
     from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import (
         LegacySkillSetScope,
     )
@@ -54,6 +58,7 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
         those guards refuse direct control of.
         """
         ...
+
     @abstractmethod
     def sync_default_installations(
         self,
@@ -71,6 +76,7 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
         removed Default membership.
         """
         ...
+
     @abstractmethod
     def initialize_installations(
         self,
@@ -83,6 +89,7 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
     ) -> InstallationFlushPlan:
         """Insert missing active Set facts without deleting existing rows."""
         ...
+
     @abstractmethod
     def list_member_skill_ids(
         self,
@@ -94,12 +101,14 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
     ) -> frozenset[int]:
         """Read the Bot's Set reachability without materializing Installation."""
         ...
+
     @abstractmethod
     def resolve_legacy_set_scope(
         self, *, set_id: str
     ) -> LegacySkillSetScope | None:
         """Resolve an ordinary Set address; return ``None`` for System Default."""
         ...
+
     @abstractmethod
     def create_set(
         self,
@@ -188,6 +197,7 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
         propagate rather than being replaced with an empty set.
         """
         ...
+
     @abstractmethod
     def set_mcp_override(
         self,
@@ -229,6 +239,7 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
         Installation delta in one transaction; ``changed=False`` when the
         member is already excluded."""
         ...
+
     @abstractmethod
     def unexclude_default_skill(
         self, *, bot_id: str, owner_id: str, set_id: str, skill_id: str,
@@ -247,6 +258,7 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
         membership. A code in neither it nor the association rows is refused
         as ``changed=False`` without writing an exclusion row."""
         ...
+
     @abstractmethod
     def unexclude_default_mcp(
         self, *, bot_id: str, owner_id: str, set_id: str, server_code: str,
@@ -263,30 +275,49 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
     ) -> set[str]: ...
     @abstractmethod
     def claim_manifest_skill(
-        self, *, bot_id: str, owner_id: str, skill_id: str,
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        skill_id: str,
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
+        expected_defaults: ManifestDefaults | None = None,
     ) -> DesiredStateMutation:
         """Manifest-only conversion of one runtime name to a Direct Skill."""
         ...
+
     @abstractmethod
     def remove_manifest_skill(
-        self, *, bot_id: str, owner_id: str, skill_id: str,
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        skill_id: str,
         remove_inactive_memberships: bool,
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
+        expected_defaults: ManifestDefaults | None = None,
     ) -> DesiredStateMutation:
         """Manifest removal; Local assets may detach inactive memberships."""
         ...
+
     @abstractmethod
     def claim_manifest_mcp(
-        self, *, bot_id: str, owner_id: str, server_code: str,
-        config: dict | None, platform_default_codes: frozenset[str],
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        server_code: str,
+        config: dict | None,
+        platform_default_codes: frozenset[str],
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
+        expected_defaults: ManifestDefaults | None = None,
     ) -> DesiredStateMutation:
         """Manifest-only source conversion plus atomic override replacement."""
         ...
+
     @abstractmethod
     def manifest_direct_mcp_exists(
         self, *, bot_id: str, owner_id: str, server_code: str,
@@ -296,15 +327,22 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
     ) -> bool:
         """Whether exclusion plus Installation already forms a Direct claim."""
         ...
+
     @abstractmethod
     def remove_manifest_mcp(
-        self, *, bot_id: str, owner_id: str, server_code: str,
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        server_code: str,
         platform_default_codes: frozenset[str],
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
+        expected_defaults: ManifestDefaults | None = None,
     ) -> DesiredStateMutation:
         """Remove explicit MCP supply while preserving Default exclusions."""
         ...
+
     @abstractmethod
     def install_skill(
         self, *, bot_id: str, owner_id: str, skill_id: str,
@@ -318,6 +356,7 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
         control with ``RESOURCE_MANAGED_BY_SKILL_SET``.
         """
         ...
+
     @abstractmethod
     def uninstall_skill(
         self, *, bot_id: str, owner_id: str, skill_id: str,
@@ -338,6 +377,7 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
         Default exclusion/un-exclusion may change its effective state.
         """
         ...
+
     @abstractmethod
     def uninstall_mcp(
         self, *, bot_id: str, owner_id: str, server_code: str,
@@ -345,6 +385,30 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation: ...
+    @abstractmethod
+    def manifest_skill_package_guard(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        name: str,
+        expected_defaults: ManifestDefaults,
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> PackageWriteGuard: ...
+
+    @abstractmethod
+    def manifest_defaults(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        check_skill_sources: bool = True,
+        platform_default_codes: frozenset[str],
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> ManifestDefaults: ...
+
     @abstractmethod
     def list_installed_mcps(
         self, *, bot_id: str, owner_id: str, engine_type: str | None = None
@@ -361,6 +425,7 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
     ) -> set[str]:
         """Return candidate codes whose SkillSet ownership forbids direct writes."""
         ...
+
     @abstractmethod
     def set_skill_set_active(
         self,

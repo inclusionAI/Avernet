@@ -53,7 +53,9 @@ from agentclaw.community.core.repository.implementations.skill_center.skill_mcp_
     set_skill_mcp_dependency_codes,
     skill_projection_mcp_dependency_codes,
 )
-from agentclaw.community.core.repository.implementations.skill_center.legacy_skill_set_scope import LegacySkillSetScopeQueries
+from agentclaw.community.core.repository.implementations.skill_center.legacy_skill_set_scope import (
+    LegacySkillSetScopeQueries,
+)
 from agentclaw.community.core.repository.capability_desired_state_types import (
     CapabilityDesiredState,
     DesiredStateMutation,
@@ -61,7 +63,9 @@ from agentclaw.community.core.repository.capability_desired_state_types import (
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
-from agentclaw.community.core.models.skill_installation_source import SkillInstallationSourceKind
+from agentclaw.community.core.models.skill_installation_source import (
+    SkillInstallationSourceKind,
+)
 
 from agentclaw.community.core.skill_center.errors import (
     SkillRuntimeNameConflictError,
@@ -74,7 +78,13 @@ from agentclaw.community.core.skill_center.policies.capability_ownership import 
 )
 
 
+from agentclaw.community.core.repository.implementations.skill_center.manifest_default_queries import (
+    ManifestDefaultQueries,
+)
+
+
 class CapabilityDesiredStateRepository(
+    ManifestDefaultQueries,
     BotSkillSetInstallations,
     DefaultExclusionCommands,
     DirectInstallationCommands,

@@ -6,6 +6,13 @@ the raw request body and maps the public response.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+
+from agentclaw.community.core.skill_center.manifest_defaults import (
+    PackageWriteGuard,
+    ManifestPackageWriteCommittedError,
+)
+
 import asyncio
 import hashlib
 import uuid
@@ -18,7 +25,10 @@ from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
-from agentclaw.community.core.bot_management.addressing import BotAddressResolver, stable_resource_owner_id
+from agentclaw.community.core.bot_management.addressing import (
+    BotAddressResolver,
+    stable_resource_owner_id,
+)
 from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.core.repository.protocols.bot import BotRepository
@@ -187,7 +197,13 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
         return package
 
     async def upload_local_skill(
-        self, *, bot_id: str, owner_id: str, actor_id: str, package: bytes
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        package: bytes,
+        write_guard: PackageWriteGuard | None = None,
     ) -> dict[str, Any]:
         # The pre-lock read exists only to address the distributed lock.  Every
         # authoritative decision is deliberately repeated after acquisition.
@@ -203,6 +219,7 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
             raise LocalSkillEditLockUnavailableError() from exc
         except SkillsPoolEditPausedError as exc:
             raise LocalSkillEditPausedError() from exc
+        package_published = False
         try:
             bot = self._authorize(bot_id, owner_id, actor_id)
             if self._scope_for(bot, bot_id) != scope:
@@ -236,14 +253,16 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
                 is_teclaw=is_teclaw,
                 name=validated.name,
             )
-            runtime_result = await self._package_runtime.apply(
-                bot_id=bot_id,
-                owner_id=owner_id,
-                skill_name=validated.name,
-                layout=location.layout,
-                package=validated.canonical_zip,
-            )
+            with write_guard() if write_guard is not None else nullcontext():
+                runtime_result = await self._package_runtime.apply(
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    skill_name=validated.name,
+                    layout=location.layout,
+                    package=validated.canonical_zip,
+                )
             if runtime_result is not None:
+                package_published = True
                 if matches:
                     result = await self._commit_runtime_replace(
                         skill=matches[0],
@@ -265,6 +284,7 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
                     )
             elif matches:
                 result = await self._replace(
+                    write_guard=write_guard,
                     skill=matches[0],
                     bot=bot,
                     owner_id=owner_id,
@@ -277,6 +297,7 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
                 )
             else:
                 result = await self._create(
+                    write_guard=write_guard,
                     bot=bot,
                     owner_id=owner_id,
                     bot_id=bot_id,
@@ -295,7 +316,8 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
                 # Formal persistence has succeeded and the Bot edit lock is
                 # still held. A failed identity bind skips observation only.
                 incarnation_id = observer.current_incarnation_id(
-                    bot_id=bot_id, owner_id=owner_id,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
                     skill_id=int(result["skill"]["id"]),
                 )
                 if incarnation_id is None:
@@ -361,7 +383,9 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
                             incarnation_id=incarnation_id,
                             name=validated.name,
                             description=validated.description,
-                            creator_id=actor_id if result["operation"] == "created" else None,
+                            creator_id=actor_id
+                            if result["operation"] == "created"
+                            else None,
                         )
                     )
                     failure_record.add_done_callback(self._log_late_security_handoff)
@@ -393,6 +417,12 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
             if request_cancelled:
                 raise asyncio.CancelledError
             return result
+        except Exception as exc:
+            if write_guard is not None and package_published:
+                raise ManifestPackageWriteCommittedError(
+                    "Package published before upload failure"
+                ) from exc
+            raise
         finally:
             self._edit_guard.release(lease)
 
@@ -525,6 +555,7 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
     async def _create(
         self,
         *,
+        write_guard: PackageWriteGuard | None = None,
         bot: dict[str, Any],
         owner_id: str,
         bot_id: str,
@@ -545,11 +576,16 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
             name=name,
         )
         skill: dict[str, Any] | None = None
+        physical_started = False
+        physical_published = False
         try:
             # A previous failed first upload has no authoritative record, but
             # must not be mixed into this package on a retry.
-            await storage.prepare()
-            await storage.write(files)
+            with write_guard() if write_guard is not None else nullcontext():
+                physical_started = True
+                await storage.prepare()
+                await storage.write(files)
+                physical_published = True
             skill = self._skill_repo.create(
                 {
                     "name": name,
@@ -573,22 +609,28 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
         except Exception as exc:  # details remain internal; public mapper is fixed
             # Compensation must continue after a failed rollback step: a failed
             # association delete must never prevent package cleanup.
+            compensation_failed = False
             if skill is not None:
                 try:
                     self._skill_repo.delete(skill["id"])
                 except SkillAssetInUseError as conflict:
                     raise conflict from exc
                 except Exception:
-                    pass
+                    compensation_failed = True
             try:
-                await storage.cleanup()
+                if physical_started:
+                    with write_guard() if write_guard is not None else nullcontext():
+                        await storage.cleanup()
             except Exception:
-                pass
+                compensation_failed = True
+            if write_guard is not None and physical_published and compensation_failed:
+                raise ManifestPackageWriteCommittedError("Published package cleanup was blocked or failed") from exc
             raise LocalSkillStorageError() from exc
 
     async def _replace(
         self,
         *,
+        write_guard: PackageWriteGuard | None = None,
         skill: dict[str, Any],
         bot: dict[str, Any],
         owner_id: str,
@@ -679,8 +721,9 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
             # ``copy_to(..., replace=True)`` can fail after clearing or partly
             # writing the canonical directory.  Mark the mutation before the
             # call so every such failure restores the old authority.
-            canonical_published = True
-            await staged.copy_to(canonical, replace=True)
+            with write_guard() if write_guard is not None else nullcontext():
+                canonical_published = True
+                await staged.copy_to(canonical, replace=True)
             replaced = self._skill_repo.replace_bot_local_skill(
                 skill_id=str(skill["id"]),
                 owner_id=owner_id,
@@ -697,6 +740,7 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
         except Exception as exc:
             if switched or canonical_published:
                 await self._restore_replacement(
+                    write_guard=write_guard,
                     skill=skill,
                     old_metadata=old_metadata,
                     owner_id=owner_id,
@@ -722,6 +766,7 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
         except Exception as exc:
             try:
                 await self._restore_replacement(
+                    write_guard=write_guard,
                     skill=skill,
                     old_metadata=old_metadata,
                     owner_id=owner_id,
@@ -733,6 +778,8 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
                     switched=switched,
                     runtime_sync_attempted=runtime_sync_attempted,
                 )
+            except ManifestPackageWriteCommittedError:
+                raise
             except Exception as rollback_exc:
                 raise LocalSkillStorageError() from rollback_exc
             raise LocalSkillStorageError() from exc
@@ -751,6 +798,7 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
     async def _restore_replacement(
         self,
         *,
+        write_guard: PackageWriteGuard | None = None,
         skill: dict[str, Any],
         old_metadata: dict[str, Any],
         owner_id: str,
@@ -762,22 +810,31 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
         switched: bool,
         runtime_sync_attempted: bool,
     ) -> None:
-        if canonical_published:
-            try:
-                if backup is None:
+        try:
+            if canonical_published:
+                try:
+                    if backup is None:
+                        raise LocalSkillStorageError()
+                    with write_guard() if write_guard is not None else nullcontext():
+                        await backup.copy_to(canonical, replace=True)
+                except Exception as exc:
+                    raise LocalSkillStorageError() from exc
+            if switched:
+                restored = self._skill_repo.update(skill["id"], old_metadata)
+                if restored is None:
                     raise LocalSkillStorageError()
-                await backup.copy_to(canonical, replace=True)
-            except Exception as exc:
-                raise LocalSkillStorageError() from exc
-        if switched:
-            restored = self._skill_repo.update(skill["id"], old_metadata)
-            if restored is None:
-                raise LocalSkillStorageError()
-            if runtime_sync_attempted:
-                await self._sync_runtime(owner_id, bot_id)
-        if backup is not None:
-            await self._discard(backup)
-        await self._discard(staged)
+                if runtime_sync_attempted:
+                    await self._sync_runtime(owner_id, bot_id)
+            if backup is not None:
+                await self._discard(backup)
+            await self._discard(staged)
+
+        except Exception as exc:
+            if write_guard is not None and canonical_published:
+                raise ManifestPackageWriteCommittedError(
+                    "Published package restore was blocked or failed"
+                ) from exc
+            raise
 
     async def _discard(self, storage) -> None:
         try:

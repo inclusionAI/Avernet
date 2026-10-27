@@ -26,7 +26,13 @@ checker, so a structurally-satisfied Protocol is verified by nothing at all;
 abstract members make a dropped or renamed method fail at construction instead
 of resolving to an inherited ``...`` stub that silently returns ``None``.
 """
+
 from __future__ import annotations
+
+from agentclaw.community.core.skill_center.manifest_defaults import (
+    ManifestDefaults,
+    PackageWriteGuard,
+)
 
 from abc import abstractmethod
 from typing import Any, Iterable, Protocol, runtime_checkable
@@ -35,6 +41,27 @@ from typing import Any, Iterable, Protocol, runtime_checkable
 @runtime_checkable
 class ActivationPort(Protocol):
     """What the ``mcp`` and ``skills`` materialisers ask of activation."""
+
+    @abstractmethod
+    def manifest_skill_package_guard(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        name: str,
+        expected_defaults: ManifestDefaults,
+    ) -> PackageWriteGuard: ...
+
+    @abstractmethod
+    def manifest_defaults(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        check_skill_sources: bool = True,
+    ) -> ManifestDefaults: ...
 
     @abstractmethod
     def list_installed_mcps(self, *, bot_id: str, owner_id: str, actor_id: str) -> set[str]: ...
@@ -98,26 +125,52 @@ class ActivationPort(Protocol):
 
     @abstractmethod
     async def claim_manifest_skill(
-        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
+        self,
+        *,
+        skill_id: str,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
         apply_id: str | None,
+        expected_defaults: ManifestDefaults | None = None,
     ) -> Any: ...
 
     @abstractmethod
     async def remove_manifest_skill(
-        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
-        apply_id: str | None, remove_inactive_memberships: bool,
+        self,
+        *,
+        skill_id: str,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        apply_id: str | None,
+        remove_inactive_memberships: bool,
+        expected_defaults: ManifestDefaults | None = None,
     ) -> Any: ...
 
     @abstractmethod
     async def claim_manifest_mcp(
-        self, *, server_code: str, config: dict | None, bot_id: str,
-        owner_id: str, actor_id: str, apply_id: str | None,
+        self,
+        *,
+        server_code: str,
+        config: dict | None,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        apply_id: str | None,
+        expected_defaults: ManifestDefaults | None = None,
     ) -> Any: ...
 
     @abstractmethod
     async def remove_manifest_mcp(
-        self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str,
+        self,
+        *,
+        server_code: str,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
         apply_id: str | None,
+        expected_defaults: ManifestDefaults | None = None,
     ) -> Any: ...
 
 

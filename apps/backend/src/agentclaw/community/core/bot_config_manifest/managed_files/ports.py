@@ -25,7 +25,15 @@ Every method is ``async`` because the port protocols are; the store itself is
 synchronous (an object-store client), so the work runs in a thread, the way
 the promotion step drives its object writes.
 """
+
 from __future__ import annotations
+
+from contextlib import nullcontext
+
+from agentclaw.community.core.skill_center.manifest_defaults import (
+    PackageWriteGuard,
+    ManifestPackageWriteCommittedError,
+)
 
 import asyncio
 import logging
@@ -246,13 +254,25 @@ class PlatformSkillPackageUpload(_StorePort, SkillPackageUploadPort):
         self._security_hook = security_hook
 
     async def upload_local_skill(
-        self, *, bot_id: str, owner_id: str, actor_id: str, package: bytes
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        package: bytes,
+        write_guard: PackageWriteGuard | None = None,
     ) -> dict[str, Any]:
         # The same gate the real service runs: the package's own SKILL.md
         # names the skill, and an invalid zip is refused here, not stored.
         validated = self._validator.validate_zip(package)
         return await asyncio.to_thread(
-            self._install, bot_id, owner_id, actor_id, validated.name, validated
+            self._install,
+            bot_id,
+            owner_id,
+            actor_id,
+            validated.name,
+            validated,
+            write_guard,
         )
 
     async def delete_local_skill(
@@ -292,56 +312,79 @@ class PlatformSkillPackageUpload(_StorePort, SkillPackageUploadPort):
                 bot_id, owner_id, skill_id, actor_id,
             )
 
-    def _install(self, bot_id: str, owner_id: str, actor_id: str, name: str, validated) -> dict:
-        scope = self._scope(OWNER_ENTITY_TYPE, owner_id, bot_id)
-        prefix = _skill_prefix(name)
-        wanted: set[str] = set()
-        for relative, content in validated.files:
-            rel_path = f"{prefix}/{relative}"
-            wanted.add(rel_path)
-            self._store.put(
-                scope,
-                category=CATEGORY_SKILLS,
-                name=name,
-                rel_path=rel_path,
-                content=content,
-            )
-        # New files first, stale ones after: the package is never missing a
-        # member between the two, and a replaced file was overwritten in place.
-        for row in self._store.list(scope, category=CATEGORY_SKILLS):
-            if _under(row.rel_path, prefix) and row.rel_path not in wanted:
-                self._store.delete(scope, rel_path=row.rel_path)
+    def _install(
+        self,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        name: str,
+        validated,
+        write_guard: PackageWriteGuard | None = None,
+    ) -> dict:
+        published = False
+        try:
+            scope = self._scope(OWNER_ENTITY_TYPE, owner_id, bot_id)
+            prefix = _skill_prefix(name)
+            with write_guard() if write_guard is not None else nullcontext():
+                wanted: set[str] = set()
+                for relative, content in validated.files:
+                    rel_path = f"{prefix}/{relative}"
+                    wanted.add(rel_path)
+                    self._store.put(
+                        scope,
+                        category=CATEGORY_SKILLS,
+                        name=name,
+                        rel_path=rel_path,
+                        content=content,
+                    )
+                    published = True
+                # New files first, stale ones after: the package is never missing a
+                # member between the two, and a replaced file was overwritten in place.
+                for row in self._store.list(scope, category=CATEGORY_SKILLS):
+                    if _under(row.rel_path, prefix) and row.rel_path not in wanted:
+                        self._store.delete(scope, rel_path=row.rel_path)
+                        published = True
 
-        locator = f"local://{SKILLS_LOCAL_DIR}/{name}"
-        existing = _own_row(
-            self._skills.list_bot_local_by_name(bot_id=bot_id, name=name), owner_id
-        )
-        if existing is None:
-            skill = self._skills.create(
-                {
-                    "name": name,
-                    "description": validated.description,
-                    "git_path": locator,
-                    "category": "general",
-                    "tags": "[]",
-                    "is_public": False,
-                    "user_id": owner_id,
-                    "bolt_id": bot_id,
-                    "source_type": "upload",
-                }
+            locator = f"local://{SKILLS_LOCAL_DIR}/{name}"
+            existing = _own_row(
+                self._skills.list_bot_local_by_name(bot_id=bot_id, name=name), owner_id
             )
-            operation = "created"
-        else:
-            skill = self._skills.update(
-                str(existing["id"]),
-                {"description": validated.description, "git_path": locator},
-            ) or existing
-            operation = "replaced"
-        return {
-            "operation": operation,
-            "skill": {**skill, "active": False},
-            "actor_id": actor_id,
-        }
+            if existing is None:
+                skill = self._skills.create(
+                    {
+                        "name": name,
+                        "description": validated.description,
+                        "git_path": locator,
+                        "category": "general",
+                        "tags": "[]",
+                        "is_public": False,
+                        "user_id": owner_id,
+                        "bolt_id": bot_id,
+                        "source_type": "upload",
+                    }
+                )
+                operation = "created"
+            else:
+                skill = (
+                    self._skills.update(
+                        str(existing["id"]),
+                        {"description": validated.description, "git_path": locator},
+                    )
+                    or existing
+                )
+                operation = "replaced"
+            return {
+                "operation": operation,
+                "skill": {**skill, "active": False},
+                "actor_id": actor_id,
+            }
+        except Exception as exc:
+            if write_guard is not None and published:
+                raise ManifestPackageWriteCommittedError(
+                    "Managed package changed before upload failure"
+                ) from exc
+            raise
+
 
 def _skill_prefix(name: str) -> str:
     return f"{WORKSPACE_NS}/{SKILLS_LOCAL_DIR}/{name}"

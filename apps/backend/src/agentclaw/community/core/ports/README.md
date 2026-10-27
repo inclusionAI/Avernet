@@ -106,5 +106,6 @@ provides:
 consumes: []
 consumed_by:
   - "core/bot_config_manifest (apply) — the `mcp` and `skills` materialisers write through these ports; the four implementations are apply/activation_delegates.py, apply/skill_package_upload.py and managed_files/ports.py"
-internal_dependencies: []
+internal_dependencies:
+  - agentclaw.community.core.skill_center.manifest_defaults
 ```

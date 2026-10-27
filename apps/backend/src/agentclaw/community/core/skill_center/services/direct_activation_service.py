@@ -9,6 +9,11 @@ family, the MCP commands the SkillSet control-plane family.
 
 from __future__ import annotations
 
+from agentclaw.community.core.skill_center.manifest_defaults import (
+    ManifestDefaults,
+    PackageWriteGuard,
+)
+
 from typing import Any
 
 from injector import inject
@@ -62,7 +67,9 @@ from agentclaw.community.core.skill_center.services._mutation_flow import (
     skill_release_scope,
 )
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
-from agentclaw.community.core.skill_center.direct_activation_service_protocol import DirectActivationServiceProtocol
+from agentclaw.community.core.skill_center.direct_activation_service_protocol import (
+    DirectActivationServiceProtocol,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.skill_center.skill_query_service_protocol import (
     SkillQueryServiceProtocol,
@@ -139,6 +146,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
         actor_id: str,
         apply_id: str | None,
         project: bool = True,
+        expected_defaults: ManifestDefaults | None = None,
     ) -> dict[str, Any]:
         """Manifest-only source conversion; ordinary activation stays guarded."""
         skill, bot = self._resolve_skill(
@@ -155,6 +163,11 @@ class DirectActivationService(DirectActivationServiceProtocol):
                 skill_id=str(skill["id"]),
                 engine_type=bot_engine_type(bot),
                 default_engine_types=bot_default_engine_types(bot),
+                **(
+                    {"expected_defaults": expected_defaults}
+                    if expected_defaults is not None
+                    else {}
+                ),
             )
             return mutation_result
 
@@ -168,11 +181,16 @@ class DirectActivationService(DirectActivationServiceProtocol):
                 scope_from_result=skill_claim_scope,
             )
             self._log_manifest_source_transitions(
-                apply_id=apply_id, bot_id=bot_id, capability_type="skill",
-                identity=skill_id, mutation=mutation_result,
+                apply_id=apply_id,
+                bot_id=bot_id,
+                capability_type="skill",
+                identity=skill_id,
+                mutation=mutation_result,
             )
             self._audit(
-                bot_id=bot_id, owner_id=str(bot["owner_id"]), actor_id=actor_id,
+                bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
+                actor_id=actor_id,
                 action="skill_manifest_direct_claim",
             )
         except Exception:
@@ -193,6 +211,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
         apply_id: str | None,
         remove_inactive_memberships: bool,
         project: bool = True,
+        expected_defaults: ManifestDefaults | None = None,
     ) -> dict[str, Any]:
         skill, bot = self._resolve_skill(
             skill_id=skill_id, bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
@@ -209,6 +228,11 @@ class DirectActivationService(DirectActivationServiceProtocol):
                 remove_inactive_memberships=remove_inactive_memberships,
                 engine_type=bot_engine_type(bot),
                 default_engine_types=bot_default_engine_types(bot),
+                **(
+                    {"expected_defaults": expected_defaults}
+                    if expected_defaults is not None
+                    else {}
+                ),
             )
             return mutation_result
 
@@ -222,11 +246,16 @@ class DirectActivationService(DirectActivationServiceProtocol):
                 scope_from_result=skill_release_scope,
             )
             self._log_manifest_source_transitions(
-                apply_id=apply_id, bot_id=bot_id, capability_type="skill",
-                identity=skill_id, mutation=mutation_result,
+                apply_id=apply_id,
+                bot_id=bot_id,
+                capability_type="skill",
+                identity=skill_id,
+                mutation=mutation_result,
             )
             self._audit(
-                bot_id=bot_id, owner_id=str(bot["owner_id"]), actor_id=actor_id,
+                bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
+                actor_id=actor_id,
                 action="skill_manifest_remove",
             )
         except Exception:
@@ -399,6 +428,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
         actor_id: str,
         apply_id: str | None,
         project: bool = True,
+        expected_defaults: ManifestDefaults | None = None,
     ) -> dict[str, Any]:
         """Manifest-only conversion to Direct plus complete Bot override."""
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
@@ -417,6 +447,11 @@ class DirectActivationService(DirectActivationServiceProtocol):
                 ),
                 engine_type=bot_engine_type(bot),
                 default_engine_types=bot_default_engine_types(bot),
+                **(
+                    {"expected_defaults": expected_defaults}
+                    if expected_defaults is not None
+                    else {}
+                ),
             )
             return mutation_result
 
@@ -430,11 +465,16 @@ class DirectActivationService(DirectActivationServiceProtocol):
                 scope_from_result=mcp_claim_scope,
             )
             self._log_manifest_source_transitions(
-                apply_id=apply_id, bot_id=bot_id, capability_type="mcp",
-                identity=server_code, mutation=mutation_result,
+                apply_id=apply_id,
+                bot_id=bot_id,
+                capability_type="mcp",
+                identity=server_code,
+                mutation=mutation_result,
             )
             self._audit(
-                bot_id=bot_id, owner_id=str(bot["owner_id"]), actor_id=actor_id,
+                bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
+                actor_id=actor_id,
                 action="mcp_manifest_direct_claim",
             )
         except Exception:
@@ -454,6 +494,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
         actor_id: str,
         apply_id: str | None,
         project: bool = True,
+        expected_defaults: ManifestDefaults | None = None,
     ) -> dict[str, Any]:
         """Manifest full-replace removal without restoring inherited supply."""
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
@@ -470,6 +511,11 @@ class DirectActivationService(DirectActivationServiceProtocol):
                 ),
                 engine_type=bot_engine_type(bot),
                 default_engine_types=bot_default_engine_types(bot),
+                **(
+                    {"expected_defaults": expected_defaults}
+                    if expected_defaults is not None
+                    else {}
+                ),
             )
             return mutation_result
 
@@ -483,11 +529,16 @@ class DirectActivationService(DirectActivationServiceProtocol):
                 scope_from_result=mcp_release_scope,
             )
             self._log_manifest_source_transitions(
-                apply_id=apply_id, bot_id=bot_id, capability_type="mcp",
-                identity=server_code, mutation=mutation_result,
+                apply_id=apply_id,
+                bot_id=bot_id,
+                capability_type="mcp",
+                identity=server_code,
+                mutation=mutation_result,
             )
             self._audit(
-                bot_id=bot_id, owner_id=str(bot["owner_id"]), actor_id=actor_id,
+                bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
+                actor_id=actor_id,
                 action="mcp_manifest_remove",
             )
         except Exception:
@@ -526,6 +577,45 @@ class DirectActivationService(DirectActivationServiceProtocol):
             action="mcp_direct_deactivate",
         )
         return result
+
+    def manifest_skill_package_guard(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        name: str,
+        expected_defaults: ManifestDefaults,
+    ) -> PackageWriteGuard:
+        bot = self._bot(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
+        return self._repository.manifest_skill_package_guard(
+            bot_id=bot_id,
+            owner_id=stable_resource_owner_id(bot),
+            name=name,
+            expected_defaults=expected_defaults,
+            engine_type=bot_engine_type(bot),
+            default_engine_types=bot_default_engine_types(bot),
+        )
+
+    def manifest_defaults(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        check_skill_sources: bool = True,
+    ) -> ManifestDefaults:
+        bot = self._bot(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
+        return self._repository.manifest_defaults(
+            check_skill_sources=check_skill_sources,
+            bot_id=bot_id,
+            owner_id=stable_resource_owner_id(bot),
+            platform_default_codes=self._platform_default_mcp_policy.server_codes_for(
+                bot
+            ),
+            engine_type=bot_engine_type(bot),
+            default_engine_types=bot_default_engine_types(bot),
+        )
 
     def list_installed_mcps(
         self, *, bot_id: str, owner_id: str, actor_id: str

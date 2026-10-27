@@ -52,6 +52,7 @@ def skill_projection_mcp_dependency_codes(
     skill: Skill | None,
     *,
     allow_unresolvable_center: bool = False,
+    locked: bool = True,
 ) -> frozenset[str]:
     """Return the dependency codes the runtime reader resolves for ``skill``.
 
@@ -76,7 +77,7 @@ def skill_projection_mcp_dependency_codes(
         except (TypeError, ValueError):
             return frozenset()
 
-    version = (
+    version_query = (
         session.query(SkillVersion)
         .filter(
             SkillVersion.avernet_tenant == skill.avernet_tenant,
@@ -85,9 +86,8 @@ def skill_projection_mcp_dependency_codes(
             SkillVersion.status == "PUBLISHED",
         )
         .order_by(SkillVersion.version_ordinal.desc(), SkillVersion.id.desc())
-        .with_for_update()
-        .first()
     )
+    version = (version_query.with_for_update() if locked else version_query).first()
     if version is None or not version.metadata_json:
         if allow_unresolvable_center:
             return cleanup_fallback()
