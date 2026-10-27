@@ -42,6 +42,7 @@ def _make_service(
     device_sync_dispatcher=None,
     bcsfuse_config=None,
     catalog_metadata_service=None,
+    risk_repository=None,
 ):
     resolver = device_context_resolver or MagicMock()
     return BotPublicService(
@@ -58,6 +59,7 @@ def _make_service(
         device_sync_dispatcher=device_sync_dispatcher or MagicMock(),
         bcsfuse_config=bcsfuse_config or MagicMock(base_url=""),
         catalog_metadata_service=catalog_metadata_service or MagicMock(),
+        risk_repository=risk_repository,
     )
 
 def _make_operator(staff_id="op_user", nick_name="Operator") -> OperatorContext:
@@ -2736,3 +2738,50 @@ def test_risk_bcs_submission_never_applies_inline_when_handoff_fails():
                 approval_biz_id="risk-123", on_approval_started=failed_handoff,
             )
     callback.assert_not_called()
+
+
+@pytest.mark.parametrize("scope", ["legacy", "user", "agent"])
+def test_withdrawal_invalidates_only_observed_risk_record_before_publish(scope):
+    from types import SimpleNamespace
+
+    repository = MagicMock()
+    repository.get_current.return_value = SimpleNamespace(risk_check_id="risk-a", row_version=4)
+    repository.invalidate_if_current.return_value = True
+    bots = MagicMock()
+    bots.get_by_id_and_owner.return_value = _make_bot(bot_id="b1", owner_id="u1")
+    service = _make_service(bot_repository=bots, risk_repository=repository)
+    if scope == "legacy":
+        with patch.object(service, "_publish_directly", return_value={}):
+            service.public_bot("b1", "u1", "0", "caller", "0", _make_operator())
+    else:
+        service.public_bcs_bot("b1:u1", "u1", scope, _make_operator(), visibility="private")
+    repository.get_current.assert_called_once_with(env="dev", bot_pk=42, public_scope=scope)
+    repository.invalidate_if_current.assert_called_once_with(env="dev", risk_check_id="risk-a", row_version=4)
+
+
+def test_withdrawal_database_failure_stops_external_publish():
+    repository = MagicMock()
+    repository.get_current.side_effect = RuntimeError("database unavailable")
+    bots = MagicMock()
+    bots.get_by_id_and_owner.return_value = _make_bot(bot_id="b1", owner_id="u1")
+    bcn = MagicMock()
+    service = _make_service(bot_repository=bots, bcn_service=bcn, risk_repository=repository)
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        service.public_bcs_bot("b1:u1", "u1", "user", _make_operator(), visibility="private")
+    bcn.patch_attributes.assert_not_called()
+
+
+def test_withdrawal_does_not_invalidate_newer_replacement_after_race():
+    from types import SimpleNamespace
+
+    repository = MagicMock()
+    repository.get_current.side_effect = [
+        SimpleNamespace(risk_check_id="risk-a", row_version=4),
+        SimpleNamespace(risk_check_id="risk-b", row_version=1),
+    ]
+    repository.invalidate_if_current.return_value = False
+    bots = MagicMock()
+    bots.get_by_id_and_owner.return_value = _make_bot(bot_id="b1", owner_id="u1")
+    service = _make_service(bot_repository=bots, risk_repository=repository)
+    service.public_bcs_bot("b1:u1", "u1", "user", _make_operator(), visibility="private")
+    repository.invalidate_if_current.assert_called_once_with(env="dev", risk_check_id="risk-a", row_version=4)

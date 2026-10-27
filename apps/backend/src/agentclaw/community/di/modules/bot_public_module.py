@@ -32,6 +32,7 @@ from agentclaw.community.core.bot_management.services.bcn_service import BcnServ
 from agentclaw.community.core.repository.protocols.bot import BotFriendRepositoryProtocol
 from agentclaw.community.core.bot_public.services.bot_discover_service import BotDiscoverService
 from agentclaw.community.core.bot_public.services.bot_public_service import BotPublicService
+from agentclaw.community.core.bot_public_risk.repository import BotPublicRiskRepository
 from agentclaw.community.core.bot_public.services.bot_catalog_metadata_service import (
     BcsBotCatalogMetadataService,
 )
@@ -131,6 +132,7 @@ class BotPublicModule(Module):
         device_sync_dispatcher: DeviceSyncDispatcher,
         bcsfuse_config: cfg.BcsFuseConfig,
         catalog_metadata_service: BotCatalogMetadataServiceProtocol,
+        risk_repository: BotPublicRiskRepository,
     ) -> BotPublicService:
         # Explicit provider (not ``binder.bind``): BotPublicService types
         # ``skill_set_service_factory`` under TYPE_CHECKING to avoid a
@@ -150,6 +152,7 @@ class BotPublicModule(Module):
             device_sync_dispatcher=device_sync_dispatcher,
             bcsfuse_config=bcsfuse_config,
             catalog_metadata_service=catalog_metadata_service,
+            risk_repository=risk_repository,
         )
 
     @singleton

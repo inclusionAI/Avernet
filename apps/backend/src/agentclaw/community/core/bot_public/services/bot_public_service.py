@@ -60,6 +60,8 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
 )
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.core.bot_public.bot_public_service_protocol import BotPublicServiceProtocol
+from agentclaw.community.core.bot_public_risk.repository import BotPublicRiskRepository
+from agentclaw.community.utils.env_utils import get_current_env
 
 logger = get_logger()
 
@@ -152,6 +154,7 @@ class BotPublicService(BotPublicServiceProtocol):
         device_sync_dispatcher: "DeviceSyncDispatcher",
         bcsfuse_config: "BcsFuseConfig",
         catalog_metadata_service: BotCatalogMetadataServiceProtocol,
+        risk_repository: Optional[BotPublicRiskRepository] = None,
     ) -> None:
         self._bot_friend_repo = bot_friend_repo
         self._bot_repository = bot_repository
@@ -171,6 +174,7 @@ class BotPublicService(BotPublicServiceProtocol):
         self._device_sync_dispatcher = device_sync_dispatcher
         self._bcsfuse_config = bcsfuse_config
         self._catalog_metadata_service = catalog_metadata_service
+        self._risk_repository = risk_repository
         self._sync_lock = threading.Lock()
         self._syncing_bots: set[str] = set()
         self._pending_syncs: dict[str, tuple[str, str]] = {}  # sync_key -> (access_mode, public)
@@ -495,6 +499,7 @@ class BotPublicService(BotPublicServiceProtocol):
         access_mode = _resolve_access_mode(public, friend_approval)
 
         if public == "0":
+            self._invalidate_observed_risk(bot, "legacy")
             return self._publish_directly(
                 bot=bot, ext=ext, bot_id=bot_id, owner_id=owner_id,
                 operator_id=operator_id, public="0",
@@ -580,6 +585,11 @@ class BotPublicService(BotPublicServiceProtocol):
         # visibility=private 直连: 不走审批, 直接 PATCH BCS 属性 (值 "private");
         # 更新的字段随 public_scope 联动 (agent→visibility, user→user_visibility)。
         if visibility == "private":
+            if self._risk_repository is not None:
+                backend_bot_id = bot_uid.split(":")[0]
+                bot = self._bot_repository.get_by_id_and_owner(backend_bot_id, owner_id)
+                if bot:
+                    self._invalidate_observed_risk(bot, public_scope)
             return self._apply_visibility_direct(
                 bot_uid=bot_uid, public_scope=public_scope
             )
@@ -699,6 +709,32 @@ class BotPublicService(BotPublicServiceProtocol):
                 "error_msg": approval_result.get("error_msg"),
             }
         return approval_result
+
+    def _invalidate_observed_risk(self, bot: Dict[str, Any], public_scope: str) -> None:
+        """Stop the observed risk request before withdrawing its publication.
+
+        Compare identity and version to avoid withdrawing a replacement. If a
+        worker changes the same record concurrently, reread and retry; database
+        errors and repeated contention propagate instead of silently proceeding.
+        """
+        repository = self._risk_repository
+        if repository is None:
+            return
+        env = get_current_env()
+        bot_pk = bot["id"]
+        row = repository.get_current(env=env, bot_pk=bot_pk, public_scope=public_scope)
+        if row is None:
+            return
+        observed_id = row.risk_check_id
+        for _ in range(3):
+            if repository.invalidate_if_current(
+                env=env, risk_check_id=observed_id, row_version=row.row_version
+            ):
+                return
+            row = repository.get_current(env=env, bot_pk=bot_pk, public_scope=public_scope)
+            if row is None or row.risk_check_id != observed_id:
+                return
+        raise BotPublicServiceError("could not invalidate current public risk request")
 
     def _publish_callbacks(self) -> BotPublishCallbacks:
         """Bind the publish-approval plugin's callback bag to this
