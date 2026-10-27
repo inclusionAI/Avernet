@@ -28,7 +28,9 @@ export function createMonitoringService(
     },
     async reportDiagnosis(input, key) {
       const event = parseDiagnosis(input, key);
-      const inserted = await store.insertDiagnosis({ wire: event, target: await resolver.resolveReport(event, event.engine) }, now());
+      // The path is an ingress routing hint; retain original diagnosis/credentials and the existing schema.
+      const { sessionNasPath: _path, ...diagnosis } = event;
+      const inserted = await store.insertDiagnosis({ wire: diagnosis, target: await resolver.resolveReport(event, event.engine) }, now());
       await recovery?.trigger(event);
       return { accepted: true, stored: true, eventId: event.eventId, botId: event.botId, entityId: event.entityId, env: event.env, duplicate: !inserted };
     },

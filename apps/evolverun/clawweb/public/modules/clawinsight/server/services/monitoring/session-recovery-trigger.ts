@@ -4,7 +4,7 @@ import type { SessionRecoveryApi } from "../repair/session-recovery/contracts.js
 import { SessionRecoveryError } from "../repair/session-recovery/errors.js";
 import { parseRequest } from "../repair/session-recovery/validation.js";
 import {
-  DIAGNOSIS_V3_VERSION, DIAGNOSIS_V4_VERSION, MonitoringError, type DiagnosisEvent, type MonitoringRecoveryConfigStore, type MonitoringRecoveryTrigger, type MonitoringTarget,
+  DIAGNOSIS_V3_VERSION, DIAGNOSIS_V4_VERSION, MonitoringError, type DiagnosisEvent, type MonitoringRecoveryConfigStore, type MonitoringRecoveryTrigger, type MonitoringTarget, type RuntimeIdentity,
 } from "./contracts.js";
 import { ACTION_POLICY_VERSION, recoverySkipReason } from "./action-policy.js";
 import { target, targetKey } from "./target.js";
@@ -34,6 +34,24 @@ function parseAllowlist(value: unknown): MonitoringTarget[] {
   });
 }
 
+function recoveryRuntimeIdentity(event: DiagnosisEvent, identity: RuntimeIdentity): RuntimeIdentity {
+  if (identity.BOT_TYPE !== "service" || identity.STAGE !== "online" || !event.sessionNasPath) return identity;
+  const parts = event.sessionNasPath.split("/");
+  const storage = [event.env, identity.ENTITY_TYPE, identity.ENTITY_ID, "openclaw", event.botId].join("_");
+  const agent = /^agent:([A-Za-z0-9_-]+):/.exec(event.sessionKey ?? "")?.[1];
+  const namespace = parts.at(-6) ?? "", filename = parts.at(-1) ?? "";
+  const deviceUuid = namespace.startsWith(storage + "_") ? namespace.slice(storage.length + 1) : "";
+  // Parse only this Bot's exact session namespace. Recovery still validates the device against its binding.
+  if (!identity.ENTITY_TYPE || !identity.ENTITY_ID || parts.at(-7) !== event.env
+    || !/^DEVICE-[a-f0-9]{32}$/.test(deviceUuid) || parts.at(-5) !== ".openclaw" || parts.at(-4) !== "agents"
+    || !agent || parts.at(-3) !== agent || parts.at(-2) !== "sessions" || !/^[A-Za-z0-9_-]+\.jsonl$/.test(filename)
+    || event.sessionId && filename !== event.sessionId + ".jsonl") return identity;
+  if (identity.CLIENT_ID === deviceUuid) return identity;
+  console.warn("[monitoring] recovery instance corrected", { eventId: event.eventId, botId: event.botId,
+    previousClientId: /^DEVICE-[a-f0-9]{32}$/.test(identity.CLIENT_ID ?? "") ? identity.CLIENT_ID : "invalid", deviceUuid });
+  return { ...identity, CLIENT_ID: deviceUuid };
+}
+
 /** Caller-side mapping only; semantic/device validation remains owned by recovery. */
 export function buildRecoveryTarget(event: DiagnosisEvent) {
   const original = { bot_id: event.botId, entity_id: event.entityId, env: event.env, engine: event.engine };
@@ -41,7 +59,7 @@ export function buildRecoveryTarget(event: DiagnosisEvent) {
   const identity = event.runtimeIdentity;
   if (!identity || !identity.BOT_ID || !identity.OWNER_ID || identity.BOT_ID !== event.botId) return null;
   return { ...original, bot_id: identity.BOT_ID, entity_id: identity.OWNER_ID,
-    runtime_identity: identity };
+    runtime_identity: recoveryRuntimeIdentity(event, identity) };
 }
 
 export function createMonitoringRecoveryTrigger(input: {
