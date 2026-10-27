@@ -23,6 +23,7 @@ def catalog_client():
     repository = MagicMock()
     templates = MagicMock()
     spaces = MagicMock()
+    spaces.bot_space.return_value = None
     service.list_bots_by_conditions.return_value = {"total": 0, "items": []}
     repository.list_by_conditions.return_value = (0, [])
     templates.list_template_configs_by_bot_ids.return_value = {}
@@ -58,10 +59,10 @@ def test_owned_stage_listing_pushes_all_filters_before_pagination(catalog_client
     catalog_client.service.list_bots_by_conditions.assert_not_called()
 
 
-def test_omitted_stage_keeps_existing_service_path(catalog_client):
+def test_omitted_stage_defaults_to_draft(catalog_client):
     assert catalog_client.client.get("/openapi/v1/bots").status_code == 200
-    catalog_client.repository.list_by_conditions.assert_not_called()
-    assert "stage" not in catalog_client.service.list_bots_by_conditions.call_args.kwargs
+    assert catalog_client.repository.list_by_conditions.call_args.kwargs["stage"] == "draft"
+    catalog_client.service.list_bots_by_conditions.assert_not_called()
 
 
 def test_invalid_stage_never_queries_repository(catalog_client):

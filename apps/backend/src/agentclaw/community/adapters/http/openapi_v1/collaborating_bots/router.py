@@ -109,7 +109,7 @@ async def list_collaborating_bots(
     page_params: PageParamsDep,
     user_id: UserIdDep,
     caller: ActingCallerDep,
-    stage: Annotated[RuntimeStage | None, Query(description="Filter service Bots by runtime stage before pagination. Other Bot kinds are unchanged; omission preserves the unfiltered listing.")] = None,
+    stage: Annotated[RuntimeStage, Query(description="Filter service Bots by runtime stage before pagination; defaults to draft. Other Bot kinds are unchanged.")] = RuntimeStage.DRAFT,
     bot_repo: BotRepository = Injected(BotRepository),
     collaborators: CollaboratorServiceProtocol = Injected(
         CollaboratorServiceProtocol
@@ -143,7 +143,7 @@ async def list_collaborating_bots(
         entity_pairs=list(granted_pairs) if granted_pairs is not None else None,
         page=page_params.page,
         page_size=page_params.page_size,
-        **({"stage": stage.value} if stage is not None else {}),
+        stage=stage.value,
     )
     template_configs, row_spaces = await asyncio.gather(
         asyncio.to_thread(_resolve_template_configs, rows, template_port),

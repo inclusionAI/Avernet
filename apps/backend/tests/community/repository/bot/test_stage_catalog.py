@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
 from agentclaw.community.core.repository.implementations.bot.bot import BotRepository
@@ -17,7 +18,7 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 @pytest.fixture
 def catalog():
-    engine = create_engine("sqlite://")
+    engine = create_engine("sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False})
     for model in (BotModel, BotPublishModel, EntityDeviceBinding):
         model.__table__.create(engine)
     factory = sessionmaker(bind=engine)

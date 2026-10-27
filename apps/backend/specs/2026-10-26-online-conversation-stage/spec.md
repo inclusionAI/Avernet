@@ -3,18 +3,21 @@
 ## Requirement
 
 The conversation workspace needs online service Bots without discarding personal
-Bots. Operator/management views must retain their existing unfiltered default.
+Bots. The conversation catalogs default to draft for service Bots; the separate
+management inventory (`/bots/all`) retains its existing behavior.
 Friend chat must not reject an explicit online target or address a draft runtime
 through another part of the conversation chain.
 
 ## Catalog contract
 
 `GET /openapi/v1/bots` and `GET /openapi/v1/bots/collaborations` accept an optional
-`stage=draft|verify|online`. Omission preserves existing filtering and pagination.
+`stage=draft|verify|online`. Omission is equivalent to `stage=draft`, as confirmed
+on 2026-10-27. This changes service-Bot inclusion for legacy requests without a
+stage: service Bots without a draft binding are no longer returned by default.
 An unknown value is a validation error. Stage only filters `bot_type=service`;
 personal/other kinds retain their existing inclusion rules for any valid stage.
 
-Stage availability uses the same publication-selection function as runtime
+Stage availability follows the same publication-selection rules as runtime
 addressing, scoped by the authorized Bot's **primary key** and current deployment
 environment. It is not a match against the latest publication's status:
 
@@ -30,6 +33,12 @@ offset and limit. Existing owner, tenant, environment, soft-delete and applicati
 grant restrictions are retained. Collaborators are still selected by stable Bot
 primary key; owners are not added to the collaboration collection.
 
+Filtering is a correlated database predicate before count and pagination; it
+does not materialize all candidate Bot rows, their IDs or publication histories
+in Python. Latest-record selection remains scoped to the exact source PK/env.
+SQLite and MySQL/OceanBase JSON projections guard invalid JSON, require integer
+or decimal-string binding IDs, and reject invalid values before numeric casting.
+
 `POST /openapi/v1/bots/metadata/queries` keeps its exact pair lookup and does not
 filter draft records. Its display-safe response adds:
 
@@ -42,6 +51,13 @@ friendship, collaboration permission or a promise that connection will succeed.
 No binding IDs, publish ext, configuration snapshots or credentials are added to
 the metadata response. Clients must check service availability separately from
 the recommended stage; an unavailable service is not redirected to draft.
+
+Metadata enrichment projects at most one latest successful publication per
+service Bot on the requested page, reading only the ID, source PK, version and
+binding-validity scalars. A malformed publication keeps its Bot's base metadata
+but reports `online_available=false`, `live_version=null`; it does not fail the
+batch or fall back to an older successful publication. Diagnostics contain only
+Bot/publication primary keys, never raw publication configuration.
 
 ## Friend runtime contract
 
@@ -81,7 +97,10 @@ verbatim as session context for engines that require it.
 
 No database migration, new deployment flag, frontend change, `/bots/all` change,
 friend management privilege or application admission expansion is included.
-Existing clients may omit stage. Legacy service friend draft requests already
+Existing clients may omit stage, but the two catalogs now filter service Bots
+by draft when it is omitted; consumers needing online must send it explicitly.
+Personal Bots and internal repository queries without a stage are unchanged.
+Legacy service friend draft requests already
 meant published chat; this now also governs their model/IAM addressing rather
 than accidentally selecting the draft workspace.
 
@@ -101,7 +120,7 @@ repository/Service API conformance and OpenAPI authorization/admission inventory
 gates remain enabled. Deployed BCN/device/IAM integration is not simulated by
 these local tests and must be verified in a deployed environment.
 
-### Local validation results
+### Initial implementation validation (before the 2026-10-27 revision)
 
 - Combined affected HTTP, domain, repository and architecture suites:
   **1887 passed, 1 skipped** (`pytest -q --no-cov`).
@@ -114,3 +133,21 @@ these local tests and must be verified in a deployed environment.
   the session-backend helper were extracted to keep their modules below the cap.
 - `git diff --check` passes. Full Backend CI, remote integration, deployment,
   frontend migration, commits, pushes and PR creation were not performed.
+
+### 2026-10-27 revision validation
+
+- Broad OpenAPI, repository, runtime, Expert Chat, handoff and architecture
+  regression run: **3241 passed, 2 skipped**. Supplemental stage safety/policy
+  run (overlapping the broad run): **49 passed**.
+- Real HTTP requests verify both catalogs default to draft for service Bots,
+  preserve personal Bots, and still honor explicit online selection.
+- Malformed publication shapes remain isolated to their own metadata rows;
+  pagination tests assert only the requested Bot page and bounded latest-record
+  projection are materialized, rather than candidate sets/publication histories.
+- SQL/runtime policy comparison covers 20 publication/stage combinations.
+  Tenant/environment isolation and equal-timestamp ordering are also covered.
+- SQLite execution and MySQL SQL compilation are verified. Real OceanBase
+  execution, full Backend CI and Singlebox coverage were not run locally.
+- Ruff and added-line secret scanning pass; the scan uses the merge base with
+  `origin/REL20261027` and includes the new untracked test file. No gate or
+  coverage threshold was weakened. No commit, push or PR mutation was performed.

@@ -122,11 +122,15 @@ def svc():
 
 
 @pytest.fixture
-def bot_repo():
+def bot_repo(svc):
     from tests.community.bot_address_fakes import support_legacy_locator
 
     repo = MagicMock()
     repo.get_by_id_and_owner.return_value = dict(BOT)
+    repo.list_by_conditions.side_effect = lambda **_filters: (
+        svc.list_bots_by_conditions.return_value["total"],
+        svc.list_bots_by_conditions.return_value["items"],
+    )
     return support_legacy_locator(repo)
 
 
@@ -247,7 +251,7 @@ def client(
             binder.bind(BotServiceProtocol, to=svc)
             from agentclaw.community.core.bot_inventory.protocols import BotInventoryTemplatePort
             templates = MagicMock()
-            templates.list_template_configs_by_bot_ids.return_value = {}
+            templates.list_template_configs_by_bot_ids.return_value = {BOT["bot_id"]: BOT["template_config"]}
             binder.bind(BotInventoryTemplatePort, to=templates)
             binder.bind(BotQuotaServiceProtocol, to=quota)
             binder.bind(BotSpaceServiceProtocol, to=bot_space)
@@ -433,8 +437,12 @@ def test_list_bots_survives_a_space_resolution_refusal(svc, startup_script):
             binder.bind(BusinessSpaceContextProtocol, to=_RefusingSpace())
             from agentclaw.community.core.repository.protocols.bot import BotRepository
             from agentclaw.community.core.bot_inventory.protocols import BotInventoryTemplatePort
-            binder.bind(BotRepository, to=MagicMock())
-            binder.bind(BotInventoryTemplatePort, to=MagicMock())
+            repository = MagicMock()
+            repository.list_by_conditions.return_value = (1, [BOT])
+            templates = MagicMock()
+            templates.list_template_configs_by_bot_ids.return_value = {}
+            binder.bind(BotRepository, to=repository)
+            binder.bind(BotInventoryTemplatePort, to=templates)
 
     app = FastAPI()
     app.include_router(router)
@@ -472,16 +480,17 @@ def test_template_config_is_gated_on_template_type(client, svc):
     assert detail["template_config"] is None
 
 
-def test_list_bots_filters_reach_service(client, svc):
+def test_list_bots_filters_reach_repository(client, bot_repo):
     client.get(
         "/openapi/v1/bots?keyword=x&engine=teclaw&status=ACTIVE&page=2&page_size=5"
     )
-    kw = svc.list_bots_by_conditions.call_args.kwargs
+    kw = bot_repo.list_by_conditions.call_args.kwargs
     assert kw["owner_id"] == "u1"
     assert kw["bot_name"] == "x"
     assert kw["engine"] == "teclaw"
     assert kw["status"] == "ACTIVE"
     assert kw["page"] == 2 and kw["page_size"] == 5
+    assert kw["stage"] == "draft"
 
 
 def test_search_bot_metadata_returns_only_display_fields(client, svc):
