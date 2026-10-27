@@ -2,22 +2,22 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import pytest
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.errors import Conflict, NotFound
 from agentclaw.community.core.task.forum.models import (
     ForumPollConfig,
     ForumPollSelection,
-    ForumShareConfig,
     ForumTopicConfig,
     TOPIC_STATUS_CLOSED,
     TOPIC_STATUS_LOCKED,
+    TOPIC_TYPE_HELP,
     TOPIC_TYPE_NOTICE,
     TOPIC_TYPE_POLL,
     TOPIC_TYPE_SHARE,
 )
 from agentclaw.community.core.task.forum.repository.models import (
-    ForumAttachmentModel,
     ForumPostModel,
     ForumTopicModel,
 )
@@ -26,6 +26,7 @@ from agentclaw.community.core.repository.implementations.task.forum.forum_reposi
     _is_post_request_idempotency_conflict,
     _is_topic_request_idempotency_conflict,
 )
+from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
 
 def _create_topic(
@@ -124,162 +125,16 @@ def test_create_topic_persists_and_returns_poll_configuration(db):
         }
 
 
-def _create_attachment(
-    repo,
-    *,
-    attachment_id="attachment_1",
-    author_type="BOT",
-    author_id="bot-a",
-):
-    return repo.create_attachment(
-        attachment_id=attachment_id,
-        author_type=author_type,
-        author_id=author_id,
-        filename=f"{attachment_id}.txt",
-        content_type="text/plain",
-        size_bytes=12,
-        object_key=f"bbs/attachments/scope/{attachment_id}",
-    )
-
-
-def test_create_share_topic_without_attachments(db):
-    repo = ForumRepository(db)
-    config = ForumTopicConfig(share=ForumShareConfig(attachment_ids=()))
-
+def test_create_share_topic_without_configuration(db):
     result = _create_topic(
-        repo,
-        request_id="req-share-empty",
-        topic_type=TOPIC_TYPE_SHARE,
-        topic_config=config,
-    )
-
-    assert result.created is True
-    assert result.topic.topic_config == config
-    assert result.topic.attachments == ()
-
-
-def test_create_share_topic_binds_attachments_in_config_order(db):
-    repo = ForumRepository(db)
-    second = _create_attachment(repo, attachment_id="attachment_2")
-    first = _create_attachment(repo, attachment_id="attachment_1")
-    config = ForumTopicConfig(
-        share=ForumShareConfig(
-            attachment_ids=(first.attachment_id, second.attachment_id)
-        )
-    )
-
-    result = _create_topic(
-        repo,
-        request_id="req-share",
-        topic_type=TOPIC_TYPE_SHARE,
-        topic_config=config,
-    )
-
-    assert result.created is True
-    assert result.topic.topic_config == config
-    assert [item.attachment_id for item in result.topic.attachments] == [
-        "attachment_1",
-        "attachment_2",
-    ]
-    loaded = repo.get_topic(result.topic.topic_id)
-    assert loaded is not None
-    assert loaded.attachments == result.topic.attachments
-    with db.orm_session() as session:
-        rows = session.query(ForumAttachmentModel).order_by(
-            ForumAttachmentModel.attachment_id
-        ).all()
-        assert [row.topic_id for row in rows] == [
-            result.topic.topic_id,
-            result.topic.topic_id,
-        ]
-
-
-def test_create_share_topic_rejects_attachment_from_other_author(db):
-    repo = ForumRepository(db)
-    attachment = _create_attachment(
-        repo, author_type="HUMAN", author_id="other-user"
-    )
-
-    with pytest.raises(Conflict, match="author does not match"):
-        _create_topic(
-            repo,
-            request_id="req-share",
-            topic_type=TOPIC_TYPE_SHARE,
-            topic_config=ForumTopicConfig(
-                share=ForumShareConfig(
-                    attachment_ids=(attachment.attachment_id,)
-                )
-            ),
-        )
-
-    assert repo.get_attachment(attachment.attachment_id).topic_id is None
-
-
-def test_create_share_topic_rejects_attachment_already_bound_to_topic(db):
-    repo = ForumRepository(db)
-    attachment = _create_attachment(repo)
-    config = ForumTopicConfig(
-        share=ForumShareConfig(attachment_ids=(attachment.attachment_id,))
-    )
-    first = _create_topic(
-        repo,
-        request_id="req-share-1",
-        topic_type=TOPIC_TYPE_SHARE,
-        topic_config=config,
-    )
-
-    with pytest.raises(Conflict, match="already bound"):
-        _create_topic(
-            repo,
-            request_id="req-share-2",
-            topic_type=TOPIC_TYPE_SHARE,
-            topic_config=config,
-        )
-
-    assert repo.get_attachment(attachment.attachment_id).topic_id == (
-        first.topic.topic_id
-    )
-
-
-def test_create_share_topic_idempotent_replay_keeps_original_binding(db):
-    repo = ForumRepository(db)
-    attachment = _create_attachment(repo)
-    config = ForumTopicConfig(
-        share=ForumShareConfig(attachment_ids=(attachment.attachment_id,))
-    )
-    first = _create_topic(
-        repo,
-        request_id="req-share",
-        topic_type=TOPIC_TYPE_SHARE,
-        topic_config=config,
-    )
-
-    replay = _create_topic(
-        repo,
+        ForumRepository(db),
         request_id="req-share",
         topic_type=TOPIC_TYPE_SHARE,
         topic_config=None,
     )
 
-    assert replay.created is False
-    assert replay.topic.topic_id == first.topic.topic_id
-    assert replay.topic.attachments == first.topic.attachments
-
-
-def test_create_share_topic_rejects_missing_attachment(db):
-    repo = ForumRepository(db)
-
-    with pytest.raises(NotFound, match="attachments were not found"):
-        _create_topic(
-            repo,
-            request_id="req-share",
-            topic_type=TOPIC_TYPE_SHARE,
-            topic_config=ForumTopicConfig(
-                share=ForumShareConfig(
-                    attachment_ids=("attachment_missing",)
-                )
-            ),
-        )
+    assert result.created is True
+    assert result.topic.topic_config is None
 
 
 def test_create_topic_poll_replay_returns_original_configuration(db):
@@ -710,3 +565,95 @@ def test_update_topic_status_transitions_closed_back_to_open(db):
 
     assert locked is not None
     assert locked.status == TOPIC_STATUS_LOCKED
+
+
+# ---------------------------------------------------------------------------
+# HELP reply helpful marker
+# ---------------------------------------------------------------------------
+
+
+def test_update_post_helpful_persists_marker_and_clear_idempotently(db):
+    repo = ForumRepository(db)
+    topic = _create_topic(repo, topic_type=TOPIC_TYPE_HELP).topic
+    post = _create_reply(repo, topic.topic_id).post
+
+    marked = repo.update_post_helpful(
+        topic_id=topic.topic_id, post_id=post.post_id, helpful=True
+    )
+    marked_again = repo.update_post_helpful(
+        topic_id=topic.topic_id, post_id=post.post_id, helpful=True
+    )
+
+    assert marked is not None and marked.helpful is True
+    assert marked_again is not None and marked_again.helpful is True
+    with db.orm_session() as session:
+        row = session.query(ForumPostModel).filter_by(post_id=post.post_id).one()
+        assert row.post_config == {"helpful": {"marked": True}}
+
+    cleared = repo.update_post_helpful(
+        topic_id=topic.topic_id, post_id=post.post_id, helpful=False
+    )
+    cleared_again = repo.update_post_helpful(
+        topic_id=topic.topic_id, post_id=post.post_id, helpful=False
+    )
+
+    assert cleared is not None and cleared.helpful is False
+    assert cleared_again is not None and cleared_again.helpful is False
+    with db.orm_session() as session:
+        row = session.query(ForumPostModel).filter_by(post_id=post.post_id).one()
+        assert row.post_config is None
+        sql_null_count = session.execute(
+            text(
+                "SELECT COUNT(*) FROM ac_forum_post "
+                "WHERE post_id = :post_id AND post_config IS NULL"
+            ),
+            {"post_id": post.post_id},
+        ).scalar_one()
+        assert sql_null_count == 1
+
+
+def test_get_and_update_post_are_scoped_by_topic_tenant_and_environment(db, monkeypatch):
+    repo = ForumRepository(db)
+    with avernet_tenant_scope("tenant-a"):
+        first_topic = _create_topic(repo, request_id="help-topic-a", topic_type=TOPIC_TYPE_HELP).topic
+        second_topic = _create_topic(repo, request_id="help-topic-b", topic_type=TOPIC_TYPE_HELP).topic
+        post = _create_reply(repo, first_topic.topic_id).post
+
+        assert repo.get_post(topic_id=first_topic.topic_id, post_id=post.post_id) is not None
+        assert repo.get_post(topic_id=second_topic.topic_id, post_id=post.post_id) is None
+        assert (
+            repo.update_post_helpful(
+                topic_id=second_topic.topic_id,
+                post_id=post.post_id,
+                helpful=True,
+            )
+            is None
+        )
+
+    with avernet_tenant_scope("tenant-b"):
+        assert repo.get_post(topic_id=first_topic.topic_id, post_id=post.post_id) is None
+        assert (
+            repo.update_post_helpful(
+                topic_id=first_topic.topic_id,
+                post_id=post.post_id,
+                helpful=True,
+            )
+            is None
+        )
+
+    monkeypatch.setenv("SERVER_ENV", "pre")
+    with avernet_tenant_scope("tenant-a"):
+        assert repo.get_post(topic_id=first_topic.topic_id, post_id=post.post_id) is None
+        assert (
+            repo.update_post_helpful(
+                topic_id=first_topic.topic_id,
+                post_id=post.post_id,
+                helpful=True,
+            )
+            is None
+        )
+
+    monkeypatch.delenv("SERVER_ENV", raising=False)
+    with avernet_tenant_scope("tenant-a"):
+        reread = repo.get_post(topic_id=first_topic.topic_id, post_id=post.post_id)
+        assert reread is not None and reread.helpful is False

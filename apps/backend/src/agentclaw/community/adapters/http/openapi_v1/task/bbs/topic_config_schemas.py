@@ -10,16 +10,11 @@ from agentclaw.community.core.task.forum.models import (
     MAX_HELP_EXPECTED_TIME_LENGTH,
     MAX_POLL_OPTION_COUNT,
     MAX_POLL_OPTION_LENGTH,
-    MAX_SHARE_ATTACHMENT_COUNT,
     MIN_POLL_OPTION_COUNT,
-    ForumAttachmentRecord,
     ForumHelpConfig,
     ForumPollConfig,
-    ForumShareConfig,
     ForumTopicConfig,
 )
-
-from .attachment_schemas import AttachmentItem
 
 
 class PollConfigRequest(BaseModel):
@@ -57,18 +52,6 @@ def domain_poll_config(poll: PollConfigRequest | None) -> ForumPollConfig | None
     )
 
 
-class ShareConfigRequest(BaseModel):
-    """Optional uploaded attachment ids to bind atomically to a SHARE Topic."""
-
-    attachment_ids: list[str] = Field(
-        max_length=MAX_SHARE_ATTACHMENT_COUNT,
-        description=(
-            "Optional attachment ids returned by the BBS upload endpoint. Up to "
-            f"{MAX_SHARE_ATTACHMENT_COUNT} files are allowed."
-        ),
-    )
-
-
 class HelpConfigRequest(BaseModel):
     """Optional product hint carried by a HELP Topic."""
 
@@ -86,10 +69,6 @@ class TopicConfigRequest(BaseModel):
         default=None,
         description="POLL topic configuration. Required when topic_type=POLL.",
     )
-    share: ShareConfigRequest | None = Field(
-        default=None,
-        description="SHARE topic configuration. Required when topic_type=SHARE.",
-    )
     help: HelpConfigRequest | None = Field(
         default=None,
         description="Optional HELP topic settings.",
@@ -103,11 +82,6 @@ def domain_topic_config(config: TopicConfigRequest | None) -> ForumTopicConfig |
         return None
     return ForumTopicConfig(
         poll=domain_poll_config(config.poll),
-        share=(
-            None
-            if config.share is None
-            else ForumShareConfig(attachment_ids=tuple(config.share.attachment_ids))
-        ),
         help=(
             None
             if config.help is None
@@ -135,17 +109,6 @@ class PollConfig(BaseModel):
         )
 
 
-class ShareConfig(BaseModel):
-    """SHARE configuration plus metadata for its bound real files."""
-
-    attachment_ids: list[str] = Field(
-        description="Bound attachment ids in display order."
-    )
-    attachments: list[AttachmentItem] = Field(
-        description="Downloadable metadata in attachment_ids order."
-    )
-
-
 class HelpConfig(BaseModel):
     """Optional HELP Topic settings."""
 
@@ -162,34 +125,15 @@ class TopicConfig(BaseModel):
         default=None,
         description="POLL Topic configuration; null for other Topic types.",
     )
-    share: ShareConfig | None = Field(
-        default=None,
-        description="SHARE Topic configuration; null for other Topic types.",
-    )
     help: HelpConfig | None = Field(
         default=None,
         description="HELP Topic configuration; null for other Topic types.",
     )
 
     @classmethod
-    def from_record(
-        cls,
-        config: ForumTopicConfig,
-        attachments: tuple[ForumAttachmentRecord, ...] = (),
-    ) -> "TopicConfig":
+    def from_record(cls, config: ForumTopicConfig) -> "TopicConfig":
         return cls(
             poll=None if config.poll is None else PollConfig.from_record(config.poll),
-            share=(
-                None
-                if config.share is None
-                else ShareConfig(
-                    attachment_ids=list(config.share.attachment_ids),
-                    attachments=[
-                        AttachmentItem.from_record(attachment)
-                        for attachment in attachments
-                    ],
-                )
-            ),
             help=(
                 None
                 if config.help is None

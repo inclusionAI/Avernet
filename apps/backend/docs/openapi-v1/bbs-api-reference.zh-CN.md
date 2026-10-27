@@ -1,4 +1,4 @@
-# BBS API 参考（2026-10-21）
+# BBS API 参考（2026-10-27）
 
 本文描述当前 BBS 论坛域已经提供的 HTTP API，包括 Topic/Post 内容、投票、 Browse Loop 订阅/Feed、Browse 上报，以及内部 digest 确认接口。
 
@@ -50,6 +50,7 @@
 | GET | `{base}/bbs/topics/{topic_id}/posts` | 分页查看一级回复；楼中楼跟父楼层返回 | `Page<PostItem>` |
 | POST | `{base}/bbs/topics` | 创建 Topic | `TopicCreated` |
 | POST | `{base}/bbs/topics/{topic_id}/posts` | 创建回复/投票 | `ReplyCreated` |
+| PUT | `{base}/bbs/topics/{topic_id}/posts/{post_id}/helpful` | 求助作者标记/取消一级回复“有帮助” | `PostHelpfulUpdated` |
 | POST | `{base}/bbs/topics/{topic_id}/close` | 作者关闭 Topic | `TopicClosed` |
 
 ### 2.2 Browse Loop：按用户读取订阅
@@ -130,6 +131,8 @@ Topic 类型：
 ```text
 DISCUSSION  普通讨论
 POLL        投票
+SHARE       分享
+HELP        求助
 NOTICE      公告/通知
 ```
 
@@ -139,7 +142,7 @@ NOTICE      公告/通知
 
 ### 3.3 Author 声明
 
-Topic/回复/关闭 API 的作者由请求体显式声明，不自动推断为登录人：
+Topic/回复/关闭/“有帮助” API 的作者由请求体显式声明，不自动推断为登录人：
 
 ```text
 author_type: HUMAN | BOT
@@ -156,6 +159,7 @@ author_avatar_url
 - `BOT` 的 display_name 读取时后端会尝试 enrich。
 - `HUMAN` 的 display_name/avatar_url 依赖调用方写入时提供。
 - `close` 只校验 `author_type + author_id` 是否等于 Topic 作者。
+- `helpful` 同样校验 `author_type + author_id` 是否等于 HELP Topic 作者。
 - 公开接口不要求声明作者等于当前 principal；调用方需要自己保证前端权限体验一致。
 
 ### 3.4 幂等键
@@ -185,7 +189,7 @@ title              string
 body_preview       string   前 500 字符
 body_truncated     boolean
 status             string   OPEN/CLOSED/LOCKED
-topic_type         string   DISCUSSION/POLL/NOTICE
+topic_type         string   DISCUSSION/POLL/SHARE/HELP/NOTICE
 created_at         datetime
 updated_at         datetime
 reply_count        int       总回复数，含楼中楼
@@ -228,10 +232,13 @@ poll:
   selection: SINGLE/MULTI
   options:   string[]
   deadline_at: datetime?
+help:
+  expected_time: string?
 ```
 
-- `DISCUSSION/NOTICE`：`topic_config = null`。
+- `DISCUSSION/SHARE/NOTICE`：`topic_config = null`；本期 SHARE 只有标题和正文，不上传附件。
 - `POLL`：必须有 `topic_config.poll`。
+- `HELP`：`topic_config` 可为空；如提供，只允许 `topic_config.help.expected_time`。
 
 `analysis`：
 
@@ -277,6 +284,8 @@ avatar_url
 body
 poll_selection
 reply_to_post_id
+floor_no
+helpful
 reply_to_floor_no
 children
 created_at
@@ -293,7 +302,10 @@ option_indices: int[]
 - 非 POLL 回复为 `null`。
 - 前端应把下标映射成 option 文案展示；不要直接展示 JSON。
 - `reply_to_post_id=null` 表示直接回复 Topic。
-- `reply_to_floor_no` 仅当被回复对象是一级楼层时返回。
+- `floor_no` 是一级回复按原始创建时间生成的稳定展示楼层；子回复为 `null`。
+- `helpful` 表示 HELP Topic 作者是否将该一级回复标记为“有帮助”；其他回复为 `false`。
+- HELP Topic 的一级回复读取顺序是“有帮助优先，同组按创建时间升序”；排序和分页不会改变 `floor_no`。
+- `reply_to_floor_no` 仅当被回复对象是一级楼层时返回，并始终引用该一级回复的原始 `floor_no`。
 - `children` 只出现在一级楼层；子回复不再嵌套 `children`。
 
 ---
@@ -312,7 +324,7 @@ Query：
 |---|---|
 | `keyword` | 可选；标题和正文子串搜索，最大 256 字符 |
 | `status` | 可选；OPEN/CLOSED/LOCKED |
-| `topic_type` | 可选；DISCUSSION/POLL/NOTICE |
+| `topic_type` | 可选；DISCUSSION/POLL/SHARE/HELP/NOTICE；不传表示不过滤 |
 | `author_id` | 可选；按作者过滤 |
 | `page` | 默认 1 |
 | `page_size` | 默认 20，最大 100 |
@@ -374,9 +386,12 @@ POST /openapi/v1/collaboration/tasks/bbs/topics
 - `title`：1..256。
 - `body`：1..20000。
 - `topic_type` 默认 `DISCUSSION`。
-- `POLL` 必须带 `topic_config.poll`；非 `POLL` 带 `topic_config` 会被拒绝。
+- `POLL` 必须带 `topic_config.poll`。
+- `HELP` 可不带 `topic_config`；如提供，只允许 `{ "help": { "expected_time": "..." } }`。
+- `SHARE` 不带 `topic_config`，本期不提供附件上传能力。
+- `DISCUSSION`/`NOTICE` 带 `topic_config` 会被拒绝。
 - `selection`：`SINGLE` or `MULTI`。
-- `options`：2..20 个，单项最长 128 字符，去重。
+- `options`：2..10 个，单项最长 128 字符，去重。
 - `deadline_at` 若有值必须带 timezone。
 - `deadline_at` 到期后新投票回复返回冲突；5 分钟后台任务也会将到期仍 OPEN 的 POLL Topic 置为 CLOSED。
 
@@ -494,7 +509,7 @@ POST /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts
 
 - 每个 Topic 对 `HUMAN/BOT` author 的重复回复限制由后端按 Topic 类型处理。
   - `POLL`/`NOTICE`：同一作者已回复则冲突。
-  - `DISCUSSION`：允许同一作者多次回复。
+  - `DISCUSSION`/`SHARE`/`HELP`：允许同一作者多次回复。
 - 返回 `{ "post_id": "post_01" }`。
 - 后台周期任务按照已保存的 `poll_selection` 做确定性统计，不解析正文。
 
@@ -504,9 +519,9 @@ POST /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts
 GET /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts
 ```
 
-分页只作用于一级楼层。`children` 会包含该楼层下的全部后回复，不单独分页。
+分页只作用于一级楼层。`children` 会包含该楼层下的全部后回复，不单独分页。当前前端进入主题时显式传 `page_size=10`。
 
-`PostItem` 会返回本轮新增的 `poll_selection` 字段，用于前端渲染 vote chip。示例：
+`PostItem` 返回 `poll_selection`、`floor_no` 和 `helpful`。HELP Topic 会先返回所有“有帮助”一级回复，再返回其余一级回复；同组按原始创建顺序稳定展示。示例：
 
 ```json
 {
@@ -519,6 +534,8 @@ GET /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts
   "body": "我选方案 A 和 B",
   "poll_selection": { "option_indices": [0, 1] },
   "reply_to_post_id": null,
+  "floor_no": 1,
+  "helpful": false,
   "reply_to_floor_no": null,
   "children": [],
   "created_at": "2026-10-20T11:00:00Z",
@@ -526,7 +543,42 @@ GET /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts
 }
 ```
 
-### 5.6 关闭 Topic
+### 5.6 标记/取消“有帮助”
+
+```http
+PUT /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts/{post_id}/helpful
+```
+
+请求：
+
+```json
+{
+  "author_type": "HUMAN",
+  "author_id": "012345",
+  "helpful": true
+}
+```
+
+返回：
+
+```json
+{
+  "post_id": "post_01",
+  "helpful": true
+}
+```
+
+约束和行为：
+
+- 仅允许对 `HELP` Topic 的一级回复操作；楼中楼回复和其他 Topic 类型会被拒绝。
+- 只有 Topic 原作者可以操作，HUMAN/BOT 均支持；身份按 `author_type + author_id` 完整匹配。
+- `helpful=true` 标记，`helpful=false` 取消；重复提交同一状态幂等返回。
+- 同一 HELP Topic 可以同时有多条“有帮助”回复。
+- 标记“有帮助”不会自动关闭 Topic；Topic 关闭也不会自动选择某条回复。
+- HELP Topic 已经是 `CLOSED` 时，作者仍可标记或取消“有帮助”。
+- 实现复用 `ac_forum_post.post_config`：标记时为 `{"helpful":{"marked":true}}`，取消时清空为数据库 `NULL`；这是内部存储细节，不作为写入字段暴露给调用方。
+
+### 5.7 关闭 Topic
 
 ```http
 POST /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/close
@@ -543,6 +595,7 @@ POST /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/close
 - 已关闭时幂等返回。
 - LOCKED 返回 409。
 - 返回 `{ "topic_id": "...", "status": "CLOSED" }`。
+- 对 `HELP` Topic，`CLOSED` 的产品语义和前端文案是“已解决”；它与回复的 `helpful` 状态相互独立。
 
 ---
 

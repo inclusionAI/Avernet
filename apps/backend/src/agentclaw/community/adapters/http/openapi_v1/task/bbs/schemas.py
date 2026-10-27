@@ -35,8 +35,6 @@ from .topic_config_schemas import (
     HelpConfigRequest,
     PollConfig,
     PollConfigRequest,
-    ShareConfig,
-    ShareConfigRequest,
     TopicConfig,
     TopicConfigRequest,
     domain_topic_config,
@@ -108,7 +106,7 @@ class CreateTopicRequest(BaseModel):
     topic_config: TopicConfigRequest | None = Field(
         default=None,
         description=(
-            "Type-specific Topic configuration for POLL, SHARE, or HELP Topics."
+            "Type-specific Topic configuration for POLL or HELP Topics."
         ),
     )
 
@@ -228,7 +226,7 @@ class CreateTopicRequestUnified(AuthorRefRequest):
 
     The author is named explicitly (`author_type` + `author_id`); the
     declared author may be a human or a Bot. `topic_type` is explicit;
-    `topic_config` carries Topic-level configuration for POLL, SHARE, or HELP.
+    `topic_config` carries Topic-level configuration for POLL or HELP.
     """
 
     client_request_id: str = Field(
@@ -253,7 +251,7 @@ class CreateTopicRequestUnified(AuthorRefRequest):
     topic_config: TopicConfigRequest | None = Field(
         default=None,
         description=(
-            "Type-specific Topic configuration for POLL, SHARE, or HELP Topics."
+            "Type-specific Topic configuration for POLL or HELP Topics."
         ),
     )
 
@@ -296,6 +294,24 @@ class CreateReplyRequestUnified(AuthorRefRequest):
     )
 
 
+class SetPostHelpfulRequest(BaseModel):
+    """Mark or unmark one direct HELP reply as the Topic author."""
+
+    author_type: str = Field(
+        min_length=1,
+        max_length=MAX_AUTHOR_TYPE_LENGTH,
+        description="Topic author kind: HUMAN or BOT.",
+    )
+    author_id: str = Field(
+        min_length=1,
+        max_length=MAX_AUTHOR_ID_LENGTH,
+        description="Stable identifier of the Topic author performing the action.",
+    )
+    helpful: bool = Field(
+        description="True to mark the reply helpful; false to remove the marker."
+    )
+
+
 class CloseTopicRequestUnified(AuthorRefRequest):
     """Body for `POST /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/close`: close a
     Topic as a declared author.
@@ -320,6 +336,13 @@ class ReplyCreated(BaseModel):
     post_id: str = Field(
         description="Stable reply post id, returned unchanged on an idempotent replay."
     )
+
+
+class PostHelpfulUpdated(BaseModel):
+    """Result of an idempotent HELP reply marker update."""
+
+    post_id: str = Field(description="Stable Post id that was updated.")
+    helpful: bool = Field(description="Resulting helpful marker state.")
 
 
 class CreateHumanTopicRequestInternal(CreateHumanTopicRequest):
@@ -584,7 +607,7 @@ class TopicDetail(BaseModel):
         return cls(
             topic_config=None
             if topic.topic_config is None
-            else TopicConfig.from_record(topic.topic_config, topic.attachments),
+            else TopicConfig.from_record(topic.topic_config),
             analysis=TopicAnalysis.from_record(topic.analysis),
             topic_id=topic.topic_id,
             author_type=topic.author_type,
@@ -604,7 +627,7 @@ class TopicDetail(BaseModel):
 
 
 class PostItem(BaseModel):
-    """One reply in a Topic's stable chronological stream."""
+    """One reply in a Topic's stable display stream."""
 
     post_id: str = Field(description="Stable server-generated reply identifier.")
     topic_id: str = Field(description="Stable server-generated Topic identifier.")
@@ -632,6 +655,17 @@ class PostItem(BaseModel):
             "Optional Post id referenced by this reply, when the author "
             "replied to an existing reply. Null for direct Topic replies."
         ),
+    )
+    floor_no: int | None = Field(
+        default=None,
+        description=(
+            "Original chronological floor number for a first-level reply. "
+            "Helpful-first display ordering never changes this number."
+        ),
+    )
+    helpful: bool = Field(
+        default=False,
+        description="Whether the HELP Topic author marked this direct reply helpful.",
     )
     reply_to_floor_no: int | None = Field(
         default=None,

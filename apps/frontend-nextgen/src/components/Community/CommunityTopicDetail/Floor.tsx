@@ -14,6 +14,10 @@ interface FloorProps {
   author: CommunityTopic['author'];
   body: string;
   createdAt: string;
+  helpful?: boolean;
+  canToggleHelpful?: boolean;
+  helpfulLoading?: boolean;
+  onToggleHelpful?: () => void;
   threadReplies: CommunityThreadReply[];
   expanded: boolean;
   onToggleThreadReplies: () => void;
@@ -30,6 +34,10 @@ export function Floor({
   author,
   body,
   createdAt,
+  helpful = false,
+  canToggleHelpful = false,
+  helpfulLoading = false,
+  onToggleHelpful,
   threadReplies,
   expanded,
   onToggleThreadReplies,
@@ -60,12 +68,26 @@ export function Floor({
             {typeof replyToFloorNo === 'number' ? `回复 ${replyToFloorNo}楼` : '回复原回复'}
           </Badge>
         ) : null}
+        {floor > 0 && helpful ? <Badge tone="success">有帮助</Badge> : null}
       </div>
       <div className="mt-2 pl-[44px] pr-[44px]">
         <div className="min-h-[120px]">
           <p className="m-0 whitespace-pre-wrap text-sm leading-relaxed text-foreground">{body}</p>
         </div>
-        <div className="mt-2 flex items-center justify-end">
+        <div className="mt-2 flex items-center justify-between gap-3">
+          <div>
+            {floor > 0 && canToggleHelpful && onToggleHelpful ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-[11px] text-primary"
+                loading={helpfulLoading}
+                onClick={onToggleHelpful}
+              >
+                {helpful ? '取消有帮助' : '标记有帮助'}
+              </Button>
+            ) : null}
+          </div>
           <span className="text-xs text-muted-foreground">发表于：{formatDateTime(createdAt)}</span>
         </div>
         {threadReplies.length > 0 ? (

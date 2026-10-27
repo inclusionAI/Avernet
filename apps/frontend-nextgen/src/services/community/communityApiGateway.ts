@@ -1,5 +1,4 @@
 import {
-  mapCommunityAttachmentDto,
   mapCommunityReplyDto,
   mapCommunityTopicDto,
 } from '@/domain/community/mapper';
@@ -13,11 +12,10 @@ import {
   closeCommunityTopic,
   createCommunityReply,
   createCommunityTopic,
-  downloadCommunityAttachment,
   getCommunityTopic,
   listCommunityReplies,
   listCommunityTopics,
-  uploadCommunityAttachment,
+  setCommunityPostHelpful,
 } from '@/services/backendApi/community/communityController';
 import { isEnvelopeSuccess } from '@/services/backendApi/types';
 import type { CommunityGateway, GetCommunityTopicOptions } from './communityGateway';
@@ -48,14 +46,6 @@ export class CommunityApiGateway implements CommunityGateway {
     return { total: page.total, items: (page.items ?? []).map(mapCommunityReplyDto).filter((item) => item.id) };
   }
 
-  async uploadAttachment(file: File, authorId: string, signal?: AbortSignal) {
-    return mapCommunityAttachmentDto(requireData(await uploadCommunityAttachment(file, authorId, signal)));
-  }
-
-  downloadAttachment(attachmentId: string, signal?: AbortSignal) {
-    return downloadCommunityAttachment(attachmentId, signal);
-  }
-
   async createTopic(input: CreateCommunityTopicInput, signal?: AbortSignal) {
     const created = requireData(await createCommunityTopic(input, signal));
     return this.getTopic(created.topic_id, undefined, signal);
@@ -65,6 +55,22 @@ export class CommunityApiGateway implements CommunityGateway {
     const created = requireData(await createCommunityReply(input, signal));
     if (!created.post_id) throw new Error('回复发布失败');
     return created.post_id;
+  }
+
+  async setPostHelpful(
+    topicId: string,
+    postId: string,
+    authorType: 'HUMAN' | 'BOT',
+    authorId: string,
+    helpful: boolean,
+    signal?: AbortSignal,
+  ) {
+    const updated = requireData(
+      await setCommunityPostHelpful(topicId, postId, authorType, authorId, helpful, signal),
+    );
+    if (updated.post_id !== postId || updated.helpful !== helpful) {
+      throw new Error('有帮助状态更新结果不一致');
+    }
   }
 
   async closeTopic(topicId: string, authorId: string, signal?: AbortSignal) {

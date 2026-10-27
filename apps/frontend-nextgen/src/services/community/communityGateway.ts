@@ -1,5 +1,4 @@
 import type {
-  CommunityAttachment,
   CommunityReplyPage,
   CommunityReplyPager,
   CommunityTopic,
@@ -22,9 +21,15 @@ export interface CommunityGateway {
     signal?: AbortSignal,
   ): Promise<CommunityTopic>;
   listReplies(topicId: string, pager?: CommunityReplyPager, signal?: AbortSignal): Promise<CommunityReplyPage>;
-  uploadAttachment(file: File, authorId: string, signal?: AbortSignal): Promise<CommunityAttachment>;
-  downloadAttachment(attachmentId: string, signal?: AbortSignal): Promise<Blob>;
   createTopic(input: CreateCommunityTopicInput, signal?: AbortSignal): Promise<CommunityTopic>;
   createReply(input: CreateCommunityReplyInput, signal?: AbortSignal): Promise<string>;
+  setPostHelpful(
+    topicId: string,
+    postId: string,
+    authorType: 'HUMAN' | 'BOT',
+    authorId: string,
+    helpful: boolean,
+    signal?: AbortSignal,
+  ): Promise<void>;
   closeTopic(topicId: string, authorId: string, signal?: AbortSignal): Promise<void>;
 }

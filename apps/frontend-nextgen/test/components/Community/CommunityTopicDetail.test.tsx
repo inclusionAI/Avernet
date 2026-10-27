@@ -25,6 +25,7 @@ const replies: CommunityReply[] = [
     body: 'Bot 回复',
     author: { type: 'bot', id: 'bot-1', displayName: '协作助手' },
     createdAt: '2026-10-06T06:20:00Z',
+    helpful: false,
   },
 ];
 
@@ -37,9 +38,10 @@ function renderDetail(overrides: Partial<DetailProps> = {}) {
     loading: false,
     error: null,
     closing: false,
+    helpfulPostId: null,
     onBack: jest.fn(),
     onCloseTopic: jest.fn(),
-    onDownloadAttachment: jest.fn(),
+    onSetPostHelpful: jest.fn(),
     replyLoading: false,
     replyError: null,
     replyPage: 1,
@@ -124,26 +126,10 @@ describe('CommunityTopicDetail', () => {
     expect(screen.queryByRole('button', { name: '发送回复' })).not.toBeInTheDocument();
   });
 
-  test('分享主题展示真实附件 metadata 并触发下载', () => {
-    const attachment = {
-      id: 'attachment-1',
-      filename: '方案.pdf',
-      contentType: 'application/pdf',
-      sizeBytes: 2048,
-    };
-    const { props } = renderDetail({
-      topic: {
-        ...topic,
-        topicType: 'share',
-        topicConfig: { share: { attachmentIds: [attachment.id], attachments: [attachment] } },
-      },
-    });
+  test('分享主题展示分享类型标识', () => {
+    renderDetail({ topic: { ...topic, topicType: 'share' } });
 
-    expect(screen.getByRole('region', { name: '分享附件' })).toBeInTheDocument();
-    expect(screen.getByText('方案.pdf')).toBeInTheDocument();
-    expect(screen.getByText('2.0 KiB')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '下载' }));
-    expect(props.onDownloadAttachment).toHaveBeenCalledWith(attachment);
+    expect(screen.getByText('分享')).toBeInTheDocument();
   });
 
   test('求助主题展示期望时间，关闭后显示已解决', () => {
@@ -161,6 +147,73 @@ describe('CommunityTopicDetail', () => {
     expect(screen.getByText('已解决')).toHaveClass('text-success');
     expect(screen.getByText('希望本周内')).toBeInTheDocument();
     expect(screen.queryByText('已结帖')).not.toBeInTheDocument();
+  });
+
+  test('求助作者可标记一级回复为有帮助，稳定展示后端楼层号', async () => {
+    const user = userEvent.setup();
+    const onSetPostHelpful = jest.fn().mockResolvedValue(true);
+    renderDetail({
+      topic: { ...topic, topicType: 'help' },
+      replies: [{ ...replies[0], floorNo: 3, helpful: true }],
+      onSetPostHelpful,
+    });
+
+    expect(screen.getByText('3楼')).toBeInTheDocument();
+    expect(screen.getByText('有帮助')).toHaveClass('text-success');
+    await user.click(screen.getByRole('button', { name: '取消有帮助' }));
+    expect(onSetPostHelpful).toHaveBeenCalledWith('reply-1', false);
+  });
+
+  test('求助作者可标记未标记的一级回复，已解决后仍可操作', async () => {
+    const user = userEvent.setup();
+    const onSetPostHelpful = jest.fn().mockResolvedValue(true);
+    renderDetail({
+      topic: { ...topic, topicType: 'help', status: 'closed', canClose: false },
+      onSetPostHelpful,
+    });
+
+    expect(screen.getByText('已解决')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '标记有帮助' }));
+    expect(onSetPostHelpful).toHaveBeenCalledWith('reply-1', true);
+  });
+
+  test('非求助作者只看到有帮助标签，不显示标记操作', () => {
+    renderDetail({
+      topic: { ...topic, topicType: 'help', isMine: false, canClose: false },
+      replies: [{ ...replies[0], helpful: true }],
+    });
+
+    expect(screen.getByText('有帮助')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '取消有帮助' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '标记有帮助' })).not.toBeInTheDocument();
+  });
+
+  test('有帮助操作只属于一级回复，楼主和楼中楼不显示操作', () => {
+    const child: CommunityReply = {
+      ...replies[0],
+      id: 'child-helpful',
+      body: '楼中楼正文',
+      helpful: true,
+      replyToPostId: 'reply-1',
+    };
+    renderDetail({
+      topic: { ...topic, topicType: 'help' },
+      replies: [{ ...replies[0], childReplies: [child] }],
+    });
+
+    expect(screen.getAllByRole('button', { name: '标记有帮助' })).toHaveLength(1);
+    expect(screen.getByText('楼中楼正文')).toBeInTheDocument();
+  });
+
+  test('求助主题使用标记已解决文案并调用结帖动作', async () => {
+    const user = userEvent.setup();
+    const { props } = renderDetail({ topic: { ...topic, topicType: 'help' } });
+
+    await user.click(screen.getByRole('button', { name: '标记已解决' }));
+    expect(screen.getByText('确认标记为已解决？')).toBeInTheDocument();
+    expect(screen.getByText('标记后该求助将显示为已解决，本期暂不支持重新打开。')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '确认标记' }));
+    expect(props.onCloseTopic).toHaveBeenCalledTimes(1);
   });
 
   test('加载中显示骨架占位、不渲染楼层', () => {

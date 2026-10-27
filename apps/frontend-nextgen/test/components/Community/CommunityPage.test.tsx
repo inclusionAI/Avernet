@@ -27,6 +27,7 @@ const mockCommunityState = {
   detailLoading: false,
   detailError: null,
   closing: false,
+  helpfulPostId: null,
   replies: [],
   replyLoading: false,
   replyError: null,
@@ -39,6 +40,7 @@ const mockCommunityState = {
   openTopic: jest.fn(),
   closeDetail: jest.fn(),
   closeTopic: jest.fn(),
+  setPostHelpful: jest.fn(),
   goToReplyPage: jest.fn(),
   setQuery: jest.fn(),
   setScope: jest.fn(),
@@ -46,8 +48,6 @@ const mockCommunityState = {
   load: jest.fn(),
   loadMore: jest.fn(),
   publishTopic: jest.fn(),
-  uploadAttachment: jest.fn(),
-  downloadAttachment: jest.fn(),
 };
 
 jest.mock('@/hooks/useCommunity', () => ({
@@ -64,7 +64,7 @@ jest.mock('@umijs/max', () => ({ history: { push: jest.fn() } }));
 describe('CommunityPage 滚动容器结构', () => {
   test('列表视：滚动 main 必须是 h-full flex 外层的 flex 子项，否则 overflow-y-auto 失效', () => {
     render(<CommunityPage />);
-    const publishButton = screen.getByRole('button', { name: '发布主题' });
+    const publishButton = screen.getByRole('button', { name: '发帖' });
     expect(publishButton).toHaveClass('bg-primary', 'text-primary-foreground');
     expect(publishButton).not.toHaveClass('bg-foreground');
     const scrollMain = screen.getByRole('main');
@@ -73,10 +73,15 @@ describe('CommunityPage 滚动容器结构', () => {
   });
 
 
-  test('首页同时展示五个类型 Tab 和独立的全部/我的范围筛选', () => {
+  test('首页筛选 Tab 位于搜索框之前，发帖入口位于搜索框之后', () => {
     render(<CommunityPage />);
 
     const topicTypeGroup = screen.getByRole('group', { name: '主题类型' });
+    const scopeGroup = screen.getByRole('group', { name: '主题范围' });
+    const searchInput = screen.getByRole('textbox', { name: '搜索社区主题' });
+    const personalCenterButton = screen.getByRole('button', { name: '个人中心' });
+    const publishButton = screen.getByRole('button', { name: '发帖' });
+
     expect(within(topicTypeGroup).getAllByRole('button').map((button) => button.textContent)).toEqual([
       '全部',
       '讨论',
@@ -84,7 +89,14 @@ describe('CommunityPage 滚动容器结构', () => {
       '投票',
       '求助',
     ]);
-    expect(within(screen.getByRole('group', { name: '主题范围' })).getAllByRole('button')).toHaveLength(2);
+    expect(within(scopeGroup).getAllByRole('button')).toHaveLength(2);
+    expect(topicTypeGroup.compareDocumentPosition(scopeGroup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(scopeGroup.compareDocumentPosition(searchInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(searchInput.compareDocumentPosition(personalCenterButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(personalCenterButton).toBeDisabled();
+    expect(
+      personalCenterButton.compareDocumentPosition(publishButton) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
 
     fireEvent.click(within(topicTypeGroup).getByRole('button', { name: '分享' }));
     expect(mockCommunityState.setTopicType).toHaveBeenCalledWith('share');

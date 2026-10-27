@@ -1,6 +1,5 @@
 import { getCapabilities } from '@/capabilities';
 import type {
-  CommunityAttachmentDto,
   CommunityReplyDto,
   CommunityTopicDto,
 } from '@/domain/community/mapper';
@@ -35,14 +34,15 @@ export interface CommunityCreatedReplyDto {
   post_id?: string;
 }
 
+export interface CommunityPostHelpfulDto {
+  post_id?: string;
+  helpful?: boolean;
+}
+
 const DEFAULT_PAGE_SIZE = 20;
 
 function bbsApiBase(): string {
   return getCapabilities().getBbsApiBase().value ?? '/openapi/v1/collaboration/tasks/bbs/topics';
-}
-
-function bbsRoot(): string {
-  return bbsApiBase().replace(/\/topics\/?$/, '');
 }
 
 function backendTopicType(topicType: CommunityTopicFilter | undefined): string | undefined {
@@ -108,26 +108,6 @@ export function listCommunityReplies(topicId: string, pager: CommunityReplyPager
   });
 }
 
-export function uploadCommunityAttachment(file: File, authorId: string, signal?: AbortSignal) {
-  const form = new FormData();
-  form.append('author_type', 'HUMAN');
-  form.append('author_id', authorId);
-  form.append('file', file);
-  return backendRequest<CommunityEnvelope<CommunityAttachmentDto>>(`${bbsRoot()}/attachments`, {
-    method: 'POST',
-    rawBody: form,
-    signal,
-  });
-}
-
-export function downloadCommunityAttachment(attachmentId: string, signal?: AbortSignal) {
-  return backendRequest<Blob>(`${bbsRoot()}/attachments/${encodeURIComponent(attachmentId)}/content`, {
-    method: 'GET',
-    responseType: 'blob',
-    signal,
-  });
-}
-
 export function createCommunityTopic(input: CreateCommunityTopicInput, signal?: AbortSignal) {
   const topicType = input.topicType ?? 'discussion';
   const data: {
@@ -143,7 +123,6 @@ export function createCommunityTopic(input: CreateCommunityTopicInput, signal?: 
         options: string[];
         deadline_at?: string;
       };
-      share?: { attachment_ids: string[] };
       help?: { expected_time?: string };
     };
     author_display_name?: string;
@@ -164,8 +143,6 @@ export function createCommunityTopic(input: CreateCommunityTopicInput, signal?: 
         ...(input.poll.deadlineAt ? { deadline_at: input.poll.deadlineAt } : {}),
       },
     };
-  } else if (topicType === 'share' && input.share) {
-    data.topic_config = { share: { attachment_ids: input.share.attachmentIds } };
   } else if (topicType === 'help' && input.help) {
     data.topic_config = {
       help: input.help.expectedTime ? { expected_time: input.help.expectedTime } : {},
@@ -204,6 +181,28 @@ export function createCommunityReply(input: CreateCommunityReplyInput, signal?: 
   return backendRequest<CommunityEnvelope<CommunityCreatedReplyDto>>(
     `${bbsApiBase()}/${encodeURIComponent(input.topicId)}/posts`,
     { method: 'POST', data, signal },
+  );
+}
+
+export function setCommunityPostHelpful(
+  topicId: string,
+  postId: string,
+  authorType: 'HUMAN' | 'BOT',
+  authorId: string,
+  helpful: boolean,
+  signal?: AbortSignal,
+) {
+  return backendRequest<CommunityEnvelope<CommunityPostHelpfulDto>>(
+    `${bbsApiBase()}/${encodeURIComponent(topicId)}/posts/${encodeURIComponent(postId)}/helpful`,
+    {
+      method: 'PUT',
+      data: {
+        author_type: authorType,
+        author_id: authorId,
+        helpful,
+      },
+      signal,
+    },
   );
 }
 

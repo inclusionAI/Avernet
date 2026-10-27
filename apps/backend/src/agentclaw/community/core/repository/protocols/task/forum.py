@@ -9,7 +9,6 @@ if TYPE_CHECKING:
     from agentclaw.community.core.task.forum.models import (
         BrowseFeedPage,
         BrowseReportCreateResult,
-        ForumAttachmentRecord,
         ForumTopicConfig,
         ForumPollProjectionCalculator,
         ForumPollSelection,
@@ -17,6 +16,7 @@ if TYPE_CHECKING:
         BrowseSubscriptionRecord,
         BrowseSubscriptionUpsertResult,
         ForumPostPage,
+        ForumPostRecord,
         ForumReplyCreateResult,
         ForumTopicCreateResult,
         ForumTopicPage,
@@ -55,6 +55,30 @@ class ForumRepositoryProtocol(Protocol):
         """
 
     @abstractmethod
+    def get_post(
+        self,
+        *,
+        topic_id: str,
+        post_id: str,
+    ) -> Optional[ForumPostRecord]:
+        """Return one Post under a visible Topic, or ``None``."""
+
+    @abstractmethod
+    def update_post_helpful(
+        self,
+        *,
+        topic_id: str,
+        post_id: str,
+        helpful: bool,
+    ) -> Optional[ForumPostRecord]:
+        """Set or clear the HELP reply marker and return the refreshed Post.
+
+        The write is scoped through the visible Topic's tenant/environment.
+        ``None`` means the Topic or Post no longer exists. Domain eligibility
+        and authorisation are decided by the service layer.
+        """
+
+    @abstractmethod
     def create_topic(
         self,
         *,
@@ -71,29 +95,9 @@ class ForumRepositoryProtocol(Protocol):
         """Create a Topic, or replay the first request.
 
         ``topic_config`` is the Topic-type-specific structured configuration.
-        POLL uses ``poll``, SHARE uses ``share``, HELP may use ``help``, and
-        other Topic types reject structured configuration.
+        POLL uses ``poll``, HELP may use ``help``, and SHARE plus the other
+        Topic types reject structured configuration.
         """
-
-    @abstractmethod
-    def create_attachment(
-        self,
-        *,
-        attachment_id: str,
-        author_type: str,
-        author_id: str,
-        filename: str,
-        content_type: str,
-        size_bytes: int,
-        object_key: str,
-    ) -> ForumAttachmentRecord:
-        """Persist metadata for one uploaded, currently unbound attachment."""
-
-    @abstractmethod
-    def get_attachment(
-        self, attachment_id: str
-    ) -> ForumAttachmentRecord | None:
-        """Return tenant-scoped attachment metadata, or ``None`` if absent."""
 
     @abstractmethod
     def create_reply(

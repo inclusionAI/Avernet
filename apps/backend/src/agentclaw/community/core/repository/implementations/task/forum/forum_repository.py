@@ -16,7 +16,6 @@ from agentclaw.community.core.task.forum.models import (
     TOPIC_TYPE_DISCUSSION,
     TOPIC_TYPE_NOTICE,
     TOPIC_TYPE_POLL,
-    TOPIC_TYPE_SHARE,
     ForumPollConfig,
     ForumPollResultOptionRecord,
     ForumPollResultRecord,
@@ -24,9 +23,9 @@ from agentclaw.community.core.task.forum.models import (
     ForumPollProjectionCalculator,
     ForumPollProjectionInput,
     ForumPollVoteRecord,
-    ForumAttachmentRecord,
     ForumTopicAnalysisRecord,
     ForumPostPage,
+    ForumPostRecord,
     ForumReplyCreateResult,
     ForumTopicConfig,
     ForumTopicCreateResult,
@@ -35,8 +34,8 @@ from agentclaw.community.core.task.forum.models import (
     ForumTopicViewerRecord,
 )
 from agentclaw.community.core.task.forum.repository.models import (
+    _helpful_from_post_config,
     _poll_selection_from_post_config,
-    ForumAttachmentModel,
     ForumPostModel,
     ForumTopicModel,
 )
@@ -88,6 +87,12 @@ def _post_config_to_row(
     }
 
 
+def _helpful_post_config_to_row(helpful: bool) -> dict[str, object] | None:
+    """Encode the HELP reply marker in the generic Post extension column."""
+
+    return {"helpful": {"marked": True}} if helpful else None
+
+
 def _topic_config_to_row(config: ForumTopicConfig | None) -> dict[str, object] | None:
     """Encode the type-specific Topic configuration as one JSON object."""
 
@@ -97,7 +102,6 @@ def _topic_config_to_row(config: ForumTopicConfig | None) -> dict[str, object] |
         name
         for name, value in (
             ("poll", config.poll),
-            ("share", config.share),
             ("help", config.help),
         )
         if value is not None
@@ -106,10 +110,6 @@ def _topic_config_to_row(config: ForumTopicConfig | None) -> dict[str, object] |
         raise ValueError("topic_config must contain exactly one section")
     if config.poll is not None:
         return {"poll": _poll_to_row(config.poll)}
-    if config.share is not None:
-        return {
-            "share": {"attachment_ids": list(config.share.attachment_ids)}
-        }
     assert config.help is not None
     return {"help": {"expected_time": config.help.expected_time}}
 
@@ -276,11 +276,21 @@ class ForumRepository(BrowseRepositoryMixin, ForumRepositoryProtocol):
                 row for row in rows if row.reply_to_post_id is None
             )
             total = len(first_level_rows)
-            visible_rows = first_level_rows[offset : offset + limit]
             floor_by_post_id = {
                 row.post_id: floor
                 for floor, row in enumerate(first_level_rows, start=1)
             }
+            display_rows = tuple(
+                sorted(
+                    first_level_rows,
+                    key=lambda row: (
+                        0 if _helpful_from_post_config(row.post_config) else 1,
+                        row.gmt_create,
+                        row.id,
+                    ),
+                )
+            )
+            visible_rows = display_rows[offset : offset + limit]
 
             children_by_parent: dict[str, list[ForumPostModel]] = {}
             for row in rows:
@@ -292,6 +302,7 @@ class ForumRepository(BrowseRepositoryMixin, ForumRepositoryProtocol):
             items = tuple(
                 replace(
                     row.to_record(),
+                    floor_no=floor_by_post_id[row.post_id],
                     reply_to_floor_no=None,
                     children=tuple(
                         replace(
@@ -310,6 +321,71 @@ class ForumRepository(BrowseRepositoryMixin, ForumRepositoryProtocol):
                 for row in visible_rows
             )
             return ForumPostPage(total=total, items=items)
+
+    def get_post(
+        self,
+        *,
+        topic_id: str,
+        post_id: str,
+    ) -> ForumPostRecord | None:
+        with self._db.orm_session() as db:
+            topic = (
+                db.query(ForumTopicModel.id)
+                .filter(
+                    ForumTopicModel.topic_id == topic_id,
+                    ForumTopicModel.env == get_current_env(),
+                    ForumTopicModel.avernet_tenant == get_current_avernet_tenant(),
+                )
+                .one_or_none()
+            )
+            if topic is None:
+                return None
+            row = (
+                db.query(ForumPostModel)
+                .filter(
+                    ForumPostModel.topic_id == topic_id,
+                    ForumPostModel.post_id == post_id,
+                )
+                .one_or_none()
+            )
+            return None if row is None else row.to_record()
+
+    def update_post_helpful(
+        self,
+        *,
+        topic_id: str,
+        post_id: str,
+        helpful: bool,
+    ) -> ForumPostRecord | None:
+        with self._transaction() as db:
+            topic = (
+                db.query(ForumTopicModel.id)
+                .filter(
+                    ForumTopicModel.topic_id == topic_id,
+                    ForumTopicModel.env == get_current_env(),
+                    ForumTopicModel.avernet_tenant == get_current_avernet_tenant(),
+                )
+                .one_or_none()
+            )
+            if topic is None:
+                return None
+            row = (
+                db.query(ForumPostModel)
+                .filter(
+                    ForumPostModel.topic_id == topic_id,
+                    ForumPostModel.post_id == post_id,
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if row is None:
+                return None
+            if _helpful_from_post_config(row.post_config) == helpful:
+                return row.to_record()
+            row.post_config = _helpful_post_config_to_row(helpful)
+            row.gmt_modified = datetime.now(timezone.utc)
+            db.flush()
+            return row.to_record()
 
     @staticmethod
     def _descendant_rows(
@@ -379,44 +455,6 @@ class ForumRepository(BrowseRepositoryMixin, ForumRepositoryProtocol):
                         created=False,
                     )
 
-                attachments: list[ForumAttachmentModel] = []
-                attachment_ids: tuple[str, ...] = ()
-                if topic_type == TOPIC_TYPE_SHARE:
-                    if topic_config is None or topic_config.share is None:
-                        raise Conflict("SHARE topic requires share config")
-                    attachment_ids = topic_config.share.attachment_ids
-                    attachments = (
-                        db.query(ForumAttachmentModel)
-                        .filter(
-                            ForumAttachmentModel.attachment_id.in_(attachment_ids),
-                            ForumAttachmentModel.env == get_current_env(),
-                            ForumAttachmentModel.avernet_tenant
-                            == get_current_avernet_tenant(),
-                        )
-                        .with_for_update()
-                        .all()
-                    )
-                    if len(attachments) != len(attachment_ids):
-                        raise NotFound("one or more attachments were not found")
-                    attachment_by_id = {
-                        attachment.attachment_id: attachment
-                        for attachment in attachments
-                    }
-                    attachments = [
-                        attachment_by_id[attachment_id]
-                        for attachment_id in attachment_ids
-                    ]
-                    for attachment in attachments:
-                        if (
-                            attachment.author_type != author_type
-                            or attachment.author_id != author_id
-                        ):
-                            raise Conflict(
-                                "attachment author does not match topic author"
-                            )
-                        if attachment.topic_id is not None:
-                            raise Conflict("attachment is already bound to a topic")
-
                 topic = ForumTopicModel(
                     topic_id=f"topic_{uuid.uuid4().hex}",
                     author_type=author_type,
@@ -436,18 +474,7 @@ class ForumRepository(BrowseRepositoryMixin, ForumRepositoryProtocol):
                 )
                 db.add(topic)
                 db.flush()
-                for attachment in attachments:
-                    attachment.topic_id = topic.topic_id
-                db.flush()
-                return ForumTopicCreateResult(
-                    topic=replace(
-                        topic.to_record(),
-                        attachments=tuple(
-                            attachment.to_record() for attachment in attachments
-                        ),
-                    ),
-                    created=True,
-                )
+                return ForumTopicCreateResult(topic=topic.to_record(), created=True)
         except IntegrityError as exc:
             if not _is_topic_request_idempotency_conflict(exc):
                 raise
@@ -646,51 +673,6 @@ class ForumRepository(BrowseRepositoryMixin, ForumRepositoryProtocol):
                 record, analysis=replace(record.analysis, poll_result=empty_result)
             )
 
-    def create_attachment(
-        self,
-        *,
-        attachment_id: str,
-        author_type: str,
-        author_id: str,
-        filename: str,
-        content_type: str,
-        size_bytes: int,
-        object_key: str,
-    ) -> ForumAttachmentRecord:
-        now = datetime.now(timezone.utc)
-        with self._transaction() as db:
-            row = ForumAttachmentModel(
-                attachment_id=attachment_id,
-                author_type=author_type,
-                author_id=author_id,
-                topic_id=None,
-                object_key=object_key,
-                filename=filename,
-                content_type=content_type,
-                size_bytes=size_bytes,
-                env=get_current_env(),
-                avernet_tenant=get_current_avernet_tenant(),
-                gmt_create=now,
-                gmt_modified=now,
-            )
-            db.add(row)
-            db.flush()
-            return row.to_record()
-
-    def get_attachment(self, attachment_id: str) -> ForumAttachmentRecord | None:
-        with self._db.orm_session() as db:
-            row = (
-                db.query(ForumAttachmentModel)
-                .filter(
-                    ForumAttachmentModel.attachment_id == attachment_id,
-                    ForumAttachmentModel.env == get_current_env(),
-                    ForumAttachmentModel.avernet_tenant
-                    == get_current_avernet_tenant(),
-                )
-                .one_or_none()
-            )
-            return None if row is None else row.to_record()
-
     def advance_poll_projection(
         self,
         *,
@@ -817,33 +799,8 @@ class ForumRepository(BrowseRepositoryMixin, ForumRepositoryProtocol):
 
     @staticmethod
     def _topic_record(db, row: ForumTopicModel) -> ForumTopicRecord:
-        record = row.to_record()
-        share = None if record.topic_config is None else record.topic_config.share
-        if share is None:
-            return record
-        attachment_rows = (
-            db.query(ForumAttachmentModel)
-            .filter(
-                ForumAttachmentModel.attachment_id.in_(share.attachment_ids),
-                ForumAttachmentModel.topic_id == record.topic_id,
-                ForumAttachmentModel.env == get_current_env(),
-                ForumAttachmentModel.avernet_tenant
-                == get_current_avernet_tenant(),
-            )
-            .all()
-        )
-        attachment_by_id = {
-            attachment.attachment_id: attachment for attachment in attachment_rows
-        }
-        if set(attachment_by_id) != set(share.attachment_ids):
-            raise NotFound("topic attachment metadata not found")
-        return replace(
-            record,
-            attachments=tuple(
-                attachment_by_id[attachment_id].to_record()
-                for attachment_id in share.attachment_ids
-            ),
-        )
+        del db
+        return row.to_record()
 
     def _find_request_post(
         self,

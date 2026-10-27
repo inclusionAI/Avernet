@@ -2,11 +2,10 @@ import {
   closeCommunityTopic,
   createCommunityReply,
   createCommunityTopic,
-  downloadCommunityAttachment,
   getCommunityTopic,
   listCommunityReplies,
   listCommunityTopics,
-  uploadCommunityAttachment,
+  setCommunityPostHelpful,
 } from '@/services/backendApi/community/communityController';
 import * as http from '@/services/backendApi/httpClient';
 
@@ -73,24 +72,20 @@ describe('communityController', () => {
     });
   });
 
-  test('附件上传使用 multipart，下载请求使用 blob 响应', async () => {
-    const file = new File(['guide'], 'guide.pdf', { type: 'application/pdf' });
-    await uploadCommunityAttachment(file, 'u1');
-    await downloadCommunityAttachment('attachment/1');
+  test('标记有帮助使用 PUT 并编码 topicId/postId，透传作者类型和目标状态', async () => {
+    await setCommunityPostHelpful('topic/1', 'post/2', 'BOT', 'bot-1', true);
 
-    const uploadOptions = mockedRequest.mock.calls[0][1];
-    expect(mockedRequest.mock.calls[0][0]).toBe('/openapi/v1/collaboration/tasks/bbs/attachments');
-    expect(uploadOptions).toMatchObject({ method: 'POST', signal: undefined });
-    expect(uploadOptions.rawBody).toBeInstanceOf(FormData);
-    expect(uploadOptions.rawBody.get('author_type')).toBe('HUMAN');
-    expect(uploadOptions.rawBody.get('author_id')).toBe('u1');
-    expect(uploadOptions.rawBody.get('file')).toBe(file);
-    expect(uploadOptions).not.toHaveProperty('data');
-
-    expect(mockedRequest).toHaveBeenNthCalledWith(
-      2,
-      '/openapi/v1/collaboration/tasks/bbs/attachments/attachment%2F1/content',
-      { method: 'GET', responseType: 'blob', signal: undefined },
+    expect(mockedRequest).toHaveBeenCalledWith(
+      '/openapi/v1/collaboration/tasks/bbs/topics/topic%2F1/posts/post%2F2/helpful',
+      {
+        method: 'PUT',
+        data: {
+          author_type: 'BOT',
+          author_id: 'bot-1',
+          helpful: true,
+        },
+        signal: undefined,
+      },
     );
   });
 
@@ -178,14 +173,13 @@ describe('communityController', () => {
     });
   });
 
-  test('创建分享主题下发 attachment_ids，创建求助主题下发 expected_time', async () => {
+  test('创建分享主题不下发 topic_config，创建求助主题下发 expected_time', async () => {
     await createCommunityTopic({
       title: '分享资料',
-      body: '附件见下方',
+      body: '正文',
       authorId: 'u1',
       authorName: '张三',
       topicType: 'share',
-      share: { attachmentIds: ['attachment-1', 'attachment-2'] },
     });
     await createCommunityTopic({
       title: '求助排查',
@@ -196,10 +190,9 @@ describe('communityController', () => {
       help: { expectedTime: '希望本周内' },
     });
 
-    expect(mockedRequest.mock.calls[0][1].data).toMatchObject({
-      topic_type: 'SHARE',
-      topic_config: { share: { attachment_ids: ['attachment-1', 'attachment-2'] } },
-    });
+    const shareData = mockedRequest.mock.calls[0][1].data;
+    expect(shareData).toMatchObject({ topic_type: 'SHARE' });
+    expect(shareData).not.toHaveProperty('topic_config');
     expect(mockedRequest.mock.calls[1][1].data).toMatchObject({
       topic_type: 'HELP',
       topic_config: { help: { expected_time: '希望本周内' } },
