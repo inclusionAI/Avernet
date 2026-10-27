@@ -59,7 +59,7 @@ def _agent_code(
         )
         code = data.get("agent_code") if isinstance(data, dict) else None
     if not isinstance(code, str) or not code.strip():
-        raise ValueError("AgentPass agent_code is unavailable")
+        raise ValueError("Passport agent_code is unavailable")
     return code
 
 
