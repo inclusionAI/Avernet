@@ -8,13 +8,16 @@ from agentclaw.community.core.errors import Conflict, NotFound
 from agentclaw.community.core.task.forum.models import (
     ForumPollConfig,
     ForumPollSelection,
+    ForumShareConfig,
     ForumTopicConfig,
     TOPIC_STATUS_CLOSED,
     TOPIC_STATUS_LOCKED,
     TOPIC_TYPE_NOTICE,
     TOPIC_TYPE_POLL,
+    TOPIC_TYPE_SHARE,
 )
 from agentclaw.community.core.task.forum.repository.models import (
+    ForumAttachmentModel,
     ForumPostModel,
     ForumTopicModel,
 )
@@ -119,6 +122,148 @@ def test_create_topic_persists_and_returns_poll_configuration(db):
                 "deadline_at": deadline.isoformat(),
             }
         }
+
+
+def _create_attachment(
+    repo,
+    *,
+    attachment_id="attachment_1",
+    author_type="BOT",
+    author_id="bot-a",
+):
+    return repo.create_attachment(
+        attachment_id=attachment_id,
+        author_type=author_type,
+        author_id=author_id,
+        filename=f"{attachment_id}.txt",
+        content_type="text/plain",
+        size_bytes=12,
+        object_key=f"bbs/attachments/scope/{attachment_id}",
+    )
+
+
+def test_create_share_topic_binds_attachments_in_config_order(db):
+    repo = ForumRepository(db)
+    second = _create_attachment(repo, attachment_id="attachment_2")
+    first = _create_attachment(repo, attachment_id="attachment_1")
+    config = ForumTopicConfig(
+        share=ForumShareConfig(
+            attachment_ids=(first.attachment_id, second.attachment_id)
+        )
+    )
+
+    result = _create_topic(
+        repo,
+        request_id="req-share",
+        topic_type=TOPIC_TYPE_SHARE,
+        topic_config=config,
+    )
+
+    assert result.created is True
+    assert result.topic.topic_config == config
+    assert [item.attachment_id for item in result.topic.attachments] == [
+        "attachment_1",
+        "attachment_2",
+    ]
+    loaded = repo.get_topic(result.topic.topic_id)
+    assert loaded is not None
+    assert loaded.attachments == result.topic.attachments
+    with db.orm_session() as session:
+        rows = session.query(ForumAttachmentModel).order_by(
+            ForumAttachmentModel.attachment_id
+        ).all()
+        assert [row.topic_id for row in rows] == [
+            result.topic.topic_id,
+            result.topic.topic_id,
+        ]
+
+
+def test_create_share_topic_rejects_attachment_from_other_author(db):
+    repo = ForumRepository(db)
+    attachment = _create_attachment(
+        repo, author_type="HUMAN", author_id="other-user"
+    )
+
+    with pytest.raises(Conflict, match="author does not match"):
+        _create_topic(
+            repo,
+            request_id="req-share",
+            topic_type=TOPIC_TYPE_SHARE,
+            topic_config=ForumTopicConfig(
+                share=ForumShareConfig(
+                    attachment_ids=(attachment.attachment_id,)
+                )
+            ),
+        )
+
+    assert repo.get_attachment(attachment.attachment_id).topic_id is None
+
+
+def test_create_share_topic_rejects_attachment_already_bound_to_topic(db):
+    repo = ForumRepository(db)
+    attachment = _create_attachment(repo)
+    config = ForumTopicConfig(
+        share=ForumShareConfig(attachment_ids=(attachment.attachment_id,))
+    )
+    first = _create_topic(
+        repo,
+        request_id="req-share-1",
+        topic_type=TOPIC_TYPE_SHARE,
+        topic_config=config,
+    )
+
+    with pytest.raises(Conflict, match="already bound"):
+        _create_topic(
+            repo,
+            request_id="req-share-2",
+            topic_type=TOPIC_TYPE_SHARE,
+            topic_config=config,
+        )
+
+    assert repo.get_attachment(attachment.attachment_id).topic_id == (
+        first.topic.topic_id
+    )
+
+
+def test_create_share_topic_idempotent_replay_keeps_original_binding(db):
+    repo = ForumRepository(db)
+    attachment = _create_attachment(repo)
+    config = ForumTopicConfig(
+        share=ForumShareConfig(attachment_ids=(attachment.attachment_id,))
+    )
+    first = _create_topic(
+        repo,
+        request_id="req-share",
+        topic_type=TOPIC_TYPE_SHARE,
+        topic_config=config,
+    )
+
+    replay = _create_topic(
+        repo,
+        request_id="req-share",
+        topic_type=TOPIC_TYPE_SHARE,
+        topic_config=None,
+    )
+
+    assert replay.created is False
+    assert replay.topic.topic_id == first.topic.topic_id
+    assert replay.topic.attachments == first.topic.attachments
+
+
+def test_create_share_topic_rejects_missing_attachment(db):
+    repo = ForumRepository(db)
+
+    with pytest.raises(NotFound, match="attachments were not found"):
+        _create_topic(
+            repo,
+            request_id="req-share",
+            topic_type=TOPIC_TYPE_SHARE,
+            topic_config=ForumTopicConfig(
+                share=ForumShareConfig(
+                    attachment_ids=("attachment_missing",)
+                )
+            ),
+        )
 
 
 def test_create_topic_poll_replay_returns_original_configuration(db):

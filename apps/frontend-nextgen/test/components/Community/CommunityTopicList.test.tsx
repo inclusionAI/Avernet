@@ -65,6 +65,20 @@ describe('CommunityTopicList', () => {
     expect(screen.queryByText('投票')).not.toBeInTheDocument();
   });
 
+  test('分享主题显示附件标识，求助主题显示橙色类型标识', () => {
+    renderList({ topics: [{ ...topic, status: 'open', topicType: 'share' }] });
+    expect(screen.getByRole('img', { name: '分享附件' })).toBeInTheDocument();
+
+    renderList({ topics: [{ ...topic, status: 'open', topicType: 'help' }] });
+    expect(screen.getByText('求助')).toHaveClass('text-warning');
+  });
+
+  test('已关闭求助显示已解决而不是普通已结帖', () => {
+    renderList({ topics: [{ ...topic, topicType: 'help' }] });
+    expect(screen.getByText('已解决')).toHaveClass('text-success');
+    expect(screen.queryByText('已结帖')).not.toBeInTheDocument();
+  });
+
   test('无回复主题不渲染回复相关行，改为显示发帖时间', () => {
     const realTopic: CommunityTopic = {
       id: 'real-1',

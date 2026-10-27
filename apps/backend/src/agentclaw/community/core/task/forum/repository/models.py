@@ -22,7 +22,10 @@ from agentclaw.community.core.task.forum.models import (
     TOPIC_TYPE_DISCUSSION,
     BrowseReportRecord,
     BrowseSubscriptionRecord,
+    ForumAttachmentRecord,
+    ForumHelpConfig,
     ForumPollConfig,
+    ForumShareConfig,
     ForumPollResultOptionRecord,
     ForumPollResultRecord,
     ForumPollSelection,
@@ -180,19 +183,40 @@ def _poll_selection_from_post_config(
     return ForumPollSelection(option_indices=tuple(indices))
 
 
-def _topic_config_from_row(value: object | None) -> ForumTopicConfig | None:
-    """Decode the generic Topic configuration JSON.
+def _share_from_row(value: object) -> ForumShareConfig:
+    if not isinstance(value, dict) or set(value) != {"attachment_ids"}:
+        raise ValueError("topic_config.share must contain only attachment_ids")
+    attachment_ids = value.get("attachment_ids")
+    if not isinstance(attachment_ids, list) or not all(
+        isinstance(attachment_id, str) for attachment_id in attachment_ids
+    ):
+        raise ValueError("topic_config.share.attachment_ids must be a string array")
+    return ForumShareConfig(attachment_ids=tuple(attachment_ids))
 
-    ``topic_type`` selects which configuration section is meaningful. The
-    current contract only defines ``poll``; future Topic types can add other
-    keys to this object without another migration.
-    """
+
+def _help_from_row(value: object) -> ForumHelpConfig:
+    if not isinstance(value, dict) or set(value) != {"expected_time"}:
+        raise ValueError("topic_config.help must contain only expected_time")
+    expected_time = value.get("expected_time")
+    if expected_time is not None and not isinstance(expected_time, str):
+        raise ValueError("topic_config.help.expected_time must be a string or null")
+    return ForumHelpConfig(expected_time=expected_time)
+
+
+def _topic_config_from_row(value: object | None) -> ForumTopicConfig | None:
+    """Strictly decode one type-specific Topic configuration section."""
 
     if value is None:
         return None
     if not isinstance(value, dict):
         raise ValueError("ac_forum_topic.topic_config must be a JSON object or null")
-    return ForumTopicConfig(poll=_poll_from_row(value.get("poll")))
+    if len(value) != 1 or not set(value).issubset({"poll", "share", "help"}):
+        raise ValueError("ac_forum_topic.topic_config must contain one supported section")
+    if "poll" in value:
+        return ForumTopicConfig(poll=_poll_from_row(value["poll"]))
+    if "share" in value:
+        return ForumTopicConfig(share=_share_from_row(value["share"]))
+    return ForumTopicConfig(help=_help_from_row(value["help"]))
 
 
 def _analysis_from_row(
@@ -388,6 +412,58 @@ class ForumTopicModel(Base):
             analysis=_analysis_from_row(self.analysis_result, self.gmt_modified),
             topic_config=_topic_config_from_row(self.topic_config),
         )
+
+
+class ForumAttachmentModel(Base):
+    __tablename__ = "ac_forum_attachment"
+
+    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False)
+    attachment_id = Column(_binary_string(128), nullable=False)
+    author_type = Column(_AUTHOR_TYPE, nullable=False)
+    author_id = Column(_AUTHOR_ID, nullable=False)
+    topic_id = Column(_TOPIC_ID, nullable=True)
+    object_key = Column(String(512), nullable=False)
+    filename = Column(String(255), nullable=False)
+    content_type = Column(String(255), nullable=False)
+    size_bytes = Column(BigInteger, nullable=False)
+    env = Column(String(20), nullable=False, default=get_current_env)
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
+    gmt_create = Column(DateTime, nullable=False, server_default=func.now())
+    gmt_modified = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        Index("uk_forum_attachment_id", "attachment_id", unique=True),
+        Index(
+            "idx_forum_attachment_owner",
+            "avernet_tenant",
+            "env",
+            "author_type",
+            "author_id",
+            "topic_id",
+        ),
+        Index("idx_forum_attachment_topic", "topic_id"),
+    )
+
+    def to_record(self) -> ForumAttachmentRecord:
+        return ForumAttachmentRecord(
+            attachment_id=self.attachment_id,
+            author_type=self.author_type,
+            author_id=self.author_id,
+            topic_id=self.topic_id,
+            filename=self.filename,
+            content_type=self.content_type,
+            size_bytes=int(self.size_bytes),
+            object_key=self.object_key,
+            created_at=self.gmt_create,
+        )
+
+
+register_avernet_tenant_guard(ForumAttachmentModel)
 
 
 class ForumPostModel(Base):

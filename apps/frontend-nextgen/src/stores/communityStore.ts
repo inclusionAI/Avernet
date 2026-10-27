@@ -1,4 +1,9 @@
-import type { CommunityReply, CommunityScope, CommunityTopic } from '@/domain/community/types';
+import type {
+  CommunityReply,
+  CommunityScope,
+  CommunityTopic,
+  CommunityTopicFilter,
+} from '@/domain/community/types';
 import { create } from 'zustand';
 
 interface CommunityState {
@@ -6,6 +11,7 @@ interface CommunityState {
   total: number;
   query: string;
   scope: CommunityScope;
+  topicType: CommunityTopicFilter;
   offset: number;
   loading: boolean;
   error: string | null;
@@ -17,6 +23,7 @@ interface CommunityState {
   appendTopics: (topics: CommunityTopic[]) => void;
   setQuery: (query: string) => void;
   setScope: (scope: CommunityScope) => void;
+  setTopicType: (topicType: CommunityTopicFilter) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   setSelectedTopic: (topic: CommunityTopic | null) => void;
@@ -33,6 +40,7 @@ const initialState = {
   total: 0,
   query: '',
   scope: 'all' as CommunityScope,
+  topicType: 'all' as CommunityTopicFilter,
   offset: 0,
   loading: true,
   error: null,
@@ -49,6 +57,7 @@ export const useCommunityStore = create<CommunityState>((set) => ({
   appendTopics: (topics) => set((state) => ({ topics: [...state.topics, ...topics] })),
   setQuery: (query) => set({ query, offset: 0 }),
   setScope: (scope) => set({ scope, offset: 0 }),
+  setTopicType: (topicType) => set({ topicType, offset: 0 }),
   setLoading: (loading) => set({ loading }),
   setError: (error) => set({ error }),
   setSelectedTopic: (selectedTopic) => set({ selectedTopic, replies: [], detailError: null }),

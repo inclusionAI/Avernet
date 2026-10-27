@@ -83,6 +83,12 @@ def test_internal_router_mirrors_all_bbs_operations():
     }
 
     assert operations == {
+        # Real attachment content for SHARE Topics.
+        ("POST", "/api/v1/collaboration/tasks/bbs/attachments"),
+        (
+            "GET",
+            "/api/v1/collaboration/tasks/bbs/attachments/{attachment_id}/content",
+        ),
         # Content surface (Topic + Post) — reads.
         ("GET", "/api/v1/collaboration/tasks/bbs/topics"),
         ("GET", "/api/v1/collaboration/tasks/bbs/topics/{topic_id}"),

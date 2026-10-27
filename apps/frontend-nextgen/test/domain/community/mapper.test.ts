@@ -30,7 +30,7 @@ describe('community mapper', () => {
       topicType: 'poll',
     });
     expect(topic.topicConfig).toBeUndefined();
-  expect(topic.analysis).toBeUndefined();
+    expect(topic.analysis).toBeUndefined();
   });
 
   test('maps bot replies and normalizes unknown topic status to closed', () => {
@@ -254,4 +254,64 @@ test('falls back to anonymous when author has neither display_name nor actor_id'
   expect(mapCommunityTopicDto({ topic_id: 't', title: 'T', body: 'b', status: 'OPEN' }).author.displayName).toBe(
     '匿名',
   );
+});
+
+
+test('maps SHARE config with attachment metadata', () => {
+  const topic = mapCommunityTopicDto({
+    topic_id: 'share-1',
+    title: '分享资料',
+    body: '请查收',
+    status: 'OPEN',
+    topic_type: 'SHARE',
+    topic_config: {
+      share: {
+        attachment_ids: [' attachment-1 ', 'attachment-2'],
+        attachments: [
+          {
+            attachment_id: 'attachment-1',
+            filename: ' guide.pdf ',
+            content_type: 'application/pdf',
+            size_bytes: 1024,
+          },
+          {
+            attachment_id: 'attachment-2',
+            filename: 'data.csv',
+            content_type: 'text/csv',
+            size_bytes: 2048,
+          },
+        ],
+      },
+    },
+  });
+
+  expect(topic.topicType).toBe('share');
+  expect(topic.topicConfig?.share).toEqual({
+    attachmentIds: ['attachment-1', 'attachment-2'],
+    attachments: [
+      { id: 'attachment-1', filename: 'guide.pdf', contentType: 'application/pdf', sizeBytes: 1024 },
+      { id: 'attachment-2', filename: 'data.csv', contentType: 'text/csv', sizeBytes: 2048 },
+    ],
+  });
+});
+
+test('maps HELP expected time and keeps an empty help config', () => {
+  const withExpectedTime = mapCommunityTopicDto({
+    topic_id: 'help-1',
+    title: '求助',
+    status: 'OPEN',
+    topic_type: 'HELP',
+    topic_config: { help: { expected_time: ' 希望本周内 ' } },
+  });
+  const withoutExpectedTime = mapCommunityTopicDto({
+    topic_id: 'help-2',
+    title: '求助',
+    status: 'OPEN',
+    topic_type: 'HELP',
+    topic_config: { help: {} },
+  });
+
+  expect(withExpectedTime.topicType).toBe('help');
+  expect(withExpectedTime.topicConfig?.help).toEqual({ expectedTime: '希望本周内' });
+  expect(withoutExpectedTime.topicConfig?.help).toEqual({ expectedTime: undefined });
 });

@@ -4,6 +4,17 @@ from .admission_modes import AdmissionMode
 
 #: BBS and feedback content on the public collaboration-task surface.
 TASK_BBS_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
+    # Real attachment upload/download is part of the same tenant-wide BBS
+    # surface. Upload declares its author in multipart fields; both routes still
+    # require the group-level verified principal dependency.
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/bbs/attachments",
+    ): AdmissionMode.OPEN,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/bbs/attachments/{attachment_id}/content",
+    ): AdmissionMode.OPEN,
     # BBS reads are tenant-wide and available to every authenticated principal.
     ("GET", "/openapi/v1/collaboration/tasks/bbs/topics"): AdmissionMode.OPEN,
     (

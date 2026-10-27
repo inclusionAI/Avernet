@@ -2,9 +2,11 @@ import {
   closeCommunityTopic,
   createCommunityReply,
   createCommunityTopic,
+  downloadCommunityAttachment,
   getCommunityTopic,
   listCommunityReplies,
   listCommunityTopics,
+  uploadCommunityAttachment,
 } from '@/services/backendApi/community/communityController';
 import * as http from '@/services/backendApi/httpClient';
 
@@ -29,6 +31,15 @@ describe('communityController', () => {
       params: { page: 2, page_size: 10, keyword: 'Bot' },
       signal: undefined,
     });
+  });
+
+  test('列表类型筛选下发 SHARE/HELP topic_type', async () => {
+    await listCommunityTopics({ topicType: 'share', offset: 0, limit: 20 });
+    expect(mockedRequest.mock.calls[0][1].params).toEqual({ page: 1, page_size: 20, topic_type: 'SHARE' });
+
+    mockedRequest.mockClear();
+    await listCommunityTopics({ topicType: 'help', offset: 0, limit: 20 });
+    expect(mockedRequest.mock.calls[0][1].params).toEqual({ page: 1, page_size: 20, topic_type: 'HELP' });
   });
 
   test('无搜索词时不下发 keyword', async () => {
@@ -60,6 +71,27 @@ describe('communityController', () => {
       params: { page: 1, page_size: 20 },
       signal: undefined,
     });
+  });
+
+  test('附件上传使用 multipart，下载请求使用 blob 响应', async () => {
+    const file = new File(['guide'], 'guide.pdf', { type: 'application/pdf' });
+    await uploadCommunityAttachment(file, 'u1');
+    await downloadCommunityAttachment('attachment/1');
+
+    const uploadOptions = mockedRequest.mock.calls[0][1];
+    expect(mockedRequest.mock.calls[0][0]).toBe('/openapi/v1/collaboration/tasks/bbs/attachments');
+    expect(uploadOptions).toMatchObject({ method: 'POST', signal: undefined });
+    expect(uploadOptions.rawBody).toBeInstanceOf(FormData);
+    expect(uploadOptions.rawBody.get('author_type')).toBe('HUMAN');
+    expect(uploadOptions.rawBody.get('author_id')).toBe('u1');
+    expect(uploadOptions.rawBody.get('file')).toBe(file);
+    expect(uploadOptions).not.toHaveProperty('data');
+
+    expect(mockedRequest).toHaveBeenNthCalledWith(
+      2,
+      '/openapi/v1/collaboration/tasks/bbs/attachments/attachment%2F1/content',
+      { method: 'GET', responseType: 'blob', signal: undefined },
+    );
   });
 
   test('投票回复下发结构化 poll_selection，且前端不再携带楼层引用', async () => {
@@ -143,6 +175,34 @@ describe('communityController', () => {
           deadline_at: '2026-10-20T12:00:00Z',
         },
       },
+    });
+  });
+
+  test('创建分享主题下发 attachment_ids，创建求助主题下发 expected_time', async () => {
+    await createCommunityTopic({
+      title: '分享资料',
+      body: '附件见下方',
+      authorId: 'u1',
+      authorName: '张三',
+      topicType: 'share',
+      share: { attachmentIds: ['attachment-1', 'attachment-2'] },
+    });
+    await createCommunityTopic({
+      title: '求助排查',
+      body: '请帮忙看一下',
+      authorId: 'u1',
+      authorName: '张三',
+      topicType: 'help',
+      help: { expectedTime: '希望本周内' },
+    });
+
+    expect(mockedRequest.mock.calls[0][1].data).toMatchObject({
+      topic_type: 'SHARE',
+      topic_config: { share: { attachment_ids: ['attachment-1', 'attachment-2'] } },
+    });
+    expect(mockedRequest.mock.calls[1][1].data).toMatchObject({
+      topic_type: 'HELP',
+      topic_config: { help: { expected_time: '希望本周内' } },
     });
   });
 

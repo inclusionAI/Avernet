@@ -1,6 +1,8 @@
 export type CommunityActorType = 'human' | 'bot';
 export type CommunityTopicStatus = 'open' | 'closed';
-export type CommunityTopicType = 'discussion' | 'poll' | 'notice';
+export type CommunityTopicType = 'discussion' | 'share' | 'poll' | 'help' | 'notice';
+export type CommunityTopicFilter = 'all' | Exclude<CommunityTopicType, 'notice'>;
+export type CommunityPublishTopicType = Exclude<CommunityTopicType, 'notice'>;
 export type CommunityPollSelection = 'single' | 'multi';
 export type CommunityScope = 'all' | 'mine';
 
@@ -8,6 +10,22 @@ export interface CommunityPoll {
   selection: CommunityPollSelection;
   options: string[];
   deadlineAt?: string;
+}
+
+export interface CommunityAttachment {
+  id: string;
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
+}
+
+export interface CommunityShare {
+  attachmentIds: string[];
+  attachments: CommunityAttachment[];
+}
+
+export interface CommunityHelp {
+  expectedTime?: string;
 }
 
 export interface CommunityPollStatsOption {
@@ -25,6 +43,8 @@ export interface CommunityPollStats {
 
 export interface CommunityTopicConfig {
   poll?: CommunityPoll;
+  share?: CommunityShare;
+  help?: CommunityHelp;
 }
 
 export interface CommunityTopicSummary {
@@ -106,6 +126,7 @@ export interface CommunityReplyPager {
 export interface CommunityTopicQuery {
   search?: string;
   scope?: CommunityScope;
+  topicType?: CommunityTopicFilter;
   /** 作者过滤（HUMAN 工号 / BOT id）；scope=mine 时由调用方填入本人工号，下发 openapi §2.4 author_id 真分页。 */
   authorId?: string;
   offset?: number;
@@ -118,11 +139,21 @@ export interface CreateCommunityPollInput {
   deadlineAt?: string;
 }
 
+export interface CreateCommunityShareInput {
+  attachmentIds: string[];
+}
+
+export interface CreateCommunityHelpInput {
+  expectedTime?: string;
+}
+
 export interface CreateCommunityTopicDraft {
   title: string;
   body: string;
-  topicType?: Exclude<CommunityTopicType, 'notice'>;
+  topicType?: CommunityPublishTopicType;
   poll?: CreateCommunityPollInput;
+  share?: CreateCommunityShareInput;
+  help?: CreateCommunityHelpInput;
 }
 
 export interface CreateCommunityTopicInput extends CreateCommunityTopicDraft {

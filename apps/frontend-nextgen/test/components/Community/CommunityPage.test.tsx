@@ -2,7 +2,7 @@
 import { CommunityPage } from '@/components/Community/CommunityPage';
 import type { CommunityTopic } from '@/domain/community/types';
 import '@testing-library/jest-dom';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 
 const topic: CommunityTopic = {
   id: 'topic-1',
@@ -19,6 +19,7 @@ const topic: CommunityTopic = {
 const mockCommunityState = {
   query: '',
   scope: 'all' as const,
+  topicType: 'all' as const,
   selectedTopic: null as CommunityTopic | null,
   topics: [topic],
   loading: false,
@@ -41,14 +42,17 @@ const mockCommunityState = {
   goToReplyPage: jest.fn(),
   setQuery: jest.fn(),
   setScope: jest.fn(),
+  setTopicType: jest.fn(),
   load: jest.fn(),
   loadMore: jest.fn(),
   publishTopic: jest.fn(),
+  uploadAttachment: jest.fn(),
+  downloadAttachment: jest.fn(),
 };
 
 jest.mock('@/hooks/useCommunity', () => ({
   useCommunity: () => mockCommunityState,
-  COMMUNITY_REPLY_PAGE_SIZE: 20,
+  COMMUNITY_REPLY_PAGE_SIZE: 10,
 }));
 jest.mock('@umijs/max', () => ({ history: { push: jest.fn() } }));
 
@@ -66,6 +70,24 @@ describe('CommunityPage 滚动容器结构', () => {
     const scrollMain = screen.getByRole('main');
     expect(scrollMain).toHaveClass('overflow-y-auto', 'flex-1', 'min-h-0');
     expect(scrollMain.parentElement).toHaveClass('h-full', 'flex', 'flex-col');
+  });
+
+
+  test('首页同时展示五个类型 Tab 和独立的全部/我的范围筛选', () => {
+    render(<CommunityPage />);
+
+    const topicTypeGroup = screen.getByRole('group', { name: '主题类型' });
+    expect(within(topicTypeGroup).getAllByRole('button').map((button) => button.textContent)).toEqual([
+      '全部',
+      '讨论',
+      '分享',
+      '投票',
+      '求助',
+    ]);
+    expect(within(screen.getByRole('group', { name: '主题范围' })).getAllByRole('button')).toHaveLength(2);
+
+    fireEvent.click(within(topicTypeGroup).getByRole('button', { name: '分享' }));
+    expect(mockCommunityState.setTopicType).toHaveBeenCalledWith('share');
   });
 
   test('详情视：回帖滚动 main 必须挂在 h-full flex 外层下', () => {
