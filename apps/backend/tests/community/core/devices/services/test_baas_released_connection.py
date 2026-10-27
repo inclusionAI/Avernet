@@ -21,7 +21,7 @@ def connection_service():
     service._baas_service.get_ws_info.return_value = SimpleNamespace(
         target="runtime:20003", token="test-token", ws_url="wss://example.invalid/ws",
         baas_base_url="https://example.invalid", bot_uuid="bot-test", tenant="test",
-        engine_port=20003, expires_at="2099-01-01T00:00:00Z",
+        engine_port=20003, expires_at="2099-01-01T00:00:00Z", a2a_base_url="",
     )
     return service
 
