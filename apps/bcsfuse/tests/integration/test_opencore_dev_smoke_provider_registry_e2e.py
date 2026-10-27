@@ -154,16 +154,14 @@ class TestDevSmokeProviderRegistryE2E:
         assert "SQLite" in store_type or "InMemory" in store_type, \
             f"Worker registry store should be SQLite or InMemory, got: {store_type}"
 
-    def test_vector_backend_is_faiss_or_inmemory(self):
-        """Test that vector backend is Faiss or InMemory in dev_smoke mode."""
+    def test_vector_backend_is_qdrant_with_sqlite(self):
+        """Local smoke mode must exercise the real supported local backend."""
         from app.bootstrap.application_context import build_application_context
+        from app.infra.public.vectorstores.qdrant_sqlite_vector_store import QdrantSQLiteVectorStore
 
         context = build_application_context(mode="dev_smoke")
-        registry = context.registry
-
-        # Check vector store type
-        vector_store = registry.get("vector_store")
-        store_type = type(vector_store).__name__
-
-        assert "Faiss" in store_type or "InMemory" in store_type, \
-            f"Vector store should be Faiss or InMemory, got: {store_type}"
+        vector_store = context.registry.require("vector_store")
+        try:
+            assert isinstance(vector_store, QdrantSQLiteVectorStore)
+        finally:
+            vector_store.close()

@@ -15,7 +15,7 @@ from app.domain.models.skill_profile import SkillProfile
 from app.domain.models.worker_profile import WorkerProfile, ProfileType
 from app.application.services.worker_vector_index_service import WorkerVectorIndexService
 from app.infra.metadatastores.file_metadata_store_adapter import FileMetadataStoreAdapter
-from app.infra.vectorstores.faiss_vector_store_adapter import FaissVectorStoreAdapter
+from app.infra.public.vectorstores.qdrant_sqlite_vector_store import QdrantSQLiteVectorStore
 
 
 class FakeEmbeddingFunction:
@@ -60,8 +60,8 @@ class TestWorkerVectorIndexIntegration:
 
     @pytest.fixture
     def vector_store(self, dimension):
-        """Create FaissVectorStoreAdapter."""
-        return FaissVectorStoreAdapter(dimension=dimension)
+        """Create QdrantSQLiteVectorStore."""
+        return QdrantSQLiteVectorStore(dimension=dimension)
 
     @pytest.fixture
     def metadata_store(self, temp_dir):
@@ -240,7 +240,7 @@ class TestWorkerVectorIndexIntegration:
     ):
         """Test that data persists correctly after save/load."""
         # Create service and index
-        vector_store = FaissVectorStoreAdapter(dimension=dimension)
+        vector_store = QdrantSQLiteVectorStore(dimension=dimension)
         metadata_store = FileMetadataStoreAdapter(storage_dir=temp_dir)
         service = WorkerVectorIndexService(
             vector_store=vector_store,
@@ -254,7 +254,7 @@ class TestWorkerVectorIndexIntegration:
         service.save(temp_dir)
 
         # Create new service and load
-        vector_store2 = FaissVectorStoreAdapter(dimension=dimension)
+        vector_store2 = QdrantSQLiteVectorStore(dimension=dimension)
         metadata_store2 = FileMetadataStoreAdapter(storage_dir=temp_dir)
         service2 = WorkerVectorIndexService(
             vector_store=vector_store2,
@@ -275,7 +275,7 @@ class TestWorkerVectorIndexIntegration:
         # Verify metadata intact
         record = service2.get_metadata("001:default")
         assert record is not None
-        assert record.vector_id is not None
+        assert service2.vector_store.get(record.profile_key).id == record.profile_key
         assert "python" in record.active_skill_names
 
     def test_update_existing_profile(

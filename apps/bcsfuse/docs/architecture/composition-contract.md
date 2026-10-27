@@ -590,3 +590,15 @@ repositories own their concrete providers, internal configuration, composition
 root, container image, and delivery pipeline. Internal code may depend on this
 public composition API; public code must not import internal packages, services,
 domains, credentials, or runtime state.
+
+
+### Shared retrieval and local storage
+
+TC adapter import paths remain available, reexporting vector values and wrapping
+shared model/storage execution. Composition loads TC environment settings and
+retains its diagnostics; shared providers receive explicit configuration. Generic
+sparse retrieval has no Worker-ID priority; the TC keyword adapter enables it.
+`dev` and `dev_smoke` now compose Qdrant Local with SQLite vector persistence and
+startup rebuilding. Existing FAISS files are left untouched and are not automatic
+migration inputs. Re-sync test Workers into a new local dataset; SQLite snapshots
+replace FAISS snapshot artifacts. No online TC database migration is required.

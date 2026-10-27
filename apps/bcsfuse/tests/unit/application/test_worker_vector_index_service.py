@@ -18,7 +18,7 @@ from app.application.services.worker_vector_index_service import (
     SearchResult,
 )
 from app.infra.metadatastores.file_metadata_store_adapter import FileMetadataStoreAdapter
-from app.infra.vectorstores.faiss_vector_store_adapter import FaissVectorStoreAdapter
+from app.infra.public.vectorstores.qdrant_sqlite_vector_store import QdrantSQLiteVectorStore
 
 
 class TestWorkerVectorIndexService:
@@ -32,8 +32,8 @@ class TestWorkerVectorIndexService:
 
     @pytest.fixture
     def vector_store(self):
-        """Create a FaissVectorStoreAdapter for testing."""
-        return FaissVectorStoreAdapter(dimension=4)
+        """Create a QdrantSQLiteVectorStore for testing."""
+        return QdrantSQLiteVectorStore(dimension=4)
 
     @pytest.fixture
     def metadata_store(self, temp_dir):
@@ -141,24 +141,12 @@ class TestWorkerVectorIndexService:
         assert record.source_root == "/data/workers"
         assert "python" in record.active_skill_names
 
-    def test_index_profiles_updates_vector_id_mapping(
-        self, service, sample_profiles, sample_embeddings
-    ):
-        """Test that indexing updates vector_id mapping."""
+    def test_index_profiles_uses_opaque_profile_keys(self, service, sample_profiles, sample_embeddings):
         service.index_profiles(sample_profiles, sample_embeddings)
-
-        # Get metadata records
-        record1 = service.metadata_store.get("123:default")
-        record2 = service.metadata_store.get("456:default")
-
-        assert record1 is not None
-        assert record1.vector_id is not None
-        assert record2 is not None
-        assert record2.vector_id is not None
-
-        # Verify vector_ids can be looked up
-        results = service.metadata_store.get_by_vector_ids([record1.vector_id])
-        assert len(results) == 1
+        for key in ["123:default", "456:default"]:
+            assert service.metadata_store.get(key).profile_key == key
+            assert service.vector_store.get(key).id == key
+        assert set(service.vector_store.get_vector_ids()) == {"123:default", "456:default"}
 
     def test_index_profiles_mismatched_counts_raises_error(
         self, service, sample_profiles
@@ -335,7 +323,7 @@ class TestWorkerVectorIndexService:
     def test_save_and_load(self, temp_dir, sample_profiles, sample_embeddings):
         """Test saving and loading index."""
         # Create service and index
-        vector_store = FaissVectorStoreAdapter(dimension=4)
+        vector_store = QdrantSQLiteVectorStore(dimension=4)
         metadata_store = FileMetadataStoreAdapter(storage_dir=temp_dir)
         service = WorkerVectorIndexService(
             vector_store=vector_store,
@@ -347,7 +335,7 @@ class TestWorkerVectorIndexService:
         service.save(temp_dir)
 
         # Create new service and load
-        vector_store2 = FaissVectorStoreAdapter(dimension=4)
+        vector_store2 = QdrantSQLiteVectorStore(dimension=4)
         metadata_store2 = FileMetadataStoreAdapter(storage_dir=temp_dir)
         service2 = WorkerVectorIndexService(
             vector_store=vector_store2,
@@ -369,8 +357,7 @@ class TestWorkerVectorIndexService:
         service.save(temp_dir)
 
         # Check vector store files
-        assert (Path(temp_dir) / "index.faiss").exists()
-        assert (Path(temp_dir) / "id_map.json").exists()
+        assert (Path(temp_dir) / "vector_embeddings.sqlite").exists()
 
         # Check metadata store files
         assert (Path(temp_dir) / "metadata.jsonl").exists()
@@ -444,5 +431,4 @@ class TestWorkerVectorIndexService:
 
     def test_search_empty_index(self, service):
         """Test searching empty index."""
-        with pytest.raises(ValueError):
-            service.search_by_vector([0.1, 0.2, 0.3, 0.4], top_k=1)
+        assert service.search_by_vector([0.1, 0.2, 0.3, 0.4], top_k=1) == []

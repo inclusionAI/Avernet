@@ -6,7 +6,7 @@ BCSFuse is a collaboration control plane for AI worker management, providing tas
 
 **IMPORTANT:**
 - This OSS candidate must not use internal DRM/Layotto/Sofa/ZDAS dependencies
-- Do not commit runtime data, logs, SQLite/Faiss/Qdrant storage, or real secrets
+- Do not commit runtime data, logs, SQLite/Qdrant storage, or real secrets
 - Enterprise hosts compose the public TC application with their own providers
 
 ## Quick Start
@@ -32,7 +32,7 @@ export BCSFUSE_AUTH_TOKEN="your-token-here"
 export BCSFUSE_PROVIDER_MODE="runtime"
 python main.py
 
-# Dev mode (SQLite + Faiss)
+# Dev mode (SQLite + Qdrant Local)
 export BCSFUSE_AUTH_TOKEN="your-token-here"
 export BCSFUSE_PROVIDER_MODE="dev"
 python main.py
@@ -66,8 +66,8 @@ curl -H "Authorization: Bearer your-token-here" http://localhost:8765/providers
 | Mode | Database | Vector Store | HTTP Providers | Auth | Use Case |
 |------|----------|--------------|----------------|------|----------|
 | `runtime` | MySQL | QdrantLocal | Real HTTP | Required | Production deployment |
-| `dev` | SQLite | FaissSQLite | Real HTTP | Required | Local development |
-| `dev_smoke` | SQLite | FaissSQLite | Fake/Noop | Required | Offline testing |
+| `dev` | SQLite | Qdrant Local + SQLite | Real HTTP | Required | Local development |
+| `dev_smoke` | SQLite | Qdrant Local + SQLite | Fake/Noop | Required | Offline testing |
 | `test` | InMemory | InMemory | Fake/Noop | Required | CI/CD testing |
 
 ## Authentication
@@ -153,8 +153,8 @@ export BCSFUSE_PROVIDER_MODE="runtime"
 ```bash
 # SQLite (for dev mode, defaults used if not set)
 export BCSFUSE_DATABASE_SQLITE_PATH="/tmp/bcsfuse_dev.db"
-export BCSFUSE_FAISS_INDEX_PATH="/tmp/bcsfuse_faiss.index"
-export BCSFUSE_FAISS_SQLITE_PATH="/tmp/bcsfuse_faiss.db"
+export QDRANT_LOCAL_PATH="/tmp/bcsfuse_qdrant"
+export BCSFUSE_VECTOR_SQLITE_PATH="/tmp/bcsfuse_vectors.db"
 
 # Embedding Provider (optional)
 export EMBEDDING_BASE_URL="http://your-embedding-service:19998"
@@ -234,15 +234,15 @@ export QDRANT_COLLECTION_NAME="worker_profiles"
 
 ### SQLite (Dev Mode)
 
-For development, BCSFuse can use SQLite with Faiss:
+For development, BCSFuse can use SQLite with Qdrant Local:
 
 ```bash
 # SQLite database
 export BCSFUSE_DATABASE_SQLITE_PATH="/tmp/bcsfuse_dev.db"
 
-# Faiss index
-export BCSFUSE_FAISS_INDEX_PATH="/tmp/bcsfuse_faiss.index"
-export BCSFUSE_FAISS_SQLITE_PATH="/tmp/bcsfuse_faiss.db"
+# Qdrant index and SQLite vector records
+export QDRANT_LOCAL_PATH="/tmp/bcsfuse_qdrant"
+export BCSFUSE_VECTOR_SQLITE_PATH="/tmp/bcsfuse_vectors.db"
 ```
 
 ### InMemory (Test Mode)
@@ -367,12 +367,12 @@ grep -R -n -I -E 'Bearer [A-Za-z0-9._-]{12,}|AUTH_TOKEN=.*[^_A-Z]|PASSWORD=.*[^_
 **Use system temp directories:**
 - Qdrant: `/tmp/bcsfuse_qdrant/` or `/var/lib/bcsfuse/qdrant_storage/`
 - SQLite: `/tmp/bcsfuse_dev.db` or `/var/lib/bcsfuse/bcsfuse.db`
-- Faiss: `/tmp/bcsfuse_faiss.index` or `/var/lib/bcsfuse/faiss.index`
+- Qdrant: `/tmp/bcsfuse_qdrant` or `/var/lib/bcsfuse/qdrant`
 
 **WRONG (do NOT use):**
 - Qdrant: `./qdrant_storage/` (in source directory)
 - SQLite: `./data/bcsfuse.db` (in source directory)
-- Faiss: `./faiss.index` (in source directory)
+- Qdrant: `./qdrant_storage` (in source directory)
 
 ### Cleanup Runtime Artifacts
 
@@ -394,7 +394,6 @@ rm -rf /var/folders/*/T/bcsfuse_*
 - `httpx-sse>=0.4.0` - SSE support
 - `requests` - HTTP library
 - `numpy==1.26.4` - Numerical computing
-- `faiss-cpu==1.8.0` - Vector similarity search
 - `qdrant-client>=1.12.0` - Vector database client
 - `mysql-connector-python>=8.0.0` - MySQL driver
 - `apscheduler>=3.10.0` - Task scheduling
@@ -428,7 +427,7 @@ rm -rf /var/folders/*/T/bcsfuse_*
    - OSS candidate only includes Python components
 
 5. **Provider Mode `dev_smoke` vs `test`**
-   - `dev_smoke`: Uses SQLite + Faiss + Fake providers (persistent)
+   - `dev_smoke`: Uses SQLite + Qdrant Local + Fake providers (persistent)
    - `test`: Uses InMemory + Fake providers (ephemeral)
 
 ## Public Candidate Status
@@ -472,3 +471,15 @@ For issues and feature requests, please use the GitHub issue tracker.
 **Document Version:** 1.0
 **Last Updated:** 2026-06-23
 **Status:** OSS Public Candidate
+
+### Local vector store migration
+
+Local `dev` / `dev_smoke` now use Qdrant Local for both dense and keyword
+retrieval, with SQLite as the durable vector/payload source. Startup rebuilds
+indexes before readiness. FAISS is no longer installed or maintained. Existing
+FAISS files are not deleted or imported automatically: re-sync local test Workers
+into a new `BCSFUSE_VECTOR_SQLITE_PATH`, then confirm search before retiring old
+files. Model credentials and dimensions must match the selected local dataset.
+SQLite snapshots use `vector_embeddings.sqlite`; old FAISS snapshots are unsupported.
+Qdrant applies payload filters before top-k, so indexed test records must contain
+the expected runtime state, visibility and other requested filter fields.

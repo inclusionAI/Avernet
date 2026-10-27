@@ -198,12 +198,7 @@ class WorkerVectorIndexService:
             self._vector_store.upsert(vector_points)
 
         if metadata_records:
-            # Update each metadata record with its vector_id
-            for record in metadata_records:
-                vector_id = self._vector_store.get_vector_id(record.profile_key)
-                if vector_id is not None:
-                    record.vector_id = vector_id
-
+            # Qdrant returns the opaque profile key; no positional index ID is needed.
             self._metadata_store.upsert(metadata_records)
 
         return IndexResult(
@@ -245,7 +240,7 @@ class WorkerVectorIndexService:
                 return []
 
         # Perform vector search
-        # Note: FAISS doesn't support filters directly, so we filter post-hoc
+        # Metadata remains owned by the separate metadata store.
         hits = self._vector_store.search(vector, top_k=top_k * 2 if candidate_keys else top_k)
 
         # Combine with metadata and filter

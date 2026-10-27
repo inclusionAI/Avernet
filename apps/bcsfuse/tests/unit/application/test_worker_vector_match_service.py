@@ -60,7 +60,7 @@ from app.application.services.worker_vector_match_service import (
 from app.domain.models.metadata_record import MetadataRecord
 from app.domain.models.vector_point import VectorPoint
 from app.infra.metadatastores.file_metadata_store_adapter import FileMetadataStoreAdapter
-from app.infra.vectorstores.faiss_vector_store_adapter import FaissVectorStoreAdapter
+from app.infra.public.vectorstores.qdrant_sqlite_vector_store import QdrantSQLiteVectorStore
 
 
 class FakeEmbeddingGenerator:
@@ -106,8 +106,8 @@ class TestWorkerVectorMatchService:
 
     @pytest.fixture
     def vector_store(self, dimension):
-        """Create a FaissVectorStoreAdapter for testing."""
-        return FaissVectorStoreAdapter(dimension=dimension)
+        """Create a QdrantSQLiteVectorStore for testing."""
+        return QdrantSQLiteVectorStore(dimension=dimension)
 
     @pytest.fixture
     def metadata_store(self, temp_dir):
@@ -148,10 +148,10 @@ class TestWorkerVectorMatchService:
         ]
 
         points = [
-            VectorPoint(id="staff_001:default", vector=embeddings[0], payload={"staff_id": "001"}),
-            VectorPoint(id="staff_002:default", vector=embeddings[1], payload={"staff_id": "002"}),
-            VectorPoint(id="staff_003:default", vector=embeddings[2], payload={"staff_id": "003"}),
-            VectorPoint(id="staff_004:default", vector=embeddings[3], payload={"staff_id": "004"}),
+            VectorPoint(id="staff_001:default", vector=embeddings[0], payload={"staff_id": "001", "runtime_state": "online", "availability": "public"}),
+            VectorPoint(id="staff_002:default", vector=embeddings[1], payload={"staff_id": "002", "runtime_state": "online", "availability": "public"}),
+            VectorPoint(id="staff_003:default", vector=embeddings[2], payload={"staff_id": "003", "runtime_state": "online", "availability": "public"}),
+            VectorPoint(id="staff_004:default", vector=embeddings[3], payload={"staff_id": "004", "runtime_state": "online", "availability": "public"}),
         ]
 
         records = [
@@ -197,6 +197,13 @@ class TestWorkerVectorMatchService:
             ),
         ]
 
+        # Qdrant applies filters before top-k; index the searchable attributes.
+        for point, record in zip(points, records):
+            point.payload.update({
+                "profile_key": record.profile_key, "profile_id": record.profile_id,
+                "domains": record.domains, "active_skill_names": record.active_skill_names,
+                "suitable_roles": record.suitable_roles,
+            })
         vector_store.upsert(points)
         metadata_store.upsert(records)
 

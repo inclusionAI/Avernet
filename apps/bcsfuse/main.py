@@ -14,8 +14,8 @@ Usage:
 
 Modes:
     - runtime: Production mode with MySQL + Qdrant + Real HTTP providers
-    - dev: Development mode with SQLite + Faiss + Real HTTP providers
-    - dev_smoke: Dev smoke test mode with SQLite + Faiss + Fake/Noop providers (offline)
+    - dev: Development mode with SQLite + Qdrant Local + Real HTTP providers
+    - dev_smoke: Dev smoke test mode with SQLite + Qdrant Local + Fake/Noop providers (offline)
     - test: Test mode with InMemory + Fake/Noop providers
 
 Environment Variables:

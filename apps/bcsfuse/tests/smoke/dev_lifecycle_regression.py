@@ -3,12 +3,12 @@
 S10F Dev Smoke Lifecycle Regression Test
 
 This test validates the complete worker/profile/vector lifecycle in OSS dev_smoke mode:
-1. Uses SQLite stores + FaissSqliteVectorStore (persistent storage)
+1. Uses SQLite stores + QdrantSQLiteVectorStore (persistent storage)
 2. Uses FakeEmbeddingProvider to avoid external HTTP connections
 3. All runtime files written to temporary directory
 4. Validates persistence across app/context rebuild
 5. Worker/profile creation, online/offline, profile activation
-6. Vector indexing with FaissSqlite
+6. Vector indexing with QdrantSQLite
 7. Search stats showing vector_count and indexed_workers
 8. Search functionality
 9. Profile and worker deletion
@@ -35,12 +35,12 @@ def test_dev_smoke_lifecycle_regression():
     """
     S10F Dev Smoke Lifecycle Regression Test
 
-    Tests the complete lifecycle with SQLite + FaissSqlite persistence:
+    Tests the complete lifecycle with SQLite + Qdrant LocalSqlite persistence:
     1. Create temporary directory for all runtime artifacts
-    2. App creation in dev_smoke mode (SQLite + Faiss + Fake/Noop providers)
+    2. App creation in dev_smoke mode (SQLite + Qdrant Local + Fake/Noop providers)
     3. Health check and providers status
     4. Worker and profile CRUD operations
-    5. Vector indexing with FaissSqlite
+    5. Vector indexing with QdrantSQLite
     6. App/context rebuild to validate persistence (SAME temp directory)
     7. Search functionality after rebuild
     8. Cleanup
@@ -57,8 +57,8 @@ def test_dev_smoke_lifecycle_regression():
     # SQLite database path - used by SQLiteWorkerRegistryStore, SQLiteWorkerProfileContentStore, etc.
     os.environ["BCSFUSE_DATABASE_SQLITE_PATH"] = os.path.join(temp_dir, "bcsfuse.db")
     # Faiss vector store paths
-    os.environ["BCSFUSE_FAISS_INDEX_PATH"] = os.path.join(temp_dir, "faiss.index")
-    os.environ["BCSFUSE_FAISS_SQLITE_PATH"] = os.path.join(temp_dir, "faiss_meta.sqlite3")
+    os.environ["QDRANT_LOCAL_PATH"] = os.path.join(temp_dir, "faiss.index")
+    os.environ["BCSFUSE_VECTOR_SQLITE_PATH"] = os.path.join(temp_dir, "faiss_meta.sqlite3")
 
     # Set auth token for dev_smoke mode protected endpoints
     set_test_auth_env(DEV_SMOKE_TOKEN)
@@ -81,7 +81,7 @@ def test_dev_smoke_lifecycle_regression():
             app = create_opensource_app(mode="dev_smoke")
             client = TestClient(app)
             print("✅ App created successfully in dev_smoke mode")
-            print("   Mode: SQLite + Faiss + FakeEmbedding (no external HTTP)")
+            print("   Mode: SQLite + Qdrant Local + FakeEmbedding (no external HTTP)")
         except Exception as e:
             print(f"❌ Failed to create app: {e}")
             import traceback

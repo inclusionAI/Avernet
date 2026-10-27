@@ -414,5 +414,9 @@ class SQLiteVectorPersistenceBackend:
 
         return metadata_map
 
+    def close(self) -> None:
+        """Release the owned SQLite connection on application shutdown."""
+        self._conn.close()
+
 
 __all__ = ["SQLiteVectorPersistenceBackend"]
