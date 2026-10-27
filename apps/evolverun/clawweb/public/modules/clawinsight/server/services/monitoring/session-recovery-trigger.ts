@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { logWorkflowBackground, workflowBackgroundError } from "@avernet/clawweb-shared/server/services/workflow-background-log";
+import { logRepairEvent, repairLogError } from "../repair/common/logging.js";
 import type { SessionRecoveryApi } from "../repair/session-recovery/contracts.js";
 import { SessionRecoveryError } from "../repair/session-recovery/errors.js";
 import { parseRequest } from "../repair/session-recovery/validation.js";
@@ -63,8 +63,8 @@ export function createMonitoringRecoveryTrigger(input: {
         allowed = parseAllowlist(JSON.parse(row.config_json));
       } catch (error) {
         console.error("[monitoring] recovery unavailable", { eventId: event.eventId, reason: "allowlist_unavailable" });
-        logWorkflowBackground("session_recovery_trigger", "configuration_unavailable", { eventId: event.eventId,
-          botId: event.botId, targetEnvironment: event.env, ...workflowBackgroundError(error) });
+        logRepairEvent("session-recovery", "session_recovery_trigger", "configuration_unavailable", { eventId: event.eventId,
+          botId: event.botId, targetEnvironment: event.env, ...repairLogError(error) });
         throw new MonitoringError("NOT_READY", "自愈内测白名单暂不可用或格式无效。");
       }
       if (!allowed.some(entry => targetKey(entry) === targetKey(event))) return;
@@ -93,7 +93,7 @@ export function createMonitoringRecoveryTrigger(input: {
         return;
       }
       if (!input.service) {
-        logWorkflowBackground("session_recovery_task", "CREATE_FAILED", { eventId: event.eventId,
+        logRepairEvent("session-recovery", "session_recovery_task", "CREATE_FAILED", { eventId: event.eventId,
           botId: event.botId, targetEnvironment: event.env, phase: "create", outcome: "failed", count: 1, errorCode: "recovery_not_ready" });
         throw new MonitoringError("NOT_READY", "自愈服务尚未就绪。");
       }

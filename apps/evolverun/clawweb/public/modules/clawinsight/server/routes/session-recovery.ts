@@ -1,5 +1,5 @@
 import { AgentToolCallIdempotencyConflictError, AgentToolCallWorkloadConflictError } from "../repositories/repair/agent-tool-call-record.js";
-import { logWorkflowBackground } from "@avernet/clawweb-shared/server/services/workflow-background-log";
+import { logRepairEvent } from "../services/repair/common/logging.js";
 import { resolveRepairRequestActor } from "../services/repair/common/request-actor.js";
 import { parseAgentExecutionTicket } from "../services/repair/common/agent-execution.js";
 import { AgentToolError } from "../services/repair/common/agent-tools/errors.js";
@@ -25,7 +25,7 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRouterOpti
       if (!supplied) {
         try {
           const request = parseRequest(req.body);
-          if (request.execution_level !== "debug") logWorkflowBackground("session_recovery_task", "CREATE_FAILED", {
+          if (request.execution_level !== "debug") logRepairEvent("session-recovery", "session_recovery_task", "CREATE_FAILED", {
             eventId: request.event_id, botId: request.target.bot_id, targetEnvironment: request.target.env,
             phase: "create", outcome: "failed", count: 1, errorCode: "recovery_not_ready" });
         } catch { /* Invalid input is not a failed online creation; preserve the existing unavailable response below. */ }

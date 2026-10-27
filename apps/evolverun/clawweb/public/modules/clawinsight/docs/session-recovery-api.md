@@ -281,7 +281,7 @@ Agent 根据适用手册及当前现场，确认剩余阻塞满足“转交 Owne
 
 ## 失败监控与排障日志
 
-自愈复用 shared 的 `logWorkflowBackground` / `workflowBackgroundError`，沿用 `[workflow-background]` 单行 JSON、字段白名单、脱敏与原 stdout 输出。内部 Host 仍写入既有 `/home/admin/logs/clawweb/start.log`，不新增 logger、日志文件、轮转或部署配置。
+自愈沿用 `[session-recovery]` 前缀，通过现有 console 输出单行 JSON；Repair 共用执行监测使用 `[agent-execution-monitor]`。日志字段白名单与错误脱敏位于 Repair 的 `common/logging.ts`，不依赖工作流日志或继承工作流上下文。内部 Host 仍写入既有 `/home/admin/logs/clawweb/start.log`，不新增 logger、日志文件、轮转或部署配置。监控继续按 `job`、`event` 筛选，失败事件和计数口径不变。
 
 分钟统计仅筛选 `job=session_recovery_task` 且 `event` 为下表两个值，对 `count` 求和；按事件类型和控制面环境分组。不要按 console 级别筛选：既有后台日志入口统一使用 `console.info`，失败语义在 `event` / `outcome` 中。
 

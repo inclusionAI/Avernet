@@ -1,5 +1,5 @@
 import { resolveTaskControlPlaneEnvironment, type AgentControlPlaneEnvironment } from "../common/task-control-plane.js";
-import { logWorkflowBackground, workflowBackgroundError } from "@avernet/clawweb-shared/server/services/workflow-background-log";
+import { logRepairEvent, repairLogError } from "../common/logging.js";
 import { BotRuntimeError } from "@avernet/clawweb-shared/server/services/bot-runtime";
 import type { AgentRuntimeTargetSnapshot } from "../common/agent-tools/contracts.js";
 import { containsSecret } from "@avernet/clawweb-shared/server/services/redaction";
@@ -49,10 +49,10 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     try { return await this.createTask(request, actor, level); }
     catch (error) {
       if (!(error instanceof SessionRecoveryError || error instanceof BotRuntimeError) || error.status >= 500) {
-        logWorkflowBackground("session_recovery_task", level === "debug" ? "creation_failed" : "CREATE_FAILED", {
+        logRepairEvent("session-recovery", "session_recovery_task", level === "debug" ? "creation_failed" : "CREATE_FAILED", {
           environment: this.deps.controlPlaneEnvironment, eventId: request.event_id, botId: request.target.bot_id,
           targetEnvironment: request.target.env, phase: "create", outcome: "failed", ...(level !== "debug" ? { count: 1 } : {}),
-          ...workflowBackgroundError(error) });
+          ...repairLogError(error) });
       }
       throw error;
     }
@@ -95,13 +95,13 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       if (JSON.stringify(raced.request) !== JSON.stringify(request) || raced.simulation?.inputDigest !== simulation?.inputDigest) this.fail(409, "同一投递标识的请求内容不一致");
       return { event_id: request.event_id, delivery_key: request.delivery_key, status: "accepted", task_id: taskId };
     }
-    logWorkflowBackground("session_recovery_task", "created", { environment: this.deps.controlPlaneEnvironment,
+    logRepairEvent("session-recovery", "session_recovery_task", "created", { environment: this.deps.controlPlaneEnvironment,
       taskId, eventId: request.event_id, botId: request.target.bot_id, targetEnvironment: request.target.env,
       phase: task.phase, status: task.status });
     setImmediate(() => {
       void this.start(task).catch(error => {
-        logWorkflowBackground("session_recovery_task", "startup_result_failed", { environment: this.deps.controlPlaneEnvironment,
-          taskId, eventId: request.event_id, ...workflowBackgroundError(error) });
+        logRepairEvent("session-recovery", "session_recovery_task", "startup_result_failed", { environment: this.deps.controlPlaneEnvironment,
+          taskId, eventId: request.event_id, ...repairLogError(error) });
       });
     });
     return { event_id: request.event_id, delivery_key: request.delivery_key, status: "accepted", task_id: taskId };
@@ -112,8 +112,8 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     if (task.status !== "running" || !this.ownsTask(task)) return;
     try { await this.deps.agent.start(task); }
     catch (error) {
-      logWorkflowBackground("session_recovery_task", "startup_failed", { environment: this.deps.controlPlaneEnvironment,
-        taskId: task.taskId, phase: task.phase, executionId: task.execution?.executionId, ...workflowBackgroundError(error) });
+      logRepairEvent("session-recovery", "session_recovery_task", "startup_failed", { environment: this.deps.controlPlaneEnvironment,
+        taskId: task.taskId, phase: task.phase, executionId: task.execution?.executionId, ...repairLogError(error) });
       const latest = await this.required(task.taskId);
       // A stale dispatcher must not fail a replacement that another worker already owns.
       if (latest.execution?.executionId !== task.execution?.executionId || latest.executionRetry?.retryAt) throw error;
@@ -380,7 +380,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
         timeline: [...value.timeline, this.event("execution", "service", summary, { execution_id: executionId, retryable, failures, retry_at_ms: delay !== undefined ? this.now() + delay : null })] };
     }, finalSummary);
     const retrying = !!task.executionRetry?.retryAt;
-    logWorkflowBackground("session_recovery_task", retrying ? "retry_scheduled"
+    logRepairEvent("session-recovery", "session_recovery_task", retrying ? "retry_scheduled"
       : failureCode && !task.simulation && task.level !== "debug" ? "EXECUTION_FAILED" : "execution_ended", {
       environment: this.deps.controlPlaneEnvironment, taskId, eventId: task.request.event_id,
       botId: task.request.target.bot_id, targetEnvironment: task.request.target.env, phase: task.phase, status: task.status,
@@ -403,8 +403,8 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       let batch: RecoveryStoredTask[];
       try { batch = await this.deps.tasks.listForMaintenance?.(200, cursor) ?? []; }
       catch (error) {
-        logWorkflowBackground("session_recovery_maintenance", "scan_failed", { environment: this.deps.controlPlaneEnvironment,
-          ...workflowBackgroundError(error) });
+        logRepairEvent("session-recovery", "session_recovery_maintenance", "scan_failed", { environment: this.deps.controlPlaneEnvironment,
+          ...repairLogError(error) });
         throw error;
       }
       if (!batch.length) return;
@@ -427,8 +427,8 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
         if (task.status === "running" && (!task.execution || task.execution.state === "ended" || task.executionRetry?.retryAt)
           && (task.executionRetry?.retryAt ?? 0) <= this.now()) await this.start(task);
       } catch (error) {
-        logWorkflowBackground("session_recovery_maintenance", "task_failed", { environment: this.deps.controlPlaneEnvironment,
-          taskId: task.taskId, phase: task.phase, executionId: task.execution?.executionId, ...workflowBackgroundError(error) });
+        logRepairEvent("session-recovery", "session_recovery_maintenance", "task_failed", { environment: this.deps.controlPlaneEnvironment,
+          taskId: task.taskId, phase: task.phase, executionId: task.execution?.executionId, ...repairLogError(error) });
       }
       }
     }
@@ -444,8 +444,8 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       sent = true;
     }
     catch (error) {
-      logWorkflowBackground("session_recovery_notification", "failed", { environment: this.deps.controlPlaneEnvironment,
-        taskId: task.taskId, operation: kind, ...workflowBackgroundError(error) });
+      logRepairEvent("session-recovery", "session_recovery_notification", "failed", { environment: this.deps.controlPlaneEnvironment,
+        taskId: task.taskId, operation: kind, ...repairLogError(error) });
     }
     const current = await this.required(task.taskId);
     await this.mutate(task.taskId, current.version, value => ({ ...value, version: value.version + 1,
@@ -457,8 +457,8 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     if (!event) return;
     try { this.deps.actionNotifier?.after({ taskId: task.taskId, eventId: event.event_id, kind }); }
     catch (error) {
-      logWorkflowBackground("session_recovery_notification", "hook_failed", { environment: this.deps.controlPlaneEnvironment,
-        taskId: task.taskId, operation: kind, ...workflowBackgroundError(error) });
+      logRepairEvent("session-recovery", "session_recovery_notification", "hook_failed", { environment: this.deps.controlPlaneEnvironment,
+        taskId: task.taskId, operation: kind, ...repairLogError(error) });
     }
   }
 
@@ -481,7 +481,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       });
       if (updated) {
         if (previous && (previous.status !== updated.status || previous.phase !== updated.phase)) {
-          logWorkflowBackground("session_recovery_task", "state_changed", { environment: this.deps.controlPlaneEnvironment,
+          logRepairEvent("session-recovery", "session_recovery_task", "state_changed", { environment: this.deps.controlPlaneEnvironment,
             taskId, eventId: updated.request.event_id, phase: updated.phase, status: updated.status,
             executionId: updated.execution?.executionId, jobId: updated.execution?.jobId ?? undefined,
             reason: updated.completionReason, stateVersion: updated.version });
