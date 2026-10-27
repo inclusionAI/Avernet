@@ -31,6 +31,9 @@ from agentclaw.community.adapters.http.openapi_v1.bots.router import router
 from agentclaw.community.adapters.http.openapi_v1.deprecated.auth_status import (
     router as legacy_auth_status_router,
 )
+from agentclaw.community.adapters.http.openapi_v1.deprecated.bots import (
+    router as legacy_engine_config_router,
+)
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.bot_quota_service import BotQuotaServiceProtocol
@@ -274,6 +277,7 @@ def client(
     # Engine config is bots-component work served at an engine-component
     # address, so it hangs off its own router and has to be mounted alongside.
     app.include_router(engine_config_router)
+    app.include_router(legacy_engine_config_router)
     # The retiring GET spelling of the auth-status poll, mounted so the GET
     # tests keep exercising the frozen contract beside its POST replacement.
     app.include_router(legacy_auth_status_router)
@@ -722,6 +726,24 @@ def test_update_engine_config(client, engine_config):
     assert data == {"a": 1}  # echoes the written config
     kw = engine_config.write_bot_config.call_args.kwargs
     assert kw["config"] == {"a": 1} and kw["owner_id"] == "u1"
+
+
+def test_update_engine_config_rejects_empty_object(client, engine_config):
+    response = client.put("/openapi/v1/bots/b1/engine/config", json={})
+    assert response.status_code == 422
+    engine_config.write_bot_config.assert_not_awaited()
+
+
+def test_update_engine_config_rejects_missing_body(client, engine_config):
+    response = client.put("/openapi/v1/bots/b1/engine/config")
+    assert response.status_code == 422
+    engine_config.write_bot_config.assert_not_awaited()
+
+
+def test_legacy_engine_config_accepts_empty_object(client, engine_config):
+    data = _ok(client.put("/openapi/v1/bots/b1/engine-config", json={}))
+    assert data == {}
+    assert engine_config.write_bot_config.call_args.kwargs["config"] == {}
 
 
 def test_mutating_not_found_masked(client, svc):
