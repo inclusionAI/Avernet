@@ -20,8 +20,9 @@ every compose engine-owned passes a reader that says so".
 """
 from __future__ import annotations
 
-from typing import Callable, Collection, Protocol, runtime_checkable
+from typing import Callable, Collection
 
+from agentclaw.community.core.apply_engine.declared_state import DeclaredStateSource
 from agentclaw.community.core.apply_engine.managed_files.store import (
     BOT_DATA_STORE,
     OWNER_ENTITY_TYPE,
@@ -49,20 +50,6 @@ from agentclaw.community.core.config_compose.protocols import (
 SERVED_ENGINE = "teclaw"
 
 
-
-@runtime_checkable
-class DeclaredStateSource(Protocol):
-    """Whether the platform holds a declared state for a bot: the one question ownership turns on.
-
-    A bot whose state the platform declared (today: a bot that carries a
-    stored configuration document; the creation job applied it before the
-    container was provisioned) gets its first artifact from the platform; a
-    bot created without one keeps the engine's own files. The service that
-    owns that declaration answers with its ``get``; the engine names no such
-    service, only this port.
-    """
-
-    def get(self, *, entity_id: str, bot_id: str) -> object | None: ...
 
 class ManagedFilesComposeReader(PlatformOwnershipReader, ManagedFilesReader):
     """The compose-side reader for both seams the composer asks about.

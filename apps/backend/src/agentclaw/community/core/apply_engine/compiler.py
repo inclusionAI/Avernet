@@ -12,6 +12,7 @@ module that registered it.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from abc import abstractmethod
 from typing import TYPE_CHECKING, Any, Collection, Dict, Mapping, Protocol, runtime_checkable
 
 from agentclaw.community.core.apply_engine.constructs import ApplyConstruct
@@ -122,8 +123,13 @@ class DesiredStateCompiler(Protocol):
     compiled at all is ``CompileRefused``, recorded with its reason; any other
     exception is a bug and propagates, which the run service records as a
     failed apply.
+
+    Both members are abstract and the two compilers (``ManifestCompiler``,
+    ``GenomeCompiler``) inherit this port explicitly, so a renamed method
+    fails at construction rather than resolving to a stub.
     """
 
+    @abstractmethod
     def check(self, ctx: ApplyContext, ref: StateRef) -> None:
         """Refuse now what ``compile`` would refuse later, so the caller hears it before an apply id exists.
 
@@ -139,6 +145,7 @@ class DesiredStateCompiler(Protocol):
         """
         ...
 
+    @abstractmethod
     async def compile(
         self, ctx: ApplyContext, ref: StateRef, *, only: Collection[ApplyConstruct] | None = None
     ) -> Compiled:

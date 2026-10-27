@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 from typing import Any, Callable, Collection, Mapping
 
-from agentclaw.community.core.apply_engine.compiler import Compiled, CompileRefused, StateRef
+from agentclaw.community.core.apply_engine.compiler import Compiled, CompileRefused, DesiredStateCompiler, StateRef
 from agentclaw.community.core.apply_engine.constructs import ApplyConstruct, Category, Section
 from agentclaw.community.core.apply_engine.desired_state import DesiredState
 from agentclaw.community.core.apply_engine.context import ApplyContext
@@ -51,7 +51,7 @@ from agentclaw.community.core.skill_center.skill_package import SkillPackageVali
 __all__ = ["ManifestCompiler"]
 
 
-class ManifestCompiler:
+class ManifestCompiler(DesiredStateCompiler):
     """Compiles ``MANIFEST_STATE`` (kind ``manifest``): the bot's stored Manifest document."""
 
     def __init__(

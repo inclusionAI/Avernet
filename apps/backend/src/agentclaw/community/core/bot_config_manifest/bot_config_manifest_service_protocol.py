@@ -34,8 +34,10 @@ from dataclasses import dataclass
 from typing import Any, Optional, Protocol, TYPE_CHECKING, runtime_checkable
 
 from agentclaw.community.core.apply_engine.compiler import StateRef
+from agentclaw.community.core.apply_engine.declared_state import DeclaredStateSource
 from agentclaw.community.core.apply_engine.capabilities import (
     Capabilities,
+    CapabilityResolver,
 )
 from agentclaw.community.core.bot_config_manifest.schema import (
     MAX_DOCUMENT_BYTES,
@@ -89,7 +91,7 @@ __all__ = [
 
 
 @runtime_checkable
-class BotConfigManifestServiceProtocol(Protocol):
+class BotConfigManifestServiceProtocol(CapabilityResolver, DeclaredStateSource, Protocol):
     """Read, replace, clear and describe a bot's configuration manifest."""
 
     @abstractmethod

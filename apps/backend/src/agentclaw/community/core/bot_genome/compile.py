@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Callable, Collection, NoReturn
 
-from agentclaw.community.core.apply_engine.compiler import Compiled, CompileRefused, StateRef
+from agentclaw.community.core.apply_engine.compiler import Compiled, CompileRefused, DesiredStateCompiler, StateRef
 from agentclaw.community.core.apply_engine.constructs import ApplyConstruct
 from agentclaw.community.core.apply_engine.desired_state import (
     CenterSkillVersion,
@@ -126,7 +126,7 @@ def genome_state(promotion_id: str) -> StateRef:
     return StateRef(GENOME_STATE_KIND, promotion_id)
 
 
-class GenomeCompiler:
+class GenomeCompiler(DesiredStateCompiler):
     """Compiles the ``genome`` kind: the revision the referenced promotion delivers."""
 
     def __init__(

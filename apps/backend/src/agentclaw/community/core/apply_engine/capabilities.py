@@ -50,6 +50,7 @@ never look like a verdict about what a bot supports.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from abc import abstractmethod
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Protocol, runtime_checkable
 
 from agentclaw.community.core.apply_engine.constructs import (
@@ -119,11 +120,16 @@ class CapabilityResolver(Protocol):
 
     The engine declares the port; the service that owns a bot's configuration
     answers it with the two entry points this module's own
-    ``resolve_capabilities`` / ``capabilities_for_bot`` back.
+    ``resolve_capabilities`` / ``capabilities_for_bot`` back. The members are
+    abstract and the implementation (``BotConfigManifestServiceProtocol``,
+    hence ``BotConfigManifestService``) inherits this port explicitly, so a
+    renamed method fails at construction rather than resolving to a stub.
     """
 
+    @abstractmethod
     def resolve_capabilities(self, *, active_engine: str | None, bot_type: str | None) -> Capabilities: ...
 
+    @abstractmethod
     def capabilities_for_bot(self, bot: dict[str, Any]) -> Capabilities: ...
 
 
