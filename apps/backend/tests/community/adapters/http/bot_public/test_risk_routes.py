@@ -1,6 +1,8 @@
 from dataclasses import replace
 from types import SimpleNamespace
 
+import pytest
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
@@ -380,3 +382,56 @@ def test_legacy_owner_handoff_allows_reads_and_refuses_submit():
     )
     assert client.post(base + f"/{record_id}/refresh").status_code == 404
     assert repo.row.risk_check_id == record_id and tasks.polls == 0
+
+
+@pytest.mark.asyncio
+async def test_openapi_refresh_keeps_event_loop_responsive(monkeypatch):
+    import asyncio
+    import time
+    from starlette.requests import Request
+    from agentclaw.community.adapters.http.bot_public import risk_routes
+    from agentclaw.community.adapters.http.bot_public.schemas_risk import (
+        RiskRecordResponse,
+    )
+
+    async def authorized(*args, **kwargs):
+        return SimpleNamespace(bot_pk=5)
+
+    async def record(*args, **kwargs):
+        return object()
+
+    class SlowService:
+        def refresh(self, **kwargs):
+            time.sleep(0.3)
+            return "NOT_QUERIED", object()
+
+    monkeypatch.setattr(risk_routes, "_authorize", authorized)
+    monkeypatch.setattr(risk_routes, "_record", record)
+    monkeypatch.setattr(
+        risk_routes,
+        "_view",
+        lambda _: RiskRecordResponse(
+            risk_check_id="r",
+            phase="CHECKING",
+            target={"public_scope": "user", "visibility": "public"},
+        ),
+    )
+    request = Request({"type": "http", "method": "POST", "path": "/", "headers": []})
+    task = asyncio.create_task(
+        risk_routes.refresh_openapi(
+            bot_id="b:e",
+            risk_check_id="r",
+            actor_id="owner",
+            request=request,
+            bots=None,
+            collaborators=None,
+            query=None,
+            service=SlowService(),
+        )
+    )
+    await asyncio.sleep(0.03)
+    assert not task.done(), (
+        "refresh blocked the event loop until the external call completed"
+    )
+    result = await task
+    assert result.data.outcome == "NOT_QUERIED"

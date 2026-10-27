@@ -203,7 +203,9 @@ async def refresh_openapi(
     )
     record = await _record(query, bot, risk_check_id)
     try:
-        outcome, record = service.refresh(bot=bot, actor_id=actor_id, record=record)
+        outcome, record = await asyncio.to_thread(
+            service.refresh, bot=bot, actor_id=actor_id, record=record
+        )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="Not found") from exc
     return envelope(RiskRefreshResponse(outcome=outcome, record=_view(record)), request)
