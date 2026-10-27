@@ -6,10 +6,10 @@ StaticLLMRouter 测试
 
 import pytest
 
-from src.infra.llm.routing.static_llm_router import StaticLLMRouter, ROUTING_RULES
-from src.infra.llm.config.llm_settings import LLMSettings
-from src.domain.models.llm_task_spec import LLMTaskSpec, TaskType
-from src.domain.models.model_profile import ModelTier
+from app.infra.llm.routing.static_llm_router import StaticLLMRouter, ROUTING_RULES
+from app.infra.llm.config.llm_settings import LLMSettings
+from app.domain.models.llm_task_spec import LLMTaskSpec, TaskType
+from app.domain.models.model_profile import ModelTier
 
 
 class TestRoutingRules:

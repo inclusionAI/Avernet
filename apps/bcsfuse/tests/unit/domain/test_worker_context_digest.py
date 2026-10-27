@@ -18,10 +18,10 @@ class TestWorkerContextDigest:
 
     def test_create_context_digest_success(self):
         """测试创建上下文摘要"""
-        from src.domain.models.worker_context_digest import WorkerContextDigest
-        from src.domain.models.retrieval_mode import RetrievalMode
-        from src.domain.models.context_fragment import ContextFragment, ContextKind
-        from src.domain.models.skill_profile import SkillProfile
+        from app.domain.models.worker_context_digest import WorkerContextDigest
+        from app.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.models.context_fragment import ContextFragment, ContextKind
+        from app.domain.models.skill_profile import SkillProfile
 
         fragment = ContextFragment(
             kind=ContextKind.SOUL,
@@ -61,8 +61,8 @@ class TestWorkerContextDigest:
 
     def test_create_context_digest_minimal(self):
         """测试创建最小字段上下文摘要"""
-        from src.domain.models.worker_context_digest import WorkerContextDigest
-        from src.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.models.worker_context_digest import WorkerContextDigest
+        from app.domain.models.retrieval_mode import RetrievalMode
 
         digest = WorkerContextDigest(
             profile_key="staff_001:default",
@@ -84,8 +84,8 @@ class TestWorkerContextDigest:
 
     def test_fragment_scores_dict(self):
         """测试片段评分字典"""
-        from src.domain.models.worker_context_digest import WorkerContextDigest
-        from src.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.models.worker_context_digest import WorkerContextDigest
+        from app.domain.models.retrieval_mode import RetrievalMode
 
         digest = WorkerContextDigest(
             profile_key="staff_001:default",
@@ -105,8 +105,8 @@ class TestWorkerContextDigest:
 
     def test_skill_scores_dict(self):
         """测试技能评分字典"""
-        from src.domain.models.worker_context_digest import WorkerContextDigest
-        from src.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.models.worker_context_digest import WorkerContextDigest
+        from app.domain.models.retrieval_mode import RetrievalMode
 
         digest = WorkerContextDigest(
             profile_key="staff_001:default",
@@ -124,8 +124,8 @@ class TestWorkerContextDigest:
 
     def test_selection_statistics(self):
         """测试选择统计字段"""
-        from src.domain.models.worker_context_digest import WorkerContextDigest
-        from src.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.models.worker_context_digest import WorkerContextDigest
+        from app.domain.models.retrieval_mode import RetrievalMode
 
         digest = WorkerContextDigest(
             profile_key="staff_001:default",
@@ -144,8 +144,8 @@ class TestWorkerContextDigest:
 
     def test_selection_statistics_zero_total(self):
         """测试总数为零时的统计"""
-        from src.domain.models.worker_context_digest import WorkerContextDigest
-        from src.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.models.worker_context_digest import WorkerContextDigest
+        from app.domain.models.retrieval_mode import RetrievalMode
 
         digest = WorkerContextDigest(
             profile_key="staff_001:default",
@@ -164,7 +164,7 @@ class TestWorkerContextDigest:
 
     def test_missing_required_fields_raises_error(self):
         """测试缺少必填字段抛出错误"""
-        from src.domain.models.worker_context_digest import WorkerContextDigest
+        from app.domain.models.worker_context_digest import WorkerContextDigest
 
         with pytest.raises(ValidationError):
             WorkerContextDigest(
@@ -182,8 +182,8 @@ class TestWorkerContextDigest:
 
     def test_extra_fields_forbidden(self):
         """测试额外字段被禁止"""
-        from src.domain.models.worker_context_digest import WorkerContextDigest
-        from src.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.models.worker_context_digest import WorkerContextDigest
+        from app.domain.models.retrieval_mode import RetrievalMode
 
         with pytest.raises(ValidationError):
             WorkerContextDigest(
@@ -196,8 +196,8 @@ class TestWorkerContextDigest:
 
     def test_mode_different_values(self):
         """测试不同模式"""
-        from src.domain.models.worker_context_digest import WorkerContextDigest
-        from src.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.models.worker_context_digest import WorkerContextDigest
+        from app.domain.models.retrieval_mode import RetrievalMode
 
         for mode in [RetrievalMode.AGENT, RetrievalMode.CONFLICT_ALIGNMENT,
                      RetrievalMode.EXPERT_DIAGNOSIS, RetrievalMode.GENERAL]:
@@ -211,10 +211,10 @@ class TestWorkerContextDigest:
 
     def test_has_relevant_content(self):
         """测试是否有相关内容"""
-        from src.domain.models.worker_context_digest import WorkerContextDigest
-        from src.domain.models.retrieval_mode import RetrievalMode
-        from src.domain.models.context_fragment import ContextFragment, ContextKind
-        from src.domain.models.skill_profile import SkillProfile
+        from app.domain.models.worker_context_digest import WorkerContextDigest
+        from app.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.models.context_fragment import ContextFragment, ContextKind
+        from app.domain.models.skill_profile import SkillProfile
 
         # 有 fragments
         digest = WorkerContextDigest(
@@ -264,8 +264,8 @@ class TestWorkerContextDigestReasons:
 
     def test_reasons_list(self):
         """测试原因列表"""
-        from src.domain.models.worker_context_digest import WorkerContextDigest
-        from src.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.models.worker_context_digest import WorkerContextDigest
+        from app.domain.models.retrieval_mode import RetrievalMode
 
         digest = WorkerContextDigest(
             profile_key="staff_001:default",

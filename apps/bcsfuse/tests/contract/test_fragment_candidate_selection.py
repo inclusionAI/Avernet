@@ -6,14 +6,14 @@ import math
 
 import pytest
 
-from src.application.services.worker_vector_match_service import (
+from app.application.services.worker_vector_match_service import (
     FragmentRetrievalConfig,
     WorkerVectorMatchService,
 )
-from src.domain.models.vector_point import VectorPoint
-from src.domain.services.fragment_reranker_service import FragmentRerankerService
-from src.infra.metadatastores.file_metadata_store_adapter import FileMetadataStoreAdapter
-from src.infra.public.vectorstores.qdrant_mysql_vector_store import QdrantMySQLVectorStore
+from app.domain.models.vector_point import VectorPoint
+from app.domain.services.fragment_reranker_service import FragmentRerankerService
+from app.infra.metadatastores.file_metadata_store_adapter import FileMetadataStoreAdapter
+from app.infra.public.vectorstores.qdrant_mysql_vector_store import QdrantMySQLVectorStore
 from tests.unit.infra.test_qdrant_durable_vector_store import FakePersistenceBackend
 
 
@@ -129,7 +129,7 @@ def test_no_rerank_or_failure_keeps_weighted_descending_order(pipeline, caplog, 
         ("weighted3", "profile", .8),
     ], fail=fail)
     service._fragment_config.reranker_model = "controlled"
-    caplog.set_level(logging.INFO, logger="src.application.services.worker_vector_match_service")
+    caplog.set_level(logging.INFO, logger="app.application.services.worker_vector_match_service")
     results = run(service, rerank=rerank)
     assert [r.profile_key for r in results] == ["weighted1:default", "weighted2:default"]
     assert results[0].score > results[1].score
@@ -148,7 +148,7 @@ def test_debug_logs_explain_ranks_admission_and_elimination_without_content(pipe
         ("weighted3", "profile", .8), ("excluded", "profile", 1.0),
     ])
     service._fragment_config.reranker_model = "controlled"
-    caplog.set_level(logging.DEBUG, logger="src.application.services.worker_vector_match_service")
+    caplog.set_level(logging.DEBUG, logger="app.application.services.worker_vector_match_service")
     run(service, excluded_profile_keys=["excluded:default"])
     chunks = [r for r in caplog.records if getattr(r, "retrieval_stage", "") == "candidate_decisions"]
     entries = [entry for record in chunks for entry in record.entries]
@@ -170,7 +170,7 @@ def test_debug_logs_explain_ranks_admission_and_elimination_without_content(pipe
 def test_debug_candidate_decisions_are_chunked_without_losing_tail(pipeline, caplog):
     service, _ = pipeline([(f"worker{i:03}", "full", .99 - i * .001) for i in range(61)])
     service._fragment_config.reranker_model = "controlled"
-    caplog.set_level(logging.DEBUG, logger="src.application.services.worker_vector_match_service")
+    caplog.set_level(logging.DEBUG, logger="app.application.services.worker_vector_match_service")
     run(service, top_k=2)
     chunks = [r for r in caplog.records if getattr(r, "retrieval_stage", "") == "candidate_decisions"]
     assert [len(r.entries) for r in chunks] == [25, 25, 11]

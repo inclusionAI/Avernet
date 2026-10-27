@@ -77,7 +77,7 @@ class TestMySQLBackupRestoreE2E:
     @pytest.fixture
     def source_store(self, mysql_config, qdrant_config):
         """Create a QdrantMySQLVectorStore for source testing."""
-        from src.infra.public.vectorstores.qdrant_mysql_vector_store import (
+        from app.infra.public.vectorstores.qdrant_mysql_vector_store import (
             QdrantMySQLVectorStore,
         )
 
@@ -190,7 +190,7 @@ class TestMySQLBackupRestoreE2E:
         - Verify payload filter works
         """
         store, mysql_config, qdrant_config = source_store
-        from src.domain.models.vector_point import VectorPoint
+        from app.domain.models.vector_point import VectorPoint
 
         # Create source database
         self._mysql_create_database(mysql_config, mysql_config["database"])
@@ -258,8 +258,8 @@ class TestMySQLBackupRestoreE2E:
         - Verify payload filters work
         """
         store, mysql_config, qdrant_config = source_store
-        from src.domain.models.vector_point import VectorPoint
-        from src.infra.public.vectorstores.qdrant_mysql_vector_store import (
+        from app.domain.models.vector_point import VectorPoint
+        from app.infra.public.vectorstores.qdrant_mysql_vector_store import (
             QdrantMySQLVectorStore,
         )
 
@@ -341,8 +341,8 @@ class TestMySQLBackupRestoreE2E:
         - Verify restored MySQL records remain intact
         """
         store, mysql_config, qdrant_config = source_store
-        from src.domain.models.vector_point import VectorPoint
-        from src.infra.public.vectorstores.qdrant_mysql_vector_store import (
+        from app.domain.models.vector_point import VectorPoint
+        from app.infra.public.vectorstores.qdrant_mysql_vector_store import (
             QdrantMySQLVectorStore,
         )
 
@@ -449,7 +449,7 @@ class TestMySQLBackupRestoreE2E:
         - Verify counts match
         """
         store, mysql_config, qdrant_config = source_store
-        from src.domain.models.vector_point import VectorPoint
+        from app.domain.models.vector_point import VectorPoint
 
         # Create source database and seed data
         self._mysql_create_database(mysql_config, mysql_config["database"])
@@ -490,7 +490,7 @@ class TestMySQLBackupRestoreE2E:
 
             try:
                 # Create new store and rebuild
-                from src.infra.public.vectorstores.qdrant_mysql_vector_store import (
+                from app.infra.public.vectorstores.qdrant_mysql_vector_store import (
                     QdrantMySQLVectorStore,
                 )
                 restored_store = QdrantMySQLVectorStore(
@@ -533,7 +533,7 @@ class TestMySQLBackupRestoreE2E:
         - Verify no full payloads are logged
         """
         store, mysql_config, qdrant_config = source_store
-        from src.domain.models.vector_point import VectorPoint
+        from app.domain.models.vector_point import VectorPoint
 
         # Create source database and seed data
         self._mysql_create_database(mysql_config, mysql_config["database"])

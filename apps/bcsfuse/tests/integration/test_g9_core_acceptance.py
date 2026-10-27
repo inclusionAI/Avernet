@@ -9,8 +9,8 @@ from uuid import uuid4
 
 import pytest
 
-from src.domain.models.llm_response import LLMResponse
-from src.domain.models.profile_fusion import GroupConversationSummary
+from app.domain.models.llm_response import LLMResponse
+from app.domain.models.profile_fusion import GroupConversationSummary
 from tests.fixtures.runtime_acceptance import acceptance_run
 from tests.integration.test_isolated_runtime_acceptance import (
     TOKEN,
@@ -54,20 +54,20 @@ class EmptyGroupContext:
 def g9_runtime(isolated_app_factory, monkeypatch, tmp_path):  # noqa: F811 - pytest fixture injection
     @contextmanager
     def open_runtime():
-        from src.application.services.bot_fuse import fusion_expert_chat_service as chat
-        from src.bootstrap.app_factory import _configure_fusion_dependencies
-        from src.infra.config.feature_flags import FeatureFlags
-        from src.interfaces.api.dependencies import fusion_dependencies as dependencies
+        from app.application.services.bot_fuse import fusion_expert_chat_service as chat
+        from app.bootstrap.app_factory import _configure_fusion_dependencies
+        from app.infra.config.feature_flags import FeatureFlags
+        from app.adapters.http.dependencies import fusion_dependencies as dependencies
 
         with isolated_app_factory() as (client, registry, _embedding):
             pool = getattr(registry.require("worker_registry_store"), "_pool", None)
             if pool is not None:
-                from src.infra.public.stores.mysql_fused_profile_store import (
+                from app.infra.public.stores.mysql_fused_profile_store import (
                     MySQLFusedProfileStore,
                 )
                 repository = MySQLFusedProfileStore(connection_pool=pool)
             else:
-                from src.infra.adapters.sqlite_fused_profile_store import (
+                from app.infra.adapters.sqlite_fused_profile_store import (
                     SQLiteFusedProfileStore,
                 )
                 repository = SQLiteFusedProfileStore(str(tmp_path / "fusion.sqlite"))

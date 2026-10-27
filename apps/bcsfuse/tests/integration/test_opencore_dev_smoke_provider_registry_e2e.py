@@ -17,7 +17,7 @@ class TestDevSmokeProviderRegistryE2E:
 
     def test_create_application_context_dev_smoke(self):
         """Test that ApplicationContext can be created in dev_smoke mode."""
-        from src.bootstrap.application_context import build_application_context
+        from app.bootstrap.application_context import build_application_context
 
         context = build_application_context(mode="dev_smoke")
 
@@ -26,7 +26,7 @@ class TestDevSmokeProviderRegistryE2E:
 
     def test_registry_initializes_without_internal_imports(self):
         """Test that provider registry initializes without internal imports."""
-        from src.bootstrap.application_context import build_application_context
+        from app.bootstrap.application_context import build_application_context
 
         context = build_application_context(mode="dev_smoke")
 
@@ -38,7 +38,7 @@ class TestDevSmokeProviderRegistryE2E:
 
     def test_registry_has_required_providers(self):
         """Test that registry has all required providers in dev_smoke mode."""
-        from src.bootstrap.application_context import build_application_context
+        from app.bootstrap.application_context import build_application_context
 
         context = build_application_context(mode="dev_smoke")
         registry = context.registry
@@ -70,7 +70,7 @@ class TestDevSmokeProviderRegistryE2E:
 
     def test_provider_types_are_public_safe(self):
         """Test that all providers in dev_smoke mode are public-safe."""
-        from src.bootstrap.application_context import build_application_context
+        from app.bootstrap.application_context import build_application_context
 
         context = build_application_context(mode="dev_smoke")
         registry = context.registry
@@ -85,7 +85,7 @@ class TestDevSmokeProviderRegistryE2E:
 
     def test_no_external_network_required(self):
         """Test that dev_smoke providers don't require external network."""
-        from src.bootstrap.application_context import build_application_context
+        from app.bootstrap.application_context import build_application_context
 
         # This test should pass without network access
         context = build_application_context(mode="dev_smoke")
@@ -108,7 +108,7 @@ class TestDevSmokeProviderRegistryE2E:
 
     def test_no_internal_package_import_attempted(self):
         """Test that no internal packages are imported during registry build."""
-        from src.bootstrap.application_context import build_application_context
+        from app.bootstrap.application_context import build_application_context
 
         # Track modules before
         modules_before = set(sys.modules.keys())
@@ -142,7 +142,7 @@ class TestDevSmokeProviderRegistryE2E:
 
     def test_database_backend_is_sqlite_or_inmemory(self):
         """Test that database backend is SQLite or InMemory in dev_smoke mode."""
-        from src.bootstrap.application_context import build_application_context
+        from app.bootstrap.application_context import build_application_context
 
         context = build_application_context(mode="dev_smoke")
         registry = context.registry
@@ -156,7 +156,7 @@ class TestDevSmokeProviderRegistryE2E:
 
     def test_vector_backend_is_faiss_or_inmemory(self):
         """Test that vector backend is Faiss or InMemory in dev_smoke mode."""
-        from src.bootstrap.application_context import build_application_context
+        from app.bootstrap.application_context import build_application_context
 
         context = build_application_context(mode="dev_smoke")
         registry = context.registry

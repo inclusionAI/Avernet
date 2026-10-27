@@ -44,7 +44,7 @@ def test_health_no_auth():
     os.environ['BCSFUSE_AUTH_TOKEN'] = TEST_TOKEN
 
     try:
-        from src.bootstrap.opensource_app import create_opensource_app
+        from app.bootstrap.opensource_app import create_opensource_app
         app = create_opensource_app(mode='test')
         client = TestClient(app)
 
@@ -64,7 +64,7 @@ def test_ready_no_auth():
     os.environ['BCSFUSE_AUTH_TOKEN'] = TEST_TOKEN
 
     try:
-        from src.bootstrap.opensource_app import create_opensource_app
+        from app.bootstrap.opensource_app import create_opensource_app
         app = create_opensource_app(mode='test')
         client = TestClient(app)
 
@@ -84,7 +84,7 @@ def test_openapi_no_auth():
     os.environ['BCSFUSE_AUTH_TOKEN'] = TEST_TOKEN
 
     try:
-        from src.bootstrap.opensource_app import create_opensource_app
+        from app.bootstrap.opensource_app import create_opensource_app
         app = create_opensource_app(mode='test')
         client = TestClient(app)
 
@@ -104,7 +104,7 @@ def test_workers_no_auth():
     os.environ['BCSFUSE_AUTH_TOKEN'] = TEST_TOKEN
 
     try:
-        from src.bootstrap.opensource_app import create_opensource_app
+        from app.bootstrap.opensource_app import create_opensource_app
         app = create_opensource_app(mode='test')
         client = TestClient(app)
 
@@ -122,7 +122,7 @@ def test_workers_wrong_token():
     os.environ['BCSFUSE_AUTH_TOKEN'] = TEST_TOKEN
 
     try:
-        from src.bootstrap.opensource_app import create_opensource_app
+        from app.bootstrap.opensource_app import create_opensource_app
         app = create_opensource_app(mode='test')
         client = TestClient(app)
 
@@ -143,7 +143,7 @@ def test_workers_correct_token():
     os.environ['BCSFUSE_AUTH_TOKEN'] = TEST_TOKEN
 
     try:
-        from src.bootstrap.opensource_app import create_opensource_app
+        from app.bootstrap.opensource_app import create_opensource_app
         app = create_opensource_app(mode='test')
         client = TestClient(app)
 
@@ -166,7 +166,7 @@ def test_search_correct_token():
     os.environ['BCSFUSE_AUTH_TOKEN'] = TEST_TOKEN
 
     try:
-        from src.bootstrap.opensource_app import create_opensource_app
+        from app.bootstrap.opensource_app import create_opensource_app
         app = create_opensource_app(mode='test')
         client = TestClient(app)
 
@@ -191,7 +191,7 @@ def test_search_no_auth_test_mode():
     os.environ['BCSFUSE_AUTH_TOKEN'] = TEST_TOKEN
 
     try:
-        from src.bootstrap.opensource_app import create_opensource_app
+        from app.bootstrap.opensource_app import create_opensource_app
         app = create_opensource_app(mode='test')
         client = TestClient(app)
 
@@ -212,7 +212,7 @@ def test_search_no_auth_dev_mode():
     os.environ.pop('BCSFUSE_AUTH_TOKEN', None)
 
     try:
-        from src.bootstrap.opensource_app import create_opensource_app
+        from app.bootstrap.opensource_app import create_opensource_app
         app = create_opensource_app(mode='dev')
         client = TestClient(app)
 
@@ -235,7 +235,7 @@ def test_token_not_in_response():
     os.environ['BCSFUSE_AUTH_TOKEN'] = TEST_TOKEN
 
     try:
-        from src.bootstrap.opensource_app import create_opensource_app
+        from app.bootstrap.opensource_app import create_opensource_app
         app = create_opensource_app(mode='test')
         client = TestClient(app)
 
@@ -280,7 +280,7 @@ def test_no_application_yaml_required():
     os.environ.pop('BCSFUSE_CONFIG_PATH', None)
 
     try:
-        from src.bootstrap.opensource_app import create_opensource_app
+        from app.bootstrap.opensource_app import create_opensource_app
         app = create_opensource_app(mode='test')
         assert app is not None, "Failed to create app without application.yaml"
         print("✅ No configs/application.yaml required")
@@ -297,8 +297,8 @@ def test_no_forbidden_imports():
 
     try:
         # Import app
-        from src.bootstrap.opensource_app import create_opensource_app
-        from src.bootstrap.oss_business_routes import include_oss_business_routes
+        from app.bootstrap.opensource_app import create_opensource_app
+        from app.bootstrap.oss_business_routes import include_oss_business_routes
 
         # Check that internal modules are not imported
         import sys
@@ -335,7 +335,7 @@ def test_no_external_connections():
 
     try:
         # Create app in test mode - should not connect to external services
-        from src.bootstrap.opensource_app import create_opensource_app
+        from app.bootstrap.opensource_app import create_opensource_app
         app = create_opensource_app(mode='test')
 
         # Verify providers are fake/noop (not real HTTP)
@@ -344,19 +344,19 @@ def test_no_external_connections():
         # Check embedding provider
         embedding = registry.get('embedding_provider')
         if embedding:
-            from src.infra.public.embedding.fake_embedding_provider import FakeEmbeddingProvider
+            from app.infra.public.embedding.fake_embedding_provider import FakeEmbeddingProvider
             assert isinstance(embedding, FakeEmbeddingProvider), "Test mode should use FakeEmbeddingProvider"
 
         # Check reranker
         reranker = registry.get('reranker_provider')
         if reranker:
-            from src.infra.public.reranker.noop_reranker import NoopReranker
+            from app.infra.public.reranker.noop_reranker import NoopReranker
             assert isinstance(reranker, NoopReranker), "Test mode should use NoopReranker"
 
         # Check LLM
         llm = registry.get('llm_provider')
         if llm:
-            from src.infra.public.llm.fake_llm_provider import FakeLLMProvider
+            from app.infra.public.llm.fake_llm_provider import FakeLLMProvider
             assert isinstance(llm, FakeLLMProvider), "Test mode should use FakeLLMProvider"
 
         print("✅ No external service connections during app construction")

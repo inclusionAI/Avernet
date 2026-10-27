@@ -16,20 +16,20 @@ class TestInMemoryWorkerRepositoryCreation:
 
     def test_repository_importable(self):
         """验证 InMemoryWorkerRepository 可导入"""
-        from src.infra.repositories.in_memory_worker_repository import InMemoryWorkerRepository
+        from app.infra.repositories.in_memory_worker_repository import InMemoryWorkerRepository
         assert InMemoryWorkerRepository is not None
 
     def test_repository_instantiation(self):
         """验证可以实例化"""
-        from src.infra.repositories.in_memory_worker_repository import InMemoryWorkerRepository
+        from app.infra.repositories.in_memory_worker_repository import InMemoryWorkerRepository
 
         repo = InMemoryWorkerRepository()
         assert repo is not None
 
     def test_repository_implements_interface(self):
         """验证实现了 WorkerRepository 接口"""
-        from src.infra.repositories.in_memory_worker_repository import InMemoryWorkerRepository
-        from src.domain.services.worker_repository import WorkerRepository
+        from app.infra.repositories.in_memory_worker_repository import InMemoryWorkerRepository
+        from app.domain.services.worker_repository import WorkerRepository
 
         repo = InMemoryWorkerRepository()
         assert isinstance(repo, WorkerRepository)
@@ -41,13 +41,13 @@ class TestInMemoryWorkerRepositoryCRUD:
     @pytest.fixture
     def repo(self):
         """创建空仓库"""
-        from src.infra.repositories.in_memory_worker_repository import InMemoryWorkerRepository
+        from app.infra.repositories.in_memory_worker_repository import InMemoryWorkerRepository
         return InMemoryWorkerRepository()
 
     @pytest.fixture
     def sample_worker(self):
         """创建示例 Worker"""
-        from src.domain.models.worker import Worker
+        from app.domain.models.worker import Worker
 
         return Worker(
             id="wrk_test_001",
@@ -98,7 +98,7 @@ class TestInMemoryWorkerRepositoryCRUD:
         """验证可以按类型筛选"""
         repo.create(sample_worker)
 
-        from src.domain.models.worker import Worker
+        from app.domain.models.worker import Worker
         human_worker = Worker(
             id="wrk_human_001",
             type="human",
@@ -123,7 +123,7 @@ class TestInMemoryWorkerRepositoryCRUD:
         repo.create(sample_worker)
 
         # 创建新的 Worker 对象，更新 identity
-        from src.domain.models.worker import WorkerIdentity
+        from app.domain.models.worker import WorkerIdentity
         updated_worker = sample_worker.model_copy(deep=True)
         updated_worker.identity = WorkerIdentity(
             name="Updated Bot",
@@ -162,12 +162,12 @@ class TestInMemoryWorkerRepositoryErrors:
 
     @pytest.fixture
     def repo(self):
-        from src.infra.repositories.in_memory_worker_repository import InMemoryWorkerRepository
+        from app.infra.repositories.in_memory_worker_repository import InMemoryWorkerRepository
         return InMemoryWorkerRepository()
 
     @pytest.fixture
     def sample_worker(self):
-        from src.domain.models.worker import Worker
+        from app.domain.models.worker import Worker
         return Worker(
             id="wrk_test_001",
             type="bot",
@@ -182,7 +182,7 @@ class TestInMemoryWorkerRepositoryErrors:
 
     def test_create_duplicate_raises_error(self, repo, sample_worker):
         """验证创建重复 Worker 抛出异常"""
-        from src.domain.exceptions import DuplicateWorkerException
+        from app.domain.exceptions import DuplicateWorkerException
 
         repo.create(sample_worker)
 
@@ -191,14 +191,14 @@ class TestInMemoryWorkerRepositoryErrors:
 
     def test_update_nonexistent_raises_error(self, repo, sample_worker):
         """验证更新不存在的 Worker 抛出异常"""
-        from src.domain.exceptions import WorkerNotFoundException
+        from app.domain.exceptions import WorkerNotFoundException
 
         with pytest.raises(WorkerNotFoundException):
             repo.update(sample_worker)
 
     def test_delete_nonexistent_raises_error(self, repo):
         """验证删除不存在的 Worker 抛出异常"""
-        from src.domain.exceptions import WorkerNotFoundException
+        from app.domain.exceptions import WorkerNotFoundException
 
         with pytest.raises(WorkerNotFoundException):
             repo.delete("wrk_nonexistent")
@@ -219,8 +219,8 @@ class TestInMemoryWorkerRepositoryFiltering:
     @pytest.fixture
     def repo_with_workers(self):
         """创建包含多个 Worker 的仓库"""
-        from src.infra.repositories.in_memory_worker_repository import InMemoryWorkerRepository
-        from src.domain.models.worker import Worker
+        from app.infra.repositories.in_memory_worker_repository import InMemoryWorkerRepository
+        from app.domain.models.worker import Worker
 
         repo = InMemoryWorkerRepository()
 

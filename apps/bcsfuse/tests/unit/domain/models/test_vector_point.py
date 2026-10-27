@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from src.domain.models.vector_point import VectorPoint
+from app.domain.models.vector_point import VectorPoint
 
 
 class TestVectorPoint:

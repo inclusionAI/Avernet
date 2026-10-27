@@ -4,13 +4,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.domain.models.vector_point import VectorPoint
-from src.domain.services.profile_embedding_indexer import ProfileEmbeddingIndexer
-from src.domain.services.vector_store_adapter import VectorStoreAdapter
-from src.infra.public.vectorstores.faiss_sqlite_vector_store import (
+from app.domain.models.vector_point import VectorPoint
+from app.domain.services.profile_embedding_indexer import ProfileEmbeddingIndexer
+from app.domain.services.vector_store_adapter import VectorStoreAdapter
+from app.infra.public.vectorstores.faiss_sqlite_vector_store import (
     FaissSqliteVectorStore,
 )
-from src.infra.vectorstores.faiss_vector_store_adapter import FaissVectorStoreAdapter
+from app.infra.vectorstores.faiss_vector_store_adapter import FaissVectorStoreAdapter
 
 
 def test_get_returns_latest_live_point_and_defensive_payload(tmp_path):

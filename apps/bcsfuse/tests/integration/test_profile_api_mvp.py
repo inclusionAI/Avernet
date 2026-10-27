@@ -11,16 +11,16 @@ Profile API MVP Tests
 import pytest
 from datetime import datetime
 
-from src.domain.models.worker_profile_content import (
+from app.domain.models.worker_profile_content import (
     ProfileContentType,
     SkillSet,
     WorkerProfileContent,
     WorkerProfileContentList,
 )
-from src.domain.models.worker_profile import SourceType
-from src.infra.adapters.sqlite_worker_profile_content_store import SQLiteWorkerProfileContentStore
-from src.application.services.worker_profile_content_service import WorkerProfileContentService
-from src.infra.worker_profiles.sources.api_worker_profile_source import ApiWorkerProfileSource
+from app.domain.models.worker_profile import SourceType
+from app.infra.adapters.sqlite_worker_profile_content_store import SQLiteWorkerProfileContentStore
+from app.application.services.worker_profile_content_service import WorkerProfileContentService
+from app.infra.worker_profiles.sources.api_worker_profile_source import ApiWorkerProfileSource
 
 
 # ============================================================================

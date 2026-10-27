@@ -52,15 +52,15 @@ from unittest.mock import Mock
 import numpy as np
 import pytest
 
-from src.application.services.worker_vector_match_service import (
+from app.application.services.worker_vector_match_service import (
     WorkerVectorMatchService,
     MatchResult,
     FragmentRetrievalConfig,
 )
-from src.domain.models.metadata_record import MetadataRecord
-from src.domain.models.vector_point import VectorPoint
-from src.infra.metadatastores.file_metadata_store_adapter import FileMetadataStoreAdapter
-from src.infra.vectorstores.faiss_vector_store_adapter import FaissVectorStoreAdapter
+from app.domain.models.metadata_record import MetadataRecord
+from app.domain.models.vector_point import VectorPoint
+from app.infra.metadatastores.file_metadata_store_adapter import FileMetadataStoreAdapter
+from app.infra.vectorstores.faiss_vector_store_adapter import FaissVectorStoreAdapter
 
 
 class FakeEmbeddingGenerator:

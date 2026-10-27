@@ -4,17 +4,17 @@ import math
 
 import pytest
 
-from src.application.services.worker_vector_match_service import (
+from app.application.services.worker_vector_match_service import (
     FragmentRetrievalConfig,
     WorkerVectorMatchService,
 )
-from src.domain.models.vector_point import VectorPoint
-from src.domain.services.fragment_reranker_service import FragmentRerankerService
-from src.domain.services.vector_persistence_backend import VectorChangeSet
-from src.infra.metadatastores.file_metadata_store_adapter import (
+from app.domain.models.vector_point import VectorPoint
+from app.domain.services.fragment_reranker_service import FragmentRerankerService
+from app.domain.services.vector_persistence_backend import VectorChangeSet
+from app.infra.metadatastores.file_metadata_store_adapter import (
     FileMetadataStoreAdapter,
 )
-from src.infra.public.vectorstores.qdrant_mysql_vector_store import (
+from app.infra.public.vectorstores.qdrant_mysql_vector_store import (
     QdrantMySQLVectorStore,
 )
 from tests.unit.infra.test_qdrant_durable_vector_store import FakePersistenceBackend
@@ -80,7 +80,7 @@ def test_filters_apply_before_top_k_and_exact_id_does_not_bypass_them(store):
 
 @pytest.mark.parametrize("requested", ["backend", ["backend"], ["frontend", "backend"]])
 def test_keyword_candidates_preserve_list_payload_matches(store, requested):
-    from src.application.services.keyword_candidate_selection import keyword_candidates
+    from app.application.services.keyword_candidate_selection import keyword_candidates
 
     store.upsert([
         point("match", "编程", domains=["backend", "data"]),
@@ -108,8 +108,8 @@ def test_keyword_candidates_preserve_list_payload_matches(store, requested):
     ({"domains": "backend-services"}, "backend", False),
 ])
 def test_keyword_legacy_filter_uses_contains_any(metadata, requested, expected):
-    from src.application.services.keyword_candidate_selection import _group_keyword_hits
-    from src.domain.models.vector_search_hit import VectorSearchHit
+    from app.application.services.keyword_candidate_selection import _group_keyword_hits
+    from app.domain.models.vector_search_hit import VectorSearchHit
 
     # Legacy providers may return unfiltered hits; application filtering must
     # preserve valid array matches without admitting mismatches or substrings.
@@ -137,7 +137,7 @@ def test_exact_worker_id_first_and_preview_only_records_searchable(store):
 
 @pytest.mark.parametrize("fragment_count", [3, 130])
 def test_keyword_budget_counts_unique_profiles_not_fragments(store, fragment_count):
-    from src.application.services.keyword_candidate_selection import keyword_candidates
+    from app.application.services.keyword_candidate_selection import keyword_candidates
 
     store.upsert(
         [point("many", "编程 " * 10, kind=f"skills:{i}", fragment_type="skills")
@@ -160,7 +160,7 @@ def test_keyword_budget_counts_unique_profiles_not_fragments(store, fragment_cou
 
 
 def test_exact_id_budget_counts_profiles_and_preserves_priority(store):
-    from src.application.services.keyword_candidate_selection import keyword_candidates
+    from app.application.services.keyword_candidate_selection import keyword_candidates
 
     store.upsert(
         [point("target", "irrelevant", kind=f"skills:{i}", fragment_type="skills")
@@ -183,7 +183,7 @@ def test_exact_id_budget_counts_profiles_and_preserves_priority(store):
 
 @pytest.mark.parametrize("scope", ["excluded", "allowed", "disabled_type"])
 def test_keyword_refill_counts_only_eligible_profiles(store, scope):
-    from src.application.services.keyword_candidate_selection import keyword_candidates
+    from app.application.services.keyword_candidate_selection import keyword_candidates
 
     store.upsert(
         [point("many", "编程 " * 10, kind=f"skills:{i}", fragment_type="skills")
@@ -202,7 +202,7 @@ def test_keyword_refill_counts_only_eligible_profiles(store, scope):
 
 
 def test_keyword_refill_failure_does_not_return_a_partial_pool(store, monkeypatch):
-    from src.application.services.keyword_candidate_selection import keyword_candidates
+    from app.application.services.keyword_candidate_selection import keyword_candidates
 
     store.upsert([point("many", "编程", kind=f"skills:{i}", fragment_type="skills")
                   for i in range(3)])
@@ -332,7 +332,7 @@ def seed(store):
 def test_configured_rerank_failure_policy_is_preserved(
     store, tmp_path, policy, failure
 ):
-    from src.domain.services.fragment_reranker_service import RerankFailAction
+    from app.domain.services.fragment_reranker_service import RerankFailAction
 
     seed(store)
     service, model = service_for(store, tmp_path, "fail")
@@ -449,7 +449,7 @@ def test_keyword_outage_preserves_dense_order_and_scores(store, tmp_path, monkey
     ],
 )
 def test_http_model_rejects_invalid_results_instead_of_fabricating_scores(response):
-    from src.infra.reranker.http_reranker import HttpReranker
+    from app.infra.reranker.http_reranker import HttpReranker
 
     with pytest.raises(ValueError):
         HttpReranker()._parse_response(response, 1)
@@ -464,7 +464,7 @@ def test_actual_http_adapter_propagates_failure_but_zero_is_a_valid_model_score(
 ):
     import requests
 
-    from src.infra.reranker.http_reranker import HttpReranker
+    from app.infra.reranker.http_reranker import HttpReranker
 
     seed(store)
     monkeypatch.setenv(

@@ -34,8 +34,8 @@ class TestTaskUnderstandingFlowIntegration:
 
     def test_complete_understanding_flow(self):
         """测试完整闭环：raw_request -> TaskSpec"""
-        from src.application.services.task_understanding_service import TaskUnderstandingService
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.application.services.task_understanding_service import TaskUnderstandingService
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
         from tests.fixtures.task_requests import get_complete_task_input
 
         input_data = get_complete_task_input()
@@ -58,8 +58,8 @@ class TestTaskUnderstandingFlowIntegration:
 
     def test_simple_design_task(self):
         """测试简单设计任务"""
-        from src.application.services.task_understanding_service import TaskUnderstandingService
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.application.services.task_understanding_service import TaskUnderstandingService
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
         from tests.fixtures.task_requests import get_simple_design_input
 
         input_data = get_simple_design_input()
@@ -76,8 +76,8 @@ class TestTaskUnderstandingFlowIntegration:
 
     def test_simple_research_task(self):
         """测试简单调研任务"""
-        from src.application.services.task_understanding_service import TaskUnderstandingService
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.application.services.task_understanding_service import TaskUnderstandingService
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
         from tests.fixtures.task_requests import get_simple_research_input
 
         input_data = get_simple_research_input()
@@ -97,8 +97,8 @@ class TestTaskUnderstandingFlowIntegration:
 
     def test_multi_step_task_decomposition(self):
         """测试多步骤任务拆解"""
-        from src.application.services.task_understanding_service import TaskUnderstandingService
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.application.services.task_understanding_service import TaskUnderstandingService
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
         from tests.fixtures.task_requests import get_multi_step_input
 
         input_data = get_multi_step_input()
@@ -113,8 +113,8 @@ class TestTaskUnderstandingFlowIntegration:
 
     def test_task_with_constraints(self):
         """测试带约束的任务"""
-        from src.application.services.task_understanding_service import TaskUnderstandingService
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.application.services.task_understanding_service import TaskUnderstandingService
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
         from tests.fixtures.task_requests import get_input_with_constraints
 
         input_data = get_input_with_constraints()
@@ -133,8 +133,8 @@ class TestTaskUnderstandingFlowIntegration:
 
     def test_vague_request_produces_unknowns(self):
         """测试模糊请求产生 unknowns"""
-        from src.application.services.task_understanding_service import TaskUnderstandingService
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.application.services.task_understanding_service import TaskUnderstandingService
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
         from tests.fixtures.task_requests import get_vague_input
 
         input_data = get_vague_input()
@@ -157,10 +157,10 @@ class TestTaskUnderstandingFlowIntegration:
 
     def test_high_risk_production_task(self):
         """测试高风险生产环境任务"""
-        from src.application.services.task_understanding_service import TaskUnderstandingService
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.application.services.task_understanding_service import TaskUnderstandingService
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
         from tests.fixtures.task_requests import get_high_risk_production_input
-        from src.domain.models.task_spec import RiskLevel
+        from app.domain.models.task_spec import RiskLevel
 
         input_data = get_high_risk_production_input()
 
@@ -174,10 +174,10 @@ class TestTaskUnderstandingFlowIntegration:
 
     def test_high_risk_external_task(self):
         """测试高风险外部访问任务"""
-        from src.application.services.task_understanding_service import TaskUnderstandingService
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.application.services.task_understanding_service import TaskUnderstandingService
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
         from tests.fixtures.task_requests import get_high_risk_external_input
-        from src.domain.models.task_spec import RiskLevel
+        from app.domain.models.task_spec import RiskLevel
 
         input_data = get_high_risk_external_input()
 
@@ -195,9 +195,9 @@ class TestTaskUnderstandingFlowIntegration:
 
     def test_understander_exception_returns_structured_error(self):
         """测试 understander 抛异常时返回结构化错误"""
-        from src.application.services.task_understanding_service import TaskUnderstandingService
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
-        from src.domain.models.task_understanding_result import TaskUnderstandingResult
+        from app.application.services.task_understanding_service import TaskUnderstandingService
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.domain.models.task_understanding_result import TaskUnderstandingResult
 
         # 创建会抛异常的 understander
         class BrokenUnderstander:
@@ -222,8 +222,8 @@ class TestTaskUnderstandingFlowIntegration:
 
     def test_context_enriches_understanding(self):
         """测试上下文丰富理解"""
-        from src.application.services.task_understanding_service import TaskUnderstandingService
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.application.services.task_understanding_service import TaskUnderstandingService
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
         from tests.fixtures.task_requests import get_input_with_context
 
         input_data = get_input_with_context()
@@ -237,9 +237,9 @@ class TestTaskUnderstandingFlowIntegration:
 
     def test_context_reduces_unknowns(self):
         """测试上下文减少 unknowns"""
-        from src.application.services.task_understanding_service import TaskUnderstandingService
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.application.services.task_understanding_service import TaskUnderstandingService
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         understander = BaselineTaskUnderstander()
         service = TaskUnderstandingService(understander=understander)
@@ -264,8 +264,8 @@ class TestTaskUnderstandingFlowIntegration:
 
     def test_worker_hints_preserved(self):
         """测试 worker hints 被保留"""
-        from src.application.services.task_understanding_service import TaskUnderstandingService
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.application.services.task_understanding_service import TaskUnderstandingService
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
         from tests.fixtures.task_requests import get_input_with_worker_hints
 
         input_data = get_input_with_worker_hints()
@@ -284,8 +284,8 @@ class TestTaskUnderstandingFlowIntegration:
 
     def test_well_defined_task_has_fewer_unknowns(self):
         """测试明确定义的任务有较少 unknowns"""
-        from src.application.services.task_understanding_service import TaskUnderstandingService
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.application.services.task_understanding_service import TaskUnderstandingService
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
         from tests.fixtures.task_requests import get_vague_input, get_clear_defined_input
 
         vague_input = get_vague_input()
@@ -306,10 +306,10 @@ class TestTaskUnderstandingFlowIntegration:
 
     def test_source_prompt_preserved(self):
         """测试原始请求被保留"""
-        from src.application.services.task_understanding_service import TaskUnderstandingService
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.application.services.task_understanding_service import TaskUnderstandingService
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
         from tests.fixtures.task_requests import REQUEST_SIMPLE_DESIGN
-        from src.domain.models.task_understanding_input import TaskUnderstandingInput
+        from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
         input_data = TaskUnderstandingInput(raw_request=REQUEST_SIMPLE_DESIGN)
 
@@ -328,8 +328,8 @@ class TestTaskUnderstandingFlowIntegration:
 
     def test_success_criteria_inferred_from_deliverables(self):
         """测试从交付物推断成功标准"""
-        from src.application.services.task_understanding_service import TaskUnderstandingService
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.application.services.task_understanding_service import TaskUnderstandingService
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
         from tests.fixtures.task_requests import get_simple_research_input
 
         input_data = get_simple_research_input()
@@ -351,8 +351,8 @@ class TestTaskUnderstandingFlowIntegration:
 
     def test_capabilities_inferred_from_task_type(self):
         """测试从任务类型推断能力"""
-        from src.application.services.task_understanding_service import TaskUnderstandingService
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.application.services.task_understanding_service import TaskUnderstandingService
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
         from tests.fixtures.task_requests import get_simple_design_input
 
         input_data = get_simple_design_input()
@@ -372,8 +372,8 @@ class TestTaskUnderstandingFlowIntegration:
 
     def test_warnings_aggregated_for_unknowns(self):
         """测试 unknowns 产生 warnings"""
-        from src.application.services.task_understanding_service import TaskUnderstandingService
-        from src.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
+        from app.application.services.task_understanding_service import TaskUnderstandingService
+        from app.infra.understanders.baseline_task_understander import BaselineTaskUnderstander
         from tests.fixtures.task_requests import get_vague_input
 
         input_data = get_vague_input()

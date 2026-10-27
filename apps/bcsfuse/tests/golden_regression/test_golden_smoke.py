@@ -25,7 +25,7 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
-from src.interfaces.api.app import app
+from app.adapters.http.app import app
 
 
 class TestGoldenStartup:
@@ -57,10 +57,10 @@ class TestGoldenG1:
 
     def test_g1_minimal_fusion_request(self):
         """验证 G1 最小融合请求可以通过"""
-        from src.domain.models.fusion_request import FusionRequest, FuseOptions
-        from src.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext
-        from src.domain.models.fusion_result import Perspective
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.domain.models.fusion_request import FusionRequest, FuseOptions
+        from app.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext
+        from app.domain.models.fusion_result import Perspective
+        from app.application.services.group_fusion_service import GroupFusionService
 
         # Mock provider
         class MockProvider(PerspectiveProvider):
@@ -91,9 +91,9 @@ class TestGoldenG2:
 
     def test_g2_minimal_conflict_alignment(self):
         """验证 G2 最小冲突对齐请求可以通过"""
-        from src.domain.models.fusion_result import Perspective
-        from src.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.domain.models.fusion_result import Perspective
+        from app.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext
+        from app.application.services.group_fusion_service import GroupFusionService
 
         # Mock provider with conflict perspectives
         class MockProvider(PerspectiveProvider):
@@ -127,7 +127,7 @@ class TestGoldenG2:
 
         service = GroupFusionService(provider=MockProvider())
 
-        from src.domain.models.fusion_request import FusionRequest
+        from app.domain.models.fusion_request import FusionRequest
         request = FusionRequest(
             question="如何优化系统架构？",
             participants=["dev", "pm"],
@@ -145,9 +145,9 @@ class TestGoldenG5:
 
     def test_g5_minimal_expert_diagnosis(self):
         """验证 G5 最小专家诊断请求可以通过"""
-        from src.domain.models.fusion_result import Perspective
-        from src.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.domain.models.fusion_result import Perspective
+        from app.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext
+        from app.application.services.group_fusion_service import GroupFusionService
 
         # Mock expert provider
         class MockExpertProvider(PerspectiveProvider):
@@ -163,7 +163,7 @@ class TestGoldenG5:
 
         service = GroupFusionService(provider=MockExpertProvider())
 
-        from src.domain.models.fusion_request import FusionRequest
+        from app.domain.models.fusion_request import FusionRequest
         request = FusionRequest(
             question="系统性能优化方案评估",
             participants=["dba", "security"],
@@ -221,14 +221,14 @@ class TestGoldenStage1Rules:
     def test_g5_filters_offline_workers(self):
         """验证 G5 默认候选过滤 offline worker 接口存在"""
         # 验证 filter 服务可导入
-        from src.application.services.registry_aware_worker_filter import RegistryAwareWorkerFilter
+        from app.application.services.registry_aware_worker_filter import RegistryAwareWorkerFilter
         assert RegistryAwareWorkerFilter is not None
         # 详细逻辑在 tests/integration/test_registry_aware_filtering.py 中验证
 
     def test_explicit_offline_participant_warning(self):
         """验证显式 offline participant 返回 warning 接口存在"""
         # 验证 checker 服务可导入
-        from src.application.services.participant_availability_checker import ParticipantAvailabilityChecker
+        from app.application.services.participant_availability_checker import ParticipantAvailabilityChecker
         assert ParticipantAvailabilityChecker is not None
         # 详细逻辑在 tests/integration/test_fusion_offline_participant_warning.py 中验证
 
@@ -242,8 +242,8 @@ class TestGoldenRealEmbedding:
     )
     def test_real_embedding_minimal_flow(self):
         """验证 real embedding 主链路（如果配置齐全）"""
-        from src.infra.embedding.config.embedding_settings import EmbeddingSettings
-        from src.infra.embedding.providers.real_provider import RealEmbeddingProvider
+        from app.infra.embedding.config.embedding_settings import EmbeddingSettings
+        from app.infra.embedding.providers.real_provider import RealEmbeddingProvider
 
         settings = EmbeddingSettings()
 
@@ -270,7 +270,7 @@ class TestGoldenRealEmbedding:
 
     def test_real_embedding_skip_when_not_configured(self):
         """验证 embedding 未配置时，测试明确 skip（不允许假通过）"""
-        from src.infra.embedding.config.embedding_settings import EmbeddingSettings
+        from app.infra.embedding.config.embedding_settings import EmbeddingSettings
 
         # 如果配置齐全，这个测试不应该 skip
         settings = EmbeddingSettings()

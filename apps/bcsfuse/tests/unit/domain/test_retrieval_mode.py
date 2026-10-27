@@ -17,7 +17,7 @@ class TestRetrievalMode:
 
     def test_retrieval_mode_values(self):
         """测试枚举值定义，对齐 fusion_mode"""
-        from src.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.models.retrieval_mode import RetrievalMode
 
         # 对齐 fusion_mode 的三个值
         assert RetrievalMode.AGENT == "agent"
@@ -29,7 +29,7 @@ class TestRetrievalMode:
 
     def test_retrieval_mode_from_string(self):
         """测试从字符串创建枚举"""
-        from src.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.models.retrieval_mode import RetrievalMode
 
         assert RetrievalMode("agent") == RetrievalMode.AGENT
         assert RetrievalMode("conflict_alignment") == RetrievalMode.CONFLICT_ALIGNMENT
@@ -38,14 +38,14 @@ class TestRetrievalMode:
 
     def test_retrieval_mode_invalid_value(self):
         """测试无效枚举值"""
-        from src.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.models.retrieval_mode import RetrievalMode
 
         with pytest.raises(ValueError):
             RetrievalMode("invalid_mode")
 
     def test_retrieval_mode_is_string_enum(self):
         """测试是字符串枚举"""
-        from src.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.models.retrieval_mode import RetrievalMode
 
         # 应该可以当作字符串使用
         assert RetrievalMode.AGENT.value == "agent"
@@ -53,7 +53,7 @@ class TestRetrievalMode:
 
     def test_retrieval_mode_fusion_modes(self):
         """测试 fusion 相关的模式列表"""
-        from src.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.models.retrieval_mode import RetrievalMode
 
         fusion_modes = RetrievalMode.fusion_modes()
 
@@ -67,7 +67,7 @@ class TestRetrievalMode:
 
     def test_retrieval_mode_from_fusion_mode(self):
         """测试从 fusion_mode 字符串转换"""
-        from src.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.models.retrieval_mode import RetrievalMode
 
         # 对齐 fusion_request 中的 fusion_mode 值
         assert RetrievalMode.from_fusion_mode("agent") == RetrievalMode.AGENT

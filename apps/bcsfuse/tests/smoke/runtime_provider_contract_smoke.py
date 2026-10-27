@@ -96,7 +96,7 @@ class TestRuntimeProviderContract(unittest.TestCase):
 
     def test_01_runtime_registry_builds_no_internal_imports(self):
         """Test that runtime provider registry builds without forbidden imports."""
-        from src.bootstrap.opensource import build_opensource_provider_registry
+        from app.bootstrap.opensource import build_opensource_provider_registry
 
         # Build registry (should not attempt MySQL/Qdrant connection yet - lazy)
         registry = build_opensource_provider_registry(mode="runtime")
@@ -107,8 +107,8 @@ class TestRuntimeProviderContract(unittest.TestCase):
 
     def test_02_embedding_provider_request_format(self):
         """Test RealEmbeddingProvider sends correct request to fake server."""
-        from src.infra.public.embedding.real_embedding_provider import RealEmbeddingProvider
-        from src.infra.embedding.config.embedding_settings import EmbeddingSettings
+        from app.infra.public.embedding.real_embedding_provider import RealEmbeddingProvider
+        from app.infra.embedding.config.embedding_settings import EmbeddingSettings
 
         # Create embedding provider
         settings = EmbeddingSettings(
@@ -138,8 +138,8 @@ class TestRuntimeProviderContract(unittest.TestCase):
 
     def test_03_embedding_provider_auth_header_sent(self):
         """Test that embedding provider sends Authorization header."""
-        from src.infra.public.embedding.real_embedding_provider import RealEmbeddingProvider
-        from src.infra.embedding.config.embedding_settings import EmbeddingSettings
+        from app.infra.public.embedding.real_embedding_provider import RealEmbeddingProvider
+        from app.infra.embedding.config.embedding_settings import EmbeddingSettings
 
         settings = EmbeddingSettings(
             base_url=self.fake_server.base_url,
@@ -160,11 +160,11 @@ class TestRuntimeProviderContract(unittest.TestCase):
 
     def test_04_embedding_provider_error_401(self):
         """Test embedding provider handles 401 error correctly."""
-        from src.infra.public.embedding.real_embedding_provider import (
+        from app.infra.public.embedding.real_embedding_provider import (
             RealEmbeddingProvider,
             EmbeddingAPIError,
         )
-        from src.infra.embedding.config.embedding_settings import EmbeddingSettings
+        from app.infra.embedding.config.embedding_settings import EmbeddingSettings
 
         # Set error mode
         self.fake_server.set_error_mode("embed_401")
@@ -192,11 +192,11 @@ class TestRuntimeProviderContract(unittest.TestCase):
 
     def test_05_embedding_provider_error_malformed(self):
         """Test embedding provider handles malformed response correctly."""
-        from src.infra.public.embedding.real_embedding_provider import (
+        from app.infra.public.embedding.real_embedding_provider import (
             RealEmbeddingProvider,
             EmbeddingAPIError,
         )
-        from src.infra.embedding.config.embedding_settings import EmbeddingSettings
+        from app.infra.embedding.config.embedding_settings import EmbeddingSettings
 
         # Set error mode
         self.fake_server.set_error_mode("embed_malformed")
@@ -221,7 +221,7 @@ class TestRuntimeProviderContract(unittest.TestCase):
 
     def test_06_reranker_provider_request_format(self):
         """Test HttpReranker sends correct request to fake server."""
-        from src.infra.public.reranker.http_reranker import HttpReranker
+        from app.infra.public.reranker.http_reranker import HttpReranker
 
         # Create reranker provider
         reranker = HttpReranker()
@@ -245,7 +245,7 @@ class TestRuntimeProviderContract(unittest.TestCase):
 
     def test_07_reranker_provider_auth_header_sent(self):
         """Test that reranker provider sends Authorization header."""
-        from src.infra.public.reranker.http_reranker import HttpReranker
+        from app.infra.public.reranker.http_reranker import HttpReranker
 
         reranker = HttpReranker()
 
@@ -257,7 +257,7 @@ class TestRuntimeProviderContract(unittest.TestCase):
 
     def test_08_reranker_provider_error_500(self):
         """Test reranker provider handles 500 error gracefully."""
-        from src.infra.public.reranker.http_reranker import HttpReranker
+        from app.infra.public.reranker.http_reranker import HttpReranker
 
         # Set error mode
         self.fake_server.set_error_mode("rerank_500")
@@ -277,10 +277,10 @@ class TestRuntimeProviderContract(unittest.TestCase):
 
     def test_09_llm_provider_request_format(self):
         """Test AnthropicCompatibleProvider sends correct request to fake server."""
-        from src.infra.public.llm.anthropic_compatible_provider import AnthropicCompatibleProvider
-        from src.infra.llm.config.llm_settings import LLMSettings
-        from src.domain.models.llm_request import LLMRequest
-        from src.domain.models.llm_task_spec import LLMTaskSpec, TaskType
+        from app.infra.public.llm.anthropic_compatible_provider import AnthropicCompatibleProvider
+        from app.infra.llm.config.llm_settings import LLMSettings
+        from app.domain.models.llm_request import LLMRequest
+        from app.domain.models.llm_task_spec import LLMTaskSpec, TaskType
 
         # Create LLM provider
         settings = LLMSettings(
@@ -312,10 +312,10 @@ class TestRuntimeProviderContract(unittest.TestCase):
 
     def test_10_llm_provider_auth_header_sent(self):
         """Test that LLM provider sends Authorization headers."""
-        from src.infra.public.llm.anthropic_compatible_provider import AnthropicCompatibleProvider
-        from src.infra.llm.config.llm_settings import LLMSettings
-        from src.domain.models.llm_request import LLMRequest
-        from src.domain.models.llm_task_spec import LLMTaskSpec, TaskType
+        from app.infra.public.llm.anthropic_compatible_provider import AnthropicCompatibleProvider
+        from app.infra.llm.config.llm_settings import LLMSettings
+        from app.domain.models.llm_request import LLMRequest
+        from app.domain.models.llm_task_spec import LLMTaskSpec, TaskType
 
         settings = LLMSettings(
             base_url=self.fake_server.base_url,
@@ -342,13 +342,13 @@ class TestRuntimeProviderContract(unittest.TestCase):
 
     def test_11_llm_provider_error_500(self):
         """Test LLM provider handles 500 error correctly."""
-        from src.infra.public.llm.anthropic_compatible_provider import (
+        from app.infra.public.llm.anthropic_compatible_provider import (
             AnthropicCompatibleProvider,
             AnthropicProviderError,
         )
-        from src.infra.llm.config.llm_settings import LLMSettings
-        from src.domain.models.llm_request import LLMRequest
-        from src.domain.models.llm_task_spec import LLMTaskSpec, TaskType
+        from app.infra.llm.config.llm_settings import LLMSettings
+        from app.domain.models.llm_request import LLMRequest
+        from app.domain.models.llm_task_spec import LLMTaskSpec, TaskType
 
         # Set error mode
         self.fake_server.set_error_mode("llm_500")
@@ -382,8 +382,8 @@ class TestRuntimeProviderContract(unittest.TestCase):
 
     def test_12_no_real_external_service_called(self):
         """Test that we only use fake server, not real services."""
-        from src.infra.public.embedding.real_embedding_provider import RealEmbeddingProvider
-        from src.infra.embedding.config.embedding_settings import EmbeddingSettings
+        from app.infra.public.embedding.real_embedding_provider import RealEmbeddingProvider
+        from app.infra.embedding.config.embedding_settings import EmbeddingSettings
 
         # Verify base_url is our fake server
         self.assertTrue(self.fake_server.base_url.startswith("http://127.0.0.1:"))
@@ -417,7 +417,7 @@ class TestRuntimeProviderContract(unittest.TestCase):
         before_imports = set(sys.modules.keys())
 
         # Import runtime provider registry
-        from src.bootstrap.opensource import build_opensource_provider_registry
+        from app.bootstrap.opensource import build_opensource_provider_registry
 
         # Build registry (should not import forbidden modules)
         registry = build_opensource_provider_registry(mode="runtime")
@@ -456,8 +456,8 @@ class TestRuntimeProviderContract(unittest.TestCase):
 
     def test_14_config_contract_uses_yaml_env(self):
         """Test that runtime mode uses YamlEnvConfigProvider."""
-        from src.bootstrap.opensource import build_opensource_provider_registry
-        from src.infra.public.config.yaml_env_config_provider import YamlEnvConfigProvider
+        from app.bootstrap.opensource import build_opensource_provider_registry
+        from app.infra.public.config.yaml_env_config_provider import YamlEnvConfigProvider
 
         registry = build_opensource_provider_registry(mode="runtime")
         config = registry.get("config")
@@ -466,8 +466,8 @@ class TestRuntimeProviderContract(unittest.TestCase):
 
     def test_15_auth_provider_is_simple_token(self):
         """Test that runtime mode uses SimpleTokenAuthProvider."""
-        from src.bootstrap.opensource import build_opensource_provider_registry
-        from src.infra.public.auth.simple_token_auth_provider import SimpleTokenAuthProvider
+        from app.bootstrap.opensource import build_opensource_provider_registry
+        from app.infra.public.auth.simple_token_auth_provider import SimpleTokenAuthProvider
 
         registry = build_opensource_provider_registry(mode="runtime")
         auth = registry.get("auth")

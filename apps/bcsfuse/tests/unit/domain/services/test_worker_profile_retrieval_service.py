@@ -15,11 +15,11 @@ from unittest.mock import Mock
 
 import pytest
 
-from src.domain.models.context_fragment import ContextFragment, ContextKind
-from src.domain.models.retrieval_mode import RetrievalMode
-from src.domain.models.scoring_signal import ScoringSignal, SignalType
-from src.domain.models.skill_profile import SkillProfile
-from src.domain.models.worker_profile import WorkerProfile, ProfileType
+from app.domain.models.context_fragment import ContextFragment, ContextKind
+from app.domain.models.retrieval_mode import RetrievalMode
+from app.domain.models.scoring_signal import ScoringSignal, SignalType
+from app.domain.models.skill_profile import SkillProfile
+from app.domain.models.worker_profile import WorkerProfile, ProfileType
 
 
 class MockWorkerProfileSource:
@@ -30,7 +30,7 @@ class MockWorkerProfileSource:
 
     def scan(self):
         """Scan all profiles"""
-        from src.domain.models.worker_profile import WorkerProfileScanResult
+        from app.domain.models.worker_profile import WorkerProfileScanResult
         return WorkerProfileScanResult(profiles=self._profiles)
 
     def get_profile(self, staff_id: str, profile_id: str) -> Optional[WorkerProfile]:
@@ -98,7 +98,7 @@ class TestRetrievalResult:
 
     def test_create_retrieval_result_success(self):
         """测试创建检索结果"""
-        from src.domain.services.worker_profile_retrieval_service import RetrievalResult
+        from app.domain.services.worker_profile_retrieval_service import RetrievalResult
 
         profile = create_test_profile(
             staff_id="001",
@@ -130,7 +130,7 @@ class TestRetrievalResult:
 
     def test_retrieval_result_with_multiple_signals(self):
         """测试带多个信号的检索结果"""
-        from src.domain.services.worker_profile_retrieval_service import RetrievalResult
+        from app.domain.services.worker_profile_retrieval_service import RetrievalResult
 
         profile = create_test_profile(
             staff_id="002",
@@ -204,7 +204,7 @@ class TestWorkerProfileRetrievalService:
 
     def test_retrieve_profiles_basic(self, mock_source):
         """测试基本检索功能"""
-        from src.domain.services.worker_profile_retrieval_service import (
+        from app.domain.services.worker_profile_retrieval_service import (
             WorkerProfileRetrievalService,
         )
 
@@ -222,7 +222,7 @@ class TestWorkerProfileRetrievalService:
 
     def test_retrieve_profiles_returns_sorted_by_score(self, mock_source):
         """测试结果按分数排序"""
-        from src.domain.services.worker_profile_retrieval_service import (
+        from app.domain.services.worker_profile_retrieval_service import (
             WorkerProfileRetrievalService,
         )
 
@@ -239,7 +239,7 @@ class TestWorkerProfileRetrievalService:
 
     def test_retrieve_profiles_respects_top_k(self, mock_source):
         """测试 top_k 限制"""
-        from src.domain.services.worker_profile_retrieval_service import (
+        from app.domain.services.worker_profile_retrieval_service import (
             WorkerProfileRetrievalService,
         )
 
@@ -255,7 +255,7 @@ class TestWorkerProfileRetrievalService:
 
     def test_retrieve_mode_agent(self, mock_source):
         """测试 AGENT 模式检索"""
-        from src.domain.services.worker_profile_retrieval_service import (
+        from app.domain.services.worker_profile_retrieval_service import (
             WorkerProfileRetrievalService,
         )
 
@@ -273,7 +273,7 @@ class TestWorkerProfileRetrievalService:
 
     def test_retrieve_mode_conflict_alignment(self, mock_source):
         """测试 CONFLICT_ALIGNMENT 模式检索"""
-        from src.domain.services.worker_profile_retrieval_service import (
+        from app.domain.services.worker_profile_retrieval_service import (
             WorkerProfileRetrievalService,
         )
 
@@ -290,7 +290,7 @@ class TestWorkerProfileRetrievalService:
 
     def test_retrieve_mode_expert_diagnosis(self, mock_source):
         """测试 EXPERT_DIAGNOSIS 模式检索"""
-        from src.domain.services.worker_profile_retrieval_service import (
+        from app.domain.services.worker_profile_retrieval_service import (
             WorkerProfileRetrievalService,
         )
 
@@ -308,7 +308,7 @@ class TestWorkerProfileRetrievalService:
 
     def test_retrieve_generates_scoring_signals(self, mock_source):
         """测试生成评分信号"""
-        from src.domain.services.worker_profile_retrieval_service import (
+        from app.domain.services.worker_profile_retrieval_service import (
             WorkerProfileRetrievalService,
         )
 
@@ -330,7 +330,7 @@ class TestWorkerProfileRetrievalService:
 
     def test_retrieve_with_skill_filter(self, mock_source):
         """测试基于技能过滤"""
-        from src.domain.services.worker_profile_retrieval_service import (
+        from app.domain.services.worker_profile_retrieval_service import (
             WorkerProfileRetrievalService,
         )
 
@@ -350,7 +350,7 @@ class TestWorkerProfileRetrievalService:
 
     def test_retrieve_with_profile_keys(self, mock_source):
         """测试指定 profile keys"""
-        from src.domain.services.worker_profile_retrieval_service import (
+        from app.domain.services.worker_profile_retrieval_service import (
             WorkerProfileRetrievalService,
         )
 
@@ -415,7 +415,7 @@ class TestModeAwareScoring:
 
     def test_g5_prioritizes_domain_diversity(self, diverse_source):
         """测试 G5 优先领域多样性"""
-        from src.domain.services.worker_profile_retrieval_service import (
+        from app.domain.services.worker_profile_retrieval_service import (
             WorkerProfileRetrievalService,
         )
 
@@ -442,7 +442,7 @@ class TestModeAwareScoring:
 
     def test_g1_focuses_on_direct_relevance(self, diverse_source):
         """测试 G1 关注直接相关性"""
-        from src.domain.services.worker_profile_retrieval_service import (
+        from app.domain.services.worker_profile_retrieval_service import (
             WorkerProfileRetrievalService,
         )
 
@@ -467,7 +467,7 @@ class TestRetrievalServiceIntegration:
 
     def test_retrieve_all_modes(self):
         """测试所有模式的检索"""
-        from src.domain.services.worker_profile_retrieval_service import (
+        from app.domain.services.worker_profile_retrieval_service import (
             WorkerProfileRetrievalService,
         )
 
@@ -492,7 +492,7 @@ class TestRetrievalServiceIntegration:
 
     def test_retrieve_empty_profiles(self):
         """测试空 profiles 检索"""
-        from src.domain.services.worker_profile_retrieval_service import (
+        from app.domain.services.worker_profile_retrieval_service import (
             WorkerProfileRetrievalService,
         )
 

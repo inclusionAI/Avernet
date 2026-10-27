@@ -1,5 +1,5 @@
 import pytest
-from src.providers.public.vector_index_startup_provider import (
+from app.providers.public.vector_index_startup_provider import (
     VectorIndexStartupProvider,
 )
 

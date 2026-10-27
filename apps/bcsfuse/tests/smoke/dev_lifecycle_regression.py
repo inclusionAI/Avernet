@@ -67,7 +67,7 @@ def test_dev_smoke_lifecycle_regression():
 
     try:
         # Import here to avoid import side effects
-        from src.bootstrap.opensource_app import create_opensource_app
+        from app.bootstrap.opensource_app import create_opensource_app
 
         print("\n" + "=" * 80)
         print("S10F Dev Smoke Lifecycle Regression Test")

@@ -2,8 +2,8 @@
 
 from unittest.mock import Mock
 
-from src.application.services.worker_vector_match_service import MatchResult
-from src.domain.models.metadata_record import MetadataRecord
+from app.application.services.worker_vector_match_service import MatchResult
+from app.domain.models.metadata_record import MetadataRecord
 
 
 def vector_dependencies(profiles):

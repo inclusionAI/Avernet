@@ -40,14 +40,14 @@ class TestWorkerProfilingServiceBasics:
 
     def test_service_importable(self):
         """测试 Service 可导入"""
-        from src.application.services.worker_profiling_service import WorkerProfilingService
+        from app.application.services.worker_profiling_service import WorkerProfilingService
 
         assert WorkerProfilingService is not None
 
     def test_service_initializes_with_extractor(self):
         """测试 Service 需要 extractor 依赖"""
-        from src.application.services.worker_profiling_service import WorkerProfilingService
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.application.services.worker_profiling_service import WorkerProfilingService
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
 
         extractor = BaselineProfileExtractor()
         service = WorkerProfilingService(extractor=extractor)
@@ -60,9 +60,9 @@ class TestSingleSourceProfiling:
 
     def test_profile_single_soul_document(self):
         """测试汇总单一 SOUL 文档结果"""
-        from src.application.services.worker_profiling_service import WorkerProfilingService
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.application.services.worker_profiling_service import WorkerProfilingService
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -90,9 +90,9 @@ class TestSingleSourceProfiling:
 
     def test_profile_single_rules_document(self):
         """测试汇总单一 RULES 文档结果"""
-        from src.application.services.worker_profiling_service import WorkerProfilingService
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.application.services.worker_profiling_service import WorkerProfilingService
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -115,9 +115,9 @@ class TestSingleSourceProfiling:
 
     def test_profile_single_memory_document(self):
         """测试汇总单一 MEMORY 文档结果"""
-        from src.application.services.worker_profiling_service import WorkerProfilingService
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.application.services.worker_profiling_service import WorkerProfilingService
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -146,9 +146,9 @@ class TestMultipleSourceProfiling:
 
     def test_profile_multiple_documents(self):
         """测试汇总多个文档结果"""
-        from src.application.services.worker_profiling_service import WorkerProfilingService
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.application.services.worker_profiling_service import WorkerProfilingService
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -183,9 +183,9 @@ class TestMultipleSourceProfiling:
 
     def test_profile_with_metadata_sources(self):
         """测试汇总文档和元数据来源"""
-        from src.application.services.worker_profiling_service import WorkerProfilingService
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.application.services.worker_profiling_service import WorkerProfilingService
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -236,9 +236,9 @@ class TestPartialSuccess:
 
     def test_partial_success_with_missing_sections(self):
         """测试部分成功：缺少某些节"""
-        from src.application.services.worker_profiling_service import WorkerProfilingService
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.application.services.worker_profiling_service import WorkerProfilingService
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -263,9 +263,9 @@ class TestPartialSuccess:
 
     def test_partial_success_with_warnings(self):
         """测试部分成功：有 warnings 但无 errors"""
-        from src.application.services.worker_profiling_service import WorkerProfilingService
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.application.services.worker_profiling_service import WorkerProfilingService
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -293,9 +293,9 @@ class TestWarningAggregation:
 
     def test_warnings_from_extractor_preserved(self):
         """测试 extractor 返回的 warnings 被保留"""
-        from src.application.services.worker_profiling_service import WorkerProfilingService
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.application.services.worker_profiling_service import WorkerProfilingService
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -320,9 +320,9 @@ class TestWarningAggregation:
 
     def test_warnings_from_multiple_documents_aggregated(self):
         """测试多文档 warnings 聚合"""
-        from src.application.services.worker_profiling_service import WorkerProfilingService
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.application.services.worker_profiling_service import WorkerProfilingService
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -357,9 +357,9 @@ class TestErrorAggregation:
 
     def test_errors_from_extractor_preserved(self):
         """测试 extractor 返回的 errors 被保留"""
-        from src.application.services.worker_profiling_service import WorkerProfilingService
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.application.services.worker_profiling_service import WorkerProfilingService
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -386,9 +386,9 @@ class TestSourceReferencesPreserved:
 
     def test_capabilities_have_source_references(self):
         """测试能力抽取结果保留 source references"""
-        from src.application.services.worker_profiling_service import WorkerProfilingService
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.application.services.worker_profiling_service import WorkerProfilingService
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -412,9 +412,9 @@ class TestSourceReferencesPreserved:
 
     def test_constraints_have_source_references(self):
         """测试约束抽取结果保留 source references"""
-        from src.application.services.worker_profiling_service import WorkerProfilingService
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.application.services.worker_profiling_service import WorkerProfilingService
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -438,9 +438,9 @@ class TestSourceReferencesPreserved:
 
     def test_memory_episodes_have_source_references(self):
         """测试记忆片段抽取结果保留 source references"""
-        from src.application.services.worker_profiling_service import WorkerProfilingService
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.application.services.worker_profiling_service import WorkerProfilingService
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -468,9 +468,9 @@ class TestEmptyAndInvalidInputs:
 
     def test_empty_documents_raises_validation_error(self):
         """测试空文档列表在输入验证时失败"""
-        from src.application.services.worker_profiling_service import WorkerProfilingService
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import ProfilingInput
+        from app.application.services.worker_profiling_service import WorkerProfilingService
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import ProfilingInput
         from pydantic import ValidationError
 
         # ProfilingInput 本身不允许空文档列表
@@ -479,9 +479,9 @@ class TestEmptyAndInvalidInputs:
 
     def test_whitespace_only_document_still_processes(self):
         """测试只有空白内容的文档仍然处理"""
-        from src.application.services.worker_profiling_service import WorkerProfilingService
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.application.services.worker_profiling_service import WorkerProfilingService
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -498,14 +498,14 @@ class TestExtractorExceptionHandling:
 
     def test_extractor_raises_exception_returns_error(self):
         """测试 extractor 抛出异常时返回 error"""
-        from src.application.services.worker_profiling_service import WorkerProfilingService
-        from src.domain.models.profiling_input import (
+        from app.application.services.worker_profiling_service import WorkerProfilingService
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
         )
-        from src.domain.services.profile_extractor import ProfileExtractor
-        from src.domain.models.profiling_result import WorkerProfileExtractionResult
+        from app.domain.services.profile_extractor import ProfileExtractor
+        from app.domain.models.profiling_result import WorkerProfileExtractionResult
 
         # 创建一个会抛出异常的 mock extractor
         class BrokenExtractor:
@@ -530,13 +530,13 @@ class TestExtractorExceptionHandling:
 
     def test_extractor_returns_result_with_errors(self):
         """测试 extractor 返回带有 errors 的结果"""
-        from src.application.services.worker_profiling_service import WorkerProfilingService
-        from src.domain.models.profiling_input import (
+        from app.application.services.worker_profiling_service import WorkerProfilingService
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
         )
-        from src.domain.models.profiling_result import (
+        from app.domain.models.profiling_result import (
             WorkerProfileExtractionResult,
             ExtractionError,
         )
@@ -575,9 +575,9 @@ class TestDuplicateHandling:
 
     def test_duplicate_capabilities_are_deduplicated(self):
         """测试重复能力被去重"""
-        from src.application.services.worker_profiling_service import WorkerProfilingService
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.application.services.worker_profiling_service import WorkerProfilingService
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,

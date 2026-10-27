@@ -5,14 +5,14 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-from avernet_search.api.errors import SearchOverloaded, SearchUnavailable
-from avernet_search.api.models import SearchCommand, VerifiedIdentity
-from avernet_search.http import create_search_router
+from search_core.api.errors import SearchOverloaded, SearchUnavailable
+from search_core.api.models import SearchCommand, VerifiedIdentity
+from search_core.adapters.http import create_search_router
 from fastapi import Request
 from fastapi.testclient import TestClient
-from src.application.search.service import TcSearchApplication
-from src.bootstrap.app_factory import create_bcsfuse_app
-from src.domain.models.candidate_recommendation import (
+from app.application.search.service import TcSearchApplication
+from app.bootstrap.app_factory import create_bcsfuse_app
+from app.domain.models.candidate_recommendation import (
     CandidateRecommendation,
     CandidateRecommendationResponse,
 )

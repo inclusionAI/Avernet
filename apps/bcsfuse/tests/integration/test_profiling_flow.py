@@ -34,8 +34,8 @@ class TestProfilingFlowIntegration:
 
     def test_complete_profiling_flow(self):
         """测试完整闭环：SOUL + RULES + MEMORY + skills + resources"""
-        from src.application.services.worker_profiling_service import WorkerProfilingService
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.application.services.worker_profiling_service import WorkerProfilingService
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
         from tests.fixtures.profiling_documents import get_complete_profiling_input
         from tests.fixtures.profiling_results import assert_complete_result
 
@@ -55,8 +55,8 @@ class TestProfilingFlowIntegration:
 
     def test_partial_success_with_empty_rules(self):
         """测试部分成功：有 SOUL 但 RULES 为空噪音"""
-        from src.application.services.worker_profiling_service import WorkerProfilingService
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.application.services.worker_profiling_service import WorkerProfilingService
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
         from tests.fixtures.profiling_documents import get_partial_profiling_input
 
         input_data = get_partial_profiling_input()
@@ -76,10 +76,10 @@ class TestProfilingFlowIntegration:
 
     def test_noisy_document_still_works(self):
         """测试噪音文档仍能正常抽取"""
-        from src.application.services.worker_profiling_service import WorkerProfilingService
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.application.services.worker_profiling_service import WorkerProfilingService
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
         from tests.fixtures.profiling_documents import SOUL_NOISY
-        from src.domain.models.profiling_input import MarkdownDocument, DocType, ProfilingInput
+        from app.domain.models.profiling_input import MarkdownDocument, DocType, ProfilingInput
 
         soul_doc = MarkdownDocument(doc_type=DocType.SOUL, content=SOUL_NOISY)
         input_data = ProfilingInput(worker_id="wrk_noisy_001", documents=[soul_doc])
@@ -98,8 +98,8 @@ class TestProfilingFlowIntegration:
 
     def test_deduplication_of_skills_and_resources(self):
         """测试技能和资源去重"""
-        from src.application.services.worker_profiling_service import WorkerProfilingService
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.application.services.worker_profiling_service import WorkerProfilingService
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
         from tests.fixtures.profiling_documents import get_duplicate_input
         from tests.fixtures.profiling_results import assert_deduplication_worked
 
@@ -115,9 +115,9 @@ class TestProfilingFlowIntegration:
 
     def test_multiple_domains_are_merged(self):
         """测试多个领域被正确合并"""
-        from src.application.services.worker_profiling_service import WorkerProfilingService
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.application.services.worker_profiling_service import WorkerProfilingService
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -148,8 +148,8 @@ class TestProfilingFlowIntegration:
 
     def test_source_references_preserved_in_complete_flow(self):
         """测试完整流程中 source references 被保留"""
-        from src.application.services.worker_profiling_service import WorkerProfilingService
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.application.services.worker_profiling_service import WorkerProfilingService
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
         from tests.fixtures.profiling_documents import get_complete_profiling_input
         from tests.fixtures.profiling_results import assert_source_references_valid
 
@@ -165,10 +165,10 @@ class TestProfilingFlowIntegration:
 
     def test_capability_source_locatable(self):
         """测试能力的来源可定位"""
-        from src.application.services.worker_profiling_service import WorkerProfilingService
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.application.services.worker_profiling_service import WorkerProfilingService
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
         from tests.fixtures.profiling_documents import SOUL_COMPLETE
-        from src.domain.models.profiling_input import MarkdownDocument, DocType, ProfilingInput
+        from app.domain.models.profiling_input import MarkdownDocument, DocType, ProfilingInput
 
         soul_doc = MarkdownDocument(doc_type=DocType.SOUL, content=SOUL_COMPLETE)
         input_data = ProfilingInput(worker_id="wrk_source_001", documents=[soul_doc])
@@ -200,13 +200,13 @@ class TestProfilingFlowIntegration:
 
     def test_extractor_exception_returns_structured_error(self):
         """测试 extractor 抛异常时返回结构化错误"""
-        from src.application.services.worker_profiling_service import WorkerProfilingService
-        from src.domain.models.profiling_input import (
+        from app.application.services.worker_profiling_service import WorkerProfilingService
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
         )
-        from src.domain.models.profiling_result import WorkerProfileExtractionResult
+        from app.domain.models.profiling_result import WorkerProfileExtractionResult
 
         # 创建会抛异常的 extractor
         class BrokenExtractor:
@@ -237,10 +237,10 @@ class TestProfilingFlowIntegration:
 
     def test_empty_document_produces_warnings(self):
         """测试空文档产生警告"""
-        from src.application.services.worker_profiling_service import WorkerProfilingService
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.application.services.worker_profiling_service import WorkerProfilingService
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
         from tests.fixtures.profiling_documents import SOUL_EMPTY
-        from src.domain.models.profiling_input import MarkdownDocument, DocType, ProfilingInput
+        from app.domain.models.profiling_input import MarkdownDocument, DocType, ProfilingInput
 
         soul_doc = MarkdownDocument(doc_type=DocType.SOUL, content=SOUL_EMPTY)
         input_data = ProfilingInput(worker_id="wrk_empty_001", documents=[soul_doc])
@@ -263,10 +263,10 @@ class TestProfilingFlowIntegration:
 
     def test_warnings_are_aggregated(self):
         """测试 warnings 被正确聚合"""
-        from src.application.services.worker_profiling_service import WorkerProfilingService
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.application.services.worker_profiling_service import WorkerProfilingService
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
         from tests.fixtures.profiling_documents import SOUL_EMPTY, RULES_EMPTY
-        from src.domain.models.profiling_input import MarkdownDocument, DocType, ProfilingInput
+        from app.domain.models.profiling_input import MarkdownDocument, DocType, ProfilingInput
 
         soul_doc = MarkdownDocument(doc_type=DocType.SOUL, content=SOUL_EMPTY)
         rules_doc = MarkdownDocument(doc_type=DocType.RULES, content=RULES_EMPTY)
@@ -290,9 +290,9 @@ class TestProfilingFlowIntegration:
 
     def test_soul_extraction_independently(self):
         """独立测试 SOUL.md 抽取"""
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
         from tests.fixtures.profiling_documents import SOUL_COMPLETE
-        from src.domain.models.profiling_input import MarkdownDocument, DocType, ProfilingInput
+        from app.domain.models.profiling_input import MarkdownDocument, DocType, ProfilingInput
 
         soul_doc = MarkdownDocument(doc_type=DocType.SOUL, content=SOUL_COMPLETE)
         input_data = ProfilingInput(worker_id="wrk_soul_only", documents=[soul_doc])
@@ -307,9 +307,9 @@ class TestProfilingFlowIntegration:
 
     def test_rules_extraction_independently(self):
         """独立测试 RULES.md 抽取"""
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
         from tests.fixtures.profiling_documents import RULES_COMPLETE
-        from src.domain.models.profiling_input import MarkdownDocument, DocType, ProfilingInput
+        from app.domain.models.profiling_input import MarkdownDocument, DocType, ProfilingInput
 
         rules_doc = MarkdownDocument(doc_type=DocType.RULES, content=RULES_COMPLETE)
         input_data = ProfilingInput(worker_id="wrk_rules_only", documents=[rules_doc])
@@ -322,9 +322,9 @@ class TestProfilingFlowIntegration:
 
     def test_memory_extraction_independently(self):
         """独立测试 MEMORY.md 抽取"""
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
         from tests.fixtures.profiling_documents import MEMORY_COMPLETE
-        from src.domain.models.profiling_input import MarkdownDocument, DocType, ProfilingInput
+        from app.domain.models.profiling_input import MarkdownDocument, DocType, ProfilingInput
 
         memory_doc = MarkdownDocument(doc_type=DocType.MEMORY, content=MEMORY_COMPLETE)
         input_data = ProfilingInput(worker_id="wrk_memory_only", documents=[memory_doc])

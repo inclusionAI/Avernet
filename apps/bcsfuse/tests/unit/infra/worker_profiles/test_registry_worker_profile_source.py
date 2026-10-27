@@ -6,8 +6,8 @@ Unit Tests for RegistryWorkerProfileSource
 
 import pytest
 
-from src.infra.worker_profiles.sources.registry_worker_profile_source import RegistryWorkerProfileSource
-from src.domain.models.worker import (
+from app.infra.worker_profiles.sources.registry_worker_profile_source import RegistryWorkerProfileSource
+from app.domain.models.worker import (
     Worker,
     WorkerType,
     WorkerIdentity,
@@ -17,8 +17,8 @@ from src.domain.models.worker import (
     Availability,
     TrustLevel,
 )
-from src.domain.models.worker_lifecycle_state import WorkerLifecycleState
-from src.domain.models.worker_runtime_state import WorkerRuntimeState
+from app.domain.models.worker_lifecycle_state import WorkerLifecycleState
+from app.domain.models.worker_runtime_state import WorkerRuntimeState
 
 
 def create_test_worker(

@@ -7,9 +7,9 @@ import httpx
 import pytest
 from fastapi import BackgroundTasks, FastAPI
 from fastapi.testclient import TestClient
-from src.bootstrap.opensource_app import create_opensource_app
-from src.infra.public.observability.trace_middleware import TraceIdMiddleware
-from src.infra.trace_context import get_trace_id, set_trace_id
+from app.bootstrap.opensource_app import create_opensource_app
+from app.infra.public.observability.trace_middleware import TraceIdMiddleware
+from app.infra.trace_context import get_trace_id, set_trace_id
 
 
 def test_online_request_logs_server_duration_with_trace(caplog):
@@ -17,7 +17,7 @@ def test_online_request_logs_server_duration_with_trace(caplog):
     app.add_middleware(TraceIdMiddleware)
 
     def background_probe():
-        logging.getLogger("src.infra.public.observability.trace_middleware").info(
+        logging.getLogger("app.infra.public.observability.trace_middleware").info(
             "[ONLINE-TIMING] phase=background_probe observed_trace_id=%s", get_trace_id(),
         )
 
@@ -26,7 +26,7 @@ def test_online_request_logs_server_duration_with_trace(caplog):
         background_tasks.add_task(background_probe)
         return {"worker_id": worker_id}
 
-    caplog.set_level(logging.INFO, logger="src.infra.public.observability.trace_middleware")
+    caplog.set_level(logging.INFO, logger="app.infra.public.observability.trace_middleware")
     with TestClient(app) as client:
         response = client.put("/v1/workers/bot-1/online", headers={"X-Trace-ID": "online-probe"})
 

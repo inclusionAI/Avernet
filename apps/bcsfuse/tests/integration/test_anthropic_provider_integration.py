@@ -16,13 +16,13 @@ import pytest
 from unittest.mock import Mock, patch
 import httpx
 
-from src.infra.llm.providers.anthropic_compatible_provider import (
+from app.infra.llm.providers.anthropic_compatible_provider import (
     AnthropicCompatibleProvider,
     AnthropicProviderError,
     AnthropicAuthError,
 )
-from src.domain.models.llm_request import LLMRequest
-from src.domain.models.llm_task_spec import LLMTaskSpec, TaskType
+from app.domain.models.llm_request import LLMRequest
+from app.domain.models.llm_task_spec import LLMTaskSpec, TaskType
 
 
 # =============================================================================
@@ -221,13 +221,13 @@ class TestG1RealLLMIntegration:
 
     def test_g1_with_real_llm_recommendation(self):
         """G1 使用真实 LLM 生成 Recommendation"""
-        from src.application.services.group_fusion_service import GroupFusionService
-        from src.application.services.fusion_recommendation_service import FusionRecommendationService
-        from src.application.services.llm_gateway_service import LLMGatewayService
-        from src.infra.llm.routing.static_llm_router import StaticLLMRouter
-        from src.infra.llm.config.llm_settings import LLMSettings
-        from src.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext
-        from src.domain.models.fusion_result import Perspective
+        from app.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.fusion_recommendation_service import FusionRecommendationService
+        from app.application.services.llm_gateway_service import LLMGatewayService
+        from app.infra.llm.routing.static_llm_router import StaticLLMRouter
+        from app.infra.llm.config.llm_settings import LLMSettings
+        from app.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext
+        from app.domain.models.fusion_result import Perspective
 
         # 创建真实 Provider
         settings = LLMSettings()
@@ -255,7 +255,7 @@ class TestG1RealLLMIntegration:
         )
 
         # 执行融合
-        from src.domain.models.fusion_request import FusionRequest
+        from app.domain.models.fusion_request import FusionRequest
         request = FusionRequest(
             question="这个方案是否可以在下个迭代上线?",
             participants=["dba", "security"],

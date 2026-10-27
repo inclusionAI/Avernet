@@ -10,14 +10,14 @@ from __future__ import annotations
 
 import pytest
 
-from src.application.services.team_composition_service import TeamCompositionService
-from src.domain.services.matchmaker import Matchmaker
-from src.domain.models.composition_input import CompositionInput
-from src.domain.models.composition_result import CompositionResult
-from src.domain.models.task_spec import TaskSpec, RiskLevel
-from src.domain.models.plan_draft import PlanDraft, PlanStep
-from src.domain.models.candidate_bundle import CandidateBundle
-from src.domain.models.worker import (
+from app.application.services.team_composition_service import TeamCompositionService
+from app.domain.services.matchmaker import Matchmaker
+from app.domain.models.composition_input import CompositionInput
+from app.domain.models.composition_result import CompositionResult
+from app.domain.models.task_spec import TaskSpec, RiskLevel
+from app.domain.models.plan_draft import PlanDraft, PlanStep
+from app.domain.models.candidate_bundle import CandidateBundle
+from app.domain.models.worker import (
     Worker, WorkerState, WorkerType, WorkerIdentity,
     Capability, CapabilityLevel,
     Availability, TrustLevel,
@@ -45,7 +45,7 @@ class MockMatchmaker:
             return self._result
 
         # Default successful result
-        from src.domain.models.team_spec import TeamSpec, RoleAssignment
+        from app.domain.models.team_spec import TeamSpec, RoleAssignment
 
         team_spec = TeamSpec(
             team_id="team_mock_001",
@@ -231,7 +231,7 @@ class TestTeamCompositionServiceIntegration:
         sample_candidate_bundle: CandidateBundle,
     ):
         """测试服务与真实 Matchmaker 集成"""
-        from src.infra.matchmakers.baseline_matchmaker import BaselineMatchmaker
+        from app.infra.matchmakers.baseline_matchmaker import BaselineMatchmaker
 
         matchmaker = BaselineMatchmaker()
         service = TeamCompositionService(matchmaker=matchmaker)
@@ -254,7 +254,7 @@ class TestTeamCompositionServiceIntegration:
         sample_plan_draft: PlanDraft,
     ):
         """测试服务处理失败的组合"""
-        from src.infra.matchmakers.baseline_matchmaker import BaselineMatchmaker
+        from app.infra.matchmakers.baseline_matchmaker import BaselineMatchmaker
 
         matchmaker = BaselineMatchmaker()
         service = TeamCompositionService(matchmaker=matchmaker)

@@ -12,9 +12,9 @@ Profile API Phase 2 端到端测试
 import pytest
 from fastapi.testclient import TestClient
 
-from src.interfaces.api.app import app
-from src.interfaces.api.dependencies.worker_dependencies import reset_stores, use_in_memory_stores
-from src.interfaces.api.dependencies.fusion_dependencies import reset_fusion_services
+from app.adapters.http.app import app
+from app.adapters.http.dependencies.worker_dependencies import reset_stores, use_in_memory_stores
+from app.adapters.http.dependencies.fusion_dependencies import reset_fusion_services
 
 
 # ============================================================================

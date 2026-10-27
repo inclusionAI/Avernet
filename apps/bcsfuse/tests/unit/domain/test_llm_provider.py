@@ -7,10 +7,10 @@ LLMProvider 协议测试
 import pytest
 from typing import Protocol, runtime_checkable
 
-from src.domain.services.llm_provider import LLMProvider
-from src.domain.models.llm_request import LLMRequest
-from src.domain.models.llm_response import LLMResponse
-from src.domain.models.llm_task_spec import LLMTaskSpec, TaskType
+from app.domain.services.llm_provider import LLMProvider
+from app.domain.models.llm_request import LLMRequest
+from app.domain.models.llm_response import LLMResponse
+from app.domain.models.llm_task_spec import LLMTaskSpec, TaskType
 
 
 class TestLLMProviderProtocol:

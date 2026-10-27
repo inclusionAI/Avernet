@@ -14,7 +14,7 @@ M5: Unified Retrieval Fabric
 
 from __future__ import annotations
 
-from src.domain.models.worker import (
+from app.domain.models.worker import (
     Worker,
     WorkerType,
     WorkerIdentity,
@@ -33,9 +33,9 @@ from src.domain.models.worker import (
     TrustLevel,
     PerformanceStats,
 )
-from src.domain.models.candidate_bundle import KnowledgeItem
-from src.domain.models.task_spec import TaskSpec, RiskLevel, Subtask
-from src.domain.models.plan_draft import PlanDraft, PlanStep
+from app.domain.models.candidate_bundle import KnowledgeItem
+from app.domain.models.task_spec import TaskSpec, RiskLevel, Subtask
+from app.domain.models.plan_draft import PlanDraft, PlanStep
 
 
 # =============================================================================

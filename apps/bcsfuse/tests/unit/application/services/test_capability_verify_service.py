@@ -6,22 +6,22 @@ import asyncio
 
 import pytest
 
-from src.application.services.capability_verify_service import CapabilityVerifyService
-from src.domain.events.worker_profile_created_event import WorkerProfileCreatedEvent
-from src.domain.models.verify_dto import (
+from app.application.services.capability_verify_service import CapabilityVerifyService
+from app.domain.events.worker_profile_created_event import WorkerProfileCreatedEvent
+from app.domain.models.verify_dto import (
     CapabilityProbes,
     DimensionJudgment,
     DimensionProbe,
     DimensionResult,
     VerifyData,
 )
-from src.domain.models.worker import Capability, CapabilityLevel, TrustLevel, Worker
+from app.domain.models.worker import Capability, CapabilityLevel, TrustLevel, Worker
 
 
 @pytest.fixture(autouse=True)
 def isolate_verify_debug_output(monkeypatch, tmp_path):
     monkeypatch.setattr(
-        "src.application.services.capability_verify_service._DEFAULT_DEBUG_OUTPUT_DIR",
+        "app.application.services.capability_verify_service._DEFAULT_DEBUG_OUTPUT_DIR",
         str(tmp_path),
     )
 
@@ -88,7 +88,7 @@ class FakeWorkerRepo:
         self._trust_levels[worker_id] = trust_level
         worker = self._workers.get(worker_id)
         if worker:
-            from src.domain.models.worker import WorkerState
+            from app.domain.models.worker import WorkerState
             worker = Worker(
                 **{**worker.model_dump(), "state": WorkerState(
                     availability=worker.state.availability,

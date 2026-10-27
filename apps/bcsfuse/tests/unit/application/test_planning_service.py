@@ -26,14 +26,14 @@ class TestPlanningServiceBasics:
 
     def test_planning_service_importable(self):
         """测试 PlanningService 可导入"""
-        from src.application.services.planning_service import PlanningService
+        from app.application.services.planning_service import PlanningService
 
         assert PlanningService is not None
 
     def test_planning_service_constructs_with_planner(self):
         """测试使用 planner 构造 PlanningService"""
-        from src.application.services.planning_service import PlanningService
-        from src.infra.planners.baseline_planner import BaselinePlanner
+        from app.application.services.planning_service import PlanningService
+        from app.infra.planners.baseline_planner import BaselinePlanner
 
         planner = BaselinePlanner()
         service = PlanningService(planner=planner)
@@ -46,9 +46,9 @@ class TestPlanningServiceExecution:
 
     def test_service_plans_from_task_spec(self):
         """测试从 TaskSpec 生成计划"""
-        from src.application.services.planning_service import PlanningService
-        from src.domain.models.planning_input import PlanningInput
-        from src.infra.planners.baseline_planner import BaselinePlanner
+        from app.application.services.planning_service import PlanningService
+        from app.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
         from tests.fixtures.planning_inputs import get_simple_design_task_spec
 
         planner = BaselinePlanner()
@@ -65,9 +65,9 @@ class TestPlanningServiceExecution:
 
     def test_service_aggregates_understanding_warnings(self):
         """测试聚合 understanding warnings"""
-        from src.application.services.planning_service import PlanningService
-        from src.domain.models.planning_input import PlanningInput
-        from src.infra.planners.baseline_planner import BaselinePlanner
+        from app.application.services.planning_service import PlanningService
+        from app.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
         from tests.fixtures.planning_inputs import (
             get_simple_design_task_spec,
             get_understanding_warnings,
@@ -90,9 +90,9 @@ class TestPlanningServiceExecution:
 
     def test_service_propagates_planning_errors(self):
         """测试传播 planning errors"""
-        from src.application.services.planning_service import PlanningService
-        from src.domain.models.planning_input import PlanningInput
-        from src.infra.planners.baseline_planner import BaselinePlanner
+        from app.application.services.planning_service import PlanningService
+        from app.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
         from tests.fixtures.planning_inputs import get_simple_design_task_spec
 
         planner = BaselinePlanner()
@@ -109,9 +109,9 @@ class TestPlanningServiceExecution:
 
     def test_service_returns_successful_result(self):
         """测试返回成功的结果"""
-        from src.application.services.planning_service import PlanningService
-        from src.domain.models.planning_input import PlanningInput
-        from src.infra.planners.baseline_planner import BaselinePlanner
+        from app.application.services.planning_service import PlanningService
+        from app.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
         from tests.fixtures.planning_inputs import get_multi_step_task_spec
 
         planner = BaselinePlanner()
@@ -132,9 +132,9 @@ class TestPlanningServiceInputHandling:
 
     def test_service_handles_high_risk_task(self):
         """测试处理高风险任务"""
-        from src.application.services.planning_service import PlanningService
-        from src.domain.models.planning_input import PlanningInput
-        from src.infra.planners.baseline_planner import BaselinePlanner
+        from app.application.services.planning_service import PlanningService
+        from app.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
         from tests.fixtures.planning_inputs import get_high_risk_task_spec
 
         planner = BaselinePlanner()
@@ -151,9 +151,9 @@ class TestPlanningServiceInputHandling:
 
     def test_service_handles_vague_task(self):
         """测试处理模糊任务"""
-        from src.application.services.planning_service import PlanningService
-        from src.domain.models.planning_input import PlanningInput
-        from src.infra.planners.baseline_planner import BaselinePlanner
+        from app.application.services.planning_service import PlanningService
+        from app.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
         from tests.fixtures.planning_inputs import get_vague_task_spec
 
         planner = BaselinePlanner()
@@ -170,9 +170,9 @@ class TestPlanningServiceInputHandling:
 
     def test_service_handles_task_with_subtasks(self):
         """测试处理有子任务的任务"""
-        from src.application.services.planning_service import PlanningService
-        from src.domain.models.planning_input import PlanningInput
-        from src.infra.planners.baseline_planner import BaselinePlanner
+        from app.application.services.planning_service import PlanningService
+        from app.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
         from tests.fixtures.planning_inputs import get_multi_step_task_spec
 
         planner = BaselinePlanner()
@@ -193,9 +193,9 @@ class TestPlanningServiceResultSummary:
 
     def test_service_result_has_summary(self):
         """测试结果有摘要方法"""
-        from src.application.services.planning_service import PlanningService
-        from src.domain.models.planning_input import PlanningInput
-        from src.infra.planners.baseline_planner import BaselinePlanner
+        from app.application.services.planning_service import PlanningService
+        from app.domain.models.planning_input import PlanningInput
+        from app.infra.planners.baseline_planner import BaselinePlanner
         from tests.fixtures.planning_inputs import get_simple_design_task_spec
 
         planner = BaselinePlanner()

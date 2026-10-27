@@ -6,16 +6,16 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from src.bootstrap.app_factory import create_bcsfuse_app
-from src.bootstrap.application_context import ApplicationContext
-from src.bootstrap.provider_registry import ProviderRegistry
+from app.bootstrap.app_factory import create_bcsfuse_app
+from app.bootstrap.application_context import ApplicationContext
+from app.bootstrap.provider_registry import ProviderRegistry
 
 
 @pytest.fixture(autouse=True)
 def disable_background_index(
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[None]:
-    from src.infra.config.feature_flags import FeatureFlags
+    from app.infra.config.feature_flags import FeatureFlags
 
     monkeypatch.setenv("ENABLE_PROFILE_EMBEDDING_INDEX", "false")
     FeatureFlags.reset()
@@ -149,7 +149,7 @@ def test_factory_runs_background_index_inside_provider_lifecycle(
             events.append("thread.join")
 
     monkeypatch.setattr(
-        "src.infra.config.feature_flags.FeatureFlags.is_enabled",
+        "app.infra.config.feature_flags.FeatureFlags.is_enabled",
         lambda _: True,
     )
     monkeypatch.setattr("threading.Thread", ThreadSpy)
@@ -185,7 +185,7 @@ def test_factory_shuts_down_provider_when_background_thread_start_fails(
             raise AssertionError("an unstarted thread must not be joined")
 
     monkeypatch.setattr(
-        "src.infra.config.feature_flags.FeatureFlags.is_enabled",
+        "app.infra.config.feature_flags.FeatureFlags.is_enabled",
         lambda _: True,
     )
     monkeypatch.setattr("threading.Thread", FailingThread)
@@ -220,7 +220,7 @@ def test_factory_propagates_business_route_mount_failure(
         raise RuntimeError("route mount failed")
 
     monkeypatch.setattr(
-        "src.bootstrap.app_factory.include_oss_business_routes",
+        "app.bootstrap.app_factory.include_oss_business_routes",
         fail_to_mount_routes,
     )
 
@@ -237,7 +237,7 @@ def test_factory_propagates_required_route_group_failure(
         raise RuntimeError("r3 mount failed")
 
     monkeypatch.setattr(
-        "src.interfaces.api.worker_profile_parity_routes.include_r3_routes",
+        "app.adapters.http.worker_profile_parity_routes.include_r3_routes",
         fail_to_mount_r3,
     )
 
@@ -248,7 +248,7 @@ def test_factory_propagates_required_route_group_failure(
 def test_factory_rejects_when_both_recommend_mounts_fail(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from src.interfaces.api.recommend_routes import router as recommend_router
+    from app.adapters.http.recommend_routes import router as recommend_router
 
     context, _ = build_context()
     original_include_router = FastAPI.include_router
@@ -263,7 +263,7 @@ def test_factory_rejects_when_both_recommend_mounts_fail(
 
     monkeypatch.setattr(FastAPI, "include_router", fail_real_recommend_mount)
     monkeypatch.setattr(
-        "src.interfaces.api.recommend_parity_routes.include_r4_routes",
+        "app.adapters.http.recommend_parity_routes.include_r4_routes",
         fail_fallback_recommend_mount,
     )
 

@@ -27,7 +27,7 @@ os.environ["BCSFUSE_OBJECT_STORAGE_DIR"] = "/tmp/bcsfuse_test_storage"
 def test_test_registry_can_be_built():
     """Test that test registry can be built."""
     print("\n[TEST] test_test_registry_can_be_built")
-    from src.bootstrap.opensource import build_opensource_provider_registry
+    from app.bootstrap.opensource import build_opensource_provider_registry
 
     registry = build_opensource_provider_registry(mode="test")
     print("✓ Test registry built successfully")
@@ -37,7 +37,7 @@ def test_test_registry_can_be_built():
 def test_registry_contains_13_provider_keys():
     """Test that registry contains all 13 required provider keys."""
     print("\n[TEST] test_registry_contains_13_provider_keys")
-    from src.bootstrap.opensource import build_opensource_provider_registry
+    from app.bootstrap.opensource import build_opensource_provider_registry
 
     registry = build_opensource_provider_registry(mode="test")
 
@@ -74,12 +74,12 @@ def test_registry_contains_13_provider_keys():
 def test_test_fallback_provider_types():
     """Test that test mode uses correct provider types."""
     print("\n[TEST] test_test_fallback_provider_types")
-    from src.bootstrap.opensource import build_opensource_provider_registry
-    from src.infra.public.stores.in_memory_worker_registry_store import InMemoryWorkerRegistryStore
-    from src.infra.public.vectorstores.in_memory_vector_store import InMemoryVectorStore
-    from src.infra.public.embedding.fake_embedding_provider import FakeEmbeddingProvider
-    from src.infra.public.reranker.noop_reranker import NoopReranker
-    from src.infra.public.llm.fake_llm_provider import FakeLLMProvider
+    from app.bootstrap.opensource import build_opensource_provider_registry
+    from app.infra.public.stores.in_memory_worker_registry_store import InMemoryWorkerRegistryStore
+    from app.infra.public.vectorstores.in_memory_vector_store import InMemoryVectorStore
+    from app.infra.public.embedding.fake_embedding_provider import FakeEmbeddingProvider
+    from app.infra.public.reranker.noop_reranker import NoopReranker
+    from app.infra.public.llm.fake_llm_provider import FakeLLMProvider
 
     registry = build_opensource_provider_registry(mode="test")
 
@@ -167,7 +167,7 @@ def test_object_storage_root_dir_not_in_source_code():
     """Test that object storage provider does not use source code directories."""
     print("\n[TEST] test_object_storage_root_dir_not_in_source_code")
 
-    from src.infra.public.object_storage.local_runtime_object_storage_provider import LocalRuntimeObjectStorageProvider
+    from app.infra.public.object_storage.local_runtime_object_storage_provider import LocalRuntimeObjectStorageProvider
 
     provider = LocalRuntimeObjectStorageProvider()
 

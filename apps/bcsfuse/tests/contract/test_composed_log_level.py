@@ -6,22 +6,22 @@ import logging
 import pytest
 from fastapi.testclient import TestClient
 
-from src.bootstrap.app_factory import create_bcsfuse_app
-from src.bootstrap.application_context import ApplicationContext
-from src.bootstrap.provider_registry import ProviderRegistry
-from src.infra.trace_context import get_trace_id
+from app.bootstrap.app_factory import create_bcsfuse_app
+from app.bootstrap.application_context import ApplicationContext
+from app.bootstrap.provider_registry import ProviderRegistry
+from app.infra.trace_context import get_trace_id
 
 
 @pytest.fixture(autouse=True)
 def logging_state(monkeypatch):
-    from src.infra.config.feature_flags import FeatureFlags
+    from app.infra.config.feature_flags import FeatureFlags
 
     for key in ("LOG_LEVEL", "SERVER_ENV", "REAL_SERVER_ENV", "ALIPAY_APP_ENV"):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("ENABLE_PROFILE_EMBEDDING_INDEX", "false")
     FeatureFlags.reset()
     root = logging.getLogger()
-    business = logging.getLogger("src")
+    business = logging.getLogger("app")
     handlers, level, business_level = root.handlers[:], root.level, business.level
     factory = logging.getLogRecordFactory()
     logger_levels = {
@@ -48,7 +48,7 @@ def logging_state(monkeypatch):
 class HostStartup:
     async def initialize(self):
         # Host initialization can reset the application logger's level.
-        logging.getLogger("src").setLevel(logging.WARNING)
+        logging.getLogger("app").setLevel(logging.WARNING)
 
     async def shutdown(self):
         pass
@@ -65,7 +65,7 @@ def make_app():
 
     @app.get("/log-probe")
     async def probe():
-        logger = logging.getLogger("src.application.services.level_probe")
+        logger = logging.getLogger("app.application.services.level_probe")
         logger.debug("candidate-detail")
         logger.info("pipeline-summary")
         logging.getLogger("httpx").debug("third-party-detail")
@@ -118,14 +118,14 @@ def test_composed_runtime_level_and_trace_preserve_host_output(
 def test_prepub_environment_fallback_keeps_info(monkeypatch, fallback):
     monkeypatch.setenv(fallback, "prepub")
     with TestClient(make_app()):
-        assert not logging.getLogger("src.application.services.new_logger").isEnabledFor(logging.DEBUG)
+        assert not logging.getLogger("app.application.services.new_logger").isEnabledFor(logging.DEBUG)
 
 
 def test_server_environment_wins_over_fallback(monkeypatch):
     monkeypatch.setenv("SERVER_ENV", "prod")
     monkeypatch.setenv("REAL_SERVER_ENV", "prepub")
     with TestClient(make_app()):
-        assert not logging.getLogger("src.application.services.new_logger").isEnabledFor(logging.DEBUG)
+        assert not logging.getLogger("app.application.services.new_logger").isEnabledFor(logging.DEBUG)
 
 
 def test_invalid_level_rejected_before_startup(monkeypatch):

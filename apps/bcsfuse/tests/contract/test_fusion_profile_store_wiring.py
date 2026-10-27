@@ -5,9 +5,9 @@ from unittest.mock import Mock
 
 import pytest
 
-from src.bootstrap.app_factory import _configure_fusion_dependencies
-from src.interfaces.api.dependencies import fusion_dependencies as dependencies
-from src.infra.adapters import sqlite_worker_profile_content_store as sqlite_module
+from app.bootstrap.app_factory import _configure_fusion_dependencies
+from app.adapters.http.dependencies import fusion_dependencies as dependencies
+from app.infra.adapters import sqlite_worker_profile_content_store as sqlite_module
 
 
 @pytest.fixture

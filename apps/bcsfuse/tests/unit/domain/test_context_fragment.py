@@ -19,7 +19,7 @@ class TestContextKind:
 
     def test_context_kind_values(self):
         """测试枚举值定义"""
-        from src.domain.models.context_fragment import ContextKind
+        from app.domain.models.context_fragment import ContextKind
 
         assert ContextKind.AGENT == "agent"
         assert ContextKind.BOOT == "boot"
@@ -33,7 +33,7 @@ class TestContextKind:
 
     def test_context_kind_from_string(self):
         """测试从字符串创建枚举"""
-        from src.domain.models.context_fragment import ContextKind
+        from app.domain.models.context_fragment import ContextKind
 
         assert ContextKind("agent") == ContextKind.AGENT
         assert ContextKind("soul") == ContextKind.SOUL
@@ -41,7 +41,7 @@ class TestContextKind:
 
     def test_context_kind_invalid_value(self):
         """测试无效枚举值"""
-        from src.domain.models.context_fragment import ContextKind
+        from app.domain.models.context_fragment import ContextKind
 
         with pytest.raises(ValueError):
             ContextKind("invalid_kind")
@@ -52,7 +52,7 @@ class TestContextFragment:
 
     def test_create_context_fragment_success(self):
         """测试创建上下文片段"""
-        from src.domain.models.context_fragment import ContextFragment, ContextKind
+        from app.domain.models.context_fragment import ContextFragment, ContextKind
 
         fragment = ContextFragment(
             kind=ContextKind.SOUL,
@@ -70,7 +70,7 @@ class TestContextFragment:
 
     def test_create_context_fragment_with_all_fields(self):
         """测试创建包含所有字段的上下文片段"""
-        from src.domain.models.context_fragment import ContextFragment, ContextKind
+        from app.domain.models.context_fragment import ContextFragment, ContextKind
 
         fragment = ContextFragment(
             kind=ContextKind.AGENT,
@@ -88,7 +88,7 @@ class TestContextFragment:
 
     def test_create_context_fragment_empty_content(self):
         """测试创建空内容的上下文片段（允许空内容）"""
-        from src.domain.models.context_fragment import ContextFragment, ContextKind
+        from app.domain.models.context_fragment import ContextFragment, ContextKind
 
         # 空内容是允许的，表示文件存在但为空
         fragment = ContextFragment(
@@ -102,7 +102,7 @@ class TestContextFragment:
 
     def test_create_context_fragment_with_other_kind(self):
         """测试创建 OTHER 类型的上下文片段"""
-        from src.domain.models.context_fragment import ContextFragment, ContextKind
+        from app.domain.models.context_fragment import ContextFragment, ContextKind
 
         fragment = ContextFragment(
             kind=ContextKind.OTHER,
@@ -116,7 +116,7 @@ class TestContextFragment:
 
     def test_weight_must_be_between_0_and_1(self):
         """测试权重必须在 0-1 之间"""
-        from src.domain.models.context_fragment import ContextFragment, ContextKind
+        from app.domain.models.context_fragment import ContextFragment, ContextKind
 
         # 有效权重
         fragment = ContextFragment(
@@ -150,7 +150,7 @@ class TestContextFragment:
 
     def test_weight_out_of_range_raises_error(self):
         """测试权重超出范围抛出错误"""
-        from src.domain.models.context_fragment import ContextFragment, ContextKind
+        from app.domain.models.context_fragment import ContextFragment, ContextKind
 
         with pytest.raises(ValidationError):
             ContextFragment(
@@ -172,7 +172,7 @@ class TestContextFragment:
 
     def test_missing_required_fields_raises_error(self):
         """测试缺少必填字段抛出错误"""
-        from src.domain.models.context_fragment import ContextFragment, ContextKind
+        from app.domain.models.context_fragment import ContextFragment, ContextKind
 
         # kind 已弃用；动态 fragment 通过 metadata.embedding_field 定义类型。
         fragment = ContextFragment(
@@ -198,7 +198,7 @@ class TestContextFragment:
 
     def test_extra_fields_forbidden(self):
         """测试额外字段被禁止"""
-        from src.domain.models.context_fragment import ContextFragment, ContextKind
+        from app.domain.models.context_fragment import ContextFragment, ContextKind
 
         with pytest.raises(ValidationError) as exc_info:
             ContextFragment(
@@ -213,7 +213,7 @@ class TestContextFragment:
 
     def test_content_can_be_whitespace(self):
         """测试内容可以全是空白（与 MarkdownDocument 不同）"""
-        from src.domain.models.context_fragment import ContextFragment, ContextKind
+        from app.domain.models.context_fragment import ContextFragment, ContextKind
 
         # ContextFragment 允许空白内容，因为文件可能为空
         fragment = ContextFragment(
@@ -231,7 +231,7 @@ class TestContextFragmentProperty:
 
     def test_is_empty_true(self):
         """测试 is_empty 属性为 True"""
-        from src.domain.models.context_fragment import ContextFragment, ContextKind
+        from app.domain.models.context_fragment import ContextFragment, ContextKind
 
         fragment = ContextFragment(
             kind=ContextKind.SOUL,
@@ -244,7 +244,7 @@ class TestContextFragmentProperty:
 
     def test_is_empty_false(self):
         """测试 is_empty 属性为 False"""
-        from src.domain.models.context_fragment import ContextFragment, ContextKind
+        from app.domain.models.context_fragment import ContextFragment, ContextKind
 
         fragment = ContextFragment(
             kind=ContextKind.SOUL,
@@ -257,7 +257,7 @@ class TestContextFragmentProperty:
 
     def test_content_preview(self):
         """测试 content_preview 属性"""
-        from src.domain.models.context_fragment import ContextFragment, ContextKind
+        from app.domain.models.context_fragment import ContextFragment, ContextKind
 
         # 短内容
         fragment = ContextFragment(
@@ -281,7 +281,7 @@ class TestContextFragmentProperty:
 
     def test_content_preview_empty(self):
         """测试空内容的 content_preview"""
-        from src.domain.models.context_fragment import ContextFragment, ContextKind
+        from app.domain.models.context_fragment import ContextFragment, ContextKind
 
         fragment = ContextFragment(
             kind=ContextKind.SOUL,

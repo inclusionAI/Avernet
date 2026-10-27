@@ -1,9 +1,9 @@
 """Composed embedding providers must reach lifecycle and search consumers."""
 
-from src.bootstrap.app_factory import _configure_fusion_dependencies
-from src.bootstrap.application_context import ApplicationContext
-from src.bootstrap.provider_registry import ProviderRegistry
-from src.interfaces.api.dependencies import fusion_dependencies
+from app.bootstrap.app_factory import _configure_fusion_dependencies
+from app.bootstrap.application_context import ApplicationContext
+from app.bootstrap.provider_registry import ProviderRegistry
+from app.adapters.http.dependencies import fusion_dependencies
 
 
 class FixedEmbedding:
@@ -60,7 +60,7 @@ def test_active_context_replaces_cached_provider_without_reconfiguration():
 
 
 def test_composed_missing_embedding_never_uses_environment_provider(monkeypatch):
-    from src.infra.embedding.config.embedding_settings import EmbeddingSettings
+    from app.infra.embedding.config.embedding_settings import EmbeddingSettings
 
     environment_reads = []
 

@@ -39,11 +39,11 @@ def reset_stores_before_test(monkeypatch):
 
     确保测试间隔离，避免状态污染。
     """
-    from src.interfaces.api.dependencies.worker_dependencies import reset_stores
-    from src.interfaces.api.dependencies.fusion_dependencies import reset_fusion_services
-    from src.interfaces.api.dependencies import fusion_dependencies
-    from src.interfaces.api import fusion_routes
-    from src.infra.config.feature_flags import FeatureFlags
+    from app.adapters.http.dependencies.worker_dependencies import reset_stores
+    from app.adapters.http.dependencies.fusion_dependencies import reset_fusion_services
+    from app.adapters.http.dependencies import fusion_dependencies
+    from app.adapters.http import fusion_routes
+    from app.infra.config.feature_flags import FeatureFlags
 
     # A composed app from a previous test must not supply stores to an
     # unrelated legacy app test. Provider selection is application-scoped.
@@ -72,8 +72,8 @@ def clean_client():
     确保每个测试都有独立的数据库状态。
     """
     from fastapi.testclient import TestClient
-    from src.interfaces.api.app import app
-    from src.interfaces.api.dependencies.worker_dependencies import reset_stores, use_in_memory_stores
+    from app.adapters.http.app import app
+    from app.adapters.http.dependencies.worker_dependencies import reset_stores, use_in_memory_stores
 
     # 强制使用内存数据库
     use_in_memory_stores()

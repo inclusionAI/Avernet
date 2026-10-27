@@ -28,16 +28,16 @@ class TestWorkerProfileIngestionFlow:
 
     def test_full_ingestion_flow(self, fixture_root):
         """测试完整摄取流程"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
-        from src.application.services.worker_profile_ingestion_service import (
+        from app.application.services.worker_profile_ingestion_service import (
             WorkerProfileIngestionService,
         )
-        from src.application.services.worker_profile_query_service import (
+        from app.application.services.worker_profile_query_service import (
             WorkerProfileQueryService,
         )
 
@@ -67,14 +67,14 @@ class TestWorkerProfileIngestionFlow:
 
     def test_profile_content_integrity(self, fixture_root):
         """测试 profile 内容完整性"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
-        from src.domain.models.context_fragment import ContextKind
-        from src.domain.models.worker_profile import ProfileType
+        from app.domain.models.context_fragment import ContextKind
+        from app.domain.models.worker_profile import ProfileType
 
         settings = WorkerProfileSettings(roots=[fixture_root])
         source = FileWorkerProfileSource(settings)
@@ -108,13 +108,13 @@ class TestWorkerProfileIngestionFlow:
 
     def test_bot_profile_content(self, fixture_root):
         """测试 bot profile 内容"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
-        from src.domain.models.worker_profile import ProfileType
+        from app.domain.models.worker_profile import ProfileType
 
         settings = WorkerProfileSettings(roots=[fixture_root])
         source = FileWorkerProfileSource(settings)
@@ -132,13 +132,13 @@ class TestWorkerProfileIngestionFlow:
 
     def test_query_service_search(self, fixture_root):
         """测试查询服务搜索功能"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
-        from src.application.services.worker_profile_query_service import (
+        from app.application.services.worker_profile_query_service import (
             WorkerProfileQueryService,
         )
 
@@ -160,13 +160,13 @@ class TestWorkerProfileIngestionFlow:
 
     def test_query_service_recommend(self, fixture_root):
         """测试查询服务推荐功能"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
-        from src.application.services.worker_profile_query_service import (
+        from app.application.services.worker_profile_query_service import (
             WorkerProfileQueryService,
         )
 
@@ -188,13 +188,13 @@ class TestWorkerProfileIngestionFlow:
 
     def test_multiple_context_files(self, fixture_root):
         """测试多个上下文文件"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
-        from src.domain.models.context_fragment import ContextKind
+        from app.domain.models.context_fragment import ContextKind
 
         settings = WorkerProfileSettings(roots=[fixture_root])
         source = FileWorkerProfileSource(settings)
@@ -215,10 +215,10 @@ class TestWorkerProfileSettingsIntegration:
 
     def test_custom_file_mapping(self):
         """测试自定义文件映射"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.domain.models.context_fragment import ContextKind
+        from app.domain.models.context_fragment import ContextKind
 
         custom_mapping = {
             "SOUL.md": ContextKind.SOUL,
@@ -236,7 +236,7 @@ class TestWorkerProfileSettingsIntegration:
 
     def test_backup_directory_handling(self):
         """测试备份目录处理"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -266,10 +266,10 @@ class TestTotalWarningsCount:
 
     def test_total_warnings_across_profiles(self, fixture_root):
         """测试跨 profile 警告总数"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
 
@@ -300,10 +300,10 @@ class TestSearchableTextFormat:
 
     def test_searchable_text_format(self, fixture_root):
         """测试 searchable_text 固定格式"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
         import re

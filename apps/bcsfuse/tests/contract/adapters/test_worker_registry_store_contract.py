@@ -10,14 +10,14 @@ from tests.contract.adapters.helpers import (
     WorkerRegistryStoreContractTests,
     make_sample_worker,
 )
-from src.infra.adapters.in_memory_worker_registry_store import InMemoryWorkerRegistryStore
-from src.application.ports.worker_profile_content_store import WorkerProfileContentStore
-from src.application.ports.worker_registry_store import WorkerRegistryStore
-from src.bootstrap.profile_store_compat import (
+from app.infra.adapters.in_memory_worker_registry_store import InMemoryWorkerRegistryStore
+from app.application.ports.worker_profile_content_store import WorkerProfileContentStore
+from app.application.ports.worker_registry_store import WorkerRegistryStore
+from app.bootstrap.profile_store_compat import (
     WorkerProfileContentStoreCompatibilityAdapter,
 )
-from src.domain.models.worker_profile_content import WorkerProfileContent
-from src.infra.public.stores.in_memory_worker_profile_content_store import (
+from app.domain.models.worker_profile_content import WorkerProfileContent
+from app.infra.public.stores.in_memory_worker_profile_content_store import (
     InMemoryWorkerProfileContentStore,
 )
 
@@ -223,7 +223,7 @@ class TestInMemoryWorkerRegistryStore:
 @pytest.fixture
 def sqlite_registry_store():
     """创建 SQLite WorkerRegistryStore 实例"""
-    from src.infra.adapters.sqlite_worker_registry_store import SQLiteWorkerRegistryStore
+    from app.infra.adapters.sqlite_worker_registry_store import SQLiteWorkerRegistryStore
     return SQLiteWorkerRegistryStore(":memory:")
 
 

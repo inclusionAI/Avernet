@@ -5,8 +5,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from src.domain.models.worker_audit_log import WorkerAuditAction, WorkerAuditLog
-from src.infra.public.audit.mysql_worker_audit_log_store import (
+from app.domain.models.worker_audit_log import WorkerAuditAction, WorkerAuditLog
+from app.infra.public.audit.mysql_worker_audit_log_store import (
     MySQLWorkerAuditLogStore,
 )
 

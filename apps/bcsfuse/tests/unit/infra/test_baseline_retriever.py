@@ -20,18 +20,18 @@ from __future__ import annotations
 
 import pytest
 
-from src.domain.services.retriever import Retriever
-from src.infra.retrievers.baseline_retriever import BaselineRetriever, CandidateCatalog
-from src.domain.models.retrieval_input import RetrievalInput, RetrievalFilters
-from src.domain.models.candidate_retrieval_result import CandidateRetrievalResult as RetrievalResult
-from src.domain.models.candidate_bundle import KnowledgeItem
-from src.domain.models.worker import (
+from app.domain.services.retriever import Retriever
+from app.infra.retrievers.baseline_retriever import BaselineRetriever, CandidateCatalog
+from app.domain.models.retrieval_input import RetrievalInput, RetrievalFilters
+from app.domain.models.candidate_retrieval_result import CandidateRetrievalResult as RetrievalResult
+from app.domain.models.candidate_bundle import KnowledgeItem
+from app.domain.models.worker import (
     Worker, WorkerType, WorkerIdentity, Capability, CapabilityLevel,
     WorkerState, Availability, TrustLevel, SkillRef, SkillSource,
     ResourceRef, ResourceKind, ResourceAccess,
 )
-from src.domain.models.task_spec import TaskSpec, RiskLevel
-from src.domain.models.plan_draft import PlanDraft, PlanStep
+from app.domain.models.task_spec import TaskSpec, RiskLevel
+from app.domain.models.plan_draft import PlanDraft, PlanStep
 from tests.fixtures.retrieval_data import (
     get_all_workers,
     get_all_knowledge_items,

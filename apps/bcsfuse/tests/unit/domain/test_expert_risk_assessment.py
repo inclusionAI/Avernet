@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from src.domain.models.expert_risk_assessment import (
+from app.domain.models.expert_risk_assessment import (
     RiskLevel,
     RiskAssessment,
 )
@@ -49,7 +49,7 @@ class TestDomain:
 
     def test_domain_enum_values(self):
         """测试领域枚举值"""
-        from src.domain.models.expert_risk_assessment import Domain
+        from app.domain.models.expert_risk_assessment import Domain
 
         assert Domain.SECURITY == "security"
         assert Domain.LEGAL == "legal"
@@ -60,13 +60,13 @@ class TestDomain:
 
     def test_domain_enum_count(self):
         """测试领域枚举数量"""
-        from src.domain.models.expert_risk_assessment import Domain
+        from app.domain.models.expert_risk_assessment import Domain
 
         assert len(Domain) == 6
 
     def test_domain_string_conversion(self):
         """测试领域字符串转换"""
-        from src.domain.models.expert_risk_assessment import Domain
+        from app.domain.models.expert_risk_assessment import Domain
 
         assert Domain("security") == Domain.SECURITY
         assert Domain("legal") == Domain.LEGAL
@@ -74,7 +74,7 @@ class TestDomain:
 
     def test_domain_invalid_value(self):
         """测试无效领域"""
-        from src.domain.models.expert_risk_assessment import Domain
+        from app.domain.models.expert_risk_assessment import Domain
 
         with pytest.raises(ValueError):
             Domain("invalid_domain")

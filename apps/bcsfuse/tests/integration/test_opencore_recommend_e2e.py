@@ -28,7 +28,7 @@ def test_client():
     os.environ["BCSFUSE_AUTH_TOKEN"] = "test_token_for_e2e"
 
     try:
-        from src.bootstrap.opensource_app import create_opensource_app
+        from app.bootstrap.opensource_app import create_opensource_app
 
         app = create_opensource_app(mode="dev_smoke")
         client = TestClient(app)

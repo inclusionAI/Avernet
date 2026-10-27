@@ -1,13 +1,13 @@
 """Runtime transitions update every owned profile without re-embedding."""
 
-from src.domain.models.vector_point import VectorPoint
+from app.domain.models.vector_point import VectorPoint
 from tests.fixtures.runtime_acceptance import acceptance_run
 from tests.integration.test_isolated_runtime_acceptance import TOKEN, isolated_app_factory  # noqa: F401
 
 
 def test_local_faiss_state_sync_survives_reopen(tmp_path):
-    from src.application.services.worker_vector_state_sync import sync_worker_vector_state
-    from src.infra.public.vectorstores.faiss_sqlite_vector_store import FaissSqliteVectorStore
+    from app.application.services.worker_vector_state_sync import sync_worker_vector_state
+    from app.infra.public.vectorstores.faiss_sqlite_vector_store import FaissSqliteVectorStore
 
     path = str(tmp_path / "vectors.sqlite")
     store = FaissSqliteVectorStore(dimension=3, db_path=path)
@@ -90,12 +90,12 @@ def test_delete_clears_generated_vectors_without_profile_content_rows(isolated_a
 
 
 def test_durable_payload_sync_includes_vectors_not_yet_in_local_index(tmp_path):
-    from src.application.services.worker_runtime_state_service import WorkerRuntimeStateService
-    from src.domain.models.worker import Worker, WorkerIdentity, WorkerState, WorkerType
-    from src.domain.models.worker_runtime_state import WorkerRuntimeState
-    from src.infra.adapters.in_memory_worker_registry_store import InMemoryWorkerRegistryStore
-    from src.infra.adapters.in_memory_worker_runtime_state_store import InMemoryWorkerRuntimeStateStore
-    from src.infra.public.vectorstores.qdrant_mysql_vector_store import QdrantMySQLVectorStore
+    from app.application.services.worker_runtime_state_service import WorkerRuntimeStateService
+    from app.domain.models.worker import Worker, WorkerIdentity, WorkerState, WorkerType
+    from app.domain.models.worker_runtime_state import WorkerRuntimeState
+    from app.infra.adapters.in_memory_worker_registry_store import InMemoryWorkerRegistryStore
+    from app.infra.adapters.in_memory_worker_runtime_state_store import InMemoryWorkerRuntimeStateStore
+    from app.infra.public.vectorstores.qdrant_mysql_vector_store import QdrantMySQLVectorStore
     from tests.unit.infra.test_qdrant_durable_vector_store import FakePersistenceBackend
 
     backend = FakePersistenceBackend()
@@ -114,8 +114,8 @@ def test_durable_payload_sync_includes_vectors_not_yet_in_local_index(tmp_path):
         backend.save(VectorPoint(id=key, vector=[1., 0., 0.], payload={
             "worker_id": owner, "runtime_state": "online", "content": "retained",
         }))
-    from src.infra.adapters.in_memory_worker_audit_log_store import InMemoryWorkerAuditLogStore
-    from src.infra.adapters.in_memory_worker_index_sync_adapter import InMemoryWorkerIndexSyncAdapter
+    from app.infra.adapters.in_memory_worker_audit_log_store import InMemoryWorkerAuditLogStore
+    from app.infra.adapters.in_memory_worker_index_sync_adapter import InMemoryWorkerIndexSyncAdapter
     service = WorkerRuntimeStateService(
         registry_store=workers, runtime_state_store=states, vector_store=store,
         audit_log_adapter=InMemoryWorkerAuditLogStore(), index_sync_adapter=InMemoryWorkerIndexSyncAdapter(),

@@ -11,10 +11,10 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from src.interfaces.api.app import app
-from src.interfaces.api.fusion_routes import set_provider
-from src.domain.models.fusion_result import Perspective
-from src.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext
+from app.adapters.http.app import app
+from app.adapters.http.fusion_routes import set_provider
+from app.domain.models.fusion_result import Perspective
+from app.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext
 
 
 # =============================================================================
@@ -45,8 +45,8 @@ class MockPerspectiveProvider:
 @pytest.fixture
 def client(monkeypatch):
     """测试客户端"""
-    from src.interfaces.api import fusion_routes
-    from src.infra.config.feature_flags import FeatureFlags
+    from app.adapters.http import fusion_routes
+    from app.infra.config.feature_flags import FeatureFlags
 
     # These tests deliberately exercise unknown participants. Keep their state
     # independent of flags/provider state left by other integration modules.

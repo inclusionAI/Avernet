@@ -11,10 +11,10 @@
 !apps/bcsfuse/schemas/**
 !apps/bcsfuse/configs/**
 !apps/bcsfuse/packages
-!apps/bcsfuse/packages/avernet-search
-!apps/bcsfuse/packages/avernet-search/pyproject.toml
-!apps/bcsfuse/packages/avernet-search/README.md
-!apps/bcsfuse/packages/avernet-search/src/**
+!apps/bcsfuse/packages/search-core
+!apps/bcsfuse/packages/search-core/pyproject.toml
+!apps/bcsfuse/packages/search-core/README.md
+!apps/bcsfuse/packages/search-core/src/**
 **/__pycache__
 **/*.pyc
 **/.env*

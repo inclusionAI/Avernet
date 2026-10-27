@@ -7,7 +7,7 @@ Contract Tests for WorkerAuditLogAdapter
 import pytest
 
 from tests.contract.adapters.helpers import WorkerAuditLogAdapterContractTests
-from src.infra.adapters.in_memory_worker_audit_log_store import InMemoryWorkerAuditLogStore
+from app.infra.adapters.in_memory_worker_audit_log_store import InMemoryWorkerAuditLogStore
 
 
 # ============================================================================
@@ -55,7 +55,7 @@ class TestInMemoryWorkerAuditLogStore:
 @pytest.fixture
 def sqlite_audit_log_adapter():
     """创建 SQLite WorkerAuditLogStore 实例"""
-    from src.infra.adapters.sqlite_worker_audit_log_store import SQLiteWorkerAuditLogStore
+    from app.infra.adapters.sqlite_worker_audit_log_store import SQLiteWorkerAuditLogStore
     return SQLiteWorkerAuditLogStore(":memory:")
 
 

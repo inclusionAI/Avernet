@@ -11,8 +11,8 @@ from __future__ import annotations
 import pytest
 from unittest.mock import Mock, patch
 
-from src.domain.models.fusion_result import Perspective
-from src.interfaces.cli.bcs_cli import (
+from app.domain.models.fusion_result import Perspective
+from app.adapters.cli.bcs_cli import (
     fuse_command,
     parse_args,
     ExitCode,

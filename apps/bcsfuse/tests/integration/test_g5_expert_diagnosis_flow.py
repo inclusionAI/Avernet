@@ -11,9 +11,9 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from src.domain.models.fusion_result import Perspective
-from src.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext
-from src.interfaces.api.fusion_routes import router, set_provider
+from app.domain.models.fusion_result import Perspective
+from app.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext
+from app.adapters.http.fusion_routes import router, set_provider
 from fastapi import FastAPI
 
 
@@ -45,16 +45,16 @@ class MockG5PerspectiveProvider(PerspectiveProvider):
 @pytest.fixture
 def client(monkeypatch):
     """创建测试客户端"""
-    from src.application.services.participant_availability_checker import ParticipantAvailabilityChecker
-    from src.domain.models.worker_runtime_state import WorkerRuntimeState
-    from src.domain.models.worker_source_info import WorkerSourceType
-    from src.infra.adapters.sqlite_worker_profile_binding_store import SQLiteWorkerProfileBindingStore
-    from src.infra.adapters.sqlite_worker_runtime_state_store import SQLiteWorkerRuntimeStateStore
-    from src.interfaces.api.dependencies import fusion_dependencies
-    from src.interfaces.api import fusion_routes
-    from src.application.services.group_fusion_service import GroupFusionService
-    from src.domain.models.worker import Worker, WorkerIdentity, WorkerState, WorkerType, Availability, TrustLevel
-    from src.infra.adapters.sqlite_worker_registry_store import SQLiteWorkerRegistryStore
+    from app.application.services.participant_availability_checker import ParticipantAvailabilityChecker
+    from app.domain.models.worker_runtime_state import WorkerRuntimeState
+    from app.domain.models.worker_source_info import WorkerSourceType
+    from app.infra.adapters.sqlite_worker_profile_binding_store import SQLiteWorkerProfileBindingStore
+    from app.infra.adapters.sqlite_worker_runtime_state_store import SQLiteWorkerRuntimeStateStore
+    from app.adapters.http.dependencies import fusion_dependencies
+    from app.adapters.http import fusion_routes
+    from app.application.services.group_fusion_service import GroupFusionService
+    from app.domain.models.worker import Worker, WorkerIdentity, WorkerState, WorkerType, Availability, TrustLevel
+    from app.infra.adapters.sqlite_worker_registry_store import SQLiteWorkerRegistryStore
 
     bindings = SQLiteWorkerProfileBindingStore()
     states = SQLiteWorkerRuntimeStateStore()
@@ -771,9 +771,9 @@ class TestG5CLI:
 
     def test_g5_cli_command_signature(self):
         """测试 G5 CLI 命令签名"""
-        from src.interfaces.cli.bcs_cli import fuse_command, get_default_service
-        from src.infra.providers.stub_perspective_provider import StubPerspectiveProvider
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.adapters.cli.bcs_cli import fuse_command, get_default_service
+        from app.infra.providers.stub_perspective_provider import StubPerspectiveProvider
+        from app.application.services.group_fusion_service import GroupFusionService
 
         # 使用 stub provider
         provider = StubPerspectiveProvider()
@@ -792,10 +792,10 @@ class TestG5CLI:
 
     def test_g5_cli_format_output(self):
         """测试 G5 CLI 格式化输出"""
-        from src.interfaces.cli.bcs_cli import format_pretty_output
-        from src.domain.models.fusion_result import FusionResult, Perspective, Recommendation, FusionTiming
-        from src.domain.models.expert_risk_assessment import RiskLevel, RiskAssessment
-        from src.domain.models.expert_diagnosis import Priority, CriticalIssue, ExpertRecommendation
+        from app.adapters.cli.bcs_cli import format_pretty_output
+        from app.domain.models.fusion_result import FusionResult, Perspective, Recommendation, FusionTiming
+        from app.domain.models.expert_risk_assessment import RiskLevel, RiskAssessment
+        from app.domain.models.expert_diagnosis import Priority, CriticalIssue, ExpertRecommendation
         from datetime import datetime
 
         result = FusionResult(

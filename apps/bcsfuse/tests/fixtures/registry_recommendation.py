@@ -2,15 +2,15 @@
 
 from unittest.mock import Mock
 
-from src.application.services.worker_candidate_recommendation_impl import WorkerCandidateRecommendationImpl
-from src.application.services.worker_vector_match_service import (
+from app.application.services.worker_candidate_recommendation_impl import WorkerCandidateRecommendationImpl
+from app.application.services.worker_vector_match_service import (
     FragmentRetrievalConfig,
     WorkerVectorMatchService,
 )
-from src.domain.models.metadata_record import MetadataRecord
-from src.domain.models.vector_search_hit import VectorSearchHit
-from src.domain.services.metadata_store_adapter import MetadataStoreAdapter
-from src.domain.services.vector_store_adapter import VectorStoreAdapter
+from app.domain.models.metadata_record import MetadataRecord
+from app.domain.models.vector_search_hit import VectorSearchHit
+from app.domain.services.metadata_store_adapter import MetadataStoreAdapter
+from app.domain.services.vector_store_adapter import VectorStoreAdapter
 
 
 def registry_recommendation_service(retrieval_service, profile_filter, profiles, min_experts=3):

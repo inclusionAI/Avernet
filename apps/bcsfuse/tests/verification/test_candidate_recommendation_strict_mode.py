@@ -12,11 +12,11 @@ Candidate Recommendation Service strict_participants测试
 import pytest
 from unittest.mock import MagicMock
 from tests.fixtures.recommendation_dependencies import vector_dependencies
-from src.application.services.worker_candidate_recommendation_impl import WorkerCandidateRecommendationImpl
-from src.domain.models.retrieval_mode import RetrievalMode
-from src.domain.models.worker_profile import WorkerProfile, ProfileType, SourceType
-from src.domain.models.skill_profile import SkillProfile
-from src.domain.services.worker_profile_retrieval_service import RetrievalResponse, RetrievalResult
+from app.application.services.worker_candidate_recommendation_impl import WorkerCandidateRecommendationImpl
+from app.domain.models.retrieval_mode import RetrievalMode
+from app.domain.models.worker_profile import WorkerProfile, ProfileType, SourceType
+from app.domain.models.skill_profile import SkillProfile
+from app.domain.services.worker_profile_retrieval_service import RetrievalResponse, RetrievalResult
 
 
 def create_mock_profile(staff_id: str, profile_id: str = "default") -> WorkerProfile:

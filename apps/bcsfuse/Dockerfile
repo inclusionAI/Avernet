@@ -30,19 +30,18 @@ RUN useradd --create-home --shell /bin/bash appuser
 WORKDIR /app
 
 # Copy dependency files first for better layer caching
-COPY apps/bcsfuse/packages/avernet-search /opt/avernet-search
+COPY apps/bcsfuse/packages/search-core /opt/search-core
 COPY apps/bcsfuse/pyproject.toml apps/bcsfuse/README.md ./
 
-# Install dependencies
-RUN python -m pip install --no-cache-dir --upgrade pip \
-    && python -m pip install --no-cache-dir /opt/avernet-search -e ".[dev]"
-
-# Copy application code
+# Copy source before installing the src-layout application.
 COPY apps/bcsfuse/src ./src
 COPY apps/bcsfuse/tests ./tests
 COPY apps/bcsfuse/schemas ./schemas
 COPY apps/bcsfuse/configs ./configs
 COPY apps/bcsfuse/main.py ./
+
+RUN python -m pip install --no-cache-dir --upgrade pip \
+    && python -m pip install --no-cache-dir /opt/search-core -e ".[dev]"
 
 # Copy documentation and legal
 COPY apps/bcsfuse/LEGAL.md apps/bcsfuse/FUSE_API_LOGIC.md ./

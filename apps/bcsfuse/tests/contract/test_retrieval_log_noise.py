@@ -4,7 +4,7 @@ import logging
 
 import pytest
 
-from src.bootstrap.logging_setup import configure_business_logging
+from app.bootstrap.logging_setup import configure_business_logging
 
 
 @pytest.fixture(autouse=True)
@@ -22,10 +22,10 @@ def restore_logger_state():
 
 
 @pytest.mark.parametrize("name", [
-    "src.interfaces.api.dependencies.fusion_dependencies",
-    "src.interfaces.api.dependencies.worker_dependencies",
-    "src.infra.public.vectorstores.qdrant_local_vector_store",
-    "src.infra.embedding.providers.real_provider",
+    "app.adapters.http.dependencies.fusion_dependencies",
+    "app.adapters.http.dependencies.worker_dependencies",
+    "app.infra.public.vectorstores.qdrant_local_vector_store",
+    "app.infra.embedding.providers.real_provider",
 ])
 def test_infrastructure_detail_requires_debug_but_warnings_always_visible(caplog, name):
     caplog.set_level(logging.DEBUG)
@@ -60,13 +60,13 @@ def test_http_request_chatter_is_hidden_without_losing_warnings(caplog):
 def test_real_pipeline_info_is_ordered_and_reports_request_rerank(
     tmp_path, caplog, monkeypatch, rerank_enabled, fail,
 ):
-    from src.application.services.worker_vector_match_service import (
+    from app.application.services.worker_vector_match_service import (
         WorkerVectorMatchService, FragmentRetrievalConfig,
     )
-    from src.domain.models.vector_point import VectorPoint
-    from src.infra.metadatastores.file_metadata_store_adapter import FileMetadataStoreAdapter
-    from src.infra.public.vectorstores.qdrant_mysql_vector_store import QdrantMySQLVectorStore
-    from src.infra import reranker as reranker_provider
+    from app.domain.models.vector_point import VectorPoint
+    from app.infra.metadatastores.file_metadata_store_adapter import FileMetadataStoreAdapter
+    from app.infra.public.vectorstores.qdrant_mysql_vector_store import QdrantMySQLVectorStore
+    from app.infra import reranker as reranker_provider
     from tests.unit.infra.test_qdrant_durable_vector_store import FakePersistenceBackend
 
     class FixedModel:

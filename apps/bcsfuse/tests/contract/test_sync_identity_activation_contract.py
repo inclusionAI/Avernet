@@ -7,13 +7,13 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from src.infra.adapters.in_memory_worker_registry_store import InMemoryWorkerRegistryStore
-from src.infra.adapters.in_memory_worker_runtime_state_store import InMemoryWorkerRuntimeStateStore
-from src.infra.adapters.in_memory_worker_profile_binding_store import InMemoryWorkerProfileBindingStore
-from src.infra.public.stores.in_memory_worker_profile_content_store import InMemoryWorkerProfileContentStore
-from src.infra.public.stores.sqlite_worker_profile_content_store import SQLiteWorkerProfileContentStore
-from src.interfaces.api import worker_profile_parity_routes as routes
-from src.interfaces.api.worker_profile_routes import analysis, common, vector_sync
+from app.infra.adapters.in_memory_worker_registry_store import InMemoryWorkerRegistryStore
+from app.infra.adapters.in_memory_worker_runtime_state_store import InMemoryWorkerRuntimeStateStore
+from app.infra.adapters.in_memory_worker_profile_binding_store import InMemoryWorkerProfileBindingStore
+from app.infra.public.stores.in_memory_worker_profile_content_store import InMemoryWorkerProfileContentStore
+from app.infra.public.stores.sqlite_worker_profile_content_store import SQLiteWorkerProfileContentStore
+from app.adapters.http import worker_profile_parity_routes as routes
+from app.adapters.http.worker_profile_routes import analysis, common, vector_sync
 
 
 @pytest.fixture(params=["memory", "sqlite"])
@@ -37,7 +37,7 @@ def sync_client(monkeypatch, tmp_path, request):
     monkeypatch.setattr(vector_sync, "_sync_runtime_state_to_vector_store", lambda *args: None)
     monkeypatch.setattr(vector_sync, "_sync_availability_to_vector_store", lambda *args: None)
     monkeypatch.setattr(analysis, "_analyze_and_persist_async", AsyncMock())
-    monkeypatch.setattr("src.application.utils.drm_config_helper.is_capability_verify_enabled", lambda: False)
+    monkeypatch.setattr("app.application.utils.drm_config_helper.is_capability_verify_enabled", lambda: False)
     with TestClient(app) as client:
         yield client, stores
 

@@ -29,7 +29,7 @@ class TestQdrantMySQLVectorStoreContract:
     def test_module_imports_without_connecting(self):
         """Test that the module can be imported without database/Qdrant connection."""
         import importlib
-        import src.infra.public.vectorstores.qdrant_mysql_vector_store as store_module
+        import app.infra.public.vectorstores.qdrant_mysql_vector_store as store_module
 
         # Reload to ensure no connection happens on import
         importlib.reload(store_module)
@@ -39,7 +39,7 @@ class TestQdrantMySQLVectorStoreContract:
 
     def test_store_constructs_without_connecting(self):
         """Test that the store can be constructed without database/Qdrant connection."""
-        from src.infra.public.vectorstores.qdrant_mysql_vector_store import (
+        from app.infra.public.vectorstores.qdrant_mysql_vector_store import (
             QdrantMySQLVectorStore,
         )
 
@@ -68,7 +68,7 @@ class TestQdrantMySQLVectorStoreContract:
 
     def test_required_methods_exist(self):
         """Test that all required methods exist."""
-        from src.infra.public.vectorstores.qdrant_mysql_vector_store import (
+        from app.infra.public.vectorstores.qdrant_mysql_vector_store import (
             QdrantMySQLVectorStore,
         )
 
@@ -114,7 +114,7 @@ class TestQdrantMySQLVectorStoreContract:
             [
                 sys.executable,
                 "-c",
-                "from src.infra.public.vectorstores.qdrant_mysql_vector_store import QdrantMySQLVectorStore; print('OK')",
+                "from app.infra.public.vectorstores.qdrant_mysql_vector_store import QdrantMySQLVectorStore; print('OK')",
             ],
             cwd=str(open_core_root),
             env=env,
@@ -134,8 +134,8 @@ class TestQdrantMySQLVectorStoreContract:
             "mist",
             "mist_client",
             "layotto",
-            "src.infra.config.zdas_settings",
-            "src.infra.adapters.zdas_",
+            "app.infra.config.zdas_settings",
+            "app.infra.adapters.zdas_",
         ]
         for keyword in forbidden:
             assert keyword not in result.stdout.lower()
@@ -143,7 +143,7 @@ class TestQdrantMySQLVectorStoreContract:
 
     def test_business_id_mapping_reused(self):
         """Test that business ID mapping from QdrantLocalVectorStore is reused."""
-        from src.infra.public.vectorstores.qdrant_mysql_vector_store import (
+        from app.infra.public.vectorstores.qdrant_mysql_vector_store import (
             QdrantMySQLVectorStore,
         )
 
@@ -155,7 +155,7 @@ class TestQdrantMySQLVectorStoreContract:
 
     def test_diagnostic_logging_present(self):
         """Test that the store has comprehensive diagnostic logging."""
-        from src.infra.public.vectorstores.qdrant_mysql_vector_store import (
+        from app.infra.public.vectorstores.qdrant_mysql_vector_store import (
             QdrantMySQLVectorStore,
         )
 
@@ -179,7 +179,7 @@ class TestQdrantMySQLVectorStoreContract:
 
     def test_rebuild_from_mysql_signature(self):
         """Test that rebuild_from_mysql has correct signature."""
-        from src.infra.public.vectorstores.qdrant_mysql_vector_store import (
+        from app.infra.public.vectorstores.qdrant_mysql_vector_store import (
             QdrantMySQLVectorStore,
         )
 
@@ -196,7 +196,7 @@ class TestQdrantMySQLVectorStoreContract:
 
     def test_write_ordering_documented(self):
         """Test that write-through ordering is documented."""
-        from src.infra.public.vectorstores.qdrant_mysql_vector_store import (
+        from app.infra.public.vectorstores.qdrant_mysql_vector_store import (
             QdrantMySQLVectorStore,
         )
 
@@ -210,7 +210,7 @@ class TestQdrantMySQLVectorStoreContract:
 
     def test_fail_fast_if_mysql_backend_missing(self):
         """Test that operations fail fast if MySQL backend is missing config."""
-        from src.infra.public.vectorstores.qdrant_mysql_vector_store import (
+        from app.infra.public.vectorstores.qdrant_mysql_vector_store import (
             QdrantMySQLVectorStore,
         )
 
@@ -239,7 +239,7 @@ class TestQdrantMySQLVectorStoreContract:
         2. Exception message indicates partial failure state
         3. Exception message mentions rebuild required
         """
-        from src.infra.public.vectorstores.qdrant_mysql_vector_store import (
+        from app.infra.public.vectorstores.qdrant_mysql_vector_store import (
             QdrantMySQLVectorStore,
         )
 
@@ -261,7 +261,7 @@ class TestQdrantMySQLVectorStoreContract:
 
     def test_no_fake_success_when_qdrant_index_update_fails(self):
         """Test that method does not return success when Qdrant index update fails."""
-        from src.infra.public.vectorstores.qdrant_mysql_vector_store import (
+        from app.infra.public.vectorstores.qdrant_mysql_vector_store import (
             QdrantMySQLVectorStore,
         )
 
@@ -305,7 +305,7 @@ class TestQdrantMySQLVectorStoreContract:
         2. Those functions automatically include correlation_id
         3. All new logging calls are properly instrumented
         """
-        from src.infra.public.vectorstores.qdrant_mysql_vector_store import (
+        from app.infra.public.vectorstores.qdrant_mysql_vector_store import (
             QdrantMySQLVectorStore,
         )
 
@@ -345,7 +345,7 @@ class TestQdrantMySQLVectorStoreIntegration:
     @pytest.fixture
     def vector_store(self):
         """Create a QdrantMySQLVectorStore for testing."""
-        from src.infra.public.vectorstores.qdrant_mysql_vector_store import (
+        from app.infra.public.vectorstores.qdrant_mysql_vector_store import (
             QdrantMySQLVectorStore,
         )
         import tempfile
@@ -371,7 +371,7 @@ class TestQdrantMySQLVectorStoreIntegration:
 
     def test_rebuild_from_mysql(self, vector_store):
         """Test rebuild_from_mysql end-to-end flow."""
-        from src.domain.models.vector_point import VectorPoint
+        from app.domain.models.vector_point import VectorPoint
 
         # Get dimension from vector store
         dimension = vector_store.dimension
@@ -410,7 +410,7 @@ class TestQdrantMySQLVectorStoreIntegration:
 
     def test_write_through_and_search(self, vector_store):
         """Test write-through to MySQL and search from Qdrant."""
-        from src.domain.models.vector_point import VectorPoint
+        from app.domain.models.vector_point import VectorPoint
 
         # Get dimension from vector store
         dimension = vector_store.dimension
@@ -437,7 +437,7 @@ class TestQdrantMySQLVectorStoreIntegration:
 
     def test_delete_operations(self, vector_store):
         """Test delete operations remove from both MySQL and Qdrant."""
-        from src.domain.models.vector_point import VectorPoint
+        from app.domain.models.vector_point import VectorPoint
 
         # Get dimension from vector store
         dimension = vector_store.dimension

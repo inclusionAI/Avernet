@@ -7,19 +7,19 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
-from src.bootstrap import oss_worker_lifecycle_routes as lifecycle
-from src.infra.adapters.in_memory_worker_registry_store import (
+from app.bootstrap import oss_worker_lifecycle_routes as lifecycle
+from app.infra.adapters.in_memory_worker_registry_store import (
     InMemoryWorkerRegistryStore,
 )
-from src.infra.adapters.in_memory_worker_runtime_state_store import (
+from app.infra.adapters.in_memory_worker_runtime_state_store import (
     InMemoryWorkerRuntimeStateStore,
 )
-from src.infra.public.stores.in_memory_worker_profile_content_store import (
+from app.infra.public.stores.in_memory_worker_profile_content_store import (
     InMemoryWorkerProfileContentStore,
 )
-from src.interfaces.api import profile_routes, worker_profile_parity_routes
-from src.interfaces.api.dependencies import fusion_dependencies
-from src.interfaces.api.worker_profile_routes import analysis, common, vector_sync
+from app.adapters.http import profile_routes, worker_profile_parity_routes
+from app.adapters.http.dependencies import fusion_dependencies
+from app.adapters.http.worker_profile_routes import analysis, common, vector_sync
 
 
 async def _invoke(app, method, path, payload=None, timeline=None):
@@ -128,7 +128,7 @@ def test_sync_waits_for_index_and_optional_analysis_without_blocking_loop(
     monkeypatch.setattr(vector_sync, "_sync_availability_to_vector_store", sync_vector)
     monkeypatch.setattr(profile_routes, "_trigger_index_sync", lambda worker_id: None)
     monkeypatch.setattr(
-        "src.application.utils.drm_config_helper.is_capability_verify_enabled",
+        "app.application.utils.drm_config_helper.is_capability_verify_enabled",
         lambda: False,
     )
 

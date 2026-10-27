@@ -19,12 +19,12 @@ Stage 1 Phase 5: Fusion Offline Participant Warning
 import os
 import tempfile
 import pytest
-from src.infra.config.feature_flags import FeatureFlags
+from app.infra.config.feature_flags import FeatureFlags
 
 from datetime import datetime
 from unittest.mock import Mock
 
-from src.domain.models.worker import (
+from app.domain.models.worker import (
     Worker,
     WorkerType,
     WorkerIdentity,
@@ -34,26 +34,26 @@ from src.domain.models.worker import (
     Availability,
     TrustLevel,
 )
-from src.domain.models.worker_lifecycle_state import WorkerLifecycleState
-from src.domain.models.worker_runtime_state import WorkerRuntimeState
-from src.domain.models.fusion_request import FusionRequest, FuseOptions
-from src.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext, Perspective
-from src.infra.adapters.sqlite_worker_registry_store import SQLiteWorkerRegistryStore
-from src.infra.adapters.sqlite_worker_runtime_state_store import SQLiteWorkerRuntimeStateStore
-from src.infra.adapters.sqlite_worker_profile_binding_store import SQLiteWorkerProfileBindingStore
-from src.infra.adapters.sqlite_worker_audit_log_store import SQLiteWorkerAuditLogStore
-from src.domain.models.worker_source_info import WorkerSourceType
-from src.application.services.participant_availability_checker import (
+from app.domain.models.worker_lifecycle_state import WorkerLifecycleState
+from app.domain.models.worker_runtime_state import WorkerRuntimeState
+from app.domain.models.fusion_request import FusionRequest, FuseOptions
+from app.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext, Perspective
+from app.infra.adapters.sqlite_worker_registry_store import SQLiteWorkerRegistryStore
+from app.infra.adapters.sqlite_worker_runtime_state_store import SQLiteWorkerRuntimeStateStore
+from app.infra.adapters.sqlite_worker_profile_binding_store import SQLiteWorkerProfileBindingStore
+from app.infra.adapters.sqlite_worker_audit_log_store import SQLiteWorkerAuditLogStore
+from app.domain.models.worker_source_info import WorkerSourceType
+from app.application.services.participant_availability_checker import (
     ParticipantAvailabilityChecker,
     ParticipantAvailability,
 )
-from src.application.services.group_fusion_service import GroupFusionService
-from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
-from src.application.services.worker_candidate_recommendation_impl import WorkerCandidateRecommendationImpl
-from src.domain.services.worker_profile_retrieval_service import WorkerProfileRetrievalService
-from src.application.services.registry_aware_worker_filter import RegistryAwareWorkerFilter
-from src.domain.models.worker_profile import WorkerProfile, ProfileType, WorkerProfileScanResult
-from src.domain.models.skill_profile import SkillProfile
+from app.application.services.group_fusion_service import GroupFusionService
+from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
+from app.application.services.worker_candidate_recommendation_impl import WorkerCandidateRecommendationImpl
+from app.domain.services.worker_profile_retrieval_service import WorkerProfileRetrievalService
+from app.application.services.registry_aware_worker_filter import RegistryAwareWorkerFilter
+from app.domain.models.worker_profile import WorkerProfile, ProfileType, WorkerProfileScanResult
+from app.domain.models.skill_profile import SkillProfile
 
 
 @pytest.fixture(autouse=True)
@@ -121,8 +121,8 @@ def setup_worker_with_profile(
     runtime_state: WorkerRuntimeState,
 ) -> Worker:
     """创建 Worker 并绑定 profile"""
-    from src.application.services.worker_import_service import WorkerImportService
-    from src.infra.adapters.in_memory_worker_index_sync_adapter import InMemoryWorkerIndexSyncAdapter
+    from app.application.services.worker_import_service import WorkerImportService
+    from app.infra.adapters.in_memory_worker_index_sync_adapter import InMemoryWorkerIndexSyncAdapter
 
     # 使用 WorkerImportService 创建 worker
     import_service = WorkerImportService(
@@ -590,7 +590,7 @@ class TestDefaultCandidateFilteringStillWorks:
         )
 
         # 检索
-        from src.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.models.retrieval_mode import RetrievalMode
         result = retrieval_service.retrieve(question="testing", mode=RetrievalMode.AGENT)
 
         # 验证：只有 online 的 profile

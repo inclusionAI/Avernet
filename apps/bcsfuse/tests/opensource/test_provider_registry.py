@@ -18,7 +18,7 @@ def test_runtime_registry_can_be_built():
     os.environ["LLM_AUTH_TOKEN"] = "test-token"
     os.environ["STARTUP_PROFILE"] = "opensource"
 
-    from src.bootstrap.opensource import build_opensource_provider_registry
+    from app.bootstrap.opensource import build_opensource_provider_registry
 
     # This will fail if MySQL is not available, but we just want to test imports
     # For now, we'll catch the exception and check that imports work
@@ -49,7 +49,7 @@ def test_dev_registry_can_be_built():
         os.environ["LLM_AUTH_TOKEN"] = "test-token"
         os.environ["STARTUP_PROFILE"] = "opensource"
 
-        from src.bootstrap.opensource import build_opensource_provider_registry
+        from app.bootstrap.opensource import build_opensource_provider_registry
 
         registry = build_opensource_provider_registry(mode="dev")
         print("✓ Dev registry built successfully")
@@ -60,7 +60,7 @@ def test_test_registry_can_be_built():
     """Test that test registry can be built."""
     os.environ["STARTUP_PROFILE"] = "opensource"
 
-    from src.bootstrap.opensource import build_opensource_provider_registry
+    from app.bootstrap.opensource import build_opensource_provider_registry
 
     registry = build_opensource_provider_registry(mode="test")
     print("✓ Test registry built successfully")
@@ -71,7 +71,7 @@ def test_registry_contains_required_provider_keys():
     """Test that registry contains every required composition provider."""
     os.environ["STARTUP_PROFILE"] = "opensource"
 
-    from src.bootstrap.opensource import build_opensource_provider_registry
+    from app.bootstrap.opensource import build_opensource_provider_registry
 
     registry = build_opensource_provider_registry(mode="test")
 
@@ -128,10 +128,10 @@ def test_dev_fallback_provider_types():
         os.environ["LLM_AUTH_TOKEN"] = "test-token"
         os.environ["STARTUP_PROFILE"] = "opensource"
 
-        from src.bootstrap.opensource import build_opensource_provider_registry
-        from src.infra.public.stores.sqlite_worker_registry_store import SQLiteWorkerRegistryStore
-        from src.infra.public.vectorstores.faiss_sqlite_vector_store import FaissSqliteVectorStore
-        from src.infra.public.embedding.real_embedding_provider import RealEmbeddingProvider
+        from app.bootstrap.opensource import build_opensource_provider_registry
+        from app.infra.public.stores.sqlite_worker_registry_store import SQLiteWorkerRegistryStore
+        from app.infra.public.vectorstores.faiss_sqlite_vector_store import FaissSqliteVectorStore
+        from app.infra.public.embedding.real_embedding_provider import RealEmbeddingProvider
 
         registry = build_opensource_provider_registry(mode="dev")
 
@@ -148,12 +148,12 @@ def test_test_fallback_provider_types():
     """Test that test mode uses correct provider types."""
     os.environ["STARTUP_PROFILE"] = "opensource"
 
-    from src.bootstrap.opensource import build_opensource_provider_registry
-    from src.infra.public.stores.in_memory_worker_registry_store import InMemoryWorkerRegistryStore
-    from src.infra.public.vectorstores.in_memory_vector_store import InMemoryVectorStore
-    from src.infra.public.embedding.fake_embedding_provider import FakeEmbeddingProvider
-    from src.infra.public.reranker.noop_reranker import NoopReranker
-    from src.infra.public.llm.fake_llm_provider import FakeLLMProvider
+    from app.bootstrap.opensource import build_opensource_provider_registry
+    from app.infra.public.stores.in_memory_worker_registry_store import InMemoryWorkerRegistryStore
+    from app.infra.public.vectorstores.in_memory_vector_store import InMemoryVectorStore
+    from app.infra.public.embedding.fake_embedding_provider import FakeEmbeddingProvider
+    from app.infra.public.reranker.noop_reranker import NoopReranker
+    from app.infra.public.llm.fake_llm_provider import FakeLLMProvider
 
     registry = build_opensource_provider_registry(mode="test")
 
@@ -186,8 +186,8 @@ def test_provider_module_path_does_not_contain_forbidden_internal_patterns():
     ]
 
     module_root = Path(__file__).resolve().parents[2]
-    oss_provider_dir = module_root / "src/infra/public"
-    bootstrap_dir = module_root / "src/bootstrap"
+    oss_provider_dir = module_root / "src/app/infra/public"
+    bootstrap_dir = module_root / "src/app/bootstrap"
 
     violations = []
 
@@ -207,7 +207,7 @@ def test_provider_module_path_does_not_contain_forbidden_internal_patterns():
                     if module_name:
                         # This is our environment/YAML adapter, not the internal
                         # DRM SDK. Its own imports are scanned below as well.
-                        if module_name == "src.infra.public.config.drm_config_provider":
+                        if module_name == "app.infra.public.config.drm_config_provider":
                             continue
                         for pattern in forbidden_patterns:
                             if pattern.lower() in module_name.lower():
@@ -249,17 +249,17 @@ def test_runtime_service_providers_can_be_added_without_replacing_storage(
     monkeypatch.setenv("LLM_BASE_URL", "http://localhost:8002")
     monkeypatch.setenv("LLM_AUTH_TOKEN", "test-token")
 
-    from src.bootstrap.opensource import (
+    from app.bootstrap.opensource import (
         build_opensource_provider_registry,
         register_runtime_service_providers,
     )
-    from src.infra.public.config.yaml_env_config_provider import (
+    from app.infra.public.config.yaml_env_config_provider import (
         YamlEnvConfigProvider,
     )
-    from src.infra.public.embedding.real_embedding_provider import (
+    from app.infra.public.embedding.real_embedding_provider import (
         RealEmbeddingProvider,
     )
-    from src.infra.public.llm.anthropic_compatible_provider import (
+    from app.infra.public.llm.anthropic_compatible_provider import (
         AnthropicCompatibleProvider,
     )
 
@@ -283,11 +283,11 @@ def test_runtime_service_providers_preserve_environment_model_selection(
     monkeypatch.setenv("LLM_FAST_MODEL", "internal-fast")
     monkeypatch.setenv("LLM_REASONING_MODEL", "internal-reasoning")
 
-    from src.bootstrap.opensource import (
+    from app.bootstrap.opensource import (
         build_opensource_provider_registry,
         register_runtime_service_providers,
     )
-    from src.infra.public.llm import anthropic_compatible_provider as llm_module
+    from app.infra.public.llm import anthropic_compatible_provider as llm_module
 
     captured = {}
 
@@ -323,7 +323,7 @@ def test_object_storage_root_dir_not_in_source_code():
     with tempfile.TemporaryDirectory() as tmpdir:
         os.environ["BCSFUSE_OBJECT_STORAGE_DIR"] = tmpdir
 
-        from src.infra.public.object_storage.local_runtime_object_storage_provider import LocalRuntimeObjectStorageProvider
+        from app.infra.public.object_storage.local_runtime_object_storage_provider import LocalRuntimeObjectStorageProvider
 
         provider = LocalRuntimeObjectStorageProvider()
 
