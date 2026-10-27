@@ -678,7 +678,14 @@ curl -X GET http://localhost:8765/v1/workers/my-bot-001 \
 
 ### POST /v1/workers/batch
 
-**Purpose:** Batch query multiple workers
+**Purpose:** Look up known Worker IDs and supply their metadata and tags. This
+endpoint does not perform semantic search or reranking.
+
+The response includes both `data` (summaries keyed by Worker ID, consumed by
+BCN) and `workers` (the existing full Worker list). `profile_tags` currently
+contains `trust_level`. Unknown IDs are listed in `not_found_ids`; an all-missing
+lookup still succeeds with an empty map and list. Duplicate IDs appear only once
+in `data`, while `workers` and `total` retain the existing per-request-ID behavior.
 
 **Authentication:** Required
 
@@ -697,19 +704,25 @@ curl -X GET http://localhost:8765/v1/workers/my-bot-001 \
   "success": true,
   "data": {
     "bot-001": {
-      "worker_id": "bot-001",
       "name": "Bot 1",
-      "runtime_state": "online"
+      "runtime_state": "online",
+      "availability": "protected",
+      "profile_tags": {"trust_level": "trusted"}
     },
     "bot-002": {
-      "worker_id": "bot-002",
       "name": "Bot 2",
-      "runtime_state": "offline"
+      "runtime_state": "offline",
+      "availability": "private",
+      "profile_tags": {"trust_level": "guarded"}
     }
   },
-  "not_found_ids": ["bot-003"]
+  "not_found_ids": ["bot-003"],
+  "total": 2
 }
 ```
+
+The example omits the unchanged `workers` field for brevity; the actual response
+also includes the full Worker objects in that list.
 
 **Status Codes:**
 
