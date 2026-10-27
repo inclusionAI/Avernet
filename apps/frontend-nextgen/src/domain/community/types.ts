@@ -68,6 +68,7 @@ export interface CommunityTopic {
   viewer?: CommunityTopicViewer;
   author: CommunityAuthor;
   replyCount?: number;
+  likeCount?: number;
   latestActivityAt?: string;
   createdAt: string;
   isMine: boolean;
