@@ -690,6 +690,13 @@ class BotPublicService(BotPublicServiceProtocol):
             on_approval_started(approval_result)
         if risk_check_id and not approval_result.get("puid"):
             raise BotPublicServiceError("risk approval has no associated PUID")
+        if risk_check_id and str(approval_result.get("state", "")).upper() == "COMPLETED":
+            deferred = self._risk_approval_guard.check(
+                get_current_env(), risk_check_id, owner_id, bot["id"], approval_result["puid"],
+                str(approval_result.get("lastOperate", "")).upper(), public_scope,
+            )
+            if deferred != "DEFERRED":
+                raise BotPublicServiceError("risk inline approval could not be persisted")
         # 记录工单信息到 BCS friend_ext.public_user_approval (PROCESSING):
         # GET→merge→PATCH (Provider 管理 API, 同 BcnService 鉴权). 失败不中断已建工单.
         try:
@@ -724,7 +731,7 @@ class BotPublicService(BotPublicServiceProtocol):
                     public_scope=public_scope, risk_check_id=risk_check_id,
                 ),
             ) is True
-        if not replayed and str(approval_result.get("state", "")).upper() == "COMPLETED":
+        if not risk_check_id and not replayed and str(approval_result.get("state", "")).upper() == "COMPLETED":
             try:
                 self.handle_public_approval_callback(
                     bot_id=bot_uid,
@@ -796,7 +803,15 @@ class BotPublicService(BotPublicServiceProtocol):
             mark_risk_target_ready=lambda risk_id, puid: self._risk_approval_guard.mark_target_ready(
                 get_current_env(), risk_id, puid
             ),
+            stage_risk_approval=self._stage_legacy_risk_approval,
         )
+
+    def _stage_legacy_risk_approval(self, risk_id: str, owner_id: str, bot_pk: int,
+                                    puid: str, decision: str) -> None:
+        if self._risk_approval_guard is None or self._risk_approval_guard.check(
+            get_current_env(), risk_id, owner_id, bot_pk, puid, decision.upper(), "legacy"
+        ) != "DEFERRED":
+            raise BotPublicServiceError("risk inline approval could not be persisted")
 
     def _replay_risk_approval(self, bot_id: str, owner_id: str, risk_check_id: str) -> bool:
         if self._risk_approval_guard is None:
@@ -1051,6 +1066,7 @@ class BotPublicService(BotPublicServiceProtocol):
     def _apply_callback_decision(
         self, *, bot_uid: str, public_scope: str, last_operate: str, expected_puid: str | None = None,
         expected_target: dict | None = None,
+        before_apply: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, Any]:
         """审批回调落 BCS: 更新 sub-block status; AGREE 时再把 BCS 可见性字段翻转。
 
@@ -1114,8 +1130,12 @@ class BotPublicService(BotPublicServiceProtocol):
             friend_ext[_BCS_VIEW_SCOPE_DEPS_KEY_BY_SCOPE[public_scope]] = (
                 block.get("view_friend_deps") or []
             )
+        if before_apply is not None and before_apply() is not True:
+            return {"success": False, "public": None, "message": "risk callback eligibility changed"}
         patched = self._bcn_service.patch_attributes(bot_uuid=bot_uid, body=body)
         skipped = isinstance(patched, dict) and bool(patched.get("skipped"))
+        if expected_puid is not None and skipped:
+            return {"success": False, "public": None, "message": "risk callback BCS patch skipped"}
         if public_scope == "user" and block["status"] == "AGREE" and not skipped:
             public = "0" if body["user_visibility"] == "private" else "1"
             self._sync_bcsfuse_worker_runtime_state(bot_uid, bot_uid, public)
@@ -1145,6 +1165,11 @@ class BotPublicService(BotPublicServiceProtocol):
                 if risk_check_id and risk_check_id != associated.risk_check_id:
                     return {"success": False, "message": "risk callback association mismatch"}
                 risk_check_id = associated.risk_check_id
+            elif not risk_check_id and re.fullmatch(
+                r"antprocess-agentclaw_botpublic_risk-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:_.+)?",
+                puid,
+            ):
+                return {"success": False, "message": "risk callback association unavailable"}
         if risk_check_id and not _risk_guarded:
             guard = self._risk_approval_guard
             if guard is None:
@@ -1192,7 +1217,10 @@ class BotPublicService(BotPublicServiceProtocol):
             try:
                 return self._apply_callback_decision(
                     bot_uid=bot_id, public_scope=public_scope, last_operate=last_operate,
-                    **({"expected_puid": puid, "expected_target": _risk_target} if _risk_guarded else {}),
+                    **({"expected_puid": puid, "expected_target": _risk_target,
+                        "before_apply": lambda: self._risk_approval_guard.revalidate_claim(
+                            get_current_env(), risk_check_id, puid, (last_operate or "").upper()
+                        )} if _risk_guarded else {}),
                 )
             except Exception as exc:  # noqa: BLE001 — callback must not crash antprocess
                 if _risk_guarded:
@@ -1258,6 +1286,10 @@ class BotPublicService(BotPublicServiceProtocol):
             ext["permission_owner"] = public_approval['permission_owner']
             ext["friend_approval"] = friend_approval_val
             update_data = {"public": public_value, "modifier_id": public_approval.get("applicant", owner_id), "ext": ext}
+            if _risk_guarded and self._risk_approval_guard.revalidate_claim(
+                get_current_env(), risk_check_id, puid, last_operate_upper
+            ) is not True:
+                return {"success": False, "public": None, "message": "risk callback eligibility changed"}
             updated_bot = self._update_bot_with_notification(bot_id, owner_id, update_data, bot, notify_device=True)
             if not updated_bot:
                 return {"success": False, "public": None, "message": "Failed to update bot"}

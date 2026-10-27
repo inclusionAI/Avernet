@@ -137,3 +137,30 @@ def test_late_target_ready_rechecks_eligibility_and_recovers_same_approval():
     assert changes["phase"] == "APPROVING"
     assert json.loads(changes["workflow_json"])["approval_target_ready"] is True
     h3.assert_called_once()
+
+
+def test_inline_completed_event_survives_h3_exception_for_recovery():
+    from datetime import datetime
+    from dataclasses import replace
+    import pytest
+    class Repository:
+        def __init__(self):
+            self.row = _record(phase="APPROVING", approval_puid="puid-a")
+        def get(self, **_):
+            return self.row
+        def update_current(self, *, row_version, changes, **_):
+            if self.row.row_version != row_version:
+                return False
+            self.row = replace(self.row, **changes, row_version=row_version + 1)
+            return True
+    repo = Repository()
+    now = datetime(2026, 1, 1)
+    def unavailable(_):
+        raise RuntimeError("H3 unavailable")
+    guard = RiskApprovalGuard(repo, unavailable, clock=lambda: now)
+    assert guard.check("dev", "risk-a", "owner", 42, "puid-a", "AGREE", "user") == "DEFERRED"
+    guard.mark_target_ready("dev", "risk-a", "puid-a")
+    with pytest.raises(RuntimeError, match="H3 unavailable"):
+        guard.replay("dev", "risk-a", MagicMock())
+    assert json.loads(repo.row.workflow_json)["pending_approval"]["decision"] == "AGREE"
+    assert repo.row.next_action_at == now

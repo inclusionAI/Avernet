@@ -2973,6 +2973,7 @@ def test_risk_agent_callback_applies_the_approved_target_visibility():
     service = _make_service(bot_repository=bots, bcn_service=bcn)
     service._risk_approval_guard = MagicMock()
     service._risk_approval_guard.check.return_value = "ALLOW"
+    service._risk_approval_guard.revalidate_claim.return_value = True
     from types import SimpleNamespace
     service._risk_approval_guard.repo.get.return_value = SimpleNamespace(target_json='{"visibility":"protected","view_depts":[]}')
     assert service.handle_public_approval_callback("b1:u1", "u1", "p1", "AGREE", "agent", risk_check_id="risk-a")["success"]
@@ -2990,9 +2991,65 @@ def test_risk_callback_rejects_puid_matching_but_changed_target():
     service = _make_service(bot_repository=bots, bcn_service=bcn)
     guard = MagicMock()
     guard.check.return_value = "ALLOW"
+    guard.revalidate_claim.return_value = True
     guard.repo.get.return_value = SimpleNamespace(target_json='{"visibility":"protected","view_depts":[{"deptNo":"1"}]}')
     service._risk_approval_guard = guard
     result = service.handle_public_approval_callback("b1:u1", "u1", "p1", "AGREE", "user", risk_check_id="risk-a")
     assert result["success"] is False
     bcn.patch_attributes.assert_not_called()
     assert guard.finish.call_args.args[-1] is False
+
+
+def test_unknown_reserved_risk_puid_cannot_fall_through_to_legacy_callback():
+    repository = MagicMock()
+    repository.find_approval.return_value = None
+    bcn = MagicMock()
+    service = _make_service(risk_repository=repository, bcn_service=bcn)
+    result = service.handle_public_approval_callback(
+        "b1:u1", "u1", "antprocess-agentclaw_botpublic_risk-12345678-1234-1234-1234-123456789abc", "AGREE", "user"
+    )
+    assert result["success"] is False
+    bcn.patch_attributes.assert_not_called()
+
+
+@pytest.mark.parametrize("failure", ["withdrawn", "skipped"])
+def test_risk_callback_does_not_report_applied_for_withdrawal_or_skipped_patch(failure):
+    from types import SimpleNamespace
+    bots = MagicMock()
+    bots.get_by_id_and_entity.return_value = _make_bot("b1", "u1")
+    bcn = MagicMock()
+    bcn.get_attributes.return_value = {"friend_ext": {"public_user_approval": {
+        "puid": "p1", "visibility": "public", "view_friend_deps": []}}}
+    bcn.patch_attributes.return_value = {"skipped": True} if failure == "skipped" else {}
+    service = _make_service(bot_repository=bots, bcn_service=bcn)
+    guard = MagicMock()
+    guard.check.return_value = "ALLOW"
+    guard.revalidate_claim.return_value = failure != "withdrawn"
+    guard.repo.get.return_value = SimpleNamespace(target_json='{"visibility":"public","view_depts":[]}')
+    service._risk_approval_guard = guard
+    result = service.handle_public_approval_callback("b1:u1", "u1", "p1", "AGREE", "user", risk_check_id="risk-a")
+    assert result["success"] is False
+    if failure == "withdrawn":
+        bcn.patch_attributes.assert_not_called()
+    assert guard.finish.call_args.args[-1] is False
+
+
+def test_completed_risk_approval_is_staged_before_target_and_replay_failure_propagates():
+    bots = MagicMock()
+    bots.get_by_id_and_entity.return_value = _make_bot("b1", "u1")
+    bcn = MagicMock()
+    bcn.get_attributes.return_value = {"friend_ext": {}}
+    bcn.patch_attributes.return_value = {}
+    process = MagicMock()
+    process.start_approval.return_value = {"success": True, "puid": "p1", "state": "COMPLETED", "lastOperate": "AGREE"}
+    service = _make_service(bot_repository=bots, bcn_service=bcn, process_service=process)
+    guard = MagicMock()
+    guard.check.return_value = "DEFERRED"
+    guard.replay.side_effect = RuntimeError("H3 unavailable")
+    service._risk_approval_guard = guard
+    with pytest.raises(RuntimeError, match="H3 unavailable"):
+        service.public_bcs_bot("b1:u1", "u1", "user", _make_operator(), visibility="public",
+            approval_biz_id="risk-a", risk_check_id="risk-a", on_approval_started=lambda _: None)
+    guard.check.assert_called_once()
+    guard.mark_target_ready.assert_called_once()
+    guard.replay.assert_called_once()

@@ -94,6 +94,7 @@ class BotPublishCallbacks:
     ]
     replay_risk_approval: Optional[Callable[..., bool]] = None
     mark_risk_target_ready: Optional[Callable[[str, str], None]] = None
+    stage_risk_approval: Optional[Callable[..., None]] = None
 
 
 class BotPublishApprovalPlugin(Plugin, Protocol):

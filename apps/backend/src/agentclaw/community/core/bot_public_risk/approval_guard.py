@@ -107,6 +107,16 @@ class RiskApprovalGuard:
                 return
         raise RuntimeError("unable to persist risk callback outcome")
 
+    def revalidate_claim(self, env: str, risk_id: str, puid: str, decision: str) -> bool:
+        """Repeat current and input checks immediately before the business write."""
+        row = self.repo.get(env=env, risk_check_id=risk_id)
+        if row is None or row.current_target_key is None or row.phase != "APPROVING" or row.approval_puid != puid:
+            return False
+        claim = json.loads(row.workflow_json).get("callback_claim") or {}
+        if claim.get("status") != "processing" or claim.get("event") != {"puid": puid, "decision": decision}:
+            return False
+        return self.check_h3(row) is True
+
     def replay(self, env: str, risk_id: str, callback: Callable[[str, str], dict]) -> bool:
         row = self.repo.get(env=env, risk_check_id=risk_id)
         if row is None:
