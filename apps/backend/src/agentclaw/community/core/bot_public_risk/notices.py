@@ -64,6 +64,7 @@ class RiskNoticeDelivery:
                 key
                 for key, value in notices.items()
                 if value["status"] != "sent"
+                and not (key == "CREATION_UNKNOWN" and row.check_id is not None)
                 and datetime.fromisoformat(value["due_at"]) <= now
             ),
             None,
@@ -101,16 +102,29 @@ class RiskNoticeDelivery:
             current = state.get("notices", {})
             if current.get(reason) != notices[reason]:
                 return
-            current[reason] = {
-                "status": "sent" if sent else "pending",
-                "due_at": (now if sent else now + timedelta(minutes=1)).isoformat(),
-            }
+            if (
+                reason == "CREATION_UNKNOWN"
+                and latest.check_id is not None
+                and not sent
+            ):
+                del current[reason]
+            else:
+                current[reason] = {
+                    "status": "sent" if sent else "pending",
+                    "due_at": (now if sent else now + timedelta(minutes=1)).isoformat(),
+                }
             if self.repo.update_notice(
                 env=env,
                 risk_check_id=risk_check_id,
                 row_version=latest.row_version,
                 workflow_json=json.dumps(state),
-                notification_due_at=_next_due(current),
+                notification_due_at=_next_due(
+                    {
+                        k: v
+                        for k, v in current.items()
+                        if not (k == "CREATION_UNKNOWN" and latest.check_id is not None)
+                    }
+                ),
             ):
                 return
 

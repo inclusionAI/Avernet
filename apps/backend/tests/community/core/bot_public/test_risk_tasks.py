@@ -497,6 +497,7 @@ def test_reclaimed_submit_keeps_late_valid_check_id_without_reposting(tmp_path):
         return "check-1"
 
     provider.submit_agent_scan = blocked
+    record = replace(record, client_scope="openapi:operator")
     tasks.start(record)
     first = queue.claim_batch(
         worker_id="first", env="dev", app="agentclaw", limit=1, lease_seconds=30
@@ -522,6 +523,13 @@ def test_reclaimed_submit_keeps_late_valid_check_id_without_reposting(tmp_path):
     assert row.phase == "CHECKING" and row.check_id == "check-1"
     assert row.auto_poll_until == now[0] + timedelta(minutes=5)
     assert len(provider.submissions) == 1
+    from agentclaw.community.core.bot_public_risk.notices import RiskNoticeDelivery
+
+    calls = []
+    RiskNoticeDelivery(
+        tasks.repo, lambda **kw: calls.append(kw), lambda: now[0]
+    ).deliver(env="dev", risk_check_id="a")
+    assert calls == []
 
 
 def test_late_check_id_does_not_revive_withdrawn_or_replaced_application():
@@ -586,3 +594,39 @@ def test_late_check_id_cannot_revive_other_failure_or_replace_existing_check():
         env="dev", risk_check_id="a", check_id="other-check"
     )
     assert repo.get(env="dev", risk_check_id="a").check_id == "original-check"
+
+
+def test_late_check_during_notice_send_preserves_actual_delivery_result():
+    import json
+    from agentclaw.community.core.bot_public_risk.notices import RiskNoticeDelivery
+
+    for send_succeeds in (True, False):
+        tasks, repo, _, _, now, record = make()
+        tasks.start(replace(record, client_scope="openapi:operator"))
+        row = repo.get(env="dev", risk_check_id="a")
+        assert tasks._update(
+            row, {"workflow_json": json.dumps({"submission_intent": True})}
+        )
+        tasks.submit(env="dev", risk_check_id="a")
+        calls = []
+
+        def send(**kwargs):
+            calls.append(kwargs)
+            tasks._record_submission_result(
+                env="dev", risk_check_id="a", check_id="check-1"
+            )
+            if not send_succeeds:
+                raise RuntimeError("delivery failed")
+
+        delivery = RiskNoticeDelivery(repo, send, lambda: now[0])
+        delivery.deliver(env="dev", risk_check_id="a")
+        row = repo.get(env="dev", risk_check_id="a")
+        notices = json.loads(row.workflow_json)["notices"]
+        if send_succeeds:
+            assert notices["CREATION_UNKNOWN"]["status"] == "sent"
+        else:
+            assert "CREATION_UNKNOWN" not in notices
+        assert row.notification_due_at is None
+        now[0] += timedelta(minutes=3)
+        delivery.deliver(env="dev", risk_check_id="a")
+        assert len(calls) == 1

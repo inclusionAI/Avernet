@@ -15,7 +15,7 @@ from agentclaw.community.core.bot_public_risk.repository import (
     BotPublicRiskRepository,
     RiskCheck,
 )
-from agentclaw.community.core.bot_public_risk.notices import stage_notice
+from agentclaw.community.core.bot_public_risk.notices import _next_due, stage_notice
 from agentclaw.community.core.task_queue.types import Complete, Reschedule, Retry
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.utils.avernet_tenant import (
@@ -205,10 +205,23 @@ class RiskTasks:
             elif row.phase != "PREPARING":
                 return
             now = self.clock()
+            notices = workflow.get("notices", {})
+            unknown = notices.get("CREATION_UNKNOWN")
+            if unknown and unknown["status"] == "pending":
+                del notices["CREATION_UNKNOWN"]
+            # A sender already in flight may have delivered. Keep that honest
+            # history, but do not reclaim or retry it after the ID is known.
+            due_notices = {k: v for k, v in notices.items() if k != "CREATION_UNKNOWN"}
             workflow["detecting_deadline"] = (now + timedelta(minutes=5)).isoformat()
+            notice_changes = (
+                {"notification_due_at": _next_due(due_notices)}
+                if unknown and unknown["status"] != "sent"
+                else {}
+            )
             if self._update(
                 row,
                 {
+                    **notice_changes,
                     "workflow_json": json.dumps(workflow),
                     "phase": "CHECKING",
                     "security_status": "DETECTING",
