@@ -4,25 +4,15 @@
 # Open-Core: 仅导出 public-safe vector stores
 # ZDAS vector stores have moved to bcsfuse_internal.providers.vector
 
-__all__ = [
-    "FaissVectorStoreAdapter",
-    "FaissSqliteVectorStore",
-]
+__all__ = []
 
 
 def __getattr__(name):
-    """延迟加载 vector store 类"""
-    if name == "FaissVectorStoreAdapter":
-        from app.infra.vectorstores.faiss_vector_store_adapter import FaissVectorStoreAdapter
-        return FaissVectorStoreAdapter
-    elif name == "FaissSqliteVectorStore":
-        from app.infra.vectorstores.faiss_sqlite_vector_store import FaissSqliteVectorStore
-        return FaissSqliteVectorStore
-    elif name == "FaissZdasVectorStore":
+    if name == "FaissZdasVectorStore":
         # ZDAS vector store - internal only
         raise ImportError(
             f"{name} is internal-only and has moved to bcsfuse_internal.providers.vector. "
-            f"Open-core must use FaissSqliteVectorStore or a public vector store provider. "
+            f"Open-core must use QdrantSQLiteVectorStore or a public vector store provider. "
             f"For ZDAS support, use bcsfuse_internal provider wiring."
         )
     elif name == "QdrantZdasVectorStore":

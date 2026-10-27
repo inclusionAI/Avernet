@@ -45,7 +45,7 @@ def isolated_app_factory(request, monkeypatch, tmp_path):
     env = {
         "BCSFUSE_PROVIDER_MODE": "runtime", "BCSFUSE_AUTH_TOKEN": TOKEN,
         "BCSFUSE_DATABASE_SQLITE_PATH": str(tmp_path / "workers.sqlite"),
-        "BCSFUSE_FAISS_SQLITE_PATH": str(tmp_path / "unused-vector.sqlite"),
+        "BCSFUSE_VECTOR_SQLITE_PATH": str(tmp_path / "unused-vector.sqlite"),
         "BCSFUSE_OBJECT_STORAGE_DIR": str(tmp_path / "objects"),
         "EMBEDDING_DIMENSION": "64", "EMBEDDING_BASE_URL": "",
         "EMBEDDING_AUTH_TOKEN": "", "LLM_BASE_URL": "", "LLM_AUTH_TOKEN": "",

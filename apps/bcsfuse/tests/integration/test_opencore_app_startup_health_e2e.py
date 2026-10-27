@@ -31,7 +31,7 @@ def test_client(
         str(runtime_dir / "bcsfuse.db"),
     )
     monkeypatch.setenv(
-        "BCSFUSE_FAISS_SQLITE_PATH",
+        "BCSFUSE_VECTOR_SQLITE_PATH",
         str(runtime_dir / "faiss_index.db"),
     )
     monkeypatch.setenv(

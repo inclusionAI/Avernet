@@ -26,6 +26,8 @@ def restore_logger_state():
     "app.adapters.http.dependencies.worker_dependencies",
     "app.infra.public.vectorstores.qdrant_local_vector_store",
     "app.infra.embedding.providers.real_provider",
+    "search_core.providers.qdrant",
+    "search_core.providers.embedding",
 ])
 def test_infrastructure_detail_requires_debug_but_warnings_always_visible(caplog, name):
     caplog.set_level(logging.DEBUG)

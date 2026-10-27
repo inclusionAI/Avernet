@@ -47,3 +47,17 @@ assert not any(name.split('.')[0] in {'src', 'app', 'bcsfuse_internal', 'zbcsfus
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_shared_providers_do_not_import_applications_or_read_execution_environment():
+    for path in ROOT.rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            names = []
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                names = [node.module or ""]
+            for name in names:
+                assert name.split(".")[0] not in {"app", "bcsfuse_internal", "zbcsfuse_internal"}, (path, name)
+            if "config" not in path.relative_to(ROOT).parts and isinstance(node, ast.Attribute):
+                assert not (isinstance(node.value, ast.Name) and node.value.id == "os" and node.attr in {"environ", "getenv"}), path

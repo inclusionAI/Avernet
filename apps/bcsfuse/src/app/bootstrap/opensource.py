@@ -123,8 +123,8 @@ def build_opensource_provider_registry(mode: str = "runtime") -> "ProviderRegist
     Args:
         mode: Deployment mode. One of:
             - "runtime": Production mode with MySQL + Qdrant + Real HTTP providers
-            - "dev": Development mode with SQLite + Faiss + Real HTTP providers
-            - "dev_smoke": Dev smoke test mode with SQLite + Faiss + Fake/Noop providers (offline)
+            - "dev": Development mode with SQLite + Qdrant Local + Real HTTP providers
+            - "dev_smoke": Dev smoke test mode with SQLite + Qdrant Local + Fake/Noop providers (offline)
             - "test": Test mode with InMemory + Fake/Noop providers
 
     Returns:
@@ -283,10 +283,10 @@ def _build_runtime_providers(registry: "ProviderRegistry", config: "YamlEnvConfi
 
 
 def _build_dev_providers(registry: "ProviderRegistry", config: "YamlEnvConfigProvider") -> None:
-    """Build dev providers (SQLite + Faiss + Real HTTP).
+    """Build dev providers (SQLite + Qdrant Local + Real HTTP).
 
     This is the standard dev mode for local development with real services.
-    Uses SQLite for persistence and Faiss for vectors, but connects to real
+    Uses SQLite for persistence and Qdrant Local for vectors, but connects to real
     embedding/LLM/reranker services via HTTP.
     """
     # Import dev providers
@@ -295,7 +295,7 @@ def _build_dev_providers(registry: "ProviderRegistry", config: "YamlEnvConfigPro
     from app.infra.public.stores.sqlite_worker_profile_content_store import SQLiteWorkerProfileContentStore
     from app.infra.adapters.sqlite_worker_profile_binding_store import SQLiteWorkerProfileBindingStore
     from app.infra.public.audit.sqlite_worker_audit_log_store import SQLiteWorkerAuditLogStore
-    from app.infra.public.vectorstores.faiss_sqlite_vector_store import FaissSqliteVectorStore
+    from app.infra.public.vectorstores.qdrant_sqlite_vector_store import QdrantSQLiteVectorStore
     from app.infra.public.embedding.real_embedding_provider import RealEmbeddingProvider
     from app.infra.public.reranker.http_reranker import HttpReranker
     from app.infra.public.llm.anthropic_compatible_provider import AnthropicCompatibleProvider
@@ -321,13 +321,19 @@ def _build_dev_providers(registry: "ProviderRegistry", config: "YamlEnvConfigPro
     worker_audit_log_store = SQLiteWorkerAuditLogStore(db_path=db_path)
     registry.register("worker_audit_log_store", worker_audit_log_store)
 
-    # Faiss+SQLite vector store
-    faiss_db_path = os.getenv("BCSFUSE_FAISS_SQLITE_PATH") or config.get("vector.faiss.db_path", "data/faiss_index.db")
-    vector_store = FaissSqliteVectorStore(
+    # Qdrant Local + SQLite vector store
+    vector_db_path = os.getenv("BCSFUSE_VECTOR_SQLITE_PATH") or config.get("vector.sqlite.db_path", "data/vector_embeddings.db")
+    vector_store = QdrantSQLiteVectorStore(
         dimension=config.get_int("embedding.dimension", 4096),
-        db_path=faiss_db_path,
+        db_path=vector_db_path,
+        qdrant_path=os.getenv("QDRANT_LOCAL_PATH") or config.get("vector.qdrant.path"),
+        auto_load=False,
     )
     registry.register("vector_store", vector_store)
+    from app.providers.public.vector_index_startup_provider import VectorIndexStartupProvider
+    registry.register("startup_provider", VectorIndexStartupProvider(
+        registry.require("startup_provider"), vector_store,
+    ))
 
     # Real embedding provider (HTTP)
     # Log embedding config resolution for parity diagnosis
@@ -439,14 +445,14 @@ def _build_dev_providers(registry: "ProviderRegistry", config: "YamlEnvConfigPro
 
 
 def _build_dev_smoke_providers(registry: "ProviderRegistry", config: "YamlEnvConfigProvider") -> None:
-    """Build dev smoke providers (SQLite + Faiss + Fake/Noop).
+    """Build dev smoke providers (SQLite + Qdrant Local + Fake/Noop).
 
     This mode is for smoke/regression tests that need SQLite persistence
     but should NOT connect to any external HTTP services.
 
     Uses:
     - SQLite stores for persistent storage
-    - FaissSqliteVectorStore for persistent vectors
+    - QdrantSQLiteVectorStore for persistent vectors
     - FakeEmbeddingProvider for deterministic embeddings
     - NoopReranker for no-op reranking
     - FakeLLMProvider for echo LLM responses
@@ -457,7 +463,7 @@ def _build_dev_smoke_providers(registry: "ProviderRegistry", config: "YamlEnvCon
     from app.infra.public.stores.sqlite_worker_profile_content_store import SQLiteWorkerProfileContentStore
     from app.infra.adapters.sqlite_worker_profile_binding_store import SQLiteWorkerProfileBindingStore
     from app.infra.public.audit.sqlite_worker_audit_log_store import SQLiteWorkerAuditLogStore
-    from app.infra.public.vectorstores.faiss_sqlite_vector_store import FaissSqliteVectorStore
+    from app.infra.public.vectorstores.qdrant_sqlite_vector_store import QdrantSQLiteVectorStore
     from app.infra.public.embedding.fake_embedding_provider import FakeEmbeddingProvider
     from app.infra.public.reranker.noop_reranker import NoopReranker
     from app.infra.public.llm.fake_llm_provider import FakeLLMProvider
@@ -481,13 +487,19 @@ def _build_dev_smoke_providers(registry: "ProviderRegistry", config: "YamlEnvCon
     worker_audit_log_store = SQLiteWorkerAuditLogStore(db_path=db_path)
     registry.register("worker_audit_log_store", worker_audit_log_store)
 
-    # Faiss+SQLite vector store
-    faiss_db_path = os.getenv("BCSFUSE_FAISS_SQLITE_PATH") or config.get("vector.faiss.db_path", "data/faiss_index.db")
-    vector_store = FaissSqliteVectorStore(
+    # Qdrant Local + SQLite vector store
+    vector_db_path = os.getenv("BCSFUSE_VECTOR_SQLITE_PATH") or config.get("vector.sqlite.db_path", "data/vector_embeddings.db")
+    vector_store = QdrantSQLiteVectorStore(
         dimension=config.get_int("embedding.dimension", 4096),
-        db_path=faiss_db_path,
+        db_path=vector_db_path,
+        qdrant_path=os.getenv("QDRANT_LOCAL_PATH") or config.get("vector.qdrant.path"),
+        auto_load=False,
     )
     registry.register("vector_store", vector_store)
+    from app.providers.public.vector_index_startup_provider import VectorIndexStartupProvider
+    registry.register("startup_provider", VectorIndexStartupProvider(
+        registry.require("startup_provider"), vector_store,
+    ))
 
     # Fake embedding provider (deterministic, no HTTP)
     embedding_provider = FakeEmbeddingProvider(dimension=config.get_int("embedding.dimension", 4096))

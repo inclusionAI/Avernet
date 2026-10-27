@@ -21,7 +21,10 @@ apps/bcsfuse/
 │   ├── pyproject.toml             Independently installable library
 │   └── src/search_core/
 │       ├── api/                   Neutral requests/results and service contracts
-│       ├── core/                  Ranking fusion and candidate selection
+│       ├── core/                  Hybrid retrieval, ranking and candidate selection
+│       ├── plugin_api/            Model/index contracts and vector values
+│       ├── providers/             Public Qdrant and model HTTP implementations
+│       ├── config/                Explicit provider configuration loading
 │       └── adapters/http/         Shared HTTP search/recommendation routes
 ├── tests/
 └── docs/
@@ -41,14 +44,18 @@ The public TC entrypoint remains independently runnable with public providers.
 
 | Owner | Implemented | Remaining work |
 | --- | --- | --- |
-| Shared package | Neutral search/recommendation contracts; reciprocal rank fusion; bounded candidate union; optional authenticated HTTP v2 routes | Extract actual asynchronous retrieval and model/storage contracts when used by both applications |
-| TC `app` | Existing business code under its new namespace; neutral-result adapter; shared ranking and selection; optional v2 | Production retrieval still resides in TC; not all TC infrastructure is a shared library |
-| Enterprise application | Host-owned application skeleton, option validation and trusted-scope handling using the same HTTP routes | Real Card conversion, storage, model orchestration, operational policies, updates and RPC |
-| Enterprise composition | Separate TC and Agent factories; internal providers remain host-owned; core and TC staged from the same public revision | A separately deployable production Agent application and its lifecycle/configuration |
+| Shared package | Neutral contracts; dense/sparse Qdrant; HTTP Embedding/reranker; independent recall branches, RRF and optional reranking; HTTP v2 | Server-mode integration, application capacity/fallback policy and performance validation |
+| TC `app` | Worker/Profile/Fuse orchestration; thin shared-provider adapters; TC keyword exact-ID priority and diagnostics | Production TC keeps existing v1 aggregation/threshold semantics |
+| Enterprise application | Option/scope validation and composition with the real shared retrieval pipeline | BCN Card mapping, audience policies, update lifecycle and TR |
+| Enterprise composition | TC/Agent factories; same-revision shared package; real local-index HTTP composition test | Production Agent deployment, internal model/storage configuration and resource limits |
 
-Future reusable storage/model contracts can live in `search_core.plugin_api`,
-with public implementations in `search_core.providers`. Those directories and a
-complete shared retrieval pipeline are not implemented by this directory move.
+`search_core.plugin_api` defines model/index contracts; `providers` implements
+public protocols without importing TC. `QdrantRetrievalIndex` supports local dense
+and sparse retrieval over one point snapshot. TC adapters retain the existing
+Worker/Profile cleanup and exact-ID keyword behavior; they do not copy storage
+or model-client implementations. Local TC development uses SQLite durable records
+plus Qdrant indexes; FAISS source and dependency have been retired.
+
 Private Card mapping, audience sources and operational rules belong to the host;
 public core must not branch on a business or deployment name.
 
@@ -73,8 +80,8 @@ TC v2 bridges the synchronous candidate service through an injected executor and
 a bounded admission semaphore. Cancellation or timeout does not release capacity
 until underlying work finishes. The composition root owns executor startup and
 shutdown. Existing v1 execution and degradation semantics are unchanged. Legacy
-providers may still convert failures into empty results; explicit provider
-outcomes remain part of later retrieval extraction, so v2 is not declared ready
+TC orchestration may still convert failures into empty results. The neutral
+pipeline propagates dependency failures as SearchUnavailable, but v2 is not declared ready
 for production cutover.
 
 ## Installation and compatibility
@@ -97,3 +104,13 @@ Worker IDs, multi-Profile behavior, exact-ID priority, thresholds and fragment
 evidence. Fresh-process tests check public startup without internal SDKs and
 Agent startup without TC. Synthetic retrieval tests prove interface composition,
 not production relevance, throughput or model capacity.
+
+## Retrieval extraction validation
+
+Shared contracts and model-wire tests use controlled responses; dense/sparse tests
+use a real temporary Qdrant Local index. They cover authorization before top-k,
+keyword independence from Embedding, absence of generic Worker-ID lookup, restart,
+deletion and invalid model/backend results. TC regression suites exercise the thin
+adapters. OCB has an HTTP test with the actual shared pipeline and local index.
+No result is a live model benchmark or evidence of high-QPM production capacity.
+See `retrieval-extraction-validation.md` for executed checks and limitations.

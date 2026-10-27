@@ -12,6 +12,8 @@ _DETAIL_LOGGERS = (
     "app.adapters.http.dependencies.worker_dependencies",
     "app.infra.public.vectorstores.qdrant_local_vector_store",
     "app.infra.embedding.providers.real_provider",
+    "search_core.providers.qdrant",
+    "search_core.providers.embedding",
 )
 
 

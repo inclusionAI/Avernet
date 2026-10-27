@@ -130,14 +130,14 @@ def test_dev_fallback_provider_types():
 
         from app.bootstrap.opensource import build_opensource_provider_registry
         from app.infra.public.stores.sqlite_worker_registry_store import SQLiteWorkerRegistryStore
-        from app.infra.public.vectorstores.faiss_sqlite_vector_store import FaissSqliteVectorStore
+        from app.infra.public.vectorstores.qdrant_sqlite_vector_store import QdrantSQLiteVectorStore
         from app.infra.public.embedding.real_embedding_provider import RealEmbeddingProvider
 
         registry = build_opensource_provider_registry(mode="dev")
 
         # Check types
         assert isinstance(registry.get("worker_registry_store"), SQLiteWorkerRegistryStore)
-        assert isinstance(registry.get("vector_store"), FaissSqliteVectorStore)
+        assert isinstance(registry.get("vector_store"), QdrantSQLiteVectorStore)
         assert isinstance(registry.get("embedding_provider"), RealEmbeddingProvider)
 
         print("✓ Dev fallback provider types validated (SQLite, Faiss, Real HTTP)")

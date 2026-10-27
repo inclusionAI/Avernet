@@ -6,13 +6,13 @@ from app.application.services.worker_vector_match_service import WorkerVectorMat
 from app.domain.models.metadata_record import MetadataRecord
 from app.domain.models.vector_point import VectorPoint
 from app.infra.metadatastores.file_metadata_store_adapter import FileMetadataStoreAdapter
-from app.infra.vectorstores.faiss_vector_store_adapter import FaissVectorStoreAdapter
+from app.infra.public.vectorstores.qdrant_sqlite_vector_store import QdrantSQLiteVectorStore
 
 
 @pytest.mark.parametrize("with_metadata", [False, True])
 @pytest.mark.parametrize("exclude_first", [False, True])
 def test_legacy_search_preserves_canonical_identity(tmp_path, with_metadata, exclude_first):
-    vectors = FaissVectorStoreAdapter(dimension=2)
+    vectors = QdrantSQLiteVectorStore(dimension=2)
     metadata = FileMetadataStoreAdapter(storage_dir=str(tmp_path))
     for worker, fragments in [("bot:owner", ["full", "profile"]), ("second:owner", ["full"])]:
         key = worker + ":default"
@@ -24,7 +24,7 @@ def test_legacy_search_preserves_canonical_identity(tmp_path, with_metadata, exc
         for fragment in fragments:
             vectors.upsert([VectorPoint(
                 id=key + ":" + fragment, vector=[1, 0],
-                payload={"profile_key": key, "worker_id": worker, "profile_id": "default"},
+                payload={"profile_key": key, "worker_id": worker, "profile_id": "default", "runtime_state": "online", "availability": "public", "domains": ["coding"]},
             )])
     service = WorkerVectorMatchService(vector_store=vectors, metadata_store=metadata)
     results = service.match(

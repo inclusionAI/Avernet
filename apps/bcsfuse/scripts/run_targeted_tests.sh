@@ -31,7 +31,7 @@ case "${1:---isolated}" in
       tests/contract/test_auth_provider_contract.py \
       tests/contract/test_vector_metadata_filter_contract.py \
       tests/contract/test_legacy_fragment_identity.py \
-      tests/contract/test_faiss_get_contract.py \
+      tests/contract/test_qdrant_sqlite_get_contract.py \
       tests/contract/test_mysql_storage_clock_contract.py \
       tests/integration/test_mysql_storage_timestamps.py \
       tests/integration/test_mysql_pooled_transactions.py \

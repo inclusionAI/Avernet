@@ -5,26 +5,26 @@ from tests.fixtures.runtime_acceptance import acceptance_run
 from tests.integration.test_isolated_runtime_acceptance import TOKEN, isolated_app_factory  # noqa: F401
 
 
-def test_local_faiss_state_sync_survives_reopen(tmp_path):
+def test_local_qdrant_state_sync_survives_reopen(tmp_path):
     from app.application.services.worker_vector_state_sync import sync_worker_vector_state
-    from app.infra.public.vectorstores.faiss_sqlite_vector_store import FaissSqliteVectorStore
+    from app.infra.public.vectorstores.qdrant_sqlite_vector_store import QdrantSQLiteVectorStore
 
     path = str(tmp_path / "vectors.sqlite")
-    store = FaissSqliteVectorStore(dimension=3, db_path=path)
+    store = QdrantSQLiteVectorStore(dimension=3, db_path=path)
     store.upsert([VectorPoint(id="bot:owner:default:full", vector=[1., 0., 0.], payload={
         "worker_id": "bot:owner", "runtime_state": "online", "content": "preserved",
     })])
     try:
         assert sync_worker_vector_state(store, "bot:owner", "offline") == 1
     finally:
-        store._backend._conn.close()
-    reopened = FaissSqliteVectorStore(dimension=3, db_path=path)
+        store.close()
+    reopened = QdrantSQLiteVectorStore(dimension=3, db_path=path)
     try:
-        point = reopened._faiss_store.get("bot:owner:default:full")
+        point = reopened.get("bot:owner:default:full")
         assert point.payload == {"worker_id": "bot:owner", "runtime_state": "offline", "content": "preserved"}
         assert point.vector == [1., 0., 0.]
     finally:
-        reopened._backend._conn.close()
+        reopened.close()
 
 
 def test_runtime_transitions_preserve_all_profiles_and_exact_owner(isolated_app_factory):
