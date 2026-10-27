@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-// 聊天副屏多任务切换验收:首帧展示同会话历史任务,切换时同步请求任务时间窗会话导航。
+// 聊天副屏任务切换验收:默认仅展示悬浮开关,展开后切换任务并同步请求任务时间窗会话导航。
 import { TaskPanelSwitcherSlot } from '@/components/Workspace/TaskPanelSwitcherSlot';
 import type { TaskListItem } from '@/domain/tasks/models';
 import { chatBridge } from '@/services/workspace/chatBridge';
@@ -73,20 +73,25 @@ describe('TaskPanelSwitcherSlot(聊天宿主)', () => {
     );
   });
 
-  it('多任务会话首帧展示切换条和历史任务列表', () => {
+  it('多任务会话首帧仅展示悬浮开关,任务切换条默认隐藏', () => {
     act(() => {
       useTaskSidePanelStore.getState().setActiveTask('task-other');
     });
     render(<TaskPanelSwitcherSlot currentTaskId="task-current" params={{ taskId: 'task-current' }} />);
 
-    expect(screen.getAllByText('当前tab的任务').length).toBeGreaterThan(0);
-    expect(screen.getByText('别的面板的任务')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '显示任务切换' })).toBeTruthy();
+    expect(screen.queryByText('当前tab的任务')).toBeNull();
+    expect(screen.queryByText('别的面板的任务')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '显示任务切换' }));
+    expect(screen.getByText('当前tab的任务')).toBeTruthy();
+    expect(screen.queryByTestId('task-switcher-dropdown')).toBeNull();
     expect(screen.getByRole('button', { name: '隐藏任务切换' })).toBeTruthy();
   });
 
-  it('再次点击开关后隐藏任务列表', () => {
+  it('再次点击开关后隐藏任务切换条', () => {
     render(<TaskPanelSwitcherSlot currentTaskId="task-current" params={{ taskId: 'task-current' }} />);
-
+    fireEvent.click(screen.getByRole('button', { name: '显示任务切换' }));
     fireEvent.click(screen.getByRole('button', { name: '隐藏任务切换' }));
 
     expect(screen.queryByText('当前tab的任务')).toBeNull();
@@ -99,19 +104,20 @@ describe('TaskPanelSwitcherSlot(聊天宿主)', () => {
     );
     rerender(<TaskPanelSwitcherSlot currentTaskId="task-switched" params={{ taskId: 'task-switched' }} />);
 
-    expect(screen.getByRole('button', { name: '隐藏任务切换' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '显示任务切换' })).toBeTruthy();
   });
 
-  it('手动选择任务后重建 panel 不再默认展开下拉', () => {
+  it('手动选择任务后重建 panel 不再默认展示切换条', () => {
     const { unmount } = render(
       <TaskPanelSwitcherSlot currentTaskId="task-current" params={{ taskId: 'task-current' }} />,
     );
+    fireEvent.click(screen.getByRole('button', { name: '显示任务切换' }));
+    fireEvent.click(screen.getByTitle('展开任务切换'));
     expect(screen.getByTestId('task-switcher-dropdown')).toBeTruthy();
 
     fireEvent.click(screen.getByText('别的面板的任务'));
-    expect(useTaskSidePanelStore.getState().switcherAutoOpenConsumedBySession['session-shared']).toBe(true);
 
-    // openPanelTab 会切换/重建任务面板；新实例必须继承“已手动选择”状态，保持下拉收起。
+    // openPanelTab 会切换/重建任务面板；新实例默认同样不展示切换条。
     unmount();
     render(<TaskPanelSwitcherSlot currentTaskId="task-other" params={{ taskId: 'task-other' }} />);
     expect(screen.queryByTestId('task-switcher-dropdown')).toBeNull();
@@ -125,8 +131,10 @@ describe('TaskPanelSwitcherSlot(聊天宿主)', () => {
     });
     render(<TaskPanelSwitcherSlot currentTaskId="task-current" params={{ taskId: 'task-current' }} />);
 
-    expect(screen.getByRole('button', { name: '隐藏任务切换' })).toBeTruthy();
-    expect(screen.getAllByText('当前任务').length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: '显示任务切换' })).toBeTruthy();
+    expect(screen.queryByText('当前任务')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '显示任务切换' }));
+    expect(screen.getByText('当前任务')).toBeTruthy();
   });
 });
 
@@ -140,6 +148,8 @@ describe('TaskPanelSwitcherSlot 切任务 openTab 宽度(拖宽记忆)', () => {
   });
 
   const switchToOtherTask = () => {
+    fireEvent.click(screen.getByRole('button', { name: '显示任务切换' }));
+    fireEvent.click(screen.getByTitle('展开任务切换'));
     fireEvent.click(screen.getByText('别的面板的任务'));
   };
 

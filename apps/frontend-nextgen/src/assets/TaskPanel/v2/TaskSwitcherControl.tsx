@@ -15,7 +15,7 @@ interface DragPosition {
 }
 
 interface TaskSwitcherControlProps extends TaskSwitcherProps {
-  /** 仅影响首帧；聊天副屏用 true 让当前会话任务立即可见。 */
+  /** 仅影响首帧；聊天副屏默认仅展示悬浮开关，宿主首次展示由用户点击开关触发。 */
   defaultVisible?: boolean;
 }
 
