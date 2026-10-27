@@ -516,12 +516,14 @@ def test_reclaimed_submit_keeps_late_valid_check_id_without_reposting(tmp_path):
     )[0]
     handler.handle(second.payload)
     assert tasks.repo.get(env="dev", risk_check_id="a").phase == "NEEDS_ATTENTION"
+    started = now[0]
+    now[0] += timedelta(minutes=2)
     release.set()
     thread.join(10)
     assert not thread.is_alive()
     row = tasks.repo.get(env="dev", risk_check_id="a")
     assert row.phase == "CHECKING" and row.check_id == "check-1"
-    assert row.auto_poll_until == now[0] + timedelta(minutes=5)
+    assert row.auto_poll_until == started + timedelta(minutes=5)
     assert len(provider.submissions) == 1
     from agentclaw.community.core.bot_public_risk.notices import RiskNoticeDelivery
 
@@ -605,7 +607,15 @@ def test_late_check_during_notice_send_preserves_actual_delivery_result():
         tasks.start(replace(record, client_scope="openapi:operator"))
         row = repo.get(env="dev", risk_check_id="a")
         assert tasks._update(
-            row, {"workflow_json": json.dumps({"submission_intent": True})}
+            row,
+            {
+                "workflow_json": json.dumps(
+                    {
+                        "submission_intent": True,
+                        "submission_started_at": now[0].isoformat(),
+                    }
+                )
+            },
         )
         tasks.submit(env="dev", risk_check_id="a")
         calls = []
@@ -630,3 +640,47 @@ def test_late_check_during_notice_send_preserves_actual_delivery_result():
         now[0] += timedelta(minutes=3)
         delivery.deliver(env="dev", risk_check_id="a")
         assert len(calls) == 1
+
+
+def test_slow_submission_never_extends_detecting_window():
+    for seconds in (120, 300, 360):
+        tasks, repo, queue, provider, now, record = make()
+        start = now[0]
+        tasks.start(record)
+
+        def slow(_):
+            now[0] += timedelta(seconds=seconds)
+            return "check-1"
+
+        provider.submit_agent_scan = slow
+        tasks.submit(env="dev", risk_check_id="a")
+        saved = repo.get(env="dev", risk_check_id="a")
+        assert saved.check_id == "check-1"
+        assert saved.auto_poll_until == start + timedelta(minutes=5)
+        assert saved.auto_poll_paused is (seconds >= 300)
+        if seconds >= 300:
+            assert saved.next_action_at is None
+            assert tasks.poll(env="dev", risk_check_id="a") == "NOT_QUERIED"
+        else:
+            assert saved.next_action_at <= saved.auto_poll_until
+
+
+def test_late_id_without_trustworthy_intent_time_pauses_automatic_polling():
+    import json
+
+    for started in (None, "invalid", "2099-01-01T00:00:00"):
+        tasks, repo, _, _, now, record = make()
+        tasks.start(record)
+        row = repo.get(env="dev", risk_check_id="a")
+        workflow = {"submission_intent": True}
+        if started is not None:
+            workflow["submission_started_at"] = started
+        assert tasks._update(row, {"workflow_json": json.dumps(workflow)})
+        tasks._record_submission_result(
+            env="dev", risk_check_id="a", check_id="check-1"
+        )
+        saved = repo.get(env="dev", risk_check_id="a")
+        assert saved.check_id == "check-1"
+        assert saved.auto_poll_paused
+        assert saved.next_action_at is None
+        assert tasks.poll(env="dev", risk_check_id="a") == "NOT_QUERIED"

@@ -145,6 +145,7 @@ class RiskTasks:
             )
             return
         workflow["submission_intent"] = True
+        workflow["submission_started_at"] = self.clock().isoformat()
         if not self._update(row, {"workflow_json": json.dumps(workflow)}):
             return
         row = self.repo.get(env=env, risk_check_id=risk_check_id)
@@ -213,7 +214,19 @@ class RiskTasks:
             # A sender already in flight may have delivered. Keep that honest
             # history, but do not reclaim or retry it after the ID is known.
             due_notices = {k: v for k, v in notices.items() if k != "CREATION_UNKNOWN"}
-            workflow["detecting_deadline"] = (now + timedelta(minutes=5)).isoformat()
+            started_at = workflow.get("submission_started_at")
+            try:
+                started = datetime.fromisoformat(started_at) if started_at else None
+                deadline = (
+                    started + timedelta(minutes=5)
+                    if started and started <= now
+                    else now
+                )
+            except (TypeError, ValueError):
+                # Old or malformed intent has no trustworthy start: do not extend it.
+                deadline = now
+            paused = now >= deadline
+            workflow["detecting_deadline"] = deadline.isoformat()
             notice_changes = (
                 {"notification_due_at": _next_due(due_notices)}
                 if unknown and unknown["status"] != "sent"
@@ -227,11 +240,26 @@ class RiskTasks:
                     "phase": "CHECKING",
                     "security_status": "DETECTING",
                     "check_id": check_id,
-                    "next_action_at": now + timedelta(seconds=30),
-                    "auto_poll_until": now + timedelta(minutes=5),
+                    "auto_poll_paused": paused,
+                    "next_action_at": None
+                    if paused
+                    else min(now + timedelta(seconds=30), deadline),
+                    "auto_poll_until": deadline,
                 },
             ):
-                self._enqueue(row, DETECTING, 30)
+                if not paused:
+                    self._enqueue(
+                        row,
+                        DETECTING,
+                        max(
+                            0,
+                            int(
+                                (
+                                    min(now + timedelta(seconds=30), deadline) - now
+                                ).total_seconds()
+                            ),
+                        ),
+                    )
                 return
         # The returned ID must not be silently dropped on repeated contention.
         raise RuntimeError("could not persist security check result after contention")
@@ -329,8 +357,12 @@ class RiskTasks:
                 self._enqueue(row, ADVANCE)
             elif row.phase == "APPROVING":
                 workflow = json.loads(row.workflow_json)
-                if (workflow.get("approval_target_ready") is not True or workflow.get("pending_approval")
-                        or (workflow.get("callback_claim") or {}).get("status") == "processing"):
+                if (
+                    workflow.get("approval_target_ready") is not True
+                    or workflow.get("pending_approval")
+                    or (workflow.get("callback_claim") or {}).get("status")
+                    == "processing"
+                ):
                     self._enqueue(row, REPLAY)
         return rows[-1].risk_check_id if len(rows) == limit else None
 
