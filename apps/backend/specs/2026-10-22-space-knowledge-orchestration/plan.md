@@ -12,7 +12,7 @@
 - Work Order manual/AUTO writer：保留既有审批与通知语义，同事务调用扩展。
 - Skill Space 创建 seam：只调用中性身份扩展，不改 Skill 业务。
 - Knowledge producer：保留捕获/确认算法，优化候选定位及元数据读取。
-- Composition root：显式选择空/持久记录实现，并拒绝有历史时误关闭记录。
+- Composition root：显式选择空/持久记录实现，保留 producer/配置/schema 检查；历史不再决定应用能否启动。
 
 ## Data Model Changes
 
@@ -97,7 +97,7 @@ class KnowledgeSpacePersistenceEffects:
 # apps/backend/src/agentclaw/community/core/space_knowledge/capture_lifecycle.py (new)
 # After Database bootstrap, before serving requests/allowing source writes:
 # disabled + missing table -> safe no-op, no SQL against the absent table
-# disabled + table exists + same-environment history (any app) -> reject unsafe downgrade
+# disabled + compatible table + retained history (any app) -> allow ordinary writes; producer still rejects
 # enabled -> validate original outbox schema; no silent fallback on errors
 ```
 
@@ -145,7 +145,7 @@ None. 不增加包、数据库服务、事件总线或共享队列改造。
 
 ## Risks & Mitigations
 
-- **Risk:** 将暂停投递误当关闭记录。**Mitigation:** 两个独立状态；有历史时拒绝关闭记录；暂停重启回归。
+- **Risk:** 将暂停投递误当关闭记录。**Mitigation:** 两个独立状态；暂停投递仍应保持记录开启。2026-10-27 起历史不再阻断应用启动，明确关闭记录的历史缺口需由发布流程控制；暂停重启回归。
 - **Risk:** 多实例滚动期间有 writer 仍为空扩展。**Mitigation:** 首次激活前所有 writer 统一启用记录装配；禁止混合策略下激活。不能只升级 API 实例而遗漏 worker/其他写入者。
 - **Risk:** 初始化顺序或 lifecycle discovery 吞错误。**Mitigation:** 配置 eager 校验、实际 lifespan 测试、校验完成前写入保护；不在 DI 构造期查库。
 - **Risk:** 空策略被用于真实同步 producer。**Mitigation:** 完整 DI 合同验证 producer/sync 与记录策略一致；默认 Sync/Provider 仍 unavailable。
@@ -165,7 +165,7 @@ None. 不增加包、数据库服务、事件总线或共享队列改造。
 从未启用：保持默认 capture=false，不要求同步 DDL，先验证缺表完整启动及原功能。
 首次启用：执行原同步表迁移 → 所有 writer 统一 capture=true → 验证装配/worker → 开放首次激活。
 暂停投递：保持 capture=true，只暂停 Sink；继续保留 pending 与 retired 历史。
-回滚：有历史时不得切空策略；按受控回滚流程暂停相关写入，绝不删除历史来绕过检查。
+回滚：历史存在不再阻断显式空策略的启动/普通写入；为避免漏记撤权，应保持记录或受控暂停相关写入，绝不删除历史。同步 producer 仍受 require_enabled 保护。
 ```
 
 不执行线上操作。原 contract.md 的全局 DDL 前置说法在本隔离变更完成后被限定为启用记录的部署；本地验证结果不等于远端 PR 或部署已经切换。
@@ -176,7 +176,7 @@ None. 不增加包、数据库服务、事件总线或共享队列改造。
 # apps/backend/tests/community/core/space_knowledge/test_capture_isolation.py (new)
 def test_default_graph_legacy_operations_persist_without_outbox_table(): ...
 def test_disabled_capture_never_queries_outbox_or_uses_knowledge_write_guard(): ...
-def test_retained_history_rejects_disabling_capture(): ...
+def test_retained_history_does_not_block_disabled_capture_startup(): ...
 def test_paused_sink_keeps_ordered_membership_history_across_restart(): ...
 
 # apps/backend/tests/community/adapters/http/space_knowledge/test_capture_isolation_http.py (new)

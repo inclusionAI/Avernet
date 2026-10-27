@@ -37,8 +37,10 @@ def capture(database, *, enabled=False, sink=None):
 
 
 @pytest.mark.parametrize("owner_app", ["agentclaw", "other-app"])
-def test_retained_history_refuses_empty_policy_even_with_delivery_disabled(
-    database, owner_app
+@pytest.mark.parametrize("status", ["active", "disabled"])
+@pytest.mark.parametrize("acknowledged", [False, True])
+def test_retained_history_does_not_block_disabled_capture_startup(
+    database, owner_app, status, acknowledged
 ):
     with database.orm_session() as session:
         session.add(
@@ -49,13 +51,19 @@ def test_retained_history_refuses_empty_policy_even_with_delivery_disabled(
                 app=owner_app,
                 payload="{}",
                 snapshot_hash="x" * 64,
-                status="disabled",
-                acknowledged=True,
+                status=status,
+                acknowledged=acknowledged,
             )
         )
-    with pytest.raises(RuntimeError, match="keep capture enabled"):
-        asyncio.run(capture(database).startup())
-    # Pausing delivery is safe only while the record policy remains enabled.
+    asyncio.run(capture(database).startup())
+    # Startup neither enables capture nor rewrites another deployment's history.
+    with database.orm_session() as session:
+        row = session.query(Snapshot).one()
+        assert (row.app, row.status, row.acknowledged) == (
+            owner_app,
+            status,
+            acknowledged,
+        )
     asyncio.run(capture(database, enabled=True).startup())
 
 
@@ -99,7 +107,10 @@ def test_sink_cannot_enable_delivery_without_recording(database):
         asyncio.run(capture(database, sink=EnabledSink()).startup())
 
 
-def test_library_writer_without_lifespan_cannot_commit_past_history_guard(database):
+@pytest.mark.parametrize("owner_app", ["agentclaw", "other-app"])
+def test_library_writer_without_lifespan_can_commit_with_retained_history(
+    database, owner_app
+):
     from agentclaw.community.core.repository.implementations.spaces.space import (
         SpaceRepository,
     )
@@ -111,7 +122,7 @@ def test_library_writer_without_lifespan_cannot_commit_past_history_guard(databa
                 env="pre",
                 space_id=7,
                 revision=1,
-                app="agentclaw",
+                app=owner_app,
                 payload="{}",
                 snapshot_hash="x" * 64,
                 status="disabled",
@@ -119,13 +130,20 @@ def test_library_writer_without_lifespan_cannot_commit_past_history_guard(databa
             )
         )
     spaces = SpaceRepository(database, capture(database))
-    with pytest.raises(RuntimeError, match="keep capture enabled"):
-        with spaces.create_team_transaction(
-            name="Must rollback", creator_id="owner", creator_user_name=None, env="pre"
-        ):
-            pytest.fail("guard must reject before caller receives identity")
+    with spaces.create_team_transaction(
+        name="Available without capture",
+        creator_id="owner",
+        creator_user_name=None,
+        env="pre",
+    ) as space:
+        space_id = space.id
+    assert spaces.get_space(space_id=space_id, env="pre").name == (
+        "Available without capture"
+    )
     with database.orm_session() as session:
-        assert session.query(SpaceModel).count() == 0
+        assert session.query(SpaceModel).count() == 1
+        row = session.query(Snapshot).one()
+        assert (row.space_id, row.revision, row.app) == (7, 1, owner_app)
 
 
 def test_library_producer_rejects_disabled_capture_before_snapshot_or_sink(database):
@@ -189,8 +207,9 @@ def test_library_producer_rejects_disabled_capture_before_snapshot_or_sink(datab
 
 
 @pytest.mark.parametrize("operation", ["activate", "next_snapshot"])
+@pytest.mark.parametrize("retained_history", [False, True])
 def test_library_repository_cannot_bypass_capture_with_a_disabled_sink(
-    database, operation
+    database, operation, retained_history
 ):
     from injector import Module
     from agentclaw.community.di import DeployProfile, build_injector
@@ -201,6 +220,21 @@ def test_library_repository_cannot_bypass_capture_with_a_disabled_sink(
     from agentclaw.community.core.repository.protocols.spaces import (
         SpaceKnowledgeSyncRepositoryProtocol,
     )
+
+    if retained_history:
+        with database.orm_session() as session:
+            session.add(
+                Snapshot(
+                    env="pre",
+                    space_id=7,
+                    revision=1,
+                    app="other-app",
+                    payload="{}",
+                    snapshot_hash="x" * 64,
+                    status="disabled",
+                    acknowledged=True,
+                )
+            )
 
     class ExistingDatabase(Module):
         def configure(self, binder):
@@ -214,4 +248,4 @@ def test_library_repository_cannot_bypass_capture_with_a_disabled_sink(
     with pytest.raises(RuntimeError, match="producer requires capture"):
         getattr(repository, operation)(space_id=7, environment="pre", app="agentclaw")
     with database.orm_session() as session:
-        assert session.query(Snapshot).count() == 0
+        assert session.query(Snapshot).count() == int(retained_history)

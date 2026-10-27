@@ -2,11 +2,11 @@
 
 Writers may also be used by startup participants or library callers that do not
 run HTTP lifespan. The same idempotent validation is performed on first use in
-that case; failure is propagated, never interpreted as missing history. There is
+that case; failure is propagated, never interpreted as missing schema. There is
 no DB I/O in DI construction and no dependency on private database engines.
 """
 
-from sqlalchemy import inspect, select
+from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from agentclaw.community.core.repository.protocols.space_persistence_effects import (
@@ -70,18 +70,6 @@ class SpaceKnowledgeCaptureLifecycle(
         ]
         if primary_key != ["env", "space_id", "revision"]:
             raise RuntimeError("ac_space_knowledge_sync primary key is incompatible")
-        if not self._enabled:
-            # Source Spaces and retired SQLite identities are shared across app
-            # owners. Another app's same-environment history is not safe to ignore.
-            history = session.execute(
-                select(Snapshot.space_id)
-                .where(Snapshot.env == self._environment)
-                .limit(1)
-            ).first()
-            if history is not None:
-                raise RuntimeError(
-                    "space knowledge history exists; keep capture enabled when pausing delivery"
-                )
         self._validated = True
 
     def require_enabled(self, session: Session) -> None:

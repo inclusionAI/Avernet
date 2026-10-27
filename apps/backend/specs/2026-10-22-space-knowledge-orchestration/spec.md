@@ -36,9 +36,9 @@
 | 记录扩展启用、Space 未激活 | 可以检查激活状态；不生成快照、不施加接收端人数/字节限制 |
 | Space 已激活且投递正常 | 源数据与完整不可变快照同事务；按序确认 |
 | Space 已激活但投递暂停/异常 | 记录扩展保留，继续记账和身份保护；只暂停远端发送 |
-| 请求关闭记录扩展但存在当前作用域历史 | 不允许静默降级为空扩展；启动校验明确拒绝这种不安全装配 |
+| 显式关闭记录扩展但存在当前作用域历史 | 启动及普通 Space 写入不因历史阻断；不自动开启记录、不修改历史；同步 producer 仍拒绝未开启 capture |
 
-最后一种校验只在同步表存在时读取当前环境的历史存在性（含其他 app；源 Space 和 SQLite 身份共享，不能仅按 app 忽略历史）；表不存在且未启用时，不执行该表的 SELECT/写入。未启用不等于数据库错误可忽略，不能把权限错误、连接故障或损坏表当作“没有历史”。
+2026-10-27 可用性修订：删除历史存在性 SELECT 和全局拒绝逻辑，同环境其他 app 的历史不能迫使当前部署开启 capture。表不存在且未启用时仍可用；已有表的结构校验、连接与权限错误继续传播，不能通过吞异常获得成功。混合 capture/no-op 写入仍可能漏记撤权，本文不承诺修复该一致性缺口。
 
 ## Acceptance Criteria
 
@@ -46,14 +46,14 @@
 - **AC2 — Inactive isolation:** AC1 的请求/事务不访问同步表、不执行知识专用 SQLite no-op UPDATE、不触发 Provider、Sink、队列或同步定时扫描。通用 Space 权限及源数据锁仍可保留，不承诺所有 SQL 与旧版本逐条相同。
 - **AC3 — Explicit assembly:** 默认为空扩展；记录能力由经严格校验的部署配置在 composition root 选择，不按 Sink 可用性、请求字段、异常或业务模块内环境变量动态选择。配置错误不能被 lifecycle discovery 吞掉。
 - **AC4 — Atomic enabled behavior:** 已启用时保留原子快照、首次激活竞态保护、2000 人/1 MiB 准入、no-op 不增版本、FIFO、精确 hash 确认与删除历史。所有源写入入口使用同一事务扩展。
-- **AC5 — Pause and restart:** 有历史时不能关闭记录扩展；保持记录启用而关闭 Sink 后，新增、移除、角色变化和删除仍按序保存。重启后继续投递；retired scope 的 SQLite ID 不可复用。
+- **AC5 — Pause and restart:** 有历史也允许显式关闭记录扩展后启动及普通写入；若需要完整同步语义，应保持记录启用而只关闭 Sink，新增、移除、角色变化和删除仍按序保存，重启继续投递且保留 SQLite retired scope 身份保护。未开启 capture 的 producer 仍拒绝，不补偿普通 no-op 写入遗漏的历史。
 - **AC6 — Bounded dispatch:** 同一 Space 的 1/1000/100000 个 pending 版本，不导致单轮候选定位线性枚举全部版本；最多返回 32 个不同 Space，并保留继续游标。调度元数据查询不读取完整 payload。
 - **AC7 — Existing boundary parity:** Skill 草稿、发布、授权、安装、审批权限与原 HTTP DTO 不变；源代码依赖守卫防止既有 writer 再直接导入知识快照实现。
 - **AC8 — Honest validation:** 先运行缺表 RED，再做 pilot 和 GREEN；相关模块、架构与真实 file-SQLite 并发回归通过。MySQL/OceanBase、企业装配、统一 Singlebox、部署及迁移未验证时必须单独报告，不复用旧 Head 结果。
 
 ## In Scope
 
-窄的持久化内部事务扩展、默认空实现、知识记录实现及显式装配；所有已受影响 writer 的接入收口；安全关闭检查；候选查找与标量读取优化；针对上述 AC 的回归与文档更新。
+窄的持久化内部事务扩展、默认空实现、知识记录实现及显式装配；所有已受影响 writer 的接入收口；配置及表结构检查；候选查找与标量读取优化；针对上述 AC 的回归与文档更新。
 
 ## Out of Scope
 

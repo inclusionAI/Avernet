@@ -1,5 +1,6 @@
 """Drive the actual application lifespan; do not hide DDL through test bootstrap."""
 
+import pytest
 from fastapi.testclient import TestClient
 
 from agentclaw.community.adapters.http.app import app
@@ -65,3 +66,50 @@ def test_full_lifespan_does_not_swallow_enabled_missing_schema(
     with pytest.raises(RuntimeError, match="requires.*migration"):
         with TestClient(app):
             pytest.fail("must not serve without recording prerequisites")
+
+
+@pytest.mark.parametrize("owner_app", ["agentclaw", "other-app"])
+def test_full_lifespan_and_legacy_http_with_retained_knowledge_history(
+    missing_knowledge_graph, monkeypatch, owner_app
+):
+    from agentclaw.community.core.space_knowledge.repository.models import (
+        SpaceKnowledgeSyncModel as Snapshot,
+    )
+
+    graph, db = missing_knowledge_graph
+    Snapshot.__table__.create(db._engine)
+    try:
+        with db.orm_session() as session:
+            session.add(
+                Snapshot(
+                    env="pre",
+                    space_id=7,
+                    revision=1,
+                    app=owner_app,
+                    payload="{}",
+                    snapshot_hash="x" * 64,
+                    status="disabled",
+                    acknowledged=True,
+                )
+            )
+        monkeypatch.setattr(app.state, "injector", graph)
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/spaces",
+                json={"space_name": "Available with history", "admin_user_id": "owner"},
+            )
+            assert response.status_code == 201, response.text
+            sid = response.json()["data"]["space"]["id"]
+            assert client.get(f"/api/spaces/{sid}").json()["data"]["member_count"] == 1
+            response = client.post(
+                f"/api/spaces/{sid}/members/batch-add",
+                json={"member_user_ids": ["bob"]},
+            )
+            assert response.status_code == 200, response.text
+            assert response.json()["data"]["added_user_ids"] == ["bob"]
+            assert client.get(f"/api/spaces/{sid}").json()["data"]["member_count"] == 2
+        with db.orm_session() as session:
+            row = session.query(Snapshot).one()
+            assert (row.space_id, row.revision, row.app) == (7, 1, owner_app)
+    finally:
+        Snapshot.__table__.drop(db._engine)

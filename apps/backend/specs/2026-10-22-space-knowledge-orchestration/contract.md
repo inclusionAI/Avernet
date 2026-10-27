@@ -4,7 +4,9 @@
 > Never-enabled deployments keep legacy Space/member/approval/Skill Space
 > creation working without `ac_space_knowledge_sync`, with auto-create disabled.
 > Capture is explicitly configured, default false, independently of Sink delivery.
-> Retained same-environment history forbids switching capture off. This amendment
+> **2026-10-27 availability amendment:** Retained history does not block startup
+> or ordinary writes with capture explicitly disabled; producers still require
+> capture. This amendment
 > supersedes earlier global DDL prerequisites below; see [spec.md](spec.md),
 > [plan.md](plan.md), [tasks.md](tasks.md) and the capture deployment README.
 
@@ -176,17 +178,20 @@ contract (not a public Service/Plugin API). Defaults are no-op capture and
 identity protection, retaining neutral source locking. The composition root
 strictly validates optional `user_config.space_knowledge_capture.enabled` (bool,
 default false; no unknown keys). A shared lifecycle/producer guard performs
-schema/history checks after bootstrap or before first protected library use,
-not in constructors. Existing history in the current environment, **any app**,
-rejects capture=false; missing table with capture=false is valid. DB failures
-propagate, never become an implicit no-op fallback.
+schema/configuration checks after bootstrap or before first protected library
+use, not in constructors. Retained history in the current environment, **any app**,
+does not reject capture=false or ordinary source writes; missing table with
+capture=false is valid. Explicit knowledge producers still reject disabled
+capture. DB/schema failures propagate, never become an implicit no-op fallback.
 
 Enablement sequence: migrate the original outbox → roll all source writers,
 workers and direct library callers to capture=true → verify assembly → allow
 first activation. Do not activate during mixed no-op/capture rolling deployment.
 Pause delivery by stopping the Sink, not capture. Restart drains retained
-remove/rejoin/role/disabled revisions in order. A rollback with history must
-preserve capture or pause the affected writes. No source/shared-queue tables or
+remove/rejoin/role/disabled revisions in order. A rollback that must preserve
+synchronization consistency should keep capture enabled or pause affected writes. Disabling capture no longer blocks the app,
+but does not record source mutations or protect retired SQLite identities; no
+revocation-gap reconciliation is added. No source/shared-queue tables or
 indexes change; no event bus or second progress table is added.
 
 Pending discovery uses at most 32 indexed Space-head seeks and a continuation

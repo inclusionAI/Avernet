@@ -25,14 +25,14 @@
 - **AC:** AC2、AC4、AC5、AC7。
 
 ## Task 3 [x]: Wire explicit capture configuration and safe lifecycle checks
-- **Goal:** 完整默认装配无知识表可用；记录与投递独立，并防止有历史时误切空实现。
+- **Goal:** 完整默认装配无知识表可用；记录与投递独立。2026-10-27 起显式空策略不再因保留历史而阻断启动/普通写入；一致性风险显式记录。
 - **Files:** `di/space_knowledge_capture_config.py`、`di/modules/space_knowledge_module.py`、`di/container.py`、`core/space_knowledge/capture_lifecycle.py`、配置/DI/lifespan 测试及相关配置示例。
 - **Done when:**
   - [x] 缺省 capture=false，拒绝未知键/错误类型；纯配置校验在所有 profile eager 执行。
   - [x] 默认 graph 使用空扩展；真实 producer 必须与启用记录装配一致。
   - [x] 未启用且缺表时完整启动成功，不以预建同步表满足测试。
   - [x] DB bootstrap 后验证持久模式；生命周期异常不被 discovery 吞掉，验证前不得放行源写入。
-  - [x] 当前 env 有任意 app 历史时禁止关闭 capture；Sink 暂停不影响 capture。
+  - [x] 当前 env 任意 app 的历史不阻断显式 capture=false 启动/普通写入；producer、配置和 schema 检查仍保留；Sink 暂停不改变 capture。
 - **Depends on:** Task 2。
 - **AC:** AC1、AC2、AC3、AC5。
 
@@ -65,7 +65,7 @@
 - **Done when:**
   - [x] 守卫拒绝既有 writer 直接导入知识快照/身份实现；scope 只约束本次有限边界。
   - [x] 新 contract/no-op/启用实现有行为测试；不扩 CI allowlist，不削弱原门禁。
-  - [x] 文档区分从未启用、启用但未激活、暂停投递、有历史禁止关闭记录；取消全局 DDL 前置表述。
+  - [x] 文档区分从未启用、启用但未激活、暂停投递，以及显式关闭但保留历史的可用性与一致性风险；取消全局 DDL 前置表述。
   - [x] 说明 rollout 全 writer 切换前不能激活，以及回滚/企业装配边界。
 - **Depends on:** Task 5。
 - **AC:** AC3、AC5、AC7。
