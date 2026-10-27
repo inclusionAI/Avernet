@@ -206,3 +206,15 @@ def test_concurrent_same_request_replays_one_record(tmp_path):
         results = [f.result() for f in futures]
     assert sorted(created for _, created in results) == [False, True]
     assert results[0][0].risk_check_id == results[1][0].risk_check_id
+
+
+def test_conditional_withdrawal_does_not_invalidate_replacement_or_changed_record(repo):
+    a, _ = repo.create_or_replay(record())
+    assert repo.update_current(env="dev", risk_check_id="a", row_version=a.row_version, changes={"phase": "CHECKING"})
+    assert not repo.invalidate_if_current(env="dev", risk_check_id="a", row_version=a.row_version)
+    a = repo.get(env="dev", risk_check_id="a")
+    b, _ = repo.create_or_replay(record("b", "req-b"))
+    assert not repo.invalidate_if_current(env="dev", risk_check_id="a", row_version=a.row_version)
+    assert repo.get_current(env="dev", bot_pk=7, public_scope="user").risk_check_id == "b"
+    assert repo.invalidate_if_current(env="dev", risk_check_id="b", row_version=b.row_version)
+    assert repo.get_current(env="dev", bot_pk=7, public_scope="user") is None

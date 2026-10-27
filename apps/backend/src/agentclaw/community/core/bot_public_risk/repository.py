@@ -287,6 +287,23 @@ class BotPublicRiskRepository:
             )
             return count == 1
 
+    def invalidate_if_current(self, *, env: str, risk_check_id: str, row_version: int) -> bool:
+        """Invalidate the observed current record only, never a newer request."""
+        with self._db.transactional_orm_session() as session:
+            count = (
+                session.query(RiskCheckModel)
+                .filter_by(env=env, risk_check_id=risk_check_id, row_version=row_version)
+                .filter(RiskCheckModel.current_target_key.isnot(None))
+                .update(
+                    {
+                        RiskCheckModel.current_target_key: None,
+                        RiskCheckModel.row_version: RiskCheckModel.row_version + 1,
+                    },
+                    synchronize_session=False,
+                )
+            )
+            return count == 1
+
     def list_due(
         self, *, env: str, now: datetime, after_id: str = "", limit: int = 100
     ) -> tuple[RiskCheck, ...]:
