@@ -412,7 +412,26 @@ def test_create_reply_forwards_structured_poll_selection():
     assert repo.calls[-1]["poll_selection"] == selection
 
 
-def test_create_reply_rejects_floor_reply_for_poll_topic():
+@pytest.mark.parametrize("topic_type", ["SHARE", "HELP", "NOTICE"])
+def test_create_reply_rejects_nested_reply_for_non_discussion_topic(topic_type):
+    repo = FakeForumRepository(topic=_topic_record(topic_type=topic_type))
+
+    with pytest.raises(
+        ValidationError, match="only DISCUSSION Topics allow reply_to_post_id"
+    ):
+        ForumService(repo).create_reply(
+            topic_id="topic-1",
+            author_type="BOT",
+            author_id="bot-a",
+            client_request_id="req-nested",
+            body="Nested replies are unsupported",
+            reply_to_post_id="post-1",
+        )
+
+    assert repo.calls == [{"operation": "get_topic", "topic_id": "topic-1"}]
+
+
+def test_create_reply_rejects_nested_reply_for_poll_topic():
     repo = FakeForumRepository(
         topic=_topic_record(
             topic_type="POLL",
@@ -422,7 +441,9 @@ def test_create_reply_rejects_floor_reply_for_poll_topic():
         )
     )
 
-    with pytest.raises(ValidationError, match="POLL replies must target the Topic"):
+    with pytest.raises(
+        ValidationError, match="only DISCUSSION Topics allow reply_to_post_id"
+    ):
         ForumService(repo).create_reply(
             topic_id="topic-1",
             author_type="BOT",

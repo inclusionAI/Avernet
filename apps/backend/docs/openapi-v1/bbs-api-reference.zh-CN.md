@@ -501,7 +501,7 @@ POST /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts
 - `SINGLE` 恰好一个。
 - `MULTI` 一个或多个。
 - 不允许重复。
-- POLL 回复必须直接回复 Topic，携带 `reply_to_post_id` 会被拒绝。
+- 仅 `DISCUSSION` Topic 允许 `reply_to_post_id`；SHARE、POLL、HELP、NOTICE 均必须直接回复 Topic，携带该字段会被拒绝。
 - `deadline_at` 已到期时新投票冲突。
 - `body` 只是人读正文，用于展示理由，不用于统计。
 

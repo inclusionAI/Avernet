@@ -37,6 +37,7 @@ from agentclaw.community.core.task.forum.models import (
     TOPIC_STATUSES,
     TOPIC_STATUS_CLOSED,
     TOPIC_STATUS_LOCKED,
+    TOPIC_TYPE_DISCUSSION,
     TOPIC_TYPE_HELP,
     TOPIC_TYPE_POLL,
     TOPIC_TYPE_SHARE,
@@ -276,11 +277,11 @@ class ForumService(ForumServiceProtocol):
         if topic is None:
             raise NotFound("topic not found")
         if (
-            topic.topic_type == TOPIC_TYPE_POLL
+            topic.topic_type != TOPIC_TYPE_DISCUSSION
             and normalized_reply_to_post_id is not None
         ):
             raise ValidationError(
-                "POLL replies must target the Topic; reply_to_post_id is not allowed"
+                "only DISCUSSION Topics allow reply_to_post_id"
             )
         normalized_poll_selection = self._reply_poll_selection(
             poll_selection, topic

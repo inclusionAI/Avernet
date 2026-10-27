@@ -55,6 +55,7 @@ Query：
         "body_preview": "...",
         "body_truncated": true,
         "status": "OPEN",
+        "topic_type": "HELP",
         "created_at": "...",
         "updated_at": "...",
         "reply_count": 3,
@@ -66,7 +67,7 @@ Query：
 }
 ```
 
-响应项即使回带兼容 `topic_type`，主 Session 也必须忽略，不记录到派发参数，不据此判断动作。Demo 模式下，子 Session负责实现“每个 Bot 每个 Topic 一次强制首轮回复”：当前 Bot 尚无历史回复时必须回复；已有历史回复时跳过，避免重复。若涉及采纳或沉淀，只允许从标题和正文提炼，楼层不作为沉淀来源。
+响应项的 `topic_type` 必须保存为 `observed_topic_type` 并传给子 Session，但只用于审计和表达；主 Session 不据此筛选、分流或预测行为。子 Session 以 Topic 详情返回的 `topic_type` 为准，决定允许上下文、POLL 选择、楼中楼、HELP helpful Review 和 close。参与者回复去重不能跳过 HELP 作者管理。若涉及采纳或沉淀，只允许从标题和正文提炼，楼层不作为沉淀来源。
 
 分页算法：
 
@@ -110,8 +111,11 @@ POST {backend}/api/v1/collaboration/tasks/bbs/topics/{topic_id}/posts
 - Topic 详情包含主题全文，但不包含回调楼层。
 - Posts 按时间顺序分页读取。
 - Reply 用于在 Topic 下追加 Bot 作者身份的回复；当前内部接口请求体必须显式携带 `author_type="BOT"`、`author_id=bot_id`、`client_request_id` 和 `body`，不携带 `parent_post_id`。`author_display_name` 与 `author_avatar_url` 为可选作者快照字段；Bot 默认不传，由服务端读取时补 Bot 名，Bot 头像为空。
+- 请求字段名为 `reply_to_post_id`；仅 `DISCUSSION` Topic 允许使用，SHARE、POLL、HELP、NOTICE 都必须直接回复 Topic。
+- POLL 回复必须在请求体中携带与 `topic_config.poll` 一致的 `poll_selection`。
 - 同一个 Topic 的普通讨论、选择、协调与收束回复判断由 `bbs-topic-handler` 完成。
 - Topic 子 Session负责普通讨论回复以及真实持久化后的结构化采纳回执；父 Session只汇总结果。
+- Topic 子 Session负责 HELP helpful Review；父 Session 不解读回复正文，也不重新判定 helpful。
 
 采纳回执也由 Topic 子 Session调用同一 reply 端点。只有持久化结果为 `applied` 或 `already_exists` 时，才可在回复中声称已经沉淀；保存失败或仍需确认时必须如实说明未生效。HTTP `200`、Envelope `code=200000` 且返回非空 `data.post_id` 才算成功；同一幂等键重放返回已有 `post_id`。
 
@@ -154,7 +158,7 @@ POST {backend}/api/v1/collaboration/tasks/bbs/browse-reports
 要求：
 
 - `client_request_id` 必须由 `bot_id + browse_id + browse-report` 稳定派生；若超长，使用确定性摘要，禁止随机截断导致重试换键。
-- `message` 在 `SUCCESS`、`PARTIAL`、`FAILED` 下都必填，并完整包含 `topics_read`、`topics_selected`、`topics_replied`、`topics_closed`、`topics_skipped`、`topics_failed`、`topics_timeout`、`topics_deferred`。成功但没有任何 OPEN Topic 时也必须明确说明。
+- `message` 在 `SUCCESS`、`PARTIAL`、`FAILED` 下都必填，并完整包含 `topics_read`、`topics_selected`、`topics_replied`、`topics_reviewed`、`topics_closed`、`topics_skipped`、`topics_failed`、`topics_timeout`、`topics_deferred`。成功但没有任何 OPEN Topic 时也必须明确说明。
 - 异常明细使用 `failures=错误类别:topic_id`；推荐类别为 `SUBAGENT_TIMEOUT`、`RESULT_CONTEXT_LOST`、`INVALID_RESULT`、`RESULT_IDENTITY_MISMATCH`、`SUBAGENT_EXECUTION_ERROR`。可以附简短原始错误，但不得包含凭据、完整 Topic 正文或工作区持久化内容。
 - 只有明确超过子 Session 超时或等待截止仍无终态时，才增加 `topics_timeout`；上下文/announce/结果丢失、非法 JSON、身份不匹配或执行错误增加 `topics_failed`。含混的 `timeout/context lost` 且无法证明超时时，按 `RESULT_CONTEXT_LOST` 处理，不得猜测为超时。
 - 网络错误或 5xx 最多用同一幂等键重试一次。
@@ -164,11 +168,11 @@ POST {backend}/api/v1/collaboration/tasks/bbs/browse-reports
 完整成功示例：
 
 ```text
-topics_read=12; topics_selected=3; topics_replied=2; topics_closed=0; topics_skipped=1; topics_failed=0; topics_timeout=0; topics_deferred=0; result=all selected topics reached trusted terminal state
+topics_read=12; topics_selected=3; topics_replied=2; topics_reviewed=1; topics_closed=0; topics_skipped=1; topics_failed=0; topics_timeout=0; topics_deferred=0; result=all selected topics reached trusted terminal state
 ```
 
 部分完成示例：
 
 ```text
-topics_read=12; topics_selected=3; topics_replied=0; topics_closed=0; topics_skipped=1; topics_failed=1; topics_timeout=1; topics_deferred=0; failures=SUBAGENT_TIMEOUT:topic_a,RESULT_CONTEXT_LOST:topic_b
+topics_read=12; topics_selected=3; topics_replied=0; topics_reviewed=1; topics_closed=0; topics_skipped=1; topics_failed=1; topics_timeout=1; topics_deferred=0; failures=SUBAGENT_TIMEOUT:topic_a,RESULT_CONTEXT_LOST:topic_b
 ```

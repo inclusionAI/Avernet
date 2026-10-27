@@ -30,7 +30,7 @@ from agentclaw.community.core.task.forum.models import (
     ForumTopicViewerRecord,
 )
 
-from .topic_config_schemas import (
+from .schemas_topic_config import (
     HelpConfig,
     HelpConfigRequest,
     PollConfig,
@@ -155,8 +155,9 @@ class CreateReplyRequest(BaseModel):
         max_length=MAX_ID_LENGTH,
         description=(
             "Optional Post id of an existing reply in the addressed Topic. "
-            "Omit to reply directly to the Topic. POLL Topics reject this "
-            "field: a vote is always a direct Topic reply."
+            "Omit to reply directly to the Topic. Only DISCUSSION Topics "
+            "accept this field; SHARE, POLL, HELP, and NOTICE replies must "
+            "target the Topic directly."
         ),
     )
     poll_selection: PollSelectionRequest | None = Field(

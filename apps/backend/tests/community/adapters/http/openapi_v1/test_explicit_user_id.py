@@ -352,6 +352,11 @@ _NO_USER_DIMENSION = {
     # app-to-app callers, so there is no user_id axis on the wire.
     ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics"),
     ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics/{{topic_id}}/posts"),
+    (
+        "put",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics/"
+        "{topic_id}/posts/{post_id}/helpful",
+    ),
     ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics/{{topic_id}}/close"),
     # BBS Browse-Loop runtime reporting: one bot reports a single Browse Run's
     # outcome; tenant-wide write, no user-id axis and no bot-id axis.
@@ -586,7 +591,9 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # The genome registry (RSI-03) adds thirteen path-addressed, user-scoped
 # operations under /bots/{bot_id}/genome: path 198 -> 211.
 # The configured engine default-model read adds one Bot-path operation: 211 -> 212.
-_BOT_ID_PLACEMENT = {"path": 212, "query": 1, "none": 129}
+# The unified HELP reply helpful-marker write declares its author in the body
+# and addresses no Bot, so it adds one operation to ``none``: 129 -> 130.
+_BOT_ID_PLACEMENT = {"path": 212, "query": 1, "none": 130}
 
 
 def _schema() -> dict:
