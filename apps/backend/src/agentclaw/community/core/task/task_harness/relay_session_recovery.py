@@ -25,6 +25,40 @@ RELAY_HARNESS_RESUME_PROMPT = (
 )
 
 
+def relay_harness_resume_prompt(resume_step: str | None = None) -> str:
+    """Build one step-aware same-session continuation prompt.
+
+    ``resume_step`` is Harness-local recovery metadata.  It is not persisted and
+    does not add a new task-loop protocol step or report event.
+    """
+    if resume_step == "S6":
+        return (
+            "继续执行当前未完成的 task-loop S6。"
+            "不要新建任务、不要重新澄清、不要重新提交 execute、"
+            "不要重做 S1~S5；请直接依据已接纳的 PLAN_RESULT 完成本棒收口、"
+            "等待或交接。如果当前步骤无法完成，请输出明确失败原因，"
+            "并继续执行后续步骤。"
+        )
+    if resume_step == "S5":
+        return (
+            "继续执行当前未完成的 task-loop S5。"
+            "不要新建任务、不要重新澄清、不要重新提交 execute、"
+            "不要重做 S1~S4；请基于已接纳的 EXECUTION_RESULT 刷新剩余缺口，"
+            "并完成下一棒规划、搜索、执行者决策和 PLAN_RESULT 上报。"
+            "如果当前步骤无法完成，请输出明确失败原因，"
+            "并继续执行后续步骤。"
+        )
+    if resume_step == "S1-S4a":
+        return (
+            "继续执行当前未完成的 task-loop S1~S4a。"
+            "不要新建任务、不要重新澄清、不要重新提交 execute；"
+            "先重新读取 S1 权威上下文，再从第一个未完成步骤继续，"
+            "直到完成 S4b 上报。如果当前步骤无法完成，"
+            "请输出明确失败原因，并继续执行后续步骤。"
+        )
+    return RELAY_HARNESS_RESUME_PROMPT
+
+
 class RelaySessionRecoveryError(RuntimeError):
     """Raised when an existing Relay execution session cannot be continued."""
 
@@ -50,7 +84,9 @@ class RelaySessionRecovery:
         self._bcs = bcs
         self._bot_tokens = bot_tokens
 
-    async def resume(self, node: TaskNode) -> RelayResumeResult:
+    async def resume(
+        self, node: TaskNode, *, resume_step: str | None = None
+    ) -> RelayResumeResult:
         props = getattr(node.run_info, "extend_props", {}) or {}
         group_id = str(props.get("group_id") or "").strip()
         session_id = str(props.get("session_id") or "").strip()
@@ -66,7 +102,7 @@ class RelaySessionRecovery:
             caller_bearer = await self._resolve_group_bearer(group_id, node)
             result = await self._bcs.send_session_chat(
                 session_id,
-                message=RELAY_HARNESS_RESUME_PROMPT,
+                message=relay_harness_resume_prompt(resume_step),
                 caller_bearer=caller_bearer,
             )
             handle = str(
@@ -110,7 +146,7 @@ class RelaySessionRecovery:
 
         sent = await self._bot.send_message(
             bot_id=compose_bot_identity(assignee, props.get("assignee_owner_id")),
-            message=RELAY_HARNESS_RESUME_PROMPT,
+            message=relay_harness_resume_prompt(resume_step),
             metadata=metadata,
         )
         logger.info(

@@ -1470,14 +1470,29 @@ local_acceptance_result: AcceptanceResult = AcceptanceResult(
 
 ### 14.4 harness 恢复
 
-Runtime liveness 采用引擎状态作为事实源：`active + 有进展` 不做恢复；`active + 无进展` 只记录、计数，等待引擎自身的 timeout/终态，不发送恢复消息。只有引擎出现 `terminal_failed` / `timeout` / `aborted`，或 `terminal_success` 但任务图未收到报告，或连续 `unknown` / `unresponsive` 时，Relay harness 才进入以下 **same-session** 恢复：
+Runtime liveness 采用引擎状态作为事实源：`active + 有进展` 不做恢复；`active + 无进展` 按观察轮次递增介入。同一节点最多 2 次送达成功的 same-session resume：
 
-- 节点保持 `RUNNING`；不重置 `PENDING`，不重新 prepare，不重新 dispatch，不轮换 `relay_token`，不改变 `run_mode`、`assignee`、群/会话或任务标识。
-- 单 Bot/OpenAPI 节点仅向原始 session 发送：`继续执行当前未完成的 task-loop S1~S6。不要新建任务、不要重新澄清、不要重新提交 execute。如果当前步骤无法完成，请输出明确失败原因，并继续执行后续步骤。`不执行引擎 run abort/stop 权限干预，不改变节点代次或 `relay_token`。
-- BCS 协作群节点通过既有 `POST /sessions/{sid}/chat` 会话口发送同一条自然语言消息，调用者使用原群内参与者 Bot 身份，不新建群/会话。
-- same-session 续跑次数持久化在节点 `relay_harness_resume_attempts` 中，不写入 `harness_retries`，不参与报告幂等键。该计数只统计实际送达成功的 resume；探活接口不可用或 resume 发送因服务部署/接口异常失败时不消耗计数，节点保持 `RUNNING` 并等待下一轮可恢复探活。默认最多 2 次；第二次恢复后，若下一次探活仍满足“可恢复终态/连续无响应”条件，则节点显式置 `HUNG`，原因是 `relay_harness_resume_exhausted`。该终态不隐式升级 BBS，也不改变执行模态。
-- Bot 继续执行时仍按当前 `relay_token` 调用 S1/context、S4b/report、S5/report 和 S6/dispatch；不新增第三个 report event 或恢复专用标记。
-- 独立的新执行代次重投（例如节点已执行失败且重新 prepare/dispatch）仍由后端状态机控制并可轮换 `relay_token`，与 same-session 续跑是两种不同恢复。
+- 第 1 轮观察期为 4 个巡检周期，连续无进展后发送 resume；
+- 第 2 轮观察期为 6 个巡检周期，视为上一轮 resume 后仍未推进；
+- 第 3 轮观察期为 8 个巡检周期，若仍无恢复信号则显式置 `HUNG`。
+
+`terminal_success_unreported` 的三个观察窗分别是 360 秒、600 秒、900 秒；`probe_unavailable` 不消耗 resume 预算，也不把部署或接口故障误判为 Bot 失活。
+
+每次成功送达的 resume 都会开启新的“恢复观察窗”：
+
+- **要重置**：本轮无进展计数、未知状态计数、Terminal Success 计数、巡检心跳 cursor 基线、观察时间起点；
+- **不重置**：`relay_harness_resume_attempts`、`relay_token`、`task_id/node_id`、`run_mode`、`assignee`、会话/群身份。
+
+首个 post-resume probe 使用新的 cursor 基线，确保 resume 消息本身不会被误判为新的业务进展。
+
+Same-session resume 消息按节点权威恢复阶段对齐：
+
+- `accepted_plan_report` 非空：resume 到 `S6`；
+- 仅 `accepted_execution_patch` 非空：resume 到 `S5`；
+- 两者均空：resume 到 `S1-S4a`；
+- 图读取失败时回退到原有 generic resume prompt。
+
+节点保持 `RUNNING`；不重新 prepare、不重新 dispatch、不轮换 `relay_token`、不改变 `run_mode`、`assignee`、群/会话或任务标识。
 
 ### 14.5 本棒已接纳事实与恢复读取
 
