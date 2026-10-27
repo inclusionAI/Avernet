@@ -188,6 +188,7 @@ export default function ConversationPage(): JSX.Element {
   // 资源管理 = 既有会话文件副屏承接；与右缘面板互斥由 togglePanel 一并处理。
   const headerPanels = useChatHeaderPanels({
     session: interactiveModel.selectedSession,
+    userId: identityChanged ? null : userId,
     messages: botChat.chat.messages,
     panelRef,
     section: store.selectedSection ?? 'managed',

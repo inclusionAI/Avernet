@@ -48,6 +48,7 @@ export function GroupWorkspaceArea({
   // 保证历史面板每条结果都能在消息区定位到（useGroupChatDisplayStatus 同款同源约定）。
   const headerPanels = useGroupChatHeaderPanels({
     session: sessions.selectedSession,
+    userId: userIdentityId ?? null,
     messages: filterVisibleGroupMessages(chat.chat.messages ?? []),
     panelRef: chat.panelRef,
     toggleFavorite: sessions.toggleFavorite,

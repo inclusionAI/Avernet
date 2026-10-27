@@ -65,6 +65,7 @@ it('收藏模型跟随会话：favorite 取自 SessionView，无会话禁用，o
 
   const { result } = renderHook(() =>
     useGroupChatHeaderPanels({
+      userId: null,
       session: makeSession({ favorite: true }),
       messages: makeMessages(),
       panelRef: handle,
@@ -78,6 +79,7 @@ it('收藏模型跟随会话：favorite 取自 SessionView，无会话禁用，o
 
   const { result: noSession } = renderHook(() =>
     useGroupChatHeaderPanels({
+      userId: null,
       session: null,
       messages: makeMessages(),
       panelRef: handle,
@@ -94,6 +96,7 @@ it('historySearch 前端过滤：关键词/发送方筛选命中', () => {
   const { ref: handle } = makePanelHandle();
   const { result } = renderHook(() =>
     useGroupChatHeaderPanels({
+      userId: null,
       session: makeSession(),
       messages: makeMessages(),
       panelRef: handle,
@@ -115,6 +118,7 @@ it('locateMessage 高亮 3s 后自动清除', () => {
     const { ref: handle } = makePanelHandle();
     const { result } = renderHook(() =>
       useGroupChatHeaderPanels({
+      userId: null,
         session: makeSession(),
         messages: makeMessages(),
         panelRef: handle,
@@ -135,6 +139,7 @@ it('toggleSidePane 打开按消息幂等重建 tabs、关闭走 closePanel；切
   const { result, rerender } = renderHook(
     ({ session }: { session: SessionView | null }) =>
       useGroupChatHeaderPanels({
+      userId: null,
         session,
         messages: makePanelMessages(),
         panelRef: handle,
@@ -174,6 +179,7 @@ it('任务节点真实路由切群会话时保留 TaskPanel 的头部开合镜�
   const { result, rerender } = renderHook(
     ({ session }: { session: SessionView | null }) =>
       useGroupChatHeaderPanels({
+      userId: null,
         session,
         messages: makePanelMessages(),
         panelRef: handle,
@@ -206,6 +212,7 @@ it('副屏判空：无 <AixUI type="panel"> 时 Monitor 禁用且 toggle 空转�
   const { result, rerender } = renderHook(
     ({ messages }: { messages: ChatMessage[] }) =>
       useGroupChatHeaderPanels({
+      userId: null,
         session: makeSession(),
         messages,
         panelRef: handle,
@@ -234,6 +241,7 @@ it('真实态同步：渲染器挂载默认展开（onIsOpenChange(true)）即�
   const { ref: handle, closePanel } = makePanelHandle();
   const { result } = renderHook(() =>
     useGroupChatHeaderPanels({
+      userId: null,
       session: makeSession(),
       messages: makePanelMessages(),
       panelRef: handle,
