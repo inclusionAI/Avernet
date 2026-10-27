@@ -129,9 +129,11 @@ class RiskTasks:
             )
             return
         now = self.clock()
+        workflow["detecting_deadline"] = (now + timedelta(minutes=5)).isoformat()
         if self._update(
             row,
             {
+                "workflow_json": json.dumps(workflow),
                 "phase": "CHECKING",
                 "security_status": "DETECTING",
                 "check_id": check_id,
@@ -178,7 +180,14 @@ class RiskTasks:
             if report.valid_pass is not True:
                 workflow["error"] = "PASS_UNVERIFIED"
         else:
-            deadline = row.auto_poll_until
+            # The two windows belong to different events. A return from
+            # REJECT to DETECTING must never inherit the longer window.
+            detection_deadline = workflow.get("detecting_deadline")
+            deadline = (
+                datetime.fromisoformat(detection_deadline)
+                if detection_deadline
+                else None
+            )
             if report.status == "REJECT":
                 if not workflow.get("reject_started_at"):
                     workflow["reject_started_at"] = now.isoformat()

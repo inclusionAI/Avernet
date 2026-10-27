@@ -15,9 +15,9 @@ from agentclaw.community.core.bot_public_risk.tasks import RiskTasks, SecurityRe
 
 class Db:
     def __init__(self):
-        engine = create_engine("sqlite:///:memory:")
-        RiskCheckModel.__table__.create(engine)
-        self.sessions = sessionmaker(bind=engine)
+        self.engine = create_engine("sqlite:///:memory:")
+        RiskCheckModel.__table__.create(self.engine)
+        self.sessions = sessionmaker(bind=self.engine)
 
     @contextmanager
     def transactional_orm_session(self):
@@ -225,3 +225,98 @@ def test_advance_enqueue_failure_is_recoverable():
     queue.enqueue = original
     tasks.recover(env="dev", now=now[0])
     assert queue.entries[-1][0][0] == "bot_public_risk_advance"
+
+
+def test_detecting_after_reject_uses_original_window_and_refresh_does_not_extend():
+    tasks, repo, _, provider, now, record = make()
+    tasks.start(record)
+    tasks.submit(env="dev", risk_check_id="a")
+    original_deadline = now[0] + timedelta(minutes=5)
+    now[0] += timedelta(seconds=30)
+    provider.report = SecurityReport("REJECT")
+    tasks.poll(env="dev", risk_check_id="a")
+    reject_deadline = now[0] + timedelta(hours=1)
+    now[0] += timedelta(minutes=6)
+    provider.report = SecurityReport("DETECTING")
+    tasks.poll(env="dev", risk_check_id="a", manual=True)
+    row = repo.get(env="dev", risk_check_id="a")
+    assert row.security_status == "DETECTING"
+    assert row.auto_poll_until == original_deadline
+    assert row.auto_poll_paused and row.next_action_at is None
+    now[0] += timedelta(minutes=1)
+    tasks.poll(env="dev", risk_check_id="a", manual=True)
+    assert repo.get(env="dev", risk_check_id="a").auto_poll_until == original_deadline
+    provider.report = SecurityReport("REJECT")
+    tasks.poll(env="dev", risk_check_id="a", manual=True)
+    row = repo.get(env="dev", risk_check_id="a")
+    assert row.auto_poll_until == reject_deadline
+    assert not row.auto_poll_paused
+
+
+def test_real_queue_reclaims_crashed_submission_without_second_post():
+    import pytest
+    from sqlalchemy import func
+    from agentclaw.community.core.repository.implementations.platform.task_queue import (
+        TaskQueueRepository,
+    )
+    from agentclaw.community.core.task_queue.repository.models import TaskQueueModel
+    from agentclaw.community.core.task_queue.types import Complete
+    from agentclaw.community.core.bot_public_risk.tasks import RiskTaskHandler, SUBMIT
+
+    tasks, repo, _, provider, _, record = make()
+    TaskQueueModel.__table__.create(repo._db.engine)
+    queue_repo = TaskQueueRepository(repo._db)
+
+    class RealQueue:
+        def enqueue(
+            self,
+            kind,
+            payload,
+            deadline_seconds,
+            *,
+            delay_seconds=0,
+            idempotency_key=None,
+        ):
+            return queue_repo.enqueue(
+                task_type=kind,
+                payload=payload,
+                env="dev",
+                app="agentclaw",
+                deadline_seconds=deadline_seconds,
+                delay_seconds=delay_seconds,
+                idempotency_key=idempotency_key,
+            )
+
+    tasks.queue = RealQueue()
+    tasks.start(record)
+    claimed = queue_repo.claim_batch(
+        worker_id="first", env="dev", app="agentclaw", limit=1, lease_seconds=30
+    )
+    assert len(claimed) == 1
+
+    class ProcessCrash(BaseException):
+        pass
+
+    def crash(payload):
+        provider.submissions.append(payload)
+        raise ProcessCrash()
+
+    provider.submit_agent_scan = crash
+    handler = RiskTaskHandler(tasks, SUBMIT, lambda: "dev")
+    with pytest.raises(ProcessCrash):
+        handler.handle(claimed[0].payload)
+    # Expire the real queue lease without sleeping; a second worker reclaims it.
+    with repo._db.orm_session() as session:
+        session.query(TaskQueueModel).filter_by(id=claimed[0].id).update(
+            {TaskQueueModel.lease_expires_at: func.datetime("now", "-1 minute")},
+            synchronize_session=False,
+        )
+    reclaimed = queue_repo.claim_batch(
+        worker_id="second", env="dev", app="agentclaw", limit=1, lease_seconds=30
+    )
+    assert len(reclaimed) == 1 and reclaimed[0].id == claimed[0].id
+    assert isinstance(handler.handle(reclaimed[0].payload), Complete)
+    assert len(provider.submissions) == 1
+    assert repo.get(env="dev", risk_check_id="a").phase == "NEEDS_ATTENTION"
+    assert not queue_repo.complete(task_id=claimed[0].id, worker_id="first")
+    assert queue_repo.complete(task_id=claimed[0].id, worker_id="second")
