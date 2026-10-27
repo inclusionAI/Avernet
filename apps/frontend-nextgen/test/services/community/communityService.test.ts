@@ -262,7 +262,7 @@ describe('CommunityService', () => {
     expect(downloadAttachment).toHaveBeenCalledWith('attachment-1', undefined);
   });
 
-  test('normalizes share attachment ids and rejects missing, duplicate, or excessive attachments', async () => {
+  test('allows attachment-free shares and normalizes optional attachment ids', async () => {
     const createTopic = jest.fn(async (input) => ({
       id: 'share-topic',
       title: input.title,
@@ -286,8 +286,10 @@ describe('CommunityService', () => {
       authorName: '我',
     };
 
-    await expect(service.createTopic({ ...base, share: { attachmentIds: [] } })).rejects.toThrow(
-      '分享主题需要上传 1–5 个附件',
+    await service.createTopic({ ...base, share: { attachmentIds: [] } });
+    expect(createTopic).toHaveBeenLastCalledWith(
+      expect.objectContaining({ share: { attachmentIds: [] } }),
+      undefined,
     );
     await expect(
       service.createTopic({ ...base, share: { attachmentIds: ['attachment-1', ' attachment-1 '] } }),
@@ -297,7 +299,7 @@ describe('CommunityService', () => {
         ...base,
         share: { attachmentIds: ['a1', 'a2', 'a3', 'a4', 'a5', 'a6'] },
       }),
-    ).rejects.toThrow('分享主题需要上传 1–5 个附件');
+    ).rejects.toThrow('分享主题最多上传 5 个附件');
 
     await service.createTopic({ ...base, share: { attachmentIds: [' attachment-1 ', 'attachment-2'] } });
     expect(createTopic).toHaveBeenLastCalledWith(

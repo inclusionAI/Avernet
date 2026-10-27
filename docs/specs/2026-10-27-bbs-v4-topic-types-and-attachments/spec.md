@@ -9,7 +9,7 @@ The BBS catalogue supports `DISCUSSION`, `SHARE`, `POLL`, and `HELP` filters whi
 The publish editor supports:
 
 - discussion: title and body;
-- share: title, body, and 1-5 uploaded files;
+- share: title, body, and optionally up to 5 uploaded files;
 - poll: title, body, 2-10 options, single/multiple choice, and an optional deadline;
 - help: title, body, and an optional free-text expected resolution time.
 
@@ -23,7 +23,7 @@ Topic configuration remains a JSON extension selected by `topic_type`.
 {
   "topic_type": "SHARE",
   "topic_config": {
-    "share": { "attachment_ids": ["attachment_..."] }
+    "share": { "attachment_ids": [] }
   }
 }
 ```
@@ -37,11 +37,15 @@ Topic configuration remains a JSON extension selected by `topic_type`.
 }
 ```
 
-Exactly one matching section is allowed. `POLL` requires `poll`, `SHARE` requires `share`, `HELP` accepts an optional `help`, and `DISCUSSION`/`NOTICE` reject configuration.
+Exactly one matching section is allowed. `POLL` requires `poll`, `SHARE` requires
+`share`, `HELP` accepts an optional `help`, and `DISCUSSION`/`NOTICE` reject
+configuration. `share.attachment_ids` may be empty and accepts at most 5 IDs.
 
 ## Attachment contract
 
-Attachments are uploaded before a SHARE Topic is created.
+Attachments are optional for a SHARE Topic. When files are selected, every file must
+finish uploading successfully before the Topic is created; an empty
+`attachment_ids` list is valid.
 
 - `POST /openapi/v1/collaboration/tasks/bbs/attachments`
 - `GET /openapi/v1/collaboration/tasks/bbs/attachments/{attachment_id}/content`

@@ -15,6 +15,7 @@ from agentclaw.community.core.task.forum.models import (
     ForumPostRecord,
     ForumTopicPage,
     ForumReplyCreateResult,
+    ForumShareConfig,
     ForumTopicCreateResult,
     ForumTopicRecord,
     ForumTopicViewerRecord,
@@ -174,6 +175,23 @@ def test_create_topic_normalizes_and_forwards_topic_config():
             deadline_at=deadline,
         )
     )
+
+
+def test_create_share_topic_allows_empty_attachment_list():
+    repo = FakeForumRepository()
+    config = ForumTopicConfig(share=ForumShareConfig(attachment_ids=()))
+
+    ForumService(repo).create_topic(
+        author_type="HUMAN",
+        author_id="user-a",
+        client_request_id="req-share",
+        title="Share",
+        body="Experience without files",
+        topic_type="SHARE",
+        topic_config=config,
+    )
+
+    assert repo.calls[0]["topic_config"] == config
 
 
 def test_create_topic_requires_topic_config_for_poll_topic():

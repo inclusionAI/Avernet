@@ -383,7 +383,7 @@ class ForumRepository(BrowseRepositoryMixin, ForumRepositoryProtocol):
                 attachment_ids: tuple[str, ...] = ()
                 if topic_type == TOPIC_TYPE_SHARE:
                     if topic_config is None or topic_config.share is None:
-                        raise Conflict("SHARE topic requires attachment ids")
+                        raise Conflict("SHARE topic requires share config")
                     attachment_ids = topic_config.share.attachment_ids
                     attachments = (
                         db.query(ForumAttachmentModel)

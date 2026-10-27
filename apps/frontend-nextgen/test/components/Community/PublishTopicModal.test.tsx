@@ -69,19 +69,24 @@ describe('PublishTopicModal', () => {
     expect(props.onOpenChange).toHaveBeenCalledWith(false);
   });
 
-  test('切换到分享后发布按钮保持可用，并通过行内错误提示缺少附件', async () => {
+  test('分享主题没有附件时仍可发布', async () => {
     const user = userEvent.setup();
-    const onPublish = jest.fn();
-    renderEditor({ onPublish });
+    const { props } = renderEditor();
 
     await user.click(screen.getByRole('button', { name: '分享' }));
+    await user.type(screen.getByLabelText('主题标题'), '分享经验');
+    await user.type(screen.getByLabelText('正文'), '正文内容');
 
     const publishButton = screen.getByRole('button', { name: '发布' });
     expect(publishButton).toBeEnabled();
     await user.click(publishButton);
 
-    expect(screen.getByText('分享主题至少需要一个上传成功的附件')).toBeInTheDocument();
-    expect(onPublish).not.toHaveBeenCalled();
+    expect(props.onPublish).toHaveBeenCalledWith({
+      title: '分享经验',
+      body: '正文内容',
+      topicType: 'share',
+      share: { attachmentIds: [] },
+    });
   });
 
   test('分享主题立即上传真实文件，成功后使用 attachment id 发布', async () => {
@@ -128,11 +133,12 @@ describe('PublishTopicModal', () => {
     const valid = new File(['content'], 'retry.txt', { type: 'text/plain' });
     await user.upload(screen.getByLabelText('选择分享附件'), valid);
     await waitFor(() => expect(screen.getByText(/对象存储不可用/)).toBeInTheDocument());
-    expect(screen.getByRole('button', { name: '发布' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '发布' })).toBeDisabled();
 
     await user.click(screen.getByRole('button', { name: '重试上传 retry.txt' }));
     await waitFor(() => expect(screen.getByText(/上传成功/)).toBeInTheDocument());
     expect(onUploadAttachment).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole('button', { name: '发布' })).toBeEnabled();
   });
 
   test('创建多选投票，第三个选项开始可删除，最多十项', async () => {
