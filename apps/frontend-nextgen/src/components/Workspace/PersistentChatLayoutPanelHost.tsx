@@ -11,6 +11,7 @@
  * 通过稳定代理切换到新路由，避免路由提交触发 TaskPanel 内容树重新 render。
  */
 import { useTaskConversationNavigationStore } from '@/stores/taskConversationNavigationStore';
+import { useStaleTaskPanelRelease } from './persistentTaskPanelStaleRelease';
 import type { BridgeHandler, ChatBridge, PanelHandle } from '@tc-chat/core';
 import { ChatLayout } from '@tc-chat/ui/es/ChatLayout';
 import type { ChatLayoutPanelProps } from '@tc-chat/ui/es/ChatLayout/types';
@@ -66,7 +67,6 @@ export function PersistentChatLayoutPanelProvider({ children }: { children: Reac
   const currentBridgeRef = useRef<ChatBridge | undefined>(undefined);
   const panelHandlersRef = useRef(new Map<string, BridgeHandler>());
   const rawHandleRef = useRef<PanelHandle | null>(null);
-
   const syncBridge = useCallback((nextBridge: ChatBridge | undefined) => {
     const previousBridge = currentBridgeRef.current;
     if (previousBridge === nextBridge) return;
@@ -126,6 +126,7 @@ export function PersistentChatLayoutPanelProvider({ children }: { children: Reac
     [],
   );
 
+  useStaleTaskPanelRelease(stableHandle);
   const handleIsOpenChange = useCallback((isOpen: boolean) => {
     setState((current) => (current.isOpen === isOpen ? current : { ...current, isOpen }));
     latestPropsRef.current?.onIsOpenChange?.(isOpen);

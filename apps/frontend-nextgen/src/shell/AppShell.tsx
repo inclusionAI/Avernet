@@ -5,9 +5,11 @@ import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import { useMinWidth } from '@/hooks/useMediaQuery';
 import { ensurePersonalSpaceOnAppEntry, initSpaceContext } from '@/hooks/useSpaceContext';
 import { workspaceService } from '@/services/workspace/workspaceService';
+import { isTaskNavigationAtCurrentRoute } from '@/services/tasks/taskConversationNavigation';
+import { useTaskConversationNavigationStore } from '@/stores/taskConversationNavigationStore';
 import { history, useLocation } from '@umijs/max';
 import { Menu } from 'lucide-react';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppSidebar } from './AppSidebar';
 import { OpenSourceExperienceNotice } from './OpenSourceExperienceNotice';
 import { SidebarNavList } from './SidebarNavList';
@@ -50,6 +52,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // 被形态开关隐藏（spaceSwitcher=false）时 Bot 页面对 spaceContextStore 的消费；
   // 切换器自身的挂载/打开触发由 SpaceSwitcher 承担（幂等+并发单飞，同帧不重复请求）。
   const activeSection = activeItem?.section;
+  // 任务副屏的保活 lease 只覆盖「源会话 → 导航目标会话」这一次 handoff。
+  // 如果路由实际离开目标（退出会话页/普通路由切换），必须通知持久副屏宿主强制关闭；
+  // 否则旧任务 tab 会跨路由悬挂，并在后续会话里把别的会话任务继续展示出来。
+  const previousTaskRouteKeyRef = useRef<string | null>(null);
+  const taskRouteKey = `${location.pathname}${location.search ?? ''}${location.hash ?? ''}`;
+  useEffect(() => {
+    const previousTaskRouteKey = previousTaskRouteKeyRef.current;
+    previousTaskRouteKeyRef.current = taskRouteKey;
+    if (previousTaskRouteKey === null) return;
+    const { navigation, requestStaleRouteRelease } = useTaskConversationNavigationStore.getState();
+    if (navigation?.routeCommitted && !isTaskNavigationAtCurrentRoute(navigation)) {
+      requestStaleRouteRelease();
+    }
+  }, [taskRouteKey]);
   useEffect(() => {
     if (activeSection === 'bot') void initSpaceContext();
   }, [activeSection]);

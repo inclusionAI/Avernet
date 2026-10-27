@@ -142,7 +142,9 @@ TaskPanelV2（壳：面包屑两级栈 + 收起/展开 + 多任务切换条；�
 - **会话导航与消息定位（契约不变决策下的派生方案）**：选中节点后通过真实
   `/workspace/chat` 或 `/workspace/collaboration` 路由切换关联会话，使 URL、左侧 Bot/群与
   Session 选中态、中央消息内容由既有 route hydration 同源更新。任务节点导航期间保留当前
-  TaskPanel；普通侧栏切换仍关闭旧副屏。首次离开任务宿主时记录其会话，根节点在其他联动
+  TaskPanel；普通侧栏切换仍关闭旧副屏。AppShell 还会观察路由是否到达导航目标：进入目标
+  会话继续保活，路由实际离开目标/退出会话页则通知持久副屏宿主 `closePanelForce` 并清空任务
+  状态，避免旧任务 tab 跨路由悬挂、把别的会话任务带进后续页面。首次离开任务宿主时记录其会话，根节点在其他联动
   会话中恢复原宿主，在原宿主中点击则保持当前内容不变。会话解析规则（纯前端）：
   `run_mode=single_bot` 节点 → `main_session`；`run_mode=coop_group/bbs` 节点 →
   `derived_session_ids` 中按 `assignee`/`source_group_id` 匹配，无法唯一定位时回退跳

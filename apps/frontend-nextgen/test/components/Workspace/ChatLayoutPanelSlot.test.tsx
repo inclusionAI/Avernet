@@ -6,6 +6,7 @@ import { PersistentChatLayoutPanelProvider } from '@/components/Workspace/Persis
 import { PersistentChatLayoutPanelViewport } from '@/components/Workspace/PersistentChatLayoutPanelViewport';
 import { PANEL_WIDTH_STORAGE_KEY } from '@/services/workspace/panelWidthMemory';
 import { useTaskConversationNavigationStore } from '@/stores/taskConversationNavigationStore';
+import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom/jest-globals';
 import { act, fireEvent, render, screen } from '@testing-library/react';
@@ -92,6 +93,7 @@ describe('ChatLayoutPanelSlot', () => {
     jest.clearAllMocks();
     localStorage.clear();
     useTaskConversationNavigationStore.getState().resetAll();
+    useTaskSidePanelStore.getState().resetAll();
     window.history.pushState({}, '', '/workspace/chat?bot=b1&session=s1');
   });
 
@@ -182,6 +184,31 @@ describe('ChatLayoutPanelSlot', () => {
 
     expect(mockRawHandle.openTab).toHaveBeenCalledWith(tab);
     expect(useTaskConversationNavigationStore.getState().navigation?.id).toBe(navigationId);
+  });
+
+  it('退出任务导航目标路由后，AppShell 释放信号强制关闭旧 TaskPanel 并清理任务状态', () => {
+    const ref = React.createRef<import('@tc-chat/core').PanelHandle>();
+    const { rerender } = render(
+      <PersistentPanelHarness>
+        <ChatLayoutPanelSlot ref={ref} key="source" {...asRootInjected({ bridge: 'source-bridge' })} />
+      </PersistentPanelHarness>,
+    );
+
+    const store = useTaskConversationNavigationStore.getState();
+    const navigationId = store.beginNavigation('t1', '/workspace/collaboration', 's2');
+    act(() => store.markRouteCommitted(navigationId));
+    act(() => useTaskSidePanelStore.getState().setActiveTask('t1'));
+    // 模拟用户退出会话页：原插槽卸载，但导航 lease 尚未释放，持久宿主仍持有旧 Panel。
+    rerender(<PersistentPanelHarness />);
+    expect(screen.getByTestId('mock-persistent-panel-state')).toBeTruthy();
+
+    // AppShell 的路由观察器发现 current route 不再是导航目标后发 release 信号。
+    act(() => useTaskConversationNavigationStore.getState().requestStaleRouteRelease());
+
+    expect(mockRawHandle.closePanelForce).toHaveBeenCalledTimes(1);
+    expect(useTaskConversationNavigationStore.getState().navigation).toBeNull();
+    expect(useTaskConversationNavigationStore.getState().originsByTask).toEqual({});
+    expect(useTaskSidePanelStore.getState().activeTaskId).toBeNull();
   });
 
   it('目标会话迟到的 closePanelForce 仍被持续抑制，TaskPanel 不会一闪而逝', () => {

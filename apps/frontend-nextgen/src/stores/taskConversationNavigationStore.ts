@@ -30,6 +30,9 @@ interface TaskConversationNavigationState {
   originsByTask: Record<string, TaskConversationOrigin>;
   tabsByTask: Record<string, TaskPanelTabSnapshot>;
   navigation: TaskConversationNavigation | null;
+  /** AppShell 路由观察器发现旧 lease 已脱离目标路由时递增，由持久副屏宿主强制关闭。 */
+  staleRouteReleaseSignal: number;
+  requestStaleRouteRelease: () => void;
   rememberOrigin: (taskId: string, origin: TaskConversationOrigin) => void;
   rememberTaskTab: (taskId: string, tab: PanelTab) => void;
   beginNavigation: (taskId: string, pathname: TaskConversationPathname, sessionId: string) => number;
@@ -44,6 +47,7 @@ const initial = {
   originsByTask: {} as Record<string, TaskConversationOrigin>,
   tabsByTask: {} as Record<string, TaskPanelTabSnapshot>,
   navigation: null as TaskConversationNavigation | null,
+  staleRouteReleaseSignal: 0,
 };
 
 function snapshotTaskTab(tab: PanelTab): TaskPanelTabSnapshot {
@@ -53,6 +57,7 @@ function snapshotTaskTab(tab: PanelTab): TaskPanelTabSnapshot {
 
 export const useTaskConversationNavigationStore = create<TaskConversationNavigationState>((set) => ({
   ...initial,
+  requestStaleRouteRelease: () => set((state) => ({ staleRouteReleaseSignal: state.staleRouteReleaseSignal + 1 })),
   rememberOrigin: (taskId, origin) =>
     set((state) =>
       !taskId || state.originsByTask[taskId] ? state : { originsByTask: { ...state.originsByTask, [taskId]: origin } },
