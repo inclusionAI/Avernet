@@ -45,7 +45,8 @@ export interface SessionRecoveryTaskApi extends SessionRecoveryApi {
   finishForUserContinuation(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string }, finalSummary?: unknown): Promise<void>;
   finishForOwnerHandoff(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string }, finalSummary?: unknown): Promise<void>;
   finishForTargetUnavailable(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string }, finalSummary?: unknown): Promise<void>;
-  executionFailure(taskId: string, reason: string, executionId?: string, retryable?: boolean, finalSummary?: unknown): Promise<void>;
+  /** Only infrastructure callers supply failureCode; Agent business blocks are not technical alarms. */
+  executionFailure(taskId: string, reason: string, executionId?: string, retryable?: boolean, finalSummary?: unknown, failureCode?: string): Promise<void>;
   maintenance(): Promise<void>;
   reportResults(): Promise<void>;
 }

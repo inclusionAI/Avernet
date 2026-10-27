@@ -111,10 +111,14 @@ describe("monitoring automatic recovery", () => {
   });
 
   it("returns a retryable error only for allowed targets when the recovery service is unavailable", async () => {
+    const output = vi.spyOn(console, "info").mockImplementation(() => {});
     const { config } = setup();
     const trigger = createMonitoringRecoveryTrigger({ config, service: null });
     await trigger.trigger({ ...event, entityId: "another-owner" });
     await expect(trigger.trigger(event)).rejects.toMatchObject({ code: "NOT_READY" });
+    const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[workflow-background] ".length)));
+    expect(events.filter(event => event.event === "CREATE_FAILED")).toEqual([expect.objectContaining({
+      eventId: event.eventId, botId: "default", errorCode: "recovery_not_ready", count: 1 })]);
   });
 });
 

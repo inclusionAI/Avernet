@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { logWorkflowBackground, workflowBackgroundError } from "@avernet/clawweb-shared/server/services/workflow-background-log";
 import type { SessionRecoveryApi } from "../repair/session-recovery/contracts.js";
 import { SessionRecoveryError } from "../repair/session-recovery/errors.js";
 import { parseRequest } from "../repair/session-recovery/validation.js";
@@ -60,8 +61,10 @@ export function createMonitoringRecoveryTrigger(input: {
         if (!row || row.enabled === 0) return;
         if (row.enabled !== 1) throw new Error("Invalid recovery configuration state");
         allowed = parseAllowlist(JSON.parse(row.config_json));
-      } catch {
+      } catch (error) {
         console.error("[monitoring] recovery unavailable", { eventId: event.eventId, reason: "allowlist_unavailable" });
+        logWorkflowBackground("session_recovery_trigger", "configuration_unavailable", { eventId: event.eventId,
+          botId: event.botId, targetEnvironment: event.env, ...workflowBackgroundError(error) });
         throw new MonitoringError("NOT_READY", "自愈内测白名单暂不可用或格式无效。");
       }
       if (!allowed.some(entry => targetKey(entry) === targetKey(event))) return;
@@ -89,7 +92,11 @@ export function createMonitoringRecoveryTrigger(input: {
         console.warn("[monitoring] recovery skipped", { eventId: event.eventId, reason: "invalid_recovery_input" });
         return;
       }
-      if (!input.service) throw new MonitoringError("NOT_READY", "自愈服务尚未就绪。");
+      if (!input.service) {
+        logWorkflowBackground("session_recovery_task", "CREATE_FAILED", { eventId: event.eventId,
+          botId: event.botId, targetEnvironment: event.env, phase: "create", outcome: "failed", count: 1, errorCode: "recovery_not_ready" });
+        throw new MonitoringError("NOT_READY", "自愈服务尚未就绪。");
+      }
       try {
         await input.service.create(request, { userId: event.entityId, isAdmin: false });
       } catch (error) {

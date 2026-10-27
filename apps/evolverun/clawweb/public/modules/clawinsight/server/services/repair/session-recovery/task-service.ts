@@ -1,4 +1,6 @@
 import { resolveTaskControlPlaneEnvironment, type AgentControlPlaneEnvironment } from "../common/task-control-plane.js";
+import { logWorkflowBackground, workflowBackgroundError } from "@avernet/clawweb-shared/server/services/workflow-background-log";
+import { BotRuntimeError } from "@avernet/clawweb-shared/server/services/bot-runtime";
 import type { AgentRuntimeTargetSnapshot } from "../common/agent-tools/contracts.js";
 import { containsSecret } from "@avernet/clawweb-shared/server/services/redaction";
 import { createHash, randomUUID } from "node:crypto";
@@ -43,7 +45,17 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
 
   async create(raw: unknown, actor: RecoveryActor): Promise<RecoveryAcknowledgment & { task_id: string }> {
     const request = parseRequest(raw);
-    return this.createTask(request, actor, this.level(raw));
+    const level = this.level(raw);
+    try { return await this.createTask(request, actor, level); }
+    catch (error) {
+      if (!(error instanceof SessionRecoveryError || error instanceof BotRuntimeError) || error.status >= 500) {
+        logWorkflowBackground("session_recovery_task", level === "debug" ? "creation_failed" : "CREATE_FAILED", {
+          environment: this.deps.controlPlaneEnvironment, eventId: request.event_id, botId: request.target.bot_id,
+          targetEnvironment: request.target.env, phase: "create", outcome: "failed", ...(level !== "debug" ? { count: 1 } : {}),
+          ...workflowBackgroundError(error) });
+      }
+      throw error;
+    }
   }
 
   async createSimulations(raw: unknown, actor: RecoveryActor) {
@@ -83,8 +95,14 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       if (JSON.stringify(raced.request) !== JSON.stringify(request) || raced.simulation?.inputDigest !== simulation?.inputDigest) this.fail(409, "同一投递标识的请求内容不一致");
       return { event_id: request.event_id, delivery_key: request.delivery_key, status: "accepted", task_id: taskId };
     }
+    logWorkflowBackground("session_recovery_task", "created", { environment: this.deps.controlPlaneEnvironment,
+      taskId, eventId: request.event_id, botId: request.target.bot_id, targetEnvironment: request.target.env,
+      phase: task.phase, status: task.status });
     setImmediate(() => {
-      void this.start(task).catch(() => { console.error("[session-recovery] failed to persist startup result", taskId); });
+      void this.start(task).catch(error => {
+        logWorkflowBackground("session_recovery_task", "startup_result_failed", { environment: this.deps.controlPlaneEnvironment,
+          taskId, eventId: request.event_id, ...workflowBackgroundError(error) });
+      });
     });
     return { event_id: request.event_id, delivery_key: request.delivery_key, status: "accepted", task_id: taskId };
   }
@@ -94,10 +112,12 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     if (task.status !== "running" || !this.ownsTask(task)) return;
     try { await this.deps.agent.start(task); }
     catch (error) {
+      logWorkflowBackground("session_recovery_task", "startup_failed", { environment: this.deps.controlPlaneEnvironment,
+        taskId: task.taskId, phase: task.phase, executionId: task.execution?.executionId, ...workflowBackgroundError(error) });
       const latest = await this.required(task.taskId);
       // A stale dispatcher must not fail a replacement that another worker already owns.
       if (latest.execution?.executionId !== task.execution?.executionId || latest.executionRetry?.retryAt) throw error;
-      await this.executionFailure(task.taskId, "自愈 Agent 启动失败", task.execution?.executionId);
+      await this.executionFailure(task.taskId, "自愈 Agent 启动失败", task.execution?.executionId, false, undefined, "AGENT_START_FAILED");
     }
   }
 
@@ -342,7 +362,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     this.notifyGroup(task, "result");
   }
 
-  async executionFailure(taskId: string, reason: string, executionId?: string, retryable = false, finalSummary?: unknown): Promise<void> {
+  async executionFailure(taskId: string, reason: string, executionId?: string, retryable = false, finalSummary?: unknown, failureCode?: string): Promise<void> {
     const previous = await this.required(taskId);
     if (!this.ownsTask(previous) || previous.status !== "running" || (executionId && (previous.execution?.executionId !== executionId || previous.execution.state === "ended"))) return;
     const task = await this.mutate(taskId, previous.version, value => {
@@ -359,6 +379,15 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
         judgment: delay !== undefined ? value.judgment : this.failureJudgment(value, summary),
         timeline: [...value.timeline, this.event("execution", "service", summary, { execution_id: executionId, retryable, failures, retry_at_ms: delay !== undefined ? this.now() + delay : null })] };
     }, finalSummary);
+    const retrying = !!task.executionRetry?.retryAt;
+    logWorkflowBackground("session_recovery_task", retrying ? "retry_scheduled"
+      : failureCode && !task.simulation && task.level !== "debug" ? "EXECUTION_FAILED" : "execution_ended", {
+      environment: this.deps.controlPlaneEnvironment, taskId, eventId: task.request.event_id,
+      botId: task.request.target.bot_id, targetEnvironment: task.request.target.env, phase: task.phase, status: task.status,
+      executionId: task.execution?.executionId, jobId: task.execution?.jobId ?? undefined, attempt: task.executionNo ?? task.executionRetry?.failures,
+      ...(retrying ? { retryAtMs: task.executionRetry!.retryAt }
+        : failureCode && !task.simulation && task.level !== "debug" ? { count: 1 } : {}),
+      ...(failureCode ? { errorCode: failureCode } : {}), outcome: "failed" });
     await this.deps.agent.release(task);
     if (task.status === "failed") this.notifyGroup(task, "result");
   }
@@ -371,7 +400,13 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
   async maintenance(): Promise<void> {
     let cursor = "";
     for (;;) {
-      const batch = await this.deps.tasks.listForMaintenance?.(200, cursor) ?? [];
+      let batch: RecoveryStoredTask[];
+      try { batch = await this.deps.tasks.listForMaintenance?.(200, cursor) ?? []; }
+      catch (error) {
+        logWorkflowBackground("session_recovery_maintenance", "scan_failed", { environment: this.deps.controlPlaneEnvironment,
+          ...workflowBackgroundError(error) });
+        throw error;
+      }
       if (!batch.length) return;
       for (const task of batch) {
       cursor = task.taskId;
@@ -391,7 +426,10 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
         }
         if (task.status === "running" && (!task.execution || task.execution.state === "ended" || task.executionRetry?.retryAt)
           && (task.executionRetry?.retryAt ?? 0) <= this.now()) await this.start(task);
-      } catch { console.error("[session-recovery] maintenance failed", task.taskId); }
+      } catch (error) {
+        logWorkflowBackground("session_recovery_maintenance", "task_failed", { environment: this.deps.controlPlaneEnvironment,
+          taskId: task.taskId, phase: task.phase, executionId: task.execution?.executionId, ...workflowBackgroundError(error) });
+      }
       }
     }
   }
@@ -405,7 +443,10 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       if (result === false) return;
       sent = true;
     }
-    catch { console.error("[session-recovery] notification not confirmed", task.taskId, kind); }
+    catch (error) {
+      logWorkflowBackground("session_recovery_notification", "failed", { environment: this.deps.controlPlaneEnvironment,
+        taskId: task.taskId, operation: kind, ...workflowBackgroundError(error) });
+    }
     const current = await this.required(task.taskId);
     await this.mutate(task.taskId, current.version, value => ({ ...value, version: value.version + 1,
       timeline: [...value.timeline, this.event("notification", "service", sent ? "钉钉通知已发送" : "钉钉通知未确认，请在任务页面处理", { kind, sent })] }));
@@ -415,12 +456,17 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     const event = task.timeline.at(-1);
     if (!event) return;
     try { this.deps.actionNotifier?.after({ taskId: task.taskId, eventId: event.event_id, kind }); }
-    catch { console.error("[session-recovery] group notification hook failed", task.taskId, kind); }
+    catch (error) {
+      logWorkflowBackground("session_recovery_notification", "hook_failed", { environment: this.deps.controlPlaneEnvironment,
+        taskId: task.taskId, operation: kind, ...workflowBackgroundError(error) });
+    }
   }
 
   private async mutate(taskId: string, version: number, change: (value: RecoveryStoredTask) => RecoveryStoredTask, finalSummary?: unknown): Promise<RecoveryStoredTask> {
     for (let attempt = 0; attempt < 5; attempt++) {
+      let previous: Pick<RecoveryStoredTask, "status" | "phase"> | undefined;
       const updated = await this.deps.tasks.update(taskId, version, value => {
+        previous = { status: value.status, phase: value.phase };
         const changed = change(value);
         // Optional presentation metadata must never invalidate a valid business result.
         if (changed.status !== value.status && ["completed", "failed", "waiting_effect"].includes(changed.status)) {
@@ -433,7 +479,15 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
           ? [...value.pending_results, recoveryTaskResult(changed, changed.status === "canceled"
             ? [...changed.timeline].reverse().find(event => event.kind === "termination")?.summary : undefined)] : value.pending_results };
       });
-      if (updated) return updated;
+      if (updated) {
+        if (previous && (previous.status !== updated.status || previous.phase !== updated.phase)) {
+          logWorkflowBackground("session_recovery_task", "state_changed", { environment: this.deps.controlPlaneEnvironment,
+            taskId, eventId: updated.request.event_id, phase: updated.phase, status: updated.status,
+            executionId: updated.execution?.executionId, jobId: updated.execution?.jobId ?? undefined,
+            reason: updated.completionReason, stateVersion: updated.version });
+        }
+        return updated;
+      }
       version = (await this.required(taskId)).version;
     }
     this.fail(409, "任务已变化，请读取当前版本");

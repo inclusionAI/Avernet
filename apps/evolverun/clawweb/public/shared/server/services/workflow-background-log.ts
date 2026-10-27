@@ -11,10 +11,12 @@ export type WorkflowBackgroundFields = {
   policyCount?: number; enabledPolicyCount?: number; op?: string; reason?: string; environment?: string;
   operation?: string; revision?: number; attempt?: number; executionId?: string; jobId?: string;
   phase?: string; status?: string; errorCode?: string; spanId?: string; suppressed?: number; queueWaitMs?: number;
+  eventId?: string; botId?: string; targetEnvironment?: string; stepId?: string; toolCallId?: string; retryAtMs?: number; stateVersion?: number;
 };
 const allowed = new Set(['enabled', 'intervalMs', 'trigger', 'outcome', 'elapsedMs', 'runId', 'workflowId',
   'flowId', 'taskId', 'count', 'policyCount', 'enabledPolicyCount', 'op', 'reason', 'environment',
-  'operation', 'revision', 'attempt', 'executionId', 'jobId', 'phase', 'status', 'errorCode', 'spanId', 'suppressed', 'queueWaitMs']);
+  'operation', 'revision', 'attempt', 'executionId', 'jobId', 'phase', 'status', 'errorCode', 'spanId', 'suppressed', 'queueWaitMs',
+  'eventId', 'botId', 'targetEnvironment', 'stepId', 'toolCallId', 'retryAtMs', 'stateVersion']);
 const context = new AsyncLocalStorage<WorkflowBackgroundFields>();
 /** Retain a useful cause without serializing SQL, parameters, provider payloads or credentials. */
 export function workflowBackgroundError(error: unknown): Pick<WorkflowBackgroundFields, 'errorCode' | 'reason'> {

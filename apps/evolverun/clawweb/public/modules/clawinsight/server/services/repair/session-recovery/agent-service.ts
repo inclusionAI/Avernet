@@ -1,4 +1,5 @@
 import { resolveTaskControlPlaneEnvironment, type AgentControlPlaneEnvironment } from "../common/task-control-plane.js";
+import { logWorkflowBackground, workflowBackgroundError } from "@avernet/clawweb-shared/server/services/workflow-background-log";
 import { simulationReadTools, type RecoverySimulationAssessment } from "./simulation.js";
 import { assertActionScope, engineActionScope, recoveryActionOperations, validateRecoveryAction } from "./action-scope.js";
 import { comparableRequestPayload } from "../../../repositories/repair/agent-tool-call-record.js";
@@ -69,7 +70,11 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
         try {
           const remote = await this.deps.ais.getJobStatusDetail(task.execution.jobId);
           if (remote.status === "running" || remote.rawStatus === "notfound") return;
-        } catch { console.error("[session-recovery] previous AIS job state unavailable; retry remains pending", task.taskId); return; }
+        } catch (error) {
+          logWorkflowBackground("session_recovery_execution", "retry_status_unavailable", { environment: this.deps.controlPlaneEnvironment,
+            taskId: task.taskId, executionId: task.execution.executionId, jobId: task.execution.jobId, ...workflowBackgroundError(error) });
+          return;
+        }
       }
       if (!await this.settleInterruptedTools(task)) return;
     }
@@ -86,7 +91,12 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     if (!reserved) return; // Another dispatcher/decision owns the current state; never launch a second job.
     task = reserved;
     try { await createAgentExecutionStep(this.deps.repo, identity); }
-    catch (error) { await this.deps.business().executionFailure(task.taskId, "自愈执行登记失败", issued.execution.executionId); throw error; }
+    catch (error) {
+      logWorkflowBackground("session_recovery_execution", "registration_failed", { environment: this.deps.controlPlaneEnvironment,
+        taskId: task.taskId, executionId: issued.execution.executionId, stepId: contract.stepId, attempt: executionNo, ...workflowBackgroundError(error) });
+      await this.deps.business().executionFailure(task.taskId, "自愈执行登记失败", issued.execution.executionId, false, undefined, "EXECUTION_REGISTRATION_FAILED");
+      throw error;
+    }
     const beforeDispatch = await this.required(task.taskId);
     if (beforeDispatch.status === "canceled") {
       await this.stopTerminatedExecution(contract.stepId, null); return;
@@ -98,13 +108,24 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
         credentials: { executionTicket: issued.ticket } },
       runtime: { clawwebUrl: this.deps.publicBaseUrl, package: { packageId: this.deps.packageId ?? "clawevolve-session-recovery" }, llm: { max_tokens: 16384 } } };
     let jobId: string;
+    const dispatchStartedAt = this.now();
+    logWorkflowBackground("session_recovery_execution", "dispatching", { environment: this.deps.controlPlaneEnvironment,
+      taskId: task.taskId, eventId: task.request.event_id, executionId: issued.execution.executionId,
+      stepId: contract.stepId, attempt: executionNo, phase: task.phase });
     try { jobId = await this.deps.ais.execute(task.request.target.entity_id, { "${clawevolve_params}": JSON.stringify(envelope) }, this.deps.snapshotId); }
     catch (error) {
       const reason = redactPersistableText(error instanceof Error ? error.message : "未取得 AIS 派发回执", 1500);
-      await this.deps.business().executionFailure(task.taskId, `自愈 Agent 派发失败：${reason}`, issued.execution.executionId, true);
+      // Provider exceptions can contain complete response bodies; retain classification here, not the message.
+      logWorkflowBackground("session_recovery_execution", "dispatch_failed", { environment: this.deps.controlPlaneEnvironment,
+        taskId: task.taskId, executionId: issued.execution.executionId, stepId: contract.stepId, attempt: executionNo,
+        elapsedMs: this.now() - dispatchStartedAt, errorCode: workflowBackgroundError(error).errorCode });
+      await this.deps.business().executionFailure(task.taskId, `自愈 Agent 派发失败：${reason}`, issued.execution.executionId, true, undefined, "AIS_DISPATCH_FAILED");
       await this.deps.repo.updateStepStatus(contract.stepId, { status: "failed", errorCode: "AIS_DISPATCH_FAILED", errorMessage: reason, retryable: true });
       return;
     }
+    logWorkflowBackground("session_recovery_execution", "dispatched", { environment: this.deps.controlPlaneEnvironment,
+      taskId: task.taskId, eventId: task.request.event_id, executionId: issued.execution.executionId,
+      stepId: contract.stepId, jobId, attempt: executionNo, phase: task.phase, elapsedMs: this.now() - dispatchStartedAt });
     await this.deps.repo.markExternalDispatched(contract.stepId, jobId, { executionId: issued.execution.executionId, jobId });
     const latest = await this.required(task.taskId);
     if (latest.status === "canceled") { await this.stopTerminatedExecution(contract.stepId, jobId); return; }
@@ -189,6 +210,8 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     }
     await this.deps.repo.recordCancellationAttempt(stepId, { status,
       ...(status === "remote_stop_failed" ? { error: "AIS stopExecution failed" } : {}) });
+    if (status === "remote_stop_failed") logWorkflowBackground("session_recovery_execution", "stop_unconfirmed", {
+      environment: this.deps.controlPlaneEnvironment, taskId: step?.task_id, stepId, jobId, outcome: status });
     return { status, aisJobId: jobId };
   }
   private async settleInterruptedTools(task: RecoveryStoredTask): Promise<boolean> {
@@ -527,7 +550,9 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
         }
         const detail = redactPersistableText(report.errorMessage ?? report.summary ?? "未取得有效运行回报", 1500);
         const reason = redactPersistableText(`自愈 AIS 执行中断${task.execution!.jobId ? `（作业 ${task.execution!.jobId}）` : ""}${report.errorCode ? ` [${report.errorCode}]` : ""}：${detail}`, 2000);
-        await this.deps.business().executionFailure(task.taskId, reason, task.execution!.executionId, report.retryable !== false);
+        const failureCode = typeof report.errorCode === "string" && /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(report.errorCode)
+          ? report.errorCode : "AIS_EXECUTION_FAILED";
+        await this.deps.business().executionFailure(task.taskId, reason, task.execution!.executionId, report.retryable !== false, undefined, failureCode);
       }
       else await this.release(task);
     }
@@ -573,6 +598,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     if (!claimed) fail(409, "工具调用已被领取");
     let dispatched = false;
     let result: unknown, status: "succeeded" | "failed" | "unknown" = "succeeded";
+    let failure: ReturnType<typeof workflowBackgroundError> | undefined;
     try {
       const current = await this.required(task.taskId);
       if (current.status === "canceled" || current.execution?.executionId !== execution.executionId || current.execution.state === "ended") fail(409, "执行授权已变化");
@@ -580,6 +606,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       if ((result as Record<string, unknown>)?.status === "failed") status = "failed";
       else if ((result as Record<string, unknown>)?.status === "unknown") status = "unknown";
     } catch (error) {
+      failure = workflowBackgroundError(error);
       status = write && dispatched ? "unknown" : "failed";
       result = { dispatched, error: error instanceof SessionRecoveryError || error instanceof BotRuntimeError || error instanceof AgentToolError ? { code: error.code, message: redactPersistableText(error.message, 1000) }
         : { code: "controlled_operation_unconfirmed", message: "受控操作未确认，需核对现场与审计" } };
@@ -589,10 +616,16 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       await this.deps.audit.completeToolCall({ callId: call.callId, executionId: execution.executionId, authorizationScopeDigest: scope,
         status, leaseOwner, result });
     } catch (error) {
+      logWorkflowBackground("session_recovery_tool", "receipt_failed", { environment: this.deps.controlPlaneEnvironment,
+        taskId: task.taskId, executionId: execution.executionId, toolCallId: call.callId, operation: name, outcome: status,
+        ...workflowBackgroundError(error) });
       const current = await this.required(task.taskId), settled = await this.deps.audit.findToolCall(call.callId);
       if (current.status !== "canceled" || !settled || ["pending", "executing"].includes(settled.status)) throw error;
       return { toolCallId: settled.callId, status: settled.status, result: settled.result };
     }
+    if (write || status !== "succeeded") logWorkflowBackground("session_recovery_tool", "tool_settled", {
+      environment: this.deps.controlPlaneEnvironment, taskId: task.taskId, executionId: execution.executionId,
+      toolCallId: call.callId, operation: name, phase: task.phase, outcome: status, ...failure });
     const evidenceId = await this.recordToolEvidence(task.taskId, call.callId, name, body, status, result);
     return { toolCallId: call.callId, status, result, evidenceId };
   }
@@ -607,7 +640,10 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       delivery: initialDelivery, observationDeadlineAt: initialDelivery.delivery.finished_at_ms + this.deps.observationMs }));
     if (name === "retry_message" && receipt.dry_run !== true) {
       try { this.deps.actionNotifier?.after({ taskId, eventId: callId, kind: "message" }); }
-      catch { console.error("[session-recovery] group notification hook failed", taskId, "message"); }
+      catch (error) {
+        logWorkflowBackground("session_recovery_notification", "hook_failed", { environment: this.deps.controlPlaneEnvironment,
+          taskId, toolCallId: callId, operation: "message", ...workflowBackgroundError(error) });
+      }
     }
     return evidenceId;
   }

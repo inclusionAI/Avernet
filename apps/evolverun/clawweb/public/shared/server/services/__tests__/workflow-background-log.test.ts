@@ -66,3 +66,14 @@ it('never changes business execution when the logging sink throws', () => {
     end('failed');
   }).not.toThrow();
 });
+
+it('retains recovery correlation metadata without introducing another logging format', () => {
+  const output = vi.spyOn(console, 'info').mockImplementation(() => {});
+  logWorkflowBackground('session_recovery_task', 'CREATE_FAILED', {
+    environment: 'pre', targetEnvironment: 'prod', eventId: 'diagnosis-1', botId: 'default', count: 1,
+  });
+  expect(JSON.parse(String(output.mock.calls[0][0]).slice('[workflow-background] '.length))).toMatchObject({
+    job: 'session_recovery_task', event: 'CREATE_FAILED', eventId: 'diagnosis-1', botId: 'default',
+    environment: 'pre', targetEnvironment: 'prod', count: 1,
+  });
+});
