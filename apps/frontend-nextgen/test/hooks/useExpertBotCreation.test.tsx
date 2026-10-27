@@ -15,6 +15,7 @@ const template: AgentCodingTemplate = {
   templateType: 'architect', source: 'official', fields: [], config: {},
   raw: { afterCreate: ['architect_name'] }, capabilityTags: [],
 };
+const dimaTemplate: AgentCodingTemplate = { ...template, raw: {}, config: { capabilities: { dima_workspace: true } } };
 const input: BotCreateInput = {
   scenario: 'cloud', name: '专家架构 Bot', description: '设计架构', engine: 'aicoding',
   spaceId: '10', ownership: 'personal', serviceMode: 'non-service', initialize: true,
@@ -54,7 +55,7 @@ test('授权完成后只初始化原 Bot 一次，并保留提交时的 DIMA/托
     return { code: 200000, data: {} };
   });
   const dimaInput: BotCreateInput = { ...input, agentCoding: {
-    kind: 'template', template: { ...template, raw: {}, config: { capabilities: { dima_workspace: true } } },
+    kind: 'template', template: dimaTemplate,
     values: { is_hosted_24x7: true },
   } };
   const { result, rerender } = renderHook(() => useExpertBotCreation(true));
@@ -111,7 +112,7 @@ test('关闭重开时，旧模板初始化完成不会把新 Bot 头像写给旧
   const { result, rerender } = renderHook(({ open }) => useExpertBotCreation(open), { initialProps: { open: true } });
   await act(async () => result.current.submit('architect', {
     ...input, avatarUrl: 'avatar-first', agentCoding: {
-      kind: 'template', template: { ...template, raw: {}, config: { capabilities: { dima_workspace: true } } }, values: {},
+      kind: 'template', template: dimaTemplate, values: {},
     },
   }));
   await waitFor(() => expect(result.current.initializing).toBe(true));

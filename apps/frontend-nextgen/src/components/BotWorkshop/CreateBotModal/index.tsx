@@ -80,7 +80,7 @@ const CreateBotModal: React.FC<CreateBotModalProps> = ({
       onExpertCreated?.();
     }
   }, [expertCreation.status, onExpertCreated]);
-  const busy = creating || expertCreation.submitting;
+  const busy = creating || expertCreation.submitting || expertCreation.initializationPending;
   const selectExpert = (next: ExpertSummary) => {
     setValues((current) => ({
       ...current,
@@ -182,6 +182,7 @@ const CreateBotModal: React.FC<CreateBotModalProps> = ({
     <Modal open={open} onOpenChange={(nextOpen) => !nextOpen && !busy && onClose()}>
       <ModalContent
         size="lg"
+        showClose={!expertCreation.initializationPending}
         aria-describedby="create-bot-description"
         className="overlay-scrollbar max-h-[calc(100vh-3rem)] max-w-[710px] overscroll-y-none p-4"
       >
@@ -208,6 +209,7 @@ const CreateBotModal: React.FC<CreateBotModalProps> = ({
               status={expertCreation.status}
               error={expertCreation.error}
               initializing={expertCreation.initializing}
+              initializationPending={expertCreation.initializationPending}
               afterCreateError={expertCreation.afterCreateError}
               unknown={expertCreation.unknown}
               input={values}

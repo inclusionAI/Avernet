@@ -1,7 +1,7 @@
 import type { BotCreateInput } from '@/services/botWorkshop';
 import { botAvatarService } from '@/services/botWorkshop/botAvatarService';
 import { toBotCreateRequest } from '@/services/botWorkshop/botCreatePolicy';
-import { runAfterCreateActions } from '@/services/botWorkshop/agentCodingAfterCreateService';
+import { resolveAfterCreateActions, runAfterCreateActions } from '@/services/botWorkshop/agentCodingAfterCreateService';
 import type { AgentCodingTemplate } from '@/services/botWorkshop/agentCodingTemplateService';
 import { mapBotDto } from '@/services/botWorkshop/botMapper';
 import {
@@ -23,6 +23,7 @@ export function useExpertBotCreation(open: boolean) {
   const [submitting, setSubmitting] = useState(false);
   const [unknown, setUnknown] = useState(false);
   const [initializing, setInitializing] = useState(false);
+  const [initializationPending, setInitializationPending] = useState(false);
   const [afterCreateError, setAfterCreateError] = useState<string>();
   const locked = useRef(false);
   const avatar = useRef<string>();
@@ -36,6 +37,7 @@ export function useExpertBotCreation(open: boolean) {
     setUnknown(false);
     setSubmitting(false);
     setInitializing(false);
+    setInitializationPending(false);
     setAfterCreateError(undefined);
     submitted.current = undefined;
     afterCreateStartedFor.current = undefined;
@@ -80,6 +82,7 @@ export function useExpertBotCreation(open: boolean) {
               if (active) setError('Bot 已创建，但头像保存失败，可在 Bot 管理中修改头像。');
             }
           }
+          if (active) setInitializationPending(false);
           return;
         }
       } catch (failure) {
@@ -101,11 +104,14 @@ export function useExpertBotCreation(open: boolean) {
     submitting,
     unknown,
     initializing,
+    initializationPending,
     afterCreateError,
     locked: submitting || Boolean(accepted) || unknown,
     async submit(expertId: string, input: BotCreateInput) {
       if (locked.current) return;
       const body = toBotCreateRequest(input);
+      const template = input.agentCoding?.template as AgentCodingTemplate | undefined;
+      const needsInitialization = Boolean(template && resolveAfterCreateActions(template).length);
       submitted.current = input;
       avatar.current = input.avatarUrl;
       locked.current = true;
@@ -114,6 +120,7 @@ export function useExpertBotCreation(open: boolean) {
       try {
         const result = await createExpertBot(expertId, body);
         if (!result.bot_id) throw new Error('创建响应缺少任务编号');
+        setInitializationPending(needsInitialization);
         setAccepted(result);
       } catch (failure) {
         // 明确的请求校验拒绝允许用户修正；连接中断/5xx/无句柄不能推断未创建。

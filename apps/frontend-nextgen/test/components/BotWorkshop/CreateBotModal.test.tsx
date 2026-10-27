@@ -62,6 +62,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  jest.useRealTimers();
   // 注入过 overlay 引擎清单的用例退出时还原 Open 默认，避免污染同文件后续用例。
   extendCapabilities({ getBotEngineOptions: defaultCapabilities.getBotEngineOptions });
 });
@@ -552,4 +553,47 @@ test('专家创建的模板初始化失败与 Manifest 完成分开展示', asyn
   await screen.findByText('Bot 已创建，但模板初始化未完成：架构域写入失败');
   expect(screen.getByText('Bot 创建及配置已完成')).toBeInTheDocument();
   expect(ordinaryCreate).not.toHaveBeenCalled();
+});
+
+test('已受理的模板初始化完成前禁止退出，失败结果可见后才允许离开', async () => {
+  jest.useFakeTimers();
+  let ready = false;
+  let failInitialization!: (error: Error) => void;
+  const initialization = new Promise<never>((_, reject) => { failInitialization = reject; });
+  extendCapabilities({ getBotEngineOptions: () => ({ status: 'available', value: [
+    { value: 'openclaw', label: 'OpenClaw' }, { value: 'aicoding', label: 'AgentCoding', createPanel: 'agent-coding' },
+  ] }) });
+  templateList.mockResolvedValue([{ ...makeTemplate(), config: { architect_name: '业务域' }, raw: { afterCreate: ['architect_name'] } }]);
+  jest.mocked(backendRequest).mockImplementation(async (path) => {
+    if (path.endsWith('/experts/product-manager/bots')) return { code: 200000, data: { bot_id: 'pending-init' } };
+    if (path.endsWith('/with-manifest/status')) return { code: 200000, data: {
+      bot_id: 'pending-init', state: ready ? 'READY' : 'CREATING',
+      ...(ready ? { bot: { bot_id: 'pending-init', owner_id: '001' } } : {}),
+    } };
+    if (path.endsWith('/ext')) return initialization;
+    return { code: 200000, data: {} };
+  });
+  const onClose = jest.fn();
+  render(<CreateBotModal scenario="cloud" expert={identityExpert} spaces={[
+    { id: '10', name: '个人空间', ownership: 'personal', canCreate: true },
+  ]} creating={false} onClose={onClose} onSubmit={jest.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: 'AgentCoding' }));
+  fireEvent.click(await screen.findByRole('button', { name: /架构 Bot/ }));
+  fireEvent.click(screen.getByRole('button', { name: '创建云端 Bot' }));
+  await screen.findByText('正在创建 Bot');
+  expect(screen.getByRole('button', { name: '留在当前页面' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '前往 Bot 列表' })).toBeDisabled();
+  expect(screen.queryByRole('button', { name: '关闭弹窗' })).not.toBeInTheDocument();
+  fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+  expect(onClose).not.toHaveBeenCalled();
+  ready = true;
+  await act(async () => { jest.advanceTimersByTime(2000); });
+  await screen.findByText('Bot 已创建，正在执行模板初始化…');
+  expect(screen.getByRole('button', { name: '前往 Bot 列表' })).toBeDisabled();
+  await act(async () => { failInitialization(new Error('初始化依赖不可用')); });
+  await screen.findByText('Bot 已创建，但模板初始化未完成：初始化依赖不可用');
+  expect(screen.getByRole('button', { name: '前往 Bot 列表' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: '留在当前页面' }));
+  expect(onClose).toHaveBeenCalledTimes(1);
+  jest.useRealTimers();
 });

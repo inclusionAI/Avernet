@@ -20,6 +20,7 @@ export function ExpertCreationResult({
   status,
   error,
   initializing,
+  initializationPending,
   afterCreateError,
   unknown,
   input,
@@ -29,6 +30,7 @@ export function ExpertCreationResult({
   status?: ExpertBotCreationStatus;
   error?: string;
   initializing?: boolean;
+  initializationPending?: boolean;
   afterCreateError?: string;
   unknown: boolean;
   input: BotCreateInput;
@@ -58,6 +60,7 @@ export function ExpertCreationResult({
       )}
       {status?.message && <p className="whitespace-pre-wrap text-sm">{status.message}</p>}
       {initializing && <p role="status">Bot 已创建，正在执行模板初始化…</p>}
+      {initializationPending && <p className="text-sm text-muted-foreground">正在完成模板创建，请稍候…</p>}
       {afterCreateError && <p role="alert" className="text-sm text-destructive">Bot 已创建，但模板初始化未完成：{afterCreateError}</p>}
       {error && (
         <p role="alert" className="text-sm text-destructive">
@@ -66,10 +69,10 @@ export function ExpertCreationResult({
       )}
       {botId && <p className="text-xs text-muted-foreground">Bot：{botId}</p>}
       <div className="flex gap-2">
-        <Button type="button" variant="secondary" onClick={onClose}>
+        <Button type="button" variant="secondary" disabled={initializationPending} onClick={onClose}>
           留在当前页面
         </Button>
-        <Button type="button" onClick={locate}>
+        <Button type="button" disabled={initializationPending} onClick={locate}>
           前往 Bot 列表
         </Button>
       </div>
