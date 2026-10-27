@@ -33,6 +33,7 @@ consumed_by:
   - "core.skill_center.services.git_sync — existing synchronization lifecycle"
   - "adapters.http.openapi_v1.experts — authenticated discovery DTOs"
 internal_dependencies:
+  - agentclaw.community.core.apply_engine  # the capability resolution and the CLI-tool verifier a template is checked against
   - agentclaw.community.core.base
   - agentclaw.community.core.repository
   - agentclaw.community.core.bot_config_manifest

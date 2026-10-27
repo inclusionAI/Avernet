@@ -10,11 +10,11 @@ from typing import Any
 
 import yaml
 
-from agentclaw.community.core.bot_config_manifest.capabilities import (
+from agentclaw.community.core.apply_engine.capabilities import (
     resolve_capabilities,
 )
 from agentclaw.community.core.bot_config_manifest.schema import validate_document
-from agentclaw.community.core.bot_config_manifest.cli_tools.verify import (
+from agentclaw.community.core.apply_engine.cli_tools.verify import (
     verify_amd64_elf,
 )
 from agentclaw.community.core.expert_market.models import ExpertScope, ScanResult
