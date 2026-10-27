@@ -45,6 +45,8 @@ export interface ChatBotView {
   actions?: string[];
   disabledActions?: Record<string, string>;
   botType?: string;
+  /** 服务 Bot 是否有可用的 online 发布；旧接口缺省不触发禁用。 */
+  onlineAvailable?: boolean | null;
   /** Inventory-backed lifecycle for service engine checks; request stage is not lifecycle proof. */
   serviceLifecycle?: BotLifecycle;
   isAgentCodingBot?: boolean;

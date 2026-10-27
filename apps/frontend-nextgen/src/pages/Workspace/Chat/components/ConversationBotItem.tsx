@@ -97,8 +97,8 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
   const isAgentCodingBot = Boolean(bot.isAgentCodingBot);
   const hasSessionControls = !isAgentCodingBot && bot.chatable;
   const interactive = isAgentCodingBot || bot.chatable;
-  // Bot 可用状态(bots 接口 status):FAILED/PENDING 整行禁用并悬停提示原因(判定与文案见包装器)。
-  const { reason: statusUnavailableReason, unavailable } = resolveBotUnavailable(bot.status);
+  // Bot 状态异常或好友服务 Bot 无 online 发布时，整行禁用并悬停提示原因。
+  const { reason: unavailableReason, unavailable } = resolveBotUnavailable(bot, section);
   const canFavorite = supportsBotSessionFavorites(bot.engine);
   // 筛选/搜索的激活与可见:归属 others 或 favorite 范围点亮筛选;归属+范围筛选对管理 Bot 开放,
   // 好友 Bot 仅在有收藏能力时暴露「会话」范围(TEClaw 无收藏接口,不发收藏请求)。
@@ -254,7 +254,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
   return (
     <div>
       {/* 不可用 Bot 整行悬停提示原因(可用时包装器原样透传,不挂 Tooltip)。 */}
-      <ConversationBotUnavailableTooltip reason={statusUnavailableReason}>{row}</ConversationBotUnavailableTooltip>
+      <ConversationBotUnavailableTooltip reason={unavailableReason}>{row}</ConversationBotUnavailableTooltip>
       {expanded && hasSessionControls && !unavailable && (
         // 展开区不再整体缩进:session 行(dmore 平齐化 1:1)自带全宽行槽,交互热区在行内部分级。
         // 首帧 2px 下落淡入(2026-10-22 体验精修二轮):展开是「自 Bot 行生长出来」,
