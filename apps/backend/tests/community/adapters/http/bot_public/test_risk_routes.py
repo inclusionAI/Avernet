@@ -435,3 +435,46 @@ async def test_openapi_refresh_keeps_event_loop_responsive(monkeypatch):
     )
     result = await task
     assert result.data.outcome == "NOT_QUERIED"
+
+
+def test_risk_openapi_requires_verified_actor_even_when_user_bypass_enabled():
+    from agentclaw.community.adapters.http.openapi_v1.principal import resolve_user_id_bypass
+    client, repo, tasks = client_for(user='attacker')
+    client.app.dependency_overrides[resolve_user_id_bypass] = lambda: frozenset({'u1'})
+    base = '/openapi/v1/collaboration/bots/default:entity/public/risk-checks'
+    body = {'client_request_id': 'r1', 'public_scope': 'user', 'visibility': 'public'}
+    responses = [client.post(base + '?user_id=u1', json=body),
+                 client.get(base + '/current?user_id=u1&public_scope=user'),
+                 client.get(base + '/risk-1?user_id=u1'),
+                 client.post(base + '/risk-1/refresh?user_id=u1')]
+    assert [r.status_code for r in responses] == [403, 403, 403, 403]
+    assert repo.row is None and tasks.polls == 0
+
+
+def test_bypass_does_not_change_correct_applicant_identity():
+    from agentclaw.community.adapters.http.openapi_v1.principal import resolve_user_id_bypass
+    client, repo, _ = client_for(user='u1')
+    client.app.dependency_overrides[resolve_user_id_bypass] = lambda: frozenset({'u1'})
+    base = '/openapi/v1/collaboration/bots/default:entity/public/risk-checks'
+    result = client.post(base + '?user_id=u1', json={'client_request_id': 'r1', 'public_scope': 'user', 'visibility': 'public'})
+    assert result.status_code == 202
+    assert repo.row.operator_id == 'u1' and repo.row.client_scope == 'openapi:u1'
+
+
+def test_risk_rejects_application_without_human_subject():
+    from agentclaw.community.core.gateway_principal import AppPrincipal, GatewayApp
+    client, repo, tasks = client_for(user='u1')
+    app = GatewayApp(app_id=5, app_name='integration', owners='u1', tenant='teamclaw')
+    client.app.dependency_overrides[require_principal] = lambda: VerifiedCaller(
+        principals=(AppPrincipal(tenant='teamclaw', app=app),))
+    base = '/openapi/v1/collaboration/bots/default:entity/public/risk-checks'
+    response = client.post(base + '?user_id=u1', json={'client_request_id': 'r1', 'public_scope': 'user', 'visibility': 'public'})
+    assert response.status_code == 403
+    assert repo.row is None and tasks.polls == 0
+
+
+def test_other_openapi_user_id_bypass_contract_remains_available():
+    import asyncio
+    from agentclaw.community.adapters.http.openapi_v1.principal import require_user_id
+    principal = VerifiedCaller(principals=(UserPrincipal(subject=GatewayUser(id='real', username='real')),))
+    assert asyncio.run(require_user_id(principal, 'u1', frozenset({'u1'}))) == 'u1'

@@ -23,7 +23,10 @@ from agentclaw.community.adapters.http.bot_public.schemas_risk import (
 from agentclaw.community.adapters.http.bot_public.schemas import ApiResponse
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 from agentclaw.community.adapters.http.openapi_v1.contracts import BotIdPath, Envelope
-from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
+from agentclaw.community.adapters.http.openapi_v1.principal import (
+    UserIdDep, caller_names_a_user, caller_owner_id,
+)
+from agentclaw.community.adapters.http.openapi_v1.dependencies import Principal, require_principal
 from agentclaw.community.adapters.http.openapi_v1.responses import accepted, envelope
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
@@ -43,6 +46,16 @@ openapi_router = APIRouter(
     tags=["collaboration-bot-risk"],
     route_class=PublicAPIRoute,
 )
+
+
+async def require_risk_actor(
+    user_id: UserIdDep,
+    principal: Annotated[Principal, Depends(require_principal)],
+) -> str:
+    """Risk applications must use the authenticated person's actual identity."""
+    if not caller_names_a_user(principal) or caller_owner_id(principal) != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return user_id
 
 
 async def _authorize(bots, collaborators, *, bot_id, actor_id, surface, owner_id=None):
@@ -109,6 +122,7 @@ async def _record(query, bot, risk_check_id):
 @openapi_router.post(
     "/{bot_id}/public/risk-checks",
     response_model=Envelope[RiskRecordResponse],
+    dependencies=[Depends(require_risk_actor)],
     status_code=202,
 )
 async def create_openapi(
@@ -143,7 +157,8 @@ async def create_openapi(
 
 
 @openapi_router.get(
-    "/{bot_id}/public/risk-checks/current", response_model=Envelope[RiskRecordResponse]
+    "/{bot_id}/public/risk-checks/current", response_model=Envelope[RiskRecordResponse],
+    dependencies=[Depends(require_risk_actor)],
 )
 async def current_openapi(
     bot_id: BotIdPath,
@@ -168,6 +183,7 @@ async def current_openapi(
 @openapi_router.get(
     "/{bot_id}/public/risk-checks/{risk_check_id}",
     response_model=Envelope[RiskRecordResponse],
+    dependencies=[Depends(require_risk_actor)],
 )
 async def get_openapi(
     bot_id: BotIdPath,
@@ -187,6 +203,7 @@ async def get_openapi(
 @openapi_router.post(
     "/{bot_id}/public/risk-checks/{risk_check_id}/refresh",
     response_model=Envelope[RiskRefreshResponse],
+    dependencies=[Depends(require_risk_actor)],
 )
 async def refresh_openapi(
     bot_id: BotIdPath,
