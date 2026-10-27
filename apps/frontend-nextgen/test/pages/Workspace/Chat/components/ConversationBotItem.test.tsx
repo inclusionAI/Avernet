@@ -591,22 +591,23 @@ describe('ConversationBotItem 行徽标', () => {
   });
 
   it.each([
-    ['openclaw', 'OpenClaw', 'text-primary'],
-    ['teclaw', 'TEClaw', 'text-success'],
-    ['claude_code', 'ClaudeCode', 'text-purple'],
-  ] as const)('引擎 %s 徽章着色与 Bot 管理一致（%s）', (engine, label, toneClass) => {
+    ['openclaw', 'OpenClaw'],
+    ['teclaw', 'TEClaw'],
+    ['claude_code', 'ClaudeCode'],
+    ['hermes', 'Hermes'],
+  ] as const)('引擎 %s 徽章与 Bot 管理同源：统一默认中性底', (engine, label) => {
     renderBadgeRow({ engine });
-    expect(screen.getByText(label)).toHaveClass(toneClass);
+    expect(screen.getByText(label)).toHaveClass('bg-muted', 'text-muted-foreground');
   });
 
-  it('AgentCoding 模板徽章保持模板名标签，但色彩取引擎规则（ClaudeCode 模板=紫）', () => {
+  it('AgentCoding 模板徽章保持模板名标签，色彩同样取默认中性底', () => {
     renderBadgeRow({ isAgentCodingBot: true, chatable: false, engine: 'claude_code', templateName: 'Coding Bot' });
     // 标签口径不变（模板名优先），颜色与 Bot 管理「标签」列同源。
-    expect(screen.getByText('Coding Bot')).toHaveClass('text-purple');
+    expect(screen.getByText('Coding Bot')).toHaveClass('bg-muted', 'text-muted-foreground');
   });
 
-  it('未知引擎徽章回退中性色（不给未识别 Bot 涂装误导色）', () => {
+  it('未知引擎徽章同为中性色（不给未识别 Bot 涂装误导色）', () => {
     renderBadgeRow({ engine: 'unknown_engine' });
-    expect(screen.getByText('unknown_engine')).toHaveClass('text-muted-foreground');
+    expect(screen.getByText('unknown_engine')).toHaveClass('bg-muted', 'text-muted-foreground');
   });
 });
