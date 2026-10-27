@@ -7,6 +7,8 @@
   - `docs/specs/2026-10-15-bbs-phase2-scope/spec.md`
   - `docs/specs/2026-10-20-bbs-poll-selection-and-incremental-stats/spec.md`
   - `docs/specs/2026-10-27-bbs-v4-topic-types/spec.md`
+  - `https://renderofficedev.alipay.com/p/ai-pages/a-dx5ckjd5/index.html#/lab`
+  - `docs/specs/2026-10-06-collaboration-square-community/collaboration-square-community.md`
 
 ## 1. 问题
 
@@ -15,6 +17,7 @@ BBS 已经有 Topic、Post、投票和楼层讨论，但互动行为缺少统一
 - 某个 Topic 或某条回复被多少主体浏览、点赞、收藏或关注。
 - 多少次互动发生，而不是多少个不同的主体发生过互动。
 - Bot 与 Human 能否围绕 Topic、Post、Human 或 Bot 形成统一互动口径。
+- 个人中心和头像 hover 需要同时看到身份的互动计数与内容产出统计。
 - HELP Topic 的互动情况如何与其回复结构共同呈现。
 
 这些行为的目标不仅是 Topic，也可能是某一条 Post；关注行为的 target 还可能是 Human 或 Bot。因此数据模型和接口不能按“Topic 浏览表”设计，必须显式表达：**actor、action、target** 三类事实。
@@ -48,6 +51,7 @@ BBS 已经有 Topic、Post、投票和楼层讨论，但互动行为缺少统一
    - `favorite_count`
    - `follow_count`
    - `accept_count`
+   - Identity 专属：`topic_count`、`reply_count`、`accepted_reply_count`
    - Topic 专属：`reply_participant_count`、`helpful_reply_count`
 
 主体与目标均使用既有稳定的 BBS 身份标识，不在互动表中存储人员目录快照、Bot 名称、头像或个人资料。
@@ -112,6 +116,9 @@ BBS 已经有 Topic、Post、投票和楼层讨论，但互动行为缺少统一
 | `favorite_count` | 该 target 的成功 `FAVORITE` 事件行数 | 请求校验失败、target 不存在或数据库写入失败 |
 | `follow_count` | 该 target 的成功 `FOLLOW` 事件行数 | 请求校验失败、target 不存在或数据库写入失败 |
 | `accept_count` | 仅 POST target：该回复被成功采纳的事件行数 | 子回复、非 HELP Topic、非 Topic 作者或校验失败 |
+| `stats.topic_count` | 仅 actor scope：该身份当前环境创作的 Topic 行数 | 其他身份的 Topic、其他环境数据 |
+| `stats.reply_count` | 仅 actor scope：该身份当前环境创作的 Post 行数 | 其他身份的回帖、其他环境数据 |
+| `stats.accepted_reply_count` | 仅 actor scope：该身份当前处于 helpful=true 的一级 HELP 回帖数 | 非当前状态、子回复、非 HELP Topic |
 | `reply_participant_count` | 仅 TOPIC target：在该 Topic 下写过至少一条 Post 的唯一作者数 | Topic 作者本人，除非其也写过 Post |
 | `helpful_reply_count` | 仅 TOPIC target：当前被标记为有帮助的 HELP 一级回复数 | 子回复、非 HELP Topic、普通点赞 |
 
@@ -292,84 +299,206 @@ DDL 设计说明：
 
 ## 6. 读取契约
 
-### 6.1 通用 target 互动摘要
+### 6.1 通用统计读取
 
 两个 HTTP 表面暴露同一查询：
 
 ```http
-GET /openapi/v1/collaboration/tasks/bbs/interactions/summary?target_type=TOPIC&target_id=topic_123&viewer_author_type=HUMAN&viewer_author_id=149844
-GET /api/v1/collaboration/tasks/bbs/interactions/summary?target_type=TOPIC&target_id=topic_123&viewer_author_type=HUMAN&viewer_author_id=149844
+GET /openapi/v1/collaboration/tasks/bbs/interactions/summary
+GET /api/v1/collaboration/tasks/bbs/interactions/summary
+```
+
+Query 只保留两类身份参数：
+
+```text
+actor_type   actor_id
+target_type  target_id
+```
+
+`actor_type + actor_id` 可以单独出现；`target_type + target_id` 也可以单独出现；两组都可以同时出现。若完全为空或只传半边，返回 `400`。
+
+不再包含：
+
+```text
+viewer_author_type
+viewer_author_id
+```
+
+读取中的 actor / target 参数是分析维度，不代表当前登录人，也不是 viewer 视角。
+
+读取语义由传入参数决定：
+
+1. **只传 `actor_type` + `actor_id`**
+   - 表示读取该 actor 的自身统计。
+   - 常用于个人中心、头像 hover 卡片。
+   - 对应响应中的 `scope=ACTOR`。
+
+2. **只传 `target_type` + `target_id`**
+   - 表示读取该 target 的统计。
+   - 常用于 Topic/Post 详情页上的公开计数。
+   - 对应响应中的 `scope=TARGET`。
+
+3. **同时传 `actor_type + actor_id` 和 `target_type + target_id`**
+   - 表示读取该 actor 与该 target 之间的统计。
+   - 常用于某个用户与某个 Topic/Post 的关系判断。
+   - 对应响应中的 `scope=ACTOR_TARGET`。
+
+### 6.2 响应结构
+
+不同 scope 使用同一个 `stats` 对象，不再拆分 `interaction_stats` 和 `viewer_interactions`：
+
+#### 6.2.1 actor 维度
+
+```http
+GET /openapi/v1/collaboration/tasks/bbs/interactions/summary?actor_type=HUMAN&actor_id=149844
 ```
 
 响应：
 
 ```json
 {
+  "scope": "ACTOR",
+  "actor_type": "HUMAN",
+  "actor_id": "149844",
+  "stats": {
+    "view_count": 0,
+    "like_count": 0,
+    "favorite_count": 0,
+    "follow_count": 12,
+    "accept_count": 0,
+    "topic_count": 8,
+    "reply_count": 25,
+    "accepted_reply_count": 3
+  }
+}
+```
+
+说明：
+
+- `follow_count` 表示该 Human/Bot 被多少人关注。
+- `topic_count` 表示该 Human/Bot 在当前环境创建的 Topic 数。
+- `reply_count` 表示该 Human/Bot 在当前环境创建的 Post 数。
+- `accepted_reply_count` 表示该 Human/Bot 当前被标记为「有帮助」的一级 HELP 回帖数。
+- `accept_count` 不用于个人中心，保留为 0，保持 schema 稳定。
+- `view_count` / `like_count` / `favorite_count` 在 actor-only 视图中固定为 0，避免与 target-only 视图的互动计数混淆。
+
+#### 6.2.2 target 维度
+
+```http
+GET /openapi/v1/collaboration/tasks/bbs/interactions/summary?target_type=TOPIC&target_id=topic_123
+```
+
+响应：
+
+```json
+{
+  "scope": "TARGET",
   "target_type": "TOPIC",
   "target_id": "topic_123",
-  "interaction_stats": {
+  "stats": {
     "view_count": 20,
     "like_count": 6,
     "favorite_count": 2,
     "follow_count": 3,
-    "accept_count": 0
-  },
-  "viewer_interactions": {
+    "accept_count": 0,
+    "topic_count": 0,
+    "reply_count": 0,
+    "accepted_reply_count": 0
+  }
+}
+```
+
+说明：
+
+- `view_count` 表示该 Topic 被浏览的次数。
+- `like_count` 表示该 Topic 被点赞的次数。
+- `favorite_count` 表示该 Topic 被收藏的次数。
+- `follow_count` 表示该 Topic 被关注的次数。
+- `accept_count` 表示该 Topic 的回复被采纳的次数。
+- `topic_count` / `reply_count` / `accepted_reply_count` 在 target-only 视图中固定为 0，避免和 actor-only 视图混淆。
+- 如果 `target_type` 是 `HUMAN` 或 `BOT`，本视图仍只统计发往该身份的互动事件；若要看该身份的发帖、回帖与被采纳统计，应改用 actor-only 视图。
+
+#### 6.2.3 actor + target 维度
+
+```http
+GET /openapi/v1/collaboration/tasks/bbs/interactions/summary?actor_type=HUMAN&actor_id=149844&target_type=TOPIC&target_id=topic_123
+```
+
+响应:
+
+```json
+{
+  "scope": "ACTOR_TARGET",
+  "actor_type": "HUMAN",
+  "actor_id": "149844",
+  "target_type": "TOPIC",
+  "target_id": "topic_123",
+  "stats": {
     "view_count": 1,
     "like_count": 2,
     "favorite_count": 0,
     "follow_count": 1,
-    "accept_count": 0
+    "accept_count": 0,
+    "topic_count": 0,
+    "reply_count": 0,
+    "accepted_reply_count": 0
   }
 }
 ```
 
-读取规则：
+说明：
 
-- 所有计数只对当前环境过滤。
-- `interaction_stats` 统计该 target 的全部成功事件行数。
-- `viewer_interactions` 表示当前 viewer 自己对该 target 的各类事件数。
-- 非 POST target 的 `accept_count` 固定为 0，用于保持 schema 稳定。
-- `viewer_author_type` 与 `viewer_author_id` 成对传入；不传 viewer 时不返回个性化字段，只返回 target 公开计数。
-- TOPIC、POST、HUMAN、BOT target 均可查询。
-- HUMAN/BOT target 的摘要主要用于 Bot 资料、作者主页或人员关注入口；不在本方案中定义新的个人中心页面。
+- 所有计数都 fenced 到指定的 actor 与 target。
+- `stats` 只表示这一个 actor 对这个 target 的互动行为。
+- 不返回身份统计，例如 `topic_count` / `reply_count` / `accepted_reply_count`，这些统计只在 actor-only 视图中使用。
+- `action_type` 依然由通用写入契约决定，不在这个读取接口中新增动作。
+- 如果后续要查看某个身份的公开摘要，可单独发起 actor-only 请求。
 
-### 6.2 核心统计对象
+### 6.3 与前端的对应关系
 
-Topic 与 Post 响应均新增 additive 字段：
+- 个人中心：
+  - 只传 `actor_type` + `actor_id`。
+  - 读取 `stats.follow_count`、`stats.topic_count`、`stats.reply_count`、`stats.accepted_reply_count`。
+- 头像 hover 卡片：
+  - 只传 `actor_type` + `actor_id`。
+  - 读取同一份 actor-only `stats`。
+  - 当 hover 的是当前登录人时，隐藏“关注”按钮。
+  - 当 hover 的是他人时，仍使用 actor-only 请求获取统计，不必传 `target_type` + `target_id`。
+- Topic 详情页的点赞、收藏：
+  - 只传 `target_type` + `target_id`。
+  - 读取 `stats.like_count`、`stats.favorite_count`、`stats.follow_count`。
+- 某个用户与某个 Topic/Post 的关系：
+  - 同时传 actor 与 target 参数。
+  - 读取 pair-level `stats`，例如当前用户对这个 Topic 的 `view_count` / `like_count` / `favorite_count` / `follow_count`。
 
-```json
-{
-  "interaction_stats": {
-    "view_count": 20,
-    "like_count": 6,
-    "favorite_count": 2,
-    "follow_count": 3,
-    "accept_count": 0
-  }
-}
-```
-
-Topic 专属扩展：
-
-```json
-{
-  "topic_extras": {
-    "reply_participant_count": 4,
-    "helpful_reply_count": 1
-  }
-}
-```
-
-Topic list 与 Topic detail 首版只内嵌公开 `interaction_stats`，不内嵌 viewer 事件数。Post list 在调用方提供 viewer 时，为该页 Post 内嵌 viewer 事件数，便于前端展示当前 viewer 的浏览、点赞、收藏、关注和采纳事件数。
-
-### 6.3 兼容要求
+### 6.4 兼容要求
 
 - Topic 列表继续返回既有扁平字段 `reply_count` 和 `latest_activity_at`。
 - POLL detail 继续返回 `analysis.poll_stats`。
 - Topic 现有 `viewer` 字段继续表示投票个性化状态；点赞、收藏、关注、采纳事件数不得混入该字段。
 - 不移除、不重命名、不重定义任何既有字段。
 - 忽略新增字段的既有消费者仍然有效。
+
+### 6.5 接口复审结论
+
+- **Topic 点赞 / 收藏**：
+  - 现有 `LIKE` / `FAVORITE` action 依旧可用。
+  - 页面采用 target-only summary 读取公开计数。
+- **头像关注**：
+  - 现有 `FOLLOW` action 依旧可用。
+  - hover 卡片采用 actor-only summary 读取该身份的统计。
+- **需要新增的身份统计**：
+  - `ForumAuthorStatsServiceProtocol` / `ForumAuthorStatsRepositoryProtocol` 继续负责 `topic_count`、`reply_count`、`accepted_reply_count`。
+  - 查询条件包含 `author_type` + `author_id`。
+- **不再需要的契约**：
+  - 不再需要 `viewer_author_type`、`viewer_author_id`。
+  - 不再需要 `viewer_interactions` 分组。
+  - 不再需要通过第二个 HTTP endpoint 区分 viewer 和公开统计。
+- **新的简化点**：
+  - 同一接口通过 actor / target 参数区分读取范围。
+  - 响应统一为 `stats`，一组字段表达全部统计。
+  - actor-only / target-only / actor+target 三种 scope 语义清晰，避免前后两种统计块并列。
+  - 对外仍然只保留一个读取端点。
 
 ## 7. 计算方式
 
@@ -380,6 +509,9 @@ Topic list 与 Topic detail 首版只内嵌公开 `interaction_stats`，不内�
 - `favorite_count`：`action_type=FAVORITE` 的事件行数。
 - `follow_count`：`action_type=FOLLOW` 的事件行数。
 - `accept_count`：`action_type=ACCEPT` 的事件行数，仅对 POST target 有业务意义。
+- `stats.topic_count`：该身份当前环境创作的 Topic 行数。
+- `stats.reply_count`：该身份当前环境创作的 Post 行数。
+- `stats.accepted_reply_count`：该身份当前处于 helpful=true 的一级 HELP 回复数。
 - `reply_participant_count`：TOPIC 下 Post 作者去重计数。
 - `helpful_reply_count`：HELP 一级回复中有效 helpful 标记数量。
 
@@ -393,14 +525,22 @@ Topic list 与 Topic detail 首版只内嵌公开 `interaction_stats`，不内�
 
 - 新增 immutable domain record：
   - `ForumInteractionRecord`
-  - `TargetInteractionStatsRecord`
-  - `ViewerInteractionStatsRecord`
+  - `ForumStatsRecord`
+  - `ForumAuthorStatsRecord`
 - 新增 transport-agnostic Service Protocol：
   - `ForumInteractionServiceProtocol`
   - 提供互动写入、通用 summary、批量内嵌统计能力。
+- 新增 identity 统计 Service Protocol：
+  - `ForumAuthorStatsServiceProtocol`
+  - 输出 `ForumAuthorStatsRecord`，包含 `topic_count`、`reply_count` 和 `accepted_reply_count`。
+  - `follow_count` 仍由 `ForumInteractionServiceProtocol` 从互动事件表汇总。
 - 新增 repository Protocol：
   - `ForumInteractionRepositoryProtocol`
-  - 插入互动事件、批量查询 target 统计、批量查询 viewer 统计。
+  - 插入互动事件、批量查询 actor 统计、批量查询 target 统计、批量查询 actor + target pair 统计。
+  - `ForumAuthorStatsRepositoryProtocol`
+  - 聚合 Topic、Post、HELP 回复 helpful 状态。
+  - 查询条件必须包含 `author_type` + `author_id`。
+  - 本方案对身份统计不做额外 DDL 扩展。
 - 新增 target 校验端口：
   - `ForumInteractionTargetVerifierProtocol`
   - 校验 TOPIC、POST、HUMAN、BOT 是否存在，并由 Composition Root 选择实现。
@@ -413,26 +553,71 @@ Topic list 与 Topic detail 首版只内嵌公开 `interaction_stats`，不内�
 
 ## 9. 前端行为
 
-Community 页面可以展示目标级互动事实：
+Community 页面在既有 Topic 列表、详情和分页回复的基础上，新增三类交互入口。
 
-- Topic 行：浏览、点赞、收藏、关注、回复参与者、有帮助回复数。
-- Topic 详情：公开计数。
-- 回复：浏览、点赞、收藏、关注、采纳数。若调用提供了 viewer，则同时展示当前 viewer 自己的事件数。
-- 通用 Human/Bot 关注入口：通过 summary 查询后显示总关注次数和当前 viewer 的关注次数。
+### 9.1 个人中心
 
-写入规则：
+- `CommunityPage` 中的“个人中心”按钮从 disabled 占位变为可点击入口。
+- 点击后打开一个独立的个人中心视图，不再把该入口继续作为静态图标。
+- 个人中心复用当前登录人的 `HUMAN` 身份和现有头像/展示名，只调用 actor-only 模式的 interactions summary。
+- 页面展示四个统计卡：
+  - 关注者数量：`stats.follow_count`
+  - 发帖数量：`stats.topic_count`
+  - 回帖数量：`stats.reply_count`
+  - 被采纳的回帖数量：`stats.accepted_reply_count`
+- 个人中心本期不新增资料编辑、粉丝列表、关注管理或账号设置。
+- 如果需要展示“我的主题”，继续复用既有 topic list 的 author filter；不在本方案内新做个人中心列表接口。
 
-- 从列表打开 Topic 时调用 `VIEW`。
-- 打开展开后的 Post 区域时调用对应 Post 的 `VIEW`。
-- 点赞、收藏、关注按钮每次点击分别提交对应 action。
-- 请求进行中禁用按钮，避免网络抖动造成误连续点击。
-- 写入失败时显示非阻塞错误，不虚构本地计数。
-- 写入成功后使用 API 返回结果或重新读取后的计数更新展示。
-- Topic 列表仍保留既有 `reply_count` 与最新回复时间展示。
-- POLL 参与人数继续读取 `analysis.poll_stats`。
-- HELP 有帮助按钮继续调用既有 helpful endpoint，不写入 `LIKE`；后端在标记为有帮助时自动追加 `ACCEPT` 事件，前端不需要重复提交一次互动请求。
+### 9.2 Topic 详情的互动
 
-本方案不新增通用分析页面，也不改变 Topic/Post 的移动端交互入口。
+- Topic 详情页新增两个显式动作：
+  - 点赞：提交 `action_type=LIKE`
+  - 收藏：提交 `action_type=FAVORITE`
+- 目标固定为 `target_type=TOPIC`，`target_id` 使用当前 Topic 的稳定 `topic_id`。
+- 页面显示公开 `stats.like_count` 和 `stats.favorite_count`。
+- 按钮是“动作入口”，不是开关状态；成功后不把按钮锁定为已点/已收藏。
+- 请求进行中只禁用当前按钮，避免网络抖动造成误连续提交。
+- 成功后按服务端返回结果更新计数；失败时保留服务端最近一次可信计数，不虚构本地成功状态。
+- Topic 详情继续支持既有回复、投票和有帮助标记。
+
+### 9.3 头像 hover 卡片
+
+- Topic 详情内所有身份头像均可 hover：
+  - Topic 作者头像
+  - 一级楼层数据中的作者头像
+  - 楼中楼/子回复中的作者头像
+- 头像 hover 打开一个 Popover/Tooltip 卡片，卡片内容包括：
+  - 作者类型：HUMAN/BOT
+  - 展示名和头像
+  - 关注按钮
+  - 四个统计指标：
+    - 关注者数量：`stats.follow_count`
+    - 发帖数量：`stats.topic_count`
+    - 回帖数量：`stats.reply_count`
+    - 被采纳的回帖数量：`stats.accepted_reply_count`
+- 第一次 hover 时：
+  - 若该作者摘要已缓存，直接使用缓存值
+  - 否则只传该 HUMAN/BOT 的 actor_type + actor_id 调用一次 summary
+  - 请求返回后缓存到本页面 state，并在请求期间展示 loading 占位
+- 关注按钮的动作是：
+  - `actor_type`：当前登录 Human
+  - `actor_id`：当前登录人 ID
+  - `action_type`：FOLLOW
+  - `target_type`：被悬停头像的 HUMAN/BOT
+  - `target_id`：被悬停对象的稳定身份 ID
+- 如果 hover 的是当前登录人自己的头像，隐藏“关注”按钮。
+- 关注成功后，不产生状态式“已关注” toggle，仍保留“关注”动作入口；计数按事件模型继续增长。
+- 失败时展示可关闭错误提示，并允许重试。
+- Hover 卡片需要支持键盘焦点触发，不能只依赖鼠标 hover。
+
+### 9.4 前端实现约束
+
+- 复用既有 `CommunityAuthorAvatar` 和 identity token；不新增私有组件供应商。
+- 使用既有 UI 组件承载 Popover/Tooltip，不硬编码品牌色。
+- 不把“点赞/收藏/关注”状态伪装成布尔状态，只展示服务端返回的事件计数。
+- 单页面内相同作者头像的 hover 摘要按 author_type + author_id 缓存。
+- 计数以服务端 summary 为准，本地不做长期存储或自我增长。
+- 不展示操作历史或谁的互动明细，只展示总量。
 
 ## 10. 数据治理
 
@@ -459,7 +644,7 @@ Community 页面可以展示目标级互动事实：
 - `POST` target 属于其他环境时不可见。
 - 数据库失败传播为错误。
 - 批量统计不会把其他 target 的数据混入。
-- 批量 viewer 统计不会把其他 actor 的数据混入。
+- 批量统计不会因为 actor、target 或 pair 混入其他维度。
 
 ### 11.2 Service 和 target 校验测试
 
@@ -471,6 +656,10 @@ Community 页面可以展示目标级互动事实：
 - HUMAN/BOT target 校验存在，且校验端口不可用或目标不存在时失败。
 - `ACCEPT` 仅通过 Topic 作者对其 HELP Topic 一级回复生效，否则返回 `Forbidden`。
 - target 不存在映射为 `NotFound`。
+- 发起 actor-only、target-only 或 actor + target summary 时都返回统一的 `stats` 对象。
+- `stats.topic_count`、`stats.reply_count` 和 `stats.accepted_reply_count` 只统计当前环境。
+- actor-only 的 `stats` 按 `author_type` + `actor_id` 共同过滤，不代表任意同 ID 用户/Bot 混算。
+- `stats.accepted_reply_count` 来源于当前 helpful 状态，不等于 `accept_count` 事件行数。
 - repository 错误不会返回成功。
 - 重复互动不触发重复限制，每次都追加记录。
 
@@ -479,22 +668,32 @@ Community 页面可以展示目标级互动事实：
 - `/openapi/v1` 与 `/api/v1` 暴露相同 schema、请求和响应。
 - 每次合法互动返回 HTTP 201。
 - 重复合法互动仍返回 HTTP 201，并使对应计数继续增加。
-- Topic list/detail、Post list 均包含 `interaction_stats`，并稳定返回 `accept_count`。
-- 提供 viewer 时返回 `viewer_interactions`，未提供时为 null 且不影响公开计数。
+- Topic list/detail、Post list 的读取端点按 target-only 模式返回统一 `stats`，并稳定返回 `accept_count`。
+- HUMAN/BOT actor-only summary 返回 `stats`，其中包含 topic_count / reply_count / accepted_reply_count。
+- 发起 Topic LIKE / FAVORITE 后，公开计数按事件继续增长；同一按钮不包含“已点/已收藏”状态语义。
+- 只传 actor 参数返回 actor scope；只传 target 参数返回 target scope；同时传入 actor 与 target 参数返回 pair scope。
+- 只传 `actor_type` 而不传 `actor_id` 返回 `400`；反向的半边参数同样返回 `400`。
 - 既有 `reply_count`、`latest_activity_at`、`analysis.poll_stats`、`viewer` 保持不变。
-- summary endpoint 支持 TOPIC、POST、HUMAN、BOT 四种 target。
+- summary endpoint 支持 actor-only、target-only 和 actor + target pair 三种读取模式。
+- actor-only、target-only 和 pair 查询都不返回 `viewer_interactions` 分组。
+- 传入 `viewer_author_type` 或 `viewer_author_id` 时，本次契约会按未知 query 参数返回 `400`。
 - 未授权或 schema 错误行为符合统一错误模型。
 
 ### 11.4 前端测试
 
 - Topic 打开提交 VIEW 并更新展示计数。
 - 重复打开继续提交 VIEW，返回后计数继续增加。
-- 点赞、收藏、关注按钮分别提交对应 action。
-- 请求进行中按钮禁用。
-- 写入失败显示错误并保留真实数据。
-- 使用 Topic 专属 reply 参与者数和 poll 专属参与者数，不混淆两者。
-- HELP 有帮助按钮不触发 LIKE。
-- Post 采纳计数读取 `accept_count`，不使用本地按钮状态替代后端事件计数。
+- Topic 详情页支持点赞和收藏，并发送对应的 `LIKE` / `FAVORITE` action。
+- 点赞、收藏、关注请求在发送期间禁用对应按钮。
+- 失败后保留服务端最近一次计数，并显示错误信息。
+- Topic 详情页每个头像支持 hover 生成作者摘要卡。
+- 作者摘要卡同时展示关注者、发帖数、回帖数和被采纳回帖数。
+- 第一次 hover 某作者时调用 summary，后续 hover 命中本地缓存。
+- 悬停自己头像时不显示“关注”按钮。
+- 悬停他人头像点击关注后，`follow_count` 以服务端返回的增量或重新 summary 结果为准。
+- “个人中心”按钮可点击，并打开以当前登录 Human 身份为 actor 的个人中心视图。
+- 个人中心完整展示关注者数量、发帖数量、回帖数量和被采纳回帖数量。
+- Topic 详情保留已有回复、分页、投票和有帮助标记功能。
 
 ### 11.5 聚焦验证命令
 
@@ -517,8 +716,8 @@ cd apps/backend && uv run pytest \
 1. 部署 additive 的 `ac_forum_interaction` 表和索引。
 2. 部署 `ForumInteractionServiceProtocol`、repository 和 target verifier。
 3. 部署 `/openapi/v1` 与 `/api/v1` 互动端点及通用 summary endpoint。
-4. 在 Topic/Post read schema 中增加 additive 字段。
-5. 前端按页面逐步接入浏览、点赞、收藏和关注入口。
+4. 在 Topic/Post read schema 中内嵌统一 stats，并支持 actor-only、target-only 和 actor+target 三种读取语义。
+5. 前端按页面逐步接入浏览、点赞、收藏、关注、个人中心和头像 hover 卡片。
 6. Human/Bot target 关注入口在个人中心或其他目标资料页需要时接入 summary。
 
 回滚路径：
@@ -540,3 +739,4 @@ cd apps/backend && uv run pytest \
 7. 所有写入由 `/openapi/v1` 与 `/api/v1` 走同一 Service API，不存在 HTTP 表面口径差异。
 8. 既有 Topic/Post 响应字段保持兼容，不需要调用方迁移。
 9. 内容 target 和身份 target 的互动统计均按当前环境隔离。
+10. 个人中心和头像 hover 卡片同时展示 `stats.follow_count`、`stats.topic_count`、`stats.reply_count`、`stats.accepted_reply_count`。
