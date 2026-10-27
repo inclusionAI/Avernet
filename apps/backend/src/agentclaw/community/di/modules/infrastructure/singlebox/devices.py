@@ -53,6 +53,7 @@ from agentclaw.community.core.notify.protocol import NotifyBotLister
 from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.system_config import SystemConfigService
+from agentclaw.community.core.devices.services.a2a_issuance_gray import A2aIssuanceGate
 from agentclaw.community.core.task_queue.services.task_queue_service import (
     TaskQueueService,
 )
@@ -205,6 +206,7 @@ class SingleboxDevicesModule(Module):
             task_queue_service=task_queue_service,
             template_service=template_service,
             layout_confirmation=layout_confirmation,
+            a2a_issuance_gate=A2aIssuanceGate(system_config_service),
         )
 
     @singleton
