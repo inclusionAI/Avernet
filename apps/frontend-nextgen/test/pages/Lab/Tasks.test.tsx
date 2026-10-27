@@ -252,7 +252,7 @@ describe('LabTasksPage(实验室·任务体验页)', () => {
     expect(ownerBotSelect).toHaveTextContent('调研助手');
   });
 
-  it('点击查看产物后复用 TaskPanel 的文件、文本、链接和代码预览', async () => {
+  it('点击查看产物后复用 TaskPanel 的文件、文本预览并保留外链跳转', async () => {
     render(<LabTasksPage />);
     await waitFor(() => expect(screen.getByText('竞品协同分析')).toBeInTheDocument());
 
@@ -303,26 +303,20 @@ describe('LabTasksPage(实验室·任务体验页)', () => {
       expect(await screen.findByRole('alert')).toHaveTextContent('纯文本类型的产物不支持下载。');
 
       fireEvent.click(screen.getByRole('button', { name: '关闭' }));
-      fireEvent.click(screen.getByRole('button', { name: '预览产物 需求文档' }));
-      const linkDetails = await screen.findByTestId('task-artifact-link-details');
-      expect(linkDetails).toHaveTextContent('需求文档');
-      expect(linkDetails).toHaveTextContent('https://docs.example/task-requirement');
-      expect(screen.getByRole('link', { name: '打开链接' })).toHaveAttribute(
+
+      // 链接和代码产物仅保留外链跳转，不再提供站内预览详情。
+      expect(screen.getByRole('link', { name: '跳转产物 需求文档' })).toHaveAttribute(
         'href',
         'https://docs.example/task-requirement',
       );
-
-      fireEvent.click(screen.getByRole('button', { name: '关闭' }));
-      fireEvent.click(screen.getByRole('button', { name: '预览产物 实现 PR' }));
-      const codeDetails = await screen.findByTestId('task-artifact-code-details');
-      expect(codeDetails).toHaveTextContent('avernet');
-      expect(codeDetails).toHaveTextContent('https://git.example/avernet');
-      expect(codeDetails).toHaveTextContent('https://git.example/avernet/pull/1');
-      expect(codeDetails).toHaveTextContent('实现任务产物预览');
-      expect(screen.getByRole('link', { name: '查看 PR' })).toHaveAttribute(
+      expect(screen.getByRole('link', { name: '跳转产物 实现 PR' })).toHaveAttribute(
         'href',
         'https://git.example/avernet/pull/1',
       );
+      expect(screen.queryByRole('button', { name: '预览产物 需求文档' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '预览产物 实现 PR' })).not.toBeInTheDocument();
+      expect(screen.queryByTestId('task-artifact-link-details')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('task-artifact-code-details')).not.toBeInTheDocument();
     } finally {
       anchorClick.mockRestore();
     }

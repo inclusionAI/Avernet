@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-// TaskOverviewV2(L1):双视图节点卡/下钻分离/边语义渲染/产物区/折叠任务信息(PRD #1/2/3/4/9)。
+// TaskOverviewV2(L1):双视图节点卡/下钻入口隐藏/边语义渲染/产物区/折叠任务信息(PRD #1/2/3/4/9)。
 import {
   artifactDescriptorCode,
   artifactDescriptorText,
@@ -168,7 +168,7 @@ describe('TaskOverviewV2(L1)', () => {
     expect((doneTitle as HTMLElement).style.textDecoration).toContain('line-through');
   });
 
-  it('根节点恢复宿主会话；其他节点保持会话联动与下钻', () => {
+  it('根节点恢复宿主会话；其他节点保持会话联动', () => {
     const nav = makeNav();
     render(<TaskOverviewV2 {...props({ nav })} />);
 
@@ -177,30 +177,28 @@ describe('TaskOverviewV2(L1)', () => {
     expect(nav.calls.select).toHaveLength(0);
     expect(nav.calls.drill).toHaveLength(0);
 
-    fireEvent.click(screen.getByTitle('下钻节点副屏'));
+    fireEvent.click(screen.getByText('并行调研执行'));
     expect(nav.calls.select).toHaveLength(1);
     expect(nav.calls.select[0][0]).toBe('n-group');
     expect(nav.calls.select[0][1]).toMatchObject({ sessionId: 'bcs_grp_902:round:2', kind: 'group' });
-    expect(nav.calls.drill).toEqual(['n-group']);
+    expect(nav.calls.drill).toHaveLength(0);
   });
 
-  it('下钻按钮仅协作群节点渲染(单聊节点无热区)', () => {
+  it('节点视图下钻入口隐藏,协作群节点也不渲染下钻按钮', () => {
     render(<TaskOverviewV2 {...props()} />);
-    const drillButtons = screen.queryAllByTitle('下钻节点副屏');
-    expect(drillButtons).toHaveLength(1);
+    expect(screen.queryByTitle('下钻节点副屏')).toBeNull();
+    expect(screen.queryByLabelText('下钻 并行调研执行')).toBeNull();
   });
 
-  it('视图切换:切到 DAG 视图后 rework 边为 warning 虚线并带 reason title,存在下钻热区', () => {
+  it('视图切换:切到 DAG 视图后 rework 边为 warning 虚线并带 reason title,下钻热区隐藏', () => {
     const nav = makeNav();
     render(<TaskOverviewV2 {...props({ nav })} />);
     fireEvent.click(screen.getByTitle('切换到 DAG 视图'));
 
     const dashed = document.querySelectorAll('path[stroke-dasharray="4 3"]');
     expect(dashed.length).toBeGreaterThanOrEqual(1);
-
-    // 节点可点(selectNode 语义) — SVG 热区以 aria-label 查询
-    fireEvent.click(screen.getByLabelText('下钻节点副屏'));
-    expect(nav.calls.drill).toEqual(['n-group']);
+    expect(nav.calls.drill).toHaveLength(0);
+    expect(screen.queryByLabelText('下钻节点副屏')).toBeNull();
   });
 
   it('DAG 视图点击根节点同样只恢复宿主会话', () => {
@@ -224,40 +222,30 @@ describe('TaskOverviewV2(L1)', () => {
     expect(screen.getByText('链接')).toBeTruthy();
     expect(screen.getByText('代码')).toBeTruthy();
     expect(screen.queryByText('文件')).toBeNull(); // 无 file kind 产物
-    // url_link 卡保留外链入口，并新增站内预览。
+    // url_link/code 卡仅保留外链入口，不提供站内预览按钮。
     expect(screen.getByRole('link', { name: '跳转产物 需求说明书' }).getAttribute('href')).toBe(
       'https://yuque.example/doc1',
     );
     expect(screen.getByRole('link', { name: '跳转产物 重构 PR' }).getAttribute('href')).toBe(
       'https://git.example/pr/1024',
     );
-    expect(screen.getByRole('button', { name: '预览产物 需求说明书' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: '预览产物 重构 PR' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '预览产物 需求说明书' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '预览产物 重构 PR' })).toBeNull();
     expect(screen.queryByRole('button', { name: '下载产物 需求说明书' })).toBeNull();
     expect(screen.queryByRole('button', { name: '下载产物 重构 PR' })).toBeNull();
   });
 
-  it('链接与代码产物可预览完整详情', async () => {
+  it('链接与代码产物仅直接跳转,不打开站内详情抽屉', () => {
     render(<TaskOverviewV2 {...props()} />);
 
-    fireEvent.click(screen.getByRole('button', { name: '预览产物 需求说明书' }));
-    const linkDetails = await screen.findByTestId('task-artifact-link-details');
-    expect(linkDetails.textContent).toContain('dima需求');
-    expect(linkDetails.textContent).toContain('https://yuque.example/doc1');
-    expect(linkDetails.textContent).toContain('group-902');
-    expect(screen.getByRole('link', { name: '打开链接' }).getAttribute('href')).toBe('https://yuque.example/doc1');
-
-    fireEvent.click(screen.getByRole('button', { name: '关闭' }));
-    fireEvent.click(screen.getByRole('button', { name: '预览产物 重构 PR' }));
-    const codeDetails = await screen.findByTestId('task-artifact-code-details');
-    expect(codeDetails.textContent).toContain('avernet');
-    expect(codeDetails.textContent).toContain('https://git.example/avernet');
-    expect(codeDetails.textContent).toContain('https://git.example/pr/1024');
-    expect(codeDetails.textContent).toContain('产物读侧接入');
-    expect(codeDetails.textContent).toContain('bot-coder');
-    expect(screen.getByRole('link', { name: '查看 PR' }).getAttribute('href')).toBe(
+    expect(screen.getByRole('link', { name: '跳转产物 需求说明书' }).getAttribute('href')).toBe(
+      'https://yuque.example/doc1',
+    );
+    expect(screen.getByRole('link', { name: '跳转产物 重构 PR' }).getAttribute('href')).toBe(
       'https://git.example/pr/1024',
     );
+    expect(screen.queryByTestId('task-artifact-link-details')).toBeNull();
+    expect(screen.queryByTestId('task-artifact-code-details')).toBeNull();
   });
 
   it('纯文本产物可预览，并在下载时提示不支持', async () => {

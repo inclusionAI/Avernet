@@ -1,8 +1,8 @@
 // @asset-migrated: teamclaw 自研资产
 /**
  * TaskOverviewV2 —— Level1 任务总览,PRD 两区结构:步骤区(节点视图/DAG 视图双切换)+ 产物区。
- * 交互语义(PRD 方案A):点根节点恢复宿主会话，点其他节点联动会话(均不进第二层)；
- * 下钻按钮 = 选中 + 进栈。
+ * 交互语义(PRD 方案A):点根节点恢复宿主会话，点其他节点联动会话；
+ * 节点/DAG 视图当前均隐藏下钻入口，暂不提供节点副屏下钻展示。
  */
 import React, { useState } from 'react';
 
@@ -92,14 +92,6 @@ export const TaskOverviewV2: React.FC<TaskOverviewV2Props> = ({ task, nav, apiBa
                 if (!node) return;
                 if (id === rootNodeId) nav.selectRootNode(id);
                 else nav.selectNode(id, resolveNodeSessionTarget(node, task));
-              }}
-              onNodeDrill={(id) => {
-                const node = task.nodes.find((n) => n.id === id);
-                if (!node) return;
-                const target = resolveNodeSessionTarget(node, task);
-                if (id === rootNodeId) nav.selectRootNode(id);
-                else nav.selectNode(id, target);
-                nav.drillInto(id, id === rootNodeId ? null : target);
               }}
             />
           </div>

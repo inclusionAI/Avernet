@@ -2,12 +2,12 @@
 /**
  * NodeListViewV2 —— L1 节点卡片列表(PRD 方案A):
  * 点根节点 = 选中并恢复宿主会话；点其他节点 = 选中并联动会话；
- * 下钻按钮(仅协作群节点)= 选中 + 进栈(drillInto)。
+ * 节点点击仅做会话联动；下钻入口当前先隐藏，不提供节点副屏下钻展示。
  * 卡片信息:present 状态点/标题(完成划线)/执行体 pill(群/单聊 icon)/返工次数/HITL 徽章/子任务入口。
  */
 import React from 'react';
 
-import { DrillWorkflow, Info, Users } from '../icons';
+import { Info, Users } from '../icons';
 import { resolveNodeSessionTarget } from '../sessionResolution';
 import { Empty as StateEmpty } from '../theme';
 import { C, PRESENT_TONES } from '../tokens';
@@ -151,43 +151,6 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
               >
                 子任务
               </button>
-            )}
-            {node.drillable && (
-              <span
-                role="button"
-                tabIndex={0}
-                title="下钻节点副屏"
-                aria-label={`下钻 ${node.name}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  selectForConversation();
-                  nav.drillInto(node.id, isRootNode ? null : target);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    selectForConversation();
-                    nav.drillInto(node.id, isRootNode ? null : target);
-                  }
-                }}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: 26,
-                  height: 26,
-                  borderRadius: 6,
-                  color: C.textSecondary,
-                  cursor: 'pointer',
-                  flexShrink: 0,
-                  transition: 'background 0.15s',
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = C.surfaceAlt)}
-                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-              >
-                <DrillWorkflow />
-              </span>
             )}
           </li>
         );
