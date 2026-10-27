@@ -8,7 +8,8 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
-from secbaas.community.api.bot_manage import BotStatus
+from secbaas.community.api.bot_manage import BotConfig, BotStatus
+from secbaas.community.api.device_manage import DeployConfig
 from secbaas.community.api.publish_manage import (
     DEFAULT_CALLBACK_TIMEOUT_SECONDS,
     BatchStatus,
@@ -172,6 +173,12 @@ class TestPublishCreation:
         mock_bot = MagicMock()
         mock_bot.id = 1
         mock_bot.replica_desired = 3
+        mock_bot.config = BotConfig(
+            entity_id="preserve-entity",
+            deploy_config=DeployConfig(
+                docker_image="previous:image", envs={"KEEP": "yes"}
+            ),
+        )
 
         mock_publish = MagicMock()
         mock_publish.id = 1
@@ -238,7 +245,11 @@ class TestPublishCreation:
         )
         assert create_call["source_bot_id"] == 1
         assert create_call["tenant"] == "test_tenant"
-        assert create_call["extra_config"] is None
+        # An omitted update override now clears the old image in the clone.
+        assert create_call["extra_config"]["deploy_config"].get("docker_image") is None
+        assert create_call["extra_config"]["deploy_config"]["envs"] == {"KEEP": "yes"}
+        assert create_call["extra_config"]["entity_id"] == "preserve-entity"
+        assert mock_bot.config.deploy_config.docker_image == "previous:image"
         assert create_call["template_uuid"] is None
         assert create_call["modifier"] == "user1"
 

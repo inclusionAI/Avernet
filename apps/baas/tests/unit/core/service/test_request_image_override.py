@@ -241,7 +241,7 @@ async def _invoke_operation(context, operation, config_payload):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("operation", ["scale_bot", "update_bot", "update_devices"])
+@pytest.mark.parametrize("operation", ["update_bot", "update_devices"])
 @pytest.mark.parametrize(("config_payload", "expected_image"), CONFIG_CASES)
 async def test_operations_resolve_image_from_this_request_only(
     bot_context, operation, config_payload, expected_image
@@ -354,3 +354,25 @@ async def test_metadata_only_update_does_not_start_an_image_reset_publish(bot_co
         modifier="tester",
         name="New display name",
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("config_payload", "requested_image"), CONFIG_CASES)
+async def test_scale_keeps_existing_conditional_merge_boundary(
+    bot_context, config_payload, requested_image
+):
+    """Missing scale config/deploy_config remains a deferred known limitation."""
+    before = deepcopy(bot_context.record.extra_config)
+    call = await _invoke_operation(bot_context, "scale_bot", config_payload)
+    patch = (
+        config_payload.get("deploy_config")
+        if isinstance(config_payload, dict)
+        else None
+    )
+    expected_image = OLD_IMAGE if patch is None else requested_image
+    deploy = call["config"].deploy_config
+    assert deploy.docker_image == expected_image
+    assert deploy.ttl_in_minutes == before["deploy_config"]["ttl_in_minutes"]
+    assert deploy.mount_points == _stored_deploy_config().mount_points
+    assert bot_context.record.extra_config == before
+    bot_context.bot_repo.update_bot.assert_not_called()
