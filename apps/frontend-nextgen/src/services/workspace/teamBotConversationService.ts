@@ -87,7 +87,7 @@ function toTeamBot(dto: CollaboratingBotDto): ChatBotView {
     reachability: 'reachable',
     chatable: Boolean(realBotId && ownerId),
     ...permissions,
-    runtimeStage: 'draft',
+    runtimeStage: dto.bot_type === 'service' ? 'online' : 'draft',
     isAgentCodingBot: runtime.isAgentCodingBot,
     templateType: runtime.templateType,
     templateName: runtime.templateName,

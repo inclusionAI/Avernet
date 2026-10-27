@@ -302,3 +302,11 @@ test('取消目录加载不读取库存', async () => {
   expect(result.ok).toBe(false);
   expect(inventory).not.toHaveBeenCalled();
 });
+
+test.each(['service', 'personal'])('团队 %s 目录映射给出正确会话阶段', async (botType) => {
+  list.mockResolvedValue({ code: 200000, data: { items: [dto({ bot_type: botType })], total: 1 } });
+  expect(await teamBotConversationService.listBots('viewer')).toMatchObject({
+    ok: true,
+    data: [{ botType, isTeamBot: true, runtimeStage: botType === 'service' ? 'online' : 'draft' }],
+  });
+});

@@ -1,4 +1,5 @@
 /** useBotSessionFilePreview — 单聊会话文件预览，与群聊共用 PreviewPane(contentUrl/text 自绘)。 */
+import type { BotRuntimeStage } from '@/domain/botWorkshop';
 import type { BotSessionFileView } from '@/services/workspace/botSessionFileService';
 import { botSessionFileService } from '@/services/workspace/botSessionFileService';
 import {
@@ -36,6 +37,7 @@ export interface UseBotSessionFilePreviewParams {
   sessionId: string | null;
   userId: string | null;
   ownerId?: string;
+  stage?: BotRuntimeStage;
 }
 
 export function useBotSessionFilePreview(
@@ -45,7 +47,7 @@ export function useBotSessionFilePreview(
   const [state, setState] = useState<BotSessionFilePreviewState>(initialState);
   const resourceId = file?.resourceId ?? null;
   const name = file?.displayName ?? '';
-  const { botId, sessionId, userId, ownerId } = params;
+  const { botId, sessionId, userId, ownerId, stage } = params;
 
   useEffect(() => {
     if (!resourceId || !botId || !sessionId || !userId) {
@@ -57,13 +59,21 @@ export function useBotSessionFilePreview(
       setState({ ...initialState, kind });
       return;
     }
-    const contentUrl = botSessionFileService.resolveContentUrl(botId, sessionId, resourceId, userId, ownerId, 'inline');
+    const contentUrl = botSessionFileService.resolveContentUrl(
+      botId,
+      sessionId,
+      resourceId,
+      userId,
+      ownerId,
+      'inline',
+      ...(stage ? ([stage] as const) : []),
+    );
     if (kind === 'text') {
       // 文本类走自绘：fetch 字节（512KB 截断）转文本渲染，与群聊侧同构。
       let cancelled = false;
       setState({ ...initialState, kind, status: 'loading', contentUrl });
       void botSessionFileService
-        .fetchBlob(botId, sessionId, resourceId, userId, ownerId, 'inline')
+        .fetchBlob(botId, sessionId, resourceId, userId, ownerId, 'inline', ...(stage ? [stage] as const : []))
         .then(async (result) => {
           if (cancelled) return;
           if (!result.ok) {
@@ -89,7 +99,7 @@ export function useBotSessionFilePreview(
       };
     }
     setState({ ...initialState, kind, status: 'ready', contentUrl });
-  }, [resourceId, name, botId, sessionId, userId, ownerId]);
+  }, [resourceId, name, botId, sessionId, userId, ownerId, stage]);
 
   return state;
 }
