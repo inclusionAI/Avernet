@@ -414,7 +414,12 @@ def create_bot_with_authorization(
             bot_id=bot_id, user_id=user_id,
             request=request if request is not None else {},
         )
-# Creation policy is evaluated here, rather than in either transport, so no
+        if override is not None and override.bot_id:
+            # Continue under the id the extension's own arbitration decided;
+            # the caller's id was allocation only, nothing is written yet.
+            bot_id = override.bot_id
+
+        # Creation policy is evaluated here, rather than in either transport, so no
     # caller can bypass template/combination rules before Passport or writes.
     if override is not None:
         spec = replace(
