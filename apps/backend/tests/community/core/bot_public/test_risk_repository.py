@@ -240,3 +240,14 @@ def test_recovery_discovers_tenants_without_leaking_records(repo):
         assert repo.get(env="dev", risk_check_id="a") is None
         assert repo.list_recovery_tenants(env="dev") == ("other", "teamclaw")
     assert repo.list_recovery_tenants(env="prod") == ()
+
+
+def test_find_approval_by_puid_identifies_early_and_superseded_records(repo):
+    repo.create_or_replay(record(approval_biz_id="risk-a"))
+    repo.create_or_replay(record("b", "req-b", approval_biz_id="risk-b"))
+    early = repo.find_approval(env="dev", puid="antprocess-agentclaw_botpublic_risk-a")
+    assert early.risk_check_id == "a"
+    assert early.current_target_key is None
+    assert repo.find_approval(env="dev", puid="antprocess-agentclaw_botpublic_unrelated") is None
+    with pytest.raises(ValueError):
+        repo.find_approval(env="dev", puid="")

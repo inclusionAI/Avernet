@@ -1086,6 +1086,12 @@ class BotPublicService(BotPublicServiceProtocol):
         Returns:
             操作结果字典 {"success": bool, "public": str|None, "message": str}
         """
+        if self._risk_repository is not None and puid:
+            associated = self._risk_repository.find_approval(env=get_current_env(), puid=puid)
+            if associated is not None:
+                if risk_check_id and risk_check_id != associated.risk_check_id:
+                    return {"success": False, "message": "risk callback association mismatch"}
+                risk_check_id = associated.risk_check_id
         if risk_check_id:
             guard = self._risk_approval_guard
             if guard is None:

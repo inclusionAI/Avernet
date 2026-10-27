@@ -2814,3 +2814,21 @@ def test_risk_publication_sends_callback_marker_and_replays_deferred_event():
     )
     assert process.start_approval.call_args.kwargs["context"]["risk_check_id"] == "risk-a"
     guard.replay.assert_called_once()
+
+
+def test_callback_without_marker_still_blocks_known_risk_approval():
+    from types import SimpleNamespace
+
+    repo = MagicMock()
+    repo.find_approval.return_value = SimpleNamespace(risk_check_id="risk-a")
+    bots = MagicMock()
+    bots.get_by_id_and_owner.return_value = _make_bot(bot_id="b1", owner_id="u1")
+    bcn = MagicMock()
+    service = _make_service(bot_repository=bots, bcn_service=bcn, risk_repository=repo)
+    guard = MagicMock()
+    guard.check.return_value = "DENIED"
+    service._risk_approval_guard = guard
+    result = service.handle_public_approval_callback("b1:u1", "u1", "p-risk", "AGREE", "user")
+    assert result["success"] is False
+    guard.check.assert_called_once()
+    bcn.patch_attributes.assert_not_called()

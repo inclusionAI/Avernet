@@ -19,6 +19,7 @@ from sqlalchemy import (
     TIMESTAMP,
     UniqueConstraint,
     false,
+    or_,
 )
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -249,6 +250,32 @@ class BotPublicRiskRepository:
                 .one_or_none()
             )
             return _view(row) if row else None
+
+    def find_approval(self, *, env: str, puid: str) -> RiskCheck | None:
+        """Resolve a callback using saved PUID or the stable botpublic business ID.
+
+        The latter applies only to the existing enterprise PUID shape; callers
+        must not enable risk publication until that shape is confirmed end to end.
+        Historical records are included so a superseded approval is not treated
+        as an unrelated legacy callback.
+        """
+        if not puid:
+            raise ValueError("approval PUID is required")
+        prefix = "antprocess-agentclaw_botpublic_"
+        biz_id = puid[len(prefix):].split("_", 1)[0] if puid.startswith(prefix) else ""
+        with self._db.orm_session() as session:
+            query = session.query(RiskCheckModel).filter_by(
+                env=env, avernet_tenant=get_current_avernet_tenant()
+            )
+            if biz_id:
+                query = query.filter(or_(RiskCheckModel.approval_puid == puid,
+                                         RiskCheckModel.approval_biz_id == biz_id))
+            else:
+                query = query.filter(RiskCheckModel.approval_puid == puid)
+            rows = query.limit(2).all()
+            if len(rows) > 1:
+                raise ValueError("approval PUID has ambiguous risk associations")
+            return _view(rows[0]) if rows else None
 
     def update_current(
         self, *, env: str, risk_check_id: str, row_version: int, changes: dict
