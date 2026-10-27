@@ -64,9 +64,6 @@ if TYPE_CHECKING:  # the module reaches the device dispatcher at import time
 __all__ = ["PlatformBotStateReader"]
 
 LOCAL_PREFIX = "local://"
-#: Where the deprecated ``POST /api/resources/file`` upload put its files: under ``workspace/data``, with rows
-#: relative to that directory rather than to the workspace. Read second, after the workspace-relative path.
-LEGACY_DATA_DIR = "data/"
 CENTER_PREFIX = "center://"
 REPO_PREFIX = "git://"
 
@@ -156,17 +153,9 @@ class PlatformBotStateReader(BotStateReader):
         for resource in service.list_resources(user_id=bot.owner_id):
             if not resource.path or resource.is_directory:
                 continue  # URL, link and node resources are not workspace files; a folder row has no bytes
-            # A row's path is workspace-relative, as the Open API records it. A row the deprecated upload
-            # wrote is relative to ``workspace/data`` instead, whatever the row's own first segment (a
-            # legacy ``data/notes.md`` sits at ``data/data/notes.md``); when the workspace-relative read
-            # finds nothing, the file is looked for where that layout put it.
+            # A row's path is workspace-relative, as the Open API records it and the apply writes it.
             path = resource.path.lstrip("/")
             data = await self._read_resource(bot, path)
-            if data is None:
-                legacy = LEGACY_DATA_DIR + path
-                data = await self._read_resource(bot, legacy)
-                if data is not None:
-                    path = legacy
             if data is None:
                 raise CaptureRefused(
                     [

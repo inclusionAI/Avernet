@@ -10,7 +10,7 @@ site. Domain imports are ``TYPE_CHECKING``-only — see the module docstring in
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import Any, List, Optional, Protocol, TYPE_CHECKING, runtime_checkable
+from typing import Any, List, Optional, Protocol, Sequence, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
     from agentclaw.community.core.quality.models import QualityTaskRecord
@@ -435,6 +435,16 @@ class ResourceRepositoryProtocol(Protocol):
     @abstractmethod
     def delete(self, resource_id: str) -> bool:
         """Soft-delete (status=deleted). Returns True if a row was updated."""
+        ...
+
+    @abstractmethod
+    def delete_many(self, resource_ids: Sequence[str]) -> int:
+        """Soft-delete every listed row in one statement; the number of rows updated (0 for no ids)."""
+        ...
+
+    @abstractmethod
+    def create_many(self, rows: Sequence[dict]) -> List[dict]:
+        """Insert every row in one flush, in order; the stored representations (empty for no rows)."""
         ...
 
     @abstractmethod

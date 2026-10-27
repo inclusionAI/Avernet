@@ -432,13 +432,20 @@ class ResourceService(ResourceRowsPort):
         next apply converges it.
         """
         # Every file row of the bot: the workspace root is the resources root.
-        for item in self._repo.list_resources(
+        # Two statements, not one per row: the repository's batch delete and insert.
+        stale = self._repo.list_resources(
             resource_type=ResourceType.FILE.value, parent_path=None, user_id=None, bolt_id=self._bot_id
-        ):
-            self._repo.delete(str(item.get("id")))
-        for file in files:
-            await self.record_uploaded_file(
-                path=file.path, size=file.size, user_id=owner_id, created_by=created_by, source="manifest"
+        )
+        if stale:
+            self._repo.delete_many([str(item.get("id")) for item in stale])
+        if files:
+            self._repo.create_many(
+                [
+                    self._uploaded_file_record(
+                        path=file.path, size=file.size, user_id=owner_id, created_by=created_by, source="manifest"
+                    ).to_dict()
+                    for file in files
+                ]
             )
 
     async def record_uploaded_file(
@@ -468,9 +475,20 @@ class ResourceService(ResourceRowsPort):
         filters rows by ``parent_path``. Both are a ``basename``/``dirname`` off
         the single path the caller gave.
         """
+        record = self._uploaded_file_record(
+            path=path, size=size, user_id=user_id, created_by=created_by, source=source
+        )
+        stored = self._repo.create(record.to_dict())
+        record.id = stored.get("id")
+        return record
+
+    def _uploaded_file_record(
+        self, *, path: str, size: int, user_id: Optional[str], created_by: Optional[str], source: str
+    ) -> Resource:
+        """The row for a file already in the workspace, ``name`` and ``parent_path`` derived from ``path``."""
         leaf = path.rsplit("/", 1)[-1]
         parent = path.rsplit("/", 1)[0] if "/" in path else ""
-        record = create_file_resource(
+        return create_file_resource(
             name=leaf,
             path=path,
             parent_path=parent,
@@ -480,9 +498,6 @@ class ResourceService(ResourceRowsPort):
             source=source,
             bolt_id=self._bot_id,
         )
-        stored = self._repo.create(record.to_dict())
-        record.id = stored.get("id")
-        return record
 
     async def upload_file(
         self,

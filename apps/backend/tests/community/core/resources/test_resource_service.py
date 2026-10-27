@@ -564,7 +564,8 @@ class TestReplaceManifestRows:
         repo.list_resources.return_value = [
             {"id": index, "attributes": {"path": path}} for index, path in enumerate(paths, start=1)
         ]
-        repo.delete.return_value = True
+        repo.delete_many.side_effect = lambda ids: len(ids)
+        repo.create_many.side_effect = lambda rows: [dict(row, id=index) for index, row in enumerate(rows, 1)]
         return repo
 
     @pytest.mark.asyncio
@@ -576,8 +577,11 @@ class TestReplaceManifestRows:
             files=[WrittenFile("data/kb/faq.md", 3), WrittenFile("data/new.txt", 1)], owner_id="owner", created_by="u2"
         )
 
-        assert sorted(call.args[0] for call in repo.delete.call_args_list) == ["1", "2", "3"]
-        created = [call.args[0] for call in repo.create.call_args_list]
+        # Two statements: one batch delete of every file row, one batch insert of the written set.
+        repo.delete_many.assert_called_once_with(["1", "2", "3"])
+        repo.delete.assert_not_called()
+        repo.create.assert_not_called()
+        created = repo.create_many.call_args.args[0]
         assert [(row["attributes"]["path"], row["attributes"]["size"]) for row in created] == [
             ("data/kb/faq.md", 3),
             ("data/new.txt", 1),
@@ -591,13 +595,13 @@ class TestReplaceManifestRows:
     async def test_an_empty_written_set_clears_the_root_rows_and_the_roots_own_row(self):
         repo = self._repo_with_rows("data", "data/old.csv")
         await _make_service(repo).replace_rows(files=[], owner_id="owner", created_by=None)
-        assert sorted(call.args[0] for call in repo.delete.call_args_list) == ["1", "2"]
-        repo.create.assert_not_called()
+        repo.delete_many.assert_called_once_with(["1", "2"])
+        repo.create_many.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_a_row_write_that_fails_raises_rather_than_reporting_success(self):
         repo = self._repo_with_rows()
-        repo.create.side_effect = RuntimeError("db down")
+        repo.create_many.side_effect = RuntimeError("db down")
         with pytest.raises(RuntimeError):
             await _make_service(repo).replace_rows(
                 files=[WrittenFile("data/a.txt", 1)], owner_id="owner", created_by=None
