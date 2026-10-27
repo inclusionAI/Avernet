@@ -59,6 +59,6 @@ class RiskApprovalGuard:
                 return False
             del state["pending_approval"]
             if self.repo.update_current(env=env, risk_check_id=risk_id, row_version=current.row_version,
-                                        changes={"workflow_json": json.dumps(state)}):
+                                        changes={"workflow_json": json.dumps(state), "next_action_at": None}):
                 return True
         raise RuntimeError("unable to complete approval callback replay")

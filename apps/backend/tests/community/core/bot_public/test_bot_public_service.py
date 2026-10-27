@@ -2850,3 +2850,18 @@ def test_new_withdrawal_uses_full_identity_to_select_risk_record():
     bots.get_by_id_and_entity.assert_called_once_with('default', 'entity-b')
     repository.get_current.assert_called_once_with(env='dev', bot_pk=77, public_scope='user')
     repository.invalidate_if_current.assert_called_once_with(env='dev', risk_check_id='risk-b', row_version=4)
+
+
+def test_legacy_owner_risk_publish_passes_stable_identity_to_approval_plugin():
+    bots = MagicMock()
+    bots.get_by_id_and_owner.return_value = _make_bot(bot_id="b1", owner_id="u1")
+    plugin = MagicMock()
+    service = _make_service(bot_repository=bots, publish_approval_plugin=plugin)
+    handoff = MagicMock()
+    service._risk_approval_guard = MagicMock()
+    service.public_bot("b1", "u1", "1", "owner", "0", _make_operator(),
+                       approval_biz_id="risk-a", risk_check_id="a", on_approval_started=handoff)
+    kwargs = plugin.publish.call_args.kwargs
+    assert kwargs["approval_biz_id"] == "risk-a"
+    assert kwargs["risk_check_id"] == "a"
+    assert kwargs["on_approval_started"] is handoff

@@ -44,6 +44,7 @@ SUBMIT = "bot_public_risk_submit"
 DETECTING = "bot_public_risk_detecting"
 REJECT = "bot_public_risk_reject"
 ADVANCE = "bot_public_risk_advance"
+REPLAY = "bot_public_risk_callback_replay"
 NOTICE = "bot_public_risk_notice"
 logger = logging.getLogger(__name__)
 
@@ -326,6 +327,8 @@ class RiskTasks:
                 )
             elif row.phase == "ADVANCING":
                 self._enqueue(row, ADVANCE)
+            elif row.phase == "APPROVING" and json.loads(row.workflow_json).get("pending_approval"):
+                self._enqueue(row, REPLAY)
         return rows[-1].risk_check_id if len(rows) == limit else None
 
 

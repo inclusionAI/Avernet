@@ -456,7 +456,7 @@ class BotPublicService(BotPublicServiceProtocol):
                 exc,
             )
 
-    def public_bot(self, bot_id: str, owner_id: str, public: str, permission_owner: str, friend_approval: str, operator: OperatorContext) -> Dict[str, Any]:
+    def public_bot(self, bot_id: str, owner_id: str, public: str, permission_owner: str, friend_approval: str, operator: OperatorContext, *, approval_biz_id: str | None = None, risk_check_id: str | None = None, on_approval_started: Optional[Callable[[Dict[str, Any]], None]] = None) -> Dict[str, Any]:
         """
         公开/取消公开 Bot。
 
@@ -488,6 +488,8 @@ class BotPublicService(BotPublicServiceProtocol):
             raise BotPublicServiceError(f"Invalid public value: {public}, must be '0' or '1'")
         if permission_owner not in ("caller", "owner"):
             raise BotPublicServiceError(f"Invalid permission_owner: {permission_owner}, must be 'caller' or 'owner'")
+        if risk_check_id and (not approval_biz_id or not on_approval_started or self._risk_approval_guard is None):
+            raise BotPublicServiceError("risk approval guard or stable handoff unavailable")
         bot = self._bot_repository.get_by_id_and_owner(bot_id, owner_id)
         if not bot:
             raise BotNotFoundError(f"Bot not found: {bot_id}")
@@ -526,12 +528,15 @@ class BotPublicService(BotPublicServiceProtocol):
         # antprocess); prod impl starts the antprocess workflow and the
         # bot stays in PENDING until the callback fires. Rule 14 — mode
         # never reaches this service.
+        risk_args = {"risk_check_id": risk_check_id, "approval_biz_id": approval_biz_id,
+                     "on_approval_started": on_approval_started} if risk_check_id else {}
         return self._publish_approval_plugin.publish(
             bot=bot, ext=ext, bot_id=bot_id, owner_id=owner_id,
             operator_id=operator_id, operator=operator,
             public=public, permission_owner=permission_owner,
             friend_approval=friend_approval, access_mode=access_mode,
             callbacks=self._publish_callbacks(),
+            **risk_args,
         )
 
     def public_bcs_bot(
@@ -776,6 +781,18 @@ class BotPublicService(BotPublicServiceProtocol):
             handle_approval_callback=self.handle_public_approval_callback,
             refetch_bot=self._bot_repository.get_by_id_and_owner,
             build_approval_context=self._build_public_approval_context,
+            replay_risk_approval=self._replay_risk_approval,
+        )
+
+    def _replay_risk_approval(self, bot_id: str, owner_id: str, risk_check_id: str) -> bool:
+        if self._risk_approval_guard is None:
+            raise BotPublicServiceError("risk callback guard unavailable")
+        return self._risk_approval_guard.replay(
+            get_current_env(), risk_check_id,
+            lambda puid, decision: self.handle_public_approval_callback(
+                bot_id=bot_id, owner_id=owner_id, puid=puid, last_operate=decision,
+                risk_check_id=risk_check_id,
+            ),
         )
 
     def _publish_directly(

@@ -3,6 +3,8 @@ from datetime import datetime
 from dataclasses import replace
 from unittest.mock import MagicMock
 
+import pytest
+
 from agentclaw.community.core.bot_public_risk.advance import RiskAdvance
 from agentclaw.community.core.bot_public_risk.repository import RiskCheck
 
@@ -68,3 +70,63 @@ def test_external_creation_exception_does_not_trigger_second_submission():
     assert repo.row.phase == "NEEDS_ATTENTION"
     assert json.loads(repo.row.workflow_json)["error"] == "APPROVAL_OUTCOME_UNKNOWN"
     assert submit.call_count == 1
+
+
+def test_early_callback_keeps_recovery_due_until_replayed():
+    repo = MemoryRepository(row())
+    now = datetime(2026, 1, 1)
+    def submit(record, on_started):
+        workflow = json.loads(repo.row.workflow_json)
+        workflow["pending_approval"] = {"puid": "p1", "decision": "AGREE"}
+        repo.update_current(env="dev", risk_check_id="a", row_version=repo.row.row_version,
+                            changes={"workflow_json": json.dumps(workflow)})
+        on_started({"puid": "p1"})
+        return "approval"
+    RiskAdvance(repo, lambda _: True, submit, lambda: now).advance("dev", "a")
+    assert repo.row.phase == "APPROVING"
+    assert repo.row.next_action_at == now
+
+
+def test_advance_handler_binds_tenant_and_rejects_wrong_environment():
+    from agentclaw.community.core.bot_public_risk.advance import RiskAdvanceHandler
+    from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
+
+    advance = MagicMock()
+    observed = []
+    advance.advance.side_effect = lambda env, risk_id: observed.append((get_current_avernet_tenant(), env, risk_id))
+    handler = RiskAdvanceHandler(advance, lambda: "dev")
+    handler.handle({"tenant": "tenant-x", "env": "dev", "risk_check_id": "a"})
+    assert observed == [("tenant-x", "dev", "a")]
+    with pytest.raises(ValueError):
+        handler.handle({"tenant": "tenant-x", "env": "prod", "risk_check_id": "a"})
+
+
+def test_recovery_enqueues_pending_approval_callback():
+    from agentclaw.community.core.bot_public_risk.tasks import REPLAY, RiskTasks
+    repo = MagicMock()
+    pending = row(phase="APPROVING", approval_puid="p1", next_action_at=datetime(2026, 1, 1),
+                  workflow_json='{"pending_approval":{"puid":"p1","decision":"AGREE"}}')
+    repo.list_due.return_value = (pending,)
+    queue = MagicMock()
+    tasks = RiskTasks(repo, queue, MagicMock(), lambda: datetime(2026, 1, 1))
+    tasks.recover(env="dev", now=datetime(2026, 1, 1))
+    assert queue.enqueue.call_args.args[0] == REPLAY
+
+
+def test_pending_handler_replays_against_original_bot_and_applicant():
+    from agentclaw.community.core.bot_public_risk.advance import RiskPendingHandler
+    repo = MagicMock()
+    repo.get.return_value = row(phase="APPROVING", approval_puid="p1", workflow_json='{"pending_approval":{}}')
+    bots = MagicMock()
+    bots.get_by_pk.return_value = {"bot_id": "b", "entity_id": "e"}
+    guard = MagicMock()
+    def replay(env, risk_id, callback):
+        callback("p1", "AGREE")
+        return True
+    guard.replay.side_effect = replay
+    public = MagicMock()
+    handler = RiskPendingHandler(repo, bots, public, guard, lambda: "dev")
+    handler.handle({"tenant": "teamclaw", "env": "dev", "risk_check_id": "a"})
+    kwargs = public.handle_public_approval_callback.call_args.kwargs
+    assert kwargs["bot_id"] == "b:e" and kwargs["owner_id"] == "owner"
+    assert kwargs["risk_check_id"] == "a" and kwargs["puid"] == "p1"
