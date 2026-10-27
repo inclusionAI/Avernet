@@ -6,9 +6,9 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from src.bootstrap import oss_worker_lifecycle_routes as lifecycle_routes
-from src.bootstrap.opensource_app import create_opensource_app
-from src.domain.models.worker import (
+from app.bootstrap import oss_worker_lifecycle_routes as lifecycle_routes
+from app.bootstrap.opensource_app import create_opensource_app
+from app.domain.models.worker import (
     Availability,
     TrustLevel,
     Worker,
@@ -16,7 +16,7 @@ from src.domain.models.worker import (
     WorkerState,
     WorkerType,
 )
-from src.interfaces.api.dependencies.worker_dependencies import (
+from app.adapters.http.dependencies.worker_dependencies import (
     get_worker_profile_content_service,
 )
 
@@ -150,7 +150,7 @@ def test_availability_route_propagates_vector_payload_update_failure(monkeypatch
         "vector payload update failed"
     )
     monkeypatch.setattr(
-        "src.interfaces.api.dependencies.fusion_dependencies._get_vector_match_service",
+        "app.adapters.http.dependencies.fusion_dependencies._get_vector_match_service",
         lambda: SimpleNamespace(_vector_store=vector_store),
     )
 

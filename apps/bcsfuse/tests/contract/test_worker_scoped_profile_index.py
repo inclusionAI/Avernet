@@ -4,38 +4,38 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from src.domain.models.worker import Worker, WorkerIdentity, WorkerState, WorkerType
-from src.domain.models.worker_lifecycle_state import WorkerLifecycleState
-from src.domain.models.worker_profile import (
+from app.domain.models.worker import Worker, WorkerIdentity, WorkerState, WorkerType
+from app.domain.models.worker_lifecycle_state import WorkerLifecycleState
+from app.domain.models.worker_profile import (
     ProfileType,
     WorkerProfile,
     WorkerProfileScanResult,
 )
-from src.domain.models.worker_profile_content import WorkerProfileContent
-from src.domain.models.worker_runtime_state import WorkerRuntimeState
-from src.infra.adapters.in_memory_worker_registry_store import (
+from app.domain.models.worker_profile_content import WorkerProfileContent
+from app.domain.models.worker_runtime_state import WorkerRuntimeState
+from app.infra.adapters.in_memory_worker_registry_store import (
     InMemoryWorkerRegistryStore,
 )
-from src.infra.adapters.in_memory_worker_runtime_state_store import (
+from app.infra.adapters.in_memory_worker_runtime_state_store import (
     InMemoryWorkerRuntimeStateStore,
 )
-from src.infra.public.stores.in_memory_worker_profile_content_store import (
+from app.infra.public.stores.in_memory_worker_profile_content_store import (
     InMemoryWorkerProfileContentStore,
 )
-from src.infra.public.stores.mysql_worker_profile_content_store import (
+from app.infra.public.stores.mysql_worker_profile_content_store import (
     MySQLWorkerProfileContentStore,
 )
-from src.infra.public.stores.sqlite_worker_profile_content_store import (
+from app.infra.public.stores.sqlite_worker_profile_content_store import (
     SQLiteWorkerProfileContentStore,
 )
-from src.infra.worker_profiles.sources.api_profile_source import APIProfileSource
-from src.infra.worker_profiles.sources.composite_worker_profile_source import (
+from app.infra.worker_profiles.sources.api_profile_source import APIProfileSource
+from app.infra.worker_profiles.sources.composite_worker_profile_source import (
     CompositeWorkerProfileSource,
 )
-from src.infra.worker_profiles.sources.registry_worker_profile_source import (
+from app.infra.worker_profiles.sources.registry_worker_profile_source import (
     RegistryWorkerProfileSource,
 )
-from src.interfaces.api.dependencies import fusion_dependencies, worker_dependencies
+from app.adapters.http.dependencies import fusion_dependencies, worker_dependencies
 
 
 @pytest.mark.parametrize("api_profile_id", ["selected", "fallback"])
@@ -129,7 +129,7 @@ def test_index_builder_preserves_active_preference_and_first_profile_fallback(
     indexer = MagicMock()
     indexer.update_index_smart.return_value = SimpleNamespace(indexed_count=1)
     monkeypatch.setattr(
-        "src.domain.services.profile_embedding_indexer.ProfileEmbeddingIndexer",
+        "app.domain.services.profile_embedding_indexer.ProfileEmbeddingIndexer",
         lambda **kwargs: indexer,
     )
 

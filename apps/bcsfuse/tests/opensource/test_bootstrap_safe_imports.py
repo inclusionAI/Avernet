@@ -14,10 +14,10 @@ def test_oss_worker_lifecycle_routes_do_not_load_legacy_api_app() -> None:
     )
     script = """
 import sys
-import src.bootstrap.oss_worker_lifecycle_routes
+import app.bootstrap.oss_worker_lifecycle_routes
 
-assert "src.interfaces.api.app" not in sys.modules
-assert "src.interfaces.api.worker_routes" not in sys.modules
+assert "app.adapters.http.app" not in sys.modules
+assert "app.adapters.http.worker_routes" not in sys.modules
 """
 
     completed = subprocess.run(
@@ -40,7 +40,7 @@ def test_legacy_api_package_exports_keep_their_object_types() -> None:
     )
     script = """
 from fastapi import APIRouter, FastAPI
-from src.interfaces.api import app, worker_router
+from app.adapters.http import app, worker_router
 
 assert isinstance(app, FastAPI), type(app)
 assert isinstance(worker_router, APIRouter), type(worker_router)

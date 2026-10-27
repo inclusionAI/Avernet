@@ -86,13 +86,13 @@ class TestWorkerProfileQueryService:
 
     def test_list_profiles(self, sample_data):
         """测试 list_profiles 返回所有 profiles"""
-        from src.application.services.worker_profile_query_service import (
+        from app.application.services.worker_profile_query_service import (
             WorkerProfileQueryService,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
 
@@ -108,13 +108,13 @@ class TestWorkerProfileQueryService:
 
     def test_get_profile_found(self, sample_data):
         """测试 get_profile 找到 profile"""
-        from src.application.services.worker_profile_query_service import (
+        from app.application.services.worker_profile_query_service import (
             WorkerProfileQueryService,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
 
@@ -130,13 +130,13 @@ class TestWorkerProfileQueryService:
 
     def test_get_profile_not_found(self, sample_data):
         """测试 get_profile 找不到 profile"""
-        from src.application.services.worker_profile_query_service import (
+        from app.application.services.worker_profile_query_service import (
             WorkerProfileQueryService,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
 
@@ -150,13 +150,13 @@ class TestWorkerProfileQueryService:
 
     def test_get_profiles_by_staff(self, sample_data):
         """测试 get_profiles_by_staff"""
-        from src.application.services.worker_profile_query_service import (
+        from app.application.services.worker_profile_query_service import (
             WorkerProfileQueryService,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
 
@@ -217,13 +217,13 @@ class TestWorkerProfileQueryServiceSearch:
 
     def test_search_profiles_by_query(self, sample_data):
         """测试 search_profiles 返回带 score 和 reasons 的结果"""
-        from src.application.services.worker_profile_query_service import (
+        from app.application.services.worker_profile_query_service import (
             WorkerProfileQueryService,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
 
@@ -234,7 +234,7 @@ class TestWorkerProfileQueryServiceSearch:
         result = service.search_profiles("search")
 
         # 返回 ProfileSearchResult
-        from src.domain.models.worker_profile import ProfileSearchResult
+        from app.domain.models.worker_profile import ProfileSearchResult
         assert isinstance(result, ProfileSearchResult)
 
         # 查询被保存
@@ -251,13 +251,13 @@ class TestWorkerProfileQueryServiceSearch:
 
     def test_search_profiles_empty_result(self, sample_data):
         """测试搜索无结果"""
-        from src.application.services.worker_profile_query_service import (
+        from app.application.services.worker_profile_query_service import (
             WorkerProfileQueryService,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
 
@@ -318,13 +318,13 @@ class TestWorkerProfileQueryServiceRecommend:
 
     def test_recommend_profiles(self, sample_data):
         """测试 recommend_profiles 返回带 score 和 reasons 的结果"""
-        from src.application.services.worker_profile_query_service import (
+        from app.application.services.worker_profile_query_service import (
             WorkerProfileQueryService,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
 
@@ -335,7 +335,7 @@ class TestWorkerProfileQueryServiceRecommend:
         result = service.recommend_profiles("I need help with web search")
 
         # 返回 ProfileRecommendResult
-        from src.domain.models.worker_profile import ProfileRecommendResult
+        from app.domain.models.worker_profile import ProfileRecommendResult
         assert isinstance(result, ProfileRecommendResult)
 
         # context 被保存
@@ -353,13 +353,13 @@ class TestWorkerProfileQueryServiceRecommend:
 
     def test_recommend_profiles_empty(self, sample_data):
         """测试推荐无结果"""
-        from src.application.services.worker_profile_query_service import (
+        from app.application.services.worker_profile_query_service import (
             WorkerProfileQueryService,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
 
@@ -401,13 +401,13 @@ class TestWorkerProfileQueryServiceTopK:
 
     def test_search_top_k(self, sample_data):
         """测试搜索 top_k"""
-        from src.application.services.worker_profile_query_service import (
+        from app.application.services.worker_profile_query_service import (
             WorkerProfileQueryService,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
 
@@ -421,13 +421,13 @@ class TestWorkerProfileQueryServiceTopK:
 
     def test_recommend_top_k(self, sample_data):
         """测试推荐 top_k"""
-        from src.application.services.worker_profile_query_service import (
+        from app.application.services.worker_profile_query_service import (
             WorkerProfileQueryService,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
 

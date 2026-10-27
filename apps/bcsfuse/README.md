@@ -7,9 +7,12 @@ BCSFuse is a collaboration control plane for AI worker management, providing tas
 **IMPORTANT:**
 - This OSS candidate must not use internal DRM/Layotto/Sofa/ZDAS dependencies
 - Do not commit runtime data, logs, SQLite/Faiss/Qdrant storage, or real secrets
-- Original internal `bcsfuse` remains protected and will not be affected
+- Enterprise hosts compose the public TC application with their own providers
 
 ## Quick Start
+
+For the `app` / `search_core` package layout, current extraction scope and
+public/enterprise boundaries, see [search architecture](docs/architecture/search-core-boundary.md).
 
 ### Installation
 
@@ -18,7 +21,7 @@ BCSFuse is a collaboration control plane for AI worker management, providing tas
 uv sync
 
 # Or using pip, from apps/bcsfuse in a complete repository checkout
-pip install -e packages/avernet-search -e .
+pip install -e packages/search-core -e .
 ```
 
 ### Start Server

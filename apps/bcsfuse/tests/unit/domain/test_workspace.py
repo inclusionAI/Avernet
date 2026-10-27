@@ -12,8 +12,8 @@ from datetime import datetime
 
 import pytest
 
-from src.domain.models.workspace import Workspace, WorkspaceStatus, WorkspaceEvent
-from src.domain.models.team_spec import TeamSpec, RoleAssignment
+from app.domain.models.workspace import Workspace, WorkspaceStatus, WorkspaceEvent
+from app.domain.models.team_spec import TeamSpec, RoleAssignment
 
 
 # =============================================================================

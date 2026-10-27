@@ -33,11 +33,11 @@ import pytest
 import os
 from fastapi.testclient import TestClient
 
-from src.interfaces.api.app import app
-from src.interfaces.api.dependencies.worker_dependencies import reset_stores, use_in_memory_stores
-from src.interfaces.api.dependencies.fusion_dependencies import reset_fusion_services
-from src.infra.observability.service_counters import reset_service_counters
-from src.infra.observability.strict_mode_checker import reset_strict_mode_checker, get_strict_mode_checker
+from app.adapters.http.app import app
+from app.adapters.http.dependencies.worker_dependencies import reset_stores, use_in_memory_stores
+from app.adapters.http.dependencies.fusion_dependencies import reset_fusion_services
+from app.infra.observability.service_counters import reset_service_counters
+from app.infra.observability.strict_mode_checker import reset_strict_mode_checker, get_strict_mode_checker
 
 
 # ============================================================================
@@ -463,7 +463,7 @@ class TestGoldenRegression:
 
         # 如果设置了 REQUIRE_REAL_EMBEDDING，验证真实调用
         if os.environ.get("REQUIRE_REAL_EMBEDDING") == "true":
-            from src.infra.observability.service_counters import get_service_counters
+            from app.infra.observability.service_counters import get_service_counters
             counters = get_service_counters()
 
             summary = counters.get_summary()
@@ -502,7 +502,7 @@ def test_final_validation():
             raise
 
     # 打印服务计数器
-    from src.infra.observability.service_counters import get_service_counters
+    from app.infra.observability.service_counters import get_service_counters
     counters = get_service_counters()
     counters.print_summary()
 

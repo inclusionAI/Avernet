@@ -2,11 +2,11 @@
 
 import pytest
 
-from src.application.services.worker_vector_match_service import WorkerVectorMatchService
-from src.domain.models.metadata_record import MetadataRecord
-from src.domain.models.vector_point import VectorPoint
-from src.infra.metadatastores.file_metadata_store_adapter import FileMetadataStoreAdapter
-from src.infra.vectorstores.faiss_vector_store_adapter import FaissVectorStoreAdapter
+from app.application.services.worker_vector_match_service import WorkerVectorMatchService
+from app.domain.models.metadata_record import MetadataRecord
+from app.domain.models.vector_point import VectorPoint
+from app.infra.metadatastores.file_metadata_store_adapter import FileMetadataStoreAdapter
+from app.infra.vectorstores.faiss_vector_store_adapter import FaissVectorStoreAdapter
 
 
 @pytest.mark.parametrize("with_metadata", [False, True])

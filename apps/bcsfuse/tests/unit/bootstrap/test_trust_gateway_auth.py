@@ -3,9 +3,9 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from src.bootstrap.application_context import ApplicationContext
-from src.bootstrap.oss_business_routes import _trust_gateway_enabled, require_oss_auth
-from src.bootstrap.provider_registry import ProviderRegistry
+from app.bootstrap.application_context import ApplicationContext
+from app.bootstrap.oss_business_routes import _trust_gateway_enabled, require_oss_auth
+from app.bootstrap.provider_registry import ProviderRegistry
 
 
 class ContractAuthProvider:

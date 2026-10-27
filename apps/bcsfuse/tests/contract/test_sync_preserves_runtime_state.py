@@ -7,21 +7,21 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from src.domain.models.worker import Availability, TrustLevel, Worker, WorkerIdentity, WorkerState, WorkerType
-from src.domain.models.worker_lifecycle_state import WorkerLifecycleState
-from src.domain.models.worker_runtime_state import WorkerRuntimeState
-from src.infra.adapters.in_memory_worker_registry_store import InMemoryWorkerRegistryStore
-from src.infra.adapters.in_memory_worker_runtime_state_store import InMemoryWorkerRuntimeStateStore
-from src.infra.public.audit.in_memory_worker_audit_log_store import (
+from app.domain.models.worker import Availability, TrustLevel, Worker, WorkerIdentity, WorkerState, WorkerType
+from app.domain.models.worker_lifecycle_state import WorkerLifecycleState
+from app.domain.models.worker_runtime_state import WorkerRuntimeState
+from app.infra.adapters.in_memory_worker_registry_store import InMemoryWorkerRegistryStore
+from app.infra.adapters.in_memory_worker_runtime_state_store import InMemoryWorkerRuntimeStateStore
+from app.infra.public.audit.in_memory_worker_audit_log_store import (
     InMemoryWorkerAuditLogStore,
 )
-from src.interfaces.api import worker_profile_parity_routes as routes
-from src.interfaces.api.worker_profile_routes import analysis, common, vector_sync
+from app.adapters.http import worker_profile_parity_routes as routes
+from app.adapters.http.worker_profile_routes import analysis, common, vector_sync
 
 
 @pytest.fixture
 def sync_app(monkeypatch):
-    from src.application.utils import drm_config_helper
+    from app.application.utils import drm_config_helper
 
     workers = InMemoryWorkerRegistryStore()
     runtime = InMemoryWorkerRuntimeStateStore()
@@ -246,9 +246,9 @@ def test_sync_keeps_internal_capability_verification_side_effects(
     sync_app,
     monkeypatch,
 ):
-    from src.application.utils import drm_config_helper
-    from src.domain import events
-    from src.interfaces.api.dependencies import fusion_dependencies
+    from app.application.utils import drm_config_helper
+    from app.domain import events
+    from app.adapters.http.dependencies import fusion_dependencies
 
     client, workers, _, _, _ = sync_app
     verify_service = SimpleNamespace(_running=False, start=AsyncMock())
@@ -286,7 +286,7 @@ def test_profile_patch_rebuilds_vectors_when_embedding_content_changes(
     sync_app,
     monkeypatch,
 ):
-    from src.interfaces.api.dependencies import fusion_dependencies
+    from app.adapters.http.dependencies import fusion_dependencies
 
     client, _, _, profiles, _ = sync_app
     profiles.get_profile.return_value = {
@@ -319,7 +319,7 @@ def test_profile_patch_rebuilds_vectors_when_embedding_content_changes(
 
 
 def test_worker_config_update_preserves_audit_side_effect(sync_app):
-    from src.domain.models.worker_audit_log import WorkerAuditAction
+    from app.domain.models.worker_audit_log import WorkerAuditAction
 
     client, workers, runtime, _, _ = sync_app
     seed_worker(workers, runtime, WorkerRuntimeState.ONLINE)
@@ -473,12 +473,12 @@ def test_sparse_sync_uses_preserved_availability_for_analysis(sync_app):
 async def test_background_analysis_preserves_profile_identity_and_skills(monkeypatch):
     import asyncio
 
-    from src.application.services.profile_analyzer_service import ProfileAnalysisResult
-    from src.infra.public.stores.in_memory_worker_profile_content_store import (
+    from app.application.services.profile_analyzer_service import ProfileAnalysisResult
+    from app.infra.public.stores.in_memory_worker_profile_content_store import (
         InMemoryWorkerProfileContentStore,
     )
-    from src.interfaces.api import profile_routes
-    from src.interfaces.api.dependencies import fusion_dependencies
+    from app.adapters.http import profile_routes
+    from app.adapters.http.dependencies import fusion_dependencies
 
     analyzed = []
     analyzer = MagicMock()
@@ -550,11 +550,11 @@ async def test_background_analysis_preserves_profile_identity_and_skills(monkeyp
 async def test_stale_background_analysis_cannot_restore_an_older_profile(
     monkeypatch, cleared_generated_only,
 ):
-    from src.application.services.profile_analyzer_service import ProfileAnalysisResult
-    from src.infra.public.stores.in_memory_worker_profile_content_store import (
+    from app.application.services.profile_analyzer_service import ProfileAnalysisResult
+    from app.infra.public.stores.in_memory_worker_profile_content_store import (
         InMemoryWorkerProfileContentStore,
     )
-    from src.interfaces.api.dependencies import fusion_dependencies
+    from app.adapters.http.dependencies import fusion_dependencies
 
     worker_id = "bot:owner"
     store = InMemoryWorkerProfileContentStore()
@@ -608,11 +608,11 @@ async def test_stale_background_analysis_cannot_restore_an_older_profile(
 
 @pytest.mark.asyncio
 async def test_failed_background_analysis_keeps_generated_fields(monkeypatch):
-    from src.application.services.profile_analyzer_service import ProfileAnalysisResult
-    from src.infra.public.stores.in_memory_worker_profile_content_store import (
+    from app.application.services.profile_analyzer_service import ProfileAnalysisResult
+    from app.infra.public.stores.in_memory_worker_profile_content_store import (
         InMemoryWorkerProfileContentStore,
     )
-    from src.interfaces.api.dependencies import fusion_dependencies
+    from app.adapters.http.dependencies import fusion_dependencies
 
     profile_data = {
         "worker_id": "bot:owner",

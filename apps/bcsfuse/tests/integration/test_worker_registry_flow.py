@@ -22,7 +22,7 @@ class TestWorkerRegistryE2EFlow:
     @pytest.fixture
     def client(self):
         """创建测试客户端"""
-        from src.interfaces.api.app import app
+        from app.adapters.http.app import app
         return TestClient(app)
 
     def test_worker_create_get_update_delete_flow(self, client):
@@ -138,7 +138,7 @@ class TestWorkerRegistryErrorHandling:
 
     @pytest.fixture
     def client(self):
-        from src.interfaces.api.app import app
+        from app.adapters.http.app import app
         return TestClient(app)
 
     def test_create_duplicate_worker_returns_409(self, client):
@@ -230,8 +230,8 @@ class TestWorkerRegistryServiceIntegration:
 
     def test_service_with_repository_integration(self):
         """验证 Service 与 Repository 的集成"""
-        from src.application.services.worker_registry_service import WorkerRegistryService
-        from src.infra.repositories.in_memory_worker_repository import InMemoryWorkerRepository
+        from app.application.services.worker_registry_service import WorkerRegistryService
+        from app.infra.repositories.in_memory_worker_repository import InMemoryWorkerRepository
 
         # 创建 service
         repo = InMemoryWorkerRepository()
@@ -294,7 +294,7 @@ class TestWorkerRuntimeStateVersionConflict:
     @pytest.fixture
     def client(self):
         """创建测试客户端"""
-        from src.interfaces.api.app import app
+        from app.adapters.http.app import app
         return TestClient(app)
 
     def test_online_then_offline_no_version_conflict(self, client):

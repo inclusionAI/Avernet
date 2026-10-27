@@ -7,7 +7,7 @@ Tests profile key normalization and matching strategies.
 import pytest
 from unittest.mock import MagicMock, patch
 
-from src.domain.services.profile_key_canonicalizer import ProfileKeyCanonicalizer
+from app.domain.services.profile_key_canonicalizer import ProfileKeyCanonicalizer
 
 
 class TestProfileKeyCanonicalizer:

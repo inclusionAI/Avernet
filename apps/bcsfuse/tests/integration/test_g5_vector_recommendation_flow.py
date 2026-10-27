@@ -2,18 +2,18 @@ from __future__ import annotations
 import pytest
 from unittest.mock import Mock, MagicMock
 from fastapi.testclient import TestClient
-from src.domain.models.fusion_result import Perspective
-from src.domain.models.candidate_recommendation import (
+from app.domain.models.fusion_result import Perspective
+from app.domain.models.candidate_recommendation import (
     CandidateRecommendation,
     CandidateRecommendationResponse,
 )
-from src.domain.models.domain_coverage import DomainCoverage
-from src.domain.models.retrieval_mode import RetrievalMode
-from src.domain.models.worker_profile import WorkerProfile, ProfileType
-from src.domain.models.context_fragment import ContextFragment, ContextKind
-from src.domain.models.skill_profile import SkillProfile
-from src.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext
-from src.interfaces.api.fusion_routes import router, set_provider
+from app.domain.models.domain_coverage import DomainCoverage
+from app.domain.models.retrieval_mode import RetrievalMode
+from app.domain.models.worker_profile import WorkerProfile, ProfileType
+from app.domain.models.context_fragment import ContextFragment, ContextKind
+from app.domain.models.skill_profile import SkillProfile
+from app.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext
+from app.adapters.http.fusion_routes import router, set_provider
 from fastapi import FastAPI
 from tests.integration.test_g5_candidate_recommendation_flow import client, mock_retrieval_service, sample_recommendation_response
 from tests.integration.test_g5_candidate_recommendation_flow import MockG5ProviderWithRecommendation
@@ -34,8 +34,8 @@ class TestG5VectorMatchIntegration:
     @pytest.fixture
     def mock_vector_match_service(self):
         """创建 mock vector match service"""
-        from src.application.services.worker_vector_match_service import MatchResult
-        from src.domain.models.metadata_record import MetadataRecord
+        from app.application.services.worker_vector_match_service import MatchResult
+        from app.domain.models.metadata_record import MetadataRecord
 
         service = Mock()
 
@@ -82,7 +82,7 @@ class TestG5VectorMatchIntegration:
     @pytest.fixture
     def vector_aware_retrieval_service(self):
         """创建支持向量匹配的 retrieval service"""
-        from src.domain.services.worker_profile_retrieval_service import (
+        from app.domain.services.worker_profile_retrieval_service import (
             RetrievalResult,
             RetrievalResponse,
         )
@@ -166,7 +166,7 @@ class TestG5VectorMatchIntegration:
         """
         G5 模式下使用向量匹配获取补充推荐
         """
-        from src.application.services.worker_candidate_recommendation_impl import (
+        from app.application.services.worker_candidate_recommendation_impl import (
             WorkerCandidateRecommendationImpl,
         )
 
@@ -205,7 +205,7 @@ class TestG5VectorMatchIntegration:
         """
         G1 (AGENT) 模式不使用向量匹配
         """
-        from src.application.services.worker_candidate_recommendation_impl import (
+        from app.application.services.worker_candidate_recommendation_impl import (
             WorkerCandidateRecommendationImpl,
         )
 
@@ -239,7 +239,7 @@ class TestG5VectorMatchIntegration:
         """
         向量匹配失败时不使用 keyword retrieval 扩大召回范围
         """
-        from src.application.services.worker_candidate_recommendation_impl import (
+        from app.application.services.worker_candidate_recommendation_impl import (
             WorkerCandidateRecommendationImpl,
         )
 
@@ -276,7 +276,7 @@ class TestG5VectorMatchIntegration:
         """
         显式 participants 优先级高于向量匹配结果
         """
-        from src.application.services.worker_candidate_recommendation_impl import (
+        from app.application.services.worker_candidate_recommendation_impl import (
             WorkerCandidateRecommendationImpl,
         )
 
@@ -317,7 +317,7 @@ class TestG5VectorMatchIntegration:
         """
         启用向量匹配后输出契约保持稳定
         """
-        from src.application.services.worker_candidate_recommendation_impl import (
+        from app.application.services.worker_candidate_recommendation_impl import (
             WorkerCandidateRecommendationImpl,
         )
 
@@ -353,7 +353,7 @@ class TestG5VectorMatchIntegration:
         """
         显式 participants 被正确排除在向量匹配结果之外
         """
-        from src.application.services.worker_candidate_recommendation_impl import (
+        from app.application.services.worker_candidate_recommendation_impl import (
             WorkerCandidateRecommendationImpl,
         )
 
@@ -389,15 +389,15 @@ class TestG5VectorMatchE2E:
     @pytest.fixture
     def client_with_vector_match(self):
         """创建带向量匹配的测试客户端"""
-        from src.application.services.worker_candidate_recommendation_impl import (
+        from app.application.services.worker_candidate_recommendation_impl import (
             WorkerCandidateRecommendationImpl,
         )
-        from src.domain.services.worker_profile_retrieval_service import (
+        from app.domain.services.worker_profile_retrieval_service import (
             RetrievalResult,
             RetrievalResponse,
         )
-        from src.application.services.worker_vector_match_service import MatchResult
-        from src.domain.models.metadata_record import MetadataRecord
+        from app.application.services.worker_vector_match_service import MatchResult
+        from app.domain.models.metadata_record import MetadataRecord
 
         app = FastAPI()
         app.include_router(router, prefix="/api/v1")

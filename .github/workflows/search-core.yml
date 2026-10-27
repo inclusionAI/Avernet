@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'apps/bcsfuse/**'
+      - 'docker/services/bcsfuse.dockerfile'
       - '.github/workflows/search-core.yml'
   workflow_dispatch:
 
@@ -19,13 +20,15 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install public packages from this checkout
-        run: python -m pip install -e 'apps/bcsfuse/packages/avernet-search[http,test]' -e 'apps/bcsfuse/agent-search[test]' -e 'apps/bcsfuse[dev]'
-      - name: Core and Agent application contracts
-        run: python -m pytest apps/bcsfuse/packages/avernet-search/tests apps/bcsfuse/agent-search/tests -q
+        run: python -m pip install -e 'apps/bcsfuse/packages/search-core[http,test]' -e 'apps/bcsfuse[dev]'
+      - name: Core contracts
+        run: python -m pytest apps/bcsfuse/packages/search-core/tests -q
       - name: TC compatibility contracts
         working-directory: apps/bcsfuse
         run: >-
           python -m pytest tests/contract/test_search_migration_baseline.py
           tests/contract/test_shared_search_application.py
           tests/unit/bootstrap/test_app_factory.py
-          tests/opensource/test_bootstrap_safe_imports.py -q
+          tests/opensource/test_bootstrap_safe_imports.py
+          tests/opensource/test_package_layout.py
+          tests/smoke/test_smoke_main.py -q

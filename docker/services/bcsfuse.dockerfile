@@ -42,13 +42,8 @@ WORKDIR /app
 
 # Copy package metadata first for layer caching.
 COPY apps/bcsfuse/pyproject.toml apps/bcsfuse/README.md ./
-COPY apps/bcsfuse/packages/avernet-search/pyproject.toml apps/bcsfuse/packages/avernet-search/README.md /opt/avernet-search/
-COPY apps/bcsfuse/packages/avernet-search/src /opt/avernet-search/src
-
-# Install package in editable mode with dev extras (tests are kept in image
-# for optional container self-verification; they are not run at startup).
-RUN python -m pip install --no-cache-dir --upgrade pip \
-    && python -m pip install --no-cache-dir /opt/avernet-search -e ".[dev]"
+COPY apps/bcsfuse/packages/search-core/pyproject.toml apps/bcsfuse/packages/search-core/README.md /opt/search-core/
+COPY apps/bcsfuse/packages/search-core/src /opt/search-core/src
 
 # Copy only the public bcsfuse source tree. We intentionally avoid copying
 # apps/backend, apps/bcs, apps/frontend, or any sibling internal modules.
@@ -56,6 +51,10 @@ COPY apps/bcsfuse/src ./src
 COPY apps/bcsfuse/schemas ./schemas
 COPY apps/bcsfuse/configs ./configs
 COPY apps/bcsfuse/main.py ./
+
+# Source is present before installing the src-layout application.
+RUN python -m pip install --no-cache-dir --upgrade pip \
+    && python -m pip install --no-cache-dir /opt/search-core -e ".[dev]"
 
 # Copy legal / deployment notes only; no live credentials.
 COPY apps/bcsfuse/LEGAL.md apps/bcsfuse/FUSE_API_LOGIC.md ./

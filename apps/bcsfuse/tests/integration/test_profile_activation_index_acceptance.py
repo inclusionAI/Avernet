@@ -2,8 +2,8 @@
 
 import pytest
 
-from src.domain.models.vector_point import VectorPoint
-from src.infra.config.feature_flags import FeatureFlags
+from app.domain.models.vector_point import VectorPoint
+from app.infra.config.feature_flags import FeatureFlags
 from tests.fixtures.runtime_acceptance import acceptance_run
 from tests.integration.test_isolated_runtime_acceptance import (
     TOKEN,

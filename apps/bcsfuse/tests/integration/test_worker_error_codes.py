@@ -7,8 +7,8 @@ Integration Tests for Worker Error Codes
 import pytest
 from fastapi.testclient import TestClient
 
-from src.interfaces.api.app import app
-from src.interfaces.api.dependencies.worker_dependencies import (
+from app.adapters.http.app import app
+from app.adapters.http.dependencies.worker_dependencies import (
     reset_stores,
     use_in_memory_stores,
 )

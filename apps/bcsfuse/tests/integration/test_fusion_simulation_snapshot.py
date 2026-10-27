@@ -23,20 +23,20 @@ from typing import Optional
 
 import pytest
 
-from src.domain.models.context_fragment import ContextFragment, ContextKind
-from src.domain.models.fusion_request import FusionRequest
-from src.domain.models.fusion_simulation_input import FusionSimulationInput
-from src.domain.models.retrieval_mode import RetrievalMode
-from src.domain.models.skill_profile import SkillProfile
-from src.domain.models.worker_context_digest import WorkerContextDigest
-from src.domain.models.worker_profile import WorkerProfile, ProfileType
-from src.domain.services.worker_context_preparation_service import (
+from app.domain.models.context_fragment import ContextFragment, ContextKind
+from app.domain.models.fusion_request import FusionRequest
+from app.domain.models.fusion_simulation_input import FusionSimulationInput
+from app.domain.models.retrieval_mode import RetrievalMode
+from app.domain.models.skill_profile import SkillProfile
+from app.domain.models.worker_context_digest import WorkerContextDigest
+from app.domain.models.worker_profile import WorkerProfile, ProfileType
+from app.domain.services.worker_context_preparation_service import (
     WorkerContextPreparationService,
 )
-from src.domain.services.worker_profile_retrieval_service import (
+from app.domain.services.worker_profile_retrieval_service import (
     WorkerProfileRetrievalService,
 )
-from src.domain.services.fusion_simulation_service import FusionSimulationService
+from app.domain.services.fusion_simulation_service import FusionSimulationService
 
 
 # =============================================================================
@@ -240,7 +240,7 @@ class TestFusionSimulationFixtureBased:
                 self._profiles = profiles
 
             def scan(self):
-                from src.domain.models.worker_profile import WorkerProfileScanResult
+                from app.domain.models.worker_profile import WorkerProfileScanResult
                 return WorkerProfileScanResult(profiles=self._profiles)
 
         retrieval_service = WorkerProfileRetrievalService(source=MockSource(fixture_profiles))
@@ -435,10 +435,10 @@ class TestFusionSimulationRealSnapshot:
 
     def test_load_real_profiles_from_snapshot(self, snapshot_data_path):
         """从真实 snapshot 加载 profiles"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
 
@@ -454,10 +454,10 @@ class TestFusionSimulationRealSnapshot:
 
     def test_g1_simulation_with_real_snapshot(self, snapshot_data_path):
         """G1 模拟：使用真实 snapshot 数据"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
 
@@ -502,10 +502,10 @@ class TestFusionSimulationRealSnapshot:
 
     def test_g5_diversity_with_real_snapshot(self, snapshot_data_path):
         """G5 多样性测试：使用真实 snapshot 数据"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
 

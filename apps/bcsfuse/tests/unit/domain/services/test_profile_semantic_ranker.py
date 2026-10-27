@@ -16,9 +16,9 @@ import os
 import pytest
 from unittest.mock import patch, MagicMock
 
-from src.domain.models.worker_profile import WorkerProfile, ProfileType, SourceType
-from src.domain.models.skill_profile import SkillProfile
-from src.domain.models.profile_match_score import (
+from app.domain.models.worker_profile import WorkerProfile, ProfileType, SourceType
+from app.domain.models.skill_profile import SkillProfile
+from app.domain.models.profile_match_score import (
     ProfileMatchScore,
     ScoreComponent,
     SEMANTIC_SIMILARITY_WEIGHT,
@@ -26,10 +26,10 @@ from src.domain.models.profile_match_score import (
     SCENARIO_MATCH_WEIGHT,
     AVAILABILITY_SCORE_WEIGHT,
 )
-from src.domain.models.retrieval_mode import RetrievalMode
-from src.domain.services.profile_semantic_ranker import ProfileSemanticRanker, RerankContext
-from src.application.services.semantic_match_service import SemanticMatchService
-from src.infra.config.feature_flags import FeatureFlags
+from app.domain.models.retrieval_mode import RetrievalMode
+from app.domain.services.profile_semantic_ranker import ProfileSemanticRanker, RerankContext
+from app.application.services.semantic_match_service import SemanticMatchService
+from app.infra.config.feature_flags import FeatureFlags
 
 
 # =============================================================================
@@ -512,7 +512,7 @@ class TestBackwardCompatibility:
 
     def test_score_breakdown_none_by_default(self, sample_profile, sample_context):
         """测试 score_breakdown 默认为 None"""
-        from src.domain.models.candidate_recommendation import CandidateRecommendation
+        from app.domain.models.candidate_recommendation import CandidateRecommendation
 
         rec = CandidateRecommendation(
             worker_id="test001",
@@ -525,7 +525,7 @@ class TestBackwardCompatibility:
 
     def test_candidate_recommendation_without_score_breakdown(self, sample_profile):
         """测试 CandidateRecommendation 可以不包含 score_breakdown"""
-        from src.domain.models.candidate_recommendation import CandidateRecommendation
+        from app.domain.models.candidate_recommendation import CandidateRecommendation
 
         # 老客户端只传入必需字段
         rec = CandidateRecommendation(
@@ -548,7 +548,7 @@ class TestRetrievalServiceIntegration:
 
     def test_v2_scorer_only_used_for_agent_mode(self, sample_profile):
         """测试 V2 评分器仅用于 AGENT 模式"""
-        from src.domain.services.worker_profile_retrieval_service import (
+        from app.domain.services.worker_profile_retrieval_service import (
             WorkerProfileRetrievalService,
             RetrievalResponse,
         )
@@ -571,7 +571,7 @@ class TestRetrievalServiceIntegration:
 
     def test_legacy_scorer_used_when_flag_off(self, sample_profile):
         """测试 flag 关闭时使用 legacy 评分器"""
-        from src.domain.services.worker_profile_retrieval_service import (
+        from app.domain.services.worker_profile_retrieval_service import (
             WorkerProfileRetrievalService,
             RetrievalResponse,
         )
@@ -781,7 +781,7 @@ class TestSemanticMatchServiceAdditional:
 
     def test_profile_with_context_fragments(self):
         """测试包含 context_fragments 的 profile"""
-        from src.domain.models.context_fragment import ContextFragment, ContextKind
+        from app.domain.models.context_fragment import ContextFragment, ContextKind
 
         profile = WorkerProfile(
             staff_id="fragments",

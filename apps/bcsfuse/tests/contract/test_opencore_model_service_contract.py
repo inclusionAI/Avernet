@@ -29,7 +29,7 @@ class TestWorkerModelsContract:
 
     def test_worker_model_imports(self):
         """Test Worker model can be imported."""
-        from src.domain.models.worker import (
+        from app.domain.models.worker import (
             Worker,
             WorkerType,
             WorkerIdentity,
@@ -40,7 +40,7 @@ class TestWorkerModelsContract:
 
     def test_worker_model_minimal_instantiation(self):
         """Test minimal Worker model instantiation."""
-        from src.domain.models.worker import Worker, WorkerType
+        from app.domain.models.worker import Worker, WorkerType
 
         worker_data = {
             "id": "wrk_test_001",
@@ -63,22 +63,22 @@ class TestWorkerModelsContract:
 
     def test_worker_profile_model_imports(self):
         """Test WorkerProfile model can be imported."""
-        from src.domain.models.worker_profile import WorkerProfile
+        from app.domain.models.worker_profile import WorkerProfile
         assert WorkerProfile is not None
 
     def test_worker_profile_binding_model_imports(self):
         """Test WorkerProfileBinding model can be imported."""
-        from src.domain.models.worker_profile_binding import WorkerProfileBinding
+        from app.domain.models.worker_profile_binding import WorkerProfileBinding
         assert WorkerProfileBinding is not None
 
     def test_profile_fragment_model_imports(self):
         """Test ProfileFragment model can be imported."""
-        from src.domain.models.profile_fragment import ProfileFragment
+        from app.domain.models.profile_fragment import ProfileFragment
         assert ProfileFragment is not None
 
     def test_profile_fragment_minimal_instantiation(self):
         """Test minimal ProfileFragment instantiation."""
-        from src.domain.models.profile_fragment import ProfileFragment
+        from app.domain.models.profile_fragment import ProfileFragment
 
         fragment = ProfileFragment(
             fragment_type="skills",
@@ -90,7 +90,7 @@ class TestWorkerModelsContract:
 
     def test_worker_invalid_payload_fails(self):
         """Test invalid Worker payload fails validation."""
-        from src.domain.models.worker import Worker
+        from app.domain.models.worker import Worker
 
         with pytest.raises(ValidationError):
             Worker.model_validate({})  # missing required fields
@@ -101,17 +101,17 @@ class TestProfileModelsContract:
 
     def test_skill_profile_model_imports(self):
         """Test SkillProfile model can be imported."""
-        from src.domain.models.skill_profile import SkillProfile
+        from app.domain.models.skill_profile import SkillProfile
         assert SkillProfile is not None
 
     def test_profiling_input_model_imports(self):
         """Test ProfilingInput model can be imported."""
-        from src.domain.models.profiling_input import ProfilingInput
+        from app.domain.models.profiling_input import ProfilingInput
         assert ProfilingInput is not None
 
     def test_profiling_result_model_imports(self):
         """Test WorkerProfileExtractionResult model can be imported."""
-        from src.domain.models.profiling_result import WorkerProfileExtractionResult
+        from app.domain.models.profiling_result import WorkerProfileExtractionResult
         assert WorkerProfileExtractionResult is not None
 
 
@@ -120,17 +120,17 @@ class TestSearchModelsContract:
 
     def test_profile_match_score_model_imports(self):
         """Test ProfileMatchScore model can be imported."""
-        from src.domain.models.profile_match_score import ProfileMatchScore
+        from app.domain.models.profile_match_score import ProfileMatchScore
         assert ProfileMatchScore is not None
 
     def test_hybrid_score_model_imports(self):
         """Test HybridScore model can be imported."""
-        from src.domain.models.hybrid_score import HybridScore
+        from app.domain.models.hybrid_score import HybridScore
         assert HybridScore is not None
 
     def test_retrieval_mode_model_imports(self):
         """Test RetrievalMode model can be imported."""
-        from src.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.models.retrieval_mode import RetrievalMode
         assert RetrievalMode is not None
 
 
@@ -139,7 +139,7 @@ class TestRecommendModelsContract:
 
     def test_recommend_schemas_import(self):
         """Test recommend schemas import."""
-        from src.interfaces.api.schemas.recommend_schemas import (
+        from app.adapters.http.schemas.recommend_schemas import (
             BotRecommendationRequest,
             BotRecommendation,
             BotRecommendationResponse,
@@ -150,7 +150,7 @@ class TestRecommendModelsContract:
 
     def test_recommend_request_minimal_instantiation(self):
         """Test minimal BotRecommendationRequest instantiation."""
-        from src.interfaces.api.schemas.recommend_schemas import BotRecommendationRequest
+        from app.adapters.http.schemas.recommend_schemas import BotRecommendationRequest
 
         req = BotRecommendationRequest(question="test question")
         assert req.question == "test question"
@@ -159,7 +159,7 @@ class TestRecommendModelsContract:
 
     def test_recommend_request_invalid_payload_fails(self):
         """Test invalid BotRecommendationRequest fails validation."""
-        from src.interfaces.api.schemas.recommend_schemas import BotRecommendationRequest
+        from app.adapters.http.schemas.recommend_schemas import BotRecommendationRequest
 
         with pytest.raises(ValidationError):
             BotRecommendationRequest(question="")  # empty question
@@ -173,7 +173,7 @@ class TestFusionModelsContract:
 
     def test_fusion_schemas_import(self):
         """Test fusion schemas import."""
-        from src.interfaces.api.schemas.fusion_schemas import (
+        from app.adapters.http.schemas.fusion_schemas import (
             FuseOptions,
             FusionRequest,
             FusionResult,
@@ -188,7 +188,7 @@ class TestFusionModelsContract:
 
     def test_fusion_request_minimal_instantiation(self):
         """Test minimal FusionRequest instantiation."""
-        from src.interfaces.api.schemas.fusion_schemas import FusionRequest
+        from app.adapters.http.schemas.fusion_schemas import FusionRequest
 
         req = FusionRequest(question="test question", participants=["bot1"])
         assert req.question == "test question"
@@ -197,7 +197,7 @@ class TestFusionModelsContract:
 
     def test_fusion_options_minimal_instantiation(self):
         """Test minimal FuseOptions instantiation."""
-        from src.interfaces.api.schemas.fusion_schemas import FuseOptions
+        from app.adapters.http.schemas.fusion_schemas import FuseOptions
 
         opts = FuseOptions()
         assert opts.timeout_ms == 120000
@@ -205,7 +205,7 @@ class TestFusionModelsContract:
 
     def test_fusion_request_invalid_payload_fails(self):
         """Test invalid FusionRequest fails validation."""
-        from src.interfaces.api.schemas.fusion_schemas import FusionRequest
+        from app.adapters.http.schemas.fusion_schemas import FusionRequest
 
         with pytest.raises(ValidationError):
             FusionRequest(question="test", participants=[])
@@ -216,7 +216,7 @@ class TestVerifyModelsContract:
 
     def test_verify_schemas_import(self):
         """Test verify schemas import."""
-        from src.interfaces.api.schemas.verify_schemas import (
+        from app.adapters.http.schemas.verify_schemas import (
             BatchVerifyRequest,
             BatchVerifyAllRequest,
             DimensionResult,
@@ -231,7 +231,7 @@ class TestVerifyModelsContract:
 
     def test_batch_verify_request_minimal_instantiation(self):
         """Test minimal BatchVerifyRequest instantiation."""
-        from src.interfaces.api.schemas.verify_schemas import BatchVerifyRequest
+        from app.adapters.http.schemas.verify_schemas import BatchVerifyRequest
 
         req = BatchVerifyRequest(worker_ids=["wrk_001"])
         assert req.worker_ids == ["wrk_001"]
@@ -239,7 +239,7 @@ class TestVerifyModelsContract:
 
     def test_batch_verify_all_request_minimal_instantiation(self):
         """Test minimal BatchVerifyAllRequest instantiation."""
-        from src.interfaces.api.schemas.verify_schemas import BatchVerifyAllRequest
+        from app.adapters.http.schemas.verify_schemas import BatchVerifyAllRequest
 
         req = BatchVerifyAllRequest()
         assert req.capabilities is None
@@ -247,7 +247,7 @@ class TestVerifyModelsContract:
 
     def test_verify_request_invalid_payload_fails(self):
         """Test invalid BatchVerifyRequest fails validation."""
-        from src.interfaces.api.schemas.verify_schemas import BatchVerifyRequest
+        from app.adapters.http.schemas.verify_schemas import BatchVerifyRequest
 
         with pytest.raises(ValidationError):
             BatchVerifyRequest(worker_ids=[])
@@ -258,47 +258,47 @@ class TestServicesContract:
 
     def test_worker_registry_service_imports(self):
         """Test WorkerRegistryService can be imported."""
-        from src.application.services.worker_registry_service import WorkerRegistryService
+        from app.application.services.worker_registry_service import WorkerRegistryService
         assert WorkerRegistryService is not None
 
     def test_worker_profiling_service_imports(self):
         """Test WorkerProfilingService can be imported."""
-        from src.application.services.worker_profiling_service import WorkerProfilingService
+        from app.application.services.worker_profiling_service import WorkerProfilingService
         assert WorkerProfilingService is not None
 
     def test_worker_profile_query_service_imports(self):
         """Test WorkerProfileQueryService can be imported."""
-        from src.application.services.worker_profile_query_service import WorkerProfileQueryService
+        from app.application.services.worker_profile_query_service import WorkerProfileQueryService
         assert WorkerProfileQueryService is not None
 
     def test_semantic_match_service_imports(self):
         """Test SemanticMatchService can be imported."""
-        from src.application.services.semantic_match_service import SemanticMatchService
+        from app.application.services.semantic_match_service import SemanticMatchService
         assert SemanticMatchService is not None
 
     def test_group_fusion_service_imports(self):
         """Test GroupFusionService can be imported."""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
         assert GroupFusionService is not None
 
     def test_verify_executor_imports(self):
         """Test VerifyExecutor can be imported."""
-        from src.application.services.verify_executor import VerifyExecutor
+        from app.application.services.verify_executor import VerifyExecutor
         assert VerifyExecutor is not None
 
     def test_verify_judge_imports(self):
         """Test VerifyJudge can be imported."""
-        from src.application.services.verify_judge import VerifyJudge
+        from app.application.services.verify_judge import VerifyJudge
         assert VerifyJudge is not None
 
     def test_planning_service_imports(self):
         """Test PlanningService can be imported."""
-        from src.application.services.planning_service import PlanningService
+        from app.application.services.planning_service import PlanningService
         assert PlanningService is not None
 
     def test_worker_vector_index_service_imports(self):
         """Test WorkerVectorIndexService can be imported."""
-        from src.application.services.worker_vector_index_service import WorkerVectorIndexService
+        from app.application.services.worker_vector_index_service import WorkerVectorIndexService
         assert WorkerVectorIndexService is not None
 
 
@@ -307,8 +307,8 @@ class TestServiceConstructorContract:
 
     def test_worker_registry_service_constructor(self):
         """Test WorkerRegistryService constructor signature."""
-        from src.application.services.worker_registry_service import WorkerRegistryService
-        from src.domain.services.worker_repository import WorkerRepository
+        from app.application.services.worker_registry_service import WorkerRegistryService
+        from app.domain.services.worker_repository import WorkerRepository
         import inspect
 
         sig = inspect.signature(WorkerRegistryService.__init__)
@@ -325,7 +325,7 @@ class TestServiceConstructorContract:
 
     def test_worker_profiling_service_constructor(self):
         """Test WorkerProfilingService constructor signature."""
-        from src.application.services.worker_profiling_service import WorkerProfilingService
+        from app.application.services.worker_profiling_service import WorkerProfilingService
         import inspect
 
         sig = inspect.signature(WorkerProfilingService.__init__)
@@ -345,7 +345,7 @@ class TestNoInternalDependencies:
         import sys
 
         # Import models
-        from src.domain.models import worker, profile_fragment, worker_profile
+        from app.domain.models import worker, profile_fragment, worker_profile
 
         # Check that forbidden modules are not loaded
         forbidden_modules = [
@@ -368,7 +368,7 @@ class TestNoInternalDependencies:
         import sys
 
         # Import services
-        from src.application.services import worker_registry_service
+        from app.application.services import worker_registry_service
 
         # Check that forbidden modules are not loaded
         forbidden_modules = [
@@ -392,7 +392,7 @@ class TestNoInternalDependencies:
         import sys
 
         # Import all schemas
-        from src.interfaces.api.schemas import (
+        from app.adapters.http.schemas import (
             recommend_schemas,
             fusion_schemas,
             verify_schemas,
@@ -418,7 +418,7 @@ class TestModelValidationContract:
 
     def test_worker_validation_errors(self):
         """Test Worker model validation errors."""
-        from src.domain.models.worker import Worker
+        from app.domain.models.worker import Worker
 
         # Missing id
         with pytest.raises(ValidationError) as exc_info:
@@ -427,7 +427,7 @@ class TestModelValidationContract:
 
     def test_profile_fragment_validation(self):
         """Test ProfileFragment validation."""
-        from src.domain.models.profile_fragment import ProfileFragment
+        from app.domain.models.profile_fragment import ProfileFragment
 
         # Valid fragment
         fragment = ProfileFragment(
@@ -445,7 +445,7 @@ class TestModelValidationContract:
 
     def test_recommend_request_validation_errors(self):
         """Test BotRecommendationRequest validation errors."""
-        from src.interfaces.api.schemas.recommend_schemas import BotRecommendationRequest
+        from app.adapters.http.schemas.recommend_schemas import BotRecommendationRequest
 
         # topK out of range
         with pytest.raises(ValidationError):
@@ -467,42 +467,42 @@ class TestAdditionalDomainModels:
 
     def test_fusion_result_model_imports(self):
         """Test FusionResult model can be imported."""
-        from src.domain.models.fusion_result import FusionResult
+        from app.domain.models.fusion_result import FusionResult
         assert FusionResult is not None
 
     def test_fusion_recommendation_model_imports(self):
         """Test FusionRecommendation model can be imported."""
-        from src.domain.models.fusion_recommendation import FusionRecommendation
+        from app.domain.models.fusion_recommendation import FusionRecommendation
         assert FusionRecommendation is not None
 
     def test_expert_context_pack_model_imports(self):
         """Test ExpertContextPack model can be imported."""
-        from src.domain.models.expert_context_pack import ExpertContextPack
+        from app.domain.models.expert_context_pack import ExpertContextPack
         assert ExpertContextPack is not None
 
     def test_execution_packet_model_imports(self):
         """Test ExecutionPacket model can be imported."""
-        from src.domain.models.execution_packet import ExecutionPacket
+        from app.domain.models.execution_packet import ExecutionPacket
         assert ExecutionPacket is not None
 
     def test_evidence_bundle_model_imports(self):
         """Test EvidenceBundle model can be imported."""
-        from src.domain.models.evidence_bundle import EvidenceBundle
+        from app.domain.models.evidence_bundle import EvidenceBundle
         assert EvidenceBundle is not None
 
     def test_handoff_bundle_model_imports(self):
         """Test HandoffBundle model can be imported."""
-        from src.domain.models.handoff_bundle import HandoffBundle
+        from app.domain.models.handoff_bundle import HandoffBundle
         assert HandoffBundle is not None
 
     def test_metadata_record_model_imports(self):
         """Test MetadataRecord model can be imported."""
-        from src.domain.models.metadata_record import MetadataRecord
+        from app.domain.models.metadata_record import MetadataRecord
         assert MetadataRecord is not None
 
     def test_structured_risk_assessment_model_imports(self):
         """Test StructuredRiskAssessment model can be imported."""
-        from src.domain.models.structured_risk_assessment import StructuredRiskAssessment
+        from app.domain.models.structured_risk_assessment import StructuredRiskAssessment
         assert StructuredRiskAssessment is not None
 
 
@@ -511,15 +511,15 @@ class TestWorkerConfigModels:
 
     def test_worker_config_model_imports(self):
         """Test WorkerConfig model can be imported."""
-        from src.domain.models.worker_config import WorkerConfig
+        from app.domain.models.worker_config import WorkerConfig
         assert WorkerConfig is not None
 
     def test_worker_lifecycle_state_model_imports(self):
         """Test WorkerLifecycleState model can be imported."""
-        from src.domain.models.worker_lifecycle_state import WorkerLifecycleState
+        from app.domain.models.worker_lifecycle_state import WorkerLifecycleState
         assert WorkerLifecycleState is not None
 
     def test_worker_runtime_state_model_imports(self):
         """Test WorkerRuntimeState model can be imported."""
-        from src.domain.models.worker_runtime_state import WorkerRuntimeState
+        from app.domain.models.worker_runtime_state import WorkerRuntimeState
         assert WorkerRuntimeState is not None

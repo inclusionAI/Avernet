@@ -7,7 +7,7 @@ Stage 1: 测试 Worker 模型新增字段
 import pytest
 from datetime import datetime
 
-from src.domain.models.worker import (
+from app.domain.models.worker import (
     Worker,
     WorkerType,
     WorkerIdentity,
@@ -17,9 +17,9 @@ from src.domain.models.worker import (
     Capability,
     CapabilityLevel,
 )
-from src.domain.models.worker_lifecycle_state import WorkerLifecycleState
-from src.domain.models.worker_runtime_state import WorkerRuntimeState
-from src.domain.models.worker_source_info import WorkerSourceType
+from app.domain.models.worker_lifecycle_state import WorkerLifecycleState
+from app.domain.models.worker_runtime_state import WorkerRuntimeState
+from app.domain.models.worker_source_info import WorkerSourceType
 
 
 class TestWorkerModelEnhanced:

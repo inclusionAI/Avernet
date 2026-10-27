@@ -61,20 +61,6 @@ wheels = [
 ]
 
 [[package]]
-name = "avernet-search"
-version = "0.1.0"
-source = { editable = "packages/avernet-search" }
-
-[package.metadata]
-requires-dist = [
-    { name = "fastapi", marker = "extra == 'http'", specifier = ">=0.100.0" },
-    { name = "httpx", marker = "extra == 'test'", specifier = ">=0.24.0" },
-    { name = "pydantic", marker = "extra == 'http'", specifier = ">=2.0.0" },
-    { name = "pytest", marker = "extra == 'test'", specifier = ">=7" },
-]
-provides-extras = ["http", "test"]
-
-[[package]]
 name = "backports-asyncio-runner"
 version = "1.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -89,7 +75,6 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "apscheduler" },
-    { name = "avernet-search" },
     { name = "faiss-cpu" },
     { name = "fastapi" },
     { name = "httpx" },
@@ -105,6 +90,7 @@ dependencies = [
     { name = "pyyaml" },
     { name = "qdrant-client" },
     { name = "requests" },
+    { name = "search-core" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -118,7 +104,6 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "apscheduler", specifier = ">=3.10.0" },
-    { name = "avernet-search", editable = "packages/avernet-search" },
     { name = "faiss-cpu", specifier = "==1.8.0" },
     { name = "fastapi", specifier = ">=0.100.0" },
     { name = "httpx", specifier = ">=0.24.0" },
@@ -137,6 +122,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "qdrant-client", specifier = ">=1.12.0" },
     { name = "requests" },
+    { name = "search-core", editable = "packages/search-core" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.23.0" },
 ]
 provides-extras = ["dev"]
@@ -977,6 +963,20 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/20/91/092bacadeda3edf92bf743cc96a7be133e13a39cdbfd7b5082e7ab638406/rpds_py-0.30.0-pp311-pypy311_pp73-musllinux_1_2_i686.whl", hash = "sha256:1b151685b23929ab7beec71080a8889d4d6d9fa9a983d213f07121205d48e2c4", size = 599782, upload-time = "2025-11-30T20:24:35.169Z" },
     { url = "https://files.pythonhosted.org/packages/d1/b7/b95708304cd49b7b6f82fdd039f1748b66ec2b21d6a45180910802f1abf1/rpds_py-0.30.0-pp311-pypy311_pp73-musllinux_1_2_x86_64.whl", hash = "sha256:ac37f9f516c51e5753f27dfdef11a88330f04de2d564be3991384b2f3535d02e", size = 562191, upload-time = "2025-11-30T20:24:36.853Z" },
 ]
+
+[[package]]
+name = "search-core"
+version = "0.1.0"
+source = { editable = "packages/search-core" }
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", marker = "extra == 'http'", specifier = ">=0.100.0" },
+    { name = "httpx", marker = "extra == 'test'", specifier = ">=0.24.0" },
+    { name = "pydantic", marker = "extra == 'http'", specifier = ">=2.0.0" },
+    { name = "pytest", marker = "extra == 'test'", specifier = ">=7" },
+]
+provides-extras = ["http", "test"]
 
 [[package]]
 name = "starlette"

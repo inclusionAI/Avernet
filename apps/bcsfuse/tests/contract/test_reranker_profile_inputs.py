@@ -4,13 +4,13 @@ import logging
 
 import pytest
 
-from src.domain.models.profile_fragment import FragmentMatch
-from src.domain.services.fragment_reranker_service import (
+from app.domain.models.profile_fragment import FragmentMatch
+from app.domain.services.fragment_reranker_service import (
     FragmentRerankerService,
     ProfileCandidate,
     RerankRequest,
 )
-from src.infra.reranker.http_reranker import HttpReranker
+from app.infra.reranker.http_reranker import HttpReranker
 
 
 QUERY = "UCT2.0 事件策略日志为空"
@@ -130,7 +130,7 @@ def test_debug_input_logging_does_not_emit_one_record_per_candidate(monkeypatch,
 
 
 def test_prepub_defaults_to_info_but_explicit_debug_is_preserved(monkeypatch):
-    from src.bootstrap.logging_setup import resolve_business_log_level
+    from app.bootstrap.logging_setup import resolve_business_log_level
 
     monkeypatch.setenv("SERVER_ENV", "prepub")
     monkeypatch.delenv("LOG_LEVEL", raising=False)
@@ -140,9 +140,9 @@ def test_prepub_defaults_to_info_but_explicit_debug_is_preserved(monkeypatch):
 
 
 def test_candidate_decision_rows_require_debug(caplog):
-    from src.domain.services.retrieval_logging import log_rows
+    from app.domain.services.retrieval_logging import log_rows
 
-    logger = logging.getLogger("src.test.reranker_rows")
+    logger = logging.getLogger("app.test.reranker_rows")
     caplog.set_level(logging.INFO, logger=logger.name)
     log_rows(logger, "candidate_decisions", ["id", "score"], [["bot:1", 0.8]])
     assert not caplog.records
@@ -158,13 +158,13 @@ def test_candidate_decision_rows_require_debug(caplog):
 def test_full_only_recall_loads_profile_only_when_reranking(
     tmp_path, monkeypatch, wire, legacy_dict, rerank, config_updated,
 ):
-    from src.application.services.worker_vector_match_service import (
+    from app.application.services.worker_vector_match_service import (
         FragmentRetrievalConfig, WorkerVectorMatchService,
     )
-    from src.domain.models.worker_profile_content import WorkerProfileContent
-    from src.domain.models.vector_point import VectorPoint
-    from src.infra.metadatastores.file_metadata_store_adapter import FileMetadataStoreAdapter
-    from src.infra.public.vectorstores.qdrant_mysql_vector_store import QdrantMySQLVectorStore
+    from app.domain.models.worker_profile_content import WorkerProfileContent
+    from app.domain.models.vector_point import VectorPoint
+    from app.infra.metadatastores.file_metadata_store_adapter import FileMetadataStoreAdapter
+    from app.infra.public.vectorstores.qdrant_mysql_vector_store import QdrantMySQLVectorStore
     from tests.unit.infra.test_qdrant_durable_vector_store import FakePersistenceBackend
 
     calls = []
@@ -219,10 +219,10 @@ def test_full_only_recall_loads_profile_only_when_reranking(
 
 @pytest.mark.asyncio
 async def test_recommend_metadata_preserves_actual_model(monkeypatch):
-    from src.interfaces.api import recommend_routes
-    from src.domain.models.bot_recommendation import BotRecommendationRequest
-    from src.domain.models.candidate_recommendation import CandidateRecommendationResponse
-    from src.domain.models.retrieval_mode import RetrievalMode
+    from app.adapters.http import recommend_routes
+    from app.domain.models.bot_recommendation import BotRecommendationRequest
+    from app.domain.models.candidate_recommendation import CandidateRecommendationResponse
+    from app.domain.models.retrieval_mode import RetrievalMode
 
     class CandidateService:
         _vector_match_service = object()
@@ -271,10 +271,10 @@ async def test_api_model_default_preserves_overrides_and_disable(
     monkeypatch, endpoint, configured, requested, enabled, expected,
 ):
     from types import SimpleNamespace
-    from src.domain.models.bot_recommendation import BotRecommendationRequest
-    from src.domain.models.candidate_recommendation import CandidateRecommendationResponse
-    from src.domain.models.retrieval_mode import RetrievalMode
-    from src.interfaces.api import profile_routes, recommend_routes
+    from app.domain.models.bot_recommendation import BotRecommendationRequest
+    from app.domain.models.candidate_recommendation import CandidateRecommendationResponse
+    from app.domain.models.retrieval_mode import RetrievalMode
+    from app.adapters.http import profile_routes, recommend_routes
 
     if configured is None:
         monkeypatch.delenv("RERANKER_MODEL", raising=False)

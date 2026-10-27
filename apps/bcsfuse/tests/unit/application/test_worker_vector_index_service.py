@@ -7,18 +7,18 @@ from unittest.mock import Mock
 
 import pytest
 
-from src.domain.models.metadata_record import MetadataRecord
-from src.domain.models.skill_profile import SkillProfile
-from src.domain.models.vector_point import VectorPoint
-from src.domain.models.vector_search_hit import VectorSearchHit
-from src.domain.models.worker_profile import WorkerProfile, ProfileType
-from src.application.services.worker_vector_index_service import (
+from app.domain.models.metadata_record import MetadataRecord
+from app.domain.models.skill_profile import SkillProfile
+from app.domain.models.vector_point import VectorPoint
+from app.domain.models.vector_search_hit import VectorSearchHit
+from app.domain.models.worker_profile import WorkerProfile, ProfileType
+from app.application.services.worker_vector_index_service import (
     WorkerVectorIndexService,
     IndexResult,
     SearchResult,
 )
-from src.infra.metadatastores.file_metadata_store_adapter import FileMetadataStoreAdapter
-from src.infra.vectorstores.faiss_vector_store_adapter import FaissVectorStoreAdapter
+from app.infra.metadatastores.file_metadata_store_adapter import FileMetadataStoreAdapter
+from app.infra.vectorstores.faiss_vector_store_adapter import FaissVectorStoreAdapter
 
 
 class TestWorkerVectorIndexService:

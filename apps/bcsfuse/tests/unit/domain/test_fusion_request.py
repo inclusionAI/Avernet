@@ -19,12 +19,12 @@ class TestFusionRequestModule:
         """测试 fusion_request 模块存在"""
         import importlib
 
-        module = importlib.import_module("src.domain.models.fusion_request")
+        module = importlib.import_module("app.domain.models.fusion_request")
         assert module is not None
 
     def test_fusion_request_class_exists(self):
         """测试 FusionRequest 类存在"""
-        from src.domain.models.fusion_request import FusionRequest
+        from app.domain.models.fusion_request import FusionRequest
 
         assert FusionRequest is not None
 
@@ -34,7 +34,7 @@ class TestFusionRequestBasic:
 
     def test_create_minimal_request(self):
         """测试创建最小请求"""
-        from src.domain.models.fusion_request import FusionRequest
+        from app.domain.models.fusion_request import FusionRequest
 
         request = FusionRequest(
             question="这个方案是否可行",
@@ -48,7 +48,7 @@ class TestFusionRequestBasic:
 
     def test_create_full_request(self):
         """测试创建完整请求"""
-        from src.domain.models.fusion_request import (
+        from app.domain.models.fusion_request import (
             FusionRequest,
             FuseOptions,
             FuseMetadata,
@@ -84,28 +84,28 @@ class TestFusionRequestBasic:
 
     def test_request_requires_question(self):
         """测试 question 是必填字段"""
-        from src.domain.models.fusion_request import FusionRequest
+        from app.domain.models.fusion_request import FusionRequest
 
         with pytest.raises(ValidationError):
             FusionRequest(participants=["zhangsan"])
 
     def test_request_requires_participants(self):
         """测试 participants 是必填字段"""
-        from src.domain.models.fusion_request import FusionRequest
+        from app.domain.models.fusion_request import FusionRequest
 
         with pytest.raises(ValidationError):
             FusionRequest(question="测试问题")
 
     def test_request_participants_min_length(self):
         """测试 participants 至少 1 个"""
-        from src.domain.models.fusion_request import FusionRequest
+        from app.domain.models.fusion_request import FusionRequest
 
         with pytest.raises(ValidationError):
             FusionRequest(question="测试问题", participants=[])
 
     def test_request_participants_max_length(self):
         """测试 participants 最多 20 个"""
-        from src.domain.models.fusion_request import FusionRequest
+        from app.domain.models.fusion_request import FusionRequest
 
         too_many = [f"participant_{i}" for i in range(21)]
 
@@ -114,7 +114,7 @@ class TestFusionRequestBasic:
 
     def test_request_question_max_length(self):
         """测试 question 最大长度 2000"""
-        from src.domain.models.fusion_request import FusionRequest
+        from app.domain.models.fusion_request import FusionRequest
 
         long_question = "x" * 2001
 
@@ -127,7 +127,7 @@ class TestFuseOptions:
 
     def test_default_options(self):
         """测试默认选项"""
-        from src.domain.models.fusion_request import FuseOptions
+        from app.domain.models.fusion_request import FuseOptions
 
         options = FuseOptions()
 
@@ -140,7 +140,7 @@ class TestFuseOptions:
 
     def test_custom_options(self):
         """测试自定义选项"""
-        from src.domain.models.fusion_request import FuseOptions
+        from app.domain.models.fusion_request import FuseOptions
 
         options = FuseOptions(
             timeout_ms=60000,
@@ -156,14 +156,14 @@ class TestFuseOptions:
 
     def test_timeout_ms_minimum(self):
         """测试 timeout_ms 最小值"""
-        from src.domain.models.fusion_request import FuseOptions
+        from app.domain.models.fusion_request import FuseOptions
 
         with pytest.raises(ValidationError):
             FuseOptions(timeout_ms=500)  # 最小 1000
 
     def test_timeout_ms_maximum(self):
         """测试 timeout_ms 最大值（FuseOptions 层不限，由 FusionRequest 动态校验）"""
-        from src.domain.models.fusion_request import FuseOptions
+        from app.domain.models.fusion_request import FuseOptions
 
         # FuseOptions 层现在允许最大 600000ms，实际校验在 FusionRequest 层
         options = FuseOptions(timeout_ms=150000)  # 在新的范围内
@@ -179,7 +179,7 @@ class TestFuseMetadata:
 
     def test_empty_metadata(self):
         """测试空 metadata"""
-        from src.domain.models.fusion_request import FuseMetadata
+        from app.domain.models.fusion_request import FuseMetadata
 
         metadata = FuseMetadata()
 
@@ -190,7 +190,7 @@ class TestFuseMetadata:
 
     def test_full_metadata(self):
         """测试完整 metadata"""
-        from src.domain.models.fusion_request import FuseMetadata
+        from app.domain.models.fusion_request import FuseMetadata
 
         metadata = FuseMetadata(
             request_id="req-001",
@@ -210,7 +210,7 @@ class TestFusionRequestValidation:
 
     def test_mode_must_be_agent(self):
         """测试 mode 必须是 agent（G1 向后兼容）"""
-        from src.domain.models.fusion_request import FusionRequest
+        from app.domain.models.fusion_request import FusionRequest
 
         # 默认 mode 是 agent
         request = FusionRequest(
@@ -229,7 +229,7 @@ class TestFusionRequestValidation:
 
     def test_driver_bot_id_optional(self):
         """测试 driver_bot_id 可选"""
-        from src.domain.models.fusion_request import FusionRequest
+        from app.domain.models.fusion_request import FusionRequest
 
         # 不指定 driver_bot_id
         request = FusionRequest(
@@ -248,7 +248,7 @@ class TestFusionRequestValidation:
 
     def test_extra_fields_forbidden(self):
         """测试额外字段被禁止"""
-        from src.domain.models.fusion_request import FusionRequest
+        from app.domain.models.fusion_request import FusionRequest
 
         with pytest.raises(ValidationError):
             FusionRequest(
@@ -259,7 +259,7 @@ class TestFusionRequestValidation:
 
     def test_timeout_ms_dynamic_validation_g1_g2(self):
         """测试 G1/G2 模式 timeout_ms 最大 600000ms"""
-        from src.domain.models.fusion_request import FusionRequest, FuseOptions
+        from app.domain.models.fusion_request import FusionRequest, FuseOptions
 
         # G1 模式下超过 600000ms 应该失败
         with pytest.raises(ValidationError):
@@ -290,7 +290,7 @@ class TestFusionRequestValidation:
 
     def test_timeout_ms_dynamic_validation_g5(self):
         """测试 G5 expert_diagnosis 模式 timeout_ms 最大 600000ms"""
-        from src.domain.models.fusion_request import FusionRequest, FuseOptions
+        from app.domain.models.fusion_request import FusionRequest, FuseOptions
 
         # G5 模式下 180000ms 应该成功
         request = FusionRequest(
@@ -330,7 +330,7 @@ class TestFusionRequestG2Mode:
 
     def test_fusion_mode_default_is_agent(self):
         """测试 fusion_mode 默认是 agent（向后兼容）"""
-        from src.domain.models.fusion_request import FusionRequest
+        from app.domain.models.fusion_request import FusionRequest
 
         request = FusionRequest(
             question="测试问题",
@@ -342,7 +342,7 @@ class TestFusionRequestG2Mode:
 
     def test_fusion_mode_conflict_alignment_accepted(self):
         """测试 fusion_mode 接受 conflict_alignment（G2）"""
-        from src.domain.models.fusion_request import FusionRequest
+        from app.domain.models.fusion_request import FusionRequest
 
         request = FusionRequest(
             question="如何协调代码与PRD的超时时间冲突？",
@@ -354,7 +354,7 @@ class TestFusionRequestG2Mode:
 
     def test_fusion_mode_agent_explicit(self):
         """测试显式设置 fusion_mode 为 agent"""
-        from src.domain.models.fusion_request import FusionRequest
+        from app.domain.models.fusion_request import FusionRequest
 
         request = FusionRequest(
             question="测试问题",
@@ -366,7 +366,7 @@ class TestFusionRequestG2Mode:
 
     def test_fusion_mode_invalid_rejected(self):
         """测试无效 fusion_mode 被拒绝"""
-        from src.domain.models.fusion_request import FusionRequest
+        from app.domain.models.fusion_request import FusionRequest
 
         with pytest.raises(ValidationError):
             FusionRequest(
@@ -377,7 +377,7 @@ class TestFusionRequestG2Mode:
 
     def test_mode_and_fusion_mode_coexist(self):
         """测试 mode 和 fusion_mode 可以共存（向后兼容过渡）"""
-        from src.domain.models.fusion_request import FusionRequest
+        from app.domain.models.fusion_request import FusionRequest
 
         # G1 请求：只用 mode，不指定 fusion_mode
         g1_request = FusionRequest(
@@ -402,21 +402,21 @@ class TestFuseOptionsG2:
 
     def test_detect_conflicts_option(self):
         """测试 detect_conflicts 选项"""
-        from src.domain.models.fusion_request import FuseOptions
+        from app.domain.models.fusion_request import FuseOptions
 
         options = FuseOptions(detect_conflicts=True)
         assert options.detect_conflicts is True
 
     def test_extract_alignment_points_option(self):
         """测试 extract_alignment_points 选项"""
-        from src.domain.models.fusion_request import FuseOptions
+        from app.domain.models.fusion_request import FuseOptions
 
         options = FuseOptions(extract_alignment_points=True)
         assert options.extract_alignment_points is True
 
     def test_g2_options_defaults(self):
         """测试 G2 选项默认值"""
-        from src.domain.models.fusion_request import FuseOptions
+        from app.domain.models.fusion_request import FuseOptions
 
         options = FuseOptions()
 
@@ -426,7 +426,7 @@ class TestFuseOptionsG2:
 
     def test_g2_options_all_enabled(self):
         """测试 G2 选项全部启用"""
-        from src.domain.models.fusion_request import FuseOptions
+        from app.domain.models.fusion_request import FuseOptions
 
         options = FuseOptions(
             detect_conflicts=True,
@@ -447,7 +447,7 @@ class TestFusionRequestG5Mode:
 
     def test_fusion_mode_expert_diagnosis_accepted(self):
         """测试 fusion_mode 接受 expert_diagnosis（G5）"""
-        from src.domain.models.fusion_request import FusionRequest
+        from app.domain.models.fusion_request import FusionRequest
 
         request = FusionRequest(
             question="这个方案是否可以上线？",
@@ -459,7 +459,7 @@ class TestFusionRequestG5Mode:
 
     def test_fusion_mode_all_modes(self):
         """测试所有 fusion_mode 有效值"""
-        from src.domain.models.fusion_request import FusionRequest
+        from app.domain.models.fusion_request import FusionRequest
 
         for mode in ["agent", "conflict_alignment", "expert_diagnosis"]:
             request = FusionRequest(
@@ -471,7 +471,7 @@ class TestFusionRequestG5Mode:
 
     def test_g5_request_with_driver(self):
         """测试 G5 请求包含 driver_bot_id"""
-        from src.domain.models.fusion_request import FusionRequest
+        from app.domain.models.fusion_request import FusionRequest
 
         request = FusionRequest(
             question="上线评审",
@@ -485,7 +485,7 @@ class TestFusionRequestG5Mode:
 
     def test_g5_request_with_options(self):
         """测试 G5 请求包含选项"""
-        from src.domain.models.fusion_request import FusionRequest, FuseOptions
+        from app.domain.models.fusion_request import FusionRequest, FuseOptions
 
         options = FuseOptions(
             timeout_ms=60000,
@@ -508,7 +508,7 @@ class TestFuseOptionsG5:
 
     def test_enable_risk_assessment_option(self):
         """测试 enable_risk_assessment 选项"""
-        from src.domain.models.fusion_request import FuseOptions
+        from app.domain.models.fusion_request import FuseOptions
 
         options = FuseOptions(enable_risk_assessment=True)
         assert options.enable_risk_assessment is True
@@ -518,7 +518,7 @@ class TestFuseOptionsG5:
 
     def test_enable_expert_recommendations_option(self):
         """测试 enable_expert_recommendations 选项"""
-        from src.domain.models.fusion_request import FuseOptions
+        from app.domain.models.fusion_request import FuseOptions
 
         options = FuseOptions(enable_expert_recommendations=True)
         assert options.enable_expert_recommendations is True
@@ -528,7 +528,7 @@ class TestFuseOptionsG5:
 
     def test_enable_go_live_conditions_option(self):
         """测试 enable_go_live_conditions 选项"""
-        from src.domain.models.fusion_request import FuseOptions
+        from app.domain.models.fusion_request import FuseOptions
 
         options = FuseOptions(enable_go_live_conditions=True)
         assert options.enable_go_live_conditions is True
@@ -538,7 +538,7 @@ class TestFuseOptionsG5:
 
     def test_g5_options_defaults(self):
         """测试 G5 选项默认值"""
-        from src.domain.models.fusion_request import FuseOptions
+        from app.domain.models.fusion_request import FuseOptions
 
         options = FuseOptions()
 
@@ -549,7 +549,7 @@ class TestFuseOptionsG5:
 
     def test_g5_options_all_enabled(self):
         """测试 G5 选项全部启用"""
-        from src.domain.models.fusion_request import FuseOptions
+        from app.domain.models.fusion_request import FuseOptions
 
         options = FuseOptions(
             enable_risk_assessment=True,
@@ -563,7 +563,7 @@ class TestFuseOptionsG5:
 
     def test_g5_options_all_disabled(self):
         """测试 G5 选项全部禁用"""
-        from src.domain.models.fusion_request import FuseOptions
+        from app.domain.models.fusion_request import FuseOptions
 
         options = FuseOptions(
             enable_risk_assessment=False,
@@ -577,7 +577,7 @@ class TestFuseOptionsG5:
 
     def test_g5_options_with_g2_options(self):
         """测试 G5 选项与 G2 选项可以共存"""
-        from src.domain.models.fusion_request import FuseOptions
+        from app.domain.models.fusion_request import FuseOptions
 
         options = FuseOptions(
             detect_conflicts=True,

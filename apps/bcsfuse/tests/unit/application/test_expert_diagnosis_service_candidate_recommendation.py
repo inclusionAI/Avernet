@@ -18,14 +18,14 @@ from __future__ import annotations
 import pytest
 from unittest.mock import Mock
 
-from src.domain.models.fusion_result import Perspective, FusionResult
-from src.domain.models.candidate_recommendation import (
+from app.domain.models.fusion_result import Perspective, FusionResult
+from app.domain.models.candidate_recommendation import (
     CandidateRecommendation,
     CandidateRecommendationResponse,
 )
-from src.domain.models.domain_coverage import DomainCoverage
-from src.domain.models.retrieval_mode import RetrievalMode
-from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+from app.domain.models.domain_coverage import DomainCoverage
+from app.domain.models.retrieval_mode import RetrievalMode
+from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
 
 # =============================================================================

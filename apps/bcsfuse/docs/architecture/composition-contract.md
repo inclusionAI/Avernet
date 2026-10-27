@@ -4,6 +4,12 @@ BCSFuse has one public source owner for shared business behavior: Avernet. A
 deployment assembles environment-specific providers outside that shared code
 and passes the completed registry into the public application factory.
 
+The package layout and public/enterprise ownership are recorded in
+[search architecture](search-core-boundary.md). TC uses `app`; the shared
+library uses `search_core`. Enterprise-specific
+business extensions remain in their host and reuse the public search contract;
+they do not become part of the TC application factory.
+
 ## Public composition API
 
 The public boundary consists of these Python APIs:
@@ -32,11 +38,11 @@ API. The host constructs it with `TcSearchApplication`, authentication and an
 owned executor. Omitting it preserves the existing v1 route surface. Existing
 public and internal entrypoints do not opt in automatically. See
 [shared search boundaries](search-core-boundary.md) and the
-[public v2 contract](../../packages/avernet-search/docs/search-api.md).
+[public v2 contract](../../packages/search-core/docs/search-api.md).
 
 ## Runtime business logging
 
-The composed app configures the shared `src` business logger at construction
+The composed app configures the shared `app` business logger at construction
 and reapplies its level after provider startup. The default is `INFO` in every
 environment, including prepub. Set `LOG_LEVEL=DEBUG` explicitly for diagnostics.
 Accepted levels are `DEBUG`, `INFO`, `WARNING`, `ERROR`, and `CRITICAL`;
@@ -217,11 +223,11 @@ Worker/Profile business behavior is owned by Avernet application services. A
 deployment may replace persistence, but its providers must implement the typed,
 transport-agnostic Plugin APIs in:
 
-- `src.application.ports.worker_registry_store.WorkerRegistryStore`
-- `src.application.ports.worker_profile_content_store.WorkerProfileContentStore`
-- `src.domain.services.adapters.worker_runtime_state_store_adapter.WorkerRuntimeStateStoreAdapter`
-- `src.domain.services.adapters.worker_profile_binding_store_adapter.WorkerProfileBindingStoreAdapter`
-- `src.domain.services.adapters.worker_audit_log_adapter.WorkerAuditLogAdapter`
+- `app.application.ports.worker_registry_store.WorkerRegistryStore`
+- `app.application.ports.worker_profile_content_store.WorkerProfileContentStore`
+- `app.domain.services.adapters.worker_runtime_state_store_adapter.WorkerRuntimeStateStoreAdapter`
+- `app.domain.services.adapters.worker_profile_binding_store_adapter.WorkerProfileBindingStoreAdapter`
+- `app.domain.services.adapters.worker_audit_log_adapter.WorkerAuditLogAdapter`
 
 The registry and profile ports exchange `Worker`, `WorkerConfig`, and
 `WorkerProfileContent` domain models; internal providers must not substitute
@@ -475,10 +481,10 @@ exception messages and provider values are not returned to clients.
 ### Retrieval and response compatibility
 
 The `Retriever.retrieve()` Plugin API returns
-`src.domain.models.candidate_retrieval_result.CandidateRetrievalResult`: a
+`app.domain.models.candidate_retrieval_result.CandidateRetrievalResult`: a
 required `candidate_bundle` and lists of warnings, errors, and explanations.
 This batch contract is distinct from the unchanged
-`src.domain.models.retrieval_result.RetrievalResult` single hybrid-search hit
+`app.domain.models.retrieval_result.RetrievalResult` single hybrid-search hit
 (`profile_key`, `score`, provenance). The baseline retriever and its application
 service use the batch type; the single-hit type remains available for compatibility.
 This repairs an incompatible model import without changing HTTP payloads.

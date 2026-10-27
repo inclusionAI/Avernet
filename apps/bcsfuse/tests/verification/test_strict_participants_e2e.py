@@ -26,8 +26,8 @@ class TestStrictParticipantsInRetrievalService:
 
         不允许 fallback 到全库
         """
-        from src.domain.services.worker_profile_retrieval_service import WorkerProfileRetrievalService
-        from src.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.services.worker_profile_retrieval_service import WorkerProfileRetrievalService
+        from app.domain.models.retrieval_mode import RetrievalMode
 
         # 模拟 profile source
         mock_source = MagicMock()
@@ -56,8 +56,8 @@ class TestStrictParticipantsInRetrievalService:
         """
         验证：strict=False 时，过滤为空后继续执行（后续可能 fallback）
         """
-        from src.domain.services.worker_profile_retrieval_service import WorkerProfileRetrievalService
-        from src.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.services.worker_profile_retrieval_service import WorkerProfileRetrievalService
+        from app.domain.models.retrieval_mode import RetrievalMode
 
         mock_source = MagicMock()
         mock_profile = MagicMock()
@@ -90,7 +90,7 @@ class TestStrictParticipantsInG5Enhancer:
         当 profile_keys 过滤为空时：- 不能调用全库检索
         - 返回空列表
         """
-        from src.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
+        from app.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
 
         # 模拟 retrieval service
         mock_retrieval = MagicMock()
@@ -128,7 +128,7 @@ class TestStrictParticipantsInG5Enhancer:
         当 profile_keys 过滤为空时：
         - 应该尝试全库检索
         """
-        from src.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
+        from app.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
 
         mock_retrieval = MagicMock()
         mock_profile = MagicMock()
@@ -171,7 +171,7 @@ class TestStrictParticipantsInG5Enhancer:
 
         这是合法场景：用户没有指定参与者
         """
-        from src.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
+        from app.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
 
         mock_retrieval = MagicMock()
         mock_profile = MagicMock()
@@ -211,8 +211,8 @@ class TestStrictParticipantsInExpertDiagnosisService:
         验证：strict=True 时，enhance() 返回空时不能回退到原 perspectives
 这是之前发现的 bug！
         """
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
-        from src.domain.models.fusion_result import Perspective
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.domain.models.fusion_result import Perspective
 
         # 模拟 enhancer 返回空
         mock_enhancer = MagicMock()
@@ -245,8 +245,8 @@ class TestStrictParticipantsInExpertDiagnosisService:
         """
         验证：strict=False 时，enhance() 返回空时回退到原 perspectives
         """
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
-        from src.domain.models.fusion_result import Perspective
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.domain.models.fusion_result import Perspective
 
         mock_enhancer = MagicMock()
         mock_enhancer.enhance.return_value = []
@@ -284,9 +284,9 @@ class TestStrictParticipantsParameterChain:
             -> ExpertDiagnosisService.diagnose(strict_participants=True)
                 -> G5ExpertEnhancer.enhance(strict_participants=True)
         """
-        from src.application.services.group_fusion_service import GroupFusionService
-        from src.domain.models.fusion_request import FusionRequest, FuseOptions
-        from src.domain.models.fusion_result import Perspective, FusionTiming
+        from app.application.services.group_fusion_service import GroupFusionService
+        from app.domain.models.fusion_request import FusionRequest, FuseOptions
+        from app.domain.models.fusion_result import Perspective, FusionTiming
 
         # 模拟所有依赖
         mock_provider = MagicMock()
@@ -340,8 +340,8 @@ class TestStrictModeIntegration:
 
         从 RetrievalService 到 ExpertDiagnosisService
         """
-        from src.domain.services.worker_profile_retrieval_service import WorkerProfileRetrievalService
-        from src.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
+        from app.domain.services.worker_profile_retrieval_service import WorkerProfileRetrievalService
+        from app.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
 
         # 模拟 profile source
         mock_source = MagicMock()

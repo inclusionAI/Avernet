@@ -23,7 +23,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "avernet-search==0.1.0",
+    "search-core==0.1.0",
     # Core Web Framework
     "fastapi>=0.100.0",
     "uvicorn[standard]>=0.23.0",
@@ -58,11 +58,14 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["src*", "tests.smoke*"]
+where = ["src"]
+include = ["app*"]
 
 [tool.setuptools.package-data]
 "*" = ["*.yaml", "*.json", "*.md"]
 
 [tool.uv.sources]
-avernet-search = { path = "packages/avernet-search", editable = true }
+search-core = { path = "packages/search-core", editable = true }
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "packages/search-core/src"]

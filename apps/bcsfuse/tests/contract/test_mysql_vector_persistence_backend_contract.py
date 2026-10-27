@@ -26,7 +26,7 @@ class TestMySQLVectorPersistenceBackendContract:
     def test_module_imports_without_connecting(self):
         """Test that the module can be imported without database connection."""
         import importlib
-        import src.infra.vectorstore_backends.mysql_vector_persistence_backend as backend_module
+        import app.infra.vectorstore_backends.mysql_vector_persistence_backend as backend_module
 
         # Reload to ensure no connection happens on import
         importlib.reload(backend_module)
@@ -36,7 +36,7 @@ class TestMySQLVectorPersistenceBackendContract:
 
     def test_backend_constructs_without_connecting(self):
         """Test that the backend can be constructed without database connection."""
-        from src.infra.vectorstore_backends.mysql_vector_persistence_backend import (
+        from app.infra.vectorstore_backends.mysql_vector_persistence_backend import (
             MySQLVectorPersistenceBackend,
         )
 
@@ -71,7 +71,7 @@ class TestMySQLVectorPersistenceBackendContract:
 
     def test_required_methods_exist(self):
         """Test that all required VectorPersistenceBackend methods exist."""
-        from src.infra.vectorstore_backends.mysql_vector_persistence_backend import (
+        from app.infra.vectorstore_backends.mysql_vector_persistence_backend import (
             MySQLVectorPersistenceBackend,
         )
 
@@ -125,7 +125,7 @@ class TestMySQLVectorPersistenceBackendContract:
             [
                 sys.executable,
                 "-c",
-                "from src.infra.vectorstore_backends.mysql_vector_persistence_backend import MySQLVectorPersistenceBackend; print('OK')",
+                "from app.infra.vectorstore_backends.mysql_vector_persistence_backend import MySQLVectorPersistenceBackend; print('OK')",
             ],
             cwd=str(open_core_root),
             env=env,
@@ -145,11 +145,11 @@ class TestMySQLVectorPersistenceBackendContract:
             "mist",
             "mist_client",
             "layotto",
-            "src.infra.config.zdas_settings",
-            "src.infra.adapters.zdas_",
-            "src.infra.vectorstores.qdrant_zdas_vector_store",
-            "src.infra.vectorstores.faiss_zdas_vector_store",
-            "src.infra.vectorstore_backends.zdas_vector_persistence_backend",
+            "app.infra.config.zdas_settings",
+            "app.infra.adapters.zdas_",
+            "app.infra.vectorstores.qdrant_zdas_vector_store",
+            "app.infra.vectorstores.faiss_zdas_vector_store",
+            "app.infra.vectorstore_backends.zdas_vector_persistence_backend",
         ]
         for keyword in forbidden:
             assert keyword not in result.stdout.lower()
@@ -157,7 +157,7 @@ class TestMySQLVectorPersistenceBackendContract:
 
     def test_no_fallback_to_sqlite_or_inmemory(self):
         """Test that the backend does not fallback to SQLite or InMemory."""
-        from src.infra.vectorstore_backends.mysql_vector_persistence_backend import (
+        from app.infra.vectorstore_backends.mysql_vector_persistence_backend import (
             MySQLVectorPersistenceBackend,
         )
 
@@ -173,7 +173,7 @@ class TestMySQLVectorPersistenceBackendContract:
 
     def test_fail_fast_without_mysql_config(self):
         """Test that the backend fails fast without valid MySQL config."""
-        from src.infra.vectorstore_backends.mysql_vector_persistence_backend import (
+        from app.infra.vectorstore_backends.mysql_vector_persistence_backend import (
             MySQLVectorPersistenceBackend,
         )
 
@@ -197,7 +197,7 @@ class TestMySQLVectorPersistenceBackendContract:
 
     def test_observability_logging_present(self):
         """Test that the backend has observability logging."""
-        from src.infra.vectorstore_backends.mysql_vector_persistence_backend import (
+        from app.infra.vectorstore_backends.mysql_vector_persistence_backend import (
             MySQLVectorPersistenceBackend,
         )
 
@@ -214,7 +214,7 @@ class TestMySQLVectorPersistenceBackendContract:
 
     def test_schema_initialization_gated(self):
         """Test that schema initialization is gated until first method call."""
-        from src.infra.vectorstore_backends.mysql_vector_persistence_backend import (
+        from app.infra.vectorstore_backends.mysql_vector_persistence_backend import (
             MySQLVectorPersistenceBackend,
         )
 
@@ -226,7 +226,7 @@ class TestMySQLVectorPersistenceBackendContract:
 
     def test_read_operations_release_repeatable_read_snapshot(self):
         """A later sync must be able to observe writes from another instance."""
-        from src.infra.vectorstore_backends.mysql_vector_persistence_backend import (
+        from app.infra.vectorstore_backends.mysql_vector_persistence_backend import (
             MySQLVectorPersistenceBackend,
         )
 
@@ -265,7 +265,7 @@ class TestMySQLVectorPersistenceBackendContract:
         import json
         import pickle
 
-        from src.infra.vectorstore_backends.mysql_vector_persistence_backend import (
+        from app.infra.vectorstore_backends.mysql_vector_persistence_backend import (
             MySQLVectorPersistenceBackend,
         )
 
@@ -326,7 +326,7 @@ class TestMySQLVectorPersistenceBackendContract:
         2. Those functions automatically include correlation_id
         3. All new logging calls are properly instrumented
         """
-        from src.infra.vectorstore_backends.mysql_vector_persistence_backend import (
+        from app.infra.vectorstore_backends.mysql_vector_persistence_backend import (
             MySQLVectorPersistenceBackend,
         )
 
@@ -364,7 +364,7 @@ class TestMySQLVectorPersistenceBackendIntegration:
     @pytest.fixture
     def mysql_backend(self):
         """Create a MySQL backend for testing."""
-        from src.infra.vectorstore_backends.mysql_vector_persistence_backend import (
+        from app.infra.vectorstore_backends.mysql_vector_persistence_backend import (
             MySQLVectorPersistenceBackend,
         )
 
@@ -387,7 +387,7 @@ class TestMySQLVectorPersistenceBackendIntegration:
 
     def test_save_and_load_vector(self, mysql_backend):
         """Test save and load operations."""
-        from src.domain.models.vector_point import VectorPoint
+        from app.domain.models.vector_point import VectorPoint
 
         # Create test vector
         point = VectorPoint(
@@ -415,7 +415,7 @@ class TestMySQLVectorPersistenceBackendIntegration:
 
     def test_exists_and_count(self, mysql_backend):
         """Test exists and count operations."""
-        from src.domain.models.vector_point import VectorPoint
+        from app.domain.models.vector_point import VectorPoint
 
         # Initially should not exist
         assert not mysql_backend.exists("test_point_2")
@@ -440,7 +440,7 @@ class TestMySQLVectorPersistenceBackendIntegration:
 
     def test_delete_operations(self, mysql_backend):
         """Test delete and delete_batch operations."""
-        from src.domain.models.vector_point import VectorPoint
+        from app.domain.models.vector_point import VectorPoint
 
         # Create multiple points
         points = [
@@ -460,7 +460,7 @@ class TestMySQLVectorPersistenceBackendIntegration:
 
     def test_batch_operations(self, mysql_backend):
         """Test batch save and load operations."""
-        from src.domain.models.vector_point import VectorPoint
+        from app.domain.models.vector_point import VectorPoint
 
         # Create batch of vectors
         points = [
@@ -487,7 +487,7 @@ class TestMySQLVectorPersistenceBackendIntegration:
 
     def test_get_last_modified_time(self, mysql_backend):
         """Test get_last_modified_time returns valid timestamp."""
-        from src.domain.models.vector_point import VectorPoint
+        from app.domain.models.vector_point import VectorPoint
         import time
 
         # Save a point

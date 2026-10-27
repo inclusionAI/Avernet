@@ -19,14 +19,14 @@ from __future__ import annotations
 import os
 import pytest
 
-from src.domain.models.fusion_result import Perspective, FusionResult
-from src.domain.models.worker_profile import WorkerProfile, ProfileType
-from src.domain.models.worker_context_digest import WorkerContextDigest
-from src.domain.models.context_fragment import ContextFragment, ContextKind
-from src.domain.models.skill_profile import SkillProfile
-from src.domain.models.retrieval_mode import RetrievalMode
-from src.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
-from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+from app.domain.models.fusion_result import Perspective, FusionResult
+from app.domain.models.worker_profile import WorkerProfile, ProfileType
+from app.domain.models.worker_context_digest import WorkerContextDigest
+from app.domain.models.context_fragment import ContextFragment, ContextKind
+from app.domain.models.skill_profile import SkillProfile
+from app.domain.models.retrieval_mode import RetrievalMode
+from app.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
+from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
 
 # =============================================================================
@@ -50,9 +50,9 @@ SKIP_REASON = (
 @pytest.fixture
 def real_gateway():
     """创建真实 LLM Gateway"""
-    from src.application.services.llm_gateway_service import LLMGatewayService
-    from src.infra.llm.providers.anthropic_compatible_provider import AnthropicCompatibleProvider
-    from src.infra.llm.config.llm_settings import LLMSettings
+    from app.application.services.llm_gateway_service import LLMGatewayService
+    from app.infra.llm.providers.anthropic_compatible_provider import AnthropicCompatibleProvider
+    from app.infra.llm.config.llm_settings import LLMSettings
 
     settings = LLMSettings()
     provider = AnthropicCompatibleProvider(settings=settings)
@@ -353,19 +353,19 @@ class TestG5SmokeConfig:
 
     def test_g5_enhancer_importable(self):
         """验证 G5 Expert Enhancer 可导入"""
-        from src.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
-        from src.domain.services.g5_expert_enhancer import G5ExpertEnhancer
+        from app.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
+        from app.domain.services.g5_expert_enhancer import G5ExpertEnhancer
         assert G5ExpertEnhancerImpl is not None
         assert G5ExpertEnhancer is not None
 
     def test_expert_diagnosis_service_importable(self):
         """验证 ExpertDiagnosisService 可导入"""
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
         assert ExpertDiagnosisService is not None
 
     def test_real_provider_importable(self):
         """验证真实 Provider 可导入"""
-        from src.infra.llm.providers.anthropic_compatible_provider import AnthropicCompatibleProvider
+        from app.infra.llm.providers.anthropic_compatible_provider import AnthropicCompatibleProvider
         assert AnthropicCompatibleProvider is not None
 
 
@@ -379,10 +379,10 @@ class TestG5CandidateRecommendationSmoke:
 
     def test_smoke_candidate_recommendation_importable(self):
         """验证 Candidate Recommendation Service 可导入"""
-        from src.application.services.worker_candidate_recommendation_impl import (
+        from app.application.services.worker_candidate_recommendation_impl import (
             WorkerCandidateRecommendationImpl,
         )
-        from src.domain.services.worker_candidate_recommendation_service import (
+        from app.domain.services.worker_candidate_recommendation_service import (
             WorkerCandidateRecommendationService,
         )
         assert WorkerCandidateRecommendationImpl is not None
@@ -402,7 +402,7 @@ class TestG5CandidateRecommendationSmoke:
         - Candidate recommendation 可用
         - 整体链路正常工作
         """
-        from src.application.services.worker_candidate_recommendation_impl import (
+        from app.application.services.worker_candidate_recommendation_impl import (
             WorkerCandidateRecommendationImpl,
         )
 
@@ -442,12 +442,12 @@ class TestG5Stage4Config:
 
     def test_candidate_recommendation_importable(self):
         """验证 Candidate Recommendation 可导入"""
-        from src.domain.models.candidate_recommendation import (
+        from app.domain.models.candidate_recommendation import (
             CandidateRecommendation,
             CandidateRecommendationResponse,
         )
-        from src.domain.models.domain_coverage import DomainCoverage
-        from src.domain.services.participants_sufficiency_checker import (
+        from app.domain.models.domain_coverage import DomainCoverage
+        from app.domain.services.participants_sufficiency_checker import (
             ParticipantsSufficiencyChecker,
         )
         assert CandidateRecommendation is not None
@@ -457,7 +457,7 @@ class TestG5Stage4Config:
 
     def test_candidate_recommendation_impl_importable(self):
         """验证 Candidate Recommendation Implementation 可导入"""
-        from src.application.services.worker_candidate_recommendation_impl import (
+        from app.application.services.worker_candidate_recommendation_impl import (
             WorkerCandidateRecommendationImpl,
         )
         assert WorkerCandidateRecommendationImpl is not None

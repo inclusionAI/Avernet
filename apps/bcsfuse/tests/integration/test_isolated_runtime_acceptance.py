@@ -55,7 +55,7 @@ def isolated_app_factory(request, monkeypatch, tmp_path):
     }
     for key, value in env.items():
         monkeypatch.setenv(key, value)
-    from src.infra.config.feature_flags import FeatureFlags
+    from app.infra.config.feature_flags import FeatureFlags
     monkeypatch.setattr(FeatureFlags, "_settings", None)
 
     # Any accidental connection beyond the disposable MySQL database is an error.
@@ -92,11 +92,11 @@ def isolated_app_factory(request, monkeypatch, tmp_path):
 
     @contextmanager
     def open_app():
-        from src.bootstrap.application_context import build_application_context
-        from src.bootstrap.app_factory import create_bcsfuse_app
-        from src.infra.public.vectorstores.qdrant_mysql_vector_store import QdrantMySQLVectorStore
-        from src.infra.vectorstore_backends.sqlite_vector_persistence_backend import SQLiteVectorPersistenceBackend
-        from src.interfaces.api.dependencies import fusion_dependencies
+        from app.bootstrap.application_context import build_application_context
+        from app.bootstrap.app_factory import create_bcsfuse_app
+        from app.infra.public.vectorstores.qdrant_mysql_vector_store import QdrantMySQLVectorStore
+        from app.infra.vectorstore_backends.sqlite_vector_persistence_backend import SQLiteVectorPersistenceBackend
+        from app.adapters.http.dependencies import fusion_dependencies
 
         fusion_dependencies.reset_fusion_services()
         monkeypatch.setenv("ENABLE_PROFILE_EMBEDDING_INDEX", "false")
@@ -104,11 +104,11 @@ def isolated_app_factory(request, monkeypatch, tmp_path):
         context = build_application_context(mode="dev_smoke")
         registry = context.registry
         if pool:
-            from src.infra.public.stores.mysql_worker_registry_store import MySQLWorkerRegistryStore
-            from src.infra.public.stores.mysql_worker_runtime_state_store import MySQLWorkerRuntimeStateStore
-            from src.infra.public.stores.mysql_worker_profile_content_store import MySQLWorkerProfileContentStore
-            from src.infra.public.stores.mysql_worker_profile_binding_store import MySQLWorkerProfileBindingStore
-            from src.infra.public.audit.mysql_worker_audit_log_store import MySQLWorkerAuditLogStore
+            from app.infra.public.stores.mysql_worker_registry_store import MySQLWorkerRegistryStore
+            from app.infra.public.stores.mysql_worker_runtime_state_store import MySQLWorkerRuntimeStateStore
+            from app.infra.public.stores.mysql_worker_profile_content_store import MySQLWorkerProfileContentStore
+            from app.infra.public.stores.mysql_worker_profile_binding_store import MySQLWorkerProfileBindingStore
+            from app.infra.public.audit.mysql_worker_audit_log_store import MySQLWorkerAuditLogStore
 
             for key, provider in (
                 ("worker_registry_store", MySQLWorkerRegistryStore),

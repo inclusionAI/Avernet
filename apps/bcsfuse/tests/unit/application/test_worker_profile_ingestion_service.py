@@ -44,13 +44,13 @@ class TestWorkerProfileIngestionService:
 
     def test_ingest_from_single_source(self, sample_data):
         """测试从单个来源摄取"""
-        from src.application.services.worker_profile_ingestion_service import (
+        from app.application.services.worker_profile_ingestion_service import (
             WorkerProfileIngestionService,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
 
@@ -65,13 +65,13 @@ class TestWorkerProfileIngestionService:
 
     def test_ingest_returns_scan_result(self, sample_data):
         """测试 ingest 返回 WorkerProfileScanResult"""
-        from src.application.services.worker_profile_ingestion_service import (
+        from app.application.services.worker_profile_ingestion_service import (
             WorkerProfileIngestionService,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
 
@@ -82,18 +82,18 @@ class TestWorkerProfileIngestionService:
         result = service.ingest()
 
         # 返回 WorkerProfileScanResult
-        from src.domain.models.worker_profile import WorkerProfileScanResult
+        from app.domain.models.worker_profile import WorkerProfileScanResult
         assert isinstance(result, WorkerProfileScanResult)
 
     def test_ingest_caches_result(self, sample_data):
         """测试 ingest 缓存结果"""
-        from src.application.services.worker_profile_ingestion_service import (
+        from app.application.services.worker_profile_ingestion_service import (
             WorkerProfileIngestionService,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
 
@@ -109,13 +109,13 @@ class TestWorkerProfileIngestionService:
 
     def test_ingest_refresh_clears_cache(self, sample_data):
         """测试 refresh=True 清除缓存"""
-        from src.application.services.worker_profile_ingestion_service import (
+        from app.application.services.worker_profile_ingestion_service import (
             WorkerProfileIngestionService,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
 
@@ -143,13 +143,13 @@ class TestWorkerProfileIngestionServiceEmptySource:
 
     def test_ingest_empty_source(self):
         """测试摄取空来源"""
-        from src.application.services.worker_profile_ingestion_service import (
+        from app.application.services.worker_profile_ingestion_service import (
             WorkerProfileIngestionService,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
 

@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from src.domain.models.worker_profile import WorkerProfile, ProfileType, SourceType
-from src.domain.models.skill_profile import SkillProfile
-from src.domain.services.profile_semantic_ranker import ProfileSemanticRanker, RerankContext
-from src.infra.config.feature_flags import FeatureFlags
+from app.domain.models.worker_profile import WorkerProfile, ProfileType, SourceType
+from app.domain.models.skill_profile import SkillProfile
+from app.domain.services.profile_semantic_ranker import ProfileSemanticRanker, RerankContext
+from app.infra.config.feature_flags import FeatureFlags
 
 
 from tests.unit.domain.services.test_profile_semantic_ranker import sample_profile as sample_profile

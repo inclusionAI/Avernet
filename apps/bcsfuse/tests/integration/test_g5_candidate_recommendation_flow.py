@@ -18,18 +18,18 @@ import pytest
 from unittest.mock import Mock, MagicMock
 from fastapi.testclient import TestClient
 
-from src.domain.models.fusion_result import Perspective
-from src.domain.models.candidate_recommendation import (
+from app.domain.models.fusion_result import Perspective
+from app.domain.models.candidate_recommendation import (
     CandidateRecommendation,
     CandidateRecommendationResponse,
 )
-from src.domain.models.domain_coverage import DomainCoverage
-from src.domain.models.retrieval_mode import RetrievalMode
-from src.domain.models.worker_profile import WorkerProfile, ProfileType
-from src.domain.models.context_fragment import ContextFragment, ContextKind
-from src.domain.models.skill_profile import SkillProfile
-from src.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext
-from src.interfaces.api.fusion_routes import router, set_provider
+from app.domain.models.domain_coverage import DomainCoverage
+from app.domain.models.retrieval_mode import RetrievalMode
+from app.domain.models.worker_profile import WorkerProfile, ProfileType
+from app.domain.models.context_fragment import ContextFragment, ContextKind
+from app.domain.models.skill_profile import SkillProfile
+from app.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext
+from app.adapters.http.fusion_routes import router, set_provider
 from fastapi import FastAPI
 
 
@@ -707,11 +707,11 @@ class TestG5ServiceIntegration:
         """
         ExpertDiagnosisService 与 CandidateRecommendation 集成
         """
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
-        from src.application.services.worker_candidate_recommendation_impl import (
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.worker_candidate_recommendation_impl import (
             WorkerCandidateRecommendationImpl,
         )
-        from src.domain.services.worker_profile_retrieval_service import (
+        from app.domain.services.worker_profile_retrieval_service import (
             RetrievalResult,
             RetrievalResponse,
         )
@@ -775,7 +775,7 @@ class TestG5ServiceIntegration:
         """
         ExpertDiagnosisService 无 candidate recommendation 时正常工作
         """
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
         # 创建服务（无 candidate_recommendation_service）
         service = ExpertDiagnosisService()

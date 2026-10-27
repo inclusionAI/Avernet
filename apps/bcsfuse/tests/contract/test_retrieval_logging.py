@@ -8,12 +8,12 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from src.domain.models.profile_fragment import FragmentMatch
-from src.domain.services.fragment_reranker_service import (
+from app.domain.models.profile_fragment import FragmentMatch
+from app.domain.services.fragment_reranker_service import (
     FragmentRerankerService, ProfileCandidate, RerankRequest,
 )
-from src.infra.public.observability.trace_middleware import TraceIdMiddleware
-from src.infra.trace_context import bind_trace_id, get_trace_id, install_trace_record_factory
+from app.infra.public.observability.trace_middleware import TraceIdMiddleware
+from app.infra.trace_context import bind_trace_id, get_trace_id, install_trace_record_factory
 
 
 @pytest.fixture(autouse=True)
@@ -37,7 +37,7 @@ def test_composed_trace_reaches_formatted_child_logs_without_configure_logging()
             return True
 
     handler.addFilter(ExternalTraceFallback())
-    child = logging.getLogger("src.application.services.trace_probe")
+    child = logging.getLogger("app.application.services.trace_probe")
     previous_level = child.level
     child.setLevel(logging.INFO)
     child.addHandler(handler)
@@ -93,9 +93,9 @@ def test_trace_factory_preserves_host_trace_outside_requests():
 
 def test_candidate_details_are_debug_only_chunked_and_complete(caplog):
     import json
-    from src.domain.services.retrieval_logging import log_candidates
+    from app.domain.services.retrieval_logging import log_candidates
 
-    logger = logging.getLogger("src.application.services.diagnostic_probe")
+    logger = logging.getLogger("app.application.services.diagnostic_probe")
     caplog.set_level(logging.INFO, logger=logger.name)
     log_candidates(logger, "reranker_input", ((f"bot:{i}:default", 0.5) for i in range(60)))
     assert not caplog.records
@@ -154,12 +154,12 @@ def test_rerank_logs_never_dump_profile_text_even_at_debug(caplog):
 
 
 def test_pipeline_logs_counts_and_distinct_removed_profile_keys(tmp_path, caplog):
-    from src.application.services.worker_vector_match_service import (
+    from app.application.services.worker_vector_match_service import (
         WorkerVectorMatchService, FragmentRetrievalConfig,
     )
-    from src.domain.models.vector_point import VectorPoint
-    from src.infra.metadatastores.file_metadata_store_adapter import FileMetadataStoreAdapter
-    from src.infra.public.vectorstores.qdrant_mysql_vector_store import QdrantMySQLVectorStore
+    from app.domain.models.vector_point import VectorPoint
+    from app.infra.metadatastores.file_metadata_store_adapter import FileMetadataStoreAdapter
+    from app.infra.public.vectorstores.qdrant_mysql_vector_store import QdrantMySQLVectorStore
     from tests.unit.infra.test_qdrant_durable_vector_store import FakePersistenceBackend
 
     vectors = QdrantMySQLVectorStore(
@@ -203,10 +203,10 @@ def test_pipeline_logs_counts_and_distinct_removed_profile_keys(tmp_path, caplog
 
 @pytest.mark.asyncio
 async def test_recommend_route_logs_summary_without_query_or_response_content(monkeypatch, caplog):
-    from src.interfaces.api import recommend_routes
-    from src.domain.models.bot_recommendation import BotRecommendationRequest
-    from src.domain.models.candidate_recommendation import CandidateRecommendation, CandidateRecommendationResponse
-    from src.domain.models.retrieval_mode import RetrievalMode
+    from app.adapters.http import recommend_routes
+    from app.domain.models.bot_recommendation import BotRecommendationRequest
+    from app.domain.models.candidate_recommendation import CandidateRecommendation, CandidateRecommendationResponse
+    from app.domain.models.retrieval_mode import RetrievalMode
 
     class CandidateService:
         _vector_match_service = object()

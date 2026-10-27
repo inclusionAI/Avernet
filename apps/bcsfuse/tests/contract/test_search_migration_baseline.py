@@ -1,10 +1,10 @@
 """TC caller-visible identities and score semantics survive Core extraction."""
 
 import pytest
-from src.application.services.keyword_candidate_selection import fuse_candidates
-from src.application.services.worker_vector_match_types import FragmentProfileCandidate
-from src.domain.models.profile_fragment import FragmentMatch
-from src.interfaces.api.schemas.recommend_schemas import BotRecommendationRequest
+from app.application.services.keyword_candidate_selection import fuse_candidates
+from app.application.services.worker_vector_match_types import FragmentProfileCandidate
+from app.domain.models.profile_fragment import FragmentMatch
+from app.adapters.http.schemas.recommend_schemas import BotRecommendationRequest
 
 
 def candidate(key, score, fragment, **metadata):

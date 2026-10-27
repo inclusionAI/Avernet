@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.domain.services.participants_sufficiency_checker import (
+from app.domain.services.participants_sufficiency_checker import (
     ParticipantsSufficiencyChecker,
     SufficiencyCheckResult,
 )

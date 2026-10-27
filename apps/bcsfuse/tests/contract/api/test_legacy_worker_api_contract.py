@@ -9,12 +9,12 @@ class TestWorkerAPISetup:
 
     def test_app_importable(self):
         """验证 FastAPI app 可导入"""
-        from src.interfaces.api.app import app
+        from app.adapters.http.app import app
         assert app is not None
 
     def test_app_is_fastapi(self):
         """验证 app 是 FastAPI 实例"""
-        from src.interfaces.api.app import app
+        from app.adapters.http.app import app
         from fastapi import FastAPI
         assert isinstance(app, FastAPI)
 
@@ -25,8 +25,8 @@ class TestWorkerAPIEndpoints:
     @pytest.fixture
     def client(self):
         """创建测试客户端"""
-        from src.interfaces.api.app import app
-        from src.interfaces.api.dependencies.worker_dependencies import use_in_memory_stores
+        from app.adapters.http.app import app
+        from app.adapters.http.dependencies.worker_dependencies import use_in_memory_stores
 
         # 确保使用内存数据库
         use_in_memory_stores()
@@ -194,8 +194,8 @@ class TestWorkerAPIFiltering:
 
     @pytest.fixture
     def client(self):
-        from src.interfaces.api.app import app
-        from src.interfaces.api.dependencies.worker_dependencies import use_in_memory_stores
+        from app.adapters.http.app import app
+        from app.adapters.http.dependencies.worker_dependencies import use_in_memory_stores
 
         # 确保使用内存数据库
         use_in_memory_stores()
@@ -255,9 +255,9 @@ class TestWorkerAPIFilteringExtended:
     @pytest.fixture
     def client_with_workers(self):
         """创建包含多个 Worker 的测试客户端"""
-        from src.interfaces.api.app import app
+        from app.adapters.http.app import app
         from fastapi.testclient import TestClient
-        from src.interfaces.api.dependencies.worker_dependencies import use_in_memory_stores
+        from app.adapters.http.dependencies.worker_dependencies import use_in_memory_stores
 
         # 确保使用内存数据库
         use_in_memory_stores()

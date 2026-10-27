@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from src.domain.models.vector_point import VectorPoint
-from src.infra.vectorstores.faiss_sqlite_vector_store import FaissSqliteVectorStore
+from app.domain.models.vector_point import VectorPoint
+from app.infra.vectorstores.faiss_sqlite_vector_store import FaissSqliteVectorStore
 
 
 class TestFaissSqliteVectorStore:
@@ -185,7 +185,7 @@ class TestFaissSqliteVectorStoreProtocol:
 
     def test_implements_protocol(self):
         """Verify protocol compliance."""
-        from src.domain.services.vector_store_adapter import VectorStoreAdapter
+        from app.domain.services.vector_store_adapter import VectorStoreAdapter
 
         store = FaissSqliteVectorStore(dimension=4, db_path=":memory:", auto_load=False)
 

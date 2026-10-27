@@ -4,18 +4,18 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.domain.models.retrieval_mode import RetrievalMode
-from src.domain.models.worker_profile import (
+from app.domain.models.retrieval_mode import RetrievalMode
+from app.domain.models.worker_profile import (
     ProfileType,
     WorkerProfile,
     WorkerProfileScanResult,
 )
-from src.domain.services.worker_profile_retrieval_service import (
+from app.domain.services.worker_profile_retrieval_service import (
     RetrievalResult,
     WorkerProfileRetrievalService,
 )
-from src.infra.config.feature_flags import FeatureFlags
-from src.infra.embedding.providers.real_provider import RealEmbeddingProvider
+from app.infra.config.feature_flags import FeatureFlags
+from app.infra.embedding.providers.real_provider import RealEmbeddingProvider
 
 
 @pytest.fixture

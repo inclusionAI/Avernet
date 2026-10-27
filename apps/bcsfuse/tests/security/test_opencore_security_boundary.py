@@ -22,8 +22,8 @@ from typing import List, Set
 import pytest
 
 
-# Open-core source directory (src/ under bcsfuse root)
-OPENCORE_SRC_DIR = Path(__file__).parent.parent.parent / "src"
+# TC source directory in the public src layout.
+OPENCORE_SRC_DIR = Path(__file__).parent.parent.parent / "src" / "app"
 # pyproject.toml is in bcsfuse root directory
 PYPROJECT_PATH = Path(__file__).parent.parent.parent / "pyproject.toml"
 
@@ -305,7 +305,7 @@ class TestNoRuntimeArtifactsVisible:
         """Verify no runtime artifacts (data/, logs/, *.sqlite, etc.) are tracked in git in open-core."""
         import subprocess
 
-        # Only check open-core directory (src/ocb-ant/ocb/src/bcsfuse)
+        # Only check the TC source package in this checkout.
         opencore_dir = OPENCORE_SRC_DIR
 
         forbidden_file_extensions = [
@@ -372,8 +372,7 @@ class TestNoInternalProviderRuntimeImports:
 
         public_provider_dir = OPENCORE_SRC_DIR / "infra" / "public"
 
-        if not public_provider_dir.exists():
-            pytest.skip("Public provider directory not found")
+        assert public_provider_dir.is_dir(), "Public provider directory not found"
 
         for py_file in public_provider_dir.rglob("*.py"):
             if "test" in str(py_file).lower():

@@ -23,7 +23,7 @@ Environment Variables:
     BCSFUSE_PORT: Server port (default: 8765)
 
 Note:
-    For internal deployments using Sofapy, use main_internal.py instead.
+    Internal deployments use their host repository's composition entrypoint.
 """
 import os
 import logging
@@ -61,10 +61,10 @@ def create_app():
     # This ensures all logger.info() calls output to stdout, which is
     # captured by nohup redirection in canonical startup script.
     # Without this, Python uses default WARNING level and suppresses INFO logs.
-    from src.infra.logging.logging_config import configure_logging
+    from app.infra.logging.logging_config import configure_logging
     configure_logging()
 
-    from src.bootstrap.opensource_app import create_opensource_app
+    from app.bootstrap.opensource_app import create_opensource_app
 
     logger.info(f"[OpenSource Entrypoint] Creating app with mode: {PROVIDER_MODE}")
     app = create_opensource_app(mode=PROVIDER_MODE)

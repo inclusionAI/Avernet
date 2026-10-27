@@ -10,7 +10,7 @@ BCS Fuse - FastAPI Web 应用适配器
 - 现有中间件
 - 现有业务逻辑
 """
-from src.interfaces.api.app import app as original_app
+from app.adapters.http.app import app as original_app
 
 # 直接复用现有的 FastAPI 应用
 app = original_app

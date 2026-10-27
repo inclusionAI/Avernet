@@ -23,13 +23,13 @@ import time
 from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 
-from src.interfaces.api.app import app
-from src.interfaces.api.dependencies import worker_dependencies
-from src.application.services.participant_availability_checker import (
+from app.adapters.http.app import app
+from app.adapters.http.dependencies import worker_dependencies
+from app.application.services.participant_availability_checker import (
     ParticipantAvailabilityChecker,
     ParticipantAvailability,
 )
-from src.domain.models.worker_runtime_state import WorkerRuntimeState
+from app.domain.models.worker_runtime_state import WorkerRuntimeState
 
 
 class TestParticipantAvailabilityCheckerRegistryConsistency:
@@ -91,7 +91,7 @@ class TestParticipantAvailabilityCheckerRegistryConsistency:
         assert online_resp.status_code == 200
 
         # 4. 使用 ParticipantAvailabilityChecker 检查
-        from src.interfaces.api.dependencies.worker_dependencies import (
+        from app.adapters.http.dependencies.worker_dependencies import (
             _get_registry_store,
             _get_runtime_state_store,
             _get_profile_binding_store,
@@ -144,7 +144,7 @@ class TestParticipantAvailabilityCheckerRegistryConsistency:
         # 设置 online
         client.put(f"/v1/workers/{worker_id}/online")
 
-        from src.interfaces.api.dependencies.worker_dependencies import (
+        from app.adapters.http.dependencies.worker_dependencies import (
             _get_profile_binding_store,
             _get_runtime_state_store,
         )
@@ -370,7 +370,7 @@ class TestFusionEndToEnd:
             client.put(f"/v1/workers/{wid}/online")
 
         # 验证 ParticipantAvailabilityChecker
-        from src.interfaces.api.dependencies.worker_dependencies import (
+        from app.adapters.http.dependencies.worker_dependencies import (
             _get_profile_binding_store,
             _get_runtime_state_store,
             _get_registry_store,
@@ -413,14 +413,14 @@ class TestParticipantAvailabilityCheckerDirect:
         当 participant_id 是一个有效的 worker_id 时，
         应该直接从 RegistryStore 确认，而不是依赖 ProfileBindingStore。
         """
-        from src.infra.adapters.in_memory_worker_registry_store import InMemoryWorkerRegistryStore
-        from src.infra.adapters.in_memory_worker_runtime_state_store import InMemoryWorkerRuntimeStateStore
-        from src.infra.adapters.in_memory_worker_profile_binding_store import InMemoryWorkerProfileBindingStore
-        from src.domain.models.worker import (
+        from app.infra.adapters.in_memory_worker_registry_store import InMemoryWorkerRegistryStore
+        from app.infra.adapters.in_memory_worker_runtime_state_store import InMemoryWorkerRuntimeStateStore
+        from app.infra.adapters.in_memory_worker_profile_binding_store import InMemoryWorkerProfileBindingStore
+        from app.domain.models.worker import (
             Worker, WorkerType, WorkerIdentity, WorkerState,
             Availability, TrustLevel, Capability, CapabilityLevel,
         )
-        from src.domain.models.worker_lifecycle_state import WorkerLifecycleState
+        from app.domain.models.worker_lifecycle_state import WorkerLifecycleState
 
         # Setup stores
         registry_store = InMemoryWorkerRegistryStore()

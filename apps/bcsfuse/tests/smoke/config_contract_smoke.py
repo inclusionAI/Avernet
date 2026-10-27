@@ -94,7 +94,7 @@ def test_no_application_yaml_required():
         print("✅ configs/application.yaml is not required")
 
     # Try to import and create app
-    from src.bootstrap.opensource_app import create_opensource_app
+    from app.bootstrap.opensource_app import create_opensource_app
     os.environ['BCSFUSE_PROVIDER_MODE'] = 'test'
     os.environ['BCSFUSE_AUTH_TOKEN'] = 'test-token'
 
@@ -188,8 +188,8 @@ def test_auth_token_from_env():
     # Test with dummy token
     os.environ['BCSFUSE_AUTH_TOKEN'] = 'test-token-for-smoke'
 
-    from src.bootstrap.opensource_app import create_opensource_app
-    from src.infra.public.auth.simple_token_auth_provider import SimpleTokenAuthProvider
+    from app.bootstrap.opensource_app import create_opensource_app
+    from app.infra.public.auth.simple_token_auth_provider import SimpleTokenAuthProvider
 
     try:
         app = create_opensource_app(mode='test')
@@ -215,7 +215,7 @@ def test_secret_masking_in_diagnostics():
     os.environ['MYSQL_PASSWORD'] = 'mysql-password-secret'
 
     try:
-        from src.bootstrap.opensource_app import create_opensource_app
+        from app.bootstrap.opensource_app import create_opensource_app
         app = create_opensource_app(mode='test')
 
         # Get config provider
@@ -388,7 +388,7 @@ def test_oss_diagnostics_masking():
     os.environ['MYSQL_PASSWORD'] = 'mysql-secret-jkl'
 
     try:
-        from src.bootstrap.oss_diagnostics import (
+        from app.bootstrap.oss_diagnostics import (
             mask_secret_value,
             safe_provider_diagnostics,
             validate_no_secrets_in_dict,
@@ -403,7 +403,7 @@ def test_oss_diagnostics_masking():
         print("✅ mask_secret_value works correctly")
 
         # Test with context
-        from src.bootstrap.opensource_app import create_opensource_app
+        from app.bootstrap.opensource_app import create_opensource_app
         app = create_opensource_app(mode='test')
 
         diagnostics = safe_provider_diagnostics(app.state.context)

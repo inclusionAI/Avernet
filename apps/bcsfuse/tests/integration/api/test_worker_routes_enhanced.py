@@ -14,8 +14,8 @@ Integration Tests for Worker Routes Enhanced
 import pytest
 from fastapi.testclient import TestClient
 
-from src.interfaces.api.app import app
-from src.interfaces.api.dependencies.worker_dependencies import (
+from app.adapters.http.app import app
+from app.adapters.http.dependencies.worker_dependencies import (
     reset_stores,
     use_in_memory_stores,
 )
@@ -222,11 +222,11 @@ class TestSetWorkerOnline:
         })
 
         # 手动设置为 disabled（通过 patch）
-        from src.interfaces.api.dependencies.worker_dependencies import get_registry_store
+        from app.adapters.http.dependencies.worker_dependencies import get_registry_store
         store = get_registry_store()
         worker = store.get_by_id("wrk_disabled_001")
         worker.lifecycle_state = "disabled"  # 使用字符串
-        from src.domain.models.worker_lifecycle_state import WorkerLifecycleState
+        from app.domain.models.worker_lifecycle_state import WorkerLifecycleState
         worker.lifecycle_state = WorkerLifecycleState.DISABLED
         store.update(worker)
 
@@ -245,10 +245,10 @@ class TestSetWorkerOnline:
         })
 
         # 手动设置为 inactive
-        from src.interfaces.api.dependencies.worker_dependencies import get_registry_store
+        from app.adapters.http.dependencies.worker_dependencies import get_registry_store
         store = get_registry_store()
         worker = store.get_by_id("wrk_inactive_001")
-        from src.domain.models.worker_lifecycle_state import WorkerLifecycleState
+        from app.domain.models.worker_lifecycle_state import WorkerLifecycleState
         worker.lifecycle_state = WorkerLifecycleState.INACTIVE
         store.update(worker)
 

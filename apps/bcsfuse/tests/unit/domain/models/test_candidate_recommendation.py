@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import pytest
 
-from src.domain.models.candidate_recommendation import (
+from app.domain.models.candidate_recommendation import (
     CandidateRecommendation,
     CandidateRecommendationResponse,
 )
-from src.domain.models.domain_coverage import DomainCoverage
-from src.domain.models.retrieval_mode import RetrievalMode
+from app.domain.models.domain_coverage import DomainCoverage
+from app.domain.models.retrieval_mode import RetrievalMode
 
 
 class TestCandidateRecommendationModel:

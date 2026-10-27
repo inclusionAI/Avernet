@@ -23,7 +23,7 @@ def composed_test_client(monkeypatch):
     monkeypatch.setenv("ENABLE_PROFILE_EMBEDDING_INDEX", "false")
     monkeypatch.delenv("BCSFUSE_EXPOSE_ADMIN", raising=False)
 
-    from src.bootstrap.opensource_app import create_opensource_app
+    from app.bootstrap.opensource_app import create_opensource_app
 
     app = create_opensource_app(mode="test")
     with TestClient(app) as client:
@@ -73,7 +73,7 @@ class CanonicalOnlyProfileStore:
     """Profile provider exposing exactly the published typed port."""
 
     def __init__(self):
-        from src.infra.public.stores.in_memory_worker_profile_content_store import (
+        from app.infra.public.stores.in_memory_worker_profile_content_store import (
             InMemoryWorkerProfileContentStore,
         )
 
@@ -246,8 +246,8 @@ def test_composed_profile_routes_accept_canonical_only_provider(monkeypatch):
     monkeypatch.setenv("BCSFUSE_AUTH_TOKEN", "test-token")
     monkeypatch.setenv("BCSFUSE_PROVIDER_MODE", "runtime")
     monkeypatch.setenv("ENABLE_PROFILE_EMBEDDING_INDEX", "false")
-    from src.bootstrap.app_factory import create_bcsfuse_app
-    from src.bootstrap.application_context import build_application_context
+    from app.bootstrap.app_factory import create_bcsfuse_app
+    from app.bootstrap.application_context import build_application_context
 
     context = build_application_context(mode="test")
     canonical_store = CanonicalOnlyProfileStore()

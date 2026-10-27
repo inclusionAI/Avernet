@@ -15,21 +15,21 @@ import tempfile
 import pytest
 from fastapi.testclient import TestClient
 
-from src.interfaces.api.app import app
-from src.interfaces.api.dependencies.worker_dependencies import (
+from app.adapters.http.app import app
+from app.adapters.http.dependencies.worker_dependencies import (
     reset_stores,
     _registry_store,
     _runtime_state_store,
     _audit_log_store,
 )
-from src.infra.config.worker_registry_settings import WorkerRegistrySettings
-from src.infra.adapters.sqlite_worker_registry_store import SQLiteWorkerRegistryStore
-from src.infra.adapters.sqlite_worker_runtime_state_store import SQLiteWorkerRuntimeStateStore
-from src.infra.adapters.sqlite_worker_audit_log_store import SQLiteWorkerAuditLogStore
-from src.application.services.worker_import_service import WorkerImportService
-from src.application.services.worker_runtime_state_service import WorkerRuntimeStateService
-from src.infra.adapters.in_memory_worker_index_sync_adapter import InMemoryWorkerIndexSyncAdapter
-from src.infra.adapters.sqlite_worker_profile_binding_store import SQLiteWorkerProfileBindingStore
+from app.infra.config.worker_registry_settings import WorkerRegistrySettings
+from app.infra.adapters.sqlite_worker_registry_store import SQLiteWorkerRegistryStore
+from app.infra.adapters.sqlite_worker_runtime_state_store import SQLiteWorkerRuntimeStateStore
+from app.infra.adapters.sqlite_worker_audit_log_store import SQLiteWorkerAuditLogStore
+from app.application.services.worker_import_service import WorkerImportService
+from app.application.services.worker_runtime_state_service import WorkerRuntimeStateService
+from app.infra.adapters.in_memory_worker_index_sync_adapter import InMemoryWorkerIndexSyncAdapter
+from app.infra.adapters.sqlite_worker_profile_binding_store import SQLiteWorkerProfileBindingStore
 
 
 @pytest.fixture
@@ -156,7 +156,7 @@ class TestWorkerPersistence:
         stores["runtime_state_store"] = new_runtime_store
 
         # 验证运行态
-        from src.domain.models.worker_runtime_state import WorkerRuntimeState
+        from app.domain.models.worker_runtime_state import WorkerRuntimeState
         runtime_state = new_runtime_store.get_runtime_state("wrk_runtime_persist_001")
         assert runtime_state == WorkerRuntimeState.ONLINE
 
@@ -232,7 +232,7 @@ class TestWorkerPersistence:
         assert found.domains == ["testing"]
 
         # 验证运行态已初始化
-        from src.domain.models.worker_runtime_state import WorkerRuntimeState
+        from app.domain.models.worker_runtime_state import WorkerRuntimeState
         runtime_state = stores["runtime_state_store"].get_runtime_state("wrk_sqlite_001")
         assert runtime_state == WorkerRuntimeState.OFFLINE
 
@@ -275,7 +275,7 @@ class TestOnlineOfflinePersistence:
 
         # 设为在线
         runtime_service.set_online("wrk_switch_001")
-        from src.domain.models.worker_runtime_state import WorkerRuntimeState
+        from app.domain.models.worker_runtime_state import WorkerRuntimeState
         assert stores["runtime_state_store"].get_runtime_state("wrk_switch_001") == WorkerRuntimeState.ONLINE
 
         # 设为离线

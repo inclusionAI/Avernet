@@ -7,9 +7,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from src.domain.models.vector_point import VectorPoint
-from src.domain.models.vector_search_hit import VectorSearchHit
-from src.infra.vectorstores.faiss_vector_store_adapter import FaissVectorStoreAdapter
+from app.domain.models.vector_point import VectorPoint
+from app.domain.models.vector_search_hit import VectorSearchHit
+from app.infra.vectorstores.faiss_vector_store_adapter import FaissVectorStoreAdapter
 
 
 class TestFaissVectorStoreAdapter:
@@ -507,7 +507,7 @@ class TestFaissVectorStoreAdapter:
 
     def test_satisfies_protocol(self, store):
         """Test that FaissVectorStoreAdapter satisfies VectorStoreAdapter protocol."""
-        from src.domain.services.vector_store_adapter import VectorStoreAdapter
+        from app.domain.services.vector_store_adapter import VectorStoreAdapter
 
         assert isinstance(store, VectorStoreAdapter)
 

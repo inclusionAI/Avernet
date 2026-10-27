@@ -22,12 +22,12 @@ import os
 import tempfile
 import pytest
 from tests.fixtures.registry_recommendation import registry_recommendation_service
-from src.infra.config.feature_flags import FeatureFlags
+from app.infra.config.feature_flags import FeatureFlags
 
 from datetime import datetime
 from unittest.mock import Mock, patch, MagicMock
 
-from src.domain.models.worker import (
+from app.domain.models.worker import (
     Worker,
     WorkerType,
     WorkerIdentity,
@@ -37,19 +37,19 @@ from src.domain.models.worker import (
     Availability,
     TrustLevel,
 )
-from src.domain.models.worker_lifecycle_state import WorkerLifecycleState
-from src.domain.models.worker_runtime_state import WorkerRuntimeState
-from src.domain.models.worker_profile import WorkerProfile, ProfileType, WorkerProfileScanResult
-from src.domain.models.skill_profile import SkillProfile
-from src.domain.models.retrieval_mode import RetrievalMode
-from src.domain.models.fusion_request import FusionRequest, FuseOptions
-from src.infra.adapters.sqlite_worker_registry_store import SQLiteWorkerRegistryStore
-from src.infra.adapters.sqlite_worker_runtime_state_store import SQLiteWorkerRuntimeStateStore
-from src.application.services.registry_aware_worker_filter import RegistryAwareWorkerFilter
-from src.application.services.worker_candidate_recommendation_impl import WorkerCandidateRecommendationImpl
-from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
-from src.application.services.group_fusion_service import GroupFusionService
-from src.domain.services.worker_profile_retrieval_service import WorkerProfileRetrievalService
+from app.domain.models.worker_lifecycle_state import WorkerLifecycleState
+from app.domain.models.worker_runtime_state import WorkerRuntimeState
+from app.domain.models.worker_profile import WorkerProfile, ProfileType, WorkerProfileScanResult
+from app.domain.models.skill_profile import SkillProfile
+from app.domain.models.retrieval_mode import RetrievalMode
+from app.domain.models.fusion_request import FusionRequest, FuseOptions
+from app.infra.adapters.sqlite_worker_registry_store import SQLiteWorkerRegistryStore
+from app.infra.adapters.sqlite_worker_runtime_state_store import SQLiteWorkerRuntimeStateStore
+from app.application.services.registry_aware_worker_filter import RegistryAwareWorkerFilter
+from app.application.services.worker_candidate_recommendation_impl import WorkerCandidateRecommendationImpl
+from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
+from app.application.services.group_fusion_service import GroupFusionService
+from app.domain.services.worker_profile_retrieval_service import WorkerProfileRetrievalService
 
 
 @pytest.fixture(autouse=True)
