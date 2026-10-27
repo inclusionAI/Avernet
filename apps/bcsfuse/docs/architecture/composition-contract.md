@@ -357,6 +357,13 @@ read. A missing Profile provider returns 503, and
 Profile read/write/activation failures return 500 `PROFILE_SYNC_FAILED` rather
 than a false success. Worker changes made before such a failure may remain
 committed; repeating the same sync safely completes the Profile step.
+When activation is requested and the configured binding provider raises during
+`bind_profile`, both aliases return 500 `PROFILE_BINDING_FAILED`. They do not
+report `success=true` or proceed to subsequent index refresh and analysis steps.
+Worker and Profile writes before the binding failure may remain committed;
+this is not an atomic rollback. Retrying the same request completes the binding
+once persistence is available. Draft sync (`profile.activate=false`) does not
+write a binding. The existing optional-provider behavior is unchanged.
 SQLite and MySQL Profile stores persist `description` under the reserved
 `__bcsfuse_profile_description_v1__` key in the existing `metadata` JSON
 column. Reads remove that storage key from caller-visible metadata. The key

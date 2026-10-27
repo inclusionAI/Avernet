@@ -236,3 +236,55 @@ def test_profile_summary_is_preserved_until_explicitly_removed(sync_client):
     assert profile_store.get("test-bot:12345", "default").contents == {
         "identity": "Assistant", "profile": "名称: Named worker",
     }
+
+
+@pytest.mark.parametrize("prefix", ["/v1", "/api/v1"])
+@pytest.mark.parametrize("existing", [False, True])
+def test_binding_failure_is_reported_and_same_sync_can_be_retried(
+    sync_client, monkeypatch, prefix, existing,
+):
+    client, stores = sync_client
+    worker_id = "test-bot:binding-failure"
+    url = f"{prefix}/workers/{worker_id}/sync"
+    binding_store = stores["worker_profile_binding_store"]
+    if existing:
+        assert client.post(url, json=payload("original", True)).status_code == 200
+
+    def fail_binding(*args, **kwargs):
+        raise RuntimeError("database write failed: private diagnostic")
+
+    request_body = payload("replacement", True)
+    with monkeypatch.context() as patch:
+        patch.setattr(binding_store, "bind_profile", fail_binding)
+        response = client.post(url, json=request_body)
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"]["code"] == "PROFILE_BINDING_FAILED"
+    assert "private diagnostic" not in response.text
+    # Earlier writes may have committed; failure is not an atomic rollback claim.
+    assert stores["worker_profile_content_store"].get(worker_id, "replacement") is not None
+    binding = binding_store.get_active_binding(worker_id)
+    assert (binding.profile_key if binding else None) == (
+        f"{worker_id}:original" if existing else None
+    )
+
+    retried = client.post(url, json=request_body)
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["success"] is True
+    assert binding_store.get_active_binding(worker_id).profile_key == f"{worker_id}:replacement"
+    assert sum(binding.is_active for binding in binding_store.list_bindings_by_worker(worker_id)) == 1
+
+
+def test_draft_sync_does_not_require_binding_write(sync_client, monkeypatch):
+    client, stores = sync_client
+    calls = []
+
+    def unexpected_binding(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("draft sync must not write an active binding")
+
+    monkeypatch.setattr(stores["worker_profile_binding_store"], "bind_profile", unexpected_binding)
+    response = client.post("/v1/workers/test-bot:draft/sync", json=payload())
+    assert response.status_code == 200, response.text
+    assert response.json()["profile_activated"] is False
+    assert calls == []
