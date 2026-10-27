@@ -5,6 +5,9 @@ pre-ledger fence / type fence / ambiguous), the creation path, and crash-resume
 (by interrupting the real ``record_workflow`` seam).
 """
 import asyncio
+from unittest.mock import Mock
+
+import httpx
 from contextlib import contextmanager
 
 import pytest
@@ -101,6 +104,69 @@ CREATE = PublishOperationKind.FIRST_RELEASE.value
 
 def run(coro):
     return asyncio.run(coro)
+
+
+@pytest.mark.parametrize(
+    ('status', 'payload', 'already_absent'),
+    [
+        (404, {'detail': {'error_code': 'BOT_NOT_FOUND'}}, True),
+        (404, {'detail': {'error_code': 'ROUTE_NOT_FOUND'}}, False),
+        (404, {'detail': {'error_code': 'DEVICE_NOT_FOUND'}}, False),
+        (403, {'detail': {'error_code': 'BOT_NOT_FOUND'}}, False),
+        (503, {'detail': {'error_code': 'BOT_NOT_FOUND'}}, False),
+        (400, {'detail': {'error_code': 'INVALID_REQUEST'}}, False),
+        (404, ['BOT_NOT_FOUND'], False),
+        (404, {'detail': 'BOT_NOT_FOUND'}, False),
+        (404, '<html>BOT_NOT_FOUND</html>', False),
+    ],
+)
+def test_eval_teardown_completes_only_structurally_absent_bot(
+    ledger, baas, status, payload, already_absent
+):
+    from agentclaw.community.core.service_bot.baas_service_errors import BaasServiceError
+    from agentclaw.community.core.service_bot.services.baas_service import BaasService
+    from agentclaw.community.core.service_bot.services.publish_flow.eval_publish_mixin import EvalPublishMixin
+
+    # Exercise the real HTTP error wrapper, operation runner and SQL ledger.
+    service = object.__new__(BaasService)
+    service._tenant = 'tenant'
+    service._http = Mock()
+    body = {'content': payload} if isinstance(payload, str) else {'json': payload}
+    service._http.post.return_value = httpx.Response(
+        status, **body, request=httpx.Request('POST', 'https://baas.test/bots/b/destroy')
+    )
+    flow = EvalPublishMixin()
+    flow._baas_service = service
+    flow._operation_runner = _runner(ledger, baas)
+    if already_absent:
+        result = run(flow.execute_eval_teardown(publish_id=17, bot_uuid='b'))
+        assert result['success'] is True
+        assert result['baas_publish_id'] is None
+    else:
+        with pytest.raises(BaasServiceError) as raised:
+            run(flow.execute_eval_teardown(publish_id=17, bot_uuid='b'))
+        assert raised.value.__cause__.response.status_code == status
+    op = ledger.get_latest_by_kind(17, PublishOperationKind.EVAL_TEARDOWN.value, PublishStage.EVAL.value)
+    assert (op.state == PublishOperationState.COMPLETED.value) is already_absent
+    service._http.post.assert_called_once()
+
+
+def test_eval_teardown_does_not_complete_on_transport_failure(ledger, baas):
+    from agentclaw.community.core.service_bot.baas_service_errors import BaasServiceError
+    from agentclaw.community.core.service_bot.services.baas_service import BaasService
+    from agentclaw.community.core.service_bot.services.publish_flow.eval_publish_mixin import EvalPublishMixin
+
+    service = object.__new__(BaasService)
+    service._tenant = 'tenant'
+    service._http = Mock()
+    service._http.post.side_effect = httpx.ConnectError('unavailable')
+    flow = EvalPublishMixin()
+    flow._baas_service = service
+    flow._operation_runner = _runner(ledger, baas)
+    with pytest.raises(BaasServiceError):
+        run(flow.execute_eval_teardown(publish_id=17, bot_uuid='b'))
+    op = ledger.get_latest_by_kind(17, PublishOperationKind.EVAL_TEARDOWN.value, PublishStage.EVAL.value)
+    assert op.state == PublishOperationState.PENDING.value
 
 
 # ── open / resume ─────────────────────────────────────────────────────────────

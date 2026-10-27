@@ -313,10 +313,6 @@ fn group_use_case_error_to_legacy(error: GroupUseCaseError) -> LegacyGroupError 
         GroupUseCaseError::ActorNotFound(actor_id) => {
             LegacyGroupError::not_found(format!("Actor '{}' not found", actor_id))
         }
-        GroupUseCaseError::ProposalNotFound(proposal_id)
-        | GroupUseCaseError::ProposalExpired(proposal_id) => {
-            LegacyGroupError::not_found(format!("Proposal '{}' not found or expired", proposal_id))
-        }
         GroupUseCaseError::InvalidParticipantMode { mode, actor_kind } => {
             LegacyGroupError::bad_request(format!(
                 "mode '{:?}' is not valid for actor_kind '{:?}'",

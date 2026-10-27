@@ -1,5 +1,8 @@
 import type { CreateGroupParams } from '@/pages/GroupChat/types';
+import * as BcnController from './BcnController';
 import type { CollaborationDefinitionValidationResponse } from './BcnController';
+import { getActorList } from './ActorController';
+import { computeIsOnline, type BotNetworkInfo, type BotVisibility } from '@/stores/botNetworkStore';
 
 export type CollaborationDefinitionValidationResult = CollaborationDefinitionValidationResponse & {
   participants: NonNullable<CollaborationDefinitionValidationResponse['participants']>;
@@ -7,25 +10,25 @@ export type CollaborationDefinitionValidationResult = CollaborationDefinitionVal
 };
 
 export interface GroupCreationHost {
-  userApiBaseUrl: string;
   groupUrlTemplate: string;
   groupListUrl: string;
 }
 export interface GroupUser { user_id: string; display_name: string }
 export interface GroupBot {
   bot_id: string; name: string; kind: 'bot'; created_by?: string;
-  status: string; reachability: string; summary?: string;
+  status: string; reachability: string; summary?: string; avatar_url?: string;
+  visibility?: BotVisibility; is_friend?: boolean | null;
 }
 export interface BotPage { items: GroupBot[]; total: number; offset: number; limit: number }
-export interface GroupCreationResult { group_id: string; initial_session_id: string }
+/** Created group identifiers plus the submitted driver used for navigation. */
+export interface GroupCreationResult { group_id: string; initial_session_id: string; driver_bot_uuid: string }
 export class UserApiError extends Error {
   constructor(message: string, public code = '', public unknownOutcome = false) { super(message); }
 }
 
-// This frontend exposes native BCS through its existing same-origin proxy.
+// Navigation stays in the host; API calls use the ordinary BCN request client.
 export const GROUP_CREATION_HOST: GroupCreationHost = {
-  userApiBaseUrl: '/bcnproxy/collaboration/user',
-  groupUrlTemplate: '/bcn/chat/detail?id={groupId}&session={sessionId}&bot_uuid={humanActorId}',
+  groupUrlTemplate: '/bcn/chat/detail?id={groupId}&session={sessionId}&bot_uuid={driverBotId}',
   groupListUrl: '/bcn/chat/list?bot_uuid={humanActorId}',
 };
 export const BCS_API_BASE = '/bcnproxy';
@@ -37,77 +40,40 @@ function sameOrigin(path: string): string {
   return `${url.pathname}${url.search}`;
 }
 
-export function groupLink(host: GroupCreationHost, user: GroupUser, result?: GroupCreationResult): string {
-  if (!result) return sameOrigin(host.groupListUrl.replace(/\{humanActorId\}/g, encodeURIComponent(`human_${user.user_id}`)));
+export function groupLink(host: GroupCreationHost, user: GroupUser | undefined, result?: GroupCreationResult): string {
+  if (!result) return sameOrigin(host.groupListUrl.replace(/\{humanActorId\}/g, encodeURIComponent(user ? `human_${user.user_id}` : '')));
   const template = host.groupUrlTemplate;
   if (!template.includes('{groupId}') || !template.includes('{sessionId}')) {
     throw new UserApiError('宿主群导航缺少群或会话参数');
   }
   return sameOrigin(template.replace(/\{groupId\}/g, encodeURIComponent(result.group_id))
     .replace(/\{sessionId\}/g, encodeURIComponent(result.initial_session_id))
-    .replace(/\{humanActorId\}/g, encodeURIComponent(`human_${user.user_id}`)));
+    .replace(/\{driverBotId\}/g, encodeURIComponent(result.driver_bot_uuid)));
 }
 
-async function request(host: GroupCreationHost, path: string, signal: AbortSignal, user?: GroupUser, body?: unknown): Promise<any> {
-  const url = sameOrigin(`${host.userApiBaseUrl.replace(/\/+$/, '')}${path}`);
-  const controller = new AbortController();
-  const abort = () => controller.abort();
-  signal.addEventListener('abort', abort, { once: true });
-  if (signal.aborted) abort();
-  const timer = window.setTimeout(abort, body === undefined ? 15_000 : 60_000);
-  try {
-    const response = await fetch(url, {
-      method: body === undefined ? 'GET' : 'POST', credentials: 'same-origin',
-      cache: 'no-store', redirect: 'error', signal: controller.signal,
-      headers: { ...(user ? { 'X-BCS-Expected-User': user.user_id } : {}),
-        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    });
-    const envelope = await response.json();
-    if (!response.ok || ![20000, 20100].includes(envelope?.code)) {
-      const code = envelope?.data?.error_code ?? '';
-      // Only boundary rejections prove the create handler never ran.
-      const rejected = ['unauthenticated', 'user_context_changed', 'browser_context_required'].includes(code)
-        && [400, 401, 403].includes(response.status);
-      throw new UserApiError(code === 'user_context_changed' ? '登录用户已变化，请重新配置'
-        : response.status === 401 ? '请先登录后再发起协作'
-        : typeof envelope?.message === 'string' ? envelope.message : `用户服务请求失败（HTTP ${response.status}）`,
-      code, body !== undefined && !rejected);
-    }
-    if (!envelope.data || typeof envelope.data !== 'object') throw new Error('Invalid response');
-    return envelope.data;
-  } catch (error) {
-    if (error instanceof UserApiError) throw error;
-    throw new UserApiError(controller.signal.aborted ? '请求已取消或超时' : '用户服务未接通或响应格式无效', '', body !== undefined);
-  } finally {
-    window.clearTimeout(timer);
-    signal.removeEventListener('abort', abort);
-  }
+/** Reuse the same owned, onboarded Bots and presentation data as the top tabs. */
+export function groupOriginatorBots(bots: BotNetworkInfo[]): GroupBot[] {
+  return bots.filter(bot => bot.actor_kind !== 'human' && !bot.bot_uuid.startsWith('human_')
+    && bot.visibility !== 'offline').map(bot => ({
+    bot_id: bot.bot_uuid, name: bot.bot_name, kind: 'bot', summary: bot.summary,
+    status: bot.status || (bot.is_online ? 'online' : 'offline'),
+    reachability: computeIsOnline(bot) ? 'reachable' : 'unreachable',
+    avatar_url: bot.avatar_url, visibility: bot.visibility,
+  }));
 }
 
-export async function readGroupUser(host: GroupCreationHost, signal: AbortSignal): Promise<GroupUser> {
-  const data = await request(host, '/me', signal);
-  if (typeof data.user_id !== 'string' || !data.user_id || typeof data.display_name !== 'string') {
-    throw new UserApiError('当前入口没有可信 Human 身份');
-  }
-  return data;
-}
-
-export async function readBotPage(host: GroupCreationHost, user: GroupUser, originator: string | null,
-  name: string, offset: number, signal: AbortSignal): Promise<BotPage> {
-  const params = new URLSearchParams({ offset: String(offset), limit: '20', name });
-  if (originator) params.set('purpose', 'collaboration');
-  else params.set('kind', 'bot');
-  const path = originator ? `/bots/${encodeURIComponent(originator)}/candidates` : '/bots/mine';
-  const page = await request(host, `${path}?${params}`, signal, user);
-  if (!Array.isArray(page.items) || !Number.isSafeInteger(page.total) || page.total < 0
-    || page.offset !== offset || page.limit !== 20) throw new UserApiError('Bot 列表响应格式无效');
-  const items = page.items.map((item: any) => originator ? item.bot : item);
-  if (items.some((bot: any) => !bot || bot.kind !== 'bot' || typeof bot.bot_id !== 'string' || !bot.bot_id
-    || typeof bot.name !== 'string' || typeof bot.status !== 'string' || typeof bot.reachability !== 'string')) {
+export async function readBotPage(originator: string, name: string, offset: number, signal: AbortSignal): Promise<BotPage> {
+  const page = await getActorList({ current_bot_uuid: originator, cooperatable_only: true,
+    page_no: offset / 20 + 1, page_size: 20, name }, { signal });
+  if (!Array.isArray(page.bots) || !Number.isSafeInteger(page.total) || page.total < 0) {
     throw new UserApiError('Bot 列表响应格式无效');
   }
-  return { ...page, items };
+  const items: GroupBot[] = page.bots.map(bot => ({
+    bot_id: bot.bot_uuid, name: bot.capabilities.name || bot.bot_uuid, kind: 'bot',
+    summary: bot.capabilities.description, status: bot.status, visibility: bot.visibility,
+    reachability: computeIsOnline(bot) ? 'reachable' : 'unreachable', is_friend: bot.is_friend,
+  }));
+  return { items, total: page.total, offset, limit: 20 };
 }
 
 export function groupDefinitionError(result: CollaborationDefinitionValidationResult): string {
@@ -125,51 +91,49 @@ export function groupDefinitionError(result: CollaborationDefinitionValidationRe
   return '';
 }
 
-/** Adapt the same modal parameters to the authenticated Human Group API. */
-export function groupCreationBody(params: CreateGroupParams, validation?: CollaborationDefinitionValidationResult) {
+/** Validate the current form, preserving the ordinary /groups wire contract. */
+export function groupCreationBody(params: CreateGroupParams, validation?: CollaborationDefinitionValidationResult): CreateGroupParams {
   const strategy = params.group_strategy || 'chat';
   if (!params.originator || !params.driver_bot) throw new UserApiError('请选择发起方和群主 Bot');
-  let collaboration: { strategy: 'chat'; delivery_policy: { bot_final_delivery: string } }
-    | { strategy: 'manager_worker' }
-    | { strategy: 'state_machine'; definition: { content_yaml: string }; participant_bindings: { binding: string; actor_ids: string[] }[] };
   if (strategy === 'state_machine') {
     if (!validation) throw new UserApiError('请先校验当前 YAML');
     const error = groupDefinitionError(validation);
     if (error) throw new UserApiError(error);
     if (!params.context?.trim()) throw new UserApiError('请输入协作目标');
-    collaboration = { strategy, definition: { content_yaml: params.collaboration_definition_yaml! },
-      participant_bindings: validation.participants.map(p => {
-        const ids = params.participant_bindings?.[p.binding]?.bot_ids;
-        if (!ids || ids.length !== 1 || !ids[0]) throw new UserApiError(`请选择“${p.display_name || p.binding}”的 Bot`);
-        return { binding: p.binding, actor_ids: [...ids] };
-      }) };
-  } else if (strategy === 'manager_worker') collaboration = { strategy };
-  else collaboration = { strategy, delivery_policy: { bot_final_delivery: params.routing_policy?.default_bot_final_delivery || 'send_to_driver' } };
-  const otherRole = strategy === 'manager_worker' ? 'worker' : 'consultant';
-  const participants = new Map(params.participants.map(p => [p.bot_uuid,
-    { actor_id: p.bot_uuid, role: p.role || otherRole }]));
-  if (!participants.has(params.originator)) participants.set(params.originator, { actor_id: params.originator, role: otherRole });
-  participants.set(params.driver_bot, { actor_id: params.driver_bot, role: strategy === 'manager_worker' ? 'manager' : 'driver' });
-  return { group_kind: 'normal', originator: params.originator, driver_bot_uuid: params.driver_bot,
-    name: params.label, ...(params.context ? { context: params.context } : {}),
-    ...(params.opening_message ? { opening_message: params.opening_message } : {}),
-    ...(params.event_subscriptions?.length ? { event_subscriptions: params.event_subscriptions } : {}),
-    participants: [...participants.values()], collaboration };
+    for (const participant of validation.participants) {
+      const ids = params.participant_bindings?.[participant.binding]?.bot_ids;
+      if (!ids || ids.length !== 1 || !ids[0]) throw new UserApiError(`请选择“${participant.display_name || participant.binding}”的 Bot`);
+    }
+  }
+  const participants = new Map(params.participants.map(p => [p.bot_uuid, p]));
+  for (const bot_uuid of [params.originator, params.driver_bot]) {
+    if (!participants.has(bot_uuid)) participants.set(bot_uuid, { bot_uuid });
+  }
+  return { ...params, group_kind: 'normal', group_strategy: strategy,
+    participants: [...participants.values()], create_initial_session: true,
+    ...(strategy === 'state_machine' ? { start_initial_run: true } : {}) };
 }
 
-export async function createGroup(host: GroupCreationHost, user: GroupUser, body: ReturnType<typeof groupCreationBody>, signal: AbortSignal): Promise<GroupCreationResult> {
-  const data = await request(host, '/groups', signal, user, body);
-  if (typeof data.group_id !== 'string' || !data.group_id || typeof data.initial_session_id !== 'string' || !data.initial_session_id) {
-    throw new UserApiError('服务未返回完整的群和初始会话标识', '', true);
+export async function createGroup(body: CreateGroupParams, signal: AbortSignal): Promise<GroupCreationResult> {
+  try {
+    const data = await BcnController.createGroup(body, { signal, timeout: 60_000 });
+    if (data?.error) throw new UserApiError(data.error, '', true);
+    const session = data?.initial_session_id || data?.session_id;
+    if (typeof data?.id !== 'string' || !data.id || typeof session !== 'string' || !session) {
+      throw new UserApiError('服务未返回完整的群和初始会话标识', '', true);
+    }
+    return { group_id: data.id, initial_session_id: session, driver_bot_uuid: body.driver_bot };
+  } catch (error) {
+    if (error instanceof UserApiError) throw error;
+    // A failed response can occur after the group has been persisted; never retry automatically.
+    throw new UserApiError(error instanceof Error ? error.message : '建群请求失败', '', true);
   }
-  return { group_id: data.group_id, initial_session_id: data.initial_session_id };
 }
 
 export interface CollaborationDefinitionReference {
   schemaVersion: 2;
   draftId: string;
   revision: number;
-  readToken: string;
 }
 export interface StoredDefinition {
   draftId: string;
@@ -192,17 +156,15 @@ function validUnicode(value: string): boolean {
 
 export function decodeCollaborationDefinitionReference(input: unknown): CollaborationDefinitionReference {
   const value = input as Record<string, unknown> | null;
-  const fields = ['schemaVersion', 'draftId', 'revision', 'readToken'];
   if (!value || typeof value !== 'object' || Array.isArray(value)
-    || Object.keys(value).length !== 4 || Object.keys(value).some((key) => !fields.includes(key))
     || value.schemaVersion !== 2
     || typeof value.draftId !== 'string'
     || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value.draftId)
-    || typeof value.revision !== 'number' || !Number.isSafeInteger(value.revision) || value.revision < 1
-    || typeof value.readToken !== 'string' || !/^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/.test(value.readToken)) {
+    || typeof value.revision !== 'number' || !Number.isSafeInteger(value.revision) || value.revision < 1) {
     throw new DraftReadError('协作版本引用无效');
   }
-  return value as unknown as CollaborationDefinitionReference;
+  // Normalize historical cards too; extra fields are never forwarded.
+  return { schemaVersion: 2, draftId: value.draftId, revision: value.revision };
 }
 
 async function definitionRequest(url: string, signal: AbortSignal, options: RequestInit = {}): Promise<any> {
@@ -216,7 +178,7 @@ async function definitionRequest(url: string, signal: AbortSignal, options: Requ
       ...options, signal: controller.signal });
     if (response.status === 404 || response.status === 401 || response.status === 403) {
       throw new DraftReadError(options.method === 'POST' ? '协作定义校验服务不可用或无访问权限'
-        : '引用不可用：版本不存在、分享已撤销或读取凭据不匹配');
+        : '引用不可用：版本不存在或分享已撤销');
     }
     if (!response.ok) throw new DraftReadError(`协作定义服务请求失败（HTTP ${response.status}）`);
     const result = await response.json();
@@ -237,8 +199,7 @@ async function definitionRequest(url: string, signal: AbortSignal, options: Requ
 }
 
 export async function readStoredDefinition(baseUrl: string, reference: CollaborationDefinitionReference, signal: AbortSignal): Promise<StoredDefinition> {
-  const r = await definitionRequest(`${baseUrl}/collaboration/drafts/${reference.draftId}/revisions/${reference.revision}`, signal,
-    { headers: { 'X-BCS-Draft-Read-Token': reference.readToken } });
+  const r = await definitionRequest(`${baseUrl}/collaboration/drafts/${reference.draftId}/revisions/${reference.revision}`, signal);
   if (!r || r.draft_id !== reference.draftId || r.revision !== reference.revision
     || typeof r.definition_yaml !== 'string' || !validUnicode(r.definition_yaml) || !Number.isSafeInteger(r.size_bytes)
     || r.size_bytes < 0 || r.size_bytes > 65_536
@@ -271,8 +232,8 @@ function decodeValidation(value: any): CollaborationDefinitionValidationResult {
 }
 
 export async function validateGroupDefinition(definitionYaml: string, signal: AbortSignal): Promise<CollaborationDefinitionValidationResult> {
-  return decodeValidation(await definitionRequest(`${BCS_API_BASE}/collaboration/definitions/validate`, signal,
-    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ definition_yaml: definitionYaml }) }));
+  return decodeValidation(await BcnController.validateCollaborationDefinitionYaml(
+    { definition_yaml: definitionYaml }, { signal, timeout: 15_000 }));
 }
 
 export interface OpenCreateGroupOptions { draft?: CollaborationDefinitionReference }
@@ -287,7 +248,7 @@ export function decodeOpenCreateGroupOptions(input: unknown = {}): OpenCreateGro
 
 export function toBindingBot(bot: GroupBot) {
   return { bot_uuid: bot.bot_id, bot_name: bot.name, summary: bot.summary,
-    status: bot.status, is_online: bot.status === 'online', avatar_url: undefined,
-    visibility: 'protected' as const, is_friend: null,
+    status: bot.status, is_online: bot.reachability === 'reachable', avatar_url: bot.avatar_url,
+    visibility: bot.visibility || 'protected' as const, is_friend: bot.is_friend ?? null,
     dynamic_status: { status: bot.reachability === 'reachable' ? 'active' as const : 'offline' as const } };
 }

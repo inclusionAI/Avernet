@@ -13,14 +13,16 @@ use bcs_service_api::{
     CollaborationTemplateService, GroupContextApplicationService,
     FriendCoreService, FriendService, FrontendDeliveryPort,
     FusionCoreService, Group, GroupCoreService, GroupFusionService, GroupManagementService,
-    GroupMessageHistoryService, GroupProposalService, GroupQueryService, HumanActorService,
+    GroupMessageHistoryService, GroupQueryService, HumanActorService,
     MessageFlowService, OrganizationManagementService,
-    ProposalCoreService, ProviderBotCoreService, ProviderCoreService,
+    ProviderBotCoreService, ProviderCoreService,
     ProviderBotEventService, ProviderManagementService, RelationCoreService, RoutingCoreService,
     SecretService, SessionFileService, SessionLaunchService, SessionManagementService,
     SystemMessageService, WorkbenchSessionService, backfill_bot_names,
 };
 use bcs_service_api::InteractionService;
+use bcs_service_api::application::v1::bot_authority::BotAuthorityService;
+use bcs_service_api::port::bot_authority::BotAuthorityPort;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -42,8 +44,6 @@ pub struct Services {
     pub routing: Arc<dyn RoutingCoreService>,
     /// Fusion service.
     pub fusion: Arc<dyn FusionCoreService>,
-    /// Proposal service.
-    pub proposal: Arc<dyn ProposalCoreService>,
     /// Friend relationship service.
     pub friend: Arc<dyn FriendCoreService>,
     /// Relation graph service (Human Actor V1, see `bcs_actor_relations`).
@@ -99,8 +99,6 @@ pub struct Services {
     pub group_management: Arc<dyn GroupManagementService>,
     /// Workbench WebSocket session application service.
     pub workbench_sessions: Arc<dyn WorkbenchSessionService>,
-    /// Group proposal application service.
-    pub group_proposals: Arc<dyn GroupProposalService>,
     /// Group message-history application service.
     pub group_message_history: Arc<dyn GroupMessageHistoryService>,
     /// Group Context V1 application service.
@@ -119,6 +117,13 @@ pub struct Services {
     pub secret: Arc<dyn SecretService>,
     /// Session file workspace application service.
     pub session_files: Arc<dyn SessionFileService>,
+    /// Unified bot-authority application facade
+    /// (manager set + ownership transfers, spec §5/§6).
+    pub bot_authority: Arc<dyn BotAuthorityService>,
+    /// The narrow authority hook business entrypoints
+    /// consult (delegates to the authority Core the
+    /// facade uses).
+    pub bot_authority_hook: Arc<dyn BotAuthorityPort>,
 }
 
 impl Services {
@@ -141,7 +146,6 @@ pub struct ServicesBuilder {
     group: Option<Arc<dyn GroupCoreService>>,
     routing: Option<Arc<dyn RoutingCoreService>>,
     fusion: Option<Arc<dyn FusionCoreService>>,
-    proposal: Option<Arc<dyn ProposalCoreService>>,
     friend: Option<Arc<dyn FriendCoreService>>,
     relation: Option<Arc<dyn RelationCoreService>>,
     message_flow: Option<Arc<dyn MessageFlowService>>,
@@ -169,7 +173,6 @@ pub struct ServicesBuilder {
     group_query: Option<Arc<dyn GroupQueryService>>,
     group_management: Option<Arc<dyn GroupManagementService>>,
     workbench_sessions: Option<Arc<dyn WorkbenchSessionService>>,
-    group_proposals: Option<Arc<dyn GroupProposalService>>,
     group_message_history: Option<Arc<dyn GroupMessageHistoryService>>,
     group_context: Option<Arc<dyn GroupContextApplicationService>>,
     system_message: Option<Arc<dyn SystemMessageService>>,
@@ -179,6 +182,8 @@ pub struct ServicesBuilder {
     channel: Option<Arc<dyn ChannelService>>,
     secret: Option<Arc<dyn SecretService>>,
     session_files: Option<Arc<dyn SessionFileService>>,
+    bot_authority: Option<Arc<dyn BotAuthorityService>>,
+    bot_authority_hook: Option<Arc<dyn BotAuthorityPort>>,
 }
 
 impl ServicesBuilder {
@@ -208,12 +213,6 @@ impl ServicesBuilder {
     /// Set the fusion service.
     pub fn fusion(mut self, service: Arc<dyn FusionCoreService>) -> Self {
         self.fusion = Some(service);
-        self
-    }
-
-    /// Set the proposal service.
-    pub fn proposal(mut self, service: Arc<dyn ProposalCoreService>) -> Self {
-        self.proposal = Some(service);
         self
     }
 
@@ -393,12 +392,6 @@ impl ServicesBuilder {
         self
     }
 
-    /// Set the group proposal application service.
-    pub fn group_proposals(mut self, service: Arc<dyn GroupProposalService>) -> Self {
-        self.group_proposals = Some(service);
-        self
-    }
-
     /// Set the group message-history application service.
     pub fn group_message_history(mut self, service: Arc<dyn GroupMessageHistoryService>) -> Self {
         self.group_message_history = Some(service);
@@ -453,6 +446,18 @@ impl ServicesBuilder {
         self
     }
 
+    /// Set the unified bot-authority application facade.
+    pub fn bot_authority(mut self, service: Arc<dyn BotAuthorityService>) -> Self {
+        self.bot_authority = Some(service);
+        self
+    }
+
+    /// Set the narrow bot-authority hook.
+    pub fn bot_authority_hook(mut self, hook: Arc<dyn BotAuthorityPort>) -> Self {
+        self.bot_authority_hook = Some(hook);
+        self
+    }
+
     /// Build the services bundle, failing if any required service is unset.
     pub fn build(self) -> Result<Services, BuilderError> {
         Ok(Services {
@@ -461,7 +466,6 @@ impl ServicesBuilder {
             group: required(self.group, "group")?,
             routing: required(self.routing, "routing")?,
             fusion: required(self.fusion, "fusion")?,
-            proposal: required(self.proposal, "proposal")?,
             friend: required(self.friend, "friend")?,
             relation: required(self.relation, "relation")?,
             message_flow: required(self.message_flow, "message_flow")?,
@@ -495,7 +499,6 @@ impl ServicesBuilder {
             group_query: required(self.group_query, "group_query")?,
             group_management: required(self.group_management, "group_management")?,
             workbench_sessions: required(self.workbench_sessions, "workbench_sessions")?,
-            group_proposals: required(self.group_proposals, "group_proposals")?,
             group_message_history: required(self.group_message_history, "group_message_history")?,
             group_context: required(self.group_context, "group_context")?,
             system_message: required(self.system_message, "system_message")?,
@@ -505,6 +508,8 @@ impl ServicesBuilder {
             channel: required(self.channel, "channel")?,
             secret: required(self.secret, "secret")?,
             session_files: required(self.session_files, "session_files")?,
+            bot_authority: required(self.bot_authority, "bot_authority")?,
+            bot_authority_hook: required(self.bot_authority_hook, "bot_authority_hook")?,
         })
     }
 
@@ -513,16 +518,17 @@ impl ServicesBuilder {
     pub fn build_for_test(self) -> Services {
         use bcs_test_support::{
             NoopA2aChatRunService, NoopA2aChatService, NoopActorDirectoryService,
+            NoopBotAuthorityPort, NoopBotAuthorityService,
             NoopBotDeliveryPort, NoopBotDiscoveryService, NoopBotManagementService,
             NoopBotOnboardingService, NoopBotQueryService, NoopBotRegistryCoreService,
             NoopBotRunContextPort, NoopBotRuntimeConnectionService, NoopChannelService,
             NoopFriendCoreService, NoopFriendService,
             NoopFrontendDeliveryPort, NoopFusionCoreService, NoopGroupCoreService,
             NoopGroupFusionService, NoopGroupManagementService, NoopGroupMessageHistoryService,
-            NoopGroupProposalService, NoopGroupQueryService, NoopHumanActorService,
+            NoopGroupQueryService, NoopHumanActorService,
             NoopCollaborationRuntimeService, NoopCollaborationTemplateService,
             NoopInteractionService, NoopMessageFlowService, NoopOrganizationManagementService,
-            NoopProposalCoreService, NoopProviderBotCoreService, NoopProviderBotEventService,
+            NoopProviderBotCoreService, NoopProviderBotEventService,
             NoopProviderCoreService,
             NoopProviderManagementService, NoopRelationCoreService, NoopRoutingCoreService,
             NoopSecretService, NoopSessionFileService, NoopSessionLaunchService,
@@ -541,9 +547,6 @@ impl ServicesBuilder {
             fusion: self
                 .fusion
                 .unwrap_or_else(|| Arc::new(NoopFusionCoreService)),
-            proposal: self
-                .proposal
-                .unwrap_or_else(|| Arc::new(NoopProposalCoreService)),
             friend: self
                 .friend
                 .unwrap_or_else(|| Arc::new(NoopFriendCoreService)),
@@ -625,9 +628,6 @@ impl ServicesBuilder {
             workbench_sessions: self
                 .workbench_sessions
                 .unwrap_or_else(|| Arc::new(NoopWorkbenchSessionService)),
-            group_proposals: self
-                .group_proposals
-                .unwrap_or_else(|| Arc::new(NoopGroupProposalService)),
             group_message_history: self
                 .group_message_history
                 .unwrap_or_else(|| Arc::new(NoopGroupMessageHistoryService)),
@@ -653,6 +653,12 @@ impl ServicesBuilder {
             session_files: self
                 .session_files
                 .unwrap_or_else(|| Arc::new(NoopSessionFileService)),
+            bot_authority: self
+                .bot_authority
+                .unwrap_or_else(|| Arc::new(NoopBotAuthorityService)),
+            bot_authority_hook: self
+                .bot_authority_hook
+                .unwrap_or_else(|| Arc::new(NoopBotAuthorityPort)),
         }
     }
 }

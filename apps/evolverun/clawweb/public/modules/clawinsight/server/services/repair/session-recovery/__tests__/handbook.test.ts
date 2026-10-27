@@ -15,10 +15,13 @@ describe("recovery handbook references", () => {
       verificationReference: expect.any(String),
     });
   });
-  it.each(["TC.MODEL.DATA", "TC.TOOL.PERMISSION", "TC.SKILL.EXECUTION", "TC.SESSION_CONTEXT.DATA"])(
+  it.each(["TC.MODEL.DATA", "TC.TOOL.PERMISSION", "TC.SESSION_CONTEXT.DATA"])(
     "shares the file topic with %s", code => {
       expect(recoveryHandbook(code).chapters).toEqual(["common/file-download/handbook.md"]);
     });
+  it("routes Skill faults to the general Skill handbook alongside shared file guidance", () => {
+    expect(recoveryHandbook("TC.SKILL.INSTRUCTION").chapters).toEqual(["common/skill/handbook.md", "common/file-download/handbook.md"]);
+  });
   it.each([null, "TC.NEW.CATEGORY", "TC.MCPX.DATA", "TC.MCP-PERMISSION", "other"])(
     "does not select a fallback topic for %s", code => {
       expect(recoveryHandbook(code).chapters).toEqual([]);

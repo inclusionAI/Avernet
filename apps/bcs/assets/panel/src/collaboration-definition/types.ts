@@ -108,7 +108,6 @@ export interface CollaborationDefinitionComponentProps {
   schemaVersion?: unknown;
   draftId?: unknown;
   revision?: unknown;
-  readToken?: unknown;
   documentId?: unknown;
   snapshotId?: unknown;
   parentSnapshotId?: unknown;

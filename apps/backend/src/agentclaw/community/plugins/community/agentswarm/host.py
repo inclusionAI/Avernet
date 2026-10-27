@@ -83,7 +83,7 @@ from agentclaw.community.core.agentswarm.domain.models import (
     NonRetryableProvisioningError,
 )
 from agentclaw.community.plugin_api.agentswarm.bot import BotPlatform
-from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
+from agentclaw.community.core.apply_engine.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.creation import (
     CREATE_ON_CONTAINER_TRIGGER, CREATE_PRE_CONTAINER_TRIGGER,
 )

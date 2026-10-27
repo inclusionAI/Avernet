@@ -30,6 +30,7 @@ export const routes = [
       // BCN 协作会话外链落地页：判定参与方式后 replace 至 /workspace 协作群深链。
       { path: '/workspace/bcn/chat/detail', component: '@/pages/Workspace/BcnChatDetail' },
       { path: '/collaboration-square', redirect: '/collaboration-square/bots' },
+      { path: '/collaboration-square/experts', component: '@/pages/CollaborationSquare/Experts' },
       { path: '/collaboration-square/bots', component: '@/pages/CollaborationSquare/Bots' },
       { path: '/collaboration-square/groups', component: '@/pages/CollaborationSquare/Groups' },
       // 社区已从「发现」迁移到独立的「实验室」一级导航（/lab）：旧深链保留重定向，不 404。

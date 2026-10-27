@@ -211,6 +211,13 @@ async fn human_app(staff: &str) -> (axum::Router, TempDir) {
     services.registry = registry.clone();
     services.group = group_store;
     services.session_management = sessions;
+    // LIVE authority chain mirroring the fixture
+    // `created_by` rows (bot-authority plan Task 6.5).
+    let authority = bcs_test_support::lazy_authority_chain().hook;
+    if staff == "alice" {
+        authority.seed_owner("driver-bot", "alice");
+    }
+    services.bot_authority_hook = authority;
 
     let identity: Arc<dyn UserIdentityPort + Send + Sync> = Arc::new(StaticHumanIdentity {
         staff_no: Some(staff.to_string()),

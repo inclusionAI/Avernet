@@ -54,9 +54,9 @@ const INSERT_SQL: &str = "INSERT INTO bcs_group_sessions \
 /// MySQL-backed session repository.
 #[derive(Clone)]
 pub struct MySqlSessionStore {
-    db: Arc<dyn DbPlugin>,
-    env: String,
-    flavor: DbSqlFlavor,
+    pub(crate) db: Arc<dyn DbPlugin>,
+    pub(crate) env: String,
+    pub(crate) flavor: DbSqlFlavor,
 }
 
 impl MySqlSessionStore {
@@ -320,7 +320,7 @@ fn parse_json(col: &str, row: &DbRow) -> ServiceResult<Option<serde_json::Value>
 }
 
 /// Parse the `status` column string into `SessionStatus`.
-fn parse_status(s: &str) -> ServiceResult<SessionStatus> {
+pub(crate) fn parse_status(s: &str) -> ServiceResult<SessionStatus> {
     match s {
         "running" => Ok(SessionStatus::Running),
         "completed" => Ok(SessionStatus::Completed),
@@ -331,7 +331,7 @@ fn parse_status(s: &str) -> ServiceResult<SessionStatus> {
 }
 
 /// Parse the `session_kind` column string into `SessionKind`.
-fn parse_session_kind(s: &str) -> ServiceResult<SessionKind> {
+pub(crate) fn parse_session_kind(s: &str) -> ServiceResult<SessionKind> {
     match s {
         "chat" => Ok(SessionKind::Chat),
         "service_invocation" => Ok(SessionKind::ServiceInvocation),
@@ -385,7 +385,7 @@ fn build_session_participants_insert_sql(
 }
 
 /// Deserialize the `participants` JSON column.
-fn participants_from_json(s: &str) -> ServiceResult<Vec<Participant>> {
+pub(crate) fn participants_from_json(s: &str) -> ServiceResult<Vec<Participant>> {
     serde_json::from_str(s)
         .map_err(|e| ServiceError::InternalError(format!("participants deserialize: {e}")))
 }
@@ -593,6 +593,15 @@ impl SessionRepoPort for MySqlSessionStore {
     async fn get(&self, session_id: &str) -> Option<Session> { self.repo_get(session_id).await }
 
     async fn try_get(&self, session_id: &str) -> ServiceResult<Option<Session>> { self.repo_try_get(session_id).await }
+
+    async fn read_authorization_snapshot(
+        &self,
+        session_id: &str,
+    ) -> ServiceResult<Option<bcs_service_api::types::authorization_snapshot::SessionAuthorizationSnapshot>> {
+        // Strict master-source read; `MySqlSessionStore` keeps no
+        // display cache, but this stays a dedicated narrow query.
+        self.read_authorization_snapshot_sql(session_id).await
+    }
 
     async fn belongs_to_group(&self, session_id: &str, group_id: &str) -> bool { self.repo_belongs_to_group(session_id, group_id).await }
 

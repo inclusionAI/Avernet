@@ -52,4 +52,4 @@ The crate owns group session business rules and lifecycle decisions. It does not
 
 Group creation, membership, Human invitations and workbench access enforce the live Provider collaboration boundary across current participants. Group mutation validation precedes optimistic version fencing. No owner fence is persisted after the last restricted participant leaves.
 
-GroupCore.upsert also validates the owner boundary, so proposal creation cannot bypass it. Legacy visibility and member writes share the same policy checks. SQL public writes acquire ordered Provider shared locks and verify current policy within the transaction, preserving Group version fencing; no lock spans delivery.
+GroupCore.upsert also validates the owner boundary, so direct group creation cannot bypass it. Legacy visibility and member writes share the same policy checks. SQL public writes acquire ordered Provider shared locks and verify current policy within the transaction, preserving Group version fencing; no lock spans delivery.

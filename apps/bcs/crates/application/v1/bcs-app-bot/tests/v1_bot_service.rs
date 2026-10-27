@@ -115,7 +115,8 @@ impl Fixture {
             Arc::new(NoopConnectService),
             Arc::new(RecordingCandidateSearch::empty()),
             BotServiceConfig { env: env.clone() },
-        );
+        )
+        .with_bot_authority_hook(bcs_test_support::authority_hook_for(repo.clone()));
         Self {
             service,
             repo,
@@ -144,10 +145,46 @@ impl Fixture {
             )
             .await
             .expect("register bot");
+        if !owner.is_empty() {
+            bcs_test_support::grant_owner_edge(&self.repo, bot_id, owner)
+                .await;
+        }
         self.repo
             .update_actor_status(bot_id, status)
             .await
             .expect("update actor status");
+    }
+
+    /// A bot the Human CONTROLS under the authority model:
+    /// the preset Human registry entry plus the governance
+    /// initialize (owner edge + version 1) on top of
+    /// `add_bot`'s created_by registration.
+    async fn add_controlled_bot(
+        &self,
+        bot_id: &str,
+        owner: &str,
+        visibility: &str,
+        status: ActorStatus,
+    ) {
+        self.repo
+            .ensure_human_actor(owner, owner)
+            .await
+            .expect("ensure fixture Human actor row");
+        self.add_bot(bot_id, owner, visibility, status).await;
+        self.repo
+            .initialize_ownership(
+                bot_id,
+                owner,
+                bcs_service_api::types::bot_authority::AuthorityMutation {
+                    mutation_id: format!("fixture-{bot_id}"),
+                    actor: bcs_service_api::types::bot_authority::AuthorityActor::
+                        Human {
+                            user_id: owner.to_string(),
+                        },
+                },
+            )
+            .await
+            .expect("initialize ownership");
     }
 }
 
@@ -468,7 +505,13 @@ async fn ownership_denial_precedes_provider_hydration() {
         Arc::new(NoopConnectService),
         Arc::new(RecordingCandidateSearch::empty()),
         BotServiceConfig { env },
-    );
+    )
+    // Row 2: the descriptor patch consults the CURRENT
+    // owner edge; the authority store holds no edge for
+    // this Bot, so staff-2 is denied at the hook.
+    .with_bot_authority_hook(bcs_test_support::authority_hook_for(
+        Arc::new(MemoryBotRepo::new()),
+    ));
 
     let error = service
         .update(UpdateBot {
@@ -514,8 +557,12 @@ async fn search_candidates_calls_core_once_and_preserves_ranked_enrichment() {
         Arc::new(NoopConnectService),
         candidate_search.clone(),
         BotServiceConfig { env },
-    );
+    )
+    .with_bot_authority_hook(bcs_test_support::authority_hook_for(
+        repo.clone(),
+    ));
 
+    bcs_test_support::grant_owner_edge(&repo, "acting", "staff-1").await;
     for bot_id in ["acting", "recommended-a", "recommended-b"] {
         repo.register_with_owner_and_token(
             bot_id.to_string(),
@@ -649,7 +696,11 @@ async fn search_candidates_normalizes_missing_empty_and_whitespace_queries() {
         BotServiceConfig {
             env: bcs_config::resolve_env_str(),
         },
-    );
+    )
+    .with_bot_authority_hook(bcs_test_support::authority_hook_for(
+        repo.clone(),
+    ));
+    bcs_test_support::grant_owner_edge(&repo, "acting", "staff-1").await;
     repo.register_with_owner_and_token(
         "acting".to_string(),
         BotCapabilities {
@@ -662,6 +713,7 @@ async fn search_candidates_normalizes_missing_empty_and_whitespace_queries() {
     )
     .await
     .expect("register acting bot");
+    bcs_test_support::grant_owner_edge(&repo, "acting", "staff-1").await;
 
     for query in [None, Some(String::new()), Some("  \t\n ".to_string())] {
         let result = service
@@ -725,7 +777,11 @@ async fn search_candidates_preserves_name_fallback_order_and_omits_semantic_enri
         BotServiceConfig {
             env: bcs_config::resolve_env_str(),
         },
-    );
+    )
+    .with_bot_authority_hook(bcs_test_support::authority_hook_for(
+        repo.clone(),
+    ));
+    bcs_test_support::grant_owner_edge(&repo, "acting", "staff-1").await;
     for bot_id in ["acting", "fallback-a", "fallback-b"] {
         repo.register_with_owner_and_token(
             bot_id.to_string(),
@@ -803,7 +859,11 @@ async fn search_candidates_omits_enrichment_for_empty_query_mode() {
         BotServiceConfig {
             env: bcs_config::resolve_env_str(),
         },
-    );
+    )
+    .with_bot_authority_hook(bcs_test_support::authority_hook_for(
+        repo.clone(),
+    ));
+    bcs_test_support::grant_owner_edge(&repo, "acting", "staff-1").await;
     for bot_id in ["acting", "unexpected-empty-hit"] {
         repo.register_with_owner_and_token(
             bot_id.to_string(),
@@ -871,7 +931,10 @@ async fn search_candidates_never_projects_human_hits_as_physical_bots() {
         BotServiceConfig {
             env: bcs_config::resolve_env_str(),
         },
-    );
+    )
+    .with_bot_authority_hook(bcs_test_support::authority_hook_for(
+        repo.clone(),
+    ));
     repo.register_with_owner_and_token(
         "acting".to_string(),
         BotCapabilities {
@@ -884,6 +947,7 @@ async fn search_candidates_never_projects_human_hits_as_physical_bots() {
     )
     .await
     .expect("register acting bot");
+    bcs_test_support::grant_owner_edge(&repo, "acting", "staff-1").await;
     repo.ensure_human_actor("staff-2", "Other Human")
         .await
         .expect("ensure human actor");
@@ -922,7 +986,10 @@ async fn search_candidates_denies_unauthorized_perspective_before_core_search() 
         BotServiceConfig {
             env: bcs_config::resolve_env_str(),
         },
-    );
+    )
+    .with_bot_authority_hook(bcs_test_support::authority_hook_for(
+        repo.clone(),
+    ));
     repo.register_with_owner_and_token(
         "acting".to_string(),
         BotCapabilities {
@@ -935,6 +1002,7 @@ async fn search_candidates_denies_unauthorized_perspective_before_core_search() 
     )
     .await
     .expect("register acting bot");
+    bcs_test_support::grant_owner_edge(&repo, "acting", "staff-1").await;
 
     let error = service
         .search_candidates(SearchBotCandidates {
@@ -1136,14 +1204,22 @@ async fn eligible_candidates_use_edge_permission_but_keep_the_same_projection() 
             kind: ActorKind::Human,
         },
     ]));
-    let service = BotServiceImpl::new(
+        let eligible_authority_repo = Arc::new(MemoryBotRepo::new());
+    bcs_test_support::grant_owner_edge(&eligible_authority_repo, "acting", "staff-1").await;
+let service = BotServiceImpl::new(
         control_plane.clone(),
         Arc::new(NoopBotRegistryCoreService),
         Arc::new(NoopFriendCoreService),
         connect,
         Arc::new(RecordingCandidateSearch::empty()),
         BotServiceConfig { env: env.clone() },
-    );
+    )
+    // Row 1: the acting Bot's CURRENT owner edge
+    // lives in the authority store; staff-1 holds
+    // it, staff-2 does not.
+    .with_bot_authority_hook(bcs_test_support::authority_hook_for(
+        eligible_authority_repo.clone(),
+    ));
 
     let page = service
         .list_eligible_candidates(ListBotCandidates {
@@ -1462,10 +1538,10 @@ async fn mine_validates_pagination_before_materializing_the_human() {
 async fn mine_accepts_tenantless_users_and_callers_without_user_are_forbidden() {
     let fixture = Fixture::new();
     fixture
-        .add_bot("reachable", "staff-1", "public", ActorStatus::Online)
+        .add_controlled_bot("reachable", "staff-1", "public", ActorStatus::Online)
         .await;
     fixture
-        .add_bot("unreachable", "staff-1", "public", ActorStatus::Online)
+        .add_controlled_bot("unreachable", "staff-1", "public", ActorStatus::Online)
         .await;
     fixture
         .repo
@@ -1553,4 +1629,254 @@ fn bot_only_caller(bot_uuid: &str) -> bcs_service_api::application::v1::Authenti
         app: None,
         access_key: None,
     }
+}
+
+#[tokio::test]
+async fn mine_lazily_initializes_ownership_for_legacy_bot() {
+    use bcs_service_api::port::repo::BotAuthorityRepoPort;
+    use bcs_service_api::types::bot_authority::BotAccessRelation;
+
+    let fixture = Fixture::new();
+    // Pre-migration legacy bot: created_by = the caller, version 0,
+    // no authority edge — exactly the pre-cutover production shape
+    // (plain registration, NOT the harness's owner-edge helper).
+    fixture
+        .repo
+        .register_with_owner_and_token(
+            "legacy-bot".to_string(),
+            BotCapabilities {
+                name: Some("legacy-bot".to_string()),
+                visibility: "protected".to_string(),
+                ..Default::default()
+            },
+            "staff-1",
+            "legacy-token",
+        )
+        .await
+        .expect("legacy registration");
+
+    // Before the mine call the strict authority read denies (the
+    // store flag is off in this harness: no legacy fallback).
+    assert_eq!(
+        BotAuthorityRepoPort::role(fixture.repo.as_ref(), "human_staff-1", "legacy-bot")
+            .await
+            .expect("role before"),
+        None,
+    );
+
+    let page = fixture
+        .service
+        .list_mine(ListMyBots {
+            caller: human_caller("staff-1"),
+            kind: None,
+            name: None,
+            status: None,
+            reachability: None,
+            offset: 0,
+            limit: 50,
+        })
+        .await
+        .expect("mine succeeds");
+
+    // The mine view itself was the migration: the legacy Bot is now
+    // initialized with the caller as its owner — so the strict read
+    // (no fallback at play) resolves Owner, and the page surfaces the
+    // Bot with the owner relation.
+    assert_eq!(
+        BotAuthorityRepoPort::role(fixture.repo.as_ref(), "human_staff-1", "legacy-bot")
+            .await
+            .expect("role after"),
+        Some(BotAccessRelation::Owner),
+    );
+    assert!(
+        page.items.iter().any(|bot| matches!(bot,
+            Bot::Physical(item) if item.bot_id == "legacy-bot")),
+        "the migrated bot must show up in mine: {:?}",
+        page.items
+    );
+
+    // The migration audit records the caller themself as the real
+    // initiator (no system/service impersonation).
+    let state = fixture.repo.authority_state().read().await;
+    let audits: Vec<_> = state.audit
+        .iter()
+        .filter(|row| row.bot_id == "legacy-bot" && row.action == "initialize")
+        .collect();
+    assert_eq!(audits.len(), 1, "exactly one initialize audit: {:?}", state.audit);
+    assert_eq!(audits[0].actor_kind, "human");
+    assert_eq!(audits[0].actor_id, "human_staff-1");
+    assert_eq!(audits[0].subject_id, "human_staff-1");
+}
+
+#[tokio::test]
+async fn mine_never_initializes_the_callers_own_human_actor_row() {
+    use bcs_service_api::port::repo::{BotAuthorityRepoPort, BotRepoPort};
+
+    let fixture = Fixture::new();
+    assert!(fixture.repo.get("human_staff-1").await.is_none());
+    fixture
+        .service
+        .list_mine(ListMyBots {
+            caller: human_caller("staff-1"),
+            kind: None,
+            name: None,
+            status: None,
+            reachability: None,
+            offset: 0,
+            limit: 50,
+        })
+        .await
+        .expect("mine succeeds");
+
+    // The mine call materialized the Human actor row (created_by =
+    // the same staff), but the migration sweep must skip it: a Human
+    // ACTOR row is never an ownership target — no version and no
+    // human→human owner edge.
+    assert!(fixture.repo.get("human_staff-1").await.is_some());
+    let governance = BotRepoPort::ownership_governance_state(
+        fixture.repo.as_ref(),
+        "human_staff-1",
+    )
+    .await
+    .expect("governance read")
+    .expect("human actor row exists");
+    assert_eq!(governance.ownership_version, 0);
+    assert_eq!(
+        BotAuthorityRepoPort::role(fixture.repo.as_ref(), "human_staff-1", "human_staff-1")
+            .await
+            .expect("role"),
+        None,
+        "no human→human owner edge after the first mine call"
+    );
+}
+
+#[tokio::test]
+async fn mine_migration_requires_byte_exact_creator_match() {
+    use bcs_service_api::port::repo::{BotAuthorityRepoPort, BotRepoPort};
+    use bcs_service_api::types::bot_authority::BotAccessRelation;
+
+    let fixture = Fixture::new();
+    // The stored creator's spelling differs from the caller only by
+    // case: a case-insensitive candidate read is never authority for
+    // minting ownership — the victim must stay unmigrated.
+    fixture
+        .repo
+        .register_with_owner_and_token(
+            "victim-bot".to_string(),
+            BotCapabilities::default(),
+            "Staff-1",
+            "victim-token",
+        )
+        .await
+        .expect("victim bot");
+    // The control Bot's creator matches byte-for-byte → it migrates.
+    fixture
+        .repo
+        .register_with_owner_and_token(
+            "own-bot".to_string(),
+            BotCapabilities::default(),
+            "staff-1",
+            "own-token",
+        )
+        .await
+        .expect("control bot");
+
+    fixture
+        .service
+        .list_mine(ListMyBots {
+            caller: human_caller("staff-1"),
+            kind: None,
+            name: None,
+            status: None,
+            reachability: None,
+            offset: 0,
+            limit: 50,
+        })
+        .await
+        .expect("mine succeeds");
+
+    assert_eq!(
+        BotAuthorityRepoPort::role(fixture.repo.as_ref(), "human_staff-1", "own-bot")
+            .await
+            .expect("control role"),
+        Some(BotAccessRelation::Owner),
+        "the byte-exact bot migrates"
+    );
+    assert_eq!(
+        BotAuthorityRepoPort::role(fixture.repo.as_ref(), "human_staff-1", "victim-bot")
+            .await
+            .expect("victim role"),
+        None,
+        "the case-off bot is never minted to the caller"
+    );
+    let governance = BotRepoPort::ownership_governance_state(
+        fixture.repo.as_ref(),
+        "victim-bot",
+    )
+    .await
+    .expect("governance read")
+    .expect("victim exists");
+    assert_eq!(governance.ownership_version, 0, "victim stays at version 0");
+}
+
+#[tokio::test]
+async fn mine_migration_progresses_beyond_the_first_hundred() {
+    use bcs_service_api::port::repo::BotAuthorityRepoPort;
+
+    let fixture = Fixture::new();
+    for i in 0..105 {
+        fixture
+            .repo
+            .register_with_owner_and_token(
+                format!("legacy-{i}"),
+                BotCapabilities::default(),
+                "staff-9",
+                &format!("legacy-token-{i}"),
+            )
+            .await
+            .expect("legacy bot");
+    }
+    // First call attempts up to the first hundred.
+    fixture
+        .service
+        .list_mine(ListMyBots {
+            caller: human_caller("staff-9"),
+            kind: None,
+            name: None,
+            status: None,
+            reachability: None,
+            offset: 0,
+            limit: 1,
+        })
+        .await
+        .expect("first mine");
+    assert_eq!(initialized_count(&fixture.repo).await, 100);
+
+    // A later call advances the remaining backlog (never rescans the
+    // already-migrated prefix against the cap).
+    fixture
+        .service
+        .list_mine(ListMyBots {
+            caller: human_caller("staff-9"),
+            kind: None,
+            name: None,
+            status: None,
+            reachability: None,
+            offset: 0,
+            limit: 1,
+        })
+        .await
+        .expect("second mine");
+    assert_eq!(initialized_count(&fixture.repo).await, 105);
+}
+
+/// Version-initialized Bots on the fixture's shared authority state.
+async fn initialized_count(repo: &MemoryBotRepo) -> usize {
+    repo.authority_state()
+        .read()
+        .await
+        .ownership_versions
+        .values()
+        .filter(|version| **version > 0)
+        .count()
 }

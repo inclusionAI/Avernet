@@ -10,6 +10,9 @@ use bcs_service_api::{
     ParticipantMode, ServiceError, ServiceResult,
     core::{GroupMutationCommand, GroupMutationKind},
 };
+use bcs_service_api::types::authorization_snapshot::{
+    GroupAuthorizationSnapshot, ParticipantAuthorizationSnapshot,
+};
 use tokio::sync::RwLock;
 
 #[derive(Default)]
@@ -19,6 +22,11 @@ pub struct FakeGroupCoreService {
     message_counts: RwLock<HashMap<String, usize>>,
     fail_add_message: RwLock<bool>,
     notify_policy: NotifyPolicyProbe,
+    /// Master-removed participants (`(group_id, actor_id)`): the
+    /// strict snapshot projection drops them while the display
+    /// `get` still lists them — the deterministic stand-in for a
+    /// second store instance committing the removal.
+    master_removed: RwLock<std::collections::HashSet<(String, String)>>,
 }
 
 /// Policy-read probe behind the shared human-notify gate: counts scoped
@@ -92,6 +100,17 @@ impl FakeGroupCoreService {
     pub async fn observed_policy(&self) -> Option<GroupHumanNotifyPolicy> {
         self.notify_policy.observed.lock().await.clone()
     }
+
+    /// Mark `actor_id` of `group_id` as removed in the MASTER
+    /// data only: the strict snapshot stops listing them while
+    /// the display `get` keeps the stale row (the cross-instance
+    /// removal a cache can never see).
+    pub async fn remove_participant_from_master(&self, group_id: &str, actor_id: &str) {
+        self.master_removed
+            .write()
+            .await
+            .insert((group_id.to_string(), actor_id.to_string()));
+    }
 }
 
 #[async_trait]
@@ -128,6 +147,58 @@ impl GroupCoreService for FakeGroupCoreService {
         *counts.entry(id.to_string()).or_default() += 1;
         drop(counts);
         self.groups.read().await.get(id).cloned()
+    }
+
+    /// Strict authorization snapshot over the fake's own
+    /// store (spec §8.3): authorization decisions against
+    /// this double must never consult the display `get`
+    /// path either. The message-flow contract stack is
+    /// single-env, ambient for the fixture — the snapshot
+    /// `env` mirrors that.
+    async fn read_authorization_snapshot(
+        &self,
+        group_id: &str,
+    ) -> ServiceResult<Option<GroupAuthorizationSnapshot>> {
+        let groups = self.groups.read().await;
+        let master_removed = self.master_removed.read().await;
+        Ok(groups.get(group_id).map(|group| {
+            GroupAuthorizationSnapshot {
+                env: "local".to_string(),
+                id: group.id.clone(),
+                live: true,
+                status: group.status,
+                record_status: "committed".to_string(),
+                visibility: "public".to_string(),
+                group_kind: group.group_kind,
+                group_strategy: group.group_strategy,
+                driver_actor_id: group.driver_bot.clone(),
+                originator_actor_id: group
+                    .originator
+                    .clone()
+                    .unwrap_or_else(|| group.driver_bot.clone()),
+                participants: group
+                    .participants
+                    .iter()
+                    .filter(|participant| {
+                        !master_removed.contains(&(
+                            group.id.clone(),
+                            participant.bot_uuid.clone(),
+                        ))
+                    })
+                    .map(|participant| {
+                        ParticipantAuthorizationSnapshot {
+                            actor_id: participant.bot_uuid.clone(),
+                            actor_kind: participant.actor_kind,
+                            role: participant.role,
+                            effective_mode: participant.mode.unwrap_or_else(|| {
+                                ParticipantMode::default_for(participant.actor_kind)
+                            }),
+                            message_view_scope: participant.message_view_scope,
+                        }
+                    })
+                    .collect(),
+            }
+        }))
     }
 
     async fn add_message(&self, id: &str, message: GroupMessage) -> ServiceResult<()> {

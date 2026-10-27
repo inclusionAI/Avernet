@@ -49,7 +49,7 @@ async fn conformance_mysql_draft_transactions_and_utf8() {
         ));
         assert_eq!(
             service
-                .read(DraftAccess::Owner("owner".into()), &id, 2)
+                .read(&id, 2)
                 .await
                 .unwrap()
                 .definition_yaml,

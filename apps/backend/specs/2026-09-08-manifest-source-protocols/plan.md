@@ -29,7 +29,7 @@ class SourceKind(StrEnum):      # how an entry names its content
 #: Every (category, kind) cell. A cell is None (supported) or a refusal reason.
 #: Exhaustive by construction — built by iterating both enums, so a category or
 #: protocol added without a verdict raises at import, never resolves silently.
-MATRIX: Mapping[tuple[ManifestCategory, SourceKind], str | None]
+MATRIX: Mapping[tuple[Category, SourceKind], str | None]
 ```
 
 Cell values carry the *reason string* the caller sees, so the refusal a
@@ -39,7 +39,7 @@ literally the same object — they cannot drift.
 Beside it, two rules the matrix references rather than duplicates:
 
 ```python
-DIGEST_REQUIRED: frozenset[tuple[ManifestCategory, SourceKind]]   # skills/cli_tools × oss
+DIGEST_REQUIRED: frozenset[tuple[Category, SourceKind]]   # skills/cli_tools × oss
 ARCHIVE_FIELDS_BY_KIND: Mapping[SourceKind, frozenset[str]]       # unpack/strip → OSS only
 ```
 

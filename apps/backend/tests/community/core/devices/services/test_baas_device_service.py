@@ -355,6 +355,9 @@ class TestGetDeviceConnection:
         info.tenant = "team_claw"
         info.engine_port = 20003
         info.expires_at = "2099-01-01T00:00:00Z"
+        # Explicit: a MagicMock attr would otherwise answer a truthy Mock and
+        # turn "the provider issued nothing" into a fake socket upstream.
+        info.a2a_base_url = ""
         return info
 
     def test_returns_baas_connection_with_bot_engine(self):
@@ -422,6 +425,28 @@ class TestGetDeviceConnection:
         svc.get_device_connection(binding_id=7, operator=_operator("u001"))
 
         assert "path" not in baas.get_ws_info.call_args.kwargs
+
+    def test_a2a_base_url_passes_through_unmangled(self):
+        """The A2A face address is BaaS-owned; this layer neither derives,
+        re-addresses nor drops it. Absent (empty) stays empty."""
+        baas = MagicMock()
+        info = self._ws_info()
+        info.a2a_base_url = "http://bot-a1b2-vc.stable.alipay.net:32196"
+        baas.get_ws_info.return_value = info
+        svc = _make_service(baas_service=baas)
+
+        result = svc.get_device_connection(binding_id=7, operator=_operator("u001"))
+
+        assert result.a2a_base_url == "http://bot-a1b2-vc.stable.alipay.net:32196"
+
+    def test_an_absent_a2a_base_url_stays_absent(self):
+        baas = MagicMock()
+        baas.get_ws_info.return_value = self._ws_info()
+        svc = _make_service(baas_service=baas)
+
+        result = svc.get_device_connection(binding_id=7, operator=_operator("u001"))
+
+        assert result.a2a_base_url == ""
 
     def test_server_issued_expiry_is_passed_through(self):
         """The ``ttl`` argument is ignored here — the server decides — so the

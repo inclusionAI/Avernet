@@ -16,7 +16,6 @@ pub mod ensure;
 pub mod friends;
 pub mod group_context;
 pub mod group_messages;
-pub mod group_requests;
 pub mod groups;
 pub mod health;
 pub mod invite;

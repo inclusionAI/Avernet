@@ -79,6 +79,7 @@ async fn cancel_latest_queued_selects_the_calling_humans_latest_im_message() {
                     kind: DeliveryType::Send,
                     max_queued: 10,
                     semantic_projection_json: json!({"version": 1}),
+                    run_id: None,
                 }],
             })
             .await
@@ -177,7 +178,7 @@ async fn queue_status_respects_participant_message_audience() {
                 content: json!({"text":id}), client_msg_id: Some(id.into()), owner_bot_id: None,
                 created_at: 100, run_id: id.into(), visibility_domain: MessageVisibilityDomain::ManagerWorker, audience: Some(audience) },
             targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: "bot-observer".into(), kind: DeliveryType::Inject,
-                max_queued: 10, semantic_projection_json: json!({"version":1}) }],
+                max_queued: 10, semantic_projection_json: json!({"version":1}), run_id: None,}],
         }).await.unwrap();
         let result = flow.query_message_deliveries(DeliveryStatusQuery {
             caller: CallerContext::Human(HumanActor { actor_id: "human_1".into(), staff_no: "1".into() }),
@@ -253,6 +254,15 @@ async fn conformance_live_group_admission_uses_defaults_and_blocks_drain_bypass(
         row.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::PendingContext), "unbound history survives for the observer's next Send");
 }
 
+/// Real authority chain for the manual-resolution
+/// ownership leg: the fixture regsitry `created_by`
+/// ("1") is mirrored as a live owner edge.
+fn authority() -> Arc<dyn bcs_service_api::port::bot_authority::BotAuthorityPort> {
+    let chain = bcs_test_support::lazy_authority_chain();
+    chain.hook.seed_owner("bot-driver", "1");
+    chain.hook
+}
+
 #[tokio::test]
 async fn manual_resolution_checks_human_scope_ownership_and_version() {
     use bcs_service_api::{ManagedMessageDeliveryService, DeliveryTransitionCommand, ResolveMessageDeliveryCommand, DeliveryResolution, ServiceError};
@@ -265,7 +275,8 @@ async fn manual_resolution_checks_human_scope_ownership_and_version() {
     let flow = BcsMessageFlow::new(support.group.clone(), support.routing.clone(), support.registry.clone(), support.bot_delivery.clone(), support.frontend_delivery.clone())
         .with_message_repo(repo).with_managed_deliveries(service.clone())
         .with_group_delivery_limits(std::collections::BTreeMap::from([("bot-driver".into(), 10)]))
-        .with_session_management(Arc::new(StaticSessionManagement::new(test_session("group-1:resolve", "group-1", group.participants))));
+        .with_session_management(Arc::new(StaticSessionManagement::new(test_session("group-1:resolve", "group-1", group.participants))))
+        .with_bot_authority_hook(Some(authority()));
     let human = CallerContext::Human(HumanActor { actor_id: "human_1".into(), staff_no: "1".into() });
     let admitted = flow.handle_web_send(WebSendCommand {
         caller_execution: None,
@@ -406,8 +417,7 @@ async fn conformance_queued_group_preparation_and_ingress() {
                 target_bot_id: "bot-driver".into(),
                 kind: DeliveryType::Send,
                 max_queued: 10,
-                semantic_projection_json: projection,
-            }],
+                semantic_projection_json: projection, run_id: None,}],
             message: NewMessage { visibility_domain: bcs_domain::MessageVisibilityDomain::Chat, audience: None,
                 group_id: command.group_id.clone(),
                 session_id: command.session_id.clone().unwrap(),

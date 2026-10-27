@@ -741,17 +741,19 @@ async fn regress1_post_group_members_rejects_human() {
         .await
         .expect("add member request failed");
 
-    // Human as consultant via add_member is now allowed (feat: human create group).
+    // bot-authority ruling T6d-1 (v0 deny polarity):
+    // this flow seedless the Bot's ownership through a
+    // RAW connect + mock-user onboard only; the runtime
+    // self-declared user header never mints authority
+    // ownership, so the Human coordinator act is DENIED
+    // (the trusted `register_with_ownership` surface is
+    // the only minter — see e2e_workbench).
     assert!(
-        resp.status().is_success(),
-        "POST /groups/{{id}}/members with Human consultant should succeed, got: {} {}",
+        !resp.status().is_success(),
+        "seedless raw-onboard members act must be denied, got: {} {}",
         resp.status(),
         resp.text().await.unwrap_or_default()
     );
-
-    let body: serde_json::Value = resp.json().await.expect("parse member response");
-    assert_eq!(body["added"].as_bool(), Some(true));
-    assert_eq!(body["member"]["bot_uuid"].as_str(), Some(human_uuid));
 }
 
 /// BUG-FIX-2 extended: `GET /bots/{id}/groups` for a DM group should

@@ -252,19 +252,52 @@ POST /api/insight/v1/monitoring/session-recoveries/:taskId/terminate
 控制面要求引用成功的 `session_read`／`trajectory_read` 审计，正常收口为 `completed`，记录 `completionReason=user_continued`，结束当前执行并清除等待／重试期限；不新增业务任务状态、不进入方案、不重放动作。
 `effect` 保留已有证据结论，缺少判断时为 `unknown`；`intervention_status` 继续由任务全量审计生成，已有干预不会被让路抹除。
 页面和群通知显示“用户已接手，自愈已让路”。统计单列该结束原因，不计为执行故障，也不能将 `completed` 直接计为恢复成功。
-没有该原因的既有 `blocked` 仍表示无法继续，沿用原失败流程；未知原因拒绝。先部署支持新字段的发送／接收后端，再更新自愈包。没有新建数据库表、字段或 AIS Base 配置。
+没有该原因的既有 `blocked` 表示自愈工作流本身无法继续，不表示原业务未恢复。真实非 Debug 任务在 `assess` 已有 `accepted`／`unknown` 的初始消息投递记录时，普通 `blocked` 返回 HTTP 422，要求回报 `assessment`、`decision=message` 后进入效果回收；不重发消息、不把未知投递当作触达。`observe`／`verify` 的普通 `blocked` 同样返回 HTTP 422，要求以 `observation` 如实回报 `recovered`／`not_recovered`／`unknown`。原业务未恢复在 `observe` 进入完整方案，在 `verify` 结束处理；证据不足保持 `unknown`。投递前受阻或明确投递失败、方案分析后确实无法修复等仍可按原失败流程回报普通 `blocked`；用户续聊、明确目标不可用及手册要求的 Owner 转交不受此限制。未知原因拒绝。先部署结果校验后端，再更新自愈包；没有新建数据库表、字段或 AIS Base 配置。
 
 回报引用了不存在的证据 ID，或 `message` 判断缺少已保存的投递／拟发送记录时，返回 HTTP 422 并说明可纠正字段。纠错保留已核实的业务判断，证据引用必须使用工具返回的完整 ID。普通 `blocked` 省略 `reason`；执行归属、阶段或版本冲突继续返回 HTTP 409。
 
 `blocked.reason=target_unavailable` 将自愈流程正常结束为 `completed`，同时回传 `completion_reason=target_unavailable`、`effect=unknown`。该结论必须引用已留存的受控工具证据，且对应审计中有 Provider 明确返回的 `target_unavailable` 错误；普通 HTTP 404、会话缺失、超时或模型断言均不足以成立。页面显示“目标不可用”，不算自愈执行故障，也不宣称业务恢复；是否干预仍由实际工具审计判断。
 
-### 已核实的 MCP 服务权限问题转交 Owner
+### 按手册转交 Owner 自行处理
 
-Agent 对当前现场确认 MCP 服务权限不足、后续仅需 Owner 自行处理时，直接回报
-`{"kind":"blocked","phase":"assess","reason":"mcp_permission_required","summary":"问题、现场依据、具体 MCP 服务及 Owner 处理指引（Markdown）","evidence_ids":["工具返回的完整证据 ID"]}`。
-已有观察／判断阶段也可按当前 phase 回报；不能在执行环境动作中途切换，Debug／仿真不发送真实通知。不能仅凭诊断标签、普通 404、链接解析失败或未明原因的工具错误认定权限问题。
+Agent 根据适用手册及当前现场，确认剩余阻塞或非阻塞优化建议满足“转交 Owner 自行处理并结束”的条件，且没有其他待调查或修复事项时，回报
+`{"kind":"owner_handoff","phase":"当前阶段","effect":"recovered|not_recovered|unknown","summary":"原任务实际进展、剩余阻塞或优化建议、手册处理依据、具体对象及 Owner 指引（Markdown）","evidence_ids":["受控现场读取返回的完整证据 ID"]}`。
+此结果表示处置决定，不使用普通 `blocked` 的错误原因表达；控制面不识别具体故障类别。`assess`、`observe`、`plan`、`verify` 均可提交，不能在 `apply` 执行环境动作中途切换，Debug／仿真禁止真实转交。
 
-服务复用现有 Owner 钉钉通知，将处理指引直接发给目标 Owner，并记录发送回执。
+服务校验当前任务、执行归属、版本及已保存的现场读取证据，复用现有 Owner 通知发送指引并记录回执。
 不创建方案、不进入等待确认／配合、不再执行或验证，结束为 `status=completed`、
-`completion_reason=mcp_permission_required`、`effect=not_recovered`；干预情况仍由实际审计计算，通知不算干预。
-通知失败或禁用时同样结束，但页面不得显示“已通知”；成功时显示“已通知 Owner 自行处理”。通知回执与任务结束均保存在原时间线，无新增数据库字段或配置。
+`completion_reason=owner_handoff`；恢复效果独立于转交决定，使用本次 `effect` 更新 `judgment.effect`，已有触达／响应结论保留，干预情况仍由实际审计计算，通知不算干预。新包明确回报三种效果之一；旧包省略 `effect` 时沿用已有判断，无判断则记为 `unknown`，不自动推断未恢复。`not_intervened` 不适用于真实转交，其他无效效果值返回 422 且不结束任务或通知。
+通知失败或禁用时同样结束，但页面不得显示“已通知”；已恢复时展示后续建议及实际通知状态，仍需人工处理时展示 Owner 处理指引。通知回执与任务结束均保存在原时间线，无新增数据库字段或配置。
+
+原故障已解除、原任务实际继续或完成，仅剩手册规定的有依据的 Skill 优化建议时，转交仍保留 `effect=recovered`，通知明确建议不阻塞本次恢复；不等待修改，也不为验证优化重跑原业务。其他不满足转交条件、确需 Owner 配合恢复的事项仍进入完整方案；普通消息干预后的 `observe.effect=not_recovered` 仍推进 `plan`，不自动转交 Owner。
+
+兼容与发布顺序：通用转交依赖支持 `owner_handoff` 的结果发送／接收后端和页面。旧包的 `blocked.reason=mcp_permission_required` 在 Agent 回报入口转换为通用转交并明确 `effect=not_recovered`，之后生成 `completion_reason=owner_handoff`；历史任务与待发送结果中的旧原因仍可读取、展示及回传，不迁移既有记录。新 Skill／Wrapper 不再输出或依赖 MCP 专属原因。
+
+本次新通用 Skill 手册需先随自愈包上传，再部署包含 `TC.SKILL` 新候选路径的后端，避免新任务引用旧包中不存在的手册；效果回报与通知行为在配套后端部署后生效。恢复执行继续使用任务创建时保存的手册引用，不给旧任务补入新候选。后端保持兼容旧包省略效果的输入；若回滚到不含新手册的旧包，应先停止后端产生该新候选引用，避免缺失手册导致执行失败。
+
+## 任务整体摘要
+
+既有任务详情 `GET /api/insight/v1/monitoring/session-recoveries/:taskId` 增加可选 `final_summary: string`，在线与仿真共用。它由自愈 Agent 在整体收尾时生成，说明原问题、关键判断依据、最终处理方式与实际进展；仿真明确未执行。表格导出可直接读取该字段，无需再从阶段分析、消息与方案拼接摘要。最多 2,000 个 UTF-16 代码单元，支持 Markdown。
+
+字段缺失表示尚未生成或摘要不可用，不代表任务失败。旧任务、外部停止和执行异常可能没有摘要，不自动回填；原判断、消息、方案、证据和效果继续可查。在线等待方案时不提前保存最终摘要；观察到期暂停的摘要只说明截至暂停的进展，恢复观察后清除，后续按新的收尾结果保存。此字段不扩展诊断结果回传协议，也不改变仿真不回传和原统计规则。
+
+## 失败监控与排障日志
+
+自愈沿用 `[session-recovery]` 前缀，通过现有 console 输出单行 JSON；Repair 共用执行监测使用 `[agent-execution-monitor]`。日志字段白名单与错误脱敏位于 Repair 的 `common/logging.ts`，不依赖工作流日志或继承工作流上下文。内部 Host 仍写入既有 `/home/admin/logs/clawweb/start.log`，不新增 logger、日志文件、轮转或部署配置。监控继续按 `job`、`event` 筛选，失败事件和计数口径不变。
+
+分钟统计仅筛选 `job=session_recovery_task` 且 `event` 为下表两个值，对 `count` 求和；按事件类型和控制面环境分组。不要按 console 级别筛选：既有后台日志入口统一使用 `console.info`，失败语义在 `event` / `outcome` 中。
+
+| event | count | 计数边界 |
+| --- | --- | --- |
+| `CREATE_FAILED` | 1 | 合法在线创建请求因系统异常未取得确认；创建服务负责输出。自动触发或 HTTP 创建入口仅在服务未装配、无法调用创建服务时自行输出。按失败请求次数统计，上游重试再次失败属于另一次请求。正常跳过、参数／权限／幂等冲突、已接受的重复请求、Debug／仿真不计入。 |
+| `EXECUTION_FAILED` | 1 | Agent 启动、执行登记、AIS 派发或运行发生技术故障，且任务最终 `failed` 已持久化。可重试的中间失败只记 `retry_scheduled`。重复／旧执行回报不增加终态计数，Debug／仿真、普通 Agent `blocked`、Owner 拒绝、取消、转交、目标不可用和验证未恢复不计入。 |
+
+同一失败只由负责该结果的服务输出计数事件，调用方保留诊断日志，不重复输出计数。日志为持久化后的尽力输出，不承诺数据库写入与日志写入原子一致；进程在两者之间被强杀可能漏记。精确业务统计仍以数据库为准。
+
+排障时按 `taskId` 查询，再用 `executionId` / `stepId` / `jobId` 关联 AIS，或用 `toolCallId` 查询既有工具审计。`eventId` 对应上游诊断；`environment` 是控制面环境，`targetEnvironment` 是目标 Bot 环境，两者可以不同。
+
+有意义的过程事实包括创建确认、AIS 派发开始／回执及耗时、技术故障重试时间、持久化后的阶段／状态变化、写工具终态、读取失败或工具结果未知，以及后台核对／维护／通知失败的有界脱敏原因。正常读取成功、心跳和空轮询不新增日志；不记录诊断正文、用户会话、完整请求／回执、票据或凭据。结果回传失败沿用原排障日志，不新增告警指标；成功和转交等业务比例由数据库统计。
+
+AIS 派发异常可能把完整响应正文放在异常消息中，因此派发日志只保留错误分类、执行关联和耗时；重试及最终技术失败日志不复制原因正文，具体已脱敏执行报告仍从原任务与 Step 查询。
+
+配置监控时使用多值多分组／分钟统计，关闭常用服务指标，将日志 `count` 求和为一个数值列 `failureCount`，按 1 分钟采集，以普通静态阈值 `failureCount >= 1` 告警，并完成订阅。生产与预发分别采集、分别告警；任务、执行和工具 ID 仅用于追查，不作为聚合维度。上线时需用实际部署日志调试时间戳解析和字段提取，不能仅凭本地测试认定监控采集已经生效。

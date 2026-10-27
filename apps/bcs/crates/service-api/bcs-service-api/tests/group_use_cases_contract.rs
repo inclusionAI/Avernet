@@ -5,15 +5,11 @@ use bcs_service_api::{
     GroupAddMemberResult, GroupCreateCommand, GroupCreateParticipantCommand, GroupDeleteCommand,
     GroupDetailResult, GroupHistoryCommand, GroupHistoryResult, GroupManagementService,
     GroupMessageHistoryService, GroupParticipantModeCommand, GroupParticipantView,
-    GroupProposalConfirmCommand, GroupProposalConfirmResult, GroupProposalCreateCommand,
-    GroupProposalCreateResult, GroupProposalPreviewCommand, GroupProposalService,
     GroupRoutingPolicyCommand, GroupStatus, GroupStatusCommand, GroupTerminateCommand,
     GroupUpdateLabelCommand, GroupUseCaseError, ParticipantMode,
-    ProposalContext, RoutingMode, RoutingPolicy, ServiceError,
+    RoutingMode, RoutingPolicy, ServiceError,
 };
-use bcs_test_support::{
-    NoopGroupManagementService, NoopGroupMessageHistoryService, NoopGroupProposalService,
-};
+use bcs_test_support::{NoopGroupManagementService, NoopGroupMessageHistoryService};
 
 #[test]
 fn group_create_command_carries_caller_and_members() {
@@ -162,42 +158,6 @@ fn group_status_and_history_commands_carry_route_inputs() {
 }
 
 #[test]
-fn group_proposal_commands_preserve_context_and_confirmation_token() {
-    let context = ProposalContext {
-        user_query: Some("need database expertise".to_string()),
-        detected_gap: Some("storage diagnosis".to_string()),
-        relevant_history: vec!["db latency rose".to_string()],
-    };
-    let create = GroupProposalCreateCommand {
-        caller_actor_id: Some("bot-driver".to_string()),
-        driver_bot_id: "bot-driver".to_string(),
-        suggested_driver_bot_id: Some("bot-suggested-driver".to_string()),
-        suggested_participants: vec!["bot-a".to_string(), "bot-b".to_string()],
-        topic: "debug incident".to_string(),
-        context: Some(context.clone()),
-    };
-    let confirm = GroupProposalConfirmCommand {
-        caller_actor_id: Some("human_123".to_string()),
-        token: "proposal-token".to_string(),
-    };
-
-    assert_eq!(create.driver_bot_id, "bot-driver");
-    assert_eq!(
-        create.suggested_driver_bot_id.as_deref(),
-        Some("bot-suggested-driver")
-    );
-    assert_eq!(create.suggested_participants, ["bot-a", "bot-b"]);
-    assert_eq!(
-        create
-            .context
-            .as_ref()
-            .and_then(|ctx| ctx.user_query.as_deref()),
-        Some("need database expertise")
-    );
-    assert_eq!(confirm.token, "proposal-token");
-}
-
-#[test]
 fn group_result_dtos_are_route_friendly_views() {
     let participant = GroupParticipantView {
         bot_uuid: "driver".to_string(),
@@ -233,24 +193,6 @@ fn group_result_dtos_are_route_friendly_views() {
         originator: None,
         visibility: "private".to_string(),
         human_mention_notify_mode: bcs_service_api::HumanMentionNotifyMode::All,
-    };
-    let proposal = GroupProposalCreateResult {
-        proposal_created: true,
-        driver_bot_id: "driver".to_string(),
-        participant_bot_ids: vec!["driver".to_string(), "bot-a".to_string()],
-        member_intros: "Driver Bot\nBot A".to_string(),
-        confirm_url: "https://bcs.example/groups/token/confirm".to_string(),
-        expires_in_seconds: 600,
-        message: "confirm this group".to_string(),
-    };
-    let confirmed = GroupProposalConfirmResult {
-        created: true,
-        group_id: "group-1".to_string(),
-        driver_bot_id: "driver".to_string(),
-        participant_bot_ids: vec!["driver".to_string(), "bot-a".to_string()],
-        chat_url: None,
-        session_id: "group-1:initial".to_string(),
-        context_injected: 0,
     };
     let add_member = GroupAddMemberResult {
         group_id: "group-1".to_string(),
@@ -289,9 +231,6 @@ fn group_result_dtos_are_route_friendly_views() {
         Some("Driver Bot")
     );
     assert_eq!(detail.context_injected, 1);
-    assert!(proposal.proposal_created);
-    assert_eq!(proposal.expires_in_seconds, 600);
-    assert!(confirmed.created);
     assert_eq!(add_member.member.role, "consultant");
     assert_eq!(history.messages.len(), 0);
     assert!(legacy_participant.get("bot_name").is_none());
@@ -430,50 +369,6 @@ async fn noop_group_management_service_fails_closed() {
 }
 
 #[tokio::test]
-async fn noop_group_proposal_service_fails_closed() {
-    let service = NoopGroupProposalService;
-
-    let created = service
-        .create_proposal(GroupProposalCreateCommand {
-            caller_actor_id: None,
-            driver_bot_id: "driver".to_string(),
-            suggested_driver_bot_id: None,
-            suggested_participants: Vec::new(),
-            topic: "debug incident".to_string(),
-            context: None,
-        })
-        .await;
-    assert_not_configured(created, "group proposal service is not configured");
-
-    let confirmed = service
-        .confirm_proposal(GroupProposalConfirmCommand {
-            caller_actor_id: None,
-            token: "proposal-token".to_string(),
-        })
-        .await;
-    assert_not_configured(confirmed, "group proposal service is not configured");
-
-    let preview = service
-        .preview_proposal(GroupProposalPreviewCommand {
-            token: "proposal-token".to_string(),
-        })
-        .await;
-    assert_not_configured(preview, "group proposal service is not configured");
-}
-
-#[tokio::test]
-async fn added_group_proposal_methods_fail_closed_for_legacy_implementations() {
-    let service = LegacyGroupProposalService;
-
-    let preview = service
-        .preview_proposal(GroupProposalPreviewCommand {
-            token: "proposal-token".to_string(),
-        })
-        .await;
-    assert_not_configured(preview, "group proposal service is not configured");
-}
-
-#[tokio::test]
 async fn noop_group_message_history_service_fails_closed() {
     let service = NoopGroupMessageHistoryService;
 
@@ -499,21 +394,3 @@ fn assert_not_configured<T>(result: Result<T, GroupUseCaseError>, expected_messa
     ));
 }
 
-struct LegacyGroupProposalService;
-
-#[async_trait]
-impl GroupProposalService for LegacyGroupProposalService {
-    async fn create_proposal(
-        &self,
-        _cmd: GroupProposalCreateCommand,
-    ) -> Result<GroupProposalCreateResult, GroupUseCaseError> {
-        Err(ServiceError::InternalError("not used".to_string()).into())
-    }
-
-    async fn confirm_proposal(
-        &self,
-        _cmd: GroupProposalConfirmCommand,
-    ) -> Result<GroupProposalConfirmResult, GroupUseCaseError> {
-        Err(ServiceError::InternalError("not used".to_string()).into())
-    }
-}

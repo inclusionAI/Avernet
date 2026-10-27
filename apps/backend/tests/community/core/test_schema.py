@@ -226,6 +226,7 @@ class _FakeResult:
 
 class _FakeEngine:
     def __init__(self, acquire_result=1, create_error=None):
+        self.dialect = mysql.dialect()
         self.connection = _FakeLockConnection(acquire_result)
         self._create_error = create_error
 

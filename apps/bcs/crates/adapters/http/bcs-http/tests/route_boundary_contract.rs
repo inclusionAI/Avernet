@@ -8,7 +8,6 @@ const ROUTES: &[&str] = &[
     "src/routes/discover.rs",
     "src/routes/friends.rs",
     "src/routes/group_messages.rs",
-    "src/routes/group_requests.rs",
     "src/routes/groups/mod.rs",
     "src/routes/groups/create/mod.rs",
     "src/routes/groups/create/definition.rs",

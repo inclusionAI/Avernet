@@ -78,12 +78,16 @@ class ContentNotReachable(GenomeError):
 
 
 class Drifted(GenomeError):
-    """The bot runs something other than ``active``; only an owner promotion may proceed."""
+    """The bot holds something other than ``active``; only an owner promotion may proceed.
 
-    def __init__(self, *, active: str, applied: str | None) -> None:
-        super().__init__(f"bot runs {applied!r} while active is {active!r}")
+    ``observed`` is the revision id the bot's current state reads as (the
+    registry captured it to find out); ``active`` is what the ref says.
+    """
+
+    def __init__(self, *, active: str, observed: str) -> None:
+        super().__init__(f"bot holds {observed!r} while active is {active!r}")
         self.active = active
-        self.applied = applied
+        self.observed = observed
 
 
 class NotPromotable(GenomeError):

@@ -87,7 +87,7 @@ describe('Insight monitoring module navigation', () => {
     expect(mocks.overview).not.toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: 'Agent 治理' }))
     expect(screen.getByText('ADMIN_CONTENT:88')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Agent 监控自愈' }))
+    await user.click(screen.getByRole('button', { name: 'Agent 诊断治愈' }))
     expect(screen.getByText('MONITORING_CONTENT')).toBeInTheDocument()
     expect(screen.queryByText('ADMIN_CONTENT:88')).not.toBeInTheDocument()
   })
@@ -98,7 +98,7 @@ describe('Monitoring member navigation boundary', () => {
     mocks.user.isAdmin = true
     mocks.user.isClawInsightAdmin = flag
     render(<MemoryRouter initialEntries={['/insight?module=monitoring']}><InsightCenter /></MemoryRouter>)
-    expect(screen.getByRole('button', { name: 'Agent 监控自愈' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Agent 诊断治愈' })).toBeInTheDocument()
     expect(screen.getByText('MONITORING_CONTENT')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Agent 治理' })).toBeInTheDocument()
     expect(mocks.overview).not.toHaveBeenCalled()
@@ -113,7 +113,7 @@ describe('Monitoring member navigation boundary', () => {
     mocks.user.userId = ''
     render(<MemoryRouter initialEntries={['/insight?module=monitoring']}><InsightCenter /></MemoryRouter>)
     expect(screen.queryByText('MONITORING_CONTENT')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Agent 监控自愈' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Agent 诊断治愈' })).not.toBeInTheDocument()
   })
 
 })

@@ -10,6 +10,7 @@ from agentclaw.community.core.service_bot.repository.models import (
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
     PublishNotFoundError,
 )
+from agentclaw.community.core.service_bot.baas_service_errors import BaasBotNotFoundError
 from agentclaw.community.core.service_bot.services.deploy.service_publish_env import (
     service_publish_extra_envs,
     service_publish_template_config,
@@ -266,9 +267,19 @@ class EvalPublishMixin:
 
         # acquire_workflow exceptions propagate (durable retry resumes the same
         # non-terminal op → adopt-by-query), mirroring execute_restart.
-        op = await self._operation_runner.acquire_workflow(op, _issue)
+        try:
+            op = await self._operation_runner.acquire_workflow(op, _issue)
+        except BaasBotNotFoundError:
+            # Teardown's postcondition already holds. Complete the same ledger
+            # operation so the durable task does not retry an absent target.
+            logger.info(
+                "[PublishFlowService.execute_eval_teardown] Target already absent: bot_uuid=%s",
+                bot_uuid,
+            )
+            self._operation_runner.complete_without_workflow(op)
+        else:
+            self._operation_runner.complete_operation(op)
         destroy_publish_id = op.baas_publish_id
-        self._operation_runner.complete_operation(op)
 
         result = {
             "success": True,

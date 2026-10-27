@@ -102,3 +102,23 @@ def test_unconfigured_catalog_fails_closed_through_consumer(world):
         )
     assert service.list_enabled_current(scope) == ()
     assert len(world.get(KnowledgeCatalogPlugin).calls_to("list_authorized")) == 1
+
+
+def test_production_catalog_fallback_is_registered_and_unavailable():
+    from agentclaw.community.di.modules.bot_knowledge_module import BotKnowledgeModule
+    from agentclaw.community.di.profile import DeployProfile
+    from agentclaw.community.plugin_api.impl_registry import IMPL_REGISTRY, Mode
+    from agentclaw.community.plugin_api.knowledge_catalog import KnowledgeCatalogPlugin
+
+    catalog = BotKnowledgeModule(DeployProfile.CORP).catalog()
+    assert type(catalog) is UnavailableKnowledgeCatalog
+    assert any(
+        entry.cls is type(catalog)
+        and entry.protocol is KnowledgeCatalogPlugin
+        and entry.mode is Mode.PROD
+        for entry in IMPL_REGISTRY
+    )
+    with pytest.raises(KnowledgeError) as error:
+        catalog.list_in_space(space_id=1, actor_id="owner")
+    assert error.value.status == 503
+    assert error.value.code == "KNOWLEDGE_CATALOG_UNAVAILABLE"

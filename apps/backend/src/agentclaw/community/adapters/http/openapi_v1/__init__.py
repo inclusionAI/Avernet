@@ -223,6 +223,7 @@ from .harness import harness_router
 from .identity import router as identity_router
 from .local import router as local_router
 from .loadtest import router as loadtest_router
+from .experts import router as experts_router
 from .market import router as market_router
 from .market.acli_clis import router as acli_market_router
 from .mcp import router as mcp_router
@@ -460,7 +461,10 @@ _GRANT_CHECKED_SUBGROUPS = [
 # their order relative to each other and to `_SUBGROUPS` is free. They are still
 # mounted before the bots router for the one rule stated above, not because any
 # of them needs it.
+from .engine_runtime.engine.default_model import router as engine_default_model_router
+
 _ENGINE_RUNTIME_GROUPS = [
+    engine_default_model_router,
     engine_sessions_router,
     engine_engine_router,
     engine_models_router,
@@ -567,6 +571,7 @@ def build_public_router() -> APIRouter:
         )
     # Tenant-identical marketplace queries. This literal group must be mounted
     # before the ``{bot_id}`` wildcard router below.
+    public.include_router(experts_router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH)
     public.include_router(
         market_router,
         responses=ERROR_RESPONSES,

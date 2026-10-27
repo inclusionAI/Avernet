@@ -94,6 +94,7 @@ GOLDEN_SUPPORTED = frozenset({
     Capability.CRON_HISTORY,
     # Model
     Capability.MODEL_LIST,
+    Capability.MODEL_DEFAULT_GET,  # additive configured-default read contract
     Capability.MODEL_SWITCH,
     # Default config
     Capability.DEFAULT_CONFIG_GET,

@@ -99,13 +99,16 @@ class BotFacts:
 
 @dataclass(frozen=True)
 class SocketInfo:
-    """One WebSocket a caller may open against a bot.
+    """One endpoint a caller may reach a bot on.
 
     ``url`` is complete and opaque — the caller opens it verbatim, appending
-    nothing and rebuilding nothing. It is also the *only* field: the credential
-    travels inside it, because a browser's WebSocket handshake can carry one
-    nowhere else, and publishing it a second time alongside would leave a caller
-    guessing which one the socket honours.
+    nothing and rebuilding nothing. It is also the *only* field: on the socket
+    kinds that carry a credential, that credential travels inside the URL,
+    because a browser's WebSocket handshake can carry one nowhere else, and
+    publishing it a second time alongside would leave a caller guessing which
+    one the socket honours. The ``a2a`` kind is the credential-less exception:
+    an HTTP base URL for the engine's A2A face, addressed browser-direct by
+    its issuer.
     """
 
     kind: str

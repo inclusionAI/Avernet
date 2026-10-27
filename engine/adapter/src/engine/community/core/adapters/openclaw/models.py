@@ -23,6 +23,9 @@ from engine.community.core.engine.context import AuthContext
 from engine.community.core.models.models import Model, ModelCapabilities, Provider
 from engine.community.core.models.protocol import ModelsService
 from engine.community.plugin_api.openclaw.models_port import OpenClawModelsPort
+from engine.community.plugin_api.openclaw.default_model import OpenClawDefaultModelPort
+from engine.community.core.adapters.openclaw.default_model import configured_default_model
+from engine.community.core.engine.exceptions import CapabilityNotSupportedError
 
 log = logging.getLogger("openclaw-models-adapter")
 
@@ -176,6 +179,12 @@ class OpenClawModelsAdapter(ModelsService):
 
     def __init__(self, port: OpenClawModelsPort) -> None:
         self._port = port
+
+    async def get_default_model(self, auth: AuthContext | None = None) -> str | None:
+        if not isinstance(self._port, OpenClawDefaultModelPort):
+            from engine.community.core.engine.capability import Capability
+            raise CapabilityNotSupportedError("openclaw", Capability.MODEL_DEFAULT_GET)
+        return configured_default_model(await self._port.get_model_config())
 
     async def list_models(
         self, auth: AuthContext | None = None,

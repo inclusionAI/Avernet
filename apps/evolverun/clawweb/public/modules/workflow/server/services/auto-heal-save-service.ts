@@ -26,6 +26,8 @@ import {
   commitAndPushSaved,
   createTempRepo,
   ensurePackManifest,
+  prepareBranchBase,
+  pruneLegacyPackCopy,
   removeTempRepo,
   writeWorkflowSpecToRepo,
   type ClawFlowsGitConfig,
@@ -132,8 +134,12 @@ export class AutoHealSaveService {
       let gitResult: { branch: string; commit: string } | undefined;
       try {
         await cloneClawflows(repoDir, this.gitConfig);
+        // Base the snapshot on the previous save/deploy content so Pack scripts and
+        // assets are inherited instead of being dropped (see prepareBranchBase).
+        await prepareBranchBase(repoDir, `saved/${workflowId}`, `wf/${workflowId}`);
         await writeWorkflowSpecToRepo(repoDir, packId, workflowId, normalized);
         await ensurePackManifest(repoDir, packId, workflowId);
+        await pruneLegacyPackCopy(repoDir, packId);
         gitResult = await commitAndPushSaved(repoDir, workflowId, input.note ?? "auto-heal save", this.author);
       } finally {
         await removeTempRepo(repoDir);

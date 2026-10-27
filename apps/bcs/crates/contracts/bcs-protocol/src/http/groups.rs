@@ -4,47 +4,6 @@ use serde::{Deserialize, Serialize};
 
 use bcs_domain::{HumanMentionNotifyMode, MessageViewScope, OpeningMessage};
 
-/// Context for a proposal.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProposalContext {
-    pub user_query: Option<String>,
-    pub detected_gap: Option<String>,
-    pub relevant_history: Vec<String>,
-}
-
-/// Response from proposal evaluation.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ProposalResponse {
-    pub proposal_created: bool,
-    /// Mode is deprecated - may not be present in new responses
-    #[serde(default)]
-    pub mode: String,
-    pub driver_bot: String,
-    pub participants: Vec<String>,
-    pub member_intros: String,
-    pub confirm_url: String,
-    pub expires_in_seconds: u64,
-    pub message: String,
-}
-
-/// Response from proposal confirmation.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ConfirmProposalResponse {
-    pub created: bool,
-    pub group_id: String,
-    /// Mode is deprecated - may not be present in new responses
-    #[serde(default)]
-    pub mode: Option<String>,
-    pub driver_bot: String,
-    pub participants: Vec<String>,
-    /// Chat page URL (present when botchat_url is configured on server).
-    #[serde(default)]
-    pub chat_url: Option<String>,
-    /// Initial BCS session created for the group.
-    #[serde(default)]
-    pub session_id: Option<String>,
-}
-
 /// Participant info for group creation.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ParticipantInfo {
@@ -348,15 +307,6 @@ mod tests {
         .expect("create response session alias should deserialize");
         assert_eq!(created.session_id.as_deref(), Some("group_1:initial"));
 
-        let confirmed: ConfirmProposalResponse = serde_json::from_value(serde_json::json!({
-            "created": true,
-            "group_id": "group_2",
-            "driver_bot": "bot_a",
-            "participants": ["bot_a", "bot_b"],
-            "session_id": "group_2:initial"
-        }))
-        .expect("confirm response session id should deserialize");
-        assert_eq!(confirmed.session_id.as_deref(), Some("group_2:initial"));
     }
 
     #[test]
@@ -377,11 +327,3 @@ mod tests {
     }
 }
 
-/// Request to evaluate a proposal.
-#[derive(Debug, Serialize)]
-pub struct EvaluateProposalRequest {
-    pub topic: String,
-    pub suggested_participants: Vec<String>,
-    pub suggested_driver: Option<String>,
-    pub context: Option<ProposalContext>,
-}

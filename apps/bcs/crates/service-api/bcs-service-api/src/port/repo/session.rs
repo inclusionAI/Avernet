@@ -440,6 +440,24 @@ pub trait SessionRepoPort: Send + Sync {
         Vec::new()
     }
 
+    /// Read the Session's authorization-fact snapshot (spec §8.3).
+    ///
+    /// `Ok(None)` means Session not found. This is a strict read
+    /// against the MASTER data source: implementations must NOT
+    /// consult an ordinary `try_get` display cache and must NOT
+    /// fall back to that cache on a read failure. A storage or
+    /// decoding failure is always `Err`. The default keeps
+    /// unconfigured repository implementations fail-closed.
+    async fn read_authorization_snapshot(
+        &self,
+        _session_id: &str,
+    ) -> ServiceResult<Option<crate::types::authorization_snapshot::SessionAuthorizationSnapshot>>
+    {
+        Err(ServiceError::InternalError(
+            "Session authorization snapshot reads are not implemented".to_string(),
+        ))
+    }
+
     /// Batch lookup of collect-event timestamps. For each session_id in
     /// `session_ids` that `bot_uuid` has collected (collected = 1), return
     /// `(session_id, collected_at_ms)`. Sessions not collected (or with no

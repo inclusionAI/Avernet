@@ -351,8 +351,15 @@ if [[ "$no_stop" -eq 0 ]]; then
   # A listed file that shows any E2E hit is counted again with a warning.
   e2e_unreachable_memory_repos=(
     bcs-bot-store/src/memory.rs
+    bcs-bot-store/src/memory_authority.rs
     bcs-bot-store/src/memory_bot_provider_storage.rs
+    bcs-bot-store/src/memory_bot_repo_port.rs
+    bcs-bot-store/src/memory_control_plane.rs
+    bcs-bot-store/src/memory_controllable.rs
+    bcs-bot-store/src/memory_permission_profile.rs
     bcs-bot-store/src/memory_registration_create.rs
+    bcs-bot-store/src/memory_registration_ownership.rs
+    bcs-bot-store/src/memory_retirement.rs
     bcs-event-store/src/memory.rs
     bcs-friend-store/src/memory.rs
     bcs-group-store/src/memory.rs

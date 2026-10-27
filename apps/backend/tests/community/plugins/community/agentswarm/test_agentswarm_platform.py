@@ -29,7 +29,7 @@ from agentclaw.community.plugins.community.agentswarm.host import _idem_digest
 from agentclaw.community.core.agentswarm.domain.models import (
     BotCreateSpec, BotState,
 )
-from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
+from agentclaw.community.core.apply_engine.outcomes import (
     ApplyStatus,
 )
 from agentclaw.community.core.bot_config_manifest.creation import (

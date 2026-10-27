@@ -265,7 +265,10 @@ _RUNTIME_CONFIG = RuntimeConfig.detect()
 _INJECTOR = build_injector(config=_RUNTIME_CONFIG)
 attach_injector(app, _INJECTOR)
 
+from engine.community.api.engine.default_model import router as default_model_router
+
 app.include_router(engine_router)
+app.include_router(default_model_router)
 app.include_router(session_router)
 app.include_router(session_favorites_router)
 app.include_router(dws_hosting_router)

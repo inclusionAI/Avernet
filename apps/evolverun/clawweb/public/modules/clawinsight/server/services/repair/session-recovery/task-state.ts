@@ -84,7 +84,7 @@ export function resumeRecoveryObservation(state: RecoveryTaskState): RecoveryTas
   if (state.simulation) conflict("仿真不可等待或恢复在线效果观察");
   if (state.status !== "waiting_effect") conflict("只有等待效果的任务可以由上游继续");
   // Do not reset the deadline here: first consume new evidence and preserve the paused phase.
-  return next(state, { status: "running", requiresFreshObservation: true });
+  return next(state, { status: "running", requiresFreshObservation: true, final_summary: undefined });
 }
 
 export function terminateRecoveryTask(state: RecoveryTaskState): RecoveryTaskState {

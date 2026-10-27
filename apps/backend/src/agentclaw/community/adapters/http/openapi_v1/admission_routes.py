@@ -527,6 +527,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "GET",
+        "/openapi/v1/bots/{bot_id}/engine/default-model",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
         "/openapi/v1/bots/{bot_id}/engine/status",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
@@ -716,6 +720,9 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/bots/source-credentials"): AdmissionMode.OPEN,
     ("DELETE", "/openapi/v1/bots/source-credentials/{name}"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/org/dept"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/experts"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/experts/categories"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/experts/{expert_id}"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/market/skills"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bots/market/clis"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/market/mcp-servers"): AdmissionMode.OPEN,

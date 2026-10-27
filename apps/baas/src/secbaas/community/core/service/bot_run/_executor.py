@@ -3,8 +3,9 @@
 执行器链处理 ``baas_bot_run_queue`` 的工作项（``BotRunQueueRecord``），结果正文
 落 ``baas_bot_run``（``BotRunRepository``）。链的层次（由外到内）：
 
-- ``ResultGuardExecutor``（兜底）：执行前处理队列级 timeout；除
-  ``RequeuedToPendingError`` 外，把逃逸异常落成 ``baas_bot_run.FAILED``。
+- ``ResultGuardExecutor``（兜底）：把队列级 timeout 和 TimeoutError 落成
+  ``baas_bot_run.TIME_OUT``，把非 timeout 逃逸异常落成 ``baas_bot_run.FAILED``；
+  ``RequeuedToPendingError`` 继续透传。
 
 - ``SerializingExecutor``（增量 4）：用 ``DistributedLockService`` 给内层执行器
   加 **session 维度串行**。同一 session 同一时刻只有一台机器能持锁执行，不同
@@ -83,9 +84,9 @@ def _is_queue_record_timed_out(record: BotRunQueueRecord) -> bool:
 
 
 class ResultGuardExecutor:
-    """RequestExecutor 兜底包装器，统一负责 ``baas_bot_run`` 失败终态。
+    """RequestExecutor 兜底包装器，统一负责 ``baas_bot_run`` 终态落库。
 
-    Worker 只关心队列生命周期；业务结果表的 FAILED 兜底留在 executor 链内。
+    队列级 timeout / TimeoutError 写 ``TIME_OUT``，其他异常写 ``FAILED``。
     ``RequeuedToPendingError`` 是调度信号，必须透传给 Worker 做 RUNNING→PENDING。
     """
 
@@ -101,7 +102,7 @@ class ResultGuardExecutor:
                 "[ResultGuardExecutor] time out before execute run_id=%s",
                 record.run_id,
             )
-            self._mark_failed(record.run_id, "time out")
+            self._mark_timeout(record.run_id, "time out")
             return
 
         try:
@@ -113,14 +114,17 @@ class ResultGuardExecutor:
                 "[ResultGuardExecutor] executor cancelled run_id=%s",
                 record.run_id,
             )
-            self._mark_failed(record.run_id, "execution cancelled (timeout)")
+            if _is_queue_record_timed_out(record):
+                self._mark_timeout(record.run_id, "execution cancelled (timeout)")
+            else:
+                self._mark_failed(record.run_id, "execution cancelled (not timeout)")
             raise
         except TimeoutError:
             logger.warning(
                 "[ResultGuardExecutor] executor timeout run_id=%s",
                 record.run_id,
             )
-            self._mark_failed(record.run_id, "Task execution timeout")
+            self._mark_timeout(record.run_id, "Task execution timeout")
         except Exception as e:
             logger.error(
                 "[ResultGuardExecutor] executor raised for run_id=%s: %s",
@@ -134,6 +138,11 @@ class ResultGuardExecutor:
         current = self._run.get_by_run_id(run_id)
         if current is not None and current.status in ("PENDING", "RUNNING"):
             self._run.update_error(run_id, f"executor safety-net: {error}")
+
+    def _mark_timeout(self, run_id: str, error: str) -> None:
+        current = self._run.get_by_run_id(run_id)
+        if current is not None and current.status in ("PENDING", "RUNNING"):
+            self._run.update_timeout(run_id, f"executor safety-net: {error}")
 
 
 class SerializingExecutor:

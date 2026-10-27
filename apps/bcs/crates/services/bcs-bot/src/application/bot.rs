@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use bcs_service_api::port::bot_authority::BotAuthorityPort;
 use bcs_service_api::{
     application::v1::{FriendCheckInStrategy, UserVisibility},
     ActorKind, ActorStatus, BotCapabilities, BotConnectCommand, BotConnectParams, BotConnectResult,
@@ -43,6 +44,17 @@ pub struct Bot {
     user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
     connection_control: Option<Arc<dyn BotConnectionControlPort>>,
     organization: Option<Arc<dyn OrganizationCoreService>>,
+    /// The narrow authority hook (bot-authority plan
+    /// Task 6.3): the Human 删除/配置/状态 control
+    /// judgments consult it live; a missing wiring
+    /// fails closed.
+    bot_authority: Option<Arc<dyn BotAuthorityPort>>,
+    /// Migration-window compat (spec §10.2a): `/bots/my`
+    /// also surfaces live physical Bots whose stored
+    /// `created_by` byte-matches the caller while their
+    /// ownership is still uninitialized. Strict posture
+    /// pins it off (default).
+    legacy_created_by_fallback: bool,
     uplink: bcs_config_api::UplinkConfig,
 }
 
@@ -82,9 +94,92 @@ impl Bot {
             user_directory: None,
             connection_control: None,
             organization: None,
+            bot_authority: None,
+            legacy_created_by_fallback: false,
             uplink: Default::default(),
         }
     }
+
+    /// Wire the §10.2a compat posture the composition
+    /// root resolved for this process: ON only inside
+    /// the declared migration window, OFF (default)
+    /// everywhere else. `/bots/my` consults it per call.
+    pub fn with_legacy_created_by_fallback(
+        mut self,
+        enabled: bool,
+    ) -> Self {
+        self.legacy_created_by_fallback = enabled;
+        self
+    }
+
+    /// Wire the authority hook (bot-authority plan
+    /// Task 6.3); 删除/配置/状态 judgments consult it.
+    pub fn with_bot_authority(
+        mut self,
+        bot_authority: Arc<dyn BotAuthorityPort>,
+    ) -> Self {
+        self.bot_authority = Some(bot_authority);
+        self
+    }
+
+    /// The wired authority hook; failing to wire one is
+    /// a composition error and must fail closed (never
+    /// deny-as-Ok).
+    fn authority(
+        &self,
+    ) -> Result<&dyn BotAuthorityPort, BotUseCaseError> {
+        self.bot_authority.as_deref().ok_or_else(|| {
+            BotUseCaseError::Service(ServiceError::InternalError(
+                "bot authority hook is not wired".to_string(),
+            ))
+        })
+    }
+
+    /// 删除/配置/状态 control judgment (bot-authority plan
+    /// Task 6.3, spec §8): these are Bot BUSINESS operations
+    /// ("Bot 配置、状态、删除 … 使用当前角色"), so the gate
+    /// admits the CURRENT ROLE — owner OR manager
+    /// (`require_manage`, spec §1 goal 1: manager 获得
+    /// 相同的 Bot 业务操作权限); the historical
+    /// `created_by` (and the unowned-bot legacy) no longer
+    /// authorize (spec §3.3: 旧创建者在失去 manager 后不再
+    /// 有特权). Only the ownership-transfer commands stay
+    /// owner-exclusive. `caller_actor_id` may be the Bot
+    /// itself (its own runtime contract) or a Human actor id.
+    async fn authorize_current_role(
+        &self,
+        caller_actor_id: Option<&str>,
+        bot: &RegisteredBot,
+    ) -> Result<(), BotUseCaseError> {
+        let Some(caller_actor_id) = caller_actor_id else {
+            return Err(BotUseCaseError::Unauthorized(format!(
+                "caller identity is required to modify bot '{}'",
+                bot.bot_uuid
+            )));
+        };
+        if caller_actor_id == bot.bot_uuid {
+            return Ok(());
+        }
+        let staff_no = caller_actor_id
+            .strip_prefix("human_")
+            .unwrap_or(caller_actor_id);
+        match self
+            .authority()?
+            .require_manage(staff_no, &bot.bot_uuid)
+            .await
+        {
+            Ok(()) => Ok(()),
+            Err(ServiceError::Forbidden(message)) => {
+                Err(BotUseCaseError::Forbidden(message))
+            }
+            Err(other) => Err(BotUseCaseError::Service(
+                ServiceError::InternalError(format!(
+                    "bot authority lookup failed: {other}"
+                )),
+            )),
+        }
+    }
+
 
     /// Inject deployment authorization; profile selection is never persisted per Bot.
     pub fn with_uplink_config(mut self, uplink: bcs_config_api::UplinkConfig) -> Self {
@@ -311,7 +406,12 @@ impl BotQueryService for Bot {
             .get(&command.bot_id)
             .await
             .ok_or_else(|| ServiceError::BotNotFound(command.bot_id.clone()))?;
-        authorize_visibility_read(command.caller_actor_id.as_deref(), &bot)?;
+        authorize_visibility_read(
+            command.caller_actor_id.as_deref(),
+            &bot,
+            self.bot_authority.as_deref(),
+        )
+        .await?;
 
         Ok(self.bot_to_detail(bot).await)
     }
@@ -340,7 +440,12 @@ impl BotQueryService for Bot {
             .await
             .ok_or_else(|| ServiceError::BotNotFound(command.bot_id.clone()))?;
 
-        authorize_visibility_read(command.caller_actor_id.as_deref(), &bot)?;
+        authorize_visibility_read(
+            command.caller_actor_id.as_deref(),
+            &bot,
+            self.bot_authority.as_deref(),
+        )
+        .await?;
 
         Ok(BotVisibilityQueryResult {
             bot_uuid: command.bot_id,
@@ -374,12 +479,123 @@ impl BotQueryService for Bot {
         &self,
         command: bcs_service_api::MyBotsCommand,
     ) -> Result<BotPagedListResult, BotUseCaseError> {
+        // mine / legacy `/bots/my` (spec §8
+        // 首行): the owner/manager UNION from the
+        // control plane's controllable read —
+        // the literal `list_bots_by_creator` is
+        // history and no longer feeds this
+        // entry (bot-authority plan Task 6.3,
+        // ruling T6c-1). Ruling T6d-3: the
+        // authenticated Human's SELF entry keeps
+        // its self semantics on this page (the
+        // trusted onboarded Human actor row is
+        // appended below).
+        if let Some(control_plane) = self.control_plane.as_ref() {
+            let candidates = control_plane
+                .list_controllable(
+                    bcs_service_api::ControllableCandidateQuery {
+                        user_id: command.staff_no.clone(),
+                        env: bcs_config::resolve_env_str(),
+                        kind: None,
+                        name: None,
+                        status: None,
+                        include_legacy_creator: self
+                            .legacy_created_by_fallback,
+                    },
+                )
+                .await
+                .map_err(BotUseCaseError::Service)?;
+            // Per-item relation sampling (spec §8
+            // mine row: 逐项
+            // `access_relation=owner|manager`; the
+            // Human self entry keeps `self`).
+            let mut relations: std::collections::HashMap<
+                String,
+                String,
+            > = std::collections::HashMap::new();
+            // Hydrate the Bot-kind candidates with ONE strict
+            // batch read (legacy-mine ruling): a store failure
+            // is an Err to the caller — never a page quietly
+            // missing entries.
+            let mut hydrate_ids: Vec<String> = Vec::new();
+            for candidate in &candidates {
+                if candidate.kind != ActorKind::Bot {
+                    continue;
+                }
+                relations.insert(
+                    candidate.id.clone(),
+                    match candidate.access_relation {
+                        bcs_service_api::types::bot_authority::BotAccessRelation::Owner => {
+                            "owner"
+                        }
+                        bcs_service_api::types::bot_authority::BotAccessRelation::Manager => {
+                            "manager"
+                        }
+                    }
+                    .to_string(),
+                );
+                hydrate_ids.push(candidate.id.clone());
+            }
+            let mut bots = self
+                .registry
+                .try_get_many(&hydrate_ids)
+                .await
+                .map_err(BotUseCaseError::Service)?;
+            // Human SELF entry (spec §8 first row):
+            // the trusted onboarded Human actor row
+            // lives in the SAME registry; the legacy
+            // page kept it alongside the union. It is
+            // self-visible by construction — the page
+            // only lists this caller's union and this
+            // caller's own row; no Human→Human edges
+            // exist.
+            let human_actor_id =
+                format!("human_{}", command.staff_no);
+            if !bots
+                .iter()
+                .any(|bot| bot.bot_uuid == human_actor_id)
+            {
+                if let Some(human) =
+                    self.registry.get(&human_actor_id).await
+                {
+                    if human.actor_kind == ActorKind::Human
+                        && human
+                            .created_by
+                            .as_deref()
+                            == Some(command.staff_no.as_str())
+                    {
+                        bots.push(human);
+                        // Spec §8 mine row: "Human
+                        // 自身条目保持 self 语义".
+                        relations.insert(
+                            human_actor_id.clone(),
+                            "self".to_string(),
+                        );
+                    }
+                }
+            }
+            return self
+                .my_bot_page_from_registered(
+                    bots,
+                    command.offset,
+                    command.limit,
+                    command.active_only,
+                    relations,
+                )
+                .await;
+        }
+        // Legacy fallback for unwired test
+        // harnesses: without the control plane
+        // the union read is impossible, so the
+        // historical behavior stands (no
+        // sampled relations exist to expose).
         let bots = self.registry.list_bots_by_creator(&command.staff_no).await;
         self.my_bot_page_from_registered(
             bots,
             command.offset,
             command.limit,
             command.active_only,
+            std::collections::HashMap::new(),
         )
             .await
     }
@@ -514,6 +730,7 @@ impl Bot {
                 )
                 .to_string(),
                 is_friend: viewer_actor_id.map(|_| candidate.is_friend),
+                access_relation: None,
             });
         }
 
@@ -622,7 +839,10 @@ impl BotManagementService for Bot {
             status,
         } = command;
         match self.registry.get(&bot_id).await {
-            Some(bot) => authorize_bot_management(caller_actor_id.as_deref(), &bot)?,
+            Some(bot) => {
+                self.authorize_current_role(caller_actor_id.as_deref(), &bot)
+                    .await?
+            }
             None if caller_actor_id.as_deref() == Some(bot_id.as_str()) => {}
             None => return Err(ServiceError::BotNotFound(bot_id).into()),
         }
@@ -655,7 +875,8 @@ impl BotManagementService for Bot {
             .get(&bot_id)
             .await
             .ok_or_else(|| ServiceError::BotNotFound(bot_id.clone()))?;
-        authorize_bot_management(caller_actor_id.as_deref(), &bot)?;
+        self.authorize_current_role(caller_actor_id.as_deref(), &bot)
+            .await?;
 
         self.registry
             .update_visibility(&bot_id, &visibility)
@@ -673,12 +894,12 @@ impl BotManagementService for Bot {
         })?;
         let staff_no = caller.strip_prefix("human_").ok_or_else(|| {
             BotUseCaseError::Forbidden(
-                "owner delete requires a human owner identity".to_string(),
+                "bot delete requires a human identity".to_string(),
             )
         })?;
         if command.human_actor_id.as_deref() != Some(caller) {
             return Err(BotUseCaseError::Forbidden(
-                "owner delete requires matching human identity".to_string(),
+                "bot delete requires matching human identity".to_string(),
             ));
         }
 
@@ -687,9 +908,34 @@ impl BotManagementService for Bot {
             .get(&command.bot_id)
             .await
             .ok_or_else(|| ServiceError::BotNotFound(command.bot_id.clone()))?;
-        authorize_human_creator_required(staff_no, &bot)?;
+        // 删除 (spec §8: "Bot 配置、状态、删除、onboard |
+        // 使用当前角色"): a BUSINESS operation, so the gate
+        // admits the current OWNER OR MANAGER (`require_manage`
+        // — spec §1 goal 1); the historical `created_by`
+        // (spec §3.3) and the ownership-transfer commands
+        // change nothing here. `bot` also feeds the INTRINSIC
+        // TC-origin classification below.
+        match self
+            .authority()?
+            .require_manage(staff_no, &command.bot_id)
+            .await
+        {
+            Ok(()) => {}
+            Err(ServiceError::Forbidden(message)) => {
+                return Err(BotUseCaseError::Forbidden(message));
+            }
+            Err(other) => {
+                return Err(BotUseCaseError::Service(ServiceError::InternalError(
+                    format!("bot authority lookup failed: {other}"),
+                )));
+            }
+        }
 
-        if is_owner_suffixed_bot_id_for_staff(&command.bot_id, staff_no) {
+        // F5: the TC-origin guard classifies from the BOT's OWN
+        // persisted `created_by` — never the requester's staff id.
+        // A manager (or a new owner after transfer) must not be
+        // able to retire a TC-origin Bot through this endpoint.
+        if is_legacy_tc_origin_bot(&bot) {
             return Err(BotUseCaseError::Forbidden(
                 "TC bot must be deleted from TC".to_string(),
             ));
@@ -701,7 +947,23 @@ impl BotManagementService for Bot {
             ));
         }
 
-        let left = self.registry.soft_delete(&command.bot_id).await;
+        // Ordinary Bot retirement (bot-authority spec
+        // §7.1): ONE atomic store command — the Bot
+        // tombstone, the owner/manager edge revocation,
+        // the pending-transfer closure (fixed system
+        // marker) and the `retire` audit carrying the
+        // REAL initiating Human. Never an ordinary
+        // delete chained behind anything.
+        let mutation = bcs_service_api::types::bot_authority::AuthorityMutation {
+            mutation_id: format!("retire_{}", uuid::Uuid::new_v4().simple()),
+            actor: bcs_service_api::types::bot_authority::AuthorityActor::Human {
+                user_id: staff_no.to_string(),
+            },
+        };
+        let left = self
+            .registry
+            .retire_with_authority(&command.bot_id, mutation)
+            .await?;
         Ok(BotLeaveResult {
             left,
             bot_uuid: command.bot_id,

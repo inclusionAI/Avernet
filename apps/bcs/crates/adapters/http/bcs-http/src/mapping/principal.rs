@@ -23,13 +23,3 @@ pub fn to_app_caller(caller: wire::CallerContext) -> app::CallerContext {
         }),
     }
 }
-
-pub fn to_app_proposal_context(
-    context: Option<wire::ProposalContext>,
-) -> Option<app::ProposalContext> {
-    context.map(|context| app::ProposalContext {
-        user_query: context.user_query,
-        detected_gap: context.detected_gap,
-        relevant_history: context.relevant_history,
-    })
-}

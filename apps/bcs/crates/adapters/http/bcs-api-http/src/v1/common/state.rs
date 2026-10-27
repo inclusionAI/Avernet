@@ -5,6 +5,7 @@ use bcs_service_api::application::v1::{
     AuthService as ApplicationAuthService, BotService, CollaborationDefinitionService, CollaborationTemplateService, EventSubscriptionService, FriendConnectionService, FriendshipService, GroupService, InvitationService, InviteCodeService, RegisterService,
     SessionFileApplicationService, SessionMessageService, SessionService,
 };
+use bcs_service_api::application::v1::bot_authority::BotAuthorityService;
 use bcs_service_api::application::channel::ChannelService;
 use bcs_service_api::application::CollaborationRuntimeService;
 
@@ -40,6 +41,12 @@ pub struct ApiState {
     pub collaboration_definition_service: Option<Arc<dyn CollaborationDefinitionService>>,
     pub collaboration_runtime_service: Option<Arc<dyn CollaborationRuntimeService>>,
     pub collaboration_drafts: Option<Arc<dyn bcs_service_api::application::collaboration_draft::CollaborationDraftService>>,
+    /// The unified `/api/v1/collaboration/` authority
+    /// facade (manager set + ownership transfers,
+    /// spec §5/§6). Fail-closed (handlers return
+    /// `internal` if None) until the composition root
+    /// mounts it.
+    pub bot_authority_service: Option<Arc<dyn BotAuthorityService>>,
     pub manifest: ManifestConfig,
     pub manifest_env: String,
     pub principal_verifier: Arc<dyn PrincipalVerifier>,
@@ -78,6 +85,7 @@ impl ApiState {
             collaboration_definition_service: None,
             collaboration_runtime_service: None,
             collaboration_drafts: None,
+            bot_authority_service: None,
             manifest: ManifestConfig::default(),
             manifest_env: "local".to_string(),
             principal_verifier,
@@ -195,6 +203,19 @@ impl ApiState {
         service: Arc<dyn CollaborationRuntimeService>,
     ) -> Self {
         self.collaboration_runtime_service = Some(service);
+        self
+    }
+
+    /// Add the unified authority facade that serves the
+    /// `/api/v1/collaboration/` manager/ownership-transfer
+    /// surface (spec §5/§6). The application performs the
+    /// Human/App admission per action; this state only
+    /// carries the service.
+    pub fn with_bot_authority_service(
+        mut self,
+        service: Arc<dyn BotAuthorityService>,
+    ) -> Self {
+        self.bot_authority_service = Some(service);
         self
     }
 

@@ -48,6 +48,23 @@ use crate::MSG_LOG_TARGET;
 use crate::protocol_context::{group_context_input, group_type_wire};
 use crate::task_store::TaskStore;
 
+/// Live Human→Bot control judgment (bot-authority plan
+/// Task 6.5, spec §8): the legacy `created_by` comparison
+/// is replaced by the authority hook. A failing authority
+/// read is an internal error — never a deny-as-verdict.
+pub(crate) async fn human_controls_bot(
+    flow: &BcsMessageFlow,
+    staff_no: &str,
+    bot_id: &str,
+) -> ServiceResult<bool> {
+    match flow.authority()?.can_manage(staff_no, bot_id).await {
+        Ok(controlled) => Ok(controlled),
+        Err(error) => Err(ServiceError::InternalError(format!(
+            "bot authority lookup failed: {error}"
+        ))),
+    }
+}
+
 pub struct BcsMessageFlow {
     pub execution_cache: Option<Arc<dyn bcs_cache_api::CachePlugin>>,
     pub direct_chat: Option<Arc<crate::a2a_chat::A2aChat>>,
@@ -78,6 +95,16 @@ pub struct BcsMessageFlow {
     pub bot_terminal_observer: Arc<dyn BotTerminalObserverPort>,
     pub human_mention_notify: Option<Arc<dyn HumanMentionNotifyPort>>,
     pub managed_deliveries: Option<Arc<dyn bcs_service_api::application::message_delivery::ManagedMessageDeliveryService>>,
+    /// Narrow bot-authority hook consulted for Human→Bot control
+    /// judgments (bot-authority plan Task 6.5). Unwired flows fail
+    /// closed at any judgment that needs live facts.
+    pub bot_authority: Option<Arc<dyn bcs_service_api::port::bot_authority::BotAuthorityPort>>,
+    /// Output-permit admission for accepted business operations
+    /// (bot-authority spec §8.2): installed by composition, consulted
+    /// by `handle_web_send_with_result` / `handle_persistent_group_send`
+    /// BEFORE their first side effect. A `None` flow (unit fixtures)
+    /// simply skips the output-admission boundary.
+    pub output_admission: Option<Arc<dyn bcs_service_api::OutputAdmissionPort>>,
     /// Composition supplies only Bots enabled for new Group admissions.
     pub group_delivery_limits: BTreeMap<String, u32>,
     pub delivery_policy: Option<Arc<crate::delivery_policy::LiveDeliveryPolicy>>,
@@ -125,6 +152,8 @@ impl BcsMessageFlow {
             channel: Arc::new(OnceLock::new()),
             bot_terminal_observer: Arc::new(NoopBotTerminalObserver),
             human_mention_notify: None,
+            bot_authority: None,
+            output_admission: None,
             managed_deliveries: None,
             group_delivery_limits: BTreeMap::new(),
             delivery_policy: None,
@@ -145,6 +174,40 @@ impl BcsMessageFlow {
     }
 
     pub fn with_direct_chat(mut self, direct: Arc<crate::a2a_chat::A2aChat>) -> Self { self.direct_chat = Some(direct); self }
+
+    /// Wire the narrow bot-authority hook (Task 6.5). A flow
+    /// without one fails closed at its Human→Bot control
+    /// judgments instead of consulting legacy `created_by` data.
+    pub fn with_bot_authority_hook(
+        mut self,
+        hook: Option<Arc<dyn bcs_service_api::port::bot_authority::BotAuthorityPort>>,
+    ) -> Self {
+        self.bot_authority = hook;
+        self
+    }
+
+    /// Wire the output-admission port (spec §8.2): every accepted
+    /// business operation freezes per-connection delivery permits
+    /// through it before its first side effect, so later output of
+    /// THAT operation needs no fresh authority read and is never
+    /// retroactively revoked.
+    pub fn with_output_admission(
+        mut self,
+        port: Option<Arc<dyn bcs_service_api::OutputAdmissionPort>>,
+    ) -> Self {
+        self.output_admission = port;
+        self
+    }
+
+    /// The authority hook; failing to wire one is an error, never
+    /// a deny-as-Ok nor a deny-as-forbidden.
+    pub(crate) fn authority(
+        &self,
+    ) -> Result<&dyn bcs_service_api::port::bot_authority::BotAuthorityPort, ServiceError> {
+        self.bot_authority
+            .as_deref()
+            .ok_or_else(|| ServiceError::InternalError("bot authority hook is not wired".into()))
+    }
 
     pub fn with_coordination_intents(mut self, port: Option<Arc<dyn CoordinationIntentPort>>) -> Self {
         self.coordination_intents = port;
@@ -231,6 +294,14 @@ impl BcsMessageFlow {
         self
     }
 
+    /// Share the producer registry used by ALL context writers (A2A, system,
+    /// queue and group sends). Composition passes this same port to producers.
+    pub fn with_tracked_run_context(mut self, context: Arc<crate::TrackedBotRunContext>) -> Self {
+        self.message_tracker = context.tracker();
+        self.bot_run_context = Some(context);
+        self
+    }
+
     pub fn with_provider_chat_run_timeout_ms(mut self, timeout_ms: u64) -> Self {
         self.provider_chat_run_timeout_ms = timeout_ms;
         self
@@ -296,8 +367,8 @@ impl BcsMessageFlow {
         if delivery_type != DeliveryType::Send {
             return Ok(());
         }
+        let deadline_ms = now_ms().saturating_add(self.provider_chat_run_timeout_ms);
         if let Some(run_context) = &self.bot_run_context {
-            let deadline_ms = now_ms().saturating_add(self.provider_chat_run_timeout_ms);
             let session_id = bcs_session_id.unwrap_or(group_id).to_string();
             run_context
                 .put_context(BotRunContext {
@@ -341,10 +412,14 @@ impl BcsMessageFlow {
                 })
                 .await?;
         }
+        // Explicitly distinguish live internal/relay Runs from a retired Run
+        // whose operation binding was cleaned up. Never recreate this at ingress.
+        self.message_tracker.register_independent_output_run(run_id, deadline_ms).await;
         Ok(())
     }
 
     pub(crate) async fn discard_send_context(&self, run_id: &str) -> ServiceResult<()> {
+        self.message_tracker.cleanup_output_run(run_id).await;
         let Some(run_context) = self.bot_run_context.as_ref() else {
             return Ok(());
         };
@@ -356,6 +431,34 @@ impl BcsMessageFlow {
             .remove_active_run(&context.scope, &context.canonical_run_id)
             .await?;
         Ok(())
+    }
+
+    /// Explicitly release runs that can no longer produce output
+    /// (confirmed rejection or an unsent target): drop their operation
+    /// bindings so stray events stop tagging the operation, and
+    /// tell the delivery adapter — an explicit end-state that lets
+    /// the operation complete on its surviving streams (spec §8.2).
+    pub(crate) async fn release_output_runs(&self, operation_id: &str, run_ids: &[String]) {
+        for run_id in run_ids {
+            self.message_tracker.cleanup_output_run(run_id).await;
+        }
+        if let Some(output_admission) = self.output_admission.as_ref() {
+            let _ = output_admission
+                .release_operation_runs(operation_id, run_ids.to_vec())
+                .await;
+        }
+    }
+
+    /// A durable terminal for a never-sent Send has no Bot callback to close
+    /// its stream. No TTL: queued/unknown/running work retains its permit.
+    pub(crate) async fn release_unsent_output(&self, row: &bcs_domain::message_delivery::PersistedMessageDelivery) {
+        if row.state.kind != DeliveryType::Send || row.state.may_have_been_sent || !row.state.status.is_terminal() {
+            return;
+        }
+        let Some(run) = &row.run_id else { return; };
+        if let Some(operation) = self.message_tracker.operation_of_run(run).await {
+            self.release_output_runs(&operation, std::slice::from_ref(run)).await;
+        }
     }
 
     pub(crate) async fn complete_send_context(&self, run_id: &str) -> ServiceResult<()> {
@@ -525,6 +628,11 @@ impl MessageFlowService for BcsMessageFlow {
         source_run_id: &str,
         accepted_run_id: &str,
     ) -> ServiceResult<bool> {
+        // All tracked aliases normalize to their source Run at event ingress;
+        // keep its IM destination under that same canonical identity.
+        if self.message_tracker.output_binding(source_run_id).await.is_some() {
+            return Ok(self.message_tracker.channel_source_message_id(source_run_id).await.is_some());
+        }
         Ok(self
             .message_tracker
             .rebind_channel_source_message_id(source_run_id, accepted_run_id)
@@ -537,10 +645,37 @@ impl MessageFlowService for BcsMessageFlow {
         run_id: &str,
         bot_id: &str,
     ) -> ServiceResult<TaskRunAliasRegistration> {
-        let result = self
-            .task_store
-            .register_alias_for_dispatched_target(task_id, run_id, bot_id)
-            .await;
+        let task = self.task_store.get(task_id).await;
+        if task.as_ref().is_some_and(|entry| entry.target_bot != bot_id
+            || entry.status != crate::task_store::TaskLedgerStatus::Dispatched)
+            || self.task_store.resolve_task_id(run_id).await.is_some_and(|id| id != task_id) {
+            return Ok(TaskRunAliasRegistration::Rejected);
+        }
+        if self.message_tracker.output_binding(task_id).await.is_some() {
+            let scope = if let Some(entry) = task {
+                Some(BotRunScope {
+                    session_id: entry.session_id.unwrap_or_else(|| entry.group_id.clone()),
+                    group_id: entry.group_id, bot_id: entry.target_bot,
+                })
+            } else if let Some(contexts) = &self.bot_run_context {
+                match contexts.find_active_run(task_id).await? {
+                    Some(context) => Some(context.scope),
+                    None => contexts.get_context(task_id).await
+                        .filter(|context| !context.terminal && context.deadline_ms > now_ms())
+                        .map(|context| BotRunScope {
+                            session_id: context.bcs_session_id.unwrap_or_default(),
+                            group_id: context.group_id, bot_id: context.bot_id,
+                        }),
+                }
+            } else { None };
+            let Some(scope) = scope.filter(|scope| scope.bot_id == bot_id) else {
+                return Ok(TaskRunAliasRegistration::Rejected);
+            };
+            if !self.message_tracker.register_output_alias(task_id, run_id, scope).await {
+                return Ok(TaskRunAliasRegistration::Rejected);
+            }
+        }
+        let result = self.task_store.register_alias_for_dispatched_target(task_id, run_id, bot_id).await;
         Ok(match result {
             Some(true) => TaskRunAliasRegistration::Registered,
             Some(false) => TaskRunAliasRegistration::Rejected,
@@ -661,3 +796,6 @@ mod delivery;
 pub use delivery::{build_chat_abort_frame};
 pub(crate) use delivery::{ContextProjection, context_projection_for_delivery, frame_protocol_version, frontend_domain_for_group};
 use delivery::{frame_for_target, bot_delivery_kind, delivery_metric_kind, publish_web_user_message, publish_group_callback_event, publish_chat_abort_event, route_source_for_web_send, log_message_received, log_routing_digest, log_bot_deliver_result};
+mod output_facts;
+pub(crate) use output_facts::freeze_run_output_facts;
+use output_facts::session_snapshot_for_freeze;

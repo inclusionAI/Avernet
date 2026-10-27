@@ -260,6 +260,12 @@ pub(super) async fn publish_task_message_to_workbench(
             exclude_conn_id: None,
             visibility_domain: MessageVisibilityDomain::ManagerWorker,
             audience: Some(audience),
+            // Task progress notices are independent finite events
+            // (spec §7.3 boundary): authorized per event against
+            // current facts.
+            operation_id: None,
+            terminal: false,
+            run_id: None,
         })
         .await;
 

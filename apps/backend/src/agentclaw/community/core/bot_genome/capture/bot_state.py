@@ -64,8 +64,6 @@ if TYPE_CHECKING:  # the module reaches the device dispatcher at import time
 __all__ = ["PlatformBotStateReader"]
 
 LOCAL_PREFIX = "local://"
-#: Where ``ac_resource`` file rows live, workspace-relative (``ResourceService.data_dir``).
-RESOURCE_DATA_DIR = "data/"
 CENTER_PREFIX = "center://"
 REPO_PREFIX = "git://"
 
@@ -155,16 +153,9 @@ class PlatformBotStateReader(BotStateReader):
         for resource in service.list_resources(user_id=bot.owner_id):
             if not resource.path or resource.is_directory:
                 continue  # URL, link and node resources are not workspace files; a folder row has no bytes
-            # A row's path is relative to the bot's data directory (``workspace/data``, the compose
-            # collector's join); the workspace-relative path apply writes and a revision names has it in front.
-            path = RESOURCE_DATA_DIR + resource.path.lstrip("/")
-            data = await self._resource_files.read_file(
-                entity_type=bot.entity_type,
-                entity_id=bot.entity_id,
-                bot_id=bot.bot_id,
-                engine_type=bot.engine_type,
-                path=path,
-            )
+            # A row's path is workspace-relative, as the Open API records it and the apply writes it.
+            path = resource.path.lstrip("/")
+            data = await self._read_resource(bot, path)
             if data is None:
                 raise CaptureRefused(
                     [
@@ -177,6 +168,15 @@ class PlatformBotStateReader(BotStateReader):
                 )
             captured.append(CapturedResource(path, (CapturedFile(path.rsplit("/", 1)[-1], data),)))
         return tuple(captured)
+
+    async def _read_resource(self, bot: BotRef, path: str) -> bytes | None:
+        return await self._resource_files.read_file(
+            entity_type=bot.entity_type,
+            entity_id=bot.entity_id,
+            bot_id=bot.bot_id,
+            engine_type=bot.engine_type,
+            path=path,
+        )
 
     async def mcp_servers(self, bot: BotRef) -> tuple[CapturedMcpServer, ...]:
         who = dict(bot_id=bot.bot_id, owner_id=bot.owner_id, actor_id=bot.owner_id)

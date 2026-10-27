@@ -83,6 +83,7 @@ pub(crate) async fn build_eventing_runtime(
     sessions: Arc<dyn SessionManagementService>,
     collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
     registry: Arc<dyn BotRegistryCoreService>,
+    bot_authority_env_hook: Arc<dyn bcs_service_api::port::bot_authority::BotAuthorityPort>,
     allow_local_test_endpoints: bool,
 ) -> Result<EventingRuntime> {
     config
@@ -113,7 +114,7 @@ pub(crate) async fn build_eventing_runtime(
     })?);
     let env = crate::env::resolve_env();
     let authorizer: Arc<dyn EventSubscriptionAuthorizer> = Arc::new(
-        CoreEventSubscriptionAuthorizer::new(groups.clone(), registry),
+        CoreEventSubscriptionAuthorizer::new(groups.clone(), registry, bot_authority_env_hook.clone()),
     );
     let service_impl = Arc::new(
         EventSubscriptionApplicationService::new(
@@ -124,7 +125,8 @@ pub(crate) async fn build_eventing_runtime(
             EventSubscriptionPolicy::from(&config.eventing),
             env.clone(),
         )
-        .with_group_provisioning(groups.clone(), config.eventing.event_retention_days),
+        .with_group_provisioning(groups.clone(), config.eventing.event_retention_days)
+        .with_bot_authority_hook(Some(bot_authority_env_hook)),
     );
     let service: Arc<dyn EventSubscriptionService> = service_impl.clone();
     let group_provisioner: Arc<dyn GroupEventSubscriptionProvisioner> = service_impl;

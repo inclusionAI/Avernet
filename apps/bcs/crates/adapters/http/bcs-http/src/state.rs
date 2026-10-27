@@ -452,12 +452,6 @@ pub struct HttpAppState {
     pub strict_container_validation: bool,
     pub onboard_binding_enabled: bool,
     pub default_visibility: Option<String>,
-    pub bcs_endpoint: Option<String>,
-    pub bind: String,
-    pub port: u16,
-    pub max_groups_as_driver: usize,
-    pub max_group_members: usize,
-    pub max_groups_as_member: usize,
     pub store_messages: bool,
     pub max_group_messages: u64,
     pub group_chat_delay_min_ms: u64,
@@ -512,12 +506,6 @@ impl HttpAppState {
             strict_container_validation: false,
             onboard_binding_enabled: false,
             default_visibility: None,
-            bcs_endpoint: None,
-            bind: "127.0.0.1".to_string(),
-            port: 21000,
-            max_groups_as_driver: 3,
-            max_group_members: 5,
-            max_groups_as_member: 10,
             store_messages: true,
             max_group_messages: 100,
             group_chat_delay_min_ms: 0,
@@ -633,24 +621,6 @@ impl HttpAppState {
         let _sync_task = tokio::spawn(async move {
             visibility_sync.sync_visibility(request).await;
         });
-    }
-
-    pub fn with_group_request_config(
-        mut self,
-        bcs_endpoint: Option<String>,
-        bind: String,
-        port: u16,
-        max_groups_as_driver: usize,
-        max_group_members: usize,
-        max_groups_as_member: usize,
-    ) -> Self {
-        self.bcs_endpoint = bcs_endpoint;
-        self.bind = bind;
-        self.port = port;
-        self.max_groups_as_driver = max_groups_as_driver;
-        self.max_group_members = max_group_members;
-        self.max_groups_as_member = max_groups_as_member;
-        self
     }
 
     pub fn with_message_config(
@@ -874,12 +844,6 @@ impl std::fmt::Debug for HttpAppState {
             )
             .field("onboard_binding_enabled", &self.onboard_binding_enabled)
             .field("default_visibility", &self.default_visibility)
-            .field("bcs_endpoint", &self.bcs_endpoint)
-            .field("bind", &self.bind)
-            .field("port", &self.port)
-            .field("max_groups_as_driver", &self.max_groups_as_driver)
-            .field("max_group_members", &self.max_group_members)
-            .field("max_groups_as_member", &self.max_groups_as_member)
             .field("store_messages", &self.store_messages)
             .field("max_group_messages", &self.max_group_messages)
             .field("group_chat_delay_min_ms", &self.group_chat_delay_min_ms)

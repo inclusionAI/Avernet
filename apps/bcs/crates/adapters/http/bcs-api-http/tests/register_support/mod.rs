@@ -19,7 +19,7 @@ use bcs_service_api::application::v1::{
 };
 use serde_json::Value;
 
-struct HeaderVerifier {
+pub(crate) struct HeaderVerifier {
     caller: AuthenticatedCaller,
 }
 
@@ -88,7 +88,7 @@ pub(crate) async fn response_json(response: axum::response::Response) -> Value {
 // (register tests never hit those routes). Copied from invitation_routes.rs.
 // ---------------------------------------------------------------------------
 
-struct NoopGroupService;
+pub(crate) struct NoopGroupService;
 
 #[async_trait]
 impl GroupService for NoopGroupService {
@@ -137,7 +137,7 @@ impl GroupService for NoopGroupService {
     }
 }
 
-struct NoopSessionService;
+pub(crate) struct NoopSessionService;
 
 #[async_trait]
 impl SessionService for NoopSessionService {
@@ -207,7 +207,7 @@ impl SessionService for NoopSessionService {
     }
 }
 
-struct NoopSessionMessageService;
+pub(crate) struct NoopSessionMessageService;
 
 #[async_trait]
 impl SessionMessageService for NoopSessionMessageService {
@@ -221,7 +221,7 @@ impl SessionMessageService for NoopSessionMessageService {
     }
 }
 
-struct NoopInvitationService;
+pub(crate) struct NoopInvitationService;
 
 #[async_trait]
 impl InvitationService for NoopInvitationService {
@@ -247,7 +247,7 @@ impl InvitationService for NoopInvitationService {
     }
 }
 
-struct NoopFriendshipService;
+pub(crate) struct NoopFriendshipService;
 
 #[async_trait]
 impl FriendshipService for NoopFriendshipService {

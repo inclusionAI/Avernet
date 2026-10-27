@@ -1,8 +1,22 @@
 use std::collections::{HashMap, HashSet};
 
 use bcs_domain::{CoordinationSurface, MessageVisibilityDomain, Participant};
+use bcs_service_api::{BotRunScope, ServiceError, ServiceResult};
+
+#[derive(Default)]
+struct OutputAliases {
+    by_alias: HashMap<String, (String, BotRunScope)>,
+    by_run: HashMap<String, Vec<String>>,
+}
 use serde_json::Value;
 use tokio::sync::Mutex;
+
+enum RunOutputBinding {
+    Admitted(String),
+    // Independent Runs have the same deadline as their trusted send context.
+    // This bound never applies to frozen, admitted operations.
+    Independent { deadline_ms: u64 },
+}
 
 const TOOL_CALL_START_TTL_MS: u64 = 6 * 60 * 60 * 1000;
 
@@ -91,6 +105,17 @@ pub struct MessageTracker {
     /// Cache it before bot delivery so the first response event can target
     /// the exact source message even when requests share one conversation.
     channel_source_message_ids: Mutex<HashMap<String, String>>,
+    /// run_id → application-assigned business operation id
+    /// (bot-authority spec §8.2: 帧携带可信 operation 归属，许可沿
+    /// 操作冻结而不是逐帧查询). Seeded when the operation's own send
+    /// path creates the run (before the bot can emit its first
+    /// event) and cleared with the run's terminal cleanup. Runs
+    /// created outside an admitted operation (internal drains,
+    /// relay continuations) explicitly register an Independent value: their events
+    /// authorize per event against current facts. A missing entry is NOT an
+    /// independent producer and cannot publish protected Run output.
+    run_operations: Mutex<HashMap<String, RunOutputBinding>>,
+    output_aliases: Mutex<OutputAliases>,
 }
 
 impl MessageTracker {
@@ -105,6 +130,112 @@ impl MessageTracker {
             streaming_thinking_buf: Mutex::new(HashMap::new()),
             channel_sender_info: Mutex::new(HashMap::new()),
             channel_source_message_ids: Mutex::new(HashMap::new()),
+            run_operations: Mutex::new(HashMap::new()),
+            output_aliases: Mutex::new(OutputAliases::default()),
+        }
+    }
+
+    // -- Run → business operation binding (spec §8.2) --
+
+    /// Bind a run to the operation that admitted it. Insert-only for
+    /// the run's lifetime (a re-seed of the SAME operation is a
+    /// no-op; a conflicting rebind leaks no frames because output
+    /// keyed by the first binding already holds a permit).
+    pub async fn cache_run_operation(&self, run_id: &str, operation_id: &str) {
+        self.run_operations
+            .lock()
+            .await
+            .entry(run_id.to_string())
+            .or_insert_with(|| RunOutputBinding::Admitted(operation_id.to_string()));
+    }
+
+    /// The operation a run was admitted under, if any.
+    pub async fn operation_of_run(&self, run_id: &str) -> Option<String> {
+        match self.run_operations.lock().await.get(run_id) {
+            Some(RunOutputBinding::Admitted(operation)) => Some(operation.clone()),
+            _ => None,
+        }
+    }
+
+    /// Explicit independent producer registration, never inferred from a missing
+    /// operation. Only trusted send preparation may create this live marker.
+    pub async fn register_independent_output_run(&self, run_id: &str, deadline_ms: u64) {
+        let mut operations = self.run_operations.lock().await;
+        // Direct A2A projects a context under the accepted alias too. It must
+        // remain an alias, not become a second independently live producer.
+        if self.output_aliases.lock().await.by_alias.contains_key(run_id) {
+            return;
+        }
+        operations.entry(run_id.to_string())
+            .and_modify(|binding| {
+                if let RunOutputBinding::Independent { deadline_ms: previous } = binding {
+                    *previous = deadline_ms;
+                }
+            })
+            .or_insert(RunOutputBinding::Independent { deadline_ms });
+    }
+
+    /// Missing means unknown/retired, Some(None) is a live independent Run,
+    /// and Some(Some(id)) belongs to an admitted operation.
+    pub async fn output_binding(&self, run_id: &str) -> Option<Option<String>> {
+        match self.run_operations.lock().await.get(run_id) {
+            Some(RunOutputBinding::Admitted(operation)) => Some(Some(operation.clone())),
+            Some(RunOutputBinding::Independent { .. }) => Some(None),
+            _ => None,
+        }
+    }
+
+    /// Called by the existing context cleanup tick. Orphaned independent Runs
+    /// expire with their send context, but admitted/queued operations never do.
+    pub(crate) async fn cleanup_expired_independent_outputs(&self, now_ms: u64, retention_ms: u64) {
+        let mut operations = self.run_operations.lock().await;
+        let mut expired = Vec::new();
+        operations.retain(|run, binding| {
+            if matches!(binding, RunOutputBinding::Independent { deadline_ms } if now_ms > deadline_ms.saturating_add(retention_ms)) {
+                expired.push(run.clone());
+                false
+            } else { true }
+        });
+        let mut aliases = self.output_aliases.lock().await;
+        for run in expired {
+            if let Some(names) = aliases.by_run.remove(&run) {
+                for name in names { aliases.by_alias.remove(&name); }
+            }
+        }
+    }
+
+    /// Retire only this Run's output facts/aliases. Unsent terminal cleanup
+    /// never scans other Runs' tool-call state or pending streaming buffers.
+    pub async fn cleanup_output_run(&self, run_id: &str) {
+        self.bot_event_run_info.lock().await.remove(run_id);
+        self.run_operations.lock().await.remove(run_id);
+        let mut aliases = self.output_aliases.lock().await;
+        if let Some(names) = aliases.by_run.remove(run_id) {
+            for name in names { aliases.by_alias.remove(&name); }
+        }
+    }
+
+    /// Only called for an authenticated acceptance of a known output Run.
+    /// Alias routing is process-local and never performs frame-time DB/cache I/O.
+    pub async fn register_output_alias(&self, run: &str, alias: &str, scope: BotRunScope) -> bool {
+        if run == alias { return true; }
+        let operations = self.run_operations.lock().await;
+        if !operations.contains_key(run) || operations.contains_key(alias) { return false; }
+        let mut aliases = self.output_aliases.lock().await;
+        if let Some(existing) = aliases.by_alias.get(alias) {
+            return existing == &(run.to_string(), scope);
+        }
+        aliases.by_alias.insert(alias.to_string(), (run.to_string(), scope));
+        aliases.by_run.entry(run.to_string()).or_default().push(alias.to_string());
+        true
+    }
+
+    pub async fn canonical_output_run(&self, run: &str, scope: &BotRunScope) -> ServiceResult<Option<String>> {
+        let aliases = self.output_aliases.lock().await;
+        match aliases.by_alias.get(run) {
+            Some((canonical, accepted_scope)) if accepted_scope == scope => Ok(Some(canonical.clone())),
+            Some(_) => Err(ServiceError::Forbidden("output Run alias scope mismatch".into())),
+            None => Ok(None),
         }
     }
 
@@ -354,7 +485,7 @@ impl MessageTracker {
         self.channel_sender_info.lock().await.remove(run_id);
         self.channel_source_message_ids.lock().await.remove(run_id);
         self.coordination_surfaces.lock().await.remove(run_id);
-        self.bot_event_run_info.lock().await.remove(run_id);
+        self.cleanup_output_run(run_id).await;
         self.streaming_chat_buf.lock().await.remove(run_id)
     }
 }
@@ -374,6 +505,26 @@ fn tool_start_expired(info: &ToolCallStartInfo, now_ms: u64) -> bool {
 mod tests {
     use super::{MessageTracker, ToolCallStartInfo};
     use serde_json::Value;
+
+    #[tokio::test]
+    async fn output_lineage_distinguishes_independent_admitted_and_retired_runs() {
+        let tracker = MessageTracker::new();
+        assert_eq!(tracker.output_binding("run").await, None);
+        tracker.cache_run_operation("run", "operation").await;
+        tracker.register_independent_output_run("run", u64::MAX).await;
+        assert_eq!(tracker.output_binding("run").await, Some(Some("operation".into())));
+        let scope = bcs_service_api::BotRunScope { bot_id:"bot".into(), group_id:"group".into(), session_id:"session".into() };
+        assert!(tracker.register_output_alias("run", "alias", scope.clone()).await);
+        tracker.register_independent_output_run("independent", u64::MAX).await;
+        assert_eq!(tracker.output_binding("independent").await, Some(None));
+        tracker.cleanup_output_run("run").await;
+        assert_eq!(tracker.output_binding("run").await, None);
+        assert_eq!(tracker.canonical_output_run("alias", &scope).await.unwrap(), None);
+        assert!(!tracker.register_output_alias("run", "alias", scope).await);
+        assert_eq!(tracker.output_binding("independent").await, Some(None));
+        tracker.cleanup_output_run("independent").await;
+        assert_eq!(tracker.output_binding("independent").await, None);
+    }
 
     #[tokio::test]
     async fn channel_source_message_ids_are_scoped_to_run_and_cleaned_up() {

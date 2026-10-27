@@ -23,6 +23,8 @@ type DiagnosisFields = {
   engine: Engine;
   sessionKey: string | null;
   sessionId: string | null;
+  /** Optional report-only routing hint; not persisted as diagnosis content. */
+  sessionNasPath?: string;
   traceId: string | null;
   occurredAt: string | null;
   diagnosedAt: string;
@@ -50,7 +52,7 @@ export type BotCheck = {
   lastSuccessfulCheckAt: string | null;
   status: CheckStatus;
 };
-export type DiagnosisItem = Omit<DiagnosisEvent, "eventId" | "engine" | "runtimeIdentity">;
+export type DiagnosisItem = Omit<DiagnosisEvent, "eventId" | "engine" | "runtimeIdentity" | "sessionNasPath">;
 export type DiagnosisQuery = {
   startMs: number | null;
   endMs: number | null;

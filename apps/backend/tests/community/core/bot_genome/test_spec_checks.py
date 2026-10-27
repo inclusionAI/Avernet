@@ -235,19 +235,26 @@ def test_resource_rules() -> None:
     spec.resources = [
         ResourceEntry(path="data/faq.csv", digest=blobs.put(b"q,a\n")),
         ResourceEntry(path="data/tool.sh", digest=blobs.put(b"#!/bin/sh\n")),
-        ResourceEntry(path="docs/", digest=blobs.put(canonical_tree_bytes([("a.md", b"a"), ("run.toml", b"x")]))),
+        ResourceEntry(path="data/docs/", digest=blobs.put(canonical_tree_bytes([("a.md", b"a"), ("run.toml", b"x")]))),
+        ResourceEntry(path="docs/", digest=blobs.put(canonical_tree_bytes([("a.md", b"a")]))),
+        ResourceEntry(path="SOUL.md", digest=blobs.put(b"# me")),
     ]
     reasons = resource_reasons(spec, blobs)
     assert [(r.code, r.location) for r in reasons] == [
         ("admission", "spec.resources[1]:'data/tool.sh'"),
-        ("admission", "spec.resources[2]:'docs/run.toml'"),
+        ("admission", "spec.resources[2]:'data/docs/run.toml'"),
+        ("resource_paths", "spec.resources[4]"),  # a protected workspace entry: the identity construct's
     ]
     spec.resources = [
-        ResourceEntry(path="data/", digest=blobs.put(b"q,a\n")),
-        ResourceEntry(path="data/x.md", digest=blobs.put(b"x")),
+        ResourceEntry(path="data/kb/", digest=blobs.put(b"q,a\n")),
+        ResourceEntry(path="data/kb/x.md", digest=blobs.put(b"x")),
     ]
     reasons = resource_reasons(spec, blobs)
     assert [r.code for r in reasons] == ["resource_paths", "tree"]
+    spec.resources = [ResourceEntry(path="skills/", digest=blobs.put(canonical_tree_bytes([("a.md", b"a")])))]
+    reasons = resource_reasons(spec, blobs)
+    assert [(r.code, r.location) for r in reasons] == [("resource_paths", "spec.resources[0]")]
+    assert "not a resources directory" in reasons[0].message, "the skills tree is the skills construct's"
 
 
 # -- MCP -------------------------------------------------------------------------------------------

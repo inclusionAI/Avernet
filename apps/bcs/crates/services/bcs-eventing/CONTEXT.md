@@ -19,6 +19,13 @@ Event namespace is introduced. The catalog and schema are authoritative.
   projection with sensitive-field removal and UTF-8-safe content limits.
 - Lease-based fanout, bounded-concurrency Webhook dispatch, full-jitter retry,
   DLQ, safe retention, and managed worker lifecycle policy.
+- Persistent integration-asset semantics for subscriptions
+  (bot-authority spec §8.4): the subscription belongs to the
+  Group/Bot, not its creating Human's live authorization; delivery
+  continues after the creator's management edge is revoked, and
+  management (list/disable/delete) stays under the CURRENT resource
+  admin's authorization, each call re-consulted. No per-delivery
+  webhook re-authorization or Human delivery-binding field exists.
 - Group Event Subscription preparation/recovery and deterministic
   `group.created`/initial `session.created` construction for an owning Group
   repository to finalize atomically.

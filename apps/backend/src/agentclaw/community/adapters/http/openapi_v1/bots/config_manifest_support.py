@@ -11,17 +11,18 @@ from __future__ import annotations
 from typing import Any, Optional, Sequence
 
 from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
-from agentclaw.community.api.bot_config_manifest_apply_service import (
+from agentclaw.community.api.apply_run_service import (
     ApplyReport,
-    BotConfigManifestApplyServiceProtocol,
-    ManifestApplyInProgressError,
+    ApplyRunServiceProtocol,
+    ApplyInProgressError,
 )
 from agentclaw.community.api.bot_config_manifest_service import (
-    ManifestCapabilities,
+    MANIFEST_STATE,
+    Capabilities,
     ManifestWriteResult,
 )
-from agentclaw.community.core.bot_config_manifest.apply.delivery import DeliveryStrategy
-from agentclaw.community.core.bot_config_manifest.apply.triggers import PUT as PUT_TRIGGER
+from agentclaw.community.core.apply_engine.delivery import DeliveryStrategy
+from agentclaw.community.core.apply_engine.triggers import PUT as PUT_TRIGGER
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.bot_config_manifest.repository.models import (
     BotConfigManifestRecord,
@@ -34,6 +35,7 @@ from .schemas_config_manifest_apply import (
     ConfigManifestApply,
     ConfigManifestApplyCategory,
     ConfigManifestApplyEntry,
+    ConfigManifestApplyState,
     ConfigManifestApplySource,
 )
 from .schemas import (
@@ -150,7 +152,7 @@ def put_warnings(
 
 
 def delivery_or_none(
-    apply_service: BotConfigManifestApplyServiceProtocol, bot: dict[str, Any]
+    apply_service: ApplyRunServiceProtocol, bot: dict[str, Any]
 ) -> Optional[DeliveryStrategy]:
     """The bot's delivery strategy for the response's notes, or ``None``.
 
@@ -173,7 +175,7 @@ def delivery_or_none(
 
 
 def start_put_apply(
-    apply_service: BotConfigManifestApplyServiceProtocol,
+    apply_service: ApplyRunServiceProtocol,
     *,
     entity_id: str,
     bot_id: str,
@@ -196,9 +198,10 @@ def start_put_apply(
             owner_id=owner_id,
             actor_id=actor_id,
             audit_actor=audit,
+            state=MANIFEST_STATE,
             trigger=PUT_TRIGGER,
         )
-    except ManifestApplyInProgressError:
+    except ApplyInProgressError:
         return ConfigManifestApplyStarted(
             apply_id="", result="NOT_STARTED", reason="apply_in_progress"
         )
@@ -216,7 +219,7 @@ def start_put_apply(
 
 
 def capabilities_payload(
-    bot_id: str, capabilities: ManifestCapabilities
+    bot_id: str, capabilities: Capabilities
 ) -> ConfigManifestCapabilities:
     """Shape the resolver's answer as the response model."""
     return ConfigManifestCapabilities(
@@ -265,6 +268,7 @@ def apply_payload(report: ApplyReport) -> ConfigManifestApply:
         ],
         entries=[ConfigManifestApplyEntry(**entry) for entry in payload["entries"]],
         notes=list(payload.get("notes") or ()),
+        state=ConfigManifestApplyState(**payload["state"]),
     )
 
 
@@ -282,6 +286,7 @@ def empty_apply_payload(bot_id: str) -> ConfigManifestApply:
         result="",
         started_at=None,
         finished_at=None,
+        state=ConfigManifestApplyState(kind="manifest"),
         sources=[],
         categories=[],
         entries=[],

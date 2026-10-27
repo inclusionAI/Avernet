@@ -246,6 +246,20 @@ impl SessionRepoPort for MemorySessionRepo {
         self.state.read().await.sessions.get(session_id).cloned()
     }
 
+    async fn read_authorization_snapshot(
+        &self,
+        session_id: &str,
+    ) -> ServiceResult<Option<bcs_service_api::types::authorization_snapshot::SessionAuthorizationSnapshot>> {
+        // Memory projects from the CURRENT state, so a second store
+        // instance always observes the just-committed value.
+        let state = self.state.read().await;
+        let env = bcs_config::resolve_env_str();
+        Ok(state
+            .sessions
+            .get(session_id)
+            .map(|session| super::authorization_snapshot::memory_snapshot(env, session)))
+    }
+
     async fn belongs_to_group(&self, session_id: &str, group_id: &str) -> bool {
         self.state
             .read()

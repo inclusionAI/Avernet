@@ -606,19 +606,6 @@ class GenomePromotionRepository(GenomePromotionRepositoryProtocol):
             )
             return total, [row.to_record() for row in rows]
 
-    def by_apply_reference(
-        self, *, env: str, entity_id: str, bot_id: str, apply_reference: str
-    ) -> Optional[GenomePromotionRow]:
-        with self._db.orm_session() as session:
-            row = (
-                session.query(GenomePromotionModel)
-                .filter(*_bot(GenomePromotionModel, env=env, entity_id=entity_id, bot_id=bot_id))
-                .filter(GenomePromotionModel.apply_reference == apply_reference)
-                .order_by(GenomePromotionModel.id.desc())
-                .first()
-            )
-            return row.to_record() if row is not None else None
-
     def finish(
         self,
         *,
@@ -627,7 +614,6 @@ class GenomePromotionRepository(GenomePromotionRepositoryProtocol):
         bot_id: str,
         promotion_id: str,
         status: str,
-        apply_reference: Optional[str],
         apply_detail: str,
     ) -> Optional[GenomePromotionRow]:
         with self._db.orm_session() as session:
@@ -635,7 +621,6 @@ class GenomePromotionRepository(GenomePromotionRepositoryProtocol):
             if row is None:
                 return None
             row.status = status
-            row.apply_reference = apply_reference
             row.apply_detail = apply_detail
             session.flush()
             session.refresh(row)

@@ -25,7 +25,6 @@ pub mod message;
 pub mod message_delivery;
 pub mod organization;
 pub mod opening_message;
-pub mod proposal;
 pub mod provider;
 pub mod provider_identity;
 pub mod provider_registration_token;
@@ -98,7 +97,6 @@ pub use opening_message::{
     MAX_OPENING_MESSAGE_COMPONENT_BYTES, OpeningMessage, OpeningMessageError,
     OpeningMessageRenderContext, OpeningMessageScope, RenderedOpeningMessage,
 };
-pub use proposal::GroupChatProposal;
 pub use provider::{
     BotDeliveryTarget, CoordinationMode, CoordinationSurface, ProviderAuthMode,
     ProviderBotBinding, ProviderBotConnectionMode, ProviderCoordinationConfig,

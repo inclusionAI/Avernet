@@ -131,6 +131,7 @@ function sidebarProps(over: Partial<ConversationSidebarProps> = {}): Conversatio
     onOpenPublicBots: jest.fn(),
     onOpenBotWorkshop: jest.fn(),
     onOpenAgentCodingBot: jest.fn(),
+    replyingSessionId: null,
     ...over,
   };
 }
@@ -965,4 +966,70 @@ it('仅团队筛选禁用他人来源，管理 Bot 保持原有可用项', () =>
   expect(useConversationStore.getState().originByManagedBotId['team:entity']).toBeUndefined();
   fireEvent.click(othersOptions.find((node) => !node.disabled)!);
   expect(useConversationStore.getState().originByManagedBotId['bot-a:2088']).toBe('others');
+});
+
+describe('ConversationSidebar #2990 还原接线（菜单传导 / 回复中指示 / infoHint）', () => {
+  it('onOpenBotManagement 仅经管理/团队行传导:两行出「更多操作」,好友行不出(好友无空间上下文)', () => {
+    const onOpenBotManagement = jest.fn();
+    const spaceManaged = { ...managedBotA, bot: { ...managedBotA.bot, spaceId: '101' } };
+    const spaceTeam = { ...teamBot, bot: { ...teamBot.bot, spaceId: '202' } };
+    render(
+      <ConversationSidebar
+        {...sidebarProps({
+          managedBots: [spaceManaged],
+          teamBots: [spaceTeam],
+          friendBots: [friendBot],
+          directory: directoryModel({
+            managedBots: [spaceManaged],
+            teamBots: [spaceTeam],
+            friendBots: [friendBot],
+          }),
+          onOpenBotManagement,
+        })}
+      />,
+    );
+    // 「更多操作」入口仅出现在管理行与团队行;好友行不渲染。
+    const entries = screen.getAllByRole('button', { name: '更多操作' });
+    expect(entries).toHaveLength(2);
+    // 管理行打开菜单点击「Bot 管理」,回调携带所属空间信息。
+    fireEvent.click(entries[0]);
+    fireEvent.click(screen.getByRole('button', { name: /Bot 管理/ }));
+    expect(onOpenBotManagement).toHaveBeenCalledTimes(1);
+    expect(onOpenBotManagement).toHaveBeenCalledWith(
+      expect.objectContaining({ botId: 'bot-a:2088', spaceId: '101' }),
+    );
+  });
+
+  it('replyingSessionId 传导至会话行:命中行渲染「Bot 正在回复」,未命中行不渲染', () => {
+    const store = seedStore((s) => {
+      s.setExpandedBot('bot-a:2088', true);
+      s.setManagedBotCache('bot-a:2088', {
+        botId: 'bot-a:2088',
+        origin: 'mine',
+        scope: 'all',
+        sessions: { ...emptyList(), items: [sessionOf('s-a')] },
+        friendDirectory: { items: [], loading: false, error: null },
+        friendGroups: {},
+      });
+    });
+    render(<ConversationSidebar {...sidebarProps({ store, replyingSessionId: 's-a' })} />);
+    expect(screen.getAllByRole('status', { name: 'Bot 正在回复' })).toHaveLength(1);
+  });
+
+  it('团队 Bot 分组标题携带来源提示 infoHint(#2990 还原),切换按钮可访问名保持纯标题', async () => {
+    render(
+      <ConversationSidebar
+        {...sidebarProps({
+          teamBots: [teamBot],
+          directory: directoryModel({ teamBots: [teamBot] }),
+        })}
+      />,
+    );
+    // 既有契约不回归:标题即开关、可访问名纯「团队 Bot」,计数徽标仍在。
+    expect(screen.getByRole('button', { name: '团队 Bot' })).toBeInTheDocument();
+    const info = screen.getByLabelText('通过团队成员身份获取的 Bot');
+    fireEvent.pointerMove(info, { pointerType: 'mouse' });
+    fireEvent.focusIn(info);
+    await waitFor(() => expect(screen.getByText('通过团队成员身份获取的 Bot')).toBeInTheDocument());
+  });
 });

@@ -5,9 +5,12 @@ import logging
 from collections.abc import Iterable
 
 
-def log_stage(logger: logging.Logger, stage: str, **metrics) -> None:
+def log_stage(logger: logging.Logger, stage: str, *, level: int = logging.INFO, **metrics) -> None:
     """Emit one stage summary for text and structured handlers."""
-    logger.info(
+    if not logger.isEnabledFor(level):
+        return
+    logger.log(
+        level,
         "[RETRIEVAL] stage=%s %s", stage,
         json.dumps(metrics, ensure_ascii=False, default=str),
         extra={"retrieval_stage": stage, **metrics},
@@ -36,14 +39,14 @@ def log_candidates(
 
 
 def log_rows(logger: logging.Logger, stage: str, fields: list[str], rows: Iterable[list]) -> None:
-    """Compact INFO decision evidence: explicit columns, at most 25 rows per log."""
-    if not logger.isEnabledFor(logging.INFO):
+    """Compact DEBUG decision evidence: explicit columns, at most 25 rows per log."""
+    if not logger.isEnabledFor(logging.DEBUG):
         return
     batch = []
     for row in rows:
         batch.append(row)
         if len(batch) == 25:
-            log_stage(logger, stage, fields=fields, entries=batch)
+            log_stage(logger, stage, level=logging.DEBUG, fields=fields, entries=batch)
             batch = []
     if batch:
-        log_stage(logger, stage, fields=fields, entries=batch)
+        log_stage(logger, stage, level=logging.DEBUG, fields=fields, entries=batch)

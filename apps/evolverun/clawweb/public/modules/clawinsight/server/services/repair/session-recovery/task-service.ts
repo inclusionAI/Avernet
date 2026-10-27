@@ -1,4 +1,6 @@
 import { resolveTaskControlPlaneEnvironment, type AgentControlPlaneEnvironment } from "../common/task-control-plane.js";
+import { logRepairEvent, repairLogError } from "../common/logging.js";
+import { BotRuntimeError } from "@avernet/clawweb-shared/server/services/bot-runtime";
 import type { AgentRuntimeTargetSnapshot } from "../common/agent-tools/contracts.js";
 import { containsSecret } from "@avernet/clawweb-shared/server/services/redaction";
 import { createHash, randomUUID } from "node:crypto";
@@ -20,7 +22,7 @@ export interface RecoveryAgentExecutor {
 }
 export interface RecoveryTaskNotifier {
   /** False means notification is disabled; do not record a delivery attempt. */
-  notify(input: { ownerId: string; taskId: string; kind: "plan" | "result"; summary: string }): Promise<boolean>;
+  notify(input: { ownerId: string; taskId: string; kind: "plan" | "result"; summary: string; effect?: RecoveryJudgment["effect"] }): Promise<boolean>;
 }
 export interface RecoveryTaskReporter { report(result: RecoveryTaskResult): Promise<void> }
 
@@ -43,7 +45,17 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
 
   async create(raw: unknown, actor: RecoveryActor): Promise<RecoveryAcknowledgment & { task_id: string }> {
     const request = parseRequest(raw);
-    return this.createTask(request, actor, this.level(raw));
+    const level = this.level(raw);
+    try { return await this.createTask(request, actor, level); }
+    catch (error) {
+      if (!(error instanceof SessionRecoveryError || error instanceof BotRuntimeError) || error.status >= 500) {
+        logRepairEvent("session-recovery", "session_recovery_task", level === "debug" ? "creation_failed" : "CREATE_FAILED", {
+          environment: this.deps.controlPlaneEnvironment, eventId: request.event_id, botId: request.target.bot_id,
+          targetEnvironment: request.target.env, phase: "create", outcome: "failed", ...(level !== "debug" ? { count: 1 } : {}),
+          ...repairLogError(error) });
+      }
+      throw error;
+    }
   }
 
   async createSimulations(raw: unknown, actor: RecoveryActor) {
@@ -83,8 +95,14 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       if (JSON.stringify(raced.request) !== JSON.stringify(request) || raced.simulation?.inputDigest !== simulation?.inputDigest) this.fail(409, "同一投递标识的请求内容不一致");
       return { event_id: request.event_id, delivery_key: request.delivery_key, status: "accepted", task_id: taskId };
     }
+    logRepairEvent("session-recovery", "session_recovery_task", "created", { environment: this.deps.controlPlaneEnvironment,
+      taskId, eventId: request.event_id, botId: request.target.bot_id, targetEnvironment: request.target.env,
+      phase: task.phase, status: task.status });
     setImmediate(() => {
-      void this.start(task).catch(() => { console.error("[session-recovery] failed to persist startup result", taskId); });
+      void this.start(task).catch(error => {
+        logRepairEvent("session-recovery", "session_recovery_task", "startup_result_failed", { environment: this.deps.controlPlaneEnvironment,
+          taskId, eventId: request.event_id, ...repairLogError(error) });
+      });
     });
     return { event_id: request.event_id, delivery_key: request.delivery_key, status: "accepted", task_id: taskId };
   }
@@ -94,10 +112,12 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     if (task.status !== "running" || !this.ownsTask(task)) return;
     try { await this.deps.agent.start(task); }
     catch (error) {
+      logRepairEvent("session-recovery", "session_recovery_task", "startup_failed", { environment: this.deps.controlPlaneEnvironment,
+        taskId: task.taskId, phase: task.phase, executionId: task.execution?.executionId, ...repairLogError(error) });
       const latest = await this.required(task.taskId);
       // A stale dispatcher must not fail a replacement that another worker already owns.
       if (latest.execution?.executionId !== task.execution?.executionId || latest.executionRetry?.retryAt) throw error;
-      await this.executionFailure(task.taskId, "自愈 Agent 启动失败", task.execution?.executionId);
+      await this.executionFailure(task.taskId, "自愈 Agent 启动失败", task.execution?.executionId, false, undefined, "AGENT_START_FAILED");
     }
   }
 
@@ -111,7 +131,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       timeline: [...value.timeline, this.event("message", "service", "初始建议发送结果", { result })] }));
   }
 
-  async assess(taskId: string, version: number, input: { decision: "message" | "environment" | "observe"; summary: string; evidence_ids: string[] }): Promise<void> {
+  async assess(taskId: string, version: number, input: { decision: "message" | "environment" | "observe"; summary: string; evidence_ids: string[] }, finalSummary?: unknown): Promise<void> {
     const task = await this.mutate(taskId, version, value => {
       if (value.simulation) this.fail(409, "仿真必须提交拟议决策");
       if (value.status !== "running" || value.phase !== "assess") this.fail(409, "当前不能提交初始判断");
@@ -125,12 +145,12 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
         ...(debugFinished ? { status: "completed" as const, judgment: { delivery: "unconfirmed" as const, response: "unknown" as const, effect: "not_intervened" as const, summary: input.summary, evidence_ids: input.evidence_ids } } : {}),
         observationDeadlineAt: input.decision === "environment" ? null : value.observationDeadlineAt ?? this.now() + this.deps.observationMs,
         timeline: [...value.timeline, this.event("assessment", "agent", input.summary, input)] };
-    });
+    }, finalSummary);
     if (task.status === "completed") await this.deps.agent.release(task);
     if (task.status === "completed") this.notifyGroup(task, "result");
   }
 
-  async assessSimulation(taskId: string, version: number, input: RecoverySimulationAssessment): Promise<void> {
+  async assessSimulation(taskId: string, version: number, input: RecoverySimulationAssessment, finalSummary?: unknown): Promise<void> {
     const task = await this.mutate(taskId, version, value => {
       if (!value.simulation || value.status !== "running" || !["assess", "plan"].includes(value.phase)) this.fail(409, "当前不能提交仿真判断");
       const reads = new Set(value.timeline.filter(event => event.kind === "operation" && event.payload.status === "succeeded")
@@ -149,11 +169,11 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
         observationDeadlineAt: null, ownerDeadlineAt: null,
         judgment: { delivery: "unconfirmed", response: "unknown", effect: "not_intervened", summary: input.summary, evidence_ids: input.evidence_ids },
         timeline: [...value.timeline, this.event("assessment", "agent", input.summary, { ...input, phase: value.phase, simulation: true })] };
-    });
+    }, finalSummary);
     if (task.status === "completed") await this.deps.agent.release(task);
   }
 
-  async observe(taskId: string, version: number, judgment: RecoveryJudgment, evidence: RecoveryEvidence[]): Promise<void> {
+  async observe(taskId: string, version: number, judgment: RecoveryJudgment, evidence: RecoveryEvidence[], finalSummary?: unknown): Promise<void> {
     const task = await this.mutate(taskId, version, value => {
       const stored = [...value.evidence];
       for (const item of evidence) {
@@ -163,14 +183,14 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       }
       return { ...value, ...observeRecovery({ ...value, evidence: stored }, judgment, this.now()),
         timeline: [...value.timeline, this.event("observation", "agent", judgment.summary, { judgment, evidence })] };
-    });
+    }, finalSummary);
     if (["completed", "failed", "waiting_effect"].includes(task.status)) await this.deps.agent.release(task);
     if (["completed", "failed"].includes(task.status)) this.notifyGroup(task, "result");
   }
 
-  async plan(taskId: string, version: number, plan: RecoveryPlan): Promise<void> {
+  async plan(taskId: string, version: number, plan: RecoveryPlan, finalSummary?: unknown): Promise<void> {
     const task = await this.mutate(taskId, version, value => ({ ...value, ...submitRecoveryPlan(value, plan, this.now()),
-      timeline: [...value.timeline, this.event("plan", "agent", plan.summary, { plan })] }));
+      timeline: [...value.timeline, this.event("plan", "agent", plan.summary, { plan })] }), finalSummary);
     this.notifyGroup(task, "plan");
     if (task.status === "waiting_owner") await this.notify(task, "plan", plan.summary);
     if (task.status === "completed") await this.deps.agent.release(task);
@@ -259,7 +279,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     await this.mutate(taskId, task.version, value => ({ ...value, version: value.version + 1,
       timeline: [...value.timeline, this.event("annotation", "owner", "人工标注", { ...input, reviewer_id: actor.userId })] }));
   }
-  async finishApply(taskId: string, version: number, input: { applicable: boolean; success: boolean; summary: string }): Promise<void> {
+  async finishApply(taskId: string, version: number, input: { applicable: boolean; success: boolean; summary: string }, finalSummary?: unknown): Promise<void> {
     const task = await this.mutate(taskId, version, value => {
       if (value.status !== "running" || value.phase !== "apply" || !value.plan?.approvedAt) this.fail(409, "当前没有获批执行方案");
       const failed = !input.applicable || !input.success;
@@ -267,13 +287,13 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
         observationDeadlineAt: failed ? null : this.now() + this.deps.observationMs,
         judgment: failed ? this.failureJudgment(value, input.summary) : value.judgment,
         timeline: [...value.timeline, this.event("operation", "agent", input.summary, { applicable: input.applicable, success: input.success })] };
-    });
+    }, finalSummary);
     if (task.status === "failed") await this.deps.agent.release(task);
     this.notifyGroup(task, "execution");
     if (task.status === "failed") this.notifyGroup(task, "result");
   }
 
-  async finishForUserContinuation(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string }): Promise<void> {
+  async finishForUserContinuation(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string }, finalSummary?: unknown): Promise<void> {
     const task = await this.mutate(taskId, version, value => {
       if (value.status !== "running" || value.execution?.executionId !== input.executionId || value.execution.state === "ended") this.fail(409, "当前不能结束自愈任务");
       const reads = new Set(value.timeline.filter(event => event.kind === "operation" && event.payload.status === "succeeded")
@@ -290,35 +310,36 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
           evidence_ids: [...new Set([...(value.judgment?.evidence_ids ?? []), ...input.evidence_ids])] },
         timeline: [...value.timeline, this.event("termination", "agent", input.summary,
           { completion_reason: "user_continued", evidence_ids: input.evidence_ids })] };
-    });
+    }, finalSummary);
     await this.deps.agent.release(task);
     this.notifyGroup(task, "result");
   }
 
-  async finishForMcpPermission(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string }): Promise<void> {
+  async finishForOwnerHandoff(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string; effect?: Exclude<RecoveryJudgment["effect"], "not_intervened"> }, finalSummary?: unknown): Promise<void> {
     const task = await this.mutate(taskId, version, value => {
       if (value.simulation || value.level === "debug" || value.status !== "running" || value.execution?.executionId !== input.executionId
-        || value.execution.state === "ended" || value.phase === "apply") this.fail(409, "当前不能转交 Owner 处理 MCP 权限");
+        || value.execution.state === "ended" || value.phase === "apply") this.fail(409, "当前不能转交 Owner 处理");
       if (typeof input.summary !== "string" || !input.summary.trim() || input.summary.length > 8000 || containsSecret(input.summary)
-        || !Array.isArray(input.evidence_ids) || !input.evidence_ids.length) this.fail(422, "MCP 权限转交需要已核实原因、Owner 处理指引及现场证据");
+        || !Array.isArray(input.evidence_ids) || !input.evidence_ids.length) this.fail(422, "Owner 转交需要已核实原因、Owner 处理指引及现场证据");
+      if (input.effect !== undefined && !["recovered", "not_recovered", "unknown"].includes(input.effect)) this.fail(422, "Owner 转交效果仅接受 recovered / not_recovered / unknown，按原任务实际执行证据判断");
       validateRecoveryEvidenceReferences(value, input.evidence_ids);
       if (!value.evidence.some(item => input.evidence_ids.includes(item.evidence_id)
-        && ["session_read", "trajectory_read", "runtime_inspect"].includes(item.source))) this.fail(422, "MCP 权限转交必须引用受控现场读取，不能只引用诊断描述");
-      return { ...value, status: "completed", completionReason: "mcp_permission_required", version: value.version + 1,
+        && ["session_read", "trajectory_read", "runtime_inspect"].includes(item.source))) this.fail(422, "Owner 转交必须引用受控现场读取，不能只引用诊断描述");
+      return { ...value, status: "completed", completionReason: "owner_handoff", version: value.version + 1,
         observationDeadlineAt: null, ownerDeadlineAt: null, requiresFreshObservation: false,
         ...(value.executionRetry ? { executionRetry: { ...value.executionRetry, retryAt: 0 } } : {}),
         judgment: { delivery: value.judgment?.delivery ?? "unconfirmed", response: value.judgment?.response ?? "unknown",
-          effect: "not_recovered", summary: input.summary, evidence_ids: input.evidence_ids },
+          effect: input.effect ?? value.judgment?.effect ?? "unknown", summary: input.summary, evidence_ids: input.evidence_ids },
         timeline: [...value.timeline, this.event("termination", "agent", input.summary,
-          { completion_reason: "mcp_permission_required", evidence_ids: input.evidence_ids, phase: value.phase })] };
-    });
+          { completion_reason: "owner_handoff", evidence_ids: input.evidence_ids, phase: value.phase })] };
+    }, finalSummary);
     // Terminal state prevents another Agent turn; the existing Owner notification records its own receipt.
     try { await this.notify(task, "result", input.summary); }
     finally { await this.deps.agent.release(task); }
     this.notifyGroup(await this.required(taskId), "result");
   }
 
-  async finishForTargetUnavailable(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string }): Promise<void> {
+  async finishForTargetUnavailable(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string }, finalSummary?: unknown): Promise<void> {
     const task = await this.mutate(taskId, version, value => {
       if (value.simulation || value.status !== "running" || value.execution?.executionId !== input.executionId || value.execution.state === "ended") this.fail(409, "当前不能结束自愈任务");
       if (typeof input.summary !== "string" || !input.summary.trim() || input.summary.length > 8000 || containsSecret(input.summary)
@@ -337,12 +358,12 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
           effect: "unknown", summary: input.summary, evidence_ids: input.evidence_ids },
         timeline: [...value.timeline, this.event("termination", "agent", input.summary,
           { completion_reason: "target_unavailable", evidence_ids: input.evidence_ids })] };
-    });
+    }, finalSummary);
     await this.deps.agent.release(task);
     this.notifyGroup(task, "result");
   }
 
-  async executionFailure(taskId: string, reason: string, executionId?: string, retryable = false): Promise<void> {
+  async executionFailure(taskId: string, reason: string, executionId?: string, retryable = false, finalSummary?: unknown, failureCode?: string): Promise<void> {
     const previous = await this.required(taskId);
     if (!this.ownsTask(previous) || previous.status !== "running" || (executionId && (previous.execution?.executionId !== executionId || previous.execution.state === "ended"))) return;
     const task = await this.mutate(taskId, previous.version, value => {
@@ -358,7 +379,16 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
           ...(failedExecutionId ? { executionId: failedExecutionId } : {}) },
         judgment: delay !== undefined ? value.judgment : this.failureJudgment(value, summary),
         timeline: [...value.timeline, this.event("execution", "service", summary, { execution_id: executionId, retryable, failures, retry_at_ms: delay !== undefined ? this.now() + delay : null })] };
-    });
+    }, finalSummary);
+    const retrying = !!task.executionRetry?.retryAt;
+    logRepairEvent("session-recovery", "session_recovery_task", retrying ? "retry_scheduled"
+      : failureCode && !task.simulation && task.level !== "debug" ? "EXECUTION_FAILED" : "execution_ended", {
+      environment: this.deps.controlPlaneEnvironment, taskId, eventId: task.request.event_id,
+      botId: task.request.target.bot_id, targetEnvironment: task.request.target.env, phase: task.phase, status: task.status,
+      executionId: task.execution?.executionId, jobId: task.execution?.jobId ?? undefined, attempt: task.executionNo ?? task.executionRetry?.failures,
+      ...(retrying ? { retryAtMs: task.executionRetry!.retryAt }
+        : failureCode && !task.simulation && task.level !== "debug" ? { count: 1 } : {}),
+      ...(failureCode ? { errorCode: failureCode } : {}), outcome: "failed" });
     await this.deps.agent.release(task);
     if (task.status === "failed") this.notifyGroup(task, "result");
   }
@@ -371,7 +401,13 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
   async maintenance(): Promise<void> {
     let cursor = "";
     for (;;) {
-      const batch = await this.deps.tasks.listForMaintenance?.(200, cursor) ?? [];
+      let batch: RecoveryStoredTask[];
+      try { batch = await this.deps.tasks.listForMaintenance?.(200, cursor) ?? []; }
+      catch (error) {
+        logRepairEvent("session-recovery", "session_recovery_maintenance", "scan_failed", { environment: this.deps.controlPlaneEnvironment,
+          ...repairLogError(error) });
+        throw error;
+      }
       if (!batch.length) return;
       for (const task of batch) {
       cursor = task.taskId;
@@ -391,7 +427,10 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
         }
         if (task.status === "running" && (!task.execution || task.execution.state === "ended" || task.executionRetry?.retryAt)
           && (task.executionRetry?.retryAt ?? 0) <= this.now()) await this.start(task);
-      } catch { console.error("[session-recovery] maintenance failed", task.taskId); }
+      } catch (error) {
+        logRepairEvent("session-recovery", "session_recovery_maintenance", "task_failed", { environment: this.deps.controlPlaneEnvironment,
+          taskId: task.taskId, phase: task.phase, executionId: task.execution?.executionId, ...repairLogError(error) });
+      }
       }
     }
   }
@@ -401,11 +440,15 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     // Notification completion is a timeline fact, independent of Owner approval.
     let sent = false;
     try {
-      const result = await this.deps.notifier.notify({ ownerId: task.request.target.entity_id, taskId: task.taskId, kind, summary });
+      const result = await this.deps.notifier.notify({ ownerId: task.request.target.entity_id, taskId: task.taskId, kind, summary,
+        ...(kind === "result" ? { effect: task.judgment?.effect ?? "unknown" } : {}) });
       if (result === false) return;
       sent = true;
     }
-    catch { console.error("[session-recovery] notification not confirmed", task.taskId, kind); }
+    catch (error) {
+      logRepairEvent("session-recovery", "session_recovery_notification", "failed", { environment: this.deps.controlPlaneEnvironment,
+        taskId: task.taskId, operation: kind, ...repairLogError(error) });
+    }
     const current = await this.required(task.taskId);
     await this.mutate(task.taskId, current.version, value => ({ ...value, version: value.version + 1,
       timeline: [...value.timeline, this.event("notification", "service", sent ? "钉钉通知已发送" : "钉钉通知未确认，请在任务页面处理", { kind, sent })] }));
@@ -415,20 +458,38 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     const event = task.timeline.at(-1);
     if (!event) return;
     try { this.deps.actionNotifier?.after({ taskId: task.taskId, eventId: event.event_id, kind }); }
-    catch { console.error("[session-recovery] group notification hook failed", task.taskId, kind); }
+    catch (error) {
+      logRepairEvent("session-recovery", "session_recovery_notification", "hook_failed", { environment: this.deps.controlPlaneEnvironment,
+        taskId: task.taskId, operation: kind, ...repairLogError(error) });
+    }
   }
 
-  private async mutate(taskId: string, version: number, change: (value: RecoveryStoredTask) => RecoveryStoredTask): Promise<RecoveryStoredTask> {
+  private async mutate(taskId: string, version: number, change: (value: RecoveryStoredTask) => RecoveryStoredTask, finalSummary?: unknown): Promise<RecoveryStoredTask> {
     for (let attempt = 0; attempt < 5; attempt++) {
+      let previous: Pick<RecoveryStoredTask, "status" | "phase"> | undefined;
       const updated = await this.deps.tasks.update(taskId, version, value => {
+        previous = { status: value.status, phase: value.phase };
         const changed = change(value);
+        // Optional presentation metadata must never invalidate a valid business result.
+        if (changed.status !== value.status && ["completed", "failed", "waiting_effect"].includes(changed.status)) {
+          const text = typeof finalSummary === "string" ? finalSummary.trim() : "";
+          changed.final_summary = text && text.length <= 2000 && !containsSecret(text) ? text : undefined;
+        }
         const reportable = !changed.simulation && changed.status !== value.status
           && ["waiting_effect", "completed", "failed", "canceled"].includes(changed.status);
         return { ...changed, pending_results: reportable
           ? [...value.pending_results, recoveryTaskResult(changed, changed.status === "canceled"
             ? [...changed.timeline].reverse().find(event => event.kind === "termination")?.summary : undefined)] : value.pending_results };
       });
-      if (updated) return updated;
+      if (updated) {
+        if (previous && (previous.status !== updated.status || previous.phase !== updated.phase)) {
+          logRepairEvent("session-recovery", "session_recovery_task", "state_changed", { environment: this.deps.controlPlaneEnvironment,
+            taskId, eventId: updated.request.event_id, phase: updated.phase, status: updated.status,
+            executionId: updated.execution?.executionId, jobId: updated.execution?.jobId ?? undefined,
+            reason: updated.completionReason, stateVersion: updated.version });
+        }
+        return updated;
+      }
       version = (await this.required(taskId)).version;
     }
     this.fail(409, "任务已变化，请读取当前版本");

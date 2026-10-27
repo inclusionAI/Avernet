@@ -2,7 +2,6 @@
 //!
 //! A standalone service for multi-bot collaboration:
 //! - Bot registry (bot_uuid → bot with heartbeat)
-//! - Proposal generation for group chat creation
 //! - Group session management (Agent/Fusion modes)
 //! - Context fusion (single LLM call to merge bot contexts)
 //! - Message routing between bots

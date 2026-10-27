@@ -468,6 +468,30 @@ describe("diagnosis report -> allowlist -> durable recovery task", () => {
     await vi.waitFor(() => expect(agent.start).toHaveBeenCalledTimes(1));
   });
 
+  it("corrects online service CLIENT_ID from a report-only NAS hint while retaining the stored credentials", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { input, tasks, agent } = await automaticRecovery("mock-bot-oc");
+    const deviceUuid = `DEVICE-${"b".repeat(32)}`;
+    const event = { ...input, engine: "OC", sessionId: "physical-session",
+      runtimeIdentity: { ...runtimeIdentity, BOT_ID: input.botId, OWNER_ID: input.entityId },
+      sessionNasPath: `/nas/prod/prod_staff_different-entity_openclaw_${input.botId}_${deviceUuid}/.openclaw/agents/main/sessions/physical-session.jsonl`,
+    };
+    expect((await post(event)).status).toBe(201);
+    expect(await post(event)).toMatchObject({ status: 200, body: { duplicate: true } });
+    const rows = await db.query<{ task_id: string }>("SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery'");
+    expect(rows).toHaveLength(1);
+    const task = await tasks.find(rows[0].task_id);
+    expect(task?.request.target.runtime_identity).toEqual({ stage: "online", version: "V16", deviceUuid });
+    expect(task?.request).not.toHaveProperty("sessionNasPath");
+    const [stored] = await db.query("SELECT runtime_identity FROM insight_monitoring_diagnose WHERE event_id = ?", [event.eventId]);
+    expect(JSON.parse(String(stored.runtime_identity))).toEqual(event.runtimeIdentity);
+    await vi.waitFor(() => expect(agent.start).toHaveBeenCalledTimes(1));
+    expect(warning.mock.calls.filter(([message]) => message === "[monitoring] recovery instance corrected")).toHaveLength(2);
+    // Existing task idempotency rejects a later hint that tries to switch instances.
+    expect((await post({ ...event, sessionNasPath: event.sessionNasPath.replace(deviceUuid, `DEVICE-${"c".repeat(32)}`) })).status).toBe(409);
+    expect(await db.query("SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery'")).toHaveLength(1);
+  });
+
   it("acknowledges nonmembers normally and retries enabled configuration failures without losing diagnostics", async () => {
     const { input, config, agent } = await automaticRecovery();
     expect((await post({ ...input, entityId: "another-owner" })).status).toBe(201);

@@ -17,13 +17,23 @@ const statusLabels: Record<SessionRecoveryTask['status'], string> = {
   canceled: '已停止',
 };
 
+function isOwnerHandoff(task: SessionRecoveryTask | null | undefined): boolean {
+  return task?.completionReason === 'owner_handoff' || task?.completionReason === 'mcp_permission_required';
+}
+
 function ownerNotificationSent(task: SessionRecoveryTask): boolean {
   return task.timeline.some(event => event.kind === 'notification' && event.payload.kind === 'result'
     && event.payload.channel !== 'group_webhook' && event.payload.sent === true);
 }
 
+function unrecoveredOutcome(task: SessionRecoveryTask): boolean {
+  return task.status === 'failed' && task.phase === 'verify' && task.judgment?.effect === 'not_recovered';
+}
+
 function taskStatusLabel(task: SessionRecoveryTask): string {
-  if (task.completionReason === 'mcp_permission_required') return ownerNotificationSent(task) ? '已通知 Owner 自行处理' : '需 Owner 自行处理';
+  if (unrecoveredOutcome(task)) return '处理结束';
+  if (isOwnerHandoff(task) && task.judgment?.effect === 'recovered') return ownerNotificationSent(task) ? '已恢复，已通知 Owner' : '已恢复，有后续建议';
+  if (isOwnerHandoff(task)) return ownerNotificationSent(task) ? '已通知 Owner 自行处理' : '需 Owner 自行处理';
   return task.completionReason === 'target_unavailable' ? '目标不可用' : task.completionReason === 'user_continued' ? '已让路' : statusLabels[task.status];
 }
 
@@ -116,16 +126,30 @@ function safeJson(value: unknown): string {
 }
 
 function StatusPill({ status, children }: { status: string; children: ReactNode }) {
-  const tone = status === 'failed' || status === 'not_recovered'
+  const tone = status === 'failed'
     ? 'danger'
     : status === 'completed' || status === 'succeeded' || status === 'recovered'
       ? 'success'
-      : status === 'waiting_owner' || status === 'waiting_effect' || status === 'unknown'
+      : status === 'waiting_owner' || status === 'waiting_effect' || status === 'unknown' || status === 'not_recovered'
         ? 'warning'
         : status === 'running' || status === 'executing'
           ? 'running'
           : 'neutral';
   return <span className={`sr-pill ${tone}`}>{children}</span>;
+}
+
+function recoveryEffectView(task: SessionRecoveryTask | null) {
+  const effect = task?.judgment?.effect ?? 'unknown';
+  if (effect === 'recovered') return { value: '已恢复', tone: 'success', hint: '原任务已恢复推进' };
+  if (effect === 'not_intervened') return { value: '未实际干预', tone: 'neutral', hint: '仅分析，未验证恢复效果' };
+  if (task?.status === 'waiting_owner') return { value: '待验证', tone: 'neutral', hint: '等待方案确认与执行后再验证' };
+  if (task?.status === 'running') {
+    if (['observe', 'verify'].includes(task.phase)) return { value: '验证中', tone: 'info', hint: '正在核对原任务的实际进展' };
+    return { value: '待验证', tone: 'neutral', hint: task.phase === 'plan' ? '等待完整方案，尚未验证恢复效果' : task.phase === 'apply' ? '等待方案执行后验证' : '正在调查，尚未验证恢复效果' };
+  }
+  if (task?.status === 'waiting_effect') return { value: '待验证', tone: 'neutral', hint: '等待原任务出现新的执行结果' };
+  if (effect === 'not_recovered') return { value: '未恢复', tone: 'warning', hint: '原任务仍受阻，需继续处理' };
+  return { value: effectLabels[effect], tone: 'neutral', hint: '原任务恢复情况尚无充分证据' };
 }
 
 function DetailRow({ label, children, mono = false }: { label: string; children: ReactNode; mono?: boolean }) {
@@ -222,12 +246,12 @@ function RecoveryWorkflow({ task, currentPhase, selected, onSelect, grouped, raw
     if (tabs && tab && tabs.scrollWidth > tabs.clientWidth) tabs.scrollLeft = tab.offsetLeft - tabs.offsetLeft;
   }, [selected]);
   return <section className="sr-card sr-workflow-card">
-    <CardHeader title="自愈流程" description={task.simulation ? '根据历史证据提出首次干预消息或完整方案，不执行实际干预。' : '自愈 Agent 判断处理方式，按需投递恢复消息、生成方案、执行修复并验证效果。'} right={<StatusPill status={task.status}>{taskStatusLabel(task)}</StatusPill>} />
+    <CardHeader title="自愈流程" description={task.simulation ? '根据历史证据提出首次干预消息或完整方案，不执行实际干预。' : '自愈 Agent 判断处理方式，按需投递恢复消息、生成方案、执行修复并验证效果。'} right={<StatusPill status={unrecoveredOutcome(task) ? 'not_recovered' : task.status}>{taskStatusLabel(task)}</StatusPill>} />
     <div className="sr-workflow" ref={tabsRef} role="tablist" aria-label="自愈流程阶段">
       {visiblePhases.map((phase, index) => {
         const current = currentPhase === phase.key;
         const visited = grouped[phase.key].length > 0;
-        const failed = current && task.status === 'failed';
+        const failed = current && task.status === 'failed' && !unrecoveredOutcome(task);
         const className = ['sr-workflow-step', selected === phase.key ? 'selected' : '', current ? 'current' : '', failed ? 'failed' : ''].filter(Boolean).join(' ');
         return <button type="button" role="tab" key={phase.key} id={`recovery-phase-${phase.key}`} className={className} aria-controls="recovery-stage-process" aria-selected={selected === phase.key} aria-current={current ? 'step' : undefined} tabIndex={selected === phase.key ? 0 : -1} onClick={() => onSelect(phase.key)} onKeyDown={(event) => {
           const offset = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
@@ -295,7 +319,7 @@ function ProcessAction({ task, event, index, rawEvidence, loadEvidence, onViewAc
     const jobUrl = execution?.jobUrl && /^https?:\/\//i.test(execution.jobUrl) ? execution.jobUrl : null;
     const submitted = record(event.payload.plan);
     const counts = [Array.isArray(submitted.actions) ? `Agent 操作 ${submitted.actions.length} 项` : '', Array.isArray(submitted.owner_cooperation) ? `Owner 事项 ${submitted.owner_cooperation.length} 项` : ''].filter(Boolean).join(' · ');
-    const outcome = event.kind === 'termination' && task.completionReason === 'mcp_permission_required' ? taskStatusLabel(task)
+    const outcome = event.kind === 'termination' && isOwnerHandoff(task) ? taskStatusLabel(task)
       : event.kind === 'plan' ? `方案已提交${counts ? ` · ${counts}` : ''}`
       : event.kind === 'notification' ? event.payload.sent === true ? '钉钉通知已发送' : event.payload.sent === false ? '钉钉通知发送失败' : event.summary
       : event.kind === 'owner_decision' ? event.payload.approved === true ? 'Owner 已确认完整方案' : event.payload.approved === false ? 'Owner 已拒绝方案' : event.summary
@@ -610,17 +634,17 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
   const judgments = [
     { key: 'delivery', label: '触达', hint: '消息是否进入原会话', value: delivery === 'confirmed' ? '已确认' : '尚未确认', tone: delivery === 'confirmed' ? 'success' : 'neutral' },
     { key: 'response', label: '响应', hint: 'Bot 是否响应或采取行动', value: response === 'acted' ? '已采取行动' : response === 'replied' ? '已有回复' : response === 'none' ? '暂无响应' : '尚未确认', tone: response === 'acted' || response === 'replied' ? 'success' : 'neutral' },
-    { key: 'effect', label: '效果', hint: '原任务是否已恢复', value: effectLabels[effect], tone: effect === 'recovered' ? 'success' : effect === 'not_recovered' ? 'danger' : 'neutral' },
+    { key: 'effect', label: '效果', ...recoveryEffectView(task) },
   ];
   const stageSummary = task ? {
-    completed: task.completionReason === 'mcp_permission_required' ? (ownerNotificationSent(task) ? '已通知 Owner 自行处理，本次自愈已结束。' : '本次自愈已结束；Owner 钉钉通知未确认，请查看处理指引。') : task.completionReason === 'target_unavailable' ? '目标运行环境已不可用，本次自愈已结束；原任务恢复效果未知。' : task.simulation ? '仿真已完成，可查看判断、拟发送消息或完整方案；未执行实际干预。' : task.completionReason === 'user_continued' ? '用户已继续对话，本次自愈已让路，不再自动干预。' : effect === 'recovered' ? '原任务已恢复，可查看下方处理过程和判断依据。' : '本次自愈处理已结束，恢复情况请查看效果判断。',
-    failed: '本次自愈未完成，请查看失败说明和相关操作记录。',
+    completed: isOwnerHandoff(task) ? (effect === 'recovered' ? (ownerNotificationSent(task) ? '原任务已恢复，已通知 Owner 后续建议，本次自愈已结束。' : '原任务已恢复，本次自愈已结束；Owner 通知未确认，请查看后续建议。') : ownerNotificationSent(task) ? '已通知 Owner 自行处理，本次自愈已结束。' : '本次自愈已结束；Owner 钉钉通知未确认，请查看处理指引。') : task.completionReason === 'target_unavailable' ? '目标运行环境已不可用，本次自愈已结束；原任务恢复效果未知。' : task.simulation ? '仿真已完成，可查看判断、拟发送消息或完整方案；未执行实际干预。' : task.completionReason === 'user_continued' ? '用户已继续对话，本次自愈已让路，不再自动干预。' : effect === 'recovered' ? '原任务已恢复，可查看下方处理过程和判断依据。' : '本次自愈处理已结束，恢复情况请查看效果判断。',
+    failed: task && unrecoveredOutcome(task) ? '自愈处理已结束，原任务仍受阻，需继续处理。' : '本次自愈未完成，请查看失败说明和相关操作记录。',
     canceled: '用户已停止本次自愈，后续处理已取消。',
     waiting_owner: !task.canOperate ? '等待 Owner 处理配合事项并确认修复方案。' : task.plan?.owner_cooperation.length ? '请先处理方案中的配合事项，再确认完整方案。' : '请核对完整修复方案，确认后 Agent 将继续执行。',
     waiting_effect: '恢复效果尚未确定，等待原会话出现新的执行结果。',
     running: lastEvent?.summary || '等待任务执行记录。',
   }[task.status] : '';
-  const review = task?.completionReason !== 'mcp_permission_required' && !task?.simulation && task?.canOperate && ['completed', 'failed'].includes(task.status) ? <ReviewSection busy={busy} saved={annotationSaved} annotationLayer={annotationLayer} annotationCorrect={annotationCorrect} annotationReason={annotationReason} onLayer={(value) => { setAnnotationLayer(value); setAnnotationSaved(false); }} onCorrect={(value) => { setAnnotationCorrect(value); setAnnotationSaved(false); }} onReason={(value) => { setAnnotationReason(value); setAnnotationSaved(false); }} onSubmit={() => void annotate()} /> : null;
+  const review = !isOwnerHandoff(task) && !task?.simulation && task?.canOperate && ['completed', 'failed'].includes(task.status) ? <ReviewSection busy={busy} saved={annotationSaved} annotationLayer={annotationLayer} annotationCorrect={annotationCorrect} annotationReason={annotationReason} onLayer={(value) => { setAnnotationLayer(value); setAnnotationSaved(false); }} onCorrect={(value) => { setAnnotationCorrect(value); setAnnotationSaved(false); }} onReason={(value) => { setAnnotationReason(value); setAnnotationSaved(false); }} onSubmit={() => void annotate()} /> : null;
   const toggleSharing = async () => {
     if (!task?.canManageShare || sharingBusy) return;
     setSharingBusy(true);
@@ -650,7 +674,7 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
     <button type="button" onClick={onBack} className="sr-back"><MonitoringIcon name="arrow" />返回监控</button>
     <header className="sr-hero">
       <div>
-        <div className="sr-kicker">{task && <StatusPill status={task.status}>{taskStatusLabel(task)}</StatusPill>}<span>{task?.simulation ? '离线仿真' : '会话自愈'}</span><code>{taskId}</code></div>
+        <div className="sr-kicker">{task && <StatusPill status={unrecoveredOutcome(task) ? 'not_recovered' : task.status}>{taskStatusLabel(task)}</StatusPill>}<span>{task?.simulation ? '离线仿真' : '会话自愈'}</span><code>{taskId}</code></div>
         <h1>{task?.simulation ? '自愈离线仿真详情' : '自愈任务详情'}</h1>
         {task && <div className="sr-target"><span><MonitoringIcon name="bot" /></span><div><strong>{task.request.target.bot_id}</strong><p>{[task.request.target.engine, task.request.target.env, task.simulation ? '离线仿真' : levelLabels[task.level]].filter(Boolean).join(' · ')}</p></div></div>}
       </div>
@@ -676,14 +700,14 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
           : task.termination?.status === 'remote_stop_failed' ? '后续干预已禁止，但 AIS 停止请求未成功，可重试停止 AIS。'
           : '后续干预已禁止；AIS 尚未返回作业编号，派发回执返回后会补停。'}已完成的操作和调查记录保留。</p></div>
       </section>}
-      {task.status === 'failed' && <section role="alert" className="sr-alert danger"><MonitoringIcon name="alert" /><div><strong>自愈执行失败</strong><div className="sr-failure-preview"><PlanMarkdown text={failureSummary} /></div><details className="sr-disclosure"><summary>查看完整失败说明</summary><PlanMarkdown text={failureSummary} /></details></div><button type="button" className="sr-button" onClick={() => {
+      {task.status === 'failed' && !unrecoveredOutcome(task) && <section role="alert" className="sr-alert danger"><MonitoringIcon name="alert" /><div><strong>自愈执行失败</strong><div className="sr-failure-preview"><PlanMarkdown text={failureSummary} /></div><details className="sr-disclosure"><summary>查看完整失败说明</summary><PlanMarkdown text={failureSummary} /></details></div><button type="button" className="sr-button" onClick={() => {
         setPhaseSelection({ taskId, phase: currentPhaseKey });
         window.requestAnimationFrame(() => document.getElementById('recovery-stage-process')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
       }}>查看执行记录</button></section>}
       {task.status === 'waiting_owner' && <section role="status" className="sr-alert warning"><MonitoringIcon name="user" /><div><strong>{task.canOperate ? '需要确认修复方案' : '等待 Owner 确认修复方案'}</strong><p>{stageSummary}</p></div><button type="button" className="sr-button primary" onClick={viewPlan}>查看方案</button></section>}
       <section className="sr-summary-grid" aria-label="任务概览">
         <article className="sr-summary-card sr-stage-summary">
-          <div className="sr-summary-heading"><span className="sr-summary-icon"><MonitoringIcon name="clock" /></span><h2>当前阶段</h2><StatusPill status={task.status}>{taskStatusLabel(task)}</StatusPill></div>
+          <div className="sr-summary-heading"><span className="sr-summary-icon"><MonitoringIcon name="clock" /></span><h2>当前阶段</h2><StatusPill status={unrecoveredOutcome(task) ? 'not_recovered' : task.status}>{taskStatusLabel(task)}</StatusPill></div>
           <strong className="sr-summary-value">{currentPhase?.title || '—'}</strong>
           <div className="sr-summary-note"><PlanMarkdown text={stageSummary} /></div>
           <p className="sr-summary-updated">最近更新 · {formatTime(lastEvent?.at_ms)}</p>
@@ -693,7 +717,7 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
           <div className="sr-judgment-grid">
             {(task.simulation ? [{ key: 'simulation', label: '执行方式', hint: '仅保存拟议决策和方案', value: '未执行实际干预', tone: 'neutral' }] : judgments).map(judgment => <div key={judgment.key} className={`sr-judgment-item ${judgment.tone}`}>
               <span className="sr-judgment-label">{judgment.label}</span>
-              <strong className="sr-judgment-value"><MonitoringIcon name={judgment.tone === 'success' ? 'check' : judgment.tone === 'danger' ? 'alert' : 'question'} />{judgment.value}</strong>
+              <strong className="sr-judgment-value"><MonitoringIcon name={judgment.tone === 'success' ? 'check' : judgment.tone === 'warning' ? 'alert' : judgment.tone === 'info' ? 'clock' : 'question'} />{judgment.value}</strong>
               <span className="sr-judgment-hint">{judgment.hint}</span>
             </div>)}
           </div>
@@ -702,9 +726,15 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
         </article>
       </section>
 
-      {task.completionReason === 'mcp_permission_required' && <section className="sr-card" aria-label="Owner 处理指引">
-        <CardHeader title="Owner 处理指引" description="MCP 服务权限需要 Owner 自行处理，本次自愈已结束。" />
-        <div className="sr-plan-body"><PlanMarkdown text={task.judgment?.summary ?? '请查看调查记录中的权限问题与处理指引。'} /></div>
+      <section className="sr-card" aria-label="任务总结">
+        <CardHeader title="任务总结" description={task.simulation ? '整体判断与拟议处理方式；未执行实际干预。' : '原问题、判断依据、处理方式与最终进展。'} />
+        {task.final_summary ? <div className="sr-plan-body"><PlanMarkdown text={task.final_summary} /></div>
+          : <p className="sr-empty">{['completed', 'failed', 'canceled', 'waiting_effect'].includes(task.status) ? '摘要暂不可用，可查看下方完整判断、方案与处理记录。' : '任务结束后由 Agent 生成整体摘要。'}</p>}
+      </section>
+
+      {isOwnerHandoff(task) && <section className="sr-card" aria-label={task.judgment?.effect === 'recovered' ? 'Owner 优化建议' : 'Owner 处理指引'}>
+        <CardHeader title={task.judgment?.effect === 'recovered' ? 'Owner 优化建议' : 'Owner 处理指引'} description={task.judgment?.effect === 'recovered' ? '原任务已恢复，后续建议可按需处理，本次自愈已结束。' : '剩余事项需 Owner 自行处理，本次自愈已结束。'} />
+        <div className="sr-plan-body"><PlanMarkdown text={task.judgment?.summary ?? '请查看调查记录中的问题依据与处理指引。'} /></div>
       </section>}
 
       {review}

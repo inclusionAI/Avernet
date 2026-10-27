@@ -10,9 +10,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import {
-  cloneClawflows, commitAndPushSaved, commitAndPushDeploy, createTempRepo, removeTempRepo,
+  cloneClawflows, commitAndPushSaved, commitAndPushDeploy, createTempRepo, ensurePackManifest,
+  prepareBranchBase, pruneLegacyPackCopy, removeTempRepo, writeWorkflowSpecToRepo,
   type ClawFlowsGitConfig,
 } from "../clawflows-git-client.js";
+import type { WorkflowSpec } from "../../workflow.js";
 import {
   createLocalRemote, credentialFiles, credentialInput, gitEnvironment, runGit,
 } from "./clawflows-git-client-fixture.js";
@@ -314,5 +316,124 @@ describe("ClawFlowsGitClient isolated credentials", () => {
     await cloneClawflows(repo, { ...config, remoteUrl, token: remoteUrl.startsWith("http") ? undefined : token });
     expect(runGit(repo, ["remote", "get-url", "origin"])).toBe(remoteUrl);
     expect(credentialFiles(root)).toEqual([]);
+  });
+});
+
+describe("ClawFlowsGitClient pack content inheritance", () => {
+  const packId = "pack-a";
+  const workflowId = "wf-a";
+  const spec: WorkflowSpec = {
+    id: workflowId,
+    title: "Updated Spec",
+    nodes: [
+      { id: "start", type: "start", title: "Start", config: {}, executor: { type: "start" }, dependsOn: [] },
+      { id: "end", type: "end", title: "End", config: {}, executor: { type: "end" }, dependsOn: ["start"] },
+    ],
+  };
+  const localConfig = (remoteUrl: string): ClawFlowsGitConfig => ({ remoteUrl, username: "", email: author.email });
+  const fullPackFiles: Record<string, string> = {
+    [`${packId}/workflows/${workflowId}.yaml`]: `id: ${workflowId}\ntitle: Old Spec\n`,
+    [`${packId}/scripts/run.sh`]: "echo pack-script\n",
+    [`${packId}/workflow.pack.yaml`]: `id: ${packId}\nworkflows:\n  - id: ${workflowId}\n    file: workflows/${workflowId}.yaml\n`,
+  };
+
+  function seedBranch(branch: string, files: Record<string, string>): void {
+    const seed = path.join(root, `seed-${branch.replace(/\//g, "_")}`);
+    for (const [rel, content] of Object.entries(files)) {
+      const target = path.join(seed, rel);
+      mkdirSync(path.dirname(target), { recursive: true });
+      writeFileSync(target, content);
+    }
+    runGit(seed, ["init"]);
+    runGit(seed, ["config", "user.name", "Seeder"]);
+    runGit(seed, ["config", "user.email", "seeder@example.invalid"]);
+    runGit(seed, ["add", "."]);
+    runGit(seed, ["commit", "-m", "seed"]);
+    runGit(seed, ["push", bare, `HEAD:refs/heads/${branch}`]);
+  }
+
+  async function withClonedWork(fn: (work: string) => Promise<void>): Promise<void> {
+    const work = await createTempRepo();
+    try {
+      await cloneClawflows(work, localConfig(bare));
+      await fn(work);
+    } finally {
+      await removeTempRepo(work);
+    }
+  }
+
+  it("inherits pack scripts when the previous deploy branch exists", async () => {
+    seedBranch(`wf/${workflowId}`, fullPackFiles);
+    await withClonedWork(async (work) => {
+      expect(await prepareBranchBase(work, `wf/${workflowId}`)).toBe("branch");
+      await writeWorkflowSpecToRepo(work, packId, workflowId, spec);
+      await ensurePackManifest(work, packId, workflowId);
+      await commitAndPushDeploy(work, workflowId, 1, 1, "deploy", author);
+      const tree = runGit(bare, ["ls-tree", "-r", "--name-only", `deploy/${workflowId}/#1`]);
+      expect(tree).toContain(`${packId}/scripts/run.sh`);
+      expect(tree).toContain(`${packId}/workflows/${workflowId}.yaml`);
+      expect(tree).toContain(`${packId}/workflow.pack.yaml`);
+      expect(tree).not.toContain(`packs/${packId}`);
+      // The spec is overwritten in place (engine root layout), not written to a second path.
+      const content = runGit(bare, ["show", `deploy/${workflowId}/#1:${packId}/workflows/${workflowId}.yaml`]);
+      expect(content).toContain(`id: ${workflowId}`);
+    });
+  });
+
+  it("bases the first snapshot on the latest deploy branch when no saved branch exists", async () => {
+    seedBranch(`wf/${workflowId}`, fullPackFiles);
+    await withClonedWork(async (work) => {
+      expect(await prepareBranchBase(work, `saved/${workflowId}`, `wf/${workflowId}`)).toBe("fallback");
+      await writeWorkflowSpecToRepo(work, packId, workflowId, spec);
+      await ensurePackManifest(work, packId, workflowId);
+      await commitAndPushSaved(work, workflowId, "save", author);
+      const tree = runGit(bare, ["ls-tree", "-r", "--name-only", `saved/${workflowId}`]);
+      expect(tree).toContain(`${packId}/scripts/run.sh`);
+      expect(tree).not.toContain(`packs/${packId}`);
+    });
+  });
+
+  it("falls back to the default-branch base for a first-ever deploy", async () => {
+    await withClonedWork(async (work) => {
+      expect(await prepareBranchBase(work, `wf/${workflowId}`)).toBe("default");
+      await writeWorkflowSpecToRepo(work, packId, workflowId, spec);
+      await ensurePackManifest(work, packId, workflowId);
+      await commitAndPushDeploy(work, workflowId, 1, 1, "deploy", author);
+      const tree = runGit(bare, ["ls-tree", "-r", "--name-only", `deploy/${workflowId}/#1`]);
+      expect(tree).toContain(`packs/${packId}/workflows/${workflowId}.yaml`);
+      expect(tree).toContain(`packs/${packId}/workflow.pack.yaml`);
+    });
+  });
+
+  it("prunes a polluted base down to a single manifest on deploy", async () => {
+    seedBranch(`wf/${workflowId}`, {
+      ...fullPackFiles,
+      [`packs/${packId}/workflows/${workflowId}.yaml`]: `id: ${workflowId}\ntitle: Old Spec\n`,
+      [`packs/${packId}/workflow.pack.yaml`]: `id: ${packId}\nworkflows: [${workflowId}]\n`,
+    });
+    await withClonedWork(async (work) => {
+      await prepareBranchBase(work, `wf/${workflowId}`);
+      await writeWorkflowSpecToRepo(work, packId, workflowId, spec);
+      await ensurePackManifest(work, packId, workflowId);
+      expect(await pruneLegacyPackCopy(work, packId)).toBe(true);
+      await commitAndPushDeploy(work, workflowId, 1, 1, "deploy", author);
+      const tree = runGit(bare, ["ls-tree", "-r", "--name-only", `deploy/${workflowId}/#1`]);
+      expect(tree).toContain(`${packId}/scripts/run.sh`);
+      expect(tree).not.toContain(`packs/${packId}`);
+      expect(tree.split("\n").filter((line) => line.endsWith("workflow.pack.yaml"))).toEqual([
+        `${packId}/workflow.pack.yaml`,
+      ]);
+    });
+  });
+
+  it("prunes the legacy copy only when the root-level layout exists", async () => {
+    mkdirSync(path.join(repo, packId, "workflows"), { recursive: true });
+    mkdirSync(path.join(repo, "packs", packId), { recursive: true });
+    writeFileSync(path.join(repo, packId, "workflow.pack.yaml"), `id: ${packId}\n`);
+    writeFileSync(path.join(repo, "packs", packId, "workflow.pack.yaml"), `id: ${packId}\n`);
+    expect(await pruneLegacyPackCopy(repo, packId)).toBe(true);
+    expect(existsSync(path.join(repo, "packs", packId))).toBe(false);
+    expect(existsSync(path.join(repo, packId, "workflow.pack.yaml"))).toBe(true);
+    expect(await pruneLegacyPackCopy(repo, "pack-b")).toBe(false);
   });
 });

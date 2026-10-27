@@ -109,9 +109,19 @@ impl GroupManagement {
                     // friendship.
                     if bot_id != originator {
                         if is_human_originator {
+                            // Row 16 (spec §8.1): the Human
+                            // may bring a controlled, non-hidden
+                            // Bot into a non-public Group WITHOUT
+                            // friendship — through its CURRENT
+                            // `can_manage` edge; public Groups
+                            // still only accept public Bots. The
+                            // historical `created_by` is not the
+                            // sponsor fact.
                             let staff_no = originator.trim_start_matches("human_");
                             if bot.capabilities.visibility != "public"
-                                && bot.created_by.as_deref() != Some(staff_no)
+                                && !self
+                                    .human_controls_bot(staff_no, &bot_id)
+                                    .await?
                             {
                                 return Err(GroupUseCaseError::Forbidden(format!(
                                     "Bot '{}' is neither public nor owned by human '{}'",
@@ -127,9 +137,14 @@ impl GroupManagement {
                     }
                 } else if bot_id != originator {
                     if is_human_originator {
+                        // Row 16 (spec §8.1): same CURRENT
+                        // `can_manage` sponsorship waiver as
+                        // the V1 policy path above.
                         let staff_no = originator.trim_start_matches("human_");
                         if bot.capabilities.visibility != "public"
-                            && bot.created_by.as_deref() != Some(staff_no)
+                            && !self
+                                .human_controls_bot(staff_no, &bot_id)
+                                .await?
                         {
                             return Err(GroupUseCaseError::Forbidden(format!(
                                 "Bot '{}' is neither public nor owned by human '{}'",

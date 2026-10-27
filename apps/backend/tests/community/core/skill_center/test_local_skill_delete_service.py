@@ -15,7 +15,10 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillStorageError,
     SkillAssetInUseError,
 )
-from agentclaw.community.core.skill_center.factories import LocalSkillPackageStorage
+from agentclaw.community.core.skill_center.factories import (
+    LocalSkillPackageStorage,
+    SkillServiceFactory,
+)
 from agentclaw.community.core.skill_center.services.local_skill_delete_service import (
     LocalSkillDeleteService,
 )
@@ -220,6 +223,43 @@ def _service(
         security_enabled,
     )
     return service, files, skills, guard
+
+
+@pytest.mark.asyncio
+async def test_legacy_openclaw_delete_resolves_engine_locator_through_real_factory(
+    test_injector, tmp_path,
+):
+    service, files, skills, guard = _service(provider="arca")
+    original_get = skills.get_by_id
+
+    def historical_get(skill_id):
+        skill = original_get(skill_id)
+        if skill:
+            skill["git_path"] = (
+                "local:///home/admin/.openclaw/workspace/skills/skills-local/one"
+            )
+        return skill
+
+    skills.get_by_id = historical_get
+    current_root = tmp_path / "owner" / "bot" / "skills-local"
+    files.files = {
+        str(current_root / "one" / "SKILL.md"): b"name: one\n",
+        str(current_root / "other" / "SKILL.md"): b"name: other\n",
+    }
+    factory = test_injector.get(SkillServiceFactory)
+    factory._pool_layout_paths = lambda *_: None
+    factory._path_factory.get_bot_skills_local_dir = lambda *_args, **_kwargs: current_root
+    device_calls = []
+    factory._device_fs_dispatcher.for_bot = lambda *args: device_calls.append(args) or files
+    service._skill_service_factory = factory
+
+    await service.delete_local_skill(skill_id="9", owner_id="owner", user_id="owner")
+
+    assert skills.deleted is True
+    assert files.delete_calls == [str(current_root / "one")]
+    assert files.files == {str(current_root / "other" / "SKILL.md"): b"name: other\n"}
+    assert device_calls == [("bot", "owner")]
+    assert guard.events[-1] == "release"
 
 
 @pytest.mark.asyncio

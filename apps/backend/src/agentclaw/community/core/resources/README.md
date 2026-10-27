@@ -22,6 +22,7 @@ internal_dependencies:
   - agentclaw.community.core.repository.protocols.platform    # repository contracts consumed by this module
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.devices
+  - agentclaw.community.core.ports.resource_rows_port  # ResourceRowsPort — the one write the apply engine's resources materialiser makes to these rows
   - agentclaw.community.core.workspace
   - agentclaw.community.log
   - agentclaw.community.core.devices.services.device_filesystem

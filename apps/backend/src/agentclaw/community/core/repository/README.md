@@ -365,11 +365,11 @@ internal_dependencies:
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.bot_message_feedback  # BotMessageFeedback ORM model + record DTO used by the repository
   - agentclaw.community.core.bot_public
+  - agentclaw.community.core.apply_engine  # the apply row and the CLI-tool record it persists
   - agentclaw.community.core.bot_config_manifest
   - agentclaw.community.core.bot_genome.repository.models  # the five ac_genome_* ORM models and row records
   - agentclaw.community.core.content_store.models  # the ac_manifest_content ORM model and record behind the content store repository
   - agentclaw.community.core.bot_startup_script
-  - agentclaw.community.core.bot_config_manifest
   - agentclaw.community.core.caller_identity
   - agentclaw.community.core.channel
   - agentclaw.community.core.common_config

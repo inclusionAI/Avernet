@@ -18,6 +18,7 @@ Read only the sources relevant to the boundary being changed.
 | --- | --- |
 | Backend | root `AGENTS.md`, the closest local guidance, and the relevant `apps/backend/specs/` directory |
 | Backend MCP configuration | [`apps/backend/src/agentclaw/community/core/mcp/CONTEXT.md`](apps/backend/src/agentclaw/community/core/mcp/CONTEXT.md), [ADR 0015](docs/adr/0015-merge-user-and-bot-mcp-headers-per-key.md), and [ADR 0016](docs/adr/0016-mcp-url-and-explicit-headers-are-independent.md) |
+| Backend apply engine, Bot Config Manifest and Bot Genome | [`core/apply_engine/README.md`](apps/backend/src/agentclaw/community/core/apply_engine/README.md) (the engine and its typed desired state), [`core/bot_config_manifest/README.md`](apps/backend/src/agentclaw/community/core/bot_config_manifest/README.md) and [`core/bot_genome/README.md`](apps/backend/src/agentclaw/community/core/bot_genome/README.md) (the two compilers), [ADR 0019](docs/adr/0019-bot-genome-is-the-unit-of-evolution.md), [ADR 0020](docs/adr/0020-promotion-is-platform-owned.md), and [ADR 0022](docs/adr/0022-apply-engine-desired-state-and-observed-drift.md) |
 | BaaS | root `AGENTS.md`, the closest local guidance, and the affected protocol or deployment contract |
 | Engine | root `AGENTS.md`, the closest local guidance, and the relevant runtime-layout contract |
 | BCS | `src/bcs/AGENTS.md`, `src/bcs/CLAUDE.md`, then the closest crate `CONTEXT.md` |

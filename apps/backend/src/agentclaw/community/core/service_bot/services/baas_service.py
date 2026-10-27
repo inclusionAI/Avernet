@@ -31,6 +31,7 @@ from agentclaw.community.core.service_bot.services.baas_api_response import (
     read_baas_bot_api_envelope,
 )
 from agentclaw.community.core.service_bot.baas_service_errors import (
+    BaasBotNotFoundError,
     BaasNoActiveDevicesError,
     BaasServiceError,
     BaasTransientServiceError,
@@ -244,12 +245,16 @@ class BotWsConnectionInfoResponse:
                   bot 级 invoke-http 链路必需；与 paas_device_id 来源相同，
                   但语义不同：bot_uuid 是逻辑 Bot 标识，paas_device_id 是
                   PaaS 设备实例标识
+        a2a_base_url: 设备 A2A 面（agent-card / rpc）的权威 HTTP base，
+                      浏览器直连可达；BaaS 沙箱平台未定义该地址时空串
+                      （加性字段，旧 BaaS 不回此键同样落空串）
     """
 
     ws_url: str
     token: str
     target: str
     expires_at: str
+    a2a_base_url: str = ""
     paas_device_id: str = ""
     baas_base_url: str = ""
     engine_port: int = 20003
@@ -1294,13 +1299,22 @@ class BaasService:  # pragma: no cover
             return result
 
         except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                try:
+                    payload = e.response.json()
+                except ValueError:
+                    payload = None
+                detail = payload.get("detail") if isinstance(payload, dict) else None
+                if isinstance(detail, dict) and detail.get("error_code") == "BOT_NOT_FOUND":
+                    logger.info("[BaasService.destroy_bot] Target already absent: bot_uuid=%s", bot_uuid)
+                    raise BaasBotNotFoundError("BaaS target Bot does not exist") from e
             logger.error(
                 f"[BaasService.destroy_bot] "
                 f"HTTP error: {e.response.status_code} - {e.response.text}"
             )
             raise BaasServiceError(
                 f"BaaS API error: {e.response.status_code} - {e.response.text}"
-            )
+            ) from e
         except BaasServiceError:
             raise
         except Exception as e:
@@ -2032,6 +2046,8 @@ class BaasService:  # pragma: no cover
                 token=data["token"],
                 target=data["target"],
                 expires_at=data["expires_at"],
+                # 加性透传：旧 BaaS 不回该键时 .get 落空串，行为同未升级。
+                a2a_base_url=str(data.get("a2a_base_url") or ""),
                 paas_device_id=bot_uuid,
                 baas_base_url=self._baas_api_base,
                 tenant=effective_tenant,

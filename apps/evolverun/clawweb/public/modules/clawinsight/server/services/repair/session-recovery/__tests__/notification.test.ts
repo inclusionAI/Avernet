@@ -291,3 +291,46 @@ it("reuses the direct Owner DingTalk channel for ended permission cases without 
   expect(sender.sendNotification.mock.calls[0][0].text).not.toContain("查看完整方案");
   expect(sender.sendNotification.mock.calls[0][0].text).toContain("本次自愈已结束，后续请自行处理。");
 });
+
+it("notifies the Owner of nonblocking suggestions after recovery without requesting approval or repair", async () => {
+  const sender = { sendNotification: vi.fn().mockResolvedValue(undefined) };
+  const config = { findByKey: vi.fn().mockResolvedValue({ enabled: 1, config_json: "{}" }) };
+  const notifier = new SessionRecoveryNotifier(sender, "https://service.invalid", config);
+  await notifier.notify({ ownerId: "owner", taskId: "SR-suggestion", kind: "result", effect: "recovered", summary: "原任务已完成；建议在 Skill 中补充参数示例。" });
+  expect(sender.sendNotification).toHaveBeenCalledExactlyOnceWith({ recipientUserId: "owner", title: "会话自愈已恢复，有后续建议",
+    text: expect.stringContaining("原任务已完成") });
+  const text = sender.sendNotification.mock.calls[0][0].text;
+  expect(text).toContain("本次自愈已结束，后续建议可按需处理。");
+  expect(text).not.toMatch(/等待|确认方案|需要人工处理/);
+});
+
+it("uses the saved overall summary in final notices while preserving verified facts", async () => {
+  const { notifier, task, sender, events } = setup();
+  task.status = "completed"; task.interventionStatus = "performed";
+  task.final_summary = "原任务需要读取资料。核实调用参数后发送纠正指引，Bot已成功读取并继续原任务。";
+  task.judgment = { delivery: "confirmed", response: "acted", effect: "recovered", summary: "很长的过程分析不代替整体摘要", evidence_ids: [] };
+  notifier.after({ ...message, kind: "result" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  const sent = sender.send.mock.calls[0][0];
+  expect(sent.text).toContain(task.final_summary);
+  expect(sent.text).toContain("消息已触达"); expect(sent.text).toContain("原任务已恢复");
+  expect(sent.text).not.toContain(task.judgment.summary);
+});
+it("links to full results when a legacy or failed summary is unavailable", async () => {
+  const { notifier, task, sender, events } = setup();
+  task.status = "completed"; task.interventionStatus = "performed";
+  notifier.after({ ...message, kind: "result" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  expect(sender.send.mock.calls[0][0].text).toContain("摘要暂不可用");
+  expect(sender.send.mock.calls[0][0].text).toContain("查看完整任务与处理记录");
+});
+it("describes a failed business verification as unrecovered rather than an execution error", async () => {
+  const { notifier, task, sender, events } = setup();
+  task.status = "failed"; task.phase = "verify"; task.interventionStatus = "performed";
+  task.judgment = { delivery: "confirmed", response: "acted", effect: "not_recovered", summary: "原任务仍受阻", evidence_ids: [] };
+  task.final_summary = "已执行完整方案，但原任务的后续步骤仍受阻，需继续处理。";
+  notifier.after({ ...message, kind: "result" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  expect(sender.send.mock.calls[0][0].title).not.toContain("执行失败");
+  expect(sender.send.mock.calls[0][0].text).toContain("原任务未恢复");
+});

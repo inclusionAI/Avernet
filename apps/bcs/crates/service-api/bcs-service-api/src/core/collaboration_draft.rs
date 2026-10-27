@@ -33,7 +33,6 @@ pub trait CollaborationDraftCoreService: Send + Sync {
     async fn metadata(&self, owner: &str, id: &str) -> Result<DraftMetadata, DraftCoreError>;
     async fn read(
         &self,
-        access: DraftAccess,
         id: &str,
         revision: u64,
     ) -> Result<DraftRevision, DraftCoreError>;

@@ -9,6 +9,7 @@ pub mod permission_profile;
 pub mod permission_request;
 
 pub use edge_grant::run_edge_grant_repo_contract;
+pub use permission_profile::permission_profile_repo_port_contract_tests;
 pub use permission_profile::run_permission_profile_repo_contract;
 pub use permission_request::run_permission_request_repo_contract;
 
@@ -31,9 +32,9 @@ use bcs_service_api::types::{EventDeliveryStatus, EventSubscriptionStatus};
 use bcs_service_api::{
     BindingChannel, BotCapabilities, BotControlPlaneRepoPort, BotRepoPort, DefaultDelivery,
     FriendRepoPort, FriendRequest, FriendRequestDirection, FriendRequestRepoPort,
-    FriendRequestStatus, Group, GroupChatProposal, GroupKind, GroupMutableFieldsPatch,
+    FriendRequestStatus, Group, GroupKind, GroupMutableFieldsPatch,
     GroupRepoPort, GroupStatus, NewSessionParams, Participant, ParticipantMode, ParticipantRole,
-    ProposalCoreService, RelationEdge, RelationRepoPort, RoutingMode, RoutingPolicy, ServiceSpec,
+    RelationEdge, RelationRepoPort, RoutingMode, RoutingPolicy, ServiceSpec,
     Session, SessionKind, SessionRepoPort, SessionStatus, Skill,
 };
 use sha2::{Digest, Sha256};
@@ -1913,27 +1914,6 @@ pub async fn friend_request_repo_contract_tests<T: FriendRequestRepoPort + ?Size
 
 pub async fn friend_request_repo_port_contract_tests<T: FriendRequestRepoPort + ?Sized>(repo: &T) {
     friend_request_repo_contract_tests(repo).await;
-}
-
-pub async fn proposal_repo_contract_tests<T: ProposalCoreService + ?Sized>(repo: &T) {
-    let proposal = GroupChatProposal {
-        token: "repo-proposal-token".to_string(),
-        driver_bot: "driver".to_string(),
-        participants: vec!["driver".to_string(), "helper".to_string()],
-        reason: "contract".to_string(),
-        proposed_by: "driver".to_string(),
-        member_intros: "driver/helper".to_string(),
-        confirm_url: "https://example.invalid/confirm".to_string(),
-        created_at: now_ms(),
-    };
-
-    assert_eq!(repo.store(proposal.clone()).await, proposal.token);
-    assert_eq!(
-        repo.get(&proposal.token).await.map(|stored| stored.reason),
-        Some("contract".to_string())
-    );
-    assert!(repo.take(&proposal.token).await.is_some());
-    assert!(repo.get(&proposal.token).await.is_none());
 }
 
 pub async fn relation_repo_contract_tests<T: RelationRepoPort + ?Sized>(repo: &T) {

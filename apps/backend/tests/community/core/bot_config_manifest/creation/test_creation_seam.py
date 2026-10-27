@@ -14,7 +14,7 @@ import pytest
 from agentclaw.community.core.bot_config_manifest.create_job import (
     DEFAULT_CREATE_DEADLINE_SECONDS,
 )
-from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
+from agentclaw.community.core.apply_engine.order import ApplyPhase
 from agentclaw.community.core.bot_config_manifest.creation import (
     CREATE_PRE_CONTAINER_TRIGGER,
     BotCreationManifestSeam,
@@ -30,12 +30,12 @@ class _Applies:
         self._fail = fail
 
     def materialised_constructs(self):
-        from agentclaw.community.core.bot_config_manifest.capabilities import (
-            ManifestCategory,
-            ManifestSection,
+        from agentclaw.community.core.apply_engine.capabilities import (
+            Category,
+            Section,
         )
 
-        return frozenset({ManifestSection.SCRIPT, ManifestCategory.MCP})
+        return frozenset({Section.SCRIPT, Category.MCP})
 
     def start_apply(self, **kwargs):
         self.calls.append(kwargs)

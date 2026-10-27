@@ -56,7 +56,6 @@ import {
   Workflow,
   X,
 } from 'lucide-react';
-import { history } from '@umijs/max';
 import React, {
   useCallback,
   useEffect,
@@ -629,7 +628,8 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
     if (groupUrl) {
       onClose();
       chatBridge.closePanelForce();
-      history.push(groupUrl);
+      // 同页 SPA 跳转会保留旧 Bot 视角；重新加载后按 URL 中的新群主 Bot 初始化。
+      window.location.assign(groupUrl);
     }
     return null;
   };
@@ -2031,7 +2031,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
           </button>
         </div>
 
-        <fieldset disabled={creation.initialDefinitionPending || (selectOriginator && (creation.frozen || creation.checking))} className="m-0 flex min-h-0 flex-1 flex-col border-0 p-0">
+        <fieldset disabled={creation.initialDefinitionPending || (selectOriginator && (creation.frozen || creation.mine.loading))} className="m-0 flex min-h-0 flex-1 flex-col border-0 p-0">
         <CollaborationFlowWorkspace
           className="rounded-none bg-white"
           compact={isCompactCollaborationFlowLayout}
@@ -4044,7 +4044,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
               onClick={handleCreate}
               loading={selectOriginator ? creation.busy : isCreatingGroup}
               disabled={
-                creation.initialDefinitionPending || (selectOriginator ? creation.busy || creation.checking || !creation.user || !!creation.error : isCreatingGroup) ||
+                creation.initialDefinitionPending || (selectOriginator ? creation.busy || creation.mine.loading || !creation.originator || !!creation.error : isCreatingGroup) ||
                 !originator ||
                 (groupStrategy === 'state_machine'
                   ? !description.trim() ||

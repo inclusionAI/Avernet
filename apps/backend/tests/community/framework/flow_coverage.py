@@ -221,6 +221,19 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
         "exercises the feedback submission end-to-end."
     ),
     "approval": _EXEMPT_REASON,
+    "apply_engine": (
+        "The engine the Manifest's and the genome's compilers feed: the "
+        "materialisers, the orchestrator, the delivery strategies and the "
+        "apply run (lock, task, report), extracted from bot_config_manifest "
+        "(#3083). Every singlebox-visible flow it has runs through the "
+        "manifest and apply routes, which are blocked on the same missing "
+        "gateway-signed principal as bot_config_manifest below; covered "
+        "meanwhile by tests/community/core/apply_engine/ (the engine over "
+        "fakes that count every write, the run service over a real database, "
+        "the delivery strategies and their port forwarding) and by the apply "
+        "routes in tests/community/endpoints/test_openapi_config_manifest_apply.py. "
+        "Drain this with bot_config_manifest."
+    ),
     "auth": _EXEMPT_REASON,
     "bot_public": _EXEMPT_REASON,
     "bot_config_manifest": (
@@ -239,7 +252,7 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
         "repository over a real database in "
         "tests/community/repository/bot/test_content_store_repository.py), "
         "by the materialiser suites in "
-        "tests/community/core/bot_config_manifest/apply/ (the two fetching "
+        "tests/community/core/apply_engine/ (the two fetching "
         "categories over fakes that count every write, and the entry-fetch "
         "pipeline's pinned/unpinned/keep_last policy), "
         "and by W1's own cover meanwhile: "

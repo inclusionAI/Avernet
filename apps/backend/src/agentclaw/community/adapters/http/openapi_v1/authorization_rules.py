@@ -236,6 +236,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/bots/{bot_id}/engine/restart"): Check(
         PermissionLevel.MEMBER, explicit=True
     ),
+    ("GET", "/openapi/v1/bots/{bot_id}/engine/default-model"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/engine/status"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/harness/apply"): ServiceChecked(
         PermissionLevel.ADMIN, "…openapi_v1.harness.router"
@@ -664,6 +665,9 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/market/skill-center/tags"): NoCheck(
         "tenant-identical marketplace"
     ),
+    ("GET", "/openapi/v1/experts"): NoCheck("tenant-identical expert catalogue"),
+    ("GET", "/openapi/v1/experts/categories"): NoCheck("tenant-identical expert catalogue"),
+    ("GET", "/openapi/v1/experts/{expert_id}"): NoCheck("tenant-identical expert catalogue"),
     ("POST", "/openapi/v1/bots/market/skills"): NoCheck("tenant-identical marketplace"),
     ("GET", "/openapi/v1/bots/market/clis"): NoCheck("tenant-identical marketplace"),
     ("GET", "/openapi/v1/bots/mcp/servers"): NoCheck(

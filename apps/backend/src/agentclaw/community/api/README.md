@@ -3,7 +3,7 @@
 **The Service API surface.** A flat collection of modules, one per
 public service, that re-export the `@runtime_checkable Protocol` any
 consumer (HTTP, CLI, in-process embedder) calls against. FastAPI routers
-live next door under [`adapters/http/`](../adapters/http/README.md); they
+live next door under `adapters/http/`; they
 Inject a Protocol from this layer rather than the concrete service class
 in `core/`.
 
@@ -56,6 +56,8 @@ api/
 
 ## Enforcement
 
+Current conventions and authority: [Backend development guide](../../../../README.md).
+
 Five gates under `tests/community/architecture/`:
 
 - `test_protocol_base_ordering.py` — a Protocol base never precedes a
@@ -103,7 +105,7 @@ purpose: "Service API Protocols — transport-agnostic contracts between adapter
 provides:
   - BuildIgnoreServiceProtocol
   - "One Protocol per public service / factory"
-  - "Structural conformance gate via tests/architecture/test_service_api_conformance.py"
+  - "Structural conformance gate via tests/community/architecture/test_service_api_conformance.py"
   - BotRuntimeProjectorProtocol
   - SkillVersionMaterializerProtocol
   - SpaceSkillPublicationServiceProtocol
@@ -127,6 +129,7 @@ consumes:
   - "No service impls at import time — Protocols only declare shape, they don't depend on concrete services"
   - "A small number of core dataclass / schema types used to type Protocol method signatures (see internal_dependencies)"
 internal_dependencies:
+  - agentclaw.community.core.expert_market
   - agentclaw.community.core.bot_knowledge
   - agentclaw.community.core.space_knowledge
   - agentclaw.community.core.bot_management.owner_handoff.contracts
@@ -219,10 +222,11 @@ internal_dependencies:
   - agentclaw.community.core.bot_public.bot_discover_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_public.bot_public_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol  # Protocol defined in its owning core module, re-exported here
-  - agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.apply_engine.compiler  # StateRef — the (kind, reference) pair apply_run_service's start_apply takes, re-exported beside the Protocol; each producer declares its own (MANIFEST_STATE via bot_config_manifest_service, genome_state in core.bot_genome.compile)
+  - agentclaw.community.core.apply_engine.run.service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_genome.genome_registry_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_genome.promotion.promotion_service_protocol  # Protocol defined in its owning core module, re-exported here
-  - agentclaw.community.core.bot_config_manifest.cli_tools.service_protocol  # BotCliToolServiceProtocol and the types in its signatures, re-exported here (W9 #1477)
+  - agentclaw.community.core.apply_engine.cli_tools.service_protocol  # BotCliToolServiceProtocol and the types in its signatures, re-exported here (W9 #1477)
   - agentclaw.community.core.bot_startup_script.bot_startup_script_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.caller_identity.caller_credential_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.caller_identity.caller_iam_token_service_protocol  # Protocol defined in its owning core module, re-exported here

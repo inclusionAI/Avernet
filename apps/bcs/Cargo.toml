@@ -53,8 +53,6 @@ members = [
     "crates/services/bcs-edge-permission-store",
     "crates/services/bcs-edge-permission",
     "crates/services/bcs-user-identity",
-    "crates/services/bcs-proposal",
-    "crates/services/bcs-proposal-store",
     "crates/services/bcs-route-security",
     "crates/services/bcs-secret",
     "crates/services/bcs-session",
@@ -290,8 +288,6 @@ bcs-webhook-client = { path = "crates/external-clients/bcs-webhook-client" }
 bcs-security-gateway-local = { path = "crates/plugins/bcs-security-gateway-local" }
 bcs-security-gateway-api = { path = "crates/plugin-api/bcs-security-gateway-api" }
 bcs-secret-api             = { path = "crates/plugin-api/bcs-secret-api" }
-bcs-proposal   = { path = "crates/services/bcs-proposal" }
-bcs-proposal-store = { path = "crates/services/bcs-proposal-store" }
 bcs-friend     = { path = "crates/services/bcs-friend" }
 bcs-friend-store = { path = "crates/services/bcs-friend-store" }
 bcs-relation   = { path = "crates/services/bcs-relation" }

@@ -89,6 +89,8 @@ describe.each(["save", "deploy"] as const)("AutoHeal /%s Git settings", (endpoin
     vi.spyOn(gitClient, "commitAndPushDeploy").mockImplementation(async (_dir, workflowId, deployNumber) => ({
       branch: `wf/${workflowId}`, tagName: `deploy/${workflowId}/#${deployNumber}`, commit: "abc123", deployNumber,
     }));
+    vi.spyOn(gitClient, "prepareBranchBase").mockResolvedValue("default");
+    vi.spyOn(gitClient, "pruneLegacyPackCopy").mockResolvedValue(false);
   });
 
   afterEach(async () => {
