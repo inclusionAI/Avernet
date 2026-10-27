@@ -367,12 +367,16 @@ def test_legacy_owner_handoff_allows_reads_and_refuses_submit():
                 else None
             )
 
-    client, repo, _ = client_for()
-    client.app.state.injector.binder.bind(BotRepository, to=FrozenBots())
+    client, repo, tasks = client_for()
     base = "/api/bots/default/public/risk-checks"
+    record_id = client.post(
+        base, json={"client_request_id": "first", "public": "1"}
+    ).json()["data"]["risk_check_id"]
+    client.app.state.injector.binder.bind(BotRepository, to=FrozenBots())
     assert client.get(base + "/current").status_code == 200
     assert (
         client.post(base, json={"client_request_id": "r", "public": "1"}).status_code
         == 404
     )
-    assert repo.row is None
+    assert client.post(base + f"/{record_id}/refresh").status_code == 404
+    assert repo.row.risk_check_id == record_id and tasks.polls == 0
