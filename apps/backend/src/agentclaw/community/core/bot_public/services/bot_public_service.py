@@ -535,6 +535,9 @@ class BotPublicService(BotPublicServiceProtocol):
         operator: OperatorContext,
         view_depts: Optional[List[Dict[str, str]]] = None,
         visibility: Optional[str] = None,
+        *,
+        approval_biz_id: Optional[str] = None,
+        on_approval_started: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> Dict[str, Any]:
         """New-version publish-to-users (BCS-delegated) — parallel to public_bot.
 
@@ -554,6 +557,8 @@ class BotPublicService(BotPublicServiceProtocol):
         """
         if not owner_id:
             raise BotPublicServiceError("Owner ID is required")
+        if bool(approval_biz_id) != bool(on_approval_started):
+            raise BotPublicServiceError("stable approval ID and handoff callback must be supplied together")
         if not public_scope:
             raise BotPublicServiceError("public_scope is required")
         if public_scope not in ("user", "agent"):
@@ -611,7 +616,7 @@ class BotPublicService(BotPublicServiceProtocol):
             # approval service's PARAM_CHECKED. Sanitize every non-alphanumeric
             # char to "-" so the puid carries the identity without the colon/_
             # that would break its "-" / "_" field delimiters.
-            biz_id=f"{re.sub(r'[^a-zA-Z0-9-]', '-', bot_uid)}{datetime.now().strftime('%Y%m%d%H%M%S')}",
+            biz_id=approval_biz_id or f"{re.sub(r'[^a-zA-Z0-9-]', '-', bot_uid)}{datetime.now().strftime('%Y%m%d%H%M%S')}",
             biz_type="botpublic",
             context=context,
         )
@@ -644,6 +649,10 @@ class BotPublicService(BotPublicServiceProtocol):
                 "approval_url": None,
                 "error_msg": approval_result.get("error_msg"),
             }
+        # The risk caller must persist the association before any inline
+        # callback can apply the approval. Failure must stop this path.
+        if on_approval_started is not None:
+            on_approval_started(approval_result)
         # 记录工单信息到 BCS friend_ext.public_user_approval (PROCESSING):
         # GET→merge→PATCH (Provider 管理 API, 同 BcnService 鉴权). 失败不中断已建工单.
         try:

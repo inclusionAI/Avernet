@@ -2701,3 +2701,38 @@ class TestRebuildAuthRelationships:
                 bot_id="bot1", owner_id="owner1", owner_name="owner_nick",
                 agent_code="agent_123", access_mode="RESTRICTED", public="0",
             )
+
+
+def test_risk_bcs_submission_records_puid_before_inline_approval_callback():
+    process = MagicMock()
+    process.start_approval.return_value = {
+        "success": True, "puid": "p-risk", "state": "COMPLETED", "lastOperate": "AGREE",
+    }
+    service = _make_service(process_service=process)
+    events = []
+    with patch.object(service, "handle_public_approval_callback", side_effect=lambda **_: events.append("callback")):
+        service.public_bcs_bot(
+            "b1", "u1", "user", _make_operator(), visibility="public",
+            approval_biz_id="risk-123", on_approval_started=lambda result: events.append(result["puid"]),
+        )
+    assert process.start_approval.call_args.kwargs["biz_id"] == "risk-123"
+    assert events == ["p-risk", "callback"]
+
+
+def test_risk_bcs_submission_never_applies_inline_when_handoff_fails():
+    process = MagicMock()
+    process.start_approval.return_value = {
+        "success": True, "puid": "p-risk", "state": "COMPLETED", "lastOperate": "AGREE",
+    }
+    service = _make_service(process_service=process)
+
+    def failed_handoff(_result):
+        raise RuntimeError("association write failed")
+
+    with patch.object(service, "handle_public_approval_callback") as callback:
+        with pytest.raises(RuntimeError, match="association write failed"):
+            service.public_bcs_bot(
+                "b1", "u1", "user", _make_operator(), visibility="public",
+                approval_biz_id="risk-123", on_approval_started=failed_handoff,
+            )
+    callback.assert_not_called()
