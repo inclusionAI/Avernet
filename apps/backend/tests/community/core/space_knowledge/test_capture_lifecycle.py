@@ -83,19 +83,109 @@ def test_other_environment_history_does_not_enable_this_deployment(database):
     asyncio.run(capture(database).startup())
 
 
-def test_enabled_capture_refuses_missing_schema_without_fallback(database):
+@pytest.mark.parametrize("enabled", [False, True])
+def test_capture_startup_allows_missing_schema(database, enabled):
     Snapshot.__table__.drop(database._engine)
-    with pytest.raises(RuntimeError, match="requires.*migration"):
-        asyncio.run(capture(database, enabled=True).startup())
-    asyncio.run(capture(database).startup())
+    asyncio.run(capture(database, enabled=enabled).startup())
 
 
-def test_existing_incompatible_schema_is_not_treated_as_missing(database):
+@pytest.mark.parametrize("enabled", [False, True])
+def test_capture_startup_allows_incompatible_schema(database, enabled):
     with database._engine.begin() as connection:
         connection.exec_driver_sql("DROP TABLE ac_space_knowledge_sync")
         connection.exec_driver_sql("CREATE TABLE ac_space_knowledge_sync (env TEXT)")
-    with pytest.raises(RuntimeError, match="schema is incompatible"):
-        asyncio.run(capture(database).startup())
+    asyncio.run(capture(database, enabled=enabled).startup())
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_capture_startup_does_not_open_database_session(database, monkeypatch, enabled):
+    def unexpected_database_session():
+        pytest.fail("capture startup must not open a database session")
+
+    monkeypatch.setattr(database, "orm_session", unexpected_database_session)
+    asyncio.run(capture(database, enabled=enabled).startup())
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_capture_startup_does_not_check_snapshot_primary_key(database, enabled):
+    with database._engine.begin() as connection:
+        connection.exec_driver_sql("DROP TABLE ac_space_knowledge_sync")
+        connection.exec_driver_sql(
+            "CREATE TABLE ac_space_knowledge_sync ("
+            "env TEXT, space_id BIGINT, revision BIGINT, app TEXT, payload TEXT, "
+            "snapshot_hash TEXT, status TEXT, acknowledged BOOLEAN, "
+            "gmt_create DATETIME, gmt_modified DATETIME, "
+            "PRIMARY KEY (space_id, revision))"
+        )
+    asyncio.run(capture(database, enabled=enabled).startup())
+
+
+@pytest.fixture(params=["missing_table", "missing_column"])
+def unusable_knowledge_table(database, request):
+    from agentclaw.community.core.spaces.repository.models import (
+        SpaceModel,
+        SpaceMemberModel,
+    )
+
+    with database.orm_session() as session:
+        session.add(
+            SpaceModel(
+                id=7,
+                space_code="runtime",
+                space_type="TEAM",
+                name="Runtime",
+                env="pre",
+                created_by="owner",
+                updated_by="owner",
+            )
+        )
+        session.add(
+            SpaceMemberModel(
+                space_id=7, user_id="owner", role="ADMIN", env="pre", created_by="owner"
+            )
+        )
+    Snapshot.__table__.drop(database._engine)
+    if request.param == "missing_column":
+        with database._engine.begin() as connection:
+            connection.exec_driver_sql(
+                "CREATE TABLE ac_space_knowledge_sync (env TEXT)"
+            )
+
+
+def test_schema_error_is_deferred_to_sync_use(database, unusable_knowledge_table):
+    from sqlalchemy.exc import OperationalError
+    from agentclaw.community.core.repository.implementations.spaces.knowledge_sync import (
+        SpaceKnowledgeSyncRepository,
+    )
+
+    guard = capture(database, enabled=True)
+    asyncio.run(guard.startup())
+    repository = SpaceKnowledgeSyncRepository(database, guard)
+    with pytest.raises(OperationalError, match="ac_space_knowledge_sync"):
+        repository.activate(space_id=7, environment="pre", app="agentclaw")
+
+
+def test_runtime_schema_error_rolls_back_member_change(
+    database, unusable_knowledge_table
+):
+    from sqlalchemy.exc import OperationalError
+    from agentclaw.community.core.repository.implementations.spaces.management import (
+        SpaceManagementRepository,
+    )
+    from agentclaw.community.core.repository.implementations.spaces.space import (
+        SpaceRepository,
+    )
+
+    guard = capture(database, enabled=True)
+    asyncio.run(guard.startup())
+    management = SpaceManagementRepository(database, guard)
+    with pytest.raises(OperationalError, match="ac_space_knowledge_sync"):
+        management.add_members(
+            space_id=7, members={"must-rollback": None}, actor_id="owner", env="pre"
+        )
+    spaces = SpaceRepository(database, NoKnowledgeSpacePersistenceEffects())
+    assert spaces.get_member(space_id=7, user_id="must-rollback", env="pre") is None
+    assert spaces.get_member(space_id=7, user_id="owner", env="pre") is not None
 
 
 def test_sink_cannot_enable_delivery_without_recording(database):

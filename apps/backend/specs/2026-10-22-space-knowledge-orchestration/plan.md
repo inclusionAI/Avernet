@@ -12,7 +12,7 @@
 - Work Order manual/AUTO writer：保留既有审批与通知语义，同事务调用扩展。
 - Skill Space 创建 seam：只调用中性身份扩展，不改 Skill 业务。
 - Knowledge producer：保留捕获/确认算法，优化候选定位及元数据读取。
-- Composition root：显式选择空/持久记录实现，保留 producer/配置/schema 检查；历史不再决定应用能否启动。
+- Composition root：显式选择空/持久记录实现，保留 producer/配置检查，表结构问题延迟到实际 SQL；历史不再决定应用能否启动。
 
 ## Data Model Changes
 
@@ -95,13 +95,13 @@ class KnowledgeSpacePersistenceEffects:
 
 ```python
 # apps/backend/src/agentclaw/community/core/space_knowledge/capture_lifecycle.py (new)
-# After Database bootstrap, before serving requests/allowing source writes:
-# disabled + missing table -> safe no-op, no SQL against the absent table
-# disabled + compatible table + retained history (any app) -> allow ordinary writes; producer still rejects
-# enabled -> validate original outbox schema; no silent fallback on errors
+# Startup validates configuration only, with no DB session or schema reflection.
+# disabled -> ordinary no-op effects, regardless of outbox schema/history
+# enabled -> actual SQL uses the existing transaction; DB errors propagate
+# No explicit schema preflight; producer still rejects disabled capture
 ```
 
-启动验证使用 DatabasePlugin 的 session/bind；不得窥探 CommunityDatabase 私有 engine。DI configure/constructor 不做 DB I/O。必须保证验证异常被正常 lifespan 传播，不靠会吞 provider 异常的 lifecycle discovery；校验未完成前不得放行可能丢事件的源写入。沿用公共 Lifecycle，不修改它的阶段语义。若 startup 使用者涉及提前写入，先验证这一顺序，不以默认已就绪绕过。实现采用同一个幂等 validation guard：正常 startup 在 DB bootstrap 后验证，startup writer/库调用在首个受保护事务内验证，失败在外部副作用或提交前传播，不以已就绪默认值跳过。
+2026-10-27 后续修订：启动仅验证 capture/Sink 配置，不打开 DB session，不反射同步表结构；普通库调用同样不进行预检。构造函数参数保持兼容，guard 仅保护配置与 producer 启用关系。真实 SQL 留在原 repository/effects 及调用者事务内执行，错误正常传播/回滚，不降级为空实现。其他 DB bootstrap 行为不变，不能承诺其他基础设施错误不阻断启动。
 
 ```python
 # apps/backend/src/agentclaw/community/di/container.py:271 (modify)

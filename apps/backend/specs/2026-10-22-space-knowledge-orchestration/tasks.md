@@ -31,8 +31,8 @@
   - [x] 缺省 capture=false，拒绝未知键/错误类型；纯配置校验在所有 profile eager 执行。
   - [x] 默认 graph 使用空扩展；真实 producer 必须与启用记录装配一致。
   - [x] 未启用且缺表时完整启动成功，不以预建同步表满足测试。
-  - [x] DB bootstrap 后验证持久模式；生命周期异常不被 discovery 吞掉，验证前不得放行源写入。
-  - [x] 当前 env 任意 app 的历史不阻断显式 capture=false 启动/普通写入；producer、配置和 schema 检查仍保留；Sink 暂停不改变 capture。
+  - [x] 生命周期只校验 capture/Sink 配置，不访问数据库或预检同步表；实际 SQL 的失败在运行时传播并回滚。
+  - [x] 当前 env 任意 app 的历史不阻断显式 capture=false 启动/普通写入；producer/配置检查仍保留，schema 预检已移除；Sink 暂停不改变 capture。
 - **Depends on:** Task 2。
 - **AC:** AC1、AC2、AC3、AC5。
 

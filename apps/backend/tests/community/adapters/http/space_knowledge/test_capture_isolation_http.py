@@ -50,22 +50,43 @@ def test_default_full_lifespan_pilot_creates_space_without_knowledge_schema(
         assert client.get(f"/api/spaces/{sid}").json()["data"]["member_count"] == 1
 
 
-def test_full_lifespan_does_not_swallow_enabled_missing_schema(
-    missing_knowledge_graph, monkeypatch
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("schema_state", ["missing_table", "missing_column"])
+def test_full_lifespan_serves_with_unusable_knowledge_schema(
+    missing_knowledge_graph, monkeypatch, enabled, schema_state
 ):
-    import pytest
     from agentclaw.community.di.space_knowledge_capture_config import (
         SpaceKnowledgeCaptureConfig,
     )
 
-    graph, _db = missing_knowledge_graph
+    graph, db = missing_knowledge_graph
     graph.binder.bind(
-        SpaceKnowledgeCaptureConfig, to=SpaceKnowledgeCaptureConfig(enabled=True)
+        SpaceKnowledgeCaptureConfig, to=SpaceKnowledgeCaptureConfig(enabled=enabled)
     )
-    monkeypatch.setattr(app.state, "injector", graph)
-    with pytest.raises(RuntimeError, match="requires.*migration"):
-        with TestClient(app):
-            pytest.fail("must not serve without recording prerequisites")
+    if schema_state == "missing_column":
+        with db._engine.begin() as connection:
+            connection.exec_driver_sql(
+                "CREATE TABLE ac_space_knowledge_sync (env TEXT)"
+            )
+    try:
+        monkeypatch.setattr(app.state, "injector", graph)
+        with TestClient(app) as client:
+            response = client.get("/api/spaces/1")
+            assert response.status_code == 200, response.text
+            assert response.json()["data"]["member_count"] == 2
+            if not enabled:
+                response = client.post(
+                    "/api/spaces",
+                    json={
+                        "space_name": "No schema dependency",
+                        "admin_user_id": "owner",
+                    },
+                )
+                assert response.status_code == 201, response.text
+    finally:
+        if schema_state == "missing_column":
+            with db._engine.begin() as connection:
+                connection.exec_driver_sql("DROP TABLE ac_space_knowledge_sync")
 
 
 @pytest.mark.parametrize("owner_app", ["agentclaw", "other-app"])

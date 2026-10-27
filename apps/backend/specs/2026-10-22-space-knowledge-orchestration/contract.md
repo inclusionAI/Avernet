@@ -6,7 +6,8 @@
 > Capture is explicitly configured, default false, independently of Sink delivery.
 > **2026-10-27 availability amendment:** Retained history does not block startup
 > or ordinary writes with capture explicitly disabled; producers still require
-> capture. This amendment
+> capture. Startup performs no sync-table schema preflight in either mode; actual
+> SQL surfaces runtime database errors. This amendment
 > supersedes earlier global DDL prerequisites below; see [spec.md](spec.md),
 > [plan.md](plan.md), [tasks.md](tasks.md) and the capture deployment README.
 
@@ -178,11 +179,13 @@ contract (not a public Service/Plugin API). Defaults are no-op capture and
 identity protection, retaining neutral source locking. The composition root
 strictly validates optional `user_config.space_knowledge_capture.enabled` (bool,
 default false; no unknown keys). A shared lifecycle/producer guard performs
-schema/configuration checks after bootstrap or before first protected library
-use, not in constructors. Retained history in the current environment, **any app**,
-does not reject capture=false or ordinary source writes; missing table with
-capture=false is valid. Explicit knowledge producers still reject disabled
-capture. DB/schema failures propagate, never become an implicit no-op fallback.
+configuration checks without database access. No table-existence, column,
+primary-key or history inspection is performed at startup or before library use.
+Retained history in the current environment, **any app**, does not reject
+capture=false or ordinary source writes. Explicit knowledge producers still
+reject disabled capture. Actual SQL failures propagate at runtime in the caller
+transaction, never become an implicit no-op fallback. Invalid schema that does
+not cause a SQL error is not proactively detected by this lifecycle.
 
 Enablement sequence: migrate the original outbox → roll all source writers,
 workers and direct library callers to capture=true → verify assembly → allow

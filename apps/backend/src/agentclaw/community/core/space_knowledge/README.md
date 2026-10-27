@@ -66,18 +66,20 @@ in the composition root; writers do not inspect Sink state or environment flags.
 | Deployment | Required behavior |
 | --- | --- |
 | Never enabled, no history | Default no-op effects; legacy Space/member/approval/Skill Space paths work without the sync table, including `create_schema=false`. No outbox SELECT, knowledge write guard, remote calls or scan. |
-| Capture enabled, Space not activated | Table required; ordinary mutations check activation but create no snapshots and have no receiver admission limit. |
+| Capture enabled, Space not activated | Startup does not inspect the table; actual mutations require usable schema to check activation, and create no snapshots or receiver admission limit until activated. |
 | Activated, delivering | Same-transaction immutable snapshots, FIFO and exact hash acknowledgement. |
 | Activated, delivery paused | Keep capture enabled; continue removal/role/delete history and retired-ID protection. Resume the Sink to drain in order after restart. |
 | Capture disabled with retained same-environment history | Startup and ordinary library writes remain available; history does not enable capture or get rewritten. Knowledge producers still require enabled capture. |
 
-The lifecycle validates after DB bootstrap (or on first protected library
-transaction); it does no DB I/O during DI construction. Missing table with
-capture disabled is valid; permissions/connection errors and incompatible tables
-are not silently treated as absence. The same lifecycle guard protects raw
-producer transactions before a Sink call, including callers without HTTP lifespan.
-Validation success is cached per graph. Changing capture/Sink bindings requires
-restart; this is not dynamic per-request fail-open selection.
+The lifecycle validates only capture/delivery configuration. It opens no DB
+session at startup and never inspects table existence, columns, primary keys or
+history, whether capture is enabled or disabled. Actual enabled-capture SQL
+surfaces schema/connection errors at runtime in the caller transaction; errors
+are not treated as absent history or successful synchronization. No explicit
+primary-key/type compatibility probe is performed at runtime either. The guard
+still rejects disabled producers, including callers without HTTP lifespan.
+Configuration validation success is cached per graph. Changing capture/Sink
+bindings requires restart; this is not per-request fail-open selection.
 
 **Never-enabled deployments require no knowledge DDL.** To first enable capture,
 apply `core/spaces/sql/2026_10_24_space_knowledge_sync.sql`, then roll out

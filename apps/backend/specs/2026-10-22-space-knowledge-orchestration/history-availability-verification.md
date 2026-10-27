@@ -1,5 +1,9 @@
 # History availability repair — 2026-10-27
 
+> Historical intermediate repair. The later user-approved runtime-schema change
+> supersedes the schema-preflight behavior below; see
+> `runtime-schema-verification.md`. Original test results remain unchanged.
+
 ## Approved change
 
 A compatible retained outbox must not force a capture-disabled deployment to fail
