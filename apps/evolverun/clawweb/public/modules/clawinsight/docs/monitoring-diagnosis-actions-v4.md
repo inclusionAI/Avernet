@@ -52,8 +52,17 @@ OC v4 与 v3 一样传完整 `target.runtime_identity`，不改写监控事件�
 ### 可选的会话 NAS 定位提示
 
 诊断上报可额外携带 `sessionNasPath`（绝对路径，最多 4096 码点；省略或 null 保持原行为）。
-生产者传自己实际读取的会话文件路径；重试时保留同一值。该字段仅为本次上报的入口路由提示，
-不属于持久诊断内容，不新增数据库列，不返回 ACK／页面；原始 credentials 仍原样落库。
+生产者传自己实际读取的原会话 `.jsonl` 绝对路径，在诊断作业及 outbox 中冻结，重试保留同一值。
+2026-10-27 的落表需求扩展原入口提示约定：字段与完整原始 credentials 随诊断行一并写入
+`insight_monitoring_diagnose.session_nas_path`（nullable TEXT，utf8mb4，无新索引），省略／null 存 SQL NULL。
+该字段是首次写入不可变的内部元数据，不参与诊断内容相等比较，重复请求不补写或覆盖，
+不新增“路径不同一律冲突”的规则；其他诊断内容及 credentials 的冲突检查不变。
+字段不返回 ACK／页面、不进入日志。生产列由运维／表负责人预先新增，服务只读检查，不自动 ALTER。
+先部署含本次落表逻辑及原路径消费能力的 ClawWeb，再部署生产者；生产者不新增独立开关。
+
+落库成功后，首次和重复请求均继续以本次验证后的原事件调用 trigger，
+保留“首次已落库但自愈创建失败”的 503 重试补偿；不新增为触发回查数据库的步骤。
+以下自愈定位、授权与执行行为沿用原实现，不属于本次落表修改。
 
 仅当 OC 的 `runtimeIdentity.BOT_TYPE=service` 且 `STAGE=online` 时，入口核对路径的
 env、ENTITY_TYPE、ENTITY_ID、Bot、agent 和会话 ID，从实例目录后缀取得 `DEVICE-<32位小写十六进制>`。

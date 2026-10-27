@@ -85,7 +85,7 @@ export function parseDiagnosis(input: unknown, key: string | undefined): Diagnos
   const sessionKey = nullableText(v.sessionKey, 1024);
   const sessionId = nullableText(v.sessionId, 255);
   const sessionNasPath = nullableText(v.sessionNasPath, 4096);
-  if (sessionNasPath !== null && (!sessionNasPath.startsWith("/") || /[\\\u0000-\u001f\u007f]/.test(sessionNasPath)
+  if (sessionNasPath !== null && (!sessionNasPath.startsWith("/") || /[\\\u0000-\u001f\u007f-\u009f]/.test(sessionNasPath)
     || sessionNasPath.split("/").some(part => part === "." || part === ".."))) invalid("会话 NAS 路径无效。");
   const traceId = nullableText(v.traceId, 255);
   if ([sessionKey, sessionId, traceId].some((s) => s !== null && !s.trim()) || (engine === "TE" && !traceId)) invalid();

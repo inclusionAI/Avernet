@@ -5,7 +5,7 @@ export const CHECKS_TABLE = "insight_monitoring_bot_check";
 const diagnosisColumns: Record<string, [string, boolean]> = {
   id: ["BIGINT", false], event_id: ["VARCHAR(128)", false], schema_version: ["VARCHAR(64)", false],
   bot_id: ["VARCHAR(128)", false], entity_id: ["VARCHAR(128)", false], env: ["VARCHAR(20)", false], engine: ["VARCHAR(2)", false], session_key: ["VARCHAR(1024)", true],
-  session_id: ["VARCHAR(255)", true], trace_id: ["VARCHAR(255)", true], occurred_at_ms: ["BIGINT", true],
+  session_id: ["VARCHAR(255)", true], session_nas_path: ["TEXT", true], trace_id: ["VARCHAR(255)", true], occurred_at_ms: ["BIGINT", true],
   diagnosed_at_ms: ["BIGINT", false], decision: ["VARCHAR(16)", false], tc_fault_label: ["VARCHAR(128)", true],
   confidence_json: ["VARCHAR(32)", true], business_problem_category: ["VARCHAR(128)", true],
   business_problem_subtype: ["VARCHAR(128)", true], system_diagnosis: ["TEXT", true], business_diagnosis: ["TEXT", true],
@@ -45,6 +45,7 @@ export async function verifyMonitoringSchema(db: IDatabase): Promise<void> {
         assert((sqlite ? column.dflt_value : column.column_default) == null);
         if (!sqlite) assert(column.collation === "utf8mb4_bin");
       }
+      if (!sqlite && name === "session_nas_path") assert(String(column.collation).startsWith("utf8mb4_"));
       if (name === "id") assert(sqlite ? Number(column.pk) === 1 : column.column_key === "PRI" && String(column.extra).includes("auto_increment"));
       if (!sqlite && ["event_id", "bot_id"].includes(name)) assert(column.collation === "latin1_bin");
     }

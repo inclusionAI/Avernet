@@ -10,7 +10,7 @@ import { target, targetKey, targetParams, targetWhere } from '../services/monito
 import { readMonitoringSummaries } from './monitoring-summaries.js';
 const fields = {
   entityId: "entity_id", env: "env", schemaVersion: "schema_version", eventId: "event_id", botId: "bot_id", engine: "engine", sessionKey: "session_key",
-  sessionId: "session_id", traceId: "trace_id", occurredAt: "occurred_at_ms", diagnosedAt: "diagnosed_at_ms",
+  sessionId: "session_id", sessionNasPath: "session_nas_path", traceId: "trace_id", occurredAt: "occurred_at_ms", diagnosedAt: "diagnosed_at_ms",
   decision: "decision", tcFaultLabel: "tc_fault_label", confidence: "confidence_json",
   businessProblemCategory: "business_problem_category", businessProblemSubtype: "business_problem_subtype",
   systemDiagnosis: "system_diagnosis", businessDiagnosis: "business_diagnosis", handlerName: "handler_name",
@@ -50,8 +50,13 @@ function checkFromRow(row: Row): BotCheck {
     checkedAt: iso(row.checked_at_ms), lastSuccessfulCheckAt: iso(row.last_successful_check_at_ms), status: row.status }, integer(row.checked_at_ms));
 }
 function item(event: DiagnosisEvent): DiagnosisItem {
-  const { eventId: _event, engine: _engine, runtimeIdentity: _runtimeIdentity, ...result } = event;
+  const { eventId: _event, engine: _engine, runtimeIdentity: _runtimeIdentity, sessionNasPath: _sessionNasPath, ...result } = event;
   return result;
+}
+// NAS metadata is first-write-only, not part of diagnosis content equality.
+function diagnosisContent(event: DiagnosisEvent): string {
+  const { sessionNasPath: _path, ...content } = event;
+  return JSON.stringify(content);
 }
 function isDuplicate(error: unknown): boolean {
   const e = error as { code?: string; errno?: number };
@@ -107,6 +112,7 @@ export class MonitoringRepository implements MonitoringStore {
         const value = event[name as keyof typeof fields];
         if (name === "occurredAt" || name === "diagnosedAt") return value === null ? null : Date.parse(String(value));
         if (name === "humanIntervention") return value ? 1 : 0;
+        if (name === "sessionNasPath") return value ?? null;
         if (name === "runtimeIdentity") return value == null ? null : JSON.stringify(value);
         if (name === "confidence") return value === null ? null : JSON.stringify(value);
         return value;
@@ -120,7 +126,7 @@ export class MonitoringRepository implements MonitoringStore {
         if (!isDuplicate(error)) throw error;
         const [row] = await this.db.query(`SELECT ${columns.join(", ")} FROM ${DIAGNOSES_TABLE} WHERE event_id = ?`, [event.eventId]);
         if (!row) throw new Error("Duplicate not yet visible");
-        if (row.schema_version !== event.schemaVersion || row.entity_id !== resolved.entityId || row.env !== resolved.env || JSON.stringify(eventFromRow(row)) !== JSON.stringify(event)) conflict();
+        if (row.schema_version !== event.schemaVersion || row.entity_id !== resolved.entityId || row.env !== resolved.env || diagnosisContent(eventFromRow(row)) !== diagnosisContent(event)) conflict();
         return false;
       }
     });

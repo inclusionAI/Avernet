@@ -23,7 +23,7 @@ type DiagnosisFields = {
   engine: Engine;
   sessionKey: string | null;
   sessionId: string | null;
-  /** Optional report-only routing hint; not persisted as diagnosis content. */
+  /** Optional first-write-only NAS metadata; stored internally, never exposed in page DTOs. */
   sessionNasPath?: string;
   traceId: string | null;
   occurredAt: string | null;
