@@ -18,11 +18,12 @@ export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
     if (!row || row.enabled === 0) return false;
     if (row.enabled !== 1) throw new Error("Invalid recovery owner notification state");
     if (!this.sender) throw new Error("Notification unavailable");
-    const title = input.kind === "plan" ? "会话自愈方案待确认" : "会话自愈需要人工处理";
+    const recovered = input.kind === "result" && input.effect === "recovered";
+    const title = input.kind === "plan" ? "会话自愈方案待确认" : recovered ? "会话自愈已恢复，有后续建议" : "会话自愈需要人工处理";
     const url = new URL("/insight", this.publicBaseUrl);
     url.searchParams.set("module", "monitoring"); url.searchParams.set("recoveryTaskId", input.taskId);
     await this.sender.sendNotification({ recipientUserId: input.ownerId, title,
-      text: `${input.summary}${input.kind === "result" ? "\n\n本次自愈已结束，后续请自行处理。" : ""}\n\n[${input.kind === "plan" ? "查看完整方案、证据及任务时间线" : "查看处理指引、证据及任务时间线"}](${url.href})` });
+      text: `${input.summary}${input.kind === "result" ? recovered ? "\n\n本次自愈已结束，后续建议可按需处理。" : "\n\n本次自愈已结束，后续请自行处理。" : ""}\n\n[${input.kind === "plan" ? "查看完整方案、证据及任务时间线" : "查看处理指引、证据及任务时间线"}](${url.href})` });
     return true;
   }
 }

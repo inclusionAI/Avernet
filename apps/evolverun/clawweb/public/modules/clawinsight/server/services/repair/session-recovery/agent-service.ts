@@ -480,7 +480,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
   }
   async report(task: RecoveryStoredTask, body: Record<string, unknown>) {
     // Compatibility for packages deployed before the generic handoff result.
-    if (body.kind === "blocked" && body.reason === "mcp_permission_required") body = { ...body, kind: "owner_handoff" };
+    if (body.kind === "blocked" && body.reason === "mcp_permission_required") body = { ...body, kind: "owner_handoff", effect: "not_recovered" };
     if (body.phase !== task.phase) fail(409, "回报不对应当前阶段，请重新读取任务");
     if (task.simulation && !["assessment", "plan", "blocked", "release"].includes(String(body.kind))) fail(403, "仿真只接受拟议判断和方案，不接受执行或效果回报");
     if (body.kind === "release") {
@@ -511,7 +511,8 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       await this.deps.business().finishApply(task.taskId, task.version, { applicable: body.applicable, success: body.success, summary: body.summary }, body.final_summary);
     } else if (body.kind === "owner_handoff") {
       await this.deps.business().finishForOwnerHandoff(task.taskId, task.version,
-        { summary: body.summary as string, evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId }, body.final_summary);
+        { summary: body.summary as string, evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId,
+          effect: body.effect as Exclude<RecoveryJudgment["effect"], "not_intervened"> | undefined }, body.final_summary);
     } else if (body.kind === "blocked" && typeof body.summary === "string") {
       if (task.simulation && body.reason === "user_continued") await this.deps.business().assessSimulation(task.taskId, task.version,
         { decision: "user_continued", summary: body.summary, evidence_ids: body.evidence_ids as string[] }, body.final_summary);
