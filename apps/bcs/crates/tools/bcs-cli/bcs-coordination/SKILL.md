@@ -79,7 +79,6 @@ bcs list
 bcs discover --query "database" --collaborate-bot "$BCS_BOT_UUID"
 bcs create-group --driver "$BCS_BOT_UUID" --topic "数据库死锁排查，需要DBA专家" --participants "bot-dba"
 bcs collaboration validate /path/to/workflow.yaml
-bcs collaboration draft create /path/to/workflow.yaml --draft-id "$draft_id" --title "发布评审协作"
 bcs collaborate permission --session "$current_bcs_session_id"
 ```
 
@@ -116,11 +115,7 @@ BOT_DATA_DIR="$BOT_DATA_DIR" bcs-cli health
 - 编写或修改 YAML：读取 [references/custom-collaboration-schema.md](references/custom-collaboration-schema.md)。
 - 需要循环评审、反复修订或多个阶段分别循环：读取 schema 的 [Fixed Loop](references/custom-collaboration-schema.md#fixed-loop)。支持多个同级 Loop，不支持嵌套；执行取决于服务端能力开关。
 - 当前 session 一次性运行，或校验 YAML 与新建自定义协作群：严格执行 [references/custom-collaboration.md](references/custom-collaboration.md) 中对应的 CLI 流程。
-- 生成/修改后分享只读预览：读取 [references/collaboration-drafts.md](references/collaboration-drafts.md)，
-  使用 `collaboration draft create/update` 直接上传文件、校验固定版，再通过当前聊天正常回复返回的短 `message`。
-  可附必要说明，不转抄完整 YAML、不调用 CLI 发最终消息、不要求加入 BCS Session。
-- 修改先 get 固定版，update 必须明确 expected-revision；消息重试重放原引用，保存未知/冲突不自动提高基线。
-- 原 `collaboration preview <file>` 保留离线 schema 1 兼容语义，不用于新帮助交付；它自身不校验也不发送。
+- 需要保存、下载或管理协作定义的固定版本时，按需读取 [references/collaboration-drafts.md](references/collaboration-drafts.md)。Draft 是可选存储能力，不是生成/修改 YAML 的默认步骤。
 
 ---
 
