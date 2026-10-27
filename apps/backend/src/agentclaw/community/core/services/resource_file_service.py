@@ -346,12 +346,12 @@ class ResourceFileService(ResourceFilePort):
         a recursive listing correct; teclaw doesn't, so fall back to the entry name
         (valid for the non-recursive listings we do today).
         """
-        leaf = ResourceFileService._leaf(entry)
+        leaf = ResourceFileService._entry_relative_path(entry)
         return f"{request_path}/{leaf}" if request_path else leaf
 
     @staticmethod
-    def _leaf(entry: Mapping[str, Any]) -> str:
-        """The name a listing entry goes by under the directory that was listed.
+    def _entry_relative_path(entry: Mapping[str, Any]) -> str:
+        """A listing entry's path relative to the directory that was listed.
 
         The engines do not agree on the key: arca / baas / local give
         ``relative_path`` (the entry's path relative to the listed directory,
@@ -771,10 +771,10 @@ class ResourceFileService(ResourceFilePort):
         """The listing entry named ``leaf``, or ``None`` when the listing has no such child.
 
         The listings here are never recursive, so an entry's path under the
-        listed directory (``_leaf``) is its name.
+        listed directory (``_entry_relative_path``) is its name.
         """
         for entry in entries:
-            if ResourceFileService._leaf(entry) == leaf:
+            if ResourceFileService._entry_relative_path(entry) == leaf:
                 return entry
         return None
 
