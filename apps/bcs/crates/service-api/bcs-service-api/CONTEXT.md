@@ -541,3 +541,17 @@ summary; HTTP version negotiation remains the adapter's responsibility.
 SessionManagementService.authorize_collaboration is the policy contract used before HTTP self-enrollment and runtime Human input. Bootstrap injects the live registry into SessionManagementServiceImpl; the runtime-cleanup wrapper delegates the contract. Legacy implementations without Provider support retain their existing default behavior.
 
 BotProviderRepoPort.validate_provider_affiliation is a fresh preflight for registration before capability merging. Concrete memory/SQL attachment implementations must also recheck public membership at the write boundary; the default unsupported error is not an authorization fallback.
+
+BotRunContextPort remains the trusted pre-delivery registration boundary. The
+bootstrap composition may decorate it with process-local output lineage without
+changing Memory/Redis storage semantics or adding per-frame remote reads.
+Independent producers and MessageFlow must share that registration instance;
+missing/retired nonmanaged Runs have no authorization to produce message effects.
+The existing BotRunContextPort conformance harness covers the decorated Memory
+and cache implementations, in addition to producer-to-consumer integration tests.
+
+`BotRunContextPort::put_alias_context` is the compatibility projection of an
+already validated accepted alias, not a new producer. Its default delegates the
+storage write for existing implementations; lifecycle decorators must not mint
+independent output lineage, including when a delayed ACK overlaps canonical
+terminal cleanup. WS uses this method for direct A2A alias scope projection.

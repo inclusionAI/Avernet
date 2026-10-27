@@ -461,26 +461,10 @@ impl BcsServer {
                 message_repo,
             )
         };
-        if config.bot_run_context_store == "redis"
-            && infrastructure_plugins.cache_kind() != CachePluginKind::Redis
-        {
-            return Err(crate::BcsError::InvalidConfig(
-                "bot_run_context_store='redis' requires a Redis cache backend \
-                 ([cache.redis]); the resolved cache is not Redis — refusing to \
-                 start with silently process-local run context"
-                    .to_string(),
-            ));
-        }
-        let bot_run_context: Arc<dyn BotRunContextPort> = if config.bot_run_context_store == "redis"
-        {
-            Arc::new(bcs_message_flow::RedisBotRunContextStore::new(
-                cache_plugin.clone(),
-                cache_key_prefix.clone(),
-                config.async_chat_run_retention_ms,
-            ))
-        } else {
-            Arc::new(bcs_message_flow::MemoryBotRunContextStore::new())
-        };
+        let tracked_run_context = create_configured_run_context(
+            &config, infrastructure_plugins.cache_kind(), cache_plugin.clone(), cache_key_prefix.clone(),
+        )?;
+        let bot_run_context: Arc<dyn BotRunContextPort> = tracked_run_context.clone();
         let session_file_service = build_session_files_service(
             &config,
             crate::env::resolve_env(),
@@ -559,7 +543,7 @@ impl BcsServer {
             build_human_mention_notify_port(&config).await?,
             bot_authority.hook.clone(),
             Some(output_admission.clone()),
-        );
+        ).with_tracked_run_context(tracked_run_context);
         let pending_messages = message_flow_builder
             .pending_message_port()
             .expect("message flow pending reader requires run context");

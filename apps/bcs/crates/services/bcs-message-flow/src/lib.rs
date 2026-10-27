@@ -27,6 +27,7 @@ pub(crate) mod protocol_context;
 pub(crate) mod message_tracker;
 pub mod run_context;
 pub mod run_context_redis;
+mod tracked_run_context;
 pub mod task_flow;
 pub mod task_store;
 
@@ -93,6 +94,7 @@ pub use group_fusion::BcsGroupFusion;
 pub use group_history::BcsGroupMessageHistory;
 pub use bcs_service_api::ProviderStreamGrayList;
 pub use run_context::MemoryBotRunContextStore;
+pub use tracked_run_context::TrackedBotRunContext;
 pub use run_context_redis::RedisBotRunContextStore;
 
 mod caller_execution;

@@ -317,12 +317,13 @@ impl MockBot {
     /// Respond to a `chat.send` request with a `chat.event` frame.
     /// `request_id` is the `id` field from the incoming `chat.send` frame.
     pub async fn send_chat_event(&mut self, group_id: &str, request_id: &str, text: &str) {
-        // First send the response to the chat.send request
+        // Events must use the same accepted Run identity as their ACK.
+        let run_id = format!("run_{}", uuid_v4());
         let response = json!({
             "type": "res",
             "id": request_id,
             "ok": true,
-            "payload": { "run_id": format!("run_{}", uuid_v4()) }
+            "payload": { "run_id": &run_id }
         });
         self.send_raw(response).await;
 
@@ -331,7 +332,7 @@ impl MockBot {
             "type": "event",
             "event": "chat.event",
             "payload": {
-                "run_id": format!("run_{}", uuid_v4()),
+                "run_id": &run_id,
                 "bcs_group_id": group_id,
                 "state": "final",
                 "message": {

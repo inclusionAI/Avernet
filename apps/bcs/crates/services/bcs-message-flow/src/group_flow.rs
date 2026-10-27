@@ -294,6 +294,14 @@ impl BcsMessageFlow {
         self
     }
 
+    /// Share the producer registry used by ALL context writers (A2A, system,
+    /// queue and group sends). Composition passes this same port to producers.
+    pub fn with_tracked_run_context(mut self, context: Arc<crate::TrackedBotRunContext>) -> Self {
+        self.message_tracker = context.tracker();
+        self.bot_run_context = Some(context);
+        self
+    }
+
     pub fn with_provider_chat_run_timeout_ms(mut self, timeout_ms: u64) -> Self {
         self.provider_chat_run_timeout_ms = timeout_ms;
         self
@@ -359,8 +367,8 @@ impl BcsMessageFlow {
         if delivery_type != DeliveryType::Send {
             return Ok(());
         }
+        let deadline_ms = now_ms().saturating_add(self.provider_chat_run_timeout_ms);
         if let Some(run_context) = &self.bot_run_context {
-            let deadline_ms = now_ms().saturating_add(self.provider_chat_run_timeout_ms);
             let session_id = bcs_session_id.unwrap_or(group_id).to_string();
             run_context
                 .put_context(BotRunContext {
@@ -406,7 +414,7 @@ impl BcsMessageFlow {
         }
         // Explicitly distinguish live internal/relay Runs from a retired Run
         // whose operation binding was cleaned up. Never recreate this at ingress.
-        self.message_tracker.register_independent_output_run(run_id).await;
+        self.message_tracker.register_independent_output_run(run_id, deadline_ms).await;
         Ok(())
     }
 
@@ -620,9 +628,9 @@ impl MessageFlowService for BcsMessageFlow {
         source_run_id: &str,
         accepted_run_id: &str,
     ) -> ServiceResult<bool> {
-        // Admitted aliases normalize to their source Run at event ingress;
+        // All tracked aliases normalize to their source Run at event ingress;
         // keep its IM destination under that same canonical identity.
-        if self.message_tracker.operation_of_run(source_run_id).await.is_some() {
+        if self.message_tracker.output_binding(source_run_id).await.is_some() {
             return Ok(self.message_tracker.channel_source_message_id(source_run_id).await.is_some());
         }
         Ok(self
@@ -650,7 +658,15 @@ impl MessageFlowService for BcsMessageFlow {
                     group_id: entry.group_id, bot_id: entry.target_bot,
                 })
             } else if let Some(contexts) = &self.bot_run_context {
-                contexts.find_active_run(task_id).await?.map(|context| context.scope)
+                match contexts.find_active_run(task_id).await? {
+                    Some(context) => Some(context.scope),
+                    None => contexts.get_context(task_id).await
+                        .filter(|context| !context.terminal && context.deadline_ms > now_ms())
+                        .map(|context| BotRunScope {
+                            session_id: context.bcs_session_id.unwrap_or_default(),
+                            group_id: context.group_id, bot_id: context.bot_id,
+                        }),
+                }
             } else { None };
             let Some(scope) = scope.filter(|scope| scope.bot_id == bot_id) else {
                 return Ok(TaskRunAliasRegistration::Rejected);

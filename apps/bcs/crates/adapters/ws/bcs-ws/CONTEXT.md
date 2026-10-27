@@ -157,3 +157,9 @@ also fails closed in MessageFlow, including cleaned aliases. Legacy agent/error
 normalizes to the same chat error command as V3, so settlement, task failure,
 terminal backpressure and per-stream permit cleanup share one lifecycle. No
 extra chat final is required; running sibling streams retain their permits.
+
+Unknown or cleaned nonmanaged Run output is also fenced at MessageFlow's event
+entry, not only at frontend publication. A completed accepted alias whose active
+context was removed cannot re-enter persistence/relay through the legacy scope
+fallback. Direct A2A alias projection uses the composition-shared tracked context
+and never creates a second independent output identity for an alias.

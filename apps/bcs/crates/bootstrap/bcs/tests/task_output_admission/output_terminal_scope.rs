@@ -225,7 +225,7 @@ async fn explicit_independent_run_keeps_live_alias_output_but_not_terminal_repla
     let (_, mut frames) = f.subscribe("bot-driver").await;
     // Trusted internal/relay send registration, unlike an arbitrary ingress Run.
     let run = "independent-run";
-    f.flow.message_tracker.register_independent_output_run(run).await;
+    f.flow.message_tracker.register_independent_output_run(run, u64::MAX).await;
     let scope = BotRunScope { group_id:"group-1".into(), bot_id:"bot-driver".into(), session_id:SESSION.into() };
     f.contexts.put_context(BotRunContext { run_id:run.into(), bot_id:"bot-driver".into(), group_id:"group-1".into(),
         bcs_session_id:Some(SESSION.into()), deadline_ms:u64::MAX, terminal:false }).await;

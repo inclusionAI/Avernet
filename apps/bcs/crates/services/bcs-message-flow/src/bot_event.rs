@@ -93,6 +93,16 @@ pub async fn handle_bot_event(
         lock.lock_owned().await
     };
     let managed = if managed.is_some() { crate::queued_admission::find_managed_run(flow, &cmd).await? } else { None };
+    // Admission at the whole event boundary, not just frontend publication.
+    // Recheck under the per-Run lock: a concurrent final may have retired this
+    // canonical Run while we waited. A cleaned alias has no binding either.
+    // Managed callbacks retain their durable terminal/recovery contract below.
+    if managed.is_none() && flow.output_admission.is_some()
+        && flow.message_tracker.output_binding(&cmd.run_id).await.is_none() {
+        return Ok(BotEventOutcome { bot_deliveries: Vec::new(), frontend_deliveries: Vec::new(),
+            unregistered_run_ids: Vec::new(), mentions: Vec::new(), delivered_count: 0,
+            failed_count: 0, delivery_results: Vec::new() });
+    }
     if let Some(row) = managed.as_ref().filter(|row| row.flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a) {
         return flow.direct_chat.as_ref().ok_or_else(|| ServiceError::InternalError("direct queue projection unavailable".into()))?.direct_event(flow, row, &cmd).await;
     }

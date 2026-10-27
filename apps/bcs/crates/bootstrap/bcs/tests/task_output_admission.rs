@@ -66,7 +66,7 @@ struct Fixture {
     registry: Arc<WorkbenchConnectionRegistry>,
     resolver: Arc<ws_support::RecordingAdmission>,
     output: Arc<OutputProbe>,
-    contexts: Arc<MemoryBotRunContextStore>,
+    contexts: Arc<bcs_message_flow::TrackedBotRunContext>,
     live: Arc<LiveDeliveryPolicy>,
 }
 impl Fixture {
@@ -94,11 +94,11 @@ impl Fixture {
             inner: WorkbenchOutputAdmission::new(registry.clone(), resolver.clone()),
             managed: managed.clone(), runs: Mutex::new(Vec::new()), release_gate: Mutex::new(None),
         });
-        let contexts = Arc::new(MemoryBotRunContextStore::default());
+        let contexts = Arc::new(bcs_message_flow::TrackedBotRunContext::new(Arc::new(MemoryBotRunContextStore::default())));
         let mut flow = BcsMessageFlow::new(support.group.clone(), support.routing.clone(), support.registry.clone(),
             support.bot_delivery.clone(), frontend)
             .with_message_repo(repo).with_managed_deliveries(fault.clone())
-            .with_bot_run_context(contexts.clone())
+            .with_tracked_run_context(contexts.clone())
             .with_output_admission(Some(output.clone()))
             .with_session_management(Arc::new(sessions::StaticSessionManagement::new(
                 sessions::test_session(SESSION, "group-1", group.participants))));

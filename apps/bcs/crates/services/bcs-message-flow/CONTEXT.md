@@ -272,3 +272,37 @@ sends register independent Runs before transport; terminal/rejection cleanup
 removes the marker and aliases. This uses the existing local Run map with no
 terminal tombstone cache, TTL, eviction loophole or frame-time database read.
 Task terminal publication precedes output binding cleanup, including errors.
+
+## Shared Run producer registration
+
+Composition wraps the selected Memory/Redis `BotRunContextPort` in
+`TrackedBotRunContext` and attaches it through `with_tracked_run_context` before
+publishing the MessageFlow or its pending-message reader. The SAME decorated
+port goes to A2A, SystemMessage, queue preparation, WS and Provider consumers.
+Successful return from producer `put_context` installs local independent output
+lineage before delivery; it never replaces an already admitted operation or
+turns an accepted alias projection into a new independent producer. No wire,
+DB schema, credential or storage-plugin contract changes are introduced. The
+business Run-context port distinguishes alias projection with `put_alias_context`;
+a delayed ACK cannot re-register output after canonical terminal cleanup.
+
+Missing/retired nonmanaged lineage is checked at the whole Bot-event boundary,
+under the existing canonical Run lock, before history, channel output, task or
+relay effects. Terminal processing removes lineage only after its final effects;
+concurrent canonical/alias frames recheck it after acquiring the lock. Managed
+callbacks retain their durable identity/status, recovery and retry contract.
+Unknown ingress never recreates producer lineage from wire IDs or stale context.
+
+Producers without a Group active-run index (including direct A2A) can bind
+acceptance aliases using their live registered context. Scope/producer
+identity checks and the original Internal response sink remain intact.
+
+Access cost: producer registration and frame checks add local map operations,
+zero SQL/cache reads. ACK validation reuses active-context reads with a registered producer-context
+fallback only at acceptance, never per output frame. The existing
+context-cleanup tick scans the local lineage map, O(number of tracked Runs),
+and removes independent markers/aliases only after context deadline plus its
+existing retention grace (e.g. a timed-out direct Run with no final). The grace
+keeps timeout/error publication possible; adapters still reject expired uplink
+frames using the existing context deadline. It does NOT expire or evict admitted/queued operation permits.
+No new timer, remote scan, retry loop or permission TTL is introduced.

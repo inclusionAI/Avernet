@@ -233,6 +233,8 @@ impl BcsServer {
         );
         let bot_run_context: Arc<dyn BotRunContextPort> =
             Arc::new(bcs_message_flow::MemoryBotRunContextStore::new());
+        let tracked_run_context = Arc::new(bcs_message_flow::TrackedBotRunContext::new(bot_run_context));
+        let bot_run_context: Arc<dyn BotRunContextPort> = tracked_run_context.clone();
         let session_file_service = build_session_files_service_blocking(
             &config,
             crate::env::resolve_env(),
@@ -305,7 +307,7 @@ impl BcsServer {
             Arc::new(bcs_service_api::port::NoopHumanMentionNotifyPort),
             bot_authority.hook.clone(),
             Some(output_admission.clone()),
-        );
+        ).with_tracked_run_context(tracked_run_context);
         let pending_messages = message_flow_builder
             .pending_message_port()
             .expect("message flow pending reader requires run context");

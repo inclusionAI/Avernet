@@ -34,7 +34,7 @@ use crate::friend_connect_notification::HttpFriendConnectNotificationPort;
 use crate::HttpFriendAuthSyncPort;
 use crate::lifecycle::LifecycleOrchestrator;
 use crate::plugins::{
-    CachePluginKind, DbPluginKind, InfrastructurePlugins, LeaderElectionRegistration,
+    DbPluginKind, InfrastructurePlugins, LeaderElectionRegistration,
     build_human_mention_notify_port, build_registered_channel_provider,
     build_registered_leader_election, build_registered_llm_provider,
     build_registered_security_gateway, build_registered_user_directory,
@@ -190,6 +190,10 @@ pub(crate) use resource_builders::gateway_principal_verifier_for_tests;
 pub use state::{BcsServer, BcsServerExtensions, BcsServerState};
 
 
+
+#[cfg(test)]
+#[path = "server/admin_run_test_support.rs"]
+mod admin_run_test_support;
 
 #[cfg(test)]
 mod tests {
@@ -652,43 +656,6 @@ mod tests {
         }
     }
 
-    struct AdminRunTestA2aRuns;
-
-    #[async_trait]
-    impl A2aChatRunService for AdminRunTestA2aRuns {
-        async fn start_async_chat(
-            &self,
-            cmd: bcs_service_api::AsyncA2aChatCommand,
-        ) -> bcs_service_api::ServiceResult<bcs_service_api::AsyncA2aChatAccepted> {
-            Ok(bcs_service_api::AsyncA2aChatAccepted {
-            delivery: None,
-                run_id: cmd.run_id,
-                bot_uuid: cmd.target_bot_id,
-                session_id: cmd.session_key,
-                status: "dispatched".to_string(),
-                expires_at_ms: u64::MAX,
-            })
-        }
-
-        async fn get_run(
-            &self,
-            cmd: bcs_service_api::ChatRunQueryCommand,
-        ) -> bcs_service_api::ServiceResult<bcs_service_api::A2aRunStatus> {
-            Ok(bcs_service_api::A2aRunStatus {
-                run_id: cmd.run_id,
-                status: "running".to_string(),
-                response: None,
-            })
-        }
-
-        async fn cancel_run(
-            &self,
-            _cmd: bcs_service_api::ChatRunCancelCommand,
-        ) -> bcs_service_api::ServiceResult<bcs_service_api::A2aRunStatus> {
-            unreachable!("admin run test does not cancel")
-        }
-    }
-
     #[test]
     fn judge_llm_provider_selection_uses_public_provider_types() {
         let mut config = BcsConfig::default();
@@ -880,7 +847,9 @@ mod tests {
                 provider_id: provider.provider_id.clone(),
             }),
         ));
-        http_state.services.a2a_chat_runs = Arc::new(AdminRunTestA2aRuns);
+        http_state.services.a2a_chat_runs = Arc::new(admin_run_test_support::AdminRunTestA2aRuns(
+            server.state.services.bot_run_context.clone(),
+        ));
         let app = bcs_http::router::build_router(http_state);
 
         let create_response = app

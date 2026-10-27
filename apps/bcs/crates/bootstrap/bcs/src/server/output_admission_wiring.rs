@@ -76,3 +76,45 @@ pub(super) fn create_output_admission(
         output_admission,
     }
 }
+
+/// Keep storage selection and its validation at the composition root. All Run
+/// producers receive this same decorated port; MessageFlow shares its tracker.
+pub(super) fn create_configured_run_context(
+    config: &crate::BcsConfig,
+    cache_kind: crate::plugins::CachePluginKind,
+    cache: Arc<dyn bcs_cache_api::CachePlugin>,
+    key_prefix: String,
+) -> crate::Result<Arc<bcs_message_flow::TrackedBotRunContext>> {
+    use bcs_service_api::BotRunContextPort;
+    if config.bot_run_context_store == "redis"
+        && cache_kind != crate::plugins::CachePluginKind::Redis {
+        return Err(crate::BcsError::InvalidConfig(
+            "bot_run_context_store='redis' requires a Redis cache backend \
+             ([cache.redis]); the resolved cache is not Redis — refusing to \
+             start with silently process-local run context".to_string(),
+        ));
+    }
+    let inner: Arc<dyn BotRunContextPort> = if config.bot_run_context_store == "redis" {
+        Arc::new(bcs_message_flow::RedisBotRunContextStore::new(
+            cache, key_prefix, config.async_chat_run_retention_ms,
+        ))
+    } else {
+        Arc::new(bcs_message_flow::MemoryBotRunContextStore::new())
+    };
+    Ok(Arc::new(bcs_message_flow::TrackedBotRunContext::new(inner)))
+}
+
+#[cfg(test)]
+mod run_context_tests {
+    use super::*;
+
+    #[test]
+    fn redis_context_still_requires_a_real_redis_backend() {
+        let mut config = crate::BcsConfig::default();
+        config.bot_run_context_store = "redis".into();
+        let result = create_configured_run_context(&config, crate::plugins::CachePluginKind::LocalMemory,
+            Arc::new(bcs_cache_local::InMemoryCachePlugin::new()), "test:".into());
+        assert!(matches!(result, Err(crate::BcsError::InvalidConfig(message))
+            if message.contains("requires a Redis cache backend")));
+    }
+}

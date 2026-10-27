@@ -11,6 +11,13 @@ struct OutputAliases {
 use serde_json::Value;
 use tokio::sync::Mutex;
 
+enum RunOutputBinding {
+    Admitted(String),
+    // Independent Runs have the same deadline as their trusted send context.
+    // This bound never applies to frozen, admitted operations.
+    Independent { deadline_ms: u64 },
+}
+
 const TOOL_CALL_START_TTL_MS: u64 = 6 * 60 * 60 * 1000;
 
 #[derive(Clone)]
@@ -104,10 +111,10 @@ pub struct MessageTracker {
     /// path creates the run (before the bot can emit its first
     /// event) and cleared with the run's terminal cleanup. Runs
     /// created outside an admitted operation (internal drains,
-    /// relay continuations) explicitly register a None value: their events
+    /// relay continuations) explicitly register an Independent value: their events
     /// authorize per event against current facts. A missing entry is NOT an
     /// independent producer and cannot publish protected Run output.
-    run_operations: Mutex<HashMap<String, Option<String>>>,
+    run_operations: Mutex<HashMap<String, RunOutputBinding>>,
     output_aliases: Mutex<OutputAliases>,
 }
 
@@ -139,24 +146,62 @@ impl MessageTracker {
             .lock()
             .await
             .entry(run_id.to_string())
-            .or_insert_with(|| Some(operation_id.to_string()));
+            .or_insert_with(|| RunOutputBinding::Admitted(operation_id.to_string()));
     }
 
     /// The operation a run was admitted under, if any.
     pub async fn operation_of_run(&self, run_id: &str) -> Option<String> {
-        self.run_operations.lock().await.get(run_id).cloned().flatten()
+        match self.run_operations.lock().await.get(run_id) {
+            Some(RunOutputBinding::Admitted(operation)) => Some(operation.clone()),
+            _ => None,
+        }
     }
 
     /// Explicit independent producer registration, never inferred from a missing
     /// operation. Only trusted send preparation may create this live marker.
-    pub async fn register_independent_output_run(&self, run_id: &str) {
-        self.run_operations.lock().await.entry(run_id.to_string()).or_insert(None);
+    pub async fn register_independent_output_run(&self, run_id: &str, deadline_ms: u64) {
+        let mut operations = self.run_operations.lock().await;
+        // Direct A2A projects a context under the accepted alias too. It must
+        // remain an alias, not become a second independently live producer.
+        if self.output_aliases.lock().await.by_alias.contains_key(run_id) {
+            return;
+        }
+        operations.entry(run_id.to_string())
+            .and_modify(|binding| {
+                if let RunOutputBinding::Independent { deadline_ms: previous } = binding {
+                    *previous = deadline_ms;
+                }
+            })
+            .or_insert(RunOutputBinding::Independent { deadline_ms });
     }
 
     /// Missing means unknown/retired, Some(None) is a live independent Run,
     /// and Some(Some(id)) belongs to an admitted operation.
     pub async fn output_binding(&self, run_id: &str) -> Option<Option<String>> {
-        self.run_operations.lock().await.get(run_id).cloned()
+        match self.run_operations.lock().await.get(run_id) {
+            Some(RunOutputBinding::Admitted(operation)) => Some(Some(operation.clone())),
+            Some(RunOutputBinding::Independent { .. }) => Some(None),
+            _ => None,
+        }
+    }
+
+    /// Called by the existing context cleanup tick. Orphaned independent Runs
+    /// expire with their send context, but admitted/queued operations never do.
+    pub(crate) async fn cleanup_expired_independent_outputs(&self, now_ms: u64, retention_ms: u64) {
+        let mut operations = self.run_operations.lock().await;
+        let mut expired = Vec::new();
+        operations.retain(|run, binding| {
+            if matches!(binding, RunOutputBinding::Independent { deadline_ms } if now_ms > deadline_ms.saturating_add(retention_ms)) {
+                expired.push(run.clone());
+                false
+            } else { true }
+        });
+        let mut aliases = self.output_aliases.lock().await;
+        for run in expired {
+            if let Some(names) = aliases.by_run.remove(&run) {
+                for name in names { aliases.by_alias.remove(&name); }
+            }
+        }
     }
 
     /// Retire only this Run's output facts/aliases. Unsent terminal cleanup
@@ -466,11 +511,11 @@ mod tests {
         let tracker = MessageTracker::new();
         assert_eq!(tracker.output_binding("run").await, None);
         tracker.cache_run_operation("run", "operation").await;
-        tracker.register_independent_output_run("run").await;
+        tracker.register_independent_output_run("run", u64::MAX).await;
         assert_eq!(tracker.output_binding("run").await, Some(Some("operation".into())));
         let scope = bcs_service_api::BotRunScope { bot_id:"bot".into(), group_id:"group".into(), session_id:"session".into() };
         assert!(tracker.register_output_alias("run", "alias", scope.clone()).await);
-        tracker.register_independent_output_run("independent").await;
+        tracker.register_independent_output_run("independent", u64::MAX).await;
         assert_eq!(tracker.output_binding("independent").await, Some(None));
         tracker.cleanup_output_run("run").await;
         assert_eq!(tracker.output_binding("run").await, None);

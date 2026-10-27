@@ -467,7 +467,7 @@ async fn alias_direct_run_context(
     }
 
     context.run_id = alias_run_id.to_string();
-    state.bot_run_context.put_context(context).await;
+    state.bot_run_context.put_alias_context(context).await;
     true
 }
 
