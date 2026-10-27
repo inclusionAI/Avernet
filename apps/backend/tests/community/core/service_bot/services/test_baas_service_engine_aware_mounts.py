@@ -3,6 +3,7 @@
 覆盖 openspec/changes/archive/2026-05-25-service-bot-claudecode-engine
 中的 spec：engine-aware-baas。
 """
+from tests.community.bot_address_fakes import support_legacy_locator
 from unittest.mock import MagicMock
 
 import pytest
@@ -52,10 +53,12 @@ def _make_storage_path() -> MagicMock:
 def _make_composer(storage_path=None, bot_repo=None) -> ManagedDeployConfigComposer:
     """Mounts and storage are the managed image's layout, so they now live on
     ``ManagedDeployConfigComposer``. Tests of that layout target it directly."""
+    bot_repo = bot_repo or MagicMock()
+    support_legacy_locator(bot_repo)
     return ManagedDeployConfigComposer(
         storage_path=storage_path or _make_storage_path(),
         sandbox_registry=_make_registry(),
-        bot_repo=bot_repo or MagicMock(),
+        bot_repo=bot_repo,
         storage_policy=NoopStoragePolicy(),
     )
 

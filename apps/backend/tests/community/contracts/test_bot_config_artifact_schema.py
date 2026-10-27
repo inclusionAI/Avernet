@@ -327,12 +327,12 @@ def test_frozen_artifact_with_opaque_engine_ext_still_conforms() -> None:
     pinned = result.ext["config_artifact"]
     jsonschema.validate(instance=pinned, schema=_schema())
     # opaque engine payload carried verbatim, plus the backend identity/stage keys
-    # (owner_id / bot_name default to "" — the bot row here carries neither).
+    # (owner_id carries the stable entity; bot_name defaults to "").
     assert pinned["engine_ext"] == {
         "memory_ref": "oss://ws/MEMORY.md",
         "nested": {"x": [1, 2]},
         "bot_id": "bot7",
-        "owner_id": "",
+        "owner_id": "staff_u1",
         "bot_name": "",
         "stage": "draft",
     }

@@ -162,7 +162,14 @@ class TestRealSchema:
         ``create_schema: true`` a supported configuration.
         """
         schema.import_all_models()
-        metadatas = schema._metadatas()
+        # MySQL preparation replaces constraints with prefix indexes. Work on
+        # copies so this test cannot mutate the ORM contracts of later tests.
+        metadatas = []
+        for original in schema._metadatas():
+            isolated = sa.MetaData()
+            for table in original.tables.values():
+                table.to_metadata(isolated)
+            metadatas.append(isolated)
 
         assert _oversized_keys(metadatas[0]), (
             "expected the shipped models to declare keys past InnoDB's cap — "
@@ -177,7 +184,10 @@ class TestRealSchema:
         schema.import_all_models()
         dialect = mysql.dialect()
 
-        for metadata in schema._metadatas():
+        for original in schema._metadatas():
+            metadata = sa.MetaData()
+            for table in original.tables.values():
+                table.to_metadata(metadata)
             schema.prepare_for_mysql(metadata)
             for table in metadata.sorted_tables:
                 CreateTable(table).compile(dialect=dialect)
