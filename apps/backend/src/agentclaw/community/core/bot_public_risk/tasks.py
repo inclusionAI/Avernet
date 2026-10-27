@@ -36,6 +36,14 @@ class SecurityProviderUnavailable(RuntimeError):
 
 
 class SecurityProvider(Protocol):
+    """Submit once and query by original check ID.
+
+    A submission returns a nonempty external ID. Errors after a request may
+    have been sent are outcome-unknown and must not trigger a blind retry;
+    SecurityProviderUnavailable means no external request was attempted.
+    Query failures propagate without inventing a security conclusion. PASS is
+    actionable only when the provider supplies independently verified valid_pass.
+    """
     def submit_agent_scan(self, agent_info: dict) -> str: ...
     def get_agent_check_report(self, check_id: str) -> SecurityReport: ...
 

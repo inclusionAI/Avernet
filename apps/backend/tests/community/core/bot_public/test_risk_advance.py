@@ -231,3 +231,50 @@ def test_concurrent_reclaimed_worker_preserves_direct_publication_result():
     thread.join(5)
     assert not thread.is_alive()
     assert repo.row.phase == "PUBLISHED"
+
+
+def test_unknown_approval_uses_one_bounded_lookup_without_resubmission():
+    repo = MemoryRepository(row(workflow_json='{"approval_intent":true}'))
+    lookup = MagicMock(return_value="puid-verified")
+    submit = MagicMock()
+    advance = RiskAdvance(repo, lambda _: True, submit, lambda: datetime(2026, 1, 1), recovery=lookup)
+    advance.advance("dev", "a")
+    advance.advance("dev", "a")
+    lookup.assert_called_once()
+    submit.assert_not_called()
+    assert repo.row.phase == "NEEDS_ATTENTION"
+    assert repo.row.approval_puid == "puid-verified"
+    assert json.loads(repo.row.workflow_json)["error"] == "APPROVAL_TARGET_NOT_READY"
+
+
+def test_inconclusive_approval_lookup_never_retries_submission():
+    repo = MemoryRepository(row(workflow_json='{"approval_intent":true}'))
+    lookup = MagicMock(return_value=None)
+    submit = MagicMock()
+    advance = RiskAdvance(repo, lambda _: True, submit, lambda: datetime(2026, 1, 1), recovery=lookup)
+    advance.advance("dev", "a")
+    advance.advance("dev", "a")
+    assert repo.row.phase == "NEEDS_ATTENTION" and repo.row.approval_puid is None
+    assert lookup.call_count == 1 and submit.call_count == 0
+
+
+def test_late_original_worker_can_finish_after_lookup_finds_same_puid():
+    from threading import Event, Thread
+    repo = MemoryRepository(row())
+    sent, resume = Event(), Event()
+    def submit(record, on_started):
+        sent.set()
+        assert resume.wait(5)
+        on_started({"puid": "p1"})
+        return "approval"
+    lookup = MagicMock(return_value="p1")
+    advance = RiskAdvance(repo, lambda _: True, submit, lambda: datetime(2026, 1, 1), recovery=lookup)
+    thread = Thread(target=advance.advance, args=("dev", "a"))
+    thread.start()
+    assert sent.wait(5)
+    advance.advance("dev", "a")
+    assert repo.row.phase == "NEEDS_ATTENTION" and repo.row.approval_puid == "p1"
+    resume.set()
+    thread.join(5)
+    assert not thread.is_alive() and repo.row.phase == "APPROVING" and repo.row.approval_puid == "p1"
+    lookup.assert_called_once()

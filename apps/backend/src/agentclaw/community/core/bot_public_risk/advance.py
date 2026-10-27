@@ -2,10 +2,21 @@
 
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Callable
+from typing import Callable, Protocol
 
 from agentclaw.community.core.bot_public_risk.repository import BotPublicRiskRepository, RiskCheck
 from agentclaw.community.core.bot_public_risk.notices import stage_notice
+
+
+class ApprovalRecovery(Protocol):
+    """Perform one bounded lookup; return only an evidenced real PUID.
+
+    None and errors mean an inconclusive lookup, never proof of no creation.
+    A returned PUID must belong to the saved business ID and applicant; callers
+    must not use this capability to poll the ordinary human approval lifecycle.
+    """
+
+    def __call__(self, row: RiskCheck) -> str | None: ...
 
 
 class RiskAdvance:
@@ -17,8 +28,9 @@ class RiskAdvance:
     """
 
     def __init__(self, repository: BotPublicRiskRepository, check_h2: Callable[[RiskCheck], bool],
-                 submit: Callable, clock: Callable):
+                 submit: Callable, clock: Callable, recovery: ApprovalRecovery | None = None):
         self.repo, self.check_h2, self.submit, self.clock = repository, check_h2, submit, clock
+        self.recovery = recovery
 
     def _attention(self, row: RiskCheck, reason: str) -> None:
         workflow = json.loads(row.workflow_json)
@@ -36,7 +48,7 @@ class RiskAdvance:
             return
         workflow = json.loads(row.workflow_json)
         if workflow.get("approval_intent"):
-            self._attention(row, "APPROVAL_OUTCOME_UNKNOWN")
+            self._recover_unknown(row)
             return
         if self.check_h2(row) is not True:
             self._attention(row, "INPUT_OR_PERMISSION_INVALID")
@@ -58,7 +70,9 @@ class RiskAdvance:
                 if latest is None or latest.current_target_key is None:
                     raise RuntimeError("risk application no longer current")
                 workflow = json.loads(latest.workflow_json)
-                if latest.phase == "NEEDS_ATTENTION" and workflow.get("error") == "APPROVAL_OUTCOME_UNKNOWN":
+                if latest.phase == "NEEDS_ATTENTION" and workflow.get("error") in {"APPROVAL_OUTCOME_UNKNOWN", "APPROVAL_TARGET_NOT_READY"}:
+                    if latest.approval_puid and latest.approval_puid != puid:
+                        raise RuntimeError("approval PUID differs from recovered instance")
                     if self.check_h2(latest) is not True:
                         raise RuntimeError("risk eligibility changed before approval association")
                     workflow.pop("error", None)
@@ -99,6 +113,40 @@ class RiskAdvance:
             return
         if latest.phase == "ADVANCING":
             self._attention(latest, "APPROVAL_OUTCOME_UNKNOWN")
+
+    def _recover_unknown(self, row: RiskCheck) -> None:
+        workflow = json.loads(row.workflow_json)
+        if self.recovery is None or workflow.get("approval_recovery_attempted"):
+            self._attention(row, "APPROVAL_OUTCOME_UNKNOWN")
+            return
+        workflow["approval_recovery_attempted"] = True
+        if not self.repo.update_current(env=row.env, risk_check_id=row.risk_check_id, row_version=row.row_version,
+                                        changes={"workflow_json": json.dumps(workflow)}):
+            return
+        current = self.repo.get(env=row.env, risk_check_id=row.risk_check_id)
+        if current is None or current.current_target_key is None:
+            return
+        try:
+            puid = self.recovery(current)
+        except Exception:
+            puid = None
+        for _ in range(3):
+            latest = self.repo.get(env=row.env, risk_check_id=row.risk_check_id)
+            if latest is None or latest.current_target_key is None or latest.approval_puid:
+                return
+            state = json.loads(latest.workflow_json)
+            if latest.phase == "NEEDS_ATTENTION" and state.get("error") != "APPROVAL_OUTCOME_UNKNOWN":
+                return
+            if latest.phase not in {"ADVANCING", "NEEDS_ATTENTION"}:
+                return
+            state["error"] = "APPROVAL_TARGET_NOT_READY" if isinstance(puid, str) and puid else "APPROVAL_OUTCOME_UNKNOWN"
+            changes = {"phase": "NEEDS_ATTENTION", "next_action_at": None, "workflow_json": json.dumps(state)}
+            if isinstance(puid, str) and puid:
+                changes["approval_puid"] = puid
+            if self.repo.update_current(env=row.env, risk_check_id=row.risk_check_id, row_version=latest.row_version,
+                                        changes=changes):
+                return
+        raise RuntimeError("unable to persist approval recovery outcome")
 
 
 class RiskAdvanceHandler:

@@ -6,7 +6,7 @@ from injector import Binder, Injector, Module, inject, provider, singleton
 
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.core.bot_collaborator.protocols import CollaboratorServiceProtocol
-from agentclaw.community.core.bot_public_risk.advance import RiskAdvance, RiskPendingHandler
+from agentclaw.community.core.bot_public_risk.advance import ApprovalRecovery, RiskAdvance, RiskPendingHandler
 from agentclaw.community.core.bot_public_risk.application import RiskInputBuilder
 from agentclaw.community.core.bot_public_risk.approval_guard import RiskApprovalGuard
 from agentclaw.community.core.bot_public_risk.eligibility import RiskEligibility
@@ -53,9 +53,15 @@ class LazyRiskInputs:
     def build(self, *, bot, target):
         return self.injector.get(RiskInputBuilder).build(bot=bot, target=target)
 
+
+class UnavailableApprovalRecovery:
+    def __call__(self, row):
+        return None
+
 class BotPublicRiskModule(Module):
     def configure(self, binder: Binder):
         binder.bind(SecurityProvider, to=UnavailableRiskProvider, scope=singleton)
+        binder.bind(ApprovalRecovery, to=UnavailableApprovalRecovery, scope=singleton)
         binder.bind(
             BotPublicRiskRepository, to=BotPublicRiskRepository, scope=singleton
         )
@@ -94,8 +100,9 @@ class BotPublicRiskModule(Module):
     @singleton
     @provider
     def risk_advance(self, repo: BotPublicRiskRepository, eligibility: RiskEligibility,
-                     bots: BotRepository, public: BotPublicServiceProtocol) -> RiskAdvance:
-        return RiskAdvance(repo, eligibility, RiskPublishAdapter(bots, public), utc_now)
+                     bots: BotRepository, public: BotPublicServiceProtocol,
+                     recovery: ApprovalRecovery) -> RiskAdvance:
+        return RiskAdvance(repo, eligibility, RiskPublishAdapter(bots, public), utc_now, recovery=recovery)
 
     @singleton
     @provider

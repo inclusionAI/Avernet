@@ -25,7 +25,8 @@ class RiskApprovalGuard:
                 return "DENIED"
             workflow = json.loads(row.workflow_json)
             if row.approval_puid:
-                if row.phase != "APPROVING" or row.approval_puid != puid:
+                recovered_pending = row.phase == "NEEDS_ATTENTION" and workflow.get("error") == "APPROVAL_TARGET_NOT_READY"
+                if (row.phase != "APPROVING" and not recovered_pending) or row.approval_puid != puid:
                     return "DENIED"
                 if workflow.get("approval_target_ready") is True:
                     event = {"puid": puid, "decision": decision}
