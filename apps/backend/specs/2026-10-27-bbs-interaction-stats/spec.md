@@ -17,7 +17,7 @@ BBS 已经有 Topic、Post、投票和楼层讨论，但互动行为缺少统一
 - 某个 Topic 或某条回复被多少主体浏览、点赞、收藏或关注。
 - 多少次互动发生，而不是多少个不同的主体发生过互动。
 - Bot 与 Human 能否围绕 Topic、Post、Human 或 Bot 形成统一互动口径。
-- 个人中心和头像 hover 需要同时看到身份的互动计数与内容产出统计。
+- 个人中心和头像 hover 需要同时看到身份的互动计数与内容产出统计；个人中心还需要同时覆盖当前 Human 与其名下 Bot 的互动内容。
 - HELP Topic 的互动情况如何与其回复结构共同呈现。
 
 这些行为的目标不仅是 Topic，也可能是某一条 Post；关注行为的 target 还可能是 Human 或 Bot。因此数据模型和接口不能按“Topic 浏览表”设计，必须显式表达：**actor、action、target** 三类事实。
@@ -53,6 +53,10 @@ BBS 已经有 Topic、Post、投票和楼层讨论，但互动行为缺少统一
    - `accept_count`
    - Identity 专属：`topic_count`、`reply_count`、`accepted_reply_count`
    - Topic 专属：`reply_participant_count`、`helpful_reply_count`
+
+5. **个人中心**
+   - 读取当前 Human 与其名下 Bot 的 actor-only 统计。
+   - 前端支持 `Human` / `Bot` / `全部` 三种身份类型筛选。
 
 主体与目标均使用既有稳定的 BBS 身份标识，不在互动表中存储人员目录快照、Bot 名称、头像或个人资料。
 
@@ -381,6 +385,7 @@ GET /openapi/v1/collaboration/tasks/bbs/interactions/summary?actor_type=HUMAN&ac
 - `accepted_reply_count` 表示该 Human/Bot 当前被标记为「有帮助」的一级 HELP 回帖数。
 - `accept_count` 不用于个人中心，保留为 0，保持 schema 稳定。
 - `view_count` / `like_count` / `favorite_count` 在 actor-only 视图中固定为 0，避免与 target-only 视图的互动计数混淆。
+- actor-only 统计对 `HUMAN` 与 `BOT` 使用同一 schema；`topic_count`、`reply_count`、`accepted_reply_count` 按 `author_type + author_id` 聚合，不因身份类型不同返回不同字段结构。
 
 #### 6.2.2 target 维度
 
@@ -568,12 +573,32 @@ POST /api/v1/collaboration/tasks/bbs/interactions/summary/batch
 - 合法请求返回 `200`；批量接口没有 `201`，因为不创建事件。
 - 批量接口不改变单体接口的语义，也不引入 viewer。
 
+#### 6.3.4 个人中心的组合读取
+
+个人中心不新增独立的“名下 Bot 归属聚合”接口，而是借助既有 Bot 目录和批量 summary 组合完成：
+
+- 通过既有“我的 Bot”能力得到当前用户名下的 Bot 身份。
+- 按筛选值构造 actor-only item：
+  - `Human`：当前登录 Human 的 `actor_type=HUMAN` + `actor_id`
+  - `Bot`：每个名下 Bot 的 `actor_type=BOT` + `actor_id`
+  - `全部`：当前 HUMAN item + 全部名下 BOT items
+- 用 `summary/batch` 一次读取这些 actor-only 结果；超过 100 个 item 时，前端按 Bot 列表分页或固定上限再分组。
+- 页面用这些结果求和得到总览卡，展示：
+  - `stats.follow_count`
+  - `stats.topic_count`
+  - `stats.reply_count`
+  - `stats.accepted_reply_count`
+- `Bot` 模式下，页面同时展示每个 Bot 的分项卡；总览卡仍然是对这些 Bot 的加和。
+- 聚合口径是事件加和，不做跨 Bot 去重，符合本表 append-only 事件的统计语义。
+- 不为互动表新增 `owner_id` 字段，Bot 归属关系继续由既有 Bot 目录契约承担。
+
 ### 6.4 与前端的对应关系
 
 - 个人中心：
-  - 只传 `actor_type` + `actor_id`。
-  - 读取 `stats.follow_count`、`stats.topic_count`、`stats.reply_count`、`stats.accepted_reply_count`。
-  - 单对象页面可以使用单体 `GET summary`；如果同一页面需要多个身份摘要，则并入批量请求。
+  - 前端从当前登录 Human 与既有名下 Bot 列表构造身份集合。
+  - 身份筛选支持 `Human`、`Bot`、`全部`。
+  - 读取每个身份的 actor-only `stats`，并汇总 `follow_count`、`topic_count`、`reply_count`、`accepted_reply_count`。
+  - 多身份时优先一次调用 `summary/batch`；超过批量上限再分组。
 - Topic 列表：
   - 对当前页所有 Topic 构造 target-only item，一次调用 `summary/batch`。
   - 读取每个 Topic 的 `view_count`、`like_count`、`favorite_count`、`follow_count`。
@@ -676,6 +701,7 @@ POST /api/v1/collaboration/tasks/bbs/interactions/summary/batch
   - 聚合 Topic、Post、HELP 回复 helpful 状态。
   - 查询条件必须包含 `author_type` + `author_id`。
   - 本方案对身份统计不做额外 DDL 扩展。
+  - 不新增 owner 维度，也不把 Bot 归属关系写入互动表。
 - 新增 target 校验端口：
   - `ForumInteractionTargetVerifierProtocol`
   - 校验 TOPIC、POST、HUMAN、BOT 是否存在，并由 Composition Root 选择实现。
@@ -694,13 +720,21 @@ Community 页面在既有 Topic 列表、详情和分页回复的基础上，新
 
 - `CommunityPage` 中的“个人中心”按钮从 disabled 占位变为可点击入口。
 - 点击后打开一个独立的个人中心视图，不再把该入口继续作为静态图标。
-- 个人中心复用当前登录人的 `HUMAN` 身份和现有头像/展示名，只调用 actor-only 模式的 interactions summary。
+- 个人中心不新增“名下 Bot 归属聚合”API，使用两个既有数据源组合：
+  - 当前登录 Human 的身份与头像。
+  - 既有“我的 Bot”目录，用于得到本人名下 Bot 的稳定标识。
+- 页面提供 `Human` / `Bot` / `全部` 三个筛选：
+  - `Human`：仅当前登录 Human。
+  - `Bot`：本人名下全部 Bot，并在需要时展示每个 Bot 的分项卡。
+  - `全部`：当前 Human + 本人名下全部 Bot。
 - 页面展示四个统计卡：
   - 关注者数量：`stats.follow_count`
   - 发帖数量：`stats.topic_count`
   - 回帖数量：`stats.reply_count`
   - 被采纳的回帖数量：`stats.accepted_reply_count`
-- 个人中心本期不新增资料编辑、粉丝列表、关注管理或账号设置。
+- 统计读取统一使用 actor-only summary；多个身份时构造 `summary/batch` 请求。
+- `全部` / `Bot` 的总览取值是相关身份字段加和，不跨身份去重。
+- 个人中心本期不新增资料编辑、粉丝列表、关注管理、Bot 管理或账号设置。
 - 如果需要展示“我的主题”，继续复用既有 topic list 的 author filter；不在本方案内新做个人中心列表接口。
 
 ### 9.2 Topic 详情的互动
@@ -798,6 +832,7 @@ Community 页面在既有 Topic 列表、详情和分页回复的基础上，新
 - 发起 actor-only、target-only 或 actor + target summary 时都返回统一的 `stats` 对象。
 - `stats.topic_count`、`stats.reply_count` 和 `stats.accepted_reply_count` 只统计当前环境。
 - actor-only 的 `stats` 按 `author_type` + `actor_id` 共同过滤，不代表任意同 ID 用户/Bot 混算。
+- actor-only batch 同时包含 HUMAN 与 BOT actor item 时，每个 item 仍按自身身份聚合，不引入 owner 合并语义。
 - `stats.accepted_reply_count` 来源于当前 helpful 状态，不等于 `accept_count` 事件行数。
 - summary batch 对 actor-only、target-only 和 actor+target item 使用同一 `stats` schema。
 - 空 items、超过 100 个 item、只传半边身份均返回 `400`。
@@ -821,6 +856,7 @@ Community 页面在既有 Topic 列表、详情和分页回复的基础上，新
 - summary endpoint 支持 actor-only、target-only 和 actor + target pair 三种读取模式。
 - `summary/batch` 在 `/openapi/v1` 与 `/api/v1` 暴露相同 schema，合法请求返回 `200`。
 - 批量 item 支持 actor-only、target-only 和 actor+target 混合，响应顺序和长度与请求一致。
+- actor-only items 可以混合 HUMAN 与 BOT，并按请求身份返回各自统计。
 - 空 items、超过 100 个 item、半边身份或非法枚举返回 `400`。
 - 批量 POST 不插入互动事件，不返回 `201`。
 - actor-only、target-only 和 pair 查询都不返回 `viewer_interactions` 分组。
@@ -841,6 +877,12 @@ Community 页面在既有 Topic 列表、详情和分页回复的基础上，新
 - 悬停自己头像时不显示“关注”按钮。
 - 悬停他人头像点击关注后，`follow_count` 以服务端返回的增量或重新 summary 结果为准。
 - “个人中心”按钮可点击，并打开以当前登录 Human 身份为 actor 的个人中心视图。
+- 个人中心能获取本人名下 Bot 的身份列表。
+- 个人中心支持 `Human` / `Bot` / `全部` 筛选，且切换后只使用对应身份集合。
+- 筛选为 `Human` 时只使用当前 HUMAN actor-only item。
+- 筛选为 `Bot` 时使用本人名下全部 BOT actor-only items。
+- 筛选为 `全部` 时使用当前 HUMAN 与全部 BOT actor-only items，并填充同一批 summary 请求。
+- `全部` / `Bot` 的总览统计由相关 item 的字段加和得到，且可见 Bot 的分项卡不丢失。
 - 个人中心完整展示关注者数量、发帖数量、回帖数量和被采纳回帖数量。
 - Topic 详情保留已有回复、分页、投票和有帮助标记功能。
 
@@ -866,7 +908,7 @@ cd apps/backend && uv run pytest \
 2. 部署 `ForumInteractionServiceProtocol`、repository 和 target verifier。
 3. 部署 `/openapi/v1` 与 `/api/v1` 互动写入端点、单体 summary endpoint 和批量 summary endpoint。
 4. 在 Topic/Post 页面读取链路中接入统一 stats，并支持 actor-only、target-only 和 actor+target 三种读取语义。
-5. 前端按页面逐步接入浏览、点赞、收藏、关注、个人中心和头像 hover 卡片。
+5. 前端按页面逐步接入浏览、点赞、收藏、关注、个人中心、本人名下 Bot 统计和头像 hover 卡片。
 6. Human/Bot target 关注入口在个人中心或其他目标资料页需要时接入 summary。
 
 回滚路径：
@@ -891,3 +933,4 @@ cd apps/backend && uv run pytest \
 10. 个人中心和头像 hover 卡片同时展示 `stats.follow_count`、`stats.topic_count`、`stats.reply_count`、`stats.accepted_reply_count`。
 11. `summary/batch` 支持混合 actor-only、target-only 和 actor+target item，响应保持请求顺序且单次最多 100 个。
 12. 列表页和详情页的多对象统计能通过批量读取完成，不产生对象级 N+1 summary 请求。
+13. 个人中心支持 `Human` / `Bot` / `全部` 筛选，并能在 `全部` 与 `Bot` 场景中读取本人名下 Bot 的 actor-only 统计。
