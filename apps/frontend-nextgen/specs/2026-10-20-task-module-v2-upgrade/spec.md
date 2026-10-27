@@ -127,17 +127,26 @@ TaskPanelV2（壳：面包屑两级栈 + 收起/展开 + 多任务切换条；�
   ——`drillStack`（封顶 2 层）、`selectedNodeId`、`activeTaskId`、`pendingNavigation`
   （由宿主消费，执行会话跳转）、`panelCollapsed`（经 `panelCommand` 作用于 SDK 副屏，
   不自管宽度）。同时清掉 `taskStore` 里两处 dead 偏好字段。
-- **多任务切换条**：数据来自 `listTasks`（现有 list API），横条展示当前任务名 + 状态 +
-  数量徽章，下拉切换 `activeTaskId`（重新挂 TaskPanelFetcher）。demo 的全屏可拖悬浮入
-  口是演示脚手架，**不产品化**；真实入口 = 发起任务时的自动切换 + 副屏横条手动切换。
+- **多任务切换条**：数据来自 `listTasks`（现有 list API），以当前任务的
+  `execution_config.main_session_id` 作为会话边界（历史记录回退读取
+  `task_spec.context.extend_props.teamclaw_context.main_session_id`），仅展示属于同一会话的任务。
+  同一会话至少有 2 个任务时，在副屏右下角展示可在副屏范围内拖拽的任务切换开关，顶部横条
+  默认隐藏；用户点击开关后，横条才在「任务总览」上方展示当前任务名 + 状态 + 数量徽章，
+  再次点击开关则隐藏；拖拽结束不触发显隐切换。
+  横条下拉切换 `activeTaskId`（重新挂 TaskPanelFetcher）。只有 1 个任务、当前任务无法从列表解析，
+  或当前任务缺少会话标识时，开关与横条都不展示，保持现有无标题的简洁头部。demo 的全屏拖拽
+  能力不产品化；真实入口 = 发起任务时的自动切换 + 副屏内可拖拽悬浮开关控制的横条手动切换。
 - **跳转/下钻分离**与 demo 语义一致：点整卡 = `selectNode`（选中 + 高亮 + 触发
   `pendingNavigation`）；下钻按钮 = `drillInto`（仅 run_mode 为协作群的节点有热区）。
-- **消息定位（契约不变决策下的派生方案）**：选中节点后由宿主切换到该节点关联会话并
-  滚动至关联消息。会话解析规则（纯前端）：`run_mode=single_bot` 节点 → `main_session`；
-  `run_mode=coop_group/bbs` 节点 → `derived_session_ids` 中按 `assignee`/`source_group_id`
-  匹配，无法唯一定位时回退跳 `main_session`。消息定位：无消息级 nodeId 契约，用该节点
-  `start_time..end_time` 时间窗 + 任务生命周期系统消息兜底定位，做"定位到该节点的
-  时间窗"而非"精确最后一条"。
+- **会话导航与消息定位（契约不变决策下的派生方案）**：选中节点后通过真实
+  `/workspace/chat` 或 `/workspace/collaboration` 路由切换关联会话，使 URL、左侧 Bot/群与
+  Session 选中态、中央消息内容由既有 route hydration 同源更新。任务节点导航期间保留当前
+  TaskPanel；普通侧栏切换仍关闭旧副屏。首次离开任务宿主时记录其会话，根节点在其他联动
+  会话中恢复原宿主，在原宿主中点击则保持当前内容不变。会话解析规则（纯前端）：
+  `run_mode=single_bot` 节点 → `main_session`；`run_mode=coop_group/bbs` 节点 →
+  `derived_session_ids` 中按 `assignee`/`source_group_id` 匹配，无法唯一定位时回退跳
+  `main_session`。消息定位：无消息级 nodeId 契约，用该节点 `start_time..end_time` 时间窗 +
+  任务生命周期系统消息兜底定位，做"定位到该节点的时间窗"而非"精确最后一条"。
 
 ### 3.3 状态与边语义映射（mapper 层，契约不变 ⇒ 全部为前端派生，即正式方案）
 
@@ -229,7 +238,7 @@ TaskPanelV2（壳：面包屑两级栈 + 收起/展开 + 多任务切换条；�
 | `TaskNodePanel.tsx` | `v2/TaskNodePanelV2.tsx`（三区 + 内嵌 `GroupSessionView` 吸收 grp 群下钻;子任务走既有 onOpenSubTask） |
 | `TaskSwitcherBar` / `TaskSwitcherFloat` | `v2/TaskSwitcherBar.tsx`(产品化);Float 演示脚手架不落地(spec §6) |
 | `coopTaskDemoV2.ts`（数据模型） | `contract.ts`（+产物 Descriptor 契约）+ `taskPanelMapper.ts`（接线）+ `statusDerivation.ts` / `artifactDescriptor.ts` / `sessionResolution.ts`（派生收口） |
-| `CoopV2SessionMain.tsx`（会话侧） | capability `navigateToConversation`（站内会话路由）+ `src/pages/Workspace/Chat/hooks/taskSessionNavigation.ts`（rootContainer 全局观察者）+ `messageWindowLocate.ts`（时间窗定位） |
+| `CoopV2SessionMain.tsx`（会话侧） | capability `navigateToConversation`（真实站内会话路由）+ `src/pages/Workspace/Chat/hooks/taskSessionNavigation.ts`（rootContainer 全局观察者）+ `src/stores/taskConversationNavigationStore.ts` / `src/services/tasks/taskConversationNavigation.ts`（原宿主恢复与 TaskPanel 跨会话保活）+ `messageWindowLocate.ts`（时间窗定位） |
 
 退役（P3/P5 清理）:`TaskProgressTab` / `NodeDetailDrawer` / `TaskSubTaskPanel` / `TaskArtifactsTab` / `TaskPanelHeader` / `NodeListView` / `useResizableRail` / `GroupDrillDownPanel`。
 

@@ -122,6 +122,9 @@ from agentclaw.community.di.modules.task_queue_module import TaskQueueModule
 from agentclaw.community.di.modules.task_trajectory_config_module import (
     TaskTrajectoryConfigModule,
 )
+from agentclaw.community.di.modules.task_artifact_config_module import (
+    TaskArtifactConfigModule,
+)
 from agentclaw.community.di.modules.user_list_module import UserListModule
 from agentclaw.community.di.modules.work_orders_module import WorkOrdersModule
 from agentclaw.community.di.profile import DeployProfile
@@ -176,6 +179,10 @@ def build_injector(
         # (bot_id + tc_bot timeout). Sits in its own module to keep
         # ConfigModule at zero headroom under the 1000-line cap.
         TaskTrajectoryConfigModule(),
+        # Task-artifact OBJECT_FILE object-store config (task module's own
+        # ``task_artifact_storage`` block). Own module for the same headroom
+        # reason as TaskTrajectoryConfigModule.
+        TaskArtifactConfigModule(),
         # Public-API ``user_id`` bypass list (``openapi`` user_config block).
         # Own module for the same headroom reason; its provider refuses a
         # malformed block anywhere and a non-empty list in pre/prod, and is

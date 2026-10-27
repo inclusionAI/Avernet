@@ -239,6 +239,40 @@ def test_raising_handler_retries_with_backoff_within_deadline():
     assert "kaboom" in stored.last_error
 
 
+@pytest.mark.parametrize('attempts', [1024, 1025, 1129, 10**100])
+@pytest.mark.parametrize('floor,cap', [(1.0, 60.0), (0.25, 3.0), (0.0, 60.0)])
+def test_backoff_remains_capped_at_large_attempt_counts(attempts, floor, cap):
+    worker = object.__new__(TaskWorker)
+    worker._config = TaskQueueWorkerConfig(
+        retry_backoff_min_seconds=floor, retry_backoff_max_seconds=cap
+    )
+    assert worker._backoff(attempts) == (0.0 if floor == 0 else cap)
+
+
+@pytest.mark.parametrize('attempts,delay', [(0, 0.25), (1, 0.25), (2, 0.5), (3, 1.0), (5, 3.0)])
+def test_backoff_preserves_initial_exponential_delays(attempts, delay):
+    worker = object.__new__(TaskWorker)
+    worker._config = TaskQueueWorkerConfig(
+        retry_backoff_min_seconds=0.25, retry_backoff_max_seconds=3.0
+    )
+    assert worker._backoff(attempts) == delay
+
+
+def test_retry_after_many_polls_persists_outcome_instead_of_losing_lease():
+    w = _world()
+    w.registry.register(_BoomHandler())
+    rec = w.enqueue('boom', deadline_seconds=3600)
+    with w.repo._db.orm_session() as db:
+        db.query(TaskQueueModel).filter(TaskQueueModel.id == rec.id).update(
+            {TaskQueueModel.attempts: 1128}, synchronize_session=False
+        )
+    assert asyncio.run(w.worker.run_once()) == 1
+    stored = w.repo.get_by_id(rec.id)
+    assert stored.attempts == 1129
+    assert stored.status == TaskStatus.PENDING
+    assert 'kaboom' in stored.last_error
+
+
 def test_raising_handler_times_out_when_backoff_exceeds_deadline():
     # Deadline 1s but backoff floor 100s → the retry would land past the
     # deadline, so the repository marks it TIMED_OUT instead of rescheduling.

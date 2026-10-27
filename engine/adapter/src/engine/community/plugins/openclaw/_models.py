@@ -10,6 +10,14 @@ log = logging.getLogger("openclaw-port")
 class _ModelsPortMixin:
     """Domain mixin: models and providers catalogue (token-agnostic)."""
 
+    async def get_model_config(self) -> dict[str, Any]:
+        """Read configuration through config.get on each call; never log its payload."""
+        client = await self._default_client()
+        response = await client.send_request("config.get", {}, timeout=5)
+        if not response.ok or not isinstance(response.payload, dict):
+            raise RuntimeError("failed to read model configuration")
+        return response.payload
+
     async def models_list(self) -> list[dict[str, Any]]:
         """Flat model-entry dicts: `models.list` first, fallback `providers.list`.
 

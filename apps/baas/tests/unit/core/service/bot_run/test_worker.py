@@ -520,7 +520,7 @@ async def test_run_one_executes_with_trace_context(repo, queue):
     )
 
 
-async def test_run_one_timeout_marks_failed_with_trace(repo, queue):
+async def test_run_one_timeout_marks_timeout_with_trace(repo, queue):
     """_run_one timeout path should still restore trace context."""
     _insert(repo, queue, "bot-1")
     inner = _CompletingExecutor(repo)
@@ -538,7 +538,7 @@ async def test_run_one_timeout_marks_failed_with_trace(repo, queue):
         await worker._run_one(record)
 
     rec = repo.get_by_run_id(record.run_id)
-    assert rec.status == "FAILED"
+    assert rec.status == "TIME_OUT"
     mock_tracer.start_span.assert_called_once_with(
         "bot_queue_worker.execute", child_of=None
     )
@@ -713,7 +713,7 @@ async def test_run_one_mark_done_raises_warning(repo, queue):
     assert repo.get_by_run_id(record.run_id).status == "COMPLETED"
 
 
-async def test_timeout_scan_marks_failed_and_force_done(repo, queue):
+async def test_timeout_scan_marks_timeout_and_force_done(repo, queue):
     run_id = uuid4().hex
     repo.insert_run(
         run_id=run_id,
@@ -728,7 +728,7 @@ async def test_timeout_scan_marks_failed_and_force_done(repo, queue):
 
     await worker._timeout_scan_once()
 
-    assert repo.get_by_run_id(run_id).status == "FAILED"
+    assert repo.get_by_run_id(run_id).status == "TIME_OUT"
     assert queue.get_by_run_id(run_id).status == "DONE"
 
 
@@ -792,8 +792,8 @@ async def test_timeout_scan_force_done_remote_running_with_stale_heartbeat(repo,
     assert queue.get_by_run_id(run_id).status == "DONE"
 
 
-async def test_timeout_scan_remote_stale_writes_result_failed(repo, queue):
-    """非本机 RUNNING + 心跳过期 → 同时写 baas_bot_run=FAILED（不再卡 PENDING）。"""
+async def test_timeout_scan_remote_stale_writes_result_timeout(repo, queue):
+    """非本机 RUNNING + 心跳过期 → 同时写 baas_bot_run=TIME_OUT（不再卡 PENDING）。"""
     run_id = _insert(repo, queue, "bot-1")
     record = queue.claim_pending_by_bot("bot-1", "remote-worker", candidates=5)
     assert record is not None
@@ -833,7 +833,7 @@ async def test_timeout_scan_remote_stale_writes_result_failed(repo, queue):
 
     assert queue.get_by_run_id(run_id).status == "DONE"
     rec = repo.get_by_run_id(run_id)
-    assert rec.status == "FAILED"
+    assert rec.status == "TIME_OUT"
     assert "worker lost" in (rec.error or "")
 
 

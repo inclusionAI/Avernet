@@ -426,6 +426,12 @@ class PublishOperationRunner:
     ) -> Optional[PublishOperationRecord]:
         return self._ledger.complete(op.id)
 
+    def complete_without_workflow(
+        self, op: PublishOperationRecord
+    ) -> Optional[PublishOperationRecord]:
+        """Complete a pending operation whose postcondition already holds."""
+        return self._ledger.complete_without_workflow(op.id)
+
     def fail_operation(
         self, op: PublishOperationRecord, error: str
     ) -> Optional[PublishOperationRecord]:

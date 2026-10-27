@@ -1,7 +1,7 @@
 """BotService plugin SPI — pluggable bot metadata backends."""
 
 from ._models import (
-    CALLER_CREDENTIAL_TYPE_AGENTPAAS,
+    CALLER_CREDENTIAL_TYPE_AGENTPASS,
     CALLER_CREDENTIAL_TYPE_IAM_TOKEN,
     BotBindingData,
     CallerConnection,
@@ -15,7 +15,7 @@ from ._models import (
 from ._protocols import BotServicePlugin
 
 __all__ = [
-    "CALLER_CREDENTIAL_TYPE_AGENTPAAS",
+    "CALLER_CREDENTIAL_TYPE_AGENTPASS",
     "CALLER_CREDENTIAL_TYPE_IAM_TOKEN",
     "BotBindingData",
     "BotServicePlugin",

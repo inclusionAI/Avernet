@@ -97,7 +97,6 @@ use bcs_message_flow::{A2aChat, BcsGroupFusion, BcsGroupMessageHistory, BcsMessa
 use bcs_message_store::{MemoryMessageRepo, MySqlMessageStore};
 use bcs_organization::{OrganizationCore, OrganizationManagement};
 use bcs_organization_store::{DbOrganizationStore, MemoryOrganizationRepo};
-use bcs_proposal::{GroupProposalUseCases, GroupProposalUseCasesConfig, ProposalStore};
 use bcs_relation::RelationCore;
 use bcs_relation_store::DbRelationStore;
 use bcs_route_security::OutboundUrlGuard;
@@ -214,8 +213,7 @@ async fn build_session_files_service(
     // otherwise ignorant of the backend roster (adding OSS/NAS later is one
     // factory arm here + its crate). See design-baas-plugin §「落地前置改造」.
 
-    // Prefer the configured external endpoint, then bind:port, mirroring
-    // `proposal_base_url` above.
+    // Prefer the configured external endpoint, then bind:port.
     let bcs_base_url = config
         .bcs_endpoint
         .clone()
@@ -2242,7 +2240,6 @@ impl Default for BcsServerState {
         );
         let router = Arc::new(MessageRouter::new());
         let fusion = Arc::new(LocalFusionService::new(config.bots_base_dir.clone()));
-        let proposals = Arc::new(ProposalStore::new());
         let friend_repo = Arc::new(MemoryFriendRepo::new());
         let friend_store: Arc<FriendCore> =
             Arc::new(FriendCore::with_repo(friend_repo).with_relation(
@@ -2347,10 +2344,6 @@ impl Default for BcsServerState {
         let a2a_chat_runs: Arc<dyn A2aChatRunService> = a2a_chat_impl.clone();
         let a2a_chat_runs = maybe_wrap_a2a_chat_runs(&config, a2a_chat_runs);
         let direct_chat_run_snapshot: Arc<dyn DirectChatRunSnapshotPort> = a2a_chat_impl.clone();
-        let proposal_base_url = config
-            .bcs_endpoint
-            .clone()
-            .unwrap_or_else(|| format!("http://{}:{}", config.bind, config.port));
         let interaction_terminal_observer = Arc::new(InteractionTerminalObserver::default());
         let terminal_observer: Arc<dyn BotTerminalObserverPort> =
             Arc::new(CompositeBotTerminalObserver::new(vec![
@@ -2362,8 +2355,10 @@ impl Default for BcsServerState {
             ]));
         let state_machine_terminal_observer =
             Arc::new(DeferredStateMachineTerminalObserver::new(terminal_observer));
-        let coordination_intents = create_coordination_intents(Arc::new(bcs_cache_local::InMemoryCachePlugin::new()));
+        let cache_plugin: Arc<dyn bcs_cache_api::CachePlugin> = Arc::new(bcs_cache_local::InMemoryCachePlugin::new());
+        let coordination_intents = create_coordination_intents(cache_plugin.clone());
         let message_flow_builder = create_message_flow_builder(
+            cache_plugin.clone(),
             coordination_intents.clone(),
             bot_registry.clone(),
             sessions.clone(),
@@ -2450,21 +2445,6 @@ impl Default for BcsServerState {
             .with_outbound_url_guard(outbound_url_guard.clone())
             .with_bot_runtime(bot_use_cases.clone()),
         );
-        let group_proposals = Arc::new(GroupProposalUseCases::new(
-            sessions.clone(),
-            bot_registry.clone(),
-            friend_store.clone(),
-            proposals.clone(),
-            session_management.clone(),
-            system_message.clone(),
-            GroupProposalUseCasesConfig {
-                max_group_members: config.max_group_members,
-                max_groups_as_driver: config.max_groups_as_driver,
-                max_groups_as_member: config.max_groups_as_member,
-                proposal_base_url,
-                botchat_base_url: config.botchat_url.clone(),
-            },
-        ));
         let group_fusion = Arc::new(BcsGroupFusion::new(sessions.clone(), fusion.clone()));
         let message_flow = maybe_wrap_message_flow(&config, message_flow);
         let interactions = create_interaction_service(
@@ -2660,7 +2640,6 @@ impl Default for BcsServerState {
             .group(sessions)
             .routing(router)
             .fusion(fusion)
-            .proposal(proposals)
             .friend(friend_store)
             .relation(relation_store)
             .bot_delivery(bot_delivery)
@@ -2687,7 +2666,6 @@ impl Default for BcsServerState {
             .group_management(group_management.clone())
             .group_query(group_management_impl.clone())
             .workbench_sessions(group_management_impl)
-            .group_proposals(group_proposals)
             .group_fusion(group_fusion)
             .system_message(system_message)
             .session_management(session_management.clone())
@@ -2977,7 +2955,6 @@ struct UseCaseBundle {
     group_query: Arc<dyn bcs_service_api::GroupQueryService>,
     workbench_sessions: Arc<dyn bcs_service_api::WorkbenchSessionService>,
     interaction_authorization: Arc<dyn CanResolveInteraction>,
-    group_proposals: Arc<dyn bcs_service_api::GroupProposalService>,
     group_fusion: Arc<dyn bcs_service_api::GroupFusionService>,
     system_message: Arc<dyn bcs_service_api::SystemMessageService>,
 }
@@ -2990,7 +2967,6 @@ fn build_use_case_bundle(
     organization_core: Arc<dyn OrganizationCoreService>,
     bot_connection_control: Arc<dyn bcs_service_api::BotConnectionControlPort>,
     group: Arc<dyn GroupCoreService>,
-    proposal: Arc<dyn bcs_service_api::ProposalCoreService>,
     friend: Arc<dyn bcs_service_api::FriendCoreService>,
     friend_request: Arc<dyn bcs_service_api::FriendRequestCoreService>,
     relation: Arc<dyn bcs_service_api::RelationCoreService>,
@@ -3084,25 +3060,6 @@ fn build_use_case_bundle(
     );
     let group_management_v1: Arc<dyn bcs_service_api::GroupManagementService> =
         Arc::new((*group_management).clone().for_v1_openapi());
-    let proposal_base_url = config
-        .bcs_endpoint
-        .clone()
-        .unwrap_or_else(|| format!("http://{}:{}", config.bind, config.port));
-    let group_proposals = Arc::new(GroupProposalUseCases::new(
-        group.clone(),
-        bot_registry.clone(),
-        friend.clone(),
-        proposal,
-        session_management,
-        system_message.clone(),
-        GroupProposalUseCasesConfig {
-            max_group_members: config.max_group_members,
-            max_groups_as_driver: config.max_groups_as_driver,
-            max_groups_as_member: config.max_groups_as_member,
-            proposal_base_url,
-            botchat_base_url: config.botchat_url.clone(),
-        },
-    ));
 
     UseCaseBundle {
         actor_directory: Arc::new(actor_directory),
@@ -3135,7 +3092,6 @@ fn build_use_case_bundle(
         group_query: group_management.clone(),
         workbench_sessions: group_management.clone(),
         interaction_authorization: group_management,
-        group_proposals,
         group_fusion: Arc::new(BcsGroupFusion::new(group, fusion)),
         system_message,
     }
@@ -3245,6 +3201,7 @@ fn create_coordination_intents(cache: Arc<dyn bcs_cache_api::CachePlugin>) -> Op
 }
 
 fn create_message_flow_builder(
+    execution_cache: Arc<dyn bcs_cache_api::CachePlugin>,
     coordination_intents: Option<Arc<dyn bcs_service_api::port::CoordinationIntentPort>>,
     registry: Arc<dyn BotRegistryCoreService>,
     group: Arc<dyn GroupCoreService>,
@@ -3270,6 +3227,7 @@ fn create_message_flow_builder(
         bot_delivery.clone(),
         frontend_delivery.clone(),
     )
+    .with_execution_cache(execution_cache)
     .with_coordination_intents(coordination_intents)
     .with_bot_relay_turn_limit(bot_relay_turn_limit)
     .with_interceptors(interceptors)
@@ -3892,8 +3850,7 @@ impl BcsServer {
             GroupCore::with_repo(group_repo).with_collaboration_registry(bot_registry.clone()).with_policy_gate(provider_repos.memory_store.as_ref().expect("memory Provider store").policy_gate()).with_event_record_factory(group_event_factory.clone()),
         );
         let router = Arc::new(MessageRouter::new());
-        let proposals = Arc::new(ProposalStore::new());
-        let friend_repo = Arc::new(MemoryFriendRepo::with_data_dir(
+                let friend_repo = Arc::new(MemoryFriendRepo::with_data_dir(
             config.bots_base_dir.clone(),
         ));
         let friend_store: Arc<FriendCore> =
@@ -3997,8 +3954,10 @@ impl BcsServer {
                  use BcsServer::new_with_storage to enable human mention notifications"
             );
         }
-        let coordination_intents = create_coordination_intents(Arc::new(bcs_cache_local::InMemoryCachePlugin::new()));
+        let cache_plugin: Arc<dyn bcs_cache_api::CachePlugin> = Arc::new(bcs_cache_local::InMemoryCachePlugin::new());
+        let coordination_intents = create_coordination_intents(cache_plugin.clone());
         let message_flow_builder = create_message_flow_builder(
+            cache_plugin.clone(),
             coordination_intents.clone(),
             bot_registry.clone(),
             sessions.clone(),
@@ -4075,7 +4034,6 @@ impl BcsServer {
             organization_core.clone(),
             bot_connections.clone() as Arc<dyn bcs_service_api::BotConnectionControlPort>,
             sessions.clone(),
-            proposals.clone(),
             friend_store.clone(),
             friend_request_store.clone(),
             relation_store.clone(),
@@ -4281,7 +4239,6 @@ impl BcsServer {
             .group(sessions)
             .routing(router)
             .fusion(fusion)
-            .proposal(proposals)
             .friend(friend_store)
             .relation(relation_store)
             .bot_delivery(bot_delivery)
@@ -4311,7 +4268,6 @@ impl BcsServer {
             .group_management(group_management)
             .group_query(use_cases.group_query)
             .workbench_sessions(use_cases.workbench_sessions)
-            .group_proposals(use_cases.group_proposals)
             .group_fusion(use_cases.group_fusion)
             .system_message(use_cases.system_message)
             .session_management(session_management.clone())
@@ -4522,8 +4478,7 @@ impl BcsServer {
 
         // Create other service implementations
         let router = Arc::new(MessageRouter::new());
-        let proposals = Arc::new(ProposalStore::new());
-
+        
         let (fusion, fuse_client) = create_fusion_service(&config);
         register_late_lifecycles(&lifecycle, fuse_client.as_ref());
 
@@ -4887,6 +4842,7 @@ impl BcsServer {
             Arc::new(DeferredStateMachineTerminalObserver::new(terminal_observer));
         let coordination_intents = create_coordination_intents(cache_plugin.clone());
         let message_flow_builder = create_message_flow_builder(
+            cache_plugin.clone(),
             coordination_intents.clone(),
             bot_registry.clone(),
             sessions.clone(),
@@ -4981,7 +4937,6 @@ impl BcsServer {
             organization_core.clone(),
             bot_connections.clone() as Arc<dyn bcs_service_api::BotConnectionControlPort>,
             sessions.clone(),
-            proposals.clone(),
             friend_svc.clone(),
             friend_request_svc.clone(),
             relation_svc.clone(),
@@ -5228,7 +5183,6 @@ impl BcsServer {
             .group(sessions)
             .routing(router)
             .fusion(fusion)
-            .proposal(proposals)
             .friend(friend_svc)
             .relation(relation_svc)
             .bot_delivery(bot_delivery)
@@ -5259,7 +5213,6 @@ impl BcsServer {
             .group_management(group_management)
             .group_query(use_cases.group_query)
             .workbench_sessions(use_cases.workbench_sessions)
-            .group_proposals(use_cases.group_proposals)
             .group_fusion(use_cases.group_fusion)
             .system_message(use_cases.system_message)
             .session_management(session_management.clone())
@@ -6974,10 +6927,6 @@ impl IntoResponse for crate::BcsError {
             Self::InvalidFrameFormat(msg) => (
                 StatusCode::BAD_REQUEST,
                 format!("Invalid frame format: {}", msg),
-            ),
-            Self::ProposalNotFound(id) => (
-                StatusCode::NOT_FOUND,
-                format!("Proposal not found or expired: {}", id),
             ),
             Self::BotDirectoryNotFound(path) => (
                 StatusCode::NOT_FOUND,

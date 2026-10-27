@@ -146,3 +146,9 @@ DeptLookupError is owned by plugin_api.staff_dept, matching the StaffDeptPlugin
 contract. The old HTTP errors module re-exports the same class identity for
 compatibility; core consumers do not import HTTP exceptions. No-department still
 returns StaffDeptInfo with null fields, and infrastructure failure remains distinct.
+
+`TaskArtifactObjectStoragePlugin` is NOT defined here — the task module owns it
+(``core/task/task_context/task_artifact/artifact_object_storage.py``, the
+SessionInitiator-style sink-into-core pattern) because it scopes OBJECT_FILE
+artifact bytes only, with its own DI key and ``task_artifact_storage`` config
+block rather than the platform-wide ``ObjectStoragePlugin`` singleton.

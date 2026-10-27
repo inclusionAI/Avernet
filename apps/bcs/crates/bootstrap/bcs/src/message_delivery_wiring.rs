@@ -303,6 +303,7 @@ mod tests {
         let enabled = flow.replace_delivery_policy(admin(), 0, policy).await.unwrap();
         assert_eq!(enabled.version, 1);
         let admission = flow.handle_web_send(WebSendCommand {
+            caller_execution: None,
             caller: CallerContext::Human(HumanActor { actor_id: "human_1".into(), staff_no: "1".into() }),
             group_id: "group-1".into(), session_id: Some("group-1:live".into()), from_actor_id: "human_1".into(),
             from_name: None, message: "@Driver dynamically enabled".into(), mentions: vec!["bot-driver".into()],
@@ -323,6 +324,7 @@ mod tests {
         expiring_policy.queue_ttl_ms = Some(100);
         let enabled = flow.replace_delivery_policy(admin(), 1, expiring_policy).await.unwrap();
         flow.handle_web_send(WebSendCommand {
+            caller_execution: None,
             caller: CallerContext::Human(HumanActor { actor_id: "human_1".into(), staff_no: "1".into() }),
             group_id: "group-1".into(), session_id: Some("group-1:live".into()), from_actor_id: "human_1".into(),
             from_name: None, message: "@Driver expire after takeover".into(), mentions: vec!["bot-driver".into()],
@@ -456,6 +458,7 @@ mod tests {
         );
         let rejected = flow
             .handle_web_send(WebSendCommand {
+                caller_execution: None,
                 caller: CallerContext::Human(HumanActor {
                     actor_id: "human_1".into(),
                     staff_no: "1".into(),

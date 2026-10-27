@@ -164,3 +164,19 @@ def test_append_distinct_content_creates_distinct_rows(db):
         "task-art-00000000000000a1",
         "task-art-00000000000000b2",
     }
+
+
+def test_get_by_artifact_id_returns_row(db):
+    repo = TaskArtifactRepository(db)
+    repo.append(_text_record(artifact_id="task-art-00000000000000a1"))
+    record = repo.get_by_artifact_id("task-art-00000000000000a1")
+    assert record is not None
+    assert record.task_id == "t-1"
+    assert record.node_id == "n-1"
+    assert record.content.text == "done"
+
+
+def test_get_by_artifact_id_unknown_returns_none(db):
+    repo = TaskArtifactRepository(db)
+    repo.append(_text_record(artifact_id="task-art-00000000000000a1"))
+    assert repo.get_by_artifact_id("task-art-doesnotexist00") is None

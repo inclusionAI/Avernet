@@ -19,6 +19,7 @@ pub async fn handle_group_chat(
     let outcome = handle_web_send(
         flow,
         WebSendCommand {
+            caller_execution: None,
             caller: cmd.caller,
             group_id: cmd.group_id.clone(),
             session_id: cmd.session_id,
@@ -111,6 +112,7 @@ pub async fn handle_persistent_group_send(
         && cmd.message_type == GroupMessageType::Bot
     {
         let outcome = handle_web_send(flow, WebSendCommand {
+            caller_execution: None,
             caller: cmd.caller.clone(), group_id: cmd.group_id.clone(), session_id: None,
             from_actor_id: cmd.sender.clone(), from_name: None, message: cmd.content.clone(),
             mentions: Vec::new(), attachments: None, thinking: None, idempotency_key: None,
@@ -216,6 +218,7 @@ pub async fn handle_persistent_group_send(
 
     let mut routed_to = Vec::new();
     let synthetic_send = WebSendCommand {
+        caller_execution: None,
         caller: cmd.caller.clone(),
         group_id: cmd.group_id.clone(),
         session_id: None,

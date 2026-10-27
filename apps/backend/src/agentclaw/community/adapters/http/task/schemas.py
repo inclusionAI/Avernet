@@ -127,6 +127,13 @@ class ExecutionConfigDTO(BaseModel):
             " `bot_id:owner_id` 寻址)"
         ),
     )
+    main_session_id: str | None = Field(
+        None,
+        description=(
+            "目标 bot 会话 ID(仅 auto_execute 消费;与 benchmark_execute 通过 send_message"
+            " 返回拿到 session_id 不同,auto_execute 由调用方直接指定要发往的会话)"
+        ),
+    )
 
 
 class TaskInfoRequestDTO(BaseModel):

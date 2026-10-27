@@ -49,6 +49,7 @@ use crate::protocol_context::{group_context_input, group_type_wire};
 use crate::task_store::TaskStore;
 
 pub struct BcsMessageFlow {
+    pub execution_cache: Option<Arc<dyn bcs_cache_api::CachePlugin>>,
     pub direct_chat: Option<Arc<crate::a2a_chat::A2aChat>>,
     pub group: Arc<dyn GroupCoreService>,
     pub routing: Arc<dyn RoutingCoreService>,
@@ -100,6 +101,7 @@ impl BcsMessageFlow {
         frontend_delivery: Arc<dyn FrontendDeliveryPort>,
     ) -> Self {
         Self {
+            execution_cache: None,
             direct_chat: None,
             group,
             routing,
@@ -135,6 +137,11 @@ impl BcsMessageFlow {
             terminal_slots: Arc::new(tokio::sync::Semaphore::new(64)),
             system_queue: Arc::new(crate::queued_system::QueuedSystemAdmission::default()),
         }
+    }
+
+    pub fn with_execution_cache(mut self, cache: Arc<dyn bcs_cache_api::CachePlugin>) -> Self {
+        self.execution_cache = Some(cache);
+        self
     }
 
     pub fn with_direct_chat(mut self, direct: Arc<crate::a2a_chat::A2aChat>) -> Self { self.direct_chat = Some(direct); self }

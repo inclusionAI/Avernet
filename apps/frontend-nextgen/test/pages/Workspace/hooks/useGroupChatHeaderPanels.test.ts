@@ -3,8 +3,9 @@
  */
 import type { SessionView } from '@/domain/collaboration';
 import { useGroupChatHeaderPanels } from '@/pages/Workspace/hooks/useGroupChatHeaderPanels';
-import type { ChatMessage, PanelHandle } from '@tc-chat/core';
+import { useTaskConversationNavigationStore } from '@/stores/taskConversationNavigationStore';
 import { beforeEach, expect, it, jest } from '@jest/globals';
+import type { ChatMessage, PanelHandle } from '@tc-chat/core';
 import { act, renderHook } from '@testing-library/react';
 
 function makeSession(overrides: Partial<SessionView> = {}): SessionView {
@@ -54,6 +55,8 @@ function makePanelHandle() {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  useTaskConversationNavigationStore.getState().resetAll();
+  window.history.pushState({}, '', '/workspace/collaboration?group=g1&session=sess-1');
 });
 
 it('收藏模型跟随会话：favorite 取自 SessionView，无会话禁用，onToggle 透传 sessionId', () => {
@@ -164,6 +167,38 @@ it('toggleSidePane 打开按消息幂等重建 tabs、关闭走 closePanel；切
   // 复位后再次开合仍正常。
   act(() => result.current.toggleSidePane());
   expect(openTab).toHaveBeenCalledTimes(3);
+});
+
+it('任务节点真实路由切群会话时保留 TaskPanel 的头部开合镜像态', () => {
+  const { ref: handle } = makePanelHandle();
+  const { result, rerender } = renderHook(
+    ({ session }: { session: SessionView | null }) =>
+      useGroupChatHeaderPanels({
+        session,
+        messages: makePanelMessages(),
+        panelRef: handle,
+        toggleFavorite: jest.fn(),
+      }),
+    { initialProps: { session: makeSession() as SessionView | null } },
+  );
+  act(() => result.current.onSidePaneIsOpenChange(true));
+
+  window.history.pushState({}, '', '/workspace/collaboration?group=g2&session=sess-2');
+  const store = useTaskConversationNavigationStore.getState();
+  store.rememberTaskTab('t1', {
+    id: 'task-t1',
+    title: 'Task',
+    type: 'taskPanel.TaskLoopView',
+    params: { taskId: 't1' },
+  });
+  const navigationId = store.beginNavigation('t1', '/workspace/collaboration', 'sess-2');
+  store.markRouteCommitted(navigationId);
+
+  rerender({ session: makeSession({ sessionId: 'sess-2', groupId: 'g2' }) });
+
+  expect(result.current.sidePaneOpen).toBe(true);
+  expect(result.current.highlightMessageId).toBe(null);
+  expect(useTaskConversationNavigationStore.getState().navigation?.routeHydrated).toBe(true);
 });
 
 it('副屏判空：无 <AixUI type="panel"> 时 Monitor 禁用且 toggle 空转，出现副屏消息后解除', () => {

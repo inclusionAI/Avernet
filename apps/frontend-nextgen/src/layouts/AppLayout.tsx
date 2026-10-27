@@ -1,3 +1,4 @@
+import { PersistentChatLayoutPanelProvider } from '@/components/Workspace/PersistentChatLayoutPanelHost';
 import { useExternalAuthBoot } from '@/hooks/useExternalAuthGuard';
 import { useInviteCodeGateBoot } from '@/hooks/useInviteCodeGate';
 import { AppShell } from '@/shell/AppShell';
@@ -10,8 +11,10 @@ export default function AppLayout() {
   // 与登录 boot 无竞态（登录先于门禁，本 boot 等 authenticated 才触发）。见 add-invite-code-gate design 决策 1。
   useInviteCodeGateBoot();
   return (
-    <AppShell>
-      <Outlet />
-    </AppShell>
+    <PersistentChatLayoutPanelProvider>
+      <AppShell>
+        <Outlet />
+      </AppShell>
+    </PersistentChatLayoutPanelProvider>
   );
 }

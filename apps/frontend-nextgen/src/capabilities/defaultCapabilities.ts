@@ -44,6 +44,15 @@ function configuredTaskApiBase(): string {
     : DEFAULT_TASK_API_BASE;
 }
 
+function normalizeTaskConversationRouteUrl(routeUrl: string): string | null {
+  if (!routeUrl.startsWith('/')) return null;
+  const base = new URL(typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
+  const parsed = new URL(routeUrl, base);
+  if (parsed.origin !== base.origin) return null;
+  if (!['/workspace/chat', '/workspace/collaboration'].includes(parsed.pathname)) return null;
+  return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+}
+
 export const defaultCapabilities: AppCapabilities = {
   // Open Core 固定展示体验环境提示；Internal overlay 覆盖为 null。
   getOpenSourceExperienceNotice: (): CapabilityResult<OpenSourceExperienceNoticeSpec | null> => ({
@@ -60,37 +69,32 @@ export const defaultCapabilities: AppCapabilities = {
   getLegacyVersionSwitch: (): CapabilityResult<LegacyVersionSwitchSpec | null> =>
     unsupported(null, '当前部署形态不提供版本切换'),
   openExternal: () => unsupported(null, '当前运行环境暂不支持打开外部链接'),
-  // 任务副屏 V2 会话联动(P4,spec §3.2):会话宿主内只替换左侧 ChatArea，
-  // 不切真实会话/路由，避免 ChatLayout.Panel 被会话切换副作用强制关闭。
-  // 会话宿主外（如我的任务抽屉）仍按目标类型路由进入对应页面。
+  // 任务节点联动统一切真实会话路由：URL 与左侧 Bot/群、Session 选中态由既有
+  // 路由 hydration 同源更新；TaskPanel 的跨会话保活由 taskConversationNavigationStore 编排。
   navigateToConversation: (target: TaskSessionJumpTarget): CapabilityResult<null> => {
     if (!target.sessionId) {
       return unsupported(null, '会话跳转目标缺少 sessionId');
     }
-    const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
-    const inConversationHost =
-      pathname.startsWith('/workspace/collaboration') || pathname.startsWith('/workspace/chat');
-    // 群会话形态判别以 session id 为准(与 sessionResolution 同一契约):
-    // 派生会话分支可能产出 kind='unknown',此处仍需识别 bcs_grp_ 物理形态。
     const isGroupTarget = target.kind === 'group' || target.sessionId.startsWith('bcs_grp_');
+    const routeUrl = target.routeUrl
+      ? normalizeTaskConversationRouteUrl(target.routeUrl)
+      : isGroupTarget
+      ? getCollaborationGroupConversationUrl(target.groupId ?? null, target.sessionId)
+      : getCollaborationBotConversationUrl(target.botId ?? '', target.sessionId);
+    if (!routeUrl) return unsupported(null, '会话跳转地址不是受支持的站内会话路由');
 
-    if (inConversationHost) {
-      useTaskSidePanelStore.getState().openLinkedSession({
-        sessionId: target.sessionId,
-        kind: isGroupTarget ? 'group' : target.kind,
-        groupId: isGroupTarget ? target.groupId ?? null : null,
-        botId: isGroupTarget ? null : target.botId ?? null,
-      });
-      return { status: 'available', value: null };
-    }
+    useTaskSidePanelStore.getState().closeLinkedSession();
+    const currentUrl =
+      typeof window === 'undefined'
+        ? ''
+        : `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (currentUrl === routeUrl) return { status: 'available', value: null };
 
-    const chatUrl = getCollaborationBotConversationUrl(target.botId ?? '', target.sessionId);
-    const groupUrl = getCollaborationGroupConversationUrl(target.groupId ?? null, target.sessionId);
     // 懒 require umi history:静态 import 会把 @umijs/max 拉进 jest 依赖图(esbuild 环境不变量崩),
     // 且 capability 求值频率低;只在真正发生路由跳转时取模块。
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const umiHistory = (require('@umijs/max') as { history: { push: (url: string) => void } }).history;
-    umiHistory.push(isGroupTarget ? groupUrl : chatUrl);
+    umiHistory.push(routeUrl);
     return { status: 'available', value: null };
   },
   // Open Core 默认路由重定向：当前无收敛项——/space-admin、/ticket-center 由页面级 getAdminSections

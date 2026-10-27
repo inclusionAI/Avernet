@@ -13,6 +13,10 @@
  * 历史搜索状态收口本 Hook（useMemo 前端过滤，Service 双源）。
  */
 import type { ConversationBotSection } from '@/domain/conversation';
+import {
+  markTaskNavigationRouteHydrated,
+  shouldPreserveTaskPanelForSession,
+} from '@/services/tasks/taskConversationNavigation';
 import type { BotChatSessionView } from '@/services/workspace/botSessionService';
 import type {
   SessionMessageSearchQuery,
@@ -20,7 +24,7 @@ import type {
 } from '@/services/workspace/conversationSearchService';
 import { searchConversationMessages } from '@/services/workspace/conversationSearchService';
 import type { ChatMessage, PanelHandle } from '@tc-chat/core';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { reopenSidePaneTabsFromMessages, sessionHasSidePaneContent } from './sidePaneContent';
 
 // 副屏内容判定与幂等重建已下沉至同目录 sidePaneContent.ts（工程红线：Hook 单文件 ≤250 行）；
@@ -154,9 +158,12 @@ export function useChatHeaderPanels(options: UseChatHeaderPanelsOptions): UseCha
     // 副屏同步复位（兜底）：useBotChat 在同边界 closePanelForce 强关面板并清空 tabs，
     // closePanelForce 经 onIsOpenChange(false) 已同步真实态；此复位防面板随舞台切换卸载
     // 而无事件发出的脱钩场景（与群侧孪生 useGroupChatHeaderPanels 一致）。
-    setSidePaneOpen(false);
+    if (!shouldPreserveTaskPanelForSession(sessionId, '/workspace/chat')) setSidePaneOpen(false);
     setSessionEpoch((epoch) => epoch + 1);
   }
+  useEffect(() => {
+    markTaskNavigationRouteHydrated(sessionId, '/workspace/chat');
+  }, [sessionId]);
 
   // 副屏判空：无内容时禁用 Monitor（openPanel 只会被 autoCloseWhenEmpty 弹回）。
   const sidePaneDisabled = useMemo(() => !sessionHasSidePaneContent(messages), [messages]);

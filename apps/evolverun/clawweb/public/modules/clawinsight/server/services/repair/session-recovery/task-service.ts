@@ -111,7 +111,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       timeline: [...value.timeline, this.event("message", "service", "初始建议发送结果", { result })] }));
   }
 
-  async assess(taskId: string, version: number, input: { decision: "message" | "environment" | "observe"; summary: string; evidence_ids: string[] }): Promise<void> {
+  async assess(taskId: string, version: number, input: { decision: "message" | "environment" | "observe"; summary: string; evidence_ids: string[] }, finalSummary?: unknown): Promise<void> {
     const task = await this.mutate(taskId, version, value => {
       if (value.simulation) this.fail(409, "仿真必须提交拟议决策");
       if (value.status !== "running" || value.phase !== "assess") this.fail(409, "当前不能提交初始判断");
@@ -125,12 +125,12 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
         ...(debugFinished ? { status: "completed" as const, judgment: { delivery: "unconfirmed" as const, response: "unknown" as const, effect: "not_intervened" as const, summary: input.summary, evidence_ids: input.evidence_ids } } : {}),
         observationDeadlineAt: input.decision === "environment" ? null : value.observationDeadlineAt ?? this.now() + this.deps.observationMs,
         timeline: [...value.timeline, this.event("assessment", "agent", input.summary, input)] };
-    });
+    }, finalSummary);
     if (task.status === "completed") await this.deps.agent.release(task);
     if (task.status === "completed") this.notifyGroup(task, "result");
   }
 
-  async assessSimulation(taskId: string, version: number, input: RecoverySimulationAssessment): Promise<void> {
+  async assessSimulation(taskId: string, version: number, input: RecoverySimulationAssessment, finalSummary?: unknown): Promise<void> {
     const task = await this.mutate(taskId, version, value => {
       if (!value.simulation || value.status !== "running" || !["assess", "plan"].includes(value.phase)) this.fail(409, "当前不能提交仿真判断");
       const reads = new Set(value.timeline.filter(event => event.kind === "operation" && event.payload.status === "succeeded")
@@ -149,11 +149,11 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
         observationDeadlineAt: null, ownerDeadlineAt: null,
         judgment: { delivery: "unconfirmed", response: "unknown", effect: "not_intervened", summary: input.summary, evidence_ids: input.evidence_ids },
         timeline: [...value.timeline, this.event("assessment", "agent", input.summary, { ...input, phase: value.phase, simulation: true })] };
-    });
+    }, finalSummary);
     if (task.status === "completed") await this.deps.agent.release(task);
   }
 
-  async observe(taskId: string, version: number, judgment: RecoveryJudgment, evidence: RecoveryEvidence[]): Promise<void> {
+  async observe(taskId: string, version: number, judgment: RecoveryJudgment, evidence: RecoveryEvidence[], finalSummary?: unknown): Promise<void> {
     const task = await this.mutate(taskId, version, value => {
       const stored = [...value.evidence];
       for (const item of evidence) {
@@ -163,14 +163,14 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       }
       return { ...value, ...observeRecovery({ ...value, evidence: stored }, judgment, this.now()),
         timeline: [...value.timeline, this.event("observation", "agent", judgment.summary, { judgment, evidence })] };
-    });
+    }, finalSummary);
     if (["completed", "failed", "waiting_effect"].includes(task.status)) await this.deps.agent.release(task);
     if (["completed", "failed"].includes(task.status)) this.notifyGroup(task, "result");
   }
 
-  async plan(taskId: string, version: number, plan: RecoveryPlan): Promise<void> {
+  async plan(taskId: string, version: number, plan: RecoveryPlan, finalSummary?: unknown): Promise<void> {
     const task = await this.mutate(taskId, version, value => ({ ...value, ...submitRecoveryPlan(value, plan, this.now()),
-      timeline: [...value.timeline, this.event("plan", "agent", plan.summary, { plan })] }));
+      timeline: [...value.timeline, this.event("plan", "agent", plan.summary, { plan })] }), finalSummary);
     this.notifyGroup(task, "plan");
     if (task.status === "waiting_owner") await this.notify(task, "plan", plan.summary);
     if (task.status === "completed") await this.deps.agent.release(task);
@@ -259,7 +259,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     await this.mutate(taskId, task.version, value => ({ ...value, version: value.version + 1,
       timeline: [...value.timeline, this.event("annotation", "owner", "人工标注", { ...input, reviewer_id: actor.userId })] }));
   }
-  async finishApply(taskId: string, version: number, input: { applicable: boolean; success: boolean; summary: string }): Promise<void> {
+  async finishApply(taskId: string, version: number, input: { applicable: boolean; success: boolean; summary: string }, finalSummary?: unknown): Promise<void> {
     const task = await this.mutate(taskId, version, value => {
       if (value.status !== "running" || value.phase !== "apply" || !value.plan?.approvedAt) this.fail(409, "当前没有获批执行方案");
       const failed = !input.applicable || !input.success;
@@ -267,13 +267,13 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
         observationDeadlineAt: failed ? null : this.now() + this.deps.observationMs,
         judgment: failed ? this.failureJudgment(value, input.summary) : value.judgment,
         timeline: [...value.timeline, this.event("operation", "agent", input.summary, { applicable: input.applicable, success: input.success })] };
-    });
+    }, finalSummary);
     if (task.status === "failed") await this.deps.agent.release(task);
     this.notifyGroup(task, "execution");
     if (task.status === "failed") this.notifyGroup(task, "result");
   }
 
-  async finishForUserContinuation(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string }): Promise<void> {
+  async finishForUserContinuation(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string }, finalSummary?: unknown): Promise<void> {
     const task = await this.mutate(taskId, version, value => {
       if (value.status !== "running" || value.execution?.executionId !== input.executionId || value.execution.state === "ended") this.fail(409, "当前不能结束自愈任务");
       const reads = new Set(value.timeline.filter(event => event.kind === "operation" && event.payload.status === "succeeded")
@@ -290,12 +290,12 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
           evidence_ids: [...new Set([...(value.judgment?.evidence_ids ?? []), ...input.evidence_ids])] },
         timeline: [...value.timeline, this.event("termination", "agent", input.summary,
           { completion_reason: "user_continued", evidence_ids: input.evidence_ids })] };
-    });
+    }, finalSummary);
     await this.deps.agent.release(task);
     this.notifyGroup(task, "result");
   }
 
-  async finishForMcpPermission(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string }): Promise<void> {
+  async finishForMcpPermission(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string }, finalSummary?: unknown): Promise<void> {
     const task = await this.mutate(taskId, version, value => {
       if (value.simulation || value.level === "debug" || value.status !== "running" || value.execution?.executionId !== input.executionId
         || value.execution.state === "ended" || value.phase === "apply") this.fail(409, "当前不能转交 Owner 处理 MCP 权限");
@@ -311,14 +311,14 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
           effect: "not_recovered", summary: input.summary, evidence_ids: input.evidence_ids },
         timeline: [...value.timeline, this.event("termination", "agent", input.summary,
           { completion_reason: "mcp_permission_required", evidence_ids: input.evidence_ids, phase: value.phase })] };
-    });
+    }, finalSummary);
     // Terminal state prevents another Agent turn; the existing Owner notification records its own receipt.
     try { await this.notify(task, "result", input.summary); }
     finally { await this.deps.agent.release(task); }
     this.notifyGroup(await this.required(taskId), "result");
   }
 
-  async finishForTargetUnavailable(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string }): Promise<void> {
+  async finishForTargetUnavailable(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string }, finalSummary?: unknown): Promise<void> {
     const task = await this.mutate(taskId, version, value => {
       if (value.simulation || value.status !== "running" || value.execution?.executionId !== input.executionId || value.execution.state === "ended") this.fail(409, "当前不能结束自愈任务");
       if (typeof input.summary !== "string" || !input.summary.trim() || input.summary.length > 8000 || containsSecret(input.summary)
@@ -337,12 +337,12 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
           effect: "unknown", summary: input.summary, evidence_ids: input.evidence_ids },
         timeline: [...value.timeline, this.event("termination", "agent", input.summary,
           { completion_reason: "target_unavailable", evidence_ids: input.evidence_ids })] };
-    });
+    }, finalSummary);
     await this.deps.agent.release(task);
     this.notifyGroup(task, "result");
   }
 
-  async executionFailure(taskId: string, reason: string, executionId?: string, retryable = false): Promise<void> {
+  async executionFailure(taskId: string, reason: string, executionId?: string, retryable = false, finalSummary?: unknown): Promise<void> {
     const previous = await this.required(taskId);
     if (!this.ownsTask(previous) || previous.status !== "running" || (executionId && (previous.execution?.executionId !== executionId || previous.execution.state === "ended"))) return;
     const task = await this.mutate(taskId, previous.version, value => {
@@ -358,7 +358,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
           ...(failedExecutionId ? { executionId: failedExecutionId } : {}) },
         judgment: delay !== undefined ? value.judgment : this.failureJudgment(value, summary),
         timeline: [...value.timeline, this.event("execution", "service", summary, { execution_id: executionId, retryable, failures, retry_at_ms: delay !== undefined ? this.now() + delay : null })] };
-    });
+    }, finalSummary);
     await this.deps.agent.release(task);
     if (task.status === "failed") this.notifyGroup(task, "result");
   }
@@ -418,10 +418,15 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     catch { console.error("[session-recovery] group notification hook failed", task.taskId, kind); }
   }
 
-  private async mutate(taskId: string, version: number, change: (value: RecoveryStoredTask) => RecoveryStoredTask): Promise<RecoveryStoredTask> {
+  private async mutate(taskId: string, version: number, change: (value: RecoveryStoredTask) => RecoveryStoredTask, finalSummary?: unknown): Promise<RecoveryStoredTask> {
     for (let attempt = 0; attempt < 5; attempt++) {
       const updated = await this.deps.tasks.update(taskId, version, value => {
         const changed = change(value);
+        // Optional presentation metadata must never invalidate a valid business result.
+        if (changed.status !== value.status && ["completed", "failed", "waiting_effect"].includes(changed.status)) {
+          const text = typeof finalSummary === "string" ? finalSummary.trim() : "";
+          changed.final_summary = text && text.length <= 2000 && !containsSecret(text) ? text : undefined;
+        }
         const reportable = !changed.simulation && changed.status !== value.status
           && ["waiting_effect", "completed", "failed", "canceled"].includes(changed.status);
         return { ...changed, pending_results: reportable

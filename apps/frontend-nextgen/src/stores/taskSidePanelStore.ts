@@ -22,6 +22,8 @@ export interface TaskNavRecord {
 export interface TaskNavTarget {
   taskId?: string;
   sessionId: string;
+  /** 根节点恢复原宿主会话时使用的精确站内地址。 */
+  routeUrl?: string;
   kind: 'group' | 'bot' | 'friend' | 'unknown';
   groupId?: string | null;
   botId?: string | null;
@@ -33,8 +35,7 @@ export interface TaskNavTarget {
 /**
  * 任务节点对应的联动会话目标。
  *
- * 会话宿主只替换 ChatArea 内容，不切真实路由/会话，因此右侧 TaskPanel 的 tab、
- * 下钻栈与宽度都保持不变。kind 以 sessionId 的 bcs_grp_ 形态作群聊兜底。
+ * 旧版 ChatArea 原位联动目标，保留用于兼容已挂载状态；新节点导航统一切真实路由。
  */
 export interface TaskLinkedSessionTarget {
   sessionId: string;
@@ -55,7 +56,7 @@ export interface TaskSidePanelState {
   /** 会话宿主左侧 ChatArea 的联动会话；null = 展示宿主当前真实会话 */
   linkedSession: TaskLinkedSessionTarget | null;
   setActiveTask: (taskId: string) => void;
-  selectRootNode: (taskId: string, nodeId: string) => void;
+  selectRootNode: (taskId: string, nodeId: string, target?: TaskNavTarget | null) => void;
   selectNode: (taskId: string, nodeId: string, target: TaskNavTarget | null) => void;
   drillInto: (taskId: string, nodeId: string, target: TaskNavTarget | null) => void;
   backToOverview: (taskId: string) => void;
@@ -81,12 +82,12 @@ const initial = {
 export const useTaskSidePanelStore = create<TaskSidePanelState>((set) => ({
   ...initial,
   setActiveTask: (taskId) => set({ activeTaskId: taskId, pendingNavigation: null }),
-  selectRootNode: (taskId, nodeId) =>
+  selectRootNode: (taskId, nodeId, target = null) =>
     set((s) => {
       const prev = s.navByTask[taskId] ?? emptyRecord;
       return {
         navByTask: { ...s.navByTask, [taskId]: { ...prev, selectedNodeId: nodeId } },
-        pendingNavigation: null,
+        pendingNavigation: target ? { ...target, taskId } : null,
         linkedSession: null,
       };
     }),

@@ -94,10 +94,6 @@ pub(crate) fn group_use_case_error_to_http(error: GroupUseCaseError) -> HttpAdap
         GroupUseCaseError::ActorNotFound(actor_id) => {
             HttpAdapterError::NotFound(format!("Actor '{}' not found", actor_id))
         }
-        GroupUseCaseError::ProposalNotFound(proposal_id)
-        | GroupUseCaseError::ProposalExpired(proposal_id) => {
-            HttpAdapterError::NotFound(format!("Proposal '{}' not found or expired", proposal_id))
-        }
         GroupUseCaseError::InvalidParticipantMode { mode, actor_kind } => {
             HttpAdapterError::BadRequest(format!(
                 "mode '{:?}' is not valid for actor_kind '{:?}'",
@@ -293,14 +289,6 @@ pub(crate) fn group_use_case_error_to_mode_response(error: GroupUseCaseError) ->
             Json(serde_json::json!({
                 "success": false,
                 "error": format!("Actor '{}' not found", actor_id)
-            })),
-        ),
-        GroupUseCaseError::ProposalNotFound(proposal_id)
-        | GroupUseCaseError::ProposalExpired(proposal_id) => (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({
-                "success": false,
-                "error": format!("Proposal '{}' not found or expired", proposal_id)
             })),
         ),
         GroupUseCaseError::InvalidParticipantMode { mode, actor_kind } => (

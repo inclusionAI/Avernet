@@ -128,8 +128,9 @@ function notificationContent(task: RecoveryStoredTask, event: RecoveryTimelineEv
     section("执行结果", event.summary);
     if (event.payload.success === true) section("后续处理", "继续核对原任务的执行效果，方案执行完成不代表业务已恢复。", 200);
   } else {
-    title = task.completionReason === "target_unavailable" ? "目标不可用，自愈已结束" : task.completionReason === "user_continued" ? "用户已接手，自愈已让路" : task.status === "completed" ? "任务已完成" : task.status === "failed" ? "任务执行失败" : "任务已停止";
-    intervention();
+    title = task.completionReason === "target_unavailable" ? "目标不可用，自愈已结束" : task.completionReason === "user_continued" ? "用户已接手，自愈已让路" : task.status === "completed" ? "任务已完成" : task.status === "failed" ? task.phase === "verify" && task.judgment?.effect === "not_recovered" ? "自愈处理结束" : "任务执行失败" : "任务已停止";
+    section("任务总结", task.final_summary ?? "摘要暂不可用，请查看完整任务与处理记录。", 2000);
+    if (!task.final_summary) intervention();
     const delivery = task.judgment?.delivery === "confirmed" ? "**消息已触达**：恢复指引已确认出现在原会话中。"
       : "**消息触达未确认**：尚无证据确认恢复指引进入原会话。";
     const response = { acted: "**Bot 已采取行动**：已采纳指引并实际执行。", replied: "**Bot 已回复**：尚未确认实际采取恢复行动。",

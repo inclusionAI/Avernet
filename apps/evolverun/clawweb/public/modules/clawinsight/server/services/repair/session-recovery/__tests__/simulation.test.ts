@@ -69,10 +69,10 @@ it("audits existing bounded session reads and records the proposed message witho
   let task = await create(); const receipt = await read(task);
   expect(receipt).toMatchObject({ status: "succeeded", result: { next_line: null, historical_boundary: { message_id: 'M100', cutoff_at_ms: 10000 } } });
   task = await current(task.taskId);
-  await agent.report(task, { kind: "assessment", phase: "assess", decision: "message", summary: "原 Bot 可核对调用后继续原任务", evidence_ids: [receipt.evidenceId], message: "请核对原调用参数，从失败步骤继续；不要重复已完成的操作。",
+  await agent.report(task, { kind: "assessment", phase: "assess", decision: "message", summary: "原 Bot 可核对调用后继续原任务", final_summary: "历史任务因调用格式受阻，建议纠正参数后从失败步骤继续。未执行消息干预。", evidence_ids: [receipt.evidenceId], message: "请核对原调用参数，从失败步骤继续；不要重复已完成的操作。",
     knowledge: [{ path: "clawevolve-recovery-handbook/mcp/handbook.md", sha256: "a".repeat(64) }] });
   task = await current(task.taskId);
-  expect(task).toMatchObject({ status: "completed", phase: "assess", judgment: { effect: "not_intervened" }, pending_results: [] });
+  expect(task).toMatchObject({ status: "completed", phase: "assess", final_summary: expect.stringContaining("未执行消息干预"), judgment: { effect: "not_intervened" }, pending_results: [] });
   expect(task.delivery).toBeUndefined();
   expect(task.timeline.find(event => event.kind === "assessment")!.payload).toMatchObject({ message: expect.stringContaining("从失败步骤继续"), knowledge: [{ sha256: "a".repeat(64) }] });
   await service.reportResults(); noExternalEffects();
@@ -80,11 +80,12 @@ it("audits existing bounded session reads and records the proposed message witho
 
 it("uses the existing complete plan contract, terminates before apply, and cannot approve or resume it", async () => {
   let task = await create(); const receipt = await read(task); task = await current(task.taskId);
-  await agent.report(task, { kind: "assessment", phase: "assess", decision: "environment", summary: "需要环境处理", evidence_ids: [receipt.evidenceId] });
+  await agent.report(task, { kind: "assessment", phase: "assess", decision: "environment", summary: "需要环境处理", final_summary: "不应保存初步摘要", evidence_ids: [receipt.evidenceId] });
   task = await current(task.taskId); expect(task.phase).toBe("plan");
-  await agent.report(task, { kind: "plan", phase: "plan", plan });
+  expect(task.final_summary).toBeUndefined();
+  await agent.report(task, { kind: "plan", phase: "plan", plan, final_summary: "已形成完整拟议方案及必要配合事项，未执行环境修改。" });
   task = await current(task.taskId);
-  expect(task).toMatchObject({ status: "completed", phase: "plan", plan: { approvedAt: null }, judgment: { effect: "not_intervened" }, pending_results: [] });
+  expect(task).toMatchObject({ status: "completed", phase: "plan", final_summary: expect.stringContaining("未执行环境修改"), plan: { approvedAt: null }, judgment: { effect: "not_intervened" }, pending_results: [] });
   await expect(service.decide(task.taskId, task.plan!.digest, true, actor, true)).rejects.toMatchObject({ status: 409 });
   await expect(service.resume(task.taskId)).rejects.toMatchObject({ status: 409 });
   noExternalEffects();

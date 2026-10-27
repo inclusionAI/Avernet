@@ -35,6 +35,7 @@ class StorageType(StrEnum):
 
     BOT_WORKSPACE = "bot_workspace"
     SESSION_FILE = "session_file"
+    OBJECT_FILE = "object_file"
 
 
 @dataclass(frozen=True)
@@ -90,9 +91,15 @@ class FileContent(ArtifactContent):
                     "BOT_WORKSPACE 按工作区相对路径寻址,file_id 必须为 None"
                 )
             _validate_workspace_relative_path(self.storage_id)
-        else:
+        elif self.storage_type is StorageType.SESSION_FILE:
             if not self.file_id:
                 raise TaskArtifactContentError("SESSION_FILE 必须提供 file_id")
+        elif self.storage_type is StorageType.OBJECT_FILE:
+            if self.file_id is not None:
+                raise TaskArtifactContentError(
+                    "OBJECT_FILE 按对象 key 寻址,file_id 必须为 None"
+                )
+            _validate_object_key(self.storage_id)
 
 
 def _validate_workspace_relative_path(path: str) -> None:
@@ -101,6 +108,22 @@ def _validate_workspace_relative_path(path: str) -> None:
     segments = path.replace("\\", "/").split("/")
     if any(segment == ".." for segment in segments):
         raise TaskArtifactContentError(f"工作区 storage_id 不允许 .. 逃逸: {path!r}")
+
+
+def _validate_object_key(key: str) -> None:
+    """OBJECT_FILE 稳定对象 key 的结构性校验(与配置无关,服务层另做前缀域校验)。"""
+
+    if "\\" in key:
+        raise TaskArtifactContentError(f"对象 key 不允许反斜杠: {key!r}")
+    if key.startswith("/") or key.startswith("~"):
+        raise TaskArtifactContentError(f"对象 key 不得以 / 或 ~ 开头: {key!r}")
+    if any(ord(char) < 0x20 for char in key):
+        raise TaskArtifactContentError(f"对象 key 不允许控制字符: {key!r}")
+    segments = key.split("/")
+    if any(segment in ("", ".", "..") for segment in segments):
+        raise TaskArtifactContentError(
+            f"对象 key 不允许空段、. 或 .. 段: {key!r}"
+        )
 
 
 @dataclass(frozen=True)

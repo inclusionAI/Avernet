@@ -11,6 +11,11 @@ version     = { workspace = true }
 name = "bcs"
 path = "src/main.rs"
 
+[[bin]]
+name = "bcs-caller-e2e"
+path = "tests/caller_channel/main.rs"
+required-features = ["test-utils"]
+
 [features]
 default = ["prometheus-metrics"]
 metrics = ["prometheus-metrics"]
@@ -127,7 +132,6 @@ bcs-security-gateway-local = { workspace = true }
 bcs-fusion      = { workspace = true }
 bcs-fuse-client = { workspace = true }
 bcs-leader-election = { workspace = true }
-bcs-proposal    = { workspace = true }
 bcs-friend      = { workspace = true }
 bcs-relation    = { workspace = true }
 bcs-system-message = { workspace = true }

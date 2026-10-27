@@ -11,7 +11,7 @@ use bcs_service_api::{
     BotCandidateSearchCoreService, BotCandidateSearchMode, BotCandidateSearchQuery,
     BotCandidateVisibility, BotRegistryCoreService, FriendCoreService, FriendRequestCoreService,
     FriendRequestDirection, FusionCoreService, GroupCoreService, OrganizationCoreService,
-    ProposalCoreService, RelationCoreService, RoutingCoreService, ServiceError,
+    RelationCoreService, RoutingCoreService, ServiceError,
     SystemMessageDispatcherService, SystemMessageProducerService,
 };
 
@@ -218,8 +218,6 @@ pub async fn organization_core_service_contract_tests<T: OrganizationCoreService
         Err(ServiceError::Forbidden(_))
     ));
 }
-
-pub async fn proposal_core_service_contract_tests<T: ProposalCoreService + ?Sized>(_svc: &T) {}
 
 pub async fn relation_core_service_contract_tests<T: RelationCoreService + ?Sized>(_svc: &T) {}
 

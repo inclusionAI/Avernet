@@ -65,6 +65,8 @@ fn hint(row: &PersistedMessageDelivery) -> Option<(&'static str, &'static str)> 
         Status::Cancelling => Some(("cancelling", "正在停止处理")),
         Status::Failed if row.last_error_code.as_deref()
             == Some(crate::managed_delivery::BOT_TERMINAL_ERROR_CODE) => None,
+        Status::Failed if row.semantic_projection_json.get("caller_execution").is_some_and(|v| !v.is_null()) =>
+            Some(("failed", "调用者模式处理失败，身份凭证可能已过期，请重新发送消息。")),
         Status::Failed => Some(("failed", "处理失败")),
         Status::Cancelled => Some(("cancelled", "消息已取消")),
         Status::Expired => None,

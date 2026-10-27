@@ -39,9 +39,18 @@ def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) ->
 
     assert result.returncode == 0, result.stdout + result.stderr
     document = json.loads((tmp_path / "bcn.openapi.json").read_text(encoding="utf-8"))
-    # 68 collaboration operations + the five public auth operations exposed by
-    # the authentication facade.
-    assert sum(len(path_item) for path_item in document["paths"].values()) == 73
+    # 69 collaboration operations (now including GET /collaboration/me) plus
+    # the five public auth operations exposed by the authentication facade.
+    # Count method keys only: path items may also carry shared "parameters"
+    # blocks, which are not operations.
+    method_keys = {"get", "post", "put", "patch", "delete"}
+    assert (
+        sum(
+            sum(1 for method in path_item if method in method_keys)
+            for path_item in document["paths"].values()
+        )
+        == 74
+    )
     assert (
         "get"
         in document["paths"][
@@ -97,7 +106,16 @@ def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) ->
     internal = json.loads(
         (tmp_path / "bcn-internal.openapi.json").read_text(encoding="utf-8")
     )
-    assert sum(len(path_item) for path_item in internal["paths"].values()) == 25
+    # Same method-only counting as the public surface above; the internal
+    # plane now also carries GET/POST on draft {revision} plus shared
+    # per-path "parameters" blocks.
+    assert (
+        sum(
+            sum(1 for method in path_item if method in method_keys)
+            for path_item in internal["paths"].values()
+        )
+        == 27
+    )
     provider_path = "/api/v1/collaboration/providers/by-slug/{slug}"
     assert set(internal["paths"][provider_path]) == {"get"}
     provider = internal["paths"][provider_path]["get"]
@@ -132,6 +150,7 @@ def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) ->
         in internal["paths"]["/api/v1/collaboration/state-machine-runs/{run_id}/reruns"]
     )
     assert [tag["name"] for tag in document["tags"]] == [
+        "Collaboration / Users",
         "Authentication",
         "Collaboration / Bots",
         "Collaboration / Friendships",

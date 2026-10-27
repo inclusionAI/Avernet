@@ -624,10 +624,6 @@ fn map_group_error(error: GroupUseCaseError) -> ApplicationError {
         | GroupUseCaseError::InvalidProposal(message) => {
             ApplicationError::invalid("invalid_request", message)
         }
-        GroupUseCaseError::ProposalNotFound(message)
-        | GroupUseCaseError::ProposalExpired(message) => {
-            ApplicationError::not_found("not_found", message)
-        }
         GroupUseCaseError::InvalidHistoryLimit(limit) => {
             ApplicationError::invalid("invalid_request", format!("invalid history limit {limit}"))
         }

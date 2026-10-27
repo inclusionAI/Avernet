@@ -298,6 +298,10 @@ from agentclaw.community.core.task.domain.errors import (
     NodeNotFoundError,
     TaskError,
     TaskArtifactContentError,
+    TaskArtifactObjectNotFoundError,
+    TaskArtifactStorageError,
+    TaskArtifactStorageNotConfiguredError,
+    TaskArtifactUploadTooLargeError,
     TaskNotFoundError,
     TaskStateError,
     TrajectoryAnalysisError,
@@ -824,6 +828,15 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # relay 回调解析/发布路径抛给客户端的是请求问题,落 422 而非 TaskError 500 兜底
     # (列在 TaskError 基类之前,同上 trajectory leaves)。
     TaskArtifactContentError: (422, "Invalid artifact report"),
+    # OBJECT_FILE 上传/下载(spec 2026-10-26 修订):四个状态对应四个不同的运维
+    # 动作——413 调大 task_artifact_storage.max_upload_mb / 分块通道;502 查对象存储
+    # 本身;503 修列绑定(task_artifact_storage 块);404 行未知或对象已被清理。列在
+    # ``TaskError`` 基类之前(同上 trajectory leaves;ENVELOPE_ERRORS 首个 isinstance
+    # 命中即返回)。
+    TaskArtifactUploadTooLargeError: (413, "Artifact upload exceeds configured size cap"),
+    TaskArtifactObjectNotFoundError: (404, "Artifact object not found"),
+    TaskArtifactStorageNotConfiguredError: (503, "Task artifact object storage is not configured"),
+    TaskArtifactStorageError: (502, "Task artifact object storage failed"),
     TaskError: (500, "Internal error"),
 }
 # Most public categories retain the ordinary ``xxx000`` business code.  A

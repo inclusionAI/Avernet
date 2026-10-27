@@ -53,6 +53,7 @@ internal_dependencies:
   - agentclaw.community.core.task_queue   # SQLite ORM side-effect import for local table creation
   - agentclaw.community.core.task.repository.models  # SQLite ORM side-effect import for task_* table creation
   - agentclaw.community.core.task.task_discovery.discovered_task_models  # SQLite ORM side-effect import for ac_discovered_tasks table creation
+  - agentclaw.community.core.task.task_context.task_artifact.artifact_object_storage  # task-owned OBJECT_FILE object-store Protocol (in-memory impl lives here)
   - agentclaw.community.core.workspace
   - agentclaw.community.core.agentswarm.config.settings  # factory derives its setup-timeout default from the swarm config
   - agentclaw.community.core.agentswarm.domain.models  # swarm domain vocabulary typed in the local subagent/artifact impls

@@ -210,6 +210,7 @@ async fn conformance_live_group_admission_uses_defaults_and_blocks_drain_bypass(
     policy.defaults.max_queued = 1;
     flow.replace_delivery_policy(admin(), 0, policy.clone()).await.unwrap();
     let command = WebSendCommand {
+        caller_execution: None,
         caller: CallerContext::Human(HumanActor { actor_id: "human_1".into(), staff_no: "1".into() }),
         group_id: "group-1".into(), session_id: Some("group-1:live".into()), from_actor_id: "human_1".into(),
         from_name: None, message: "live defaults".into(), mentions: vec!["bot-driver".into()], attachments: None,
@@ -267,6 +268,7 @@ async fn manual_resolution_checks_human_scope_ownership_and_version() {
         .with_session_management(Arc::new(StaticSessionManagement::new(test_session("group-1:resolve", "group-1", group.participants))));
     let human = CallerContext::Human(HumanActor { actor_id: "human_1".into(), staff_no: "1".into() });
     let admitted = flow.handle_web_send(WebSendCommand {
+        caller_execution: None,
         caller: human.clone(), group_id: "group-1".into(), session_id: Some("group-1:resolve".into()), from_actor_id: "human_1".into(),
         from_name: None, message: "resolve test".into(), mentions: vec!["bot-driver".into()], attachments: None,
         thinking: None, idempotency_key: Some("resolve".into()), source_im_message_id: None, channel_sender_identity: None,
@@ -343,6 +345,7 @@ async fn conformance_queued_group_preparation_and_ingress() {
     );
     Arc::get_mut(&mut flow).unwrap().delivery_queue_ttl_ms = Some(60000);
     let command = WebSendCommand {
+        caller_execution: None,
         caller: CallerContext::Human(HumanActor {
             actor_id: "human_1".into(),
             staff_no: "1".into(),

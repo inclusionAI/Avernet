@@ -127,7 +127,7 @@ it('retains audited evidence and shows a simple collapsed review only after task
   const review = screen.getByText('人工复核').closest('details')!;
   expect(review).not.toHaveAttribute('open');
   expect(review.closest('[role="tabpanel"]')).toBeNull();
-  expect(screen.getByRole('region', { name: '任务概览' }).nextElementSibling).toBe(review.closest('section'));
+  expect(screen.getByRole('region', { name: '任务总结' }).nextElementSibling).toBe(review.closest('section'));
   fireEvent.click(screen.getByText('人工复核'));
   expect(screen.queryByText('引用证据')).toBeNull();
   fireEvent.change(screen.getByLabelText('理由'), { target: { value: '前后原文已核对' } });
@@ -468,4 +468,47 @@ it.each([true, false])('shows Owner permission instructions without continuing o
   expect(screen.queryByRole('button', { name: /确认完整方案|拒绝方案|停止任务|查看方案/ })).toBeNull();
   expect(sessionRecoveryApi.decide).not.toHaveBeenCalled();
   expect(screen.queryByText('人工复核')).toBeNull();
+});
+
+it('shows an expanded overall summary independently of full judgment', async () => {
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'completed', final_summary: '原任务需读取资料。核实为调用参数错误，发送纠正指引后已恢复推进。' } as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  const title = await screen.findByRole('heading', { name: '任务总结' });
+  const summary = title.closest('section')!;
+  expect(summary).toHaveTextContent('原任务需读取资料。');
+  expect(within(summary).getByText('核实为调用参数错误，发送纠正指引后已恢复推进。')).toBeVisible();
+  expect(summary.querySelector('details')).toBeNull();
+});
+it('shows an explicit unavailable summary for legacy completed tasks', async () => {
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'completed' } as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  expect(await screen.findByText(/摘要暂不可用/)).toBeVisible();
+  expect(screen.getByText('原问题仍存在')).toBeInTheDocument();
+});
+it.each([
+  ['waiting_owner', 'apply', '待验证', 'neutral', '等待方案确认'],
+  ['running', 'plan', '待验证', 'neutral', '等待完整方案'],
+  ['running', 'verify', '验证中', 'info', '正在核对原任务'],
+  ['completed', 'verify', '未恢复', 'warning', '原任务仍受阻'],
+] as const)('distinguishes business effect from execution status: %s/%s', async (status, phase, label, tone, hint) => {
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status, phase } as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  await screen.findByRole('heading', { name: '恢复效果' });
+  const metric = screen.getByText('效果', { selector: '.sr-judgment-label' }).closest('.sr-judgment-item')!;
+  expect(metric).toHaveClass(tone); expect(metric).not.toHaveClass('danger');
+  expect(within(metric as HTMLElement).getByText(label)).toBeVisible();
+  expect(metric).toHaveTextContent(hint);
+});
+it('keeps an unrecovered business outcome separate from an execution error', async () => {
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'failed', phase: 'verify' } as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  await screen.findByRole('heading', { name: '恢复效果' });
+  expect(screen.queryByText('自愈执行失败')).not.toBeInTheDocument();
+  const metric = screen.getByText('效果', { selector: '.sr-judgment-label' }).closest('.sr-judgment-item')!;
+  expect(metric).toHaveClass('warning'); expect(metric).toHaveTextContent('原任务仍受阻');
+});
+it('retains the red execution alert for an actual execution failure', async () => {
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'failed', phase: 'verify', judgment: { ...task.judgment, effect: 'unknown' } } as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  expect(await screen.findByText('自愈执行失败')).toBeVisible();
 });

@@ -267,6 +267,10 @@ from agentclaw.community.core.skill_center.services.installation_backfill_servic
 from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
     LocalSkillUploadService,
 )
+from agentclaw.community.core.task.task_context.task_artifact.artifact_object_file_service import (
+    TaskArtifactObjectFileService,
+    TaskArtifactObjectFileServiceProtocol,
+)
 from agentclaw.community.core.skill_center.services.direct_activation_service import (
     DirectActivationService,
 )
@@ -408,6 +412,7 @@ _PAIRS = [
     (ServiceArtifactLineageReaderProtocol, ServiceArtifactLineageReader),
     (SpaceSkillOfflineServiceProtocol, SpaceSkillOfflineService),
     (AcliCliServiceProtocol, AcliCliService),
+    (TaskArtifactObjectFileServiceProtocol, TaskArtifactObjectFileService),
 ]
 
 _IDS = [f"{p.__name__}->{c.__name__}" for p, c in _PAIRS]

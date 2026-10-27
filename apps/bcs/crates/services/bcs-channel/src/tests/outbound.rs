@@ -3,6 +3,7 @@ use super::*;
 #[test]
 fn channel_meta_uses_inbound_channel_type_as_source() {
     let msg = InboundMessage {
+        execution_token: None,
         channel_type: "test-im".to_string(),
         account_ref: "robot_1".to_string(),
         im_conversation_id: "conv_meta".to_string(),

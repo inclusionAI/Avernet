@@ -34,11 +34,15 @@ from agentclaw.community.adapters.http.task.schemas import (
     task_info_request_from_dto, trajectory_to_dto,
 )
 from agentclaw.community.adapters.http.task.artifact_routes import router as artifact_api_router
+from agentclaw.community.adapters.http.task.artifact_object_file_routes import (
+    router as artifact_object_file_router,
+)
 from agentclaw.community.adapters.http.task.result_writeback_routes import (
     router as result_writeback_api_router,
 )
 from agentclaw.community.adapters.http.task.relay_routes import router as relay_api_router
 from agentclaw.community.adapters.http.task.benchmark_routes import router as benchmark_api_router
+from agentclaw.community.adapters.http.task.auto_routes import router as auto_api_router
 from agentclaw.community.adapters.http.task.bbs_routes import router as bbs_api_router
 from agentclaw.community.adapters.http.task.intake_routes import router as intake_api_router
 from agentclaw.community.adapters.http.task.task_read_routes import (
@@ -86,8 +90,10 @@ router.include_router(relay_api_router)
 router.include_router(bbs_api_router)
 router.include_router(intake_api_router)
 router.include_router(benchmark_api_router)
+router.include_router(auto_api_router)
 router.include_router(task_read_api_router)
 router.include_router(artifact_api_router)
+router.include_router(artifact_object_file_router)
 router.include_router(result_writeback_api_router)
 
 # ===== 公开面镜像(execute;内部 /api/v1 副本,不经 spanner)=====

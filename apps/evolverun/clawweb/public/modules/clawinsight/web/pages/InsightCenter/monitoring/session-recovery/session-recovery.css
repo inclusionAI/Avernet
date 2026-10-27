@@ -229,8 +229,10 @@
 .sr-judgment-hint { display:block; margin-top:7px; color:var(--sub); font-size:11px; line-height:1.6 }
 .sr-judgment-item.success { background:var(--green-soft); border-color:transparent }
 .sr-judgment-item.success .sr-judgment-value { color:var(--green) }
-.sr-judgment-item.danger { background:var(--red-soft); border-color:transparent }
-.sr-judgment-item.danger .sr-judgment-value { color:var(--red) }
+.sr-judgment-item.warning { background:var(--amber-soft); border-color:transparent }
+.sr-judgment-item.warning .sr-judgment-value { color:var(--amber) }
+.sr-judgment-item.info { background:var(--blue-soft); border-color:transparent }
+.sr-judgment-item.info .sr-judgment-value { color:var(--blue) }
 .sr-summary-details { margin:16px 0 0; padding-top:14px; border-top:1px solid var(--line) }
 .sr-summary-details>summary { color:var(--blue) }
 .sr-summary-details>.sr-plan-markdown { margin-top:14px; padding-top:14px; border-top:1px solid var(--line) }

@@ -62,6 +62,8 @@ export type RecoveryTaskState = {
   ownerDeadlineAt: number | null;
   plan: (RecoveryPlan & { digest: string; approvedAt: number | null }) | null;
   judgment: RecoveryJudgment | null;
+  /** Agent-authored overall closeout summary; absent on legacy tasks or failed generation. */
+  final_summary?: string;
   evidence: RecoveryEvidence[];
   delivery?: RecoveryResult;
   runtimeTarget?: AgentRuntimeTargetSnapshot;

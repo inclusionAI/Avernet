@@ -254,9 +254,6 @@ fn clone_service_error(error: &ServiceError) -> ServiceError {
         ServiceError::BotNotRegistered(bot_id) => ServiceError::BotNotRegistered(bot_id.clone()),
         ServiceError::BotNotConnected(bot_id) => ServiceError::BotNotConnected(bot_id.clone()),
         ServiceError::GroupNotFound(group_id) => ServiceError::GroupNotFound(group_id.clone()),
-        ServiceError::ProposalNotFound(proposal_id) => {
-            ServiceError::ProposalNotFound(proposal_id.clone())
-        }
         ServiceError::ProviderNotFound(provider_id) => {
             ServiceError::ProviderNotFound(provider_id.clone())
         }

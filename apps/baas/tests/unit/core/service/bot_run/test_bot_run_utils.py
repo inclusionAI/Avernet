@@ -773,7 +773,7 @@ class TestResolveCallerBinding:
         assert info.sandbox_id == "sbx-9"
         assert info.device_provider == "caller"
 
-    async def test_resolves_sandbox_via_agentpaas_credential(self):
+    async def test_resolves_sandbox_via_agentpass_credential(self):
         plugin = MagicMock()
         plugin.get_caller_connection = AsyncMock(return_value="sbx-agent")
         resolver = BotBindingResolver(plugin)
@@ -781,8 +781,8 @@ class TestResolveCallerBinding:
             bot_id=f"{BOT_ID}:{ENTITY_ID}",
             metadata={
                 "user_id": "workno-agent",
-                "caller_token": "agentpaas-token",
-                "type": "agentpaas",
+                "caller_token": "test-token",
+                "type": "agentpass",
             },
         )
         plugin.get_caller_connection.assert_awaited_once_with(
@@ -790,8 +790,8 @@ class TestResolveCallerBinding:
             owner_id=ENTITY_ID,
             user_id="workno-agent",
             credential=CallerExecutionCredential(
-                type="agentpaas",
-                token="agentpaas-token",
+                type="agentpass",
+                token="test-token",
             ),
         )
         assert info.sandbox_id == "sbx-agent"
@@ -865,7 +865,7 @@ class TestIsCallerMode:
             is False
         )
 
-    def test_agentpaas_credential_enables_caller_mode(self):
+    def test_agentpass_credential_enables_caller_mode(self):
         binding = BotBindingInfo(
             bot_id=BOT_ID,
             entity_id=ENTITY_ID,
@@ -880,8 +880,8 @@ class TestIsCallerMode:
         )
         metadata = {
             "user_id": "workno-agent",
-            "caller_token": "agentpaas-token",
-            "type": "agentpaas",
+            "caller_token": "test-token",
+            "type": "agentpass",
         }
         assert is_caller_mode(metadata, binding) is True
 
@@ -900,15 +900,15 @@ class TestIsCallerMode:
             baas_session_id=None,
         )
         metadata = normalize_caller_identity_metadata(
-            {"user_id": "u-1", "caller_token": "agentpaas-token"}
+            {"user_id": "u-1", "caller_token": "test-token"}
         )
         assert metadata == {
             "user_id": "u-1",
-            "caller_token": "agentpaas-token",
+            "caller_token": "test-token",
         }
         assert is_caller_mode(metadata, binding) is True
 
-    async def test_unsupported_agentpaas_credential_type_fails_closed(self):
+    async def test_unsupported_agentpass_credential_type_fails_closed(self):
         plugin = MagicMock()
         plugin.get_caller_connection = AsyncMock()
         resolver = BotBindingResolver(plugin)
@@ -917,7 +917,7 @@ class TestIsCallerMode:
                 bot_id=BOT_ID,
                 metadata={
                     "user_id": "u-1",
-                    "caller_token": "agentpaas-token",
+                    "caller_token": "test-token",
                     "type": "unsupported",
                 },
             )
@@ -929,15 +929,15 @@ class TestStripSensitiveMetadata:
     def test_strips_unified_caller_token(self):
         result = strip_sensitive_metadata(
             {
-                "caller_token": "agentpaas-token",
+                "caller_token": "test-token",
                 "user_id": "u-1",
-                "type": "agentpaas",
+                "type": "agentpass",
                 "foo": "bar",
             }
         )
 
         assert "caller_token" not in result
-        assert result["type"] == "agentpaas"
+        assert result["type"] == "agentpass"
         assert result["user_id"] == "u-1"
         assert result["foo"] == "bar"
 
@@ -971,8 +971,8 @@ class TestNormalizeCallerIdentityMetadata:
     def test_bcn_canonical_keys_pass_through_unchanged(self):
         metadata = {
             "user_id": "workno-agent",
-            "caller_token": "agentpaas-token",
-            "type": "agentpaas",
+            "caller_token": "test-token",
+            "type": "agentpass",
         }
         assert normalize_caller_identity_metadata(metadata) == metadata
 
@@ -980,8 +980,8 @@ class TestNormalizeCallerIdentityMetadata:
         result = normalize_caller_identity_metadata(
             {
                 "user_id": "u-1",
-                "caller_execution_token": "agentpaas-token",
-                "caller_execution_token_type": "agentpaas",
+                "caller_execution_token": "test-token",
+                "caller_execution_token_type": "agentpass",
             }
         )
 
@@ -997,18 +997,18 @@ class TestNormalizeCallerIdentityMetadata:
 
 
 class TestStripSensitiveMetadataLegacy:
-    def test_strips_openapi_and_agentpaas_credential_values(self):
+    def test_strips_openapi_and_agentpass_credential_values(self):
         metadata = {
             "user_id": "u-1",
             "iam_token": "iam-token-value",
-            "caller_token": "agentpaas-token",
-            "caller_token_type": "agentpaas",
+            "caller_token": "test-token",
+            "caller_token_type": "agentpass",
             "foo": "bar",
         }
         result = strip_sensitive_metadata(metadata)
         assert "iam_token" not in result
         assert "caller_token" not in result
-        assert result["caller_token_type"] == "agentpaas"
+        assert result["caller_token_type"] == "agentpass"
         assert result["foo"] == "bar"
 
 

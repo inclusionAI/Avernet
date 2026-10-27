@@ -152,15 +152,6 @@ fn test_private_bot_cannot_collaborate_code() {
     assert_eq!(err.error_params(), Value::Null);
 }
 
-#[test]
-fn test_proposal_not_found_code() {
-    let err = ServiceError::ProposalNotFound("prop-99".into());
-    assert_eq!(err.as_ref(), "proposal_not_found");
-    assert_eq!(
-        err.error_params(),
-        serde_json::json!({ "proposal_id": "prop-99" })
-    );
-}
 
 #[test]
 fn test_provider_not_found_code() {

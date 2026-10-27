@@ -108,7 +108,7 @@ async fn manager_worker_initialization_queues_owned_context_with_directed_audien
 }
 
 fn user_send() -> WebSendCommand {
-    WebSendCommand { caller: CallerContext::Human(HumanActor { actor_id:"human_1".into(), staff_no:"1".into() }),
+    WebSendCommand { caller_execution: None, caller: CallerContext::Human(HumanActor { actor_id:"human_1".into(), staff_no:"1".into() }),
         group_id:"group-1".into(), session_id:Some("group-1:system".into()), from_actor_id:"human_1".into(),
         from_name:None, message:"请检查当前需求".into(), mentions:vec!["bot-observer".into()], attachments:None,
         thinking:None, idempotency_key:Some("user-request".into()), source_im_message_id:None,

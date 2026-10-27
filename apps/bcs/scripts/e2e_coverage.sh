@@ -240,6 +240,9 @@ mkdir -p "$cov_dir"
 : > "$cli_coverage_log"
 export BCS_CLI_COVERAGE_LOG="$cli_coverage_log"
 bash "$bcs_dir/scripts/e2e-test/e2e.sh" || e2e_status=$?
+# Exercise channel plugins through a separate real server without enabling a
+# test ingress on the shared production-composition Singlebox instance.
+bash "$bcs_dir/scripts/caller_e2e_coverage.sh" || e2e_status=$?
 if [[ "$e2e_status" -ne 0 ]]; then
   echo "WARN: e2e exited with $e2e_status; continuing to flush profraw and aggregate coverage." >&2
 fi

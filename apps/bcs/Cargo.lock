@@ -332,7 +332,6 @@ dependencies = [
  "bcs-observability",
  "bcs-organization",
  "bcs-organization-store",
- "bcs-proposal",
  "bcs-protocol",
  "bcs-provider-http",
  "bcs-relation",
@@ -1802,33 +1801,6 @@ dependencies = [
  "serde_json",
  "sha2",
  "tokio",
-]
-
-[[package]]
-name = "bcs-proposal"
-version = "0.1.4-beta.3"
-dependencies = [
- "async-trait",
- "bcs-proposal-store",
- "bcs-service-api",
- "bcs-test-support",
- "serde_json",
- "tokio",
- "tokio-test",
- "urlencoding",
- "uuid",
-]
-
-[[package]]
-name = "bcs-proposal-store"
-version = "0.1.4-beta.3"
-dependencies = [
- "async-trait",
- "bcs-service-api",
- "bcs-test-support",
- "tokio",
- "tracing",
- "uuid",
 ]
 
 [[package]]

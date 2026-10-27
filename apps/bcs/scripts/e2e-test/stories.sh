@@ -398,13 +398,13 @@ story_user_builds_trusted_team() {
 # Flow:
 #   Create a group -> manage members and visibility -> configure participant mode,
 #   workspace, routing, and service settings -> exchange persistent and live messages
-#   -> process an agent callback -> close the group -> confirm a proposed group.
+#   -> process an agent callback -> close the group.
 #
 # Critical assertions:
 #   - Membership, labels, visibility, and participant identity changes are exact.
 #   - Workspace and routing updates survive an independent read-back.
 #   - Messages and callbacks produce routing or delivery results for the same group.
-#   - Deleted groups return 404, while confirmed proposals create the requested group.
+#   - Deleted groups return 404.
 story_user_operates_group_workspace() {
     info "Story: a user forms a team, configures its workspace, and collaborates"
     # Reuse stable CRUD/CLI steps as implementation details of this story.
@@ -424,7 +424,6 @@ story_user_operates_group_workspace() {
     test_group_status_via_cli
     test_group_terminate_via_cli
     _story_group_metadata_without_workspace || return
-    _story_group_proposal_confirmation || return
 }
 
 _story_group_metadata_without_workspace() {
@@ -487,37 +486,6 @@ _story_group_metadata_without_workspace() {
     assert_json_eq "group deletion confirms the id" "$RESPONSE" "id" "$group_id"
     api_get "/groups/${group_id}"
     require_status "closed incident group is gone" "404" || return
-}
-
-_story_group_proposal_confirmation() {
-    bot_post "/groups/request" CEO \
-        "{\"topic\":\"Review release readiness\",\"suggested_participants\":[\"${BOT_PM_UUID}\",\"${BOT_QA_UUID}\"],\"suggested_driver\":\"${BOT_CEO_UUID}\"}"
-    require_status "driver requests a release-readiness group" "200" || return
-    assert_json_eq "group proposal is created" "$RESPONSE" "proposal_created" "true"
-    local confirm_url confirm_path
-    confirm_url=$(json_path "$RESPONSE" "confirm_url")
-    assert_not_empty "group proposal returns a confirmation URL" "$confirm_url"
-    [[ -n "$confirm_url" ]] || return
-    confirm_path=$(python3 -c 'import sys,urllib.parse; u=urllib.parse.urlparse(sys.argv[1]); print(u.path)' "$confirm_url")
-
-    api_get "$confirm_path"
-    require_status "user previews the group confirmation page" "200" || return
-    assert_contains "confirmation page shows the proposal topic" "$RESPONSE" "Review release readiness"
-    assert_contains "confirmation page posts back to the same token" "$RESPONSE" "$confirm_path"
-
-    api_post "$confirm_path"
-    require_status "user confirms the proposed group" "200" || return
-    assert_json_eq "confirmed proposal creates a group" "$RESPONSE" "created" "true"
-    local group_id
-    group_id=$(json_path "$RESPONSE" "group_id")
-    assert_not_empty "confirmed proposal returns group id" "$group_id"
-    [[ -n "$group_id" ]] || return
-
-    api_get "/groups/${group_id}"
-    require_status "confirmed group is queryable" "200" || return
-    assert_json_eq "confirmed group uses the proposed driver" "$RESPONSE" "driver_bot" "$BOT_CEO_UUID"
-    api_delete "/groups/${group_id}?bot_id=${BOT_CEO_UUID}"
-    require_status "confirmed group is cleaned up" "200" || return
 }
 
 # User story: A team creates, shares, completes, and invokes collaboration sessions.

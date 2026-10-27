@@ -174,28 +174,6 @@ impl FriendRequestCoreService for NoopFriendRequestCoreService {
 }
 
 #[derive(Debug, Default)]
-pub struct NoopProposalCoreService;
-
-#[async_trait]
-impl ProposalCoreService for NoopProposalCoreService {
-    async fn store(&self, proposal: GroupChatProposal) -> String {
-        proposal.token
-    }
-
-    async fn get(&self, _token: &str) -> Option<GroupChatProposal> {
-        None
-    }
-
-    async fn take(&self, _token: &str) -> Option<GroupChatProposal> {
-        None
-    }
-
-    async fn cleanup_expired(&self) -> usize {
-        0
-    }
-}
-
-#[derive(Debug, Default)]
 pub struct NoopBotRegistryCoreService;
 
 #[async_trait]
@@ -1721,32 +1699,6 @@ impl A2aChatRunService for NoopA2aChatRunService {
 
     async fn cancel_run(&self, _cmd: ChatRunCancelCommand) -> ServiceResult<A2aRunStatus> {
         Err(service_not_configured("a2a chat run service"))
-    }
-}
-
-pub struct NoopGroupProposalService;
-
-#[async_trait]
-impl GroupProposalService for NoopGroupProposalService {
-    async fn create_proposal(
-        &self,
-        _cmd: GroupProposalCreateCommand,
-    ) -> Result<GroupProposalCreateResult, GroupUseCaseError> {
-        Err(service_not_configured("group proposal service").into())
-    }
-
-    async fn confirm_proposal(
-        &self,
-        _cmd: GroupProposalConfirmCommand,
-    ) -> Result<GroupProposalConfirmResult, GroupUseCaseError> {
-        Err(service_not_configured("group proposal service").into())
-    }
-
-    async fn preview_proposal(
-        &self,
-        _cmd: GroupProposalPreviewCommand,
-    ) -> Result<GroupProposalPreviewResult, GroupUseCaseError> {
-        Err(service_not_configured("group proposal service").into())
     }
 }
 

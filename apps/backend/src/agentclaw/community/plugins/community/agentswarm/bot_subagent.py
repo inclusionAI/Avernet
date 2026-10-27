@@ -76,6 +76,8 @@ class AvernetSubagent:
                  create_call_timeout: float = _CREATE_CALL_TIMEOUT_SECONDS,
                  status_call_timeout: float = _STATUS_CALL_TIMEOUT_SECONDS,
                  delete_call_timeout: float = _DELETE_CALL_TIMEOUT_SECONDS,
+                 ready_poll_timeout: float = 300.0,
+                 setup_delay_seconds: float = 0.0,
                  ) -> None:
         self._spec = spec
         self._run = run
@@ -93,6 +95,8 @@ class AvernetSubagent:
         self._create_call_timeout = create_call_timeout
         self._status_call_timeout = status_call_timeout
         self._delete_call_timeout = delete_call_timeout
+        self._ready_poll_timeout = ready_poll_timeout
+        self._setup_delay_seconds = setup_delay_seconds
         # Per-chat cancel registry: the in-flight chat's cooperative-unwind
         # event, reachable by ``halt()`` from off the awaiting coroutine.
         self._chat_registry_lock = threading.Lock()
@@ -107,6 +111,8 @@ class AvernetSubagent:
         # once per bound identity; every park recheck from here is a cheap
         # status poll.
         if self._bot_id is None:
+            if self._setup_delay_seconds > 0:
+                await asyncio.sleep(self._setup_delay_seconds)
             # Per-attempt persona (D-J): the idempotency key carries the in-slice
             # retry index, so a torn-down attempt's row (live or soft-deleted)
             # can never collide with the retry's create; a cross-slice replay of
@@ -143,7 +149,8 @@ class AvernetSubagent:
                 # fail now instead of polling bot_status(None) to the deadline.
                 raise RuntimeError(
                     f"platform returned invalid bot_id: {self._bot_id!r}")
-        state = await self._poll_ready(self._bot_id)
+        state = await self._poll_ready(
+            self._bot_id, timeout=self._ready_poll_timeout)
         if state != BotState.READY.value:
             raise RuntimeError(f"bot {self._bot_id} did not reach READY: {state}")
         self.executor_id = self._bot_id

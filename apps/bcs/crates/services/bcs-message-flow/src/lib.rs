@@ -94,3 +94,5 @@ pub use group_history::BcsGroupMessageHistory;
 pub use bcs_service_api::ProviderStreamGrayList;
 pub use run_context::MemoryBotRunContextStore;
 pub use run_context_redis::RedisBotRunContextStore;
+
+mod caller_execution;

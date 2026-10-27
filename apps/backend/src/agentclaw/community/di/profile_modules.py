@@ -62,6 +62,9 @@ def _common_test_doubles() -> list[Module]:
         TestFrontendUrlProviderModule,
         TestNotifyMessagesProviderModule,
     )
+    from agentclaw.community.di.modules.infrastructure.test.task_artifact_object_storage import (
+        TestTaskArtifactObjectStorageModule,
+    )
     from agentclaw.community.di.modules.testing_aicoding_module import (
         TestingAicodingModule,
     )
@@ -99,6 +102,8 @@ def _common_test_doubles() -> list[Module]:
         # task_discovery plugin ports (FrontendUrl / NotifyMessages) — Null impls.
         TestFrontendUrlProviderModule(),
         TestNotifyMessagesProviderModule(),
+        # task-artifact object store — in-memory for genuine roundtrips.
+        TestTaskArtifactObjectStorageModule(),
     ]
 
 
@@ -310,6 +315,9 @@ def modules_for(profile: DeployProfile) -> list[Module]:
         from agentclaw.community.di.modules.infrastructure.community.object_storage import (
             CommunityObjectStorageModule,
         )
+        from agentclaw.community.di.modules.infrastructure.community.task_artifact_object_storage import (
+            CommunityTaskArtifactObjectStorageModule,
+        )
         from agentclaw.community.di.modules.infrastructure.community.secret import (
             CommunitySecretModule,
         )
@@ -362,6 +370,7 @@ def modules_for(profile: DeployProfile) -> list[Module]:
             CommunitySecretModule(),
             CommunityDatabaseModule(),
             CommunityObjectStorageModule(),
+            CommunityTaskArtifactObjectStorageModule(),
             CommunityIdentityModule(),
             CommunityHealthModule(),
             CommunityHarnessModule(),

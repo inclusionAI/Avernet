@@ -13,7 +13,6 @@ pub mod error;
 pub mod friends;
 pub mod group_management;
 pub mod group_message;
-pub mod group_proposal;
 pub mod human_actor;
 pub mod interaction;
 pub mod invite;
@@ -41,7 +40,6 @@ pub use collaboration_runtime::*;
 pub use friends::*;
 pub use group_management::*;
 pub use group_message::*;
-pub use group_proposal::*;
 pub use human_actor::*;
 pub use interaction::*;
 pub use message_flow::*;
@@ -61,3 +59,5 @@ pub use crate::port::{
 
 pub use admission::AdmissionService;
 pub use connect::{ConnectResult, ConnectService, ConnectStatus, RequestDirection, RequestsPage};
+
+pub mod caller_execution;

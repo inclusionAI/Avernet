@@ -1473,7 +1473,6 @@ fn service_error_code(error: &ServiceError) -> DeliveryErrorCode {
         ServiceError::DeliveryNotSent { .. } => DeliveryErrorCode::InvalidOperation,
         ServiceError::BotNotFound(_)
         | ServiceError::GroupNotFound(_)
-        | ServiceError::ProposalNotFound(_)
         | ServiceError::ParticipantNotFound(_)
         | ServiceError::FriendRequestNotFound(_) => DeliveryErrorCode::NotFound,
         ServiceError::BotNotRegistered(_) => DeliveryErrorCode::NotRegistered,

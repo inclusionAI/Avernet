@@ -263,6 +263,7 @@ pub(crate) async fn commit_routed_reply(
     // the reconstructed full reply.
     let text = normalized.map(|reply| reply.text.as_str()).unwrap_or(text);
     let command = WebSendCommand {
+        caller_execution: None,
         caller: bcs_service_api::CallerContext::Public,
         group_id: group.id.clone(),
         session_id: Some(session_id.clone()),

@@ -81,6 +81,10 @@ from agentclaw.community.core.task.task_context.task_artifact.artifact_api_servi
     TaskArtifactApiService,
     TaskArtifactApiServiceProtocol,
 )
+from agentclaw.community.core.task.task_context.task_artifact.artifact_object_file_service import (
+    TaskArtifactObjectFileService,
+    TaskArtifactObjectFileServiceProtocol,
+)
 from agentclaw.community.core.task.task_context.task_context_service import TaskContextService
 from agentclaw.community.core.task.task_context.task_graph_service import (
     TaskGraphService,
@@ -102,7 +106,13 @@ from agentclaw.community.core.task.task_runner.client.ports import (
     OpenApiBotPort,
 )
 from agentclaw.community.api.task.task_context_service import TaskContextServiceProtocol
+from agentclaw.community.core.task.task_context.task_artifact.artifact_object_storage_config import (
+    TaskArtifactStorageConfig,
+)
 from agentclaw.community.di.task_trajectory_config import TrajectoryAnalysisConfig
+from agentclaw.community.core.task.task_context.task_artifact.artifact_object_storage import (
+    TaskArtifactObjectStoragePlugin,
+)
 
 logger = logging.getLogger("task.persistence")
 
@@ -216,6 +226,40 @@ class TaskPersistenceModule(Module):
             session_files=session_files,
             bcs_bot_tokens=bcs_bot_tokens,
             task_info_repo=task_info_repo,
+        )
+
+    @singleton
+    @provider
+    def task_artifact_object_file_service(
+        self, injector: Injector
+    ) -> TaskArtifactObjectFileServiceProtocol:
+        """Construct the OBJECT_FILE upload/download proxy service.
+
+        The artifact object-store plugin is optional (try/except → None) so
+        lightweight test/local injectors stay constructible — an unbound store
+        surfaces per-request as ``TaskArtifactStorageNotConfiguredError``
+        (503), matching the analyzer's optional-port posture above.
+        """
+        graph_repo = injector.get(TaskGraphRepositoryProtocol)
+        artifact_repo = injector.get(TaskArtifactRepositoryProtocol)
+        config = injector.get(TaskArtifactStorageConfig)
+
+        object_storage: TaskArtifactObjectStoragePlugin | None = None
+        try:
+            object_storage = injector.get(TaskArtifactObjectStoragePlugin)
+        except Exception as exc:  # noqa: BLE001 optional seam is unbound
+            logger.info(
+                "[task-persistence] TaskArtifactObjectStoragePlugin 未绑定 → "
+                "OBJECT_FILE 上传/下载将 503:%s: %s",
+                type(exc).__name__,
+                exc,
+            )
+
+        return TaskArtifactObjectFileService(
+            graph_repo=graph_repo,
+            artifact_repo=artifact_repo,
+            object_storage=object_storage,
+            config=config,
         )
 
     @singleton

@@ -366,10 +366,6 @@ pub enum GroupUseCaseError {
     InvalidGroupStatus(String),
     #[error("Invalid proposal: {0}")]
     InvalidProposal(String),
-    #[error("Proposal '{0}' not found or expired")]
-    ProposalNotFound(String),
-    #[error("Proposal '{0}' expired")]
-    ProposalExpired(String),
     #[error("Invalid history limit: {0}")]
     InvalidHistoryLimit(u64),
     #[error("Actor '{0}' not found")]
