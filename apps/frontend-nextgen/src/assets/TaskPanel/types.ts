@@ -37,7 +37,7 @@ export interface TaskArtifactView {
   updatedAt: string; // ISO 或格式化后的展示串
   /** file 形态的存储寻址(使用既有资源/会话文件服务读取,后端不给现成 URL) */
   fileRef?: {
-    storageType: 'bot_workspace' | 'session_file';
+    storageType: 'bot_workspace' | 'session_file' | 'object_file';
     storageId: string;
     fileId?: string | null;
     fileType?: string | null;

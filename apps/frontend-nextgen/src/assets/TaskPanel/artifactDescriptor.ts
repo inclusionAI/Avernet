@@ -11,9 +11,11 @@ function str(v: unknown): string | null {
   return typeof v === 'string' && v.length > 0 ? v : null;
 }
 
-function normalizeStorageType(value: unknown): 'bot_workspace' | 'session_file' | null {
+function normalizeStorageType(value: unknown): 'bot_workspace' | 'session_file' | 'object_file' | null {
   const normalized = str(value)?.toLowerCase();
-  return normalized === 'bot_workspace' || normalized === 'session_file' ? normalized : null;
+  return normalized === 'bot_workspace' || normalized === 'session_file' || normalized === 'object_file'
+    ? normalized
+    : null;
 }
 
 function msToIso(ms: number): string {

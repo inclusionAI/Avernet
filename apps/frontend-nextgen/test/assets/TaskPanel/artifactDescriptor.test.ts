@@ -1,6 +1,7 @@
 /** @jest-environment node */
 import {
   artifactDescriptorWorkspaceFile,
+  artifactDescriptorObjectFile,
   artifactDescriptorSessionFile,
   artifactDescriptorUrlLink,
   artifactDescriptorCode,
@@ -75,6 +76,18 @@ describe('normalizeDescriptor', () => {
       pullRequestUrl: 'https://git.example/pr/1024',
       description: '产物读侧接入',
     });
+  });
+
+  it('file 分支:object_file 产 fileRef,供预览/下载走后端代理接口', () => {
+    const view = normalizeDescriptor(artifactDescriptorObjectFile, 'n2');
+    expect(view.name).toBe('analysis-report.pdf');
+    expect(view.fileRef).toEqual({
+      storageType: 'object_file',
+      storageId: 'task-artifacts/tk_20261027_0001/analysis-report.pdf',
+      fileId: null,
+      fileType: 'application/pdf',
+    });
+    expect(view.url).toBeNull();
   });
 
   it('content 非 object(脏数据)不崩溃,回落 id 为名', () => {

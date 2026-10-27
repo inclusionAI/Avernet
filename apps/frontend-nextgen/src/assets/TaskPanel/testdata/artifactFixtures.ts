@@ -38,6 +38,22 @@ export const artifactDescriptorSessionFile: TaskArtifactDescriptorDto = {
   created_at: 1729400100000,
 };
 
+export const artifactDescriptorObjectFile: TaskArtifactDescriptorDto = {
+  artifact_id: 'art-obj-file',
+  artifact_name: null, // 缺名回落 content.file_name
+  kind: 'file',
+  content: {
+    storage_type: 'object_file',
+    storage_id: 'task-artifacts/tk_20261027_0001/analysis-report.pdf',
+    file_name: 'analysis-report.pdf',
+    file_id: null,
+    file_type: 'application/pdf',
+  },
+  attempt: 0,
+  creator: 'bot-claw',
+  created_at: 1729400150000,
+};
+
 export const artifactDescriptorUrlLink: TaskArtifactDescriptorDto = {
   artifact_id: 'art-url',
   artifact_name: '需求说明书',

@@ -1,5 +1,6 @@
 // @asset-migrated: teamclaw 自研资产
 import { botEditorService } from '@/services/botWorkshop/botEditorService';
+import { downloadTaskArtifactContent } from '@/services/backendApi/tasks/taskController';
 import { sessionFileService } from '@/services/workspace/sessionFileService';
 import {
   getFileExt,
@@ -75,13 +76,14 @@ function clickDownload(href: string, fileName: string, openInNewTab = false): vo
   anchor.remove();
 }
 
-/** 直接预览 text 产物；file 产物使用既有 session_files / bot workspace 服务加载。 */
+/** 直接预览 text 产物；file 产物分别走 session_files、OBJECT_FILE 后端代理和 bot workspace 服务加载。 */
 export function useTaskArtifactPreview(
   artifact: TaskArtifactView | null,
   context: TaskArtifactAccessContext,
 ): TaskArtifactPreviewState {
   const [state, setState] = useState<TaskArtifactPreviewState>(() => stateFor('other', 'unsupported'));
   const hasArtifact = artifact !== null;
+  const artifactId = artifact?.id ?? null;
   const artifactKind = artifact?.kind ?? null;
   const textArtifactContent = artifactKind === 'text' ? artifact?.summary ?? '' : null;
   const fileRef = artifactKind === 'file' ? artifact?.fileRef : null;
@@ -121,6 +123,18 @@ export function useTaskArtifactPreview(
 
     const load = async () => {
       try {
+        if (storageType === 'object_file') {
+          const blob = await downloadTaskArtifactContent(artifact.id);
+          if (kind === 'text') {
+            const preview = await readTextPreview(blob, name);
+            if (!cancelled) setState({ ...stateFor(kind, 'ready'), ...preview });
+            return;
+          }
+          objectUrl = URL.createObjectURL(blob);
+          if (!cancelled) setState({ ...stateFor(kind, 'ready'), contentUrl: objectUrl, size: blob.size });
+          return;
+        }
+
         if (storageType === 'session_file') {
           const contentUrl = sessionFileService.buildContentUrl(storageId, fileId!);
           if (kind !== 'text') {
@@ -161,6 +175,7 @@ export function useTaskArtifactPreview(
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [
+    artifactId,
     artifactKind,
     context.ownerBotId,
     context.ownerUserId,
@@ -177,7 +192,7 @@ export function useTaskArtifactPreview(
   return state;
 }
 
-/** 下载 Task file artifact；session_file 走导航下载，workspace 走既有 Blob 下载服务。 */
+/** 下载 Task file artifact；session_file 走导航下载，object_file 走后端代理，workspace 走既有 Blob 下载服务。 */
 export async function downloadTaskArtifact(
   artifact: TaskArtifactView,
   context: TaskArtifactAccessContext,
@@ -186,6 +201,14 @@ export async function downloadTaskArtifact(
 
   const fileRef = artifact.kind === 'file' ? artifact.fileRef : null;
   if (!fileRef) throw new Error('产物文件引用不完整，无法下载。');
+
+  if (fileRef.storageType === 'object_file') {
+    const blob = await downloadTaskArtifactContent(artifact.id);
+    const objectUrl = URL.createObjectURL(blob);
+    clickDownload(objectUrl, artifact.name);
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+    return;
+  }
 
   if (fileRef.storageType === 'session_file') {
     if (!fileRef.fileId) throw new Error('会话文件引用不完整，无法下载。');
