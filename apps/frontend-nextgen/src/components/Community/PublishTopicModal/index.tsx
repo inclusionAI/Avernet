@@ -177,9 +177,6 @@ export function PublishTopicModal({
   };
 
   if (!open) return null;
-  const shareReady =
-    attachments.length > 0 && attachments.every((attachment) => attachment.status === 'uploaded');
-
   return (
     <section className="app-scrollbar flex h-full flex-col overflow-y-auto" aria-label="发布主题编辑区">
       <header className="sticky top-0 z-10 flex items-center gap-2 border-b border-border bg-background/95 px-6 py-4 backdrop-blur">
@@ -195,7 +192,6 @@ export function PublishTopicModal({
             size="sm"
             className="px-4 text-xs"
             loading={publishing}
-            disabled={topicType === 'share' && !shareReady}
             onClick={() => void handleSubmit()}
           >
             发布
