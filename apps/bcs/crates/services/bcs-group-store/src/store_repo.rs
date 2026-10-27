@@ -127,14 +127,6 @@ impl GroupRepoPort for MySqlGroupStore {
         self.update_status_sql(id, status).await
     }
 
-    async fn update_service_spec(
-        &self,
-        id: &str,
-        service_spec: Option<bcs_service_api::ServiceSpec>,
-    ) -> ServiceResult<()> {
-        self.update_service_spec_sql(id, service_spec).await
-    }
-
     async fn delete(&self, id: &str) -> ServiceResult<Option<Group>> {
         self.delete_sql(id).await
     }

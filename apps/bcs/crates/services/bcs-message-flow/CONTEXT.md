@@ -306,3 +306,17 @@ existing retention grace (e.g. a timed-out direct Run with no final). The grace
 keeps timeout/error publication possible; adapters still reject expired uplink
 frames using the existing context deadline. It does NOT expire or evict admitted/queued operation permits.
 No new timer, remote scan, retry loop or permission TTL is introduced.
+
+## Service Session policy retirement
+
+Service Sessions retain creation, authorization, completion, completion events,
+activation fencing and reactivation. The Group `service_spec` policy, Service
+Session timeout scanner, external completion callbacks and callback recovery are
+retired. Reactivation requires a Completed Service Session; it has no callback
+status prerequisite. State Machine Node deadlines, progression/IM recovery,
+Provider callbacks and Event subscriptions retain their existing contracts.
+Legacy Group creation accepts and discards `service_spec` for Backend compatibility, and the legacy settings
+endpoint returns 410. Service invocation needs no Group policy marker. MySQL 037
+and SQLite 038 remove only the retired Group policy and Session callback columns;
+stop old binaries before applying cleanup. Historical migration bodies remain
+unchanged. See `apps/bcs/specs/2026-10-27-retire-service-session-policies/spec.md`.

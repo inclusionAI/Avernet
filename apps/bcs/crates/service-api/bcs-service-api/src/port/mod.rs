@@ -26,7 +26,7 @@ pub mod pending_group_message;
 pub mod provider_stream_gray;
 pub mod repo;
 pub mod secret;
-pub mod session_callback;
+
 pub mod session_channel_outbound;
 pub mod state_machine_metrics;
 pub mod state_machine_result;
@@ -124,7 +124,7 @@ pub use repo::{
     UserIdentity, UserIdentityRepoPort,
 };
 pub use secret::{SecretAccessError, SecretAccessPort, SecretRecord};
-pub use session_callback::SessionCallbackDispatchPort;
+
 pub use session_channel_outbound::{
     HumanInputReadyEvent, SessionChannelDeliveryOutcome, SessionChannelOutboundPort,
     StateMachineTerminalEvent, StateMachineTerminalStatus,

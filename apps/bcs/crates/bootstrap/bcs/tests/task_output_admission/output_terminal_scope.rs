@@ -60,7 +60,6 @@ fn dispatch_state(f: &Fixture) -> Arc<bcs_ws::bot::BotDispatchState> {
         task_callback: None,
         session_management: Arc::new(bcs_session::NoopSessionManagementService),
         group_dispatch: Arc::new(bcs_test_support::NoopGroupDispatchContextPort),
-        callback_dispatch: Arc::new(bcs_test_support::NoopSessionCallbackDispatchPort),
         system_message: None, coordination_processed: Arc::new(tokio::sync::Mutex::new(Default::default())),
         agent_credential_backfill: None, interactions: Arc::new(bcs_test_support::NoopInteractionService),
     })

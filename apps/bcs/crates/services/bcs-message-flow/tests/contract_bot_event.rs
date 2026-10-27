@@ -18,7 +18,7 @@ use bcs_service_api::{
     CoordinationMode, CoordinationSurface, MessageFlowService, Participant, ParticipantMode,
     ParticipantRole,
     ProviderStreamGrayList,
-    RoutingMode, RoutingPolicy, ServiceError, ServiceSpec, Session, SessionKind,
+    RoutingMode, RoutingPolicy, ServiceError, Session, SessionKind,
     SessionManagementService, SessionStatus, SessionUseCaseError, SystemMessageEvent,
     SystemMessageService, TaskCompleteCommand, TaskDispatchCommand, TaskMessageCommand,
     TaskRunAliasRegistration, ChannelInboundError, ChannelService, ChannelUseCaseError,
@@ -4695,11 +4695,6 @@ async fn echo_task_complete_blocked_returns_ok_guarded_when_pending() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let mut group = support.group.get("group-1").await.unwrap();
     group.service_mode = Some("master_slave".to_string());
-    group.service_spec = Some(ServiceSpec {
-        callback_config: None,
-        timeout_seconds: None,
-        max_concurrency: None,
-    });
     support.group.upsert(group).await.unwrap();
     let session = test_session("group-1:abcdef12", "group-1", SessionKind::ServiceInvocation);
     let session_management = Arc::new(RecordingSessionManagement::new(vec![session]));
@@ -4857,11 +4852,6 @@ async fn task_complete_pending_in_other_session_does_not_block() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let mut group = support.group.get("group-1").await.unwrap();
     group.service_mode = Some("master_slave".to_string());
-    group.service_spec = Some(ServiceSpec {
-        callback_config: None,
-        timeout_seconds: None,
-        max_concurrency: None,
-    });
     let participants = group.participants.clone();
     support.group.upsert(group).await.unwrap();
     let mut pending_session =
@@ -4932,11 +4922,6 @@ async fn task_complete_with_session_id_completes_service_session_without_closing
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let mut group = support.group.get("group-1").await.unwrap();
     group.service_mode = Some("master_slave".to_string());
-    group.service_spec = Some(ServiceSpec {
-        callback_config: None,
-        timeout_seconds: None,
-        max_concurrency: None,
-    });
     support.group.upsert(group).await.unwrap();
     let session = test_session("group-1:abcdef12", "group-1", SessionKind::ServiceInvocation);
     let session_management = Arc::new(RecordingSessionManagement::new(vec![session]));
@@ -4986,11 +4971,6 @@ async fn task_complete_with_legacy_session_group_id_completes_session_without_cl
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let mut group = support.group.get("group-1").await.unwrap();
     group.service_mode = Some("master_slave".to_string());
-    group.service_spec = Some(ServiceSpec {
-        callback_config: None,
-        timeout_seconds: None,
-        max_concurrency: None,
-    });
     support.group.upsert(group).await.unwrap();
     let session = test_session("group-1:abcdef12", "group-1", SessionKind::ServiceInvocation);
     let session_management = Arc::new(RecordingSessionManagement::new(vec![session]));
@@ -5157,7 +5137,6 @@ fn test_session(id: &str, group_id: &str, kind: SessionKind) -> Session {
         input: None,
         output: None,
         error_message: None,
-        callback_status: Some("pending".to_string()),
         activation_count: 1,
         message_visibility_version: 1,
         caller_principal: None,
@@ -5236,26 +5215,6 @@ impl SessionManagementService for RecordingSessionManagement {
             .filter(|session| status.map_or(true, |status| session.status == status))
             .cloned()
             .collect())
-    }
-
-    async fn count_running_service(&self, _group_id: &str) -> Result<u64, SessionUseCaseError> {
-        unimplemented!("not needed by this test")
-    }
-
-    async fn list_running_service(
-        &self,
-        _offset: u64,
-        _limit: u64,
-    ) -> Result<Vec<Session>, SessionUseCaseError> {
-        unimplemented!("not needed by this test")
-    }
-
-    async fn update_callback_status(
-        &self,
-        _session_id: &str,
-        _status: &str,
-    ) -> Result<(), SessionUseCaseError> {
-        Ok(())
     }
 
     async fn complete_if_running(

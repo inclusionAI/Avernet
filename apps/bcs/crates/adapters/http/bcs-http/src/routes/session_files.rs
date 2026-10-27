@@ -1069,7 +1069,6 @@ mod tests {
             group_kind: GroupKind::default(),
             dm_pair_key: None,
             group_strategy: bcs_service_api::GroupStrategy::default(),
-            service_spec: None,
             version: 1,
             record_status: "active".to_string(),
             visibility: "protected".to_string(),

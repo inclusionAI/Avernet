@@ -130,9 +130,9 @@ async fn check_full_mysql_chain(db: Arc<dyn DbPlugin>, global: &MigrateGlobalArg
     let result: Result<()> = async {
         println!("[phase 1/3] applying the fresh MySQL migration chain");
         let report = apply_mysql_migrations(&args, global).await?;
-        assert!(report.contains("applied_versions=36\npending_versions=0"), "{report}");
+        assert!(report.contains("applied_versions=37\npending_versions=0"), "{report}");
         let versions = load_applied_mysql_migrations(db).await?.into_iter().map(|record| record.version).collect::<Vec<_>>();
-        assert_eq!(versions, (1..=36).collect::<Vec<_>>());
+        assert_eq!(versions, (1..=37).collect::<Vec<_>>());
         assert_chain_columns(db).await?;
         assert_direct_queue_indexes(db).await?;
         assert_history_lookup_plans(db).await?;
@@ -236,12 +236,18 @@ async fn assert_chain_columns(db: &dyn DbPlugin) -> Result<()> {
         ("bcs_groups", vec!["human_mention_notify_mode"]),
         ("bcs_bots", vec!["task_claim_mode", "task_dream_mode", "user_visibility", "friend_ext", "friend_check_in_strategy", "provider_id", "provider_bot_ref", "connection_mode", "webhook_url", "ownership_version"]),
         ("bcs_state_machine_runs", vec!["root_run_id", "rerun_of", "session_activation_count", "opening_message_override_json"]),
-        ("bcs_group_sessions", vec!["message_visibility_version", "callback_lease_owner", "callback_lease_token", "callback_lease_until_ms"]),
+        ("bcs_group_sessions", vec!["message_visibility_version", "activation_count", "completed_at"]),
         ("bcs_state_machine_definition_snapshots", vec!["execution_plan_json", "execution_plan_content_hash", "execution_plan_compiler_version"]),
     ] {
         let rows = db.query(DbStatement::with_params("SELECT column_name AS column_name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ?", vec![DbValue::from(table)])).await?;
         let actual = rows.iter().map(|row| db_get_column::<String>(row, "column_name")).collect::<bcs_db_api::DbResult<Vec<_>>>()?;
         for column in columns { assert!(actual.iter().any(|actual| actual == column), "missing {table}.{column}"); }
+        if table == "bcs_group_sessions" {
+            assert!(!actual.iter().any(|column| column.starts_with("callback_")));
+        }
+        if table == "bcs_groups" {
+            assert!(!actual.iter().any(|column| column == "service_spec"));
+        }
         if table.starts_with("bcs_collaboration_draft") {
             assert!(!actual.iter().any(|column| column == "deployment_id"), "obsolete {table}.deployment_id");
         }

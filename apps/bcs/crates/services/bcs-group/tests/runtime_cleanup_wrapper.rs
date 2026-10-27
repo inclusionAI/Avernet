@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
 use bcs_service_api::{
-    GroupManagementService, GroupParticipantModeCommand, GroupPatchSettingsCommand,
-    GroupRemoveMemberCommand, GroupRoutingPolicyCommand, GroupStatusCommand,
+    GroupManagementService, GroupParticipantModeCommand, GroupRemoveMemberCommand, GroupRoutingPolicyCommand, GroupStatusCommand,
     GroupTerminateCommand, GroupUpdateLabelCommand, GroupUpdateVisibilityCommand,
     ParticipantMode,
 };
@@ -85,15 +84,6 @@ async fn cleanup_wrapper_forwards_non_delete_operations() {
                 actor_id: "worker".to_string(),
                 mode: ParticipantMode::Muted,
                 message_view_scope: None,
-            })
-            .await
-            .is_err()
-    );
-    assert!(
-        service
-            .patch_group_settings(GroupPatchSettingsCommand {
-                group_id: "group-1".to_string(),
-                service_spec: None,
             })
             .await
             .is_err()

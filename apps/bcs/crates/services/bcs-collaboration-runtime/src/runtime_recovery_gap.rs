@@ -27,11 +27,8 @@ impl CollaborationRuntime {
             || Some(saved.failed_at_ms) != run.completed_at || run.error.as_ref() != Some(&saved.error) {
             return Err(CollaborationRuntimeError::InvalidRequest("startup failure does not match terminal Run".into()));
         }
-        let Some(completed) = self.complete_service_session_for_run(run, None, Some(saved.error)).await
+        let Some(_) = self.complete_service_session_for_run(run, None, Some(saved.error)).await
             .map_err(|e| CollaborationRuntimeError::Internal(ServiceError::InternalError(e.to_string())))? else { return Ok(false); };
-        bcs_callback::dispatch::maybe_dispatch_for_session_with_url_guard(
-            completed, self.groups.clone(), self.sessions.clone(), self.callback_url_guard.clone(),
-        );
         // No original workflow snapshot exists, so do not invent terminal IM
         // content or execute/recompile today's definition during recovery.
         Ok(true)

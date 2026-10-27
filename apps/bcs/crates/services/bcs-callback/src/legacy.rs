@@ -1,9 +1,8 @@
 //! Legacy `bcs-service-group` callback path (stubbed).
 //!
 //! Drives `ServiceGroupInstance.callback_status` for the older
-//! `/service-groups/*` API. The new Session-based dispatcher in
-//! [`super::dispatch::dispatch_callback`] lives alongside this — this
-//! crate does not delete the legacy path (per spec §16 follow-up).
+//! `/service-groups/*` API. These compatibility hooks remain separate from
+//! the retired Service Session completion callbacks.
 //!
 //! Ported from legacy `bcs/src/callback/legacy.rs`.
 //!

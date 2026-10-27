@@ -93,3 +93,17 @@ encode caller identity; route policy declares allowed principals explicitly.
 - `cargo check --workspace --all-targets --manifest-path src/bcs/Cargo.toml`
 
 Provider Bot registration and list responses expose the saved optional webhook_url. PATCH maps omitted/null/string to the application endpoint change contract; the application rejects mixing URL and capability writes. URL inheritance is decided in BotCore, not the HTTP adapter.
+
+## Service Session policy retirement
+
+Service Sessions retain creation, authorization, completion, completion events,
+activation fencing and reactivation. The Group `service_spec` policy, Service
+Session timeout scanner, external completion callbacks and callback recovery are
+retired. Reactivation requires a Completed Service Session; it has no callback
+status prerequisite. State Machine Node deadlines, progression/IM recovery,
+Provider callbacks and Event subscriptions retain their existing contracts.
+Legacy Group creation accepts and discards `service_spec` for Backend compatibility, and the legacy settings
+endpoint returns 410. Service invocation needs no Group policy marker. MySQL 037
+and SQLite 038 remove only the retired Group policy and Session callback columns;
+stop old binaries before applying cleanup. Historical migration bodies remain
+unchanged. See `apps/bcs/specs/2026-10-27-retire-service-session-policies/spec.md`.

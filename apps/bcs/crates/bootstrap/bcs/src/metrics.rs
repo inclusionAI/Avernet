@@ -36,8 +36,7 @@ use bcs_service_api::{
     GroupChatCommand, GroupChatOutcome, GroupCreateCommand, GroupDeleteCommand, GroupDeleteResult,
     GroupRemoveMemberCommand, GroupRemoveMemberResult,
     GroupDetailResult, GroupKind, GroupManagementService, GroupMetricCount,
-    GroupMetricsSnapshotPort, GroupPatchSettingsCommand, GroupPatchSettingsResult,
-    GroupParticipantModeCommand, GroupParticipantModeResult,
+    GroupMetricsSnapshotPort, GroupParticipantModeCommand, GroupParticipantModeResult,
     GroupRoutingPolicyCommand, GroupRoutingPolicyResult, GroupSessionMetricCount,
     GroupSessionMetricsSnapshotPort, GroupStatus, GroupStatusCommand,
     GroupStrategy, GroupTerminateCommand, GroupUpdateLabelCommand, GroupUpdateVisibilityCommand,
@@ -726,12 +725,6 @@ impl GroupManagementService for MetricsGroupManagementService {
         self.inner.update_participant_mode(cmd).await
     }
 
-    async fn patch_group_settings(
-        &self,
-        cmd: GroupPatchSettingsCommand,
-    ) -> std::result::Result<GroupPatchSettingsResult, GroupUseCaseError> {
-        self.inner.patch_group_settings(cmd).await
-    }
 }
 
 #[cfg(feature = "prometheus-metrics")]
@@ -1492,13 +1485,11 @@ fn service_error_code(error: &ServiceError) -> DeliveryErrorCode {
         ServiceError::CannotRejectAccepted => DeliveryErrorCode::CannotRejectAccepted,
         ServiceError::NotFriends(_) => DeliveryErrorCode::NotFriends,
         ServiceError::PrivateBotCannotCollaborate => DeliveryErrorCode::PrivateBot,
-        ServiceError::SessionNotFound(_)
-        | ServiceError::SessionInvalidParams(_)
-        | ServiceError::SessionCallbackPending(_) => DeliveryErrorCode::Internal,
         ServiceError::ProviderNotFound(_) => DeliveryErrorCode::NotFound,
         ServiceError::ProviderNotReadyForDownlink { .. } => DeliveryErrorCode::InvalidOperation,
         ServiceError::BotAlreadyBound { .. } => DeliveryErrorCode::InvalidOperation,
-            ServiceError::ExistNonPublicBots { .. } => DeliveryErrorCode::InvalidOperation,
+            ServiceError::SessionNotFound(_) | ServiceError::SessionInvalidParams(_) => DeliveryErrorCode::Internal,
+        ServiceError::ExistNonPublicBots { .. } => DeliveryErrorCode::InvalidOperation,
     }
 }
 

@@ -3,8 +3,7 @@ use async_trait::async_trait;
 use crate::types::{
     EventActor, Group, GroupHumanNotifyPolicy, GroupKind, GroupMessage, GroupMutableFieldsPatch,
     GroupStatus, Participant, MessageViewScope, ParticipantMode, RoutingPolicy, ServiceError,
-    ServiceResult, ServiceSpec,
-};
+    ServiceResult, };
 
 use super::AppendEventRecord;
 
@@ -41,7 +40,6 @@ pub enum GroupEventfulMutation {
         mode: Option<ParticipantMode>,
     },
     UpdateRoutingPolicy(RoutingPolicy),
-    UpdateServiceSpec(Option<ServiceSpec>),
     Delete,
 }
 
@@ -130,14 +128,6 @@ pub trait GroupRepoPort: Send + Sync {
     ) -> ServiceResult<()>;
     async fn update_label(&self, id: &str, label: Option<String>) -> ServiceResult<()>;
     async fn update_status(&self, id: &str, status: GroupStatus) -> ServiceResult<()>;
-    /// Persist a `service_spec` patch onto the group. `Some(spec)` installs or
-    /// replaces the spec; `None` removes it. Validation (route-field lock,
-    /// callback_config immutability) is the caller's responsibility.
-    async fn update_service_spec(
-        &self,
-        id: &str,
-        service_spec: Option<ServiceSpec>,
-    ) -> ServiceResult<()>;
     async fn delete(&self, id: &str) -> ServiceResult<Option<Group>>;
     async fn list(&self) -> Vec<Group>;
     /// List groups ordered by `updated_at` descending, then apply pagination.

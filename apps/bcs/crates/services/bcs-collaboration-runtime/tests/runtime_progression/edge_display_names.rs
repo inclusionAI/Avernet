@@ -32,7 +32,6 @@ async fn graph_and_rerun_keep_saved_display_names_and_exhausted_actual_outcomes(
     assert_eq!(source.status, Some(StateMachineNodeStatus::Completed));
     h.finish(2, run, "rewritten").await;
     assert_eq!(h.fail(3, run).await.view.unwrap().run.status, StateMachineRunStatus::Failed);
-    wait_for_callback_status(&h.sessions, &run.session_id, "not_applicable").await;
     h.definitions.hide_definitions.store(true, Ordering::SeqCst);
     let rerun = h.runtime.rerun_state_machine_run(RerunStateMachineCommand {
         source_run_id: run.run_id.clone(), authenticated_human: None,

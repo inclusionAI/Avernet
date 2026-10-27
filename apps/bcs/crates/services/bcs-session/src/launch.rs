@@ -567,9 +567,6 @@ fn map_session_error(error: SessionUseCaseError) -> SessionLaunchError {
     match error {
         SessionUseCaseError::NotFound(message) => SessionLaunchError::SessionNotFound(message),
         SessionUseCaseError::InvalidParams(message) => SessionLaunchError::InvalidRequest(message),
-        SessionUseCaseError::CallbackPending(message) => {
-            SessionLaunchError::CallbackPending(message)
-        }
         SessionUseCaseError::Conflict(message) => SessionLaunchError::Conflict(message),
         SessionUseCaseError::Internal(error) => SessionLaunchError::Internal(error),
     }

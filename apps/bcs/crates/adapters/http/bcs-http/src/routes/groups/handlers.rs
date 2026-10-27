@@ -47,24 +47,10 @@ pub async fn get_group(
         .await
         .map_err(group_use_case_error_to_http)?;
 
-    // Only expose latest_running_session_id for non-service groups
-    if group.service_spec.is_none() {
-        if let Ok(Some(session)) = state
-            .services
-            .session_management
-            .list_by_group(
-                &group.group_id,
-                Some(SessionStatus::Running),
-                0,
-                1,
-                None,
-                None,
-            )
-            .await
-            .map(|v| v.into_iter().next())
-        {
-            group.latest_running_session_id = Some(session.id);
-        }
+    if let Ok(sessions) = state.services.session_management
+        .list_by_group(&group.group_id, Some(SessionStatus::Running), 0, 1, None, None).await
+    {
+        group.latest_running_session_id = sessions.into_iter().next().map(|session| session.id);
     }
 
     let mut json = group_to_detail_json(group.clone());
@@ -648,62 +634,9 @@ pub async fn put_participant_mode(
         .into_response()
 }
 
-
-pub async fn patch_group_settings(
-    State(state): State<HttpAppState>,
-    Path(group_id): Path<String>,
-    Json(body): Json<PatchGroupSettingsRequest>,
-) -> impl IntoResponse {
-    // Security: block callback URLs that resolve to private/local addresses
-    // before delegating to the use case. The app service owns the
-    // immutability / route-field-lock validation; the outbound URL guard is an
-    // adapter-level network policy and lives at the route boundary.
-    if let Some(ref spec_patch) = body.service_spec {
-        if let Err(e) =
-            validate_service_spec_callback_urls(&state.outbound_url_guard, spec_patch.as_ref())
-        {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": e})),
-            )
-                .into_response();
-        }
-    }
-
-    match state
-        .services
-        .group_management
-        .patch_group_settings(GroupPatchSettingsCommand {
-            group_id: group_id.clone(),
-            service_spec: body.service_spec,
-        })
-        .await
-    {
-        Ok(result) => (
-            StatusCode::OK,
-            Json(serde_json::json!({
-                "id": result.group_id,
-                "service_spec": result.service_spec,
-                "status": "ok",
-            })),
-        )
-            .into_response(),
-        Err(GroupUseCaseError::Conflict(message)) => {
-            // The use case JSON-encodes a `GroupPatchSettingsConflict` into
-            // the message; surface it verbatim so clients recover the detail.
-            let conflict: Value = serde_json::from_str(&message)
-                .unwrap_or_else(|_| serde_json::json!({"error": message}));
-            (StatusCode::CONFLICT, Json(conflict)).into_response()
-        }
-        Err(GroupUseCaseError::Service(ServiceError::GroupNotFound(_))) => (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "group not found"})),
-        )
-            .into_response(),
-        Err(error) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": error.to_string()})),
-        )
-            .into_response(),
-    }
+pub async fn patch_group_settings() -> impl IntoResponse {
+    (StatusCode::GONE, Json(serde_json::json!({
+        "error": "service_policy_retired",
+        "message": "service_spec settings have been retired"
+    })))
 }

@@ -81,7 +81,6 @@ impl SessionManagementService for CollectionMock {
             input: cmd.params.input.clone(),
             output: None,
             error_message: None,
-            callback_status: None,
             activation_count: 1,
             message_visibility_version: cmd.params.message_visibility_version,
             caller_principal: cmd.params.caller_principal.clone(),
@@ -141,26 +140,6 @@ impl SessionManagementService for CollectionMock {
             .filter(|s| s.group_id == group_id)
             .cloned()
             .collect())
-    }
-
-    async fn count_running_service(&self, _group_id: &str) -> Result<u64, SessionUseCaseError> {
-        Ok(0)
-    }
-
-    async fn list_running_service(
-        &self,
-        _offset: u64,
-        _limit: u64,
-    ) -> Result<Vec<Session>, SessionUseCaseError> {
-        Ok(Vec::new())
-    }
-
-    async fn update_callback_status(
-        &self,
-        _session_id: &str,
-        _status: &str,
-    ) -> Result<(), SessionUseCaseError> {
-        Ok(())
     }
 
     async fn complete_if_running(
@@ -368,7 +347,6 @@ async fn collect_and_list_collected_via_bot_token() {
         input: None,
         output: None,
         error_message: None,
-        callback_status: None,
         activation_count: 1,
         message_visibility_version: 1,
         caller_principal: None,
@@ -474,7 +452,6 @@ async fn collected_list_rejects_unauthorized_participant() {
         input: None,
         output: None,
         error_message: None,
-        callback_status: None,
         activation_count: 1,
         message_visibility_version: 1,
         caller_principal: None,
@@ -564,7 +541,6 @@ async fn collected_list_ordered_by_collect_event_desc() {
             input: None,
             output: None,
             error_message: None,
-            callback_status: None,
             activation_count: 1,
             message_visibility_version: 1,
             caller_principal: None,
@@ -647,7 +623,6 @@ async fn ordinary_list_with_participant_surfaces_collected_fields() {
             input: None,
             output: None,
             error_message: None,
-            callback_status: None,
             activation_count: 1,
             message_visibility_version: 1,
             caller_principal: None,
@@ -759,7 +734,6 @@ async fn uncollect_removes_from_collected_list() {
         input: None,
         output: None,
         error_message: None,
-        callback_status: None,
         activation_count: 1,
         message_visibility_version: 1,
         caller_principal: None,
@@ -879,7 +853,6 @@ async fn human_caller_collect_enforces_participant_and_ownership() {
         input: None,
         output: None,
         error_message: None,
-        callback_status: None,
         activation_count: 1,
         message_visibility_version: 1,
         caller_principal: None,
@@ -982,7 +955,6 @@ async fn human_caller_uncollect_via_query_enforces_ownership() {
         input: None,
         output: None,
         error_message: None,
-        callback_status: None,
         activation_count: 1,
         message_visibility_version: 1,
         caller_principal: None,
@@ -1414,7 +1386,6 @@ async fn push_session(
         input: None,
         output: None,
         error_message: None,
-        callback_status: None,
         activation_count: 1,
         message_visibility_version: 1,
         caller_principal: None,

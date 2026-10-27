@@ -286,7 +286,6 @@ dependencies = [
  "bcs-cache-api",
  "bcs-cache-local",
  "bcs-cache-redis",
- "bcs-callback",
  "bcs-channel",
  "bcs-channel-api",
  "bcs-channel-store",
@@ -957,16 +956,8 @@ dependencies = [
 name = "bcs-callback"
 version = "0.1.4-beta.3"
 dependencies = [
- "async-trait",
- "bcs-observability",
- "bcs-route-security",
- "bcs-service-api",
- "futures",
- "reqwest",
- "serde_json",
  "tokio",
  "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -1102,7 +1093,6 @@ name = "bcs-collaboration-runtime"
 version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
- "bcs-callback",
  "bcs-channel",
  "bcs-channel-api",
  "bcs-channel-store",
@@ -1116,7 +1106,6 @@ dependencies = [
  "bcs-group-store",
  "bcs-message-store",
  "bcs-protocol",
- "bcs-route-security",
  "bcs-service-api",
  "bcs-session",
  "bcs-session-store",
@@ -1428,7 +1417,6 @@ dependencies = [
  "bcs-friend",
  "bcs-group-store",
  "bcs-relation",
- "bcs-route-security",
  "bcs-service-api",
  "bcs-session",
  "bcs-session-store",
@@ -1501,7 +1489,6 @@ dependencies = [
  "bcs-auth-local",
  "bcs-bot",
  "bcs-bot-store",
- "bcs-callback",
  "bcs-channel-api",
  "bcs-cli",
  "bcs-collaboration-draft",
@@ -2013,7 +2000,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-service-api"
-version = "0.4.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "bcs-config-api",
@@ -2289,7 +2276,6 @@ dependencies = [
  "bcs-app-session",
  "bcs-bot",
  "bcs-bot-store",
- "bcs-callback",
  "bcs-domain",
  "bcs-friend",
  "bcs-group",

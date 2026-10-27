@@ -53,3 +53,19 @@ The crate owns group session business rules and lifecycle decisions. It does not
 Group creation, membership, Human invitations and workbench access enforce the live Provider collaboration boundary across current participants. Group mutation validation precedes optimistic version fencing. No owner fence is persisted after the last restricted participant leaves.
 
 GroupCore.upsert also validates the owner boundary, so direct group creation cannot bypass it. Legacy visibility and member writes share the same policy checks. SQL public writes acquire ordered Provider shared locks and verify current policy within the transaction, preserving Group version fencing; no lock spans delivery.
+
+GroupCore.upsert also validates the owner boundary, so proposal creation cannot bypass it. Legacy visibility and member writes share the same policy checks. SQL public writes acquire ordered Provider shared locks and verify current policy within the transaction, preserving Group version fencing; no lock spans delivery.
+
+## Service Session policy retirement
+
+Service Sessions retain creation, authorization, completion, completion events,
+activation fencing and reactivation. The Group `service_spec` policy, Service
+Session timeout scanner, external completion callbacks and callback recovery are
+retired. Reactivation requires a Completed Service Session; it has no callback
+status prerequisite. State Machine Node deadlines, progression/IM recovery,
+Provider callbacks and Event subscriptions retain their existing contracts.
+Legacy Group creation accepts and discards `service_spec` for Backend compatibility, and the legacy settings
+endpoint returns 410. Service invocation needs no Group policy marker. MySQL 037
+and SQLite 038 remove only the retired Group policy and Session callback columns;
+stop old binaries before applying cleanup. Historical migration bodies remain
+unchanged. See `apps/bcs/specs/2026-10-27-retire-service-session-policies/spec.md`.

@@ -2672,26 +2672,6 @@ impl SessionManagementService for StaticSessionManagement {
         unimplemented!("not needed by this test")
     }
 
-    async fn count_running_service(&self, _group_id: &str) -> Result<u64, SessionUseCaseError> {
-        unimplemented!("not needed by this test")
-    }
-
-    async fn list_running_service(
-        &self,
-        _offset: u64,
-        _limit: u64,
-    ) -> Result<Vec<Session>, SessionUseCaseError> {
-        unimplemented!("not needed by this test")
-    }
-
-    async fn update_callback_status(
-        &self,
-        _session_id: &str,
-        _status: &str,
-    ) -> Result<(), SessionUseCaseError> {
-        unimplemented!("not needed by this test")
-    }
-
     async fn complete_if_running(
         &self,
         _session_id: &str,
@@ -2760,7 +2740,6 @@ fn test_session(session_id: &str, group_id: &str, participants: Vec<Participant>
         input: None,
         output: None,
         error_message: None,
-        callback_status: None,
         activation_count: 1,
         message_visibility_version: 1,
         caller_principal: None,
@@ -2985,7 +2964,6 @@ fn create_cmd(
         member_bot_ids: Vec::new(),
         participants,
         group_kind: None,
-        service_spec: None,
         group_strategy: None,
         visibility: None,
         provisioning: false,
@@ -3370,73 +3348,6 @@ impl FriendCoreService for FakeFriendCoreService {
     }
 }
 
-#[tokio::test]
-async fn create_group_persists_service_spec() {
-    let fixture = Fixture::new()
-        .with_bot("driver", "Driver", "public", None)
-        .with_bot("helper", "Helper", "public", None);
-    let service = fixture.service_with_limits(5, 10, 10);
-
-    let mut cmd = create_cmd(
-        Some("driver"),
-        "driver",
-        vec![
-            participant("driver", Some("driver")),
-            participant("helper", Some("consultant")),
-        ],
-    );
-    cmd.service_spec = Some(bcs_service_api::ServiceSpec {
-        callback_config: None,
-        timeout_seconds: Some(60),
-        max_concurrency: Some(8),
-    });
-
-    service.create_group(cmd).await.unwrap();
-    let stored = fixture.group.get("group-under-test").await
-        .expect("group should be persisted");
-    let spec = stored.service_spec
-        .expect("service_spec should round-trip through create_group");
-    assert_eq!(spec.timeout_seconds, Some(60));
-    assert_eq!(spec.max_concurrency, Some(8));
-    assert!(spec.callback_config.is_none());
-}
-
-#[tokio::test]
-async fn create_group_rejects_private_baas_callback_base_url() {
-    let fixture = Fixture::new()
-        .with_bot("driver", "Driver", "public", None)
-        .with_bot("helper", "Helper", "public", None);
-    let service = fixture.service_with_limits(5, 10, 10);
-
-    let mut cmd = create_cmd(
-        Some("driver"),
-        "driver",
-        vec![
-            participant("driver", Some("driver")),
-            participant("helper", Some("consultant")),
-        ],
-    );
-    cmd.service_spec = Some(bcs_service_api::ServiceSpec {
-        callback_config: Some(bcs_service_api::CallbackConfig {
-            channels: vec![bcs_service_api::CallbackChannelConfig::Baas {
-                base_url: "http://169.254.169.254/latest/meta-data".to_string(),
-                api_key: "sk-test".to_string(),
-                bot_id: "default:callback-test".to_string(),
-                metadata: None,
-            }],
-        }),
-        timeout_seconds: Some(60),
-        max_concurrency: Some(8),
-    });
-
-    let err = service
-        .create_group(cmd)
-        .await
-        .expect_err("private BaaS callback base_url should be rejected");
-
-    assert!(matches!(err, GroupUseCaseError::InvalidProposal(message) if message.contains("base_url is not allowed")));
-    assert!(fixture.group.get("group-under-test").await.is_none());
-}
 
 #[tokio::test]
 async fn create_group_with_human_consultant_chat() {
@@ -4114,7 +4025,6 @@ async fn list_groups_filters_by_visibility() {
         member_bot_ids: Vec::new(),
         participants: vec![participant("bot_b", Some("driver"))],
         group_kind: None,
-        service_spec: None,
         group_strategy: None,
         visibility: Some("public".to_string()),
         provisioning: false,

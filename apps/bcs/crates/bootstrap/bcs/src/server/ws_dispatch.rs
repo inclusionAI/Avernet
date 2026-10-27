@@ -97,10 +97,6 @@ pub(super) fn bot_ws_dispatch_state(state: &Arc<BcsServerState>) -> Arc<bcs_ws::
         group_dispatch: Arc::new(CoreGroupDispatchContext {
             group: state.services.group.clone(),
         }),
-        callback_dispatch: Arc::new(bcs_callback::SessionCallbackDispatcher::new(
-            state.services.group.clone(),
-            state.outbound_url_guard.clone(),
-        )),
         system_message: Some(state.services.system_message.clone()),
         coordination_processed: state.coordination_processed.clone(),
         agent_credential_backfill: Some(Arc::new(AgentCredentialBackfill {

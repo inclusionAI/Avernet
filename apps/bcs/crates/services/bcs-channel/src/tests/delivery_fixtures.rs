@@ -34,7 +34,6 @@ impl SessionRepoPort for RecordingSessionRepo {
             input: params.input,
             output: None,
             error_message: None,
-            callback_status: None,
             activation_count: 1,
             message_visibility_version: params.message_visibility_version,
             caller_principal: params.caller_principal,
@@ -92,34 +91,6 @@ impl SessionRepoPort for RecordingSessionRepo {
             .await
             .into_iter()
             .next()
-    }
-
-    async fn count_running_service(&self, group_id: &str) -> u64 {
-        self.list_by_group(
-            group_id,
-            Some(SessionStatus::Running),
-            0,
-            u64::MAX,
-            None,
-            None,
-        )
-        .await
-        .into_iter()
-        .filter(|session| session.session_kind == SessionKind::ServiceInvocation)
-        .count() as u64
-    }
-
-    async fn list_running_service(&self, _offset: u64, _limit: u64) -> Vec<Session> {
-        self.sessions
-            .lock()
-            .await
-            .values()
-            .filter(|session| {
-                session.status == SessionStatus::Running
-                    && session.session_kind == SessionKind::ServiceInvocation
-            })
-            .cloned()
-            .collect()
     }
 
     async fn complete_if_running(
@@ -212,19 +183,6 @@ impl SessionRepoPort for RecordingSessionRepo {
             }
         }
         Ok(session.clone())
-    }
-
-    async fn update_callback_status(
-        &self,
-        session_id: &str,
-        status: &str,
-    ) -> ServiceResult<()> {
-        let mut sessions = self.sessions.lock().await;
-        let Some(session) = sessions.get_mut(session_id) else {
-            return Err(ServiceError::SessionNotFound(session_id.to_string()));
-        };
-        session.callback_status = Some(status.to_string());
-        Ok(())
     }
 
     async fn update_title(

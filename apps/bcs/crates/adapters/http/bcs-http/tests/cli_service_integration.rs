@@ -7,7 +7,7 @@
 //!   "service_invocation"`, `reused: false` on a fresh invocation.
 //! - `GET /services/{group_id}/sessions/{sid}` returns the same shape;
 //!   `status` flips to `"completed"` when the session reaches a terminal
-//!   state, and `output` / `callback_status` are non-null on completion.
+//!   state and output are returned on completion.
 //!
 //! What is NOT tested here: svc-key auth (covered by service_auth.rs unit
 //! tests), real callback dispatch, ServiceInvocationRunner. The fixture uses
@@ -25,8 +25,7 @@ use bcs_service_api::{
     Group, GroupCoreService, GroupHistoryCommand, GroupHistoryResult, GroupMessage,
     GroupMessageHistoryService, GroupUseCaseError, Participant, ParticipantMode, ParticipantRole,
     Session, SessionHistoryCommand, SessionHistoryResult, SessionKind, SessionManagementService,
-    SessionStatus, SessionUseCaseError, ServiceSpec,
-};
+    SessionStatus, SessionUseCaseError, };
 use bcs_services_container::Services;
 use serde_json::{json, Value};
 use tempfile::TempDir;
@@ -88,7 +87,6 @@ impl SessionManagementService for MockServiceSessions {
             input: cmd.params.input.clone(),
             output: None,
             error_message: None,
-            callback_status: None,
             activation_count: 1,
             message_visibility_version: cmd.params.message_visibility_version,
             caller_principal: cmd.params.caller_principal.clone(),
@@ -116,7 +114,6 @@ impl SessionManagementService for MockServiceSessions {
             if calls > threshold && s.status == SessionStatus::Running {
                 s.status = SessionStatus::Completed;
                 s.output = Some(self.completion_output.lock().await.clone());
-                s.callback_status = Some("success".to_string());
                 s.completed_at = Some(1_700_000_001_000);
                 // Persist the flipped state so subsequent `get` calls keep it.
                 *self.last.lock().await = Some(s.clone());
@@ -146,27 +143,6 @@ impl SessionManagementService for MockServiceSessions {
         _participant_id: Option<&str>,
     ) -> Result<Vec<Session>, SessionUseCaseError> {
         Ok(Vec::new())
-    }
-
-    async fn count_running_service(&self, _group_id: &str) -> Result<u64, SessionUseCaseError> {
-        // No active concurrent invocations — keeps max_concurrency check passing.
-        Ok(0)
-    }
-
-    async fn list_running_service(
-        &self,
-        _offset: u64,
-        _limit: u64,
-    ) -> Result<Vec<Session>, SessionUseCaseError> {
-        Ok(Vec::new())
-    }
-
-    async fn update_callback_status(
-        &self,
-        _session_id: &str,
-        _status: &str,
-    ) -> Result<(), SessionUseCaseError> {
-        Ok(())
     }
 
     async fn complete_if_running(
@@ -262,9 +238,8 @@ struct ServerFixture {
     _shutdown: tokio::task::JoinHandle<()>,
 }
 
-/// Builds an in-process server. `with_service_spec=false` produces a group
-/// without `service_spec` so the 400 path can be exercised.
-async fn start_server(with_service_spec: bool) -> ServerFixture {
+/// Builds an in-process server with an ordinary Group.
+async fn start_server() -> ServerFixture {
     let tmp = TempDir::new().unwrap();
     let registry = Arc::new(BotCore::with_base_dir(tmp.path().to_path_buf()));
     registry
@@ -284,18 +259,11 @@ async fn start_server(with_service_spec: bool) -> ServerFixture {
         .await;
 
     let group_store = Arc::new(GroupStore::new());
-    let mut group = Group::new(
+    let group = Group::new(
         "g-1",
         "driver-bot",
         vec![Participant::bot("driver-bot", ParticipantRole::Driver)],
     );
-    if with_service_spec {
-        group.service_spec = Some(ServiceSpec {
-            callback_config: None,
-            timeout_seconds: None,
-            max_concurrency: None,
-        });
-    }
     group_store.upsert(group).await.unwrap();
 
     let sessions = Arc::new(MockServiceSessions::default());
@@ -328,7 +296,7 @@ async fn start_server(with_service_spec: bool) -> ServerFixture {
 
 #[tokio::test]
 async fn cli_service_invoke_returns_session_id_and_running() {
-    let server = start_server(true).await;
+    let server = start_server().await;
     let client = BcsClient::with_token(&server.base_url, "driver-token");
 
     let body = client
@@ -371,7 +339,7 @@ async fn cli_service_invoke_returns_session_id_and_running() {
 
 #[tokio::test]
 async fn cli_service_status_returns_running_then_completed() {
-    let server = start_server(true).await;
+    let server = start_server().await;
     let client = BcsClient::with_token(&server.base_url, "driver-token");
 
     // Seed a session via invoke first.
@@ -401,33 +369,13 @@ async fn cli_service_status_returns_running_then_completed() {
         Some("ok"),
         "completed session must surface output"
     );
-    assert_eq!(
-        second.get("callback_status").and_then(|v| v.as_str()),
-        Some("success"),
-        "callback_status key is exposed (CLI prints it)"
-    );
     assert!(second.get("completed_at").is_some());
 }
 
 #[tokio::test]
-async fn cli_service_invoke_rejects_when_group_has_no_service_spec() {
-    let server = start_server(false).await;
+async fn cli_service_invoke_accepts_group_without_service_policy() {
+    let server = start_server().await;
     let client = BcsClient::with_token(&server.base_url, "driver-token");
-
-    let err = client
-        .service_invoke("g-1", Some(&json!({"q": "ping"})), None, None, None, None)
-        .await
-        .expect_err("invoke without service_spec should fail");
-
-    let msg = err.to_string();
-    assert!(
-        msg.contains("400"),
-        "expected 400 status in error message, got: {}",
-        msg
-    );
-    assert!(
-        msg.contains("invalid_params"),
-        "expected invalid_params error code, got: {}",
-        msg
-    );
+    let result = client.service_invoke("g-1", Some(&json!({"q": "ping"})), None, None, None, None).await.unwrap();
+    assert!(result.get("session_id").is_some());
 }

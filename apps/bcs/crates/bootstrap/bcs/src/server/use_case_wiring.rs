@@ -49,7 +49,6 @@ pub(super) fn build_use_case_bundle(
     bot_run_context: Arc<dyn BotRunContextPort>,
     user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
     message_repo: Option<Arc<dyn MessageRepoPort>>,
-    callback_url_guard: OutboundUrlGuard,
     provider_stream_gray_list: Arc<ProviderStreamGrayList>,
     profile_store: Arc<dyn bcs_service_api::port::repo::PermissionProfileRepoPort>,
     // The narrow authority hook consumed by the Bot
@@ -134,7 +133,6 @@ pub(super) fn build_use_case_bundle(
         )
         .with_channel_binding_cleanup(channel_binding_cleanup)
         .with_participant_view_bindings(participant_view_bindings)
-        .with_outbound_url_guard(callback_url_guard.clone())
         .with_bot_runtime(bot_use_cases.clone())
         .with_bot_authority(bot_authority_hook.clone())
         .with_session_authorization(session_authorization),

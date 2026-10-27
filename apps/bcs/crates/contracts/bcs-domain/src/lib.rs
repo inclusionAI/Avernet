@@ -112,8 +112,7 @@ pub use routing::{
     RouteParticipantOverlay, RouteSelectorWire, RoutingDecision, RoutingTarget,
 };
 pub use session::{
-    CallbackChannelConfig, CallbackConfig, Session, SessionKind, SessionStatus, ServiceSpec,
-};
+    Session, SessionKind, SessionStatus, };
 pub use system_message::{
     PersistMode, SystemGroupMessage, SystemMessageEvent, SystemMessageEventKind,
     system_message_visibility,

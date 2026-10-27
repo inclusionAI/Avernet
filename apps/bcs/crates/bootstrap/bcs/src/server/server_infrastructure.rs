@@ -635,7 +635,6 @@ impl BcsServer {
             bot_run_context.clone(),
             user_directory.clone(),
             Some(message_repo.clone()),
-            outbound_url_guard.clone(),
             provider_stream_gray_list.clone(),
             profile_store.clone(),
             bot_authority.hook.clone(),
@@ -689,7 +688,6 @@ impl BcsServer {
             .with_history_persistence(config.state_machine_history.persistence_enabled)
             .with_history_cutoff_timestamp(config.message_history.state_machine_cutoff_timestamp)
                 .with_loop_instrumentation(state_machine_loop_instrumentation(metrics.as_ref()))
-                .with_callback_url_guard(outbound_url_guard.clone())
                 .with_session_channel_outbound(session_channel_outbound)
                 .with_result_publisher(Arc::new(MessageFlowStateMachineResultPublisher::new(
                     message_flow.clone(),
@@ -905,13 +903,6 @@ impl BcsServer {
             .build()
             .expect("services must be fully wired");
 
-        // Start timeout scanner for service-invocation sessions
-        let _timeout_handle = crate::timeout_scanner::spawn_with_url_guard(
-            services.session_management.clone(),
-            services.group.clone(),
-            crate::timeout_scanner::DEFAULT_SCAN_INTERVAL,
-            outbound_url_guard.clone(),
-        );
         // Start Pending-sweep for session-file workspace
         spawn_session_files_pending_sweep(services.session_files.clone());
 

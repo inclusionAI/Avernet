@@ -133,7 +133,6 @@ async fn rig_with_authority(
             .collect(),
             member_bot_ids: vec![],
             group_kind: None,
-            service_spec: None,
             group_strategy: Some(GroupStrategy::Chat),
             visibility: Some("private".into()),
             provisioning: false,

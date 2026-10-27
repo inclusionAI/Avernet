@@ -75,13 +75,6 @@ impl MySqlGroupStore {
         let g_group_strategy_str = Self::group_strategy_to_str(group.group_strategy);
         let g_service_group_uuid: Option<String> = group.service_group_uuid.clone();
         let g_service_mode: Option<String> = group.service_mode.clone();
-        let g_service_spec_json: Option<String> = match group.service_spec {
-            Some(ref spec) => Some(
-                serde_json::to_string(spec)
-                    .map_err(|e| ServiceError::InternalError(format!("service_spec: {e}")))?,
-            ),
-            None => None,
-        };
         let g_version: i64 = group.version as i64;
         let g_record_status = group.record_status.clone();
         // Build participant tuples: (bot_uuid, role_str, actor_kind_str, mode_str, tags_json, scope)
@@ -115,7 +108,7 @@ impl MySqlGroupStore {
                 "routing_policy_json",
                 "context",
                 "opening_message_json",
-                "service_spec",
+
                 "version",
                 "record_status",
                 "visibility",
@@ -124,8 +117,8 @@ impl MySqlGroupStore {
             &[("gmt_modified", self.flavor.now())],
         );
         let upsert_sql = format!(
-            "INSERT INTO bcs_groups (group_id, label, status, driver_bot, originator, env, routing_policy_json, context, opening_message_json, group_kind, dm_pair_key, group_strategy, service_group_uuid, service_mode, service_spec, version, record_status, visibility, human_mention_notify_mode, gmt_create, gmt_modified) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, {now}, {now}) \
+            "INSERT INTO bcs_groups (group_id, label, status, driver_bot, originator, env, routing_policy_json, context, opening_message_json, group_kind, dm_pair_key, group_strategy, service_group_uuid, service_mode, version, record_status, visibility, human_mention_notify_mode, gmt_create, gmt_modified) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, {now}, {now}) \
              {upsert}",
             now = self.flavor.now(),
             upsert = upsert_clause,
@@ -157,7 +150,7 @@ impl MySqlGroupStore {
                 Value::from(g_group_strategy_str),
                 Value::from(g_service_group_uuid.as_deref()),
                 Value::from(g_service_mode.as_deref()),
-                Value::from(g_service_spec_json.as_deref()),
+
                 Value::from(g_version),
                 Value::from(g_record_status.as_str()),
                 Value::from(g_visibility.as_str()),
@@ -710,54 +703,6 @@ impl MySqlGroupStore {
             let mut cache = self.cache.write().await;
             if let Some(group) = cache.get_mut(id) {
                 group.status = status;
-            }
-        }
-        Ok(())
-    }
-
-    /// Persist a `service_spec` patch to MySQL. `Some(spec)` writes a JSON
-    /// blob into the `service_spec` column; `None` clears the column. Caller
-    /// is responsible for validation (route-field lock, callback_config
-    /// immutability) — this method only writes.
-    pub(crate) async fn update_service_spec_sql(
-        &self,
-        id: &str,
-        service_spec: Option<bcs_service_api::ServiceSpec>,
-    ) -> ServiceResult<()> {
-        // Verify group exists
-        if self.get(id).await.is_none() {
-            return Err(ServiceError::GroupNotFound(id.to_string()));
-        }
-
-        let spec_json = match service_spec.as_ref() {
-            Some(s) => {
-                serde_json::to_string(s).map_err(|e| ServiceError::InternalError(e.to_string()))?
-            }
-            None => String::new(),
-        };
-        let spec_value: Value = if service_spec.is_some() {
-            Value::from(spec_json.as_str())
-        } else {
-            Value::Null
-        };
-
-        self.db
-            .execute_with(
-                &self.logical_db,
-                "UPDATE bcs_groups SET service_spec = ? WHERE group_id = ? AND env = ?",
-                vec![spec_value, Value::from(id), Value::from(self.env.as_str())],
-            )
-            .await
-            .map_err(|e| {
-                warn!(group_id = %id, error = %e, "Failed to update group service_spec");
-                ServiceError::InternalError(e.to_string())
-            })?;
-
-        debug!(group_id = %id, "Group service_spec updated");
-        {
-            let mut cache = self.cache.write().await;
-            if let Some(group) = cache.get_mut(id) {
-                group.service_spec = service_spec;
             }
         }
         Ok(())

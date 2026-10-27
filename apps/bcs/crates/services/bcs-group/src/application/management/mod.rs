@@ -3,35 +3,32 @@
 use std::{collections::HashSet, sync::Arc};
 
 use async_trait::async_trait;
-use bcs_route_security::OutboundUrlGuard;
 use bcs_service_api::core::{
     GroupMutationCommand, GroupMutationKind, SessionAuthorizationCoreService,
 };
 use bcs_service_api::port::bot_authority::BotAuthorityPort;
 use bcs_service_api::port::{NoopParticipantViewBindingPort, ParticipantViewBindingPort};
 
-use crate::core::validate_service_spec_patch;
 use crate::noop::{
     EmptyRelationCoreService, EmptySessionManagementService, NoopSystemMessageService,
 };
 use bcs_service_api::types::{EventActor, EventActorType, MessageViewScope, OpeningMessageScope};
 use bcs_service_api::{
     ActorKind, ActorStatus, BotRegistryCoreService, BotRuntimeConnectionService,
-    CallbackChannelConfig, CanResolveInteraction, CanResolveInteractionCommand,
+    CanResolveInteraction, CanResolveInteractionCommand,
     ChannelBindingCleanupPort, CollaborationRuntimeService, DeliveryType, DmActorSpec,
     DmCreateCommand, DmCreateResult, FriendCoreService, Group as DomainGroup,
     GroupAddMemberCommand, GroupAddMemberResult, GroupCoreService, GroupCreateCommand,
     GroupDeleteCommand, GroupDeleteResult, GroupDetailCommand, GroupDetailResult, GroupKind,
     GroupListCommand, GroupListEntry, GroupListResult, GroupManagementService,
     GroupMutableFieldsPatch, GroupParticipantModeCommand, GroupParticipantModeResult,
-    GroupParticipantView, GroupPatchSettingsCommand, GroupPatchSettingsConflict,
-    GroupPatchSettingsResult, GroupQueryService, GroupRemoveMemberCommand, GroupRemoveMemberResult,
+    GroupParticipantView, GroupQueryService, GroupRemoveMemberCommand, GroupRemoveMemberResult,
     GroupRoutingPolicyCommand, GroupRoutingPolicyResult, GroupStatus, GroupStatusCommand,
     GroupStrategy, GroupTerminateCommand, GroupUpdateLabelCommand, GroupUpdateVisibilityCommand,
     GroupUseCaseError,
     InitialGroupRun, InitialGroupRunActivityKind, InitialGroupRunState,
     NoopChannelBindingCleanupPort, Participant, ParticipantMode, ParticipantRole, RegisteredBot,
-    RelationCoreService, ServiceError, ServiceResult, ServiceSpec, ServiceSpecPatchConflictField,
+    RelationCoreService, ServiceError, ServiceResult,
     SessionKind, SessionManagementService, SystemMessageEvent,
     WorkbenchChatAbortAuthorizationCommand,
     WorkbenchChatAuthorizationCommand, WorkbenchConnectCommand, WorkbenchConnectOutcome,
@@ -81,7 +78,6 @@ pub struct GroupManagement {
     channel_binding_cleanup: Arc<dyn ChannelBindingCleanupPort>,
     participant_view_bindings: Arc<dyn ParticipantViewBindingPort>,
     bot_runtime: Option<Arc<dyn BotRuntimeConnectionService>>,
-    outbound_url_guard: OutboundUrlGuard,
     v1_openapi_create_policy: bool,
     /// The narrow authority hook (bot-authority plan
     /// Task 6.3): the Human→Bot control judgments in
@@ -212,33 +208,6 @@ impl GroupManagementService for GroupManagementWithRuntimeCleanup {
         self.inner.update_participant_mode(cmd).await
     }
 
-    async fn patch_group_settings(
-        &self,
-        cmd: GroupPatchSettingsCommand,
-    ) -> Result<GroupPatchSettingsResult, GroupUseCaseError> {
-        self.inner.patch_group_settings(cmd).await
-    }
-}
-
-pub(crate) fn validate_service_spec_callback_urls(
-    guard: &OutboundUrlGuard,
-    service_spec: Option<&ServiceSpec>,
-) -> Result<(), GroupUseCaseError> {
-    let Some(callback_config) = service_spec.and_then(|spec| spec.callback_config.as_ref()) else {
-        return Ok(());
-    };
-    for (index, channel) in callback_config.channels.iter().enumerate() {
-        if let CallbackChannelConfig::Baas { base_url, .. } = channel {
-            guard
-                .validate_configured_http_url(base_url)
-                .map_err(|error| {
-                    GroupUseCaseError::InvalidProposal(format!(
-                        "service_spec.callback_config.channels[{index}].base_url is not allowed: {error}"
-                    ))
-                })?;
-        }
-    }
-    Ok(())
 }
 
 impl GroupManagement {
@@ -262,7 +231,6 @@ impl GroupManagement {
             channel_binding_cleanup: Arc::new(NoopChannelBindingCleanupPort),
             participant_view_bindings: Arc::new(NoopParticipantViewBindingPort),
             bot_runtime: None,
-            outbound_url_guard: OutboundUrlGuard::strict(),
             v1_openapi_create_policy: false,
             bot_authority: None,
             session_authorization: None,
@@ -352,11 +320,6 @@ impl GroupManagement {
         participant_view_bindings: Arc<dyn ParticipantViewBindingPort>,
     ) -> Self {
         self.participant_view_bindings = participant_view_bindings;
-        self
-    }
-
-    pub fn with_outbound_url_guard(mut self, outbound_url_guard: OutboundUrlGuard) -> Self {
-        self.outbound_url_guard = outbound_url_guard;
         self
     }
 

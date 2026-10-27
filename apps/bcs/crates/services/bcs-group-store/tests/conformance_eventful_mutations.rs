@@ -27,8 +27,7 @@ use bcs_service_api::types::{
 };
 use bcs_service_api::{
     DefaultDelivery, Group, GroupKind, GroupMutableFieldsPatch, GroupStatus,
-    HumanMentionNotifyMode, RoutingMode, RoutingPolicy, ServiceError, ServiceSpec,
-};
+    HumanMentionNotifyMode, RoutingMode, RoutingPolicy, ServiceError, };
 
 #[path = "../../../bootstrap/bcs/src/migrations.rs"]
 #[allow(dead_code)]
@@ -307,46 +306,6 @@ async fn update_routing_policy_eventful_mutation_persists_policy() {
         loaded.default_bot_final_delivery,
         DefaultDelivery::SendToDriver
     );
-}
-
-#[tokio::test]
-async fn update_service_spec_eventful_mutation_installs_then_clears() {
-    let db = migrated_db().await;
-    let seeded = seeded_group(&db, "ev-spec", None).await;
-
-    let spec = ServiceSpec {
-        callback_config: None,
-        timeout_seconds: Some(30),
-        max_concurrency: Some(3),
-    };
-    let committed = commit(
-        &db,
-        "ev-spec",
-        seeded.version,
-        GroupEventfulMutation::UpdateServiceSpec(Some(spec.clone())),
-    )
-    .await;
-    let installed = committed.service_spec.as_ref().expect("spec installed");
-    assert_eq!(installed.timeout_seconds, spec.timeout_seconds);
-    assert_eq!(installed.max_concurrency, spec.max_concurrency);
-    assert_eq!(committed.version, seeded.version + 1);
-
-    let cleared = commit(
-        &db,
-        "ev-spec",
-        committed.version,
-        GroupEventfulMutation::UpdateServiceSpec(None),
-    )
-    .await;
-    assert!(cleared.service_spec.is_none());
-    assert_eq!(cleared.version, committed.version + 1);
-
-    let cold = sqlite_store(&db, ENV)
-        .try_get("ev-spec")
-        .await
-        .expect("cold read")
-        .expect("group");
-    assert!(cold.service_spec.is_none());
 }
 
 #[tokio::test]
@@ -669,7 +628,7 @@ async fn message_view_scope_updates_enforce_bot_full_and_persist_human_changes()
 // --- Mutable-field updates via direct primitives ------------------------------
 
 #[tokio::test]
-async fn label_status_visibility_and_service_spec_updates_round_trip() {
+async fn label_status_visibility_updates_round_trip() {
     let db = migrated_db().await;
     let store = sqlite_store(&db, ENV);
     let seeded = seeded_group(&db, "crud-fields", None).await;
@@ -690,11 +649,6 @@ async fn label_status_visibility_and_service_spec_updates_round_trip() {
         .await
         .expect_err("visibility");
     assert!(matches!(error, ServiceError::GroupNotFound(ref g) if *g == "crud-none"), "{error}");
-    let error = store
-        .update_service_spec("crud-none", Some(ServiceSpec { callback_config: None, timeout_seconds: Some(1), max_concurrency: None }))
-        .await
-        .expect_err("service_spec");
-    assert!(matches!(error, ServiceError::GroupNotFound(ref g) if *g == "crud-none"), "{error}");
 
     store
         .update_label("crud-fields", Some("renamed".to_string()))
@@ -708,19 +662,6 @@ async fn label_status_visibility_and_service_spec_updates_round_trip() {
         .update_visibility("crud-fields", "private")
         .await
         .expect("set visibility");
-    let spec = ServiceSpec {
-        callback_config: None,
-        timeout_seconds: Some(15),
-        max_concurrency: Some(2),
-    };
-    store
-        .update_service_spec("crud-fields", Some(spec))
-        .await
-        .expect("set service spec");
-    store
-        .update_service_spec("crud-fields", None)
-        .await
-        .expect("clear service spec");
 
     // Patches of the remaining mutable arms (context, visibility) also land.
     store
@@ -744,7 +685,6 @@ async fn label_status_visibility_and_service_spec_updates_round_trip() {
     assert_eq!(cold.label.as_deref(), Some("renamed"));
     assert_eq!(cold.status, GroupStatus::Completed);
     assert_eq!(cold.visibility, "public", "the later patch wins");
-    assert!(cold.service_spec.is_none());
     assert_eq!(cold.context.as_deref(), Some("fresh context"));
     assert_eq!(cold.human_mention_notify_mode, HumanMentionNotifyMode::DriverBotOnly);
     // Only the field-level primitives ran; the eventful version counter is

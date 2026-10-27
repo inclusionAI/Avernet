@@ -135,11 +135,8 @@ pub(crate) async fn human_has_session_access(
 
 pub fn session_error_to_response(err: &bcs_service_api::SessionUseCaseError) -> Response {
     let (code, msg) = match err {
+        bcs_service_api::SessionUseCaseError::InvalidParams(s) => (StatusCode::BAD_REQUEST, s.clone()),
         bcs_service_api::SessionUseCaseError::NotFound(s) => (StatusCode::NOT_FOUND, s.clone()),
-        bcs_service_api::SessionUseCaseError::InvalidParams(s)
-        | bcs_service_api::SessionUseCaseError::CallbackPending(s) => {
-            (StatusCode::BAD_REQUEST, s.clone())
-        }
         bcs_service_api::SessionUseCaseError::Conflict(s) => (StatusCode::CONFLICT, s.clone()),
         bcs_service_api::SessionUseCaseError::Internal(bcs_service_api::ServiceError::Forbidden(message)) => {
             (StatusCode::FORBIDDEN, message.clone())
@@ -238,12 +235,7 @@ fn session_launch_error_to_legacy(error: SessionLaunchError) -> Response {
             })),
         )
             .into_response(),
-        SessionLaunchError::InvalidRequest(message)
-        | SessionLaunchError::CallbackPending(message) => (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": message})),
-        )
-            .into_response(),
+        SessionLaunchError::InvalidRequest(message) => (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": message}))).into_response(),
         SessionLaunchError::Conflict(message) => (
             StatusCode::CONFLICT,
             Json(serde_json::json!({"error": message})),
@@ -757,12 +749,6 @@ pub async fn complete_session(
         .await
     {
         Ok(Some(session)) => {
-            bcs_callback::dispatch::maybe_dispatch_for_session_with_url_guard(
-                session.clone(),
-                state.services.group.clone(),
-                state.services.session_management.clone(),
-                state.outbound_url_guard.clone(),
-            );
             Json(session).into_response()
         }
         Ok(None) => Json(serde_json::json!({"already_completed": true})).into_response(),

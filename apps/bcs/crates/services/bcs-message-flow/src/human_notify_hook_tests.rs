@@ -213,14 +213,6 @@ impl GroupCoreService for PolicyGroupCore {
         self.fallback.update_status(id, status).await
     }
 
-    async fn update_service_spec(
-        &self,
-        id: &str,
-        service_spec: Option<bcs_service_api::ServiceSpec>,
-    ) -> ServiceResult<()> {
-        self.fallback.update_service_spec(id, service_spec).await
-    }
-
     async fn terminate(&self, id: &str, caller_bot_id: &str) -> ServiceResult<bcs_domain::Group> {
         self.fallback.terminate(id, caller_bot_id).await
     }

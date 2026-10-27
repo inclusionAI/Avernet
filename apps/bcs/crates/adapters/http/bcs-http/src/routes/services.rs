@@ -78,42 +78,6 @@ pub async fn post_invocation(
         }
     };
     state.services.backfill_bot_names(&mut group).await;
-    if group.service_spec.is_none() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": "invalid_params",
-                "message": format!("group {} is not a service group (no service_spec)", group_id),
-            })),
-        )
-            .into_response();
-    }
-    if body.session_id.is_none() {
-        if let Some(max) = group
-            .service_spec
-            .as_ref()
-            .and_then(|spec| spec.max_concurrency)
-        {
-            let current = state
-                .services
-                .session_management
-                .count_running_service(&group_id)
-                .await
-                .unwrap_or(0);
-            if current as i32 >= max {
-                return (
-                    StatusCode::TOO_MANY_REQUESTS,
-                    Json(serde_json::json!({
-                        "error": "max_concurrency_exceeded",
-                        "max": max,
-                        "current_running": current,
-                        "retry_after_seconds": 10,
-                    })),
-                )
-                    .into_response();
-            }
-        }
-    }
     let session_input = body.input.clone();
     let cmd = bcs_service_api::CreateOrReactivateCommand {
         group_id: group_id.clone(),
@@ -374,7 +338,6 @@ fn service_session_to_json(sess: &bcs_service_api::Session, reused: bool) -> Val
         "input": sess.input,
         "output": sess.output,
         "error_message": sess.error_message,
-        "callback_status": sess.callback_status,
         "meta": sess.meta,
         "reused": reused,
         "created_at": sess.created_at,

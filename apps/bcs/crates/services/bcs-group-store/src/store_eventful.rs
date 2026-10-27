@@ -424,27 +424,6 @@ impl MySqlGroupStore {
                     ),
                 ));
             }
-            GroupEventfulMutation::UpdateServiceSpec(service_spec) => {
-                let spec_json = service_spec
-                    .as_ref()
-                    .map(serde_json::to_string)
-                    .transpose()
-                    .map_err(|error| ServiceError::InternalError(error.to_string()))?;
-                steps.push(DbTransactionStep::Execute(
-                    DbStatement::with_transaction_params(
-                        "UPDATE bcs_groups SET service_spec = ?, version = version + 1, \
-                         gmt_modified = ? WHERE env = ? AND group_id = ?",
-                        vec![
-                            DbTransactionParam::value(
-                                spec_json.as_deref().map(Value::from).unwrap_or(Value::Null),
-                            ),
-                            DbTransactionParam::value(mutated_at.as_str()),
-                            DbTransactionParam::value(self.env.as_str()),
-                            group_id.clone(),
-                        ],
-                    ),
-                ));
-            }
             GroupEventfulMutation::Delete => {}
         }
 

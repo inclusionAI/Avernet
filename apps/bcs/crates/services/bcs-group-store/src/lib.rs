@@ -304,18 +304,6 @@ fn apply_db_group_mutation_candidate(
                 true
             }
         }
-        GroupEventfulMutation::UpdateServiceSpec(service_spec) => {
-            let current = serde_json::to_value(&group.service_spec)
-                .map_err(|error| ServiceError::InternalError(error.to_string()))?;
-            let requested = serde_json::to_value(service_spec)
-                .map_err(|error| ServiceError::InternalError(error.to_string()))?;
-            if current == requested {
-                false
-            } else {
-                group.service_spec = service_spec.clone();
-                true
-            }
-        }
         GroupEventfulMutation::Delete => true,
     };
     if !changed {

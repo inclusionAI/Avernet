@@ -75,7 +75,6 @@ impl GroupBuilder {
             group_kind: GroupKind::default(),
             dm_pair_key: None,
             group_strategy: GroupStrategy::Chat,
-            service_spec: None,
             version: 1,
             record_status: "active".to_string(),
             visibility: "private".to_string(),

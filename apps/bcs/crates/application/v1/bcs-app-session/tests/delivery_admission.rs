@@ -561,7 +561,6 @@ impl bcs_service_api::GroupCoreService for CountingGroupCore {
     async fn insert_human_participant(&self, _g: &str, _h: &str, _m: ParticipantMode) -> ServiceResult<()> { unreachable!() }
     async fn update_label(&self, _id: &str, _l: Option<String>) -> ServiceResult<()> { unreachable!() }
     async fn update_status(&self, _id: &str, _s: bcs_service_api::GroupStatus) -> ServiceResult<()> { unreachable!() }
-    async fn update_service_spec(&self, _id: &str, _s: Option<bcs_service_api::ServiceSpec>) -> ServiceResult<()> { unreachable!() }
     async fn terminate(&self, _id: &str, _c: &str) -> ServiceResult<DomainGroup> { unreachable!() }
     async fn delete(&self, _id: &str) -> ServiceResult<Option<DomainGroup>> { unreachable!() }
     async fn list(&self) -> Vec<DomainGroup> { unreachable!() }

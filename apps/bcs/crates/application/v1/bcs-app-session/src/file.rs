@@ -793,9 +793,7 @@ fn map_session_error(
         SessionUseCaseError::InvalidParams(message) => {
             ApplicationError::invalid("invalid_request", message)
         }
-        SessionUseCaseError::CallbackPending(message) | SessionUseCaseError::Conflict(message) => {
-            ApplicationError::conflict("conflict", message)
-        }
+        SessionUseCaseError::Conflict(message) => ApplicationError::conflict("conflict", message),
         SessionUseCaseError::Internal(error) => map_service_error(error),
     }
 }

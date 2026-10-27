@@ -297,15 +297,6 @@ impl GroupManagementService for GroupServiceFake {
         })
     }
 
-    async fn patch_group_settings(
-        &self,
-        cmd: GroupPatchSettingsCommand,
-    ) -> Result<GroupPatchSettingsResult, GroupUseCaseError> {
-        Ok(GroupPatchSettingsResult {
-            group_id: cmd.group_id,
-            service_spec: cmd.service_spec.unwrap_or(None),
-        })
-    }
 }
 
 struct MessageFlowFake;
@@ -561,7 +552,6 @@ fn group_detail(status: GroupStatus, group_kind: GroupKind) -> GroupDetailResult
         updated_at: 1,
         chat_url: None,
         context_injected: 0,
-        service_spec: None,
         latest_running_session_id: None,
         initial_run: None,
         originator: None,
@@ -599,7 +589,6 @@ fn group_create_cmd() -> GroupCreateCommand {
         participants: vec![],
         member_bot_ids: vec![],
         group_kind: Some(GroupKind::Normal),
-        service_spec: None,
         group_strategy: None,
         visibility: None,
         provisioning: false,

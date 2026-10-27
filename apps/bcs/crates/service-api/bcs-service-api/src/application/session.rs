@@ -17,8 +17,6 @@ pub enum SessionUseCaseError {
     NotFound(String),
     #[error("invalid session params: {0}")]
     InvalidParams(String),
-    #[error("session callback pending: {0}")]
-    CallbackPending(String),
     #[error("conflict: {0}")]
     Conflict(String),
     #[error(transparent)]
@@ -30,7 +28,6 @@ impl From<ServiceError> for SessionUseCaseError {
         match e {
             ServiceError::SessionNotFound(msg) => SessionUseCaseError::NotFound(msg),
             ServiceError::SessionInvalidParams(msg) => SessionUseCaseError::InvalidParams(msg),
-            ServiceError::SessionCallbackPending(msg) => SessionUseCaseError::CallbackPending(msg),
             ServiceError::Conflict(msg) => SessionUseCaseError::Conflict(msg),
             other => SessionUseCaseError::Internal(other),
         }
@@ -41,7 +38,7 @@ impl From<ServiceError> for SessionUseCaseError {
 #[derive(Debug, Clone)]
 pub struct CreateOrReactivateCommand {
     pub group_id: String,
-    /// 不为 None 时唤醒指定 session（必须 Completed 且 callback 终态）；
+    /// 不为 None 时唤醒指定 session（必须是 Completed 的 Service Session）；
     /// 为 None 时新建。
     pub session_id: Option<String>,
     pub params: NewSessionParams,
@@ -53,29 +50,6 @@ pub struct CreateOrReactivateOutcome {
     pub session: Session,
     /// 本次是新建还是唤醒。
     pub created: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct ClaimSessionCallbackCommand {
-    pub session_id: String,
-    pub expected_activation_count: i32,
-    pub lease_owner: String,
-    pub now_ms: u64,
-    pub lease_until_ms: u64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ClaimSessionCallbackOutcome {
-    pub lease_token: i64,
-}
-
-#[derive(Debug, Clone)]
-pub struct CompleteSessionCallbackCommand {
-    pub session_id: String,
-    pub expected_activation_count: i32,
-    pub lease_owner: String,
-    pub lease_token: i64,
-    pub terminal_status: String,
 }
 
 #[async_trait]
@@ -123,16 +97,6 @@ pub trait SessionManagementService: Send + Sync {
         participant_id: Option<&str>,
     ) -> Result<Vec<Session>, SessionUseCaseError>;
 
-    /// 统计 group 下 running service_invocation session 数（用于 max_concurrency / 路由字段锁）。
-    async fn count_running_service(&self, group_id: &str) -> Result<u64, SessionUseCaseError>;
-
-    /// 列出全 BCS 节点下所有 running service_invocation session（用于 timeout 扫描）。
-    async fn list_running_service(
-        &self,
-        offset: u64,
-        limit: u64,
-    ) -> Result<Vec<Session>, SessionUseCaseError>;
-
     /// Fallible, bounded Running ServiceInvocation page ordered by Session id,
     /// exclusive of the cursor. Restart with None after the end of each sweep.
     async fn list_running_service_after(
@@ -146,46 +110,7 @@ pub trait SessionManagementService: Send + Sync {
         }))
     }
 
-    /// List callback recovery candidates using Session-id keyset pagination.
-    /// Only FO-era activations with an idle or expired callback lease are
-    /// returned by production repositories.
-    async fn list_recoverable_callbacks(
-        &self,
-        _now_ms: u64,
-        _after_session_id: Option<&str>,
-        _limit: u64,
-    ) -> Result<Vec<Session>, SessionUseCaseError> {
-        Ok(Vec::new())
-    }
-
-    /// 更新 session 的 callback_status（供 callback dispatcher 调用）。
-    async fn update_callback_status(
-        &self,
-        session_id: &str,
-        status: &str,
-    ) -> Result<(), SessionUseCaseError>;
-
-    async fn claim_callback(
-        &self,
-        _command: ClaimSessionCallbackCommand,
-    ) -> Result<Option<ClaimSessionCallbackOutcome>, SessionUseCaseError> {
-        Err(SessionUseCaseError::Internal(ServiceError::InvalidOperation {
-            message: "Session callback claim is not configured".to_string(),
-            request_id: None,
-        }))
-    }
-
-    async fn complete_callback(
-        &self,
-        _command: CompleteSessionCallbackCommand,
-    ) -> Result<bool, SessionUseCaseError> {
-        Err(SessionUseCaseError::Internal(ServiceError::InvalidOperation {
-            message: "Session callback completion is not configured".to_string(),
-            request_id: None,
-        }))
-    }
-
-    /// CAS 终结：仅当 status=Running 时落 Completed 并触发 callback；
+    /// CAS 终结：仅当 status=Running 时落 Completed 并记录完成事件；
     /// 已 Completed 返回 `Ok(None)`。
     async fn complete_if_running(
         &self,
@@ -197,8 +122,7 @@ pub trait SessionManagementService: Send + Sync {
     /// Complete the caller's saved Running ServiceInvocation activation with
     /// the usual Session event. An observed missing/stale/kind mismatch is a
     /// no-op; a race in the eventful transaction may return a conflict. Writes
-    /// remain fallible. The caller may dispatch callbacks only for the returned
-    /// completed activation. No unguarded completion fallback is permitted.
+    /// remain fallible. The returned snapshot identifies the completed activation. No unguarded completion fallback is permitted.
     async fn complete_running_service_activation(
         &self,
         _session_id: &str,

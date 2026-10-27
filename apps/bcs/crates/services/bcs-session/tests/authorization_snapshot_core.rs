@@ -155,13 +155,6 @@ impl SessionRepoPort for NoSnapshotRepo {
     ) -> ServiceResult<Session> {
         Err(ServiceError::InternalError("mode unsupported".into()))
     }
-    async fn update_callback_status(
-        &self,
-        _session_id: &str,
-        _status: &str,
-    ) -> ServiceResult<()> {
-        Err(ServiceError::InternalError("callback unsupported".into()))
-    }
     async fn update_title(
         &self,
         _session_id: &str,
@@ -182,12 +175,6 @@ impl SessionRepoPort for NoSnapshotRepo {
     }
     async fn latest_running(&self, _group_id: &str) -> Option<Session> {
         None
-    }
-    async fn count_running_service(&self, _group_id: &str) -> u64 {
-        0
-    }
-    async fn list_running_service(&self, _offset: u64, _limit: u64) -> Vec<Session> {
-        Vec::new()
     }
     async fn list_group_ids_by_session_participant(&self, _bot_uuid: &str) -> Vec<String> {
         Vec::new()

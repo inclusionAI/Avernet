@@ -181,7 +181,6 @@ impl GroupServiceImpl {
                 participants,
                 member_bot_ids: Vec::new(),
                 group_kind: Some(GroupKind::Normal),
-                service_spec: None,
                 group_strategy: Some(strategy),
                 originator: Some(originator),
                 visibility: Some(visibility_name(request.visibility).to_string()),

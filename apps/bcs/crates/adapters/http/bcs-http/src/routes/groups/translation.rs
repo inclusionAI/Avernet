@@ -415,28 +415,6 @@ pub(crate) fn group_kind_filter(filter: GroupKindFilter) -> Option<GroupKind> {
     }
 }
 
-
-pub(crate) fn validate_service_spec_callback_urls(
-    guard: &OutboundUrlGuard,
-    service_spec: Option<&ServiceSpec>,
-) -> Result<(), String> {
-    let Some(callback_config) = service_spec.and_then(|spec| spec.callback_config.as_ref()) else {
-        return Ok(());
-    };
-    for (index, channel) in callback_config.channels.iter().enumerate() {
-        if let CallbackChannelConfig::Baas { base_url, .. } = channel {
-            guard
-                .validate_configured_http_url(base_url)
-                .map_err(|error| {
-                    format!(
-                        "service_spec.callback_config.channels[{index}].base_url is not allowed: {error}"
-                    )
-                })?;
-        }
-    }
-    Ok(())
-}
-
 // ---------------------------------------------------------------
 // PATCH /groups/{id}/settings
 // ---------------------------------------------------------------

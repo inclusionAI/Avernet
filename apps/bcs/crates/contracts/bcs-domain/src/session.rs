@@ -1,70 +1,10 @@
-//! Session and ServiceSpec domain types.
+//! Session domain types.
 //!
 //! Ported from `bcs-services::lib.rs` (old commit 0c775f5b) §930–§1035.
 
 use serde::{Deserialize, Serialize};
 
 use crate::group::Participant;
-
-/// Callback channel configuration for a service group.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum CallbackChannelConfig {
-    #[serde(rename = "antding")]
-    AntDing {
-        access_key_id: String,
-        access_key_secret: String,
-        robot_code: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        user_id: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        open_conversation_id: Option<String>,
-    },
-    #[serde(rename = "baas")]
-    Baas {
-        base_url: String,
-        api_key: String,
-        bot_id: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        metadata: Option<serde_json::Value>,
-    },
-}
-
-impl CallbackChannelConfig {
-    pub fn type_name(&self) -> &'static str {
-        match self {
-            Self::AntDing { .. } => "antding",
-            Self::Baas { .. } => "baas",
-        }
-    }
-}
-
-/// Callback configuration for a service group template.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct CallbackConfig {
-    #[serde(default)]
-    pub channels: Vec<CallbackChannelConfig>,
-}
-
-/// 服务化 Group 的对外暴露配置。
-///
-/// - `callback_config` 本期 Immutable（未来 Draft+publish 可改）；
-/// - `timeout_seconds` / `max_concurrency` 可原地 PATCH，
-///   受路由字段锁保护（有 running service session 时 409）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServiceSpec {
-    /// 回调通道配置（Immutable）。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub callback_config: Option<CallbackConfig>,
-
-    /// 超时秒数；NULL = 不超时判定。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub timeout_seconds: Option<i32>,
-
-    /// 并发上限；NULL = 不限。仅统计 running 的 service_invocation session。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_concurrency: Option<i32>,
-}
 
 /// Session 状态机（本期仅 Running / Completed）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -139,8 +79,6 @@ pub struct Session {
     pub output: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub callback_status: Option<String>,
 
     /// 初始 1，每次 reactivate +1。
     #[serde(default = "default_activation_count")]
@@ -174,47 +112,10 @@ pub struct Session {
     pub collected_at: Option<u64>,
 
     /// 调用方透传的元数据。
-    /// 回调时作为 `instance_meta` 传给通道，可用于携带 `callback_target.user_id` 等动态参数。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<serde_json::Value>,
 }
 
 fn default_activation_count() -> i32 {
     1
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn callback_channel_config_round_trips_baas() {
-        let channel: CallbackChannelConfig = serde_json::from_value(serde_json::json!({
-            "type": "baas",
-            "base_url": "https://baas.example.com",
-            "api_key": "sk-test",
-            "bot_id": "default:151614",
-            "metadata": {
-                "title": "BCS service callback",
-                "bot_options": {
-                    "lifecycle_stage": "online"
-                },
-                "sender_options": {
-                    "from": "owner"
-                }
-            }
-        }))
-        .expect("baas callback channel should deserialize");
-
-        assert_eq!(channel.type_name(), "baas");
-
-        let encoded = serde_json::to_value(&channel).expect("baas channel should serialize");
-        assert_eq!(encoded["type"], "baas");
-        assert_eq!(encoded["base_url"], "https://baas.example.com");
-        assert_eq!(encoded["api_key"], "sk-test");
-        assert_eq!(encoded["bot_id"], "default:151614");
-        assert_eq!(encoded["metadata"]["title"], "BCS service callback");
-        assert_eq!(encoded["metadata"]["bot_options"]["lifecycle_stage"], "online");
-        assert_eq!(encoded["metadata"]["sender_options"]["from"], "owner");
-    }
 }

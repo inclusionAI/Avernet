@@ -1,6 +1,6 @@
 [package]
 name = "bcs-callback"
-description = "BCS callback dispatcher for service-invocation sessions"
+description = "BCS compatibility hooks for legacy service-group callbacks"
 edition = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
@@ -8,16 +8,10 @@ rust-version = { workspace = true }
 version = { workspace = true }
 
 [dependencies]
-bcs-observability = { workspace = true }
-async-trait = { workspace = true }
-bcs-route-security = { workspace = true }
-bcs-service-api = { workspace = true }
-futures = { workspace = true }
-reqwest = { workspace = true }
-serde_json = { workspace = true }
-tokio = { workspace = true }
 tracing = { workspace = true }
-uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
 
 [lints]
 workspace = true

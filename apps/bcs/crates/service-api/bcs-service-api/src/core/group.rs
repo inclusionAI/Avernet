@@ -8,8 +8,7 @@ use crate::types::{EventActor, GroupHumanNotifyPolicy};
 pub use bcs_domain::{
     DefaultDelivery, Group, GroupKind, GroupStatus, GroupStrategy, HumanMentionNotifyMode,
     MessageViewScope, Participant, ParticipantKind, ParticipantMode, ParticipantRole, RoutingMode,
-    RoutingPolicy, SenderRoutesValidationError, ServiceSpec,
-};
+    RoutingPolicy, SenderRoutesValidationError, };
 
 /// Actor input for actor-level DM group creation.
 #[derive(Debug, Clone)]
@@ -46,7 +45,6 @@ pub enum GroupMutationKind {
         mode: Option<ParticipantMode>,
     },
     UpdateRoutingPolicy(RoutingPolicy),
-    UpdateServiceSpec(Option<ServiceSpec>),
     Delete {
         reason: String,
     },
@@ -308,15 +306,6 @@ pub trait GroupCoreService: Send + Sync {
 
     /// Update group status.
     async fn update_status(&self, id: &str, status: GroupStatus) -> ServiceResult<()>;
-
-    /// Replace (or remove) the group's `service_spec`. Validation of the
-    /// patch (route-field lock, callback_config immutability) is done by the
-    /// HTTP/use-case layer; this contract just persists the new value.
-    async fn update_service_spec(
-        &self,
-        id: &str,
-        service_spec: Option<ServiceSpec>,
-    ) -> ServiceResult<()>;
 
     /// Terminate a group.
     ///

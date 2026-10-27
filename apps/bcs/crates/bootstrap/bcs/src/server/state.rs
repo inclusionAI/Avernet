@@ -492,7 +492,6 @@ impl Default for BcsServerState {
             )
             .with_channel_binding_cleanup(channel_binding_cleanup.clone())
             .with_participant_view_bindings(frontend_connections.clone())
-            .with_outbound_url_guard(outbound_url_guard.clone())
             .with_bot_runtime(bot_use_cases.clone())
             .with_bot_authority(bot_authority.hook.clone())
             .with_session_authorization(session_authorization_core.clone()),
@@ -535,7 +534,6 @@ impl Default for BcsServerState {
             .with_history_persistence(config.state_machine_history.persistence_enabled)
             .with_history_cutoff_timestamp(config.message_history.state_machine_cutoff_timestamp)
             .with_loop_instrumentation(state_machine_loop_instrumentation(metrics.as_ref()))
-            .with_callback_url_guard(outbound_url_guard.clone())
             .with_session_channel_outbound(session_channel_outbound)
             .with_result_publisher(Arc::new(MessageFlowStateMachineResultPublisher::new(
                 message_flow.clone(),
@@ -725,13 +723,6 @@ impl Default for BcsServerState {
             .build()
             .expect("services must be fully wired");
 
-        // Start timeout scanner for service-invocation sessions
-        let _timeout_handle = crate::timeout_scanner::spawn_with_url_guard(
-            services.session_management.clone(),
-            services.group.clone(),
-            crate::timeout_scanner::DEFAULT_SCAN_INTERVAL,
-            outbound_url_guard.clone(),
-        );
         // Start JWT token expiry scanner
         let _token_expiry_handle = crate::token_expiry_scanner::spawn(
             bot_connections.clone(),

@@ -51,7 +51,6 @@ async fn activation_completion_preserves_events_and_wrapper_delegation() {
             }
         }
         assert_eq!(stored, usize::from(eventful));
-        repo.update_callback_status(&session.id, "not_applicable").await.unwrap();
         let next = repo.reactivate(&session.id, None).await.unwrap();
         assert!(service.complete_running_service_activation(&session.id, session.activation_count, None, Some("old failure".into())).await.unwrap().is_none());
         let current = service.get(&session.id).await.unwrap().unwrap();

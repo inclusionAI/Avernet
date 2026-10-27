@@ -35,7 +35,6 @@ pub(super) fn map_session_error(err: SessionUseCaseError) -> (String, String) {
     match err {
         SessionUseCaseError::NotFound(s) => ("session_not_found".to_string(), s),
         SessionUseCaseError::InvalidParams(s) => ("invalid_params".to_string(), s),
-        SessionUseCaseError::CallbackPending(s) => ("callback_pending".to_string(), s),
         SessionUseCaseError::Conflict(s) => ("conflict".to_string(), s),
         SessionUseCaseError::Internal(e) => ("internal_error".to_string(), e.to_string()),
     }

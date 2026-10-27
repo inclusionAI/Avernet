@@ -108,9 +108,9 @@ pub struct CreateGroupRequest {
     /// Group kind: "normal" (default) or "dm" (1:1 direct message).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub group_kind: Option<String>,
-    /// Service-as-a-Group configuration. None for regular groups.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub service_spec: Option<serde_json::Value>,
+    /// Accepted legacy input; ignored and absent from responses and runtime configuration.
+    #[serde(default, rename = "service_spec", skip_serializing, deserialize_with = "ignore_retired_service_spec")]
+    pub retired_service_spec: (),
     /// Group strategy: "chat" (default), "manager_worker", or "state_machine".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group_strategy: Option<String>,
@@ -327,3 +327,7 @@ mod tests {
     }
 }
 
+fn ignore_retired_service_spec<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<(), D::Error> {
+    let _ = <serde::de::IgnoredAny as Deserialize>::deserialize(deserializer)?;
+    Ok(())
+}

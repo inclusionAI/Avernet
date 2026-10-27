@@ -131,10 +131,6 @@ pub enum ServiceError {
     #[error("Invalid session params: {0}")]
     SessionInvalidParams(String),
 
-    /// Session reactivation blocked because callback is still pending.
-    #[error("Session '{0}' callback still pending")]
-    SessionCallbackPending(String),
-
     /// Group contains non-public bots, preventing visibility change to public.
     /// Each tuple is (bot_uuid, bot_name).
     #[error("Group contains non-public bots preventing visibility change")]
@@ -196,7 +192,6 @@ impl ServiceError {
             Self::ParticipantNotFound(id) => serde_json::json!({ "participant_id": id }),
             Self::SessionNotFound(id) => serde_json::json!({ "session_id": id }),
             Self::SessionInvalidParams(reason) => serde_json::json!({ "reason": reason }),
-            Self::SessionCallbackPending(id) => serde_json::json!({ "session_id": id }),
             Self::Conflict(reason)
             | Self::Unauthorized(reason)
             | Self::Forbidden(reason)

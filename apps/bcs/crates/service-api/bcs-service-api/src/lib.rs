@@ -74,8 +74,7 @@ pub use application::invite::{
     InviteUseCaseError, JoinByInviteCommand, JoinByInviteResult,
 };
 pub use application::session::{
-    ClaimSessionCallbackCommand, ClaimSessionCallbackOutcome,
-    CompleteSessionCallbackCommand, CreateOrReactivateCommand, CreateOrReactivateOutcome,
+    CreateOrReactivateCommand, CreateOrReactivateOutcome,
     SessionManagementService, SessionUseCaseError,
 };
 pub use application::session_launch::{
@@ -149,12 +148,12 @@ pub use group_use_cases::{
     GroupHistoryResult, GroupListCommand, GroupListEntry, GroupListResult, GroupManagementService,
     GroupMessageHistoryService, GroupParticipantModeCommand, GroupParticipantModeResult,
     InitialGroupRun, InitialGroupRunActivityKind, InitialGroupRunState, MessageHistoryOptions,
-    GroupParticipantView, GroupPatchSettingsCommand, GroupPatchSettingsConflict,
-    GroupPatchSettingsResult, GroupQueryService, GroupRemoveMemberCommand,
+    GroupParticipantView,
+    GroupQueryService, GroupRemoveMemberCommand,
     GroupRemoveMemberResult, GroupRoutingPolicyCommand, GroupRoutingPolicyResult,
     GroupStatusCommand, GroupTerminateCommand, GroupUpdateLabelCommand,
     GroupUpdateVisibilityCommand, GroupUseCaseError,
-    ServiceSpecPatchConflictField, SessionHistoryCommand, SessionHistoryResult,
+    SessionHistoryCommand, SessionHistoryResult,
 };
 pub use human_actors::{
     CurrentHumanActorCommand, EnsureCurrentHumanActorError, EnsureCurrentHumanActorResult,
@@ -239,7 +238,7 @@ pub use port::{
     OrganizationCandidateReadQuery, OrganizationMemberPage, OrganizationRepoPort, UpdateOrganizationRecord,
     UpsertOrganizationMemberRecord,
     RelationRepoPort, RunFallbackDelivery,
-    SessionCallbackDispatchPort, SessionChannelDeliveryOutcome, SessionChannelOutboundPort,
+    SessionChannelDeliveryOutcome, SessionChannelOutboundPort,
     SessionRepoPort, StateMachineDefinitionRepoPort, StateMachineResultPublishCommand,
     StateMachineResultPublisherPort, StateMachineRunRepoPort, StateMachineTerminalEvent,
     StateMachineTerminalStatus, UserIdentity, UserIdentityRepoPort,
@@ -261,7 +260,7 @@ pub use types::{
     BotControlPlanePatch, BotControlPlaneRecord,
     BotTaskModesQuery, TaskModeMatch,
     ControllableCandidateQuery, ControlledBotCandidate,
-    BotDeliveryTarget, CallbackChannelConfig, CallbackConfig, CoordinationMode,
+    BotDeliveryTarget, CoordinationMode,
     CoordinationSurface, ProviderAuthMode, ProviderBotBinding, ProviderBotConnectionMode,
     ProviderCoordinationConfig, ProviderCredential, ProviderOrganizationManagementConfig,
     ProviderRecord, RedactedToken,
@@ -305,7 +304,7 @@ pub use core::{
     ResponseMode, RouteAndSendResult,
     RouteParticipantOverlay, RouteSelectorWire, RoutingCoreService, RoutingDecision,
     RoutingMode, RoutingPolicy, RoutingTarget, RuntimeBotIdentity, SenderRoutesValidationError,
-    ServiceError, ServiceResult, ServiceSpec, Session, SessionKind, SessionStatus, Skill,
+    ServiceError, ServiceResult, Session, SessionKind, SessionStatus, Skill,
     StructuredRoutingError, MOCK_TOKEN_PREFIX, mock_token, is_mock_token,
     SystemGroupMessage, SystemMessageDispatchOutcome, SystemMessageDispatcherService,
     SystemMessageEvent, SystemMessageEventKind, SystemMessageProducerService,

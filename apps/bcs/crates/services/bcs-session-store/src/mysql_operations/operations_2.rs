@@ -65,33 +65,6 @@ impl MySqlSessionStore {
 }
 
 impl MySqlSessionStore {
-    pub(super) async fn repo_list_running_service(&self, offset: u64, limit: u64) -> Vec<Session> {
-        let select_cols = self.select_cols();
-        let sql = format!(
-            "SELECT {select_cols} FROM bcs_group_sessions \
-             WHERE env = ? AND session_kind = 'service_invocation' AND status = 'running' \
-             ORDER BY gmt_create ASC LIMIT ? OFFSET ?"
-        );
-        let rows = match self
-            .db
-            .query(DbStatement::with_params(
-                &sql,
-                vec![
-                    DbValue::from(self.env.as_str()),
-                    DbValue::U64(limit),
-                    DbValue::U64(offset),
-                ],
-            ))
-            .await
-        {
-            Ok(r) => r,
-            Err(_) => return Vec::new(),
-        };
-        rows.iter().filter_map(|r| row_to_session(r).ok()).collect()
-    }
-}
-
-impl MySqlSessionStore {
     pub(super) async fn repo_list_running_service_after(
         &self,
         after_session_id: Option<&str>,
@@ -108,40 +81,6 @@ impl MySqlSessionStore {
             DbValue::from(self.env.as_str()), DbValue::from(after_session_id.unwrap_or("")),
             DbValue::U64(limit),
         ])).await.map_err(|error| ServiceError::InternalError(format!("Session recovery candidates: {error}")))?;
-        rows.iter().map(row_to_session).collect()
-    }
-}
-
-impl MySqlSessionStore {
-    pub(super) async fn repo_list_recoverable_callbacks(
-        &self,
-        now_ms: u64,
-        after_session_id: Option<&str>,
-        limit: u64,
-    ) -> ServiceResult<Vec<Session>> {
-        let select_cols = self.select_cols();
-        let mut sql = format!(
-            "SELECT {select_cols} FROM bcs_group_sessions \
-             WHERE env = ? AND session_kind = 'service_invocation' \
-             AND status = 'completed' AND callback_status = 'pending' \
-             AND callback_lease_token IS NOT NULL \
-             AND (callback_lease_until_ms IS NULL OR callback_lease_until_ms <= ?)"
-        );
-        let mut params = vec![DbValue::from(self.env.as_str()), DbValue::U64(now_ms)];
-        if let Some(after_session_id) = after_session_id {
-            sql.push_str(" AND session_id > ?");
-            params.push(DbValue::from(after_session_id));
-        }
-        sql.push_str(" ORDER BY session_id ASC LIMIT ?");
-        params.push(DbValue::U64(limit));
-
-        let rows = self
-            .db
-            .query(DbStatement::with_params(&sql, params))
-            .await
-            .map_err(|error| {
-                ServiceError::InternalError(format!("list recoverable Session callbacks: {error}"))
-            })?;
         rows.iter().map(row_to_session).collect()
     }
 }

@@ -22,7 +22,6 @@ use bcs_protocol::{
     BCS_PROTOCOL_VERSION, BcsFrame, EventFrame, GroupContextInput, GroupContextParticipant,
     build_chat_send_frame,
 };
-use bcs_route_security::OutboundUrlGuard;
 use bcs_service_api::port::repo::{MessageRepoPort, StateMachineEventfulTransition};
 use bcs_service_api::port::{EventRecordFactoryPort, NewEvent};
 use bcs_service_api::types::{
@@ -162,7 +161,6 @@ pub struct CollaborationRuntime {
     result_publisher: Option<Arc<dyn StateMachineResultPublisherPort>>,
     event_record_factory: Option<Arc<dyn EventRecordFactoryPort>>,
     judge: Arc<dyn JudgeEvaluatorPort>,
-    callback_url_guard: OutboundUrlGuard,
 }
 
 struct ResolvedDefinition {
@@ -217,7 +215,6 @@ impl CollaborationRuntime {
             session_channel_outbound: None,
             result_publisher: None,
             event_record_factory: None,
-            callback_url_guard: OutboundUrlGuard::strict(),
         }
     }
 
@@ -332,11 +329,6 @@ impl CollaborationRuntime {
         event_record_factory: Arc<dyn EventRecordFactoryPort>,
     ) -> Self {
         self.event_record_factory = Some(event_record_factory);
-        self
-    }
-
-    pub fn with_callback_url_guard(mut self, callback_url_guard: OutboundUrlGuard) -> Self {
-        self.callback_url_guard = callback_url_guard;
         self
     }
 
@@ -1880,15 +1872,7 @@ impl CollaborationRuntime {
                 .complete_service_session_for_run(run, output.clone().map(Value::String), None)
                 .await
             {
-                Ok(Some(session)) => {
-                    bcs_callback::dispatch::maybe_dispatch_for_session_with_url_guard(
-                        session,
-                        self.groups.clone(),
-                        self.sessions.clone(),
-                        self.callback_url_guard.clone(),
-                    );
-                    ("completed", true)
-                }
+                Ok(Some(_)) => ("completed", true),
                 Ok(None) => ("not_running", false),
                 Err(error) => {
                     warn!(
@@ -1960,15 +1944,7 @@ impl CollaborationRuntime {
                     .complete_service_session_for_run(run, None, Some(error.clone()))
                     .await
                 {
-                    Ok(Some(session)) => {
-                        bcs_callback::dispatch::maybe_dispatch_for_session_with_url_guard(
-                            session,
-                            self.groups.clone(),
-                            self.sessions.clone(),
-                            self.callback_url_guard.clone(),
-                        );
-                        ("completed", true)
-                    }
+                    Ok(Some(_)) => ("completed", true),
                     Ok(None) => ("not_running", false),
                     Err(error) => {
                         warn!(
@@ -2534,12 +2510,9 @@ impl CollaborationRuntime {
         if let Some(status) = notification_status {
             self.prepare_terminal_im(&run, loaded.execution.definition.name.clone(), status, run.output.clone()).await?;
         }
-        let Some(completed) = self.complete_service_session_for_run(&run, output, error).await
+        let Some(_) = self.complete_service_session_for_run(&run, output, error).await
             .map_err(|error| CollaborationRuntimeError::Internal(ServiceError::InternalError(error.to_string())))?
         else { return Ok(false); };
-        bcs_callback::dispatch::maybe_dispatch_for_session_with_url_guard(
-            completed, self.groups.clone(), self.sessions.clone(), self.callback_url_guard.clone(),
-        );
         if notification_status.is_some() && self.session_channel_outbound.is_some() { self.resume_terminal_im(&run.run_id).await?; }
         Ok(true)
     }
@@ -4108,14 +4081,6 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         } else {
             "not_running"
         };
-        if let Some(session) = completed_session {
-            bcs_callback::dispatch::maybe_dispatch_for_session_with_url_guard(
-                session,
-                self.groups.clone(),
-                self.sessions.clone(),
-                self.callback_url_guard.clone(),
-            );
-        }
         info!(
             run_id = %cmd.run_id,
             group_id = %run.group_id,

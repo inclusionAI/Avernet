@@ -127,7 +127,7 @@ mod bot_ws_admission_config;
 mod config;
 mod collaboration_drafts;
 mod config_loader;
-pub mod callback_recovery_scanner;
+
 mod env;
 mod error;
 mod eventing_wiring;
@@ -151,7 +151,7 @@ pub mod state_machine_timeout_scanner;
 pub mod state_machine_progression_scanner;
 mod recovery_backoff;
 mod telemetry;
-pub mod timeout_scanner;
+
 pub mod token_expiry_scanner;
 
 pub mod leader_election {

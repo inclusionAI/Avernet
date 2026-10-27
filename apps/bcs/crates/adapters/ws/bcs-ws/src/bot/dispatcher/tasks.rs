@@ -263,12 +263,7 @@ pub(super) async fn handle_task_complete(
                 status = %outcome.status,
                 "Task group completed"
             );
-            if let Some(session) = outcome.completed_session {
-                state
-                    .callback_dispatch
-                    .maybe_dispatch(session, state.session_management.clone())
-                    .await;
-            } else if outcome.callback_requested {
+            if outcome.completed_session.is_none() && outcome.callback_requested {
                 if let Some(callback) = state.task_callback.clone() {
                     let group_id = real_group_id.clone();
                     tokio::spawn(async move {

@@ -18,8 +18,7 @@ use bcs_service_api::{
     CollaborationRuntimeService, ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome,
     DmActorSpec, Group, GroupCoreService, GroupMessage, GroupStatus, HandleBotTerminalEventCommand,
     HandleBotTerminalEventOutcome, MessageFlowService, Participant, ParticipantMode,
-    ParticipantRole, ProviderRunTransport, RedactedToken, ServiceError, ServiceResult, ServiceSpec,
-    SessionHistoryResult, StartStateMachineRunCommand, StartStateMachineRunOutcome,
+    ParticipantRole, ProviderRunTransport, RedactedToken, ServiceError, ServiceResult, SessionHistoryResult, StartStateMachineRunCommand, StartStateMachineRunOutcome,
     StateMachineDeliveryCorrelation, StateMachineRunView,
     SystemMessageEvent, SystemMessageService, TaskCompleteCommand, TaskCompleteOutcome,
     TaskDispatchCommand, TaskDispatchOutcome, TaskMessageCommand, TaskMessageOutcome,
@@ -180,14 +179,6 @@ impl GroupCoreService for RecordingGroupCoreService {
     }
 
     async fn update_status(&self, id: &str, _status: GroupStatus) -> ServiceResult<()> {
-        Err(ServiceError::GroupNotFound(id.to_string()))
-    }
-
-    async fn update_service_spec(
-        &self,
-        id: &str,
-        _service_spec: Option<ServiceSpec>,
-    ) -> ServiceResult<()> {
         Err(ServiceError::GroupNotFound(id.to_string()))
     }
 
@@ -729,7 +720,6 @@ fn new_state() -> TestState {
         group_dispatch: Arc::new(RecordingGroupDispatchContext {
             group: group.clone(),
         }),
-        callback_dispatch: Arc::new(bcs_test_support::NoopSessionCallbackDispatchPort),
         system_message: Some(system_message.clone()),
         coordination_processed: Arc::new(Mutex::new(HashMap::new())),
         agent_credential_backfill: None,

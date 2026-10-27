@@ -114,7 +114,6 @@ impl SessionManagementService for EmptySessionManagementService {
                 input: cmd.params.input,
                 output: None,
                 error_message: None,
-                callback_status: None,
                 activation_count: 1,
                 caller_principal: cmd.params.caller_principal,
                 created_by: cmd.params.created_by,
@@ -153,26 +152,6 @@ impl SessionManagementService for EmptySessionManagementService {
         _participant_id: Option<&str>,
     ) -> Result<Vec<Session>, SessionUseCaseError> {
         Ok(Vec::new())
-    }
-
-    async fn count_running_service(&self, _group_id: &str) -> Result<u64, SessionUseCaseError> {
-        Ok(0)
-    }
-
-    async fn list_running_service(
-        &self,
-        _offset: u64,
-        _limit: u64,
-    ) -> Result<Vec<Session>, SessionUseCaseError> {
-        Ok(Vec::new())
-    }
-
-    async fn update_callback_status(
-        &self,
-        _session_id: &str,
-        _status: &str,
-    ) -> Result<(), SessionUseCaseError> {
-        Ok(())
     }
 
     async fn complete_if_running(

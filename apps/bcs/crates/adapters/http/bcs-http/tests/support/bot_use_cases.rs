@@ -318,7 +318,6 @@ fn clone_service_error(error: &ServiceError) -> ServiceError {
         )),
         ServiceError::SessionNotFound(id) => ServiceError::SessionNotFound(id.clone()),
         ServiceError::SessionInvalidParams(msg) => ServiceError::SessionInvalidParams(msg.clone()),
-        ServiceError::SessionCallbackPending(id) => ServiceError::SessionCallbackPending(id.clone()),
         ServiceError::ParticipantNotFound(id) => ServiceError::ParticipantNotFound(id.clone()),
         ServiceError::ExistNonPublicBots { bots } => {
             ServiceError::ExistNonPublicBots {

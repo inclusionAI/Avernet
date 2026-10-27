@@ -131,7 +131,6 @@ pub(crate) fn group_to_detail_json(mut group: GroupDetailResult) -> Value {
         "group_kind": group.group_kind,
         "dm_pair_key": group.dm_pair_key,
         "group_strategy": group.group_strategy,
-        "service_spec": group.service_spec,
         "latest_running_session_id": group.latest_running_session_id,
         "originator": group.originator,
         "visibility": group.visibility,

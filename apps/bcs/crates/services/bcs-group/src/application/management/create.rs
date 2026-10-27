@@ -33,7 +33,6 @@ impl GroupManagement {
                     .to_string(),
             ));
         }
-        validate_service_spec_callback_urls(&self.outbound_url_guard, cmd.service_spec.as_ref())?;
 
         let originator = cmd
             .originator
@@ -231,7 +230,6 @@ impl GroupManagement {
         group.opening_message = cmd.opening_message;
         group.routing_policy = cmd.routing_policy;
         group.group_kind = cmd.group_kind.unwrap_or(GroupKind::Normal);
-        group.service_spec = cmd.service_spec.clone();
         group.group_strategy = requested_strategy;
         if cmd.provisioning {
             group.record_status = "provisioning".to_string();

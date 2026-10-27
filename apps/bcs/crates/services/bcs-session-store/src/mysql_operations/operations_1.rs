@@ -385,15 +385,9 @@ impl MySqlSessionStore {
         // Validate state machine before mutating.
         can_reactivate(
             current.status,
-            current.session_kind,
-            current.callback_status.as_deref(),
-        )
+            current.session_kind)
         .map_err(|msg| {
-            if msg == "callback is still pending" {
-                ServiceError::SessionCallbackPending(session_id.to_string())
-            } else {
-                ServiceError::SessionInvalidParams(format!("{session_id}: {msg}"))
-            }
+            ServiceError::SessionInvalidParams(format!("{session_id}: {msg}"))
         })?;
 
         // Use new_input if provided; otherwise preserve the existing input.
@@ -408,9 +402,7 @@ impl MySqlSessionStore {
         let update_sql = format!(
             "UPDATE bcs_group_sessions \
              SET status = 'running', output = NULL, error_message = NULL, \
-                 callback_status = 'pending', input = ?, \
-                 callback_lease_owner = NULL, callback_lease_token = 0, \
-                 callback_lease_until_ms = NULL, \
+                 input = ?, \
                  activation_count = activation_count + 1, \
                  completed_at = NULL, {} \
              WHERE env = ? AND session_id = ?",
@@ -441,135 +433,6 @@ impl MySqlSessionStore {
             .next()
             .ok_or_else(|| ServiceError::SessionNotFound(session_id.to_string()))
             .and_then(|r| row_to_session(&r))
-    }
-}
-
-impl MySqlSessionStore {
-    pub(super) async fn repo_update_callback_status(&self, session_id: &str, status: &str) -> ServiceResult<()> {
-        let sql = format!(
-            "UPDATE bcs_group_sessions \
-             SET callback_status = ?, callback_lease_owner = NULL, \
-                 callback_lease_until_ms = NULL, {} \
-             WHERE env = ? AND session_id = ?",
-            self.flavor.set_modified_now(),
-        );
-        self.db
-            .execute(DbStatement::with_params(
-                &sql,
-                vec![
-                    DbValue::from(status),
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(session_id),
-                ],
-            ))
-            .await
-            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
-        Ok(())
-    }
-}
-
-impl MySqlSessionStore {
-    pub(super) async fn repo_claim_callback(
-        &self,
-        command: ClaimSessionCallback,
-    ) -> ServiceResult<Option<SessionCallbackClaim>> {
-        let sql = format!(
-            "UPDATE bcs_group_sessions \
-             SET callback_lease_owner = ?, \
-                 callback_lease_token = callback_lease_token + 1, \
-                 callback_lease_until_ms = ?, {} \
-             WHERE env = ? AND session_id = ? \
-               AND status = 'completed' AND session_kind = 'service_invocation' \
-               AND activation_count = ? AND callback_status = 'pending' \
-               AND callback_lease_token IS NOT NULL \
-               AND (callback_lease_until_ms IS NULL OR callback_lease_until_ms <= ?)",
-            self.flavor.set_modified_now(),
-        );
-        let result = self
-            .db
-            .execute(DbStatement::with_params(
-                &sql,
-                vec![
-                    DbValue::from(command.lease_owner.as_str()),
-                    DbValue::from(command.lease_until_ms),
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(command.session_id.as_str()),
-                    DbValue::I64(i64::from(command.expected_activation_count)),
-                    DbValue::from(command.now_ms),
-                ],
-            ))
-            .await
-            .map_err(|e| ServiceError::InternalError(format!("session callback claim: {e}")))?;
-        if result.affected_rows == 0 {
-            return Ok(None);
-        }
-        let rows = self
-            .db
-            .query(DbStatement::with_params(
-                "SELECT callback_lease_token FROM bcs_group_sessions \
-                 WHERE env = ? AND session_id = ? AND activation_count = ? \
-                   AND callback_lease_owner = ?",
-                vec![
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(command.session_id.as_str()),
-                    DbValue::I64(i64::from(command.expected_activation_count)),
-                    DbValue::from(command.lease_owner.as_str()),
-                ],
-            ))
-            .await
-            .map_err(|e| {
-                ServiceError::InternalError(format!("session callback claim read: {e}"))
-            })?;
-        let row = rows.into_iter().next().ok_or_else(|| {
-            ServiceError::InternalError(
-                "Session callback claim disappeared before token read".to_string(),
-            )
-        })?;
-        let lease_token: i64 = db_get_column(&row, "callback_lease_token")
-            .map_err(|e| ServiceError::InternalError(format!("callback lease token: {e}")))?;
-        Ok(Some(SessionCallbackClaim { lease_token }))
-    }
-}
-
-impl MySqlSessionStore {
-    pub(super) async fn repo_complete_callback(&self, command: CompleteSessionCallback) -> ServiceResult<bool> {
-        if !matches!(
-            command.terminal_status.as_str(),
-            "succeeded" | "partial_failed" | "failed" | "not_applicable"
-        ) {
-            return Err(ServiceError::SessionInvalidParams(format!(
-                "invalid terminal callback status: {}",
-                command.terminal_status
-            )));
-        }
-        let sql = format!(
-            "UPDATE bcs_group_sessions \
-             SET callback_status = ?, callback_lease_owner = NULL, \
-                 callback_lease_until_ms = NULL, {} \
-             WHERE env = ? AND session_id = ? \
-               AND status = 'completed' AND session_kind = 'service_invocation' \
-               AND activation_count = ? AND callback_status = 'pending' \
-               AND callback_lease_owner = ? AND callback_lease_token = ?",
-            self.flavor.set_modified_now(),
-        );
-        let result = self
-            .db
-            .execute(DbStatement::with_params(
-                &sql,
-                vec![
-                    DbValue::from(command.terminal_status.as_str()),
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(command.session_id.as_str()),
-                    DbValue::I64(i64::from(command.expected_activation_count)),
-                    DbValue::from(command.lease_owner.as_str()),
-                    DbValue::I64(command.lease_token),
-                ],
-            ))
-            .await
-            .map_err(|e| {
-                ServiceError::InternalError(format!("session callback completion: {e}"))
-            })?;
-        Ok(result.affected_rows == 1)
     }
 }
 
@@ -720,32 +583,5 @@ impl MySqlSessionStore {
             .await
             .into_iter()
             .next()
-    }
-}
-
-impl MySqlSessionStore {
-    pub(super) async fn repo_count_running_service(&self, group_id: &str) -> u64 {
-        let sql = "SELECT COUNT(*) AS cnt FROM bcs_group_sessions \
-                   WHERE env = ? AND group_id = ? AND session_kind = 'service_invocation' AND status = 'running'";
-        let rows = match self
-            .db
-            .query(DbStatement::with_params(
-                sql,
-                vec![DbValue::from(self.env.as_str()), DbValue::from(group_id)],
-            ))
-            .await
-        {
-            Ok(r) => r,
-            Err(_) => return 0,
-        };
-        rows.into_iter()
-            .next()
-            .and_then(|row| {
-                db_get_column_opt::<i64>(&row, "cnt")
-                    .ok()
-                    .flatten()
-                    .map(|v| v.max(0) as u64)
-            })
-            .unwrap_or(0)
     }
 }

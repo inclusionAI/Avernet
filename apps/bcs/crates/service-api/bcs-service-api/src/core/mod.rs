@@ -35,4 +35,4 @@ pub use registry::*;
 pub use routing::*;
 pub use session_authorization::*;
 pub use system_message::*;
-pub use crate::types::{Session, SessionKind, SessionStatus, ServiceSpec};
+pub use crate::types::{Session, SessionKind, SessionStatus};

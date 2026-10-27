@@ -15,8 +15,7 @@ use bcs_service_api::types::{
 use bcs_service_api::{
     ActorKind, DmActorSpec, Group, GroupCoreService, GroupKind, GroupMessage,
     GroupMutableFieldsPatch, GroupStatus, Participant, ParticipantMode, ParticipantRole,
-    ServiceError, ServiceResult, ServiceSpec,
-};
+    ServiceError, ServiceResult, };
 use chrono::{SecondsFormat, Utc};
 use serde_json::{Value, json};
 
@@ -270,14 +269,6 @@ impl GroupCoreService for GroupCore {
 
     async fn update_status(&self, id: &str, status: GroupStatus) -> ServiceResult<()> {
         self.repo.update_status(id, status).await
-    }
-
-    async fn update_service_spec(
-        &self,
-        id: &str,
-        service_spec: Option<ServiceSpec>,
-    ) -> ServiceResult<()> {
-        self.repo.update_service_spec(id, service_spec).await
     }
 
     async fn terminate(&self, id: &str, caller_bot_id: &str) -> ServiceResult<Group> {
@@ -785,19 +776,6 @@ fn prepare_group_mutation(
             PreparedGroupMutation {
                 event: None,
                 mutation: GroupEventfulMutation::UpdateRoutingPolicy(policy.clone()),
-            }
-        }
-        GroupMutationKind::UpdateServiceSpec(service_spec) => {
-            if serde_json::to_value(&group.service_spec)
-                .map_err(|error| ServiceError::InternalError(error.to_string()))?
-                == serde_json::to_value(service_spec)
-                    .map_err(|error| ServiceError::InternalError(error.to_string()))?
-            {
-                return Ok(None);
-            }
-            PreparedGroupMutation {
-                event: None,
-                mutation: GroupEventfulMutation::UpdateServiceSpec(service_spec.clone()),
             }
         }
         GroupMutationKind::Delete { reason } => {

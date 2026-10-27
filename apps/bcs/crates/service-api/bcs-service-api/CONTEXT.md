@@ -245,7 +245,7 @@ dispatcher-to-Send boundary without native inject.
   repository contracts provide an activation CAS; Memory/SQL implementations
   and the runtime-cleanup decorator must preserve it. Normal State Machine
   completion, failure, and cancellation use the same CAS, propagate write errors,
-  and dispatch callbacks only from the returned activation snapshot. Missing
+  and return the completed activation snapshot. Missing
   activation metadata is never inferred from the current Session. Completed/Failed
   Run recovery prepares the immutable terminal IM intent before completing the
   Session, then shares the foreground delivery path. Chat publication uses its
@@ -555,3 +555,21 @@ already validated accepted alias, not a new producer. Its default delegates the
 storage write for existing implementations; lifecycle decorators must not mint
 independent output lineage, including when a delayed ACK overlaps canonical
 terminal cleanup. WS uses this method for direct A2A alias scope projection.
+
+## Service Session policy retirement
+
+Service Sessions retain creation, authorization, completion, completion events,
+activation fencing and reactivation. The Group `service_spec` policy, Service
+Session timeout scanner, external completion callbacks and callback recovery are
+retired. Reactivation requires a Completed Service Session; it has no callback
+status prerequisite. State Machine Node deadlines, progression/IM recovery,
+Provider callbacks and Event subscriptions retain their existing contracts.
+Legacy Group creation accepts and discards `service_spec` for Backend compatibility, and the legacy settings
+endpoint returns 410. Service invocation needs no Group policy marker. MySQL 037
+and SQLite 038 remove only the retired Group policy and Session callback columns;
+stop old binaries before applying cleanup. Historical migration bodies remain
+unchanged. See `apps/bcs/specs/2026-10-27-retire-service-session-policies/spec.md`.
+
+This retirement is a breaking Rust Service API change: bcs-service-api is version
+1.0.0. Group/Session consumers and implementations must rebuild together; Plugin
+API versions and State Machine contracts are unchanged.

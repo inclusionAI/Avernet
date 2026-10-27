@@ -497,46 +497,6 @@ fn build_panel_opening_message(
     Ok(Some(serde_json::Value::Object(opening_message)))
 }
 
-fn merge_baas_session_id_into_meta(
-    meta: Option<serde_json::Value>,
-    baas_session_id: Option<&str>,
-) -> Result<Option<serde_json::Value>> {
-    let Some(baas_session_id) = baas_session_id else {
-        return Ok(meta);
-    };
-
-    let mut meta_object = match meta {
-        Some(serde_json::Value::Object(map)) => map,
-        None => serde_json::Map::new(),
-        Some(_) => {
-            return Err(anyhow!(
-                "--meta must be a JSON object when --baas-session-id is set"
-            ));
-        }
-    };
-
-    let callback_target = meta_object.remove("callback_target");
-    let mut callback_target_object = match callback_target {
-        Some(serde_json::Value::Object(map)) => map,
-        None => serde_json::Map::new(),
-        Some(_) => {
-            return Err(anyhow!(
-                "meta.callback_target must be a JSON object when --baas-session-id is set"
-            ));
-        }
-    };
-    callback_target_object.insert(
-        "baas_session_id".to_string(),
-        serde_json::Value::String(baas_session_id.to_string()),
-    );
-    meta_object.insert(
-        "callback_target".to_string(),
-        serde_json::Value::Object(callback_target_object),
-    );
-
-    Ok(Some(serde_json::Value::Object(meta_object)))
-}
-
 /// Split a service session id at its canonical `{group_id}:<session_suffix>` boundary into its
 /// `(group_id, session_id)` parts. `group_arg` always wins when supplied;
 /// otherwise the colon split must succeed.
@@ -657,11 +617,6 @@ fn service_session_summary_lines(session: &serde_json::Value, header: &str) -> V
     if let Some(err) = session.get("error_message").and_then(|v| v.as_str()) {
         if !err.is_empty() {
             lines.push(format!("  Error:    {}", err));
-        }
-    }
-    if let Some(cb) = session.get("callback_status").and_then(|v| v.as_str()) {
-        if !cb.is_empty() {
-            lines.push(format!("  Callback: {}", cb));
         }
     }
     lines
@@ -1450,7 +1405,7 @@ enum Commands {
         command: SessionCommands,
     },
 
-    /// Drive a service-invocation flow on a group with `service_spec` set.
+    /// Drive a service-invocation flow on an existing group.
     ///
     /// Requires a bot token. The server records the caller as `bot:<bot_id>`.
     Service {
@@ -2175,12 +2130,10 @@ enum SessionFileCommands {
 enum ServiceCommands {
     /// Kick off (or reactivate) a service-invocation session on a group.
     ///
-    /// The group must have a `service_spec` set (otherwise the server
-    /// returns 400). By default this command short-polls until the session
     /// reaches `status="completed"` or the timeout fires; pass `--detach`
     /// to return immediately after the 202 with the session id.
     Invoke {
-        /// Target group id (must have `service_spec` configured)
+        /// Target group id
         #[arg(short = 'g', long)]
         group: String,
 
@@ -2195,10 +2148,6 @@ enum ServiceCommands {
         /// Reactivate an existing session id instead of allocating a new one
         #[arg(long)]
         session_id: Option<String>,
-
-        /// BaaS conversation session id for callback delivery
-        #[arg(long)]
-        baas_session_id: Option<String>,
 
         /// Opaque caller-supplied id (recorded on the session row)
         #[arg(long)]
@@ -5420,7 +5369,7 @@ pub async fn run() -> Result<()> {
                     input,
                     meta,
                     session_id,
-                    baas_session_id,
+
                     caller_id,
                     title,
                     detach,
@@ -5436,9 +5385,6 @@ pub async fn run() -> Result<()> {
                         .map(parse_json_arg)
                         .transpose()
                         .map_err(|e| anyhow!("--meta: {}", e))?;
-                    let meta_json =
-                        merge_baas_session_id_into_meta(meta_json, baas_session_id.as_deref())
-                            .map_err(|e| anyhow!("--baas-session-id: {}", e))?;
 
                     debug_request!(
                         debug,
@@ -7797,7 +7743,7 @@ mod tests {
                         input,
                         meta,
                         session_id,
-                        baas_session_id,
+
                         caller_id,
                         title,
                         detach,
@@ -7809,7 +7755,6 @@ mod tests {
                 assert!(input.is_none());
                 assert!(meta.is_none());
                 assert!(session_id.is_none());
-                assert!(baas_session_id.is_none());
                 assert!(caller_id.is_none());
                 assert!(title.is_none());
                 assert!(!detach);
@@ -7854,8 +7799,7 @@ mod tests {
             r#"{"trace":"abc"}"#,
             "--session-id",
             "g-1:00000001",
-            "--baas-session-id",
-            "agent:main:baas-session-1",
+
             "--caller-id",
             "client-a",
             "--title",
@@ -7874,7 +7818,7 @@ mod tests {
                         input,
                         meta,
                         session_id,
-                        baas_session_id,
+
                         caller_id,
                         title,
                         detach,
@@ -7886,10 +7830,6 @@ mod tests {
                 assert_eq!(input.as_deref(), Some(r#"{"q":"hi"}"#));
                 assert_eq!(meta.as_deref(), Some(r#"{"trace":"abc"}"#));
                 assert_eq!(session_id.as_deref(), Some("g-1:00000001"));
-                assert_eq!(
-                    baas_session_id.as_deref(),
-                    Some("agent:main:baas-session-1")
-                );
                 assert_eq!(caller_id.as_deref(), Some("client-a"));
                 assert_eq!(title.as_deref(), Some("demo"));
                 assert!(detach);
@@ -7918,39 +7858,6 @@ mod tests {
         let rendered = err.to_string();
         assert!(rendered.contains("--timeout-ms"));
         assert!(rendered.contains("86400000"));
-    }
-
-    #[test]
-    fn test_service_invoke_baas_session_id_merges_into_meta() {
-        let meta = Some(serde_json::json!({
-            "trace": "abc",
-            "callback_target": {
-                "source": "cli"
-            }
-        }));
-
-        let merged = merge_baas_session_id_into_meta(meta, Some("agent:main:baas-session-1"))
-            .unwrap()
-            .expect("meta should exist after merge");
-
-        assert_eq!(merged["trace"], "abc");
-        assert_eq!(merged["callback_target"]["source"], "cli");
-        assert_eq!(
-            merged["callback_target"]["baas_session_id"],
-            "agent:main:baas-session-1"
-        );
-    }
-
-    #[test]
-    fn test_service_invoke_baas_session_id_creates_meta_when_absent() {
-        let merged = merge_baas_session_id_into_meta(None, Some("agent:main:baas-session-1"))
-            .unwrap()
-            .expect("meta should be created");
-
-        assert_eq!(
-            merged["callback_target"]["baas_session_id"],
-            "agent:main:baas-session-1"
-        );
     }
 
     #[test]
@@ -8129,5 +8036,14 @@ mod tests {
             body["valid_to"],
             serde_json::json!("2026-10-12T14:56:08+08:00")
         );
+    }
+}
+
+#[cfg(test)]
+mod retired_service_policy_tests {
+    use super::*;
+    #[test]
+    fn service_invoke_rejects_retired_callback_flag() {
+        assert!(Cli::try_parse_from(["bcs-cli", "service", "invoke", "--group", "g", "--baas-session-id", "old-target"]).is_err());
     }
 }

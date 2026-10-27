@@ -32,7 +32,6 @@ async fn contract(repo: &dyn SessionRepoPort) {
     let last = repo.list_running_service_after(Some(&sessions[2].id), 2).await.unwrap();
     assert_eq!(last.iter().map(|s| &s.id).collect::<Vec<_>>(), [&sessions[3].id, &sessions[4].id]);
     assert!(repo.list_running_service_after(Some(&sessions[4].id), 2).await.unwrap().is_empty());
-    repo.update_callback_status(&target.id, "not_applicable").await.unwrap();
     let next = repo.reactivate(&target.id, None).await.unwrap();
     assert!(repo.complete_running_service_activation(&target.id, target.activation_count, None, Some("old failure".into())).await.unwrap().is_none());
     let unchanged = repo.try_get(&target.id).await.unwrap().unwrap();

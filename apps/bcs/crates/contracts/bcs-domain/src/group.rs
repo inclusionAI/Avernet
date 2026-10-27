@@ -386,9 +386,6 @@ pub struct Group {
     /// Group strategy: `Chat` (default) or `ManagerWorker`.
     #[serde(default)]
     pub group_strategy: GroupStrategy,
-    /// Service-as-a-Group 配置；None = 普通协作群。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub service_spec: Option<crate::session::ServiceSpec>,
     /// 版本号（本期恒为 1，仅 schema 保留）。
     #[serde(default = "default_group_version")]
     pub version: i32,
@@ -495,7 +492,6 @@ impl Group {
             group_kind: GroupKind::Normal,
             dm_pair_key: None,
             group_strategy: GroupStrategy::Chat,
-            service_spec: None,
             version: 1,
             record_status: "active".to_string(),
             visibility: "private".to_string(),

@@ -262,7 +262,6 @@ async fn bot_app(session_group: &str, upsert_group: bool) -> (axum::Router, Temp
         input: None,
         output: None,
         error_message: None,
-        callback_status: None,
         activation_count: 1,
         message_visibility_version: 1,
         caller_principal: None,
@@ -359,7 +358,6 @@ async fn human_app_files(
         input: None,
         output: None,
         error_message: None,
-        callback_status: None,
         activation_count: 1,
         message_visibility_version: 1,
         caller_principal: None,
@@ -525,26 +523,6 @@ impl SessionManagementService for RecordingSessions {
         _participant_id: Option<&str>,
     ) -> Result<Vec<Session>, SessionUseCaseError> {
         Ok(Vec::new())
-    }
-
-    async fn count_running_service(&self, _group_id: &str) -> Result<u64, SessionUseCaseError> {
-        Ok(0)
-    }
-
-    async fn list_running_service(
-        &self,
-        _offset: u64,
-        _limit: u64,
-    ) -> Result<Vec<Session>, SessionUseCaseError> {
-        Ok(Vec::new())
-    }
-
-    async fn update_callback_status(
-        &self,
-        _session_id: &str,
-        _status: &str,
-    ) -> Result<(), SessionUseCaseError> {
-        Ok(())
     }
 
     async fn complete_if_running(

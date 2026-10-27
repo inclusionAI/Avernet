@@ -86,9 +86,8 @@ pub use relation::RelationRepoPort;
 pub use permission_profile::PermissionProfileRepoPort;
 pub use permission_request::PermissionRequestRepoPort;
 pub use session::{
-    AddSessionParticipantWithEvent, ClaimSessionCallback, CompleteSessionCallback,
-    CompleteSessionWithEvent, CreateSessionWithEvent, NewSessionParams,
-    RemoveSessionParticipantWithEvent, SessionCallbackClaim, SessionRepoPort,
+    AddSessionParticipantWithEvent, CompleteSessionWithEvent, CreateSessionWithEvent, NewSessionParams,
+    RemoveSessionParticipantWithEvent, SessionRepoPort,
     UpdateSessionParticipantMessageViewScopeWithEvent,
 };
 pub use session_file::{

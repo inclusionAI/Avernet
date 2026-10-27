@@ -2495,9 +2495,7 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                            OR \
                            (? = 1 AND session_state.session_kind = 'service_invocation' \
                             AND session_state.status = 'completed' \
-                            AND session_state.activation_count = ? \
-                            AND session_state.callback_status IN \
-                              ('succeeded', 'partial_failed', 'failed', 'not_applicable')) \
+                            AND session_state.activation_count = ?) \
                          ) \
                          AND NOT EXISTS ( \
                            SELECT 1 FROM bcs_state_machine_runs direct_child \
@@ -2529,13 +2527,11 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
         let reactivate_sql = format!(
             "UPDATE bcs_group_sessions \
              SET status = 'running', output = NULL, error_message = NULL, \
-                 callback_status = 'pending', input = ?, callback_lease_owner = NULL, \
-                 callback_lease_token = 0, callback_lease_until_ms = NULL, \
+                 input = ?, \
                  activation_count = activation_count + 1, completed_at = NULL, {} \
              WHERE ? = 1 AND env = ? AND session_id = ? \
                AND session_kind = 'service_invocation' AND status = 'completed' \
                AND activation_count = ? \
-               AND callback_status IN ('succeeded', 'partial_failed', 'failed', 'not_applicable') \
                AND EXISTS (SELECT 1 FROM bcs_state_machine_runs \
                            WHERE env = ? AND run_id = ? AND record_status = 'active')",
             self.flavor.set_modified_now(),
@@ -4269,10 +4265,6 @@ mod tests {
                 output TEXT DEFAULT NULL,
                 error_message TEXT DEFAULT NULL,
                 activation_count INTEGER NOT NULL DEFAULT 1,
-                callback_status TEXT DEFAULT 'not_applicable',
-                callback_lease_owner TEXT DEFAULT NULL,
-                callback_lease_token INTEGER DEFAULT NULL,
-                callback_lease_until_ms INTEGER DEFAULT NULL,
                 completed_at INTEGER DEFAULT NULL,
                 gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(env, session_id)
@@ -4642,8 +4634,8 @@ runtime:
         let (db, store) = sqlite_state_machine_store().await?;
         db.execute(DbStatement::with_params(
             "INSERT INTO bcs_group_sessions \
-             (env, session_id, group_id, session_kind, status, activation_count, callback_status) \
-             VALUES (?, ?, ?, 'service_invocation', 'completed', 1, 'succeeded')",
+             (env, session_id, group_id, session_kind, status, activation_count) \
+             VALUES (?, ?, ?, 'service_invocation', 'completed', 1)",
             vec![
                 DbValue::from("dev"),
                 DbValue::from("session-rerun"),
@@ -4737,7 +4729,7 @@ runtime:
         assert!(store.get_run_snapshot(&child.run_id).await?.is_some());
         let session_rows = db
             .query(DbStatement::with_params(
-                "SELECT status, activation_count, callback_status \
+                "SELECT status, activation_count \
                  FROM bcs_group_sessions WHERE env = ? AND session_id = ?",
                 vec![DbValue::from("dev"), DbValue::from("session-rerun")],
             ))
@@ -4745,7 +4737,6 @@ runtime:
         let session_row = session_rows.first().expect("reactivated session row");
         assert_eq!(db_string(session_row, "status")?, "running");
         assert_eq!(db_i32(session_row, "activation_count")?, 2);
-        assert_eq!(db_string(session_row, "callback_status")?, "pending");
         assert!(matches!(
             store.create_rerun_if_session_idle(command).await?,
             CreateStateMachineRerunOutcome::Existing(existing)

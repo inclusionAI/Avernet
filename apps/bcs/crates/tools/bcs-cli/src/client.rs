@@ -1590,6 +1590,7 @@ impl BcsClient {
     ) -> Result<CreateGroupResponse> {
         let url = format!("{}/groups", self.base_url);
         let payload = CreateGroupRequest {
+            retired_service_spec: (),
             human_mention_notify_mode: Default::default(),
             create_initial_session,
             id: options.id,
@@ -1604,7 +1605,6 @@ impl BcsClient {
             opening_message: None,
             topic: options.topic,
             group_kind: None,
-            service_spec: None,
             group_strategy: Some("state_machine".to_string()),
             originator: Some(options.driver_bot),
             collaboration_definition_yaml: Some(options.definition_yaml),
@@ -1646,6 +1646,7 @@ impl BcsClient {
         let url = format!("{}/groups", self.base_url);
 
         let payload = CreateGroupRequest {
+            retired_service_spec: (),
             human_mention_notify_mode: Default::default(),
             create_initial_session: true,
             mode: Some(mode.to_string()),
@@ -1660,7 +1661,6 @@ impl BcsClient {
             opening_message: None,
             topic: None,
             group_kind: None,
-            service_spec: None,
             group_strategy: None,
             originator: None,
             collaboration_definition_yaml: None,
@@ -1744,6 +1744,7 @@ impl BcsClient {
         let url = format!("{}/groups", self.base_url);
 
         let payload = CreateGroupRequest {
+            retired_service_spec: (),
             human_mention_notify_mode: Default::default(),
             create_initial_session,
             mode: None,
@@ -1758,7 +1759,6 @@ impl BcsClient {
             opening_message: None,
             topic: topic.map(|s| s.to_string()),
             group_kind: None,
-            service_spec: None,
             group_strategy: group_strategy.map(str::to_string),
             originator: None,
             collaboration_definition_yaml: None,

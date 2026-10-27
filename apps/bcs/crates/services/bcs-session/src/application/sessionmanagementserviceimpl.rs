@@ -88,55 +88,10 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
             .await
     }
 
-    async fn count_running_service(&self, group_id: &str) -> Result<u64, SessionUseCaseError> {
-        self.inner.count_running_service(group_id).await
-    }
-
-    async fn list_running_service(
-        &self,
-        offset: u64,
-        limit: u64,
-    ) -> Result<Vec<Session>, SessionUseCaseError> {
-        self.inner.list_running_service(offset, limit).await
-    }
-
     async fn list_running_service_after(
         &self, cursor: Option<&str>, limit: u64,
     ) -> Result<Vec<Session>, SessionUseCaseError> {
         self.inner.list_running_service_after(cursor, limit).await
-    }
-
-    async fn list_recoverable_callbacks(
-        &self,
-        now_ms: u64,
-        after_session_id: Option<&str>,
-        limit: u64,
-    ) -> Result<Vec<Session>, SessionUseCaseError> {
-        self.inner
-            .list_recoverable_callbacks(now_ms, after_session_id, limit)
-            .await
-    }
-
-    async fn update_callback_status(
-        &self,
-        session_id: &str,
-        status: &str,
-    ) -> Result<(), SessionUseCaseError> {
-        self.inner.update_callback_status(session_id, status).await
-    }
-
-    async fn claim_callback(
-        &self,
-        command: ClaimSessionCallbackCommand,
-    ) -> Result<Option<ClaimSessionCallbackOutcome>, SessionUseCaseError> {
-        self.inner.claim_callback(command).await
-    }
-
-    async fn complete_callback(
-        &self,
-        command: CompleteSessionCallbackCommand,
-    ) -> Result<bool, SessionUseCaseError> {
-        self.inner.complete_callback(command).await
     }
 
     async fn complete_if_running(

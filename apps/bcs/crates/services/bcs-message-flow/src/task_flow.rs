@@ -346,7 +346,7 @@ pub async fn handle_task_complete(
             crate::bot_event_actor(&cmd.bot_id),
         )
         .await?;
-        complete_service_session_if_needed(flow, &group, &scope.group_id, status, &cmd.payload)
+        complete_service_session_if_needed(flow, &scope.group_id, status, &cmd.payload)
             .await?
     };
     log_task_complete(

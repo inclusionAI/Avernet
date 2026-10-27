@@ -26,8 +26,7 @@ use bcs_service_api::port::repo::{AppendEventRecord, MessageRepoError, MessageRe
 use bcs_service_api::port::{EventRecordError, EventRecordFactoryPort, NewEvent};
 use bcs_service_api::{
     AuthenticatedHumanCaller, BotDeliveryCommand, BotDeliveryPort, BotDeliveryResult,
-    BotDeliveryTarget, BotRunContext, BotRunContextPort, CallbackChannelConfig, CallbackConfig,
-    ChatEventState, CollaborationEventRepoPort, CollaborationRuntimeError,
+    BotDeliveryTarget, BotRunContext, BotRunContextPort, ChatEventState, CollaborationEventRepoPort, CollaborationRuntimeError,
     CollaborationRuntimeService, ConfigureGroupRuntimeCommand, CreateStateMachineRerun,
     CreateStateMachineRerunOutcome, DefinitionYamlSource, FrontendDeliveryCommand,
     FrontendDeliveryPort, FrontendDeliveryResult, FrontendDeliveryTarget, GroupCoreService,
@@ -36,7 +35,7 @@ use bcs_service_api::{
     HumanResponseSource, HumanRunAccessCommand, JudgeDecision, JudgeEvaluatorPort, JudgeRequest,
     ListPendingHumanNodesCommand, PatchGroupCollaborationDefinitionCommand, ProviderRunTransport,
     RerunStateMachineCommand, RespondHumanNodeCommand, RespondHumanNodeOutcome, ServiceError,
-    ServiceResult, ServiceSpec, SessionChannelDeliveryOutcome, SessionChannelOutboundPort,
+    ServiceResult, SessionChannelDeliveryOutcome, SessionChannelOutboundPort,
     SessionManagementService, SessionStateMachinePermissionCommand,
     StartSessionStateMachineRunCommand, StartStateMachineRunCommand,
     StateMachineDefinitionRepoPort, StateMachineNodeSubStatus, StateMachineResultPublishCommand,
@@ -3185,21 +3184,9 @@ async fn message_less_final_fails_attempt_and_schedules_retry() {
 }
 
 #[tokio::test]
-async fn state_machine_completion_dispatches_service_callback() {
+async fn state_machine_completion_finishes_service_without_callback() {
     let group = Arc::new(GroupStore::new());
-    let mut seeded_group = test_group();
-    seeded_group.service_spec = Some(ServiceSpec {
-        callback_config: Some(CallbackConfig {
-            channels: vec![CallbackChannelConfig::Baas {
-                base_url: "http://127.0.0.1:0".to_string(),
-                api_key: "sk-test".to_string(),
-                bot_id: "default:callback-test".to_string(),
-                metadata: None,
-            }],
-        }),
-        timeout_seconds: None,
-        max_concurrency: None,
-    });
+    let seeded_group = test_group();
     group.upsert(seeded_group).await.expect("seed group");
     let sessions = test_sessions();
     let store = Arc::new(MemoryCollaborationStore::new());
@@ -3235,7 +3222,6 @@ async fn state_machine_completion_dispatches_service_callback() {
         .await
         .expect("get session")
         .expect("session");
-    assert_eq!(initial_session.callback_status.as_deref(), Some("pending"));
 
     let delivery_run_id = delivery.commands.lock().await[0].run_id.clone();
     complete_with_text(
@@ -3246,7 +3232,11 @@ async fn state_machine_completion_dispatches_service_callback() {
     )
     .await;
 
-    wait_for_callback_status(&sessions, &started.view.run.session_id, "failed").await;
+    let completed = sessions.get(&started.view.run.session_id).await.unwrap().unwrap();
+    assert_eq!(initial_session.status, SessionStatus::Running);
+    assert_eq!(completed.status, SessionStatus::Completed);
+    assert!(completed.completed_at.is_some());
+
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -5556,30 +5546,6 @@ async fn complete_with_text(
         })
         .await
         .expect("handle final")
-}
-
-async fn wait_for_callback_status(
-    sessions: &Arc<SessionManagementServiceImpl>,
-    session_id: &str,
-    expected: &str,
-) {
-    let mut last = None;
-    for _ in 0..100 {
-        let session = sessions
-            .get(session_id)
-            .await
-            .expect("get session")
-            .expect("session");
-        last = session.callback_status.clone();
-        if session.callback_status.as_deref() == Some(expected) {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
-    panic!(
-        "callback_status did not become {expected}; last status was {:?}",
-        last
-    );
 }
 
 fn join_yaml() -> String {

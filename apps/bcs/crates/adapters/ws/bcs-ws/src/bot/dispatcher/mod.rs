@@ -19,7 +19,7 @@ use async_trait::async_trait;
 use bcs_protocol::{BcsFrame, RequestFrame};
 use bcs_service_api::{
     BotRunContextPort, BotRuntimeConnectionService, CollaborationRuntimeService,
-    GroupDispatchContextPort, MessageFlowService, SessionCallbackDispatchPort,
+    GroupDispatchContextPort, MessageFlowService,
     SessionManagementService, SystemMessageService,
 };
 use serde::Deserialize;
@@ -90,7 +90,6 @@ pub struct BotDispatchState {
     pub task_callback: Option<Arc<dyn TaskCallbackHook>>,
     pub session_management: Arc<dyn SessionManagementService>,
     pub group_dispatch: Arc<dyn GroupDispatchContextPort>,
-    pub callback_dispatch: Arc<dyn SessionCallbackDispatchPort>,
     pub system_message: Option<Arc<dyn SystemMessageService>>,
     pub coordination_processed: Arc<Mutex<HashMap<String, u64>>>,
     pub agent_credential_backfill: Option<Arc<dyn super::AgentCredentialBackfillPort>>,
@@ -176,10 +175,6 @@ async fn handle_session_complete(
         .await
     {
         Ok(Some(session)) => {
-            state
-                .callback_dispatch
-                .maybe_dispatch(session.clone(), state.session_management.clone())
-                .await;
             send_ok(
                 tx,
                 req_id,

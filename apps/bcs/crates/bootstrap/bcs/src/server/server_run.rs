@@ -259,17 +259,6 @@ impl BcsServer {
         )
     }
 
-    fn spawn_callback_recovery_scanner(&self) -> tokio::task::JoinHandle<()> {
-        crate::callback_recovery_scanner::spawn(
-            self.state.leader_election.clone(),
-            self.state.services.session_management.clone(),
-            self.state.services.group.clone(),
-            crate::callback_recovery_scanner::DEFAULT_SCAN_INTERVAL,
-            crate::callback_recovery_scanner::DEFAULT_BATCH_SIZE,
-            self.state.outbound_url_guard.clone(),
-        )
-    }
-
     /// Run the server with graceful shutdown support.
     pub async fn run(self) -> Result<()> {
         self.run_with_listener(None).await
@@ -289,7 +278,6 @@ impl BcsServer {
         let ws_leadership = crate::ws_leadership::start(self.state.clone()).await;
         let _state_machine_timeout_handle = self.spawn_state_machine_timeout_scanner();
         let state_machine_progression_handle = Arc::new(Mutex::new(self.spawn_state_machine_progression_scanner()));
-        let _callback_recovery_handle = self.spawn_callback_recovery_scanner();
 
         // Spawn async chat-run TTL cleanup loop.
         {
@@ -438,7 +426,6 @@ impl BcsServer {
         let ws_leadership = crate::ws_leadership::start(self.state.clone()).await;
         let _state_machine_timeout_handle = self.spawn_state_machine_timeout_scanner();
         let state_machine_progression_handle = self.spawn_state_machine_progression_scanner();
-        let _callback_recovery_handle = self.spawn_callback_recovery_scanner();
 
         let app = self.build_router().await?;
 

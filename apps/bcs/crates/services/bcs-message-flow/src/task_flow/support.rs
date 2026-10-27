@@ -69,14 +69,10 @@ pub(super) async fn complete_session_target(
 
 pub(super) async fn complete_service_session_if_needed(
     flow: &BcsMessageFlow,
-    group: &Group,
     group_id: &str,
     status: &str,
     payload: &Value,
 ) -> ServiceResult<Option<Session>> {
-    if group.service_spec.is_none() {
-        return Ok(None);
-    }
     let Some(session_management) = flow.session_management.as_ref() else {
         return Ok(None);
     };
