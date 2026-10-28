@@ -128,6 +128,11 @@ def _bind_bot_service(
                 binder.bind(AuthPlugin, to=auth)
             if auth_rel is not None:
                 binder.bind(AuthRelationshipPlugin, to=auth_rel)
+            from agentclaw.community.plugin_api.bot_create_extension import (
+                BotCreateExtension as _BCE,
+                NoopBotCreateExtension as _NoopBCE,
+            )
+            binder.bind(_BCE, to=_NoopBCE)
             if skill_set_factory is not None:
                 binder.bind(SkillSetServiceFactory, to=skill_set_factory)
             if policy_service is not None:

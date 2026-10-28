@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Mapping
 
 from agentclaw.community.core.bot_management.create_context import (
     BotCreateContext,
@@ -63,6 +63,7 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.passport import PassportError
 
 if TYPE_CHECKING:
+    from agentclaw.community.plugin_api.bot_create_extension import BotCreateExtension
     from agentclaw.community.core.bot_management.services.bot_service import BotService
     from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
     from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
@@ -387,6 +388,8 @@ def create_bot_with_authorization(
     passport_plugin: PassportPlugin,
     auth_rel_plugin: AuthRelationshipPlugin,
     skill_set_factory: SkillSetServiceFactory,
+    create_extension: "BotCreateExtension | None" = None,
+    request: Mapping[str, Any] | None = None,
 ) -> Created | AuthPending:
     """Run the create + Passport-authorization flow for an already-allocated id.
 
@@ -402,8 +405,32 @@ def create_bot_with_authorization(
     surface does not pass it. Remove once the internal path stops needing it.
     """
 
-    # Creation policy is evaluated here, rather than in either transport, so no
+    # A bound lifecycle extension may reinterpret the request first (identity
+    # fields, provisioning split, pre-issued identity). Opaque to this layer;
+    # everything it decides runs here through the flow's OWN contracts.
+    override = None
+    if create_extension is not None:
+        override = create_extension.resolve_create(
+            bot_id=bot_id, user_id=user_id,
+            request=request if request is not None else {},
+        )
+        if override is not None and override.bot_id:
+            # Continue under the id the extension's own arbitration decided;
+            # the caller's id was allocation only, nothing is written yet.
+            bot_id = override.bot_id
+
+        # Creation policy is evaluated here, rather than in either transport, so no
     # caller can bypass template/combination rules before Passport or writes.
+    if override is not None:
+        spec = replace(
+            spec,
+            template_config=(
+                dict(override.template_config)
+                if override.template_config is not None else spec.template_config
+            ),
+            template_type=override.template_type or spec.template_type,
+            engine_type=override.engine_type or spec.engine_type,
+        )
     spec = _prepare_create(spec=spec, context=context, bot_service=bot_service)
 
     # Validate the name up front so an invalid one never reaches Passport or
@@ -429,54 +456,63 @@ def create_bot_with_authorization(
         space_quota=context.space_quota,
     )
 
-    passport_result = _apply_passport(
-        passport_plugin,
-        bot_id=bot_id,
-        user_id=user_id,
-        bot_name=bot_name,
-        spec=spec,
-        mcp_codes=_get_bot_mcp_codes(
-            skill_set_factory, user_id, bot_id, spec.entity_id, spec.entity_type,
-            engine_type=spec.engine_type,
-        ),
-        cli_items=get_default_cli_items(
-            spec.engine_type,
-            spec.template_type,
-            ext_info={"template_config": spec.template_config}
-            if spec.template_config is not None
-            else None,
-        ),
-        use_first_passport=use_first_passport,
-    )
-
-    passport_token = passport_result.get("token") if passport_result else None
-
-    # No token yet → authorization pending; nothing is created.
-    if not passport_token:
-        iframe_url = passport_result.get("iframe_url") if passport_result else None
-        redirect_url = passport_result.get("redirect_url") if passport_result else None
-        # "Pending" is only a real state if the caller has somewhere to go. With
-        # neither a token nor a handle — including the ``None`` result the plugin
-        # contract explicitly permits — the apply did not succeed, and reporting
-        # it as pending hands back a dead end that is indistinguishable from a
-        # genuine wait.
-        if not iframe_url and not redirect_url:
-            raise PassportError(
-                f"Passport returned no token and no authorization URL for bot {bot_id}"
-            )
-        return AuthPending(
+    agent_code: str | None = None
+    if override is not None and override.preissued is not None:
+        # The identity already exists (minted in a flow the extension ran
+        # earlier); re-applying would mint a second one. Skip straight to the
+        # create step with the agent code the extension hands over — nothing
+        # external is touched on this path.
+        passport_token = ""
+        agent_code = override.preissued["agent_code"]
+    else:
+        passport_result = _apply_passport(
+            passport_plugin,
             bot_id=bot_id,
-            iframe_url=iframe_url,
-            redirect_url=redirect_url,
+            user_id=user_id,
+            bot_name=bot_name,
+            spec=spec,
+            mcp_codes=_get_bot_mcp_codes(
+                skill_set_factory, user_id, bot_id, spec.entity_id, spec.entity_type,
+                engine_type=spec.engine_type,
+            ),
+            cli_items=get_default_cli_items(
+                spec.engine_type,
+                spec.template_type,
+                ext_info={"template_config": spec.template_config}
+                if spec.template_config is not None
+                else None,
+            ),
+            use_first_passport=use_first_passport,
         )
 
-    # A completed Passport identity must include the identifier needed for the
-    # owner relationship. Fail before creating the bot rather than silently
-    # acknowledging a bot that its owner cannot reach through that relationship.
-    agent_code = _require_agent_code(
-        passport_result.get("agent_code") if passport_result else None,
-        bot_id=bot_id,
-    )
+        passport_token = passport_result.get("token") if passport_result else None
+
+        # No token yet → authorization pending; nothing is created.
+        if not passport_token:
+            iframe_url = passport_result.get("iframe_url") if passport_result else None
+            redirect_url = passport_result.get("redirect_url") if passport_result else None
+            # "Pending" is only a real state if the caller has somewhere to go. With
+            # neither a token nor a handle — including the ``None`` result the plugin
+            # contract explicitly permits — the apply did not succeed, and reporting
+            # it as pending hands back a dead end that is indistinguishable from a
+            # genuine wait.
+            if not iframe_url and not redirect_url:
+                raise PassportError(
+                    f"Passport returned no token and no authorization URL for bot {bot_id}"
+                )
+            return AuthPending(
+                bot_id=bot_id,
+                iframe_url=iframe_url,
+                redirect_url=redirect_url,
+            )
+
+        # A completed Passport identity must include the identifier needed for the
+        # owner relationship. Fail before creating the bot rather than silently
+        # acknowledging a bot that its owner cannot reach through that relationship.
+        agent_code = _require_agent_code(
+            passport_result.get("agent_code") if passport_result else None,
+            bot_id=bot_id,
+        )
 
     # Token present → create the bot inline.
     result = create_authorized_bot(
@@ -503,8 +539,18 @@ def create_bot_with_authorization(
             "cookie": cookie,
             "space_id": spec.space_id,
             "space_quota": context.space_quota,
+            "provision": (
+                override.provision
+                if override is not None and override.provision is not None
+                else True
+            ),
         },
     )
+
+    if override is not None:
+        # Only a request the extension resolved enters its post-registration
+        # bookkeeping; unrecognized requests run the unextended path.
+        create_extension.after_bot_registered(bot_id=bot_id, user_id=user_id)
 
     return Created(
         bot=result,
@@ -819,6 +865,8 @@ def complete_bot_authorization(
     passport_plugin: PassportPlugin,
     auth_rel_plugin: AuthRelationshipPlugin,
     provision: bool = True,
+    create_extension: "BotCreateExtension | None" = None,
+    request: Mapping[str, Any] | None = None,
 ) -> AuthStatusResult:
     """Poll Passport authorization for a pending bot; complete creation on ISSUED.
 
@@ -833,6 +881,25 @@ def complete_bot_authorization(
     ``cookie`` carries the browser session into the service layer — **bad
     practice**, see :func:`create_bot_with_authorization`; internal path only.
     """
+
+    # A bound lifecycle extension may reinterpret the completion first; opaque
+    # to this layer. It resolves its own state by bot_id — nothing is echoed.
+    override = None
+    if create_extension is not None:
+        override = create_extension.resolve_create(
+            bot_id=bot_id, user_id=user_id,
+            request=request if request is not None else {},
+        )
+    if override is not None:
+        spec = replace(
+            spec,
+            template_config=(
+                dict(override.template_config)
+                if override.template_config is not None else spec.template_config
+            ),
+            template_type=override.template_type or spec.template_type,
+            engine_type=override.engine_type or spec.engine_type,
+        )
 
     # Re-run the same policy on authorization completion because callers echo
     # the creation attributes and must not bypass the original create contract.
@@ -875,9 +942,16 @@ def complete_bot_authorization(
             "template_config": spec.template_config,
             "cookie": cookie,
             "space_id": spec.space_id,
-            "provision": provision,
+            "provision": (
+                override.provision
+                if override is not None and override.provision is not None
+                else provision
+            ),
             "space_quota": context.space_quota,
         },
     )
+
+    if override is not None:
+        create_extension.after_bot_registered(bot_id=bot_id, user_id=user_id)
 
     return AuthStatusResult(status=AuthStatus.ISSUED, bot=result)

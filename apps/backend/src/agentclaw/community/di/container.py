@@ -50,6 +50,7 @@ from agentclaw.community.di.modules.manifest_fetch_module import ManifestFetchMo
 from agentclaw.community.di.modules.bot_public_module import BotPublicModule
 from agentclaw.community.di.modules.bot_public_risk_module import BotPublicRiskModule
 from agentclaw.community.di.modules.bot_quota_module import BotQuotaModule
+from agentclaw.community.di.modules.bot_extension_module import BotExtensionModule
 from agentclaw.community.di.modules.task_module import TaskModule
 from agentclaw.community.di.modules.acli_clis_module import AcliClisModule
 from agentclaw.community.di.modules.caller_identity_module import CallerIdentityModule
@@ -205,6 +206,7 @@ def build_injector(
         DigitalEmployeeModule(),
         AgentSwarmModule(),
         BotQuotaModule(),
+        BotExtensionModule(),
         ManifestFetchModule(),
         # The content store binds after the module that parses its blob root
         # (cfg.BotConfigManifestConfig) and before its two consumers.

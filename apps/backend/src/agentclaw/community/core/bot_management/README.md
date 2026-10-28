@@ -111,6 +111,7 @@ internal_dependencies:
   - agentclaw.community.utils.env_utils
   - agentclaw.community.utils.secret_utils
   - agentclaw.community.core.access.policy_service_protocol  # Service API Protocol consumed by this module
+  - agentclaw.community.plugin_api.bot_create_extension  # the businessless create/delete lifecycle seam the flow drives
 ```
 
 ### Change impact

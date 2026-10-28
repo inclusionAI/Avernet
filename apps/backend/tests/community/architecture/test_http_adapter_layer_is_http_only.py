@@ -269,7 +269,7 @@ _CORE_SERVICE_NAMES_OK: frozenset[str] = frozenset({
     "BotLimitExceededError", "BotNameExistsError", "BotNameInvalidError",
     "BotOperationNotAllowedError",
     "DefaultBotTeclawNotAllowedError",
-    "DeviceAllocationError", "DeviceLimitError",
+    "DeviceAllocationError", "DeviceLimitError", "TemplateFactoryError",
     # Multi-instance entry-resolution errors raised by DeviceServiceRouter and
     # translated to HTTP by the devices router (§1/§2/§3):
     "BindingNotFoundError", "BotPublishNotFoundError",
