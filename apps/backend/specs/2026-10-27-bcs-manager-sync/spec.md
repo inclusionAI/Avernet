@@ -13,6 +13,26 @@ recorded in the plan); the operational procedure is
 `apps/backend/docs/bot-manager-sync-operations.md`. Nothing here overrides an
 accepted ADR or the architecture rules.
 
+> **Revision (2026-10-28, direct delivery):** the delivery path changed on
+> this branch. The syncer no longer authenticates through the gateway's
+> app registry (that form's premise — a gateway bearer the gateway would
+> resolve into a trusted-App principal — was contractually refuted and
+> removed). It now PUTs **directly to the BCS origin** with a self-signed
+> `X-Avernet-Principal` minting this component's own service identity
+> (`core/gateway_principal/service_principal.py`: `iss=backend`,
+> `aud=bcs`, `kid=bare`, short-lived, one app principal — the `backend`
+> service — scoped to the snapshot's own backend tenant) using the SAME
+> shared signing key and `SecretNamesConfig.gateway_principal_signing_key`
+> conventions every other principal flow uses. The signing side stays
+> inside the signer package's minting boundary: self-identity only, no
+> caller-claims oracle. Production prerequisites therefore read:
+> **BCS-side issuers whitelist containing `backend`** (with the shared
+> verification key distributed per the existing gateway_principal
+> conventions) **+ `trusted_apps(app=backend, tenant=<the backend
+> tenant>, actions=[managers:sync])` registered on BCS**. §1, §2 deploy
+> order and §11.3 below carry the corrected form; the §8/§11.2 gate
+> numbers are historical run records of the branch and stay verbatim.
+
 ## 1. Implementation contract (what shipped)
 
 - **Service API** — `agentclaw.community.api.bot_manager_sync.BotManagerSyncProtocol`
@@ -33,9 +53,11 @@ accepted ADR or the architecture rules.
   never raw response bodies) and `plugin_api/manager_sync_coordination.py`
   (`ManagerSyncCoordinator`: atomic claim/begin/finish/release,
   owner-hold markers, exact-attempt CAS clear, generation sentinel).
-- **Plugins** — `plugins/community/bcs_managers.py` (one PUT per attempt via
-  the Gateway origin with the per-tenant trusted-App bearer), local fakes in
-  `plugins/local/`, and `plugins/community/manager_sync_coordination.py`
+- **Plugins** — `plugins/community/bcs_managers.py` (one PUT per attempt
+  direct to the BCS origin, authenticated with a self-signed
+  `X-Avernet-Principal` minted per send from the composition-root-provided
+  minter — no Bearer, no gateway hop), local fakes in `plugins/local/`, and
+  `plugins/community/manager_sync_coordination.py`
   (Redis-coordinator over atomic Lua: strict leases, TTL-less in-flight
   markers, generation verification) and `plugins/community/manager_sync_scripts.py`.
 - **Triggers** — the existing collaborator callback plus post-commit hints
@@ -48,17 +70,22 @@ accepted ADR or the architecture rules.
   space-affected bots, repair paging). **No schema, no task persistence, no
   `ac_task_queue` use, no `Bot.ext` sync state.**
 - **DI/config** — `di/bot_manager_sync_config.py` (`bot_manager_sync` block;
-  strictly validated; **default off**; the block's six keys are the whole
-  surface), `di/modules/bot_manager_sync_module.py` (stack + coordinator +
-  repair + lifecycle bindings; disabled deployments resolve zero-resource
-  twins), context-boundary READMEs updated for every new boundary.
+  strictly validated; **default off**; the block's keys are the whole
+  surface — auth is NOT one of them), `di/modules/bot_manager_sync_module.py`
+  (stack + coordinator + repair + lifecycle bindings; disabled deployments
+  resolve zero-resource twins), context-boundary READMEs updated for every
+  new boundary.
 
 ## 2. Release decision record (design §12 — verbatim decision)
 
 - **Deploy order:** record the release Backend build SHA and the deployed dev
   BCS version independently → confirm the coordination topology and the Redis
-  **non-eviction guarantee** → configure and verify the trusted App
-  (`managers:sync`), Human registration and the target Bot's stable identity →
+  **non-eviction guarantee** → configure and verify the BCS-side delivery
+  prerequisites (issuers whitelist containing `backend`, the shared
+  verification-key distribution per the existing gateway_principal
+  conventions, and the `trusted_apps(app=backend, tenant=<backend tenant>,
+  actions=["managers:sync"])` rule), Human registration and the target Bot's
+  stable identity →
   deploy the Backend with the feature **default-off** → verify shared
   coordination and unknown-result recovery → run the first sync + permission
   acceptance for a controlled Bot → only then widen notifications.
@@ -308,9 +335,11 @@ The exact tails of every long/background gate run of §8 live in
 This addendum records the singlebox enablement of the feature in its
 **single-replica downgrade form** (`coordination_mode: memory`): the
 in-process `MemoryManagerSyncCoordinator` (the same contract the conformance
-suites pin) with the real trusted-App Gateway delivery. It changes nothing in
-§1–§10: production stays `redis` + shared non-evicting Redis (§3), and the
-external live suite (§10) remains the ONLY live feature acceptance.
+suites pin) with the real self-signed direct-BCS delivery (2026-10-28
+revision; earlier runs used the removed gateway-forwarding form). It changes
+nothing in §1–§10: production stays `redis` + shared non-evicting Redis
+(§3), and the external live suite (§10) remains the ONLY live feature
+acceptance.
 
 ### 11.1 What is now measured on singlebox that was not before
 
@@ -356,7 +385,8 @@ comment records exactly that boundary.
   `tests/community/contracts/test_manager_sync_coordination.py`:
   40 passed.
 - Live stack: backend startup shows `[MANAGER-SYNC-LIFECYCLE] started` with
-  zero `syncer unavailable` reasons; six real backend-driven rounds during
+  zero `syncer unavailable` reasons (this head's run: §11.5); six real
+  backend-driven rounds during
   `tests/community/acceptance/bot_collaborator` (12 passed), each forwarded
   by the gateway to the dev BCS managers endpoint (200 envelopes).
 - Unified singlebox coverage (`singlebox/ci/singlebox_coverage.sh` +
@@ -381,24 +411,70 @@ comment records exactly that boundary.
   acceptance junit/log, summary/dashboard. Full numbers and terminal
   output in `.superpowers/sdd/pr-3208-review-fixes/fix-C2-singlebox-report.md`.
 
-### 11.3 The singlebox trusted-App chain (all dev-only literals, marked)
+### 11.3 The singlebox delivery chain (all dev-only literals, marked)
+
+Rewritten by the 2026-10-28 direct-delivery revision; the earlier
+gateway-seeded `singlebox-manager-sync` app chain was removed with it
+(the gateway's `local_dev_apps` section no longer carries any entry, and
+the backend's dev App credential is gone everywhere).
 
 - Backend config: `bot_manager_sync.enabled: true`, `coordination_mode:
   memory`, `env: dev` (= `get_current_env()` under `SERVER_ENV=dev` — the
-  env singlebox Bots are created with), `gateway_base_url:
-  http://127.0.0.1:8889`, tenant `teamclaw` → secret name
-  `singlebox_manager_sync_app_credential`.
-- Credential: the deterministic dev key `SingleboxManagerSyncDevAppKey000`
-  (32-char base62 — the verifier's exact shape), exported by
-  `singlebox/modules/backend.sh` into the SecretResolver and seeded into the
-  local gateway's in-memory `avernet_application` registry from
-  `user_config.local_dev_apps` (config-gated: an empty list — every
-  production config — seeds nothing; the plugin's PBKDF2 prefix+hash path is
-  the production one).
-- BCS: `[bot_authority] trusted_apps` rule `singlebox-manager-sync` /
-  `teamclaw` / `["managers:sync"]` in `bcs-config-local.toml` — byte-exact
-  app+tenant scope, deny-everything default for every other App (verified
-  live: unknown app name → 403, the sync-only rule denies ownership reads).
+  env singlebox Bots are created with), `bcs_base_url:
+  http://127.0.0.1:21000` (the local BCS origin itself — the authority
+  PUT goes straight there, no gateway hop).
+- Credential: the shared gateway-principal signing key — the same dev
+  literal `avernet-dev-signing-key-NOT-FOR-PROD` the gateway signs with
+  (gateway.sh), BCS verifies with (bcs.sh), and the Backend now both
+  verifies `/openapi/v1` principals with AND mints its own direct-BCS
+  service principals with (exported under
+  `AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE` by
+  `singlebox/modules/backend.sh`; clearly-marked synthetic stand-in,
+  overridable from `singlebox/.env.local`). A deployment whose key does
+  not resolve binds the feature unavailable
+  (`principal-signing-key-required`), never an unsigned send.
+- BCS: `[gateway_principal]` already accepts `iss=backend` for `aud=bcs`
+  (`issuers = ["gateway", "backend"]`), and the
+  `[bot_authority] trusted_apps` rule in `bcs-config-local.toml` is now
+  `backend` / `teamclaw` / `["managers:sync"]` — byte-exact app+tenant
+  scope, deny-everything default for every other App. The principal the
+  Backend mints names exactly that identity: one `app` principal,
+  `app_name=backend`, tenant = the snapshot's backend tenant.
 - `memory` is refused outside the dev family: a pre/prod deployment asking
   for it raises a structural config error (pinned by test), never a silent
   degraded build.
+
+### 11.5 Re-verification after the direct-delivery revision (2026-10-28, this head)
+
+Full stack `./singlebox/singlebox.sh start all` after the revision (a stale
+bot-identity runtime from the earlier runs produced the known one-time
+`valid bot token is required` onboard refusals; resolved the prescribed
+`clean bcs_bots` reset, then a clean 0-ERROR start):
+
+- Enablement (backend.log, PID 165638): `[MANAGER-SYNC] enabled stack
+  resolving (singlebox memory mode — single-replica dev downgrade, real
+  direct-BCS delivery): target=singlebox-dev-manager-sync env=dev
+  bcs=http://127.0.0.1:21000 generation=provided` +
+  `[MANAGER-SYNC-LIFECYCLE] started`, and **no** `syncer unavailable`
+  line for this boot.
+- Acceptance `tests/community/acceptance/bot_collaborator`
+  (RUN_ACCEPTANCE=1, reuse-live literals): **12 passed**; three live
+  rounds during the run end `send_drift` (`expected=1 reported=0`,
+  bot_pk 4/5/6) — the confirmed-envelope outcome, which is only reachable
+  through a verified HTTP 200 apply response. BCS's own log shows the PUTs
+  arriving directly
+  (`route=/api/v1/collaboration/bots/{bot_id}/managers method=PUT` →
+  `authority_sync_managers … returning zeros` for the never-registered
+  colon identities → `status=200 outcome="success"`), and the gateway log
+  of this boot contains **zero** managers PUTs (the pre-revision boot's
+  40+ forward entries are what the removed form looked like).
+- Direct effect proof (real register chain through the gateway, then the
+  PUT straight to 127.0.0.1:21000 with a principal minted by the
+  backend's own `mint_service_app_principal` under the dev shared key):
+  `PUT managers ["d2002"] on ownership-initialized bot
+  bot_bdb28ad9 → {"code":20000,"data":{"added":1,"removed":0,"total":1}}`,
+  owner read-back `items:["d2002"]` with `owner_actor_id human_d2001`;
+  a same-key token naming an unregistered app → 403
+  `bot_authority_operator_forbidden`; the removed Bearer form against BCS
+  directly → 401. The two proof bots were deleted and the stack stopped
+  and verified stopped afterwards.

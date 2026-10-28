@@ -1,5 +1,17 @@
 # Bot manager sync — operations runbook (backfill, compensation, controlled recovery)
 
+> **Revision (2026-10-28, direct delivery — THE sanctioned form):** the
+> syncer delivers by PUTting **directly to the BCS origin** under a
+> self-signed `X-Avernet-Principal` that names this Backend component's own
+> service identity (`iss=backend`, `aud=bcs`, one `backend` app principal
+> scoped to the Backend tenant of the snapshot). There is no gateway hop and
+> no per-tenant bearer. The prerequisites below that used to name the
+> gateway's trusted-App credential registry now read: the shared principal
+> signing key resolves under the existing gateway_principal conventions
+> (§2.1), and BCS registers the `backend` issuer + the
+> `trusted_apps(app=backend, tenant=<backend tenant>,
+> actions=["managers:sync"])` rule (§2.2).
+
 Backend→BCS bot manager set sync: what an approved operator runs for the
 **first backfill**, for **targeted compensation** of dropped work, and for
 **controlled recovery** of stuck markers — and the proofs each step must leave
@@ -64,13 +76,15 @@ Concrete steps:
    the container binds the zero-resource `DisabledManagerSyncRepair` twin:
    `request_bot` answers `DISABLED`, and `request_page` /
    `clear_confirmed_attempt` raise `RuntimeError` with a stable reason word
-   (`disabled`, `shared-redis-required`, `missing-credential:...`). That is
+   (`disabled`, `shared-redis-required`, `principal-signing-key-required`).
+   That is
    the honest answer — there is no coordinator to CAS against in that
    posture, and no verdict may be fabricated. Fix the posture (config /
-   credential / Redis) before continuing; do not work around the twin.
+   signing key / Redis) before continuing; do not work around the twin.
 4. Only then run §2–§6. Nothing in the maintenance environment exposes the
-   service over HTTP, and the Gateway/App credential used by the delivery
-   path stays inside the deployment's secret store.
+   service over HTTP, and the shared principal signing key used to mint
+   the delivery's service principal stays inside the deployment's secret
+   store.
 
 ## 2. Verify the actors before the first send
 
@@ -78,13 +92,21 @@ Run this checklist before the **first backfill** of a new deployment and
 after any credential / scope / registration change. Every item needs
 **server-side evidence**, not "the config file says so":
 
-1. **Gateway App credential** — the `app_secret_names_by_tenant` names in the
-   `bot_manager_sync` config block resolve through the SecretResolver and are
-   non-empty. Verify presence/rotation state; never print the value.
-2. **BCS app + tenant scope** — the trusted App registered on the BCS side
-   belongs to exactly the scope the deployment targets: the same
-   `target_id`, and the tenant matching `avernet_tenant` of the keys being
-   synced. A credential scoped to another tenant must never be used to touch it.
+1. **Shared principal signing key** — `SecretNamesConfig.gateway_principal_signing_key`
+   resolves through the SecretResolver and is non-empty. This is the SAME
+   named secret the `/openapi/v1` verifier init reads, and the delivery path
+   mints its self-signed `backend` service principal from the value it
+   resolves; a deployment where it misses keeps the whole feature
+   unavailable (`principal-signing-key-required`). Verify presence/rotation
+   state; never print the value, and remember rotation requires a restart of
+   every side of the contract (gateway, backend, BCS).
+2. **BCS issuer + app + tenant scope** — the deployed BCS is configured to
+   trust the `backend` issuer for `aud=bcs` (its gateway_principal issuers
+   list contains `backend`), and its `[[bot_authority.trusted_apps]]` rule
+   names exactly the scope the deployment targets: `app = "backend"` (byte-exact),
+   the tenant matching `avernet_tenant` of the keys being
+   synced, and `actions = ["managers:sync"]`. A rule scoped to another
+   tenant can never authorize a snapshot outside it — BCS denies by default.
 3. **Bot registration and version** — the Bot is registered on BCS with a
    known version. Registration evidence comes from the BCS registry itself,
    not from the Backend's own tables.
@@ -275,7 +297,8 @@ for the gate table and the NOT-RUN discipline):
    They prove the contract the Backend codes against; they cannot prove which
    version an endpoint actually runs — deployment verification is separate
    and uses the §2 checklist.
-4. **Deployment postures:** §2's actor checklist verified (App scope, tenant
+4. **Deployment postures:** §2's actor checklist verified (shared signing
+   key distribution, BCS `backend` issuer + trusted_apps rule, tenant
    mapping, registration, stable identity, Human registration, owner
    alignment), §3's generation init + non-eviction guarantee confirmed, and
    the first-backfill sweep's per-key outcomes (§6) captured with the empty
@@ -313,21 +336,24 @@ Singlebox runs the manager sync in its **single-replica downgrade form**:
   downgrade is valid *only* because singlebox has exactly one Backend
   process and always whole-stack-restarts — that is the single-writer
   guarantee for this dev stack.
-- **Delivery stays the real production path unchanged**: the trusted-App
-  HTTP plugin PUTs through the local Gateway (`gateway_base_url`), the
-  gateway resolves the dev App credential against its app registry, and the
-  dev BCS applies its `[bot_authority] trusted_apps` scope rule
-  (`managers:sync`, byte-exact app + tenant). Credential availability
-  checks are identical to the redis mode — a missing credential keeps the
-  feature unavailable with a diagnostic, never an empty-string fake.
-- **Credentials**: the dev App is the deterministic `singlebox-manager-sync`
-  registry entry the gateway seeds from `user_config.local_dev_apps`
-  (apps/gateway/configs/application-local.yaml; tenant `teamclaw`). The
-  Backend presents the same literal through the SecretResolver
-  (`singlebox_manager_sync_app_credential`, exported by
-  `singlebox/modules/backend.sh`). Both ends are clearly-marked
-  NOT-FOR-PROD dev stand-ins, overridable together from
-  `singlebox/.env.local`.
+- **Delivery stays the real production path unchanged**: the self-signed
+  HTTP plugin PUTs **directly to the local BCS origin** (`bcs_base_url`,
+  http://127.0.0.1:21000 — direct mode is the sanctioned form on every
+  stack), carrying an `X-Avernet-Principal` the Backend minted for its own
+  `backend` service identity, and the dev BCS applies its
+  `[bot_authority] trusted_apps` scope rule (`managers:sync`, byte-exact
+  app + tenant). The signing-key availability check is identical to the
+  redis mode — a missing key keeps the feature unavailable with a
+  diagnostic (`principal-signing-key-required`), never an unsigned send.
+- **Credentials**: the shared gateway-principal signing key, in its
+  clearly-marked dev form (`AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE`,
+  dev literal `avernet-dev-signing-key-NOT-FOR-PROD`, exported by
+  `singlebox/modules/backend.sh`) — the same key the local gateway signs
+  with and the dev BCS verifies with, overridable together from
+  `singlebox/.env.local`. The earlier gateway-seeded
+  `singlebox-manager-sync` app and its dev bearer were removed with the
+  direct-delivery revision; the gateway's `local_dev_apps` seed machinery
+  stays (config-gated, currently empty — it seeds nothing anywhere).
 - **No Redis anywhere** in this posture: no `redis_url`, no generation
   sentinel bootstrap (§3), no eviction concern — the coordination namespace
   lives and dies with the one Backend process.
