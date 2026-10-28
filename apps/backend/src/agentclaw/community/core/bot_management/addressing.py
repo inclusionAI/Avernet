@@ -49,6 +49,10 @@ class BotAddressResolverProtocol(Protocol):
 
     def resolve_pk(self, bot_pk: int) -> ResolvedBotContext: ...
 
+    def resolve_publish_source(
+        self, *, source_bot_pk: int, source_bot_id: str, legacy_owner_id: str,
+    ) -> ResolvedBotContext: ...
+
 
 class BotAddressResolver(BotAddressResolverProtocol):
     """Resolve stable, legacy and PK addresses without silent ambiguity."""
@@ -109,6 +113,26 @@ class BotAddressResolver(BotAddressResolverProtocol):
         bot = self._repository.get_by_pk(bot_pk)
         if bot is None:
             raise BotAddressNotFoundError(f"Bot not found: bot_pk={bot_pk}")
+        return self._context(bot)
+
+    def resolve_publish_source(
+        self, *, source_bot_pk: int, source_bot_id: str, legacy_owner_id: str,
+    ) -> ResolvedBotContext:
+        """Resolve publication metadata by its immutable source key first.
+
+        Old and new publish rows disagree on the meaning of owner_id; a live
+        source PK needs neither interpretation. Historical default lineages can
+        outlive their source row, so retain their owner/entity metadata lookup.
+        This never rewrites a publish source PK or substitutes a stage binding.
+        Other missing sources and mismatched PKs fail closed.
+        """
+        bot = self._repository.get_by_pk(source_bot_pk)
+        if bot is None:
+            if source_bot_id == "default":
+                return self.resolve(bot_id=source_bot_id, legacy_owner_id=legacy_owner_id)
+            raise BotAddressNotFoundError(f"Publish source Bot not found: bot_pk={source_bot_pk}")
+        if str(bot["bot_id"]) != source_bot_id:
+            raise BotAddressConflictError("Publish source PK and bot_id identify different Bots")
         return self._context(bot)
 
     @staticmethod

@@ -232,7 +232,8 @@ class RestartMixin:
             }, None, None
 
         bot = self._bot_service.get_bot_by_address(
-            bot_id=publish_record.source_bot_id, user_id=publish_record.owner_id
+            bot_id=publish_record.source_bot_id, user_id=publish_record.owner_id,
+            source_bot_pk=publish_record.source_bot_pk,
         )
         if not bot:
             logger.warning(
@@ -294,7 +295,8 @@ class RestartMixin:
         bot_uuid = binding.device_id
 
         bot = self._bot_service.get_bot_by_address(
-            bot_id=publish_record.source_bot_id, user_id=publish_record.owner_id
+            bot_id=publish_record.source_bot_id, user_id=publish_record.owner_id,
+            source_bot_pk=publish_record.source_bot_pk,
         )
         if not bot:
             return {"success": False, "message": f"Bot not found: {publish_record.source_bot_id}"}

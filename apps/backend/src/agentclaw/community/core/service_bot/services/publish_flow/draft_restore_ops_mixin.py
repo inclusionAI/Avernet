@@ -139,6 +139,7 @@ class DraftRestoreOpsMixin:
             bot = self._bot_service.get_bot_by_address(
                 bot_id=draft.source_bot_id,
                 user_id=owner_id,
+                source_bot_pk=draft.source_bot_pk,
             )
             if not bot:
                 raise PublishFlowServiceError(f"Bot不存在: {draft.source_bot_id}")

@@ -665,12 +665,28 @@ class DeviceServiceRouter(DeviceProviderRouterMixin, DeviceService):
             f"bot_id={bot_id}, owner_id={owner_id}"
         )
 
-        bot = self._bot_query.get_by_id_and_owner(bot_id, owner_id)
+        if self._bot_repo is not None:
+            from agentclaw.community.core.bot_management.addressing import BotAddressResolver
+            from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
+
+            try:
+                addressed = BotAddressResolver(self._bot_repo).resolve(
+                    bot_id=bot_id, legacy_owner_id=owner_id,
+                )
+            except BotAddressNotFoundError as exc:
+                raise DeviceNotFoundError(f"bot {bot_id} not found") from exc
+            bot = dict(addressed.bot)
+        else:
+            # Embedded callers without the full repository retain their strict
+            # Owner lookup; every runtime composition root provides bot_repo.
+            bot = self._bot_query.get_by_id_and_owner(bot_id, owner_id)
         if bot is None:
             logger.error(
                 f"[bootstrap_device_auth] Bot not found: bot_id={bot_id}, owner_id={owner_id}"
             )
             raise DeviceNotFoundError(f"bot {bot_id} not found")
+
+        resource_owner_id = str(bot.get("entity_id") or owner_id)
 
         # ========== 步骤 1: 查 binding ==========
         record = self._repo.get_by_device_id(device_id)
@@ -711,7 +727,7 @@ class DeviceServiceRouter(DeviceProviderRouterMixin, DeviceService):
             if self._passport_plugin is None:
                 raise DeviceServiceError("passport_plugin not injected into DeviceServiceRouter")
             agent_pass_token = (
-                self._passport_plugin.query_token(bot_id, owner_id) or ""
+                self._passport_plugin.query_token(bot_id, resource_owner_id) or ""
             )
             logger.info(
                 f"[bootstrap_device_auth] Token queried: device_id={device_id}, "
@@ -738,7 +754,7 @@ class DeviceServiceRouter(DeviceProviderRouterMixin, DeviceService):
                 device_provider=BAAS_DEVICE_PROVIDER,
                 device_props={
                     "bolt_id": bot.get("bot_id", ""),
-                    "entity_id": owner_id,
+                    "entity_id": resource_owner_id,
                     "device_uuid": device_id,
                 },
             )

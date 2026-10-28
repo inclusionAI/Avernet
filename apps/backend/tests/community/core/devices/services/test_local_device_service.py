@@ -147,6 +147,9 @@ def _make_service(
 ) -> LocalDeviceService:
     repo = repo or MagicMock()
     bq = bot_query or MagicMock()
+    if bot_query is None:
+        bq.get_by_binding_id.return_value = None
+        bq.get_by_id_and_entity.return_value = None
     bot_sync = MagicMock()
     baas = baas_service if baas_service is not None else MagicMock()
     poller = publish_poller if publish_poller is not None else MagicMock()
@@ -943,3 +946,19 @@ def test_compose_conn_info_ws_info_failure_already_returns_unavailable(
     assert "unavailable" in conn.message.lower()
     # ws 都没拿到，不应该再去尝试 http
     mock_baas.get_http_info.assert_not_called()
+
+
+@pytest.mark.parametrize("actor,allowed", [("new-owner", True), ("old-owner", False), ("outsider", False)])
+def test_handoff_binding_entity_is_not_owner_authority(actor, allowed):
+    repo = MagicMock()
+    repo.get_by_id.return_value = _make_record(entity_id="old-owner", status="ACTIVE")
+    query = MagicMock()
+    query.get_by_binding_id.return_value = {
+        "bot_id": "handoff-bot", "owner_id": "new-owner", "entity_id": "old-owner", "public": "0",
+    }
+    service = _make_service(repo=repo, bot_query=query)
+    if allowed:
+        assert isinstance(service.get_device_connection(binding_id=1, operator=_make_operator(actor)), DeviceConnectionInfo)
+    else:
+        with pytest.raises(InvalidDeviceStatusError):
+            service.get_device_connection(binding_id=1, operator=_make_operator(actor))

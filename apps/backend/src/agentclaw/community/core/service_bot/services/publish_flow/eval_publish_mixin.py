@@ -92,6 +92,7 @@ class EvalPublishMixin:
         bot = self._bot_service.get_bot_by_address(
             bot_id=publish_record.source_bot_id,
             user_id=owner_id,
+            source_bot_pk=publish_record.source_bot_pk,
         )
         if not bot:
             raise PublishFlowServiceError(f"Bot not found: {publish_record.source_bot_id}")
