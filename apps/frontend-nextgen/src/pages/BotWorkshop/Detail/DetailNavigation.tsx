@@ -6,6 +6,7 @@ import React from 'react';
 interface DetailNavigationItem<T extends string> {
   key: T;
   label: string;
+  shortLabel?: string;
   icon: React.ReactNode;
 }
 
@@ -43,7 +44,7 @@ function NavigationButton<T extends string>({
             onClick={onClick}
           >
             {item.icon}
-            <span>{item.label.slice(0, 2)}</span>
+            <span>{item.shortLabel ?? item.label.slice(0, 2)}</span>
           </Button>
         </TooltipTrigger>
         {item.label.length > 2 ? <TooltipContent side="right">{item.label}</TooltipContent> : null}
