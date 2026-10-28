@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 
 from tests.community._flows.bot_knowledge.api_lifecycle import BOT_KNOWLEDGE_FLOWS
+from tests.community._flows.bot_public_risk.api_lifecycle import RISK_FLOWS
 from tests.community._flows.digital_employee.api_lifecycle import DIGITAL_EMPLOYEE_FLOWS
 from tests.community._flows.access.api_lifecycle import ACCESS_LIFECYCLE_FLOWS
 from tests.community._flows.bot_chat.api_lifecycle import BOT_CHAT_LIFECYCLE_FLOWS
@@ -42,6 +43,7 @@ from tests.community.framework.flow_coverage import (
 # 进来 extend 此列表。
 REGISTERED_FLOWS: list = [
     *BOT_KNOWLEDGE_FLOWS,
+    *RISK_FLOWS,
     *SPACE_KNOWLEDGE_FLOWS,
     *DIGITAL_EMPLOYEE_FLOWS,
     *API_LIFECYCLE_FLOWS,
