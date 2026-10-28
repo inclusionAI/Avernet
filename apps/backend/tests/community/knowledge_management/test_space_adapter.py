@@ -77,7 +77,7 @@ def test_create_preserves_actor_revision_and_stable_request_id():
 def test_safe_business_conflicts_preserved(status, code):
     def _callback(r):
         return httpx.Response(
-            status, json={"detail": {"code": code, "secret": "must-not-leak"}}
+            status, json={"detail": {"code": code, "diagnostic": "must-not-leak"}}
         )
 
     adapter, client = provider(_callback)
