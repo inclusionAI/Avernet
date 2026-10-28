@@ -100,6 +100,8 @@ export function useCollaborationSquare(resource: SquareResource) {
 
   useSquareDeepLink({
     resource,
+    hasMoreRef: botGroupList.hasMoreRef,
+    loadMoreRef: botGroupList.loadMoreRef,
     openGroupMembers,
     handleTargetInvalid,
   });

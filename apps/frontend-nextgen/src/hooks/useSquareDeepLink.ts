@@ -9,6 +9,9 @@ import { useEffect, useRef } from 'react';
 
 interface UseSquareDeepLinkOptions {
   resource: SquareResource;
+  /** 分页标记的同步镜像：名称搜索结果分页未耗尽时深链持续加载再判定，避免重名目标落在后续页被误判失效。 */
+  hasMoreRef: { current: boolean };
+  loadMoreRef: { current: () => void };
   openGroupMembers: (group: PublicGroup) => Promise<void>;
   handleTargetInvalid: (resource: SquareResource, id: string) => void;
 }
@@ -33,10 +36,17 @@ function resolveIdentityFallback(): { id: string | null; message: string } | nul
 /**
  * bot/group 的 SquareDeepLink 深链解析。任务广场本期不接深链（Non-goal），resource='task' 时跳过。
  * Bot 深链按「列表内定位」落地：先把搜索对齐到分享名称（名称模式 + 关键词，列表请求带当前协作身份），
- * 列表按新条件加载完成后在结果中按 canonical ID 定位目标卡片并触发高亮；确认不含目标则按目标失效处理。
+ * 列表按新条件加载完成后在结果中按 canonical ID 定位目标卡片并触发高亮；重名命中多页时持续
+ * 加载直到命中或分页耗尽，仍未命中才按目标失效处理。
  * 不发起独立的深链请求：身份异步就绪、列表失败重试由 effect 依赖轮次自然重驱动，无中止竞态。
  */
-export function useSquareDeepLink({ resource, openGroupMembers, handleTargetInvalid }: UseSquareDeepLinkOptions) {
+export function useSquareDeepLink({
+  resource,
+  hasMoreRef,
+  loadMoreRef,
+  openGroupMembers,
+  handleTargetInvalid,
+}: UseSquareDeepLinkOptions) {
   const loading = useCollaborationSquareStore((state) => state.loading);
   const bots = useCollaborationSquareStore((state) => state.bots);
   const groups = useCollaborationSquareStore((state) => state.groups);
@@ -120,6 +130,13 @@ export function useSquareDeepLink({ resource, openGroupMembers, handleTargetInva
         handledTarget.current = targetKey;
         fallbackTried.current = false;
         setHighlightBotId(deepLink.id);
+        return;
+      }
+      // 重名分享名称可能命中多页结果：当前页未命中但分页未耗尽时先加载更多再判定，
+      // 避免目标在后续页时被误判为不可见。经 ref 读取实时分页标记，规避 setHasMore
+      // 批处理滞后于 setBots 同步通知的渲染轮次差。
+      if (hasMoreRef.current) {
+        void loadMoreRef.current();
         return;
       }
       // 未命中可能是公开受众与当前浏览身份不匹配（对用户公开/对 Bot 公开为独立设置），
