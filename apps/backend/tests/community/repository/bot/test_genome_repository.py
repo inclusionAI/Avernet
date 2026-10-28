@@ -444,10 +444,13 @@ def _in_flight(revision_id: str, promotion_id: str, from_revision_id: str | None
     )
 
 
-def _settle(promotions, promotion_id: str, *, status="applied", labels=(), statuses=PROMOTABLE, move_refs=True):
+def _settle(
+    promotions, promotion_id: str, *, status="applied", labels=(), statuses=PROMOTABLE, move_refs=True, apply_id="ap_1"
+):
     return promotions.settle(
         **BOT,
         promotion_id=promotion_id,
+        apply_id=apply_id,
         status=status,
         apply_detail="applied",
         move_refs=move_refs,
@@ -540,3 +543,19 @@ def test_stale_pending_rows_without_an_apply_are_failed(db):
     )
     assert settled == 1
     assert [promotions.get(**BOT, promotion_id=p * 32).status for p in "abc"] == ["apply_failed", "applying", "pending"]
+
+
+def test_settling_records_the_apply_even_when_the_request_never_marked_the_row_applying(db):
+    """A worker can settle before the request records the association, or the request can die first: the
+    settle writes the apply id itself, on success and on a lost compare-and-swap alike."""
+    revisions, promotions = GenomeRevisionRepository(db), GenomePromotionRepository(db)
+    revisions.insert(_revision(R1, status="draft"))
+    promotions.insert(_in_flight(R1, "a" * 32, None))
+    assert _settle(promotions, "a" * 32, apply_id="ap_9") is SettleResult.SETTLED
+    settled = promotions.get(**BOT, promotion_id="a" * 32)
+    assert (settled.status, settled.apply_id) == ("applied", "ap_9")
+    assert promotions.mark_applying(**BOT, promotion_id="a" * 32, apply_id="ap_9") is None, "late, and harmless"
+    promotions.insert(_in_flight(R1, "b" * 32, "sha256:" + "0" * 64))  # expects an active the bot never had
+    assert _settle(promotions, "b" * 32, apply_id="ap_10") is SettleResult.REF_CONFLICT
+    lost = promotions.get(**BOT, promotion_id="b" * 32)
+    assert (lost.status, lost.apply_id) == ("apply_failed", "ap_10")

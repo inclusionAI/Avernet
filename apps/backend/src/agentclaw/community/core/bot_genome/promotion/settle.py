@@ -69,6 +69,7 @@ class PromotionSettler:
             entity_id=entity_id,
             bot_id=bot_id,
             promotion_id=promotion_id,
+            apply_id=outcome.apply_id,
             status=status.value,
             apply_detail=f"apply {outcome.apply_id}: {outcome.summary}"[:_DETAIL_CHARS],
             move_refs=delivered,

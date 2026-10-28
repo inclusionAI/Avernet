@@ -212,6 +212,7 @@ class GenomePromotionRepositoryProtocol(Protocol):
         entity_id: str,
         bot_id: str,
         promotion_id: str,
+        apply_id: str,
         status: str,
         apply_detail: str,
         move_refs: bool,
@@ -224,7 +225,9 @@ class GenomePromotionRepositoryProtocol(Protocol):
         One transaction: ``active`` → the promotion's revision by
         compare-and-swap against its ``from_revision_id``, ``previous`` → the
         old ``active``, ``active``'s ``labels``, the revision marked
-        ``promoted`` (from one of ``expected_statuses``), and the row. A lost
+        ``promoted`` (from one of ``expected_statuses``), and the row, which
+        also records ``apply_id`` (the apply can end before the request that
+        started it records the association). A lost
         compare-and-swap or a revision status that moved rolls all of it back
         and records the row ``apply_failed`` instead (``REF_CONFLICT``). A row
         already settled is left alone (``ALREADY_SETTLED``); a missing one is

@@ -578,6 +578,7 @@ class GenomePromotionRepository(GenomePromotionRepositoryProtocol):
         entity_id: str,
         bot_id: str,
         promotion_id: str,
+        apply_id: str,
         status: str,
         apply_detail: str,
         move_refs: bool,
@@ -624,6 +625,8 @@ class GenomePromotionRepository(GenomePromotionRepositoryProtocol):
                         # Its status moved while the apply ran (verification rejected it).
                         raise _Conflict(row.revision_id)
                 row.status = status
+                # The worker can settle before the request records the association (or the request died first).
+                row.apply_id = apply_id
                 row.apply_detail = apply_detail
                 row.settled_at = settled_at
                 session.flush()
@@ -633,6 +636,7 @@ class GenomePromotionRepository(GenomePromotionRepositoryProtocol):
         conflicted = self._settle_without_refs(
             **axes,
             promotion_id=promotion_id,
+            apply_id=apply_id,
             status="apply_failed",
             apply_detail="active moved, or the revision's status changed, while the apply ran; no ref moved",
             settled_at=settled_at,
@@ -664,20 +668,24 @@ class GenomePromotionRepository(GenomePromotionRepositoryProtocol):
         entity_id: str,
         bot_id: str,
         promotion_id: str,
+        apply_id: str | None,
         status: str,
         apply_detail: str,
         settled_at: datetime,
     ) -> bool:
-        """The row's final status with no ref move, only while it is in flight; whether it changed."""
+        """The row's final status with no ref move, only while it is in flight; whether it changed.
+
+        ``apply_id`` is the apply that ended, recorded on the row; ``None`` when no apply started (``finish``).
+        """
+        values = {"status": status, "apply_detail": apply_detail, "settled_at": settled_at}
+        if apply_id is not None:
+            values["apply_id"] = apply_id
         with self._db.orm_session() as session:
             updated = (
                 session.query(GenomePromotionModel)
                 .filter(*_bot(GenomePromotionModel, env=env, entity_id=entity_id, bot_id=bot_id))
                 .filter(GenomePromotionModel.promotion_id == promotion_id, GenomePromotionModel.status.in_(_IN_FLIGHT))
-                .update(
-                    {"status": status, "apply_detail": apply_detail, "settled_at": settled_at},
-                    synchronize_session=False,
-                )
+                .update(values, synchronize_session=False)
             )
             return updated == 1
 
@@ -729,6 +737,7 @@ class GenomePromotionRepository(GenomePromotionRepositoryProtocol):
             entity_id=entity_id,
             bot_id=bot_id,
             promotion_id=promotion_id,
+            apply_id=None,
             status=status,
             apply_detail=apply_detail,
             settled_at=datetime.now(timezone.utc).replace(tzinfo=None),
