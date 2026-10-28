@@ -63,3 +63,8 @@ No native remote ACL execution, deployed environment, real document construction
   ORM MySQL compilation and retains the unique identity constraint.
 - These are local SQLite results, not remote engine latency guarantees.
   Production DDL was not executed. See candidate-index.md for operator steps.
+
+Current index/release complete Backend CI (unchanged 4-worker runner): **27,175
+passed, 40 existing skipped, 2 subtests passed**, 431.98s; complete gate passed.
+Line coverage **90.56%**, changed-line **93.07%**. The ten new index/migration
+cases passed in this full run. No skips/timeouts/coverage thresholds changed.
