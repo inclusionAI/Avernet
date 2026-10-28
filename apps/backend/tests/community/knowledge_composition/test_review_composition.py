@@ -35,14 +35,19 @@ def test_management_routes_are_registered_by_the_http_app_not_profiles(world):
     tree = ast.parse(source.read_text())
     assert any(
         isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "include_router"
-        and any(
-            isinstance(arg, ast.Name) and arg.id == "knowledge_management_router"
-            for arg in node.args
-        )
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "mount_resource_routers"
         for node in ast.walk(tree)
     )
+    from agentclaw.community.adapters.http.space_knowledge.registration import (
+        mount_resource_routers,
+    )
+    from fastapi import FastAPI
+
+    constructed = FastAPI()
+    mount_resource_routers(constructed)
+    mounted_paths = {route.path for route in _routes(constructed)}
+    assert {route.path for route in _routes(management_surface)} <= mounted_paths
     paths = {route.path for route in _routes(management_surface)}
     for router in world.get(OptionalRouters).routers:
         assert not paths.intersection(route.path for route in _routes(router))
