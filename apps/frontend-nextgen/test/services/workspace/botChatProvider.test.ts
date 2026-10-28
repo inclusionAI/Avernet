@@ -58,6 +58,7 @@ const bot = {
   realBotId: 'b',
   ownerId: '2088',
   displayName: 'B',
+  botType: 'service',
   online: true,
   chatable: true,
   runtimeStage: 'online' as const,
@@ -204,7 +205,7 @@ describe('botChatProvider', () => {
       message: 'OK',
       request_id: 'r',
     });
-    const friendBot = { ...bot, isFriendBot: true };
+    const friendBot = { ...bot, isFriendBot: true, botType: 'personal' };
     const provider = createBotChatProvider({ bot: friendBot, userId: 'human_900003', sessionId: 'sid-1' });
     await provider.connect();
     expect(mockedGetConnection).toHaveBeenCalledWith('b', {
@@ -212,7 +213,6 @@ describe('botChatProvider', () => {
       owner_id: '2088',
       f_user_id: '900003',
       session_id: 'sid-1',
-      stage: 'draft',
     });
   });
 
@@ -467,4 +467,22 @@ it('团队连接、IAM 和消息历史使用登录用户与 entity owner，不�
     50,
   );
   await provider.disconnect();
+});
+
+it.each([
+  ['my', {}],
+  ['team', { isTeamBot: true }],
+  ['friend', { isFriendBot: true }],
+])('%s personal Bot omits stage on connection and every IAM refresh', async (_role, flags) => {
+  mockedGetConnection.mockResolvedValue({ data: { sockets: [{ kind: 'chat', url: 'wss://gw/ws' }] } });
+  const target = { ...bot, ...flags, botType: 'personal', runtimeStage: 'draft' as const };
+  const provider = createBotChatProvider({ bot: target, userId: 'viewer', sessionId: 's1' });
+  await provider.connect();
+  const cfg = (adapters.OpenClawProvider as jest.Mock<any>).mock.calls[0][0];
+  await cfg.credentialProvider();
+  mockSdk.isConnected = true;
+  await provider.request({ content: 'hi', sessionId: 's1' });
+  expect(mockedGetConnection.mock.calls[0][1]).not.toHaveProperty('stage');
+  expect(mockedGetIamToken).toHaveBeenCalledTimes(3);
+  for (const args of mockedGetIamToken.mock.calls) expect(args).toEqual(['b', 'viewer', '2088', undefined]);
 });

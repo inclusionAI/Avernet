@@ -42,7 +42,9 @@ beforeEach(() => {
 test.each(cases)('%s resolves the correct runtime', (_name, override, stage) => {
   const bot = { ...base, ...override };
   expect(resolveChatRuntimeStage(bot)).toBe(stage);
-  expect(withFriendBotRequestParams(bot, 'human_viewer', { user_id: 'viewer' })).toMatchObject({ stage });
+  const params = withFriendBotRequestParams(bot, 'human_viewer', { user_id: 'viewer' });
+  expect(params.stage).toBe(bot.botType === 'service' ? stage : undefined);
+  expect(Object.hasOwn(params, 'stage')).toBe(bot.botType === 'service');
 });
 
 test.each(cases)('%s uses the same stage on all conversation requests', async (_name, override, stage) => {
@@ -64,7 +66,9 @@ test.each(cases)('%s uses the same stage on all conversation requests', async (_
   expect(request).toHaveBeenCalledTimes(13);
   for (const [url, options] of request.mock.calls) {
     expect(url).toMatch(/^\/openapi\/v1\/bots\/service\/(sessions|models)/);
-    expect(options?.params).toMatchObject({ stage, user_id: 'viewer' });
+    expect(options?.params).toMatchObject({ user_id: 'viewer' });
+    expect(options?.params?.stage).toBe(bot.botType === 'service' ? stage : undefined);
+    expect(Object.hasOwn(options?.params ?? {}, 'stage')).toBe(bot.botType === 'service');
     const ownerParams = bot.isTeamBot || bot.isFriendBot ? { owner_id: 'entity' } : {};
     expect(options?.params).toMatchObject(ownerParams);
     expect(options?.params?.f_user_id).toBe(bot.isFriendBot ? 'viewer' : undefined);
@@ -88,9 +92,9 @@ test('my Bot preserves an explicitly selected request stage', () => {
   });
 });
 
-test('non-service team Bots retain explicit instance-range stages', () => {
+test('non-service team Bots omit even stale explicit instance-range stages', () => {
   const bot = { ...base, isTeamBot: true, botType: undefined };
-  expect(withFriendBotRequestParams(bot, 'viewer', { user_id: 'viewer', stage: 'verify' })).toMatchObject({ stage: 'verify' });
+  expect(withFriendBotRequestParams(bot, 'viewer', { user_id: 'viewer', stage: 'verify' })).not.toHaveProperty('stage');
 });
 
 test.each(['service', 'personal'])(
@@ -122,7 +126,10 @@ test.each(['service', 'personal'])(
     await botSessionService.listSessionsPage(bot, 'human_viewer');
     await botSessionService.listFavoriteSessionsPage(bot, 'human_viewer');
     await botSessionService.listModels(bot, 'human_viewer');
-    for (const [, options] of request.mock.calls.slice(1)) expect(options?.params).toMatchObject({ stage });
+    for (const [, options] of request.mock.calls.slice(1)) {
+      expect(options?.params?.stage).toBe(botType === 'service' ? 'online' : undefined);
+      expect(Object.hasOwn(options?.params ?? {}, 'stage')).toBe(botType === 'service');
+    }
   },
 );
 
@@ -133,3 +140,14 @@ test('owned online service cannot be downgraded by stale draft instance ranges',
   await botSessionService.listFavoriteSessionsPage(bot, 'viewer', 1, 20, range);
   for (const [, options] of request.mock.calls) expect(options?.params).toMatchObject({ stage: 'online' });
 });
+
+test.each(['personal', 'desktop', undefined])(
+  'non-service type=%p omits stage even when an instance range supplies draft',
+  async (botType) => {
+    const bot = { ...base, botType };
+    const range = { deviceUuid: 'device', stage: 'draft' as const };
+    await botSessionService.listSessionsPage(bot, 'viewer', 1, 20, '', range);
+    await botSessionService.listFavoriteSessionsPage(bot, 'viewer', 1, 20, range);
+    for (const [, options] of request.mock.calls) expect(options?.params).not.toHaveProperty('stage');
+  },
+);

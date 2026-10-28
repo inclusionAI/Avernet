@@ -116,20 +116,20 @@ export function resolveChatRuntimeStage(bot: ChatBotView): BotIamTokenStage {
   return bot.runtimeStage ?? (bot.botType === 'service' ? 'online' : 'draft');
 }
 
-/** 所有单聊请求补运行环境；好友补 f_user_id，团队补实体 owner。 */
+/** 服务 Bot 请求才显式指定阶段；非服务 Bot 依赖后端默认环境，并移除旧筛选条件中的 stage。 */
 export function withFriendBotRequestParams<T extends { user_id: string; owner_id?: string; stage?: BotIamTokenStage }>(
   bot: ChatBotView,
   userId: string,
   params: T,
-): T & { stage: BotIamTokenStage; f_user_id?: string } {
+): Omit<T, 'stage'> & { stage?: BotIamTokenStage; f_user_id?: string } {
+  const { stage: requestedStage, ...baseParams } = params;
+  const stage =
+    bot.isFriendBot || bot.isTeamBot || bot.runtimeStage === 'online'
+      ? resolveChatRuntimeStage(bot)
+      : requestedStage ?? resolveChatRuntimeStage(bot);
   return {
-    ...params,
-    stage:
-      bot.isFriendBot ||
-      bot.botType === 'personal' ||
-      (bot.botType === 'service' && (bot.isTeamBot || bot.runtimeStage === 'online'))
-        ? resolveChatRuntimeStage(bot)
-        : params.stage ?? resolveChatRuntimeStage(bot),
+    ...baseParams,
+    ...(bot.botType === 'service' ? { stage } : {}),
     ...((bot.isFriendBot || bot.isTeamBot) && bot.ownerId ? { owner_id: bot.ownerId } : {}),
     ...(bot.isFriendBot ? { f_user_id: resolveUserId(userId) } : {}),
   };
