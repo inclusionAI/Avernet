@@ -68,27 +68,19 @@ def parse_gray_config(raw: Any) -> A2aIssuanceGrayConfig | None:
         「键不存在」不在本函数语义内——存在性由 ``A2aIssuanceGate``
         从 repo record 判定后才调用到这里。
     """
-    if raw is None or raw == "" or (isinstance(raw, str) and not raw.strip()):
-        # 记录存在但值为空——半配置事故，闭门而不是静默全量。
-        return _closed_gate()
     data: Any
     if isinstance(raw, str):
         try:
             data = json.loads(raw)
         except (ValueError, TypeError):
-            return _closed_gate()
+            return _closed_gate()  # 空串/空白/坏 JSON 同归此处
     else:
         data = raw
     if not isinstance(data, dict):
         return _closed_gate()
-    # 配置对象缺 ``enabled``（或 null）= 结构非法，fail-closed：
-    # 运营贴了这条配置却漏了关键字段，绝不能静默解读成"全量放行"。
-    # 解除门控只有一个正形：显式 ``enabled: false``（键不存在在 gate 层已放开）。
-    if "enabled" not in data or data["enabled"] is None:
-        return _closed_gate()
-    enabled = data["enabled"]
-    # 布尔之外不允许任何隐式真值（"yes"/1 等按 fail-closed 关门）；
-    # 显式 false 是运营的解除门控操作（全量形态），非失效状态。
+    # ``enabled`` 缺失/null/非布尔（"yes"/1 等）一律 fail-closed；唯一解除
+    # 门控的正形是显式布尔 false（键不存在在 gate 层已放开）。
+    enabled = data.get("enabled")
     if enabled is False:
         return None
     if enabled is not True:

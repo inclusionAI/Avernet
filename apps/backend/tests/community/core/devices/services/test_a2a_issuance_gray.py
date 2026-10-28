@@ -68,7 +68,8 @@ def test_raw_json_string_is_parsed():
         '{"enabled": true, "mode": "percent", "percent": 10}'
     )
     assert parsed is not None
-    assert is_user_in_gray(parsed, "240841") in (True, False)
+    assert parsed.mode == "percent"
+    assert parsed.percent == 10
 
 
 # ===========================================================================
@@ -81,11 +82,7 @@ def test_whitelist_valid():
         {"enabled": True, "mode": "whitelist", "users": ["240841", "009977"]}
     )
     assert parsed is not None
-    assert decoded_members(parsed) == frozenset({"240841", "009977"})
-
-
-def decoded_members(parsed) -> frozenset[str] | None:
-    return getattr(parsed, "users", None)
+    assert parsed.users == frozenset({"240841", "009977"})
 
 
 # ===========================================================================

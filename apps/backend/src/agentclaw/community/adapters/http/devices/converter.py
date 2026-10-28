@@ -98,7 +98,7 @@ def connection_info_to_response(info: DeviceConnectionInfo) -> DeviceConnectionR
         message=info.message,
         url=info.url,
         a2a_base_url=info.a2a_base_url,
-        a2a_withheld=bool(getattr(info, "a2a_withheld", False)),
+        a2a_withheld=info.a2a_withheld,
     )
 
 

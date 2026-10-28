@@ -24,8 +24,6 @@ def connection_service():
     service._baas_service.get_ws_info.return_value = SimpleNamespace(
         target="runtime:20003", token="test-token", ws_url="wss://example.invalid/ws",
         baas_base_url="https://example.invalid", bot_uuid="bot-test", tenant="test",
-        # ws-info 面恒带 a2a_base_url 字段；SimpleNamespace 严格属性访问，缺字段即
-        # AttributeError。语义与 dev 侧吸收版一致，注释保留修复意图。
         engine_port=20003, expires_at="2099-01-01T00:00:00Z", a2a_base_url="",
     )
     return service
