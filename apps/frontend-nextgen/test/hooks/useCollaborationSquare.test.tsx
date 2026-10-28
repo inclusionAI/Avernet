@@ -11,6 +11,7 @@ import {
   collaborationSquareTaskService,
 } from '@/services/collaborationSquare';
 import { useCollaborationSquareStore } from '@/stores/collaborationSquareStore';
+import { useSquareHighlightStore } from '@/stores/squareHighlightStore';
 import { useSquareIdentityStore } from '@/stores/squareIdentityStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { act, renderHook, waitFor } from '@testing-library/react';
@@ -73,6 +74,7 @@ describe('useCollaborationSquare Bot Search', () => {
     jest.useFakeTimers();
     (history.push as jest.Mock).mockClear();
     useCollaborationSquareStore.getState().reset();
+    useSquareHighlightStore.setState({ highlightBotId: null });
     useSquareIdentityStore.getState().reset();
     useWorkspaceStore.getState().reset();
     useWorkspaceStore
@@ -253,7 +255,7 @@ describe('useCollaborationSquare Bot Search', () => {
       await Promise.resolve();
     });
     const state = useCollaborationSquareStore.getState();
-    expect(state.highlightBotId).toBe('bot:target');
+    expect(useSquareHighlightStore.getState().highlightBotId).toBe('bot:target');
     expect(state.selectedBotId).toBeNull();
     expect(state.botProfile).toBeNull();
     expect(resolveSharedBot).not.toHaveBeenCalled();
@@ -279,7 +281,7 @@ describe('useCollaborationSquare Bot Search', () => {
       await Promise.resolve();
     });
 
-    await waitFor(() => expect(useCollaborationSquareStore.getState().highlightBotId).toBe('bot:loaded'));
+    await waitFor(() => expect(useSquareHighlightStore.getState().highlightBotId).toBe('bot:loaded'));
     const listBotPage = collaborationSquareBotService.listBotPage as jest.Mock;
     expect(listBotPage).toHaveBeenCalledTimes(1);
     expect(resolveSharedBot).not.toHaveBeenCalled();
@@ -326,7 +328,7 @@ describe('useCollaborationSquare Bot Search', () => {
     // 列表搜索失败由列表错误态承载：不误判目标失效，深链参数保留待重试
     expect(useCollaborationSquareStore.getState().error).toBe('Catalog Search 暂不可用');
     expect(mockedNotifyError).not.toHaveBeenCalledWith('内容已取消公开或对当前账号不可见');
-    expect(useCollaborationSquareStore.getState().highlightBotId).toBeNull();
+    expect(useSquareHighlightStore.getState().highlightBotId).toBeNull();
     expect(window.location.search).toContain('id=bot%3Atarget');
 
     // 用户重新加载成功后深链继续定位
@@ -341,7 +343,7 @@ describe('useCollaborationSquare Bot Search', () => {
       jest.advanceTimersByTime(0);
       await Promise.resolve();
     });
-    await waitFor(() => expect(useCollaborationSquareStore.getState().highlightBotId).toBe('bot:target'));
+    await waitFor(() => expect(useSquareHighlightStore.getState().highlightBotId).toBe('bot:target'));
     expect(resolveSharedBot).not.toHaveBeenCalled();
     unmount();
   });
@@ -383,7 +385,7 @@ describe('useCollaborationSquare Bot Search', () => {
 
     await waitFor(() => expect(mockedNotifyError).toHaveBeenCalledWith('内容已取消公开或对当前账号不可见'));
     expect(window.location.search).toBe('');
-    expect(useCollaborationSquareStore.getState().highlightBotId).toBeNull();
+    expect(useSquareHighlightStore.getState().highlightBotId).toBeNull();
     expect(useCollaborationSquareStore.getState().selectedBotId).toBeNull();
     unmount();
   });
@@ -412,7 +414,7 @@ describe('useCollaborationSquare Bot Search', () => {
     });
     expect(useCollaborationSquareStore.getState().error).toBe('当前工作身份不可用，请刷新后重试');
     expect(listPending).toHaveLength(0);
-    expect(useCollaborationSquareStore.getState().highlightBotId).toBeNull();
+    expect(useSquareHighlightStore.getState().highlightBotId).toBeNull();
 
     // 阶段 2：身份恢复就绪（用户点「重新加载」/身份服务恢复），列表与深链自动重驱动
     mockedUseHumanIdentity.mockReturnValue({
@@ -444,7 +446,7 @@ describe('useCollaborationSquare Bot Search', () => {
       await Promise.resolve();
     });
 
-    expect(useCollaborationSquareStore.getState().highlightBotId).toBe('bot:target');
+    expect(useSquareHighlightStore.getState().highlightBotId).toBe('bot:target');
     expect(resolveSharedBot).not.toHaveBeenCalled();
     expect(mockedNotifyError).not.toHaveBeenCalled();
     expect(window.location.search).toContain('id=bot%3Atarget');
@@ -527,7 +529,7 @@ describe('useCollaborationSquare Bot Search', () => {
       jest.advanceTimersByTime(0);
       await Promise.resolve();
     });
-    expect(useCollaborationSquareStore.getState().highlightBotId).toBe('bot:target');
+    expect(useSquareHighlightStore.getState().highlightBotId).toBe('bot:target');
     expect(mockedNotifyError).not.toHaveBeenCalled();
     expect(window.location.search).toContain('id=bot%3Atarget');
     unmount();
@@ -602,7 +604,7 @@ describe('useCollaborationSquare Bot Search', () => {
       expect(mockedNotifyError).toHaveBeenCalledWith('内容已取消公开或对当前账号不可见'),
     );
     expect(window.location.search).toBe('');
-    expect(useCollaborationSquareStore.getState().highlightBotId).toBeNull();
+    expect(useSquareHighlightStore.getState().highlightBotId).toBeNull();
     unmount();
   });
 
@@ -667,7 +669,7 @@ describe('useCollaborationSquare Bot Search', () => {
       jest.advanceTimersByTime(0);
       await Promise.resolve();
     });
-    expect(useCollaborationSquareStore.getState().highlightBotId).toBe('bot:target');
+    expect(useSquareHighlightStore.getState().highlightBotId).toBe('bot:target');
     // 前置切换发生在搜索对齐之前：Bot 视角从未发起名称搜索
     expect(
       listPending.filter((p) => p.query?.search === '项目助手' && p.query.viewerActorType === 'bot'),
@@ -705,7 +707,7 @@ describe('useCollaborationSquare Bot Search', () => {
       expect(mockedNotifyError).toHaveBeenCalledWith('内容已取消公开或对当前账号不可见'),
     );
     expect(window.location.search).toBe('');
-    expect(useCollaborationSquareStore.getState().highlightBotId).toBeNull();
+    expect(useSquareHighlightStore.getState().highlightBotId).toBeNull();
     // 未发起任何名称搜索即失效（受众类型已声明必然不可见）
     expect(listPending.filter((p) => p.query?.search)).toHaveLength(0);
     unmount();
@@ -746,7 +748,7 @@ describe('useCollaborationSquare Bot Search', () => {
       await Promise.resolve();
     });
 
-    expect(useCollaborationSquareStore.getState().highlightBotId).toBe('bot:target');
+    expect(useSquareHighlightStore.getState().highlightBotId).toBe('bot:target');
     expect(mockedNotifySuccess).not.toHaveBeenCalled();
     expect(useSquareIdentityStore.getState().selectedIdentityId).toBeNull();
     unmount();
@@ -1442,6 +1444,7 @@ describe('useCollaborationSquare Task Plaza', () => {
     jest.useFakeTimers();
     (history.push as jest.Mock).mockClear();
     useCollaborationSquareStore.getState().reset();
+    useSquareHighlightStore.setState({ highlightBotId: null });
     useSquareIdentityStore.getState().reset();
     useWorkspaceStore.getState().reset();
     useWorkspaceStore

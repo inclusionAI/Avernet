@@ -9,7 +9,7 @@ import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
 import type { BotCatalogViewModel, PublicBot } from '@/domain/collaborationSquare/types';
 import { getPublicBotActionKey, getPublicBotTargetId, resolvePublicBotPrimaryAction } from '@/domain/collaborationSquare/types';
-import { useCollaborationSquareStore } from '@/stores/collaborationSquareStore';
+import { useSquareHighlightStore } from '@/stores/squareHighlightStore';
 import { Bot, RefreshCw, Search } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Points } from '@/tracking/points';
@@ -46,7 +46,7 @@ function BotLoadingState() {
 export function PublicBotCatalogPanel({ vm, scrollRootRef, smartEmptyHint }: PublicBotCatalogPanelProps) {
   const sentinelRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
-  const highlightBotId = useCollaborationSquareStore((state) => state.highlightBotId);
+  const highlightBotId = useSquareHighlightStore((state) => state.highlightBotId);
   const { hasMore, loading, loadingMore, error, loadMore } = vm;
   const activeActor = vm.activeActor;
   const actorKey = activeActor ? `${activeActor.type}:${activeActor.id}` : '';
@@ -58,7 +58,7 @@ export function PublicBotCatalogPanel({ vm, scrollRootRef, smartEmptyHint }: Pub
     if (!highlightBotId) return;
     const target = gridRef.current?.querySelector<HTMLElement>(`[data-bot-id="${CSS.escape(highlightBotId)}"]`);
     target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    const timer = setTimeout(() => useCollaborationSquareStore.getState().setHighlightBotId(null), 3000);
+    const timer = setTimeout(() => useSquareHighlightStore.getState().setHighlightBotId(null), 3000);
     return () => clearTimeout(timer);
   }, [highlightBotId]);
   const pendingBot = pending?.actorKey === actorKey

@@ -2,6 +2,7 @@ import { notifySuccess } from '@/components/ui/notify';
 import { parseSquareDeepLink } from '@/domain/collaborationSquare/mapper';
 import type { PublicGroup, SquareResource } from '@/domain/collaborationSquare/types';
 import { useCollaborationSquareStore } from '@/stores/collaborationSquareStore';
+import { useSquareHighlightStore } from '@/stores/squareHighlightStore';
 import { useSquareIdentityStore } from '@/stores/squareIdentityStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useEffect, useRef } from 'react';
@@ -100,7 +101,8 @@ export function useSquareDeepLink({ resource, openGroupMembers, handleTargetInva
           return;
         }
       }
-      const { setQuery, setBotSearchMode, setHighlightBotId } = useCollaborationSquareStore.getState();
+      const { setQuery, setBotSearchMode } = useCollaborationSquareStore.getState();
+      const { setHighlightBotId } = useSquareHighlightStore.getState();
       const searchHint = deepLink.searchHint?.trim();
       if (searchHint && (botSearchMode !== 'name' || botQuery !== searchHint)) {
         // 切换名称模式会清空关键词，须在其后再填入分享名称。

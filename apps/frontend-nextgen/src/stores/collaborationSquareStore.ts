@@ -25,8 +25,6 @@ export interface CollaborationSquareState {
   botSearchMode: BotSearchMode;
   selectedBotId: string | null;
   selectedGroupId: string | null;
-  /** 深链定位的 Bot 高亮目标 id；由 UI 层滚动到卡片并短暂高亮后清除。 */
-  highlightBotId: string | null;
   busyKeys: string[];
   tasks: PublicTask[];
   taskQuery: string;
@@ -47,7 +45,6 @@ export interface CollaborationSquareState {
   setBotSearchMode: (mode: BotSearchMode) => void;
   setSelectedBotId: (id: string | null) => void;
   setSelectedGroupId: (id: string | null) => void;
-  setHighlightBotId: (id: string | null) => void;
   setBusy: (key: string, busy: boolean) => void;
   updateBotRelationship: (targetId: string, status: PublicBot['relationshipStatus']) => void;
   removeBot: (id: string) => void;
@@ -77,7 +74,6 @@ const initialState = {
   botSearchMode: 'name' as BotSearchMode,
   selectedBotId: null,
   selectedGroupId: null,
-  highlightBotId: null,
   busyKeys: [],
   tasks: [],
   taskQuery: '',
@@ -112,7 +108,6 @@ export const useCollaborationSquareStore = create<CollaborationSquareState>((set
     set((state) => (state.botSearchMode === botSearchMode ? { botSearchMode } : { botSearchMode, botQuery: '' })),
   setSelectedBotId: (selectedBotId) => set({ selectedBotId, botProfile: null }),
   setSelectedGroupId: (selectedGroupId) => set({ selectedGroupId, groupMembers: [], groupOwnerUserName: null }),
-  setHighlightBotId: (highlightBotId) => set({ highlightBotId }),
   setBusy: (key, busy) =>
     set((state) => ({
       busyKeys: busy ? [...new Set([...state.busyKeys, key])] : state.busyKeys.filter((item) => item !== key),
