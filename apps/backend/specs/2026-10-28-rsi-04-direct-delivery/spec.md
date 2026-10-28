@@ -107,30 +107,36 @@ latest published version (ADR 0002), and a new Center version is not drift.
       - Compare-and-swap lost (`active` moved while the apply ran) → no ref
         moves; the promotion becomes `apply_failed` ("active moved during the
         apply").
-- [ ] Settling happens on every terminal path of the apply: normal end, a
-      refused compile, an engine exception, a worker that could not rebuild
-      the apply. Settling twice is a no-op.
+- [ ] Every way an apply ends notifies the promotion (publish/subscribe:
+      the apply engine publishes "apply X of kind K ended with outcome O",
+      the genome subscribes to kind `genome`): a normal end, a refused
+      compile, an engine exception, a worker that could not rebuild the
+      apply, and the task queue giving up on the apply task. A publish that
+      fails is not lost: the apply task is retried, and a run that finds its
+      report already terminal only publishes. Settling twice is a no-op.
+      Nothing settles a promotion on read.
 - [ ] A worker that dies mid-apply does not end the apply: the apply is a
       durable task, so another worker re-claims it once its lease expires and
-      runs it again from the start (apply converges, so re-running is safe;
-      the genome compiler still accepts the promotion, which is `applying`).
-      The promotion stays `applying` and settles when that run ends.
-- [ ] The one case where no run ends: the task is retired at its 20-minute
-      deadline (`APPLY_TASK_DEADLINE_SECONDS`) before any run finished, e.g.
-      workers down. Nothing writes the apply's terminal state; it is
-      *reported* `FAILED` once its lock is gone or stale. Its promotion is
-      marked `apply_failed` when it is next read, or when the bot's next
-      promotion starts (which settles earlier in-flight promotions first).
+      runs it again from the start (compile and apply both again; apply
+      converges, so this is safe). The promotion stays `applying` and settles
+      when that run ends.
+- [ ] The task queue gains an optional per-task-type **give-up hook**, called
+      when it gives up on a task: retired at its deadline (in the claim scan
+      or on a reschedule that would overshoot it) or failed by its handler.
+      The apply task's hook writes the apply's `FAILED` report if no run
+      wrote a terminal one, releases its lock and publishes, so an apply
+      report is never left `RUNNING` and its promotion always settles. Task
+      types without a hook behave as today.
 - [ ] `going_back` keeps its meaning (target was promoted before and is not
       the current `active`).
-- [ ] The genome compiler compiles a promotion's revision only while the
-      promotion is `pending` or `applying` and `active` still points where
-      the promotion expected; for a settled promotion it refuses
-      (`CompileRefused`), so a retried or redelivered apply task never
-      re-applies a finished promotion. The only compiler of a promotion is
-      that promotion's own apply task: once on its first run (the worker may
-      start before the row turns `applying`, hence `pending` too) and again
-      on each re-run after a crash.
+- [ ] **Compile** (revision → desired state) and **apply** (desired state →
+      bot) stay separate layers. The genome compiler reads the promotion row
+      for its revision and compiles that revision; it checks no promotion
+      status and refuses only a promotion that does not exist. The compile
+      is pure, so the apply task compiling again on a re-run yields the same
+      state; the task queue never re-runs a finished or retired task, and the
+      apply lock keeps two promotions of a bot from overlapping. The
+      promotion layer never retries anything.
 - [ ] An automated actor's delivery apply runs with the bot owner as its
       principal (`actor_id` = owner id) and the actor's audit label
       (`audit_actor`); a user's runs as that user.
@@ -197,10 +203,14 @@ latest published version (ADR 0002), and a new Center version is not drift.
 
 ## In Scope
 
-- The direct applier, the promotion lifecycle, the completion seam in the
-  apply engine, settling, the read-time settle.
+- The direct applier, the promotion lifecycle, the completion
+  publish/subscribe in the apply engine, settling.
+- The task queue's give-up hook, and the apply task's use of it.
+- Renaming the Skill Center's Manifest-named Direct-claim calls to apply
+  names (`claim_manifest_skill` → `claim_apply_skill`, …): they are the apply
+  engine's calls whichever compiler produced the state.
 - Genome DDL edited in place (tables not deployed): promotion status values,
-  `apply_id` on the promotion, `delivery` on the ref.
+  `apply_id` on the promotion, `labels` on the ref.
 - Center/repo skill delivery in the skills materialiser and the Skill Center
   claim path; `center_version` removal from the RSI-02 contract.
 - Genome HTTP payloads and error mapping; docs; singlebox verification.
@@ -233,6 +243,15 @@ latest published version (ADR 0002), and a new Center version is not drift.
 7. A `PARTIAL` apply moves the ref, and `active` carries a partial marker.
 8. The marker is a `labels` JSON-list column on the ref (review 2026-10-28):
    `["partial"]`; no `complete` label, since that is the default.
+9. Compile and apply are separate layers; the genome compiler checks no
+   promotion status (review 2026-10-28).
+10. Every termination of an apply publishes; the task queue gets a give-up
+    hook so the deadline case publishes too; no read-time settle
+    (review 2026-10-28).
+11. `RevisionApplier.preflight` stays: it refuses nothing in this item and is
+    where #3212 refuses a verify/online target (review 2026-10-28).
+12. The Direct-claim calls are apply scope and lose "manifest" from their
+    names (review 2026-10-28; the exact names await the owner's OK).
 
 ## Decisions taken here, flagged for review
 
@@ -247,27 +266,15 @@ latest published version (ADR 0002), and a new Center version is not drift.
   entry for that apply's kind, so the engine still knows nothing about
   promotions. The alternative was a background task per promotion that
   re-reads the apply report until it is terminal; it costs a read per
-  promotion per poll and is one more thing that can die. The callback cannot
-  fire when the worker itself died, which is what the sweep and the
-  read-time settle cover.
+  promotion per poll and is one more thing that can die.
 - **The promotion row regains an `apply_id` column.** #3083 removed
   `apply_reference` because it was used to infer what the bot holds; here it
   only says which apply to read for progress. Drift stays observed.
 - **`pending` is a new promotion status** for the instant between the row and
-  the lock; a row never stays there unless the process dies between the two
-  writes, and such a row settles as `apply_failed` when read.
+  the lock. If the request process dies between the two writes, the row
+  stays `pending` with no apply behind it; the bot's next promotion marks
+  such a row `apply_failed` before inserting its own (there is no apply to
+  publish for it).
 - **A Center asset "the bot may install"** is one the Skill Center query
   service resolves for the bot and the acting principal (the same access rule
   as activating it by id).
-</content>
-</invoke>
-
-## Open Questions
-
-- **A periodic sweep for deadline-retired applies?** (Revised after review:
-  a crashed worker's apply is re-claimed and re-run by the task queue, so the
-  sweep first proposed is not needed for crashes.) Only a task retired at its
-  deadline leaves a promotion `applying` with no run to end it; reads and the
-  bot's next promotion settle it. Recommended: no sweep. A sweep (a periodic
-  loop started with the backend's lifecycle, like the Skill Center sync) can
-  be added later if `applying` rows are seen to linger.

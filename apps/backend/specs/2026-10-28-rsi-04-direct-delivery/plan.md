@@ -17,11 +17,16 @@ POST …/genome/promotions
        accepted             → row applying, apply_id
   ← 201 Promotion(status=applying, apply_id)
 
-apply worker (ApplyRunService._run / run_apply_task)
-  compile (GenomeCompiler: promotion pending|applying, active == from_revision) → orchestrator → report
+apply task (durable; ApplyRunService.run_apply_task → _run)
+  compile  (GenomeCompiler: promotion row → revision → DesiredState; no status check)
+  apply    (orchestrator → report)
   applies.finish(report)
-  completion_handlers[state.kind].on_finished(axes, state, report)    ──▶ PromotionSettler.settle
+  publish: completion_handlers[state.kind].on_finished(axes, state, outcome) ──▶ PromotionSettler.settle
   locks.release
+
+task queue gives up on the apply task (deadline in claim scan / on reschedule, or Fail)
+  apply task's on_give_up(task):
+    applies.finish(FAILED) only if the report is still RUNNING; locks.release(token); publish
 
 PromotionSettler.settle(axes, promotion_id, outcome)
   SUCCEEDED / PARTIAL → promotions.settle_moving_refs(...)  one transaction:
@@ -30,9 +35,6 @@ PromotionSettler.settle(axes, promotion_id, outcome)
   FAILED → promotions.finish(apply_failed, reason)
   row already terminal → no-op
 
-GET …/promotions/{id} / list
-  row applying + its apply terminal (incl. abandoned → FAILED) → settle, then answer
-  row pending older than the apply lock TTL with no apply_id      → apply_failed, then answer
 ```
 
 The apply engine still names no producer: it calls "the handler registered for
@@ -55,7 +57,7 @@ class ApplyCompletionHandler(Protocol):
     def on_finished(self, *, env: str, entity_id: str, bot_id: str, state: StateRef, outcome: ApplyOutcome) -> None: ...
 
 StateCompletionHandlers = Dict[str, ApplyCompletionHandler]   # map multibinding keyed by state kind
-def outcome_of(report: ApplyReport) -> ApplyOutcome: ...       # the one summariser, also used by the read-time settle
+def outcome_of(report: ApplyReport) -> ApplyOutcome: ...       # the one summariser
 ```
 
 - `ApplyRunService.__init__` takes `completion_handlers: StateCompletionHandlers`
@@ -63,20 +65,59 @@ def outcome_of(report: ApplyReport) -> ApplyOutcome: ...       # the one summari
   nothing called.
 - `_run`'s `finally`: after `applies.finish` and **before** `locks.release`,
   call the handler (so a promotion that follows sees settled refs). A handler
-  that raises is logged and swallowed — the report is already terminal and the
-  read-time settle repairs the promotion.
+  that raises does not lose the notice: the lock is still released, then the
+  exception leaves `run_apply_task`, which the queue treats as a retry.
+- **A re-run whose report is already terminal only publishes.**
+  `run_apply_task` first reads the apply record; when it is terminal (a run
+  wrote it, then the publish failed or the worker died before publishing),
+  it publishes `outcome_of` the stored report and completes, applying
+  nothing. Publishing is idempotent (settling twice is a no-op), so every
+  path that ends an apply converges on exactly one settled promotion. One
+  extra indexed read per task run.
 - `terminate_unstartable` (run/termination.py) gains an optional handler
   argument and calls it the same way. `terminate_on_launch_failure` runs on
   the caller's thread inside `start_apply`, whose exception reaches the
   promotion service directly, so it calls nothing.
-- The abandoned case (dead worker; `_to_report` derives FAILED at read) has no
-  writer to hook; the genome settles it at read time (§3).
+- A worker that dies mid-run publishes nothing; the queue re-claims the task
+  and the re-run either applies again (report still `RUNNING`) or only
+  publishes (report terminal). The deadline case publishes through §1b.
 - DI: `apply_engine_module` (or wherever `StateCompilers` gets its empty
   base) binds an empty `StateCompletionHandlers` map;
   `bot_management_module.bot_config_manifest_apply_service` passes it.
-- `ApplyRunServiceProtocol` is unchanged; `get_apply` already gives the
-  genome what the read-time settle needs. `apply_engine/README.md` boundary
+- `ApplyRunServiceProtocol` is unchanged. `apply_engine/README.md` boundary
   lists `ApplyCompletionHandler`, `ApplyOutcome`, `StateCompletionHandlers`.
+
+## 1b. Task queue: the give-up hook
+
+Today the queue gives up on a task in three places and runs no code for it:
+the claim scan's retire `UPDATE … TIMED_OUT` (`claim_batch`, step 2b), a
+`reschedule` whose `run_at` would overshoot the deadline (→ `TIMED_OUT`), and
+a handler's `Fail` (→ `FAILED`).
+
+- `TaskHandler` (`core/task_queue/types.py` / `services/registry.py`) gains an
+  optional `on_give_up(task: TaskRecord) -> None`; a handler without it is
+  unaffected.
+- Repository (`core/repository/{protocols,implementations}/platform/task_queue.py`):
+  a new `claim_batch_reporting_retired(...) -> ClaimOutcome(won, retired)`
+  carries the rows the claim scan retired (step 2b's `UPDATE` already runs per
+  candidate id; a row whose retire landed is read back). `claim_batch` keeps
+  its signature and returns `.won`, so its existing callers and tests are
+  untouched. `reschedule` keeps returning `bool`; the worker learns a
+  reschedule ended in `TIMED_OUT` with one `get_by_id`, only for a task type
+  that has a hook.
+- Worker (`services/worker.py`): after each give-up it calls the handler's
+  `on_give_up` with the record (outside any DB session); a raising hook is
+  logged and swallowed — the task is already terminal.
+- `README.md` (task queue): a "Give-up hook" paragraph.
+- Apply task (`apply_engine/apply_task.py`): its handler implements
+  `on_give_up` via a new `ApplyRunService.give_up(payload)`: read the apply
+  record; if still `RUNNING`, finish it `FAILED` with the note "the apply task
+  was given up (deadline elapsed)"; release the lock by the payload's token
+  (a no-op when already released); publish `outcome_of` the (now) terminal
+  report to the kind's handler — also when a run had already written it,
+  since that run may have died before publishing; settling is idempotent.
+  `ApplyRunServiceProtocol` is not widened: `give_up` is on the concrete
+  service the handler already holds.
 
 Hot-path cost: one extra handler call per apply; for the genome kind it is
 one promotion read plus one transaction (§3). No extra query for Manifest
@@ -109,18 +150,16 @@ Repository (`core/repository/{protocols,implementations}/bot/genome.py`):
     `settled | already_settled | ref_conflict`.
   - `finish` (exists) stays for the pre-apply failures (lock busy, start
     error); conditioned on a non-terminal status.
-- Round trips: settle = 1 read + 1 transaction of ≤5 statements; the
-  read-time settle adds one `get_apply` (1 query) only for rows still
-  `applying`.
+- Round trips: settle = 1 read + 1 transaction of ≤5 statements, once per
+  genome apply.
 
 ## 3. Genome promotion (`core/bot_genome/promotion/`)
 
 - `applier.py`: `RevisionApplier` becomes
   ```python
   kind: str
-  def preflight(self, bot, state: DesiredState) -> None
+  def preflight(self, bot, state: DesiredState) -> None                    # kept; refuses nothing here, #3212 uses it
   def start(self, bot, *, promotion_id, principal_id, audit_actor) -> str   # the apply id; raises ApplyBusy
-  def outcome(self, bot, apply_id) -> ApplyOutcome | None                   # None while running
   ```
   `PendingDeliveryApplier` is deleted.
 - New `direct_applier.py`: `DirectApplier(RevisionApplier)`, `kind="direct"`,
@@ -129,8 +168,7 @@ Repository (`core/repository/{protocols,implementations}/bot/genome.py`):
   will refuse verify/online here). `start` calls
   `start_apply(entity_id, bot_id, bot=<record>, owner_id, actor_id=principal_id,
   audit_actor=…, state=genome_state(pid), trigger="genome_promotion", phase=None)`
-  and maps `ApplyInProgressError` to the genome's `ApplyBusy`. `outcome`
-  reads `get_apply` and returns `outcome_of(report)` for a terminal one.
+  and maps `ApplyInProgressError` to the genome's `ApplyBusy`.
   The bot record comes from the bot repository the applier holds (the run
   service needs it for capabilities); the trigger value is added to the
   apply engine's trigger vocabulary (`triggers.py`) if it is a closed set.
@@ -141,11 +179,10 @@ Repository (`core/repository/{protocols,implementations}/bot/genome.py`):
   `on_finished` to it (reads `state.reference` as the promotion id).
 - `service.py` `promote`: order per Shape; principal = `actor.audit` user id
   for `USER`, `bot.owner_id` otherwise; audit label = `actor.audit`.
-  `get_promotion`/`list_promotions` run the read-time settle for rows that
-  are `applying` (via `applier.outcome`) or stale `pending` (older than
-  `APPLY_LOCK_TTL_SECONDS`, no apply id). `list` settles at most the page's
-  rows. `promote` settles the bot's earlier in-flight promotions the same
-  way before inserting its own row.
+  `get_promotion`/`list_promotions` only read. Before inserting its row,
+  `promote` marks `apply_failed` any of the bot's rows still `pending` with
+  no apply id (a request that died between its two writes; nothing will
+  publish for it) — one indexed query, usually empty.
 - `errors.py`: `ApplyBusy` (→ 409 `apply_in_progress` in `errors_genome.py`
   and the domain-error status map test).
 - `models.py`: `PromotionStatus` closed set; `Promotion.apply_id`,
@@ -153,10 +190,11 @@ Repository (`core/repository/{protocols,implementations}/bot/genome.py`):
 
 ## 4. Genome compiler (`core/bot_genome/compile.py`)
 
-- `_DELIVERABLE = {"pending", "applying"}`; the "superseded" rule becomes:
-  `active` must still point at `row.from_revision_id` (or not exist when that
-  is `None`). Re-promoting the current `active` (from == target) stays
-  deliverable.
+- No status check: `_revision_of` reads the promotion row and returns its
+  `revision_id`; a missing row is refused (`check`: `RevisionNotFound`;
+  `compile`: `CompileRefused`). `_DELIVERABLE`, the superseded rule and
+  their tests go. The compile stays pure, so a re-run compiles the same
+  state.
 - `_skill_source`: `CenterSkill` → `CenterSkillSource()`.
 
 ## 5. Center version removal (RSI-02 contract)
@@ -195,13 +233,23 @@ Repository (`core/repository/{protocols,implementations}/bot/genome.py`):
   `Intent(name, _SharedSkill(skill_id))` or a `ResolveFailure` with the
   readable reason; `plan` classifies it like a package (`updated` when the
   name is active, else `created`); `write` calls
-  `activation.claim_manifest_skill(skill_id=…)`. `_NotDelivered` and the
+  `activation.claim_apply_skill(skill_id=…)`. `_NotDelivered` and the
   #3103 docstring paragraph go.
-- Skill Center claim: `manifest_direct_claim_commands.claim_manifest_skill`
+- Rename first, as its own commit with no behaviour change (review: these
+  are apply scope): `claim_manifest_skill` → `claim_apply_skill`,
+  `remove_manifest_skill` → `remove_apply_skill`, `claim_manifest_mcp` →
+  `claim_apply_mcp`, `remove_manifest_mcp` → `remove_apply_mcp`,
+  `manifest_direct_mcp_codes` → `apply_direct_mcp_codes`,
+  `ManifestDesiredStateCommittedError` → `ApplyDesiredStateCommittedError`,
+  `manifest_direct_claim_commands.py` → `apply_claim_commands.py`, across the
+  activation port, the Skill Center service and protocol, the repository, the
+  apply-engine delegates and their tests (~85 references, 14 files). The
+  persisted audit action string `skill_manifest_direct_claim` keeps its value.
+- Skill Center claim: `apply_claim_commands.claim_apply_skill`
   accepts a target whose locator is `center://…` or `git://…` (shared, no
   bot ownership check — access was established by `_resolve_skill`) besides
   the bot's own `local://…`. Same same-name Set/Default detach logic. The
-  `skill_center/AGENTS.md` paragraph on Manifest claims and its contract test
+  `skill_center/AGENTS.md` passages on these claims and its contract test
   are updated.
 - `MaterialiserPorts` / both delivery bundles carry the `SharedSkillPort`;
   the platform (teclaw-platform) road gets the same port.
@@ -235,12 +283,13 @@ without reversing them; the P-2 decision is recorded in 08-promotion §13.
 
 | Area | Tests |
 |---|---|
-| completion seam | `apply_engine/test_apply_service_lifecycle.py`: handler called once on SUCCEEDED/PARTIAL/FAILED/CompileRefused/engine exception/unstartable, before lock release; raising handler swallowed; Manifest kind calls nothing |
+| completion seam | `apply_engine/test_apply_service_lifecycle.py`: handler called once on SUCCEEDED/PARTIAL/FAILED/CompileRefused/engine exception/unstartable, before lock release; raising handler swallowed; Manifest kind calls nothing; `give_up` finishes a RUNNING report FAILED, releases, publishes, and does nothing for a terminal one |
+| task queue | `repository/platform/test_task_queue_repository.py`: `claim_batch_reporting_retired` returns the retired rows; `claim_batch` unchanged; worker tests: hook called on claim-scan retire, reschedule→TIMED_OUT and Fail, never on success; a raising hook swallowed; a handler without a hook unaffected |
 | repository | `test_genome_repository.py`: insert pending, mark_applying conditional, settle moves pair + labels + promoted, CAS-lost → apply_failed, double settle no-op, DDL/ORM pin |
-| promotion | `bot_genome/test_promotion_service.py` (rewritten order): lock busy → 409 + row apply_failed + refs untouched; start error; principal for automated actors; read-time settle of applying/abandoned/stale pending |
+| promotion | `bot_genome/test_promotion_service.py` (rewritten order): lock busy → 409 + row apply_failed + refs untouched; start error; principal for automated actors; a stale `pending` row is failed by the next promotion |
 | settler | new `bot_genome/test_promotion_settle.py` |
 | applier | new `bot_genome/test_direct_applier.py` over a fake run service |
-| compiler | `bot_genome/test_compile.py`: deliverable rule rewritten |
+| compiler | `bot_genome/test_compile.py`: any existing promotion compiles; a missing one is refused; status tests removed |
 | center removal | `test_contract_models.py`, `test_capture.py`, `test_bot_state.py`, `contracts/test_bot_genome_schema.py`, equivalence test |
 | skills | `apply_engine/test_skills_materialiser.py`: center/repo found/not found/ambiguous; claim called; plan outcomes; removal of a shared asset never deletes |
 | skill center | claim of center/git target (`tests/community/core/skill_center/...` claim command tests), `SkillQueryService` lookup tests |
@@ -257,11 +306,13 @@ container cannot run singlebox, that is stated with what was run instead.
 
 - **Revision ids change** for revisions with Center skills; tables are not
   deployed (same footing as #3072/#3083).
-- **`claim_manifest_skill` widening** touches the Skill Center control plane;
+- **`claim_apply_skill` widening** touches the Skill Center control plane;
   guarded by its own tests and `_resolve_skill`'s access check.
 - **Owner as principal** lets an automated actor do what the owner may; the
   gate and drift checks before it are the control.
-- **A worker dying between `applies.finish` and the handler** leaves a row
-  `applying` until read; the read-time settle closes it.
-</content>
-</invoke>
+- **A worker dying between `applies.finish` and the publish** leaves the
+  report terminal and the promotion `applying`; the re-claimed task sees the
+  terminal report and only publishes; a given-up task publishes from
+  `give_up`. Settling twice is a no-op.
+- **The give-up hook touches the shared task queue**; it is optional per type
+  and every existing repository and worker test keeps its expectations.

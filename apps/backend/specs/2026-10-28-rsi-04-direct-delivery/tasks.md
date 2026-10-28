@@ -5,7 +5,7 @@
 > One pull request. Groups are the order of work; the suite is green at the
 > end of every group.
 
-## Group 1 — Baseline and the Center version removal
+## Group 1 — Record the starting test counts; drop the Center version
 
 ### Task 1: Behaviour lock `[ ]`
 - **Goal:** Record what must keep passing.
@@ -33,13 +33,21 @@
   - [ ] A fake port with a reflection test pinning it to the protocol.
 - **Depends on:** Task 2
 
-### Task 4: Claim a shared asset as a Manifest Direct skill `[ ]`
-- **Goal:** `claim_manifest_skill` accepts `center://` and `git://` targets.
-- **Files:** `repository/implementations/skill_center/manifest_direct_claim_commands.py`, `skill_center/AGENTS.md`; the claim command tests
+### Task 4a: Rename the Direct-claim calls to apply scope `[ ]`
+- **Goal:** The calls the apply engine makes lose "manifest" from their names (they serve every compiler). No behaviour change; its own commit.
+- **Files:** `core/ports/activation_port.py`, `apply_engine/activation_delegates.py`, `skill_center/{direct_activation_service,direct_activation_service_protocol,errors}.py`, `repository/{protocols/capability_desired_state,implementations/skill_center/manifest_direct_claim_commands → apply_claim_commands}.py`, materialisers `skills.py`/`mcp.py`, `skill_center/AGENTS.md`, and the tests that name them (14 files in all)
+- **Done when:**
+  - [ ] `claim_apply_skill`, `remove_apply_skill`, `claim_apply_mcp`, `remove_apply_mcp`, `apply_direct_mcp_codes`, `ApplyDesiredStateCommittedError`, `apply_claim_commands.py`; no `manifest` left in these names; the audit action string `skill_manifest_direct_claim` unchanged.
+  - [ ] Every suite that touched them passes with the same counts.
+- **Depends on:** Task 1
+
+### Task 4: Claim a shared asset as an apply Direct skill `[ ]`
+- **Goal:** `claim_apply_skill` accepts `center://` and `git://` targets.
+- **Files:** `repository/implementations/skill_center/apply_claim_commands.py`, `skill_center/AGENTS.md`; the claim command tests
 - **Done when:**
   - [ ] A shared target is claimed with the same-name Set/Default detach a local one gets; a foreign bot's `local://` target is still refused.
   - [ ] Removal of a shared asset deactivates and never deletes (existing behaviour, pinned by a test).
-- **Depends on:** Task 3
+- **Depends on:** Tasks 3, 4a
 
 ### Task 5: The skills materialiser delivers Center and repo skills `[ ]`
 - **Goal:** Close #3103.
@@ -49,16 +57,25 @@
   - [ ] Module docstring rewritten; the "materialisers name no engine" test passes.
 - **Depends on:** Task 4
 
-## Group 3 — The apply engine tells a producer its apply ended
+## Group 3 — Every end of an apply is published
 
-### Task 6: Completion seam `[ ]`
-- **Goal:** `ApplyCompletionHandler` keyed by state kind, called on every terminal path the run service writes.
+### Task 6: Completion publish/subscribe `[ ]`
+- **Goal:** `ApplyCompletionHandler` keyed by state kind, called on every terminal path the run service writes; a re-run with a terminal report only publishes.
 - **Files:** `apply_engine/completion.py`, `run/service.py`, `run/termination.py`, `apply_engine/README.md`, DI (`bot_management_module.py`, the module that bases `StateCompilers`); tests `test_apply_service_lifecycle.py`, `test_apply_task.py`, `di/test_apply_engine_module_wiring.py`
 - **Done when:**
-  - [ ] Handler called exactly once per terminal path (SUCCEEDED, PARTIAL, FAILED, compile refused, engine exception, unstartable), after `applies.finish`, before `locks.release`, with `outcome_of(report)`.
-  - [ ] A raising handler is logged, the report stays terminal, the lock is released.
+  - [ ] Handler called once per terminal path (SUCCEEDED, PARTIAL, FAILED, compile refused, engine exception, unstartable), after `applies.finish`, before `locks.release`, with `outcome_of(report)`.
+  - [ ] A raising handler: lock released, then the task raises (queue retry); the retried run finds the report terminal and only publishes.
   - [ ] A kind with no handler (Manifest) calls nothing; every existing Manifest/apply test passes unchanged.
 - **Depends on:** Task 1
+
+### Task 6b: The task queue's give-up hook `[ ]`
+- **Goal:** The queue tells a task type when it gives up on one of its tasks; the apply task finishes, unlocks and publishes.
+- **Files:** `core/task_queue/{types.py,services/registry.py,services/worker.py,README.md}`, `core/repository/{protocols,implementations}/platform/task_queue.py`, `apply_engine/apply_task.py`, `run/service.py` (`give_up`); tests `repository/platform/test_task_queue_repository.py`, the worker tests, `test_apply_task.py`
+- **Done when:**
+  - [ ] `claim_batch_reporting_retired` returns the rows the scan retired; `claim_batch` unchanged for its callers.
+  - [ ] The worker calls `on_give_up` after a claim-scan retire, a reschedule that ended `TIMED_OUT`, and a `Fail`; never after success; a raising hook is swallowed; a handler without a hook is unaffected.
+  - [ ] The apply task's `give_up`: a `RUNNING` report becomes `FAILED` with the give-up note, the lock is released, the outcome is published; an already terminal report is published as stored.
+- **Depends on:** Task 6
 
 ## Group 4 — Promotion follows the apply
 
@@ -70,11 +87,11 @@
   - [ ] Double settle is a no-op; the DDL/ORM pin passes.
 - **Depends on:** Task 2
 
-### Task 8: Genome compiler delivers an in-flight promotion `[ ]`
-- **Goal:** Deliverable = `pending`/`applying` and `active` still where the promotion expected.
+### Task 8: Genome compiler: promotion → revision → desired state `[ ]`
+- **Goal:** Compile reads the promotion's revision and compiles it; no status check.
 - **Files:** `bot_genome/compile.py`, `test_compile.py`
 - **Done when:**
-  - [ ] Pending/applying with matching `active` compile; settled statuses, a moved `active`, a missing row are refused (check: domain error; compile: `CompileRefused`).
+  - [ ] Any existing promotion compiles to its revision's state; a missing one is refused (check: `RevisionNotFound`; compile: `CompileRefused`); `_DELIVERABLE` and the superseded rule are gone with their tests.
 - **Depends on:** Task 7
 
 ### Task 9: Direct applier, settler and the promotion order `[ ]`
@@ -84,10 +101,10 @@
   - [ ] Lock busy → `ApplyBusy`, row `apply_failed`, refs untouched; other start error → row `apply_failed` (type only); accepted → row `applying` + apply id.
   - [ ] Settle maps SUCCEEDED/PARTIAL/FAILED/CAS-lost per spec; `GenomeCompletionHandler` is in the completion map under `genome`.
   - [ ] Automated actor → principal is the bot owner, audit label the actor; user → that user.
-  - [ ] Reads, and the start of the bot's next promotion, settle an `applying` row whose apply ended (incl. abandoned) and a stale `pending` row.
-  - [ ] A worker crash mid-apply: the re-claimed task re-runs the apply, the compiler accepts the still-`applying` promotion, and the promotion settles once (test: the same task payload run a second time after a run that never reached its terminal write).
+  - [ ] Reads do not settle; the bot's next promotion fails a stale `pending` row (no apply id) before inserting its own.
+  - [ ] A worker crash mid-apply: the same task payload run again re-applies and the promotion settles once; run again after the terminal write, it only publishes; given up, it settles `apply_failed`.
   - [ ] `PendingDeliveryApplier` deleted; `RevisionApplier` binds `DirectApplier`; no DI cycle.
-- **Depends on:** Tasks 6, 8
+- **Depends on:** Tasks 6, 6b, 8
 
 ### Task 10: HTTP surface `[ ]`
 - **Goal:** The genome API shows the lifecycle and the partial marker.
