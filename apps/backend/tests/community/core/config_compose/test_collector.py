@@ -1264,7 +1264,7 @@ def test_engine_overrides_active_channel_maps_neutral_account():
 
     # Channel resources follow the immutable entity, independently of the actor.
     repo.get_by_type_and_identity_ids.assert_called_once_with(
-        type="dingding", identity_ids=["e1", "aideskdingding"], bind_bot_id="bot1"
+        type="dingding", identity_ids=["staff_u1", "aideskdingding"], bind_bot_id="bot1"
     )
     dingding = out["channels"]["dingding"]
     assert dingding["enabled"] is True

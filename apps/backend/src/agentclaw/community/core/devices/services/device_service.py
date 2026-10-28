@@ -1048,16 +1048,14 @@ class DeviceService:
         if self._effective_binding_status(record) == DeviceBindingStatus.FAILED.value:
             raise InvalidDeviceStatusError("cannot get connection for failed device")
 
-        # Permission check: 检查是否是公开 Bot 或协作者
-        if record.entity_id != operator.staff_id:
-            is_public = False
+        from .binding_identity import bot_for_binding
+
+        bot = bot_for_binding(self._bot_query, record)
+        current_owner_id = (bot or {}).get("owner_id") or record.entity_id
+        # Permission check: current Owner, public Bot or collaborator.
+        if current_owner_id != operator.staff_id:
+            is_public = bot is not None and bot.get("public") == "1"
             is_collaborator = False
-            bot = None
-            try:
-                bot = self._bot_query.get_by_binding_id(binding_id)
-                is_public = bot is not None and bot.get("public") == "1"
-            except Exception as e:
-                logger.warning("[get_device_connection] Failed to check bot visibility: %s", e)
 
             # 检查协作者权限
             if not is_public and not is_collaborator:

@@ -2,6 +2,13 @@
 
 Device / engine domain — engine binding, health probing, readiness, sandbox provisioning, OSS↔NAS migration.
 
+Connection authorization resolves the Bot linked to a binding first and uses
+its current `owner_id`. A published binding's `device_props.bolt_id` plus its
+immutable `entity_id` resolves the same Bot after handoff. Historical bindings
+with no linked Bot retain their standalone entity-owner rule. Lookup failures
+deny access; the retained entity never grants former-Owner access to a linked
+private Bot. Public visibility and existing collaborator checks remain in place.
+
 ## Context Boundary
 
 ```yaml
