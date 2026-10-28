@@ -119,6 +119,10 @@ class AgentSwarmOrchestrationConfig:
     batch_size: int = 10
     wall_clock_seconds: float = 3600.0
     no_progress_threshold: int = 3
+    # Simulator-only fault injection: artificial delay inside each
+    # subagent's setup() — llm and bot kind alike — defaulting to zero
+    # everywhere that does not configure it (prod/pre never set the key).
+    subagent_setup_delay_seconds: float = 0.0
 
     @classmethod
     def from_block(cls, block: dict) -> "AgentSwarmOrchestrationConfig":
@@ -149,6 +153,8 @@ class AgentSwarmOrchestrationConfig:
                 block, "wall_clock_seconds", d.wall_clock_seconds, exclusive=True),
             no_progress_threshold=_as_int(
                 block, "no_progress_threshold", d.no_progress_threshold, minimum=1),
+            subagent_setup_delay_seconds=_as_float(
+                block, "subagent_setup_delay_seconds", d.subagent_setup_delay_seconds),
         )
         # A single attempt is setup() then run_task(); if their budgets do
         # not fit inside one slice, the slice cancels the attempt mid-phase,

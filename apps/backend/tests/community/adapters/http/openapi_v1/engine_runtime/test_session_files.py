@@ -248,7 +248,7 @@ def test_friendship_source_failure_never_reads_resources(friend_client, friendsh
     assert resources.calls == []
 
 
-@pytest.mark.parametrize("reason", ["not_friend", "foreign_identity", "foreign_session", "verify", "online", "missing_parameter"])
+@pytest.mark.parametrize("reason", ["not_friend", "foreign_identity", "foreign_session", "missing_parameter"])
 def test_friend_list_refuses_unauthorized_access_without_reading_resources(
     friend_client, resources, friendships, expert, reason,
 ):
@@ -263,17 +263,53 @@ def test_friend_list_refuses_unauthorized_access_without_reading_resources(
         expert.get_owned_chat_session = AsyncMock(side_effect=BotNotFoundError("foreign session"))
     elif reason == "missing_parameter":
         del params["f_user_id"]
-    else:
-        params["stage"] = reason
     assert fails(friend_client.get(_base(), params=params), 404)["message"] == "Not found"
     assert resources.calls == []
 
 
-@pytest.mark.parametrize("suffix,method", [("/sr_1/content", "get"), ("/sr_1", "delete"), ("/upload-intents", "post")])
+def test_friend_file_list_supports_online(friend_client, resources):
+    response = friend_client.get(_base(), params={
+        "owner_id": OWNER, "f_user_id": "friend-1", "stage": "online",
+    })
+    assert response.status_code == 200
+    assert resources.calls[0][0] == "list"
+
+
+def test_friend_file_list_rejects_verify_before_reading_resources(friend_client, resources):
+    response = friend_client.get(_base(), params={
+        "owner_id": OWNER, "f_user_id": "friend-1", "stage": "verify",
+    })
+    assert response.status_code == 409
+    assert resources.calls == []
+
+
+@pytest.mark.parametrize("suffix,method", [("/sr_1", "delete"), ("/upload-intents", "post")])
 def test_friend_parameter_does_not_grant_other_file_permissions(friend_client, resources, suffix, method):
     response = getattr(friend_client, method)(
         _base() + suffix, params={"owner_id": OWNER, "f_user_id": "friend-1"},
     )
+    assert response.status_code == 404
+    assert resources.calls == []
+
+
+@pytest.mark.parametrize("suffix", ["", "/sr_1/content", "/sr_1/materialize-status"])
+def test_online_friend_file_reads_share_owned_session_authorization(friend_client, expert, resources, suffix):
+    response = friend_client.get(_base() + suffix, params={
+        "owner_id": OWNER, "f_user_id": "friend-1", "stage": "online",
+    })
+    assert response.status_code == 200, response.text
+    assert any(call[0] == "get_owned_chat_session" for call in expert.calls)
+    assert len(resources.calls) == 1
+
+
+@pytest.mark.parametrize("suffix", ["", "/sr_1/content", "/sr_1/materialize-status"])
+def test_foreign_session_cannot_read_friend_files(friend_client, expert, resources, suffix):
+    from unittest.mock import AsyncMock
+
+    expert.get_owned_chat_session = AsyncMock(side_effect=BotNotFoundError("foreign"))
+    response = friend_client.get(_base() + suffix, params={
+        "owner_id": OWNER, "f_user_id": "friend-1", "stage": "online",
+    })
     assert response.status_code == 404
     assert resources.calls == []
 

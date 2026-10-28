@@ -367,6 +367,11 @@ class AgentSwarmModule(Module):
         factory = DefaultSubagentFactory(
             llm, platform, attempt_repo=attempt_repo,
             setup_timeout=config.orchestration.setup_timeout,
+            setup_ceiling=(
+                config.orchestration.slice_max_seconds
+                - config.orchestration.per_attempt_timeout
+            ),
+            subagent_setup_delay=config.orchestration.subagent_setup_delay_seconds,
         )
         store = FilesystemArtifactStore(config.artifact_store_root)
         # The pool's binding-journal SliceStore (D-L): the same repos, its
@@ -389,6 +394,10 @@ class AgentSwarmModule(Module):
             max_attempts=config.orchestration.agent_max_attempts,
             per_task_timeout=config.orchestration.per_attempt_timeout,
             setup_timeout=config.orchestration.setup_timeout,
+            setup_ceiling=(
+                config.orchestration.slice_max_seconds
+                - config.orchestration.per_attempt_timeout
+            ),
             artifact_inline_threshold=config.artifact_inline_threshold,
             upstream_breaker=UpstreamBreaker(
                 failure_threshold=config.upstream_breaker.failure_threshold,

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -9,6 +10,7 @@ from agentclaw.community.core.task.domain.errors import (
     NodeNotFoundError,
     TaskArtifactContentError,
     TaskNotFoundError,
+    TaskStateError,
 )
 from agentclaw.community.core.task.domain.models import (
     Context,
@@ -78,6 +80,16 @@ class _StubGraphRepo:
         return self._graphs.get(task_id)
 
 
+class _StubTaskInfoRepo:
+    def __init__(self, executor_app=None):
+        self.executor_app = executor_app
+
+    def get(self, task_id):
+        if self.executor_app is None:
+            return None
+        return SimpleNamespace(task_id=task_id, executor_app=self.executor_app)
+
+
 class _StubArtifactRepo:
     def __init__(self, events=None, *, append_error=None):
         self.appended = []
@@ -138,12 +150,14 @@ def _service(
     *,
     session_files=None,
     bcs_bot_tokens=None,
+    task_info_executor_app=None,
 ):
     return TaskArtifactApiService(
         _StubGraphRepo(graphs),
         artifact_repo or _StubArtifactRepo(),
         session_files=session_files,
         bcs_bot_tokens=bcs_bot_tokens,
+        task_info_repo=_StubTaskInfoRepo(task_info_executor_app),
     )
 
 
@@ -539,3 +553,52 @@ async def test_dashboard_sync_without_session_integration_lists_database_once():
 
     assert await service.sync_session_files_and_list(graph) == [existing]
     assert repo.list_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_dashboard_sync_is_read_only_for_cross_executor_app_owner(monkeypatch):
+    from agentclaw.community.core.task.task_context.task_artifact import artifact_api_service
+
+    monkeypatch.setattr(
+        artifact_api_service, "get_current_executor_app", lambda: "agentclaw"
+    )
+    repo = _StubArtifactRepo()
+    existing = _record(_session_content())
+    repo.rows = [existing]
+    files = _StubSessionFiles([_ready_file()])
+    graph = _session_graph()
+    service = _service(
+        {"t-1": graph},
+        repo,
+        session_files=files,
+        task_info_executor_app="agentclawengine",
+    )
+
+    rows = await service.sync_session_files_and_list(graph)
+
+    assert rows == [existing]
+    assert repo.appended == []
+    assert files.calls == []
+
+
+def test_manual_artifact_write_is_rejected_for_cross_executor_app_owner(monkeypatch):
+    from agentclaw.community.core.task.task_context.task_artifact import artifact_api_service
+
+    monkeypatch.setattr(
+        artifact_api_service, "get_current_executor_app", lambda: "agentclaw"
+    )
+    repo = _StubArtifactRepo()
+    graph = _session_graph()
+    service = _service(
+        {"t-1": graph},
+        repo,
+        task_info_executor_app="agentclawengine",
+    )
+
+    with pytest.raises(TaskStateError, match="executor app mismatch"):
+        service.add_artifact(
+            parse_artifact_report_item(
+                _raw_item(), report_task_id="t-1", report_node_id="n-1"
+            )
+        )
+    assert repo.appended == []

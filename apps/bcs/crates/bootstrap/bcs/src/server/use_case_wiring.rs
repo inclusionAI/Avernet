@@ -332,6 +332,7 @@ pub(super) fn create_message_flow_builder(
         .with_output_admission(output_admission)
 }
 
+#[cfg(any(test, feature = "test-utils"))]
 pub(super) fn finalize_message_flow(
     message_flow: BcsMessageFlow,
     system_message: Arc<dyn bcs_service_api::SystemMessageService>,

@@ -216,6 +216,31 @@ describe('botChatProvider', () => {
     });
   });
 
+  it.each(['isTeamBot', 'isFriendBot'] as const)(
+    '%s 服务 Bot 的连接、IAM 初始化/重连/发送均使用 online',
+    async (role) => {
+      mockedGetConnection.mockResolvedValue({
+        code: 200000,
+        data: { sockets: [{ kind: 'chat', url: 'wss://gw/ws' }] },
+      });
+      const target = { ...bot, botType: 'service', runtimeStage: 'draft' as const, [role]: true };
+      const provider = createBotChatProvider({ bot: target, userId: 'human_900003', sessionId: 'sid-1' });
+      await provider.connect();
+      const cfg = (adapters.OpenClawProvider as jest.Mock<any>).mock.calls[0][0] as {
+        credentialProvider: () => Promise<unknown>;
+      };
+      await cfg.credentialProvider();
+      mockSdk.isConnected = true;
+      await provider.request({ content: 'hi', sessionId: 'sid-1' });
+      expect(mockedGetConnection).toHaveBeenCalledWith(
+        'b',
+        expect.objectContaining({ stage: 'online', owner_id: '2088' }),
+      );
+      expect(mockedGetIamToken).toHaveBeenCalledTimes(3);
+      for (const args of mockedGetIamToken.mock.calls) expect(args).toEqual(['b', '900003', '2088', 'online']);
+    },
+  );
+
   it('request 透传 query + sessionKey,并按需 connect', async () => {
     mockedGetConnection.mockResolvedValue({
       code: 200000,

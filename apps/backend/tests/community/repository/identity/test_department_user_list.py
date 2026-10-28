@@ -97,3 +97,19 @@ def test_mysql_department_parameters_remain_strings(nocase_repository, monkeypat
                 assert isinstance(bind.type, String)
                 assert processed == path
     assert found_path
+
+
+def test_name_matching_uses_database_collation(nocase_repository):
+    from unittest.mock import Mock
+
+    from agentclaw.community.core.user_list.service import UserListService
+    from agentclaw.community.plugin_api.staff_dept import StaffDeptInfo
+
+    nocase_repository.set_membership(
+        entity_id="Example-Platform", subject_type="department", user_list_type="feature",
+        env="pre", in_whitelist=True,
+    )
+    directory = Mock()
+    directory.get_dept_by_work_no.return_value = StaffDeptInfo(dept_name="EXAMPLE-platform-Research")
+    service = UserListService(repository=nocase_repository, staff_dept=directory)
+    assert service.matches_user(entity_id="staff", user_list_type="feature", env="pre", bot_type="personal")

@@ -98,6 +98,14 @@ export const PanelToggle: React.FC<P> = (p) => (
     <line x1="9" y1="2" x2="9" y2="12" stroke="#fff" strokeWidth="1.2" />
   </svg>
 );
+export const TaskSwitcherIcon: React.FC<P> = (p) => (
+  <Svg {...p}>
+    <rect width="6" height="6" x="3" y="4" rx="1" />
+    <path d="m4 17 2 2 4-4" />
+    <path d="M13 7h8" />
+    <path d="M13 17h8" />
+  </Svg>
+);
 
 /** 节点状态 → icon（F3） */
 /** 节点状态圆点（对齐 PRD demo 图1：实心圆点 + 浅描边） */

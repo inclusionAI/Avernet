@@ -141,6 +141,7 @@ class RunOptions:
     model_name: str | None = None
     slice_max_seconds: float | None = None
     per_attempt_timeout_seconds: float | None = None
+    setup_timeout_seconds: float | None = None
     max_turns: int | None = None
     max_total_agents: int | None = None
     max_width: int | None = None
@@ -154,6 +155,7 @@ class RunOptions:
             model_name=dto.model_name,
             slice_max_seconds=dto.slice_max_seconds,
             per_attempt_timeout_seconds=dto.per_attempt_timeout_seconds,
+            setup_timeout_seconds=dto.setup_timeout_seconds,
             max_turns=dto.max_turns,
             max_total_agents=dto.max_total_agents,
             max_width=dto.max_width,
@@ -180,6 +182,7 @@ class RunOptions:
             model_name=ext.get(f"{prefix}.model_name"),
             slice_max_seconds=val("slice_max_seconds", float),
             per_attempt_timeout_seconds=val("per_attempt_timeout_seconds", float),
+            setup_timeout_seconds=val("setup_timeout_seconds", float),
             max_turns=val("max_turns", int),
             max_total_agents=val("max_total_agents", int),
             max_width=val("max_width", int),
@@ -191,6 +194,7 @@ class RunOptions:
             "model_name": self.model_name,
             "slice_max_seconds": self.slice_max_seconds,
             "per_attempt_timeout_seconds": self.per_attempt_timeout_seconds,
+            "setup_timeout_seconds": self.setup_timeout_seconds,
             "max_turns": self.max_turns,
             "max_total_agents": self.max_total_agents,
             "max_width": self.max_width,
@@ -198,3 +202,35 @@ class RunOptions:
         }.items():
             if v is not None:
                 md.extend[f"agentswarm.options.{key}"] = str(v)
+
+    def resolved_setup_timeout(self, config_value: float,
+                               ceiling: float) -> float:
+        """Effective provisioning budget (spawn + authorization + READY).
+
+        The deployment's ``orchestration.setup_timeout`` is the fallback;
+        an explicitly requested value wins up to ``ceiling`` — the slice
+        room the deployment configuration leaves (``slice_max_seconds``
+        minus ``per_attempt_timeout``), so a caller can lengthen slow-env
+        provisioning from the request alone (no redeploy) but can never
+        push one agent's setup past what a single slice can hold."""
+        if self.setup_timeout_seconds is None:
+            return float(config_value)
+        return max(1.0, min(float(self.setup_timeout_seconds), float(ceiling)))
+
+    def resolved_per_attempt_timeout(self, config_value: float) -> float:
+        """Effective one-attempt task budget: tighten-only. The deployment's
+        ``orchestration.per_attempt_timeout`` is both fallback and cap — a
+        per-run value can never outgrow the slice room its setup budget
+        already occupies."""
+        if self.per_attempt_timeout_seconds is None:
+            return float(config_value)
+        return max(1.0, min(float(self.per_attempt_timeout_seconds),
+                           float(config_value)))
+
+    def resolved_slice_max(self, config_value: float) -> float:
+        """Effective slice budget: tighten-only. The deployment's
+        ``orchestration.slice_max_seconds`` stays the ceiling so one run
+        cannot stretch the scheduling quantum past fleet norms."""
+        if self.slice_max_seconds is None:
+            return float(config_value)
+        return max(1.0, min(float(self.slice_max_seconds), float(config_value)))

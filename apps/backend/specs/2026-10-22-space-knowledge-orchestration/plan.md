@@ -12,7 +12,7 @@
 - Work Order manual/AUTO writer：保留既有审批与通知语义，同事务调用扩展。
 - Skill Space 创建 seam：只调用中性身份扩展，不改 Skill 业务。
 - Knowledge producer：保留捕获/确认算法，优化候选定位及元数据读取。
-- Composition root：显式选择空/持久记录实现，并拒绝有历史时误关闭记录。
+- Composition root：显式选择空/持久记录实现，保留 producer/配置检查，表结构问题延迟到实际 SQL；历史不再决定应用能否启动。
 
 ## Data Model Changes
 
@@ -42,12 +42,12 @@ class SpaceKnowledgeCaptureConfig:
 ```
 
 ```yaml
-# user_config: strictly validated optional block
+# user_config: optional block; malformed values fail closed to disabled
 space_knowledge_capture:
   enabled: false
 ```
 
-缺省为 false；拒绝未知键和非 bool。Sink.is_enabled 继续只控制投递。公共配置在专用小模块定义，避免扩大现有 config.py。
+缺省为 false；非法形状（未知键/非 bool）按关闭处理并告警，不阻断启动。Sink.is_enabled 继续只控制投递。公共配置在专用小模块定义，避免扩大现有 config.py。
 
 ## Key Files & Functions
 
@@ -95,17 +95,18 @@ class KnowledgeSpacePersistenceEffects:
 
 ```python
 # apps/backend/src/agentclaw/community/core/space_knowledge/capture_lifecycle.py (new)
-# After Database bootstrap, before serving requests/allowing source writes:
-# disabled + missing table -> safe no-op, no SQL against the absent table
-# disabled + table exists + same-environment history (any app) -> reject unsafe downgrade
-# enabled -> validate original outbox schema; no silent fallback on errors
+# Startup performs no configuration validation, with no DB session or schema reflection.
+# disabled -> ordinary no-op effects, regardless of outbox schema/history
+# enabled -> actual SQL uses the existing transaction; DB errors propagate
+# No explicit schema preflight; producer still rejects disabled capture
 ```
 
-启动验证使用 DatabasePlugin 的 session/bind；不得窥探 CommunityDatabase 私有 engine。DI configure/constructor 不做 DB I/O。必须保证验证异常被正常 lifespan 传播，不靠会吞 provider 异常的 lifecycle discovery；校验未完成前不得放行可能丢事件的源写入。沿用公共 Lifecycle，不修改它的阶段语义。若 startup 使用者涉及提前写入，先验证这一顺序，不以默认已就绪绕过。实现采用同一个幂等 validation guard：正常 startup 在 DB bootstrap 后验证，startup writer/库调用在首个受保护事务内验证，失败在外部副作用或提交前传播，不以已就绪默认值跳过。
+2026-10-27 后续修订：启动不打开 DB session，不反射同步表结构；普通库调用同样不进行预检。2026-10-27 startup 解耦修订：启动也不再校验配置格式或 capture/Sink 组合，非法配置块按关闭处理并告警，capture=false + delivery=true 组合正常启动。构造函数参数保持兼容，guard 仅在运行时保护 producer 启用关系。真实 SQL 留在原 repository/effects 及调用者事务内执行，错误正常传播/回滚，不降级为空实现。其他 DB bootstrap 行为不变，不能承诺其他基础设施错误不阻断启动。
 
 ```python
 # apps/backend/src/agentclaw/community/di/container.py:271 (modify)
-# Eagerly validate typed capture configuration on every profile (no DB I/O).
+# Eagerly resolve typed capture configuration on every profile (no DB I/O);
+# malformed blocks fail closed to disabled capture with a warning.
 # Existing spaces_module.py / space_skill_repository_bindings.py retain contracts;
 # wire effects once and verify WorkOrdersModule shares the same singleton policy.
 ```
@@ -145,7 +146,7 @@ None. 不增加包、数据库服务、事件总线或共享队列改造。
 
 ## Risks & Mitigations
 
-- **Risk:** 将暂停投递误当关闭记录。**Mitigation:** 两个独立状态；有历史时拒绝关闭记录；暂停重启回归。
+- **Risk:** 将暂停投递误当关闭记录。**Mitigation:** 两个独立状态；暂停投递仍应保持记录开启。2026-10-27 起历史不再阻断应用启动，明确关闭记录的历史缺口需由发布流程控制；暂停重启回归。
 - **Risk:** 多实例滚动期间有 writer 仍为空扩展。**Mitigation:** 首次激活前所有 writer 统一启用记录装配；禁止混合策略下激活。不能只升级 API 实例而遗漏 worker/其他写入者。
 - **Risk:** 初始化顺序或 lifecycle discovery 吞错误。**Mitigation:** 配置 eager 校验、实际 lifespan 测试、校验完成前写入保护；不在 DI 构造期查库。
 - **Risk:** 空策略被用于真实同步 producer。**Mitigation:** 完整 DI 合同验证 producer/sync 与记录策略一致；默认 Sync/Provider 仍 unavailable。
@@ -165,7 +166,7 @@ None. 不增加包、数据库服务、事件总线或共享队列改造。
 从未启用：保持默认 capture=false，不要求同步 DDL，先验证缺表完整启动及原功能。
 首次启用：执行原同步表迁移 → 所有 writer 统一 capture=true → 验证装配/worker → 开放首次激活。
 暂停投递：保持 capture=true，只暂停 Sink；继续保留 pending 与 retired 历史。
-回滚：有历史时不得切空策略；按受控回滚流程暂停相关写入，绝不删除历史来绕过检查。
+回滚：历史存在不再阻断显式空策略的启动/普通写入；为避免漏记撤权，应保持记录或受控暂停相关写入，绝不删除历史。同步 producer 仍受 require_enabled 保护。
 ```
 
 不执行线上操作。原 contract.md 的全局 DDL 前置说法在本隔离变更完成后被限定为启用记录的部署；本地验证结果不等于远端 PR 或部署已经切换。
@@ -176,7 +177,7 @@ None. 不增加包、数据库服务、事件总线或共享队列改造。
 # apps/backend/tests/community/core/space_knowledge/test_capture_isolation.py (new)
 def test_default_graph_legacy_operations_persist_without_outbox_table(): ...
 def test_disabled_capture_never_queries_outbox_or_uses_knowledge_write_guard(): ...
-def test_retained_history_rejects_disabling_capture(): ...
+def test_retained_history_does_not_block_disabled_capture_startup(): ...
 def test_paused_sink_keeps_ordered_membership_history_across_restart(): ...
 
 # apps/backend/tests/community/adapters/http/space_knowledge/test_capture_isolation_http.py (new)

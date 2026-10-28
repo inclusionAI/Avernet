@@ -22,16 +22,20 @@ from __future__ import annotations
 
 import logging
 import time
+
+from agentclaw.community.utils.app_utils import get_current_executor_app
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from agentclaw.community.core.repository.protocols.task import (
     TaskArtifactRepositoryProtocol,
     TaskGraphRepositoryProtocol,
+    TaskInfoRepositoryProtocol,
 )
 from agentclaw.community.core.task.domain.errors import (
     NodeNotFoundError,
     TaskArtifactContentError,
     TaskNotFoundError,
+    TaskStateError,
 )
 from agentclaw.community.core.task.repository.types import TaskArtifactRecord
 from agentclaw.community.core.task.task_context.task_artifact.artifact_publish import (
@@ -102,13 +106,37 @@ class TaskArtifactApiService(TaskArtifactApiServiceProtocol):
         artifact_repo: TaskArtifactRepositoryProtocol,
         session_files: BcsSessionFilesPort | None = None,
         bcs_bot_tokens: BcsBotTokenProvider | None = None,
+        task_info_repo: TaskInfoRepositoryProtocol | None = None,
     ) -> None:
         self._graph_repo = graph_repo
         self._artifact_repo = artifact_repo
         self._session_files = session_files
         self._bcs_bot_tokens = bcs_bot_tokens
+        self._task_info_repo = task_info_repo
+
+    def _task_executor_app(self, task_id: str) -> str | None:
+        """Return the durable task owner, or ``None`` when ownership is unknown.
+
+        Lightweight test wiring can omit the repository; then historical behavior
+        treats the current deployment as owner. Production DI always supplies this
+        repository.
+        """
+        if self._task_info_repo is None:
+            return None
+        record = self._task_info_repo.get(task_id)
+        return record.executor_app if record is not None else None
+
+    def _require_owned_task(self, task_id: str) -> None:
+        owner_app = self._task_executor_app(task_id)
+        current_app = get_current_executor_app()
+        if owner_app is not None and owner_app != current_app:
+            raise TaskStateError(
+                f"task executor app mismatch: task_id={task_id}, "
+                f"task={owner_app}, current={current_app}"
+            )
 
     def add_artifact(self, item: "ArtifactReportItem") -> TaskArtifactRecord:
+        self._require_owned_task(item.task_id)
         graph = self._graph_repo.load_graph(item.task_id)
         if graph is None:
             raise TaskNotFoundError(item.task_id)
@@ -167,6 +195,13 @@ class TaskArtifactApiService(TaskArtifactApiServiceProtocol):
         propagated. A successful append triggers a fresh manifest read so callers see
         all artifacts currently stored by the repository.
         """
+        owner_app = self._task_executor_app(graph.task_id)
+        current_app = get_current_executor_app()
+        if owner_app is not None and owner_app != current_app:
+            # A viewer deployment must not write the owner's artifact manifest.
+            # Return already-persisted artifacts only.
+            return self.list_artifacts(graph.task_id, limit=limit)
+
         discovered = await self._discover_session_files(graph)
 
         # Required ordering: inspect every visible node session before the first

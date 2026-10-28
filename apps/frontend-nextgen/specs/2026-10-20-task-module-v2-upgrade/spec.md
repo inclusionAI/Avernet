@@ -127,9 +127,15 @@ TaskPanelV2（壳：面包屑两级栈 + 收起/展开 + 多任务切换条；�
   ——`drillStack`（封顶 2 层）、`selectedNodeId`、`activeTaskId`、`pendingNavigation`
   （由宿主消费，执行会话跳转）、`panelCollapsed`（经 `panelCommand` 作用于 SDK 副屏，
   不自管宽度）。同时清掉 `taskStore` 里两处 dead 偏好字段。
-- **多任务切换条**：数据来自 `listTasks`（现有 list API），横条展示当前任务名 + 状态 +
-  数量徽章，下拉切换 `activeTaskId`（重新挂 TaskPanelFetcher）。demo 的全屏可拖悬浮入
-  口是演示脚手架，**不产品化**；真实入口 = 发起任务时的自动切换 + 副屏横条手动切换。
+- **多任务切换条**：数据来自 `listTasks`（现有 list API），以当前任务的
+  `execution_config.main_session_id` 作为会话边界（历史记录回退读取
+  `task_spec.context.extend_props.teamclaw_context.main_session_id`），仅展示属于同一会话的任务。
+  同一会话至少有 2 个任务时，在副屏右下角展示可在副屏范围内拖拽的任务切换开关，顶部横条
+  默认隐藏；用户点击开关后，横条才在「任务总览」上方展示当前任务名 + 状态 + 数量徽章，
+  再次点击开关则隐藏；拖拽结束不触发显隐切换。
+  横条下拉切换 `activeTaskId`（重新挂 TaskPanelFetcher）。只有 1 个任务、当前任务无法从列表解析，
+  或当前任务缺少会话标识时，开关与横条都不展示，保持现有无标题的简洁头部。demo 的全屏拖拽
+  能力不产品化；真实入口 = 发起任务时的自动切换 + 副屏内可拖拽悬浮开关控制的横条手动切换。
 - **跳转/下钻分离**与 demo 语义一致：点整卡 = `selectNode`（选中 + 高亮 + 触发
   `pendingNavigation`）；下钻按钮 = `drillInto`（仅 run_mode 为协作群的节点有热区）。
 - **会话导航与消息定位（契约不变决策下的派生方案）**：选中节点后通过真实

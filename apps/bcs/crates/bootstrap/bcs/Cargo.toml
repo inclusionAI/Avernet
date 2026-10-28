@@ -13,7 +13,7 @@ path = "src/main.rs"
 
 [[bin]]
 name = "bcs-caller-e2e"
-path = "tests/caller_channel/main.rs"
+path = "tests/caller_channel/runner.rs"
 required-features = ["test-utils"]
 
 [features]

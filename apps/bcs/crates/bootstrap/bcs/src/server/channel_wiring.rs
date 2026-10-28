@@ -433,12 +433,14 @@ pub(super) fn build_configured_channel_providers(
     Ok(providers)
 }
 
+#[cfg(any(test, feature = "test-utils"))]
 fn build_file_collaboration_template_service(
     config: &BcsConfig,
 ) -> Arc<dyn CollaborationTemplateService> {
     build_file_collaboration_template_service_with_judge_templates(config, config.llm.is_enabled())
 }
 
+#[cfg(any(test, feature = "test-utils"))]
 pub(super) fn build_standalone_collaboration_template_service(
     config: &BcsConfig,
 ) -> Arc<dyn CollaborationTemplateService> {

@@ -256,3 +256,20 @@ describe('botSessionFileService 列表/删除/下载', () => {
     expect(res.ok).toBe(true);
   });
 });
+
+describe('会话文件 online stage 贯穿读写与内容地址', () => {
+  it('文件列表、删除和内容读取使用显式 stage，保留好友列表身份', async () => {
+    mocked.listReady.mockResolvedValue({ files: [] });
+    mocked.deleteFile.mockResolvedValue({ deleted: true });
+    mocked.getContentBlob.mockResolvedValue(new Blob(['text']));
+    const params = { user_id: 'viewer', owner_id: 'entity', stage: 'online' };
+    await botSessionFileService.loadReady('bot', 's1', 'human_viewer', 'entity', 'human_viewer', 'online');
+    expect(mocked.listReady).toHaveBeenLastCalledWith('bot', 's1', { ...params, f_user_id: 'viewer' });
+    await botSessionFileService.remove('bot', 's1', 'r1', 'human_viewer', 'entity', 'online');
+    expect(mocked.deleteFile).toHaveBeenLastCalledWith('bot', 's1', 'r1', params);
+    await botSessionFileService.fetchBlob('bot', 's1', 'r1', 'human_viewer', 'entity', 'inline', 'online');
+    expect(mocked.getContentBlob).toHaveBeenLastCalledWith('bot', 's1', 'r1', params, 'inline');
+    botSessionFileService.resolveContentUrl('bot', 's1', 'r1', 'human_viewer', 'entity', 'attachment', 'online');
+    expect(mocked.buildBotSessionFileContentUrl).toHaveBeenLastCalledWith('bot', 's1', 'r1', params, 'attachment');
+  });
+});

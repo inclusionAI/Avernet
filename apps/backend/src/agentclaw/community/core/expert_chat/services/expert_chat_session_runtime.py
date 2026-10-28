@@ -62,6 +62,10 @@ class ExpertChatSessionRuntimeMixin:
         bot_id = bot["bot_id"]
         connection_user_id = self._session_read_actor(bot, user_id, actor_user_id, bcn_friend_authorized)
         bot_call_type = McpCallType.parse(bot.get("call_type") or None)
+        online_binding = (
+            self._online_chat_binding(bot)
+            if bot.get("bot_type") == "service" else None
+        )
         logger.info(
             "[ExpertChatService] Bot call_type: bot=%s, call_type=%s, parsed=%s",
             bot_id, bot.get("call_type"), bot_call_type,
@@ -79,12 +83,7 @@ class ExpertChatSessionRuntimeMixin:
             instance = result.get("instance", {})
             bot["binding_id"] = (instance.get("ext") or {}).get("binding_id")
         elif bot.get("bot_type", "personal") == "service":
-            from agentclaw.community.core.service_bot.repository.models import PublishStatus
-
-            bot["binding_id"] = self._baas_service.get_bind_id(
-                bot_id=bot_id, owner_id=owner_id, bot_type="service",
-                publish_status=PublishStatus.SUCCESS.value,
-            )
+            bot["binding_id"] = online_binding
         return self._get_connection(
             bot, connection_user_id, bcn_friend_authorized=bcn_friend_authorized,
         ), False

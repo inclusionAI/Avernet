@@ -2,7 +2,7 @@
 /**
  * TaskSwitcherBar —— 副屏顶部多任务切换横条(PRD #6,数据源 listTasks,宿主注入)。
  * 横条:任务小标 + 当前任务名 + 状态 tag + 任务总数徽章;点击展开下拉切换。
- * demo 的 TaskSwitcherFloat 悬浮按钮是演示脚手架,不产品化(spec §6)。
+ * demo 的全屏拖拽能力不产品化，副屏内入口由 TaskSwitcherControl 承载。
  */
 import React, { useState } from 'react';
 
@@ -49,18 +49,18 @@ const Tag: React.FC<{ item: TaskSwitcherItem }> = ({ item }) => {
 
 export const TaskSwitcherBar: React.FC<TaskSwitcherProps> = ({ items, activeTaskId, onSelectTask }) => {
   const [open, setOpen] = useState(false);
-  if (!items.length) return null;
+  // PRD 的切换横条只服务多任务会话；单任务继续保持「任务总览」直接置顶。
+  if (items.length <= 1) return null;
 
   const active = items.find((i) => i.taskId === activeTaskId) ?? items[0];
-  const isSingleton = items.length === 1;
 
   return (
     <div style={{ position: 'relative', borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
       <button
         type="button"
-        title={isSingleton ? '任务' : '展开任务切换'}
+        title="展开任务切换"
         aria-expanded={open}
-        onClick={() => !isSingleton && setOpen((v) => !v)}
+        onClick={() => setOpen((v) => !v)}
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -69,7 +69,7 @@ export const TaskSwitcherBar: React.FC<TaskSwitcherProps> = ({ items, activeTask
           padding: '8px 12px',
           border: 'none',
           background: open ? C.surfaceAlt : 'transparent',
-          cursor: isSingleton ? 'default' : 'pointer',
+          cursor: 'pointer',
           fontSize: 13,
           color: C.textPrimary,
           textAlign: 'left',
@@ -107,15 +107,13 @@ export const TaskSwitcherBar: React.FC<TaskSwitcherProps> = ({ items, activeTask
         >
           {items.length}
         </span>
-        {!isSingleton && (
-          <ChevronRight
-            style={{
-              transform: open ? 'rotate(90deg)' : 'rotate(-90deg)',
-              color: C.textSecondary,
-              flexShrink: 0,
-            }}
-          />
-        )}
+        <ChevronRight
+          style={{
+            transform: open ? 'rotate(90deg)' : 'rotate(-90deg)',
+            color: C.textSecondary,
+            flexShrink: 0,
+          }}
+        />
       </button>
 
       {open && (

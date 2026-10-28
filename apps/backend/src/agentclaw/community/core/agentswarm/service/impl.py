@@ -133,7 +133,8 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
             self._dispatch_repo.enqueue(
                 run_id=RunId(run_id),
                 tenant=TenantId(req.tenant),
-                deadline_seconds=self._deadline,
+                deadline_seconds=req.run_options.resolved_slice_max(
+                    self._deadline),
             )
         except Exception as exc:
             # Orphan-run compensation: the run row THIS call just created

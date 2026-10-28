@@ -177,6 +177,7 @@ class TaskPersistenceModule(Module):
         """
         graph_repo = injector.get(TaskGraphRepositoryProtocol)
         artifact_repo = injector.get(TaskArtifactRepositoryProtocol)
+        task_info_repo = injector.get(TaskInfoRepositoryProtocol)
 
         session_files = None
         try:
@@ -214,6 +215,7 @@ class TaskPersistenceModule(Module):
             artifact_repo=artifact_repo,
             session_files=session_files,
             bcs_bot_tokens=bcs_bot_tokens,
+            task_info_repo=task_info_repo,
         )
 
     @singleton

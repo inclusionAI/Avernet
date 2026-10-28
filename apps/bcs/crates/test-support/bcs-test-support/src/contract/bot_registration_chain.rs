@@ -20,7 +20,7 @@ use bcs_bot_store::{DbProviderStore, PersistentBotRepo};
 use bcs_db_api::{
     DbError, DbExecuteResult, DbHealth, DbPlugin, DbRow, DbResult,
     DbSqlFlavor, DbStatement, DbTransactionStep,
-    DbTransactionStepResult, DbValue,
+    DbTransactionStepResult,
 };
 use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_domain::provider_registration_token::{

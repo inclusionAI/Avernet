@@ -509,25 +509,22 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
     ) -> tuple[Any, Optional[str]]:
         """Resolve the owner success publish order + migration_path.
 
-        Same source as ``BaasService.get_bind_id(SUCCESS)``: the latest
-        success publish order under ``(publish_bot_id=bot_id, owner_id,
-        env)``. ``migration_path`` rides on that publish order's ``ext``
+        Same exact source-PK/environment and newest-first order as the online
+        runtime selector. ``migration_path`` rides on that publish order's ``ext``
         (written by build, read by verify/online/release — see
         ``publish_flow_service.py``); the instance never holds it.
 
-        No source-bot back-lookup: the publish order + ``bot_id`` carry
-        everything the baas payload needs (``bot_name``/``owner_id``/
-        ``version`` from the record; the rest is baas-side resolved).
+        A newer draft or another owner's same-named Bot cannot change the
+        artifact reproduced by a friend Caller instance.
         """
         env = get_current_env()
         address = BotAddressResolver(self._bot_repo).resolve(
             bot_id=bot_id, legacy_owner_id=owner_id
         )
-        publish_record = self._publish_repo.get_by_publish_bot_id(
-            publish_bot_id=bot_id,
-            owner_id=address.entity_id,
-            env=env,
-            publish_status=PublishStatus.SUCCESS.value,
+        records = self._publish_repo.list_by_source_bot(address.bot_pk, env)
+        publish_record = next(
+            (record for record in records if record.status == PublishStatus.SUCCESS.value),
+            None,
         )
         if publish_record is None:
             logger.warning(
