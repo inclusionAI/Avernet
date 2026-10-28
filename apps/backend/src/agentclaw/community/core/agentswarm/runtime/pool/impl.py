@@ -602,8 +602,14 @@ class SubagentRuntime:
 
     @staticmethod
     def _find_spec(run: Run, envelope: TaskEnvelope) -> AgentSpec | None:
+        # Exact-name match first; then prefix match so the orchestrator's
+        # composite spawn names (e.g. "coder_rust" from catalog "coder")
+        # inherit the catalog entry's kind, config_manifest, and identity.
         for spec in run.agent_catalog:
             if spec.name == envelope.name:
+                return spec
+        for spec in run.agent_catalog:
+            if envelope.name.startswith(spec.name):
                 return spec
         return None
 

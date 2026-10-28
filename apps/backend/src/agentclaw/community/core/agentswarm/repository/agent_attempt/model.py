@@ -19,7 +19,7 @@ class AcAgentSwarmAgentAttemptModel(_AgentSwarmBase, Base):
     slice_retry_index = Column(Integer, nullable=False, default=1)
     executor_kind = Column(String(16), nullable=False, default="bot")
     executor_id = Column(String(64), nullable=False)
-    executor_name = Column(String(128), nullable=False)
+    executor_name = Column(String(256), nullable=False)
     binding_state = Column(String(32), nullable=False, default="SPAWNED")
     result_status = Column(String(32), nullable=True)
     result_message = Column(Text().with_variant(MEDIUMTEXT, "mysql"), nullable=True)
