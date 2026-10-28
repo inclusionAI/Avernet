@@ -1,0 +1,24 @@
+apps/backend/src/agentclaw/community/core/bot_public_risk/advance.py
+  h_9d7cfd405752f5 5,11-21,31,33,51,73-75,117-150
+apps/backend/src/agentclaw/community/core/bot_public_risk/approval_guard.py
+  h_9d7cfd405752f5 28-29
+apps/backend/src/agentclaw/community/core/bot_public_risk/service_protocol.py
+  h_9d7cfd405752f5 11-18,35-39
+apps/backend/src/agentclaw/community/core/bot_public_risk/tasks.py
+  h_9d7cfd405752f5 39-46
+apps/backend/src/agentclaw/community/di/modules/bot_public_risk_module.py
+  h_9d7cfd405752f5 9,56-60,64,103-105
+apps/backend/tests/community/core/bot_public/test_risk_advance.py
+  h_9d7cfd405752f5 234-280
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "02b3804f067f9894518f5f533d7a1b99dda44c86",
+  "prompts": {},
+  "humans": {
+    "h_9d7cfd405752f5": {
+      "author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

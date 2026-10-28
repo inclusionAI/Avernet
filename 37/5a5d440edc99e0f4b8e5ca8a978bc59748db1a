@@ -1,0 +1,45 @@
+apps/backend/src/agentclaw/community/core/bot_public/services/bot_public_service.py
+  s_befd386ce20825::t_dbe9f698a3c366 63,157
+apps/backend/src/agentclaw/community/core/bot_public_risk/advance.py
+  s_befd386ce20825::t_9a98084dd1cd08 7,30
+apps/backend/src/agentclaw/community/core/bot_public_risk/application.py
+  s_befd386ce20825::t_bd3c9ef3f5847c 11,46
+apps/backend/src/agentclaw/community/core/bot_public_risk/approval_guard.py
+  s_befd386ce20825::t_233446a053eb61 8,12
+apps/backend/src/agentclaw/community/core/bot_public_risk/input_builder.py
+  s_befd386ce20825::t_20daccd5cee36e 206,208
+apps/backend/src/agentclaw/community/core/bot_public_risk/notices.py
+  s_befd386ce20825::t_454d2d99e7177b 7-8,47
+apps/backend/src/agentclaw/community/core/bot_public_risk/query.py
+  s_befd386ce20825::t_43d25e4866f60e 4,12
+apps/backend/src/agentclaw/community/core/bot_public_risk/repository.py
+  s_befd386ce20825::t_2a30360b03d7fe 7,30
+apps/backend/src/agentclaw/community/core/bot_public_risk/repository_protocol.py
+  s_befd386ce20825::t_41bede715906e8 1-78
+apps/backend/src/agentclaw/community/core/bot_public_risk/service_protocol.py
+  s_befd386ce20825::t_172963dbeff6c3 6
+apps/backend/src/agentclaw/community/core/bot_public_risk/tasks.py
+  s_befd386ce20825::t_a3c0a89b3fae9b 14-15,63,297-350,352
+apps/backend/src/agentclaw/community/di/modules/bot_public_module.py
+  s_befd386ce20825::t_821fb54f741a28 35,145,186,195
+apps/backend/src/agentclaw/community/di/modules/bot_public_risk_module.py
+  s_befd386ce20825::t_9de9545c448df0 18,67,75,85,97,103,116
+apps/backend/tests/community/core/bot_public/test_risk_tasks.py
+  s_befd386ce20825::t_fb0fafaf604768 687-758
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "375a5d440edc99e0f4b8e5ca8a978bc59748db1a",
+  "prompts": {},
+  "sessions": {
+    "s_befd386ce20825": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17e54-391f-7460-a1a1-4f8e39166a4f",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
