@@ -24,7 +24,7 @@ from agentclaw.community.adapters.http.bot_public.schemas import ApiResponse
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 from agentclaw.community.adapters.http.openapi_v1.contracts import BotIdPath, Envelope
 from agentclaw.community.adapters.http.openapi_v1.principal import (
-    UserIdDep, caller_names_a_user, caller_owner_id,
+    UserIdDep, caller_names_a_user, caller_owner_id, refuse_app_only_caller,
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import Principal, require_principal
 from agentclaw.community.adapters.http.openapi_v1.responses import accepted, envelope
@@ -122,7 +122,7 @@ async def _record(query, bot, risk_check_id):
 @openapi_router.post(
     "/{bot_id}/public/risk-checks",
     response_model=Envelope[RiskRecordResponse],
-    dependencies=[Depends(require_risk_actor)],
+    dependencies=[Depends(require_risk_actor), Depends(refuse_app_only_caller)],
     status_code=202,
 )
 async def create_openapi(
@@ -158,7 +158,7 @@ async def create_openapi(
 
 @openapi_router.get(
     "/{bot_id}/public/risk-checks/current", response_model=Envelope[RiskRecordResponse],
-    dependencies=[Depends(require_risk_actor)],
+    dependencies=[Depends(require_risk_actor), Depends(refuse_app_only_caller)],
 )
 async def current_openapi(
     bot_id: BotIdPath,
@@ -183,7 +183,7 @@ async def current_openapi(
 @openapi_router.get(
     "/{bot_id}/public/risk-checks/{risk_check_id}",
     response_model=Envelope[RiskRecordResponse],
-    dependencies=[Depends(require_risk_actor)],
+    dependencies=[Depends(require_risk_actor), Depends(refuse_app_only_caller)],
 )
 async def get_openapi(
     bot_id: BotIdPath,
@@ -203,7 +203,7 @@ async def get_openapi(
 @openapi_router.post(
     "/{bot_id}/public/risk-checks/{risk_check_id}/refresh",
     response_model=Envelope[RiskRefreshResponse],
-    dependencies=[Depends(require_risk_actor)],
+    dependencies=[Depends(require_risk_actor), Depends(refuse_app_only_caller)],
 )
 async def refresh_openapi(
     bot_id: BotIdPath,
