@@ -120,6 +120,6 @@ test('关闭重开时，旧模板初始化完成不会把新 Bot 头像写给旧
   rerender({ open: true });
   await act(async () => result.current.submit('architect', { ...input, engine: 'openclaw', agentCoding: undefined, avatarUrl: 'avatar-second' }));
   await act(async () => completeWorkspace({ code: 200000, data: { dima_space_id: 'workspace-1' } }));
-  await waitFor(() => expect(request).toHaveBeenCalledWith('/openapi/v1/bots/avatar-1/avatar', { method: 'PUT', data: { avatar_url: 'avatar-first' } }));
-  expect(request).toHaveBeenCalledWith('/openapi/v1/bots/avatar-2/avatar', { method: 'PUT', data: { avatar_url: 'avatar-second' } });
+  await waitFor(() => expect(request).toHaveBeenCalledWith('/openapi/v1/bots/avatar-1/avatar', { method: 'PUT', params: {}, data: { avatar_url: 'avatar-first' } }));
+  expect(request).toHaveBeenCalledWith('/openapi/v1/bots/avatar-2/avatar', { method: 'PUT', params: {}, data: { avatar_url: 'avatar-second' } });
 });

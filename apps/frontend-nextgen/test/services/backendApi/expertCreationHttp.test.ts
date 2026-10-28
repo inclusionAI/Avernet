@@ -1,4 +1,5 @@
 import { createExpertBot, getExpertBotCreationStatus } from '@/services/expertMarketService';
+import { botAvatarService } from '@/services/botWorkshop/botAvatarService';
 import { useIdentityStore } from '@/stores/identityStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 
@@ -27,10 +28,15 @@ test.each(userCases)('详情未初始化 identityStore 时，创建及轮询沿�
   Object.defineProperty(globalThis, 'TEAMCLAW_OPENAPI_USER_ID', { configurable: true, value: configuredId });
   expect(useIdentityStore.getState().currentIdentityId).toBeUndefined();
   const fetchMock = jest.fn().mockImplementationOnce(() => reply({ bot_id: 'bot-1', iframe_url: '', redirect_url: '' }))
-    .mockImplementationOnce(() => reply({ bot_id: 'bot-1', state: 'READY' }));
+    .mockImplementationOnce(() => reply({ bot_id: 'bot-1', state: 'READY' }))
+    .mockImplementation(() => reply({ avatar_url: 'https://example.com/avatar.png' }));
   globalThis.fetch = fetchMock;
   await expect(createExpertBot('product-manager', body)).resolves.toMatchObject({ bot_id: 'bot-1' });
   await expect(getExpertBotCreationStatus('bot-1')).resolves.toMatchObject({ state: 'READY' });
+  await expect(botAvatarService.save('bot-1', 'https://example.com/avatar.png')).resolves.toBe('https://example.com/avatar.png');
+  await expect(botAvatarService.get('bot-1')).resolves.toBe('https://example.com/avatar.png');
   expect(fetchMock).toHaveBeenNthCalledWith(1, '/openapi/v1/experts/product-manager/bots?user_id=001', expect.objectContaining({ method: 'POST', body: JSON.stringify(body), credentials: 'include' }));
   expect(fetchMock).toHaveBeenNthCalledWith(2, '/openapi/v1/bots/bot-1/with-manifest/status?user_id=001', expect.objectContaining({ method: 'GET', credentials: 'include' }));
+  expect(fetchMock).toHaveBeenNthCalledWith(3, '/openapi/v1/bots/bot-1/avatar?user_id=001', expect.objectContaining({ method: 'PUT', credentials: 'include' }));
+  expect(fetchMock).toHaveBeenNthCalledWith(4, '/openapi/v1/bots/bot-1/avatar?user_id=001', expect.objectContaining({ method: 'GET', credentials: 'include' }));
 });
