@@ -89,11 +89,13 @@ def _collector(*, skill_set_service=None, mcp_config_service=None,
                local_mcp_registry=None, managed_files_reader=None,
                cli_tool_repository=None):
     center_store = _ready_center_store()
+    bot_repo = MagicMock()
+    bot_repo.get_by_id_and_entity.return_value = {"bot_type": "service"}
     return ConfigComposerInputCollector(
         skill_set_service_factory=_factory_returning(skill_set_service or MagicMock()),
         mcp_config_service=mcp_config_service or MagicMock(),
         resource_repository=resource_repository or MagicMock(),
-        bot_repo=MagicMock(),
+        bot_repo=bot_repo,
         path_factory=MagicMock(),
         identity_service=identity_service or MagicMock(),
         overrides_reader=_reader_over(channel_repo),

@@ -33,5 +33,7 @@ service normalizes these to the entity for transferable service Bots. Shared
 defaults and personal/default Bot channel identities retain their legacy rules.
 Stage generation and existing-channel synchronization resolve the Bot before
 calling Owner-scoped workspace APIs. Those calls use its current Owner, while
-channel collection uses its stable entity. The Owner-only HTTP config endpoint
+channel collection uses the same identity as storage: stable entity for
+non-default service Bots, legacy user identity for personal/default Bots.
+The Owner-only HTTP config endpoint
 checks current ownership independently; an entity locator grants no authority.
