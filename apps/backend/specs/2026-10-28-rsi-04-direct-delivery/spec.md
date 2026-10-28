@@ -110,12 +110,17 @@ latest published version (ADR 0002), and a new Center version is not drift.
 - [ ] Settling happens on every terminal path of the apply: normal end, a
       refused compile, an engine exception, a worker that could not rebuild
       the apply. Settling twice is a no-op.
-- [ ] A worker that dies mid-apply writes nothing: its apply row stays
-      `RUNNING` in the database and is only *reported* as `FAILED` once its
-      lock is gone or past the 30-minute TTL. Its promotion is marked
-      `apply_failed` by a periodic sweep that finds `applying` promotions
-      whose apply reads as abandoned (see Open Questions), and also, as soon
-      as anyone reads such a promotion, by the read itself.
+- [ ] A worker that dies mid-apply does not end the apply: the apply is a
+      durable task, so another worker re-claims it once its lease expires and
+      runs it again from the start (apply converges, so re-running is safe;
+      the genome compiler still accepts the promotion, which is `applying`).
+      The promotion stays `applying` and settles when that run ends.
+- [ ] The one case where no run ends: the task is retired at its 20-minute
+      deadline (`APPLY_TASK_DEADLINE_SECONDS`) before any run finished, e.g.
+      workers down. Nothing writes the apply's terminal state; it is
+      *reported* `FAILED` once its lock is gone or stale. Its promotion is
+      marked `apply_failed` when it is next read, or when the bot's next
+      promotion starts (which settles earlier in-flight promotions first).
 - [ ] `going_back` keeps its meaning (target was promoted before and is not
       the current `active`).
 - [ ] The genome compiler compiles a promotion's revision only while the
@@ -256,11 +261,10 @@ latest published version (ADR 0002), and a new Center version is not drift.
 
 ## Open Questions
 
-- **The sweep for promotions whose worker died.** Proposed: a periodic loop
-  started with the backend's lifecycle (the shape the Skill Center sync and
-  the git sync already use; the task queue has no recurring schedule) that every few minutes
-  marks `apply_failed` every `applying` promotion whose apply reads as
-  abandoned (one indexed query over in-flight promotions, one apply read
-  each). Without it such a promotion is only settled when someone reads it,
-  or when the next promotion of the same bot starts (which settles earlier
-  in-flight promotions first). Keep the sweep, or rely on reads?
+- **A periodic sweep for deadline-retired applies?** (Revised after review:
+  a crashed worker's apply is re-claimed and re-run by the task queue, so the
+  sweep first proposed is not needed for crashes.) Only a task retired at its
+  deadline leaves a promotion `applying` with no run to end it; reads and the
+  bot's next promotion settle it. Recommended: no sweep. A sweep (a periodic
+  loop started with the backend's lifecycle, like the Skill Center sync) can
+  be added later if `applying` rows are seen to linger.

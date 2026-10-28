@@ -85,7 +85,7 @@
   - [ ] Settle maps SUCCEEDED/PARTIAL/FAILED/CAS-lost per spec; `GenomeCompletionHandler` is in the completion map under `genome`.
   - [ ] Automated actor → principal is the bot owner, audit label the actor; user → that user.
   - [ ] Reads, and the start of the bot's next promotion, settle an `applying` row whose apply ended (incl. abandoned) and a stale `pending` row.
-  - [ ] The sweep (if the owner keeps it): `sweep_once` settles abandoned in-flight promotions across bots in bounded batches; started with the backend lifecycle.
+  - [ ] A worker crash mid-apply: the re-claimed task re-runs the apply, the compiler accepts the still-`applying` promotion, and the promotion settles once (test: the same task payload run a second time after a run that never reached its terminal write).
   - [ ] `PendingDeliveryApplier` deleted; `RevisionApplier` binds `DirectApplier`; no DI cycle.
 - **Depends on:** Tasks 6, 8
 

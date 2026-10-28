@@ -146,12 +146,6 @@ Repository (`core/repository/{protocols,implementations}/bot/genome.py`):
   `APPLY_LOCK_TTL_SECONDS`, no apply id). `list` settles at most the page's
   rows. `promote` settles the bot's earlier in-flight promotions the same
   way before inserting its own row.
-- New `sweep.py`: `PromotionSweeper.sweep_once()` lists in-flight promotions
-  across bots (new repository query `in_flight(older_than, limit)` on an
-  index `(status, created_at)`; bounded batch) and settles each as above.
-  Started and stopped with the backend lifecycle as a periodic loop (the
-  Skill Center sync's shape), interval from config with a few-minute
-  default. Pending the owner's answer to the spec's open question.
 - `errors.py`: `ApplyBusy` (→ 409 `apply_in_progress` in `errors_genome.py`
   and the domain-error status map test).
 - `models.py`: `PromotionStatus` closed set; `Promotion.apply_id`,
