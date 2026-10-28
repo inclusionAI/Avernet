@@ -395,6 +395,28 @@ def test_singlebox_memory_mode_without_credentials_stays_unavailable():
     )
 
 
+def test_singlebox_redis_mode_declaration_never_delivers_memory_coordination():
+    """The singlebox override honors the declared coordination mode.
+
+    A singlebox ``bot_manager_sync`` block that declares the default redis
+    mode (the override exists for the memory downgrade only) surfaces the
+    community column's no-shared-Redis verdict — the dev stack runs no
+    Redis service — and never silently delivers in-process coordination
+    under a redis declaration.
+    """
+    injector = build_injector(
+        profile=DeployProfile.SINGLEBOX,
+        extra_modules=[_EnabledConfigModule()],
+    )
+    stack = injector.get(ManagerSyncStack)
+    assert stack.available is False
+    assert stack.reason == "shared-redis-required"
+    assert stack.coordinator is None
+    assert isinstance(
+        injector.get(BotManagerSyncProtocol), DisabledBotManagerSync
+    )
+
+
 def test_memory_mode_is_a_structural_error_on_pre_prod_environments(monkeypatch):
     """`memory` is the dev-stack downgrade: a pre/prod deployment asking
     for it fails the boot loudly instead of running without cross-process

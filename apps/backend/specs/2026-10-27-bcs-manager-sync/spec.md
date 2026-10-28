@@ -336,18 +336,25 @@ comment records exactly that boundary.
 
 ### 11.2 Measured numbers (real run, this branch)
 
-- Unit/contract/DI suites: `tests/community/di` 569 passed (incl. the new
-  `coordination_mode` parse pins, the SINGLEBOX memory-mode wiring pin —
-  `HttpBcsManagersPlugin` + `MemoryManagerSyncCoordinator` over the test
-  column's Recording double — the same-availability-checks pin
-  (`missing-credential` also in memory mode), and the pre/prod structural
-  refusal pin); `tests/community/contracts` + `core/bot_collaborator/manager_sync`
-  709 passed; config golden regen + `tests/community/config`,
-  `test_config_isolation.py`, `test_profile_and_modules_for.py` green;
-  gateway unit suite 890 passed (incl. the dev-seed pins: empty config seeds
-  nothing, seeded key resolves through `find_app_by_credential`,
-  schema-less-boot regression, idempotence, credential-drift ERROR,
-  malformed-key never-legacy).
+- Unit/contract/DI suites (re-run after the C2 re-review fixes): `tests/
+  community/di` **564 passed** (incl. the `coordination_mode` parse pins, the
+  SINGLEBOX memory-mode wiring pin — `HttpBcsManagersPlugin` +
+  `MemoryManagerSyncCoordinator` over the test column's Recording double —
+  the same-availability-checks pin (`missing-credential` also in memory
+  mode), the pre/prod structural refusal pin, and the redis-mode-declared
+  pin: the singlebox override never delivers in-process coordination under
+  a redis declaration — `shared-redis-required`, coordinator None);
+  `tests/community/core/bot_collaborator/manager_sync` **148 passed**;
+  `tests/community/contracts` + the combined manager-sync run 709 passed
+  on the earlier full invocation; config golden regen +
+  `tests/community/config`, `test_config_isolation.py`,
+  `test_profile_and_modules_for.py` green; gateway unit suite **890
+  passed** (incl. the dev-seed pins: empty config seeds nothing, seeded
+  key resolves through `find_app_by_credential`, schema-less-boot
+  regression, idempotence, credential-drift ERROR, malformed-key
+  never-legacy). `tests/community/di/test_bot_manager_sync_config.py` +
+  `tests/community/contracts/test_manager_sync_coordination.py`:
+  40 passed.
 - Live stack: backend startup shows `[MANAGER-SYNC-LIFECYCLE] started` with
   zero `syncer unavailable` reasons; six real backend-driven rounds during
   `tests/community/acceptance/bot_collaborator` (12 passed), each forwarded

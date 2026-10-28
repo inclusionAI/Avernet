@@ -14,13 +14,20 @@ generation sentinel value. No Redis service, no ``redis_url``, no
 sentinel bootstrap — the whole-stack restart that singlebox always
 performs is the dev stack's single-writer guarantee.
 
+The declared ``coordination_mode`` is honored, never overridden: this
+override exists for the memory downgrade alone, so a singlebox block
+that declares the default ``redis`` mode gets the SAME availability
+verdict the community column produces without shared Redis
+(``shared-redis-required``) — it must never silently deliver in-process
+coordination under a redis declaration.
+
 Invariants kept identical to the community column:
 
 - disabled stays disabled (``unavailable("disabled")``) — this module
   binds a stack, it never turns the feature on by itself;
-- the SAME credential availability checks run, so a missing local app
-  credential makes the feature unavailable with a diagnostic instead of
-  fabricating an empty-string credential;
+- the SAME credential availability checks run in memory mode, so a
+  missing local app credential makes the feature unavailable with a
+  diagnostic instead of fabricating an empty-string credential;
 - the plugin-key doubles below ``TestBotManagerSyncModule`` (the
   ``BcsManagersPlugin`` / ``ManagerSyncCoordinator`` DI keys the
   conformance suites resolve) stay untouched — this module adds exactly
@@ -56,6 +63,13 @@ class SingleboxBotManagerSyncModule(Module):
         """The singlebox stack — only stateful when the feature is enabled."""
         if not config.enabled:
             return ManagerSyncStack.unavailable("disabled")
+        if config.coordination_mode != "memory":
+            # Honor the declared mode: this override exists for the memory
+            # downgrade only. A singlebox block declaring the default redis
+            # mode surfaces the community column's no-shared-Redis verdict
+            # — the dev stack runs no Redis service — never a silent
+            # in-process coordinator under a redis declaration.
+            return ManagerSyncStack.unavailable("shared-redis-required")
         credentials, missing_reason = _resolve_app_credentials(
             config, secret_resolver
         )
