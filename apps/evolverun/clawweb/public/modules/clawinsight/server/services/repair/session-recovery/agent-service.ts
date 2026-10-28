@@ -19,6 +19,7 @@ import type { AgentToolContext, AgentRuntimeInspectInput, AgentRuntimeTargetSnap
 import { redactEvidenceValue, redactPersistableText } from "@avernet/clawweb-shared/server/services/redaction";
 import { SessionRecoveryError } from "./errors.js";
 import { RecoverySessionReader } from "./session-reader.js";
+import { addSessionReadCoverage, boundedSessionReadCoverage } from "./session-read-coverage.js";
 import { cronRunSessionId } from "./session-identity.js";
 import { savedRecoveryHandbook } from "./handbook.js";
 import { recoveryResult } from "./result.js";
@@ -249,10 +250,11 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     return task;
   }
   async bootstrap(task: RecoveryStoredTask) {
-    const { pending_results: _pending, execution: rawExecution, aisExecution: _ais, interventionStatus: _intervention, interventionAuditComplete: _auditCoverage, ...business } = task;
+    const { pending_results: _pending, execution: rawExecution, aisExecution: _ais, interventionStatus: _intervention, interventionAuditComplete: _auditCoverage, sessionReadCoverage, ...business } = task;
     const { ticketDigest: _digest, ...execution } = task.status === "canceled" ? this.executions.end(rawExecution!) : rawExecution!;
     const engine = task.runtimeTarget?.target.activeEngine ?? { OC: "openclaw", CC: "claude_code", TE: "teclaw" }[task.request.target.engine] as "openclaw" | "claude_code" | "teclaw";
     return { taskId: task.taskId, stepId: task.current!.stepId, executionId: execution.executionId, deliveryKey: this.latestDeliveryKey(task), task: { ...business, execution,
+        sessionReadCoverage: boundedSessionReadCoverage(sessionReadCoverage ?? []),
         timeline: business.timeline.filter(event => event.payload.channel !== "group_webhook").slice(-60).map(event => ({ ...event, payload: event.kind === "operation" ? { tool_call_id: event.payload.tool_call_id, status: event.payload.status, evidence_id: event.payload.evidence_id } : event.payload })),
         evidence: business.evidence.map(item => ({ ...item, excerpt: item.excerpt.slice(0, 1500) })),
       }, handbook: savedRecoveryHandbook(task),
@@ -280,7 +282,8 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
         const latest = await this.required(task.taskId);
         await this.save(latest, value => ({ ...value, requiresFreshObservation: false, observationDeadlineAt: this.now() + this.deps.observationMs }), task.execution!.executionId);
       }
-      return { ...output, delivery_key: this.latestDeliveryKey(task) };
+      return { ...output, delivery_key: this.latestDeliveryKey(task),
+        session_read_coverage: boundedSessionReadCoverage(addSessionReadCoverage(task.sessionReadCoverage ?? [], output)) };
     });
   }
   private nasEvidence(task: RecoveryStoredTask, value: unknown): Record<string, unknown> {
