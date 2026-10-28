@@ -3,6 +3,7 @@
 // 历史分页/Agent Coding 引导),保持既有能力不裁剪。分支无关:`origin=others`
 // 的只读分支由页边界(Task 8 ConversationPage)裁决,本组件只渲染模型给的内容;
 // no-session / Agent Coding 分支按模型字段降级。
+import { ConversationComposerHost } from '@/components/Workspace/ConversationComposerHost';
 import { ChatPanel } from '@/components/Workspace/ChatPanel';
 import { BotModelSelectorContainer } from '@/components/Workspace/ChatPanel/BotModelSelector';
 import { ComposerCapabilitiesMenu } from '@/components/Workspace/TaskComposerMenu';
@@ -51,7 +52,13 @@ export function ConversationInteractiveStage(props: {
       {model.agentCodingBot ? (
         <AgentCodingGuide bot={model.agentCodingBot} onOpen={onOpenAgentCodingBot} />
       ) : (
-        <ChatPanel
+        <ConversationComposerHost
+          bot={model.chatBots.find((bot) => bot.botId === model.selectedSession?.botId) ?? null}
+          session={model.selectedSession}
+          command={fileFeature.command}
+          onSend={model.handleSend}
+        >
+        {(composer) => <ChatPanel
           target={model.target}
           viewer={model.viewer}
           sessionTitle={model.selectedSession?.title}
@@ -74,7 +81,8 @@ export function ConversationInteractiveStage(props: {
           panelRef={asPanelRef(model.panelRef)}
           chatBridge={model.chatBridge}
           onDraftChange={model.onDraftChange}
-          onSend={model.handleSend}
+          onSend={composer.onSend}
+          composerHeader={composer.header}
           onStop={botChat.stop}
           onReconnect={() => void botChat.reconnect()}
           onPanelAction={model.handlePanelAction}
@@ -109,13 +117,14 @@ export function ConversationInteractiveStage(props: {
             />
           }
           fileChip={model.desktopFileFeaturesHidden ? undefined : fileFeature.fileChip}
-          command={fileFeature.command}
+          command={composer.command}
           fileToolbar={fileFeature.fileToolbar}
           senderRef={fileFeature.senderRef}
           mode="bot"
           interactive
           inputRef={asSenderRef(model.inputRef)}
-        />
+        />}
+        </ConversationComposerHost>
       )}
       {fileFeature.featureNode}
       {headerRightPanels}

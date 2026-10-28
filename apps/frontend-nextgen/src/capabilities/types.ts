@@ -4,6 +4,18 @@ import type { ConversationSessionRequestRange } from '@/domain/conversation';
 import type { NavigationItem } from '@/shell/navigation';
 import type { RouteMeta } from '@/shell/routeMeta';
 import type { ComponentType } from 'react';
+import type { ConversationComposerProps } from './conversationComposer';
+
+export interface BotEditorPanelContext {
+  botId: string; ownerId: string; spaceId: string; editable: boolean;
+  serviceMode: import('@/domain/botWorkshop').BotServiceMode;
+  runtimeStage?: 'draft' | 'verify' | 'online';
+}
+export interface BotEditorPanelExtension {
+  id: string; label: string;
+  Icon: ComponentType<{ className?: string }>;
+  Panel: ComponentType<BotEditorPanelContext>;
+}
 
 export type CapabilityStatus = 'available' | 'unsupported';
 
@@ -489,6 +501,10 @@ export interface AppCapabilities {
   getBotSkillPickerSources: () => CapabilityResult<BotSkillPickerSource[]>;
   /** 内部市场与工坊 Skill 的详情链接；Open Core 默认不提供。 */
   getBotSkillPickerDetailUrl: (skill: BotEditorSkill) => CapabilityResult<string | null>;
+  /** Deployment-owned editor panels; empty by default, no business-specific imports. */
+  getBotEditorPanels: () => CapabilityResult<BotEditorPanelExtension[]>;
+  /** Optional single-Bot composer decorator; public default is absent. */
+  getConversationComposer: () => CapabilityResult<ComponentType<ConversationComposerProps> | null>;
   /** Bot 编辑页添加 MCP 仅属于 Internal Overlay；Open Core / 阿里云不展示入口也不请求市场接口。 */
   getBotMcpPickerEnabled: () => CapabilityResult<boolean>;
   /**

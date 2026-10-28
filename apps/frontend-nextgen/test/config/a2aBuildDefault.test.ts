@@ -19,3 +19,18 @@ describe('a2aClientBuildDefault（define 值形态单源）', () => {
     expect(a2aClientBuildDefault({ A2A_CLIENT_DEFAULT: 'false' })).toBe(false);
   });
 });
+
+
+it('默认参数只读取所需环境变量，不改变显式环境或开关语义', () => {
+  const previous = process.env.A2A_CLIENT_DEFAULT;
+  try {
+    process.env.A2A_CLIENT_DEFAULT = 'true';
+    expect(a2aClientBuildDefault()).toBe(true);
+    expect(a2aClientBuildDefault({})).toBe(false);
+    delete process.env.A2A_CLIENT_DEFAULT;
+    expect(a2aClientBuildDefault()).toBe(false);
+  } finally {
+    if (previous === undefined) delete process.env.A2A_CLIENT_DEFAULT;
+    else process.env.A2A_CLIENT_DEFAULT = previous;
+  }
+});

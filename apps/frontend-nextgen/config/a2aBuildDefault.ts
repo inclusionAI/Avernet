@@ -12,7 +12,7 @@
  * 运行期 localStorage '0'/'1' 仍优先于构建期默认（现场回退通道）。
  */
 export function a2aClientBuildDefault(
-  env: { A2A_CLIENT_DEFAULT?: string } = process.env,
+  env: { A2A_CLIENT_DEFAULT?: string } = { A2A_CLIENT_DEFAULT: process.env.A2A_CLIENT_DEFAULT },
 ): boolean {
   return env.A2A_CLIENT_DEFAULT === 'true';
 }

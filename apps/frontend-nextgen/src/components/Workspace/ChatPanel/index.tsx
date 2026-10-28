@@ -49,6 +49,7 @@ export function ChatPanel({
   modelSelector,
   fileChip,
   command,
+  composerHeader,
   fileToolbar,
   senderRef,
   mode,
@@ -250,6 +251,7 @@ export function ChatPanel({
             placeholder="可使用 /file 引用文件、/link 引用链接、/skill 调用能力"
             fileChip={fileChip}
             command={command}
+            slots={{ header: composerHeader }}
             toolbar={{
               left:
                 taskComposer || modelSelector || connectionCopy.detail || fileToolbar ? (

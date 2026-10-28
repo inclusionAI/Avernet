@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import React from 'react';
 
-export type MainTab = 'capability' | 'resource' | 'routine' | 'escort' | 'hosting';
+export type MainTab = 'capability' | 'resource' | 'routine' | 'escort' | 'hosting' | `extension:${string}`;
 export const mainTabs: Array<{ key: MainTab; label: string; icon: React.ReactNode }> = [
   { key: 'capability', label: '能力集', icon: <LayoutGrid className="size-3.5 shrink-0" /> },
   { key: 'resource', label: '资源', icon: <Database className="size-3.5 shrink-0" /> },

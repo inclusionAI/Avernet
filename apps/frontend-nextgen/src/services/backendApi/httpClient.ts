@@ -1,3 +1,4 @@
+import { readLimitedResponse } from './readLimitedResponse';
 import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
 import { useIdentityStore } from '@/stores/identityStore';
 import { useLoginRedirectStore } from '@/stores/loginRedirectStore';
@@ -17,6 +18,8 @@ export interface BackendRequestOptions {
   retryOnTransient?: boolean;
   responseType?: 'json' | 'blob' | 'text';
   injectUserId?: boolean;
+  /** Optional bounded consumption for inline text previews; ordinary requests are unchanged. */
+  maxResponseBytes?: number;
   /** 操作语义标签(如 create-skill),参与 toastKey 去重键组成,保证同接口跨操作的独立失败不被误合并。 */
   operation?: string;
   signal?: AbortSignal;
@@ -134,7 +137,13 @@ function withQuery(url: string, params?: Record<string, unknown>) {
 async function readResponseData(
   response: Response,
   responseType?: BackendRequestOptions['responseType'],
+  maxResponseBytes?: number,
 ): Promise<unknown> {
+  if (maxResponseBytes !== undefined) {
+    const text = await readLimitedResponse(response, maxResponseBytes);
+    // Preserve JSON authentication/error inspection even for bounded text previews.
+    return response.headers.get('content-type')?.includes('application/json') ? JSON.parse(text) : text;
+  }
   if (responseType === 'text') return response.text();
   if (responseType === 'blob') return response.blob();
   const contentType = response.headers.get('content-type') ?? '';
@@ -164,7 +173,7 @@ async function executeBackendRequest<T>(url: string, options: BackendRequestOpti
     signal: options.signal,
   });
 
-  const responseData = await readResponseData(response, options.responseType);
+  const responseData = await readResponseData(response, options.responseType, options.maxResponseBytes);
 
   if (!response.ok) {
     // 未登录处置决策(见 authFailurePolicy):外部 oauth 策略下,未登录失败(HTTP 401 / 信封未登录体)
