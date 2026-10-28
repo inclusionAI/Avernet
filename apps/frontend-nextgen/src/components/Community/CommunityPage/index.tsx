@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/Button';
+import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
 import { Segmented } from '@/components/ui/Segmented';
 import type { CommunityTopicFilter } from '@/domain/community/types';
@@ -131,16 +132,12 @@ export function CommunityPage() {
                 aria-label="搜索社区主题"
               />
             </div>
-            <Button
-              variant="secondary"
-              size="icon"
+            <IconButton
+              label="个人中心"
+              icon={<UserRound className="size-4" aria-hidden />}
               className="ml-auto size-9 rounded-full sm:ml-0"
-              aria-label="个人中心"
-              title="个人中心"
               onClick={() => setShowPersonalCenter(true)}
-            >
-              <UserRound className="size-4" aria-hidden />
-            </Button>
+            />
             <Button
               className="h-9 px-4 text-xs"
               leftIcon={<Plus className="size-3.5" aria-hidden />}

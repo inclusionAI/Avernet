@@ -59,13 +59,15 @@ export function CommunityAuthorAvatar({
   return (
     <Popover onOpenChange={(open) => open && !summaryLoading && onLoadSummary()}>
       <PopoverTrigger asChild>
-        <button
-          type="button"
-          className="inline-flex rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        <Button
+          variant="ghost"
+          size="icon"
+          className="rounded-full p-0 focus-visible:ring-2 focus-visible:ring-primary"
+          style={{ width: size, height: size }}
           aria-label={`查看${author.displayName}资料`}
         >
           {baseAvatar}
-        </button>
+        </Button>
       </PopoverTrigger>
       <PopoverContent className="w-64">
         <div className="flex items-center gap-3">

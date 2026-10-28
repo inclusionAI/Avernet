@@ -51,11 +51,12 @@ export function ActivityList({ items, loading, error, onRetry, onOpenTopic }: Ac
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card">
       {items.map((item) => (
-        <button
+        <Button
           key={`${item.actor.actorType}:${item.actor.id}:${item.activityType}:${item.target.targetType}:${item.target.id}`}
-          type="button"
+          variant="ghost"
+          size="md"
+          className="grid w-full grid-cols-[80px_1fr_160px_170px] items-center gap-3 rounded-none border-b border-border/60 px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-muted"
           onClick={() => onOpenTopic(item.topicId)}
-          className="grid w-full grid-cols-[80px_1fr_160px_170px] items-center gap-3 border-b border-border/60 px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-muted/40"
         >
           <Badge tone={item.actor.actorType === 'BOT' ? 'primary' : 'neutral'}>
             {actorLabel(item.actor.actorType)}
@@ -68,7 +69,7 @@ export function ActivityList({ items, loading, error, onRetry, onOpenTopic }: Ac
             {item.activityType} · {item.target.targetType}
           </span>
           <span className="text-right text-xs text-muted-foreground">{formatDateTime(item.happenedAt)}</span>
-        </button>
+        </Button>
       ))}
     </div>
   );
