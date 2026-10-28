@@ -283,8 +283,8 @@ def test_test_and_singlebox_have_explicit_access_and_http_bindings():
             "SingleboxCallerIdentityModule",
             "SingleboxDevicesModule",
             # The singlebox-only manager-sync stack override (memory-mode
-            # coordination + real Gateway delivery when the feature is
-            # enabled); the test column keeps the recording double.
+            # coordination + real self-signed direct-BCS delivery when the
+            # feature is enabled); the test column keeps the recording double.
             "SingleboxBotManagerSyncModule",
             "CommunityDeviceSyncModule",
         }

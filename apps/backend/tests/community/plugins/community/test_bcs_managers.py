@@ -1,12 +1,14 @@
-"""Unit tests for ``HttpBcsManagersPlugin`` — the trusted-App BCS PUT adapter.
+"""Unit tests for ``HttpBcsManagersPlugin`` — the self-signed BCS PUT adapter.
 
 Transport-failure and wire-contract coverage for the PROD
 ``BcsManagersPlugin``: exactly one PUT per call to the BCS v1 managers
-endpoint, every failure classified into the kernel's ``DeliveryFailure``
-vocabulary. All HTTP runs over ``httpx.MockTransport`` — no services,
-no sleeps; ``UNKNOWN`` classification comes from a handler that never
-answers. The test owns the client it passes in; the plugin's self-owned
-lifecycle is exercised separately.
+endpoint, authenticated with a self-signed ``X-Avernet-Principal`` (no
+``Authorization`` header at all), every failure classified into the
+kernel's ``DeliveryFailure`` vocabulary. All HTTP runs over
+``httpx.MockTransport`` — no services, no sleeps; ``UNKNOWN``
+classification comes from a handler that never answers. The test owns
+the client it passes in; the plugin's self-owned lifecycle is exercised
+separately.
 """
 from __future__ import annotations
 
@@ -15,10 +17,16 @@ import json
 from contextlib import asynccontextmanager
 
 import httpx
+import jwt
 import pytest
 
 from agentclaw.community.core.bot_collaborator.manager_sync.projector import (
     build_snapshot,
+)
+from agentclaw.community.core.gateway_principal import (
+    PrincipalSignerConfig,
+    PrincipalVerificationError,
+    mint_service_app_principal,
 )
 from agentclaw.community.kernel.bot_manager_sync import (
     CollaboratorFact,
@@ -37,8 +45,22 @@ from agentclaw.community.plugins.community.bcs_managers import (
     HttpBcsManagersPlugin,
 )
 
-_BASE_URL = "https://gateway.invalid"
-_APP_CREDENTIALS = {"tenant-a": "fixture-app-credential"}
+_BASE_URL = "https://bcs.invalid"
+
+#: A test signing key in the shape the minter test suite already uses —
+#: never a real secret, and strong enough for HMAC-SHA256.
+_MINT_KEY = "test-manager-sync-signing-key-0123456789abcdef"
+
+#: The delivery minter the composition root would hand the plugin: this
+#: component's own service identity under the fixed BCS envelope.
+_MINT_PRINCIPAL = (
+    lambda tenant: mint_service_app_principal(
+        PrincipalSignerConfig(
+            signing_key=_MINT_KEY, audience="bcs", issuer="backend", key_id="bare"
+        ),
+        tenant,
+    )
+)
 
 
 @pytest.fixture
@@ -65,15 +87,15 @@ async def _plugin_with(handler, *, base_url: str = _BASE_URL):
     transport = httpx.MockTransport(handler)
     async with httpx.AsyncClient(base_url=base_url, transport=transport) as client:
         yield HttpBcsManagersPlugin(
-            base_url=base_url, app_credentials=_APP_CREDENTIALS, client=client
+            base_url=base_url, mint_principal=_MINT_PRINCIPAL, client=client
         )
 
 
-# — Step 1: the transport + wire-contract test (verbatim from the plan) ———
+# — Step 1: the transport + wire-contract test ———————————————————————————
 
 
 @pytest.mark.asyncio
-async def test_put_uses_app_credential_and_complete_snapshot():
+async def test_put_carries_a_self_signed_principal_and_no_bearer():
     seen = []
     def handle(request):
         seen.append(request)
@@ -81,15 +103,37 @@ async def test_put_uses_app_credential_and_complete_snapshot():
             "request_id": "req-test", "data": {"added": 2, "removed": 0, "total": 2}})
     facts = SyncFacts(SyncKey("tenant-a", "dev", 7), "bot", "entity", "owner",
         (CollaboratorFact("a", "admin", True), CollaboratorFact("b", "member", True)))
-    async with httpx.AsyncClient(base_url="https://gateway.invalid",
+    async with httpx.AsyncClient(base_url=_BASE_URL,
                                 transport=httpx.MockTransport(handle)) as client:
-        plugin = HttpBcsManagersPlugin(base_url="https://gateway.invalid", client=client,
-            app_credentials={"tenant-a": "fixture-app-credential"})
+        plugin = HttpBcsManagersPlugin(base_url=_BASE_URL, client=client,
+            mint_principal=_MINT_PRINCIPAL)
         result = await plugin.replace_managers(build_snapshot(facts), timeout_seconds=2)
     assert seen[0].method == "PUT"
     assert seen[0].url.path == "/api/v1/collaboration/bots/bot:entity/managers"
     assert json.loads(seen[0].content) == {"manager_user_ids": ["a", "b"]}
-    assert seen[0].headers["Authorization"] == "Bearer fixture-app-credential"
+    # Direct delivery: no Bearer anywhere on the wire.
+    assert "Authorization" not in seen[0].headers
+    # The one credential is the self-signed BCS principal, and it is a
+    # well-formed envelope under the test key: iss=backend, aud=bcs,
+    # kid=bare, integer iat<exp, and the fixed service-app identity
+    # scoped to the snapshot's own tenant.
+    principal = seen[0].headers["X-Avernet-Principal"]
+    header = jwt.get_unverified_header(principal)
+    assert header["alg"] == "HS256"
+    assert header["typ"] == "JWT"
+    assert header["kid"] == "bare"
+    claims = jwt.decode(
+        principal, _MINT_KEY,
+        algorithms=["HS256"], audience="bcs", issuer="backend",
+    )
+    assert isinstance(claims["iat"], int)
+    assert isinstance(claims["exp"], int)
+    assert claims["exp"] > claims["iat"]
+    (only,) = claims["principals"]
+    assert only["type"] == "app"
+    assert only["tenant"] == "tenant-a"
+    assert only["app"]["app_name"] == "backend"
+    assert only["app"]["tenant"] == "tenant-a"
     assert result.total == 2
 
 
@@ -164,7 +208,17 @@ async def test_input_id_list_is_not_filtered():
 
 
 @pytest.mark.asyncio
-async def test_unknown_tenant_refuses_to_send():
+async def test_unmintable_principal_refuses_to_send():
+    """A mint that fails (e.g. no signing key) is proven pre-send.
+
+    The token would not verify at BCS, so the adapter refuses before the
+    transport rather than sending a credential it knows is dead — the
+    round is safely retryable once the deployment's key resolves.
+    """
+
+    def broken_mint(tenant: str) -> str:
+        raise PrincipalVerificationError("no principal signing key is configured")
+
     seen: list[httpx.Request] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
@@ -172,14 +226,22 @@ async def test_unknown_tenant_refuses_to_send():
         return httpx.Response(200, json=_envelope({"added": 0, "removed": 0, "total": 0}))
 
     facts = SyncFacts(
-        SyncKey("tenant-z", "dev", 8), "bot", "entity", "owner",
+        SyncKey("tenant-a", "dev", 8), "bot", "entity", "owner",
         (CollaboratorFact("a", "admin", True),),
     )
-    async with _plugin_with(handle) as plugin:
-        with pytest.raises(BcsManagersError) as caught:
-            await plugin.replace_managers(build_snapshot(facts), timeout_seconds=2)
+    async with _plugin_with(handle) as _:
+        plugin = HttpBcsManagersPlugin(
+            base_url=_BASE_URL, mint_principal=broken_mint, client=None
+        )
+        try:
+            with pytest.raises(BcsManagersError) as caught:
+                await plugin.replace_managers(
+                    build_snapshot(facts), timeout_seconds=2
+                )
+        finally:
+            await plugin.aclose()
     assert caught.value.kind == DeliveryFailure.NOT_SENT
-    assert caught.value.code == "missing_tenant_credential"
+    assert caught.value.code == "principal_mint_failed"
     assert seen == []  # nothing ever reached the transport
 
 
@@ -384,7 +446,7 @@ async def test_plugin_never_closes_a_caller_owned_client(
         base_url=_BASE_URL, transport=httpx.MockTransport(handle)
     ) as client:
         plugin = HttpBcsManagersPlugin(
-            base_url=_BASE_URL, app_credentials=_APP_CREDENTIALS, client=client
+            base_url=_BASE_URL, mint_principal=_MINT_PRINCIPAL, client=client
         )
         await plugin.replace_managers(snapshot, timeout_seconds=2)
         await plugin.aclose()  # no-op: the caller owns this client
@@ -399,7 +461,7 @@ async def test_lazy_self_owned_client_is_created_and_closed(
 ):
     plugin = HttpBcsManagersPlugin(
         base_url="http://127.0.0.1:1",  # nothing listens: connect refused, fast
-        app_credentials=_APP_CREDENTIALS,
+        mint_principal=_MINT_PRINCIPAL,
     )
     assert plugin._client is None  # not born yet
     try:

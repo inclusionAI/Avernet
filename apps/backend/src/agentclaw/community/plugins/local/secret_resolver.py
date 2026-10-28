@@ -23,11 +23,6 @@ logger = get_logger()
 
 _AIWORKBENCH_REPO_URL_SECRET_NAME = "other_manual_agentclaw_aiworkbench_repo_url"
 _GATEWAY_PRINCIPAL_SIGNING_KEY_SECRET_NAME = "gateway_principal_signing_key"
-#: Singlebox dev-only trusted-App credential for the Backend→BCS manager
-#: sync — a local stack stand-in for the deployment's per-tenant gateway
-#: App credential. Env-injected (like the signing key above), never a
-#: real secret, never read by any other profile.
-_MANAGER_SYNC_APP_CREDENTIAL_SECRET_NAME = "singlebox_manager_sync_app_credential"
 
 
 @dataclass(frozen=True)
@@ -47,10 +42,8 @@ class LocalSecretResolver(MockSeam, SecretResolver):
     def __init__(
         self,
         gateway_principal_signing_key: str = "",
-        manager_sync_app_credential: str = "",
     ) -> None:
         self._gateway_principal_signing_key = gateway_principal_signing_key.strip()
-        self._manager_sync_app_credential = manager_sync_app_credential.strip()
 
     # B11: application-singlebox.yaml lives in the community subtree
     # (agentclaw/community/configs). parents[2] is agentclaw/community from this file
@@ -99,14 +92,6 @@ class LocalSecretResolver(MockSeam, SecretResolver):
             return _LocalSecret(
                 secret_user="",
                 secret_value=self._gateway_principal_signing_key,
-            )
-        if (
-            secret_name == _MANAGER_SYNC_APP_CREDENTIAL_SECRET_NAME
-            and self._manager_sync_app_credential
-        ):
-            return _LocalSecret(
-                secret_user="",
-                secret_value=self._manager_sync_app_credential,
             )
 
         logger.info("[LocalMock] SecretResolver.get_secret(%s) -> None", secret_name)

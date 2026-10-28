@@ -85,7 +85,9 @@ user_config:
   # single-replica downgrade form: `coordination_mode: memory` runs the
   # SAME in-process coordinator contract the conformance suites pin
   # (claim/begin/finish/hold/generation/CAS inside one process), with the
-  # REAL Gateway→BCS trusted-App delivery. Singlebox has exactly one
+  # REAL direct delivery: the backend self-signs an X-Avernet-Principal
+  # for its own service identity and PUTs straight to the BCS origin
+  # (no gateway hop). Singlebox has exactly one
   # Backend process and always whole-stack-restarts, so there is no
   # cross-process writer to protect — which is exactly why `memory` is a
   # dev-stack value ONLY and never a production mode: production keeps
@@ -93,18 +95,18 @@ user_config:
   # generation sentinel; see docs/bot-manager-sync-operations.md §3).
   # `env: dev` must equal the env singlebox Bots are created with
   # (SERVER_ENV=dev → get_current_env()="dev"); the dispatcher env-gate
-  # and the reader both filter on it. The tenant credential resolves
-  # through the SecretResolver (secret name below): for singlebox, the
-  # dev App credential exported by singlebox/modules/backend.sh and
-  # registered in the local gateway's dev app registry.
+  # and the reader both filter on it. Delivery authentication is the
+  # same shared gateway-principal signing key the verifier uses
+  # (SecretNamesConfig.gateway_principal_signing_key): the dev value is
+  # exported by singlebox/modules/backend.sh, and the dev BCS trusts the
+  # `backend` issuer for `managers:sync` via its
+  # [[bot_authority.trusted_apps]] rule (app `backend`, tenant teamclaw).
   bot_manager_sync:
     enabled: true
     coordination_mode: memory
     target_id: singlebox-dev-manager-sync
     env: dev
-    gateway_base_url: "http://127.0.0.1:8889"
-    app_secret_names_by_tenant:
-      teamclaw: singlebox_manager_sync_app_credential
+    bcs_base_url: "http://127.0.0.1:21000"
     coordination_generation: singlebox-memory-generation
 
   # token_exchange — 外网替换为本地 mock

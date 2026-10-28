@@ -25,10 +25,4 @@ class TestSecretModule(Module):
             gateway_principal_signing_key=os.environ.get(
                 "AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE", ""
             ),
-            # Dev-only trusted-App credential the singlebox stack registers
-            # in its local gateway (see singlebox/modules/backend.sh); the
-            # same env-injection shape as the signing key above.
-            manager_sync_app_credential=os.environ.get(
-                "AGENTCLAW_SECRET_MANAGER_SYNC_APP_CREDENTIAL", ""
-            ),
         )

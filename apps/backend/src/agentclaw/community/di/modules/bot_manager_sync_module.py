@@ -9,11 +9,12 @@ resolvable:
   eagerly resolves this binding on every profile).
 - ``ManagerSyncStack`` — the (un)available delivery + coordination
   plugin pair. The community column runs the prod stack (Redis-backed
-  coordination on the shared cache's Redis URL, trusted-App HTTP delivery
-  with per-tenant credentials from the SecretResolver); the test column
-  overrides it with the Recording / Memory doubles. An unavailable stack
-  carries a stable reason word, never a raised exception and never a
-  fabricated fallback (no process-local lock, no empty-string secrets).
+  coordination on the shared cache's Redis URL, real HTTP delivery
+  direct to the BCS origin with self-signed service principals minted
+  from the shared signing key); the test column overrides it with the
+  Recording / Memory doubles. An unavailable stack carries a stable
+  reason word, never a raised exception and never a fabricated fallback
+  (no process-local lock, no empty-string secrets).
 - ``BotManagerSyncProtocol`` — :class:`DisabledBotManagerSync` (zero
   resources) when the feature is off or the stack is unavailable; the
   bounded :class:`BotManagerSyncDispatcher` when everything resolved.
@@ -27,10 +28,13 @@ resolvable:
 
 The Redis URL never appears in this module: it comes from the existing
 ``CommunityCacheConfig``, and a deployment without shared Redis gets an
-unavailable stack, not a degraded lock. Credentials resolve through
-``SecretResolver.get_secret(...).secret_value``; a missing one makes
-the feature unavailable with a diagnostic — never an empty-string fake
-credential — and secret material is never logged or repr'ed.
+unavailable stack, not a degraded lock. Delivery authentication resolves
+through the same shared gateway-principal signing key every other
+principal flow in this component uses
+(``SecretNamesConfig.gateway_principal_signing_key`` via
+:func:`resolve_signing_key`); a missing key makes the feature
+unavailable with a diagnostic — never an empty-string or unsigned-key
+fallback — and secret material is never logged or repr'ed.
 
 ``coordination_mode`` selects the coordinator implementation: ``redis``
 (the default, production-only posture) builds the Redis coordinator
@@ -39,12 +43,13 @@ form** — builds the in-process
 :class:`MemoryManagerSyncCoordinator` with the configured generation,
 exchanging cross-process coordination for a dev stack that has exactly
 one Backend process (singlebox). Delivery stays the real
-:class:`HttpBcsManagersPlugin` through the Gateway in BOTH modes, and
-the credential availability checks are identical — ``memory`` never
-loosens them, it only swaps the coordination boundary.
+:class:`HttpBcsManagersPlugin` direct to BCS in BOTH modes, and the
+signing-key availability check is identical — ``memory`` never loosens
+it, it only swaps the coordination boundary.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from injector import Binder, Module, inject, provider, singleton
@@ -77,6 +82,7 @@ from agentclaw.community.di.bot_manager_sync_config import (
     ManagerSyncConfig,
     parse_manager_sync_config,
 )
+from agentclaw.community.di.config import SecretNamesConfig
 from agentclaw.community.di.modules.config_module import read_user_config
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.bcs_managers import BcsManagersPlugin
@@ -84,6 +90,10 @@ from agentclaw.community.plugin_api.manager_sync_coordination import (
     ManagerSyncCoordinator,
 )
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
+from agentclaw.community.utils.gateway_principal_config import (
+    bcs_service_principal_signer_config,
+    resolve_signing_key,
+)
 
 logger = get_logger()
 
@@ -125,56 +135,61 @@ class ManagerSyncStack:
         return cls(bcs=None, coordinator=None, available=False, reason=reason)
 
 
-def _resolve_app_credentials(
-    config: ManagerSyncConfig, secret_resolver: SecretResolver
-) -> tuple[dict[str, str], str]:
-    """Resolve every configured tenant's trusted-App credential.
+def _build_principal_minter(
+    resolver: SecretResolver, secret_names: SecretNamesConfig
+) -> Callable[[str], str] | None:
+    """Resolve the delivery signing key and close a mint over it.
 
-    Returns ``(credentials, missing_reason)`` — ``missing_reason`` is
-    empty when every lookup succeeded. The resolver is asked by *name*
-    (the map only selects which named secret each tenant uses); a
-    missing, empty, or unreadable secret makes the whole feature
-    unavailable rather than forging an empty-string credential. Secret
-    values never travel into logs, diagnostics, or exceptions.
+    Returns a tenant → token callable minting **this component's**
+    service identity under the fixed BCS envelope
+    (``core/gateway_principal/service_principal.py``), or ``None`` when
+    the shared signing key did not resolve — the caller then binds the
+    feature unavailable, because a deployment that cannot mint a
+    principal BCS will verify is exactly one that must not send at all.
+
+    The key is resolved under the same secret name and conventions the
+    HTTP boot's verifier init uses (:func:`resolve_signing_key`), so the
+    deployments that can mint are exactly the ones that can verify. The
+    callable closes over the signer config built from the resolved key
+    rather than the boot-installed global: the credential the stack
+    validated is the credential the sender mints with.
     """
-    credentials: dict[str, str] = {}
-    missing: list[str] = []
-    for tenant, secret_name in config.app_secret_names_by_tenant.items():
-        secret = None
-        value: str | None = None
-        try:
-            secret = secret_resolver.get_secret(secret_name)
-        except Exception as exc:  # noqa: BLE001 — unavailable, not a boot crash
-            logger.error(
-                "[MANAGER-SYNC] credential_lookup_failed secret_name=%s error=%s",
-                secret_name,
-                type(exc).__name__,
-            )
-        if secret is not None:
-            value = getattr(secret, "secret_value", None)
-        if not isinstance(value, str) or not value:
-            missing.append(secret_name)
-            continue
-        credentials[tenant] = value
-    if missing:
-        reason = "missing-credential:" + ",".join(sorted(missing)[:8])
-    else:
-        reason = ""
-    return credentials, reason
+    from agentclaw.community.core.gateway_principal import (
+        mint_service_app_principal,
+    )
+
+    signing_key = resolve_signing_key(
+        resolver, secret_names.gateway_principal_signing_key
+    )
+    if not signing_key:
+        logger.warning(
+            "[MANAGER-SYNC] no principal signing key resolved under "
+            "secret_names.gateway_principal_signing_key=%r — cannot mint "
+            "BCS service principals, so no manager sync can be delivered "
+            "by this deployment",
+            secret_names.gateway_principal_signing_key,
+        )
+        return None
+    signer = bcs_service_principal_signer_config(signing_key)
+
+    def mint_principal(tenant: str) -> str:
+        return mint_service_app_principal(signer, tenant)
+
+    return mint_principal
 
 
 def build_memory_manager_sync_stack(
-    config: ManagerSyncConfig, credentials: dict[str, str]
+    config: ManagerSyncConfig, mint_principal: Callable[[str], str]
 ) -> "ManagerSyncStack":
     """The ``memory``-mode stack: real HTTP delivery + in-process coordination.
 
     The single-replica downgrade form (singlebox/dev only — see the
-    config module docstring). Delivery stays the real trusted-App HTTP
-    plugin through the Gateway with the deployment's credentials, and
-    coordination swaps to the in-process coordinator bound to the
-    configured generation sentinel value. The coordinator ctor takes
-    the generation only: the namespace identity (``target_id``) is part
-    of the Redis key layout and has no in-process analogue.
+    config module docstring). Delivery stays the real self-signed HTTP
+    plugin direct to the BCS origin, and coordination swaps to the
+    in-process coordinator bound to the configured generation sentinel
+    value. The coordinator ctor takes the generation only: the namespace
+    identity (``target_id``) is part of the Redis key layout and has no
+    in-process analogue.
 
     Fail-closed on data environments outside the dev family: a pre/prod
     deployment asking for in-process coordination is a structural
@@ -200,7 +215,7 @@ def build_memory_manager_sync_stack(
     coordinator = MemoryManagerSyncCoordinator(generation=config.coordination_generation)
     return ManagerSyncStack.available_with(
         HttpBcsManagersPlugin(
-            base_url=config.gateway_base_url, app_credentials=credentials
+            base_url=config.bcs_base_url, mint_principal=mint_principal
         ),
         coordinator,
     )
@@ -230,6 +245,7 @@ class BotManagerSyncModule(Module):
         self,
         config: ManagerSyncConfig,
         secret_resolver: SecretResolver,
+        secret_names: SecretNamesConfig,
         cache_config: community_cfg.CommunityCacheConfig,
     ) -> ManagerSyncStack:
         """The community/prod stack (the test column overrides this key).
@@ -249,34 +265,30 @@ class BotManagerSyncModule(Module):
             # Single-replica downgrade (singlebox/dev stacks only): a
             # deployment authorizing memory mode opts out of shared Redis
             # entirely, so the shared-redis requirement does not apply —
-            # one process, one writer, whole-stack restart. Credential
-            # resolution is identical in both coordination modes;
-            # ``memory`` never loosens it.
-            credentials, missing_reason = _resolve_app_credentials(
-                config, secret_resolver
-            )
-            if missing_reason:
-                return ManagerSyncStack.unavailable(missing_reason)
+            # one process, one writer, whole-stack restart. The
+            # signing-key availability check is identical in both
+            # coordination modes; ``memory`` never loosens it.
+            mint_principal = _build_principal_minter(secret_resolver, secret_names)
+            if mint_principal is None:
+                return ManagerSyncStack.unavailable("principal-signing-key-required")
             logger.info(
                 "[MANAGER-SYNC] enabled stack resolving (memory mode — "
                 "single-replica dev downgrade, in-process coordination): "
-                "target=%s env=%s tenants=%d generation=provided",
+                "target=%s env=%s bcs=%s generation=provided",
                 config.target_id,
                 config.env,
-                len(credentials),
+                config.bcs_base_url,
             )
-            return build_memory_manager_sync_stack(config, credentials)
+            return build_memory_manager_sync_stack(config, mint_principal)
         # Shared Redis is mandatory in the default (production) mode:
         # markers must not be evicted and two replicas must coordinate.
         # No process-local fallback exists for it.
         redis_url = cache_config.redis_url
         if not redis_url:
             return ManagerSyncStack.unavailable("shared-redis-required")
-        credentials, missing_reason = _resolve_app_credentials(
-            config, secret_resolver
-        )
-        if missing_reason:
-            return ManagerSyncStack.unavailable(missing_reason)
+        mint_principal = _build_principal_minter(secret_resolver, secret_names)
+        if mint_principal is None:
+            return ManagerSyncStack.unavailable("principal-signing-key-required")
         try:
             import redis  # community dep; import stays behind the gate
 
@@ -300,14 +312,14 @@ class BotManagerSyncModule(Module):
 
         logger.info(
             "[MANAGER-SYNC] enabled stack resolving: target=%s env=%s "
-            "tenants=%d shared-redis=yes generation=provided",
+            "bcs=%s shared-redis=yes generation=provided",
             config.target_id,
             config.env,
-            len(credentials),
+            config.bcs_base_url,
         )
         return ManagerSyncStack.available_with(
             HttpBcsManagersPlugin(
-                base_url=config.gateway_base_url, app_credentials=credentials
+                base_url=config.bcs_base_url, mint_principal=mint_principal
             ),
             RedisManagerSyncCoordinator(
                 target_id=config.target_id,
@@ -347,8 +359,8 @@ class BotManagerSyncModule(Module):
     def manager_sync_lifecycle(self) -> BotManagerSyncLifecycle:
         """Lifecycle participant — the real loop owner, or its no-op twin.
 
-        Reads the (singleton) protocol binding so the lifecycle drives
-        the *same* dispatcher instance the business code submits to.
+        Reads the (singleton) protocol binding so the lifecycle drives the
+        *same* dispatcher instance the business code submits to.
         """
         entry = self.__injector__.get(BotManagerSyncProtocol)
         if not isinstance(entry, BotManagerSyncDispatcher):

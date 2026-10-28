@@ -6,7 +6,11 @@ Parse pins (the config module is independent — no provider lives here):
   are structural config errors regardless of ``enabled``;
 - enabling requires every field — indistinct emptiness is refused;
 - endpoint-style values must be http(s) URLs, never anything guessable
-  from source defaults.
+  from source defaults;
+- delivery credentials have NO key in the block: the direct-BCS form
+  signs its own service principal with the shared
+  ``gateway_principal_signing_key``, so per-tenant secret names are an
+  unknown-key error, not a removed-but-tolerated spelling.
 
 Wiring pins (test profile binds Recording + Memory via the new
 infrastructure module):
@@ -15,8 +19,8 @@ infrastructure module):
   lifecycle participant is the disabled no-op lifecycle;
 - explicitly enabling (config override module + fixture secrets)
   resolves a real dispatcher on the recording/memory stack;
-- enabling without credentials makes the syncer unavailable with a
-  diagnostic while the rest of the DI graph keeps resolving.
+- enabling without the shared signing key makes the syncer unavailable
+  with a diagnostic while the rest of the DI graph keeps resolving.
 """
 from __future__ import annotations
 
@@ -41,6 +45,7 @@ from agentclaw.community.di.bot_manager_sync_config import (
     ManagerSyncConfig,
     parse_manager_sync_config,
 )
+from agentclaw.community.di.config import SecretNamesConfig
 from agentclaw.community.di.modules.bot_manager_sync_module import (
     BotManagerSyncModule,
     ManagerSyncStack,
@@ -68,18 +73,38 @@ def test_valid_full_block_parses():
             "enabled": True,
             "target_id": "bcs-prod-a",
             "env": "prod",
-            "gateway_base_url": "https://gateway.example.test",
-            "app_secret_names_by_tenant": {"teamclaw": "SECRET_NAME_BCS_APP"},
+            "bcs_base_url": "https://bcs.example.test",
             "coordination_generation": "ops-init-2026-10-27",
         }
     )
     assert config.enabled is True
     assert config.target_id == "bcs-prod-a"
     assert config.env == "prod"
-    assert config.app_secret_names_by_tenant == {"teamclaw": "SECRET_NAME_BCS_APP"}
+    assert config.bcs_base_url == "https://bcs.example.test"
     assert config.coordination_generation == "ops-init-2026-10-27"
     # The coordination mode defaults to the production posture.
     assert config.coordination_mode == "redis"
+
+
+def test_delivery_credential_names_are_an_unknown_key():
+    """Direct self-signed delivery has no per-tenant credential names.
+
+    Authentication is the shared ``gateway_principal_signing_key`` (and
+    BCS's own trusted-app rules); an ``app_secret_names_by_tenant`` map
+    is the removed gateway-bearer spelling and must fail closed rather
+    than sit in the block unused.
+    """
+    with pytest.raises(ValueError, match="unknown"):
+        parse_manager_sync_config(
+            {
+                "enabled": True,
+                "target_id": "bcs-prod-a",
+                "env": "prod",
+                "bcs_base_url": "https://bcs.example.test",
+                "coordination_generation": "g",
+                "app_secret_names_by_tenant": {"teamclaw": "SECRET_NAME_BCS_APP"},
+            }
+        )
 
 
 @pytest.mark.parametrize("mode", ["redis", "memory"])
@@ -89,8 +114,7 @@ def test_coordination_mode_accepts_exactly_two_spellings(mode):
             "enabled": True,
             "target_id": "t",
             "env": "dev",
-            "gateway_base_url": "http://127.0.0.1:9999",
-            "app_secret_names_by_tenant": {"teamclaw": "S"},
+            "bcs_base_url": "http://127.0.0.1:9999",
             "coordination_generation": "g",
             "coordination_mode": mode,
         }
@@ -110,8 +134,7 @@ def test_disabled_block_with_all_fields_parses():
             "enabled": False,
             "target_id": "bcs-prod-a",
             "env": "prod",
-            "gateway_base_url": "https://gateway.example.test",
-            "app_secret_names_by_tenant": {"teamclaw": "S"},
+            "bcs_base_url": "https://bcs.example.test",
             "coordination_generation": "g",
         }
     )
@@ -134,15 +157,14 @@ def test_non_bool_enabled_is_a_config_error(bad_enabled):
         parse_manager_sync_config({"enabled": bad_enabled})
 
 
-@pytest.mark.parametrize("field", ["target_id", "env", "gateway_base_url",
+@pytest.mark.parametrize("field", ["target_id", "env", "bcs_base_url",
                                    "coordination_generation"])
 def test_enabled_requires_every_field(field):
     block = {
         "enabled": True,
         "target_id": "t",
         "env": "dev",
-        "gateway_base_url": "http://127.0.0.1:9999",
-        "app_secret_names_by_tenant": {"teamclaw": "S"},
+        "bcs_base_url": "http://127.0.0.1:9999",
         "coordination_generation": "g",
     }
     block.pop(field)
@@ -155,61 +177,21 @@ def test_non_string_fields_are_config_errors_even_when_disabled():
         parse_manager_sync_config({"enabled": False, "target_id": 7})
 
 
-def test_gateway_url_must_be_http_s():
-    with pytest.raises(ValueError, match="gateway_base_url"):
+def test_bcs_url_must_be_http_s():
+    with pytest.raises(ValueError, match="bcs_base_url"):
         parse_manager_sync_config(
             {
                 "enabled": True,
                 "target_id": "t",
                 "env": "dev",
-                "gateway_base_url": "ftp://gateway.example.test",
-                "app_secret_names_by_tenant": {"teamclaw": "S"},
+                "bcs_base_url": "ftp://bcs.example.test",
                 "coordination_generation": "g",
             }
         )
     # Also validated when the feature itself is off.
-    with pytest.raises(ValueError, match="gateway_base_url"):
+    with pytest.raises(ValueError, match="bcs_base_url"):
         parse_manager_sync_config(
-            {"enabled": False, "gateway_base_url": "not-a-url"}
-        )
-
-
-def test_app_secret_map_must_map_nonempty_strings():
-    with pytest.raises(ValueError, match="app_secret_names_by_tenant"):
-        parse_manager_sync_config(
-            {
-                "enabled": True,
-                "target_id": "t",
-                "env": "dev",
-                "gateway_base_url": "http://127.0.0.1:9999",
-                "app_secret_names_by_tenant": ["teamclaw"],
-                "coordination_generation": "g",
-            }
-        )
-    with pytest.raises(ValueError, match="app_secret_names_by_tenant"):
-        parse_manager_sync_config(
-            {
-                "enabled": True,
-                "target_id": "t",
-                "env": "dev",
-                "gateway_base_url": "http://127.0.0.1:9999",
-                "app_secret_names_by_tenant": {"teamclaw": ""},
-                "coordination_generation": "g",
-            }
-        )
-
-
-def test_enabled_requires_a_nonempty_secret_map():
-    with pytest.raises(ValueError, match="app_secret_names_by_tenant"):
-        parse_manager_sync_config(
-            {
-                "enabled": True,
-                "target_id": "t",
-                "env": "dev",
-                "gateway_base_url": "http://127.0.0.1:9999",
-                "app_secret_names_by_tenant": {},
-                "coordination_generation": "g",
-            }
+            {"enabled": False, "bcs_base_url": "not-a-url"}
         )
 
 
@@ -229,8 +211,7 @@ _ENABLED_CONFIG = ManagerSyncConfig(
     enabled=True,
     target_id="bcs-target-fixture",
     env="dev",
-    gateway_base_url="http://127.0.0.1:9999",
-    app_secret_names_by_tenant={"teamclaw": "SECRET_NAME_BCS_APP"},
+    bcs_base_url="http://127.0.0.1:9999",
     coordination_generation="ops-generation-fixture",
 )
 
@@ -345,12 +326,13 @@ def test_enabled_wiring_resolves_dispatcher_on_test_doubles():
 def test_singlebox_memory_mode_resolves_real_delivery_over_memory_coordinator():
     """SINGLEBOX + memory coordination = the single-replica downgrade stack.
 
-    The same real trusted-App HTTP delivery production uses
-    (:class:`HttpBcsManagersPlugin` against the configured Gateway origin,
-    with the tenant credential resolved through the SecretResolver), with
-    the in-process coordinator carrying the configured generation. The
-    stack override wins over the test column's Recording double, and no
-    Redis service is consulted anywhere.
+    The same real self-signed HTTP delivery production uses
+    (:class:`HttpBcsManagersPlugin` against the configured BCS origin,
+    with the service principal minted from the shared signing key
+    resolved through the SecretResolver), with the in-process
+    coordinator carrying the configured generation. The stack override
+    wins over the test column's Recording double, and no Redis service
+    is consulted anywhere.
     """
     from agentclaw.community.plugins.community.bcs_managers import (
         HttpBcsManagersPlugin,
@@ -376,8 +358,8 @@ def test_singlebox_memory_mode_resolves_real_delivery_over_memory_coordinator():
     assert type(lifecycle) is BotManagerSyncLifecycle
 
 
-def test_singlebox_memory_mode_without_credentials_stays_unavailable():
-    """Same availability checks as redis mode: no credential, no stack."""
+def test_singlebox_memory_mode_without_signing_key_stays_unavailable():
+    """Same availability checks as redis mode: no signing key, no stack."""
     class _MemoryNoSecretModule(Module):
         def configure(self, binder):
             binder.bind(ManagerSyncConfig, to=_MEMORY_CONFIG, scope=singleton)
@@ -389,7 +371,7 @@ def test_singlebox_memory_mode_without_credentials_stays_unavailable():
     )
     stack = injector.get(ManagerSyncStack)
     assert stack.available is False
-    assert "missing-credential" in stack.reason
+    assert "principal-signing-key-required" in stack.reason
     assert isinstance(
         injector.get(BotManagerSyncProtocol), DisabledBotManagerSync
     )
@@ -464,6 +446,10 @@ class _CommunityStackFixtures(Module):
             to=config_community.CommunityCacheConfig(redis_url=self._redis_url),
             scope=singleton,
         )
+        # The stack resolves the shared principal signing key under the
+        # deployment's own secret-names config; the raw-Injection columns
+        # below skip the config module, so bind the production defaults.
+        binder.bind(SecretNamesConfig, to=SecretNamesConfig(), scope=singleton)
 
 
 class _NoSecretResolver:
@@ -473,12 +459,12 @@ class _NoSecretResolver:
         return None
 
 
-def test_enabled_without_credentials_is_unavailable_with_diagnostics(caplog):
+def test_enabled_without_signing_key_is_unavailable_with_diagnostics(caplog):
     from injector import Injector
 
-    # The community (prod) stack: every secret lookup misses, so the
-    # stack must come up unavailable — never with empty-string fake
-    # credentials — and the entry point stays the zero-resource disabled
+    # The community (prod) stack: the signing-key lookup misses, so the
+    # stack must come up unavailable — never with an unsigned-key
+    # fallback — and the entry point stays the zero-resource disabled
     # posture while the diagnostic names the reason.
     injector = Injector(
         [
@@ -490,11 +476,12 @@ def test_enabled_without_credentials_is_unavailable_with_diagnostics(caplog):
     )
     stack = injector.get(ManagerSyncStack)
     assert stack.available is False
-    assert "missing-credential" in stack.reason
+    assert "principal-signing-key-required" in stack.reason
     protocol = injector.get(BotManagerSyncProtocol)
     assert isinstance(protocol, DisabledBotManagerSync)
     assert any(
-        "MANAGER-SYNC" in record.message and "missing-credential" in record.message
+        "MANAGER-SYNC" in record.message
+        and "no principal signing key resolved" in record.message
         for record in caplog.records
     )
 

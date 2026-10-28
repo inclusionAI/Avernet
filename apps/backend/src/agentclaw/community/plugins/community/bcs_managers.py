@@ -1,14 +1,18 @@
-"""HttpBcsManagersPlugin — trusted-App HTTP delivery to BCS managers.
+"""HttpBcsManagersPlugin — self-signed direct-HTTP delivery to BCS managers.
 
 The ``BcsManagersPlugin`` PROD implementation: exactly one ``PUT`` per
-call to the BCS v1 bot-authority managers endpoint through the Gateway,
-with every failure classified into the kernel's ``DeliveryFailure``
-vocabulary. Nothing else — no retries, no HMAC, no
-``X-Avernet-Principal`` signing, no user-token forwarding; the
-Authorization header carries only the per-tenant trusted-App credential
-(the same bearer the Gateway app-token strategy resolves against its
-app registry). Everything deeper about identity is BCS's own
-application rule, applied to the verified App.
+call to the BCS v1 bot-authority managers endpoint — **directly to the
+BCS origin**, no gateway hop — authenticated with a self-signed
+``X-Avernet-Principal`` minted by the composition-root-provided
+callable, with every failure classified into the kernel's
+``DeliveryFailure`` vocabulary. Nothing else — no retries, no Bearer
+tokens, no caller-identity forwarding: the mint callable produces this
+component's own service identity under its fixed scope
+(``core/gateway_principal/service_principal.py``), so the authority
+BCS applies is that of the ``backend`` service itself, rule-gated by the
+operator's ``[[bot_authority.trusted_apps]]`` entry. Everything deeper
+about identity is BCS's own application rule, applied to the verified
+App.
 
 BCS contract (v1 bot authority, frozen upstream):
 
@@ -27,8 +31,9 @@ BCS contract (v1 bot authority, frozen upstream):
 Classification (the safety core — a wrong label either re-sends a
 mutation or silently strands a bot):
 
-- ``NOT_SENT`` — proven pre-send: a tenant the composition root never
-  gave a credential (the adapter refuses to send unauthenticated), and
+- ``NOT_SENT`` — proven pre-send: a per-tenant service principal that
+  could not be minted (no signing key, blank tenant — an
+  unauthenticated PUT would be worse than a deferred sync), and
   connect / pool-acquisition failures. Safe to retry.
 - ``REJECTED`` — 400/401/403/404/409: BCS considered and refused this
   snapshot. Permanent for this attempt.
@@ -39,25 +44,30 @@ mutation or silently strands a bot):
   bot's next sync; this adapter never auto-retries any outcome.
 
 Failures carry only the stable ``kind`` plus a short classification
-code — never response bodies or exception texts, which may hold
-internal diagnostics.
+code — never response bodies, token material, or exception texts, which
+may hold internal diagnostics or a credential.
 
 Lifecycle: with ``client=None`` the plugin lazily creates and owns one
 ``httpx.AsyncClient`` on the first async call (born inside the worker
 loop); ``aclose()`` closes only a self-owned client and is a no-op for
-one the caller owns. The composition root (Task 6) resolves the
-``base_url`` (Gateway external origin; the path is fixed here) and the
-per-tenant credentials; the adapter takes both as constructor
-parameters.
+one the caller owns. The composition root
+(``di/modules/bot_manager_sync_module.py``) resolves the ``base_url``
+(the BCS origin; the path is fixed here) and the mint callable (the
+shared-key principal minter over the delivery envelope); the adapter
+takes both as constructor parameters and stays ignorant of keys,
+issuers and configs.
 """
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Callable
 from urllib.parse import quote
 
 import httpx
 
+from agentclaw.community.core.gateway_principal.errors import (
+    PrincipalVerificationError,
+)
 from agentclaw.community.kernel.bot_manager_sync import (
     DeliveryFailure,
     ManagerSetChange,
@@ -80,7 +90,7 @@ _REJECTED_STATUSES = frozenset({400, 401, 403, 404, 409})
 
 @plugin_impl(
     mode=Mode.PROD,
-    rationale="trusted-App bearer PUT to the BCS managers endpoint via the Gateway",
+    rationale="self-signed BCS principal PUT direct to the managers endpoint",
 )
 class HttpBcsManagersPlugin(BcsManagersPlugin):
     """One PUT, one classified verdict — no retries, no leaky errors."""
@@ -89,14 +99,15 @@ class HttpBcsManagersPlugin(BcsManagersPlugin):
         self,
         *,
         base_url: str,
-        app_credentials: Mapping[str, str],
+        mint_principal: Callable[[str], str],
         client: httpx.AsyncClient | None = None,
     ) -> None:
-        #: Gateway external origin; the adapter owns the fixed path.
+        #: BCS origin; the adapter owns the fixed authority path.
         self._base_url = base_url
-        #: Backend tenant → trusted-App credential, resolved by the
-        #: composition root. Read-only at call time, never recomposed.
-        self._app_credentials = app_credentials
+        #: Backend tenant → a self-signed ``X-Avernet-Principal`` for
+        #: this component's service identity. Handed in by the
+        #: composition root; the adapter never sees key material.
+        self._mint_principal = mint_principal
         self._client = client
         #: ``client=None`` is the self-managed pool mode: the client is
         #: created lazily on the first async call and owned until
@@ -110,13 +121,15 @@ class HttpBcsManagersPlugin(BcsManagersPlugin):
         timeout_seconds: float,
     ) -> ManagerSetChange:
         """Deliver the full replace and return BCS's applied diff."""
-        credential = self._app_credentials.get(snapshot.key.avernet_tenant)
-        if not credential:
-            # No credential, no send: an unauthenticated PUT would be
-            # worse than a deferred sync.
+        try:
+            principal = self._mint_principal(snapshot.key.avernet_tenant)
+        except PrincipalVerificationError:
+            # No key, or nothing to sign for: nothing was (or can be)
+            # sent on this attempt, so the round is safely retryable
+            # once the deployment's signing key resolves.
             raise BcsManagersError(
-                DeliveryFailure.NOT_SENT, "missing_tenant_credential"
-            )
+                DeliveryFailure.NOT_SENT, "principal_mint_failed"
+            ) from None
         path = (
             "/api/v1/collaboration/bots/"
             + quote(snapshot.bcs_bot_id, safe="")
@@ -129,7 +142,7 @@ class HttpBcsManagersPlugin(BcsManagersPlugin):
                 client = self._borrow_client()
                 response = await client.put(
                     path,
-                    headers={"Authorization": f"Bearer {credential}"},
+                    headers={"X-Avernet-Principal": principal},
                     json={"manager_user_ids": list(snapshot.manager_user_ids)},
                     # Mirror the budget onto the wire so httpx's ~5s
                     # phase defaults cannot cap a longer attempt before
@@ -157,19 +170,13 @@ class HttpBcsManagersPlugin(BcsManagersPlugin):
             ) from None
         except httpx.ReadTimeout:
             # The request was already on the wire — the outcome is BCS's.
-            raise BcsManagersError(
-                DeliveryFailure.UNKNOWN, "read_timeout"
-            ) from None
+            raise BcsManagersError(DeliveryFailure.UNKNOWN, "read_timeout") from None
         except httpx.WriteTimeout:
             # Possibly delivered even though the write never finished.
-            raise BcsManagersError(
-                DeliveryFailure.UNKNOWN, "write_timeout"
-            ) from None
+            raise BcsManagersError(DeliveryFailure.UNKNOWN, "write_timeout") from None
         except httpx.HTTPError:
             # Disconnects, protocol errors, anything unverifiable.
-            raise BcsManagersError(
-                DeliveryFailure.UNKNOWN, "transport_error"
-            ) from None
+            raise BcsManagersError(DeliveryFailure.UNKNOWN, "transport_error") from None
 
     def _borrow_client(self) -> httpx.AsyncClient:
         """The caller-provided client, or the lazily self-owned one."""

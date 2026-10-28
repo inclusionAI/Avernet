@@ -36,6 +36,7 @@ from datetime import datetime
 from unittest.mock import Mock
 
 import httpx
+import jwt
 import pytest
 
 from tests.community.bot_address_fakes import support_legacy_locator
@@ -61,6 +62,10 @@ from agentclaw.community.core.bot_collaborator.models import (
 from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
     CollaboratorService,
 )
+from agentclaw.community.core.gateway_principal import (
+    PrincipalSignerConfig,
+    mint_service_app_principal,
+)
 from agentclaw.community.di.bot_manager_sync_config import CONFIG_BLOCK_NAME
 from agentclaw.community.di.modules import bot_manager_sync_module as composition
 from agentclaw.community.kernel.bot_manager_sync import (
@@ -82,6 +87,16 @@ from agentclaw.community.plugins.local.manager_sync_coordination import (
 OWNER = "owner-1"
 MEMBER = "member-1"
 BOT_PK = 10
+
+#: The delivery minter the composition root would hand the real plugin:
+#: this component's own service identity under the fixed BCS envelope,
+#: signed with a test-only key (never a real secret).
+_SIGNER = PrincipalSignerConfig(
+    signing_key="test-manager-sync-signing-key-0123456789abcdef",
+    audience="bcs",
+    issuer="backend",
+    key_id="bare",
+)
 
 
 # -- shared doubles -----------------------------------------------------------
@@ -221,7 +236,7 @@ async def test_business_result_returns_while_bcs_http_request_hangs():
 
     bcs = HttpBcsManagersPlugin(
         base_url="http://bcs.test",
-        app_credentials={"teamclaw": "trusted-app-token"},
+        mint_principal=lambda tenant: mint_service_app_principal(_SIGNER, tenant),
         client=httpx.AsyncClient(
             base_url="http://bcs.test", transport=httpx.MockTransport(_park)
         ),
@@ -251,7 +266,19 @@ async def test_business_result_returns_while_bcs_http_request_hangs():
             seen_requests[0].url.path
             == "/api/v1/collaboration/bots/bot-10:entity-10/managers"
         )
-        assert seen_requests[0].headers["Authorization"] == "Bearer trusted-app-token"
+        # Direct delivery: the hung PUT carried the self-signed backend
+        # service principal, and no bearer at all — the transport saw a
+        # verifiable JWT (test key above) addressed to BCS.
+        assert "Authorization" not in seen_requests[0].headers
+        claims = jwt.decode(
+            seen_requests[0].headers["X-Avernet-Principal"],
+            _SIGNER.signing_key,
+            algorithms=["HS256"],
+            audience="bcs",
+            issuer="backend",
+        )
+        (only,) = claims["principals"]
+        assert only["app"]["app_name"] == "backend"
 
         release.set()
         await _drain(dispatcher)
@@ -531,8 +558,7 @@ def enabled_manager_sync_block(monkeypatch):
         "enabled": True,
         "target_id": "bcs-singlebox",
         "env": "dev",
-        "gateway_base_url": "http://127.0.0.1:21000",
-        "app_secret_names_by_tenant": {"teamclaw": "bcs-app-secret"},
+        "bcs_base_url": "http://127.0.0.1:21000",
         "coordination_generation": "gen-ordering-test",
     }
     monkeypatch.setattr(composition, "read_user_config", lambda: config)

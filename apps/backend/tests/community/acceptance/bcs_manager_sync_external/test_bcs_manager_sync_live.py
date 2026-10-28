@@ -65,8 +65,8 @@ Required (base posture — every matrix test); suffixes below attach to
 
 Destructive posture, opt-in via ``MANAGER_SYNC_LIVE_DESTRUCTIVE=1`` (else
 every destructive test skips: scenario NOT covered, never a silent green):
-``DESTRUCTIVE_GATEWAY_URL`` (gateway origin the in-test fault proxy
-forwards to, with the deployment's ``bot_manager_sync.gateway_base_url``
+``DESTRUCTIVE_UPSTREAM_URL`` (BCS origin the in-test fault proxy
+forwards to, with the deployment's ``bot_manager_sync.bcs_base_url``
 pointed at the proxy),
 ``DESTRUCTIVE_PROXY_PORT`` (local proxy port), and ``MAINTENANCE_PROFILE``
 (DeployProfile for the deployment maintenance injector, runbook §1 — the
@@ -133,7 +133,7 @@ class LiveCaseConfig:
     gateway_signing_key: str
     bcs_human_invite_code: str
     destructive: bool
-    destructive_gateway_url: str
+    destructive_upstream_url: str
     destructive_proxy_port: int
     maintenance_profile: str
 
@@ -191,13 +191,13 @@ class LiveCaseConfig:
             ) from exc
         destructive = _env("MANAGER_SYNC_LIVE_DESTRUCTIVE") == "1"
         if destructive and (
-            not _env("MANAGER_SYNC_LIVE_DESTRUCTIVE_GATEWAY_URL")
+            not _env("MANAGER_SYNC_LIVE_DESTRUCTIVE_UPSTREAM_URL")
             or not _env("MANAGER_SYNC_LIVE_DESTRUCTIVE_PROXY_PORT")
             or not _env("MANAGER_SYNC_LIVE_MAINTENANCE_PROFILE")
         ):
             raise LiveCaseConfigError(
                 "MANAGER_SYNC_LIVE_DESTRUCTIVE=1 requires "
-                "MANAGER_SYNC_LIVE_DESTRUCTIVE_GATEWAY_URL, "
+                "MANAGER_SYNC_LIVE_DESTRUCTIVE_UPSTREAM_URL, "
                 "MANAGER_SYNC_LIVE_DESTRUCTIVE_PROXY_PORT and "
                 "MANAGER_SYNC_LIVE_MAINTENANCE_PROFILE — the destructive "
                 "scenarios run only against an isolated fault-capable posture "
@@ -220,7 +220,7 @@ class LiveCaseConfig:
             gateway_signing_key=base["MANAGER_SYNC_LIVE_GATEWAY_SIGNING_KEY"],
             bcs_human_invite_code=_env("MANAGER_SYNC_LIVE_BCS_HUMAN_INVITE_CODE"),
             destructive=destructive,
-            destructive_gateway_url=_env("MANAGER_SYNC_LIVE_DESTRUCTIVE_GATEWAY_URL"),
+            destructive_upstream_url=_env("MANAGER_SYNC_LIVE_DESTRUCTIVE_UPSTREAM_URL"),
             destructive_proxy_port=int(
                 _env("MANAGER_SYNC_LIVE_DESTRUCTIVE_PROXY_PORT") or 0
             )
@@ -669,7 +669,7 @@ def test_space_member_removal_excludes_and_rejoin_restores(live_manager_case):
 #
 # These run only against an isolated fault-capable posture:
 # MANAGER_SYNC_LIVE_DESTRUCTIVE=1, with the isolated deployment's
-# ``bot_manager_sync.gateway_base_url`` pointed at this suite's in-test
+# ``bot_manager_sync.bcs_base_url`` pointed at this suite's in-test
 # fault proxy. The fault agent exists only at this test boundary —
 # production core never grows a test-only hook, and the shared BCS of a
 # deployment is never touched without that opt-in. The maintenance legs
@@ -683,7 +683,7 @@ def test_space_member_removal_excludes_and_rejoin_restores(live_manager_case):
 class _FaultPlan:
     """Fault behavior for the in-test proxy — test-boundary only."""
 
-    reject_status: int | None = None  # e.g. 403 from the gateway side
+    reject_status: int | None = None  # e.g. 403 from the BCS side
     drop_after_request_bytes: bool = False  # accept body, never answer → unknown
     rewrite_total: int | None = None  # answer with a wrong `total` (drift)
     requests: list[dict[str, Any]] = field(default_factory=list)
@@ -695,8 +695,8 @@ class _FaultPlan:
 
 
 def _start_fault_proxy(config: LiveCaseConfig, plan: _FaultPlan) -> ThreadingHTTPServer:
-    """A local proxy forwarding to the real gateway, with injectable faults."""
-    upstream = config.destructive_gateway_url
+    """A local proxy forwarding to the real BCS, with injectable faults."""
+    upstream = config.destructive_upstream_url
 
     class Handler(BaseHTTPRequestHandler):
         def _forward(self) -> None:
@@ -764,11 +764,11 @@ def destructive_case(live_manager_case):
 
 @pytest.fixture
 def fault_proxy(destructive_case):
-    """The in-test fault proxy over the deployment's real gateway.
+    """The in-test fault proxy over the deployment's real BCS.
 
     The faulted server lives for the test body; the finalizer then leaves
     a *clean* proxy on the case so the case's own teardown sends (and the
-    recovery legs) reach the real gateway — a dead proxy would classify
+    recovery legs) reach the real BCS — a dead proxy would classify
     every later send as unknown and poison the next scenario.
     """
     case = destructive_case

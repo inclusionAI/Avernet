@@ -6,8 +6,9 @@ coordination doubles, wired for the conformance suites), and this module
 is appended **after** it in the singlebox column so the last binding
 wins: an explicitly enabled singlebox ``bot_manager_sync`` block gets
 the single-replica downgrade stack — the SAME real
-trusted-App HTTP delivery through the local Gateway
-(:class:`HttpBcsManagersPlugin`, per-tenant credential resolved through
+self-signed HTTP delivery production uses
+(:class:`HttpBcsManagersPlugin`, PUT direct to the BCS origin with a
+service principal minted from the shared signing key resolved through
 the ``SecretResolver`` exactly like production) with the in-process
 :class:`MemoryManagerSyncCoordinator` carrying the configured
 generation sentinel value. No Redis service, no ``redis_url``, no
@@ -25,9 +26,9 @@ Invariants kept identical to the community column:
 
 - disabled stays disabled (``unavailable("disabled")``) — this module
   binds a stack, it never turns the feature on by itself;
-- the SAME credential availability checks run in memory mode, so a
-  missing local app credential makes the feature unavailable with a
-  diagnostic instead of fabricating an empty-string credential;
+- the SAME signing-key availability check runs in memory mode, so a
+  missing principal signing key makes the feature unavailable with a
+  diagnostic instead of sending with no credential BCS can verify;
 - the plugin-key doubles below ``TestBotManagerSyncModule`` (the
   ``BcsManagersPlugin`` / ``ManagerSyncCoordinator`` DI keys the
   conformance suites resolve) stay untouched — this module adds exactly
@@ -38,9 +39,10 @@ from __future__ import annotations
 from injector import Module, provider, singleton, inject
 
 from agentclaw.community.di.bot_manager_sync_config import ManagerSyncConfig
+from agentclaw.community.di.config import SecretNamesConfig
 from agentclaw.community.di.modules.bot_manager_sync_module import (
     ManagerSyncStack,
-    _resolve_app_credentials,
+    _build_principal_minter,
     build_memory_manager_sync_stack,
 )
 from agentclaw.community.log import get_logger
@@ -59,6 +61,7 @@ class SingleboxBotManagerSyncModule(Module):
         self,
         config: ManagerSyncConfig,
         secret_resolver: SecretResolver,
+        secret_names: SecretNamesConfig,
     ) -> ManagerSyncStack:
         """The singlebox stack — only stateful when the feature is enabled."""
         if not config.enabled:
@@ -70,20 +73,18 @@ class SingleboxBotManagerSyncModule(Module):
             # — the dev stack runs no Redis service — never a silent
             # in-process coordinator under a redis declaration.
             return ManagerSyncStack.unavailable("shared-redis-required")
-        credentials, missing_reason = _resolve_app_credentials(
-            config, secret_resolver
-        )
-        if missing_reason:
-            return ManagerSyncStack.unavailable(missing_reason)
+        mint_principal = _build_principal_minter(secret_resolver, secret_names)
+        if mint_principal is None:
+            return ManagerSyncStack.unavailable("principal-signing-key-required")
         logger.info(
             "[MANAGER-SYNC] enabled stack resolving (singlebox memory mode "
-            "— single-replica dev downgrade, real Gateway delivery): "
-            "target=%s env=%s tenants=%d generation=provided",
+            "— single-replica dev downgrade, real direct-BCS delivery): "
+            "target=%s env=%s bcs=%s generation=provided",
             config.target_id,
             config.env,
-            len(credentials),
+            config.bcs_base_url,
         )
-        return build_memory_manager_sync_stack(config, credentials)
+        return build_memory_manager_sync_stack(config, mint_principal)
 
 
 __all__ = ["SingleboxBotManagerSyncModule"]

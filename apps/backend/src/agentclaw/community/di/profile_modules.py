@@ -237,10 +237,11 @@ def modules_for(profile: DeployProfile) -> list[Module]:
                     SingleboxCallerIdentityModule(),
                     # Manager sync: appended AFTER TestBotManagerSyncModule so the
                     # last binding wins — an enabled singlebox ``bot_manager_sync``
-                    # block resolves the memory-mode stack (real Gateway HTTP
-                    # delivery + in-process coordination) instead of the recording
-                    # doubles, with no Redis service. Disabled stays disabled; the
-                    # doubles' plugin keys stay bound for the conformance suites.
+                    # block resolves the memory-mode stack (real self-signed
+                    # direct-BCS HTTP delivery + in-process coordination) instead
+                    # of the recording doubles, with no Redis service. Disabled
+                    # stays disabled; the doubles' plugin keys stay bound for the
+                    # conformance suites.
                     SingleboxBotManagerSyncModule(),
                 ]
             )

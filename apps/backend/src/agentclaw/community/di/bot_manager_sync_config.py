@@ -5,7 +5,7 @@ that shared module is at the repository's 1,000-line limit; the provider
 that turns this into a binding lives in
 ``di/modules/bot_manager_sync_module.py``.
 
-The surface is exactly seven keys, and the default is **off**:
+The surface is exactly six keys, and the default is **off**:
 
 - ``enabled`` (default ``false``) — nothing about the syncer runs, and
   no thread/client exists, unless the deployment opts in.
@@ -16,12 +16,11 @@ The surface is exactly seven keys, and the default is **off**:
   exactly this env; requests naming another env are refused before any
   send (the background must not pretend to serve an env it was not
   configured for, and Git branches are *not* envs).
-- ``gateway_base_url`` — the Gateway external origin. Provided by the
-  deployment injection; never a source-code default, and must be an
+- ``bcs_base_url`` — the BCS origin the syncer PUTs to directly (the
+  authority surface's ``/api/v1/collaboration`` routes are served by BCS
+  itself; there is no gateway hop). Provided by the deployment
+  injection; never a source-code default, and must be an
   ``http://``/``https://`` URL.
-- ``app_secret_names_by_tenant`` — Backend tenant → named secret in the
-  credential registry. The map *selects* credentials by name; it never
-  carries a credential value and never forges tenant identity.
 - ``coordination_generation`` — the ops-initialized namespace
   generation sentinel value. Enabling without one keeps the sender
   stopped (a missing generation must stop all sends, never auto-create).
@@ -36,6 +35,19 @@ The surface is exactly seven keys, and the default is **off**:
   sender processes sharing one BCS would race undetected. A production
   deployment must never set it.
 
+Delivery authentication is deliberately NOT a key of this block: the
+syncer signs its own service identity
+(``core/gateway_principal/service_principal.py``) with the shared
+gateway-principal signing key, resolved through the same
+``SecretNamesConfig.gateway_principal_signing_key`` name and
+SecretResolver conventions every other principal flow in this component
+uses — per-tenant delivery credentials (and their registry) do not
+exist in the direct-delivery form. BCS's own
+``[[bot_authority.trusted_apps]]`` rule (``app`` byte-exact, ``tenant``,
+``actions``) is the authorization that decides whether the verified
+``backend`` service identity may sync; a deployment without a resolved
+signing key binds the feature unavailable, never a weaker fallback.
+
 Unknown keys, wrong types, or enabled-with-missing-fields are structural
 configuration errors: they raise at resolution and fail the boot on
 every profile, per the repo's config policy. The Redis URL is NOT part
@@ -48,7 +60,7 @@ Redis keep the feature unavailable in the default ``redis`` mode
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from urllib.parse import urlparse
 
 #: The yaml block name inside ``user_config``.
@@ -60,8 +72,7 @@ _ALLOWED_KEYS = frozenset(
         "enabled",
         "target_id",
         "env",
-        "gateway_base_url",
-        "app_secret_names_by_tenant",
+        "bcs_base_url",
         "coordination_generation",
         "coordination_mode",
     }
@@ -78,8 +89,7 @@ class ManagerSyncConfig:
     enabled: bool = False
     target_id: str = ""
     env: str = ""
-    gateway_base_url: str = ""
-    app_secret_names_by_tenant: Mapping[str, str] = field(default_factory=dict)
+    bcs_base_url: str = ""
     coordination_generation: str = ""
     coordination_mode: str = "redis"
 
@@ -115,7 +125,7 @@ def parse_manager_sync_config(
             f"{CONFIG_BLOCK_NAME}.coordination_mode must be one of: "
             + ", ".join(sorted(_COORDINATION_MODES))
         )
-    string_fields = ("target_id", "env", "gateway_base_url", "coordination_generation")
+    string_fields = ("target_id", "env", "bcs_base_url", "coordination_generation")
     values: dict[str, str] = {}
     for key in string_fields:
         if key in block:
@@ -124,25 +134,6 @@ def parse_manager_sync_config(
             values[key] = block[key]  # type: ignore[assignment]
         else:
             values[key] = ""
-    secret_map: dict[str, str] = {}
-    if "app_secret_names_by_tenant" in block:
-        raw_map = block["app_secret_names_by_tenant"]
-        if not isinstance(raw_map, Mapping):
-            raise ValueError(
-                f"{CONFIG_BLOCK_NAME}.app_secret_names_by_tenant must be a mapping"
-            )
-        for tenant, secret_name in raw_map.items():
-            if not isinstance(tenant, str) or not tenant:
-                raise ValueError(
-                    f"{CONFIG_BLOCK_NAME}.app_secret_names_by_tenant keys must "
-                    "be non-empty tenant strings"
-                )
-            if not isinstance(secret_name, str) or not secret_name.strip():
-                raise ValueError(
-                    f"{CONFIG_BLOCK_NAME}.app_secret_names_by_tenant values "
-                    f"must be non-empty secret names (tenant {tenant!r})"
-                )
-            secret_map[tenant] = secret_name
     enabled = block.get("enabled", False)
     assert isinstance(enabled, bool)  # narrowed above
 
@@ -150,17 +141,16 @@ def parse_manager_sync_config(
         # Types were validated above; a disabled block may still carry a
         # half-filled value set — but a *malformed* value must fail the
         # boot on every profile, never slide by as "off anyway".
-        if values["gateway_base_url"] and not _is_http_url(values["gateway_base_url"]):
+        if values["bcs_base_url"] and not _is_http_url(values["bcs_base_url"]):
             raise ValueError(
-                f"{CONFIG_BLOCK_NAME}.gateway_base_url must be an http:// or "
+                f"{CONFIG_BLOCK_NAME}.bcs_base_url must be an http:// or "
                 "https:// URL"
             )
         return ManagerSyncConfig(
             enabled=False,
             target_id=values["target_id"],
             env=values["env"],
-            gateway_base_url=values["gateway_base_url"],
-            app_secret_names_by_tenant=secret_map,
+            bcs_base_url=values["bcs_base_url"],
             coordination_generation=values["coordination_generation"],
             coordination_mode=coordination_mode,
         )
@@ -170,28 +160,25 @@ def parse_manager_sync_config(
     required = {
         "target_id": values["target_id"],
         "env": values["env"],
-        "gateway_base_url": values["gateway_base_url"],
+        "bcs_base_url": values["bcs_base_url"],
         "coordination_generation": values["coordination_generation"],
     }
     missing = sorted(name for name, value in required.items() if not value.strip())
-    if not secret_map:
-        missing.append("app_secret_names_by_tenant")
     if missing:
         raise ValueError(
             f"{CONFIG_BLOCK_NAME} enabled requires these fields: "
             + ", ".join(missing)
         )
-    if not _is_http_url(required["gateway_base_url"]):
+    if not _is_http_url(required["bcs_base_url"]):
         raise ValueError(
-            f"{CONFIG_BLOCK_NAME}.gateway_base_url must be an http:// or "
+            f"{CONFIG_BLOCK_NAME}.bcs_base_url must be an http:// or "
             "https:// URL"
         )
     return ManagerSyncConfig(
         enabled=True,
         target_id=required["target_id"],
         env=required["env"],
-        gateway_base_url=required["gateway_base_url"],
-        app_secret_names_by_tenant=secret_map,
+        bcs_base_url=required["bcs_base_url"],
         coordination_generation=required["coordination_generation"],
         coordination_mode=coordination_mode,
     )
