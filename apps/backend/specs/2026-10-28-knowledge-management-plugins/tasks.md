@@ -13,4 +13,5 @@
 ## Batch follow-up
 - [x] Replace per-ID detail calls with one ordered, fail-closed batch.
 - [x] Restore sync-context error code and assert its HTTP body.
-- [ ] Run public consumer/gates and downstream real-provider pairing; update both PRs.
+- [x] Run public consumer/gates and downstream real-provider pairing.
+- Delivery order: update this existing public PR first, verify the exact mirror object, then update the existing downstream PR; no merge or deployment.
