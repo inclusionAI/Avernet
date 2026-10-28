@@ -96,7 +96,9 @@ def _run_queued_apply(world, promotion_id: str) -> None:
         status=TaskStatus.PENDING, env=get_current_env(), app=DEFAULT_APP
     )
     [task] = [
-        t for t in queued if t.task_type == APPLY_TASK_TYPE and (t.payload.get("state") or {}).get("reference") == promotion_id
+        t
+        for t in queued
+        if t.task_type == APPLY_TASK_TYPE and (t.payload.get("state") or {}).get("reference") == promotion_id
     ]
     world.get(ApplyRunServiceProtocol).run_apply_task(task.payload)
 

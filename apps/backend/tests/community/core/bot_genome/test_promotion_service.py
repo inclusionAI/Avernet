@@ -1,4 +1,4 @@
-"""``GenomePromotionService``: file, start the delivery, settle when it ends — with a fake applier and the real settler."""
+"""``GenomePromotionService``: file, start the delivery, settle when it ends (fake applier, real settler)."""
 
 from __future__ import annotations
 
