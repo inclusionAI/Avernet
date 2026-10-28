@@ -303,3 +303,95 @@ The exact tails of every long/background gate run of §8 live in
   version + env/tenant recorded as evidence); then the destructive drills in
   the isolated fault-capable posture (incl. the two maintenance legs). Until
   the base matrix passes, the feature stays `enabled=false` everywhere.
+## 11. Validation addendum (2026-10-28) — singlebox enablement, memory coordination
+
+This addendum records the singlebox enablement of the feature in its
+**single-replica downgrade form** (`coordination_mode: memory`): the
+in-process `MemoryManagerSyncCoordinator` (the same contract the conformance
+suites pin) with the real trusted-App Gateway delivery. It changes nothing in
+§1–§10: production stays `redis` + shared non-evicting Redis (§3), and the
+external live suite (§10) remains the ONLY live feature acceptance.
+
+### 11.1 What is now measured on singlebox that was not before
+
+PR #3208 lowered the `bot_collaborator` singlebox floor 53.88 → 49.36 because
+~1,300 manager-sync Core statements were structurally uncoverable while the
+feature shipped disabled. With `/standalone start all` now enabling the
+feature (memory coordination, real delivery), the dispatcher/lifecycle/retry
+paths run inside the acceptance flow, so:
+
+- `bot_collaborator.core_min_percent` is restored to **53.88** (the lowering
+  is folded into this change), and
+- a new `manager_sync` module registers `core_paths:
+  [src/agentclaw/community/core/bot_collaborator/manager_sync/]` with the
+  acceptance target `tests/community/acceptance/bot_collaborator` and a
+  threshold from THIS branch's measured run (see `singlebox/ci/
+  singlebox_coverage_modules.yaml`).
+
+Rounds on this stack still cannot reach `send_confirmed`: a singlebox Bot's
+stable identity `<bot_id>:<entity_id>` is never an ownership-initialized BCS
+bot (no provider registration flow exists in this stack), so BCS answers
+`total=0` and rounds end `send_drift`/`acknowledged-empty`. The manifest
+comment records exactly that boundary.
+
+### 11.2 Measured numbers (real run, this branch)
+
+- Unit/contract/DI suites: `tests/community/di` 569 passed (incl. the new
+  `coordination_mode` parse pins, the SINGLEBOX memory-mode wiring pin —
+  `HttpBcsManagersPlugin` + `MemoryManagerSyncCoordinator` over the test
+  column's Recording double — the same-availability-checks pin
+  (`missing-credential` also in memory mode), and the pre/prod structural
+  refusal pin); `tests/community/contracts` + `core/bot_collaborator/manager_sync`
+  709 passed; config golden regen + `tests/community/config`,
+  `test_config_isolation.py`, `test_profile_and_modules_for.py` green;
+  gateway unit suite 890 passed (incl. the dev-seed pins: empty config seeds
+  nothing, seeded key resolves through `find_app_by_credential`,
+  schema-less-boot regression, idempotence, credential-drift ERROR,
+  malformed-key never-legacy).
+- Live stack: backend startup shows `[MANAGER-SYNC-LIFECYCLE] started` with
+  zero `syncer unavailable` reasons; six real backend-driven rounds during
+  `tests/community/acceptance/bot_collaborator` (12 passed), each forwarded
+  by the gateway to the dev BCS managers endpoint (200 envelopes).
+- Unified singlebox coverage (`singlebox/ci/singlebox_coverage.sh` +
+  `verify_singlebox_coverage_artifacts.py`):
+  `bot_collaborator` core **58.04%** (1281/2207; restored floor 53.88 — the
+  PR #3208 measurement with the feature disabled was 49.86%),
+  `manager_sync` core **54.03%** (442/818; threshold pinned to the measured
+  value). Both module gates PASS in the real-run report; every other
+  registered module passes its floor too. The run's remaining reds are
+  environment-classified, none branch-introduced: `expert_chat` fails with
+  the IDENTICAL measured values recorded in §8.2 attempt 3
+  (core 52.34% < 61.18, router 90.91% < 100; all 12 acceptance failures are
+  `expert_chat/test_caller_connection_api.py` on the host's SQLite missing
+  `RETURNING` — `SQL error: near "RETURNING": syntax error`), and the BCS
+  e2e coverage leg reads 37.94%/33.31% against the 41/36 defaults while
+  every story-surface metric is complete (Router API 165/165, CLI 66/66) —
+  current dev's larger instrumented denominator, not the 15 toml-line BCS
+  delta of this change. `verify_singlebox_coverage_artifacts.py`
+  consequently reports exactly those three artifacts red (summary.status,
+  the expert_chat junit failures, the BCS e2e thresholds) and the rest
+  present: backend coverage json/text/html, baas coverage json/text/html,
+  acceptance junit/log, summary/dashboard. Full numbers and terminal
+  output in `.superpowers/sdd/pr-3208-review-fixes/fix-C2-singlebox-report.md`.
+
+### 11.3 The singlebox trusted-App chain (all dev-only literals, marked)
+
+- Backend config: `bot_manager_sync.enabled: true`, `coordination_mode:
+  memory`, `env: dev` (= `get_current_env()` under `SERVER_ENV=dev` — the
+  env singlebox Bots are created with), `gateway_base_url:
+  http://127.0.0.1:8889`, tenant `teamclaw` → secret name
+  `singlebox_manager_sync_app_credential`.
+- Credential: the deterministic dev key `SingleboxManagerSyncDevAppKey000`
+  (32-char base62 — the verifier's exact shape), exported by
+  `singlebox/modules/backend.sh` into the SecretResolver and seeded into the
+  local gateway's in-memory `avernet_application` registry from
+  `user_config.local_dev_apps` (config-gated: an empty list — every
+  production config — seeds nothing; the plugin's PBKDF2 prefix+hash path is
+  the production one).
+- BCS: `[bot_authority] trusted_apps` rule `singlebox-manager-sync` /
+  `teamclaw` / `["managers:sync"]` in `bcs-config-local.toml` — byte-exact
+  app+tenant scope, deny-everything default for every other App (verified
+  live: unknown app name → 403, the sync-only rule denies ownership reads).
+- `memory` is refused outside the dev family: a pre/prod deployment asking
+  for it raises a structural config error (pinned by test), never a silent
+  degraded build.

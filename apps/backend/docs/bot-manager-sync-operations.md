@@ -299,6 +299,47 @@ live run, re-provisioning the case Bot and completing the §5.3 both-sides
 reconciliation are prerequisites before the suite can run again against the
 same target.
 
+## 9. Singlebox/dev downgrade posture (memory coordination — dev only)
+
+Singlebox runs the manager sync in its **single-replica downgrade form**:
+`coordination_mode: memory` in the `bot_manager_sync` block
+(`application-singlebox.yaml`):
+
+- **Coordination**: the in-process `MemoryManagerSyncCoordinator` bound to
+  the configured `coordination_generation` — the SAME coordinator contract
+  the conformance suites pin. All whole-stack invariants (claim / begin /
+  finish / hold-owner-check / generation sentinel / attempt-id CAS) are
+  enforced inside one process. There is **no cross-process protection**: the
+  downgrade is valid *only* because singlebox has exactly one Backend
+  process and always whole-stack-restarts — that is the single-writer
+  guarantee for this dev stack.
+- **Delivery stays the real production path unchanged**: the trusted-App
+  HTTP plugin PUTs through the local Gateway (`gateway_base_url`), the
+  gateway resolves the dev App credential against its app registry, and the
+  dev BCS applies its `[bot_authority] trusted_apps` scope rule
+  (`managers:sync`, byte-exact app + tenant). Credential availability
+  checks are identical to the redis mode — a missing credential keeps the
+  feature unavailable with a diagnostic, never an empty-string fake.
+- **Credentials**: the dev App is the deterministic `singlebox-manager-sync`
+  registry entry the gateway seeds from `user_config.local_dev_apps`
+  (apps/gateway/configs/application-local.yaml; tenant `teamclaw`). The
+  Backend presents the same literal through the SecretResolver
+  (`singlebox_manager_sync_app_credential`, exported by
+  `singlebox/modules/backend.sh`). Both ends are clearly-marked
+  NOT-FOR-PROD dev stand-ins, overridable together from
+  `singlebox/.env.local`.
+- **No Redis anywhere** in this posture: no `redis_url`, no generation
+  sentinel bootstrap (§3), no eviction concern — the coordination namespace
+  lives and dies with the one Backend process.
+
+**Production is unchanged.** Every non-dev deployment stays on the default
+`coordination_mode: redis` (shared, non-evicting Redis + the ops-initialized
+generation sentinel, §3), keeps `enabled: false` unless it has completed the
+§2/§3/§6 checklists, and must never set `memory` — two sender processes
+sharing one BCS would race undetected. A production config without shared
+Redis keeps the feature unavailable (`shared-redis-required`), exactly as
+before; singlebox evidence never substitutes for §8's release evidence.
+
 ---
 
 ### Concrete repair driving procedures (reference)
