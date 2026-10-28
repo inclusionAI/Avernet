@@ -55,7 +55,7 @@ describe('ComposerCapabilitiesMenu（胶囊双区拆分）', () => {
 
     await user.click(screen.getByRole('button', { name: '添加附件' }));
     expect(screen.getByRole('button', { name: '上传文件' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '动态任务' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '任务' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '工作流任务' })).not.toBeInTheDocument();
   });
 
@@ -97,9 +97,9 @@ describe('ComposerCapabilitiesMenu（胶囊双区拆分）', () => {
     );
     await user.click(screen.getByRole('button', { name: '添加附件' }));
     expect(screen.getByRole('button', { name: '上传文件' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '动态任务' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '任务' })).toBeInTheDocument();
     expect(screen.queryByText('能力集')).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '动态任务' }));
+    await user.click(screen.getByRole('button', { name: '任务' }));
     expect(onDynamicSelected).toHaveBeenCalledTimes(1);
     // 「通用协作能力」触发器仍常驻（未连带触发生效）。
     expect(screen.getByRole('button', { name: '通用协作能力' })).toBeInTheDocument();
@@ -122,7 +122,7 @@ describe('ComposerCapabilitiesMenu（胶囊双区拆分）', () => {
     expect(screen.getByText('查看明细')).toBeInTheDocument();
     // ＋ 区气泡未被连带打开。
     expect(screen.queryByRole('button', { name: '上传文件' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '动态任务' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '任务' })).not.toBeInTheDocument();
   });
 
   it('选中后胶囊常驻、chip 并列展示，可继续添加（原单选取代形态回归）', () => {
@@ -145,7 +145,7 @@ describe('ComposerCapabilitiesMenu（胶囊双区拆分）', () => {
     const clears = screen.getAllByRole('button', { name: '取消选择' });
     expect(clears).toHaveLength(2);
     expect(screen.getByText('工作流A')).toBeInTheDocument();
-    expect(screen.getByText('动态任务')).toBeInTheDocument();
+    expect(screen.getByText('任务')).toBeInTheDocument();
   });
 
   it('点 chip 的 x 按 key 调用 onRemoveSelection', async () => {
