@@ -1,6 +1,8 @@
 export type CommunityActorType = 'human' | 'bot';
 export type CommunityTopicStatus = 'open' | 'closed';
-export type CommunityTopicType = 'discussion' | 'poll' | 'notice';
+export type CommunityTopicType = 'discussion' | 'share' | 'poll' | 'help' | 'notice';
+export type CommunityTopicFilter = 'all' | Exclude<CommunityTopicType, 'notice'>;
+export type CommunityPublishTopicType = Exclude<CommunityTopicType, 'notice'>;
 export type CommunityPollSelection = 'single' | 'multi';
 export type CommunityScope = 'all' | 'mine';
 
@@ -8,6 +10,10 @@ export interface CommunityPoll {
   selection: CommunityPollSelection;
   options: string[];
   deadlineAt?: string;
+}
+
+export interface CommunityHelp {
+  expectedTime?: string;
 }
 
 export interface CommunityPollStatsOption {
@@ -25,6 +31,7 @@ export interface CommunityPollStats {
 
 export interface CommunityTopicConfig {
   poll?: CommunityPoll;
+  help?: CommunityHelp;
 }
 
 export interface CommunityTopicSummary {
@@ -73,6 +80,10 @@ export interface CommunityReply {
   body: string;
   author: CommunityAuthor;
   createdAt: string;
+  /** Stable chronological number for a first-level reply. */
+  floorNo?: number;
+  /** HELP-only marker controlled by the Topic author. */
+  helpful: boolean;
   /** Optional Post being referenced. The list remains flat; this is not a tree edge. */
   replyToPostId?: string;
   /** Structured vote indexes for POLL replies. */
@@ -106,6 +117,7 @@ export interface CommunityReplyPager {
 export interface CommunityTopicQuery {
   search?: string;
   scope?: CommunityScope;
+  topicType?: CommunityTopicFilter;
   /** 作者过滤（HUMAN 工号 / BOT id）；scope=mine 时由调用方填入本人工号，下发 openapi §2.4 author_id 真分页。 */
   authorId?: string;
   offset?: number;
@@ -118,11 +130,16 @@ export interface CreateCommunityPollInput {
   deadlineAt?: string;
 }
 
+export interface CreateCommunityHelpInput {
+  expectedTime?: string;
+}
+
 export interface CreateCommunityTopicDraft {
   title: string;
   body: string;
-  topicType?: Exclude<CommunityTopicType, 'notice'>;
+  topicType?: CommunityPublishTopicType;
   poll?: CreateCommunityPollInput;
+  help?: CreateCommunityHelpInput;
 }
 
 export interface CreateCommunityTopicInput extends CreateCommunityTopicDraft {
@@ -138,4 +155,82 @@ export interface CreateCommunityReplyInput {
   authorName?: string;
   authorAvatarUrl?: string;
   pollSelection?: number[];
+}
+
+export type InteractionActorType = 'HUMAN' | 'BOT';
+export type InteractionActionType = 'VIEW' | 'LIKE' | 'FAVORITE' | 'FOLLOW' | 'ACCEPT';
+export type InteractionTargetType = 'TOPIC' | 'POST' | 'HUMAN' | 'BOT';
+export type InteractionSummaryScope = 'ACTOR' | 'TARGET' | 'ACTOR_TARGET';
+export type PersonalCenterActorScope = 'HUMAN' | 'BOT' | 'ALL';
+/** Personal Center exposes only the five concrete activity tabs; ALL is a backend-only aggregate. */
+export type PersonalCenterActivityType =
+  | 'AUTHORED'
+  | 'FAVORITED'
+  | 'VIEWED'
+  | 'LIKED'
+  | 'REPLIED';
+export type PersonalCenterTargetFilter = 'ALL' | 'TOPIC' | 'POST';
+
+export interface ForumActorRef {
+  actorType: InteractionActorType;
+  id: string;
+}
+
+export interface ForumTargetRef {
+  targetType: InteractionTargetType;
+  id: string;
+}
+
+export interface InteractionSummaryQuery {
+  actor?: ForumActorRef;
+  target?: ForumTargetRef;
+}
+
+export interface InteractionStats {
+  viewCount: number;
+  likeCount: number;
+  favoriteCount: number;
+  followCount: number;
+  acceptCount: number;
+  topicCount: number;
+  replyCount: number;
+  acceptedReplyCount: number;
+  replyParticipantCount: number;
+  helpfulReplyCount: number;
+}
+
+export interface InteractionSummary extends InteractionStats {
+  scope: InteractionSummaryScope;
+  actor?: ForumActorRef;
+  target?: ForumTargetRef;
+}
+
+export interface RecordInteractionInput {
+  actor: ForumActorRef;
+  actionType: InteractionActionType;
+  target: ForumTargetRef;
+}
+
+export interface PersonalCenterActivity {
+  activityType: PersonalCenterActivityType;
+  actor: ForumActorRef;
+  target: ForumTargetRef;
+  topicId: string;
+  postId?: string;
+  happenedAt: string;
+  bodyPreview: string;
+}
+
+export interface PersonalCenterActivityPage {
+  items: PersonalCenterActivity[];
+  total: number;
+}
+
+export interface PersonalCenterActivityQuery {
+  ownerUserId: string;
+  actorScope: PersonalCenterActorScope;
+  activityType: PersonalCenterActivityType;
+  targetType: PersonalCenterTargetFilter;
+  page: number;
+  pageSize: number;
 }

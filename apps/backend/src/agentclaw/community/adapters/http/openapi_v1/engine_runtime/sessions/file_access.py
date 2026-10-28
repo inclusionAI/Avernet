@@ -1,4 +1,4 @@
-"""Session-file list authorization: operator access or an owned friend session."""
+"""Owned-session authorization shared by read-only friend files and IAM preparation."""
 
 from fastapi import Request
 
@@ -17,18 +17,16 @@ async def authorize_file_list(
     owner_id: str, stage: RuntimeStage, friend_user_id: str | None,
     relay: EngineRuntimeRelayProtocol, friendships: HumanBotFriendshipServiceProtocol,
     expert: ExpertChatServiceProtocol,
-) -> None:
+) -> str:
     if friend_user_id is None:
         await resolve_operable_bot(
             relay, bot_id, caller_id=user_id, owner_id=owner_id,
             stage=stage.value, surface="sessions",
         )
-        return
-    if stage is not RuntimeStage.DRAFT:
-        raise EngineResourceNotFoundError("friend chat is available only in draft")
-    await authorize_friend_chat(
+        return stage.value
+    resolved_stage = await authorize_friend_chat(
         request=request, bot_id=bot_id, caller_id=user_id, owner_id=owner_id,
-        friend_user_id=friend_user_id, friendships=friendships, expert=expert,
+        friend_user_id=friend_user_id, friendships=friendships, expert=expert, stage=stage.value,
     )
     try:
         # The Backend-owned session index, not a user-id suffix in the key,
@@ -42,3 +40,4 @@ async def authorize_file_list(
         raise EngineResourceNotFoundError("friend session not found") from error
     except ConnectionError as error:
         raise EngineDeviceNotReadyError("friend bot runtime is not ready") from error
+    return resolved_stage

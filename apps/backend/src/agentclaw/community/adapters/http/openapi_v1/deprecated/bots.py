@@ -14,6 +14,8 @@ and the old address answers exactly as it always did.
 
 from __future__ import annotations
 
+from typing import Any
+
 from agentclaw.community.adapters.http.openapi_v1.bots.engine_config import (
     router as engine_config_router,
 )
@@ -21,7 +23,7 @@ from agentclaw.community.adapters.http.openapi_v1.bots.engine_config import (
 from fastapi import APIRouter
 
 from ._relocate import relocate
-from ._requery import drop_parameter
+from ._requery import drop_parameter, with_query_parameter
 from ._shim import legacy_router
 
 _CONFIG = "/openapi/v1/bots/{bot_id}/engine/config"
@@ -42,11 +44,19 @@ def _to_hyphenated(path: str) -> str | None:
     return "/openapi/v1/bots/{bot_id}/engine-config"
 
 
+def _legacy_contract(handler, method, path):
+    handler = _DROP_STAGE(handler, method, path)
+    if method == "PUT":
+        # The old address accepted an empty JSON object; keep its body contract.
+        handler = with_query_parameter(handler, "body", dict[str, Any])
+    return handler
+
+
 router: APIRouter = relocate(
     engine_config_router,
     legacy_router("/openapi/v1/bots", "bots"),
     _to_hyphenated,
-    transform=_DROP_STAGE,
+    transform=_legacy_contract,
 )
 
 # A reword written for a route that no longer exists would be skipped in

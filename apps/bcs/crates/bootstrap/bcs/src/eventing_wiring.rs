@@ -6,7 +6,9 @@ use std::time::Duration;
 use async_trait::async_trait;
 use bcs_app_group::{GroupProvisioningLifecycle, GroupProvisioningReconciler};
 use bcs_db_api::{DbPlugin, DbSqlFlavor};
-use bcs_event_store::{DbEventStore, EventRecorder, MemoryEventStore};
+use bcs_event_store::{DbEventStore, EventRecorder};
+#[cfg(any(test, feature = "test-utils"))]
+use bcs_event_store::MemoryEventStore;
 use bcs_eventing::{
     CoreEventSubscriptionAuthorizer, EventCatalog, EventDispatcher, EventFanoutWorker,
     EventRetentionWorker, EventRetryPolicy, EventSubscriptionApplicationService,

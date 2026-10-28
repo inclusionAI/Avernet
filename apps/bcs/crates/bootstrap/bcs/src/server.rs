@@ -59,7 +59,9 @@ use bcs_bot::{
     Bot, BotCandidateSearchCore, BotControlPlaneCore, BotCore, EmptyWorkerProfileCoreService,
     ProviderBotEvents, ProviderCore, ProviderManagement,
 };
-use bcs_bot_store::{DbProviderStore, MemoryBotRepo, MemoryProviderStore, PersistentBotRepo};
+use bcs_bot_store::{DbProviderStore, PersistentBotRepo};
+#[cfg(any(test, feature = "test-utils"))]
+use bcs_bot_store::{MemoryBotRepo, MemoryProviderStore};
 use bcs_channel::{BcsChannelService, ChannelServiceInboundSink};
 use bcs_channel_api::{ChannelHttpIngressRegistry, ChannelProvider, ChannelProviderRegistry};
 use bcs_channel_store::{
@@ -69,20 +71,25 @@ use bcs_channel_store::{
 };
 use bcs_collaboration_runtime::CollaborationRuntime;
 use bcs_collaboration_store::{
-    DbCollaborationTemplateRepo, MemoryCollaborationStore, MySqlCollaborationStore,
+    DbCollaborationTemplateRepo, MySqlCollaborationStore,
 };
+#[cfg(any(test, feature = "test-utils"))]
+use bcs_collaboration_store::MemoryCollaborationStore;
 use bcs_collaboration_template::{CollaborationTemplateServiceImpl, FileCollaborationTemplateRepo};
 use bcs_db_api::DbSqlFlavor;
-use bcs_domain::{MessageAudience, MessageVisibilityDomain, NewMessage, SenderType};
 use bcs_friend::{FriendCore, FriendRequestCore};
 use bcs_friend_store::{
-    DbFriendRequestStore, DbFriendStore, MemoryFriendRepo, MemoryFriendRequestRepo,
+    DbFriendRequestStore, DbFriendStore,
 };
+#[cfg(any(test, feature = "test-utils"))]
+use bcs_friend_store::{MemoryFriendRepo, MemoryFriendRequestRepo};
 use bcs_invite_code_store::{DbInviteCodeStore, MemoryInviteCodeRepo};
 use bcs_fuse_client::FuseClient;
 use bcs_fusion::{FuseClientService, FuseWorkerProfileService, LocalFusionService};
 use bcs_group::{GroupConfig, GroupCore, GroupManagement, GroupManagementWithRuntimeCleanup};
-use bcs_group_store::{MemoryGroupRepo, MySqlGroupStore};
+use bcs_group_store::MySqlGroupStore;
+#[cfg(any(test, feature = "test-utils"))]
+use bcs_group_store::MemoryGroupRepo;
 use bcs_http::{
     admin_invocation_terminal::AdminInvocationTerminalObserver, state::AdminInvocationStore,
 };
@@ -95,14 +102,19 @@ use bcs_llm_api::LlmChatCompletionPort;
 use bcs_llm_openai_compatible::OpenAiCompatibleLlmClient;
 use bcs_message::MessageService;
 use bcs_message_flow::{A2aChat, BcsGroupFusion, BcsGroupMessageHistory, BcsMessageFlow};
-use bcs_message_store::{MemoryMessageRepo, MySqlMessageStore};
+use bcs_message_store::MySqlMessageStore;
+#[cfg(any(test, feature = "test-utils"))]
+use bcs_message_store::MemoryMessageRepo;
 use bcs_organization::{OrganizationCore, OrganizationManagement};
-use bcs_organization_store::{DbOrganizationStore, MemoryOrganizationRepo};
+use bcs_organization_store::DbOrganizationStore;
+#[cfg(any(test, feature = "test-utils"))]
+use bcs_organization_store::MemoryOrganizationRepo;
 use bcs_relation::RelationCore;
 use bcs_relation_store::DbRelationStore;
 use bcs_route_security::OutboundUrlGuard;
 use bcs_routing::MessageRouter;
 use bcs_routing::security::SecurityInterceptor;
+#[cfg(any(test, feature = "test-utils"))]
 use bcs_secret_local::InMemorySecretAccess;
 use bcs_security_gateway_api::SecurityGatewayPort;
 use bcs_security_gateway_local::NoopSecurityGateway;
@@ -114,11 +126,11 @@ use bcs_service_api::port::{
     EventRecordFactoryPort, EventRecorderPort, GroupSessionTokenPort, SecretAccessPort,
 };
 use bcs_service_api::{
-    A2aChatRunService, A2aChatService, BotActor, BotCandidateSearchCoreService,
+    A2aChatRunService, A2aChatService, BotCandidateSearchCoreService,
     BotCatalogCleanupPort,
     BotControlPlaneCoreService, BotControlPlaneRepoPort, BotDeliveryPort, BotDeliveryTarget,
     BotMetricsSnapshotPort, BotRegistryCoreService, BotRunContextPort, BotTerminalEvent,
-    BotTerminalObserverPort, BotTerminalState, CallerContext, CanResolveInteraction,
+    BotTerminalObserverPort, BotTerminalState, CanResolveInteraction,
     ChannelBindingCleanupPort, ChannelService, CollaborationRuntimeService,
     CollaborationTemplateService, CompositeBotTerminalObserver, DirectChatClientKind,
     DirectChatRunEvent, DirectChatRunLifecycleHook, DirectChatRunReason, DirectChatRunSnapshotPort,
@@ -134,7 +146,7 @@ use bcs_service_api::{
     ServiceError, ServiceResult,
     SessionChannelDeliveryOutcome, SessionChannelOutboundPort, SessionManagementService,
     StateMachineResultPublishCommand, StateMachineResultPublisherPort, StateMachineTerminalEvent,
-    SystemMessageService, WebSendCommand, WsCloseReason, WsErrorKind,
+    SystemMessageService, WsCloseReason, WsErrorKind,
     WsLifecycleInstrumentationHook, WsPeer,
     port::repo::{
         ChannelBindingRepoPort, ConversationSessionRepoPort, HumanInputRequestRepoPort,
@@ -145,7 +157,9 @@ use bcs_services_container::{Services, ServicesBuilder};
 use bcs_session::{
     SessionLaunchApplication, SessionManagementServiceImpl, SessionManagementWithRuntimeCleanup,
 };
-use bcs_session_store::{MemorySessionRepo, MySqlSessionStore};
+use bcs_session_store::MySqlSessionStore;
+#[cfg(any(test, feature = "test-utils"))]
+use bcs_session_store::MemorySessionRepo;
 use bcs_system_message::{
     SystemMessageDispatcherImpl, SystemMessageServiceImpl,
     producers::bot_hidden_notice::BotHiddenNoticeProducer,
@@ -186,6 +200,7 @@ use ws_dispatch::*;
 use ws_handlers::*;
 
 pub use resource_builders::resolve_config_secrets;
+#[cfg(any(test, feature = "test-utils"))]
 pub(crate) use resource_builders::gateway_principal_verifier_for_tests;
 pub use state::{BcsServer, BcsServerExtensions, BcsServerState};
 

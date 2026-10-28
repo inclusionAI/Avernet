@@ -174,6 +174,10 @@ def _is_endpoint_file(file: pathlib.Path) -> bool:
     for pattern in _NON_ENDPOINT_NAME_PATTERNS:
         if stem == pattern or stem.startswith(pattern + "_"):
             return False
+        if pattern == "schemas" and stem.endswith("_schemas"):
+            # Covers schema splits named by their topic, such as
+            # interaction_schemas and personal_center_schemas.
+            return False
     return True
 
 

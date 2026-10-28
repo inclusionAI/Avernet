@@ -207,6 +207,15 @@ class DeviceConnectionResponse(BaseModel):
     available: bool = Field(True, description="Whether the device is reachable")
     message: str = Field("", description="Human-readable status message when unavailable")
     url: str = Field("", description="Connection URL (HTTP or WebSocket, depending on connection mode)")
+    a2a_base_url: str = Field(
+        "",
+        description=(
+            "Authoritative HTTP base of the device's A2A face (agent-card / /rpc), "
+            "issued by BaaS in ws-info. Empty string means the provider delivered "
+            "no A2A address: callers fall back to existing behavior and must NOT "
+            "derive or compose one (a relay ws URL implies no equivalent A2A face)."
+        ),
+    )
 
 
 class DeviceProps(BaseModel):

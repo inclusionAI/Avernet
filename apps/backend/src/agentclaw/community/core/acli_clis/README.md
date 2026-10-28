@@ -40,7 +40,7 @@ consumes:
   - "core.caller_identity guard — bot lookup and the edit-lock check shared with the identity switch"
   - "BotRepository, BotCollabLockRepositoryProtocol, CallerIdentityRepositoryProtocol (core.repository)"
   - "CollaboratorServiceProtocol (core.bot_collaborator) — who may read a bot's CLIs"
-  - "DeviceAdapterTransport (plugin_api) — the hop to the engine's /api/cli/acli/* endpoints"
+  - "DeviceAdapterTransport (plugin_api) — the hop to the engine's /api/cli/acli/* endpoints (teclaw: /api/v1/cli/acli/*)"
   - "TaskQueueService, HandlerRegistry, TaskQueueRepositoryProtocol (core.task_queue, core.repository) — the operations run as tasks"
   - "DatabasePlugin (plugin_api) — the ac_acli_operation rows"
   - "HttpClient (plugin_api) — the general client, for the market's search API"

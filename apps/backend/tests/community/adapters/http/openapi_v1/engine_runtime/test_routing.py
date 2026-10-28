@@ -178,7 +178,7 @@ def test_enums_reach_the_generated_document_as_string_enums():
     components = _document()["components"]["schemas"]
 
     for name, expected in (
-        ("SocketKind", {"chat"}),
+        ("SocketKind", {"chat", "a2a"}),
         ("ApprovalMode", {"approve", "on-miss", "never"}),
         ("MessageRole", {"user", "assistant", "system", "tool_use", "tool_result"}),
     ):

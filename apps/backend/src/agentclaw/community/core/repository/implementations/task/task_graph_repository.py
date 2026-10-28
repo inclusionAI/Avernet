@@ -102,13 +102,18 @@ class TaskGraphRepository(TaskGraphBbsOverviewMixin, TaskGraphRepositoryProtocol
         return Status(raw)
 
     @staticmethod
-    def _require_task_scope(info: TaskInfoModel) -> None:
+    def _require_environment_scope(info: TaskInfoModel) -> None:
+        """Environment-only read scope for presentation and diagnostic queries."""
         env = get_current_env()
         if info.env != env:
             raise TaskStateError(
                 f"task environment mismatch: task_id={info.task_id}, "
                 f"task={info.env}, current={env}"
             )
+
+    @staticmethod
+    def _require_task_scope(info: TaskInfoModel) -> None:
+        TaskGraphRepository._require_environment_scope(info)
         executor_app = get_current_executor_app()
         if info.executor_app != executor_app:
             raise TaskStateError(
@@ -140,12 +145,19 @@ class TaskGraphRepository(TaskGraphBbsOverviewMixin, TaskGraphRepositoryProtocol
         self._require_task_scope(info)
         return True
 
+    def _require_environment_scope_for_id(self, db, task_id: str) -> bool:
+        info = db.query(TaskInfoModel).filter(TaskInfoModel.task_id == task_id).first()
+        if info is None:
+            return False
+        self._require_environment_scope(info)
+        return True
+
     def load_graph(self, task_id: str):
         with self._db.orm_session() as db:
             info = db.query(TaskInfoModel).filter(TaskInfoModel.task_id == task_id).first()
             if info is None:
                 return None
-            self._require_task_scope(info)
+            self._require_environment_scope(info)
             node_rows = (
                 db.query(TaskNodeModel)
                 .filter(
@@ -742,7 +754,7 @@ class TaskGraphRepository(TaskGraphBbsOverviewMixin, TaskGraphRepositoryProtocol
             row = db.query(TaskInfoModel).filter(TaskInfoModel.task_id == task_id).first()
             if row is None:
                 return None
-            self._require_task_scope(row)
+            self._require_environment_scope(row)
             return int(row.graph_version or 0)
 
     def next_action_seq(self, task_id: str, node_id: str) -> int:
@@ -773,7 +785,7 @@ class TaskGraphRepository(TaskGraphBbsOverviewMixin, TaskGraphRepositoryProtocol
 
         limit = max(1, min(limit, 200))
         with self._db.orm_session() as db:
-            self._require_task_scope_for_id(db, task_id)
+            self._require_environment_scope_for_id(db, task_id)
             query = db.query(TaskActionLogModel).filter(TaskActionLogModel.task_id == task_id)
             if node_id is not None:
                 query = query.filter(TaskActionLogModel.node_id == node_id)

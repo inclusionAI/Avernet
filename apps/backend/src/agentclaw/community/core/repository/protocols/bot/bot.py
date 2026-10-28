@@ -161,13 +161,15 @@ class BotRepository(Protocol):
     @abstractmethod
     def page_live_bots_by_pks(
         self, bot_pks: list[int], *, exclude_owner_id: str, entity_pairs: list[tuple[str, str]] | None,
-        page: int, page_size: int,
+        page: int, page_size: int, stage: str | None = None,
     ) -> tuple[int, list[dict[str, Any]]]:
         """Page live relation targets by stable PK; optional app scope is exact entity pairs.
 
         None means a human listing, an empty list means no application scope.
         Historical collaborator owner snapshots are never used to locate Bots.
         Current Owners are excluded from their own collaboration collection.
+        Optional stage filters only service Bots before count/pagination, using
+        the canonical published-runtime selection. Other kinds are unchanged.
         """
         ...
 
@@ -233,6 +235,7 @@ class BotRepository(Protocol):
         page: int = 1,
         page_size: int = 20,
         bot_ids: list[str] | None = None,
+        stage: str | None = None,
     ) -> tuple[int, List[Dict[str, Any]]]:
         """List bots by conditions with pagination.
 
@@ -245,6 +248,8 @@ class BotRepository(Protocol):
         business Space (exact after canonical string persistence), ``engine``
         filters on the active engine (exact), and ``status`` filters on lifecycle
         status (exact). All are optional and additive.
+        ``stage`` selects service Bots with that runtime before pagination;
+        other Bot kinds retain the existing matching behavior.
         """
         ...
 

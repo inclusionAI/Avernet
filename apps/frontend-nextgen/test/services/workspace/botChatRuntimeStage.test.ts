@@ -23,9 +23,9 @@ beforeEach(() => {
   jest.mocked(ctrl.unfavoriteBotSession).mockResolvedValue({ code: 200000, data: { session_id: 's', favorited: false } });
 });
 
-test.each(['draft', 'verify', 'online'] as const)('%s 的所有会话请求选择同一运行环境', async (stage) => {
+test.each(['draft', 'verify', 'online'] as const)('团队服务 Bot 的历史 %s 阶段在所有会话请求中统一使用 online', async (stage) => {
   const target = { ...bot, runtimeStage: stage };
-  const params = expect.objectContaining({ user_id: 'user', owner_id: 'owner', stage });
+  const params = expect.objectContaining({ user_id: 'user', owner_id: 'owner', stage: 'online' });
   await botSessionService.listSessions(target, 'user');
   await botSessionService.listSessionsPage(target, 'user', 2);
   await botSessionService.createSession(target, 'user');
@@ -54,10 +54,11 @@ test.each(['draft', 'verify', 'online'] as const)('%s 的所有会话请求选�
   expect(ctrl.listFavoriteSessions).toHaveBeenCalledWith('service', params);
 });
 
-test('服务 Bot 默认线上；个人和好友 Bot 不接受发布环境覆盖', async () => {
+test('团队/好友服务 Bot 使用 online，个人 Bot 始终使用 draft', async () => {
   expect(resolveChatRuntimeStage(bot)).toBe('online');
   expect(resolveChatRuntimeStage({ ...bot, botType: 'personal', runtimeStage: 'online' })).toBe('draft');
-  expect(resolveChatRuntimeStage({ ...bot, isFriendBot: true, runtimeStage: 'verify' })).toBe('draft');
+  expect(resolveChatRuntimeStage({ ...bot, isFriendBot: true, runtimeStage: 'verify' })).toBe('online');
+  expect(resolveChatRuntimeStage({ ...bot, isFriendBot: true, botType: 'personal', runtimeStage: 'online' })).toBe('draft');
   await botSessionService.listSessions({ ...bot, botType: 'personal', runtimeStage: 'online' }, 'user');
   expect(ctrl.listBotSessions).toHaveBeenCalledWith('service', expect.objectContaining({ stage: 'draft' }));
 });

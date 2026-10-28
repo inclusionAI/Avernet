@@ -1,3 +1,4 @@
+from tests.community.bot_address_fakes import support_legacy_locator
 from unittest.mock import MagicMock
 
 from agentclaw.community.core.service_bot.services.deploy.managed_composer import (
@@ -27,10 +28,12 @@ def _make_registry() -> EngineSandboxRegistry:
 def _make_composer(bot_repo=None) -> ManagedDeployConfigComposer:
     """The read-only rules are the managed image's own policy, so they moved
     with it onto ``ManagedDeployConfigComposer``. These tests follow."""
+    bot_repo = bot_repo or MagicMock()
+    support_legacy_locator(bot_repo)
     return ManagedDeployConfigComposer(
         storage_path=MagicMock(),
         sandbox_registry=_make_registry(),
-        bot_repo=bot_repo or MagicMock(),
+        bot_repo=bot_repo,
         storage_policy=NoopStoragePolicy(),
     )
 

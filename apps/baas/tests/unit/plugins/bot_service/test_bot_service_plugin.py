@@ -1344,7 +1344,7 @@ _CALLER_PRINCIPAL_SECRET_NAME = "other_manual_teamclawgw_principal_signing_key"
 _CALLER_PRINCIPAL_KEY = "unit-test-principal-signing-key-0123456789abcdef"
 _CALLER_IAM_TOKEN = "iam-value"
 _CALLER_COOKIE = f"IAM_TOKEN={_CALLER_IAM_TOKEN}"
-_CALLER_AGENTPAAS_TOKEN = "agentpaas-caller-token"
+_CALLER_AGENTPASS_TOKEN = "test-token"
 
 
 class _FakeSecretStore:
@@ -1470,10 +1470,10 @@ class TestAiohttpBotServicePluginGetCallerConnection:
         await plugin.close()
 
     @pytest.mark.asyncio
-    async def test_agentpaas_success_appends_x_caller_token_rule(self):
-        """AgentPaaS 凭据就绪后 append x-caller-token，不调用 IAM 刷新。"""
+    async def test_agentpass_success_appends_x_caller_token_rule(self):
+        """AgentPass 凭据就绪后 append x-caller-token，不调用 IAM 刷新。"""
         mock_post = MagicMock(
-            return_value=_mock_caller_response(_caller_ready_body("sbx-agentpaas"))
+            return_value=_mock_caller_response(_caller_ready_body("sbx-agentpass"))
         )
         mock_get = MagicMock()
         mock_facade = MagicMock()
@@ -1484,18 +1484,18 @@ class TestAiohttpBotServicePluginGetCallerConnection:
             paas_service_facade=mock_facade,
         )
         credential = CallerExecutionCredential(
-            type="agentpaas",
-            token=_CALLER_AGENTPAAS_TOKEN,
+            type="agentpass",
+            token=_CALLER_AGENTPASS_TOKEN,
         )
 
         result = await self._call(plugin, credential)
 
-        assert result == "sbx-agentpaas"
+        assert result == "sbx-agentpass"
         mock_get.assert_not_called()
         # append 目标是 target 剥离 ARCA_/:20003 后的 sandbox_id，而非
         # connection.paas_device_id 字段
         mock_facade.update_outbound_operation_rule.assert_awaited_once_with(
-            paas_device_id="sbx-agentpaas",
+            paas_device_id="sbx-agentpass",
             outbound_operation_rule=(
                 mock_facade.update_outbound_operation_rule.await_args.kwargs[
                     "outbound_operation_rule"
@@ -1510,15 +1510,15 @@ class TestAiohttpBotServicePluginGetCallerConnection:
         operation = rule.header_operation_rules[0]
         assert operation.header_name == "x-caller-token"
         assert operation.action == "set"
-        assert operation.value == _CALLER_AGENTPAAS_TOKEN
+        assert operation.value == _CALLER_AGENTPASS_TOKEN
         assert operation.domains == [
             "caller-gateway.example.test",
             "caller-tools.example.test",
         ]
 
     @pytest.mark.asyncio
-    async def test_agentpaas_without_domains_fails_closed_before_provisioning(self):
-        """AgentPaaS credentials require an operator-provided domain allowlist."""
+    async def test_agentpass_without_domains_fails_closed_before_provisioning(self):
+        """AgentPass credentials require an operator-provided domain allowlist."""
         mock_post = MagicMock()
         mock_get = MagicMock()
         mock_facade = MagicMock()
@@ -1533,8 +1533,8 @@ class TestAiohttpBotServicePluginGetCallerConnection:
             await self._call(
                 plugin,
                 CallerExecutionCredential(
-                    type="agentpaas",
-                    token=_CALLER_AGENTPAAS_TOKEN,
+                    type="agentpass",
+                    token=_CALLER_AGENTPASS_TOKEN,
                 ),
             )
 
@@ -1544,7 +1544,7 @@ class TestAiohttpBotServicePluginGetCallerConnection:
         await plugin.close()
 
     @pytest.mark.asyncio
-    async def test_agentpaas_without_facade_fails_closed_before_provisioning(self):
+    async def test_agentpass_without_facade_fails_closed_before_provisioning(self):
         mock_post = MagicMock()
         mock_get = MagicMock()
         plugin = self._make_plugin(mock_post, get=mock_get)
@@ -1553,8 +1553,8 @@ class TestAiohttpBotServicePluginGetCallerConnection:
             await self._call(
                 plugin,
                 CallerExecutionCredential(
-                    type="agentpaas",
-                    token=_CALLER_AGENTPAAS_TOKEN,
+                    type="agentpass",
+                    token=_CALLER_AGENTPASS_TOKEN,
                 ),
             )
 

@@ -74,6 +74,7 @@ def _make_service(
         collaborator_service=mock_collaborator_service,
         transport=mock_transport,
         instance_service=mock_instance_service,
+        publish_repository=MagicMock(),
     )
 
 
@@ -481,9 +482,10 @@ class TestGetChatSession:
         mock_repository.save_session.assert_called_once_with("user1", "bot1", "owner1", "session:brand-new")
 
     @pytest.mark.asyncio
-    async def test_service_bot_fetches_binding_id_from_baas(self, mock_repository, mock_bot_repo, mock_device_provider):
-        """service bot 应该从 BaasService 获取 binding_id，而不是从 bot 对象获取"""
+    async def test_service_bot_fetches_online_binding_by_exact_source_pk(self, mock_repository, mock_bot_repo, mock_device_provider):
+        """Service chat uses the canonical publication rule, not the draft binding."""
         service_bot = {
+            "id": 11,
             "bot_id": "bot1",
             "status": "ACTIVE",
             "binding_id": None,  # service bot 的 binding_id 不在 bot 对象中
@@ -496,19 +498,21 @@ class TestGetChatSession:
         mock_baas = MagicMock()
         mock_baas.get_bind_id.return_value = "baas-binding-123"
         svc = _make_service(mock_repository, mock_bot_repo, mock_device_provider, mock_baas)
+        from types import SimpleNamespace
+
+        svc._publish_repository.list_by_source_bot.return_value = [
+            SimpleNamespace(id=3, status="draft", ext={}),
+            SimpleNamespace(id=2, status="success", ext={"binding": {"online": 123}}),
+        ]
 
         with patch.object(svc, "_create_session", new=AsyncMock(return_value="session:new")):
             result = await svc.get_chat_session("user1", "bot1", "owner1")
 
         # 验证 BaasService.get_bind_id 被正确调用
-        mock_baas.get_bind_id.assert_called_once_with(
-            bot_id="bot1",
-            owner_id="owner1",
-            bot_type="service",
-            publish_status="success",
-        )
+        mock_baas.get_bind_id.assert_not_called()
+        assert svc._publish_repository.list_by_source_bot.call_args.args[0] == 11
         # 验证 binding_id 被正确设置到 bot 对象中
-        assert service_bot["binding_id"] == "baas-binding-123"
+        assert service_bot["binding_id"] == 123
         assert result["session_key"] == "session:new"
         assert result["is_new"] is True
 

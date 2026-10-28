@@ -22,10 +22,12 @@ from agentclaw.community.core.task.forum.models import (
     TOPIC_TYPE_DISCUSSION,
     BrowseReportRecord,
     BrowseSubscriptionRecord,
+    ForumHelpConfig,
     ForumPollConfig,
     ForumPollResultOptionRecord,
     ForumPollResultRecord,
     ForumPollSelection,
+    ForumInteractionRecord,
     ForumPostRecord,
     ForumTopicConfig,
     ForumTopicRecord,
@@ -128,26 +130,40 @@ def _poll_result_options_from_row(
     return tuple(options)
 
 
-def _poll_selection_from_post_config(
+def _post_config_from_row(
     value: object | None,
-) -> ForumPollSelection | None:
-    """Decode one Post's structured vote selection from its generic config.
+) -> tuple[ForumPollSelection | None, bool]:
+    """Decode the one supported structured extension on a Post.
 
-    ``post_config`` is the storage-level extension container. The reply
-    contract currently defines only the ``poll_selection`` key; future
-    structured Post variants can add further keys without another column.
+    POLL selections and HELP helpful markers are mutually exclusive because a
+    Post belongs to exactly one Topic type. Keeping the outer object generic
+    preserves the existing extension column without exposing storage details
+    through the public contract.
     """
 
     if value is None:
-        return None
+        return None, False
     if not isinstance(value, dict):
         raise ValueError("ac_forum_post.post_config must be a JSON object or null")
-    if set(value) != {"poll_selection"}:
+    if len(value) != 1 or not set(value).issubset({"poll_selection", "helpful"}):
         raise ValueError(
-            "ac_forum_post.post_config may contain only poll_selection"
+            "ac_forum_post.post_config must contain one supported section"
         )
 
-    selection = value.get("poll_selection")
+    if "helpful" in value:
+        helpful = value["helpful"]
+        if not isinstance(helpful, dict) or set(helpful) != {"marked"}:
+            raise ValueError(
+                "ac_forum_post.post_config.helpful must contain only marked"
+            )
+        marked = helpful.get("marked")
+        if marked is not True:
+            raise ValueError(
+                "ac_forum_post.post_config.helpful.marked must be true"
+            )
+        return None, True
+
+    selection = value["poll_selection"]
     if not isinstance(selection, dict):
         raise ValueError(
             "ac_forum_post.post_config.poll_selection must be a JSON object"
@@ -177,22 +193,44 @@ def _poll_selection_from_post_config(
             "ac_forum_post.post_config.poll_selection.option_indices must not "
             "contain duplicates"
         )
-    return ForumPollSelection(option_indices=tuple(indices))
+    return ForumPollSelection(option_indices=tuple(indices)), False
+
+
+def _poll_selection_from_post_config(
+    value: object | None,
+) -> ForumPollSelection | None:
+    """Return the POLL selection, if this Post stores that extension."""
+
+    return _post_config_from_row(value)[0]
+
+
+def _helpful_from_post_config(value: object | None) -> bool:
+    """Return whether this HELP reply is marked helpful."""
+
+    return _post_config_from_row(value)[1]
+
+
+def _help_from_row(value: object) -> ForumHelpConfig:
+    if not isinstance(value, dict) or set(value) != {"expected_time"}:
+        raise ValueError("topic_config.help must contain only expected_time")
+    expected_time = value.get("expected_time")
+    if expected_time is not None and not isinstance(expected_time, str):
+        raise ValueError("topic_config.help.expected_time must be a string or null")
+    return ForumHelpConfig(expected_time=expected_time)
 
 
 def _topic_config_from_row(value: object | None) -> ForumTopicConfig | None:
-    """Decode the generic Topic configuration JSON.
-
-    ``topic_type`` selects which configuration section is meaningful. The
-    current contract only defines ``poll``; future Topic types can add other
-    keys to this object without another migration.
-    """
+    """Strictly decode one type-specific Topic configuration section."""
 
     if value is None:
         return None
     if not isinstance(value, dict):
         raise ValueError("ac_forum_topic.topic_config must be a JSON object or null")
-    return ForumTopicConfig(poll=_poll_from_row(value.get("poll")))
+    if len(value) != 1 or not set(value).issubset({"poll", "help"}):
+        raise ValueError("ac_forum_topic.topic_config must contain one supported section")
+    if "poll" in value:
+        return ForumTopicConfig(poll=_poll_from_row(value["poll"]))
+    return ForumTopicConfig(help=_help_from_row(value["help"]))
 
 
 def _analysis_from_row(
@@ -409,7 +447,10 @@ class ForumPostModel(Base):
     author_display_name = Column(String(256), nullable=True)
     author_avatar_url = Column(String(1024), nullable=True)
     body = Column(Text, nullable=False)
-    post_config = Column(JSON, nullable=True)
+    # ``None`` is domain absence, not the JSON literal ``null``. Persist it as
+    # SQL NULL so clearing a HELP marker restores the same empty storage state
+    # as a Post that never carried structured configuration.
+    post_config = Column(JSON(none_as_null=True), nullable=True)
     client_request_id = Column(_REQUEST_ID, nullable=False)
     gmt_create = Column(DateTime, nullable=False, server_default=func.now())
     gmt_modified = Column(
@@ -444,6 +485,7 @@ class ForumPostModel(Base):
     )
 
     def to_record(self) -> ForumPostRecord:
+        poll_selection, helpful = _post_config_from_row(self.post_config)
         return ForumPostRecord(
             post_id=self.post_id,
             topic_id=self.topic_id,
@@ -453,13 +495,82 @@ class ForumPostModel(Base):
             display_name=self.author_display_name,
             avatar_url=self.author_avatar_url,
             body=self.body,
-            poll_selection=_poll_selection_from_post_config(self.post_config),
+            poll_selection=poll_selection,
+            helpful=helpful,
             created_at=self.gmt_create,
             updated_at=self.gmt_modified,
         )
 
 
 register_avernet_tenant_guard(ForumTopicModel)
+
+
+class ForumInteractionModel(Base):
+    """One append-only BBS interaction event.
+
+    Measurements are event counts, not state rows: the same actor may act on
+    the same target many times and each successful write inserts one row. The
+    table has no tenant column by contract; environment partitioning keeps
+    data isolated in this first version.
+    """
+
+    __tablename__ = "ac_forum_interaction"
+
+    id = Column(
+        AutoIncrementBigInteger,
+        primary_key=True,
+        autoincrement=True,
+        nullable=False,
+    )
+    actor_type = Column(_AUTHOR_TYPE, nullable=False)
+    actor_id = Column(_binary_string(256), nullable=False)
+    action_type = Column(String(16), nullable=False)
+    target_type = Column(String(16), nullable=False)
+    target_id = Column(_binary_string(256), nullable=False)
+    env = Column(String(20), nullable=False, default=get_current_env)
+    gmt_create = Column(DateTime, nullable=False, server_default=func.now())
+    gmt_modified = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        Index(
+            "idx_forum_interaction_target",
+            "env",
+            "target_type",
+            "target_id",
+            "action_type",
+            "gmt_create",
+            "id",
+        ),
+        Index(
+            "idx_forum_interaction_actor",
+            "env",
+            "actor_type",
+            "actor_id",
+            "action_type",
+            "gmt_create",
+            "id",
+        ),
+    )
+
+    def to_record(self) -> ForumInteractionRecord:
+        return ForumInteractionRecord(
+            actor_type=self.actor_type,
+            actor_id=self.actor_id,
+            action_type=self.action_type,
+            target_type=self.target_type,
+            target_id=self.target_id,
+            env=self.env,
+            created_at=self.gmt_create,
+            updated_at=self.gmt_modified,
+        )
+
+
+
 
 
 class ForumBrowseSubscriptionModel(Base):

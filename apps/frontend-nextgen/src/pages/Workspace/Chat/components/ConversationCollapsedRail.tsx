@@ -13,6 +13,7 @@ import type { ConversationBotSection, ConversationBotView } from '@/domain/conve
 import { Plus } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { AvatarTile } from '../../components/AvatarTile';
+import { resolveBotUnavailable } from './ConversationBotUnavailableTooltip';
 
 /** 每分组直达头像上限，超出走「+N」溢出收口（点击展开完整侧栏）。 */
 const RAIL_SECTION_MAX_VISIBLE = 5;
@@ -91,6 +92,7 @@ function BotTile({
 
 /** 降权占位：不可聊 Bot 不提供直达按钮（cursor 语义与分组泊位一致），仍保留身份提示。 */
 function NonInteractiveTile({ view }: { view: ConversationBotView }) {
+  const { reason } = resolveBotUnavailable(view.bot, view.section);
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -107,7 +109,7 @@ function NonInteractiveTile({ view }: { view: ConversationBotView }) {
           />
         </span>
       </TooltipTrigger>
-      <TooltipContent side="right">{view.bot.displayName}</TooltipContent>
+      <TooltipContent side="right">{reason ?? view.bot.displayName}</TooltipContent>
     </Tooltip>
   );
 }
@@ -160,7 +162,11 @@ export function ConversationCollapsedRail({
                   visible.map((view) => {
                     const selected =
                       view.bot.botId === selectedBotId && section.id === selectedSection;
-                    // 与 Bot 行 handleToggle 同口径：AgentCoding 直达 coding 对话；不可聊不提供直达。
+                    // 与 Bot 行同口径：不可用 Bot 不允许通过 Coding 专用入口绕过禁用。
+                    if (resolveBotUnavailable(view.bot, view.section).unavailable) {
+                      return <NonInteractiveTile key={view.bot.botId} view={view} />;
+                    }
+                    // AgentCoding 直达 coding 对话；不可聊不提供直达。
                     if (view.bot.isAgentCodingBot) {
                       return (
                         <BotTile

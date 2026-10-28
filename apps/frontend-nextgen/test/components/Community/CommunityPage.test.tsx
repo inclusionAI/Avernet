@@ -2,7 +2,7 @@
 import { CommunityPage } from '@/components/Community/CommunityPage';
 import type { CommunityTopic } from '@/domain/community/types';
 import '@testing-library/jest-dom';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 
 const topic: CommunityTopic = {
   id: 'topic-1',
@@ -19,6 +19,7 @@ const topic: CommunityTopic = {
 const mockCommunityState = {
   query: '',
   scope: 'all' as const,
+  topicType: 'all' as const,
   selectedTopic: null as CommunityTopic | null,
   topics: [topic],
   loading: false,
@@ -26,6 +27,7 @@ const mockCommunityState = {
   detailLoading: false,
   detailError: null,
   closing: false,
+  helpfulPostId: null,
   replies: [],
   replyLoading: false,
   replyError: null,
@@ -38,9 +40,11 @@ const mockCommunityState = {
   openTopic: jest.fn(),
   closeDetail: jest.fn(),
   closeTopic: jest.fn(),
+  setPostHelpful: jest.fn(),
   goToReplyPage: jest.fn(),
   setQuery: jest.fn(),
   setScope: jest.fn(),
+  setTopicType: jest.fn(),
   load: jest.fn(),
   loadMore: jest.fn(),
   publishTopic: jest.fn(),
@@ -48,7 +52,7 @@ const mockCommunityState = {
 
 jest.mock('@/hooks/useCommunity', () => ({
   useCommunity: () => mockCommunityState,
-  COMMUNITY_REPLY_PAGE_SIZE: 20,
+  COMMUNITY_REPLY_PAGE_SIZE: 10,
 }));
 jest.mock('@umijs/max', () => ({ history: { push: jest.fn() } }));
 
@@ -60,12 +64,42 @@ jest.mock('@umijs/max', () => ({ history: { push: jest.fn() } }));
 describe('CommunityPage 滚动容器结构', () => {
   test('列表视：滚动 main 必须是 h-full flex 外层的 flex 子项，否则 overflow-y-auto 失效', () => {
     render(<CommunityPage />);
-    const publishButton = screen.getByRole('button', { name: '发布主题' });
+    const publishButton = screen.getByRole('button', { name: '发帖' });
     expect(publishButton).toHaveClass('bg-primary', 'text-primary-foreground');
     expect(publishButton).not.toHaveClass('bg-foreground');
     const scrollMain = screen.getByRole('main');
     expect(scrollMain).toHaveClass('overflow-y-auto', 'flex-1', 'min-h-0');
     expect(scrollMain.parentElement).toHaveClass('h-full', 'flex', 'flex-col');
+  });
+
+
+  test('首页筛选 Tab 位于搜索框之前，发帖入口位于搜索框之后', () => {
+    render(<CommunityPage />);
+
+    const topicTypeGroup = screen.getByRole('group', { name: '主题类型' });
+    const scopeGroup = screen.getByRole('group', { name: '主题范围' });
+    const searchInput = screen.getByRole('textbox', { name: '搜索社区主题' });
+    const personalCenterButton = screen.getByRole('button', { name: '个人中心' });
+    const publishButton = screen.getByRole('button', { name: '发帖' });
+
+    expect(within(topicTypeGroup).getAllByRole('button').map((button) => button.textContent)).toEqual([
+      '全部',
+      '讨论',
+      '分享',
+      '投票',
+      '求助',
+    ]);
+    expect(within(scopeGroup).getAllByRole('button')).toHaveLength(2);
+    expect(topicTypeGroup.compareDocumentPosition(scopeGroup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(scopeGroup.compareDocumentPosition(searchInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(searchInput.compareDocumentPosition(personalCenterButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(personalCenterButton).toBeEnabled();
+    expect(
+      personalCenterButton.compareDocumentPosition(publishButton) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    fireEvent.click(within(topicTypeGroup).getByRole('button', { name: '分享' }));
+    expect(mockCommunityState.setTopicType).toHaveBeenCalledWith('share');
   });
 
   test('详情视：回帖滚动 main 必须挂在 h-full flex 外层下', () => {

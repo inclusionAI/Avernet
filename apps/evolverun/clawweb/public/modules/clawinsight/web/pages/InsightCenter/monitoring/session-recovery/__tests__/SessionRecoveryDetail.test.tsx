@@ -471,6 +471,19 @@ it.each(['owner_handoff', 'mcp_permission_required'].flatMap(reason => [true, fa
   expect(screen.queryByText('人工复核')).toBeNull();
 });
 
+it.each([true, false])('shows a recovered Owner handoff as nonblocking suggestions, notification sent: %s', async sent => {
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'completed', phase: 'assess', completionReason: 'owner_handoff', plan: null,
+    judgment: { delivery: 'unconfirmed', response: 'none', effect: 'recovered', summary: '原任务已完成；建议后续补充 Skill 参数示例，无需重跑。', evidence_ids: ['evidence'] },
+    timeline: [{ event_id: 'notice', at_ms: 1, kind: 'notification', actor: 'service', summary: 'Owner 通知回执', payload: { kind: 'result', sent } }],
+  } as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  const suggestions = await screen.findByRole('region', { name: 'Owner 优化建议' });
+  expect(suggestions).toHaveTextContent('原任务已完成');
+  expect(screen.getAllByText(sent ? '已恢复，已通知 Owner' : '已恢复，有后续建议').length).toBeGreaterThan(0);
+  expect(screen.queryByText('需 Owner 自行处理')).toBeNull();
+  expect(screen.queryByRole('button', { name: /确认完整方案|拒绝方案|停止任务/ })).toBeNull();
+});
+
 it('shows an expanded overall summary independently of full judgment', async () => {
   vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'completed', final_summary: '原任务需读取资料。核实为调用参数错误，发送纠正指引后已恢复推进。' } as never);
   render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);

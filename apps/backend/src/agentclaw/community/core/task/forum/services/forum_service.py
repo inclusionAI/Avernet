@@ -7,7 +7,7 @@ from datetime import datetime
 
 from injector import inject
 
-from agentclaw.community.core.errors import Conflict, NotFound, ValidationError
+from agentclaw.community.core.errors import Conflict, Forbidden, NotFound, ValidationError
 from agentclaw.community.core.task.forum.models import (
     AUTHOR_TYPES,
     BROWSE_MODES,
@@ -25,6 +25,7 @@ from agentclaw.community.core.task.forum.models import (
     MAX_AUTHOR_DISPLAY_NAME_LENGTH,
     MAX_AUTHOR_AVATAR_URL_LENGTH,
     MAX_ID_LENGTH,
+    MAX_HELP_EXPECTED_TIME_LENGTH,
     MAX_POLL_OPTION_COUNT,
     MAX_POLL_OPTION_LENGTH,
     MIN_POLL_OPTION_COUNT,
@@ -36,12 +37,16 @@ from agentclaw.community.core.task.forum.models import (
     TOPIC_STATUSES,
     TOPIC_STATUS_CLOSED,
     TOPIC_STATUS_LOCKED,
+    TOPIC_TYPE_HELP,
     TOPIC_TYPE_POLL,
+    TOPIC_TYPE_SHARE,
     TOPIC_TYPES,
+    ForumHelpConfig,
     ForumPollConfig,
     ForumPollSelection,
     ForumTopicConfig,
     ForumPostPage,
+    ForumPostRecord,
     ForumReplyCreateResult,
     ForumTopicCreateResult,
     ForumTopicPage,
@@ -139,6 +144,62 @@ class ForumService(ForumServiceProtocol):
             limit=page_size,
         )
 
+    def set_post_helpful(
+        self,
+        *,
+        topic_id: str,
+        post_id: str,
+        author_type: str,
+        author_id: str,
+        helpful: bool,
+    ) -> ForumPostRecord:
+        normalized_topic_id = self._required_text(topic_id, "topic_id", MAX_ID_LENGTH)
+        normalized_post_id = self._required_text(post_id, "post_id", MAX_ID_LENGTH)
+        normalized_author_type = self._author_type(author_type)
+        normalized_author_id = self._required_text(
+            author_id, "author_id", MAX_AUTHOR_ID_LENGTH
+        )
+        if not isinstance(helpful, bool):
+            raise ValidationError("helpful must be a boolean")
+
+        topic = self._repository.get_topic(normalized_topic_id)
+        if topic is None:
+            raise NotFound("topic not found")
+        if topic.topic_type != TOPIC_TYPE_HELP:
+            raise ValidationError("helpful is only allowed for HELP topics")
+        if (
+            topic.author_type != normalized_author_type
+            or topic.author_id != normalized_author_id
+        ):
+            raise Forbidden("only the topic author may mark helpful replies")
+
+        post = self._repository.get_post(
+            topic_id=normalized_topic_id,
+            post_id=normalized_post_id,
+        )
+        if post is None:
+            raise NotFound("post not found in this topic")
+        if post.reply_to_post_id is not None:
+            raise ValidationError("only first-level replies can be marked helpful")
+
+        if helpful:
+            updated = self._repository.update_post_helpful_with_accept(
+                topic_id=normalized_topic_id,
+                post_id=normalized_post_id,
+                helpful=True,
+                actor_type=normalized_author_type,
+                actor_id=normalized_author_id,
+            )
+        else:
+            updated = self._repository.update_post_helpful(
+                topic_id=normalized_topic_id,
+                post_id=normalized_post_id,
+                helpful=False,
+            )
+        if updated is None:
+            raise NotFound("post not found in this topic")
+        return updated
+
     def create_topic(
         self,
         *,
@@ -163,16 +224,10 @@ class ForumService(ForumServiceProtocol):
         normalized_body = self._required_text(body, "body", MAX_BODY_LENGTH)
         normalized_topic_type = self._topic_type(topic_type) or "DISCUSSION"
         normalized_config = self._topic_config(topic_config)
-        if normalized_topic_type == TOPIC_TYPE_POLL and (
-            normalized_config is None or normalized_config.poll is None
-        ):
-            raise ValidationError(
-                "topic_config.poll is required when topic_type is POLL"
-            )
-        if normalized_topic_type != TOPIC_TYPE_POLL and normalized_config is not None:
-            raise ValidationError(
-                "topic_config is only allowed when topic_type is POLL"
-            )
+        self._validate_topic_config_for_type(
+            normalized_topic_type,
+            normalized_config,
+        )
         normalized_display_name = self._optional_text(
             author_display_name, "author_display_name",
             MAX_AUTHOR_DISPLAY_NAME_LENGTH,
@@ -361,9 +416,60 @@ class ForumService(ForumServiceProtocol):
             return None
         if not isinstance(value, ForumTopicConfig):
             raise ValidationError("topic_config must be a topic configuration object")
-        if set(value.__dict__) - {"poll"}:
+        if set(value.__dict__) - {"poll", "help"}:
             raise ValidationError("topic_config contains unsupported fields")
-        return ForumTopicConfig(poll=cls._poll_config(value.poll))
+        normalized = ForumTopicConfig(
+            poll=cls._poll_config(value.poll),
+            help=cls._help_config(value.help),
+        )
+        configured_sections = sum(
+            section is not None for section in (normalized.poll, normalized.help)
+        )
+        if configured_sections > 1:
+            raise ValidationError("topic_config must contain exactly one section")
+        return None if configured_sections == 0 else normalized
+
+    @staticmethod
+    def _validate_topic_config_for_type(
+        topic_type: str,
+        config: ForumTopicConfig | None,
+    ) -> None:
+        if topic_type == TOPIC_TYPE_POLL:
+            if config is None or config.poll is None:
+                raise ValidationError(
+                    "topic_config.poll is required when topic_type is POLL"
+                )
+            return
+        if topic_type == TOPIC_TYPE_SHARE:
+            if config is not None:
+                raise ValidationError(
+                    "topic_config is not allowed when topic_type is SHARE"
+                )
+            return
+        if topic_type == TOPIC_TYPE_HELP:
+            if config is not None and config.help is None:
+                raise ValidationError(
+                    "only topic_config.help is allowed when topic_type is HELP"
+                )
+            return
+        if config is not None:
+            raise ValidationError(
+                "topic_config is only allowed for POLL or HELP topics"
+            )
+
+    @classmethod
+    def _help_config(cls, value: ForumHelpConfig | None) -> ForumHelpConfig | None:
+        if value is None:
+            return None
+        if not isinstance(value, ForumHelpConfig):
+            raise ValidationError("help must be a help configuration")
+        return ForumHelpConfig(
+            expected_time=cls._optional_text(
+                value.expected_time,
+                "help.expected_time",
+                MAX_HELP_EXPECTED_TIME_LENGTH,
+            )
+        )
 
     @classmethod
     def _poll_config(cls, value: ForumPollConfig | None) -> ForumPollConfig | None:

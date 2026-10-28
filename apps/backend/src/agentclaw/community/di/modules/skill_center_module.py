@@ -6,7 +6,6 @@ module; request-scoped service factories remain here.
 
 from __future__ import annotations
 
-from agentclaw.community.core.skill_center.services.runtime_projections.skill_projection_guard import SkillProjectionGuard
 
 import dataclasses
 from typing import Callable
@@ -597,9 +596,8 @@ class SkillCenterModule(
         pool_layouts: SkillsPoolLayoutRepositoryProtocol,
         device_contexts: DeviceContextResolver,
         center_content: CenterContentDistribution,
-        guard: SkillProjectionGuard,
     ) -> EngineRuntimeProjectionRegistry:
-        """Wire guarded per-domain delivery; Teclaw keeps whole-artifact delivery."""
+        """Wire per-domain delivery; Teclaw keeps whole-artifact delivery."""
         from agentclaw.community.core.skill_center.services.runtime_projections.per_domain import (
             PerDomainRuntimeProjection,
         )
@@ -617,7 +615,6 @@ class SkillCenterModule(
                     pool_layouts=pool_layouts,
                     device_contexts=device_contexts,
                     center_content=center_content,
-                    guard=guard,
                 ),
             ),
             by_engine={"teclaw": WholeArtifactRuntimeProjection()},

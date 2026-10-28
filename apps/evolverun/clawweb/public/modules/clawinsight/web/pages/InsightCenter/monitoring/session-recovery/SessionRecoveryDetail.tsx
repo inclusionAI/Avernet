@@ -32,6 +32,7 @@ function unrecoveredOutcome(task: SessionRecoveryTask): boolean {
 
 function taskStatusLabel(task: SessionRecoveryTask): string {
   if (unrecoveredOutcome(task)) return '处理结束';
+  if (isOwnerHandoff(task) && task.judgment?.effect === 'recovered') return ownerNotificationSent(task) ? '已恢复，已通知 Owner' : '已恢复，有后续建议';
   if (isOwnerHandoff(task)) return ownerNotificationSent(task) ? '已通知 Owner 自行处理' : '需 Owner 自行处理';
   return task.completionReason === 'target_unavailable' ? '目标不可用' : task.completionReason === 'user_continued' ? '已让路' : statusLabels[task.status];
 }
@@ -636,7 +637,7 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
     { key: 'effect', label: '效果', ...recoveryEffectView(task) },
   ];
   const stageSummary = task ? {
-    completed: isOwnerHandoff(task) ? (ownerNotificationSent(task) ? '已通知 Owner 自行处理，本次自愈已结束。' : '本次自愈已结束；Owner 钉钉通知未确认，请查看处理指引。') : task.completionReason === 'target_unavailable' ? '目标运行环境已不可用，本次自愈已结束；原任务恢复效果未知。' : task.simulation ? '仿真已完成，可查看判断、拟发送消息或完整方案；未执行实际干预。' : task.completionReason === 'user_continued' ? '用户已继续对话，本次自愈已让路，不再自动干预。' : effect === 'recovered' ? '原任务已恢复，可查看下方处理过程和判断依据。' : '本次自愈处理已结束，恢复情况请查看效果判断。',
+    completed: isOwnerHandoff(task) ? (effect === 'recovered' ? (ownerNotificationSent(task) ? '原任务已恢复，已通知 Owner 后续建议，本次自愈已结束。' : '原任务已恢复，本次自愈已结束；Owner 通知未确认，请查看后续建议。') : ownerNotificationSent(task) ? '已通知 Owner 自行处理，本次自愈已结束。' : '本次自愈已结束；Owner 钉钉通知未确认，请查看处理指引。') : task.completionReason === 'target_unavailable' ? '目标运行环境已不可用，本次自愈已结束；原任务恢复效果未知。' : task.simulation ? '仿真已完成，可查看判断、拟发送消息或完整方案；未执行实际干预。' : task.completionReason === 'user_continued' ? '用户已继续对话，本次自愈已让路，不再自动干预。' : effect === 'recovered' ? '原任务已恢复，可查看下方处理过程和判断依据。' : '本次自愈处理已结束，恢复情况请查看效果判断。',
     failed: task && unrecoveredOutcome(task) ? '自愈处理已结束，原任务仍受阻，需继续处理。' : '本次自愈未完成，请查看失败说明和相关操作记录。',
     canceled: '用户已停止本次自愈，后续处理已取消。',
     waiting_owner: !task.canOperate ? '等待 Owner 处理配合事项并确认修复方案。' : task.plan?.owner_cooperation.length ? '请先处理方案中的配合事项，再确认完整方案。' : '请核对完整修复方案，确认后 Agent 将继续执行。',
@@ -731,8 +732,8 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
           : <p className="sr-empty">{['completed', 'failed', 'canceled', 'waiting_effect'].includes(task.status) ? '摘要暂不可用，可查看下方完整判断、方案与处理记录。' : '任务结束后由 Agent 生成整体摘要。'}</p>}
       </section>
 
-      {isOwnerHandoff(task) && <section className="sr-card" aria-label="Owner 处理指引">
-        <CardHeader title="Owner 处理指引" description="剩余事项需 Owner 自行处理，本次自愈已结束。" />
+      {isOwnerHandoff(task) && <section className="sr-card" aria-label={task.judgment?.effect === 'recovered' ? 'Owner 优化建议' : 'Owner 处理指引'}>
+        <CardHeader title={task.judgment?.effect === 'recovered' ? 'Owner 优化建议' : 'Owner 处理指引'} description={task.judgment?.effect === 'recovered' ? '原任务已恢复，后续建议可按需处理，本次自愈已结束。' : '剩余事项需 Owner 自行处理，本次自愈已结束。'} />
         <div className="sr-plan-body"><PlanMarkdown text={task.judgment?.summary ?? '请查看调查记录中的问题依据与处理指引。'} /></div>
       </section>}
 

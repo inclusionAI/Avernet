@@ -202,11 +202,45 @@ def test_delivery_intent_is_scoped_to_executor_app(db, monkeypatch) -> None:
     assert graph_repo.list_pending_delivery_intents() == []
     with pytest.raises(TaskStateError, match="executor app mismatch"):
         graph_repo.claim_delivery_intent(task_id, "node-2", relay_token)
+    # Read-only task records stay visible to the viewer application in the same
+    # environment; only durable execution ownership is restricted.
+    assert info_repo.get(task_id).executor_app == "agentclawengine"
+    assert info_repo.list_records()[0].task_id == task_id
     with pytest.raises(TaskStateError, match="executor app mismatch"):
-        info_repo.get(task_id)
+        info_repo.update_status(task_id, Status.RUNNING)
 
     _set_executor_app(monkeypatch, "agentclawengine")
     assert graph_repo.claim_delivery_intent(task_id, "node-2", relay_token)[0] == "CLAIMED"
+
+
+def test_graph_reads_cross_executor_app_but_writes_do_not(db, monkeypatch) -> None:
+    task_id = "T-APP-GRAPH-READ"
+    _set_env(monkeypatch, "pre")
+    _set_executor_app(monkeypatch, "agentclawengine")
+    _seed_task_info(db, task_id)
+    graph = _minimal_graph(task_id)
+    repo = TaskGraphRepository(db)
+    assert repo.save_graph(
+        graph,
+        expected_version=0,
+        runtime_status=Status.RUNNING,
+        action_events=[],
+    ) == 1
+
+    _set_executor_app(monkeypatch, "agentclaw")
+    assert repo.get_version(task_id) == 1
+    loaded = repo.load_graph(task_id)
+    assert loaded is not None and loaded.task_id == task_id
+    with pytest.raises(TaskStateError, match="executor app mismatch"):
+        repo.save_graph(
+            graph,
+            expected_version=1,
+            runtime_status=Status.RUNNING,
+            action_events=[],
+        )
+
+    _set_executor_app(monkeypatch, "agentclawengine")
+    assert repo.get_version(task_id) == 1
 
 
 def test_recoverable_tasks_are_scoped_to_executor_app(db, monkeypatch) -> None:

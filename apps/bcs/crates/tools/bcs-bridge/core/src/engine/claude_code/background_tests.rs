@@ -30,10 +30,9 @@ use super::*;
         // results cut the turn with two enqueued-but-undelivered finders).
         let enq = r#"{"type":"system","subtype":"task_notification","task_id":"t1","tool_use_id":"toolu_1","status":"completed","summary":"done"}"#;
         match map_cc_line(enq, "r-1") {
-            CcMap::BackgroundEnqueued { task_id, tool_use_id, status } => {
+            CcMap::BackgroundEnqueued { task_id, tool_use_id } => {
                 assert_eq!(task_id.as_deref(), Some("t1"));
                 assert_eq!(tool_use_id.as_deref(), Some("toolu_1"));
-                assert_eq!(status, "completed");
             }
             other => panic!("expected BackgroundEnqueued, got {other:?}"),
         }

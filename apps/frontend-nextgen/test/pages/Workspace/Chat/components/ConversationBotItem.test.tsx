@@ -20,6 +20,7 @@ const noop = () => undefined;
 function renderBotItem(
   overrides: {
     expanded?: boolean;
+    section?: 'friend' | 'managed' | 'team';
     onToggle?: () => void;
     bot?: Partial<ChatBotView>;
     botSelected?: boolean;
@@ -30,7 +31,7 @@ function renderBotItem(
   const utils = render(
     <ConversationBotItem
       bot={{ ...bot, ...overrides.bot }}
-      section="managed"
+      section={overrides.section ?? 'managed'}
       expanded={overrides.expanded ?? false}
       selectedSessionId={null}
       botSelected={overrides.botSelected ?? false}
@@ -591,22 +592,58 @@ describe('ConversationBotItem 行徽标', () => {
   });
 
   it.each([
-    ['openclaw', 'OpenClaw', 'text-primary'],
-    ['teclaw', 'TEClaw', 'text-success'],
-    ['claude_code', 'ClaudeCode', 'text-purple'],
-  ] as const)('引擎 %s 徽章着色与 Bot 管理一致（%s）', (engine, label, toneClass) => {
+    ['openclaw', 'OpenClaw'],
+    ['teclaw', 'TEClaw'],
+    ['claude_code', 'ClaudeCode'],
+    ['hermes', 'Hermes'],
+  ] as const)('引擎 %s 徽章与 Bot 管理同源：统一默认中性底', (engine, label) => {
     renderBadgeRow({ engine });
-    expect(screen.getByText(label)).toHaveClass(toneClass);
+    expect(screen.getByText(label)).toHaveClass('bg-muted', 'text-muted-foreground');
   });
 
-  it('AgentCoding 模板徽章保持模板名标签，但色彩取引擎规则（ClaudeCode 模板=紫）', () => {
+  it('AgentCoding 模板徽章保持模板名标签，色彩同样取默认中性底', () => {
     renderBadgeRow({ isAgentCodingBot: true, chatable: false, engine: 'claude_code', templateName: 'Coding Bot' });
     // 标签口径不变（模板名优先），颜色与 Bot 管理「标签」列同源。
-    expect(screen.getByText('Coding Bot')).toHaveClass('text-purple');
+    expect(screen.getByText('Coding Bot')).toHaveClass('bg-muted', 'text-muted-foreground');
   });
 
-  it('未知引擎徽章回退中性色（不给未识别 Bot 涂装误导色）', () => {
+  it('未知引擎徽章同为中性色（不给未识别 Bot 涂装误导色）', () => {
     renderBadgeRow({ engine: 'unknown_engine' });
-    expect(screen.getByText('unknown_engine')).toHaveClass('text-muted-foreground');
+    expect(screen.getByText('unknown_engine')).toHaveClass('bg-muted', 'text-muted-foreground');
+  });
+});
+
+describe('ConversationBotItem 非运行中好友服务 Bot', () => {
+  it('置灰、屏蔽点击及已展开的会话和操作入口，悬停提示原因', async () => {
+    const { onToggle } = renderBotItem({
+      section: 'friend',
+      expanded: true,
+      bot: { botType: 'service', onlineAvailable: false, status: 'ACTIVE' },
+    });
+    const row = screen.getByRole('button', { name: '测试 Bot' }).parentElement as HTMLElement;
+    expect(row).toHaveAttribute('aria-disabled', 'true');
+    expect(row).toHaveClass('opacity-60');
+    fireEvent.click(screen.getByRole('button', { name: '测试 Bot' }));
+    expect(onToggle).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('会话列表：测试 Bot')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '新建会话' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '搜索会话' })).not.toBeInTheDocument();
+    fireEvent.pointerMove(row, { pointerType: 'mouse' });
+    await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent('非运行中服务 Bot'));
+  });
+
+  it.each([
+    ['friend', 'service', true],
+    ['friend', 'service', null],
+    ['friend', 'service', undefined],
+    ['friend', 'personal', false],
+    ['friend', undefined, false],
+    ['managed', 'service', false],
+    ['team', 'service', false],
+  ] as const)('%s botType=%p onlineAvailable=%p 不触发好友服务禁用规则', (section, botType, onlineAvailable) => {
+    const { onToggle } = renderBotItem({ section, bot: { botType, onlineAvailable, status: 'ACTIVE' } });
+    fireEvent.click(screen.getByRole('button', { name: '测试 Bot' }));
+    expect(onToggle).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('div[aria-disabled="true"]')).toBeNull();
   });
 });

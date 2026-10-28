@@ -65,12 +65,22 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
             return row.to_record()
 
     @staticmethod
-    def _require_scope(row: TaskInfoModel) -> None:
+    def _require_read_scope(row: TaskInfoModel) -> None:
+        """Scope reads to the deployment environment only.
+
+        ``executor_app`` records which application owns durable execution; it must
+        not prevent the presentation/read side from showing another application's
+        task in the same environment.
+        """
         env = get_current_env()
         if row.env != env:
             raise TaskStateError(
                 f"task environment mismatch: task={row.env}, current={env}"
             )
+
+    @staticmethod
+    def _require_write_scope(row: TaskInfoModel) -> None:
+        TaskInfoRepository._require_read_scope(row)
         executor_app = get_current_executor_app()
         if row.executor_app != executor_app:
             raise TaskStateError(
@@ -83,7 +93,7 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
             row = db.query(self._model).filter(self._model.task_id == task_id).first()
             if row is None:
                 return None
-            self._require_scope(row)
+            self._require_read_scope(row)
             return row.to_record()
 
     def get_by_intake_session(self, session_id: str) -> Optional[TaskInfoRecord]:
@@ -95,7 +105,7 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
             )
             if row is None:
                 return None
-            self._require_scope(row)
+            self._require_read_scope(row)
             return row.to_record()
 
     def update_status(self, task_id: str, status: Status) -> bool:
@@ -108,7 +118,7 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
             )
             if row is None:
                 return False
-            self._require_scope(row)
+            self._require_write_scope(row)
             row.status = status.value
             db.flush()
             return True
@@ -122,7 +132,6 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
         with self._db.orm_session() as db:
             q = db.query(self._model).filter(
                 self._model.env == get_current_env(),
-                self._model.executor_app == get_current_executor_app(),
             )
             # status 是运行时态集合:空/None 不过滤,非空按 SQL IN 过滤。
             if status:
@@ -146,7 +155,6 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
         with self._db.orm_session() as db:
             q = db.query(self._model).filter(
                 self._model.env == get_current_env(),
-                self._model.executor_app == get_current_executor_app(),
             )
             # status 是运行时态集合:空/None 不过滤,非空按 SQL IN 过滤。
             if status:
@@ -176,7 +184,6 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
             statuses = [status] if isinstance(status, Status) else list(status)
             q = db.query(self._model).filter(
                 self._model.env == get_current_env(),
-                self._model.executor_app == get_current_executor_app(),
                 self._model.status.in_([item.value for item in statuses]),
             )
             if gmt_modified_since is not None:

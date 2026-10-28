@@ -43,7 +43,8 @@ describe("self-healing task orchestration", () => {
     const error = Object.assign(new Error("target resolution failed; password=private-value"), { code: "TARGET_LOOKUP_FAILED" });
     deps.resolveTarget = async () => { throw error; };
     await expect(service.create({ ...request, diagnosis: "PRIVATE_DIAGNOSIS" }, actor)).rejects.toBe(error);
-    const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[workflow-background] ".length)));
+    expect(output.mock.calls[0][0]).toMatch(/^\[session-recovery\] /);
+    const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[session-recovery] ".length)));
     expect(events).toEqual([expect.objectContaining({ job: "session_recovery_task", event: "CREATE_FAILED", outcome: "failed",
       count: 1, eventId: "evt", botId: "default", environment: "pre", targetEnvironment: "prod", errorCode: "TARGET_LOOKUP_FAILED" })]);
     expect(events[0].reason).toContain("target resolution failed");
@@ -60,7 +61,7 @@ describe("self-healing task orchestration", () => {
     await expect(service.create({ ...request, event_id: "forbidden" }, { userId: "other", isAdmin: false })).rejects.toMatchObject({ status: 403 });
     deps.resolveTarget = async () => { throw new SessionRecoveryError(422, "invalid_recovery_target", "binding mismatch"); };
     await expect(service.create({ ...request, event_id: "mismatch" }, actor)).rejects.toMatchObject({ status: 422 });
-    const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[workflow-background] ".length)));
+    const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[session-recovery] ".length)));
     expect(events.filter(event => event.event === "created")).toHaveLength(1);
     expect(events.filter(event => event.event === "CREATE_FAILED")).toEqual([]);
   });
@@ -75,7 +76,7 @@ describe("self-healing task orchestration", () => {
     await service.executionFailure(task_id, "late duplicate", undefined, true, undefined, "AIS_EXECUTION_FAILED");
     const blocked = await service.create({ ...request, event_id: "blocked" }, actor); await flush();
     await service.executionFailure(blocked.task_id, "业务受阻，需要现场证据");
-    const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[workflow-background] ".length)));
+    const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[session-recovery] ".length)));
     expect(events.filter(event => event.event === "retry_scheduled")).toHaveLength(2);
     expect(events.filter(event => event.event === "EXECUTION_FAILED")).toEqual([expect.objectContaining({
       taskId: task_id, eventId: "evt", phase: "assess", attempt: 3, count: 1, environment: "pre", errorCode: "AIS_EXECUTION_FAILED" })]);
@@ -91,7 +92,7 @@ describe("self-healing task orchestration", () => {
     const second = await service.create({ ...request, event_id: "persist-failure" }, actor); await flush();
     vi.spyOn(deps.tasks, "update").mockRejectedValueOnce(new Error("state write unavailable"));
     await expect(service.executionFailure(second.task_id, "startup failed", undefined, false, undefined, "AGENT_START_FAILED")).rejects.toThrow("state write unavailable");
-    const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[workflow-background] ".length)));
+    const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[session-recovery] ".length)));
     expect(events.filter(event => event.event === "EXECUTION_FAILED").map(event => event.taskId)).toEqual([first.task_id]);
   });
 
@@ -110,7 +111,7 @@ describe("self-healing task orchestration", () => {
     await service.terminate(cancel.task_id, actor);
     const debug = await service.create({ ...request, event_id: "debug", execution_level: "debug" }, actor); await flush();
     await service.executionFailure(debug.task_id, "debug execution interrupted", undefined, false, undefined, "AIS_EXECUTION_FAILED");
-    const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[workflow-background] ".length)));
+    const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[session-recovery] ".length)));
     expect(events.filter(event => event.event === "EXECUTION_FAILED")).toEqual([]);
     expect(events.filter(event => event.event === "state_changed").map(event => event.status)).toContain("canceled");
   });
@@ -120,7 +121,7 @@ describe("self-healing task orchestration", () => {
     const { service, deps } = setup();
     vi.spyOn(deps.tasks, "listForMaintenance").mockRejectedValueOnce(new Error("scan DB unavailable"));
     await expect(service.maintenance()).rejects.toThrow("scan DB unavailable");
-    const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[workflow-background] ".length)));
+    const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[session-recovery] ".length)));
     expect(events).toEqual([expect.objectContaining({ job: "session_recovery_maintenance", event: "scan_failed", reason: "scan DB unavailable" })]);
   });
 
@@ -133,7 +134,7 @@ describe("self-healing task orchestration", () => {
       return null;
     });
     await service.executionFailure(task_id, "AIS failed", undefined, false, undefined, "AIS_EXECUTION_FAILED");
-    const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[workflow-background] ".length)));
+    const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[session-recovery] ".length)));
     expect(events.filter(event => event.event === "EXECUTION_FAILED")).toHaveLength(1);
     expect(events.filter(event => event.event === "state_changed")).toHaveLength(1);
   });

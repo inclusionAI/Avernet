@@ -1,10 +1,7 @@
 /** useBotSessionFilesFeature — 装配单聊会话文件的上传/管理/引用 + /clear /skill 命令,
  *  返回 ChatPanel 所需的 fileChip / command / fileToolbar / senderRef / 副屏面板节点。 */
 import type { ComposerCapabilitySetsState } from '@/components/Workspace/CapabilitySetViewer/types';
-import { WORKSPACE_RIGHT_PANEL_LAYOUT } from '@/components/Workspace/workspacePanelLayout';
-import { BotSessionFilesPanel } from '@/pages/Workspace/components/BotSessionFiles/BotSessionFilesPanel';
-import { BotUploadFilesModal } from '@/pages/Workspace/components/BotSessionFiles/UploadFilesModal';
-import { WorkspaceOverlayPanel } from '@/pages/Workspace/components/WorkspaceOverlayPanel';
+import { BotSessionFileOverlays } from '@/pages/Workspace/components/BotSessionFiles/BotSessionFileOverlays';
 import { buildBotSessionCommandItems } from '@/pages/Workspace/hooks/botSessionCommandItems';
 import { useBotCapabilitySets } from '@/pages/Workspace/hooks/useBotCapabilitySets';
 import { useBotSessionFileUpload } from '@/pages/Workspace/hooks/useBotSessionFileUpload';
@@ -12,7 +9,7 @@ import { useBotSessionFiles } from '@/pages/Workspace/hooks/useBotSessionFiles';
 import { useBotSkills } from '@/pages/Workspace/hooks/useBotSkills';
 import type { BotSessionFileView } from '@/services/workspace/botSessionFileService';
 import { useBotSessionFileStore } from '@/stores/botSessionFileStore';
-import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
+import { resolveChatRuntimeStage, type BotChatSessionView, type ChatBotView } from '@/services/workspace/botSessionService';
 import type { CommandConfig, CommandItem, FileChipConfig, PendingFileChip, SenderRef } from '@tc-chat/ui/es/Sender';
 import { FileIcon, Zap } from 'lucide-react';
 import { useCallback, useMemo, useRef, useState } from 'react';
@@ -46,9 +43,19 @@ export function useBotSessionFilesFeature(
   const botId = bot?.botType === 'desktop' ? null : bot?.realBotId ?? null;
   const sessionId = session?.sessionId ?? null;
   const ownerId = bot?.ownerId;
+  // Only shared service conversations opt into online; my Bots retain the existing file request shape.
+  const stage =
+    bot?.botType === 'service' && (bot.isTeamBot || bot.isFriendBot) ? resolveChatRuntimeStage(bot) : undefined;
 
-  const files = useBotSessionFiles(botId, sessionId, userId, ownerId, bot?.isFriendBot ? userId ?? undefined : undefined);
-  const upload = useBotSessionFileUpload(botId, sessionId, userId, ownerId);
+  const files = useBotSessionFiles(
+    botId,
+    sessionId,
+    userId,
+    ownerId,
+    bot?.isFriendBot ? userId ?? undefined : undefined,
+    ...(stage ? ([stage] as const) : []),
+  );
+  const upload = useBotSessionFileUpload(botId, sessionId, userId, ownerId, ...(stage ? ([stage] as const) : []));
   const skillsState = useBotSkills(bot, userId);
   // 「通用协作能力」能力集装配：好友 Bot / 不可会话 Bot 为 null（文案区随之隐藏）。
   const capabilitySets = useBotCapabilitySets(bot, userId);
@@ -185,44 +192,22 @@ export function useBotSessionFilesFeature(
   const openUpload = useCallback(() => setUploadOpen(true), []);
 
   const featureNode = (
-    <>
-      <BotUploadFilesModal
-        open={uploadOpen}
-        onClose={() => setUploadOpen(false)}
-        queue={upload.tasks}
-        isUploading={upload.isUploading}
-        stageFiles={upload.stageFiles}
-        submit={async () => {
-          await upload.submit();
-        }}
-        onAddToSession={addReadyUploadsToSession}
-        removeTask={upload.removeTask}
-      />
-      {drawerOpen && (
-        // 与群聊共用会话局部覆盖层，保留文件面板的拖宽能力。
-        <WorkspaceOverlayPanel
-          ariaLabel="资源管理面板"
-          onDismiss={closeFileDrawer}
-          {...WORKSPACE_RIGHT_PANEL_LAYOUT}
-          className="z-30 bg-background"
-        >
-          <BotSessionFilesPanel
-            readyFiles={files.readyFiles}
-            isLoadingList={files.isLoadingList}
-            botId={botId ?? undefined}
-            sessionId={sessionId ?? undefined}
-            userId={userId ?? undefined}
-            ownerId={ownerId}
-            onClose={closeFileDrawer}
-            onUploadClick={() => setUploadOpen(true)}
-            onOpen={() => void files.refresh()}
-            onDelete={(f) => void files.deleteFile(f)}
-            onDownload={(f) => void files.downloadFile(f)}
-            onReference={handleReference}
-          />
-        </WorkspaceOverlayPanel>
-      )}
-    </>
+    <BotSessionFileOverlays
+      botId={botId}
+      sessionId={sessionId}
+      userId={userId}
+      ownerId={ownerId}
+      stage={stage}
+      files={files}
+      upload={upload}
+      drawerOpen={drawerOpen}
+      uploadOpen={uploadOpen}
+      onCloseDrawer={closeFileDrawer}
+      onCloseUpload={() => setUploadOpen(false)}
+      onOpenUpload={openUpload}
+      onAddToSession={addReadyUploadsToSession}
+      onReference={handleReference}
+    />
   );
 
   return {

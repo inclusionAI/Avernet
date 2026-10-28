@@ -80,6 +80,8 @@ def connection_info_to_response(info: DeviceConnectionInfo) -> DeviceConnectionR
     在此边界:
     - type 归一化 (tunnel/arca → remote)
     - available / message 透传
+    - a2a_base_url 原样透传:BaaS ws-info 签发的 A2A 面权威 base,空串 =
+      该设备无可交付的 A2A 面,caller 按原行为回落、不得代填/推导
 
     Args:
         info: 领域层的 DeviceConnectionInfo 实例
@@ -95,6 +97,7 @@ def connection_info_to_response(info: DeviceConnectionInfo) -> DeviceConnectionR
         available=info.available,
         message=info.message,
         url=info.url,
+        a2a_base_url=info.a2a_base_url,
     )
 
 

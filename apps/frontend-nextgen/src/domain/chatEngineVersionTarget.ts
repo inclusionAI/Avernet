@@ -19,6 +19,8 @@ export function isChatEngineVersionCandidate(input: ChatEngineVersionInput): boo
     (section !== 'managed' && section !== 'team') ||
     origin !== 'mine' ||
     bot.isFriendBot ||
+    // Published team services cannot use the draft-only engine inspection/update API.
+    (section === 'team' && bot.botType === 'service') ||
     bot.botType?.trim().toLowerCase() === 'desktop' ||
     !bot.online ||
     bot.status?.toLowerCase() === 'hidden' ||

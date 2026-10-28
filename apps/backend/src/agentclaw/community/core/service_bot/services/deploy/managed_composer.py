@@ -343,7 +343,11 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
         custom_rules: list[dict[str, str]] = []
         if bot_id and owner_id:
             try:
-                bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+                from agentclaw.community.core.bot_management.addressing import BotAddressResolver
+
+                bot = dict(BotAddressResolver(self._bot_repo).resolve(
+                    bot_id=bot_id, legacy_owner_id=owner_id,
+                ).bot)
                 ext = self._parse_bot_ext(bot)
                 custom_rules = self._normalize_custom_read_only_rules(
                     ext.get("read_only_rules", []),

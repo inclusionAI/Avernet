@@ -124,6 +124,7 @@ pub(super) async fn build_session_files_service(
 /// when the calling thread already runs a tokio runtime (e.g. tests).
 /// The production path (`new_with_infrastructure`) is already async and
 /// calls [`build_session_files_service`] directly, without this overhead.
+#[cfg(any(test, feature = "test-utils"))]
 pub(super) fn build_session_files_service_blocking(
     config: &BcsConfig,
     env: String,
@@ -149,6 +150,7 @@ pub(super) fn build_session_files_service_blocking(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[cfg(any(test, feature = "test-utils"))]
 pub(super) fn build_eventing_runtime_blocking(
     config: &BcsConfig,
     repo: Arc<dyn bcs_service_api::port::repo::EventRepoPort>,

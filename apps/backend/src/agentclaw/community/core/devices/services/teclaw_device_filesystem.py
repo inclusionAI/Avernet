@@ -19,25 +19,27 @@ See ``core/config_compose/teclaw_paths.to_engine_relative``. The engine's
 Transport: the container is reached through the **agentclawproxy** gateway
 (``http_url`` is ``{base}/proxypass/{target}{path}``, same gateway ARCA uses),
 authenticated with ``x-proxypass-token`` — NOT the secbaas invoke-http tunnel's
-``openclawToken``. Calls go through ``BaasService.invoke_http(...,
-auth_header="x-proxypass-token")``, which resolves the proxypass ``http_url`` +
-proxy token via ``get_http_info`` (from the teclaw ``conn_info``'s ``bind_id`` +
-``engine_port`` + ``tenant``). ``invoke_http`` is synchronous, so calls run on a
-thread.
+``openclawToken``. Calls go through the injected ``BaasInvokeTransport`` (the
+same cloud transport :class:`BaasDeviceFileSystem` uses), which resolves the
+proxypass ``http_url`` + proxy token via ``get_http_info`` (from the teclaw
+``conn_info``'s ``bind_id`` + ``engine_port`` + ``tenant``) and caches that
+resolution per engine path for the life of this instance. Every ``read_file``
+hits the same ``/api/v1/file/read`` path, so a promotion sweep over N files costs
+one binding lookup + one BaaS ``/http-info`` round trip, not N. The transport is
+synchronous, so calls run on a thread.
 """
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any, Callable
+from typing import Any, Callable
 
 import httpx
 
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.devices.services.baas_invoke_transport import (
+    BaasTransport,
+)
 from agentclaw.community.core.devices.services.device_filesystem import DeviceFileSystem
-
-if TYPE_CHECKING:
-    from agentclaw.community.core.service_bot.services.baas_service import BaasService
-
 
 logger = get_logger()
 
@@ -48,33 +50,28 @@ class TeclawDeviceFileSystem(DeviceFileSystem):
     def __init__(
         self,
         *,
+        transport: BaasTransport,
         conn_info: dict[str, Any],
         path_mapper: Callable[[str], str],
-        baas_service: "BaasService",
     ) -> None:
         """
         Args:
+            transport: Issues the per-file engine-API calls over the agentclawproxy
+                gateway — a ``BaasInvokeTransport`` the resolver builds from this
+                ``conn_info``'s ``bind_id`` (``ac_entity_device_binding.id``),
+                ``engine_port`` and ``tenant``, exactly like
+                :class:`BaasDeviceFileSystem`. It caches the resolved ``http_info``
+                per path and refreshes it once on a 401.
             conn_info: Teclaw connection info (``build_baas_conn_info_for_http``
-                output). Provides the invoke-http fields — ``bind_id``
-                (``ac_entity_device_binding.id``), ``engine_port``, ``tenant`` —
-                exactly like :class:`BaasDeviceFileSystem`.
+                output); only ``paas_device_id`` is read here, for log lines.
             path_mapper: Maps a device host path (or namespace-relative logical
                 path) to the **engine-relative** form under ``/workspace`` or
                 ``/identity`` — the path the engine knows the file by. Injected
                 (``teclaw_paths.to_engine_relative``) so this plugin stays a
                 ``core``-free leaf.
-            baas_service: Resolves the container URL + proxypass token and issues
-                the per-file engine-API calls via :meth:`BaasService.invoke_http`
-                (synchronous, so calls run on a thread) — the same authenticated
-                transport :class:`BaasDeviceFileSystem` uses.
         """
+        self._transport = transport
         self._path_mapper = path_mapper
-        self._baas_service = baas_service
-        # BaaS invoke-http fields for reads (same as BaasDeviceFileSystem; teclaw
-        # conn_info is build_baas_conn_info_for_http output, so it carries bind_id).
-        self._bind_id: int = conn_info["bind_id"]
-        self._engine_port: int = conn_info["engine_port"]
-        self._tenant: str = conn_info.get("tenant", "default")
         # for log lines only
         self._bot_uuid: str = conn_info.get("paas_device_id", "")
 
@@ -93,7 +90,7 @@ class TeclawDeviceFileSystem(DeviceFileSystem):
             self._bot_uuid, engine_path, len(content),
         )
         response = await asyncio.to_thread(
-            self._invoke,
+            self._transport.post_multipart,
             "/api/v1/file/upload",
             files={"file": (engine_path, content)},
             data={"target_path": engine_path},
@@ -105,7 +102,8 @@ class TeclawDeviceFileSystem(DeviceFileSystem):
         engine_path = self._path_mapper(file_path)
         try:
             response = await asyncio.to_thread(
-                self._invoke, "/api/v1/file/remove", json={"target_path": engine_path}
+                self._transport.post, "/api/v1/file/remove",
+                json={"target_path": engine_path},
             )
             response.raise_for_status()
             logger.info("[TeclawDeviceFileSystem.delete_file] removed %s", engine_path)
@@ -123,7 +121,8 @@ class TeclawDeviceFileSystem(DeviceFileSystem):
         engine_dir = self._path_mapper(dir_path)
         try:
             response = await asyncio.to_thread(
-                self._invoke, "/api/v1/file/remove", json={"target_path": engine_dir}
+                self._transport.post, "/api/v1/file/remove",
+                json={"target_path": engine_dir},
             )
             response.raise_for_status()
             logger.info("[TeclawDeviceFileSystem.delete_tree] removed tree %s", engine_dir)
@@ -133,33 +132,6 @@ class TeclawDeviceFileSystem(DeviceFileSystem):
                 "[TeclawDeviceFileSystem.delete_tree] error: %s: %s", engine_dir, e
             )
             return False
-
-    # ── transport (query the running container via the agentclawproxy gateway) ──
-    def _invoke(
-        self, path: str, *, json: Any = None, files: Any = None, data: Any = None
-    ) -> httpx.Response:
-        """Synchronous ``invoke_http`` call (wrap in ``asyncio.to_thread`` for
-        async use) — resolves the container ``http_url`` + token via
-        ``get_http_info`` and POSTs (json body, or ``files``+``data`` multipart
-        for upload).
-
-        The teclaw container is reached through the **agentclawproxy** gateway
-        (``http_url`` is ``{base}/proxypass/{target}{path}``, same gateway ARCA
-        uses), which authenticates with ``x-proxypass-token`` — NOT the
-        ``openclawToken`` the secbaas invoke-http tunnel uses. So we pass
-        ``auth_header="x-proxypass-token"`` (sending ``openclawToken`` here 401s).
-        ``info.token`` is the gateway's proxy_token; only the header name differs.
-        """
-        return self._baas_service.invoke_http(
-            bind_id=self._bind_id,
-            port=self._engine_port,
-            path=path,
-            tenant=self._tenant,
-            json=json,
-            files=files,
-            data=data,
-            auth_header="x-proxypass-token",
-        )
 
     async def read_file(
         self,
@@ -179,7 +151,8 @@ class TeclawDeviceFileSystem(DeviceFileSystem):
         )
         try:
             response = await asyncio.to_thread(
-                self._invoke, "/api/v1/file/read", json={"file_path": engine_path}
+                self._transport.post, "/api/v1/file/read",
+                json={"file_path": engine_path},
             )
             response.raise_for_status()
             return response.content
@@ -214,7 +187,7 @@ class TeclawDeviceFileSystem(DeviceFileSystem):
         )
         try:
             response = await asyncio.to_thread(
-                self._invoke,
+                self._transport.post,
                 "/api/v1/file/list",
                 json={"dir_path": engine_path, "recursive": recursive},
             )

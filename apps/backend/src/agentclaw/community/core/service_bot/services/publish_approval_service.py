@@ -71,7 +71,7 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
         Returns:
             True if approval is required, False otherwise
         """
-        bot = self._bot_service.get_bot(
+        bot = self._bot_service.get_bot_by_address(
             bot_id=publish_record.source_bot_id,
             user_id=publish_record.owner_id,
         )
@@ -155,7 +155,7 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
             ApprovalResult with the new approval status
         """
         # Get bot info for approval context
-        bot = self._bot_service.get_bot(
+        bot = self._bot_service.get_bot_by_address(
             bot_id=publish_record.source_bot_id,
             user_id=publish_record.owner_id,
         )
@@ -172,7 +172,7 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
                 message=f"Bot not found: {publish_record.source_bot_id}",
             )
 
-        owner_id = publish_record.owner_id
+        owner_id = str(bot["owner_id"])
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
 
         logger.info(
@@ -235,7 +235,9 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
             "action": action,
             "operator_id": operator,
             "status": "PROCESSING",
-            "owner_id": publish_record.owner_id,
+            "owner_id": str(self._bot_service.get_bot_by_address(
+                bot_id=publish_record.source_bot_id, user_id=publish_record.owner_id,
+            )["owner_id"]),
             "approval_url": approval_result.get("approval_url"),
             "created_at": datetime.now().isoformat(),
         }
@@ -283,8 +285,11 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
         """Call the approval-workflow plugin to open the approval instance,
         assembling the auditor context. Returns the plugin's raw result dict
         (carries ``success`` / ``puid`` / ``approval_url`` / ``error_msg``)."""
-        owner_id = publish_record.owner_id
-        owner_name = publish_record.owner_name or owner_id
+        bot = self._bot_service.get_bot_by_address(
+            bot_id=publish_record.source_bot_id, user_id=publish_record.owner_id,
+        )
+        owner_id = str(bot["owner_id"])
+        owner_name = bot.get("owner_name") or owner_id
         publish_name = publish_record.name or publish_record.source_bot_id
         return self._process_service.start_approval(
             applicant=operator,
@@ -362,7 +367,9 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
             )
 
         # 4. If operator is the owner, skip approval
-        if operator == publish_record.owner_id:
+        if operator == str(self._bot_service.get_bot_by_address(
+            bot_id=publish_record.source_bot_id, user_id=publish_record.owner_id,
+        )["owner_id"]):
             logger.info(
                 "[check_and_process_should_approval] skip: operator is owner, publish_id=%s, operator=%s",
                 publish_record.id,
@@ -442,7 +449,9 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
             )
 
         # 4. If operator is the owner, skip approval
-        if operator == publish_record.owner_id:
+        if operator == str(self._bot_service.get_bot_by_address(
+            bot_id=publish_record.source_bot_id, user_id=publish_record.owner_id,
+        )["owner_id"]):
             logger.info(
                 "[check_and_process_offline_approval] skip: operator is owner, publish_id=%s, operator=%s",
                 publish_record.id,

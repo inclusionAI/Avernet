@@ -24252,7 +24252,7 @@
       },
       "RunOptionsDTO": {
         "additionalProperties": false,
-        "description": "Per-request operational overrides — values absent from the request\nfall back to the deployment's `agentswarm.orchestration.*` config.\n\nKeys mirror the yaml config keys so operators think in one vocabulary.\nAll values are upper-bounded by the deployment config: a caller can\ntighten a budget (shorter timeout, fewer turns) but never loosen it\npast what the deployment allows (the max in `_validated` clamps to\nthe configured value).",
+        "description": "Per-request operational overrides — values absent from the request\nfall back to the deployment's `agentswarm.orchestration.*` config.\n\nKeys mirror the yaml config keys so operators think in one\nvocabulary. Honored at runtime, clamped to deployment authority:\nmodel_name (provider default when unset), max_width and\nmax_attempts (tighten-only), per_attempt_timeout_seconds and\nslice_max_seconds (tighten-only), and setup_timeout_seconds —\nwhich may raise up to the deployment's slice room\n(slice_max_seconds minus per_attempt_timeout), so slow-env\nprovisioning can be re-budgeted from the request alone.\nmax_turns and max_total_agents are persisted with the run but do\nnot override the deployment's orchestrator budgets.",
         "properties": {
           "max_attempts": {
             "anyOf": [
@@ -24337,6 +24337,20 @@
             "description": "Upper bound for one attempt task (seconds).",
             "title": "Per Attempt Timeout Seconds"
           },
+      "setup_timeout_seconds": {
+      "anyOf": [
+      {
+      "exclusiveMinimum": 0.0,
+      "maximum": 900.0,
+      "type": "number"
+      },
+      {
+      "type": "null"
+      }
+      ],
+      "description": "Upper bound for one agent's provisioning phase (spawn + authorization + READY, seconds). Parked time waiting on human consent never counts against it. Falls to the deployment's setup_timeout; a requested value wins up to the deployment's slice room (slice_max_seconds minus per_attempt_timeout).",
+      "title": "Setup Timeout Seconds"
+      },
           "slice_max_seconds": {
             "anyOf": [
               {
@@ -28312,7 +28326,7 @@
         "type": "object"
       },
       "Socket": {
-        "description": "One WebSocket you may open against the bot.",
+        "description": "One connection endpoint you may reach the bot on.",
         "example": {
           "kind": "chat",
           "url": "wss://gateway.example/openapi/v1/bots/messages/ws/abc/api/openclaw/ws?x-proxypass-token=…"
@@ -28323,7 +28337,7 @@
             "description": "Which socket this is."
           },
           "url": {
-            "description": "Complete WebSocket URL, credential included. Open it as given — do not append to it, rebuild it, or move any part of it into a header; a browser cannot set headers on a WebSocket handshake, which is why everything needed is in the URL.",
+            "description": "Complete URL for this socket, credential included on the chat kinds. Open it as given — do not append to it, rebuild it, or move any part of it into a header; a browser cannot set headers on a WebSocket handshake, which is why everything needed is in the URL. The a2a kind is the exception in shape, not in the rule: it is an HTTP base URL with no credential, and the two A2A paths (/.well-known/agent-card.json and /rpc) hang beneath it as given.",
             "title": "Url",
             "type": "string"
           }
@@ -28336,20 +28350,24 @@
         "type": "object"
       },
       "SocketKind": {
-        "description": "Which WebSocket a connection entry describes.",
+        "description": "Which connection a socket entry describes.",
         "enum": [
-          "chat"
+          "chat",
+          "a2a"
         ],
         "title": "SocketKind",
         "type": "string",
         "x-enum-descriptions": [
-          "Converse with the bot."
+          "Converse with the bot.",
+          "The bot's A2A agent endpoint — an HTTP base URL. The agent card is served at /.well-known/agent-card.json beneath it and the A2A JSON-RPC surface at /rpc; address both against the URL as given. Unlike a chat socket it carries no credential and never expires on its own. Absent when the deployment defines no browser-direct address for it."
         ],
         "x-enum-varnames": [
-          "CHAT"
+          "CHAT",
+          "A2A"
         ],
         "x-enumNames": [
-          "CHAT"
+          "CHAT",
+          "A2A"
         ]
       },
       "SourceCredential": {

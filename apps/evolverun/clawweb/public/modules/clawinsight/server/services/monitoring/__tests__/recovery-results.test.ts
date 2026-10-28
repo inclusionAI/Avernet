@@ -147,9 +147,9 @@ it.each([{ completion_reason: "other", status: "completed", waiting_reason: null
 });
 
 
-it.each(["owner_handoff", "mcp_permission_required"] as const)("persists %s independently from business recovery and intervention", async reason => {
+it.each(["owner_handoff", "mcp_permission_required"].flatMap(reason => ["recovered", "not_recovered", "unknown"].map(effect => ({ reason, effect }))))("persists $reason with $effect independently from intervention", async ({ reason, effect }) => {
   const input = { ...result, result_version: 8, status: "completed" as const, waiting_reason: null,
-    completion_reason: reason, effect: "not_recovered" as const, intervention_status: "none" as const,
+    completion_reason: reason as "owner_handoff" | "mcp_permission_required", effect: effect as "recovered" | "not_recovered" | "unknown", intervention_status: "none" as const,
     result_text: "MCP 权限需 Owner 自行处理，本次自愈已结束" };
   expect(parseRecoveryResult(input)).toEqual(input);
   expect(await repo.appendRecoveryResult(input)).toBe(true);

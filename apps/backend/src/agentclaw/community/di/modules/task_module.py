@@ -38,6 +38,13 @@ from agentclaw.community.api.task.forum_digest_service import (
     ForumDigestReportServiceProtocol,
 )
 from agentclaw.community.api.task.forum_service import ForumServiceProtocol
+from agentclaw.community.api.task.forum_interaction_service import (
+    ForumAuthorStatsServiceProtocol,
+    ForumInteractionServiceProtocol,
+)
+from agentclaw.community.api.task.forum_personal_center_activity_service import (
+    ForumPersonalCenterActivityServiceProtocol,
+)
 from agentclaw.community.api.task.task_grant_service import (
     TaskClaimGrantService,
     TaskClaimGrantServiceProtocol,
@@ -48,7 +55,10 @@ from agentclaw.community.core.repository.implementations.task.feedback import (
     FeedbackRepository,
 )
 from agentclaw.community.core.repository.implementations.task.forum import (
+    ForumAuthorStatsRepository,
     ForumDigestReportRepository,
+    ForumInteractionRepository,
+    ForumPersonalCenterActivityRepository as ForumPersonalCenterActivityRepositoryImpl,
     ForumRepository,
 )
 from agentclaw.community.core.repository.protocols.task import (
@@ -64,6 +74,15 @@ from agentclaw.community.core.repository.protocols.task.feedback import (
 )
 from agentclaw.community.core.repository.protocols.task.forum import (
     ForumRepositoryProtocol,
+)
+from agentclaw.community.core.repository.protocols.task.forum_author_stats import (
+    ForumAuthorStatsRepositoryProtocol,
+)
+from agentclaw.community.core.repository.protocols.task.forum_interaction import (
+    ForumInteractionRepositoryProtocol,
+)
+from agentclaw.community.core.repository.protocols.task.forum_personal_center_activity import (
+    ForumPersonalCenterActivityRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.task.forum_digest import (
     ForumDigestReportRepositoryProtocol,
@@ -105,6 +124,18 @@ from agentclaw.community.core.task.forum.digest.report_service import (
     BbsDigestReportService,
 )
 from agentclaw.community.core.task.forum.services.forum_service import ForumService
+from agentclaw.community.core.task.forum.interaction.forum_author_stats_service import (
+    ForumAuthorStatsService,
+)
+from agentclaw.community.core.task.forum.interaction.forum_interaction_service import (
+    ForumInteractionService,
+)
+from agentclaw.community.core.task.forum.interaction.personal_center_activity_service import (
+    ForumPersonalCenterActivityService,
+)
+from agentclaw.community.core.task.forum.interaction.target_verifier import (
+    DatabaseForumInteractionTargetVerifier,
+)
 from agentclaw.community.core.task.task_harness.harness import TaskHarness
 from agentclaw.community.core.task.task_harness.relay_session_recovery import (
     RelaySessionRecovery,
@@ -141,6 +172,9 @@ from agentclaw.community.plugin_api.notify_sender import (
     NotifySenderPlugin,
 )
 from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
+from agentclaw.community.core.task.forum.interaction.target_verifier_protocol import (
+    ForumInteractionTargetVerifierProtocol,
+)
 from agentclaw.community.di.config import TaskDispatchConfig
 
 logger = logging.getLogger("task.module")
@@ -199,6 +233,33 @@ class TaskModule(Module):
         )
         binder.bind(ForumRepositoryProtocol, to=ForumRepository, scope=singleton)
         binder.bind(ForumServiceProtocol, to=ForumService, scope=singleton)
+        binder.bind(
+            ForumInteractionRepositoryProtocol,
+            to=ForumInteractionRepository,
+            scope=singleton,
+        )
+        binder.bind(
+            ForumAuthorStatsRepositoryProtocol,
+            to=ForumAuthorStatsRepository,
+            scope=singleton,
+        )
+        binder.bind(
+            ForumPersonalCenterActivityRepositoryProtocol,
+            to=ForumPersonalCenterActivityRepositoryImpl,
+            scope=singleton,
+        )
+        binder.bind(
+            ForumInteractionTargetVerifierProtocol,
+            to=DatabaseForumInteractionTargetVerifier,
+            scope=singleton,
+        )
+        binder.bind(ForumAuthorStatsServiceProtocol, to=ForumAuthorStatsService, scope=singleton)
+        binder.bind(ForumInteractionServiceProtocol, to=ForumInteractionService, scope=singleton)
+        binder.bind(
+            ForumPersonalCenterActivityServiceProtocol,
+            to=ForumPersonalCenterActivityService,
+            scope=singleton,
+        )
         binder.bind(
             ForumDigestReportRepositoryProtocol,
             to=ForumDigestReportRepository,

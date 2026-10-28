@@ -1,8 +1,9 @@
-import { TaskSwitcherBar } from '@/assets/TaskPanel/v2/TaskSwitcherBar';
+import { TaskSwitcherControl } from '@/assets/TaskPanel/v2/TaskSwitcherControl';
 import { getCapabilities } from '@/capabilities';
 import { useTaskSwitcherTasks } from '@/hooks/useTaskSwitcherTasks';
 import { chatBridge } from '@/services/workspace/chatBridge';
 import { resolveTaskPanelDefaultWidth } from '@/services/workspace/panelWidthMemory';
+import { useTaskConversationNavigationStore } from '@/stores/taskConversationNavigationStore';
 import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import React from 'react';
@@ -22,19 +23,24 @@ export const TaskPanelSwitcherSlot: React.FC<{
   useWorkspaceStore((s) => s.identities);
   const human = getCapabilities().getHumanIdentity();
   const userId = human.status === 'available' ? human.value?.userId?.trim() || undefined : undefined;
-  const { items } = useTaskSwitcherTasks(userId);
+  const { items } = useTaskSwitcherTasks(userId, { currentTaskId, enabled: Boolean(currentTaskId) });
   const activeTaskId = useTaskSidePanelStore((s) => s.activeTaskId);
   // I4:横条「当前」以本面板实例的任务为准——全局 activeTaskId 只服务发起任务后的 tab
   // 自动聚焦语义,不得让非活跃任务面板在自己的横条里显示别的任务为"当前"。
   const effectiveActive = currentTaskId || activeTaskId || items[0]?.taskId || '';
-  if (!items.length) return null;
+  if (items.length <= 1) return null;
 
   return (
-    <TaskSwitcherBar
+    <TaskSwitcherControl
       items={items}
       activeTaskId={effectiveActive}
       onSelectTask={(taskId) => {
         if (taskId === effectiveActive) return;
+        // 同一会话任务共享原始宿主。若当前已联动到节点会话，切任务前继承 origin，
+        // 避免新任务把当前节点会话误记为根节点恢复目标。
+        const conversationNavigation = useTaskConversationNavigationStore.getState();
+        const currentOrigin = conversationNavigation.originsByTask[effectiveActive];
+        if (currentOrigin) conversationNavigation.rememberOrigin(taskId, currentOrigin);
         useTaskSidePanelStore.getState().setActiveTask(taskId);
         const target = items.find((i) => i.taskId === taskId);
         chatBridge.openPanelTab({

@@ -1,19 +1,28 @@
 """Unit tests for TeclawDeviceFileSystem.
 
 teclaw forwards every read **and write** per-file to the engine over
-``BaasService.invoke_http`` (agentclawproxy gateway, ``x-proxypass-token``):
+the cloud ``BaasInvokeTransport`` → ``BaasService.invoke_http`` (agentclawproxy
+gateway, ``x-proxypass-token``):
 write → ``/api/v1/file/upload`` (multipart), delete → ``/api/v1/file/remove``,
 delete_tree → the same recursive-capable ``/api/v1/file/remove``, read →
 ``/api/v1/file/read``, list → ``/api/v1/file/list``. No OSS write and no
 whole-artifact redeliver on an edit. These tests inject a stub ``path_mapper``
 (its real behavior is covered in ``test_teclaw_paths``) and pin the per-file
-calls and auth header.
+calls and auth header. The transport is the real one over a mocked
+``BaasService``, so these also pin that ``http_info`` is resolved once per engine
+path rather than once per file.
 """
 from unittest.mock import MagicMock
 
 import httpx
 import pytest
 
+from agentclaw.community.core.devices.services.baas_invoke_transport import (
+    BaasInvokeTransport,
+)
+from agentclaw.community.core.devices.services.device_filesystem_resolver import (
+    DefaultDeviceFileSystemResolver,
+)
 from agentclaw.community.core.devices.services.teclaw_device_filesystem import TeclawDeviceFileSystem
 
 _DEVICE_PATH = (
@@ -64,9 +73,15 @@ class _FakeResponse:
 
 
 def _fs():
-    baas = MagicMock()  # BaasService (sync .invoke_http)
+    baas = MagicMock()  # BaasService (sync .get_http_info / .invoke_http)
+    transport = BaasInvokeTransport(
+        bind_id=_CONN_INFO["bind_id"],
+        engine_port=_CONN_INFO["engine_port"],
+        tenant=_CONN_INFO["tenant"],
+        baas_service=baas,
+    )
     fs = TeclawDeviceFileSystem(
-        conn_info=_CONN_INFO, path_mapper=_map, baas_service=baas,
+        transport=transport, conn_info=_CONN_INFO, path_mapper=_map,
     )
     return fs, baas
 
@@ -205,3 +220,93 @@ async def test_exists_true_when_read_succeeds():
     fs, baas = _fs()
     baas.invoke_http.return_value = _FakeResponse(content=b"x")
     assert await fs.exists(_DEVICE_PATH) is True
+
+
+# ── http_info resolution (one binding lookup per path, not per file) ──
+@pytest.mark.asyncio
+async def test_many_reads_resolve_http_info_once():
+    """A promotion sweep reads every file through ``/api/v1/file/read``; each read
+    used to re-run ``get_http_info`` (an ``ac_entity_device_binding`` SELECT plus a
+    BaaS ``/http-info`` round trip). The transport now resolves it once and reuses
+    it for every read on the same path."""
+    fs, baas = _fs()
+    baas.invoke_http.return_value = _FakeResponse(content=b"x")
+
+    for i in range(5):
+        assert await fs.read_file(f"{_ENGINE_ROOT}/workspace/f{i}.txt") == b"x"
+
+    baas.get_http_info.assert_called_once_with(
+        bind_id=4242, port=20003, path="/api/v1/file/read",
+        tenant="team_claw", device_uuid=None,
+    )
+    assert baas.invoke_http.call_count == 5
+    resolved = baas.get_http_info.return_value
+    assert all(
+        c.kwargs["http_info"] is resolved for c in baas.invoke_http.call_args_list
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_and_read_resolve_once_per_engine_path():
+    # ``http_url`` embeds the engine path, so list and read cannot share an entry.
+    fs, baas = _fs()
+    baas.invoke_http.return_value = _FakeResponse(
+        content=b"x", json_data={"data": {"files": []}},
+    )
+
+    await fs.list_dir(_DEVICE_DIR, recursive=True)
+    await fs.read_file(_DEVICE_PATH)
+    await fs.read_file(_DEVICE_PATH)
+
+    assert [c.kwargs["path"] for c in baas.get_http_info.call_args_list] == [
+        "/api/v1/file/list", "/api/v1/file/read",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_rejected_token_is_refreshed_and_the_read_retried_once():
+    fs, baas = _fs()
+    stale, fresh = MagicMock(name="stale"), MagicMock(name="fresh")
+    baas.get_http_info.side_effect = [stale, fresh]
+    baas.invoke_http.side_effect = [
+        _FakeResponse(status_code=401), _FakeResponse(content=b"ok"),
+    ]
+
+    assert await fs.read_file(_DEVICE_PATH) == b"ok"
+    assert [c.kwargs["http_info"] for c in baas.invoke_http.call_args_list] == [
+        stale, fresh,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_failed_resolution_reads_as_missing_and_is_not_cached():
+    fs, baas = _fs()
+    baas.get_http_info.side_effect = [RuntimeError("baas down"), MagicMock()]
+    baas.invoke_http.return_value = _FakeResponse(content=b"x")
+
+    assert await fs.read_file(_DEVICE_PATH) is None
+    assert await fs.read_file(_DEVICE_PATH) == b"x"
+    assert baas.get_http_info.call_count == 2
+
+
+def test_resolver_builds_teclaw_fs_over_the_cloud_baas_transport():
+    baas = MagicMock()
+    resolver = DefaultDeviceFileSystemResolver(
+        baas_service=baas, bot_repo=MagicMock(), binding_repo=MagicMock(),
+        sandbox_client=MagicMock(),
+    )
+    ctx = MagicMock(provider="teclaw", bot_id="bot7", conn_info=_CONN_INFO)
+
+    fs = resolver(ctx, _map)
+
+    assert isinstance(fs, TeclawDeviceFileSystem)
+    transport = fs._transport
+    assert isinstance(transport, BaasInvokeTransport)
+    assert transport._bind_id == 4242
+    assert transport._engine_port == 20003
+    assert transport._tenant == "team_claw"
+    # teclaw never pinned an instance; BaaS keeps choosing the active one.
+    assert transport._device_uuid is None
+    assert transport._baas_service is baas
+    # A fresh transport (and so a fresh http_info cache) per dispatch.
+    assert resolver(ctx, _map)._transport is not transport

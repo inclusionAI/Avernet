@@ -7,10 +7,10 @@ mod participants;
 mod response;
 mod spec;
 
-pub use definition::*;
-pub use participants::*;
-pub use response::*;
-pub use spec::*;
+pub(crate) use definition::*;
+pub(crate) use participants::*;
+pub(crate) use response::*;
+pub(crate) use spec::*;
 
 pub async fn create_group(
     State(state): State<HttpAppState>,

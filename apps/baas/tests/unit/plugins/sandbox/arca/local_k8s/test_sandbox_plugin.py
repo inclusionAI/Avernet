@@ -801,6 +801,549 @@ class TestLocalK8sPluginResolve:
         assert conn.target == "10.96.42.7:8080"
 
 
+class TestLocalK8sPluginA2aBaseUrl:
+    """The A2A face address handed out beside the ws URL.
+
+    Empty string is the additive default: a deployment that configured no
+    template, a Service with no NodePort, or a discovery failure must degrade
+    to "no A2A address" — never break the chat connection, never guess a host.
+    """
+
+    _INCLUSTER_ENV = {
+        "LOCAL_K8S_KUBECONFIG": "in-cluster",
+        "LOCAL_K8S_NAMESPACE": "default",
+        "LOCAL_K8S_IMAGE": "bot-runtime:latest",
+        "LOCAL_K8S_CONTAINER_PORT": "8080",
+    }
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_nodeport_mode_derives_a2a_from_the_same_public_port(
+        self, mock_core_cls, mock_client
+    ) -> None:
+        """Out-of-cluster the ws URL already addresses the host machine, so
+        the A2A face sits on the identical host:port over plain HTTP —
+        no template required."""
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "LOCAL_K8S_NAMESPACE": "default",
+                    "LOCAL_K8S_IMAGE": "bot-runtime:latest",
+                    "LOCAL_K8S_CONTAINER_PORT": "8080",
+                },
+                clear=False,
+            ),
+            patch(
+                "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin._use_incluster_config",
+                return_value=False,
+            ),
+            patch(
+                "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin._resolve_kubeconfig",
+                return_value="apiVersion: v1\nkind: Config",
+            ),
+        ):
+            plugin = LocalK8sArcaSandboxPlugin(credentials=_make_credentials())
+            plugin._client_manager.get_client = lambda *a, **kw: mock_client
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+            mock_svc = MagicMock()
+            mock_svc.spec.ports = [MagicMock(node_port=30081)]
+            mock_core.read_namespaced_service.return_value = mock_svc
+
+            conn = plugin.resolve_ws_conn_info(
+                paas_device_id="tpl-test-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+
+        assert conn.ws_url == "ws://localhost:30081/api/openclaw/ws"
+        assert conn.a2a_base_url == "http://localhost:30081"
+
+    def _incluster_plugin(
+        self, mock_client, mock_core_cls=None
+    ) -> LocalK8sArcaSandboxPlugin:
+        plugin = LocalK8sArcaSandboxPlugin(
+            credentials=_make_credentials(), arca_utils=MagicMock()
+        )
+        plugin._client_manager.get_client = lambda *a, **kw: mock_client
+        return plugin
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_incluster_without_template_publishes_no_a2a_address(
+        self, mock_core_cls, mock_client
+    ) -> None:
+        """In-cluster the template IS the deployment's host convention; its
+        absence means BaaS cannot promise any browser-reachable host, and an
+        empty string — not a guess — is the honest answer."""
+        with patch.dict(
+            os.environ,
+            {**self._INCLUSTER_ENV, "LOCAL_K8S_A2A_URL_TEMPLATE": ""},
+            clear=True,
+        ):
+            plugin = self._incluster_plugin(mock_client, mock_core_cls)
+            conn = plugin.resolve_ws_conn_info(
+                paas_device_id="tpl-test-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+
+        assert conn.a2a_base_url == ""
+        mock_core_cls.assert_not_called()
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_incluster_template_substitutes_discovered_nodeport(
+        self, mock_core_cls, mock_client
+    ) -> None:
+        """The NodePort comes from the kube api — the one place that knows
+        it — and the host part from the configured template, placeholders
+        filled with the real Service/namespace facts."""
+        with patch.dict(
+            os.environ,
+            {
+                **self._INCLUSTER_ENV,
+                "LOCAL_K8S_A2A_URL_TEMPLATE": (
+                    "http://{service_name}.stable.alipay.net:{node_port}"
+                ),
+            },
+            clear=True,
+        ):
+            plugin = self._incluster_plugin(mock_client, mock_core_cls)
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+            mock_svc = MagicMock()
+            mock_svc.spec.ports = [MagicMock(node_port=30082)]
+            mock_core.read_namespaced_service.return_value = mock_svc
+
+            # 新契约（review P2 终闭环）：签发零 kube 查询——首笔未就绪
+            # 先空地址，后台发现 join 后的下一笔带上实查 NodePort
+            first = plugin.resolve_ws_conn_info(
+                paas_device_id="tpl-test-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+            plugin.a2a_discovery_join("tpl-test-abc")
+            conn = plugin.resolve_ws_conn_info(
+                paas_device_id="tpl-test-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+
+        assert first.a2a_base_url == ""
+        assert conn.a2a_base_url == ("http://tpl-test-abc-svc.stable.alipay.net:30082")
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_create_service_response_warms_a2a_cache(
+        self, mock_core_cls, mock_client
+    ) -> None:
+        """create 响应已完成 NodePort 分配——直接预热，后续签发零 kube
+        查询（review P2：可选地址发现彻底离开签发路径，含首轮签发）。"""
+        with patch.dict(
+            os.environ,
+            {
+                **self._INCLUSTER_ENV,
+                "LOCAL_K8S_A2A_URL_TEMPLATE": (
+                    "http://{service_name}.stable.alipay.net:{node_port}"
+                ),
+            },
+            clear=True,
+        ):
+            plugin = self._incluster_plugin(mock_client, mock_core_cls)
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+            created = MagicMock()
+            created.spec.ports = [MagicMock(node_port=30090)]
+            mock_core.create_namespaced_service.return_value = created
+
+            plugin._create_service(deployment_name="warm-abc", container_port=20003)
+
+            conn = plugin.resolve_ws_conn_info(
+                paas_device_id="warm-abc",
+                port=20003,
+                path="/api/openclaw/ws",
+            )
+            assert conn.a2a_base_url == ("http://warm-abc-svc.stable.alipay.net:30090")
+            # 预热命中：签发行程未做任何 read 查询、未开后台线程
+            mock_core.read_namespaced_service.assert_not_called()
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_slow_k8s_does_not_delay_ws_issuance(
+        self, mock_core_cls, mock_client
+    ) -> None:
+        """review P2（终闭环）：kube 慢不仅是事件循环问题——旧实现会让
+        *本次* WS 签发同步等完发现。现契约：签发零 kube 查询，缓存未就绪
+        立即返回空 A2A 地址 + 后台发现，后续签发命中。"""
+        import threading
+        import time as _time
+
+        with patch.dict(
+            os.environ,
+            {
+                **self._INCLUSTER_ENV,
+                "LOCAL_K8S_A2A_URL_TEMPLATE": (
+                    "http://{service_name}.stable.alipay.net:{node_port}"
+                ),
+            },
+            clear=True,
+        ):
+            plugin = self._incluster_plugin(mock_client, mock_core_cls)
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+            mock_svc = MagicMock()
+            mock_svc.spec.ports = [MagicMock(node_port=30083)]
+            mock_core.read_namespaced_service = MagicMock(
+                side_effect=lambda *a, **kw: (_time.sleep(0.3), mock_svc)[1]
+            )
+
+            start = _time.monotonic()
+            conn = plugin.resolve_ws_conn_info(
+                paas_device_id="slow-k8s-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+            elapsed = _time.monotonic() - start
+
+            assert conn.a2a_base_url == ""  # 缓存未就绪：空地址立即返回
+            assert elapsed < 0.1, (
+                f"ws issuance waited {elapsed:.2f}s for slow k8s — "
+                "discovery must not be on the critical path"
+            )
+            # 后台发现完成、写入缓存后，下一笔签发命中
+            plugin.a2a_discovery_join("slow-k8s-abc")
+            conn2 = plugin.resolve_ws_conn_info(
+                paas_device_id="slow-k8s-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+            assert conn2.a2a_base_url == (
+                "http://slow-k8s-abc-svc.stable.alipay.net:30083"
+            )
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_a2a_discovery_failure_negative_caches(
+        self, mock_core_cls, mock_client
+    ) -> None:
+        """review P2：持续故障不得反复等待。失败写「负缓存+短 TTL」，TTL 内
+        未就绪的签发一律空地址、零新查询零新线程。"""
+        import time as _time
+
+        with patch.dict(
+            os.environ,
+            {
+                **self._INCLUSTER_ENV,
+                "LOCAL_K8S_A2A_URL_TEMPLATE": (
+                    "http://{service_name}.stable.alipay.net:{node_port}"
+                ),
+            },
+            clear=True,
+        ):
+            plugin = self._incluster_plugin(mock_client, mock_core_cls)
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+            mock_core.read_namespaced_service = MagicMock(
+                side_effect=RuntimeError("api down")
+            )
+
+            for _ in range(3):
+                conn = plugin.resolve_ws_conn_info(
+                    paas_device_id="neg-cache-abc",
+                    port=8080,
+                    path="/api/openclaw/ws",
+                )
+                assert conn.a2a_base_url == ""
+                plugin.a2a_discovery_join("neg-cache-abc")
+
+            # 一次失败探查 + TTL 内不重查（3 次签发共 1 次 kube 读）
+            assert mock_core.read_namespaced_service.call_count == 1
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_a2a_discovery_thread_start_failure_degrades(
+        self, mock_core_cls, mock_client
+    ) -> None:
+        """review P2-1（调度失败边界）：后台发现线程启动失败（线程资源不足）必须
+        就地降级——WS 签发照常返回（a2a 面空串，零异常上抛）、零 kube 查询、
+        in-flight/线程记录零残留（残留会永久旁路该设备的后续调度）、负缓存
+        就位；TTL 出清后重新调度即恢复。"""
+        import time as _time
+
+        with patch.dict(
+            os.environ,
+            {
+                **self._INCLUSTER_ENV,
+                "LOCAL_K8S_A2A_URL_TEMPLATE": (
+                    "http://{service_name}.stable.alipay.net:{node_port}"
+                ),
+            },
+            clear=True,
+        ):
+            plugin = self._incluster_plugin(mock_client, mock_core_cls)
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+            mock_svc = MagicMock()
+            mock_svc.spec.ports = [MagicMock(node_port=30095)]
+            mock_core.read_namespaced_service.return_value = mock_svc
+            plugin._arca_utils.build_proxypass_url.return_value = (
+                "ws://proxypass/api/openclaw/ws"
+            )
+
+            class _ExplodingThread:
+                def __init__(self, *args, **kwargs): ...
+
+                def start(self):
+                    raise RuntimeError("can't start new thread")
+
+                def is_alive(self):
+                    return False
+
+            with patch(
+                "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin.threading.Thread",
+                _ExplodingThread,
+            ):
+                conn = plugin.resolve_ws_conn_info(
+                    paas_device_id="boom-abc",
+                    port=8080,
+                    path="/api/openclaw/ws",
+                )
+
+            # WS 签发不被调度异常打断：正常返回且 a2a 面降级空串，零 kube 查询
+            assert conn.ws_url == "ws://proxypass/api/openclaw/ws"
+            assert conn.a2a_base_url == ""
+            mock_core.read_namespaced_service.assert_not_called()
+            # 调度失败清理义务：in-flight / 线程记录零残留 + 负缓存就位
+            key = ("default", "boom-abc-svc")
+            assert plugin._a2a_inflight == {}
+            assert plugin._a2a_threads == {}
+            entry = plugin._a2a_node_port_cache[key]
+            assert isinstance(entry, tuple) and entry[0] == "error"
+            assert entry[1] > _time.monotonic()
+
+            # 负缓存出清（模拟 TTL 过期）后重新调度即恢复：真线程跑完发现
+            plugin._a2a_node_port_cache.clear()
+            plugin.resolve_ws_conn_info(
+                paas_device_id="boom-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+            plugin.a2a_discovery_join("boom-abc")
+            recovered = plugin.resolve_ws_conn_info(
+                paas_device_id="boom-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+            assert recovered.a2a_base_url == (
+                "http://boom-abc-svc.stable.alipay.net:30095"
+            )
+            assert mock_core.read_namespaced_service.call_count == 1
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_a2a_discovery_backpressure_cap_degrades_immediately(
+        self, mock_core_cls, mock_client
+    ) -> None:
+        """review P2-1：后台发现进程级并发上限——容量耗尽立即降级为空地址 +
+        短负缓存（零等待、零新线程、零 kube 查询），WS 签发不受影响；
+        本 key 不进 in-flight，容量释放后可再调度。"""
+        import time as _time
+
+        from secbaas.community.plugins.sandbox.arca.local_k8s._a2a_discovery import (
+            _A2A_URL_DISCOVERY_MAX_CONCURRENCY,
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                **self._INCLUSTER_ENV,
+                "LOCAL_K8S_A2A_URL_TEMPLATE": (
+                    "http://{service_name}.stable.alipay.net:{node_port}"
+                ),
+            },
+            clear=True,
+        ):
+            plugin = self._incluster_plugin(mock_client, mock_core_cls)
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+            # 占满并发额度（合成的他设备 key）——触达容量上限
+            for i in range(_A2A_URL_DISCOVERY_MAX_CONCURRENCY):
+                plugin._a2a_inflight[("default", f"busy-{i}-svc")] = 10_000
+
+            start = _time.monotonic()
+            conn = plugin.resolve_ws_conn_info(
+                paas_device_id="cap-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+            elapsed = _time.monotonic() - start
+
+            assert conn.ws_url is not None
+            assert conn.a2a_base_url == ""
+            assert elapsed < 0.1, (
+                f"ws issuance waited {elapsed:.2f}s at capacity — "
+                "backpressure must degrade immediately, never queue"
+            )
+            mock_core.read_namespaced_service.assert_not_called()
+            # 零等待策略下既不占额度也不开线程：负缓存承载"稍后再试"
+            key = ("default", "cap-abc-svc")
+            assert key not in plugin._a2a_inflight
+            assert plugin._a2a_threads == {}
+            entry = plugin._a2a_node_port_cache[key]
+            assert isinstance(entry, tuple) and entry[0] == "error"
+            assert entry[1] > _time.monotonic()
+
+            # 容量释放 + 负缓存出清后可再调度（恢复路径不被容量事件旁路）
+            plugin._a2a_inflight.clear()
+            plugin._a2a_node_port_cache.clear()
+            mock_svc = MagicMock()
+            mock_svc.spec.ports = [MagicMock(node_port=30096)]
+            mock_core.read_namespaced_service.return_value = mock_svc
+            plugin.resolve_ws_conn_info(
+                paas_device_id="cap-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+            plugin.a2a_discovery_join("cap-abc")
+            recovered = plugin.resolve_ws_conn_info(
+                paas_device_id="cap-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+            assert recovered.a2a_base_url == (
+                "http://cap-abc-svc.stable.alipay.net:30096"
+            )
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_a2a_discovery_bounded_timeout(self, mock_core_cls, mock_client) -> None:
+        """review P2：kube 实查必须在有界超时内返回等待——无 _request_timeout
+        的挂起会拖住整条 WS 签发（to_thread 之外的第二道防线）。"""
+        with patch.dict(
+            os.environ,
+            {
+                **self._INCLUSTER_ENV,
+                "LOCAL_K8S_A2A_URL_TEMPLATE": (
+                    "http://{service_name}.stable.alipay.net:{node_port}"
+                ),
+            },
+            clear=True,
+        ):
+            plugin = self._incluster_plugin(mock_client, mock_core_cls)
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+            mock_svc = MagicMock()
+            mock_svc.spec.ports = [MagicMock(node_port=30082)]
+            mock_core.read_namespaced_service.return_value = mock_svc
+
+            plugin.resolve_ws_conn_info(
+                paas_device_id="a2a-to-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+
+        kwargs = mock_core.read_namespaced_service.call_args.kwargs
+        assert (
+            kwargs.get("_request_timeout") is not None
+            and kwargs["_request_timeout"] <= 5
+        )
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_a2a_discovery_caches_nodeport(self, mock_core_cls, mock_client) -> None:
+        """review P2：NodePort 对 Service 生命周期内不变——按 (namespace,
+        service) 记忆化，重复签发不再打 kube API。"""
+        with patch.dict(
+            os.environ,
+            {
+                **self._INCLUSTER_ENV,
+                "LOCAL_K8S_A2A_URL_TEMPLATE": (
+                    "http://{service_name}.stable.alipay.net:{node_port}"
+                ),
+            },
+            clear=True,
+        ):
+            plugin = self._incluster_plugin(mock_client, mock_core_cls)
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+            mock_svc = MagicMock()
+            mock_svc.spec.ports = [MagicMock(node_port=30082)]
+            mock_core.read_namespaced_service.return_value = mock_svc
+
+            first = plugin.resolve_ws_conn_info(
+                paas_device_id="a2a-cache-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+            assert first.a2a_base_url == ""  # 未就绪：先空地址
+            plugin.a2a_discovery_join("a2a-cache-abc")
+            for _ in range(2):
+                conn = plugin.resolve_ws_conn_info(
+                    paas_device_id="a2a-cache-abc",
+                    port=8080,
+                    path="/api/openclaw/ws",
+                )
+                assert conn.a2a_base_url == (
+                    "http://a2a-cache-abc-svc.stable.alipay.net:30082"
+                )
+
+        assert mock_core.read_namespaced_service.call_count == 1
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_incluster_missing_nodeport_degrades_to_empty(
+        self, mock_core_cls, mock_client
+    ) -> None:
+        """A ClusterIP-shaped Service under a configured template is a
+        describable configuration state, answered with the empty string rather
+        than an exception that takes the chat connection down with it."""
+        with patch.dict(
+            os.environ,
+            {
+                **self._INCLUSTER_ENV,
+                "LOCAL_K8S_A2A_URL_TEMPLATE": (
+                    "http://{service_name}.stable.alipay.net:{node_port}"
+                ),
+            },
+            clear=True,
+        ):
+            plugin = self._incluster_plugin(mock_client, mock_core_cls)
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+            mock_svc = MagicMock()
+            mock_svc.spec.ports = [MagicMock(node_port=None)]
+            mock_core.read_namespaced_service.return_value = mock_svc
+
+            conn = plugin.resolve_ws_conn_info(
+                paas_device_id="tpl-test-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+
+        assert conn.a2a_base_url == ""
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_incluster_discovery_failure_degrades_to_empty(
+        self, mock_core_cls, mock_client
+    ) -> None:
+        """A kube api outage while resolving the A2A face must cost the A2A
+        socket alone; the ws side answers through its own path unchanged."""
+        with patch.dict(
+            os.environ,
+            {
+                **self._INCLUSTER_ENV,
+                "LOCAL_K8S_A2A_URL_TEMPLATE": (
+                    "http://{service_name}.stable.alipay.net:{node_port}"
+                ),
+            },
+            clear=True,
+        ):
+            plugin = self._incluster_plugin(mock_client, mock_core_cls)
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+            mock_core.read_namespaced_service.side_effect = RuntimeError("api down")
+
+            conn = plugin.resolve_ws_conn_info(
+                paas_device_id="tpl-test-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+
+        assert conn.a2a_base_url == ""
+        assert conn.ws_url
+
+
 class TestImagePullPolicy:
     """Tests for `_image_pull_policy` default behavior based on image tag."""
 

@@ -116,7 +116,7 @@ describe("monitoring automatic recovery", () => {
     const trigger = createMonitoringRecoveryTrigger({ config, service: null });
     await trigger.trigger({ ...event, entityId: "another-owner" });
     await expect(trigger.trigger(event)).rejects.toMatchObject({ code: "NOT_READY" });
-    const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[workflow-background] ".length)));
+    const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[session-recovery] ".length)));
     expect(events.filter(event => event.event === "CREATE_FAILED")).toEqual([expect.objectContaining({
       eventId: event.eventId, botId: "default", errorCode: "recovery_not_ready", count: 1 })]);
   });

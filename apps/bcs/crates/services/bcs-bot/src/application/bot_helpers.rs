@@ -631,19 +631,6 @@ pub(super) async fn authorize_visibility_read(
     }
 }
 
-pub(super) fn authorize_human_creator_required(
-    staff_no: &str,
-    bot: &RegisteredBot,
-) -> Result<(), BotUseCaseError> {
-    match bot.created_by.as_deref() {
-        Some(owner) if owner == staff_no => Ok(()),
-        _ => Err(BotUseCaseError::Forbidden(format!(
-            "User {} is not the creator of bot {}",
-            staff_no, bot.bot_uuid
-        ))),
-    }
-}
-
 pub(super) fn is_owner_suffixed_bot_id_for_staff(bot_uuid: &str, staff_no: &str) -> bool {
     bot_uuid
         .rsplit_once(':')

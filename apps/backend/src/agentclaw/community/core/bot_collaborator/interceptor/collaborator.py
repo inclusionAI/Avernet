@@ -171,7 +171,7 @@ class CollaboratorPermissionInterceptor:
 
         if (
             ctx.request is not None
-            and ctx.request.method not in {"GET", "HEAD", "OPTIONS"}
+            and user_id != "anonymous"
             and params.bot_id
         ):
             from agentclaw.community.core.bot_management.addressing import (
@@ -203,7 +203,8 @@ class CollaboratorPermissionInterceptor:
                     pass  # The existing route retains its missing-Bot behavior.
                 else:
                     try:
-                        assert_bot_mutable(addressed.bot)
+                        if ctx.request.method not in {"GET", "HEAD", "OPTIONS"}:
+                            assert_bot_mutable(addressed.bot)
                     except HandoffError:
                         ctx.response = InterceptedResponse(
                             success=False,
@@ -211,6 +212,13 @@ class CollaboratorPermissionInterceptor:
                             error_code=423,
                         )
                         return None
+
+                    # Historical resource locators remain stable across handoff;
+                    # authority belongs to the resolved Bot's current Owner.
+                    params = PermissionParams(
+                        bot_id=addressed.bot_id,
+                        owner_id=addressed.current_owner_id,
+                    )
 
         # 缓存日志所需信息（用于 after 阶段）
         ctx.metadata["_log_user_id"] = user_id

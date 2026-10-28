@@ -21,16 +21,27 @@ def test_the_payload_round_trips_through_json_shape() -> None:
         operation_id="a" * 32, kind=OperationKind.CANCEL, action=AcliAction.INSTALL,
         cli_code="yuque-cli", bot_pk=7, bot_id="bot-1", entity_id="ent-1", owner_id="owner-1",
         stage=PublishStage.VERIFY,
-        actor_id="owner-1", enqueued_at=12.5, target_operation_id="b" * 32,
+        actor_id="owner-1", enqueued_at=12.5, target_operation_id="b" * 32, engine="teclaw",
     )
 
     again = OperationPayload.from_dict(payload.to_dict())
 
     assert again == payload
     assert again.runtime == AcliRuntime(
-        bot_id="bot-1", owner_id="owner-1", stage=PublishStage.VERIFY
+        bot_id="bot-1", owner_id="owner-1", stage=PublishStage.VERIFY, engine="teclaw"
     )
     assert again.to_dict()["stage"] == "verify" and type(again.to_dict()["kind"]) is str
+
+
+def test_a_payload_enqueued_before_the_engine_was_recorded_reads_with_none() -> None:
+    old = OperationPayload(
+        operation_id="a" * 32, kind=OperationKind.OPERATION, action=AcliAction.INSTALL,
+        cli_code="yuque-cli", bot_pk=7, bot_id="bot-1", entity_id="ent-1", owner_id="owner-1",
+        stage=PublishStage.DRAFT, actor_id="owner-1", enqueued_at=12.5,
+    ).to_dict()
+    del old["engine"]
+
+    assert OperationPayload.from_dict(old).runtime.engine == ""
 
 
 def test_the_two_keys_never_collide() -> None:

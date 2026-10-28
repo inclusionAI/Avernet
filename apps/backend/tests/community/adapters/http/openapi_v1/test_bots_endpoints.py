@@ -31,6 +31,9 @@ from agentclaw.community.adapters.http.openapi_v1.bots.router import router
 from agentclaw.community.adapters.http.openapi_v1.deprecated.auth_status import (
     router as legacy_auth_status_router,
 )
+from agentclaw.community.adapters.http.openapi_v1.deprecated.bots import (
+    router as legacy_engine_config_router,
+)
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.bot_quota_service import BotQuotaServiceProtocol
@@ -122,11 +125,15 @@ def svc():
 
 
 @pytest.fixture
-def bot_repo():
+def bot_repo(svc):
     from tests.community.bot_address_fakes import support_legacy_locator
 
     repo = MagicMock()
     repo.get_by_id_and_owner.return_value = dict(BOT)
+    repo.list_by_conditions.side_effect = lambda **_filters: (
+        svc.list_bots_by_conditions.return_value["total"],
+        svc.list_bots_by_conditions.return_value["items"],
+    )
     return support_legacy_locator(repo)
 
 
@@ -245,6 +252,10 @@ def client(
     class _M(Module):
         def configure(self, binder):
             binder.bind(BotServiceProtocol, to=svc)
+            from agentclaw.community.core.bot_inventory.protocols import BotInventoryTemplatePort
+            templates = MagicMock()
+            templates.list_template_configs_by_bot_ids.return_value = {BOT["bot_id"]: BOT["template_config"]}
+            binder.bind(BotInventoryTemplatePort, to=templates)
             binder.bind(BotQuotaServiceProtocol, to=quota)
             binder.bind(BotSpaceServiceProtocol, to=bot_space)
             binder.bind(PolicyServiceProtocol, to=policy)
@@ -266,6 +277,7 @@ def client(
     # Engine config is bots-component work served at an engine-component
     # address, so it hangs off its own router and has to be mounted alongside.
     app.include_router(engine_config_router)
+    app.include_router(legacy_engine_config_router)
     # The retiring GET spelling of the auth-status poll, mounted so the GET
     # tests keep exercising the frozen contract beside its POST replacement.
     app.include_router(legacy_auth_status_router)
@@ -427,6 +439,14 @@ def test_list_bots_survives_a_space_resolution_refusal(svc, startup_script):
         def configure(self, binder):
             binder.bind(BotServiceProtocol, to=svc)
             binder.bind(BusinessSpaceContextProtocol, to=_RefusingSpace())
+            from agentclaw.community.core.repository.protocols.bot import BotRepository
+            from agentclaw.community.core.bot_inventory.protocols import BotInventoryTemplatePort
+            repository = MagicMock()
+            repository.list_by_conditions.return_value = (1, [BOT])
+            templates = MagicMock()
+            templates.list_template_configs_by_bot_ids.return_value = {}
+            binder.bind(BotRepository, to=repository)
+            binder.bind(BotInventoryTemplatePort, to=templates)
 
     app = FastAPI()
     app.include_router(router)
@@ -464,16 +484,17 @@ def test_template_config_is_gated_on_template_type(client, svc):
     assert detail["template_config"] is None
 
 
-def test_list_bots_filters_reach_service(client, svc):
+def test_list_bots_filters_reach_repository(client, bot_repo):
     client.get(
         "/openapi/v1/bots?keyword=x&engine=teclaw&status=ACTIVE&page=2&page_size=5"
     )
-    kw = svc.list_bots_by_conditions.call_args.kwargs
+    kw = bot_repo.list_by_conditions.call_args.kwargs
     assert kw["owner_id"] == "u1"
     assert kw["bot_name"] == "x"
     assert kw["engine"] == "teclaw"
     assert kw["status"] == "ACTIVE"
     assert kw["page"] == 2 and kw["page_size"] == 5
+    assert kw["stage"] == "draft"
 
 
 def test_search_bot_metadata_returns_only_display_fields(client, svc):
@@ -500,6 +521,9 @@ def test_search_bot_metadata_returns_only_display_fields(client, svc):
                 "engine": "teclaw",
                 "bot_type": "personal",
                 "status": "ACTIVE",
+                "online_available": None,
+                "live_version": None,
+                "conversation_stage": "draft",
             }
         ],
     }
@@ -702,6 +726,24 @@ def test_update_engine_config(client, engine_config):
     assert data == {"a": 1}  # echoes the written config
     kw = engine_config.write_bot_config.call_args.kwargs
     assert kw["config"] == {"a": 1} and kw["owner_id"] == "u1"
+
+
+def test_update_engine_config_rejects_empty_object(client, engine_config):
+    response = client.put("/openapi/v1/bots/b1/engine/config", json={})
+    assert response.status_code == 422
+    engine_config.write_bot_config.assert_not_awaited()
+
+
+def test_update_engine_config_rejects_missing_body(client, engine_config):
+    response = client.put("/openapi/v1/bots/b1/engine/config")
+    assert response.status_code == 422
+    engine_config.write_bot_config.assert_not_awaited()
+
+
+def test_legacy_engine_config_accepts_empty_object(client, engine_config):
+    data = _ok(client.put("/openapi/v1/bots/b1/engine-config", json={}))
+    assert data == {}
+    assert engine_config.write_bot_config.call_args.kwargs["config"] == {}
 
 
 def test_mutating_not_found_masked(client, svc):

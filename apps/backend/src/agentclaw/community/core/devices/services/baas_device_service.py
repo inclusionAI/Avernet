@@ -8,7 +8,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Protocol, override
 
 from agentclaw.community.core.bot_management.engines import resolve_provisioning
-from agentclaw.community.core.devices.errors import DeviceServiceError
+from agentclaw.community.core.devices.errors import DeviceServiceError, InvalidDeviceStatusError
 from agentclaw.community.core.devices.models import (
     AllocatedDevice,
     DeviceConnectionInfo,
@@ -840,12 +840,17 @@ class BaasDeviceService(DeviceService):
 
         Raises:
             DeviceNotFoundError: 设备绑定不存在
+            InvalidDeviceStatusError: 已释放的绑定不再请求 BaaS 连接信息
             BaasDeviceServiceError: 获取连接信息失败
         """
         logger.info(f"[BaasDeviceService.get_device_connection] Getting connection for binding_id={binding_id}, device_uuid={device_uuid}")
 
         # 延迟导入避免循环依赖
         from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
+
+        record = self._repo.get_by_id(binding_id)
+        if record is not None and record.status == DeviceBindingStatus.RELEASED.value:
+            raise InvalidDeviceStatusError("cannot get connection for released device")
 
         try:
             ws_info = self._baas_service.get_ws_info(
@@ -883,6 +888,9 @@ class BaasDeviceService(DeviceService):
             bot_uuid=ws_info.bot_uuid,
             tenant=ws_info.tenant,
             engine_port=ws_info.engine_port,
+            # A2A 面 base 与 ws_conn_mode 无关：它描述的是设备自己的 http 面，
+            # 不是某条 ws 链路的形状。BaaS 未签发即空串，透传空串。
+            a2a_base_url=ws_info.a2a_base_url,
             # 服务端签发；ttl 入参本层忽略，caller 自行推算必然与真 token 不符。
             # 本链路 token 就是 ws token，故不另填 ws_*（留空即"用 token"）。
             expires_at=ws_info.expires_at,

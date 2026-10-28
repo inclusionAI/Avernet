@@ -58,7 +58,7 @@ it.each([null, "TC.MCP.PERMISSION"])("sends only the task output-token override 
   expect(runtime.sendMessage).not.toHaveBeenCalled();
   expect(runtime.request).not.toHaveBeenCalled();
   expect(runtime.executeShell).not.toHaveBeenCalled();
-  const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[workflow-background] ".length)));
+  const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[session-recovery] ".length)));
   expect(events.filter(event => event.event === "dispatched")).toEqual([1, 2].map(attempt => expect.objectContaining({
     taskId: ack.task_id, executionId: expect.any(String), jobId: `job-${attempt}`, attempt, environment: "pre" })));
   expect(JSON.stringify(events)).not.toContain("executionTicket");
@@ -73,7 +73,7 @@ it("counts an AIS failure once after committing its terminal task state despite 
   const report = { status: "failed" as const, errorCode: "TASK_TIMEOUT", errorMessage: "runtime interrupted", retryable: false };
   await agent.handleAisStatus({ task: (await repo.findTask(task_id))!, step, report });
   await agent.handleAisStatus({ task: (await repo.findTask(task_id))!, step: (await repo.findStep(step.step_id))!, report });
-  const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[workflow-background] ".length)));
+  const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[session-recovery] ".length)));
   expect(events.filter(event => event.event === "EXECUTION_FAILED")).toEqual([expect.objectContaining({
     taskId: task_id, executionId: task.execution!.executionId, jobId: "job-1", errorCode: "TASK_TIMEOUT", count: 1 })]);
   expect((await tasks.find(task_id))!.status).toBe("failed");
@@ -87,7 +87,7 @@ it("logs a failed read once from the settled tool audit without logging request 
   const task = (await tasks.find(task_id))!, input = { clientRequestId: "read-1", purpose: "PRIVATE_PURPOSE" };
   const first = await agent.sessionRead(task, input), second = await agent.sessionRead(task, input);
   expect(first.status).toBe("failed"); expect(second.toolCallId).toBe(first.toolCallId);
-  const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[workflow-background] ".length)));
+  const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[session-recovery] ".length)));
   expect(events.filter(event => event.event === "tool_settled")).toEqual([expect.objectContaining({
     taskId: task_id, toolCallId: first.toolCallId, operation: "session_read", outcome: "failed" })]);
   expect(JSON.stringify(events)).not.toMatch(/PRIVATE_PURPOSE|private-value|PRIVATE_DIAGNOSIS/);
@@ -107,7 +107,7 @@ it.each([
       executionRetry: { ...value.executionRetry!, retryAt: 1 } }));
     await agent.start((await tasks.find(task_id))!);
   }
-  const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[workflow-background] ".length)));
+  const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[session-recovery] ".length)));
   expect(events.filter(event => event.event === "dispatch_failed")).toHaveLength(3);
   expect(events.filter(event => event.event === "EXECUTION_FAILED")).toHaveLength(1);
   expect(JSON.stringify(events)).not.toMatch(/PRIVATE_SESSION_BODY|PRIVATE_TICKET/);

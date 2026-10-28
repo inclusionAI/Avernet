@@ -260,18 +260,20 @@ POST /api/insight/v1/monitoring/session-recoveries/:taskId/terminate
 
 ### 按手册转交 Owner 自行处理
 
-Agent 根据适用手册及当前现场，确认剩余阻塞满足“转交 Owner 自行处理并结束”的条件，且没有其他待调查或修复事项时，回报
-`{"kind":"owner_handoff","phase":"当前阶段","summary":"已核实的剩余阻塞、手册处理依据、具体对象及 Owner 处理指引（Markdown）","evidence_ids":["受控现场读取返回的完整证据 ID"]}`。
+Agent 根据适用手册及当前现场，确认剩余阻塞或非阻塞优化建议满足“转交 Owner 自行处理并结束”的条件，且没有其他待调查或修复事项时，回报
+`{"kind":"owner_handoff","phase":"当前阶段","effect":"recovered|not_recovered|unknown","summary":"原任务实际进展、剩余阻塞或优化建议、手册处理依据、具体对象及 Owner 指引（Markdown）","evidence_ids":["受控现场读取返回的完整证据 ID"]}`。
 此结果表示处置决定，不使用普通 `blocked` 的错误原因表达；控制面不识别具体故障类别。`assess`、`observe`、`plan`、`verify` 均可提交，不能在 `apply` 执行环境动作中途切换，Debug／仿真禁止真实转交。
 
 服务校验当前任务、执行归属、版本及已保存的现场读取证据，复用现有 Owner 通知发送指引并记录回执。
 不创建方案、不进入等待确认／配合、不再执行或验证，结束为 `status=completed`、
-`completion_reason=owner_handoff`、`effect=not_recovered`；已有触达／响应结论保留，干预情况仍由实际审计计算，通知不算干预。
-通知失败或禁用时同样结束，但页面不得显示“已通知”；成功时显示“已通知 Owner 自行处理”。通知回执与任务结束均保存在原时间线，无新增数据库字段或配置。
+`completion_reason=owner_handoff`；恢复效果独立于转交决定，使用本次 `effect` 更新 `judgment.effect`，已有触达／响应结论保留，干预情况仍由实际审计计算，通知不算干预。新包明确回报三种效果之一；旧包省略 `effect` 时沿用已有判断，无判断则记为 `unknown`，不自动推断未恢复。`not_intervened` 不适用于真实转交，其他无效效果值返回 422 且不结束任务或通知。
+通知失败或禁用时同样结束，但页面不得显示“已通知”；已恢复时展示后续建议及实际通知状态，仍需人工处理时展示 Owner 处理指引。通知回执与任务结束均保存在原时间线，无新增数据库字段或配置。
 
-其他需要 Owner 配合的情况仍进入完整方案；普通消息干预后的 `observe.effect=not_recovered` 仍推进 `plan`，不自动转交 Owner。
+原故障已解除、原任务实际继续或完成，仅剩手册规定的有依据的 Skill 优化建议时，转交仍保留 `effect=recovered`，通知明确建议不阻塞本次恢复；不等待修改，也不为验证优化重跑原业务。其他不满足转交条件、确需 Owner 配合恢复的事项仍进入完整方案；普通消息干预后的 `observe.effect=not_recovered` 仍推进 `plan`，不自动转交 Owner。
 
-兼容与发布顺序：先部署支持 `owner_handoff` 的结果发送／接收后端和页面，再更新自愈包。旧包的 `blocked.reason=mcp_permission_required` 在 Agent 回报入口转换为同一个通用转交处理，之后生成 `completion_reason=owner_handoff`；历史任务与待发送结果中的旧原因仍可读取、展示及回传，不迁移既有记录。新 Skill／Wrapper 不再输出或依赖 MCP 专属原因。回滚自愈包可继续使用旧输入；已产生新结果后不应先回滚接收端。
+兼容与发布顺序：通用转交依赖支持 `owner_handoff` 的结果发送／接收后端和页面。旧包的 `blocked.reason=mcp_permission_required` 在 Agent 回报入口转换为通用转交并明确 `effect=not_recovered`，之后生成 `completion_reason=owner_handoff`；历史任务与待发送结果中的旧原因仍可读取、展示及回传，不迁移既有记录。新 Skill／Wrapper 不再输出或依赖 MCP 专属原因。
+
+本次新通用 Skill 手册需先随自愈包上传，再部署包含 `TC.SKILL` 新候选路径的后端，避免新任务引用旧包中不存在的手册；效果回报与通知行为在配套后端部署后生效。恢复执行继续使用任务创建时保存的手册引用，不给旧任务补入新候选。后端保持兼容旧包省略效果的输入；若回滚到不含新手册的旧包，应先停止后端产生该新候选引用，避免缺失手册导致执行失败。
 
 ## 任务整体摘要
 
@@ -281,7 +283,7 @@ Agent 根据适用手册及当前现场，确认剩余阻塞满足“转交 Owne
 
 ## 失败监控与排障日志
 
-自愈复用 shared 的 `logWorkflowBackground` / `workflowBackgroundError`，沿用 `[workflow-background]` 单行 JSON、字段白名单、脱敏与原 stdout 输出。内部 Host 仍写入既有 `/home/admin/logs/clawweb/start.log`，不新增 logger、日志文件、轮转或部署配置。
+自愈沿用 `[session-recovery]` 前缀，通过现有 console 输出单行 JSON；Repair 共用执行监测使用 `[agent-execution-monitor]`。日志字段白名单与错误脱敏位于 Repair 的 `common/logging.ts`，不依赖工作流日志或继承工作流上下文。内部 Host 仍写入既有 `/home/admin/logs/clawweb/start.log`，不新增 logger、日志文件、轮转或部署配置。监控继续按 `job`、`event` 筛选，失败事件和计数口径不变。
 
 分钟统计仅筛选 `job=session_recovery_task` 且 `event` 为下表两个值，对 `count` 求和；按事件类型和控制面环境分组。不要按 console 级别筛选：既有后台日志入口统一使用 `console.info`，失败语义在 `event` / `outcome` 中。
 

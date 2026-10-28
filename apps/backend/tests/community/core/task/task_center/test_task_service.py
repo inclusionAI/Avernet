@@ -328,6 +328,33 @@ class TestHarnessWiring:
         assert "root_execution_instruction" in result.extend_props
         assert "t1" in harness._registered
 
+    def test_dashboard_cross_executor_app_owner_does_not_register_harness(self, monkeypatch):
+        from types import SimpleNamespace
+
+        from agentclaw.community.core.task.task_center import task_service_queries
+        from agentclaw.community.core.task.task_harness.harness import TaskHarness
+        from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
+
+        svc = TaskGraphService()
+        harness = TaskHarness(svc)
+        facade = _CaseTaskService(
+            svc, planner_factory=lambda g: [_child("c1")], harness=harness,
+            task_id_provider=lambda: "t1",
+        )
+        _exec(facade, _task_info_request())
+        harness._registered.clear()
+        facade._task_info_repo = SimpleNamespace(
+            get=lambda task_id: SimpleNamespace(
+                task_id=task_id, executor_app="agentclawengine"
+            )
+        )
+        monkeypatch.setattr(
+            task_service_queries, "get_current_executor_app", lambda: "agentclaw"
+        )
+        facade.get_task_dashboard("t1")
+
+        assert "t1" not in harness._registered
+
     def test_dashboard_registers_task_for_harness_on_this_worker(self):
         from agentclaw.community.core.task.task_harness.harness import TaskHarness
         from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService

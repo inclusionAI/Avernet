@@ -1,5 +1,5 @@
 import { getCurrentEnv } from "@avernet/clawweb-shared/server/env";
-import { logWorkflowBackground, workflowBackgroundError } from "@avernet/clawweb-shared/server/services/workflow-background-log";
+import { logRepairEvent, repairLogError } from "./logging.js";
 import { resolveTaskControlPlaneEnvironment, type AgentControlPlaneEnvironment } from "./task-control-plane.js";
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 import type { EvolveRepository } from "@avernet/clawevolve/server/repositories/evolve-repository";
@@ -50,8 +50,8 @@ export async function reconcileAgentExecutions(deps: {
         await deps.handlers[name]({ task, step, report: { status: "failed", summary: "本次 Agent 容器执行中断，未收到有效运行回报",
           errorCode: reason, errorMessage, retryable } });
       } catch (error) {
-        logWorkflowBackground("agent_execution_monitor", "reconciliation_failed", { environment: deps.controlPlaneEnvironment,
-          taskId: row.task_id, stepId: row.step_id, ...workflowBackgroundError(error) });
+        logRepairEvent("agent-execution-monitor", "agent_execution_monitor", "reconciliation_failed", { environment: deps.controlPlaneEnvironment,
+          taskId: row.task_id, stepId: row.step_id, ...repairLogError(error) });
       }
     }
   }
@@ -63,7 +63,7 @@ export function startAgentExecutionMonitor(deps: Omit<Parameters<typeof reconcil
   const timer = setInterval(() => {
     if (inFlight) return;
     inFlight = reconcileAgentExecutions({ ...deps, controlPlaneEnvironment }).catch(error => {
-      logWorkflowBackground("agent_execution_monitor", "unavailable", { environment: controlPlaneEnvironment, ...workflowBackgroundError(error) });
+      logRepairEvent("agent-execution-monitor", "agent_execution_monitor", "unavailable", { environment: controlPlaneEnvironment, ...repairLogError(error) });
     })
       .finally(() => { inFlight = undefined; });
   }, 20000);

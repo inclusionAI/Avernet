@@ -43,7 +43,7 @@ it("counts an unavailable recovery service at the creation entry point", async (
       });
       expect(rejected.status).toBe(503); // Keep the existing unavailable-service HTTP contract.
     }
-    const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[workflow-background] ".length)));
+    const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[session-recovery] ".length)));
     expect(events.filter(event => event.event === "CREATE_FAILED")).toEqual([expect.objectContaining({ errorCode: "recovery_not_ready", count: 1 })]);
   } finally {
     server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));
