@@ -317,3 +317,24 @@ describe('managedBotConversationService.listOtherMessages', () => {
     ]);
   });
 });
+
+it.each(['service', 'personal'])(
+  'owned %s other-user session reads share the conversation runtime',
+  async (botType) => {
+    mocked.listBotSessions.mockResolvedValue({ code: 200000, data: { items: [], total: 0 } });
+    mocked.listBotSessionMessages.mockResolvedValue({ code: 200000, data: { items: [], total: 0 } });
+    const bot = { ...managedBot, botType, runtimeStage: 'online' as const };
+    const stage = botType === 'service' ? 'online' : 'draft';
+    await managedBotConversationService.listOtherSessions(bot, 'friend');
+    await managedBotConversationService.listOtherMessages(bot, 'friend', 'session');
+    expect(mocked.listBotSessions).toHaveBeenLastCalledWith(
+      'bot-a',
+      expect.objectContaining({ stage, f_user_id: 'friend', owner_id: '2088' }),
+    );
+    expect(mocked.listBotSessionMessages).toHaveBeenLastCalledWith(
+      'bot-a',
+      'session',
+      expect.objectContaining({ stage, f_user_id: 'friend', owner_id: '2088' }),
+    );
+  },
+);

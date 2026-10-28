@@ -21,6 +21,7 @@ import {
   BOT_MESSAGE_PAGE_SIZE,
   BOT_SESSION_PAGE_SIZE,
   mapBotSessionSummary,
+  resolveChatRuntimeStage,
   splitBotId,
   type ChatBotView,
 } from './botSessionService';
@@ -132,6 +133,7 @@ export const managedBotConversationService = {
         user_id: context.ownerId,
         owner_id: context.ownerId,
         f_user_id: friendId,
+        stage: resolveChatRuntimeStage(bot),
         page,
         page_size: pageSize,
         ...(sessionKey ? { session_key: sessionKey } : {}),
@@ -178,6 +180,7 @@ export const managedBotConversationService = {
         user_id: context.ownerId,
         owner_id: context.ownerId,
         f_user_id: friendId,
+        stage: resolveChatRuntimeStage(bot),
         page,
         page_size: pageSize,
       });

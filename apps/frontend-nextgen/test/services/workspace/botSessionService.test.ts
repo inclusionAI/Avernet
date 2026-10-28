@@ -144,7 +144,7 @@ describe('botSessionService', () => {
     ]);
   });
 
-  it('服务 Bot 的真实目录未返回阶段时仍保留草稿操作上下文', async () => {
+  it('服务 Bot 的在线目录使用 online，但不从 inventory 扩大操作权限', async () => {
     ownedMocked.listBots.mockResolvedValue({
       code: 200000,
       data: {
@@ -180,7 +180,7 @@ describe('botSessionService', () => {
       data: [
         {
           botType: 'service',
-          runtimeStage: 'draft',
+          runtimeStage: 'online',
           actions: [],
           ownerId: 'owner-1',
         },
@@ -581,7 +581,7 @@ describe('owned directory engine context stays deferred', () => {
     ownedMocked.listBots.mockResolvedValue({ data: { items: [{ bot_id: 'deferred', bot_name: 'Bot', owner_entity_id: 'owner', bot_type, status: 'ACTIVE', engine: 'openclaw' }] } });
     ownedMocked.listBotInventory.mockClear();
     const result = await botSessionService.listOwnedBots('caller');
-    expect(result).toMatchObject({ ok: true, data: [{ actions: [], chatable: true, runtimeStage: 'draft' }] });
+    expect(result).toMatchObject({ ok: true, data: [{ actions: [], chatable: true, runtimeStage: bot_type === 'service' ? 'online' : 'draft' }] });
     expect(ownedMocked.listBotInventory).not.toHaveBeenCalled();
   });
 });

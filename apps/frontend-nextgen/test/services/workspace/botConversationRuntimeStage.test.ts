@@ -25,6 +25,8 @@ const cases: [string, Partial<ChatBotView>, 'draft' | 'verify' | 'online'][] = [
   ['team personal', { isTeamBot: true, botType: 'personal' }, 'draft'],
   ['friend personal', { isFriendBot: true, botType: 'personal' }, 'draft'],
   ['friend without type', { isFriendBot: true, botType: undefined }, 'draft'],
+  ['my service online', { runtimeStage: 'online' }, 'online'],
+  ['my personal', { botType: 'personal', runtimeStage: 'online' }, 'draft'],
   ['my service draft', {}, 'draft'],
   ['my service verify', { runtimeStage: 'verify' }, 'verify'],
 ];
@@ -89,4 +91,45 @@ test('my Bot preserves an explicitly selected request stage', () => {
 test('non-service team Bots retain explicit instance-range stages', () => {
   const bot = { ...base, isTeamBot: true, botType: undefined };
   expect(withFriendBotRequestParams(bot, 'viewer', { user_id: 'viewer', stage: 'verify' })).toMatchObject({ stage: 'verify' });
+});
+
+test.each(['service', 'personal'])(
+  'owned %s catalog selects online and its sessions use the mapped runtime',
+  async (botType) => {
+    request.mockResolvedValueOnce({
+      code: 200000,
+      data: {
+        items: [
+          { bot_id: 'service', owner_entity_id: 'entity', bot_name: 'My Bot', bot_type: botType, status: 'ACTIVE' },
+        ],
+        total: 1,
+      },
+    });
+    const result = await botSessionService.listOwnedBots('human_viewer');
+    expect(request).toHaveBeenCalledWith(
+      '/openapi/v1/bots',
+      expect.objectContaining({
+        method: 'GET',
+        params: expect.objectContaining({ user_id: 'viewer', stage: 'online' }),
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.friendlyMessage);
+    const bot = result.data[0];
+    const stage = botType === 'service' ? 'online' : 'draft';
+    expect(bot).toMatchObject({ botType, runtimeStage: stage });
+    await botSessionService.createSession(bot, 'human_viewer');
+    await botSessionService.listSessionsPage(bot, 'human_viewer');
+    await botSessionService.listFavoriteSessionsPage(bot, 'human_viewer');
+    await botSessionService.listModels(bot, 'human_viewer');
+    for (const [, options] of request.mock.calls.slice(1)) expect(options?.params).toMatchObject({ stage });
+  },
+);
+
+test('owned online service cannot be downgraded by stale draft instance ranges', async () => {
+  const bot = { ...base, runtimeStage: 'online' as const };
+  const range = { deviceUuid: 'device', stage: 'draft' as const };
+  await botSessionService.listSessionsPage(bot, 'viewer', 1, 20, '', range);
+  await botSessionService.listFavoriteSessionsPage(bot, 'viewer', 1, 20, range);
+  for (const [, options] of request.mock.calls) expect(options?.params).toMatchObject({ stage: 'online' });
 });
