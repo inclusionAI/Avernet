@@ -166,10 +166,10 @@ bcsfuse_setup() {
     log_info "Syncing Python dependencies for bcsfuse..."
     # Exclude Python 3.13: faiss-cpu==1.8.0 and numpy==1.26.4 ship no cp313
     # wheels, so a 3.13 venv (e.g. selected via .python-version=3.13) cannot
-    # resolve. Use a "<3.13" constraint instead of a hard 3.12 so 3.10/3.11
-    # still work (e.g. offline where uv cannot auto-download 3.12), mirroring
-    # requires-python in pyproject.toml.
-    if ! uv sync --python "<3.13" --index-url "${PYPI_INDEX_URL}"; then
+    # resolve. Match both requires-python bounds so system Python 3.9 cannot
+    # satisfy the explicit interpreter request. Keep 3.10/3.11 supported
+    # (e.g. offline where uv cannot auto-download 3.12).
+    if ! uv sync --python ">=3.10,<3.13" --index-url "${PYPI_INDEX_URL}"; then
         log_error "Failed to sync Python dependencies for bcsfuse"
         return 1
     fi
