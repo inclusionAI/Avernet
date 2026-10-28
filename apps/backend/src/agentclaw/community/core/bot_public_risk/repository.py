@@ -110,6 +110,16 @@ class BotPublicRiskRepository:
     def __init__(self, db: DatabasePlugin) -> None:
         self._db = db
 
+    def find_risk_tenant(self, *, env: str, risk_check_id: str) -> str | None:
+        """Discover only a specific risk record's tenant before entering its scope."""
+        columns = RiskCheckModel.__table__.c
+        with self._db.orm_session() as session:
+            return session.execute(
+                select(columns.avernet_tenant)
+                .where(columns.env == env, columns.risk_check_id == risk_check_id)
+                .execution_options(skip_avernet_tenant_guard=True)
+            ).scalar_one_or_none()
+
     def create_or_replay(self, record: RiskCheck) -> tuple[RiskCheck, bool]:
         # Concurrent new requests can race for an initially vacant target. The
         # losing transaction rolls back completely and retries against the winner.

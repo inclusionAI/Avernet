@@ -756,3 +756,98 @@ def test_poll_repeated_contention_does_not_claim_update():
     with pytest.raises(RuntimeError, match="contention"):
         tasks.poll(env="dev", risk_check_id="a", manual=True)
     assert repo.get(env="dev", risk_check_id="a").phase == "CHECKING"
+
+
+def test_callback_locates_risk_tenant_and_restores_scope():
+    from types import SimpleNamespace
+    from agentclaw.community.core.approval.callback_handler import handle_approval_callback
+    from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope, get_current_avernet_tenant
+
+    _, repo, _, _, _, record = make()
+    risk_id = '12345678-1234-1234-1234-123456789abc'
+    with avernet_tenant_scope('other'):
+        repo.create_or_replay(replace(record, risk_check_id=risk_id))
+    seen = []
+    service = SimpleNamespace(handle_public_approval_callback=lambda **kw: seen.append((get_current_avernet_tenant(), kw)) or {'success': True})
+    puid = f'antprocess-agentclaw_botpublic_risk-{risk_id}'
+    data = {'global_unique_id': puid, 'owner_id': 'owner', 'bot_id': 'bot', 'last_operate': 'AGREE'}
+    with avernet_tenant_scope('teamclaw'):
+        assert handle_approval_callback(data, service, repo)['success']
+        assert get_current_avernet_tenant() == 'teamclaw'
+    assert seen[0][0] == 'other' and seen[0][1]['risk_check_id'] == risk_id
+    assert not handle_approval_callback({**data, 'risk_check_id': 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'}, service, repo)['success']
+    assert len(seen) == 1
+    assert not handle_approval_callback({**data, 'risk_check_id': 'bad'}, service, repo)['success']
+    assert not handle_approval_callback({**data, 'global_unique_id': 'antprocess-agentclaw_botpublic_risk-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'}, service, repo)['success']
+    legacy = {**data, 'global_unique_id': 'legacy-puid'}
+    assert handle_approval_callback(legacy, service, repo)['success']
+    assert 'risk_check_id' not in seen[-1][1]
+
+
+def test_callback_lookup_failure_never_falls_back_to_legacy():
+    from types import SimpleNamespace
+    import pytest
+    from agentclaw.community.core.approval.callback_handler import handle_approval_callback
+
+    def failure(**kwargs):
+        raise RuntimeError('database unavailable')
+    called = []
+    service = SimpleNamespace(handle_public_approval_callback=lambda **kw: called.append(kw))
+    repo = SimpleNamespace(find_risk_tenant=failure)
+    data = {'global_unique_id': 'puid', 'risk_check_id': '12345678-1234-1234-1234-123456789abc'}
+    with pytest.raises(RuntimeError, match='database unavailable'):
+        handle_approval_callback(data, service, repo)
+    assert called == []
+
+
+def test_scoped_callback_guard_fails_closed_for_bad_associations_and_replacement():
+    from types import SimpleNamespace
+    from agentclaw.community.core.approval.callback_handler import handle_approval_callback
+    from agentclaw.community.core.bot_public_risk.approval_guard import RiskApprovalGuard
+    from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
+
+    _, repo, _, _, _, record = make()
+    risk_id = '12345678-1234-1234-1234-123456789abc'
+    puid = f'antprocess-agentclaw_botpublic_risk-{risk_id}'
+    with avernet_tenant_scope('other'):
+        repo.create_or_replay(replace(record, risk_check_id=risk_id, phase='APPROVING', security_status='PASS', approval_puid=puid, workflow_json='{"approval_target_ready": true}'))
+    guard = RiskApprovalGuard(repo, lambda row: True)
+    def callback(**kw):
+        bot_pk = 7 if kw['bot_id'] == 'bot' else 8
+        result = guard.check('dev', kw['risk_check_id'], kw['owner_id'], bot_pk, kw['puid'], kw['last_operate'], 'user')
+        return {'success': result == 'ALLOW'}
+    service = SimpleNamespace(handle_public_approval_callback=callback)
+    data = {'global_unique_id': puid, 'owner_id': 'owner', 'bot_id': 'bot', 'last_operate': 'AGREE', 'public_scope': 'user', 'risk_check_id': risk_id}
+    assert not handle_approval_callback({**data, 'owner_id': 'other'}, service, repo)['success']
+    assert not handle_approval_callback({**data, 'bot_id': 'other'}, service, repo)['success']
+    assert not handle_approval_callback({**data, 'global_unique_id': 'incorrect'}, service, repo)['success']
+    with avernet_tenant_scope('other'):
+        row = repo.get(env='dev', risk_check_id=risk_id)
+        assert repo.invalidate_if_current(env='dev', risk_check_id=risk_id, row_version=row.row_version)
+    assert not handle_approval_callback(data, service, repo)['success']
+
+
+def test_cross_tenant_early_callback_is_deferred_and_replacement_is_denied():
+    import json
+    from types import SimpleNamespace
+    from agentclaw.community.core.approval.callback_handler import handle_approval_callback
+    from agentclaw.community.core.bot_public_risk.approval_guard import RiskApprovalGuard
+    from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
+
+    _, repo, _, _, _, record = make()
+    risk_id = '12345678-1234-1234-1234-123456789abc'
+    puid = f'antprocess-agentclaw_botpublic_risk-{risk_id}'
+    with avernet_tenant_scope('other'):
+        repo.create_or_replay(replace(record, risk_check_id=risk_id, phase='ADVANCING', security_status='PASS', workflow_json='{"approval_intent": true}'))
+    guard = RiskApprovalGuard(repo, lambda row: True)
+    def callback(**kw):
+        result = guard.check('dev', kw['risk_check_id'], kw['owner_id'], 7, kw['puid'], kw['last_operate'], 'user')
+        return {'success': result == 'DEFERRED', 'result': result}
+    service = SimpleNamespace(handle_public_approval_callback=callback)
+    data = {'global_unique_id': puid, 'owner_id': 'owner', 'bot_id': 'bot', 'last_operate': 'AGREE', 'public_scope': 'user', 'risk_check_id': risk_id}
+    assert handle_approval_callback(data, service, repo)['result'] == 'DEFERRED'
+    with avernet_tenant_scope('other'):
+        row = repo.get(env='dev', risk_check_id=risk_id)
+        assert json.loads(row.workflow_json)['pending_approval']['puid'] == puid
+        repo.create_or_replay(replace(record, risk_check_id='new', client_request_id='new'))
+    assert handle_approval_callback(data, service, repo)['result'] == 'DENIED'

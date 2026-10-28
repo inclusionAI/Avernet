@@ -41,6 +41,9 @@ class RequestConflict(ValueError):
 
 
 class RiskRepository(Protocol):
+    def find_risk_tenant(self, *, env: str, risk_check_id: str) -> str | None:
+        ...
+
     def create_or_replay(self, record: RiskCheck) -> tuple[RiskCheck, bool]:
         ...
 
