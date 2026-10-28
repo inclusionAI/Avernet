@@ -14,18 +14,6 @@ user_config:
     create_schema: true
     seed_data: true
 
-  # Deterministic local dev test apps, seeded into the (in-memory) app
-  # registry at boot — DEV/ SINGLE-BOX ONLY, never production (an empty/absent
-  # list seeds nothing anywhere). The api_key is a well-known NOT-FOR-PROD
-  # stand-in in the real 32-char base62 shape so the app_token strategy
-  # verifies it through the same prefix+hash path a production key takes.
-  # singlebox's Backend manager-sync sender presents this credential
-  # (exported with the identical literal by singlebox/modules/backend.sh).
-  local_dev_apps:
-    - app_name: singlebox-manager-sync
-      tenant: teamclaw
-      api_key: SingleboxManagerSyncDevAppKey000
-
   upstream_vars:
     backend_server_url: http://127.0.0.1:8888
     baas_server_url: http://127.0.0.1:8890

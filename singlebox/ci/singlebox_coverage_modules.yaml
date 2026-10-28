@@ -210,8 +210,9 @@ modules:
       # Restored to 53.88 (the PR #3208 lowering documented below is folded
       # into this change): singlebox now runs the manager-sync feature in its
       # single-replica form — the SAME in-process coordination contract used
-      # by the conformance suites over real Gateway→BCS trusted-App delivery,
-      # with no Redis service — so the dispatcher/lifecycle/retry paths under
+      # by the conformance suites over real Backend→BCS delivery (self-signed
+      # service principals, direct to the BCS origin), with no Redis service
+      # — so the dispatcher/lifecycle/retry paths under
       # core/bot_collaborator/manager_sync/ become acceptance-reachable on
       # this stack (the manager_sync module below owns their per-module gate).
       #
@@ -234,8 +235,9 @@ modules:
       # dispatcher/lifecycle/retry paths acceptance-reachable at all:
       # singlebox enables bot_manager_sync with coordination_mode: memory
       # (the single-replica downgrade — one Backend process, in-process
-      # coordination, never a production mode) plus the dev trusted-App
-      # chain Backend→Gateway→BCS (singlebox-manager-sync app with
+      # coordination, never a production mode) plus direct Backend→BCS
+      # delivery under the backend service identity (self-signed
+      # X-Avernet-Principal, trusted_apps rule app=backend with
       # managers:sync on tenant teamclaw). Rounds do reach the real BCS
       # authority surface, but a bot whose stable identity exists only in
       # the Backend DB is never ownership-initialized on BCS, so its PUT

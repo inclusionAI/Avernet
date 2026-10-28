@@ -2,13 +2,16 @@
 
 The single-box dev stack runs the gateway on an in-memory app registry:
 nothing persists, and a local service that must authenticate as a trusted
-App (the singlebox Backend's manager-sync sender) needs a *reproducible*
-credential to present. The admin ``POST /apps`` endpoint cannot provide
-one — the registrar mints a random key a caller must then hand to another
-process — so the seed writes the row directly at boot from configuration
-(``user_config.local_dev_apps``), storing the same PBKDF2 hash + prefix
-the registrar stores, so verification runs the identical ``_by_api_key``
-path a production credential takes.
+App needs a *reproducible* credential to present. The admin ``POST /apps``
+endpoint cannot provide one — the registrar mints a random key a caller
+must then hand to another process — so the seed writes the row directly at
+boot from configuration (``user_config.local_dev_apps``), storing the same
+PBKDF2 hash + prefix the registrar stores, so verification runs the
+identical ``_by_api_key`` path a production credential takes. (The one
+consumer this module had — the singlebox Backend's manager-sync sender —
+now self-signs its BCS principals and no longer presents an app key, so
+shipped configurations seed nothing; the machinery stays for future local
+integrations that genuinely need a registry-backed dev App.)
 
 Discipline, so this can never become a production backdoor:
 
