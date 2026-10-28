@@ -49,6 +49,12 @@ class ExpertCatalogService(ExpertCatalogServiceProtocol):
         value = self.catalog.get(self._scope(tenant), expert_id)
         if value is None:
             raise ExpertNotFoundError("expert is not available")
+        # Derive display facts from the stored declaration so old catalogue rows
+        # need no migration. Connection overrides remain private execution input.
+        value["mcp"] = [
+            {"server_code": entry["server_code"]}
+            for entry in value["manifest_template"]["manifest"].get("mcp", [])
+        ]
         return value
 
     def categories(self, *, tenant):
