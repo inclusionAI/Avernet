@@ -5,7 +5,7 @@ use bcs_service_api::application::v1::{
     CreateSessionOutcome, DeleteResult, DeleteSession, DeleteSessionParticipant, GetSession,
     ListSessionMessages, ListSessions, MessageViewScope, Page, ParticipantMode,
     SessionCollectionResult, SessionCompletionResult, SessionDetail, SessionMessageService,
-    SessionParticipant, SessionCaller, SessionService, SessionStatus, UncollectSession,
+    SessionParticipant, SessionService, SessionStatus, UncollectSession,
     UpdateSession, UpdateSessionParticipant,
 };
 use bcs_service_api::types::{AttachmentType, MessageAttachment};

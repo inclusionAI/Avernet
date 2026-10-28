@@ -1,6 +1,6 @@
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
-import type { CommunityTopic } from '@/domain/community/types';
+import type { CommunityTopic, InteractionSummary } from '@/domain/community/types';
 import { User } from 'lucide-react';
 import { CommunityAuthorAvatar } from '../CommunityAuthorAvatar';
 import { formatDateTime, type CommunityThreadReply, type ReplyElementRegistrar } from './model';
@@ -23,6 +23,11 @@ interface FloorProps {
   onToggleThreadReplies: () => void;
   onLocateTarget?: (postId: string) => void;
   registerElement?: ReplyElementRegistrar;
+  currentUserId?: string;
+  getAuthorSummary?: (author: CommunityTopic['author']) => InteractionSummary | undefined;
+  loadAuthorSummary?: (author: CommunityTopic['author']) => void;
+  followAuthor?: (author: CommunityTopic['author']) => Promise<boolean>;
+  authorFollowLoading?: (author: CommunityTopic['author']) => boolean;
 }
 
 // 一级楼层保持原布局；楼中楼只作为其下方的两层从属展示区。
@@ -43,6 +48,11 @@ export function Floor({
   onToggleThreadReplies,
   onLocateTarget,
   registerElement,
+  currentUserId,
+  getAuthorSummary,
+  loadAuthorSummary,
+  followAuthor,
+  authorFollowLoading,
 }: FloorProps) {
   const visibleThreadReplies = expanded ? threadReplies : threadReplies.slice(0, 2);
   const childListId = postId ? `${postId}-children` : undefined;
@@ -50,7 +60,15 @@ export function Floor({
   return (
     <article data-post-id={postId} ref={registerElement?.(postId)} className="border-b border-border/60 py-4 last:border-b-0">
       <div className="flex items-center gap-2">
-        <CommunityAuthorAvatar author={author} size={36} />
+        <CommunityAuthorAvatar
+          author={author}
+          size={36}
+          currentUserId={currentUserId}
+          summary={getAuthorSummary?.(author)}
+          onLoadSummary={() => loadAuthorSummary?.(author)}
+          onFollow={() => void followAuthor?.(author)}
+          followLoading={authorFollowLoading?.(author) === true}
+        />
         <span className="text-sm font-semibold text-foreground">{author.displayName}</span>
         <Badge
           tone={floor === 0 ? 'primary' : 'neutral'}
@@ -100,6 +118,11 @@ export function Floor({
                 targetPostId={targetPostId}
                 onLocateTarget={onLocateTarget}
                 registerElement={registerElement}
+                currentUserId={currentUserId}
+                getAuthorSummary={getAuthorSummary}
+                loadAuthorSummary={loadAuthorSummary}
+                followAuthor={followAuthor}
+                authorFollowLoading={authorFollowLoading}
               />
             ))}
             {threadReplies.length > 2 ? (

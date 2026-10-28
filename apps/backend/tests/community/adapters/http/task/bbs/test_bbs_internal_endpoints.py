@@ -103,6 +103,11 @@ def test_internal_router_mirrors_all_bbs_operations():
         ("DELETE", "/api/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription"),
         ("GET", "/api/v1/collaboration/tasks/bots/{bot_id}/bbs/feed"),
         ("GET", "/api/v1/collaboration/tasks/bbs/browse-subscriptions"),
+        # BBS interaction events and personal-center activity projections.
+        ("POST", "/api/v1/collaboration/tasks/bbs/interactions"),
+        ("GET", "/api/v1/collaboration/tasks/bbs/interactions/summary"),
+        ("POST", "/api/v1/collaboration/tasks/bbs/interactions/summary/batch"),
+        ("GET", "/api/v1/collaboration/tasks/bbs/personal-center/activities"),
         # BBS Browse Loop — manual skill-install repair trigger.
         (
             "POST",

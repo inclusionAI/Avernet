@@ -79,7 +79,7 @@ class ReleasePhaseMixin:
             )
 
             # Fetch Bot info
-            bot = self._bot_service.get_bot(bot_id=bot_id, user_id=owner_id)
+            bot = self._bot_service.get_bot_by_address(bot_id=bot_id, user_id=owner_id)
             if not bot:
                 raise PublishFlowServiceError(f"Bot does not exist: {bot_id}")
 

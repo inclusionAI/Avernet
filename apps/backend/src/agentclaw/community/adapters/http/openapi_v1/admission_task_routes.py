@@ -51,6 +51,27 @@ TASK_BBS_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # BBS Browse-Loop per-owner list: a backend read keyed by the explicit
     # ``owner_id`` query (subscription owner), not the logged-in user, so an
     # application caller may query any owner just like the unified BBS writes.
+    # BBS interaction events and summaries. The actor and requested dimensions
+    # are explicit inputs and no bot is addressed, so admission is OPEN and
+    # authorization remains NoCheck.
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/bbs/interactions",
+    ): AdmissionMode.OPEN,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/bbs/interactions/summary",
+    ): AdmissionMode.OPEN,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/bbs/interactions/summary/batch",
+    ): AdmissionMode.OPEN,
+    # Personal Center is OPEN only at the admission gate; the handler binds
+    # owner_user_id to the verified human principal and otherwise returns 403.
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/bbs/personal-center/activities",
+    ): AdmissionMode.OPEN,
     (
         "GET",
         "/openapi/v1/collaboration/tasks/bbs/browse-subscriptions",

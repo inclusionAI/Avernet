@@ -42,7 +42,7 @@ table. Existing authenticated Bot reads remain available.
 | REISSUING | Initial caller issues once; later workers reconcile remote operation marker | Unknown result stays frozen; no blind second issuance |
 | WAITING_AUTHORIZATION | Require selected generation and ISSUED AAC with token | Pending is not success; only executor may retrieve consent metadata |
 | UPDATING_RUNTIME | Inject selected token via existing draft/online/verify/Caller fan-out | Any error, empty binding set or empty device acknowledgement blocks retirement |
-| RETIRING_OLD_CREDENTIALS | Explicit RPC retires previous live generations and caches | Must acknowledge; partial outcomes retry forward |
+| RETIRING_OLD_CREDENTIALS | Explicit RPC retires only previous local credential caches; AgentPass handles old remote credential expiry | Must acknowledge local writes; never revoke the shared Agent; partial outcomes retry forward |
 | COMMITTING_OWNER | Recheck Bot/marker/work orders/executor; update responsibility and permissions atomically | DB failure preserves old Owner and maintenance marker; replay final transaction |
 | SUCCEEDED | New Owner committed; old Owner collaborator row removed; lock released | Repeated request/status returns original operation |
 
@@ -150,3 +150,24 @@ Backend API calls first: where Backend already normalizes publish/resource
 locators, validate that API compatibility instead of assuming SecBaaS directly
 reads ac_bot_publish or requiring an unsupported client change. Any confirmed
 caller contract change belongs in that consumer's later review and acceptance.
+
+## 2026-10-27 provider clarification and publication compatibility
+
+AgentPass confirmed `revokeIdentityCredential` deletes the shared agentCode's
+Agent and cascades to its credentials. Owner handoff must not invoke that API.
+The compatible `retireAgentCredentials` RPC now only retires old local caches;
+remote credentials follow AgentPass's automatic retirement/expiry. This does not
+promise immediate remote invalidation. Agents already deleted by the old path
+need provider recovery/re-registration before runtime acceptance.
+
+Legacy publication requests still accept `publish_id` or owner-shaped locators.
+Both read and write permission interceptors resolve the Bot's current Owner;
+only writes are blocked by the handoff maintenance fence. Build, promotion,
+restart, retry, restore, rollback and scaling load the Bot through stable
+address lookup. The publish record, resource paths and runtime legacy locator
+keep entity identity. New approvals use the current Owner and leave history
+unchanged. Deletion checks current ownership and protection rules before any
+version teardown, then cleans service-Bot resources under entity. Legacy scale
+and direct status mutations now require the same ADMIN/Owner authorization as
+other publication writes. Frontend payloads, schema and personal/default deletion
+policies are unchanged.

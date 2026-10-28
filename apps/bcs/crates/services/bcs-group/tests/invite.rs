@@ -38,9 +38,6 @@ struct Fixture {
     /// handover and edge-withdrawal tests drive
     /// it directly.
     authority_repo: Arc<bcs_bot_store::MemoryBotRepo>,
-    authority: Arc<
-        dyn bcs_service_api::core::bot_authority::BotAuthorityCoreService,
-    >,
 }
 
 impl Fixture {
@@ -81,7 +78,6 @@ impl Fixture {
             sessions,
             bots,
             authority_repo,
-            authority,
         }
     }
 
@@ -112,17 +108,6 @@ impl Fixture {
         .await;
     }
 
-    async fn transfer_bot(&self, bot_uuid: &str, from: &str, to: &str) {
-        bcs_test_support::grant_owner_edge(&self.authority_repo, bot_uuid, to)
-            .await;
-        bcs_test_support::revoke_authority_edge(
-            &self.authority_repo,
-            bot_uuid,
-            from,
-            bcs_bot_store::memory_authority::MemoryAuthorityEdgeKind::Manager,
-        )
-        .await;
-    }
 
     async fn store_group(&self, group_id: &str, driver: &str) {
         let mut group = Group::new(

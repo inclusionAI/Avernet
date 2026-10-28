@@ -241,3 +241,17 @@ journal and TaskQueue coordinator. It preserves Bot/entity/tenant/environment
 identity and commits mutable Owner responsibility only after fenced credential
 and runtime cutover. See [its contract](owner_handoff/README.md). Legacy resource
 addressing remains shared with normal Bot lifecycle callers.
+
+### Resource lookup and deletion after Owner handoff
+
+`BotService.get_bot_by_address(bot_id, user_id)` is an internal resource query:
+`user_id` is a legacy entity/current-Owner locator, not caller authority. It uses
+`BotAddressResolver` and enriches the resolved Bot through the strict current-Owner
+`get_bot` query. Transport callers must authorize the authenticated actor before
+using this resource lookup. Ambiguity and database errors propagate.
+
+`validate_delete_bot` checks current ownership and existing deletion protections
+without releasing devices or credentials. Publishing calls it before tearing
+down any version container. Actual deletion repeats validation; current ownership
+selects the Bot row while transferable service-Bot resources are cleaned using
+immutable entity. Personal/default cleanup keeps its original Owner semantics.

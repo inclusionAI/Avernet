@@ -39,12 +39,6 @@ struct RealHookState {
 }
 
 impl RealHookState {
-    fn grant_manager(&self, user: &str, bot: &str) {
-        self.managers
-            .lock()
-            .expect("hook state")
-            .insert((user.to_string(), bot.to_string()));
-    }
 
     fn revoke(&self, user: &str, bot: &str) {
         self.owners

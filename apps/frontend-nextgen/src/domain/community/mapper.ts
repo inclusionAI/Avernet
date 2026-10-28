@@ -8,6 +8,15 @@ import type {
   CommunityReply,
   CommunityTopic,
   CommunityTopicType,
+  ForumActorRef,
+  ForumTargetRef,
+  InteractionActorType,
+  InteractionStats,
+  InteractionSummary,
+  InteractionSummaryQuery,
+  InteractionTargetType,
+  PersonalCenterActivity,
+  PersonalCenterActivityType,
 } from './types';
 
 export interface CommunityAuthorDto {
@@ -295,5 +304,138 @@ export function mapCommunityReplyDto(dto: CommunityReplyDto): CommunityReply {
         )
       : undefined,
     childReplies: (dto.children ?? []).map(mapCommunityReplyDto),
+  };
+}
+
+export interface InteractionStatsDto {
+  view_count?: number | null;
+  like_count?: number | null;
+  favorite_count?: number | null;
+  follow_count?: number | null;
+  accept_count?: number | null;
+  topic_count?: number | null;
+  reply_count?: number | null;
+  accepted_reply_count?: number | null;
+  reply_participant_count?: number | null;
+  helpful_reply_count?: number | null;
+  [key: string]: unknown;
+}
+
+export interface InteractionSummaryQueryDto {
+  actor_type?: string;
+  actor_id?: string;
+  target_type?: string;
+  target_id?: string;
+  [key: string]: unknown;
+}
+
+export interface InteractionSummaryDto extends InteractionStatsDto {
+  scope?: string;
+  [key: string]: unknown;
+}
+
+export interface InteractionRecordedDto {
+  actor_type?: string;
+  actor_id?: string;
+  action_type?: string;
+  target_type?: string;
+  target_id?: string;
+  recorded?: boolean;
+  [key: string]: unknown;
+}
+
+export interface PersonalCenterActivityDto {
+  activity_type?: string;
+  actor_type?: string;
+  actor_id?: string;
+  target_type?: string;
+  target_id?: string;
+  topic_id?: string;
+  post_id?: string | null;
+  happened_at?: string;
+  body_preview?: string;
+  [key: string]: unknown;
+}
+
+function interactionActorType(value: string | undefined): InteractionActorType {
+  return value?.toUpperCase() === 'BOT' ? 'BOT' : 'HUMAN';
+}
+
+function interactionTargetType(value: string | undefined): InteractionTargetType {
+  const normalized = value?.toUpperCase();
+  if (normalized === 'POST' || normalized === 'HUMAN' || normalized === 'BOT') return normalized;
+  return 'TOPIC';
+}
+
+function countOrZero(value: number | null | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+function mapSummaryActor(dto: InteractionSummaryQueryDto): ForumActorRef | undefined {
+  if (!dto.actor_type || !dto.actor_id) return undefined;
+  return { actorType: interactionActorType(dto.actor_type), id: dto.actor_id };
+}
+
+function mapSummaryTarget(dto: InteractionSummaryQueryDto): ForumTargetRef | undefined {
+  if (!dto.target_type || !dto.target_id) return undefined;
+  return { targetType: interactionTargetType(dto.target_type), id: dto.target_id };
+}
+
+export function mapInteractionStatsDto(dto: InteractionStatsDto): InteractionStats {
+  return {
+    viewCount: countOrZero(dto.view_count),
+    likeCount: countOrZero(dto.like_count),
+    favoriteCount: countOrZero(dto.favorite_count),
+    followCount: countOrZero(dto.follow_count),
+    acceptCount: countOrZero(dto.accept_count),
+    topicCount: countOrZero(dto.topic_count),
+    replyCount: countOrZero(dto.reply_count),
+    acceptedReplyCount: countOrZero(dto.accepted_reply_count),
+    replyParticipantCount: countOrZero(dto.reply_participant_count),
+    helpfulReplyCount: countOrZero(dto.helpful_reply_count),
+  };
+}
+
+export function mapInteractionSummaryQuery(query: InteractionSummaryQuery): InteractionSummaryQueryDto {
+  if (query.actor && query.target) {
+    return {
+      actor_type: query.actor.actorType,
+      actor_id: query.actor.id,
+      target_type: query.target.targetType,
+      target_id: query.target.id,
+    };
+  }
+  if (query.actor) return { actor_type: query.actor.actorType, actor_id: query.actor.id };
+  if (query.target) return { target_type: query.target.targetType, target_id: query.target.id };
+  return {};
+}
+
+export function mapInteractionSummaryDto(dto: InteractionSummaryDto): InteractionSummary {
+  const actor = mapSummaryActor(dto);
+  const target = mapSummaryTarget(dto);
+  const scope = actor && target ? 'ACTOR_TARGET' : actor ? 'ACTOR' : 'TARGET';
+  return { scope, actor, target, ...mapInteractionStatsDto(dto) };
+}
+
+export function mapPersonalCenterActivityDto(
+  dto: PersonalCenterActivityDto,
+): PersonalCenterActivity | null {
+  const activityType = (dto.activity_type?.toUpperCase() ?? '') as PersonalCenterActivityType;
+  const actorType = dto.actor_type?.toUpperCase();
+  const targetId = dto.target_id?.trim();
+  const actorId = dto.actor_id?.trim();
+  if (!['AUTHORED', 'FAVORITED', 'VIEWED', 'LIKED', 'REPLIED'].includes(activityType)) return null;
+  if (!actorId || !targetId || !dto.topic_id) return null;
+  return {
+    activityType,
+    actor: { actorType: interactionActorType(actorType), id: actorId },
+    target: {
+      targetType: interactionTargetType(dto.target_type),
+      id: targetId,
+    },
+    topicId: dto.topic_id,
+    postId: dto.post_id?.trim() || undefined,
+    happenedAt: dto.happened_at ?? '',
+    bodyPreview: dto.body_preview ?? '',
   };
 }

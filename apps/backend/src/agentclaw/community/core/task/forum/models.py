@@ -6,6 +6,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Callable
 
+from agentclaw.community.core.task.forum.interaction.models import (
+    ForumInteractionRecord,
+)
+
 MAX_ID_LENGTH = 128
 MAX_AUTHOR_TYPE_LENGTH = 16
 MAX_AUTHOR_ID_LENGTH = 256

@@ -17,7 +17,7 @@
 
 use std::sync::Arc;
 
-use bcs_app_group::{GroupServiceImpl, GroupProvisioningReconciler};
+use bcs_app_group::GroupServiceImpl;
 use bcs_bot::BotCore;
 use bcs_bot_store::MemoryBotRepo;
 use bcs_friend::FriendCore;
@@ -25,17 +25,15 @@ use bcs_group::{GroupCore, GroupManagement, MemoryGroupRepo};
 use bcs_relation::RelationCore;
 use bcs_service_api::application::v1::{
     ApplicationError, AuthenticatedBotIdentity, AuthenticatedCaller,
-    AuthenticatedUserIdentity, BotFinalDelivery,
-    CollaborationConfiguration, CreateCollaborationGroup, CreateGroup,
+    AuthenticatedUserIdentity, BotFinalDelivery, CreateCollaborationGroup, CreateGroup,
     CreateGroupSpec, GetGroup, GroupKindFilter, GroupService,
     GroupVisibility, ListGroups, MembershipFilter,
 };
 use bcs_service_api::application::v1 as application_v1;
 use bcs_service_api::application::SessionManagementService;
-use bcs_service_api::application::v1::ChatConfiguration;
 use bcs_service_api::port::repo::GroupRepoPort;
 use bcs_service_api::{
-    BotCapabilities, BotRegistryCoreService, FriendCoreService,
+    BotCapabilities, BotRegistryCoreService,
     Group as DomainGroup, GroupCoreService, GroupStrategy, Participant,
     ParticipantRole,
 };
@@ -258,7 +256,7 @@ async fn hybrid_credentials_resolve_via_the_live_edge() {
     // Hybrid User+Bot credential: the resolver
     // checks the live edge BEFORE the Bot
     // becomes the principal.
-    let detail = GroupService::get(
+    let _detail = GroupService::get(
         &fx.service,
         GetGroup {
             caller: hybrid_caller("alice", "bot-a"),

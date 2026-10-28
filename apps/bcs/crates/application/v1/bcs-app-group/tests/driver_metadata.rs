@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use bcs_app_group::{GroupServiceConfig, GroupServiceImpl};
+use bcs_app_group::GroupServiceImpl;
 use bcs_bot::BotCore;
 use bcs_bot_store::MemoryBotRepo;
 use bcs_friend::FriendCore;

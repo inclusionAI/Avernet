@@ -74,7 +74,7 @@ impl Fixture {
     }
 }
 
-fn delete_as(service: &Bot, staff_no: &str, bot_id: &str) -> BotLeaveCommand {
+fn delete_as(_service: &Bot, staff_no: &str, bot_id: &str) -> BotLeaveCommand {
     BotLeaveCommand {
         caller_actor_id: Some(format!("human_{staff_no}")),
         human_actor_id: Some(format!("human_{staff_no}")),

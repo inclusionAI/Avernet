@@ -24,7 +24,7 @@ use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_service_api::port::repo::BotControlPlaneRepoPort;
 use bcs_service_api::types::bot_authority::BotAccessRelation;
 use bcs_service_api::{
-    ActorKind, ActorStatus, BotCapabilities, BotRepoPort,
+    ActorStatus, BotCapabilities, BotRepoPort,
 };
 use bcs_test_support::contract::bot_mine_contract::{
     BotControllableContractFixture, run_bot_controllable_contract,
@@ -109,13 +109,6 @@ impl SqlControllableFixture {
             .expect("execute seed statement");
     }
 
-    async fn execute_with(
-        &self,
-        sql: &str,
-        kind: BotAccessRelation,
-    ) {
-        let _ = (sql, kind);
-    }
 }
 
 #[async_trait]

@@ -34,6 +34,23 @@ function gateway(overrides: Partial<CommunityGateway> = {}): CommunityGateway {
     })),
     closeTopic: jest.fn(async () => undefined),
     setPostHelpful: jest.fn(async () => undefined),
+    createInteraction: jest.fn(async () => undefined),
+    getInteractionSummary: jest.fn(async () => ({
+      scope: 'ACTOR' as const,
+      viewCount: 0,
+      likeCount: 0,
+      favoriteCount: 0,
+      followCount: 0,
+      acceptCount: 0,
+      topicCount: 0,
+      replyCount: 0,
+      acceptedReplyCount: 0,
+      replyParticipantCount: 0,
+      helpfulReplyCount: 0,
+    })),
+    getInteractionSummaryBatch: jest.fn(async () => []),
+    getPersonalCenterActivities: jest.fn(async () => ({ items: [], total: 0 })),
+    listBrowseSubscriptions: jest.fn(async () => []),
     ...overrides,
   };
 }
@@ -355,5 +372,73 @@ describe('CommunityService', () => {
       { viewerAuthorId: 'u1', viewerAuthorType: 'HUMAN' },
       undefined,
     );
+  });
+
+  test('interaction methods validate dimensions and forward batch requests unchanged', async () => {
+    const createInteraction = jest.fn(async () => undefined);
+    const summaryResult = {
+      scope: 'ACTOR' as const,
+      viewCount: 0,
+      likeCount: 0,
+      favoriteCount: 0,
+      followCount: 0,
+      acceptCount: 0,
+      topicCount: 0,
+      replyCount: 0,
+      acceptedReplyCount: 0,
+      replyParticipantCount: 0,
+      helpfulReplyCount: 0,
+    };
+    const getInteractionSummary = jest.fn(async () => summaryResult);
+    const getInteractionSummaryBatch = jest.fn(async () => []);
+    const service = new CommunityService(
+      gateway({ createInteraction, getInteractionSummary, getInteractionSummaryBatch }),
+    );
+    const input = {
+      actor: { actorType: 'HUMAN' as const, id: '149844' },
+      actionType: 'LIKE' as const,
+      target: { targetType: 'TOPIC' as const, id: 'topic-1' },
+    };
+    const query = { target: { targetType: 'TOPIC' as const, id: 'topic-1' } };
+
+    await service.createInteraction(input);
+    await service.getInteractionSummary(query);
+    await service.getInteractionSummaryBatch([query]);
+
+    expect(createInteraction).toHaveBeenCalledWith(input, undefined);
+    expect(getInteractionSummary).toHaveBeenCalledWith(query, undefined);
+    expect(getInteractionSummaryBatch).toHaveBeenCalledWith([query], undefined);
+
+    await expect(
+      service.createInteraction({
+        actor: { actorType: 'HUMAN', id: ' ' },
+        actionType: 'LIKE',
+        target: query.target,
+      }),
+    ).rejects.toThrow('互动主体或目标不能为空');
+    await expect(async () => service.getInteractionSummary({})).rejects.toThrow('缺少互动统计维度');
+    await expect(async () => service.getInteractionSummaryBatch([])).rejects.toThrow('互动统计批次不能为空');
+  });
+
+  test('Personal Center forwards its owner-scoped query and pages subscription Bot source', async () => {
+    const getPersonalCenterActivities = jest.fn(async () => ({ items: [], total: 0 }));
+    const listBrowseSubscriptions = jest.fn(async () => ['bot-A']);
+    const service = new CommunityService(
+      gateway({ getPersonalCenterActivities, listBrowseSubscriptions }),
+    );
+    const query = {
+      ownerUserId: '149844',
+      actorScope: 'ALL' as const,
+      activityType: 'AUTHORED' as const,
+      targetType: 'ALL' as const,
+      page: 1,
+      pageSize: 10,
+    };
+
+    await service.getPersonalCenterActivities(query);
+    await service.listBrowseSubscriptions('149844');
+
+    expect(getPersonalCenterActivities).toHaveBeenCalledWith(query, undefined);
+    expect(listBrowseSubscriptions).toHaveBeenCalledWith('149844', undefined);
   });
 });

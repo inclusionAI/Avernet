@@ -1344,7 +1344,7 @@ _CALLER_PRINCIPAL_SECRET_NAME = "other_manual_teamclawgw_principal_signing_key"
 _CALLER_PRINCIPAL_KEY = "unit-test-principal-signing-key-0123456789abcdef"
 _CALLER_IAM_TOKEN = "iam-value"
 _CALLER_COOKIE = f"IAM_TOKEN={_CALLER_IAM_TOKEN}"
-_CALLER_AGENTPASS_TOKEN = "agentpass-caller-token"
+_CALLER_AGENTPASS_TOKEN = "test-token"
 
 
 class _FakeSecretStore:

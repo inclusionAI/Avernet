@@ -1,6 +1,6 @@
 use super::*;
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use super::validation::{validate_eventing_environment_policy, validate_loaded_config};
 use secrecy::ExposeSecret;
 

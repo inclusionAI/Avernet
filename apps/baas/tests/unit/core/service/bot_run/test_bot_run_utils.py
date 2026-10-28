@@ -781,7 +781,7 @@ class TestResolveCallerBinding:
             bot_id=f"{BOT_ID}:{ENTITY_ID}",
             metadata={
                 "user_id": "workno-agent",
-                "caller_token": "agentpass-token",
+                "caller_token": "test-token",
                 "type": "agentpass",
             },
         )
@@ -791,7 +791,7 @@ class TestResolveCallerBinding:
             user_id="workno-agent",
             credential=CallerExecutionCredential(
                 type="agentpass",
-                token="agentpass-token",
+                token="test-token",
             ),
         )
         assert info.sandbox_id == "sbx-agent"
@@ -880,7 +880,7 @@ class TestIsCallerMode:
         )
         metadata = {
             "user_id": "workno-agent",
-            "caller_token": "agentpass-token",
+            "caller_token": "test-token",
             "type": "agentpass",
         }
         assert is_caller_mode(metadata, binding) is True
@@ -900,11 +900,11 @@ class TestIsCallerMode:
             baas_session_id=None,
         )
         metadata = normalize_caller_identity_metadata(
-            {"user_id": "u-1", "caller_token": "agentpass-token"}
+            {"user_id": "u-1", "caller_token": "test-token"}
         )
         assert metadata == {
             "user_id": "u-1",
-            "caller_token": "agentpass-token",
+            "caller_token": "test-token",
         }
         assert is_caller_mode(metadata, binding) is True
 
@@ -917,7 +917,7 @@ class TestIsCallerMode:
                 bot_id=BOT_ID,
                 metadata={
                     "user_id": "u-1",
-                    "caller_token": "agentpass-token",
+                    "caller_token": "test-token",
                     "type": "unsupported",
                 },
             )
@@ -929,7 +929,7 @@ class TestStripSensitiveMetadata:
     def test_strips_unified_caller_token(self):
         result = strip_sensitive_metadata(
             {
-                "caller_token": "agentpass-token",
+                "caller_token": "test-token",
                 "user_id": "u-1",
                 "type": "agentpass",
                 "foo": "bar",
@@ -971,7 +971,7 @@ class TestNormalizeCallerIdentityMetadata:
     def test_bcn_canonical_keys_pass_through_unchanged(self):
         metadata = {
             "user_id": "workno-agent",
-            "caller_token": "agentpass-token",
+            "caller_token": "test-token",
             "type": "agentpass",
         }
         assert normalize_caller_identity_metadata(metadata) == metadata
@@ -980,7 +980,7 @@ class TestNormalizeCallerIdentityMetadata:
         result = normalize_caller_identity_metadata(
             {
                 "user_id": "u-1",
-                "caller_execution_token": "agentpass-token",
+                "caller_execution_token": "test-token",
                 "caller_execution_token_type": "agentpass",
             }
         )
@@ -1001,7 +1001,7 @@ class TestStripSensitiveMetadataLegacy:
         metadata = {
             "user_id": "u-1",
             "iam_token": "iam-token-value",
-            "caller_token": "agentpass-token",
+            "caller_token": "test-token",
             "caller_token_type": "agentpass",
             "foo": "bar",
         }

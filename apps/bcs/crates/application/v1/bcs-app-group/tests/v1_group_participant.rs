@@ -27,7 +27,7 @@ use bcs_session::SessionManagementServiceImpl;
 use bcs_session_store::MemorySessionRepo;
 use bcs_test_support::NoopSystemMessageService;
 
-use bcs_app_group::{GroupServiceConfig, GroupServiceImpl};
+use bcs_app_group::GroupServiceImpl;
 
 const GROUP_ID: &str = "group-1";
 

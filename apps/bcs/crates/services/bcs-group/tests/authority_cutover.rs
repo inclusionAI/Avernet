@@ -25,7 +25,7 @@ use bcs_service_api::port::repo::BotRepoPort;
 use bcs_service_api::{
     BotCapabilities, GroupCreateCommand, GroupCreateParticipantCommand,
     GroupManagementService, GroupRemoveMemberCommand, GroupUseCaseError,
-    GroupUpdateVisibilityCommand, ParticipantRole,
+    GroupUpdateVisibilityCommand,
 };
 use bcs_session_store::MemorySessionRepo;
 use bcs_service_api::port::bot_authority::BotAuthorityPort;

@@ -21,18 +21,15 @@ use async_trait::async_trait;
 
 use bcs_app_session::SessionServiceImpl;
 use bcs_bot::BotCore;
-use bcs_bot_store::{MemoryBotRepo, memory_authority::{
-    MemoryAuthorityEdgeKind, MemoryAuthorityEdgeStatus,
-}};
+use bcs_bot_store::{MemoryBotRepo, memory_authority::MemoryAuthorityEdgeKind};
 use bcs_group::{GroupCore, MemoryGroupRepo};
 use bcs_session::SessionManagementServiceImpl;
 use bcs_session_store::MemorySessionRepo;
 use bcs_service_api::application::v1::{
     AuthenticatedBotIdentity, AuthenticatedCaller, AuthenticatedUserIdentity,
-    CollectSession, CreateSession, GetSession, IdentityPolicy, ListSessions,
-    SessionService, UpdateSession, resolve_authorized_principal,
+    CollectSession, CreateSession, GetSession,
+    SessionService, UpdateSession,
 };
-use bcs_service_api::port::bot_authority::BotAuthorityPort;
 use bcs_service_api::port::repo::{GroupRepoPort, NewSessionParams, SessionRepoPort};
 use bcs_service_api::core::FriendCoreService;
 use bcs_service_api::port::repo::BotRepoPort;
@@ -42,20 +39,16 @@ use bcs_service_api::{
     CollaborationDefinition, CollaborationRuntimeError, CollaborationRuntimeService,
     ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome,
     HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome,
-    Participant, ParticipantRole, ServiceError,
+    Participant, ParticipantRole,
     Group, GroupCoreService,
-    GroupStrategy, GroupStatus, GroupUseCaseError,
-    MessageRole, SessionHistoryCommand, SessionHistoryResult, SessionKind,
-    GroupHistoryCommand, GroupHistoryResult, MessageHistoryOptions,
-    SessionManagementService, StartStateMachineRunCommand,
+    GroupStrategy, GroupUseCaseError, SessionHistoryCommand, SessionHistoryResult, SessionKind,
+    GroupHistoryCommand, GroupHistoryResult, MessageHistoryOptions, StartStateMachineRunCommand,
     StartStateMachineRunOutcome, StateMachineDeliveryCorrelation,
-    StateMachineRun, StateMachineRunStatus,
 };
 use bcs_test_support::{
     NoopSystemMessageService as NoopSystemMessage, authority_hook_for, failing_authority_hook,
     grant_manager_edge, grant_owner_edge,
 };
-use tokio::sync::Mutex;
 
 // ── fixture ──────────────────────────────────────────────
 
@@ -201,7 +194,6 @@ struct Fixture {
     service: SessionServiceImpl,
     groups: Arc<GroupCore>,
     repo: Arc<MemoryBotRepo>,
-    authority: Arc<dyn BotAuthorityPort>,
     session_repo: Arc<MemorySessionRepo>,
 }
 
@@ -254,7 +246,6 @@ impl Fixture {
             service,
             groups,
             repo: bot_repo,
-            authority,
             session_repo,
         }
     }
@@ -336,7 +327,6 @@ impl Fixture {
 
     async fn legacy_creator_edge(&self, human_actor: &str, bot: &str) {
         // a legacy creator relation edge (row 4 历史数据)
-        use bcs_service_api::RelationCoreService as _;
         // The fixture uses no relation core; the edge is
         // asserted at the app level by NOT carrying any
         // relation core. This helper exists for
@@ -862,7 +852,7 @@ async fn create_resolves_the_hybrid_session_caller_via_the_edge() {
     fx.seed_bot("bot-a", Some("alice"), "public").await;
     fx.seed_group("g1", "bot-a", "protected").await;
 
-    fn create(fx: &Fixture, user: &str, bot: &str) -> CreateSession {
+    fn create(_fx: &Fixture, user: &str, bot: &str) -> CreateSession {
         CreateSession {
             caller: hybrid_caller(user, bot),
             group_id: "g1".to_string(),

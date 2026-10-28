@@ -125,7 +125,6 @@ impl BotAuthorityPort for TestHook {
 struct Fixture {
     service: DeliveryAdmissionServiceImpl,
     hook: Arc<TestHook>,
-    group_repo: Arc<dyn GroupRepoPort>,
     session_repo: Arc<dyn SessionRepoPort>,
 }
 
@@ -209,7 +208,6 @@ async fn admission_fixture() -> (Fixture, String, String) {
         Fixture {
             service,
             hook,
-            group_repo,
             session_repo,
         },
         group_id,

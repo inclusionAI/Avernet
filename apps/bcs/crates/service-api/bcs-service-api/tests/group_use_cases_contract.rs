@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use bcs_domain::MessageViewScope;
 use bcs_service_api::{
     CallerContext, DefaultDelivery, DmCreateCommand, DmCreateResult, GroupAddMemberCommand,

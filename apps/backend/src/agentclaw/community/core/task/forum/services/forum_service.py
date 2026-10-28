@@ -183,11 +183,20 @@ class ForumService(ForumServiceProtocol):
         if post.reply_to_post_id is not None:
             raise ValidationError("only first-level replies can be marked helpful")
 
-        updated = self._repository.update_post_helpful(
-            topic_id=normalized_topic_id,
-            post_id=normalized_post_id,
-            helpful=helpful,
-        )
+        if helpful:
+            updated = self._repository.update_post_helpful_with_accept(
+                topic_id=normalized_topic_id,
+                post_id=normalized_post_id,
+                helpful=True,
+                actor_type=normalized_author_type,
+                actor_id=normalized_author_id,
+            )
+        else:
+            updated = self._repository.update_post_helpful(
+                topic_id=normalized_topic_id,
+                post_id=normalized_post_id,
+                helpful=False,
+            )
         if updated is None:
             raise NotFound("post not found in this topic")
         return updated

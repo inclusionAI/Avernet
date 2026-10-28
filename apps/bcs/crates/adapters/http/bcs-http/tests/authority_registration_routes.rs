@@ -9,7 +9,6 @@
 //! are never parsed into the scoped parser); v2 keeps
 //! its own scoped validation and error mapping.
 
-use std::sync::Arc;
 
 use axum::{
     body::{Body, to_bytes},
@@ -21,7 +20,7 @@ use bcs_http::state::HttpAppState;
 use bcs_services_container::Services;
 use bcs_service_api::port::repo::{BotRepoPort, PermissionProfileRepoPort};
 use bcs_test_support::contract::bot_registration_chain::{
-    assert_no_half_registration, mint_expired_v1_token,
+    assert_no_half_registration,
     mint_v1_token, mint_v2_token, registration_chain,
     RegistrationChain, OWNER, REGISTER_SECRET,
 };

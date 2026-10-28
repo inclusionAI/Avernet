@@ -1,8 +1,14 @@
+import { MAX_INTERACTION_SUMMARY_BATCH } from '@/domain/community/constants';
 import type {
   CommunityReplyPager,
   CommunityTopicQuery,
   CreateCommunityReplyInput,
   CreateCommunityTopicInput,
+  InteractionSummary,
+  InteractionSummaryQuery,
+  PersonalCenterActivityPage,
+  PersonalCenterActivityQuery,
+  RecordInteractionInput,
 } from '@/domain/community/types';
 import type { CommunityGateway, GetCommunityTopicOptions } from './communityGateway';
 
@@ -79,5 +85,41 @@ export class CommunityService {
 
   closeTopic(topicId: string, authorId: string, signal?: AbortSignal) {
     return this.gateway.closeTopic(topicId, authorId, signal);
+  }
+
+  async createInteraction(input: RecordInteractionInput, signal?: AbortSignal) {
+    if (!input.actor.id.trim() || !input.target.id.trim()) {
+      throw new Error('互动主体或目标不能为空');
+    }
+    await this.gateway.createInteraction(input, signal);
+  }
+
+  getInteractionSummary(query: InteractionSummaryQuery, signal?: AbortSignal) {
+    if (!query.actor && !query.target) throw new Error('缺少互动统计维度');
+    return this.gateway.getInteractionSummary(query, signal);
+  }
+
+  getInteractionSummaryBatch(
+    queries: InteractionSummaryQuery[],
+    signal?: AbortSignal,
+  ): Promise<InteractionSummary[]> {
+    if (!queries.length) throw new Error('互动统计批次不能为空');
+    if (queries.length > MAX_INTERACTION_SUMMARY_BATCH) {
+      throw new Error(`互动统计每次最多 ${MAX_INTERACTION_SUMMARY_BATCH} 项`);
+    }
+    return this.gateway.getInteractionSummaryBatch(queries, signal);
+  }
+
+  getPersonalCenterActivities(
+    query: PersonalCenterActivityQuery,
+    signal?: AbortSignal,
+  ): Promise<PersonalCenterActivityPage> {
+    if (!query.ownerUserId.trim()) throw new Error('缺少当前用户身份');
+    return this.gateway.getPersonalCenterActivities(query, signal);
+  }
+
+  listBrowseSubscriptions(ownerUserId: string, signal?: AbortSignal) {
+    if (!ownerUserId.trim()) throw new Error('缺少当前用户身份');
+    return this.gateway.listBrowseSubscriptions(ownerUserId, signal);
   }
 }

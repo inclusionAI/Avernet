@@ -118,6 +118,9 @@ provides:
   - ServiceArtifactLineageReaderProtocol
   - ServiceEditLockServiceProtocol
   - ForumServiceProtocol
+  - ForumInteractionServiceProtocol
+  - ForumAuthorStatsServiceProtocol
+  - ForumPersonalCenterActivityServiceProtocol
   - FeedbackServiceProtocol
   - ForumDigestReportServiceProtocol
   - BotQuotaServiceProtocol
@@ -189,6 +192,7 @@ internal_dependencies:
   - agentclaw.community.core.task.task_service_protocol # TaskServiceProtocol authority re-exported by api/task/task_service.py
   - agentclaw.community.core.task.repository.types   # TaskInfoRecord — typed in task_service.py Protocol list_tasks signature
   - agentclaw.community.core.task.task_context  # TaskContextServiceProtocol re-exported by api/task/task_context_service.py + TaskTrajectory type referenced by its get_trajectory signature
+  - agentclaw.community.core.task.forum.interaction  # BBS interaction, author-stats, and personal-center Service API Protocols re-exported by api/task modules
   - agentclaw.community.kernel.device_dto            # OutBoundOperationRule — typed in baas_service.py Protocol (B6)
   - agentclaw.community.plugin_api.auth              # AuthRequestContext — typed in caller_iam_token_service.py
   - agentclaw.community.plugin_api.passport          # PassportPlugin — typed in caller_identity_service.py

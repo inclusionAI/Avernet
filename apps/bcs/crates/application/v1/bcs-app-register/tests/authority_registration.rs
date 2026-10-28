@@ -22,10 +22,9 @@
 //! singlebox gates (plan §6).
 
 use bcs_service_api::application::v1::{
-    ApplicationError, RegisterBot, RegisterService,
+    ApplicationError, RegisterBot,
 };
 use bcs_service_api::core::provider_registration::ProviderRegistrationMode;
-use bcs_service_api::core::BotRegistryCoreService;
 use bcs_service_api::port::repo::BotRepoPort;
 use bcs_service_api::port::repo::bot_provider::BotProviderRepoPort;
 use bcs_db_api::DbPlugin;

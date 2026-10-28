@@ -1,13 +1,25 @@
+import { mapBrowseSubscriptionDto } from '@/domain/lab/mapper';
 import {
   mapCommunityReplyDto,
   mapCommunityTopicDto,
+  mapInteractionSummaryDto,
+  mapPersonalCenterActivityDto,
 } from '@/domain/community/mapper';
 import type {
   CommunityReplyPager,
   CommunityTopicQuery,
   CreateCommunityReplyInput,
   CreateCommunityTopicInput,
+  InteractionSummary,
+  InteractionSummaryQuery,
+  PersonalCenterActivity,
+  PersonalCenterActivityPage,
+  PersonalCenterActivityQuery,
+  RecordInteractionInput,
 } from '@/domain/community/types';
+import {
+  listBrowseSubscriptions,
+} from '@/services/backendApi/lab/botConfigController';
 import {
   closeCommunityTopic,
   createCommunityReply,
@@ -17,6 +29,12 @@ import {
   listCommunityTopics,
   setCommunityPostHelpful,
 } from '@/services/backendApi/community/communityController';
+import {
+  createCommunityInteraction,
+  getCommunityInteractionSummary,
+  getCommunityInteractionSummaryBatch,
+} from '@/services/backendApi/community/interactionController';
+import { getPersonalCenterActivities } from '@/services/backendApi/community/personalCenterController';
 import { isEnvelopeSuccess } from '@/services/backendApi/types';
 import type { CommunityGateway, GetCommunityTopicOptions } from './communityGateway';
 
@@ -76,5 +94,55 @@ export class CommunityApiGateway implements CommunityGateway {
   async closeTopic(topicId: string, authorId: string, signal?: AbortSignal) {
     const response = await closeCommunityTopic(topicId, authorId, signal);
     if (!isEnvelopeSuccess(response)) throw new Error(response.message || '结帖失败，请稍后重试');
+  }
+
+  async createInteraction(input: RecordInteractionInput, signal?: AbortSignal) {
+    const recorded = requireData(await createCommunityInteraction(input, signal));
+    if (recorded.recorded !== true) throw new Error('互动记录失败');
+  }
+
+  async getInteractionSummary(
+    query: InteractionSummaryQuery,
+    signal?: AbortSignal,
+  ): Promise<InteractionSummary> {
+    return mapInteractionSummaryDto(requireData(await getCommunityInteractionSummary(query, signal)));
+  }
+
+  async getInteractionSummaryBatch(
+    queries: InteractionSummaryQuery[],
+    signal?: AbortSignal,
+  ): Promise<InteractionSummary[]> {
+    const data = requireData(await getCommunityInteractionSummaryBatch(queries, signal));
+    return data.items.map(mapInteractionSummaryDto);
+  }
+
+  async getPersonalCenterActivities(
+    query: PersonalCenterActivityQuery,
+    signal?: AbortSignal,
+  ): Promise<PersonalCenterActivityPage> {
+    const page = requireData(await getPersonalCenterActivities(query, signal));
+    const items: PersonalCenterActivity[] = (page.items ?? [])
+      .map(mapPersonalCenterActivityDto)
+      .filter((item): item is PersonalCenterActivity => item !== null);
+    return { total: page.total ?? 0, items };
+  }
+
+  async listBrowseSubscriptions(ownerUserId: string, signal?: AbortSignal) {
+    const botIds = new Set<string>();
+    let page = 1;
+    let total = 0;
+    let loaded = 0;
+    do {
+      const data = requireData(await listBrowseSubscriptions(ownerUserId, signal, page, 100));
+      total = data.total ?? 0;
+      const items = data.items ?? [];
+      if (!items.length) break;
+      loaded += items.length;
+      items
+        .map(mapBrowseSubscriptionDto)
+        .forEach((item) => item.botId && botIds.add(item.botId));
+      page += 1;
+    } while (loaded < total);
+    return [...botIds];
   }
 }

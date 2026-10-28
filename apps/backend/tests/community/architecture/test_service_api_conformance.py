@@ -209,6 +209,22 @@ from agentclaw.community.api.draft_edit_lease_service import (
     DraftEditLeaseServiceProtocol,
 )
 from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService
+from agentclaw.community.api.task.forum_interaction_service import (
+    ForumAuthorStatsServiceProtocol,
+    ForumInteractionServiceProtocol,
+)
+from agentclaw.community.api.task.forum_personal_center_activity_service import (
+    ForumPersonalCenterActivityServiceProtocol,
+)
+from agentclaw.community.core.task.forum.interaction.forum_author_stats_service import (
+    ForumAuthorStatsService,
+)
+from agentclaw.community.core.task.forum.interaction.forum_interaction_service import (
+    ForumInteractionService,
+)
+from agentclaw.community.core.task.forum.interaction.personal_center_activity_service import (
+    ForumPersonalCenterActivityService,
+)
 from agentclaw.community.core.bot_dormant.audit_service import DormantAuditService
 from agentclaw.community.core.bot_dormant.recycle_service import RecycleBotService
 from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
@@ -406,6 +422,12 @@ _PAIRS = [
     (SpaceMemberServiceProtocol, SpaceMemberService),
     (MarketFavoriteServiceProtocol, MarketFavoriteService),
     (BotMessageFeedbackServiceProtocol, BotMessageFeedbackService),
+    (ForumInteractionServiceProtocol, ForumInteractionService),
+    (ForumAuthorStatsServiceProtocol, ForumAuthorStatsService),
+    (
+        ForumPersonalCenterActivityServiceProtocol,
+        ForumPersonalCenterActivityService,
+    ),
     (ServicePublicationFacadeProtocol, ServicePublicationFacade),
     (ServiceEditLockServiceProtocol, ServiceEditLockService),
     (ServiceArtifactLineageReaderProtocol, ServiceArtifactLineageReader),

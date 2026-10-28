@@ -27,6 +27,7 @@ from agentclaw.community.core.task.forum.models import (
     ForumPollResultOptionRecord,
     ForumPollResultRecord,
     ForumPollSelection,
+    ForumInteractionRecord,
     ForumPostRecord,
     ForumTopicConfig,
     ForumTopicRecord,
@@ -502,6 +503,74 @@ class ForumPostModel(Base):
 
 
 register_avernet_tenant_guard(ForumTopicModel)
+
+
+class ForumInteractionModel(Base):
+    """One append-only BBS interaction event.
+
+    Measurements are event counts, not state rows: the same actor may act on
+    the same target many times and each successful write inserts one row. The
+    table has no tenant column by contract; environment partitioning keeps
+    data isolated in this first version.
+    """
+
+    __tablename__ = "ac_forum_interaction"
+
+    id = Column(
+        AutoIncrementBigInteger,
+        primary_key=True,
+        autoincrement=True,
+        nullable=False,
+    )
+    actor_type = Column(_AUTHOR_TYPE, nullable=False)
+    actor_id = Column(_binary_string(256), nullable=False)
+    action_type = Column(String(16), nullable=False)
+    target_type = Column(String(16), nullable=False)
+    target_id = Column(_binary_string(256), nullable=False)
+    env = Column(String(20), nullable=False, default=get_current_env)
+    gmt_create = Column(DateTime, nullable=False, server_default=func.now())
+    gmt_modified = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        Index(
+            "idx_forum_interaction_target",
+            "env",
+            "target_type",
+            "target_id",
+            "action_type",
+            "gmt_create",
+            "id",
+        ),
+        Index(
+            "idx_forum_interaction_actor",
+            "env",
+            "actor_type",
+            "actor_id",
+            "action_type",
+            "gmt_create",
+            "id",
+        ),
+    )
+
+    def to_record(self) -> ForumInteractionRecord:
+        return ForumInteractionRecord(
+            actor_type=self.actor_type,
+            actor_id=self.actor_id,
+            action_type=self.action_type,
+            target_type=self.target_type,
+            target_id=self.target_id,
+            env=self.env,
+            created_at=self.gmt_create,
+            updated_at=self.gmt_modified,
+        )
+
+
+
 
 
 class ForumBrowseSubscriptionModel(Base):

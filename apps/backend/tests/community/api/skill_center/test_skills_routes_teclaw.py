@@ -726,6 +726,10 @@ def test_parameter_routes_reject_non_admin_collaborator(method):
         "active_engine": "openclaw",
         "bot_type": "personal",
     }
+    # Every Bot lookup must describe the same persisted Owner in this fixture.
+    injector.get(BotRepository).get_by_id_and_owner.return_value = (
+        injector.get(BotRepository).get_by_id.return_value
+    )
     injector.get(
         CollaboratorService
     ).check_collaborator_permission.return_value = {
@@ -974,6 +978,10 @@ def test_parameter_routes_fail_closed_when_permission_service_errors(method):
         "active_engine": "openclaw",
         "bot_type": "personal",
     }
+    # Every Bot lookup must describe the same persisted Owner in this fixture.
+    injector.get(BotRepository).get_by_id_and_owner.return_value = (
+        injector.get(BotRepository).get_by_id.return_value
+    )
     injector.get(
         CollaboratorService
     ).check_collaborator_permission.side_effect = RuntimeError("unavailable")

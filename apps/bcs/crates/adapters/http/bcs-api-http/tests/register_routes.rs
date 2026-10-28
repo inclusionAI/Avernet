@@ -13,6 +13,14 @@ use tower::ServiceExt;
 mod register_support;
 use register_support::*;
 
+#[path = "register_support/requests.rs"]
+mod requests;
+use requests::*;
+
+#[path = "register_support/authenticated_requests.rs"]
+mod authenticated_requests;
+use authenticated_requests::authenticated_request;
+
 // ---------------------------------------------------------------------------
 // Fake register service.
 // ---------------------------------------------------------------------------

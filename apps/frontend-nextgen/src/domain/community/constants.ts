@@ -6,3 +6,8 @@ export const COMMUNITY_PAGE_SIZE = 10;
  * 每页固定展示 10 条一级回复。
  */
 export const COMMUNITY_REPLY_PAGE_SIZE = 10;
+
+/** 后端 summary batch 上限；前端在上层按页面分组，不在网关做隐式截断。 */
+export const MAX_INTERACTION_SUMMARY_BATCH = 100;
+/** Personal Center 列表页大小固定，防止分页参数随组件尺寸漂移。 */
+export const PERSONAL_CENTER_PAGE_SIZE = 10;
