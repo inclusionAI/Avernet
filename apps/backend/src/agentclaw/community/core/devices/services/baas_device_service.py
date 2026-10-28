@@ -919,7 +919,7 @@ class BaasDeviceService(DeviceService):
         if not bolt_id:
             return None
 
-        return self._bot_query.get_by_id_and_owner(bolt_id, binding.entity_id)
+        return self._bot_query.get_by_id_and_entity(bolt_id, binding.entity_id)
 
     def update_device_headers(
         self,

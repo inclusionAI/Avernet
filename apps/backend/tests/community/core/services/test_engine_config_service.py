@@ -41,7 +41,7 @@ def _record(*, status: str = "success", binding: dict | None = None,
 
 def _service(*, read_return=b'{"a": 1}', resolve_raises=None, provider="arca"):
     bot_repo = MagicMock()
-    bot_repo.get_by_id_and_owner.return_value = {"entity_id": "100018", "entity_type": "staff"}
+    bot_repo.get_by_id_and_entity.return_value = {"entity_id": "100018", "entity_type": "staff"}
 
     resolver = MagicMock()
     if resolve_raises is not None:

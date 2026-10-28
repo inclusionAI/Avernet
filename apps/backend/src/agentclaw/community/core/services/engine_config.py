@@ -227,7 +227,7 @@ class EngineConfigService:
 
         # entity coords for the arca/baas config mapper (teclaw ignores them); same
         # resolution as the bot-level engine-config GET.
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        bot = self._bot_repo.get_by_id_and_entity(bot_id, owner_id)
         entity_id = (bot or {}).get("entity_id") or owner_id
         entity_type = (bot or {}).get("entity_type") or "staff"
 

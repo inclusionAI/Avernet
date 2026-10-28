@@ -605,13 +605,13 @@ class TestResolveBotByBindingId:
         result = svc._resolve_bot_by_binding_id(1)
 
         assert result == {"bot_id": "b1", "bot_type": "desktop"}
-        bot_query.get_by_id_and_owner.assert_not_called()
+        bot_query.get_by_id_and_entity.assert_not_called()
 
     def test_fallback_via_binding_record(self):
         """服务 BOT：直接查不到，通过 binding 的 bolt_id + entity_id 查到。"""
         bot_query = MagicMock()
         bot_query.get_by_binding_id.return_value = None
-        bot_query.get_by_id_and_owner.return_value = {"bot_id": "b2", "bot_type": "service"}
+        bot_query.get_by_id_and_entity.return_value = {"bot_id": "b2", "bot_type": "service"}
 
         repo = MagicMock()
         repo.get_by_id.return_value = _make_binding_record(
@@ -623,7 +623,7 @@ class TestResolveBotByBindingId:
         result = svc._resolve_bot_by_binding_id(1)
 
         assert result == {"bot_id": "b2", "bot_type": "service"}
-        bot_query.get_by_id_and_owner.assert_called_once_with("b2", "u001")
+        bot_query.get_by_id_and_entity.assert_called_once_with("b2", "u001")
 
     def test_binding_not_found_returns_none(self):
         """binding_id 在两张表都查不到。"""
@@ -637,7 +637,7 @@ class TestResolveBotByBindingId:
         result = svc._resolve_bot_by_binding_id(99)
 
         assert result is None
-        bot_query.get_by_id_and_owner.assert_not_called()
+        bot_query.get_by_id_and_entity.assert_not_called()
 
     def test_binding_without_bolt_id_returns_none(self):
         """binding 记录存在但 device_props 里没有 bolt_id。"""
@@ -651,7 +651,7 @@ class TestResolveBotByBindingId:
         result = svc._resolve_bot_by_binding_id(1)
 
         assert result is None
-        bot_query.get_by_id_and_owner.assert_not_called()
+        bot_query.get_by_id_and_entity.assert_not_called()
 
     def test_binding_with_none_device_props_returns_none(self):
         """binding 记录的 device_props 为 None。"""
@@ -670,7 +670,7 @@ class TestResolveBotByBindingId:
         """binding 有 bolt_id 但 ac_bots 按 bot_id+owner_id 也查不到。"""
         bot_query = MagicMock()
         bot_query.get_by_binding_id.return_value = None
-        bot_query.get_by_id_and_owner.return_value = None
+        bot_query.get_by_id_and_entity.return_value = None
 
         repo = MagicMock()
         repo.get_by_id.return_value = _make_binding_record(
@@ -682,7 +682,7 @@ class TestResolveBotByBindingId:
         result = svc._resolve_bot_by_binding_id(1)
 
         assert result is None
-        bot_query.get_by_id_and_owner.assert_called_once_with("nonexistent", "u001")
+        bot_query.get_by_id_and_entity.assert_called_once_with("nonexistent", "u001")
 
 
 # ===========================================================================

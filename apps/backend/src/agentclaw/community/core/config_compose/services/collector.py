@@ -819,7 +819,7 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         draft channels yields ``{}``, so the artifact keeps its default.
         """
         return self._overrides_reader.overrides_for_stage(
-            user_id=req.user_id,
+            user_id=req.entity_id,
             bot_id=req.bot_id,
             accept_stages={None, "", "draft"},
         )
