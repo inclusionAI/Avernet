@@ -1,109 +1,120 @@
 import { Button, ConfirmDialog, IconButton, Input } from '@/components/ui';
 import { Modal, ModalContent, ModalDescription, ModalFooter, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import { cn } from '@/utils/cn';
-import { Eraser, MoreHorizontal, Pencil, Star, Trash2 } from 'lucide-react';
+import { Eraser, MoreHorizontal, Pencil, ScrollText, Share2, ShieldCheck, Trash2 } from 'lucide-react';
 import { useConversationSessionMenu, type ConversationSessionRowActions } from '../hooks/useConversationSessionMenu';
 import { ConversationSessionMeta } from './ConversationSessionMeta';
 
 export function ConversationSessionActions({
   title,
   createdAt,
-  favorite,
   actions,
   withMeta = true,
 }: {
   title: string;
   createdAt: string;
-  favorite?: { value?: boolean; pending: boolean; toggle(): void };
   actions?: ConversationSessionRowActions;
   /** 平齐化会话行(dmore)不展示右侧时间列,只出 hover「…」菜单;缺省包含时间槽。 */
   withMeta?: boolean;
 }) {
   const menu = useConversationSessionMenu(title, actions);
+  const titleMaxLength = actions?.features?.titleMaxLength;
   const menuPopover = (
     <Popover open={menu.menuOpen} onOpenChange={menu.setMenuOpen}>
-          {/* 选中仅绑定标题按钮；click 须冒泡，让其他会话菜单识别外部点击并关闭。 */}
-          <PopoverTrigger asChild>
-            <IconButton
-              label={menu.busy ? '会话操作或列表加载中，请稍候' : '会话更多操作'}
-              ariaLabel="会话更多操作"
-              size="sm"
-              icon={<MoreHorizontal className={withMeta ? 'h-4 w-4' : 'h-3.5 w-3.5'} />}
-              disabled={menu.busy || favorite?.pending}
-              className={cn(
-                'shrink-0',
-                !withMeta && 'h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground',
-              )}
-            />
-          </PopoverTrigger>
-          <PopoverContent
-            align="end"
-            className="w-44 p-1"
-            onCloseAutoFocus={(event) => {
-              if (menu.dialog) event.preventDefault();
-            }}
-          >
-            {favorite && (
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className="block">
-                      <Button
-                        variant="ghost"
-                        className="h-auto w-full justify-start gap-2 px-2 py-2 text-xs"
-                        disabled={menu.busy || favorite.pending || favorite.value === undefined}
-                        aria-busy={favorite.pending}
-                        onClick={() => {
-                          menu.setMenuOpen(false);
-                          favorite.toggle();
-                        }}
-                      >
-                        <Star className={cn('h-3.5 w-3.5', favorite.value && 'fill-warning text-warning')} />
-                        {favorite.value ? '取消收藏' : '收藏会话'}
-                      </Button>
-                    </span>
-                  </TooltipTrigger>
-                  {favorite.value === undefined && (
-                    <TooltipContent>收藏状态暂不可用，请重新加载会话列表</TooltipContent>
-                  )}
-                </Tooltip>
-              </TooltipProvider>
+      {/* 选中仅绑定标题按钮；click 须冒泡，让其他会话菜单识别外部点击并关闭。 */}
+      <PopoverTrigger asChild>
+        <IconButton
+          label={menu.busy ? '会话操作或列表加载中，请稍候' : '会话更多操作'}
+          ariaLabel="会话更多操作"
+          size="sm"
+          icon={<MoreHorizontal className={withMeta ? 'h-4 w-4' : 'h-3.5 w-3.5'} />}
+          disabled={menu.busy}
+          className={cn(
+            'shrink-0',
+            !withMeta && 'h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground',
+          )}
+        />
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        className="w-44 p-1"
+        onCloseAutoFocus={(event) => {
+          if (menu.dialog) event.preventDefault();
+        }}
+      >
+        {actions && (
+          <>
+            {actions.features?.dima && (
+              <Button
+                variant="ghost"
+                className="h-auto w-full justify-start gap-2 px-2 py-2 text-xs"
+                onClick={() => {
+                  menu.setMenuOpen(false);
+                  void actions.run({ type: 'dima' });
+                }}
+              >
+                <ShieldCheck className="h-3.5 w-3.5" />
+                关联 DIMA
+              </Button>
             )}
-            {actions && (
-              <>
-                <Button
-                  variant="ghost"
-                  className="h-auto w-full justify-start gap-2 px-2 py-2 text-xs"
-                  onClick={() => menu.open('rename')}
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                  编辑标题
-                </Button>
-                <Button
-                  variant="ghost"
-                  className="h-auto w-full justify-start gap-2 px-2 py-2 text-xs"
-                  onClick={() => menu.open('clear')}
-                >
-                  <Eraser className="h-3.5 w-3.5" />
-                  清除上下文
-                </Button>
-                <Button
-                  variant="ghost"
-                  className="h-auto w-full justify-start gap-2 px-2 py-2 text-xs text-destructive"
-                  onClick={() => menu.open('delete')}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  删除会话
-                </Button>
-              </>
+            <Button
+              variant="ghost"
+              className="h-auto w-full justify-start gap-2 px-2 py-2 text-xs"
+              onClick={() => menu.open('rename')}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              编辑标题
+            </Button>
+            <Button
+              variant="ghost"
+              className="h-auto w-full justify-start gap-2 px-2 py-2 text-xs"
+              onClick={() => menu.open('clear')}
+            >
+              <Eraser className="h-3.5 w-3.5" />
+              清除上下文
+            </Button>
+            {actions.features?.share && (
+              <Button
+                variant="ghost"
+                className="h-auto w-full justify-start gap-2 px-2 py-2 text-xs"
+                onClick={() => {
+                  menu.setMenuOpen(false);
+                  void actions.run({ type: 'share' });
+                }}
+              >
+                <Share2 className="h-3.5 w-3.5" />
+                分享链接
+              </Button>
             )}
-          </PopoverContent>
-        </Popover>
-      );
-      return (
-        <>
+            {actions.features?.logs && (
+              <Button
+                variant="ghost"
+                className="h-auto w-full justify-start gap-2 px-2 py-2 text-xs"
+                onClick={() => {
+                  menu.setMenuOpen(false);
+                  void actions.run({ type: 'logs' });
+                }}
+              >
+                <ScrollText className="h-3.5 w-3.5" />
+                日志
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              className="h-auto w-full justify-start gap-2 px-2 py-2 text-xs text-destructive"
+              onClick={() => menu.open('delete')}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              删除会话
+            </Button>
+          </>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+  return (
+    <>
       {withMeta ? (
         <ConversationSessionMeta createdAt={createdAt} menuOpen={menu.menuOpen}>
           {menuPopover}
@@ -143,7 +154,14 @@ export function ConversationSessionActions({
               value={menu.titleDraft}
               onChange={(event) => menu.setTitleDraft(event.target.value)}
               disabled={menu.busy}
+              maxLength={titleMaxLength}
+              placeholder={titleMaxLength ? `请输入会话标题（最多 ${titleMaxLength} 个字符）` : undefined}
             />
+            {titleMaxLength ? (
+              <p className="text-right text-xs font-normal text-content-hint">
+                {menu.titleDraft.length}/{titleMaxLength}
+              </p>
+            ) : null}
             <ModalFooter>
               <Button variant="ghost" size="sm" onClick={menu.close} disabled={menu.busy}>
                 取消

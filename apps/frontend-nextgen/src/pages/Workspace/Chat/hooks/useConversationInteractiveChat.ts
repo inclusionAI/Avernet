@@ -52,8 +52,6 @@ export interface UseConversationInteractiveChatOptions {
   panelRef: RefObject<PanelHandle | null>;
   /** 主屏输入框 ref(页面持有;桥注册在页面/旧 useWorkspace 内)。 */
   inputRef: RefObject<SenderRef | null>;
-  /** Agent Coding 引导目标;存在时舞台以引导替代 ChatPanel。 */
-  selectedAgentCodingBot: ChatBotView | null;
   /** 既有会话操作(重命名/清除上下文/模型切换)。 */
   sessions: ConversationInteractiveSessionOperations;
   /** 副屏面板非填充动作的发送出口;缺省按旧页行为(单聊不处理)。 */
@@ -70,8 +68,6 @@ export interface ConversationInteractiveChatModel {
   authenticatedUserId: string | null | undefined;
   authenticatedUserName: string | null | undefined;
   userAvatarUrl: string | undefined;
-  /** Agent Coding 引导目标;存在时舞台渲染引导而非 ChatPanel。 */
-  agentCodingBot: ChatBotView | null;
   draft: string;
   onDraftChange: (draft: string) => void;
   handleSend: (content: string, context?: SubmitContext) => Promise<void>;
@@ -214,7 +210,6 @@ export function useConversationInteractiveChat(
     authenticatedUserId: options.authenticatedUserId,
     authenticatedUserName: options.authenticatedUserName,
     userAvatarUrl: options.authenticatedUserAvatarUrl,
-    agentCodingBot: options.selectedAgentCodingBot,
     draft,
     onDraftChange: setDraft,
     handleSend,

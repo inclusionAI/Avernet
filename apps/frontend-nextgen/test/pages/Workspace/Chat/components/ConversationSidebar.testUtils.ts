@@ -103,7 +103,6 @@ export function sidebarProps(over: Partial<ConversationSidebarProps> = {}): Conv
     onOpenSession: jest.fn(),
     onOpenPublicBots: jest.fn(),
     onOpenBotWorkshop: jest.fn(),
-    onOpenAgentCodingBot: jest.fn(),
     replyingSessionId: null,
     ...over,
   };

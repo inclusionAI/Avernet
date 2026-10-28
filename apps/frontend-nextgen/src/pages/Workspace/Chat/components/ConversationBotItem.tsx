@@ -56,8 +56,6 @@ export interface ConversationBotItemProps {
   onLoadMore(): void;
   onToggleFavorite(sessionId: string): void;
   isFavoritePending(sessionId: string): boolean;
-  /** AgentCoding Bot 专用入口:与 Bot 工坊「去使用」一致,跳 /coding/coding-chat。 */
-  onOpenAgentCodingBot(bot: ChatBotView): void;
   /** 「Bot 管理」菜单项回调(#2990 还原):跳转该 Bot 所属空间的 Bot 管理页;
    *  好友 Bot 不传(菜单项不渲染);bot.spaceId 有值才显示菜单入口。 */
   onOpenBotManagement?(bot: ChatBotView): void;
@@ -87,16 +85,14 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
   onLoadMore,
   onToggleFavorite,
   isFavoritePending,
-  onOpenAgentCodingBot,
   onOpenBotManagement,
   replyingSessionId,
   sessionActions,
 }: ConversationBotItemProps) {
   const isManaged = isManagedConversationSection(section);
   const isOthers = isManaged && origin === 'others';
-  const isAgentCodingBot = Boolean(bot.isAgentCodingBot);
-  const hasSessionControls = !isAgentCodingBot && bot.chatable;
-  const interactive = isAgentCodingBot || bot.chatable;
+  const hasSessionControls = bot.chatable;
+  const interactive = bot.chatable;
   // Bot 状态异常或好友服务 Bot 无 online 发布时，整行禁用并悬停提示原因。
   const { reason: unavailableReason, unavailable } = resolveBotUnavailable(bot, section);
   const canFavorite = supportsBotSessionFavorites(bot.engine);
@@ -127,11 +123,6 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
   };
   const handleToggle = () => {
     if (unavailable) return;
-    // AgentCoding Bot 是可点击入口,但不建普通 session:直接进专用 coding 对话页(与工坊「去使用」一致)。
-    if (bot.isAgentCodingBot) {
-      onOpenAgentCodingBot(bot);
-      return;
-    }
     if (!bot.chatable) return;
     onToggle();
   };

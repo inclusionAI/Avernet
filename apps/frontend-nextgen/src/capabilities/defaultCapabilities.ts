@@ -14,6 +14,7 @@ import type {
   AppCapabilities,
   BotEngineOption,
   CapabilityResult,
+  CodingBotConversationHost,
   ConversationInstanceScopeCapability,
   HumanIdentity,
   InviteCodeGatePolicy,
@@ -343,6 +344,11 @@ export const defaultCapabilities: AppCapabilities = {
   }),
   // Open Core 无多实例范围概念:对话菜单不渲染实例行,会话取数不限定实例(行为不变)。
   getConversationInstanceScope: (): CapabilityResult<ConversationInstanceScopeCapability | null> => ({
+    status: 'available',
+    value: null,
+  }),
+  // Open Core 没有 AIXCoding 微应用货源:Coding Bot 会话可选择,但工作区显式提示未配置。
+  getCodingBotConversationHost: (): CapabilityResult<CodingBotConversationHost | null> => ({
     status: 'available',
     value: null,
   }),

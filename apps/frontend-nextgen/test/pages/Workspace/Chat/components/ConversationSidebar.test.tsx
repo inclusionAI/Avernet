@@ -476,9 +476,8 @@ describe('ConversationSidebar', () => {
     expect(screen.queryByText('暂无他人发起的会话')).not.toBeInTheDocument();
   });
 
-  it('shows AgentCoding Bots in the managed list and opens the coding chat directly', () => {
+  it('shows AgentCoding Bots in the managed list and uses the normal session toggle', () => {
     const sessions = sessionsModel();
-    const onOpenAgentCodingBot = jest.fn();
     const agentCodingBot: ConversationBotView = {
       bot: {
         botId: 'coding-bot:2088',
@@ -503,18 +502,16 @@ describe('ConversationSidebar', () => {
           sessions,
           friendBots: [],
           directory: directoryModel({ managedBots: [agentCodingBot, managedBotA], friendBots: [] }),
-          onOpenAgentCodingBot,
         })}
       />,
     );
     expect(screen.getByText('AgentCoding Bot')).toBeInTheDocument();
     expect(screen.getByText('应用 Bot')).toBeInTheDocument();
     expect(screen.queryByText('AgentCoding Bot 请前往')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'AgentCoding Bot' }));
-    expect(onOpenAgentCodingBot).toHaveBeenCalledWith(agentCodingBot.bot);
-    expect(sessions.toggleBot).not.toHaveBeenCalled();
     const agentCodingRow = screen.getByRole('button', { name: 'AgentCoding Bot' }).closest('div');
-    expect(within(agentCodingRow as HTMLElement).queryByRole('button', { name: '新建会话' })).not.toBeInTheDocument();
+    expect(within(agentCodingRow as HTMLElement).getByRole('button', { name: '新建会话' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'AgentCoding Bot' }));
+    expect(sessions.toggleBot).toHaveBeenCalledWith('coding-bot:2088', 'managed');
   });
   it.each(['mine', 'others'] as const)('ends the %s session list before pagination and errors', (origin) => {
     const list = {

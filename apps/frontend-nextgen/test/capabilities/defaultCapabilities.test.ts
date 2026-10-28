@@ -56,6 +56,10 @@ describe('Open Core default capabilities', () => {
     expect(r.value).toEqual({ url: null });
   });
 
+  test('getCodingBotConversationHost 默认 null（Open Core 不加载内部 AIXCoding Runtime）', () => {
+    expect(defaultCapabilities.getCodingBotConversationHost()).toEqual({ status: 'available', value: null });
+  });
+
   test('getAgentCodingInternalResources 默认全部为 null（Open Core 不泄漏内部资源地址）', () => {
     const r = defaultCapabilities.getAgentCodingInternalResources();
     expect(r.status).toBe('available');

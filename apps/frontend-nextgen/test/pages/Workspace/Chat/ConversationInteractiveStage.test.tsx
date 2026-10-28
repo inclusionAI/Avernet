@@ -52,7 +52,6 @@ let mockModelSelectorProps: {
   chatBots?: ChatBotView[];
 } | null = null;
 let mockComposerMenuProps: { disabled?: boolean; disabledReason?: string | null } | null = null;
-let mockAgentCodingOpen: jest.Mock = jest.fn();
 
 const mockFileFeature: UseBotSessionFilesFeatureResult = {
   senderRef: { current: null },
@@ -145,13 +144,6 @@ jest.mock('@/components/Workspace/TaskComposerMenu', () => ({
     return <div data-testid="composer-menu" data-disabled={String(Boolean(props.disabled))} />;
   },
 }));
-jest.mock('@/pages/Workspace/components/AgentCodingGuide', () => ({
-  AgentCodingGuide: (props: { bot: { displayName: string }; onOpen: (bot: unknown) => void }) => (
-    <button type="button" data-testid="agent-coding-guide" onClick={() => props.onOpen?.(props.bot)}>
-      {props.bot.displayName}
-    </button>
-  ),
-}));
 jest.mock('@/pages/Workspace/components/ReadOnlyConversationPanel', () => ({
   ReadOnlyConversationPanel: () => <div data-testid="read-only-panel" />,
 }));
@@ -231,7 +223,6 @@ const buildOptions = (
     botChat: buildBotChatMock(),
     panelRef: { current: null },
     inputRef: { current: null },
-    selectedAgentCodingBot: null,
     sessions: {
       renameSessionOnFirstMessage: jest.fn(() => Promise.resolve(true)),
       clearContext: jest.fn(() => Promise.resolve(true)),
@@ -247,7 +238,6 @@ function InteractiveStageHarness(props: { options: UseConversationInteractiveCha
     <ConversationInteractiveStage
       model={model}
       onOpenSessionList={() => {}}
-      onOpenAgentCodingBot={mockAgentCodingOpen}
       headerRightPanels={<div data-testid="header-right-panel" />}
     />
   );
@@ -268,7 +258,7 @@ function PageBranchHarness(props: {
       <ReadOnlyConversationPanelStub />
     </div>
   ) : (
-    <ConversationInteractiveStage model={model} onOpenSessionList={() => {}} onOpenAgentCodingBot={() => {}} />
+    <ConversationInteractiveStage model={model} onOpenSessionList={() => {}} />
   );
 }
 
@@ -391,15 +381,11 @@ describe('交互式主舞台(mine / 好友 Bot 单聊)', () => {
     expect(mockChatPanelProps?.panelRef).toBe(options.panelRef);
   });
 
-  it('Agent Coding 引导存在时替代 ChatPanel,并回调打开引导 Bot', () => {
-    const guideBot = chatBotOf({ botId: 'ac-bot:327325', displayName: '编码 Bot' });
-    const options = buildOptions({ selectedAgentCodingBot: guideBot });
-    render(<InteractiveStageHarness options={options} />);
+  it('交互舞台不再提供 Coding Bot 专属引导分支', () => {
+    render(<InteractiveStageHarness options={buildOptions()} />);
 
-    expect(screen.queryByTestId('chat-panel-stub')).not.toBeInTheDocument();
-    expect(screen.getByTestId('agent-coding-guide')).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId('agent-coding-guide'));
-    expect(mockAgentCodingOpen).toHaveBeenCalledWith(guideBot);
+    expect(screen.getByTestId('chat-panel-stub')).toBeInTheDocument();
+    expect(screen.queryByTestId('agent-coding-guide')).not.toBeInTheDocument();
   });
 
   it('无会话时任务菜单降级禁用', () => {

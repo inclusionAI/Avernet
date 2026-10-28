@@ -48,7 +48,6 @@ function renderBotItem(
       onLoadMore={noop}
       onToggleFavorite={noop}
       isFavoritePending={() => false}
-      onOpenAgentCodingBot={noop}
       onOpenBotManagement={overrides.onOpenBotManagement}
     />,
   );
@@ -79,7 +78,6 @@ function rerenderBotItem(
       onLoadMore={noop}
       onToggleFavorite={noop}
       isFavoritePending={() => false}
-      onOpenAgentCodingBot={noop}
     />,
   );
 }
@@ -224,8 +222,7 @@ describe('ConversationBotItem 行内折叠角标（#2990 形态）', () => {
         onLoadMore={noop}
         onToggleFavorite={noop}
         isFavoritePending={() => false}
-        onOpenAgentCodingBot={noop}
-      />,
+        />,
     );
     // 整行只剩主按钮,无行内角标。
     expect(container.querySelectorAll('button').length).toBe(1);
@@ -233,43 +230,46 @@ describe('ConversationBotItem 行内折叠角标（#2990 形态）', () => {
   });
 });
 
-describe('ConversationBotItem 外跳 Bot', () => {
-  it.each([['managed'], ['team'], ['friend']] as const)('%s 分组 Coding Bot 可点且不出现普通会话操作区', (section) => {
-    const onOpenAgentCodingBot = jest.fn();
-    const { container, getByRole } = render(
-      <ConversationBotItem
-        bot={{
-          ...bot,
-          isAgentCodingBot: true,
-          templateName: 'Coding Bot',
-          chatable: false,
-        }}
-        section={section}
-        expanded={false}
-        selectedSessionId={null}
-        origin="mine"
-        scope="all"
-        sessionKey=""
-        onToggle={noop}
-        onOriginChange={noop}
-        onScopeChange={noop}
-        onSearchSession={noop}
-        onCreateSession={noop}
-        onSelectSession={noop}
-        onLoadMore={noop}
-        onToggleFavorite={noop}
-        isFavoritePending={() => false}
-        onOpenAgentCodingBot={onOpenAgentCodingBot}
-      />,
-    );
+describe('ConversationBotItem Coding Bot', () => {
+  it.each([['managed'], ['team'], ['friend']] as const)(
+    '%s 分组 chatable Coding Bot 走普通会话交互，不再外跳',
+    (section) => {
+      const onToggle = jest.fn();
+      const { container, getByRole } = render(
+        <ConversationBotItem
+          bot={{
+            ...bot,
+            isAgentCodingBot: true,
+            templateName: 'Coding Bot',
+            chatable: true,
+          }}
+          section={section}
+          expanded={false}
+          selectedSessionId={null}
+          botSelected={false}
+          origin="mine"
+          scope="all"
+          sessionKey=""
+          sessions={undefined}
+          onToggle={onToggle}
+          onOriginChange={noop}
+          onScopeChange={noop}
+          onSearchSession={noop}
+          onCreateSession={jest.fn()}
+          onSelectSession={noop}
+          onLoadMore={noop}
+          onToggleFavorite={noop}
+          isFavoritePending={() => false}
+        />,
+      );
 
-    const trigger = getByRole('button', { name: '测试 Bot' });
-    expect(trigger).not.toHaveClass('opacity-50', 'cursor-not-allowed');
-    fireEvent.click(trigger);
-    expect(onOpenAgentCodingBot).toHaveBeenCalled();
-    expect(container.querySelector('span[role="presentation"]')).toBeNull();
-    expect(screen.queryByRole('button', { name: '会话ID检索' })).not.toBeInTheDocument();
-  });
+      expect(container.querySelector('span[role="presentation"]')).toBeNull();
+      expect(getByRole('button', { name: '新建会话' })).toBeInTheDocument();
+      expect(getByRole('button', { name: '会话ID检索' })).toBeInTheDocument();
+      fireEvent.click(getByRole('button', { name: '测试 Bot' }));
+      expect(onToggle).toHaveBeenCalledTimes(1);
+    },
+  );
 });
 
 describe('ConversationBotItem 会话ID检索入口', () => {
@@ -305,8 +305,7 @@ describe('ConversationBotItem 会话ID检索入口', () => {
         onLoadMore={noop}
         onToggleFavorite={noop}
         isFavoritePending={() => false}
-        onOpenAgentCodingBot={noop}
-      />,
+        />,
     );
     return { ...utils, onSearchSession };
   };
@@ -326,10 +325,10 @@ describe('ConversationBotItem 会话ID检索入口', () => {
     expect(screen.getByRole('button', { name: '会话ID检索' })).toBeInTheDocument();
   });
 
-  it('AgentCoding 与不可聊 Bot 不渲染搜索入口', () => {
-    const first = renderRow({ isAgentCodingBot: true });
-    expect(screen.queryByRole('button', { name: '会话ID检索' })).not.toBeInTheDocument();
-    first.unmount();
+  it('Coding Bot 保留搜索入口，不可聊 Bot 不渲染搜索入口', () => {
+    const coding = renderRow({ isAgentCodingBot: true });
+    expect(screen.getByRole('button', { name: '会话ID检索' })).toBeInTheDocument();
+    coding.unmount();
     renderRow({ chatable: false });
     expect(screen.queryByRole('button', { name: '会话ID检索' })).not.toBeInTheDocument();
   });
@@ -477,33 +476,6 @@ describe('ConversationBotItem 「更多操作」菜单（#2990 还原）', () =>
     await waitFor(() => expect(onOpenBotManagement).toHaveBeenCalledTimes(1));
   });
 
-  it('AgentCoding Bot 不渲染「…」(#2990 门控保留,纯点击直达)', () => {
-    const { container } = render(
-      <ConversationBotItem
-        bot={{ ...bot, isAgentCodingBot: true, chatable: false, spaceId: '101' }}
-        section="managed"
-        expanded={false}
-        selectedSessionId={null}
-        origin="mine"
-        scope="all"
-        sessionKey=""
-        onToggle={noop}
-        onOriginChange={noop}
-        onScopeChange={noop}
-        onSearchSession={noop}
-        onCreateSession={noop}
-        onSelectSession={noop}
-        onLoadMore={noop}
-        onToggleFavorite={noop}
-        isFavoritePending={() => false}
-        onOpenAgentCodingBot={noop}
-        onOpenBotManagement={noop}
-      />,
-    );
-    expect(screen.queryByRole('button', { name: '更多操作' })).not.toBeInTheDocument();
-    expect(container.querySelectorAll('button').length).toBe(1);
-  });
-
   it('菜单打开期间操作区钉住:strip 含 data-state=open 钉住类(静态类断言,jsdom 不算选择器)', () => {
     const { container } = renderBotItem({ bot: { spaceId: '101' }, onOpenBotManagement: noop });
     const actions = Array.from(container.querySelectorAll('div')).find((el) =>
@@ -531,7 +503,6 @@ describe('ConversationBotItem 「更多操作」菜单（#2990 还原）', () =>
         onLoadMore={noop}
         onToggleFavorite={noop}
         isFavoritePending={() => false}
-        onOpenAgentCodingBot={noop}
         onOpenBotManagement={noop}
       />,
     );
@@ -560,8 +531,7 @@ describe('ConversationBotItem 行徽标', () => {
         onLoadMore={noop}
         onToggleFavorite={noop}
         isFavoritePending={() => false}
-        onOpenAgentCodingBot={noop}
-      />,
+        />,
     );
   };
 
