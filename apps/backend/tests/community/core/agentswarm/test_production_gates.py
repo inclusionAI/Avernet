@@ -258,15 +258,29 @@ class TestLoadQueueSaturation:
 class TestRollingDeploy:
 
     def test_mid_slice_redeploy_resumes_without_reexecution(self):
+        class PausedAfterSpawnLLM(_StoryLLM):
+            """Park a real in-flight decision after the first spawn turn."""
+
+            def __init__(self):
+                super().__init__([_spawn_decision("a1", "work")])
+                self.parked = asyncio.Event()
+                self.resume = asyncio.Event()
+                self.spawned = False
+
+            async def complete(self, request):
+                if self.spawned:
+                    self.parked.set()
+                    await self.resume.wait()
+                self.spawned = True
+                return await super().complete(request)
+
         db = _gate_db()
         factory = FakeFactory(scripts={"a1": [{"did": 1}]})
-        story = _StoryLLM([
-            _spawn_decision("a1", "work"),
-            _wait_decision("ghost"),
-        ])
+        story = PausedAfterSpawnLLM()
         env = _build_env(
             db, [], factory,
-            config=_gate_config(grace=0.05, slice_seconds=10.0),
+            # This gate tests deploy/drain, not 100ms lease-expiry races.
+            config=_gate_config(grace=0.05, slice_seconds=30.0, lease=10),
             llm=story,
         )
         run = _mk_run(goal="rolling")
@@ -274,26 +288,50 @@ class TestRollingDeploy:
         env.dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT, deadline_seconds=3600)
 
         async def main():
+            async def wait_for_result():
+                while not await asyncio.to_thread(env.result_repo.list_by_run, run.run_id, TENANT):
+                    await asyncio.sleep(0.01)
+
             worker_a = AgentSwarmWorker(
                 config=env.cfg, handler=env.handler, dispatch_repo=env.dispatch_repo,
             )
             await worker_a.startup()
-            # Slice A: spawn a1, its result persists, then the slice parks
-            # waiting on "ghost" — a deploy lands over-grace and releases
-            # the dispatch for the next worker.
-            await asyncio.sleep(0.4)
-            story.set_script([_finish_decision("deployed")])
-            await worker_a.shutdown()
+            try:
+                # Prove the deploy happens mid-slice, after the result commit.
+                # A wall-clock sleep cannot establish either fact on busy CI.
+                await asyncio.wait_for(story.parked.wait(), timeout=15)
+                await asyncio.wait_for(wait_for_result(), timeout=15)
+            finally:
+                await worker_a.shutdown()
 
-            worker_b = AgentSwarmWorker(
-                config=env.cfg, handler=env.handler, dispatch_repo=env.dispatch_repo,
+            assert env.run_repo.get(run.run_id, TENANT).status is dm.RunStatus.RUNNING
+            assert len(env.result_repo.list_by_run(run.run_id, TENANT)) == 1
+
+            # A fresh process has no in-memory orchestrator/runtime state.
+            resumed = _build_env(
+                db, [], factory, config=env.cfg,
+                llm=_StoryLLM([_finish_decision("deployed")]),
             )
-            for _ in range(40):
-                if env.dispatch_repo.count_pending_dispatches() == 0:
-                    break
-                await worker_b.run_once()
-                await asyncio.sleep(0.01)
-            await worker_b.shutdown()
+            worker_b = AgentSwarmWorker(
+                config=resumed.cfg, handler=resumed.handler, dispatch_repo=resumed.dispatch_repo,
+            )
+
+            async def wait_for_terminal():
+                while True:
+                    current = await asyncio.to_thread(env.run_repo.get, run.run_id, TENANT)
+                    dispatch_status, _ = await asyncio.to_thread(_job_row, db, run.run_id)
+                    if current.status is not dm.RunStatus.RUNNING and dispatch_status in {
+                        dm.DispatchStatus.DONE.value, dm.DispatchStatus.FAILED.value,
+                    }:
+                        return
+                    await asyncio.sleep(0.01)
+
+            await worker_b.startup()
+            try:
+                # READY=0 can also mean LEASED, so wait for the actual Run.
+                await asyncio.wait_for(wait_for_terminal(), timeout=15)
+            finally:
+                await worker_b.shutdown()
 
         asyncio.run(main())
 
@@ -305,6 +343,8 @@ class TestRollingDeploy:
         assert len(results) == 1
         assert (results[0].payload is None) != (results[0].artifact_key is None)
         assert len(env.round_repo.list_by_run(run.run_id, TENANT)) == 1
+        assert factory.creates == {"a1": 1}
+        assert factory.run_effects == [("a1", {"did": 1})]
         row_status, row_epoch = _job_row(db, run.run_id)
         assert row_status == dm.DispatchStatus.DONE.value
         assert row_epoch >= 2
