@@ -696,6 +696,27 @@ class TestSpecResolution:
 
         asyncio.run(main())
 
+    def test_prefix_spawn_name_inherits_catalog_spec(self):
+        catalog_spec = AgentSpec(name="coder", role="writes code")
+        run = _mk_run(catalog=[catalog_spec])
+        env = _mk_envelope(name="coder_rust")
+
+        assert SubagentRuntime._find_spec(run, env) is catalog_spec
+
+    def test_exact_name_match_wins_over_prefix(self):
+        exact_spec = AgentSpec(name="coder_rust", role="rust specialist")
+        prefix_spec = AgentSpec(name="coder", role="writes code")
+        run = _mk_run(catalog=[prefix_spec, exact_spec])
+        env = _mk_envelope(name="coder_rust")
+
+        assert SubagentRuntime._find_spec(run, env) is exact_spec
+
+    def test_no_match_returns_none(self):
+        run = _mk_run()
+        env = _mk_envelope(name="ghost")
+
+        assert SubagentRuntime._find_spec(run, env) is None
+
 
 class TestTokenUsagePropagation:
     def test_token_usage_flows_to_completion(self):
