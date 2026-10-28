@@ -337,3 +337,100 @@ async def test_space_expansion_truncation_records_once(caplog):
         assert "25" not in message
     finally:
         await dispatcher.stop()
+
+
+@pytest.mark.asyncio
+async def test_exact_fill_completion_emits_no_truncation_signal(caplog):
+    """A final page that exactly fills the queue completed the fan-out —
+    every key admitted, zero dropped: no truncation record and no
+    WARNING. (An "unexpanded remainder" line here would be a false
+    ops signal pointing repair at work that does not exist.)"""
+    service = ScriptedService()
+    reader = PagedReader(
+        [
+            (
+                SyncKey("a", "dev", 31),
+                SyncKey("a", "dev", 32),
+                SyncKey("a", "dev", 33),
+            )
+        ]
+    )
+    diagnostics = SyncDiagnostics()
+    dispatcher = BotManagerSyncDispatcher(
+        service,
+        reader,
+        policy=DispatcherPolicy(worker_count=1, max_keys=3, page_size=3),
+        diagnostics=diagnostics,
+    )
+    assert (
+        dispatcher.request_space_sync(SpaceChange("a", "dev", ("space:1",), ()))
+        is SubmissionResult.QUEUED
+    )
+    await dispatcher.attach()
+    try:
+        with caplog.at_level(logging.WARNING):
+            assert await dispatcher.drain(5.0) is True
+        assert dispatcher.stats.rejected_space_keys == 0
+        assert len(reader.page_calls) == 1  # stopped exactly at the fill
+        assert ("space_expansion_truncated", "queue_full") not in diagnostics.counted
+        assert _dispatch_warnings(caplog, "space_expansion_truncated") == []
+        assert {call.bot_pk for call in service.sync_once_calls} == {31, 32, 33}
+    finally:
+        await dispatcher.stop()
+
+
+@pytest.mark.asyncio
+async def test_truncation_admitted_counts_only_new_admissions(caplog):
+    """A key already in the queue coalesces during expansion; the
+    aggregated truncation record counts only the genuinely-new
+    admissions (bots 32, 33), never the coalesced re-notification
+    (bot 31) — while the truly-dropped key (34) is still what fires
+    the record."""
+    service = ScriptedService()
+    service.gate.clear()  # park bot-31's round while the hint expands
+    reader = PagedReader(
+        [
+            (
+                SyncKey("a", "dev", 31),  # already queued -> COALESCED
+                SyncKey("a", "dev", 32),
+                SyncKey("a", "dev", 33),
+                SyncKey("a", "dev", 34),  # does not fit -> dropped
+            )
+        ]
+    )
+    diagnostics = SyncDiagnostics()
+    dispatcher = BotManagerSyncDispatcher(
+        service,
+        reader,
+        policy=DispatcherPolicy(worker_count=2, max_keys=3, page_size=4),
+        diagnostics=diagnostics,
+    )
+    assert (
+        _submit_bot(dispatcher, 31, reason=SyncReason.REPAIR)
+        is SubmissionResult.QUEUED
+    )
+    await dispatcher.attach()
+    try:
+        await spin_until(
+            lambda: len(service.sync_once_calls) == 1, what="bot-31 round parked"
+        )
+        assert (
+            dispatcher.request_space_sync(SpaceChange("a", "dev", ("space:1",), ()))
+            is SubmissionResult.QUEUED
+        )
+        with caplog.at_level(logging.WARNING):
+            await spin_until(
+                lambda: dispatcher.stats.rejected_space_keys == 1,
+                what="expansion dropped the over-capacity key",
+            )
+            service.gate.set()
+            assert await dispatcher.drain(5.0) is True
+        assert diagnostics.counted[("space_expansion_truncated", "queue_full")] == 1
+        warnings = _dispatch_warnings(caplog, "space_expansion_truncated")
+        assert len(warnings) == 1
+        assert "admitted=2" in warnings[0]  # 32 and 33 only, not coalesced 31
+        assert len(reader.page_calls) == 1
+        assert {call.bot_pk for call in service.sync_once_calls} == {31, 32, 33}
+    finally:
+        service.gate.set()
+        await dispatcher.stop()

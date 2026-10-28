@@ -30,10 +30,11 @@ Safety rules this module exists to enforce (each pinned by a test):
   cap; latches are never evicted, and a latched key that also holds an
   entry is counted once). Page expansion stops at the first full queue
   and records the rejected keys for repair.
-- **Best-effort, never silent.** A full or closed queue may drop a
-  notification — silently dropping it may not: every REJECTED admission
-  (queue full / closed / env mismatch) and every capacity-truncated
-  Space expansion leaves one diagnostics record plus one WARNING with
+- **Best-effort, never silent — and never noisy.** A full or closed
+  queue may drop a notification — silently dropping it may not: every
+  REJECTED admission (queue full / closed / env mismatch) and every
+  Space expansion that actually lost keys to the cap leaves one
+  diagnostics record plus one WARNING with
   the reason, scope and SyncKey dimensions only, so the loss is
   observable and the repair sweep can be pointed at it. Business
   callers stay non-blocking and never see a raise.
@@ -449,7 +450,10 @@ class BotManagerSyncDispatcher:
 
     def _note_truncated(self, change: SpaceChange, admitted: int) -> None:
         """A hint's expansion stopped at capacity mid-way: one record +
-        one WARNING (counts only — remaining keys are never emitted)."""
+        one WARNING (counts only — remaining keys are never emitted).
+
+        ``admitted`` counts genuinely-new admissions only — coalesced
+        re-notifications of keys already in the queue are excluded."""
         self._diagnostics.record(
             SyncEvent.SPACE_EXPANSION_TRUNCATED,
             key=_space_level_key(change),
@@ -714,6 +718,7 @@ class BotManagerSyncDispatcher:
         try:
             cursor = 0
             admitted_this_hint = 0
+            dropped_this_hint = 0
             truncated = False
             while True:
                 with self._mutex:
@@ -751,12 +756,19 @@ class BotManagerSyncDispatcher:
                             # Coalesced keys are already queued — only genuine
                             # over-capacity drops count for repair.
                             self._rejected_space_keys += 1
-                        else:
+                            dropped_this_hint += 1
+                        elif result is SubmissionResult.QUEUED:
                             admitted_this_hint += 1
                 with self._mutex:
                     full_now = self._capacity_used_locked() >= self._policy.max_keys
                 if full_now:
-                    truncated = True
+                    # An exact fill is a completed fan-out, not a
+                    # truncation: only a page that actually lost keys to
+                    # the cap leaves the remainder-unaccounted signal —
+                    # full-with-zero-drops means every key read so far
+                    # sits in the queue (no drop was proven lost).
+                    if dropped_this_hint:
+                        truncated = True
                     return  # met a full queue: expansion stops at capacity
                 cursor = page[-1].bot_pk
         finally:
