@@ -1,0 +1,29 @@
+apps/backend/src/agentclaw/community/adapters/http/antprocess/router.py
+  s_befd386ce20825::t_5ea0e106c1f28d 3-4,90,113
+apps/backend/src/agentclaw/community/core/approval/README.md
+  s_befd386ce20825::t_61f0b7a242ea28 16-17
+apps/backend/src/agentclaw/community/core/approval/callback_handler.py
+  s_befd386ce20825::t_3940f9497354c5 8-11,20,52-72
+apps/backend/src/agentclaw/community/core/bot_public_risk/repository.py
+  s_befd386ce20825::t_5a4ce7840e0dc8 113-122
+apps/backend/src/agentclaw/community/core/bot_public_risk/repository_protocol.py
+  s_befd386ce20825::t_037cd95689ccd2 44-46
+apps/backend/tests/community/core/bot_public/test_risk_tasks.py
+  s_befd386ce20825::t_351158755fa20a 759-853
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "66361ae1a7485d983e041e265ca36564d0ec3ccc",
+  "prompts": {},
+  "sessions": {
+    "s_befd386ce20825": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17e54-391f-7460-a1a1-4f8e39166a4f",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

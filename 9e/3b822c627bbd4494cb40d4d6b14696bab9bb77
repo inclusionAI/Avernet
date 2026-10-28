@@ -1,0 +1,19 @@
+apps/backend/src/agentclaw/community/adapters/http/bot_public/risk_routes.py
+  s_befd386ce20825::t_388cc65808936c 27,125,161,186,206
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9e3b822c627bbd4494cb40d4d6b14696bab9bb77",
+  "prompts": {},
+  "sessions": {
+    "s_befd386ce20825": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17e54-391f-7460-a1a1-4f8e39166a4f",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
