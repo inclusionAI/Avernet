@@ -207,22 +207,45 @@ modules:
     router_api: *pending_router_denominator
     plugin_api: *pending_plugin_denominator
     thresholds:
-      # 53.88 -> 49.36: the manager-sync feature adds ~1,300 Core statements
-      # under core/bot_collaborator/manager_sync/ whose production enablement
-      # requires a shared non-evicting Redis (generation sentinel + atomic
-      # coordination scripts), trusted-app Gateway wiring, and the managers
-      # API on the BCS built by the unified stack — none of which singlebox
-      # provides today (no Redis service, and sync ships enabled: false by
-      # design). These statements are structurally uncoverable by acceptance
-      # execution on this stack; unit/conformance coverage lives in
-      # tests/community/core/bot_collaborator/manager_sync/,
-      # tests/community/contracts/ and
-      # tests/community/integration/test_manager_sync_redis.py. Lower bound
-      # tracks the new source reality (measured 49.86% in PR #3208); no
-      # production Core path excluded, no test-only call added. Revisit upward
-      # when the unified stack gains shared Redis + trusted-app wiring and a
-      # manager-sync acceptance module registers with real runs.
-      core_min_percent: 49.36
+      # Restored to 53.88 (the PR #3208 lowering documented below is folded
+      # into this change): singlebox now runs the manager-sync feature in its
+      # single-replica form — the SAME in-process coordination contract used
+      # by the conformance suites over real Gateway→BCS trusted-App delivery,
+      # with no Redis service — so the dispatcher/lifecycle/retry paths under
+      # core/bot_collaborator/manager_sync/ become acceptance-reachable on
+      # this stack (the manager_sync module below owns their per-module gate).
+      #
+      # History: 53.88 -> 49.36 (measured 49.86% in PR #3208) was the
+      # documented accommodation for ~1,300 manager_sync Core statements that
+      # were structurally uncoverable while the feature shipped disabled.
+      core_min_percent: 53.88
+
+  manager_sync:
+    system: backend
+    acceptance_targets:
+      - tests/community/acceptance/bot_collaborator
+    core_paths:
+      - src/agentclaw/community/core/bot_collaborator/manager_sync/
+    router_api: *pending_router_denominator
+    plugin_api: *pending_plugin_denominator
+    thresholds:
+      # 2026-10-28: greenfield module, measured from the real singlebox
+      # acceptance run on this branch. Prerequisites that make the
+      # dispatcher/lifecycle/retry paths acceptance-reachable at all:
+      # singlebox enables bot_manager_sync with coordination_mode: memory
+      # (the single-replica downgrade — one Backend process, in-process
+      # coordination, never a production mode) plus the dev trusted-App
+      # chain Backend→Gateway→BCS (singlebox-manager-sync app with
+      # managers:sync on tenant teamclaw). Rounds do reach the real BCS
+      # authority surface, but a bot whose stable identity exists only in
+      # the Backend DB is never ownership-initialized on BCS, so its PUT
+      # comes back total=0 and the round ends drift/acknowledged-empty —
+      # never send_confirmed. The deep-delivery branches therefore stay
+      # outside this denominator until a singlebox flow registers
+      # backend bots on BCS; unit/contract suites remain their coverage
+      # authority. Threshold = the measured value of this branch's real
+      # run (442/818 Core statements, acceptance suite of 2026-10-28).
+      core_min_percent: 54.03
 
   cron:
     system: backend
