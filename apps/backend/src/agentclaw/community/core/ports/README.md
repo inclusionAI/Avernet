@@ -96,6 +96,7 @@ rather than binding the service raw:
 | `ResourceFilePort` | `ResourceFileService`, 7 public methods | 3 |
 | `SkillPackageUploadPort` | `LocalSkillUploadServiceProtocol`, 3 | 2 |
 | `ActivationPort` | `DirectActivationServiceProtocol`, 6 + `project` | 6, no `project` |
+| `SharedSkillPort` | `SkillQueryServiceProtocol`, the skill reads | 2: a Center skill by name, a repo skill by path |
 
 ## Context Boundary
 
@@ -106,8 +107,10 @@ provides:
   - SkillPackageUploadPort
   - IdentityFilePort
   - ResourceFilePort
+  - SharedSkillPort  # and SharedSkillNotFound, SharedSkillAmbiguous; implemented by core.skill_center SkillQueryService
 consumes: []
 consumed_by:
   - "core/bot_config_manifest (apply) — the `mcp` and `skills` materialisers write through these ports; the four implementations are apply/activation_delegates.py, apply/skill_package_upload.py and managed_files/ports.py"
+  - "core/apply_engine (skills materialiser) — SharedSkillPort turns a desired Center or repository skill into the skill id it claims Direct"
 internal_dependencies: []
 ```

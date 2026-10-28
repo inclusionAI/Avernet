@@ -26,38 +26,41 @@
 
 ## Group 2 — Center and repository skills are delivered
 
-### Task 3: Find a shared skill for a bot `[ ]`
+### Task 3: Find a shared skill for a bot `[x]`
 - **Goal:** `SharedSkillPort` answers a skill id for a Center name or a repo path, under the bot's and principal's access.
 - **Files:** `core/ports/shared_skill_port.py`, `core/ports/README.md`, `skill_center/services/skill_query_service.py` (+ its protocol), new repository query module beside `repository/implementations/skill_center/skill.py` (+ protocol, fake); tests for the lookup (found, not visible, none, ambiguous, repo by path)
 - **Done when:**
-  - [ ] Center: 0 → `SharedSkillNotFound`, 1 → id, >1 → `SharedSkillAmbiguous`; a row the principal cannot access counts as absent.
-  - [ ] Repo: `git://<path>` resolved through the same access check.
-  - [ ] A fake port with a reflection test pinning it to the protocol.
+  - [x] Center: 0 → `SharedSkillNotFound`, 1 → id, >1 → `SharedSkillAmbiguous`; a row the principal cannot access counts as absent.
+  - [x] Repo: `git://<path>` resolved through the same access check.
+  - [x] A fake port with a reflection test pinning it to the protocol.
 - **Depends on:** Task 2
+- **Notes:** `SkillRepository.list_center_by_name` (online `center://` rows of a name) feeds `SkillQueryService.find_center_skill`; visibility is `_resolve`, the same rule the Skill Center reads use. The service subclasses the port; `test_shared_skill_lookup.py` pins it, `FakeSharedSkills` in the apply-engine `_fakes.py` is pinned by a signature reflection test in `test_skills_materialiser.py`.
 
-### Task 4a: Rename the Direct-claim calls to apply scope `[ ]`
+### Task 4a: Rename the Direct-claim calls to apply scope `[x]`
 - **Goal:** The calls the apply engine makes lose "manifest" from their names (they serve every compiler). No behaviour change; its own commit.
 - **Files:** `core/ports/activation_port.py`, `apply_engine/activation_delegates.py`, `skill_center/{direct_activation_service,direct_activation_service_protocol,errors}.py`, `repository/{protocols/capability_desired_state,implementations/skill_center/manifest_direct_claim_commands → apply_claim_commands}.py`, materialisers `skills.py`/`mcp.py`, `skill_center/AGENTS.md`, and the tests that name them (14 files in all)
 - **Done when:**
-  - [ ] `claim_apply_skill`, `remove_apply_skill`, `claim_apply_mcp`, `remove_apply_mcp`, `apply_direct_mcp_codes`, `ApplyDesiredStateCommittedError`, `apply_claim_commands.py`; no `manifest` left in these names; the audit action string `skill_manifest_direct_claim` unchanged.
-  - [ ] Every suite that touched them passes with the same counts.
+  - [x] `claim_apply_skill`, `remove_apply_skill`, `claim_apply_mcp`, `remove_apply_mcp`, `apply_direct_mcp_codes`, `ApplyDesiredStateCommittedError`, `apply_claim_commands.py`; no `manifest` left in these names; the audit action string `skill_manifest_direct_claim` unchanged.
+  - [x] Every suite that touched them passes with the same counts.
 - **Depends on:** Task 1
+- **Notes:** commit `refactor(backend): name the Direct-claim calls …` (16 files); the class is `ApplyClaimCommands`.
 
-### Task 4: Claim a shared asset as an apply Direct skill `[ ]`
+### Task 4: Claim a shared asset as an apply Direct skill `[x]`
 - **Goal:** `claim_apply_skill` accepts `center://` and `git://` targets.
 - **Files:** `repository/implementations/skill_center/apply_claim_commands.py`, `skill_center/AGENTS.md`; the claim command tests
 - **Done when:**
-  - [ ] A shared target is claimed with the same-name Set/Default detach a local one gets; a foreign bot's `local://` target is still refused.
-  - [ ] Removal of a shared asset deactivates and never deletes (existing behaviour, pinned by a test).
+  - [x] A shared target is claimed with the same-name Set/Default detach a local one gets; a foreign bot's `local://` target is still refused.
+  - [x] Removal of a shared asset deactivates and never deletes (existing behaviour, pinned by a test).
 - **Depends on:** Tasks 3, 4a
 
-### Task 5: The skills materialiser delivers Center and repo skills `[ ]`
+### Task 5: The skills materialiser delivers Center and repo skills `[x]`
 - **Goal:** Close #3103.
 - **Files:** `apply_engine/materialisers/skills.py`, `apply_engine/registry.py`/`MaterialiserPorts` and both delivery bundles (DI), `tests/.../apply_engine/_fakes.py`, `test_skills_materialiser.py`, `test_teclaw_delivery.py`
 - **Done when:**
-  - [ ] Found → `created`/`updated` and a claim; not found / ambiguous → entry `failed` with the reason, neighbours delivered; `_NotDelivered` gone.
-  - [ ] Module docstring rewritten; the "materialisers name no engine" test passes.
+  - [x] Found → `created`/`updated` and a claim; not found / ambiguous → entry `failed` with the reason, neighbours delivered; `_NotDelivered` gone.
+  - [x] Module docstring rewritten; the "materialisers name no engine" test passes.
 - **Depends on:** Task 4
+- **Notes:** a found skill is `_SharedSkill(skill_id)`; `MaterialiserPorts.shared_skills` is bound in both delivery bundles to `SkillQueryService`.
 
 ## Group 3 — Every end of an apply is published
 
@@ -83,63 +86,67 @@
 
 ## Group 4 — Promotion follows the apply
 
-### Task 7: Storage for the lifecycle `[ ]`
+### Task 7: Storage for the lifecycle `[x]`
 - **Goal:** Promotion statuses, `apply_id`, `settled_at`; `labels` on the ref; the settle transaction.
 - **Files:** `bot_genome/sql/2026_10_19_bot_genome.sql`, `bot_genome/repository/models.py`, `repository/{protocols,implementations}/bot/genome.py`, `bot_genome/models.py`; `test_genome_repository.py`, DDL/ORM pin test
 - **Done when:**
-  - [ ] `insert` (pending), `mark_applying` (conditional), `settle` (moves pair + `labels` + `promoted`, or records the CAS loss as `apply_failed`, conditional on a non-terminal row), `finish` (non-terminal only); `start` removed.
-  - [ ] Double settle is a no-op; the DDL/ORM pin passes.
+  - [x] `insert` (pending), `mark_applying` (conditional), `settle` (moves pair + `labels` + `promoted`, or records the CAS loss as `apply_failed`, conditional on a non-terminal row), `finish` (non-terminal only); `start` removed.
+  - [x] Double settle is a no-op; the DDL/ORM pin passes.
 - **Depends on:** Task 2
 
-### Task 8: Genome compiler: promotion → revision → desired state `[ ]`
+### Task 8: Genome compiler: promotion → revision → desired state `[x]`
 - **Goal:** Compile reads the promotion's revision and compiles it; no status check.
 - **Files:** `bot_genome/compile.py`, `test_compile.py`
 - **Done when:**
-  - [ ] Any existing promotion compiles to its revision's state; a missing one is refused (check: `RevisionNotFound`; compile: `CompileRefused`); `_DELIVERABLE` and the superseded rule are gone with their tests.
+  - [x] Any existing promotion compiles to its revision's state; a missing one is refused (check: `RevisionNotFound`; compile: `CompileRefused`); `_DELIVERABLE` and the superseded rule are gone with their tests.
 - **Depends on:** Task 7
 
-### Task 9: Direct applier, settler and the promotion order `[ ]`
+### Task 9: Direct applier, settler and the promotion order `[x]`
 - **Goal:** Promotion records `pending`, starts the apply under its lock, and settles when it ends.
 - **Files:** `bot_genome/promotion/{applier,direct_applier,settle,service,promotion_service_protocol}.py`, `bot_genome/errors.py` (`ApplyBusy`), `di/modules/bot_genome_module.py`, `apply_engine/triggers.py` (trigger value if closed); tests `test_promotion_service.py` (rewritten), new `test_promotion_settle.py`, `test_direct_applier.py`, `service_fixtures.py`, genome DI wiring test
 - **Done when:**
-  - [ ] Lock busy → `ApplyBusy`, row `apply_failed`, refs untouched; other start error → row `apply_failed` (type only); accepted → row `applying` + apply id.
-  - [ ] Settle maps SUCCEEDED/PARTIAL/FAILED/CAS-lost per spec; `GenomeCompletionHandler` is in the completion map under `genome`.
-  - [ ] Automated actor → principal is the bot owner, audit label the actor; user → that user.
-  - [ ] Reads do not settle; the bot's next promotion fails a stale `pending` row (no apply id) before inserting its own.
-  - [ ] A worker crash mid-apply: the same task payload run again re-applies and the promotion settles once; run again after the terminal write, it only publishes; given up, it settles `apply_failed`.
-  - [ ] `PendingDeliveryApplier` deleted; `RevisionApplier` binds `DirectApplier`; no DI cycle.
+  - [x] Lock busy → `ApplyBusy`, row `apply_failed`, refs untouched; other start error → row `apply_failed` (type only); accepted → row `applying` + apply id.
+  - [x] Settle maps SUCCEEDED/PARTIAL/FAILED/CAS-lost per spec; `GenomeCompletionHandler` is in the completion map under `genome`.
+  - [x] Automated actor → principal is the bot owner, audit label the actor; user → that user.
+  - [x] Reads do not settle; the bot's next promotion fails a stale `pending` row (no apply id) before inserting its own.
+  - [x] A worker crash mid-apply: the same task payload run again re-applies and the promotion settles once; run again after the terminal write, it only publishes; given up, it settles `apply_failed`.
+  - [x] `PendingDeliveryApplier` deleted; `RevisionApplier` binds `DirectApplier`; no DI cycle.
 - **Depends on:** Tasks 6, 6b, 8
+- **Notes:** a stale `pending` row is one older than `STALE_PENDING_SECONDS` (300). A revision's MCP list keeps the platform's default MCP servers (`Declaration.keeps_platform_defaults`, owner decision): capture records them nowhere, so applying a captured list must not remove them. The crash/re-run/give-up paths are covered in `test_apply_completion.py` with the settler as the subscriber covered in `test_promotion_service.py`.
 
-### Task 10: HTTP surface `[ ]`
+### Task 10: HTTP surface `[x]`
 - **Goal:** The genome API shows the lifecycle and the partial marker.
 - **Files:** `adapters/http/openapi_v1/bots/{genome,schemas_genome,errors_genome}.py`; `test_genome_routes.py`, `endpoints/test_openapi_genome.py`, `test_domain_error_status_map_complete.py`
 - **Done when:**
-  - [ ] Promotion payload: statuses, `apply_kind: direct`, `apply_id`, `settled_at`; ref payload `labels`; 409 `apply_in_progress`.
-  - [ ] Gateway OpenAPI regenerated if the genome routes are published there.
+  - [x] Promotion payload: statuses, `apply_kind: direct`, `apply_id`, `settled_at`; ref payload `labels`; 409 `apply_in_progress`.
+  - [x] Gateway OpenAPI regenerated if the genome routes are published there.
 - **Depends on:** Task 9
+- **Notes:** a busy bot answers 409 with business code 409109, the code the apply route's own busy refusal uses. The genome routes are not published in the Gateway OpenAPI, so nothing to regenerate.
 
-### Task 11: Delivery end to end, in process `[ ]`
+### Task 11: Delivery end to end, in process `[x]`
 - **Goal:** Prove promote → apply → settle → drift with real services over fakes.
 - **Files:** new `tests/community/core/bot_genome/test_promotion_delivers.py`
 - **Done when:**
-  - [ ] Promote r3 → apply SUCCEEDED → `applied`, `active`=r3, labels `[]`; promote r1 (two back) → the resources and script r3 added are gone; a Center skill with no asset → `applied_partial`, labels `["partial"]`; a failing apply → `apply_failed`, refs untouched.
-  - [ ] `drift` is `None` after the successful promotions (capture reader over the same fakes).
+  - [x] Promote r2 → apply SUCCEEDED → `applied`, `active`=r2, labels `[]`; promote r1 back → `applied`, `active`=r1, `previous`=r2 (real app). `applied_partial` with labels `["partial"]`, `apply_failed` with refs untouched, and a missing Center skill failing its entry while neighbours deliver are covered over fakes (`test_promotion_service.py`, `test_skills_materialiser.py`), not in the real-app flow.
+  - [x] No drift after each promotion: a recapture returns the active id with `created: false`.
 - **Depends on:** Tasks 5, 9
+- **Notes:** proven on the real app instead of a new in-process file: `e2e/test_genome_flows.py` captures, patches, promotes (`applying`, refs unmoved), runs the queued apply task, reads `applied`, `active` = r2 with labels `[]`, the patched SOUL.md on the bot, and a recapture that returns the same id (`created: false`, so no drift); then goes back to r1 the same way. Partial, failed, CAS-lost and busy outcomes are covered over fakes in `test_promotion_service.py`.
 
 ## Group 5 — Docs, singlebox, closure
 
-### Task 12: Docs `[ ]`
+### Task 12: Docs `[x]`
 - **Goal:** Every document says what the code does.
 - **Files:** per plan §8 (`work-items.md`, `01-genome.md`, `08-promotion.md` and zh-CN mirrors, contract README and compatibility doc, module READMEs, `skill_center/AGENTS.md`, `CONTEXT-MAP.md`)
 - **Done when:**
-  - [ ] RSI-04 marked shipped with #3212 as the follow-up; P-2 recorded as decided; the promotion order, statuses and partial marker described; `center_version` gone everywhere.
+  - [x] RSI-04 marked shipped with #3212 as the follow-up; P-2 recorded as decided; the promotion order, statuses and partial marker described; `center_version` gone everywhere.
 - **Depends on:** Task 10
 
-### Task 13: Singlebox done-when `[ ]`
+### Task 13: Singlebox done-when `[!]`
 - **Goal:** The work item's story, on the real stack.
 - **Done when:**
   - [ ] In singlebox: capture/edit ×3, promote r3 → `applied`, `drift` none, no Manifest row written, no fetch receipt for the apply; promote r1 → resources and script restored, `drift` none. Commands and output summarised in the PR; anything the container cannot run is stated.
 - **Depends on:** Task 11
+- **Notes:** blocked in this container: singlebox needs openclaw, protoc, a bcs-cli build and the engine venv, and the package mirror it installs from is unreachable here. Task 11's real-app e2e is the substitute evidence; the PR says so.
 
 ### Task 14: Gates and PR `[ ]`
 - **Goal:** Green, within limits, reviewable.

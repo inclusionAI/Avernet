@@ -29,6 +29,12 @@ before the apply lock is released. A re-run of an apply whose report is
 already terminal applies nothing and only publishes again, so a failed
 publish is retried by the queue. The genome subscribes; the Manifest does not.
 
+A desired Center skill is found by name and a shared-repository skill by
+path through `SharedSkillPort` (`core/ports`), then claimed Direct like any
+skill. A declaration with `keeps_platform_defaults` (a compiled revision's
+MCP list, which never records the platform's default MCP servers) leaves
+those defaults in place instead of removing what it does not list.
+
 Extracted from `core/bot_config_manifest/apply/` by
 `apps/backend/specs/2026-10-23-apply-engine-desired-state/`, which also
 records the resources-root rule (the workspace root minus
@@ -96,7 +102,7 @@ provides:
   - ManagedFilesStore  # and ManagedFilesComposeReader, EngineOwnedComposeReader, PlatformIdentity / PlatformResource / PlatformSkillPackageUpload (managed_files/)
 consumes:
   - "ContentStoreProtocol (core.content_store) — the bytes every desired entry names, read by digest"
-  - "IdentityFilePort, ResourceFilePort, SkillPackageUploadPort, ActivationPort (core.ports) — the narrow write ports the materialisers call"
+  - "IdentityFilePort, ResourceFilePort, SkillPackageUploadPort, ActivationPort, SharedSkillPort (core.ports) — the narrow ports the materialisers call"
   - "BotCapabilityStateReaderProtocol, SkillPackageValidator, DirectActivationServiceProtocol (core.skill_center) — the skills and MCP area state and the package gate"
   - "MCPAuthServiceProtocol, MCPConfigServiceProtocol (core.mcp) — the MCP permission and override checks"
   - "BotStartupScriptServiceProtocol (core.bot_startup_script) — the script row"
