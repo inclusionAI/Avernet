@@ -1,4 +1,4 @@
-"""Independent lexical/semantic recall, rank fusion and optional model reranking."""
+"""Independent recall and ranking with bounded execution and visible fallback."""
 
 from __future__ import annotations
 
@@ -6,20 +6,31 @@ import asyncio
 import math
 
 from search_core.api.errors import SearchUnavailable
-from search_core.api.models import RetrievalRequest, SearchItem, SearchResult
+from search_core.api.models import (
+    RecallResult,
+    RetrievalRequest,
+    SearchItem,
+    SearchResult,
+)
 from search_core.core.ranking import reciprocal_rank_fusion
 from search_core.plugin_api.embedding import EmbeddingProvider
+from search_core.plugin_api.execution import CallExecutor
 from search_core.plugin_api.reranker import Reranker
 from search_core.plugin_api.retrieval import RetrievalIndex
 
 
-class HybridRetrievalService:
-    """Run both recall branches independently; preserve a visible degradation path.
+class _StageFailure(Exception):
+    def __init__(self, reason: str):
+        self.reason = reason
 
-    Synchronous providers run off the event loop. A single branch failure is
-    reported as a degraded result when the other branch succeeds. If both fail,
-    a configured in-process literal fallback may be used; no fallback is a
-    declared retrieval failure and must not become an empty success.
+
+class HybridRetrievalService:
+    """Run recall branches independently and rank once from staged results.
+
+    Synchronous providers run off the event loop. A staged execution pool can
+    bound physical calls. One branch failure is visible degradation when the
+    other branch succeeds. If both fail, a configured literal fallback may be
+    used; otherwise retrieval is unavailable and never an empty success.
     """
 
     def __init__(
@@ -30,6 +41,8 @@ class HybridRetrievalService:
         reranker: Reranker | None = None,
         candidate_limit: int = 30,
         fallback_index: RetrievalIndex | None = None,
+        allow_partial: bool = False,
+        execution: dict[str, CallExecutor] | None = None,
     ):
         if candidate_limit <= 0:
             raise ValueError("candidate_limit must be positive")
@@ -38,80 +51,122 @@ class HybridRetrievalService:
         self._reranker = reranker
         self._candidate_limit = candidate_limit
         self._fallback_index = fallback_index
+        self._allow_partial = allow_partial
+        self._execution = dict(execution or {})
 
-    async def retrieve(self, request: RetrievalRequest) -> SearchResult:
+    async def _call(self, stage: str, function, *args):
+        pool = self._execution.get(stage)
+        if pool is not None:
+            return await pool.call(function, *args)
+        return await asyncio.to_thread(function, *args)
+
+    async def recall(self, request: RetrievalRequest) -> RecallResult:
         if not request.query.strip() or not 0 < request.limit <= self._candidate_limit:
             raise ValueError("query and limit within candidate_limit are required")
         if request.allowed_ids == frozenset() or any(
             not values for values in request.filters.values()
         ):
-            return SearchResult()
+            return RecallResult()
 
-        def semantic():
-            vector = self._embedding.embed(request.query)
-            return self._index.vector_search(
-                vector,
-                self._candidate_limit,
-                request.filters,
-                request.allowed_ids,
-            )
+        query_vector: tuple[float, ...] = ()
 
-        recall_results = await asyncio.gather(
-            asyncio.to_thread(semantic),
-            asyncio.to_thread(
-                self._index.keyword_search,
-                request.query,
-                self._candidate_limit,
-                request.filters,
-                request.allowed_ids,
-            ),
+        async def semantic():
+            nonlocal query_vector
+            try:
+                vector = await self._call("embedding", self._embedding.embed, request.query)
+            except Exception as exc:
+                raise _StageFailure("semantic_unavailable") from exc
+            if not vector or any(not math.isfinite(value) for value in vector):
+                raise _StageFailure("semantic_unavailable")
+            query_vector = tuple(vector)
+            try:
+                return await self._call(
+                    "index",
+                    self._index.vector_search,
+                    vector,
+                    self._candidate_limit,
+                    request.filters,
+                    request.allowed_ids,
+                )
+            except Exception as exc:
+                raise _StageFailure("semantic_unavailable") from exc
+
+        async def keyword():
+            try:
+                return await self._call(
+                    "index",
+                    self._index.keyword_search,
+                    request.query,
+                    self._candidate_limit,
+                    request.filters,
+                    request.allowed_ids,
+                )
+            except Exception as exc:
+                raise _StageFailure("keyword_unavailable") from exc
+
+        results = await asyncio.gather(
+            semantic(),
+            keyword(),
             return_exceptions=True,
         )
-        semantic_failure = _exception_from(recall_results[0])
-        keyword_failure = _exception_from(recall_results[1])
+        vector_result = self._stage_result(results[0], "vector_unavailable")
+        keyword_result = self._stage_result(results[1], "keyword_unavailable")
+        vector_failure = _exception_from(vector_result)
+        keyword_failure = _exception_from(keyword_result)
 
-        if semantic_failure is not None and keyword_failure is not None:
-            return await self._regex_fallback(
-                request, semantic_failure, keyword_failure
+        if vector_failure is not None and keyword_failure is not None:
+            if not self._allow_partial:
+                raise SearchUnavailable("retrieval dependency failed") from keyword_failure
+            return RecallResult(
+                reasons=("semantic_unavailable", "keyword_unavailable"),
+                available=False,
             )
 
+        vector_hits: tuple = () if vector_failure is not None else tuple(vector_result)
+        keyword_hits: tuple = () if keyword_failure is not None else tuple(keyword_result)
         reasons = []
-        if semantic_failure is not None:
-            reasons.append("semantic_unavailable")
-            vector_hits = []
-        else:
-            vector_hits = recall_results[0]
+        if vector_failure is not None:
+            reasons.append(getattr(vector_failure, "reason", "vector_unavailable"))
         if keyword_failure is not None:
-            reasons.append("keyword_unavailable")
-            keyword_hits = []
-        else:
-            keyword_hits = recall_results[1]
+            reasons.append(getattr(keyword_failure, "reason", "keyword_unavailable"))
 
         hits = {hit.id: hit for hit in [*keyword_hits, *vector_hits]}
         _validate_authorization(hits, request.allowed_ids)
-        ranking = reciprocal_rank_fusion(
-            [[hit.id for hit in vector_hits], [hit.id for hit in keyword_hits]]
+        return RecallResult(
+            vector_hits=vector_hits,
+            keyword_hits=keyword_hits,
+            query_vector=query_vector,
+            reasons=tuple(dict.fromkeys(reasons)),
+            available=True,
         )
-        candidates = ranking[: self._candidate_limit]
-        scores = [(item.item_id, item.score) for item in candidates]
+
+    async def rank(self, request: RetrievalRequest, recall: RecallResult) -> SearchResult:
+        if not recall.available:
+            raise SearchUnavailable("all recall paths unavailable")
+        hits = {hit.id: hit for hit in [*recall.keyword_hits, *recall.vector_hits]}
+        ranking = reciprocal_rank_fusion(
+            [[hit.id for hit in recall.vector_hits], [hit.id for hit in recall.keyword_hits]]
+        )[: self._candidate_limit]
+        scores = [(item.item_id, item.score) for item in ranking]
+        reasons = list(recall.reasons)
         score_source = "rrf"
-        if self._reranker is not None and candidates:
+
+        if self._reranker is not None and ranking:
             try:
-                reranked = await asyncio.to_thread(
+                reranked = await self._call(
+                    "reranker",
                     self._reranker.rerank,
                     request.query,
                     [
                         {
                             "id": item.item_id,
-                            "text": str(
-                                hits[item.item_id].payload.get("content") or ""
-                            ),
+                            "text": str(hits[item.item_id].payload.get("content") or ""),
                         }
-                        for item in candidates
+                        for item in ranking
                     ],
                     request.limit,
                 )
-                expected = {item.item_id for item in candidates}
+                expected = {item.item_id for item in ranking}
                 ids = [item.candidate_id for item in reranked]
                 if len(ids) != len(set(ids)) or not set(ids) <= expected:
                     raise ValueError("invalid reranker candidate identities")
@@ -120,7 +175,7 @@ class HybridRetrievalService:
                 scores = [(item.candidate_id, item.score) for item in reranked]
                 score_source = "reranker"
             except ValueError as exc:
-                # Malformed or unauthorized model output never becomes a fallback.
+                # Malformed model output can never be interpreted as an outage.
                 raise SearchUnavailable("invalid reranker response") from exc
             except Exception:
                 reasons.append("reranker_unavailable")
@@ -131,16 +186,32 @@ class HybridRetrievalService:
             reasons=tuple(dict.fromkeys(reasons)),
         )
 
+    async def retrieve(self, request: RetrievalRequest) -> SearchResult:
+        try:
+            recall = await self.recall(request)
+        except SearchUnavailable as exc:
+            if self._fallback_index is None:
+                raise
+            return await self._regex_fallback(request, exc)
+        try:
+            return await self.rank(request, recall)
+        except SearchUnavailable as exc:
+            if recall.available:
+                raise
+            if self._fallback_index is None:
+                raise
+            return await self._regex_fallback(request, exc)
+
     async def _regex_fallback(
         self,
         request: RetrievalRequest,
-        semantic_failure: Exception,
-        keyword_failure: Exception,
+        failure: Exception,
     ) -> SearchResult:
         if self._fallback_index is None:
-            raise SearchUnavailable("retrieval dependency failed") from keyword_failure
+            raise SearchUnavailable("retrieval dependency failed") from failure
         try:
-            fallback_hits = await asyncio.to_thread(
+            fallback_hits = await self._call(
+                "fallback",
                 self._fallback_index.keyword_search,
                 request.query,
                 self._candidate_limit,
@@ -162,6 +233,14 @@ class HybridRetrievalService:
                 "regex_fallback",
             ),
         )
+
+    def _stage_result(self, result: object, fallback_reason: str):
+        if isinstance(result, asyncio.CancelledError):
+            raise result
+        if isinstance(result, Exception):
+            reason = getattr(result, "reason", fallback_reason)
+            return _StageFailure(reason)
+        return result
 
 
 def _exception_from(result: object) -> Exception | None:
