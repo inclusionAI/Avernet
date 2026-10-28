@@ -131,7 +131,7 @@ def require_check(rule: Check, *, bot_dependency: Callable = resolve_legacy_bot)
         # Only a successfully returned response may produce an audit record.
         yield
         if _succeeded(request) and _is_audited(request) and level < PermissionLevel.OWNER:
-            await _audit(request, bot_id=bot.bot_id, owner_id=bot.entity_id, actor_id=caller_id, route=_route_of(request))
+            await _audit(request, bot_id=bot.bot_id, owner_id=bot.current_owner_id, actor_id=caller_id, route=_route_of(request))
     return gate
 
 
