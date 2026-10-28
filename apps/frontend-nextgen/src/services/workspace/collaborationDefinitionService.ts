@@ -14,6 +14,7 @@ export interface DefinitionValidation {
   summary: DefinitionValidationData['summary'];
   participants: ParticipantSlot[];
   errors: ValidationDiagnostic[];
+  warnings: ValidationDiagnostic[];
   graph?: CollaborationDefinitionGraphPreview;
 }
 
@@ -48,11 +49,16 @@ export function buildParticipantDefinitions(slots: ParticipantSlot[] = []): Part
 export function formatValidationErrors(errors: ValidationDiagnostic[] | undefined): string {
   if (!errors?.length) return 'YAML 校验未通过';
   return errors
-    .map(({ path, message }) => {
+    .map(({ path, message, code, hint }) => {
       const p = path.trim();
-      return p && p !== '$' ? `${p}: ${message}` : message;
+      const diagnostic = p && p !== '$' ? `${p}: ${message}` : message;
+      return `${code ? `[${code}] ` : ''}${diagnostic}${hint ? `（${hint}）` : ''}`;
     })
     .join('；');
+}
+
+export function canExecuteValidatedCollaboration(warnings: ValidationDiagnostic[]): boolean {
+  return !warnings.some(({ code }) => code === 'VALIDATION_ONLY_FEATURE');
 }
 
 function pickString(value: unknown): string | undefined {
@@ -163,6 +169,7 @@ export const collaborationDefinitionService = {
           summary: data.summary,
           participants: data.participants ?? [],
           errors: data.errors ?? [],
+          warnings: data.warnings ?? [],
           graph: data.graph,
         },
       };

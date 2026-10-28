@@ -3,6 +3,8 @@ import {
   buildParticipantDefinitions,
   collaborationDefinitionService,
   formatValidationErrors,
+  canExecuteValidatedCollaboration,
+  type DefinitionValidation,
   type ParticipantDefinition,
 } from '@/services/workspace/collaborationDefinitionService';
 import { useCallback, useRef, useState } from 'react';
@@ -19,6 +21,8 @@ export interface UseYamlValidationResult {
   validationError: string | undefined;
   /** 校验是否通过且 YAML 未变更。 */
   isValidated: boolean;
+  warnings: DefinitionValidation['warnings'];
+  canExecute: boolean;
   validate: (yaml: string) => Promise<{ ok: boolean; definitions: ParticipantDefinition[] }>;
   reset: () => void;
   /** YAML 变更后调用，使 isValidated 失效。 */
@@ -37,6 +41,7 @@ export function useYamlValidation(): UseYamlValidationResult {
   const [graph, setGraph] = useState<CollaborationDefinitionGraphPreview | null>(null);
   const [summary, setSummary] = useState<{ initial_nodes: string[] } | null>(null);
   const [validationError, setValidationError] = useState<string | undefined>(undefined);
+  const [warnings, setWarnings] = useState<DefinitionValidation['warnings']>([]);
   const requestIdRef = useRef(0);
 
   const reset = useCallback(() => {
@@ -47,27 +52,34 @@ export function useYamlValidation(): UseYamlValidationResult {
     setGraph(null);
     setSummary(null);
     setValidationError(undefined);
+    setWarnings([]);
   }, []);
 
   const invalidate = useCallback(() => {
+    requestIdRef.current += 1;
+    setIsValidating(false);
     setValidatedYaml('');
+    setWarnings([]);
   }, []);
 
   const validate = useCallback(async (yaml: string): Promise<{ ok: boolean; definitions: ParticipantDefinition[] }> => {
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+    setValidatedYaml('');
+    setWarnings([]);
+    setValidationError(undefined);
     if (!yaml.trim()) {
+      setIsValidating(false);
       setValidationError('请输入自定义协作 YAML');
       return { ok: false, definitions: [] };
     }
-    const requestId = requestIdRef.current + 1;
-    requestIdRef.current = requestId;
     setIsValidating(true);
-    setValidationError(undefined);
-    setValidatedYaml('');
 
     const res = await collaborationDefinitionService.validate(yaml);
     if (requestId !== requestIdRef.current) return { ok: false, definitions: [] };
 
     setIsValidating(false);
+    setWarnings(res.ok ? res.data.warnings : []);
     if (!res.ok) {
       setValidationError(res.error.friendlyMessage);
       setParticipantDefinitions([]);
@@ -105,6 +117,8 @@ export function useYamlValidation(): UseYamlValidationResult {
     summary,
     validationError,
     isValidated: validatedYaml !== '',
+    warnings,
+    canExecute: validatedYaml !== '' && canExecuteValidatedCollaboration(warnings),
     validate,
     reset,
     invalidate,

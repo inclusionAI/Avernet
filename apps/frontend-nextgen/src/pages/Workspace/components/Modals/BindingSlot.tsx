@@ -3,6 +3,7 @@ import { cn } from '@/utils/cn';
 import type { ReactNode } from 'react';
 import type { UseParticipantBindingResult } from '../../hooks/useParticipantBinding';
 import { ParticipantBindingPanel } from './ParticipantBindingPanel';
+import CollaborationValidationNotices from './CollaborationValidationNotices';
 
 export interface BindingSlotProps {
   visible: boolean;
@@ -49,6 +50,7 @@ export function BindingSlot({ visible, binding, botNameResolver, summaryAction }
     <div className="mt-3 space-y-3">
       {validated && (
         <>
+          <CollaborationValidationNotices warnings={yamlValidation.warnings} />
           <div className={cn('grid grid-cols-1 gap-3', summaryAction && 'sm:grid-cols-2')}>
             <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-background px-3 py-2">
               <div className="flex min-w-0 flex-wrap items-center gap-2">
