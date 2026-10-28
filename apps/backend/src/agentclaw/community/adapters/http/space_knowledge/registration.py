@@ -4,6 +4,9 @@ from fastapi import FastAPI
 
 
 def mount_resource_routers(app: FastAPI) -> None:
+    from agentclaw.community.adapters.http.knowledge_management.assembly import (
+        management_surface as knowledge_management_router,
+    )
     from agentclaw.community.adapters.http.resources import router as resources_router
     from agentclaw.community.adapters.http.session_resources import (
         internal_router,
@@ -14,6 +17,7 @@ def mount_resource_routers(app: FastAPI) -> None:
     )
 
     for router in (
+        knowledge_management_router,
         resources_router,
         sessions_router,
         internal_router,
