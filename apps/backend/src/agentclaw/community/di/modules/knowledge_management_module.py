@@ -18,6 +18,8 @@ from agentclaw.community.adapters.knowledge_platform.content_client import (
 )
 from agentclaw.community.adapters.knowledge_platform.content_ports import (
     AsyncContentTransport,
+    ContentAccessPolicy,
+    deny_content_access,
 )
 from agentclaw.community.adapters.knowledge_platform.identity import (
     DirectKnowledgeIdentity,
@@ -48,13 +50,9 @@ from agentclaw.community.di.modules.http_client_module import _client
 from agentclaw.community.di.profile import DeployProfile
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.http_client import HttpClient
-from agentclaw.community.plugin_api.knowledge_session import KnowledgeSessionPlugin
 from agentclaw.community.plugin_api.space_knowledge import SpaceKnowledgeSync
 from agentclaw.community.plugins.http_client import AsyncHttpxClient
 from agentclaw.community.plugins.local.http_client import LocalHttpClient
-from agentclaw.community.plugins.unavailable.knowledge_session import (
-    DisabledKnowledgeSession,
-)
 from agentclaw.community.utils.env_utils import get_current_env
 from injector import Module, provider, singleton
 
@@ -80,8 +78,8 @@ class KnowledgeManagementModule(Module):
 
     @provider
     @singleton
-    def sessions(self) -> KnowledgeSessionPlugin:
-        return DisabledKnowledgeSession()
+    def access_policy(self) -> ContentAccessPolicy:
+        return deny_content_access
 
     @provider
     @singleton
@@ -138,9 +136,9 @@ class KnowledgeManagementModule(Module):
     @provider
     @singleton
     def content(
-        self, client: EcbKnowledgeContentClient, sessions: KnowledgeSessionPlugin
+        self, client: EcbKnowledgeContentClient, access_policy: ContentAccessPolicy
     ) -> KnowledgeContentServiceProtocol:
-        return RemoteKnowledgeContentService(client, sessions)
+        return RemoteKnowledgeContentService(client, access_policy)
 
     @provider
     @singleton

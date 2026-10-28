@@ -7,6 +7,10 @@ from urllib.parse import quote
 from agentclaw.community.adapters.knowledge_platform.content_client import (
     EcbKnowledgeContentClient,
 )
+from agentclaw.community.adapters.knowledge_platform.content_ports import (
+    ContentAccessPolicy,
+    deny_content_access,
+)
 from agentclaw.community.api.knowledge_content_service import (
     KnowledgeContentServiceProtocol,
 )
@@ -15,7 +19,6 @@ from agentclaw.community.core.knowledge_management.content_policy import (
 )
 from agentclaw.community.kernel.knowledge import require_knowledge_id
 from agentclaw.community.kernel.knowledge_content import ContentAccess
-from agentclaw.community.plugin_api.knowledge_session import KnowledgeSessionPlugin
 
 BASE = "/api/v1/knowledge"
 
@@ -26,16 +29,16 @@ def segment(value: str) -> str:
 
 class RemoteKnowledgeContentService(KnowledgeContentServiceProtocol):
     def __init__(
-        self, client: EcbKnowledgeContentClient, sessions: KnowledgeSessionPlugin
+        self,
+        client: EcbKnowledgeContentClient,
+        access_policy: ContentAccessPolicy = deny_content_access,
     ):
-        self.client, self.sessions = client, sessions
+        self.client, self.access_policy = client, access_policy
 
     def prepare_access(
         self, *, actor_id: str, session: Mapping[str, str]
     ) -> ContentAccess:
-        return ContentAccess(
-            actor_id, self.sessions.headers(actor_id=actor_id, session=session)
-        )
+        return self.access_policy(actor_id, session)
 
     @staticmethod
     def path(kb_id: str, suffix: str = "") -> str:

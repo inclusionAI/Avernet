@@ -19,13 +19,10 @@ class CommunityAppServicesModule(Module):
 
     def configure(self, binder: Binder) -> None:
         from agentclaw.community.adapters.http.bot_knowledge.router import router
-        from agentclaw.community.adapters.http.knowledge_management.assembly import (
-            management_surface,
-        )
 
         binder.bind(
             OptionalRouters,
-            to=OptionalRouters(routers=[router, management_surface]),
+            to=OptionalRouters(routers=[router]),
             scope=singleton,
         )
 

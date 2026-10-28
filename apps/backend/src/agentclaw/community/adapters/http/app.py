@@ -889,6 +889,11 @@ async def health_check():
 # Router registration
 # =============================================================================
 # 1. AgentClaw 自有路由
+from agentclaw.community.adapters.http.knowledge_management.assembly import (
+    management_surface as knowledge_management_router,
+)
+
+app.include_router(knowledge_management_router)
 app.include_router(dws_proof_router)
 app.include_router(token_exchange_router)
 app.include_router(yuque_router)

@@ -1,4 +1,4 @@
-"""One corp gate for every new KB surface, including the public Bot alias."""
+"""Shared management gate and the enterprise-only Bot alias admission."""
 
 from typing import Literal
 
@@ -33,14 +33,18 @@ def require_current_selection(selection_stage: Literal["draft"] = Query("draft")
     """Online selection is deferred; never return a draft value as an online one."""
 
 
-router = APIRouter(dependencies=[Depends(require_enabled)])
-router.include_router(bot_router, dependencies=[Depends(require_current_selection)])
-router.include_router(management_router)
-router.include_router(content_router)
-
-
-# Community preserves its existing ungated Bot-selection routes. Only the new
-# management/content surface shares the management capability gate.
+# Management/content are public routes registered once by the HTTP application.
 management_surface = APIRouter(dependencies=[Depends(require_enabled)])
 management_surface.include_router(management_router)
 management_surface.include_router(content_router)
+
+# Only the pre-existing Bot alias retains deployment-specific admission.
+bot_selection_surface = APIRouter(dependencies=[Depends(require_enabled)])
+bot_selection_surface.include_router(
+    bot_router, dependencies=[Depends(require_current_selection)]
+)
+
+# Standalone consumer/contract apps may mount the complete enterprise surface.
+router = APIRouter()
+router.include_router(bot_selection_surface)
+router.include_router(management_surface)

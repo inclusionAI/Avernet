@@ -5,27 +5,16 @@ These cases do not claim native provider or knowledge-building acceptance.
 """
 
 import json
-from types import SimpleNamespace
+from contextlib import contextmanager
+from typing import Annotated
 
 import httpx
-from agentclaw.community.adapters.knowledge_platform.catalog import (
-    EcbKnowledgeClient,
-    RemoteKnowledgeCatalog,
-)
 from agentclaw.community.adapters.knowledge_platform.config import (
     KnowledgeIntegrationConfig,
 )
-from agentclaw.community.adapters.knowledge_platform.content import (
-    RemoteKnowledgeContentService,
-)
-from agentclaw.community.adapters.knowledge_platform.content_client import (
-    EcbKnowledgeContentClient,
-)
 from agentclaw.community.adapters.knowledge_platform.content_ports import (
     AsyncContentTransport,
-)
-from agentclaw.community.adapters.knowledge_platform.identity import (
-    DirectKnowledgeIdentity,
+    ContentAccessPolicy,
 )
 from agentclaw.community.api.knowledge_content_service import (
     KnowledgeContentServiceProtocol,
@@ -36,18 +25,12 @@ from agentclaw.community.api.knowledge_management_service import (
 from agentclaw.community.core.knowledge_management.config import (
     KnowledgeManagementConfig,
 )
-from agentclaw.community.core.knowledge_management.repository.source import (
-    ExistingKnowledgeEnablementReader,
-    KnowledgeSourceRepository,
-)
-from agentclaw.community.core.knowledge_management.services.service import (
-    KnowledgeManagementService,
-)
-from agentclaw.community.kernel.lifecycle import LifecycleBase
+from agentclaw.community.kernel.knowledge import KnowledgeError
+from agentclaw.community.kernel.knowledge_content import ContentAccess
 from agentclaw.community.plugin_api.database import DatabasePlugin
+from agentclaw.community.plugin_api.http_client import HttpClient
 from agentclaw.community.plugin_api.knowledge_catalog import KnowledgeCatalogPlugin
 from agentclaw.community.plugin_api.models import BotModel
-from agentclaw.community.plugin_api.space_knowledge import SpaceKnowledgeSync
 from agentclaw.community.plugins.http_client import AsyncHttpxClient
 from agentclaw.community.utils.env_utils import get_current_env
 from injector import InstanceProvider
@@ -77,6 +60,8 @@ PARAMS = {
 
 def _answer(request):
     path = request.url.path
+    if "/integrations/tc/" not in path and "/bot-authorizations" not in path:
+        assert request.headers.get("X-Test-Session") == "fixture"
     fact = {
         "space_id": "1",
         "kb_id": "kb",
@@ -138,12 +123,12 @@ def _answer(request):
     return httpx.Response(200, json=payload)
 
 
-class _Remote(LifecycleBase):
-    def __init__(self):
-        self.http = httpx.Client(transport=httpx.MockTransport(_answer))
-
-    async def teardown(self):
-        self.http.close()
+def _test_access(actor_id, session):
+    if session.get("test_actor", actor_id) != actor_id:
+        raise KnowledgeError("KNOWLEDGE_IDENTITY_MISMATCH", 403)
+    if session.get("test_session") != "fixture":
+        raise KnowledgeError("KNOWLEDGE_CONTENT_UNAVAILABLE", 503)
+    return ContentAccess(actor_id, {"X-Test-Session": session["test_session"]})
 
 
 def _seed_enabled(world):
@@ -166,28 +151,59 @@ def _seed_enabled(world):
             )
         )
     world.get(KnowledgeCatalogPlugin).set_response("list_authorized", ("kb",))
-    upstream = _Remote()
-    world.injector.binder.bind(_Remote, to=upstream)
-    config = KnowledgeIntegrationConfig(True, "https://knowledge.test")
-    remote = EcbKnowledgeClient(config.catalog_origin, config, client=upstream.http)
-    catalog = RemoteKnowledgeCatalog(remote, DirectKnowledgeIdentity())
-    service = KnowledgeManagementService(
-        KnowledgeSourceRepository(db, env, "teamclaw"),
-        catalog,
-        ExistingKnowledgeEnablementReader(db, env),
-        env,
-        world.get(SpaceKnowledgeSync),
+    # Only configuration, credentials and the external wire boundary are seeded.
+    # All repositories, catalog/content adapters and business services are resolved
+    # through the exact providers the real HTTP handlers use.
+    world.injector.binder.bind(
+        KnowledgeIntegrationConfig,
+        to=KnowledgeIntegrationConfig(True, "https://knowledge.test"),
     )
     world.injector.binder.bind(
         KnowledgeManagementConfig, to=KnowledgeManagementConfig(True, "teamclaw")
     )
-    world.injector.binder.bind(KnowledgeManagementServiceProtocol, to=service)
+    world.injector.binder.bind(ContentAccessPolicy, to=InstanceProvider(_test_access))
+    sync = world.get(Annotated[HttpClient, "knowledge"])
+
+    @contextmanager
+    def send(method, url, **kwargs):
+        kwargs.pop("timeout", None)
+        response = _answer(httpx.Request(method, url, **kwargs))
+        try:
+            yield response
+        finally:
+            response.close()
+
+    sync.set_override("stream", send)
     pool = AsyncHttpxClient(transport=httpx.MockTransport(_answer))
     world.injector.binder.bind(AsyncContentTransport, to=InstanceProvider(pool))
-    content = RemoteKnowledgeContentService(
-        EcbKnowledgeContentClient(remote, pool), SimpleNamespace(headers=lambda **_: {})
+
+
+def _assert_real_composition(response, world):
+    from agentclaw.community.adapters.knowledge_platform.catalog import (
+        EcbKnowledgeClient,
     )
-    world.injector.binder.bind(KnowledgeContentServiceProtocol, to=content)
+    from agentclaw.community.adapters.knowledge_platform.content_client import (
+        EcbKnowledgeContentClient,
+    )
+    from agentclaw.community.core.knowledge_management.ports import KnowledgeCatalog
+    from agentclaw.community.core.knowledge_management.repository.source import (
+        KnowledgeSourceRepository,
+    )
+
+    service = world.get(KnowledgeManagementServiceProtocol)
+    assert service.source is world.get(KnowledgeSourceRepository)
+    assert service.catalog is world.get(KnowledgeCatalog)
+    assert service.catalog.remote is world.get(EcbKnowledgeClient)
+    assert service.catalog.remote.client is world.get(
+        Annotated[HttpClient, "knowledge"]
+    )
+    if "/sources" in response.request.url.path or any(
+        suffix in response.request.url.path
+        for suffix in ("/yuque/", "/ingest-", "/source-revisions/", "/activities")
+    ):
+        content = world.get(KnowledgeContentServiceProtocol)
+        assert content.client is world.get(EcbKnowledgeContentClient)
+        assert content.client.transport is world.get(AsyncContentTransport)
 
 
 # Explicit endpoint inventory: do not derive coverage claims from the live router.
@@ -266,15 +282,24 @@ for method, path, inputs in CASES:
         method=method,
         path=path,
         scenario="configured_real_consumer",
-        input=CaseInput(path_params=PARAMS, headers={"x-user-id": ACTOR}, **inputs),
+        input=CaseInput(
+            path_params=PARAMS,
+            headers={"x-user-id": ACTOR, "cookie": "test_session=fixture"},
+            **inputs,
+        ),
         seed=_seed_enabled,
         expect=ExpectSuccess(),
+        extra_assertions=(_assert_real_composition,),
     )(lambda: None)
     endpoint_test(
         method=method,
         path=path,
         scenario="disabled_before_dependencies",
-        input=CaseInput(path_params=PARAMS, headers={"x-user-id": ACTOR}, **inputs),
+        input=CaseInput(
+            path_params=PARAMS,
+            headers={"x-user-id": ACTOR, "cookie": "test_session=fixture"},
+            **inputs,
+        ),
         expect=ExpectError(
             status=503,
             json_contains={"detail": {"code": "KNOWLEDGE_INTEGRATION_UNAVAILABLE"}},

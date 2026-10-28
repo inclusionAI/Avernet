@@ -29,21 +29,23 @@ from fastapi_injector import attach_injector
 from injector import CallableProvider, Injector
 
 
-class TestSessionInterpreter:
-    def headers(self, *, actor_id, session):
-        if session.get("test_actor", actor_id) != actor_id:
-            raise KnowledgeError("KNOWLEDGE_IDENTITY_MISMATCH", 403)
-        return {
-            "Cookie": f"session={session['session']}" if "session" in session else ""
-        }
-
-
 from agentclaw.community.api.knowledge_content_service import (
     KnowledgeContentServiceProtocol,
 )
 from agentclaw.community.core.knowledge_management.config import (
     KnowledgeManagementConfig,
 )
+
+
+def prepare_test_access(actor_id, session):
+    from agentclaw.community.kernel.knowledge_content import ContentAccess
+
+    if session.get("test_actor", actor_id) != actor_id:
+        raise KnowledgeError("KNOWLEDGE_IDENTITY_MISMATCH", 403)
+    return ContentAccess(
+        actor_id,
+        {"Cookie": f"session={session['session']}" if "session" in session else ""},
+    )
 
 
 @pytest.fixture
@@ -90,7 +92,7 @@ def content():
         ),
         (
             KnowledgeContentServiceProtocol,
-            RemoteKnowledgeContentService(remote, TestSessionInterpreter()),
+            RemoteKnowledgeContentService(remote, prepare_test_access),
         ),
         (EcbKnowledgeContentClient, remote),
         (KnowledgeManagementServiceProtocol, SimpleNamespace(detail=detail)),

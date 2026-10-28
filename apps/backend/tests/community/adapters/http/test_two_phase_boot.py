@@ -305,7 +305,8 @@ def test_finalize_mounts_the_di_conditional_routers(preload_then_finalize):
     from tests.community.endpoints.test_knowledge_management import CASES
 
     expected_management_paths = {path for _, path, _ in CASES}
-    assert after - before == expected_management_paths | {
+    assert expected_management_paths <= before, "generic management routes must exist before worker DI"
+    assert after - before == {
         "/local/sql/execute",
         "/api/bot-knowledge/{bot_id}",
         "/api/bot-knowledge/{bot_id}/{kb_id}",
