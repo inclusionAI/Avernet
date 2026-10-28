@@ -1,0 +1,30 @@
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-contract.md
+  h_b601d8706f5d44 20-23
+apps/evolverun/clawweb/public/modules/clawinsight/server/repositories/repair/session-recovery-task-repository.ts
+  h_b601d8706f5d44 11,188,241
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/agent-service.test.ts
+  h_b601d8706f5d44 40-59
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/session-pagination.test.ts
+  h_b601d8706f5d44 1-31
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/session-read-coverage.test.ts
+  h_b601d8706f5d44 1-33
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/agent-service.ts
+  h_b601d8706f5d44 22,253,257,285-286
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/session-read-coverage.ts
+  h_b601d8706f5d44 1-45
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/session-reader.ts
+  h_b601d8706f5d44 49,51,54,57,78,80,93,101
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/task-contracts.ts
+  h_b601d8706f5d44 98-99
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5243d95f35c6fe9aaba4ae4a0cc001e95fa251c2",
+  "prompts": {},
+  "humans": {
+    "h_b601d8706f5d44": {
+      "author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}
