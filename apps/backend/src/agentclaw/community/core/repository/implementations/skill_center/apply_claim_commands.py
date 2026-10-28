@@ -36,7 +36,11 @@ from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.models.skill_installation_source import SkillInstallationSourceKind
 
 
-class ManifestDirectClaimCommands:
+#: Locators of the shared assets an apply may claim Direct, besides the bot's own ``local://`` packages.
+_SHARED_LOCATORS = ("center://", "git://")
+
+
+class ApplyClaimCommands:
     """Mixed into the desired-state UoW; uses its scoped query helpers."""
 
     def manifest_direct_mcp_exists(
@@ -331,7 +335,14 @@ class ManifestDirectClaimCommands:
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
-        """Replace same-runtime-name Set/Default supply with a Direct Skill."""
+        """Replace same-runtime-name Set/Default supply with a Direct Skill.
+
+        The target is the bot's own ``local://`` package, or a shared Center
+        (``center://``) or repository (``git://``) asset — the ones a genome
+        revision names; whether the actor may use a shared asset is the
+        caller's check (``DirectActivationService._resolve_skill``), made
+        before this runs.
+        """
         with self._db.transactional_orm_session() as session:
             sets = self._bot_sets(
                 session,
@@ -347,11 +358,9 @@ class ManifestDirectClaimCommands:
                 .with_for_update()
                 .one_or_none()
             )
-            if target is None or not (
-                str(target.git_path or "").startswith("local://")
-                and target.bolt_id == bot_id
-                and str(target.user_id) == owner_id
-            ):
+            locator = str(target.git_path or "") if target is not None else ""
+            own_local = locator.startswith("local://") and target.bolt_id == bot_id and str(target.user_id) == owner_id
+            if target is None or not (own_local or locator.startswith(_SHARED_LOCATORS)):
                 raise SkillSetControlPlaneNotFoundError()
             require_skill_online(target)
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
@@ -533,4 +542,4 @@ class ManifestDirectClaimCommands:
             )
 
 
-__all__ = ["ManifestDirectClaimCommands"]
+__all__ = ["ApplyClaimCommands"]

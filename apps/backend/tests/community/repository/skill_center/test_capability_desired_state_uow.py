@@ -4174,6 +4174,45 @@ def test_manifest_skill_claim_replaces_same_name_membership_with_local_direct_cl
         }
 
 
+def test_an_apply_claims_a_shared_center_or_repo_asset_direct():
+    """A genome revision names Center and repository skills; the apply claims the shared asset itself."""
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    with db.transactional_orm_session() as session:
+        center = Skill(
+            name="refund-policy", git_path="center://refund", skill_uuid="refund",
+            version=3, status="PUBLISHED", env="dev",
+        )
+        repo = Skill(name="weather", git_path="git://team/weather", env="dev")
+        session.add_all([center, repo])
+
+    for skill in (center, repo):
+        result = repository.claim_apply_skill(
+            bot_id="bot", owner_id="owner", skill_id=str(skill.id),
+            engine_type="openclaw", default_engine_types=("openclaw",),
+        )
+        assert result.source_transitions == (("none", "direct"),)
+    with db.orm_session() as session:
+        assert {row.skill_id for row in session.query(BotSkillInstallation)} == {center.id, repo.id}
+        assert session.query(Skill).count() == 2, "a shared asset is claimed, never copied"
+
+
+def test_an_apply_may_not_claim_another_bots_local_package():
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    with db.transactional_orm_session() as session:
+        foreign = Skill(
+            name="theirs", git_path="local://theirs", user_id="someone", bolt_id="other", env="dev",
+        )
+        session.add(foreign)
+
+    with pytest.raises(SkillSetControlPlaneNotFoundError):
+        repository.claim_apply_skill(
+            bot_id="bot", owner_id="owner", skill_id=str(foreign.id),
+            engine_type="openclaw", default_engine_types=("openclaw",),
+        )
+
+
 def test_manifest_skill_claim_excludes_the_current_center_default_version():
     db = _Database()
     repository = CapabilityDesiredStateRepository(db)

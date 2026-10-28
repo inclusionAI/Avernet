@@ -47,7 +47,7 @@ from agentclaw.community.core.repository.implementations.skill_center.mcp_skill_
     McpSkillSetControlPlaneCommands,
 )
 from agentclaw.community.core.repository.implementations.skill_center.apply_claim_commands import (
-    ManifestDirectClaimCommands,
+    ApplyClaimCommands,
 )
 from agentclaw.community.core.repository.implementations.skill_center.skill_mcp_dependencies import (
     set_skill_mcp_dependency_codes,
@@ -78,7 +78,7 @@ class CapabilityDesiredStateRepository(
     BotSkillSetInstallations,
     DefaultExclusionCommands,
     DirectInstallationCommands,
-    ManifestDirectClaimCommands,
+    ApplyClaimCommands,
     LegacySkillSetScopeQueries,
     McpSkillSetControlPlaneCommands,
     CapabilityDesiredStateRepositoryProtocol,
