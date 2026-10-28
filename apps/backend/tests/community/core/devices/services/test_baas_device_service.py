@@ -515,6 +515,28 @@ class TestGetDeviceConnection:
         assert denied.a2a_base_url != ""
         assert allowed.a2a_base_url == ""
 
+    def test_gate_still_judges_when_no_face_is_issued(self):
+        """review R3-F1：上游没签发地址也要过门——local/单机 provider 不填
+        a2a_base_url，但直连拓扑可从 WS 推导出 A2A 地址。名单外用户必须
+        拿到 withheld=True 才禁得住推导兜底；名单成员则保留空地址推导。"""
+        baas = MagicMock()
+        baas.get_ws_info.return_value = self._ws_info()  # 无 a2a face
+        svc = _make_service(
+            baas_service=baas,
+            a2a_issuance_gate=self._gate({"u001": False, "u002": True}),
+        )
+
+        denied = svc.get_device_connection(
+            binding_id=7, operator=_operator("u001")
+        )
+        allowed = svc.get_device_connection(binding_id=7, operator=_operator("u002"))
+
+        assert denied.a2a_base_url == ""
+        assert denied.a2a_withheld is True
+        assert allowed.a2a_base_url == ""
+        assert allowed.a2a_withheld is False
+        assert allowed.a2a_base_url == ""
+
     def test_gate_failure_withholds_rather_than_breaks_the_connection(self):
         """门读配置抛异常也只收敛 a2a face：v3 面照常签发。"""
         baas = MagicMock()

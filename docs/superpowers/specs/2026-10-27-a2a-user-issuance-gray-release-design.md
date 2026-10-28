@@ -41,17 +41,20 @@ A2A 迁移主干已合入 dev，但放量缺一个**用户粒度**灰度载体�
 - `percent`：`sha256("a2a-gray:" + staff_id)` 前 8 字节整数 `% 100 < percent`
   （稳定 hash，同用户永远同侧，跨设备/跨会话粘性由构造保证）。
 
-语义矩阵（fail 方向对每条明确；**R1 评审修订**：配置对象已存在而缺 `enabled`/`enabled:null` 也按非法 fail-closed——"解除门控"只有键不存在或显式 `enabled:false` 两个正形）：
+语义矩阵（fail 方向对每条明确；**R1 评审修订**：配置对象已存在而缺 `enabled`/`enabled:null` 也按非法 fail-closed；**R3 评审修订**：配置**记录**存在但值为 JSON `null`/空串/空白同样 fail-closed——存在性从 `ConfigRepository` 的 record 判定，而非把「键不存在」「值 null」折叠成一体的 `SystemConfigService.get_config` 返回值）：
 
 | 状态 | 结果 |
 |---|---|
 | 配置**键**不存在 / 显式 `enabled:false` | **不门控**（face 照常签发——维持阶段二加性面，存量行为零变化） |
+| 配置记录存在但值为 `null`/空串/空白 | **fail-closed 等价空名单**（半配置事故，全部拒发） |
 | 配置对象存在但缺 `enabled` / `enabled:null` / 非布尔 | **fail-closed 等价空名单**（全部拒发）——运营贴了配置却漏字段绝不能静默全量放行 |
 | `whitelist` 合法 | 名单内签发，名单外拒发 |
 | `percent` 合法（0-100） | 按分桶命中 |
 | 配置存在但 JSON/结构非法 | **fail-closed 等价空名单**（全部拒发）+ 告警日志 |
 | 配置读取异常（DB 故障） | **fail-closed 本次拒发** + 告警日志 |
 | 身份（`caller_id`，缺席回退 `operator.staff_id`）为空 | fail-closed 不签 |
+
+**判定触发（R3 评审修订）**：gate 接线后**无论上游是否签发 `a2a_base_url` 都执行判定**——local/单机 provider 不填地址，但直连拓扑客户端可从 WS 推导 A2A 地址探测使用，名单外用户必须拿到 `a2a_withheld=true` 才禁得住推导兜底；名单成员允许时保留原状（空地址仍空、`withheld=false`，推导兜底是名单成员在直连拓扑使用 A2A 的正路）。gate 未接线（旧装配/测试形态）原样透传。
 
 **身份（R1 评审修订）**：灰度键取**经认证的实际访问用户**。engine_runtime 连接面有意把 operator 重标为 resolved owner（权限兼容 + 实例亲和，见 `connection.py` 的 operator 构造注释），该面必须通过 `caller_id` 参数把认证用户传到门控；operator 本身就是 caller 的面（devices HTTP 面）回退 `operator.staff_id`。协作者不继承 owner 的灰度桶。
 

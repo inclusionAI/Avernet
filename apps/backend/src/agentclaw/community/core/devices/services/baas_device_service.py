@@ -932,8 +932,11 @@ class BaasDeviceService(DeviceService):
         前者是"旧服务端没有地址"（客户端仍可 ws 推导兜底），后者是
         "明确拒绝"（客户端必须禁用推导与探测，稳定落 v3）。
         """
-        if not issued or self._a2a_issuance_gate is None:
+        if self._a2a_issuance_gate is None:
             return issued, False
+        # 门接线即判定，与上游是否签发地址无关：单机/直连 provider 不填
+        # a2a_base_url，但客户端仍可从直连 WS 推导 A2A 地址——名单外用户
+        # 在这些拓扑下必须拿到 withheld=True 才禁得住推导兜底。
         identity = caller_id or operator.staff_id
         try:
             allowed = self._a2a_issuance_gate.allows_face(identity)
@@ -945,6 +948,8 @@ class BaasDeviceService(DeviceService):
                 exc_info=True,
             )
             return "", True
+        # 允许时空地址原样返还并 withheld=False——灰名单成员在直连拓扑
+        # 本就靠推导兜底使用 A2A，不能因门接线而丢失。
         if allowed:
             return issued, False
         return "", True

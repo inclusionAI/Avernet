@@ -2,14 +2,21 @@
 
 分两层：
 - 纯判定层（``parse_gray_config`` / ``is_user_in_gray``）——无 IO，语义矩阵见设计文档 §3；
-- 门服务 ``A2aIssuanceGate``——读 system_config 判定单次签发是否对
-  ``staff_id`` 暴露 A2A face。
+- 门服务 ``A2aIssuanceGate``——直读 ``ConfigRepositoryProtocol`` 判定单次签发
+  是否对 ``staff_id`` 暴露 A2A face。
 
 fail 方向（每条都在测试钉板）：
-- 配置缺失 / ``enabled: false`` → **不门控**：维持阶段二的加性签发，
-  存量行为零变化；只有配置明确存在且合法才开启管控。
-- 配置存在但任何字段非法 / DB 读取异常 / ``staff_id`` 为空 →
-  **fail-closed 拒发**：运营已表达管控意图，判不动就闭门，绝不误全量。
+- 配置**键不存在** / 显式 ``enabled: false`` → **不门控**：维持阶段二的加性
+  签发，存量行为零变化；只有配置明确存在且合法才开启管控。
+- 配置记录存在但值为 JSON ``null`` / 空串 / 空白 / 任何结构非法，以及
+  DB 读取异常 / ``staff_id`` 为空 → **fail-closed 拒发**：运营已表达管控
+  意图，判不动就闭门，绝不误全量。
+
+存在性从 repo 判定而不是从 ``SystemConfigService.get_config`` 的返回值：
+后者把「键不存在」和「值是 'null'」都折叠成 Python ``None``（_parse_value
+经 json.loads），两者的运营含义恰好相反（未管控 vs 半配置事故）。
+``ConfigRepository.get_config_by_key`` 的 record 携带**原始字符串**
+``config_value``（未 parse），三态因此可分。
 """
 
 from __future__ import annotations
@@ -18,9 +25,12 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agentclaw.community.utils.env_utils import get_current_env
+
+if TYPE_CHECKING:
+    from agentclaw.community.core.system_config import ConfigRepositoryProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -49,15 +59,18 @@ def _closed_gate() -> A2aIssuanceGrayConfig:
 
 
 def parse_gray_config(raw: Any) -> A2aIssuanceGrayConfig | None:
-    """把配置面原始值解析为灰度参数。
+    """把**已知存在**的配置值解析为灰度参数。
 
     Returns:
-        ``None`` —— 未配置/显式关闭：签发面不加门，保持加性语义。
-        其余 —— 门控生效；任何非法输入都解析为封闭名单（fail-closed），
-        而不是退化为 None（未门控）。
+        ``None`` —— 显式 ``enabled: false``（运营解除门控，全量形态）。
+        其余 —— 门控生效。任何非法输入（null/空串/空白/坏 JSON/结构残缺）
+        都解析为封闭名单（fail-closed），绝不退化为 None（未门控）。
+        「键不存在」不在本函数语义内——存在性由 ``A2aIssuanceGate``
+        从 repo record 判定后才调用到这里。
     """
     if raw is None or raw == "" or (isinstance(raw, str) and not raw.strip()):
-        return None
+        # 记录存在但值为空——半配置事故，闭门而不是静默全量。
+        return _closed_gate()
     data: Any
     if isinstance(raw, str):
         try:
@@ -68,9 +81,9 @@ def parse_gray_config(raw: Any) -> A2aIssuanceGrayConfig | None:
         data = raw
     if not isinstance(data, dict):
         return _closed_gate()
-    # 配置对象已存在而缺 ``enabled``（或 null）= 结构非法，fail-closed：
+    # 配置对象缺 ``enabled``（或 null）= 结构非法，fail-closed：
     # 运营贴了这条配置却漏了关键字段，绝不能静默解读成"全量放行"。
-    # 解除门控只有两个正形：配置键不存在，或显式 ``enabled: false``。
+    # 解除门控只有一个正形：显式 ``enabled: false``（键不存在在 gate 层已放开）。
     if "enabled" not in data or data["enabled"] is None:
         return _closed_gate()
     enabled = data["enabled"]
@@ -119,30 +132,30 @@ def _masked(staff_id: str | None) -> str:
 class A2aIssuanceGate:
     """单次签发的 A2A face 门。
 
-    每次调用现读配置（连接签发是低频路径，单次索引查询即可，
-    不引入 TTL 缓存的复杂度）；配置即改即生效，无需重启。
+    直读 ``ConfigRepositoryProtocol``（record 的 ``config_value`` 是未 parse
+    的原始字符串）：配置项记录是否存在即三态的判据——存在而值为
+    null/空是事故，缺失是未管控。每次调用现读（连接签发低频，单次
+    索引查询即可，不引入 TTL 缓存复杂度）；配置即改即生效，无需重启。
     """
 
-    def __init__(self, config_service: Any) -> None:
-        self._config_service = config_service
+    def __init__(self, config_repository: "ConfigRepositoryProtocol") -> None:
+        self._repo = config_repository
 
-    def allows_face(self, staff_id: str | None) -> bool:
-        try:
-            raw = self._config_service.get_config(
-                category=A2A_ISSUANCE_GRAY_CONFIG_CATEGORY,
-                config_key=A2A_ISSUANCE_GRAY_CONFIG_KEY,
-                env=get_current_env(),
-            )
-        except Exception:
-            logger.warning(
-                "[a2a_gray] config read failed, withholding face (fail-closed)",
-                exc_info=True,
-            )
-            return False
-        config = parse_gray_config(raw)
+    def _load_response(self, staff_id: str | None) -> bool:
+        env = get_current_env()
+        category = self._repo.get_category(
+            category=A2A_ISSUANCE_GRAY_CONFIG_CATEGORY, env=env
+        )
+        if category is None:
+            return True  # 分类未建 = 未配置，不加门
+        record = self._repo.get_config_by_key(
+            parent_id=category.id, config_key=A2A_ISSUANCE_GRAY_CONFIG_KEY
+        )
+        if record is None:
+            return True  # 键不存在 = 未配置，不加门
+        config = parse_gray_config(record.config_value)
         if config is None:
-            # 未配置不门控：不必刷日志噪音，静默维持加性签发。
-            return True
+            return True  # 显式 enabled:false = 解除门控（全量形态）
         allowed = is_user_in_gray(config, staff_id)
         logger.info(
             "[a2a_gray] decision=%s mode=%s percent=%s staff=%s",
@@ -152,3 +165,13 @@ class A2aIssuanceGate:
             _masked(staff_id),
         )
         return allowed
+
+    def allows_face(self, staff_id: str | None) -> bool:
+        try:
+            return self._load_response(staff_id)
+        except Exception:
+            logger.warning(
+                "[a2a_gray] config read failed, withholding face (fail-closed)",
+                exc_info=True,
+            )
+            return False

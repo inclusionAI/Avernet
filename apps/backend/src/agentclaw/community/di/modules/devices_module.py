@@ -57,6 +57,7 @@ from agentclaw.community.core.devices.protocols import (
     McpSyncProtocol,
 )
 from agentclaw.community.core.devices.services.a2a_issuance_gray import A2aIssuanceGate
+from agentclaw.community.core.system_config import ConfigRepositoryProtocol
 from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.arca_bot_create_baas_rollout_config import (
@@ -227,6 +228,7 @@ class DevicesModule(Module):
         repository: DeviceBindingRepository,
         baas_service: BaasService,
         system_config_service: SystemConfigService,
+        config_repository: ConfigRepositoryProtocol,
         oss_record_repo: OssToNasRecordRepository,
         bot_repository: BotRepository,
         bot_service: BotService,
@@ -258,7 +260,7 @@ class DevicesModule(Module):
             secret_resolver=secret_resolver,
             theta_master_key_secret=secret_names.aicoding_theta_master_key,
             layout_confirmation=layout_confirmation,
-            a2a_issuance_gate=A2aIssuanceGate(system_config_service),
+            a2a_issuance_gate=A2aIssuanceGate(config_repository),
         )
 
     @singleton

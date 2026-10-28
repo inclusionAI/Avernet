@@ -54,6 +54,7 @@ from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.system_config import SystemConfigService
 from agentclaw.community.core.devices.services.a2a_issuance_gray import A2aIssuanceGate
+from agentclaw.community.core.system_config import ConfigRepositoryProtocol
 from agentclaw.community.core.task_queue.services.task_queue_service import (
     TaskQueueService,
 )
@@ -186,6 +187,7 @@ class SingleboxDevicesModule(Module):
         repository: DeviceBindingRepository,
         baas_service: BaasService,
         system_config_service: SystemConfigService,
+        config_repository: ConfigRepositoryProtocol,
         oss_record_repo: OssToNasRecordRepository,
         bot_repository: BotRepository,
         bot_service: BotService,
@@ -208,7 +210,7 @@ class SingleboxDevicesModule(Module):
             task_queue_service=task_queue_service,
             template_service=template_service,
             layout_confirmation=layout_confirmation,
-            a2a_issuance_gate=A2aIssuanceGate(system_config_service),
+            a2a_issuance_gate=A2aIssuanceGate(config_repository),
         )
 
     @singleton
