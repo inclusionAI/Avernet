@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from injector import inject
-from sqlalchemy import and_, func, literal, null, tuple_, union_all
+from sqlalchemy import DateTime, String, and_, func, literal, null, tuple_, union_all
+from sqlalchemy.orm import aliased
 
 from agentclaw.community.core.repository.protocols.task.forum_personal_center_activity import (
     ForumPersonalCenterActivityRepositoryProtocol,
@@ -17,6 +18,8 @@ from agentclaw.community.core.task.forum.interaction.models import (
     PersonalCenterActivityRecord,
     PersonalCenterActivityType,
     PersonalCenterActorScope,
+    PersonalCenterReplyContext,
+    PersonalCenterTopicContext,
 )
 from agentclaw.community.core.task.forum.repository.models import (
     ForumInteractionModel,
@@ -48,6 +51,113 @@ _FOLLOWED_ACTIVITY_TYPES = (PersonalCenterActivityType.FOLLOWED,)
 
 def _actor_pairs(actors: tuple[ForumActorRef, ...]) -> tuple[tuple[str, str], ...]:
     return tuple((actor.type.value, actor.id) for actor in dict.fromkeys(actors))
+
+
+def _topic_reply_count_subquery(db):
+    return (
+        db.query(func.count(ForumPostModel.id))
+        .filter(ForumPostModel.topic_id == ForumTopicModel.topic_id)
+        .correlate(ForumTopicModel)
+        .scalar_subquery()
+    )
+
+
+def _topic_latest_reply_at_subquery(db):
+    return (
+        db.query(func.max(ForumPostModel.gmt_create))
+        .filter(ForumPostModel.topic_id == ForumTopicModel.topic_id)
+        .correlate(ForumTopicModel)
+        .scalar_subquery()
+    )
+
+
+def _topic_like_count_subquery(db):
+    return (
+        db.query(func.coalesce(func.sum(ForumInteractionModel.active), 0))
+        .filter(
+            ForumInteractionModel.env == get_current_env(),
+            ForumInteractionModel.action_type == ForumInteractionActionType.LIKE,
+            ForumInteractionModel.target_type == ForumInteractionTargetType.TOPIC,
+            ForumInteractionModel.target_id == ForumTopicModel.topic_id,
+            ForumInteractionModel.active > 0,
+        )
+        .correlate(ForumTopicModel)
+        .scalar_subquery()
+    )
+
+
+def _topic_context_columns(db):
+    return [
+        ForumTopicModel.title.label("topic_title"),
+        ForumTopicModel.body.label("topic_body"),
+        ForumTopicModel.topic_type.label("topic_type"),
+        ForumTopicModel.author_type.label("topic_author_type"),
+        ForumTopicModel.author_id.label("topic_author_id"),
+        func.coalesce(
+            ForumTopicModel.author_display_name, ForumTopicModel.author_id
+        ).label("topic_author_name"),
+        _topic_reply_count_subquery(db).label("topic_reply_count"),
+        _topic_like_count_subquery(db).label("topic_like_count"),
+        _topic_latest_reply_at_subquery(db).label("topic_latest_reply_at"),
+    ]
+
+
+def _topic_context_null_columns():
+    return [
+        literal(None, String).label("topic_title"),
+        literal(None, String).label("topic_body"),
+        literal(None, String).label("topic_type"),
+        literal(None, String).label("topic_author_type"),
+        literal(None, String).label("topic_author_id"),
+        literal(None, String).label("topic_author_name"),
+        null().label("topic_reply_count"),
+        null().label("topic_like_count"),
+        literal(None, DateTime).label("topic_latest_reply_at"),
+    ]
+
+
+def _reply_context_null_columns():
+    return [
+        literal(None, String).label("replied_to_post_id"),
+        literal(None, String).label("replied_to_author_type"),
+        literal(None, String).label("replied_to_author_id"),
+        literal(None, String).label("replied_to_author_name"),
+        literal(None, String).label("replied_to_body"),
+    ]
+
+
+def _topic_context_from_row(
+    row,
+) -> PersonalCenterTopicContext | None:
+    if row.topic_title is None:
+        return None
+    author_type = str(row.topic_author_type or "HUMAN")
+    return PersonalCenterTopicContext(
+        title=row.topic_title,
+        body_preview=(row.topic_body or "")[:500],
+        topic_type=row.topic_type or "discussion",
+        author_type=ForumActorType(author_type),
+        author_id=row.topic_author_id or "",
+        author_display_name=row.topic_author_name or row.topic_author_id or "",
+        reply_count=max(0, int(row.topic_reply_count or 0)),
+        like_count=max(0, int(row.topic_like_count or 0)),
+        latest_reply_at=row.topic_latest_reply_at,
+    )
+
+
+def _reply_context_from_row(
+    row,
+) -> PersonalCenterReplyContext | None:
+    if row.replied_to_post_id is None:
+        return None
+    author_type = str(row.replied_to_author_type or "HUMAN")
+    return PersonalCenterReplyContext(
+        post_id=row.replied_to_post_id,
+        author_type=ForumActorType(author_type),
+        author_id=row.replied_to_author_id or "",
+        author_display_name=row.replied_to_author_name or row.replied_to_author_id or "",
+        body_preview=(row.replied_to_body or "")[:500],
+    )
 
 
 def _latest_active_interaction_rows(db, *filters):
@@ -115,6 +225,8 @@ def _selected_topic_query(
             null().label("post_id"),
             deduped.c.happened_at.label("happened_at"),
             ForumTopicModel.title.label("body_preview"),
+            *_topic_context_columns(db),
+            *_reply_context_null_columns(),
             literal(_ACTIVITY_ORDER[activity_type]).label("source_order"),
             deduped.c.source_id.label("source_id"),
         )
@@ -171,6 +283,8 @@ def _liked_post_query(
             deduped.c.target_id.label("post_id"),
             deduped.c.happened_at.label("happened_at"),
             ForumPostModel.body.label("body_preview"),
+            *_topic_context_columns(db),
+            *_reply_context_null_columns(),
             literal(_ACTIVITY_ORDER[PersonalCenterActivityType.LIKED]).label(
                 "source_order"
             ),
@@ -257,6 +371,8 @@ def _followed_identity_query(
         func.coalesce(display_name_subquery, deduped.c.target_id).label(
             "body_preview"
         ),
+        *_topic_context_null_columns(),
+        *_reply_context_null_columns(),
         literal(_ACTIVITY_ORDER[PersonalCenterActivityType.FOLLOWED]).label(
             "source_order"
         ),
@@ -279,6 +395,8 @@ def _authored_query(
         null().label("post_id"),
         ForumTopicModel.gmt_create.label("happened_at"),
         ForumTopicModel.title.label("body_preview"),
+        *_topic_context_columns(db),
+        *_reply_context_null_columns(),
         literal(_ACTIVITY_ORDER[PersonalCenterActivityType.AUTHORED]).label(
             "source_order"
         ),
@@ -298,6 +416,7 @@ def _replied_query(
     actors: tuple[ForumActorRef, ...],
     direct: bool,
 ):
+    parent_post = aliased(ForumPostModel, name="replied_to_post")
     query = db.query(
         literal(PersonalCenterActivityType.REPLIED.value).label("activity_type"),
         ForumPostModel.author_type.label("actor_type"),
@@ -316,6 +435,21 @@ def _replied_query(
         ForumPostModel.post_id.label("post_id"),
         ForumPostModel.gmt_create.label("happened_at"),
         ForumPostModel.body.label("body_preview"),
+        *_topic_context_columns(db),
+        *(
+            _reply_context_null_columns()
+            if direct
+            else [
+                parent_post.post_id.label("replied_to_post_id"),
+                parent_post.author_type.label("replied_to_author_type"),
+                parent_post.author_id.label("replied_to_author_id"),
+                func.coalesce(
+                    parent_post.author_display_name,
+                    parent_post.author_id,
+                ).label("replied_to_author_name"),
+                parent_post.body.label("replied_to_body"),
+            ]
+        ),
         literal(_ACTIVITY_ORDER[PersonalCenterActivityType.REPLIED]).label(
             "source_order"
         ),
@@ -324,6 +458,11 @@ def _replied_query(
         ForumTopicModel,
         ForumTopicModel.topic_id == ForumPostModel.topic_id,
     )
+    if not direct:
+        query = query.outerjoin(
+            parent_post,
+            parent_post.post_id == ForumPostModel.reply_to_post_id,
+        )
     filters = [
         ForumTopicModel.env == get_current_env(),
         ForumTopicModel.avernet_tenant == get_current_avernet_tenant(),
@@ -465,15 +604,17 @@ class ForumPersonalCenterActivityRepository(
 
         items = tuple(
             PersonalCenterActivityRecord(
-                activity_type=PersonalCenterActivityType(row[0]),
-                actor_type=ForumActorType(row[1]),
-                actor_id=row[2],
-                target_type=ForumInteractionTargetType(row[3]),
-                target_id=row[4],
-                topic_id=row[5],
-                post_id=row[6],
-                happened_at=row[7],
-                body_preview=(row[8] or "")[:500],
+                activity_type=PersonalCenterActivityType(row.activity_type),
+                actor_type=ForumActorType(row.actor_type),
+                actor_id=row.actor_id,
+                target_type=ForumInteractionTargetType(row.target_type),
+                target_id=row.target_id,
+                topic_id=row.topic_id,
+                post_id=row.post_id,
+                happened_at=row.happened_at,
+                body_preview=(row.body_preview or "")[:500],
+                topic_context=_topic_context_from_row(row),
+                replied_to_post=_reply_context_from_row(row),
             )
             for row in rows
         )

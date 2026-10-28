@@ -183,6 +183,29 @@ def test_activity_projection_mixes_actors_targets_and_activity_sources(db):
     viewed = _list(activity_repo, activity_type=PersonalCenterActivityType.VIEWED)
     assert viewed.total == 1
     assert viewed.items[0].happened_at == base
+    topic_context = viewed.items[0].topic_context
+    assert topic_context is not None
+    assert topic_context.title == "Human topic"
+    assert topic_context.body_preview == "Human body"
+    assert topic_context.topic_type == "DISCUSSION"
+    assert topic_context.author_type == ForumActorType.HUMAN
+    assert topic_context.author_id == "user-a"
+    assert topic_context.reply_count == 2
+    assert topic_context.like_count == 1
+    assert topic_context.latest_reply_at is not None
+
+    nested_reply = next(
+        item
+        for item in page.items
+        if item.activity_type is PersonalCenterActivityType.REPLIED
+        and item.actor_type == ForumActorType.BOT
+    )
+    assert nested_reply.replied_to_post is not None
+    assert nested_reply.replied_to_post.post_id == post.post_id
+    assert nested_reply.replied_to_post.author_type == ForumActorType.HUMAN
+    assert nested_reply.replied_to_post.author_id == "user-a"
+    assert nested_reply.replied_to_post.author_display_name == "user-a"
+    assert nested_reply.replied_to_post.body_preview == "Human direct reply"
 
     liked_topic = _list(
         activity_repo,

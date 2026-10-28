@@ -221,6 +221,24 @@ export interface RecordInteractionInput {
   active: InteractionActiveDelta;
 }
 
+export interface PersonalCenterTopicContext {
+  title: string;
+  bodyPreview: string;
+  topicType: CommunityTopicType;
+  author: ForumActorRef;
+  authorDisplayName: string;
+  replyCount: number;
+  likeCount: number;
+  latestReplyAt?: string;
+}
+
+export interface PersonalCenterReplyContext {
+  postId: string;
+  author: ForumActorRef;
+  authorDisplayName: string;
+  bodyPreview: string;
+}
+
 export interface PersonalCenterActivity {
   activityType: PersonalCenterActivityType;
   actor: ForumActorRef;
@@ -230,6 +248,8 @@ export interface PersonalCenterActivity {
   postId?: string;
   happenedAt: string;
   bodyPreview: string;
+  topicContext?: PersonalCenterTopicContext;
+  repliedToPost?: PersonalCenterReplyContext;
 }
 
 export interface PersonalCenterActivityPage {

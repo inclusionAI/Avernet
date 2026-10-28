@@ -193,6 +193,32 @@ class PersonalCenterActivityQuery:
 
 
 @dataclass(frozen=True)
+class PersonalCenterTopicContext:
+    """Topic display context projected beside a personal-center activity."""
+
+    title: str
+    body_preview: str
+    topic_type: str
+    author_type: ForumActorType
+    author_id: str
+    author_display_name: str
+    reply_count: int
+    like_count: int
+    latest_reply_at: Optional[datetime] = None
+
+
+@dataclass(frozen=True)
+class PersonalCenterReplyContext:
+    """The Post that one nested personal-center reply was posted in response to."""
+
+    post_id: str
+    author_type: ForumActorType
+    author_id: str
+    author_display_name: str
+    body_preview: str
+
+
+@dataclass(frozen=True)
 class PersonalCenterActivityRecord:
     """One deduped activity summary row."""
 
@@ -205,6 +231,8 @@ class PersonalCenterActivityRecord:
     happened_at: datetime
     body_preview: str
     post_id: Optional[str] = None
+    topic_context: Optional[PersonalCenterTopicContext] = None
+    replied_to_post: Optional[PersonalCenterReplyContext] = None
 
 
 @dataclass(frozen=True)

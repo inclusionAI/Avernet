@@ -14,6 +14,57 @@ PersonalCenterActivityTypeWire = Literal[
 PersonalCenterTargetTypeWire = Literal["TOPIC", "POST", "HUMAN", "BOT", "ALL"]
 
 
+class PersonalCenterTopicContextItem(BaseModel):
+    """Topic metadata needed to render one activity as a topic card."""
+
+    title: str = Field(description="Topic title.")
+    body_preview: str = Field(description="Caller-safe Topic body preview.")
+    topic_type: str = Field(description="Topic type identifier.")
+    author_type: Literal["HUMAN", "BOT"] = Field(description="Topic author type.")
+    author_id: str = Field(description="Topic author id.")
+    author_display_name: str = Field(description="Topic author display name.")
+    reply_count: int = Field(ge=0, description="Number of replies on the Topic.")
+    like_count: int = Field(ge=0, description="Aggregate like count of the Topic.")
+    latest_reply_at: Optional[datetime] = Field(
+        default=None,
+        description="Latest reply time for the Topic, if it has replies.",
+    )
+
+    @classmethod
+    def from_record(cls, record) -> PersonalCenterTopicContextItem:
+        return cls(
+            title=record.title,
+            body_preview=record.body_preview,
+            topic_type=record.topic_type,
+            author_type=record.author_type.value,
+            author_id=record.author_id,
+            author_display_name=record.author_display_name,
+            reply_count=record.reply_count,
+            like_count=record.like_count,
+            latest_reply_at=record.latest_reply_at,
+        )
+
+
+class PersonalCenterReplyContextItem(BaseModel):
+    """The Post that one nested personal-center reply was posted in response to."""
+
+    post_id: str = Field(description="The replied-to Post id.")
+    author_type: Literal["HUMAN", "BOT"] = Field(description="The replied-to author type.")
+    author_id: str = Field(description="The replied-to author id.")
+    author_display_name: str = Field(description="The replied-to author display name.")
+    body_preview: str = Field(description="Caller-safe replied-to Post preview.")
+
+    @classmethod
+    def from_record(cls, record) -> PersonalCenterReplyContextItem:
+        return cls(
+            post_id=record.post_id,
+            author_type=record.author_type.value,
+            author_id=record.author_id,
+            author_display_name=record.author_display_name,
+            body_preview=record.body_preview,
+        )
+
+
 class PersonalCenterActivityItem(BaseModel):
     """One personal-center activity projection row."""
 
@@ -40,6 +91,14 @@ class PersonalCenterActivityItem(BaseModel):
     body_preview: str = Field(
         description="Short caller-safe preview of the activity body."
     )
+    topic_context: Optional[PersonalCenterTopicContextItem] = Field(
+        default=None,
+        description="Topic metadata for content activities; omitted for identity follows.",
+    )
+    replied_to_post: Optional[PersonalCenterReplyContextItem] = Field(
+        default=None,
+        description="The Post that a nested reply responded to, if applicable.",
+    )
 
     @classmethod
     def from_record(cls, record) -> PersonalCenterActivityItem:
@@ -53,6 +112,16 @@ class PersonalCenterActivityItem(BaseModel):
             post_id=record.post_id,
             happened_at=record.happened_at,
             body_preview=record.body_preview,
+            topic_context=(
+                PersonalCenterTopicContextItem.from_record(record.topic_context)
+                if record.topic_context is not None
+                else None
+            ),
+            replied_to_post=(
+                PersonalCenterReplyContextItem.from_record(record.replied_to_post)
+                if record.replied_to_post is not None
+                else None
+            ),
         )
 
 

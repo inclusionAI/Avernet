@@ -26,6 +26,8 @@ from agentclaw.community.core.task.forum.interaction.models import (
     PersonalCenterActivityPage,
     PersonalCenterActivityRecord,
     PersonalCenterActivityType,
+    PersonalCenterReplyContext,
+    PersonalCenterTopicContext,
 )
 from agentclaw.community.core.task.forum.models import ForumPostRecord
 from agentclaw.community.utils.gateway_principal_config import (
@@ -133,8 +135,19 @@ def _seed_summaries(world):
 
 
 def _activity_page() -> PersonalCenterActivityPage:
+    topic_context = PersonalCenterTopicContext(
+        title="Topic title",
+        body_preview="Topic body",
+        topic_type="discussion",
+        author_type=ForumActorType.HUMAN,
+        author_id=_CALLER,
+        author_display_name="Interaction Caller",
+        reply_count=2,
+        like_count=3,
+        latest_reply_at=_NOW,
+    )
     return PersonalCenterActivityPage(
-        total=1,
+        total=2,
         items=(
             PersonalCenterActivityRecord(
                 activity_type=PersonalCenterActivityType.VIEWED,
@@ -145,6 +158,26 @@ def _activity_page() -> PersonalCenterActivityPage:
                 topic_id="topic_endpoint_1",
                 happened_at=_NOW,
                 body_preview="Topic title",
+                topic_context=topic_context,
+            ),
+            PersonalCenterActivityRecord(
+                activity_type=PersonalCenterActivityType.REPLIED,
+                actor_type=ForumActorType.HUMAN,
+                actor_id=_CALLER,
+                target_type=ForumInteractionTargetType.POST,
+                target_id="post_parent_1",
+                topic_id="topic_endpoint_1",
+                post_id="post_child_1",
+                happened_at=_NOW,
+                body_preview="My nested reply",
+                topic_context=topic_context,
+                replied_to_post=PersonalCenterReplyContext(
+                    post_id="post_parent_1",
+                    author_type=ForumActorType.BOT,
+                    author_id="bot-1",
+                    author_display_name="Responder Bot",
+                    body_preview="Original reply",
+                ),
             ),
         ),
     )
@@ -208,6 +241,28 @@ def _seed_helpful(world):
         ForumServiceProtocol,
         {"set_post_helpful": set_post_helpful},
     )
+
+
+def _assert_personal_center_projection(response, _world):
+    items = response.json()["data"]["items"]
+    viewed = next(
+        item
+        for item in items
+        if item["activity_type"] == "VIEWED"
+    )
+    nested_reply = next(
+        item
+        for item in items
+        if item["activity_type"] == "REPLIED"
+    )
+    assert viewed["topic_context"]["title"] == "Topic title"
+    assert viewed["topic_context"]["body_preview"] == "Topic body"
+    assert viewed["topic_context"]["reply_count"] == 2
+    assert viewed["topic_context"]["like_count"] == 3
+    assert viewed["topic_context"]["latest_reply_at"] is not None
+    assert nested_reply["replied_to_post"]["post_id"] == "post_parent_1"
+    assert nested_reply["replied_to_post"]["author_display_name"] == "Responder Bot"
+    assert nested_reply["replied_to_post"]["body_preview"] == "Original reply"
 
 
 _CREATE_BODY = {
@@ -360,6 +415,7 @@ def public_get_summary_batch_empty_items():
     ),
     seed=lambda world: (_boot_verifier(world), _seed_personal_center(world)),
     expect=ExpectSuccess(status=200),
+    extra_assertions=(_assert_personal_center_projection,),
 )
 def public_get_personal_center_activities_ok():
     """Read the signed-in owner's server-paged BBS activity projection."""
@@ -553,6 +609,7 @@ def internal_get_summary_batch_empty_items():
     ),
     seed=_seed_personal_center,
     expect=ExpectSuccess(status=200),
+    extra_assertions=(_assert_personal_center_projection,),
 )
 def internal_get_personal_center_activities_ok():
     """Mirror the trusted owner-scoped activity projection."""
