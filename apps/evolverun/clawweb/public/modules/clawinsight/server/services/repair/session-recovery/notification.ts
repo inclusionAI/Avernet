@@ -61,28 +61,37 @@ function webhookConfig(raw: string): WebhookConfig {
 }
 
 type MarkdownNode = { type: string; value?: string; children?: MarkdownNode[] };
-function plainText(node: MarkdownNode): string {
+function plainText(node: MarkdownNode, limit: number): string {
   // Full commands, raw HTML and images belong in the linked task, not in a short notification.
   if (["code", "html", "image", "imageReference"].includes(node.type)) return "";
+  // Do not let a technical literal consume most of a short description.
+  if (node.type === "inlineCode" && Array.from(node.value ?? "").length > limit / 2) return "（详见任务页）";
   if (typeof node.value === "string") return node.value;
   const separator = ["root", "blockquote", "list", "listItem"].includes(node.type) ? " " : "";
-  return node.children?.map(plainText).join(separator) ?? "";
+  return node.children?.map(child => plainText(child, limit)).join(separator) ?? "";
 }
 function escapeMarkdown(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     .replace(/[\\`*_[\]{}()#+.!|~-]/g, "\\$&");
 }
+const longContentNotice = "内容较长，请查看完整任务。";
 function clip(value: string, limit: number): string {
   // Redact the complete, already bounded source before presentation trimming. A byte slice can split UTF-8.
-  const text = plainText(fromMarkdown(redactPersistableText(value, Number.MAX_SAFE_INTEGER))).replace(/\s+/g, " ").trim();
-  if (!text) return value.trim() ? "详细内容请查看任务页。" : "";
+  const text = plainText(fromMarkdown(redactPersistableText(value, Number.MAX_SAFE_INTEGER)), limit).replace(/\s+/g, " ").trim();
+  if (!text) return value.trim() ? longContentNotice : "";
   if (Array.from(text).length <= limit) return escapeMarkdown(text);
   let prefix = "";
   for (const { segment } of new Intl.Segmenter("zh", { granularity: "sentence" }).segment(text)) {
     if (Array.from(prefix + segment).length > limit) break;
     prefix += segment;
   }
-  return prefix.trim() ? `${escapeMarkdown(prefix.trim())}（完整内容见任务页）` : "内容较长，请查看完整任务。";
+  if (prefix.trim()) return `${escapeMarkdown(prefix.trim())}（完整内容见任务页）`;
+  // A long first sentence can still contain useful prose. Fall back to word boundaries; do not byte-slice.
+  for (const { segment } of new Intl.Segmenter("zh", { granularity: "word" }).segment(text)) {
+    if (Array.from(prefix + segment).length > limit) break;
+    prefix += segment;
+  }
+  return prefix.trim() ? `${escapeMarkdown(prefix.trim())}……（完整内容见任务页）` : longContentNotice;
 }
 
 function notificationContent(task: RecoveryStoredTask, event: RecoveryTimelineEvent, kind: GroupNotification["kind"], baseUrl: string) {
@@ -93,8 +102,12 @@ function notificationContent(task: RecoveryStoredTask, event: RecoveryTimelineEv
     if (text) sections.push(`**【${label}】**\n\n${text}`);
   };
   const list = (label: string, values: string[]) => {
-    if (values.length) sections.push(`**【${label}】**\n\n${values.slice(0, 5).map(value => `- ${clip(value, 120)}`).join("\n")}`
-      + (values.length > 5 ? "\n\n其余事项见任务页。" : ""));
+    if (!values.length) return;
+    const clipped = values.slice(0, 5).map(value => clip(value, 120));
+    const items = clipped.filter(value => value && value !== longContentNotice).map(value => `- ${value}`);
+    if (clipped.includes(longContentNotice)) items.push(longContentNotice);
+    else if (values.length > 5) items.push("其余事项见任务页。");
+    if (items.length) sections.push(`**【${label}】**\n\n${items.join("\n\n")}`);
   };
   const intervention = () => {
     const purposes = task.timeline.flatMap(item => {
