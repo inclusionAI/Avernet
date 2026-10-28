@@ -365,16 +365,27 @@ describe('isSendBannedForSession + deriveEndpointBase（§3.1 发送门）', () 
     const registry = createSendBanRegistry();
     const base = deriveEndpointBase(WS_URL)!;
     registry.begin(base, 'ctx-1');
-    expect(isSendBannedForSession('ctx-1', WS_URL, undefined, registry)).toBe(true);
-    expect(isSendBannedForSession('ctx-2', WS_URL, undefined, registry)).toBe(false);
+    expect(isSendBannedForSession('ctx-1', registry)).toBe(true);
+    expect(isSendBannedForSession('ctx-2', registry)).toBe(false);
     registry.releaseOnConfirmedAbort(base, 'ctx-1');
-    expect(isSendBannedForSession('ctx-1', WS_URL, undefined, registry)).toBe(false);
+    expect(isSendBannedForSession('ctx-1', registry)).toBe(false);
   });
 
-  it('非 ws url 恒 false（v3 发送不受影响）', () => {
+  it('context 级查询：挂禁与当前连接推导键不同源仍拦（回滚换轨后旧面禁令不丢）', () => {
     const registry = createSendBanRegistry();
-    registry.begin('http://x/rpc', 'ctx-1');
-    expect(isSendBannedForSession('ctx-1', 'http://x/rpc', undefined, registry)).toBe(false);
+    // 回滚前：独立 A2A 面挂禁（cancel 未确认）
+    registry.begin('http://bonjour-a2a-face/…/rpc', 'ctx-1');
+    // 回滚后：重连收 withheld 且无 a2a 地址——此前的按推导键查询会查丢
+    expect(isSendBannedForSession('ctx-1', registry)).toBe(true);
+  });
+
+  it('核销仍精确按 (endpoint, context)：其他面的挂禁不受影响', () => {
+    const registry = createSendBanRegistry();
+    registry.begin('http://face-a/rpc', 'ctx-1');
+    registry.begin('http://face-b/rpc', 'ctx-2');
+    registry.releaseOnTerminal('http://face-a/rpc', 'ctx-1');
+    expect(isSendBannedForSession('ctx-1', registry)).toBe(false);
+    expect(isSendBannedForSession('ctx-2', registry)).toBe(true);
   });
 });
 
@@ -478,22 +489,22 @@ describe('B17 决策表补充行：a2aBaseUrl 在场（resolveA2aUrls 单源）'
   });
 });
 
-describe('B17 发送门：签发面在场时端点键同源切换', () => {
-  it('签发值在场 → 禁令键按签发地址解析（与 provider 注册面同键）', () => {
+describe('B17 发送门：context 级查询（R5-F2 后与推导键无关）', () => {
+  it('签发面挂禁 → 移出名单（a2aWithheld、无地址）后重连仍拦', () => {
     const registry = createSendBanRegistry();
     registry.begin(A2A_URLS.rpcUrl, 'ctx-1');
-    // 旧口径的 ws 推导键（relay url 派生）≠ 签发键：若门不切换键，此断言
-    // 必然失败——正是把 a2aBaseUrl 接进门解析的原因。
+    // 旧口径按当前连接推导键查询：签发地址不在场时键从 relay ws 派生
+    // （≠ 签发键），旧任务禁令会被查丢——context 级查询不受推导键影响。
     expect(deriveEndpointBase(SIGNED_CONFIG.url)).not.toBe(A2A_URLS.rpcUrl);
-    expect(isSendBannedForSession('ctx-1', SIGNED_CONFIG.url, A2A_BASE_URL, registry)).toBe(true);
-    expect(isSendBannedForSession('ctx-2', SIGNED_CONFIG.url, A2A_BASE_URL, registry)).toBe(false);
+    expect(isSendBannedForSession('ctx-1', registry)).toBe(true);
+    expect(isSendBannedForSession('ctx-2', registry)).toBe(false);
   });
 
-  it('签发值缺省 → 行为逐字节保持旧口径（回归线）', () => {
+  it('ws 推导面挂禁同样可查（回归线）', () => {
     const registry = createSendBanRegistry();
     const base = deriveEndpointBase(WS_URL)!;
     registry.begin(base, 'ctx-1');
-    expect(isSendBannedForSession('ctx-1', WS_URL, undefined, registry)).toBe(true);
+    expect(isSendBannedForSession('ctx-1', registry)).toBe(true);
   });
 });
 

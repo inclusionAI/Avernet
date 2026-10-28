@@ -150,10 +150,11 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
    * （尚无 ws url）/ 非 A2A 面（选择探测落 v3）恒 false——v3 发送不受影响。
    */
   isSendBanned(): boolean {
-    // B17：签发 base 在场时按它解析禁令键（与 provider 注册面同一 endpoint
-    // 口径），否则回退既有的 ws 推导——两态都是 bootstrap 单源函数。
+    // 查询口径 = sessionKey 级（context 挂有任意面未终结禁令即拦），与当前
+    // 连接的 wsUrl/a2aBaseUrl 无关——灰度回滚移除 A2A 地址后旧面禁令仍
+    // 可查（review R5-F2），不因推导键漂移误放行。
     return this.wsUrl !== null
-      && isSendBannedForSession(this.options.sessionId, this.wsUrl, this.a2aBaseUrl ?? undefined);
+      && isSendBannedForSession(this.options.sessionId);
   }
 
   /** B12 取消终局播报订阅：A2AProvider.onCancelOutcome 经本类转发（含 provider 已 teardown 的迟到核销） */

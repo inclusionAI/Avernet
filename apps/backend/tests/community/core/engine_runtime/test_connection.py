@@ -197,6 +197,7 @@ def _svc(
     collaborators=None,
     publish_repo=None,
     desktop=None,
+    a2a_issuance_gate=None,
 ):
     return EngineConnectionService(
         bots or _Bots(),
@@ -206,6 +207,7 @@ def _svc(
         collaborators or _Collaborators(),
         publish_repo or _PublishRepo(),
         desktop_connections=desktop or Mock(),
+        a2a_issuance_gate=a2a_issuance_gate,
     )
 
 
@@ -266,6 +268,123 @@ def test_withheld_a2a_reaches_the_result_as_an_explicit_refusal():
     result = _build(_svc(devices=devices))
     assert result.a2a_withheld is True
     assert {s.kind for s in result.sockets} == {"chat"}
+
+
+# ── desktop 分支的灰度门（review R5-F1：不绕行） ─────────────────────────────
+
+def _desktop_connections(mode="direct"):
+    connections = Mock()
+    connections.config.mode = mode
+    # relay 形态的 ws_url 必须是网关可 re-address 的完整 URL（与 desktop
+    # relay 生产契约一致）；direct 只需本机可达地址。
+    ws_url = (
+        "wss://hop.example/proxypass/127.0.0.1:20003"
+        "/api/openclaw/ws?x-proxypass-token=tok"
+        if mode != "direct"
+        else "ws://127.0.0.1:20003/api/openclaw/ws"
+    )
+    connections.resolve.return_value = SimpleNamespace(
+        target="127.0.0.1:20003",
+        token="tok",
+        ws_url=ws_url,
+        expires_at="2099-01-01T00:00:00Z",
+    )
+    return connections
+
+
+class _StaticGate:
+    def __init__(self, allowed: bool):
+        self._allowed = allowed
+        self.calls: list[str] = []
+
+    def allows_face(self, staff_id):
+        self.calls.append(staff_id)
+        return self._allowed
+
+
+def test_desktop_direct_passes_the_gray_gate_before_its_early_return():
+    """Desktop direct returns before the shared assembly runs — the gate must
+    judge on that path too (a denial signs ``a2a_withheld`` so clients refuse
+    ws-derivation), or an empty gray list leaves desktop users on A2A."""
+    gate = _StaticGate(False)
+    result = _build(
+        _svc(
+            bots=_Bots(bot_type="desktop"),
+            desktop=_desktop_connections("direct"),
+            a2a_issuance_gate=gate,
+        )
+    )
+    assert result.a2a_withheld is True
+    assert result.transport_mode == "direct"
+    assert {s.kind for s in result.sockets} == {"chat"}
+    assert gate.calls, "desktop path must actually consult the gate"
+
+
+def test_desktop_direct_allows_a_whitelisted_user_through():
+    gate = _StaticGate(True)
+    result = _build(
+        _svc(
+            bots=_Bots(bot_type="desktop"),
+            desktop=_desktop_connections("direct"),
+            a2a_issuance_gate=gate,
+        )
+    )
+    assert result.a2a_withheld is False
+
+
+def test_desktop_relay_path_is_gated_as_well():
+    """Relay keeps the SimpleNamespace assembly run; the withheld flag must
+    travel from the desktop decision through that namespace to the result."""
+    gate = _StaticGate(False)
+    result = _build(
+        _svc(
+            bots=_Bots(bot_type="desktop"),
+            desktop=_desktop_connections("relay"),
+            a2a_issuance_gate=gate,
+        )
+    )
+    assert result.a2a_withheld is True
+    assert result.transport_mode == "relay"
+
+
+def test_desktop_judges_the_authenticated_caller_not_the_owner():
+    collaborators = _Collaborators({(100, "collab-1"): PermissionLevel.ADMIN})
+    gate = _StaticGate(False)
+    _build(
+        _svc(
+            bots=_Bots(bot_type="desktop"),
+            desktop=_desktop_connections("direct"),
+            collaborators=collaborators,
+            a2a_issuance_gate=gate,
+        ),
+        caller_id="collab-1",
+    )
+    assert gate.calls == ["collab-1"]
+
+
+def test_desktop_gate_failure_withholds_only_the_face():
+    """Same isolation contract as the BaaS path: a gate that raises may not
+    break desktop connection issuance — it withholds the a2a face only."""
+    gate = Mock()
+    gate.allows_face.side_effect = RuntimeError("config store down")
+    result = _build(
+        _svc(
+            bots=_Bots(bot_type="desktop"),
+            desktop=_desktop_connections("direct"),
+            a2a_issuance_gate=gate,
+        )
+    )
+    assert result.a2a_withheld is True
+    assert result.sockets[0].url == "ws://127.0.0.1:20003/api/openclaw/ws"
+
+
+def test_desktop_without_a_gate_keeps_the_additive_default():
+    """Unwired wiring (legacy/test assembly) passes through — withheld=False,
+    zero behavior change, mirroring the BaaS-service idiom."""
+    result = _build(
+        _svc(bots=_Bots(bot_type="desktop"), desktop=_desktop_connections("direct"))
+    )
+    assert result.a2a_withheld is False
 
 
 def test_the_engines_socket_path_is_requested_from_the_provider():

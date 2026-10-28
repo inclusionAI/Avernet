@@ -21,6 +21,10 @@ A2A 迁移主干已合入 dev，但放量缺一个**用户粒度**灰度载体�
 - 判定唯一源点：`BaasDeviceService.get_device_connection`
   （`engine_runtime.connection` 的 sockets 面与 `devices converter` 的
   DeviceConnectionResponse 面都消费其 `DeviceConnectionInfo`，单点门控双面继承）。
+  **Desktop 例外（R5 修）**：desktop 的 direct/relay 分支不经由设备服务，
+  在 `EngineConnectionService` 的 desktop 分支就地执行同一判定（identity=
+  authenticated caller），direct 早退返回与 relay 的 `SimpleNamespace` 组装都
+  带出 `a2a_withheld`；门的异常只收敛面不炸连接（与 BaaS 路径同契约）。
 - 拒绝信号是 wire 契约的一部分：`a2a_withheld` 逐层透传
   （`DeviceConnectionInfo` → `ConnectionResult` → HTTP 组装 → DTO →
   `botChatProvider` → 包/`bootstrap` 双入口拦截）。空地址与明确拒绝是

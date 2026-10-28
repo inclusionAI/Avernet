@@ -19,7 +19,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { getSendBanRegistry, maybeBuildA2AProvider, takeCachedA2AProvider } from '@/adapters/a2a/bootstrap';
+import { deriveEndpointBase, getSendBanRegistry, maybeBuildA2AProvider, takeCachedA2AProvider } from '@/adapters/a2a/bootstrap';
 import { A2A_FILE_REFS_UNSUPPORTED_MESSAGE } from '@avernet/a2a-chat-client';
 import { A2A_SWITCH_KEY } from '@/adapters/a2a/switch';
 import * as ctrl from '@/services/backendApi/bots/privateBotSessionController';
@@ -654,6 +654,55 @@ describe('BotChatProvider A2A 接缝活体集成（B16）', () => {
       expect(sendings).toEqual(['v3']);
     } finally {
       registry.releaseOnConfirmedAbort(RPC_URL, 'sess-1');   // 套件卫生：不泄漏给后续用例
+    }
+  });
+
+  it('review R5-F2 §3.1 强制门：灰度回滚移除 A2A 地址后，不同源旧面禁令仍拦发送'
+    + '（查询口径 session 级，与当前连接推导键无关）', async () => {
+    // 旧禁令挂在独立 A2A 面（与 wsUrl 推导键不同源）——cfg 无 a2aBaseUrl
+    // 且 a2aWithheld=true 的重连，旧口径按 wsUrl 推导键查询会把禁令查丢。
+    const FOREIGN_A2A_FACE_RPC = 'http://independent-a2a-face.stable.alipay.net:32197/rpc';
+    expect(deriveEndpointBase(WS_URL)).not.toBe(FOREIGN_A2A_FACE_RPC);
+    // 回滚后的重连面：无 a2a socket + 明确拒绝——同步工厂入口必须落 v3
+    // （不靠开关关闭；这正是 withheld 拦截的意义）。
+    mockedGetConnection.mockResolvedValueOnce({
+      data: {
+        sockets: [{ kind: 'chat', url: WS_URL }],
+        a2a_withheld: true,
+        transport_mode: 'remote',
+      },
+    });
+    const registry = getSendBanRegistry();
+    registry.begin(FOREIGN_A2A_FACE_RPC, 'sess-1');
+    try {
+      const sendings: string[] = [];
+      const stubFor = (kind: string): any => ({
+        isA2aProvider: kind === 'a2a',
+        isConnected: true,
+        connect: () => Promise.resolve(),
+        request: () => { sendings.push(kind); return Promise.resolve(); },
+        disconnect: () => undefined,
+        subscribeToConnectionStatus: () => () => undefined,
+      });
+      const v3provider = createBotChatProvider({
+        bot: BOT, userId: '2088', sessionId: 'sess-1',
+        createSdkProvider: (cfg: any) =>
+          stubFor(takeCachedA2AProvider(cfg) ? 'a2a' : 'v3'),
+      });
+      const onError = jest.fn();
+      v3provider.onError = onError;
+
+      await expect(v3provider.request({ content: '绕过尝试', sessionId: 'sess-1' } satisfies BotChatRequest))
+        .rejects.toThrow('该会话暂不可发送（底层执行停止未确认）');
+      expect(sendings).toEqual([]);
+      expect(onError).toHaveBeenCalledTimes(1);
+
+      // 旧面禁令精确核销后同入口恢复——context 键下挂的两条互不误伤
+      registry.releaseOnConfirmedAbort(FOREIGN_A2A_FACE_RPC, 'sess-1');
+      await v3provider.request({ content: '恢复了', sessionId: 'sess-1' } satisfies BotChatRequest);
+      expect(sendings).toEqual(['v3']);
+    } finally {
+      registry.releaseOnConfirmedAbort(FOREIGN_A2A_FACE_RPC, 'sess-1');
     }
   });
 

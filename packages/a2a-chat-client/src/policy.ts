@@ -72,21 +72,18 @@ export function deriveEndpointBase(wsUrl: string): string | null {
 }
 
 /**
- * 发送门判据（§3.1）：(endpointBase, sessionKey) 命中禁令 → 拦截本次发送。
+ * 发送门判据（§3.1）：该 sessionKey 挂有**任意**未终结禁令 → 拦截本次发送。
  * **registry 必填**（公共面不默认宿主单例——review R2-4）；宿主便利封装
  *（isSendBannedForSession，缺省 app 单例）留在 bootstrap。
+ *
+ * 查询是 context 级而不是"当前连接推导键"级（review R5-F2）：挂禁/核销仍按
+ * (endpointBase, sessionKey) 精确键，但**查询**按 sessionKey 全量——灰度
+ * 回滚移除 A2A 地址后，重连面的推导键与挂禁时的 endpoint 可能不同源
+ * （chat 中继 vs 独立 A2A 面），按当前面查会把旧任务禁令查丢、误放行。
  */
 export function isSessionBanned(
   registry: SendBanRegistry,
   sessionKey: string,
-  wsUrl: string,
-  a2aBaseUrl?: string,
 ): boolean {
-  let base: string | null;
-  try {
-    base = resolveA2aUrls({ url: wsUrl, a2aBaseUrl }).rpcUrl;
-  } catch {
-    base = null;
-  }
-  return base !== null && registry.isBanned(base, sessionKey);
+  return registry.isContextBanned(sessionKey);
 }

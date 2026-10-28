@@ -106,12 +106,14 @@ describe('botChatProvider A2A bootstrap 接缝钉板（B16 static guard）', () 
     expect(HOOK_SOURCE).toContain('toast(CANCEL_UI_TEXT[outcome.kind]);');
   });
 
-  it('发送门：provider 侧纯谓词（§3.1 同键喂 registry），hook 侧入口拦截 + toast', () => {
+  it('发送门：provider 侧纯谓词（§3.1 sessionKey 级查 registry），hook 侧入口拦截 + toast', () => {
     expect(PROVIDER_SOURCE).toContain(
       'return this.wsUrl !== null',
     );
+    // R5-F2：查询与当前连接的 wsUrl/a2aBaseUrl 无关——回滚移除 A2A 地址后
+    // 旧面禁令仍可查，禁止再回到"按当前面推导键查询"的口径。
     expect(PROVIDER_SOURCE).toContain(
-      'isSendBannedForSession(this.options.sessionId, this.wsUrl, this.a2aBaseUrl ?? undefined);',
+      'isSendBannedForSession(this.options.sessionId);',
     );
     expect(PROVIDER_SOURCE).toContain('this.wsUrl = url;');
     expect(HOOK_SOURCE).toContain('if (provider?.isSendBanned?.()) {');

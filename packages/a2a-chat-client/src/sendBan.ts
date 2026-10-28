@@ -46,6 +46,20 @@ export class SendBanRegistry {
   }
 
   /**
+   * §3.1 查询口径（context 级存在性）：该 context 是否挂有**任意** endpoint 的
+   * 未终结禁令。挂禁/核销仍按 (endpointBase, contextId) 精确键；**查询**必须
+   * context 级——灰度回滚移除 A2A 地址后，当前连接推导出的 endpoint 可能与
+   * 挂禁时的面不同源（chat 中继 vs 独立 A2A 面），按当前面推导键查询会
+   * 把旧任务的禁令查丢、误放行（"查不到 ≠ 没禁令"）。
+   */
+  isContextBanned(contextId: string): boolean {
+    for (const rec of this.banned.values()) {
+      if (rec.contextId === contextId) return true;
+    }
+    return false;
+  }
+
+  /**
    * §3.1 唯一自动解禁位：CancelTask 控制面 engineAbort=confirmed 落地
    * （cancelled-clean 终局的核销）。非 confirmed 结局绝不走此方法
    * （unconfirmed/unknown 保持挂禁——"解禁只认 confirmed"红线）。

@@ -255,16 +255,16 @@ export function takeCachedA2AProvider(
 
 /**
  * 发送门（hook 侧入口）：isSessionBanned 的 nextgen 便利封装——registry 缺省
- * app 单例（判据/键位口径与文档见 policy.isSessionBanned；语义注释随真身迁去，
+ * app 单例（判据/口径与文档见 policy.isSessionBanned；语义注释随真身迁去，
  * 此处不在公共面——公共入口导出显式收 registry 的纯判据版）。
+ * 查询是 sessionKey 级（context 存在任意未终结禁令即拦）——不随当前
+ * 连接推导键变化（review R5-F2：回滚换轨后旧面禁令仍要可查）。
  */
 export function isSendBannedForSession(
   sessionKey: string,
-  wsUrl: string,
-  a2aBaseUrl?: string,
   registry: SendBanRegistry = appSendBan,
 ): boolean {
-  return isSessionBanned(registry, sessionKey, wsUrl, a2aBaseUrl);
+  return isSessionBanned(registry, sessionKey);
 }
 
 // A2A M2 bootstrap seam: 取消结果 UI 文案单源转出（spec §4.3 表）——
