@@ -4,7 +4,6 @@ import pytest
 
 from agentclaw.community.core.bot_public_risk.input_builder import (
     RiskInputBuilder,
-    McpProjectionUnavailable,
 )
 
 
@@ -38,14 +37,8 @@ class Identities:
         return {"default": "caller"}
 
 
-class Projector:
-    def project(self, *, bot, entry, call_type):
-        assert call_type == "CALLER"
-        return {"identityMode": call_type}
-
-
 def test_effective_mcp_and_bot_identity_are_built_from_current_metadata():
-    builder = RiskInputBuilder(Reader(), Mcps(), Identities(), None, None, Projector())
+    builder = RiskInputBuilder(Reader(), Mcps(), Identities(), None, None)
     data, digest = builder.build(
         bot=BOT,
         target={"visibility": "public", "public_scope": "user", "view_depts": []},
@@ -58,12 +51,6 @@ def test_effective_mcp_and_bot_identity_are_built_from_current_metadata():
     assert agent["resourceManifest"][0]["resourceCode"] == "default"
     assert agent["resourceManifest"][0]["resourceConfig"] == {"identityMode": "CALLER"}
     assert len(digest) == 64
-
-
-def test_unavailable_mcp_projection_fails_instead_of_silently_omitting():
-    builder = RiskInputBuilder(Reader(), Mcps(), Identities(), None, None, None)
-    with pytest.raises(McpProjectionUnavailable):
-        builder.build(bot=BOT, target={"visibility": "public", "public_scope": "user"})
 
 
 def test_active_skills_use_existing_local_and_external_center_identity():
@@ -102,7 +89,7 @@ def test_active_skills_use_existing_local_and_external_center_identity():
             )
 
     builder = RiskInputBuilder(
-        Skills(), Mcps(), Identities(), Observations(), None, Projector()
+        Skills(), Mcps(), Identities(), Observations(), None
     )
     data, _ = builder.build(
         bot={**BOT, "bot_type": "service"},
@@ -113,9 +100,9 @@ def test_active_skills_use_existing_local_and_external_center_identity():
         for v in data["agent_info"]["resourceManifest"]
         if v["resourceType"] == "SKILL"
     ]
-    assert [(v["resourceCode"], v["resourceVersion"]) for v in skills] == [
-        ("external", "2.3"),
-        ("tc:123e4567-e89b-12d3-a456-426614174000", "1.0"),
+    assert [(v["resourceCode"], v["resourcePlatform"], v["resourceVersion"]) for v in skills] == [
+        ("external", "SKILL_CENTER", "2.3"),
+        ("tc:123e4567-e89b-12d3-a456-426614174000", "teamclaw", "1.0"),
     ]
     assert data["missing_local_skill_ids"] == [2]
     assert data["agent_info"]["visibility"] == "AUTHORIZED"
@@ -131,7 +118,7 @@ def test_passport_fallback_and_read_failure_are_not_empty_success():
         def collect_bot_active_mcps(self, **kwargs):
             return []
 
-    builder = RiskInputBuilder(Reader(), NoMcps(), Identities(), None, Passport(), Projector())
+    builder = RiskInputBuilder(Reader(), NoMcps(), Identities(), None, Passport())
     data, _ = builder.build(bot={**BOT, "ext": None}, target={"visibility": "public"})
     assert data["agent_info"]["agentCode"] == "from-passport"
 
@@ -141,12 +128,12 @@ def test_passport_fallback_and_read_failure_are_not_empty_success():
 
     with pytest.raises(RuntimeError, match="database unavailable"):
         RiskInputBuilder(
-            Broken(), NoMcps(), Identities(), None, Passport(), Projector()
+            Broken(), NoMcps(), Identities(), None, Passport()
         ).build(bot={**BOT, "ext": None}, target={"visibility": "public"})
 
 
 def test_input_digest_uses_stable_department_ids_and_owner():
-    builder = RiskInputBuilder(Reader(), Mcps(), Identities(), None, None, Projector())
+    builder = RiskInputBuilder(Reader(), Mcps(), Identities(), None, None)
     target = {
         "visibility": "protected",
         "view_depts": [
@@ -169,22 +156,6 @@ def test_input_digest_uses_stable_department_ids_and_owner():
     assert first == reordered and first != changed
 
 
-def test_sensitive_projection_and_missing_required_config_fail_closed():
-    class Sensitive:
-        def project(self, **kwargs):
-            return {"headers": {"Authorization": "secret"}}
-
-    class Empty:
-        def project(self, **kwargs):
-            return {}
-
-    for projector in (Sensitive(), Empty()):
-        with pytest.raises(McpProjectionUnavailable):
-            RiskInputBuilder(
-                Reader(), Mcps(), Identities(), None, None, projector
-            ).build(bot=BOT, target={"visibility": "public"})
-
-
 def test_mcp_uses_one_stable_owner_capability_snapshot():
     snapshot = SimpleNamespace(bot_id="default", owner_id="entity", skills=(), installed_mcp_server_codes=frozenset({"active"}))
 
@@ -200,7 +171,7 @@ def test_mcp_uses_one_stable_owner_capability_snapshot():
             assert kwargs["capability_snapshot"] is snapshot
             return []
 
-    RiskInputBuilder(SnapshotReader(), ScopedMcps(), Identities(), None, None, Projector()).build(
+    RiskInputBuilder(SnapshotReader(), ScopedMcps(), Identities(), None, None).build(
         bot=BOT, target={"visibility": "public"}
     )
 
@@ -211,7 +182,7 @@ def test_capability_read_failure_is_not_an_empty_mcp_list():
             raise RuntimeError("capability read failed")
 
     with pytest.raises(RuntimeError, match="capability read failed"):
-        RiskInputBuilder(BrokenReader(), Mcps(), Identities(), None, None, Projector()).build(
+        RiskInputBuilder(BrokenReader(), Mcps(), Identities(), None, None).build(
             bot=BOT, target={"visibility": "public"}
         )
 
@@ -240,7 +211,7 @@ def test_real_collector_exclusions_are_scoped_to_resource_owner(monkeypatch):
         def active_capabilities(self, **kwargs):
             return snapshot
 
-    data, _ = RiskInputBuilder(SnapshotReader(), collector, Identities(), None, None, Projector()).build(
+    data, _ = RiskInputBuilder(SnapshotReader(), collector, Identities(), None, None).build(
         bot=BOT, target={"visibility": "public"}
     )
     assert data["agent_info"]["resourceManifest"] == []
@@ -261,6 +232,60 @@ def test_real_collector_does_not_swallow_snapshot_read_failure():
     assert collector._active_skill_assets(entity_id="entity", bot_id="default", user_id="owner") == ()
     collector._reader.active_capabilities.side_effect = LocalSkillNotFoundError("read failed")
     with pytest.raises(LocalSkillNotFoundError, match="read failed"):
-        RiskInputBuilder(collector._reader, collector, Identities(), None, None, Projector()).build(
+        RiskInputBuilder(collector._reader, collector, Identities(), None, None).build(
+            bot=BOT, target={"visibility": "public"}
+        )
+
+
+def test_confirmed_mcp_identity_and_platform_contract_ignores_connection_material():
+    class EffectiveMcps:
+        def collect_bot_active_mcps(self, **kwargs):
+            return [
+                {"server_code": "remote", "name": "Remote", "url": "https://example.invalid/private", "headers": {"Authorization": "do-not-export"}},
+                {"server_code": "local", "name": "Local", "command": "python", "args": ["do-not-export"]},
+                {"server_code": "remote", "name": "Duplicate"},
+            ]
+
+    class Modes:
+        def list_draft_call_types(self, bot_pk, engine):
+            assert (bot_pk, engine) == (42, "openclaw")
+            return {"remote": "caller", "obsolete": "caller"}
+
+    data, first = RiskInputBuilder(Reader(), EffectiveMcps(), Modes(), None, None).build(
+        bot=BOT, target={"visibility": "public"}
+    )
+    resources = data["agent_info"]["resourceManifest"]
+    assert [(r["resourceCode"], r["resourcePlatform"], r["resourceConfig"]) for r in resources] == [
+        ("local", "MCPCenter", {"identityMode": "OWNER"}),
+        ("remote", "MCPCenter", {"identityMode": "CALLER"}),
+    ]
+    assert "do-not-export" not in str(data)
+
+    class OwnerModes:
+        def list_draft_call_types(self, bot_pk, engine):
+            return {}
+
+    _, changed = RiskInputBuilder(Reader(), EffectiveMcps(), OwnerModes(), None, None).build(
+        bot=BOT, target={"visibility": "public"}
+    )
+    assert first != changed
+
+
+def test_invalid_sparse_override_and_repository_failure_do_not_become_owner():
+    class InvalidModes:
+        def list_draft_call_types(self, bot_pk, engine):
+            return {"default": "owner"}
+
+    with pytest.raises(ValueError, match="sparse MCP call identity"):
+        RiskInputBuilder(Reader(), Mcps(), InvalidModes(), None, None).build(
+            bot=BOT, target={"visibility": "public"}
+        )
+
+    class FailedModes:
+        def list_draft_call_types(self, bot_pk, engine):
+            raise RuntimeError("identity read failed")
+
+    with pytest.raises(RuntimeError, match="identity read failed"):
+        RiskInputBuilder(Reader(), Mcps(), FailedModes(), None, None).build(
             bot=BOT, target={"visibility": "public"}
         )

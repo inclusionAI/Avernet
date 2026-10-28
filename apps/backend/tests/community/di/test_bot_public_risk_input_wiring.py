@@ -11,14 +11,13 @@ from agentclaw.community.core.bot_public_risk.application import (
 )
 from agentclaw.community.core.bot_public_risk.input_builder import (
     RiskInputBuilder,
-    McpProjectionUnavailable,
 )
 from agentclaw.community.di.container import build_injector
 from agentclaw.community.di.profile import DeployProfile
 
 
 @pytest.mark.parametrize("profile", [DeployProfile.TEST, DeployProfile.COMMUNITY])
-def test_actual_composition_resolves_risk_service_and_fails_closed_on_missing_mcp_projection(
+def test_actual_composition_resolves_risk_service_and_builds_mcp_identity(
     profile,
 ):
     injector = build_injector(profile=profile)
@@ -44,31 +43,13 @@ def test_actual_composition_resolves_risk_service_and_fails_closed_on_missing_mc
         "creator_id": "owner",
         "ext": {"passport": {"agent_code": "agent"}},
     }
-    with pytest.raises(
-        McpProjectionUnavailable, match="MCP risk projection is not configured"
-    ):
-        builder.build(
-            bot=bot,
-            target={"visibility": "public", "public_scope": "user", "view_depts": []},
-        )
-    builder.capabilities.active_skill_assets.assert_not_called()
-
-    service._repository = Mock()
-    service._repository.get_by_request.return_value = None
-    service._tasks = Mock()
-    resolved = SimpleNamespace(bot_pk=1, current_owner_id="owner", bot=bot)
-    with pytest.raises(
-        McpProjectionUnavailable, match="MCP risk projection is not configured"
-    ):
-        service.submit(
-            bot=resolved,
-            actor_id="owner",
-            surface="openapi",
-            body={
-                "client_request_id": "r1",
-                "visibility": "public",
-                "public_scope": "user",
-                "view_depts": [],
-            },
-        )
-    service._tasks.start.assert_not_called()
+    builder.capabilities.active_capabilities.return_value = SimpleNamespace(
+        owner_id="entity", skills=(), installed_mcp_server_codes=frozenset()
+    )
+    data, _ = builder.build(
+        bot=bot,
+        target={"visibility": "public", "public_scope": "user", "view_depts": []},
+    )
+    item = data["agent_info"]["resourceManifest"][0]
+    assert item["resourcePlatform"] == "MCPCenter"
+    assert item["resourceConfig"] == {"identityMode": "OWNER"}

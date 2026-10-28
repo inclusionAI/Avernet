@@ -5,30 +5,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 from hashlib import sha256
 import json
-from typing import Any, Protocol
+from typing import Any
 from uuid import UUID
 
 from agentclaw.community.core.skill_center.public_center_identity import (
     PublicCenterSkillIdentity,
 )
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
-
-
-class McpProjectionUnavailable(RuntimeError):
-    """The risk-safe projection of necessary MCP configuration is unavailable."""
-
-
-class McpRiskProjector(Protocol):
-    def project(
-        self, *, bot: Mapping[str, Any], entry: Mapping[str, Any], call_type: str
-    ) -> Mapping[str, Any]:
-        """Return complete necessary config and call identity with no credentials.
-
-        Raise if a required parameter cannot be represented safely and faithfully.
-        This contract has no default implementation until the external field and
-        secret-projection contracts have been verified.
-        """
-        ...
 
 
 def _text(bot: Mapping[str, Any], field: str) -> str:
@@ -63,38 +46,6 @@ def _agent_code(
     return code
 
 
-def _safe_mapping(value: Any) -> dict:
-    if not isinstance(value, Mapping):
-        raise McpProjectionUnavailable("MCP required config is unavailable")
-
-    # Reject obvious credential fields even when a supplied projector is faulty.
-    def check(item):
-        if isinstance(item, Mapping):
-            for key, nested in item.items():
-                if not isinstance(key, str) or any(
-                    word in key.lower()
-                    for word in (
-                        "token",
-                        "secret",
-                        "password",
-                        "credential",
-                        "api_key",
-                        "apikey",
-                        "authorization",
-                    )
-                ):
-                    raise McpProjectionUnavailable(
-                        "MCP config contains a credential field"
-                    )
-                check(nested)
-        elif isinstance(item, (tuple, list)):
-            for nested in item:
-                check(nested)
-
-    check(value)
-    return dict(value)
-
-
 class RiskInputBuilder:
     def __init__(
         self,
@@ -103,20 +54,13 @@ class RiskInputBuilder:
         identities,
         observations,
         passport,
-        mcp_projector: McpRiskProjector | None,
     ):
         self.capabilities, self.mcps, self.identities = capabilities, mcps, identities
-        self.observations, self.passport, self.mcp_projector = (
-            observations,
-            passport,
-            mcp_projector,
-        )
+        self.observations, self.passport = observations, passport
 
     def build(
         self, *, bot: Mapping[str, Any], target: dict[str, Any]
     ) -> tuple[dict[str, Any], str]:
-        if self.mcp_projector is None:
-            raise McpProjectionUnavailable("MCP risk projection is not configured")
         bot_id, entity, env = (
             _text(bot, "bot_id"),
             _text(bot, "entity_id"),
@@ -149,25 +93,22 @@ class RiskInputBuilder:
             if code in seen:
                 continue
             seen.add(code)
-            raw_mode = modes.get(code, "owner")
-            mode = str(getattr(raw_mode, "value", raw_mode)).upper()
-            if mode not in {"OWNER", "CALLER"}:
-                raise ValueError("invalid MCP call identity")
-            config = _safe_mapping(
-                self.mcp_projector.project(bot=bot, entry=entry, call_type=mode)
-            )
-            if not config:
-                raise McpProjectionUnavailable(
-                    f"MCP {code} missing required identity/config"
-                )
+            # Only Caller overrides are persisted; Owner is represented by absence.
+            raw_mode = modes.get(code)
+            if code in modes:
+                if str(getattr(raw_mode, "value", raw_mode)).lower() != "caller":
+                    raise ValueError("invalid sparse MCP call identity")
+                mode = "CALLER"
+            else:
+                mode = "OWNER"
             resources.append(
                 {
                     "resourceType": "MCP",
-                    "resourcePlatform": "teamclaw",
+                    "resourcePlatform": "MCPCenter",
                     "resourceCode": code,
                     "resourceVersion": "V1.0",
                     "resourceName": entry.get("name") or entry.get("server_name") or code,
-                    "resourceConfig": config,
+                    "resourceConfig": {"identityMode": mode},
                 }
             )
         missing = []
@@ -213,7 +154,7 @@ class RiskInputBuilder:
                     raise ValueError("Center Skill external identity is ambiguous")
                 code, platform, version = (
                     external,
-                    "skillcenter",
+                    "SKILL_CENTER",
                     asset.sc_version_number,
                 )
             elif path.startswith("git://"):

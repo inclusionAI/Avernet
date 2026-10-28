@@ -1,7 +1,7 @@
 """Durable security submission and original-report polling.
 
 The provider interprets the external contract; this layer never infers PASS
-from timeout, an absent field, or an unverified default.
+from timeout or an absent field.
 """
 
 from dataclasses import dataclass, replace
@@ -42,7 +42,7 @@ class SecurityProvider(Protocol):
     have been sent are outcome-unknown and must not trigger a blind retry;
     SecurityProviderUnavailable means no external request was attempted.
     Query failures propagate without inventing a security conclusion. PASS is
-    actionable only when the provider supplies independently verified valid_pass.
+    actionable when a successful original-checkId report supplies PASS.
     """
     def submit_agent_scan(self, agent_info: dict) -> str: ...
     def get_agent_check_report(self, check_id: str) -> SecurityReport: ...

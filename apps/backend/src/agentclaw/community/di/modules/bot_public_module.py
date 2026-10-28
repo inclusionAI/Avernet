@@ -207,8 +207,6 @@ class BotPublicModule(Module):
         observations: LocalSkillSecurityObservationRepositoryProtocol,
         passport: PassportPlugin,
     ) -> RiskInputBuilder:
-        # No safe MCP projection has been established yet. The builder fails
-        # closed until an implementation is bound here.
         return CurrentRiskInputBuilder(
-            capabilities, mcps, identities, observations, passport, mcp_projector=None
+            capabilities, mcps, identities, observations, passport
         )
