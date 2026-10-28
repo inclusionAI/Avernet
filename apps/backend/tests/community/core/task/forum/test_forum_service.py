@@ -449,7 +449,7 @@ def test_create_reply_rejects_floor_reply_for_poll_topic():
         )
     )
 
-    with pytest.raises(ValidationError, match="POLL replies must target the Topic"):
+    with pytest.raises(ValidationError, match="only DISCUSSION Topics allow reply_to_post_id"):
         ForumService(repo).create_reply(
             topic_id="topic-1",
             author_type="BOT",

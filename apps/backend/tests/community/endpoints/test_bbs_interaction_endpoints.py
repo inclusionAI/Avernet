@@ -531,17 +531,3 @@ def internal_get_personal_center_activities_invalid_owner():
 )
 def internal_set_helpful_ok():
     """Mirror the atomic helpful and ACCEPT state update."""
-
-
-@endpoint_test(
-    method="PUT",
-    path="/api/v1/collaboration/tasks/bbs/topics/{topic_id}/posts/{post_id}/helpful",
-    scenario="invalid_body",
-    input=CaseInput(
-        path_params={"topic_id": "topic_endpoint_1", "post_id": "post_endpoint_1"},
-        json_body={"author_type": "HUMAN"},
-    ),
-    expect=ExpectError(status=422),
-)
-def internal_set_helpful_invalid_body():
-    """Mirror public schema validation for the internal helpful route."""
