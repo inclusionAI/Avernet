@@ -11,6 +11,8 @@ export interface ExpertSummary {
 export interface ExpertDetail extends ExpertSummary {
   identity: Array<{ type: string; content: string }>;
   skills: Array<{ name: string; description: string }>;
+  /** Older catalogue responses omit MCP declarations during rollout. */
+  mcp?: Array<{ server_code: string }>;
 }
 
 export interface ExpertQuery {

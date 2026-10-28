@@ -108,7 +108,7 @@ it('首屏不加载市场候选，用户打开添加能力时再一次性加载'
 
   await botEditorService.loadCapabilityCandidates('bot-1', '12', 'skill');
 
-  expect(controller.listBotMcps).not.toHaveBeenCalled();
+  expect(controller.listBotMcps).toHaveBeenCalledTimes(1);
   expect(controller.searchMarketMcpServers).not.toHaveBeenCalled();
   expect(controller.listRepositorySkills).toHaveBeenCalledTimes(1);
   expect(controller.listSkillCenterSkills).not.toHaveBeenCalled();
@@ -497,4 +497,25 @@ it('相同定时任务的并发创建复用同一个请求', async () => {
   );
   resolveCreate?.({ data: undefined });
   await expect(Promise.all([first, second])).resolves.toHaveLength(2);
+});
+
+it('loads actual Local Skill and MCP facts without inventing set membership or authorization', async () => {
+  controller.listSkillSetResources.mockResolvedValue({ data: [] });
+  controller.listSkills.mockResolvedValue({ data: { total: 1, items: [
+    { skill_id: 'local-review', name: 'writing-review', source: 'LOCAL', active: true },
+  ] } });
+  controller.listBotMcps.mockResolvedValue({ data: [{ server_code: 'project-tools', active: true }] });
+  const result = await botEditorService.load('bot-with-capabilities');
+  expect(result.skills).toEqual([expect.objectContaining({ id: 'local-review', source: 'local', active: true })]);
+  expect(result.mcps).toEqual([{ serverCode: 'project-tools', name: 'project-tools', active: true }]);
+  expect(result.skillSets).toEqual([]);
+});
+
+it('keeps the original capability read error without fabricating enabled or authorized facts', async () => {
+  controller.listSkillSetResources.mockResolvedValue({ data: [] });
+  controller.listBotMcps.mockRejectedValue(new Error('MCP access denied'));
+  const result = await botEditorService.load('bot-with-capabilities');
+  expect(result.mcps).toEqual([]);
+  expect(result.capabilityLoadError).toBe('MCP：MCP access denied');
+  expect(result.errors).toBe(1);
 });

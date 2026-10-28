@@ -69,7 +69,19 @@ export function ExpertDetails({ expertId, onBack }: { expertId: string; onBack: 
                 {expert.skills.map((skill) => (
                   <article key={skill.name} className="rounded-xl border border-input bg-card p-5">
                     <h3 className="font-medium text-foreground">{skill.name}</h3>
+                    <span className="text-xs text-muted-foreground">Local Skill</span>
                     <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{skill.description}</p>
+                  </article>
+                ))}
+              </section>
+            )}
+            {(expert.mcp ?? []).length > 0 && (
+              <section aria-label="模板声明的 MCP" className="space-y-3">
+                <h2 className="text-lg font-semibold text-foreground">模板声明的 MCP</h2>
+                <p className="text-sm text-muted-foreground">创建时沿现有权限与用户授权处理，实际配置可在 Bot 管理中查看。</p>
+                {expert.mcp?.map((mcp) => (
+                  <article key={mcp.server_code} className="rounded-xl border border-input bg-card p-5">
+                    <h3 className="font-medium text-foreground">{mcp.server_code}</h3>
                   </article>
                 ))}
               </section>

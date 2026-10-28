@@ -70,12 +70,17 @@ test('detail renders authored Markdown and real counts, then returns with the or
     tags: ['PRD'], creation_count: 7, first_added_at: '2026-10-27T00:00:00Z',
     identity: [{ type: 'AGENTS.md', content: '# 专业身份\n\n<script>unsafe()</script>\n\n[危险链接](javascript:alert(1))' }],
     skills: [{ name: 'prd-review', description: '检查验收标准' }],
+    mcp: [{ server_code: 'project-tools' }],
   });
   render(<ExpertMarketPage />);
   expect(await screen.findByRole('heading', { name: '产品经理' })).toBeVisible();
   expect(screen.getByText('已创建 7 个 Bot')).toBeVisible();
   expect(screen.getByRole('heading', { name: '专业身份' })).toBeVisible();
   expect(screen.getByText('检查验收标准')).toBeVisible();
+  expect(screen.getByText('Local Skill')).toBeVisible();
+  expect(screen.getByRole('heading', { name: '模板声明的 MCP' })).toBeVisible();
+  expect(screen.getByText('project-tools')).toBeVisible();
+  expect(screen.queryByText('已授权')).not.toBeInTheDocument();
   expect(document.querySelector('script')).toBeNull();
   expect(document.querySelector('a[href^="javascript:"]')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '返回专家列表' }));

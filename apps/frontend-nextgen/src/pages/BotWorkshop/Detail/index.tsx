@@ -221,6 +221,8 @@ const BotWorkshopDetailPage: React.FC = () => {
                 skillSets={editor.skillSets}
                 mySkills={editor.skills.filter((skill) => skill.source === 'local')}
                 availableMcps={editor.availableMcps}
+                currentMcps={editor.mcps}
+                loadError={editor.capabilityLoadError}
                 marketSkills={editor.marketSkills}
                 skillCenterSkills={editor.skillCenterSkills}
                 workshopSkills={editor.workshopSkills}
