@@ -58,9 +58,7 @@ def test_seeded_key_resolves_through_the_app_token_lookup_path(db):
     assert resolved_row.app_name == _DEV_APP.app_name
     assert resolved_row.tenant == _DEV_APP.tenant
 
-    resolved = asyncio.run(
-        AppRepository(db).find_app_by_credential(_DEV_KEY)
-    )
+    resolved = asyncio.run(AppRepository(db).find_app_by_credential(_DEV_KEY))
     assert resolved is not None
     assert resolved.app_name == _DEV_APP.app_name
     assert resolved.tenant == _DEV_APP.tenant
@@ -96,8 +94,6 @@ def test_seed_works_when_the_deployment_created_no_schema():
     plugin = SqliteDatabasePlugin(create_schema=False)
     db = initialize_database(plugin)
     assert _seed(db, _config([_DEV_APP])) == 1
-    resolved = asyncio.run(
-        AppRepository(db).find_app_by_credential(_DEV_KEY)
-    )
+    resolved = asyncio.run(AppRepository(db).find_app_by_credential(_DEV_KEY))
     assert resolved is not None
     assert resolved.tenant == _DEV_APP.tenant

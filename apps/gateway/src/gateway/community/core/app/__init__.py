@@ -24,11 +24,11 @@ closed, a secbaas-side edit to the scheme must be paired with a gateway-side
 re-copy by hand.
 """
 
+from ._dev_seed import seed_local_dev_apps
 from ._key_gen import APIKeyGenerator
 from ._orm import AppRow
 from ._registrar import AppRegistrar, IssuedApp, PrefixAllocationError
 from ._repository import AppNameTakenError, AppRepository, PrefixTakenError
-from ._dev_seed import seed_local_dev_apps
 
 __all__ = [
     "APIKeyGenerator",
