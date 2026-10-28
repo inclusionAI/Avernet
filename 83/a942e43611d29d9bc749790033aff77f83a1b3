@@ -1,0 +1,16 @@
+apps/backend/src/agentclaw/community/core/bot_public/services/bot_public_service.py
+  h_9d7cfd405752f5 1088-1089
+apps/backend/tests/community/core/bot_public/test_bot_public_service.py
+  h_9d7cfd405752f5 3015,3023-3024,3034
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "83a942e43611d29d9bc749790033aff77f83a1b3",
+  "prompts": {},
+  "humans": {
+    "h_9d7cfd405752f5": {
+      "author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
