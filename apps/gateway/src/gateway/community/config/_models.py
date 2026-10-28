@@ -201,6 +201,28 @@ class PluginConfig(BaseSettings):
     secret_aliyun_kms: dict[str, Any] = Field(default_factory=dict)
 
 
+class LocalDevApp(BaseModel):
+    """One deterministic local test app to seed at boot (DEV ONLY).
+
+    ``local_dev_apps`` exists for the single-box dev stack: a gateway with an
+    in-memory app registry that a *local* service (the Backend's manager-sync
+    sender, singlebox) must authenticate needs a reproducible credential
+    without any admin HTTP round-trip or persisted state. Seeding runs only
+    when this list is non-empty — a configuration gate, not an environment
+    sniff, so a deployment that never writes the section never seeds
+    anything. The ``api_key`` is a well-known development stand-in, the exact
+    32-char base62 shape a real key takes so the verifier exercises the same
+    path; it must never be a real credential, and production configuration
+    must never list an entry here.
+    """
+
+    app_name: str = Field(min_length=1)
+    tenant: str = Field(min_length=1)
+    api_key: str = Field(min_length=1)
+    owners: str = "singlebox"
+    app_type: str = "SINGLEBOX_TEST"
+
+
 class UserConfig(BaseModel):
     model_config = {"extra": "allow"}
     plugins: PluginConfig = Field(default_factory=PluginConfig)
@@ -213,6 +235,7 @@ class UserConfig(BaseModel):
     route_security: dict[str, dict[str, str]] = Field(default_factory=dict)
     cors: CorsConfig = Field(default_factory=CorsConfig)
     upstreams: dict[str, Any] = Field(default_factory=dict)
+    local_dev_apps: list[LocalDevApp] = Field(default_factory=list)
 
     def get(self, key: str, default: Any = None) -> Any:
         try:

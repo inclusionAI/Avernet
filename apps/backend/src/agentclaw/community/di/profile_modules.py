@@ -217,6 +217,9 @@ def modules_for(profile: DeployProfile) -> list[Module]:
             from agentclaw.community.di.modules.infrastructure.singlebox.devices import (
                 SingleboxDevicesModule,
             )
+            from agentclaw.community.di.modules.infrastructure.singlebox.manager_sync import (
+                SingleboxBotManagerSyncModule,
+            )
             from agentclaw.community.core.devices.services.singlebox_device_sync import (
                 SingleboxDeviceSyncService,
             )
@@ -232,6 +235,13 @@ def modules_for(profile: DeployProfile) -> list[Module]:
                     ),
                     SingleboxAccessModule(),
                     SingleboxCallerIdentityModule(),
+                    # Manager sync: appended AFTER TestBotManagerSyncModule so the
+                    # last binding wins — an enabled singlebox ``bot_manager_sync``
+                    # block resolves the memory-mode stack (real Gateway HTTP
+                    # delivery + in-process coordination) instead of the recording
+                    # doubles, with no Redis service. Disabled stays disabled; the
+                    # doubles' plugin keys stay bound for the conformance suites.
+                    SingleboxBotManagerSyncModule(),
                 ]
             )
 

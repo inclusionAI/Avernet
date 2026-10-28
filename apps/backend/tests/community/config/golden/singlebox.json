@@ -88,7 +88,15 @@
       "teclaw_platform_managed": false
     },
     "bot_manager_sync": {
-      "enabled": false
+      "app_secret_names_by_tenant": {
+        "teamclaw": "singlebox_manager_sync_app_credential"
+      },
+      "coordination_generation": "singlebox-memory-generation",
+      "coordination_mode": "memory",
+      "enabled": true,
+      "env": "dev",
+      "gateway_base_url": "http://127.0.0.1:8889",
+      "target_id": "singlebox-dev-manager-sync"
     },
     "bot_oss_config": {
       "access_key_secret": "oss_m_manual_agentclaw_botdata",

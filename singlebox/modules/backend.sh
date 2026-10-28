@@ -94,6 +94,14 @@ backend_start() {
 
     if [ "${SERVER_ENV:-dev}" = "local" ] || [ "${DEPLOY_PROFILE:-}" = "singlebox" ]; then
         export AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE="${AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}"
+        # Backend→BCS manager sync (singlebox posture): the dev trusted-App
+        # credential the local gateway seeds from its
+        # user_config.local_dev_apps registry entry (apps/gateway/configs/
+        # application-local.yaml) — the same literal, by convention. A
+        # clearly-marked synthetic stand-in, same shape as the signing key
+        # above: never a real secret, and an .env.local value overrides all
+        # ends together.
+        export AGENTCLAW_SECRET_MANAGER_SYNC_APP_CREDENTIAL="${AGENTCLAW_SECRET_MANAGER_SYNC_APP_CREDENTIAL:-SingleboxManagerSyncDevAppKey000}"
     fi
 
     log_info "Engine type: ${CHAT_ENGINE}"
@@ -113,6 +121,7 @@ backend_start() {
         api_key_prefix="${backend_openapi_header_prefix}" \
         SERVER_ENV=dev DEPLOY_PROFILE=singlebox \
             AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE="${AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}" \
+            AGENTCLAW_SECRET_MANAGER_SYNC_APP_CREDENTIAL="${AGENTCLAW_SECRET_MANAGER_SYNC_APP_CREDENTIAL:-SingleboxManagerSyncDevAppKey000}" \
             DATABASE_URL="sqlite:///${RUNTIME_DATA_DIR}/backend.db" \
             ENABLE_OSS_SYNC=false \
             CHAT_ENGINE="${CHAT_ENGINE}" \

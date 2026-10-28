@@ -81,12 +81,31 @@ user_config:
     poll_interval_seconds: 0.2
     poll_jitter_seconds: 0.0
 
-  # Backend→BCS manager sync — off in singlebox (like every neutral
-  # deployment). Enabling requires shared Redis, an ops-initialized
-  # coordination generation, Gateway base URL, and per-tenant App
-  # credentials from the deployment's secret injection.
+  # Backend→BCS manager sync — enabled on the singlebox stack in the
+  # single-replica downgrade form: `coordination_mode: memory` runs the
+  # SAME in-process coordinator contract the conformance suites pin
+  # (claim/begin/finish/hold/generation/CAS inside one process), with the
+  # REAL Gateway→BCS trusted-App delivery. Singlebox has exactly one
+  # Backend process and always whole-stack-restarts, so there is no
+  # cross-process writer to protect — which is exactly why `memory` is a
+  # dev-stack value ONLY and never a production mode: production keeps
+  # the default `redis` (shared, non-evicting Redis + ops-initialized
+  # generation sentinel; see docs/bot-manager-sync-operations.md §3).
+  # `env: dev` must equal the env singlebox Bots are created with
+  # (SERVER_ENV=dev → get_current_env()="dev"); the dispatcher env-gate
+  # and the reader both filter on it. The tenant credential resolves
+  # through the SecretResolver (secret name below): for singlebox, the
+  # dev App credential exported by singlebox/modules/backend.sh and
+  # registered in the local gateway's dev app registry.
   bot_manager_sync:
-    enabled: false
+    enabled: true
+    coordination_mode: memory
+    target_id: singlebox-dev-manager-sync
+    env: dev
+    gateway_base_url: "http://127.0.0.1:8889"
+    app_secret_names_by_tenant:
+      teamclaw: singlebox_manager_sync_app_credential
+    coordination_generation: singlebox-memory-generation
 
   # token_exchange — 外网替换为本地 mock
   token_exchange:

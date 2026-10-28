@@ -213,6 +213,20 @@ mock_user_id = "000000"
 mock_user_name = "guest"
 allow_mock_headers = true
 
+# Trusted-App authority scope (bot-authority spec §3.1): an explicit allow
+# list of App scope rules the local dev BCS answers. The single entry names
+# the deterministic dev test app the singlebox gateway seeds from its
+# user_config.local_dev_apps registry entry, so the singlebox Backend's
+# manager-sync sender (trusted-App PUT .../managers) is authorized through
+# the REAL authority policy path — byte-exact app name + tenant, no
+# wildcards, deny-everything default for every other App. Local/dev-only
+# identifiers; a production BCS provisions its own rules here.
+[bot_authority]
+[[bot_authority.trusted_apps]]
+app = "singlebox-manager-sync"
+tenant = "teamclaw"
+actions = ["managers:sync"]
+
 [bcsfuse]
 enabled = true
 url = "http://127.0.0.1:8765"

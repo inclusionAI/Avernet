@@ -5,7 +5,7 @@ that shared module is at the repository's 1,000-line limit; the provider
 that turns this into a binding lives in
 ``di/modules/bot_manager_sync_module.py``.
 
-The surface is exactly six keys, and the default is **off**:
+The surface is exactly seven keys, and the default is **off**:
 
 - ``enabled`` (default ``false``) — nothing about the syncer runs, and
   no thread/client exists, unless the deployment opts in.
@@ -25,14 +25,24 @@ The surface is exactly six keys, and the default is **off**:
 - ``coordination_generation`` — the ops-initialized namespace
   generation sentinel value. Enabling without one keeps the sender
   stopped (a missing generation must stop all sends, never auto-create).
+- ``coordination_mode`` (default ``redis``) — which coordination
+  implementation the composition root builds. ``redis`` is the only
+  production posture (shared, non-evicting Redis; see the operations
+  runbook §3). ``memory`` is the **single-replica downgrade form**: one
+  instance, one process, one writer, whole-stack restart — valid only
+  as an explicitly-authored dev-stack value (singlebox). The in-process
+  coordinator enforces the same claim/begin/finish/hold/CAS invariants
+  inside one mutex, but there is **no cross-process protection**: two
+  sender processes sharing one BCS would race undetected. A production
+  deployment must never set it.
 
 Unknown keys, wrong types, or enabled-with-missing-fields are structural
 configuration errors: they raise at resolution and fail the boot on
 every profile, per the repo's config policy. The Redis URL is NOT part
 of this block — the shared cache configuration
 (``CommunityCacheConfig``) already owns it; deployments without shared
-Redis keep the feature unavailable (never a process-local lock
-fallback).
+Redis keep the feature unavailable in the default ``redis`` mode
+(never a process-local lock fallback for a production deployment).
 """
 
 from __future__ import annotations
@@ -53,8 +63,12 @@ _ALLOWED_KEYS = frozenset(
         "gateway_base_url",
         "app_secret_names_by_tenant",
         "coordination_generation",
+        "coordination_mode",
     }
 )
+
+#: The only accepted ``coordination_mode`` spellings.
+_COORDINATION_MODES = frozenset({"redis", "memory"})
 
 
 @dataclass(frozen=True)
@@ -67,6 +81,7 @@ class ManagerSyncConfig:
     gateway_base_url: str = ""
     app_secret_names_by_tenant: Mapping[str, str] = field(default_factory=dict)
     coordination_generation: str = ""
+    coordination_mode: str = "redis"
 
 
 def parse_manager_sync_config(
@@ -91,6 +106,15 @@ def parse_manager_sync_config(
     for key in ("enabled",):
         if key in block and type(block[key]) is not bool:
             raise ValueError(f"{CONFIG_BLOCK_NAME}.{key} must be a boolean")
+    coordination_mode = block.get("coordination_mode", "redis")
+    if (
+        not isinstance(coordination_mode, str)
+        or coordination_mode not in _COORDINATION_MODES
+    ):
+        raise ValueError(
+            f"{CONFIG_BLOCK_NAME}.coordination_mode must be one of: "
+            + ", ".join(sorted(_COORDINATION_MODES))
+        )
     string_fields = ("target_id", "env", "gateway_base_url", "coordination_generation")
     values: dict[str, str] = {}
     for key in string_fields:
@@ -138,6 +162,7 @@ def parse_manager_sync_config(
             gateway_base_url=values["gateway_base_url"],
             app_secret_names_by_tenant=secret_map,
             coordination_generation=values["coordination_generation"],
+            coordination_mode=coordination_mode,
         )
 
     # Enabled: every deployment-owned field is required, and none may be
@@ -168,6 +193,7 @@ def parse_manager_sync_config(
         gateway_base_url=required["gateway_base_url"],
         app_secret_names_by_tenant=secret_map,
         coordination_generation=required["coordination_generation"],
+        coordination_mode=coordination_mode,
     )
 
 

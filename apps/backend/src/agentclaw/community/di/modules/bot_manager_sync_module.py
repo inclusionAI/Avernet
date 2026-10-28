@@ -31,6 +31,17 @@ unavailable stack, not a degraded lock. Credentials resolve through
 ``SecretResolver.get_secret(...).secret_value``; a missing one makes
 the feature unavailable with a diagnostic — never an empty-string fake
 credential — and secret material is never logged or repr'ed.
+
+``coordination_mode`` selects the coordinator implementation: ``redis``
+(the default, production-only posture) builds the Redis coordinator
+over the shared cache URL; ``memory`` — the **single-replica downgrade
+form** — builds the in-process
+:class:`MemoryManagerSyncCoordinator` with the configured generation,
+exchanging cross-process coordination for a dev stack that has exactly
+one Backend process (singlebox). Delivery stays the real
+:class:`HttpBcsManagersPlugin` through the Gateway in BOTH modes, and
+the credential availability checks are identical — ``memory`` never
+loosens them, it only swaps the coordination boundary.
 """
 from __future__ import annotations
 
@@ -152,6 +163,49 @@ def _resolve_app_credentials(
     return credentials, reason
 
 
+def build_memory_manager_sync_stack(
+    config: ManagerSyncConfig, credentials: dict[str, str]
+) -> "ManagerSyncStack":
+    """The ``memory``-mode stack: real HTTP delivery + in-process coordination.
+
+    The single-replica downgrade form (singlebox/dev only — see the
+    config module docstring). Delivery stays the real trusted-App HTTP
+    plugin through the Gateway with the deployment's credentials, and
+    coordination swaps to the in-process coordinator bound to the
+    configured generation sentinel value. The coordinator ctor takes
+    the generation only: the namespace identity (``target_id``) is part
+    of the Redis key layout and has no in-process analogue.
+
+    Fail-closed on data environments outside the dev family: a pre/prod
+    deployment asking for in-process coordination is a structural
+    configuration error (two sender processes would race undetected),
+    so this raises — it is never silently accepted, never downgraded
+    to a hidden Redis fallback.
+    """
+    from agentclaw.community.plugins.community.bcs_managers import (
+        HttpBcsManagersPlugin,
+    )
+    from agentclaw.community.plugins.local.manager_sync_coordination import (
+        MemoryManagerSyncCoordinator,
+    )
+    from agentclaw.community.utils.env_utils import get_current_env
+
+    if get_current_env() != "dev":
+        raise ValueError(
+            "bot_manager_sync.coordination_mode=memory is the single-replica "
+            "dev-stack downgrade (singlebox) and is not a valid "
+            f"{get_current_env()!r} posture — keep the default redis mode "
+            "with shared non-evicting Redis"
+        )
+    coordinator = MemoryManagerSyncCoordinator(generation=config.coordination_generation)
+    return ManagerSyncStack.available_with(
+        HttpBcsManagersPlugin(
+            base_url=config.gateway_base_url, app_credentials=credentials
+        ),
+        coordinator,
+    )
+
+
 class BotManagerSyncModule(Module):
     """Composition root for the manager sync feature (default off)."""
 
@@ -181,14 +235,40 @@ class BotManagerSyncModule(Module):
         """The community/prod stack (the test column overrides this key).
 
         ``CommunityCacheConfig`` is injected, so only deployments that
-        actually support the shared cache can ever construct the Redis
-        coordinator; test profiles rebind this provider wholesale with
-        the Recording/Memory doubles and never resolve this one.
+        actually support the shared cache can ever construct through to
+        the Redis-coordinator branch below; test profiles rebind this
+        provider wholesale with the Recording/Memory doubles and never
+        resolve this one, while the singlebox column overrides it with
+        the memory-mode stack builder (real delivery + in-process
+        coordination) so the dev stack never requires shared Redis.
         """
         if not config.enabled:
             return ManagerSyncStack.unavailable("disabled")
-        # Shared Redis is mandatory: markers must not be evicted and two
-        # replicas must coordinate. No process-local fallback exists.
+        memory_mode = config.coordination_mode == "memory"
+        if memory_mode:
+            # Single-replica downgrade (singlebox/dev stacks only): a
+            # deployment authorizing memory mode opts out of shared Redis
+            # entirely, so the shared-redis requirement does not apply —
+            # one process, one writer, whole-stack restart. Credential
+            # resolution is identical in both coordination modes;
+            # ``memory`` never loosens it.
+            credentials, missing_reason = _resolve_app_credentials(
+                config, secret_resolver
+            )
+            if missing_reason:
+                return ManagerSyncStack.unavailable(missing_reason)
+            logger.info(
+                "[MANAGER-SYNC] enabled stack resolving (memory mode — "
+                "single-replica dev downgrade, in-process coordination): "
+                "target=%s env=%s tenants=%d generation=provided",
+                config.target_id,
+                config.env,
+                len(credentials),
+            )
+            return build_memory_manager_sync_stack(config, credentials)
+        # Shared Redis is mandatory in the default (production) mode:
+        # markers must not be evicted and two replicas must coordinate.
+        # No process-local fallback exists for it.
         redis_url = cache_config.redis_url
         if not redis_url:
             return ManagerSyncStack.unavailable("shared-redis-required")

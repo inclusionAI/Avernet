@@ -20,6 +20,7 @@ infrastructure module):
 """
 from __future__ import annotations
 
+import dataclasses
 import threading
 import time
 
@@ -77,6 +78,30 @@ def test_valid_full_block_parses():
     assert config.env == "prod"
     assert config.app_secret_names_by_tenant == {"teamclaw": "SECRET_NAME_BCS_APP"}
     assert config.coordination_generation == "ops-init-2026-10-27"
+    # The coordination mode defaults to the production posture.
+    assert config.coordination_mode == "redis"
+
+
+@pytest.mark.parametrize("mode", ["redis", "memory"])
+def test_coordination_mode_accepts_exactly_two_spellings(mode):
+    config = parse_manager_sync_config(
+        {
+            "enabled": True,
+            "target_id": "t",
+            "env": "dev",
+            "gateway_base_url": "http://127.0.0.1:9999",
+            "app_secret_names_by_tenant": {"teamclaw": "S"},
+            "coordination_generation": "g",
+            "coordination_mode": mode,
+        }
+    )
+    assert config.coordination_mode == mode
+
+
+@pytest.mark.parametrize("bad_mode", ["Memory", " MEMORY", "", 7, None, "sql"])
+def test_bad_coordination_mode_is_a_config_error_even_when_disabled(bad_mode):
+    with pytest.raises(ValueError, match="coordination_mode"):
+        parse_manager_sync_config({"enabled": False, "coordination_mode": bad_mode})
 
 
 def test_disabled_block_with_all_fields_parses():
@@ -224,6 +249,19 @@ class _EnabledConfigModule(Module):
             )
 
 
+_MEMORY_CONFIG = dataclasses.replace(_ENABLED_CONFIG, coordination_mode="memory")
+
+
+class _MemoryConfigModule(Module):
+    """Test-only override: the enabled config in memory-coordination mode."""
+
+    def configure(self, binder):
+        binder.bind(ManagerSyncConfig, to=_MEMORY_CONFIG, scope=singleton)
+        binder.bind(
+            SecretResolver, to=_FixtureSecretResolver(), scope=singleton
+        )
+
+
 def _wait_thread_gone(name: str, timeout: float = 5.0) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -300,6 +338,85 @@ def test_enabled_wiring_resolves_dispatcher_on_test_doubles():
         )
         is SubmissionResult.REJECTED
     )
+
+    # (singlebox wiring pins live in the memory-mode tests below.)
+
+
+def test_singlebox_memory_mode_resolves_real_delivery_over_memory_coordinator():
+    """SINGLEBOX + memory coordination = the single-replica downgrade stack.
+
+    The same real trusted-App HTTP delivery production uses
+    (:class:`HttpBcsManagersPlugin` against the configured Gateway origin,
+    with the tenant credential resolved through the SecretResolver), with
+    the in-process coordinator carrying the configured generation. The
+    stack override wins over the test column's Recording double, and no
+    Redis service is consulted anywhere.
+    """
+    from agentclaw.community.plugins.community.bcs_managers import (
+        HttpBcsManagersPlugin,
+    )
+    from agentclaw.community.plugins.local.manager_sync_coordination import (
+        MemoryManagerSyncCoordinator,
+    )
+
+    injector = build_injector(
+        profile=DeployProfile.SINGLEBOX,
+        extra_modules=[_MemoryConfigModule()],
+    )
+    stack = injector.get(ManagerSyncStack)
+    assert stack.available is True
+    assert type(stack.bcs) is HttpBcsManagersPlugin
+    assert type(stack.coordinator) is MemoryManagerSyncCoordinator
+    # The in-process coordinator carries the configured generation, not a
+    # fabricated default.
+    assert stack.coordinator._generation == _MEMORY_CONFIG.coordination_generation
+    protocol = injector.get(BotManagerSyncProtocol)
+    assert isinstance(protocol, BotManagerSyncDispatcher)
+    lifecycle = injector.get(BotManagerSyncLifecycle)
+    assert type(lifecycle) is BotManagerSyncLifecycle
+
+
+def test_singlebox_memory_mode_without_credentials_stays_unavailable():
+    """Same availability checks as redis mode: no credential, no stack."""
+    class _MemoryNoSecretModule(Module):
+        def configure(self, binder):
+            binder.bind(ManagerSyncConfig, to=_MEMORY_CONFIG, scope=singleton)
+            binder.bind(SecretResolver, to=_NoSecretResolver(), scope=singleton)
+
+    injector = build_injector(
+        profile=DeployProfile.SINGLEBOX,
+        extra_modules=[_MemoryNoSecretModule()],
+    )
+    stack = injector.get(ManagerSyncStack)
+    assert stack.available is False
+    assert "missing-credential" in stack.reason
+    assert isinstance(
+        injector.get(BotManagerSyncProtocol), DisabledBotManagerSync
+    )
+
+
+def test_memory_mode_is_a_structural_error_on_pre_prod_environments(monkeypatch):
+    """`memory` is the dev-stack downgrade: a pre/prod deployment asking
+    for it fails the boot loudly instead of running without cross-process
+    coordination — and without falling back to any hidden Redis build."""
+    from injector import Injector
+
+    for server_env in ("pre", "prod"):
+        monkeypatch.setenv("SERVER_ENV", server_env)
+        # _MemoryConfigModule goes LAST so its memory-mode config binding
+        # wins _CommunityStackFixtures' plain _ENABLED_CONFIG binding.
+        injector = Injector(
+            [
+                BotManagerSyncModule(),
+                _CommunityStackFixtures(
+                    redis_url="redis://127.0.0.1:6399/0",
+                    secrets=_FixtureSecretResolver(),
+                ),
+                _MemoryConfigModule(),
+            ]
+        )
+        with pytest.raises(ValueError, match="memory"):
+            injector.get(ManagerSyncStack)
 
 
 class _CommunityStackFixtures(Module):
