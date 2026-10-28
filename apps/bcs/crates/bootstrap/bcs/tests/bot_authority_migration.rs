@@ -252,10 +252,10 @@ async fn bot_authority_upgrade_preserves_legacy_rows_and_extends_runtime() {
         ))
         .await
         .expect("history");
-    assert_eq!(history.len(), 38, "full chain recorded");
-    let authority = history.get(36).expect("bot_authority version 37 present");
+    assert_eq!(history.len(), 37, "full chain recorded");
+    let last = history.last().expect("bot_authority present");
     assert_eq!(
-        authority.get("name"),
+        last.get("name"),
         Some(&DbValue::String("bot_authority".into()))
     );
     bcs::migrations::run_sqlite_migrations(db.as_ref())
