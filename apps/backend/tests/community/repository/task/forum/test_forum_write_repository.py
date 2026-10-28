@@ -12,12 +12,14 @@ from agentclaw.community.core.task.forum.models import (
     ForumTopicConfig,
     TOPIC_STATUS_CLOSED,
     TOPIC_STATUS_LOCKED,
+    TOPIC_STATUS_OPEN,
     TOPIC_TYPE_HELP,
     TOPIC_TYPE_NOTICE,
     TOPIC_TYPE_POLL,
     TOPIC_TYPE_SHARE,
 )
 from agentclaw.community.core.task.forum.repository.models import (
+    ForumInteractionModel,
     ForumPostModel,
     ForumTopicModel,
 )
@@ -565,6 +567,105 @@ def test_update_topic_status_transitions_closed_back_to_open(db):
 
     assert locked is not None
     assert locked.status == TOPIC_STATUS_LOCKED
+
+
+# ---------------------------------------------------------------------------
+# update_topic_content / delete_topic
+# ---------------------------------------------------------------------------
+
+
+def test_update_topic_content_persists_only_open_topic_content(db):
+    repo = ForumRepository(db)
+    topic = _create_topic(repo).topic
+
+    updated = repo.update_topic_content(
+        topic_id=topic.topic_id,
+        title="Edited title",
+        body="Edited description",
+        expected_status=TOPIC_STATUS_OPEN,
+    )
+
+    assert updated is not None
+    assert updated.title == "Edited title"
+    assert updated.body == "Edited description"
+    reread = repo.get_topic(topic.topic_id)
+    assert reread is not None
+    assert (reread.title, reread.body) == ("Edited title", "Edited description")
+
+
+def test_update_topic_content_returns_none_when_status_no_longer_matches(db):
+    repo = ForumRepository(db)
+    topic = _create_topic(repo).topic
+    repo.update_topic_status(topic_id=topic.topic_id, status=TOPIC_STATUS_CLOSED)
+
+    assert repo.update_topic_content(
+        topic_id=topic.topic_id,
+        title="Edited title",
+        body="Edited description",
+        expected_status=TOPIC_STATUS_OPEN,
+    ) is None
+
+
+def test_delete_topic_removes_topic_posts_and_direct_interactions(db):
+    repo = ForumRepository(db)
+    topic = _create_topic(repo).topic
+    post = _create_reply(repo, topic.topic_id).post
+    now = datetime(2026, 10, 28, tzinfo=timezone.utc)
+    with db.orm_session() as session:
+        session.add_all(
+            [
+                ForumInteractionModel(
+                    actor_type="HUMAN",
+                    actor_id="user-a",
+                    action_type="VIEW",
+                    target_type="TOPIC",
+                    target_id=topic.topic_id,
+                    env="dev",
+                    gmt_create=now,
+                    gmt_modified=now,
+                ),
+                ForumInteractionModel(
+                    actor_type="HUMAN",
+                    actor_id="user-a",
+                    action_type="LIKE",
+                    target_type="POST",
+                    target_id=post.post_id,
+                    env="dev",
+                    gmt_create=now,
+                    gmt_modified=now,
+                ),
+                ForumInteractionModel(
+                    actor_type="HUMAN",
+                    actor_id="user-a",
+                    action_type="FOLLOW",
+                    target_type="HUMAN",
+                    target_id="user-keep",
+                    env="dev",
+                    gmt_create=now,
+                    gmt_modified=now,
+                ),
+            ]
+        )
+
+    assert repo.delete_topic(topic.topic_id) is True
+
+    with db.orm_session() as session:
+        assert session.query(ForumTopicModel).filter_by(topic_id=topic.topic_id).count() == 0
+        assert session.query(ForumPostModel).filter_by(topic_id=topic.topic_id).count() == 0
+        assert session.query(ForumInteractionModel).count() == 1
+
+
+def test_delete_topic_refuses_locked_topic_and_returns_false(db):
+    repo = ForumRepository(db)
+    topic = _create_topic(repo).topic
+    post = _create_reply(repo, topic.topic_id).post
+    repo.update_topic_status(topic_id=topic.topic_id, status=TOPIC_STATUS_LOCKED)
+
+    assert repo.delete_topic(topic.topic_id) is False
+
+    with db.orm_session() as session:
+        assert session.query(ForumTopicModel).filter_by(topic_id=topic.topic_id).count() == 1
+        assert session.query(ForumPostModel).filter_by(post_id=post.post_id).count() == 1
 
 
 # ---------------------------------------------------------------------------

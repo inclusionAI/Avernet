@@ -35,7 +35,6 @@ function renderRail(over: Partial<Parameters<typeof ConversationCollapsedRail>[0
     selectedSection: null,
     onQuickOpen: jest.fn(),
     onExpand: jest.fn(),
-    onOpenAgentCodingBot: jest.fn(),
     ...over,
   };
   render(<ConversationCollapsedRail {...props} />);
@@ -57,7 +56,7 @@ describe('ConversationCollapsedRail（整栏收起的 Bot 泊位竖轨）', () =
     expect(screen.getByRole('button', { name: '打开 管理 Bot A' })).not.toHaveAttribute('aria-current');
   });
 
-  it('routes AgentCoding Bots to the coding chat and dims non-chatable ones', () => {
+  it('chatable Coding Bot uses quick-open while non-chatable tiles stay disabled', () => {
     const agentCoding = botOf('coding-bot:1', 'AgentCoding Bot', { isAgentCodingBot: true });
     const nonChatable = botOf('bot-nc:1', '禁聊 Bot', { chatable: false });
     const props = renderRail({
@@ -66,8 +65,8 @@ describe('ConversationCollapsedRail（整栏收起的 Bot 泊位竖轨）', () =
       ],
     });
     fireEvent.click(screen.getByRole('button', { name: '打开 AgentCoding Bot' }));
-    expect(props.onOpenAgentCodingBot).toHaveBeenCalledWith(agentCoding.bot);
-    expect(props.onQuickOpen).not.toHaveBeenCalled();
+    expect(props.onQuickOpen).toHaveBeenCalledWith(agentCoding);
+    expect(props.onExpand).not.toHaveBeenCalled();
     // 不可聊 Bot 保持降权占位：不提供直达按钮，仅身份标签。
     expect(screen.queryByRole('button', { name: '打开 禁聊 Bot' })).not.toBeInTheDocument();
     expect(screen.getByLabelText('禁聊 Bot（不可发起会话）')).toBeInTheDocument();
@@ -116,7 +115,6 @@ it.each([false, true])(
     const tile = screen.getByLabelText('未运行服务（不可发起会话）');
     fireEvent.click(tile);
     expect(props.onQuickOpen).not.toHaveBeenCalled();
-    expect(props.onOpenAgentCodingBot).not.toHaveBeenCalled();
     fireEvent.pointerMove(tile, { pointerType: 'mouse' });
     await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent('非运行中服务 Bot'));
   },

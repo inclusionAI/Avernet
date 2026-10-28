@@ -63,7 +63,7 @@ test('保留 Service 计算权限所需的后端动作与阶段字段', () => {
     ...input,
     bot: { ...bot, botType: 'service', runtimeStage: 'online' },
   });
-  expect(onlineService?.permissionSource).toBe('backend');
+  expect(onlineService).toBeNull();
 
   const draftService = buildChatEngineVersionTarget({
     ...input,

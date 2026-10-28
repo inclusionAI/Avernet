@@ -35,6 +35,7 @@ export interface ChatPanelProps {
   modelSelector?: ReactNode;
   fileChip?: FileChipConfig;
   command?: CommandConfig;
+  composerHeader?: ReactNode;
   fileToolbar?: ReactNode;
   senderRef?: React.RefObject<SenderRef | null>;
   mode?: 'demo' | 'support' | 'bot';

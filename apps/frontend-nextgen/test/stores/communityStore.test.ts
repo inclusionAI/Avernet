@@ -12,6 +12,8 @@ const topic = {
   createdAt: '2026-10-06T09:00:00Z',
   isMine: true,
   canClose: true,
+  canEdit: true,
+  canDelete: true,
 };
 
 describe('community store', () => {

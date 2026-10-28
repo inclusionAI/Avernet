@@ -27,7 +27,7 @@ export async function getBotIamToken(
   botId: string,
   userId?: string,
   entityId?: string,
-  stage: BotIamTokenStage = 'online',
+  stage?: BotIamTokenStage,
 ): Promise<string> {
   const response = await backendRequest<BackendApiEnvelope<IamTokenResponse>>(
     `/openapi/v1/bots/${encodeURIComponent(botId)}/iam-token`,
@@ -36,7 +36,7 @@ export async function getBotIamToken(
       params: userScopedParams({
         ...(userId ? { user_id: userId } : {}),
         ...(entityId ? { entity_id: entityId } : {}),
-        stage,
+        ...(stage ? { stage } : {}),
       }),
     },
   );

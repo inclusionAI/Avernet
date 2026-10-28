@@ -738,12 +738,10 @@ class BaasDeviceService(DeviceService):
         return initializer
 
     def _do_release(self, *, device: AllocatedDevice) -> bool:
-        """Destroy the BaaS bot. Operator is recovered from ``device_props``
-        because the parent ``release_device`` doesn't forward the
-        ``OperatorContext`` into this hook.
-        """
+        """Destroy the BaaS bot using the binding identity or release caller."""
         bot_uuid = device.device_props.get("bot_uuid") or device.device_id
-        operator = device.device_props.get("entity_id", "")
+        entity_id = device.device_props.get("entity_id", "")
+        operator = entity_id or device.device_props.get("_release_operator", "")
         if not bot_uuid:
             logger.warning(
                 "[_do_release] no bot_uuid for device_id=%s, skipping BaaS destroy",
@@ -753,7 +751,7 @@ class BaasDeviceService(DeviceService):
 
         request_id = _generate_request_id(
             bot_id=device.device_props.get("bolt_id", "") or device.device_id,
-            entity_id=operator,
+            entity_id=entity_id,
             entity_type=device.device_props.get("entity_type", "staff"),
             env=device.device_props.get("env", ""),
             action="destroy",

@@ -95,6 +95,8 @@ export type RecoveryTaskResult = {
 };
 
 export type RecoveryStoredTask = RecoveryTaskState & {
+  /** Transient facts from the existing read audit; never a claim of full session coverage. */
+  sessionReadCoverage?: import("./session-read-coverage.js").SessionReadCoverage[];
   /** Transient projection of the complete tool ledger; never persisted or supplied by the Agent. */
   interventionStatus?: RecoveryInterventionStatus;
   /** Written only at task creation; absence means historical audit coverage cannot be proven. */

@@ -5,6 +5,7 @@ import type {
   CreateCommunityReplyInput,
   CreateCommunityTopicInput,
   InteractionSummary,
+  UpdateCommunityTopicInput,
   InteractionSummaryQuery,
   PersonalCenterActivityPage,
   PersonalCenterActivityQuery,
@@ -60,7 +61,7 @@ export class CommunityService {
   }
 
   createReply(input: CreateCommunityReplyInput, signal?: AbortSignal) {
-    const normalized = { ...input, body: input.body.trim() };
+    const normalized = { ...input, body: input.body.trim(), replyToPostId: input.replyToPostId?.trim() || undefined };
     if (!normalized.body) return Promise.reject(new Error('请输入回复内容'));
     return this.gateway.createReply(normalized, signal);
   }
@@ -81,6 +82,19 @@ export class CommunityService {
       helpful,
       signal,
     );
+  }
+
+  async updateTopic(input: UpdateCommunityTopicInput, signal?: AbortSignal) {
+    const normalized = { ...input, title: input.title.trim(), body: input.body.trim() };
+    if (!normalized.title) throw new Error('请输入主题标题');
+    if (!normalized.body) throw new Error('请输入主题正文');
+    if (!normalized.authorId.trim()) throw new Error('缺少当前用户身份');
+    return this.gateway.updateTopic(normalized, signal);
+  }
+
+  deleteTopic(topicId: string, authorId: string, signal?: AbortSignal) {
+    if (!authorId.trim()) return Promise.reject(new Error('缺少当前用户身份'));
+    return this.gateway.deleteTopic(topicId, authorId, signal);
   }
 
   closeTopic(topicId: string, authorId: string, signal?: AbortSignal) {

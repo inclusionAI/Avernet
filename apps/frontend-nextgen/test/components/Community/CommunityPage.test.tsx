@@ -14,6 +14,8 @@ const topic: CommunityTopic = {
   createdAt: '2026-10-06T06:20:00Z',
   isMine: false,
   canClose: false,
+  canEdit: false,
+  canDelete: false,
 };
 
 const mockCommunityState = {
@@ -84,11 +86,17 @@ describe('CommunityPage 滚动容器结构', () => {
 
     expect(within(topicTypeGroup).getAllByRole('button').map((button) => button.textContent)).toEqual([
       '全部',
+      '关注',
       '讨论',
       '分享',
       '投票',
       '求助',
     ]);
+    const followingButton = within(topicTypeGroup).getByRole('button', { name: '关注' });
+    expect(followingButton).toBeDisabled();
+    fireEvent.click(followingButton);
+    expect(mockCommunityState.setTopicType).not.toHaveBeenCalled();
+    expect(topicTypeGroup).toHaveClass('bg-background', 'sm:w-2/5', 'sm:min-w-[240px]', 'sm:max-w-[50%]');
     expect(within(scopeGroup).getAllByRole('button')).toHaveLength(2);
     expect(topicTypeGroup.compareDocumentPosition(scopeGroup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(scopeGroup.compareDocumentPosition(searchInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

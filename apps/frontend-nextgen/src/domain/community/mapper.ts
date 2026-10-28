@@ -73,6 +73,7 @@ export interface CommunityTopicDto {
   display_name?: string;
   avatar_url?: string | null;
   reply_count?: number;
+  like_count?: number;
   latest_activity_at?: string;
   updated_at?: string;
   created_at?: string;
@@ -278,10 +279,13 @@ export function mapCommunityTopicDto(dto: CommunityTopicDto): CommunityTopic {
     viewer: mapTopicViewer(dto.viewer),
     author: mapAuthor(asAuthorDto(dto)),
     replyCount: typeof dto.reply_count === 'number' ? dto.reply_count : undefined,
+    likeCount: typeof dto.like_count === 'number' ? dto.like_count : undefined,
     latestActivityAt,
     createdAt: dto.created_at ?? '',
     isMine: dto.is_mine === true,
     canClose: dto.can_close === true,
+    canEdit: false,
+    canDelete: false,
   };
 }
 

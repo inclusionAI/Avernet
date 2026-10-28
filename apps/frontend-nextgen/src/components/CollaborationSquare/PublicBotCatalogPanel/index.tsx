@@ -9,6 +9,7 @@ import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
 import type { BotCatalogViewModel, PublicBot } from '@/domain/collaborationSquare/types';
 import { getPublicBotActionKey, getPublicBotTargetId, resolvePublicBotPrimaryAction } from '@/domain/collaborationSquare/types';
+import { useSquareHighlightStore } from '@/stores/squareHighlightStore';
 import { Bot, RefreshCw, Search } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Points } from '@/tracking/points';
@@ -44,12 +45,22 @@ function BotLoadingState() {
  */
 export function PublicBotCatalogPanel({ vm, scrollRootRef, smartEmptyHint }: PublicBotCatalogPanelProps) {
   const sentinelRef = useRef<HTMLDivElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
+  const highlightBotId = useSquareHighlightStore((state) => state.highlightBotId);
   const { hasMore, loading, loadingMore, error, loadMore } = vm;
   const activeActor = vm.activeActor;
   const actorKey = activeActor ? `${activeActor.type}:${activeActor.id}` : '';
   const [pending, setPending] = useState<{ bot: PublicBot; actorKey: string } | null>(null);
   // 身份变化后必须重新确认，不能用旧弹窗为新身份发送申请。
   useEffect(() => setPending(null), [actorKey]);
+  // 深链定位：滚动到目标卡片并短暂高亮，数秒后自动清除。
+  useEffect(() => {
+    if (!highlightBotId) return;
+    const target = gridRef.current?.querySelector<HTMLElement>(`[data-bot-id="${CSS.escape(highlightBotId)}"]`);
+    target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const timer = setTimeout(() => useSquareHighlightStore.getState().setHighlightBotId(null), 3000);
+    return () => clearTimeout(timer);
+  }, [highlightBotId]);
   const pendingBot = pending?.actorKey === actorKey
     ? vm.bots.find((bot) => getPublicBotTargetId(bot) === getPublicBotTargetId(pending.bot))
     : undefined;
@@ -132,13 +143,14 @@ export function PublicBotCatalogPanel({ vm, scrollRootRef, smartEmptyHint }: Pub
         </Card>
       )}
       {showGrid && activeActor && (
-        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+        <div ref={gridRef} className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
           {vm.bots.map((bot) => (
             <SquareBotCard
               key={getPublicBotTargetId(bot)}
               bot={bot}
               activeActor={activeActor}
               busy={vm.busyKeys.includes(getPublicBotActionKey(activeActor, getPublicBotTargetId(bot)))}
+              highlighted={bot.id === highlightBotId}
               onShare={(item) => vm.share(item)}
               onPrimaryAction={(item) => {
                 Tracert.click(Points.collabSquare.openBotCard, { bot_id: getPublicBotTargetId(item) });

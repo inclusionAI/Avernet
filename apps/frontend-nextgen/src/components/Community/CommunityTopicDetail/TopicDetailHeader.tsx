@@ -8,22 +8,28 @@ import { PollTypeIcon } from '../PollTypeIcon';
 export interface TopicDetailHeaderProps {
   topic: CommunityTopic | null;
   closing: boolean;
+  deleting: boolean;
   replyLoading: boolean;
   replyPage: number;
   replyPageCount: number;
   onBack: () => void;
   onCloseTopic: () => Promise<boolean>;
+  onEditTopic: () => void;
+  onDeleteTopic: () => Promise<boolean>;
   onGoToReplyPage: (page: number) => void;
 }
 
 export function TopicDetailHeader({
   topic,
   closing,
+  deleting,
   replyLoading,
   replyPage,
   replyPageCount,
   onBack,
   onCloseTopic,
+  onEditTopic,
+  onDeleteTopic,
   onGoToReplyPage,
 }: TopicDetailHeaderProps) {
   const isHelpTopic = topic?.topicType === 'help';
@@ -73,6 +79,32 @@ export function TopicDetailHeader({
           {topic?.status === 'closed' && topic.topicType !== 'help' && (
             <Badge tone="outline">已结帖</Badge>
           )}
+          {topic?.canEdit ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 px-3 text-xs"
+              onClick={onEditTopic}
+            >
+              编辑
+            </Button>
+          ) : null}
+          {topic?.canDelete ? (
+            <ConfirmDialog
+              title="确认删除主题？"
+              description="删除后该主题及其全部回复将从社区中移除，且无法恢复。"
+              confirmText="删除"
+              confirmVariant="destructive"
+              loading={deleting}
+              onConfirm={async () => {
+                await onDeleteTopic();
+              }}
+            >
+              <Button variant="destructive" size="sm" className="h-8 px-3 text-xs">
+                删除
+              </Button>
+            </ConfirmDialog>
+          ) : null}
           {topic?.canClose && (
             <ConfirmDialog
               title={isHelpTopic ? '确认标记为已解决？' : '确认结帖？'}

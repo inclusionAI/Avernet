@@ -2,8 +2,8 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
-import type { CommunityTopic } from '@/domain/community/types';
-import { ChevronDown, Lock, Paperclip, RefreshCw } from 'lucide-react';
+import type { CommunityTopic, CommunityTopicType } from '@/domain/community/types';
+import { ChevronDown, Heart, Lock, MessageCircle, Paperclip, RefreshCw } from 'lucide-react';
 import type { KeyboardEvent, RefObject } from 'react';
 import { useEffect, useRef } from 'react';
 import { PollTypeIcon } from '../PollTypeIcon';
@@ -11,6 +11,14 @@ import { CommunityAuthorAvatar } from '../CommunityAuthorAvatar';
 
 // 滚到距底该距离时预取下一页（用户已滚动后，预取可减少触底等待）。
 const LOAD_MORE_PRELOAD_DISTANCE = 320;
+
+const TOPIC_TYPE_LABELS: Record<CommunityTopicType, string> = {
+  discussion: '讨论',
+  share: '分享',
+  poll: '投票',
+  help: '求助',
+  notice: '通知',
+};
 
 /** 相对时间（分钟前 / 小时前 / 天前 …），对齐原型。 */
 function formatRelative(value: string): string {
@@ -59,8 +67,9 @@ function TopicRow({ topic, onOpen }: { topic: CommunityTopic; onOpen: (topic: Co
     onOpen(topic);
   };
 
-  // 列表行对齐原型 4 列：主题(1fr) / 发帖人(140px) / 回复数(64px) / 最新回复(176px)。
+  // 列表行对齐原型 5 列：主题 / 类型 / 发帖人 / 互动数据 / 最新回复。
   const replyCount = typeof topic.replyCount === 'number' ? topic.replyCount : 0;
+  const likeCount = typeof topic.likeCount === 'number' ? topic.likeCount : 0;
   const hasReplies = replyCount > 0;
   const activityAt = hasReplies ? topic.latestActivityAt ?? topic.createdAt : topic.createdAt;
   const activityPrefix = hasReplies ? '最新回复：' : '发帖时间：';
@@ -71,7 +80,7 @@ function TopicRow({ topic, onOpen }: { topic: CommunityTopic; onOpen: (topic: Co
       tabIndex={0}
       onClick={() => onOpen(topic)}
       onKeyDown={handleKeyDown}
-      className="grid grid-cols-[1fr_140px_64px_176px] items-center gap-3 border-b border-border/60 px-4 py-3 outline-none transition-colors last:border-b-0 hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+      className="grid grid-cols-[1fr_100px_140px_64px_176px] items-center gap-3 border-b border-border/60 px-4 py-3 outline-none transition-colors last:border-b-0 hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
     >
       <div className="min-w-0">
         <div className="flex items-center gap-2">
@@ -98,11 +107,25 @@ function TopicRow({ topic, onOpen }: { topic: CommunityTopic; onOpen: (topic: Co
         </div>
         <p className="mt-0.5 truncate text-xs text-muted-foreground">{topic.body}</p>
       </div>
+      <div>
+        <span className="inline-flex rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">
+          {TOPIC_TYPE_LABELS[topic.topicType]}
+        </span>
+      </div>
       <div className="flex min-w-0 items-center gap-2">
         <CommunityAuthorAvatar author={topic.author} size={24} />
         <span className="truncate text-xs text-muted-foreground">{topic.author.displayName}</span>
       </div>
-      <div className="text-right text-xs font-medium text-muted-foreground tabular-nums">{replyCount} 回复</div>
+      <div className="flex items-center justify-end gap-2 text-xs font-medium text-muted-foreground tabular-nums">
+        <span className="inline-flex items-center gap-1" aria-label={`回复 ${replyCount}`}>
+          <MessageCircle className="size-3.5" aria-hidden />
+          <span aria-hidden>{replyCount}</span>
+        </span>
+        <span className="inline-flex items-center gap-1" aria-label={`点赞 ${likeCount}`}>
+          <Heart className="size-3.5" aria-hidden />
+          <span aria-hidden>{likeCount}</span>
+        </span>
+      </div>
       <div className="min-w-0 text-right">
         <span className="truncate text-xs text-muted-foreground tabular-nums">
           {activityPrefix}

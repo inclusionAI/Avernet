@@ -8,6 +8,7 @@ import type { RecoveryStoredTask, RecoveryTaskStore, RecoveryTimelineEvent } fro
 import { containsSecret } from "@avernet/clawweb-shared/server/services/redaction";
 import { AgentToolCallRepository, type AgentToolCall } from "./agent-tool-call-repository.js";
 import { recoveryInterventionStatus } from "../../services/repair/session-recovery/result.js";
+import { sessionReadCoverage } from "../../services/repair/session-recovery/session-read-coverage.js";
 
 export type { RecoveryStoredTask } from "../../services/repair/session-recovery/task-contracts.js";
 export type RecoveryArtifactStore = Required<Pick<ObjectStore, "getObject" | "putObject">>;
@@ -184,7 +185,7 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
       ...(value.delivery ? { delivery: value.delivery } : {}), ...(value.interventionAuditComplete ? { interventionAuditComplete: true } : {}) };
   }
   private config(value: RecoveryStoredTask, detailsRef: ArtifactRef, resultDelivery: ResultDelivery[] = [], stoppedResultDelivery: StoppedResultDelivery[] = []): string {
-    const { timeline: _timeline, evidence: _evidence, pending_results: _results, interventionStatus: _intervention, interventionAuditComplete: _auditCoverage, plan, delivery: _delivery, judgment: _judgment, ...state } = value;
+    const { timeline: _timeline, evidence: _evidence, pending_results: _results, interventionStatus: _intervention, interventionAuditComplete: _auditCoverage, sessionReadCoverage: _readCoverage, plan, delivery: _delivery, judgment: _judgment, ...state } = value;
     const json = JSON.stringify({ ...state, artifactStorage: 2, detailsRef, resultDelivery,
       ...(stoppedResultDelivery.length ? { stoppedResultDelivery } : {}), plan: plan ? { digest: plan.digest, approvedAt: plan.approvedAt, actions: plan.actions.map(action => ({ actionId: action.actionId })) } : null });
     this.validateConfig(json);
@@ -237,6 +238,7 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
       if (calls.length < 500) break;
     }
     const intervention = recoveryInterventionStatus(interventionCalls, task.delivery?.delivery);
+    task.sessionReadCoverage = sessionReadCoverage(interventionCalls);
     task.interventionStatus = intervention === "none" && !task.interventionAuditComplete ? "unknown" : intervention;
     for (const result of (resultDelivery ?? []) as ResultDelivery[]) {
       task.pending_results.push(await this.get(result) as RecoveryStoredTask["pending_results"][number]);

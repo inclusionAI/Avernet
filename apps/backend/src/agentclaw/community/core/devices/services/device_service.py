@@ -846,10 +846,16 @@ class DeviceService:
 
         entity_id = current.entity_id
         entity_type = current.entity_type
+        device_props = current.device_props
+        if current.device_provider == BAAS_DEVICE_PROVIDER and isinstance(device_props, dict):
+            # The release caller is transient, never trusted from stored props.
+            device_props = {k: v for k, v in device_props.items() if k != "_release_operator"}
+            if not device_props.get("entity_id") and operator.staff_id:
+                device_props["_release_operator"] = operator.staff_id
         allocated_device = AllocatedDevice(
             device_id=current.device_id,
             device_provider=current.device_provider,
-            device_props=current.device_props,
+            device_props=device_props,
         )
 
         # 物理释放与 DB 状态更新解耦：即使物理释放失败，也要更新 DB 状态为 RELEASED，

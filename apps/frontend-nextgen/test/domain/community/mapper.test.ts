@@ -1,4 +1,5 @@
 import { mapCommunityReplyDto, mapCommunityTopicDto } from '@/domain/community/mapper';
+import { enrichOwnership } from '@/domain/community/ownership';
 
 describe('community mapper', () => {
   test('maps topic metadata and page totals for the BBS list item', () => {
@@ -9,6 +10,7 @@ describe('community mapper', () => {
       status: 'OPEN',
       author: { actor_type: 'HUMAN', actor_id: 'user-1', display_name: '顾客' },
       reply_count: 2,
+      like_count: 5,
       latest_activity_at: '2026-10-06T10:00:00Z',
       created_at: '2026-10-05T09:00:00Z',
       is_mine: true,
@@ -23,14 +25,25 @@ describe('community mapper', () => {
       status: 'open',
       author: { type: 'human', id: 'user-1', displayName: '顾客', avatarUrl: undefined },
       replyCount: 2,
+      likeCount: 5,
       latestActivityAt: '2026-10-06T10:00:00Z',
       createdAt: '2026-10-05T09:00:00Z',
       isMine: true,
       canClose: true,
+      canEdit: false,
+      canDelete: false,
       topicType: 'poll',
     });
     expect(topic.topicConfig).toBeUndefined();
     expect(topic.analysis).toBeUndefined();
+
+    const owned = enrichOwnership(topic, 'user-1');
+    expect(owned).toMatchObject({
+      isMine: true,
+      canClose: true,
+      canEdit: true,
+      canDelete: true,
+    });
   });
 
   test('maps bot replies and normalizes unknown topic status to closed', () => {
@@ -161,6 +174,7 @@ test('maps the real backend flattened BBS DTO (no nested author, no reply count/
   expect(topic.analysis).toBeUndefined();
   expect(topic.author).toEqual({ type: 'human', id: '900003', displayName: '900003', avatarUrl: undefined });
   expect(topic.replyCount).toBeUndefined();
+  expect(topic.likeCount).toBeUndefined();
   expect(topic.isMine).toBe(false);
   expect(topic.canClose).toBe(false);
 });

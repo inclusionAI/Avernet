@@ -2,6 +2,7 @@ import { Button } from '@/components/ui/Button';
 import type { CommunityReply, InteractionSummary } from '@/domain/community/types';
 import { CommunityAuthorAvatar } from '../CommunityAuthorAvatar';
 import { formatDateTime, type ReplyElementRegistrar } from './model';
+import { MessageSquare } from 'lucide-react';
 
 interface ThreadReplyProps {
   reply: CommunityReply;
@@ -14,6 +15,8 @@ interface ThreadReplyProps {
   loadAuthorSummary?: (author: CommunityReply['author']) => void;
   followAuthor?: (author: CommunityReply['author']) => Promise<boolean>;
   authorFollowLoading?: (author: CommunityReply['author']) => boolean;
+  canReply?: boolean;
+  onReply?: (target: { postId: string; authorName: string }) => void;
 }
 
 export function ThreadReply({
@@ -27,6 +30,8 @@ export function ThreadReply({
   loadAuthorSummary,
   followAuthor,
   authorFollowLoading,
+  canReply = false,
+  onReply,
 }: ThreadReplyProps) {
   return (
     <article data-post-id={reply.id} ref={registerElement?.(reply.id)} className="rounded-xl border border-border/60 bg-muted/40 px-3 py-2.5">
@@ -57,7 +62,20 @@ export function ThreadReply({
         )}
       </div>
       <p className="m-0 mt-2 whitespace-pre-wrap text-xs leading-relaxed text-foreground">{reply.body}</p>
-      <div className="mt-2 flex items-center justify-end">
+      <div className="mt-2 flex items-center justify-between gap-2">
+        {canReply ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-[11px] text-primary"
+            leftIcon={<MessageSquare className="size-3.5" aria-hidden />}
+            onClick={() => onReply?.({ postId: reply.id, authorName: reply.author.displayName })}
+          >
+            回复
+          </Button>
+        ) : (
+          <span />
+        )}
         <span className="text-[10px] text-muted-foreground">{formatDateTime(reply.createdAt)}</span>
       </div>
     </article>

@@ -6,6 +6,7 @@ import type {
   CommunityTopicQuery,
   CreateCommunityReplyInput,
   CreateCommunityTopicInput,
+  UpdateCommunityTopicInput,
   InteractionSummary,
   InteractionSummaryQuery,
   PersonalCenterActivityPage,
@@ -34,6 +35,8 @@ export interface CommunityGateway {
   listReplies(topicId: string, pager?: CommunityReplyPager, signal?: AbortSignal): Promise<CommunityReplyPage>;
   createTopic(input: CreateCommunityTopicInput, signal?: AbortSignal): Promise<CommunityTopic>;
   createReply(input: CreateCommunityReplyInput, signal?: AbortSignal): Promise<string>;
+  updateTopic(input: UpdateCommunityTopicInput, signal?: AbortSignal): Promise<CommunityTopic>;
+  deleteTopic(topicId: string, authorId: string, signal?: AbortSignal): Promise<void>;
   setPostHelpful(
     topicId: string,
     postId: string,

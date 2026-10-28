@@ -1,3 +1,4 @@
+import { readLimitedResponse, ResponseTooLargeError } from './readLimitedResponse';
 import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
 import { useIdentityStore } from '@/stores/identityStore';
 import { useLoginRedirectStore } from '@/stores/loginRedirectStore';
@@ -17,6 +18,13 @@ export interface BackendRequestOptions {
   retryOnTransient?: boolean;
   responseType?: 'json' | 'blob' | 'text';
   injectUserId?: boolean;
+  /**
+   * Opt-in bounded consumption for inline text previews; ordinary requests are unchanged.
+   * Caller-facing data keeps responseType semantics; JSON auth/error envelopes are still
+   * parsed for inspection, and HTTP status handling (e.g. 401 login prompt) wins over the
+   * size limit. Combining with responseType 'blob' is rejected.
+   */
+  maxResponseBytes?: number;
   /** 操作语义标签(如 create-skill),参与 toastKey 去重键组成,保证同接口跨操作的独立失败不被误合并。 */
   operation?: string;
   signal?: AbortSignal;
@@ -149,6 +157,10 @@ async function readResponseData(
  */
 
 async function executeBackendRequest<T>(url: string, options: BackendRequestOptions): Promise<T> {
+  // 有界预览读取（opt-in）只支持文本形态：blob 无法有界解码，显式拒绝组合（fail-fast，不发请求）。
+  if (options.maxResponseBytes !== undefined && options.responseType === 'blob') {
+    throw new Error('maxResponseBytes 仅支持文本预览，不支持与 responseType: "blob" 组合使用');
+  }
   const resolvedUrl = resolveBackendUrl(url);
   const finalParams =
     options.injectUserId === false ? options.params : injectUserId(resolvedUrl, options.params, options.data);
@@ -164,28 +176,61 @@ async function executeBackendRequest<T>(url: string, options: BackendRequestOpti
     signal: options.signal,
   });
 
-  const responseData = await readResponseData(response, options.responseType);
+  let responseData: unknown;
+  // 信封识别视图：鉴权/错误信封策略（ACE 登录体、未登录/门禁信封、错误文案提取）消费的解析
+  // 形态，与返回给调用方的数据分离——受限读取下调用方按 responseType 语义取原始文本。
+  let inspectData: unknown;
+  if (options.maxResponseBytes === undefined) {
+    responseData = await readResponseData(response, options.responseType);
+    inspectData = responseData;
+  } else {
+    let previewText: string | undefined;
+    try {
+      previewText = await readLimitedResponse(response, options.maxResponseBytes);
+    } catch (error) {
+      // 预览大小限制不覆盖 HTTP 语义：失败响应（如 oauth 策略下 401 需登记登录弹窗）仍进入
+      // 下方统一登录/错误处置，超限降级为仅按状态处置；2xx 预览体超限才把「内容过大」抛给调用方。
+      if (response.ok || !(error instanceof ResponseTooLargeError)) throw error;
+      responseData = undefined;
+      inspectData = undefined;
+    }
+    if (previewText !== undefined) {
+      const isJson = (response.headers.get('content-type') ?? '').includes('application/json');
+      let parsed: unknown = undefined;
+      if (isJson) {
+        try {
+          parsed = JSON.parse(previewText);
+        } catch (error) {
+          // 默认 JSON 语义与未受限路径的 response.json() 一致（解析失败照常上抛）；
+          // 调用方显式要原始文本时不因解析失败破坏预览，识别视图退化为原始文本。
+          if (options.responseType !== 'text') throw error;
+        }
+      }
+      inspectData = parsed !== undefined ? parsed : previewText;
+      responseData = options.responseType === 'text' ? previewText : inspectData;
+    }
+  }
 
   if (!response.ok) {
     // 未登录处置决策(见 authFailurePolicy):外部 oauth 策略下,未登录失败(HTTP 401 / 信封未登录体)
     // 已在策略内单飞登记弹窗信号 → 静默上抛 AceLoginRedirectError 阻止 stale 渲染,不逐条报错
     // (spec: 会话过期/未登录场景统一导向登录弹窗);已确认未登录后的其余失败也静默,登录前的接口
     // 错误提示是噪音。两者均仍抛错,调用方可感知失败。ace-gateway 维持既有 BackendRequestError 路径。
-    const authDisposition = resolveAuthFailureDisposition({ status: response.status, data: responseData });
+    const authDisposition = resolveAuthFailureDisposition({ status: response.status, data: inspectData });
     if (authDisposition === 'login-prompt-silent') {
       throw new AceLoginRedirectError();
     }
     const apiPath = formatApiPath(requestUrl);
-    const message = extractFriendlyErrorMessage({ response: { status: response.status, data: responseData } });
+    const message = extractFriendlyErrorMessage({ response: { status: response.status, data: inspectData } });
     const operation = options.operation;
     const toastKey = buildToastKey({ apiPath, operation, message });
     // 邀请码门禁拦截（oauth-provider 策略下 `error_code='invite_code_required'` 403）：单飞登记门禁弹窗信号 +
     // 静默上抛（不投默认 toast，未绑定用户的业务 403 不逐条轰炸；未登录 UX 唯一出口是 InviteCodeBindingModal）。
     // 识别键严格限定专属 error_code，不吞通用 forbidden/真实权限拒绝 403（见 inviteGateFailurePolicy）。
-    if (resolveInviteGateDisposition({ status: response.status, data: responseData }) === 'gate-prompt-silent') {
+    if (resolveInviteGateDisposition({ status: response.status, data: inspectData }) === 'gate-prompt-silent') {
       throw new BackendRequestError(message, {
         status: response.status,
-        data: responseData,
+        data: inspectData,
         apiPath,
         toastKey,
         alreadyHandled: true,
@@ -199,7 +244,7 @@ async function executeBackendRequest<T>(url: string, options: BackendRequestOpti
     }
     throw new BackendRequestError(message, {
       status: response.status,
-      data: responseData,
+      data: inspectData,
       apiPath,
       toastKey,
       alreadyHandled: true,
@@ -209,8 +254,8 @@ async function executeBackendRequest<T>(url: string, options: BackendRequestOpti
   // 网关级 ACE 登录拦截体(HTTP 2xx + 登录 body):登记单飞跳转信号 + 抛 AceLoginRedirectError,
   // 避免把登录体当作成功数据返回给无校验的调用方继续渲染。toast + window.location 由顶层观察者
   // useGatewayLoginRedirect 消费 store 的 pendingLogin 完成（redirect 模式；prompt 模式由 ExternalLoginPromptModal 消费）。
-  if (isAceLoginResponse(responseData)) {
-    const loginUrl = extractLoginUrl(responseData);
+  if (isAceLoginResponse(inspectData)) {
+    const loginUrl = extractLoginUrl(inspectData);
     // loginStrategy 分支：外部(oauth-provider)→弹窗信号(不携带 ACE pubLogin url，由 /auth/url 取 provider)；
     // 内部(ace-gateway)现状→硬跳转。两者都抛 AceLoginRedirectError 阻止 stale 渲染。
     if (useLoginStrategyStore.getState().loginStrategy === 'oauth-provider') {
@@ -224,17 +269,17 @@ async function executeBackendRequest<T>(url: string, options: BackendRequestOpti
 
   // 网关误包形态(HTTP 2xx 但信封 code 落未登录段,如 40100/401000):与 !response.ok 的未登录路径
   // 同处置——登记弹窗信号(单飞)+ 静默上抛,避免误包体被无校验调用方当成功数据渲染或逐条报错。
-  if (resolveAuthFailureDisposition({ data: responseData }) === 'login-prompt-silent') {
+  if (resolveAuthFailureDisposition({ data: inspectData }) === 'login-prompt-silent') {
     throw new AceLoginRedirectError();
   }
 
   // 网关误包形态(HTTP 2xx 但信封含 `error_code='invite_code_required'` 门禁体):与 !response.ok 的门禁路径
   // 同处置——单飞登记门禁弹窗信号 + 静默上抛（不投默认 toast），避免误包体被无校验调用方当成功数据渲染。
-  if (resolveInviteGateDisposition({ data: responseData }) === 'gate-prompt-silent') {
+  if (resolveInviteGateDisposition({ data: inspectData }) === 'gate-prompt-silent') {
     const apiPath = formatApiPath(requestUrl);
     throw new BackendRequestError('邀请码门禁拦截', {
       status: response.status,
-      data: responseData,
+      data: inspectData,
       apiPath,
       alreadyHandled: true,
     });

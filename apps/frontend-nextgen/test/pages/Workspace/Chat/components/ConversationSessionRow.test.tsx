@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 // 会话行契约测试（restore-design-chat-page-b2-b3 Batch 1，dmore「会话目录二级*」帧 1:1）：
 // 平齐化（无 rail/前置图标/条数列）、点击热区分级、hover/选中胶囊同长全宽同构、收藏星标槽位;
-// 合并 PR 454 恢复的会话操作菜单（hover「…」:编辑标题/清除上下文/删除会话,收藏不入菜单走星标）。
+// 合并 PR 454 恢复的会话操作菜单（hover「…」:编辑标题/清除上下文/删除会话;收藏只走行内星标）。
 import { ConversationSessionRow } from '@/pages/Workspace/Chat/components/ConversationSessionRow';
 import type { ConversationSessionAction } from '@/services/workspace/conversationSessionActionService';
 import '@testing-library/jest-dom';
@@ -153,9 +153,7 @@ describe('ConversationSessionRow 长标题让位（文字不与 hover 图标互�
     expect(button).not.toHaveClass('group-hover/row:pr-[80px]');
 
     // 选中且未收藏：星标同样常驻 → 常驻让位 pr-[44px]（mr-4 → 右界同为 60px）。
-    rerender(
-      <ConversationSessionRow session={session} selected onSelect={jest.fn()} onToggleFavorite={jest.fn()} />,
-    );
+    rerender(<ConversationSessionRow session={session} selected onSelect={jest.fn()} onToggleFavorite={jest.fn()} />);
     expect(button).toHaveClass('pr-[44px]');
     expect(button).not.toHaveClass('pr-2');
   });
@@ -267,15 +265,16 @@ describe('ConversationSessionRow 收藏动作', () => {
 });
 
 describe('ConversationSessionRow 恢复的会话操作菜单（PR 454,平齐形态）', () => {
-  it('hover「…」菜单承载编辑标题/清除上下文/删除会话,收藏不入菜单（星标常驻）', async () => {
+  it('hover「…」菜单不重复提供收藏,收藏只走行内星标', async () => {
     const user = userEvent.setup();
+    const onToggleFavorite = jest.fn();
     const actions = createActions();
     render(
       <ConversationSessionRow
         session={{ ...session, favorite: true }}
         selected={false}
         onSelect={jest.fn()}
-        onToggleFavorite={jest.fn()}
+        onToggleFavorite={onToggleFavorite}
         actions={actions}
       />,
     );
@@ -283,7 +282,7 @@ describe('ConversationSessionRow 恢复的会话操作菜单（PR 454,平齐形�
     const menu = await screen.findByRole('dialog');
     const items = within(menu).getAllByRole('button');
     expect(items.map((item) => item.textContent)).toEqual(['编辑标题', '清除上下文', '删除会话']);
-    // 收藏走行内常驻星标,菜单不重复提供翻转入口。
+    // 外部星标是唯一收藏入口,避免菜单和行内操作重复。
     expect(screen.getByRole('button', { name: '取消收藏' })).toBeInTheDocument();
     expect(within(menu).queryByText('取消收藏')).toBeNull();
     expect(within(menu).queryByText('收藏会话')).toBeNull();
@@ -305,7 +304,7 @@ describe('ConversationSessionRow 恢复的会话操作菜单（PR 454,平齐形�
     await user.click(screen.getByRole('button', { name: '会话更多操作' }));
     const menu = await screen.findByRole('dialog');
     await user.click(within(menu).getByRole('button', { name: /删除会话/ }));
-    expect(await screen.findByText('删除会话', { selector : '[role="alertdialog"] *' })).toBeInTheDocument();
+    expect(await screen.findByText('删除会话', { selector: '[role="alertdialog"] *' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '确认删除' }));
     expect(actions.run).toHaveBeenCalledTimes(1);
     expect(actions.run.mock.calls[0][0]).toEqual({ type: 'delete' });

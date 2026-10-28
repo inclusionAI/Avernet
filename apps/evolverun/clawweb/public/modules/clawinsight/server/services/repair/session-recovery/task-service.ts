@@ -455,7 +455,9 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
   }
   private notifyGroup(task: RecoveryStoredTask, kind: Parameters<RecoveryActionNotifier["after"]>[0]["kind"]): void {
     if (task.simulation) return;
-    const event = task.timeline.at(-1);
+    const event = kind === "result" && task.completionReason === "owner_handoff"
+      ? task.timeline.findLast(item => item.kind === "termination" && item.payload.completion_reason === "owner_handoff")
+      : task.timeline.at(-1);
     if (!event) return;
     try { this.deps.actionNotifier?.after({ taskId: task.taskId, eventId: event.event_id, kind }); }
     catch (error) {

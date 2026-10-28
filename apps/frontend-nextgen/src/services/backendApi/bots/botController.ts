@@ -212,7 +212,7 @@ function engineRuntimeParams(target?: BotEngineRuntimeRequestOptions): BackendUn
   return userScopedParams({
     user_id: target.userId,
     ...(target.ownerId ? { entity_id: target.ownerId } : {}),
-    stage: target.stage ?? 'draft',
+    // Engine inspection/restart only supports draft; omit it and use the Backend default.
     ...(target.deviceUuid ? { device_uuid: target.deviceUuid } : {}),
   });
 }

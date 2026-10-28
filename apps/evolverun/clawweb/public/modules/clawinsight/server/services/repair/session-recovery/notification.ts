@@ -129,7 +129,8 @@ function notificationContent(task: RecoveryStoredTask, event: RecoveryTimelineEv
     section("执行结果", event.summary);
     if (event.payload.success === true) section("后续处理", "继续核对原任务的执行效果，方案执行完成不代表业务已恢复。", 200);
   } else {
-    title = task.completionReason === "target_unavailable" ? "目标不可用，自愈已结束" : task.completionReason === "user_continued" ? "用户已接手，自愈已让路" : task.status === "completed" ? "任务已完成" : task.status === "failed" ? task.phase === "verify" && task.judgment?.effect === "not_recovered" ? "自愈处理结束" : "任务执行失败" : "任务已停止";
+    const ownerHandoff = task.completionReason === "owner_handoff";
+    title = ownerHandoff ? "已转交 Owner，自愈已结束" : task.completionReason === "target_unavailable" ? "目标不可用，自愈已结束" : task.completionReason === "user_continued" ? "用户已接手，自愈已让路" : task.status === "completed" ? "任务已完成" : task.status === "failed" ? task.phase === "verify" && task.judgment?.effect === "not_recovered" ? "自愈处理结束" : "任务执行失败" : "任务已停止";
     section("任务总结", task.final_summary ?? "摘要暂不可用，请查看完整任务与处理记录。", 2000);
     if (!task.final_summary) intervention();
     const delivery = task.judgment?.delivery === "confirmed" ? "**消息已触达**：恢复指引已确认出现在原会话中。"
@@ -140,7 +141,14 @@ function notificationContent(task: RecoveryStoredTask, event: RecoveryTimelineEv
     const effects = { recovered: "原任务已恢复", not_recovered: "原任务未恢复", unknown: "恢复效果尚未确认", not_intervened: "未实际干预" };
     const effect = task.judgment?.effect ?? "unknown";
     sections.push(`**【恢复结论】**\n\n${effect === "recovered" ? `<font color="#16803C">${effects[effect]}</font>` : effects[effect]}`);
-    if (task.completionReason !== undefined || task.status === "failed" || task.status === "canceled") section("结束说明", event.summary);
+    if (ownerHandoff) {
+      const handoff = task.timeline.findLast(item => item.kind === "termination" && item.payload.completion_reason === "owner_handoff");
+      const summary = task.judgment?.summary?.trim() || handoff?.summary.trim() || task.final_summary?.trim()
+        || "转交说明暂不可用，请查看完整任务与处理记录。";
+      // Leave room for the existing task summary, UTF-8 and Markdown escaping.
+      section("转交原因与 Owner 处理事项", summary, 1600);
+      section("结束说明", "本次自愈已结束，后续由 Owner 处理。");
+    } else if (task.completionReason !== undefined || task.status === "failed" || task.status === "canceled") section("结束说明", event.summary);
   }
   const url = new URL("/insight", baseUrl);
   url.searchParams.set("module", "monitoring"); url.searchParams.set("recoveryTaskId", task.taskId);

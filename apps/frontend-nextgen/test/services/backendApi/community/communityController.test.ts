@@ -2,10 +2,12 @@ import {
   closeCommunityTopic,
   createCommunityReply,
   createCommunityTopic,
+  deleteCommunityTopic,
   getCommunityTopic,
   listCommunityReplies,
   listCommunityTopics,
   setCommunityPostHelpful,
+  updateCommunityTopic,
 } from '@/services/backendApi/community/communityController';
 import * as http from '@/services/backendApi/httpClient';
 
@@ -112,6 +114,26 @@ describe('communityController', () => {
   });
 
 
+  test('楼中楼回复下发 reply_to_post_id', async () => {
+    await createCommunityReply({
+      topicId: 'topic/1',
+      body: '回复楼层成员',
+      authorId: 'u1',
+      replyToPostId: 'post/2',
+    });
+
+    const arg = mockedRequest.mock.calls[0];
+    expect(arg?.[0]).toBe('/openapi/v1/collaboration/tasks/bbs/topics/topic%2F1/posts');
+    expect(arg?.[1].data).toMatchObject({
+      client_request_id: expect.any(String),
+      author_type: 'HUMAN',
+      author_id: 'u1',
+      body: '回复楼层成员',
+      reply_to_post_id: 'post/2',
+    });
+    expect(arg?.[1].data).not.toHaveProperty('poll_selection');
+  });
+
   test('发布主题走 /openapi/v1/collaboration/tasks/bbs/topics，HUMAN 写体含 client_request_id/title/body/author_id + 作者快照 author_display_name/author_avatar_url；结帖 body 含 author_id', async () => {
     // §2.1 + §8 填充规则：HUMAN 发帖时把 displayName/avatarUrl 作为写入快照下发，供列表/详情/楼层回放。
     const input = {
@@ -210,6 +232,40 @@ describe('communityController', () => {
     await createCommunityTopic({ title: '标题', body: '正文', authorId: 'u1', authorName: '   ' });
     const arg = mockedRequest.mock.calls[0];
     expect(arg?.[1].data).not.toHaveProperty('author_display_name');
+  });
+
+  test('编辑主题使用 PUT，删除主题使用 DELETE，两者均携带声明作者', async () => {
+    await updateCommunityTopic({
+      topicId: 'topic/1',
+      authorId: 'u1',
+      title: '新标题',
+      body: '新正文',
+    });
+    await deleteCommunityTopic('topic/1', 'u1');
+
+    expect(mockedRequest).toHaveBeenNthCalledWith(
+      1,
+      '/openapi/v1/collaboration/tasks/bbs/topics/topic%2F1',
+      {
+        method: 'PUT',
+        data: {
+          author_type: 'HUMAN',
+          author_id: 'u1',
+          title: '新标题',
+          body: '新正文',
+        },
+        signal: undefined,
+      },
+    );
+    expect(mockedRequest).toHaveBeenNthCalledWith(
+      2,
+      '/openapi/v1/collaboration/tasks/bbs/topics/topic%2F1',
+      {
+        method: 'DELETE',
+        data: { author_type: 'HUMAN', author_id: 'u1' },
+        signal: undefined,
+      },
+    );
   });
 
   test('详情请求透传 viewer 身份参数', async () => {

@@ -1,7 +1,7 @@
 import { serializeConversationRoute } from '@/domain/conversation';
 import type { BotDomain } from '@/services/botWorkshop';
 import { resolveBotRuntimeStage } from '@/services/botWorkshop/botRuntimeStage';
-import { buildAgentCodingChatPath, workspaceService } from '@/services/workspace';
+import { workspaceService } from '@/services/workspace';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { history } from '@umijs/max';
 import { useCallback } from 'react';
@@ -17,10 +17,6 @@ export function useBotWorkshopNavigation() {
     history.push(`/bot-workshop/detail?${params.toString()}`);
   }, []);
   const openConversation = useCallback((bot: BotDomain) => {
-    if (bot.runtime.isAgentCodingBot) {
-      history.push(buildAgentCodingChatPath({ botId: bot.id, spaceId: bot.spaceId, spaceName: bot.spaceName }));
-      return;
-    }
     const current = useWorkspaceStore.getState();
     const user = current.identities.find((identity) => identity.kind === 'user');
     if (!user) {

@@ -202,6 +202,10 @@ it.each(["assess", "observe", "plan", "verify"] as const)("notifies the Owner an
     ownerDeadlineAt: null, observationDeadlineAt: null, execution: { state: "ended" }, judgment: { effect: "not_recovered", summary } });
   expect(notifier.notify).toHaveBeenCalledExactlyOnceWith({ ownerId: "owner", taskId: task.taskId, kind: "result", effect: "not_recovered", summary });
   expect(task.timeline.some(event => event.kind === "notification" && event.payload.kind === "result" && event.payload.sent === true)).toBe(true);
+  const notice = actionNotifier.after.mock.calls.map(([value]) => value).find(value => value.kind === "result");
+  expect(task.timeline.find(event => event.event_id === notice?.eventId)).toMatchObject({
+    kind: "termination", summary, payload: { completion_reason: "owner_handoff" },
+  });
   expect(task.timeline.some(event => event.kind === "plan" || event.kind === "owner_decision")).toBe(false);
   await service.reportResults();
   expect(callbacks.at(-1)).toMatchObject({ status: "completed", completion_reason: "owner_handoff", effect: "not_recovered", intervention_status: phase === "observe" ? "performed" : "none" });

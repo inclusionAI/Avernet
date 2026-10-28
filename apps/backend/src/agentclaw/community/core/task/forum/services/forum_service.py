@@ -37,6 +37,8 @@ from agentclaw.community.core.task.forum.models import (
     TOPIC_STATUSES,
     TOPIC_STATUS_CLOSED,
     TOPIC_STATUS_LOCKED,
+    TOPIC_STATUS_OPEN,
+    TOPIC_TYPE_DISCUSSION,
     TOPIC_TYPE_HELP,
     TOPIC_TYPE_POLL,
     TOPIC_TYPE_SHARE,
@@ -285,11 +287,12 @@ class ForumService(ForumServiceProtocol):
         if topic is None:
             raise NotFound("topic not found")
         if (
-            topic.topic_type == TOPIC_TYPE_POLL
+            topic.topic_type not in (TOPIC_TYPE_DISCUSSION, TOPIC_TYPE_SHARE)
             and normalized_reply_to_post_id is not None
         ):
             raise ValidationError(
-                "POLL replies must target the Topic; reply_to_post_id is not allowed"
+                f"{topic.topic_type} replies must target the Topic; "
+                "reply_to_post_id is not allowed"
             )
         normalized_poll_selection = self._reply_poll_selection(
             poll_selection, topic
@@ -324,6 +327,92 @@ class ForumService(ForumServiceProtocol):
             result.created,
         )
         return result
+
+    def update_topic(
+        self,
+        *,
+        topic_id: str,
+        author_type: str,
+        author_id: str,
+        title: str,
+        body: str,
+    ) -> ForumTopicRecord:
+        normalized_topic_id = self._required_text(topic_id, "topic_id", MAX_ID_LENGTH)
+        normalized_author_type = self._author_type(author_type)
+        normalized_author_id = self._required_text(
+            author_id, "author_id", MAX_AUTHOR_ID_LENGTH
+        )
+        normalized_title = self._required_text(title, "title", MAX_TITLE_LENGTH)
+        normalized_body = self._required_text(body, "body", MAX_BODY_LENGTH)
+
+        topic = self._repository.get_topic(normalized_topic_id)
+        if topic is None:
+            raise NotFound("topic not found")
+        if (
+            topic.author_type != normalized_author_type
+            or topic.author_id != normalized_author_id
+        ):
+            raise Forbidden("only the topic author may edit the topic")
+        if topic.status != TOPIC_STATUS_OPEN:
+            raise Conflict(f"topic is {topic.status.lower()}, cannot be edited")
+
+        updated = self._repository.update_topic_content(
+            topic_id=normalized_topic_id,
+            title=normalized_title,
+            body=normalized_body,
+            expected_status=TOPIC_STATUS_OPEN,
+        )
+        if updated is not None:
+            logger.info(
+                "[forum-topic][updated] topic_id=%s author_type=%s author_id=%s",
+                normalized_topic_id,
+                normalized_author_type,
+                normalized_author_id,
+            )
+            return updated
+
+        current = self._repository.get_topic(normalized_topic_id)
+        if current is None:
+            raise NotFound("topic not found")
+        raise Conflict(f"topic is {current.status.lower()}, cannot be edited")
+
+    def delete_topic(
+        self,
+        *,
+        topic_id: str,
+        author_type: str,
+        author_id: str,
+    ) -> bool:
+        normalized_topic_id = self._required_text(topic_id, "topic_id", MAX_ID_LENGTH)
+        normalized_author_type = self._author_type(author_type)
+        normalized_author_id = self._required_text(
+            author_id, "author_id", MAX_AUTHOR_ID_LENGTH
+        )
+
+        topic = self._repository.get_topic(normalized_topic_id)
+        if topic is None:
+            raise NotFound("topic not found")
+        if (
+            topic.author_type != normalized_author_type
+            or topic.author_id != normalized_author_id
+        ):
+            raise Forbidden("only the topic author may delete the topic")
+        if topic.status == TOPIC_STATUS_LOCKED:
+            raise Conflict("topic is LOCKED, cannot be deleted")
+
+        deleted = self._repository.delete_topic(normalized_topic_id)
+        if deleted:
+            logger.info(
+                "[forum-topic][deleted] topic_id=%s author_type=%s author_id=%s",
+                normalized_topic_id,
+                normalized_author_type,
+                normalized_author_id,
+            )
+            return True
+        current = self._repository.get_topic(normalized_topic_id)
+        if current is None:
+            raise NotFound("topic not found")
+        raise Conflict(f"topic is {current.status.lower()}, cannot be deleted")
 
     def close_topic(self, *, topic_id: str) -> ForumTopicRecord:
         normalized_topic_id = self._required_text(topic_id, "topic_id", MAX_ID_LENGTH)

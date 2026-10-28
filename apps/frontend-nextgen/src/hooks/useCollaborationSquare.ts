@@ -1,5 +1,4 @@
 import { notifyError, notifySuccess } from '@/components/ui/notify';
-import { mapPublicBotCatalogSummaryToProfile } from '@/domain/collaborationSquare/mapper';
 import {
   getPublicBotActionKey,
   getPublicBotTargetId,
@@ -72,7 +71,7 @@ export function useCollaborationSquare(resource: SquareResource) {
         store.removeGroup(id);
         closeGroupMembers();
       }
-      notifyError('内容已取消公开或不可访问');
+      notifyError('内容已取消公开或对当前账号不可见');
     },
     [closeBotProfile, closeGroupMembers, store.removeBot, store.removeGroup],
   );
@@ -94,14 +93,6 @@ export function useCollaborationSquare(resource: SquareResource) {
     [handleTargetInvalid, store.setBotProfile, store.setDetailLoading, store.setSelectedBotId],
   );
 
-  const openSharedBot = useCallback(
-    (bot: PublicBot) => {
-      store.setSelectedBotId(bot.id);
-      store.setDetailLoading(false);
-      store.setBotProfile(mapPublicBotCatalogSummaryToProfile(bot));
-    },
-    [store.setBotProfile, store.setDetailLoading, store.setSelectedBotId],
-  );
   const openGroupMembers = useSquareGroupMembers(
     handleTargetInvalid,
     `${resource}:${humanBotContext?.userId ?? ''}:${humanBotContext?.actorId ?? ''}`,
@@ -109,9 +100,6 @@ export function useCollaborationSquare(resource: SquareResource) {
 
   useSquareDeepLink({
     resource,
-    humanBotContext,
-    viewer: viewer ?? undefined,
-    openSharedBot,
     openGroupMembers,
     handleTargetInvalid,
   });

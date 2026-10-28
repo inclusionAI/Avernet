@@ -106,8 +106,10 @@ it.each([
   ['friend service', { isFriendBot: true, botType: 'service' }, 'online'],
   ['team personal', { isTeamBot: true, botType: 'personal' }, undefined],
   ['friend personal', { isFriendBot: true, botType: 'personal' }, undefined],
+  ['my online service', { botType: 'service', runtimeStage: 'online' as const }, 'online'],
+  ['my personal', { botType: 'personal', runtimeStage: 'draft' as const }, undefined],
   ['my service', { botType: 'service', runtimeStage: 'draft' as const }, undefined],
-])('%s files and uploads use the conversation stage without changing my Bots', (_label, override, stage) => {
+])('%s files and uploads use the selected conversation stage', (_label, override, stage) => {
   const target = { ...bot, ...override };
   renderHook(() => useBotSessionFilesFeature(target, session, 'human_900003', jest.fn()));
   expect(mockedUseBotSessionFiles.mock.calls.at(-1)).toEqual([

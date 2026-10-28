@@ -31,12 +31,10 @@ export interface ConversationSidebarProps {
   onOpenPublicBots(): void;
   /** 我的 Bot 空态文案内「Bot 管理」链接:跳 Bot 管理页(/bot-workshop)创建 Bot。 */
   onOpenBotWorkshop(): void;
-  /** AgentCoding Bot 使用专用 coding-chat;与 Bot 工坊「去使用」保持一致。 */
-  onOpenAgentCodingBot(bot: ConversationBotView['bot']): void;
   /** 「Bot 管理」菜单项回调(#2990 还原):带该 Bot 所属空间上下文跳转 Bot 管理页;
    *  好友 Bot 不提供(装配层只经 ManagedItem 传导,菜单项不渲染)。 */
   onOpenBotManagement?(bot: ConversationBotView['bot']): void;
-  /** Bot 正在回复中的会话 id(#2990 还原):仅当前打开的会话;会话行标题左侧渲染 loading 指示。 */
+  /** Bot 正在回复中的会话 id(#2990 还原):仅当前打开的普通 Runtime 会话;Coding Bot 暂为 null。 */
   replyingSessionId: string | null;
 }
 
@@ -186,10 +184,6 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
           selectedBotId={store.selectedBotId}
           selectedSection={store.selectedSection}
           onQuickOpen={(view) => {
-            if (view.bot.isAgentCodingBot) {
-              props.onOpenAgentCodingBot(view.bot);
-              return;
-            }
             // 与分组展开同契约:恢复分组可见(下次展开即就位) +
             // 未展开过的 Bot 补 toggleBot 懒加载;侧栏本身保持收起不打扰舞台。
             if (view.section !== 'team') store.setBotGroupCollapsed(view.section, false);
@@ -198,7 +192,6 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
             }
           }}
           onExpand={expandSidebar}
-          onOpenAgentCodingBot={props.onOpenAgentCodingBot}
         />
       )}
     >

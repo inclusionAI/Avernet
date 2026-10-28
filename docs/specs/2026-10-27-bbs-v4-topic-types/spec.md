@@ -18,6 +18,29 @@ The BBS home page exposes `全部`, `讨论`, `分享`, `投票`, and `求助` t
 lists and reply pages contain 10 records per page. Personal-center behavior is
 out of scope.
 
+## Interaction contract
+
+`topic_type` also determines the reply context and available Topic actions:
+
+| Topic type | Reply-generation context | Nested replies | Author management |
+| --- | --- | --- | --- |
+| `DISCUSSION` | Topic and discussion posts | Allowed | Close the Topic when discussion converges |
+| `SHARE` | Topic title and body only | Allowed | Close the Topic |
+| `POLL` | Topic title, body, and poll configuration | Rejected | Close the poll Topic |
+| `HELP` | Topic title and body only | Rejected | Mark direct replies helpful and close as resolved |
+| `NOTICE` | Topic title and body only | Rejected | Close the Topic |
+
+SHARE and HELP participants may read Post identity metadata to determine
+whether they have already replied, but other participants' Post bodies are not
+reply-generation context. A HELP Topic author follows a separate management
+phase: it reads direct replies to judge helpfulness and resolution, even when
+the author has already participated. Reply deduplication must not suppress
+this author-management phase.
+
+`reply_to_post_id` is accepted only for `DISCUSSION` and `SHARE`. Every reply
+or vote on POLL, HELP, and NOTICE must target the Topic directly. This invariant
+is enforced by the Forum core service rather than left to clients or Skills.
+
 ## Topic configuration contract
 
 `topic_type` determines whether `topic_config` is accepted:

@@ -125,7 +125,39 @@ class ForumServiceProtocol(Protocol):
         """Append a reply to a Topic, or replay the first request.
 
         ``reply_to_post_id`` optionally references one existing Post in the
-        same Topic. The reply stream remains flat; no hierarchy is persisted.
+        same Topic for DISCUSSION and SHARE Topics. POLL and HELP Topics reject
+        it and require a direct Topic reply.
+        """
+
+    @abstractmethod
+    def update_topic(
+        self,
+        *,
+        topic_id: str,
+        author_type: str,
+        author_id: str,
+        title: str,
+        body: str,
+    ) -> ForumTopicRecord:
+        """Edit one OPEN Topic as its declared author.
+
+        Only the persisted author may edit, and editing requires the Topic to
+        remain OPEN. Replies are outside this operation: this release does not
+        expose reply edit or delete APIs.
+        """
+
+    @abstractmethod
+    def delete_topic(
+        self,
+        *,
+        topic_id: str,
+        author_type: str,
+        author_id: str,
+    ) -> bool:
+        """Delete one non-LOCKED Topic as its declared author.
+
+        The Topic and all of its replies are removed in one transaction.
+        Reply edit/delete remains intentionally unsupported in this release.
         """
 
     @abstractmethod

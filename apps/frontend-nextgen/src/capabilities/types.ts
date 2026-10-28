@@ -4,6 +4,18 @@ import type { ConversationSessionRequestRange } from '@/domain/conversation';
 import type { NavigationItem } from '@/shell/navigation';
 import type { RouteMeta } from '@/shell/routeMeta';
 import type { ComponentType } from 'react';
+import type { ConversationComposerProps } from './conversationComposer';
+
+export interface BotEditorPanelContext {
+  botId: string; ownerId: string; spaceId: string; editable: boolean;
+  serviceMode: import('@/domain/botWorkshop').BotServiceMode;
+  runtimeStage?: 'draft' | 'verify' | 'online';
+}
+export interface BotEditorPanelExtension {
+  id: string; label: string;
+  Icon: ComponentType<{ className?: string }>;
+  Panel: ComponentType<BotEditorPanelContext>;
+}
 
 export type CapabilityStatus = 'available' | 'unsupported';
 
@@ -345,6 +357,91 @@ export interface ConversationInstanceScopeState {
 }
 
 /**
+ * Coding Bot 对话工作区宿主 props。只暴露 AIXCoding Embedded 需要的领域输入,
+ * 不包含 TeamClaw URL、内部应用地址或部署信息。
+ */
+export interface CodingBotConversationHostProps {
+  /**
+   * AIXCoding runtime Bot ID. This is the head of TeamClaw's compound view ID
+   * (`realBotId`); callers must not pass the URL identity `bot.botId`.
+   */
+  botId: string;
+  /** 当前选中 Session;缺省时由 Embedded 宿主展示空态,不自动新建。 */
+  sessionId?: string;
+  ownerId?: string;
+  /**
+   * 当前登录人的 canonical OpenAPI user_id。Embedded runtime 用它初始化
+   * AIXCoding user store、会话归属与会话锁，必须由宿主显式传入；
+   * 不允许从复合 Session ID 反推当前浏览器用户。
+   */
+  userId: string;
+  /** 当前登录人显示名，用于 AIXCoding runtime identity 初始化。 */
+  nickName?: string;
+  publishId?: string | number;
+  /** 服务 Bot 发布元数据;必须与 publishId 成对出现。 */
+  stage?: 'verify' | 'online';
+  /** Embedded 模式是唯一支持的宿主形态,由 Open 边界固定传入。 */
+  mode: 'embed';
+}
+
+export type CodingBotSessionAction =
+  | { type: 'rename'; sessionId: string; title: string }
+  | { type: 'clear'; sessionId: string }
+  | { type: 'delete'; sessionId: string }
+  | { type: 'favorite'; sessionId: string; favorite: boolean }
+  | { type: 'share'; sessionId: string }
+  | { type: 'logs'; sessionId: string }
+  | { type: 'dima'; sessionId: string };
+
+export interface CodingBotSessionSummary {
+  sessionId: string;
+  title?: string;
+  messageCount?: number;
+  gmtModified?: string;
+  gmtCreate?: string;
+  model?: string;
+}
+
+export interface CodingBotSessionActionInput {
+  botId: string;
+  userId: string;
+  ownerId?: string;
+  action: CodingBotSessionAction;
+}
+
+export interface CodingBotSessionCreateInput {
+  botId: string;
+  userId: string;
+  ownerId?: string;
+  title?: string;
+}
+
+export type CodingBotSessionActionResult =
+  | { ok: true; session?: CodingBotSessionSummary; favorite?: boolean }
+  | { ok: false; message: string };
+
+/**
+ * Coding Bot 对话工作区宿主能力。Open Core 默认 null;internal overlay 注入
+ * 真实微应用 Stage。开源侧只依赖该组件合同,不感知任何内部 URL。
+ */
+export interface CodingBotConversationHost {
+  Stage: ComponentType<CodingBotConversationHostProps>;
+  /**
+   * 页面在识别出 Coding Bot、但目标 Session 详情尚未就绪时，可先触发宿主
+   * 定向预载微应用入口资产。该函数必须幂等且不要求返回 Promise；Open Core
+   * 可不注入，内部 overlay 才提供实现。
+   */
+  preload?: () => void;
+  /**
+   * Coding Bot 会话创建/写操作委托给已挂载的 AIXCoding runtime。该 runtime
+   * 继续持有 model/runtime、git author、内部会话列表与消息状态等原路由语义；
+   * 未注入该桥接的旧 Stage 可回退 generic OpenAPI。
+   */
+  createSession?: (input: CodingBotSessionCreateInput) => Promise<CodingBotSessionActionResult>;
+  runSessionAction?: (input: CodingBotSessionActionInput) => Promise<CodingBotSessionActionResult>;
+}
+
+/**
  * 会话实例范围能力:对话菜单多实例服务 Bot 的实例选择与按实例取数。
  * Open Core 默认 null(对话菜单无实例概念,会话查看与检索行为不变);
  * internal overlay 注入实现(实例清单拉取/自动选中/实例下拉组件/请求范围推导)。
@@ -489,6 +586,10 @@ export interface AppCapabilities {
   getBotSkillPickerSources: () => CapabilityResult<BotSkillPickerSource[]>;
   /** 内部市场与工坊 Skill 的详情链接；Open Core 默认不提供。 */
   getBotSkillPickerDetailUrl: (skill: BotEditorSkill) => CapabilityResult<string | null>;
+  /** Deployment-owned editor panels; empty by default, no business-specific imports. */
+  getBotEditorPanels: () => CapabilityResult<BotEditorPanelExtension[]>;
+  /** Optional single-Bot composer decorator; public default is absent. */
+  getConversationComposer: () => CapabilityResult<ComponentType<ConversationComposerProps> | null>;
   /** Bot 编辑页添加 MCP 仅属于 Internal Overlay；Open Core / 阿里云不展示入口也不请求市场接口。 */
   getBotMcpPickerEnabled: () => CapabilityResult<boolean>;
   /**
@@ -597,6 +698,11 @@ export interface AppCapabilities {
    * 选中实例经 conversationStore.setBotInstanceSelection 写入(代次/缓存失效走 Store 既有机制)。
    */
   getConversationInstanceScope: () => CapabilityResult<ConversationInstanceScopeCapability | null>;
+  /**
+   * Coding Bot 对话工作区宿主（见 `CodingBotConversationHost`）。
+   * Open Core 默认 null（显示未配置状态）；internal overlay 注入真实 AIXCoding 微应用 Stage。
+   */
+  getCodingBotConversationHost: () => CapabilityResult<CodingBotConversationHost | null>;
   /**
    * SPM 埋点上报 adapter（见 `TrackerAdapter`）。
    * Open Core 默认 no-op（零上报、零内部资源）；internal overlay 注入真实 Tracert 实现。

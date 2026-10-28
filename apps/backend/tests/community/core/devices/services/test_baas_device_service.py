@@ -1275,6 +1275,79 @@ class TestContainerInitSteps:
 
 
 class TestDoRelease:
+    @pytest.mark.parametrize(
+        "stored,caller,expected",
+        [(None, "caller", "caller"), ("", "caller", "caller"), ("owner", "caller", "owner")],
+    )
+    def test_release_uses_caller_when_binding_identity_missing(self, stored, caller, expected):
+        props = {"bot_uuid": "BOT-1"}
+        if stored is not None:
+            props["entity_id"] = stored
+        original = props.copy()
+        binding = _make_binding_record(device_props=props)
+        repo = MagicMock()
+        repo.get_by_id.return_value = binding
+        baas = MagicMock()
+        baas.destroy_bot.return_value = {}
+        svc = _make_service(repo=repo, baas_service=baas)
+
+        svc.release_device(binding_id=1, release_reason="test", operator=_operator(caller))
+
+        assert baas.destroy_bot.call_args.kwargs["operator"] == expected
+        assert binding.device_props == original
+        repo.release_binding.assert_called_once()
+
+    def test_release_keeps_request_id_stable_across_callers(self):
+        repo = MagicMock()
+        repo.get_by_id.return_value = _make_binding_record(device_props={"bot_uuid": "BOT-1"})
+        baas = MagicMock()
+        baas.destroy_bot.return_value = {}
+        svc = _make_service(repo=repo, baas_service=baas)
+
+        for caller in ("first", "second"):
+            svc.release_device(binding_id=1, release_reason="test", operator=_operator(caller))
+
+        calls = baas.destroy_bot.call_args_list
+        assert [c.kwargs["operator"] for c in calls] == ["first", "second"]
+        assert calls[0].kwargs["request_id"] == calls[1].kwargs["request_id"]
+
+    def test_release_without_identity_records_physical_failure(self):
+        repo = MagicMock()
+        repo.get_by_id.return_value = _make_binding_record(device_props={"bot_uuid": "BOT-1"})
+        baas = MagicMock()
+        baas.destroy_bot.side_effect = BaasServiceError("operator must not be empty")
+        svc = _make_service(repo=repo, baas_service=baas)
+
+        svc.release_device(binding_id=1, release_reason="test", operator=_operator(""))
+
+        assert baas.destroy_bot.call_args.kwargs["operator"] == ""
+        assert "physical release failed" in repo.release_binding.call_args.kwargs["release_reason"]
+
+    @pytest.mark.parametrize("props", [None, []])
+    def test_malformed_legacy_props_preserve_release_failure_handling(self, props):
+        binding = _make_binding_record()
+        binding.device_props = props
+        repo = MagicMock()
+        repo.get_by_id.return_value = binding
+        svc = _make_service(repo=repo)
+
+        svc.release_device(binding_id=1, release_reason="test", operator=_operator())
+
+        assert "physical release failed" in repo.release_binding.call_args.kwargs["release_reason"]
+
+    def test_stored_release_operator_is_not_trusted(self):
+        binding = _make_binding_record(device_props={"bot_uuid": "BOT-1", "_release_operator": "forged"})
+        repo = MagicMock()
+        repo.get_by_id.return_value = binding
+        baas = MagicMock()
+        baas.destroy_bot.return_value = {}
+        svc = _make_service(repo=repo, baas_service=baas)
+
+        svc.release_device(binding_id=1, release_reason="test", operator=_operator("caller"))
+
+        assert baas.destroy_bot.call_args.kwargs["operator"] == "caller"
+        assert binding.device_props["_release_operator"] == "forged"
+
     def test_destroy_bot_called_with_bot_uuid_from_props(self):
         baas = MagicMock()
         svc = _make_service(baas_service=baas)

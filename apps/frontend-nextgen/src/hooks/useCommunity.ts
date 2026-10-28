@@ -35,6 +35,7 @@ export function useCommunity() {
   });
   const topicDetail = useCommunityTopicDetail({
     currentUserId,
+    currentAuthorName: identity?.displayName,
     viewer: interactionViewer,
     interactions,
     enrichTopicBotAuthor,
@@ -42,6 +43,8 @@ export function useCommunity() {
 
   const [publishing, setPublishing] = useState(false);
   const [closing, setClosing] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const publishTopic = useCallback(
     async (draft: CreateCommunityTopicDraft) => {
@@ -83,6 +86,52 @@ export function useCommunity() {
     ],
   );
 
+  const updateTopic = useCallback(
+    async (draft: { title: string; body: string }) => {
+      const topic = store.selectedTopic;
+      if (!topic?.canEdit) return false;
+      setEditSaving(true);
+      try {
+        const updated = await communityService.updateTopic({
+          topicId: topic.id,
+          authorId: topic.author.id,
+          title: draft.title,
+          body: draft.body,
+        });
+        store.replaceTopic(enrichOwnership(updated, currentUserId));
+        notifySuccess('主题已更新');
+        return true;
+      } catch (error) {
+        notifyError(communityErrorMessage(error, '主题更新失败'), {
+          title: '更新失败',
+        });
+        return false;
+      } finally {
+        setEditSaving(false);
+      }
+    },
+    [currentUserId, store.replaceTopic, store.selectedTopic],
+  );
+
+  const deleteTopic = useCallback(async () => {
+    const topic = store.selectedTopic;
+    if (!topic?.canDelete) return false;
+    setDeleting(true);
+    try {
+      await communityService.deleteTopic(topic.id, topic.author.id);
+      store.removeTopic(topic.id);
+      notifySuccess('主题已删除');
+      return true;
+    } catch (error) {
+      notifyError(communityErrorMessage(error, '主题删除失败，请稍后重试'), {
+        title: '删除失败',
+      });
+      return false;
+    } finally {
+      setDeleting(false);
+    }
+  }, [store.removeTopic, store.selectedTopic]);
+
   const closeTopic = useCallback(async () => {
     const topic = store.selectedTopic;
     if (!topic?.canClose) return false;
@@ -114,9 +163,13 @@ export function useCommunity() {
     ...topicDetail,
     currentUserId,
     publishTopic,
+    updateTopic,
+    deleteTopic,
     closeTopic,
     publishing,
     closing,
+    editSaving,
+    deleting,
     interactions,
   };
 }

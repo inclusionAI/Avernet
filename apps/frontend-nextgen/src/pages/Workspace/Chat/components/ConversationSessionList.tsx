@@ -55,38 +55,48 @@ export function ConversationSessionList(props: {
   return (
     <>
       <div>
-        {sessions.items.map((session) => (
-          <ConversationSessionRow
-            key={session.sessionId}
-            session={session}
-            selected={selectedSessionId === session.sessionId}
-            onSelect={() => {
-              Tracert.click(Points.workspaceChat.switchSession, { bot_id: session.botId });
-              onSelectSession(session.sessionId);
-            }}
-            onToggleFavorite={onToggleFavorite ? () => onToggleFavorite(session.sessionId) : undefined}
-            favoritePending={isFavoritePending(session.sessionId)}
-            replyingSessionId={replyingSessionId}
-            actions={
-              actions
-                ? {
-                    run: (action) => actions.run(session.sessionId, action),
-                    pending:
-                      actions.pending ||
-                      Boolean(sessions.loading || sessions.isLoadingMore) ||
-                      isFavoritePending(session.sessionId),
-                  }
-                : undefined
-            }
-          />
-        ))}
+        {sessions.items.map((session) => {
+          const selected = selectedSessionId === session.sessionId;
+          return (
+            <ConversationSessionRow
+              key={session.sessionId}
+              session={session}
+              selected={selected}
+              onSelect={() => {
+                Tracert.click(Points.workspaceChat.switchSession, { bot_id: session.botId });
+                onSelectSession(session.sessionId);
+              }}
+              onToggleFavorite={onToggleFavorite ? () => onToggleFavorite(session.sessionId) : undefined}
+              favoritePending={isFavoritePending(session.sessionId)}
+              replyingSessionId={replyingSessionId}
+              actions={
+                actions
+                  ? {
+                      run: (action) => {
+                        // AIXCoding 路由页的日志行为会先切到目标会话再打开 Harness；
+                        // TeamClaw 保持相同次序，避免外层舞台与日志目标会话不一致。
+                        if (action.type === 'logs' && !selected) {
+                          Tracert.click(Points.workspaceChat.switchSession, { bot_id: session.botId });
+                          onSelectSession(session.sessionId);
+                        }
+                        return actions.run(session.sessionId, action);
+                      },
+                      pending:
+                        actions.pending ||
+                        Boolean(sessions.loading || sessions.isLoadingMore) ||
+                        isFavoritePending(session.sessionId),
+                      features: actions.features,
+                    }
+                  : undefined
+              }
+            />
+          );
+        })}
       </div>
       {sessions.hasMore && (
         <ConversationLoadMore
           loading={sessions.isLoadingMore}
-          disabled={
-            actions?.pending || sessions.items.some((session) => isFavoritePending(session.sessionId))
-          }
+          disabled={actions?.pending || sessions.items.some((session) => isFavoritePending(session.sessionId))}
           onClick={() => onLoadMore()}
         />
       )}

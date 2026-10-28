@@ -22,6 +22,7 @@ from agentclaw.community.core.cron.services.cron_targeted_operations import Cron
 from injector import inject
 
 from agentclaw.community.core.runtime_binding.service import RuntimeBindingResolutionService
+from agentclaw.community.core.runtime_binding.models import RuntimeBindingRequest
 
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.repository.protocols.bot import TemplateRepository
@@ -119,7 +120,8 @@ class CronRelayService(CronTargetedOperationsMixin, CronRuntimeOperationsMixin, 
             nick_name: 用户花名
             bot_id: 如果为 "all" 或 None，返回所有 bots 的任务；否则返回指定 bot 的任务
             runtime_stage: 仅返回该运行态的任务；None 表示全部运行态。openapi_v1
-                传 draft——公开面只操作草稿态；内部控制台不传，保持全运行态聚合。
+                传 draft——公开面只操作草稿态；内部控制台不传，聚合全部普通运行态，
+                Caller 服务 Bot 则读取当前认证用户已有的 online Caller 实例。
 
         Returns:
             {"success": True, "data": [...], "total": N}
@@ -156,6 +158,45 @@ class CronRelayService(CronTargetedOperationsMixin, CronRuntimeOperationsMixin, 
         targets: list[CronRuntimeTarget] = []
         failed_targets: list[dict[str, Any]] = []
         for bot in bots:
+            if (
+                bot.get("bot_type") == "service"
+                and bot.get("call_type") == "caller"
+                and runtime_stage in (None, RUNTIME_STAGE_ONLINE)
+                and str(bot.get("active_engine") or "").strip().lower()
+                not in _CRON_UNSUPPORTED_ENGINES
+            ):
+                # COSEC: Caller identity comes from authentication, never the Bot owner.
+                actor = authenticated_user_id or user_id
+                owner = bot.get("owner_id") or user_id
+                try:
+                    resolved = self._runtime_bindings.resolve(
+                        RuntimeBindingRequest(
+                            bot_id=bot["bot_id"], owner_id=owner,
+                            actor_user_id=actor, stage=RUNTIME_STAGE_ONLINE,
+                        )
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "cron.list.caller_unavailable bot_id=%s owner_id=%s actor_user_id=%s exception_type=%s error=%s",
+                        bot["bot_id"], owner, actor, type(exc).__name__, exc,
+                    )
+                    failed_targets.append(self._failed_target_from_values(
+                        bot_id=bot["bot_id"], bot_name=bot.get("bot_name", ""),
+                        owner_id=owner, runtime_stage=RUNTIME_STAGE_ONLINE,
+                        publish_id=None, reason="caller_unavailable", message=str(exc),
+                    ))
+                    continue
+                logger.info(
+                    "cron.list.caller_selected bot_id=%s owner_id=%s actor_user_id=%s binding_id=%s",
+                    bot["bot_id"], owner, actor, resolved.binding_id,
+                )
+                targets.append(CronRuntimeTarget(
+                    bot_id=bot["bot_id"], bot_name=bot.get("bot_name", ""),
+                    owner_id=owner, bot_type="service", runtime_stage=RUNTIME_STAGE_ONLINE,
+                    binding_id=resolved.binding_id, operator_id=actor,
+                    authenticated_user_id=actor, fixed_binding=True, caller_binding=True,
+                ))
+                continue
             bot_targets, bot_failed_targets = self._build_runtime_targets(bot, user_id)
             targets.extend(bot_targets)
             failed_targets.extend(bot_failed_targets)
@@ -173,7 +214,17 @@ class CronRelayService(CronTargetedOperationsMixin, CronRuntimeOperationsMixin, 
 
         tasks = []
         for target in targets:
-            task = self._fetch_runtime_target_crons(target, user_id)
+            if target.caller_binding:
+                # The binding and membership snapshot were validated before expansion.
+                task = self._forward_targeted_cron_request(
+                    bot_id=target.bot_id, user_id=target.owner_id,
+                    runtime_stage=target.runtime_stage, device_uuid=target.device_uuid,
+                    operator_id=target.operator_id,
+                    authenticated_user_id=target.authenticated_user_id,
+                    method="GET", path="/api/cron", _resolved_target=target,
+                )
+            else:
+                task = self._fetch_runtime_target_crons(target, user_id)
             tasks.append(task)
 
         results = await asyncio.gather(*tasks, return_exceptions=True)

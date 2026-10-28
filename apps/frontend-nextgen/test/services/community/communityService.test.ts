@@ -16,6 +16,8 @@ function gateway(overrides: Partial<CommunityGateway> = {}): CommunityGateway {
       createdAt: '',
       isMine: true,
       canClose: true,
+      canEdit: true,
+      canDelete: true,
     })),
     listReplies: jest.fn(async () => ({ items: [], total: 0 })),
     createReply: jest.fn(async () => 'created-reply'),
@@ -31,8 +33,26 @@ function gateway(overrides: Partial<CommunityGateway> = {}): CommunityGateway {
       createdAt: '',
       isMine: true,
       canClose: true,
+      canEdit: true,
+      canDelete: true,
     })),
     closeTopic: jest.fn(async () => undefined),
+    updateTopic: jest.fn(async (input) => ({
+      id: input.topicId,
+      title: input.title,
+      body: input.body,
+      status: 'open' as const,
+      topicType: 'discussion' as const,
+      author: { type: 'human' as const, id: input.authorId, displayName: '我' },
+      replyCount: 0,
+      latestActivityAt: '',
+      createdAt: '',
+      isMine: true,
+      canClose: true,
+      canEdit: true,
+      canDelete: true,
+    })),
+    deleteTopic: jest.fn(async () => undefined),
     setPostHelpful: jest.fn(async () => undefined),
     createInteraction: jest.fn(async () => undefined),
     getInteractionSummary: jest.fn(async () => ({
@@ -83,6 +103,8 @@ describe('CommunityService', () => {
           createdAt: '',
           isMine: true,
           canClose: false,
+          canEdit: false,
+          canDelete: false,
         },
         {
           id: 'old',
@@ -96,6 +118,8 @@ describe('CommunityService', () => {
           createdAt: '',
           isMine: true,
           canClose: false,
+          canEdit: false,
+          canDelete: false,
         },
       ],
     }));
@@ -142,6 +166,8 @@ describe('CommunityService', () => {
           createdAt: '',
           isMine: true,
           canClose: true,
+          canEdit: true,
+          canDelete: true,
         },
         {
           id: 'other',
@@ -155,6 +181,8 @@ describe('CommunityService', () => {
           createdAt: '',
           isMine: false,
           canClose: false,
+          canEdit: false,
+          canDelete: false,
         },
         {
           id: 'mine2',
@@ -168,6 +196,8 @@ describe('CommunityService', () => {
           createdAt: '',
           isMine: true,
           canClose: true,
+          canEdit: true,
+          canDelete: true,
         },
       ],
     }));
@@ -197,6 +227,8 @@ describe('CommunityService', () => {
           createdAt: '2026-10-05T00:00:00Z',
           isMine: false,
           canClose: false,
+          canEdit: false,
+          canDelete: false,
         },
         {
           id: 'a',
@@ -210,6 +242,8 @@ describe('CommunityService', () => {
           createdAt: '2026-10-01T00:00:00Z',
           isMine: false,
           canClose: false,
+          canEdit: false,
+          canDelete: false,
         },
       ],
     }));
@@ -245,6 +279,28 @@ describe('CommunityService', () => {
   });
 
 
+  test('createReply 透传并裁剪楼中楼 replyToPostId', async () => {
+    const createReply = jest.fn(async () => 'created-reply');
+    const service = new CommunityService(gateway({ createReply }));
+
+    await service.createReply({
+      topicId: 't',
+      body: '回复楼层',
+      authorId: 'u',
+      replyToPostId: ' reply-1 ',
+    });
+
+    expect(createReply).toHaveBeenCalledWith(
+      {
+        topicId: 't',
+        body: '回复楼层',
+        authorId: 'u',
+        replyToPostId: 'reply-1',
+      },
+      undefined,
+    );
+  });
+
   test('allows title-and-body-only shares', async () => {
     const createTopic = jest.fn(async (input) => ({
       id: 'share-topic',
@@ -258,6 +314,8 @@ describe('CommunityService', () => {
       createdAt: '',
       isMine: true,
       canClose: true,
+      canEdit: true,
+      canDelete: true,
     }));
     const service = new CommunityService(gateway({ createTopic }));
 
@@ -292,6 +350,8 @@ describe('CommunityService', () => {
       createdAt: '',
       isMine: true,
       canClose: true,
+      canEdit: true,
+      canDelete: true,
     }));
     const service = new CommunityService(gateway({ createTopic }));
     const common = { title: '标题', body: '正文', authorId: 'u1', authorName: '我' };
@@ -321,6 +381,63 @@ describe('CommunityService', () => {
         help: { expectedTime: 'x'.repeat(129) },
       }),
     ).rejects.toThrow('期望解决时间不能超过 128 个字符');
+  });
+
+  test('updateTopic trims title/body and forwards the author to the gateway', async () => {
+    const updateTopic = jest.fn(async () => ({
+      id: 'topic-1',
+      title: '新标题',
+      body: '新正文',
+      status: 'open' as const,
+      topicType: 'discussion' as const,
+      author: { type: 'human' as const, id: 'u1', displayName: '我' },
+      replyCount: 0,
+      latestActivityAt: '',
+      createdAt: '',
+      isMine: true,
+      canClose: true,
+      canEdit: true,
+      canDelete: true,
+    }));
+    const service = new CommunityService(gateway({ updateTopic }));
+
+    await expect(
+      service.updateTopic({ topicId: 'topic-1', authorId: ' ', title: '  标题  ', body: '  正文  ' }),
+    ).rejects.toThrow('缺少当前用户身份');
+    expect(updateTopic).not.toHaveBeenCalled();
+
+    await expect(
+      service.updateTopic({ topicId: 'topic-1', authorId: 'u1', title: '  ', body: '正文' }),
+    ).rejects.toThrow('请输入主题标题');
+    expect(updateTopic).not.toHaveBeenCalled();
+
+    await service.updateTopic({
+      topicId: 'topic-1',
+      authorId: 'u1',
+      title: '  新标题  ',
+      body: '  新正文  ',
+    });
+
+    expect(updateTopic).toHaveBeenLastCalledWith(
+      {
+        topicId: 'topic-1',
+        authorId: 'u1',
+        title: '新标题',
+        body: '新正文',
+      },
+      undefined,
+    );
+  });
+
+  test('deleteTopic 透传 Topic 与作者，空白作者被拒绝', async () => {
+    const deleteTopic = jest.fn(async () => undefined);
+    const service = new CommunityService(gateway({ deleteTopic }));
+
+    await expect(service.deleteTopic('topic-1', ' ')).rejects.toThrow('缺少当前用户身份');
+    expect(deleteTopic).not.toHaveBeenCalled();
+
+    await service.deleteTopic('topic-1', 'u1');
+    expect(deleteTopic).toHaveBeenCalledWith('topic-1', 'u1', undefined);
   });
 
   test('closeTopic 透传 author_id 到网关', async () => {
@@ -359,6 +476,8 @@ describe('CommunityService', () => {
       createdAt: '',
       isMine: true,
       canClose: true,
+      canEdit: true,
+      canDelete: true,
       viewer: { hasVoted: true, votePostId: 'post-vote', pollSelection: [0] },
     };
     const getTopic = jest.fn(async () => topic);

@@ -31,6 +31,8 @@ interface CommunityState {
   setDetailLoading: (loading: boolean) => void;
   setDetailError: (error: string | null) => void;
   prependTopic: (topic: CommunityTopic) => void;
+  replaceTopic: (topic: CommunityTopic) => void;
+  removeTopic: (topicId: string) => void;
   markTopicClosed: (topicId: string) => void;
   reset: () => void;
 }
@@ -65,6 +67,18 @@ export const useCommunityStore = create<CommunityState>((set) => ({
   setDetailLoading: (detailLoading) => set({ detailLoading }),
   setDetailError: (detailError) => set({ detailError }),
   prependTopic: (topic) => set((state) => ({ topics: [topic, ...state.topics], total: state.total + 1 })),
+  replaceTopic: (topic) =>
+    set((state) => ({
+      topics: state.topics.map((item) => (item.id === topic.id ? topic : item)),
+      selectedTopic: state.selectedTopic?.id === topic.id ? topic : state.selectedTopic,
+    })),
+  removeTopic: (topicId) =>
+    set((state) => ({
+      topics: state.topics.filter((topic) => topic.id !== topicId),
+      total: Math.max(0, state.total - 1),
+      selectedTopic: state.selectedTopic?.id === topicId ? null : state.selectedTopic,
+      replies: state.selectedTopic?.id === topicId ? [] : state.replies,
+    })),
   markTopicClosed: (topicId) =>
     set((state) => ({
       topics: state.topics.map((topic) =>
