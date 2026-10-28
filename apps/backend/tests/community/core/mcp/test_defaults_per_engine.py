@@ -7,6 +7,7 @@ from agentclaw.community.core.mcp.services._defaults import (
 
 
 BCS_MCP_SERVER_CODE = "mcp.ant.agentclawscs.bcs_mcp"
+ECB_KNOWLEDGE_MCP_SERVER_CODE = "mcp.ant.ecb.ecb-knowledge-mcp-service"
 
 
 def test_openclaw_defaults_preserved():
@@ -57,15 +58,15 @@ def test_claude_code_merges_aicoding_research_mcps():
         assert code in codes, f"missing aicoding-only MCP in claude_code: {code}"
     # 无重复。
     assert len(codes) == len(set(codes))
-    # 12 原有 + 6 研发 MCP + 1 应用信息 MCP + 1 clawmind = 20。
-    assert len(codes) == 20
+    # 12 原有 + 6 研发 MCP + 1 应用信息 MCP + 1 clawmind + 1 ECB 知识库 MCP = 21。
+    assert len(codes) == 21
 
 
 def test_aicoding_has_its_own_list():
     servers = get_default_mcp_servers("aicoding")
     codes = [s["server_code"] for s in servers]
     assert isinstance(servers, list)
-    assert len(servers) == 20
+    assert len(servers) == 21
     assert "mcp.ant.arkai.assistantmcpserver" in codes
     assert "mcp.ant.arkai.dimamcpserver" in codes
     assert "mcp.ant.faas.aixjiter.AixCodingMemoryMCP" in codes
@@ -105,6 +106,12 @@ def test_bcs_mcp_is_default_for_mcp_enabled_engines():
     assert BCS_MCP_SERVER_CODE in get_default_mcp_server_codes("hermes")
     assert BCS_MCP_SERVER_CODE in get_default_mcp_server_codes("aicoding")
     assert BCS_MCP_SERVER_CODE not in get_default_mcp_server_codes("moltis")
+
+
+def test_ecb_knowledge_mcp_is_default_for_mcp_enabled_engines():
+    for engine in ("openclaw", "teclaw", "claude_code", "hermes", "aicoding"):
+        assert ECB_KNOWLEDGE_MCP_SERVER_CODE in get_default_mcp_server_codes(engine)
+    assert ECB_KNOWLEDGE_MCP_SERVER_CODE not in get_default_mcp_server_codes("moltis")
 
 
 def test_unknown_engine_returns_empty():
@@ -523,6 +530,7 @@ TECLAW_DEFAULT_MCP_CODES = (
     "mcp.ant.arkai.dimamcpserver",
     "mcp.ant.homistudio.recordmcp",
     "mcp.ant.rpc.dcanttouch.adminservice",
+    "mcp.ant.ecb.ecb-knowledge-mcp-service",
     "hitl",
 )
 
