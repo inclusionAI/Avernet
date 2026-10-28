@@ -45,7 +45,9 @@ class RiskRepository(Protocol):
 
     Errors propagate; a false CAS result means the observation is stale or no
     longer current. Recovery pages use exclusive after_id and stable ID order.
-    The narrow tenant discovery operation is the sole cross-tenant lookup.
+    Cross-tenant reads are limited to tenant identifiers: an exact risk lookup
+    and environment-scoped recovery tenant discovery. Subsequent access must
+    enter the discovered tenant scope.
     """
     def find_risk_tenant(self, *, env: str, risk_check_id: str) -> str | None:
         ...
