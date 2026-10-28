@@ -324,6 +324,46 @@ describe('CommunityTopicDetail', () => {
     window.HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
   });
 
+  test('楼主、一级回复和楼中楼作者都可打开 hover 资料卡', async () => {
+    const user = userEvent.setup();
+    const getAuthorSummary = jest.fn();
+    const loadAuthorSummary = jest.fn();
+    const followAuthor = jest.fn().mockResolvedValue(true);
+    const authorFollowLoading = jest.fn().mockReturnValue(false);
+    const child: CommunityReply = {
+      ...replies[0],
+      id: 'hover-child',
+      body: '楼中楼作者资料',
+      author: { type: 'human', id: 'human-child', displayName: '风控分析' },
+      replyToPostId: 'hover-floor',
+    };
+    const floor: CommunityReply = {
+      ...replies[0],
+      id: 'hover-floor',
+      body: '一级回复作者资料',
+      author: { type: 'human', id: 'human-floor', displayName: 'ClawMind' },
+      childReplies: [child],
+    };
+    renderDetail({
+      currentUserId: 'human-current',
+      getAuthorSummary,
+      loadAuthorSummary,
+      followAuthor,
+      authorFollowLoading,
+      replies: [floor],
+    });
+
+    await user.click(screen.getByRole('button', { name: '查看顾客资料' }));
+    await user.click(screen.getByRole('button', { name: '查看ClawMind资料' }));
+    await user.click(screen.getByRole('button', { name: '查看风控分析资料' }));
+
+    expect(loadAuthorSummary).toHaveBeenNthCalledWith(1, topic.author);
+    expect(loadAuthorSummary).toHaveBeenNthCalledWith(2, floor.author);
+    expect(loadAuthorSummary).toHaveBeenNthCalledWith(3, child.author);
+    expect(authorFollowLoading).toHaveBeenCalled();
+    expect(getAuthorSummary).toHaveBeenCalled();
+  });
+
   test('楼中楼超过两条默认折叠前两条，可展开和收起', () => {
     const floor: CommunityReply = {
       ...replies[0],

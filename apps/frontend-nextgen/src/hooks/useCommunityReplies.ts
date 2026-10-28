@@ -1,6 +1,6 @@
 import { COMMUNITY_REPLY_PAGE_SIZE } from '@/domain/community/constants';
 import { communityErrorMessage } from '@/domain/community/errors';
-import type { CommunityReply, CommunityTopic } from '@/domain/community/types';
+import type { CommunityReply, CommunityReplyPage, CommunityTopic } from '@/domain/community/types';
 import { communityService } from '@/services/community';
 import { useCallback, useState } from 'react';
 
@@ -25,7 +25,7 @@ export function useCommunityReplies({
   }, []);
 
   const fetchReplies = useCallback(
-    async (topicId: string, page: number) => {
+    async (topicId: string, page: number): Promise<CommunityReplyPage> => {
       setReplyLoading(true);
       setReplyError(null);
       try {
@@ -36,8 +36,10 @@ export function useCommunityReplies({
         setReplies(result.items);
         setReplyTotal(result.total);
         setReplyPage(page);
+        return result;
       } catch (error) {
         setReplyError(communityErrorMessage(error, '回复加载失败'));
+        return { items: [], total: 0 };
       } finally {
         setReplyLoading(false);
       }
@@ -49,13 +51,13 @@ export function useCommunityReplies({
     setReplyTotal(0);
     setReplyPage(1);
     setReplyError(null);
-    await fetchReplies(topicId, 1);
+    return fetchReplies(topicId, 1);
   }, [fetchReplies]);
 
   const goToReplyPage = useCallback(
-    async (page: number) => {
-      if (!selectedTopic) return;
-      await fetchReplies(selectedTopic.id, page);
+    async (page: number): Promise<CommunityReplyPage> => {
+      if (!selectedTopic) return { items: [], total: 0 };
+      return fetchReplies(selectedTopic.id, page);
     },
     [fetchReplies, selectedTopic],
   );

@@ -3,13 +3,34 @@ import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
-import type { CommunityReply, CommunityTopic } from '@/domain/community/types';
+import type {
+  CommunityAuthor,
+  CommunityReply,
+  CommunityTopic,
+  ForumTargetRef,
+  InteractionStats,
+  InteractionSummary,
+} from '@/domain/community/types';
 import { ArrowLeft, CircleHelp, Share2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Floor } from './Floor';
 import { PollTypeIcon } from '../PollTypeIcon';
 import { PollPanel } from './PollPanel';
+import { TopicInteractionBar } from '../TopicInteractionBar';
 import { buildReplyGroups } from './model';
+
+const EMPTY_STATS: InteractionStats = {
+  viewCount: 0,
+  likeCount: 0,
+  favoriteCount: 0,
+  followCount: 0,
+  acceptCount: 0,
+  topicCount: 0,
+  replyCount: 0,
+  acceptedReplyCount: 0,
+  replyParticipantCount: 0,
+  helpfulReplyCount: 0,
+};
 
 export interface CommunityTopicDetailProps {
   topic: CommunityTopic | null;
@@ -19,6 +40,16 @@ export interface CommunityTopicDetailProps {
   closing: boolean;
   helpfulPostId: string | null;
   onBack: () => void;
+  currentUserId?: string;
+  targetSummary?: InteractionSummary;
+  getAuthorSummary?: (author: CommunityAuthor) => InteractionSummary | undefined;
+  loadAuthorSummary?: (author: CommunityAuthor) => void;
+  followAuthor?: (author: CommunityAuthor) => Promise<boolean>;
+  authorFollowLoading?: (author: CommunityAuthor) => boolean;
+  likePending?: boolean;
+  favoritePending?: boolean;
+  onLike?: (target: ForumTargetRef) => void;
+  onFavorite?: (target: ForumTargetRef) => void;
   onCloseTopic: () => Promise<boolean>;
   onSetPostHelpful: (postId: string, helpful: boolean) => Promise<boolean>;
   // 回帖分页
@@ -38,6 +69,16 @@ export function CommunityTopicDetail({
   closing,
   helpfulPostId,
   onBack,
+  currentUserId,
+  targetSummary,
+  getAuthorSummary,
+  loadAuthorSummary,
+  followAuthor,
+  authorFollowLoading,
+  likePending,
+  favoritePending,
+  onLike,
+  onFavorite,
   onCloseTopic,
   onSetPostHelpful,
   replyLoading,
@@ -75,6 +116,19 @@ export function CommunityTopicDetail({
   const toggleThreadReplies = useCallback((postId: string) => {
     setExpandedReplyIds((previous) => ({ ...previous, [postId]: !previous[postId] }));
   }, []);
+
+  const getSummaryFor = useCallback(
+    (author: CommunityAuthor) => getAuthorSummary?.(author),
+    [getAuthorSummary],
+  );
+  const loadSummaryFor = useCallback(
+    (author: CommunityAuthor) => loadAuthorSummary?.(author),
+    [loadAuthorSummary],
+  );
+  const followFor = useCallback(
+    (author: CommunityAuthor) => followAuthor?.(author) ?? Promise.resolve(false),
+    [followAuthor],
+  );
 
   // 楼中楼是楼层页面内的局部展开状态；翻页后必须回到默认展示前 2 条。
   useEffect(() => {
@@ -198,6 +252,11 @@ export function CommunityTopicDetail({
                   expanded={false}
                   onToggleThreadReplies={() => undefined}
                   registerElement={registerReplyElement}
+                  currentUserId={currentUserId}
+                  getAuthorSummary={getSummaryFor}
+                  loadAuthorSummary={loadSummaryFor}
+                  followAuthor={followFor}
+                  authorFollowLoading={authorFollowLoading}
                 />
               )}
               {topic.topicType === 'help' && topic.topicConfig?.help?.expectedTime ? (
@@ -215,6 +274,25 @@ export function CommunityTopicDetail({
                 status={topic.status}
                 poll={topic.topicConfig?.poll}
                 pollStats={topic.analysis?.pollStats}
+              />
+              <TopicInteractionBar
+                topicId={topic.id}
+                topicStats={targetSummary ? {
+                  viewCount: targetSummary.viewCount,
+                  likeCount: targetSummary.likeCount,
+                  favoriteCount: targetSummary.favoriteCount,
+                  followCount: targetSummary.followCount,
+                  acceptCount: targetSummary.acceptCount,
+                  topicCount: targetSummary.topicCount,
+                  replyCount: targetSummary.replyCount,
+                  acceptedReplyCount: targetSummary.acceptedReplyCount,
+                  replyParticipantCount: targetSummary.replyParticipantCount,
+                  helpfulReplyCount: targetSummary.helpfulReplyCount,
+                } : EMPTY_STATS}
+                likePending={likePending === true}
+                favoritePending={favoritePending === true}
+                onLike={(target) => onLike?.(target)}
+                onFavorite={(target) => onFavorite?.(target)}
               />
               {floorGroups.map(({ reply, floorNo, children }) => (
                 <Floor
@@ -237,6 +315,11 @@ export function CommunityTopicDetail({
                   onToggleThreadReplies={() => toggleThreadReplies(reply.id)}
                   onLocateTarget={locateTargetReply}
                   registerElement={registerReplyElement}
+                  currentUserId={currentUserId}
+                  getAuthorSummary={getSummaryFor}
+                  loadAuthorSummary={loadSummaryFor}
+                  followAuthor={followFor}
+                  authorFollowLoading={authorFollowLoading}
                 />
               ))}
               {!replies.length && !replyLoading && <p className="py-6 text-center text-sm text-muted-foreground">暂时还没有回复</p>}

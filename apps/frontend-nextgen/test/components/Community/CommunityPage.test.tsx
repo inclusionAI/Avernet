@@ -93,7 +93,7 @@ describe('CommunityPage 滚动容器结构', () => {
     expect(topicTypeGroup.compareDocumentPosition(scopeGroup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(scopeGroup.compareDocumentPosition(searchInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(searchInput.compareDocumentPosition(personalCenterButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(personalCenterButton).toBeDisabled();
+    expect(personalCenterButton).toBeEnabled();
     expect(
       personalCenterButton.compareDocumentPosition(publishButton) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();

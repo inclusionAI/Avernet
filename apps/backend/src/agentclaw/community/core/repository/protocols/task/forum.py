@@ -79,6 +79,22 @@ class ForumRepositoryProtocol(Protocol):
         """
 
     @abstractmethod
+    def update_post_helpful_with_accept(
+        self,
+        *,
+        topic_id: str,
+        post_id: str,
+        helpful: bool,
+        actor_type: str,
+        actor_id: str,
+    ) -> Optional[ForumPostRecord]:
+        """Update helpful and append the ACCEPT event in one transaction.
+
+        The method must not emit an ACCEPT when the marker was already true or
+        is being cleared. Infrastructure failure rolls back the marker update.
+        """
+
+    @abstractmethod
     def create_topic(
         self,
         *,

@@ -1,12 +1,24 @@
 import { notifyError, notifySuccess } from '@/components/ui/notify';
 import { enrichOwnership } from '@/domain/community/ownership';
 import { communityErrorMessage } from '@/domain/community/errors';
-import { COMMUNITY_PAGE_SIZE } from '@/domain/community/constants';
-import type { CommunityAuthor, CommunityTopic, CreateCommunityTopicDraft } from '@/domain/community/types';
+import {
+  COMMUNITY_PAGE_SIZE,
+  MAX_INTERACTION_SUMMARY_BATCH,
+} from '@/domain/community/constants';
+import type {
+  CommunityAuthor,
+  CommunityReply,
+  CommunityTopic,
+  CreateCommunityTopicDraft,
+  ForumActorRef,
+  ForumTargetRef,
+  InteractionSummaryQuery,
+} from '@/domain/community/types';
 import { communityService } from '@/services/community';
 import { useCommunityStore } from '@/stores/communityStore';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useBotAuthorEnricher } from './useBotAuthorEnricher';
+import { interactionQueryKey, useCommunityInteractions } from './useCommunityInteractions';
 import { useCommunityReplies } from './useCommunityReplies';
 import { useHumanIdentity } from './useHumanIdentity';
 
@@ -18,6 +30,11 @@ export function useCommunity() {
   const currentUserId = identity?.userId.trim() ?? '';
   // BOT 作者名兜底：后端 §4.1 不返 BOT作者 display_name 时，用本人 owned bots 的 bot_name 兜底。
   const { enrichTopicBotAuthor, botNameById } = useBotAuthorEnricher(currentUserId);
+  const interactionViewer: ForumActorRef = {
+    actorType: 'HUMAN',
+    id: currentUserId || 'current-user',
+  };
+  const interactions = useCommunityInteractions({ viewer: interactionViewer });
 
   const [publishing, setPublishing] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -27,6 +44,42 @@ export function useCommunity() {
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const requestRef = useRef(0);
 
+  const forumAuthorRef = useCallback((author: CommunityAuthor): ForumActorRef => ({
+    actorType: author.type === 'bot' ? 'BOT' : 'HUMAN',
+    id: author.id,
+  }), []);
+
+  const visiblePosts = useCallback((replies: CommunityReply[]): CommunityReply[] => {
+    const result: CommunityReply[] = [];
+    replies.forEach((reply) => {
+      result.push(reply);
+      result.push(...(reply.childReplies ?? []));
+    });
+    return result;
+  }, []);
+
+  const summaryQueries = useCallback(
+    (topic: CommunityTopic, replies: CommunityReply[]) => {
+      const queries = new Map<string, InteractionSummaryQuery>();
+      const add = (query: InteractionSummaryQuery) => {
+        queries.set(interactionQueryKey(query), query);
+      };
+      const topicTarget: ForumTargetRef = { targetType: 'TOPIC', id: topic.id };
+      add({ target: topicTarget });
+      add({ actor: interactionViewer, target: topicTarget });
+      const authors = [topic.author, ...visiblePosts(replies).map((reply) => reply.author)];
+      const uniqueAuthors = new Map<string, CommunityAuthor>();
+      authors.forEach((author) => {
+        uniqueAuthors.set(`${author.type}:${author.id}`, author);
+      });
+      uniqueAuthors.forEach((author) => add({ actor: forumAuthorRef(author) }));
+      visiblePosts(replies).forEach((reply) => {
+        add({ target: { targetType: 'POST', id: reply.id } });
+      });
+      return [...queries.values()].slice(0, MAX_INTERACTION_SUMMARY_BATCH);
+    },
+    [forumAuthorRef, interactionViewer, visiblePosts],
+  );
   const fetchTopicWithViewer = useCallback(
     async (topicId: string) => {
       const options = currentUserId
@@ -43,7 +96,12 @@ export function useCommunity() {
     selectedTopic: store.selectedTopic,
     setReplies: store.setReplies,
   });
-  const { resetReplies, openFirstReplyPage, goToReplyPage, replyPage } = replies;
+  const {
+    resetReplies,
+    openFirstReplyPage,
+    goToReplyPage: baseGoToReplyPage,
+    replyPage,
+  } = replies;
 
   const load = useCallback(async () => {
     const requestId = ++requestRef.current;
@@ -139,6 +197,27 @@ export function useCommunity() {
     store.topics.length,
   ]);
 
+  const loadTopicAndReplies = useCallback(
+    async (topicId: string) => {
+      const loadedTopic = await fetchTopicWithViewer(topicId);
+      const replyPage = await openFirstReplyPage(topicId);
+      const target: ForumTargetRef = { targetType: 'TOPIC', id: topicId };
+      if (currentUserId) {
+        await interactions.recordInteraction('VIEW', target, { refresh: false });
+      }
+      await interactions.refreshSummaries(summaryQueries(loadedTopic, replyPage.items), {
+        force: true,
+      });
+    },
+    [
+      currentUserId,
+      fetchTopicWithViewer,
+      interactions,
+      openFirstReplyPage,
+      summaryQueries,
+    ],
+  );
+
   const openTopic = useCallback(
     async (topic: CommunityTopic) => {
       const owned = enrichOwnership(topic, currentUserId);
@@ -147,8 +226,7 @@ export function useCommunity() {
       store.setDetailError(null);
       resetReplies();
       try {
-        await fetchTopicWithViewer(topic.id);
-        await openFirstReplyPage(topic.id);
+        await loadTopicAndReplies(topic.id);
       } catch (error) {
         store.setDetailError(communityErrorMessage(error, '主题详情加载失败'));
       } finally {
@@ -157,13 +235,58 @@ export function useCommunity() {
     },
     [
       currentUserId,
-      fetchTopicWithViewer,
-      openFirstReplyPage,
+      loadTopicAndReplies,
       resetReplies,
       store.setDetailError,
       store.setDetailLoading,
       store.setSelectedTopic,
     ],
+  );
+
+  const openTopicById = useCallback(
+    async (topicId: string) => {
+      store.setDetailLoading(true);
+      store.setDetailError(null);
+      resetReplies();
+      try {
+        await loadTopicAndReplies(topicId);
+      } catch (error) {
+        store.setDetailError(communityErrorMessage(error, '主题详情加载失败'));
+      } finally {
+        store.setDetailLoading(false);
+      }
+    },
+    [
+      loadTopicAndReplies,
+      resetReplies,
+      store.setDetailError,
+      store.setDetailLoading,
+    ],
+  );
+
+  const goToReplyPage = useCallback(
+    async (page: number) => {
+      const selected = store.selectedTopic;
+      if (!selected) return;
+      const replyPage = await baseGoToReplyPage(page);
+      await interactions.refreshSummaries(summaryQueries(selected, replyPage.items), {
+        force: true,
+      });
+    },
+    [baseGoToReplyPage, interactions, store.selectedTopic, summaryQueries],
+  );
+
+  const getAuthorSummary = useCallback(
+    (author: CommunityAuthor) =>
+      interactions.getSummary({ actor: forumAuthorRef(author) }),
+    [forumAuthorRef, interactions],
+  );
+
+  const loadAuthorSummary = useCallback(
+    (author: CommunityAuthor) => {
+      void interactions.refreshSummaries([{ actor: forumAuthorRef(author) }]);
+    },
+    [forumAuthorRef, interactions],
   );
 
   const closeDetail = useCallback(() => store.setSelectedTopic(null), [store.setSelectedTopic]);
@@ -228,6 +351,45 @@ export function useCommunity() {
     }
   }, [store.markTopicClosed, store.selectedTopic]);
 
+  const likeTopic = useCallback(
+    (target: ForumTargetRef) => interactions.recordInteraction('LIKE', target),
+    [interactions],
+  );
+  const favoriteTopic = useCallback(
+    (target: ForumTargetRef) => interactions.recordInteraction('FAVORITE', target),
+    [interactions],
+  );
+  const authorFollowPending = useCallback(
+    (author: CommunityAuthor) => {
+      const targetType = author.type === 'bot' ? 'BOT' : 'HUMAN';
+      return interactions.isActionPending('FOLLOW', {
+        targetType,
+        id: author.id,
+      });
+    },
+    [interactions],
+  );
+  const followAuthor = useCallback(
+    async (author: CommunityAuthor) => {
+      const success = await interactions.recordInteraction('FOLLOW', {
+        targetType: author.type === 'bot' ? 'BOT' : 'HUMAN',
+        id: author.id,
+      });
+      if (success) {
+        await interactions.refreshSummaries([{ actor: forumAuthorRef(author) }], {
+          force: true,
+        });
+      }
+      return success;
+    },
+    [forumAuthorRef, interactions],
+  );
+  const targetSummary = useCallback(
+    (topic: CommunityTopic | null) =>
+      topic ? interactions.getSummary({ target: { targetType: 'TOPIC', id: topic.id } }) : undefined,
+    [interactions],
+  );
+
   const setPostHelpful = useCallback(
     async (postId: string, helpful: boolean) => {
       const topic = store.selectedTopic;
@@ -264,6 +426,7 @@ export function useCommunity() {
     loadingMore,
     loadMoreError,
     openTopic,
+    openTopicById,
     closeDetail,
     publishTopic,
     closeTopic,
@@ -271,5 +434,14 @@ export function useCommunity() {
     publishing,
     closing,
     helpfulPostId,
+    interactions,
+    targetSummary,
+    getAuthorSummary,
+    loadAuthorSummary,
+    followAuthor,
+    authorFollowPending,
+    likeTopic,
+    favoriteTopic,
+    goToReplyPage,
   };
 }

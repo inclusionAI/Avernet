@@ -11,14 +11,27 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Page,
     PageParamsDep,
 )
-from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     created,
     envelope,
     envelope_errors,
     page as page_envelope,
 )
-from agentclaw.community.core.errors import Forbidden
+from agentclaw.community.core.errors import Forbidden, ValidationError
+
+from agentclaw.community.adapters.http.openapi_v1.dependencies import (
+    Principal,
+    require_principal,
+)
+from agentclaw.community.api.task.forum_interaction_service import (
+    ForumInteractionServiceProtocol,
+)
+from agentclaw.community.api.task.forum_personal_center_activity_service import (
+    ForumPersonalCenterActivityServiceProtocol,
+)
+from agentclaw.community.core.task.forum.interaction.models import (
+    PersonalCenterActivityQuery,
+)
 from agentclaw.community.core.task.forum.models import (
     MAX_AUTHOR_ID_LENGTH,
     MAX_AUTHOR_TYPE_LENGTH,
@@ -29,6 +42,23 @@ from agentclaw.community.di import Injected
 from agentclaw.community.adapters.http.task.bbs.author_enricher import (
     enrich_bot_display_name,
     enrich_bot_display_names,
+)
+
+from .interaction_schemas import (
+    CreateInteractionRequest,
+    InteractionRecorded,
+    InteractionSummaryBatchRequest,
+    InteractionSummaryItemRequest,
+    InteractionSummaryBatchResponse,
+    InteractionSummaryResponse,
+    domain_summary_query,
+)
+from .personal_center_schemas import (
+    PersonalCenterActivityItem,
+    PersonalCenterActivityPage,
+    PersonalCenterActivityTypeWire,
+    PersonalCenterActorScopeWire,
+    PersonalCenterTargetTypeWire,
 )
 
 from .schemas import (
@@ -66,6 +96,7 @@ TopicIdPath = Annotated[
     ),
 ]
 
+
 @read_router.get(
     "/topics",
     response_model=Envelope[Page[TopicListItem]],
@@ -95,7 +126,7 @@ async def list_topics(
         max_length=256,
         description="Optional author filter: return only Topics authored by "
         "this identifier (HUMAN work-no or BOT id). Use for the per-user "
-        "\'my topics\' view, server-side paginated.",
+        "'my topics' view, server-side paginated.",
     ),
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
 ) -> Envelope[Page[TopicListItem]]:
@@ -305,7 +336,10 @@ async def close_topic_unified(
     topic = service.get_topic(topic_id=topic_id)
     declared_author_type = body.author_type.strip().upper()
     declared_author_id = body.author_id.strip()
-    if topic.author_type != declared_author_type or topic.author_id != declared_author_id:
+    if (
+        topic.author_type != declared_author_type
+        or topic.author_id != declared_author_id
+    ):
         raise Forbidden("only the topic author may close the topic")
     closed = service.close_topic(topic_id=topic_id)
     return envelope(
@@ -355,6 +389,143 @@ async def list_bbs_browse_subscriptions(
         request,
     )
 
+
+@read_router.post(
+    "/interactions",
+    response_model=Envelope[InteractionRecorded],
+    dependencies=[Depends(require_principal)],
+)
+@envelope_errors
+async def create_interaction(
+    body: CreateInteractionRequest,
+    request: Request,
+    response: Response,
+    service: ForumInteractionServiceProtocol = Injected(
+        ForumInteractionServiceProtocol
+    ),
+) -> Envelope[InteractionRecorded]:
+    """Append one valid BBS interaction event in the current environment."""
+    result = service.record_interaction(
+        actor_type=body.actor_type,
+        actor_id=body.actor_id,
+        action_type=body.action_type,
+        target_type=body.target_type,
+        target_id=body.target_id,
+    )
+    response.status_code = 201
+    return created(InteractionRecorded.from_record(result), request)
+
+
+_SUMMARY_QUERY_KEYS = frozenset(
+    {
+        "actor_type",
+        "actor_id",
+        "target_type",
+        "target_id",
+    }
+)
+
+
+@read_router.get(
+    "/interactions/summary",
+    response_model=Envelope[InteractionSummaryResponse],
+    dependencies=[Depends(require_principal)],
+)
+@envelope_errors
+async def get_interaction_summary(
+    request: Request,
+    actor_type: str | None = Query(default=None, max_length=16),
+    actor_id: str | None = Query(default=None, max_length=256),
+    target_type: str | None = Query(default=None, max_length=16),
+    target_id: str | None = Query(default=None, max_length=256),
+    service: ForumInteractionServiceProtocol = Injected(
+        ForumInteractionServiceProtocol
+    ),
+) -> Envelope[InteractionSummaryResponse]:
+    """Read one actor, target, or actor-target summary."""
+    _reject_unknown_query_keys(request, _SUMMARY_QUERY_KEYS)
+    result = service.get_summary(
+        domain_summary_query(
+            InteractionSummaryItemRequest(
+                actor_type=actor_type,  # type: ignore[arg-type]
+                actor_id=actor_id,
+                target_type=target_type,  # type: ignore[arg-type]
+                target_id=target_id,
+            )
+        )
+    )
+    return envelope(InteractionSummaryResponse.from_result(result), request)
+
+
+@read_router.post(
+    "/interactions/summary/batch",
+    response_model=Envelope[InteractionSummaryBatchResponse],
+    dependencies=[Depends(require_principal)],
+)
+@envelope_errors
+async def get_interaction_summary_batch(
+    body: InteractionSummaryBatchRequest,
+    request: Request,
+    service: ForumInteractionServiceProtocol = Injected(
+        ForumInteractionServiceProtocol
+    ),
+) -> Envelope[InteractionSummaryBatchResponse]:
+    """Read at most 100 mixed summary dimensions; this operation is read-only."""
+    result = service.get_summary_batch(
+        tuple(domain_summary_query(item) for item in body.items)
+    )
+    return envelope(
+        InteractionSummaryBatchResponse(
+            items=[InteractionSummaryResponse.from_result(item) for item in result]
+        ),
+        request,
+    )
+
+
+@read_router.get(
+    "/personal-center/activities",
+    response_model=Envelope[PersonalCenterActivityPage],
+    dependencies=[Depends(require_principal)],
+)
+@envelope_errors
+async def get_personal_center_activities(
+    request: Request,
+    page_params: PageParamsDep,
+    owner_user_id: str = Query(min_length=1, max_length=256),
+    actor_scope: PersonalCenterActorScopeWire = Query(default="ALL"),
+    activity_type: PersonalCenterActivityTypeWire = Query(default="ALL"),
+    target_type: PersonalCenterTargetTypeWire = Query(default="ALL"),
+    principal: Principal = Depends(require_principal),
+    service: ForumPersonalCenterActivityServiceProtocol = Injected(
+        ForumPersonalCenterActivityServiceProtocol
+    ),
+) -> Envelope[PersonalCenterActivityPage]:
+    """Return the current Human's server-paged BBS activity summary."""
+    if owner_user_id.strip() != principal.user_id:
+        raise Forbidden("owner_user_id must match the current human")
+    result = service.get_personal_center_activities(
+        PersonalCenterActivityQuery(
+            owner_user_id=owner_user_id,
+            actor_scope=actor_scope,
+            activity_type=activity_type,
+            target_type=target_type,  # type: ignore[arg-type]
+            page=page_params.page,
+            page_size=page_params.page_size,
+        )
+    )
+    return page_envelope(
+        result.total,
+        [PersonalCenterActivityItem.from_record(item) for item in result.items],
+        request,
+    )
+
+
+def _reject_unknown_query_keys(request: Request, allowed: frozenset[str]) -> None:
+    unexpected = set(request.query_params) - allowed
+    if unexpected:
+        raise ValidationError(
+            "unknown query parameter: " + ", ".join(sorted(unexpected))
+        )
 
 
 @read_router.post(

@@ -6,6 +6,7 @@ import { COMMUNITY_REPLY_PAGE_SIZE, useCommunity } from '@/hooks/useCommunity';
 import { history } from '@umijs/max';
 import { ArrowLeft, Plus, Search, UserRound } from 'lucide-react';
 import { useRef, useState } from 'react';
+import { CommunityPersonalCenter } from '../CommunityPersonalCenter';
 import { CommunityTopicDetail } from '../CommunityTopicDetail';
 import { CommunityTopicList } from '../CommunityTopicList';
 import { PublishTopicModal } from '../PublishTopicModal';
@@ -21,13 +22,25 @@ const topicTypeOptions: Array<{ value: CommunityTopicFilter; label: string }> = 
 export function CommunityPage() {
   const community = useCommunity();
   const [publishOpen, setPublishOpen] = useState(false);
+  const [showPersonalCenter, setShowPersonalCenter] = useState(false);
   const hasFilter =
     !!community.query.trim() || community.scope === 'mine' || community.topicType !== 'all';
   const scrollRootRef = useRef<HTMLElement>(null);
 
   if (community.selectedTopic) {
+    const topicTarget = { targetType: 'TOPIC' as const, id: community.selectedTopic.id };
     return (
       <CommunityTopicDetail
+        currentUserId={community.currentUserId}
+        targetSummary={community.targetSummary?.(community.selectedTopic)}
+        getAuthorSummary={community.getAuthorSummary}
+        loadAuthorSummary={community.loadAuthorSummary}
+        followAuthor={community.followAuthor}
+        authorFollowLoading={community.authorFollowPending}
+        likePending={community.interactions?.isActionPending('LIKE', topicTarget)}
+        favoritePending={community.interactions?.isActionPending('FAVORITE', topicTarget)}
+        onLike={(target) => community.likeTopic?.(target)}
+        onFavorite={(target) => community.favoriteTopic?.(target)}
         topic={community.selectedTopic}
         replies={community.replies}
         loading={community.detailLoading}
@@ -42,7 +55,19 @@ export function CommunityPage() {
         replyPage={community.replyPage}
         replyPageCount={community.replyPageCount}
         replyPageSize={COMMUNITY_REPLY_PAGE_SIZE}
-        onGoToReplyPage={(page) => void community.goToReplyPage(page)}
+        onGoToReplyPage={(page) => void community.goToReplyPage?.(page)}
+      />
+    );
+  }
+
+  if (showPersonalCenter) {
+    return (
+      <CommunityPersonalCenter
+        onBack={() => setShowPersonalCenter(false)}
+        onOpenTopic={(topicId) => {
+          setShowPersonalCenter(false);
+          void community.openTopicById?.(topicId);
+        }}
       />
     );
   }
@@ -112,7 +137,7 @@ export function CommunityPage() {
               className="ml-auto size-9 rounded-full sm:ml-0"
               aria-label="个人中心"
               title="个人中心"
-              disabled
+              onClick={() => setShowPersonalCenter(true)}
             >
               <UserRound className="size-4" aria-hidden />
             </Button>

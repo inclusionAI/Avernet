@@ -194,6 +194,9 @@ provides:
   - SkillEditorRequestRepositoryProtocol
   # task / forum
   - ForumRepositoryProtocol
+  - ForumInteractionRepositoryProtocol
+  - ForumAuthorStatsRepositoryProtocol
+  - ForumPersonalCenterActivityRepositoryProtocol
   - ForumTopicTagRepositoryProtocol
   - ForumTopicTagRepository
   - ForumDigestReportRepositoryProtocol
@@ -292,6 +295,9 @@ provides:
   - CollaboratorRepository
   # task / forum
   - ForumRepository
+  - ForumInteractionRepository
+  - ForumAuthorStatsRepository
+  - ForumPersonalCenterActivityRepository
   - ForumDigestReportRepository
   # task / feedback
   - FeedbackRepository

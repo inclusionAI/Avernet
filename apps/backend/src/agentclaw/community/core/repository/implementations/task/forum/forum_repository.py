@@ -36,6 +36,7 @@ from agentclaw.community.core.task.forum.models import (
 from agentclaw.community.core.task.forum.repository.models import (
     _helpful_from_post_config,
     _poll_selection_from_post_config,
+    ForumInteractionModel,
     ForumPostModel,
     ForumTopicModel,
 )
@@ -384,6 +385,62 @@ class ForumRepository(BrowseRepositoryMixin, ForumRepositoryProtocol):
                 return row.to_record()
             row.post_config = _helpful_post_config_to_row(helpful)
             row.gmt_modified = datetime.now(timezone.utc)
+            db.flush()
+            return row.to_record()
+
+    def update_post_helpful_with_accept(
+        self,
+        *,
+        topic_id: str,
+        post_id: str,
+        helpful: bool,
+        actor_type: str,
+        actor_id: str,
+    ) -> ForumPostRecord | None:
+        """Update a HELP marker and its ACCEPT event in one database transaction."""
+
+        with self._transaction() as db:
+            topic = (
+                db.query(ForumTopicModel)
+                .filter(
+                    ForumTopicModel.topic_id == topic_id,
+                    ForumTopicModel.env == get_current_env(),
+                    ForumTopicModel.avernet_tenant == get_current_avernet_tenant(),
+                )
+                .one_or_none()
+            )
+            if topic is None:
+                return None
+            row = (
+                db.query(ForumPostModel)
+                .filter(
+                    ForumPostModel.topic_id == topic_id,
+                    ForumPostModel.post_id == post_id,
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if row is None:
+                return None
+            previous_helpful = _helpful_from_post_config(row.post_config)
+            if previous_helpful == helpful:
+                return row.to_record()
+            now = datetime.now(timezone.utc)
+            row.post_config = _helpful_post_config_to_row(helpful)
+            row.gmt_modified = now
+            if helpful:
+                db.add(
+                    ForumInteractionModel(
+                        actor_type=actor_type,
+                        actor_id=actor_id,
+                        action_type="ACCEPT",
+                        target_type="POST",
+                        target_id=post_id,
+                        env=get_current_env(),
+                        gmt_create=now,
+                        gmt_modified=now,
+                    )
+                )
             db.flush()
             return row.to_record()
 

@@ -6,7 +6,12 @@ from typing import Any
 
 import pytest
 
-from agentclaw.community.core.errors import Conflict, Forbidden, NotFound, ValidationError
+from agentclaw.community.core.errors import (
+    Conflict,
+    Forbidden,
+    NotFound,
+    ValidationError,
+)
 from agentclaw.community.core.task.forum.models import (
     ForumPollConfig,
     ForumPollSelection,
@@ -73,6 +78,28 @@ class FakeForumRepository:
             {"operation": "get_post", "topic_id": topic_id, "post_id": post_id}
         )
         return self._default_post if self.post is None else self.post
+
+    def update_post_helpful_with_accept(
+        self,
+        *,
+        topic_id: str,
+        post_id: str,
+        helpful: bool,
+        actor_type: str,
+        actor_id: str,
+    ):
+        self.calls.append(
+            {
+                "operation": "update_post_helpful_with_accept",
+                "topic_id": topic_id,
+                "post_id": post_id,
+                "helpful": helpful,
+                "actor_type": actor_type,
+                "actor_id": actor_id,
+            }
+        )
+        post = self._default_post if self.post is None else self.post
+        return None if post is None else dataclasses.replace(post, helpful=helpful)
 
     def update_post_helpful(self, *, topic_id: str, post_id: str, helpful: bool):
         self.calls.append(
@@ -678,7 +705,9 @@ def test_get_topic_attaches_viewer_state_when_viewer_is_declared():
 def test_get_topic_requires_viewer_type_and_viewer_id_to_be_declared_together():
     repo = FakeForumRepository()
 
-    with pytest.raises(ValidationError, match="viewer_author_type and viewer_author_id"):
+    with pytest.raises(
+        ValidationError, match="viewer_author_type and viewer_author_id"
+    ):
         ForumService(repo).get_topic(
             topic_id="topic-1", viewer_author_type="HUMAN", viewer_author_id=None
         )
@@ -725,10 +754,12 @@ def test_set_post_helpful_allows_help_topic_author_and_normalizes_identity(
         {"operation": "get_topic", "topic_id": "topic-1"},
         {"operation": "get_post", "topic_id": "topic-1", "post_id": "post-1"},
         {
-            "operation": "update_post_helpful",
+            "operation": "update_post_helpful_with_accept",
             "topic_id": "topic-1",
             "post_id": "post-1",
             "helpful": True,
+            "actor_type": author_type,
+            "actor_id": author_id,
         },
     ]
 
@@ -874,7 +905,9 @@ def _close_test_repo(topic, *, writer_returns=_CLOSE_WRITER_UNSET):
     captured: list[dict] = []
 
     def update_topic_status(*, topic_id, status):
-        captured.append({"op": "update_topic_status", "topic_id": topic_id, "status": status})
+        captured.append(
+            {"op": "update_topic_status", "topic_id": topic_id, "status": status}
+        )
         if writer_returns is _CLOSE_WRITER_UNSET:
             if topic is None:
                 return None
@@ -883,7 +916,9 @@ def _close_test_repo(topic, *, writer_returns=_CLOSE_WRITER_UNSET):
 
     repo = FakeForumRepository()
     if topic is not None:
-        repo.get_topic = lambda topic_id=topic.topic_id: topic if topic_id == topic.topic_id else topic
+        repo.get_topic = lambda topic_id=topic.topic_id: (
+            topic if topic_id == topic.topic_id else topic
+        )
     else:
         repo.get_topic = lambda topic_id=None: topic
     repo.update_topic_status = update_topic_status  # type: ignore[assignment]
