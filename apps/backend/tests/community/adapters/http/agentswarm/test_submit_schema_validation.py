@@ -4,9 +4,9 @@ Wire contract enforced at the Pydantic boundary (D18 closed-set + input
 caps):
 
 * every inbound free-text field is length-capped — caps align with the
-  durable columns they land in (``name`` String(128), ``role`` String(256),
-  ``idempotency_key`` String(190) unique keys; ``goal``/``instructions``
-  are generous Text caps);
+  durable columns they land in (``name`` String(128), ``role`` MEDIUMTEXT
+  (20000), ``idempotency_key`` String(190) unique keys; ``goal``/
+  ``instructions`` are generous Text caps);
 * request DTOs are ``extra="forbid"`` — an unknown key (a typo'd
   ``idempotency_key``) must fail loudly with 422 instead of silently
   disabling dedup;
@@ -30,7 +30,7 @@ from agentclaw.community.core.agentswarm.domain.models import ProviderKind
 
 GOAL_MAX = 8000
 NAME_MAX = 128
-ROLE_MAX = 256
+ROLE_MAX = 20000
 INSTRUCTIONS_MAX = 20000
 IDEMPOTENCY_KEY_MAX = 190
 AGENTS_MAX = 64
