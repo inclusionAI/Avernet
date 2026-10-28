@@ -1,4 +1,4 @@
-import { readLimitedResponse } from '@/services/backendApi/readLimitedResponse';
+import { readLimitedResponse, ResponseTooLargeError } from '@/services/backendApi/readLimitedResponse';
 
 it('reads UTF-8 across transport chunks and closes the reader', async () => {
   const bytes = new TextEncoder().encode('知识库');
@@ -25,7 +25,7 @@ it('cancels an oversized chunked response before consuming the whole object', as
     },
     { highWaterMark: 0 },
   );
-  await expect(readLimitedResponse(new Response(stream), 2048)).rejects.toThrow('在线预览');
+  await expect(readLimitedResponse(new Response(stream), 2048)).rejects.toThrow(ResponseTooLargeError);
   expect(pulls).toBe(3);
   expect(cancel).toHaveBeenCalledTimes(1);
   expect(stream.locked).toBe(false);
@@ -35,8 +35,23 @@ it('rejects a declared oversized response without reading', async () => {
   const stream = new ReadableStream({ cancel }, { highWaterMark: 0 });
   await expect(
     readLimitedResponse(new Response(stream, { headers: { 'content-length': '5000' } }), 1024),
-  ).rejects.toThrow('在线预览');
+  ).rejects.toThrow(ResponseTooLargeError);
   expect(cancel).toHaveBeenCalledTimes(1);
+});
+it('reports a human-readable limit in the size error', async () => {
+  const readError = async (contentLength: string, limit: number) => {
+    const stream = new ReadableStream({ cancel: jest.fn() }, { highWaterMark: 0 });
+    return readLimitedResponse(new Response(stream, { headers: { 'content-length': contentLength } }), limit).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+  };
+  const kibError = await readError('5000', 1024);
+  expect(kibError).toBeInstanceOf(ResponseTooLargeError);
+  expect((kibError as Error).message).toContain('1 KiB');
+  const mibError = await readError(String(3 * 1024 * 1024), 2 * 1024 * 1024);
+  expect(mibError).toBeInstanceOf(ResponseTooLargeError);
+  expect((mibError as Error).message).toContain('2.0 MiB');
 });
 it('propagates network failures and releases the stream', async () => {
   const stream = new ReadableStream({

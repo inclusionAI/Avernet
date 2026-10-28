@@ -25,7 +25,11 @@ No new server message fields or platform-specific commands are defined here.
 
 `BackendRequestOptions.maxResponseBytes` bounds streamed preview reads and cancels
 the reader when finished or oversized. Existing requests remain unlimited unless
-explicitly opted in; JSON authentication and error handling are preserved.
+explicitly opted in. Bounded reads keep `responseType` semantics for caller-facing
+data (text previews stay raw text) while JSON authentication and error envelopes
+are still parsed for inspection; HTTP status handling (e.g. a 401 login prompt)
+wins over the size limit, and combining the limit with `responseType: 'blob'` is
+rejected.
 
 A navigation item can set `placement: 'last'` to follow ordinary items within its
 section. Items without it retain existing ordering.
