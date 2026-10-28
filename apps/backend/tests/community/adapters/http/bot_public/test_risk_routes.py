@@ -115,7 +115,8 @@ def client_for(user="u1"):
         def configure(self, binder):
             binder.bind(BotRepository, to=Bots())
             binder.bind(CollaboratorServiceProtocol, to=Collaborators())
-            binder.bind(BotPublicRiskRepository, to=repo)
+            from injector import InstanceProvider
+            binder.bind(RiskRepository, to=InstanceProvider(repo))
             binder.bind(BotPublicRiskQueryProtocol, to=RiskQuery(repo))
             binder.bind(BotPublicRiskServiceProtocol, to=app_service)
 
