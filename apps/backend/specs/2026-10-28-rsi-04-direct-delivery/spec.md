@@ -127,7 +127,10 @@ latest published version (ADR 0002), and a new Center version is not drift.
       promotion is `pending` or `applying` and `active` still points where
       the promotion expected; for a settled promotion it refuses
       (`CompileRefused`), so a retried or redelivered apply task never
-      re-applies a finished promotion.
+      re-applies a finished promotion. The only compiler of a promotion is
+      that promotion's own apply task: once on its first run (the worker may
+      start before the row turns `applying`, hence `pending` too) and again
+      on each re-run after a crash.
 - [ ] An automated actor's delivery apply runs with the bot owner as its
       principal (`actor_id` = owner id) and the actor's audit label
       (`audit_actor`); a user's runs as that user.
