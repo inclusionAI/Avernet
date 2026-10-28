@@ -1318,12 +1318,14 @@ async def unreachable_redeliver(ctx) -> None:
 
 
 class FakeSharedSkills(SharedSkillPort):
-    """``SharedSkillPort`` over two dicts: Center name → skill ids visible to the bot, repo path → skill id.
+    """``SharedSkillPort`` over two dicts: Center name → skill ids visible to the bot, repo path → (id, name).
 
     A name with several ids is ambiguous; a missing one is not found — the real lookup's three answers.
     """
 
-    def __init__(self, center: dict[str, list[str]] | None = None, repo: dict[str, str] | None = None) -> None:
+    def __init__(
+        self, center: dict[str, list[str]] | None = None, repo: dict[str, tuple[str, str]] | None = None
+    ) -> None:
         self.center = dict(center or {})
         self.repo = dict(repo or {})
         self.asked: list[tuple[str, str, str]] = []
@@ -1339,13 +1341,16 @@ class FakeSharedSkills(SharedSkillPort):
             raise SharedSkillAmbiguous(f"{len(ids)} Skill Center skills named {name!r} are available to this bot")
         return ids[0]
 
-    def find_repo_skill(self, *, bot_id: str, owner_id: str, actor_id: str, path: str) -> str:
+    def find_repo_skill(self, *, bot_id: str, owner_id: str, actor_id: str, name: str, path: str) -> str:
         from agentclaw.community.core.ports.shared_skill_port import SharedSkillNotFound
 
         self.asked.append(("repo", path, actor_id))
         if path not in self.repo:
             raise SharedSkillNotFound(f"no shared-repository skill at {path!r} is available to this bot")
-        return self.repo[path]
+        skill_id, found = self.repo[path]
+        if found != name:
+            raise SharedSkillNotFound(f"the shared-repository skill at {path!r} is named {found!r}, not {name!r}")
+        return skill_id
 
 
 def device_port_bundle(

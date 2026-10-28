@@ -312,13 +312,17 @@ class SkillQueryService(SkillQueryServiceProtocol, SharedSkillPort):
             raise SharedSkillAmbiguous(f"{len(visible)} Skill Center skills named {name!r} are available to this bot")
         return visible[0]
 
-    def find_repo_skill(self, *, bot_id: str, owner_id: str, actor_id: str, path: str) -> str:
+    def find_repo_skill(self, *, bot_id: str, owner_id: str, actor_id: str, name: str, path: str) -> str:
         """The shared-repository asset at ``git://<path>``, by id, when this bot and actor may use it."""
         skill = self._skill_repo.get_by_git_path(f"git://{path}")
         if skill is None or not self._usable(
             skill_id=str(skill["id"]), bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
         ):
             raise SharedSkillNotFound(f"no shared-repository skill at {path!r} is available to this bot")
+        if skill.get("name") != name:
+            raise SharedSkillNotFound(
+                f"the shared-repository skill at {path!r} is named {skill.get('name')!r}, not {name!r}"
+            )
         return str(skill["id"])
 
     def _usable(self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str) -> bool:

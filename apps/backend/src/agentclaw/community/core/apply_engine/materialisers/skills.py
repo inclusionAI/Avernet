@@ -161,7 +161,7 @@ class SkillsMaterialiser(Materialiser):
                 who = dict(bot_id=ctx.bot_id, owner_id=ctx.entity_id, actor_id=ctx.actor_id)
                 try:
                     if isinstance(entry.source, RepoSkillPath):
-                        skill_id = self._shared.find_repo_skill(**who, path=entry.source.path)
+                        skill_id = self._shared.find_repo_skill(**who, name=name, path=entry.source.path)
                     else:
                         skill_id = self._shared.find_center_skill(**who, name=name)
                 except (SharedSkillNotFound, SharedSkillAmbiguous) as exc:
@@ -262,6 +262,8 @@ class SkillsMaterialiser(Materialiser):
                     actor_id=ctx.actor_id,
                     apply_id=ctx.apply_id,
                 )
+                # A returned claim is a committed write too, a shared asset's included.
+                confirmed_write = True
                 results.append(
                     EntryResult(
                         self.construct,

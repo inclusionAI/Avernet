@@ -42,6 +42,10 @@ class SharedSkillPort(Protocol):
         ...
 
     @abstractmethod
-    def find_repo_skill(self, *, bot_id: str, owner_id: str, actor_id: str, path: str) -> str:
-        """The id of the shared-repository skill at ``git://<path>``; ``SharedSkillNotFound`` when there is none."""
+    def find_repo_skill(self, *, bot_id: str, owner_id: str, actor_id: str, name: str, path: str) -> str:
+        """The id of the shared-repository skill at ``git://<path>``, whose runtime name must be ``name``.
+
+        Raises ``SharedSkillNotFound`` when there is none, or when the skill there is named otherwise: the
+        entry, the report and the runtime name must agree, as for a local package.
+        """
         ...

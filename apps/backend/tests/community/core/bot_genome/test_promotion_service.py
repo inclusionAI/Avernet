@@ -301,3 +301,29 @@ async def test_a_request_that_died_before_starting_its_delivery_is_failed_by_the
     finally:
         service_module._now = original
     assert world.promotion.get_promotion(BOT, stranded.id).status == PromotionStatus.APPLY_FAILED
+
+
+@pytest.mark.asyncio
+async def test_a_stranded_promotion_whose_apply_still_holds_the_bot_is_left_to_that_apply(world: World) -> None:
+    """A request that died after starting its apply but before recording the apply id leaves a `pending` row
+    whose apply still holds the bot's lock. The next promotion is refused busy and leaves that row alone;
+    the apply's own end settles it."""
+    r1, r2 = await _two_revisions(world)
+    world.applier.fail = KeyboardInterrupt()
+    with pytest.raises(KeyboardInterrupt):
+        await world.promotion.promote(BOT, revision=r1, ref="active", expected_revision=None, actor=OWNER, reason="x")
+    [stranded] = world.promotion.list_promotions(BOT).items
+    world.applier.fail = ApplyBusy("its apply still holds bot b")
+    import agentclaw.community.core.bot_genome.promotion.service as service_module
+
+    later = service_module._now() + timedelta(seconds=service_module.STALE_PENDING_SECONDS + 1)
+    original = service_module._now
+    service_module._now = lambda: later
+    try:
+        with pytest.raises(ApplyBusy):
+            await world.promotion.promote(
+                BOT, revision=r2, ref="active", expected_revision=None, actor=OWNER, reason="y"
+            )
+    finally:
+        service_module._now = original
+    assert world.promotion.get_promotion(BOT, stranded.id).status == PromotionStatus.PENDING

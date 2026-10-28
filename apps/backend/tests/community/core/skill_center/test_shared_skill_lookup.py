@@ -81,8 +81,14 @@ def test_several_visible_center_skills_of_one_name_are_ambiguous() -> None:
 
 def test_a_repo_skill_is_found_by_its_git_path_when_the_bot_may_use_it() -> None:
     repo = {"git://team/weather": {"id": "4", "name": "weather"}}
-    assert _service(repo=repo, visible={"4"}).find_repo_skill(**_WHO, path="team/weather") == "4"
+    assert _service(repo=repo, visible={"4"}).find_repo_skill(**_WHO, name="weather", path="team/weather") == "4"
     with pytest.raises(SharedSkillNotFound, match="team/weather"):
-        _service(repo=repo).find_repo_skill(**_WHO, path="team/weather")
+        _service(repo=repo).find_repo_skill(**_WHO, name="weather", path="team/weather")
     with pytest.raises(SharedSkillNotFound):
-        _service(repo=repo, visible={"4"}).find_repo_skill(**_WHO, path="team/other")
+        _service(repo=repo, visible={"4"}).find_repo_skill(**_WHO, name="weather", path="team/other")
+
+
+def test_a_repo_skill_whose_runtime_name_differs_from_the_entry_is_refused() -> None:
+    repo = {"git://team/weather": {"id": "4", "name": "weather"}}
+    with pytest.raises(SharedSkillNotFound, match="is named 'weather', not 'forecast'"):
+        _service(repo=repo, visible={"4"}).find_repo_skill(**_WHO, name="forecast", path="team/weather")

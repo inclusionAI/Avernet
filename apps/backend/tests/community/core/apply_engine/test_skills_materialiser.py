@@ -510,7 +510,7 @@ def test_a_declared_name_matching_a_non_local_active_skill_becomes_local_direct(
 def test_a_center_and_a_repo_skill_are_claimed_as_the_shared_asset_itself():
     """A revision's Center skill (by name) and repository skill (by path) are found through the lookup and the
     shared asset becomes the Direct claim: nothing is uploaded or copied, and an active one reports ``updated``."""
-    shared = FakeSharedSkills(center={"triage": ["41"]}, repo={"team/weather": "42"})
+    shared = FakeSharedSkills(center={"triage": ["41"]}, repo={"team/weather": ("42", "weather")})
     materialiser, uploads, activation, _, _, _ = skill_rig(
         assets=[skill_asset(41, "triage", git_path="center://triage")], shared_skills=shared
     )
@@ -529,7 +529,7 @@ def test_a_center_and_a_repo_skill_are_claimed_as_the_shared_asset_itself():
 
 
 def test_a_shared_skill_that_cannot_be_found_fails_its_entry_and_writes_nothing():
-    shared = FakeSharedSkills(center={"twice": ["1", "2"]})
+    shared = FakeSharedSkills(center={"twice": ["1", "2"]}, repo={"team/storm": ("43", "storm")})
     materialiser, uploads, activation, _, _, _ = skill_rig(shared_skills=shared)
     raw = materialiser.materialiser
     resolved = _run(
@@ -539,6 +539,7 @@ def test_a_shared_skill_that_cannot_be_found_fails_its_entry_and_writes_nothing(
                 DesiredSkill("missing", CenterSkillByName()),
                 DesiredSkill("twice", CenterSkillByName()),
                 DesiredSkill("weather", RepoSkillPath("team/weather")),
+                DesiredSkill("rain", RepoSkillPath("team/storm")),
             ],
         )
     )
@@ -546,8 +547,33 @@ def test_a_shared_skill_that_cannot_be_found_fails_its_entry_and_writes_nothing(
         ("missing", "no Skill Center skill named 'missing' is available to this bot"),
         ("twice", "2 Skill Center skills named 'twice' are available to this bot"),
         ("weather", "no shared-repository skill at 'team/weather' is available to this bot"),
+        ("rain", "the shared-repository skill at 'team/storm' is named 'storm', not 'rain'"),
     ]
     assert uploads.uploads == [] and activation.writes == 0
+
+
+def test_a_claimed_shared_skill_is_a_durable_write_when_a_later_claim_fails():
+    """A shared asset's claim commits on its own: a later failure is a partial write, not a clean failure."""
+    shared = FakeSharedSkills(center={"triage": ["41"], "summary": ["44"]})
+    materialiser, _, activation, _, _, _ = skill_rig(shared_skills=shared)
+    raw = materialiser.materialiser
+    ctx = _ctx()
+    resolved = _run(
+        raw.resolve(ctx, [DesiredSkill("summary", CenterSkillByName()), DesiredSkill("triage", CenterSkillByName())])
+    )
+    plan = _run(raw.plan(ctx, resolved.intents))
+    claim = activation.claim_apply_skill
+
+    async def _second_claim_fails(**kwargs):
+        if kwargs["skill_id"] == "41":
+            raise RuntimeError("claim refused")
+        return await claim(**kwargs)
+
+    activation.claim_apply_skill = _second_claim_fails
+    import pytest as _pytest
+
+    with _pytest.raises(ConfirmedPartialWriteError):
+        _run(raw.write(ctx, plan))
 
 
 def test_undeclared_members_of_the_area_are_removed_by_name():

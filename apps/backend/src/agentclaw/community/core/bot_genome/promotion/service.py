@@ -112,12 +112,6 @@ class GenomePromotionService(GenomePromotionServiceProtocol):
             raise RefConflict("active", expected=expected_revision, current=current.revision_id if current else None)
 
         now = _now()
-        self._promotions.fail_stale_pending(
-            **self._axes(bot),
-            older_than=now - timedelta(seconds=STALE_PENDING_SECONDS),
-            apply_detail="the request that filed it ended before its apply started",
-            settled_at=now,
-        )
         row = self._promotions.insert(
             GenomePromotionRow(
                 **self._axes(bot),
@@ -162,6 +156,15 @@ class GenomePromotionService(GenomePromotionServiceProtocol):
                 )
                 or row
             )
+        # This apply holds the bot's lock now, so no earlier promotion's apply is queued or running: an apply
+        # whose request died after starting it held the lock until it ended, and its end settled that row.
+        # An older `pending` row is one whose apply never started.
+        self._promotions.fail_stale_pending(
+            **self._axes(bot),
+            older_than=now - timedelta(seconds=STALE_PENDING_SECONDS),
+            apply_detail="the request that filed it ended before its apply started",
+            settled_at=now,
+        )
         applying = self._promotions.mark_applying(**self._axes(bot), promotion_id=row.promotion_id, apply_id=apply_id)
         # ``None`` only when the apply already ended and settled the row (a worker can be that quick): read it.
         return _promotion(applying or self._promotions.get(**self._axes(bot), promotion_id=row.promotion_id) or row)
