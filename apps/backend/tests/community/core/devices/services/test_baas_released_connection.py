@@ -20,8 +20,8 @@ def connection_service():
     service._resolve_bot_by_binding_id = MagicMock(return_value=None)
     service._baas_service.get_ws_info.return_value = SimpleNamespace(
         target="runtime:20003", token="test-token", ws_url="wss://example.invalid/ws",
-        baas_base_url="https://example.invalid", a2a_base_url="", bot_uuid="bot-test",
-        tenant="test", engine_port=20003, expires_at="2099-01-01T00:00:00Z",
+        baas_base_url="https://example.invalid", bot_uuid="bot-test", tenant="test",
+        engine_port=20003, expires_at="2099-01-01T00:00:00Z", a2a_base_url="",
     )
     return service
 
@@ -47,7 +47,6 @@ def test_other_states_keep_existing_provider_behavior(connection_service, status
     )
 
     assert result.url == "wss://example.invalid/ws"
-    assert result.a2a_base_url == ""
     connection_service._baas_service.get_ws_info.assert_called_once_with(
         bind_id=7, device_affinity="owner", device_uuid="instance",
         ws_conn_mode="relay", path="/api/claude_code/ws",
