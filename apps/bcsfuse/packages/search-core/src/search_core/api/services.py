@@ -3,6 +3,7 @@
 from typing import Protocol
 
 from search_core.api.models import (
+    RecallResult,
     RetrievalRequest,
     SearchCommand,
     SearchResult,
@@ -27,3 +28,12 @@ class RetrievalService(Protocol):
         Startup/cleanup belongs to the composing application's lifespan.
         """
         ...
+
+
+class StagedRetrievalService(Protocol):
+    """Recall once, optionally inspect query_vector, then rank without re-embedding."""
+
+    async def recall(self, request: RetrievalRequest) -> RecallResult: ...
+    async def rank(
+        self, request: RetrievalRequest, recall: RecallResult
+    ) -> SearchResult: ...

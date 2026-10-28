@@ -1,8 +1,13 @@
 """Business-neutral values. Identity is supplied by trusted composition."""
 
+from __future__ import annotations
+
 import math
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from search_core.plugin_api.vector_search_hit import VectorSearchHit
 
 
 @dataclass(frozen=True)
@@ -62,3 +67,14 @@ class RetrievalRequest:
     limit: int
     filters: dict[str, tuple[str, ...]]
     allowed_ids: frozenset[str] | None
+
+
+@dataclass(frozen=True)
+class RecallResult:
+    """Staged recall output; available distinguishes a valid empty from outage."""
+
+    vector_hits: tuple[VectorSearchHit, ...] = ()
+    keyword_hits: tuple[VectorSearchHit, ...] = ()
+    query_vector: tuple[float, ...] = ()
+    reasons: tuple[str, ...] = ()
+    available: bool = True
