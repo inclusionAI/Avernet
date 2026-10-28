@@ -1,0 +1,166 @@
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization_rules_task.py
+  h_059e888e5e4e82 107-123
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/bbs/interaction_schemas.py
+  h_059e888e5e4e82 1-153
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/bbs/personal_center_schemas.py
+  h_059e888e5e4e82 1-45
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/bbs/router.py
+  h_059e888e5e4e82 20-34,47-63,99,129,339-342,393-529
+apps/backend/src/agentclaw/community/adapters/http/task/bbs/router.py
+  h_059e888e5e4e82 36-51,83-92,618-743
+apps/backend/src/agentclaw/community/api/README.md
+  h_059e888e5e4e82 121-123,195
+apps/backend/src/agentclaw/community/api/task/forum_interaction_service.py
+  h_059e888e5e4e82 1-13
+apps/backend/src/agentclaw/community/api/task/forum_personal_center_activity_service.py
+  h_059e888e5e4e82 1-9
+apps/backend/src/agentclaw/community/core/repository/README.md
+  h_059e888e5e4e82 197-199,298-300
+apps/backend/src/agentclaw/community/core/repository/implementations/task/forum/__init__.py
+  h_059e888e5e4e82 5-7,10-17
+apps/backend/src/agentclaw/community/core/repository/implementations/task/forum/forum_author_stats_repository.py
+  h_059e888e5e4e82 1-149
+apps/backend/src/agentclaw/community/core/repository/implementations/task/forum/forum_interaction_repository.py
+  h_059e888e5e4e82 1-312
+apps/backend/src/agentclaw/community/core/repository/implementations/task/forum/forum_repository.py
+  h_059e888e5e4e82 39,391-446
+apps/backend/src/agentclaw/community/core/repository/implementations/task/forum/personal_center_activity_repository.py
+  h_059e888e5e4e82 1-362
+apps/backend/src/agentclaw/community/core/repository/protocols/task/forum.py
+  h_059e888e5e4e82 81-96
+apps/backend/src/agentclaw/community/core/repository/protocols/task/forum_author_stats.py
+  h_059e888e5e4e82 1-41
+apps/backend/src/agentclaw/community/core/repository/protocols/task/forum_interaction.py
+  h_059e888e5e4e82 1-59
+apps/backend/src/agentclaw/community/core/repository/protocols/task/forum_personal_center_activity.py
+  h_059e888e5e4e82 1-31
+apps/backend/src/agentclaw/community/core/task/forum/interaction/README.md
+  h_059e888e5e4e82 1-31
+apps/backend/src/agentclaw/community/core/task/forum/interaction/__init__.py
+  h_059e888e5e4e82 1
+apps/backend/src/agentclaw/community/core/task/forum/interaction/forum_author_stats_service.py
+  h_059e888e5e4e82 1-32
+apps/backend/src/agentclaw/community/core/task/forum/interaction/forum_interaction_service.py
+  h_059e888e5e4e82 1-254
+apps/backend/src/agentclaw/community/core/task/forum/interaction/models.py
+  h_059e888e5e4e82 1-213
+apps/backend/src/agentclaw/community/core/task/forum/interaction/personal_center_activity_service.py
+  h_059e888e5e4e82 1-157
+apps/backend/src/agentclaw/community/core/task/forum/interaction/personal_center_protocol.py
+  h_059e888e5e4e82 1-20
+apps/backend/src/agentclaw/community/core/task/forum/interaction/service_protocol.py
+  h_059e888e5e4e82 1-58
+apps/backend/src/agentclaw/community/core/task/forum/interaction/target_verifier.py
+  h_059e888e5e4e82 1-84
+apps/backend/src/agentclaw/community/core/task/forum/interaction/target_verifier_protocol.py
+  h_059e888e5e4e82 1-30
+apps/backend/src/agentclaw/community/core/task/forum/models.py
+  h_059e888e5e4e82 9-12
+apps/backend/src/agentclaw/community/core/task/forum/repository/models.py
+  h_059e888e5e4e82 30,508-575
+apps/backend/src/agentclaw/community/core/task/forum/services/forum_service.py
+  h_059e888e5e4e82 185-198
+apps/backend/src/agentclaw/community/core/task/forum/sql/2026_10_27_forum_interaction.sql
+  h_059e888e5e4e82 1-20
+apps/backend/src/agentclaw/community/di/modules/task_module.py
+  h_059e888e5e4e82 41-47,58,60-61,78-86,127-138,175-177,237-263
+apps/backend/tests/community/adapters/http/task/bbs/test_bbs_internal_endpoints.py
+  h_059e888e5e4e82 106-110
+apps/backend/tests/community/architecture/test_http_adapter_layer_is_http_only.py
+  h_059e888e5e4e82 177-180
+apps/backend/tests/community/architecture/test_service_api_conformance.py
+  h_059e888e5e4e82 212-227,425-430
+apps/backend/tests/community/core/task/forum/interaction/test_forum_author_stats_service.py
+  h_059e888e5e4e82 1-83
+apps/backend/tests/community/core/task/forum/interaction/test_forum_interaction_service.py
+  h_059e888e5e4e82 1-451
+apps/backend/tests/community/core/task/forum/interaction/test_personal_center_activity_service.py
+  h_059e888e5e4e82 1-196
+apps/backend/tests/community/core/task/forum/test_forum_service.py
+  h_059e888e5e4e82 9-14,82-103,708-710,757,761-762,908-910,919-921
+apps/backend/tests/community/endpoints/test_bbs_interaction_endpoints.py
+  h_059e888e5e4e82 1-547
+apps/backend/tests/community/repository/task/forum/test_forum_author_stats_repository.py
+  h_059e888e5e4e82 1-106
+apps/backend/tests/community/repository/task/forum/test_forum_interaction_repository.py
+  h_059e888e5e4e82 1-308
+apps/backend/tests/community/repository/task/forum/test_personal_center_activity_repository.py
+  h_059e888e5e4e82 1-282
+apps/frontend-nextgen/src/components/Community/CommunityAuthorAvatar/index.tsx
+  h_059e888e5e4e82 2-3,5,9-23,40-118
+apps/frontend-nextgen/src/components/Community/CommunityPage/index.tsx
+  h_059e888e5e4e82 9,25,31,34-43,58-70,140
+apps/frontend-nextgen/src/components/Community/CommunityPersonalCenter/ActivityList.tsx
+  h_059e888e5e4e82 1-75
+apps/frontend-nextgen/src/components/Community/CommunityPersonalCenter/StatsCards.tsx
+  h_059e888e5e4e82 1-48
+apps/frontend-nextgen/src/components/Community/CommunityPersonalCenter/index.tsx
+  h_059e888e5e4e82 1-98
+apps/frontend-nextgen/src/components/Community/CommunityPersonalCenter/model.ts
+  h_059e888e5e4e82 1-28
+apps/frontend-nextgen/src/components/Community/CommunityTopicDetail/Floor.tsx
+  h_059e888e5e4e82 3,26-30,51-55,63-71,121-125
+apps/frontend-nextgen/src/components/Community/CommunityTopicDetail/ThreadReply.tsx
+  h_059e888e5e4e82 2,12-16,25-29,34-42
+apps/frontend-nextgen/src/components/Community/CommunityTopicDetail/index.tsx
+  h_059e888e5e4e82 6-13,19,22-34,43-52,72-81,120-132,255-259,278-296,318-322
+apps/frontend-nextgen/src/components/Community/TopicInteractionBar/index.tsx
+  h_059e888e5e4e82 1-68
+apps/frontend-nextgen/src/domain/community/constants.ts
+  h_059e888e5e4e82 9-13
+apps/frontend-nextgen/src/domain/community/mapper.ts
+  h_059e888e5e4e82 11-19,307-439
+apps/frontend-nextgen/src/domain/community/types.ts
+  h_059e888e5e4e82 159-236
+apps/frontend-nextgen/src/hooks/useCommunity.ts
+  h_059e888e5e4e82 4-16,21,33-37,47-82,99-104,200-220,229,238,246-291,354-392,429,437-445
+apps/frontend-nextgen/src/hooks/useCommunityInteractions.ts
+  h_059e888e5e4e82 1-150
+apps/frontend-nextgen/src/hooks/useCommunityReplies.ts
+  h_059e888e5e4e82 3,28,39,42,54,58-60
+apps/frontend-nextgen/src/hooks/usePersonalCenter.ts
+  h_059e888e5e4e82 1-256
+apps/frontend-nextgen/src/services/backendApi/community/interactionController.ts
+  h_059e888e5e4e82 1-78
+apps/frontend-nextgen/src/services/backendApi/community/personalCenterController.ts
+  h_059e888e5e4e82 1-30
+apps/frontend-nextgen/src/services/community/communityApiGateway.ts
+  h_059e888e5e4e82 1,5-6,13-18,20-22,32-37,98-147
+apps/frontend-nextgen/src/services/community/communityGateway.ts
+  h_059e888e5e4e82 9-13,21-26,45-58
+apps/frontend-nextgen/src/services/community/communityService.ts
+  h_059e888e5e4e82 1,7-11,89-124
+apps/frontend-nextgen/test/components/Community/CommunityAuthorAvatar.test.tsx
+  h_059e888e5e4e82 1-104
+apps/frontend-nextgen/test/components/Community/CommunityPage.test.tsx
+  h_059e888e5e4e82 96
+apps/frontend-nextgen/test/components/Community/CommunityTopicDetail.test.tsx
+  h_059e888e5e4e82 327-366
+apps/frontend-nextgen/test/components/Community/PersonalCenter.test.tsx
+  h_059e888e5e4e82 1-120
+apps/frontend-nextgen/test/hooks/useCommunityInteractions.test.ts
+  h_059e888e5e4e82 1-96
+apps/frontend-nextgen/test/hooks/usePersonalCenter.test.tsx
+  h_059e888e5e4e82 1-92
+apps/frontend-nextgen/test/services/backendApi/community/interactionController.test.ts
+  h_059e888e5e4e82 1-72
+apps/frontend-nextgen/test/services/backendApi/community/personalCenterController.test.ts
+  h_059e888e5e4e82 1-36
+apps/frontend-nextgen/test/services/community/communityService.test.ts
+  h_059e888e5e4e82 37-53,376-443
+apps/frontend-nextgen/test/services/community/interactionGateway.test.ts
+  h_059e888e5e4e82 1-149
+docs/bbs-acceptance.md
+  h_059e888e5e4e82 70-126,229-232
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1fcf88d9e29a84ed890b1465bfd86120d7a9dcfe",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
