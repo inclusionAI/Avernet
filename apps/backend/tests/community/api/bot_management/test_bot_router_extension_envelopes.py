@@ -15,6 +15,9 @@ import pytest
 from fastapi_injector import attach_injector
 from injector import Injector, Module
 
+from agentclaw.community.core.bot_management.services.bot_service import (
+    BotNotFoundError,
+)
 from agentclaw.community.plugin_api.bot_create_extension import (
     BotCreateExtension,
     ExtensionBlocked,
@@ -106,6 +109,97 @@ class TestDeleteRouteEnvelope:
         tc, svc, passport = client
         _poison_with(tc, svc, passport, exc)
         resp = tc.delete(DELETE_URL_TPL.format(bot_id="bot-1"))
+        body = resp.json()
+        assert body["success"] is False
+        assert body["error_code"] == code
+        assert body["data"] == data
+
+
+class NotFoundThrowingExtension:
+    """Extension double: healthy before_delete, raises at the not-found
+    cleanup hook — the callback that runs inside the route's own
+    ``except BotNotFoundError`` handler."""
+
+    def __init__(self, exc: Exception | None = None) -> None:
+        self._exc = exc
+
+    def resolve_create(self, *, bot_id, user_id, request):
+        return None
+
+    def after_bot_registered(self, *, bot_id, user_id):
+        pass
+
+    def before_delete(self, *, bot_id, owner_id):
+        pass
+
+    def on_delete_completed(self, *, bot_id, owner_id):
+        pass
+
+    def on_delete_not_found(self, *, bot_id, owner_id):
+        if self._exc is not None:
+            raise self._exc
+
+
+def _bind_raw_extension(tc, svc, passport, ext):
+    """Layer an already-built extension instance over the fixture's Noop."""
+    from fastapi_injector import attach_injector as _attach
+    from injector import Injector as _Injector, Module as _Module
+
+    class _Bind(Module):
+        def configure(self, binder):
+            binder.bind(BotCreateExtension, to=ext)
+
+    _attach(tc.app, _Injector([_bind_bot_service(
+        svc, bot_repo=MagicMock(), passport=passport,
+        auth=MagicMock(), auth_rel=MagicMock(),
+        skill_set_factory=MagicMock(),
+    ), _Bind()]))
+    return tc
+
+
+class TestDeleteNotFoundEnvelope:
+    """The not-found cleanup callback must map like every other hook.
+
+    It runs inside the ``except BotNotFoundError`` handler, so an exception
+    raised there escapes the sibling mappings entirely — the route has to
+    translate it itself. The not-found proof is the callback's own business
+    (an implementation reads the owner-scoped row before touching any
+    parent snapshot); the route keeps the 404 envelope whenever the
+    callback finishes, and surfaces a controlled 500 whenever it fails.
+    """
+
+    @staticmethod
+    def _delete_missing_bot(client, mock_passport, ext):
+        tc, svc, passport = client
+        svc.delete_bot.side_effect = BotNotFoundError("bot missing")
+        _bind_raw_extension(tc, svc, passport, ext)
+        return tc.delete(DELETE_URL_TPL.format(bot_id="bot-1"))
+
+    def test_healthy_not_found_callback_keeps_404(self, client, mock_passport):
+        resp = self._delete_missing_bot(client, mock_passport, NotFoundThrowingExtension())
+        body = resp.json()
+        assert body["success"] is False
+        assert body["error_code"] == 404
+
+    @pytest.mark.parametrize(
+        ("exc", "code", "data"),
+        [
+            pytest.param(
+                ExtensionBlocked("关联实例状态暂不可达", data={"bot_id": "b1"}),
+                500, {"bot_id": "b1"}, id="blocked-500-with-data",
+            ),
+            pytest.param(
+                RuntimeError("关联存储不可达"),
+                500, None, id="unexpected-500-controlled",
+            ),
+        ],
+    )
+    def test_failing_not_found_callback_maps_to_envelopes(
+        self, client, mock_passport, exc, code, data
+    ):
+        resp = self._delete_missing_bot(
+            client, mock_passport, NotFoundThrowingExtension(exc)
+        )
         body = resp.json()
         assert body["success"] is False
         assert body["error_code"] == code

@@ -2814,12 +2814,39 @@ async def delete_bot(
         )
     except BotNotFoundError:
         # A not-found proves neither deletion nor ownership; the extension's
-        # own state decides whether a retry cleanup applies at all.
+        # own state decides whether a retry cleanup applies at all. The
+        # callback runs INSIDE this handler, so its own failures would
+        # otherwise escape every sibling mapping below — translate them here
+        # exactly like the pre-delete hook: a controlled rejection envelope
+        # on failure, and the plain not-found answer when the callback
+        # finishes (the callback itself owns the ownership/deleted proof and
+        # the no-cleanup-before-proof guarantee).
         ext = _extension_of(create_extension)
         if ext is not None:
-            ext.on_delete_not_found(
-                bot_id=bot_id, owner_id=resolved_owner_id
-            )
+            try:
+                ext.on_delete_not_found(
+                    bot_id=bot_id, owner_id=resolved_owner_id
+                )
+            except ExtensionBlocked as e:
+                logger.error(
+                    f"[bot_router.delete_bot] delete not-found cleanup blocked: {e}"
+                )
+                return ApiResponse(
+                    success=False,
+                    message=str(e),
+                    error_code=500,
+                    data=e.data,
+                )
+            except Exception as e:
+                logger.error(
+                    f"[bot_router.delete_bot] delete not-found cleanup failed: {e}"
+                )
+                return ApiResponse(
+                    success=False,
+                    message=f"关联状态收尾失败: {str(e)}",
+                    error_code=500,
+                    data=None,
+                )
         return ApiResponse(
             success=False,
             message=f"Bot不存在: {bot_id}",
