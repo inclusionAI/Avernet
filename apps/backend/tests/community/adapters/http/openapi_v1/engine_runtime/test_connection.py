@@ -42,6 +42,8 @@ class FakeConnections:
         # Optional second socket, mirroring the core service's additive a2a
         # behavior: set by tests that exercise the published shape.
         self.extra_socket: SocketInfo | None = None
+        # User-gray refusal mirroring the core service's negative result.
+        self.a2a_withheld: bool = False
 
     def __set_relay(self, relay):  # wired by the fixture
         self._relay = relay
@@ -74,7 +76,10 @@ class FakeConnections:
         if self.extra_socket is not None:
             sockets.append(self.extra_socket)
         return ConnectionResult(
-            engine="openclaw", expires_at="2026-07-30T14:30:00+00:00", sockets=sockets
+            engine="openclaw",
+            expires_at="2026-07-30T14:30:00+00:00",
+            sockets=sockets,
+            a2a_withheld=self.a2a_withheld,
         )
 
 
@@ -165,6 +170,22 @@ def test_payload_never_exposes_routing_internals(client, relay):
         assert set(socket) == {"kind", "url"}
         assert "target" not in socket and "type" not in socket
         assert "token" not in socket
+
+
+def test_withheld_reaches_http_json_as_true(client, connections):
+    """The refusal must survive core → HTTP assembly: the router composes
+    ``Connection`` by hand, and a missing copy would silently fall back to the
+    schema default ``False`` — turning an explicit gray refusal back into
+    "no address available" and letting derivable direct topologies probe
+    their way around the gate (review round-2 P1)."""
+    connections.a2a_withheld = True
+    data = ok(client.get(URL))
+    assert data["a2a_withheld"] is True
+
+
+def test_withheld_defaults_false_when_core_says_nothing(client):
+    data = ok(client.get(URL))
+    assert data["a2a_withheld"] is False
 
 
 def test_connection_build_failure_is_enveloped(client, relay, connections):
