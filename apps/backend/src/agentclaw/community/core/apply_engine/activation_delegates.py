@@ -79,7 +79,7 @@ class _DelegatingActivation(ActivationPort):
             bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
         )
 
-    def manifest_direct_mcp_codes(
+    def apply_direct_mcp_codes(
         self,
         *,
         bot_id: str,
@@ -87,7 +87,7 @@ class _DelegatingActivation(ActivationPort):
         actor_id: str,
         server_codes: set[str],
     ) -> set[str]:
-        return self._inner.manifest_direct_mcp_codes(
+        return self._inner.apply_direct_mcp_codes(
             bot_id=bot_id,
             owner_id=owner_id,
             actor_id=actor_id,
@@ -161,7 +161,7 @@ class _DelegatingActivation(ActivationPort):
             actor_id=actor_id, project=self._PROJECT,
         )
 
-    async def claim_manifest_skill(
+    async def claim_apply_skill(
         self,
         *,
         skill_id: str,
@@ -170,7 +170,7 @@ class _DelegatingActivation(ActivationPort):
         actor_id: str,
         apply_id: str | None,
     ) -> dict[str, Any]:
-        return await self._inner.claim_manifest_skill(
+        return await self._inner.claim_apply_skill(
             skill_id=skill_id,
             bot_id=bot_id,
             owner_id=owner_id,
@@ -179,7 +179,7 @@ class _DelegatingActivation(ActivationPort):
             project=self._PROJECT,
         )
 
-    async def remove_manifest_skill(
+    async def remove_apply_skill(
         self,
         *,
         skill_id: str,
@@ -189,7 +189,7 @@ class _DelegatingActivation(ActivationPort):
         apply_id: str | None,
         remove_inactive_memberships: bool,
     ) -> dict[str, Any]:
-        return await self._inner.remove_manifest_skill(
+        return await self._inner.remove_apply_skill(
             skill_id=skill_id,
             bot_id=bot_id,
             owner_id=owner_id,
@@ -199,7 +199,7 @@ class _DelegatingActivation(ActivationPort):
             project=self._PROJECT,
         )
 
-    async def claim_manifest_mcp(
+    async def claim_apply_mcp(
         self,
         *,
         server_code: str,
@@ -209,7 +209,7 @@ class _DelegatingActivation(ActivationPort):
         actor_id: str,
         apply_id: str | None,
     ) -> dict[str, Any]:
-        return await self._inner.claim_manifest_mcp(
+        return await self._inner.claim_apply_mcp(
             server_code=server_code,
             config=config,
             bot_id=bot_id,
@@ -219,7 +219,7 @@ class _DelegatingActivation(ActivationPort):
             project=self._PROJECT,
         )
 
-    async def remove_manifest_mcp(
+    async def remove_apply_mcp(
         self,
         *,
         server_code: str,
@@ -228,7 +228,7 @@ class _DelegatingActivation(ActivationPort):
         actor_id: str,
         apply_id: str | None,
     ) -> dict[str, Any]:
-        return await self._inner.remove_manifest_mcp(
+        return await self._inner.remove_apply_mcp(
             server_code=server_code,
             bot_id=bot_id,
             owner_id=owner_id,

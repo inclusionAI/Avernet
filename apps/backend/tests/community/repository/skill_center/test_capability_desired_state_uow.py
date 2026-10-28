@@ -3991,7 +3991,7 @@ def test_manifest_mcp_claim_detaches_ordinary_membership_and_keeps_direct_instal
             ),
         ])
 
-    result = repository.claim_manifest_mcp(
+    result = repository.claim_apply_mcp(
         bot_id="bot", owner_id="owner", server_code="mcp.convert",
         config={"headers": {}}, platform_default_codes=frozenset(),
         engine_type="openclaw", default_engine_types=("openclaw",),
@@ -4012,7 +4012,7 @@ def test_manifest_mcp_claim_turns_default_supply_into_exclusion_plus_installatio
     repository = CapabilityDesiredStateRepository(db)
     default, _skill = _seed_default_with_member(db)
 
-    result = repository.claim_manifest_mcp(
+    result = repository.claim_apply_mcp(
         bot_id="bot", owner_id="owner", server_code="mcp.member",
         config=None, platform_default_codes=frozenset(),
         engine_type="openclaw", default_engine_types=("openclaw",),
@@ -4041,13 +4041,13 @@ def test_manifest_mcp_removal_keeps_default_exclusion_and_does_not_restore_suppl
     db = _Database()
     repository = CapabilityDesiredStateRepository(db)
     _default, _skill = _seed_default_with_member(db)
-    repository.claim_manifest_mcp(
+    repository.claim_apply_mcp(
         bot_id="bot", owner_id="owner", server_code="mcp.member",
         config=None, platform_default_codes=frozenset(),
         engine_type="openclaw", default_engine_types=("openclaw",),
     )
 
-    removed = repository.remove_manifest_mcp(
+    removed = repository.remove_apply_mcp(
         bot_id="bot", owner_id="owner", server_code="mcp.member",
         platform_default_codes=frozenset(), engine_type="openclaw",
         default_engine_types=("openclaw",),
@@ -4068,7 +4068,7 @@ def test_ordinary_update_and_remove_can_manage_an_existing_manifest_direct_mcp()
     db = _Database()
     repository = CapabilityDesiredStateRepository(db)
     _seed_default_with_member(db)
-    repository.claim_manifest_mcp(
+    repository.claim_apply_mcp(
         bot_id="bot", owner_id="owner", server_code="mcp.member",
         config=None, platform_default_codes=frozenset(),
         engine_type="openclaw", default_engine_types=("openclaw",),
@@ -4127,7 +4127,7 @@ def test_default_exclusion_plus_install_is_not_direct_with_ordinary_membership()
             default_engine_types=("openclaw",),
         )
 
-    removed = repository.remove_manifest_mcp(
+    removed = repository.remove_apply_mcp(
         bot_id="bot", owner_id="owner", server_code="mcp.member",
         platform_default_codes=frozenset(), engine_type="openclaw",
         default_engine_types=("openclaw",),
@@ -4158,7 +4158,7 @@ def test_manifest_skill_claim_replaces_same_name_membership_with_local_direct_cl
             ),
         ])
 
-    result = repository.claim_manifest_skill(
+    result = repository.claim_apply_skill(
         bot_id="bot", owner_id="owner", skill_id=str(local.id),
         engine_type="openclaw", default_engine_types=("openclaw",),
     )
@@ -4204,7 +4204,7 @@ def test_manifest_skill_claim_excludes_the_current_center_default_version():
             ),
         ])
 
-    repository.claim_manifest_skill(
+    repository.claim_apply_skill(
         bot_id="bot", owner_id="owner", skill_id=str(local.id),
         engine_type="openclaw", default_engine_types=("openclaw",),
     )

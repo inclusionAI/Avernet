@@ -39,7 +39,7 @@ from agentclaw.community.core.skill_center.capability_state_contract import (
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
     LocalSkillRuntimeSyncError,
-    ManifestDesiredStateCommittedError,
+    ApplyDesiredStateCommittedError,
     McpPermissionDeniedError,
     SkillSetAccessDeniedError,
     SkillSetControlPlaneNotFoundError,
@@ -130,7 +130,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
             actor_id=actor_id, active=False, project=project,
         )
 
-    async def claim_manifest_skill(
+    async def claim_apply_skill(
         self,
         *,
         skill_id: str,
@@ -149,7 +149,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
 
         def mutation():
             nonlocal mutation_result
-            mutation_result = self._repository.claim_manifest_skill(
+            mutation_result = self._repository.claim_apply_skill(
                 bot_id=bot_id,
                 owner_id=resource_owner_id,
                 skill_id=str(skill["id"]),
@@ -177,13 +177,13 @@ class DirectActivationService(DirectActivationServiceProtocol):
             )
         except Exception:
             if mutation_result is not None and mutation_result.changed:
-                raise ManifestDesiredStateCommittedError(
+                raise ApplyDesiredStateCommittedError(
                     "Manifest desired state committed before follow-up failure"
                 ) from None
             raise
         return {**skill, **result}
 
-    async def remove_manifest_skill(
+    async def remove_apply_skill(
         self,
         *,
         skill_id: str,
@@ -202,7 +202,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
 
         def mutation():
             nonlocal mutation_result
-            mutation_result = self._repository.remove_manifest_skill(
+            mutation_result = self._repository.remove_apply_skill(
                 bot_id=bot_id,
                 owner_id=resource_owner_id,
                 skill_id=str(skill["id"]),
@@ -231,7 +231,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
             )
         except Exception:
             if mutation_result is not None and mutation_result.changed:
-                raise ManifestDesiredStateCommittedError(
+                raise ApplyDesiredStateCommittedError(
                     "Manifest desired state committed before follow-up failure"
                 ) from None
             raise
@@ -389,7 +389,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
         )
         return result
 
-    async def claim_manifest_mcp(
+    async def claim_apply_mcp(
         self,
         *,
         server_code: str,
@@ -407,7 +407,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
 
         def mutation():
             nonlocal mutation_result
-            mutation_result = self._repository.claim_manifest_mcp(
+            mutation_result = self._repository.claim_apply_mcp(
                 bot_id=bot_id,
                 owner_id=stable_resource_owner_id(bot),
                 server_code=server_code,
@@ -439,13 +439,13 @@ class DirectActivationService(DirectActivationServiceProtocol):
             )
         except Exception:
             if mutation_result is not None and mutation_result.changed:
-                raise ManifestDesiredStateCommittedError(
+                raise ApplyDesiredStateCommittedError(
                     "Manifest desired state committed before follow-up failure"
                 ) from None
             raise
         return result
 
-    async def remove_manifest_mcp(
+    async def remove_apply_mcp(
         self,
         *,
         server_code: str,
@@ -461,7 +461,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
 
         def mutation():
             nonlocal mutation_result
-            mutation_result = self._repository.remove_manifest_mcp(
+            mutation_result = self._repository.remove_apply_mcp(
                 bot_id=bot_id,
                 owner_id=stable_resource_owner_id(bot),
                 server_code=server_code,
@@ -492,7 +492,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
             )
         except Exception:
             if mutation_result is not None and mutation_result.changed:
-                raise ManifestDesiredStateCommittedError(
+                raise ApplyDesiredStateCommittedError(
                     "Manifest desired state committed before follow-up failure"
                 ) from None
             raise
@@ -545,7 +545,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
             bot_id=bot_id, owner_id=stable_resource_owner_id(bot)
         )
 
-    def manifest_direct_mcp_codes(
+    def apply_direct_mcp_codes(
         self,
         *,
         bot_id: str,

@@ -55,7 +55,7 @@ from agentclaw.community.core.skill_center.capability_state_contract import (
     BotCapabilityStateReaderProtocol,
 )
 from agentclaw.community.core.skill_center.errors import (
-    ManifestDesiredStateCommittedError,
+    ApplyDesiredStateCommittedError,
 )
 from agentclaw.community.core.skill_center.mcp_dependency_scope import (
     mcp_dependency_codes,
@@ -261,7 +261,7 @@ class SkillsMaterialiser(Materialiser):
                 # have committed, even if the following Direct claim fails.
                 confirmed_write = True
                 skill_id = str(uploaded["skill"]["id"])
-                await self._activation.claim_manifest_skill(
+                await self._activation.claim_apply_skill(
                     skill_id=skill_id,
                     bot_id=ctx.bot_id,
                     owner_id=ctx.entity_id,
@@ -285,7 +285,7 @@ class SkillsMaterialiser(Materialiser):
                 if asset is None:
                     continue
                 is_local = str(asset.git_path or "").startswith("local://")
-                await self._activation.remove_manifest_skill(
+                await self._activation.remove_apply_skill(
                     skill_id=str(asset.skill_id),
                     bot_id=ctx.bot_id,
                     owner_id=ctx.entity_id,
@@ -312,7 +312,7 @@ class SkillsMaterialiser(Materialiser):
             if isinstance(exc, ConfirmedPartialWriteError):
                 raise
             if confirmed_write or isinstance(
-                exc, ManifestDesiredStateCommittedError
+                exc, ApplyDesiredStateCommittedError
             ):
                 raise ConfirmedPartialWriteError(
                     "Skill replacement stopped after a durable write"

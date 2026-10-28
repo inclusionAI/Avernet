@@ -46,7 +46,7 @@ from agentclaw.community.core.repository.implementations.skill_center.direct_ins
 from agentclaw.community.core.repository.implementations.skill_center.mcp_skill_set_control_plane import (
     McpSkillSetControlPlaneCommands,
 )
-from agentclaw.community.core.repository.implementations.skill_center.manifest_direct_claim_commands import (
+from agentclaw.community.core.repository.implementations.skill_center.apply_claim_commands import (
     ManifestDirectClaimCommands,
 )
 from agentclaw.community.core.repository.implementations.skill_center.skill_mcp_dependencies import (

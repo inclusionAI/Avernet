@@ -40,7 +40,7 @@ from agentclaw.community.core.bot_config_manifest.sources.source_resolver import
     DeclaredSourceResolver,
 )
 from agentclaw.community.core.skill_center.errors import (
-    ManifestDesiredStateCommittedError,
+    ApplyDesiredStateCommittedError,
 )
 
 from ._fakes import (
@@ -758,7 +758,7 @@ async def test_a_raising_materialiser_is_reported_as_written_nothing():
     """
 
     class ExplodingActivation(FakeActivationService):
-        async def claim_manifest_mcp(self, **kwargs):
+        async def claim_apply_mcp(self, **kwargs):
             raise RuntimeError("device unreachable")
 
     activations = ExplodingActivation()
@@ -990,7 +990,7 @@ async def test_a_declared_empty_category_that_fails_is_not_reported_successful()
     async def _explode(**_kwargs):
         raise RuntimeError("the activation service is down")
 
-    activations.remove_manifest_mcp = _explode
+    activations.remove_apply_mcp = _explode
 
     report = await _apply(
         _engine(activations=activations),
@@ -1018,7 +1018,7 @@ async def test_one_aborted_empty_category_downgrades_an_otherwise_good_apply():
     async def _explode(**_kwargs):
         raise RuntimeError("the activation service is down")
 
-    activations.remove_manifest_mcp = _explode
+    activations.remove_apply_mcp = _explode
 
     report = await _apply(
         _engine(activations=activations),
@@ -1042,7 +1042,7 @@ async def test_an_abort_during_the_write_says_the_area_may_have_changed():
     async def _explode(**_kwargs):
         raise RuntimeError("the activation service is down")
 
-    activations.claim_manifest_mcp = _explode
+    activations.claim_apply_mcp = _explode
 
     report = await _apply(
         _engine(activations=activations),
@@ -1059,14 +1059,14 @@ async def test_an_abort_during_the_write_says_the_area_may_have_changed():
 @pytest.mark.asyncio
 async def test_a_later_mcp_failure_after_a_committed_claim_reports_partial():
     activations = FakeActivationService()
-    original_claim = activations.claim_manifest_mcp
+    original_claim = activations.claim_apply_mcp
 
     async def _fail_second(**kwargs):
         if kwargs["server_code"] == "second":
             raise RuntimeError("second MCP failed")
         return await original_claim(**kwargs)
 
-    activations.claim_manifest_mcp = _fail_second
+    activations.claim_apply_mcp = _fail_second
     report = await _apply(
         _engine(activations=activations),
         "schema_version: 1\nmanifest:\n  mcp:\n"
@@ -1085,9 +1085,9 @@ async def test_first_mcp_post_commit_failure_reports_partial():
 
     async def _commit_then_fail(**kwargs):
         activations.installed.add(kwargs["server_code"])
-        raise ManifestDesiredStateCommittedError()
+        raise ApplyDesiredStateCommittedError()
 
-    activations.claim_manifest_mcp = _commit_then_fail
+    activations.claim_apply_mcp = _commit_then_fail
     report = await _apply(
         _engine(activations=activations),
         "schema_version: 1\nmanifest:\n  mcp:\n"
@@ -1128,7 +1128,7 @@ async def test_failed_skill_write_refreshes_actual_dependencies_before_mcp():
     async def _fail_claim(**_kwargs):
         raise RuntimeError("Direct claim failed after package upload")
 
-    activations.claim_manifest_skill = _fail_claim
+    activations.claim_apply_skill = _fail_claim
     report = await _apply(
         _engine(
             activations=activations,

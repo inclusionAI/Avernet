@@ -41,7 +41,7 @@ from agentclaw.community.core.skill_center.capability_state_contract import (
     BotCapabilityStateReaderProtocol,
 )
 from agentclaw.community.core.skill_center.errors import (
-    ManifestDesiredStateCommittedError,
+    ApplyDesiredStateCommittedError,
 )
 from agentclaw.community.core.skill_center.mcp_dependency_scope import (
     mcp_dependency_codes,
@@ -195,7 +195,7 @@ class McpMaterialiser(Materialiser):
             actor_id=ctx.actor_id,
             server_codes=current | declared,
         )
-        manifest_direct = self._activation.manifest_direct_mcp_codes(
+        manifest_direct = self._activation.apply_direct_mcp_codes(
             bot_id=ctx.bot_id,
             owner_id=ctx.owner_id,
             actor_id=ctx.actor_id,
@@ -283,7 +283,7 @@ class McpMaterialiser(Materialiser):
                         )
                     )
                     continue
-                await self._activation.claim_manifest_mcp(
+                await self._activation.claim_apply_mcp(
                     server_code=planned.intent.identity,
                     config=planned.intent.value,
                     bot_id=ctx.bot_id,
@@ -306,7 +306,7 @@ class McpMaterialiser(Materialiser):
                 else plan.removals
             )
             for server_code in removal_writes:
-                await self._activation.remove_manifest_mcp(
+                await self._activation.remove_apply_mcp(
                     server_code=server_code,
                     bot_id=ctx.bot_id,
                     owner_id=ctx.owner_id,
@@ -316,7 +316,7 @@ class McpMaterialiser(Materialiser):
                 confirmed_write = True
         except Exception as exc:
             if confirmed_write or isinstance(
-                exc, ManifestDesiredStateCommittedError
+                exc, ApplyDesiredStateCommittedError
             ):
                 raise ConfirmedPartialWriteError(
                     "MCP replacement stopped after a durable write"

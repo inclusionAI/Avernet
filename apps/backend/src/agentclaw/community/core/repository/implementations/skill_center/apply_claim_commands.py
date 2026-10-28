@@ -120,7 +120,7 @@ class ManifestDirectClaimCommands:
             for set_id in relevant
         )
 
-    def claim_manifest_mcp(
+    def claim_apply_mcp(
         self,
         *,
         bot_id: str,
@@ -226,7 +226,7 @@ class ManifestDirectClaimCommands:
                 source_transitions=tuple(sorted(transitions)),
             )
 
-    def remove_manifest_mcp(
+    def remove_apply_mcp(
         self,
         *,
         bot_id: str,
@@ -322,7 +322,7 @@ class ManifestDirectClaimCommands:
                 source_transitions=tuple(sorted(transitions)),
             )
 
-    def claim_manifest_skill(
+    def claim_apply_skill(
         self,
         *,
         bot_id: str,
@@ -450,7 +450,7 @@ class ManifestDirectClaimCommands:
                 source_transitions=tuple(sorted(transitions)),
             )
 
-    def remove_manifest_skill(
+    def remove_apply_skill(
         self,
         *,
         bot_id: str,

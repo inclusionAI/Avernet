@@ -41,13 +41,13 @@ class DirectActivationServiceProtocol(Protocol):
     ) -> dict[str, Any]: ...
 
     @abstractmethod
-    async def claim_manifest_skill(
+    async def claim_apply_skill(
         self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
         apply_id: str | None, project: bool = True,
     ) -> dict[str, Any]: ...
 
     @abstractmethod
-    async def remove_manifest_skill(
+    async def remove_apply_skill(
         self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
         apply_id: str | None, remove_inactive_memberships: bool,
         project: bool = True,
@@ -72,14 +72,14 @@ class DirectActivationServiceProtocol(Protocol):
     ) -> dict[str, Any]: ...
 
     @abstractmethod
-    async def claim_manifest_mcp(
+    async def claim_apply_mcp(
         self, *, server_code: str, config: dict | None, bot_id: str,
         owner_id: str, actor_id: str, apply_id: str | None,
         project: bool = True,
     ) -> dict[str, Any]: ...
 
     @abstractmethod
-    async def remove_manifest_mcp(
+    async def remove_apply_mcp(
         self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str,
         apply_id: str | None, project: bool = True,
     ) -> dict[str, Any]: ...
@@ -104,7 +104,7 @@ class DirectActivationServiceProtocol(Protocol):
     ) -> dict[str, dict]: ...
 
     @abstractmethod
-    def manifest_direct_mcp_codes(
+    def apply_direct_mcp_codes(
         self, *, bot_id: str, owner_id: str, actor_id: str,
         server_codes: set[str],
     ) -> set[str]: ...

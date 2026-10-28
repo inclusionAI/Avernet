@@ -749,7 +749,7 @@ def test_a_deactivation_conflict_mid_write_reports_partially_written():
             "RESOURCE_MANAGED_BY_SKILL_SET"
         )
 
-    activation.remove_manifest_skill = _conflicting_deactivate
+    activation.remove_apply_skill = _conflicting_deactivate
     import pytest as _pytest
 
     with _pytest.raises(
