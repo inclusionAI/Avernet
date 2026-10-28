@@ -6,7 +6,7 @@ Core owns provider-neutral management orchestration and display enrichment from 
 KnowledgeCatalog is an ordinary outbound port. KnowledgeContentServiceProtocol is a resource-oriented Service API. Do not add Catalog/Content business plugins for single HTTP implementations. Session authentication is an ordinary constructor policy on the content adapter, not a Plugin. Preserve existing selection/membership Plugin contracts.
 
 ## Composition and compatibility
-KnowledgeManagementModule installs disabled-by-default config and an unavailable session implementation. Enabled deployments provide an explicit space dataset identifier and a trusted origin. The normal community Bot-selection router remains ungated; only the new management/content surface uses the new gate. Enterprise composition can retain its existing combined gate and aliases.
+KnowledgeManagementModule installs disabled-by-default config and a fail-closed ordinary request access policy. Enabled deployments provide an explicit space dataset identifier and a trusted origin. The normal community Bot-selection router remains ungated; only the new management/content surface uses the new gate. Management/content routes register in the existing phase-one resource mount alongside other normal resource routers; enterprise composition retains only the existing gated Bot aliases.
 
 Public HTTP clients share configured pool limits and discard response cookies. JSON and raw-file operations use a lazy asynchronous pool with native cancellation, no redirects and no environment proxy inheritance. Closing a response must not close the shared pool. Lifecycle discovery closes the pool once at shutdown, and subsequent use fails.
 
@@ -30,3 +30,6 @@ app.include_router(management_surface)
 ```
 
 Replace the endpoint seed's manually constructed services with bottom-boundary config and transport setup. Obtain clients from the injector, retain the real public repository/catalog/service/content factories, and assert resolved object identity and recorded wire requests. Add a mutation guard demonstrating that a broken provider fails a success case. Add preload/registration uniqueness coverage and corp gate/identity/Cookie regressions. Keep prod/prepub YAML byte-identical to the latest user-approved PR input. Push public first, verify mirror reachability, then advance the existing enterprise PR.
+
+## Release-target conflict resolution (2026-10-28)
+The user-selected public target is `REL20261029`, not `dev`. Rebase preserves the target's Bot publication risk module, its Service API boundary declaration and registered risk flows alongside the knowledge module and flows. Both TaskArtifactConfigModule and TcFileUploadIntegrationModule remain in the application container. Normal resource-router registration is reused to avoid growing the 1,000-line application composition root; no optional management router or relaxed gate is introduced.
