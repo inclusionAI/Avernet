@@ -1,5 +1,7 @@
 """HTTP API 接口：提供流程审批的 HTTP 接口"""
 
+from agentclaw.community.core.bot_public_risk.repository_protocol import RiskRepository
+
 from fastapi import APIRouter, HTTPException, Request
 
 from agentclaw.community.adapters.http.antprocess.schemas import (
@@ -85,6 +87,7 @@ async def cancel_approval(
 async def approval_callback(
     request: Request,
     bot_public_service: BotPublicServiceProtocol = Injected(BotPublicServiceProtocol),
+    risk_repository: RiskRepository = Injected(RiskRepository),
 ):
     """
     接收流程平台审批结果回调
@@ -104,6 +107,7 @@ async def approval_callback(
         "owner_id": data.get("ownerId"),
         "bot_id": data.get("botId"),
         "public_scope": data.get("publicScope") or data.get("public_scope") or "",
+        "risk_check_id": data.get("riskCheckId") or data.get("risk_check_id") or "",
     }
 
-    return handle_approval_callback(callback_data, bot_public_service)
+    return handle_approval_callback(callback_data, bot_public_service, risk_repository)

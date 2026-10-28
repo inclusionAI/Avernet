@@ -19,7 +19,7 @@ B6 继续保持转交入口关闭。Legacy BFF Router 已按职责拆分，原 s
 skillsets.py 保留 Router 和历史导入接口；共享请求解析先解析 Bot，将稳定 entity
 用于资源路径，当前 Owner 仅用于元数据和权限。上传与基于持久 Skill 的删除也使用
 同一身份边界。SkillSetService 按职责拆分为行为模块，Default 模板查询使用 entity。
-Factory 的显式 entity 优先于历史 user_id 路由别名；Pool 路径不再使用当前 Owner。
+Factory 的显式 entity 优先于历史 user_id 路由别名；无状态 MCP 集合读取按方法参数 entity 定位默认模板，不能使用服务实例的旧 entity。Pool 路径不再使用当前 Owner。
 真实 actor 仍由每个命令显式传入，不能由上述路径参数获得人员授权。
 共享/离线/无 Bot 的历史目录流保留显式地址，不因此授予活跃 Bot 的访问权限。
 DB 失败或歧义不能当作 Bot 不存在后猜测资源地址。路由顺序及响应合同由 Legacy
