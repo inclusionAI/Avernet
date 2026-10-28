@@ -511,17 +511,18 @@ class DeviceInstanceService:
         self, record: DeviceBindingRecord, operator: OperatorContext,
     ) -> None:
         # COSEC: only Owner, configured super admin or explicit target-Bot editor.
-        if record.entity_id == operator.staff_id:
+        bolt_id = (record.device_props or {}).get("bolt_id")
+        bot = (
+            self._bot_repo.get_by_id_and_entity(bolt_id, record.entity_id)
+            if self._bot_repo is not None and bolt_id else None
+        )
+        current_owner_id = (bot or {}).get("owner_id") or record.entity_id
+        if current_owner_id == operator.staff_id:
             logger.info("device.restart.authorized binding_id=%s actor_id=%s role=owner", record.id, operator.staff_id)
             return
         if operator.staff_id in admin_scopes.super_admin():
             logger.info("device.restart.authorized binding_id=%s actor_id=%s role=super_admin", record.id, operator.staff_id)
             return
-        bolt_id = (record.device_props or {}).get("bolt_id")
-        bot = (
-            self._bot_repo.get_by_id_and_owner(bolt_id, record.entity_id)
-            if self._bot_repo is not None and bolt_id else None
-        )
         collaborator_service = (
             self._collaborator_service_factory()
             if self._collaborator_service_factory is not None else None

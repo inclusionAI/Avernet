@@ -74,6 +74,7 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
         bot = self._bot_service.get_bot_by_address(
             bot_id=publish_record.source_bot_id,
             user_id=publish_record.owner_id,
+            source_bot_pk=publish_record.source_bot_pk,
         )
         if not bot:
             # Bot not found, default to no approval required
@@ -158,6 +159,7 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
         bot = self._bot_service.get_bot_by_address(
             bot_id=publish_record.source_bot_id,
             user_id=publish_record.owner_id,
+            source_bot_pk=publish_record.source_bot_pk,
         )
         if not bot:
             logger.error(
@@ -237,6 +239,7 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
             "status": "PROCESSING",
             "owner_id": str(self._bot_service.get_bot_by_address(
                 bot_id=publish_record.source_bot_id, user_id=publish_record.owner_id,
+                source_bot_pk=publish_record.source_bot_pk,
             )["owner_id"]),
             "approval_url": approval_result.get("approval_url"),
             "created_at": datetime.now().isoformat(),
@@ -287,6 +290,7 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
         (carries ``success`` / ``puid`` / ``approval_url`` / ``error_msg``)."""
         bot = self._bot_service.get_bot_by_address(
             bot_id=publish_record.source_bot_id, user_id=publish_record.owner_id,
+            source_bot_pk=publish_record.source_bot_pk,
         )
         owner_id = str(bot["owner_id"])
         owner_name = bot.get("owner_name") or owner_id
@@ -369,6 +373,7 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
         # 4. If operator is the owner, skip approval
         if operator == str(self._bot_service.get_bot_by_address(
             bot_id=publish_record.source_bot_id, user_id=publish_record.owner_id,
+            source_bot_pk=publish_record.source_bot_pk,
         )["owner_id"]):
             logger.info(
                 "[check_and_process_should_approval] skip: operator is owner, publish_id=%s, operator=%s",
@@ -451,6 +456,7 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
         # 4. If operator is the owner, skip approval
         if operator == str(self._bot_service.get_bot_by_address(
             bot_id=publish_record.source_bot_id, user_id=publish_record.owner_id,
+            source_bot_pk=publish_record.source_bot_pk,
         )["owner_id"]):
             logger.info(
                 "[check_and_process_offline_approval] skip: operator is owner, publish_id=%s, operator=%s",

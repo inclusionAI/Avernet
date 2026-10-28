@@ -114,6 +114,26 @@ async def test_resource_locator_does_not_grant_owner_permission(publication, act
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("actor", ["B", "A", "outsider"])
+@pytest.mark.parametrize("publish_locator", ["A", "staff_A"])
+async def test_legacy_owner_and_entity_publish_rows_authorize_by_source_pk(publication, actor, publish_locator):
+    with publication.database.orm_session() as session:
+        session.get(BotModel, publication.pk).entity_id = "staff_A"
+    publication.record.owner_id = publish_locator
+
+    response = await upgrade(publication, actor)
+
+    if actor == "B":
+        assert response.success is True
+        publication.service.upgrade_publish.assert_called_once_with(publish_id=13820, owner_id="B")
+        assert publication.locks.get_lock_info.call_args.kwargs["owner_id"] == "B"
+    else:
+        assert response.status_code == 403
+        publication.service.upgrade_publish.assert_not_called()
+    assert publication.record.owner_id == publish_locator
+
+
+@pytest.mark.asyncio
 async def test_owner_equal_to_entity_keeps_existing_upgrade_behavior(publication):
     with publication.database.orm_session() as session:
         session.get(BotModel, publication.pk).owner_id = "A"

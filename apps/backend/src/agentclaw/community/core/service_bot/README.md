@@ -1,5 +1,13 @@
 # `agentclaw.community.core.service_bot`
 
+Publication resource lookups pass the record's `source_bot_pk` to the common
+Bot address resolver. This covers build, verify/online/eval release, scale,
+restart, restore, rollback, approval and deletion: a legacy publish Owner can
+differ from both the current Owner and entity. Config coordinates and engine
+selection use the same source-PK rule. Historical publish fields and per-record
+stage bindings are not rewritten. Only orphaned default metadata retains the
+legacy owner/entity lookup; service-source mismatches fail closed.
+
 Service-bot domain — bot publication facade, BAAS service binding, sub-resource management.
 
 ## Context Boundary

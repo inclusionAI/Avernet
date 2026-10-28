@@ -47,6 +47,10 @@ class LayoutInitializationConfirmationProtocol(Protocol):
 class BotQueryProtocol(Protocol):
     """Bot 查询接口 — 供设备服务检查 Bot 可见性和查询绑定关系."""
 
+    def get_by_id_and_entity(self, bot_id: str, entity_id: str) -> dict[str, Any] | None:
+        """Resolve an immutable resource address; does not authorize an actor."""
+        ...
+
     def get_by_binding_id(self, binding_id: int) -> dict[str, Any] | None:
         """根据 binding_id 获取 Bot 信息.
 

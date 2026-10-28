@@ -194,12 +194,26 @@ class CollaboratorPermissionInterceptor:
 
                 repository = ctx.injector.get(BotRepository)
                 try:
-                    addressed = await asyncio.to_thread(
-                        BotAddressResolver(repository).resolve,
-                        bot_id=params.bot_id,
-                        legacy_owner_id=params.owner_id or user_id,
-                    )
+                    address_resolver = BotAddressResolver(repository)
+                    if params.source_bot_pk is not None:
+                        addressed = await asyncio.to_thread(
+                            address_resolver.resolve_publish_source,
+                            source_bot_pk=params.source_bot_pk,
+                            source_bot_id=params.bot_id,
+                            legacy_owner_id=params.owner_id or user_id,
+                        )
+                    else:
+                        addressed = await asyncio.to_thread(
+                            address_resolver.resolve,
+                            bot_id=params.bot_id,
+                            legacy_owner_id=params.owner_id or user_id,
+                        )
                 except BotAddressNotFoundError:
+                    if params.source_bot_pk is not None:
+                        ctx.response = InterceptedResponse(
+                            success=False, message="发布记录关联的 Bot 不存在", error_code=404,
+                        )
+                        return None
                     pass  # The existing route retains its missing-Bot behavior.
                 else:
                     try:
