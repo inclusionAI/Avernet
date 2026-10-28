@@ -2,7 +2,9 @@
 
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
-from agentclaw.community.adapters.http.knowledge_management.router import execute
+from agentclaw.community.adapters.http.knowledge_management.router import (
+    execute as execute_sync_knowledge_command,
+)
 from agentclaw.community.api.knowledge_content_service import (
     KnowledgeContentServiceProtocol,
 )
@@ -49,7 +51,9 @@ class ContentContext:
                 actor_id=self.user.staffId,
             )
 
-        await run_in_threadpool(execute, self.config, read_detail)
+        await run_in_threadpool(
+            execute_sync_knowledge_command, self.config, read_detail
+        )
 
     async def call(self, operation, **kwargs):
         try:

@@ -302,7 +302,10 @@ def test_finalize_mounts_the_di_conditional_routers(preload_then_finalize):
     before = {row[0] for row in got["before"]["routes"]}
     after = {row[0] for row in got["after_one"]["routes"]}
 
-    assert after - before == {
+    from tests.community.endpoints.test_knowledge_management import CASES
+
+    expected_management_paths = {path for _, path, _ in CASES}
+    assert after - before == expected_management_paths | {
         "/local/sql/execute",
         "/api/bot-knowledge/{bot_id}",
         "/api/bot-knowledge/{bot_id}/{kb_id}",

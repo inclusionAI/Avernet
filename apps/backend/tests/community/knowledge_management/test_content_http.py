@@ -89,10 +89,6 @@ def content():
             KnowledgeManagementConfig(config.enabled, "teamclaw"),
         ),
         (
-            KnowledgeManagementConfig,
-            KnowledgeManagementConfig(config.enabled, "teamclaw"),
-        ),
-        (
             KnowledgeContentServiceProtocol,
             RemoteKnowledgeContentService(remote, TestSessionInterpreter()),
         ),
