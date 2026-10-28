@@ -24,6 +24,11 @@ test):
 - **Late reads are dropped.** A cancelled/threaded read cannot stop the
   underlying SQL, so the result is discarded unless the remaining
   budget can still carry a send.
+- **A slow ``begin`` stops the round, not the truth.** ``begin``
+  answering only after the round deadline is confirmed-not-sent: the
+  attempt is finished and the round is FAILED — never a PUT on a stale
+  budget, and never a blind clear of a dispatched-but-unanswered
+  ``begin`` (that result stays UNKNOWN with its marker kept).
 - **claim BUSY is the only DEFERRED.** Any other infrastructure
   ambiguity reports FAILED, never BUSY, and never sends.
 - **NOT_SENT is the only retryable delivery failure.** The attempt is
@@ -359,6 +364,29 @@ class BotManagerSyncService:
                 attempt=attempt_no,
             )
             return SyncOutcome.UNKNOWN
+
+        # begin answered, but it may have consumed the budget: recompute
+        # the remaining time from a fresh clock read before any PUT (the
+        # lease guard above already covers this smaller remaining).
+        now = self._clock()
+        remaining = deadline - now
+        if remaining < MIN_SEND_BUDGET_SECONDS:
+            # Confirmed-not-sent: begin returned and no PUT was ever
+            # invoked, so the marker is ours to finish here — an
+            # *unanswered* dispatched begin keeps its marker instead.
+            confirmed = await self._finish_confirmed(key, attempt, attempt_no)
+            if confirmed is None:
+                return SyncOutcome.UNKNOWN  # cancelled during finish
+            if not confirmed:
+                return SyncOutcome.BLOCKED  # marker is not ours to clear
+            self._record(
+                SyncEvent.DEADLINE_EXPIRED,
+                key=key,
+                outcome=SyncOutcome.FAILED,
+                attempt=attempt_no,
+                counts={"budget_remaining_ms": max(0, int(remaining * 1000))},
+            )
+            return SyncOutcome.FAILED
 
         try:
             result = await self._bcs.replace_managers(

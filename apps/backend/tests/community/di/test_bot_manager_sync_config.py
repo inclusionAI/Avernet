@@ -305,8 +305,11 @@ def test_enabled_wiring_resolves_dispatcher_on_test_doubles():
 class _CommunityStackFixtures(Module):
     """Bindings the base (community) stack provider needs to resolve."""
 
-    def __init__(self, *, redis_url: str) -> None:
+    def __init__(
+        self, *, redis_url: str, secrets: object | None = None
+    ) -> None:
         self._redis_url = redis_url
+        self._secrets = secrets
 
     def configure(self, binder):
         from agentclaw.community.di import config_community
@@ -314,7 +317,7 @@ class _CommunityStackFixtures(Module):
         binder.bind(ManagerSyncConfig, to=_ENABLED_CONFIG, scope=singleton)
         binder.bind(
             SecretResolver,
-            to=_NoSecretResolver(),
+            to=self._secrets if self._secrets is not None else _NoSecretResolver(),
             scope=singleton,
         )
         binder.bind(
@@ -370,6 +373,46 @@ def test_enabled_without_shared_redis_is_unavailable_no_process_lock():
     stack = injector.get(ManagerSyncStack)
     assert stack.available is False
     assert stack.reason == "shared-redis-required"
+
+
+def test_community_stack_redis_client_has_bounded_socket_timeouts():
+    """The composition root's coordination Redis client carries finite
+    socket timeouts (O(1) inspection of the pooled connection kwargs —
+    ``from_url`` never opens a socket): a stalled Redis fails fast
+    instead of parking every sync worker round after round."""
+    from injector import Injector
+
+    from agentclaw.community.di.modules.bot_manager_sync_module import (
+        REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS,
+        REDIS_SOCKET_TIMEOUT_SECONDS,
+    )
+
+    injector = Injector(
+        [
+            BotManagerSyncModule(),
+            _CommunityStackFixtures(
+                redis_url="redis://127.0.0.1:6399/0",
+                secrets=_FixtureSecretResolver(),
+            ),
+        ]
+    )
+    stack = injector.get(ManagerSyncStack)
+    assert stack.available is True
+    assert stack.coordinator is not None
+    connection_kwargs = (
+        stack.coordinator._redis.connection_pool.connection_kwargs
+    )
+    assert (
+        connection_kwargs["socket_connect_timeout"]
+        == REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS
+    )
+    assert (
+        connection_kwargs["socket_timeout"] == REDIS_SOCKET_TIMEOUT_SECONDS
+    )
+    # small relative to the 15s round budget — several coordination ops
+    # must still fit inside one round.
+    assert REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS < 15
+    assert REDIS_SOCKET_TIMEOUT_SECONDS < 15
 
 
 @pytest.mark.asyncio

@@ -13,6 +13,10 @@ Safety rules driven here (each rule has at least one test):
   reports UNKNOWN.
 - Cancelled ``to_thread`` reads cannot stop the underlying SQL — a late
   result is dropped before ``begin``/BCS (fake clock + thread Event).
+- A ``begin`` that ANSWERS past the round deadline never PUTs: the
+  attempt is confirmed-not-sent, finished (marker cleared) and the
+  round is FAILED — a dispatched ``begin`` with no answer stays
+  UNKNOWN with its marker kept (conservative barrier).
 - claim BUSY is the only DEFERRED; every other infrastructure
   ambiguity is FAILED, never BUSY.
 - NOT_SENT is the only retryable failure: finish first, then re-read
@@ -590,6 +594,128 @@ async def test_cancel_during_put_keeps_unknown_marker():
 
 
 # -- begin: uncertain / lost -------------------------------------------------------
+
+
+class _SlowBeginCoordinator(MemoryManagerSyncCoordinator):
+    """Fake whose ``begin`` answers past the deadline: the injected fake
+    clock advances inside the call, then the real begin succeeds."""
+
+    def __init__(self, *, clock: FakeClock, consume: float) -> None:
+        super().__init__(clock=clock)
+        self._slow_clock = clock
+        self._consume = consume
+
+    def begin(self, lease, *, attempt_id, digest):
+        self._slow_clock.advance(self._consume)
+        return super().begin(lease, attempt_id=attempt_id, digest=digest)
+
+
+class _UnansweredBeginCoordinator(MemoryManagerSyncCoordinator):
+    """Fake whose ``begin`` writes the marker, then cannot answer — the
+    dispatched-begin-with-unknown-result shape."""
+
+    def begin(self, lease, *, attempt_id, digest):
+        super().begin(lease, attempt_id=attempt_id, digest=digest)
+        raise CoordinationUnavailable("redis read timeout mid-begin")
+
+
+class _HangingFinishAfterSlowBeginCoordinator(MemoryManagerSyncCoordinator):
+    """Slow begin past the deadline, then a ``finish`` that hangs on a
+    thread Event and (like an abandoned worker thread) never clears."""
+
+    def __init__(self, *, clock: FakeClock, consume: float) -> None:
+        super().__init__(clock=clock)
+        self._slow_clock = clock
+        self._consume = consume
+        self.finish_entered = threading.Event()
+        self.finish_gate = threading.Event()
+
+    def begin(self, lease, *, attempt_id, digest):
+        self._slow_clock.advance(self._consume)
+        return super().begin(lease, attempt_id=attempt_id, digest=digest)
+
+    def finish(self, attempt):
+        self.finish_entered.set()
+        assert self.finish_gate.wait(timeout=30), "test gate never opened"
+        return False  # the abandoned thread never clears the marker
+
+
+@pytest.mark.asyncio
+async def test_slow_begin_past_deadline_finishes_attempt_and_never_sends():
+    """The reviewer's 16s-begin repro: ``begin`` returns successfully
+    only after the 15s budget is gone — no PUT with the stale remaining
+    time; the attempt is finished (confirmed-not-sent, not a blind
+    clear) and the round is FAILED, never UNKNOWN (zero sends)."""
+    facts = _facts(("admin",))
+    clock = FakeClock()
+    coordinator = _SlowBeginCoordinator(clock=clock, consume=16)
+    service, bcs, coordinator, diag = _build(
+        facts=facts, clock=clock, coordinator=coordinator
+    )
+    assert await service.sync_once(facts.key) is SyncOutcome.FAILED
+    assert bcs.calls == []
+    # confirmed-not-sent: the marker is finished and cleared...
+    assert len(coordinator.calls_to("finish")) == 1
+    assert coordinator.read_blocked(facts.key) is None
+    assert len(coordinator.calls_to("release")) == 1
+    assert diag.counted.get(("deadline_expired", "failed")) == 1
+
+
+@pytest.mark.asyncio
+async def test_slow_begin_past_deadline_finish_mismatch_keeps_marker():
+    """The post-deadline clear is the same CAS finish NOT_SENT uses: a
+    marker that is no longer ours to clear turns the round BLOCKED."""
+    facts = _facts(("admin",))
+    clock = FakeClock()
+    coordinator = _SlowBeginCoordinator(clock=clock, consume=16)
+    coordinator.set_override("finish", lambda attempt: False)
+    service, bcs, coordinator, diag = _build(
+        facts=facts, clock=clock, coordinator=coordinator
+    )
+    assert await service.sync_once(facts.key) is SyncOutcome.BLOCKED
+    assert bcs.calls == []
+    assert coordinator.read_blocked(facts.key) is not None
+    assert diag.counted.get(("finish_mismatch", "blocked")) == 1
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_post_deadline_finish_is_unknown_not_cleared():
+    """Cancelling while the post-deadline ``finish`` thread is already
+    dispatched keeps the marker and reports UNKNOWN — the finish result
+    is genuinely unknown, so this never degrades into a blind clear."""
+    facts = _facts(("admin",))
+    clock = FakeClock()
+    coordinator = _HangingFinishAfterSlowBeginCoordinator(clock=clock, consume=16)
+    service, bcs, coordinator, diag = _build(
+        facts=facts, clock=clock, coordinator=coordinator
+    )
+    task = asyncio.create_task(service.sync_once(facts.key))
+    await _until(coordinator.finish_entered.is_set)
+    task.cancel()
+    coordinator.finish_gate.set()
+    assert (await task) is SyncOutcome.UNKNOWN  # swallowed on purpose
+    assert bcs.calls == []
+    assert coordinator.read_blocked(facts.key) is not None
+    assert len(coordinator.calls_to("release")) == 1
+    assert diag.counted.get(("cancelled", "unknown")) == 1
+
+
+@pytest.mark.asyncio
+async def test_unanswered_begin_keeps_marker_and_reports_unknown():
+    """A dispatched ``begin`` whose result never arrives is untouched by
+    the deadline logic: no PUT, no finish, UNKNOWN, marker kept — the
+    next round is blocked at claim time (conservative barrier)."""
+    facts = _facts(("admin",))
+    coordinator = _UnansweredBeginCoordinator()
+    service, bcs, coordinator, diag = _build(
+        facts=facts, coordinator=coordinator
+    )
+    assert await service.sync_once(facts.key) is SyncOutcome.UNKNOWN
+    assert bcs.calls == []
+    assert coordinator.calls_to("finish") == []
+    assert coordinator.read_blocked(facts.key) is not None
+    assert diag.counted.get(("begin_uncertain", "unknown")) == 1
+    assert await service.sync_once(facts.key) is SyncOutcome.BLOCKED
 
 
 @pytest.mark.asyncio

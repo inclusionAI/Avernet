@@ -76,6 +76,16 @@ from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 
 logger = get_logger()
 
+#: Bounded connect timeout (seconds) for the coordination Redis client.
+#: Small relative to the 15s round budget — claim/renew/begin/finish must
+#: each fit inside one round — so a stalled Redis connect fails fast
+#: instead of parking every sync worker indefinitely.
+REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS = 3.0
+
+#: Bounded read/write timeout (seconds) for one coordination command —
+#: same round-budget rationale as the connect timeout above.
+REDIS_SOCKET_TIMEOUT_SECONDS = 5.0
+
 
 @dataclass(frozen=True)
 class ManagerSyncStack:
@@ -190,7 +200,11 @@ class BotManagerSyncModule(Module):
         try:
             import redis  # community dep; import stays behind the gate
 
-            client = redis.Redis.from_url(redis_url)
+            client = redis.Redis.from_url(
+                redis_url,
+                socket_connect_timeout=REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS,
+                socket_timeout=REDIS_SOCKET_TIMEOUT_SECONDS,
+            )
         except Exception as exc:  # noqa: BLE001 — unavailable, not a crash
             logger.error(
                 "[MANAGER-SYNC] redis_client_build_failed error=%s",
