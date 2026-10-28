@@ -56,3 +56,25 @@ service. `RetrievalService` must honor the requested prefilters and trusted scop
 report unsupported options, and report failures. Providers are supplied and
 closed by the host; neither importing the package nor constructing a router
 initializes storage, models or update jobs.
+
+## Optional staged retrieval and execution protection
+
+`HybridRetrievalService.recall()` returns `RecallResult` (vector and keyword hits,
+query vector, reasons and whether any recall branch completed). `rank()` fuses
+and optionally reranks those candidates. `retrieve()` remains their composition.
+The split permits business adapters to reuse a single query embedding. Empty
+successful recall is distinct from all recall branches failing.
+
+Strict dependency failures remain the default. A host may explicitly select
+`allow_partial=True`: embedding failure keeps keyword results; one failed index
+branch keeps the other; reranker failure keeps RRF ranking. Partial results carry
+`status=degraded` and sanitized stage reasons. Both recall branches failing still
+raises `SearchUnavailable`. Authorization violations never become partial success.
+
+Hosts can inject stage executors through the `CallExecutor` plugin protocol.
+The supplied `ExecutionPool` bounds physical synchronous calls, fails fast when
+full, and retains permits after deadline or cancellation until calls actually end.
+It temporarily rejects calls after repeated failures. Hosts own closing pools and
+must also configure finite timeouts on the underlying provider clients; Python
+cannot stop running threads. No retry, quota allocation or process-wide admission
+policy is silently enabled for existing consumers.
