@@ -1,0 +1,16 @@
+apps/backend/src/agentclaw/corp/plugins/prod/bot_publish_approval.py
+  h_109ba21d0fda5e 65,126-127
+apps/backend/tests/corp/plugins/prod/test_prod_bot_publish_approval.py
+  h_109ba21d0fda5e 102,109-179
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7ad02af6d00ccfa50213fa6044717def59d67ada",
+  "prompts": {},
+  "humans": {
+    "h_109ba21d0fda5e": {
+      "author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}
