@@ -103,7 +103,8 @@ retired. Reactivation requires a Completed Service Session; it has no callback
 status prerequisite. State Machine Node deadlines, progression/IM recovery,
 Provider callbacks and Event subscriptions retain their existing contracts.
 Legacy Group creation accepts and discards `service_spec` for Backend compatibility, and the legacy settings
-endpoint returns 410. Service invocation needs no Group policy marker. MySQL 037
-and SQLite 038 remove only the retired Group policy and Session callback columns;
-stop old binaries before applying cleanup. Historical migration bodies remain
-unchanged. See `apps/bcs/specs/2026-10-27-retire-service-session-policies/spec.md`.
+endpoint returns 410. Service invocation needs no Group policy marker. Existing
+Group policy and Session callback columns, indexes and values remain unchanged;
+runtime stores no longer read or write those fields. This retirement adds no
+schema migration. Stop old binaries to prevent legacy scanners and callbacks
+from continuing to run. See `apps/bcs/specs/2026-10-27-retire-service-session-policies/spec.md`.

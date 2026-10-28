@@ -8,7 +8,9 @@ Service invocation remains authorized by its existing service-key/Bot checks and
 
 ## Alternatives and compatibility
 
-Disabling scanners alone leaves callback-pending reactivation dependencies and unused persistence contracts. Keeping a no-op callback dispatcher also leaves unnecessary Group reads and leases. The chosen removal changes the API contract explicitly and removes all runtime SQL reads/writes of retired columns. Existing numbered migrations stay frozen. An explicit forward cleanup migration removes retired columns/indexes after all old binaries have stopped; no production database operation is part of this change. Preserve historical legacy callback tables and unrelated callback concepts.
+Disabling scanners alone leaves callback-pending reactivation dependencies and unused persistence contracts. Keeping a no-op callback dispatcher also leaves unnecessary Group reads and leases. The chosen removal changes the API contract explicitly and removes runtime dependence on the retired columns. Existing numbered migrations stay frozen. Keep `bcs_groups.service_spec`, `bcs_group_sessions.callback_status`, the three `callback_lease_*` columns, their indexes and stored values unchanged. New writes omit these nullable fields; old values no longer control completion or reactivation. This retirement adds no schema migration or production database operation. Preserve historical legacy callback tables and unrelated callback concepts.
+
+Stop all old scanner/callback binaries during rollout so they cannot continue acting on the retained configuration. Retained columns preserve storage compatibility for a binary rollback, but their values are stale: new Sessions have no callback state and existing callback values are no longer maintained. Review any old policies and pending callbacks before re-enabling an old binary; a rollback can resume legacy behavior and does not retroactively reconstruct missed callbacks.
 
 ## Propagation and cost
 
@@ -19,7 +21,7 @@ Affected: domain/protocol DTOs, Group and Session Service APIs/repository ports,
 1. Add behavior tests: authenticated invocation without service_spec; compatibility acceptance and discard of retired request configuration; normal Session completion and reactivation regardless of persisted old callback state. Run the tests against the baseline and record expected failures.
 2. Remove timeout/recovery task wiring and Session callback call sites. Remove callback-only contracts and state from memory/MySQL Session stores, keep completion events and activation fencing.
 3. Remove service_spec configuration/types/store projection/mutation, retire settings handling, remove max-concurrency checks, and replace configuration-presence branches with Session-based behavior. Propagate fixture and client DTO changes.
-4. Add forward schema cleanup and migration tests/documentation without editing historical migrations; preserve upgrade compatibility until cleanup.
+4. Preserve the deployed schema and historical migrations. Verify fresh initialization, upgrades and repeated startup retain policy/callback columns, indexes and historical values, and that Session creation/completion/reactivation works with those fields present.
 5. Update affected conformance tests, docs and context. Keep existing file boundaries under the user-approved file-size exception; do not globally format.
 6. Run focused tests, affected crates/workspace checks, architecture checks and migration validation where available. Record limitations and review the final diff.
 
@@ -29,7 +31,7 @@ Affected: domain/protocol DTOs, Group and Session Service APIs/repository ports,
 - [ ] No running Session policy scanner / callback sender or callback leases
 - [ ] Legacy create config accepted and discarded; service invocation and authentication retained
 - [ ] Memory and DB completion/reactivation and activation CAS conformance
-- [ ] Forward migration upgrade/fresh schema validation
+- [ ] Unchanged migration chain, retained schema/history and Session lifecycle compatibility
 - [ ] Affected HTTP/WS/Group/Session/runtime tests and compilation
 - [ ] Changed-source line counts and architecture validation
 
@@ -46,8 +48,9 @@ User clarification: leave Backend code unchanged. Its optional legacy service_sp
 
 ## Rebase compatibility
 
-The latest dev branch already owns MySQL 036 and SQLite 037 for Bot authority.
-This PR has not been deployed; its cleanup migrations move to MySQL 037 and
-SQLite 038, preserving the upstream migrations and their checksums. The removed
+The dev baseline owns MySQL 036 and SQLite 037 for Bot authority. This retirement
+adds no migration after those versions and leaves every existing migration file
+and checksum unchanged. The fresh MySQL chain applies 36 versions, and an upgrade
+from version 20 applies 16. SQLite remains at version 37. The removed
 scanner/callback wiring follows the upstream server and WebSocket dispatcher
 file splits. Bot authority and terminal-output protections remain intact.

@@ -57,6 +57,39 @@ async fn sqlite_session_completion_recovery_conforms_and_uses_index() {
 }
 
 #[tokio::test]
+async fn retired_callback_columns_allow_creation_completion_and_reactivation() {
+    let db = sqlite_db().await;
+    let repo = MySqlSessionStore::sqlite(db.clone(), "dev".into());
+    let session = repo.create("retained-schema", NewSessionParams {
+        session_kind: SessionKind::ServiceInvocation, ..Default::default()
+    }).await.unwrap();
+    let legacy_sql = "SELECT callback_status, callback_lease_owner, callback_lease_token, callback_lease_until_ms FROM bcs_group_sessions WHERE env = 'dev' AND session_id = ?";
+    let legacy_row = db.query(DbStatement::with_params(legacy_sql, vec![DbValue::from(session.id.clone())])).await.unwrap();
+    assert_eq!(bcs_db_api::db_get_column_opt::<String>(&legacy_row[0], "callback_status").unwrap(), None);
+    // Simulate a record written by an old binary with an outstanding callback.
+    db.execute(DbStatement::with_params(
+        "UPDATE bcs_group_sessions SET callback_status = 'pending', callback_lease_owner = 'old-worker', callback_lease_token = 42, callback_lease_until_ms = 1234 WHERE env = 'dev' AND session_id = ?",
+        vec![DbValue::from(session.id.clone())],
+    )).await.unwrap();
+    let legacy_row = db.query(DbStatement::with_params(legacy_sql, vec![DbValue::from(session.id.clone())])).await.unwrap();
+    let completed = repo.complete_running_service_activation(
+        &session.id, session.activation_count, Some(json!({"answer": 42})), None,
+    ).await.unwrap().unwrap();
+    assert_eq!(completed.status, SessionStatus::Completed);
+    assert_eq!(completed.output, Some(json!({"answer": 42})));
+    assert!(completed.completed_at.is_some());
+    assert_eq!(repo.try_get(&session.id).await.unwrap().unwrap().output, completed.output);
+    assert_eq!(db.query(DbStatement::with_params(legacy_sql, vec![DbValue::from(session.id.clone())])).await.unwrap(), legacy_row);
+
+    let reactivated = repo.reactivate(&session.id, None).await.unwrap();
+    assert_eq!(reactivated.status, SessionStatus::Running);
+    assert_eq!(reactivated.activation_count, session.activation_count + 1);
+    assert!(reactivated.output.is_none());
+    assert!(reactivated.completed_at.is_none());
+    assert_eq!(db.query(DbStatement::with_params(legacy_sql, vec![DbValue::from(session.id)])).await.unwrap(), legacy_row);
+}
+
+#[tokio::test]
 async fn session_recovery_query_and_decode_failures_are_not_empty_pages() {
     for db in [Arc::new(AlwaysFailDb) as Arc<dyn DbPlugin>, Arc::new(MalformedMembershipRowDb)] {
         let repo = MySqlSessionStore::new(db, "dev".into());
