@@ -10,6 +10,7 @@ conftest 再导出)。local 实现是真实内存 dict(非 MagicMock),下面的�
 - 三态读分辨 FOUND / NOT_FOUND —— 下载路由映射 200 / 404 的判别基础;
 - community 列绑的是契约形状的 fs 实现。
 """
+
 from __future__ import annotations
 
 from agentclaw.community.core.task.task_context.task_artifact.artifact_object_storage import (
@@ -44,7 +45,7 @@ def test_put_rejects_non_bytes_payload(world) -> None:
 
 
 def test_community_column_binds_contract_shaped_impl(community_world) -> None:
-    from agentclaw.community.plugins.community.task_artifact_object_storage import (
+    from agentclaw.community.core.task.task_context.task_artifact.task_artifact_object_storage import (
         CommunityFsTaskArtifactObjectStorage,
     )
 

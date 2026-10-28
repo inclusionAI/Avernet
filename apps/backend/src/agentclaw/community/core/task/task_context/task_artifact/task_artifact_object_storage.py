@@ -1,29 +1,60 @@
-"""Community TaskArtifactObjectStoragePlugin implementation.
+"""TaskArtifactObjectStoragePlugin 的列内实现。
 
-``CommunityFsTaskArtifactObjectStorage`` — a zero-dependency filesystem
-object store for community deployments, mirroring
-:class:`~agentclaw.community.plugins.community.object_storage.CommunityFsObjectStorage`'
-traversal guard. Selected by the ``task_artifact_storage`` block with
-``backend: fs``; any other backend is a configuration error the
-infrastructure module raises on, so a community deployment cannot
-silently write artifact bytes somewhere unexpected.
+本文件归 task 模块自有缝（``artifact_object_storage.py``）同处，避免
+任务域的产物存储实现散落在平台 ``plugins/`` 下：
 
-Transport/IO errors swallow into the Protocol's refusal shapes
-(``False`` / FAILED) rather than raising.
+- test/singlebox: in-memory dict of real bytes for artifact roundtrips.
+- community: filesystem-backed object store for community deployments.
+- other profiles: composition root binds another module-owned implementation
+  or fails closed at configuration validation time.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
 
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugin_api.impl_registry import Mode, plugin_impl
-from agentclaw.community.core.task.task_context.task_artifact.artifact_object_storage import (
+from agentclaw.community.plugin_api.impl_registry import Flavor, Mode, plugin_impl
+
+from .artifact_object_storage import (
     TaskArtifactObjectReadResult,
     TaskArtifactObjectReadStatus,
     TaskArtifactObjectStoragePlugin,
 )
 
 logger = get_logger()
+
+
+@plugin_impl(
+    mode=Mode.LOCAL,
+    flavor=Flavor.FAKE,
+    rationale="in-process dict of real bytes for artifact roundtrips",
+)
+class InMemoryTaskArtifactObjectStoragePlugin(TaskArtifactObjectStoragePlugin):
+    """Task-artifact object store kept in a per-instance dict."""
+
+    def __init__(self) -> None:
+        self._objects: dict[str, bytes] = {}
+
+    def put_object(self, key: str, content: bytes) -> bool:
+        if not isinstance(content, bytes):
+            return False
+        self._objects[key] = content
+        return True
+
+    def get_object(self, key: str) -> TaskArtifactObjectReadResult:
+        if key in self._objects:
+            return TaskArtifactObjectReadResult(
+                status=TaskArtifactObjectReadStatus.FOUND,
+                content=self._objects[key],
+            )
+        return TaskArtifactObjectReadResult(
+            status=TaskArtifactObjectReadStatus.NOT_FOUND
+        )
+
+    def delete_object(self, key: str) -> bool:
+        self._objects.pop(key, None)
+        return True
 
 
 @plugin_impl(
@@ -55,7 +86,9 @@ class CommunityFsTaskArtifactObjectStorage(TaskArtifactObjectStoragePlugin):
             path.write_bytes(content)
             return True
         except OSError as exc:
-            logger.error("TaskArtifactObjectStorage put failed: key=%s, error=%s", key, exc)
+            logger.error(
+                "TaskArtifactObjectStorage put failed: key=%s, error=%s", key, exc
+            )
             return False
 
     def get_object(self, key: str) -> TaskArtifactObjectReadResult:
@@ -74,7 +107,9 @@ class CommunityFsTaskArtifactObjectStorage(TaskArtifactObjectStoragePlugin):
                 content=path.read_bytes(),
             )
         except OSError as exc:
-            logger.error("TaskArtifactObjectStorage get failed: key=%s, error=%s", key, exc)
+            logger.error(
+                "TaskArtifactObjectStorage get failed: key=%s, error=%s", key, exc
+            )
             return TaskArtifactObjectReadResult(
                 status=TaskArtifactObjectReadStatus.FAILED
             )

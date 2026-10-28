@@ -6,6 +6,7 @@ filesystem backend only; anything else is a boot-time configuration
 error (fail fast — a mis-deployed artifact store must not silently
 fall back to writing artifact bytes to local disk).
 """
+
 from __future__ import annotations
 
 from injector import Module, inject, provider, singleton
@@ -31,7 +32,7 @@ class CommunityTaskArtifactObjectStorageModule(Module):
     def task_artifact_object_storage(
         self, config: TaskArtifactStorageConfig
     ) -> TaskArtifactObjectStoragePlugin:
-        from agentclaw.community.plugins.community.task_artifact_object_storage import (
+        from agentclaw.community.core.task.task_context.task_artifact.task_artifact_object_storage import (
             CommunityFsTaskArtifactObjectStorage,
         )
 

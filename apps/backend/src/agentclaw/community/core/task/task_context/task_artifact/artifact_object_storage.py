@@ -3,11 +3,11 @@
 (与 SessionInitiator 同款下沉:task 私有协议定义在 task 自己的模块下,不占
 公共 ``plugin_api/`` 面。)OBJECT_FILE 产物的字节承载(spec 2026-10-20 §13):
 
-- community: ``plugins/community/task_artifact_object_storage.py`` fs 实现
+- community: ``task_artifact_object_storage.py``(同目录) fs 实现
   (``backend: fs``,``user_config.task_artifact_storage`` 块);
 - corp(消费仓): 其自有对象存储服务(``backend: oss``),列内 DI 首次解析时经
   部署自有凭证链(SecretResolver)懒取 AK/SK,导入期零触网;
-- test / singlebox: ``plugins/local/task_artifact_object_storage.py`` 内存实现,
+- test / singlebox: ``task_artifact_object_storage.py``(同目录) 内存实现,
   真实字节回环。
 
 实现经 ``@plugin_impl`` 注册(Rule 20/21 卫生口径);按配置 fail-fast,禁止
@@ -16,6 +16,7 @@
 而非可选 capability —— 下载路由必须区分"字节缺失"(404)与"存储不可用"(502),
 任何实现都必须能回答这个问题。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
