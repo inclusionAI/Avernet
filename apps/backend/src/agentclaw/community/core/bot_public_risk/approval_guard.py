@@ -1,6 +1,7 @@
 """Guard risk-linked approval callbacks and preserve early deliveries."""
 
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
@@ -56,11 +57,26 @@ class RiskApprovalGuard:
                 row.phase == "NEEDS_ATTENTION" and workflow.get("error") == "APPROVAL_OUTCOME_UNKNOWN"
             )) or workflow.get("approval_intent") is not True:
                 return "DENIED"
+            # Before association only a PUID for this generated risk business ID
+            # is eligible for deferred handling; the returned PUID remains authoritative.
+            if re.fullmatch(r"risk-[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}", row.approval_biz_id):
+                if not re.fullmatch(r"antprocess-agentclaw_botpublic_" + re.escape(row.approval_biz_id) + r"(?:_.+)?", puid):
+                    return "DENIED"
             event = {"puid": puid, "decision": decision}
             pending = workflow.get("pending_approval")
             if pending is not None:
-                return "DEFERRED" if pending == event else "DENIED"
-            workflow["pending_approval"] = event
+                candidates = workflow.get("pending_candidates", [])
+                if not isinstance(candidates, list):
+                    return "DENIED"
+                if pending == event or event in candidates:
+                    return "DEFERRED"
+                if len(candidates) >= 7:
+                    return "DENIED"
+                if any(item.get("puid") == puid for item in [pending, *candidates] if isinstance(item, dict)):
+                    return "DENIED"
+                workflow["pending_candidates"] = [*candidates, event]
+            else:
+                workflow["pending_approval"] = event
             if self.repo.update_current(env=env, risk_check_id=risk_id, row_version=row.row_version,
                                         changes={"workflow_json": json.dumps(workflow)}):
                 return "DEFERRED"

@@ -317,3 +317,17 @@ def test_crash_during_lookup_keeps_explicit_unknown_without_reposting():
     assert json.loads(repo.row.workflow_json)["error"] == "APPROVAL_OUTCOME_UNKNOWN"
     advance.advance("dev", "a")
     assert lookup.call_count == 1 and submit.call_count == 0
+
+
+def test_authoritative_approval_association_discards_wrong_early_puid():
+    repo = MemoryRepository(row())
+    def submit(record, on_started):
+        workflow = json.loads(repo.row.workflow_json)
+        workflow['pending_approval'] = {'puid': 'wrong', 'decision': 'AGREE'}
+        repo.update_current(env='dev', risk_check_id='a', row_version=repo.row.row_version,
+                            changes={'workflow_json': json.dumps(workflow)})
+        on_started({'puid': 'correct'})
+        return 'approval'
+    RiskAdvance(repo, lambda _: True, submit, lambda: datetime(2026, 1, 1)).advance('dev', 'a')
+    assert repo.row.approval_puid == 'correct'
+    assert 'pending_approval' not in json.loads(repo.row.workflow_json)

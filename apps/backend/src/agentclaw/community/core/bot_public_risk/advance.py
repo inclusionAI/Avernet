@@ -19,6 +19,16 @@ class ApprovalRecovery(Protocol):
     def __call__(self, row: RiskCheck) -> str | None: ...
 
 
+def _select_authoritative_pending(workflow: dict, puid: str) -> None:
+    """Retain only the early callback for the returned approval instance."""
+    first = workflow.pop("pending_approval", None)
+    candidates = workflow.pop("pending_candidates", [])
+    for event in [first, *(candidates if isinstance(candidates, list) else [])]:
+        if isinstance(event, dict) and event.get("puid") == puid:
+            workflow["pending_approval"] = event
+            break
+
+
 class RiskAdvance:
     """H2 and publish are injected; an uncertain creation is never retried blindly.
 
@@ -87,6 +97,7 @@ class RiskAdvance:
                     workflow.pop("error", None)
                 elif latest.phase != "ADVANCING":
                     raise RuntimeError("risk application no longer advancing")
+                _select_authoritative_pending(workflow, puid)
                 if self.repo.update_current(env=env, risk_check_id=risk_check_id, row_version=latest.row_version,
                                             changes={"phase": "APPROVING", "approval_puid": puid,
                                                      "workflow_json": json.dumps(workflow),
@@ -153,6 +164,8 @@ class RiskAdvance:
             state["error"] = "APPROVAL_TARGET_NOT_READY" if isinstance(puid, str) and puid else "APPROVAL_OUTCOME_UNKNOWN"
             changes = {"phase": "NEEDS_ATTENTION", "next_action_at": None, "workflow_json": json.dumps(state)}
             if isinstance(puid, str) and puid:
+                _select_authoritative_pending(state, puid)
+                changes["workflow_json"] = json.dumps(state)
                 changes["approval_puid"] = puid
             if self.repo.update_current(env=row.env, risk_check_id=row.risk_check_id, row_version=latest.row_version,
                                         changes=changes):

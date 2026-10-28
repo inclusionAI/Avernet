@@ -41,10 +41,17 @@ class RequestConflict(ValueError):
 
 
 class RiskRepository(Protocol):
+    """Risk persistence scoped to the active tenant and supplied environment.
+
+    Errors propagate; a false CAS result means the observation is stale or no
+    longer current. Recovery pages use exclusive after_id and stable ID order.
+    The narrow tenant discovery operation is the sole cross-tenant lookup.
+    """
     def find_risk_tenant(self, *, env: str, risk_check_id: str) -> str | None:
         ...
 
     def create_or_replay(self, record: RiskCheck) -> tuple[RiskCheck, bool]:
+        """Atomically replay identical request IDs or replace the current target; conflicting intent raises RequestConflict."""
         ...
 
     def get_by_request(self, *, env: str, client_scope: str, client_request_id: str) -> RiskCheck | None:
@@ -60,21 +67,25 @@ class RiskRepository(Protocol):
         ...
 
     def update_current(self, *, env: str, risk_check_id: str, row_version: int, changes: dict) -> bool:
+        """CAS only the observed current record; reject invalid field changes."""
         ...
 
     def invalidate_current(self, *, env: str, bot_pk: int, public_scope: str) -> bool:
         ...
 
     def invalidate_if_current(self, *, env: str, risk_check_id: str, row_version: int) -> bool:
+        """Withdraw only the observed current version, never its replacement."""
         ...
 
     def list_due(self, *, env: str, now: datetime, after_id: str='', limit: int=100) -> tuple[RiskCheck, ...]:
+        """Page current due work; exclude paused records and reject invalid limits."""
         ...
 
     def update_notice(self, *, env: str, risk_check_id: str, row_version: int, workflow_json: str, notification_due_at: datetime | None) -> bool:
         ...
 
     def list_notice_due(self, *, env: str, now: datetime, after_id: str='', limit: int=100) -> tuple[RiskCheck, ...]:
+        """Page due notices including historical records; reject invalid limits."""
         ...
 
     def list_recovery_tenants(self, *, env: str) -> tuple[str, ...]:

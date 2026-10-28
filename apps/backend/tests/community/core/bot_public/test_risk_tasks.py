@@ -794,7 +794,7 @@ def test_callback_lookup_failure_never_falls_back_to_legacy():
     called = []
     service = SimpleNamespace(handle_public_approval_callback=lambda **kw: called.append(kw))
     repo = SimpleNamespace(find_risk_tenant=failure)
-    data = {'global_unique_id': 'puid', 'risk_check_id': '12345678-1234-1234-1234-123456789abc'}
+    data = {'global_unique_id': 'antprocess-agentclaw_botpublic_risk-12345678-1234-1234-1234-123456789abc', 'risk_check_id': '12345678-1234-1234-1234-123456789abc'}
     with pytest.raises(RuntimeError, match='database unavailable'):
         handle_approval_callback(data, service, repo)
     assert called == []
@@ -851,3 +851,41 @@ def test_cross_tenant_early_callback_is_deferred_and_replacement_is_denied():
         assert json.loads(row.workflow_json)['pending_approval']['puid'] == puid
         repo.create_or_replay(replace(record, risk_check_id='new', client_request_id='new'))
     assert handle_approval_callback(data, service, repo)['result'] == 'DENIED'
+
+
+def test_early_callback_wrong_puid_cannot_poison_authoritative_association():
+    import json
+    from agentclaw.community.core.bot_public_risk.approval_guard import RiskApprovalGuard
+    from agentclaw.community.core.bot_public_risk.advance import RiskAdvance
+
+    _, repo, _, _, now, record = make()
+    risk_id = '12345678-1234-1234-1234-123456789abc'
+    biz_id = f'risk-{risk_id}'
+    puid = f'antprocess-agentclaw_botpublic_{biz_id}'
+    repo.create_or_replay(replace(record, risk_check_id=risk_id, approval_biz_id=biz_id, phase='ADVANCING', security_status='PASS', workflow_json='{"approval_intent": true}'))
+    guard = RiskApprovalGuard(repo, lambda row: True, lambda: now[0])
+    assert guard.check('dev', risk_id, 'owner', 7, 'wrong', 'AGREE', 'user') == 'DENIED'
+    assert guard.check('dev', risk_id, 'owner', 7, puid + '_wrong', 'AGREE', 'user') == 'DEFERRED'
+    assert guard.check('dev', risk_id, 'owner', 7, puid, 'AGREE', 'user') == 'DEFERRED'
+    advance = RiskAdvance(repo, lambda row: True, lambda row, started: None, lambda: now[0], recovery=lambda row: puid)
+    advance._recover_unknown(repo.get(env='dev', risk_check_id=risk_id))
+    row = repo.get(env='dev', risk_check_id=risk_id)
+    assert row.approval_puid == puid
+    assert json.loads(row.workflow_json)['pending_approval']['puid'] == puid
+    guard.mark_target_ready('dev', risk_id, puid)
+    assert guard.check('dev', risk_id, 'owner', 7, puid, 'AGREE', 'user') == 'ALLOW'
+
+
+def test_early_approval_candidates_are_bounded_and_idempotent():
+    from agentclaw.community.core.bot_public_risk.approval_guard import RiskApprovalGuard
+
+    _, repo, _, _, _, record = make()
+    risk_id = '12345678-1234-1234-1234-123456789abc'
+    biz = f'risk-{risk_id}'
+    base = f'antprocess-agentclaw_botpublic_{biz}'
+    repo.create_or_replay(replace(record, risk_check_id=risk_id, approval_biz_id=biz, phase='ADVANCING', security_status='PASS', workflow_json='{"approval_intent": true}'))
+    guard = RiskApprovalGuard(repo, lambda row: True)
+    for i in range(8):
+        assert guard.check('dev', risk_id, 'owner', 7, f'{base}_{i}', 'AGREE', 'user') == 'DEFERRED'
+    assert guard.check('dev', risk_id, 'owner', 7, f'{base}_0', 'AGREE', 'user') == 'DEFERRED'
+    assert guard.check('dev', risk_id, 'owner', 7, f'{base}_8', 'AGREE', 'user') == 'DENIED'

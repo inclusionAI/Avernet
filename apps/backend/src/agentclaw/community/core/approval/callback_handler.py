@@ -54,7 +54,7 @@ def handle_approval_callback(
     puid_risk_id = match.group(1) if match else None
     if risk_check_id and not re.fullmatch(uuid_pattern, risk_check_id):
         return {"success": False, "message": "invalid risk callback identifier"}
-    if risk_check_id and puid_risk_id and risk_check_id != puid_risk_id:
+    if risk_check_id and risk_check_id != puid_risk_id:
         return {"success": False, "message": "risk callback association mismatch"}
     risk_id = risk_check_id or puid_risk_id
     def invoke():
