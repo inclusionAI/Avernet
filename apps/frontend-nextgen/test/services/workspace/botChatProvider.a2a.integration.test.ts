@@ -20,7 +20,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { deriveEndpointBase, getSendBanRegistry, maybeBuildA2AProvider, takeCachedA2AProvider } from '@/adapters/a2a/bootstrap';
-import { A2A_FILE_REFS_UNSUPPORTED_MESSAGE } from '@avernet/a2a-chat-client';
+import { A2A_FILE_REFS_UNSUPPORTED_MESSAGE, scopedSendBanContext } from '@avernet/a2a-chat-client';
 import { A2A_SWITCH_KEY } from '@/adapters/a2a/switch';
 import * as ctrl from '@/services/backendApi/bots/privateBotSessionController';
 import { getBotIamToken } from '@/services/backendApi/privateChat/iamTokenController';
@@ -147,6 +147,10 @@ async function routingFetch(input: any, init?: any): Promise<Response> {
 }
 
 // ─── 用例 ─────────────────────────────────────────────────────────────────
+
+// R6 禁令作用域：与 BotChatProvider 的 sendBanScopeId 同构(realBotId ownerId stage)
+const BAN_SCOPE = 'b1 2088 online';
+const ban = (ctx: string) => scopedSendBanContext(BAN_SCOPE, ctx);
 
 const BOT = {
   botId: 'b:1', realBotId: 'b1', ownerId: '2088', displayName: 'B',
@@ -603,7 +607,7 @@ describe('BotChatProvider A2A 接缝活体集成（B16）', () => {
 
     // 解禁（confirmed 唯自动释放位）后恢复：新发送照常出站
     const registry = getSendBanRegistry();
-    registry.releaseOnConfirmedAbort(RPC_URL, 'sess-1');
+    registry.releaseOnConfirmedAbort(RPC_URL, ban('sess-1'));
     expect(provider.isSendBanned()).toBe(false);
     sseFactory = (reqId) => sseResponse(
       snapshotEnvelopes.map((e) => ({ ...e, id: reqId })),
@@ -621,7 +625,7 @@ describe('BotChatProvider A2A 接缝活体集成（B16）', () => {
     // 残留禁令 = 旧 A2A 任务取消未被 confirmed 核销（review 场景 4）：直接在
     // app 级 registry（谓词同一实例）挂禁——键与 v3 签发 wsUrl 推导的 endpointBase 同源
     const registry = getSendBanRegistry();
-    registry.begin(RPC_URL, 'sess-1');
+    registry.begin(RPC_URL, ban('sess-1'));
     try {
       // SDK 工厂 stub：开关关 → takeCached 取不到 → v3 stub（真链路的
       // rollbackTransportForNewRun 等价路径），记录直发送位事实
@@ -649,11 +653,11 @@ describe('BotChatProvider A2A 接缝活体集成（B16）', () => {
       expect(onError).toHaveBeenCalledTimes(1);
 
       // confirmed 核销后同入口恢复
-      registry.releaseOnConfirmedAbort(RPC_URL, 'sess-1');
+      registry.releaseOnConfirmedAbort(RPC_URL, ban('sess-1'));
       await v3provider.request({ content: '恢复了', sessionId: 'sess-1' } satisfies BotChatRequest);
       expect(sendings).toEqual(['v3']);
     } finally {
-      registry.releaseOnConfirmedAbort(RPC_URL, 'sess-1');   // 套件卫生：不泄漏给后续用例
+      registry.releaseOnConfirmedAbort(RPC_URL, ban('sess-1'));   // 套件卫生：不泄漏给后续用例
     }
   });
 
@@ -673,7 +677,7 @@ describe('BotChatProvider A2A 接缝活体集成（B16）', () => {
       },
     });
     const registry = getSendBanRegistry();
-    registry.begin(FOREIGN_A2A_FACE_RPC, 'sess-1');
+    registry.begin(FOREIGN_A2A_FACE_RPC, ban('sess-1'));
     try {
       const sendings: string[] = [];
       const stubFor = (kind: string): any => ({
@@ -698,11 +702,56 @@ describe('BotChatProvider A2A 接缝活体集成（B16）', () => {
       expect(onError).toHaveBeenCalledTimes(1);
 
       // 旧面禁令精确核销后同入口恢复——context 键下挂的两条互不误伤
-      registry.releaseOnConfirmedAbort(FOREIGN_A2A_FACE_RPC, 'sess-1');
+      registry.releaseOnConfirmedAbort(FOREIGN_A2A_FACE_RPC, ban('sess-1'));
       await v3provider.request({ content: '恢复了', sessionId: 'sess-1' } satisfies BotChatRequest);
       expect(sendings).toEqual(['v3']);
     } finally {
-      registry.releaseOnConfirmedAbort(FOREIGN_A2A_FACE_RPC, 'sess-1');
+      registry.releaseOnConfirmedAbort(FOREIGN_A2A_FACE_RPC, ban('sess-1'));
+    }
+  });
+
+  it('review R6-F1 §3.1 强制门：Bot A 的禁令不串到同 sessionKey 的 Bot B'
+    + '（scope 隔离——Bot B 走 v3 正常发送）', async () => {
+    // Bot A（b1）cancel 未确认挂禁；Bot B（b2）同名 sessionKey、无任务、
+    // v3 + 被灰度拒绝（withheld）。R5 的裸 context 级查询会拿 Bot A 的禁令
+    // 拦住 Bot B；R6 的 scope 域限定了误封边界。
+    const registry = getSendBanRegistry();
+    registry.begin('http://bot-a-a2a-face/rpc', scopedSendBanContext('b1 2088 online', 'agent:main:main'));
+    try {
+      const sendings: string[] = [];
+      const stubFor = (kind: string): any => ({
+        isA2aProvider: kind === 'a2a',
+        isConnected: true,
+        connect: () => Promise.resolve(),
+        request: () => { sendings.push(kind); return Promise.resolve(); },
+        disconnect: () => undefined,
+        subscribeToConnectionStatus: () => () => undefined,
+      });
+      const BOT_B = {
+        botId: 'b:2', realBotId: 'b2', ownerId: '2088', displayName: 'B2',
+        online: true, chatable: true, runtimeStage: 'online',
+      } as unknown as ChatBotView;
+      const botBProvider = createBotChatProvider({
+        bot: BOT_B, userId: '2088', sessionId: 'agent:main:main',
+        createSdkProvider: (cfg: any) =>
+          stubFor(takeCachedA2AProvider(cfg) ? 'a2a' : 'v3'),
+      });
+      const onError = jest.fn();
+      botBProvider.onError = onError;
+      // 连接响应：无 a2a 地址 + 明确拒绝（Bot B 被灰度拒）——v3 直发
+      mockedGetConnection.mockResolvedValueOnce({
+        data: {
+          sockets: [{ kind: 'chat', url: WS_URL }],
+          a2a_withheld: true,
+          transport_mode: 'remote',
+        },
+      });
+
+      await botBProvider.request({ content: '正常 v3 发送', sessionId: 'agent:main:main' } satisfies BotChatRequest);
+      expect(sendings).toEqual(['v3']);   // 不受 Bot A 禁令影响
+      expect(onError).toHaveBeenCalledTimes(0);
+    } finally {
+      registry.releaseOnConfirmedAbort('http://bot-a-a2a-face/rpc', scopedSendBanContext('b1 2088 online', 'agent:main:main'));
     }
   });
 

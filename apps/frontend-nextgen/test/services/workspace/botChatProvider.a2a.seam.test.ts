@@ -110,11 +110,15 @@ describe('botChatProvider A2A bootstrap 接缝钉板（B16 static guard）', () 
     expect(PROVIDER_SOURCE).toContain(
       'return this.wsUrl !== null',
     );
-    // R5-F2：查询与当前连接的 wsUrl/a2aBaseUrl 无关——回滚移除 A2A 地址后
-    // 旧面禁令仍可查，禁止再回到"按当前面推导键查询"的口径。
+    // R5-F2+R6：查询限定在本 bot/runtime 域内（scope 隔离跨 bot 同名
+    // sessionKey），且与当前连接的推导键无关——回滚移除 A2A 地址后旧面
+    // 禁令仍可查；禁止回到裸 sessionKey（跨 bot 串联）或按当前面推导键查。
     expect(PROVIDER_SOURCE).toContain(
-      'isSendBannedForSession(this.options.sessionId);',
+      'isSendBannedForSession(this.options.sessionId, {',
     );
+    expect(PROVIDER_SOURCE).toContain('scopeId: this.sendBanScopeId,');
+    // 挂禁/核销的 provider 配置同 scope（cfg 条件展开，v3 面幂等忽略）
+    expect(PROVIDER_SOURCE).toContain('sendBanScopeId: this.sendBanScopeId');
     expect(PROVIDER_SOURCE).toContain('this.wsUrl = url;');
     expect(HOOK_SOURCE).toContain('if (provider?.isSendBanned?.()) {');
     expect(HOOK_SOURCE).toContain('toast.error(SEND_BAN_UI_TEXT);');

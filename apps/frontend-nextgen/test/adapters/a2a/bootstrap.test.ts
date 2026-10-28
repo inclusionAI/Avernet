@@ -23,7 +23,7 @@ import {
 } from '@/adapters/a2a/bootstrap';
 import { A2AProvider } from '@avernet/a2a-chat-client';
 import { TransportChoiceCache } from '@avernet/a2a-chat-client';
-import { createSendBanRegistry } from '@avernet/a2a-chat-client';
+import { createSendBanRegistry, isSessionBanned, scopedSendBanContext } from '@avernet/a2a-chat-client';
 import { a2aUrlsFromBaseUrl, a2aUrlsFromWsUrl } from '@avernet/a2a-chat-client';
 import { makeEngineCard } from './helpers';
 
@@ -364,28 +364,32 @@ describe('isSendBannedForSession + deriveEndpointBase（§3.1 发送门）', () 
   it('挂禁命中即拦、不同 context 不拦、confirmed 核销后放行', () => {
     const registry = createSendBanRegistry();
     const base = deriveEndpointBase(WS_URL)!;
-    registry.begin(base, 'ctx-1');
-    expect(isSendBannedForSession('ctx-1', registry)).toBe(true);
-    expect(isSendBannedForSession('ctx-2', registry)).toBe(false);
-    registry.releaseOnConfirmedAbort(base, 'ctx-1');
-    expect(isSendBannedForSession('ctx-1', registry)).toBe(false);
+    const scope = 'bot-a 2088 online';
+    const ban = scopedSendBanContext(scope, 'ctx-1');
+    registry.begin(base, ban);
+    expect(isSessionBanned(registry, 'ctx-1', { scopeId: scope, wsUrl: WS_URL })).toBe(true);
+    expect(isSessionBanned(registry, 'ctx-2', { scopeId: scope, wsUrl: WS_URL })).toBe(false);
+    registry.releaseOnConfirmedAbort(base, ban);
+    expect(isSessionBanned(registry, 'ctx-1', { scopeId: scope, wsUrl: WS_URL })).toBe(false);
   });
 
   it('context 级查询：挂禁与当前连接推导键不同源仍拦（回滚换轨后旧面禁令不丢）', () => {
     const registry = createSendBanRegistry();
+    const scope = 'bot-a 2088 online';
     // 回滚前：独立 A2A 面挂禁（cancel 未确认）
-    registry.begin('http://bonjour-a2a-face/…/rpc', 'ctx-1');
-    // 回滚后：重连收 withheld 且无 a2a 地址——此前的按推导键查询会查丢
-    expect(isSendBannedForSession('ctx-1', registry)).toBe(true);
+    registry.begin('http://bonjour-a2a-face/rpc', scopedSendBanContext(scope, 'ctx-1'));
+    // 回滚后：重连收 withheld 且无 a2a 地址——按推导键查询会查丢
+    expect(isSessionBanned(registry, 'ctx-1', { scopeId: scope, wsUrl: WS_URL })).toBe(true);
   });
 
   it('核销仍精确按 (endpoint, context)：其他面的挂禁不受影响', () => {
     const registry = createSendBanRegistry();
-    registry.begin('http://face-a/rpc', 'ctx-1');
-    registry.begin('http://face-b/rpc', 'ctx-2');
-    registry.releaseOnTerminal('http://face-a/rpc', 'ctx-1');
-    expect(isSendBannedForSession('ctx-1', registry)).toBe(false);
-    expect(isSendBannedForSession('ctx-2', registry)).toBe(true);
+    const scope = 'bot-a 2088 online';
+    registry.begin('http://face-a/rpc', scopedSendBanContext(scope, 'ctx-1'));
+    registry.begin('http://face-b/rpc', scopedSendBanContext(scope, 'ctx-2'));
+    registry.releaseOnTerminal('http://face-a/rpc', scopedSendBanContext(scope, 'ctx-1'));
+    expect(isSessionBanned(registry, 'ctx-1', { scopeId: scope, wsUrl: WS_URL })).toBe(false);
+    expect(isSessionBanned(registry, 'ctx-2', { scopeId: scope, wsUrl: WS_URL })).toBe(true);
   });
 });
 
@@ -489,22 +493,49 @@ describe('B17 决策表补充行：a2aBaseUrl 在场（resolveA2aUrls 单源）'
   });
 });
 
-describe('B17 发送门：context 级查询（R5-F2 后与推导键无关）', () => {
-  it('签发面挂禁 → 移出名单（a2aWithheld、无地址）后重连仍拦', () => {
+describe('发送门：scoped context 查询（R5-F2 旧面可查 + R6-F1 跨 bot 隔离）', () => {
+  const SCOPE_A = 'bot-a 2088 online'; // 成分无空格、空格为域边界（宿主构造约定）
+  const SCOPE_B = 'bot-b 2088 online';
+
+  it('同 bot：签发面挂禁 → 移出名单（a2aWithheld、无地址）后重连仍拦', () => {
     const registry = createSendBanRegistry();
-    registry.begin(A2A_URLS.rpcUrl, 'ctx-1');
+    // 挂禁键=provider 实际口径（scopedSendBanContext(scope, context)）
+    registry.begin(A2A_URLS.rpcUrl, scopedSendBanContext(SCOPE_A, 'ctx-1'));
     // 旧口径按当前连接推导键查询：签发地址不在场时键从 relay ws 派生
-    // （≠ 签发键），旧任务禁令会被查丢——context 级查询不受推导键影响。
+    // （≠ 签发键），旧任务禁令会被查丢——scope 内 context 级查询不受推导键影响。
     expect(deriveEndpointBase(SIGNED_CONFIG.url)).not.toBe(A2A_URLS.rpcUrl);
-    expect(isSendBannedForSession('ctx-1', registry)).toBe(true);
-    expect(isSendBannedForSession('ctx-2', registry)).toBe(false);
+    expect(isSendBannedForSession('ctx-1', {
+      scopeId: SCOPE_A, wsUrl: SIGNED_CONFIG.url, a2aBaseUrl: undefined,
+    }, registry)).toBe(true);
+    expect(isSendBannedForSession('ctx-2', {
+      scopeId: SCOPE_A, wsUrl: SIGNED_CONFIG.url, a2aBaseUrl: undefined,
+    }, registry)).toBe(false);
   });
 
-  it('ws 推导面挂禁同样可查（回归线）', () => {
+  it('跨 bot：同名 sessionKey（不同 OpenClaw 实例的 agent:main:main）互不串联', () => {
+    const registry = createSendBanRegistry();
+    registry.begin(A2A_URLS.rpcUrl, scopedSendBanContext(SCOPE_A, 'agent:main:main'));
+    // Bot B（v3、被灰度拒绝 a2aWithheld=true）不得命中 Bot A 的禁令
+    expect(isSendBannedForSession('agent:main:main', {
+      scopeId: SCOPE_B, wsUrl: WS_URL, a2aBaseUrl: undefined,
+    }, registry)).toBe(false);
+    // Bot A 自己仍拦（同 scope 任意面）
+    expect(isSendBannedForSession('agent:main:main', {
+      scopeId: SCOPE_A, wsUrl: SIGNED_CONFIG.url, a2aBaseUrl: undefined,
+    }, registry)).toBe(true);
+  });
+
+  it('无 scope（未升级宿主）：退回当前面推导键精确查询的 legacy 口径', () => {
     const registry = createSendBanRegistry();
     const base = deriveEndpointBase(WS_URL)!;
     registry.begin(base, 'ctx-1');
-    expect(isSendBannedForSession('ctx-1', registry)).toBe(true);
+    expect(isSendBannedForSession('ctx-1', {
+      wsUrl: WS_URL, a2aBaseUrl: undefined,
+    }, registry)).toBe(true);
+    // 推导键不同源（如回滚后）不启用 context 扫描——capabilities opt-in
+    expect(isSendBannedForSession('ctx-1', {
+      wsUrl: SIGNED_CONFIG.url, a2aBaseUrl: undefined,
+    }, registry)).toBe(false);
   });
 });
 

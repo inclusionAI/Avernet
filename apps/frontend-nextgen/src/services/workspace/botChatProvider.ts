@@ -14,6 +14,7 @@ import { installCompleteFallback } from './botChatCompleteFallback';
 import {
   BOT_MESSAGE_PAGE_SIZE,
   botSessionService,
+  resolveChatRuntimeStage,
   resolveUserId,
   withFriendBotRequestParams,
   type ChatBotView,
@@ -99,6 +100,10 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   private a2aBaseUrl: string | null = null;
   /** 用户灰度负结果（服务端 a2a_withheld）——bootstrap 拦截推导/探测/构造 */
   private a2aWithheld = false;
+  /** R6 禁令作用域：bot+owner+stage 键前缀——registry 是 app 级单例而
+   * sessionKey 跨 bot 不唯一（不同 OpenClaw 实例的同名会话），scope 把
+   * 挂禁/查询/核销限定在本 bot/runtime 域内，杜绝跨 bot 串联误封。 */
+  private readonly sendBanScopeId: string;
   /** B12 取消四态的宿主订阅面（A2AProvider.onCancelOutcome → useBotChat toast 消费） */
   private readonly cancelOutcomeListeners = new Set<(outcome: CancelOutcome) => void>();
   private unsubscribeInnerConnection?: () => void;
@@ -112,6 +117,11 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   constructor(options: BotChatProviderOptions) {
     this.options = options;
     this.getIamTokenFn = options.getIamToken ?? getBotIamToken;
+    // 成分均无空格（bot id/工号/stage 枚举）——空格即稳定的域边界（policy 约定）。
+    this.sendBanScopeId = [
+      options.bot.realBotId, options.bot.ownerId,
+      resolveChatRuntimeStage(options.bot),
+    ].join(' ');
   }
 
   get isConnected(): boolean {
@@ -150,11 +160,15 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
    * （尚无 ws url）/ 非 A2A 面（选择探测落 v3）恒 false——v3 发送不受影响。
    */
   isSendBanned(): boolean {
-    // 查询口径 = sessionKey 级（context 挂有任意面未终结禁令即拦），与当前
-    // 连接的 wsUrl/a2aBaseUrl 无关——灰度回滚移除 A2A 地址后旧面禁令仍
-    // 可查（review R5-F2），不因推导键漂移误放行。
+    // 查询口径 = 本 bot/runtime 域内 context 级（scope 隔离跨 bot 同名
+    // sessionKey），与当前连接的推导键无关——回滚移除 A2A 地址后旧面禁令
+    // 仍可查（R5-F2），跨 bot 互不串联（R6-F1）。
     return this.wsUrl !== null
-      && isSendBannedForSession(this.options.sessionId);
+      && isSendBannedForSession(this.options.sessionId, {
+        scopeId: this.sendBanScopeId,
+        wsUrl: this.wsUrl,
+        a2aBaseUrl: this.a2aBaseUrl ?? undefined,
+      });
   }
 
   /** B12 取消终局播报订阅：A2AProvider.onCancelOutcome 经本类转发（含 provider 已 teardown 的迟到核销） */
@@ -253,6 +267,10 @@ private fetchIamToken(): Promise<string> {
       ...(this.a2aBaseUrl ? { a2aBaseUrl: this.a2aBaseUrl } : {}),
       // 用户灰度明确拒绝同链透传：bootstrap 拦截推导/探测/缓存构造。
       ...(this.a2aWithheld ? { a2aWithheld: true } : {}),
+      // R6 禁令作用域进 provider 配置:挂禁/核销与宿主查询同键
+      //（条件展开同 a2aBaseUrl 模式:v3 OpenClawProviderConfig 无此成员,
+      // spread 形态不触发 excess-property 检查,v3 对多出成员幂等忽略）
+      ...(this.sendBanScopeId ? { sendBanScopeId: this.sendBanScopeId } : {}),
       sessionKey: this.options.sessionId,
       xIAMToken: this.iamToken,
       immediateConnect: true,
@@ -432,6 +450,10 @@ private fetchIamToken(): Promise<string> {
       url: this.wsUrl,
       ...(this.a2aBaseUrl ? { a2aBaseUrl: this.a2aBaseUrl } : {}),
       ...(this.a2aWithheld ? { a2aWithheld: true } : {}),
+      // R6 禁令作用域进 provider 配置:挂禁/核销与宿主查询同键
+      //（条件展开同 a2aBaseUrl 模式:v3 OpenClawProviderConfig 无此成员,
+      // spread 形态不触发 excess-property 检查,v3 对多出成员幂等忽略）
+      ...(this.sendBanScopeId ? { sendBanScopeId: this.sendBanScopeId } : {}),
       sessionKey: this.options.sessionId,
     } as A2aBootstrapConfig;
     if (takeCachedA2AProvider(probeCfg)) return;    // 当下选择仍 A2A——复用

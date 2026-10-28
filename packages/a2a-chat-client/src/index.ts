@@ -81,6 +81,7 @@ export type {
 // —— 传输选择策略纯函数（policy.ts 单源；宿主 bootstrap 仅保历史 re-export）——
 export {
   resolveA2aUrls, deriveEndpointBase, isLockCandidateError, isSessionBanned,
+  scopedSendBanContext,
   A2A_CHOICE_SESSION_KEY, SEND_BAN_UI_TEXT,
   type A2aBootstrapConfig,
 } from './policy';
