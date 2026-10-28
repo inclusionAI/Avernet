@@ -26,6 +26,7 @@ it.each([
   ["failed", "unknown", undefined],
   ["canceled", "unknown", undefined],
   ["completed", "unknown", "user_continued"],
+  ["completed", "unknown", "owner_handoff"],
 ] as const)("omits terminal group notices without intervention: %s/%s/%s", async (status, effect, completionReason) => {
   const { notifier, task, tasks, sender, events } = setup();
   task.status = status; task.completionReason = completionReason; task.interventionStatus = "none";
@@ -201,6 +202,91 @@ it("does not turn missing delivery, a reply or an ended task into confirmed reco
   const text = sender.send.mock.calls[0][0].text;
   expect(text).toContain("消息触达未确认"); expect(text).toContain("Bot 已回复");
   expect(text).toContain("恢复效果尚未确认"); expect(text).not.toContain("<font");
+});
+
+it.each([
+  ["recovered", "原任务已恢复"],
+  ["not_recovered", "原任务未恢复"],
+  ["unknown", "恢复效果尚未确认"],
+] as const)("shows the saved Owner handoff details without changing effect %s", async (effect, conclusion) => {
+  const { notifier, task, sender, events } = setup();
+  const handoff = "## 转交原因\n\n原任务的外部上报缺少可独立核对的回执。\n\n"
+    + "已核查本轮执行记录，保留现有结果并避免重复业务操作。".repeat(18)
+    + "\n\n## Owner 处理事项\n\n核查 eventKey start-fixture-key、end-fixture-key 对应的服务端记录；核对 worker.py 的实际位置。";
+  task.status = "completed"; task.completionReason = "owner_handoff"; task.interventionStatus = "performed";
+  task.final_summary = "原任务已经核查，具体后续事项在转交说明中。";
+  task.judgment = { delivery: "confirmed", response: "acted", effect, summary: handoff, evidence_ids: [] };
+  task.timeline.push({ event_id: "handoff", kind: "termination", at_ms: 2, actor: "agent", summary: handoff,
+    payload: { completion_reason: "owner_handoff" } });
+  task.timeline.push({ event_id: "released", kind: "execution", at_ms: 3, actor: "service",
+    summary: "本次执行结束，已保存任务上下文", payload: {} });
+  // A queued legacy callback may still refer to the release event; the saved handoff remains authoritative.
+  notifier.after({ ...message, eventId: "released", kind: "result" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  const sent = sender.send.mock.calls[0][0];
+  expect(sent.title).toBe("会话自愈｜已转交 Owner，自愈已结束");
+  expect(sent.text).toContain("**【转交原因与 Owner 处理事项】**");
+  expect(sent.text).toContain("外部上报缺少可独立核对的回执");
+  expect(sent.text).toContain("start\\-fixture\\-key"); expect(sent.text).toContain("end\\-fixture\\-key");
+  expect(sent.text).toContain("worker\\.py");
+  expect(sent.text).toContain(conclusion);
+  expect(sent.text).toContain("本次自愈已结束，后续由 Owner 处理。");
+  expect(sent.text).not.toContain("本次执行结束，已保存任务上下文");
+  expect(sent.text).not.toContain("等待 Owner");
+  expect(task.judgment.effect).toBe(effect);
+});
+
+it.each([
+  ["message", "已提交恢复消息"], ["plan", "已形成修复方案"], ["execution", "修复方案执行未完成"],
+] as const)("keeps a delayed %s notification unchanged after Owner handoff", async (kind, title) => {
+  const { notifier, task, sender, events } = setup();
+  task.status = "completed"; task.completionReason = "owner_handoff";
+  notifier.after({ ...message, kind });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  const sent = sender.send.mock.calls[0][0];
+  expect(sent.title).toBe(`会话自愈｜${title}`);
+  expect(sent.text).not.toContain("转交原因与 Owner 处理事项");
+});
+
+it("uses the saved task summary when a legacy handoff has no detailed judgment", async () => {
+  const { notifier, task, sender, events } = setup();
+  task.status = "completed"; task.completionReason = "owner_handoff";
+  task.final_summary = "请 Owner 核查 start-fixture-key 对应的上报记录。";
+  task.timeline[0].summary = "本次执行结束，已保存任务上下文";
+  notifier.after({ ...message, kind: "result" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  const text = sender.send.mock.calls[0][0].text;
+  expect(text).toContain("start\\-fixture\\-key");
+  expect(text).not.toContain("本次执行结束，已保存任务上下文");
+});
+
+it("prefers the saved handoff event over a generic legacy task summary", async () => {
+  const { notifier, task, sender, events } = setup();
+  task.status = "completed"; task.completionReason = "owner_handoff";
+  task.final_summary = "原任务已经核查，具体后续事项在转交说明中。";
+  task.timeline.push({ event_id: "handoff", kind: "termination", at_ms: 2, actor: "agent",
+    summary: "缺少外部回执，请 Owner 核查 start-fixture-key 对应的服务端记录。",
+    payload: { completion_reason: "owner_handoff" } });
+  notifier.after({ ...message, kind: "result" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  expect(sender.send.mock.calls[0][0].text).toContain("start\\-fixture\\-key");
+});
+
+it.each([
+  ["Chinese", "请核对原始执行回执。".repeat(700), "任务摘要。".repeat(400)],
+  ["emoji", "😀。".repeat(2000), "任务摘要。".repeat(400)],
+  ["escaped characters", "&&&&。".repeat(1600), "&&&&。".repeat(400)],
+])("bounds long Owner details with %s while retaining the task link", async (_name, summary, finalSummary) => {
+  const { notifier, task, sender, events } = setup();
+  task.status = "completed"; task.completionReason = "owner_handoff";
+  task.final_summary = finalSummary;
+  task.judgment = { delivery: "confirmed", response: "acted", effect: "unknown", summary, evidence_ids: [] };
+  notifier.after({ ...message, kind: "result" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  const text = sender.send.mock.calls[0][0].text;
+  expect(Buffer.byteLength(text)).toBeLessThan(20000);
+  expect(text).toContain("完整内容见任务页");
+  expect(text).toContain("[查看完整任务与处理记录]");
 });
 
 it("shows the business summary of an audited plan action without claiming unexecuted actions", async () => {
