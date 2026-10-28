@@ -1,3 +1,7 @@
+function formatPreviewLimit(bytes: number): string {
+  return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MiB` : `${Math.round(bytes / 1024)} KiB`;
+}
+
 /**
  * 体超限错误：2xx 预览体超限时对调用方上抛；!ok 响应由 httpClient 降级为按 HTTP 状态
  * 处置（鉴权/错误语义优先，预览大小限制不得覆盖，见 executeBackendRequest）。
@@ -7,10 +11,6 @@ export class ResponseTooLargeError extends Error {
     super(`内容超过 ${formatPreviewLimit(limit)}，暂不支持在线预览`);
     this.name = 'ResponseTooLargeError';
   }
-}
-
-function formatPreviewLimit(bytes: number): string {
-  return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MiB` : `${Math.round(bytes / 1024)} KiB`;
 }
 
 /** Opt-in byte limit for small inline previews. Cancellation also closes chunked responses. */
