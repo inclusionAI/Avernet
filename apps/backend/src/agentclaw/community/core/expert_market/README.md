@@ -78,8 +78,16 @@ source-credential name). GitSync's secret URL is deliberately not reused: its
 transport credential and the Manifest resolver credential have different owners.
 The configured source must correspond to the catalogue's `source_repo_id`.
 
-The original task spec binds the final stored Manifest key and canonical digest;
-its workers verify before each read and never reconstruct from the latest Git.
+The original task spec binds the final stored Manifest key and canonical digest.
+Creation passes a Manifest-owned `StateRef("manifest", "sha256-json-v1:<digest>")`
+through the existing Apply run and queue for each delivery phase. The Manifest
+compiler verifies the exact parsed document it consumes, both at admission and
+again in the worker, before any fetch or materialisation. Missing or changed
+documents refuse the run without restoring old content. No document or private
+storage coordinates travel in this reference. Ordinary subsequent Apply keeps
+`MANIFEST_STATE` (an unbound reference) and may use the owner's updated document;
+the origin is history, not a permanent lock on configuration. No task recompiles
+from the latest expert catalogue or Git.
 An internal `ExpertOrigin` travels into the initial Bot INSERT with avatar and
 Passport ext fields. Ordinary Bot metadata updates reject that system key.
 The public Bot DTO exposes only `expert_name`; internal provenance remains in

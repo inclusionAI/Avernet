@@ -63,6 +63,73 @@ _ISSUED_BOT = {
 }
 
 
+def _bound_payload():
+    binding = {key: _PAYLOAD[key] for key in ("entity_id", "bot_id", "tenant", "env")}
+    binding.update(manifest_digest="a" * 64, digest_encoding="sha256-json-v1")
+    return {**_PAYLOAD, "spec": {**_PAYLOAD["spec"], "manifest_binding": binding}}
+
+
+class _BoundSeam:
+    def __init__(self):
+        self.verified = []
+        self.phases = []
+
+    def verify_binding(self, **kwargs):
+        self.verified.append(kwargs)
+
+    def apply_pre_container(self, **kwargs):
+        self.phases.append(kwargs)
+        return "apply-a"
+
+
+@pytest.mark.parametrize("sequence", list(CreationSequence))
+def test_binding_reaches_every_creation_sequences_pre_container_phase(sequence):
+    seam = _BoundSeam()
+    bot = _ISSUED_BOT if sequence is CreationSequence.RECORD_APPLY_PROVISION else None
+    handler, _, _, _ = _handler(passport_status="ISSUED", bots=_Bots(bot), seam=seam)
+    payload = {**_bound_payload(), "creation_sequence": sequence.value}
+    assert isinstance(handler.handle(payload), Reschedule)
+    assert seam.verified and seam.phases[0]["expected_manifest_digest"] == "a" * 64
+
+
+def test_binding_reaches_the_on_container_run_as_a_manifest_reference():
+    from agentclaw.community.core.bot_config_manifest.binding import bound_manifest_state
+
+    handler, applies, _, _ = _handler(bots=_Bots(_ISSUED_BOT), seam=_BoundSeam())
+    assert isinstance(handler.handle(_bound_payload()), Complete)
+    assert applies.started[0]["state"] == bound_manifest_state("a" * 64)
+    assert "expected_manifest_digest" not in applies.started[0]
+
+
+@pytest.mark.parametrize("field,value", [
+    ("manifest_digest", "bad"), ("digest_encoding", "unknown"),
+    ("entity_id", "other"), ("bot_id", "other"), ("tenant", "other"), ("env", "prod"),
+])
+def test_invalid_binding_stops_without_creating_or_discarding(field, value):
+    payload = _bound_payload()
+    payload["spec"]["manifest_binding"][field] = value
+    handler, applies, seam, created = _handler(passport_status="ISSUED")
+    assert isinstance(handler.handle(payload), Fail)
+    assert not created and not applies.started and not seam.discards
+
+
+def test_expert_origin_without_binding_cannot_become_an_ordinary_creation():
+    payload = {**_PAYLOAD, "spec": {**_PAYLOAD["spec"], "expert_origin": {"expert_id": "writer"}}}
+    handler, _, seam, created = _handler(passport_status="ISSUED")
+    assert isinstance(handler.handle(payload), Fail)
+    assert not created and not seam.discards
+
+
+def test_expert_origin_and_execution_binding_must_identify_the_same_input():
+    payload = _bound_payload()
+    payload["spec"]["expert_origin"] = {
+        "manifest_digest": "b" * 64, "digest_encoding": "sha256-json-v1",
+    }
+    handler, _, seam, created = _handler(passport_status="ISSUED")
+    assert isinstance(handler.handle(payload), Fail)
+    assert not created and not seam.discards
+
+
 @dataclass
 class _Report:
     trigger: str

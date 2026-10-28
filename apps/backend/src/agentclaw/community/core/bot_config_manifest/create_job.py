@@ -29,6 +29,9 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import MANIFEST_STATE
+from agentclaw.community.core.bot_config_manifest.binding import (
+    DIGEST_ENCODING, ManifestBindingMismatchError, bound_manifest_state,
+)
 from agentclaw.community.core.bot_app_grant.protocols import (
     BotAppGrantSweepProtocol,
 )
@@ -63,6 +66,7 @@ from agentclaw.community.core.task_queue.types import (
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
+from agentclaw.community.utils.env_utils import get_current_env
 
 if TYPE_CHECKING:  # pragma: no cover - import-time cycle, see ``enqueue_create_job``
     from agentclaw.community.core.task_queue.services.task_queue_service import (
@@ -365,19 +369,34 @@ class BotCreateWithManifestHandler:
         bot_id = str(payload["bot_id"])
         entity_id = str(payload["entity_id"])
 
-        binding = payload["spec"].get("manifest_binding")
-        if binding:
-            if (binding["entity_id"] != entity_id or binding["bot_id"] != bot_id
-                    or binding["tenant"] != str(payload.get("tenant") or "")
-                    or binding["env"] != str(payload["env"])):
-                return Fail(f"{BOT_COULD_NOT_BE_PROVISIONED}: bound Manifest storage reference does not match creation")
-            try:
+        spec = payload["spec"]
+        binding = spec.get("manifest_binding")
+        try:
+            if spec.get("expert_origin") and not binding:
+                raise ManifestBindingMismatchError("expert creation is missing its Manifest binding")
+            if binding is not None:
+                if (not isinstance(binding, dict)
+                        or binding.get("entity_id") != entity_id
+                        or binding.get("bot_id") != bot_id
+                        or binding.get("tenant") != str(payload.get("tenant") or "")
+                        or binding.get("env") != get_current_env()
+                        or binding.get("env") != payload.get("env")
+                        or binding.get("digest_encoding") != DIGEST_ENCODING):
+                    raise ManifestBindingMismatchError("bound Manifest storage reference does not match creation")
+                bound_manifest_state(binding.get("manifest_digest"))
+                origin = spec.get("expert_origin")
+                if origin is not None and (
+                    not isinstance(origin, dict)
+                    or origin.get("manifest_digest") != binding["manifest_digest"]
+                    or origin.get("digest_encoding") != DIGEST_ENCODING
+                ):
+                    raise ManifestBindingMismatchError("expert origin does not match its Manifest binding")
                 self._seam_provider().verify_binding(
                     entity_id=entity_id, bot_id=bot_id,
                     manifest_digest=binding["manifest_digest"],
                 )
-            except ValueError as exc:
-                return Fail(f"{BOT_COULD_NOT_BE_PROVISIONED}: {exc}")
+        except ValueError as exc:
+            return Fail(f"{BOT_COULD_NOT_BE_PROVISIONED}: {exc}")
         bot = self._bots_provider().get_by_id_and_entity(bot_id, entity_id)
         if bot is None:
             return self._before_the_bot_exists(payload)
@@ -655,10 +674,10 @@ class BotCreateWithManifestHandler:
                 bot=bot,
                 owner_id=str(payload["user_id"]),
                 actor_id=str(payload["user_id"]),
-                state=MANIFEST_STATE,
+                state=(bound_manifest_state(payload["spec"]["manifest_binding"]["manifest_digest"])
+                       if payload["spec"].get("manifest_binding") is not None else MANIFEST_STATE),
                 trigger=CREATE_ON_CONTAINER_TRIGGER,
                 phase=ApplyPhase.ON_CONTAINER,
-                **self._binding_kwargs(payload),
                 carry_from_apply_id=self._pre_container_apply_id(
                     entity_id=entity_id, bot_id=bot_id
                 ),
