@@ -132,6 +132,12 @@ export interface PublicBot {
   isOwnedByLoggedInUser?: boolean;
   /** 智能搜索 Discovery 响应的推荐理由简述（recommendation.short_profile），名称搜索无此字段。 */
   shortProfile?: string;
+  /**
+   * 公开受众类型（由 BCS visibility / user_visibility 两维独立设置派生）：
+   * 'user' = 仅对用户公开，'bot' = 仅对 Bot 公开；两类均公开或字段缺失时无值。
+   * 分享链接据此携带 audience 参数，深链落地时用于提前匹配浏览身份。
+   */
+  audience?: 'user' | 'bot';
 }
 
 /** Return the stable identity used to isolate friend-request state for a public Bot card. */
@@ -246,6 +252,8 @@ export interface SquareDeepLink {
   id: string;
   /** Bot 分享链接附带的公开名称，仅作为 Catalog Search 提示；最终仍按 id 精确匹配。 */
   searchHint?: string;
+  /** Bot 分享链接附带的公开受众类型（'user' 仅对用户公开 / 'bot' 仅对 Bot 公开）；两类均公开时不携带。 */
+  audience?: 'user' | 'bot';
 }
 
 /**
