@@ -1,10 +1,10 @@
 # BCS 超长 Rust 文件按职责拆分设计
 
 > 日期：2026-10-28
-> 状态：总体方案与范围已确认；本文细化设计待用户审阅；尚未开始实现。
+> 状态：设计已确认，已获授权编写第 1 单元实施计划；尚未开始实现。
 > 源码基准：`dd316eb35`（`dev`，包含 #3209）。
 > 范围：下表五个源文件及完成其拆分所必需的 crate 内私有模块与测试装配。
-> 本轮交付：仅 design 文档，不执行 Rust 重构，不自动进入实现计划。
+> 设计交付：本文及第 1 单元 [实施计划](../plans/2026-10-28-bcs-bot-event-contract-decomposition-implementation-plan.md)；不执行 Rust 重构。
 
 ## 1. 决策与目标
 
@@ -197,7 +197,8 @@ CLI library 的 `lib.rs`、`client.rs`、`oauth.rs` 不因消重而扩大修改�
 | `task_result.rs` | Worker final 到 Manager 的结果、独立上下文、成功前后持久化与失败重试 |
 | `task_stream.rs` | after-last-tool-call、delta/tool 分界、SSE 及参与者 tags |
 | `task_completion.rs` | pending/超时 guard、跨 Session 任务、Service Session 完成与群状态 |
-| `history_persistence.rs` | owner/audience、tool start 保留/清除、写失败、错误/终态 segment 落库 |
+| `task_history.rs` | 任务消息落库顺序、错误/终态 segment、去重及目标身份 |
+| `history_persistence.rs` | owner/audience、tool start 保留/清除、写失败及非任务 segment 落库 |
 | `human_notify.rs` | legacy mention、结构化路由、Sender Route、策略阻断与 Human 通知 |
 | `support.rs` | 套件级共享入口；按下列职责装配 fixture |
 | `support/{channel,session,messages,task_flow,frames}.rs` | Channel/System 记录器、Session fake、记录/阻塞 repo、任务组合工厂、payload 与断言辅助 |
@@ -205,6 +206,15 @@ CLI library 的 `lib.rs`、`client.rs`、`oauth.rs` 不因消重而扩大修改�
 按场景语义分组而非原文件连续区间；每个函数只有一个拥有者。
 例如 TaskResult 的重试写入测试归 `task_result`，通用消息 repo fixture 归 `support/messages`，
 不能复制两份记录器或把一个测试拆成互相依赖的多个测试。
+
+`BlockingInterceptor` 被 task dispatch 阻断和 Human 通知策略阻断两个场景共用，
+类型与唯一 trait impl 归 `support/task_flow.rs`，不放在任一场景模块内私有。
+通过套件级受限可见性和具名重导出供 `task_routing`、`human_notify` 使用，
+不复制实现、不扩大为生产 API。
+
+2026-10-28 规划细化：原文件有 108 个测试，包含一个带 `start_paused = true`
+的 Tokio 测试；按 14 个场景模块编制一一迁移清单。`task_history.rs` 将任务历史
+与通用持久化场景分开，避免重新形成超长测试模块，不增加测试或改变职责范围。
 
 保留既有 `support/session.rs` 与 `crates/test-support/message_flow_contract_support.rs`
 的原装配关系。不改变 `BcsMessageFlow` 的生产导出或把套件 fake 移进生产 crate API。
@@ -395,6 +405,10 @@ DB 往返数、批次上界、读写行数、锁/事务范围的预期变化为 
 
 - 使用 AST/结构化提取比较搬迁前后函数及测试体，列明所有非字节等价修改。
   允许的非字节等价项必须对应导入、路径、可见性或直接委托，不容许弱化断言。
+- AST 保持性检查不能替代 Rust 编译；共享 fixture 拆分后必须实际验证跨模块名称解析
+  和隐私边界，不能只凭 preview/verify 成功宣告工具可执行。
+- 跨工具调用恢复 Bash 会话时，同时恢复工作目录、执行变量及 `set -euo pipefail`；
+  验证经 `tee` 记录的失败仍以非零退出，避免 Cargo/门禁失败被日志管道掩盖。
 - 验证测试名单旧 -> 新映射是一一对应；不能以相同数量掩盖丢失与重复。
 - 重启测试保持完整名称，并逐个验证子进程实际运行目标测试，不能仅检查退出码 0。
 - 对所有新增、修改 `.rs` 逐一计算物理行数，包含不在原五文件中的必要修改。
@@ -517,6 +531,9 @@ cargo test -p bcs-collaboration-store --test mysql_store \
 - 一致性：类型和状态留原父级；长 trait 采用唯一实现，不使用部分 trait impl。
 - 可执行性：给出每个模块的职责、特殊兼容点、逐单元验证和失败停止条件。
 - 门禁：承认源码搬移进入覆盖率分母，采用更严格文档约束，不改阈值或统计范围。
-- 权限：总体方案已获用户确认；本文仍需用户审阅后才进入实现计划。
-- 当前证据：已检查源码、AST item 边界、现有模块布局、重启测试名称和 coverage 入口；
-  本轮未执行构建、业务测试、数据库或 E2E，不宣称重构已完成或测试已通过。
+- 权限：设计已确认，用户已授权编写第 1 单元实施计划；实施仍需后续执行指令。
+- 初版设计证据：已检查源码、AST item 边界、现有模块布局、重启测试名称和 coverage 入口；
+  设计阶段未执行构建、业务测试、数据库或 E2E。
+- 审阅修订证据：第 1 单元的临时副本已通过 AST 保持性及 Rust 名称解析/类型检查，
+  Bash 恢复与失败传播检查通过；初始 imports 仍需实施时清理。详见实施计划的验收追踪。
+  工作区未执行 Rust 重构，不宣称完成业务测试或最终门禁。
