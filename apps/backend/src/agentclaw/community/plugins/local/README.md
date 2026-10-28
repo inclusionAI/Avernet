@@ -88,7 +88,6 @@ internal_dependencies:
   - agentclaw.community.plugin_api.impl_registry
   - agentclaw.community.plugin_api.knowledge_catalog
   - agentclaw.community.plugin_api.local_skill_security_provider
-  - agentclaw.community.plugin_api.manager_sync_coordination
   - agentclaw.community.plugin_api.mcp_auth
   - agentclaw.community.plugin_api.mcp_center
   - agentclaw.community.plugin_api.notify_sender

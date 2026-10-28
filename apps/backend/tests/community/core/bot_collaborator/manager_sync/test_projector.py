@@ -12,10 +12,9 @@ Projection rules pinned here (Task 1 type dictionary):
   still ``space_eligible``, excluding the owner, deduped and sorted;
 - rejection: unknown roles and empty ``user_id`` rows raise instead of
   being silently projected as members;
-- cap: at most 1,000 manager ids; one more raises ``SnapshotTooLarge``;
-- digest: SHA-256 over canonical JSON of key / target / owner / full
-  list, so it moves with the desired state, not the input order.
+- cap: at most 1,000 manager ids; one more raises ``SnapshotTooLarge``.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -49,11 +48,16 @@ def _facts(
 
 def test_all_explicit_roles_but_not_owner_or_revoked_member():
     facts = SyncFacts(
-        SyncKey("tenant-a", "dev", 7), "default", "stable-entity", "new-owner",
-        (CollaboratorFact("admin", "admin", True),
-         CollaboratorFact("member", "member", True),
-         CollaboratorFact("new-owner", "admin", True),
-         CollaboratorFact("revoked", "member", False)),
+        SyncKey("tenant-a", "dev", 7),
+        "default",
+        "stable-entity",
+        "new-owner",
+        (
+            CollaboratorFact("admin", "admin", True),
+            CollaboratorFact("member", "member", True),
+            CollaboratorFact("new-owner", "admin", True),
+            CollaboratorFact("revoked", "member", False),
+        ),
     )
     result = build_snapshot(facts)
     assert result.bcs_bot_id == "default:stable-entity"
@@ -64,44 +68,47 @@ def test_empty_collaborators_project_empty_manager_set():
     result = build_snapshot(_facts(()))
     assert result.manager_user_ids == ()
     assert result.bcs_bot_id == "default:stable-entity"
-    assert len(result.digest) == 64
 
 
-def test_duplicate_rows_dedupe_sort_and_keep_digest_stable():
+def test_duplicate_rows_dedupe_and_sort():
     facts = _facts(
-        (CollaboratorFact("zeta", "member", True),
-         CollaboratorFact("alpha", "admin", True),
-         CollaboratorFact("alpha", "member", True),
-         CollaboratorFact("zeta", "member", True)),
+        (
+            CollaboratorFact("zeta", "member", True),
+            CollaboratorFact("alpha", "admin", True),
+            CollaboratorFact("alpha", "member", True),
+            CollaboratorFact("zeta", "member", True),
+        ),
     )
     result = build_snapshot(facts)
     assert result.manager_user_ids == ("alpha", "zeta")
-    distinct_order = build_snapshot(
+
+
+def test_role_change_between_admin_and_member_keeps_ids():
+    admin_first = build_snapshot(
         _facts(
-            (CollaboratorFact("zeta", "member", True),
-             CollaboratorFact("alpha", "admin", True)),
+            (
+                CollaboratorFact("u1", "admin", True),
+                CollaboratorFact("u2", "member", True),
+            )
         )
     )
-    assert result.digest == distinct_order.digest
-
-
-def test_role_change_between_admin_and_member_keeps_ids_and_digest():
-    admin_first = build_snapshot(
-        _facts((CollaboratorFact("u1", "admin", True),
-                CollaboratorFact("u2", "member", True)))
-    )
     roles_swapped = build_snapshot(
-        _facts((CollaboratorFact("u1", "member", True),
-                CollaboratorFact("u2", "admin", True)))
+        _facts(
+            (
+                CollaboratorFact("u1", "member", True),
+                CollaboratorFact("u2", "admin", True),
+            )
+        )
     )
     assert admin_first.manager_user_ids == roles_swapped.manager_user_ids
-    assert admin_first.digest == roles_swapped.digest
 
 
 def test_unknown_role_rejected_not_silently_projected_as_member():
     facts = _facts(
-        (CollaboratorFact("admin", "admin", True),
-         CollaboratorFact("guest", "guest", True)),
+        (
+            CollaboratorFact("admin", "admin", True),
+            CollaboratorFact("guest", "guest", True),
+        ),
     )
     with pytest.raises(ValueError, match="role"):
         build_snapshot(facts)
@@ -125,22 +132,25 @@ def test_cap_allows_1000_managers_and_rejects_1001():
 def test_owner_change_keeps_bcs_identity_and_excludes_new_owner():
     old_owner = build_snapshot(
         _facts(
-            (CollaboratorFact("admin", "admin", True),
-             CollaboratorFact("old-owner", "admin", True)),
+            (
+                CollaboratorFact("admin", "admin", True),
+                CollaboratorFact("old-owner", "admin", True),
+            ),
             owner_id="old-owner",
         )
     )
     new_owner = build_snapshot(
         _facts(
-            (CollaboratorFact("admin", "admin", True),
-             CollaboratorFact("new-owner", "admin", True)),
+            (
+                CollaboratorFact("admin", "admin", True),
+                CollaboratorFact("new-owner", "admin", True),
+            ),
             owner_id="new-owner",
         )
     )
     assert old_owner.bcs_bot_id == new_owner.bcs_bot_id == "default:stable-entity"
     assert old_owner.manager_user_ids == ("admin",)
     assert new_owner.manager_user_ids == ("admin",)
-    assert old_owner.digest != new_owner.digest
 
 
 def test_missing_stable_identity_raises_snapshot_unavailable():

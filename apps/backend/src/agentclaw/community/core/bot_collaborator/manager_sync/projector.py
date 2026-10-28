@@ -1,8 +1,8 @@
 """The manager set projector — ``SyncFacts`` in, ``ManagerSnapshot`` out.
 
 A pure function over in-memory facts: no database, no plugins, no
-logging of the projected roster (the id list labels travel inside the
-payload/digest, but nothing here writes them anywhere).
+logging of the projected roster (the id list travels only inside the
+returned payload; nothing here writes it anywhere).
 
 Rules (fixed by the Task 1 type dictionary):
 
@@ -14,20 +14,15 @@ Rules (fixed by the Task 1 type dictionary):
 - membership: ``admin`` / ``member`` rows that are still
   ``space_eligible``, excluding the current owner, deduped and sorted.
 - cap: at most 1,000 manager ids — ``SnapshotTooLarge`` beyond that.
-- digest: SHA-256 over canonical JSON of key, target, owner, and the
-  full id list, so it tracks the desired state rather than input order.
 """
-from __future__ import annotations
 
-import hashlib
-import json
+from __future__ import annotations
 
 from agentclaw.community.kernel.bot_manager_sync import (
     ManagerSnapshot,
     SnapshotTooLarge,
     SnapshotUnavailable,
     SyncFacts,
-    SyncKey,
 )
 
 #: The only roles that make someone a BCS manager; anything read from
@@ -54,10 +49,17 @@ def build_snapshot(facts: SyncFacts) -> ManagerSnapshot:
                 f"collaborator with empty user_id for bot_pk={facts.key.bot_pk}"
             )
 
-    user_ids = tuple(sorted({row.user_id for row in facts.collaborators
-                             if row.role in MANAGER_ROLES
-                             and row.space_eligible
-                             and row.user_id != facts.owner_id}))
+    user_ids = tuple(
+        sorted(
+            {
+                row.user_id
+                for row in facts.collaborators
+                if row.role in MANAGER_ROLES
+                and row.space_eligible
+                and row.user_id != facts.owner_id
+            }
+        )
+    )
     if len(user_ids) > MAX_MANAGER_USER_IDS:
         raise SnapshotTooLarge()
 
@@ -67,7 +69,6 @@ def build_snapshot(facts: SyncFacts) -> ManagerSnapshot:
         bcs_bot_id=bcs_bot_id,
         owner_id=facts.owner_id,
         manager_user_ids=user_ids,
-        digest=_digest(facts.key, bcs_bot_id, facts.owner_id, user_ids),
     )
 
 
@@ -83,22 +84,3 @@ def _require_identity(facts: SyncFacts) -> None:
         raise SnapshotUnavailable("missing_entity_id")
     if not facts.owner_id:
         raise SnapshotUnavailable("missing_owner_id")
-
-
-def _digest(
-    key: SyncKey, bcs_bot_id: str, owner_id: str, user_ids: tuple[str, ...]
-) -> str:
-    payload = json.dumps(
-        {
-            "avernet_tenant": key.avernet_tenant,
-            "env": key.env,
-            "bot_pk": key.bot_pk,
-            "bcs_bot_id": bcs_bot_id,
-            "owner_id": owner_id,
-            "manager_user_ids": list(user_ids),
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()

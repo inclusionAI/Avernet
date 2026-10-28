@@ -81,33 +81,12 @@ user_config:
     poll_interval_seconds: 0.2
     poll_jitter_seconds: 0.0
 
-  # Backend→BCS manager sync — enabled on the singlebox stack in the
-  # single-replica downgrade form: `coordination_mode: memory` runs the
-  # SAME in-process coordinator contract the conformance suites pin
-  # (claim/begin/finish/hold/generation/CAS inside one process), with the
-  # REAL direct delivery: the backend self-signs an X-Avernet-Principal
-  # for its own service identity and PUTs straight to the BCS origin
-  # (no gateway hop). Singlebox has exactly one
-  # Backend process and always whole-stack-restarts, so there is no
-  # cross-process writer to protect — which is exactly why `memory` is a
-  # dev-stack value ONLY and never a production mode: production keeps
-  # the default `redis` (shared, non-evicting Redis + ops-initialized
-  # generation sentinel; see docs/bot-manager-sync-operations.md §3).
-  # `env: dev` must equal the env singlebox Bots are created with
-  # (SERVER_ENV=dev → get_current_env()="dev"); the dispatcher env-gate
-  # and the reader both filter on it. Delivery authentication is the
-  # same shared gateway-principal signing key the verifier uses
-  # (SecretNamesConfig.gateway_principal_signing_key): the dev value is
-  # exported by singlebox/modules/backend.sh, and the dev BCS trusts the
-  # `backend` issuer for `managers:sync` via its
-  # [[bot_authority.trusted_apps]] rule (app `backend`, tenant teamclaw).
+  # Best-effort projection through the same direct BCS delivery as production.
+  # Local BCS trusts the backend service principal using the existing dev key.
   bot_manager_sync:
     enabled: true
-    coordination_mode: memory
-    target_id: singlebox-dev-manager-sync
     env: dev
     bcs_base_url: "http://127.0.0.1:21000"
-    coordination_generation: singlebox-memory-generation
 
   # token_exchange — 外网替换为本地 mock
   token_exchange:

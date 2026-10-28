@@ -4,7 +4,7 @@ Shared vocabulary for the Backend→BCS bot manager sync feature. Every
 layer exchanges these values: the api Service Protocol
 (``api/bot_manager_sync.py``), the core projector and later services,
 the read repository contracts, and the plugin Protocols
-(``BcsManagersPlugin``, ``ManagerSyncCoordinator``). Names and shapes
+(``BcsManagersPlugin``). Names and shapes
 below are a type dictionary frozen by the task plan — later tasks fill
 in the implementations and must not rename or re-parameterize members.
 
@@ -14,6 +14,7 @@ module without dragging infrastructure along (the labels of the
 manager ids are part of the payload, but nothing here logs or exposes
 them).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -64,16 +65,14 @@ class SyncFacts:
 class ManagerSnapshot:
     """The projected desired state of one Bot's BCS manager set.
 
-    ``digest`` is the SHA-256 over canonical JSON of key, target,
-    owner, and the full id list — it moves with the desired state so
-    senders can dedupe identical pushes.
+    The snapshot is the complete desired manager roster for one stable BCS
+    Bot identity. Delivery always replaces the full set.
     """
 
     key: SyncKey
     bcs_bot_id: str
     owner_id: str
     manager_user_ids: tuple[str, ...]
-    digest: str
 
 
 @dataclass(frozen=True)
@@ -127,10 +126,6 @@ class SyncOutcome(StrEnum):
     ACKNOWLEDGED_EMPTY = "acknowledged_empty"
     DRIFT = "drift"
     FAILED = "failed"
-    DEFERRED = "deferred"
-    BLOCKED = "blocked"
-    UNKNOWN = "unknown"
-    SKIPPED = "skipped"
 
 
 class DeliveryFailure(StrEnum):

@@ -1,480 +1,193 @@
-# Backend→BCS bot manager sync — implementation contract and release validation record
+# Backend → BCS bot manager best-effort sync specification
 
-Branch: `feat/backend-bcs-manager-sync` (16 commits ahead of `origin/REL20261027`;
-merge-base `1131e4af8c30e35cfa3b28effcdaba7fb2d2174c`, computed fresh in this
-session as `git merge-base origin/REL20261027 HEAD` with the released
-`origin/REL20261027` ref already fetched at `1131e4af8…` in this checkout —
-never a stale SHA or a direct target-tree diff).
+- Status: implemented; local regression passed, remote CI/live validation pending
+- Feature baseline: `be5b69b21`
+- Merge target: `dev`; release work is already merged, so no release/dev split remains
+- Design: `/home/admin/workspace/docs/avernet/superpowers/specs/2026-10-26-backend-bcs-manager-sync-design.md`
+- Operations: `apps/backend/docs/bot-manager-sync-operations.md`
 
-This doc is the concise implementation contract plus the honest record of which
-gates actually ran and which did not. The full design lives outside this
-repository (`2026-10-26-backend-bcs-manager-sync-design.md`, § pointers
-recorded in the plan); the operational procedure is
-`apps/backend/docs/bot-manager-sync-operations.md`. Nothing here overrides an
-accepted ADR or the architecture rules.
+## Problem
 
-> **Revision (2026-10-28, direct delivery):** the delivery path changed on
-> this branch. The syncer no longer authenticates through the gateway's
-> app registry (that form's premise — a gateway bearer the gateway would
-> resolve into a trusted-App principal — was contractually refuted and
-> removed). It now PUTs **directly to the BCS origin** with a self-signed
-> `X-Avernet-Principal` minting this component's own service identity
-> (`core/gateway_principal/service_principal.py`: `iss=backend`,
-> `aud=bcs`, `kid=bare`, short-lived, one app principal — the `backend`
-> service — scoped to the snapshot's own backend tenant) using the SAME
-> shared signing key and `SecretNamesConfig.gateway_principal_signing_key`
-> conventions every other principal flow uses. The signing side stays
-> inside the signer package's minting boundary: self-identity only, no
-> caller-claims oracle. Production prerequisites therefore read:
-> **BCS-side issuers whitelist containing `backend`** (with the shared
-> verification key distributed per the existing gateway_principal
-> conventions) **+ `trusted_apps(app=backend, tenant=<the backend
-> tenant>, actions=[managers:sync])` registered on BCS**. §1, §2 deploy
-> order and §11.3 below carry the corrected form; the §8/§11.2 gate
-> numbers are historical run records of the branch and stay verbatim.
+Backend owns Bot collaborators while BCS consumes a manager set. The projection must
+follow committed Backend changes without adding BCS latency or failure to the business
+transaction. The product accepts best-effort delivery and does not require distributed
+ordering, a durable outbox, or eventual consistency.
 
-## 1. Implementation contract (what shipped)
+## Contract
 
-- **Service API** — `agentclaw.community.api.bot_manager_sync.BotManagerSyncProtocol`
-  (`request_sync` / `request_space_sync`): the only surface business code
-  calls; verdicts `QUEUED / COALESCED / DISABLED / REJECTED`, never blocking on
-  BCS, never raising for downstream states.
-- **Core** — `core/bot_collaborator/manager_sync/`: `projector.py` (pure
-  roster projection: `admin`+`member` explicit collaborators with Team Space
-  eligibility, owner excluded, dedup+sorted, hard cap 1,000,
-  `bcs_bot_id = "<bot_id>:<entity_id>"` stable identity), `service.py` /
-  `dispatcher.py` / `retry.py` / `lifecycle.py` (bounded in-memory executor,
-  per-Bot merge generations, bounded retry budgets, startup/shutdown via the
-  kernel lifecycle), `repair.py` (maintenance-only first-backfill /
-  targeted-compensation surface), `diagnostics.py` (structured logs/metrics
-  without rosters or secrets).
-- **Plugin API** — `plugin_api/bcs_managers.py` (`BcsManagersPlugin.replace_managers`,
-  typed `added/removed/total` verdicts, `BcsManagersError` with stable kind/code,
-  never raw response bodies) and `plugin_api/manager_sync_coordination.py`
-  (`ManagerSyncCoordinator`: atomic claim/begin/finish/release,
-  owner-hold markers, exact-attempt CAS clear, generation sentinel).
-- **Plugins** — `plugins/community/bcs_managers.py` (one PUT per attempt
-  direct to the BCS origin, authenticated with a self-signed
-  `X-Avernet-Principal` minted per send from the composition-root-provided
-  minter — no Bearer, no gateway hop), local fakes in `plugins/local/`, and
-  `plugins/community/manager_sync_coordination.py`
-  (Redis-coordinator over atomic Lua: strict leases, TTL-less in-flight
-  markers, generation verification) and `plugins/community/manager_sync_scripts.py`.
-- **Triggers** — the existing collaborator callback plus post-commit hints
-  from work orders (editor approvals), owner handoff (COMMITTING_OWNER, no
-  Passport admin-sync path), Space member/maintenance flows, space join
-  approval completion, and `BotSpaceService.change_space`. Every hint sits in
-  its own local try/except; no trigger can change the business result.
-- **Repository** — read-only queries in
-  `core/repository/implementations/bot/manager_sync.py` (bot facts, roster,
-  space-affected bots, repair paging). **No schema, no task persistence, no
-  `ac_task_queue` use, no `Bot.ext` sync state.**
-- **DI/config** — `di/bot_manager_sync_config.py` (`bot_manager_sync` block;
-  strictly validated; **default off**; the block's keys are the whole
-  surface — auth is NOT one of them), `di/modules/bot_manager_sync_module.py`
-  (stack + coordinator + repair + lifecycle bindings; disabled deployments
-  resolve zero-resource twins), context-boundary READMEs updated for every
-  new boundary.
+### Source of truth
 
-## 2. Release decision record (design §12 — verbatim decision)
+A fresh projection contains every explicit `admin` and `member` collaborator that is
+still eligible under the existing Team Space policy, excluding the current Backend
+Owner. IDs are deduplicated and sorted; more than 1,000 is an error. Passport and
+device credential updates remain admin-only.
 
-- **Deploy order:** record the release Backend build SHA and the deployed dev
-  BCS version independently → confirm the coordination topology and the Redis
-  **non-eviction guarantee** → configure and verify the BCS-side delivery
-  prerequisites (issuers whitelist containing `backend`, the shared
-  verification-key distribution per the existing gateway_principal
-  conventions, and the `trusted_apps(app=backend, tenant=<backend tenant>,
-  actions=["managers:sync"])` rule), Human registration and the target Bot's
-  stable identity →
-  deploy the Backend with the feature **default-off** → verify shared
-  coordination and unknown-result recovery → run the first sync + permission
-  acceptance for a controlled Bot → only then widen notifications.
-- **Without the Redis non-eviction guarantee this release keeps the feature
-  closed.** No automatic degradation is shipped: the single-replica
-  restricted form (single instance/process/logical writer, no overlapping
-  releases, external stop-send + old-request-completion confirmation before
-  manual recovery) would still need its own explicitly approved contract,
-  tests and operational duties. This release adds **no** local-only
-  production mode and **no** new configuration item for such a form.
-- **Rollback** stops new notifications/sends and drains bounded work only; it
-  never rewrites managers already in BCS (close ≠ revoke — §7 below) and there
-  is no SQL migration to revert. Lost in-memory tasks are not promised back;
-  recovery is the runbook's manual backfill/compensation.
+A fact-read, stable-identity, eligibility, or projection failure sends nothing. It
+must never clear BCS by substituting an empty roster.
 
-## 3. Evidence separation (what gate proves what)
+### Business notification
 
-- The **external live suite** — tests →
-  `tests/community/acceptance/bcs_manager_sync_external/` — is the only
-  compatibility evidence for this feature: controlled release Backend +
-  deployed dev BCS, normal Backend HTTP mutations, owner-credential BCS reads.
-  The directory is deliberately outside the release singlebox manifest
-  (`singlebox/ci/singlebox_coverage_modules.yaml` — unchanged by this branch):
-  the default singlebox builds the release-tree BCS whose gates say nothing
-  about this feature, and no module or threshold was added or cut.
-- The Backend's existing singlebox/coverage/SAST/architecture gates below
-  prove what the feature must **not** have changed (business semantics,
-  boundaries, file sizes, schema).
-- BCS-side authority proof: the dev-source Rust tests (independent dev
-  worktree, fixed SHA) prove the **contract**; they cannot prove the
-  deployment actually running at an endpoint — deployment verification is a
-  separate release step.
+`BotManagerSyncProtocol.request_sync` and `request_space_sync` are post-commit,
+nonblocking notification surfaces. They perform bounded memory admission only and
+return `QUEUED`, `COALESCED`, `DISABLED`, or `REJECTED`. They never confirm remote
+state and never change a collaborator, work-order, Space, Bot-space, or Owner-handoff
+result.
 
-## 4. First-registration / owner / empty-roster acceptance guidance
+Owner handoff uses the same ordinary refresh path as every other roster-affecting
+change. It does not invoke BCS owner transfer, establish owner alignment, or create a
+persistent owner gate.
 
-1. Ownership evidence is read from **both sides**: the Backend owner of the
-   case Bot and the BCS owner summary of the stable target must agree before
-   any first sync (the live fixture asserts this precondition).
-2. A first empty roster is acceptable only with the Bot's **BCS registration
-   evidence** (registry entry + version + stable identity), every paged key
-   accounted for (`queued + coalesced + rejected` = paged, `rejected_keys`
-   empty), and every emptied key's `ACKNOWLEDGED_EMPTY` backed by that
-   existence proof. A queued counter or an all-zero sweep is submission, not
-   acceptance; an ordinary App's 403/404 on a read is never a data answer
-   (runbook §6).
-3. Unknown humans and unregistered targets are never auto-created or guessed;
-   identity completion happens through the registration path and a fresh
-   explicit re-request (runbook §2).
+### Runtime
 
-## 5. Redis coordination ownership (who owns what)
+- Keep the dedicated manager-sync background loop.
+- Run 4 workers.
+- Bound Bot entries plus pending/expanding Space hints to 1,024 total, counting running entries.
+- Page Space fan-out and repair at 100 keys.
+- Coalesce only within one process. A notification arriving during a round marks the
+  key dirty and causes a later fresh-read round.
+- Do not use Redis leases, in-flight markers, namespace generations, owner holds, or
+  CAS recovery.
 
-- **Generation sentinel** `mgrsync:v1:{sha256(target_id)}:generation`:
-  initialized only by operations with all senders stopped (runbook §3),
-  pinned as `coordination_generation` in the deployment config, required to
-  match before any lease/marker operation; it is never auto-created by
-  workers and a missing/mismatched sentinel stops every sender.
-- **Non-eviction:** coordination markers are TTL-less by design; the shared
-  Redis must protect them from normal eviction — a cache that cannot give
-  that guarantee means the feature stays off (§2).
-- **Drain/unknown ownership:** the in-flight marker blocks new snapshots for
-  the Bot. Clearing it is a controlled human step — stop old senders, prove
-  from BCS server-side evidence (request/audit) the ended attempt, CAS-clear
-  exactly that attempt id with operator + evidence, then re-request; a fixed
-  wait or a fetched roster is never proof (runbook §4/§5).
+Cross-replica, out-of-order, concurrent, and late writes are allowed. Process failure
+may lose admitted work. There is no eventual-consistency guarantee. Stale managers,
+including revoked permissions, may persist until a later successful sync or manual
+resync. Existing editor locks reduce risk but do not serialize every trigger.
 
-## 6. Unknown-recovery drill summary
+### Retry and outcome
 
-The drill shape (implemented in the external live suite, destructive
-posture): a held/dropped in-flight PUT after its bytes were accepted produces
-an `unknown` outcome and plants the marker; later snapshots for the key are
-blocked (verified through the maintenance coordinator's `read_blocked`);
-recovery replays exactly the runbook's §4/§5 flow — evidence collection,
-`clear_confirmed_attempt(key, attempt_id, operator_id, evidence)` returning
-`True`, explicit `request_bot(key)` re-request, and only then roster
-convergence is asserted. The owner-drill variant plants the owner-check hold
-on handoff completion and asserts BCS ownership is **never** auto-transferred
-(design §3.3); its marker is deliberately left to the §5.3 both-sides ops
-reconciliation — the suite never fakes it, and its final report line says so.
+One round has a 15-second budget and starts at most 3 sends. Before every send attempt,
+read current facts and rebuild the full snapshot. A running synchronous SQL read
+cannot be forcibly cancelled; a result arriving after the deadline is not sent.
+Retry after approximately 1 second
+and 2 seconds plus jitter, clipped by the remaining budget.
 
-## 7. Compatibility and risk
+- `DeliveryFailure.NOT_SENT`: retryable.
+- `DeliveryFailure.UNKNOWN`: retryable, including timeouts and HTTP 5xx; the prior
+  request may still complete late.
+- `DeliveryFailure.REJECTED`: permanent for the round.
+- Shutdown cancellation ends the local task and does not create a marker.
+- Exhaustion returns `SyncOutcome.FAILED`; later notifications remain admissible.
 
-- **Default-off switch:** `bot_manager_sync.enabled=false` everywhere in this
-  release. Disabled deployments keep the exact prior business behavior
-  (notifications draw `DISABLED`; zero threads/clients/Redis dependencies).
-- **Async de-permission window (real and acknowledged):** after a removal or
-  a leave commits on the Backend, the person's BCS manager grant may persist
-  until the next successful projection. Disabling the feature or a failed
-  projection never revokes what was already written. Logs/metrics separate
-  add-failures from revocation-failures; the window closes only via the
-  projection (or the runbook's manual compensation).
-- Business guarantees: BCS faults, queue rejection, cache failure, retry
-  exhaustion never change collaborator/work-order/owner-handoff results;
-  database write failures still fail upward; no `synced=true` is added to any
-  existing HTTP schema.
+A confirmed envelope whose `total` differs from the sent roster is drift. Empty is
+sent only when a successful authoritative read projects an actual empty set.
 
-## 8. Gate record (what actually ran, 2026-10-27, worktree c1509531e)
+### Delivery identity
 
-Every entry below is a real command with its real outcome. Nothing was run
-against a deployed BCS in this record; deployment-side acceptance is §10.
+The HTTP plugin sends directly to `bcs_base_url`:
 
-| Gate | Command | Result |
-| --- | --- | --- |
-| Focused module regression | `DEPLOY_PROFILE=test uv run pytest tests/community/core/bot_collaborator tests/community/core/work_orders tests/community/core/spaces tests/community/core/bot_management/test_owner_handoff.py tests/community/core/bot_management/services/test_bot_space_service.py tests/community/contracts/test_bcs_managers.py tests/community/contracts/test_manager_sync_coordination.py tests/community/architecture -q` | **PASS — 989 passed, 0 failed** (~209 s) |
-| Architecture, oversized-files gate | `DEPLOY_PROFILE=test uv run pytest tests/community/architecture/test_no_oversized_modules.py -q` | **PASS — 2 passed** (the gate scans `src/agentclaw/**` only; see §9) |
-| Real-Redis coordination suite | `MANAGER_SYNC_TEST_REDIS_URL=redis://127.0.0.1:6399/0 DEPLOY_PROFILE=test uv run pytest tests/community/integration/test_manager_sync_redis.py -q` | **PASS — 14 passed, 0 failed, 0 skipped** (throwaway Redis on 6399) |
-| Python SAST (branch-diff form used by the pre-push hook / CI) | `singlebox/ci/python_sast_local.sh apps/backend 1 --base 1131e4af8c30e35cfa3b28effcdaba7fb2d2174c --head HEAD` | **PASS — 0 findings** (after a one-line `SpaceRecord` import fix in `space_member_service.py`; see §9) |
-| Python SAST (whole-path local form, brief step-5 literal) | `singlebox/ci/python_sast_local.sh apps/backend` | **FAIL as invoked locally — 1,645 hits, all in `.venv/site-packages`** (local flake8 fallback scans the venv; `apps/backend/src` has zero findings). The branch-diff form the pre-push hook runs is the authority and passes |
-| Backend CI gate incl. changed-line coverage ≥80% / total ≥75% | `apps/backend/scripts/ci_test.sh --base 1131e4af8c30e35cfa3b28effcdaba7fb2d2174c --head HEAD` | **PASS on the coverage verdict** — via §8.1 (run 2 completed with only the 12 pre-existing base failures; the deselected rerun + the repo's own `report_check.py` gives changed-line 94.22% ≥ 80%, total 90.48% ≥ 75%, case pass rate 100%). The literal `ci_test.sh` invocation itself stops at those 12 base failures — recorded, with the base-classification proving none is branch-introduced |
-| BCS authority Rust tests (contract authority; independent dev worktree) | `git worktree add /tmp/avernet-bcs-dev origin/dev` → SHA **a0c407a5a929c1125f7db76401c17c9254e00e9f** → `(cd apps/bcs && cargo test -p bcs-api-http --test bot_authority_routes)` | **PASS — 19 tests passed; 0 failed** (run with `CARGO_TARGET_DIR=/home/admin/cargo-bcs-dev-target`: `/shared/cargo/target` is root-owned and unwritable in this environment — exact blocker below) |
-| Unified singlebox coverage + artifact verifier | `singlebox/ci/singlebox_coverage.sh` then `python3 singlebox/ci/verify_singlebox_coverage_artifacts.py --reports-dir singlebox/.dependencies/coverage/singlebox/reports` | See §8.2 — attempts 1-2 environment-blocked upstream; attempt 3 ran the full stack (BCS E2E gate PASSED) but failed its Backend acceptance leg in the non-isolated session environment. **FAIL (environment-not-isolated)**; the artifact verifier was therefore not run (never claimed as pass) |
-| External live acceptance suite | `RUN_ACCEPTANCE=1 uv run pytest -o addopts= tests/community/acceptance/bcs_manager_sync_external/test_bcs_manager_sync_live.py -v` | **NOT RUN (live scenarios)** — no controlled release Backend endpoint/credentials exists in this session (§10). The suite's loudness was verified: enabled without config → 9 loud fixture errors naming every missing key, no skips, no fallback; without `RUN_ACCEPTANCE=1` the repo conftest reports skipped (NOT RUN) |
-| Whole backend suite (regression context; same command as Task 8: `DEPLOY_PROFILE=test uv run pytest tests/community`) | Not re-run in this task | **NOT RUN** — Task 8 already ran it at the branch (26,268 passed / 15 failed / 54 skipped) with all 15 reproduced identically at the pre-change commit; §8.3 records this branch's classification re-check |
-
-### 8.1 `ci_test.sh --base 1131e4af8 --head HEAD` (the coverage gate)
-
-- **Run 1 (as configured, `xdist -n auto`): ABORTED — pytest INTERNALERROR**:
-  the 32 GiB memory cgroup killed an xdist worker (`Memory cgroup out of
-  memory: Killed process …`), and xdist died with
-  `KeyError: <WorkerController gw27>`. Environment resource failure, **not** a
-  code failure — 96 visible cores made `-n auto` spawn ~96 workers under a
-  32 GiB cap.
-- **Run 2 (BACKEND_CI_PYTEST_WORKERS=4): the full suite completed** —
-  `12 failed, 26321 passed, 54 skipped, 2 subtests passed in 1090.57s`.
-  Every one of the 12 failures is in §8.3's pre-classified base set (they
-  reproduce identically at the merge-base); **zero failures are
-  branch-introduced** (Task 8's 15 = these 12 + 3 arch failures the branch
-  itself has since fixed). Because `ci_test.sh` stops when pytest does not
-  pass cleanly, its changed-line-coverage step did not run in that
-  invocation; the coverage verdict was produced by running the same
-  pytest/coverage invocation with **exactly those 12 pre-classified base
-  tests `--deselect`ed** (a recorded deviation — none of the 12 touches a
-  branch-changed file), then applying the repo's own
-  `singlebox/ci/report_check.py` with the gate's thresholds:
-
-```
-pytest (12 base tests deselected): 26321 passed, 54 skipped, 0 failed in 1055.60s
-case pass rate:      100.00% (26377/26377, required >= 100.00%)
-line coverage:       90.48%  (required >= 75.00%)
-change line coverage: 94.22% (1629/1729, required >= 80.00%)  → PASS
+```http
+PUT /api/v1/collaboration/bots/{bot_id}/managers
+X-Avernet-Principal: <JWT>
 ```
 
-Deselecting the 12 pre-classified failures is conservative for the
-changed-line verdict in this direction: any lines those tests would have
-exercised are simply not counted, so the 94.22% is a lower bound for the
-with-them run; none of the 12 is a test of a branch-changed module.
+There is no gateway hop and no Bearer header. The token is minted per send from the
+existing shared gateway-principal signing key with HS256, `iss=backend`, `aud=bcs`,
+`kid=bare`, a 60-second lifetime, and exactly one `app_name=backend` principal. Its
+tenant comes from the `SyncKey`/snapshot scope. BCS must trust issuer `backend` and
+allow `app=backend`, the same tenant, and action `managers:sync` in `trusted_apps`.
 
-### 8.2 Unified singlebox coverage — three attempts, three environment blockers
+### Repair
 
-1. **Attempt 1 (`singlebox_coverage.sh` as-is): FAILED at frontend setup —**
-   `npm ci` in `apps/frontend` fails at the `husky install` postinstall
-   (`husky - .git can't be found`) in this checkout layout. Local-layout
-   artifact, not a repo defect (CI checkouts run prepare scripts against a
-   plain `.git` directory).
-2. **Attempt 2 (`HUSKY=0`): got through frontend install, BAAS, gateway and
-   bot spawn; FAILED starting the singlebox BCS** — `run sqlite migrations:
-   invalid database input: sqlite migration checksum mismatch for version 34
-   (bot_authority): applied=bec911a6…, current=11e5e13d… (expected
-   name=group_context, dialect=sqlite)`. The throwaway coverage-runtime BCS
-   state mixes a dev-built runtime with this tree's on-disk migration set.
-3. **Attempt 3 (HUSKY=0, the stale throwaway `bcs.db` removed): the full
-   release stack ran** — frontend build, BAAS, gateway, 5 bots, BCS E2E
-   gate **PASSED** (`E2E line coverage 48.90% ≥ 41`, `method 43.13% ≥ 36`,
-   endpoint coverage 165/165), coverage reports were collected — but the
-   Backend acceptance leg ended `13 failed, 50 passed`
-   (expert_chat caller-connection ×12, cron lifecycle ×1 — all **outside
-   any branch-changed module**) and with that the all-module thresholds
-   tripped (`bot_collaborator core 49.86% < 53.88%`,
-   `cron core 37.01% < 41.84%`, `cron router API 88.89% < 100%`,
-   `expert_chat core 52.34% < 61.18%`, `expert_chat router API 90.91% <
-   100%`): *"singlebox coverage collected, but Backend acceptance failed
-   with exit code 1"*. Root cause class in this session: the acceptance
-   stack ran concurrently with a parallel 26k-test coverage sweep on a
-   host whose memory cgroup is 32 GiB — the environment was never isolated
-   for this gate. Recorded as **FAIL**, not retried a fourth time; no
-   registration/threshold was touched, and its verdict concerns only the
-   release default modules (never the new feature, §3).
-   `verify_singlebox_coverage_artifacts.py` was consequently not run
-   (the run never reached "all modules green" to verify).
+`ManagerSyncRepairService` has only:
 
-The record for release: the singlebox gate's pass/fail in this session says
-nothing about the new feature either way (§3); the release pipeline's own CI
-run remains the authority, and CI will have the normal `.git` layout and a
-clean coverage runtime.
+```python
+request_bot(key: SyncKey) -> SubmissionResult
+request_page(*, avernet_tenant: str, env: str, after_pk: int, limit: int) -> RepairPage
+```
 
-### 8.3 Base-classification of the whole-suite failures found in Task 8
+The page limit is at most 100 and `RepairPage.rejected_keys` preserves every refused
+submission. Repair re-reads current facts through the normal worker. It has no marker
+read/clear, CAS, drain proof, or owner-alignment operation.
 
-All 12 non-architecture whole-suite failures (config golden ×3, space
-config-isolation ×3, resource handoff ×2, expert-chat seed ×2, skills path
-factory ×1, sqlite observation ×1) were re-run at the **merge-base**
-`1131e4af8` in a temp worktree (`/tmp/avernet-base-classify`, UV sharing the
-feature worktree's venv via `UV_PROJECT_ENVIRONMENT`, identical `uv.lock` —
-the branch did not touch `uv.lock`/`pyproject.toml`):
+### Configuration and persistence
 
-**12 failed exactly as at HEAD — every one reproduces at base.** None are
-branch-introduced. (The 3 architecture-compliance failures were already
-resolved on the branch by `b5149480c` and Task 11's conformance suites.)
+The only keys are `enabled`, `env`, and `bcs_base_url`. Missing configuration is
+disabled. Enabled configuration requires `env` and an HTTP(S) BCS origin. Unknown
+keys fail validation. `ManagerSyncStack` contains only `bcs` and `reason`; it has no
+coordinator. Singlebox explicitly enables the same real direct-BCS path through the
+base `BotManagerSyncModule` provider; there is no `SingleboxBotManagerSyncModule`.
+The recording test module is installed for TEST/CORP_TEST, not singlebox.
 
-### 8.4 Terminal outputs of the long gates
+Do not add database schema, migrations, `Bot.ext` state, `ac_task_queue` writes,
+`coordination_mode`, `coordination_generation`, `target_id`, memory/Redis modes, or
+per-tenant bearer credentials.
 
-The exact tails of every long/background gate run of §8 live in
-`.superpowers/sdd/2026-10-27-backend-bcs-manager-sync-implementation/task-12-report.md`
-(these are outside the released repository).
+## Acceptance criteria
 
-## 9. File-size, schema and audit record
+1. Committed collaborator and indirect permission changes notify; rollback/failure
+   paths do not.
+2. A hung or failed BCS request does not delay or rewrite the business result.
+3. Projection tests cover admin/member inclusion, Owner exclusion, Team Space
+   eligibility, stable Bot identity, empty roster, and 1,000/1,001 boundaries.
+4. Retry tests prove a fresh fact read before every send; `NOT_SENT` and `UNKNOWN`
+   retry, `REJECTED` does not, and exhaustion is `FAILED`.
+5. Dispatcher tests prove local dirty/coalescing, later work after failure, 4 workers,
+   1,024 total admitted units including running/hints, and 100-key paging.
+6. Shutdown tests prove cancellation ends local work and no manager-sync thread
+   survives teardown.
+7. Transport tests verify direct `X-Avernet-Principal` claims, 60-second TTL, tenant
+   scope, no Bearer header, envelope validation, and timeout/5xx classification.
+8. Repair tests cover `request_bot`, bounded `request_page`, and exact rejected keys,
+   with no clear methods.
+9. Repository/integration tests prove real projection boundaries and that read or
+   projection failure never emits an empty clear.
+10. Architecture/config tests prove the coordinator Protocol and implementations are
+    removed and the three-key configuration is the only accepted surface.
 
-- **Scoped 1,000-line audit (branch-own constraint: 新增/修改源文件 ≤ 1,000 行
-  — source files):** every branch-changed `apps/backend/src/**/*.py` file is
-  ≤ 1,000 lines — largest: `collaborator_service.py` 991,
-  `work_order_service.py` 960, `dispatcher.py` 660. The repo gate
-  (`test_no_oversized_modules.py`, `src/agentclaw/**` only) is **PASS**.
-- **Known follow-up (explicitly not a gate breach):**
-  `tests/community/core/work_orders/test_work_order_service.py` is 1,246
-  lines with branch changes. Test files have no enforced cap; the repo gate
-  verifies this by scanning only `src/`. Suggested owner-split is a
-  future cleanup task, not part of this release.
-- `git diff --check` (merge-base..HEAD): **clean**.
-- **Schema zero:** `git diff --name-only <merge-base>..HEAD -- apps/backend/migrations apps/backend/alembic` is **empty**, and a grep of the full branch diff for `CREATE TABLE` / `ADD COLUMN` / `ALTER` finds **nothing**. No `ac_task_queue` write and no `Bot.ext` sync-state field was added (grep of the branch diff and of the new `manager_sync` module: no hits). Migrations are untouched repo-wide.
-- **Forced one-line fix this task had to make:** the branch-diff SAST gate
-  flags `F821 undefined name 'SpaceRecord'` in
-  `core/spaces/services/space_member_service.py` (Task 8's helper annotation
-  without the import — latent only, `from __future__ import annotations`
-  present). Fixed by adding `SpaceRecord` to the existing models import in
-  the same commit as this task's deliverables; no other line of that file
-  changed. Recorded as a gate-driven mechanical fix, not new scope.
+### Live acceptance matrix
 
-## 10. External live acceptance — NOT RUN (exact reasons)
+The final live suite contains four normal flows:
 
-- **Scenario results: NOT RUN, feature NOT verified against any deployed
-  BCS.** Reason: this session has **no controlled release-Backend instance
-  and no deployed dev-BCS endpoint/credentials** (the environment's ground
-  truth), so the external live scenario cannot execute here. Nothing in this
-  record may be read as the feature being live-accepted.
-- What was verified **here** about the suite: it collects (9 tests); with
-  `RUN_ACCEPTANCE=1` and no configuration it fails loudly on every test
-  (fixture error naming all 14 missing `MANAGER_SYNC_LIVE_*` keys); with the
-  env unset the repo conftest skips it with a plain NOT-RUN reason; it is
-  outside the release singlebox manifest; secrets come only from the
-  environment; destructive drills opt in explicitly and are never allowed
-  near a shared deployment.
-- **Enable checklist before go-live:** run the base matrix green against the
-  controlled release Backend + deployed dev BCS (backend build SHA + BCS
-  version + env/tenant recorded as evidence); then the destructive drills in
-  the isolated fault-capable posture (incl. the two maintenance legs). Until
-  the base matrix passes, the feature stays `enabled=false` everywhere.
-## 11. Validation addendum (2026-10-28) — singlebox enablement, memory coordination
+1. admin/member reach BCS and removal clears them;
+2. update and leave;
+3. work-order editor approval;
+4. Team Space removal and rejoin.
 
-This addendum records the singlebox enablement of the feature in its
-**single-replica downgrade form** (`coordination_mode: memory`): the
-in-process `MemoryManagerSyncCoordinator` (the same contract the conformance
-suites pin) with the real self-signed direct-BCS delivery (2026-10-28
-revision; earlier runs used the removed gateway-forwarding form). It changes
-nothing in §1–§10: production stays `redis` + shared non-evicting Redis
-(§3), and the external live suite (§10) remains the ONLY live feature
-acceptance.
+Fault scenarios are explicit opt-in only: BCS 403 without business rollback, transient
+disconnect followed by retry, and reported-count drift. The simplified contract has no
+Owner, drain, marker-clear, CAS, or restart-barrier drill.
 
-### 11.1 What is now measured on singlebox that was not before
+## Validation status
 
-PR #3208 lowered the `bot_collaborator` singlebox floor 53.88 → 49.36 because
-~1,300 manager-sync Core statements were structurally uncoverable while the
-feature shipped disabled. With `/standalone start all` now enabling the
-feature (memory coordination, real delivery), the dispatcher/lifecycle/retry
-paths run inside the acceptance flow, so:
+On 2026-10-28 the integrated local selection passed **1,178 tests**. It includes
+all bot-collaborator, work-order and Space tests; Owner handoff/Bot-space regressions;
+manager-sync service/dispatcher/lifecycle/resource/failure tests; gateway-principal,
+HTTP plugin, consumer conformance, repository, DI/profile/config, and all architecture
+tests. Command and output: `/tmp/manager-sync-simple-final-tests.log`.
 
-- `bot_collaborator.core_min_percent` is restored to **53.88** (the lowering
-  is folded into this change), and
-- a new `manager_sync` module registers `core_paths:
-  [src/agentclaw/community/core/bot_collaborator/manager_sync/]` with the
-  acceptance target `tests/community/acceptance/bot_collaborator` and a
-  threshold from THIS branch's measured run (see `singlebox/ci/
-  singlebox_coverage_modules.yaml`).
+Changed-file critical/unused-import lint and the whole-PR 1,000-line audit passed.
+Final review then added focused regressions for lifecycle readiness-timeout cleanup,
+complete principal-mint failure classification, and permanent-4xx classification;
+those focused results are recorded in the final review report. The new live fault proxy
+also has three isolated HTTP unit tests in the 1,178-test selection.
+The earlier work-order sync tests were split without dropping assertions to keep the
+original test file below 1,000 lines. No coverage threshold was lowered.
 
-Rounds on this stack still cannot reach `send_confirmed`: a singlebox Bot's
-stable identity `<bot_id>:<entity_id>` is never an ownership-initialized BCS
-bot (no provider registration flow exists in this stack), so BCS answers
-`total=0` and rounds end `send_drift`/`acknowledged-empty`. The manifest
-comment records exactly that boundary.
+After final-review corrections, a coherent focused rerun passed **185 tests**, with
+**95% statement coverage** across manager-sync core, configuration/composition, and
+the production HTTP plugin (844 statements, 38 missed). This scoped measurement is
+not the whole-Backend or changed-line CI denominator. Log:
+`/tmp/manager-sync-simple-coverage.log`. Independent final review found no remaining
+blocking findings.
 
-### 11.2 Measured numbers (real run, this branch)
+Remote Backend CI and unified singlebox checks will be recorded after the requested
+push. External live acceptance has not been run: no isolated deployment/credentials
+were supplied for this execution. Local tests do not prove actual deployment rollout.
+An unscoped local SAST invocation traversed `.venv` dependencies; use the repository's
+commit-range-scoped invocation for the PR rather than treating dependency diagnostics
+as source regressions.
 
-- Unit/contract/DI suites (re-run after the C2 re-review fixes): `tests/
-  community/di` **564 passed** (incl. the `coordination_mode` parse pins, the
-  SINGLEBOX memory-mode wiring pin — `HttpBcsManagersPlugin` +
-  `MemoryManagerSyncCoordinator` over the test column's Recording double —
-  the same-availability-checks pin (`missing-credential` also in memory
-  mode), the pre/prod structural refusal pin, and the redis-mode-declared
-  pin: the singlebox override never delivers in-process coordination under
-  a redis declaration — `shared-redis-required`, coordinator None);
-  `tests/community/core/bot_collaborator/manager_sync` **148 passed**;
-  `tests/community/contracts` + the combined manager-sync run 709 passed
-  on the earlier full invocation; config golden regen +
-  `tests/community/config`, `test_config_isolation.py`,
-  `test_profile_and_modules_for.py` green; gateway unit suite **890
-  passed** (incl. the dev-seed pins: empty config seeds nothing, seeded
-  key resolves through `find_app_by_credential`, schema-less-boot
-  regression, idempotence, credential-drift ERROR, malformed-key
-  never-legacy). `tests/community/di/test_bot_manager_sync_config.py` +
-  `tests/community/contracts/test_manager_sync_coordination.py`:
-  40 passed.
-- Live stack: backend startup shows `[MANAGER-SYNC-LIFECYCLE] started` with
-  zero `syncer unavailable` reasons (this head's run: §11.5); six real
-  backend-driven rounds during
-  `tests/community/acceptance/bot_collaborator` (12 passed), each forwarded
-  by the gateway to the dev BCS managers endpoint (200 envelopes).
-- Unified singlebox coverage (`singlebox/ci/singlebox_coverage.sh` +
-  `verify_singlebox_coverage_artifacts.py`):
-  `bot_collaborator` core **58.04%** (1281/2207; restored floor 53.88 — the
-  PR #3208 measurement with the feature disabled was 49.86%),
-  `manager_sync` core **54.03%** (442/818; threshold pinned to the measured
-  value). Both module gates PASS in the real-run report; every other
-  registered module passes its floor too. The run's remaining reds are
-  environment-classified, none branch-introduced: `expert_chat` fails with
-  the IDENTICAL measured values recorded in §8.2 attempt 3
-  (core 52.34% < 61.18, router 90.91% < 100; all 12 acceptance failures are
-  `expert_chat/test_caller_connection_api.py` on the host's SQLite missing
-  `RETURNING` — `SQL error: near "RETURNING": syntax error`), and the BCS
-  e2e coverage leg reads 37.94%/33.31% against the 41/36 defaults while
-  every story-surface metric is complete (Router API 165/165, CLI 66/66) —
-  current dev's larger instrumented denominator, not the 15 toml-line BCS
-  delta of this change. `verify_singlebox_coverage_artifacts.py`
-  consequently reports exactly those three artifacts red (summary.status,
-  the expert_chat junit failures, the BCS e2e thresholds) and the rest
-  present: backend coverage json/text/html, baas coverage json/text/html,
-  acceptance junit/log, summary/dashboard. Full numbers and terminal
-  output in `.superpowers/sdd/pr-3208-review-fixes/fix-C2-singlebox-report.md`.
+## Compatibility and risk
 
-### 11.3 The singlebox delivery chain (all dev-only literals, marked)
+This is a deliberate weakening of the baseline feature's ordering and recovery
+claims. Redis coordination, persistent holds, CAS clearing, and unknown-write blocking
+are removed rather than migrated. No data migration is required because those
+mechanisms did not use Backend SQL persistence.
 
-Rewritten by the 2026-10-28 direct-delivery revision; the earlier
-gateway-seeded `singlebox-manager-sync` app chain was removed with it
-(the gateway's `local_dev_apps` section no longer carries any entry, and
-the backend's dev App credential is gone everywhere).
+Disabling stops future notifications but does not remove managers already present in
+BCS. Rollback is therefore “stop sending,” not “restore BCS.” Manual resync projects
+current Backend facts when repair is needed.
 
-- Backend config: `bot_manager_sync.enabled: true`, `coordination_mode:
-  memory`, `env: dev` (= `get_current_env()` under `SERVER_ENV=dev` — the
-  env singlebox Bots are created with), `bcs_base_url:
-  http://127.0.0.1:21000` (the local BCS origin itself — the authority
-  PUT goes straight there, no gateway hop).
-- Credential: the shared gateway-principal signing key — the same dev
-  literal `avernet-dev-signing-key-NOT-FOR-PROD` the gateway signs with
-  (gateway.sh), BCS verifies with (bcs.sh), and the Backend now both
-  verifies `/openapi/v1` principals with AND mints its own direct-BCS
-  service principals with (exported under
-  `AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE` by
-  `singlebox/modules/backend.sh`; clearly-marked synthetic stand-in,
-  overridable from `singlebox/.env.local`). A deployment whose key does
-  not resolve binds the feature unavailable
-  (`principal-signing-key-required`), never an unsigned send.
-- BCS: `[gateway_principal]` already accepts `iss=backend` for `aud=bcs`
-  (`issuers = ["gateway", "backend"]`), and the
-  `[bot_authority] trusted_apps` rule in `bcs-config-local.toml` is now
-  `backend` / `teamclaw` / `["managers:sync"]` — byte-exact app+tenant
-  scope, deny-everything default for every other App. The principal the
-  Backend mints names exactly that identity: one `app` principal,
-  `app_name=backend`, tenant = the snapshot's backend tenant.
-- `memory` is refused outside the dev family: a pre/prod deployment asking
-  for it raises a structural config error (pinned by test), never a silent
-  degraded build.
-
-### 11.5 Re-verification after the direct-delivery revision (2026-10-28, this head)
-
-Full stack `./singlebox/singlebox.sh start all` after the revision (a stale
-bot-identity runtime from the earlier runs produced the known one-time
-`valid bot token is required` onboard refusals; resolved the prescribed
-`clean bcs_bots` reset, then a clean 0-ERROR start):
-
-- Enablement (backend.log, PID 165638): `[MANAGER-SYNC] enabled stack
-  resolving (singlebox memory mode — single-replica dev downgrade, real
-  direct-BCS delivery): target=singlebox-dev-manager-sync env=dev
-  bcs=http://127.0.0.1:21000 generation=provided` +
-  `[MANAGER-SYNC-LIFECYCLE] started`, and **no** `syncer unavailable`
-  line for this boot.
-- Acceptance `tests/community/acceptance/bot_collaborator`
-  (RUN_ACCEPTANCE=1, reuse-live literals): **12 passed**; three live
-  rounds during the run end `send_drift` (`expected=1 reported=0`,
-  bot_pk 4/5/6) — the confirmed-envelope outcome, which is only reachable
-  through a verified HTTP 200 apply response. BCS's own log shows the PUTs
-  arriving directly
-  (`route=/api/v1/collaboration/bots/{bot_id}/managers method=PUT` →
-  `authority_sync_managers … returning zeros` for the never-registered
-  colon identities → `status=200 outcome="success"`), and the gateway log
-  of this boot contains **zero** managers PUTs (the pre-revision boot's
-  40+ forward entries are what the removed form looked like).
-- Direct effect proof (real register chain through the gateway, then the
-  PUT straight to 127.0.0.1:21000 with a principal minted by the
-  backend's own `mint_service_app_principal` under the dev shared key):
-  `PUT managers ["d2002"] on ownership-initialized bot
-  bot_bdb28ad9 → {"code":20000,"data":{"added":1,"removed":0,"total":1}}`,
-  owner read-back `items:["d2002"]` with `owner_actor_id human_d2001`;
-  a same-key token naming an unregistered app → 403
-  `bot_authority_operator_forbidden`; the removed Bearer form against BCS
-  directly → 401. The two proof bots were deleted and the stack stopped
-  and verified stopped afterwards.
+The older review and validation records describe an invalidated design and are
+historical only. The results above apply to the simplified contract; they do not
+establish eventual consistency or replace the unrun external live acceptance.

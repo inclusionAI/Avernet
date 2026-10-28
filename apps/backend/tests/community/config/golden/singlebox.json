@@ -89,11 +89,8 @@
     },
     "bot_manager_sync": {
       "bcs_base_url": "http://127.0.0.1:21000",
-      "coordination_generation": "singlebox-memory-generation",
-      "coordination_mode": "memory",
       "enabled": true,
-      "env": "dev",
-      "target_id": "singlebox-dev-manager-sync"
+      "env": "dev"
     },
     "bot_oss_config": {
       "access_key_secret": "oss_m_manual_agentclaw_botdata",

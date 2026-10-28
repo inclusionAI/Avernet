@@ -1,196 +1,67 @@
-"""Deployment configuration for the Backend→BCS manager sync.
+"""Strict, default-off configuration for best-effort Backend → BCS sync.
 
-The configuration lives outside ``di/modules/config_module.py`` because
-that shared module is at the repository's 1,000-line limit; the provider
-that turns this into a binding lives in
-``di/modules/bot_manager_sync_module.py``.
-
-The surface is exactly six keys, and the default is **off**:
-
-- ``enabled`` (default ``false``) — nothing about the syncer runs, and
-  no thread/client exists, unless the deployment opts in.
-- ``target_id`` — the fixed coordination-namespace identity (hashed into
-  the Redis key layout), shared by every replica of one target. Never
-  re-randomized per pod.
-- ``env`` — the deployment's own environment label. The syncer serves
-  exactly this env; requests naming another env are refused before any
-  send (the background must not pretend to serve an env it was not
-  configured for, and Git branches are *not* envs).
-- ``bcs_base_url`` — the BCS origin the syncer PUTs to directly (the
-  authority surface's ``/api/v1/collaboration`` routes are served by BCS
-  itself; there is no gateway hop). Provided by the deployment
-  injection; never a source-code default, and must be an
-  ``http://``/``https://`` URL.
-- ``coordination_generation`` — the ops-initialized namespace
-  generation sentinel value. Enabling without one keeps the sender
-  stopped (a missing generation must stop all sends, never auto-create).
-- ``coordination_mode`` (default ``redis``) — which coordination
-  implementation the composition root builds. ``redis`` is the only
-  production posture (shared, non-evicting Redis; see the operations
-  runbook §3). ``memory`` is the **single-replica downgrade form**: one
-  instance, one process, one writer, whole-stack restart — valid only
-  as an explicitly-authored dev-stack value (singlebox). The in-process
-  coordinator enforces the same claim/begin/finish/hold/CAS invariants
-  inside one mutex, but there is **no cross-process protection**: two
-  sender processes sharing one BCS would race undetected. A production
-  deployment must never set it.
-
-Delivery authentication is deliberately NOT a key of this block: the
-syncer signs its own service identity
-(``core/gateway_principal/service_principal.py``) with the shared
-gateway-principal signing key, resolved through the same
-``SecretNamesConfig.gateway_principal_signing_key`` name and
-SecretResolver conventions every other principal flow in this component
-uses — per-tenant delivery credentials (and their registry) do not
-exist in the direct-delivery form. BCS's own
-``[[bot_authority.trusted_apps]]`` rule (``app`` byte-exact, ``tenant``,
-``actions``) is the authorization that decides whether the verified
-``backend`` service identity may sync; a deployment without a resolved
-signing key binds the feature unavailable, never a weaker fallback.
-
-Unknown keys, wrong types, or enabled-with-missing-fields are structural
-configuration errors: they raise at resolution and fail the boot on
-every profile, per the repo's config policy. The Redis URL is NOT part
-of this block — the shared cache configuration
-(``CommunityCacheConfig``) already owns it; deployments without shared
-Redis keep the feature unavailable in the default ``redis`` mode
-(never a process-local lock fallback for a production deployment).
+Authentication uses the existing gateway-principal signing-key configuration.
+There is no separate sync credential, coordination store or persistence mode.
 """
-
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
-#: The yaml block name inside ``user_config``.
 CONFIG_BLOCK_NAME = "bot_manager_sync"
-
-#: Every key the block may name; anything else is an unknown-key error.
-_ALLOWED_KEYS = frozenset(
-    {
-        "enabled",
-        "target_id",
-        "env",
-        "bcs_base_url",
-        "coordination_generation",
-        "coordination_mode",
-    }
-)
-
-#: The only accepted ``coordination_mode`` spellings.
-_COORDINATION_MODES = frozenset({"redis", "memory"})
+_ALLOWED_KEYS = frozenset({"enabled", "env", "bcs_base_url"})
 
 
 @dataclass(frozen=True)
 class ManagerSyncConfig:
-    """Parsed ``bot_manager_sync`` block; defaults are all-off/empty."""
-
     enabled: bool = False
-    target_id: str = ""
     env: str = ""
     bcs_base_url: str = ""
-    coordination_generation: str = ""
-    coordination_mode: str = "redis"
 
 
-def parse_manager_sync_config(
-    block: Mapping[str, object] | None,
-) -> ManagerSyncConfig:
-    """Strictly parse the ``bot_manager_sync`` block.
-
-    A missing/empty block is the all-off default. Anything malformed
-    raises ``ValueError`` — a structural config error, not a silent
-    fallback — and enabling the feature requires every deployment-owned
-    field to be present and well-formed.
-    """
+def parse_manager_sync_config(block: Mapping[str, object] | None) -> ManagerSyncConfig:
+    """Reject unknown/malformed values even when disabled; require target when on."""
     if block is None:
         return ManagerSyncConfig()
     if not isinstance(block, Mapping):
         raise ValueError(f"{CONFIG_BLOCK_NAME} must be a mapping")
-    unknown = sorted(set(block) - _ALLOWED_KEYS)
+    unknown = set(block) - _ALLOWED_KEYS
     if unknown:
-        raise ValueError(
-            f"{CONFIG_BLOCK_NAME} contains unknown keys: " + ", ".join(unknown)
-        )
-    for key in ("enabled",):
-        if key in block and type(block[key]) is not bool:
-            raise ValueError(f"{CONFIG_BLOCK_NAME}.{key} must be a boolean")
-    coordination_mode = block.get("coordination_mode", "redis")
-    if (
-        not isinstance(coordination_mode, str)
-        or coordination_mode not in _COORDINATION_MODES
-    ):
-        raise ValueError(
-            f"{CONFIG_BLOCK_NAME}.coordination_mode must be one of: "
-            + ", ".join(sorted(_COORDINATION_MODES))
-        )
-    string_fields = ("target_id", "env", "bcs_base_url", "coordination_generation")
-    values: dict[str, str] = {}
-    for key in string_fields:
-        if key in block:
-            if not isinstance(block[key], str):
-                raise ValueError(f"{CONFIG_BLOCK_NAME}.{key} must be a string")
-            values[key] = block[key]  # type: ignore[assignment]
-        else:
-            values[key] = ""
+        raise ValueError(f"{CONFIG_BLOCK_NAME} contains unknown keys: {sorted(unknown, key=str)}")
     enabled = block.get("enabled", False)
-    assert isinstance(enabled, bool)  # narrowed above
+    if type(enabled) is not bool:
+        raise ValueError(f"{CONFIG_BLOCK_NAME}.enabled must be a boolean")
+    values: dict[str, str] = {}
+    for field in ("env", "bcs_base_url"):
+        value = block.get(field, "")
+        if not isinstance(value, str):
+            raise ValueError(f"{CONFIG_BLOCK_NAME}.{field} must be a string")
+        values[field] = value.strip()
+        if enabled and not values[field]:
+            raise ValueError(f"{CONFIG_BLOCK_NAME} enabled requires {field}")
+    if values["bcs_base_url"]:
+        if not _is_origin(values["bcs_base_url"]):
+            raise ValueError(f"{CONFIG_BLOCK_NAME}.bcs_base_url must be an http(s) origin")
+    return ManagerSyncConfig(enabled=enabled, **values)
 
-    if not enabled:
-        # Types were validated above; a disabled block may still carry a
-        # half-filled value set — but a *malformed* value must fail the
-        # boot on every profile, never slide by as "off anyway".
-        if values["bcs_base_url"] and not _is_http_url(values["bcs_base_url"]):
-            raise ValueError(
-                f"{CONFIG_BLOCK_NAME}.bcs_base_url must be an http:// or "
-                "https:// URL"
-            )
-        return ManagerSyncConfig(
-            enabled=False,
-            target_id=values["target_id"],
-            env=values["env"],
-            bcs_base_url=values["bcs_base_url"],
-            coordination_generation=values["coordination_generation"],
-            coordination_mode=coordination_mode,
+
+def _is_origin(value: str) -> bool:
+    """Only a service origin; the HTTP adapter owns the fixed API path."""
+    try:
+        parsed = urlparse(value)
+        port = parsed.port  # malformed/out-of-range ports fail before startup
+        return (
+            parsed.scheme in {"http", "https"}
+            and bool(parsed.hostname)
+            and not any(character.isspace() for character in parsed.netloc)
+            and parsed.username is None
+            and parsed.password is None
+            and parsed.path in {"", "/"}
+            and not parsed.params
+            and not parsed.query
+            and not parsed.fragment
+            and (port is None or port > 0)
         )
-
-    # Enabled: every deployment-owned field is required, and none may be
-    # an indistinct empty string — a missing value here is structural.
-    required = {
-        "target_id": values["target_id"],
-        "env": values["env"],
-        "bcs_base_url": values["bcs_base_url"],
-        "coordination_generation": values["coordination_generation"],
-    }
-    missing = sorted(name for name, value in required.items() if not value.strip())
-    if missing:
-        raise ValueError(
-            f"{CONFIG_BLOCK_NAME} enabled requires these fields: "
-            + ", ".join(missing)
-        )
-    if not _is_http_url(required["bcs_base_url"]):
-        raise ValueError(
-            f"{CONFIG_BLOCK_NAME}.bcs_base_url must be an http:// or "
-            "https:// URL"
-        )
-    return ManagerSyncConfig(
-        enabled=True,
-        target_id=required["target_id"],
-        env=required["env"],
-        bcs_base_url=required["bcs_base_url"],
-        coordination_generation=required["coordination_generation"],
-        coordination_mode=coordination_mode,
-    )
-
-
-def _is_http_url(value: str) -> bool:
-    parsed = urlparse(value.strip())
-    return parsed.scheme in ("http", "https") and bool(parsed.netloc)
-
-
-__all__ = [
-    "CONFIG_BLOCK_NAME",
-    "ManagerSyncConfig",
-    "parse_manager_sync_config",
-]
+    except ValueError:
+        return False

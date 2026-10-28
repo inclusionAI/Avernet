@@ -1,10 +1,9 @@
 """BotManagerSyncLifecycle — the dedicated worker-loop owner.
 
-One pthread hosts exactly one asyncio loop; the four dispatcher workers,
-the bounded default executor the service's ``asyncio.to_thread`` calls
-run through, and every ``AsyncClient`` the delivery plugin lazily
-creates, live and die on that one loop. Nothing of the syncer ever runs
-on the FastAPI app loop.
+One pthread hosts exactly one asyncio loop; the dispatcher workers and every
+``AsyncClient`` the delivery plugin lazily creates live on that loop. Synchronous
+repository reads use a bounded executor. A running synchronous read cannot be
+forcibly cancelled, so shutdown bounds its own wait and never claims otherwise.
 
 Startup/shutdown posture (each pinned by a test):
 
@@ -13,17 +12,15 @@ Startup/shutdown posture (each pinned by a test):
   get REJECTED, matching "unavailable" — and alerts; the process keeps
   booting. Structural config errors are a different failure: they raise
   at config resolution, per the repo's config policy.
-- **Shutdown stops admission first, drains bounded, then ends the
-  loop.** In-flight rounds are cancelled inside the service, which is
-  what keeps every unknown marker intact; ``bcs.aclose()`` runs on the
-  worker loop (pooled clients must close where they were created).
-  Closing the HTTP pool never converts an unknown into a success — the
-  dispatcher never confirms anything during teardown.
+- **Shutdown stops admission first, drains bounded, then ends the loop.**
+  In-flight async rounds are cancelled and ``bcs.aclose()`` runs on the worker
+  loop. No shutdown path creates delayed retries or persistent sync state.
 - **The disabled posture holds zero resources.** The composition root
   binds :class:`DisabledBotManagerSyncLifecycle` whenever the feature is
   off or its stack is unavailable, so lifecycle discovery still resolves
   a participant without spinning a thread loop for a disabled feature.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -43,7 +40,7 @@ logger = get_logger()
 _WORKER_LOOP_THREAD_NAME = "manager-sync-loop"
 
 #: Upper bound of the loop-owned default executor: the service's
-#: ``to_thread`` calls (coordinator interactions, SQL reads) run here,
+#: ``to_thread`` repository reads run here,
 #: four workers deep — never unbounded.
 _EXECUTOR_MAX_WORKERS = 8
 
@@ -111,9 +108,8 @@ class BotManagerSyncLifecycle(LifecycleBase):
     async def shutdown(self) -> None:
         """Close admission, drain bounded, stop the loop, close bcs there.
 
-        Unknown markers are never cleared here: a cancellation inside a
-        running round keeps the service's own UNKNOWN posture, and no
-        pool close path in this shutdown confirms anything.
+        Cancellation propagates through running async rounds; no pool-close
+        path reports a delivery result or schedules later work.
         """
         with self._started_lock:
             if not self._started:
@@ -125,7 +121,7 @@ class BotManagerSyncLifecycle(LifecycleBase):
             if drained is False:
                 logger.warning(
                     "[MANAGER-SYNC-LIFECYCLE] drain_timeout — cancelling "
-                    "in-flight rounds; unknown markers stay untouched"
+                    "in-flight async rounds"
                 )
         except Exception:  # noqa: BLE001 — teardown must not blow up shutdown
             logger.error("[MANAGER-SYNC-LIFECYCLE] drain_failed")
@@ -144,6 +140,8 @@ class BotManagerSyncLifecycle(LifecycleBase):
     def _start_background(self) -> None:
         """Spawn the loop thread; attach the dispatcher onto that loop."""
         ready = threading.Event()
+        start_loop = threading.Event()
+        abort = threading.Event()
         loop_holder: dict[str, asyncio.AbstractEventLoop] = {}
 
         def _run_loop() -> None:
@@ -156,27 +154,39 @@ class BotManagerSyncLifecycle(LifecycleBase):
             asyncio.set_event_loop(loop)
             loop_holder["loop"] = loop
             ready.set()
+            # Do not enter run_forever until the starter accepts the loop. If
+            # readiness times out, the abort handshake lets this late thread
+            # close itself instead of becoming an unowned daemon loop.
+            start_loop.wait()
             try:
-                loop.run_forever()
+                if not abort.is_set():
+                    loop.run_forever()
             finally:
-                try:
-                    loop.run_until_complete(loop.shutdown_default_executor())
-                finally:
-                    loop.close()
+                # Running synchronous repository calls cannot be stopped. Do
+                # not let executor shutdown turn the lifecycle's bounded join
+                # into an unbounded wait; outstanding calls finish naturally.
+                executor.shutdown(wait=False, cancel_futures=True)
+                loop.close()
 
         thread = threading.Thread(
             target=_run_loop, name=_WORKER_LOOP_THREAD_NAME, daemon=True
         )
         thread.start()
         if not ready.wait(_LOOP_READY_TIMEOUT_SECONDS):
+            abort.set()
+            start_loop.set()
+            thread.join(timeout=_JOIN_TIMEOUT_SECONDS)
+            if thread.is_alive():
+                logger.warning(
+                    "[MANAGER-SYNC-LIFECYCLE] worker_loop_thread_lingers_after_start_timeout"
+                )
             raise RuntimeError("manager-sync worker loop did not become ready")
         self._loop = loop_holder["loop"]
         self._thread = thread
+        start_loop.set()
         # Bind the dispatcher and confirm its workers actually spawned —
         # the coroutine runs on the dedicated loop, this thread only waits.
-        fut = asyncio.run_coroutine_threadsafe(
-            self._dispatcher.attach(), self._loop
-        )
+        fut = asyncio.run_coroutine_threadsafe(self._dispatcher.attach(), self._loop)
         fut.result(timeout=_ATTACH_TIMEOUT_SECONDS)
 
     def _stop_on_worker_loop(self) -> None:
@@ -202,9 +212,7 @@ class BotManagerSyncLifecycle(LifecycleBase):
         if thread is not None:
             thread.join(timeout=_JOIN_TIMEOUT_SECONDS)
             if thread.is_alive():
-                logger.warning(
-                    "[MANAGER-SYNC-LIFECYCLE] worker_loop_thread_lingers"
-                )
+                logger.warning("[MANAGER-SYNC-LIFECYCLE] worker_loop_thread_lingers")
         self._teardown_worker_loop()
 
     def _teardown_worker_loop(self) -> None:

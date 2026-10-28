@@ -1,133 +1,100 @@
 # `agentclaw.community.core.bot_collaborator.manager_sync`
 
-Backend→BCS bot manager set sync — the projection layer plus the sync
-orchestration. Fixed value types live in `kernel/bot_manager_sync.py`
-(pure, stdlib-only); this package owns the projector that turns
-read-only `SyncFacts` into the desired `ManagerSnapshot`, and the
-service that delivers one snapshot round to BCS.
+Best-effort projection of Backend Bot collaborators onto the BCS manager set.
+Business code submits a post-commit notification; this package owns the pure roster
+projection, bounded local dispatcher, one retry-bounded sync round, dedicated-loop
+lifecycle, diagnostics, and maintenance resubmission.
 
 ## Direction of travel
 
 ```text
-api BotManagerSyncProtocol          core projector               BcsManagersPlugin
-   request_sync ──▶ core sync service ──▶ build_snapshot ──▶ replace_managers ──▶ BCS
-                         │
-                         └─▶ ManagerSyncReadRepository (read-only facts) +
-                             ManagerSyncCoordinator (lease + in-flight markers)
+business service
+  └─ BotManagerSyncProtocol.request_*       (memory-only notification)
+       └─ BotManagerSyncDispatcher           (local queue/dirty coalescing)
+            ├─ ManagerSyncReadRepository     (fresh authoritative facts)
+            ├─ build_snapshot                (admin + member projection)
+            └─ BcsManagersPlugin             (full replacement in BCS)
 ```
 
-- **Service → Plugin only.** Business code calls the Service API Protocol
-  (`api/bot_manager_sync.py`) and the outbound plugins
-  (`plugin_api/bcs_managers.py`, `plugin_api/manager_sync_coordination.py`);
-  this package never imports a plugin implementation and never speaks HTTP
-  or Redis.
-- **The repository is read-only.** The sync path persists nothing about
-  collaborators; `ManagerSyncReadRepository` exists to source facts, not
-  to mutate them.
-- **No task persistence.** Sync is coordinated through leases and
-  markers in the shared store (`ManagerSyncCoordinator`) — there is no
-  durable queue table, no retry log, and no task record owned here.
+Core remains transport-agnostic. HTTP and principal minting belong to the BCS plugin
+and composition root. The repository is read-only; this feature writes no database
+sync state and uses no task queue.
 
-## Projection rules
+## Projection
 
-`build_snapshot` keeps exactly the `admin`/`member` collaborators that
-are still space-eligible, excluding the current owner, dedupes and
-sorts the ids, and caps the roster at 1,000 (`SnapshotTooLarge` beyond).
-An unknown role or an empty `user_id` is a hard error — never silently
-projected as a member — and a Bot missing its stable identity raises
-`SnapshotUnavailable`. The `digest` is the SHA-256 over canonical JSON
-of key, target (`bcs_bot_id`, stable across owner handoffs), owner, and
-the full id list, so senders can dedupe identical pushes.
+`build_snapshot` includes explicit `admin` and `member` collaborators, excludes the
+current Backend Owner, applies the existing Team Space eligibility rule, deduplicates
+and sorts IDs, and rejects rosters above 1,000. The stable BCS identity uses the Bot's
+`entity_id`, not its Owner.
 
-## The sync round (`BotManagerSyncService.sync_once`)
+Passport and device credentials remain admin-only; their filtered admin list is not
+the BCS roster.
 
-One bounded round per key: claim lease → read facts (in a thread) →
-`build_snapshot` → begin attempt → `replace_managers` with the remaining
-budget → verify the reported total → finish attempt → release lease.
-The safety postures, each pinned by a test:
+A fact-read, identity, eligibility, or projection failure sends nothing. It never
+becomes an empty BCS replacement.
 
-- **Never replay an uncertain write.** `begin` returns uncertain, or
-  the PUT reports `DeliveryFailure.UNKNOWN`, or the round is cancelled
-  after the PUT was invoked ⇒ no send, report `UNKNOWN`, keep the
-  in-flight marker; the *next* `sync_once` on that key is BLOCKED at
-  claim time until the marker is explicitly resolved. `finish` is never
-  called for an uncertain attempt.
-- **Only claim-BUSY is DEFERRED.** Any other infrastructure ambiguity
-  (coordinator unavailable, lease renewal refused) is FAILED — never
-  dressed up as BUSY or DEFERRED.
-- **NOT_SENT is the only retryable failure.** The attempt is finished
-  first (marker cleared), then the round may re-read and send again
-  with a **new** attempt id, inside the remaining budget, at most
-  `SyncRunPolicy(max_attempts=3)` sends per round, backing off
-  ~1s/2s + jitter bounded by the remaining budget.
-- **False success is DRIFT.** A confirmed `total` that disagrees with
-  the pushed roster is DRIFT; total 0 against an empty roster is only
-  `ACKNOWLEDGED_EMPTY` — it proves nothing about target existence
-  (Tasks 10/12 verify that from registration evidence).
-- **Deadline hygiene.** A threaded SQL read cannot be cancelled — a
-  late result is dropped (no begin, no send) once the remaining budget
-  is smaller than a minimal send window.
-- **Lease hygiene.** The lease is renewed only when its remaining
-  window is smaller than the remaining budget + 2s, strictly inside
-  the deadline; failed renewal means no send. The default 15s budget /
-  30s lease renews zero times. The outer `finally` releases exactly
-  this holder's lease and never touches a marker.
-- **Holder uniqueness.** The service mints one holder string
-  (`hostname:pid:uuid4[:8]`) per instance; the lease value IS the
-  holder, so two processes (or two instances) must never share one.
+## Runtime semantics
 
-`hold_owner_check(key)` plants the independent owner-hold marker in a
-thread — never any HTTP — for the dispatcher's high-priority
-`OWNER_HANDOFF` reason: marker set → BLOCKED, infrastructure failure →
-FAILED with a WARNING.
+- Notification is post-commit, nonblocking, and memory-only.
+- The existing dedicated loop runs 4 workers.
+- Capacity is 1,024 Bot entries plus pending Space hints, with running entries counted.
+- Space expansion and repair page at 100 keys.
+- One process coalesces duplicate keys and marks a running key dirty so it is read
+  again after the current round.
+- Every send attempt re-reads current facts.
+- A round starts at most 3 sends within 15 seconds, with about 1s/2s plus jitter
+  between retries.
+- `NOT_SENT` and `UNKNOWN` delivery failures are retryable; `REJECTED` is permanent
+  for the round. Exhaustion is `FAILED`.
+- Shutdown cancellation ends local work. It does not create a marker or prove that a
+  remote request did not finish.
 
-## Diagnostics
+There is no distributed coordinator. Cross-replica, out-of-order, concurrent, and
+late writes are accepted. No eventual convergence is promised. Stale managers,
+including revoked permissions, can remain until another successful notification or a
+manual repair request.
 
-`SyncDiagnostics.record` accepts only its own finite enums
-(`SyncEvent`, `SyncOutcome`) and integer counts — no payloads, no
-credentials — and emits one aggregatable `manager_sync event=…
-outcome=…` log line per event (infrastructure failures at WARNING).
-The `(event, outcome)` counter on the instance is the hook for a later
-metrics exporter; there is no new external dependency.
+Owner handoff is an ordinary refresh: this package does not transfer BCS ownership,
+prove owners match, or retain an owner hold.
+
+## Repair
+
+`ManagerSyncRepairService` exposes only `request_bot` and bounded `request_page`.
+Pages are at most 100 keys and preserve exact rejected keys. Repair submits fresh work
+through the same notifier; it has no marker, clear, CAS, or roster payload API.
 
 ## Context Boundary
 
 ```yaml
-purpose: "Project bot collaborator facts onto the BCS manager set and drive one bounded, marker-safe delivery round."
+purpose: Project current Backend Bot collaborator facts to BCS managers through a bounded, genuinely best-effort local runtime.
 provides:
   - build_snapshot
-  - "Projection rules: explicit admin/member roles, owner excluded, deduped+sorted, 1000-id cap, stable digest"
-  - BotManagerSyncService.sync_once / hold_owner_check
-  - BotManagerSyncDispatcher.request_sync / request_space_sync (bounded, memory-only admission)
-  - BotManagerSyncLifecycle (the dedicated worker loop owner)
-  - ManagerSyncRepairService (first backfill / targeted compensation / marker recovery)
-  - SyncRunPolicy; SyncDiagnostics
+  - BotManagerSyncService
+  - BotManagerSyncDispatcher
+  - DisabledBotManagerSync
+  - BotManagerSyncLifecycle
+  - DisabledBotManagerSyncLifecycle
+  - ManagerSyncRepairService
+  - DisabledManagerSyncRepair
+  - SyncRunPolicy
+  - SyncDiagnostics
 consumes:
-  - ManagerSyncReadRepository     # read-only facts (constructor-injected)
-  - BcsManagersPlugin             # full-replace delivery (constructor-injected)
-  - ManagerSyncCoordinator        # lease + markers (constructor-injected)
+  - ManagerSyncReadRepository
+  - BcsManagersPlugin
 internal_dependencies:
-  - agentclaw.community.kernel.bot_manager_sync   # the fixed, transport-free type dictionary
-  - agentclaw.community.kernel.lifecycle           # LifecycleBase, for the dedicated-loop participant
+  - agentclaw.community.kernel.bot_manager_sync
+  - agentclaw.community.kernel.lifecycle
   - agentclaw.community.plugin_api.bcs_managers
-  - agentclaw.community.plugin_api.manager_sync_coordination
-  - agentclaw.community.core.repository.protocols.bot.manager_sync  # read-only facts contract
+  - agentclaw.community.core.repository.protocols.bot.manager_sync
   - agentclaw.community.log
-  - agentclaw.community.utils.avernet_tenant      # worker-side per-entry tenant scoping
+  - agentclaw.community.utils.avernet_tenant
 ```
 
 ### Change impact
 
-The DTO/enum members are a frozen type dictionary shared with the
-plugin Protocols and later sync tasks; renaming anything here rewrites
-every consumer. The outcome mapping of `sync_once` is the dispatcher's
-contract (e.g. DISPATCH on FAILED, human/AI resolution on UNKNOWN /
-BLOCKED via marker recovery) — changing an outcome's meaning is a
-cross-module contract change. The consumer conformance suites for the
-plugin Protocols live under `tests/community/contracts/`
-(`test_bcs_managers.py`, `test_manager_sync_coordination.py`); failure
-isolation and resource bounds are pinned in
-`tests/community/core/bot_collaborator/manager_sync/`
-(`test_failure_isolation.py`, `test_resource_bounds.py`), and the
-multi-client atomicity evidence runs against real Redis in
-`tests/community/integration/test_manager_sync_redis.py`.
+Changes to projection rules affect BCS authorization for every Bot collaborator.
+Changes to retry or dispatcher semantics affect the duration and likelihood of stale
+manager permissions but must never change the committed Backend business result. The
+BCS plugin consumer contract is covered under `tests/community/contracts/`; runtime,
+failure-isolation, resource-bound, repair, trigger, and projection tests live under
+`tests/community/core/bot_collaborator/manager_sync/`.

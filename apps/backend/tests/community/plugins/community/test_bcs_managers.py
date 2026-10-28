@@ -10,6 +10,7 @@ classification comes from a handler that never answers. The test owns
 the client it passes in; the plugin's self-owned lifecycle is exercised
 separately.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -51,16 +52,16 @@ _BASE_URL = "https://bcs.invalid"
 #: never a real secret, and strong enough for HMAC-SHA256.
 _MINT_KEY = "test-manager-sync-signing-key-0123456789abcdef"
 
+
 #: The delivery minter the composition root would hand the plugin: this
 #: component's own service identity under the fixed BCS envelope.
-_MINT_PRINCIPAL = (
-    lambda tenant: mint_service_app_principal(
+def _MINT_PRINCIPAL(tenant: str) -> str:
+    return mint_service_app_principal(
         PrincipalSignerConfig(
             signing_key=_MINT_KEY, audience="bcs", issuer="backend", key_id="bare"
         ),
         tenant,
     )
-)
 
 
 @pytest.fixture
@@ -97,16 +98,32 @@ async def _plugin_with(handler, *, base_url: str = _BASE_URL):
 @pytest.mark.asyncio
 async def test_put_carries_a_self_signed_principal_and_no_bearer():
     seen = []
+
     def handle(request):
         seen.append(request)
-        return httpx.Response(200, json={"code": 20000, "message": "OK",
-            "request_id": "req-test", "data": {"added": 2, "removed": 0, "total": 2}})
-    facts = SyncFacts(SyncKey("tenant-a", "dev", 7), "bot", "entity", "owner",
-        (CollaboratorFact("a", "admin", True), CollaboratorFact("b", "member", True)))
-    async with httpx.AsyncClient(base_url=_BASE_URL,
-                                transport=httpx.MockTransport(handle)) as client:
-        plugin = HttpBcsManagersPlugin(base_url=_BASE_URL, client=client,
-            mint_principal=_MINT_PRINCIPAL)
+        return httpx.Response(
+            200,
+            json={
+                "code": 20000,
+                "message": "OK",
+                "request_id": "req-test",
+                "data": {"added": 2, "removed": 0, "total": 2},
+            },
+        )
+
+    facts = SyncFacts(
+        SyncKey("tenant-a", "dev", 7),
+        "bot",
+        "entity",
+        "owner",
+        (CollaboratorFact("a", "admin", True), CollaboratorFact("b", "member", True)),
+    )
+    async with httpx.AsyncClient(
+        base_url=_BASE_URL, transport=httpx.MockTransport(handle)
+    ) as client:
+        plugin = HttpBcsManagersPlugin(
+            base_url=_BASE_URL, client=client, mint_principal=_MINT_PRINCIPAL
+        )
         result = await plugin.replace_managers(build_snapshot(facts), timeout_seconds=2)
     assert seen[0].method == "PUT"
     assert seen[0].url.path == "/api/v1/collaboration/bots/bot:entity/managers"
@@ -123,8 +140,11 @@ async def test_put_carries_a_self_signed_principal_and_no_bearer():
     assert header["typ"] == "JWT"
     assert header["kid"] == "bare"
     claims = jwt.decode(
-        principal, _MINT_KEY,
-        algorithms=["HS256"], audience="bcs", issuer="backend",
+        principal,
+        _MINT_KEY,
+        algorithms=["HS256"],
+        audience="bcs",
+        issuer="backend",
     )
     assert isinstance(claims["iat"], int)
     assert isinstance(claims["exp"], int)
@@ -146,10 +166,15 @@ async def test_empty_roster_puts_a_present_empty_array():
 
     def handle(request: httpx.Request) -> httpx.Response:
         seen.append(request)
-        return httpx.Response(200, json=_envelope({"added": 0, "removed": 1, "total": 0}))
+        return httpx.Response(
+            200, json=_envelope({"added": 0, "removed": 1, "total": 0})
+        )
 
     facts = SyncFacts(
-        SyncKey("tenant-a", "dev", 7), "bot", "entity", "owner",
+        SyncKey("tenant-a", "dev", 7),
+        "bot",
+        "entity",
+        "owner",
         (CollaboratorFact("gone", "admin", False),),
     )
     projected = build_snapshot(facts)
@@ -167,20 +192,23 @@ async def test_bot_id_special_chars_stay_one_encoded_segment():
 
     def handle(request: httpx.Request) -> httpx.Response:
         seen.append(request)
-        return httpx.Response(200, json=_envelope({"added": 1, "removed": 0, "total": 1}))
+        return httpx.Response(
+            200, json=_envelope({"added": 1, "removed": 0, "total": 1})
+        )
 
     projected = ManagerSnapshot(
         key=SyncKey("tenant-a", "dev", 7),
         bcs_bot_id="bot x/y:z",
         owner_id="owner",
         manager_user_ids=("a",),
-        digest="fixture-digest",
     )
     async with _plugin_with(handle) as plugin:
         await plugin.replace_managers(projected, timeout_seconds=2)
     # On the wire the id is percent-encoded as ONE segment: neither the
     # space, the slash, nor the colon may split or reshape the route.
-    assert seen[0].url.raw_path == b"/api/v1/collaboration/bots/bot%20x%2Fy%3Az/managers"
+    assert (
+        seen[0].url.raw_path == b"/api/v1/collaboration/bots/bot%20x%2Fy%3Az/managers"
+    )
 
 
 @pytest.mark.asyncio
@@ -189,14 +217,15 @@ async def test_input_id_list_is_not_filtered():
 
     def handle(request: httpx.Request) -> httpx.Response:
         seen.append(request)
-        return httpx.Response(200, json=_envelope({"added": 3, "removed": 0, "total": 3}))
+        return httpx.Response(
+            200, json=_envelope({"added": 3, "removed": 0, "total": 3})
+        )
 
     projected = ManagerSnapshot(
         key=SyncKey("tenant-a", "dev", 7),
         bcs_bot_id="bot:entity",
         owner_id="owner",
         manager_user_ids=("b", "a", "b"),
-        digest="fixture-digest",
     )
     async with _plugin_with(handle) as plugin:
         await plugin.replace_managers(projected, timeout_seconds=2)
@@ -223,10 +252,15 @@ async def test_unmintable_principal_refuses_to_send():
 
     def handle(request: httpx.Request) -> httpx.Response:
         seen.append(request)
-        return httpx.Response(200, json=_envelope({"added": 0, "removed": 0, "total": 0}))
+        return httpx.Response(
+            200, json=_envelope({"added": 0, "removed": 0, "total": 0})
+        )
 
     facts = SyncFacts(
-        SyncKey("tenant-a", "dev", 8), "bot", "entity", "owner",
+        SyncKey("tenant-a", "dev", 8),
+        "bot",
+        "entity",
+        "owner",
         (CollaboratorFact("a", "admin", True),),
     )
     async with _plugin_with(handle) as _:
@@ -235,9 +269,7 @@ async def test_unmintable_principal_refuses_to_send():
         )
         try:
             with pytest.raises(BcsManagersError) as caught:
-                await plugin.replace_managers(
-                    build_snapshot(facts), timeout_seconds=2
-                )
+                await plugin.replace_managers(build_snapshot(facts), timeout_seconds=2)
         finally:
             await plugin.aclose()
     assert caught.value.kind == DeliveryFailure.NOT_SENT
@@ -246,9 +278,47 @@ async def test_unmintable_principal_refuses_to_send():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mint_result",
+    [RuntimeError("signer unavailable"), ""],
+    ids=["unexpected-exception", "empty-token"],
+)
+async def test_every_principal_mint_failure_is_classified_not_sent(
+    snapshot: ManagerSnapshot, mint_result: object
+):
+    def broken_mint(tenant: str) -> str:
+        if isinstance(mint_result, Exception):
+            raise mint_result
+        return mint_result
+
+    seen: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200, json=_envelope({"added": 0, "removed": 0, "total": 0})
+        )
+
+    async with httpx.AsyncClient(
+        base_url=_BASE_URL, transport=httpx.MockTransport(handle)
+    ) as client:
+        plugin = HttpBcsManagersPlugin(
+            base_url=_BASE_URL, mint_principal=broken_mint, client=client
+        )
+        with pytest.raises(BcsManagersError) as caught:
+            await plugin.replace_managers(snapshot, timeout_seconds=2)
+
+    assert caught.value.kind is DeliveryFailure.NOT_SENT
+    assert caught.value.code == "principal_mint_failed"
+    assert seen == []
+
+
+@pytest.mark.asyncio
 async def test_total_zero_is_returned_verbatim(snapshot: ManagerSnapshot):
     def handle(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json=_envelope({"added": 0, "removed": 0, "total": 0}))
+        return httpx.Response(
+            200, json=_envelope({"added": 0, "removed": 0, "total": 0})
+        )
 
     async with _plugin_with(handle) as plugin:
         result = await plugin.replace_managers(snapshot, timeout_seconds=2)
@@ -283,7 +353,9 @@ async def test_attempt_budget_reaches_the_wire_not_httpx_defaults(
 
     def handle(request: httpx.Request) -> httpx.Response:
         wire_timeouts.append(dict(request.extensions["timeout"]))
-        return httpx.Response(200, json=_envelope({"added": 0, "removed": 0, "total": 2}))
+        return httpx.Response(
+            200, json=_envelope({"added": 0, "removed": 0, "total": 2})
+        )
 
     async with _plugin_with(handle) as plugin:
         result = await plugin.replace_managers(snapshot, timeout_seconds=30)
@@ -291,9 +363,7 @@ async def test_attempt_budget_reaches_the_wire_not_httpx_defaults(
     # Above httpx's ~5s default phases: every wire phase carries the full
     # attempt budget. Before the per-request timeout this dict was
     # {connect: 5.0, read: 5.0, write: 5.0, pool: 5.0}.
-    assert wire_timeouts == [
-        {"connect": 30, "read": 30, "write": 30, "pool": 30}
-    ]
+    assert wire_timeouts == [{"connect": 30, "read": 30, "write": 30, "pool": 30}]
 
 
 @pytest.mark.parametrize(
@@ -343,16 +413,19 @@ async def test_unverifiable_transport_failures_are_unknown(
     assert caught.value.code == code
 
 
-@pytest.mark.parametrize("status", [400, 401, 403, 404, 409])
+@pytest.mark.parametrize("status", [400, 401, 403, 404, 409, 410, 413, 422])
 @pytest.mark.asyncio
-async def test_rejection_statuses_are_permanent(
-    snapshot: ManagerSnapshot, status: int
-):
+async def test_rejection_statuses_are_permanent(snapshot: ManagerSnapshot, status: int):
     def handle(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(status, json={
-            "code": status * 100, "message": "no",
-            "request_id": "req-test", "data": {"error_code": "x"},
-        })
+        return httpx.Response(
+            status,
+            json={
+                "code": status * 100,
+                "message": "no",
+                "request_id": "req-test",
+                "data": {"error_code": "x"},
+            },
+        )
 
     async with _plugin_with(handle) as plugin:
         with pytest.raises(BcsManagersError) as caught:
@@ -361,15 +434,21 @@ async def test_rejection_statuses_are_permanent(
     assert caught.value.code == f"http_{status}"
 
 
-@pytest.mark.parametrize("status", [422, 429, 500, 502, 503])
+@pytest.mark.parametrize("status", [408, 425, 429, 500, 502, 503])
 @pytest.mark.asyncio
 async def test_unverifiable_statuses_are_unknown(
     snapshot: ManagerSnapshot, status: int
 ):
     def handle(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(status, json={
-            "code": 1000, "message": "no", "request_id": "req-test", "data": {},
-        })
+        return httpx.Response(
+            status,
+            json={
+                "code": 1000,
+                "message": "no",
+                "request_id": "req-test",
+                "data": {},
+            },
+        )
 
     async with _plugin_with(handle) as plugin:
         with pytest.raises(BcsManagersError) as caught:
@@ -388,28 +467,70 @@ async def test_unverifiable_statuses_are_unknown(
     [
         httpx.Response(200, text="not-json"),
         httpx.Response(200, json=[{"added": 0}]),
-        httpx.Response(200, json={
-            "code": 50000, "message": "OK", "request_id": "r",
-            "data": {"added": 0, "removed": 0, "total": 0}}),
-        httpx.Response(200, json={
-            "code": 20000, "message": "OK", "request_id": "r",
-            "data": "not-a-dict"}),
-        httpx.Response(200, json={
-            "code": 20000, "message": "OK", "request_id": "r",
-            "data": {"added": True, "removed": 0, "total": 0}}),
-        httpx.Response(200, json={
-            "code": 20000, "message": "OK", "request_id": "r",
-            "data": {"added": "0", "removed": 0, "total": 0}}),
-        httpx.Response(200, json={
-            "code": 20000, "message": "OK", "request_id": "r",
-            "data": {"added": 0, "removed": 0, "total": -1}}),
-        httpx.Response(200, json={
-            "code": 20000, "message": "OK", "request_id": "",
-            "data": {"added": 0, "removed": 0, "total": 0}}),
+        httpx.Response(
+            200,
+            json={
+                "code": 50000,
+                "message": "OK",
+                "request_id": "r",
+                "data": {"added": 0, "removed": 0, "total": 0},
+            },
+        ),
+        httpx.Response(
+            200,
+            json={
+                "code": 20000,
+                "message": "OK",
+                "request_id": "r",
+                "data": "not-a-dict",
+            },
+        ),
+        httpx.Response(
+            200,
+            json={
+                "code": 20000,
+                "message": "OK",
+                "request_id": "r",
+                "data": {"added": True, "removed": 0, "total": 0},
+            },
+        ),
+        httpx.Response(
+            200,
+            json={
+                "code": 20000,
+                "message": "OK",
+                "request_id": "r",
+                "data": {"added": "0", "removed": 0, "total": 0},
+            },
+        ),
+        httpx.Response(
+            200,
+            json={
+                "code": 20000,
+                "message": "OK",
+                "request_id": "r",
+                "data": {"added": 0, "removed": 0, "total": -1},
+            },
+        ),
+        httpx.Response(
+            200,
+            json={
+                "code": 20000,
+                "message": "OK",
+                "request_id": "",
+                "data": {"added": 0, "removed": 0, "total": 0},
+            },
+        ),
     ],
     ids=[
-        "not-json", "payload-not-dict", "wrong-code", "data-not-dict",
-        "bool-count", "string-count", "negative-count", "empty-request-id",
+        "not-json",
+        "payload-not-dict",
+        "wrong-code",
+        "data-not-dict",
+        "bool-count",
+        "string-count",
+        "negative-count",
+        "empty-request-id",
     ],
 )
 @pytest.mark.asyncio
@@ -440,7 +561,8 @@ async def test_plugin_never_closes_a_caller_owned_client(
     def handle(request: httpx.Request) -> httpx.Response:
         seen.append(request)
         return httpx.Response(
-            200, json=_envelope({"added": 0, "removed": 0, "total": 2}))
+            200, json=_envelope({"added": 0, "removed": 0, "total": 2})
+        )
 
     async with httpx.AsyncClient(
         base_url=_BASE_URL, transport=httpx.MockTransport(handle)

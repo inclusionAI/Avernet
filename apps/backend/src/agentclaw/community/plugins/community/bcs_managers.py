@@ -1,62 +1,17 @@
-"""HttpBcsManagersPlugin — self-signed direct-HTTP delivery to BCS managers.
+"""One direct BCS full-replace PUT authenticated as the Backend service.
 
-The ``BcsManagersPlugin`` PROD implementation: exactly one ``PUT`` per
-call to the BCS v1 bot-authority managers endpoint — **directly to the
-BCS origin**, no gateway hop — authenticated with a self-signed
-``X-Avernet-Principal`` minted by the composition-root-provided
-callable, with every failure classified into the kernel's
-``DeliveryFailure`` vocabulary. Nothing else — no retries, no Bearer
-tokens, no caller-identity forwarding: the mint callable produces this
-component's own service identity under its fixed scope
-(``core/gateway_principal/service_principal.py``), so the authority
-BCS applies is that of the ``backend`` service itself, rule-gated by the
-operator's ``[[bot_authority.trusted_apps]]`` entry. Everything deeper
-about identity is BCS's own application rule, applied to the verified
-App.
+The composition root supplies a tenant-scoped service-principal minter. This
+adapter owns HTTP/envelope parsing, never retries, and never logs credentials or
+response bodies. The consumer bounds retries, including uncertain transport
+outcomes, under the explicitly best-effort contract.
 
-BCS contract (v1 bot authority, frozen upstream):
-
-- ``PUT /api/v1/collaboration/bots/{bot_id}/managers`` with body
-  ``{"manager_user_ids": [...]}``. The array is REQUIRED — never
-  null — so an empty roster is a PUT of ``[]`` that clears the set
-  rather than a patch or a mistake. The bot id travels percent-encoded
-  (``quote(..., safe="")``) so spaces, slashes, and colons cannot
-  split or reshape the route; BCS decodes the segment back.
-- The only confirmed outcome is HTTP 200 with the Envelope
-  ``{"code": 20000, "message", "request_id", "data": {"added",
-  "removed", "total"}}``. The counts are returned verbatim —
-  ``total == 0`` on a valid envelope is BCS's real answer, and drift
-  stays the consumer's decision, never the adapter's disguise.
-
-Classification (the safety core — a wrong label either re-sends a
-mutation or silently strands a bot):
-
-- ``NOT_SENT`` — proven pre-send: a per-tenant service principal that
-  could not be minted (no signing key, blank tenant — an
-  unauthenticated PUT would be worse than a deferred sync), and
-  connect / pool-acquisition failures. Safe to retry.
-- ``REJECTED`` — 400/401/403/404/409: BCS considered and refused this
-  snapshot. Permanent for this attempt.
-- ``UNKNOWN`` — everything else: read/write/overall timeout (pre- and
-  post-send are indistinguishable at the wire), disconnects, 5xx, 429
-  (a rate limit proves nothing about pre- vs post-execution), and any
-  response that fails Envelope verification. ``UNKNOWN`` blocks the
-  bot's next sync; this adapter never auto-retries any outcome.
-
-Failures carry only the stable ``kind`` plus a short classification
-code — never response bodies, token material, or exception texts, which
-may hold internal diagnostics or a credential.
-
-Lifecycle: with ``client=None`` the plugin lazily creates and owns one
-``httpx.AsyncClient`` on the first async call (born inside the worker
-loop); ``aclose()`` closes only a self-owned client and is a no-op for
-one the caller owns. The composition root
-(``di/modules/bot_manager_sync_module.py``) resolves the ``base_url``
-(the BCS origin; the path is fixed here) and the mint callable (the
-shared-key principal minter over the delivery envelope); the adapter
-takes both as constructor parameters and stays ignorant of keys,
-issuers and configs.
+NOT_SENT means connect/pool/mint failure; REJECTED means a permanent 4xx refusal;
+408/425/429 and all other transport/status/envelope failures are UNKNOWN. UNKNOWN
+does not imply that BCS failed to apply the write and does not permanently block
+future synchronization. A supplied client belongs to its caller; otherwise this
+plugin lazily owns one pooled AsyncClient on the worker loop.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -82,10 +37,10 @@ from agentclaw.community.plugin_api.impl_registry import Mode, plugin_impl
 #: BCS Envelope success code (``20_000`` = OK in the v1 API).
 _SUCCESS_CODE = 20000
 
-#: Statuses BCS applies to a *considered and refused* managers PUT —
-#: permanent rejections. 429 is deliberately absent: a rate limit
-#: cannot prove it refused the request before execution.
-_REJECTED_STATUSES = frozenset({400, 401, 403, 404, 409})
+#: Transient/ambiguous client statuses. Every other 4xx is a considered,
+#: permanent refusal for this fixed PUT. 408/425/429 do not prove whether a
+#: request was applied, so the consumer may retry them under its shared budget.
+_AMBIGUOUS_4XX_STATUSES = frozenset({408, 425, 429})
 
 
 @plugin_impl(
@@ -123,10 +78,11 @@ class HttpBcsManagersPlugin(BcsManagersPlugin):
         """Deliver the full replace and return BCS's applied diff."""
         try:
             principal = self._mint_principal(snapshot.key.avernet_tenant)
-        except PrincipalVerificationError:
-            # No key, or nothing to sign for: nothing was (or can be)
-            # sent on this attempt, so the round is safely retryable
-            # once the deployment's signing key resolves.
+            if not isinstance(principal, str) or not principal:
+                raise PrincipalVerificationError("principal minter returned no token")
+        except Exception:
+            # Any mint failure is necessarily pre-send. Keep provider details out
+            # of the contract and preserve the Plugin API's classified-error rule.
             raise BcsManagersError(
                 DeliveryFailure.NOT_SENT, "principal_mint_failed"
             ) from None
@@ -155,9 +111,7 @@ class HttpBcsManagersPlugin(BcsManagersPlugin):
             raise BcsManagersError(DeliveryFailure.UNKNOWN, "timeout") from None
         except httpx.ConnectError:
             # The socket was never established: provably not sent.
-            raise BcsManagersError(
-                DeliveryFailure.NOT_SENT, "connect_error"
-            ) from None
+            raise BcsManagersError(DeliveryFailure.NOT_SENT, "connect_error") from None
         except httpx.ConnectTimeout:
             # Same proof, connect-stage budget exhaustion.
             raise BcsManagersError(
@@ -165,9 +119,7 @@ class HttpBcsManagersPlugin(BcsManagersPlugin):
             ) from None
         except httpx.PoolTimeout:
             # No connection was ever acquired from the pool.
-            raise BcsManagersError(
-                DeliveryFailure.NOT_SENT, "pool_timeout"
-            ) from None
+            raise BcsManagersError(DeliveryFailure.NOT_SENT, "pool_timeout") from None
         except httpx.ReadTimeout:
             # The request was already on the wire — the outcome is BCS's.
             raise BcsManagersError(DeliveryFailure.UNKNOWN, "read_timeout") from None
@@ -199,10 +151,10 @@ def _verify_envelope(response: httpx.Response) -> ManagerSetChange:
     body travels into the error path.
     """
     status = response.status_code
-    if status in _REJECTED_STATUSES:
+    if 400 <= status < 500 and status not in _AMBIGUOUS_4XX_STATUSES:
         raise BcsManagersError(DeliveryFailure.REJECTED, f"http_{status}")
     if status != 200:
-        # 429 included: no proof the limit applied before execution.
+        # 408/425/429 included: no proof the response precedes execution.
         raise BcsManagersError(DeliveryFailure.UNKNOWN, f"http_{status}")
     malformed = BcsManagersError(DeliveryFailure.UNKNOWN, "malformed_envelope")
     try:

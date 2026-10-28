@@ -1,89 +1,26 @@
-"""Live acceptance: Backend→BCS manager sync over a controlled release Backend + a deployed dev BCS.
+"""Opt-in live validation of best-effort Backend → BCS manager projection.
 
-**Evidence separation (binding):** this suite is the *external live
-evidence* for the manager-sync feature; it is not part of the release
-singlebox coverage gate. The default singlebox builds the release tree's
-own BCS, which does not implement ``PUT /bots/{bot_id}/managers`` — its
-gates say nothing about this feature, and this directory is deliberately
-not registered in ``singlebox/ci/singlebox_coverage_modules.yaml`` (the
-Backend's existing singlebox gates stay the authority for everything the
-feature must not have changed).
+RUN_ACCEPTANCE=1 requires explicit MANAGER_SYNC_LIVE_* deployment configuration:
+BACKEND_BASE_URL, BACKEND_PRINCIPAL, BACKEND_BUILD_SHA, BACKEND_ENV,
+BACKEND_TENANT, BACKEND_BOT_ID, BACKEND_ENTITY_ID, BACKEND_BOT_PK,
+BACKEND_OWNER_ID, SPACE_ID, BCS_BASE_URL, BCS_OWNER_PRINCIPAL,
+BCS_DEPLOYED_VERSION, GATEWAY_SIGNING_KEY; BCS_HUMAN_INVITE_CODE if required.
+Use only an isolated, ownership-aligned, registered Bot starting with no BCS
+managers. Version values are recorded operator evidence, not remotely probed.
+The fixture creates fresh test humans and mutates normal Backend HTTP routes;
+BCS reads use a legal Owner principal, never the sync App's write credential.
 
-**What runs here, and what never does:** mutations are driven through the
-release Backend's *normal* HTTP interfaces only, and every effect is
-verified by reading the deployed dev BCS through an *owner/manager human
-credential* on the existing ``GET /api/v1/collaboration/bots/{bot_id}``
-authority surface. The trusted App that ``PUT``s the sync is configured
-inside the deployment (``bot_manager_sync`` block); this suite never holds
-an App credential and never assumes an App may ``GET`` managers — an
-ordinary App has no such scope, so a 403/404 from it is never a roster
-answer.
-
-**Identity model:** ``"admin"``/``"member"``/… in the tests are *stable
-aliases*. For each run the fixture creates a fresh human id per alias
-(``mgrsync_live_<alias>_<random>``) — the code under test never sees a
-shared employee identity — and :meth:`LiveCase.read_manager_ids` reports
-the observed BCS roster *projected back into alias space*, so the brief's
-scenario reads exactly like its contract; ids this run did not create
-pass through unprojected.
-
-**Configuration contract — every value is explicit, none invented:** with
-``RUN_ACCEPTANCE=1`` this suite either runs against a fully configured
-controlled environment or fails loudly naming every missing key — it
-never falls back to localhost, in-singlebox fakes, or invented
-credentials. Without ``RUN_ACCEPTANCE=1`` the repo-wide acceptance
-conftest skips this suite (recorded as NOT RUN). Configuration comes from
-the environment (prefix ``MANAGER_SYNC_LIVE_``); secrets are never
-printed and never written to artifacts.
-
-Required (base posture — every matrix test); suffixes below attach to
-``MANAGER_SYNC_LIVE_``:
-
-- ``BACKEND_BASE_URL`` — controlled release Backend origin;
-  ``BACKEND_PRINCIPAL`` — gateway-signed ``X-Avernet-Principal`` of the
-  case Bot's *owner* (secret); ``BACKEND_BUILD_SHA`` — the Backend build
-  actually deployed there (release evidence, recorded not probed).
-- ``BACKEND_ENV`` / ``BACKEND_TENANT`` — the deployment's env label and
-  the *isolated test tenant* the case resources live in.
-- ``BACKEND_BOT_ID`` / ``_ENTITY_ID`` / ``_BOT_PK`` / ``_OWNER_ID`` —
-  the **isolated case Bot**: fresh/dedicated, member-management enabled,
-  Team Space attached, whose BCS manager roster starts *empty* (the
-  empty-roster acceptance posture), registered on the dev BCS under the
-  stable identity ``<bot_id>:<entity_id>``, cross-checked through the
-  owner read before anything runs (runbook §2 registration evidence).
-- ``SPACE_ID`` — the case Bot's Team Space (space matrix).
-- ``BCS_BASE_URL`` — deployed dev BCS origin; ``BCS_OWNER_PRINCIPAL`` —
-  the registered Owner human's ``x-avernet-principal`` (secret) used for
-  the evidence reads; ``BCS_DEPLOYED_VERSION`` — the BCS deployment
-  actually running there (recorded; the dev-source Rust tests prove the
-  contract, never the deployment).
-- ``GATEWAY_SIGNING_KEY`` — the deployment's controlled *test* gateway
-  principal signing key (secret); the fixture mints the fresh case
-  humans' short-lived principals, like the singlebox acceptance does.
-- ``BCS_HUMAN_INVITE_CODE`` — optional; required when the deployed BCS
-  runs the invite-code gate (fresh humans via ``invite-codes/bind``).
-
-Destructive posture, opt-in via ``MANAGER_SYNC_LIVE_DESTRUCTIVE=1`` (else
-every destructive test skips: scenario NOT covered, never a silent green):
-``DESTRUCTIVE_UPSTREAM_URL`` (BCS origin the in-test fault proxy
-forwards to, with the deployment's ``bot_manager_sync.bcs_base_url``
-pointed at the proxy),
-``DESTRUCTIVE_PROXY_PORT`` (local proxy port), and ``MAINTENANCE_PROFILE``
-(DeployProfile for the deployment maintenance injector, runbook §1 — the
-drain/compensation legs work only inside that environment).
-
-Isolation and cleanup: the case Bot belongs to the isolated test tenant;
-the fixture asserts its BCS roster starts empty (baseline), and on
-teardown removes every added collaborator through the same normal HTTP
-interfaces and waits for the baseline. The one deliberate exception is
-the owner-check drill — it stays last in the file and leaves the target
-blocked: re-running this suite against the same target first needs the
-runbook §5.3 owner reconciliation plus target re-provisioning.
+Fault tests additionally require MANAGER_SYNC_LIVE_DESTRUCTIVE=1,
+DESTRUCTIVE_UPSTREAM_URL and DESTRUCTIVE_PROXY_PORT (same prefix). The isolated
+Backend's bcs_base_url must point to that test proxy. No fake/localhost default
+is used when enabling this suite; do not configure shared production resources.
+No Redis, marker clearing or restart safety guarantee is part of this contract.
 """
 
 from __future__ import annotations
 
 import json
+import socket
 import threading
 import time
 import uuid
@@ -135,7 +72,6 @@ class LiveCaseConfig:
     destructive: bool
     destructive_upstream_url: str
     destructive_proxy_port: int
-    maintenance_profile: str
 
     @property
     def bcs_bot_target(self) -> str:
@@ -174,8 +110,8 @@ class LiveCaseConfig:
         if missing:
             raise LiveCaseConfigError(
                 "MANAGER_SYNC_LIVE_* configuration incomplete — this suite runs "
-                "against an explicitly configured controlled release Backend + "
-                "deployed dev BCS and refuses localhost/fake fallbacks. Missing: "
+                "against an explicitly configured controlled Backend + "
+                "deployed BCS and refuses localhost/fake fallbacks. Missing: "
                 + ", ".join(missing)
                 + ". Provide the deployment endpoints/credentials/version facts "
                 "described in this module's docstring (secrets travel via the "
@@ -193,15 +129,13 @@ class LiveCaseConfig:
         if destructive and (
             not _env("MANAGER_SYNC_LIVE_DESTRUCTIVE_UPSTREAM_URL")
             or not _env("MANAGER_SYNC_LIVE_DESTRUCTIVE_PROXY_PORT")
-            or not _env("MANAGER_SYNC_LIVE_MAINTENANCE_PROFILE")
         ):
             raise LiveCaseConfigError(
                 "MANAGER_SYNC_LIVE_DESTRUCTIVE=1 requires "
                 "MANAGER_SYNC_LIVE_DESTRUCTIVE_UPSTREAM_URL, "
-                "MANAGER_SYNC_LIVE_DESTRUCTIVE_PROXY_PORT and "
-                "MANAGER_SYNC_LIVE_MAINTENANCE_PROFILE — the destructive "
+                "MANAGER_SYNC_LIVE_DESTRUCTIVE_PROXY_PORT — the destructive "
                 "scenarios run only against an isolated fault-capable posture "
-                "with the maintenance environment available (runbook §1/§4)."
+                "with the isolated Backend targeting the test proxy."
             )
         return LiveCaseConfig(
             backend_base_url=base["MANAGER_SYNC_LIVE_BACKEND_BASE_URL"],
@@ -225,7 +159,6 @@ class LiveCaseConfig:
                 _env("MANAGER_SYNC_LIVE_DESTRUCTIVE_PROXY_PORT") or 0
             )
             or 0,
-            maintenance_profile=_env("MANAGER_SYNC_LIVE_MAINTENANCE_PROFILE"),
         )
 
 
@@ -288,9 +221,6 @@ class LiveCase:
         self._aliases: dict[str, str] = {}
         self._collaborator_row_ids: dict[str, int] = {}
         self._baseline_manager_ids: set[str] | None = None
-        #: Set by the owner-check drill: teardown's roster wait is intentionally
-        #: skipped because the target is left blocked pending ops §5.3.
-        self._teardown_note: str | None = None
         #: A clean (faultless) proxy the destructive fixtures leave running for
         #: this case's own teardown sends; closed after teardown completes.
         self._cleanup_proxy: ThreadingHTTPServer | None = None
@@ -523,10 +453,6 @@ class LiveCase:
 
     def teardown_to_baseline(self) -> None:
         """Cleanup through normal HTTP + wait for baseline convergence."""
-        if self._teardown_note:
-            # Deliberate, recorded exception (owner-check drill): the target is
-            # left blocked pending the runbook §5.3 ops reconciliation.
-            return
         for alias in list(self._collaborator_row_ids):
             try:
                 self.remove_collaborator(alias)
@@ -562,8 +488,10 @@ def live_manager_case():
         case.record_baseline()
         yield case
     finally:
-        case.teardown_to_baseline()
-        case.close()
+        try:
+            case.teardown_to_baseline()
+        finally:
+            case.close()
 
 
 # ---------------------------------------------------------------------------
@@ -665,334 +593,121 @@ def test_space_member_removal_excludes_and_rejoin_restores(live_manager_case):
 
 
 # ---------------------------------------------------------------------------
-# Extended matrix (brief step 3) — destructive/fault scenarios.
-#
-# These run only against an isolated fault-capable posture:
-# MANAGER_SYNC_LIVE_DESTRUCTIVE=1, with the isolated deployment's
-# ``bot_manager_sync.bcs_base_url`` pointed at this suite's in-test
-# fault proxy. The fault agent exists only at this test boundary —
-# production core never grows a test-only hook, and the shared BCS of a
-# deployment is never touched without that opt-in. The maintenance legs
-# (drain proof, marker CAS clear, backfill) use the deployment's
-# maintenance injector exactly as the operations runbook §1/§4/§5/§8
-# prescribes, importable only inside that environment.
-# ---------------------------------------------------------------------------
-
+# Fault injection stays strictly in the opt-in test boundary.
 
 @dataclass
 class _FaultPlan:
-    """Fault behavior for the in-test proxy — test-boundary only."""
-
-    reject_status: int | None = None  # e.g. 403 from the BCS side
-    drop_after_request_bytes: bool = False  # accept body, never answer → unknown
-    rewrite_total: int | None = None  # answer with a wrong `total` (drift)
+    reject_status: int | None = None
+    disconnects_remaining: int = 0
+    rewrite_total: int | None = None
     requests: list[dict[str, Any]] = field(default_factory=list)
-    lock = threading.Lock()
+    lock: Any = field(default_factory=threading.Lock)
 
-    def observe(self, method: str, path: str) -> None:
+    def count(self) -> int:
         with self.lock:
-            self.requests.append({"method": method, "path": path})
+            return len(self.requests)
 
 
 def _start_fault_proxy(config: LiveCaseConfig, plan: _FaultPlan) -> ThreadingHTTPServer:
-    """A local proxy forwarding to the real BCS, with injectable faults."""
-    upstream = config.destructive_upstream_url
-
     class Handler(BaseHTTPRequestHandler):
         def _forward(self) -> None:
             length = int(self.headers.get("Content-Length") or 0)
             payload = self.rfile.read(length) if length else b""
-            relay_headers = {
-                key: value
-                for key, value in self.headers.items()
-                if key.lower() not in {"host", "content-length"}
-            }
             with plan.lock:
-                plan.observe(self.command, self.path)
-                drop = plan.drop_after_request_bytes
-                observed = len(plan.requests)
-            if drop and observed > 1:
-                # The request bytes were accepted by the transport: the sender
-                # cannot know whether BCS applied them — the unknown posture.
-                time.sleep(120)
+                plan.requests.append({"method": self.command, "path": self.path})
+                reject = plan.reject_status
+                disconnect = plan.disconnects_remaining > 0
+                if disconnect:
+                    plan.disconnects_remaining -= 1
+                total = plan.rewrite_total
+            if disconnect:
+                # Request bytes accepted, response lost: the Backend cannot
+                # infer whether the remote mutation happened. This proxy did
+                # not forward it, allowing deterministic live retry evidence.
+                self.connection.shutdown(socket.SHUT_RDWR)
+                self.close_connection = True
                 return
-            with httpx.Client(base_url=upstream, timeout=30.0) as client:
-                answered = client.request(
-                    self.command, self.path, content=payload, headers=relay_headers
-                )
-            body = answered.content or b""
-            if plan.rewrite_total is not None and body:
-                try:
-                    envelope = json.loads(body)
-                    envelope["data"]["total"] = plan.rewrite_total
-                    body = json.dumps(envelope).encode()
-                except (ValueError, KeyError, TypeError):
-                    pass
-            self.send_response(plan.reject_status or answered.status_code)
-            for key, value in answered.headers.items():
-                if key.lower() not in {"content-length", "transfer-encoding"}:
-                    self.send_header(key, value)
+            if reject is not None:
+                # A rejected request must not be forwarded and mutate BCS.
+                self.send_response(reject)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            headers = {key: value for key, value in self.headers.items()
+                       if key.lower() not in {"host", "content-length"}}
+            with httpx.Client(base_url=config.destructive_upstream_url, timeout=30) as client:
+                response = client.request(self.command, self.path, content=payload, headers=headers)
+            body = response.content
+            if total is not None:
+                envelope = response.json()
+                envelope["data"]["total"] = total
+                body = json.dumps(envelope).encode()
+            self.send_response(response.status_code)
+            self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
 
-        do_PUT = do_GET = do_POST = do_DELETE = _forward
+        do_PUT = _forward
 
-        def log_message(self, *args: Any) -> None:  # silence proxy chatter
+        def log_message(self, *args: Any) -> None:
             pass
 
-    server = ThreadingHTTPServer(
-        ("127.0.0.1", config.destructive_proxy_port or 0), Handler
-    )
+    server = ThreadingHTTPServer(("127.0.0.1", config.destructive_proxy_port), Handler)
+    server.daemon_threads = True
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server
 
 
 @pytest.fixture
 def destructive_case(live_manager_case):
-    """The destructive posture's case — an unambiguous skip without opt-in."""
-    case = live_manager_case
-    if not case.config.destructive:
-        pytest.skip(
-            "destructive manager-sync scenario NOT covered by this run: it "
-            "requires MANAGER_SYNC_LIVE_DESTRUCTIVE=1 and an isolated "
-            "fault-capable deployment posture (module docstring); it must "
-            "never run against a shared BCS without that permission"
-        )
-    return case
+    if not live_manager_case.config.destructive:
+        pytest.skip("fault tests require MANAGER_SYNC_LIVE_DESTRUCTIVE=1 and an isolated deployment")
+    return live_manager_case
 
 
 @pytest.fixture
 def fault_proxy(destructive_case):
-    """The in-test fault proxy over the deployment's real BCS.
-
-    The faulted server lives for the test body; the finalizer then leaves
-    a *clean* proxy on the case so the case's own teardown sends (and the
-    recovery legs) reach the real BCS — a dead proxy would classify
-    every later send as unknown and poison the next scenario.
-    """
-    case = destructive_case
     plan = _FaultPlan()
-    server = _start_fault_proxy(case.config, plan)
+    server = _start_fault_proxy(destructive_case.config, plan)
     try:
         yield plan
     finally:
         server.shutdown()
         server.server_close()
-        case._cleanup_proxy = _start_fault_proxy(case.config, _FaultPlan())
-
-
-def _case_key(case: Any):
-    from agentclaw.community.kernel.bot_manager_sync import SyncKey
-
-    return SyncKey(
-        avernet_tenant=case.config.backend_tenant,
-        env=case.config.backend_env,
-        bot_pk=case.config.backend_bot_pk,
-    )
-
-
-def _maintenance_stack(case: Any):
-    """Resolve the deployment's maintenance injector parts (runbook §1).
-
-    Only importable inside the deployment's controlled maintenance
-    environment; elsewhere the import failure is an honest stop.
-    """
-    from agentclaw.community.di import DeployProfile, build_injector
-    from agentclaw.community.di.modules.bot_manager_sync_module import ManagerSyncStack
-
-    profile = getattr(DeployProfile, case.config.maintenance_profile, None)
-    if profile is None:
-        pytest.fail(
-            f"MANAGER_SYNC_LIVE_MAINTENANCE_PROFILE={case.config.maintenance_profile!r} "
-            "names no DeployProfile; the drain/compensation leg needs the "
-            "deployment's real profile to build the maintenance injector"
-        )
-    injector = build_injector(profile=profile)
-    stack = injector.get(ManagerSyncStack)
-    if not stack.available or stack.coordinator is None:
-        pytest.fail(
-            f"manager-sync stack unavailable in this posture ({stack.reason}); "
-            "the destructive drills need the enabled deployment stack"
-        )
-    return injector, stack
-
-
-def _maintenance_repair(case: Any):
-    from agentclaw.community.core.bot_collaborator.manager_sync.repair import (
-        ManagerSyncRepairService,
-    )
-
-    injector, _ = _maintenance_stack(case)
-    return injector.get(ManagerSyncRepairService)
+        destructive_case._cleanup_proxy = _start_fault_proxy(destructive_case.config, _FaultPlan())
 
 
 def test_backend_success_with_bcs_403_keeps_business_result(destructive_case, fault_proxy):
     case = destructive_case
-    plan = fault_proxy
-    plan.reject_status = 403
+    fault_proxy.reject_status = 403
     row = case.add_collaborator("admin", "admin")
-    # The business result is the original one: the row committed and the
-    # normal HTTP response reports success regardless of BCS's refusal.
     assert row["role"] == "admin"
-    case.wait_until(lambda: len(plan.requests) >= 1, timeout_seconds=30)
-    # 403 is a permanent refusal for the sender — the roster must not
-    # show the new human while the Backend row still exists (the revoked/
-    # refused state is observable, not hidden behind a fake synced claim).
-    case.wait_until(
-        lambda: "admin" not in case.read_manager_ids(), timeout_seconds=30,
-    )
-    listing = case._backend_client.get(
-        "/api/bot/collaborator/list",
-        params={
-            "bot_id": case.config.backend_bot_id,
-            "owner_id": case.config.backend_owner_id,
-        },
-    )
-    assert listing.status_code == 200 and listing.json()["success"] is True
-    assert any(
-        entry["user_id"] == case._resolve_alias("admin")
-        for entry in listing.json()["data"]
-    ), "the collaborator row must survive the refused projection"
-
-
-def test_bcs_total_drift_never_projects_as_confirmed(destructive_case, fault_proxy):
-    case = destructive_case
-    plan = fault_proxy
-    plan.rewrite_total = 0
-    case.add_collaborator("member", "member")
-    case.wait_until(lambda: len(plan.requests) >= 1, timeout_seconds=30)
-    assert plan.requests, "the sender must actually have attempted the PUT"
-    # total drift (BCS answered total=0 against a one-id push) is the
-    # contract's drift outcome — the roster read remains the evidence.
-    case.wait_until(
-        lambda: "member" not in case.read_manager_ids(), timeout_seconds=30,
-    )
-
-
-def test_unknown_delivery_blocks_until_confirmed_drain_then_clear(
-    destructive_case, fault_proxy,
-):
-    case = destructive_case
-    key = _case_key(case)
-    plan = fault_proxy
-    case.add_collaborator("member", "member")
-    case.wait_until(lambda: len(plan.requests) >= 1, timeout_seconds=30)
-    # Hold the answer of the *next* PUT after its bytes were accepted:
-    # the sender times out on an in-flight request → unknown outcome.
-    with plan.lock:
-        plan.drop_after_request_bytes = True
-    row = case.add_collaborator("admin", "admin")
-    assert row["role"] == "admin", "business result unchanged by the fault"
-    case.wait_until(lambda: len(plan.requests) >= 2, timeout_seconds=30)
-    # With the sender's attempt unknown, later snapshots for this Bot must be
-    # blocked: the admin mutation is admitted but must not land in BCS.
-    _, stack = _maintenance_stack(case)
-    coordinator = stack.coordinator
-    case.wait_until(
-        lambda: coordinator.read_blocked(key) is not None, timeout_seconds=30
-    )
+    case.wait_until(lambda: fault_proxy.count() >= 1, timeout_seconds=30)
     assert "admin" not in case.read_manager_ids()
-    # §4/§5: prove (deployment evidence recorded in the release validation
-    # record), then CAS-clear exactly the blocked attempt with operator +
-    # evidence, re-request explicitly, and only then verify convergence. The
-    # proxy forwards cleanly for the re-send; the dropped attempt can never
-    # be re-sent (its held connection is gone with the drill's stop).
-    plan.drop_after_request_bytes = False
-    repair = _maintenance_repair(case)
-    attempt_id = coordinator.read_blocked(key)
-    assert attempt_id, "the unknown attempt's marker must still be present"
-    assert repair.clear_confirmed_attempt(
-        key,
-        attempt_id=attempt_id,
-        operator_id="live-acceptance-drill",
-        evidence=(
-            "drill: isolated destructive posture; the held attempt's bytes "
-            "could never be re-sent (connection dropped); BCS server-side "
-            "evidence confirmed the attempt never applied; see the release "
-            "validation record"
-        ),
-    ) is True
-    verdict = repair.request_bot(key)
-    assert verdict in {"queued", "coalesced"}, f"re-request admitted: {verdict}"
-    case.wait_until(
-        lambda: case.read_manager_ids() >= {"member", "admin"}, timeout_seconds=300,
-    )
+    listing = case._backend_client.get("/api/bot/collaborator/list", params={
+        "bot_id": case.config.backend_bot_id, "owner_id": case.config.backend_owner_id,
+    })
+    assert listing.status_code == 200 and listing.json()["success"] is True
+    assert any(row["user_id"] == case._resolve_alias("admin") for row in listing.json()["data"])
 
 
-def test_restart_lost_queue_manual_backfill_recovers_roster(
-    destructive_case, fault_proxy,
-):
-    """A restart-lost in-memory queue is recovered by the §8 manual backfill.
-
-    In this isolated posture the operator restarts the deployed Backend
-    (dropping its in-memory queue) right after the collaborator row below
-    commits and before its projection ran; the drill then replays the key
-    from the maintenance environment and verifies convergence. The proxy
-    runs faultless: the recovery leg must see clean sends.
-    """
+def test_uncertain_delivery_retries_without_unlocking(destructive_case, fault_proxy):
     case = destructive_case
-    key = _case_key(case)
-    row = case.add_collaborator("backfill_member", "member")
-    assert row["role"] == "member"
-    repair = _maintenance_repair(case)
-    verdict = repair.request_bot(key)
-    assert verdict in {"queued", "coalesced"}, (
-        f"manual backfill must admit after the restart window: {verdict}"
-    )
-    case.wait_until(
-        lambda: "backfill_member" in case.read_manager_ids(),
-        timeout_seconds=300,
-    )
+    fault_proxy.disconnects_remaining = 1
+    assert case.add_collaborator("member", "member")["role"] == "member"
+    case.wait_until(lambda: case.read_manager_ids() == {"member"}, timeout_seconds=30)
+    assert fault_proxy.count() >= 2
+    # No coordinator/marker recovery: a subsequent ordinary notification works.
+    case.remove_collaborator("member")
+    case.wait_until(lambda: not case.read_manager_ids(), timeout_seconds=30)
 
 
-def test_owner_check_hold_blocks_and_does_not_auto_transfer(destructive_case, fault_proxy):
-    """Backend handoff success must NOT fake a BCS ownership transfer.
-
-    The side-channel only plants the owner-check hold; cross-system
-    ownership reconciliation stays a separate, explicit operation (design
-    §3.3, runbook §5.3). The drill intentionally ends with the target
-    held — hence it MUST STAY LAST IN THIS FILE: any later scenario would
-    start on a blocked marker + non-empty roster, and re-running the
-    suite needs §5.3 reconciliation first.
-    """
+def test_reported_count_drift_does_not_roll_back_business(destructive_case, fault_proxy):
     case = destructive_case
-    key = _case_key(case)
-    case.add_collaborator("admin", "admin")
-    case.wait_until(lambda: "admin" in case.read_manager_ids(), timeout_seconds=30)
-    original_owner = case.read_bcs_owner_user_id()
-    new_owner_id = case._resolve_alias("handoff_target")
-    handoff = case._backend_client.post(
-        "/api/bots/owner-handoffs",
-        json={
-            "bot_pk": case.config.backend_bot_pk,
-            "new_owner_id": new_owner_id,
-            "request_key": f"live-{uuid.uuid4().hex[:16]}",
-        },
-    )
-    assert handoff.status_code == 200, handoff.text
-    operation_id = handoff.json()["data"]["operation_id"]
-
-    def _handoff_state() -> str:
-        response = case._backend_client.get(f"/api/bots/owner-handoffs/{operation_id}")
-        return response.json()["data"]["status"]
-
-    case.wait_until(lambda: _handoff_state() == "SUCCEEDED", timeout_seconds=300)
-    # No auto-transfer: BCS ownership is untouched by the Backend handoff.
-    assert case.read_bcs_owner_user_id() == original_owner
-    # And the hold is present, blocking further roster sends for this target.
-    _, stack = _maintenance_stack(case)
-    case.wait_until(
-        lambda: stack.coordinator.read_blocked(key) is not None, timeout_seconds=60
-    )
-    case.update_collaborator("admin", role="member")
-    time.sleep(5)
-    assert case.read_manager_ids() == {"admin"}, (
-        "roster must not drift past the owner-check hold"
-    )
-    # Deliberate end state; see above for why this test stays last: §5.3
-    # reconciliation is ops' both-sides call, never faked or cleared here.
-    case._teardown_note = (
-        "owner-check drill: case target intentionally left blocked pending the "
-        "runbook §5.3 both-sides owner reconciliation by operations"
-    )
+    fault_proxy.rewrite_total = 0
+    assert case.add_collaborator("member", "member")["role"] == "member"
+    case.wait_until(lambda: fault_proxy.count() >= 1, timeout_seconds=30)
+    # Rewriting the response cannot undo a replace BCS already applied.
+    # The consumer's DRIFT classification is pinned by its contract suite.
+    case.wait_until(lambda: "member" in case.read_manager_ids(), timeout_seconds=30)
