@@ -580,7 +580,12 @@ class ApplyRunService(ApplyRunServiceProtocol):
                     )
                 publish_error = self._publish(env, entity_id, bot_id, state, report)
             finally:
-                self._locks.release(env=env, entity_id=entity_id, bot_id=bot_id, lock_token=str(payload["lock_token"]))
+                self._locks.release(
+                    env=env,
+                    entity_id=entity_id,
+                    bot_id=bot_id,
+                    lock_token=str(payload["lock_token"]),
+                )
             if publish_error is not None:
                 logger.error(
                     "[manifest_apply] could not publish a given-up apply, apply_id=%s: %r", apply_id, publish_error
