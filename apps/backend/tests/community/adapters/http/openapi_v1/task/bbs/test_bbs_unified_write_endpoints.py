@@ -9,18 +9,22 @@ from agentclaw.community.adapters.http.openapi_v1.task.bbs.router import (
     close_topic_unified,
     create_reply_unified,
     create_topic_unified,
+    set_post_helpful_unified,
 )
 from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     CloseTopicRequestUnified,
     CreateReplyRequestUnified,
     PollSelectionRequest,
     CreateTopicRequestUnified,
+    SetPostHelpfulRequest,
+    HelpConfigRequest,
     PollConfigRequest,
     TopicConfigRequest,
     TopicDetail,
 )
 from agentclaw.community.core.errors import Conflict, Forbidden, NotFound
 from agentclaw.community.core.task.forum.models import (
+    ForumHelpConfig,
     ForumPollConfig,
     ForumPollSelection,
     ForumPollResultOptionRecord,
@@ -223,6 +227,78 @@ async def test_create_topic_unified_translates_topic_config():
             deadline_at=_NOW,
         )
     )
+
+
+@pytest.mark.asyncio
+async def test_create_topic_unified_passes_share_without_config():
+    service = _write_service(_topic_result(True))
+
+    await create_topic_unified(
+        body=CreateTopicRequestUnified(
+            author_type="HUMAN",
+            author_id="user-a",
+            client_request_id="req-share",
+            title="share",
+            body="Share experience",
+            topic_type="SHARE",
+        ),
+        request=_request("POST", "/openapi/v1/collaboration/tasks/bbs/topics"),
+        response=Response(),
+        service=service,
+    )
+
+    assert service.calls[0]["topic_type"] == "SHARE"
+    assert service.calls[0]["topic_config"] is None
+
+
+@pytest.mark.asyncio
+async def test_create_topic_unified_translates_help_config():
+    service = _write_service(_topic_result(True))
+
+    await create_topic_unified(
+        body=CreateTopicRequestUnified(
+            author_type="HUMAN",
+            author_id="user-a",
+            client_request_id="req-help",
+            title="help",
+            body="How can I debug this?",
+            topic_type="HELP",
+            topic_config=TopicConfigRequest(
+                help=HelpConfigRequest(expected_time="希望本周内")
+            ),
+        ),
+        request=_request("POST", "/openapi/v1/collaboration/tasks/bbs/topics"),
+        response=Response(),
+        service=service,
+    )
+
+    assert service.calls[0]["topic_config"] == ForumTopicConfig(
+        help=ForumHelpConfig(expected_time="希望本周内")
+    )
+
+
+def test_topic_detail_returns_help_expected_time():
+    payload = TopicDetail.from_record(
+        ForumTopicRecord(
+            topic_id="topic_help",
+            author_type="HUMAN",
+            author_id="user-a",
+            title="Help",
+            body="Need help",
+            status="OPEN",
+            topic_type="HELP",
+            topic_config=ForumTopicConfig(
+                help=ForumHelpConfig(expected_time="希望本周内")
+            ),
+            analysis=ForumTopicAnalysisRecord(),
+            created_at=_NOW,
+            updated_at=_NOW,
+        )
+    )
+
+    assert payload.topic_config is not None
+    assert payload.topic_config.help is not None
+    assert payload.topic_config.help.expected_time == "希望本周内"
 
 
 def test_topic_detail_returns_topic_config_and_analysis():

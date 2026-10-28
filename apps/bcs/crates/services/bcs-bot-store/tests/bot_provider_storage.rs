@@ -5,6 +5,8 @@ use bcs_bot_store::provider::MemoryBotProviderStore;
 use bcs_db_api::{DbPlugin, DbStatement};
 #[path = "common/bot_provider.rs"]
 mod database;
+#[path = "common/memory_provider.rs"]
+mod memory_provider;
 use database::sqlite;
 use bcs_test_support::contract::bot_provider::bot_provider_repo_port_contract_tests;
 use bcs_service_api::bot_provider::{BotConnectionMode, BotProviderRecord};
@@ -78,7 +80,7 @@ async fn memory_bot_provider_contract() {
     let temp = tempfile::tempdir().unwrap();
     let bots = Arc::new(MemoryBotRepo::with_base_dir(temp.path().into()));
     let bindings = Arc::new(MemoryProviderStore::new());
-    database::seed_memory_provider(bindings.as_ref()).await;
+    memory_provider::seed_memory_provider(bindings.as_ref()).await;
     let store = MemoryBotProviderStore::new(bots, bindings.clone());
     bot_provider_repo_port_contract_tests(&store, bindings.as_ref()).await;
 }

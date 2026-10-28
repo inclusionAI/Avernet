@@ -102,6 +102,11 @@ def deps():
         has_collaborators=False,
         is_owner=False,
     )
+    def matches(bot_id, locator):
+        bot = values.bot_repo.get_by_id_and_owner(bot_id, locator)
+        return [{"entity_id": "owner", "env": "dev", **bot}] if bot else []
+
+    values.bot_repo.list_matches_by_legacy_locator.side_effect = matches
     values.facade = ServicePublicationFacade(
         bot_repo=values.bot_repo,
         publish_repo=values.publish_repo,

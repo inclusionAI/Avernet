@@ -85,7 +85,7 @@ class EvalPublishMixin:
         if not mp and not ca:
             raise PublishFlowServiceError("Build artifact path not found; run the build first")
 
-        bot = self._bot_service.get_bot(
+        bot = self._bot_service.get_bot_by_address(
             bot_id=publish_record.source_bot_id,
             user_id=owner_id,
         )

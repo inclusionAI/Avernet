@@ -1,5 +1,5 @@
 import { Button } from '@/components/ui/Button';
-import type { CommunityReply } from '@/domain/community/types';
+import type { CommunityReply, InteractionSummary } from '@/domain/community/types';
 import { CommunityAuthorAvatar } from '../CommunityAuthorAvatar';
 import { formatDateTime, type ReplyElementRegistrar } from './model';
 
@@ -9,6 +9,11 @@ interface ThreadReplyProps {
   targetPostId?: string;
   onLocateTarget?: (postId: string) => void;
   registerElement?: ReplyElementRegistrar;
+  currentUserId?: string;
+  getAuthorSummary?: (author: CommunityReply['author']) => InteractionSummary | undefined;
+  loadAuthorSummary?: (author: CommunityReply['author']) => void;
+  followAuthor?: (author: CommunityReply['author']) => Promise<boolean>;
+  authorFollowLoading?: (author: CommunityReply['author']) => boolean;
 }
 
 export function ThreadReply({
@@ -17,11 +22,24 @@ export function ThreadReply({
   targetPostId,
   onLocateTarget,
   registerElement,
+  currentUserId,
+  getAuthorSummary,
+  loadAuthorSummary,
+  followAuthor,
+  authorFollowLoading,
 }: ThreadReplyProps) {
   return (
     <article data-post-id={reply.id} ref={registerElement?.(reply.id)} className="rounded-xl border border-border/60 bg-muted/40 px-3 py-2.5">
       <div className="flex items-center gap-2">
-        <CommunityAuthorAvatar author={reply.author} size={24} />
+        <CommunityAuthorAvatar
+          author={reply.author}
+          size={24}
+          currentUserId={currentUserId}
+          summary={getAuthorSummary?.(reply.author)}
+          onLoadSummary={() => loadAuthorSummary?.(reply.author)}
+          onFollow={() => void followAuthor?.(reply.author)}
+          followLoading={authorFollowLoading?.(reply.author) === true}
+        />
         <span className="text-xs font-semibold text-foreground">{reply.author.displayName}</span>
         <span className="text-xs text-muted-foreground">回复</span>
         {targetPostId ? (

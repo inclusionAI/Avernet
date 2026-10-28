@@ -455,19 +455,33 @@ it('shows target unavailability as an ended workflow with unknown recovery effec
 });
 
 
-it.each([true, false])('shows Owner permission instructions without continuing or claiming an unconfirmed notification: %s', async sent => {
-  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'completed', phase: 'assess', completionReason: 'mcp_permission_required', plan: null,
-    judgment: { delivery: 'unconfirmed', response: 'unknown', effect: 'not_recovered', summary: '请在能力集中申请目标 MCP 服务权限，获批后自行继续原任务。', evidence_ids: ['evidence'] },
+it.each(['owner_handoff', 'mcp_permission_required'].flatMap(reason => [true, false].map(sent => ({ reason, sent }))))('shows Owner instructions with accurate notification status: $reason / $sent', async ({ reason, sent }) => {
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'completed', phase: 'assess', completionReason: reason, plan: null,
+    judgment: { delivery: 'unconfirmed', response: 'unknown', effect: 'not_recovered', summary: '请 Owner 在管理页面恢复已停用的业务资源，再继续原任务。', evidence_ids: ['evidence'] },
     timeline: [{ event_id: 'notice', at_ms: 1, kind: 'notification', actor: 'service', summary: sent ? '钉钉通知已发送' : '钉钉通知未确认', payload: { kind: 'result', sent } }],
   } as never);
   render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
   await screen.findByRole('region', { name: 'Owner 处理指引' });
-  expect(within(screen.getByRole('region', { name: 'Owner 处理指引' })).getByText(/请在能力集中申请目标 MCP 服务权限/)).toBeVisible();
+  expect(screen.queryByText(/MCP 服务权限需要 Owner/)).toBeNull();
+  expect(within(screen.getByRole('region', { name: 'Owner 处理指引' })).getByText(/请 Owner 在管理页面恢复已停用的业务资源/)).toBeVisible();
   if (sent) expect(screen.getAllByText('已通知 Owner 自行处理').length).toBeGreaterThan(0);
   else expect(screen.queryByText('已通知 Owner 自行处理')).toBeNull();
   expect(screen.queryByRole('button', { name: /确认完整方案|拒绝方案|停止任务|查看方案/ })).toBeNull();
   expect(sessionRecoveryApi.decide).not.toHaveBeenCalled();
   expect(screen.queryByText('人工复核')).toBeNull();
+});
+
+it.each([true, false])('shows a recovered Owner handoff as nonblocking suggestions, notification sent: %s', async sent => {
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'completed', phase: 'assess', completionReason: 'owner_handoff', plan: null,
+    judgment: { delivery: 'unconfirmed', response: 'none', effect: 'recovered', summary: '原任务已完成；建议后续补充 Skill 参数示例，无需重跑。', evidence_ids: ['evidence'] },
+    timeline: [{ event_id: 'notice', at_ms: 1, kind: 'notification', actor: 'service', summary: 'Owner 通知回执', payload: { kind: 'result', sent } }],
+  } as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  const suggestions = await screen.findByRole('region', { name: 'Owner 优化建议' });
+  expect(suggestions).toHaveTextContent('原任务已完成');
+  expect(screen.getAllByText(sent ? '已恢复，已通知 Owner' : '已恢复，有后续建议').length).toBeGreaterThan(0);
+  expect(screen.queryByText('需 Owner 自行处理')).toBeNull();
+  expect(screen.queryByRole('button', { name: /确认完整方案|拒绝方案|停止任务/ })).toBeNull();
 });
 
 it('shows an expanded overall summary independently of full judgment', async () => {

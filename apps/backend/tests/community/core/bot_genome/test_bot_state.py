@@ -189,18 +189,20 @@ async def test_resources_are_the_bots_file_rows_read_from_the_device() -> None:
         SimpleNamespace(path="kb", is_directory=True),  # a folder row has no bytes
         SimpleNamespace(path="kb/notes.md", is_directory=False),
     ]
-    files = FakeResourceFiles({"data/faq.csv": b"q,a\n", "data/kb/notes.md": b"# n\n"})
+    files = FakeResourceFiles({"faq.csv": b"q,a\n", "kb/notes.md": b"# n\n"})
     resources = await _reader(resource_services=FakeResourceServices(rows), resource_files=files).resources(BOT)
+    # A row's path is workspace-relative, as the Open API records it and the apply writes it; it is read there.
     assert [(r.path, r.files) for r in resources] == [
-        ("data/faq.csv", (("faq.csv", b"q,a\n"),)),
-        ("data/kb/notes.md", (("notes.md", b"# n\n"),)),
+        ("faq.csv", (("faq.csv", b"q,a\n"),)),
+        ("kb/notes.md", (("notes.md", b"# n\n"),)),
     ]
+    assert [c["path"] for c in files.calls] == ["faq.csv", "kb/notes.md"]
     assert files.calls[0] == {
         "entity_type": "staff",
         "entity_id": "staff_u1",
         "bot_id": "bot_1",
         "engine_type": "openclaw",
-        "path": "data/faq.csv",
+        "path": "faq.csv",
     }
 
 

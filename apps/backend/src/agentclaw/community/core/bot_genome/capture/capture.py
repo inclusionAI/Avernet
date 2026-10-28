@@ -247,8 +247,19 @@ class _Builder:
             return None
 
 
-async def capture_spec(reader: BotStateReader, bot: BotRef, *, validator: SkillPackageValidator) -> CapturedSpec:
-    """The bot's current state as a spec, plus the produced bytes to file."""
+async def capture_spec(
+    reader: BotStateReader, bot: BotRef, *, validator: SkillPackageValidator, bounded: bool = True
+) -> CapturedSpec:
+    """The bot's current state as a spec, plus the produced bytes to file.
+
+    ``bounded`` applies the per-category limit a revision may hold
+    (``GenomeSpec``'s list lengths); a capture that will be recorded keeps
+    it. An observation that is only compared, never recorded (the drift
+    check), passes ``False``: an applied directory resource is one revision
+    entry but one row per member file on the bot, so the bot can hold more
+    file entries than a revision may, and still be exactly its revision.
+    Every entry is validated either way; only the list-level limit is skipped.
+    """
     refusal = await reader.refusal(bot)
     if refusal is not None:
         raise CaptureRefused([Reason("not_capturable", "bot", refusal)])
@@ -352,16 +363,22 @@ async def capture_spec(reader: BotStateReader, bot: BotRef, *, validator: SkillP
     if build.reasons:
         raise CaptureRefused(build.reasons)
 
-    try:
-        spec = GenomeSpec(
-            persona=sorted(persona, key=lambda e: e.type),
-            skills=sorted(skills, key=lambda e: e.name),
-            memory=None,
-            resources=sorted(resources, key=lambda e: e.path),
-            tools=ToolsSpec(mcp=sorted(mcp, key=lambda e: e.server_code)),
-            engine_config={},
-            script=script,
+    members: dict[str, Any] = dict(
+        persona=sorted(persona, key=lambda e: e.type),
+        skills=sorted(skills, key=lambda e: e.name),
+        memory=None,
+        resources=sorted(resources, key=lambda e: e.path),
+        tools=ToolsSpec(mcp=sorted(mcp, key=lambda e: e.server_code)),
+        engine_config={},
+        script=script,
+    )
+    if not bounded:
+        return CapturedSpec(
+            spec=GenomeSpec.model_construct(**members),
+            writes=tuple(ProducedBlob(digest, data) for digest, data in build.writes.items()),
         )
+    try:
+        spec = GenomeSpec(**members)
     except (
         ValidationError
     ) as exc:  # a list-level rule the entries cannot carry, e.g. more entries than a category holds

@@ -1,4 +1,5 @@
 use super::*;
+use bcs_service_api::port::bot_authority::BotAuthorityPort;
 
 impl Bot {
     pub(super) async fn discover_organization_bots(
@@ -169,6 +170,7 @@ impl Bot {
         offset: u64,
         limit: u64,
         active_only: bool,
+        access_relations: std::collections::HashMap<String, String>,
     ) -> Result<BotPagedListResult, BotUseCaseError> {
         let mut entries = Vec::with_capacity(bots.len());
         let bot_uuids = bots
@@ -187,7 +189,12 @@ impl Bot {
                 continue;
             }
             let bot_uuid = bot.bot_uuid.clone();
-            entries.push((is_active, bot_uuid, Self::bot_to_my_query_entry(bot, is_active)));
+            let access_relation = access_relations.get(&bot_uuid).cloned();
+            entries.push((
+                is_active,
+                bot_uuid,
+                Self::bot_to_my_query_entry(bot, is_active, access_relation),
+            ));
         }
         entries.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
         let total = entries.len() as u64;
@@ -206,7 +213,11 @@ impl Bot {
         })
     }
 
-    pub(super) fn bot_to_my_query_entry(bot: RegisteredBot, is_active: bool) -> BotQueryEntry {
+    pub(super) fn bot_to_my_query_entry(
+        bot: RegisteredBot,
+        is_active: bool,
+        access_relation: Option<String>,
+    ) -> BotQueryEntry {
         let visibility = bot.capabilities.visibility.clone();
         BotQueryEntry {
             bot_uuid: bot.bot_uuid,
@@ -226,6 +237,7 @@ impl Bot {
             )
             .to_string(),
             is_friend: None,
+            access_relation,
         }
     }
 
@@ -248,6 +260,7 @@ impl Bot {
             )
             .to_string(),
             is_friend: None,
+            access_relation: None,
         }
     }
 
@@ -569,9 +582,18 @@ pub(super) fn normalized_visibility(visibility: &str) -> &'static str {
     }
 }
 
-pub(super) fn authorize_visibility_read(
+/// Visibility read gate (bot-authority plan Task 6,
+/// carry B): the Human→Bot leg consults the CURRENT
+/// live management edge — a manager of a controlled
+/// Bot may read its visibility info; the historical
+/// `created_by` mismatch (and the `created_by: None`
+/// legacy read fallback) no longer silently
+/// authorizes. A failing authority read is an internal
+/// error, never a deny-as-verdict.
+pub(super) async fn authorize_visibility_read(
     caller_actor_id: Option<&str>,
     bot: &RegisteredBot,
+    authority: Option<&dyn BotAuthorityPort>,
 ) -> Result<(), BotUseCaseError> {
     let Some(caller_actor_id) = caller_actor_id else {
         return Ok(());
@@ -582,17 +604,25 @@ pub(super) fn authorize_visibility_read(
     }
 
     if let Some(staff_no) = caller_actor_id.strip_prefix("human_") {
-        if bot
-            .created_by
-            .as_deref()
-            .is_some_and(|owner| owner != staff_no)
-        {
-            return Err(BotUseCaseError::Forbidden(format!(
+        let Some(authority) = authority else {
+            return Err(BotUseCaseError::Service(
+                ServiceError::InternalError(
+                    "bot authority hook is not wired".to_string(),
+                ),
+            ));
+        };
+        return match authority.can_manage(staff_no, &bot.bot_uuid).await {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(BotUseCaseError::Forbidden(format!(
                 "Not authorized to access bot '{}'",
                 bot.bot_uuid
-            )));
-        }
-        return Ok(());
+            ))),
+            Err(error) => Err(BotUseCaseError::Service(
+                ServiceError::InternalError(format!(
+                    "bot authority lookup failed: {error}"
+                )),
+            )),
+        };
     }
 
     match bot.capabilities.visibility.as_str() {
@@ -601,23 +631,28 @@ pub(super) fn authorize_visibility_read(
     }
 }
 
-pub(super) fn authorize_human_creator_required(
-    staff_no: &str,
-    bot: &RegisteredBot,
-) -> Result<(), BotUseCaseError> {
-    match bot.created_by.as_deref() {
-        Some(owner) if owner == staff_no => Ok(()),
-        _ => Err(BotUseCaseError::Forbidden(format!(
-            "User {} is not the creator of bot {}",
-            staff_no, bot.bot_uuid
-        ))),
-    }
-}
-
 pub(super) fn is_owner_suffixed_bot_id_for_staff(bot_uuid: &str, staff_no: &str) -> bool {
     bot_uuid
         .rsplit_once(':')
         .is_some_and(|(_, suffix)| suffix == staff_no)
+}
+
+/// Legacy TC-origin classification (F5): a Bot whose OWN
+/// persisted `created_by` matches the `<prefix>:<staff_no>`
+/// owner-suffix convention is a TC-origin Bot and must never be
+/// deletable through the ordinary Avernet delete path — for ANY
+/// current owner or manager. The classification is intrinsic to
+/// the Bot record (origin marker), never a function of the
+/// requester: ownership transfer must not reclassify it either
+/// (`created_by` stays the historical origin marker; spec §3.6.6).
+/// A missing `created_by` cannot prove origin — such legacy rows
+/// fall through to the ordinary path and need their own data
+/// investigation; this helper never invents one.
+pub(super) fn is_legacy_tc_origin_bot(bot: &RegisteredBot) -> bool {
+    match bot.created_by.as_deref() {
+        Some(staff_no) => is_owner_suffixed_bot_id_for_staff(&bot.bot_uuid, staff_no),
+        None => false,
+    }
 }
 
 
@@ -666,4 +701,44 @@ pub(super) fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod legacy_tc_origin_tests {
+    use super::*;
+
+    fn bot(bot_uuid: &str, created_by: Option<&str>) -> RegisteredBot {
+        RegisteredBot {
+            bot_uuid: bot_uuid.to_string(),
+            capabilities: BotCapabilities::default(),
+            env: None,
+            created_by: created_by.map(str::to_string),
+            actor_kind: ActorKind::Bot,
+            status: ActorStatus::Online,
+        }
+    }
+
+    #[test]
+    fn tc_origin_is_intrinsic_to_the_bot_record() {
+        // The `<prefix>:<staff_no>` suffix matching the persisted
+        // creator classifies, regardless of who asks.
+        assert!(is_legacy_tc_origin_bot(&bot("teamclaw-bot:alice", Some("alice"))));
+        assert!(is_legacy_tc_origin_bot(&bot("custom-prefix:carol", Some("carol"))));
+        // Supported multi-colon ids anchor on the LAST segment
+        // (the Memory-store parsing rule); the creator must match
+        // that anchor.
+        assert!(is_legacy_tc_origin_bot(&bot("ns:teamclaw-bot:alice", Some("alice"))));
+        assert!(!is_legacy_tc_origin_bot(&bot("ns:teamclaw-bot:alice", Some("ns"))));
+    }
+
+    #[test]
+    fn non_tc_records_stay_on_the_ordinary_path() {
+        // Ordinary ids, suffix/creator mismatch, and a missing
+        // creator (origin unprovable — a data-investigation case,
+        // never a classification this helper invents).
+        assert!(!is_legacy_tc_origin_bot(&bot("plain-bot", Some("alice"))));
+        assert!(!is_legacy_tc_origin_bot(&bot("teamclaw-bot:alice", Some("bob"))));
+        assert!(!is_legacy_tc_origin_bot(&bot("teamclaw-bot:alice", None)));
+        assert!(!is_legacy_tc_origin_bot(&bot("no-colon-id", Some("colin"))));
+    }
 }

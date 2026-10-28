@@ -5,13 +5,13 @@ RevisionPath:
   get:
     operationId: read_draft_revision
     tags: ["Collaboration / Drafts"]
-    summary: Read an immutable revision using its share capability.
+    summary: Read an immutable revision without credentials.
     description: >-
-      Exactly one X-BCS-Draft-Read-Token is required. No ambient User, Bot or
-      Gateway credential fallback. No-store on success and errors. No management
+      Draft ID and revision are sufficient; no read credential or custom header
+      is required. No-store on success and errors. No management
       aliases exist. Uses the same application service as native Draft reads.
     x-avernet-security: {}
-    security: [{RevisionReadToken: []}]
+    security: []
     responses:
       '200':
         description: Exact stored source and metadata, in the V1 envelope.
@@ -32,11 +32,11 @@ ValidatePath:
     tags: ["Collaboration / Drafts"]
     summary: Validate the stored revision with current BCS capabilities.
     description: >-
-      Empty body only; the caller cannot substitute source. Capability-only
-      authorization and no-store match the revision read. Invalid bodies are
+      Empty body only; the caller cannot substitute source. Public access
+      and no-store match the revision read. Invalid bodies are
       rejected without echoing their content.
     x-avernet-security: {}
-    security: [{RevisionReadToken: []}]
+    security: []
     responses:
       '200':
         description: Validation bound to the immutable source hash.
@@ -66,7 +66,7 @@ RevisionEnvelope:
 
 DraftError:
   description: >-
-    400 DRAFT_INPUT; 404 DRAFT_REFERENCE_UNAVAILABLE for missing, mismatched,
+    400 DRAFT_INPUT; 404 DRAFT_REFERENCE_UNAVAILABLE for missing,
     revoked or deleted references; 503 DRAFT_SERVICE_UNAVAILABLE. No credentials
     or source in errors.
   x-error-codes: [DRAFT_INPUT, DRAFT_REFERENCE_UNAVAILABLE, DRAFT_SERVICE_UNAVAILABLE]

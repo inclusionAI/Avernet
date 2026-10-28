@@ -2,10 +2,10 @@
 // 收起分组只留标题行（2026-10-22 需求变更:「Bot 泊位」头像预览删除,收起即净,
 // 成员数由标题右缘计数承载;原 2026-10-10「收起不留盲区」裁决作废）。
 // 与 ConversationSidebar 拆分自同文件(2026-10-10 收起需求 + TC-G005 文件体积门禁)。
-import { Button, Empty } from '@/components/ui';
+import { Button, Empty, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui';
 import type { ConversationBotView } from '@/domain/conversation/types';
 import { cn } from '@/utils/cn';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Info } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { ListErrorState } from '../../components/ListErrorState';
 import { ConversationBotRowsSkeleton } from './ConversationSkeletons';
@@ -21,6 +21,8 @@ export interface ConversationSidebarSectionProps {
   /** 空态提示,可含跳转链接(由调用方组装 ReactNode)。 */
   emptyHint?: ReactNode;
   isSearching: boolean;
+  /** 标题行来源提示(#2990 还原):标题旁 i 图标悬停说明;缺省不渲染。 */
+  infoHint?: string;
   renderItem(view: ConversationBotView): ReactNode;
   /** 可收起分组(我的/好友 Bot):缺省展开,标题行点击切换;搜索时强制展开以保证可检索。 */
   collapsible?: boolean;
@@ -30,7 +32,7 @@ export interface ConversationSidebarSectionProps {
 
 export function ConversationSidebarSection(props: ConversationSidebarSectionProps) {
   const { title, loading, error, onRetry, items } = props;
-  const { emptyTitle, emptyHint, isSearching, renderItem, collapsible } = props;
+  const { emptyTitle, emptyHint, isSearching, renderItem, collapsible, infoHint } = props;
   const { collapsed, onToggleCollapsed } = props;
   const bodyHidden = collapsible === true && collapsed;
   return (
@@ -42,31 +44,51 @@ export function ConversationSidebarSection(props: ConversationSidebarSectionProp
           标题行右缘补成员计数（2026-10-22 体验精修）：aria-hidden 纯视觉数字（行数由列表
           本身可达，读屏不重复报），且置于切换按钮之外 → 按钮可访问名仍为纯标题。 */}
       <div className="flex min-h-8 items-center justify-between gap-1 px-4">
-        {collapsible ? (
-          <Button
-            variant="ghost"
-            aria-expanded={!collapsed}
-            className={cn(
-              // hover pill(2026-10-22 体验精修二轮):-mx-1 + px-1 补偿保持标题文字 x 不动,
-              // 悬停给极轻 muted 底揭示「标题即开关」可点性;去掉了原 hover:bg-transparent 的零反馈。
-              'flex h-auto min-w-0 items-center justify-start gap-1 rounded-md py-1 pr-1.5 pl-1 text-xs font-normal text-content-soft',
-              '-mx-1 hover:bg-muted/50 transition-colors',
-            )}
-            onClick={onToggleCollapsed}
-          >
-            <span className="truncate">{title}</span>
-            {/* chevron 旋转过渡:单 ChevronDown,收起 -rotate-90,与 Bot 行箭头同一动效语言。 */}
-            <ChevronDown
+        {/* 标题与来源提示(#2990 还原 infoHint)聚合:i 图标为切换按钮的同级兄弟
+            (非按钮内容),按钮可访问名保持纯标题;role=img 不进 Tab 序,infoHint 有值才渲染。 */}
+        <div className="flex min-w-0 items-center gap-0.5">
+          {collapsible ? (
+            <Button
+              variant="ghost"
+              aria-expanded={!collapsed}
               className={cn(
-                'h-3.5 w-3.5 shrink-0 text-content-icon transition-transform duration-150',
-                collapsed && '-rotate-90',
+                // hover pill(2026-10-22 体验精修二轮):-mx-1 + px-1 补偿保持标题文字 x 不动,
+                // 悬停给极轻 muted 底揭示「标题即开关」可点性;去掉了原 hover:bg-transparent 的零反馈。
+                'flex h-auto min-w-0 items-center justify-start gap-1 rounded-md py-1 pr-1.5 pl-1 text-xs font-normal text-content-soft',
+                '-mx-1 hover:bg-muted/50 transition-colors',
               )}
-              aria-hidden="true"
-            />
-          </Button>
-        ) : (
-          <p className="text-xs font-normal text-content-soft">{title}</p>
-        )}
+              onClick={onToggleCollapsed}
+            >
+              <span className="truncate">{title}</span>
+              {/* chevron 旋转过渡:单 ChevronDown,收起 -rotate-90,与 Bot 行箭头同一动效语言。 */}
+              <ChevronDown
+                className={cn(
+                  'h-3.5 w-3.5 shrink-0 text-content-icon transition-transform duration-150',
+                  collapsed && '-rotate-90',
+                )}
+                aria-hidden="true"
+              />
+            </Button>
+          ) : (
+            <p className="text-xs font-normal text-content-soft">{title}</p>
+          )}
+          {infoHint && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    role="img"
+                    aria-label={infoHint}
+                    className="inline-flex shrink-0 cursor-help items-center text-content-icon"
+                  >
+                    <Info className="h-3 w-3" aria-hidden="true" />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>{infoHint}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+        </div>
         {items.length > 0 && (
           <span
             aria-hidden="true"

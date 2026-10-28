@@ -59,7 +59,18 @@ pub enum ProviderRunTransport {
 
 #[async_trait]
 pub trait BotRunContextPort: Send + Sync {
+    /// Register a trusted producer before transport I/O.
     async fn put_context(&self, context: BotRunContext);
+
+    /// Project an already validated accepted alias for legacy callback scope
+    /// lookup. This is NOT a new producer registration: it must not resurrect
+    /// output after the canonical Run completes. Storage-only implementations
+    /// may share the context write; lifecycle decorators must preserve the
+    /// distinction. The caller binds and validates the alias before this call.
+    async fn put_alias_context(&self, context: BotRunContext) {
+        self.put_context(context).await;
+    }
+
     async fn get_context(&self, run_id: &str) -> Option<BotRunContext>;
     async fn try_begin_terminal(&self, run_id: &str) -> bool;
     async fn mark_terminal(&self, run_id: &str) -> bool;

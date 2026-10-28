@@ -67,7 +67,7 @@ export function parseRuntimeIdentity(input: unknown): RuntimeIdentity | null {
   return result;
 }
 export function parseDiagnosis(input: unknown, key: string | undefined): DiagnosisEvent {
-  const v = record(input, [...diagnosisKeys, "runtimeIdentity"]);
+  const v = record(input, [...diagnosisKeys, "runtimeIdentity", "sessionNasPath"]);
   const version = v.schemaVersion === DIAGNOSIS_V4_VERSION ? DIAGNOSIS_V4_VERSION : v.schemaVersion === DIAGNOSIS_V3_VERSION ? DIAGNOSIS_V3_VERSION : DIAGNOSIS_VERSION;
   const identity = reportIdentity(v, version);
   if (version === DIAGNOSIS_V4_VERSION && [...diagnosisKeys, "runtimeIdentity"].some(k => !(k in v))) invalid("v4 必须包含完整标签及身份字段。");
@@ -84,6 +84,9 @@ export function parseDiagnosis(input: unknown, key: string | undefined): Diagnos
   if (version !== DIAGNOSIS_V4_VERSION && decision === "PASS" && tcFaultLabel !== null) invalid();
   const sessionKey = nullableText(v.sessionKey, 1024);
   const sessionId = nullableText(v.sessionId, 255);
+  const sessionNasPath = nullableText(v.sessionNasPath, 4096);
+  if (sessionNasPath !== null && (!sessionNasPath.startsWith("/") || /[\\\u0000-\u001f\u007f-\u009f]/.test(sessionNasPath)
+    || sessionNasPath.split("/").some(part => part === "." || part === ".."))) invalid("会话 NAS 路径无效。");
   const traceId = nullableText(v.traceId, 255);
   if ([sessionKey, sessionId, traceId].some((s) => s !== null && !s.trim()) || (engine === "TE" && !traceId)) invalid();
   if (typeof v.humanIntervention !== "boolean") invalid();
@@ -91,6 +94,7 @@ export function parseDiagnosis(input: unknown, key: string | undefined): Diagnos
     ...(version !== DIAGNOSIS_VERSION ? { schemaVersion: version, runtimeIdentity } : { schemaVersion: version }),
     eventId, diagnosisId: eventId, ...identity, engine,
     sessionKey, sessionId, traceId, occurredAt: v.occurredAt == null ? null : timestamp(v.occurredAt),
+    ...(sessionNasPath !== null ? { sessionNasPath } : {}),
     diagnosedAt: timestamp(v.diagnosedAt), decision, tcFaultLabel, confidence,
     businessProblemCategory: nullableText(v.businessProblemCategory, 128),
     businessProblemSubtype: nullableText(v.businessProblemSubtype, 128),

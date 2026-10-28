@@ -58,6 +58,8 @@ export interface BotDomain {
   lock?: BotLock;
   /** 库存接口声明需要协作锁，未持锁时也保留获取入口。 */
   needsEditLock?: boolean;
+  /** Bot 级协作关系；运行态不要求编辑锁，但仍允许管理已有协作锁。 */
+  hasCollaborators?: boolean;
   completeness: BotCompleteness;
   warnings: string[];
   actions: string[];

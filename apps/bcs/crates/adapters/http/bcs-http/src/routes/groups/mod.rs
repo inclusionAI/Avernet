@@ -47,7 +47,7 @@ use crate::routes::group_messages::{
 use crate::state::HttpAppState;
 
 use super::{
-    authenticated_bot_from_headers, bots::bot_use_case_error_to_http,
+    authenticated_bot_from_headers,
     reject_judge_definition_when_unavailable, reject_judge_yaml_when_unavailable,
     validate_container_header,
 };
@@ -61,5 +61,5 @@ mod translation;
 pub use create::*;
 pub use dto::*;
 pub use handlers::*;
-pub use projections::*;
-pub use translation::*;
+pub(crate) use projections::*;
+pub(crate) use translation::*;

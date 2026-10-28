@@ -799,3 +799,39 @@ pub(super) fn sqlite_channel_audit_expr(
         "CURRENT_TIMESTAMP"
     }
 }
+
+/// 037_bot_authority: `bcs_bots.ownership_version`, the
+/// `edge_grants` unique-key swap plus the approved-owner partial
+/// unique index, and the `bot_ownership_transfers` /
+/// `bot_authority_changes` tables (spec §4, migration file
+/// `migrations/sqlite/037_bot_authority.sql`).
+///
+/// The `bcs_bots` ALTER statement inside the file is applied
+/// here with a column guard: fresh databases already created the
+/// column through the baseline DDL, and SQLite `ADD COLUMN` has
+/// no `IF NOT EXISTS` form.
+pub(super) async fn add_sqlite_bot_authority_schema(db: &dyn DbPlugin) -> DbResult<()> {
+    const ALTER_STATEMENT: &str =
+        "ALTER TABLE bcs_bots ADD COLUMN ownership_version INTEGER NOT NULL DEFAULT 0";
+    if table_exists(db, "bcs_bots").await? {
+        let columns = sqlite_table_columns(db, "bcs_bots").await?;
+        if !columns.iter().any(|column| column == "ownership_version") {
+            db.execute(DbStatement::new(ALTER_STATEMENT)).await?;
+        }
+    }
+    for sql in include_str!("../../../../../migrations/sqlite/037_bot_authority.sql")
+        .split(';')
+        .map(str::trim)
+        .filter(|sql| !sql.is_empty())
+    {
+        // The guarded column add ran above (fresh databases get
+        // the column from the baseline DDL). The file's ALTER
+        // fragment carries its leading comment lines, so match
+        // the distinctive clause, not the whole statement.
+        if sql.contains("ADD COLUMN ownership_version") {
+            continue;
+        }
+        db.execute(DbStatement::new(sql)).await?;
+    }
+    Ok(())
+}

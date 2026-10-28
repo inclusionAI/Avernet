@@ -737,15 +737,21 @@ class BotService(BotServiceProtocol):
         Lookup/resolution failures propagate: callers must not mistake an unknown
         template for one eligible for the legacy ARCA image Pin.
         """
-        bot = self._repository.get_by_id_and_owner(bot_id, user_id)
-        if not bot:
-            raise BotNotFoundError(f"Bot not found: {bot_id}")
+        from agentclaw.community.core.bot_management.addressing import BotAddressResolver
+        from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
+
+        try:
+            bot = dict(BotAddressResolver(self._repository).resolve(
+                bot_id=bot_id, legacy_owner_id=user_id,
+            ).bot)
+        except BotAddressNotFoundError as exc:
+            raise BotNotFoundError(f"Bot not found: {bot_id}") from exc
         # Unlike get_bot's best-effort enrichment, propagate template read errors.
         # Identity lookup does not need device bindings.
         template_config = self._template_service.get_template_config_strict(bot_id)
         return self._baas_template_resolver.resolve_template_uid(
             bot_id=bot_id,
-            user_id=user_id,
+            user_id=str(bot["owner_id"]),
             env=env,
             bot_type=str(bot.get("bot_type") or "service"),
             engine_type=bot.get("active_engine"),
@@ -2479,6 +2485,23 @@ class BotService(BotServiceProtocol):
         thread.start()
         logger.info(f"[bot_service._allocate_device_async] Started background thread for bot {bot_id} device allocation")
 
+    def get_bot_by_address(self, bot_id: str, user_id: str) -> Dict[str, Any]:
+        """Internal resource lookup; user_id is a legacy entity/Owner locator.
+
+        This method does not authorize the actor. Callers must authorize separately;
+        get_bot retains its strict current-Owner lookup contract.
+        """
+        from agentclaw.community.core.bot_management.addressing import BotAddressResolver
+        from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
+
+        try:
+            address = BotAddressResolver(self._repository).resolve(
+                bot_id=bot_id, legacy_owner_id=user_id,
+            )
+        except BotAddressNotFoundError as exc:
+            raise BotNotFoundError(f"Bot not found: {bot_id}") from exc
+        return self.get_bot(bot_id=bot_id, user_id=address.current_owner_id)
+
     def get_bot(self, bot_id: str, user_id: str) -> Dict[str, Any]:
         """
         Get bot by ID.
@@ -3952,6 +3975,36 @@ class BotService(BotServiceProtocol):
             for engine in engine_types
         }
 
+    def validate_delete_bot(self, bot_id: str, user_id: str) -> Dict[str, Any]:
+        """Validate current ownership and deletion policy before external cleanup."""
+        bot = self._repository.get_by_id_and_owner(bot_id, user_id)
+        if not bot:
+            raise BotNotFoundError(f"Bot not found: {bot_id}")
+        if (bot.get("ext") or {}).get("digital_employee"):
+            raise BotOperationNotAllowedError("已绑定数字员工的 Bot 不支持删除")
+
+        # 保护 owner 名下最早创建的 bot 不能删除（等价于旧 "default" bot 不可删语义）。
+        # 含 owner 仅一只的情形（earliest 即该只 → 拒），自然保留 ≥1。
+        # 必须在 release_device / destroy_passport 之前拦截，否则会误销毁
+        # agent 许可证 (Passport) 并重置引擎配置 (openclaw.json)。
+        # 用 BotOperationNotAllowedError（BotServiceError 子类）表达"这是客户端
+        # 不支持的操作"，而不是服务端故障：重试永远不会成功。内部路由的 except 链没有
+        # 这一分支，仍落到 `except BotServiceError` → 500，行为不变；公共 API 则按
+        # 4xx 映射。
+        _total_owner_bots, owner_bot_items = self._repository.list_by_owner(user_id, 1, 1000)
+        if owner_bot_items:
+            # gmt_create可能是 datetime 或 ISO 字符串;统一成字符串排序,避免类型混比。
+            # 空值兜底为空串(ISO 字符串排序下排最前,等同"最早")。
+            earliest = min(
+                owner_bot_items,
+                key=lambda b: str(b.get("gmt_create") or ""),
+            )
+            earliest_bot_id = earliest.get("bot_id")
+            if earliest_bot_id and bot_id == earliest_bot_id:
+                raise BotOperationNotAllowedError("不能删除首个创建的 Bot，该 Bot 受保护")
+
+        return bot
+
     def delete_bot(self, bot_id: str, user_id: str, nick_name: Optional[str] = None) -> bool:
         """
         Soft delete a bot.
@@ -3973,33 +4026,13 @@ class BotService(BotServiceProtocol):
             raise BotServiceError("User ID is required for deleting bot")
 
         try:
-            # Get bot by bot_id and owner_id (user_id)
-            bot = self._repository.get_by_id_and_owner(bot_id, user_id)
-            if not bot:
-                raise BotNotFoundError(f"Bot not found: {bot_id}")
-
-            if (bot.get("ext") or {}).get("digital_employee"):
-                raise BotOperationNotAllowedError("已绑定数字员工的 Bot 不支持删除")
-
-            # 保护 owner 名下最早创建的 bot 不能删除（等价于旧 "default" bot 不可删语义）。
-            # 含 owner 仅一只的情形（earliest 即该只 → 拒），自然保留 ≥1。
-            # 必须在 release_device / destroy_passport 之前拦截，否则会误销毁
-            # agent 许可证 (Passport) 并重置引擎配置 (openclaw.json)。
-            # 用 BotOperationNotAllowedError（BotServiceError 子类）表达"这是客户端
-            # 不支持的操作"，而不是服务端故障：重试永远不会成功。内部路由的 except 链没有
-            # 这一分支，仍落到 `except BotServiceError` → 500，行为不变；公共 API 则按
-            # 4xx 映射。
-            _total_owner_bots, owner_bot_items = self._repository.list_by_owner(user_id, 1, 1000)
-            if owner_bot_items:
-                # gmt_create可能是 datetime 或 ISO 字符串;统一成字符串排序,避免类型混比。
-                # 空值兜底为空串(ISO 字符串排序下排最前,等同"最早")。
-                earliest = min(
-                    owner_bot_items,
-                    key=lambda b: str(b.get("gmt_create") or ""),
-                )
-                earliest_bot_id = earliest.get("bot_id")
-                if earliest_bot_id and bot_id == earliest_bot_id:
-                    raise BotOperationNotAllowedError("不能删除首个创建的 Bot，该 Bot 受保护")
+            bot = self.validate_delete_bot(bot_id, user_id)
+            from agentclaw.community.core.bot_management.addressing import stable_resource_owner_id
+            resource_owner_id = (
+                stable_resource_owner_id(bot)
+                if bot.get("bot_type") == "service" and bot_id != "default"
+                else user_id
+            )
 
             # Withdraw every application authorization standing against this
             # bot — whoever delegated it — before anything destructive happens.
@@ -4017,7 +4050,7 @@ class BotService(BotServiceProtocol):
             # Failures propagate deliberately. Swallowing this would reintroduce
             # exactly the gap it closes, and quietly.
             revoked = self._bot_app_grant_provider().revoke_all_for_bot(
-                bot_id=bot_id, owner_id=user_id
+                bot_id=bot_id, owner_id=resource_owner_id
             )
             if revoked:
                 logger.info(
@@ -4082,7 +4115,7 @@ class BotService(BotServiceProtocol):
 
             # Step 2: 通知 Passport 服务销毁 Passport（阻塞流程）
             try:
-                self._passport_plugin.destroy_passport(bot_id, user_id)
+                self._passport_plugin.destroy_passport(bot_id, resource_owner_id)
                 logger.info(f"[bot_service.delete_bot] destroyPassport success: bot_id={bot_id}, owner_workno={user_id}")
             except PassportError as e:
                 logger.error(f"[bot_service.delete_bot] destroyPassport failed: bot_id={bot_id}, owner_workno={user_id}, error={e}")
@@ -4093,7 +4126,7 @@ class BotService(BotServiceProtocol):
             if not result:
                 raise BotNotFoundError(f"Bot not found: {bot_id}")
 
-            self._sweep_grants_that_raced_the_deletion(bot_id, user_id)
+            self._sweep_grants_that_raced_the_deletion(bot_id, resource_owner_id)
 
             if bot_id != "default":
                 self._sweep_startup_script_that_raced_the_deletion(bot_id, bot)
@@ -4104,7 +4137,7 @@ class BotService(BotServiceProtocol):
             # default bot 是用户的默认 Bot，删除它通常是"重启"逻辑，应保留技能和配置
             if bot_id != "default":
                 try:
-                    self._cleanup_bot_associated_data(bot_id, user_id)
+                    self._cleanup_bot_associated_data(bot_id, resource_owner_id)
                     logger.info(f"[bot_service.delete_bot] Cleaned up associated data for bot {bot_id}")
                 except Exception as cleanup_error:
                     # 清理失败不影响删除结果，只记录日志
@@ -5866,8 +5899,10 @@ class BotService(BotServiceProtocol):
                     f"[bot_service.refresh_passport_token] Routing to service bot: "
                     f"bot_id={bot_id}, user_id={user_id}"
                 )
+                from agentclaw.community.core.bot_management.addressing import stable_resource_owner_id
+                resource_owner_id = stable_resource_owner_id(bot) if bot_id != "default" else user_id
                 bindings = self._hot_update_service_bot_passport_token(
-                    bot_id=bot_id, user_id=user_id, token=new_token, bot=bot,
+                    bot_id=bot_id, user_id=resource_owner_id, token=new_token, bot=bot,
                     agent_code=agent_code,
                 )
             elif bot_type == "personal":

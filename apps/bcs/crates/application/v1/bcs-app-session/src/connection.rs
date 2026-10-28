@@ -4,11 +4,14 @@ use async_trait::async_trait;
 use bcs_service_api::application::v1::{
     ActorKind, ApplicationError, AuthenticatedCaller, AuthenticatedUserIdentity,
     AuthorizeGroupSessionConnection, AuthorizedGroupSessionConnection,
+    ConnectionView,
     GROUP_SESSION_WS_TOKEN_TTL_SECONDS, GetSession, GroupSessionConnectionBinding,
     GroupSessionConnectionError, GroupSessionConnectionService, IssueGroupSessionConnectionToken,
-    IssuedGroupSessionConnectionToken, ParticipantMode, SessionService,
+    IssuedGroupSessionConnectionToken, ParticipantMode, SessionParticipant, SessionService,
     VerifyGroupSessionConnectionToken, require_authenticated_user,
 };
+use bcs_service_api::core::SessionAuthorizationCoreService;
+use bcs_service_api::port::bot_authority::BotAuthorityPort;
 use bcs_service_api::port::{
     GroupSessionTokenError, GroupSessionTokenPort, GroupSessionTokenScope,
 };
@@ -18,11 +21,29 @@ use bcs_service_api::port::{
 pub struct GroupSessionConnectionServiceImpl {
     sessions: Arc<dyn SessionService>,
     tokens: Arc<dyn GroupSessionTokenPort>,
+    /// Strict Session authorization-fact snapshot read
+    /// (bot-authority plan Task 7.3, spec §8.3): the Bot view
+    /// authorizes against the snapshot, never a display read.
+    session_snapshots: Arc<dyn SessionAuthorizationCoreService>,
+    /// Live Human→Bot management edge, consulted only when a
+    /// Bot view is explicitly selected. A missing wiring fails
+    /// closed.
+    bot_authority: Option<Arc<dyn BotAuthorityPort>>,
 }
 
 impl GroupSessionConnectionServiceImpl {
-    pub fn new(sessions: Arc<dyn SessionService>, tokens: Arc<dyn GroupSessionTokenPort>) -> Self {
-        Self { sessions, tokens }
+    pub fn new(
+        sessions: Arc<dyn SessionService>,
+        tokens: Arc<dyn GroupSessionTokenPort>,
+        session_snapshots: Arc<dyn SessionAuthorizationCoreService>,
+        bot_authority: Option<Arc<dyn BotAuthorityPort>>,
+    ) -> Self {
+        Self {
+            sessions,
+            tokens,
+            session_snapshots,
+            bot_authority,
+        }
     }
 }
 
@@ -84,9 +105,37 @@ impl GroupSessionConnectionService for GroupSessionConnectionServiceImpl {
         command: AuthorizeGroupSessionConnection,
     ) -> Result<AuthorizedGroupSessionConnection, GroupSessionConnectionError> {
         let binding = command.binding;
-        let user_id = binding.user_id;
+        match command.view {
+            ConnectionView::HumanSelf => self
+                .authorize_human_self_view(&binding)
+                .await
+                .map(|participants| AuthorizedGroupSessionConnection {
+                    participants,
+                    view: ConnectionView::HumanSelf,
+                }),
+            ConnectionView::Bot { bot_id } => self
+                .authorize_bot_view(&binding, &bot_id)
+                .await
+                .map(|participants| AuthorizedGroupSessionConnection {
+                    participants,
+                    view: ConnectionView::Bot { bot_id },
+                }),
+        }
+    }
+}
+
+impl GroupSessionConnectionServiceImpl {
+    /// Human self view: the token proves the current Session read
+    /// qualification and the Human must still be a present
+    /// participant. No Bot authority is consulted (§3.3
+    /// independent Human right).
+    async fn authorize_human_self_view(
+        &self,
+        binding: &GroupSessionConnectionBinding,
+    ) -> Result<Vec<SessionParticipant>, GroupSessionConnectionError> {
+        let user_id = binding.user_id.clone();
         let caller = AuthenticatedCaller {
-            tenant: binding.tenant,
+            tenant: binding.tenant.clone(),
             user: Some(AuthenticatedUserIdentity {
                 id: user_id.clone(),
                 username: user_id.clone(),
@@ -101,7 +150,7 @@ impl GroupSessionConnectionService for GroupSessionConnectionServiceImpl {
             .sessions
             .get(GetSession {
                 caller,
-                session_id: binding.session_id,
+                session_id: binding.session_id.clone(),
             })
             .await?;
         if session.group_id != binding.group_id {
@@ -121,9 +170,88 @@ impl GroupSessionConnectionService for GroupSessionConnectionServiceImpl {
             )
             .into());
         }
-        Ok(AuthorizedGroupSessionConnection {
-            participants: session.participants,
-        })
+        Ok(session.participants)
+    }
+
+    /// Explicit Bot view (spec §8.3): the Bot view is a selection
+    /// parameter, not a credential. Verify the token range
+    /// (Session still belongs to the token-bound Group), the
+    /// CURRENT Human→Bot management edge and the Bot's resource
+    /// qualification (a live Session participant).
+    async fn authorize_bot_view(
+        &self,
+        binding: &GroupSessionConnectionBinding,
+        bot_id: &str,
+    ) -> Result<Vec<SessionParticipant>, GroupSessionConnectionError> {
+        let snapshot = self
+            .session_snapshots
+            .read_authorization_snapshot(&binding.session_id)
+            .await
+            .map_err(|_| {
+                GroupSessionConnectionError::Internal(
+                    "session authorization snapshot read failed".into(),
+                )
+            })?;
+        let Some(snapshot) = snapshot else {
+            return Err(ApplicationError::forbidden(
+                "Session no longer exists",
+            )
+            .into());
+        };
+        if snapshot.group_id != binding.group_id {
+            return Err(ApplicationError::forbidden(
+                "Session no longer belongs to the token-bound Group",
+            )
+            .into());
+        }
+        let qualified = snapshot.participants.iter().any(|participant| {
+            participant.actor_kind == ActorKind::Bot
+                && participant.actor_id == bot_id
+        });
+        if !qualified {
+            return Err(ApplicationError::forbidden(
+                "Selected Bot view is not a participant of the token-bound Session",
+            )
+            .into());
+        }
+        match self.bot_authority.as_ref() {
+            Some(hook) => match hook.can_manage(&binding.user_id, bot_id).await {
+                Ok(true) => {}
+                Ok(false) => {
+                    return Err(ApplicationError::forbidden(
+                        "The authenticated Human no longer controls the selected Bot view",
+                    )
+                    .into());
+                }
+                Err(_) => {
+                    return Err(GroupSessionConnectionError::Internal(
+                        "bot authority read failed".into(),
+                    ));
+                }
+            },
+            None => {
+                return Err(ApplicationError::forbidden(
+                    "Bot view authorization is not available",
+                )
+                .into());
+            }
+        }
+        // The connect-time participant projection comes from the
+        // same strict snapshot.
+        Ok(snapshot
+            .participants
+            .iter()
+            .map(|participant| SessionParticipant {
+                actor_id: participant.actor_id.clone(),
+                actor_kind: participant.actor_kind,
+                name: None,
+                role: participant.role,
+                tags: Vec::new(),
+                mode: participant.effective_mode,
+                message_view_scope: participant.message_view_scope,
+                joined_at: None,
+            })
+            .collect())
     }
 }
 

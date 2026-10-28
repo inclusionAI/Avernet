@@ -270,9 +270,25 @@ export type Repositories = {
 };
 
 let repos: Repositories | null = null;
+let initializedSchema: "migrate" | "external" | null = null;
 
-export async function initDatabase(configPath?: string): Promise<Repositories> {
-  if (repos) return repos;
+/** External schemas are provisioned by the caller; connection failures remain fatal. */
+export type DatabaseInitOptions = { schema?: "migrate" | "external" };
+
+export async function initDatabase(
+  configPath?: string,
+  options: DatabaseInitOptions = {},
+): Promise<Repositories> {
+  const schema = options.schema ?? "migrate";
+  if (schema !== "migrate" && schema !== "external") {
+    throw new Error(`Unsupported database schema initialization: ${schema}`);
+  }
+  if (repos) {
+    if (initializedSchema !== schema) {
+      throw new Error("Database already initialized with a different schema strategy");
+    }
+    return repos;
+  }
 
   const config = resolveDbConfig(configPath);
 
@@ -290,8 +306,9 @@ export async function initDatabase(configPath?: string): Promise<Repositories> {
       db = initSqlite(config.sqlitePath);
     }
 
-    await runMigrations(db, db.dbType as DbType);
+    if (schema === "migrate") await runMigrations(db, db.dbType as DbType);
   } catch (err) {
+    if (schema === "external") throw err;
     const msg = err instanceof Error ? err.message : String(err);
     console.warn(`[clawweb] Database init failed (mode=${config.mode}): ${msg}`);
     console.warn("[clawweb] Falling back to NoOp database — API will return 503");
@@ -299,6 +316,7 @@ export async function initDatabase(configPath?: string): Promise<Repositories> {
   }
 
   repos = { db };
+  initializedSchema = schema;
   console.log(`[clawweb] Database ready (type=${db.dbType})`);
   return repos;
 }
@@ -929,6 +947,7 @@ export async function closeDatabase(): Promise<void> {
   if (repos) {
     await repos.db.close();
     repos = null;
+    initializedSchema = null;
   }
 }
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from tests.community.helpers.skill_projection_guard import PassThroughSkillProjectionGuard
 
 import pytest
 
@@ -189,7 +188,6 @@ def _plan(
 
 def _delivery(pool_runtime, pool_layouts, *, center_content=None):
     return SkillRuntimeDelivery(
-        guard=PassThroughSkillProjectionGuard(),
         pool_runtime=pool_runtime,
         pool_layouts=pool_layouts,
         device_contexts=_DeviceContexts(),

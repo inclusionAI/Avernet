@@ -10,7 +10,7 @@ createRoot(document.getElementById('root')!).render(<BrowserRouter>
     <main className="flex-1"><Routes>
       <Route path="/" element={<Navigate to="/insight?module=monitoring" replace />} />
       <Route path="/insight" element={<InsightCenter />} />
-      <Route path="*" element={<div className="p-8 text-sm text-gray-600">此本地预览仅提供监控页面。<Link className="text-blue-600" to="/insight?module=monitoring">返回 Agent 监控自愈</Link></div>} />
+      <Route path="*" element={<div className="p-8 text-sm text-gray-600">此本地预览仅提供监控页面。<Link className="text-blue-600" to="/insight?module=monitoring">返回 Agent 诊断治愈</Link></div>} />
     </Routes></main>
   </div>
   <details className="preview-tools"><summary>本地预览</summary>

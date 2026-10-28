@@ -143,6 +143,47 @@ describe('conversationService.listDirectory', () => {
     ]);
   });
 
+  it.each([
+    ['service', false, false],
+    ['service', true, true],
+    ['service', null, true],
+    ['service', undefined, true],
+    ['personal', false, true],
+    [undefined, false, true],
+  ] as const)(
+    'maps friend bot_type=%p online_available=%p to chatable=%p',
+    async (botType, onlineAvailable, chatable) => {
+      botMocked.listBots.mockResolvedValue({ code: 200000, data: { items: [], total: 0 } });
+      relationsMocked.mockResolvedValue({
+        code: 20000,
+        data: { items: [{ actor: { type: 'bot', id: 'friend:327325' } }], total: 1 },
+      });
+      botMocked.listBotMetadata.mockResolvedValue({
+        code: 200000,
+        data: {
+          items: [
+            {
+              bot_id: 'friend',
+              owner_id: '327325',
+              bot_name: '好友 Bot',
+              bot_type: botType,
+              online_available: onlineAvailable,
+              status: 'ACTIVE',
+            },
+          ],
+          total: 1,
+        },
+      });
+
+      const result = await conversationService.listDirectory('human_900003');
+
+      expect(result).toMatchObject({
+        ok: true,
+        data: { friendBots: [{ botId: 'friend:327325', botType, onlineAvailable, chatable, isFriendBot: true }] },
+      });
+    },
+  );
+
   it('keeps the directory usable with empty friend Bots when friend relations fail', async () => {
     botMocked.listBots.mockResolvedValue({
       code: 200000,

@@ -57,6 +57,14 @@ pub struct DeliveryAdmissionTarget {
     pub kind: DeliveryType,
     pub max_queued: u32,
     pub semantic_projection_json: serde_json::Value,
+    /// Caller-preassigned canonical run identity for this delivery
+    /// (Send targets only). The sending flow assigns it BEFORE the
+    /// durable admission commits so the run's operation binding and
+    /// frozen producer facts exist before ANY queue worker can
+    /// execute the row — a callback can never observe an admitted
+    /// run without its trusted operation identity (spec §8.2).
+    /// `None` lets the admission assign one (legacy producers).
+    pub run_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]

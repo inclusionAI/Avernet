@@ -1091,7 +1091,12 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             )
 
         bot_id = publish_record.source_bot_id
-        owner_id = publish_record.owner_id
+        bot = self._bot_service.get_bot_by_address(
+            bot_id=bot_id, user_id=publish_record.owner_id,
+        )
+        owner_id = str(bot["owner_id"])
+        # Resolve and validate before destroying any published version resources.
+        self._bot_service.validate_delete_bot(bot_id=bot_id, user_id=owner_id)
 
         logger.info(f"[delete_service_bot] Starting delete: publish_id={publish_id}, bot_id={bot_id}, owner_id={owner_id}")
 

@@ -5,15 +5,14 @@ info:
   description: >-
     BCS-native HTTP adapter contract, independent of Gateway principals and chat
     sessions. All responses use Cache-Control:no-store. Management requires the
-    authenticated owner Bot. On read/validate, presence of X-BCS-Draft-Read-Token
-    always selects capability authorization, with no fallback to Bot or cookie
-    credentials. Capabilities are transferable, revocable, fixed to one revision
-    in the configured database, and never grant management or execution.
-    Random read tokens are persisted with revisions; no signing keys are required.
+    authenticated owner Bot. Fixed-revision reads and validation are public;
+    draft ID and revision are sufficient, without any read credential or custom
+    header. References remain fixed to one revision and never grant management
+    or execution. Revoked or deleted revisions are unavailable to all readers.
     The service is disabled by default; opt in with collaboration_drafts.enabled.
     The checked-in local SQLite configuration explicitly enables the service.
-    When disabled, authenticated/authorized requests report HTTP 503
-    DRAFT_SERVICE_UNAVAILABLE. Disabling preserves stored revisions and read tokens.
+    When disabled, valid requests report HTTP 503
+    DRAFT_SERVICE_UNAVAILABLE. Disabling preserves stored revisions and availability.
 paths:
   /collaboration/drafts/{draftId}:
     parameters:
@@ -84,7 +83,7 @@ paths:
       - $ref: '#/components/parameters/Revision'
     get:
       operationId: readCollaborationDraftRevision
-      security: [{RevisionReadToken: []}, {BotToken: []}]
+      security: []
       responses:
         '200': {$ref: '#/components/responses/Revision'}
         '404': {$ref: '#/components/responses/Error'}
@@ -95,7 +94,7 @@ paths:
       - $ref: '#/components/parameters/Revision'
     post:
       operationId: validateCollaborationDraftRevision
-      security: [{RevisionReadToken: []}, {BotToken: []}]
+      security: []
       description: No request body. Validates the stored source using current BCS capabilities.
       responses:
         '200':
@@ -122,10 +121,13 @@ paths:
     get:
       operationId: getCollaborationDraftReference
       security: [{BotToken: []}]
-      description: Returns the same persisted active reference. Revoked/deleted versions cannot be re-shared.
+      description: >-
+        Returns the active fixed-version reference. Revoked/deleted versions
+        cannot be re-shared. readToken is a constant deprecated placeholder for
+        deployed CLI decoders; it is not stored, required for reads, or authenticated.
       responses:
         '200':
-          description: Four-field AixUI payload; no source, title or service URL.
+          description: Fixed-version reference with one legacy compatibility field; no source, title or service URL.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Reference'}
@@ -137,7 +139,7 @@ paths:
     delete:
       operationId: revokeCollaborationDraftRead
       security: [{BotToken: []}]
-      description: Permanently revokes every copy of this version's read capability. Idempotent.
+      description: Permanently disables public reading of this version. Idempotent.
       responses:
         '204': {description: Revoked}
         default: {$ref: '#/components/responses/Error'}
@@ -147,10 +149,6 @@ components:
       type: http
       scheme: bearer
       description: Existing BCS Bot credential and Actor matching; X-BCS-Bot-Token also follows existing auth.
-    RevisionReadToken:
-      type: apiKey
-      in: header
-      name: X-BCS-Draft-Read-Token
   parameters:
     DraftId:
       in: path
@@ -241,4 +239,9 @@ components:
         revision: {$ref: '#/components/schemas/RevisionNumber'}
         readToken:
           type: string
-          pattern: '^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$'
+          deprecated: true
+          const: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+          description: >-
+            Non-secret base64url encoding of 32 zero bytes, retained only because
+            deployed CLI versions require the field. Never used for authorization.
+            New CLI and Panel consumers discard it.

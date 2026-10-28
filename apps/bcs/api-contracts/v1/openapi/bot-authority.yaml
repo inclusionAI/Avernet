@@ -1,0 +1,755 @@
+# Unified Bot Authority surface (spec §5.1/§6.1, 2026-10-10
+# bot owner/manager simple design). All paths mount under the
+# internal /api/v1/collaboration/ prefix: Humans and trusted
+# Apps use the SAME routes — there is no second URL group.
+#
+# Path/verb admission matrix (spec §6.1):
+# | route                                              | caller rule                       |
+# | GET /bots/{bot_id}/managers                        | Human owner/manager               |
+# | PUT /bots/{bot_id}/managers                        | trusted App `managers:sync` ONLY  |
+# | PUT/DELETE /bots/{bot_id}/managers/{user_id}       | Human owner/manager               |
+# | GET /bots/{bot_id}/ownership                       | Human owner/manager               |
+# | PUT /bots/{bot_id}/ownership-transfers/{target}    | Human current owner               |
+# | GET /bots/{bot_id}/ownership-transfers/{target}    | Human row party OR App `ownership:read`    |
+# | POST .../accept                                    | Human target OR App `ownership:accept`     |
+# | POST .../reject                                    | Human target OR App `ownership:reject`     |
+# | POST .../cancel                                    | Human initiator                   |
+# | GET /ownership-transfers                           | Human (own inbox/outbox)          |
+#
+# Dual-admission routes process the Human FIRST; a Human
+# rejection never falls back to App escalation. Trusted Apps
+# must be configured in the server's trusted-app scope rules
+# (`app + tenant + actions`, byte-exact, no wildcards;
+# rules bind to the instance env; audit keeps the numeric
+# app id).
+#
+# NOTE on the sync collection operationId: the plan records
+# `syncBotManagers`, but the repository OpenAPI conformance
+# gate (`scripts/validate_openapi_contract.py`) enforces
+# snake_case operationIds, so the frozen contract id is
+# `sync_bot_managers`.
+
+user_id:
+  type: string
+  description: A verified Backend User ID. `sync` is a legal user id.
+
+managers_page:
+  type: object
+  additionalProperties: false
+  required:
+    - owner
+    - items
+    - total
+  properties:
+    owner:
+      type: object
+      additionalProperties: false
+      required:
+        - bot_id
+        - owner_user_id
+        - owner_actor_id
+      properties:
+        bot_id:
+          type: string
+        owner_user_id:
+          type: string
+          description: User id portion of the owner's Human actor id.
+        owner_actor_id:
+          type: string
+          description: Persisted Human actor id (`human_<user_id>`).
+    items:
+      type: array
+      items:
+        type: string
+    total:
+      type: integer
+      format: int64
+
+managers_page_envelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: '#/managers_page'
+    request_id:
+      $ref: ../shared.yaml#/RequestId
+
+manager_change:
+  type: object
+  additionalProperties: false
+  required:
+    - added
+    - removed
+    - total
+  properties:
+    added:
+      type: integer
+      format: int64
+    removed:
+      type: integer
+      format: int64
+    total:
+      type: integer
+      format: int64
+
+manager_change_envelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: '#/manager_change'
+    request_id:
+      $ref: ../shared.yaml#/RequestId
+
+sync_managers_body:
+  type: object
+  additionalProperties: false
+  required:
+    - manager_user_ids
+  properties:
+    manager_user_ids:
+      type: array
+      description: One full manager snapshot; owner ids are normalized out; an empty array explicitly clears every manager. At most 1,000 deduped users.
+      items:
+        type: string
+
+bot_ownership:
+  type: object
+  additionalProperties: false
+  required:
+    - bot_id
+    - owner_user_id
+    - owner_actor_id
+  properties:
+    bot_id:
+      type: string
+    owner_user_id:
+      type: string
+    owner_actor_id:
+      type: string
+
+bot_ownership_envelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: '#/bot_ownership'
+    request_id:
+      $ref: ../shared.yaml#/RequestId
+
+transfer_view:
+  type: object
+  additionalProperties: false
+  required:
+    - bot_id
+    - target_owner_actor_id
+    - from_owner_actor_id
+    - status
+    - requested_at
+    - expires_at
+    - updated_at
+  properties:
+    bot_id:
+      type: string
+    target_owner_actor_id:
+      type: string
+    target_owner_user_id:
+      type: string
+      nullable: true
+    from_owner_actor_id:
+      type: string
+    from_owner_user_id:
+      type: string
+      nullable: true
+    status:
+      type: string
+      description: Effective status by server DB time.
+      enum:
+        - pending
+        - accepted
+        - rejected
+        - cancelled
+        - expired
+        - invalidated
+    requested_at:
+      type: integer
+      format: int64
+    expires_at:
+      type: integer
+      format: int64
+    updated_at:
+      type: integer
+      format: int64
+    decided_at:
+      type: integer
+      format: int64
+      nullable: true
+    decided_by_kind:
+      type: string
+      nullable: true
+      description: The real decision actor kind; never a Human alias for service decisions.
+      enum:
+        - human
+        - service
+        - provider
+        - system
+    decided_by_id:
+      type: string
+      nullable: true
+    reason:
+      type: string
+      nullable: true
+    result_ownership_version:
+      type: integer
+      format: int64
+      nullable: true
+      description: Internal result version of an accepted transfer; clients never submit it.
+    bot_name_snapshot:
+      type: string
+      nullable: true
+      description: Minimal inbox display snapshot; no Bot configuration or resource content.
+
+transfer_view_envelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: '#/transfer_view'
+    request_id:
+      $ref: ../shared.yaml#/RequestId
+
+transfer_created_envelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20100
+    message:
+      type: string
+    data:
+      $ref: '#/transfer_view'
+    request_id:
+      $ref: ../shared.yaml#/RequestId
+
+transfer_page:
+  type: object
+  additionalProperties: false
+  required:
+    - items
+    - total
+  properties:
+    items:
+      type: array
+      items:
+        $ref: '#/transfer_view'
+    total:
+      type: integer
+      format: int64
+
+transfer_page_envelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: '#/transfer_page'
+    request_id:
+      $ref: ../shared.yaml#/RequestId
+
+UnauthorizedError:
+  description: Gateway principal header missing, expired, tampered, or wrong-audience.
+  x-error-codes:
+    - unauthenticated
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+ForbiddenError:
+  description: Identity verified but not admitted for this action (Human rule, App scope, or row-party restriction).
+  x-error-codes:
+    - bot_authority_operator_forbidden
+    - bot_authority_scope_denied
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+NotFoundError:
+  description: Target Bot or transfer row does not exist in this environment.
+  x-error-codes:
+    - bot_not_found
+    - bot_transfer_not_found
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+InvalidError:
+  description: Malformed body or query; unknown Human in a manager write; failed completeness of the transfer target.
+  x-error-codes:
+    - invalid_request
+    - bot_authority_human_unknown
+    - bot_manager_input_limit
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+ConflictError:
+  description: Business/state conflict with a pinned public code.
+  x-error-codes:
+    - owner_not_manager
+    - bot_ownership_not_initialized
+    - transfer_pending
+    - owner_changed
+    - transfer_expired
+    - transfer_state_conflict
+    - bot_manager_stock_limit
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+
+
+BotManagersPath:
+  get:
+    operationId: list_bot_managers
+    tags: ["Collaboration / Bot Authority"]
+    summary: Page the current manager set plus the owner summary (Human owner/manager).
+    x-avernet-security:
+      user: required
+    parameters:
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          format: int64
+          default: 0
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          format: int64
+          default: 50
+          maximum: 100
+    responses:
+      "200":
+        description: The effective manager page.
+        content:
+          application/json:
+            schema:
+              $ref: '#/managers_page_envelope'
+      "400":
+        description: Page bounds violated (limit must be 1..=100).
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        $ref: '#/UnauthorizedError'
+      "403":
+        $ref: '#/ForbiddenError'
+      "404":
+        $ref: '#/NotFoundError'
+      "409":
+        $ref: '#/ConflictError'
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+  put:
+    operationId: sync_bot_managers
+    tags: ["Collaboration / Bot Authority"]
+    summary: Trusted-App full manager-set replace (sync). Never removes the owner.
+    description: >-
+      App-only by design: a Human identity is rejected with no App
+      fallback even when the request also carries one. The trusted application
+      must be configured in the server scope rules for `managers:sync`,
+      this env/tenant, and this Bot. One logical sync writer per Bot;
+      HTTP timeout does not prove non-commitment. Collidates the full
+      set: it also covers manual edits and transfer-created managers.
+    x-avernet-security:
+      app: required
+      user: optional
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/sync_managers_body'
+    responses:
+      "200":
+        description: The committed set change (added/removed/final total).
+        content:
+          application/json:
+            schema:
+              $ref: '#/manager_change_envelope'
+      "400":
+        $ref: '#/InvalidError'
+      "401":
+        $ref: '#/UnauthorizedError'
+      "403":
+        $ref: '#/ForbiddenError'
+      "404":
+        $ref: '#/NotFoundError'
+      "409":
+        $ref: '#/ConflictError'
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+BotManagerItemPath:
+  put:
+    operationId: add_bot_manager
+    tags: ["Collaboration / Bot Authority"]
+    summary: Add or restore one manager (Human owner/manager). The user id `sync` here is a legitimate single-item add, never a collection replace.
+    x-avernet-security:
+      user: required
+    parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+    responses:
+      "200":
+        description: Added (already-existing adds stay successful with no duplicate audit).
+        content:
+          application/json:
+            schema:
+              $ref: '#/manager_change_envelope'
+      "400":
+        $ref: '#/InvalidError'
+      "401":
+        $ref: '#/UnauthorizedError'
+      "403":
+        $ref: '#/ForbiddenError'
+      "404":
+        $ref: '#/NotFoundError'
+      "409":
+        $ref: '#/ConflictError'
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+  delete:
+    operationId: remove_bot_manager
+    tags: ["Collaboration / Bot Authority"]
+    summary: Remove one manager (Human owner/manager; removing an absent manager stays successful).
+    x-avernet-security:
+      user: required
+    parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+    responses:
+      "200":
+        description: Removed or already absent.
+        content:
+          application/json:
+            schema:
+              $ref: '#/manager_change_envelope'
+      "401":
+        $ref: '#/UnauthorizedError'
+      "403":
+        $ref: '#/ForbiddenError'
+      "404":
+        $ref: '#/NotFoundError'
+      "409":
+        $ref: '#/ConflictError'
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+BotOwnershipPath:
+  get:
+    operationId: get_bot_ownership
+    tags: ["Collaboration / Bot Authority"]
+    summary: Owner/manager read of the current owner summary (Human owner/manager).
+    x-avernet-security:
+      user: required
+    responses:
+      "200":
+        description: The owner summary (no internal ownership version).
+        content:
+          application/json:
+            schema:
+              $ref: '#/bot_ownership_envelope'
+      "401":
+        $ref: '#/UnauthorizedError'
+      "403":
+        $ref: '#/ForbiddenError'
+      "404":
+        $ref: '#/NotFoundError'
+      "409":
+        $ref: '#/ConflictError'
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+BotOwnershipTransferItemPath:
+  put:
+    operationId: request_ownership_transfer
+    tags: ["Collaboration / Bot Authority"]
+    summary: The current owner initiates or refreshes the transfer request for the target Human (201 new, 200 reuse/refresh).
+    x-avernet-security:
+      user: required
+    parameters:
+      - name: target_owner_actor_id
+        in: path
+        required: true
+        schema:
+          type: string
+    responses:
+      "200":
+        description: The target row was reused/refreshed.
+        content:
+          application/json:
+            schema:
+              $ref: '#/transfer_view_envelope'
+      "201":
+        description: A new pending row was created.
+        content:
+          application/json:
+            schema:
+              $ref: '#/transfer_created_envelope'
+      "400":
+        $ref: '#/InvalidError'
+      "401":
+        $ref: '#/UnauthorizedError'
+      "403":
+        description: Only the current owner may initiate; targets must be live Humans.
+        x-error-codes:
+          - bot_authority_operator_forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        $ref: '#/NotFoundError'
+      "409":
+        $ref: '#/ConflictError'
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+  get:
+    operationId: get_ownership_transfer
+    tags: ["Collaboration / Bot Authority"]
+    summary: Read one transfer row by (Bot, target); dual admission — the row's two Human parties or a trusted App with `ownership:read` scoped to the target.
+    x-avernet-security:
+      user: optional
+      app: optional
+    parameters:
+      - name: target_owner_actor_id
+        in: path
+        required: true
+        schema:
+          type: string
+    responses:
+      "200":
+        description: The row's minimal current-round projection (effective status by DB time; GET never writes).
+        content:
+          application/json:
+            schema:
+              $ref: '#/transfer_view_envelope'
+      "401":
+        $ref: '#/UnauthorizedError'
+      "403":
+        $ref: '#/ForbiddenError'
+      "404":
+        $ref: '#/NotFoundError'
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+AcceptOwnershipTransferPath:
+  post:
+    operationId: accept_ownership_transfer
+    tags: ["Collaboration / Bot Authority"]
+    summary: Accept the current request; dual admission — the target Human or a trusted App with `ownership:accept` scoped to the target. Service decisions record the real service actor.
+    x-avernet-security:
+      user: optional
+      app: optional
+    parameters:
+      - name: target_owner_actor_id
+        in: path
+        required: true
+        schema:
+          type: string
+    responses:
+      "200":
+        description: Decided (repeating the same decision on the terminal row returns it unchanged).
+        content:
+          application/json:
+            schema:
+              $ref: '#/transfer_view_envelope'
+      "401":
+        $ref: '#/UnauthorizedError'
+      "403":
+        $ref: '#/ForbiddenError'
+      "404":
+        $ref: '#/NotFoundError'
+      "409":
+        $ref: '#/ConflictError'
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+RejectOwnershipTransferPath:
+  post:
+    operationId: reject_ownership_transfer
+    tags: ["Collaboration / Bot Authority"]
+    summary: Reject the current request; dual admission — the target Human or a trusted App with `ownership:reject` scoped to the target.
+    x-avernet-security:
+      user: optional
+      app: optional
+    parameters:
+      - name: target_owner_actor_id
+        in: path
+        required: true
+        schema:
+          type: string
+    responses:
+      "200":
+        description: Decided.
+        content:
+          application/json:
+            schema:
+              $ref: '#/transfer_view_envelope'
+      "401":
+        $ref: '#/UnauthorizedError'
+      "403":
+        $ref: '#/ForbiddenError'
+      "404":
+        $ref: '#/NotFoundError'
+      "409":
+        $ref: '#/ConflictError'
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+CancelOwnershipTransferPath:
+  post:
+    operationId: cancel_ownership_transfer
+    tags: ["Collaboration / Bot Authority"]
+    summary: Cancel the pending request; Human initiator rule (pending cancel re-verifies the current owner; terminal repeat verifies only the row's initiator).
+    x-avernet-security:
+      user: required
+    parameters:
+      - name: target_owner_actor_id
+        in: path
+        required: true
+        schema:
+          type: string
+    responses:
+      "200":
+        description: Cancelled (or the terminal row echo).
+        content:
+          application/json:
+            schema:
+              $ref: '#/transfer_view_envelope'
+      "401":
+        $ref: '#/UnauthorizedError'
+      "403":
+        $ref: '#/ForbiddenError'
+      "404":
+        $ref: '#/NotFoundError'
+      "409":
+        $ref: '#/ConflictError'
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+OwnershipTransfersPath:
+  get:
+    operationId: list_ownership_transfers
+    tags: ["Collaboration / Bot Authority"]
+    summary: 'The authenticated Human''s inbox/outbox: one row per Bot/target with the most recent round (Human-only; App scope has no action for it).'
+    x-avernet-security:
+      user: required
+    parameters:
+      - name: direction
+        in: query
+        schema:
+          type: string
+          enum: [received, sent]
+          default: received
+      - name: status
+        in: query
+        schema:
+          type: array
+          items:
+            type: string
+            enum:
+              - pending
+              - accepted
+              - rejected
+              - cancelled
+              - expired
+              - invalidated
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          format: int64
+          default: 0
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          format: int64
+          default: 50
+          maximum: 100
+    responses:
+      "200":
+        description: One page under the same effective-status lens as the count.
+        content:
+          application/json:
+            schema:
+              $ref: '#/transfer_page_envelope'
+      "400":
+        $ref: '#/InvalidError'
+      "401":
+        $ref: '#/UnauthorizedError'
+      "403":
+        $ref: '#/ForbiddenError'
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse

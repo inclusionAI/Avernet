@@ -142,23 +142,30 @@ class TestPendingAuthorization:
             owner_id="staff-1", bot_id="agent_swarm_a1",
         ) is None
 
-    def test_facade_failure_reads_as_not_pending_never_raises(self):
+    def test_facade_failure_trusts_stored_payload_never_raises(self):
         source = _source({
             "agent_swarm_a1": _job({"iframe_url": "https://x.example/c"}),
         }, fail_for={"agent_swarm_a1"})
 
-        assert source.authorization(
+        descriptor = source.authorization(
             owner_id="staff-1", bot_id="agent_swarm_a1",
-        ) is None
+        )
+        assert descriptor is not None
+        assert descriptor.iframe_url == "https://x.example/c"
 
-    def test_facade_none_answer_reads_as_not_pending(self):
+    def test_facade_none_answer_trusts_stored_payload(self):
+        # The status query's None answer (tcauthmng lag or outage)
+        # must NOT hide the consent URL — the job payload was frozen
+        # atomically at submit time and is the ground truth.
         source = _source({
             "agent_swarm_a1": _job({"iframe_url": "https://x.example/c"}),
         }, answers={"agent_swarm_a1": None})
 
-        assert source.authorization(
+        descriptor = source.authorization(
             owner_id="staff-1", bot_id="agent_swarm_a1",
-        ) is None
+        )
+        assert descriptor is not None
+        assert descriptor.iframe_url == "https://x.example/c"
 
     def test_pending_past_the_window_answers_none(self):
         # PENDING past its horizon: the creation job owns the expiry

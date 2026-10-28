@@ -1,5 +1,10 @@
 # `agentclaw.community.plugin_api`
 
+For current authority, layering, DI and verification, start at the
+[Backend development guide](../../../../README.md). Protocol details and the
+machine-checked Context Boundary below refine this outbound capability surface.
+
+
 Plugin Protocol declarations (the kernel's outbound interface to swappable capabilities).
 
 ## Context Boundary

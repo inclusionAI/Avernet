@@ -198,6 +198,14 @@ impl BotRegistryCoreService for NoopBotRegistryCoreService {
         Vec::new()
     }
 
+    async fn list_uninitialized_bots_by_creator(
+        &self,
+        _created_by: &str,
+        _limit: usize,
+    ) -> ServiceResult<Vec<RegisteredBot>> {
+        Ok(Vec::new())
+    }
+
     async fn list_bots_by_creator(&self, _created_by: &str) -> Vec<RegisteredBot> {
         Vec::new()
     }

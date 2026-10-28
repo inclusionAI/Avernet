@@ -85,8 +85,6 @@ pub(super) async fn handle_task_bot_event(
             if cmd.state == ChatEventState::Final {
                 crate::task_flow::record_task_completed(flow, &entry, &response_text, now_ms()).await?;
             }
-            flow.message_tracker.cleanup_run(&cmd.run_id).await;
-            flow.message_tracker.cleanup_run(&crate::run_reply::chat_key(cmd)).await;
             crate::task_flow::emit_task_ledger_status(flow, group, &entry.group_id,
                 entry.session_id.as_deref(), &entry.driver_bot).await;
             return Ok(Vec::new());
@@ -230,10 +228,6 @@ pub(super) async fn handle_task_bot_event(
     if matches!(cmd.state, ChatEventState::Final) {
         crate::task_flow::record_task_completed(flow, &entry, &response_text, now_ms()).await?;
     }
-    flow.message_tracker.cleanup_run(&cmd.run_id).await;
-    flow.message_tracker
-        .cleanup_run(&crate::run_reply::chat_key(cmd))
-        .await;
     crate::task_failure::mark_terminal(flow, task_id, &cmd.state).await;
     if let Some(group) = group.as_ref() {
         crate::task_flow::emit_task_ledger_status(

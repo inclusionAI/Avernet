@@ -211,6 +211,29 @@ function manifestPath(repoDir: string, packId: string): string {
   return path.join(repoDir, "packs", packId, "workflow.pack.yaml");
 }
 
+/**
+ * Resolve where the workflow spec and pack manifest must be written inside a
+ * cloned repo, matching the layout the branch base already carries.
+ *
+ * ClawMind's own deploys commit Pack folders at the repo ROOT ({packId}/workflows/…,
+ * {packId}/workflow.pack.yaml). Writing a second copy under packs/{packId}/ when the
+ * base tree already carries the root layout would leave two manifests in one commit
+ * and trip the engine's readPackSnapshot uniqueness check ("Pack 不唯一或缺失"),
+ * so once the baseline has the pack in either layout we overwrite in place.
+ */
+export function resolvePackPaths(
+  repoDir: string,
+  packId: string,
+  workflowId: string,
+): { specPath: string; manifestPath: string } {
+  const rootManifest = path.join(repoDir, packId, "workflow.pack.yaml");
+  const rootSpec = path.join(repoDir, packId, "workflows", `${workflowId}.yaml`);
+  if (existsSync(rootManifest) || existsSync(rootSpec)) {
+    return { specPath: rootSpec, manifestPath: rootManifest };
+  }
+  return { specPath: specPath(repoDir, packId, workflowId), manifestPath: manifestPath(repoDir, packId) };
+}
+
 export async function writeWorkflowSpecToRepo(
   repoDir: string,
   packId: string,
@@ -218,7 +241,7 @@ export async function writeWorkflowSpecToRepo(
   spec: WorkflowSpec,
 ): Promise<void> {
   const normalized = normalizeWorkflowSpec(spec);
-  const filePath = specPath(repoDir, packId, workflowId);
+  const { specPath: filePath } = resolvePackPaths(repoDir, packId, workflowId);
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeFile(filePath, stringifyYaml(normalized, { lineWidth: 0 }));
 }
@@ -228,7 +251,7 @@ export async function ensurePackManifest(
   packId: string,
   workflowId: string,
 ): Promise<void> {
-  const filePath = manifestPath(repoDir, packId);
+  const { manifestPath: filePath } = resolvePackPaths(repoDir, packId, workflowId);
   const packDir = path.dirname(filePath);
   await mkdir(packDir, { recursive: true });
 
@@ -250,6 +273,67 @@ export async function ensurePackManifest(
   await writeFile(filePath, stringifyYaml(manifest, { lineWidth: 0 }));
 }
 
+/**
+ * Remove the legacy packs/{packId} duplicate when the root-level pack layout is
+ * authoritative. Pre-fix publishes wrote their two files under packs/{packId}/ while
+ * engine deploys carried the pack at {packId}/ — a branch that has been through both
+ * now holds two manifests, and the engine's readPackSnapshot rejects such trees with
+ * "Pack 不唯一或缺失". Deleting the legacy copy (only when the root layout exists)
+ * keeps the published tree single-manifest.
+ */
+export async function pruneLegacyPackCopy(repoDir: string, packId: string): Promise<boolean> {
+  const rootManifest = path.join(repoDir, packId, "workflow.pack.yaml");
+  const legacyDir = path.join(repoDir, "packs", packId);
+  if (!existsSync(rootManifest) || !existsSync(legacyDir)) return false;
+  await rm(legacyDir, { recursive: true, force: true });
+  return true;
+}
+
+async function remoteRefExists(repoDir: string, ref: string): Promise<boolean> {
+  try {
+    await git(repoDir, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Check out the branch base for a save/deploy commit — before any spec/manifest writes.
+ *
+ * The pre-fix flow reset the branch from the cloned default-branch HEAD
+ * (`checkout -B` without a start point), silently discarding the full Pack content
+ * (scripts/assets) that a previous engine deploy had pushed to the branch. Every
+ * auto-heal/editor publish then produced a tag whose Pack had no scripts, and the
+ * engine's run-time materialization ("never read the editable Pack") failed with
+ * `workdir 目录不存在: ~/.clawmind/runtime/{wfId}/{version}/scripts`.
+ *
+ * Base priority:
+ *   1. origin/{branch}         — previous commit on this branch (fast-forward base)
+ *   2. fallbackBase (optional) — e.g. origin/wf/{workflowId}, so the first save of
+ *                                a deployed workflow still carries the full Pack
+ *   3. cloned HEAD             — first-ever publish for the workflow
+ *
+ * Must run BEFORE the spec/manifest writes: switching branches rewrites the working
+ * tree, and the writes must land on top of the final base.
+ */
+export async function prepareBranchBase(
+  repoDir: string,
+  branch: string,
+  fallbackBase?: string,
+): Promise<"branch" | "fallback" | "default"> {
+  if (await remoteRefExists(repoDir, `origin/${branch}`)) {
+    await git(repoDir, ["checkout", "--quiet", "-B", branch, `origin/${branch}`]);
+    return "branch";
+  }
+  if (fallbackBase && (await remoteRefExists(repoDir, `origin/${fallbackBase}`))) {
+    await git(repoDir, ["checkout", "--quiet", "-B", branch, `origin/${fallbackBase}`]);
+    return "fallback";
+  }
+  await git(repoDir, ["checkout", "--quiet", "-B", branch]);
+  return "default";
+}
+
 export async function commitAndPushSaved(
   repoDir: string,
   workflowId: string,
@@ -258,13 +342,12 @@ export async function commitAndPushSaved(
 ): Promise<SaveGitResult> {
   const branch = `saved/${workflowId}`;
 
-  try {
-    await git(repoDir, ["checkout", "--orphan", branch]);
-  } catch (error) {
-    if (['GIT_OPERATION_TIMEOUT', 'GIT_TIMEOUT', 'GIT_QUEUE_FULL'].includes((error as { code?: string }).code ?? '')) throw error;
-    // Branch may already exist locally (e.g. reused temp dir); force-create it.
-    await git(repoDir, ["checkout", "-B", branch]);
-  }
+  // The branch base is prepared by prepareBranchBase before the spec/manifest writes
+  // (see AutoHealSaveService.save), so the saved snapshot inherits the previous full
+  // Pack content. This reset is a no-op when the base was prepared, and a
+  // default-HEAD fallback for legacy callers that skip prepareBranchBase. The old
+  // --orphan reset discarded the base and published a scripts-less snapshot.
+  await git(repoDir, ["checkout", "-B", branch]);
 
   await git(repoDir, ["add", "."]);
 
@@ -311,6 +394,10 @@ export async function commitAndPushDeploy(
   const branch = `wf/${workflowId}`;
   const tagName = `deploy/${workflowId}/#${deployNumber}`;
 
+  // The branch base is prepared by prepareBranchBase before the spec/manifest writes
+  // (see AutoHealDeployService.deploy), so the commit inherits the previous full Pack
+  // content. This reset is a no-op when the base was prepared, and a default-HEAD
+  // fallback for legacy callers that skip prepareBranchBase.
   await git(repoDir, ["checkout", "-B", branch]);
   await git(repoDir, ["add", "."]);
 

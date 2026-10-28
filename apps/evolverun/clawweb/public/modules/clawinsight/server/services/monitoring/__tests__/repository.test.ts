@@ -163,6 +163,7 @@ describe("monitoring real SQL persistence (no HTTP listener)", () => {
     const sql = renderMonitoringDdl(dialect).join("\n");
     expect(sql).toContain("VARCHAR(255)"); expect(sql).toContain("CHARACTER SET latin1 COLLATE latin1_bin");
     expect(sql).toContain("utf8mb4"); expect(sql).toContain("AUTO_INCREMENT");
+    expect(sql).toContain("session_nas_path TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL");
     expect(sql).toContain("(bot_id, entity_id, env, decision, occurred_at_ms, event_id)");
     expect(sql).not.toContain("unixepoch"); expect(sql).not.toContain("VARCHAR(190)");
     expect(dialect.renderDdl("CREATE TABLE IF NOT EXISTS legacy (name VARCHAR(255))")).toContain("VARCHAR(190)");
@@ -203,5 +204,52 @@ describe("runtime identity persistence boundary", () => {
     const exec = vi.spyOn(db, "exec");
     await expect(insert()).rejects.toMatchObject({ code: "NOT_READY" });
     expect(exec).not.toHaveBeenCalled();
+  });
+});
+
+describe("session NAS metadata persistence", () => {
+  const path = "/nas/实例 B/.openclaw/agents/main/sessions/原文😀.jsonl";
+  it("stores the original string and credentials atomically, survives reopen and stays private", async () => {
+    const event = { ...unresolved, schemaVersion: "claw-monitoring/diagnosis-event/v4", runtimeIdentity,
+      handlerName: null, sessionNasPath: path };
+    expect(await insert(event)).toBe(true);
+    const [row] = await db.query("SELECT session_nas_path, runtime_identity FROM insight_monitoring_diagnose WHERE event_id = ?", [event.eventId]);
+    expect(row.session_nas_path).toBe(path);
+    expect(JSON.parse(String(row.runtime_identity))).toEqual(runtimeIdentity);
+    await db.close(); db = database(join(dir, "db.sqlite3")); repo = new MonitoringRepository(db);
+    expect(await insert(event)).toBe(false); // Exercises row-to-event with a stored path.
+    const page = await list({}, "mock-bot-oc");
+    expect(page.items[0]).not.toHaveProperty("sessionNasPath");
+    expect(JSON.stringify(page)).not.toContain(path);
+    await expect(insert({ ...event, systemDiagnosis: "changed" })).rejects.toMatchObject({ code: "EVENT_CONFLICT" });
+    await expect(insert({ ...event, runtimeIdentity: { ...runtimeIdentity, CLIENT_ID: "changed" } })).rejects.toMatchObject({ code: "EVENT_CONFLICT" });
+  });
+  it.each([undefined, null, path])("never updates first-write metadata (%j), without adding a new conflict rule", async first => {
+    const event = { ...alert, sessionNasPath: first };
+    expect(await insert(event)).toBe(true);
+    for (const value of [undefined, null, path, "/nas/another.jsonl"]) expect(await insert({ ...event, sessionNasPath: value })).toBe(false);
+    expect((await db.query("SELECT session_nas_path FROM insight_monitoring_diagnose"))[0].session_nas_path).toBe(first ?? null);
+  });
+  it("retains all 4096 Unicode codepoints, including supplementary characters", async () => {
+    const sessionNasPath = "/" + "😀".repeat(4095);
+    expect(await insert({ ...alert, sessionNasPath })).toBe(true);
+    expect((await db.query("SELECT session_nas_path FROM insight_monitoring_diagnose"))[0].session_nas_path).toBe(sessionNasPath);
+    expect(await insert({ ...alert, sessionNasPath })).toBe(false);
+  });
+  it("requires the externally provisioned nullable TEXT column without executing DDL", async () => {
+    await db.exec("ALTER TABLE insight_monitoring_diagnose RENAME COLUMN session_nas_path TO missing_nas_path");
+    const exec = vi.spyOn(db, "exec");
+    await expect(insert({ ...alert, sessionNasPath: path })).rejects.toMatchObject({ code: "NOT_READY" });
+    expect(exec).not.toHaveBeenCalled();
+  });
+  it("propagates a path-column write failure without leaving a half-written diagnosis", async () => {
+    await db.exec("CREATE TRIGGER fail_nas BEFORE INSERT ON insight_monitoring_diagnose WHEN NEW.session_nas_path IS NOT NULL BEGIN SELECT RAISE(ABORT, 'injected'); END");
+    await expect(insert({ ...alert, sessionNasPath: path })).rejects.toMatchObject({ code: "NOT_READY" });
+    expect((await db.query("SELECT COUNT(*) AS n FROM insight_monitoring_diagnose"))[0].n).toBe(0);
+  });
+  it("does not turn corrupt non-string SQL metadata into a path", async () => {
+    await insert({ ...alert, sessionNasPath: path });
+    await db.exec("UPDATE insight_monitoring_diagnose SET session_nas_path = ?", [Buffer.from("/nas/corrupt")]);
+    await expect(list()).rejects.toMatchObject({ code: "NOT_READY" });
   });
 });

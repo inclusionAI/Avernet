@@ -223,6 +223,7 @@ from .harness import harness_router
 from .identity import router as identity_router
 from .local import router as local_router
 from .loadtest import router as loadtest_router
+from .experts import router as experts_router
 from .market import router as market_router
 from .market.acli_clis import router as acli_market_router
 from .mcp import router as mcp_router
@@ -570,6 +571,7 @@ def build_public_router() -> APIRouter:
         )
     # Tenant-identical marketplace queries. This literal group must be mounted
     # before the ``{bot_id}`` wildcard router below.
+    public.include_router(experts_router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH)
     public.include_router(
         market_router,
         responses=ERROR_RESPONSES,

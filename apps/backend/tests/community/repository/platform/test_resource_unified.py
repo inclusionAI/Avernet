@@ -119,6 +119,19 @@ def test_create_accepts_non_numeric_owner_fields(repo):
     assert r["created_by"] == "creator_abc"
 
 
+def test_create_many_and_delete_many_are_one_round_trip_each(repo):
+    """The apply's row replacement writes a bot's whole file set at once: every row in one flush, every
+    stale row soft-deleted by one statement; nothing to do is nothing done."""
+    assert repo.create_many([]) == []
+    assert repo.delete_many([]) == 0
+    created = repo.create_many([_make_resource(name="a"), _make_resource(name="b"), _make_resource(name="c")])
+    assert [r["name"] for r in created] == ["a", "b", "c"]
+    assert all(isinstance(r["id"], str) for r in created)
+    assert repo.delete_many([created[0]["id"], created[2]["id"]]) == 2
+    assert [r["name"] for r in repo.list_resources(bolt_id="bolt-1")] == ["b"]
+    assert repo.get_by_id(created[0]["id"])["status"] == "deleted"
+
+
 def test_list_resources_filters_deleted_by_default(repo):
     r1 = repo.create(_make_resource(name="a"))
     r2 = repo.create(_make_resource(name="b"))

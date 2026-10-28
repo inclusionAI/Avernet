@@ -184,6 +184,7 @@ export function mapBotDto(dto: BackendUnknownRecord, addressedBotId?: string, cu
     healthyInstances: asNumber(dto.healthy_instances),
     totalInstances: asNumber(dto.total_instances),
     needsEditLock: typeof lockRaw?.need_lock === 'boolean' ? lockRaw.need_lock : undefined,
+    hasCollaborators: typeof lockRaw?.has_collaborators === 'boolean' ? lockRaw.has_collaborators : undefined,
     lock:
       lockRaw && (lockRaw.locked === true || !('locked' in lockRaw))
         ? {

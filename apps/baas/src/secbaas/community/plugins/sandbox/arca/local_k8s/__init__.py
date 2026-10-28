@@ -8,10 +8,12 @@
 - LocalK8sArcaSandboxPlugin: 沙箱插件工厂类
 """
 
+from ._a2a_discovery import A2aUrlDiscoveryState
 from ._sandbox import LocalK8sArcaSandbox
 from ._sandbox_plugin import LocalK8sArcaSandboxPlugin, local_k8s_plugin_factory
 
 __all__ = [
+    "A2aUrlDiscoveryState",
     "LocalK8sArcaSandbox",
     "LocalK8sArcaSandboxPlugin",
     "local_k8s_plugin_factory",

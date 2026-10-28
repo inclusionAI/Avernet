@@ -83,7 +83,7 @@ from agentclaw.community.core.agentswarm.domain.models import (
     NonRetryableProvisioningError,
 )
 from agentclaw.community.plugin_api.agentswarm.bot import BotPlatform
-from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
+from agentclaw.community.core.apply_engine.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.creation import (
     CREATE_ON_CONTAINER_TRIGGER, CREATE_PRE_CONTAINER_TRIGGER,
 )
@@ -104,6 +104,7 @@ from agentclaw.community.core.bot_management.manifest_seam import (
 from agentclaw.community.core.bot_inventory.protocols import (
     BusinessSpaceContextProtocol,
 )
+from agentclaw.community.plugin_api.passport import PassportError
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.task_queue.types import (
     TERMINAL_STATUSES, TaskStatus,
@@ -396,6 +397,9 @@ class AvernetBotPlatform(BotPlatform):
         space = self._space_context.resolve_current(
             owner_id=owner, header_space_id=None,
         )
+        # D16 idempotent resume: prior slice's job already tracking this identity.
+        if self._manifest_seam.find_job(entity_id=owner, bot_id=bot_id):
+            return BotId(bot_id)
         try:
             submitted = submit_bot_creation_with_manifest(
                 user_id=owner,
@@ -454,6 +458,20 @@ class AvernetBotPlatform(BotPlatform):
             # submit, before anything is persisted) — quota refusals
             # above keep their classification.
             raise NonRetryableProvisioningError(str(exc)) from exc
+        except PassportError:
+            # Cross-slice resume: passport already ISSUED — start the job directly.
+            auth = self._passport.query_auth_status(bot_id=bot_id, owner_workno=owner)
+            if auth and auth.get("status") == "ISSUED":
+                self._manifest_seam.start_job(
+                    bot_id=bot_id, entity_id=owner, user_id=owner,
+                    document_owner=owner,
+                    spec={"entity_id": owner, "engine_type": spec.engine or "openclaw",
+                          "bot_type": spec.bot_type or "personal", "bot_name": bot_name,
+                          "bot_desc": spec.description or "", "nick_name": owner},
+                    iframe_url=None, redirect_url=None,
+                )
+                return BotId(bot_id)
+            raise
         return BotId(submitted.bot_id)
 
     # ── status: the narrow table ──────────────────────────────────────────
@@ -817,7 +835,18 @@ class AvernetBotPlatform(BotPlatform):
                     f"engine refused the reset: {payload!r}")
             return
 
-    async def _connect_engine(self, ws_url: str, token: str):
+    async def _connect_engine(self, ws_url: str, token: str) -> Any:
+        """Connect+handshake with bounded retry (15/30/60s)."""
+        for i in range(4):
+            try:
+                return await self._connect_engine_once(ws_url, token)
+            except ConnectionError as e:
+                if i == 3:
+                    raise
+                logger.warning("[agentswarm][host] engine connect %d/4: %s", i + 1, e)
+                await asyncio.sleep(15.0 * (2 ** i))
+
+    async def _connect_engine_once(self, ws_url: str, token: str) -> Any:
         import websockets
 
         ssl_context = None

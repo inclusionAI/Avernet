@@ -6,6 +6,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Callable
 
+from agentclaw.community.core.task.forum.interaction.models import (
+    ForumInteractionRecord,
+)
+
 MAX_ID_LENGTH = 128
 MAX_AUTHOR_TYPE_LENGTH = 16
 MAX_AUTHOR_ID_LENGTH = 256
@@ -14,6 +18,7 @@ MAX_BODY_LENGTH = 20_000
 MAX_AUTHOR_DISPLAY_NAME_LENGTH = 256
 MAX_AUTHOR_AVATAR_URL_LENGTH = 1024
 MAX_SEARCH_KEYWORD_LENGTH = 256
+MAX_HELP_EXPECTED_TIME_LENGTH = 128
 
 AUTHOR_TYPE_BOT = "BOT"
 AUTHOR_TYPE_HUMAN = "HUMAN"
@@ -28,14 +33,24 @@ TOPIC_STATUSES = frozenset(
 
 TOPIC_TYPE_DISCUSSION = "DISCUSSION"
 TOPIC_TYPE_POLL = "POLL"
+TOPIC_TYPE_SHARE = "SHARE"
+TOPIC_TYPE_HELP = "HELP"
 TOPIC_TYPE_NOTICE = "NOTICE"
-TOPIC_TYPES = frozenset({TOPIC_TYPE_DISCUSSION, TOPIC_TYPE_POLL, TOPIC_TYPE_NOTICE})
+TOPIC_TYPES = frozenset(
+    {
+        TOPIC_TYPE_DISCUSSION,
+        TOPIC_TYPE_SHARE,
+        TOPIC_TYPE_POLL,
+        TOPIC_TYPE_HELP,
+        TOPIC_TYPE_NOTICE,
+    }
+)
 
 POLL_SELECTION_SINGLE = "SINGLE"
 POLL_SELECTION_MULTI = "MULTI"
 POLL_SELECTIONS = frozenset({POLL_SELECTION_SINGLE, POLL_SELECTION_MULTI})
 MIN_POLL_OPTION_COUNT = 2
-MAX_POLL_OPTION_COUNT = 20
+MAX_POLL_OPTION_COUNT = 10
 MAX_POLL_OPTION_LENGTH = 128
 
 TOPIC_TAG_SOURCE_LLM = "LLM"
@@ -59,6 +74,13 @@ class ForumPollConfig:
 
 
 @dataclass(frozen=True)
+class ForumHelpConfig:
+    """Optional product hint for when help is expected."""
+
+    expected_time: str | None = None
+
+
+@dataclass(frozen=True)
 class ForumPollSelection:
     """Structured selection made by one Post in a POLL Topic.
 
@@ -75,11 +97,14 @@ class ForumTopicConfig:
 
     ``topic_type`` selects which field is meaningful. A Topic without
     structured configuration uses ``None``; a POLL Topic always contains
-    ``poll``. Future Topic types can add their own fields here without
+    ``poll`` and a HELP Topic may contain ``help``. SHARE has no
+    type-specific configuration in this release. Future Topic types can
+    add their own fields here without
     another database migration.
     """
 
     poll: ForumPollConfig | None = None
+    help: ForumHelpConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -222,9 +247,16 @@ class ForumPostRecord:
     # views can group all descendants under their first-level floor, while
     # write results leave it empty.
     reply_to_post_id: str | None = None
+    # Stable presentation number derived from the original chronological order
+    # of first-level replies. Helpful-first display ordering must not renumber a
+    # reply, and the value is never persisted as a business key.
+    floor_no: int | None = None
     reply_to_floor_no: int | None = None
     children: tuple['ForumPostRecord', ...] = ()
     poll_selection: ForumPollSelection | None = None
+    # HELP-only presentation state decoded from ``post_config``. Only direct
+    # Topic replies can be marked helpful; child replies always remain False.
+    helpful: bool = False
 
 
 @dataclass(frozen=True)

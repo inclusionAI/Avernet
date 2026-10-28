@@ -27,7 +27,7 @@ capabilities. It uses the existing BCS entry/proxy without Gateway principals
 or chat membership. Its schema 2 AixUI payload is exactly four fields; historical
 schema 1 consumers remain supported.
 
-`v1/internal/collaboration-drafts.yaml` adds only capability-authorized fixed
+`v1/internal/collaboration-drafts.yaml` adds only public fixed
 revision GET/validate projections with V1 envelopes. It reuses the native source
 and validation schemas; it has no management aliases or Gateway identity fallback.
 

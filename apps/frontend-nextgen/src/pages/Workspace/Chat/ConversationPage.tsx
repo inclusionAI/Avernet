@@ -13,11 +13,12 @@ import { buildBotChatTarget } from '@/hooks/workspaceIdentityMapper';
 import { buildAgentCodingChatPath } from '@/services/workspace';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { chatBridge } from '@/services/workspace/chatBridge';
+import { useSpaceContextStore } from '@/stores/spaceContextStore';
 import { useChatBridge } from '@tc-chat/adapters';
 import type { BridgeInputRef, PanelHandle } from '@tc-chat/core';
 import type { SenderRef } from '@tc-chat/ui/es/Sender';
 import { history } from '@umijs/max';
-import { useMemo, useRef, type RefObject } from 'react';
+import { useCallback, useMemo, useRef, type RefObject } from 'react';
 import { ReadOnlyConversationPanel } from '../components/ReadOnlyConversationPanel';
 import { useBotChat } from '../hooks/useBotChat';
 import { ChatHeaderActions } from './components/ChatHeaderActions';
@@ -168,6 +169,17 @@ export default function ConversationPage(): JSX.Element {
   // AgentCoding Bot 行点击直达专用 coding 对话页(与 Bot 工坊「去使用」一致;spec 2026-10-09 G2)。
   const openAgentCodingBot = (bot: ChatBotView) =>
     history.push(buildAgentCodingChatPath({ botId: bot.botId, spaceId: bot.spaceId, spaceName: bot.spaceName }));
+  // 「Bot 管理」菜单项回调(#2990 还原):带该 Bot 所属空间上下文跳转 Bot 管理页,打开即定位该空间;
+  // 空间信息缺失(好友 Bot)时装配层不传导本回调,菜单项不渲染。
+  const openBotManagement = useCallback((bot: ChatBotView) => {
+    const spaceId = bot.spaceId ? Number(bot.spaceId) : undefined;
+    if (spaceId !== undefined && Number.isFinite(spaceId)) {
+      useSpaceContextStore.getState().setCurrentSpaceId(spaceId);
+    }
+    history.push('/bot-workshop');
+  }, []);
+  // Bot 正在回复中(#2990 还原):仅当前打开的会话,会话行标题左侧渲染 loading 指示。
+  const replyingSessionId = botChat.chat.isRequesting ? (selectedSession?.sessionId ?? null) : null;
   const sidebarProps: ConversationSidebarProps = {
     managedBots: directory.managedBots,
     teamBots: directory.teamBots,
@@ -182,6 +194,8 @@ export default function ConversationPage(): JSX.Element {
     // 我的 Bot 空态文案内「Bot 管理」链接:跳 Bot 管理页创建 Bot。
     onOpenBotWorkshop: () => history.push('/bot-workshop'),
     onOpenAgentCodingBot: openAgentCodingBot,
+    onOpenBotManagement: openBotManagement,
+    replyingSessionId,
   };
 
   // 头部五图标域编排（chat-header-panels）：收藏会话/会话管理/历史消息/资源管理/副屏。

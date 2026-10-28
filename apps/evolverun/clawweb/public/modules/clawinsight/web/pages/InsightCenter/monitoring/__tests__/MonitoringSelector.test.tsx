@@ -13,8 +13,6 @@ const open = () => fireEvent.click(screen.getByRole('button', { name: /^监控 B
 beforeEach(() => {
   vi.resetAllMocks();
   api.options.mockResolvedValue({ items: [bot('001', true), bot('002')], nextCursor: null });
-  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function(this: HTMLDialogElement) { this.open = true; } });
-  Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: function(this: HTMLDialogElement) { this.open = false; } });
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
 describe('bounded searchable Bot selector', () => {
@@ -129,36 +127,29 @@ describe('bounded searchable Bot selector', () => {
     expect(screen.queryByText('Bot 001')).not.toBeInTheDocument();
   });
 });
-describe('enrollment placeholder', () => {
-  it('shows user-facing notice only for the documented 501, and returns focus on dismissal', async () => {
-    const refresh = vi.fn();
-    api.enroll.mockRejectedValue({ status: 501, body: JSON.stringify({ error: { code: 'MONITORING_ENROLLMENT_NOT_IMPLEMENTED' } }) });
-    render(<MonitoringEnrollment bot={bot('001')} onRefresh={refresh} />);
-    fireEvent.click(screen.getByRole('button', { name: '加入监控' }));
-    await screen.findByRole('dialog');
-    expect(screen.getByText('暂不支持添加监控Bot')).toBeInTheDocument();
-    expect(screen.getByText('当前暂不支持在页面中自行添加监控Bot。')).toBeInTheDocument();
-    expect(screen.getByText('如有需要请联系@沐荛添加监控Bot')).toBeInTheDocument();
-    expect(screen.queryByText(/接口|写入|切换 Bot/)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '知道了' }));
+describe('unmonitored Bot contact information', () => {
+  it.each([true, false])('is display-only when canRequestEnrollment=%s', canRequestEnrollment => {
+    render(<MonitoringEnrollment bot={{ ...bot('001'), capabilities: { canView: true, canRequestEnrollment } }} />);
+    expect(screen.getByRole('region', { name: '未监控 Bot' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '此 Bot 尚未纳入监控范围。' })).toBeInTheDocument();
+    expect(screen.getByText('如有需要请联系@沐荛添加监控 Bot。')).toBeInTheDocument();
+    expect(screen.getByText('Bot 001 · default · 001')).toBeInTheDocument();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '加入监控' })).toHaveFocus(); expect(refresh).not.toHaveBeenCalled();
-    expect(api.enroll.mock.lastCall?.[0]).toBe('ref-001');
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    expect(screen.queryByText(/正在开发|暂不支持|敬请期待|加入监控后/)).not.toBeInTheDocument();
+    expect(api.enroll).not.toHaveBeenCalled();
   });
-  it.each(['resolve', 'reject'] as const)('ignores a late %s after the selected panel unmounts', async outcome => {
-    let resolve!: () => void, reject!: (reason: unknown) => void;
-    api.enroll.mockImplementation(() => new Promise<void>((yes, no) => { resolve = yes; reject = no; }));
-    const refresh = vi.fn();
-    const mounted = render(<MonitoringEnrollment bot={bot('001')} onRefresh={refresh} />);
-    fireEvent.click(screen.getByRole('button', { name: '加入监控' }));
-    const signal = api.enroll.mock.lastCall?.[1];
-    mounted.unmount(); expect(signal.aborted).toBe(true);
-    await act(async () => outcome === 'resolve' ? resolve() : reject({ status: 409, body: JSON.stringify({ error: { code: 'MONITORING_ALREADY_ENROLLED' } }) }));
-    expect(refresh).not.toHaveBeenCalled();
-  });
-  it.each([{ status: 503 }, { status: 501, body: '{}' }, new Error('offline')])('does not disguise a request failure as a coming-soon notice', async failure => {
-    api.enroll.mockRejectedValue(failure); render(<MonitoringEnrollment bot={bot('001')} onRefresh={vi.fn()} />);
-    fireEvent.click(screen.getByRole('button', { name: '加入监控' }));
-    await screen.findByRole('alert'); expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  it('updates identity without enrollment requests or timers, including after unmount', async () => {
+    vi.useFakeTimers();
+    const mounted = render(<MonitoringEnrollment bot={bot('001')} />);
+    mounted.rerender(<MonitoringEnrollment bot={bot('002')} />);
+    expect(screen.queryByText('Bot 001 · default · 001')).not.toBeInTheDocument();
+    expect(screen.getByText('Bot 002 · default · 002')).toBeInTheDocument();
+    expect(vi.getTimerCount()).toBe(0);
+    mounted.unmount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(60000); });
+    expect(api.enroll).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

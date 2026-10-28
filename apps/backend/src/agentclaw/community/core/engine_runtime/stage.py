@@ -28,7 +28,7 @@ keyed by publish record, go there.
 from __future__ import annotations
 
 import json
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, Callable, Sequence
 
 from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.repository.protocols.bot import BotRepository
@@ -225,6 +225,23 @@ def resolve_stage_bind_id(
     # Records come back newest-first; scoped to this bot row, so "newest"
     # cannot mean "some other owner's".
     records = publish_repo.list_by_source_bot(bot_pk, env)
+    return published_stage_binding(
+        records, bot_id=bot_id, stage=stage, env=env,
+        binding_is_active=lambda bind_id: _binding_is_active(binding_repo, bind_id),
+    )
+
+
+def published_stage_binding(
+    records: Sequence[Any], *, bot_id: str, stage: str, env: str,
+    binding_is_active: Callable[[int], bool],
+) -> int:
+    """Pure stage selection shared by runtime addressing and catalog filtering.
+
+    Records must be newest-first and scoped to one exact Bot primary key/env.
+    Availability is publication/binding selection, not a heartbeat probe.
+    """
+    if stage not in {STAGE_ONLINE, STAGE_VERIFY}:
+        raise ValueError(f"not a published stage: {stage!r}")
 
     if stage == STAGE_ONLINE:
         record = next(
@@ -232,7 +249,7 @@ def resolve_stage_bind_id(
         )
         if record is not None:
             bind_id = _record_binding(record, bot_id=bot_id, stage=stage)
-            if bind_id:
+            if bind_id > 0:
                 return bind_id
         raise EngineStageNotLiveError(
             f"no live online runtime for bot={bot_id} env={env}"
@@ -250,7 +267,7 @@ def resolve_stage_bind_id(
     )
     if record is not None:
         bind_id = _record_binding(record, bot_id=bot_id, stage=stage)
-        if bind_id:
+        if bind_id > 0:
             return bind_id
         raise EngineStageNotLiveError(
             f"verify runtime not yet bound for bot={bot_id} "
@@ -266,7 +283,7 @@ def resolve_stage_bind_id(
     )
     if record is not None:
         bind_id = _record_binding(record, bot_id=bot_id, stage=stage)
-        if bind_id and _binding_is_active(binding_repo, bind_id):
+        if bind_id > 0 and binding_is_active(bind_id):
             return bind_id
     raise EngineStageNotLiveError(
         f"no live verify runtime for bot={bot_id} env={env}"

@@ -89,6 +89,63 @@ pub async fn handle_persistent_group_send(
         });
     }
 
+    // F4/R2 ordering: determine THIS request's branch and resolve
+    // its actual write target first — the managed resolver for the
+    // managed Bot-send branch (exactly-one Running Session or an
+    // error), the unmanaged eventing anchor otherwise — and gate
+    // the sender's membership of THAT Session BEFORE quota or any
+    // write side effect. A request that fails this gate must never
+    // touch the message count nor disable the Group. The managed
+    // and unmanaged selection rules stay per-branch on purpose:
+    // neither may borrow the other's "unique" or "first" policy.
+    let managed_branch = group.group_strategy != GroupStrategy::StateMachine
+        && crate::queued_admission::manages_any(flow, &group).await
+        && cmd.message_type == GroupMessageType::Bot;
+    let resolved_session = if managed_branch {
+        Some(
+            crate::queued_admission::resolve_group_session(flow, &group, None)
+                .await?
+                .ok_or_else(|| {
+                    ServiceError::InternalError(
+                        "managed admission resolved no Session".to_string(),
+                    )
+                })?,
+        )
+    } else {
+        web_send::resolve_unmanaged_eventing_session(flow, &group).await?
+    };
+    if let Some(session_id) = resolved_session.as_deref() {
+        web_send::ensure_resolved_session_sender_membership(flow, session_id, &cmd.sender)
+            .await?;
+    }
+
+    // F1 (spec §8.2): the NON-managed branch delivers its downstream
+    // Runs itself, so it installs the SAME operation output
+    // admission WebSend gets — per-connection permits frozen before
+    // the operation's first side effect, callback events tagged with
+    // the operation instead of re-authorizing per event. The managed
+    // branch delegates to handle_web_send, which admits its own
+    // operation; preparing another one here would only leave an
+    // unused duplicate for the prepare-timeout.
+    let output_operation_id = if managed_branch {
+        None
+    } else {
+        let operation_id = uuid::Uuid::new_v4().to_string();
+        if let Some(output_admission) = flow.output_admission.as_ref() {
+            output_admission
+                .admit_output_operation(bcs_service_api::OutputOperationAdmission {
+                    operation_id: operation_id.clone(),
+                    group_id: cmd.group_id.clone(),
+                    session_id: resolved_session.clone(),
+                })
+                .await?;
+        }
+        Some(operation_id)
+    };
+
+    // Quota gate — only Session-admitted requests may reach it;
+    // everything the limit check does (including the Inactive
+    // transition) is a side effect reserved for admitted sends.
     if cmd.max_group_messages > 0 {
         let count = flow.group.message_count(&cmd.group_id).await?;
         if count >= cmd.max_group_messages as usize {
@@ -107,13 +164,11 @@ pub async fn handle_persistent_group_send(
         }
     }
 
-    if group.group_strategy != GroupStrategy::StateMachine
-        && crate::queued_admission::manages_any(flow, &group).await
-        && cmd.message_type == GroupMessageType::Bot
-    {
+    if managed_branch {
         let outcome = handle_web_send(flow, WebSendCommand {
             caller_execution: None,
-            caller: cmd.caller.clone(), group_id: cmd.group_id.clone(), session_id: None,
+            caller: cmd.caller.clone(), group_id: cmd.group_id.clone(),
+            session_id: resolved_session.clone(),
             from_actor_id: cmd.sender.clone(), from_name: None, message: cmd.content.clone(),
             mentions: Vec::new(), attachments: None, thinking: None, idempotency_key: None,
             source_im_message_id: None, channel_sender_identity: None, sender_conn_id: None,
@@ -136,7 +191,10 @@ pub async fn handle_persistent_group_send(
         routed_to.sort(); routed_to.dedup();
         return Ok(PersistentGroupSendOutcome { queue_admission: outcome.queue_admission, message_id, routed_to, mentions: outcome.mentions });
     }
-    let _ = flow.group.increment_message_count(&cmd.group_id).await;
+
+    // A rejected write must not hide the count increment failure:
+    // persistence-layer discipline propagates it as an error.
+    flow.group.increment_message_count(&cmd.group_id).await?;
 
     let message = GroupMessage {
         id: uuid::Uuid::new_v4().to_string(),
@@ -160,7 +218,7 @@ pub async fn handle_persistent_group_send(
     try_persist_group_message(
         flow,
         &cmd.group_id,
-        None,
+        resolved_session.as_deref(),
         &cmd.sender,
         sender_type,
         "chat",
@@ -221,7 +279,7 @@ pub async fn handle_persistent_group_send(
         caller_execution: None,
         caller: cmd.caller.clone(),
         group_id: cmd.group_id.clone(),
-        session_id: None,
+        session_id: resolved_session.clone(),
         from_actor_id: cmd.sender.clone(),
         from_name: Some(sender_display_name.clone()),
         message: cmd.content.clone(),
@@ -234,6 +292,21 @@ pub async fn handle_persistent_group_send(
         sender_conn_id: None,
         provider_bypass_headers: Vec::new(),
     };
+
+    // F1 (spec §8.2): plan every downstream Run up front — the
+    // operation's complete output-stream set must exist before the
+    // first register_send_context, so its runs can be bound, their
+    // producer facts frozen, and the whole set registered with the
+    // delivery adapter before any downstream callback can fire.
+    struct TargetPlan {
+        run_id: String,
+        target_bot_id: String,
+        delivery_type: DeliveryType,
+        delivery_target: BotDeliveryTarget,
+        frame: BcsFrame,
+    }
+
+    let mut plans = Vec::new();
     for target in &decision.targets {
         let outbound =
             match apply_outbound_interceptors(flow, &cmd.group_id, &message, target).await {
@@ -281,18 +354,85 @@ pub async fn handle_persistent_group_send(
             from_bot_owner.clone(),
         )
         .await;
-        let delivery_kind = bot_delivery_kind(target.delivery_type);
-        flow.register_send_context(
-            target.delivery_type,
-            &delivery_target,
-            &frame,
-            &run_id,
-            &target.bot_uuid,
-            &cmd.group_id,
-            None,
-            &[],
-        )
-        .await?;
+        plans.push(TargetPlan {
+            run_id,
+            target_bot_id: target.bot_uuid.clone(),
+            delivery_type: target.delivery_type,
+            delivery_target,
+            frame,
+        });
+    }
+
+    // Bind the operation's stream set before ANY downstream I/O:
+    // cache the trusted operation tag, freeze each producer's output
+    // facts from the admission-time snapshot, and hand the complete
+    // set to the delivery adapter (Run terminal ≠ operation
+    // complete). Freeze the same Session used by admission and callbacks;
+    // truly Group-only sends retain Group participant facts. Only Send
+    // targets produce callbacks (Inject never registers a run context).
+    let freeze_session = session_snapshot_for_freeze(flow, resolved_session.as_deref()).await;
+    if let Some(operation_id) = output_operation_id.as_deref() {
+        let mut operation_run_ids: Vec<String> = Vec::new();
+        for plan in &plans {
+            if plan.delivery_type != DeliveryType::Send {
+                continue;
+            }
+            flow.message_tracker
+                .cache_run_operation(&plan.run_id, operation_id)
+                .await;
+            freeze_run_output_facts(flow, &group, freeze_session.as_ref(), &plan.run_id, &plan.target_bot_id)
+                .await;
+            operation_run_ids.push(plan.run_id.clone());
+        }
+        if !operation_run_ids.is_empty() {
+            if let Some(output_admission) = flow.output_admission.as_ref() {
+                output_admission
+                    .register_operation_runs(operation_id, operation_run_ids)
+                    .await?;
+            }
+        }
+    }
+
+    // The send's planned Send runs. Each leaves the unsettled set
+    // as its outcome is decided; a register_send_context failure
+    // releases exactly the still-unsettled runs (never an
+    // already-delivered sibling).
+    let mut unsettled_send_ids: Vec<String> = plans
+        .iter()
+        .filter(|plan| plan.delivery_type == DeliveryType::Send)
+        .map(|plan| plan.run_id.clone())
+        .collect();
+
+    for plan in plans {
+        let TargetPlan {
+            run_id,
+            target_bot_id,
+            delivery_type,
+            delivery_target,
+            frame,
+        } = plan;
+        let delivery_kind = bot_delivery_kind(delivery_type);
+        // A failure here aborts the whole send: its registered runs
+        // are provably output-less — release them explicitly.
+        if let Err(error) = flow
+            .register_send_context(
+                delivery_type,
+                &delivery_target,
+                &frame,
+                &run_id,
+                &target_bot_id,
+                &cmd.group_id,
+                resolved_session.as_deref(),
+                &[],
+            )
+            .await
+        {
+            if let Some(operation_id) = output_operation_id.as_deref() {
+                flow.release_output_runs(operation_id, &unsettled_send_ids)
+                    .await;
+            }
+            return Err(error);
+        }
         let result = flow
             .bot_delivery
             .deliver(BotDeliveryCommand {
@@ -304,30 +444,44 @@ pub async fn handle_persistent_group_send(
                 provider_bypass_headers: Vec::new(),
             })
             .await;
+        unsettled_send_ids.retain(|candidate| candidate != &run_id);
         match result {
             Ok(result) => {
                 if !result.delivered {
                     flow.discard_send_context(&run_id).await?;
+                    // The transport proved this run produces
+                    // nothing: release it explicitly (spec §8.2
+                    // end-states).
+                    if delivery_type == DeliveryType::Send {
+                        if let Some(operation_id) = output_operation_id.as_deref() {
+                            flow.release_output_runs(operation_id, &[run_id.clone()])
+                                .await;
+                        }
+                    }
                     warn!(
                         session_id = %cmd.group_id,
-                        bot_uuid = %target.bot_uuid,
+                        bot_uuid = %target_bot_id,
                         error = ?result.error,
                         "Failed to send message to bot"
                     );
                 }
             }
             Err(error) => {
-                flow.discard_send_context(&run_id).await?;
+                // Preserve the ingress context and active index as well as the
+                // output permit; callbacks still enforce identity and deadline.
+                // A transport Err is UNCERTAIN, not terminal: the
+                // remote may have accepted the run — its binding
+                // and frozen facts survive until its own terminal
+                // (spec §8.2 uncertainty rule), nothing to release.
                 warn!(
                     session_id = %cmd.group_id,
-                    bot_uuid = %target.bot_uuid,
+                    bot_uuid = %target_bot_id,
                     error = %error,
                     "Failed to send message to bot"
                 );
             }
         }
     }
-
     if cmd.store_messages {
         flow.group
             .add_message(&cmd.group_id, message.clone())

@@ -59,6 +59,10 @@ pub struct A2aChat {
     /// the production chain via `with_interceptors`.
     interceptors: Arc<bcs_service_api::interceptor::InterceptorChain>,
     organization: Option<Arc<dyn OrganizationCoreService>>,
+    /// Narrow bot-authority hook for the Human→Bot
+    /// control judgment (bot-authority plan Task 6.5);
+    /// unwired instances fail closed at that judgment.
+    bot_authority: Option<Arc<dyn bcs_service_api::port::bot_authority::BotAuthorityPort>>,
 }
 
 impl A2aChat {
@@ -102,7 +106,17 @@ impl A2aChat {
             session_management: None, queue_owner: Arc::new(std::sync::OnceLock::new()),
             interceptors: Arc::new(bcs_service_api::interceptor::InterceptorChain::new()),
             organization: None,
+            bot_authority: None,
         }
+    }
+
+    /// Wire the narrow bot-authority hook (Task 6.5).
+    pub fn with_bot_authority_hook(
+        mut self,
+        hook: Option<Arc<dyn bcs_service_api::port::bot_authority::BotAuthorityPort>>,
+    ) -> Self {
+        self.bot_authority = hook;
+        self
     }
 
     /// Attach the production outbound interceptor chain (security, audit, ...).
@@ -665,6 +679,13 @@ impl A2aChat {
         }
     }
 
+    /// Human→Bot control judgment for acting AS the
+    /// source Bot (spec §8 / bot-authority plan Task 6.5).
+    /// The legacy `created_by` comparison — including its
+    /// `created_by: None → allow` auto-claim — is replaced
+    /// by the live management edge: a Bot without an
+    /// authorized manager controls nothing, and a failing
+    /// authority read is an internal error, never a deny.
     async fn ensure_source_owner(
         &self,
         from_bot_id: &str,
@@ -673,18 +694,18 @@ impl A2aChat {
         let Some(staff_id) = authenticated_staff_id.filter(|id| !id.is_empty()) else {
             return Ok(());
         };
-        let created_by = self
-            .registry
-            .get(from_bot_id)
-            .await
-            .and_then(|bot| bot.created_by);
-        if created_by.as_deref().is_some_and(|owner| owner != staff_id) {
-            Err(ServiceError::Unauthorized(format!(
-                "User {} is not the creator of bot {}",
+        let authority = self.bot_authority.as_deref().ok_or_else(|| {
+            ServiceError::InternalError("bot authority hook is not wired".into())
+        })?;
+        match authority.can_manage(staff_id, from_bot_id).await {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(ServiceError::Unauthorized(format!(
+                "User {} does not control bot {}",
                 staff_id, from_bot_id
-            )))
-        } else {
-            Ok(())
+            ))),
+            Err(error) => Err(ServiceError::InternalError(format!(
+                "bot authority lookup failed: {error}"
+            ))),
         }
     }
 

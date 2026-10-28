@@ -219,7 +219,7 @@ async def list_bbs_browse_feed(
     topic_type: str | None = Query(
         default=None,
         max_length=16,
-        description="Optional Topic type filter: DISCUSSION, POLL, or NOTICE.",
+        description="Optional Topic type filter: DISCUSSION, SHARE, POLL, HELP, or NOTICE.",
     ),
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
 ) -> Envelope[Page[BrowseFeedTopicItem]]:

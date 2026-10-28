@@ -24,6 +24,10 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Callable, Mapping
 
+from agentclaw.community.core.apply_engine.unpack import (  # noqa: F401  re-exported: the fetch vocabulary
+    ARCHIVE_MEMBER_LIMIT,
+    ARCHIVE_UNPACKED_LIMIT,
+)
 from agentclaw.community.core.content_store.limits import DIGEST_RE  # noqa: F401  re-exported: the fetch vocabulary, see below
 
 #: Address resolution seam: host → resolved IP string list. Real DNS via
@@ -55,7 +59,7 @@ FETCH_ENTRY_LIMITS: Mapping[str, int] = {
     "identity": 1 * 1024 * 1024,
     "cli_tools": 200 * 1024 * 1024,
     "resources_archive": 200 * 1024 * 1024,
-    "resources_unpacked": 500 * 1024 * 1024,
+    "resources_unpacked": ARCHIVE_UNPACKED_LIMIT,
 }
 
 assert set(FETCH_ENTRY_LIMITS) == {c.value for c in FetchCategory}, (
@@ -64,7 +68,6 @@ assert set(FETCH_ENTRY_LIMITS) == {c.value for c in FetchCategory}, (
 )
 
 #: ``schema §5`` — one archive may not explode beyond this many members.
-ARCHIVE_MEMBER_LIMIT = 5000
 
 #: ``schema §5`` — totals for a single apply run, LEDGERED by W5's
 #: ``apply/budget.ApplyFetchBudget`` (carried on ``ApplyContext``,

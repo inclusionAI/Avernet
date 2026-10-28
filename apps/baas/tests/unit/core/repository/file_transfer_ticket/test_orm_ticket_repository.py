@@ -248,6 +248,72 @@ class TestUpdateStatus:
         # Should not raise
         repo.update_status("tf-001", "CREATED")
 
+    @pytest.mark.parametrize(
+        "status",
+        ["CREATED", "UPLOADING", "PUSHING", "FAILED", "DONE", "CANCELLED", "DELETED"],
+    )
+    @pytest.mark.parametrize("error_message", [None, "", "Download timed out"])
+    def test_zero_update_with_requested_result_is_idempotent(
+        self, repo, mock_session, status, error_message
+    ):
+        """A zero changed-row count does not imply a state conflict."""
+        query = mock_session.query.return_value.filter.return_value
+        query.update.return_value = 0
+        query.first.return_value = MagicMock(status=status, error_message=error_message)
+
+        repo.update_status("tf-001", status, error_message)
+
+        query.update.assert_called_once()
+        query.first.assert_called_once()
+
+    def test_zero_update_without_message_preserves_existing_message(
+        self, repo, mock_session
+    ):
+        query = mock_session.query.return_value.filter.return_value
+        query.update.return_value = 0
+        query.first.return_value = MagicMock(
+            status="FAILED", error_message="original error"
+        )
+
+        repo.update_status("tf-001", "FAILED")
+
+        assert "error_message" not in query.update.call_args.args[0]
+
+    @pytest.mark.parametrize("stored_message", [None, "different error"])
+    def test_zero_update_with_unpersisted_message_still_fails(
+        self, repo, mock_session, stored_message
+    ):
+        query = mock_session.query.return_value.filter.return_value
+        query.update.return_value = 0
+        query.first.return_value = MagicMock(
+            status="FAILED", error_message=stored_message
+        )
+
+        with pytest.raises(TransferStateConflictError):
+            repo.update_status("tf-001", "FAILED", "Download timed out")
+
+    def test_database_update_error_propagates(self, repo, mock_session):
+        query = mock_session.query.return_value.filter.return_value
+        query.update.side_effect = RuntimeError("database unavailable")
+
+        with pytest.raises(RuntimeError, match="database unavailable"):
+            repo.update_status("tf-001", "FAILED")
+
+        query.first.assert_not_called()
+
+    def test_idempotent_readback_does_not_hide_commit_error(
+        self, repo, mock_session, mock_database
+    ):
+        query = mock_session.query.return_value.filter.return_value
+        query.update.return_value = 0
+        query.first.return_value = MagicMock(status="FAILED", error_message="timeout")
+        mock_database.orm_session.return_value.__exit__.side_effect = RuntimeError(
+            "commit failed"
+        )
+
+        with pytest.raises(RuntimeError, match="commit failed"):
+            repo.update_status("tf-001", "FAILED", "timeout")
+
     def test_with_error_message(self, repo, mock_session):
         """Verify error_message is passed through to update_kwargs."""
         mock_session.query.return_value.filter.return_value.update.return_value = 1

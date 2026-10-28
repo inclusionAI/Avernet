@@ -167,7 +167,7 @@ class ApplyStatus(StrEnum):
 class EntryResult:
     """One declared entry's outcome."""
 
-    construct: ManifestCategory | ManifestSection
+    construct: Category | Section
     #: The entry's identity within its category — ``name`` / ``type`` / ``path``
     #: / ``server_code``. Whatever the category keys entries by.
     identity: str
@@ -188,7 +188,7 @@ class CategoryResult:
     destructive half of overwrite unaudited.
     """
 
-    construct: ManifestCategory | ManifestSection
+    construct: Category | Section
     entries: tuple[EntryResult, ...]
     removals: tuple[str, ...] = ()
     #: True when the category was not written at all (all-or-nothing, §3.2).
@@ -231,7 +231,7 @@ class ApplyPhase(StrEnum):
 
 @dataclass(frozen=True)
 class ApplyStep:
-    construct: ManifestCategory | ManifestSection
+    construct: Category | Section
     phase: ApplyPhase
     position: int
 
@@ -245,22 +245,22 @@ class ApplyStep:
 #:
 #: This REVERSES design §3.4, which put `script` last. See work-items §2.12.
 APPLY_ORDER: tuple[ApplyStep, ...] = (
-    ApplyStep(ManifestSection.SCRIPT,           ApplyPhase.PRE_CONTAINER, 0),
-    ApplyStep(ManifestCategory.IDENTITY,        ApplyPhase.ON_CONTAINER,  1),
-    ApplyStep(ManifestCategory.RESOURCES,       ApplyPhase.ON_CONTAINER,  2),
-    ApplyStep(ManifestCategory.SKILLS,          ApplyPhase.ON_CONTAINER,  3),
-    ApplyStep(ManifestCategory.MCP,             ApplyPhase.ON_CONTAINER,  4),
-    ApplyStep(ManifestCategory.ENGINE_CONFIG,   ApplyPhase.ON_CONTAINER,  5),
-    ApplyStep(ManifestCategory.CLI_TOOLS,       ApplyPhase.ON_CONTAINER,  6),
+    ApplyStep(Section.SCRIPT,           ApplyPhase.PRE_CONTAINER, 0),
+    ApplyStep(Category.IDENTITY,        ApplyPhase.ON_CONTAINER,  1),
+    ApplyStep(Category.RESOURCES,       ApplyPhase.ON_CONTAINER,  2),
+    ApplyStep(Category.SKILLS,          ApplyPhase.ON_CONTAINER,  3),
+    ApplyStep(Category.MCP,             ApplyPhase.ON_CONTAINER,  4),
+    ApplyStep(Category.ENGINE_CONFIG,   ApplyPhase.ON_CONTAINER,  5),
+    ApplyStep(Category.CLI_TOOLS,       ApplyPhase.ON_CONTAINER,  6),
 )
 ```
 
 ```python
 # apply/registry.py
 
-MATERIALISERS: dict[ManifestCategory | ManifestSection, Materialiser] = {
-    ManifestSection.SCRIPT: ScriptMaterialiser(),
-    ManifestCategory.MCP:   McpMaterialiser(),
+MATERIALISERS: dict[Category | Section, Materialiser] = {
+    Section.SCRIPT: ScriptMaterialiser(),
+    Category.MCP:   McpMaterialiser(),
 }
 ```
 
@@ -290,7 +290,7 @@ class Materialiser(Protocol):
 
     #: Which construct this materialises. Read by the registry test that pins
     #: every ``MATERIALISERS`` key to an ``APPLY_ORDER`` row.
-    construct: ManifestCategory | ManifestSection
+    construct: Category | Section
 
     @abstractmethod
     async def resolve(
@@ -385,7 +385,7 @@ async def apply_bot_config_manifest(...) -> Envelope[ConfigManifestApplyAccepted
 `start_apply` is synchronous up to the point where it can answer, and no
 further:
 
-1. Take the lock. Held ⇒ `ManifestApplyInProgressError` ⇒ 409, **before** an id
+1. Take the lock. Held ⇒ `ApplyInProgressError` ⇒ 409, **before** an id
    is minted. A caller never gets an id for an apply that did not start.
 2. Read and re-validate the stored document. Invalid ⇒ 422 now, not a report
    the caller has to poll for to learn their document was bad.
@@ -472,7 +472,7 @@ class BotConfigManifestApplyServiceProtocol(Protocol):
         the start command is composed, Phase B once the container is up.
 
         Raises:
-            ManifestApplyInProgressError: Another apply holds this bot's lock.
+            ApplyInProgressError: Another apply holds this bot's lock.
             ManifestValidationError: The stored document no longer validates for
                 this bot — its engine can change after the document was accepted.
         """
@@ -659,7 +659,7 @@ than a snapshot.
 
 | Error | Status | Note |
 | --- | --- | --- |
-| `ManifestApplyInProgressError` | 409 | The lock is held. Retryable, and the message says so |
+| `ApplyInProgressError` | 409 | The lock is held. Retryable, and the message says so |
 | `ManifestValidationError` | 422 | Existing. Re-validating the stored document at apply is not paranoia: capabilities are resolved from the bot's engine, which can change after the document was accepted |
 
 Everything else — a failed entry, an aborted category — is a **200 with a report

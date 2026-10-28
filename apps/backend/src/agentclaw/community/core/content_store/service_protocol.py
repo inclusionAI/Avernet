@@ -14,6 +14,8 @@ from abc import abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
 
+from agentclaw.community.core.content_store.reader import ContentReader
+
 if TYPE_CHECKING:
     from agentclaw.community.core.content_store.models import (
         ContentScope,
@@ -28,7 +30,7 @@ if TYPE_CHECKING:
 
 
 @runtime_checkable
-class ContentStoreProtocol(Protocol):
+class ContentStoreProtocol(ContentReader, Protocol):
     """内容存储服务接口(§2.8).
 
     One mechanism behind three consumers — audit, delivery, ``keep_last`` —

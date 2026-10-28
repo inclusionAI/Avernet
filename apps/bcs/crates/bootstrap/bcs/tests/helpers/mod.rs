@@ -70,6 +70,13 @@ pub fn create_test_config(bots_dir: &PathBuf) -> BcsConfig {
         async_chat_poll_wait_max_ms: 30_000,
         async_chat_run_max_entries: 100_000,
         security_gateway: Default::default(),
+        // Test servers pin the strict post-migration posture by
+        // default: every suite keeps proving the old strict-deny
+        // semantics; the migration-window shim opts in per-suite.
+        bot_authority: bcs::BotAuthorityConfig {
+            legacy_created_by_fallback: false,
+            ..Default::default()
+        },
         security: Default::default(),
         message_history: MessageHistoryConfig::default(),
         api_keys: vec![],
@@ -310,12 +317,13 @@ impl MockBot {
     /// Respond to a `chat.send` request with a `chat.event` frame.
     /// `request_id` is the `id` field from the incoming `chat.send` frame.
     pub async fn send_chat_event(&mut self, group_id: &str, request_id: &str, text: &str) {
-        // First send the response to the chat.send request
+        // Events must use the same accepted Run identity as their ACK.
+        let run_id = format!("run_{}", uuid_v4());
         let response = json!({
             "type": "res",
             "id": request_id,
             "ok": true,
-            "payload": { "run_id": format!("run_{}", uuid_v4()) }
+            "payload": { "run_id": &run_id }
         });
         self.send_raw(response).await;
 
@@ -324,7 +332,7 @@ impl MockBot {
             "type": "event",
             "event": "chat.event",
             "payload": {
-                "run_id": format!("run_{}", uuid_v4()),
+                "run_id": &run_id,
                 "bcs_group_id": group_id,
                 "state": "final",
                 "message": {

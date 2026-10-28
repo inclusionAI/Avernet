@@ -57,7 +57,7 @@ export const navigationItems: NavigationItem[] = [
     path: '/collaboration-square',
     icon: Compass,
     section: 'collab',
-    description: '发现公开 Bot、协作群与任务',
+    description: '发现专家模板、公开 Bot 与协作群',
   },
   {
     id: 'lab',

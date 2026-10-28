@@ -73,10 +73,10 @@ from agentclaw.community.core.agentswarm.service import AgentSwarmService
 from agentclaw.community.core.agentswarm.service.protocols import (
     SubmitRunRequest,
 )
-from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
+from agentclaw.community.core.apply_engine.apply_task import (
     APPLY_TASK_TYPE,
 )
-from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
+from agentclaw.community.core.apply_engine.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.create_job import (
     CREATE_JOB_TASK_TYPE,
 )
@@ -93,8 +93,8 @@ from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.platform import (
     TaskQueueRepositoryProtocol,
 )
-from agentclaw.community.api.bot_config_manifest_apply_service import (
-    BotConfigManifestApplyServiceProtocol,
+from agentclaw.community.api.apply_run_service import (
+    ApplyRunServiceProtocol,
 )
 from agentclaw.community.core.task_queue.types import (
     Complete, DEFAULT_APP, Fail, Reschedule, TaskStatus,
@@ -384,7 +384,7 @@ class _TaskQueuePump(threading.Thread):
         if task.task_type == CREATE_JOB_TASK_TYPE:
             return self._world.get(BotCreateWithManifestHandler).handle(task.payload)
         if task.task_type == APPLY_TASK_TYPE:
-            self._world.get(BotConfigManifestApplyServiceProtocol).run_apply_task(
+            self._world.get(ApplyRunServiceProtocol).run_apply_task(
                 task.payload
             )
             return Complete()
@@ -454,7 +454,7 @@ class TestBotKindEndToEnd:
             passport_plugin=world.get(PassportPlugin),
             skill_set_factory=world.get(SkillSetServiceFactoryProtocol),
             bot_repo=world.get(BotRepository),
-            apply_service=world.get(BotConfigManifestApplyServiceProtocol),
+            apply_service=world.get(ApplyRunServiceProtocol),
             space_context=world.get(BusinessSpaceContextProtocol),
             baas_service=world.get(BaasService),
         )
@@ -534,7 +534,7 @@ class TestBotKindEndToEnd:
         job = seam.find_job(entity_id=OWNER, bot_id=expected_id)
         assert job is not None and job.status is TaskStatus.SUCCEEDED
 
-        report = world.get(BotConfigManifestApplyServiceProtocol).last_apply(
+        report = world.get(ApplyRunServiceProtocol).last_apply(
             entity_id=OWNER, bot_id=expected_id,
         )
         assert report is not None

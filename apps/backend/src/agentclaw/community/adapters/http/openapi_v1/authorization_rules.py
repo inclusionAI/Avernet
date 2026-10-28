@@ -87,7 +87,11 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("DELETE", "/openapi/v1/bots/authorized-apps/{app_id}"): NoCheck(
         "the caller's own account-level delegation, not a bot; app-only callers are REFUSED (admission.py)"
     ),
-    ("POST", "/openapi/v1/bots/{bot_id}/iam-token"): OWNER_SCOPED,
+    # Explicit friend mode additionally verifies BCN friendship, owned session,
+    # and the resolved published stage before updating only the subject's IAM.
+    ("POST", "/openapi/v1/bots/{bot_id}/iam-token"): ServiceChecked(
+        PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.file_access"
+    ),
     # Config manifest. Read at MEMBER, write at ADMIN — the same split the
     # channels rows above make, and for the same reason: reading how a bot is
     # configured is part of working on it, while replacing that configuration
@@ -430,12 +434,12 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}/content",
-    ): Check(PermissionLevel.MEMBER),
+    ): ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.file_access"),
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}"
         "/materialize-status",
-    ): Check(PermissionLevel.MEMBER),
+    ): ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.file_access"),
     ("GET", "/openapi/v1/bots/{bot_id}/sessions/favorites"): ServiceChecked(
         PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.router"
     ),
@@ -665,6 +669,9 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/market/skill-center/tags"): NoCheck(
         "tenant-identical marketplace"
     ),
+    ("GET", "/openapi/v1/experts"): NoCheck("tenant-identical expert catalogue"),
+    ("GET", "/openapi/v1/experts/categories"): NoCheck("tenant-identical expert catalogue"),
+    ("GET", "/openapi/v1/experts/{expert_id}"): NoCheck("tenant-identical expert catalogue"),
     ("POST", "/openapi/v1/bots/market/skills"): NoCheck("tenant-identical marketplace"),
     ("GET", "/openapi/v1/bots/market/clis"): NoCheck("tenant-identical marketplace"),
     ("GET", "/openapi/v1/bots/mcp/servers"): NoCheck(

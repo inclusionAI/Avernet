@@ -245,12 +245,16 @@ class BotWsConnectionInfoResponse:
                   bot 级 invoke-http 链路必需；与 paas_device_id 来源相同，
                   但语义不同：bot_uuid 是逻辑 Bot 标识，paas_device_id 是
                   PaaS 设备实例标识
+        a2a_base_url: 设备 A2A 面（agent-card / rpc）的权威 HTTP base，
+                      浏览器直连可达；BaaS 沙箱平台未定义该地址时空串
+                      （加性字段，旧 BaaS 不回此键同样落空串）
     """
 
     ws_url: str
     token: str
     target: str
     expires_at: str
+    a2a_base_url: str = ""
     paas_device_id: str = ""
     baas_base_url: str = ""
     engine_port: int = 20003
@@ -2042,6 +2046,8 @@ class BaasService:  # pragma: no cover
                 token=data["token"],
                 target=data["target"],
                 expires_at=data["expires_at"],
+                # 加性透传：旧 BaaS 不回该键时 .get 落空串，行为同未升级。
+                a2a_base_url=str(data.get("a2a_base_url") or ""),
                 paas_device_id=bot_uuid,
                 baas_base_url=self._baas_api_base,
                 tenant=effective_tenant,
@@ -2244,6 +2250,18 @@ class BaasService:  # pragma: no cover
         # A list `data` deserializes straight through _get_bots_api's data extract.
         return data if isinstance(data, list) else []
 
+    def _resolve_bot_locator(self, bot_id: str, locator: str) -> dict | None:
+        """Resolve resource identity without treating the locator as an actor."""
+        from agentclaw.community.core.bot_management.addressing import BotAddressResolver
+        from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
+
+        try:
+            return dict(BotAddressResolver(self._bot_repo).resolve(
+                bot_id=bot_id, legacy_owner_id=locator,
+            ).bot)
+        except BotAddressNotFoundError:
+            return None
+
     def get_bind_id(
         self,
         bot_id: str,
@@ -2276,9 +2294,9 @@ class BaasService:  # pragma: no cover
             f"bot_type={bot_type}, publish_status={publish_status}"
         )
 
+        bot = self._resolve_bot_locator(bot_id, owner_id)
         # DRAFT 状态或无状态：从 bot 数据中获取 bind_id
         if publish_status == PublishStatus.DRAFT.value or publish_status is None:
-            bot = self._bot_repo.get_by_id_and_owner(bot_id=bot_id, owner_id=owner_id)
             if bot is None:
                 logger.warning(f"[BaasService.get_bind_id] Bot not found: bot_id={bot_id}")
                 return None
@@ -2290,6 +2308,10 @@ class BaasService:  # pragma: no cover
         # VALIDATING/SUCCESS 等状态：从发布单扩展字段获取
         from agentclaw.community.utils.env_utils import get_current_env
         env = get_current_env()
+        if bot and bot.get("bot_type") == "service" and bot_id != "default":
+            from agentclaw.community.core.bot_management.addressing import stable_resource_owner_id
+            owner_id = stable_resource_owner_id(bot)
+        # Keep historical personal/default publication lookups, including orphan lineages.
         publish_record = self._bot_publish_repo.get_by_publish_bot_id(
             publish_bot_id=bot_id,
             owner_id=owner_id,
@@ -2611,9 +2633,7 @@ class BaasService:  # pragma: no cover
 
     def _resolve_bot_type(self, bot_id: str, owner_id: str) -> str | None:
         """根据 bot_id + owner_id 查询 bot_type（供 outbound rule 选择 secret）。"""
-        bot = self._bot_repo.get_by_id_and_owner(
-            bot_id=bot_id, owner_id=owner_id
-        )
+        bot = self._resolve_bot_locator(bot_id, owner_id)
         return (bot or {}).get("bot_type")
 
     def _build_outbound_operation_rule(

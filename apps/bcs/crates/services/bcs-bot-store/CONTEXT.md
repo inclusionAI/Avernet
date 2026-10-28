@@ -89,11 +89,34 @@ credential can trigger one extra bounded existence query (Bot and binding keys,
 including tombstones). Any persisted identity blocks this fallback, so stale
 memory tokens cannot bypass revocation, deletion or Provider state. Unknown
 tokens incur no extra query; no writes or new cache are introduced.
-
 ## Provider collaboration scope
-
 Bot Provider authorization uses a bounded fresh environment-scoped LEFT JOIN (maximum 256 actors per read); no policy cache or group policy table is introduced. Provider metadata writes atomically reject relaxation of same_owner, including stale ordinary PATCH config.
-
 Provider tightening to same_owner atomically rejects related public groups through current environment-scoped membership. Memory implementations receive a Group membership projection and weak Bot-metadata reference; their policy gate serializes Group writes against policy updates. Failed tightening leaves all Provider metadata unchanged.
-
 Affiliation into a same_owner Provider rejects current public membership before writing Bot metadata or gateway projection. SQL attachment locks Provider then Bot and checks membership inside the transaction; public Group writes also lock unbound Bot rows. Memory attachment uses the existing policy gate. A fresh preflight port supports registration before capability merging; the write always rechecks.
+## Bot authority
+
+Bot authority state (bot-authority spec, plan Tasks 3–4) joins the SAME
+atomic shared state for Memory (`MemoryBotState`) and the SQL chain: the
+owner/manager edge projection, `bcs_bots.ownership_version`, the
+`bot_ownership_transfers` current-round row (one pending per
+`(env, bot_id, target_owner_actor_id)`) and the `bot_authority_changes`
+permission-scope audit. Registration commits the owner identity, the owner
+edge, `ownership_version` and the default runtime profile in one command
+(`register_with_ownership` → `CommittedBotRegistration`); owner transfer
+acceptance moves owner/manager edges and bumps the version inside one
+transaction, restoring the ex-owner as a plain manager. Manager sync is a
+set replacement in one transaction (input ≤1,000 deduped known Humans,
+stock cap 10,000, bounded retry for deterministic local rollbacks only);
+the owner is never a sync operand. Provider retirement (three branches),
+cleanup-pending retry and retire audits share the same atomic command
+boundary; a failed post-commit cleanup returns
+`retirement_cleanup_pending` and stays retriable without new audit rows.
+The authority read-side same-record pin (profile port, memory mode) holds
+for both dialects.
+
+Ordinary Bot retirement rejects Human targets in the repository, not just the
+application hook. SQL checks actor_kind again under the existing Bot row lock;
+Memory checks it under the shared authority write lock. This API does not delete
+Humans, so registration/transfer cannot race it into orphaning an owner. No new
+Human lifecycle API, query, migration or owner scan is introduced. Authority
+role/fallback reads accept only physical Bot targets (scalar and batch).

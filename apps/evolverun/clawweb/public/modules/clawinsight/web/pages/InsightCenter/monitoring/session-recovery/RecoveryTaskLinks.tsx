@@ -23,11 +23,13 @@ export function RecoveryTaskLinks({ eventId }: { eventId: string }) {
   if (error === eventId) return <div className="recovery-task-links" role="status">自愈任务暂时无法读取。<button type="button" className="copy-btn" onClick={() => setRevision(value => value + 1)}>重试</button></div>;
   const task = loaded?.eventId === eventId ? loaded.items[0] : null;
   if (!task) return null;
+  const ownerHandoff = task.completion_reason === 'owner_handoff' || task.completion_reason === 'mcp_permission_required';
+  const handoffLabel = task.effect === 'recovered' ? '已恢复，有后续建议' : '需 Owner 自行处理';
   return <section className="recovery-task-links" aria-label="对应的自愈任务">
     <span className="recovery-task-label">自愈任务</span>
     <div className="recovery-task-item">
-      <span className={`health ${statusClasses[task.status]}`}><span className="dot" />{task.completion_reason === 'mcp_permission_required' ? '需 Owner 自行处理' : task.completion_reason === 'target_unavailable' ? '目标不可用' : task.completion_reason === 'user_continued' ? '已让路' : statusLabels[task.status]}</span>
-      <Link className="recovery-task-link" title={task.task_id} aria-label={`查看自愈任务 ${task.completion_reason === 'mcp_permission_required' ? '需 Owner 自行处理' : task.completion_reason === 'target_unavailable' ? '目标不可用' : task.completion_reason === 'user_continued' ? '已让路' : statusLabels[task.status]} ${task.task_id}`} to={`/insight?module=monitoring&recoveryTaskId=${encodeURIComponent(task.task_id)}`}>
+      <span className={`health ${statusClasses[task.status]}`}><span className="dot" />{ownerHandoff ? handoffLabel : task.completion_reason === 'target_unavailable' ? '目标不可用' : task.completion_reason === 'user_continued' ? '已让路' : statusLabels[task.status]}</span>
+      <Link className="recovery-task-link" title={task.task_id} aria-label={`查看自愈任务 ${ownerHandoff ? handoffLabel : task.completion_reason === 'target_unavailable' ? '目标不可用' : task.completion_reason === 'user_continued' ? '已让路' : statusLabels[task.status]} ${task.task_id}`} to={`/insight?module=monitoring&recoveryTaskId=${encodeURIComponent(task.task_id)}`}>
         查看任务<span aria-hidden="true">↗</span>
       </Link>
     </div>

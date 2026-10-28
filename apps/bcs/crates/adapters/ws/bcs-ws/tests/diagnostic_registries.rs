@@ -31,7 +31,7 @@ async fn closed_bot_channel_reports_failed_delivery_with_request_id() {
 async fn expired_run_channel_is_removed_and_no_longer_delivers() {
     let registry = RunChannelManager::new();
     let (tx, mut rx) = mpsc::channel(1);
-    registry.register("expired-run".into(), "session-diagnostic".into(), tx, None, None).await;
+    registry.register_internal("expired-run".into(), "session-diagnostic".into(), tx, None, None).await;
     assert!(registry.send_event("expired-run", "before-expiry".into()).await);
     assert_eq!(rx.recv().await.as_deref(), Some("before-expiry"));
     let (_, logs) = bcs_test_support::capture_request_logs("expired-run-request", async {
@@ -51,7 +51,7 @@ async fn expired_run_channel_is_removed_and_no_longer_delivers() {
 async fn failed_run_delivery_and_full_frontend_queue_remain_observable_without_false_success() {
     let runs = RunChannelManager::new();
     let (tx, rx) = mpsc::channel(1);
-    runs.register("failed-run".into(), "session-diagnostic".into(), tx, None, None).await;
+    runs.register_internal("failed-run".into(), "session-diagnostic".into(), tx, None, None).await;
     drop(rx);
     let frontends = WorkbenchConnectionRegistry::new();
     let (tx, mut rx) = mpsc::channel(1);

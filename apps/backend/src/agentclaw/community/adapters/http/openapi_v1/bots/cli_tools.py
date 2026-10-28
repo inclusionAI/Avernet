@@ -7,7 +7,7 @@ group like every other bot-component group.
 caller, hands the service the uploaded bytes and what to make of them, and
 shapes the result; the pin, the unpacking, the architecture check, the
 platform's copy of the bytes and the engine call all live in
-``core/bot_config_manifest/cli_tools``. That is the same component a manifest's
+``core/apply_engine/cli_tools``. That is the same component a manifest's
 ``cli_tools`` category applies through, which is what makes the two doors
 refuse the same executable for the same reason.
 

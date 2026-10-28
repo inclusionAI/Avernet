@@ -58,9 +58,8 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
     OwnerIdDep,
     StageQuery,
 )
-from agentclaw.community.adapters.http.openapi_v1.engine_runtime.friend_chat import (
-    FriendUserIdQuery, authorize_friend_chat,
-)
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.friend_chat import FriendUserIdQuery
+from .backend import resolve_session_backend as _resolve_session_backend
 from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     created,
@@ -115,40 +114,6 @@ _LOOKAHEAD = 1
 #: Generous for a conversation; bounded enough that a page number cannot be
 #: turned into device load.
 _MAX_HISTORY_DEPTH = 5000
-
-async def _resolve_session_backend(
-    *,
-    relay: EngineRuntimeRelayProtocol,
-    friendships: HumanBotFriendshipServiceProtocol,
-    expert: ExpertChatServiceProtocol,
-    request: Request,
-    bot_id: str,
-    user_id: str,
-    owner_id: str,
-    friend_user_id: str | None,
-    stage: RuntimeStage,
-    device_uuid: str | None = None,
-):
-    """Select the unchanged operator backend or explicit friend backend."""
-    if friend_user_id is None:
-        return await resolve_operable_bot(
-            relay,
-            bot_id,
-            caller_id=user_id,
-            owner_id=owner_id,
-            stage=stage.value,
-            surface="sessions",
-        )
-    if device_uuid is not None:
-        raise EngineResourceNotFoundError("instance selection is unavailable for friend chat")
-    if stage is not RuntimeStage.DRAFT:
-        raise EngineResourceNotFoundError("friend chat is available only in draft")
-    await authorize_friend_chat(
-        request=request, bot_id=bot_id, caller_id=user_id, owner_id=owner_id,
-        friend_user_id=friend_user_id, friendships=friendships, expert=expert,
-    )
-    return None
-
 
 def _raise_expert_error(error: Exception) -> None:
     if isinstance(error, ExpertBotNotFoundError):
@@ -744,12 +709,16 @@ async def session_file_materialize_status(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
+    expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
     adapter: OpenApiSessionFileAdapter = Injected(OpenApiSessionFileAdapter),
 ) -> Envelope[SessionFile]:
-    await resolve_operable_bot(
-        relay, bot_id, caller_id=user_id, owner_id=owner_id, stage=stage.value,
-        surface="sessions",
+    await authorize_file_list(
+        request=request, bot_id=bot_id, session_id=session_id, user_id=user_id,
+        owner_id=owner_id, stage=stage, friend_user_id=f_user_id,
+        relay=relay, friendships=friendships, expert=expert,
     )
     try:
         record = adapter.get_status(
@@ -815,13 +784,17 @@ async def stream_session_file_content(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    f_user_id: FriendUserIdQuery = None,
     disposition: DispositionQuery = "inline",
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
+    expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
     adapter: OpenApiSessionFileAdapter = Injected(OpenApiSessionFileAdapter),
 ) -> StreamingResponse:
-    await resolve_operable_bot(
-        relay, bot_id, caller_id=user_id, owner_id=owner_id, stage=stage.value,
-        surface="sessions",
+    await authorize_file_list(
+        request=request, bot_id=bot_id, session_id=session_id, user_id=user_id,
+        owner_id=owner_id, stage=stage, friend_user_id=f_user_id,
+        relay=relay, friendships=friendships, expert=expert,
     )
     try:
         record, upstream = await adapter.open_content(

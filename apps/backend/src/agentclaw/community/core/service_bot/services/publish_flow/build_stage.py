@@ -138,7 +138,7 @@ class BuildStageRunner:
             owner_id,
         )
 
-        bot = self._bot_service.get_bot(bot_id=bot_id, user_id=owner_id)
+        bot = self._bot_service.get_bot_by_address(bot_id=bot_id, user_id=owner_id)
         if not bot:
             raise PublishFlowServiceError(f"Bot not found: {bot_id}")
 
@@ -280,7 +280,7 @@ class BuildStageRunner:
             # 数字员工快照校验 — 如果构建期间数字员工能力发生变化，拒绝发布
             if result.employee_snapshot is not None:
                 owner_id = self._ext_state.owner_id(publish_record)
-                bot = self._bot_service.get_bot(
+                bot = self._bot_service.get_bot_by_address(
                     bot_id=publish_record.source_bot_id, user_id=owner_id,
                 )
                 employee_service = self._employee_publication_provider()

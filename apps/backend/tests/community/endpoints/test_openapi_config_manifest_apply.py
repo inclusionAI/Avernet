@@ -5,7 +5,7 @@ real gateway-principal verification, the ownership guard, the declared bars, and
 the repository round trip.
 
 The engine's own behaviour — convergence, all-or-nothing, overwrite — is proven
-in ``tests/community/core/bot_config_manifest/apply/``. What these cover is the
+in ``tests/community/core/apply_engine/``. What these cover is the
 *surface*: the shapes a caller sees, and the two "absent is not an error" rules.
 """
 
@@ -22,10 +22,10 @@ import jwt
 from injector import singleton
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
-from agentclaw.community.api.bot_config_manifest_apply_service import (
-    BotConfigManifestApplyServiceProtocol,
+from agentclaw.community.api.apply_run_service import (
+    ApplyRunServiceProtocol,
 )
-from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
+from agentclaw.community.core.apply_engine.apply_task import (
     APPLY_TASK_TYPE,
 )
 from agentclaw.community.core.repository.protocols.platform import (
@@ -215,7 +215,7 @@ def _await_the_background_apply(_response, world) -> None:
             "the explicit-apply route reached the service with a phase; it must "
             f"pass none, got {task.payload['phase']!r}"
         )
-    apply_service = world.get(BotConfigManifestApplyServiceProtocol)
+    apply_service = world.get(ApplyRunServiceProtocol)
     for task in enqueued:
         apply_service.run_apply_task(task.payload)
 
@@ -476,7 +476,7 @@ def apply_while_locked_is_a_409():
     """Applies are serialized per bot, and contention is retryable — not a 500.
 
     The route's own documentation promises this 409, but
-    ``ManifestApplyInProgressError`` was not registered in the envelope's error
+    ``ApplyInProgressError`` was not registered in the envelope's error
     map, so ``@envelope_errors`` re-raised it and the caller got a 500. Pinned
     through the assembled app rather than at the service, because the defect was
     entirely in the mapping: the service raised the right exception all along.
@@ -512,10 +512,10 @@ _RESOURCE_DOCUMENT = (
     "schema_version: 1\n"
     "manifest:\n"
     "  resources:\n"
-    "    - path: notes/r.md\n"
+    "    - path: data/notes/r.md\n"
     "      content: |\n"
     "        # rules\n"
-    "    - path: tools/\n"
+    "    - path: data/tools/\n"
     "      unpack: tar.gz\n"
     "      strip_components: 1\n"
     "      source:\n"
@@ -557,7 +557,7 @@ def _seed_bot_with_resource_manifest(world) -> None:
     from agentclaw.community.core.bot_config_manifest.fetch.object_store import (
         AliyunObjectStore,
     )
-    from tests.community.core.bot_config_manifest.apply._fakes import (
+    from tests.community.core.apply_engine._fakes import (
         FakeObjectStore,
     )
 
@@ -582,6 +582,16 @@ def _seed_bot_with_resource_manifest(world) -> None:
     async def exists(_self, **_kwargs):
         return False
 
+    listed: list[int] = []
+    clears: list[int] = []
+
+    async def list_entries(_self, **kwargs):
+        (listed if kwargs.get("recursive") else clears).append(1)
+        return ()
+
+    async def delete_dir(_self, **_kwargs):
+        return True
+
     # The object store is doubled BEFORE the fetch funnel is first resolved:
     # the funnel is a singleton built over whatever store the injector holds
     # at that moment, and a fake bound afterwards would never be consulted.
@@ -590,7 +600,13 @@ def _seed_bot_with_resource_manifest(world) -> None:
     bind_overrides(
         world,
         ResourceFileService,
-        {"upload_file": upload_file, "delete": delete, "exists": exists},
+        {
+            "upload_file": upload_file,
+            "delete": delete,
+            "exists": exists,
+            "list_entries": list_entries,
+            "delete_dir": delete_dir,
+        },
     )
     # The stubs only record; the materialiser under test still decides what
     # to call, so its decisions are visible on the recorders. Function
@@ -626,6 +642,7 @@ def _seed_bot_with_resource_manifest(world) -> None:
 
     _seed_bot_with_resource_manifest.uploads = uploads
     _seed_bot_with_resource_manifest.deletes = deletes
+    _seed_bot_with_resource_manifest.clears = clears
 
 
 def _resources_reached_the_write_chain(_response, world) -> None:
@@ -643,23 +660,23 @@ def _resources_reached_the_write_chain(_response, world) -> None:
     by_entry = {
         (e["category"], e["name"]): e["action"] for e in report["entries"]
     }
-    assert by_entry[("resources", "notes/r.md")] == "created"
-    assert by_entry[("resources", "tools/a.py")] == "created"
-    assert by_entry[("resources", "tools/sub/b.py")] == "created"
+    assert by_entry[("resources", "data/notes/r.md")] == "created"
+    assert by_entry[("resources", "data/tools/a.py")] == "created"
+    assert by_entry[("resources", "data/tools/sub/b.py")] == "created"
 
     uploads = _seed_bot_with_resource_manifest.uploads
-    assert sorted(u["target_dir"] for u in uploads) == ["notes", "tools", "tools/sub"]
+    assert sorted(u["target_dir"] for u in uploads) == ["data/notes", "data/tools", "data/tools/sub"]
     writes = {(u["target_dir"], u["filename"]): u["data"] for u in uploads}
     assert writes == {
-        ("notes", "r.md"): b"# rules\n",
-        ("tools", "a.py"): b"x = 1\n",
-        ("tools/sub", "b.py"): b"y = 2\n",
+        ("data/notes", "r.md"): b"# rules\n",
+        ("data/tools", "a.py"): b"x = 1\n",
+        ("data/tools/sub", "b.py"): b"y = 2\n",
     }
-    # The declared directory tree is replaced in full, delete first — the
-    # ownership rule, including files the new archive no longer ships. The
-    # tree is addressed without the declaring slash: the write chain's
-    # file-vs-tree branching keys on the path's shape.
-    assert _seed_bot_with_resource_manifest.deletes == ["tools"]
+    # The resources root is owned whole: cleared once, before any member is
+    # written — the ownership rule, including files the new archive no longer
+    # ships and files the bot wrote there itself.
+    assert len(_seed_bot_with_resource_manifest.clears) == 1
+    assert _seed_bot_with_resource_manifest.deletes == []
 
 
 @endpoint_test(

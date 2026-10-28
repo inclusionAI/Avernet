@@ -5,10 +5,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_service_api::application::v1::{ApplicationError, AuthenticatedCaller};
+use bcs_service_api::port::bot_authority::BotAuthorityPort;
 use bcs_service_api::types::{
     EventActor, EventActorType, EventSubscriptionScope, EventSubscriptionScopeType,
 };
-use bcs_service_api::{BotRegistryCoreService, GroupCoreService, GroupStrategy, ParticipantRole};
+use bcs_service_api::{BotRegistryCoreService, GroupCoreService};
 
 use crate::{
     AuthorizedEventSubscriptionScope, EventSubscriptionAuthorizationAction,
@@ -19,17 +20,28 @@ use crate::{
 ///
 /// MVP management is deliberately limited to Group scope. Child resource
 /// Events are selected through the Group's descendant stream hierarchy.
+///
+/// The resource leg reads the CURRENT Group management edge through
+/// the strict authorization snapshot (bot-authority plan §8.3); the
+/// Human→Bot judge leg consults the live `BotAuthorityPort`. The
+/// legacy `list_bots_by_creator` / `bot.owner_id` probes are gone.
 pub struct CoreEventSubscriptionAuthorizer {
     groups: Arc<dyn GroupCoreService>,
     registry: Arc<dyn BotRegistryCoreService>,
+    bot_authority: Arc<dyn BotAuthorityPort>,
 }
 
 impl CoreEventSubscriptionAuthorizer {
     pub fn new(
         groups: Arc<dyn GroupCoreService>,
         registry: Arc<dyn BotRegistryCoreService>,
+        bot_authority: Arc<dyn BotAuthorityPort>,
     ) -> Self {
-        Self { groups, registry }
+        Self {
+            groups,
+            registry,
+            bot_authority,
+        }
     }
 
     async fn group_management_actor_ids(
@@ -37,36 +49,29 @@ impl CoreEventSubscriptionAuthorizer {
         group_id: &str,
         caller: &AuthenticatedCaller,
     ) -> Result<Vec<String>, ApplicationError> {
-        let group = self
+        let snapshot = self
             .groups
-            .try_get(group_id)
+            .read_authorization_snapshot(group_id)
             .await
             .map_err(|error| ApplicationError::internal(error.to_string()))?
+            .filter(|snapshot| snapshot.live)
             .ok_or_else(|| {
                 ApplicationError::event_subscription_not_found(
                     "Event Subscription scope was not found",
                 )
             })?;
-        let mut scope_actors = group.participants.iter().map(|p| p.bot_uuid.clone()).collect::<Vec<_>>();
+        let mut scope_actors = snapshot.participants.iter().map(|p| p.actor_id.clone()).collect::<Vec<_>>();
         if let Some(bot) = &caller.bot { scope_actors.push(bot.bot_uuid.clone()); }
         if let Some(user) = &caller.user { scope_actors.push(format!("human_{}", user.id)); }
         self.registry.collaboration_owner(&scope_actors).await.map_err(|error| match error {
             bcs_service_api::ServiceError::Forbidden(message) => ApplicationError::event_subscription_forbidden(message),
             other => ApplicationError::internal(other.to_string()),
         })?;
-        let mut actor_ids = vec![group.driver_bot.clone(), group.originator().to_string()];
-        if group.group_strategy == GroupStrategy::ManagerWorker {
-            actor_ids.extend(
-                group
-                    .participants
-                    .iter()
-                    .filter(|participant| participant.role == ParticipantRole::Manager)
-                    .map(|participant| participant.bot_uuid.clone()),
-            );
-        }
-        actor_ids.sort();
-        actor_ids.dedup();
-        Ok(actor_ids)
+        Ok(snapshot
+            .management_actor_ids()
+            .into_iter()
+            .map(str::to_string)
+            .collect())
     }
 
     async fn authorized_actor(
@@ -74,18 +79,31 @@ impl CoreEventSubscriptionAuthorizer {
         caller: &AuthenticatedCaller,
         actor_ids: Vec<String>,
     ) -> Result<EventActor, ApplicationError> {
-        let candidates = actor_ids.into_iter().collect::<HashSet<_>>();
+        let candidates = actor_ids.iter().map(String::as_str).collect::<HashSet<_>>();
         if let Some(bot) = caller.bot.as_ref() {
-            if caller
-                .user
-                .as_ref()
-                .is_some_and(|user| user.id != bot.owner_id)
-            {
-                return Err(ApplicationError::event_subscription_forbidden(
-                    "The authenticated Bot is not owned by the authenticated User",
-                ));
+            if let Some(user) = caller.user.as_ref() {
+                // Hybrid User+Bot credential: the current live
+                // management edge decides (spec §8). The legacy
+                // `bot.owner_id` claim comparison is gone.
+                match self
+                    .bot_authority
+                    .can_manage(&user.id, &bot.bot_uuid)
+                    .await
+                {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        return Err(ApplicationError::event_subscription_forbidden(
+                            "The authenticated Bot is not managed by the authenticated User",
+                        ))
+                    }
+                    Err(error) => {
+                        return Err(ApplicationError::internal(format!(
+                            "bot authority lookup failed: {error}"
+                        )))
+                    }
+                }
             }
-            if candidates.contains(&bot.bot_uuid) {
+            if candidates.contains(bot.bot_uuid.as_str()) {
                 return Ok(EventActor {
                     actor_type: EventActorType::Bot,
                     id: bot.bot_uuid.clone(),
@@ -100,7 +118,7 @@ impl CoreEventSubscriptionAuthorizer {
             ));
         };
         let human_actor_id = format!("human_{}", user.id);
-        if candidates.contains(&human_actor_id) || candidates.contains(&user.id) {
+        if candidates.contains(human_actor_id.as_str()) || candidates.contains(user.id.as_str()) {
             return Ok(EventActor {
                 actor_type: EventActorType::Human,
                 id: human_actor_id,
@@ -108,20 +126,30 @@ impl CoreEventSubscriptionAuthorizer {
             });
         }
 
-        let owned_bots = self
-            .registry
-            .try_list_bots_by_creator(&user.id)
-            .await
-            .map_err(|error| ApplicationError::internal(error.to_string()))?;
-        if let Some(bot) = owned_bots
-            .into_iter()
-            .find(|bot| candidates.contains(&bot.bot_uuid))
-        {
-            return Ok(EventActor {
-                actor_type: EventActorType::Bot,
-                id: bot.bot_uuid,
-                display_name: bot.capabilities.name,
-            });
+        // The legacy `try_list_bots_by_creator` probe is
+        // replaced by the live management edge over the
+        // candidate Bots (spec §8.3); a failure is an
+        // internal error, not a deny-as-verdict.
+        for id in &actor_ids {
+            if id.starts_with("human_") {
+                continue;
+            }
+            match self.bot_authority.can_manage(&user.id, id).await {
+                Ok(true) => {
+                    let display_name = self.registry.get(id).await.and_then(|bot| bot.capabilities.name);
+                    return Ok(EventActor {
+                        actor_type: EventActorType::Bot,
+                        id: id.clone(),
+                        display_name,
+                    });
+                }
+                Ok(false) => {}
+                Err(error) => {
+                    return Err(ApplicationError::internal(format!(
+                        "bot authority lookup failed: {error}"
+                    )))
+                }
+            }
         }
 
         Err(ApplicationError::event_subscription_forbidden(
@@ -175,7 +203,11 @@ mod tests {
     }
 
     fn authorizer(groups: Arc<dyn GroupCoreService>) -> CoreEventSubscriptionAuthorizer {
-        CoreEventSubscriptionAuthorizer::new(groups, Arc::new(NoopBotRegistryCoreService))
+        CoreEventSubscriptionAuthorizer::new(
+            groups,
+            Arc::new(NoopBotRegistryCoreService),
+            Arc::new(bcs_test_support::NoopBotAuthorityPort),
+        )
     }
 
     #[tokio::test]

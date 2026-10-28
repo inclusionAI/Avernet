@@ -1,5 +1,42 @@
 # bcs-service-api Context
 
+Operation-boundary delivery admission (bot-authority spec §8.2 — 已准入输出不追溯):
+`DeliveryAdmissionService::resolve_recipient_views` resolves each candidate
+connection's delivery view ONCE per accepted operation per scope (one shared
+snapshot batch, never per frame). `OutputAdmissionPort` installs the result as
+read-only in-process permits at business-accept time; producers stamp trusted
+metadata (`FrontendDeliveryCommand.operation_id` / `run_id` / `terminal`) and
+the adapter checks frames against frozen permits at the enqueue boundary.
+Mid-operation revocation never interrupts admitted output; new operations,
+subscriptions and reconnects re-admit against current facts. Frames with no
+operation tag are independent resource events authorized per publish against
+current facts; their read failures skip fail-closed and never cancel streams.
+Terminal frames are typed: after accept the producer registers the operation's
+COMPLETE Send-run set (`register_operation_runs`) BEFORE the durable commit —
+a terminal closes only its own stream, and the operation turns Draining when
+EVERY registered stream is terminal (Run terminal ≠ operation complete);
+producer visibility facts are frozen from the admission-time Group/Session
+snapshot before the first callback, and managed deliveries pre-assign their
+canonical run ids (`DeliveryAdmissionTarget.run_id`) so bindings, facts and
+the full managed ∪ direct stream set exist before the commit — a queue
+worker never runs an unbound admitted row, and a caller cancelled AT the
+commit boundary changes nothing. Accepted operations are reclaimed only by
+explicit end-states, never by age: stream terminals, recipient loss, or
+`release_operation_runs`. Releases are exact: commit-side failure, duplicates
+and admission-time rejections release only their fresh identities, a
+`delivered=false` explicit rejection releases only that run, a transport Err
+(uncertain) releases nothing, and an aborted send releases only runs that
+never started — already-delivered siblings keep their binding until their
+own terminal. A terminal that cannot enqueue within the bounded backpressure
+budget retires the saturated connection (observable transport failure),
+leaving no silent final-less stream.
+
+Bot-view delivery admission consumes the existing batched `BotAuthorityPort::roles_for`
+contract (one result per input in order), including fail-closed length/error checks.
+SQL implementations read actual identity pairs in bounded chunks, never scalar
+`can_manage` per viewer. Accepted Run aliases enter MessageFlow under their
+canonical output identity after authenticated Bot/scope validation; no transport
+or database details enter that contract.
 
 MessageFlowService::publish_state_machine_result accepts the original one-shot
 result command. Success acknowledges durable Group admission for managed targets
@@ -504,3 +541,17 @@ summary; HTTP version negotiation remains the adapter's responsibility.
 SessionManagementService.authorize_collaboration is the policy contract used before HTTP self-enrollment and runtime Human input. Bootstrap injects the live registry into SessionManagementServiceImpl; the runtime-cleanup wrapper delegates the contract. Legacy implementations without Provider support retain their existing default behavior.
 
 BotProviderRepoPort.validate_provider_affiliation is a fresh preflight for registration before capability merging. Concrete memory/SQL attachment implementations must also recheck public membership at the write boundary; the default unsupported error is not an authorization fallback.
+
+BotRunContextPort remains the trusted pre-delivery registration boundary. The
+bootstrap composition may decorate it with process-local output lineage without
+changing Memory/Redis storage semantics or adding per-frame remote reads.
+Independent producers and MessageFlow must share that registration instance;
+missing/retired nonmanaged Runs have no authorization to produce message effects.
+The existing BotRunContextPort conformance harness covers the decorated Memory
+and cache implementations, in addition to producer-to-consumer integration tests.
+
+`BotRunContextPort::put_alias_context` is the compatibility projection of an
+already validated accepted alias, not a new producer. Its default delegates the
+storage write for existing implementations; lifecycle decorators must not mint
+independent output lineage, including when a delayed ACK overlaps canonical
+terminal cleanup. WS uses this method for direct A2A alias scope projection.

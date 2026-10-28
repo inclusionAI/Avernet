@@ -635,7 +635,7 @@ async def test_execute_release_phase_falls_back_to_first_release_when_last_publi
     # DI refactor replaced the module-level get_bot_service() shim with
     # the injected self._bot_service; set it directly instead of patching.
     bot_service = Mock()
-    bot_service.get_bot.return_value = {'bot_id': 'bot-source'}
+    bot_service.get_bot_by_address.return_value = {'bot_id': 'bot-source'}
     svc._bot_service = bot_service
     svc._execute_first_release = AsyncMock(return_value='FIRST')
     svc._execute_upgrade_release = AsyncMock(return_value='UPGRADE')
@@ -683,7 +683,7 @@ async def test_execute_release_phase_offlined_online_bot_stopped_no_orphan(provi
     build_service.retire_superseded_bot.return_value = 777  # destroy publish id
 
     bot_service = Mock()
-    bot_service.get_bot.return_value = {'bot_id': 'bot-source'}
+    bot_service.get_bot_by_address.return_value = {'bot_id': 'bot-source'}
     svc._bot_service = bot_service
     svc._execute_first_release = AsyncMock(return_value='FIRST')
     svc._execute_upgrade_release = AsyncMock(return_value='UPGRADE')
@@ -730,7 +730,7 @@ async def test_online_retire_then_first_release_is_crash_safe_on_redelivery():
     )
     baas_service.resolve_container_provider.return_value = 'teclaw'
     bot_service = Mock()
-    bot_service.get_bot.return_value = {'bot_id': 'bot-source'}
+    bot_service.get_bot_by_address.return_value = {'bot_id': 'bot-source'}
     svc._bot_service = bot_service
     svc._execute_first_release = AsyncMock(return_value='FIRST')
 
@@ -759,7 +759,7 @@ async def test_execute_release_phase_unhandled_decision_fails_loudly():
         source_bot_id='bot-source', ext={'migration_path': '/m'}
     )
     bot_service = Mock()
-    bot_service.get_bot.return_value = {'bot_id': 'bot-source'}
+    bot_service.get_bot_by_address.return_value = {'bot_id': 'bot-source'}
     svc._bot_service = bot_service
     svc._decide_online_deploy = Mock(return_value="BOGUS_DECISION")
     svc._execute_first_release = AsyncMock()
@@ -985,7 +985,7 @@ async def test_execute_rollback_enqueues_progress_poll_for_target():
     }
     svc._get_latest_ext = Mock(return_value=target_ext)
     publish_service.get_device_binding_by_id.return_value = Mock(device_id='BOT-online')
-    bot_service.get_bot.return_value = {'bot_id': 'bot-source'}
+    bot_service.get_bot_by_address.return_value = {'bot_id': 'bot-source'}
     build_service.upgrade_async = AsyncMock(return_value={'publish_id': baas_publish_id})
     build_service.generate_request_id.return_value = 'rid'
     svc._update_publish_status = Mock()
@@ -1069,7 +1069,7 @@ def _build_svc_with_router(router, bot, provider="baas", **publish_flow_kwargs):
     # test_baas_service_resolve_container.py.
     baas_service.resolve_container_provider.return_value = provider
     bot_service = Mock()
-    bot_service.get_bot.return_value = bot
+    bot_service.get_bot_by_address.return_value = bot
     # teclaw build runs the file-promotion gather; default it to a no-op (empty
     # snapshot) so the build-phase routing assertions aren't perturbed. The gather
     # itself is covered by test_stage_teclaw_files_* and the endpoint test.
@@ -1353,7 +1353,7 @@ def _setup_restart(svc, record, bot_uuid="BOT-x"):
     svc._publish_service.get_device_binding_by_id = Mock(
         return_value=Mock(device_id=bot_uuid)
     )
-    svc._bot_service.get_bot = Mock(return_value={"bot_id": "b", "entity_id": "u"})
+    svc._bot_service.get_bot_by_address = Mock(return_value={"bot_id": "b", "entity_id": "u"})
     svc._mutate_and_update_ext = Mock()
     svc.refresh_publish_handle = Mock()
 
@@ -2437,7 +2437,7 @@ def test_refresh_provider_mcp_after_success_repushes_for_teclaw():
     baas_service.resolve_container_provider.return_value = "teclaw"
     bot_service = Mock()
     bot = {"bot_id": "bot-source", "entity_id": "u1"}
-    bot_service.get_bot.return_value = bot
+    bot_service.get_bot_by_address.return_value = bot
     svc = _pf(publish_service, build_service, baas_service, bot_service,
               _arca_router(build_service))
 
@@ -2460,7 +2460,7 @@ def test_refresh_provider_mcp_after_success_noop_for_arca():
     baas_service = Mock()
     baas_service.resolve_container_provider.return_value = "arca"
     bot_service = Mock()
-    bot_service.get_bot.return_value = {"bot_id": "bot-source", "entity_id": "u1"}
+    bot_service.get_bot_by_address.return_value = {"bot_id": "bot-source", "entity_id": "u1"}
     svc = _pf(publish_service, build_service, baas_service, bot_service,
               _arca_router(build_service))
 
@@ -2672,7 +2672,7 @@ async def test_execute_rollback_uses_fixed_device_count_one():
     publish_service.get_publish_by_id.side_effect = [target_record, current_record]
     publish_service.get_device_binding_by_id.return_value = mock_binding
     publish_service.get_publish_by_id.return_value = target_record  # subsequent calls return target
-    bot_service.get_bot.return_value = {"bot_id": "bot-123", "entity_id": "e1", "entity_type": "staff"}
+    bot_service.get_bot_by_address.return_value = {"bot_id": "bot-123", "entity_id": "e1", "entity_type": "staff"}
 
     # get_publish_by_id needs re-setup because it is called multiple times
     def get_publish_side_effect(pk):
@@ -2839,7 +2839,7 @@ async def test_execute_rollback_with_config_artifact():
 
     publish_service.get_publish_by_id = Mock(side_effect=get_publish_side_effect)
     publish_service.get_device_binding_by_id.return_value = mock_binding
-    bot_service.get_bot.return_value = {"bot_id": "bot-456", "entity_id": "e2", "entity_type": "staff"}
+    bot_service.get_bot_by_address.return_value = {"bot_id": "bot-456", "entity_id": "e2", "entity_type": "staff"}
 
     result = await svc.execute_rollback(
         current_publish_id=3,
@@ -2923,7 +2923,7 @@ async def test_execute_rollback_delivers_stored_online_overrides_not_live():
 
     publish_service.get_publish_by_id = Mock(side_effect=get_publish_side_effect)
     publish_service.get_device_binding_by_id.return_value = mock_binding
-    bot_service.get_bot.return_value = {"bot_id": "bot-456", "entity_id": "e2", "entity_type": "staff"}
+    bot_service.get_bot_by_address.return_value = {"bot_id": "bot-456", "entity_id": "e2", "entity_type": "staff"}
 
     await svc.execute_rollback(
         current_publish_id=3,
@@ -2984,7 +2984,7 @@ async def test_scale_bot_success_prefers_bot_ext_device_count():
     publish_service.get_device_binding_by_id = Mock(return_value=binding)
     # The mutable Draft has already switched to TeClaw, but this historical
     # Publish remains ARCA-owned and must still execute BaaS scale.
-    bot_service.get_bot = Mock(return_value={
+    bot_service.get_bot_by_address = Mock(return_value={
         "bot_id": "bot-source",
         "active_engine": "teclaw",
         "ext": {"service_bot_config": {"device_count": 3}},
@@ -3043,7 +3043,7 @@ async def test_scale_bot_falls_back_to_common_config_default_device_count():
 
     publish_service.get_publish_by_id = Mock(return_value=record)
     publish_service.get_device_binding_by_id = Mock(return_value=binding)
-    bot_service.get_bot = Mock(return_value={"bot_id": "bot-source", "ext": {}})
+    bot_service.get_bot_by_address = Mock(return_value={"bot_id": "bot-source", "ext": {}})
     common_config_service.get_value = Mock(
         side_effect=lambda **kwargs: (
             2
@@ -3082,7 +3082,7 @@ async def test_scale_bot_teclaw_returns_supported_message_without_baas_call():
             ext={"migration_path": "/build/v1"},
         )
     )
-    bot_service.get_bot = Mock(
+    bot_service.get_bot_by_address = Mock(
         return_value={"bot_id": "bot-source", "active_engine": "teclaw", "ext": {}}
     )
     # Scale support follows the bot's container, not anything cached on the
@@ -3161,7 +3161,7 @@ async def test_scale_bot_raises_when_ext_and_common_config_both_missing():
     binding = Mock()
     binding.device_id = "BOT-UUID-3"
     publish_service.get_device_binding_by_id = Mock(return_value=binding)
-    bot_service.get_bot = Mock(return_value={"bot_id": "bot-source", "ext": {"service_bot_config": {"device_count": 0}}})
+    bot_service.get_bot_by_address = Mock(return_value={"bot_id": "bot-source", "ext": {"service_bot_config": {"device_count": 0}}})
     common_config_service.get_value = Mock(return_value=None)
 
     with pytest.raises(PublishFlowServiceError, match="service_bot_config\\.device_count not found"):
@@ -3409,7 +3409,7 @@ async def test_eval_publish_success():
     build_service.generate_request_id = Mock(return_value="rid-eval")
     baas_service = Mock()
     bot_service = Mock()
-    bot_service.get_bot.return_value = {
+    bot_service.get_bot_by_address.return_value = {
         "bot_id": "bot-source",
         "entity_id": "u1",
         "entity_type": "staff",
@@ -3435,9 +3435,9 @@ async def test_eval_publish_success():
     assert result["baas_publish_id"] == 901
     assert build_service.release_async.await_args.kwargs["publish_stage"] == PublishStage.EVAL
     assert build_service.release_async.await_args.kwargs["version"] == "3"
-    assert build_service.release_async.await_args.kwargs["bot"] == bot_service.get_bot.return_value
+    assert build_service.release_async.await_args.kwargs["bot"] == bot_service.get_bot_by_address.return_value
     assert build_service.release_async.await_args.kwargs["ext_info"] == {"biz_id": "biz-001"}
-    assert bot_service.get_bot.return_value["ext"] == {}
+    assert bot_service.get_bot_by_address.return_value["ext"] == {}
     # 未传 default_tag 时 AGENTCLAW_DEFAULT_TAG 不应注入 extra_envs
     extra_envs = build_service.release_async.await_args.kwargs["extra_envs"]
     assert "AGENTCLAW_DEFAULT_TAG" not in extra_envs
@@ -3497,7 +3497,7 @@ async def test_eval_publish_with_default_tag():
     build_service.generate_request_id = Mock(return_value="rid-eval-tag")
     baas_service = Mock()
     bot_service = Mock()
-    bot_service.get_bot.return_value = {
+    bot_service.get_bot_by_address.return_value = {
         "bot_id": "bot-source",
         "entity_id": "u1",
         "entity_type": "staff",
@@ -3596,7 +3596,7 @@ def test_handle_sync_success_skips_destroy_verify_bot_for_teclaw_online_publish(
     ext = dict(publish_record.ext)
     progress = {"status": "SUCCESS", "device_details": [], "overall_progress": {}}
 
-    bot_service.get_bot = Mock(
+    bot_service.get_bot_by_address = Mock(
         return_value={"bot_id": "bot-source", "active_engine": "teclaw", "ext": {}}
     )
     # teclaw → TeclawProviderBehavior (destroys_verify_bot_on_online=False).
@@ -3616,7 +3616,7 @@ def test_handle_sync_success_skips_destroy_verify_bot_for_teclaw_online_publish(
     )
 
     assert result.status == PublishStatus.SUCCESS
-    bot_service.get_bot.assert_called_once_with(bot_id="bot-source", user_id="u1")
+    bot_service.get_bot_by_address.assert_called_once_with(bot_id="bot-source", user_id="u1")
     svc._destroy_bot_by_stage.assert_not_called()
 
 
@@ -3637,7 +3637,7 @@ def test_handle_sync_success_destroys_verify_bot_for_non_teclaw_online_publish()
     ext = dict(publish_record.ext)
     progress = {"status": "SUCCESS", "device_details": [], "overall_progress": {}}
 
-    bot_service.get_bot = Mock(
+    bot_service.get_bot_by_address = Mock(
         return_value={"bot_id": "bot-source", "active_engine": "openclaw", "ext": {}}
     )
     svc._mark_previous_publish_superseded = Mock()
@@ -3655,7 +3655,7 @@ def test_handle_sync_success_destroys_verify_bot_for_non_teclaw_online_publish()
     )
 
     assert result.status == PublishStatus.SUCCESS
-    bot_service.get_bot.assert_called_once_with(bot_id="bot-source", user_id="u1")
+    bot_service.get_bot_by_address.assert_called_once_with(bot_id="bot-source", user_id="u1")
     svc._destroy_bot_by_stage.assert_called_once_with(publish_record, PublishStage.VERIFY)
 
 
@@ -3717,7 +3717,7 @@ def test_handle_sync_success_verify_stage_updates_validating_and_clears_retry():
         baas_publish_id=456,
         bot_id=publish_record.source_bot_id,
     )
-    bot_service.get_bot.assert_not_called()
+    bot_service.get_bot_by_address.assert_not_called()
     svc._destroy_bot_by_stage.assert_not_called()
 
 
@@ -3738,7 +3738,7 @@ def test_handle_sync_success_online_publish_raises_when_bot_missing():
     ext = dict(publish_record.ext)
     progress = {"status": "SUCCESS"}
 
-    bot_service.get_bot = Mock(return_value=None)
+    bot_service.get_bot_by_address = Mock(return_value=None)
     svc._mark_previous_publish_superseded = Mock()
     svc._activate_binding = Mock()
     svc._destroy_bot_by_stage = Mock()
@@ -3780,7 +3780,7 @@ def test_handle_sync_success_online_publish_logs_warning_when_destroy_verify_fai
     ext = dict(publish_record.ext)
     progress = {"status": "SUCCESS"}
 
-    bot_service.get_bot = Mock(
+    bot_service.get_bot_by_address = Mock(
         return_value={"bot_id": "bot-source", "active_engine": "openclaw", "ext": {}}
     )
     svc._mark_previous_publish_superseded = Mock()
@@ -4304,7 +4304,7 @@ def test_restart_bot_success_enqueues_durable_task_and_returns_stage(in_place):
     )
     svc, publish_service = _svc_with_record(record)
     publish_service.get_device_binding_by_id.return_value = Mock(device_id="BOT-x")
-    svc._bot_service.get_bot = Mock(return_value={"bot_id": "bot-source"})
+    svc._bot_service.get_bot_by_address = Mock(return_value={"bot_id": "bot-source"})
     svc._task_queue_service = Mock()
 
     result = svc.restart_bot(publish_id=1, operator="op", in_place=in_place)
@@ -4587,7 +4587,7 @@ async def test_execute_restore_draft_uses_migration_path_and_keeps_state():
     publish_service.get_device_binding_by_id.return_value = Mock(
         device_id="BOT-draft", status="ACTIVE"
     )
-    bot_service.get_bot.return_value = {
+    bot_service.get_bot_by_address.return_value = {
         "bot_id": "bot-source",
         "entity_id": "u1",
         "binding_id": 77,
@@ -4606,7 +4606,7 @@ async def test_execute_restore_draft_uses_migration_path_and_keeps_state():
     assert result["status"] == "success"
     assert result["draft_binding_id"] == 77
     kwargs = build_service.restore_draft_async.await_args.kwargs
-    assert kwargs["bot"] is bot_service.get_bot.return_value
+    assert kwargs["bot"] is bot_service.get_bot_by_address.return_value
     assert "device_id" not in kwargs["bot"]
     assert "bot_uuid" not in kwargs
     assert kwargs["source_version"] == 1
@@ -4763,7 +4763,7 @@ async def test_execute_restore_draft_teclaw_uses_current_binding_and_historical_
     publish_service.get_device_binding_by_id.return_value = Mock(
         device_id="BOT-current-draft", status="ACTIVE"
     )
-    bot_service.get_bot.return_value = {
+    bot_service.get_bot_by_address.return_value = {
         "bot_id": "bot-source",
         "entity_id": "u1",
         "binding_id": 77,
@@ -4798,7 +4798,7 @@ async def test_execute_restore_draft_teclaw_uses_current_binding_and_historical_
     assert result["draft_binding_id"] == 77
     assert build_service.restore_teclaw_draft_async.await_count == 2
     kwargs = build_service.restore_teclaw_draft_async.await_args_list[0].kwargs
-    assert kwargs["bot"] is bot_service.get_bot.return_value
+    assert kwargs["bot"] is bot_service.get_bot_by_address.return_value
     assert "device_id" not in kwargs["bot"]
     assert kwargs["bot_uuid"] == "BOT-current-draft"
     assert kwargs["owner_id"] == "u1"
@@ -4870,7 +4870,7 @@ async def test_execute_restore_draft_teclaw_resumes_recorded_workflow_without_re
     publish_service.get_device_binding_by_id.return_value = Mock(
         device_id="BOT-current-draft", status="ACTIVE"
     )
-    bot_service.get_bot.return_value = {
+    bot_service.get_bot_by_address.return_value = {
         "bot_id": "bot-source",
         "entity_id": "u1",
         "binding_id": 77,
@@ -4964,7 +4964,7 @@ async def test_execute_restore_draft_teclaw_crash_after_issue_resumes_via_adopt(
     publish_service.get_device_binding_by_id.return_value = Mock(
         device_id="BOT-current-draft", status="ACTIVE"
     )
-    bot_service.get_bot.return_value = {
+    bot_service.get_bot_by_address.return_value = {
         "bot_id": "bot-source",
         "entity_id": "u1",
         "binding_id": 77,

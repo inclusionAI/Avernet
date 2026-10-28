@@ -15,6 +15,7 @@ jest.mock('@/services/community', () => ({
     createReply: jest.fn(),
     createTopic: jest.fn(),
     closeTopic: jest.fn(),
+    setPostHelpful: jest.fn(),
   },
 }));
 jest.mock('@/hooks/useHumanIdentity', () => ({ useHumanIdentity: jest.fn() }));
@@ -51,11 +52,16 @@ const reply: CommunityReply = {
   body: '回复',
   author: { type: 'bot', id: 'bot-1', displayName: '协作助手' },
   createdAt: '2026-10-06T06:20:00Z',
+  helpful: false,
 };
 const pollTopic: CommunityTopic = {
   ...topic,
   topicType: 'poll',
   topicConfig: { poll: { selection: 'multi', options: ['方案 A', '方案 B'] } },
+};
+const helpTopic: CommunityTopic = {
+  ...topic,
+  topicType: 'help',
 };
 
 async function flushDebouncedLoad() {
@@ -76,6 +82,7 @@ describe('useCommunity', () => {
     });
     mockedService.listTopics.mockResolvedValue({ items: [topic], total: 1 });
     mockedService.listReplies.mockResolvedValue({ items: [reply], total: 1 });
+    mockedService.setPostHelpful.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -95,12 +102,25 @@ describe('useCommunity', () => {
     expect(mockedService.listTopics).toHaveBeenCalledWith({
       search: '  Bot  ',
       scope: 'mine',
+      topicType: 'all',
       authorId: '900003',
       offset: 0,
       limit: COMMUNITY_PAGE_SIZE,
     });
     expect(result.current.topics).toEqual([topic]);
     expect(result.current.hasMore).toBe(false);
+  });
+
+  test('类型筛选随列表请求下发', async () => {
+    useCommunityStore.setState({ topicType: 'share' });
+    const { result } = renderHook(() => useCommunity());
+
+    await flushDebouncedLoad();
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(mockedService.listTopics).toHaveBeenCalledWith(
+      expect.objectContaining({ topicType: 'share', offset: 0, limit: COMMUNITY_PAGE_SIZE }),
+    );
   });
 
   test('使用当前 Human 身份发布主题，成功后加入列表并提示', async () => {
@@ -126,6 +146,33 @@ describe('useCommunity', () => {
       authorAvatarUrl: 'avatar.png',
     });
     expect(result.current.topics[0]).toEqual(topic);
+    expect(notifySuccess).toHaveBeenCalledWith('主题发布成功');
+  });
+
+  test('当前类型筛选不匹配时发布成功但不插入列表', async () => {
+    const sharedTopic: CommunityTopic = {
+      ...topic,
+      id: 'share-1',
+      topicType: 'share',
+    };
+    useCommunityStore.setState({ topicType: 'help' });
+    mockedService.listTopics.mockResolvedValue({ items: [], total: 0 });
+    mockedService.createTopic.mockResolvedValue(sharedTopic);
+    const { result } = renderHook(() => useCommunity());
+    await flushDebouncedLoad();
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      expect(
+        await result.current.publishTopic({
+          title: '分享资料',
+          body: '请查收',
+          topicType: 'share',
+        }),
+      ).toBe(true);
+    });
+
+    expect(result.current.topics).toEqual([]);
     expect(notifySuccess).toHaveBeenCalledWith('主题发布成功');
   });
 
@@ -166,7 +213,8 @@ describe('useCommunity', () => {
     });
   });
 
-  test('打开详情加载主题与第 1 页回复（page=1/pageSize=COMMUNITY_REPLY_PAGE_SIZE），结帖带 author_id：优先主题作者', async () => {
+  test('打开详情加载主题与第 1 页回复（每页 10 条），结帖带 author_id：优先主题作者', async () => {
+    expect(COMMUNITY_REPLY_PAGE_SIZE).toBe(10);
     mockedService.getTopic.mockResolvedValue(topic);
     const { result } = renderHook(() => useCommunity());
     await flushDebouncedLoad();
@@ -245,6 +293,114 @@ describe('useCommunity', () => {
       pageSize: COMMUNITY_REPLY_PAGE_SIZE,
     });
     expect(result.current.replyPage).toBe(2);
+  });
+
+  test('求助作者标记有帮助后刷新当前回复页并提示，关闭状态也允许操作', async () => {
+    const closedHelpTopic: CommunityTopic = { ...helpTopic, status: 'closed', canClose: false };
+    mockedService.getTopic.mockResolvedValue(closedHelpTopic);
+    mockedService.listReplies.mockResolvedValue({ items: [reply], total: 25 });
+    const { result } = renderHook(() => useCommunity());
+    await flushDebouncedLoad();
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.openTopic(closedHelpTopic);
+    });
+    await act(async () => {
+      await result.current.goToReplyPage(2);
+    });
+    await act(async () => {
+      expect(await result.current.setPostHelpful(reply.id, true)).toBe(true);
+    });
+
+    expect(mockedService.setPostHelpful).toHaveBeenCalledWith(
+      closedHelpTopic.id,
+      reply.id,
+      'HUMAN',
+      closedHelpTopic.author.id,
+      true,
+    );
+    expect(mockedService.listReplies).toHaveBeenLastCalledWith(closedHelpTopic.id, {
+      page: 2,
+      pageSize: COMMUNITY_REPLY_PAGE_SIZE,
+    });
+    expect(notifySuccess).toHaveBeenCalledWith('已标记为有帮助');
+    expect(result.current.helpfulPostId).toBeNull();
+  });
+
+  test('取消有帮助提示成功，失败时展示操作失败并清理 loading 状态', async () => {
+    mockedService.getTopic.mockResolvedValue(helpTopic);
+    const { result } = renderHook(() => useCommunity());
+    await flushDebouncedLoad();
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => {
+      await result.current.openTopic(helpTopic);
+    });
+
+    await act(async () => {
+      expect(await result.current.setPostHelpful(reply.id, false)).toBe(true);
+    });
+    expect(notifySuccess).toHaveBeenCalledWith('已取消有帮助');
+
+    mockedService.setPostHelpful.mockRejectedValueOnce(new Error('后端拒绝'));
+    await act(async () => {
+      expect(await result.current.setPostHelpful(reply.id, true)).toBe(false);
+    });
+    expect(notifyError).toHaveBeenCalledWith('后端拒绝', { title: '操作失败' });
+    expect(result.current.helpfulPostId).toBeNull();
+  });
+
+  test('非本人或非求助主题不会发起有帮助请求', async () => {
+    const otherHelpTopic: CommunityTopic = {
+      ...helpTopic,
+      isMine: false,
+      canClose: false,
+      author: { ...helpTopic.author, id: 'other-user' },
+    };
+    mockedService.getTopic.mockResolvedValue(otherHelpTopic);
+    const { result } = renderHook(() => useCommunity());
+    await flushDebouncedLoad();
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => {
+      await result.current.openTopic(otherHelpTopic);
+    });
+    await act(async () => {
+      expect(await result.current.setPostHelpful(reply.id, true)).toBe(false);
+    });
+    expect(mockedService.setPostHelpful).not.toHaveBeenCalled();
+
+    mockedService.getTopic.mockResolvedValue(topic);
+    await act(async () => {
+      await result.current.openTopic(topic);
+    });
+    await act(async () => {
+      expect(await result.current.setPostHelpful(reply.id, true)).toBe(false);
+    });
+    expect(mockedService.setPostHelpful).not.toHaveBeenCalled();
+  });
+
+  test('求助结帖使用已解决文案，失败时使用标记失败文案', async () => {
+    mockedService.getTopic.mockResolvedValue(helpTopic);
+    const { result } = renderHook(() => useCommunity());
+    await flushDebouncedLoad();
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => {
+      await result.current.openTopic(helpTopic);
+    });
+    await act(async () => {
+      expect(await result.current.closeTopic()).toBe(true);
+    });
+    expect(notifySuccess).toHaveBeenCalledWith('求助已标记为已解决');
+
+    mockedService.getTopic.mockResolvedValue(helpTopic);
+    mockedService.closeTopic.mockRejectedValueOnce(new Error('关闭失败'));
+    await act(async () => {
+      await result.current.openTopic(helpTopic);
+    });
+    await act(async () => {
+      expect(await result.current.closeTopic()).toBe(false);
+    });
+    expect(notifyError).toHaveBeenCalledWith('关闭失败', { title: '标记已解决失败' });
   });
 
   test('BOT 作者名兜底为本人 owned bots 的 bot_name（后端 §4.1 display_name 缺失时前端补）', async () => {

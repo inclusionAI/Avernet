@@ -21,7 +21,7 @@ from injector import inject
 from sqlalchemy import DateTime, func, select, type_coerce
 from sqlalchemy.exc import IntegrityError
 
-from agentclaw.community.core.bot_config_manifest.repository.apply_models import (
+from agentclaw.community.core.apply_engine.repository.apply_models import (
     BotConfigManifestApplyLockModel,
     BotConfigManifestApplyLockRecord,
     BotConfigManifestApplyModel,

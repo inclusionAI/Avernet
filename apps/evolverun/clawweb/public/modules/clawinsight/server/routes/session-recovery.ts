@@ -1,10 +1,12 @@
 import { AgentToolCallIdempotencyConflictError, AgentToolCallWorkloadConflictError } from "../repositories/repair/agent-tool-call-record.js";
+import { logRepairEvent } from "../services/repair/common/logging.js";
 import { resolveRepairRequestActor } from "../services/repair/common/request-actor.js";
 import { parseAgentExecutionTicket } from "../services/repair/common/agent-execution.js";
 import { AgentToolError } from "../services/repair/common/agent-tools/errors.js";
 import type { RecoveryActor } from "../services/repair/session-recovery/contracts.js";
 import { Router, json, type Request } from "express";
 import { SessionRecoveryError } from "../services/repair/session-recovery/errors.js";
+import { parseRequest } from "../services/repair/session-recovery/validation.js";
 import { BotRuntimeError } from "@avernet/clawweb-shared/server/services/bot-runtime";
 import { redactPersistableText } from "@avernet/clawweb-shared/server/services/redaction";
 import type { SessionRecoveryRuntime } from "../services/repair/session-recovery/contracts.js";
@@ -20,6 +22,14 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRouterOpti
   };
   router.post("/internal/monitoring/session-recoveries", json({ limit: "64kb", inflate: false }), async (req, res, next) => {
     try {
+      if (!supplied) {
+        try {
+          const request = parseRequest(req.body);
+          if (request.execution_level !== "debug") logRepairEvent("session-recovery", "session_recovery_task", "CREATE_FAILED", {
+            eventId: request.event_id, botId: request.target.bot_id, targetEnvironment: request.target.env,
+            phase: "create", outcome: "failed", count: 1, errorCode: "recovery_not_ready" });
+        } catch { /* Invalid input is not a failed online creation; preserve the existing unavailable response below. */ }
+      }
       const deps = runtime();
       res.set("Cache-Control", "no-store");
       res.status(202).json(await deps.service.create(req.body, { userId: "session-recovery-service", isAdmin: true }));

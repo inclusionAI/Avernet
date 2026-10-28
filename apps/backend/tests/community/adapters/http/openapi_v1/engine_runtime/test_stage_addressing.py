@@ -71,6 +71,8 @@ def _is_engine_runtime(path: str) -> bool:
 #: frozen, so they must not have grown the parameter — which the exclusivity
 #: assertion below is what proves.
 _STAGE_ADDRESSED_ELSEWHERE = {
+    ("get", "/openapi/v1/bots"),
+    ("get", "/openapi/v1/bots/collaborations"),
     # Release inspection explicitly rejects published stages, never falls back
     # to a draft. Its stage parameter is an intentional additive contract.
     ("get", "/openapi/v1/bots/{bot_id}/engine-version"),
@@ -106,6 +108,7 @@ _STAGE_ADDRESSED_ELSEWHERE = {
 #: **not** take ``stage``: there is no runtime in question when you are
 #: recording who may reach a bot, or listing a bot's stored skills.
 _OWNER_ADDRESSED_ELSEWHERE = {
+    ("post", "/openapi/v1/bots/{bot_id}/iam-token"),
     ("get", "/openapi/v1/bots/{bot_id}/engine-version"),
     ("get", "/openapi/v1/bots/{bot_id}/status"),
     ("post", "/openapi/v1/bots/{bot_id}/activate"),
@@ -541,6 +544,7 @@ def test_neither_parameter_is_ever_a_body_field_or_a_path_segment():
 
 def test_friend_user_id_is_optional_and_only_on_human_chat_capable_operations():
     expected = {
+        ("post", "/openapi/v1/bots/{bot_id}/iam-token"),
         ("get", "/openapi/v1/bots/{bot_id}/sessions"),
         ("post", "/openapi/v1/bots/{bot_id}/sessions"),
         ("get", "/openapi/v1/bots/{bot_id}/sessions/favorites"),
@@ -548,9 +552,10 @@ def test_friend_user_id_is_optional_and_only_on_human_chat_capable_operations():
         ("patch", "/openapi/v1/bots/{bot_id}/sessions/{session_id}"),
         ("delete", "/openapi/v1/bots/{bot_id}/sessions/{session_id}"),
         ("get", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/messages"),
-        # Only the file list supports friend reads; content and mutations
-        # retain their owner/collaborator contract without this selector.
+        # Read-only file operations use the same owned friend-session guard.
         ("get", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files"),
+        ("get", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}/content"),
+        ("get", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}/materialize-status"),
         ("delete", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/messages"),
         ("put", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/favorite"),
         ("delete", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/favorite"),

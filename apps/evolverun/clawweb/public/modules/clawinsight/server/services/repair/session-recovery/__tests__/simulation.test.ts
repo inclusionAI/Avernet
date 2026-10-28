@@ -110,7 +110,7 @@ it("rejects intervention tools and fabricated execution or effect reports", asyn
   for (const method of ["apply", "retryMessage", "reconcileWrite"] as const) {
     await expect(agent[method](task, { clientRequestId: "attempt", purpose: "不允许的调用" })).rejects.toMatchObject({ status: 403 });
   }
-  for (const kind of ["apply", "observation"]) await expect(agent.report(task, { kind, phase: "assess" })).rejects.toMatchObject({ status: 403 });
+  for (const kind of ["apply", "observation", "owner_handoff"]) await expect(agent.report(task, { kind, phase: "assess" })).rejects.toMatchObject({ status: 403 });
   await expect(agent.report(task, { kind: "assessment", phase: "assess", decision: "message", summary: "缺正文", evidence_ids: [] })).rejects.toMatchObject({ status: 422 });
   noExternalEffects();
 });

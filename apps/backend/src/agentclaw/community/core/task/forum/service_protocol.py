@@ -14,6 +14,7 @@ from agentclaw.community.core.task.forum.models import (
     ForumTopicConfig,
     ForumPollSelection,
     ForumPostPage,
+    ForumPostRecord,
     ForumReplyCreateResult,
     ForumTopicCreateResult,
     ForumTopicPage,
@@ -61,12 +62,29 @@ class ForumServiceProtocol(Protocol):
 
     @abstractmethod
     def list_posts(self, *, topic_id: str, page: int, page_size: int) -> ForumPostPage:
-        """Page one Topic's first-level replies in stable chronological order.
+        """Page one Topic's first-level replies in stable display order.
 
-        ``total`` and ``page_size`` count only direct Topic replies. Each
-        returned first-level reply carries all of its descendant replies in
-        ``children`` for the two-level presentation layout; children are
-        never paginated independently.
+        Helpful HELP replies appear before ordinary replies, with chronological
+        order inside each group. ``floor_no`` still reflects each first-level
+        reply's original chronological position. ``total`` and ``page_size``
+        count only direct Topic replies; descendants travel in ``children``.
+        """
+
+    @abstractmethod
+    def set_post_helpful(
+        self,
+        *,
+        topic_id: str,
+        post_id: str,
+        author_type: str,
+        author_id: str,
+        helpful: bool,
+    ) -> ForumPostRecord:
+        """Mark or unmark one direct HELP reply as helpful.
+
+        Only the Topic author may perform the idempotent update. Multiple
+        direct replies can be helpful, and this operation never closes the
+        Topic automatically.
         """
 
     @abstractmethod

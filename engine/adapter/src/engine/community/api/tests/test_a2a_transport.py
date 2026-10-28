@@ -39,6 +39,7 @@ from fastapi.testclient import TestClient
 import engine.community.api.transport.a2a.router as R
 import engine.community.api.transport.a2a.engine_bridge as bridge
 from engine.community.api.transport.a2a import kernel as kernel_mod
+from engine.community.api.transport.a2a.card import make_agent_card
 from engine.community.core.chat.models import ChatAbortRequest, ChatAbortResult  # noqa: E402
 from engine.community.kernel.frames import ErrorShape  # noqa: E402
 
@@ -1115,6 +1116,105 @@ def test_agent_card_declares_cancel_extension(app_client):
     uris = [e["url"] for e in card["capabilities"]["extensions"]]
     from engine.community.api.transport.a2a.card import EXTENSION_URIS
     assert EXTENSION_URIS["cancel"] in uris, uris
+
+
+# ── P0: resolve 能力条件声明（spec stage2 §5）──
+# 粒度=单一 URI 代表完整能力集：三方法全在场才声明；部分支持=不声明。
+# URI 字面量 = 契约定稿值，不用模块属性——测试与 card.py 实现漂移时字面量会红。
+
+RESOLVE_URI = "https://avernet.local/a2a/ext/resolve/v1"
+
+
+def test_agent_card_default_excludes_resolve_uri():
+    c = make_agent_card("http://127.0.0.1:20003")
+    urls = [e["url"] for e in c["capabilities"]["extensions"]]
+    assert RESOLVE_URI not in urls
+
+
+def test_agent_card_with_resolve_support_declares_uri_last():
+    c = make_agent_card("http://127.0.0.1:20003", resolve_supported=True)
+    urls = [e["url"] for e in c["capabilities"]["extensions"]]
+    assert RESOLVE_URI in urls
+    # 声明位序=最后（老消费方按索引/位序跳过未知扩展时 resolve 不前置扰序）
+    assert urls[-1] == RESOLVE_URI
+    # 既有五项不受影响（retry 被 router:232 retry-only 校验消费，不能动）
+    assert "https://avernet.local/a2a/ext/retry/v1" in urls
+    assert "https://avernet.local/a2a/ext/cancel/v1" in urls
+    assert len(urls) == 6
+    # 声明必须 required:false，与其余五项一致
+    resolve_entry = [e for e in c["capabilities"]["extensions"]
+                    if e["url"] == RESOLVE_URI][0]
+    assert resolve_entry["required"] is False
+
+
+class _FullResolveChat:
+    """三方法全有——声明满足。"""
+    def resolve_exec_approval(self, **kw): ...
+    def resolve_interaction(self, **kw): ...
+    def resolve_mode_transition(self, **kw): ...
+
+
+class _PartialResolveChat:
+    """缺 mode_switch——部分支持=不声明。"""
+    def resolve_exec_approval(self, **kw): ...
+    def resolve_interaction(self, **kw): ...
+
+
+def test_card_endpoint_declares_resolve_for_full_engine(
+        app_client, monkeypatch):
+    monkeypatch.setattr(bridge, "_chat_plugin", lambda: _FullResolveChat())
+    resp = app_client.get("/.well-known/agent-card.json")
+    assert resp.status_code == 200
+    urls = [e["url"] for e in resp.json()["capabilities"]["extensions"]]
+    assert RESOLVE_URI in urls
+
+
+def test_card_endpoint_no_resolve_decl_for_partial_engine(
+        app_client, monkeypatch):
+    monkeypatch.setattr(bridge, "_chat_plugin", lambda: _PartialResolveChat())
+    resp = app_client.get("/.well-known/agent-card.json")
+    urls = [e["url"] for e in resp.json()["capabilities"]["extensions"]]
+    assert RESOLVE_URI not in urls
+    # 基础五项仍在，老消费方（BaaS abort 判读）不受影响
+    assert "https://avernet.local/a2a/ext/cancel/v1" in urls
+
+
+def test_card_endpoint_no_resolve_decl_when_plugin_unavailable(
+        app_client, monkeypatch):
+    def _raise():
+        raise RuntimeError("no active engine")
+    monkeypatch.setattr(bridge, "_chat_plugin", _raise)
+    resp = app_client.get("/.well-known/agent-card.json")
+    assert resp.status_code == 200  # card 永可答，声明保守缺席
+    urls = [e["url"] for e in resp.json()["capabilities"]["extensions"]]
+    assert RESOLVE_URI not in urls
+
+
+class _PoisonedAttrChat:
+    """奇异插件：属性访问本身抛错（非 AttributeError）——真值检查
+    须降级为不声明，card 端点不得 500。三方法全毒化，绕开 all() 的
+    缺位短路路径，必中属性访问异常。"""
+    @property
+    def resolve_exec_approval(self):
+        raise RuntimeError("poisoned plugin surface")
+
+    @property
+    def resolve_interaction(self):
+        raise RuntimeError("poisoned plugin surface")
+
+    @property
+    def resolve_mode_transition(self):
+        raise RuntimeError("poisoned plugin surface")
+
+
+def test_card_endpoint_no_resolve_decl_when_attr_access_raises(
+        app_client, monkeypatch):
+    monkeypatch.setattr(bridge, "_chat_plugin",
+                        lambda: _PoisonedAttrChat())
+    resp = app_client.get("/.well-known/agent-card.json")
+    assert resp.status_code == 200  # 真值检查吞异常降级，card 永可答
+    urls = [e["url"] for e in resp.json()["capabilities"]["extensions"]]
+    assert RESOLVE_URI not in urls
 
 
 # ══════════ R4-2: 多 pending 交互逐个可决（gateway 并发 canUseTool）══════════

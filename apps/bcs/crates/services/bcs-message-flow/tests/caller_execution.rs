@@ -4,6 +4,7 @@ use bcs_service_api::{CallerContext, GroupCoreService, HumanActor, ManagedDelive
 use bcs_domain::{message_delivery::MessageDeliveryStatus as Status};
 use serde_json::json;
 #[path = "support/session.rs"] mod session;
+#[path = "support/operation_output.rs"] mod output_support;
 #[path = "../../../test-support/message_flow_contract_support.rs"] mod support;
 
 fn command(id: &str, name: &str, value: &str) -> WebSendCommand {
@@ -226,4 +227,26 @@ async fn caller_rejects_other_bot_and_duplicate_does_not_replace_original_identi
     request.caller_execution.as_mut().unwrap().target_bot_id = "another-bot".into();
     assert!(flow.handle_web_send(request).await.is_err());
     assert!(support.bot_delivery.frames().await.is_empty());
+}
+
+#[tokio::test]
+async fn caller_legacy_cache_failure_releases_unsent_output_runs() {
+    use std::sync::atomic::Ordering::SeqCst;
+    let (support, mut flow, service) = fixture().await;
+    let cache = Arc::new(ObservedCache::default());
+    cache.fail_reads.store(true, SeqCst);
+    let output = Arc::new(output_support::RecordingOutputAdmission::default());
+    let builder = Arc::get_mut(&mut flow).unwrap();
+    builder.group_delivery_limits.clear();
+    builder.execution_cache = Some(cache.clone());
+    builder.output_admission = Some(output.clone());
+    assert!(flow.handle_web_send(caller_command("legacy-failed-read", "user", "credential")).await.is_err());
+    assert!(support.bot_delivery.frames().await.is_empty());
+    assert!(service.snapshot(None).await.unwrap().is_empty());
+    let registered = output.registered_runs.lock().unwrap();
+    assert_eq!(registered.len(), 1);
+    assert_eq!(registered[0].1.len(), 1);
+    assert_eq!(*output.released_runs.lock().unwrap(), *registered);
+    assert_eq!(cache.writes.load(SeqCst), 1);
+    assert_eq!(cache.reads.load(SeqCst), 1);
 }

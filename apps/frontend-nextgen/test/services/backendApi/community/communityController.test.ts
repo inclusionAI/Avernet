@@ -5,6 +5,7 @@ import {
   getCommunityTopic,
   listCommunityReplies,
   listCommunityTopics,
+  setCommunityPostHelpful,
 } from '@/services/backendApi/community/communityController';
 import * as http from '@/services/backendApi/httpClient';
 
@@ -29,6 +30,15 @@ describe('communityController', () => {
       params: { page: 2, page_size: 10, keyword: 'Bot' },
       signal: undefined,
     });
+  });
+
+  test('列表类型筛选下发 SHARE/HELP topic_type', async () => {
+    await listCommunityTopics({ topicType: 'share', offset: 0, limit: 20 });
+    expect(mockedRequest.mock.calls[0][1].params).toEqual({ page: 1, page_size: 20, topic_type: 'SHARE' });
+
+    mockedRequest.mockClear();
+    await listCommunityTopics({ topicType: 'help', offset: 0, limit: 20 });
+    expect(mockedRequest.mock.calls[0][1].params).toEqual({ page: 1, page_size: 20, topic_type: 'HELP' });
   });
 
   test('无搜索词时不下发 keyword', async () => {
@@ -60,6 +70,23 @@ describe('communityController', () => {
       params: { page: 1, page_size: 20 },
       signal: undefined,
     });
+  });
+
+  test('标记有帮助使用 PUT 并编码 topicId/postId，透传作者类型和目标状态', async () => {
+    await setCommunityPostHelpful('topic/1', 'post/2', 'BOT', 'bot-1', true);
+
+    expect(mockedRequest).toHaveBeenCalledWith(
+      '/openapi/v1/collaboration/tasks/bbs/topics/topic%2F1/posts/post%2F2/helpful',
+      {
+        method: 'PUT',
+        data: {
+          author_type: 'BOT',
+          author_id: 'bot-1',
+          helpful: true,
+        },
+        signal: undefined,
+      },
+    );
   });
 
   test('投票回复下发结构化 poll_selection，且前端不再携带楼层引用', async () => {
@@ -143,6 +170,32 @@ describe('communityController', () => {
           deadline_at: '2026-10-20T12:00:00Z',
         },
       },
+    });
+  });
+
+  test('创建分享主题不下发 topic_config，创建求助主题下发 expected_time', async () => {
+    await createCommunityTopic({
+      title: '分享资料',
+      body: '正文',
+      authorId: 'u1',
+      authorName: '张三',
+      topicType: 'share',
+    });
+    await createCommunityTopic({
+      title: '求助排查',
+      body: '请帮忙看一下',
+      authorId: 'u1',
+      authorName: '张三',
+      topicType: 'help',
+      help: { expectedTime: '希望本周内' },
+    });
+
+    const shareData = mockedRequest.mock.calls[0][1].data;
+    expect(shareData).toMatchObject({ topic_type: 'SHARE' });
+    expect(shareData).not.toHaveProperty('topic_config');
+    expect(mockedRequest.mock.calls[1][1].data).toMatchObject({
+      topic_type: 'HELP',
+      topic_config: { help: { expected_time: '希望本周内' } },
     });
   });
 

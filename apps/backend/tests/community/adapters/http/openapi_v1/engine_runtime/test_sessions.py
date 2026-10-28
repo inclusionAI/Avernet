@@ -1096,7 +1096,7 @@ def test_friend_messages_preserve_legacy_metadata(
     assert data["items"][0]["history_meta"] == {"summary": "context"}
 
 
-def test_friend_access_is_draft_only(make_client, friendships, expert):
+def test_friend_access_accepts_online(make_client, friendships, expert):
     friendships.allowed = True
     client = make_client(router, caller="friend-1")
 
@@ -1104,6 +1104,6 @@ def test_friend_access_is_draft_only(make_client, friendships, expert):
         _base(), params={"owner_id": OWNER, "f_user_id": "friend-1", "stage": "online"}
     )
 
-    assert fails(response, 404)["message"] == "Not found"
-    assert friendships.calls == []
-    assert expert.calls == []
+    assert response.status_code == 200, response.json()
+    assert len(friendships.calls) == 1
+    assert expert.calls[-1][0] == "list_chat_sessions"

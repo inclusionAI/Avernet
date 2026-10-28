@@ -29,6 +29,17 @@ use bcs_service_api::{
     SessionUseCaseError,
 };
 use bcs_services_container::Services;
+use bcs_service_api::application::session_files::{
+    CapabilitiesView, DeleteFileCommand, DownloadRoute,
+    PrepareUploadCommand, PrepareUploadResult,
+    SessionFileService as SessionFilesService, SessionFileUseCaseError,
+    ShareConsumeResult, ShareMintCommand, ShareMintResult,
+};
+use bcs_service_api::port::repo::{
+    SessionFileListParams, SessionFileListPage,
+};
+use bcs_domain::session_file::SessionFile;
+use bcs_storage_api::ByteStream;
 use serde_json::json;
 use tempfile::TempDir;
 use tokio::sync::Mutex;
@@ -47,7 +58,7 @@ async fn channel_conversation_lookup_allows_session_member_bot() {
 
 #[tokio::test]
 async fn channel_conversation_lookup_allows_human_via_owned_participant_bot() {
-    let (app, _t, _r) = human_app("alice").await;
+    let (app, _t, _r, _chain) = human_app("alice").await;
     let resp = get_channel_conversations(&app, SID, "").await;
     assert_eq!(resp.status(), StatusCode::OK);
 }
@@ -102,7 +113,7 @@ async fn gate_rejects_non_member_bot() {
 
 #[tokio::test]
 async fn gate_allows_human_via_owned_participant_bot() {
-    let (app, _t, _r) = human_app("alice").await;
+    let (app, _t, _r, _chain) = human_app("alice").await;
     // Human `alice` is not a direct participant (`human_alice`), but owns
     // `driver-bot`, which IS a session participant → `human_has_session_access`
     // owned-bot branch must admit the call.
@@ -112,7 +123,7 @@ async fn gate_allows_human_via_owned_participant_bot() {
 
 #[tokio::test]
 async fn gate_rejects_human_without_owned_participant_bot() {
-    let (app, _t, _r) = human_app("bob").await;
+    let (app, _t, _r, _chain) = human_app("bob").await;
     // Human `bob` owns only `worker-bot`-equivalent? Here bob owns no bot in the
     // session, so both `human_has_session_access` branches miss → 403.
     let resp = get(&app, SID, "").await;
@@ -278,7 +289,39 @@ async fn bot_app(session_group: &str, upsert_group: bool) -> (axum::Router, Temp
 /// To exercise the owned-bot branch we register `driver-bot` (a session
 /// participant) as owned by `staff` only when `staff` == "alice"; other humans
 /// own no bots in the session and must be rejected.
-async fn human_app(staff: &str) -> (axum::Router, TempDir, Arc<BotCore>) {
+async fn human_app(
+    staff: &str,
+) -> (
+    axum::Router,
+    TempDir,
+    Arc<BotCore>,
+    Arc<bcs_test_support::LazySeedAuthorityHook>,
+) {
+    human_app_with_chain(staff).await
+}
+
+async fn human_app_with_chain(
+    staff: &str,
+) -> (
+    axum::Router,
+    TempDir,
+    Arc<BotCore>,
+    Arc<bcs_test_support::LazySeedAuthorityHook>,
+) {
+    human_app_files(staff, None).await
+}
+
+/// The harness with an optional wire-in for the
+/// SessionFileService (delete-matrix tests).
+async fn human_app_files(
+    staff: &str,
+    files: Option<Arc<dyn SessionFilesService>>,
+) -> (
+    axum::Router,
+    TempDir,
+    Arc<BotCore>,
+    Arc<bcs_test_support::LazySeedAuthorityHook>,
+) {
     let temp_dir = TempDir::new().unwrap();
     let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
     register_bot(&registry, "driver-bot", "Driver").await;
@@ -335,12 +378,22 @@ async fn human_app(staff: &str) -> (axum::Router, TempDir, Arc<BotCore>) {
     services.registry = registry.clone();
     services.group = group_store;
     services.session_management = sessions;
+    if let Some(files) = files {
+        services.session_files = files;
+    }
+    // LIVE authority chain mirroring the fixture
+    // `created_by` rows (bot-authority plan Task 6.5).
+    let authority = bcs_test_support::lazy_authority_chain().hook;
+    if staff == "alice" {
+        authority.seed_owner("driver-bot", "alice");
+    }
+    services.bot_authority_hook = authority.clone();
 
     let identity: Arc<dyn UserIdentityPort + Send + Sync> = Arc::new(StaticHumanIdentity {
         staff_no: Some(staff.to_string()),
     });
     let app = build_router(HttpAppState::new(services).with_user_identity(identity));
-    (app, temp_dir, registry)
+    (app, temp_dir, registry, authority)
 }
 
 fn bot_participant(bot_uuid: &str, role: ParticipantRole) -> Participant {
@@ -548,4 +601,311 @@ impl SessionManagementService for RecordingSessions {
     async fn delete(&self, _session_id: &str) -> Result<bool, SessionUseCaseError> {
         Ok(false)
     }
+}
+
+// ---------------------------------------------------------------------------
+// GPT-review batch C finding #13: the legacy delete
+// expands the FILE OWNER as an authorized-delete
+// candidate (V1-facade parity), judged by the LIVE
+// control edge: the file-owner controller deletes a
+// file a participant Bot uploaded; after the A→B
+// handover the revoked controller is fallback-free
+// denied and the CURRENT controller deletes.
+// ---------------------------------------------------------------------------
+
+/// A files service whose `get` returns ONE file
+/// (owned by the participant `worker-bot`) and whose
+/// `delete_file` records the resolved
+/// `caller_identities`.
+struct RecordingFileDeletes {
+    deletes: Mutex<Vec<DeleteFileCommand>>,
+}
+
+impl RecordingFileDeletes {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            deletes: Mutex::new(Vec::new()),
+        })
+    }
+
+    async fn deleted_identities(&self) -> Vec<(String, Vec<String>)> {
+        self.deletes
+            .lock()
+            .await
+            .iter()
+            .map(|cmd| {
+                (
+                    cmd.caller.actor_id.clone(),
+                    cmd.caller_identities.clone(),
+                )
+            })
+            .collect()
+    }
+}
+
+#[async_trait::async_trait]
+impl SessionFilesService for RecordingFileDeletes {
+    async fn capabilities(&self) -> CapabilitiesView {
+        CapabilitiesView {
+            storage: "test".into(),
+            presign_upload: false,
+            presign_download: false,
+            inline_view: false,
+            max_size: 1024,
+        }
+    }
+
+    async fn prepare_upload(
+        &self,
+        _cmd: PrepareUploadCommand,
+    ) -> Result<PrepareUploadResult, SessionFileUseCaseError> {
+        Err(SessionFileUseCaseError::Internal(
+            bcs_service_api::ServiceError::InternalError("unused".into()),
+        ))
+    }
+
+    async fn stream_upload(
+        &self,
+        _session_id: &str,
+        _file_id: &str,
+        _part_number: Option<u16>,
+        _body: ByteStream,
+        _content_length: u64,
+    ) -> Result<(), SessionFileUseCaseError> {
+        Err(SessionFileUseCaseError::Internal(
+            bcs_service_api::ServiceError::InternalError("unused".into()),
+        ))
+    }
+
+    async fn complete_upload(
+        &self,
+        _session_id: &str,
+        _file_id: &str,
+    ) -> Result<SessionFile, SessionFileUseCaseError> {
+        Err(SessionFileUseCaseError::NotFound("unused".into()))
+    }
+
+    async fn delete_file(
+        &self,
+        cmd: DeleteFileCommand,
+    ) -> Result<(), SessionFileUseCaseError> {
+        // Mirror the session-file service's
+        // `can_delete`: caller identities against
+        // the file owner / session creator /
+        // driver (the service facts; the
+        // IDENTITY expansion is the route's).
+        let owner = "worker-bot";
+        let authorized = cmd
+            .caller_identities
+            .iter()
+            .any(|identity| {
+                identity == owner
+                    || cmd.session_creator.as_deref() == Some(identity)
+                    || cmd.driver_bot.as_deref() == Some(identity.as_str())
+            });
+        if !authorized {
+            return Err(SessionFileUseCaseError::Forbidden(
+                "not authorized to delete".into(),
+            ));
+        }
+        self.deletes.lock().await.push(cmd);
+        Ok(())
+    }
+
+    async fn get(
+        &self,
+        session_id: &str,
+        file_id: &str,
+    ) -> Result<SessionFile, SessionFileUseCaseError> {
+        Ok(SessionFile {
+            file_id: file_id.to_string(),
+            session_id: session_id.to_string(),
+            file_name: "report.txt".into(),
+            mime_type: "text/plain".into(),
+            size: 3,
+            sha256: None,
+            // The FILE owner is a participant Bot that
+            // is neither the session creator nor the
+            // group driver.
+            owner: bcs_domain::ActorRef {
+                actor_kind: ActorKind::Bot,
+                actor_id: "worker-bot".to_string(),
+            },
+            storage_backend: "test".into(),
+            object_handle: String::new(),
+            status: bcs_domain::FileStatus::Ready,
+            created_at: 1,
+            updated_at: 1,
+        })
+    }
+
+    async fn list(
+        &self,
+        _session_id: &str,
+        _params: SessionFileListParams,
+    ) -> Result<SessionFileListPage, SessionFileUseCaseError> {
+        Err(SessionFileUseCaseError::NotFound("unused".into()))
+    }
+
+    async fn download_route(
+        &self,
+        _session_id: &str,
+        _file_id: &str,
+        _ttl_secs: Option<u64>,
+        _show: bool,
+    ) -> Result<(SessionFile, DownloadRoute), SessionFileUseCaseError> {
+        Err(SessionFileUseCaseError::NotFound("unused".into()))
+    }
+
+    async fn share_mint(
+        &self,
+        _cmd: ShareMintCommand,
+    ) -> Result<ShareMintResult, SessionFileUseCaseError> {
+        Err(SessionFileUseCaseError::Internal(
+            bcs_service_api::ServiceError::InternalError("unused".into()),
+        ))
+    }
+
+    async fn share_mint_for_history(
+        &self,
+        _session_id: &str,
+        _file_id: &str,
+        _ttl_seconds: u64,
+    ) -> Result<ShareMintResult, SessionFileUseCaseError> {
+        Err(SessionFileUseCaseError::NotFound("unused".into()))
+    }
+
+    async fn share_consume(
+        &self,
+        _token: &str,
+    ) -> Result<ShareConsumeResult, SessionFileUseCaseError> {
+        Err(SessionFileUseCaseError::NotFound("unused".into()))
+    }
+
+    async fn get_stream(
+        &self,
+        _session_id: &str,
+        _file_id: &str,
+    ) -> Result<(SessionFile, ByteStream), SessionFileUseCaseError> {
+        Err(SessionFileUseCaseError::NotFound("unused".into()))
+    }
+
+    async fn sweep_expired_pending(&self) -> Result<u64, SessionFileUseCaseError> {
+        Ok(0)
+    }
+
+    async fn delete_all_for_session(
+        &self,
+        _session_id: &str,
+    ) -> Result<u64, SessionFileUseCaseError> {
+        Ok(0)
+    }
+}
+
+async fn delete_report(
+    app: &axum::Router,
+) -> axum::response::Response {
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/sessions/{SID}/files/report.txt"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn legacy_delete_expands_the_file_owner_through_the_live_edge() {
+    let files = RecordingFileDeletes::new();
+    let (app_a, _t, _r, chain_a) =
+        human_app_files("alice", Some(files.clone())).await;
+    chain_a.seed_owner("worker-bot", "alice");
+    let resp = delete_report(&app_a).await;
+    let status = resp.status();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .expect("body");
+    assert_eq!(
+        status,
+        StatusCode::NO_CONTENT,
+        "the file-owner controller deletes: {}",
+        String::from_utf8_lossy(&body)
+    );
+    // The FILE owner reaches the authorized-delete
+    // candidates through the same live-control check.
+    let deletes = files.deleted_identities().await;
+    assert_eq!(deletes.len(), 1);
+    let (caller, identities) = &deletes[0];
+    assert_eq!(caller, "human_alice");
+    // The file owner WAS an expansion candidate and
+    // PASSED the live-control check.
+    assert!(
+        identities.iter().any(|id| id == "worker-bot"),
+        "the file owner must be an identity of a member caller: {identities:?}"
+    );
+
+    // A→B handover of `worker-bot`: the revoked
+    // controller is denied (no candidate identity
+    // passes: it is neither the driver nor the file
+    // owner's CURRENT controller), and the CURRENT
+    // controller deletes.
+    let files_b = RecordingFileDeletes::new();
+    let (app_b, _t, _r, chain_b) =
+        human_app_files("bob", Some(files_b.clone())).await;
+    chain_b.seed_owner("worker-bot", "bob");
+    let resp_b = delete_report(&app_b).await;
+    assert_eq!(resp_b.status(), StatusCode::NO_CONTENT);
+    let deletes_b = files_b.deleted_identities().await;
+    assert!(deletes_b
+        .iter()
+        .flat_map(|(_, ids)| ids.iter())
+        .any(|id| id == "worker-bot"));
+
+    // M polarity, then withdrawal: the CURRENT
+    // manager of the file-owner Bot deletes
+    // through the SAME owner-candidate
+    // expansion; after the manager withdrawal
+    // the route is fallback-free denied (the
+    // manager-edge revocation is the expressible
+    // revocation here: a zero-owner Bot is an
+    // invalid authority state).
+    let files_m = RecordingFileDeletes::new();
+    let (app_m, _t, _r, chain_m) =
+        human_app_files("carol", Some(files_m.clone())).await;
+    // A Bot always has a live owner (B); carol
+    // holds a manager edge on it.
+    chain_m.seed_owner("worker-bot", "bob");
+    chain_m.seed_manager("worker-bot", "carol");
+    let resp_m = delete_report(&app_m).await;
+    assert_eq!(
+        resp_m.status(),
+        StatusCode::NO_CONTENT,
+        "the current manager deletes through the owner candidate"
+    );
+    assert!(
+        files_m
+            .deleted_identities()
+            .await
+            .iter()
+            .flat_map(|(_, ids)| ids.iter())
+            .any(|id| id == "worker-bot"),
+    );
+
+    chain_m.revoke_manager("worker-bot", "carol");
+    let (app_revoked, _t, _r, _chain) =
+        human_app_files("carol", Some(RecordingFileDeletes::new())).await;
+    let resp_revoked = delete_report(&app_revoked).await;
+    let status_revoked = resp_revoked.status();
+    let body = axum::body::to_bytes(resp_revoked.into_body(), usize::MAX)
+        .await
+        .expect("body");
+    assert_eq!(
+        status_revoked,
+        StatusCode::FORBIDDEN,
+        "the revoked controller is fallback-free denied: {}",
+        String::from_utf8_lossy(&body)
+    );
 }

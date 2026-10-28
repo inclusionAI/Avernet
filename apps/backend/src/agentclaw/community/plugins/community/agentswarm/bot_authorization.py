@@ -73,32 +73,32 @@ class ManifestBotAuthorizationSource:
             bot_id=(bot_id or "").strip(),
         )
         if job is None:
-            # No durable creation under this (owner, bot) — nothing to
-            # surface; the parked agent's descriptor composes with the
-            # module's empty spelling at the caller, never a fabricated
-            # URL or deadline.
-            return None
-        status_answer = self._application_status(
-            bot_id=(bot_id or "").strip(), owner=(owner_id or "").strip(),
-        )
-        if status_answer is None or \
-                str(status_answer.get("status") or "") != "PENDING":
-            # Issued, approved, rejected, or no answer yet: no gate is
-            # pending for this creation, regardless of what URLs its
-            # payload froze.
             return None
         payload: dict[str, Any] = job.payload or {}
         if _window_elapsed(payload):
-            # PENDING past its horizon: the creation job retires within
-            # one poll delay and owns the flip; never surface a dead
-            # window as an actionable gate.
             return None
+
+        # Trust the job payload's frozen data: the consent URLs and
+        # window were written atomically at submit time. The status
+        # query is only consulted to close a resolved gate — never
+        # to suppress an unresolved one (tcauthmng can lag behind
+        # its own apply, and the payload is the ground truth).
+        status_answer = self._application_status(
+            bot_id=(bot_id or "").strip(), owner=(owner_id or "").strip(),
+        )
+        if status_answer is not None:
+            status = str(status_answer.get("status") or "")
+            if status in ("ISSUED", "REJECTED", "EXPIRED"):
+                return None  # Gate is closed; no page to serve.
+        application_id = str(
+            (status_answer or {}).get("application_id")
+            or payload.get("application_id") or "")
         return BotAuthorizationDescriptor(
             state=BotState.AWAITING_AUTHORIZATION.value,
             iframe_url=str(payload.get("iframe_url") or ""),
             redirect_url=str(payload.get("redirect_url") or ""),
             deadline=_window_deadline(payload),
-            application_id=str(status_answer.get("application_id") or ""),
+            application_id=application_id,
         )
 
     def _application_status(

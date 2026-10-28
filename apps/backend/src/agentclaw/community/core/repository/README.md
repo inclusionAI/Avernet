@@ -18,6 +18,10 @@ core/repository/
 ```
 
 Repositories are not plugins. Each has exactly one implementation, and database selection remains the `DatabasePlugin` injected into the constructor.
+`BotCollabLockRepositoryProtocol.acquire` rejects an existing `(lock_key, env)`
+row. Its `steal` operation atomically inserts or replaces that row's holder and
+acquisition timestamps in one transaction. Both Bot and Session force-acquire
+paths use `steal`; they must not release a lock before inserting its replacement.
 Space writers additionally share the narrow transaction extension described below. See `plugins/README.md` for the test that
 puts them here rather than there.
 
@@ -190,6 +194,9 @@ provides:
   - SkillEditorRequestRepositoryProtocol
   # task / forum
   - ForumRepositoryProtocol
+  - ForumInteractionRepositoryProtocol
+  - ForumAuthorStatsRepositoryProtocol
+  - ForumPersonalCenterActivityRepositoryProtocol
   - ForumTopicTagRepositoryProtocol
   - ForumTopicTagRepository
   - ForumDigestReportRepositoryProtocol
@@ -288,6 +295,9 @@ provides:
   - CollaboratorRepository
   # task / forum
   - ForumRepository
+  - ForumInteractionRepository
+  - ForumAuthorStatsRepository
+  - ForumPersonalCenterActivityRepository
   - ForumDigestReportRepository
   # task / feedback
   - FeedbackRepository
@@ -348,6 +358,8 @@ consumes:
   - get_server_host               # ditto
   - get_current_avernet_tenant    # tenant scoping (utils.avernet_tenant)
 internal_dependencies:
+  - agentclaw.community.core.engine_runtime.stage  # stage vocabulary; SQL/runtime selection parity is covered by conformance tests
+  - agentclaw.community.core.engine_runtime.errors
   - agentclaw.community.core.space_knowledge.capture_guard
   - agentclaw.community.core.space_knowledge.repository
   - agentclaw.community.plugin_api.space_knowledge
@@ -365,11 +377,11 @@ internal_dependencies:
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.bot_message_feedback  # BotMessageFeedback ORM model + record DTO used by the repository
   - agentclaw.community.core.bot_public
+  - agentclaw.community.core.apply_engine  # the apply row and the CLI-tool record it persists
   - agentclaw.community.core.bot_config_manifest
   - agentclaw.community.core.bot_genome.repository.models  # the five ac_genome_* ORM models and row records
   - agentclaw.community.core.content_store.models  # the ac_manifest_content ORM model and record behind the content store repository
   - agentclaw.community.core.bot_startup_script
-  - agentclaw.community.core.bot_config_manifest
   - agentclaw.community.core.caller_identity
   - agentclaw.community.core.channel
   - agentclaw.community.core.common_config

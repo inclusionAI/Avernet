@@ -52,10 +52,10 @@ def import_all_models() -> None:
     import agentclaw.community.core.bot_management.repository.models  # noqa: F401  ac_templates / ac_bot_restart_lock
     import agentclaw.community.core.bot_startup_script.repository.models  # noqa: F401  ac_bot_startup_script
     import agentclaw.community.core.bot_config_manifest.repository.models  # noqa: F401  ac_bot_config_manifest
-    import agentclaw.community.core.bot_config_manifest.cli_tools  # noqa: F401  ac_bot_cli_tool
+    import agentclaw.community.core.apply_engine.cli_tools  # noqa: F401  ac_bot_cli_tool
     import agentclaw.community.core.content_store.models  # noqa: F401  ac_manifest_content
     import agentclaw.community.core.bot_config_manifest.credentials.models  # noqa: F401  ac_source_credential
-    import agentclaw.community.core.bot_config_manifest.repository.apply_models  # noqa: F401  ac_bot_config_manifest_apply(_lock)
+    import agentclaw.community.core.apply_engine.repository.apply_models  # noqa: F401  ac_bot_config_manifest_apply
     import agentclaw.community.core.bot_genome.repository.models  # noqa: F401  ac_genome_*
     import agentclaw.community.core.bot_management.render_screen.sqlite_models  # noqa: F401  ac_bot_render_screen
     import agentclaw.community.core.system_config.orm  # noqa: F401  ac_config_*
@@ -79,6 +79,7 @@ def import_all_models() -> None:
     import_module("agentclaw.community.core.bot_knowledge.repository.models")
     import agentclaw.community.core.space_knowledge.repository.models  # noqa: F401
     import agentclaw.community.core.spaces.repository.models  # noqa: F401  ac_space / ac_space_member
+    import agentclaw.community.core.expert_market.orm  # noqa: F401  ac_experts
     import agentclaw.community.core.market_favorites.repository.models  # noqa: F401  ac_market_favorite
     import agentclaw.community.core.bot_message_feedback.models  # noqa: F401  ac_bot_message_feedback
     import agentclaw.community.core.work_orders.repository.models  # noqa: F401  ac_work_order / ac_work_order_notification
@@ -227,6 +228,11 @@ def create_all(engine: Engine, *, mysql: bool = False) -> None:
     """
     import_all_models()
     metadatas = _metadatas()
+    from agentclaw.community.core.expert_market.postgres_schema import (
+        install_postgres_expert_json,
+    )
+
+    install_postgres_expert_json(engine)
     lock_name = "agentclaw_schema_bootstrap"
     conn = None
     acquired = False

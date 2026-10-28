@@ -22,7 +22,7 @@ mode ``test_protocol_base_ordering.py`` was written after shipping. Only
 **What this file does not check is behaviour.** Every assertion here is
 structural: a delegate that forwards the wrong argument, drops a keyword, or
 picks the other family's ``project`` satisfies all of it. That is covered by
-``core/bot_config_manifest/apply/test_device_port_forwarding.py``, which drives
+``core/apply_engine/test_device_port_forwarding.py``, which drives
 each port's methods through a recording double, and by the store-backed
 implementations' own suites under ``managed_files/``.
 
@@ -38,20 +38,20 @@ import inspect
 
 import pytest
 
-from agentclaw.community.core.bot_config_manifest.apply.activation_delegates import (
+from agentclaw.community.core.apply_engine.activation_delegates import (
     DeviceActivation,
     PlatformActivation,
 )
-from agentclaw.community.core.bot_config_manifest.apply.identity_files import (
+from agentclaw.community.core.apply_engine.identity_files import (
     DeviceIdentity,
 )
-from agentclaw.community.core.bot_config_manifest.apply.resource_files import (
+from agentclaw.community.core.apply_engine.resource_files import (
     DeviceResource,
 )
-from agentclaw.community.core.bot_config_manifest.apply.skill_package_upload import (
+from agentclaw.community.core.apply_engine.skill_package_upload import (
     DeviceSkillPackageUpload,
 )
-from agentclaw.community.core.bot_config_manifest.managed_files.ports import (
+from agentclaw.community.core.apply_engine.managed_files.ports import (
     PlatformIdentity,
     PlatformResource,
     PlatformSkillPackageUpload,
@@ -59,6 +59,8 @@ from agentclaw.community.core.bot_config_manifest.managed_files.ports import (
 from agentclaw.community.core.ports.activation_port import ActivationPort
 from agentclaw.community.core.ports.identity_file_port import IdentityFilePort
 from agentclaw.community.core.ports.resource_file_port import ResourceFilePort
+from agentclaw.community.core.ports.resource_rows_port import ResourceRowsPort
+from agentclaw.community.core.resources.service import ResourceService
 from agentclaw.community.core.ports.skill_package_upload_port import (
     SkillPackageUploadPort,
 )
@@ -76,6 +78,7 @@ _PORT_IMPLEMENTERS = [
     (IdentityFilePort, PlatformIdentity),
     (ResourceFilePort, DeviceResource),
     (ResourceFilePort, PlatformResource),
+    (ResourceRowsPort, ResourceService),
 ]
 
 #: Every outbound port. Members must be abstract for the declarations to gate.
@@ -84,6 +87,7 @@ _PORTS = [
     SkillPackageUploadPort,
     IdentityFilePort,
     ResourceFilePort,
+    ResourceRowsPort,
 ]
 
 

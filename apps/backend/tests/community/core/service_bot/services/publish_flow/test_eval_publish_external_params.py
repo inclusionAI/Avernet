@@ -48,7 +48,7 @@ class _FakeEvalPublishService(EvalPublishMixin):
             publish_record or _record()
         )
         self._bot_service = Mock()
-        self._bot_service.get_bot.return_value = {
+        self._bot_service.get_bot_by_address.return_value = {
             "bot_id": "src-bot",
             "owner_id": "u1",
             "active_engine": "openclaw",

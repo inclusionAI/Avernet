@@ -33,6 +33,11 @@ export interface ConversationSidebarProps {
   onOpenBotWorkshop(): void;
   /** AgentCoding Bot 使用专用 coding-chat;与 Bot 工坊「去使用」保持一致。 */
   onOpenAgentCodingBot(bot: ConversationBotView['bot']): void;
+  /** 「Bot 管理」菜单项回调(#2990 还原):带该 Bot 所属空间上下文跳转 Bot 管理页;
+   *  好友 Bot 不提供(装配层只经 ManagedItem 传导,菜单项不渲染)。 */
+  onOpenBotManagement?(bot: ConversationBotView['bot']): void;
+  /** Bot 正在回复中的会话 id(#2990 还原):仅当前打开的会话;会话行标题左侧渲染 loading 指示。 */
+  replyingSessionId: string | null;
 }
 
 /** 空态文案内跳转链接:文案即入口,点击直达对应菜单路由(2026-10-14 体验修复)。 */
@@ -123,28 +128,23 @@ export function ConversationSidebarContent(props: ConversationSidebarProps) {
                 props.store.setBotGroupCollapsed('managed', props.store.collapsedBotGroups.managed !== true)
               }
             />
-{/* 团队 Bot 第三分组:桶非空/独立加载中/独立加载失败时渲染
-                (collaborations 目录 loading/error/retry 须可见,2026-10-10 spec);
-                空桶(含搜索中无匹配)一律不渲染,不给空分组留死标题与缺省内容
-                (B2/B3 复原裁决 + 2026-10-14 体验修复)。
-                2026-10-22 需求变更:接入收起,与我的/好友 Bot 同契约
-                (届时标题同款 chevron 旋转 + 收起只留标题行 + 计数承载成员量)。 */}
-            {(filteredTeam.length > 0 || directory.teamLoading || directory.teamError) && (
-              <SidebarSection
-                title={teamTitle}
-                loading={directory.teamLoading && teamBots.length === 0}
-                error={directory.teamError}
-                onRetry={directory.retryTeam}
-                items={filteredTeam}
-                isSearching={isSearching}
-                renderItem={(view) => <ManagedItem key={view.bot.botId} view={view} props={props} />}
-                collapsible
-                collapsed={!isSearching && props.store.collapsedBotGroups.team === true}
-                onToggleCollapsed={() =>
-                  props.store.setBotGroupCollapsed('team', props.store.collapsedBotGroups.team !== true)
-                }
-              />
-            )}
+            {/* 团队目录为空时仍保留分类，与我的/好友 Bot 的空态、收起行为一致。 */}
+            <SidebarSection
+              title={teamTitle}
+              loading={directory.teamLoading && teamBots.length === 0}
+              error={directory.teamError}
+              onRetry={directory.retryTeam}
+              items={filteredTeam}
+              emptyTitle="暂无运行中的团队 Bot"
+              isSearching={isSearching}
+              renderItem={(view) => <ManagedItem key={view.bot.botId} view={view} props={props} />}
+              collapsible
+              infoHint="通过团队成员身份获取的 Bot"
+              collapsed={!isSearching && props.store.collapsedBotGroups.team === true}
+              onToggleCollapsed={() =>
+                props.store.setBotGroupCollapsed('team', props.store.collapsedBotGroups.team !== true)
+              }
+            />
             <SidebarSection
               title={friendTitle}
               loading={directory.friendLoading && friendBots.length === 0}
@@ -171,15 +171,10 @@ export function ConversationSidebarContent(props: ConversationSidebarProps) {
 /** 桌面端(≥lg)可拖宽侧栏外壳;<lg 隐藏,由页面用 Drawer 包裹 Content 呈现。 */
 export function ConversationSidebar(props: ConversationSidebarProps) {
   const { managedBots, teamBots, friendBots, store } = props;
-  // 整栏收起竖轨的数据面:管理/好友两组常驻(与展开态空态引导一致),
-  // 团队组仅在有成员时入轨(展开侧栏对空团队桶也不渲染死分组);加载中/失败态
-  // 不进竖轨——收起条只做「快速抵达」,真态留在展开侧栏。
-  // (注:分组收起自 2026-10-22 起只留标题不再渲染泊位,竖轨是整栏级独立特性。)
+  // 整栏收起时保留全部三类目录；空目录提供展开入口，与完整侧栏保持一致。
   const railSections: ConversationCollapsedRailSection[] = [
     { id: 'managed', label: '我的 Bot', items: managedBots },
-    ...(teamBots.length > 0
-      ? [{ id: 'team' as const, label: '团队 Bot', items: teamBots }]
-      : []),
+    { id: 'team', label: '团队 Bot', items: teamBots },
     { id: 'friend', label: '好友 Bot', items: friendBots },
   ];
   return (

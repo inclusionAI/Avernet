@@ -11,9 +11,10 @@ from __future__ import annotations
 from abc import abstractmethod
 from typing import Protocol, runtime_checkable
 
+from agentclaw.community.core.apply_engine.desired_state import DesiredState
 from agentclaw.community.core.bot_genome.models import (
     BotRef,
-    CompiledManifest,
+    Drift,
     ContentReceipt,
     GenomeDiff,
     GenomeRef,
@@ -130,13 +131,21 @@ class GenomeRegistryProtocol(Protocol):
         ...
 
     @abstractmethod
-    def compile(self, bot: BotRef, rev: str) -> CompiledManifest: ...
+    def compile(self, bot: BotRef, rev: str) -> DesiredState:
+        """The revision rendered as the apply engine's desired state (``bot_genome/compile``).
+
+        Raises ``RevisionNotFound``, and ``NotAppliable`` for a revision the
+        state model refuses as recorded (one recorded before a rule the model
+        now enforces, such as a resource outside the resources root).
+        """
+        ...
 
     @abstractmethod
-    def applied_revision(self, bot: BotRef) -> str | None:
-        """The revision whose promotion started the bot's last apply, or ``None``.
+    async def drift(self, bot: BotRef) -> Drift | None:
+        """Whether the bot holds something other than ``active``, found by reading the bot.
 
-        Only a ``SUCCEEDED`` apply counts: a running, partial or failed one
-        means the bot does not run that revision, so it reads as drift.
+        ``None`` when the bot has no ``active`` or its captured state records
+        as ``active``'s revision id; otherwise the two ids. Raises
+        ``CaptureRefused`` when the bot's state cannot be read.
         """
         ...

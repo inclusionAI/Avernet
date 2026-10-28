@@ -83,7 +83,7 @@ class DumpOpenApiTests(unittest.TestCase):
 
         self.assertEqual(
             [tag["name"] for tag in contract["tags"]],
-            COLLABORATION_TAGS,
+            COLLABORATION_TAGS + ["Group Context"],
         )
         operation_tags = [
             operation.get("tags")
@@ -118,7 +118,8 @@ class DumpOpenApiTests(unittest.TestCase):
             for method in path_item
             if method.lower() in HTTP_METHODS
         ]
-        self.assertEqual(len(operations), 26)
+        # 27 current dev operations plus 11 bot-authority operations.
+        self.assertEqual(len(operations), 38)
         self.assertTrue(
             all(path.startswith("/api/v1/collaboration/") for _, path in operations)
         )

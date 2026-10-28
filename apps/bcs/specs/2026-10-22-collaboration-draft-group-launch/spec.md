@@ -10,7 +10,7 @@ owners: [bcs, frontend]
 
 用户已授权采用“副屏预览 + frontend 主屏现有建群浮层”，并进一步要求通用建群入口和 Draft 初始内容可编辑。本轮保留既有 BCS 用户接口，不修改 Backend、Gateway、Runtime 或 frontend-nextgen。
 
-- 通用宿主回调为 `onOpenCreateGroup(options?)`。`options` 仅支持可选 `draft`（schema 2 四字段固定引用）；不传 Draft 时打开普通建群浮层。事件只打开配置，不自动提交。
+- 通用宿主回调为 `onOpenCreateGroup(options?)`。`options` 仅支持可选 `draft`（schema 2 三字段固定引用）；不传 Draft 时打开普通建群浮层。事件只打开配置，不自动提交。
 - `CreateGroupModal` 增加 `selectOriginator` 和可选 `initialDraft` 两个独立参数。原入口默认使用当前身份；副屏入口要求选择当前 Human 的自有 Bot，不切换聊天身份。通用 `useGroupCreation` 管理自有 Bot、候选与提交，不再提供 Draft 专用建群 hook 或 wrapper。
 - Draft 只作为初始 YAML 来源：读取固定 revision 时核对 UTF-8 字节/hash，一次填入原有自由编辑器。带 Draft 时固定自定义协作并隐藏群类型、自由编辑/模板切换；载入后自动校验，成功直接展开角色绑定与流程图，失败停留编辑器并显示诊断。用户可通过“重新编辑”修改 YAML；编辑不更新 Draft，不创建新 revision。取消重开、身份刷新和表单校验不能用初始 Draft 覆盖用户修改。
 - 沿用现有 YAML 编辑、校验、角色绑定、群名、目标、高级设置及 Loop 图。编辑后使旧校验/绑定失效，必须重新校验和绑定；自有 Bot 入口所有声明槽位显式绑定。
@@ -32,7 +32,7 @@ owners: [bcs, frontend]
 
 | 依据 | 本版使用方式 |
 | --- | --- |
-| [固定 Draft 与只读分享契约](../../api-contracts/collaboration-drafts/v1.yaml) | 继续使用 schema 2、固定 revision、readToken、原文字节/hash 核对；不修改原管理权限 |
+| [固定 Draft 与只读分享契约](../../api-contracts/collaboration-drafts/v1.yaml) | 继续使用 schema 2、固定 revision、原文字节/hash 核对；不修改原管理权限 |
 | [Panel 组件与宿主约定](../../assets/panel/README.md) | 复用卡片、预览/源码子 Tab、逻辑 Loop 图、宿主 API base 和资源绑定 |
 | [V1 发起方授权](../../crates/application/v1/bcs-app-group/src/authorization.rs) | `authorize_originator` 已允许 Human 使用自己拥有的 Bot；Bot 调用者不能冒用别的 Bot |
 | [候选查询](../../crates/application/v1/bcs-app-bot/src/lib.rs) | `authorize_candidate_perspective` 校验用户对视角 Bot 的所有权；`purpose=collaboration` 决定候选范围 |
@@ -40,7 +40,7 @@ owners: [bcs, frontend]
 | [建群 HTTP DTO](../../crates/adapters/http/bcs-api-http/src/v1/openapi/dto/group.rs) | 接收原文 `content_yaml` 和独立 `participant_bindings`；没有通用客户端幂等 key |
 | [初始会话输入](../../crates/services/bcs-group/src/application/management/create.rs) | 任务说明通过 `context` 进入既有 `{ query: ... }` 输入语义，不发明新的输入协议 |
 
-遵守 [架构约束](../../../../docs/arch/arch.rules.md)、[CI 约束](../../../../docs/arch/ci.enforce.md)、[领域文档规则](../../../../docs/agents/domain.md)、[BCS 规则](../../AGENTS.md)、[BCS 分层](../../CLAUDE.md)、[Group 应用边界](../../crates/application/v1/bcs-app-group/CONTEXT.md) 和 [Draft 应用边界](../../crates/application/bcs-app-collaboration-draft/CONTEXT.md)。本设计不改变已有跨服务身份信任机制，不以 Draft 分享凭据替代 Human 身份。
+遵守 [架构约束](../../../../docs/arch/arch.rules.md)、[CI 约束](../../../../docs/arch/ci.enforce.md)、[领域文档规则](../../../../docs/agents/domain.md)、[BCS 规则](../../AGENTS.md)、[BCS 分层](../../CLAUDE.md)、[Group 应用边界](../../crates/application/v1/bcs-app-group/CONTEXT.md) 和 [Draft 应用边界](../../crates/application/bcs-app-collaboration-draft/CONTEXT.md)。本设计不改变已有跨服务身份信任机制，不以 Draft 公开引用替代 Human 身份。
 
 已知缺口必须纳入交付，不能由 UI 测试掩盖：
 
@@ -84,7 +84,9 @@ owners: [bcs, frontend]
 
 在现有预览头部提供“用我的 Bot 发起协作”。用户点击后，Panel 调用宿主注入的回调，frontend 通过 Portal 打开已有 `CreateGroupModal`，副屏保持预览。取消仅关闭浮层，回到原聊天。
 
-通用回调为 `onOpenCreateGroup(options?)`，frontend 共用 UMD 宿主向副屏组件注入该函数。无参数或 `{}` 打开普通建群配置；`{ draft: { schemaVersion: 2, draftId, revision, readToken } }` 载入固定版初始 YAML。宿主检查参数形状与严格四字段引用；消息不能指定回调、用户身份或导航地址。BCS Preview 仅为 schema 2 显示此入口，schema 1 保持只读。未接入回调的宿主提示暂不支持建群，保留预览/源码/复制。
+通用回调为 `onOpenCreateGroup(options?)`，frontend 共用 UMD 宿主向副屏组件注入该函数。无参数或 `{}` 打开普通建群配置；`{ draft: { schemaVersion: 2, draftId, revision } }` 载入固定版初始 YAML。宿主检查参数形状与三字段引用（忽略历史卡片的多余字段，不转发）；消息不能指定回调、用户身份或导航地址。BCS Preview 仅为 schema 2 显示此入口，schema 1 保持只读。未接入回调的宿主提示暂不支持建群，保留预览/源码/复制。
+
+已部署 CLI 无需同步升级：原生 `/reference` 响应保留固定 `readToken` 占位值（32 个零字节的 base64url 编码），只满足旧 CLI 的严格响应解析，不落库、不参与鉴权。旧 CLI 输出的四字段卡片由新版副屏归一化为三字段；新 CLI 直接输出三字段卡片。固定版读取与校验均不发送专用请求头。
 
 直接复用主屏浮层，通过 `selectOriginator` 开启自有 Bot 选择，通过可选 `initialDraft` 初始化自由编辑器。两个参数独立；普通入口不传参数时保留当前身份与原行为。带 Draft 固定自定义协作并隐藏群类型及模板切换，初次载入自动校验并展开角色绑定和流程图；“重新编辑”保留 YAML 编辑能力。不带 Draft 时保留原有群类型和模板选择。复用群名、协作目标、高级设置、角色页签、Bot 列表和逻辑 Loop 图；图与角色绑定保持既有联动。Bot 名称搜索和分页使用 Human 候选契约；好友筛选和画像推荐尚未接入，见 roadmap。
 
@@ -124,7 +126,7 @@ owners: [bcs, frontend]
 
 仅在当前副屏宿主持有的浮层内存中保存：可选初始 `draftId + revision + contentHash`、当前编辑 YAML、可信用户上下文、发起 Bot、角色绑定、群名、任务说明、查询状态和提交状态。
 
-配置按“可信 BCS 部署 + 当前用户 + 副屏实例 + 建群操作”隔离；分享凭据不进入配置 key、URL 或日志。转发同一方案后，接收者重新选择自己的 Bot，不继承发送者的绑定。关闭重开浮层保留本次内存配置及提交状态；关闭副屏或刷新不承诺恢复配置，不写共享 Draft 或持久浏览器缓存。
+配置按“可信 BCS 部署 + 当前用户 + 副屏实例 + 建群操作”隔离；Draft 引用只包含 schemaVersion、draftId、revision。转发同一方案后，接收者重新选择自己的 Bot，不继承发送者的绑定。关闭重开浮层保留本次内存配置及提交状态；关闭副屏或刷新不承诺恢复配置，不写共享 Draft 或持久浏览器缓存。
 
 用户切换/退出登录时取消旧查询、清空发起 Bot、成员/角色绑定、目标与高级设置；不以身份刷新覆盖当前编辑文本。宿主或初始引用变化时新建浮层实例，旧响应不能回写新实例。已发出的建群请求不能因前端取消而宣称被撤销，见第 7 节。
 
@@ -134,7 +136,7 @@ owners: [bcs, frontend]
 2. 初始化成功后，当前编辑缓冲区成为本次建群的内容来源。修改后（无 Draft 入口也包含换模板）清空旧校验和绑定，用户重新校验并选择角色。关闭重开、身份轮询或表单校验不重读 Draft 覆盖编辑。
 3. 确认时在任何 await 之前快照普通表单参数。自定义协作将当前 YAML 送到已有 definitions/validate，再组装建群 POST；自由聊天/任务协作不做定义校验。复用同一个 `CreateGroupParams`，只在 API 层适配 Human DTO。
 4. `content_yaml` 使用快照中的原始字符串，不 trim、不 parse/dump、不改换行、不从图重建、不经模型转写；绑定独立提交。此流程不写 Draft，不创建 revision。
-5. 取得合法分享的原文后，用户以自己的建群权限使用本地文本副本。readToken 不授予建群权，不能进入当前文本校验或建群请求。之后撤销分享不追溯回收已取得的副本，也不会撤销已建群；分享不是持续执行许可证。
+5. 取得合法分享的原文后，用户以自己的建群权限使用本地文本副本。公开读取不授予建群权，建群仍使用既有 Human 身份。之后撤销分享不追溯回收已取得的副本，也不会撤销已建群；分享不是持续执行许可证。
 6. 新版本不会替换旧配置；明确打开另一引用会启动新浮层实例。相同引用（或同一个无 Draft 入口）关闭重开保留配置及成功/未知状态；原群继续使用创建时的定义和绑定。
 
 ## 6. 请求与权限契约
@@ -143,9 +145,9 @@ owners: [bcs, frontend]
 
 | 操作 | API | 授权来源 |
 | --- | --- | --- |
-| 读取/校验固定 Draft | 原生 `/collaboration/drafts/{id}/revisions/{revision}` 及其 `/validate` | `X-BCS-Draft-Read-Token`，沿用单版读取权限 |
+| 读取/校验固定 Draft | 原生 `/collaboration/drafts/{id}/revisions/{revision}` 及其 `/validate` | 无凭据、无自定义请求头；只需 ID 和 revision，撤销/删除状态仍生效 |
 | 本版补齐的部署读取入口 | `/api/v1/collaboration/drafts/{id}/revisions/{revision}` 及其 `/validate` | 同一 Draft 读取裁决；不会把普通用户登录升级为 Draft 管理权 |
-| 校验当前编辑文本 | 原生 `POST /collaboration/definitions/validate`，请求 `{definition_yaml}` | 既有只读校验契约；不需要 Draft 分享凭据 |
+| 校验当前编辑文本 | 原生 `POST /collaboration/definitions/validate`，请求 `{definition_yaml}` | 既有只读校验契约；不需要 Draft 凭据 |
 | 当前用户 | `GET /openapi/v1/collaboration/me` | 已验证 Human 的最小投影，不返回凭据 |
 | 查询我的 Bot | `GET /openapi/v1/collaboration/bots/mine` | 宿主可信 Human 认证 |
 | 查询可协作候选 | `GET /openapi/v1/collaboration/bots/{originator}/candidates?purpose=collaboration` | Human 认证 + 对视角 Bot 的所有权 |
@@ -154,7 +156,7 @@ owners: [bcs, frontend]
 
 Draft V1 入口属于 BCS 适配器增量，只开放本流程所需的 GET 和 validate POST，不增加管理路由。V1 使用已有标准响应 envelope，Panel 解包后执行与原生响应相同的固定版/原文校验；原生协议不变。应用服务复用现有 Draft 服务，不能复制一套鉴权或存储实现。
 
-现场核对确认：本地宿主只转发 `/bcnproxy`，直接请求 `/openapi` 返回宿主 404；直连 BCS V1 缺少 Gateway 签名 Principal 返回 401。本版通过独立原生浏览器入口解决，不让 Gateway 验证失败后降级。原生入口拒绝 Bot、Actor、Gateway Principal 和 Draft 凭据，调用既有 BCS Human cookie 认证链（本地沿用已配置的 local Human），不从 Bot owner 或请求体构造用户。
+现场核对确认：本地宿主只转发 `/bcnproxy`，直接请求 `/openapi` 返回宿主 404；直连 BCS V1 缺少 Gateway 签名 Principal 返回 401。本版通过独立原生浏览器入口解决，不让 Gateway 验证失败后降级。原生入口拒绝 Bot、Actor 和 Gateway Principal，调用既有 BCS Human cookie 认证链（本地沿用已配置的 local Human），不从 Bot owner 或请求体构造用户。
 
 Panel 的 Draft 预览继续使用已有 `apiBaseUrl/baseUrl`。主屏浮层由 frontend 自己选择可信请求入口：Draft 使用 `/bcnproxy/collaboration/drafts`，Human 操作使用 `/bcnproxy/collaboration/user`。成功链接为 `/bcn/chat/detail?id={groupId}&session={sessionId}&bot_uuid={humanActorId}`，未知结果链接为 `/bcn/chat/list?bot_uuid={humanActorId}`。不从消息读取 API base 或导航路径，不在认证失败后切换入口。frontend-nextgen 的 V1 路径与导航接入属于 roadmap，不再通过 Panel 默认值宣称已接通。
 
@@ -177,7 +179,7 @@ Panel 的 Draft 预览继续使用已有 `apiBaseUrl/baseUrl`。主屏浮层由 
 | `collaboration.definition.content_yaml` | 仅自定义协作：提交前校验通过的当前编辑字符串，保持 UTF-8 字节与换行 |
 | `collaboration.participant_bindings` | 仅自定义协作：`[{binding, actor_ids: [botId]}]`，按当前校验结果映射，与 definition 同级 |
 
-不调用 Backend task execute，不另发“启动一次”请求，不附带 Draft readToken、助手 token 或声明式用户 ID。Human 会话参与者按既有可信 caller 规则产生，不由模型填入的 Human ID 决定。
+不调用 Backend task execute，不另发“启动一次”请求，不附带助手 token 或声明式用户 ID。Human 会话参与者按既有可信 caller 规则产生，不由模型填入的 Human ID 决定。
 
 BCS 在提交时重新校验发起方所有权、参与者关系、必需绑定和定义约束。候选请求与创建之间发生的权限变化必须拒绝，浮层刷新相关选择，不退回协作助手身份。
 
@@ -230,7 +232,7 @@ Panel 只实现宿主回调。frontend 共用 UMD 宿主按需打开既有建群
 | L-AC04 | candidates 按所选发起 Bot 查询；分页/搜索不误删已有合法选择；切换发起 Bot 后清空旧绑定 |
 | L-AC05 | 必填槽位完整、同名 Bot 可区分、相同 Bot 多槽位按契约处理、参与者去重、助手不自动入群 |
 | L-AC06 | 初始读取校验固定 revision 与 UTF-8/hash；编辑只作用于本次表单，POST 精确使用当前文本；head 或身份刷新不覆盖编辑 |
-| L-AC07 | 初始读取时撤销/删除/完整性异常阻断初始化；当前文本校验失败不 POST；readToken 不进入校验文本/建群请求；无身份降级 |
+| L-AC07 | 初始读取时撤销/删除/完整性异常阻断初始化；当前文本校验失败不 POST；固定版读取与校验不发送自定义头；无身份降级 |
 | L-AC08 | 建群 POST 使用 Human 身份和指定 originator；群 driver、绑定、context 与用户确认一致；Human 可进入会话 |
 | L-AC09 | 按钮明确告知启动；成功进入真实新群并观察到首个状态机运行，未额外重复发送启动请求 |
 | L-AC10 | 连点/回车只发一次；未知结果不自动重试；服务器失败与不确定补偿不显示虚假“未创建” |

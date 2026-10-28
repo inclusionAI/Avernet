@@ -87,3 +87,22 @@ test('团队引擎请求使用真实 Bot owner，保留实体 ID 作为聊天身
   expect(teamBot.ownerId).toBe('record-entity');
   expect(buildChatEngineVersionTarget({ ...input, section: 'team', bot: { ...teamBot, engineOwnerId: undefined } })).toBeNull();
 });
+
+test('团队服务 Bot 的在线对话不触发仅支持 draft 的引擎版本检查', () => {
+  expect(
+    buildChatEngineVersionTarget({
+      ...input,
+      section: 'team',
+      bot: {
+        ...bot,
+        botType: 'service',
+        isTeamBot: true,
+        engineOwnerId: 'owner',
+        runtimeStage: 'online',
+      },
+    }),
+  ).toBeNull();
+  expect(
+    buildChatEngineVersionTarget({ ...input, bot: { ...bot, botType: 'service', runtimeStage: 'draft' } }),
+  ).not.toBeNull();
+});

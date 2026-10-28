@@ -14,6 +14,10 @@ class ExpertChatServiceProtocol(Protocol):
     must be the Bot owner. This is not a client-selectable elevation flag.
     """
 
+    def resolve_chat_stage(self, bot_id: str, owner_id: str, stage: str) -> str:
+        """Resolve an authorized friend stage; services always address online."""
+        ...
+
     def add_chat_bot(
         self, user_id: str, bot_id: str, owner_id: str
     ) -> Dict[str, Any]: ...

@@ -17,12 +17,15 @@ import re
 from collections.abc import Callable
 from datetime import datetime, timezone
 
-from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
-from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol import (
-    BotConfigManifestApplyServiceProtocol,
+from agentclaw.community.core.content_store import (
+    DIGEST_RE,
+    ContentScope,
+    ContentStoreError,
+    ContentStoreProtocol,
+    decode_tree_bytes,
 )
-from agentclaw.community.core.content_store import DIGEST_RE, ContentScope, ContentStoreError, ContentStoreProtocol
 from agentclaw.community.core.bot_genome import contract
+from agentclaw.community.core.apply_engine.desired_state import DesiredState
 from agentclaw.community.core.bot_genome.canonical import canonicalize, loads_strict, revision_id, sha256_digest
 from agentclaw.community.core.bot_genome.capture import BotStateReader, capture_spec
 from agentclaw.community.core.bot_genome.compile import compile_spec
@@ -43,7 +46,7 @@ from agentclaw.community.core.bot_genome.limits import MAX_ENTRIES_PER_CATEGORY,
 from agentclaw.community.core.bot_genome.models import (
     FIXED_REFS,
     BotRef,
-    CompiledManifest,
+    Drift,
     ContentReader,
     ContentReceipt,
     GenomeDiff,
@@ -75,7 +78,7 @@ from agentclaw.community.core.bot_genome.repository.models import (
     GenomeRevisionRow,
 )
 from agentclaw.community.core.bot_genome.spec_checks import SpecCheckContext, SpecChecks, policy_path_reasons
-from agentclaw.community.core.bot_genome.spec_models import GenomePolicy, GenomeSpec
+from agentclaw.community.core.bot_genome.spec_models import GenomePolicy, GenomeSpec, ResourceEntry
 from agentclaw.community.core.repository.protocols.bot.genome import (
     GenomePatchRepositoryProtocol,
     GenomePromotionRepositoryProtocol,
@@ -157,7 +160,6 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         state_reader: Callable[[], BotStateReader],
         checks: SpecChecks,
         validator: SkillPackageValidator,
-        applies: BotConfigManifestApplyServiceProtocol,
         env: Callable[[], str] = get_current_env,
     ) -> None:
         self._revisions = revisions
@@ -168,7 +170,6 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         self._state_reader = state_reader
         self._checks = checks
         self._validator = validator
-        self._applies = applies
         self._env = env
 
     # -- plumbing -----------------------------------------------------------------------------
@@ -217,6 +218,11 @@ class GenomeRegistryService(GenomeRegistryProtocol):
             spec=GenomeSpec.from_json(hashed["spec"]),
             policy=GenomePolicy.from_json(hashed["policy"]),
         )
+
+    @staticmethod
+    def _policy_of(row: GenomeRevisionRow) -> GenomePolicy:
+        """A stored revision's policy, read without re-verifying the whole revision."""
+        return GenomePolicy.from_json(loads_strict(row.content)["policy"])
 
     def _active(self, bot: BotRef) -> GenomeRevisionRow | None:
         ref = self._refs.get(**self._axes(bot), name="active")
@@ -348,9 +354,7 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         """
         captured = await capture_spec(self._state_reader(), bot, validator=self._validator)
         active = self._active(bot)
-        policy = (
-            GenomePolicy.from_json(loads_strict(active.content)["policy"]) if active is not None else DEFAULT_POLICY
-        )
+        policy = self._policy_of(active) if active is not None else DEFAULT_POLICY
         writes = dict(captured.writes)
         reasons = self._checks.reasons(
             captured.spec, policy, _PendingContent(writes, self._reader(bot)), self._ctx(bot, created_by.checked_as)
@@ -615,16 +619,61 @@ class GenomeRegistryService(GenomeRegistryProtocol):
 
     # -- delivery -----------------------------------------------------------------------------
 
-    def compile(self, bot: BotRef, rev: str) -> CompiledManifest:
+    def compile(self, bot: BotRef, rev: str) -> DesiredState:
         revision = self._revision(self._resolve(bot, rev))
-        return compile_spec(revision.spec, self._reader(bot), revision_id=revision.revision.id)
+        return compile_spec(revision.spec, self._reader(bot))
 
-    def applied_revision(self, bot: BotRef) -> str | None:
-        report = self._applies.last_apply(entity_id=bot.entity_id, bot_id=bot.bot_id)
-        if report is None or report.status is not ApplyStatus.SUCCEEDED:
-            return None  # running, partial or failed: the bot does not run that revision (yet)
-        promotion = self._promotions.by_apply_reference(**self._axes(bot), apply_reference=report.apply_id)
-        return None if promotion is None else promotion.revision_id
+    async def drift(self, bot: BotRef) -> Drift | None:
+        """Whether the bot holds something other than ``active``, by reading the bot.
+
+        The comparison is the bot against the revision: capture the bot's
+        state as ``capture`` would (nothing is recorded — the captured blobs
+        are dropped), compute the revision id it would record under
+        ``active``'s policy, and compare with ``active``'s id under the same
+        policy; both specs are first put in one representation
+        (:meth:`_in_file_form`), because a revision records a directory
+        resource as one tree while the applied bot holds its member files
+        and records one row each, which the platform reader answers as file
+        entries. So an unchanged bot reads as in step whichever form its
+        reader answers, and ``observed`` is the id capture would record. The
+        observation is not bounded by the per-category limit a revision may
+        hold (``bounded=False``): a directory resource of more files than
+        that is one revision entry but one row each on the bot. No
+        ``active`` means nothing to drift from. ``CaptureRefused``
+        propagates: a bot whose state cannot be read cannot be said to be
+        in step either.
+        """
+        active = self._active(bot)
+        if active is None:
+            return None
+        captured = await capture_spec(self._state_reader(), bot, validator=self._validator, bounded=False)
+        policy = self._policy_of(active)
+        observed = revision_id(captured.spec, policy)
+        stored = GenomeSpec.from_json(loads_strict(active.content)["spec"])
+        produced = {blob.digest: blob.data for blob in captured.writes}
+        if self._in_file_form(bot, captured.spec, produced) == self._in_file_form(bot, stored, {}):
+            return None
+        return Drift(active=active.revision_id, observed=observed)
+
+    def _in_file_form(self, bot: BotRef, spec: GenomeSpec, produced: dict[str, bytes]) -> GenomeSpec:
+        """``spec`` with every directory resource replaced by its member files, one entry each, digested as a
+        file's bytes are: the form the two sides of a drift comparison share. A tree's bytes come from
+        ``produced`` (what capture just read) or else the bot's content store, which raises
+        ``ContentNotReachable`` for a blob it no longer holds; a recorded revision's tree decodes, since it
+        passed the spec checks.
+        """
+        resources: list[ResourceEntry] = []
+        for entry in spec.resources:
+            if not entry.path.endswith("/"):
+                resources.append(entry)
+                continue
+            blob = produced.get(entry.digest)
+            members = decode_tree_bytes(blob if blob is not None else self._reader(bot).read(entry.digest))
+            if members is None:
+                raise RuntimeError(f"resources/{entry.path} ({entry.digest}) is not an acm-tree-v1 blob")
+            for name, data in members:
+                resources.append(ResourceEntry(path=entry.path + name, digest=sha256_digest(data)))
+        return spec.model_copy(update={"resources": sorted(resources, key=lambda e: e.path)})
 
 
 # ---------------------------------------------------------------------------------------------

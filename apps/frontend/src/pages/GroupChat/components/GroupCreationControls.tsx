@@ -24,7 +24,7 @@ function OriginatorBotLabel({ bot, selected, duplicate, option = false }: {
 }) {
   const reachable = bot.reachability === 'reachable';
   return <>
-    <BotAvatar type="assistant" size="sm" name={bot.name} botId={bot.bot_id.split(':')[0]} />
+    <BotAvatar type="assistant" size="sm" avatarUrl={bot.avatar_url} name={bot.name} botId={bot.bot_id.split(':')[0]} />
     <span className="min-w-0 flex-1 text-left">
       <span className="flex flex-wrap items-center gap-2">
         <span className="truncate text-sm font-medium">{option ? <Select.ItemText>{bot.name}</Select.ItemText> : bot.name}</span>
@@ -42,21 +42,20 @@ function OriginatorBotLabel({ bot, selected, duplicate, option = false }: {
 export function GroupOriginatorPicker({ creation }: { creation: Creation }) {
   const selectId = React.useId();
   const { mine, originator } = creation;
-  const options = originator && !mine.page.items.some(bot => bot.bot_id === originator.bot_id)
-    ? [originator, ...mine.page.items] : mine.page.items;
+  const options = mine.items;
   const hasDuplicateName = (bot: GroupBot) => options.some(other => other.bot_id !== bot.bot_id && other.name === bot.name);
   return <section className="mt-2 space-y-1" aria-label="发起方 Bot">
     <label htmlFor={selectId} className="block text-sm font-medium">发起方 Bot</label>
-    <p className="text-xs text-muted-foreground">操作用户：{creation.user?.display_name || '尚未登录'}</p>
+    {creation.user ? <p className="text-xs text-muted-foreground">操作用户：{creation.user.display_name}</p> : null}
     <div className="flex items-center gap-2">
       <Select.Root value={originator?.bot_id || ''}
-        disabled={mine.loading || !creation.user || !options.length}
+        disabled={mine.loading || !options.length}
         onValueChange={value => creation.setOriginator(options.find(bot => bot.bot_id === value))}>
         <Select.Trigger asChild>
           <Button id={selectId} variant="default"
             className="h-auto min-h-12 w-full justify-between gap-3 rounded-xl border border-input bg-background px-3 py-2 text-foreground hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-primary/20 data-[state=open]:border-primary/50">
             <span className="min-w-0 flex-1 text-left">
-              <Select.Value placeholder={<span className="font-normal text-muted-foreground">{!mine.loading && !mine.error && !options.length ? '暂无自有 Bot' : '请选择发起方 Bot'}</span>}>
+              <Select.Value placeholder={<span className="font-normal text-muted-foreground">{!mine.loading && !options.length ? '暂无自有 Bot' : '请选择发起方 Bot'}</span>}>
                 {originator ? <span className="flex min-w-0 items-center gap-2.5">
                   <OriginatorBotLabel bot={originator} selected duplicate={hasDuplicateName(originator)} />
                 </span> : undefined}
@@ -82,8 +81,7 @@ export function GroupOriginatorPicker({ creation }: { creation: Creation }) {
       </Select.Root>
       {mine.loading ? <Spin /> : null}
     </div>
-    {mine.error || mine.page.total > mine.page.limit || mine.page.offset > 0
-      ? <GroupBotPager page={mine} label="自有 Bot" /> : null}
+    {!mine.loading && !options.length ? <Button size="sm" variant="ghost" onClick={mine.retry}>刷新 Bot 列表</Button> : null}
   </section>;
 }
 
@@ -91,12 +89,11 @@ export function GroupCreationStatus({ creation, startsWorkflow }: { creation: Cr
   const { submission, user } = creation;
   return <div className="space-y-1 text-sm">
     {creation.error || submission.error ? <p role="alert" className="text-destructive">{creation.error || submission.error}</p> : null}
-    {creation.error && !creation.frozen ? <Button size="sm" variant="ghost" onClick={creation.retry}>重新读取并确认登录</Button> : null}
+    {creation.error && !creation.frozen ? <Button size="sm" variant="ghost" onClick={creation.retry}>重新读取协作定义</Button> : null}
     {submission.phase === 'unknown' ? <p role="alert">未能确认创建结果，请先检查群列表，避免重复建群。 <a className="text-primary underline" href={user ? groupLink(GROUP_CREATION_HOST, user) : '/bcn/chat/list'}>查看群列表</a></p> : null}
-    {submission.phase === 'success' && user && user.user_id === submission.userId && submission.result ? <p role="status">
+    {submission.phase === 'success' && submission.result ? <p role="status">
       已创建协作群。 <a className="text-primary underline" href={groupLink(GROUP_CREATION_HOST, user, submission.result)}>进入协作群</a>
     </p> : null}
-    {submission.phase === 'success' && user?.user_id !== submission.userId ? <p role="alert">登录用户已变化，请切回原用户查看创建结果。</p> : null}
     {!creation.frozen ? <p className="text-xs text-muted-foreground">{startsWorkflow ? '确认后将建群并立即开始协作。' : '确认后将创建协作群。'}</p> : null}
   </div>;
 }

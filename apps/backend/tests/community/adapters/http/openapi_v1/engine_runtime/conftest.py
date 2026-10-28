@@ -279,6 +279,13 @@ class FakeExpertChat:
             },
         }
 
+    def resolve_chat_stage(self, bot_id, owner_id, stage):
+        from agentclaw.community.core.engine_runtime.errors import EngineStageNotLiveError
+
+        if stage == "verify":
+            raise EngineStageNotLiveError("friend chat cannot address verify")
+        return "online" if stage == "online" else "draft"
+
     def add_chat_bot(self, *args, **kwargs):
         self.calls.append(("add_chat_bot", args, kwargs))
         return {}

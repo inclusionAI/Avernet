@@ -15,6 +15,8 @@ reach a caller without being named here first.
 """
 from __future__ import annotations
 
+from typing import Literal
+
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -50,8 +52,8 @@ class ConfigManifestApplyEntry(BaseModel):
     )
     action: str = Field(
         description="`created` / `updated` / `unchanged` / `skipped` / `failed`. "
-        "`skipped` means the entry was not written because its category was "
-        "aborted — never that it was optional."
+        "`skipped` means the entry was not written: its category was aborted, or its "
+        "materialiser declined to deliver it (`error` says which) — never that it was optional."
     )
     error: str | None = Field(
         default=None, description="Why, when `action` is `failed` or `skipped`."
@@ -131,6 +133,19 @@ class ConfigManifestApplyCategory(BaseModel):
     )
 
 
+class ConfigManifestApplyState(BaseModel):
+    """What the apply applied: the bot's stored Manifest, or a genome promotion's revision."""
+
+    kind: Literal["manifest", "genome"] = Field(
+        description="`manifest` for the stored document, `genome` for a promotion's revision."
+    )
+    reference: str | None = Field(
+        default=None,
+        description="The producer's reference within the kind: the promotion id for `genome`; `null` for "
+        "`manifest`, which has one state per bot.",
+    )
+
+
 class ConfigManifestApply(BaseModel):
     """One apply's report — what was delivered, and what was not."""
 
@@ -143,6 +158,7 @@ class ConfigManifestApply(BaseModel):
                 "result": "SUCCEEDED",
                 "started_at": "2026-08-31T09:12:04+00:00",
                 "finished_at": "2026-08-31T09:12:06+00:00",
+                "state": {"kind": "manifest", "reference": None},
                 "sources": [],
                 "categories": [
                     {"category": "mcp", "aborted": False, "removed": ["mcp.old"]}
@@ -173,6 +189,11 @@ class ConfigManifestApply(BaseModel):
     )
     finished_at: datetime | None = Field(
         default=None, description="Null exactly while `result` is `RUNNING`."
+    )
+    state: ConfigManifestApplyState = Field(
+        default_factory=lambda: ConfigManifestApplyState(kind="manifest"),
+        description="What was applied. This API's own applies are always the stored "
+        "Manifest; a promotion's apply reads back here too, naming its promotion.",
     )
     sources: list[ConfigManifestApplySource] = Field(
         default_factory=list,

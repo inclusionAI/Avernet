@@ -39,6 +39,34 @@ EXPECTED_OPERATIONS = {
     ("post", "/api/v1/collaboration/sessions/{session_id}/files/{file_id}/complete"),
     ("post", "/api/v1/collaboration/sessions/{session_id}/files/{file_id}/share"),
     ("get", "/api/v1/collaboration/sessions/shared-file/content"),
+    # Bot authority surface (spec §5.1/§6.1) — one unified
+    # route group; Human and trusted-App callers share it.
+    ("get", "/api/v1/collaboration/bots/{bot_id}/managers"),
+    ("put", "/api/v1/collaboration/bots/{bot_id}/managers"),
+    ("put", "/api/v1/collaboration/bots/{bot_id}/managers/{user_id}"),
+    ("delete", "/api/v1/collaboration/bots/{bot_id}/managers/{user_id}"),
+    ("get", "/api/v1/collaboration/bots/{bot_id}/ownership"),
+    (
+        "put",
+        "/api/v1/collaboration/bots/{bot_id}/ownership-transfers/{target_owner_actor_id}",
+    ),
+    (
+        "get",
+        "/api/v1/collaboration/bots/{bot_id}/ownership-transfers/{target_owner_actor_id}",
+    ),
+    (
+        "post",
+        "/api/v1/collaboration/bots/{bot_id}/ownership-transfers/{target_owner_actor_id}/accept",
+    ),
+    (
+        "post",
+        "/api/v1/collaboration/bots/{bot_id}/ownership-transfers/{target_owner_actor_id}/reject",
+    ),
+    (
+        "post",
+        "/api/v1/collaboration/bots/{bot_id}/ownership-transfers/{target_owner_actor_id}/cancel",
+    ),
+    ("get", "/api/v1/collaboration/ownership-transfers"),
 }
 
 
@@ -66,3 +94,41 @@ def test_all_operations_share_the_internal_ownership_prefix() -> None:
 def test_contract_excludes_public_openapi_routes() -> None:
     actual = _actual_operations()
     assert not any(path.startswith("/openapi/v1/") for _, path in actual)
+
+
+def test_bot_authority_operations_carry_frozen_contract_ids() -> None:
+    contract = load_contract(CONTRACT_ROOT, entrypoint="internal.yaml")
+    methods = {"get", "post", "put", "delete"}
+    operation_ids = {
+        path: [item[m]["operationId"] for m in item if m in methods]
+        for path, item in contract["paths"].items()
+        if path in AUTHORITY_PATHS
+    }
+    flat_ids = {
+        operation_id
+        for ids in operation_ids.values()
+        for operation_id in ids
+    }
+
+    # The plan records the collection-PUT operation id as
+    # `syncBotManagers`; the repository conformance gate
+    # (`scripts/validate_openapi_contract.py`) enforces
+    # snake_case, so the frozen contract id is
+    # `sync_bot_managers`.
+    assert (
+        "sync_bot_managers"
+        in operation_ids["/api/v1/collaboration/bots/{bot_id}/managers"]
+    )
+
+    # One unified path group only (no second Human/App URL
+    # group) and exactly 11 frozen verb/path combos.
+    assert len(operation_ids) == 8
+    assert sum(1 for m, p in EXPECTED_OPERATIONS if p in AUTHORITY_PATHS) == 11
+    # Unique ids across the surface.
+    assert len(flat_ids) == sum(len(ids) for ids in operation_ids.values())
+
+
+AUTHORITY_PATHS = {
+    path for (_, path) in EXPECTED_OPERATIONS
+    if "managers" in path or "ownership" in path
+}

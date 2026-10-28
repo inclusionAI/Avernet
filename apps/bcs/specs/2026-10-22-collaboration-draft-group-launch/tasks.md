@@ -12,13 +12,13 @@ owners: [bcs, frontend]
 
 - [x] 核对当前 Human、我的 Bot / candidates 用户入口；解释本地宿主 404 与直连 V1 401。
 - [x] 复用 BCS 现有浏览器认证补齐原生 Human 入口；Gateway V1 独立，不在失败后降级。
-- [x] 固定版 V1 GET / validate 复用同一 Draft 应用服务、分享权限与 composition root 实例。
+- [x] 固定版 V1 GET / validate 复用同一 Draft 应用服务、公开读取语义与 composition root 实例。
 - [x] 保留原生路由和管理权限；V1 envelope 与原生响应使用相同的原文完整性约束。
 - [x] 已有 Rust / API 契约测试与接入证据见 [verification](./verification.md) 历史章节；本轮没有修改服务端代码。
 
 ## L02：通用宿主事件与浮层参数
 
-- [x] `onOpenCreateGroup(options?)` 注入通用 UMD 宿主；无参打开普通配置，可选 `{draft}` 只接受 schema 2 四字段引用。
+- [x] `onOpenCreateGroup(options?)` 注入通用 UMD 宿主；无参打开普通配置，可选 `{draft}` 只接受 schema 2 三字段引用。
 - [x] BCS schema 2 仅在显式点击后传 `{draft}`；无回调、schema 1、不可用原文维持只读边界。
 - [x] 原 CreateGroupModal 增加独立 `selectOriginator` / `initialDraft`；不传时保留普通建群行为。
 - [x] 移除 Draft 专用 hook、wrapper 和提交 helper 命名，改用 `useGroupCreation`、通用提交逻辑及 Controller。

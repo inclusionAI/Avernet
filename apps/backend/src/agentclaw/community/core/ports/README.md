@@ -54,8 +54,11 @@ Here, both sides can import it and neither owns it.
   local skill package, without the directory-upload route's method.
 - `identity_file_port.py` — `IdentityFilePort`: listing, reading and writing a
   bot's identity files — three of `IdentityService`'s fifteen public methods.
+- `resource_rows_port.py` — `ResourceRowsPort`: replacing a bot's resource rows
+  under the resources root — one of `ResourceService`'s many.
 - `resource_file_port.py` — `ResourceFilePort`: uploading, deleting and probing
-  a bot's workspace files — three of `ResourceFileService`'s seven.
+  a bot's workspace files, and listing or clearing the resources root
+  (`data/`) — five of `ResourceFileService`'s methods.
 
 The `cli_tools` ports (`arca_port`, `delivery_port`) stay where they are. That
 category already splits by family one level down — `CliToolDeliveryPort` with

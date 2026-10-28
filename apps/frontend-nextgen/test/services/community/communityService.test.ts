@@ -1,5 +1,5 @@
-import type { CommunityGateway } from '../../../src/services/community/communityGateway';
 import { CommunityService } from '../../../src/services/community/communityService';
+import type { CommunityGateway } from '../../../src/services/community/communityGateway';
 
 function gateway(overrides: Partial<CommunityGateway> = {}): CommunityGateway {
   return {
@@ -33,6 +33,24 @@ function gateway(overrides: Partial<CommunityGateway> = {}): CommunityGateway {
       canClose: true,
     })),
     closeTopic: jest.fn(async () => undefined),
+    setPostHelpful: jest.fn(async () => undefined),
+    createInteraction: jest.fn(async () => undefined),
+    getInteractionSummary: jest.fn(async () => ({
+      scope: 'ACTOR' as const,
+      viewCount: 0,
+      likeCount: 0,
+      favoriteCount: 0,
+      followCount: 0,
+      acceptCount: 0,
+      topicCount: 0,
+      replyCount: 0,
+      acceptedReplyCount: 0,
+      replyParticipantCount: 0,
+      helpfulReplyCount: 0,
+    })),
+    getInteractionSummaryBatch: jest.fn(async () => []),
+    getPersonalCenterActivities: jest.fn(async () => ({ items: [], total: 0 })),
+    listBrowseSubscriptions: jest.fn(async () => []),
     ...overrides,
   };
 }
@@ -44,6 +62,7 @@ function reply(id: string, createdAt: string) {
     body: id === '1' ? '先' : '后',
     author: { type: 'human' as const, id: 'u', displayName: 'U' },
     createdAt,
+    helpful: false,
   };
 }
 
@@ -88,7 +107,7 @@ describe('CommunityService', () => {
     expect(result.items.map((item) => item.id)).toEqual(['new', 'old']);
   });
 
-  test('sorts replies chronologically (返回 {items,total}) and rejects blank publish input', async () => {
+  test('preserves backend helpful-first reply order (返回 {items,total}) and rejects blank publish input', async () => {
     const listReplies = jest.fn(async () => ({
       total: 2,
       items: [reply('2', '2026-10-06T12:00:00Z'), reply('1', '2026-10-06T10:00:00Z')],
@@ -98,7 +117,7 @@ describe('CommunityService', () => {
 
     const result = await service.listReplies('t');
     expect(listReplies).toHaveBeenCalledWith('t', {}, undefined);
-    expect(result.items.map((item) => item.id)).toEqual(['1', '2']);
+    expect(result.items.map((item) => item.id)).toEqual(['2', '1']);
     expect(result.total).toBe(2);
 
     await expect(service.createTopic({ title: ' ', body: '正文', authorId: 'u', authorName: '我' })).rejects.toThrow(
@@ -225,11 +244,106 @@ describe('CommunityService', () => {
     );
   });
 
+
+  test('allows title-and-body-only shares', async () => {
+    const createTopic = jest.fn(async (input) => ({
+      id: 'share-topic',
+      title: input.title,
+      body: input.body,
+      status: 'open' as const,
+      topicType: 'share' as const,
+      author: { type: 'human' as const, id: input.authorId, displayName: input.authorName },
+      replyCount: 0,
+      latestActivityAt: '',
+      createdAt: '',
+      isMine: true,
+      canClose: true,
+    }));
+    const service = new CommunityService(gateway({ createTopic }));
+
+    await service.createTopic({
+      title: ' 分享经验 ',
+      body: ' 正文 ',
+      topicType: 'share',
+      authorId: 'u1',
+      authorName: '我',
+    });
+
+    expect(createTopic).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: '分享经验',
+        body: '正文',
+        topicType: 'share',
+      }),
+      undefined,
+    );
+  });
+
+  test('enforces poll option limit and trims optional help expected time', async () => {
+    const createTopic = jest.fn(async (input) => ({
+      id: 'topic-created',
+      title: input.title,
+      body: input.body,
+      status: 'open' as const,
+      topicType: input.topicType ?? ('discussion' as const),
+      author: { type: 'human' as const, id: input.authorId, displayName: input.authorName },
+      replyCount: 0,
+      latestActivityAt: '',
+      createdAt: '',
+      isMine: true,
+      canClose: true,
+    }));
+    const service = new CommunityService(gateway({ createTopic }));
+    const common = { title: '标题', body: '正文', authorId: 'u1', authorName: '我' };
+
+    await expect(
+      service.createTopic({
+        ...common,
+        topicType: 'poll',
+        poll: { selection: 'single', options: Array.from({ length: 11 }, (_, index) => `选项 ${index + 1}`) },
+      }),
+    ).rejects.toThrow('投票选项最多 10 个');
+
+    await service.createTopic({
+      ...common,
+      topicType: 'help',
+      help: { expectedTime: ' 希望本周内 ' },
+    });
+    expect(createTopic).toHaveBeenLastCalledWith(
+      expect.objectContaining({ help: { expectedTime: '希望本周内' } }),
+      undefined,
+    );
+
+    await expect(
+      service.createTopic({
+        ...common,
+        topicType: 'help',
+        help: { expectedTime: 'x'.repeat(129) },
+      }),
+    ).rejects.toThrow('期望解决时间不能超过 128 个字符');
+  });
+
   test('closeTopic 透传 author_id 到网关', async () => {
     const closeTopic = jest.fn(async () => undefined);
     const service = new CommunityService(gateway({ closeTopic }));
     await service.closeTopic('topic-1', 'u1');
     expect(closeTopic).toHaveBeenCalledWith('topic-1', 'u1', undefined);
+  });
+
+  test('setPostHelpful 透传 Topic、Post、作者类型和目标状态到网关', async () => {
+    const setPostHelpful = jest.fn(async () => undefined);
+    const service = new CommunityService(gateway({ setPostHelpful }));
+
+    await service.setPostHelpful('topic-1', 'post-2', 'BOT', 'bot-1', true);
+
+    expect(setPostHelpful).toHaveBeenCalledWith(
+      'topic-1',
+      'post-2',
+      'BOT',
+      'bot-1',
+      true,
+      undefined,
+    );
   });
 
   test('getTopic 透传 viewer 身份参数且不改写网关结果', async () => {
@@ -258,5 +372,73 @@ describe('CommunityService', () => {
       { viewerAuthorId: 'u1', viewerAuthorType: 'HUMAN' },
       undefined,
     );
+  });
+
+  test('interaction methods validate dimensions and forward batch requests unchanged', async () => {
+    const createInteraction = jest.fn(async () => undefined);
+    const summaryResult = {
+      scope: 'ACTOR' as const,
+      viewCount: 0,
+      likeCount: 0,
+      favoriteCount: 0,
+      followCount: 0,
+      acceptCount: 0,
+      topicCount: 0,
+      replyCount: 0,
+      acceptedReplyCount: 0,
+      replyParticipantCount: 0,
+      helpfulReplyCount: 0,
+    };
+    const getInteractionSummary = jest.fn(async () => summaryResult);
+    const getInteractionSummaryBatch = jest.fn(async () => []);
+    const service = new CommunityService(
+      gateway({ createInteraction, getInteractionSummary, getInteractionSummaryBatch }),
+    );
+    const input = {
+      actor: { actorType: 'HUMAN' as const, id: '149844' },
+      actionType: 'LIKE' as const,
+      target: { targetType: 'TOPIC' as const, id: 'topic-1' },
+    };
+    const query = { target: { targetType: 'TOPIC' as const, id: 'topic-1' } };
+
+    await service.createInteraction(input);
+    await service.getInteractionSummary(query);
+    await service.getInteractionSummaryBatch([query]);
+
+    expect(createInteraction).toHaveBeenCalledWith(input, undefined);
+    expect(getInteractionSummary).toHaveBeenCalledWith(query, undefined);
+    expect(getInteractionSummaryBatch).toHaveBeenCalledWith([query], undefined);
+
+    await expect(
+      service.createInteraction({
+        actor: { actorType: 'HUMAN', id: ' ' },
+        actionType: 'LIKE',
+        target: query.target,
+      }),
+    ).rejects.toThrow('互动主体或目标不能为空');
+    await expect(async () => service.getInteractionSummary({})).rejects.toThrow('缺少互动统计维度');
+    await expect(async () => service.getInteractionSummaryBatch([])).rejects.toThrow('互动统计批次不能为空');
+  });
+
+  test('Personal Center forwards its owner-scoped query and pages subscription Bot source', async () => {
+    const getPersonalCenterActivities = jest.fn(async () => ({ items: [], total: 0 }));
+    const listBrowseSubscriptions = jest.fn(async () => ['bot-A']);
+    const service = new CommunityService(
+      gateway({ getPersonalCenterActivities, listBrowseSubscriptions }),
+    );
+    const query = {
+      ownerUserId: '149844',
+      actorScope: 'ALL' as const,
+      activityType: 'AUTHORED' as const,
+      targetType: 'ALL' as const,
+      page: 1,
+      pageSize: 10,
+    };
+
+    await service.getPersonalCenterActivities(query);
+    await service.listBrowseSubscriptions('149844');
+
+    expect(getPersonalCenterActivities).toHaveBeenCalledWith(query, undefined);
+    expect(listBrowseSubscriptions).toHaveBeenCalledWith('149844', undefined);
   });
 });

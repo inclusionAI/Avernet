@@ -4,13 +4,14 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_domain::MessageViewScope;
+use bcs_service_api::port::bot_authority::BotAuthorityPort;
 use bcs_service_api::port::repo::NewSessionParams;
 use bcs_service_api::{
     ActorKind, AuthenticatedHumanCaller, BotRegistryCoreService, CollaborationRuntimeService,
     CreateOrReactivateCommand, CreateSessionLaunch, DeliveryType, Group, GroupCoreService,
     GroupStrategy, InitialSessionRun, InitialSessionRunActivityKind, InitialSessionRunState,
     Participant, ParticipantMode, ParticipantRole, ReactivateSessionLaunch, RequestedSessionRole,
-    Session, SessionCaller, SessionKind, SessionLaunchError, SessionLaunchOutcome,
+    ServiceError, Session, SessionCaller, SessionKind, SessionLaunchError, SessionLaunchOutcome,
     SessionLaunchRequest, SessionLaunchService, SessionManagementService, SessionUseCaseError,
     StartStateMachineRunCommand, SystemMessageEvent, SystemMessageService, backfill_bot_names,
     resolve_session_topic,
@@ -22,6 +23,11 @@ pub struct SessionLaunchApplication {
     sessions: Arc<dyn SessionManagementService>,
     runtime: Arc<dyn CollaborationRuntimeService>,
     system_message: Arc<dyn SystemMessageService>,
+    /// The narrow authority hook (bot-authority plan
+    /// Task 6.3): the launch Human→Bot control
+    /// judgments consult it live; a missing wiring
+    /// fails closed.
+    bot_authority: Option<Arc<dyn BotAuthorityPort>>,
 }
 
 struct PreparedLaunch {
@@ -51,6 +57,48 @@ impl SessionLaunchApplication {
             sessions,
             runtime,
             system_message,
+            bot_authority: None,
+        }
+    }
+
+    /// Wire the authority hook (row 17, bot-authority
+    /// plan Task 6.3).
+    pub fn with_bot_authority_hook(
+        mut self,
+        bot_authority: Arc<dyn BotAuthorityPort>,
+    ) -> Self {
+        self.bot_authority = Some(bot_authority);
+        self
+    }
+
+    /// The wired authority hook; failing to wire one is a
+    /// composition error and must fail closed (never deny-as-Ok).
+    fn authority(
+        &self,
+    ) -> Result<&dyn BotAuthorityPort, SessionLaunchError> {
+        self.bot_authority
+            .as_deref()
+            .ok_or_else(|| {
+                SessionLaunchError::Internal(ServiceError::InternalError(
+                    "bot authority hook is not wired".to_string(),
+                ))
+            })
+    }
+
+    /// Row 17 Human→Bot control leg: a live `can_manage`
+    /// edge; the historical `created_by` no longer
+    /// authorizes anything here.
+    async fn human_controls_bot(
+        &self,
+        user_id: &str,
+        bot_id: &str,
+    ) -> Result<bool, SessionLaunchError> {
+        match self.authority()?.can_manage(user_id, bot_id).await {
+            Ok(result) => Ok(result),
+            Err(ServiceError::Forbidden(message)) => {
+                Err(SessionLaunchError::Forbidden(message))
+            }
+            Err(other) => Err(SessionLaunchError::Internal(other)),
         }
     }
 
@@ -74,13 +122,19 @@ impl SessionLaunchApplication {
         {
             return Ok(true);
         }
-        let owned = self.registry.try_list_bots_by_creator(owner_id).await?;
-        Ok(owned.iter().any(|bot| {
-            group
-                .participants
-                .iter()
-                .any(|participant| participant.bot_uuid == bot.bot_uuid)
-        }))
+        // Row 17 access leg: the Human reaches the Group
+        // through a participant Bot it CURRENTLY controls
+        // (live `can_manage` per participant, never a
+        // creator-list whitelist).
+        for participant in &group.participants {
+            if self
+                .human_controls_bot(owner_id, &participant.bot_uuid)
+                .await?
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     async fn caller_has_group_access(
@@ -124,13 +178,14 @@ impl SessionLaunchApplication {
                 "caller does not own bot {target}"
             )));
         };
-        let owned = self
-            .registry
-            .try_get(target)
-            .await?
-            .and_then(|bot| bot.created_by)
-            .is_some_and(|created_by| created_by == *owner_id);
-        if !owned {
+        // Row 17 sponsor leg (spec §8.1): the Human may
+        // launch as a Bot it CURRENTLY controls (live
+        // `can_manage`); the historical `created_by` is
+        // not a sponsor fact. A manager-controlled bot
+        // may serve as the Session creator as well.
+        let controlled = self.registry.try_get(target).await?.is_some()
+            && self.human_controls_bot(owner_id, target).await?;
+        if !controlled {
             return Err(SessionLaunchError::Forbidden(format!(
                 "caller does not own bot {target}"
             )));

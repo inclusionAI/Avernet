@@ -3,7 +3,7 @@
 ## Provides
 
 - Immutable Draft GET/validate at `/api/v1/collaboration/drafts/**`, outside
-  Gateway middleware, using only the fixed revision read capability. The native
+  Gateway middleware, using public fixed-revision reads without credentials. The native
   and V1 adapters share one injected Draft service; V1 adds an envelope, not
   management routes, identity fallback or persistence.
 - `GET /openapi/v1/collaboration/me` projects the verified Human only. The native

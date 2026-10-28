@@ -60,36 +60,45 @@ space_knowledge_capture:
   enabled: false
 ```
 
-This block rejects unknown keys and non-boolean values. Selection happens only
+This block accepts only a boolean `enabled`. A malformed block keeps capture
+disabled with a warning instead of aborting boot; it never guesses an enabled
+value from an invalid shape. Selection happens only
 in the composition root; writers do not inspect Sink state or environment flags.
 
 | Deployment | Required behavior |
 | --- | --- |
 | Never enabled, no history | Default no-op effects; legacy Space/member/approval/Skill Space paths work without the sync table, including `create_schema=false`. No outbox SELECT, knowledge write guard, remote calls or scan. |
-| Capture enabled, Space not activated | Table required; ordinary mutations check activation but create no snapshots and have no receiver admission limit. |
+| Capture enabled, Space not activated | Startup does not inspect the table; actual mutations require usable schema to check activation, and create no snapshots or receiver admission limit until activated. |
 | Activated, delivering | Same-transaction immutable snapshots, FIFO and exact hash acknowledgement. |
 | Activated, delivery paused | Keep capture enabled; continue removal/role/delete history and retired-ID protection. Resume the Sink to drain in order after restart. |
-| Capture disabled with retained same-environment history | Startup/first library writer rejects the unsafe downgrade, including history owned by another app because source Spaces and SQLite IDs are shared. |
+| Capture disabled with retained same-environment history | Startup and ordinary library writes remain available; history does not enable capture or get rewritten. Knowledge producers still require enabled capture. |
 
-The lifecycle validates after DB bootstrap (or on first protected library
-transaction); it does no DB I/O during DI construction. Missing table with
-capture disabled is valid; permissions/connection errors and incompatible tables
-are not silently treated as absence. The same lifecycle guard protects raw
-producer transactions before a Sink call, including callers without HTTP lifespan.
-Validation success is cached per graph. Changing capture/Sink bindings requires
-restart; this is not dynamic per-request fail-open selection.
+The lifecycle performs no configuration or capture/delivery validation at
+startup. It opens no DB session at startup and never inspects table existence,
+columns, primary keys or history, whether capture is enabled or disabled.
+Capture-disabled deployments with an enabled Sink start normally; the first
+delivery use surfaces its real runtime error. Actual enabled-capture SQL
+surfaces schema/connection errors at runtime in the caller transaction; errors
+are not treated as absent history or successful synchronization. No explicit
+primary-key/type compatibility probe is performed at runtime either. The guard
+still rejects disabled producers, including callers without HTTP lifespan.
+Changing capture/Sink bindings requires restart; this is not per-request
+fail-open selection.
 
 **Never-enabled deployments require no knowledge DDL.** To first enable capture,
 apply `core/spaces/sql/2026_10_24_space_knowledge_sync.sql`, then roll out
 `capture=true` to **all** writers (API instances, workers and library users)
 before allowing any first activation. Mixed capture/no-op writers are unsafe;
-a one-time local history check is not a distributed rollout coordinator.
+history presence does not enforce this rollout requirement at startup.
 
 The earlier progress-only schema was an unpublished experiment; `CREATE IF NOT
 EXISTS` does not upgrade it. Preserve snapshots/progress with an explicit
 state-preserving migration if it exists. No source or shared-queue schema/index
-changes are introduced here. Rollback with history must preserve capture or
-pause affected writes; never delete history or disable capture to bypass startup.
+changes are introduced here. For consistent rollback with history, preserve
+capture or pause affected writes.
+Explicitly disabling capture no longer blocks startup, but loses recording and
+SQLite retired-ID protection; it does not reconcile missed revocations. Never
+delete history to change deployment availability.
 Corporate composition roots must wire the new required transaction policy and
 producer guard before enabling real knowledge. Public tests do not prove that
 external assembly, MySQL/OceanBase or online migration is deployed.

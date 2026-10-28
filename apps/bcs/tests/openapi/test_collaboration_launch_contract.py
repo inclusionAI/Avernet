@@ -1,4 +1,4 @@
-"""Shared wire shapes and separate Human/capability trust boundaries."""
+"""Shared wire shapes and separate Human and public-read boundaries."""
 import sys
 from pathlib import Path
 
@@ -7,7 +7,7 @@ sys.path.insert(0, str(BCS_ROOT))
 from scripts.validate_openapi_contract import load_contract, validate_contract  # noqa: E402
 
 
-def test_draft_projection_is_capability_only_and_uses_native_source_schema():
+def test_draft_projection_is_public_and_uses_native_source_schema():
     root = BCS_ROOT / "api-contracts"
     native = load_contract(root / "collaboration-drafts", "v1.yaml")
     internal = load_contract(root / "v1", "internal.yaml")
@@ -17,12 +17,17 @@ def test_draft_projection_is_capability_only_and_uses_native_source_schema():
     for path, method in [(base, "get"), (base + "/validate", "post")]:
         op = internal["paths"][path][method]
         assert op["x-avernet-security"] == {}
-        assert op["security"] == [{"RevisionReadToken": []}]
+        assert op["security"] == []
         assert "requestBody" not in op
         schema = op["responses"]["200"]["content"]["application/json"]["schema"]
         assert set(schema["required"]) == {"code", "message", "data", "request_id"}
     schema = internal["paths"][base]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
     assert schema["properties"]["data"] == native["components"]["schemas"]["StoredRevision"]
+    reference = native["components"]["schemas"]["Reference"]
+    assert reference["required"] == ["schemaVersion", "draftId", "revision", "readToken"]
+    assert reference["properties"]["readToken"]["deprecated"] is True
+    assert reference["properties"]["readToken"]["const"] == "A" * 43
+    assert set(native["components"]["securitySchemes"]) == {"BotToken"}
 
 
 def test_native_browser_slice_reuses_v1_shapes_without_gateway_or_bot_auth():

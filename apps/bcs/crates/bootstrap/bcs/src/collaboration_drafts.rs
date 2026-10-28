@@ -1,4 +1,4 @@
-//! Drafts are opt-in and persist their per-revision read grants in the database.
+//! Drafts are opt-in and persist their revision availability in the database.
 use bcs_collaboration_store::draft::DbCollaborationDraftStore;
 use bcs_service_api::application::{
     collaboration_draft::CollaborationDraftService,
@@ -33,7 +33,7 @@ mod tests {
     use super::*;
     use bcs_collaboration_store::MemoryCollaborationStore;
     use bcs_service_api::{
-        application::collaboration_draft::{DraftAccess, DraftContent},
+        application::collaboration_draft::DraftContent,
         JudgeDecision, JudgeEvaluatorPort, JudgeRequest, ServiceResult,
     };
     use std::path::Path;
@@ -106,7 +106,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn restart_and_disable_preserve_grants_without_key_files() {
+    async fn restart_and_disable_preserve_revisions_without_key_files() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("bcs.db");
         let mut config = crate::config::BcsConfig::default();
@@ -131,11 +131,11 @@ mod tests {
         config.collaboration_drafts.as_mut().unwrap().enabled = true;
         let service = build(&config, db.clone(), validator()).unwrap();
         let replica = build(&config, db, validator()).unwrap();
-        assert_eq!(replica.reference("owner", &id, 1).await.unwrap().read_token, reference.read_token);
-        assert_eq!(service.read(DraftAccess::ReadToken(reference.read_token.clone()), &id, 1)
+        assert_eq!(replica.reference("owner", &id, 1).await.unwrap().revision, reference.revision);
+        assert_eq!(service.read(&id, 1)
             .await.unwrap().definition_yaml, "原文\r\n😀\n");
         replica.revoke("owner", &id, 1).await.unwrap();
-        assert!(service.read(DraftAccess::ReadToken(reference.read_token), &id, 1).await.is_err());
+        assert!(service.read(&id, 1).await.is_err());
         assert_eq!(std::fs::read_to_string(old_file).unwrap(), "obsolete");
     }
 

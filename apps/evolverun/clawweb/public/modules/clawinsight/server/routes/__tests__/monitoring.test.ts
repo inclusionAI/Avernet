@@ -468,6 +468,33 @@ describe("diagnosis report -> allowlist -> durable recovery task", () => {
     await vi.waitFor(() => expect(agent.start).toHaveBeenCalledTimes(1));
   });
 
+  it("corrects online service CLIENT_ID from the persisted NAS path while retaining the stored credentials", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { input, tasks, agent } = await automaticRecovery("mock-bot-oc");
+    const deviceUuid = `DEVICE-${"b".repeat(32)}`;
+    const event = { ...input, engine: "OC", sessionId: "physical-session",
+      runtimeIdentity: { ...runtimeIdentity, BOT_ID: input.botId, OWNER_ID: input.entityId },
+      sessionNasPath: `/nas/prod/prod_staff_different-entity_openclaw_${input.botId}_${deviceUuid}/.openclaw/agents/main/sessions/physical-session.jsonl`,
+    };
+    expect((await post(event)).status).toBe(201);
+    expect(await post(event)).toMatchObject({ status: 200, body: { duplicate: true } });
+    const rows = await db.query<{ task_id: string }>("SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery'");
+    expect(rows).toHaveLength(1);
+    const task = await tasks.find(rows[0].task_id);
+    expect(task?.request.target.runtime_identity).toEqual({ stage: "online", version: "V16", deviceUuid });
+    expect(task?.request).not.toHaveProperty("sessionNasPath");
+    const [stored] = await db.query("SELECT runtime_identity, session_nas_path FROM insight_monitoring_diagnose WHERE event_id = ?", [event.eventId]);
+    expect(JSON.parse(String(stored.runtime_identity))).toEqual(event.runtimeIdentity);
+    expect(stored.session_nas_path).toBe(event.sessionNasPath);
+    await vi.waitFor(() => expect(agent.start).toHaveBeenCalledTimes(1));
+    expect(warning.mock.calls.filter(([message]) => message === "[monitoring] recovery instance corrected")).toHaveLength(2);
+    // Existing task idempotency rejects a later hint that tries to switch instances.
+    expect((await post({ ...event, sessionNasPath: event.sessionNasPath.replace(deviceUuid, `DEVICE-${"c".repeat(32)}`) })).status).toBe(409);
+    const [replayed] = await db.query("SELECT session_nas_path FROM insight_monitoring_diagnose WHERE event_id = ?", [event.eventId]);
+    expect(replayed.session_nas_path).toBe(event.sessionNasPath);
+    expect(await db.query("SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery'")).toHaveLength(1);
+  });
+
   it("acknowledges nonmembers normally and retries enabled configuration failures without losing diagnostics", async () => {
     const { input, config, agent } = await automaticRecovery();
     expect((await post({ ...input, entityId: "another-owner" })).status).toBe(201);
@@ -544,4 +571,60 @@ it("stores the complete v3 snapshot without leaking it in ACKs, UI DTOs or rejec
     expect(JSON.stringify(response)).not.toContain(runtimeIdentity.TOKEN);
     expect(JSON.stringify(response)).not.toContain(runtimeIdentity.CLIENT_ID);
   }
+});
+
+describe("sessionNasPath monitoring storage and trigger boundary", () => {
+  const path = "/nas/instance-b/.openclaw/agents/main/sessions/original.jsonl";
+  const event = { ...unresolved, schemaVersion: DIAGNOSIS_V4_VERSION, runtimeIdentity,
+    handlerName: null, sessionNasPath: path };
+  it("persists before triggering, retries original metadata after 503 and omits it from ACK/pages", async () => {
+    await stop();
+    const trigger = vi.fn(async (input) => {
+      expect(input.sessionNasPath).toBe(path);
+      expect(input.runtimeIdentity).toEqual(runtimeIdentity);
+      const [row] = await db.query("SELECT session_nas_path FROM insight_monitoring_diagnose WHERE event_id = ?", [input.eventId]);
+      expect(row.session_nas_path).toBe(path);
+      if (trigger.mock.calls.length === 1) throw new MonitoringError("NOT_READY", "temporary");
+    });
+    recovery = { trigger }; await start();
+    expect((await post(event)).status).toBe(503);
+    const retry = await post(event);
+    expect(retry.status).toBe(200);
+    expect(retry.body).toMatchObject({ accepted: true, stored: true, duplicate: true });
+    expect(retry.body).not.toHaveProperty("sessionNasPath");
+    expect(trigger).toHaveBeenCalledTimes(2);
+    expect(trigger.mock.calls[0][0]).toEqual(trigger.mock.calls[1][0]);
+    const page = await get(event.botId);
+    expect(page.status).toBe(200);
+    expect(page.body.items[0]).not.toHaveProperty("sessionNasPath");
+    expect(JSON.stringify(page.body)).not.toContain(path);
+    expect((await db.query("SELECT COUNT(*) AS n FROM insight_monitoring_diagnose"))[0].n).toBe(1);
+  });
+  it("returns 201 then 200 without changing the ACK schema", async () => {
+    const first = await post(event), duplicate = await post(event);
+    expect(first.status).toBe(201); expect(duplicate.status).toBe(200);
+    expect(first.body).toEqual({ ...duplicate.body, duplicate: false });
+    expect(first.body).not.toHaveProperty("sessionNasPath");
+  });
+  it.each([null, undefined])("persists absent/null as SQL NULL and keeps the original trigger behavior (%j)", async value => {
+    await stop(); const trigger = vi.fn().mockResolvedValue(undefined); recovery = { trigger }; await start();
+    expect((await post({ ...event, sessionNasPath: value })).status).toBe(201);
+    expect((await db.query("SELECT session_nas_path FROM insight_monitoring_diagnose"))[0].session_nas_path).toBeNull();
+    expect(trigger).toHaveBeenCalledTimes(1);
+    expect(trigger.mock.calls[0][0]).not.toHaveProperty("sessionNasPath");
+  });
+  it.each([42, {}, "", "relative/file", "/a\\b", "/a/./b", "/a/../b", "/a\n", "/a\u0000", "/a\u007f", "/a\u0085", "/a\u009f", "/a\ud800", "/" + "😀".repeat(4096)])(
+    "rejects invalid metadata without writes or trigger (%j)", async value => {
+      await stop(); const trigger = vi.fn(); recovery = { trigger }; await start();
+      const result = await post({ ...event, sessionNasPath: value });
+      expect(result.status).toBe(typeof value === "string" && [...value].length > 4096 ? 413 : 400);
+      expect(trigger).not.toHaveBeenCalled();
+      expect((await db.query("SELECT COUNT(*) AS n FROM insight_monitoring_diagnose"))[0].n).toBe(0);
+    });
+  it("does not trigger or acknowledge storage when the new column is missing", async () => {
+    await stop(); const trigger = vi.fn(); recovery = { trigger }; await start();
+    await db.exec("ALTER TABLE insight_monitoring_diagnose RENAME COLUMN session_nas_path TO missing_nas_path");
+    expect((await post(event)).status).toBe(503);
+    expect(trigger).not.toHaveBeenCalled();
+  });
 });

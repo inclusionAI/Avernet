@@ -30,7 +30,7 @@ describe('community mapper', () => {
       topicType: 'poll',
     });
     expect(topic.topicConfig).toBeUndefined();
-  expect(topic.analysis).toBeUndefined();
+    expect(topic.analysis).toBeUndefined();
   });
 
   test('maps bot replies and normalizes unknown topic status to closed', () => {
@@ -179,6 +179,7 @@ test('maps a real backend reply with flattened author', () => {
     id: 'post-real',
     topicId: 'real-1',
     author: { type: 'bot', id: 'product-helper', displayName: 'product-helper' },
+    helpful: false,
   });
 });
 
@@ -187,6 +188,8 @@ test('maps flat reply reference fields without adding a tree edge', () => {
     post_id: 'post-2',
     topic_id: 'topic-1',
     body: '继续讨论',
+    floor_no: 3,
+    helpful: true,
     reply_to_post_id: 'post-1',
     reply_to_floor_no: 1,
     author_type: 'HUMAN',
@@ -197,6 +200,8 @@ test('maps flat reply reference fields without adding a tree edge', () => {
 
   expect(reply.replyToPostId).toBe('post-1');
   expect(reply.replyToFloorNo).toBe(1);
+  expect(reply.floorNo).toBe(3);
+  expect(reply.helpful).toBe(true);
   expect(reply).not.toHaveProperty('children');
   expect(reply).not.toHaveProperty('replies');
 });
@@ -245,6 +250,7 @@ test('maps first-level replies with their two-level child reply group', () => {
     id: 'post-2',
     replyToPostId: 'post-1',
     replyToFloorNo: 1,
+    helpful: false,
     author: { type: 'bot', displayName: '协作助手' },
   });
   expect(reply.childReplies?.[0]).not.toHaveProperty('children');
@@ -254,4 +260,39 @@ test('falls back to anonymous when author has neither display_name nor actor_id'
   expect(mapCommunityTopicDto({ topic_id: 't', title: 'T', body: 'b', status: 'OPEN' }).author.displayName).toBe(
     '匿名',
   );
+});
+
+
+test('maps SHARE type without topic configuration', () => {
+  const topic = mapCommunityTopicDto({
+    topic_id: 'share-1',
+    title: '分享经验',
+    body: '正文',
+    status: 'OPEN',
+    topic_type: 'SHARE',
+  });
+
+  expect(topic.topicType).toBe('share');
+  expect(topic.topicConfig).toBeUndefined();
+});
+
+test('maps HELP expected time and keeps an empty help config', () => {
+  const withExpectedTime = mapCommunityTopicDto({
+    topic_id: 'help-1',
+    title: '求助',
+    status: 'OPEN',
+    topic_type: 'HELP',
+    topic_config: { help: { expected_time: ' 希望本周内 ' } },
+  });
+  const withoutExpectedTime = mapCommunityTopicDto({
+    topic_id: 'help-2',
+    title: '求助',
+    status: 'OPEN',
+    topic_type: 'HELP',
+    topic_config: { help: {} },
+  });
+
+  expect(withExpectedTime.topicType).toBe('help');
+  expect(withExpectedTime.topicConfig?.help).toEqual({ expectedTime: '希望本周内' });
+  expect(withoutExpectedTime.topicConfig?.help).toEqual({ expectedTime: undefined });
 });

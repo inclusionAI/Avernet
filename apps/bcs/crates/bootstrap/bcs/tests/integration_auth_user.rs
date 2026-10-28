@@ -315,7 +315,7 @@ async fn browser_launch_uses_configured_human_and_rejects_identity_confusion() {
         .header("x-bcs-expected-user", "001").send().await.unwrap();
     assert_eq!(response.status(), 200);
     for (header, value) in [("authorization", "Bearer bot-credential"), ("actor", "bot-id"),
-        ("x-bcs-draft-read-token", "share-capability"), ("x-avernet-principal", "invalid-gateway") ] {
+        ("x-avernet-principal", "invalid-gateway") ] {
         assert_eq!(client.get(format!("{base}/me")).header(header, value).send().await.unwrap().status(), 401);
     }
     let changed = client.post(format!("{base}/groups")).header("x-bcs-expected-user", "other")

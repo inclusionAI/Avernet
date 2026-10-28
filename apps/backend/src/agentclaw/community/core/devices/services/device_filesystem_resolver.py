@@ -116,6 +116,9 @@ class DefaultDeviceFileSystemResolver:
             return self._resolve_arca(conn_info, path_mapper)
 
         if provider == "teclaw":
+            from agentclaw.community.core.devices.services.baas_invoke_transport import (
+                BaasInvokeTransport,
+            )
             from agentclaw.community.core.devices.services.teclaw_device_filesystem import (
                 TeclawDeviceFileSystem,
             )
@@ -128,12 +131,21 @@ class DefaultDeviceFileSystemResolver:
             # ``/workspace/...`` | ``/identity/...`` (the path the engine knows the
             # file by). teclaw now forwards every read/write per-file to the engine,
             # so it needs neither OSS nor the whole-artifact device-sync redeliver.
-            # ``baas_service`` powers those per-file calls via ``invoke_http`` over
-            # the agentclawproxy gateway.
+            # Those per-file calls go over the agentclawproxy gateway through the
+            # cloud BaaS transport, which resolves ``http_info`` once per path for
+            # the life of this filesystem instead of once per file. No
+            # ``device_uuid``: teclaw never pinned an instance, so BaaS keeps
+            # choosing the active one.
+            teclaw_transport = BaasInvokeTransport(
+                bind_id=conn_info["bind_id"],
+                engine_port=conn_info["engine_port"],
+                tenant=conn_info.get("tenant", "default"),
+                baas_service=self._baas_service,
+            )
             return TeclawDeviceFileSystem(
+                transport=teclaw_transport,
                 conn_info=conn_info,
                 path_mapper=path_mapper,
-                baas_service=self._baas_service,
             )
 
         if provider == "local":

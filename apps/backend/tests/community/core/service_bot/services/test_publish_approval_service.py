@@ -59,6 +59,7 @@ def _make_publish_record(
 def _make_bot_with_should_approval(should_approval: bool) -> dict:
     """Helper to create bot dict with should_approval config."""
     return {
+        "owner_id": "owner_001",
         "ext": {
             "service_bot_config": {
                 "should_approval": should_approval,
@@ -74,7 +75,7 @@ class TestCheckAndProcessOnlineApproval:
     async def test_skip_when_should_approval_disabled(self):
         """should_approval=False 时，跳过审批。"""
         bot_service = MagicMock()
-        bot_service.get_bot.return_value = _make_bot_with_should_approval(False)
+        bot_service.get_bot_by_address.return_value = _make_bot_with_should_approval(False)
 
         service = _make_publish_approval_service(bot_service=bot_service)
         record = _make_publish_record(owner_id="owner_001")
@@ -92,7 +93,7 @@ class TestCheckAndProcessOnlineApproval:
     async def test_skip_when_operator_is_owner(self):
         """operator 是 owner 时，跳过审批。"""
         bot_service = MagicMock()
-        bot_service.get_bot.return_value = _make_bot_with_should_approval(True)
+        bot_service.get_bot_by_address.return_value = _make_bot_with_should_approval(True)
 
         service = _make_publish_approval_service(bot_service=bot_service)
         record = _make_publish_record(owner_id="owner_001")
@@ -110,7 +111,7 @@ class TestCheckAndProcessOnlineApproval:
     async def test_return_existing_when_processing(self):
         """已有 PROCESSING 状态审批时，返回现有审批。"""
         bot_service = MagicMock()
-        bot_service.get_bot.return_value = _make_bot_with_should_approval(True)
+        bot_service.get_bot_by_address.return_value = _make_bot_with_should_approval(True)
 
         service = _make_publish_approval_service(bot_service=bot_service)
         existing_approval = {
@@ -137,7 +138,7 @@ class TestCheckAndProcessOnlineApproval:
     async def test_create_new_approval_for_collaborator(self):
         """非 owner 的协作者需要创建新审批。"""
         bot_service = MagicMock()
-        bot_service.get_bot.return_value = _make_bot_with_should_approval(True)
+        bot_service.get_bot_by_address.return_value = _make_bot_with_should_approval(True)
 
         process_service = MagicMock()
         process_service.start_approval.return_value = {
@@ -180,7 +181,7 @@ class TestCheckAndProcessOfflineApproval:
     async def test_skip_when_should_approval_disabled(self):
         """should_approval=False 时，跳过审批。"""
         bot_service = MagicMock()
-        bot_service.get_bot.return_value = _make_bot_with_should_approval(False)
+        bot_service.get_bot_by_address.return_value = _make_bot_with_should_approval(False)
 
         service = _make_publish_approval_service(bot_service=bot_service)
         record = _make_publish_record(owner_id="owner_001")
@@ -198,7 +199,7 @@ class TestCheckAndProcessOfflineApproval:
     async def test_skip_when_operator_is_owner(self):
         """operator 是 owner 时，跳过审批。"""
         bot_service = MagicMock()
-        bot_service.get_bot.return_value = _make_bot_with_should_approval(True)
+        bot_service.get_bot_by_address.return_value = _make_bot_with_should_approval(True)
 
         service = _make_publish_approval_service(bot_service=bot_service)
         record = _make_publish_record(owner_id="owner_001")
@@ -216,7 +217,7 @@ class TestCheckAndProcessOfflineApproval:
     async def test_return_existing_when_processing(self):
         """已有 PROCESSING 状态审批时，返回现有审批。"""
         bot_service = MagicMock()
-        bot_service.get_bot.return_value = _make_bot_with_should_approval(True)
+        bot_service.get_bot_by_address.return_value = _make_bot_with_should_approval(True)
 
         service = _make_publish_approval_service(bot_service=bot_service)
         existing_approval = {
@@ -243,7 +244,7 @@ class TestCheckAndProcessOfflineApproval:
     async def test_create_new_approval_for_collaborator(self):
         """非 owner 的协作者需要创建新审批。"""
         bot_service = MagicMock()
-        bot_service.get_bot.return_value = _make_bot_with_should_approval(True)
+        bot_service.get_bot_by_address.return_value = _make_bot_with_should_approval(True)
 
         process_service = MagicMock()
         process_service.start_approval.return_value = {
@@ -469,7 +470,7 @@ class TestCreateNewApproval:
     async def test_create_approval_fails(self):
         """创建审批失败时返回 ERROR。"""
         bot_service = MagicMock()
-        bot_service.get_bot.return_value = _make_bot_with_should_approval(True)
+        bot_service.get_bot_by_address.return_value = _make_bot_with_should_approval(True)
 
         process_service = MagicMock()
         process_service.start_approval.return_value = {
@@ -500,7 +501,7 @@ class TestCreateNewApproval:
     async def test_archive_old_approval_on_terminal_state(self):
         """终态审批应被归档后创建新审批。"""
         bot_service = MagicMock()
-        bot_service.get_bot.return_value = _make_bot_with_should_approval(True)
+        bot_service.get_bot_by_address.return_value = _make_bot_with_should_approval(True)
 
         process_service = MagicMock()
         process_service.start_approval.return_value = {
@@ -544,7 +545,7 @@ class TestIsApprovalRequired:
     def test_returns_false_when_bot_not_found(self):
         """Bot 不存在时返回 False。"""
         bot_service = MagicMock()
-        bot_service.get_bot.return_value = None
+        bot_service.get_bot_by_address.return_value = None
 
         service = _make_publish_approval_service(bot_service=bot_service)
         record = _make_publish_record()
@@ -555,7 +556,7 @@ class TestIsApprovalRequired:
     def test_returns_false_when_should_approval_is_none(self):
         """should_approval 为 None 时返回 False。"""
         bot_service = MagicMock()
-        bot_service.get_bot.return_value = {
+        bot_service.get_bot_by_address.return_value = {
             "ext": {
                 "service_bot_config": {
                     # should_approval not set
@@ -572,7 +573,7 @@ class TestIsApprovalRequired:
     def test_returns_false_when_should_approval_is_false(self):
         """should_approval 为 False 时返回 False。"""
         bot_service = MagicMock()
-        bot_service.get_bot.return_value = _make_bot_with_should_approval(False)
+        bot_service.get_bot_by_address.return_value = _make_bot_with_should_approval(False)
 
         service = _make_publish_approval_service(bot_service=bot_service)
         record = _make_publish_record()
@@ -583,7 +584,7 @@ class TestIsApprovalRequired:
     def test_returns_true_when_should_approval_is_true(self):
         """should_approval 为 True 时返回 True。"""
         bot_service = MagicMock()
-        bot_service.get_bot.return_value = _make_bot_with_should_approval(True)
+        bot_service.get_bot_by_address.return_value = _make_bot_with_should_approval(True)
 
         service = _make_publish_approval_service(bot_service=bot_service)
         record = _make_publish_record()
@@ -594,7 +595,7 @@ class TestIsApprovalRequired:
     def test_returns_false_when_service_bot_config_missing(self):
         """service_bot_config 不存在时返回 False。"""
         bot_service = MagicMock()
-        bot_service.get_bot.return_value = {"ext": {}}
+        bot_service.get_bot_by_address.return_value = {"ext": {}}
 
         service = _make_publish_approval_service(bot_service=bot_service)
         record = _make_publish_record()
@@ -673,7 +674,7 @@ class TestCreateNewApprovalBotNotFound:
     async def test_returns_error_when_bot_not_found(self):
         """Bot 不存在时返回 ERROR。"""
         bot_service = MagicMock()
-        bot_service.get_bot.return_value = None  # Bot not found
+        bot_service.get_bot_by_address.return_value = None  # Bot not found
 
         service = _make_publish_approval_service(bot_service=bot_service)
         record = _make_publish_record()

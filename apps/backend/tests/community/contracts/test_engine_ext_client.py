@@ -82,11 +82,11 @@ def test_consumer_surfaces_empty_engine_ext_from_local_noop() -> None:
     )
 
     assert result.success is True
-    # Engine payload empty (Noop); producer injects identity + draft stage (owner_id
-    # / bot_name default to "" — neither on this bot row).
+    # Engine payload empty (Noop); producer injects the stable entity locator,
+    # draft stage and an empty bot_name.
     assert result.ext["config_artifact"]["engine_ext"] == {
         "bot_id": "b1",
-        "owner_id": "",
+        "owner_id": "u1",
         "bot_name": "",
         "stage": "draft",
     }
@@ -127,7 +127,7 @@ def test_consumer_carries_mock_engine_ext_verbatim() -> None:
     assert pinned["engine_ext"] == {
         **opaque,
         "bot_id": "b2",
-        "owner_id": "",
+        "owner_id": "u2",
         "bot_name": "",
         "stage": "draft",
     }

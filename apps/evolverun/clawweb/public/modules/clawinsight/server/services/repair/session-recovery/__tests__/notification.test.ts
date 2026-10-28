@@ -292,6 +292,18 @@ it("reuses the direct Owner DingTalk channel for ended permission cases without 
   expect(sender.sendNotification.mock.calls[0][0].text).toContain("本次自愈已结束，后续请自行处理。");
 });
 
+it("notifies the Owner of nonblocking suggestions after recovery without requesting approval or repair", async () => {
+  const sender = { sendNotification: vi.fn().mockResolvedValue(undefined) };
+  const config = { findByKey: vi.fn().mockResolvedValue({ enabled: 1, config_json: "{}" }) };
+  const notifier = new SessionRecoveryNotifier(sender, "https://service.invalid", config);
+  await notifier.notify({ ownerId: "owner", taskId: "SR-suggestion", kind: "result", effect: "recovered", summary: "原任务已完成；建议在 Skill 中补充参数示例。" });
+  expect(sender.sendNotification).toHaveBeenCalledExactlyOnceWith({ recipientUserId: "owner", title: "会话自愈已恢复，有后续建议",
+    text: expect.stringContaining("原任务已完成") });
+  const text = sender.sendNotification.mock.calls[0][0].text;
+  expect(text).toContain("本次自愈已结束，后续建议可按需处理。");
+  expect(text).not.toMatch(/等待|确认方案|需要人工处理/);
+});
+
 it("uses the saved overall summary in final notices while preserving verified facts", async () => {
   const { notifier, task, sender, events } = setup();
   task.status = "completed"; task.interventionStatus = "performed";

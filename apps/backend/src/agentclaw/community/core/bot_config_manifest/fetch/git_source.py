@@ -52,6 +52,7 @@ from types import MappingProxyType
 from typing import Callable, Mapping, Optional, Protocol, Sequence, Tuple
 from urllib.parse import urlparse
 
+from agentclaw.community.core.apply_engine.outcomes import SourceMode
 from agentclaw.community.core.bot_config_manifest.fetch.errors import (
     FetchFailedError,
     FetchRefusedError,
@@ -183,7 +184,7 @@ class GitSourceSpec:
     url: str
     ref: str = "HEAD"
     subpath: Optional[str] = None
-    mode: str = "non_strict"
+    mode: SourceMode = SourceMode.NON_STRICT
     auth: Optional[str] = None
 
 

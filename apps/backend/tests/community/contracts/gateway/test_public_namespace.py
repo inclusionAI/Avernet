@@ -18,6 +18,9 @@ from fastapi import FastAPI
 #: matching gateway domain + route_security entries, never alone.
 _DECLARED_PREFIXES = (
     "/openapi/v1/bots",
+    # Governed expert catalogue — declared together with the experts backend
+    # domain and tenant-authenticated route_security entries.
+    "/openapi/v1/experts",
     # The verified caller's own identity — the one operation whose answer is
     # the user. Declared with its gateway domain + route_security entries.
     "/openapi/v1/org",

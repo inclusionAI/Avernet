@@ -490,3 +490,211 @@ async fn search_actors_restores_fallback_score_and_skill_summary() {
     assert_eq!(queries[0].visibility, BotCandidateVisibility::Collaboration);
     assert_eq!(queries[0].limit, 7);
 }
+
+// ---------------------------------------------------------------------------
+// Bot-authority review (P1): the cross-actor status write
+//二十年 lifespan the legacy creator relation edge even after
+// transfers emptied it — the Human→Bot leg must consult the
+// LIVE authority hook; the non-Human caller leg keeps the
+// legacy creator-relation contract.
+// ---------------------------------------------------------------------------
+
+use bcs_service_api::core::BotAuthorityCoreService;
+use bcs_service_api::port::repo::{BotAuthorityRepoPort, BotRepoPort};
+use bcs_service_api::{ActorStatus, ActorStatusUpdateCommand};
+use bcs_service_api::types::bot_authority::{
+    AuthorityActor, AuthorityMutation, ManagerEdit, ManagerEditAction, ManagerSync,
+    TransferAction, TransferCommand, TransferKey,
+};
+
+fn status_command(caller: &str, bot: &str, hidden: bool) -> ActorStatusUpdateCommand {
+    ActorStatusUpdateCommand {
+        caller_actor_id: caller.to_string(),
+        actor_id: bot.to_string(),
+        status: if hidden {
+            ActorStatus::Hidden
+        } else {
+            ActorStatus::Online
+        },
+    }
+}
+
+fn authority_mutation(id: &str, user: &str) -> AuthorityMutation {
+    AuthorityMutation {
+        mutation_id: id.to_string(),
+        actor: AuthorityActor::Human {
+            user_id: user.to_string(),
+        },
+    }
+}
+
+/// Register `status-bot` owned by `owner` (authority edge
+/// minted via the trusted registration composite) and hand
+/// the memory repo + a built ActorDirectory to the caller.
+async fn owner_directory_fixture(
+    owner: &str,
+) -> (tempfile::TempDir, Arc<MemoryBotRepo>, ActorDirectory) {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let repo = Arc::new(MemoryBotRepo::with_base_dir(temp_dir.path().to_path_buf()));
+    repo.create_registration_if_absent_with_ownership(
+        "status-bot".to_string(),
+        BotCapabilities {
+            name: Some("Status Bot".to_string()),
+            ..Default::default()
+        },
+        owner,
+        "status-token",
+        bcs_service_api::types::bot_authority::OwnershipInitialization {
+            owner_user_id: owner.to_string(),
+            mutation: authority_mutation("status-register", owner),
+        },
+    )
+    .await
+    .expect("trusted registration");
+
+    let registry: Arc<dyn BotRegistryCoreService> =
+        Arc::new(BotCore::with_repo(repo.clone()));
+    let directory = directory_with_default_search(
+        registry,
+        Arc::new(bcs_test_support::NoopFriendCoreService),
+        Arc::new(bcs_test_support::NoopRelationCoreService),
+    )
+    .with_bot_authority_hook(bcs_test_support::authority_hook_for(repo.clone()));
+    (temp_dir, repo, directory)
+}
+
+async fn transfer_to(repo: &Arc<MemoryBotRepo>, new_owner: &str) {
+    for (action, user, tag) in [
+        (TransferAction::RequestOrRefresh, "11111111", "request"),
+        (TransferAction::Accept, "22222222", "accept"),
+    ] {
+        repo.change_transfer(TransferCommand {
+            key: TransferKey {
+                bot_id: "status-bot".to_string(),
+                target_owner_actor_id: format!("human_{new_owner}"),
+            },
+            action,
+            mutation: authority_mutation(tag, user),
+        })
+        .await
+        .expect("transfer leg");
+    }
+}
+
+#[tokio::test]
+async fn revoked_creator_cannot_mutate_actor_status() {
+    let (_temp, repo, directory) = owner_directory_fixture("11111111").await;
+    repo.ensure_human_actor("22222222", "Bob").await.expect("bob actor");
+    transfer_to(&repo, "22222222").await;
+    // The transferred-out owner keeps nothing: the legacy
+    // creator relation edge must not resurrect the write.
+    repo.sync_managers(ManagerSync {
+        bot_id: "status-bot".to_string(),
+        user_ids: vec![],
+        mutation: AuthorityMutation {
+            mutation_id: "clear-managers".to_string(),
+            actor: AuthorityActor::Service { app_id: 1 },
+        },
+    })
+    .await
+    .expect("clear managers");
+    assert_eq!(
+        repo.role("human_11111111", "status-bot").await
+        .expect("role"),
+        None,
+        "precondition: the old creator holds no role"
+    );
+
+    let error = directory
+        .update_actor_status_for_caller(status_command("human_11111111", "status-bot", true))
+        .await
+        .expect_err("revoked creator must not mutate status");
+    assert!(
+        matches!(error, bcs_service_api::ServiceError::Unauthorized(_)),
+        "Unauthorized expected, got {error:?}"
+    );
+}
+
+#[tokio::test]
+async fn transferred_in_owner_and_granted_manager_can_mutate() {
+    let (_temp, repo, directory) = owner_directory_fixture("11111111").await;
+    repo.ensure_human_actor("22222222", "Bob").await.expect("bob actor");
+    transfer_to(&repo, "22222222").await;
+    // New owner:
+    directory
+        .update_actor_status_for_caller(status_command("human_22222222", "status-bot", true))
+        .await
+        .expect("current owner mutates status");
+    // Plus a granted manager (service source of truth):
+    repo.ensure_human_actor("44444444", "Carol").await.expect("carol actor");
+    bcs_test_support::authority_hook_for(repo.clone())
+        .edit_manager(ManagerEdit {
+            bot_id: "status-bot".to_string(),
+            user_id: "44444444".to_string(),
+            action: ManagerEditAction::Grant,
+            mutation: AuthorityMutation {
+                mutation_id: "grant-carol".to_string(),
+                actor: AuthorityActor::Human {
+                    user_id: "22222222".to_string(),
+                },
+            },
+        })
+        .await
+        .expect("grant manager");
+    directory
+        .update_actor_status_for_caller(status_command("human_44444444", "status-bot", true))
+        .await
+        .expect("granted manager mutates status");
+}
+
+#[tokio::test]
+async fn non_human_caller_keeps_the_legacy_creator_contract() {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let repo = Arc::new(MemoryBotRepo::with_base_dir(temp_dir.path().to_path_buf()));
+    repo.register("status-bot".to_string(), BotCapabilities::default())
+        .await
+        .expect("runtime register");
+    let registry: Arc<dyn BotRegistryCoreService> =
+        Arc::new(BotCore::with_repo(repo.clone()));
+    let relation = Arc::new(bcs_relation::RelationCore::memory());
+    relation
+        .ensure_owner_edges("legacy-tool", "status-bot", &bcs_config::resolve_env_str())
+        .await
+        .expect("creator relation edge");
+    let directory = directory_with_default_search(
+        registry,
+        Arc::new(bcs_test_support::NoopFriendCoreService),
+        relation,
+    );
+    directory
+        .update_actor_status_for_caller(status_command("legacy-tool", "status-bot", true))
+        .await
+        .expect("legacy creator-relation caller still mutates");
+}
+
+#[tokio::test]
+async fn unwired_authority_hook_fails_the_human_leg_closed() {
+    let (_temp, _repo, _directory) = owner_directory_fixture("11111111").await;
+    // Rebuild without the hook (ctor default = unwired).
+    let temp_dir = tempfile::tempdir().expect("temp dir 2");
+    let repo2 = Arc::new(MemoryBotRepo::with_base_dir(temp_dir.path().to_path_buf()));
+    repo2
+        .register("status-bot".to_string(), BotCapabilities::default())
+        .await
+        .expect("register");
+    let registry2: Arc<dyn BotRegistryCoreService> =
+        Arc::new(BotCore::with_repo(repo2));
+    let unwired = directory_with_default_search(
+        registry2,
+        Arc::new(bcs_test_support::NoopFriendCoreService),
+        Arc::new(bcs_test_support::NoopRelationCoreService),
+    );
+    let error = unwired
+        .update_actor_status_for_caller(status_command("human_11111111", "status-bot", true))
+        .await
+        .expect_err("unwired hook fails the Human leg closed");
+    assert!(
+        matches!(error, bcs_service_api::ServiceError::Unauthorized(_)),
+        "Unauthorized expected, got {error:?}"
+    );
+}

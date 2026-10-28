@@ -9,7 +9,8 @@ use bcs_service_api::port::repo::{
 };
 use bcs_service_api::port::{EventRecordFactoryPort, NewEvent};
 use bcs_service_api::types::{
-    EVENT_SCHEMA_VERSION_V1, EventScope, EventSubject, GroupHumanNotifyPolicy, MessageViewScope,
+    EVENT_SCHEMA_VERSION_V1, EventScope, EventSubject, GroupAuthorizationSnapshot,
+    GroupHumanNotifyPolicy, MessageViewScope,
 };
 use bcs_service_api::{
     ActorKind, DmActorSpec, Group, GroupCoreService, GroupKind, GroupMessage,
@@ -101,6 +102,16 @@ impl GroupCoreService for GroupCore {
             }
         }
         self.repo.upsert(group).await
+    }
+
+    /// Strict authorization snapshot read; the Core forwards
+    /// the repo's strict port read and adds no cache
+    /// fallback (spec §8.3).
+    async fn read_authorization_snapshot(
+        &self,
+        group_id: &str,
+    ) -> ServiceResult<Option<GroupAuthorizationSnapshot>> {
+        self.repo.read_authorization_snapshot(group_id).await
     }
 
     async fn read_human_notify_policy(

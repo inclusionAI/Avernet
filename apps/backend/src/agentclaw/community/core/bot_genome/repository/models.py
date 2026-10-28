@@ -168,8 +168,6 @@ class GenomePromotionRow(BaseModel):
     ref: str
     revision_id: str
     from_revision_id: Optional[str] = None
-    document_digest: str
-    document_json: str
     going_back: bool = False
     actor_kind: str
     actor_id: str
@@ -177,7 +175,6 @@ class GenomePromotionRow(BaseModel):
     reason: str
     status: str
     apply_kind: str
-    apply_reference: Optional[str] = None
     apply_detail: str = ""
     created_at: datetime
     gmt_create: datetime = Field(default_factory=datetime.now)
@@ -302,10 +299,6 @@ class GenomePromotionModel(Base):
     ref = Column(String(16), nullable=False, comment="active/canary")
     revision_id = Column(CHAR(DIGEST_WIDTH), nullable=False)
     from_revision_id = Column(CHAR(DIGEST_WIDTH), nullable=True, comment="where the ref pointed before")
-    document_digest = Column(CHAR(DIGEST_WIDTH), nullable=False, comment="sha256 of JCS(compiled document)")
-    document_json = Column(
-        MediumText, nullable=False, comment="the compiled document handed to delivery, canonical JSON"
-    )
     going_back = Column(Boolean, nullable=False, default=False, comment="the target had been promoted before")
     actor_kind = Column(String(16), nullable=False, comment="user/strategy_run")
     actor_id = Column(String(MAX_AUDIT_ACTOR_CHARS), nullable=False)
@@ -313,7 +306,6 @@ class GenomePromotionModel(Base):
     reason = Column(String(1024), nullable=False)
     status = Column(String(16), nullable=False, comment="applying/applied/apply_failed")
     apply_kind = Column(String(16), nullable=False, comment="the applier that took it (pending/direct/…)")
-    apply_reference = Column(String(64), nullable=True, comment="the applier's handle (an apply id)")
     apply_detail = Column(String(1024), nullable=False, default="", comment="the applier's last word")
     created_at = Column(DateTime, nullable=False)
     gmt_create = Column(DateTime, default=func.now(), nullable=False)
@@ -321,7 +313,6 @@ class GenomePromotionModel(Base):
 
     __table_args__ = (
         UniqueConstraint("avernet_tenant", "promotion_id", name="uk_genome_promotion"),
-        Index("idx_genome_promotion_bot_apply", "avernet_tenant", "env", "entity_id", "bot_id", "apply_reference"),
         Index("idx_genome_promotion_bot_created", "avernet_tenant", "env", "entity_id", "bot_id", "created_at"),
     )
 

@@ -15,6 +15,7 @@ import httpx
 from injector import inject
 from pydantic import BaseModel, Field
 
+from agentclaw.community.core.workspace.protected_entries import IDENTITY_FILE_NAMES
 from agentclaw.community.core.bot_config_surface.coords import BotConfigCoords
 from agentclaw.community.core.errors import InternalError
 from agentclaw.community.core.ports.identity_file_port import IdentityFilePort
@@ -59,25 +60,9 @@ REFERENCE_SECTION_END_MARKER = "<!-- REFERENCE_FILES_SECTION_END -->"
 
 # ==================== Constants ====================
 
-# Valid identity file names.
-VALID_IDENTITY_FILES = {
-    "RULES.md",
-    "OKR.md",
-    "SAFETY.md",
-    "SOUL.md",
-    "OUTPUT.md",
-    "MEMORY.md",
-    "IDENTITY.md",
-    "AGENTS.md",
-    "USER.md",
-    "TOOLS.md",
-    "HEARTBEAT.md",
-    "BOOTSTRAP.md",
-    "KNOWLEDGE.md",
-    "CLAUDE.md",
-    "GREETING.md",
-    "README.md",
-}
+# Valid identity file names: the one vocabulary in ``core/workspace/protected_entries.py``, which is also
+# what a resources clear never touches — defined there so the two rules cannot drift apart.
+VALID_IDENTITY_FILES = set(IDENTITY_FILE_NAMES)
 
 # claude_code engine 支持的 identity 文件（仅 CLAUDE.md）。
 CLAUDE_CODE_IDENTITY_FILES = {"CLAUDE.md"}

@@ -20,6 +20,7 @@ from tests.community._flows.bot_management.api_lifecycle import BOT_MANAGEMENT_L
 from tests.community._flows.cron.api_lifecycle import CRON_FLOWS
 from tests.community._flows.devices.api_lifecycle import DEVICES_LIFECYCLE_FLOWS
 from tests.community._flows.expert_chat.api_lifecycle import EXPERT_CHAT_FLOWS
+from tests.community._flows.expert_market.api_lifecycle import EXPERT_MARKET_FLOWS
 from tests.community._flows.harness.api_lifecycle import HARNESS_LIFECYCLE_FLOWS
 from tests.community._flows.mcp.api_lifecycle import MCP_FLOWS
 from tests.community._flows.quality.api_lifecycle import QUALITY_FLOWS
@@ -53,6 +54,7 @@ REGISTERED_FLOWS: list = [
     *BOT_COLLABORATOR_LIFECYCLE_FLOWS,
     *MCP_FLOWS,
     *EXPERT_CHAT_FLOWS,
+    *EXPERT_MARKET_FLOWS,
     *CRON_FLOWS,
     *QUALITY_FLOWS,
     *USER_LIST_FLOWS,
