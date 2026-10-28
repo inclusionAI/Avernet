@@ -600,7 +600,17 @@ class ApplyRunService(ApplyRunServiceProtocol):
         report = report_from_payload(
             json.loads(record.report) if record.report else {}, record=record, status=ApplyStatus(record.status)
         )
-        publish_error = self._publish(env, entity_id, bot_id, state_of_payload(payload), report)
+        try:
+            publish_error = self._publish(env, entity_id, bot_id, state_of_payload(payload), report)
+        finally:
+            # The run that wrote the terminal report may have died before unlocking; the release is by
+            # token, so it is a no-op when that run did unlock (or the lock already went to another apply).
+            self._locks.release(
+                env=env,
+                entity_id=entity_id,
+                bot_id=bot_id,
+                lock_token=str(payload["lock_token"]),
+            )
         if publish_error is not None:
             raise publish_error
         return True

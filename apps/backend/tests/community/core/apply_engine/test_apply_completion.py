@@ -229,6 +229,27 @@ def test_a_failed_publish_is_retried_by_the_queue_and_the_rerun_only_publishes(r
     assert [n[1].status for n in recorder.notices] == [ApplyStatus.SUCCEEDED, ApplyStatus.SUCCEEDED]
 
 
+def test_a_rerun_after_a_worker_died_before_unlocking_releases_the_lock(rig, monkeypatch) -> None:
+    service, compiler, recorder, queue, locks, _ = rig
+    payload = _start(service, queue)
+    with monkeypatch.context() as died:
+        died.setattr(locks, "release", lambda **_: False)  # the worker dies between the terminal write and the release
+        service.run_apply_task(payload)
+    assert _lock_held(locks)
+    service.run_apply_task(payload)  # the queue re-claims the task
+    assert not _lock_held(locks), "the bot is free again without waiting out the lock's TTL"
+    assert compiler.compiles == 1 and [n[1].status for n in recorder.notices] == [ApplyStatus.SUCCEEDED] * 2
+
+
+def test_a_rerun_of_an_ended_apply_leaves_the_next_apply_s_lock_alone(rig) -> None:
+    service, _, _, queue, locks, _ = rig
+    first = _start(service, queue)
+    service.run_apply_task(first)
+    _start(service, queue)  # the next apply takes the lock
+    service.run_apply_task(first)
+    assert _lock_held(locks), "the release is by token"
+
+
 def test_a_given_up_apply_is_finished_failed_unlocked_and_published(rig) -> None:
     service, compiler, recorder, queue, locks, _ = rig
     payload = _start(service, queue)  # no run ever happens: the queue gives up on the task
