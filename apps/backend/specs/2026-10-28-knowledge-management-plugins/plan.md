@@ -33,3 +33,7 @@ Replace the endpoint seed's manually constructed services with bottom-boundary c
 
 ## Release-target conflict resolution (2026-10-28)
 The user-selected public target is `REL20261029`, not `dev`. Rebase preserves the target's Bot publication risk module, its Service API boundary declaration and registered risk flows alongside the knowledge module and flows. Both TaskArtifactConfigModule and TcFileUploadIntegrationModule remain in the application container. Normal resource-router registration is reused to avoid growing the 1,000-line application composition root; no optional management router or relaxed gate is introduced.
+
+## Bounded-query follow-up
+
+Replace the five-page grant history reader with one composite-identity POST. Validate the full response envelope, exact mapped Owner and request order before returning CAS state. Introduce a narrow `page_authorized` catalog port and preserve its opaque continuation in `available_for_bot`; keep existing selection and batch-detail projection unchanged. Retain the latest ordinary access-policy and normal resource-route composition, not the removed session Plugin. Test malformed/old receiver replies, one-call budgets and decreasing cursors. Real receiving-provider HTTP/SQLite pairing is maintained downstream; no internal receiver implementation or private endpoint is published here.

@@ -29,3 +29,10 @@
 - [x] Reuse phase-one normal resource routing and prove provider-aware HTTP composition and the unchanged source-size guard.
 - [x] Record release-based complete Backend results and independent conflict review.
 - [ ] Update the original public PR through normal hooks; downstream mirror/pointer integration remains separate.
+
+## Bounded-query follow-up
+- [x] Replace history-prefix state scans with exact, ordered composite-identity reads.
+- [x] Forward provider pagination and load only current-page metadata.
+- [x] Preserve the latest access-policy/resource-route simplification.
+- [x] Focused knowledge, configured endpoint and composition regression: 363 passed, zero skips.
+- [ ] Record the current complete Backend CI result and publish the bounded-query commit.
