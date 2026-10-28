@@ -1,0 +1,34 @@
+apps/frontend-nextgen/src/components/Community/CommunityAuthorAvatar/index.tsx
+  h_059e888e5e4e82 62-66,70
+apps/frontend-nextgen/src/components/Community/CommunityPage/index.tsx
+  h_059e888e5e4e82 2,135-137,140
+apps/frontend-nextgen/src/components/Community/CommunityPersonalCenter/ActivityList.tsx
+  h_059e888e5e4e82 54,56-58,72
+apps/frontend-nextgen/src/components/Community/CommunityTopicDetail/TopicDetailHeader.tsx
+  h_059e888e5e4e82 1-124
+apps/frontend-nextgen/src/components/Community/CommunityTopicDetail/index.tsx
+  h_059e888e5e4e82 12,17,137-146
+apps/frontend-nextgen/src/domain/community/interactionQueries.ts
+  h_059e888e5e4e82 1-55
+apps/frontend-nextgen/src/hooks/personalCenterModel.ts
+  h_059e888e5e4e82 1-67
+apps/frontend-nextgen/src/hooks/useCommunity.ts
+  h_059e888e5e4e82 3,11,13-15,31,34-36,38-39,41,43-44,69-71,95-97,101-104,113-114
+apps/frontend-nextgen/src/hooks/useCommunityTopicDetail.ts
+  h_059e888e5e4e82 1-243
+apps/frontend-nextgen/src/hooks/useCommunityTopicList.ts
+  h_059e888e5e4e82 1-134
+apps/frontend-nextgen/src/hooks/usePersonalCenter.ts
+  h_059e888e5e4e82 10-17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ff6c5bfbebe3c971c9390f71204de294a3add24d",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
