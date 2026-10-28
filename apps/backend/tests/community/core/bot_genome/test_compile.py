@@ -131,22 +131,10 @@ def _row(status: str = "applying", ref: str = "active"):
     return SimpleNamespace(revision_id=REVISION, status=status, ref=ref)
 
 
-class _Refs:
-    def __init__(self, active: str | None = REVISION) -> None:
-        self.active = active
-        self.asked: list[str] = []
-
-    def get(self, *, name, **axes):
-        self.asked.append(name)
-        return None if self.active is None else SimpleNamespace(revision_id=self.active)
-
-
-def _compiler(
-    row, state: DesiredState | None = None, *, active: str | None = REVISION
-) -> tuple[GenomeCompiler, _Registry, _Promotions]:
+def _compiler(row, state: DesiredState | None = None) -> tuple[GenomeCompiler, _Registry, _Promotions]:
     registry = _Registry(state or compile_spec(_spec(CASES[0]), BlobDir()))
     promotions = _Promotions(row)
-    compiler = GenomeCompiler(registry=registry, promotions=promotions, refs=_Refs(active), env=lambda: "dev")
+    compiler = GenomeCompiler(registry=registry, promotions=promotions, env=lambda: "dev")
     return compiler, registry, promotions
 
 
@@ -176,12 +164,10 @@ def test_only_narrows_the_genome_state_to_a_phases_constructs() -> None:
     assert half.identity is None and half.resources is None and half.skills is None and half.mcp is None
 
 
-def test_a_missing_never_started_unknown_or_superseded_promotion_is_refused() -> None:
-    """The row is ``applied`` by the time the apply run compiles in its
-    worker (the seam answered "started" before that), so ``applied`` resolves
-    like ``applying``; ``apply_failed`` has nothing to deliver, a status this
-    module does not know is refused rather than trusted, and a promotion
-    ``active`` has moved on from must not be redelivered over the newer one."""
+def test_only_a_missing_promotion_is_refused_and_no_status_is_checked() -> None:
+    """Compile is revision → desired state and nothing else: whatever the promotion's status, its revision
+    compiles (a re-run after a crash compiles the same state again). Only a promotion that does not exist
+    is refused — as the genome's own error by ``check``, as ``CompileRefused`` in the worker."""
     ctx = make_context(engine_type="openclaw", bot_type="arca")
     compiler, _, _ = _compiler(None)
     with pytest.raises(RevisionNotFound):
@@ -189,26 +175,11 @@ def test_a_missing_never_started_unknown_or_superseded_promotion_is_refused() ->
     with pytest.raises(CompileRefused, match="is not there to deliver") as refused:
         asyncio.run(compiler.compile(ctx, genome_state("p" * 32)))
     assert isinstance(refused.value.domain_error, RevisionNotFound)
-    compiler, registry, _ = _compiler(_row("applied"))
-    assert asyncio.run(compiler.compile(ctx, genome_state("p" * 32))).state is registry.state
-    for status in ("apply_failed", "superseded", ""):
-        compiler, _, _ = _compiler(_row(status))
-        with pytest.raises(NotAppliable) as caught:
-            compiler.check(ctx, genome_state("p" * 32))
-        assert "only an applied or applying promotion is delivered" in caught.value.reasons[0].message
-        with pytest.raises(CompileRefused, match="only an applied or applying promotion"):
-            asyncio.run(compiler.compile(ctx, genome_state("p" * 32)))
-    for active in ("sha256:" + "cd" * 32, None):
-        compiler, _, _ = _compiler(_row("applied"), active=active)
-        with pytest.raises(NotAppliable) as caught:
-            compiler.check(ctx, genome_state("p" * 32))
-        assert "superseded" in caught.value.reasons[0].message
-        # In the worker the same refusal is the engine's CompileRefused, with the genome error as its cause.
-        with pytest.raises(CompileRefused) as refused:
-            asyncio.run(compiler.compile(ctx, genome_state("p" * 32)))
-        assert isinstance(refused.value.domain_error, NotAppliable) and "superseded" in str(refused.value)
-        assert refused.value.domain_error.reasons == caught.value.reasons, "the same refusal check raised"
-        assert refused.value.__cause__ is refused.value.domain_error, "chained for the worker's log too"
+    assert refused.value.__cause__ is refused.value.domain_error, "chained for the worker's log too"
+    for status in ("pending", "applying", "applied", "applied_partial", "apply_failed"):
+        compiler, registry, _ = _compiler(_row(status))
+        compiler.check(ctx, genome_state("p" * 32))
+        assert asyncio.run(compiler.compile(ctx, genome_state("p" * 32))).state is registry.state
 
 
 def test_a_genome_reference_without_a_promotion_id_is_refused_before_the_repository_is_asked() -> None:
@@ -224,14 +195,6 @@ def test_a_genome_reference_without_a_promotion_id_is_refused_before_the_reposit
         asyncio.run(compiler.compile(ctx, StateRef("genome", "")))
     assert isinstance(refused.value.domain_error, RevisionNotFound)
     assert promotions.calls == []
-
-
-def test_currency_is_judged_against_the_ref_the_promotion_moved() -> None:
-    """A canary promotion (RSI-16) moves ``canary``, not ``active``; it is current while ``canary`` points at it."""
-    compiler, registry, _ = _compiler(_row("applied", ref="canary"))
-    ctx = make_context(engine_type="openclaw", bot_type="arca")
-    assert asyncio.run(compiler.compile(ctx, genome_state("p" * 32))).state is registry.state
-    assert compiler._refs.asked == ["canary"]
 
 
 def test_a_revision_the_state_model_refuses_is_not_appliable_rather_than_a_crash() -> None:
@@ -258,7 +221,7 @@ def test_a_revision_the_state_model_refuses_is_not_appliable_rather_than_a_crash
         def compile(self, bot, rev):
             return compile_spec(spec, BlobDir())
 
-    compiler = GenomeCompiler(registry=_StaleRegistry(), promotions=_Promotions(_row()), refs=_Refs(), env=lambda: "dev")
+    compiler = GenomeCompiler(registry=_StaleRegistry(), promotions=_Promotions(_row()), env=lambda: "dev")
     with pytest.raises(CompileRefused, match="is an identity file") as refused:
         asyncio.run(compiler.compile(make_context(engine_type="openclaw", bot_type="arca"), genome_state("p" * 32)))
     assert isinstance(refused.value.domain_error, NotAppliable)

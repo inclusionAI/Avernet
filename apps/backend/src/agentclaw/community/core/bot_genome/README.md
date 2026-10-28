@@ -73,8 +73,10 @@ provides:
   - GenomeRegistryService
   - GenomePromotionServiceProtocol  # the promotion Service API (api/bot_genome_promotion_service.py re-exports it)
   - GenomePromotionService
-  - RevisionApplier  # the delivery seam RSI-04 binds its direct-delivery applier into
-  - PendingDeliveryApplier
+  - RevisionApplier  # the delivery seam
+  - DirectApplier  # its binding: a promotion's revision delivered as an apply run (RSI-04)
+  - PromotionSettler  # a promotion's final status, and the refs it moves, once its apply ends
+  - GenomeCompletionHandler  # the genome row of the apply run service's completion map
   - BotRef
   - Provenance
   - RunScope
@@ -133,6 +135,9 @@ internal_dependencies:
   - agentclaw.community.core.base
   - agentclaw.community.core.workspace.protected_entries  # the one list of workspace entries that are never resources (spec_checks refuses them)
   - agentclaw.community.core.apply_engine.compiler  # Compiled, StateRef — the genome is one of the run service's compilers, under GENOME_STATE_KIND
+  - agentclaw.community.core.apply_engine.completion  # ApplyCompletionHandler, ApplyOutcome — the genome subscribes to its applies' ends to settle promotions
+  - agentclaw.community.core.apply_engine.outcomes  # ApplyStatus, read off an apply's outcome when settling
+  - agentclaw.community.core.apply_engine.run.service_protocol  # ApplyRunServiceProtocol — DirectApplier starts the apply run that delivers a promotion
   - agentclaw.community.core.apply_engine.constructs  # the construct vocabulary a creation half narrows a state by
   - agentclaw.community.core.apply_engine.context  # ApplyContext, the run the genome compiler compiles for (typing only)
   - agentclaw.community.core.apply_engine.desired_state  # the DesiredState a revision compiles to

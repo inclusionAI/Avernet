@@ -718,6 +718,7 @@ def _ref(row) -> GenomeRef:
         moved_at=row.moved_at,
         moved_by=Provenance(ProvenanceKind(row.moved_kind), row.moved_actor, run_id=row.run_id),
         reason=row.reason,
+        labels=tuple(json.loads(row.labels)),
     )
 
 
