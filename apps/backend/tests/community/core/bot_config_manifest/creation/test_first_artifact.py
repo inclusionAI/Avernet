@@ -218,6 +218,7 @@ def _build(db):
             resource_service=PlatformResource(store),
             resource_rows=resource_rows_for()[0],
             cli_tool_service=object(),
+            shared_skills=object(),
         )
 
     queue = _InlineQueue()

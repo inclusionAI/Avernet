@@ -51,6 +51,7 @@ def _ports(tag: str) -> MaterialiserPorts:
         identity_service=tag, upload_service=tag, capability_reader=tag,
         package_validator=tag, content=tag, resource_service=tag, resource_rows=tag,
         cli_tool_service=tag,
+        shared_skills=tag,
     )
 
 

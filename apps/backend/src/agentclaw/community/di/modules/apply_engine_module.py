@@ -72,6 +72,8 @@ from agentclaw.community.core.apply_engine.identity_files import (
 )
 from agentclaw.community.core.apply_engine.redeliver import TeclawRedeliver
 from agentclaw.community.core.apply_engine.completion import StateCompletionHandlers
+from agentclaw.community.core.ports.shared_skill_port import SharedSkillPort
+from agentclaw.community.core.skill_center.skill_query_service_protocol import SkillQueryServiceProtocol
 from agentclaw.community.core.apply_engine.resource_files import (
     DeviceResource,
 )
@@ -133,6 +135,7 @@ class ApplyEngineModule(Module):
     @inject
     def manifest_device_ports(
         self,
+        injector: Injector,
         script_service_provider: Callable[[], BotStartupScriptServiceProtocol],
         activation_service_provider: Callable[[], DirectActivationServiceProtocol],
         mcp_auth_service_provider: Callable[[], MCPAuthServiceProtocol],
@@ -189,6 +192,7 @@ class ApplyEngineModule(Module):
                 resource_service=DeviceResource(resource_service_provider()),
                 resource_rows=lambda bot_id: resource_services.create(bot_id=bot_id),
                 cli_tool_service=cli_tool_service_factory("arca"),
+                shared_skills=injector.get(SharedSkillPort),
             )
 
         return device_ports
@@ -249,6 +253,7 @@ class ApplyEngineModule(Module):
                 # as ``mcp`` does not: the artifact is the delivery on this
                 # family whatever the switch says.
                 cli_tool_service=cli_tool_service_factory("teclaw"),
+                shared_skills=injector.get(SharedSkillPort),
             )
 
         return platform_ports
@@ -387,6 +392,15 @@ class ApplyEngineModule(Module):
         if manifest_config.teclaw_delivery_mode is not TeclawDeliveryMode.DEVICE:
             return {}
         return {EngineFamily.TECLAW: device}
+
+    @provider
+    @inject
+    def shared_skill_port(self, queries: SkillQueryServiceProtocol) -> SharedSkillPort:
+        """The skills materialiser's lookup of Center and repository skills: the Skill Center's query service,
+        which owns asset visibility (``SkillQueryService`` implements the port)."""
+        if not isinstance(queries, SharedSkillPort):
+            raise TypeError(f"{type(queries).__name__} does not implement SharedSkillPort")
+        return queries
 
     # ── who hears how an apply ended ───────────────────────────────────────
 

@@ -147,6 +147,7 @@ def _build(db):
             resource_service=FakeResourceFileService(),
             resource_rows=resource_rows_for()[0],
             cli_tool_service=object(),
+            shared_skills=object(),
         )
 
     applies = ApplyRunService(

@@ -86,6 +86,7 @@ from agentclaw.community.core.ports.resource_file_port import (
     ResourceFilePort,
 )
 from agentclaw.community.core.ports.resource_rows_port import ResourceRowsPort
+from agentclaw.community.core.ports.shared_skill_port import SharedSkillPort
 from agentclaw.community.core.ports.skill_package_upload_port import (
     SkillPackageUploadPort,
 )
@@ -168,7 +169,7 @@ class CreationSequence(StrEnum):
 class MaterialiserPorts:
     """The write targets a strategy hands ``build_materialisers``.
 
-    Ten fields, matching that function's keyword arguments name for name, so
+    One field per keyword argument of that function, matching name for name, so
     :meth:`as_kwargs` can splat them straight in. A strategy differs from
     another by which **objects** sit behind these names, never by which
     materialisers exist: ARCA binds device-backed services, platform-managed
@@ -198,9 +199,11 @@ class MaterialiserPorts:
     #: dependency and the family difference stays here, where W6 put it.
     cli_tool_service: CliToolService
     mcp_config_service: MCPConfigServiceProtocol
+    #: Finds the shared Center / repository skill a desired skill names, for the skills materialiser.
+    shared_skills: SharedSkillPort
 
     def as_kwargs(self) -> dict[str, Any]:
-        """The same ten fields as a plain dict, ready to splat into
+        """The same fields as a plain dict, ready to splat into
         ``build_materialisers(**ports.as_kwargs())``. Written out by hand
         rather than derived, so adding a field here without adding a
         materialiser parameter is a visible edit."""
@@ -217,6 +220,7 @@ class MaterialiserPorts:
             "resource_rows": self.resource_rows,
             "cli_tool_service": self.cli_tool_service,
             "mcp_config_service": self.mcp_config_service,
+            "shared_skills": self.shared_skills,
         }
 
 

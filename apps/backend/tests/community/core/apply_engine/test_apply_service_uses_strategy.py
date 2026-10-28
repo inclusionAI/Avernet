@@ -161,6 +161,7 @@ def _world(*, bot, mode, platform_activation=None, redeliver=None):
             resource_service=FakeResourceFileService(),
             resource_rows=resource_rows_for()[0],
             cli_tool_service=object(),
+            shared_skills=object(),
         )
 
     device_ports = device_port_bundle(activation_service=device_activation)

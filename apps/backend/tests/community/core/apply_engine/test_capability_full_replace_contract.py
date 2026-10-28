@@ -76,6 +76,7 @@ from agentclaw.community.core.skill_center.services.skill_version_resolver impor
 )
 
 from ._fakes import (
+    FakeSharedSkills,
     FakeManifestContent,
     FakeObjectCredentials,
     OSS_AUTH,
@@ -364,7 +365,7 @@ async def test_combined_full_replace_dry_run_and_apply_use_real_persistence():
         ApplyOrchestrator(
             {
                 Category.SKILLS: SkillsMaterialiser(
-                    uploads, activation, reader, real_validator(), content
+                    uploads, activation, reader, real_validator(), content, FakeSharedSkills()
                 ),
                 Category.MCP: McpMaterialiser(
                     activation, _Center(), _McpConfig(), reader
