@@ -315,7 +315,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     this.notifyGroup(task, "result");
   }
 
-  async finishForOwnerHandoff(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string; effect?: Exclude<RecoveryJudgment["effect"], "not_intervened"> }, finalSummary?: unknown): Promise<void> {
+  async finishForOwnerHandoff(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string; effect?: Exclude<RecoveryJudgment["effect"], "not_intervened">; delivery?: RecoveryJudgment["delivery"]; response?: RecoveryJudgment["response"] }, finalSummary?: unknown): Promise<void> {
     const task = await this.mutate(taskId, version, value => {
       if (value.simulation || value.level === "debug" || value.status !== "running" || value.execution?.executionId !== input.executionId
         || value.execution.state === "ended" || value.phase === "apply") this.fail(409, "当前不能转交 Owner 处理");
@@ -328,7 +328,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       return { ...value, status: "completed", completionReason: "owner_handoff", version: value.version + 1,
         observationDeadlineAt: null, ownerDeadlineAt: null, requiresFreshObservation: false,
         ...(value.executionRetry ? { executionRetry: { ...value.executionRetry, retryAt: 0 } } : {}),
-        judgment: { delivery: value.judgment?.delivery ?? "unconfirmed", response: value.judgment?.response ?? "unknown",
+        judgment: { delivery: input.delivery ?? value.judgment?.delivery ?? "unconfirmed", response: input.response ?? value.judgment?.response ?? "unknown",
           effect: input.effect ?? value.judgment?.effect ?? "unknown", summary: input.summary, evidence_ids: input.evidence_ids },
         timeline: [...value.timeline, this.event("termination", "agent", input.summary,
           { completion_reason: "owner_handoff", evidence_ids: input.evidence_ids, phase: value.phase })] };

@@ -494,10 +494,9 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       else await this.deps.business().assess(task.taskId, task.version, { decision: body.decision as "message" | "environment" | "observe", summary: body.summary as string, evidence_ids: body.evidence_ids as string[] }, body.final_summary);
     } else if (body.kind === "observation") {
       const judgment = body.judgment as RecoveryJudgment;
-      if (!judgment || !["confirmed", "unconfirmed"].includes(judgment.delivery) || !["acted", "replied", "none", "unknown"].includes(judgment.response)
-        || !["recovered", "not_recovered", "unknown"].includes(judgment.effect) || typeof judgment.summary !== "string" || !Array.isArray(judgment.evidence_ids)) fail(422, "效果回报格式无效");
-      if (judgment.delivery === "confirmed" && !task.timeline.some(event => event.kind === "operation" && (event.payload.result as Record<string, unknown>)?.delivery_confirmed === true && (event.payload.result as Record<string, unknown>)?.delivery_key === this.latestDeliveryKey(task))) fail(422, "触达确认必须来自受控会话或轨迹读取核实的本次实际用户消息");
-      if (["acted", "replied"].includes(judgment.response) && judgment.delivery !== "confirmed") fail(422, "响应指 Bot 对本次自愈消息的回复或采纳，acted/replied 需要先核实本次触达。本次未发消息时用 response=none；关联证据不足时用 unknown。Bot 自行执行或回应用户不等于响应自愈指引，effect 仍按实际业务证据判断，不重复发送消息。");
+      if (!judgment || !["recovered", "not_recovered", "unknown"].includes(judgment.effect)
+        || typeof judgment.summary !== "string" || !Array.isArray(judgment.evidence_ids)) fail(422, "效果回报格式无效");
+      this.validateDeliveryResponse(task, judgment.delivery, judgment.response);
       await this.deps.business().observe(task.taskId, task.version, judgment, [], body.final_summary);
     } else if (body.kind === "plan") {
       const plan = body.plan as RecoveryPlan;
@@ -513,8 +512,11 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       if (typeof body.applicable !== "boolean" || typeof body.success !== "boolean" || typeof body.summary !== "string") fail(422, "执行回报格式无效");
       await this.deps.business().finishApply(task.taskId, task.version, { applicable: body.applicable, success: body.success, summary: body.summary }, body.final_summary);
     } else if (body.kind === "owner_handoff") {
+      const hasJudgment = body.delivery !== undefined || body.response !== undefined;
+      if (hasJudgment) this.validateDeliveryResponse(task, body.delivery, body.response);
       await this.deps.business().finishForOwnerHandoff(task.taskId, task.version,
         { summary: body.summary as string, evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId,
+          ...(hasJudgment ? { delivery: body.delivery as RecoveryJudgment["delivery"], response: body.response as RecoveryJudgment["response"] } : {}),
           effect: body.effect as Exclude<RecoveryJudgment["effect"], "not_intervened"> | undefined }, body.final_summary);
     } else if (body.kind === "blocked" && typeof body.summary === "string") {
       if (task.simulation && body.reason === "user_continued") await this.deps.business().assessSimulation(task.taskId, task.version,
@@ -676,6 +678,11 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
   private recordAfterCutoff(timestamp: unknown, cutoffAtMs: number): boolean {
     const at = typeof timestamp === "number" ? timestamp : typeof timestamp === "string" ? Date.parse(timestamp) : NaN;
     return Number.isFinite(at) && at > cutoffAtMs;
+  }
+  private validateDeliveryResponse(task: RecoveryStoredTask, delivery: unknown, response: unknown): void {
+    if (!["confirmed", "unconfirmed"].includes(delivery as string) || !["acted", "replied", "none", "unknown"].includes(response as string)) fail(422, "效果回报格式无效");
+    if (delivery === "confirmed" && !task.timeline.some(event => event.kind === "operation" && (event.payload.result as Record<string, unknown>)?.delivery_confirmed === true && (event.payload.result as Record<string, unknown>)?.delivery_key === this.latestDeliveryKey(task))) fail(422, "触达确认必须来自受控会话或轨迹读取核实的本次实际用户消息");
+    if (["acted", "replied"].includes(response as string) && delivery !== "confirmed") fail(422, "响应指 Bot 对本次自愈消息的回复或采纳，acted/replied 需要先核实本次触达。本次未发消息时用 response=none；关联证据不足时用 unknown。Bot 自行执行或回应用户不等于响应自愈指引，effect 仍按实际业务证据判断，不重复发送消息。");
   }
   private latestDeliveryKey(task: RecoveryStoredTask): string {
     const event = [...task.timeline].reverse().find(item => item.kind === "operation" && typeof (item.payload.result as Record<string, unknown>)?.delivery_key === "string");
