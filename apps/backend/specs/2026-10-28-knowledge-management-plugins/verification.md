@@ -10,3 +10,10 @@ Runtime-source candidate: `e635bb6bdb4459af7d18db5c2c2e6b7196ef0ce2`, based on a
 - Normal push secret scanning and SAST hooks passed. Their default lint-only mode is distinct from the separately executed full Backend CI.
 
 No native remote ACL execution, deployed environment, real document construction, frontend, publication-stage isolation or MCP consumption is claimed. Existing per-library detail fan-out and aggregate slow-shard deadline limitations remain follow-up work. No DDL or deployment was performed.
+
+## Batch-detail follow-up
+- Rebased on authoritative public dev `8f71072ba`. This adds existing BaaS/frontend baseline updates; the knowledge follow-up does not modify those modules.
+- Public knowledge/session/endpoint focused regression: **278 passed, zero skips**.
+- New wire assertions cover 1/20-item pages, empty pages, duplicate/oversize input, whole-batch errors, ordered exact-ID/space matching and malformed/partial results. Full available-page HTTP counts are 2 for 1 or 20 items (one authorization list plus one batch), and 1 for an empty page.
+- The original sync-context HTTP error body is restored and asserted. Missing remote batch support fails closed; no per-ID fallback.
+- Full Backend gates and downstream pairing are recorded after their final runs. Slow-stream aggregate deadlines and pre-body raw disconnect cleanup remain unresolved and are not claimed fixed. No deployment or schema change.

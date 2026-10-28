@@ -97,7 +97,7 @@ class KnowledgeManagementService:
             or type(context.revision) is not int
             or context.revision < 1
         ):
-            raise KnowledgeManagementError("KNOWLEDGE_SCOPE_MISMAworkspaceH")
+            raise KnowledgeManagementError("KNOWLEDGE_SCOPE_MISMATCH")
         payload = self.catalog.list_in_space(
             space_id=space_id, actor_id=actor_id, cursor=cursor, limit=limit
         )

@@ -180,12 +180,21 @@ class RemoteKnowledgeCatalog:
             "next_cursor": cursor,
         }
 
-    def _read(self, path: str, params: dict, *, deadline: float | None = None) -> dict:
+    def _read(
+        self,
+        path: str,
+        params: dict,
+        *,
+        deadline: float | None = None,
+        method: str = "GET",
+        body: dict | None = None,
+    ) -> dict:
         try:
             return self.remote.call(
-                "GET",
+                method,
                 path,
                 params=params,
+                **({"body": body} if body is not None else {}),
                 **({"deadline": deadline} if deadline is not None else {}),
             )
         except KnowledgeError as exc:
@@ -210,22 +219,43 @@ class RemoteKnowledgeCatalog:
         )
 
     def details(self, *, space_id: int, kb_ids: list[str], actor_id: str) -> list[dict]:
-        # One identity lookup per page, no cross-request ACL cache. Each detail
-        # still reaches ECB for its own authorization; the whole fan-out has a budget.
         if len(kb_ids) > 20:
             raise KnowledgeManagementError("INVALID_KNOWLEDGE_INPUT")
         if not kb_ids:
             return []
-        actor = self.identities.staff_no(actor_id)
-        deadline = monotonic() + 8
-        return [
-            self._read(
-                self.remote.path(space_id, kb_id) + "/catalog-detail",
-                {"actor_staff_no": actor},
-                deadline=deadline,
+        try:
+            for kb_id in kb_ids:
+                require_knowledge_id(kb_id, "kb_id")
+        except ValueError:
+            raise KnowledgeManagementError("INVALID_KNOWLEDGE_INPUT") from None
+        if len(set(kb_ids)) != len(kb_ids):
+            raise KnowledgeManagementError("INVALID_KNOWLEDGE_INPUT")
+        # The remote batch checks every native ACL before returning any detail.
+        # Never fall back to per-ID reads when the batch is rejected/unavailable.
+        payload = self._read(
+            self.remote.path(space_id) + "/knowledge-bases/catalog-details",
+            {},
+            method="POST",
+            body={
+                "actor_staff_no": self.identities.staff_no(actor_id),
+                "kb_ids": kb_ids,
+            },
+            deadline=monotonic() + 8,
+        )
+        items = payload.get("items")
+        if (
+            payload.get("space_id") != str(space_id)
+            or not isinstance(items, list)
+            or len(items) != len(kb_ids)
+            or any(
+                not isinstance(item, dict)
+                or item.get("kb_id") != kb_id
+                or item.get("space_id") != str(space_id)
+                for kb_id, item in zip(kb_ids, items, strict=True)
             )
-            for kb_id in kb_ids
-        ]
+        ):
+            raise KnowledgeManagementError("KNOWLEDGE_CATALOG_INVALID")
+        return items
 
     def authorized_bots(
         self, *, space_id: int, kb_id: str, actor_id: str, cursor: int, limit: int

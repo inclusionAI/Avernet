@@ -14,3 +14,6 @@ Public HTTP clients share configured pool limits and discard response cookies. J
 Migrate generic tests and retain deployment transport and fixed-provider pairing tests downstream. Check native authority, composite identity, Source/Job/run scope, CAS, closed defaults, original wire bodies and stream cleanup. Add a composition HTTP flow and import/credential ownership guards. Keep provider execution, deployment and actual production acceptance distinct from controlled transport tests.
 
 Contribute public changes first, then pin a reachable public revision downstream. Public baseline advancement requires adjacent regression checks, independently of the feature relocation.
+
+## Batch consumer follow-up
+Keep KnowledgeCatalog.details as the public port. The outbound adapter sends one POST to the configured TC catalog-details endpoint with actor_staff_no and kb_ids, reusing request identity mapping, shared transport, error mapping and the existing budget. Validate complete ordered space-scoped results before returning them; no partial or per-item fallback. Add 1/20-item wire counts, invalid batch/rejection regressions and a fixed downstream real-provider pairing.

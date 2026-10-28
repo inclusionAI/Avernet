@@ -9,3 +9,8 @@
 - [x] Run final public contracts, architecture, HTTP flow and adjacent suites.
 - [x] Review final public diff for accidental private material and behavior drift.
 - [x] Push through normal hooks and open a development-target pull request.
+
+## Batch follow-up
+- [x] Replace per-ID detail calls with one ordered, fail-closed batch.
+- [x] Restore sync-context error code and assert its HTTP body.
+- [ ] Run public consumer/gates and downstream real-provider pairing; update both PRs.

@@ -18,4 +18,7 @@ Expose existing knowledge browser and management consumers without a private dep
 6. Shared asynchronous transport preserves cancellation and releases individual responses without closing the pool; credentials and response cookies do not leak across callers.
 
 ## Non-goals
-Publication-stage isolation, chat/MCP consumption, changing platform ACL policy, frontend or live deployment. Existing catalog fan-out and slow-shard aggregate deadline limitations are not fixed by relocating consumers.
+Publication-stage isolation, chat/MCP consumption, changing platform ACL policy, frontend or live deployment. The initial relocation preserved catalog fan-out; the follow-up below removes it. The existing slow-shard aggregate deadline limitation remains out of scope.
+
+## Follow-up: bounded catalog detail batches
+Use the remote TC catalog-details read endpoint for one page of 1–20 unique knowledge IDs. Preserve requested order, exact space/ID correspondence and all-or-nothing native authorization; an empty page makes no detail request. A missing batch endpoint or malformed/partial batch fails closed, never falls back to per-ID HTTP. Restore the original KNOWLEDGE_SCOPE_MISMATCH error body for invalid sync context. This follow-up does not fix the existing slow-stream total deadline or pre-body disconnect cleanup limitations.

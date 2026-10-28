@@ -1,5 +1,6 @@
 """The new candidate page must not monopolize the shared Backend workers."""
 
+import json
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -16,13 +17,20 @@ from agentclaw.community.kernel.knowledge import KnowledgeError
 from agentclaw.community.kernel.knowledge_management import KnowledgeManagementError
 
 
-def test_page_details_resolve_actor_once_and_keep_per_kb_acl():
+def test_page_details_resolve_actor_once_and_use_one_acl_checked_batch():
     seen = []
     identities = SimpleNamespace(staff_no=Mock(return_value="actor"))
 
     def receive(request):
         seen.append(request)
-        return httpx.Response(200, json={"kb_id": request.url.path.split("/")[-2]})
+        ids = json.loads(request.content)["kb_ids"]
+        return httpx.Response(
+            200,
+            json={
+                "space_id": "1",
+                "items": [{"kb_id": kb_id, "space_id": "1"} for kb_id in ids],
+            },
+        )
 
     config = KnowledgeIntegrationConfig(True, "https://ecb.test")
     with httpx.Client(transport=httpx.MockTransport(receive)) as client:
@@ -34,8 +42,8 @@ def test_page_details_resolve_actor_once_and_keep_per_kb_acl():
             for row in catalog.details(space_id=1, kb_ids=["a", "b"], actor_id="actor")
         ] == ["a", "b"]
     identities.staff_no.assert_called_once_with("actor")
-    assert len(seen) == 2
-    assert all(request.url.params["actor_staff_no"] == "actor" for request in seen)
+    assert len(seen) == 1
+    assert json.loads(seen[0].content)["actor_staff_no"] == "actor"
 
 
 def test_page_details_stop_after_budget_expires(monkeypatch):

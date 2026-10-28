@@ -19,7 +19,11 @@ class KnowledgeCatalog(Protocol):
         ...
 
     def details(self, *, space_id: int, kb_ids: list[str], actor_id: str) -> list[dict]:
-        """Read metadata for a bounded set of knowledge bases."""
+        """Read one ordered, complete batch of up to 20 unique IDs.
+
+        Empty input returns no details. Any denied, missing or mismatched item
+        fails the complete batch; callers never receive partial metadata.
+        """
         ...
 
     def authorized_bots(

@@ -163,7 +163,9 @@ def test_nonmember_cannot_use_never_activated_empty_shortcut(client, world):
 )
 def test_mismatched_sync_context_fails_closed(client, world, context):
     world.service.sync = SimpleNamespace(get_context=lambda **kw: context)
-    assert client.get(PREFIX).status_code == 503
+    response = client.get(PREFIX)
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "KNOWLEDGE_SCOPE_MISMATCH"
     assert world.catalog.calls == []
 
 
