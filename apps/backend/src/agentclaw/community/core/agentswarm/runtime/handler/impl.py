@@ -528,8 +528,13 @@ class SwarmRunHandler:
 
     @staticmethod
     def _resolve_kind(run: Run, name: str) -> AgentKind:
+        # Exact match first; then prefix match so composite spawn names
+        # (e.g. "coder_rust" from catalog "coder") inherit the catalog kind.
         for spec in run.agent_catalog:
             if spec.name == name:
+                return spec.kind if isinstance(spec.kind, AgentKind) else AgentKind.LLM
+        for spec in run.agent_catalog:
+            if name.startswith(spec.name):
                 return spec.kind if isinstance(spec.kind, AgentKind) else AgentKind.LLM
         return AgentKind.LLM
 
