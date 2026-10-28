@@ -2485,19 +2485,25 @@ class BotService(BotServiceProtocol):
         thread.start()
         logger.info(f"[bot_service._allocate_device_async] Started background thread for bot {bot_id} device allocation")
 
-    def get_bot_by_address(self, bot_id: str, user_id: str) -> Dict[str, Any]:
+    def get_bot_by_address(self, bot_id: str, user_id: str, *, source_bot_pk: int | None = None) -> Dict[str, Any]:
         """Internal resource lookup; user_id is a legacy entity/Owner locator.
 
         This method does not authorize the actor. Callers must authorize separately;
         get_bot retains its strict current-Owner lookup contract.
+        Publication callers provide source_bot_pk so historical Owner values do
+        not have to match a current Owner or entity. Ordinary locators omit it.
         """
         from agentclaw.community.core.bot_management.addressing import BotAddressResolver
         from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
 
         try:
-            address = BotAddressResolver(self._repository).resolve(
-                bot_id=bot_id, legacy_owner_id=user_id,
-            )
+            resolver = BotAddressResolver(self._repository)
+            if source_bot_pk is not None:
+                address = resolver.resolve_publish_source(
+                    source_bot_pk=source_bot_pk, source_bot_id=bot_id, legacy_owner_id=user_id,
+                )
+            else:
+                address = resolver.resolve(bot_id=bot_id, legacy_owner_id=user_id)
         except BotAddressNotFoundError as exc:
             raise BotNotFoundError(f"Bot not found: {bot_id}") from exc
         return self.get_bot(bot_id=bot_id, user_id=address.current_owner_id)

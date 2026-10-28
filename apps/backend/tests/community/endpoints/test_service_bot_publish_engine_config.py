@@ -14,7 +14,8 @@ import json
 from agentclaw.community.core.service_bot.repository.models import BotPublishModel, PublishStatus
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from tests.community.factories.access import make_staff_user
-from tests.community.factories.devices import make_active_local_device
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
+from tests.community.factories.bot_collaborator import make_bot
 from tests.community.framework import (
     CaseInput,
     ExpectError,
@@ -42,6 +43,8 @@ def _seed_publish_record(
     """
     make_staff_user(world, user_id=owner_id)
 
+    bot = make_bot(world, bot_id="bot-test-001", owner_id=owner_id, active_engine="openclaw")
+
     ext: dict = {}
     if build_target_path is not None:
         ext["build_target_path"] = build_target_path
@@ -53,7 +56,7 @@ def _seed_publish_record(
     with db.orm_session() as session:
         row = BotPublishModel(
             id=publish_id,
-            source_bot_pk=1,
+            source_bot_pk=bot["id"],
             source_bot_id="bot-test-001",
             publish_bot_id="bot-test-001-pub",
             name="Test Bot",
@@ -76,12 +79,18 @@ def _seed_publish_record(
 
 def _seed_publish_with_local_binding(world, *, publish_id: int, owner_id: str) -> None:
     make_staff_user(world, user_id=owner_id)
-    bind_id = make_active_local_device(world, owner_id=owner_id, device_id=f"loc_{publish_id}")
+    # This case exercises the real local filesystem, not the BaaS transport.
+    bind_id = world.get(DeviceBindingRepository).insert_binding(
+        entity_id=owner_id, entity_type="staff", device_id=f"loc_{publish_id}",
+        device_provider="local", env="dev", device_props={"openclaw_port": 18789},
+        status="ACTIVE", apply_reason="config read test", applied_by=owner_id,
+    )
+    bot = make_bot(world, bot_id="bot-test-001", owner_id=owner_id, active_engine="openclaw", binding_id=bind_id)
     db = world.get(DatabasePlugin)
     with db.orm_session() as session:
         session.add(BotPublishModel(
             id=publish_id,
-            source_bot_pk=1,
+            source_bot_pk=bot["id"],
             source_bot_id="bot-test-001",
             publish_bot_id="bot-test-001-pub",
             name="Test Bot",

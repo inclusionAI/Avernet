@@ -29,6 +29,7 @@ import json
 from injector import inject
 
 from agentclaw.community.core.bot_config_surface.coords import BotConfigCoords
+from agentclaw.community.core.bot_management.addressing import BotAddressResolver
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
 )
@@ -225,11 +226,11 @@ class EngineConfigService:
         owner_id = record.owner_id
         bot_id = record.source_bot_id
 
-        # entity coords for the arca/baas config mapper (teclaw ignores them); same
-        # resolution as the bot-level engine-config GET.
-        bot = self._bot_repo.get_by_id_and_entity(bot_id, owner_id)
-        entity_id = (bot or {}).get("entity_id") or owner_id
-        entity_type = (bot or {}).get("entity_type") or "staff"
+        address = BotAddressResolver(self._bot_repo).resolve_publish_source(
+            source_bot_pk=record.source_bot_pk, source_bot_id=bot_id, legacy_owner_id=owner_id,
+        )
+        entity_id = address.entity_id
+        entity_type = address.bot.get("entity_type") or "staff"
 
         ext = record.ext or {}
         # Select by record.status; a missing/0 bind_id means there is no resolvable
@@ -252,7 +253,7 @@ class EngineConfigService:
         # Resolution errors are NOT swallowed — a binding that can't be resolved/reached
         # is a real failure and must surface to the caller, not masquerade as an empty
         # config (only a genuinely absent file returns {}).
-        ctx = self._resolver.resolve_for_binding(int(bind_id), owner_id, bot_id=bot_id)
+        ctx = self._resolver.resolve_for_binding(int(bind_id), address.current_owner_id, bot_id=bot_id)
 
         device_fs = self._device_fs_dispatcher.dispatch_addressed(
             ctx, namespace=CONFIG_NS, entity_type=entity_type, entity_id=entity_id,

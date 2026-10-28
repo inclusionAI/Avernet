@@ -100,10 +100,16 @@ Legacy/manual calls without a claim retain the existing BotService write path.
 
 ### Single-instance restart authorization
 
-Restart accepts the binding Owner, configured `admin.super_admin`, or an explicit
+Restart accepts the resolved Bot's current Owner, configured `admin.super_admin`, or an explicit
 Bot collaborator (MEMBER or ADMIN). Resolve the Bot by the binding-owned
 `device_props.bolt_id` and `entity_id`; the draft Bot binding is not the runtime
 binding. Public visibility and space-derived grants do not authorize this
 mutation. Missing authorization dependencies fail closed. BaaS receives the
 actual caller identity. Binding provider, environment and ACTIVE checks apply
 to every role before any restart request.
+
+The binding's entity remains a resource locator after handoff. Bootstrap resolves
+the Bot before querying Passport with that immutable entity, including when the
+compatibility request names the current Owner. Only unlinked historical bindings
+retain standalone entity ownership; a linked Bot's former Owner gains no grant
+from the retained binding identity.
