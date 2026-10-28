@@ -1,13 +1,9 @@
 /** @jest-environment jsdom */
 // TaskSwitcherBar/Control:默认保留旧行为；聊天副屏可传 defaultVisible/defaultOpen 首帧展开。
-import {
-  TaskSwitcherBar,
-  type TaskSwitcherItem,
-  type TaskSwitcherProps,
-} from '@/assets/TaskPanel/v2/TaskSwitcherBar';
+import { TaskSwitcherBar, type TaskSwitcherItem, type TaskSwitcherProps } from '@/assets/TaskPanel/v2/TaskSwitcherBar';
 import { TaskSwitcherControl } from '@/assets/TaskPanel/v2/TaskSwitcherControl';
-import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeAll, describe, expect, it, jest } from '@jest/globals';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 
 beforeAll(() => {
   if (!window.PointerEvent) {
@@ -32,9 +28,21 @@ describe('TaskSwitcherBar', () => {
   it('横条渲染:当前任务名 + 状态 tag + 任务总数徽章', () => {
     render(<TaskSwitcherBar {...props()} />);
     expect(screen.getByText('任务')).toBeTruthy();
+    expect(screen.queryByTitle('焦点任务')).toBeNull();
     expect(screen.getByText('竞品分析')).toBeTruthy();
     expect(screen.getByText('执行中')).toBeTruthy();
     expect(screen.getByTitle('任务总数').textContent).toBe('3');
+  });
+
+  it('非焦点任务有进展时,横条和条目显示提醒徽标', () => {
+    const updatedItems = items.map((item) => (item.taskId === 't-2' ? { ...item, hasUnhandledUpdate: true } : item));
+    render(<TaskSwitcherBar {...props({ items: updatedItems })} />);
+
+    expect(screen.getByTestId('task-switcher-attention-badge')).toBeTruthy();
+
+    fireEvent.click(screen.getByTitle('展开任务切换'));
+    expect(screen.getAllByTestId('task-switcher-update-badge')).toHaveLength(1);
+    expect(screen.getByTitle('有新进展')).toBeTruthy();
   });
 
   it('点击横条展开下拉;点条目回调 onSelectTask 并收起', () => {
@@ -64,12 +72,13 @@ describe('TaskSwitcherBar', () => {
 
   it('空任务列表不渲染横条', () => {
     render(<TaskSwitcherBar items={[]} activeTaskId="t-1" onSelectTask={() => {}} />);
-    expect(screen.queryByText('任务')).toBeNull();
+    expect(screen.queryByTitle('焦点任务')).toBeNull();
   });
 
   it('只有一个任务时仍渲染横条,可查看当前任务', () => {
     render(<TaskSwitcherBar items={[items[0]]} activeTaskId="t-1" onSelectTask={() => {}} />);
     expect(screen.getByText('任务')).toBeTruthy();
+    expect(screen.queryByTitle('焦点任务')).toBeNull();
     expect(screen.getByText('竞品分析')).toBeTruthy();
     expect(screen.getByTitle('任务总数').textContent).toBe('1');
 
@@ -85,7 +94,15 @@ describe('TaskSwitcherControl', () => {
 
     expect(screen.getByRole('button', { name: '显示任务切换' })).toBeTruthy();
     expect(screen.queryByText('竞品分析')).toBeNull();
-    expect(screen.queryByText('任务')).toBeNull();
+    expect(screen.queryByTitle('焦点任务')).toBeNull();
+  });
+
+  it('非焦点任务有进展时,悬浮开关显示提醒徽标', () => {
+    const updatedItems = items.map((item) => (item.taskId === 't-2' ? { ...item, hasUnhandledUpdate: true } : item));
+    render(<TaskSwitcherControl {...props({ items: updatedItems })} />);
+
+    expect(screen.getByTestId('task-switcher-attention-badge')).toBeTruthy();
+    expect(screen.getByTitle('有任务新进展')).toBeTruthy();
   });
 
   it('defaultVisible=true 首帧展示切换条,defaultOpen=true 首帧展开历史任务', () => {

@@ -1,9 +1,6 @@
 import { TaskSwitcherControl } from '@/assets/TaskPanel/v2/TaskSwitcherControl';
 import { getCapabilities } from '@/capabilities';
-import {
-  buildTaskConversationNavigationTarget,
-  useTaskSwitcherTasks,
-} from '@/hooks/useTaskSwitcherTasks';
+import { buildTaskConversationNavigationTarget, useTaskSwitcherTasks } from '@/hooks/useTaskSwitcherTasks';
 import { chatBridge } from '@/services/workspace/chatBridge';
 import { resolveTaskPanelDefaultWidth } from '@/services/workspace/panelWidthMemory';
 import { useTaskConversationNavigationStore } from '@/stores/taskConversationNavigationStore';
@@ -15,9 +12,8 @@ import React from 'react';
  * chat 宿主的任务切换条挂件(业务层装配,经 TaskPanelAdapter.switcher 注入副屏):
  * - 数据:listTasks 经 useTaskSwitcherTasks(登录人工号);
  * - 活跃:taskSidePanelStore.activeTaskId(发起任务自动切换写入),未设置时以当前 tab 任务为准;
- * - 切换:先请求任务时间窗导航,再 chatBridge.openPanelTab 幂等 upsert——已存在 `task-${id}` tab
- *   则更新数据并聚焦,
- *   不存在则按当前面板 params 形状新建同组件 tab(openTab 的既有语义,见 taskPanelMessage.ts 注释)。
+ * - 切换:chatBridge.openPanelTab 幂等 upsert——已存在 `task-${id}` tab 则更新数据并聚焦,
+ *   不存在则按当前面板形状新建;随后按任务第一个步骤节点请求左侧会话导航与消息定位。
  */
 export const TaskPanelSwitcherSlot: React.FC<{
   currentTaskId: string;
@@ -47,10 +43,7 @@ export const TaskPanelSwitcherSlot: React.FC<{
         const currentOrigin = conversationNavigation.originsByTask[effectiveActive];
         if (currentOrigin) conversationNavigation.rememberOrigin(taskId, currentOrigin);
         const task = records.find((record) => record.task_id === taskId);
-        const navigationTarget = task ? buildTaskConversationNavigationTarget(task) : null;
         useTaskSidePanelStore.getState().setActiveTask(taskId);
-        // setActiveTask 会清理旧 pending；先切任务，再写入目标，确保全局 observer 消费本次导航。
-        if (navigationTarget) useTaskSidePanelStore.getState().requestTaskNavigation(navigationTarget);
         const target = items.find((i) => i.taskId === taskId);
         useTaskSidePanelStore.getState().markTaskPanelOpenIntent(taskId);
         chatBridge.openPanelTab({
@@ -62,6 +55,12 @@ export const TaskPanelSwitcherSlot: React.FC<{
           defaultWidth: resolveTaskPanelDefaultWidth(),
           params: { ...params, taskId },
         });
+        if (task) {
+          void buildTaskConversationNavigationTarget(task).then((navigationTarget) => {
+            if (!navigationTarget || useTaskSidePanelStore.getState().activeTaskId !== taskId) return;
+            useTaskSidePanelStore.getState().requestTaskNavigation(navigationTarget);
+          });
+        }
       }}
     />
   );

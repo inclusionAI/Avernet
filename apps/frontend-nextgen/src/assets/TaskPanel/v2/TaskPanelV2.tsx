@@ -8,13 +8,13 @@ import React from 'react';
 
 import './TaskPanelV2.css';
 
-import { PanelToggle, ChevronRight } from '../icons';
-import { C } from '../tokens';
-import type { TaskView } from '../types';
+import { ChevronRight, PanelToggle } from '../icons';
 import { truncateText } from '../text';
-import type { TaskPanelNav } from './taskPanelNav';
+import { C, TASK_STATUS_TONES } from '../tokens';
+import type { TaskView } from '../types';
 import { TaskNodePanelV2 } from './TaskNodePanelV2';
 import { TaskOverviewV2 } from './TaskOverviewV2';
+import type { TaskPanelNav } from './taskPanelNav';
 
 export interface TaskPanelV2Props {
   task: TaskView;
@@ -48,6 +48,7 @@ export const TaskPanelV2: React.FC<TaskPanelV2Props> = ({
   const nodeShort =
     (currentNodeId && task.dagNodes.find((dn) => dn.id === currentNodeId)?.short) ||
     (node ? truncateText(node.name, 8) : null);
+  const focusStatusLabel = TASK_STATUS_TONES[task.status]?.label ?? task.status;
 
   return (
     <section
@@ -77,7 +78,22 @@ export const TaskPanelV2: React.FC<TaskPanelV2Props> = ({
         }}
       >
         {currentNodeId === null ? (
-          <span style={{ fontWeight: 600 }}>任务总览</span>
+          <>
+            <span
+              title={`任务总览：${task.name}`}
+              style={{
+                minWidth: 0,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                fontWeight: 600,
+              }}
+            >
+              {task.name}
+            </span>
+            <span style={{ color: C.textSecondary }}>·</span>
+            <span style={{ color: C.textSecondary, whiteSpace: 'nowrap' }}>{focusStatusLabel}</span>
+          </>
         ) : (
           <>
             <button

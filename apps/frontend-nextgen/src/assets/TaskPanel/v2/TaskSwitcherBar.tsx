@@ -14,6 +14,8 @@ export interface TaskSwitcherItem {
   title: string;
   status: 'running' | 'pending' | 'done';
   statusLabel: string;
+  /** 非焦点任务有进展但尚未被用户查看。 */
+  hasUnhandledUpdate?: boolean;
 }
 
 export interface TaskSwitcherProps {
@@ -54,6 +56,7 @@ export const TaskSwitcherBar: React.FC<TaskSwitcherProps> = ({ items, activeTask
   if (items.length === 0) return null;
 
   const active = items.find((i) => i.taskId === activeTaskId) ?? items[0];
+  const hasUnhandledUpdate = items.some((i) => i.hasUnhandledUpdate);
 
   return (
     <div style={{ position: 'relative', borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
@@ -63,6 +66,7 @@ export const TaskSwitcherBar: React.FC<TaskSwitcherProps> = ({ items, activeTask
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         style={{
+          position: 'relative',
           display: 'flex',
           alignItems: 'center',
           gap: 8,
@@ -76,7 +80,7 @@ export const TaskSwitcherBar: React.FC<TaskSwitcherProps> = ({ items, activeTask
           textAlign: 'left',
         }}
       >
-        <span style={{ fontSize: 11, color: C.textSecondary, flexShrink: 0 }}>任务</span>
+        <span style={{ fontSize: 12, color: C.textSecondary, flexShrink: 0 }}>任务</span>
         <span
           style={{
             flex: 1,
@@ -89,6 +93,7 @@ export const TaskSwitcherBar: React.FC<TaskSwitcherProps> = ({ items, activeTask
         >
           {active.title}
         </span>
+        <span style={{ color: C.textSecondary, flexShrink: 0 }}>·</span>
         <Tag item={active} />
         <span
           title="任务总数"
@@ -115,6 +120,21 @@ export const TaskSwitcherBar: React.FC<TaskSwitcherProps> = ({ items, activeTask
             flexShrink: 0,
           }}
         />
+        {hasUnhandledUpdate && (
+          <span
+            data-testid="task-switcher-attention-badge"
+            title="有任务新进展"
+            style={{
+              position: 'absolute',
+              top: 7,
+              right: 9,
+              width: 7,
+              height: 7,
+              borderRadius: 999,
+              background: C.danger,
+            }}
+          />
+        )}
       </button>
 
       {open && (
@@ -162,6 +182,18 @@ export const TaskSwitcherBar: React.FC<TaskSwitcherProps> = ({ items, activeTask
                     textAlign: 'left',
                   }}
                 >
+                  <span
+                    data-testid={i.hasUnhandledUpdate ? 'task-switcher-update-badge' : undefined}
+                    title={i.hasUnhandledUpdate ? '有新进展' : undefined}
+                    aria-hidden={!i.hasUnhandledUpdate || undefined}
+                    style={{
+                      width: i.hasUnhandledUpdate ? 6 : 0,
+                      height: 6,
+                      borderRadius: 999,
+                      background: C.danger,
+                      flexShrink: 0,
+                    }}
+                  />
                   <span
                     style={{
                       overflow: 'hidden',

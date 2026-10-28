@@ -7,7 +7,7 @@ import { persistPanelWidthPercent } from '@/services/workspace/panelWidthMemory'
 import { useTaskConversationNavigationStore } from '@/stores/taskConversationNavigationStore';
 import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const taskRecord = (taskId: string, title: string): TaskListItem =>
   ({
@@ -28,7 +28,7 @@ const taskRecord = (taskId: string, title: string): TaskListItem =>
     status: 'EXECUTING',
     gmt_create: '2026-10-27 10:00:00',
     gmt_modified: '2026-10-27 11:00:00',
-  }) as TaskListItem;
+  } as TaskListItem);
 
 const currentRecord = taskRecord('task-current', '当前tab的任务');
 const otherRecord = taskRecord('task-other', '别的面板的任务');
@@ -45,15 +45,17 @@ const mockUseTaskSwitcherTasks = jest.fn(() => ({
 jest.mock('@/hooks/useTaskSwitcherTasks', () => ({
   resolveTaskMainSessionId: (record: TaskListItem) => record.execution_config.main_session_id,
   useTaskSwitcherTasks: (...args: unknown[]) => mockUseTaskSwitcherTasks(...args),
-  buildTaskConversationNavigationTarget: (record: TaskListItem) => ({
-    taskId: record.task_id,
-    sessionId: 'session-shared',
-    kind: 'bot' as const,
-    groupId: null,
-    botId: 'b1:u1',
-    startTime: Date.parse('2026-10-27T10:00:00'),
-    endTime: Date.parse('2026-10-27T11:00:00'),
-  }),
+  buildTaskConversationNavigationTarget: (record: TaskListItem) =>
+    Promise.resolve({
+      taskId: record.task_id,
+      nodeId: 'n-first',
+      sessionId: 'session-first-step',
+      kind: 'bot' as const,
+      groupId: null,
+      botId: 'b1:u1',
+      startTime: Date.parse('2026-10-27T10:00:00'),
+      endTime: Date.parse('2026-10-27T11:00:00'),
+    }),
 }));
 
 const openPanelTabMock = jest.spyOn(chatBridge, 'openPanelTab').mockImplementation(() => {});
@@ -194,21 +196,24 @@ describe('TaskPanelSwitcherSlot 切任务 openTab 宽度(拖宽记忆)', () => {
     expect(useTaskConversationNavigationStore.getState().originsByTask['task-other']).toEqual(origin);
   });
 
-  it('切换任务时请求主会话导航并携带任务时间窗', () => {
+  it('切换任务时请求第一个步骤节点会话,并携带节点开始时间定位消息', async () => {
     render(<TaskPanelSwitcherSlot currentTaskId="task-current" params={{ taskId: 'task-current' }} />);
     switchToOtherTask();
 
     expect(useTaskSidePanelStore.getState().activeTaskId).toBe('task-other');
-    expect(useTaskSidePanelStore.getState().pendingNavigation).toMatchObject({
-      taskId: 'task-other',
-      sessionId: 'session-shared',
-      kind: 'bot',
-      botId: 'b1:u1',
-      startTime: Date.parse('2026-10-27T10:00:00'),
-      endTime: Date.parse('2026-10-27T11:00:00'),
-    });
     expect(openPanelTabMock).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'task-task-other', title: '别的面板的任务' }),
+    );
+    await waitFor(() =>
+      expect(useTaskSidePanelStore.getState().pendingNavigation).toMatchObject({
+        taskId: 'task-other',
+        nodeId: 'n-first',
+        sessionId: 'session-first-step',
+        kind: 'bot',
+        botId: 'b1:u1',
+        startTime: Date.parse('2026-10-27T10:00:00'),
+        endTime: Date.parse('2026-10-27T11:00:00'),
+      }),
     );
   });
 });

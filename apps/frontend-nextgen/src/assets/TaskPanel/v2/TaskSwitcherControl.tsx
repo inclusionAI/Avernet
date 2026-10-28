@@ -85,6 +85,7 @@ export const TaskSwitcherControl: React.FC<TaskSwitcherControlProps> = (props) =
   if (props.items.length === 0) return null;
 
   const label = visible ? '隐藏任务切换' : '显示任务切换';
+  const hasUnhandledUpdate = props.items.some((item) => item.hasUnhandledUpdate);
 
   return (
     <>
@@ -203,6 +204,22 @@ export const TaskSwitcherControl: React.FC<TaskSwitcherControlProps> = (props) =
         }}
       >
         <TaskSwitcherIcon size={24} aria-hidden="true" />
+        {hasUnhandledUpdate && (
+          <span
+            data-testid="task-switcher-attention-badge"
+            title="有任务新进展"
+            style={{
+              position: 'absolute',
+              top: 9,
+              right: 9,
+              width: 8,
+              height: 8,
+              borderRadius: 999,
+              background: C.danger,
+              border: `1px solid ${C.surface}`,
+            }}
+          />
+        )}
       </button>
     </>
   );

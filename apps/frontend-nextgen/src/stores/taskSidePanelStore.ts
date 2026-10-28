@@ -1,3 +1,4 @@
+import { useTaskUpdateAttentionStore } from '@/stores/taskUpdateAttentionStore';
 import { create } from 'zustand';
 
 /**
@@ -45,7 +46,7 @@ export interface TaskLinkedSessionTarget {
 }
 
 export interface TaskSidePanelState {
-  /** 当前活跃任务（多任务切换条的落点；聊天 tab 由 taskId 自带，不强依赖） */
+  /** 焦点任务：副屏当前渲染/用户当前关注的任务；同一会话可承载多个任务但不并发展示。 */
   activeTaskId: string | null;
   /** 按 task 分片的导航状态 */
   navByTask: Record<string, TaskNavRecord>;
@@ -87,8 +88,11 @@ const initial = {
 
 export const useTaskSidePanelStore = create<TaskSidePanelState>((set, get) => ({
   ...initial,
-  setActiveTask: (taskId) =>
-    set({ activeTaskId: taskId, pendingNavigation: null, taskPanelOpenIntentTaskId: null }),
+  setActiveTask: (taskId) => {
+    // 用户切到某任务（含新任务夺焦）即消费该任务的进展徽标。
+    useTaskUpdateAttentionStore.getState().clearTaskUpdate(taskId);
+    set({ activeTaskId: taskId, pendingNavigation: null, taskPanelOpenIntentTaskId: null });
+  },
   markTaskPanelOpenIntent: (taskId) => set({ taskPanelOpenIntentTaskId: taskId }),
   consumeTaskPanelOpenIntent: (taskId) => {
     const matched = get().taskPanelOpenIntentTaskId === taskId;
@@ -136,5 +140,8 @@ export const useTaskSidePanelStore = create<TaskSidePanelState>((set, get) => ({
   consumePendingNavigation: () => set({ pendingNavigation: null }),
   openLinkedSession: (target) => set({ linkedSession: target }),
   closeLinkedSession: () => set({ linkedSession: null }),
-  resetAll: () => set(initial),
+  resetAll: () => {
+    useTaskUpdateAttentionStore.getState().resetAll();
+    set(initial);
+  },
 }));
