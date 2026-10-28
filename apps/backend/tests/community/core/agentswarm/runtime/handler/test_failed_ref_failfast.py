@@ -136,7 +136,9 @@ class TestFailFastOnFailedBlockingRef:
         assert outcome == "complete"
         stored = env.run_repo.get(run.run_id, TENANT)
         assert stored.status is dm.RunStatus.COMPLETED
-        agents = {a.name: a for a in env.agent_repo.list_by_run(run.run_id, TENANT)}
+        # Rows carry spawn-local composite names ("a1_<12hex>").
+        agents = {a.name.split("_", 1)[0]: a
+                  for a in env.agent_repo.list_by_run(run.run_id, TENANT)}
         assert agents["a1"].status is dm.AgentStatus.FAILED
         assert agents["a2"].status is dm.AgentStatus.COMPLETED
 
