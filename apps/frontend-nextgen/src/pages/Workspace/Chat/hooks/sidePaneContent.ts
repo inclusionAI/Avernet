@@ -10,6 +10,8 @@ import {
   type AixUiRawAttrs,
 } from '@tc-chat/ui/es/utils/aixTags';
 
+import { chooseAppendWinners } from './panelAppendRebuild';
+
 /**
  * AixUI 副屏标记：显式 type=panel（双引号/单引号/无引号均命中，引擎与 BCS 输出引号风格不一），
  * 或无显式 type 时的旧版 panel= 属性（对齐 @tc-chat/ui resolveAixUi 的位置轴：
@@ -95,7 +97,7 @@ export function reopenSidePaneTabsFromMessages(messages: ChatMessage[], panel: P
           payload,
         });
         openedAny = true;
-      } else if (resolved.mode === 'panel-component' && resolved.component) {
+      } else if (resolved.mode === 'panel-component' && resolved.component && resolved.component !== 'panel-append') {
         // 与 PanelComponentTrigger 同款：命令式 openBusinessPanel（tab.id 缺省取 component）。
         openBusinessPanel(panel, {
           component: resolved.component,
@@ -109,6 +111,23 @@ export function reopenSidePaneTabsFromMessages(messages: ChatMessage[], panel: P
         openedAny = true;
       }
     }
+  }
+  // panel-append 重建：对 component="panel-append" 的同 id 取 params.blocks 最长者为候选（跳过
+  // 上方 panel-component 即时开 tab 分支，避免双开），按 winner.params 一次开 tab 恢复完整累积序列。
+  const appendWinners = chooseAppendWinners(messages);
+  for (const winner of appendWinners) {
+    openBusinessPanel(panel, {
+      component: 'panel-append',
+      params: winner.params,
+      tab: {
+        id: winner.tabId,
+        title: winner.title,
+        closable: winner.closable,
+        ...(winner.defaultWidth !== undefined ? { defaultWidth: winner.defaultWidth as PanelTab['defaultWidth'] } : {}),
+      },
+      children: winner.body || undefined,
+    });
+    openedAny = true;
   }
   return openedAny;
 }

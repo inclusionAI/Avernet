@@ -11,7 +11,8 @@ import { useTaskConversationNavigationStore } from '@/stores/taskConversationNav
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import * as SidePanelApi from '@tc-chat/ui/es/SidePanel';
 import type { PanelContentProps } from '@tc-chat/ui/es/SidePanelContent';
-import { registerPanelContent } from '@tc-chat/ui/es/SidePanelContent';
+import { registerPanelComponent } from '@/services/workspace/panelComponentRegistry';
+import { PanelAppend } from '@/components/PanelAppend';
 import React, { type ComponentType } from 'react';
 
 type SidePanelConfigureFn = (opts: { maxTabLabelLength?: number }) => void;
@@ -95,11 +96,14 @@ export function registerSidePanelWiring(): void {
   registerUmdPanelHandler();
   registerTaskPanel();
   // Open Core task-loop skill card: public component key replaces the internal cardId loader.
-  registerPanelContent('taskCard.TaskLoopCard', TaskLoopCard as ComponentType<PanelContentProps>);
+  registerPanelComponent('taskCard.TaskLoopCard', TaskLoopCard as ComponentType<PanelContentProps>);
   // 业务层覆盖注入登录用户工号：协群后端 opening_message.params 不带 userId，副屏下钻需登录人工号
   // 判定群成员归属本人 bot（view_bot_id）与跨用户单聊权限；缺省回填，已有 userId 则沿用。
-  registerPanelContent('taskPanel.TaskLoopView', TaskPanelAdapterWithUser);
-  registerPanelContent('task-loop', TaskPanelAdapterWithUser);
+  registerPanelComponent('taskPanel.TaskLoopView', TaskPanelAdapterWithUser);
+  registerPanelComponent('task-loop', TaskPanelAdapterWithUser);
+  // 副屏 append 模式：声明式 <AixUI type="panel" component="panel-append" tab='{id}' params='{mode,blocks}'>
+  // 经 SDK openBusinessPanel 渲染，PanelAppend 按 params.blocks 纵向堆叠、历史保留（见 PanelAppend.tsx）。
+  registerPanelComponent('panel-append', PanelAppend as ComponentType<PanelContentProps>);
 }
 
 export const appExtension = {
