@@ -6,6 +6,11 @@ import type { BackendApiPage } from '@/services/backendApi/types';
 // @/services/backendApi/types，由 service 层转出，保持全库判定逻辑单一收口(见 types.ts isEnvelopeFailure)。
 export { isEnvelopeFailure } from '@/services/backendApi/types';
 
+// re-export 任务看板读 API：hooks/components 层(useTaskSwitcherTasks 等)受 import-boundaries
+// 门禁不可直接依赖 @/services/backendApi(tasks taskController), 由 service 层转出。controller
+// 仍是唯一信封边界(envelope{code,message,data}), 这里只做透传, 不重塑契约。
+export { dashboardTask } from '@/services/backendApi/tasks/taskController';
+
 /** 我的任务列表查询参数（对齐 GET /openapi/v1/collaboration/tasks/list）。 */
 export interface ListMyTaskParams {
   user_id: string;

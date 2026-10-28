@@ -19,14 +19,11 @@ const mockNormalizeMyTaskPage = jest.fn((data: unknown) => ({
   items: Array.isArray(data) ? data : [],
   total: Array.isArray(data) ? data.length : 0,
 }));
-jest.mock('@/services/backendApi/tasks/taskController', () => ({
-  dashboardTask: (...args: unknown[]) => mockDashboardTask(...args),
-}));
-
 jest.mock('@/services/myTask', () => ({
   listMyTasks: (...args: unknown[]) => mockListMyTasks(...args),
   normalizeMyTaskPage: (data: unknown) => mockNormalizeMyTaskPage(data),
   isEnvelopeFailure: () => false,
+  dashboardTask: (...args: unknown[]) => mockDashboardTask(...args),
 }));
 
 const item = (
