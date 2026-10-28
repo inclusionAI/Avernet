@@ -917,3 +917,15 @@ def test_refusal_log_bounds_caller_supplied_ids(caplog):
     line = refusals[0].getMessage()
     assert "\n" not in line, "a caller-supplied newline reached the log verbatim"
     assert "FAKE LOG LINE" in line, "the value should be escaped, not dropped"
+
+
+def test_audit_keeps_current_owner_after_entity_and_owner_diverge():
+    class TransferredBots(_Bots):
+        def list_matches_by_legacy_locator(self, bot_id, locator):
+            rows = super().list_matches_by_legacy_locator(bot_id, locator)
+            return [{**row, "entity_id": "stable-entity"} for row in rows]
+    client, audit = _surface(level=PermissionLevel.ADMIN, bots=TransferredBots())
+    assert _post(client).status_code == 200
+    assert len(audit.rows) == 1
+    assert audit.rows[0]["owner_id"] == OWNER
+    assert audit.rows[0]["operator_id"] == CALLER

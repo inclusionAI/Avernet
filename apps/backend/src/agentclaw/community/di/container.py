@@ -48,6 +48,7 @@ from agentclaw.community.di.modules.apply_engine_module import (
 )
 from agentclaw.community.di.modules.manifest_fetch_module import ManifestFetchModule
 from agentclaw.community.di.modules.bot_public_module import BotPublicModule
+from agentclaw.community.di.modules.bot_public_risk_module import BotPublicRiskModule
 from agentclaw.community.di.modules.bot_quota_module import BotQuotaModule
 from agentclaw.community.di.modules.task_module import TaskModule
 from agentclaw.community.di.modules.acli_clis_module import AcliClisModule
@@ -213,6 +214,7 @@ def build_injector(
         BotInventoryModule(),
         SkillsPoolModule(),
         BotPublicModule(),
+        BotPublicRiskModule(),
         ExpertMarketModule(),
         TaskModule(),
         DevicesModule(),

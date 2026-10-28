@@ -184,6 +184,7 @@ class SkillSetDefaultContext:
         self,
         bot_id: Optional[str] = None,
         *,
+        entity_id: Optional[str] = None,
         strict: bool = False,
     ) -> str | None:
         """Resolve template routing context for Default capabilities.
@@ -192,13 +193,14 @@ class SkillSetDefaultContext:
         a repository failure is not evidence that the Bot has no template.
         """
         target_bot_id = bot_id or self.bot_id
-        if not target_bot_id or not self.entity_id:
+        target_entity_id = entity_id or self.entity_id
+        if not target_bot_id or not target_entity_id:
             if strict:
                 raise RuntimeError("Default MCP template context is unavailable")
             return None
         try:
             bot = self._bot_repo.get_by_id_and_entity(
-                str(target_bot_id), str(self.entity_id)
+                str(target_bot_id), str(target_entity_id)
             )
         except Exception as exc:
             if strict:

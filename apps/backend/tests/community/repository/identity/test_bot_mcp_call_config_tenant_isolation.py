@@ -237,3 +237,34 @@ def test_cross_tenant_delete_is_a_noop(db):
     with avernet_tenant_scope("tenant-a"):
         with db.orm_session() as s:
             assert s.query(BotMcpCallConfigModel).count() == 1
+
+
+def test_risk_manifest_uses_real_sparse_identity_records(repo, db):
+    from types import SimpleNamespace
+    from agentclaw.community.core.bot_public_risk.input_builder import RiskInputBuilder
+
+    class Reader:
+        def active_capabilities(self, **kwargs):
+            return SimpleNamespace(owner_id="entity", skills=(), installed_mcp_server_codes=frozenset())
+
+    class Mcps:
+        def collect_bot_active_mcps(self, **kwargs):
+            return [{"server_code": "caller"}, {"server_code": "owner"}]
+
+    bot = {"id": 42, "bot_id": "default", "entity_id": "entity", "env": get_current_env(),
+           "owner_id": "owner", "creator_id": "creator", "bot_name": "Bot", "active_engine": "openclaw",
+           "ext": {"passport": {"agent_code": "agent"}}}
+    _add_row(db, tenant="tenant-a", bot_pk=42, server_code="caller")
+    with avernet_tenant_scope("tenant-a"):
+        data, digest = RiskInputBuilder(Reader(), Mcps(), repo, None, None).build(
+            bot=bot, target={"visibility": "public"}
+        )
+        assert [(m["resourceCode"], m["resourceConfig"]["identityMode"]) for m in data["agent_info"]["resourceManifest"]] == [
+            ("caller", "CALLER"), ("owner", "OWNER")
+        ]
+    with avernet_tenant_scope("tenant-b"):
+        other, other_digest = RiskInputBuilder(Reader(), Mcps(), repo, None, None).build(
+            bot=bot, target={"visibility": "public"}
+        )
+        assert [m["resourceConfig"]["identityMode"] for m in other["agent_info"]["resourceManifest"]] == ["OWNER", "OWNER"]
+        assert digest != other_digest

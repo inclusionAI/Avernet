@@ -296,3 +296,21 @@ def test_display_read_still_degrades_when_template_lookup_fails(tmp_path):
         bot_id="bot",
         user_id="owner",
     ) == []
+
+
+def test_stateless_provider_resolves_template_for_the_requested_entity(tmp_path):
+    db = _Database()
+    service = _service(db, tmp_path, ext_info_provider=lambda _bot_id: None)
+    # The global BotMCPProvider is constructed without a bound entity. Even a
+    # scoped provider must use the requested entity rather than stale state.
+    service.entity_id = "different-entity"
+    service._bot_repo.get_by_id_and_entity.return_value = {"template_type": "custom"}
+
+    service.collect_bot_active_mcps(
+        entity_id="owner",
+        bot_id="bot",
+        user_id="owner",
+        strict_policy_context=True,
+    )
+
+    service._bot_repo.get_by_id_and_entity.assert_called_with("bot", "owner")

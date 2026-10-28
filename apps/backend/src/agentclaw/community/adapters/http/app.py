@@ -135,6 +135,7 @@ from agentclaw.community.adapters.http.bot_render_screen.router import router as
 from agentclaw.community.adapters.http.antprocess import router as antprocess_router  # noqa: E402
 from agentclaw.community.adapters.http.antcode.router import router as antcode_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_public import bot_public_auth_router, bot_public_router, bot_public_noauth_router  # noqa: E402
+from agentclaw.community.adapters.http.bot_public.risk_routes import legacy_router as risk_legacy_router  # noqa: E402
 from agentclaw.community.adapters.http.oss_to_nas.router import router as oss_to_nas_router  # noqa: E402
 from agentclaw.community.adapters.http.system import system_health_router, system_readiness_router, system_disk_usage_router  # noqa: E402
 from agentclaw.community.adapters.http.desktop.router import bot_router as desktop_bot_router, device_router as desktop_device_router  # noqa: E402
@@ -928,6 +929,7 @@ app.include_router(antprocess_router)
 app.include_router(antcode_router)  # AntCode 集成
 app.include_router(bot_public_auth_router)
 app.include_router(bot_public_router)
+app.include_router(risk_legacy_router)
 app.include_router(bot_public_noauth_router)
 app.include_router(workitem_noauth_router)  # 工作项接口 (route URL still /api/public/dima)
 app.include_router(oss_to_nas_router)
@@ -936,7 +938,6 @@ app.include_router(system_readiness_router)
 app.include_router(system_disk_usage_router)
 app.include_router(desktop_device_router)
 app.include_router(desktop_bot_router)
-
 # 2. OpenClawEnterprise 路由（统一挂载到 /api 下）
 # 注意：OpenClaw 的路由前缀和 AgentClaw 不冲突
 mount_resource_routers(app)
@@ -978,7 +979,6 @@ app.include_router(economy_governance_workflow_router)
 app.include_router(enums_router)
 app.include_router(task_internal_router)
 app.include_router(task_callback_router)
-
 # Runtime-mode-conditional routers (bound by DI: empty in prod, populated in
 # local boots via the test column's app-services module) are NOT mounted here:
 # they are the one route registration that needs a resolved binding, so

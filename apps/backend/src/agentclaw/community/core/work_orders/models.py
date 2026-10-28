@@ -167,6 +167,10 @@ class WorkOrderEventType(StrEnum):
         "BOT2BOT_PUBLIC_ORDER_COMPLETED", NotificationCategory.NOTICE,
         "Bot 公开工单审批已结束", "Bot 公开工单审批已结束",
     )
+    BOT_PUBLIC_RISK = (
+        "BOT_PUBLIC_RISK", NotificationCategory.NOTICE,
+        "Bot 公开风险检测需要关注", "Bot 公开风险检测需要关注。",
+    )
     TASK_DISCOVERED = (
         "TASK_DISCOVERED", NotificationCategory.NOTICE,
         "发现新任务", "发现一条新任务。",

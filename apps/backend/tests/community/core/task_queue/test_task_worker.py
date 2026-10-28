@@ -575,3 +575,24 @@ def test_idle_worker_loop_wakes_on_an_opted_in_enqueue(monkeypatch):
 
     elapsed = asyncio.run(drive())
     assert elapsed < 1.0
+
+
+def test_risk_advance_and_replay_are_dispatched_by_real_queue_worker():
+    from agentclaw.community.core.bot_public_risk.advance import RiskAdvanceHandler, RiskPendingHandler
+    from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
+
+    world = _world()
+    advance = MagicMock()
+    seen = []
+    advance.advance.side_effect = lambda env, risk_id: seen.append((get_current_avernet_tenant(), env, risk_id))
+    repo = MagicMock()
+    repo.get.return_value = None
+    world.registry.register(RiskAdvanceHandler(advance, lambda: "dev"))
+    world.registry.register(RiskPendingHandler(repo, MagicMock(), MagicMock(), MagicMock(), lambda: "dev"))
+    payload = {"tenant": "example", "env": "dev", "risk_check_id": "risk-a"}
+    first = world.enqueue("bot_public_risk_advance", payload)
+    second = world.enqueue("bot_public_risk_callback_replay", payload)
+    assert asyncio.run(world.worker.run_once()) == 2
+    assert world.status_of(first.id) == TaskStatus.SUCCEEDED
+    assert world.status_of(second.id) == TaskStatus.SUCCEEDED
+    assert seen == [("example", "dev", "risk-a")]

@@ -42,6 +42,7 @@ def _make_service(
     device_sync_dispatcher=None,
     bcsfuse_config=None,
     catalog_metadata_service=None,
+    risk_repository=None,
 ):
     resolver = device_context_resolver or MagicMock()
     return BotPublicService(
@@ -58,6 +59,7 @@ def _make_service(
         device_sync_dispatcher=device_sync_dispatcher or MagicMock(),
         bcsfuse_config=bcsfuse_config or MagicMock(base_url=""),
         catalog_metadata_service=catalog_metadata_service or MagicMock(),
+        risk_repository=risk_repository,
     )
 
 def _make_operator(staff_id="op_user", nick_name="Operator") -> OperatorContext:
@@ -2701,3 +2703,355 @@ class TestRebuildAuthRelationships:
                 bot_id="bot1", owner_id="owner1", owner_name="owner_nick",
                 agent_code="agent_123", access_mode="RESTRICTED", public="0",
             )
+
+
+def test_risk_bcs_submission_records_puid_before_inline_approval_callback():
+    process = MagicMock()
+    process.start_approval.return_value = {
+        "success": True, "puid": "p-risk", "state": "COMPLETED", "lastOperate": "AGREE",
+    }
+    service = _make_service(process_service=process)
+    events = []
+    with patch.object(service, "handle_public_approval_callback", side_effect=lambda **_: events.append("callback")):
+        service.public_bcs_bot(
+            "b1", "u1", "user", _make_operator(), visibility="public",
+            approval_biz_id="risk-123", on_approval_started=lambda result: events.append(result["puid"]),
+        )
+    assert process.start_approval.call_args.kwargs["biz_id"] == "risk-123"
+    assert events == ["p-risk", "callback"]
+
+
+def test_risk_bcs_submission_never_applies_inline_when_handoff_fails():
+    process = MagicMock()
+    process.start_approval.return_value = {
+        "success": True, "puid": "p-risk", "state": "COMPLETED", "lastOperate": "AGREE",
+    }
+    service = _make_service(process_service=process)
+
+    def failed_handoff(_result):
+        raise RuntimeError("association write failed")
+
+    with patch.object(service, "handle_public_approval_callback") as callback:
+        with pytest.raises(RuntimeError, match="association write failed"):
+            service.public_bcs_bot(
+                "b1", "u1", "user", _make_operator(), visibility="public",
+                approval_biz_id="risk-123", on_approval_started=failed_handoff,
+            )
+    callback.assert_not_called()
+
+
+@pytest.mark.parametrize("scope", ["legacy", "user", "agent"])
+def test_withdrawal_invalidates_only_observed_risk_record_before_publish(scope):
+    from types import SimpleNamespace
+
+    repository = MagicMock()
+    repository.get_current.return_value = SimpleNamespace(risk_check_id="risk-a", row_version=4)
+    repository.invalidate_if_current.return_value = True
+    bots = MagicMock()
+    bots.get_by_id_and_owner.return_value = _make_bot(bot_id="b1", owner_id="u1")
+    bots.get_by_id_and_entity.return_value = _make_bot(bot_id="b1", owner_id="u1")
+    service = _make_service(bot_repository=bots, risk_repository=repository)
+    if scope == "legacy":
+        with patch.object(service, "_publish_directly", return_value={}):
+            service.public_bot("b1", "u1", "0", "caller", "0", _make_operator())
+    else:
+        service.public_bcs_bot("b1:u1", "u1", scope, _make_operator(), visibility="private")
+    repository.get_current.assert_called_once_with(env="dev", bot_pk=42, public_scope=scope)
+    repository.invalidate_if_current.assert_called_once_with(env="dev", risk_check_id="risk-a", row_version=4)
+
+
+def test_withdrawal_database_failure_stops_external_publish():
+    repository = MagicMock()
+    repository.get_current.side_effect = RuntimeError("database unavailable")
+    bots = MagicMock()
+    bots.get_by_id_and_owner.return_value = _make_bot(bot_id="b1", owner_id="u1")
+    bots.get_by_id_and_entity.return_value = _make_bot(bot_id="b1", owner_id="u1")
+    bcn = MagicMock()
+    service = _make_service(bot_repository=bots, bcn_service=bcn, risk_repository=repository)
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        service.public_bcs_bot("b1:u1", "u1", "user", _make_operator(), visibility="private")
+    bcn.patch_attributes.assert_not_called()
+
+
+def test_withdrawal_does_not_invalidate_newer_replacement_after_race():
+    from types import SimpleNamespace
+
+    repository = MagicMock()
+    repository.get_current.side_effect = [
+        SimpleNamespace(risk_check_id="risk-a", row_version=4),
+        SimpleNamespace(risk_check_id="risk-b", row_version=1),
+    ]
+    repository.invalidate_if_current.return_value = False
+    bots = MagicMock()
+    bots.get_by_id_and_owner.return_value = _make_bot(bot_id="b1", owner_id="u1")
+    bots.get_by_id_and_entity.return_value = _make_bot(bot_id="b1", owner_id="u1")
+    service = _make_service(bot_repository=bots, risk_repository=repository)
+    service.public_bcs_bot("b1:u1", "u1", "user", _make_operator(), visibility="private")
+    repository.invalidate_if_current.assert_called_once_with(env="dev", risk_check_id="risk-a", row_version=4)
+
+
+def test_risk_callback_guard_denial_never_changes_bcs():
+    bot = _make_bot(bot_id="b1", owner_id="u1")
+    bots = MagicMock()
+    bots.get_by_id_and_owner.return_value = bot
+    bots.get_by_id_and_entity.return_value = bot
+    bcn = MagicMock()
+    guard = MagicMock()
+    guard.check.return_value = "DENIED"
+    service = _make_service(bot_repository=bots, bcn_service=bcn)
+    service._risk_approval_guard = guard
+    result = service.handle_public_approval_callback("b1:u1", "u1", "p1", "AGREE", "user", risk_check_id="risk-a")
+    assert result["success"] is False
+    bcn.patch_attributes.assert_not_called()
+
+
+def test_risk_publication_sends_callback_marker_and_replays_deferred_event():
+    process = MagicMock()
+    process.start_approval.return_value = {"success": True, "puid": "p-risk", "state": "PROCESSING"}
+    bots = MagicMock()
+    bots.get_by_id_and_entity.return_value = _make_bot("b1", "u1")
+    bcn = MagicMock()
+    bcn.get_attributes.return_value = {"friend_ext": {}}
+    bcn.patch_attributes.return_value = {}
+    service = _make_service(process_service=process, bot_repository=bots, bcn_service=bcn)
+    guard = MagicMock()
+    guard.replay.return_value = False
+    service._risk_approval_guard = guard
+    service.public_bcs_bot(
+        "b1:u1", "u1", "user", _make_operator(), visibility="public",
+        approval_biz_id="risk-123", on_approval_started=lambda _: None, risk_check_id="risk-a",
+    )
+    assert process.start_approval.call_args.kwargs["context"]["risk_check_id"] == "risk-a"
+    guard.replay.assert_called_once()
+
+
+def test_callback_without_marker_still_blocks_known_risk_approval():
+    from types import SimpleNamespace
+
+    repo = MagicMock()
+    repo.find_approval.return_value = SimpleNamespace(risk_check_id="risk-a")
+    bots = MagicMock()
+    bots.get_by_id_and_owner.return_value = _make_bot(bot_id="b1", owner_id="u1")
+    bots.get_by_id_and_entity.return_value = _make_bot(bot_id="b1", owner_id="u1")
+    bcn = MagicMock()
+    service = _make_service(bot_repository=bots, bcn_service=bcn, risk_repository=repo)
+    guard = MagicMock()
+    guard.check.return_value = "DENIED"
+    service._risk_approval_guard = guard
+    result = service.handle_public_approval_callback("b1:u1", "u1", "p-risk", "AGREE", "user")
+    assert result["success"] is False
+    guard.check.assert_called_once()
+    bcn.patch_attributes.assert_not_called()
+
+
+def test_new_withdrawal_uses_full_identity_to_select_risk_record():
+    from types import SimpleNamespace
+    bots = MagicMock()
+    bots.get_by_id_and_owner.return_value = {**_make_bot(bot_id='default', owner_id='owner'), 'id': 42, 'entity_id': 'entity-a'}
+    bots.get_by_id_and_entity.return_value = {**_make_bot(bot_id='default', owner_id='owner'), 'id': 77, 'entity_id': 'entity-b'}
+    repository = MagicMock()
+    repository.get_current.return_value = SimpleNamespace(risk_check_id='risk-b', row_version=4)
+    repository.invalidate_if_current.return_value = True
+    service = _make_service(bot_repository=bots, risk_repository=repository)
+    service.public_bcs_bot('default:entity-b', 'owner', 'user', _make_operator(), visibility='private')
+    bots.get_by_id_and_entity.assert_called_once_with('default', 'entity-b')
+    repository.get_current.assert_called_once_with(env='dev', bot_pk=77, public_scope='user')
+    repository.invalidate_if_current.assert_called_once_with(env='dev', risk_check_id='risk-b', row_version=4)
+
+
+def test_legacy_owner_risk_publish_passes_stable_identity_to_approval_plugin():
+    bots = MagicMock()
+    bots.get_by_id_and_owner.return_value = _make_bot(bot_id="b1", owner_id="u1")
+    plugin = MagicMock()
+    service = _make_service(bot_repository=bots, publish_approval_plugin=plugin)
+    handoff = MagicMock()
+    service._risk_approval_guard = MagicMock()
+    service.public_bot("b1", "u1", "1", "owner", "0", _make_operator(),
+                       approval_biz_id="risk-a", risk_check_id="a", on_approval_started=handoff)
+    kwargs = plugin.publish.call_args.kwargs
+    assert kwargs["approval_biz_id"] == "risk-a"
+    assert kwargs["risk_check_id"] == "a"
+    assert kwargs["on_approval_started"] is handoff
+
+
+def test_callback_between_puid_and_bcs_target_waits_until_target_is_ready():
+    from threading import Event, Thread, Lock
+    from dataclasses import replace
+    from agentclaw.community.core.bot_public_risk.approval_guard import RiskApprovalGuard
+    from agentclaw.community.core.bot_public_risk.repository import RiskCheck
+
+    class Repository:
+        def __init__(self):
+            self.lock = Lock()
+            self.row = RiskCheck(risk_check_id="risk-a", env="dev", bot_pk=42, owner_id="u1", operator_id="op_user",
+                client_scope="openapi:op_user", client_request_id="req", public_scope="user", target_json='{"visibility":"public","view_depts":[]}',
+                request_hash="h", input_json="{}", input_hash="h", approval_biz_id="risk-a", phase="ADVANCING",
+                security_status="PASS", current_target_key="current", workflow_json='{"approval_intent":true}')
+        def get(self, **_):
+            with self.lock:
+                return self.row
+        def update_current(self, *, row_version, changes, **_):
+            with self.lock:
+                if self.row.row_version != row_version:
+                    return False
+                self.row = replace(self.row, **changes, row_version=row_version + 1)
+                return True
+    repo = Repository()
+    started, resume = Event(), Event()
+    bot_repo = MagicMock()
+    bot_repo.get_by_id_and_owner.return_value = _make_bot("b1", "u1")
+    bot_repo.get_by_id_and_entity.return_value = _make_bot("b1", "u1")
+    bcn = MagicMock()
+    bcn.get_attributes.return_value = {"friend_ext": {"public_user_approval": {"puid": "p1", "visibility": "public"}}}
+    process = MagicMock()
+    process.start_approval.return_value = {"success": True, "puid": "p1", "state": "PROCESSING"}
+    service = _make_service(bot_repository=bot_repo, bcn_service=bcn, process_service=process)
+    service._risk_approval_guard = RiskApprovalGuard(repo, lambda _: True)
+    def handoff(_):
+        assert repo.update_current(row_version=repo.row.row_version, changes={"phase": "APPROVING", "approval_puid": "p1"})
+    def persist(**_):
+        started.set()
+        assert resume.wait(5)
+        return True
+    with patch.object(service, "_persist_public_approval", side_effect=persist):
+        errors = []
+        def publish():
+            try:
+                service.public_bcs_bot("b1:u1", "u1", "user", _make_operator(), visibility="public",
+                    approval_biz_id="risk-a", risk_check_id="risk-a", on_approval_started=handoff)
+            except Exception as exc:
+                errors.append(exc)
+        thread = Thread(target=publish)
+        thread.start()
+        assert started.wait(5)
+        result = service.handle_public_approval_callback("b1:u1", "u1", "p1", "AGREE", "user", risk_check_id="risk-a")
+        assert result["message"] == "risk callback deferred"
+        bcn.patch_attributes.assert_not_called()
+        resume.set()
+        thread.join(5)
+        assert not thread.is_alive() and not errors
+    bcn.patch_attributes.assert_called_once()
+
+
+def test_risk_callback_resolves_complete_bot_identity_before_guard():
+    bots = MagicMock()
+    bots.get_by_id_and_owner.return_value = {**_make_bot("default", "owner"), "id": 42, "entity_id": "a"}
+    bots.get_by_id_and_entity.return_value = {**_make_bot("default", "owner"), "id": 77, "entity_id": "b"}
+    service = _make_service(bot_repository=bots)
+    guard = MagicMock()
+    guard.check.return_value = "DENIED"
+    service._risk_approval_guard = guard
+    service.handle_public_approval_callback("default:b", "owner", "p1", "AGREE", "user", risk_check_id="risk-b")
+    bots.get_by_id_and_entity.assert_called_once_with("default", "b")
+    assert guard.check.call_args.args[3] == 77
+
+
+def test_risk_publication_does_not_mark_ready_when_bcs_persistence_is_skipped():
+    bots = MagicMock()
+    bots.get_by_id_and_entity.return_value = _make_bot("b1", "u1")
+    bcn = MagicMock()
+    bcn.get_attributes.return_value = {"skipped": True}
+    process = MagicMock()
+    process.start_approval.return_value = {"success": True, "puid": "p1", "state": "PROCESSING"}
+    service = _make_service(bot_repository=bots, bcn_service=bcn, process_service=process)
+    guard = MagicMock()
+    service._risk_approval_guard = guard
+    with pytest.raises(BotPublicServiceError, match="association could not be persisted"):
+        service.public_bcs_bot("b1:u1", "u1", "user", _make_operator(), visibility="public",
+            approval_biz_id="risk-a", risk_check_id="risk-a", on_approval_started=lambda _: None)
+    guard.mark_target_ready.assert_not_called()
+
+
+def test_risk_agent_callback_applies_the_approved_target_visibility():
+    bots = MagicMock()
+    bots.get_by_id_and_entity.return_value = _make_bot("b1", "u1")
+    bcn = MagicMock()
+    bcn.get_attributes.return_value = {"friend_check_in_strategy": "OPEN", "friend_ext": {
+        "public_agent_approval": {"puid": "p1", "visibility": "protected"}
+    }}
+    bcn.patch_attributes.return_value = {}
+    service = _make_service(bot_repository=bots, bcn_service=bcn)
+    service._risk_approval_guard = MagicMock()
+    service._risk_approval_guard.check.return_value = "ALLOW"
+    service._risk_approval_guard.revalidate_claim.return_value = True
+    from types import SimpleNamespace
+    service._risk_approval_guard.repo.get.return_value = SimpleNamespace(target_json='{"visibility":"protected","view_depts":[]}')
+    assert service.handle_public_approval_callback("b1:u1", "u1", "p1", "AGREE", "agent", risk_check_id="risk-a")["success"]
+    assert bcn.patch_attributes.call_args.kwargs["body"]["visibility"] == "protected"
+
+
+def test_risk_callback_rejects_puid_matching_but_changed_target():
+    from types import SimpleNamespace
+    bots = MagicMock()
+    bots.get_by_id_and_entity.return_value = _make_bot("b1", "u1")
+    bcn = MagicMock()
+    bcn.get_attributes.return_value = {"friend_ext": {"public_user_approval": {
+        "puid": "p1", "visibility": "public", "view_friend_deps": []
+    }}}
+    service = _make_service(bot_repository=bots, bcn_service=bcn)
+    guard = MagicMock()
+    guard.check.return_value = "ALLOW"
+    guard.revalidate_claim.return_value = True
+    guard.repo.get.return_value = SimpleNamespace(target_json='{"visibility":"protected","view_depts":[{"deptNo":"1"}]}')
+    service._risk_approval_guard = guard
+    result = service.handle_public_approval_callback("b1:u1", "u1", "p1", "AGREE", "user", risk_check_id="risk-a")
+    assert result["success"] is False
+    bcn.patch_attributes.assert_not_called()
+    assert guard.finish.call_args.args[-1] is False
+
+
+def test_unknown_reserved_risk_puid_cannot_fall_through_to_legacy_callback():
+    repository = MagicMock()
+    repository.find_approval.return_value = None
+    bcn = MagicMock()
+    service = _make_service(risk_repository=repository, bcn_service=bcn)
+    result = service.handle_public_approval_callback(
+        "b1:u1", "u1", "antprocess-agentclaw_botpublic_risk-12345678-1234-1234-1234-123456789abc", "AGREE", "user"
+    )
+    assert result["success"] is False
+    bcn.patch_attributes.assert_not_called()
+
+
+@pytest.mark.parametrize("failure", ["withdrawn", "skipped", "get_skipped"])
+def test_risk_callback_does_not_report_applied_for_withdrawal_or_skipped_patch(failure):
+    from types import SimpleNamespace
+    bots = MagicMock()
+    bots.get_by_id_and_entity.return_value = _make_bot("b1", "u1")
+    bcn = MagicMock()
+    bcn.get_attributes.return_value = {"friend_ext": {"public_user_approval": {
+        "puid": "p1", "visibility": "public", "view_friend_deps": []}}}
+    if failure == "get_skipped":
+        bcn.get_attributes.return_value = {"skipped": True}
+    bcn.patch_attributes.return_value = {"skipped": True} if failure == "skipped" else {}
+    service = _make_service(bot_repository=bots, bcn_service=bcn)
+    guard = MagicMock()
+    guard.check.return_value = "ALLOW"
+    guard.revalidate_claim.return_value = failure != "withdrawn"
+    guard.repo.get.return_value = SimpleNamespace(target_json='{"visibility":"public","view_depts":[]}')
+    service._risk_approval_guard = guard
+    result = service.handle_public_approval_callback("b1:u1", "u1", "p1", "AGREE", "user", risk_check_id="risk-a")
+    assert result["success"] is False
+    if failure in {"withdrawn", "get_skipped"}:
+        bcn.patch_attributes.assert_not_called()
+    assert guard.finish.call_args.args[-1] is False
+
+
+def test_completed_risk_approval_is_staged_before_target_and_replay_failure_propagates():
+    bots = MagicMock()
+    bots.get_by_id_and_entity.return_value = _make_bot("b1", "u1")
+    bcn = MagicMock()
+    bcn.get_attributes.return_value = {"friend_ext": {}}
+    bcn.patch_attributes.return_value = {}
+    process = MagicMock()
+    process.start_approval.return_value = {"success": True, "puid": "p1", "state": "COMPLETED", "lastOperate": "AGREE"}
+    service = _make_service(bot_repository=bots, bcn_service=bcn, process_service=process)
+    guard = MagicMock()
+    guard.check.return_value = "DEFERRED"
+    guard.replay.side_effect = RuntimeError("H3 unavailable")
+    service._risk_approval_guard = guard
+    with pytest.raises(RuntimeError, match="H3 unavailable"):
+        service.public_bcs_bot("b1:u1", "u1", "user", _make_operator(), visibility="public",
+            approval_biz_id="risk-a", risk_check_id="risk-a", on_approval_started=lambda _: None)
+    guard.check.assert_called_once()
+    guard.mark_target_ready.assert_called_once()
+    guard.replay.assert_called_once()
