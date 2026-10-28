@@ -21,6 +21,15 @@ export function useCommunity() {
   const store = useCommunityStore();
   const { identity } = useHumanIdentity();
   const currentUserId = identity?.userId.trim() ?? '';
+  /** 当前登录人。Avatar 由 HumanIdentity capability 提供，社交媒体头像可直接命中。 */
+  const currentUser: CommunityAuthor | null = currentUserId
+    ? {
+        type: 'human',
+        id: currentUserId,
+        displayName: identity?.displayName || '我',
+        avatarUrl: identity?.avatarUrl,
+      }
+    : null;
   // BOT 作者名兜底：后端 §4.1 不返 BOT作者 display_name 时，用本人 owned bots 的 bot_name 兜底。
   const { enrichTopicBotAuthor, botNameById } = useBotAuthorEnricher(currentUserId);
   const interactionViewer: ForumActorRef = {
@@ -161,6 +170,7 @@ export function useCommunity() {
     ...store,
     ...topicList,
     ...topicDetail,
+    currentUser,
     currentUserId,
     publishTopic,
     updateTopic,
