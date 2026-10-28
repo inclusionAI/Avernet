@@ -35,4 +35,4 @@
 - [x] Forward provider pagination and load only current-page metadata.
 - [x] Preserve the latest access-policy/resource-route simplification.
 - [x] Focused knowledge, configured endpoint and composition regression: 363 passed, zero skips.
-- [ ] Record the current complete Backend CI result and publish the bounded-query commit.
+- [x] Record the complete Backend CI result, including its three parallel-run failures and unchanged isolated feature/target reruns; prepare the bounded-query commit for the existing PR.
