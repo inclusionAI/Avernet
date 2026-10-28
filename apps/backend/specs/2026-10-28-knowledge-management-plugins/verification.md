@@ -48,3 +48,18 @@ No native remote ACL execution, deployed environment, real document construction
 - Failures: `test_first_activation_is_idempotent_across_real_processes` (20-second subprocess timeout), `test_schema_invalid_output_retried_then_completed` (reschedule vs complete), and `test_bot_agent_runs_a_real_swarm_round` (agent completion assertion). All three tests and the related membership/swarm production trees are byte-identical to `REL20261029@0317937dfaa12ed97ff2ca1a3ad0c4c5b7d57b7f`. The three tests passed unchanged in isolation on both the feature (**3 passed**, 5.47s) and a target-only archive (**3 passed**, 5.82s). This supports a scheduling/load-sensitive suspicion, not a clean complete-suite result or a reproduced clean-target failure.
 - Enterprise complete Backend CI passed: **2,849/2,849**, mandatory knowledge suites zero skips, total line coverage **90.72%**, changed-line coverage **97.22%**. Fixed real receiving-provider HTTP/SQLite pairing: **34 passed**, zero skips.
 - Tested runtime/test commit: `39a0bc1d6`; subsequent commits change specifications and evidence only. Public and private business files did not change after these runs. No shared-stack/live prepub acceptance is claimed.
+
+## Candidate index regression (2026-10-28)
+- Rebased onto `REL20261029@e307d7109` before this fix.
+- RED: 9 regression cases failed with the old metadata. Empty pages used the
+  integer primary key and cost 3,093 / 30,093 / 300,093 SQLite VM instructions
+  for 1k / 10k / 100k other-space rows.
+- GREEN: 10 tests passed, zero skips. Empty pages cost 120 instructions at all
+  three sizes and use the composite scope index. Sparse continuation isolates
+  other tenants, environments and removed Bots even with a legacy space index.
+- Existing-table migration control: with the legacy single-space index, 10k
+  other-tenant rows in the same space cost 90,119 steps; applying the checked-in
+  SQL locally reduces this to 85, with identical empty-page output. SQL matches
+  ORM MySQL compilation and retains the unique identity constraint.
+- These are local SQLite results, not remote engine latency guarantees.
+  Production DDL was not executed. See candidate-index.md for operator steps.

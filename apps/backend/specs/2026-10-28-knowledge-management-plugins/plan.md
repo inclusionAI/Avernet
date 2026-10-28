@@ -37,3 +37,10 @@ The user-selected public target is `REL20261029`, not `dev`. Rebase preserves th
 ## Bounded-query follow-up
 
 Replace the five-page grant history reader with one composite-identity POST. Validate the full response envelope, exact mapped Owner and request order before returning CAS state. Introduce a narrow `page_authorized` catalog port and preserve its opaque continuation in `available_for_bot`; keep existing selection and batch-detail projection unchanged. Retain the latest ordinary access-policy and normal resource-route composition, not the removed session Plugin. Test malformed/old receiver replies, one-call budgets and decreasing cursors. Real receiving-provider HTTP/SQLite pairing is maintained downstream; no internal receiver implementation or private endpoint is published here.
+
+## Candidate index follow-up
+Add `idx_bot_knowledge_candidates(avernet_tenant, env, space_id, is_delete, id)`
+to `BotModel` and ship the matching operator SQL under
+`core/knowledge_management/sql/2026_10_28_bot_candidates.sql`. Keep unique keys
+and repository logic unchanged. See [candidate-index.md](candidate-index.md)
+for alternatives, preflight, rollout/rollback and proof boundaries.

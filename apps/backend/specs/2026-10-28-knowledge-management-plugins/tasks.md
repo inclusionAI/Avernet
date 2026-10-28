@@ -36,3 +36,10 @@
 - [x] Preserve the latest access-policy/resource-route simplification.
 - [x] Focused knowledge, configured endpoint and composition regression: 363 passed, zero skips.
 - [x] Record the complete Backend CI result, including its three parallel-run failures and unchanged isolated feature/target reruns; prepare the bounded-query commit for the existing PR.
+
+## Candidate index follow-up
+- [x] Reproduce missing-index failures using actual repository and tenant guard.
+- [x] Add ORM index, manual existing-table SQL and migration/plan/cost regressions.
+- [x] Ten new tests pass; record fixed-scope proof and rollout limits.
+- [ ] Complete current-release regression and update the existing two PRs.
+- [ ] Operator applies/validates DDL in each deployment; not an automated task.

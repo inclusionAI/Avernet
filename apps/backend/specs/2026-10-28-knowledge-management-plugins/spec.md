@@ -32,3 +32,9 @@ Remove the unnecessary session Plugin API/registry pair without weakening identi
 - Available-KB management pages request only the current provider page (`cursor`, `limit<=20`) and one metadata batch for that page. They never prefetch the complete authorized list or compute local offsets. Provider cursors are opaque integers and can decrease; pass them through unchanged.
 - Incomplete, mismatched, duplicate or malformed provider replies fail closed. The existing plugin enablement contract stays compatible; this change does not migrate its legacy list call.
 - The configured knowledge-platform receiver must support exact state POST and authorized-KB server pagination before deploying this consumer. No fallback to history scans, unbounded lists or per-KB HTTP is permitted. Restart pagination at zero during transition from the old local-offset implementation.
+
+## Candidate pagination index follow-up
+Candidate Bot reads must bound access by tenant/environment/space/deletion state
+before seeking the ID cursor. Add a non-unique access index without changing
+identity constraints, authorization, output or substring-search semantics. Existing
+databases require operator-approved migration; code delivery is not DDL execution.
