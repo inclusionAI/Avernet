@@ -271,3 +271,23 @@ def client(world):
     attach_injector(app, injector)
     with TestClient(app) as client:
         yield client
+
+
+def make_catalog(origin, *, enabled=False, client=None):
+    from agentclaw.community.adapters.knowledge_platform.catalog import (
+        EcbKnowledgeClient,
+        RemoteKnowledgeCatalog,
+    )
+    from agentclaw.community.adapters.knowledge_platform.config import (
+        KnowledgeIntegrationConfig,
+    )
+    from agentclaw.community.adapters.knowledge_platform.identity import (
+        DirectKnowledgeIdentity,
+    )
+
+    return RemoteKnowledgeCatalog(
+        EcbKnowledgeClient(
+            origin, KnowledgeIntegrationConfig(enabled, origin), client=client
+        ),
+        DirectKnowledgeIdentity(),
+    )
