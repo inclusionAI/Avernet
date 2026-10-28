@@ -4,6 +4,7 @@ Only the remote HTTP provider and deployment session interpretation are scripted
 These cases do not claim native provider or knowledge-building acceptance.
 """
 
+import json
 from types import SimpleNamespace
 
 import httpx
@@ -83,7 +84,14 @@ def _answer(request):
         "kgbase_status": "ready",
         "can_manage": True,
     }
-    if path.endswith("/catalog-detail"):
+    if path.endswith("/knowledge-bases/catalog-details"):
+        assert request.method == "POST"
+        assert json.loads(request.content) == {
+            "actor_staff_no": ACTOR,
+            "kb_ids": ["kb"],
+        }
+        payload = {"space_id": "1", "items": [fact]}
+    elif path.endswith("/catalog-detail"):
         payload = fact
     elif path.endswith("/knowledge-bases"):
         payload = {"items": [fact], "next_cursor": None}
