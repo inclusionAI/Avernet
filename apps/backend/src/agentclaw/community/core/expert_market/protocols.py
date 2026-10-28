@@ -3,7 +3,7 @@
 from typing import Any, Protocol, runtime_checkable, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.expert_market.creation import CompiledExpert
+    from agentclaw.community.core.expert_market.models import CompiledExpert
 
 
 @runtime_checkable

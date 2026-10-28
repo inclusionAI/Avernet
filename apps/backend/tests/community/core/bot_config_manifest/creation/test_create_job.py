@@ -113,8 +113,9 @@ def test_invalid_binding_stops_without_creating_or_discarding(field, value):
     assert not created and not applies.started and not seam.discards
 
 
-def test_expert_origin_without_binding_cannot_become_an_ordinary_creation():
-    payload = {**_PAYLOAD, "spec": {**_PAYLOAD["spec"], "expert_origin": {"expert_id": "writer"}}}
+@pytest.mark.parametrize("origin", [{"expert_id": "writer"}, {}, False])
+def test_expert_origin_without_binding_cannot_become_an_ordinary_creation(origin):
+    payload = {**_PAYLOAD, "spec": {**_PAYLOAD["spec"], "expert_origin": origin}}
     handler, _, seam, created = _handler(passport_status="ISSUED")
     assert isinstance(handler.handle(payload), Fail)
     assert not created and not seam.discards

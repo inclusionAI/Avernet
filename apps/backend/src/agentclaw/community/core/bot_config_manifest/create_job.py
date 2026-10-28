@@ -372,7 +372,7 @@ class BotCreateWithManifestHandler:
         spec = payload["spec"]
         binding = spec.get("manifest_binding")
         try:
-            if spec.get("expert_origin") and not binding:
+            if spec.get("expert_origin") is not None and not binding:
                 raise ManifestBindingMismatchError("expert creation is missing its Manifest binding")
             if binding is not None:
                 if (not isinstance(binding, dict)

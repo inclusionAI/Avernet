@@ -25,6 +25,9 @@ provides:
   - ExpertCatalogServiceProtocol
   - ExpertCatalogRepository
   - ExpertScope
+  - ExpertCreationService
+  - ExpertCreationServiceProtocol
+  - CompiledExpert
 consumes:
   - "DatabasePlugin — catalogue persistence and historical Bot aggregates"
   - "Manifest schema — existing validation without capability downgrade"

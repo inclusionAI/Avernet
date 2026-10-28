@@ -11,7 +11,7 @@ from agentclaw.community.core.expert_market.protocols import (
     ExpertCatalogServiceProtocol,
     ExpertCreationServiceProtocol,
 )
-from agentclaw.community.core.expert_market.models import ExpertCreationError
+from agentclaw.community.core.expert_market.models import CompiledExpert, ExpertCreationError
 from agentclaw.community.core.expert_market.scanner import canonical_digest
 
 
@@ -20,12 +20,6 @@ class ExpertCreationConfig:
     source_url: str
     source_auth: str = ""
     source_repo_id: str = "aiworkbench"
-
-
-@dataclass(frozen=True)
-class CompiledExpert:
-    document: str
-    origin: ExpertOrigin
 
 
 class ExpertCreationService(ExpertCreationServiceProtocol):
