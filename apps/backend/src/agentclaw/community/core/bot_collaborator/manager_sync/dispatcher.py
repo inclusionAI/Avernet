@@ -24,8 +24,19 @@ Safety rules this module exists to enforce (each pinned by a test):
   reschedules the key inside its 15s defer budget; the entry stays
   queued until it actually completes or the budget ends.
 - **Capacity is total and bounded.** ``max_keys`` counts queued, running
-  and deferred entries plus pending space hints; page expansion stops at
-  the first full queue and records the rejected keys for repair.
+  and deferred entries plus pending space hints, AND owner-hold latched
+  keys whose entry is gone — a retained latch still stands for
+  owner-gated work, so it keeps consuming its slot (fail-closed at the
+  cap; latches are never evicted, and a latched key that also holds an
+  entry is counted once). Page expansion stops at the first full queue
+  and records the rejected keys for repair.
+- **Best-effort, never silent.** A full or closed queue may drop a
+  notification — silently dropping it may not: every REJECTED admission
+  (queue full / closed / env mismatch) and every capacity-truncated
+  Space expansion leaves one diagnostics record plus one WARNING with
+  the reason, scope and SyncKey dimensions only, so the loss is
+  observable and the repair sweep can be pointed at it. Business
+  callers stay non-blocking and never see a raise.
 - **One wake, not a flood.** Bursts of submissions from arbitrary
   threads coalesce into a single scheduled wake callback; the mutex is
   held only over plain memory work — never across an ``await``.
@@ -43,6 +54,11 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Callable
 
+from agentclaw.community.core.bot_collaborator.manager_sync.diagnostics import (
+    SyncDiagnostics,
+    SyncEvent,
+    SyncRejection,
+)
 from agentclaw.community.core.bot_collaborator.manager_sync.service import (
     BotManagerSyncService,
 )
@@ -69,6 +85,16 @@ DEFER_WINDOW_SECONDS = 15.0
 
 _DEFER_BASE_DELAY_SECONDS = 1.0
 _DRAIN_POLL_SECONDS = 0.01
+
+
+def _space_level_key(change: SpaceChange) -> SyncKey:
+    """Diagnostic identity for a Space-level (multi-Bot) event.
+
+    Carries the change's tenant/env dimensions with the fixed sentinel
+    ``bot_pk=0`` — a static "no single Bot" marker, so space-scope
+    records add no new cardinality dimension.
+    """
+    return SyncKey(avernet_tenant=change.avernet_tenant, env=change.env, bot_pk=0)
 
 
 @dataclass(frozen=True)
@@ -147,11 +173,16 @@ class BotManagerSyncDispatcher:
         *,
         clock: Callable[[], float] | None = None,
         env: str = "",
+        diagnostics: SyncDiagnostics | None = None,
     ) -> None:
         self._service = service
         self._reader = reader
         self._policy = policy or DispatcherPolicy()
         self._clock = clock or time.monotonic
+        #: Rejection / truncation observability sink (memory-only).
+        self._diagnostics = (
+            diagnostics if diagnostics is not None else SyncDiagnostics()
+        )
         #: The deployment env this syncer serves; empty disables the
         #: gate (unit tests construct without one). Requests for another
         #: env are refused before any send: the reader would refuse them
@@ -191,14 +222,17 @@ class BotManagerSyncDispatcher:
         """Memory-only admission: never reads, never blocks, never sends."""
         key = SyncKey(avernet_tenant=avernet_tenant, env=env, bot_pk=bot_pk)
         if self._env and key.env != self._env:
-            logger.warning(
-                "[MANAGER-SYNC-DISPATCH] env_mismatch_rejected env=%s deployment_env=%s",
-                env,
-                self._env,
-            )
+            self._note_rejected(key, SyncRejection.ENV_MISMATCH, scope="submission")
             return SubmissionResult.REJECTED
         with self._mutex:
-            return self._admit_locked(key, reason)
+            result = self._admit_locked(key, reason)
+            if result is SubmissionResult.REJECTED:
+                rejected_because = (
+                    SyncRejection.CLOSED if self._closed else SyncRejection.QUEUE_FULL
+                )
+        if result is SubmissionResult.REJECTED:
+            self._note_rejected(key, rejected_because, scope="submission")
+        return result
 
     def request_space_sync(self, change: SpaceChange) -> SubmissionResult:
         """Admit one Space fan-out hint; the workers expand it later.
@@ -208,19 +242,25 @@ class BotManagerSyncDispatcher:
         a space-wide change cannot put a DB read on the caller either.
         """
         if self._env and change.env != self._env:
-            logger.warning(
-                "[MANAGER-SYNC-DISPATCH] env_mismatch_rejected env=%s deployment_env=%s",
-                change.env,
-                self._env,
+            self._note_rejected(
+                _space_level_key(change), SyncRejection.ENV_MISMATCH,
+                scope="space-fanout",
             )
             return SubmissionResult.REJECTED
         with self._mutex:
             if self._closed:
-                return SubmissionResult.REJECTED
-            if self._capacity_used_locked() >= self._policy.max_keys:
-                return SubmissionResult.REJECTED
-            self._space_hints.append(change)
-            self._schedule_single_wakeup_locked()
+                rejected_because = SyncRejection.CLOSED
+            elif self._capacity_used_locked() >= self._policy.max_keys:
+                rejected_because = SyncRejection.QUEUE_FULL
+            else:
+                rejected_because = None
+                self._space_hints.append(change)
+                self._schedule_single_wakeup_locked()
+        if rejected_because is not None:
+            self._note_rejected(
+                _space_level_key(change), rejected_because, scope="space-fanout"
+            )
+            return SubmissionResult.REJECTED
         return SubmissionResult.QUEUED
 
     # -- lifecycle surface (owned by the lifecycle) ---------------------
@@ -344,9 +384,14 @@ class BotManagerSyncDispatcher:
     # -- admission helpers (mutex held) -----------------------------------
 
     def _capacity_used_locked(self) -> int:
-        """Total capacity in use: entries (running and deferred included)
-        plus pending space hints — all share the one bounded budget."""
-        return len(self._entries) + len(self._space_hints)
+        """Total capacity in use: entries (running and deferred included),
+        pending space hints, PLUS owner-hold latched keys whose entry is
+        gone — a retained latch still stands for owner-gated work, so it
+        keeps consuming a slot (fail-closed at ``max_keys``; the latch
+        itself is never evicted). A latched key that also currently
+        holds an entry is counted exactly once, via the entry."""
+        latched_without_entry = len(self._latched_owner_keys - self._entries.keys())
+        return len(self._entries) + len(self._space_hints) + latched_without_entry
 
     def _admit_locked(self, key: SyncKey, reason: SyncReason) -> SubmissionResult:
         previous = self._entries.get(key)
@@ -370,6 +415,61 @@ class BotManagerSyncDispatcher:
         self._ready.append(key)
         self._schedule_single_wakeup_locked()
         return SubmissionResult.QUEUED
+
+    # -- rejection observability (caller-visible results unchanged) ------
+
+    def _note_rejected(
+        self, key: SyncKey, rejection: SyncRejection, *, scope: str
+    ) -> None:
+        """One diagnostics record + one WARNING per refused submission.
+
+        Dropping a notification best-effort is allowed; dropping it
+        silently is not. Pure memory: no flush, no external call, and
+        the lines carry only the reason, scope, SyncKey dimensions and
+        integer counts — never a payload or manager list. Business
+        callers keep getting their plain ``REJECTED`` without a raise.
+        """
+        self._diagnostics.record(
+            SyncEvent.SUBMIT_REJECTED,
+            key=key,
+            outcome=rejection,
+            counts={"rejected": 1},
+        )
+        logger.warning(
+            "[MANAGER-SYNC-DISPATCH] submit_rejected reason=%s scope=%s "
+            "deployment_env=%s tenant=%s env=%s bot_pk=%d — submission "
+            "dropped; run a manager-sync repair sweep when the queue drains",
+            rejection.value,
+            scope,
+            self._env,
+            key.avernet_tenant,
+            key.env,
+            key.bot_pk,
+        )
+
+    def _note_truncated(self, change: SpaceChange, admitted: int) -> None:
+        """A hint's expansion stopped at capacity mid-way: one record +
+        one WARNING (counts only — remaining keys are never emitted)."""
+        self._diagnostics.record(
+            SyncEvent.SPACE_EXPANSION_TRUNCATED,
+            key=_space_level_key(change),
+            outcome=SyncRejection.QUEUE_FULL,
+            counts={
+                "spaces": len(change.space_refs),
+                "admitted": admitted,
+                "truncated": 1,
+            },
+        )
+        logger.warning(
+            "[MANAGER-SYNC-DISPATCH] space_expansion_truncated "
+            "reason=queue_full scope=space-fanout tenant=%s env=%s spaces=%d "
+            "admitted=%d — paging stopped at capacity, the unexpanded "
+            "remainder is repair's; run a repair sweep when the queue drains",
+            change.avernet_tenant,
+            change.env,
+            len(change.space_refs),
+            admitted,
+        )
 
     def _schedule_single_wakeup_locked(self) -> None:
         """Arm exactly one wake callback; a burst costs one schedule."""
@@ -613,12 +713,15 @@ class BotManagerSyncDispatcher:
         """
         try:
             cursor = 0
+            admitted_this_hint = 0
+            truncated = False
             while True:
                 with self._mutex:
                     capacity_left = self._policy.max_keys - self._capacity_used_locked()
                 if capacity_left <= 0:
                     # Full before this page: stop paging, never cache the
                     # rest. Repair (Task 10) compensates, this hint is done.
+                    truncated = True
                     return
                 try:
                     with avernet_tenant_scope(change.avernet_tenant):
@@ -648,9 +751,12 @@ class BotManagerSyncDispatcher:
                             # Coalesced keys are already queued — only genuine
                             # over-capacity drops count for repair.
                             self._rejected_space_keys += 1
+                        else:
+                            admitted_this_hint += 1
                 with self._mutex:
                     full_now = self._capacity_used_locked() >= self._policy.max_keys
                 if full_now:
+                    truncated = True
                     return  # met a full queue: expansion stops at capacity
                 cursor = page[-1].bot_pk
         finally:
@@ -658,3 +764,5 @@ class BotManagerSyncDispatcher:
             # failure, stop() cancellation — releases the pop count.
             with self._mutex:
                 self._expanding_hints -= 1
+            if truncated:
+                self._note_truncated(change, admitted_this_hint)

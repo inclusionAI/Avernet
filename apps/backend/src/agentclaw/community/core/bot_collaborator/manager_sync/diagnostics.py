@@ -3,7 +3,8 @@
 Rules fixed by the feature contract:
 
 - ``event`` / ``outcome`` come only from the finite enums below /
-  ``SyncOutcome`` — ``record`` validates both and raises ``ValueError``
+  ``SyncOutcome`` (round outcomes) / ``SyncRejection`` (admission
+  rejection reasons) — ``record`` validates both and raises ``ValueError``
   on anything else, so no dynamic string can slip in as a label and no
   cardinality explosion can reach the sink.
 - No payloads, no credentials: the record addresses the ``SyncKey``
@@ -55,6 +56,22 @@ class SyncEvent(StrEnum):
     RELEASE_FAILED = "release_failed"
     HOLD_SET = "hold_set"
     HOLD_FAILED = "hold_failed"
+    SUBMIT_REJECTED = "submit_rejected"
+    SPACE_EXPANSION_TRUNCATED = "space_expansion_truncated"
+
+
+class SyncRejection(StrEnum):
+    """Finite admission-rejection reasons (`SUBMIT_REJECTED` taxonomy).
+
+    The outcome vocabulary for submission-refusal records: a closed set
+    so a rejection reason can never be a dynamic string label. Same
+    validation discipline as ``SyncOutcome`` — ``record`` raises
+    ``ValueError`` on anything outside this enum.
+    """
+
+    QUEUE_FULL = "queue_full"
+    CLOSED = "closed"
+    ENV_MISMATCH = "env_mismatch"
 
 
 #: Events that describe infrastructure trouble — these log at WARNING.
@@ -69,6 +86,8 @@ _WARN_EVENTS = frozenset(
         SyncEvent.FINISH_FAILED,
         SyncEvent.RELEASE_FAILED,
         SyncEvent.HOLD_FAILED,
+        SyncEvent.SUBMIT_REJECTED,
+        SyncEvent.SPACE_EXPANSION_TRUNCATED,
     }
 )
 
@@ -106,7 +125,13 @@ class SyncDiagnostics:
         service may only speak its own vocabulary.
         """
         event_value = SyncEvent(event).value
-        outcome_value = SyncOutcome(outcome).value
+        try:
+            outcome_value = SyncOutcome(outcome).value
+        except ValueError:
+            # The one other finite outcome vocabulary: admission
+            # rejection reasons (submission / expansion truncation).
+            # Still enum-validated — no dynamic label reaches the sink.
+            outcome_value = SyncRejection(outcome).value
         extras = counts or {}
         self._counted[(event_value, outcome_value)] += 1
         line = " ".join(f"{name}={value}" for name, value in extras.items())
