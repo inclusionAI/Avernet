@@ -268,3 +268,29 @@ class TestDeleteHooks:
         )
         for c in ext.calls:
             assert c[2] == delete_owner == "op2"
+
+
+class TestCreateFlowRetargetsOntoExtensionBotId:
+    def test_retarget_continues_under_extension_bot_id(self):
+        """The caller-supplied id is allocation-only: when the extension's
+        own arbitration names the id the flow continues under, the shared
+        flow retargets — the recorded create, the passport application and
+        the post-registration hook all carry the extension's id, while
+        ``resolve_create`` observed the caller's."""
+        ext = RecordingExtension(override=CreateOverride(bot_id="arb-winner"))
+        passport, bot_service, skill_set = _make_services()
+        outcome = create_bot_with_authorization(
+            user_id="u1", nick_name="u1", bot_id="caller-id",
+            spec=_SPEC, context=_CONTEXT,
+            bot_service=bot_service, passport_plugin=passport,
+            auth_rel_plugin=MagicMock(), skill_set_factory=skill_set,
+            create_extension=ext, request={"bot_name": "Bot"},
+        )
+        assert isinstance(outcome, Created)
+        created_kwargs = bot_service.create_bot.call_args.kwargs
+        assert created_kwargs["bot_id"] == "arb-winner"
+        applied = passport.apply_first_agent_passport.call_args or \
+            passport.apply_agent_passport.call_args
+        assert applied.kwargs["bot_id"] == "arb-winner"
+        assert ext.calls[0][1] == "caller-id"
+        assert ext.calls[1] == ("after", "arb-winner", "u1")
