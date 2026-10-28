@@ -23,10 +23,8 @@ from agentclaw.community.adapters.http.bot_public.schemas_risk import (
 from agentclaw.community.adapters.http.bot_public.schemas import ApiResponse
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 from agentclaw.community.adapters.http.openapi_v1.contracts import BotIdPath, Envelope
-from agentclaw.community.adapters.http.openapi_v1.principal import (
-    UserIdDep, caller_names_a_user, caller_owner_id, refuse_app_only_caller,
-)
-from agentclaw.community.adapters.http.openapi_v1.dependencies import Principal, require_principal
+from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
+from agentclaw.community.adapters.http.openapi_v1.bot_address import CollaborationBotDep
 from agentclaw.community.adapters.http.openapi_v1.responses import accepted, envelope
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
@@ -46,16 +44,6 @@ openapi_router = APIRouter(
     tags=["collaboration-bot-risk"],
     route_class=PublicAPIRoute,
 )
-
-
-async def require_risk_actor(
-    user_id: UserIdDep,
-    principal: Annotated[Principal, Depends(require_principal)],
-) -> str:
-    """Risk applications must use the authenticated person's actual identity."""
-    if not caller_names_a_user(principal) or caller_owner_id(principal) != user_id:
-        raise HTTPException(status_code=403, detail="Forbidden")
-    return user_id
 
 
 async def _authorize(bots, collaborators, *, bot_id, actor_id, surface, owner_id=None):
@@ -122,22 +110,17 @@ async def _record(query, bot, risk_check_id):
 @openapi_router.post(
     "/{bot_id}/public/risk-checks",
     response_model=Envelope[RiskRecordResponse],
-    dependencies=[Depends(require_risk_actor), Depends(refuse_app_only_caller)],
     status_code=202,
 )
 async def create_openapi(
     bot_id: BotIdPath,
     actor_id: UserIdDep,
+    bot: CollaborationBotDep,
     req: OpenApiRiskRequest,
     request: Request,
     response: Response,
-    bots: BotRepository = Injected(BotRepository),
-    collaborators: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
     service: BotPublicRiskServiceProtocol = Injected(BotPublicRiskServiceProtocol),
 ):
-    bot = await _authorize(
-        bots, collaborators, bot_id=bot_id, actor_id=actor_id, surface="openapi"
-    )
     try:
         record, created = await asyncio.to_thread(
             service.submit,
@@ -158,22 +141,17 @@ async def create_openapi(
 
 @openapi_router.get(
     "/{bot_id}/public/risk-checks/current", response_model=Envelope[RiskRecordResponse],
-    dependencies=[Depends(require_risk_actor), Depends(refuse_app_only_caller)],
 )
 async def current_openapi(
     bot_id: BotIdPath,
     actor_id: UserIdDep,
+    bot: CollaborationBotDep,
     request: Request,
     public_scope: Literal["user", "agent"] = Query(
         ..., description="Publication dimension to read."
     ),
-    bots: BotRepository = Injected(BotRepository),
-    collaborators: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
     query: BotPublicRiskQueryProtocol = Injected(BotPublicRiskQueryProtocol),
 ):
-    bot = await _authorize(
-        bots, collaborators, bot_id=bot_id, actor_id=actor_id, surface="openapi"
-    )
     row = await asyncio.to_thread(
         query.current, env=bot.bot["env"], bot_pk=bot.bot_pk, public_scope=public_scope
     )
@@ -183,41 +161,31 @@ async def current_openapi(
 @openapi_router.get(
     "/{bot_id}/public/risk-checks/{risk_check_id}",
     response_model=Envelope[RiskRecordResponse],
-    dependencies=[Depends(require_risk_actor), Depends(refuse_app_only_caller)],
 )
 async def get_openapi(
     bot_id: BotIdPath,
     risk_check_id: Annotated[str, Path(description="Risk application identifier.")],
     actor_id: UserIdDep,
+    bot: CollaborationBotDep,
     request: Request,
-    bots: BotRepository = Injected(BotRepository),
-    collaborators: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
     query: BotPublicRiskQueryProtocol = Injected(BotPublicRiskQueryProtocol),
 ):
-    bot = await _authorize(
-        bots, collaborators, bot_id=bot_id, actor_id=actor_id, surface="openapi"
-    )
     return envelope(_view(await _record(query, bot, risk_check_id)), request)
 
 
 @openapi_router.post(
     "/{bot_id}/public/risk-checks/{risk_check_id}/refresh",
     response_model=Envelope[RiskRefreshResponse],
-    dependencies=[Depends(require_risk_actor), Depends(refuse_app_only_caller)],
 )
 async def refresh_openapi(
     bot_id: BotIdPath,
     risk_check_id: Annotated[str, Path(description="Risk application identifier.")],
     actor_id: UserIdDep,
+    bot: CollaborationBotDep,
     request: Request,
-    bots: BotRepository = Injected(BotRepository),
-    collaborators: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
     query: BotPublicRiskQueryProtocol = Injected(BotPublicRiskQueryProtocol),
     service: BotPublicRiskServiceProtocol = Injected(BotPublicRiskServiceProtocol),
 ):
-    bot = await _authorize(
-        bots, collaborators, bot_id=bot_id, actor_id=actor_id, surface="openapi"
-    )
     record = await _record(query, bot, risk_check_id)
     try:
         outcome, record = await asyncio.to_thread(

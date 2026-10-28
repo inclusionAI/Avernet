@@ -307,7 +307,6 @@ def test_risk_operations_are_enforced_by_collaboration_check_gate():
         assert (
             rule.level == PermissionLevel.ADMIN
             and rule.explicit
-            and rule.address_type == "collaboration"
         )
 
 
@@ -424,8 +423,7 @@ async def test_openapi_refresh_keeps_event_loop_responsive(monkeypatch):
             risk_check_id="r",
             actor_id="owner",
             request=request,
-            bots=None,
-            collaborators=None,
+            bot=SimpleNamespace(bot_pk=5),
             query=None,
             service=SlowService(),
         )
@@ -438,10 +436,10 @@ async def test_openapi_refresh_keeps_event_loop_responsive(monkeypatch):
     assert result.data.outcome == "NOT_QUERIED"
 
 
-def test_risk_openapi_requires_verified_actor_even_when_user_bypass_enabled():
+def test_risk_openapi_uses_standard_verified_user_policy():
     from agentclaw.community.adapters.http.openapi_v1.principal import resolve_user_id_bypass
     client, repo, tasks = client_for(user='attacker')
-    client.app.dependency_overrides[resolve_user_id_bypass] = lambda: frozenset({'u1'})
+    client.app.dependency_overrides[resolve_user_id_bypass] = lambda: frozenset()
     base = '/openapi/v1/collaboration/bots/default:entity/public/risk-checks'
     body = {'client_request_id': 'r1', 'public_scope': 'user', 'visibility': 'public'}
     responses = [client.post(base + '?user_id=u1', json=body),
@@ -462,16 +460,83 @@ def test_bypass_does_not_change_correct_applicant_identity():
     assert repo.row.operator_id == 'u1' and repo.row.client_scope == 'openapi:u1'
 
 
-def test_risk_rejects_application_without_human_subject():
+class AppGrants:
+    def __init__(self, enabled=True):
+        self.enabled = enabled
+        self.calls = []
+
+    def find(self, **scope):
+        self.calls.append(scope)
+        return object() if self.enabled and scope == {
+            "bot_id": "default", "owner_id": "entity", "user_id": "manager", "app_id": 5,
+        } else None
+
+
+def app_client(grants=None, user="manager"):
     from agentclaw.community.core.gateway_principal import AppPrincipal, GatewayApp
-    client, repo, tasks = client_for(user='u1')
-    app = GatewayApp(app_id=5, app_name='integration', owners='u1', tenant='teamclaw')
-    client.app.dependency_overrides[require_principal] = lambda: VerifiedCaller(
-        principals=(AppPrincipal(tenant='teamclaw', app=app),))
-    base = '/openapi/v1/collaboration/bots/default:entity/public/risk-checks'
-    response = client.post(base + '?user_id=u1', json={'client_request_id': 'r1', 'public_scope': 'user', 'visibility': 'public'})
-    assert response.status_code == 403
+    from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProtocol
+    from injector import InstanceProvider
+    client, repo, tasks = client_for(user=user)
+    principal = VerifiedCaller(principals=(AppPrincipal(tenant="teamclaw", app=GatewayApp(
+        app_id=5, app_name="integration", owners="unrelated-app-owner", tenant="teamclaw",
+    )),))
+    client.app.dependency_overrides[require_principal] = lambda: principal
+    if grants is not None:
+        client.app.state.injector.binder.bind(BotAppGrantServiceProtocol, to=InstanceProvider(grants))
+    return client, repo, tasks
+
+
+def test_delegated_application_uses_canonical_bot_grant_and_actual_operator():
+    grants = AppGrants()
+    client, repo, tasks = app_client(grants)
+    base = "/openapi/v1/collaboration/bots/default:entity/public/risk-checks"
+    body = {"client_request_id": "app-r1", "public_scope": "user", "visibility": "public"}
+    result = client.post(base + "?user_id=manager", json=body)
+    assert result.status_code == 202, result.text
+    record_id = result.json()["data"]["risk_check_id"]
+    assert repo.row.operator_id == "manager" and repo.row.owner_id == "u1"
+    assert client.post(base + "?user_id=manager", json=body).status_code == 200
+    assert client.get(base + "/current?user_id=manager&public_scope=user").status_code == 200
+    assert client.get(base + "/" + record_id + "?user_id=manager").status_code == 200
+    assert client.post(base + "/" + record_id + "/refresh?user_id=manager").status_code == 200
+    assert tasks.polls == 1
+    assert all(call["bot_id"] == "default" and call["owner_id"] == "entity" for call in grants.calls)
+    grants.enabled = False
+    assert client.get(base + "/" + record_id + "?user_id=manager").status_code == 404
+    assert client.post(base + "/" + record_id + "/refresh?user_id=manager").status_code == 404
+    assert tasks.polls == 1
+
+
+@pytest.mark.parametrize("grants", [None, AppGrants(False)])
+def test_application_without_bot_delegation_is_denied(grants):
+    client, repo, tasks = app_client(grants)
+    base = "/openapi/v1/collaboration/bots/default:entity/public/risk-checks"
+    result = client.post(base + "?user_id=manager", json={"client_request_id":"r", "public_scope":"user", "visibility":"public"})
+    assert result.status_code == 404
     assert repo.row is None and tasks.polls == 0
+
+
+def test_bot_grant_does_not_replace_live_collaborator_permission():
+    grants = AppGrants()
+    client, repo, tasks = app_client(grants)
+    class RevokedCollaborators:
+        def get_explicit_permission_level(self, **kwargs):
+            return PermissionLevel.NONE
+    client.app.state.injector.binder.bind(CollaboratorServiceProtocol, to=RevokedCollaborators())
+    response = client.post("/openapi/v1/collaboration/bots/default:entity/public/risk-checks?user_id=manager", json={"client_request_id":"r", "public_scope":"user", "visibility":"public"})
+    assert response.status_code == 404 and repo.row is None
+
+
+def test_application_cannot_reuse_grant_for_another_entity_or_user():
+    for address, user in [("default:other", "manager"), ("default:entity", "stranger")]:
+        client, repo, _ = app_client(AppGrants(), user=user)
+        class TwoEntities(Bots):
+            def get_by_id_and_entity(self, bot_id, entity_id):
+                row = super().get_by_id_and_entity(bot_id, "entity")
+                return {**row, "id": 6, "entity_id": "other"} if row and entity_id == "other" else super().get_by_id_and_entity(bot_id, entity_id)
+        client.app.state.injector.binder.bind(BotRepository, to=TwoEntities())
+        response = client.post(f"/openapi/v1/collaboration/bots/{address}/public/risk-checks?user_id={user}", json={"client_request_id":"r", "public_scope":"user", "visibility":"public"})
+        assert response.status_code == 404 and repo.row is None
 
 
 def test_other_openapi_user_id_bypass_contract_remains_available():
@@ -492,3 +557,18 @@ def test_response_exposes_persisted_invalidation_reason_without_internal_workflo
     data = _view(row).model_dump()
     assert data["invalidation_reason"] == "REPLACED" and data["phase"] == "CLOSED"
     assert "internal_detail" not in data
+
+
+def test_resolved_bot_context_is_shared_by_gate_and_handler():
+    class CountingBots(Bots):
+        def __init__(self):
+            self.reads = 0
+        def get_by_id_and_entity(self, bot_id, entity_id):
+            self.reads += 1
+            return super().get_by_id_and_entity(bot_id, entity_id)
+    bots = CountingBots()
+    client, _, _ = client_for()
+    client.app.state.injector.binder.bind(BotRepository, to=bots)
+    result = client.post("/openapi/v1/collaboration/bots/default:entity/public/risk-checks?user_id=u1", json={"client_request_id":"once", "public_scope":"user", "visibility":"public"})
+    assert result.status_code == 202
+    assert bots.reads == 1

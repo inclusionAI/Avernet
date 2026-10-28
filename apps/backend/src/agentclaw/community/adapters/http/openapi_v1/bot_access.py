@@ -72,13 +72,13 @@ from agentclaw.community.core.bot_collaborator.protocols import (
     resolve_explicit_permission_level,
     resolve_operable_permission_level,
 )
-from agentclaw.community.core.bot_management.addressing import BotAddressResolver
+from agentclaw.community.core.bot_management.addressing import BotAddressResolver, ResolvedBotContext
 from agentclaw.community.core.repository.protocols.bot import (
     BotCollabLogRepositoryProtocol,
     BotRepository,
 )
 from agentclaw.community.log import get_logger
-from fastapi import Request
+from fastapi import Depends, Request
 
 logger = get_logger()
 
@@ -92,140 +92,46 @@ logger = get_logger()
 _READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
-def require_check(rule: Check) -> Callable[..., AsyncIterator[None]]:
-    """Build the dependency that enforces one operation's row.
+async def resolve_legacy_bot(request: Request, bot_id: BotIdPath, owner_id: OwnerIdDep, caller_id: UserIdDep) -> ResolvedBotContext:
+    """Resolve the same legacy address consumed by existing handlers."""
+    bots = _service(request, BotRepository)
+    if bots is None:
+        logger.error("[bot_access] cannot adjudicate bot=%s: repository unavailable", for_log(bot_id))
+        raise BotAccessRefusedError("Bot access unavailable")
+    try:
+        return await asyncio.to_thread(BotAddressResolver(bots).resolve, bot_id=bot_id, legacy_owner_id=owner_id)
+    except Exception:
+        logger.warning("[bot_access] caller %s is below required access on bot=%s owner=%s", for_log(caller_id), for_log(bot_id), for_log(owner_id))
+        raise BotAccessRefusedError("Bot access unavailable") from None
 
-    Enforcement only: the return value is not reachable from a handler, which is
-    why handlers that need the resolved owner keep declaring ``OwnerIdDep``
-    themselves. FastAPI caches a dependency per request, so that is the same
-    resolution and not a second lookup.
-    """
 
-    if rule.address_type == "collaboration":
-        return _require_collaboration_check(rule)
-
+def require_check(rule: Check, *, bot_dependency: Callable = resolve_legacy_bot) -> Callable[..., AsyncIterator[None]]:
+    """Apply one table-declared policy to a resolved, request-cached Bot."""
     async def gate(
         request: Request,
-        bot_id: BotIdPath,
         caller_id: UserIdDep,
-        owner_id: OwnerIdDep,
+        bot: ResolvedBotContext = Depends(bot_dependency),
     ) -> AsyncIterator[None]:
         level = await _resolve_level(
-            request,
-            bot_id=bot_id,
-            caller_id=caller_id,
-            owner_id=owner_id,
-            explicit=rule.explicit,
+            request, bot_id=bot.bot_id, caller_id=caller_id,
+            owner_id=bot.entity_id, explicit=rule.explicit, resolved_bot=bot,
         )
         if level < rule.level:
-            # The ids go to the log because the response cannot carry them: it
-            # is a fixed "Not found", so this line is the only record of who
-            # was refused what. All of them go through ``for_log``. This branch
-            # runs only for values the server refused, so by construction they
-            # are caller-chosen:
-            # ``owner_id`` is a query parameter declared ``min_length=1`` with
-            # no upper bound, and ``bot_id`` is a path segment that arrives
-            # percent-decoded — so either can carry newlines or arbitrary bulk
-            # and forge extra lines in the audit trail of refusals. ``caller_id``
-            # is already bounded by matching the verified principal, but goes
-            # through the same helper so the line has one rule, not two.
-            logger.warning(
-                "[bot_access] caller %s is below %s on bot=%s owner=%s",
-                for_log(caller_id),
-                rule.level.name,
-                for_log(bot_id),
-                for_log(owner_id),
-            )
-            # ``for_log`` in the exception message too. It never reaches a
-            # caller — ``ENVELOPE_ERRORS`` maps this to a fixed "Not found" —
-            # but ``app.py``'s 404 handler renders ``str(exc)`` through ``%s``,
-            # so an unescaped id here would leak into that line by the back
-            # door. Bounding it at the source keeps that handler identical to
-            # its three siblings rather than making this one a special case.
-            raise BotAccessRefusedError(f"bot {for_log(bot_id)} not found")
-
-        if request.method not in _READ_METHODS:
-            from agentclaw.community.core.bot_management.owner_handoff.guard import (
-                assert_bot_mutable,
-            )
-            from agentclaw.community.core.bot_management.owner_handoff.contracts import (
-                HandoffError,
-            )
-
-            bots = request.app.state.injector.get(BotRepository)
-            addressed = await asyncio.to_thread(
-                BotAddressResolver(bots).resolve,
-                bot_id=bot_id,
-                legacy_owner_id=owner_id,
-            )
-            bot = addressed.bot
-            try:
-                assert_bot_mutable(bot)
-            except HandoffError as exc:
-                raise BotAccessRefusedError("Bot is temporarily read-only") from exc
-
-        if rule.edit_lock is not None:
-            await _require_edit_lock(
-                request,
-                bot_id=bot_id,
-                owner_id=owner_id,
-                caller_id=caller_id,
-            )
-
-        # The ``yield`` is bare, and that is load-bearing rather than terse. An
-        # exception escaping the handler is thrown back in here, and a bare
-        # ``yield`` propagates it immediately, so everything below is skipped —
-        # which is the only thing stopping an audit row from being written for
-        # a mutation that never produced a response and therefore never
-        # published a status for ``_succeeded`` to read. Wrapping this in
-        # ``try``/``finally`` to "make sure the audit always runs" reintroduces
-        # exactly that bug; ``test_a_mutation_that_never_produced_a_response_
-        # writes_no_audit_row`` fails if anyone does.
-        yield
-
-        if (
-            _succeeded(request)
-            and _is_audited(request)
-            and level < PermissionLevel.OWNER
-        ):
-            await _audit(
-                request,
-                bot_id=bot_id,
-                owner_id=owner_id,
-                actor_id=caller_id,
-                route=_route_of(request),
-            )
-
-    return gate
-
-
-def _require_collaboration_check(rule: Check) -> Callable[..., AsyncIterator[None]]:
-    """Adjudicate the full Bot/entity path identity, not a legacy owner alias."""
-    async def gate(request: Request, bot_id: BotIdPath, caller_id: UserIdDep) -> AsyncIterator[None]:
-        from agentclaw.community.core.bot_public_risk.access import (
-            RiskAccessDenied, authorize_risk_bot,
-        )
-        bots = _service(request, BotRepository)
-        collaborators = _service(request, CollaboratorServiceProtocol)
-        if bots is None or collaborators is None:
+            logger.warning("[bot_access] caller %s is below %s on bot=%s owner=%s", for_log(caller_id), rule.level.name, for_log(bot.bot_id), for_log(bot.entity_id))
             raise BotAccessRefusedError("Bot access unavailable")
-        try:
-            resolved = await asyncio.to_thread(
-                authorize_risk_bot, bots, collaborators, bot_id=bot_id,
-                actor_id=caller_id, surface="openapi",
-            )
-        except RiskAccessDenied as exc:
-            raise BotAccessRefusedError("Bot access unavailable") from exc
         if request.method not in _READ_METHODS:
             from agentclaw.community.core.bot_management.owner_handoff.guard import assert_bot_mutable
             from agentclaw.community.core.bot_management.owner_handoff.contracts import HandoffError
             try:
-                assert_bot_mutable(resolved.bot)
+                assert_bot_mutable(bot.bot)
             except HandoffError as exc:
                 raise BotAccessRefusedError("Bot is temporarily read-only") from exc
+        if rule.edit_lock is not None:
+            await _require_edit_lock(request, bot_id=bot.bot_id, owner_id=bot.entity_id, caller_id=caller_id)
+        # Only a successfully returned response may produce an audit record.
         yield
-        if _succeeded(request) and _is_audited(request) and caller_id != resolved.current_owner_id:
-            await _audit(request, bot_id=resolved.bot_id, owner_id=resolved.entity_id, actor_id=caller_id, route=_route_of(request))
+        if _succeeded(request) and _is_audited(request) and level < PermissionLevel.OWNER:
+            await _audit(request, bot_id=bot.bot_id, owner_id=bot.entity_id, actor_id=caller_id, route=_route_of(request))
     return gate
 
 
@@ -296,6 +202,7 @@ async def _resolve_level(
     caller_id: str,
     owner_id: str,
     explicit: bool = False,
+    resolved_bot: ResolvedBotContext | None = None,
 ) -> PermissionLevel:
     """:func:`_level`, with its database work off the event loop.
 
@@ -337,6 +244,7 @@ async def _resolve_level(
         caller_id=caller_id,
         owner_id=owner_id,
         explicit=explicit,
+        resolved_bot=resolved_bot,
     )
 
 
@@ -348,6 +256,7 @@ def _level(
     caller_id: str,
     owner_id: str,
     explicit: bool = False,
+    resolved_bot: ResolvedBotContext | None = None,
 ) -> PermissionLevel:
     """The caller's level on the addressed bot, or ``NONE`` if anything failed.
 
@@ -367,17 +276,14 @@ def _level(
     answer stays the default because every plain read on it depends on Space
     members keeping their view and chat.
     """
-    try:
-        bot = (
-            BotAddressResolver(bots)
-            .resolve(bot_id=bot_id, legacy_owner_id=owner_id)
-            .bot
-        )
-    except Exception:
-        logger.exception(
-            "[bot_access] bot lookup failed for bot=%s; refusing", for_log(bot_id)
-        )
-        return PermissionLevel.NONE
+    if resolved_bot is not None:
+        bot = resolved_bot.bot
+    else:
+        try:
+            bot = BotAddressResolver(bots).resolve(bot_id=bot_id, legacy_owner_id=owner_id).bot
+        except Exception:
+            logger.exception("[bot_access] bot lookup failed for bot=%s; refusing", for_log(bot_id))
+            return PermissionLevel.NONE
     if not bot:
         return PermissionLevel.NONE
     if explicit:
