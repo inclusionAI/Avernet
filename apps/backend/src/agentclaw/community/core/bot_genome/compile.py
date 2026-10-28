@@ -2,7 +2,7 @@
 
 The mapping is ``api-contracts/genome/v1/manifest-v1-compatibility.md``: every
 stored file becomes a ``ContentRef`` by its digest, a local skill its
-``acm-tree-v1`` tree, a Skill Center skill its pinned version, a
+``acm-tree-v1`` tree, a Skill Center skill its runtime name (the Center's published version applies), a
 shared-repository skill its path, MCP entries their typed override, and the
 script's stored body is read back. A revision is total (contract §4.3), so
 every category it covers is *declared* — an empty list declares "none", which
@@ -18,7 +18,9 @@ pure — a revision is immutable and names only bytes already stored — so the
 apply task compiling again on a re-run after a crash yields the same state;
 the task queue never runs a finished or given-up task again, and the apply
 lock keeps two promotions of one bot from overlapping. Only a promotion that
-does not exist is refused.
+does not exist is refused. ``check``, the run service's synchronous gate under
+the apply lock, also refuses a promotion whose ``from_revision`` is no longer
+``active``.
 """
 
 from __future__ import annotations
@@ -43,7 +45,7 @@ from agentclaw.community.core.apply_engine.desired_state import (
     RepoSkillPath,
     ContentRef,
 )
-from agentclaw.community.core.bot_genome.errors import NotAppliable, Reason, RevisionNotFound
+from agentclaw.community.core.bot_genome.errors import NotAppliable, Reason, RefConflict, RevisionNotFound
 from agentclaw.community.core.bot_genome.models import BotRef, ContentReader
 from agentclaw.community.core.bot_genome.spec_models import (
     CenterSkill,
@@ -58,6 +60,7 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from agentclaw.community.core.apply_engine.context import ApplyContext
+    from agentclaw.community.core.bot_genome.repository.models import GenomePromotionRow
     from agentclaw.community.core.bot_genome.genome_registry_protocol import GenomeRegistryProtocol
 
 __all__ = ["GenomeCompiler", "compile_spec"]
@@ -136,6 +139,10 @@ class GenomeCompiler(DesiredStateCompiler):
 
     def _revision_of(self, ctx: ApplyContext, ref: StateRef) -> str:
         """The revision id the promotion delivers; a promotion that does not exist is refused."""
+        return self._promotion_of(ctx, ref).revision_id
+
+    def _promotion_of(self, ctx: ApplyContext, ref: StateRef) -> GenomePromotionRow:
+        """The promotion row the reference names; a promotion that does not exist is refused."""
         if not ref.reference:
             # ``genome_state`` never builds one; a hand-built or mis-decoded reference is refused here rather
             # than asked of the repository as ``promotion_id=None``.
@@ -145,11 +152,28 @@ class GenomeCompiler(DesiredStateCompiler):
         )
         if row is None:
             raise RevisionNotFound(f"promotion {ref.reference}")
-        return row.revision_id
+        return row
 
     def check(self, ctx: ApplyContext, ref: StateRef) -> None:
-        """Raises ``RevisionNotFound`` for a promotion that does not exist, which the genome's HTTP surface maps."""
-        self._revision_of(ctx, ref)
+        """Refuses a promotion that does not exist (``RevisionNotFound``) or whose ``from_revision`` is no longer
+        ``active`` (``RefConflict``), both of which the genome's HTTP surface maps.
+
+        The run service calls this under the bot's apply lock, before the apply is enqueued, so the second
+        test closes the window in which another promotion settled between the promotion's own ref check and
+        this apply taking the lock: delivering then would put a revision on the bot that settling refuses to
+        name ``active``. The worker's ``compile`` asks neither question again: it maps what it is given.
+        """
+        row = self._promotion_of(ctx, ref)
+        bot = BotRef(
+            entity_id=ctx.entity_id,
+            bot_id=ctx.bot_id,
+            owner_id=ctx.owner_id,
+            engine_type=ctx.engine_type,
+            bot_type=ctx.bot_type,
+        )
+        active = next((r.revision for r in self._registry.list_refs(bot) if r.name == "active"), None)
+        if active != row.from_revision_id:
+            raise RefConflict("active", expected=row.from_revision_id, current=active)
 
     async def compile(
         self, ctx: ApplyContext, ref: StateRef, *, only: Collection[ApplyConstruct] | None = None

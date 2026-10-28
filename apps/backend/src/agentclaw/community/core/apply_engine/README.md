@@ -27,7 +27,9 @@ run, a refused compile, an engine exception, a task that could not be
 rebuilt, and the task queue giving up on the apply task (its give-up hook) —
 before the apply lock is released. A re-run of an apply whose report is
 already terminal applies nothing and only publishes again, so a failed
-publish is retried by the queue. The genome subscribes; the Manifest does not.
+publish is retried by the queue. The one exception is the give-up hook: the
+queue has already retired the task, so a subscriber that raises there is
+logged and not retried. The genome subscribes; the Manifest does not.
 
 A desired Center skill is found by name and a shared-repository skill by
 path through `SharedSkillPort` (`core/ports`), then claimed Direct like any

@@ -847,7 +847,8 @@ the only way evolution changes a bot.
    back to its revision and applies it through the materialisers, with no
    Manifest document in between. The run takes the bot's apply lock; a bot
    another apply holds is refused with `409 apply_busy` and the row is
-   `apply_failed`. An automated actor's apply runs with the bot owner as its
+   `apply_failed`; so is one whose `active` moved (another promotion
+   settled) before this apply took the lock, with `409 ref_conflict`. An automated actor's apply runs with the bot owner as its
    principal; the row records the actor. Promoting a service bot's verify
    or online stage through the draft → verify → publish flow is
    [#3212](https://github.com/inclusionAI/Avernet/issues/3212); the VERIFY

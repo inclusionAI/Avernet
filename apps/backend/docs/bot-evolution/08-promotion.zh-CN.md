@@ -811,7 +811,8 @@ open ──approve──▶ approved   (Promotion created; revision status → p
    或服务 bot 的草稿，接缝是一次直接 apply 运行，其状态引用为
    `StateRef("genome", promotion_id)`：worker 把这次晋升编译回它的修订版，并通过
    各物化器应用，中间不经过 Manifest 文档。该运行获取 bot 的 apply 锁；若另一次
-   apply 占用该 bot，则以 `409 apply_busy` 拒绝，该行为 `apply_failed`。自动化
+   apply 占用该 bot，则以 `409 apply_busy` 拒绝，该行为 `apply_failed`；若在本次 apply 获取锁之前
+   `active` 已移动（另一次晋升已结算），则以 `409 ref_conflict` 拒绝，该行同样为 `apply_failed`。自动化
    参与者的 apply 以 bot 所有者作为主体运行；该行记录参与者。通过
    draft → verify → publish 流程晋升服务 bot 的 verify 或 online 阶段见
    [#3212](https://github.com/inclusionAI/Avernet/issues/3212)；该流程的 VERIFY

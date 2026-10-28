@@ -26,7 +26,7 @@ from agentclaw.community.core.apply_engine.desired_state import (
     ContentRef,
 )
 from agentclaw.community.core.bot_genome.compile import GenomeCompiler, compile_spec
-from agentclaw.community.core.bot_genome.errors import NotAppliable, RevisionNotFound
+from agentclaw.community.core.bot_genome.errors import NotAppliable, RefConflict, RevisionNotFound
 from agentclaw.community.core.bot_genome.spec_models import GenomeSpec, RepoSkill
 from tests.community.core.apply_engine._fakes import make_context
 from tests.community.core.bot_genome.example_blobs import EXAMPLES, BlobDir, load_revisions
@@ -104,6 +104,10 @@ def test_script_null_declares_no_script_rather_than_leaving_it_alone() -> None:
 # -- the compiler the run service holds ----------------------------------------------------------
 
 
+REVISION = "sha256:" + "ab" * 32
+FROM = "sha256:" + "cd" * 32
+
+
 class _Promotions:
     def __init__(self, row) -> None:
         self.row = row
@@ -115,20 +119,21 @@ class _Promotions:
 
 
 class _Registry:
-    def __init__(self, state: DesiredState) -> None:
+    def __init__(self, state: DesiredState, active: str | None = FROM) -> None:
         self.state = state
+        self.active = active
         self.compiled: list[tuple] = []
+
+    def list_refs(self, bot):
+        return [] if self.active is None else [SimpleNamespace(name="active", revision=self.active)]
 
     def compile(self, bot, rev):
         self.compiled.append((bot, rev))
         return self.state
 
 
-REVISION = "sha256:" + "ab" * 32
-
-
-def _row(status: str = "applying", ref: str = "active"):
-    return SimpleNamespace(revision_id=REVISION, status=status, ref=ref)
+def _row(status: str = "applying", ref: str = "active", from_revision: str | None = FROM):
+    return SimpleNamespace(revision_id=REVISION, status=status, ref=ref, from_revision_id=from_revision)
 
 
 def _compiler(row, state: DesiredState | None = None) -> tuple[GenomeCompiler, _Registry, _Promotions]:
@@ -180,6 +185,25 @@ def test_only_a_missing_promotion_is_refused_and_no_status_is_checked() -> None:
         compiler, registry, _ = _compiler(_row(status))
         compiler.check(ctx, genome_state("p" * 32))
         assert asyncio.run(compiler.compile(ctx, genome_state("p" * 32))).state is registry.state
+
+
+def test_check_refuses_a_promotion_whose_from_revision_is_no_longer_active() -> None:
+    """``check`` runs under the bot's apply lock before the apply is enqueued: a promotion that another
+    promotion's settle overtook is refused there, before its revision reaches the bot. ``compile`` maps
+    the revision whatever ``active`` says."""
+    ctx = make_context(engine_type="openclaw", bot_type="arca")
+    compiler, registry, _ = _compiler(_row())
+    registry.active = "sha256:" + "ef" * 32
+    with pytest.raises(RefConflict) as moved:
+        compiler.check(ctx, genome_state("p" * 32))
+    assert (moved.value.expected, moved.value.current) == (FROM, registry.active)
+    assert asyncio.run(compiler.compile(ctx, genome_state("p" * 32))).state is registry.state
+    first, registry, _ = _compiler(_row(from_revision=None))
+    registry.active = None
+    first.check(ctx, genome_state("p" * 32))  # a bot's first promotion: no active either side
+    registry.active = FROM
+    with pytest.raises(RefConflict):
+        first.check(ctx, genome_state("p" * 32))
 
 
 def test_a_genome_reference_without_a_promotion_id_is_refused_before_the_repository_is_asked() -> None:

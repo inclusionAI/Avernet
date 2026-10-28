@@ -223,6 +223,18 @@ async def test_a_busy_bot_refuses_the_promotion_and_records_why(world: World) ->
 
 
 @pytest.mark.asyncio
+async def test_active_moving_before_the_apply_takes_the_lock_refuses_the_promotion(world: World) -> None:
+    """The compiler's ``check`` under the apply lock refuses a promotion another promotion overtook."""
+    r1, _ = await _two_revisions(world)
+    world.applier.fail = RefConflict("active", expected=None, current=r1)
+    with pytest.raises(RefConflict):
+        await world.promotion.promote(BOT, revision=r1, ref="active", expected_revision=None, actor=OWNER, reason="x")
+    [recorded] = world.promotion.list_promotions(BOT).items
+    assert recorded.status == PromotionStatus.APPLY_FAILED and "active moved" in recorded.apply_detail
+    assert _refs(world) == {}
+
+
+@pytest.mark.asyncio
 async def test_an_automated_actor_delivers_as_the_bot_owner_and_is_recorded_as_itself(world: World) -> None:
     r1, _ = await _two_revisions(world)
     promoted = await world.promotion.promote(

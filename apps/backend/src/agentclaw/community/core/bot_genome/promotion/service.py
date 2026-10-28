@@ -144,6 +144,10 @@ class GenomePromotionService(GenomePromotionServiceProtocol):
         except ApplyBusy:
             self._finish(bot, row.promotion_id, "another apply was running on this bot; nothing moved")
             raise
+        except RefConflict:
+            # Another promotion settled between the check above and this apply taking the bot's lock.
+            self._finish(bot, row.promotion_id, "active moved before its apply started; nothing moved")
+            raise
         except Exception as exc:  # noqa: BLE001 - recorded on the row; the refs never moved
             logger.warning(
                 "[genome.promotion] delivery did not start promotion=%s bot=%s: %s", row.promotion_id, bot.bot_id, exc
