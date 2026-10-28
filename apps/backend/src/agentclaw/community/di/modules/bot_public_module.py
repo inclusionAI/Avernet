@@ -32,7 +32,7 @@ from agentclaw.community.core.bot_management.services.bcn_service import BcnServ
 from agentclaw.community.core.repository.protocols.bot import BotFriendRepositoryProtocol
 from agentclaw.community.core.bot_public.services.bot_discover_service import BotDiscoverService
 from agentclaw.community.core.bot_public.services.bot_public_service import BotPublicService
-from agentclaw.community.core.bot_public_risk.repository import BotPublicRiskRepository
+from agentclaw.community.core.bot_public_risk.repository_protocol import RiskRepository
 from agentclaw.community.core.bot_public_risk.application import RiskApplication, RiskInputBuilder
 from agentclaw.community.core.bot_public_risk.input_builder import RiskInputBuilder as CurrentRiskInputBuilder
 from agentclaw.community.core.mcp.services.repositories import BotMCPProvider
@@ -142,7 +142,7 @@ class BotPublicModule(Module):
         device_sync_dispatcher: DeviceSyncDispatcher,
         bcsfuse_config: cfg.BcsFuseConfig,
         catalog_metadata_service: BotCatalogMetadataServiceProtocol,
-        risk_repository: BotPublicRiskRepository,
+        risk_repository: RiskRepository,
         risk_approval_guard: RiskApprovalGuard,
     ) -> BotPublicService:
         # Explicit provider (not ``binder.bind``): BotPublicService types
@@ -183,7 +183,7 @@ class BotPublicModule(Module):
     @provider
     @inject
     def public_risk_application(
-        self, repository: BotPublicRiskRepository, tasks: RiskTasks,
+        self, repository: RiskRepository, tasks: RiskTasks,
         inputs: RiskInputBuilder,
     ) -> BotPublicRiskServiceProtocol:
         return RiskApplication(repository, tasks, inputs)
@@ -192,7 +192,7 @@ class BotPublicModule(Module):
     @provider
     @inject
     def public_risk_query(
-        self, repository: BotPublicRiskRepository,
+        self, repository: RiskRepository,
     ) -> BotPublicRiskQueryProtocol:
         return RiskQuery(repository)
 

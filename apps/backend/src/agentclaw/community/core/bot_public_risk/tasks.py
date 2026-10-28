@@ -11,8 +11,8 @@ import json
 import logging
 from typing import Callable, Protocol
 
-from agentclaw.community.core.bot_public_risk.repository import (
-    BotPublicRiskRepository,
+from agentclaw.community.core.bot_public_risk.repository_protocol import (
+    RiskRepository,
     RiskCheck,
 )
 from agentclaw.community.core.bot_public_risk.notices import _next_due, stage_notice
@@ -60,7 +60,7 @@ logger = logging.getLogger(__name__)
 class RiskTasks:
     def __init__(
         self,
-        repository: BotPublicRiskRepository,
+        repository: RiskRepository,
         queue,
         provider: SecurityProvider,
         clock: Callable[[], datetime],
@@ -294,49 +294,62 @@ class RiskTasks:
         report = self.provider.get_agent_check_report(row.check_id)
         if report.status not in {"DETECTING", "REJECT", "PASS"}:
             raise ValueError("unknown security report status")
-        workflow = json.loads(row.workflow_json)
-        changes = {"security_status": report.status, "detail_url": report.detail_url}
-        if report.status == "PASS":
-            changes.update(
-                {
-                    "phase": "ADVANCING"
-                    if report.valid_pass is True
-                    else "NEEDS_ATTENTION",
-                    "next_action_at": now if report.valid_pass is True else None,
-                    "auto_poll_paused": False,
-                }
-            )
-            if report.valid_pass is not True:
-                workflow["error"] = "PASS_UNVERIFIED"
+        # A notice delivery may change row_version while the HTTP query is in flight.
+        # Retry only if the security state observed before the query is unchanged.
+        observed = (row.current_target_key, row.phase, row.check_id, row.security_status,
+                    row.detail_url, row.auto_poll_paused, row.auto_poll_until, row.next_action_at)
+        for _ in range(3):
+            row = self.repo.get(env=env, risk_check_id=risk_check_id)
+            if row is None or row.current_target_key is None or (
+                row.current_target_key, row.phase, row.check_id, row.security_status,
+                row.detail_url, row.auto_poll_paused, row.auto_poll_until, row.next_action_at
+            ) != observed:
+                return "NOT_QUERIED"
+            workflow = json.loads(row.workflow_json)
+            changes = {"security_status": report.status, "detail_url": report.detail_url}
+            if report.status == "PASS":
+                changes.update(
+                    {
+                        "phase": "ADVANCING"
+                        if report.valid_pass is True
+                        else "NEEDS_ATTENTION",
+                        "next_action_at": now if report.valid_pass is True else None,
+                        "auto_poll_paused": False,
+                    }
+                )
+                if report.valid_pass is not True:
+                    workflow["error"] = "PASS_UNVERIFIED"
+            else:
+                # The two windows belong to different events. A return from
+                # REJECT to DETECTING must never inherit the longer window.
+                detection_deadline = workflow.get("detecting_deadline")
+                deadline = (
+                    datetime.fromisoformat(detection_deadline)
+                    if detection_deadline
+                    else None
+                )
+                if report.status == "REJECT":
+                    if not workflow.get("reject_started_at"):
+                        workflow["reject_started_at"] = now.isoformat()
+                    deadline = datetime.fromisoformat(
+                        workflow["reject_started_at"]
+                    ) + timedelta(hours=1)
+                interval = 300 if report.status == "REJECT" else 30
+                paused = deadline is None or now >= deadline
+                changes.update(
+                    {
+                        "auto_poll_until": deadline,
+                        "auto_poll_paused": paused,
+                        "next_action_at": None
+                        if paused
+                        else min(now + timedelta(seconds=interval), deadline),
+                    }
+                )
+            changes["workflow_json"] = json.dumps(workflow)
+            if self._update(row, changes):
+                break
         else:
-            # The two windows belong to different events. A return from
-            # REJECT to DETECTING must never inherit the longer window.
-            detection_deadline = workflow.get("detecting_deadline")
-            deadline = (
-                datetime.fromisoformat(detection_deadline)
-                if detection_deadline
-                else None
-            )
-            if report.status == "REJECT":
-                if not workflow.get("reject_started_at"):
-                    workflow["reject_started_at"] = now.isoformat()
-                deadline = datetime.fromisoformat(
-                    workflow["reject_started_at"]
-                ) + timedelta(hours=1)
-            interval = 300 if report.status == "REJECT" else 30
-            paused = deadline is None or now >= deadline
-            changes.update(
-                {
-                    "auto_poll_until": deadline,
-                    "auto_poll_paused": paused,
-                    "next_action_at": None
-                    if paused
-                    else min(now + timedelta(seconds=interval), deadline),
-                }
-            )
-        changes["workflow_json"] = json.dumps(workflow)
-        if not self._update(row, changes):
-            return "UPDATED"
+            raise RuntimeError("could not persist security report after contention")
         current = self.repo.get(env=env, risk_check_id=risk_check_id)
         if current is not None and current.current_target_key is not None:
             if current.phase == "ADVANCING":

@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Protocol
 
-from agentclaw.community.core.bot_public_risk.repository import BotPublicRiskRepository, RiskCheck
+from agentclaw.community.core.bot_public_risk.repository_protocol import RiskRepository, RiskCheck
 from agentclaw.community.core.bot_public_risk.notices import stage_notice
 
 
@@ -27,7 +27,7 @@ class RiskAdvance:
     input digest and check current owner and the original operator's permission.
     """
 
-    def __init__(self, repository: BotPublicRiskRepository, check_h2: Callable[[RiskCheck], bool],
+    def __init__(self, repository: RiskRepository, check_h2: Callable[[RiskCheck], bool],
                  submit: Callable, clock: Callable, recovery: ApprovalRecovery | None = None):
         self.repo, self.check_h2, self.submit, self.clock = repository, check_h2, submit, clock
         self.recovery = recovery

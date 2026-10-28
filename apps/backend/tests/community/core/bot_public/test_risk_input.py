@@ -289,3 +289,13 @@ def test_invalid_sparse_override_and_repository_failure_do_not_become_owner():
         RiskInputBuilder(Reader(), Mcps(), FailedModes(), None, None).build(
             bot=BOT, target={"visibility": "public"}
         )
+
+
+def test_digest_excludes_modifier_but_security_payload_keeps_real_value():
+    builder = RiskInputBuilder(Reader(), Mcps(), Identities(), None, None)
+    target = {"visibility": "public", "public_scope": "user", "view_depts": []}
+    original, first = builder.build(bot={**BOT, "modifier_id": "previous"}, target=target)
+    after, second = builder.build(bot={**BOT, "modifier_id": "applicant"}, target=target)
+    assert original["agent_info"]["agentModifier"] == "previous"
+    assert after["agent_info"]["agentModifier"] == "applicant"
+    assert first == second

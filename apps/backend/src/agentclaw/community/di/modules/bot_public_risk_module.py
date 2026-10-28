@@ -15,6 +15,7 @@ from agentclaw.community.core.bot_public_risk.notices import (
     RiskNoticeDelivery,
     WorkOrderRiskNoticeSender,
 )
+from agentclaw.community.core.bot_public_risk.repository_protocol import RiskRepository
 from agentclaw.community.core.bot_public_risk.repository import BotPublicRiskRepository
 from agentclaw.community.core.bot_public_risk.publish_adapter import RiskPublishAdapter
 from agentclaw.community.core.repository.protocols.bot import BotRepository
@@ -63,7 +64,7 @@ class BotPublicRiskModule(Module):
         binder.bind(SecurityProvider, to=UnavailableRiskProvider, scope=singleton)
         binder.bind(ApprovalRecovery, to=UnavailableApprovalRecovery, scope=singleton)
         binder.bind(
-            BotPublicRiskRepository, to=BotPublicRiskRepository, scope=singleton
+            RiskRepository, to=BotPublicRiskRepository, scope=singleton
         )
 
     @singleton
@@ -71,7 +72,7 @@ class BotPublicRiskModule(Module):
     @inject
     def risk_tasks(
         self,
-        repo: BotPublicRiskRepository,
+        repo: RiskRepository,
         queue: TaskQueueService,
         provider: SecurityProvider,
     ) -> RiskTasks:
@@ -81,7 +82,7 @@ class BotPublicRiskModule(Module):
     @provider
     @inject
     def risk_notice_delivery(
-        self, repo: BotPublicRiskRepository, work_orders: WorkOrderServiceProtocol
+        self, repo: RiskRepository, work_orders: WorkOrderServiceProtocol
     ) -> RiskNoticeDelivery:
         return RiskNoticeDelivery(repo, WorkOrderRiskNoticeSender(work_orders), utc_now)
 
@@ -93,13 +94,13 @@ class BotPublicRiskModule(Module):
 
     @singleton
     @provider
-    def risk_approval_guard(self, repo: BotPublicRiskRepository,
+    def risk_approval_guard(self, repo: RiskRepository,
                             eligibility: RiskEligibility) -> RiskApprovalGuard:
         return RiskApprovalGuard(repo, eligibility, utc_now)
 
     @singleton
     @provider
-    def risk_advance(self, repo: BotPublicRiskRepository, eligibility: RiskEligibility,
+    def risk_advance(self, repo: RiskRepository, eligibility: RiskEligibility,
                      bots: BotRepository, public: BotPublicServiceProtocol,
                      recovery: ApprovalRecovery) -> RiskAdvance:
         return RiskAdvance(repo, eligibility, RiskPublishAdapter(bots, public), utc_now, recovery=recovery)
@@ -112,7 +113,7 @@ class BotPublicRiskModule(Module):
         registry: HandlerRegistry,
         tasks: RiskTasks,
         delivery: RiskNoticeDelivery,
-        repo: BotPublicRiskRepository,
+        repo: RiskRepository,
         config: TaskQueueWorkerConfig,
         advance: RiskAdvance,
         bots: BotRepository,

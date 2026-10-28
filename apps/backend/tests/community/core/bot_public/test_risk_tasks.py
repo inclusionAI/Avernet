@@ -684,3 +684,75 @@ def test_late_id_without_trustworthy_intent_time_pauses_automatic_polling():
         assert saved.auto_poll_paused
         assert saved.next_action_at is None
         assert tasks.poll(env="dev", risk_check_id="a") == "NOT_QUERIED"
+
+
+def test_poll_retries_notice_only_cas_and_persists_pass():
+    tasks, repo, _, provider, _, record = make()
+    tasks.start(record)
+    tasks.submit(env="dev", risk_check_id="a")
+    provider.report = SecurityReport("PASS", valid_pass=True)
+    original = provider.get_agent_check_report
+
+    def competing_notice(check_id):
+        row = repo.get(env="dev", risk_check_id="a")
+        assert repo.update_notice(env="dev", risk_check_id="a", row_version=row.row_version,
+                                  workflow_json=row.workflow_json, notification_due_at=None)
+        return original(check_id)
+
+    provider.get_agent_check_report = competing_notice
+    assert tasks.poll(env="dev", risk_check_id="a", manual=True) == "UPDATED"
+    assert repo.get(env="dev", risk_check_id="a").phase == "ADVANCING"
+
+
+def test_poll_never_overwrites_replacement_with_stale_report():
+    tasks, repo, _, provider, _, record = make()
+    tasks.start(record)
+    tasks.submit(env="dev", risk_check_id="a")
+    provider.report = SecurityReport("PASS", valid_pass=True)
+    original = provider.get_agent_check_report
+
+    def replaced(check_id):
+        tasks.start(replace(record, risk_check_id="b", client_request_id="other"))
+        return original(check_id)
+
+    provider.get_agent_check_report = replaced
+    assert tasks.poll(env="dev", risk_check_id="a", manual=True) == "NOT_QUERIED"
+    assert repo.get(env="dev", risk_check_id="a").phase == "CLOSED"
+
+
+def test_poll_does_not_overwrite_concurrent_withdrawal_pause_or_conclusion():
+    for concurrent in ("withdraw", "pause", "conclusion", "check_id"):
+        tasks, repo, _, provider, _, record = make()
+        tasks.start(record)
+        tasks.submit(env="dev", risk_check_id="a")
+        provider.report = SecurityReport("PASS", valid_pass=True)
+        original = provider.get_agent_check_report
+
+        def competing(check_id):
+            row = repo.get(env="dev", risk_check_id="a")
+            if concurrent == "withdraw":
+                assert repo.invalidate_if_current(env="dev", risk_check_id="a", row_version=row.row_version)
+            else:
+                changes = {"pause": {"auto_poll_paused": True, "next_action_at": None},
+                           "conclusion": {"security_status": "REJECT"},
+                           "check_id": {"check_id": "other"}}[concurrent]
+                assert repo.update_current(env="dev", risk_check_id="a", row_version=row.row_version, changes=changes)
+            return original(check_id)
+
+        provider.get_agent_check_report = competing
+        assert tasks.poll(env="dev", risk_check_id="a", manual=True) == "NOT_QUERIED"
+        row = repo.get(env="dev", risk_check_id="a")
+        assert row.phase != "ADVANCING"
+
+
+def test_poll_repeated_contention_does_not_claim_update():
+    import pytest
+
+    tasks, repo, _, provider, _, record = make()
+    tasks.start(record)
+    tasks.submit(env="dev", risk_check_id="a")
+    provider.report = SecurityReport("PASS", valid_pass=True)
+    repo.update_current = lambda **kwargs: False
+    with pytest.raises(RuntimeError, match="contention"):
+        tasks.poll(env="dev", risk_check_id="a", manual=True)
+    assert repo.get(env="dev", risk_check_id="a").phase == "CHECKING"

@@ -60,7 +60,7 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
 )
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.core.bot_public.bot_public_service_protocol import BotPublicServiceProtocol
-from agentclaw.community.core.bot_public_risk.repository import BotPublicRiskRepository
+from agentclaw.community.core.bot_public_risk.repository_protocol import RiskRepository
 from agentclaw.community.utils.env_utils import get_current_env
 
 logger = get_logger()
@@ -154,7 +154,7 @@ class BotPublicService(BotPublicServiceProtocol):
         device_sync_dispatcher: "DeviceSyncDispatcher",
         bcsfuse_config: "BcsFuseConfig",
         catalog_metadata_service: BotCatalogMetadataServiceProtocol,
-        risk_repository: Optional[BotPublicRiskRepository] = None,
+        risk_repository: Optional[RiskRepository] = None,
         risk_approval_guard: Any = None,
     ) -> None:
         self._bot_friend_repo = bot_friend_repo

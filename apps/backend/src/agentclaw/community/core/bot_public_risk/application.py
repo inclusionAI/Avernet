@@ -8,7 +8,7 @@ from typing import Any, Mapping, Protocol
 from uuid import uuid4
 
 from agentclaw.community.core.bot_management.addressing import ResolvedBotContext
-from agentclaw.community.core.bot_public_risk.repository import BotPublicRiskRepository, RequestConflict, RiskCheck
+from agentclaw.community.core.bot_public_risk.repository_protocol import RiskRepository, RequestConflict, RiskCheck
 from agentclaw.community.core.bot_public_risk.tasks import RiskTasks
 
 
@@ -43,7 +43,7 @@ def _target(surface: str, body: Mapping[str, Any]) -> tuple[dict[str, Any], dict
 class RiskApplication:
     """Application methods expect the caller to have authorized the resolved Bot."""
 
-    def __init__(self, repository: BotPublicRiskRepository, tasks: RiskTasks, inputs: RiskInputBuilder) -> None:
+    def __init__(self, repository: RiskRepository, tasks: RiskTasks, inputs: RiskInputBuilder) -> None:
         self._repository, self._tasks, self._inputs = repository, tasks, inputs
 
     def submit(self, *, bot: ResolvedBotContext, actor_id: str, surface: str, body: Mapping[str, Any]) -> tuple[RiskCheck, bool]:

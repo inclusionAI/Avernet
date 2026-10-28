@@ -4,7 +4,7 @@ Current eligibility is an explicit unique key, not an ordering inferred from IDs
 No external call is made while a transaction is held.
 """
 
-from dataclasses import dataclass, fields
+from dataclasses import fields
 from datetime import datetime
 from hashlib import sha256
 import json
@@ -27,40 +27,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql import func
 
 from agentclaw.community.core.base import Base
+from agentclaw.community.core.bot_public_risk.repository_protocol import RiskCheck, RequestConflict
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.avernet_tenant_guard import register_avernet_tenant_guard
-
-
-@dataclass(frozen=True)
-class RiskCheck:
-    risk_check_id: str
-    env: str
-    bot_pk: int
-    owner_id: str
-    operator_id: str
-    client_scope: str
-    client_request_id: str
-    public_scope: str
-    target_json: str
-    request_hash: str
-    input_json: str
-    input_hash: str
-    approval_biz_id: str
-    phase: str = "PREPARING"
-    security_status: str | None = None
-    auto_poll_paused: bool = False
-    next_action_at: datetime | None = None
-    auto_poll_until: datetime | None = None
-    check_id: str | None = None
-    approval_puid: str | None = None
-    detail_url: str | None = None
-    notification_due_at: datetime | None = None
-    workflow_json: str = "{}"
-    current_target_key: str | None = None
-    row_version: int = 1
-    gmt_create: datetime | None = None
-    gmt_modified: datetime | None = None
 
 
 class RiskCheckModel(Base):
@@ -125,10 +95,6 @@ class RiskCheckModel(Base):
 
 
 register_avernet_tenant_guard(RiskCheckModel)
-
-
-class RequestConflict(ValueError):
-    """A request identifier already belongs to a different intent."""
 
 
 def _view(row: RiskCheckModel) -> RiskCheck:

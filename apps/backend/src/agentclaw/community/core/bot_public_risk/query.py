@@ -1,7 +1,7 @@
 """Read locally persisted risk applications in their authorized Bot scope."""
 from __future__ import annotations
 
-from agentclaw.community.core.bot_public_risk.repository import BotPublicRiskRepository, RiskCheck
+from agentclaw.community.core.bot_public_risk.repository_protocol import RiskRepository, RiskCheck
 
 
 class RiskRecordNotFound(LookupError):
@@ -9,7 +9,7 @@ class RiskRecordNotFound(LookupError):
 
 
 class RiskQuery:
-    def __init__(self, repository: BotPublicRiskRepository) -> None:
+    def __init__(self, repository: RiskRepository) -> None:
         self._repository = repository
 
     def get(self, *, env: str, bot_pk: int, risk_check_id: str) -> RiskCheck:

@@ -4,8 +4,8 @@ import json
 from datetime import datetime, timedelta
 from typing import Callable
 
-from agentclaw.community.core.bot_public_risk.repository import (
-    BotPublicRiskRepository,
+from agentclaw.community.core.bot_public_risk.repository_protocol import (
+    RiskRepository,
     RiskCheck,
 )
 
@@ -44,7 +44,7 @@ def stage_notice(
 class RiskNoticeDelivery:
     def __init__(
         self,
-        repository: BotPublicRiskRepository,
+        repository: RiskRepository,
         send: Callable,
         clock: Callable[[], datetime],
     ):

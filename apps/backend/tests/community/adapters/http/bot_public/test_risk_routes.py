@@ -24,7 +24,7 @@ from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
 from agentclaw.community.core.bot_public_risk.application import RiskApplication
-from agentclaw.community.core.bot_public_risk.repository import BotPublicRiskRepository
+from agentclaw.community.core.bot_public_risk.repository_protocol import RiskRepository
 from agentclaw.community.core.bot_public_risk.query import RiskQuery
 from agentclaw.community.core.gateway_principal import (
     GatewayUser,
@@ -230,7 +230,7 @@ def test_injector_constructs_application_with_test_builder_and_security_provider
 
     class TestBindings(Module):
         def configure(self, binder):
-            binder.bind(BotPublicRiskRepository, to=InstanceProvider(repo))
+            binder.bind(RiskRepository, to=InstanceProvider(repo))
             binder.bind(TaskQueueService, to=InstanceProvider(Queue()))
             binder.bind(RiskInputBuilder, to=InstanceProvider(Builder()))
             binder.bind(SecurityProvider, to=InstanceProvider(Security()))

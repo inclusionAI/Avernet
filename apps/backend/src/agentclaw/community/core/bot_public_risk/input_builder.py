@@ -203,8 +203,9 @@ class RiskInputBuilder:
                 {str(x["deptNo"]) for x in departments}
             )
         data = {"agent_info": agent, "missing_local_skill_ids": sorted(missing)}
+        digest_data = {**data, "agent_info": {k: v for k, v in agent.items() if k != "agentModifier"}}
         payload = json.dumps(
-            {"input": data, "target": canonical_target},
+            {"input": digest_data, "target": canonical_target},
             sort_keys=True,
             ensure_ascii=False,
             separators=(",", ":"),

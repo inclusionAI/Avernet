@@ -3,7 +3,7 @@
 from typing import Any, Mapping, Protocol, runtime_checkable
 
 from agentclaw.community.core.bot_management.addressing import ResolvedBotContext
-from agentclaw.community.core.bot_public_risk.repository import RiskCheck
+from agentclaw.community.core.bot_public_risk.repository_protocol import RiskCheck
 
 
 @runtime_checkable

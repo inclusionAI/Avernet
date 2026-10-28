@@ -5,11 +5,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 from agentclaw.community.core.bot_public_risk.notices import stage_notice
-from agentclaw.community.core.bot_public_risk.repository import BotPublicRiskRepository, RiskCheck
+from agentclaw.community.core.bot_public_risk.repository_protocol import RiskRepository, RiskCheck
 
 
 class RiskApprovalGuard:
-    def __init__(self, repository: BotPublicRiskRepository, check_h3: Callable[[RiskCheck], bool],
+    def __init__(self, repository: RiskRepository, check_h3: Callable[[RiskCheck], bool],
                  clock: Callable[[], datetime] | None = None):
         self.repo = repository
         self.check_h3 = check_h3
