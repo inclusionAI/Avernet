@@ -69,7 +69,7 @@
 - **Files:** `apply_engine/completion.py`, `run/service.py`, `run/termination.py`, `apply_engine/README.md`, DI (`bot_management_module.py`, the module that bases `StateCompilers`); tests `test_apply_service_lifecycle.py`, `test_apply_task.py`, `di/test_apply_engine_module_wiring.py`
 - **Done when:**
   - [x] Handler called once per terminal path (SUCCEEDED, PARTIAL, FAILED, compile refused, engine exception, unstartable), after `applies.finish`, before `locks.release`, with `outcome_of(report)`.
-  - [x] A raising handler: lock released, then the task raises (queue retry); the retried run finds the report terminal and only publishes.
+  - [x] A raising handler: the task raises with the lock still held (queue retry); the retried run finds the report terminal, publishes, then unlocks; giving up unlocks regardless (review fix: a promotion's next apply must not start before the previous one settled).
   - [x] A kind with no handler (Manifest) calls nothing; every existing Manifest/apply test passes unchanged.
 - **Depends on:** Task 1
 - **Notes:** `ApplyRunService` takes `completion_handlers` as a required argument, like `compilers`; the seven suites that construct it directly pass `completion_handlers={}` (their only change). `apply_engine_module` contributes the map's empty base row, so a container with no subscribing producer still builds the run service. Tests: `test_apply_completion.py` (a stub compiler under a test kind drives every path; PARTIAL is covered on `outcome_of` directly).

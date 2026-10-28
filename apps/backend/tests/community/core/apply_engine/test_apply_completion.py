@@ -217,16 +217,43 @@ def test_a_task_that_cannot_be_rebuilt_is_published_as_failed(rig) -> None:
     assert not _lock_held(locks)
 
 
+def test_an_unstartable_apply_whose_publish_fails_keeps_the_bot_locked_for_the_rerun(rig) -> None:
+    service, compiler, recorder, queue, locks, bots = rig
+    payload = _start(service, queue)
+    bots.record = None
+    recorder.raise_next = RuntimeError("database blip")
+    with pytest.raises(RuntimeError):
+        service.run_apply_task(payload)
+    assert _lock_held(locks)
+    service.run_apply_task(payload)  # the re-run finds the FAILED report, publishes, unlocks
+    assert not _lock_held(locks) and compiler.compiles == 0
+
+
 def test_a_failed_publish_is_retried_by_the_queue_and_the_rerun_only_publishes(rig) -> None:
     service, compiler, recorder, queue, locks, _ = rig
     payload = _start(service, queue)
     recorder.raise_next = RuntimeError("database blip")
     with pytest.raises(RuntimeError, match="database blip"):
         service.run_apply_task(payload)  # the worker turns this raise into a retry
-    assert not _lock_held(locks), "the lock is released before the raise"
+    assert _lock_held(locks), "the bot stays locked until the subscriber has heard"
     service.run_apply_task(payload)  # the retry
     assert compiler.compiles == 1, "the re-run applies nothing again"
     assert [n[1].status for n in recorder.notices] == [ApplyStatus.SUCCEEDED, ApplyStatus.SUCCEEDED]
+    assert not _lock_held(locks), "a publish that lands unlocks"
+
+
+def test_a_publish_that_fails_again_on_the_rerun_keeps_the_bot_locked_until_the_queue_gives_up(rig) -> None:
+    service, _, recorder, queue, locks, _ = rig
+    payload = _start(service, queue)
+    recorder.raise_next = RuntimeError("database blip")
+    with pytest.raises(RuntimeError):
+        service.run_apply_task(payload)
+    recorder.raise_next = RuntimeError("still down")
+    with pytest.raises(RuntimeError):
+        service.run_apply_task(payload)
+    assert _lock_held(locks), "a second promotion cannot start while the first is unsettled"
+    service.give_up(payload)  # retries exhausted or deadline: the queue gives up, nothing will retry
+    assert not _lock_held(locks)
 
 
 def test_a_rerun_after_a_worker_died_before_unlocking_releases_the_lock(rig, monkeypatch) -> None:

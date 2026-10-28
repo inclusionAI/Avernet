@@ -82,7 +82,8 @@ def terminate_unstartable(
     its lock goes stale; without the release the bot is locked against every
     future apply for the whole TTL. ``publish`` tells the state's producer
     (``completion.py``) between the two; what it raised is answered, for the
-    caller to re-raise once the lock is free.
+    caller to re-raise, and the lock stays held until the queue's re-run has
+    published (see ``ApplyRunService._run``).
     """
     env = str(payload["env"])
     entity_id = str(payload["entity_id"])
@@ -99,6 +100,7 @@ def terminate_unstartable(
         state=state_of_payload(payload),
     )
     record_engine_failure(report, exc)
+    publish_error: Exception | None = None
     try:
         applies.finish(
             env=env,
@@ -108,14 +110,16 @@ def terminate_unstartable(
             status=report.status.value,
             report=json.dumps(report.as_payload()),
         )
-        return publish(env, entity_id, bot_id, report.state, report)
+        publish_error = publish(env, entity_id, bot_id, report.state, report)
+        return publish_error
     finally:
-        locks.release(
-            env=env,
-            entity_id=entity_id,
-            bot_id=bot_id,
-            lock_token=str(payload["lock_token"]),
-        )
+        if publish_error is None:
+            locks.release(
+                env=env,
+                entity_id=entity_id,
+                bot_id=bot_id,
+                lock_token=str(payload["lock_token"]),
+            )
 
 
 def terminate_on_launch_failure(

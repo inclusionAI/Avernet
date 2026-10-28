@@ -468,15 +468,18 @@ class ApplyRunService(ApplyRunServiceProtocol):
                     # bot's next apply can start.
                     publish_error = self._publish(ctx.env, ctx.entity_id, ctx.bot_id, state, report)
             finally:
-                self._locks.release(
-                    env=ctx.env,
-                    entity_id=ctx.entity_id,
-                    bot_id=ctx.bot_id,
-                    lock_token=lock_token,
-                )
+                # The lock is held until the producer has heard: a subscriber that has not settled yet
+                # (a genome promotion moving ``active``) must not see the bot's next apply start first.
+                if publish_error is None:
+                    self._locks.release(
+                        env=ctx.env,
+                        entity_id=ctx.entity_id,
+                        bot_id=ctx.bot_id,
+                        lock_token=lock_token,
+                    )
             if publish_error is not None:
-                # The report is terminal and the lock is free; raising hands the task back to the queue,
-                # whose re-run finds the report terminal and only publishes (``run_apply_task``).
+                # The report is terminal and the lock still held; raising hands the task back to the queue,
+                # whose re-run finds the report terminal, publishes, and only then unlocks (``run_apply_task``).
                 raise publish_error
 
     def run_apply_task(self, payload: dict) -> None:
@@ -600,19 +603,17 @@ class ApplyRunService(ApplyRunServiceProtocol):
         report = report_from_payload(
             json.loads(record.report) if record.report else {}, record=record, status=ApplyStatus(record.status)
         )
-        try:
-            publish_error = self._publish(env, entity_id, bot_id, state_of_payload(payload), report)
-        finally:
-            # The run that wrote the terminal report may have died before unlocking; the release is by
-            # token, so it is a no-op when that run did unlock (or the lock already went to another apply).
-            self._locks.release(
-                env=env,
-                entity_id=entity_id,
-                bot_id=bot_id,
-                lock_token=str(payload["lock_token"]),
-            )
+        publish_error = self._publish(env, entity_id, bot_id, state_of_payload(payload), report)
         if publish_error is not None:
-            raise publish_error
+            raise publish_error  # still locked: the queue's next re-run publishes again
+        # The run that wrote the terminal report may have died before unlocking, or kept the lock because its
+        # publish failed; the release is by token, so it is a no-op when the lock already went to another apply.
+        self._locks.release(
+            env=env,
+            entity_id=entity_id,
+            bot_id=bot_id,
+            lock_token=str(payload["lock_token"]),
+        )
         return True
 
     def _publish(
@@ -624,7 +625,7 @@ class ApplyRunService(ApplyRunServiceProtocol):
             return None
         try:
             handler.on_finished(env=env, entity_id=entity_id, bot_id=bot_id, state=state, outcome=outcome_of(report))
-        except Exception as exc:  # noqa: BLE001 - surfaced to the caller once the lock is free
+        except Exception as exc:  # noqa: BLE001 - surfaced to the caller, which keeps the lock
             logger.exception(
                 "[manifest_apply] completion handler raised, apply_id=%s, kind=%s", report.apply_id, state.kind
             )

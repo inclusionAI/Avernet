@@ -75,8 +75,9 @@ class ApplyCompletionHandler(Protocol):
     Called on the apply worker after the report is terminal and before the
     apply lock is released, so whatever the producer records is in place
     before the bot's next apply can start. Must be idempotent; a raise is not
-    lost — the run service lets it reach the task queue, which runs the task
-    again, and the re-run publishes the stored outcome again.
+    lost — the run service keeps the lock and lets it reach the task queue,
+    which runs the task again, and the re-run publishes the stored outcome
+    again before unlocking. Only the queue's give-up unlocks unheard.
     """
 
     @abstractmethod
