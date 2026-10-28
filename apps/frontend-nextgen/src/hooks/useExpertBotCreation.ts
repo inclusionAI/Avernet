@@ -8,6 +8,7 @@ import {
   createExpertBot,
   recoverExpertBot,
   getExpertBotApplyReport,
+  getExpertBotLastApply,
   classifyExpertSubmissionFailure,
   getExpertBotCreationStatus,
   type ExpertBotAccepted,
@@ -28,6 +29,7 @@ export function useExpertBotCreation(open: boolean, existingBotId?: string) {
   const [initializationPending, setInitializationPending] = useState(false);
   const [afterCreateError, setAfterCreateError] = useState<string>();
   const [recoveryId, setRecoveryId] = useState<string>();
+  const [recoveryLookupAfterId, setRecoveryLookupAfterId] = useState<string>();
   const [recovering, setRecovering] = useState(false);
   const recoverySubmitting = useRef(false);
   const generation = useRef(0);
@@ -35,10 +37,12 @@ export function useExpertBotCreation(open: boolean, existingBotId?: string) {
   const avatar = useRef<string>();
   const submitted = useRef<BotCreateInput>();
   const afterCreateStartedFor = useRef<string>();
+  useEffect(() => () => { generation.current += 1; }, []);
   useEffect(() => {
     if (open) return;
     generation.current += 1;
     setRecoveryId(undefined);
+    setRecoveryLookupAfterId(undefined);
     setRecovering(false);
     recoverySubmitting.current = false;
     setAccepted(undefined);
@@ -111,13 +115,27 @@ export function useExpertBotCreation(open: boolean, existingBotId?: string) {
     };
   }, [open, accepted?.bot_id]);
   useEffect(() => {
-    if (!open || !accepted?.bot_id || !recoveryId) return;
+    if (!open || !accepted?.bot_id || (!recoveryId && recoveryLookupAfterId === undefined)) return;
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
       try {
-        const report = await getExpertBotApplyReport(accepted.bot_id, recoveryId);
+        const report = recoveryId
+          ? await getExpertBotApplyReport(accepted.bot_id, recoveryId)
+          : await getExpertBotLastApply(accepted.bot_id);
         if (!active) return;
+        if (!recoveryId) {
+          // A lost POST response is not permission to repeat the write. Only
+          // a new bound recovery report can give this attempt a polling handle.
+          if (report.apply_id && report.apply_id !== recoveryLookupAfterId
+              && report.trigger === 'explicit' && report.state?.kind === 'manifest' && report.state.reference) {
+            setRecoveryId(report.apply_id);
+            setRecoveryLookupAfterId(undefined);
+            return;
+          }
+          timer = setTimeout(poll, 2000);
+          return;
+        }
         if (report.apply_id !== recoveryId) throw new Error('配置恢复报告尚不可用，正在重试');
         setError(undefined);
         setStatus((current) => current && ({
@@ -136,7 +154,7 @@ export function useExpertBotCreation(open: boolean, existingBotId?: string) {
     };
     void poll();
     return () => { active = false; clearTimeout(timer); };
-  }, [open, accepted?.bot_id, recoveryId]);
+  }, [open, accepted?.bot_id, recoveryId, recoveryLookupAfterId]);
   return {
     accepted,
     status,
@@ -154,15 +172,27 @@ export function useExpertBotCreation(open: boolean, existingBotId?: string) {
       setRecovering(true);
       setError(undefined);
       const version = generation.current;
+      let posted = false;
+      let previousApplyId = '';
       try {
+        const previous = await getExpertBotLastApply(accepted.bot_id);
+        if (version !== generation.current) return;
+        previousApplyId = previous.apply_id || '';
+        posted = true;
         const next = await recoverExpertBot(accepted.bot_id);
         if (version !== generation.current) return;
         setStatus((current) => current && ({ ...current, state: 'APPLYING', message: undefined }));
         setRecoveryId(next.apply_id);
       } catch (failure) {
         if (version !== generation.current) return;
-        setRecovering(false);
-        setError(failure instanceof Error ? failure.message : '配置恢复未能确认，请到 Bot 管理查看');
+        if (posted && classifyExpertSubmissionFailure(failure) === 'unknown') {
+          setRecoveryId(undefined);
+          setRecoveryLookupAfterId(previousApplyId);
+          setError('配置恢复请求结果未知，正在查询原 Bot 的最新报告，请勿重复提交。');
+        } else {
+          setRecovering(false);
+          setError(failure instanceof Error ? failure.message : '配置恢复未能确认，请到 Bot 管理查看');
+        }
       } finally {
         if (version === generation.current) recoverySubmitting.current = false;
       }

@@ -83,3 +83,7 @@ export async function recoverExpertBot(botId: string) {
 export async function getExpertBotApplyReport(botId: string, applyId: string) {
   return catalogData(await requestExpertBotApplyReport(botId, applyId), 'config-manifest/applies');
 }
+
+export async function getExpertBotLastApply(botId: string) {
+  return catalogData(await requestExpertBotLastApply(botId), 'config-manifest/last-apply');
+}

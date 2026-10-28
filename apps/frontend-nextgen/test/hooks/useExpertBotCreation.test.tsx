@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { useExpertBotCreation } from '@/hooks/useExpertBotCreation';
-import { backendRequest } from '@/services/backendApi/httpClient';
+import { backendRequest, BackendRequestError } from '@/services/backendApi/httpClient';
 import type { BotCreateInput } from '@/services/botWorkshop';
 import type { AgentCodingTemplate } from '@/services/botWorkshop/agentCodingTemplateService';
 
@@ -180,4 +180,38 @@ test('后续普通 Apply 失败不冒充原专家初始化恢复', async () => {
   expect(result.current.status?.recoverable).toBe(false);
   await act(async () => result.current.recover());
   expect(request.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
+});
+
+test.each(['SUCCEEDED', 'FAILED', 'PARTIAL'] as const)('恢复响应丢失后只读接续新 bound Apply 至 %s，不重发 POST', async (outcome) => {
+  jest.useFakeTimers();
+  let posted = false;
+  let latestReads = 0;
+  let reportReads = 0;
+  request.mockImplementation(async (path) => {
+    if (path.endsWith('/experts/architect/bots')) return { code: 200000, data: { bot_id: 'lost-response' } };
+    if (path.endsWith('/with-manifest/status')) return { code: 200000, data: {
+      bot_id: 'lost-response', state: 'APPLY_FAILED', bot: { bot_id: 'lost-response', owner_id: '001' },
+      apply: { apply_id: 'old-failure', result: 'FAILED', entries: [] },
+    } };
+    if (path.endsWith('/config-manifest/apply')) { posted = true; throw new BackendRequestError('502 response lost', { status: 502, apiPath: path }); }
+    if (path.endsWith('/last-apply')) return { code: 200000, data: !posted || latestReads++ === 0
+      ? { apply_id: 'old-failure', result: 'FAILED', trigger: 'explicit', state: { kind: 'manifest', reference: 'sha256-json-v1:original' }, entries: [] }
+      : { apply_id: 'new-bound-apply', result: 'RUNNING', trigger: 'explicit', state: { kind: 'manifest', reference: 'sha256-json-v1:original' }, entries: [] } };
+    if (path.endsWith('/applies/new-bound-apply')) return { code: 200000, data: {
+      apply_id: 'new-bound-apply', result: reportReads++ === 0 ? 'RUNNING' : outcome, entries: [],
+    } };
+    return { code: 200000, data: {} };
+  });
+  const { result } = renderHook(() => useExpertBotCreation(true));
+  await act(async () => result.current.submit('architect', { ...input, engine: 'openclaw', agentCoding: undefined }));
+  await act(async () => result.current.recover());
+  expect(result.current.recovering).toBe(true);
+  expect(result.current.status?.apply?.apply_id).toBe('old-failure');
+  await act(async () => { jest.advanceTimersByTime(2000); });
+  await act(async () => { jest.advanceTimersByTime(2000); });
+  await act(async () => { jest.advanceTimersByTime(2000); });
+  expect(result.current.status?.apply?.apply_id).toBe('new-bound-apply');
+  expect(result.current.status?.state).toBe(outcome === 'SUCCEEDED' ? 'READY' : 'APPLY_FAILED');
+  expect(result.current.recovering).toBe(false);
+  expect(request.mock.calls.filter(([path]) => path.endsWith('/config-manifest/apply'))).toHaveLength(1);
 });
