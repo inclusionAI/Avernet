@@ -18,7 +18,6 @@ from tests.community.core.skill_center._skill_set_management_bot_doubles import 
     _PkLessRuntimeBots as _PkLessRuntimeBots,
 )
 
-from tests.community.helpers.skill_projection_guard import PassThroughSkillProjectionGuard
 
 
 
@@ -497,7 +496,6 @@ def _registry(*, pool_runtime, pool_layouts):
     return EngineRuntimeProjectionRegistry(
         default=PerDomainRuntimeProjection(
             skill_delivery=SkillRuntimeDelivery(
-        guard=PassThroughSkillProjectionGuard(),
                 pool_runtime=pool_runtime,
                 pool_layouts=pool_layouts,
                 device_contexts=_Contexts(),

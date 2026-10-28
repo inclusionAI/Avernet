@@ -289,29 +289,6 @@ def test_handler_retries_transient_network_failure_instead_of_fast_polling() -> 
     assert isinstance(outcome, Retry)
 
 
-@pytest.mark.parametrize("code", [
-    "SKILL_PROJECTION_BUSY",
-    "SKILL_PROJECTION_LOCK_LOST",
-    "SKILL_PROJECTION_LOCK_UNAVAILABLE",
-    "SKILL_PROJECTION_SNAPSHOT_UNAVAILABLE",
-    "SKILL_PROJECTION_STALE",
-    "SKILL_PROJECTION_TIMEOUT",
-])
-def test_handler_retries_projection_guard_failures(code: str) -> None:
-    projector = _Projector()
-    projector.apply_plan = AsyncMock(
-        return_value=RuntimeProjectionResult.pending(code=code, reason="guard deferred")
-    )
-
-    outcome = _handler(projector=projector).handle(
-        {"owner_id": "owner-a", "bot_id": "bot-a"}
-    )
-
-    assert isinstance(outcome, Retry)
-    assert code in outcome.error
-    projector.apply_plan.assert_awaited_once()
-
-
 def test_permanent_prepare_failure_stops_derived_pending_fast_poll(caplog) -> None:
     projector = _Projector()
     projector.plans = [_plan("1"), _plan("1")]

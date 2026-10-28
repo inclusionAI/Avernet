@@ -823,7 +823,7 @@ fn extract_thread_id(value: &Value) -> Option<String> {
 }
 
 /// Locate an executable named `name` on PATH without launching it.
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn executable_on_path(name: &str) -> bool {
     std::env::var_os("PATH").is_some_and(|paths| std::env::split_paths(&paths).any(|directory| {
         let candidate = directory.join(name);

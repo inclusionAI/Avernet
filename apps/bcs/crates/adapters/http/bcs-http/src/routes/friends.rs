@@ -437,7 +437,16 @@ async fn check_actor_ownership(
         })
         .await
     {
-        Ok(_bot) => {
+        Ok(bot) => {
+            // Human self access is an identity check, not a Bot management edge.
+            if bot.actor_kind == bcs_service_api::ActorKind::Human {
+                return if actor_id == format!("human_{staff_no}") {
+                    Ok(())
+                } else {
+                    Err(ActorOwnershipError::Denied)
+                };
+            }
+
             // Control rule (bot-authority plan Task 6.5):
             // the Human→Bot leg is the CURRENT `can_manage`
             // edge through the live authority hook — the

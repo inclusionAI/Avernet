@@ -379,7 +379,7 @@ def test_owner_list_subquery_cannot_use_other_tenant_or_environment_bots(
     assert total == 0 and rows == []
 
 
-def test_caller_artifact_uses_entity_while_bot_detail_uses_current_owner(persisted):
+def test_caller_artifact_uses_stable_pk_while_bot_detail_uses_current_owner(persisted):
     from types import SimpleNamespace
     from agentclaw.community.core.expert_chat.services.expert_chat_instance_service import (
         ExpertChatInstanceService,
@@ -387,13 +387,15 @@ def test_caller_artifact_uses_entity_while_bot_detail_uses_current_owner(persist
 
     db, bots, bot = persisted
     handoff(db, bot["id"])
-    artifact = SimpleNamespace(ext={"migration_path": "/existing/build"})
+    artifact = SimpleNamespace(status="success", ext={"migration_path": "/existing/build"})
 
     class Published:
-        def get_by_publish_bot_id(self, **address):
-            assert address["owner_id"] == "A"
-            assert address["publish_bot_id"] == "service"
-            return artifact
+        def list_by_source_bot(self, source_bot_pk, env):
+            # Responsibility changes from A to B; neither legacy locator may
+            # switch the stable publication identity or deployment environment.
+            assert source_bot_pk == bot["id"]
+            assert env == "dev"
+            return [SimpleNamespace(status="draft", ext={}), artifact]
 
     class BotDetails:
         def get_bot(self, *, bot_id, user_id):

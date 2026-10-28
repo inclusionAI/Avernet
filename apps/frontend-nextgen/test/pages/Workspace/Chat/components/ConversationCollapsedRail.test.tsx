@@ -4,7 +4,7 @@ import { ConversationCollapsedRail } from '@/pages/Workspace/Chat/components/Con
 import { describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const botOf = (
   botId: string,
@@ -99,3 +99,25 @@ describe('ConversationCollapsedRail（整栏收起的 Bot 泊位竖轨）', () =
     expect(screen.queryByRole('button', { name: '前往公开 Bot' })).not.toBeInTheDocument();
   });
 });
+
+it.each([false, true])(
+  '非运行中好友服务 Bot 收起侧栏后仍不可打开会话，并提示原因（Coding=%p）',
+  async (isAgentCodingBot) => {
+    const offlineFriend = botOf('offline:2', '未运行服务', {
+      botType: 'service',
+      onlineAvailable: false,
+      chatable: false,
+      isFriendBot: true,
+      isAgentCodingBot,
+    });
+    offlineFriend.section = 'friend';
+    const props = renderRail({ sections: [{ id: 'friend', label: '好友 Bot', items: [offlineFriend] }] });
+    expect(screen.queryByRole('button', { name: '打开 未运行服务' })).not.toBeInTheDocument();
+    const tile = screen.getByLabelText('未运行服务（不可发起会话）');
+    fireEvent.click(tile);
+    expect(props.onQuickOpen).not.toHaveBeenCalled();
+    expect(props.onOpenAgentCodingBot).not.toHaveBeenCalled();
+    fireEvent.pointerMove(tile, { pointerType: 'mouse' });
+    await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent('非运行中服务 Bot'));
+  },
+);

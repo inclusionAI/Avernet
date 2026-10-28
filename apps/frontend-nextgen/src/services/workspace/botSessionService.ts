@@ -45,6 +45,8 @@ export interface ChatBotView {
   actions?: string[];
   disabledActions?: Record<string, string>;
   botType?: string;
+  /** 服务 Bot 是否有可用的 online 发布；旧接口缺省不触发禁用。 */
+  onlineAvailable?: boolean | null;
   /** Inventory-backed lifecycle for service engine checks; request stage is not lifecycle proof. */
   serviceLifecycle?: BotLifecycle;
   isAgentCodingBot?: boolean;
@@ -52,7 +54,7 @@ export interface ChatBotView {
   templateName?: string;
   spaceId?: string;
   spaceName?: string;
-  /** 服务 Bot 的运行阶段；个人 Bot 和好友会话仅使用 draft。 */
+  /** 会话运行阶段；团队/好友服务 Bot 使用 online，个人 Bot 使用 draft。 */
   runtimeStage?: BotIamTokenStage;
   /** 标记来自当前用户好友关系，而非当前用户管理的 Bot。 */
   isFriendBot?: boolean;
@@ -109,6 +111,7 @@ export function resolveUserId(userId: string): string {
 
 /** 连接和会话请求共用运行环境，避免 Token 与实际实例选址不一致。 */
 export function resolveChatRuntimeStage(bot: ChatBotView): BotIamTokenStage {
+  if (bot.botType === 'service' && (bot.isTeamBot || bot.isFriendBot)) return 'online';
   if (bot.isFriendBot || bot.botType === 'personal') return 'draft';
   return bot.runtimeStage ?? (bot.botType === 'service' ? 'online' : 'draft');
 }
@@ -121,7 +124,10 @@ export function withFriendBotRequestParams<T extends { user_id: string; owner_id
 ): T & { stage: BotIamTokenStage; f_user_id?: string } {
   return {
     ...params,
-    stage: bot.isFriendBot || bot.botType === 'personal' ? 'draft' : params.stage ?? resolveChatRuntimeStage(bot),
+    stage:
+      bot.isFriendBot || bot.botType === 'personal' || (bot.isTeamBot && bot.botType === 'service')
+        ? resolveChatRuntimeStage(bot)
+        : params.stage ?? resolveChatRuntimeStage(bot),
     ...((bot.isFriendBot || bot.isTeamBot) && bot.ownerId ? { owner_id: bot.ownerId } : {}),
     ...(bot.isFriendBot ? { f_user_id: resolveUserId(userId) } : {}),
   };

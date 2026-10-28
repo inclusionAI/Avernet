@@ -30,11 +30,13 @@ an ADR **before** implementation, following the README recipe: next number is
 
 ## Two-edition rules
 
-- The ADR set and this file are **byte-identical** in both repos' `apps/baas/`.
-  Change both copies or neither.
+- This repo's `docs/adr/` set is the **platform authority** (it also records
+  the two-edition relationship, ADR-0007). The internal OCB monorepo keeps
+  its own enterprise-focused ADR set under its `apps/baas/docs/adr/`
+  covering the `secbaas.enterprise` overlay. The sets are intentionally
+  separate; do not copy one into the other.
 - Evidence paths are labeled: `community:` resolves under the Avernet app
-  root, `enterprise:` under the internal OCB app root; unlabeled paths must
-  resolve under both.
+  root, `enterprise:` refers to the internal OCB app root (private overlay).
 - New infrastructure capability in `core/` must land as an `spi/` contract +
   `plugins/` option selected via `user_config.plugins` in
   `configs/application.yaml` — do not fork a service for one edition.

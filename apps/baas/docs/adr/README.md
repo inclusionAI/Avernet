@@ -6,13 +6,16 @@ private overlay living in the internal OCB monorepo's `apps/baas/src/`).
 
 Scope rules:
 
-- Decisions here are **BaaS-app-level**. Hard-to-reverse, system-level decisions
-  for the whole Avernet monorepo live in the repo-root
+- Decisions here are **BaaS-app-level** and govern the community platform
+  (including its side of the two-edition relationship). Hard-to-reverse,
+  system-level decisions for the whole Avernet monorepo live in the repo-root
   [`docs/adr/`](../../../docs/adr/) — see `CONTEXT-MAP.md` and
   `docs/agents/domain.md` for that numbering and lifecycle. No repo-root ADR
   concerns BaaS topics today, so the app-level numbering here starts at 0001.
-- The set is **byte-identical** in both repos (Avernet `apps/baas/docs/adr/` and
-  the internal OCB `apps/baas/docs/adr/`). Change both copies or neither.
+- The internal OCB monorepo keeps its **own, separate** enterprise-focused ADR
+  set under its `apps/baas/docs/adr/` (covering the `secbaas.enterprise`
+  overlay architecture). The sets are intentionally not copies; this one is
+  the platform authority, that one is the overlay authority.
 
 | Number | Title | Status | Applies to | Summary |
 | ------ | ----- | ------ | ---------- | ------- |
@@ -34,8 +37,8 @@ Scope rules:
 
 ## Writing the next ADR
 
-1. Next number: **0016**. Create `NNNN-kebab-title.md` here (in both repos,
-   byte-identical).
+1. Next number: **0016**. Create `NNNN-kebab-title.md` here, following the
+   scope rules above.
 2. Required sections, in order: `# ADR-NNNN: <Title>`, `## Status`,
    `## Date`, `## Applies to`, `## Context`, `## Decision`,
    `## Consequences` (**Positive:** / **Negative:** / **Risks:**),
@@ -47,12 +50,14 @@ Scope rules:
    with status updated.
 4. `## Applies to`: `all`, `enterprise`, or `community` — which edition(s)
    the decision governs.
-5. `## Evidence` path labeling (keeps both repos' copies byte-identical):
+5. `## Evidence` path labeling:
    - `community: <path>` resolves under the Avernet `apps/baas/` root;
-   - `enterprise: <path>` resolves under the internal OCB `apps/baas/` root;
+   - `enterprise: <path>` refers to the internal OCB monorepo's `apps/baas/`
+     root (`secbaas.enterprise`, private) — an informative reference to the
+     overlay edition, not a file in this repo;
    - unlabeled paths must exist under **both** app roots.
-   Every path must resolve at authoring time; code is the primary evidence,
-   design notes are history.
+   Every resolvable path must exist at authoring time; code is the primary
+   evidence, design notes are history.
 6. Sections of this README and the ADR bodies follow the repo's ADR customs
    (accepted stays readable after replacement; see
    `docs/agents/domain.md`, "ADR lifecycle").

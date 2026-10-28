@@ -174,9 +174,9 @@ async def get_connection(
     if f_user_id is not None and device_uuid is not None:
         raise EngineResourceNotFoundError("instance selection is unavailable for friend chat")
     if f_user_id is not None:
-        if stage is not RuntimeStage.DRAFT or not session_id:
+        if not session_id:
             raise EngineResourceNotFoundError(
-                "friend connection requires a draft session_id"
+                "friend connection requires a session_id"
             )
         await authorize_friend_chat(
             request=request,
@@ -186,6 +186,7 @@ async def get_connection(
             friend_user_id=f_user_id,
             friendships=friendships,
             expert=expert,
+            stage=stage.value,
         )
         try:
             result = await expert.connect_chat_session(

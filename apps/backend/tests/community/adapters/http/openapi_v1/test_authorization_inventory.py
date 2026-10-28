@@ -331,6 +331,10 @@ def test_scaffolding_burn_down_is_reported():
 #: operation cannot be renamed to escape.
 _DEFERRED_OPERATIONS = frozenset(
     {
+        # IAM friend preparation is not operator authorization: the adapter
+        # verifies friendship plus own session and the service confines writes
+        # to that subject's Caller instance. Operator MEMBER alone is not enough.
+        ("POST", "/openapi/v1/bots/{bot_id}/iam-token"),
         # Advisory needs visibility + non-raising restart eligibility in core.
         ("GET", "/openapi/v1/bots/{bot_id}/engine-version"),
         # Not a structural limit: these routes do carry {bot_id} on the path.
@@ -371,10 +375,12 @@ _DEFERRED_OPERATIONS = frozenset(
         # relocate it. The seam adjudicates one level; this is a disjunction,
         # and expressing it is not a question this feature settles.
         #
-        # File-list reads now have the same disjunction: authorize_file_list
+        # File reads now have the same disjunction: authorize_file_list
         # checks MEMBER or BCN friendship plus Backend-owned session identity.
-        # The other five file operations keep Check(MEMBER).
+        # Upload/delete operations keep Check(MEMBER).
         ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files"),
+        ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}/content"),
+        ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}/materialize-status"),
         ("GET", "/openapi/v1/bots/{bot_id}/sessions"),
         ("POST", "/openapi/v1/bots/{bot_id}/sessions"),
         ("GET", "/openapi/v1/bots/{bot_id}/sessions/favorites"),

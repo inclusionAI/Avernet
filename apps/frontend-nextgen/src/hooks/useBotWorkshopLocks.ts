@@ -11,8 +11,11 @@ export function useBotWorkshopLocks(load: (options?: { silent?: boolean }) => Pr
       const toastId = toast.loading('正在获取编辑锁...');
       try {
         await botEditLockService.claim(bot);
-        toast.success('可以进入编辑', { id: toastId });
+        const enterEditor = bot.lifecycle === 'draft';
+        toast.success(enterEditor ? '可以进入编辑' : '已获取编辑锁', { id: toastId });
         await load({ silent: true });
+        // Published runtimes keep their own entry/readonly policy; a lock is not an edit grant.
+        if (!enterEditor) return;
         const params = new URLSearchParams({
           type: 'edit',
           id: bot.id,

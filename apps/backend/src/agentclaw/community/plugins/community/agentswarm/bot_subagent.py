@@ -76,6 +76,8 @@ class AvernetSubagent:
                  create_call_timeout: float = _CREATE_CALL_TIMEOUT_SECONDS,
                  status_call_timeout: float = _STATUS_CALL_TIMEOUT_SECONDS,
                  delete_call_timeout: float = _DELETE_CALL_TIMEOUT_SECONDS,
+                 ready_poll_timeout: float = 300.0,
+                 setup_delay_seconds: float = 0.0,
                  ) -> None:
         self._spec = spec
         self._run = run
@@ -93,6 +95,9 @@ class AvernetSubagent:
         self._create_call_timeout = create_call_timeout
         self._status_call_timeout = status_call_timeout
         self._delete_call_timeout = delete_call_timeout
+        self._ready_poll_timeout = ready_poll_timeout
+        self._setup_delay_seconds = setup_delay_seconds
+        self._prov_delay_fired = False
         # Per-chat cancel registry: the in-flight chat's cooperative-unwind
         # event, reachable by ``halt()`` from off the awaiting coroutine.
         self._chat_registry_lock = threading.Lock()
@@ -143,7 +148,8 @@ class AvernetSubagent:
                 # fail now instead of polling bot_status(None) to the deadline.
                 raise RuntimeError(
                     f"platform returned invalid bot_id: {self._bot_id!r}")
-        state = await self._poll_ready(self._bot_id)
+        state = await self._poll_ready(
+            self._bot_id, timeout=self._ready_poll_timeout)
         if state != BotState.READY.value:
             raise RuntimeError(f"bot {self._bot_id} did not reach READY: {state}")
         self.executor_id = self._bot_id
@@ -240,6 +246,9 @@ class AvernetSubagent:
             if state == BotState.READY.value:
                 return state
             if state == BotState.AWAITING_AUTHORIZATION.value:
+                # The human gate: reset the provisioning-delay marker so
+                # the post-gate boot simulation fires once per gate cycle.
+                self._prov_delay_fired = False
                 # The human gate: the passport application is
                 # pending inside its window and only a human can move it, so
                 # burning the poll budget against this deadline is guaranteed
@@ -266,6 +275,20 @@ class AvernetSubagent:
                 raise NonRetryableProvisioningError(
                     f"bot {bot_id} creation failed: {state}",
                     bot_id=bot_id, bot_state=state,)
+            if (state not in _TERMINAL_FAILURE
+                    and state != ""
+                    and not self._prov_delay_fired
+                    and self._setup_delay_seconds > 0):
+                # PRE parity: after the passport resolves (gate clears),
+                # the persona's container takes ~180s to boot on ARCA.
+                # Locally the container is up in <5s, so inject the
+                # observed PRE provisioning depth here — once per gate
+                # resolution — to exercise the real setup budget.
+                self._prov_delay_fired = True
+                logger.info(
+                    "[agentswarm][bot] simulating PRE provisioning: "
+                    "%.0fs for bot %s", self._setup_delay_seconds, bot_id)
+                await asyncio.sleep(self._setup_delay_seconds)
             if state in _TERMINAL_FAILURE:
                 # A terminal-failure state will not become READY by polling
                 # longer, so stop the poll now; the pool decides whether the

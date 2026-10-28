@@ -518,7 +518,7 @@ class AgentSwarmWorker(LifecycleBase):
     async def _requeue_orphan(self, run: dm.Run) -> int:
         acted = await run_blocking(
             self._dispatch_repo.requeue_orphan, run.run_id, run.tenant,
-            self._submit_deadline_seconds(),
+            self._submit_deadline_seconds(run),
         )
         if acted:
             await self._emit_orphan_guard_event(run)
@@ -546,7 +546,7 @@ class AgentSwarmWorker(LifecycleBase):
         if dispatch is None:
             await run_blocking(
                 self._dispatch_repo.requeue_orphan, run.run_id, run.tenant,
-                self._submit_deadline_seconds(),
+                self._submit_deadline_seconds(run),
             )
             dispatch = await run_blocking(
                 self._dispatch_repo.get_run_dispatch, run.run_id, run.tenant,
@@ -580,12 +580,16 @@ class AgentSwarmWorker(LifecycleBase):
         )
         return 1
 
-    def _submit_deadline_seconds(self) -> float:
+    def _submit_deadline_seconds(self, run) -> float:
         # The service's own enqueue semantics (service/impl.py):
         # max(slice_max_seconds, 1) — mirrored so a re-enqueued orphan
         # carries the same deadline_at contract as a fresh submit.
         slice_max = self._config.orchestration.slice_max_seconds
-        return max(float(slice_max or 3600.0), 1.0)
+        budget = max(float(slice_max or 3600.0), 1.0)
+        opts = getattr(run, "run_options", None)
+        if opts is not None:
+            budget = opts.resolved_slice_max(budget)
+        return budget
 
     async def _emit_orphan_guard_event(self, run: dm.Run) -> None:
         await run_blocking(

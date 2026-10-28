@@ -2,6 +2,7 @@
 import { useBotSessionFiles } from '@/pages/Workspace/hooks/useBotSessionFiles';
 import { useBotSessionFilesFeature } from '@/pages/Workspace/hooks/useBotSessionFilesFeature';
 import { useBotSessionFileUpload } from '@/pages/Workspace/hooks/useBotSessionFileUpload';
+import { useBotSessionFilePreview } from '@/pages/Workspace/hooks/useBotSessionFilePreview';
 import { useBotSkills } from '@/pages/Workspace/hooks/useBotSkills';
 import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
 import { beforeEach, expect, it, jest } from '@jest/globals';
@@ -12,6 +13,7 @@ jest.mock('@/pages/Workspace/hooks/useBotSessionFiles');
 jest.mock('@/pages/Workspace/hooks/useBotSessionFileUpload');
 jest.mock('@/pages/Workspace/hooks/useBotSkills');
 jest.mock('sonner');
+jest.mock('@/pages/Workspace/hooks/useBotSessionFilePreview');
 
 const mockedUseBotSessionFiles = useBotSessionFiles as jest.Mock;
 const mockedUseBotSessionFileUpload = useBotSessionFileUpload as jest.Mock;
@@ -35,6 +37,7 @@ const session: BotChatSessionView = {
 };
 
 beforeEach(() => {
+  jest.mocked(useBotSessionFilePreview).mockReturnValue({ kind: 'other', status: 'unsupported', contentUrl: null, text: null, truncated: false, errorMessage: null });
   mockedUseBotSessionFiles.mockReturnValue({
     readyFiles: [],
     isLoadingList: false,
@@ -96,4 +99,50 @@ it('对话资源面板点击外部收起，入口再次点击不会先关闭又�
   fireEvent.click(trigger);
   fireEvent.pointerDown(screen.getByText('聊天消息'));
   expect(screen.queryByLabelText('资源管理面板')).not.toBeInTheDocument();
+});
+
+it.each([
+  ['team service', { isTeamBot: true, botType: 'service' }, 'online'],
+  ['friend service', { isFriendBot: true, botType: 'service' }, 'online'],
+  ['team personal', { isTeamBot: true, botType: 'personal' }, undefined],
+  ['friend personal', { isFriendBot: true, botType: 'personal' }, undefined],
+  ['my service', { botType: 'service', runtimeStage: 'draft' as const }, undefined],
+])('%s files and uploads use the conversation stage without changing my Bots', (_label, override, stage) => {
+  const target = { ...bot, ...override };
+  renderHook(() => useBotSessionFilesFeature(target, session, 'human_900003', jest.fn()));
+  expect(mockedUseBotSessionFiles.mock.calls.at(-1)).toEqual([
+    'bot',
+    'session-1',
+    'human_900003',
+    '2088',
+    target.isFriendBot ? 'human_900003' : undefined,
+    ...(stage ? [stage] : []),
+  ]);
+  expect(mockedUseBotSessionFileUpload.mock.calls.at(-1)).toEqual([
+    'bot',
+    'session-1',
+    'human_900003',
+    '2088',
+    ...(stage ? [stage] : []),
+  ]);
+});
+
+it('团队服务 Bot 资源面板将 online 阶段传递给预览 Hook', () => {
+  function Fixture() {
+    const files = useBotSessionFilesFeature(
+      { ...bot, isTeamBot: true, botType: 'service' },
+      session,
+      'viewer',
+      jest.fn(),
+    );
+    return (
+      <>
+        <button type="button" onClick={files.openFileDrawer}>Open files</button>
+        {files.featureNode}
+      </>
+    );
+  }
+  render(<Fixture />);
+  fireEvent.click(screen.getByText('Open files'));
+  expect(useBotSessionFilePreview).toHaveBeenLastCalledWith(null, expect.objectContaining({ stage: 'online' }));
 });

@@ -201,6 +201,10 @@ class _Bots:
     def __init__(self) -> None:
         self.calls: list[dict] = []
 
+    def list_by_conditions(self, **kwargs):
+        result = self.list_bots_by_conditions(**kwargs)
+        return result["total"], result["items"]
+
     def list_bots_by_conditions(self, **kwargs):
         self.calls.append(kwargs)
         owned = [
@@ -584,6 +588,7 @@ def cross_owner_client(bots):
                 binder.bind(BotServiceProtocol, to=bots)
                 binder.bind(BotRepository, to=bots)
                 binder.bind(BotAppGrantServiceProtocol, to=_CrossOwnerGrants())
+                binder.bind(BotInventoryTemplatePort, to=_UnexpectedService())
                 binder.bind(
                     BusinessSpaceContextProtocol,
                     to=NoopBusinessSpaceContext(),

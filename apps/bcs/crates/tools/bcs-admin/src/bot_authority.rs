@@ -41,7 +41,6 @@ use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_db_mysql::{MysqlDbManager, MysqlDbPlugin};
 use bcs_service_api::types::bot_authority::{
     AuthorityActor, AuthorityMutation, BotOwnershipGovernance,
-    MUTATION_ID_MAX_LEN,
 };
 use bcs_service_api::{ActorKind, BotRegistryCoreService};
 use clap::Subcommand;

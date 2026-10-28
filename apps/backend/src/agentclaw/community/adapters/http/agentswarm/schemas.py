@@ -41,11 +41,16 @@ class RunOptionsDTO(BaseModel):
     """Per-request operational overrides — values absent from the request
     fall back to the deployment's `agentswarm.orchestration.*` config.
 
-    Keys mirror the yaml config keys so operators think in one vocabulary.
-    All values are upper-bounded by the deployment config: a caller can
-    tighten a budget (shorter timeout, fewer turns) but never loosen it
-    past what the deployment allows (the max in `_validated` clamps to
-    the configured value)."""
+    Keys mirror the yaml config keys so operators think in one
+    vocabulary. Honored at runtime, clamped to deployment authority:
+    model_name (provider default when unset), max_width and
+    max_attempts (tighten-only), per_attempt_timeout_seconds and
+    slice_max_seconds (tighten-only), and setup_timeout_seconds —
+    which may raise up to the deployment's slice room
+    (slice_max_seconds minus per_attempt_timeout), so slow-env
+    provisioning can be re-budgeted from the request alone.
+    max_turns and max_total_agents are persisted with the run but do
+    not override the deployment's orchestrator budgets."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -58,6 +63,14 @@ class RunOptionsDTO(BaseModel):
     per_attempt_timeout_seconds: float | None = Field(
         default=None, gt=0, le=600,
         description="Upper bound for one attempt task (seconds).")
+    setup_timeout_seconds: float | None = Field(
+        default=None, gt=0, le=900,
+        description="Upper bound for one agent's provisioning phase "
+        "(spawn + authorization + READY, seconds). Parked time waiting "
+        "on human consent never counts against it. Falls to the "
+        "deployment's setup_timeout; a requested value wins up to the "
+        "deployment's slice room (slice_max_seconds minus "
+        "per_attempt_timeout).")
     max_turns: int | None = Field(
         default=None, ge=1, le=50,
         description="Orchestrator decision-turn budget.")

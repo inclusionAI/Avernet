@@ -95,6 +95,7 @@ class SubagentRuntime:
         max_attempts: int = 3,
         per_task_timeout: float = 120.0,
         setup_timeout: float = 240.0,
+        setup_ceiling: float = 600.0,
         artifact_inline_threshold: int = 16384,
         upstream_breaker: UpstreamBreaker | None = None,
         binding_store: "SliceStore | None" = None,
@@ -106,6 +107,7 @@ class SubagentRuntime:
         self._max_attempts = max_attempts
         self._per_task_timeout = per_task_timeout
         self._setup_timeout = setup_timeout
+        self._setup_ceiling = setup_ceiling
         self._artifact_inline_threshold = artifact_inline_threshold
         self._upstream_breaker = upstream_breaker
         self._binding_store = binding_store
@@ -212,6 +214,22 @@ class SubagentRuntime:
         if override is None:
             return self._max_attempts
         return max(1, min(int(override), self._max_attempts))
+
+    def _resolve_setup_timeout(self, run: Run) -> float:
+        # Same snapshot rule as _resolve_max_attempts: the deployment's
+        # setup budget is the fallback, a requested value wins up to the
+        # slice-room ceiling (see RunOptions.resolved_setup_timeout).
+        opts = getattr(run, "run_options", None)
+        if opts is None:
+            return self._setup_timeout
+        return opts.resolved_setup_timeout(self._setup_timeout,
+                                           self._setup_ceiling)
+
+    def _resolve_per_task_timeout(self, run: Run) -> float:
+        opts = getattr(run, "run_options", None)
+        if opts is None:
+            return self._per_task_timeout
+        return opts.resolved_per_attempt_timeout(self._per_task_timeout)
 
     async def wait_for_completions(self, timeout: float | None = None) -> list[dict[str, Any]]:
         if timeout is None or timeout < 0:
@@ -345,7 +363,8 @@ class SubagentRuntime:
                 while True:
                     try:
                         await asyncio.wait_for(
-                            subagent.setup(), timeout=self._setup_timeout,
+                            subagent.setup(),
+                            timeout=self._resolve_setup_timeout(item.run),
                         )
                         break
                     except ParkedAwaitingAuthorization as exc:
@@ -374,7 +393,7 @@ class SubagentRuntime:
                 await self._journal_binding(subagent, spec, item, attempt)
                 raw = await asyncio.wait_for(
                     subagent.run_task(item.envelope),
-                    timeout=self._per_task_timeout,
+                    timeout=self._resolve_per_task_timeout(item.run),
                 )
                 if validator is not None:
                     schema_error = self._first_schema_error(validator, raw.output)

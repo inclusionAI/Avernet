@@ -39,9 +39,10 @@ function toConversationFriendBotView(view: CollaborationBotView): ChatBotView {
     avatarUrl: view.avatarUrl,
     online: view.online,
     reachability: view.reachability,
-    chatable: view.detailsResolved !== false,
+    chatable: view.detailsResolved !== false && !(view.botType === 'service' && view.onlineAvailable === false),
     engine: view.engine,
     botType: view.botType,
+    onlineAvailable: view.onlineAvailable,
     isFriendBot: true,
     isAgentCodingBot: runtime.isAgentCodingBot,
   };

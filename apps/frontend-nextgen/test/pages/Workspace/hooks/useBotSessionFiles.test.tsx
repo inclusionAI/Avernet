@@ -175,3 +175,12 @@ describe('useBotSessionFiles（单聊会话文件 hook）', () => {
     expect(readyFiles()).toEqual(['new']);
   });
 });
+
+it('文件列表透传 online stage', async () => {
+  mockLoadReady.mockResolvedValue({ ok: true, data: { items: [], total: 0 } });
+  const { result } = renderHook(() => useBotSessionFiles('bot', 's1', 'viewer', 'entity', 'viewer', 'online'));
+  await act(async () => {
+    await result.current.refresh();
+  });
+  expect(mockLoadReady).toHaveBeenLastCalledWith('bot', 's1', 'viewer', 'entity', 'viewer', 'online');
+});

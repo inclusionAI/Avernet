@@ -468,7 +468,7 @@ describe("diagnosis report -> allowlist -> durable recovery task", () => {
     await vi.waitFor(() => expect(agent.start).toHaveBeenCalledTimes(1));
   });
 
-  it("corrects online service CLIENT_ID from a report-only NAS hint while retaining the stored credentials", async () => {
+  it("corrects online service CLIENT_ID from the persisted NAS path while retaining the stored credentials", async () => {
     const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { input, tasks, agent } = await automaticRecovery("mock-bot-oc");
     const deviceUuid = `DEVICE-${"b".repeat(32)}`;
@@ -483,12 +483,15 @@ describe("diagnosis report -> allowlist -> durable recovery task", () => {
     const task = await tasks.find(rows[0].task_id);
     expect(task?.request.target.runtime_identity).toEqual({ stage: "online", version: "V16", deviceUuid });
     expect(task?.request).not.toHaveProperty("sessionNasPath");
-    const [stored] = await db.query("SELECT runtime_identity FROM insight_monitoring_diagnose WHERE event_id = ?", [event.eventId]);
+    const [stored] = await db.query("SELECT runtime_identity, session_nas_path FROM insight_monitoring_diagnose WHERE event_id = ?", [event.eventId]);
     expect(JSON.parse(String(stored.runtime_identity))).toEqual(event.runtimeIdentity);
+    expect(stored.session_nas_path).toBe(event.sessionNasPath);
     await vi.waitFor(() => expect(agent.start).toHaveBeenCalledTimes(1));
     expect(warning.mock.calls.filter(([message]) => message === "[monitoring] recovery instance corrected")).toHaveLength(2);
     // Existing task idempotency rejects a later hint that tries to switch instances.
     expect((await post({ ...event, sessionNasPath: event.sessionNasPath.replace(deviceUuid, `DEVICE-${"c".repeat(32)}`) })).status).toBe(409);
+    const [replayed] = await db.query("SELECT session_nas_path FROM insight_monitoring_diagnose WHERE event_id = ?", [event.eventId]);
+    expect(replayed.session_nas_path).toBe(event.sessionNasPath);
     expect(await db.query("SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery'")).toHaveLength(1);
   });
 

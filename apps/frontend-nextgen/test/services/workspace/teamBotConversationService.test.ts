@@ -28,7 +28,7 @@ beforeEach(() => {
 test('entity_id 而不是 owner_id 作为会话 owner 上下文，mine 不标记好友', async () => {
   list.mockResolvedValue({ code: 200000, data: { items: [dto()], total: 1 } });
   const result = await teamBotConversationService.listBots('human_viewer');
-  expect(list).toHaveBeenCalledWith({ user_id: 'viewer', page: 1, page_size: 100 }, undefined);
+  expect(list).toHaveBeenCalledWith({ user_id: 'viewer', page: 1, page_size: 100, stage: 'online' }, undefined);
   expect(result).toMatchObject({
     ok: true,
     data: [
@@ -220,7 +220,7 @@ test('按 total 分页且按完整 bot_id/entity_id 去重，保留后端顺序'
   list.mockResolvedValueOnce({ code: 200000, data: { items: [dto(), dto({ bot_id: 'last' })], total: 101 } });
   const signal = new AbortController().signal;
   const result = await teamBotConversationService.listBots('viewer', signal);
-  expect(list).toHaveBeenNthCalledWith(2, { user_id: 'viewer', page: 2, page_size: 100 }, signal);
+  expect(list).toHaveBeenNthCalledWith(2, { user_id: 'viewer', page: 2, page_size: 100, stage: 'online' }, signal);
   expect(result.ok && result.data.map((b) => b.botId)).toEqual([
     'shared:team-entity',
     'shared:other-team',
@@ -301,4 +301,12 @@ test('取消目录加载不读取库存', async () => {
   const result = await teamBotConversationService.listBots('viewer', controller.signal);
   expect(result.ok).toBe(false);
   expect(inventory).not.toHaveBeenCalled();
+});
+
+test.each(['service', 'personal'])('团队 %s 目录映射给出正确会话阶段', async (botType) => {
+  list.mockResolvedValue({ code: 200000, data: { items: [dto({ bot_type: botType })], total: 1 } });
+  expect(await teamBotConversationService.listBots('viewer')).toMatchObject({
+    ok: true,
+    data: [{ botType, isTeamBot: true, runtimeStage: botType === 'service' ? 'online' : 'draft' }],
+  });
 });

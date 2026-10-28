@@ -114,17 +114,33 @@ curl -sS "$BASE/runs/$RUN_ID?tenant=teamclaw"
 | `metadata` | object | — | ≤ 32 个键值；键 ≤ 200 字符，值 ≤ 2,000 字符 |
 | `config_manifest` | string | — | **≤ 200,000 字符。** 一份完整的 Bot 配置清单 YAML 文档 —— 见 §8 |
 
-`options`（`RunOptionsDTO`，严格模式）—— 每个取值都被部署配置 `agentswarm.orchestration.*` 封顶（调用方只能收紧预算，不能放宽到部署上限之上）：
+`options`（`RunOptionsDTO`，严格模式）—— 未指定的取值回退到部署配置
+`agentswarm.orchestration.*`；部署方始终保留最终裁量权，分三种语义：
+
+- **回退（fallback）** —— `model_name` 为未自带模型的 Agent 指定模型，
+  省略时使用部署默认。
+- **只能收紧（tighten-only）** —— `max_width`、`max_attempts`、
+  `slice_max_seconds`、`per_attempt_timeout_seconds` 会被部署配置值
+  钳制：请求值只能更小，不能超过部署上限。
+- **可放宽至切片余量（raise-to-slice-room）** —— `setup_timeout_seconds`
+  为单个 Agent 的供给阶段（生成 + 授权等待 + READY）重新定预算：
+  部署的 `setup_timeout` 是回退值，显式请求值在**部署留下的切片余量**
+  （`slice_max_seconds − per_attempt_timeout`）之内直接生效。在人工
+  授权窗口停等的时间不计入该预算。
+
+`max_turns` 与 `max_total_agents` 会随运行持久化，但不会覆盖部署方的
+编排预算。
 
 | 字段 | 范围 | 含义 |
 | --- | --- | --- |
 | `model_name` | ≤ 128 字符 | 未自带模型的 Agent 使用的模型 |
-| `slice_max_seconds` | (0, 3600] | 编排器单个切片的截止时间 |
-| `per_attempt_timeout_seconds` | (0, 600] | 单次 Agent 尝试的上限 |
-| `max_turns` | [1, 50] | 编排器决策轮数预算 |
-| `max_total_agents` | [1, 64] | 本次运行的生成总数上限 |
-| `max_width` | [1, 16] | 最大同时在飞的 Agent 数 |
-| `max_attempts` | [1, 3] | 单 Agent 全新上下文重试上限 |
+| `slice_max_seconds` | (0, 3600] | 单次运行的切片截止时间（只能收紧） |
+| `per_attempt_timeout_seconds` | (0, 600] | 单次 Agent 尝试上限（只能收紧） |
+| `setup_timeout_seconds` | (0, 900] | Agent 供给预算（可放宽至部署切片余量） |
+| `max_turns` | [1, 50] | 仅持久化 —— 由部署预算管辖 |
+| `max_total_agents` | [1, 64] | 仅持久化 —— 由部署预算管辖 |
+| `max_width` | [1, 16] | 最大同时在飞的 Agent 数（只能收紧） |
+| `max_attempts` | [1, 3] | 单 Agent 全新上下文重试上限（只能收紧） |
 
 响应：
 

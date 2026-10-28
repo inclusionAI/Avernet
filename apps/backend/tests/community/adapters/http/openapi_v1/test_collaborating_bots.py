@@ -142,7 +142,7 @@ def test_lists_only_collaborations_and_keeps_entity_and_owner_separate():
     )
     collaborators.list_user_collaborations.assert_called_once_with("collab-1")
     bots.page_live_bots_by_pks.assert_called_once_with(
-        bot_pks=[91], exclude_owner_id="collab-1", entity_pairs=None, page=2, page_size=7
+        bot_pks=[91], exclude_owner_id="collab-1", entity_pairs=None, page=2, page_size=7, stage="draft"
     )
 
 
@@ -180,5 +180,5 @@ def test_application_filter_uses_exact_bot_and_owner_pair():
 
     assert response.status_code == 200, response.json()
     bots.page_live_bots_by_pks.assert_called_once_with(
-        bot_pks=[91, 92], exclude_owner_id="collab-1", entity_pairs=[("default", "owner-2")], page=1, page_size=20
+        bot_pks=[91, 92], exclude_owner_id="collab-1", entity_pairs=[("default", "owner-2")], page=1, page_size=20, stage="draft"
     )
