@@ -61,10 +61,10 @@ class RunOptionsDTO(BaseModel):
         default=None, gt=0, le=3600,
         description="Orchestrator deadline per slice (seconds).")
     per_attempt_timeout_seconds: float | None = Field(
-        default=None, gt=0, le=600,
+        default=None, gt=0, le=1800,
         description="Upper bound for one attempt task (seconds).")
     setup_timeout_seconds: float | None = Field(
-        default=None, gt=0, le=900,
+        default=None, gt=0, le=1800,
         description="Upper bound for one agent's provisioning phase "
         "(spawn + authorization + READY, seconds). Parked time waiting "
         "on human consent never counts against it. Falls to the "

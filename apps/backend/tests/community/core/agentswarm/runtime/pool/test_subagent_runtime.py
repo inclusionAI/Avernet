@@ -19,6 +19,7 @@ from collections import deque
 import pytest
 
 from agentclaw.community.core.agentswarm.domain.models import (
+    AgentKind,
     AgentId,
     AgentSpec, AgentStatus, EpochMillis, ProviderKind, RequestMetadata,
     Run, RunId, RunStatus, SubagentResult, TaskEnvelope, TenantId,
@@ -693,6 +694,31 @@ class TestSpecResolution:
             assert factory.created_specs[0] == AgentSpec(
                 name="ghost", role="the objective"
             )
+
+        asyncio.run(main())
+
+    def test_unknown_spawn_inherits_unanimous_catalog_kind(self):
+        # A decision name that misses the catalog must not silently change
+        # the run's composition: with a unanimous bot catalog, the
+        # fallback spec is bot-kind (engine/bot_type/identity inherited)
+        # so the spawn provisions a bot subagent, not an llm one.
+        async def main():
+            factory = FakeFactory(scripts={"*": [("ok", _ok_result()),
+                                                 ("ok", _ok_result())]})
+            run = _mk_run(catalog=[AgentSpec(
+                name="scout", role="surveys", kind=AgentKind.BOT,
+            )] * 2)
+            rt = SubagentRuntime(factory=factory)
+            await rt.start()
+            try:
+                env = _mk_envelope(name="auditor_for_x", objective="o-x")
+                await rt.spawn(run, env)
+                await rt.wait_for_completions()
+            finally:
+                await rt.stop()
+
+            created = factory.created_specs[0]
+            assert created.kind is AgentKind.BOT
 
         asyncio.run(main())
 
