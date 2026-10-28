@@ -5,6 +5,7 @@ from __future__ import annotations
 from urllib.parse import quote, urlsplit
 
 import httpx
+from agentclaw.community.plugin_api.http_client import HttpClient
 from agentclaw.community.plugin_api.space_knowledge import (
     KnowledgeBasePage,
     KnowledgeBaseResult,
@@ -76,7 +77,7 @@ def _identifier(value: str) -> str:
 
 
 class EcbSpaceKnowledgeProvider:
-    def __init__(self, config: EcbSpaceKnowledgeConfig, client: httpx.Client) -> None:
+    def __init__(self, config: EcbSpaceKnowledgeConfig, client: HttpClient) -> None:
         self._config = config
         self._client = client
 

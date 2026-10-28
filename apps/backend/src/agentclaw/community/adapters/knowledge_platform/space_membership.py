@@ -6,12 +6,13 @@ import httpx
 from agentclaw.community.adapters.knowledge_platform.space_knowledge import (
     EcbSpaceKnowledgeConfig,
 )
+from agentclaw.community.plugin_api.http_client import HttpClient
 from agentclaw.community.plugin_api.space_knowledge import SpaceKnowledgeError
 from agentclaw.community.plugin_api.space_membership import SpaceMembershipSnapshot
 
 
 class EcbSpaceMembershipSink:
-    def __init__(self, config: EcbSpaceKnowledgeConfig, client: httpx.Client):
+    def __init__(self, config: EcbSpaceKnowledgeConfig, client: HttpClient):
         self._config, self._client = config, client
 
     def is_enabled(self) -> bool:

@@ -200,7 +200,7 @@ def test_replace_preserves_source_and_hash_cas(content):
 
 def test_yuque_query_url_not_reparsed_and_batch_source_kb_is_server_controlled(content):
     w = content
-    url = "https://yuque.antfin.com/a/b/c"
+    url = "https://yuque.example/a/b/c"
     assert (
         w.client.get(w.prefix + "/yuque/documents", params={"q": url}).status_code
         == 200

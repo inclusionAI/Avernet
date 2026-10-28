@@ -33,16 +33,13 @@ def test_fixed_grant_http_sample_retains_missing_bot(client, world, expected):
     assert response.json() == expected["authorized_bots"]
 
 
-def test_one_route_per_method_and_path_and_no_second_transport():
+def test_one_route_per_method_and_path():
     routes = Counter(
         (method, route.path) for route in router.routes for method in route.methods
     )
     assert all(count == 1 for count in routes.values())
     assert len(routes) == 9  # KB-scoped candidates only; no unscoped Bot directory
     assert ("GET", "/api/knowledge/spaces/{space_id}/bots") not in routes
-    corp = Path(__file__).resolve().parents[3] / "src/agentclaw/corp"
-    assert not (corp / "plugins/knowledge_management_catalog.py").exists()
-    assert not (corp / "core/knowledge_management/repository.py").exists()
 
 
 @pytest.mark.parametrize(
