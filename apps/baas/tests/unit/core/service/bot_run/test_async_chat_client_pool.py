@@ -104,7 +104,7 @@ class TestParamPassthrough:
             session_key_timeout=15.0,
             max_retries=3,
             retry_base_backoff=2.0,
-            a2a_mode="off",
+            transport_mode="off",
             ignore_case=False,
             interaction_service=None,
             sensitive_bypass_keys_loader=ANY,
@@ -386,7 +386,7 @@ class _FakeChatClient:
         self._active = 0
         self._connected = False
         self.is_reconnecting = False
-        self.a2a_mode = kwargs.get("a2a_mode", "off")
+        self.transport_mode = kwargs.get("transport_mode", "off")
 
     @property
     def is_connected(self):
@@ -756,20 +756,20 @@ class TestModeFlipReuseValidation:
         )
 
         c1 = await pool.get("sbx-flip", "ws://host/ws")
-        assert c1.a2a_mode == "off"
+        assert c1.transport_mode == "off"
 
         holder["value"] = "grey"
         await asyncio.sleep(0)  # holder 翻转（side_effect 每调用现读）
         c2 = await pool.get("sbx-flip", "ws://host/ws")
         assert c2 is not c1, "grey 开启后不得继续复用 off 存量连接"
-        assert c2.a2a_mode == "grey"
+        assert c2.transport_mode == "grey"
         await asyncio.sleep(0.01)
         assert c1._connected is False, "空闲 off 连接在 grey 翻转后应立即关闭"
 
         holder["value"] = "off"
         c3 = await pool.get("sbx-flip", "ws://host/ws")
         assert c3 is not c2, "off 回退后不得继续复用 grey 存量连接"
-        assert c3.a2a_mode == "off"
+        assert c3.transport_mode == "off"
         await asyncio.sleep(0.01)
         assert c2._connected is False, "空闲 grey 连接在 off 回退后应立即关闭"
 
@@ -797,7 +797,7 @@ class TestModeFlipReuseValidation:
         holder["value"] = "grey"
         c2 = await pool.get("sbx-busy", "ws://host/ws")
         assert c2 is not c1
-        assert c2.a2a_mode == "grey"
+        assert c2.transport_mode == "grey"
         assert c1._connected is True, "在途请求期间不得误杀旧连接"
 
         c1._active = 0  # 排空
@@ -884,7 +884,7 @@ class TestReadA2aModeFailure:
         pool = AsyncChatClientPool(system_config_service=config_service)
         await pool.get("sbx-cfg-down", "ws://host/ws")
 
-        assert mock_cls.call_args.kwargs["a2a_mode"] == "off"
+        assert mock_cls.call_args.kwargs["transport_mode"] == "off"
         await pool.close_all()
 
 

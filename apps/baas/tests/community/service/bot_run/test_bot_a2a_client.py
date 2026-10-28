@@ -1277,18 +1277,17 @@ def test_abort_routes_with_the_run_b3_and_off_modes():
             return {"ok": True}
 
     async def scenario():
-        acc = AsyncChatClient(uri="ws://unused")
-        acc._transport = "a2a"
+        acc = AsyncChatClient(uri="ws://unused", transport_mode="grey")
+        acc._chat_transport._current_name = "a2a"
         acc._client = _FakeTransport("a2a")
-        acc._v3_fallback = _FakeTransport("v3")
-        acc._v3_routed_sessions["s-att"] = "v3"
+        acc._chat_transport.fallback_client = _FakeTransport("v3")
+        acc._chat_transport.routed_sessions["s-att"] = "v3"
         await acc.chat_abort("s-att", "r1")  # B3 reroute 过的 run
         await acc.chat_abort("s-normal")  # A2A 正常 session
 
         acc2 = AsyncChatClient(uri="ws://unused")
-        acc2._transport = "v3-ws"  # off 模式
         acc2._client = _FakeTransport("v3-ws")
-        acc2._v3_routed_sessions["s-att"] = "v3"  # 脏标记也不得干扰 v3
+        assert not hasattr(acc2._chat_transport, "routed_sessions")
         await acc2.chat_abort("s-att")
 
     _run(scenario())
@@ -1493,12 +1492,12 @@ def test_proxypass_route_prefix_survives_to_card_and_rpc():
 
             acc = AsyncChatClient(
                 uri=f"ws://127.0.0.1:{srv.port}{prefix}/api/openclaw/ws",
-                a2a_mode="on",
+                transport_mode="on",
                 max_retries=0,
             )
-            assert acc._a2a_mode == "on"
+            assert acc.transport_mode == "on"
             hello = await acc.connect()
-            assert acc._transport == "a2a", (
+            assert acc.transport_name == "a2a", (
                 f"probing must hit prefixed card: hello={hello}"
             )
             content, _events = await acc.send_message(session_key="s", message="hi")
@@ -1821,12 +1820,12 @@ def test_attachment_hitl_answer_routes_via_v3_and_run_resumes():
             )
             acc = AsyncChatClient(
                 uri=f"ws://127.0.0.1:{srv.port}/api/openclaw/ws",
-                a2a_mode="on",
+                transport_mode="on",
                 max_retries=0,
                 interaction_service=service,
             )
             hello = await acc.connect()
-            assert acc._transport == "a2a", hello
+            assert acc.transport_name == "a2a", hello
 
             async def spy_resolve(**kwargs: Any) -> Any:
                 raise AssertionError("answer leaked to a2a transport")
@@ -1835,7 +1834,7 @@ def test_attachment_hitl_answer_routes_via_v3_and_run_resumes():
             acc._client.interaction_resolve = spy_resolve
 
             with patch(
-                "secbaas.community.core.service.bot_run._bot_websocket_client.BotWebSocketClient",
+                "secbaas.community.core.service.bot_run._async_chat_client.BotWebSocketClient",
                 _FakeV3KingineTransport,
             ):
                 task = asyncio.create_task(
@@ -1847,7 +1846,7 @@ def test_attachment_hitl_answer_routes_via_v3_and_run_resumes():
                     )
                 )
                 await asyncio.sleep(0.05)  # reroute 发生
-                v3 = acc._v3_fallback
+                v3 = acc._chat_transport.fallback_client
                 assert v3 is not None, "附件请求未 reroute 到 v3 fallback"
                 assert v3.chat_send_calls, "chat_send 未打到 v3"
                 assert v3.chat_send_calls[0][0] == "hitl-1"
@@ -1894,7 +1893,7 @@ def test_attachment_hitl_answer_routes_via_v3_and_run_resumes():
                 )
                 content, _events = await asyncio.wait_for(task, 5)
                 assert content == "resumed-after-approval"
-                assert "hitl-1" not in acc._v3_routed_sessions
+                assert "hitl-1" not in acc._chat_transport.routed_sessions
                 await acc.close()
                 return service
 
@@ -2643,9 +2642,11 @@ def test_pool_owner_lookup_survives_wait_result_false_send():
 
         async def scenario():
             inner = await _connect_async(srv.base)  # 真 BotA2aClient
-            holder = AsyncChatClient(uri="ws://x/ws", max_retries=0)
+            holder = AsyncChatClient(
+                uri="ws://x/ws", max_retries=0, transport_mode="on"
+            )
             holder._client = inner
-            holder._transport = "a2a"
+            holder._chat_transport._current_name = "a2a"
 
             other = MagicMock()  # 另一条空闲连接
             other.tracks_session = MagicMock(return_value=False)
@@ -2698,11 +2699,11 @@ def test_async_client_grey_mode_falls_back_to_v3_on_probe_failure():
             ):
                 acc = AsyncChatClient(
                     uri=f"ws://127.0.0.1:{srv.port}/api/openclaw/ws",
-                    a2a_mode="grey",
+                    transport_mode="grey",
                     max_retries=0,
                 )
                 hello = await acc.connect()
-                assert acc._transport == "v3-ws", (
+                assert acc.transport_name == "v3-ws", (
                     f"探测失败时 grey 必须回退 v3（不炸不断流）: {hello}"
                 )
                 assert acc._client is not None
@@ -2725,7 +2726,7 @@ def test_async_client_on_mode_raises_when_a2a_probe_fails():
         async def scenario():
             acc = AsyncChatClient(
                 uri=f"ws://127.0.0.1:{srv.port}/api/openclaw/ws",
-                a2a_mode="on",
+                transport_mode="on",
                 max_retries=0,
             )
             await acc.connect()
@@ -2756,11 +2757,11 @@ def test_async_client_grey_malformed_card_falls_back_to_v3(case, payload):
             ):
                 acc = AsyncChatClient(
                     uri=f"ws://127.0.0.1:{srv.port}/api/openclaw/ws",
-                    a2a_mode="grey",
+                    transport_mode="grey",
                     max_retries=0,
                 )
                 hello = await acc.connect()
-                assert acc._transport == "v3-ws", (
+                assert acc.transport_name == "v3-ws", (
                     f"畸形卡({case})下 grey 必须回退 v3: {hello}"
                 )
                 await acc.close()
@@ -2785,7 +2786,7 @@ def test_async_client_on_mode_malformed_card_raises_a2a_error(case, payload):
         async def scenario():
             acc = AsyncChatClient(
                 uri=f"ws://127.0.0.1:{srv.port}/api/openclaw/ws",
-                a2a_mode="on",
+                transport_mode="on",
                 max_retries=0,
             )
             await acc.connect()
