@@ -27,29 +27,23 @@ use bcs_service_api::application::v1::{
 };
 use bcs_service_api::port::repo::BotRepoPort;
 use bcs_service_api::{
-    ActorKind, ActorStatus, BotCapabilities, BotControlPlaneCoreService,
-    BotRegistryCoreService,
+    ActorStatus, BotCapabilities, BotControlPlaneCoreService,
 };
 use bcs_test_support::{
     authority_hook_for, grant_manager_edge, grant_owner_edge,
     revoke_authority_edge,
 };
-use bcs_service_api::port::bot_authority::BotAuthorityPort;
 
 struct Fixture {
     service: BotServiceImpl,
     repo: Arc<MemoryBotRepo>,
     registry: Arc<BotCore>,
-    authority: Arc<dyn BotAuthorityPort>,
     // Holds the per-test persistence root for
     // as long as the fixture lives.
     _temp: tempfile::TempDir,
 }
 
 impl Fixture {
-    fn bots_registry(&self) -> &Arc<BotCore> {
-        &self.registry
-    }
 
     async fn new() -> Self {
         let env = bcs_config::resolve_env_str();
@@ -87,7 +81,6 @@ impl Fixture {
             service,
             registry,
             repo,
-            authority,
             _temp: temp,
         }
     }
@@ -95,7 +88,7 @@ impl Fixture {
     async fn add_bot(
         &self,
         bot_id: &str,
-        owner: &str,
+        _owner: &str,
         status: ActorStatus,
     ) {
         BotRepoPort::register(&*self.repo,

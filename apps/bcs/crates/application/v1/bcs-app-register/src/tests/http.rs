@@ -1,4 +1,4 @@
-use super::provider_registration::{core_errors, scoped_payload, scoped_service, seed_humans};
+use super::provider_registration::{core_errors, scoped_payload, scoped_service};
 use super::*;
 use axum::http::StatusCode;
 use bcs_domain::provider_registration_token;
@@ -9,6 +9,14 @@ use tower::ServiceExt;
 #[path = "../../../../../adapters/http/bcs-api-http/tests/register_support/mod.rs"]
 mod support;
 use support::*;
+
+#[path = "../../../../../adapters/http/bcs-api-http/tests/register_support/requests.rs"]
+mod requests;
+use requests::*;
+
+#[path = "../../../../../adapters/http/bcs-api-http/tests/register_support/authenticated_requests.rs"]
+mod authenticated_requests;
+use authenticated_requests::authenticated_request;
 
 const REGISTER: &str = "/openapi/v1/collaboration/register";
 

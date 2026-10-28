@@ -15,7 +15,7 @@ use bcs_bot_store::MemoryBotRepo;
 use bcs_service_api::port::repo::{BotAuthorityRepoPort, BotRepoPort};
 use bcs_service_api::types::bot_authority::{
     AuthorityActor, AuthorityActorKind, AuthorityMutation, BotAccessRelation,
-    ManagerEdit, ManagerEditAction, ManagerSync, TransferStatus,
+    ManagerEdit, ManagerEditAction, ManagerSync,
     human_user_id_of_actor,
 };
 use bcs_test_support::contract::bot_authority_contract::{
@@ -50,18 +50,7 @@ impl MemoryAuthorityFixture {
         self.repo.authority_state().read().await
     }
 
-    pub async fn seed_human_in(&self, user_id: &str) {
-        // The authority Human registry is the actor rows on
-        // the shared bots map — seed the same row the
-        // production `ensure_human_actor` path creates.
-        self.repo
-            .seed_human_actor_in(&target_env().await, user_id)
-            .await;
-    }
 
-    pub async fn remove_human_in(&self, user_id: &str) {
-        self.repo.remove_human_actor_in(user_id).await;
-    }
 }
 
 fn grant_kind(kind: BotAccessRelation) -> bcs_bot_store::memory_authority::MemoryAuthorityEdgeKind {
@@ -206,25 +195,6 @@ fn ms_now() -> u64 {
         .unwrap_or(0)
 }
 
-fn memory_audit_row(
-    env: &str,
-    mutation_id: &str,
-    sequence: u64,
-) -> MemoryAuthorityAuditRow {
-    MemoryAuthorityAuditRow {
-        env: env.to_string(),
-        bot_id: "fixture-seed".to_string(),
-        mutation_id: mutation_id.to_string(),
-        sequence,
-        action: "seed_conflict".to_string(),
-        actor_kind: "system".to_string(),
-        actor_id: "system_seed".to_string(),
-        subject_id: "none".to_string(),
-        before_state: None,
-        after_state: "none".to_string(),
-        created_ms: 0,
-    }
-}
 
 #[async_trait]
 impl BotTransferContractFixture for MemoryAuthorityFixture {
@@ -441,7 +411,6 @@ use bcs_service_api::types::bot_authority::{
     BotAccessRelation as RoleRelation, OwnershipInitialization,
 };
 use bcs_service_api::{BotCapabilities, ServiceError};
-use bcs_domain::edge_permission::PermissionProfile;
 
 /// A Task-4 memory repo with an ISOLATED durability
 /// directory (fixed test bot IDs must not collide

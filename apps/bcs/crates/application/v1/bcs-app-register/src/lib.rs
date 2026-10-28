@@ -327,7 +327,7 @@ mod tests {
         ProviderRegistrationResult, RegisterProviderBot,
     };
     use bcs_service_api::types::bot_authority::{
-        AuthorityActor, AuthorityMutation, BotAccessRelation,
+        BotAccessRelation,
         OwnershipInitialization,
     };
 

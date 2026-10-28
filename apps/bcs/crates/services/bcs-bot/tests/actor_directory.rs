@@ -674,7 +674,7 @@ async fn non_human_caller_keeps_the_legacy_creator_contract() {
 
 #[tokio::test]
 async fn unwired_authority_hook_fails_the_human_leg_closed() {
-    let (_temp, _repo, directory) = owner_directory_fixture("11111111").await;
+    let (_temp, _repo, _directory) = owner_directory_fixture("11111111").await;
     // Rebuild without the hook (ctor default = unwired).
     let temp_dir = tempfile::tempdir().expect("temp dir 2");
     let repo2 = Arc::new(MemoryBotRepo::with_base_dir(temp_dir.path().to_path_buf()));

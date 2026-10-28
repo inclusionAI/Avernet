@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use axum::body::{Body, to_bytes};
-use axum::http::{HeaderMap, Request};
+use axum::http::HeaderMap;
 use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
 use bcs_service_api::application::v1::{
     AcceptFriendRequest, AcceptInvitation, AddGroupParticipant, AddSessionParticipant,
@@ -17,7 +16,6 @@ use bcs_service_api::application::v1::{
     SessionParticipant, SessionService, SessionSummary, UpdateGroup, UpdateGroupParticipant,
     UpdateSession, UpdateSessionParticipant,
 };
-use serde_json::Value;
 
 pub(crate) struct HeaderVerifier {
     caller: AuthenticatedCaller,
@@ -54,33 +52,6 @@ pub(crate) fn caller() -> AuthenticatedCaller {
         app: None,
         access_key: None,
     }
-}
-
-pub(crate) fn authenticated_request(method: &str, uri: &str, body: Value) -> Request<Body> {
-    Request::builder()
-        .method(method)
-        .uri(uri)
-        .header("content-type", "application/json")
-        .header("x-test-auth", "yes")
-        .header("x-request-id", "request-123")
-        .body(Body::from(body.to_string()))
-        .expect("request")
-}
-
-pub(crate) fn bare_request(method: &str, uri: &str) -> Request<Body> {
-    Request::builder()
-        .method(method)
-        .uri(uri)
-        .header("x-request-id", "request-123")
-        .body(Body::empty())
-        .expect("request")
-}
-
-pub(crate) async fn response_json(response: axum::response::Response) -> Value {
-    let bytes = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("read response body");
-    serde_json::from_slice(&bytes).expect("JSON response")
 }
 
 // ---------------------------------------------------------------------------

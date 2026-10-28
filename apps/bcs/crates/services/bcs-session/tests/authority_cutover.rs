@@ -21,21 +21,20 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use bcs_bot::BotCore;
-use bcs_service_api::types::{HumanMessageView, MessageViewScope};
+use bcs_service_api::types::HumanMessageView;
 use bcs_group::{GroupCore, MemoryGroupRepo};
-use bcs_service_api::port::repo::{GroupRepoPort, SessionRepoPort};
+use bcs_service_api::port::repo::GroupRepoPort;
 use bcs_service_api::{
-    ActorKind, BotCapabilities, BotRegistryCoreService, CancelStateMachineRunCommand,
+    BotCapabilities, BotRegistryCoreService, CancelStateMachineRunCommand,
     CollaborationDefinition, CollaborationRuntimeError, CollaborationRuntimeService,
-    ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome, CreateSessionLaunch, DeliveryType,
+    ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome, CreateSessionLaunch,
     Group, GroupCoreService, GroupStrategy, HandleBotTerminalEventCommand,
-    HandleBotTerminalEventOutcome, Participant, ParticipantMode, ParticipantRole,
-    RequestedSessionRole, ServiceResult, SessionCaller,
+    HandleBotTerminalEventOutcome, Participant, ParticipantRole, ServiceResult, SessionCaller,
     SessionHistoryResult, SessionKind, SessionLaunchError, SessionLaunchRequest,
-    SessionLaunchService, SessionManagementService, StartStateMachineRunCommand,
+    SessionLaunchService, StartStateMachineRunCommand,
     StartStateMachineRunOutcome, StateMachineDeliveryCorrelation, StateMachineRun,
     StateMachineRunStatus, StateMachineRunView, SystemMessageEvent, SystemMessageService,
-    SystemMessageDispatchOutcome, SystemMessageRecipientResult,
+    SystemMessageDispatchOutcome,
 };
 use bcs_session::{SessionLaunchApplication, SessionManagementServiceImpl};
 use bcs_session_store::MemorySessionRepo;
@@ -217,9 +216,6 @@ struct Fixture {
     bots: Arc<BotCore>,
     authority: Arc<LazySeedAuthorityHook>,
     groups: Arc<GroupCore>,
-    sessions: Arc<SessionManagementServiceImpl>,
-    session_repo: Arc<MemorySessionRepo>,
-    runtime: Arc<RecordingRuntime>,
 }
 
 impl Fixture {
@@ -246,9 +242,6 @@ impl Fixture {
             bots,
             authority,
             groups,
-            sessions,
-            session_repo,
-            runtime: Arc::new(RecordingRuntime::default()),
         }
     }
 

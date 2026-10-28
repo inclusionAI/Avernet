@@ -29,7 +29,6 @@ use bcs_group::{GroupCore, MemoryGroupRepo};use bcs_service_api::application::v1
 use bcs_service_api::application::v1::friend_connection::{
     CreateFriendConnectionRequest, FriendConnectionActor,
     FriendConnectionActorType, FriendConnectionService,
-    ListFriendConnections,
 };
 use bcs_service_api::port::repo::{GroupRepoPort, SessionRepoPort};
 use bcs_service_api::{

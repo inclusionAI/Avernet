@@ -15,7 +15,7 @@ use bcs_service_api::types::bot_authority::{
     AuthorityActor, AuthorityMutation, OwnershipInitialization,
 };
 use bcs_service_api::types::BotAccessRelation;
-use bcs_service_api::{ActorStatus, BotCapabilities, BotControlPlaneCoreService, BotQueryService, BotRegistryCoreService};
+use bcs_service_api::{BotCapabilities, BotControlPlaneCoreService, BotQueryService, BotRegistryCoreService};
 
 async fn fixture() -> (
     tempfile::TempDir,

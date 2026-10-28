@@ -87,9 +87,6 @@ impl TestHook {
             .remove(&(user_id.to_string(), bot_id.to_string()));
     }
 
-    fn calls(&self) -> u64 {
-        self.can_manage_calls.load(Ordering::SeqCst)
-    }
 
     fn fail_reads(&self) {
         self.fail.store(true, Ordering::SeqCst);

@@ -38,7 +38,6 @@ use bcs_service_api::application::session_files::{
 use bcs_service_api::port::repo::{
     SessionFileListParams, SessionFileListPage,
 };
-use bcs_service_api::application::v1::SessionFileActorKind;
 use bcs_domain::session_file::SessionFile;
 use bcs_storage_api::ByteStream;
 use serde_json::json;

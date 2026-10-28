@@ -30,7 +30,6 @@ use bcs_http::{
 use bcs_service_api::BotControlPlaneCoreService;
 use tower::ServiceExt;
 use bcs_services_container::{Services, ServicesBuilder};
-use bcs_service_api::port::repo::BotRepoPort;
 use bcs_service_api::{BotCapabilities, BotRegistryCoreService as _ey, Skill};
 use bcs_test_support::LazySeedAuthorityHook;
 use serde_json::Value;
