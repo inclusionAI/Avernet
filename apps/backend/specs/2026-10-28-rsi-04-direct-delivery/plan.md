@@ -26,7 +26,7 @@ apply worker (ApplyRunService._run / run_apply_task)
 PromotionSettler.settle(axes, promotion_id, outcome)
   SUCCEEDED / PARTIAL → promotions.settle_moving_refs(...)  one transaction:
        CAS active (expected = row.from_revision_id) + previous, revision promoted,
-       ref.delivery = complete|partial, row applied|applied_partial      (CAS lost → row apply_failed)
+       ref.labels = [] | ["partial"], row applied|applied_partial        (CAS lost → row apply_failed)
   FAILED → promotions.finish(apply_failed, reason)
   row already terminal → no-op
 
@@ -87,9 +87,10 @@ applies.
 - `ac_genome_promotion`: `status` comment `pending/applying/applied/applied_partial/apply_failed`;
   new `apply_id varchar(32) DEFAULT NULL COMMENT 'the delivery apply'`; `created_at`
   keeps meaning "when the promotion was asked for"; new `settled_at datetime DEFAULT NULL`.
-- `ac_genome_ref`: new `delivery varchar(16) DEFAULT NULL COMMENT 'active only: complete/partial'`.
+- `ac_genome_ref`: new `labels varchar(256) NOT NULL DEFAULT '[]' COMMENT 'JSON list of strings; today only "partial" on active'`.
+  Every ref move writes it (`[]` unless the mover passes labels), so a later move never inherits a stale label.
 - ORM (`bot_genome/repository/models.py`), rows, `Promotion` dataclass
-  (`apply_id`, `settled_at`), `GenomeRefRow`/ref read model (`delivery`).
+  (`apply_id`, `settled_at`), `GenomeRefRow`/ref read model (`labels: tuple[str, ...]`, a closed `RefLabel` enum).
   The DDL/ORM contract test keeps them pinned.
 
 Repository (`core/repository/{protocols,implementations}/bot/genome.py`):
@@ -102,8 +103,7 @@ Repository (`core/repository/{protocols,implementations}/bot/genome.py`):
   - `settle(axes, promotion_id, *, status, apply_detail, move_refs: RefMove | None, settled_at) -> SettleResult`
     — one transaction, conditional on `status in ('pending','applying')`:
     when `move_refs` is given, `_move_pair` (existing helper) with
-    `expected_active=row.from_revision_id`, sets `ac_genome_ref.delivery` on
-    `active`, marks the revision `promoted` (from any `PROMOTABLE` status);
+    `expected_active=row.from_revision_id`, sets `active`'s `labels`, marks the revision `promoted` (from any `PROMOTABLE` status);
     a lost CAS or status change rolls back and the same call writes
     `apply_failed` with "active moved during the apply" instead. Answers
     `settled | already_settled | ref_conflict`.
@@ -144,7 +144,14 @@ Repository (`core/repository/{protocols,implementations}/bot/genome.py`):
   `get_promotion`/`list_promotions` run the read-time settle for rows that
   are `applying` (via `applier.outcome`) or stale `pending` (older than
   `APPLY_LOCK_TTL_SECONDS`, no apply id). `list` settles at most the page's
-  rows.
+  rows. `promote` settles the bot's earlier in-flight promotions the same
+  way before inserting its own row.
+- New `sweep.py`: `PromotionSweeper.sweep_once()` lists in-flight promotions
+  across bots (new repository query `in_flight(older_than, limit)` on an
+  index `(status, created_at)`; bounded batch) and settles each as above.
+  Started and stopped with the backend lifecycle as a periodic loop (the
+  Skill Center sync's shape), interval from config with a few-minute
+  default. Pending the owner's answer to the spec's open question.
 - `errors.py`: `ApplyBusy` (→ 409 `apply_in_progress` in `errors_genome.py`
   and the domain-error status map test).
 - `models.py`: `PromotionStatus` closed set; `Promotion.apply_id`,
@@ -209,7 +216,7 @@ Repository (`core/repository/{protocols,implementations}/bot/genome.py`):
 
 - `schemas_genome.py`: `PromotionPayload.status` literal gains `pending`,
   `applied_partial`; `apply_kind` literal `direct` only; new `apply_id`,
-  `settled_at`; ref payload gains `delivery` (null except `active`). The
+  `settled_at`; ref payload gains `labels` (a list). The
   `created_at` description drops "when the refs moved". Center skill entry
   schema loses `center_version`.
 - `genome.py` promote docstring/OpenAPI text: 201 with `applying`; 409
@@ -235,7 +242,7 @@ without reversing them; the P-2 decision is recorded in 08-promotion §13.
 | Area | Tests |
 |---|---|
 | completion seam | `apply_engine/test_apply_service_lifecycle.py`: handler called once on SUCCEEDED/PARTIAL/FAILED/CompileRefused/engine exception/unstartable, before lock release; raising handler swallowed; Manifest kind calls nothing |
-| repository | `test_genome_repository.py`: insert pending, mark_applying conditional, settle moves pair + delivery + promoted, CAS-lost → apply_failed, double settle no-op, DDL/ORM pin |
+| repository | `test_genome_repository.py`: insert pending, mark_applying conditional, settle moves pair + labels + promoted, CAS-lost → apply_failed, double settle no-op, DDL/ORM pin |
 | promotion | `bot_genome/test_promotion_service.py` (rewritten order): lock busy → 409 + row apply_failed + refs untouched; start error; principal for automated actors; read-time settle of applying/abandoned/stale pending |
 | settler | new `bot_genome/test_promotion_settle.py` |
 | applier | new `bot_genome/test_direct_applier.py` over a fake run service |

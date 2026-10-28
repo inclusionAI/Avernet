@@ -63,10 +63,10 @@
 ## Group 4 — Promotion follows the apply
 
 ### Task 7: Storage for the lifecycle `[ ]`
-- **Goal:** Promotion statuses, `apply_id`, `settled_at`; `delivery` on the ref; the settle transaction.
+- **Goal:** Promotion statuses, `apply_id`, `settled_at`; `labels` on the ref; the settle transaction.
 - **Files:** `bot_genome/sql/2026_10_19_bot_genome.sql`, `bot_genome/repository/models.py`, `repository/{protocols,implementations}/bot/genome.py`, `bot_genome/models.py`; `test_genome_repository.py`, DDL/ORM pin test
 - **Done when:**
-  - [ ] `insert` (pending), `mark_applying` (conditional), `settle` (moves pair + `delivery` + `promoted`, or records the CAS loss as `apply_failed`, conditional on a non-terminal row), `finish` (non-terminal only); `start` removed.
+  - [ ] `insert` (pending), `mark_applying` (conditional), `settle` (moves pair + `labels` + `promoted`, or records the CAS loss as `apply_failed`, conditional on a non-terminal row), `finish` (non-terminal only); `start` removed.
   - [ ] Double settle is a no-op; the DDL/ORM pin passes.
 - **Depends on:** Task 2
 
@@ -84,7 +84,8 @@
   - [ ] Lock busy → `ApplyBusy`, row `apply_failed`, refs untouched; other start error → row `apply_failed` (type only); accepted → row `applying` + apply id.
   - [ ] Settle maps SUCCEEDED/PARTIAL/FAILED/CAS-lost per spec; `GenomeCompletionHandler` is in the completion map under `genome`.
   - [ ] Automated actor → principal is the bot owner, audit label the actor; user → that user.
-  - [ ] Reads settle an `applying` row whose apply ended (incl. abandoned) and a stale `pending` row.
+  - [ ] Reads, and the start of the bot's next promotion, settle an `applying` row whose apply ended (incl. abandoned) and a stale `pending` row.
+  - [ ] The sweep (if the owner keeps it): `sweep_once` settles abandoned in-flight promotions across bots in bounded batches; started with the backend lifecycle.
   - [ ] `PendingDeliveryApplier` deleted; `RevisionApplier` binds `DirectApplier`; no DI cycle.
 - **Depends on:** Tasks 6, 8
 
@@ -92,7 +93,7 @@
 - **Goal:** The genome API shows the lifecycle and the partial marker.
 - **Files:** `adapters/http/openapi_v1/bots/{genome,schemas_genome,errors_genome}.py`; `test_genome_routes.py`, `endpoints/test_openapi_genome.py`, `test_domain_error_status_map_complete.py`
 - **Done when:**
-  - [ ] Promotion payload: statuses, `apply_kind: direct`, `apply_id`, `settled_at`; ref payload `delivery`; 409 `apply_in_progress`.
+  - [ ] Promotion payload: statuses, `apply_kind: direct`, `apply_id`, `settled_at`; ref payload `labels`; 409 `apply_in_progress`.
   - [ ] Gateway OpenAPI regenerated if the genome routes are published there.
 - **Depends on:** Task 9
 
@@ -100,7 +101,7 @@
 - **Goal:** Prove promote → apply → settle → drift with real services over fakes.
 - **Files:** new `tests/community/core/bot_genome/test_promotion_delivers.py`
 - **Done when:**
-  - [ ] Promote r3 → apply SUCCEEDED → `applied`, `active`=r3, `delivery=complete`; promote r1 (two back) → the resources and script r3 added are gone; a Center skill with no asset → `applied_partial`, `delivery=partial`; a failing apply → `apply_failed`, refs untouched.
+  - [ ] Promote r3 → apply SUCCEEDED → `applied`, `active`=r3, labels `[]`; promote r1 (two back) → the resources and script r3 added are gone; a Center skill with no asset → `applied_partial`, labels `["partial"]`; a failing apply → `apply_failed`, refs untouched.
   - [ ] `drift` is `None` after the successful promotions (capture reader over the same fakes).
 - **Depends on:** Tasks 5, 9
 

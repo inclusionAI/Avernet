@@ -10,10 +10,14 @@
 ## Summary
 
 Promotion today refuses every delivery (`PendingDeliveryApplier`), so
-`active` never moves. This item makes a promotion **deliver**: it starts an
-apply run whose state reference names the promotion, the genome compiler
-turns that back into the revision's desired state, the apply engine writes it
-to the bot, and the promotion row follows the apply through to its end. The
+`active` never moves. This item makes a promotion **deliver**, which means
+making the bot's runtime hold the revision. The promotion starts an apply run
+that carries only a pointer to the promotion (`StateRef("genome",
+promotion_id)`, no copy of the revision). In the worker, the genome compiler
+follows that pointer: it reads the promotion row, finds the revision it names,
+and compiles the revision into the apply engine's desired state. The apply
+engine writes that state to the bot, and the promotion row follows the apply
+through to its end. The
 refs move **when the apply finishes**, not when the promotion is asked for.
 
 Two things that only a revision can carry become deliverable: a Skill Center
@@ -46,7 +50,9 @@ latest published version (ADR 0002), and a new Center version is not drift.
   long as the apply runs, and forever if it fails. Following the apply and
   moving the ref at its end keeps `active` meaning "what the bot holds".
 - Captured revisions can name Center and shared-repository skills, but the
-  skills materialiser skips both (#3103): a captured bot cannot be restored.
+  skills materialiser skips both (#3103). So when a revision captured from a
+  bot that uses such skills is promoted, those skills are not installed: the
+  bot cannot be brought back to that revision in full.
 
 ## User Stories
 
@@ -75,7 +81,10 @@ latest published version (ADR 0002), and a new Center version is not drift.
 ### Promotion lifecycle
 
 - [ ] A promotion resolves the target, compiles, checks drift (automated
-      actors only) and preflights as today; nothing is written before that.
+      actors only) and asks the applier whether it can take this bot at all
+      (`RevisionApplier.preflight`, the seam's existing check; the direct
+      applier accepts every bot today, and #3212 will use it to refuse a
+      verify/online target); nothing is written before that.
 - [ ] It then records the promotion row with status `pending` and starts the
       delivery apply. The apply engine takes its per-bot lock synchronously.
       - Lock held by another apply: the row becomes `apply_failed` ("another
@@ -100,15 +109,20 @@ latest published version (ADR 0002), and a new Center version is not drift.
         apply").
 - [ ] Settling happens on every terminal path of the apply: normal end, a
       refused compile, an engine exception, a worker that could not rebuild
-      the apply. A delivery apply abandoned by a dead worker (read back as
-      `FAILED`) settles the next time the promotion is read. Settling twice
-      is a no-op.
+      the apply. Settling twice is a no-op.
+- [ ] A worker that dies mid-apply writes nothing: its apply row stays
+      `RUNNING` in the database and is only *reported* as `FAILED` once its
+      lock is gone or past the 30-minute TTL. Its promotion is marked
+      `apply_failed` by a periodic sweep that finds `applying` promotions
+      whose apply reads as abandoned (see Open Questions), and also, as soon
+      as anyone reads such a promotion, by the read itself.
 - [ ] `going_back` keeps its meaning (target was promoted before and is not
       the current `active`).
-- [ ] The genome compiler delivers a promotion only while it is `pending` or
-      `applying` and `active` still points where the promotion expected; a
-      settled promotion is refused (`CompileRefused`), so a retried or
-      redelivered apply never re-applies a finished promotion.
+- [ ] The genome compiler compiles a promotion's revision only while the
+      promotion is `pending` or `applying` and `active` still points where
+      the promotion expected; for a settled promotion it refuses
+      (`CompileRefused`), so a retried or redelivered apply task never
+      re-applies a finished promotion.
 - [ ] An automated actor's delivery apply runs with the bot owner as its
       principal (`actor_id` = owner id) and the actor's audit label
       (`audit_actor`); a user's runs as that user.
@@ -117,12 +131,13 @@ latest published version (ADR 0002), and a new Center version is not drift.
 - [ ] `PendingDeliveryApplier` is gone; the bound applier is the direct one
       (`apply_kind: direct`).
 
-### Partial marker on `active`
+### Labels on refs
 
-- [ ] `ac_genome_ref` gains a nullable `delivery` column: `complete` or
-      `partial` on the `active` row, set whenever a promotion moves it; null
-      on every other ref. The ref payload of the genome API shows it on
-      `active`.
+- [ ] `ac_genome_ref` gains a `labels` column: a JSON list of strings
+      (e.g. `["partial"]`), empty by default. The only label today is
+      `partial`, set on `active` when a `PARTIAL` apply moved it; every move
+      of a ref rewrites its labels (a complete apply leaves `[]`). The genome
+      API's ref payload shows `labels`.
 
 ### Center and shared-repository skills
 
@@ -208,15 +223,25 @@ latest published version (ADR 0002), and a new Center version is not drift.
    with a concurrent apply.
 6. `center_version` comes out of the revision; no repo commit is recorded.
 7. A `PARTIAL` apply moves the ref, and `active` carries a partial marker.
+8. The marker is a `labels` JSON-list column on the ref (review 2026-10-28):
+   `["partial"]`; no `complete` label, since that is the default.
 
 ## Decisions taken here, flagged for review
 
-- **The partial marker is a `delivery` column on the ref row**, meaningful
-  only on `active`, rather than a second ref name. The promotion status gains
-  `applied_partial` to match.
-- **Settling is a completion hook in the apply engine**, looked up by state
-  kind like the compilers, with a read-time settle as the safety net, rather
-  than a polling task per promotion.
+- **The promotion status gains `applied_partial`** to match the ref label.
+- **How the promotion learns its apply ended: a callback, not polling.** The
+  apply engine already keeps a table from state kind to compiler
+  (`"manifest"` → the Manifest compiler, `"genome"` → the genome compiler)
+  and picks the compiler from the apply's state reference. This adds a
+  second table of the same shape, state kind → *what to call when an apply
+  of this kind ends*. The genome registers its settler under `"genome"`; the
+  Manifest registers nothing. When the worker finishes an apply it calls the
+  entry for that apply's kind, so the engine still knows nothing about
+  promotions. The alternative was a background task per promotion that
+  re-reads the apply report until it is terminal; it costs a read per
+  promotion per poll and is one more thing that can die. The callback cannot
+  fire when the worker itself died, which is what the sweep and the
+  read-time settle cover.
 - **The promotion row regains an `apply_id` column.** #3083 removed
   `apply_reference` because it was used to infer what the bot holds; here it
   only says which apply to read for progress. Drift stays observed.
@@ -228,3 +253,14 @@ latest published version (ADR 0002), and a new Center version is not drift.
   as activating it by id).
 </content>
 </invoke>
+
+## Open Questions
+
+- **The sweep for promotions whose worker died.** Proposed: a periodic loop
+  started with the backend's lifecycle (the shape the Skill Center sync and
+  the git sync already use; the task queue has no recurring schedule) that every few minutes
+  marks `apply_failed` every `applying` promotion whose apply reads as
+  abandoned (one indexed query over in-flight promotions, one apply read
+  each). Without it such a promotion is only settled when someone reads it,
+  or when the next promotion of the same bot starts (which settles earlier
+  in-flight promotions first). Keep the sweep, or rely on reads?
