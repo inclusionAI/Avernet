@@ -71,6 +71,7 @@ from agentclaw.community.core.apply_engine.identity_files import (
     DeviceIdentity,
 )
 from agentclaw.community.core.apply_engine.redeliver import TeclawRedeliver
+from agentclaw.community.core.apply_engine.completion import StateCompletionHandlers
 from agentclaw.community.core.apply_engine.resource_files import (
     DeviceResource,
 )
@@ -386,6 +387,16 @@ class ApplyEngineModule(Module):
         if manifest_config.teclaw_delivery_mode is not TeclawDeliveryMode.DEVICE:
             return {}
         return {EngineFamily.TECLAW: device}
+
+    # ── who hears how an apply ended ───────────────────────────────────────
+
+    @singleton
+    @multiprovider
+    def apply_completion_base(self) -> StateCompletionHandlers:
+        """The completion map's base row: none. Producers that subscribe add their own row
+        (the genome module); without one the run service is still built, and a kind with no
+        row is simply told nothing — the Manifest's case."""
+        return {}
 
     # ── the lookup over them ───────────────────────────────────────────────
 

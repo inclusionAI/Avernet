@@ -226,6 +226,7 @@ def _build(db):
         apply_repository=BotConfigManifestApplyRepository(db),
         lock_repository=BotConfigManifestApplyLockRepository(db),
         compilers=manifest_compilers(manifests=_Manifests(), content=content, resolver=fetcher()),
+        completion_handlers={},
         task_queue_provider=lambda: queue,
         bot_repository=_Bots(),
         # The platform-managed deployment, assembled the way the composition

@@ -154,6 +154,7 @@ def _build(db):
         apply_repository=BotConfigManifestApplyRepository(db),
         lock_repository=BotConfigManifestApplyLockRepository(db),
         compilers=manifest_compilers(manifests=_Manifests(), content=content, resolver=fetcher()),
+        completion_handlers={},
         task_queue_provider=lambda: queue,
         bot_repository=bots,
         # The platform-managed deployment: the store-backed bundle above, and

@@ -20,6 +20,15 @@ a desired state is already in the content store, named by digest. That is
 what lets a revision be delivered with no Manifest document in between
 (RSI-04) and what keeps a grammar change out of the materialisers.
 
+A producer can also subscribe to how its applies end (`completion.py`): a
+second map keyed by state kind, beside the compilers. Every terminal path of
+an apply publishes its `ApplyOutcome` to the kind's subscriber — a finished
+run, a refused compile, an engine exception, a task that could not be
+rebuilt, and the task queue giving up on the apply task (its give-up hook) —
+before the apply lock is released. A re-run of an apply whose report is
+already terminal applies nothing and only publishes again, so a failed
+publish is retried by the queue. The genome subscribes; the Manifest does not.
+
 Extracted from `core/bot_config_manifest/apply/` by
 `apps/backend/specs/2026-10-23-apply-engine-desired-state/`, which also
 records the resources-root rule (the workspace root minus
@@ -46,6 +55,9 @@ provides:
   - DesiredEngineConfig
   - DesiredStateCompiler  # the compiler contract both producers implement
   - StateRef  # (kind, reference) — what an apply run converges to; each compiler registers its kind
+  - ApplyCompletionHandler  # completion.py: a producer's subscriber, told when an apply of its kind ends
+  - ApplyOutcome
+  - StateCompletionHandlers  # kind → subscriber, the second map beside the compilers
   - Compiled
   - ContentReader  # imported from core/content_store; ContentStoreProtocol inherits it
   - Category  # the construct vocabulary (constructs.py)
@@ -94,7 +106,7 @@ consumes:
   - "TaskQueue (core.task_queue) — the apply task"
 consumed_by:
   - "core.bot_config_manifest — compiles a stored document into a DesiredState and starts apply runs with MANIFEST_STATE, kind 'manifest'; the creation flow applies its two phases through ApplyRunService"
-  - "core.bot_genome — compiles a revision into a DesiredState (RSI-04 starts apply runs with genome_state(promotion_id), kind 'genome')"
+  - "core.bot_genome — compiles a revision into a DesiredState, starts apply runs with genome_state(promotion_id), kind 'genome', and subscribes to their completion to settle the promotion"
   - "adapters/http/openapi_v1/bots — the apply, last-apply and create-with-manifest routes"
   - "di/modules/apply_engine_module, bot_management_module — binds ports, strategies, compilers and the run service"
   - "plugins/community/agentswarm — reads a bot's last apply"

@@ -185,6 +185,7 @@ def _world(*, bot, mode, platform_activation=None, redeliver=None):
         apply_repository=BotConfigManifestApplyRepository(db),
         lock_repository=BotConfigManifestApplyLockRepository(db),
         compilers=manifest_compilers(manifests=_Manifests()),
+        completion_handlers={},
         task_queue_provider=lambda: queue,
         bot_repository=_Bots(bot),
         delivery_strategies=DeliveryStrategyFactory(

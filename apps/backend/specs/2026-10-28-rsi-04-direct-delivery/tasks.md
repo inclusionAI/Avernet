@@ -61,23 +61,25 @@
 
 ## Group 3 — Every end of an apply is published
 
-### Task 6: Completion publish/subscribe `[ ]`
+### Task 6: Completion publish/subscribe `[x]`
 - **Goal:** `ApplyCompletionHandler` keyed by state kind, called on every terminal path the run service writes; a re-run with a terminal report only publishes.
 - **Files:** `apply_engine/completion.py`, `run/service.py`, `run/termination.py`, `apply_engine/README.md`, DI (`bot_management_module.py`, the module that bases `StateCompilers`); tests `test_apply_service_lifecycle.py`, `test_apply_task.py`, `di/test_apply_engine_module_wiring.py`
 - **Done when:**
-  - [ ] Handler called once per terminal path (SUCCEEDED, PARTIAL, FAILED, compile refused, engine exception, unstartable), after `applies.finish`, before `locks.release`, with `outcome_of(report)`.
-  - [ ] A raising handler: lock released, then the task raises (queue retry); the retried run finds the report terminal and only publishes.
-  - [ ] A kind with no handler (Manifest) calls nothing; every existing Manifest/apply test passes unchanged.
+  - [x] Handler called once per terminal path (SUCCEEDED, PARTIAL, FAILED, compile refused, engine exception, unstartable), after `applies.finish`, before `locks.release`, with `outcome_of(report)`.
+  - [x] A raising handler: lock released, then the task raises (queue retry); the retried run finds the report terminal and only publishes.
+  - [x] A kind with no handler (Manifest) calls nothing; every existing Manifest/apply test passes unchanged.
 - **Depends on:** Task 1
+- **Notes:** `ApplyRunService` takes `completion_handlers` as a required argument, like `compilers`; the seven suites that construct it directly pass `completion_handlers={}` (their only change). `apply_engine_module` contributes the map's empty base row, so a container with no subscribing producer still builds the run service. Tests: `test_apply_completion.py` (a stub compiler under a test kind drives every path; PARTIAL is covered on `outcome_of` directly).
 
-### Task 6b: The task queue's give-up hook `[ ]`
+### Task 6b: The task queue's give-up hook `[x]`
 - **Goal:** The queue tells a task type when it gives up on one of its tasks; the apply task finishes, unlocks and publishes.
 - **Files:** `core/task_queue/{types.py,services/registry.py,services/worker.py,README.md}`, `core/repository/{protocols,implementations}/platform/task_queue.py`, `apply_engine/apply_task.py`, `run/service.py` (`give_up`); tests `repository/platform/test_task_queue_repository.py`, the worker tests, `test_apply_task.py`
 - **Done when:**
-  - [ ] `claim_batch_reporting_retired` returns the rows the scan retired; `claim_batch` unchanged for its callers.
-  - [ ] The worker calls `on_give_up` after a claim-scan retire, a reschedule that ended `TIMED_OUT`, and a `Fail`; never after success; a raising hook is swallowed; a handler without a hook is unaffected.
-  - [ ] The apply task's `give_up`: a `RUNNING` report becomes `FAILED` with the give-up note, the lock is released, the outcome is published; an already terminal report is published as stored.
+  - [x] `claim_batch_reporting_retired` returns the rows the scan retired; `claim_batch` unchanged for its callers.
+  - [x] The worker calls `on_give_up` after a claim-scan retire, a reschedule that ended `TIMED_OUT`, and a `Fail`; never after success; a raising hook is swallowed; a handler without a hook is unaffected.
+  - [x] The apply task's `give_up`: a `RUNNING` report becomes `FAILED` with the give-up note, the lock is released, the outcome is published; an already terminal report is published as stored.
 - **Depends on:** Task 6
+- **Notes:** the optional protocol is `GivesUp` in `services/registry.py`; the worker checks it with `isinstance`. Tests: `core/task_queue/test_give_up_hook.py` (worker paths and the repository's retired rows), and the apply handler's delegation in `test_apply_completion.py`.
 
 ## Group 4 — Promotion follows the apply
 
