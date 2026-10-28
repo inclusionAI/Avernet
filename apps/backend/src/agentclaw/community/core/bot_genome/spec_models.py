@@ -64,8 +64,8 @@ def schema_property(schema_file: str, *path: str | int) -> dict[str, Any]:
     or, inside a JSON array such as a ``oneOf``, an index (``int``):
     ``schema_property(REVISION_SCHEMA_FILE, "definitions", "digest")`` is the
     digest definition, and ``schema_property(REVISION_SCHEMA_FILE,
-    "definitions", "skillEntry", "oneOf", 1, "properties", "center_version")``
-    is the ``center_version`` property of the second skill shape.
+    "definitions", "skillEntry", "oneOf", 2, "properties", "repo_path")``
+    is the ``repo_path`` property of the third skill shape.
     """
     revision, patch = contract.schemas()
     if schema_file == contract.REVISION_SCHEMA_FILE:
@@ -132,7 +132,6 @@ SkillName = constrained(_REV, "definitions", "skillName")
 ResourcePath = constrained(_REV, "definitions", "resourcePath")
 MemoryKey = constrained(_REV, "definitions", "memoryKey")
 EvidenceRef = constrained(_REV, "definitions", "evidenceRef")
-CenterVersion = constrained(_REV, "definitions", "skillEntry", "oneOf", 1, "properties", "center_version")
 RepoPath = constrained(_REV, "definitions", "skillEntry", "oneOf", 2, "properties", "repo_path")
 McpUrl = constrained(_REV, "definitions", "mcpConfig", "properties", "url")
 HeaderName = constrained(_REV, "definitions", "mcpConfig", "properties", "headers", "propertyNames")
@@ -185,11 +184,10 @@ class LocalSkill(ContractModel):
 
 
 class CenterSkill(ContractModel):
-    """A governed Skill Center skill, pinned by version and not copied."""
+    """A governed Skill Center skill, by name and not copied; the bot runs the version the Center publishes."""
 
     name: SkillName = Field(description="The skill's name in Skill Center, and its key.")
     origin: Literal["center"] = Field(description="Marks this shape: a Skill Center skill.")
-    center_version: CenterVersion = Field(description="The published Skill Center version this revision uses.")
 
 
 class RepoSkill(ContractModel):

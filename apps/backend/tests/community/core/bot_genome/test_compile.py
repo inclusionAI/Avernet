@@ -12,7 +12,7 @@ from agentclaw.community.core.bot_genome.compile import genome_state
 from agentclaw.community.core.apply_engine.compiler import Compiled, CompileRefused
 from agentclaw.community.core.apply_engine.constructs import Category, Section
 from agentclaw.community.core.apply_engine.desired_state import (
-    CenterSkillVersion,
+    CenterSkillByName,
     Declaration,
     DesiredIdentityFile,
     DesiredMcpServer,
@@ -81,7 +81,7 @@ def test_skill_origins_and_mcp_overrides_take_their_typed_source() -> None:
     state = compile_spec(spec, BlobDir())
     sources = {s.name: s.source for s in state.skills.entries}
     assert sources["weather"] == RepoSkillPath("team/weather")
-    assert all(isinstance(s, (LocalSkillPackage, CenterSkillVersion, RepoSkillPath)) for s in sources.values())
+    assert all(isinstance(s, (LocalSkillPackage, CenterSkillByName, RepoSkillPath)) for s in sources.values())
     for entry in spec.tools.mcp:
         desired = next(m for m in state.mcp.entries if m.server_code == entry.server_code)
         expected = McpOverride.from_config(entry.config.to_json()) if entry.config is not None else None

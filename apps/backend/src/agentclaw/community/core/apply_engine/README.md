@@ -38,7 +38,7 @@ provides:
   - ContentRef
   - DesiredScript
   - DesiredIdentityFile
-  - DesiredSkill  # LocalSkillPackage | CenterSkillVersion | RepoSkillPath
+  - DesiredSkill  # LocalSkillPackage | CenterSkillByName | RepoSkillPath
   - DesiredResourceFile
   - DesiredResourceTree
   - DesiredMcpServer  # McpOverride, McpHeader, McpTransport, McpEndpointEnv

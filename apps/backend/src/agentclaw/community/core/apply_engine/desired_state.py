@@ -33,7 +33,7 @@ from agentclaw.community.core.apply_engine.paths import resource_path_refusal
 from agentclaw.community.core.content_store import DIGEST_RE
 
 __all__ = [
-    "CenterSkillVersion",
+    "CenterSkillByName",
     "Declaration",
     "DesiredCliTool",
     "DesiredEngineConfig",
@@ -184,13 +184,8 @@ class LocalSkillPackage:
 
 
 @dataclass(frozen=True)
-class CenterSkillVersion:
-    """A Skill Center skill at a pinned published version."""
-
-    version: str
-
-    def __post_init__(self) -> None:
-        _require(bool(self.version), "a Skill Center skill needs a version")
+class CenterSkillByName:
+    """A Skill Center skill, found by the entry's name; the bot runs the version the Center publishes (ADR 0002)."""
 
 
 @dataclass(frozen=True)
@@ -206,7 +201,7 @@ class RepoSkillPath:
 @dataclass(frozen=True)
 class DesiredSkill:
     name: str
-    source: LocalSkillPackage | CenterSkillVersion | RepoSkillPath
+    source: LocalSkillPackage | CenterSkillByName | RepoSkillPath
     note: str | None = None
 
     def __post_init__(self) -> None:
@@ -220,7 +215,7 @@ class DesiredSkill:
     def origin(self) -> SkillOrigin:
         if isinstance(self.source, LocalSkillPackage):
             return SkillOrigin.LOCAL
-        if isinstance(self.source, CenterSkillVersion):
+        if isinstance(self.source, CenterSkillByName):
             return SkillOrigin.CENTER
         return SkillOrigin.REPO
 

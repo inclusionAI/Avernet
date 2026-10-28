@@ -322,7 +322,7 @@ Every entry in `spec` is a **key**, the one field that names it, plus a
 | Category | Key | Value |
 | --- | --- | --- |
 | `persona` | `type` | `digest` |
-| `skills` | `name` | `origin: local` + `digest` (a tree), or `origin: center` + `center_version` |
+| `skills` | `name` | `origin: local` + `digest` (a tree), `origin: center` (nothing else), or `origin: repo` + `repo_path` |
 | `resources` | `path` (trailing `/` = directory) | `digest` (file bytes, or a tree for a directory) |
 | `tools.mcp` | `server_code` | optional `config` |
 | memory item | `key` | `text`, `tags`, `source` |
@@ -331,7 +331,7 @@ Every entry in `spec` is a **key**, the one field that names it, plus a
   never inline, whatever way it arrived (fetched, inline in a Manifest,
   written by a patch).
 - An entry with no bytes has inline fields only: an MCP server's bot-level
-  config, a Center skill's pinned version.
+  config, a shared-repository skill's path. A Center skill has none.
 - Keys are stable while values change, so a diff reports "modified", and a
   pin on a key keeps matching after its value changes.
 
@@ -364,13 +364,14 @@ Every entry in `spec` is a **key**, the one field that names it, plus a
   directory around the package and drops the paths the validator ignores
   (`.DS_Store`, `._*`, `Thumbs.db`, `ehthumbs.db`, `Desktop.ini`, a root
   `__MACOSX/`, any `.git` or `__pycache__` component, `*.pyc`, `*.pyo`), so
-  the digest is of what apply delivers. `center`: a governed Skill Center skill pinned by version and
-  not copied (ADR 0010); a pinned version is a reference to a published
-  version, not evidence that it is active. A Manifest v1 document cannot yet
-  declare a Center skill; RSI-04 adds that source. `repo`: a skill supplied from the
+  the digest is of what apply delivers. `center`: a governed Skill Center skill,
+  named and not copied. No version is recorded: a bot runs whatever version
+  the Center publishes (ADR 0002), so a newer Center version is not drift;
+  apply finds the Center asset by this name (RSI-04). A Manifest v1 document
+  cannot declare a Center skill. `repo`: a skill supplied from the
   platform-synced shared skill repository, named by `repo_path` (what follows
-  `git://` on the skill row); neither copied nor version-pinned, because the
-  repository sync exposes no commit yet (added by RSI-03, additive under §1).
+  `git://` on the skill row); neither copied nor pinned to a commit, for the
+  same reason (added by RSI-03, additive under §1).
 - **`memory`.** `null`, or `{mode, items_digest}`. `mode` is `seed`, `merge`
   or `replace` (01-genome.md §2.2).
 - **`resources`.** `path` is workspace-relative: characters
@@ -501,7 +502,7 @@ policy, copied unchanged.
   and the script change only when an owner records a whole Manifest document,
   which keeps tool changes human-only structurally.
 - Memory ops are rejected while `spec.memory` is `null`.
-- A Center skill's pinned version is changed by an owner recording a
+- Adding or removing a Center skill is done by an owner recording a
   document, not by a patch.
 - Content is given inline (a UTF-8 string, at most 64 KiB once encoded, the
   Manifest's inline limit; the schema's `maxLength` can only bound code points,
@@ -771,8 +772,7 @@ dropping the resource silently; the owner renames it first (§8). Capture
 reads resource files the platform has a row for, by their workspace-relative
 path; a skill installed from a `local://` package is stored as the
 `acm-tree-v1` tree of the files `SkillPackageValidator` keeps (§4.2), a
-Center skill as its pinned `center_version`, a shared-repository skill as
-its `repo_path`.
+Center skill by its name, a shared-repository skill as its `repo_path`.
 
 > **The AGENTS.md reference block is removed.** On openclaw bots, writing any
 > of `RULES.md`, `OKR.md`, `SAFETY.md` or `OUTPUT.md` makes the platform
@@ -812,7 +812,7 @@ its `repo_path`.
 state (`core/apply_engine/desired_state.py`): one declaration per construct
 the revision covers — `script`, `identity`, `resources`, `skills`, `mcp`,
 an empty list declaring "none" — whose entries name their bytes in the
-content store by digest, a Skill Center skill by its pinned version and a
+content store by digest, a Skill Center skill by its name and a
 shared-repository skill by its path; `cli_tools` and `engine_config` stay
 undeclared, and `memory` is not delivered while `null`. A Bot Config
 Manifest document compiles into the same state, so the two are compared,

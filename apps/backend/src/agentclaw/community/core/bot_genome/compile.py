@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Callable, Collection, NoReturn
 from agentclaw.community.core.apply_engine.compiler import Compiled, CompileRefused, DesiredStateCompiler, StateRef
 from agentclaw.community.core.apply_engine.constructs import ApplyConstruct
 from agentclaw.community.core.apply_engine.desired_state import (
-    CenterSkillVersion,
+    CenterSkillByName,
     Declaration,
     DesiredIdentityFile,
     DesiredMcpServer,
@@ -70,9 +70,9 @@ __all__ = ["GenomeCompiler", "compile_spec"]
 _DELIVERABLE = frozenset({"applying", "applied"})
 
 
-def _skill_source(entry: SkillEntry) -> LocalSkillPackage | CenterSkillVersion | RepoSkillPath:
+def _skill_source(entry: SkillEntry) -> LocalSkillPackage | CenterSkillByName | RepoSkillPath:
     if isinstance(entry, CenterSkill):
-        return CenterSkillVersion(entry.center_version)
+        return CenterSkillByName()
     if isinstance(entry, RepoSkill):
         return RepoSkillPath(entry.repo_path)
     return LocalSkillPackage(ContentRef(entry.digest))

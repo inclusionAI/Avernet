@@ -46,7 +46,7 @@ from agentclaw.community.core.bot_config_manifest.fetch.errors import (
 from agentclaw.community.core.apply_engine.registry import (
     ConfirmedPartialWriteError,
 )
-from agentclaw.community.core.apply_engine.desired_state import CenterSkillVersion, DesiredSkill
+from agentclaw.community.core.apply_engine.desired_state import CenterSkillByName, DesiredSkill
 from agentclaw.community.core.content_store import decode_tree_bytes
 
 from ._fakes import (
@@ -514,7 +514,7 @@ def test_a_non_local_skill_is_skipped_not_failed_and_not_removed(caplog):
     raw = materialiser.materialiser
     ctx = _ctx()
     with caplog.at_level(logging.WARNING):
-        resolved = _run(raw.resolve(ctx, [DesiredSkill("triage", CenterSkillVersion("1.0.0"))]))
+        resolved = _run(raw.resolve(ctx, [DesiredSkill("triage", CenterSkillByName())]))
     assert resolved.ok and resolved.failures == ()
     assert any("does not deliver" in record.getMessage() and "3103" in record.getMessage() for record in caplog.records)
     plan = _run(raw.plan(ctx, resolved.intents))
@@ -532,7 +532,7 @@ def test_a_non_local_skill_is_skipped_not_failed_and_not_removed(caplog):
     from agentclaw.community.core.apply_engine.outcomes import ApplyStatus, derive_status
 
     orchestrator = ApplyOrchestrator({raw.construct: raw}, steps=lambda phase: order.APPLY_ORDER)
-    state = DesiredState(skills=Declaration((DesiredSkill("triage", CenterSkillVersion("1.0.0")),)))
+    state = DesiredState(skills=Declaration((DesiredSkill("triage", CenterSkillByName()),)))
     preview = _run(
         orchestrator.apply(ctx, state, apply_id="", trigger="dry_run", started_at=datetime.now(), dry_run=True)
     )

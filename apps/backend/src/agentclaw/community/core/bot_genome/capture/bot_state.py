@@ -6,7 +6,7 @@ and the compose collector read through, so capture sees what apply sees:
 - persona: ``IdentityFilePort`` (``list_bot_files`` / ``read_identity_file``);
 - skills: ``BotCapabilityStateReaderProtocol.active_skill_assets``, classified
   by locator prefix as the skill set service records them (``local://`` files
-  via the factory's package storage, ``center://`` by pinned version,
+  via the factory's package storage, ``center://`` by name,
   ``git://<path>`` as a shared-repository skill);
 - resources: the bot's ``ac_resource`` file rows (what the compose collector
   lists), at ``data/<row path>`` in the workspace, bytes through
@@ -138,7 +138,7 @@ class PlatformBotStateReader(BotStateReader):
                     )
                 )
             elif locator.startswith(CENTER_PREFIX):
-                captured.append(CapturedSkill(asset.name, SkillOrigin.CENTER, center_version=asset.sc_version_number))
+                captured.append(CapturedSkill(asset.name, SkillOrigin.CENTER))
             elif locator.startswith(REPO_PREFIX):
                 captured.append(CapturedSkill(asset.name, SkillOrigin.REPO, repo_path=locator[len(REPO_PREFIX) :]))
             else:

@@ -152,10 +152,10 @@ async def test_skills_are_classified_by_locator() -> None:
     capabilities = FakeCapabilities(assets)
     skills = await _reader(capabilities=capabilities, skill_factory=factory).skills(BOT)
     assert capabilities.asked_for == "u1", "active skills are the owner's rows"
-    assert [(s.name, s.origin, s.center_version, s.repo_path, s.files) for s in skills] == [
-        ("tidy", "local", None, None, (("SKILL.md", b"---\nname: tidy\n---\n"),)),
-        ("refund", "center", "v7", None, ()),
-        ("weather", "repo", None, "team/weather", ()),
+    assert [(s.name, s.origin, s.repo_path, s.files) for s in skills] == [
+        ("tidy", "local", None, (("SKILL.md", b"---\nname: tidy\n---\n"),)),
+        ("refund", "center", None, ()),
+        ("weather", "repo", "team/weather", ()),
     ]
     call = factory.calls[0]
     assert (call["entity_id"], call["owner_id"], call["bot_id"], call["engine_type"], call["entity_type"]) == (
