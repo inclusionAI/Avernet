@@ -15,6 +15,10 @@ from agentclaw.community.adapters.http.task.schemas_artifact import (  # noqa: E
 )
 
 from pydantic import BaseModel, ConfigDict, Field
+from agentclaw.community.adapters.http.task.schemas_callback import (  # noqa: F401
+    TaskCallbackRequest as TaskCallbackRequest,
+    TaskNodeCallbackRequest as TaskNodeCallbackRequest,
+)
 from agentclaw.community.adapters.http.task.schemas_relay_dispatch import (
     TaskDispatchRequestDTO as TaskDispatchRequestDTO,
 )
@@ -908,32 +912,9 @@ def op_result_to_dto(result) -> TaskOpResultDTO:
     )
 
 
-# ===== task_loop inbound callback schemas(PUSH 回调,对齐羽雀 TaskCallbackData/TaskNodeCallbackData)=====
-# SSOT TaskCallbackData 保持精简(不扩);羽雀丰富字段在 translator 边缘折叠进 SSOT。
-# 必填非可选(AGENTS.md):task_id/workflow_source/workflow_id/workflow_instance_id/status/is_success。
-# None 仅契约态:goal/output/failed_info/ext_info/loop_task_id(回声字段,缺失走 registry)。
+# ===== task_loop inbound callback schemas —— 已拆出到 schemas_callback.py =====
+# 回调 DTO 仍在本模块 re-export,保持既有 `from .schemas import TaskCallbackRequest` 入口不变。
 
-
-class TaskCallbackRequest(BaseModel):
-    """task 级(workflow)回调载荷。"""
-
-    task_id: str
-    workflow_source: Literal["claw_mind", "bcn"]
-    workflow_id: str
-    workflow_instance_id: str
-    goal: str | None = None
-    status: str
-    is_success: bool
-    output: dict[str, Any] | None = None
-    failed_info: str | None = None
-    ext_info: dict[str, Any] | None = None
-    loop_task_id: str | None = None  # 回声字段:派发期透传,引擎原样回带(可选)
-
-
-class TaskNodeCallbackRequest(TaskCallbackRequest):
-    """node 级回调载荷(node_id 即 Avernet 子节点 id,统一领域对象 1:1 映射)。"""
-
-    node_id: str
 
 
 # ===== 任务认领 Bot 授权(grant/revoke)DTO =====
