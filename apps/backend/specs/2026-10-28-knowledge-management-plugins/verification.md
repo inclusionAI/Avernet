@@ -68,3 +68,22 @@ Current index/release complete Backend CI (unchanged 4-worker runner): **27,175
 passed, 40 existing skipped, 2 subtests passed**, 431.98s; complete gate passed.
 Line coverage **90.56%**, changed-line **93.07%**. The ten new index/migration
 cases passed in this full run. No skips/timeouts/coverage thresholds changed.
+
+## Release advanced again: resolve #3228 DI conflict
+
+The release target advanced from `e307d7109` to `c5066167e` while waiting for the
+previous public snapshot's mirror sync. Rebase completed against `c5066167e`.
+The only conflict was `di/container.py` imports: preserve the target's new
+BotExtensionModule and the knowledge module, remove duplicate AcliClis/Task
+imports, and keep all target module-construction calls in their original order.
+AST comparison confirms the target's full construction sequence is unchanged
+except one KnowledgeManagementModule insertion, with both modules exactly once.
+Knowledge platform adapters, management repository/services and BotModel
+(including the new index) are byte-identical to the prior tested snapshot.
+
+Post-rebase checks: **854 passed** (knowledge, all DI, Bot create-extension and
+architecture contracts); **92 passed, 1714 unrelated deselected** (configured
+knowledge endpoints, real composition, two-phase boot and community-only boot).
+No skips or weakened thresholds. Ruff imports/duplicate checks and diff-check
+pass. The 27,175-case full CI result above belongs to the prior `e307d7109` base;
+it was not rerun on this subsequent release rebase and is not represented as such.

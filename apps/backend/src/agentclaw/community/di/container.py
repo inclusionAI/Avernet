@@ -38,6 +38,7 @@ from agentclaw.community.di.modules.bot_app_grant_module import BotAppGrantModul
 from agentclaw.community.di.modules.bot_chat_open_module import BotChatOpenModule
 from agentclaw.community.di.modules.bot_collaborator_module import BotCollaboratorModule
 from agentclaw.community.di.modules.bot_dormant_module import BotDormantModule
+from agentclaw.community.di.modules.bot_extension_module import BotExtensionModule
 from agentclaw.community.di.modules.bot_friend_auth_module import BotFriendAuthModule
 from agentclaw.community.di.modules.bot_genome_module import BotGenomeModule
 from agentclaw.community.di.modules.bot_inventory_module import BotInventoryModule
@@ -49,9 +50,6 @@ from agentclaw.community.di.modules.bot_message_feedback_module import (
 from agentclaw.community.di.modules.bot_public_module import BotPublicModule
 from agentclaw.community.di.modules.bot_public_risk_module import BotPublicRiskModule
 from agentclaw.community.di.modules.bot_quota_module import BotQuotaModule
-from agentclaw.community.di.modules.bot_extension_module import BotExtensionModule
-from agentclaw.community.di.modules.task_module import TaskModule
-from agentclaw.community.di.modules.acli_clis_module import AcliClisModule
 from agentclaw.community.di.modules.caller_identity_module import CallerIdentityModule
 from agentclaw.community.di.modules.channel_module import ChannelModule
 from agentclaw.community.di.modules.common_config_module import CommonConfigModule
@@ -112,15 +110,15 @@ from agentclaw.community.di.modules.skills_pool_module import SkillsPoolModule
 from agentclaw.community.di.modules.space_knowledge_module import SpaceKnowledgeModule
 from agentclaw.community.di.modules.spaces_module import SpacesModule
 from agentclaw.community.di.modules.system_config_module import SystemConfigModule
+from agentclaw.community.di.modules.task_artifact_config_module import (
+    TaskArtifactConfigModule,
+)
 from agentclaw.community.di.modules.task_discovery_module import TaskDiscoveryModule
 from agentclaw.community.di.modules.task_module import TaskModule
 from agentclaw.community.di.modules.task_persistence_module import TaskPersistenceModule
 from agentclaw.community.di.modules.task_queue_module import TaskQueueModule
 from agentclaw.community.di.modules.task_trajectory_config_module import (
     TaskTrajectoryConfigModule,
-)
-from agentclaw.community.di.modules.task_artifact_config_module import (
-    TaskArtifactConfigModule,
 )
 from agentclaw.community.di.modules.tc_file_upload_integration_module import (
     TcFileUploadIntegrationModule,
