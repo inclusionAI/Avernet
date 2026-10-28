@@ -3,7 +3,7 @@
 ## Ownership
 Core owns provider-neutral management orchestration and display enrichment from existing public models. Delivery owns HTTP schemas and scoped exception mapping. adapters/knowledge_platform owns the remote HTTP protocol, configured origin and bounded JSON/raw transport. Deployment packages own identity directories, session interpretation and environment configuration.
 
-KnowledgeCatalog is an ordinary outbound port. KnowledgeContentServiceProtocol is a resource-oriented Service API. Do not add Catalog/Content business plugins for single HTTP implementations. Only KnowledgeSessionPlugin represents a genuinely deployment-specific capability; preserve the existing selection/membership Plugin contracts.
+KnowledgeCatalog is an ordinary outbound port. KnowledgeContentServiceProtocol is a resource-oriented Service API. Do not add Catalog/Content business plugins for single HTTP implementations. Session authentication is an ordinary constructor policy on the content adapter, not a Plugin. Preserve existing selection/membership Plugin contracts.
 
 ## Composition and compatibility
 KnowledgeManagementModule installs disabled-by-default config and an unavailable session implementation. Enabled deployments provide an explicit space dataset identifier and a trusted origin. The normal community Bot-selection router remains ungated; only the new management/content surface uses the new gate. Enterprise composition can retain its existing combined gate and aliases.
@@ -17,3 +17,16 @@ Contribute public changes first, then pin a reachable public revision downstream
 
 ## Batch consumer follow-up
 Keep KnowledgeCatalog.details as the public port. The outbound adapter sends one POST to the configured TC catalog-details endpoint with actor_staff_no and kb_ids, reusing request identity mapping, shared transport, error mapping and the existing budget. Validate complete ordered space-scoped results before returning them; no partial or per-item fallback. Add 1/20-item wire counts, invalid batch/rejection regressions and a fixed downstream real-provider pairing.
+
+## Review follow-up design
+Use a small ordinary access-policy callable; remove the Plugin Protocol, LOCAL/PROD registrations and unavailable implementations. The policy returns request-scoped ContentAccess. The public default raises the existing unavailable error; corp supplies the original allowlist/identity policy through composition. A test policy supplies only neutral test credentials. No authentication mode branches in services and no duplicated resource methods.
+
+```python
+ContentAccessPolicy = Callable[[str, Mapping[str, str]], ContentAccess]
+RemoteKnowledgeContentService(client, access_policy)
+# Application construction, without resolving injector or opening I/O:
+app.include_router(management_surface)
+# Enterprise OptionalRouters retains ONLY the gated Bot alias surface.
+```
+
+Replace the endpoint seed's manually constructed services with bottom-boundary config and transport setup. Obtain clients from the injector, retain the real public repository/catalog/service/content factories, and assert resolved object identity and recorded wire requests. Add a mutation guard demonstrating that a broken provider fails a success case. Add preload/registration uniqueness coverage and corp gate/identity/Cookie regressions. Keep prod/prepub YAML byte-identical to the latest user-approved PR input. Push public first, verify mirror reachability, then advance the existing enterprise PR.

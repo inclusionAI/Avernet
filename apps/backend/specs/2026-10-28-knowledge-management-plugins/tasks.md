@@ -15,3 +15,11 @@
 - [x] Restore sync-context error code and assert its HTTP body.
 - [x] Run public consumer/gates and downstream real-provider pairing.
 - Delivery order: update this existing public PR first, verify the exact mirror object, then update the existing downstream PR; no merge or deployment.
+
+## Reviewer follow-up
+- [ ] Record red tests for plugin absence, regular unique routing and provider-aware endpoint acceptance.
+- [ ] Replace session Plugin with an ordinary request access policy; preserve default denial and private credential rules.
+- [ ] Register management/content routers normally; retain profile-specific Bot alias policy.
+- [ ] Seed bottom boundaries only and prove provider mutations break acceptance.
+- [ ] Run focused, boot/architecture, native ECB paired and complete Backend gates.
+- [ ] Review the fixed diff, update original public PR, verify mirror, and update original corp PR preserving rollout changes.
