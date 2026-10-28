@@ -325,6 +325,7 @@ class AgentSwarmModule(Module):
             space_context=injector.get(BusinessSpaceContextProtocol),
             baas_service=injector.get(BaasService),
             max_platform_workers=config.executor.max_platform_workers,
+            chat_timeout_seconds=config.executor.bot_chat_timeout_seconds,
         )
 
     @provider

@@ -289,7 +289,16 @@ class SubagentRuntime:
     async def _execute_with_retry(self, item: _WorkItem) -> dict[str, Any]:
         spec = self._find_spec(item.run, item.envelope)
         if spec is None:
-            spec = AgentSpec(name=item.envelope.name, role=item.envelope.objective)
+            # An unresolvable spawn inherits the run's unanimous catalog
+            # kind (and engine/bot_type/identity): a bot run whose
+            # decision names miss the catalog must still provision bot
+            # subagents — silently minting llm agents changes the run's
+            # composition. Mixed/empty catalogs keep the llm default.
+            spec = AgentSpec(
+                name=item.envelope.name,
+                role=item.envelope.objective,
+                **self._unanimous_catalog_surface(item.run),
+            )
 
         schema = item.envelope.output_schema
         validator = None
@@ -503,7 +512,12 @@ class SubagentRuntime:
     def _is_non_retryable(exc: BaseException) -> bool:
         # Agentswarm-owned marker only — the pool never imports the host
         # platform that raised the original error (D17).
-        return isinstance(exc, NonRetryableProvisioningError)
+        # AgentSwarmConfigError (e.g., no BotPlatform bound) is
+        # deterministic — a deployment-config gap will not resolve mid-run.
+        from agentclaw.community.core.agentswarm.service.protocols import (
+            AgentSwarmConfigError,
+        )
+        return isinstance(exc, (NonRetryableProvisioningError, AgentSwarmConfigError))
 
     async def _journal_intent(self, subagent: Any, spec: AgentSpec,
                                item: _WorkItem, attempt: int) -> None:
@@ -593,12 +607,31 @@ class SubagentRuntime:
 
     @staticmethod
     def _executor_kind(spec: AgentSpec) -> str:
-        kind = spec.kind if isinstance(spec.kind, AgentKind) else AgentKind.LLM
-        return kind.value
+        kind = getattr(spec, "kind", None)
+        if isinstance(kind, AgentKind):
+            return kind.value
+        try:
+            return AgentKind(kind).value
+        except (ValueError, TypeError, KeyError):
+            return AgentKind.LLM.value
 
     def _record_upstream_failure(self) -> None:
         if self._upstream_breaker is not None:
             self._upstream_breaker.record_failure(time.monotonic())
+
+    @staticmethod
+    def _unanimous_catalog_surface(run: Run) -> dict[str, Any]:
+        catalog = getattr(run, "agent_catalog", None) or ()
+        kinds = {s.kind for s in catalog}
+        if len(kinds) != 1:
+            return {}
+        first = catalog[0]
+        return {
+            "kind": first.kind,
+            "engine": first.engine,
+            "bot_type": first.bot_type,
+            "identity_file": first.identity_file,
+        }
 
     @staticmethod
     def _find_spec(run: Run, envelope: TaskEnvelope) -> AgentSpec | None:

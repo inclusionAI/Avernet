@@ -550,6 +550,126 @@ class TestOrchestrator:
         assert not any(ge.kind.value == "width_exceeded"
                        for ge in result["guard_events"])
 
+    def test_width_retires_terminal_failed_agents(self):
+        # A FAILED agent never routes a result, so spawned-minus-routed
+        # counts it in flight forever — one genuine failure then wedges
+        # every later spawn at the cap. The terminal_without_result
+        # census frees exactly those agents.
+        script = json.dumps({
+            "kind": "spawn_agent",
+            "agents": [{"name": "r4", "objective": "o4"}],
+        })
+        stub = StubLLMProvider(script=[script])
+        orch = Orchestrator(
+            llm=stub, parser=DecisionParser(),
+            guards=GuardService(max_width=1),
+            config=AgentSwarmConfig(
+                orchestration=AgentSwarmOrchestrationConfig(repair_max=2),
+            ),
+        )
+        run = _mk_run()
+        state = RunState(run=run)
+        state.total_agents_spawned = 3
+        state.routed_result_count = 1
+        state.terminal_without_result = 2  # FAILED pair holds no capacity
+        result = asyncio.run(orch.decide_turn(run, state, lambda rid: []))
+        assert [e.name for e in result["spawn"]] == ["r4"]
+        assert not any(ge.kind.value == "width_exceeded"
+                       for ge in result["guard_events"])
+
+    def test_failed_agents_still_occupy_width_without_census(self):
+        # The inverse pin: without the census the same shape must reject —
+        # proves the census (not some other path) is what freed the slot.
+        script = json.dumps({
+            "kind": "spawn_agent",
+            "agents": [{"name": "r4", "objective": "o4"}],
+        })
+        stub = StubLLMProvider(script=[script])
+        orch = Orchestrator(
+            llm=stub, parser=DecisionParser(),
+            guards=GuardService(max_width=1),
+            config=AgentSwarmConfig(
+                orchestration=AgentSwarmOrchestrationConfig(repair_max=2),
+            ),
+        )
+        run = _mk_run()
+        state = RunState(run=run)
+        state.total_agents_spawned = 3
+        state.routed_result_count = 1
+        state.terminal_without_result = 0  # census dropped the retirement
+        result = asyncio.run(orch.decide_turn(run, state, lambda rid: []))
+        assert result["spawn"] == []
+        assert any(ge.kind.value == "width_exceeded"
+                   for ge in result["guard_events"])
+
+    def test_fully_deferred_spawn_consumes_no_turn_budget(self):
+        # Turn budget is real work: a spawn batch whose every envelope was
+        # width-deferred re-emits on later turns, and charging it would let
+        # the re-emissions burn the whole budget without any ever landing
+        # (a tech-team run died exactly this way at max_turns).
+        script = json.dumps({
+            "kind": "spawn_agent",
+            "agents": [
+                {"name": "r1", "objective": "o1"},
+                {"name": "r2", "objective": "o2"},
+            ],
+        })
+        stub = StubLLMProvider(script=[script])
+        orch = Orchestrator(
+            llm=stub, parser=DecisionParser(),
+            guards=GuardService(max_width=0),
+            config=AgentSwarmConfig(
+                orchestration=AgentSwarmOrchestrationConfig(repair_max=2),
+            ),
+        )
+        run = _mk_run()
+        state = RunState(run=run)
+        result = asyncio.run(orch.decide_turn(run, state, lambda rid: []))
+        assert result["spawn"] == []
+        assert len(result["defer_refs"]) == 2
+        assert state.turn_count == 0
+
+    def test_partially_landed_spawn_consumes_one_turn(self):
+        script = json.dumps({
+            "kind": "spawn_agent",
+            "agents": [
+                {"name": "r1", "objective": "o1"},
+                {"name": "r2", "objective": "o2"},
+            ],
+        })
+        stub = StubLLMProvider(script=[script])
+        orch = Orchestrator(
+            llm=stub, parser=DecisionParser(),
+            guards=GuardService(max_width=1),
+            config=AgentSwarmConfig(
+                orchestration=AgentSwarmOrchestrationConfig(repair_max=2),
+            ),
+        )
+        run = _mk_run()
+        state = RunState(run=run)
+        result = asyncio.run(orch.decide_turn(run, state, lambda rid: []))
+        assert len(result["spawn"]) == 1
+        assert state.turn_count == 1
+
+    def test_finish_consumes_a_turn(self):
+        # Handoff/Finish stay full-price decisions (the exemption is a
+        # Wait/free-capacity carve-out ONLY for deferred spawns).
+        script = json.dumps({"kind": "finish", "answer": "done"})
+        stub = StubLLMProvider(script=[script])
+        orch = Orchestrator(
+            llm=stub, parser=DecisionParser(),
+            guards=GuardService(max_width=8),
+            config=AgentSwarmConfig(
+                orchestration=AgentSwarmOrchestrationConfig(repair_max=2),
+            ),
+        )
+        run = _mk_run()
+        state = RunState(run=run)
+        state.routed_result_count = 1
+        result = asyncio.run(orch.decide_turn(run, state, lambda rid: []))
+        assert result["terminate"] == TerminationReason.FINISH
+        assert state.turn_count == 1
+
     def test_congested_spawn_batch_continues_without_terminating(self):
         # P0-8: a fully guard-rejected batch is transient congestion, not a
         # verdict on the run — the slice continues; true no-progress is

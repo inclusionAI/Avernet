@@ -240,6 +240,42 @@ class TestCreate:
         assert first == again and first.startswith("agent_swarm_") and len(first) == 28
         assert [w["bot_id"] for w in seen] == [first, first]
 
+    def test_persona_name_is_id_format_desc_carries_the_label(self, monkeypatch):
+        # The platform caps bot_name at 32 chars and a spec-derived name
+        # (composite spawn name + digest) can exceed it, so the NAME is the
+        # id-format digest and the descriptive label rides bot_desc.
+        seen = self._record_submit(monkeypatch)
+        platform = _mk()
+        spec = BotCreateSpec(name="tester_rust_f9ed5997468d",
+                             description="writes rust tests")
+        bot_id = platform.create_bot(spec=spec, idempotency_key="run-9:a1",
+                                     owner_id="owner-1")
+        submitted = seen[0]
+        assert submitted["bot_id"] == bot_id == submitted["spec"].bot_name
+        assert len(bot_id) == 28
+        assert not submitted["spec"].bot_name.startswith("tester_rust")
+        desc = submitted["spec"].bot_desc
+        assert desc.startswith("tester_rust_f9ed5997468d-")
+        assert "writes rust tests" in desc
+
+    def test_persona_desc_label_only_without_role(self, monkeypatch):
+        seen = self._record_submit(monkeypatch)
+        platform = _mk()
+        spec = BotCreateSpec(name="scout")  # no description
+        platform.create_bot(spec=spec, idempotency_key="run-9:a2",
+                            owner_id="owner-1")
+        desc = seen[0]["spec"].bot_desc
+        # f"{spec.name}-{digest8}" and nothing else
+        assert desc.startswith("scout-") and len(desc) == len("scout-") + 8
+
+    def test_persona_desc_clamped_to_column_size(self, monkeypatch):
+        seen = self._record_submit(monkeypatch)
+        platform = _mk()
+        spec = BotCreateSpec(name="scout", description="x" * 20000)
+        platform.create_bot(spec=spec, idempotency_key="run-9:a3",
+                            owner_id="owner-1")
+        assert len(seen[0]["spec"].bot_desc) <= 1024
+
     def test_name_refusal_adopts_the_live_persona_row(self, monkeypatch):
         # D16 respawn after a mid-creation crash: bot_service's name check
         # refuses the re-create; the live row under our derived id is ours.
@@ -324,9 +360,15 @@ class TestCreate:
         assert "type: SOUL.md" in document
         assert "File weekly reports." in document
         host_spec = w["spec"]
-        assert host_spec.bot_name == f"clerk-{first8(w['bot_id'][12:])}"
+        # Id-format naming contract: bot_name IS the derived id (the
+        # platform's 32-char bot_name cap forbids spec-derived names);
+        # the descriptive label moves into bot_desc ahead of the role.
+        assert host_spec.bot_name == w["bot_id"]
+        assert host_spec.bot_name.startswith("agent_swarm_")
+        assert host_spec.bot_desc.startswith(
+            f"clerk-{first8(w['bot_id'][12:])}")
+        assert "a filing clerk" in host_spec.bot_desc
         assert host_spec.engine_type == "openclaw"
-        assert host_spec.bot_desc == "a filing clerk"
         assert w["context"].deployment_mode.value == "cloud"
         assert document.count("template_display") == 0
 

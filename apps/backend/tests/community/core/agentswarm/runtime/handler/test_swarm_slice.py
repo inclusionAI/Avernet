@@ -713,7 +713,7 @@ class TestMidSliceCancel:
         assert stored.status is dm.RunStatus.CANCELLED
         assert stored.termination_reason is dm.TerminationReason.CANCELLED
         agents = env.agent_repo.list_by_run(run.run_id, TENANT)
-        assert [a.name for a in agents] == ["a1"]
+        assert [a.name.split("_", 1)[0] for a in agents] == ["a1"]
         assert _dispatch_row(db, run.run_id)["status"] == "DONE"
 
 

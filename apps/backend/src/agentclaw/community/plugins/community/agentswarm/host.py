@@ -330,6 +330,7 @@ class AvernetBotPlatform(BotPlatform):
         space_context: BusinessSpaceContextProtocol,
         baas_service: BaasService,
         max_platform_workers: int = _DEFAULT_MAX_PLATFORM_WORKERS,
+        chat_timeout_seconds: float = _CHAT_TIMEOUT_SECONDS,
     ) -> None:
         self._manifest_seam = manifest_seam
         self._bot_service = bot_service
@@ -339,7 +340,7 @@ class AvernetBotPlatform(BotPlatform):
         self._apply_service = apply_service
         self._space_context = space_context
         self._baas_service = baas_service
-        self._chat_timeout_seconds = _CHAT_TIMEOUT_SECONDS
+        self._chat_timeout_seconds = chat_timeout_seconds
         set_chat_bridge_max_workers(max_platform_workers)
 
 
@@ -372,9 +373,14 @@ class AvernetBotPlatform(BotPlatform):
             f"agent_swarm_{_idem_digest(idempotency_key, _HASHED_IDEMPOTENCY_ID_DIGITS)}")
         # One persona per (run, spec): the same idempotency key derives the same
         # bot identifier, so a retried setup rebinds the same creation instead of
-        # minting a second one (and soft-name collisions across concurrent runs
-        # are impossible: the name carries the key's digest).
-        bot_name = f"{spec.name}-{_idem_digest(idempotency_key, 8)}"
+        # minting a second one. The platform caps bot_name at 32 chars
+        # (_BOT_NAME_MAX_LEN) and a spec-derived name (composite spawn name +
+        # digest) can exceed it (e.g. "tester_rust_f9ed5997468d-1a2b3c4d"), so
+        # the bot NAME is the id-format digest (always 28 chars, unique per key
+        # by construction) and the descriptive composite label rides the
+        # bot's description instead.
+        bot_name = bot_id
+        bot_desc_label = f"{spec.name}-{_idem_digest(idempotency_key, 8)}"
         # A caller-supplied manifest document REPLACES the synthesized
         # persona document: the spec's config_manifest is the full
         # five-category bot_config_manifest exactly as the platform's
@@ -412,7 +418,9 @@ class AvernetBotPlatform(BotPlatform):
                     engine_type=spec.engine or "openclaw",
                     bot_type=spec.bot_type or "personal",
                     bot_name=bot_name,
-                    bot_desc=spec.description or None,
+                    bot_desc=(f"{bot_desc_label} — {spec.description}"
+                              if (spec.description or "").strip()
+                              else bot_desc_label)[:1024],
                     template_validation_mode=BotCreateTemplateValidationMode.PUBLIC,
                     engine_properties={},
                 ),
@@ -710,7 +718,7 @@ class AvernetBotPlatform(BotPlatform):
         except TimeoutError as exc:
             raise ChatTimeoutError(
                 f"engine chat for bot {bot_id} did not finish within "
-                f"{_CHAT_TIMEOUT_SECONDS:.0f}s"
+                f"{self._chat_timeout_seconds:.0f}s"
             ) from exc
 
     def _engine_endpoint(self, bot_id: BotId, owner: str) -> tuple[str, str]:

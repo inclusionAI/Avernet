@@ -507,7 +507,7 @@ class TestBotKindEndToEnd:
         assert run.final_answer == "e2e-bot-done"
 
         agents = repos["agent"].list_by_run(dm.RunId(run_id), TENANT)
-        assert [a.name for a in agents] == ["surveyor"]
+        assert [a.name.split("_", 1)[0] for a in agents] == ["surveyor"]
         assert all(a.status is dm.AgentStatus.COMPLETED for a in agents)
 
         results = repos["result"].list_by_run(dm.RunId(run_id), TENANT)
@@ -528,8 +528,10 @@ class TestBotKindEndToEnd:
         assert bot["bot_id"] == expected_id
         assert bot["status"] == "ACTIVE"
         assert bot["owner_id"] == OWNER
-        assert bot["bot_desc"] == "swarm surveyor persona"
-        assert bot["bot_name"] == f"surveyor-{expected_id[12:20]}"
+        assert bot["bot_desc"].endswith("swarm surveyor persona")
+        assert bot["bot_desc"].startswith("surveyor-")
+        # Id-format naming contract: bot_name IS the derived persona id.
+        assert bot["bot_name"] == expected_id
 
         job = seam.find_job(entity_id=OWNER, bot_id=expected_id)
         assert job is not None and job.status is TaskStatus.SUCCEEDED

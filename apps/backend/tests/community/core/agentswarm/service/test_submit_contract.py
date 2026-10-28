@@ -397,7 +397,8 @@ class TestSubmitterDetach:
         assert _dispatch_status(db, run_id) == "DONE"
         rid = dm.RunId(run_id)
         agents = env.agent_repo.list_by_run(rid, TID)
-        assert [a.name for a in agents] == ["a1"]
+        # Spawn-local composite name: base stem carries the envelope name.
+        assert [a.name.split("_", 1)[0] for a in agents] == ["a1"]
         assert agents[0].status is dm.AgentStatus.COMPLETED
         assert len(env.result_repo.list_by_run(rid, TID)) == 1
         assert any(

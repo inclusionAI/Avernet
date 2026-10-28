@@ -31,8 +31,8 @@ class LLMBackedSubagent:
         self.executor_id = spawn_digest(
             str(run.run_id), str(agent_id), attempt, 16)
         self.executor_name = (
-            f"{spec.name}-"
-            f"{spawn_digest(str(run.run_id), str(agent_id), attempt, 8)}"
+            f"{spec.name}_"
+            f"{spawn_digest(str(run.run_id), str(agent_id), attempt, 12)}"
         )
 
     async def setup(self) -> None:
