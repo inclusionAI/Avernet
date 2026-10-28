@@ -1,0 +1,22 @@
+autocoding/README.md
+  h_109ba21d0fda5e 14,79-80
+autocoding/skills/teamclaw-cdo-patrol/SKILL.md
+  h_109ba21d0fda5e 3,6,8,11,18,46,48,50-58,62
+autocoding/skills/teamclaw-cdo-patrol/assets/dima-template.md
+  h_109ba21d0fda5e 43
+autocoding/skills/teamclaw-cdo-patrol/assets/report-template.md
+  h_109ba21d0fda5e 1,3,5-10,12-16,18,20,22,24-32,34-38,40,42,44,46,48-51,53,55-58
+autocoding/skills/teamclaw-cdo-patrol/references/application-scope.md
+  h_109ba21d0fda5e 56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bc144b6448533d7c483709a056bdb28bd0a5e806",
+  "prompts": {},
+  "humans": {
+    "h_109ba21d0fda5e": {
+      "author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}
