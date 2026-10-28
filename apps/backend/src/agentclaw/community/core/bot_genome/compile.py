@@ -102,7 +102,8 @@ def compile_spec(spec: GenomeSpec, content: ContentReader) -> DesiredState:
             identity=Declaration(tuple(DesiredIdentityFile(e.type, ContentRef(e.digest)) for e in spec.persona)),
             resources=Declaration(tuple(_resource(e) for e in spec.resources)),
             skills=Declaration(tuple(DesiredSkill(e.name, _skill_source(e)) for e in spec.skills)),
-            mcp=Declaration(tuple(_mcp(e) for e in spec.tools.mcp)),
+            # A revision records the bot's own MCP servers, never the platform defaults: delivery keeps those.
+            mcp=Declaration(tuple(_mcp(e) for e in spec.tools.mcp), keeps_platform_defaults=True),
         )
     except ValueError as exc:
         raise NotAppliable([Reason("not_appliable", "spec", f"the revision cannot be delivered as recorded: {exc}")]) from exc
