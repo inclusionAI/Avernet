@@ -114,8 +114,9 @@ antlogs 可查；服务端观测链（Engine /rpc 成功率 + wire 失败 taxono
 ## 5. 明确不在本设计内
 
 - 前端总闸打开（构建 ARG `A2A_CLIENT_DEFAULT` 注入）——发布工程操作，非代码；
-- BaaS `bot_run.a2a_client_mode`（服务端→引擎路径，独立灰，正交不动）；
-- OpenAPI 第三方消费面 `get_ws_info_by_bot_uuid`（由 BaaS 侧 mode 自行治理）；
+- BaaS `bot_run.a2a_client_mode`（服务端→引擎路径，独立灰，与白名单的运维协同见 §7；按人白名单在服务端路径不成立——调用链无个人身份可判，物理上只能全局三态）；
+- OpenAPI 第三方消费面 `get_ws_info_by_bot_uuid`：有调用方身份、技术上可接 gate，
+  本期按"简化优先"不扩；如后续要按名单灰第三方签发面，增量接 gate 即可（判定/测试模式全部现成）；
 - 前端埋点/上报体系（百分比大档阶段再立项）；
 - 全量切流的前置判据（附件/文件引用按能力回退 P0 + 遗留任务 UI 闭环 P0）——
   本设计提供载体，切流时点由运营按前置判据拍板。
@@ -132,3 +133,51 @@ antlogs 可查；服务端观测链（Engine /rpc 成功率 + wire 失败 taxono
 - DI wiring：devices_module 与 singlebox 工厂注入 repo 形态 gate；
 - 前端：bootstrap 双入口拒绝（不推导、不探测、缓存命中不构造）、
   连接响应 `a2a_withheld` 读取透传；存量契约快照与阶段二连接测试零回归。
+
+## 7. 上线操作卡（运维协同版）
+
+两条链路、两个键、各有现成 HTTP 运维面，**全部远程操作、不碰数据库、不发版**：
+
+| 链路 | 键（存储） | 运维面 | 生效节奏 |
+|---|---|---|---|
+| 聊天（浏览器→引擎，按人） | `a2a_issuance_gray`（backend `ac_config_item`） | `POST /api/v1/config/set`（upsert） | 下次连接签发，**秒级** |
+| 管理接口/服务端（BaaS bot_run→引擎，全局） | `bot_run.a2a_client_mode`（BaaS `baas_system_config`） | `POST /api/v1/system-configs` 首建 / `PUT /api/v1/system-configs/{key}` 改值 | **排干式**：池中连接无活跃会话后重建 |
+
+### 动作 ① 开白名单（灰度开始）
+
+两笔调用，环境各做一遍（env 不传默认当前环境）：
+
+```jsonc
+// backend：名单内的用户聊天走 A2A
+{ "category": "system", "config_key": "a2a_issuance_gray",
+  "config_value": "{\"enabled\":true,\"mode\":\"whitelist\",\"users\":[\"240841\"]}" }
+// BaaS：服务端调用走 A2A，探测失败自动回 v3（grey 即安全灰度形态）
+{ "conf_key": "bot_run.a2a_client_mode", "conf_value": "grey" }
+```
+
+**顺序铁律不变：先配 backend 白名单、再放开前端总闸（发前端 ARG 镜像那一步）。**
+
+### 动作 ② 抬档
+
+只动 backend：`config_value` 改 `{"enabled":true,"mode":"percent","percent":10}` → 50。
+BaaS 保持 `grey`；`on`（探测失败抛错）留到阶段三验收后拍板。
+
+### 动作 ③ 回滚
+
+两笔都做，别只改一边：
+
+- backend：`{"enabled":true,"mode":"whitelist","users":[]}` —— 新连接秒级全回 v3
+- BaaS：`conf_value` 改 `"off"` —— 活跃会话跑完、连接重建后回 v3（软着陆）
+
+### 观察面分工
+
+- 聊天链路：backend 日志 `[a2a_gray] decision=allow|withhold ...` + 签发响应
+  `a2a_withheld`；试点用户定向反馈
+- 服务端链路：引擎 `/rpc` 流量来源分布与失败率
+- 生效边界：两条链路都不打断在途任务；"秒级"仅对新连接成立
+
+### 记忆三句话
+
+1. **聊天看人（白名单、秒级）、服务端看全局（grey、排干式）** ——物理差异，不是复杂度
+2. 回滚是两笔，各管各的层，关一层不关另一层
+3. `{"enabled":false}` 是全量解除；漏写 `enabled`/空值不是关闭，是全部拒发（fail-closed）
