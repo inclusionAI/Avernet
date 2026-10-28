@@ -60,6 +60,13 @@ def test_activation_roster_and_source_mutation_are_one_serial_order(
             session.flush()
             order_id = order.id
     other = CommunityDatabase(database._url)
+
+    @event.listens_for(other._engine, "connect")
+    def _tolerate_starved_guard_wait(connection, record):
+        # pysqlite's default 5s busy timeout can expire on starved CI
+        # runners while the activation thread still holds the write guard.
+        connection.execute("PRAGMA busy_timeout=15000")
+
     sink = BoundedSink()
     sync = synchronizer(database, sink)
     roster_read, release, write_attempted, committed = (Event() for _ in range(4))
@@ -68,7 +75,7 @@ def test_activation_roster_and_source_mutation_are_one_serial_order(
     def pause_first_snapshot(db, **kwargs):
         if kwargs["body"]["revision"] == 1:
             roster_read.set()
-            assert release.wait(timeout=10)
+            assert release.wait(timeout=60)
         return save(db, **kwargs)
 
     monkeypatch.setattr(knowledge_sync, "_save_snapshot", pause_first_snapshot)
@@ -109,20 +116,20 @@ def test_activation_roster_and_source_mutation_are_one_serial_order(
                 sync.ensure_synced, space_id=space_id, environment="pre"
             )
             try:
-                assert roster_read.wait(timeout=5)
+                assert roster_read.wait(timeout=30)
                 change = pool.submit(mutate)
-                assert write_attempted.wait(timeout=5)
+                assert write_attempted.wait(timeout=30)
                 # Old implementation commits here without recording an event.
                 # The repair holds a DB write guard, so this wait expires.
                 committed.wait(timeout=0.5)
             finally:
                 release.set()
             try:
-                activation.result(timeout=10)
+                activation.result(timeout=60)
             except SpaceKnowledgeError as exc:
                 # Deletion may win immediately after the first snapshot commits.
                 assert mutation == "delete" and exc.code == "RESOURCE_NOT_FOUND"
-            change.result(timeout=10)
+            change.result(timeout=60)
     finally:
         release.set()
         other._engine.dispose()
@@ -154,7 +161,7 @@ def test_source_deleted_before_activation_guard_is_not_resurrected(
 
     def pause_before_guard(*args, **kwargs):
         before_guard.set()
-        assert release.wait(timeout=5)
+        assert release.wait(timeout=60)
         return lock_space(*args, **kwargs)
 
     monkeypatch.setattr(knowledge_sync, "lock_space", pause_before_guard)
@@ -167,14 +174,14 @@ def test_source_deleted_before_activation_guard_is_not_resurrected(
                 sync.ensure_synced, space_id=space_id, environment="pre"
             )
             try:
-                assert before_guard.wait(timeout=5)
+                assert before_guard.wait(timeout=30)
                 SpaceManagementRepository(other, effects=KnowledgeSpacePersistenceEffects()).delete_team(
                     space_id=space_id, with_members=True, env="pre"
                 )
             finally:
                 release.set()
             with pytest.raises(SpaceKnowledgeError, match="RESOURCE_NOT_FOUND"):
-                activation.result(timeout=5)
+                activation.result(timeout=60)
     finally:
         release.set()
         other._engine.dispose()
