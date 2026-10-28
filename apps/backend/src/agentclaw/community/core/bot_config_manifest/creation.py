@@ -25,7 +25,9 @@ from __future__ import annotations
 from typing import Any, Callable, Optional
 
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import MANIFEST_STATE
-from agentclaw.community.core.bot_config_manifest.binding import bound_manifest_state
+from agentclaw.community.core.bot_config_manifest.binding import (
+    DIGEST_ENCODING, ManifestBindingMismatchError, ManifestRecoveryRefusedError, bound_manifest_state,
+)
 from agentclaw.community.core.apply_engine.triggers import (
     CREATE_ON_CONTAINER_TRIGGER,
     CREATE_PRE_CONTAINER_TRIGGER,
@@ -39,7 +41,7 @@ from agentclaw.community.core.apply_engine.order import (
 )
 from agentclaw.community.core.bot_config_manifest.compiler.declared import declared_entries
 from agentclaw.community.core.apply_engine.outcomes import (
-    ApplyConstruct,
+    ApplyStatus, ApplyConstruct,
 )
 from agentclaw.community.core.apply_engine.run.service_protocol import (
     ApplyRunServiceProtocol,
@@ -57,7 +59,7 @@ from agentclaw.community.core.bot_config_manifest.schema import (
 from agentclaw.community.core.bot_management.manifest_seam import (
     ManifestCreationSeam,
 )
-from agentclaw.community.core.task_queue.types import TaskRecord
+from agentclaw.community.core.task_queue.types import TaskRecord, TaskStatus, TERMINAL_STATUSES
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
@@ -316,6 +318,44 @@ class BotCreationManifestSeam(ManifestCreationSeam):
 
         record = self._manifests.get(entity_id=entity_id, bot_id=bot_id)
         verify_bound_document(record.document if record else None, manifest_digest)
+
+    def recovery_manifest_digest(self, *, entity_id: str, bot_id: str) -> str:
+        """Retry the original stored input without recreating or rewriting it."""
+        job = self.find_job(entity_id=entity_id, bot_id=bot_id)
+        if job is None or job.status not in TERMINAL_STATUSES:
+            raise ManifestRecoveryRefusedError("no terminal creation is available to recover")
+        binding = (job.payload.get("spec") or {}).get("manifest_binding")
+        if not isinstance(binding, dict):
+            raise ManifestRecoveryRefusedError("creation has no bound Manifest")
+        if (binding.get("entity_id") != entity_id or binding.get("bot_id") != bot_id
+                or binding.get("tenant") != get_current_avernet_tenant()
+                or binding.get("env") != get_current_env()
+                or binding.get("digest_encoding") != DIGEST_ENCODING):
+            raise ManifestBindingMismatchError("bound Manifest storage reference does not match creation")
+        state = bound_manifest_state(binding.get("manifest_digest"))
+        origin = (job.payload.get("spec") or {}).get("expert_origin")
+        if origin is not None and (
+            not isinstance(origin, dict)
+            or origin.get("manifest_digest") != binding["manifest_digest"]
+            or origin.get("digest_encoding") != DIGEST_ENCODING
+        ):
+            raise ManifestBindingMismatchError("expert origin does not match its Manifest binding")
+        report = self._applies.last_apply(entity_id=entity_id, bot_id=bot_id)
+        creation_report = report is not None and report.trigger in (
+            CREATE_PRE_CONTAINER_TRIGGER, CREATE_ON_CONTAINER_TRIGGER,
+        )
+        recovery_report = report is not None and report.state == state
+        failed_report = report is not None and report.status in (ApplyStatus.FAILED, ApplyStatus.PARTIAL)
+        # A failed job can precede phase B's enqueue; the pre-container report
+        # then succeeded, but the original initialization still needs recovery.
+        failed_job = job.status in (TaskStatus.FAILED, TaskStatus.TIMED_OUT) and (
+            report is None or (creation_report and report.trigger == CREATE_PRE_CONTAINER_TRIGGER
+                               and report.status is ApplyStatus.SUCCEEDED)
+        )
+        if not (failed_job or (failed_report and (creation_report or recovery_report))):
+            raise ManifestRecoveryRefusedError("creation is running or already configured; use ordinary Apply")
+        self.verify_binding(entity_id=entity_id, bot_id=bot_id, manifest_digest=binding["manifest_digest"])
+        return binding["manifest_digest"]
 
     def apply_pre_container(
         self,

@@ -40,3 +40,23 @@ OpenClaw沿原身份投递；Claude Code按声明顺序、源文件名标题及�
 `CLAUDE.md`。未证明身份运行消费的Teclaw组合在创建前明确拒绝；其他当前构建不支持的
 Manifest扩展同样明确拒绝，不删除作者声明以降级通过。服务Bot保持原草稿及发布流程，
 创建/配置完成不代表已发布生产。
+
+
+## 原 Bot 配置恢复与当前报告
+
+Bot 已存在且创建初始化配置失败（包括 `PARTIAL`）时，在原有 owner-only
+`POST /openapi/v1/bots/{bot_id}/config-manifest/apply?user_id=...&recover_creation=true`
+显式恢复。此选择器只适用于同一用户存储作用域下的原绑定失败任务；任务仍运行、
+已配置成功、没有原绑定，或存储引用/清单摘要不一致时返回标准409。
+`dry_run=true` 可在同一绑定约束下预览。缺省 `recover_creation=false` 保持现有普通
+Apply 语义，用户创建完成后的配置不永久锁定初始模板。
+
+恢复返回202和新的 `apply_id`，沿既有
+`GET .../config-manifest/applies/{apply_id}` 查询该报告；只有 `SUCCEEDED` 表示配置完成，
+`PARTIAL` 与 `FAILED` 都保持配置失败。创建状态接口继续描述原创建任务；正式前端在
+创建结果及 Bot 管理的“专家配置与恢复”入口读取当前 `last-apply`，展示新编号和条目错误。
+恢复不重新创建 Bot、不改来源或累计次数、不重新编译 Git HEAD，也不回写旧清单。
+
+用户显式重试沿原生 Replace：仅省略类目才不操作，显式 resources（含 `[]`）清理
+workspace 非保护项后写入；不承诺保留所有用户输出。Git 模板更新或下架本身不触发
+已有 Bot 再 Apply，也不下线已有 Bot。首次创建 POST 结果未知且没有 bot_id 的边界保持不变。

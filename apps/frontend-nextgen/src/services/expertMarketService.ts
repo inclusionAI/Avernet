@@ -6,6 +6,9 @@ import {
   requestExpertPage,
   requestExpertBotCreation,
   requestExpertBotCreationStatus,
+  requestExpertBotRecovery,
+  requestExpertBotApplyReport,
+  requestExpertBotLastApply,
 } from './backendApi/expertController';
 import { BackendRequestError } from './backendApi/httpClient';
 import { type BackendApiEnvelope, isEnvelopeSuccess } from './backendApi/types';
@@ -51,10 +54,18 @@ export async function createExpertBot(
 }
 export async function getExpertBotCreationStatus(botId: string): Promise<ExpertBotCreationStatus> {
   const path = `/openapi/v1/bots/${encodeURIComponent(botId)}/with-manifest/status`;
-  return catalogData(
-    await requestExpertBotCreationStatus(botId),
-    path,
-  );
+  const creation = catalogData(await requestExpertBotCreationStatus(botId), path);
+  if (!['READY', 'APPLY_FAILED'].includes(creation.state)) return creation;
+  const latest = catalogData(await requestExpertBotLastApply(botId), 'config-manifest/last-apply');
+  // The creation endpoint deliberately describes its original task. Subsequent
+  // Apply reports are the fact source for current configuration, including a
+  // recovery started before this page was reopened.
+  if (!latest.apply_id || !['explicit', 'put'].includes(latest.trigger || '')) return creation;
+  return {
+    ...creation, apply: latest, message: undefined,
+    recoverable: latest.state?.kind === 'manifest' && Boolean(latest.state.reference),
+    state: latest.result === 'RUNNING' ? 'APPLYING' : latest.result === 'SUCCEEDED' ? 'READY' : 'APPLY_FAILED',
+  };
 }
 
 
@@ -62,4 +73,13 @@ export async function getExpertBotCreationStatus(botId: string): Promise<ExpertB
 export function classifyExpertSubmissionFailure(failure: unknown): 'rejected' | 'unknown' {
   return failure instanceof BackendRequestError && failure.status !== undefined && failure.status >= 400 && failure.status < 500
     ? 'rejected' : 'unknown';
+}
+
+export async function recoverExpertBot(botId: string) {
+  const accepted = catalogData(await requestExpertBotRecovery(botId), 'config-manifest/apply');
+  if (!accepted.apply_id) throw new Error('配置恢复响应缺少 Apply 编号，请先在 Bot 管理中确认结果。');
+  return accepted;
+}
+export async function getExpertBotApplyReport(botId: string, applyId: string) {
+  return catalogData(await requestExpertBotApplyReport(botId, applyId), 'config-manifest/applies');
 }

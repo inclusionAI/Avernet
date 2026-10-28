@@ -58,6 +58,7 @@ from agentclaw.community.api.bot_startup_script_service import (
     StartupScriptTooLargeError,
 )
 from agentclaw.community.api.bot_config_manifest_service import (
+    ManifestBindingMismatchError, ManifestRecoveryRefusedError,
     MAX_DOCUMENT_BYTES,
     ManifestNotEncodableError,
     ManifestTooLargeError,
@@ -683,6 +684,8 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # holds the lock is an ordinary, retryable state — not an internal error.
     # Unregistered, ``@envelope_errors`` re-raised it and the caller got a 500
     # where the route's own documentation promises a 409.
+    ManifestBindingMismatchError: (409, "Bound Manifest changed"),
+    ManifestRecoveryRefusedError: (409, "Creation recovery unavailable"),
     ApplyInProgressError: (409, "An apply is already running for this bot"),
     # W9's CLI tools. ``Refused`` is 422 rather than 400 for the reason the
     # manifest's own validation error is: the request was well-formed and the
@@ -861,6 +864,8 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     SkillParameterValidationError: 422101,
     ManifestValidationError: 422109,
     ApplyInProgressError: 409109,
+    ManifestBindingMismatchError: 409112,
+    ManifestRecoveryRefusedError: 409113,
     CliToolConflictError: 409110,
     CliToolUnsupportedError: 409111,
     CliToolRefusedError: 422110,
