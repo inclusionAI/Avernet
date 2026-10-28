@@ -17,12 +17,15 @@ provides:
   - "Plugin marker"
   - "@plugin_impl decorator + Mode/Flavor enums"
   - "IMPL_REGISTRY"
+  - "BcsManagersPlugin + BcsManagersError — full-replace delivery of a Bot's BCS manager set"
+  - "ManagerSyncCoordinator + coordination DTOs (Lease / Attempt / ClaimStatus / ClaimResult, CoordinationUnavailable / CoordinationLost)"
 consumes:
   []
 internal_dependencies:
   - agentclaw.community.kernel.knowledge
   - agentclaw.community.kernel.file_count
   - agentclaw.community.kernel.publish_ignore
+  - agentclaw.community.kernel.bot_manager_sync    # manager sync DTO/enum dictionary typed in both manager sync Protocols
   - agentclaw.community.core.base
   - agentclaw.community.core.service_bot.services.baas_service  # BAAS dataclass (BotWsConnectionInfoResponse) typed in BaasServiceProtocol
   - agentclaw.community.core.service_bot.types                  # PublishStage enum, default value in BaasServiceProtocol signatures
@@ -136,6 +139,24 @@ The default implementation preserves configured addresses; the community runtime
 implementation selects the existing Claude Code Engine source layout. The
 factory's existing locator/device-I/O adapters remain responsible for address
 translation, including enterprise host addresses and Teclaw namespaces.
+
+`BcsManagersPlugin` and `ManagerSyncCoordinator` are the two outbound Protocols
+of the bot manager sync group. `replace_managers` is the only write: it
+delivers one full `ManagerSnapshot` per attempt under an explicit
+`timeout_seconds`, and every failure surfaces as `BcsManagersError(kind, code)`
+carrying the stable `DeliveryFailure` classification — never the raw response
+body. `ManagerSyncCoordinator` serializes senders with a holder-token lease
+plus two independent markers: a TTL-less in-flight record that outlives lease
+expiry, and an owner-hold marker with its own id that survives both lease
+expiry and a finishing sync. `read_blocked` returning `None` only means "read
+succeeded, no marker"; a substrate failure raises `CoordinationUnavailable`,
+never a False/None. `clear_confirmed` is controlled recovery (CAS-delete of
+exactly one matching marker), not a business entry point. Their consumer
+conformance suites drive the real `BotManagerSyncService` through the
+test-profile `world` fixture in `tests/community/contracts/`
+(`test_bcs_managers.py`, `test_manager_sync_coordination.py`); the
+multi-client and real-EVAL evidence lives in
+`tests/community/integration/test_manager_sync_redis.py`.
 
 
 ## Token scope V2 and staff-directory errors

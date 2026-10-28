@@ -23,6 +23,9 @@ from agentclaw.community.core.bot_collaborator.models import (
 from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
     CollaboratorService,
 )
+from agentclaw.community.core.bot_collaborator.manager_sync.dispatcher import (
+    DisabledBotManagerSync,
+)
 from agentclaw.community.core.spaces.errors import SpaceAccessDeniedError
 from agentclaw.community.core.spaces.models import SpaceType
 
@@ -74,6 +77,7 @@ def dependencies():
         passport_plugin=Mock(),
         credentials_admins_writer=Mock(),
         space_access_service=space_access,
+        manager_sync=DisabledBotManagerSync(),
     )
     service.on_collaboration_changed = Mock()
     return service, collaborator_repo, bot_repo, space_access

@@ -1,0 +1,249 @@
+"""BotManagerSyncLifecycle — the dedicated worker-loop owner.
+
+One pthread hosts exactly one asyncio loop; the four dispatcher workers,
+the bounded default executor the service's ``asyncio.to_thread`` calls
+run through, and every ``AsyncClient`` the delivery plugin lazily
+creates, live and die on that one loop. Nothing of the syncer ever runs
+on the FastAPI app loop.
+
+Startup/shutdown posture (each pinned by a test):
+
+- **Startup never aborts the backend.** A failed start (thread, loop,
+  executor, worker spawn) only closes the syncer's admission — callers
+  get REJECTED, matching "unavailable" — and alerts; the process keeps
+  booting. Structural config errors are a different failure: they raise
+  at config resolution, per the repo's config policy.
+- **Shutdown stops admission first, drains bounded, then ends the
+  loop.** In-flight rounds are cancelled inside the service, which is
+  what keeps every unknown marker intact; ``bcs.aclose()`` runs on the
+  worker loop (pooled clients must close where they were created).
+  Closing the HTTP pool never converts an unknown into a success — the
+  dispatcher never confirms anything during teardown.
+- **The disabled posture holds zero resources.** The composition root
+  binds :class:`DisabledBotManagerSyncLifecycle` whenever the feature is
+  off or its stack is unavailable, so lifecycle discovery still resolves
+  a participant without spinning a thread loop for a disabled feature.
+"""
+from __future__ import annotations
+
+import asyncio
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
+from agentclaw.community.core.bot_collaborator.manager_sync.dispatcher import (
+    BotManagerSyncDispatcher,
+)
+from agentclaw.community.kernel.lifecycle import LifecycleBase
+from agentclaw.community.log import get_logger
+from agentclaw.community.plugin_api.bcs_managers import BcsManagersPlugin
+
+logger = get_logger()
+
+#: Name of the one thread owning the syncer's asyncio loop.
+_WORKER_LOOP_THREAD_NAME = "manager-sync-loop"
+
+#: Upper bound of the loop-owned default executor: the service's
+#: ``to_thread`` calls (coordinator interactions, SQL reads) run here,
+#: four workers deep — never unbounded.
+_EXECUTOR_MAX_WORKERS = 8
+
+#: Bounded waits (seconds) for the loop thread / worker handshake.
+_LOOP_READY_TIMEOUT_SECONDS = 5.0
+_ATTACH_TIMEOUT_SECONDS = 5.0
+_STOP_TIMEOUT_SECONDS = 10.0
+_JOIN_TIMEOUT_SECONDS = 10.0
+
+#: How long shutdown lets already-admitted work finish before the
+#: worker tasks are cancelled. Bounded, never "wait until the queue is
+#: empty no matter what".
+_SHUTDOWN_DRAIN_SECONDS = 10.0
+
+
+class BotManagerSyncLifecycle(LifecycleBase):
+    """Own the dispatcher's thread, loop and executor; close bcs there."""
+
+    def __init__(
+        self,
+        dispatcher: BotManagerSyncDispatcher,
+        bcs: BcsManagersPlugin,
+    ) -> None:
+        if not isinstance(dispatcher, BotManagerSyncDispatcher):
+            raise TypeError("manager-sync lifecycle requires the real dispatcher")
+        self._dispatcher = dispatcher
+        self._bcs = bcs
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._thread: threading.Thread | None = None
+        self._started_lock = threading.Lock()
+        self._started = False
+
+    # -- Lifecycle ----------------------------------------------------------------
+
+    async def startup(self) -> None:
+        """Start the dedicated loop + workers; never raise to the boot.
+
+        Config-structural errors never reach here (they fail at config
+        resolution); everything that can go wrong at runtime makes the
+        syncer unavailable — admission closed, alert logged — and the
+        backend finishes its startup regardless.
+        """
+        with self._started_lock:
+            if self._started:
+                return
+        try:
+            await asyncio.to_thread(self._start_background)
+        except Exception:
+            logger.error(
+                "[MANAGER-SYNC-LIFECYCLE] startup_failed syncer unavailable "
+                "(worker loop did not come up cleanly)"
+            )
+            try:
+                self._dispatcher.close_admission()
+            except Exception:  # noqa: BLE001 — best-effort degrade
+                logger.error("[MANAGER-SYNC-LIFECYCLE] close_admission_failed")
+            # Partial resources (thread/loop) must not outlive the
+            # failed start: stop the loop where it runs and join it.
+            await asyncio.to_thread(self._stop_on_worker_loop)
+            return
+        with self._started_lock:
+            self._started = True
+        logger.info("[MANAGER-SYNC-LIFECYCLE] started")
+
+    async def shutdown(self) -> None:
+        """Close admission, drain bounded, stop the loop, close bcs there.
+
+        Unknown markers are never cleared here: a cancellation inside a
+        running round keeps the service's own UNKNOWN posture, and no
+        pool close path in this shutdown confirms anything.
+        """
+        with self._started_lock:
+            if not self._started:
+                return
+            self._started = False
+        self._dispatcher.close_admission()
+        try:
+            drained = await self._dispatcher.drain(_SHUTDOWN_DRAIN_SECONDS)
+            if drained is False:
+                logger.warning(
+                    "[MANAGER-SYNC-LIFECYCLE] drain_timeout — cancelling "
+                    "in-flight rounds; unknown markers stay untouched"
+                )
+        except Exception:  # noqa: BLE001 — teardown must not blow up shutdown
+            logger.error("[MANAGER-SYNC-LIFECYCLE] drain_failed")
+        # Stop workers + close the delivery pool ON the worker loop, so a
+        # lazily-created AsyncClient is closed where it was created.
+        await asyncio.to_thread(self._stop_on_worker_loop)
+
+    async def bootstrap(self) -> None:
+        return None
+
+    async def teardown(self) -> None:
+        return None
+
+    # -- internals -----------------------------------------------------------------
+
+    def _start_background(self) -> None:
+        """Spawn the loop thread; attach the dispatcher onto that loop."""
+        ready = threading.Event()
+        loop_holder: dict[str, asyncio.AbstractEventLoop] = {}
+
+        def _run_loop() -> None:
+            loop = asyncio.new_event_loop()
+            executor = ThreadPoolExecutor(
+                max_workers=_EXECUTOR_MAX_WORKERS,
+                thread_name_prefix="manager-sync-exec",
+            )
+            loop.set_default_executor(executor)
+            asyncio.set_event_loop(loop)
+            loop_holder["loop"] = loop
+            ready.set()
+            try:
+                loop.run_forever()
+            finally:
+                try:
+                    loop.run_until_complete(loop.shutdown_default_executor())
+                finally:
+                    loop.close()
+
+        thread = threading.Thread(
+            target=_run_loop, name=_WORKER_LOOP_THREAD_NAME, daemon=True
+        )
+        thread.start()
+        if not ready.wait(_LOOP_READY_TIMEOUT_SECONDS):
+            raise RuntimeError("manager-sync worker loop did not become ready")
+        self._loop = loop_holder["loop"]
+        self._thread = thread
+        # Bind the dispatcher and confirm its workers actually spawned —
+        # the coroutine runs on the dedicated loop, this thread only waits.
+        fut = asyncio.run_coroutine_threadsafe(
+            self._dispatcher.attach(), self._loop
+        )
+        fut.result(timeout=_ATTACH_TIMEOUT_SECONDS)
+
+    def _stop_on_worker_loop(self) -> None:
+        """Cancel workers and close bcs on their loop, then stop it."""
+        loop = self._loop
+        if loop is None:
+            return
+
+        async def _shutdown_on_loop() -> None:
+            await self._dispatcher.stop()
+            await self._bcs.aclose()
+
+        fut = asyncio.run_coroutine_threadsafe(_shutdown_on_loop(), loop)
+        try:
+            fut.result(timeout=_STOP_TIMEOUT_SECONDS)
+        except Exception:  # noqa: BLE001 — teardown must not blow up shutdown
+            logger.error("[MANAGER-SYNC-LIFECYCLE] worker_loop_stop_failed")
+        try:
+            loop.call_soon_threadsafe(loop.stop)
+        except RuntimeError:
+            pass  # already stopped
+        thread = self._thread
+        if thread is not None:
+            thread.join(timeout=_JOIN_TIMEOUT_SECONDS)
+            if thread.is_alive():
+                logger.warning(
+                    "[MANAGER-SYNC-LIFECYCLE] worker_loop_thread_lingers"
+                )
+        self._teardown_worker_loop()
+
+    def _teardown_worker_loop(self) -> None:
+        """Clear the references; the thread's finally closed the loop."""
+        self._loop = None
+        self._thread = None
+
+
+class DisabledBotManagerSyncLifecycle(BotManagerSyncLifecycle):
+    """Zero-resource participant for the disabled / unavailable posture.
+
+    The composition root binds this when the feature is off or the
+    stack could not resolve, so lifecycle discovery still resolves a
+    (no-op) participant and never sees a raise. Deliberately calls no
+    ``__init__``super — there is no dispatcher or delivery pool to own.
+    """
+
+    def __init__(self, reason: str = "disabled") -> None:
+        # No super().__init__: this posture owns nothing at all. The
+        # reason is a stable diagnostic word (never secret material).
+        self._reason = reason
+
+    def __repr__(self) -> str:  # pragma: no cover — debug aid only
+        return f"<DisabledBotManagerSyncLifecycle reason={self._reason!r}>"
+
+    async def startup(self) -> None:
+        return None
+
+    async def shutdown(self) -> None:
+        return None
+
+    async def bootstrap(self) -> None:
+        return None
+
+    async def teardown(self) -> None:
+        return None
+
+
+__all__ = [
+    "BotManagerSyncLifecycle",
+    "DisabledBotManagerSyncLifecycle",
+]

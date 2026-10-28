@@ -55,6 +55,9 @@ def _common_test_doubles() -> list[Module]:
     from agentclaw.community.di.modules.infrastructure.test.bot_publish_approval import (
         TestBotPublishApprovalModule,
     )
+    from agentclaw.community.di.modules.infrastructure.test.bot_manager_sync import (
+        TestBotManagerSyncModule,
+    )
     from agentclaw.community.di.modules.infrastructure.test.eval_env import (
         TestEvalEnvModule,
     )
@@ -78,6 +81,10 @@ def _common_test_doubles() -> list[Module]:
         TestApprovalWorkflowModule(),
         TestStaffDeptModule(),
         TestBotPublishApprovalModule(),
+        # Manager-sync doubles (recording BCS + memory coordination). The
+        # dispatcher itself stays DISABLED by default — only tests that
+        # install an enabled manager-sync config start workers.
+        TestBotManagerSyncModule(),
         # WorkspaceHostingService stub (offline DIMA) — corp-free.
         TestingAicodingModule(),
         # SQLite + per-module repos (TestingDatabaseModule owns the SQLite engine;

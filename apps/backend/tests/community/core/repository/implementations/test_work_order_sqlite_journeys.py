@@ -11,6 +11,9 @@ import pytest
 from sqlalchemy import event
 from sqlalchemy.orm import Session
 
+from agentclaw.community.core.bot_collaborator.manager_sync.dispatcher import (
+    DisabledBotManagerSync,
+)
 from agentclaw.community.core.bot_collaborator.services.member_management_capability import (
     MemberManagementCapabilityService,
 )
@@ -121,6 +124,7 @@ def world(tmp_path, monkeypatch):
         staff,
         handler,
         WorkOrderDecisionCallbackDispatcher(http, resign_principal=lambda value: value),
+        DisabledBotManagerSync(),
     )
     entry = SpaceSkillEditorRequestService(repo, skills, service, staff, lambda: "dev")
     yield SimpleNamespace(

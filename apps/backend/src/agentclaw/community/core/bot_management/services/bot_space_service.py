@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from injector import inject
 
+from agentclaw.community.api.bot_manager_sync import BotManagerSyncProtocol
 from agentclaw.community.core.bot_management.bot_space import (
     BotSpaceAccessProtocol,
     BotSpaceAssignmentResult,
@@ -21,7 +22,12 @@ from agentclaw.community.core.spaces.models import SpaceType
 from agentclaw.community.core.bot_management.bot_space_service_protocol import (
     BotSpaceServiceProtocol,
 )
+from agentclaw.community.kernel.bot_manager_sync import SyncReason
+from agentclaw.community.log import get_logger
+from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
+
+logger = get_logger()
 
 
 class BotSpaceService(BotSpaceServiceProtocol):
@@ -37,10 +43,12 @@ class BotSpaceService(BotSpaceServiceProtocol):
         repository: BotRepository,
         space_access: BotSpaceAccessProtocol,
         bot_quota: BotQuotaServiceProtocol,
+        manager_sync: BotManagerSyncProtocol,
     ) -> None:
         self._repository = repository
         self._space_access = space_access
         self._bot_quota = bot_quota
+        self._manager_sync = manager_sync
 
     def change_space(
         self,
@@ -124,4 +132,21 @@ class BotSpaceService(BotSpaceServiceProtocol):
             # The Bot may have been deleted between the read and write. Mask it
             # exactly like the initial owner-scoped lookup.
             raise BotNotFoundError(f"Bot not found: {bot_id}")
+        # The assignment is durable — the Bot's Space membership now vouches
+        # for a different collaborator set, so BCS's manager projection may
+        # have moved. Best-effort submit with the EXPLICIT env threaded through
+        # this business call (never re-collapsed to the process env): a
+        # rejected submit leaves the Space change successful.
+        try:
+            self._manager_sync.request_sync(
+                bot_pk=updated["id"],
+                env=env,
+                avernet_tenant=get_current_avernet_tenant(),
+                reason=SyncReason.BOT_SPACE_CHANGED,
+            )
+        except Exception:
+            logger.error(
+                "manager sync notification rejected",
+                extra={"bot_pk": updated.get("id"), "env": env},
+            )
         return BotSpaceAssignmentResult(bot=updated, space=space, changed=True)
