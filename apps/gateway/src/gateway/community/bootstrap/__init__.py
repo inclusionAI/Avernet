@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from dependency_injector.wiring import Provide
 
 from gateway.community.core.access_key import AccessKeyIssuer
-from gateway.community.core.app import AppRegistrar, seed_local_dev_apps
+from gateway.community.core.app import AppRegistrar
 from gateway.community.core.authn import Authenticator
 from gateway.community.core.baas_migration import BaasKeyMigrator
 from gateway.community.core.forwarding import Forwarding
@@ -116,12 +116,6 @@ def bootstrap_app() -> BootstrapResult:
         secret_resolver=container.plugins().secret_resolver(),
     )
     db = container.plugins().database()
-    # Config-gated dev-stack seeding (singlebox): a non-empty
-    # ``user_config.local_dev_apps`` writes exactly the listed deterministic
-    # test apps into the app registry so a local service can authenticate as
-    # a trusted App without an admin HTTP round-trip; an empty list (every
-    # production config) creates nothing.
-    seed_local_dev_apps(db, container.user_config())
     access_key_issuer = build_access_key_issuer(db, principal_signer)
     app_registrar = build_app_registrar(db)
     baas_key_migrator = build_baas_key_migrator(db)
