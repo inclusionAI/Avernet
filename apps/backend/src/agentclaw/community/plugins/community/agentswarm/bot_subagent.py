@@ -112,8 +112,6 @@ class AvernetSubagent:
         # once per bound identity; every park recheck from here is a cheap
         # status poll.
         if self._bot_id is None:
-            if self._setup_delay_seconds > 0:
-                await asyncio.sleep(self._setup_delay_seconds)
             # Per-attempt persona (D-J): the idempotency key carries the in-slice
             # retry index, so a torn-down attempt's row (live or soft-deleted)
             # can never collide with the retry's create; a cross-slice replay of
