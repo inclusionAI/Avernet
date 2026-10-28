@@ -11,8 +11,11 @@ import { CommunityTopicDetail } from '../CommunityTopicDetail';
 import { CommunityTopicList } from '../CommunityTopicList';
 import { PublishTopicModal } from '../PublishTopicModal';
 
-const topicTypeOptions: Array<{ value: CommunityTopicFilter; label: string }> = [
+type CommunityTopicView = CommunityTopicFilter | 'following';
+
+const topicTypeOptions: Array<{ value: CommunityTopicView; label: string; disabledReason?: string }> = [
   { value: 'all', label: '全部' },
+  { value: 'following', label: '关注', disabledReason: '关注功能暂未开放' },
   { value: 'discussion', label: '讨论' },
   { value: 'share', label: '分享' },
   { value: 'poll', label: '投票' },
@@ -76,12 +79,16 @@ export function CommunityPage() {
           </header>
 
           <section className="mt-4 flex flex-wrap items-center gap-3" aria-label="社区主题筛选">
-            <Segmented<CommunityTopicFilter>
+            <Segmented<CommunityTopicView>
               value={community.topicType}
-              onChange={community.setTopicType}
+              onChange={(value) => {
+                if (value === 'following') return;
+                community.setTopicType(value);
+              }}
               aria-label="主题类型"
               options={topicTypeOptions}
-              className="h-9"
+              activeOptionClassName="bg-primary/10 text-primary hover:bg-primary/10"
+              className="h-9 w-full bg-background sm:w-1/3 sm:min-w-[240px] sm:max-w-[50%]"
             />
             <div className="relative w-full min-w-[160px] sm:ml-auto sm:w-40 sm:flex-none">
               <Search
