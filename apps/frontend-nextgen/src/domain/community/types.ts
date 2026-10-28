@@ -12,10 +12,6 @@ export interface CommunityPoll {
   deadlineAt?: string;
 }
 
-export interface CommunityHelp {
-  expectedTime?: string;
-}
-
 export interface CommunityPollStatsOption {
   label: string;
   votes: number;
@@ -31,7 +27,6 @@ export interface CommunityPollStats {
 
 export interface CommunityTopicConfig {
   poll?: CommunityPoll;
-  help?: CommunityHelp;
 }
 
 export interface CommunityTopicSummary {
@@ -133,16 +128,11 @@ export interface CreateCommunityPollInput {
   deadlineAt?: string;
 }
 
-export interface CreateCommunityHelpInput {
-  expectedTime?: string;
-}
-
 export interface CreateCommunityTopicDraft {
   title: string;
   body: string;
   topicType?: CommunityPublishTopicType;
   poll?: CreateCommunityPollInput;
-  help?: CreateCommunityHelpInput;
 }
 
 export interface CreateCommunityTopicInput extends CreateCommunityTopicDraft {

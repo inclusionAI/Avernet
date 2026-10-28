@@ -1,6 +1,5 @@
 import type {
   CommunityAuthor,
-  CommunityHelp,
   CommunityPoll,
   CommunityPollSelection,
   CommunityPollStats,
@@ -26,14 +25,8 @@ export interface CommunityAuthorDto {
   avatar_url?: string | null;
 }
 
-export interface CommunityHelpDto {
-  expected_time?: string | null;
-  [key: string]: unknown;
-}
-
 export interface CommunityTopicConfigDto {
   poll?: CommunityPollDto | null;
-  help?: CommunityHelpDto | null;
   [key: string]: unknown;
 }
 
@@ -164,11 +157,6 @@ function mapPoll(value: CommunityPollDto | null | undefined): CommunityPoll | un
   };
 }
 
-function mapHelp(value: CommunityHelpDto | null | undefined): CommunityHelp | undefined {
-  if (!value) return undefined;
-  return { expectedTime: value.expected_time?.trim() || undefined };
-}
-
 function mapPollStats(
   value: CommunityPollStatsDto | null | undefined,
   configuredOptions: string[],
@@ -227,9 +215,8 @@ function mapTopicConfig(value: CommunityTopicConfigDto | null | undefined) {
   if (!value) return undefined;
   const config = {
     poll: mapPoll(value.poll),
-    help: mapHelp(value.help),
   };
-  if (!config.poll && !config.help) return undefined;
+  if (!config.poll) return undefined;
   return config;
 }
 

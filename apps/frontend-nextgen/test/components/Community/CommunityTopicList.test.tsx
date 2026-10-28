@@ -70,13 +70,16 @@ describe('CommunityTopicList', () => {
     expect(screen.getByText('投票')).toBeInTheDocument();
   });
 
-  test('分享主题显示附件标识，求助主题显示橙色类型标识', () => {
-    renderList({ topics: [{ ...topic, status: 'open', topicType: 'share' }] });
+  test('分享主题显示附件标识，求助主题标题旁显示求助图标', () => {
+    const { unmount } = renderList({ topics: [{ ...topic, status: 'open', topicType: 'share' }] });
     expect(screen.getByRole('img', { name: '分享附件' })).toBeInTheDocument();
     expect(screen.getByText('分享')).toBeInTheDocument();
+    unmount();
 
     renderList({ topics: [{ ...topic, status: 'open', topicType: 'help' }] });
-    expect(screen.getAllByText('求助')).toHaveLength(2);
+    const helpIcon = screen.getByRole('img', { name: '求助' });
+    expect(helpIcon).toHaveClass('text-warning');
+    expect(screen.getAllByText('求助')).toHaveLength(1);
   });
 
   test('已关闭求助显示已解决而不是普通已结帖', () => {
