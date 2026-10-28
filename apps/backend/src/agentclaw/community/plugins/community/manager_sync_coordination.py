@@ -50,8 +50,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
     import redis
@@ -128,9 +129,16 @@ def _as_text(value: Any) -> str:
     return value  # narrow: callers pass str here
 
 
-def _owner_hold_id(key: SyncKey) -> str:
-    """The deterministic, independent owner-hold marker id."""
-    return f"owner-hold:{key.avernet_tenant}:{key.env}:{key.bot_pk}"
+def _fresh_owner_hold_token() -> str:
+    """A fresh, unique owner-hold marker id (opaque to every caller).
+
+    Unique per creation and derived from nothing but ``uuid4``: an id
+    recorded against a cleared barrier must never match the barrier a
+    later hold builds in the same place (the ABA recovery contract —
+    ``owner-hold:{tenant}:{env}:{bot_pk}`` determinism let a stale
+    operator confirmation delete a *new* barrier).
+    """
+    return f"owner-hold:{uuid.uuid4().hex}"
 
 
 @plugin_impl(
@@ -155,6 +163,7 @@ class RedisManagerSyncCoordinator(ManagerSyncCoordinator):
         generation: str,
         redis_url: str = "",
         client: "redis.Redis | None" = None,
+        token_factory: Callable[[], str] | None = None,
     ) -> None:
         if not target_id:
             raise ValueError("target_id is required (from config, not per-pod)")
@@ -174,6 +183,10 @@ class RedisManagerSyncCoordinator(ManagerSyncCoordinator):
             raise ValueError("a redis client or redis_url is required")
         self._target_id = target_id
         self._generation = generation
+        # Candidate-id source for ``hold_owner_check``: evaluate fresh
+        # per call Python-side (randomness stays out of Lua), then let
+        # the script keep the existing marker if one is present.
+        self._token_factory = token_factory or _fresh_owner_hold_token
 
     # -- internals ------------------------------------------------------
 
@@ -357,13 +370,21 @@ class RedisManagerSyncCoordinator(ManagerSyncCoordinator):
         )
 
     def hold_owner_check(self, key: SyncKey) -> str:
-        """Idempotently ensure the independent owner-hold marker."""
+        """Idempotently ensure the independent owner-hold marker.
+
+        Proposes a fresh unique candidate token (never derived from
+        tenant/env/bot_pk) and lets the script decide atomically: an
+        existing marker wins and is returned unchanged — so a repeat
+        hold inside one marker lifetime is idempotent, while a barrier
+        rebuilt after a ``clear_confirmed`` gets a brand-new id the old
+        one can never match.
+        """
         keys = self._keys(key)
         result = self._eval(
             scripts.HOLD_OWNER_CHECK,
             2,
             (keys.owner_hold, keys.generation),
-            (_owner_hold_id(key), self._generation),
+            (self._token_factory(), self._generation),
         )
         if result == scripts.GENERATION_REFUSED:
             raise CoordinationUnavailable("generation-sentinel-missing-or-mismatch")

@@ -162,7 +162,8 @@ def test_release_compare_deletes_lease_not_markers(shared_coordination):
     a, b, _ = shared_coordination
     acquired = a.claim(_KEY, holder="a", ttl_seconds=_LEASE_TTL)
     attempt = a.begin(acquired.lease, attempt_id="attempt-a", digest="digest-a")
-    assert b.hold_owner_check(_KEY) == "owner-hold:tenant-a:dev:7"
+    hold_id = b.hold_owner_check(_KEY)
+    assert hold_id.startswith("owner-hold:")
     assert b.release(Lease(_KEY, "b")) is False
     assert a.release(acquired.lease) is True
     # Both markers survive the holder's own release untouched.
@@ -174,7 +175,7 @@ def test_owner_hold_is_idempotent_and_independent_of_inflight(shared_coordinatio
     acquired = a.claim(_KEY, holder="a", ttl_seconds=_LEASE_TTL)
     attempt = a.begin(acquired.lease, attempt_id="attempt-a", digest="digest-a")
     hold_id = b.hold_owner_check(_KEY)
-    assert hold_id == "owner-hold:tenant-a:dev:7"
+    assert hold_id.startswith("owner-hold:")
     # Idempotent: a second hold returns the same marker, never a new one.
     assert b.hold_owner_check(_KEY) == hold_id
     # The hold never overwrote the in-flight record.
@@ -184,9 +185,54 @@ def test_owner_hold_is_idempotent_and_independent_of_inflight(shared_coordinatio
     # long-running sync traffic.
     other = b.claim(_OTHER_TENANT_KEY, holder="b", ttl_seconds=_LEASE_TTL)
     assert other.status is ClaimStatus.ACQUIRED
-    assert a.hold_owner_check(_OTHER_TENANT_KEY) == "owner-hold:tenant-b:dev:7"
+    other_hold_id = a.hold_owner_check(_OTHER_TENANT_KEY)
+    assert other_hold_id.startswith("owner-hold:")
+    assert other_hold_id != hold_id
     with pytest.raises(CoordinationLost):
         b.begin(other.lease, attempt_id="attempt-b", digest="digest-b")
+
+
+def test_owner_hold_recreate_after_clear_issues_a_fresh_unique_token():
+    """The ABA recovery contract, memory side: an operator confirmation
+    recorded against a cleared barrier must never clear the barrier a
+    later hold builds in the same place."""
+    tokens = iter(f"owner-hold:tok-{n}" for n in range(3))
+    coordinator = MemoryManagerSyncCoordinator(token_factory=lambda: next(tokens))
+    first = coordinator.hold_owner_check(_KEY)
+    assert first == "owner-hold:tok-0"
+    # Idempotent inside one marker lifetime: the factory is not even
+    # consulted again — the same token comes back.
+    assert coordinator.hold_owner_check(_KEY) == first
+    assert coordinator.read_blocked(_KEY) == first
+    # Operator-confirmed recovery removes the first barrier.
+    assert coordinator.clear_confirmed(_KEY, attempt_id=first) is True
+    assert coordinator.read_blocked(_KEY) is None
+    # A later hold builds a NEW barrier under a NEW token.
+    second = coordinator.hold_owner_check(_KEY)
+    assert second == "owner-hold:tok-1"
+    # The STALE token no longer matches anything: replaying the old
+    # confirmed recovery must not remove the new barrier.
+    assert coordinator.clear_confirmed(_KEY, attempt_id=first) is False
+    assert coordinator.read_blocked(_KEY) == second
+    # The new barrier's own token still clears it (exactly once).
+    assert coordinator.clear_confirmed(_KEY, attempt_id=second) is True
+    assert coordinator.read_blocked(_KEY) is None
+
+
+def test_owner_hold_default_tokens_are_unique_and_key_shape_free():
+    """The default factory issues unique, opaque tokens — never the old
+    tenant/env/bot_pk-deterministic id two creations would share."""
+    coordinator = MemoryManagerSyncCoordinator()
+    first = coordinator.hold_owner_check(_KEY)
+    assert first.startswith("owner-hold:")
+    assert "tenant-a" not in first
+    assert first != f"owner-hold:{_KEY.avernet_tenant}:{_KEY.env}:{_KEY.bot_pk}"
+    assert coordinator.clear_confirmed(_KEY, attempt_id=first) is True
+    second = coordinator.hold_owner_check(_KEY)
+    assert second != first
+    # Distinct keys hold distinct tokens too.
+    other = coordinator.hold_owner_check(_OTHER_TENANT_KEY)
+    assert other != second
 
 
 def test_finishing_an_attempt_never_clears_owner_hold(shared_coordination):
@@ -452,7 +498,7 @@ def test_redis_clear_confirmed_script_result_classification():
 def test_redis_hold_owner_check_script_result_classification():
     client = _ScriptedRedis()
     a = _make_redis(client)
-    hold_id = "owner-hold:tenant-a:dev:7"
+    hold_id = "owner-hold:7f3c9a2e"
     client.results["hold_owner_check"] = hold_id.encode("utf-8")
     assert a.hold_owner_check(_KEY) == hold_id
     client.results["hold_owner_check"] = hold_id
@@ -465,20 +511,51 @@ def test_redis_hold_owner_check_script_result_classification():
         a.hold_owner_check(_KEY)
 
 
+def test_redis_hold_owner_check_proposes_fresh_python_side_token():
+    """The candidate id is generated Python-side per call (passed via
+    ARGV, never Lua randomness) and carries no tenant/env/bot_pk shape
+    — so a stale recovery token can never match a rebuilt barrier."""
+    client = _ScriptedRedis()
+    a = RedisManagerSyncCoordinator(
+        target_id=_TARGET_ID,
+        generation=_GENERATION,
+        client=client,
+        token_factory=lambda: "owner-hold:candidate-1",
+    )
+    keys = coordination_keys(_TARGET_ID, _KEY)
+    client.results["hold_owner_check"] = b"owner-hold:candidate-1"
+    assert a.hold_owner_check(_KEY) == "owner-hold:candidate-1"
+    name, numkeys, args = client.eval_calls[-1]
+    # KEYS/ARGV: owner_hold, generation; candidate token, generation.
+    assert name == "hold_owner_check" and numkeys == 2
+    assert args == (
+        keys.owner_hold,
+        keys.generation,
+        "owner-hold:candidate-1",
+        _GENERATION,
+    )
+    # A fresh candidate is proposed on every call — the script decides
+    # atomically whether it is stored (marker absent) or discarded in
+    # favor of the existing marker (idempotent hit).
+    a.hold_owner_check(_KEY)
+    name, numkeys, args = client.eval_calls[-1]
+    assert args[2] == "owner-hold:candidate-1"
+
+
 def test_redis_read_blocked_precedence_and_generation_guard():
     client = _ScriptedRedis()
     a = _make_redis(client)
     inflight = json.dumps(
         {"attempt_id": "attempt-a", "digest": "digest-a", "holder": "a"}
     ).encode("utf-8")
-    hold_id = b"owner-hold:tenant-a:dev:7"
+    hold_id = b"owner-hold:5b1d0f8a"
     gen = _GENERATION.encode("utf-8")
     # In-flight id wins over the owner hold.
     client.mget_result = [gen, inflight, hold_id]
     assert a.read_blocked(_KEY) == "attempt-a"
     # No in-flight → the owner-hold marker id.
     client.mget_result = [gen, None, hold_id]
-    assert a.read_blocked(_KEY) == "owner-hold:tenant-a:dev:7"
+    assert a.read_blocked(_KEY) == "owner-hold:5b1d0f8a"
     # Neither marker → None (a successful read of a clean namespace).
     client.mget_result = [gen, None, None]
     assert a.read_blocked(_KEY) is None

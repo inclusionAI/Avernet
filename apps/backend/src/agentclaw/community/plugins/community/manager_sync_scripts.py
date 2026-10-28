@@ -34,8 +34,11 @@ returns arrive as ``bytes``):
   - ``CLEAR_CONFIRMED``: ``1`` exactly one matching marker removed
     (in-flight family first, then owner-hold), ``0`` nothing matched.
   - ``HOLD_OWNER_CHECK``: the owner-hold marker id — the existing one
-    if any (idempotent), otherwise the id the caller proposed; the
-    in-flight record is never touched by this script.
+    if any (idempotent), otherwise the caller's fresh unique candidate
+    token (generated Python-side per call and passed via ARGV — never
+    derived from tenant/env/bot_pk, so a cleared barrier's id can never
+    reach the barrier built after it); the in-flight record is never
+    touched by this script.
 
 The ``BEGIN`` script is the Task 3 brief's script verbatim (its
 ordering is the safety core: generation → lease → in-flight →
@@ -153,14 +156,17 @@ return 0
 """
 
 #: hold_owner_check: KEYS = [owner_hold, generation]
-#: ARGV = [owner_hold_id, expected_generation]
+#: ARGV = [candidate_token, expected_generation]
 #: Idempotent: return the existing marker id if one is present (never
-#: overwrite, never touch the in-flight record), else SET the
-#: proposed id and return it. The marker is TTL-less by design — it
-#: is resolved explicitly via ``clear_confirmed``.
+#: overwrite, never touch the in-flight record), else SET the caller's
+#: fresh unique candidate token and return it. The candidate is
+#: generated Python-side per call — a barrier rebuilt after a clear
+#: must never be reachable by an id recorded against the old one. The
+#: marker is TTL-less by design — it is resolved explicitly via
+#: ``clear_confirmed``.
 HOLD_OWNER_CHECK = """
 -- hold_owner_check: KEYS = [owner_hold, generation]
--- ARGV = [owner_hold_id, expected_generation]
+-- ARGV = [candidate_token, expected_generation]
 if redis.call('GET', KEYS[2]) ~= ARGV[2] then
   return -2
 end

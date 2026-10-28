@@ -290,6 +290,51 @@ def test_real_eval_refusals_and_cas_semantics():
             b._redis.close()
 
 
+def test_owner_hold_aba_stale_token_cannot_clear_rebuilt_barrier():
+    """Real-Redis proof of the owner-hold ABA recovery contract.
+
+    The old deterministic id (``owner-hold:{tenant}:{env}:{bot_pk}``)
+    made every barrier over one Bot share one id, so a replayed
+    operator confirmation recorded against a *cleared* barrier deleted
+    the *next* one. A barrier rebuilt after a clear must live under a
+    fresh unique id the stale token can never match.
+    """
+    url = _test_redis_url_or_skip()
+    with _fresh_namespace(url) as namespace:
+        a = _make_coordinator(namespace)
+        b = _make_coordinator(namespace)
+        try:
+            keys = coordination_keys(namespace.target_id, _KEY)
+            acquired = a.claim(_KEY, holder="a", ttl_seconds=_LEASE_TTL)
+            assert acquired.status is ClaimStatus.ACQUIRED
+            # Barrier A: its fresh opaque token is what read_blocked
+            # exposes (no in-flight record exists yet).
+            token_a = b.hold_owner_check(_KEY)
+            assert token_a.startswith("owner-hold:")
+            assert b.hold_owner_check(_KEY) == token_a  # idempotent
+            assert a.read_blocked(_KEY) == token_a
+            # Operator-confirmed recovery removes barrier A.
+            assert b.clear_confirmed(_KEY, attempt_id=token_a) is True
+            assert a.read_blocked(_KEY) is None
+            # A later hold builds barrier B under a DIFFERENT token.
+            token_b = b.hold_owner_check(_KEY)
+            assert token_b != token_a
+            assert b.hold_owner_check(_KEY) == token_b  # still idempotent
+            assert a.read_blocked(_KEY) == token_b
+            # The STALE token no longer clears anything: barrier B
+            # survives the old recovery replay.
+            assert b.clear_confirmed(_KEY, attempt_id=token_a) is False
+            assert a.read_blocked(_KEY) == token_b
+            # B's own token still clears it — the family is untouched.
+            assert b.clear_confirmed(_KEY, attempt_id=token_b) is True
+            assert a.read_blocked(_KEY) is None
+            # The in-flight record was never touched by anything above.
+            assert namespace.client.get(keys.inflight) is None
+        finally:
+            a._redis.close()
+            b._redis.close()
+
+
 def test_generation_mismatch_stops_the_sender():
     url = _test_redis_url_or_skip()
     with _fresh_namespace(url) as namespace:

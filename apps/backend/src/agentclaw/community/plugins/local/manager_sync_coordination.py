@@ -15,6 +15,9 @@ describes:
   it outlives lease expiry by design;
 - one independent owner-hold marker with its own id — coexisting with
   (never overwriting) an in-flight record and surviving lease expiry.
+  The id is a fresh unique token per creation (never derived from
+  tenant/env/bot_pk), so a barrier rebuilt after a clear is never
+  reachable by an id recorded against the old one.
 
 A namespace generation stands in for the Redis generation sentinel:
 constructing the fake initializes it (here, construction *is* the
@@ -27,6 +30,7 @@ from __future__ import annotations
 
 import threading
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Callable
 
@@ -57,6 +61,17 @@ class _InflightRecord:
     digest: str
 
 
+def _fresh_owner_hold_token() -> str:
+    """A fresh, unique owner-hold marker id (opaque to every caller).
+
+    Mirrors the Redis implementation's contract: unique per creation and
+    free of tenant/env/bot_pk determinism, so a stale operator
+    confirmation recorded against a cleared barrier can never delete
+    the barrier built after it.
+    """
+    return f"owner-hold:{uuid.uuid4().hex}"
+
+
 @plugin_impl(
     mode=Mode.LOCAL,
     flavor=Flavor.FAKE,
@@ -70,6 +85,7 @@ class MemoryManagerSyncCoordinator(MockSeam, ManagerSyncCoordinator):
         generation: str | None = "memory-generation",
         *,
         clock: Callable[[], float] | None = None,
+        token_factory: Callable[[], str] | None = None,
     ) -> None:
         self._lock = threading.Lock()
         self._generation = generation
@@ -77,6 +93,10 @@ class MemoryManagerSyncCoordinator(MockSeam, ManagerSyncCoordinator):
         self._inflight: dict[SyncKey, _InflightRecord] = {}
         self._owner_holds: dict[SyncKey, str] = {}
         self._clock = clock or time.monotonic
+        # Candidate-id source for ``hold_owner_check`` — the same
+        # fresh-unique-per-creation token contract the Redis impl has;
+        # injectable so tests can drive the ABA flow deterministically.
+        self._token_factory = token_factory or _fresh_owner_hold_token
 
     # -- helpers -------------------------------------------------------
 
@@ -184,6 +204,6 @@ class MemoryManagerSyncCoordinator(MockSeam, ManagerSyncCoordinator):
             existing = self._owner_holds.get(key)
             if existing is not None:
                 return existing
-            hold_id = f"owner-hold:{key.avernet_tenant}:{key.env}:{key.bot_pk}"
+            hold_id = self._token_factory()
             self._owner_holds[key] = hold_id
             return hold_id
