@@ -1787,14 +1787,20 @@ fn build_channel_bind_payload(command: &ChannelCommands) -> Result<serde_json::V
         }
     };
 
+    // channel_type MUST be the registry spelling "dingtalk": bcs-http routes,
+    // the bcs-channel inbound join (find_active_by_account), and bcs-cli's own
+    // ConversationId by-session queries all key on that exact string.
+    // ChannelType is a plain String with no aliasing, so any other spelling
+    // stores a binding that inbound messages can never hit (BindingNotFound)
+    // and that our own channel conversation listing cannot see.
     let mut payload = json!({
-        "channel_type": "ding_talk",
+        "channel_type": "dingtalk",
         "account_ref": account,
         "target": target,
         "outbound_visibility": visibility,
         "env": env,
         "config": {
-            "channel_type": "ding_talk",
+            "channel_type": "dingtalk",
             "robot_code": robot_code,
             "client_id": client_id,
             "client_secret": client_secret,
@@ -6898,14 +6904,14 @@ mod tests {
         assert_eq!(
             payload,
             json!({
-                "channel_type": "ding_talk",
+                "channel_type": "dingtalk",
                 "account_ref": "robot_1",
                 "target": { "group": { "group_id": "group_1" } },
                 "group_chat_scope": "conversation_shared",
                 "outbound_visibility": "full_transcript",
                 "env": "pre",
                 "config": {
-                    "channel_type": "ding_talk",
+                    "channel_type": "dingtalk",
                     "robot_code": "robot_1",
                     "client_id": "client_id",
                     "client_secret": "secret",
