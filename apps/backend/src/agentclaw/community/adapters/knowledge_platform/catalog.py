@@ -278,6 +278,47 @@ class RemoteKnowledgeCatalog:
             self, kb_id=kb_id, actor_id=actor_id, identities=identities, env=env
         )
 
+    def page_authorized(self, *, scope, space_id: int, cursor: int, limit: int) -> dict:
+        if (
+            type(cursor) is not int
+            or not 0 <= cursor <= 2**63 - 1
+            or type(limit) is not int
+            or not 1 <= limit <= 20
+        ):
+            raise KnowledgeManagementError("INVALID_KNOWLEDGE_INPUT")
+        owner = self.identities.staff_no(scope.owner_id)
+        payload = self._read(
+            self.remote.path(space_id)
+            + f"/bots/{quote(scope.bot_id, safe='')}/authorized-knowledge-bases",
+            {"user_id": owner, "cursor": cursor, "limit": limit},
+        )
+        ids, next_cursor = payload.get("kb_ids"), payload.get("next_cursor")
+        if (
+            payload.get("bot_id") != scope.bot_id
+            or payload.get("user_id") != owner
+            or payload.get("space_id") != str(space_id)
+            or not isinstance(ids, list)
+            or len(ids) > limit
+            or "next_cursor" not in payload
+            or (
+                next_cursor is not None
+                and (
+                    type(next_cursor) is not int
+                    or not 1 <= next_cursor <= 2**63 - 1
+                    or next_cursor == cursor
+                )
+            )
+        ):
+            raise KnowledgeManagementError("KNOWLEDGE_GRANTS_INVALID")
+        try:
+            for kb in ids:
+                require_knowledge_id(kb, "kb_id")
+            if ids != sorted(set(ids)):
+                raise ValueError("unordered grant page")
+        except (ValueError, TypeError):
+            raise KnowledgeManagementError("KNOWLEDGE_GRANTS_INVALID") from None
+        return {"kb_ids": ids, "next_cursor": next_cursor}
+
     def list_authorized(
         self, *, scope: BotKnowledgeScope, space_id: int
     ) -> tuple[str, ...]:

@@ -95,38 +95,45 @@ def test_batch_requires_native_manage(client, world):
     assert result.status_code == 403
 
 
-def test_generic_ecb_bindings_include_revoked_state():
+def test_exact_ecb_batch_includes_revoked_state():
+    import json
+
     calls = []
 
     def send(request):
         calls.append(request)
-        assert request.url.path == "/api/v1/knowledge/kb/kb/bot-authorizations"
-        assert dict(request.url.params) == {
+        assert request.method == "POST"
+        assert request.url.path == "/api/v1/knowledge/kb/kb/bot-authorization-states"
+        assert json.loads(request.content) == {
             "actor_staff_no": "actor",
-            "cursor": "0",
-            "limit": "100",
+            "platform": "teamclaw",
+            "targets": [
+                {"bot_id": "bot", "user_id": owner}
+                for owner in ("owner", "other-owner")
+            ],
         }
         return httpx.Response(
             200,
             json={
+                "kb_id": "kb",
+                "platform": "teamclaw",
+                "platform_env": "pre",
                 "items": [
                     {
-                        "kb_id": "kb",
-                        "platform": "teamclaw",
-                        "platform_env": "pre",
                         "bot_id": "bot",
-                        "user_id": "owner",
+                        "user_id": owner,
                         "granted": False,
-                        "revision": 9,
+                        "revision": revision,
                     }
+                    for owner, revision in (("owner", 9), ("other-owner", 0))
                 ],
-                "next_cursor": None,
             },
         )
 
     with httpx.Client(transport=httpx.MockTransport(send)) as http:
-        catalog = make_catalog("https://ecb.test", enabled=True, client=http)
-        result = catalog.grant_states(
+        result = make_catalog(
+            "https://ecb.test", enabled=True, client=http
+        ).grant_states(
             kb_id="kb",
             actor_id="actor",
             identities=[("bot", "owner"), ("bot", "other-owner")],
@@ -169,24 +176,29 @@ def test_mismatched_sync_context_fails_closed(client, world, context):
     assert world.catalog.calls == []
 
 
-def test_grant_scan_incomplete_never_invents_zero():
+def test_incomplete_exact_batch_never_invents_zero():
     from agentclaw.community.kernel.knowledge_management import KnowledgeManagementError
 
     calls = []
 
     def send(request):
         calls.append(request)
-        return httpx.Response(200, json={"items": [], "next_cursor": len(calls)})
+        return httpx.Response(
+            200,
+            json={
+                "kb_id": "kb",
+                "platform": "teamclaw",
+                "platform_env": "pre",
+                "items": [],
+            },
+        )
 
     with httpx.Client(transport=httpx.MockTransport(send)) as http:
-        catalog = make_catalog("https://ecb.test", enabled=True, client=http)
-        with pytest.raises(
-            KnowledgeManagementError, match="KNOWLEDGE_GRANT_LOOKUP_LIMIT"
-        ):
-            catalog.grant_states(
+        with pytest.raises(KnowledgeManagementError, match="KNOWLEDGE_GRANTS_INVALID"):
+            make_catalog("https://ecb.test", enabled=True, client=http).grant_states(
                 kb_id="kb", actor_id="actor", identities=[("bot", "owner")], env="pre"
             )
-    assert len(calls) == 5
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize(
@@ -224,35 +236,39 @@ def test_grant_malformed_response_is_not_absence(page):
             )
 
 
-def test_grant_scan_ignores_foreign_environment_and_uses_next_page():
+def test_exact_batch_foreign_environment_fails_without_scanning():
+    from agentclaw.community.kernel.knowledge_management import KnowledgeManagementError
+
     calls = []
 
     def send(request):
         calls.append(request)
-        row = {
-            "kb_id": "kb",
-            "platform": "teamclaw",
-            "platform_env": "prod" if len(calls) == 1 else "pre",
-            "bot_id": "bot",
-            "user_id": "owner",
-            "granted": False,
-            "revision": 12,
-        }
         return httpx.Response(
-            200, json={"items": [row], "next_cursor": 7 if len(calls) == 1 else None}
+            200,
+            json={
+                "kb_id": "kb",
+                "platform": "teamclaw",
+                "platform_env": "prod",
+                "items": [
+                    {
+                        "bot_id": "bot",
+                        "user_id": "owner",
+                        "granted": False,
+                        "revision": 12,
+                    }
+                ],
+            },
         )
 
     with httpx.Client(transport=httpx.MockTransport(send)) as http:
-        result = make_catalog(
-            "https://ecb.test", enabled=True, client=http
-        ).grant_states(
-            kb_id="kb", actor_id="actor", identities=[("bot", "owner")], env="pre"
-        )
-    assert result["items"][0]["revision"] == 12
-    assert calls[1].url.params["cursor"] == "7"
+        with pytest.raises(KnowledgeManagementError, match="KNOWLEDGE_GRANTS_INVALID"):
+            make_catalog("https://ecb.test", enabled=True, client=http).grant_states(
+                kb_id="kb", actor_id="actor", identities=[("bot", "owner")], env="pre"
+            )
+    assert len(calls) == 1
 
 
-def test_grant_pages_share_one_budget_and_map_each_owner_once():
+def test_exact_batch_has_one_budget_and_maps_each_owner_once():
     from agentclaw.community.adapters.knowledge_platform.grant_state_reader import (
         read_grant_states,
     )
@@ -263,9 +279,18 @@ def test_grant_pages_share_one_budget_and_map_each_owner_once():
         mapped.append(user)
         return user
 
-    def read(*args, deadline):
+    def read(path, params, *, method, body, deadline):
         deadlines.append(deadline)
-        return {"items": [], "next_cursor": 1 if len(deadlines) == 1 else None}
+        assert method == "POST" and params == {}
+        return {
+            "kb_id": "kb",
+            "platform": "teamclaw",
+            "platform_env": "pre",
+            "items": [
+                {**target, "revision": 0, "granted": False}
+                for target in body["targets"]
+            ],
+        }
 
     catalog = SimpleNamespace(
         platform="teamclaw", identities=SimpleNamespace(staff_no=identity), _read=read
@@ -277,8 +302,7 @@ def test_grant_pages_share_one_budget_and_map_each_owner_once():
         identities=[("a", "owner"), ("b", "owner")],
         env="pre",
     )
-    assert mapped == ["actor", "owner"]
-    assert len(deadlines) == 2 and deadlines[0] == deadlines[1]
+    assert mapped == ["actor", "owner"] and len(deadlines) == 1
     assert [row["revision"] for row in result["items"]] == [0, 0]
 
 

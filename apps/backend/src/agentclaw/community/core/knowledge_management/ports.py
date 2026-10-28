@@ -14,6 +14,14 @@ class KnowledgeCatalog(Protocol):
         """Read canonical knowledge-base metadata and access permissions."""
         ...
 
+    def page_authorized(self, *, scope, space_id: int, cursor: int, limit: int) -> dict:
+        """Read at most limit authorized IDs and an opaque integer next_cursor.
+
+        Cursor zero starts a page sequence; consumers forward it unchanged,
+        never add a page size, and never prefetch the legacy complete list.
+        """
+        ...
+
     def list_authorized(self, *, scope, space_id: int) -> tuple[str, ...]:
         """List knowledge bases authorized for one composite Bot identity."""
         ...

@@ -154,6 +154,7 @@ def test_available_page_has_constant_http_count(world, count):
                     "bot_id": "bot",
                     "user_id": "owner",
                     "kb_ids": ids,
+                    "next_cursor": None,
                 },
             )
         assert request.url.path.endswith("/knowledge-bases/catalog-details")

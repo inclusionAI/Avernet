@@ -306,8 +306,10 @@ class KnowledgeManagementService:
             raise KnowledgeManagementError("INVALID_KNOWLEDGE_INPUT")
         bot = self.source.bot_context(scope, actor_id)
         space_id = bot["space_id"]
-        ids = sorted(self.catalog.list_authorized(scope=scope, space_id=space_id))
-        selected = ids[cursor : cursor + limit]
+        page = self.catalog.page_authorized(
+            scope=scope, space_id=space_id, cursor=cursor, limit=limit
+        )
+        selected = page["kb_ids"]
         saved = self.source.selections(bot=bot, kb_ids=selected)
         # Only fetch this page's metadata, not every authorized KB on every request.
         space = self._scope(space_id, actor_id)
@@ -330,5 +332,5 @@ class KnowledgeManagementService:
             )
         return {
             "items": items,
-            "next_cursor": cursor + limit if cursor + limit < len(ids) else None,
+            "next_cursor": page["next_cursor"],
         }

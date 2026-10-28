@@ -60,7 +60,11 @@ PARAMS = {
 
 def _answer(request):
     path = request.url.path
-    if "/integrations/tc/" not in path and "/bot-authorizations" not in path:
+    if (
+        "/integrations/tc/" not in path
+        and "/bot-authorizations" not in path
+        and not path.endswith("/bot-authorization-states")
+    ):
         assert request.headers.get("X-Test-Session") == "fixture"
     fact = {
         "space_id": "1",
@@ -81,7 +85,26 @@ def _answer(request):
     elif path.endswith("/knowledge-bases"):
         payload = {"items": [fact], "next_cursor": None}
     elif path.endswith("/authorized-knowledge-bases"):
-        payload = {"bot_id": "bot", "user_id": ACTOR, "space_id": "1", "kb_ids": ["kb"]}
+        payload = {
+            "bot_id": "bot",
+            "user_id": ACTOR,
+            "space_id": "1",
+            "kb_ids": ["kb"],
+            "next_cursor": None,
+        }
+    elif path.endswith("/bot-authorization-states"):
+        assert request.method == "POST"
+        body = json.loads(request.content)
+        assert body["actor_staff_no"] == ACTOR and body["platform"] == "teamclaw"
+        payload = {
+            "kb_id": "kb",
+            "platform": "teamclaw",
+            "platform_env": get_current_env(),
+            "items": [
+                {**target, "granted": False, "revision": 0}
+                for target in body["targets"]
+            ],
+        }
     elif path.endswith("/authorized-bots") or path.endswith("/bot-authorizations"):
         payload = {"items": [], "next_cursor": None}
     elif "/bot-authorizations/" in path:
