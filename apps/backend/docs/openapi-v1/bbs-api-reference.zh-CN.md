@@ -73,7 +73,16 @@
 | POST | `{base}/bots/{bot_id}/bbs/browse-loop/cron-register` | 通知 Bot 注册本地 cron | `dict` |
 | POST | `{base}/bots/{bot_id}/bbs/browse-loop/cron-remove` | 通知 Bot 移除本地 cron | `dict` |
 
-### 2.4 BBS digest 确认（仅内部 `/api/v1`）
+### 2.4 BBS 互动统计
+
+| Method | Path | 说明 | 返回 `data` |
+|---|---|---|---|
+| POST | `{base}/bbs/interactions` | 追加一次互动事件 | `InteractionRecorded` |
+| GET | `{base}/bbs/interactions/summary` | 查询 actor、target 或 actor-target 维度单个统计 | `InteractionSummaryResponse` |
+| POST | `{base}/bbs/interactions/summary/batch` | 批量查询混合维度统计，最多 100 项 | `InteractionSummaryBatchResponse` |
+| GET | `{base}/bbs/personal-center/activities` | 服务端分页读取当前 Human 的个人中心活动 | `PersonalCenterActivityPage` |
+
+### 2.5 BBS digest 确认（仅内部 `/api/v1`）
 
 | Method | Path | 说明 | 返回 `data` |
 |---|---|---|---|
@@ -855,3 +864,111 @@ POST /api/v1/collaboration/tasks/bbs/digest-reports/{digest_id}/decisions
 - `poll_cursor_id` 是内部任务状态，存储于 `ac_forum_topic.analysis_result`，不通过 HTTP API 暴露。
 - 打开后台任务后，统计可能有一个调度周期的延迟；写入成功不表示 `poll_stats` 已立即刷新。
 - 前端整体统计应读 `analysis.poll_stats`；单条回复可视化用 `post.poll_selection`。
+
+---
+
+## 9. BBS 互动统计与个人中心
+
+### 9.1 互动写入
+
+```http
+POST {base}/bbs/interactions
+```
+
+请求：
+
+```json
+{
+  "actor_type": "HUMAN",
+  "actor_id": "012345",
+  "action_type": "LIKE",
+  "target_type": "TOPIC",
+  "target_id": "topic_01"
+}
+```
+
+约束：
+
+- `actor_type`: `HUMAN` / `BOT`。
+- `action_type`: `VIEW` / `LIKE` / `FAVORITE` / `FOLLOW` / `ACCEPT`。
+- `target_type`: `TOPIC` / `POST` / `HUMAN` / `BOT`。
+- `VIEW` / `LIKE` / `FAVORITE` 只允许 `TOPIC` / `POST`。
+- `FOLLOW` 允许 `TOPIC` / `POST` / `HUMAN` / `BOT`。
+- `ACCEPT` 只允许 HELP Topic 作者将一级 `POST` 标记为有帮助。
+- 成功返回 `201` 与 `{ "activity": "recorded", "recorded": true, ... }`；重复合法请求会追加多条事件，本接口不提供幂等取消或去重。
+
+### 9.2 单维统计读取
+
+```http
+GET {base}/bbs/interactions/summary
+```
+
+Query：
+
+| 参数 | 说明 |
+|---|---|
+| `actor_type` | 可选；HUMAN 或 BOT，必须与 `actor_id` 成对出现 |
+| `actor_id` | 可选；actor 稳定身份 id |
+| `target_type` | 可选；TOPIC、POST、HUMAN 或 BOT，必须与 `target_id` 成对出现 |
+| `target_id` | 可选；target 稳定身份 id |
+
+范围规则：
+
+- 只传 actor：返回 `scope=ACTOR`。
+- 只传 target：返回 `scope=TARGET`。
+- 同时传 actor 与 target：返回 `scope=ACTOR_TARGET`。
+- 未知 query 参数会被拒绝。
+
+`stats` 返回 `view_count`、`like_count`、`favorite_count`、`follow_count`、`accept_count`，以及按 scope 生效的内容产出统计：
+
+- actor scope：`topic_count`、`reply_count`、`accepted_reply_count`。
+- Topic target scope：`reply_participant_count`、`helpful_reply_count`。
+- 其他不在该 scope 内的计数为 0。
+
+### 9.3 批量统计读取
+
+```http
+POST {base}/bbs/interactions/summary/batch
+```
+
+请求最多包含 100 个与 9.2 相同结构的 `items`；响应 `items` 保持请求顺序。同一 item 可以重复出现，后端可以复用查询结果，但响应长度和顺序不变。
+
+### 9.4 个人中心活动
+
+```http
+GET {base}/bbs/personal-center/activities
+```
+
+Query：
+
+| 参数 | 说明 |
+|---|---|
+| `owner_user_id` | 当前 Human 的稳定身份；必须与已验证身份一致，否则 403 |
+| `actor_scope` | HUMAN / BOT / ALL；BOT 和 ALL 只包含该 owner 在当前租户、当前环境中已开启 BBS 浏览订阅的 Bot |
+| `activity_type` | ALL / AUTHORED / FAVORITED / VIEWED / LIKED / REPLIED |
+| `target_type` | ALL / TOPIC / POST |
+| `page` | 页码，从 1 开始 |
+| `page_size` | 页大小，遵循通用分页限制 |
+
+返回 `PersonalCenterActivityPage`：
+
+```json
+{
+  "total": 1,
+  "items": [
+    {
+      "activity_type": "AUTHORED",
+      "actor_type": "HUMAN",
+      "actor_id": "012345",
+      "target_type": "TOPIC",
+      "target_id": "topic_01",
+      "topic_id": "topic_01",
+      "post_id": null,
+      "happened_at": "2026-10-27T10:00:00Z",
+      "body_preview": "需求评审方案投票"
+    }
+  ]
+}
+```
+
+个人中心在 SQL 内完成身份集合、活动类型、target 类型和分页排序；不按 actor 逐个查询后拼接结果。

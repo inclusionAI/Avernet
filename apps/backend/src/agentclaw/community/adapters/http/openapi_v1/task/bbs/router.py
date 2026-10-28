@@ -10,6 +10,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Envelope,
     Page,
     PageParamsDep,
+    USER_SCOPED_ERROR_RESPONSES,
 )
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     created,
@@ -434,10 +435,26 @@ _SUMMARY_QUERY_KEYS = frozenset(
 @envelope_errors
 async def get_interaction_summary(
     request: Request,
-    actor_type: str | None = Query(default=None, max_length=16),
-    actor_id: str | None = Query(default=None, max_length=256),
-    target_type: str | None = Query(default=None, max_length=16),
-    target_id: str | None = Query(default=None, max_length=256),
+    actor_type: str | None = Query(
+        default=None,
+        max_length=16,
+        description="Optional actor dimension type: HUMAN or BOT. Required with actor_id.",
+    ),
+    actor_id: str | None = Query(
+        default=None,
+        max_length=256,
+        description="Optional stable HUMAN work-no or BOT id used as the actor dimension.",
+    ),
+    target_type: str | None = Query(
+        default=None,
+        max_length=16,
+        description="Optional target dimension type: TOPIC, POST, HUMAN, or BOT. Required with target_id.",
+    ),
+    target_id: str | None = Query(
+        default=None,
+        max_length=256,
+        description="Optional stable target id used as the target dimension.",
+    ),
     service: ForumInteractionServiceProtocol = Injected(
         ForumInteractionServiceProtocol
     ),
@@ -485,16 +502,30 @@ async def get_interaction_summary_batch(
 @read_router.get(
     "/personal-center/activities",
     response_model=Envelope[PersonalCenterActivityPage],
+    responses=USER_SCOPED_ERROR_RESPONSES,
     dependencies=[Depends(require_principal)],
 )
 @envelope_errors
 async def get_personal_center_activities(
     request: Request,
     page_params: PageParamsDep,
-    owner_user_id: str = Query(min_length=1, max_length=256),
-    actor_scope: PersonalCenterActorScopeWire = Query(default="ALL"),
-    activity_type: PersonalCenterActivityTypeWire = Query(default="ALL"),
-    target_type: PersonalCenterTargetTypeWire = Query(default="ALL"),
+    owner_user_id: str = Query(
+        min_length=1,
+        max_length=256,
+        description="The current human owner whose own and authorized-Bot activities are returned.",
+    ),
+    actor_scope: PersonalCenterActorScopeWire = Query(
+        default="ALL",
+        description="Which activities to include: the current HUMAN, authorized Bots, or both.",
+    ),
+    activity_type: PersonalCenterActivityTypeWire = Query(
+        default="ALL",
+        description="Activity kind filter, or ALL for every supported activity.",
+    ),
+    target_type: PersonalCenterTargetTypeWire = Query(
+        default="ALL",
+        description="Content target type filter, or ALL for Topics and Posts.",
+    ),
     principal: Principal = Depends(require_principal),
     service: ForumPersonalCenterActivityServiceProtocol = Injected(
         ForumPersonalCenterActivityServiceProtocol
