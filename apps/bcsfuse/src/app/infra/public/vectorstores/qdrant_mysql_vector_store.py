@@ -17,6 +17,7 @@ import time
 from typing import Any, List, Optional
 
 from search_core.config.qdrant import LOCAL_QDRANT, QdrantConnection
+from search_core.core.index_sync import apply_change_pages, apply_snapshot_pages
 from search_core.providers.index_lock import IndexLock
 from search_core.providers.qdrant_server import QdrantServerVectorStore
 
@@ -419,14 +420,15 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
             try:
                 stale_ids = set(self._qdrant.get_vector_ids())
                 stale_ids.update(keywords.get_vector_ids())
-                for points in self._persistence.iter_batches(batch_size):
-                    if not points or len(points) > batch_size:
-                        raise ValueError("persistence backend yielded an invalid vector page")
+                def restore(points):
                     keywords.upsert(points)
                     self._qdrant.upsert(points)
-                    stale_ids.difference_update(point.id for point in points)
-                    total_loaded += len(points)
-                    total_indexed += len(points)
+
+                total_loaded = apply_snapshot_pages(
+                    self._persistence.iter_batches(batch_size), batch_size,
+                    restore, stale_ids,
+                )
+                total_indexed = total_loaded
                 for point_id in stale_ids:
                     self._qdrant.delete(point_id)
 
@@ -435,16 +437,11 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
                 swapped_keywords = True
                 if supports_incremental_sync:
                     self._last_sync_time = rebuild_checkpoint
-                    for changes in self._persistence.iter_change_batches_since(
-                        rebuild_checkpoint, batch_size
-                    ):
-                        if changes.upserts:
-                            self._upsert_local(changes.upserts)
-                        if changes.deleted_ids:
-                            self._delete_local(changes.deleted_ids)
-                        self._last_sync_time = max(
-                            self._last_sync_time, changes.checkpoint
-                        )
+                    apply_change_pages(
+                        self._persistence.iter_change_batches_since(rebuild_checkpoint, batch_size),
+                        rebuild_checkpoint, self._upsert_local, self._delete_local,
+                        lambda value: setattr(self, "_last_sync_time", value),
+                    )
                 else:
                     self._last_sync_time = self._persistence.get_last_modified_time()
                 self._keywords_ready = True
@@ -480,21 +477,11 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
         if not isinstance(self._persistence, BatchedIncrementalVectorPersistenceBackend):
             raise RuntimeError("configured persistence backend does not support bounded sync")
         with self._index_lock:
-            upserted = 0
-            deleted = 0
-            checkpoint = self._last_sync_time
-            for changes in self._persistence.iter_change_batches_since(checkpoint, 100):
-                if changes.upserts:
-                    self._upsert_local(changes.upserts)
-                    upserted += len(changes.upserts)
-                if changes.deleted_ids:
-                    self._delete_local(changes.deleted_ids)
-                    deleted += len(changes.deleted_ids)
-                self._last_sync_time = max(self._last_sync_time, changes.checkpoint)
-        return {
-            "upserted": upserted,
-            "deleted": deleted,
-        }
+            return apply_change_pages(
+                self._persistence.iter_change_batches_since(self._last_sync_time, 100),
+                self._last_sync_time, self._upsert_local, self._delete_local,
+                lambda value: setattr(self, "_last_sync_time", value),
+            )
 
     def clear(self) -> None:
         """Delete durable records first, then rebuild both derived indexes."""

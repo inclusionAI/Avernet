@@ -108,6 +108,13 @@ class QdrantRetrievalIndex:
                 self._filters(filters, allowed_ids, "_keyword_external_id"),
             )
 
+    def get_vector_ids(self):
+        """Snapshot IDs for recovery cleanup; never queried by online retrieval."""
+        with self._lock.read():
+            return sorted(
+                set(self._dense.get_vector_ids()) | set(self._keyword.get_vector_ids())
+            )
+
     def close(self):
         with self._lock:
             try:
