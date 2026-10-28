@@ -90,7 +90,7 @@ export const botEditorService = {
       policy.screens ? botEditorController.listRenderScreens(botId, ownerId) : Promise.resolve({ data: { items: [] } }),
       policy.routines ? botEditorController.listRoutines(botId, ownerId) : Promise.resolve({ data: { items: [] } }),
       botEditorController.getEngineStatus(botId, ownerId),
-      botEditorController.listBotMcps(botId),
+      botEditorController.listBotMcps(botId, ownerId),
     ]);
     const sets: BotCapabilitySet[] = [];
     let skillSetDetailErrors = 0;

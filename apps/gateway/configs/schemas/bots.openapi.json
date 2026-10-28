@@ -32200,6 +32200,14 @@
             "title": "Identity",
             "type": "array"
           },
+          "mcp": {
+            "description": "Declared MCP servers; connection overrides are omitted.",
+            "items": {
+              "$ref": "#/components/schemas/ExpertMcp"
+            },
+            "title": "Mcp",
+            "type": "array"
+          },
           "name": {
             "description": "Expert display name.",
             "title": "Name",
@@ -32255,6 +32263,21 @@
           "content"
         ],
         "title": "ExpertIdentity",
+        "type": "object"
+      },
+      "ExpertMcp": {
+        "description": "A template declaration, without connection overrides or authorization claims.",
+        "properties": {
+          "server_code": {
+            "description": "Declared Registry MCP code; not an authorization or runtime status.",
+            "title": "Server Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "server_code"
+        ],
+        "title": "ExpertMcp",
         "type": "object"
       },
       "ExpertSkill": {

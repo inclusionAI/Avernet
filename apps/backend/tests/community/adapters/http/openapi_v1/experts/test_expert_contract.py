@@ -74,3 +74,18 @@ def test_real_catalog_http_dto_scope_filters_and_limits(tmp_path):
         }
         assert client.get("/openapi/v1/experts/writer").status_code == 404
     reset_for_tests()
+
+
+def test_published_expert_detail_matches_runtime_dto():
+    """Generated clients see the same MCP declarations as the real response DTO."""
+    import json
+    from pathlib import Path
+    from agentclaw.community.adapters.http.openapi_v1.experts.schemas import ExpertDetail
+
+    repository = Path(__file__).resolve().parents[8]
+    published = json.loads((repository / "apps/gateway/configs/schemas/bots.openapi.json").read_text())
+    actual = ExpertDetail.model_json_schema(ref_template="#/components/schemas/{model}")
+    definitions = actual.pop("$defs")
+    schemas = published["components"]["schemas"]
+    assert schemas["ExpertDetail"] == actual
+    assert schemas["ExpertMcp"] == definitions["ExpertMcp"]

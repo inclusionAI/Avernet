@@ -519,3 +519,15 @@ it('keeps the original capability read error without fabricating enabled or auth
   expect(result.capabilityLoadError).toBe('MCP：MCP access denied');
   expect(result.errors).toBe(1);
 });
+
+it('loads shared Bot MCP facts using the same addressed owner as other configuration reads', async () => {
+  controller.listSkillSetResources.mockResolvedValue({ data: [] });
+  controller.listBotMcps.mockImplementation(async (_botId, ownerId) => {
+    if (ownerId !== 'owner-77') throw new Error('404 Not found');
+    return { data: [{ server_code: 'shared-project-tools', active: true }] };
+  });
+  const result = await botEditorService.load('shared-bot', 'owner-77');
+  expect(result.mcps).toEqual([{ serverCode: 'shared-project-tools', name: 'shared-project-tools', active: true }]);
+  expect(result.capabilityLoadError).toBeUndefined();
+  expect(result.errors).toBe(0);
+});
