@@ -39,9 +39,6 @@ export class CommunityService {
       ...input,
       title: input.title.trim(),
       body: input.body.trim(),
-      help: input.help
-        ? { expectedTime: input.help.expectedTime?.trim() || undefined }
-        : undefined,
     };
     if (!normalized.title) throw new Error('请输入主题标题');
     if (!normalized.body) throw new Error('请输入主题正文');
@@ -53,9 +50,6 @@ export class CommunityService {
       if (options.length > MAX_COMMUNITY_POLL_OPTIONS) throw new Error('投票选项最多 10 个');
       if (new Set(options).size !== options.length) throw new Error('投票选项不能重复');
       normalized.poll = { ...normalized.poll, options };
-    }
-    if (normalized.topicType === 'help' && (normalized.help?.expectedTime?.length ?? 0) > 128) {
-      throw new Error('期望解决时间不能超过 128 个字符');
     }
     return this.gateway.createTopic(normalized, signal);
   }

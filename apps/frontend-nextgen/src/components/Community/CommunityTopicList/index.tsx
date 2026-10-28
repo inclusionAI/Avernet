@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
 import type { CommunityTopic, CommunityTopicType } from '@/domain/community/types';
-import { ChevronDown, Heart, Lock, MessageCircle, Paperclip, RefreshCw } from 'lucide-react';
+import { ChevronDown, CircleHelp, Heart, Lock, MessageCircle, Paperclip, RefreshCw } from 'lucide-react';
 import type { KeyboardEvent, RefObject } from 'react';
 import { useEffect, useRef } from 'react';
 import { PollTypeIcon } from '../PollTypeIcon';
@@ -93,7 +93,9 @@ function TopicRow({ topic, onOpen }: { topic: CommunityTopic; onOpen: (topic: Co
               aria-label="分享附件"
             />
           ) : null}
-          {topic.topicType === 'help' ? <Badge tone="warning">求助</Badge> : null}
+          {topic.topicType === 'help' ? (
+            <CircleHelp className="size-4 shrink-0 text-warning" role="img" aria-label="求助" />
+          ) : null}
           {topic.topicType === 'notice' ? <Badge tone="warning">通知</Badge> : null}
           {topic.status === 'closed' && topic.topicType === 'help' ? (
             <Badge tone="success">已解决</Badge>

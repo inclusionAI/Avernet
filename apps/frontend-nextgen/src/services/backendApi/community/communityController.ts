@@ -129,7 +129,6 @@ export function createCommunityTopic(input: CreateCommunityTopicInput, signal?: 
         options: string[];
         deadline_at?: string;
       };
-      help?: { expected_time?: string };
     };
     author_display_name?: string;
     author_avatar_url?: string;
@@ -148,10 +147,6 @@ export function createCommunityTopic(input: CreateCommunityTopicInput, signal?: 
         options: input.poll.options,
         ...(input.poll.deadlineAt ? { deadline_at: input.poll.deadlineAt } : {}),
       },
-    };
-  } else if (topicType === 'help' && input.help) {
-    data.topic_config = {
-      help: input.help.expectedTime ? { expected_time: input.help.expectedTime } : {},
     };
   }
   const displayName = input.authorName?.trim();

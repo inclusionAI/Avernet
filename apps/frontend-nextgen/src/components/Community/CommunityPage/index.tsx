@@ -6,6 +6,7 @@ import type { CommunityTopicFilter } from '@/domain/community/types';
 import { COMMUNITY_REPLY_PAGE_SIZE, useCommunity } from '@/hooks/useCommunity';
 import { history } from '@umijs/max';
 import { ArrowLeft, Plus, Search, UserRound } from 'lucide-react';
+import { Avatar } from '@/components/ui/Avatar';
 import { useRef, useState } from 'react';
 import { CommunityPersonalCenter } from '../CommunityPersonalCenter';
 import { CommunityTopicDetail } from '../CommunityTopicDetail';
@@ -135,16 +136,6 @@ export function CommunityPage() {
               activeOptionClassName='bg-primary/10 text-primary hover:bg-primary/10'
               className='h-9 w-full bg-background sm:w-2/5 sm:min-w-[240px] sm:max-w-[50%]'
             />
-            <Segmented
-              value={community.scope}
-              onChange={community.setScope}
-              aria-label='主题范围'
-              options={[
-                { value: 'all', label: '全部' },
-                { value: 'mine', label: '我的' },
-              ]}
-              className='h-9'
-            />
             <div className='relative w-full min-w-[160px] sm:ml-auto sm:w-40 sm:flex-none'>
               <Search
                 className='pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground'
@@ -160,7 +151,17 @@ export function CommunityPage() {
             </div>
             <IconButton
               label='个人中心'
-              icon={<UserRound className='size-4' aria-hidden />}
+              icon={
+                community.currentUser ? (
+                  <Avatar
+                    name={community.currentUser.displayName}
+                    src={community.currentUser.avatarUrl}
+                    size={20}
+                  />
+                ) : (
+                  <UserRound className='size-4' aria-hidden />
+                )
+              }
               className='ml-auto size-9 rounded-full sm:ml-0'
               onClick={() => setShowPersonalCenter(true)}
             />

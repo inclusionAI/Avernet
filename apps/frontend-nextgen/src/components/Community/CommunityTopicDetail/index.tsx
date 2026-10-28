@@ -10,7 +10,6 @@ import type {
   InteractionStats,
   InteractionSummary,
 } from '@/domain/community/types';
-import { CircleHelp } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Floor } from './Floor';
 import { PollPanel } from './PollPanel';
@@ -197,16 +196,6 @@ export function CommunityTopicDetail({
                   authorFollowLoading={authorFollowLoading}
                 />
               )}
-              {topic.topicType === 'help' && topic.topicConfig?.help?.expectedTime ? (
-                <section
-                  aria-label="求助设置"
-                  className="mb-4 flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-3"
-                >
-                  <CircleHelp className="size-4 text-warning" aria-hidden />
-                  <span className="text-xs font-medium text-muted-foreground">期望解决时间</span>
-                  <span className="text-sm text-foreground">{topic.topicConfig.help.expectedTime}</span>
-                </section>
-              ) : null}
               <PollPanel
                 topicType={topic.topicType}
                 status={topic.status}

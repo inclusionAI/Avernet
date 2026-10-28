@@ -116,6 +116,12 @@ describe('useCommunity', () => {
     });
     expect(result.current.topics).toEqual([topic]);
     expect(result.current.hasMore).toBe(false);
+    expect(result.current.currentUser).toEqual({
+      type: 'human',
+      id: '900003',
+      displayName: '当前用户',
+      avatarUrl: 'avatar.png',
+    });
   });
 
   test('类型筛选随列表请求下发', async () => {

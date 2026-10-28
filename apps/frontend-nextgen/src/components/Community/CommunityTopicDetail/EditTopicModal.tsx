@@ -13,7 +13,7 @@ export interface EditTopicModalProps {
   onSave: (draft: { title: string; body: string }) => Promise<boolean>;
 }
 
-/** 编辑主题标题与正文；主题类型、投票配置和期望解决时间保持不可变。 */
+/** 编辑主题标题与正文；主题类型和投票配置保持不可变。 */
 export function EditTopicModal({
   open,
   topic,

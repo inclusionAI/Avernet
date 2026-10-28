@@ -337,7 +337,7 @@ describe('CommunityService', () => {
     );
   });
 
-  test('enforces poll option limit and trims optional help expected time', async () => {
+  test('enforces poll option limit and submits help topics without extra config', async () => {
     const createTopic = jest.fn(async (input) => ({
       id: 'topic-created',
       title: input.title,
@@ -364,23 +364,9 @@ describe('CommunityService', () => {
       }),
     ).rejects.toThrow('投票选项最多 10 个');
 
-    await service.createTopic({
-      ...common,
-      topicType: 'help',
-      help: { expectedTime: ' 希望本周内 ' },
-    });
-    expect(createTopic).toHaveBeenLastCalledWith(
-      expect.objectContaining({ help: { expectedTime: '希望本周内' } }),
-      undefined,
-    );
-
-    await expect(
-      service.createTopic({
-        ...common,
-        topicType: 'help',
-        help: { expectedTime: 'x'.repeat(129) },
-      }),
-    ).rejects.toThrow('期望解决时间不能超过 128 个字符');
+    await service.createTopic({ ...common, topicType: 'help' });
+    const helpInput = createTopic.mock.calls[createTopic.mock.calls.length - 1][0];
+    expect(helpInput).not.toHaveProperty('help');
   });
 
   test('updateTopic trims title/body and forwards the author to the gateway', async () => {

@@ -22,6 +22,12 @@ const mockCommunityState = {
   query: '',
   scope: 'all' as const,
   topicType: 'all' as const,
+  currentUser: {
+    type: 'human' as const,
+    id: 'human-1',
+    displayName: '张三',
+    avatarUrl: 'https://example.com/avatar.png',
+  },
   selectedTopic: null as CommunityTopic | null,
   topics: [topic],
   loading: false,
@@ -75,11 +81,10 @@ describe('CommunityPage 滚动容器结构', () => {
   });
 
 
-  test('首页筛选 Tab 位于搜索框之前，发帖入口位于搜索框之后', () => {
+  test('主题类型筛选后移除范围按钮，搜索前后保持类型、当前用户头像和发帖入口', () => {
     render(<CommunityPage />);
 
     const topicTypeGroup = screen.getByRole('group', { name: '主题类型' });
-    const scopeGroup = screen.getByRole('group', { name: '主题范围' });
     const searchInput = screen.getByRole('textbox', { name: '搜索社区主题' });
     const personalCenterButton = screen.getByRole('button', { name: '个人中心' });
     const publishButton = screen.getByRole('button', { name: '发帖' });
@@ -92,14 +97,16 @@ describe('CommunityPage 滚动容器结构', () => {
       '投票',
       '求助',
     ]);
+    expect(screen.queryByRole('group', { name: '主题范围' })).not.toBeInTheDocument();
     const followingButton = within(topicTypeGroup).getByRole('button', { name: '关注' });
     expect(followingButton).toBeDisabled();
     fireEvent.click(followingButton);
     expect(mockCommunityState.setTopicType).not.toHaveBeenCalled();
     expect(topicTypeGroup).toHaveClass('bg-background', 'sm:w-2/5', 'sm:min-w-[240px]', 'sm:max-w-[50%]');
-    expect(within(scopeGroup).getAllByRole('button')).toHaveLength(2);
-    expect(topicTypeGroup.compareDocumentPosition(scopeGroup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(scopeGroup.compareDocumentPosition(searchInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(topicTypeGroup.compareDocumentPosition(searchInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(personalCenterButton).getByAltText('张三').getAttribute('src')).toBe(
+      'https://example.com/avatar.png',
+    );
     expect(searchInput.compareDocumentPosition(personalCenterButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(personalCenterButton).toBeEnabled();
     expect(

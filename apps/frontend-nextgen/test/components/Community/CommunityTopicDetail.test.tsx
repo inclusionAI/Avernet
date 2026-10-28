@@ -206,7 +206,7 @@ describe('CommunityTopicDetail', () => {
     const user = userEvent.setup();
     const onSubmitReply = jest.fn().mockResolvedValue(true);
     renderDetail({
-      topic: { ...topic, topicType: 'help', topicConfig: { help: { expectedTime: '希望本周内' } } },
+      topic: { ...topic, topicType: 'help' },
       currentUserId: 'human-current',
       onSubmitReply,
     });
@@ -231,7 +231,7 @@ describe('CommunityTopicDetail', () => {
     expect(screen.getByText('分享')).toBeInTheDocument();
   });
 
-  test('求助主题展示期望时间，关闭后显示已解决', () => {
+  test('求助主题不再展示期望解决时间，关闭后显示已解决', () => {
     renderDetail({
       topic: {
         ...topic,
@@ -240,13 +240,13 @@ describe('CommunityTopicDetail', () => {
         canEdit: false,
         canDelete: false,
         topicType: 'help',
-        topicConfig: { help: { expectedTime: '希望本周内' } },
       },
     });
 
     expect(screen.getByText('求助')).toHaveClass('text-warning');
     expect(screen.getByText('已解决')).toHaveClass('text-success');
-    expect(screen.getByText('希望本周内')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '求助设置' })).not.toBeInTheDocument();
+    expect(screen.queryByText('期望解决时间')).not.toBeInTheDocument();
     expect(screen.queryByText('已结帖')).not.toBeInTheDocument();
   });
 

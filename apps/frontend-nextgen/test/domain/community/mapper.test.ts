@@ -290,23 +290,15 @@ test('maps SHARE type without topic configuration', () => {
   expect(topic.topicConfig).toBeUndefined();
 });
 
-test('maps HELP expected time and keeps an empty help config', () => {
-  const withExpectedTime = mapCommunityTopicDto({
+test('maps HELP topics while ignoring legacy expected-time config', () => {
+  const mapped = mapCommunityTopicDto({
     topic_id: 'help-1',
     title: '求助',
     status: 'OPEN',
     topic_type: 'HELP',
     topic_config: { help: { expected_time: ' 希望本周内 ' } },
   });
-  const withoutExpectedTime = mapCommunityTopicDto({
-    topic_id: 'help-2',
-    title: '求助',
-    status: 'OPEN',
-    topic_type: 'HELP',
-    topic_config: { help: {} },
-  });
 
-  expect(withExpectedTime.topicType).toBe('help');
-  expect(withExpectedTime.topicConfig?.help).toEqual({ expectedTime: '希望本周内' });
-  expect(withoutExpectedTime.topicConfig?.help).toEqual({ expectedTime: undefined });
+  expect(mapped.topicType).toBe('help');
+  expect(mapped.topicConfig).toBeUndefined();
 });
