@@ -1,10 +1,10 @@
 # BCS 超长 Rust 文件按职责拆分设计
 
 > 日期：2026-10-28
-> 状态：设计已确认，已获授权编写第 1 单元实施计划；尚未开始实现。
+> 状态：设计已确认；第 1 单元已随 #3240 合入；已获授权编写第 2 单元实施计划，第 2～5 单元尚未实施。
 > 源码基准：`dd316eb35`（`dev`，包含 #3209）。
 > 范围：下表五个源文件及完成其拆分所必需的 crate 内私有模块与测试装配。
-> 设计交付：本文及第 1 单元 [实施计划](../plans/2026-10-28-bcs-bot-event-contract-decomposition-implementation-plan.md)；不执行 Rust 重构。
+> 设计交付：本文、第 1 单元 [实施计划](../plans/2026-10-28-bcs-bot-event-contract-decomposition-implementation-plan.md)及第 2 单元 [实施计划](../plans/2026-10-28-bcs-runtime-progression-decomposition-implementation-plan.md)；本轮只更新规划文档。
 
 ## 1. 决策与目标
 
@@ -290,6 +290,11 @@ trait method 保留同签名的直接委托，不新增内部 trait、动态 dis
 保留 `runtime_progression.rs` 集成测试 target，继续直接装配既有
 `fixed_loop_tests`、`history_identity`、`history_persistence`。
 
+第 2 单元规划基准为 `b57b8e2d7`（包含 #3240）：入口 5,789 行；49 个顶层测试
+按下表迁移，217 个既有后代保持完整身份，实际 target 共 266 项。后代物理文件共
+26 个，本单元保持只读；新建 11 个场景、1 个 support 装配和 7 个 fixture 文件，
+连同原入口共 20 个新增/修改 Rust 文件。详细一一清单与命令见第 2 单元实施计划。
+
 | 新场景（`runtime_progression/` 下） | 职责 |
 | --- | --- |
 | `session_permission.rs` | 当前 Session permission、legacy Chat、Human access/cancel |
@@ -298,7 +303,7 @@ trait method 保留同签名的直接委托，不新增内部 trait、动态 dis
 | `human_input_activation.rs` | 有效 Human 存在、加入/恢复、通知与前端/IM 绑定 |
 | `human_input_response.rs` | response 校验、pending、Judge、已持久化响应与失败 |
 | `timeouts.rs` | Human timeout、缺失资源、无效候选跳过、Provider timeout 与拒绝投递 |
-| `completion.rs` | 单 Node 完成、session/callback、日志以及 message-less final 重试 |
+| `completion.rs` | 单 Node 完成、Session 收尾（保留上游移除 callback 后的契约）、日志以及 message-less final 重试 |
 | `resource_cleanup.rs` | 删除 Session/Group、孤儿 Run 与 runtime 清理 |
 | `definition_binding.rs` | source YAML、默认定义、模板 bindings、无额外 definition upsert |
 | `opening.rs` | 自定义 opening、历史复用及写失败前不 dispatch |
@@ -324,10 +329,14 @@ fixed_loop_tests::recovery_tests::sqlite_restart_tests::session_recovery_tests::
 
 - `test_runtime!` 宏在使用它的子模块前声明，保留注入 MemoryMessageRepo 的行为。
 - tracing buffer/OnceLock 保持套件内同一份，不让每个模块重复安装全局 subscriber。
+  旧 observability 后代直接读取 `SharedLogBuffer.0`，需开放到原 target 祖先范围；
+  `SharedLogWriter` 是 `MakeWriter::Writer` 关联类型，需匹配的受限可见性，
+  但无需在 target 根重导出 Writer 名称。
 - 既有子模块通过祖先可见的测试辅助名称继续共享原对象，不复制 fake。
 - 搬移 `include_str!("fixtures/fixed_loop.yaml")` 时修正路径，比较最终解析内容不变。
-- 基准下 `runtime_progression/fixed_loop.rs` 恰为 1,000 行：保留其模块装配，
-  不向它追加 import、重导出或辅助函数，把新增共享入口放在原测试 target 父级。
+- 最初设计基准下 `runtime_progression/fixed_loop.rs` 恰为 1,000 行；第 2 单元基准
+  已因上游变更降为 997 行。仍保持原文件及装配只读，不向它追加 import、重导出或辅助函数，
+  把新增共享入口放在原测试 target 父级。
 
 ## 8. Collaboration Store：类型留在根、实现按存储与能力拆分
 
@@ -531,9 +540,13 @@ cargo test -p bcs-collaboration-store --test mysql_store \
 - 一致性：类型和状态留原父级；长 trait 采用唯一实现，不使用部分 trait impl。
 - 可执行性：给出每个模块的职责、特殊兼容点、逐单元验证和失败停止条件。
 - 门禁：承认源码搬移进入覆盖率分母，采用更严格文档约束，不改阈值或统计范围。
-- 权限：设计已确认，用户已授权编写第 1 单元实施计划；实施仍需后续执行指令。
+- 权限与进度：第 1 单元已由 #3240 合入；用户已授权编写第 2 单元实施计划，
+  第 2 单元的实际实施仍需后续执行指令。
 - 初版设计证据：已检查源码、AST item 边界、现有模块布局、重启测试名称和 coverage 入口；
   设计阶段未执行构建、业务测试、数据库或 E2E。
-- 审阅修订证据：第 1 单元的临时副本已通过 AST 保持性及 Rust 名称解析/类型检查，
-  Bash 恢复与失败传播检查通过；初始 imports 仍需实施时清理。详见实施计划的验收追踪。
-  工作区未执行 Rust 重构，不宣称完成业务测试或最终门禁。
+- 第 1 单元规划期证据：当时临时副本通过 AST 保持性及 Rust 名称解析/类型检查，
+  Bash 恢复与失败传播检查通过；该记录不替代后来 #3240 的实现与合入验证。
+  详见第 1 单元实施计划及对应 PR。
+
+第 2 单元规划已重新检查上游基线、266 项发现及共享 fixture 传播；临时副本验证和
+子进程 phase 证据详见第 2 单元计划的“当前验证边界”，不等同于工作区实施或最终门禁通过。
