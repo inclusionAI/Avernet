@@ -124,7 +124,7 @@ describe('PublicationEditor', () => {
       expect(screen.getByRole('button', { name: /示例集团 \/ 产品事业部 \/ 体验团队/ })).toBeInTheDocument(),
     );
     fireEvent.click(screen.getByRole('button', { name: /示例集团 \/ 产品事业部 \/ 体验团队/ }));
-    fireEvent.click(screen.getByRole('button', { name: '提交审批' }));
+    fireEvent.click(screen.getByRole('button', { name: '发起变更' }));
 
     expect(onSubmit).toHaveBeenCalledWith(
       {
@@ -162,7 +162,7 @@ describe('PublicationEditor', () => {
 
     expect(screen.getByRole('radio', { name: /限定组织可申请/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '保存' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '提交审批' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '发起变更' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('radio', { name: /限定组织可申请/ }));
     fireEvent.change(screen.getByRole('textbox', { name: '搜索组织范围' }), { target: { value: '大安全' } });
@@ -219,6 +219,6 @@ describe('PublicationEditor', () => {
     );
 
     expect(screen.getByText('可见性未发生变化，无需保存')).toBeInTheDocument();
-    expect(screen.queryByText('可见性未发生变化，无需提交审批')).not.toBeInTheDocument();
+    expect(screen.queryByText('可见性未发生变化，无需提交')).not.toBeInTheDocument();
   });
 });

@@ -217,6 +217,39 @@ describe('mapWorkOrderDto', () => {
     expect(none.sessionUrl).toBeUndefined();
   });
 
+  // bot-public-risk-check：BOT_PUBLIC_RISK 通知（content={text, detail_url}）的检测工单外链提取。
+  it('BOT_PUBLIC_RISK 通知 content.detail_url 抽出到 item.detailUrl；text 信封不回退；无链接不填；顶层优先', () => {
+    const riskNotice = {
+      notification_id: 604,
+      item_type: 'NOTIFICATION',
+      notification_category: 'NOTICE',
+      event_type: 'BOT_PUBLIC_RISK',
+      biz_type: 'bot_public_risk',
+      biz_id: 'd00e2027-a0d0-4833-a562-c645b17dab26:REJECT',
+      title: 'Bot 公开风险检测需要关注',
+      summary: 'Bot 公开风险检测未通过，请查看详情并处理。',
+      content: {
+        text: 'Bot 公开风险检测未通过，请查看详情并处理。',
+        detail_url: 'https://agentsecgw.example.com/checkOrder/abc',
+      },
+      is_read: true,
+    };
+    const { item } = mapWorkOrderDto(riskNotice);
+    // 正文渲染后端权威 summary；{text} 信封 contentRaw 不填充（既有行为不回退）
+    expect(item.content).toBe('Bot 公开风险检测未通过，请查看详情并处理。');
+    expect(item.contentRaw).toBeUndefined();
+    expect(item.detailUrl).toBe('https://agentsecgw.example.com/checkOrder/abc');
+    expect(item.bizType).toBe('bot_public_risk');
+
+    // 顶层 detail_url 优先于 content 对象
+    const fromTop = mapWorkOrderDto({ ...riskNotice, detail_url: 'https://top.example.com/order' }).item;
+    expect(fromTop.detailUrl).toBe('https://top.example.com/order');
+
+    // content 无 detail_url 时不填充
+    const noLink = mapWorkOrderDto({ ...riskNotice, content: { text: '无链接通知' } }).item;
+    expect(noLink.detailUrl).toBeUndefined();
+  });
+
   it('列表 content 为字符串时原样透传、不触发对象解析', () => {
     const { item } = mapWorkOrderDto({ ...workOrderDto });
     expect(item.content).toBe('用户「张三」申请加入空间「风控团队」');

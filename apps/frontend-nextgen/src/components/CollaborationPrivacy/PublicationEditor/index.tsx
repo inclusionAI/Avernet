@@ -1,6 +1,8 @@
 import { getCapabilities } from '@/capabilities';
 import { Button } from '@/components/ui/Button';
 import { Modal, ModalContent, ModalDescription, ModalFooter, ModalHeader, ModalTitle } from '@/components/ui/Modal';
+import type { BotPublicRiskUiState } from '@/domain/collaborationPrivacy/botPublicRisk';
+import { resolvePublishChannel } from '@/domain/collaborationPrivacy/botPublicRisk';
 import { publicConfigsEqual } from '@/domain/collaborationPrivacy/policies';
 import type {
   OrganizationPath,
@@ -9,6 +11,7 @@ import type {
   PublicConfig,
   PublicScope,
 } from '@/domain/collaborationPrivacy/types';
+import type { BotPublicRiskCheckRecord } from '@/services/collaborationPrivacy/botPublicRiskService';
 import { history } from '@umijs/max';
 import { type MouseEvent, useEffect, useState } from 'react';
 import {
@@ -19,6 +22,7 @@ import {
 } from '../botVisibilityCopy';
 import { ChoiceGroup } from '../ChoiceGroup';
 import { OrganizationScopeSearch } from '../OrganizationScopeSearch';
+import { RiskFailureBanner, RiskFlowPreviewBanner, RiskInFlightBanner } from './RiskFlowBanners';
 
 const audienceTitles: Record<PublicAudience, string> = {
   user: visibilityAudience.user.editorTitle,
@@ -51,6 +55,15 @@ interface PublicationEditorProps {
   loading?: boolean;
   onClose: () => void;
   onSubmit: (config: PublicConfig, deptEntries?: Array<{ deptNo: string; deptName: string }>) => void;
+  /**
+   * 公开风险前置检测状态（bot-public-risk-check；仅 audience==='user' 且非外部 Bot 时由宿主传入）。
+   * checking/advancing/approving → 已发起终态锁定；failed/attention → 失败提示 + 可编辑重发。
+   */
+  risk?: {
+    uiState: BotPublicRiskUiState;
+    record: BotPublicRiskCheckRecord | null;
+    isCreating: boolean;
+  };
 }
 
 export function PublicationEditor({
@@ -58,6 +71,7 @@ export function PublicationEditor({
   audience,
   isExternalBot = false,
   initialConfig,
+  risk,
   onSearch,
   loading,
   onClose,
@@ -128,6 +142,17 @@ export function PublicationEditor({
 
   const invalid = scope === 'restricted' && selected.length === 0;
   const unchanged = publicConfigsEqual(initialConfig, { scope, organizationPaths: selected });
+  // 风险动线（仅对用户非外部 Bot）：触发动线展示提示条；发起后在途则进入已发起终态锁定。
+  const riskActive = audience === 'user' && !isExternalBot ? risk : undefined;
+  const riskKind = riskActive?.uiState.kind ?? 'idle';
+  const riskInFlight = riskKind === 'checking' || riskKind === 'advancing' || riskKind === 'approving';
+  const riskOutcome: 'none' | 'resolved' = riskKind === 'failed' || riskKind === 'attention' ? 'resolved' : 'none';
+  const channel = resolvePublishChannel(
+    { scope, organizationPaths: selected, organizationEntries: selectedEntries },
+    initialConfig,
+    isExternalBot,
+  );
+  const showFlowBanner = !riskInFlight && riskOutcome === 'none' && channel === 'risk-check';
   return (
     <Modal open={open} onOpenChange={(next) => !next && !loading && onClose()}>
       <ModalContent size="lg">
@@ -145,50 +170,76 @@ export function PublicationEditor({
             {visibilityEditorDescription.trailing}
           </ModalDescription>
         </ModalHeader>
-        <div className="space-y-5">
-          <ChoiceGroup
-            value={scope}
-            options={availableScopeOptions.map((option) => ({
-              ...option,
-              description: scopeDescriptions[audience][option.value],
-            }))}
-            ariaLabel="Bot 可见性"
-            onChange={setScope}
-            className={scopeSelectionEnabled ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}
-          />
-          {!scopeSelectionEnabled && initialConfig.scope === 'restricted' && (
-            <p className="text-xs text-muted-foreground">
-              当前可见性“限定组织可申请”已下线，请重新选择“不可见”或“全部可见”。
-            </p>
-          )}
-          {scope === 'restricted' && (
-            <section aria-labelledby="publication-organizations">
-              <h3 id="publication-organizations" className="mb-2 text-sm font-medium text-foreground">
-                {organizationScopeCopy.editorTitle}
-              </h3>
-              <OrganizationScopeSearch
-                value={selected}
-                onChange={setSelected}
-                onSearch={wrappedSearch}
-                selectedEntries={selectedEntries}
-                onEntriesChange={setSelectedEntries}
+        <div className="flex flex-col gap-4">
+          {riskInFlight && riskActive ? (
+            <RiskInFlightBanner
+              kind={riskKind === 'approving' ? 'approving' : riskKind === 'advancing' ? 'advancing' : 'checking'}
+              record={riskActive.record}
+              currentScopeNote={`${visibilityScopeLabels[initialConfig.scope]}${
+                initialConfig.scope === 'restricted' ? `（${initialConfig.organizationPaths.length} 个组织范围）` : ''
+              }`}
+            />
+          ) : (
+            <>
+              {riskOutcome === 'resolved' && riskActive ? (
+                <RiskFailureBanner kind={riskKind === 'attention' ? 'attention' : 'failed'} record={riskActive.record} />
+              ) : null}
+              {showFlowBanner ? <RiskFlowPreviewBanner /> : null}
+              <ChoiceGroup
+                value={scope}
+                options={availableScopeOptions.map((option) => ({
+                  ...option,
+                  description: scopeDescriptions[audience][option.value],
+                }))}
+                ariaLabel="Bot 可见性"
+                onChange={setScope}
+                className={scopeSelectionEnabled ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}
               />
-              {invalid && <p className="mt-2 text-xs text-destructive">选择限定组织可申请时，请至少选择一个组织范围</p>}
-            </section>
-          )}
-          {unchanged && !invalid && (
-            <p className="text-xs text-muted-foreground">
-              {isExternalBot ? '可见性未发生变化，无需保存' : '可见性未发生变化，无需提交审批'}
-            </p>
+              {!scopeSelectionEnabled && initialConfig.scope === 'restricted' && (
+                <p className="text-xs text-muted-foreground">
+                  当前可见性“限定组织可申请”已下线，请重新选择“不可见”或“全部可见”。
+                </p>
+              )}
+              {scope === 'restricted' && (
+                <section aria-labelledby="publication-organizations">
+                  <h3 id="publication-organizations" className="mb-2 text-sm font-medium text-foreground">
+                    {organizationScopeCopy.editorTitle}
+                  </h3>
+                  <OrganizationScopeSearch
+                    value={selected}
+                    onChange={setSelected}
+                    onSearch={wrappedSearch}
+                    selectedEntries={selectedEntries}
+                    onEntriesChange={setSelectedEntries}
+                  />
+                  {invalid && (
+                    <p className="mt-2 text-xs text-destructive">选择限定组织可申请时，请至少选择一个组织范围</p>
+                  )}
+                </section>
+              )}
+              {unchanged && !invalid && (
+                <p className="text-xs text-muted-foreground">
+                  {isExternalBot ? '可见性未发生变化，无需保存' : '可见性未发生变化，无需提交'}
+                </p>
+              )}
+            </>
           )}
         </div>
         <ModalFooter>
-          <Button variant="secondary" disabled={loading} onClick={onClose}>
-            取消
-          </Button>
-          <Button loading={loading} disabled={invalid || unchanged} onClick={handleSubmit}>
-            {isExternalBot ? '保存' : '提交审批'}
-          </Button>
+          {riskInFlight ? (
+            <Button variant="secondary" onClick={onClose}>
+              关闭
+            </Button>
+          ) : (
+            <>
+              <Button variant="secondary" disabled={loading} onClick={onClose}>
+                取消
+              </Button>
+              <Button loading={loading} disabled={invalid || unchanged} onClick={handleSubmit}>
+                {isExternalBot ? '保存' : '发起变更'}
+              </Button>
+            </>
+          )}
         </ModalFooter>
       </ModalContent>
     </Modal>

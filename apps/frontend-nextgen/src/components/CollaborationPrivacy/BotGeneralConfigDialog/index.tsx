@@ -25,7 +25,9 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { useBotPublishApproval } from '@/hooks/useBotPublishApproval';
 import { useCollaborationPrivacy } from '@/hooks/useCollaborationPrivacy';
 import type { BotDomain } from '@/services/botWorkshop';
+import { history } from '@umijs/max';
 import { Copy, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { useMemo } from 'react';
 
 interface BotGeneralConfigDialogProps {
   /** BotWorkshop 列表行数据：身份三要素（id / 名称 / 引擎）+ 头像透传；外部 Bot PRD 预留同形复用。 */
@@ -57,13 +59,26 @@ export function BotGeneralConfigDialog({ bot, isExternalBot = false, onClose }: 
   const isAgentCodingBot = bot.runtime.isAgentCodingBot;
   const showCollaborationAbilitySettings = !isAgentCodingBot || bot.runtime.bcnEnabled === true;
   // 外部 Bot 与 Coding Bot 仅展示群聊参与；其他 Bot 隐藏任务认领与 Dream Mode。
-  const visibleAbilitySettings = isExternalBot || isAgentCodingBot ? codingBotAbilitySettings : generalConfigAbilitySettings;
+  const visibleAbilitySettings =
+    isExternalBot || isAgentCodingBot ? codingBotAbilitySettings : generalConfigAbilitySettings;
   // 显示与复制均以协作域 Bot UUID 为准（含 :port 后缀，与协作权限页一致）；
   // 加载中/未命中时回退行数据 Bot ID（collab-permission-entry-migration 验收修正）。
   const displayId = targetBot?.id ?? bot.id;
   const showPublishApproval =
     getCapabilities().getGeneralConfigPublishApprovalEnabled().value && bot.spaceKind === 'team';
   const publishApproval = useBotPublishApproval(bot.id, bot.ownerId, showPublishApproval);
+  // 公开风险前置检测在途态（bot-public-risk-check）：仅「对用户」行消费；failed/attention 恢复编辑不在行上展示。
+  const userRiskStatus = useMemo(() => {
+    const { uiState, record } = privacy.userRisk;
+    if (uiState.kind === 'checking' || uiState.kind === 'advancing' || uiState.kind === 'approving') {
+      return {
+        kind: uiState.kind,
+        detailUrl: uiState.kind === 'approving' ? null : record?.detail_url ?? null,
+        onViewApprovalProgress: () => history.push('/ticket-center'),
+      };
+    }
+    return null;
+  }, [privacy.userRisk]);
   const publishApprovalSection = showPublishApproval ? (
     <PublishApprovalSettings
       checked={publishApproval.required}
@@ -148,6 +163,7 @@ export function BotGeneralConfigDialog({ bot, isExternalBot = false, onClose }: 
                 bot={targetBot}
                 showUserVisibility={!isExternalBot}
                 isExternalBot={isExternalBot}
+                userRiskStatus={isExternalBot ? undefined : userRiskStatus}
                 onEditPublication={privacy.openPublicationEditor}
                 onViewScope={privacy.openScopeViewer}
               />
@@ -194,6 +210,7 @@ export function BotGeneralConfigDialog({ bot, isExternalBot = false, onClose }: 
             audience={privacy.publicationEditor.audience}
             isExternalBot={isExternalBot}
             initialConfig={privacy.publicationBot.publication[privacy.publicationEditor.audience]}
+            risk={isExternalBot ? undefined : privacy.userRisk}
             onSearch={(keyword, signal) => privacy.searchDepartments(keyword, signal)}
             loading={
               privacy.busyAction === `${privacy.publicationBot.id}:publication:${privacy.publicationEditor.audience}`

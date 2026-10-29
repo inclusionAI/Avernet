@@ -29,7 +29,7 @@ function renderPanel(overrides: Partial<Parameters<typeof ResourcePanel>[0]> = {
   return props;
 }
 
-/** 目录行名称与路径同文本，但面包屑也会渲染同名段；改按行热区按钮的 aria-label 精确命中「展开/收起docs」。 */
+/** 按行热区按钮的 aria-label 精确命中「展开/收起docs」，避免与同名文本节点混淆。 */
 function clickDocsName() {
   fireEvent.click(screen.getByRole('button', { name: /^(展开|收起)docs$/ }));
 }
