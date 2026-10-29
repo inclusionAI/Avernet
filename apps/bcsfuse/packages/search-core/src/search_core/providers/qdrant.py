@@ -12,7 +12,6 @@ S30C Status: Business ID to UUID mapping implemented.
 from typing import Optional, List, Dict, Any
 import logging
 import time
-import builtins
 import threading
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
@@ -292,6 +291,7 @@ class QdrantLocalVectorStore(QdrantMutations):
         filters: Optional[Dict[str, Any]] = None,
         *,
         payload_fields: Optional[List[str]] = None,
+        timeout: int | None = None,
     ) -> List[Dict[str, Any]]:
         """Search for similar vectors.
 
@@ -311,18 +311,12 @@ class QdrantLocalVectorStore(QdrantMutations):
         # Support both 'filter' and 'filters' for backward compatibility
         effective_filter = filters if filters is not None else filter
 
-        client_inst_id = builtins.id(self._client)
-        logger.info(
-            f"[Qdrant] Searching collection {self.collection_name}, dimension={len(query_vector)}, client_id={client_inst_id}, path={self.path}, filters={effective_filter}"
+        logger.debug(
+            "Qdrant search collection=%s dimension=%d filter_count=%d",
+            self.collection_name,
+            len(query_vector),
+            len(effective_filter or {}),
         )
-
-        # Phase 2.3.5: FILTER-TRACE - Log filter input values and types
-        if effective_filter:
-            logger.info(
-                "[FILTER-TRACE] stage=qdrant_search_input, filters=%s, filter_value_types=%s",
-                effective_filter,
-                {k: f"{v}({type(v).__name__})" for k, v in effective_filter.items()},
-            )
 
         # Check dimension mismatch
         if len(query_vector) != self.dimension:
@@ -353,7 +347,6 @@ class QdrantLocalVectorStore(QdrantMutations):
                         # Phase 2.6.1: Use MatchAny for list values (OR condition)
                         # MatchAny matches if the field value is ANY of the values in the list
                         conditions.append(FieldCondition(key=k, match=MatchAny(any=v)))
-                        logger.debug(f"[Qdrant] Applied MatchAny filter: {k}={v}")
                     else:
                         # Single value filter
                         conditions.append(
@@ -362,17 +355,6 @@ class QdrantLocalVectorStore(QdrantMutations):
 
                 if conditions:
                     qdrant_filter = Filter(must=conditions)
-                    logger.info(
-                        f"[Qdrant] Applied filter: {len(conditions)} conditions"
-                    )
-                    # Phase 2.3.5: FILTER-TRACE - Log Qdrant filter structure
-                    logger.info(
-                        "[FILTER-TRACE] stage=qdrant_filter_built, filter=%s",
-                        qdrant_filter,
-                    )
-                else:
-                    logger.info(f"[Qdrant] No valid single-value filters to apply")
-
             # query_points is supported by the declared client dependency.
             # Backend failures must not turn into a successful empty result.
             results = self._client.query_points(
@@ -380,14 +362,11 @@ class QdrantLocalVectorStore(QdrantMutations):
                 query=query_vector,
                 limit=top_k,
                 query_filter=qdrant_filter,
-                with_payload=list(payload_fields)
-                if payload_fields is not None
-                else True,
+                with_payload=(
+                    list(payload_fields) if payload_fields is not None else True
+                ),
+                **({"timeout": timeout} if timeout is not None else {}),
             ).points
-
-            logger.info(
-                f"[Qdrant] Search found {len(results)} raw results in collection {self.collection_name}"
-            )
 
             # Import VectorSearchHit here to avoid circular dependency
             from search_core.plugin_api.vector_search_hit import VectorSearchHit

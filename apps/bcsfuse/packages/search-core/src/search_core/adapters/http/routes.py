@@ -16,6 +16,8 @@ from search_core.api.models import SearchCommand, VerifiedIdentity
 from search_core.api.services import SearchApplication
 from fastapi.routing import APIRoute
 
+from search_core.core.observation import events
+
 Authenticator = Callable[[Request], Awaitable[VerifiedIdentity]]
 
 MAX_SEARCH_BODY_BYTES = 64 * 1024
@@ -126,6 +128,12 @@ def create_search_router(
             except SearchUnavailable as error:
                 raise HTTPException(503, "search unavailable") from error
             except asyncio.TimeoutError as error:
+                events.record(
+                    "search_request",
+                    "http",
+                    "deadline_exceeded",
+                    timeout_ms=timeout_seconds * 1000,
+                )
                 raise HTTPException(504, "search deadline exceeded") from error
             return ResultBody(
                 items=[

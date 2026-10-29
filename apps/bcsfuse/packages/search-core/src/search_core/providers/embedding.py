@@ -18,8 +18,9 @@ from typing import Optional
 
 import httpx
 
-from search_core.plugin_api.embedding import EmbeddingProvider
 from search_core.config.embedding import EmbeddingSettings
+from search_core.plugin_api.embedding import EmbeddingProvider
+from search_core.providers.async_model_http import AsyncModelHttpClient
 from search_core.providers.embedding_wire import (
     BINARY_CONTENT_TYPE,
     EMBEDDING_ACCEPT_HEADER,
@@ -63,6 +64,47 @@ def _provider_reason_code(response: httpx.Response | None) -> str | None:
     if not isinstance(reason, str) or not reason.strip():
         return None
     return reason.strip().upper()
+
+
+class AsyncHttpEmbedding:
+    """Native async online query client; host owns lifecycle, core owns deadlines.
+
+    No retries, artificial intervals or per-stage admission limits. Background
+    batch preparation and TC can continue using RealEmbeddingProvider.
+    """
+
+    def __init__(self, settings: EmbeddingSettings):
+        if not settings.is_configured():
+            raise ValueError("Embedding configuration is incomplete")
+        self._settings = settings
+        self._client = AsyncModelHttpClient(timeout=settings.timeout_ms / 1000.0)
+
+    @property
+    def dimension(self) -> int:
+        return self._settings.dimension
+
+    async def embed(self, text: str) -> list[float]:
+        response = await self._client.post_json(
+            f"{self._settings.base_url}/embeddings",
+            headers={"Authorization": f"Bearer {self._settings.auth_token}"},
+            json={"input": [text], "model": self._settings.model},
+        )
+        data = response.get("data", [])
+        if len(data) != 1:
+            raise ValueError("embedding response must contain one query vector")
+        vector = data[0].get("embedding", [])
+        if len(vector) != self.dimension or any(
+            isinstance(value, bool)
+            or not isinstance(value, (float, int))
+            or not math.isfinite(value)
+            for value in vector
+        ):
+            raise ValueError("embedding dimension or values are invalid")
+        return vector
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
 
 
 class EmbeddingAPIError(Exception):
@@ -370,7 +412,7 @@ class RealEmbeddingProvider(EmbeddingProvider):
         except Exception:
             base_url_host = "<invalid-url>"
 
-        logger.info(
+        logger.debug(
             "[EMBEDDING_REQUEST_PREPARE] provider_class=%s endpoint_path=%s model=%s dimension=%s text_count=%d timeout_ms=%d",
             self.__class__.__name__,
             "/embeddings",
@@ -654,7 +696,8 @@ class RealEmbeddingProvider(EmbeddingProvider):
 
 
 __all__ = [
-    "RealEmbeddingProvider",
+    "AsyncHttpEmbedding",
     "EmbeddingAPIError",
     "EmbeddingDimensionContractError",
+    "RealEmbeddingProvider",
 ]

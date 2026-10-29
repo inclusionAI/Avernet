@@ -15,11 +15,12 @@ import uuid
 import requests
 
 from search_core.plugin_api.reranker import Reranker, RerankResult
+from search_core.providers.async_model_http import AsyncModelHttpClient
 
 logger = logging.getLogger(__name__)
 
 
-class HttpReranker(Reranker):
+class _RerankerCodec:
     """
     HTTP API Reranker - 支持 bge-reranker-v2-m3 和 Qwen3-Reranker-4B
 
@@ -102,6 +103,69 @@ class HttpReranker(Reranker):
             formatted_docs = [doc + self.CHAT_SUFFIX for doc in documents]
             return formatted_query, formatted_docs
 
+    def _parse_response(self, result: dict, num_docs: int) -> list[float]:
+        """解析 API 响应，支持多种格式"""
+        scores = []
+
+        if "results" in result:
+            # 格式: {"results": [{"index": 0, "relevance_score": 0.9}, ...]}
+            sorted_results = sorted(result["results"], key=lambda x: x.get("index", 0))
+            if [r.get("index") for r in sorted_results] != list(range(num_docs)):
+                raise ValueError(
+                    "reranker response indices are incomplete or duplicated"
+                )
+            scores = [r["relevance_score"] for r in sorted_results]
+            # DIAGNOSTIC: Log parsed relevance scores
+            logger.debug(
+                "[RERANKER-HTTP] Parsed 'results' format | count=%d | first_scores=%s",
+                len(scores),
+                scores[:3] if scores else [],
+            )
+        elif "scores" in result:
+            scores = result["scores"]
+            logger.debug(
+                "[RERANKER-HTTP] Parsed 'scores' format | count=%d | top_scores=%s",
+                len(scores),
+                scores[:3] if scores else [],
+            )
+        elif "data" in result and "scores" in result["data"]:
+            scores = result["data"]["scores"]
+            logger.debug(
+                "[RERANKER-HTTP] Parsed 'data.scores' format | count=%d | top_scores=%s",
+                len(scores),
+                scores[:3] if scores else [],
+            )
+        elif "output" in result:
+            scores = result["output"].get("scores", [])
+            logger.debug(
+                "[RERANKER-HTTP] Parsed 'output' format | count=%d | top_scores=%s",
+                len(scores),
+                scores[:3] if scores else [],
+            )
+        else:
+            raise ValueError("unknown reranker response format")
+
+        if len(scores) != num_docs or any(
+            not isinstance(score, (float, int))
+            or isinstance(score, bool)
+            or not math.isfinite(score)
+            for score in scores
+        ):
+            raise ValueError("reranker scores are incomplete or non-finite")
+
+        logger.debug(
+            "[RERANKER-HTTP] Final parsed scores | count=%d | min=%.4f | max=%.4f",
+            len(scores),
+            min(scores) if scores else 0.0,
+            max(scores) if scores else 0.0,
+        )
+
+        return scores
+
+
+class HttpReranker(_RerankerCodec, Reranker):
+    """Synchronous provider retained for existing TC callers."""
+
     def rerank(
         self, query: str, candidates: list[dict], top_k: int = 5
     ) -> list[RerankResult]:
@@ -176,61 +240,49 @@ class HttpReranker(Reranker):
         result = response.json()
         return self._parse_response(result, len(documents))
 
-    def _parse_response(self, result: dict, num_docs: int) -> list[float]:
-        """解析 API 响应，支持多种格式"""
-        scores = []
 
-        if "results" in result:
-            # 格式: {"results": [{"index": 0, "relevance_score": 0.9}, ...]}
-            sorted_results = sorted(result["results"], key=lambda x: x.get("index", 0))
-            if [r.get("index") for r in sorted_results] != list(range(num_docs)):
-                raise ValueError(
-                    "reranker response indices are incomplete or duplicated"
-                )
-            scores = [r["relevance_score"] for r in sorted_results]
-            # DIAGNOSTIC: Log parsed relevance scores
-            logger.debug(
-                "[RERANKER-HTTP] Parsed 'results' format | count=%d | first_scores=%s",
-                len(scores),
-                scores[:3] if scores else [],
-            )
-        elif "scores" in result:
-            scores = result["scores"]
-            logger.debug(
-                "[RERANKER-HTTP] Parsed 'scores' format | count=%d | top_scores=%s",
-                len(scores),
-                scores[:3] if scores else [],
-            )
-        elif "data" in result and "scores" in result["data"]:
-            scores = result["data"]["scores"]
-            logger.debug(
-                "[RERANKER-HTTP] Parsed 'data.scores' format | count=%d | top_scores=%s",
-                len(scores),
-                scores[:3] if scores else [],
-            )
-        elif "output" in result:
-            scores = result["output"].get("scores", [])
-            logger.debug(
-                "[RERANKER-HTTP] Parsed 'output' format | count=%d | top_scores=%s",
-                len(scores),
-                scores[:3] if scores else [],
-            )
-        else:
-            raise ValueError("unknown reranker response format")
+class AsyncHttpReranker(_RerankerCodec):
+    """Native async online client sharing the synchronous wire format and parser."""
 
-        if len(scores) != num_docs or any(
-            not isinstance(score, (float, int))
-            or isinstance(score, bool)
-            or not math.isfinite(score)
-            for score in scores
-        ):
-            raise ValueError("reranker scores are incomplete or non-finite")
-
-        logger.debug(
-            "[RERANKER-HTTP] Final parsed scores | count=%d | min=%.4f | max=%.4f",
-            len(scores),
-            min(scores) if scores else 0.0,
-            max(scores) if scores else 0.0,
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        model: str = "Qwen3-Reranker-4B",
+        timeout: float = 30,
+    ):
+        super().__init__(
+            base_url=base_url, api_key=api_key, model=model, timeout=timeout
         )
+        self._client = AsyncModelHttpClient(timeout=timeout)
 
-        return scores
+    async def rerank(
+        self, query: str, candidates: list[dict], top_k: int = 5
+    ) -> list[RerankResult]:
+        if not candidates:
+            return []
+        if not self.api_key:
+            raise RuntimeError("reranker API key is not configured")
+        query, documents = self._format(query, [c.get("text", "") for c in candidates])
+        response = await self._client.post_json(
+            f"{self.base_url}/rerank",
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "X-Request-Id": f"rerank-{uuid.uuid4().hex[:8]}",
+            },
+            json={"model": self.model, "query": query, "documents": documents},
+        )
+        scores = self._parse_response(response, len(candidates))
+        results = [
+            RerankResult(
+                candidate_id=c.get("id", str(i)),
+                score=scores[i],
+                metadata={"text": c.get("text", "")[:100]},
+            )
+            for i, c in enumerate(candidates)
+        ]
+        return sorted(results, key=lambda r: r.score, reverse=True)[:top_k]
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
