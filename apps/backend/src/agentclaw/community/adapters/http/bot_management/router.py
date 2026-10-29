@@ -1539,6 +1539,15 @@ async def get_auth_status(
             error_code=500,
             data={"bot_id": e.bot_id, "retryable": True},
         )
+    except ExtensionConflict as e:
+        logger.warning(f"[bot_router.get_auth_status] extension conflict: {e}")
+        return ApiResponse(success=False, message=str(e), error_code=409, data=None)
+    except ExtensionInvalidInput as e:
+        logger.warning(f"[bot_router.get_auth_status] extension invalid input: {e}")
+        return ApiResponse(success=False, message=str(e), error_code=400, data=None)
+    except ExtensionBlocked as e:
+        logger.error(f"[bot_router.get_auth_status] extension blocked: {e}")
+        return ApiResponse(success=False, message=str(e), error_code=500, data=e.data)
     except Exception as e:
         logger.error(f"[bot_router.get_auth_status] Error: {e}")
         return ApiResponse(
