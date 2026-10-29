@@ -314,19 +314,38 @@ class BotA2aClient:
         # E1 错误二分：非 SSE 响应 = JSON-RPC 错误体（先不会有流）
         ctype = resp.headers.get("content-type", "")
         if resp.status_code != 200 or "text/event-stream" not in ctype:
-            data: dict[str, Any] = {}
+            raw = (await resp.aread()).decode(errors="replace")
             try:
-                data = json.loads((await resp.aread()).decode(errors="replace")) or {}
+                parsed: Any = json.loads(raw)
             except Exception:
-                pass
+                parsed = None
+            # 上游错误面不保证是 JSON-RPC 错误对象（2026-10-29 预发实证：
+            # 代理曾回 JSON 裸串，.get 直接炸成 AttributeError，把真实错
+            # 误盖住、run 被误报为代码异常）。两级 isinstance 守卫；解析
+            # 不出错误对象时原文截断进 message，让上游真身可见。
+            data: dict[str, Any] = parsed if isinstance(parsed, dict) else {}
+            err_raw: Any = data.get("error") if data else None
+            err_obj: Any = err_raw if isinstance(err_raw, dict) else {}
+            err_data: Any = err_obj.get("data")
+            if not isinstance(err_data, dict):
+                err_data = {}
+            # 信息丢失才透原文（生产实证形态）：body 合法 JSON 但非对象、或
+            # error 字段非对象。解析失败的垃圾体（代理 HTML 等）维持
+            # message 留空的既有契约，不造垃圾。
+            if parsed is not None and (
+                not isinstance(parsed, dict)
+                or (err_raw is not None and not isinstance(err_raw, dict))
+            ):
+                raw_snippet = raw[:200]
+            else:
+                raw_snippet = ""
             await resp.aclose()
             await client.aclose()
-            err = (data.get("error") or {}).get("data") or {}
             return {
                 "ok": False,
                 "error": {
-                    "code": err.get("reason", f"HTTP_{resp.status_code}"),
-                    "message": ((data.get("error") or {}).get("message", ""))[:200],
+                    "code": err_data.get("reason", f"HTTP_{resp.status_code}"),
+                    "message": str(err_obj.get("message") or raw_snippet)[:200],
                     "retryable": False,
                 },
             }
@@ -777,17 +796,40 @@ class BotA2aClient:
                     },
                 }
             body = resp.json()
-        if "error" in body:
+        # 同 E1 二分守卫（2026-10-29 预发同源实证）：错误面不保证对象形态——
+        # 裸串时 "error" in body 退化为子串检查、随后 .get/.get("result")
+        # 炸 AttributeError。isinstance 两级守卫，原文截断进 message。
+        if not isinstance(body, dict):
             return {
                 "ok": False,
                 "error": {
-                    "code": (body["error"].get("data") or {}).get(
-                        "reason", "a2a_error"
-                    ),
-                    "message": body["error"].get("message", "")[:200],
+                    "code": "a2a_error",
+                    "message": str(body)[:200],
                 },
             }
-        result = body.get("result") or {}
+        err_obj: Any = body.get("error")
+        if err_obj is not None:
+            if not isinstance(err_obj, dict):
+                return {
+                    "ok": False,
+                    "error": {
+                        "code": "a2a_error",
+                        "message": str(err_obj)[:200],
+                    },
+                }
+            err_data: Any = err_obj.get("data")
+            if not isinstance(err_data, dict):
+                err_data = {}
+            return {
+                "ok": False,
+                "error": {
+                    "code": err_data.get("reason", "a2a_error"),
+                    "message": str(err_obj.get("message", ""))[:200],
+                },
+            }
+        result = body.get("result")
+        if not isinstance(result, dict):
+            result = {}
         status = result.get("inject", "unknown")
         return {
             "ok": status in ("accepted", "duplicate_accepted", "duplicate_in_progress"),

@@ -418,6 +418,75 @@ def test_gate_rejection_not_ok(gate_server):
     assert out["error"]["code"] == "auth_required"
 
 
+# ── E1-robust: 上游错误面不是 JSON-RPC 错误对象（裸串/字符串 error 字段）──
+
+
+def make_stringified_error_app(body: Any, status_code: int = 200) -> FastAPI:
+    """错误面速写：body 原样 JSON 化返回——含 JSON 裸串与非对象 error 字段。
+
+    2026-10-29 预发实证：代理层曾回 JSON 裸串错误体，E1 二分把它当
+    JSON-RPC 错误对象 .get，炸成 AttributeError 并盖住真实错误。
+    """
+    app = FastAPI()
+
+    @app.get("/.well-known/agent-card.json")
+    def card() -> dict:
+        return {
+            "supportedInterfaces": [
+                {"protocolBinding": "JSONRPC", "protocolVersion": "1.0"}
+            ]
+        }
+
+    @app.post("/rpc")
+    async def rpc(request: Request) -> Any:
+        await request.json()
+        return JSONResponse(body, status_code=status_code)
+
+    return app
+
+
+def test_bare_string_error_body_surfaces_raw_not_crash():
+    """HTTP 502 + JSON 裸串 body：不得炸 AttributeError，原文必须进 message。"""
+    srv = LiveServer(make_stringified_error_app("upstream refused", 502))
+    try:
+
+        async def scenario():
+            client = await _connect_async(srv.base)
+            out = await client.chat_send(session_key="s", message="hi")
+            await client.close()
+            return out
+
+        out = _run(scenario())
+    finally:
+        srv.stop()
+    assert out["ok"] is False
+    assert out["error"]["code"] == "HTTP_502", "解析不出对象时回退真实状态码"
+    assert "upstream refused" in out["error"]["message"], "原始错误不得被盖住"
+
+
+def test_string_error_field_body_surfaces_raw_not_crash():
+    """200 + error 字段是字符串（非对象）：同款两级守卫，原文可见。"""
+    srv = LiveServer(
+        make_stringified_error_app(
+            {"jsonrpc": "2.0", "id": 1, "error": "gate exploded"}
+        )
+    )
+    try:
+
+        async def scenario():
+            client = await _connect_async(srv.base)
+            out = await client.chat_send(session_key="s", message="hi")
+            await client.close()
+            return out
+
+        out = _run(scenario())
+    finally:
+        srv.stop()
+    assert out["ok"] is False
+    assert out["error"]["code"] == "HTTP_200", "error 非对象时 reason 不可得"
+    assert "gate exploded" in out["error"]["message"]
+
+
 # ── hitl: 真实 dataclass + exchange ──
 
 
@@ -2443,6 +2512,38 @@ async def _inject_scenario(srv: LiveServer, **inject_kwargs: Any) -> dict:
     out = await client.chat_inject(session_key="s-inj", **kwargs)
     await client.close()
     return out
+
+
+def test_chat_inject_bare_string_error_body_no_crash():
+    """200 + JSON 裸串 body：isinstance 守卫 + 原文进 message。"""
+    app, _ = make_inject_app(
+        lambda body: JSONResponse('"inject refused"', status_code=200)
+    )
+    srv = LiveServer(app)
+    try:
+        out = _run(_inject_scenario(srv))
+    finally:
+        srv.stop()
+    assert out["ok"] is False
+    assert "inject refused" in out["error"]["message"]
+
+
+def test_chat_inject_string_error_field_no_crash():
+    """200 + error 字段是字符串：error 三键守卫，原文进 message。"""
+    app, _ = make_inject_app(
+        lambda body: JSONResponse(
+            {"jsonrpc": "2.0", "id": body["id"], "error": "inject refused"},
+            status_code=200,
+        )
+    )
+    srv = LiveServer(app)
+    try:
+        out = _run(_inject_scenario(srv))
+    finally:
+        srv.stop()
+    assert out["ok"] is False
+    assert out["error"]["code"] == "a2a_error"
+    assert "inject refused" in out["error"]["message"]
 
 
 def test_chat_inject_rejects_attachments_without_wire_side_effects():
