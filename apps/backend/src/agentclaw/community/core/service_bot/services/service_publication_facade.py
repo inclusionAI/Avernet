@@ -64,6 +64,7 @@ from agentclaw.community.core.service_bot.services.bot_publish_service import (
 from agentclaw.community.core.service_bot.services.publish_exceptions import (
     PublishNotFoundError,
     PublishStatusInvalidError,
+    UpgradeDraftRestartError,
 )
 from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
 from agentclaw.community.core.service_bot.services.publish_approval_service import (
@@ -531,6 +532,12 @@ class ServicePublicationFacade:
                 publish_id=record.id,
                 owner_id=bot["owner_id"],
             )
+        except UpgradeDraftRestartError as exc:
+            # The draft remains available through get/list lifecycle; retain the
+            # public API's existing upstream failure envelope.
+            raise ServiceContainerUpstreamError(
+                f"draft {exc.draft_record.id} created but restart submission failed"
+            ) from exc
         except (PublishNotFoundError, PublishStatusInvalidError) as exc:
             # The record may have changed between the projection check and the
             # domain write. Expose that race as the same stable state conflict.

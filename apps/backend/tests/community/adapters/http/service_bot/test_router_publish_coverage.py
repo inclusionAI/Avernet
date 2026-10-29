@@ -213,12 +213,21 @@ async def test_create_first_publish_success_and_errors():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_upgrade_publish_success_and_errors():
+async def test_upgrade_publish_success_and_errors(caplog):
+    sentinel = "credential" + "-sentinel"
     req = UpgradePublishRequest(publish_id=1)
     service = MagicMock()
-    service.upgrade_publish.return_value = Record()
-    resp = await router_publish.upgrade_publish(request=req, user=_USER, publish_service=service)
+    service.upgrade_publish.return_value.to_dict.return_value = {
+        "id": 2, "version": 2, "last_pub_id": 1, "status": "draft",
+        "ext": {"secret": sentinel},
+    }
+    with caplog.at_level("INFO"):
+        resp = await router_publish.upgrade_publish(request=req, user=_USER, publish_service=service)
     assert resp.success is True
+    assert "service_bot.upgrade.request" in caplog.text
+    assert "service_bot.upgrade.response" in caplog.text
+    assert "draft_id=2 draft_status=draft version=2 last_pub_id=1" in caplog.text
+    assert sentinel not in caplog.text
     service.upgrade_publish.assert_called_once_with(publish_id=1, owner_id="u1")
 
     resp = await router_publish.upgrade_publish(request=req, user=_ANON, publish_service=service)
@@ -1145,3 +1154,27 @@ async def test_draft_restore_endpoint_error_paths():
             2, user=_USER, publish_service=publish_service
         )
         assert_error(restored, code, message)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_upgrade_retains_draft_when_restart_submission_fails(caplog):
+    from agentclaw.community.core.service_bot.services.publish_exceptions import UpgradeDraftRestartError
+
+    draft = MagicMock()
+    draft.to_dict.return_value = {"id": 2, "version": 2, "last_pub_id": 1, "status": "draft"}
+    service = MagicMock()
+    service.upgrade_publish.side_effect = UpgradeDraftRestartError(draft)
+    with caplog.at_level("INFO"):
+        response = await router_publish.upgrade_publish(
+            request=UpgradePublishRequest(publish_id=1), user=_USER,
+            publish_service=service,
+        )
+    assert response.success is False
+    assert response.error_code == 500
+    assert response.data == draft.to_dict()
+    assert "重启触发失败" in response.message
+    assert "service_bot.upgrade.request" in caplog.text
+    assert "service_bot.upgrade.failure" in caplog.text
+    assert "success=False error_code=500 draft_id=2" in caplog.text
+    assert "version=2 last_pub_id=1" in caplog.text

@@ -68,6 +68,7 @@ from agentclaw.community.core.service_bot.services.bot_publish_service import (
     PublishNotFoundError,
     PublishStatusInvalidError,
 )
+from agentclaw.community.core.service_bot.services.publish_exceptions import UpgradeDraftRestartError
 from agentclaw.community.core.service_bot.services.publish_flow_service import (
     PublishFlowServiceError,
 )
@@ -529,48 +530,70 @@ async def upgrade_publish(
     - 操作者必须是发布单的 owner 或协作者（ADMIN 及以上权限）
 
     幂等性：
-    - 如果已升级过，返回已创建的新发布单
+    - 如果已升级过，返回已创建的新发布单，不重复重启
+    - 首次新建后提交源 Bot 草稿重启；teclaw 跳过，不等待健康完成
+    - 提交失败时保留草稿，返回失败及草稿信息，可使用手动草稿重启恢复
 
     Returns:
         ApiResponse: 包含新创建的发布单信息
     """
-    try:
-        user_id = user.staffId
-
-        if not user_id or user_id == "anonymous":
-            return ApiResponse(success=False, message="无法获取用户信息", error_code=400, data=None)
-
+    started = time.monotonic()
+    user_id = user.staffId
+    logger.info(
+        "service_bot.upgrade.request system=backend direction=inbound operation=upgrade "
+        "method=POST route=/api/service-bot/publish/upgrade publish_id=%s operator_id=%s",
+        request.publish_id, user_id,
+    )
+    if not user_id or user_id == "anonymous":
         logger.info(
-            f"[upgrade_publish] Upgrading: publish_id={request.publish_id}, user_id={user_id}"
+            "service_bot.upgrade.failure publish_id=%s operator_id=%s "
+            "error_code=400 reason=missing_user duration_ms=%.1f",
+            request.publish_id, user_id, (time.monotonic() - started) * 1000,
         )
-
+        return ApiResponse(success=False, message="无法获取用户信息", error_code=400, data=None)
+    try:
         # 调用 service 升级发布单
         record = publish_service.upgrade_publish(
             publish_id=request.publish_id,
             owner_id=user_id,
         )
 
-        return ApiResponse(
+        response = ApiResponse(
             success=True,
             data=record.to_dict(),
             message="发布单升级成功",
         )
 
+    except UpgradeDraftRestartError as e:
+        response = ApiResponse(
+            success=False, message=str(e), error_code=500, data=e.draft_record.to_dict(),
+        )
     except PublishNotFoundError as e:
         logger.warning(f"[upgrade_publish] Publish not found: {e}")
-        return ApiResponse(success=False, message=str(e), error_code=404, data=None)
+        response = ApiResponse(success=False, message=str(e), error_code=404, data=None)
 
     except PublishStatusInvalidError as e:
         logger.warning(f"[upgrade_publish] Invalid status: {e}")
-        return ApiResponse(success=False, message=str(e), error_code=400, data=None)
+        response = ApiResponse(success=False, message=str(e), error_code=400, data=None)
 
     except BotPublishServiceError as e:
         logger.error(f"[upgrade_publish] Service error: {e}")
-        return ApiResponse(success=False, message=str(e), error_code=403, data=None)
+        response = ApiResponse(success=False, message=str(e), error_code=403, data=None)
 
     except Exception as e:
         logger.error(f"[upgrade_publish] Unexpected error: {e}")
-        return ApiResponse(success=False, message=f"升级发布单失败: {str(e)}", error_code=500, data=None)
+        response = ApiResponse(success=False, message=f"升级发布单失败: {str(e)}", error_code=500, data=None)
+
+    logger.info(
+        "service_bot.upgrade.%s system=backend direction=outbound operation=upgrade "
+        "publish_id=%s operator_id=%s success=%s error_code=%s draft_id=%s "
+        "draft_status=%s version=%s last_pub_id=%s duration_ms=%.1f",
+        "response" if response.success else "failure", request.publish_id, user_id,
+        response.success, response.error_code, (response.data or {}).get("id"),
+        (response.data or {}).get("status"), (response.data or {}).get("version"),
+        (response.data or {}).get("last_pub_id"), (time.monotonic() - started) * 1000,
+    )
+    return response
 
 
 @router.post(
