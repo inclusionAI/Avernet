@@ -159,7 +159,9 @@ class ExpertScanner(ExpertScannerProtocol):
         manifest_path = safe_path(_text(meta.get("manifest"), "manifest", 256))
         manifest_path = path.rsplit("/", 1)[0] + "/" + manifest_path
         template = _yaml(source.read(manifest_path))
-        if set(template) - {"schema_version", "manifest", "apply_policy"}:
+        if "apply_policy" in template:
+            raise ValueError("apply_policy is not supported for expert templates")
+        if set(template) - {"schema_version", "manifest"}:
             raise ValueError("expert templates cannot declare sources or scripts")
         manifest = template.get("manifest")
         if not isinstance(manifest, dict) or set(manifest) - {

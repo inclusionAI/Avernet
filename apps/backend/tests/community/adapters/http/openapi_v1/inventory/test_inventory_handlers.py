@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 from datetime import datetime
+import json
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -387,3 +389,25 @@ def test_list_inventory_total_includes_cloud_rows_beyond_first_fetch_window(clie
     ids = {item["bot_id"] for item in data["items"]}
     assert "c249" in ids
     assert "l1" in ids
+
+
+@pytest.mark.parametrize("stored_ext", [
+    {"avatar_url": "avatar", "expert_origin": {"expert_name": "产品经理", "source_commit": "private-commit", "content_digest": "private-digest"}},
+    '{"expert_origin":{"expert_name":"产品经理","source_commit":"private-commit"}}',
+])
+@pytest.mark.parametrize("bot_type", ["personal", "service"])
+def test_inventory_http_projects_only_expert_name(client, bot_service, stored_ext, bot_type):
+    bot_service.list_bots_by_conditions.return_value = {"total": 1, "items": [{**CLOUD, "ext": stored_ext, "bot_type": bot_type}]}
+    data = _ok(client.get("/openapi/v1/bots/all"))
+    by_id = {item["bot_id"]: item for item in data["items"]}
+    assert by_id["c1"]["expert_name"] == "产品经理"
+    assert by_id["l1"]["expert_name"] is None
+    assert "expert_origin" not in str(data)
+    assert "private-commit" not in str(data)
+    assert "private-digest" not in str(data)
+    schema = client.app.openapi()["components"]["schemas"]["BotInventoryItem"]
+    assert "expert_name" not in schema["required"]
+    assert schema["properties"]["expert_name"]["readOnly"] is True
+    public_root = next(parent for parent in Path(__file__).resolve().parents if (parent / "apps/gateway/configs/schemas/bots.openapi.json").exists())
+    published = json.loads((public_root / "apps/gateway/configs/schemas/bots.openapi.json").read_text())
+    assert published["components"]["schemas"]["BotInventoryItem"]["properties"]["expert_name"] == schema["properties"]["expert_name"]

@@ -29,6 +29,9 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import MANIFEST_STATE
+from agentclaw.community.core.bot_config_manifest.binding import (
+    DIGEST_ENCODING, ManifestBindingMismatchError, bound_manifest_state,
+)
 from agentclaw.community.core.bot_app_grant.protocols import (
     BotAppGrantSweepProtocol,
 )
@@ -49,6 +52,7 @@ from agentclaw.community.core.bot_config_manifest.creation import (
 )
 from agentclaw.community.core.bot_management.manifest_seam import (
     ManifestCreationSeam,
+    create_job_idempotency_key,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.plugin_api.passport import PassportPlugin
@@ -63,6 +67,7 @@ from agentclaw.community.core.task_queue.types import (
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
+from agentclaw.community.utils.env_utils import get_current_env
 
 if TYPE_CHECKING:  # pragma: no cover - import-time cycle, see ``enqueue_create_job``
     from agentclaw.community.core.task_queue.services.task_queue_service import (
@@ -117,29 +122,6 @@ AUTHORIZATION_WINDOW_ELAPSED = "the authorization window elapsed"
 BOT_COULD_NOT_BE_PROVISIONED = "the bot could not be provisioned"
 
 
-def create_job_idempotency_key(
-    *, tenant: str, entity_id: str, bot_id: str
-) -> str:
-    """The enqueue key for one creation. Derived, never stored.
-
-    Both the submission (which enqueues) and the poll (which looks the job up)
-    compute it from values they already hold, so there is nothing to keep in
-    step and no column to add.
-
-    It carries the same three parts as the manifest's own storage key, and for
-    the same reason rather than for symmetry. The queue's dedup scope is
-    ``(env, app, task_type)`` and knows nothing about tenants or owners, so
-    anything left out of the key is something the lookup does not scope by —
-    and the poll's whole authorization argument is that a caller can only reach
-    rows keyed by the ``entity_id`` resolved from their own principal. Without
-    ``entity_id`` in here, another user's ``bot_id`` would find their pending
-    creation and hand back their authorization URL.
-
-    ``bot_id`` alone is documented as globally unique, so the other two parts
-    never change *which* row is found for a legitimate caller; they decide which
-    rows are reachable at all.
-    """
-    return f"create_with_manifest:{tenant}:{entity_id}:{bot_id}"
 
 
 #: How often the job looks again. Matches the existing publish poller's cadence.
@@ -301,6 +283,7 @@ class BotCreateWithManifestHandler:
     def __init__(
         self,
         *,
+        validate_creation_spec: Callable[[dict[str, Any]], None],
         manifest_seam_provider: Callable[[], ManifestCreationSeam],
         apply_service_provider: Callable[[], ApplyRunServiceProtocol],
         bot_repository_provider: Callable[[], BotRepository],
@@ -329,6 +312,7 @@ class BotCreateWithManifestHandler:
         # binds it. ``None`` leaves the row inert rather than live.
         grant_sweep_provider: Optional[Callable[[], BotAppGrantSweepProtocol]] = None,
     ) -> None:
+        self._validate_creation_spec = validate_creation_spec
         self._seam_provider = manifest_seam_provider
         self._applies_provider = apply_service_provider
         self._bots_provider = bot_repository_provider
@@ -365,12 +349,37 @@ class BotCreateWithManifestHandler:
         bot_id = str(payload["bot_id"])
         entity_id = str(payload["entity_id"])
 
+        spec = payload["spec"]
+        binding = spec.get("manifest_binding")
+        try:
+            self._validate_creation_spec(spec)
+            if binding is not None:
+                if (not isinstance(binding, dict)
+                        or binding.get("entity_id") != entity_id
+                        or binding.get("bot_id") != bot_id
+                        or binding.get("tenant") != str(payload.get("tenant") or "")
+                        or binding.get("env") != get_current_env()
+                        or binding.get("env") != payload.get("env")
+                        or binding.get("digest_encoding") != DIGEST_ENCODING):
+                    raise ManifestBindingMismatchError("bound Manifest storage reference does not match creation")
+                bound_manifest_state(binding.get("manifest_digest"))
+                self._seam_provider().verify_binding(
+                    entity_id=entity_id, bot_id=bot_id,
+                    manifest_digest=binding["manifest_digest"],
+                )
+        except ValueError as exc:
+            return Fail(f"{BOT_COULD_NOT_BE_PROVISIONED}: {exc}")
         bot = self._bots_provider().get_by_id_and_entity(bot_id, entity_id)
         if bot is None:
             return self._before_the_bot_exists(payload)
         if self._sequence(payload) is CreationSequence.RECORD_APPLY_PROVISION:
             return self._after_the_record_exists(payload, bot)
         return self._after_the_bot_exists(payload, bot)
+
+    @staticmethod
+    def _binding_kwargs(payload: dict) -> dict:
+        binding = payload["spec"].get("manifest_binding")
+        return {"expected_manifest_digest": binding["manifest_digest"]} if binding else {}
 
     def _sequence(self, payload: dict) -> CreationSequence:
         # Frozen at submission (W8): the sequence the creation started under
@@ -449,6 +458,7 @@ class BotCreateWithManifestHandler:
                 actor_id=user_id,
                 engine_type=payload["spec"].get("engine_type"),
                 bot_type=payload["spec"].get("bot_type"),
+                **self._binding_kwargs(payload),
             )
             return Reschedule(POLL_DELAY_SECONDS)
         if pre_container.status is ApplyStatus.RUNNING:
@@ -489,6 +499,7 @@ class BotCreateWithManifestHandler:
                     engine_type=spec.get("engine_type"),
                     bot_type=spec.get("bot_type"),
                     bot=bot,
+                    **self._binding_kwargs(payload),
                 )
                 return Reschedule(POLL_DELAY_SECONDS)
             if pre_container.status is ApplyStatus.RUNNING:
@@ -635,7 +646,8 @@ class BotCreateWithManifestHandler:
                 bot=bot,
                 owner_id=str(payload["user_id"]),
                 actor_id=str(payload["user_id"]),
-                state=MANIFEST_STATE,
+                state=(bound_manifest_state(payload["spec"]["manifest_binding"]["manifest_digest"])
+                       if payload["spec"].get("manifest_binding") is not None else MANIFEST_STATE),
                 trigger=CREATE_ON_CONTAINER_TRIGGER,
                 phase=ApplyPhase.ON_CONTAINER,
                 carry_from_apply_id=self._pre_container_apply_id(

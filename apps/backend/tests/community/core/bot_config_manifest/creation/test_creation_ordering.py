@@ -18,6 +18,8 @@ caller asked for.
 """
 from __future__ import annotations
 
+from agentclaw.community.core.bot_management.creation_source import validate_creation_source
+
 from contextlib import contextmanager
 
 import pytest
@@ -220,6 +222,7 @@ def _build(db, *, scripts=None):
     queue.service = applies
 
     seam = BotCreationManifestSeam(
+        validate_creation_spec=validate_creation_source,
         manifest_service=_Manifests(),
         apply_service=applies,
         script_service_provider=lambda: scripts,
@@ -255,6 +258,7 @@ def _build(db, *, scripts=None):
         bots.record = {"bot_id": _BOT, "entity_id": _ENTITY, "status": "STARTING"}
 
     handler = BotCreateWithManifestHandler(
+        validate_creation_spec=validate_creation_source,
         manifest_seam_provider=lambda: seam,
         apply_service_provider=lambda: applies,
         bot_repository_provider=lambda: bots,

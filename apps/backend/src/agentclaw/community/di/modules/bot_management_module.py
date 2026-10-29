@@ -20,6 +20,7 @@ from __future__ import annotations
 from agentclaw.community.core.apply_engine.compiler import StateCompilers
 from agentclaw.community.core.common_config.bot_config_protocol import BotStoragePolicyProtocol
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
+from agentclaw.community.core.bot_management.creation_source import validate_creation_source
 from agentclaw.community.core.bot_management.engines.aicoding.restart_arca import ArcaRestartTransport
 from agentclaw.community.core.bot_management.engines.aicoding.restart_dependencies import RestartBackupDependencies
 
@@ -798,6 +799,7 @@ class BotManagementModule(Module):
         imports ``creation`` for the triggers), behind the same lazy queue provider.
         """
         return BotCreationManifestSeam(
+            validate_creation_spec=validate_creation_source,
             manifest_service=manifest_service,
             apply_service=apply_service,
             script_service_provider=script_service_provider,
@@ -840,6 +842,7 @@ class BotManagementModule(Module):
             )
 
         return BotCreateWithManifestHandler(
+            validate_creation_spec=validate_creation_source,
             manifest_seam_provider=lambda: injector.get(ManifestCreationSeam),
             apply_service_provider=lambda: injector.get(
                 ApplyRunService

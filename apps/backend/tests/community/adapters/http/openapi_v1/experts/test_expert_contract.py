@@ -29,7 +29,12 @@ def test_real_catalog_http_dto_scope_filters_and_limits(tmp_path):
     db = SqliteDB()
     asyncio.run(db.bootstrap())
     catalog = ExpertCatalogRepository(db)
-    write_expert(tmp_path)
+    folder = write_expert(tmp_path)
+    with (folder / "manifest.yaml").open("a") as manifest:
+        manifest.write(
+            "  mcp:\n    - server_code: project-tools\n"
+            "      config:\n        headers:\n          X-Project: private-project-value\n"
+        )
     ExpertScanner(catalog).scan(
         tmp_path, source_commit="a" * 40, scope=ExpertScope("a", "dev", "aiworkbench")
     )
@@ -50,6 +55,9 @@ def test_real_catalog_http_dto_scope_filters_and_limits(tmp_path):
         assert client.get("/openapi/v1/experts/categories").json()["data"] == ["内容"]
         detail = client.get("/openapi/v1/experts/writer")
         assert detail.json()["data"]["identity"][0]["content"] == "原文正文"
+        assert detail.json()["data"]["mcp"] == [{"server_code": "project-tools"}]
+        assert "private-project-value" not in detail.text
+        assert "config" not in detail.json()["data"]["mcp"][0]
         assert "source_commit" not in detail.text
         assert (
             client.get("/openapi/v1/experts", params={"page_size": 101}).status_code
@@ -66,3 +74,18 @@ def test_real_catalog_http_dto_scope_filters_and_limits(tmp_path):
         }
         assert client.get("/openapi/v1/experts/writer").status_code == 404
     reset_for_tests()
+
+
+def test_published_expert_detail_matches_runtime_dto():
+    """Generated clients see the same MCP declarations as the real response DTO."""
+    import json
+    from pathlib import Path
+    from agentclaw.community.adapters.http.openapi_v1.experts.schemas import ExpertDetail
+
+    repository = Path(__file__).resolve().parents[8]
+    published = json.loads((repository / "apps/gateway/configs/schemas/bots.openapi.json").read_text())
+    actual = ExpertDetail.model_json_schema(ref_template="#/components/schemas/{model}")
+    definitions = actual.pop("$defs")
+    schemas = published["components"]["schemas"]
+    assert schemas["ExpertDetail"] == actual
+    assert schemas["ExpertMcp"] == definitions["ExpertMcp"]

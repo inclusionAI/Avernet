@@ -621,7 +621,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # explicit-author account-level routes, both with no Bot dimension: 134 -> 136.
 # Service environments add one Bot-addressed and two workflow/environment operations.
 # Risk-check routes add four user-scoped Bot-path operations.
-_BOT_ID_PLACEMENT = {"path": 217, "query": 1, "none": 138}
+_BOT_ID_PLACEMENT = {"path": 217, "query": 1, "none": 139}
 
 
 def _schema() -> dict:
@@ -832,7 +832,7 @@ def test_the_pinned_number_of_operations_take_it():
     # DWS rollout eligibility also requires the explicit caller: 269 -> 270.
     # The genome registry (RSI-03) adds thirteen: 270 -> 283.
     # The default-model read adds one Bot-addressed user-scoped operation.
-    assert len(taking) == 288
+    assert len(taking) == 289
 
 
 def test_the_exempt_operations_take_none():

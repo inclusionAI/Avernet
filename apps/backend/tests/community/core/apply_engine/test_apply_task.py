@@ -107,11 +107,12 @@ class _Db:
 class _Manifests:
     def __init__(self, *, raise_on_get: bool = False) -> None:
         self._raise_on_get = raise_on_get
+        self.document = _DOCUMENT
 
     def get(self, *, entity_id, bot_id):
         if self._raise_on_get:
             raise RuntimeError("the manifest store is unreachable")
-        return type("R", (), {"document": _DOCUMENT})()
+        return type("R", (), {"document": self.document})()
 
     def validate(self, *, document, active_engine, bot_type):
         import yaml
@@ -210,6 +211,25 @@ def _start(service):
         actor_id=_ENTITY,
         state=MANIFEST_STATE,
     )
+
+
+def test_bound_manifest_is_checked_again_in_real_worker_and_lock_is_released(world):
+    from agentclaw.community.core.bot_config_manifest.binding import bound_manifest_state, manifest_digest
+
+    service, queue, scripts, locks = world
+    ref = bound_manifest_state(manifest_digest(_DOCUMENT))
+    accepted = service.start_apply(
+        entity_id=_ENTITY, bot_id=_BOT, bot=_BOT_RECORD,
+        owner_id=_ENTITY, actor_id=_ENTITY, state=ref,
+    )
+    assert queue.payloads[-1]["state"] == ref.to_payload()
+    service._compilers["manifest"]._manifests.document = _DOCUMENT.replace("hello", "changed")
+    service.run_apply_task(queue.payloads[-1])
+    report = service.get_apply(entity_id=_ENTITY, bot_id=_BOT, apply_id=accepted.apply_id)
+    assert report.status is ApplyStatus.FAILED
+    assert report.state == ref and "bound Manifest has changed" in report.notes[0]
+    assert scripts.writes == 0
+    assert locks.get(env="dev", entity_id=_ENTITY, bot_id=_BOT) is None
 
 
 # ── the payload ────────────────────────────────────────────────────────────

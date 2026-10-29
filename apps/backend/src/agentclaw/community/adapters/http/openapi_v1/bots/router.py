@@ -75,6 +75,7 @@ from agentclaw.community.api.bot_space_service import BotSpaceServiceProtocol
 from agentclaw.community.api.skill_set_service_factory import (
     SkillSetServiceFactoryProtocol,
 )
+from agentclaw.community.core.bot_management.expert_origin import expert_name_from_ext
 from agentclaw.community.core.bot_management.create_flow import (
     AuthPending,
     AuthStatus,
@@ -238,6 +239,7 @@ def _to_bot(
         bot_type=d.get("bot_type") or "",
         status=d.get("status") or "",
         owner_entity_id=d.get("owner_id") or "",
+        expert_name=expert_name_from_ext(d.get("ext")),
         template_type=str(d["template_type"]) if has_template else None,
         template_config=(
             template_config_for_public(d.get("template_config"))

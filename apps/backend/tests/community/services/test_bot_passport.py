@@ -942,3 +942,28 @@ class TestCreateServiceBotPublish:
         # Verify: 发布单创建失败可见，Bot/layout 选择保留供重试复用。
         mock_publish_service.create_publish.assert_called_once()
         mock_bot_repository.soft_delete_by_owner.assert_not_called()
+
+
+class TestExpertOriginProtection(TestBotServicePassportIntegration):
+    def test_patch_cannot_forge_system_origin(self, bot_service):
+        with pytest.raises(ValueError, match="system-owned"):
+            bot_service.update_bot_ext("b", "u", {"expert_origin": None})
+
+    def test_put_cannot_replace_system_origin(self, bot_service):
+        with pytest.raises(ValueError, match="system-owned"):
+            bot_service.update_bot("b", "u", ext={"expert_origin": {"expert_id": "forged"}})
+
+    def test_origin_is_in_first_insert_before_post_record_failure(self, bot_service, mock_bot_repository):
+        from agentclaw.community.core.bot_management.expert_origin import ExpertOrigin
+        origin = ExpertOrigin("catalog", "writer", "Writer", "a" * 40, "b" * 64, "c" * 64)
+        ext = {"expert_origin": origin.as_payload(), "avatar_url": "https://example.test/avatar.png", "passport": {"agent_code": "ac-1"}}
+        mock_bot_repository.get_by_id_and_owner.return_value = None
+        mock_bot_repository.exists_by_bot_name.return_value = False
+        bot_service.check_create_bot_preflight = MagicMock()
+        bot_service._check_device_limit = MagicMock()
+        bot_service._initialize_capability_installations = MagicMock(side_effect=RuntimeError("after initial record"))
+        with pytest.raises(BotServiceError):
+            bot_service.create_bot(user_id="u", nick_name="User", bot_id="new-bot", bot_name="Expert Bot", engine_type="openclaw", bot_type="personal", ext=ext)
+        record = mock_bot_repository.insert_with_initial_skill_layout.call_args.args[0]
+        assert record["ext"] == ext
+        assert record["owner_id"] == "u"

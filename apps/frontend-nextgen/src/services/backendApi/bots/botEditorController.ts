@@ -202,7 +202,8 @@ export const botEditorController = {
       { method: 'POST', params: userScopedParams(), rawBody: body },
     );
   },
-  listBotMcps: (botId: string) => request<BotMcpDto[]>(path(botId, 'mcps')),
+  listBotMcps: (botId: string, ownerId?: string) =>
+    request<BotMcpDto[]>(path(botId, 'mcps'), 'GET', { owner_id: ownerId }),
   listMcpServers: () =>
     request<BackendApiPage<McpServerDto>>('/openapi/v1/bots/mcp/servers', 'GET', { page: 1, page_size: 100 }),
   searchMarketMcpServers: (params: { keyword?: string; tenants?: string[] } = {}) =>

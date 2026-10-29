@@ -23,6 +23,11 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Mapping
 
+from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
+from agentclaw.community.utils.env_utils import get_current_env
+
+from agentclaw.community.core.bot_management.creation_source import bind_creation_source
+from agentclaw.community.core.bot_management.expert_origin import ExpertOrigin
 from agentclaw.community.core.bot_management.create_context import (
     BotCreateContext,
     BotCreateDeploymentMode as BotCreateDeploymentMode,
@@ -333,10 +338,13 @@ def _apply_passport(
 
 
 def _build_ext(
-    *, avatar_url: str | None, agent_code: str | None, issued: bool = False
+    *, avatar_url: str | None, agent_code: str | None, issued: bool = False,
+    expert_origin: ExpertOrigin | None = None,
 ) -> dict[str, Any] | None:
     """Assemble the bot's ``ext`` payload; ``None`` when there is nothing to store."""
     ext: dict[str, Any] = {}
+    if expert_origin is not None:
+        ext["expert_origin"] = expert_origin.as_payload()
     if avatar_url:
         ext["avatar_url"] = avatar_url
     if agent_code:
@@ -533,7 +541,7 @@ def create_bot_with_authorization(
             "entity_type": spec.entity_type,
             "share_policy": spec.share_policy,
             "engine_type": spec.engine_type,
-            "ext": _build_ext(avatar_url=spec.avatar_url, agent_code=agent_code),
+            "ext": _build_ext(avatar_url=spec.avatar_url, agent_code=agent_code, expert_origin=spec.expert_origin),
             "bot_id": bot_id,
             "bot_type": spec.bot_type,
             "template_type": spec.template_type,
@@ -643,6 +651,11 @@ def submit_bot_creation_with_manifest(
         engine_type=spec.engine_type,
         bot_type=spec.bot_type,
     )
+    payload_spec = bind_creation_source(
+        {**creation_spec_to_payload(spec, context), "nick_name": nick_name},
+        tenant=get_current_avernet_tenant(), env=get_current_env(),
+        entity_id=spec.entity_id, bot_id=bot_id,
+    )
     # The seam resolves the storage key and returns it: this module must not
     # import the manifest package (that closes a cycle through the creation
     # graph), and the key's rule belongs with the storage that depends on it.
@@ -666,6 +679,12 @@ def submit_bot_creation_with_manifest(
     # job exists there is no job to bound them, so this is the only place that
     # can.
     try:
+        binding = payload_spec.get("manifest_binding")
+        if binding is not None:
+            manifest_seam.verify_binding(
+                entity_id=entity_id, bot_id=bot_id,
+                manifest_digest=binding["manifest_digest"],
+            )
         return _apply_and_hand_off(
             nick_name=nick_name,
             manifest_seam=manifest_seam,
@@ -676,6 +695,7 @@ def submit_bot_creation_with_manifest(
             entity_id=entity_id,
             bot_name=bot_name,
             spec=spec,
+            payload_spec=payload_spec,
             context=context,
         )
     except Exception:
@@ -696,6 +716,7 @@ def _apply_and_hand_off(
     entity_id: str,
     bot_name: str | None,
     spec: BotCreateSpec,
+    payload_spec: dict[str, Any],
     context: BotCreateContext,
 ) -> ManifestCreationSubmitted:
     """Apply for the Passport, then hand the creation to its durable job.
@@ -756,7 +777,7 @@ def _apply_and_hand_off(
         entity_id=entity_id,
         user_id=user_id,
         document_owner=user_id,
-        spec={**creation_spec_to_payload(spec, context), "nick_name": nick_name},
+        spec=payload_spec,
         iframe_url=iframe_url,
         redirect_url=redirect_url,
     )
@@ -794,6 +815,7 @@ def creation_spec_to_payload(
         "template_validation_mode": spec.template_validation_mode.value,
         "space_id": spec.space_id,
         "engine_properties": spec.engine_properties,
+        "expert_origin": spec.expert_origin.as_payload() if spec.expert_origin else None,
         **context.as_payload(),
     }
 
@@ -819,6 +841,7 @@ def creation_spec_from_payload(
             ),
             space_id=payload.get("space_id"),
             engine_properties=payload.get("engine_properties") or {},
+            expert_origin=ExpertOrigin.from_payload(payload["expert_origin"]) if payload.get("expert_origin") else None,
         ),
         BotCreateContext.from_payload(payload),
     )
@@ -937,7 +960,7 @@ def complete_bot_authorization(
             "share_policy": spec.share_policy,
             "engine_type": spec.engine_type,
             "ext": _build_ext(
-                avatar_url=spec.avatar_url, agent_code=agent_code, issued=True
+                avatar_url=spec.avatar_url, agent_code=agent_code, issued=True, expert_origin=spec.expert_origin
             ),
             "bot_type": spec.bot_type,
             "template_type": spec.template_type,

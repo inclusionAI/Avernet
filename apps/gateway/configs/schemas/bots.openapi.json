@@ -1640,6 +1640,18 @@
             ],
             "description": "Template type of the bot, e.g. 'applicationCoding'; null for bots created without a template.",
             "title": "Template Type"
+          },
+          "expert_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Read-only source expert name for a bot created from the expert market; null for ordinary bots.",
+            "title": "Expert Name"
           }
         },
         "required": [
@@ -2404,6 +2416,19 @@
       "BotInventoryItem": {
         "description": "Unified card for a personal cloud, local, or service bot.",
         "properties": {
+        "expert_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Read-only source expert name for a bot created from the expert market; null for ordinary bots.",
+          "readOnly": true,
+          "title": "Expert Name"
+        },
           "actions": {
             "description": "Actions currently available for this bot.",
             "items": {
@@ -32198,6 +32223,14 @@
             "title": "Identity",
             "type": "array"
           },
+          "mcp": {
+            "description": "Declared MCP servers; connection overrides are omitted.",
+            "items": {
+              "$ref": "#/components/schemas/ExpertMcp"
+            },
+            "title": "Mcp",
+            "type": "array"
+          },
           "name": {
             "description": "Expert display name.",
             "title": "Name",
@@ -32253,6 +32286,21 @@
           "content"
         ],
         "title": "ExpertIdentity",
+        "type": "object"
+      },
+      "ExpertMcp": {
+        "description": "A template declaration, without connection overrides or authorization claims.",
+        "properties": {
+          "server_code": {
+            "description": "Declared Registry MCP code; not an authorization or runtime status.",
+            "title": "Server Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "server_code"
+        ],
+        "title": "ExpertMcp",
         "type": "object"
       },
       "ExpertSkill": {
@@ -115607,6 +115655,194 @@
           }
         },
         "summary": "Expert Detail",
+        "tags": [
+          "experts"
+        ]
+      }
+    },
+    "/openapi/v1/experts/{expert_id}/bots": {
+      "post": {
+        "description": "Create an owned Bot using the latest valid expert identity and original authorization flow.",
+        "operationId": "create_bot_from_expert",
+        "parameters": [
+          {
+            "description": "Stable expert identifier in the configured source.",
+            "in": "path",
+            "name": "expert_id",
+            "required": true,
+            "schema": {
+              "description": "Stable expert identifier in the configured source.",
+              "maxLength": 64,
+              "title": "Expert Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BotCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_BotCreateWithManifestAccepted_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_BotQuotaExceededData_"
+                }
+              }
+            },
+            "description": "The target Space has no capacity for another Bot."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "summary": "Create Bot From Expert",
         "tags": [
           "experts"
         ]

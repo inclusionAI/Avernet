@@ -1,5 +1,12 @@
-import type { ExpertDetail, ExpertPage, ExpertQuery } from '@/domain/expertMarket';
-import { EXPERT_ENDPOINT, requestExpertCategories, requestExpertDetail, requestExpertPage } from './backendApi/expertController';
+import type { ExpertDetail, ExpertPage, ExpertQuery, ExpertBotAccepted, ExpertBotCreationStatus } from '@/domain/expertMarket';
+import {
+  EXPERT_ENDPOINT,
+  requestExpertCategories,
+  requestExpertDetail,
+  requestExpertPage,
+  requestExpertBotCreation,
+  requestExpertBotCreationStatus,
+} from './backendApi/expertController';
 import { BackendRequestError } from './backendApi/httpClient';
 import { type BackendApiEnvelope, isEnvelopeSuccess } from './backendApi/types';
 
@@ -12,7 +19,10 @@ function catalogData<T>(response: BackendApiEnvelope<T>, path: string): T {
 
 /** 发现页与模板选择器共用服务端语义；可见范围始终由认证上下文决定。 */
 export async function listExperts(query: ExpertQuery, signal?: AbortSignal): Promise<ExpertPage> {
-  const page = catalogData(await requestExpertPage({ ...query, keyword: query.keyword.trim() }, signal), EXPERT_ENDPOINT);
+  const page = catalogData(
+    await requestExpertPage({ ...query, keyword: query.keyword.trim() }, signal),
+    EXPERT_ENDPOINT,
+  );
   if (typeof page.total !== 'number' || !Array.isArray(page.items)) {
     throw new BackendRequestError('专家目录分页响应无效', { apiPath: EXPERT_ENDPOINT, data: page });
   }
@@ -25,4 +35,28 @@ export async function listExpertCategories(signal?: AbortSignal): Promise<string
 
 export async function getExpert(expertId: string, signal?: AbortSignal): Promise<ExpertDetail> {
   return catalogData(await requestExpertDetail(expertId, signal), `${EXPERT_ENDPOINT}/${encodeURIComponent(expertId)}`);
+}
+
+export type { ExpertBotAccepted, ExpertBotCreationStatus } from '@/domain/expertMarket';
+
+export async function createExpertBot(
+  expertId: string,
+  body: import('@/domain/botWorkshop').AvernetBotCreateRequest,
+): Promise<ExpertBotAccepted> {
+  const path = `${EXPERT_ENDPOINT}/${encodeURIComponent(expertId)}/bots`;
+  return catalogData(
+    await requestExpertBotCreation(expertId, body),
+    path,
+  );
+}
+export async function getExpertBotCreationStatus(botId: string): Promise<ExpertBotCreationStatus> {
+  const path = `/openapi/v1/bots/${encodeURIComponent(botId)}/with-manifest/status`;
+  return catalogData(await requestExpertBotCreationStatus(botId), path);
+}
+
+
+/** Service owns transport error interpretation; presentation consumes only the outcome category. */
+export function classifyExpertSubmissionFailure(failure: unknown): 'rejected' | 'unknown' {
+  return failure instanceof BackendRequestError && failure.status !== undefined && failure.status >= 400 && failure.status < 500
+    ? 'rejected' : 'unknown';
 }

@@ -426,6 +426,29 @@ def _phase_report(apply_id, trigger, *, sources=(), categories=()):
     )
 
 
+@pytest.mark.parametrize("kind,reference", [
+    ("manifest", None),
+    ("manifest", "sha256-json-v1:" + "a" * 64),
+    ("genome", "promotion-1"),
+])
+def test_phase_carry_preserves_current_state_in_the_api_report(kind, reference):
+    from dataclasses import replace
+
+    from agentclaw.community.core.apply_engine.compiler import StateRef
+    from agentclaw.community.adapters.http.openapi_v1.bots.config_manifest_support import apply_payload
+
+    earlier = _phase_report("a", "create:pre_container")
+    current = replace(
+        _phase_report("b", "create:on_container"),
+        state=StateRef(kind, reference),
+    )
+    merged = _folded(earlier, current)
+    assert merged.state == current.state
+    assert apply_payload(merged).state.model_dump() == {
+        "kind": kind, "reference": reference,
+    }
+
+
 def test_one_source_used_by_both_phases_is_one_row() -> None:
     """The invariant the fold used to break: one declaration, one row.
 

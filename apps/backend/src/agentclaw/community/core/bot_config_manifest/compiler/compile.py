@@ -42,11 +42,16 @@ from agentclaw.community.core.bot_config_manifest.compiler.entries.script import
 from agentclaw.community.core.bot_config_manifest.compiler.entries.skills import compile_skills
 from agentclaw.community.core.bot_config_manifest.compiler.session import CompileSession
 from agentclaw.community.core.bot_config_manifest.schema import ManifestValidationError
+from agentclaw.community.core.bot_config_manifest.binding import (
+    ManifestBindingMismatchError, expected_manifest_digest, verify_parsed_document,
+)
 from agentclaw.community.core.bot_config_manifest.fetch.git_source import GitSourceClient
 from agentclaw.community.core.apply_engine.run.report_codec import report_from_payload
 from agentclaw.community.core.content_store import ContentStoreProtocol
 from agentclaw.community.core.repository.protocols.bot import BotConfigManifestApplyRepositoryProtocol
 from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
+from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
+from agentclaw.community.utils.env_utils import get_current_env
 
 __all__ = ["ManifestCompiler"]
 
@@ -81,7 +86,7 @@ class ManifestCompiler(DesiredStateCompiler):
         or a construct's materialiser was withdrawn — so the ``PUT``'s own
         validation is not enough.
         """
-        self._parsed_or_empty(ctx)
+        self._parsed_or_empty(ctx, ref)
 
     async def compile(
         self, ctx: ApplyContext, ref: StateRef, *, only: Collection[ApplyConstruct] | None = None
@@ -96,8 +101,8 @@ class ManifestCompiler(DesiredStateCompiler):
         engine failure.
         """
         try:
-            parsed = self._parsed_or_empty(ctx)
-        except ManifestValidationError as exc:
+            parsed = self._parsed_or_empty(ctx, ref)
+        except (ManifestValidationError, ManifestBindingMismatchError) as exc:
             raise CompileRefused(
                 f"the stored document no longer validates for this bot: {exc}", domain_error=exc
             ) from exc
@@ -163,14 +168,23 @@ class ManifestCompiler(DesiredStateCompiler):
             cli_tools=await compile_cli_tools(session, cli_tools, **kwargs) if cli_tools is not None else None,
         )
 
-    def _parsed_or_empty(self, ctx: ApplyContext) -> dict[str, Any]:
+    def _parsed_or_empty(self, ctx: ApplyContext, ref: StateRef) -> dict[str, Any]:
         """The stored document, re-validated, or ``{}`` when there is none."""
+        expected = expected_manifest_digest(ref)
+        if expected is not None:
+            if ctx.env != get_current_env() or ctx.tenant != get_current_avernet_tenant():
+                raise ManifestBindingMismatchError("bound Manifest execution scope does not match storage")
         record = self._manifests.get(entity_id=ctx.entity_id, bot_id=ctx.bot_id)
         if record is None:
+            if expected is not None:
+                raise ManifestBindingMismatchError("bound Manifest document is missing")
             return {}
-        return self._manifests.validate(
+        parsed = self._manifests.validate(
             document=record.document, active_engine=ctx.engine_type, bot_type=ctx.bot_type
         ).parsed
+        if expected is not None:
+            verify_parsed_document(parsed, expected)
+        return parsed
 
     def _baselines(self, ctx: ApplyContext) -> dict[tuple[str, str, str], str]:
         """Each git source's SHA as the bot's recent applies resolved it (W7)."""
