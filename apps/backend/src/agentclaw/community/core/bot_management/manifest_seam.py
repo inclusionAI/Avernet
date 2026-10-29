@@ -89,14 +89,6 @@ class ManifestCreationSeam(Protocol):
         """Refuse a changed or missing task-bound document without modifying it."""
         ...
 
-    def recovery_manifest_digest(self, *, entity_id: str, bot_id: str) -> str:
-        """Return the failed creation's original digest, refusing changed input.
-
-        Only an existing, terminal failed bound initialization is recoverable.
-        Normal subsequent Apply calls do not call this operation.
-        """
-        ...
-
     def apply_pre_container(
         self,
         *,

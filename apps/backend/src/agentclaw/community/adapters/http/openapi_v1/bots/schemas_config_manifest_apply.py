@@ -142,7 +142,7 @@ class ConfigManifestApplyState(BaseModel):
     reference: str | None = Field(
         default=None,
         description="The producer's reference within the kind: the promotion id for `genome`; `null` for "
-        "`manifest` on ordinary Apply, or a producer-owned digest reference for bound creation/recovery.",
+        "`manifest` on ordinary Apply, or a producer-owned digest reference for bound creation.",
     )
 
 

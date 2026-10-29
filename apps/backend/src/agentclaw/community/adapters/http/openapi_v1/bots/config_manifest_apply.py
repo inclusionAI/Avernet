@@ -37,8 +37,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 from agentclaw.community.api.apply_run_service import (
     ApplyRunServiceProtocol,
 )
-from agentclaw.community.api.bot_config_manifest_service import MANIFEST_STATE, bound_manifest_state
-from agentclaw.community.core.bot_management.manifest_seam import ManifestCreationSeam
+from agentclaw.community.api.bot_config_manifest_service import MANIFEST_STATE
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.di import Injected
 
@@ -116,13 +115,6 @@ async def apply_bot_config_manifest(
             "manifest declares is applied to the bot."
         ),
     ] = False,
-    recover_creation: Annotated[
-        bool,
-        Query(description="Recover a failed bound initialization on this same bot using its original stored Manifest. "
-              "A changed binding or a completed/running creation is refused with 409. "
-              "False (default) preserves ordinary Apply of the current user document."),
-    ] = False,
-    manifest_seam: ManifestCreationSeam = Injected(ManifestCreationSeam),
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     apply_service: ApplyRunServiceProtocol = Injected(
         ApplyRunServiceProtocol
@@ -174,11 +166,6 @@ async def apply_bot_config_manifest(
     # principal denied every application caller at ``can_manage_bot``.
     audit = audit_actor(caller, actor_id)
 
-    state = (
-        bound_manifest_state(manifest_seam.recovery_manifest_digest(entity_id=entity_id, bot_id=bot_id))
-        if recover_creation else MANIFEST_STATE
-    )
-
     if dry_run:
         # A dry run is finished when it answers — nothing was accepted for later
         # processing — so it is a 200, not the route's default 202.
@@ -191,7 +178,7 @@ async def apply_bot_config_manifest(
             # A dry run writes no record, so it has no audit column to fill and
             # needs only the principal.
             actor_id=actor_id,
-            state=state,
+            state=MANIFEST_STATE,
         )
         return envelope(apply_payload(report), request)
 
@@ -210,7 +197,7 @@ async def apply_bot_config_manifest(
         audit_actor=audit,
         # This API applies the bot's stored document; a promotion's revision
         # starts from the genome routes.
-        state=state,
+        state=MANIFEST_STATE,
     )
     return envelope(
         ConfigManifestApplyAccepted(

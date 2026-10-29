@@ -25,8 +25,6 @@ export function ExpertCreationResult({
   unknown,
   input,
   onClose,
-  onRecover,
-  recovering,
 }: {
   botId?: string;
   status?: ExpertBotCreationStatus;
@@ -37,8 +35,6 @@ export function ExpertCreationResult({
   unknown: boolean;
   input?: BotCreateInput;
   onClose: () => void;
-  onRecover?: () => void;
-  recovering?: boolean;
 }) {
   const locate = () => {
     const spaceId = Number(input?.spaceId);
@@ -81,12 +77,6 @@ export function ExpertCreationResult({
             </p>
           ))}
           {status.apply.notes?.map((note, index) => <p key={index}>{note}</p>)}
-        </div>
-      )}
-      {status?.state === 'APPLY_FAILED' && status.recoverable !== false && onRecover && (
-        <div className="space-y-2">
-          <p className="text-sm text-muted-foreground">重试会在原 Bot 按原清单替换声明的配置。若清单声明资源（含空列表），会清理工作区非保护项，请先保存需要保留的输出。</p>
-          <Button type="button" disabled={recovering || initializationPending} onClick={onRecover}>在原 Bot 重试配置</Button>
         </div>
       )}
       <div className="flex gap-2">

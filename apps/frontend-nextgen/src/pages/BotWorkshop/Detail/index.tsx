@@ -1,4 +1,4 @@
-import { ExpertConfigurationRecovery } from '@/components/BotWorkshop/ExpertConfigurationRecovery';
+import { ExpertCreationDetails } from '@/components/BotWorkshop/ExpertCreationDetails';
 import { useBotEditorAddress } from './useBotEditorAddress';
 import { BotEditorExtensionContent } from './BotEditorExtensionContent';
 import { useBotEditorPanels } from './useBotEditorPanels';
@@ -131,7 +131,7 @@ const BotWorkshopDetailPage: React.FC = () => {
         }}
         onReload={() => void detail.retry()}
       />
-      {isOwner && !verifying && bot.expertOriginName && <ExpertConfigurationRecovery key={bot.id} botId={bot.id} />}
+      {isOwner && !verifying && bot.expertOriginName && <ExpertCreationDetails key={bot.id} botId={bot.id} />}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <DetailNavigation
           hidden={debugFullscreen}

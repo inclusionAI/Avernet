@@ -212,8 +212,6 @@ const CreateBotModal: React.FC<CreateBotModalProps> = ({
               initializationPending={expertCreation.initializationPending}
               afterCreateError={expertCreation.afterCreateError}
               unknown={expertCreation.unknown}
-              onRecover={expertCreation.recover}
-              recovering={expertCreation.recovering}
               input={values}
               onClose={onClose}
             />
