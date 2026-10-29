@@ -28,7 +28,7 @@ from agentclaw.community.kernel.knowledge import (
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
-from agentclaw.community.plugin_api.models import BotModel
+from agentclaw.community.plugin_api.models import BotCommonConfig, BotModel
 from agentclaw.community.utils.env_utils import get_current_env
 
 logger = get_logger()
@@ -154,6 +154,21 @@ class BotKnowledgePublicationSelection:
             )
             return False
 
+    def _read_record(self, identity: dict) -> str | None:
+        # Generic configs.get treats a missing table as absence for legacy
+        # policy callers. Observations must distinguish that outage from an
+        # ordinary historical record that was never captured.
+        with self.db.orm_session() as session:
+            row = (
+                session.query(BotCommonConfig)
+                .filter_by(
+                    **_coordinates(identity),
+                    is_delete=0,
+                )
+                .one_or_none()
+            )
+            return row.config_value if row is not None else None
+
     def get_publication_selection(
         self,
         *,
@@ -189,7 +204,7 @@ class BotKnowledgePublicationSelection:
             captured_at=None,
         )
         try:
-            raw = self.configs.get(**_coordinates(identity))
+            raw = self._read_record(identity)
         except Exception:
             logger.exception(
                 "Knowledge observation unavailable: publication_id=%s", publication_id

@@ -40,7 +40,7 @@ config_key = f"publication:{publication_id}"
 }
 ```
 
-启用集合排序去重、最多 100 个 ID，沿用现有 ID 校验；序列化后 UTF-8 不超过 65535 字节。空数组是有效记录；不能把查询失败或权限不足转换为空数组后保存。使用已有 common-config Repository 的 `get/put`（`implementations/config/bot_common_config.py:21-48,143-182`），独立会话；写入异常由 Repository 正常抛出，由显式的附属记录方法处理并返回结果。
+启用集合排序去重、最多 100 个 ID，沿用现有 ID 校验；序列化后 UTF-8 不超过 65535 字节。空数组是有效记录；不能把查询失败或权限不足转换为空数组后保存。保存复用 common-config Repository 的 `put`（`implementations/config/bot_common_config.py:143-182`），读取在本 Module 的独立会话按同一唯一键执行严格查询；原有 `get` 会将缺表降级为 None，不能用于区分本功能的 unavailable。均不修改通用 Repository 的兼容语义；写入异常由 Repository 正常抛出，由显式的附属记录方法处理并返回结果。
 
 ## API / Interface Changes
 现有草稿端点、分页、CAS、个人 Bot 行为不变。不在原 GET 中混入历史选择，也不新增阶段开关写入口。

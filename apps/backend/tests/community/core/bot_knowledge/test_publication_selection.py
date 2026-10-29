@@ -140,7 +140,7 @@ def test_rebuild_success_replaces_only_this_versions_observation(observation):
 
 def test_auxiliary_read_failure_is_unavailable_without_draft_fallback(observation):
     _, service, _ = observation
-    service.configs.get = Mock(side_effect=RuntimeError("read unavailable"))
+    service._read_record = Mock(side_effect=RuntimeError("read unavailable"))
     result = read(observation)
     assert result["observation_status"] == "unavailable"
     assert result["kb_ids"] is None
@@ -151,7 +151,7 @@ def test_auxiliary_read_failure_is_unavailable_without_draft_fallback(observatio
 )
 def test_malformed_payload_is_unrecorded(observation, value):
     _, service, _ = observation
-    service.configs.get = Mock(return_value=value)
+    service._read_record = Mock(return_value=value)
     assert read(observation)["observation_status"] == "unrecorded"
 
 
@@ -183,12 +183,12 @@ def test_wrong_or_invalid_record_is_not_a_selection(observation, field, value):
 
 def test_authorization_errors_are_not_swallowed(observation):
     _, service, scope = observation
-    service.configs.get = Mock(side_effect=AssertionError("must not query config"))
+    service._read_record = Mock(side_effect=AssertionError("must not query config"))
     with pytest.raises(KnowledgeError, match="BOT_EDITOR_REQUIRED"):
         service.get_publication_selection(
             scope=scope, actor_id="other", publication_id=101
         )
-    service.configs.get.assert_not_called()
+    service._read_record.assert_not_called()
 
 
 def test_old_owner_is_not_authority_but_current_owner_can_read(observation):
@@ -261,3 +261,16 @@ def test_invalid_space_does_not_overwrite_with_empty(observation):
 def test_invalid_publication_id_is_not_recorded(observation, publication_id):
     _, service, _ = observation
     assert not service.record_build_selection(publication_id=publication_id)
+
+
+def test_missing_auxiliary_table_is_unavailable_not_historical_absence(observation):
+    db, service, _ = observation
+    with db.orm_session() as session:
+        BotCommonConfig.__table__.drop(session.get_bind())
+    assert read(observation)["observation_status"] == "unavailable"
+    assert not service.record_build_selection(publication_id=101)
+    # Original generic policy-store semantics are not changed.
+    assert (
+        service.configs.get(bot_id="x", entity_id="y", env="dev", config_key="z")
+        is None
+    )
