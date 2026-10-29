@@ -386,6 +386,17 @@ class BcnClientTests(unittest.IsolatedAsyncioTestCase):
         # 生成器还没退出，不能先 ACK。
         with self.assertRaises(TimeoutError):
             await self.fake.wait_for_response("abort-stubborn", timeout=0.2)
+        # 但接收循环不能被等待取消阻塞：其它请求仍应被处理。
+        await self.fake.send(
+            {
+                "type": "req",
+                "id": "inject-during-abort",
+                "method": "chat.inject",
+                "params": {"session_key": SESSION_KEY, "bcs_session_id": SESSION_ID, "message": {}},
+            }
+        )
+        inject = await self.fake.wait_for_response("inject-during-abort", timeout=1)
+        self.assertTrue(inject["ok"])
         brain.release.set()
         response = await self.fake.wait_for_response("abort-stubborn", timeout=3)
         self.assertEqual(response["payload"], {"aborted": True, "aborted_run_ids": [run_id]})
