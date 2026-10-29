@@ -58,12 +58,24 @@ def _measured_page(world, *, space_id=1, cursor=0, limit=1, keyword=""):
         raw.driver_connection.set_progress_handler(None, 0)
         event.remove(world.engine, "before_cursor_execute", capture)
     try:
-        assert len(captured) == 1  # includes the real injected tenant predicate
-        statement, parameters = captured[0]
-        assert "ac_bots.avernet_tenant = ?" in statement
-        plan = raw.driver_connection.execute(
-            "EXPLAIN QUERY PLAN " + statement, parameters
-        ).fetchall()
+        # One point lookup for personal-space ownership, then one Team branch
+        # or two disjoint Personal branches. Every Bot query is independently
+        # seek/limit bounded, including the real injected tenant predicate.
+        bot_queries = [
+            (sql, params) for sql, params in captured if "FROM ac_bots" in sql
+        ]
+        assert 1 <= len(bot_queries) <= 2
+        assert len(captured) == len(bot_queries) + 1
+        plan = []
+        for statement, parameters in bot_queries:
+            assert "ac_bots.avernet_tenant = ?" in statement
+            assert "ac_bots.id > ?" in statement
+            assert " LIMIT ?" in statement
+            plan.extend(
+                raw.driver_connection.execute(
+                    "EXPLAIN QUERY PLAN " + statement, parameters
+                ).fetchall()
+            )
     finally:
         raw.close()
     return page, steps, " ".join(row[3] for row in plan)
@@ -168,3 +180,30 @@ def test_operator_migration_repairs_existing_table_with_legacy_space_index(world
     assert INDEX in after_plan
     assert after_steps < 500
     print(f"candidate-existing-table before={before_steps} after={after_steps}")
+
+
+@pytest.mark.parametrize("count", [1_000, 10_000, 100_000])
+def test_personal_legacy_candidates_do_not_scan_other_spaces(world, count):
+    from agentclaw.community.core.spaces.repository.models import SpaceModel
+
+    _seed(world, count)
+    with world.db.orm_session() as session:
+        space = session.get(SpaceModel, 1)
+        space.space_type, space.personal_owner_id = "PERSONAL", "owner"
+        session.get(BotModel, 1).space_id = None
+        session.get(BotModel, 2).space_id = None  # Another Owner must stay hidden.
+    page, steps, plan = _measured_page(world)
+    assert [bot["owner_id"] for bot in page["items"]] == ["owner"]
+    assert page["next_cursor"] is None
+    assert steps < 1_000
+    assert plan.count(f"SEARCH ac_bots USING INDEX {INDEX}") == 2
+    assert "USE TEMP B-TREE" not in plan
+    print(f"candidate-personal-legacy noise={count} steps={steps} plan={plan}")
+
+
+def test_team_candidates_do_not_scan_unassigned_personal_bots(world):
+    _seed(world, 10_000, space_id=None, owner_id="unrelated-owner")
+    page, steps, plan = _measured_page(world, limit=20)
+    assert [bot["owner_id"] for bot in page["items"]] == ["owner", "other-owner"]
+    assert steps < 1_000
+    assert INDEX in plan

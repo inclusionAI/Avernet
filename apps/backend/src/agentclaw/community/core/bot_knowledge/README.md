@@ -121,3 +121,17 @@ indexes for fresh local schemas; that is not evidence they exist in an already
 running database. Deferring them does not change draft-check correctness, but
 production query/lock cost without them remains unverified. No automatic
 existing-database migration, production DDL, or deployment is performed here.
+
+## Legacy personal Bot selection
+
+For a Bot with NULL `space_id`, knowledge operations resolve the Owner's
+existing, undeleted PERSONAL space in the Bot's environment. They do not create
+a space or persist the effective space back to the Bot. Missing/deleted spaces
+remain unavailable. Explicit assignments never fall back, including invalid or
+deleted assignments. Native Owner/Editor and service-Bot draft rules remain.
+
+Current selections are stored and read using the effective space ID; the write
+transaction locks and re-resolves both Bot and space after the external grant
+check. A real intervening move is rejected, while normalizing NULL to the same
+personal space preserves selections and CAS revisions. Limits, binding pages
+and runtime selection reads use the same effective scope.
