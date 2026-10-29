@@ -204,3 +204,77 @@ class TestDeleteNotFoundEnvelope:
         assert body["success"] is False
         assert body["error_code"] == code
         assert body["data"] == data
+
+
+class AuthRouteThrowingExtension:
+    """Extension double: raises the configured rejection from
+    ``resolve_create`` — the first hook the authorization-completion flow
+    runs, so the rejection surfaces inside the route's own mapping chain."""
+
+    def __init__(self, exc: Exception | None = None) -> None:
+        self._exc = exc
+
+    def resolve_create(self, *, bot_id, user_id, request):
+        if self._exc is not None:
+            raise self._exc
+        return None
+
+    def after_bot_registered(self, *, bot_id, user_id):
+        pass
+
+    def before_delete(self, *, bot_id, owner_id):
+        pass
+
+    def on_delete_completed(self, *, bot_id, owner_id):
+        pass
+
+    def on_delete_not_found(self, *, bot_id, owner_id):
+        pass
+
+
+class TestAuthStatusEnvelope:
+    """The authorization-completion route maps the lifecycle-extension
+    families exactly like create/delete: invalid input → 400, conflict →
+    409, blocked → 500 carrying the extension's data payload."""
+
+    @pytest.mark.parametrize(
+        ("exc", "code", "data"),
+        [
+            pytest.param(
+                ExtensionInvalidInput("相关请求上下文不完整"),
+                400, None, id="invalid-input-400",
+            ),
+            pytest.param(
+                ExtensionConflict("续接目标与预留不一致"),
+                409, None, id="conflict-409",
+            ),
+            pytest.param(
+                ExtensionBlocked("关联实例状态暂不可达", data={"bot_id": "b9"}),
+                500, {"bot_id": "b9"}, id="blocked-500-with-data",
+            ),
+        ],
+    )
+    def test_extension_rejections_map_to_envelopes(
+        self, client, mock_passport, exc, code, data
+    ):
+        tc, svc, passport = client
+        _bind_raw_extension(tc, svc, passport, AuthRouteThrowingExtension(exc))
+        resp = tc.post(
+            "/api/bots/auth-status",
+            json={"bot_id": "bot-9", "bot_name": "NewBot"},
+        )
+        body = resp.json()
+        assert body["success"] is False
+        assert body["error_code"] == code
+        assert body["data"] == data
+
+    def test_no_rejection_maps_to_pending_envelope(self, client, mock_passport):
+        tc, svc, passport = client
+        passport.query_auth_status.return_value = {"status": "PENDING"}
+        _bind_raw_extension(tc, svc, passport, AuthRouteThrowingExtension())
+        body = tc.post(
+            "/api/bots/auth-status",
+            json={"bot_id": "bot-9", "bot_name": "NewBot"},
+        ).json()
+        assert body["success"] is True
+        assert body["data"]["status"] == "PENDING"
