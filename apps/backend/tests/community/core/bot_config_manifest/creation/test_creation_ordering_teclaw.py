@@ -9,6 +9,8 @@ and the bot service are stood in for.
 """
 from __future__ import annotations
 
+from agentclaw.community.core.bot_management.creation_source import validate_creation_source
+
 import pytest
 
 from agentclaw.community.core.apply_engine.delivery import MaterialiserPorts
@@ -166,6 +168,7 @@ def _build(db):
     queue.service = applies
 
     seam = BotCreationManifestSeam(
+        validate_creation_spec=validate_creation_source,
         manifest_service=_Manifests(),
         apply_service=applies,
         script_service_provider=lambda: scripts,
@@ -203,6 +206,7 @@ def _build(db):
             return bots.record
 
     handler = BotCreateWithManifestHandler(
+        validate_creation_spec=validate_creation_source,
         manifest_seam_provider=lambda: seam,
         apply_service_provider=lambda: applies,
         bot_repository_provider=lambda: bots,

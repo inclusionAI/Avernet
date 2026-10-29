@@ -80,9 +80,12 @@ class BotConfigManifestApplyRepositoryProtocol(Protocol):
 
     @abstractmethod
     def latest(
-        self, *, env: str, entity_id: str, bot_id: str
+        self, *, env: str, entity_id: str, bot_id: str, trigger: str | None = None
     ) -> Optional[BotConfigManifestApplyRecord]:
-        """The newest row for this bot, or ``None`` when it has never applied.
+        """The newest row for this bot, optionally restricted to one trigger.
+
+        Filtering happens before ordering and selecting a row, so later ordinary
+        applies cannot hide an earlier creation phase. No match returns ``None``.
 
         ``None``, never an error — the same "absent is not an error" rule the
         manifest's own read follows.

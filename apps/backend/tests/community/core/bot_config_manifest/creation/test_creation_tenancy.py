@@ -19,6 +19,8 @@ standing where a guarantee was supposed to be.
 """
 from __future__ import annotations
 
+from agentclaw.community.core.bot_management.creation_source import validate_creation_source
+
 from typing import Optional
 
 import pytest
@@ -233,6 +235,7 @@ class _RecordingPassport:
 
 def _job(passport):
     return BotCreateWithManifestHandler(
+        validate_creation_spec=validate_creation_source,
         manifest_seam_provider=lambda: None,
         apply_service_provider=lambda: None,
         bot_repository_provider=lambda: _RecordingBots(),

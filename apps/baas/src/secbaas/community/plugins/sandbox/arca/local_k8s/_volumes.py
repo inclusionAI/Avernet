@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 SIDECAR_PROXY_PORT = 38080
 SIDECAR_ADMIN_PORT = 38081
+_FUSE_DEVICE_MOUNT_PATH = PurePosixPath("/opt/dev/fuse")
 
 
 def _absolute_path(value: str) -> PurePosixPath:
@@ -27,10 +28,29 @@ def _absolute_path(value: str) -> PurePosixPath:
     return path
 
 
+def parse_default_mounts(value: object) -> list[MountPoint]:
+    """Parse platform defaults without broadening the request mount grammar."""
+    if not isinstance(value, list):
+        raise ValueError("local_k8s: default mounts must be a list")
+    mounts = []
+    for item in value:
+        if not isinstance(item, dict) or set(item) != {
+            "remote_dir",
+            "local_dir",
+            "permission",
+        }:
+            raise ValueError("local_k8s: invalid default mount declaration")
+        mounts.append(MountPoint(id="", **item))
+    return mounts
+
+
 def resolve_mounts(
     mount_points: list[MountPoint] | None,
     mappings: dict[str, str],
     image_mounts: list[dict[str, str]],
+    *,
+    default_mounts: list[MountPoint] | None = None,
+    storage_id: str | None = None,
 ) -> list[tuple[str, str, bool]]:
     """Fail closed unless a mount maps to the PVC or an exact image-owned mount."""
     if not isinstance(mappings, dict) or not isinstance(image_mounts, list):
@@ -62,8 +82,11 @@ def resolve_mounts(
         MountPermission(item["permission"])
         delegated.add((item["remote_dir"], item["local_dir"], item["permission"]))
     resolved = []
-    destinations: set[PurePosixPath] = set()
-    for mount in mount_points or []:
+    platform_sources = []
+    request_sources = []
+    defaults = default_mounts or []
+    destinations: set[PurePosixPath] = {_FUSE_DEVICE_MOUNT_PATH}
+    for index, mount in enumerate([*defaults, *(mount_points or [])]):
         remote, local = (
             _absolute_path(mount.remote_dir),
             _absolute_path(mount.local_dir),
@@ -82,12 +105,28 @@ def resolve_mounts(
         if match is None:
             raise ValueError(f"local_k8s: unsupported remote mount: {mount.remote_dir}")
         prefix, sub_path = match
-        resolved.append(
-            (
-                str(local),
-                str(PurePosixPath(sub_path) / remote.relative_to(prefix)),
-                mount.permission == MountPermission.READ_ONLY,
-            )
+        item = (
+            str(local),
+            str(PurePosixPath(sub_path) / remote.relative_to(prefix)),
+            mount.permission == MountPermission.READ_ONLY,
+        )
+        resolved.append(item)
+        (platform_sources if index < len(defaults) else request_sources).append(item)
+    protected = [
+        PurePosixPath(sub) for _, sub, read_only in platform_sources if read_only
+    ]
+    writable = [
+        PurePosixPath(sub) for _, sub, read_only in request_sources if not read_only
+    ]
+    if storage_id:
+        writable.append(PurePosixPath(storage_id))
+    if any(
+        source.is_relative_to(guard) or guard.is_relative_to(source)
+        for source in writable
+        for guard in protected
+    ):
+        raise ValueError(
+            "local_k8s: writable storage overlaps a read-only platform source"
         )
     return resolved
 
@@ -102,7 +141,15 @@ def validate_storage_mounts(
         return
     if PurePosixPath(storage_id).is_absolute() or ".." in storage_id.split("/"):
         raise ValueError("local_k8s: unsafe storage_id")
-    if any(destination == mount_path for destination, _, _ in extra_mounts):
+    storage_path = _absolute_path(mount_path)
+    if storage_path.is_relative_to(
+        _FUSE_DEVICE_MOUNT_PATH
+    ) or _FUSE_DEVICE_MOUNT_PATH.is_relative_to(storage_path):
+        raise ValueError("local_k8s: bot storage conflicts with the FUSE device mount")
+    if any(
+        storage_path.is_relative_to(PurePosixPath(destination))
+        for destination, _, _ in extra_mounts
+    ):
         raise ValueError("local_k8s: mount conflicts with bot storage")
 
 
@@ -122,7 +169,9 @@ def build_volumes(
         V1VolumeMount,
     )
 
-    mounts = [V1VolumeMount(name="fuse-device", mount_path="/opt/dev/fuse")]
+    mounts = [
+        V1VolumeMount(name="fuse-device", mount_path=str(_FUSE_DEVICE_MOUNT_PATH))
+    ]
     volumes = [
         V1Volume(
             name="header-rules", config_map=V1ConfigMapVolumeSource(name=configmap_name)

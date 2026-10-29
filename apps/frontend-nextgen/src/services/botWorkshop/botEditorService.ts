@@ -83,13 +83,14 @@ export const botEditorService = {
   },
   async load(botId: string, ownerId?: string, deployment = 'cloud', engine = '') {
     const policy = desktopCapabilityPolicy(deployment, engine);
-    const [skills, skillSetResources, resources, screens, routines, engineStatus] = await Promise.allSettled([
+    const [skills, skillSetResources, resources, screens, routines, engineStatus, mcps] = await Promise.allSettled([
       listAllLocalBotSkills(botId, ownerId),
       botEditorController.listSkillSetResources(botId, ownerId),
       botEditorService.listResources(botId, '', ownerId),
       policy.screens ? botEditorController.listRenderScreens(botId, ownerId) : Promise.resolve({ data: { items: [] } }),
       policy.routines ? botEditorController.listRoutines(botId, ownerId) : Promise.resolve({ data: { items: [] } }),
       botEditorController.getEngineStatus(botId, ownerId),
+      botEditorController.listBotMcps(botId, ownerId),
     ]);
     const sets: BotCapabilitySet[] = [];
     let skillSetDetailErrors = 0;
@@ -127,10 +128,16 @@ export const botEditorService = {
       );
       sets.push(...details);
     }
+    const capabilityFailures = [
+      ...(skills.status === 'rejected' ? [`本地 Skill：${skills.reason instanceof Error ? skills.reason.message : '加载失败'}`] : []),
+      ...(mcps.status === 'rejected' ? [`MCP：${mcps.reason instanceof Error ? mcps.reason.message : '加载失败'}`] : []),
+    ];
     return {
       skills: skills.status === 'fulfilled' ? skills.value.map(mapSkill) : [],
       skillSets: sets,
-      mcps: [],
+      mcps: mcps.status === 'fulfilled' ? (mcps.value.data ?? []).map((item): BotEditorMcp => ({
+        serverCode: item.server_code, name: item.server_code, active: item.active,
+      })) : [],
       availableMcps: [],
       marketSkills: [],
       workshopSkills: [],
@@ -145,8 +152,9 @@ export const botEditorService = {
               running: engineStatus.value.data?.running ?? false,
             }
           : undefined,
+      ...(capabilityFailures.length ? { capabilityLoadError: capabilityFailures.join('；') } : {}),
       errors:
-        [skills, skillSetResources, resources, screens, routines, engineStatus].filter(
+        [skills, skillSetResources, resources, screens, routines, engineStatus, mcps].filter(
           (item) => item.status === 'rejected',
         ).length + skillSetDetailErrors,
     };

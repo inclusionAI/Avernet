@@ -26,6 +26,7 @@ _ERROR_REF = "#/components/schemas/ErrorEnvelope"
 _DOCUMENTED_DATA_BEARING_ERRORS = {
     ("/openapi/v1/bots", 409),
     ("/openapi/v1/bots/with-manifest", 409),
+    ("/openapi/v1/experts/{expert_id}/bots", 409),
     ("/openapi/v1/bots/{bot_id}/auth-status", 409),
     ("/openapi/v1/bots/{bot_id}/space", 409),
     ("/openapi/v1/bots/{bot_id}/auth-status", 400),
@@ -154,3 +155,11 @@ def test_create_and_completion_agree_on_cluster_name():
 
     assert _values(create) == {"ACRA", "ANDC"}, create
     assert _values(completion) == _values(create), completion
+
+
+def test_expert_creation_keeps_the_original_quota_conflict_contract():
+    paths = _schema()["paths"]
+    expert = paths["/openapi/v1/experts/{expert_id}/bots"]["post"]
+    ordinary = paths["/openapi/v1/bots/with-manifest"]["post"]
+    assert _json_ref(expert, "409") == _json_ref(ordinary, "409")
+    assert _json_ref(expert, "409") == "#/components/schemas/Envelope_BotQuotaExceededData_"
