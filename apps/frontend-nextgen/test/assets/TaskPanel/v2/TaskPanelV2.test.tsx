@@ -75,14 +75,23 @@ const baseTask = {
   dagEdges: [],
 } as unknown as TaskView;
 
-const makeNav = (): TaskPanelNav & { calls: { root: string[]; select: string[]; drill: string[]; back: number[] } } => {
-  const calls = { root: [] as string[], select: [] as string[], drill: [] as string[], back: [] as number[] };
+const makeNav = (): TaskPanelNav & {
+  calls: { root: string[]; select: string[]; default: string[]; drill: string[]; back: number[] };
+} => {
+  const calls = {
+    root: [] as string[],
+    select: [] as string[],
+    default: [] as string[],
+    drill: [] as string[],
+    back: [] as number[],
+  };
   return {
     selectedNodeId: null,
     drillStack: [],
     calls,
     selectRootNode: (id: string) => calls.root.push(id),
     selectNode: (id: string) => calls.select.push(id),
+    selectDefaultNode: (id: string) => calls.default.push(id),
     drillInto: (id: string) => calls.drill.push(id),
     backToOverview: () => calls.back.push(1),
   } as unknown as TaskPanelNav & { calls: typeof calls };
@@ -96,6 +105,15 @@ const baseProps = (overrides?: Partial<TaskPanelV2Props>): TaskPanelV2Props => (
 });
 
 describe('TaskPanelV2 壳', () => {
+  it('任务数据可用后默认调用第一节点选中，不触发会话跳转回调', () => {
+    const nav = makeNav();
+    render(<TaskPanelV2 {...baseProps({ nav })} />);
+
+    expect(nav.calls.default).toEqual(['n-solo']);
+    expect(nav.calls.select).toEqual([]);
+    expect(nav.calls.root).toEqual([]);
+  });
+
   it('L1 默认渲染焦点任务状态条:任务名 + 任务状态,L1 内容区可见', () => {
     render(<TaskPanelV2 {...baseProps()} />);
     expect(screen.queryByTitle('焦点任务')).toBeNull();

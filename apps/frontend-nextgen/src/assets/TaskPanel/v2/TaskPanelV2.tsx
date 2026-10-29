@@ -4,7 +4,7 @@
  *  + 面包屑即标题行(两级栈导航) + 收起按钮 + L1/L2 互斥渲染。
  * 下钻封顶 2 层:dagStack 顶即当前节点;节点在下一次轮询后消失时 L2 出空态,不卡栈。
  */
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 
 import './TaskPanelV2.css';
 
@@ -48,6 +48,13 @@ export const TaskPanelV2: React.FC<TaskPanelV2Props> = ({
   const groupIds = useMemo(() => collectTaskGroupIds(task), [task]);
   const groupMemberNames = useGroupMemberNames(groupIds, bcsBaseUrl);
   const displayTask = useMemo(() => enrichTaskGroupDisplay(task, groupMemberNames), [task, groupMemberNames]);
+
+  const defaultNodeId = displayTask.nodes[0]?.id ?? null;
+
+  useEffect(() => {
+    if (!defaultNodeId || nav.selectedNodeId !== null) return;
+    nav.selectDefaultNode(defaultNodeId);
+  }, [defaultNodeId, nav.selectedNodeId, nav.selectDefaultNode]);
 
   const currentNodeId = nav.drillStack.length > 0 ? nav.drillStack[nav.drillStack.length - 1] : null;
   const node = currentNodeId ? displayTask.nodes.find((n) => n.id === currentNodeId) ?? null : null;
