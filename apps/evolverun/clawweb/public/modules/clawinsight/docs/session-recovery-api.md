@@ -245,6 +245,20 @@ POST /api/insight/v1/monitoring/session-recoveries/:taskId/terminate
 标注请求：`{ "layer": "effect", "correct": true, "reason": "原操作前后已核验", "evidence_ids": ["…"] }`。`layer` 为 `delivery / response / effect`；`correct` 为 `true / false / null`。标注追加保留，不覆盖 Agent 的判断。
 
 
+### Cron 发送前观察
+
+真实非 Debug 的 OpenClaw Cron 尚在运行、且本次未发送恢复指引时，Agent 在现有阶段回报接口提交：
+
+```json
+{"kind":"assessment","phase":"assess","decision":"wait_cron","summary":"本轮 Cron 的实际进展、运行状态及等待依据","evidence_ids":["受控现场读取的证据 ID"]}
+```
+
+任务仍为 `running / assess`，后端在既有 Task JSON 保存 `cronWait: { startedAt, deadlineAt }`，首次设置固定 5 分钟期限。重复评估、新日志和执行恢复均不延长期限，runner 复用约 60 秒的轮询续跑 Agent。到期再次提交 `wait_cron` 返回 HTTP 422，要求按最新证据收口。窗口内本轮已结束时，仍可使用原评估分支，离开评估后清除 `cronWait`；发送成功后的效果观察沿用原期限。
+
+Agent 通过已有 `runtime_inspect` 的 `engine_read` 查询 `GET /api/cron/running`，结合执行历史与原会话核对本轮；空列表、索引缺失或当前文件末尾不证明本轮已完成。消息工具对正在运行的对应 Cron 返回 `cron_run_running`、`dispatched=false`；状态不可核实则返回 `cron_state_unavailable`，均不实际发送。
+
+到期刷新后仍在运行或本轮结果未确认，按 `owner_handoff` 协议转交并结束，说明具体 Cron、已观察时长、实际进展、待核查事项和未发送消息的事实；未知结果使用 `effect=unknown`，不宣称 Cron 已超时失败。用户续聊和其他独立、已核实的转交条件继续适用。Debug／仿真及已 accepted／unknown 投递后的效果回收不进入此等待；没有新增数据库表、业务状态或 AIS Base 配置。
+
 ### 用户续聊后正常结束
 
 任何活动阶段核实原始故障后已有真实用户新消息时，Agent 回报

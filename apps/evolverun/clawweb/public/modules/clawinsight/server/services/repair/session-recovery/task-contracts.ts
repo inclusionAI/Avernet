@@ -10,6 +10,11 @@ export type RecoveryTaskStatus = "running" | "waiting_owner" | "waiting_effect" 
 export type RecoveryPhase = "assess" | "observe" | "plan" | "apply" | "verify";
 export type RecoveryEffect = "recovered" | "not_recovered" | "unknown" | "not_intervened";
 export type RecoveryInterventionStatus = "none" | "performed" | "unknown";
+export type RecoveryAssessment = {
+  decision: "message" | "environment" | "observe" | "wait_cron";
+  summary: string;
+  evidence_ids: string[];
+};
 export type RecoveryEvidence = {
   evidence_id: string;
   tool_call_id: string;
@@ -59,6 +64,8 @@ export type RecoveryTaskState = {
   /** Absent on legacy tasks; only true enables read-only sharing. */
   shared?: boolean;
   observationDeadlineAt: number | null;
+  /** Pre-intervention Cron observation; survives execution recovery, never extends itself. */
+  cronWait?: { startedAt: number; deadlineAt: number };
   ownerDeadlineAt: number | null;
   plan: (RecoveryPlan & { digest: string; approvedAt: number | null }) | null;
   judgment: RecoveryJudgment | null;

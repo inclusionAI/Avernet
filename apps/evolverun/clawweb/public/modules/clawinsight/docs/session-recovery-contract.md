@@ -170,11 +170,39 @@ List and callback projections include optional `completion_reason=user_continued
 ### Cron delivery identity
 
 A direct OpenClaw Cron execution key can differ from its persisted conversation key.
+Before an OC Cron message, the controlled sender reads the declared
+`GET /api/cron/running` endpoint. A matching running job rejects delivery with
+`cron_run_running` and `dispatched=false`; unavailable or malformed status rejects
+with `cron_state_unavailable`, without claiming the job has ended. Ordinary
+conversations do not incur this read.
 Before delivery, resolve the indexed job-level key only when it still points to the
 frozen physical Session ID. A separately indexed run key remains usable when its
 identity matches. Missing/replaced entries fail closed; historical transcripts do
 not authorize creating a new conversation. Preserve the original diagnosis key
 and Session ID, and audit the resolved delivery key with the receipt.
+
+Pre-intervention assessment accepts `decision=wait_cron` only for a live non-Debug
+OpenClaw Cron with no existing initial delivery. It keeps `phase=assess` and
+`status=running`, with `cronWait: { startedAt, deadlineAt }` in the existing Task
+JSON. The backend sets a five-minute absolute window once; repeated assessments,
+new evidence and replacement executions cannot extend it. No table, status,
+phase, scheduler or Base configuration is added. The runner reuses its existing
+60-second polling and Agent session, bounds waiting turns, and never infers a
+business conclusion from elapsed time. A new `wait_cron` report after expiry is
+rejected for correction.
+
+The Agent refreshes original-run evidence and the declared Cron status on each
+turn. A current running job does not identify a historical run by itself; an empty
+running list or a transcript EOF does not prove completion. Completion within the
+window returns to the existing assessment choices, clearing `cronWait`; actual
+message delivery retains its normal effect-observation budget. On expiry, the
+Agent refreshes once more and uses the existing `owner_handoff` if the original run
+is still executing or its final result remains unconfirmed. The handoff includes
+the specific job, progress, elapsed observation and Owner follow-up, then ends the
+task. It does not equate the observation limit with Cron failure or force
+`effect=not_recovered`. User continuation and other independently proven handoff
+conditions retain their existing priority. Simulation, Debug, and effect recovery
+after accepted/unknown delivery do not enter this wait.
 
 ## Task-level final summary
 

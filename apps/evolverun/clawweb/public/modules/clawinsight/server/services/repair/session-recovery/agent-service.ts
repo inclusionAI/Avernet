@@ -20,12 +20,12 @@ import { redactEvidenceValue, redactPersistableText } from "@avernet/clawweb-sha
 import { SessionRecoveryError } from "./errors.js";
 import { RecoverySessionReader } from "./session-reader.js";
 import { addSessionReadCoverage, boundedSessionReadCoverage } from "./session-read-coverage.js";
-import { cronRunSessionId } from "./session-identity.js";
+import { cronJobId, cronRunSessionId } from "./session-identity.js";
 import { savedRecoveryHandbook } from "./handbook.js";
 import { recoveryResult } from "./result.js";
 import type { RecoveryAgentExecutor } from "./task-service.js";
 import type { RecoveryActionNotifier, RecoveryExecutionView, RecoveryTermination, SessionRecoveryTaskApi, SessionRecoveryAgentApi } from "./contracts.js";
-import type { RecoveryStoredTask, RecoveryTaskStore, RecoveryJudgment, RecoveryPlan } from "./task-contracts.js";
+import type { RecoveryAssessment, RecoveryStoredTask, RecoveryTaskStore, RecoveryJudgment, RecoveryPlan } from "./task-contracts.js";
 
 function fail(status: number, message: string): never { throw new SessionRecoveryError(status, "recovery_execution_conflict", message); }
 function recoveryToolRequest(body: Record<string, unknown>): Record<string, unknown> {
@@ -433,6 +433,17 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       if (task.level === "debug") return { status: "not_intervened", dry_run: true, delivery_key: key, message: body.message, initial_message: initial };
       const currentTarget = await this.deps.targets.resolve({ environment: task.request.target.env, ownerId: task.request.target.entity_id, botId: task.request.target.bot_id, ...(task.request.target.runtime_identity ? { runtimeIdentity: task.request.target.runtime_identity } : {}) });
       if (recoveryTargetSnapshot(currentTarget).fingerprint !== task.runtimeTarget!.fingerprint) fail(409, "目标运行位置已变化，不能投递旧方案的重试消息");
+      const cronId = task.request.target.engine === "OC" ? cronJobId(task.request.session_key) : undefined;
+      if (cronId) {
+        const state = await new BotEngineOperations(this.deps.runtime).execute(task.runtimeTarget!.target, { method: "GET", path: "/api/cron/running" }, false)
+          .catch((error: unknown) => {
+            if (error instanceof BotRuntimeError && error.code === "target_unavailable") throw new SessionRecoveryError(410, error.code, "目标运行环境已不可用，消息未发送");
+            throw new SessionRecoveryError(503, "cron_state_unavailable", "无法核实 Cron 运行状态，消息未发送；保留未知，不将读取失败解释为任务结束");
+          });
+        const running = (state.body as { data?: { running?: Array<{ id?: string }> } } | undefined)?.data?.running;
+        if (state.status !== "success" || !Array.isArray(running) || running.some(job => !job || typeof job.id !== "string")) throw new SessionRecoveryError(503, "cron_state_unavailable", "无法核实 Cron 运行状态，消息未发送；保留未知，不将读取失败解释为任务结束");
+        if (running.some(job => job.id === cronId)) throw new SessionRecoveryError(409, "cron_run_running", "对应 Cron 仍在执行，消息未发送；先核对本轮原会话，评估阶段按 Skill 做有界观察，其他阶段按原协议回报；读取到当前文件末尾不证明执行中断");
+      }
       const originalId = this.originalSessionId(task);
       let deliverySessionKey = task.request.session_key;
       if (originalId && task.request.target.engine !== "TE") {
@@ -491,7 +502,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     } else if (body.kind === "assessment") {
       if (task.simulation) await this.deps.business().assessSimulation(task.taskId, task.version,
         { decision: body.decision, summary: body.summary, evidence_ids: body.evidence_ids, ...(body.knowledge === undefined ? {} : { knowledge: body.knowledge }), ...(body.message === undefined ? {} : { message: body.message }) } as RecoverySimulationAssessment, body.final_summary);
-      else await this.deps.business().assess(task.taskId, task.version, { decision: body.decision as "message" | "environment" | "observe", summary: body.summary as string, evidence_ids: body.evidence_ids as string[] }, body.final_summary);
+      else await this.deps.business().assess(task.taskId, task.version, { decision: body.decision as RecoveryAssessment["decision"], summary: body.summary as string, evidence_ids: body.evidence_ids as string[] }, body.final_summary);
     } else if (body.kind === "observation") {
       const judgment = body.judgment as RecoveryJudgment;
       if (!judgment || !["recovered", "not_recovered", "unknown"].includes(judgment.effect)

@@ -5,14 +5,16 @@ import type { AgentRuntimeTargetSnapshot } from "../common/agent-tools/contracts
 import { containsSecret } from "@avernet/clawweb-shared/server/services/redaction";
 import { createHash, randomUUID } from "node:crypto";
 import { SessionRecoveryError } from "./errors.js";
+import { cronJobId } from "./session-identity.js";
 import { parseRequest } from "./validation.js";
 import { recoveryHandbook, resolveRecoveryHandbook, type RecoveryHandbookConfigStore } from "./handbook.js";
 import { parseRecoverySimulationBatch, simulationReadTools, validateSimulationKnowledge, type RecoverySimulation, type RecoverySimulationAssessment } from "./simulation.js";
 import { decideRecoveryPlan, validateRecoveryEvidenceReferences, observeRecovery, recoveryTaskResult, resumeRecoveryObservation, submitRecoveryPlan, terminateRecoveryTask } from "./task-state.js";
 import type { RecoveryActionNotifier, RecoveryActor, RecoveryAcknowledgment, RecoveryExecutionView, RecoveryRequest, RecoveryResult, RecoveryTaskView, RecoveryTermination, SessionRecoveryTaskApi } from "./contracts.js";
-import type { RecoveryEvidence, RecoveryJudgment, RecoveryLevel, RecoveryPlan, RecoveryTaskResult, RecoveryTimelineEvent, RecoveryStoredTask, RecoveryTaskStore } from "./task-contracts.js";
+import type { RecoveryAssessment, RecoveryEvidence, RecoveryJudgment, RecoveryLevel, RecoveryPlan, RecoveryTaskResult, RecoveryTimelineEvent, RecoveryStoredTask, RecoveryTaskStore } from "./task-contracts.js";
 
 const EXECUTION_RETRY_DELAYS_MS = [20000, 60000] as const;
+const CRON_WAIT_MS = 5 * 60 * 1000;
 
 export interface RecoveryAgentExecutor {
   start(task: RecoveryStoredTask): Promise<void>;
@@ -131,17 +133,26 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       timeline: [...value.timeline, this.event("message", "service", "初始建议发送结果", { result })] }));
   }
 
-  async assess(taskId: string, version: number, input: { decision: "message" | "environment" | "observe"; summary: string; evidence_ids: string[] }, finalSummary?: unknown): Promise<void> {
+  async assess(taskId: string, version: number, input: RecoveryAssessment, finalSummary?: unknown): Promise<void> {
     const task = await this.mutate(taskId, version, value => {
       if (value.simulation) this.fail(409, "仿真必须提交拟议决策");
       if (value.status !== "running" || value.phase !== "assess") this.fail(409, "当前不能提交初始判断");
-      if (!["message", "environment", "observe"].includes(input.decision) || typeof input.summary !== "string" || !input.summary.trim()
+      if (!["message", "environment", "observe", "wait_cron"].includes(input.decision) || typeof input.summary !== "string" || !input.summary.trim()
         || input.summary.length > 8000 || containsSecret(input.summary) || !Array.isArray(input.evidence_ids) || !input.evidence_ids.length) this.fail(422, "初始判断需要决策、理由及已保存的证据");
       validateRecoveryEvidenceReferences(value, input.evidence_ids);
+      if (input.decision === "wait_cron") {
+        if (value.level === "debug" || value.request.target.engine !== "OC" || !cronJobId(value.request.session_key) || value.delivery) {
+          this.fail(422, "wait_cron 只用于尚未发送指引的真实 OpenClaw Cron；已投递消息仍按原流程回收效果");
+        }
+        if (value.cronWait && this.now() >= value.cronWait.deadlineAt) this.fail(422, "Cron 观察窗口已到期；按最新证据结束或转交 Owner，不能再次等待");
+        return { ...value, version: value.version + 1,
+          cronWait: value.cronWait ?? { startedAt: this.now(), deadlineAt: this.now() + CRON_WAIT_MS },
+          timeline: [...value.timeline, this.event("assessment", "agent", input.summary, input)] };
+      }
       if (input.decision === "message" && !value.delivery && !(value.level === "debug" && value.timeline.some(event =>
         event.kind === "operation" && (event.payload.result as Record<string, unknown>)?.dry_run === true))) this.fail(422, "message 决策需要已留存的初始消息或拟发送内容。若 retry_message 在投递前失败且无法继续，请保留受阻结论并返回 blocked；不要改写为已发送，也不要盲目重发结果未知的消息。");
       const debugFinished = value.level === "debug" && input.decision !== "environment";
-      return { ...value, version: value.version + 1, phase: input.decision === "environment" ? "plan" : "observe",
+      return { ...value, version: value.version + 1, cronWait: undefined, phase: input.decision === "environment" ? "plan" : "observe",
         ...(debugFinished ? { status: "completed" as const, judgment: { delivery: "unconfirmed" as const, response: "unknown" as const, effect: "not_intervened" as const, summary: input.summary, evidence_ids: input.evidence_ids } } : {}),
         observationDeadlineAt: input.decision === "environment" ? null : value.observationDeadlineAt ?? this.now() + this.deps.observationMs,
         timeline: [...value.timeline, this.event("assessment", "agent", input.summary, input)] };

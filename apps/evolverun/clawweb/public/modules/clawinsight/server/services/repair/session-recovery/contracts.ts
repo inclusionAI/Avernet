@@ -38,7 +38,7 @@ export interface SessionRecoveryTaskApi extends SessionRecoveryApi {
   decide(taskId: string, digest: string, approved: boolean, actor: RecoveryActor, cooperationDone?: boolean, feedback?: string): Promise<void>;
   annotate(taskId: string, actor: RecoveryActor, input: { layer: "delivery" | "response" | "effect"; correct: boolean | null; reason: string; evidence_ids: string[] }): Promise<void>;
   resume(taskId: string): Promise<void>;
-  assess(taskId: string, version: number, input: { decision: "message" | "environment" | "observe"; summary: string; evidence_ids: string[] }, finalSummary?: unknown): Promise<void>;
+  assess(taskId: string, version: number, input: import("./task-contracts.js").RecoveryAssessment, finalSummary?: unknown): Promise<void>;
   observe(taskId: string, version: number, judgment: RecoveryJudgment, evidence: RecoveryEvidence[], finalSummary?: unknown): Promise<void>;
   plan(taskId: string, version: number, plan: RecoveryPlan, finalSummary?: unknown): Promise<void>;
   finishApply(taskId: string, version: number, input: { applicable: boolean; success: boolean; summary: string }, finalSummary?: unknown): Promise<void>;
