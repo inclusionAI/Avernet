@@ -371,23 +371,15 @@ class AvernetBotPlatform(BotPlatform):
         # knows the (run, agent) pair addresses the identical bot id.
         bot_id = (
             f"agent_swarm_{_idem_digest(idempotency_key, _HASHED_IDEMPOTENCY_ID_DIGITS)}")
-        # One persona per (run, spec): the same idempotency key derives the same
-        # bot identifier, so a retried setup rebinds the same creation instead of
-        # minting a second one. The platform caps bot_name at 32 chars
-        # (_BOT_NAME_MAX_LEN) and a spec-derived name (composite spawn name +
-        # digest) can exceed it (e.g. "tester_rust_f9ed5997468d-1a2b3c4d"), so
-        # the bot NAME is the id-format digest (always 28 chars, unique per key
-        # by construction) and the descriptive composite label rides the
-        # bot's description instead.
+        # One persona per (run, spec): the idempotency key derives the bot id,
+        # so retries rebind the same creation. The platform caps bot_name at
+        # 32 chars and a spec-derived name can exceed it: bot_name is the
+        # id-format digest (28 chars); the composite label rides bot_desc.
         bot_name = bot_id
         bot_desc_label = f"{spec.name}-{_idem_digest(idempotency_key, 8)}"
-        # A caller-supplied manifest document REPLACES the synthesized
-        # persona document: the spec's config_manifest is the full
-        # five-category bot_config_manifest exactly as the platform's
-        # with-manifest surface accepts it, so the platform's own
-        # preflight stays the single authority on its grammar. Blank
-        # (or whitespace-only) keeps today's behavior: identity-only
-        # synthesis from the spec's identity_file + instructions.
+        # A caller-supplied manifest REPLACES the synthesized persona
+        # document (the platform's own preflight validates its grammar);
+        # blank keeps identity-only synthesis.
         document = spec.config_manifest.strip() or yaml.safe_dump(
             {
                 "schema_version": 1,
@@ -435,14 +427,9 @@ class AvernetBotPlatform(BotPlatform):
                 manifest_seam=self._manifest_seam,
             )
         except BotNameExistsError:
-            # A D16 respawn after a mid-creation crash re-derives the same
-            # deterministic persona, and bot_service's name check refuses
-            # the re-create (upstream-owned, not idempotent). The refused
-            # name carries this idempotency key's digest, so the row it
-            # collides with is OUR identity: adopt it when the derived
-            # bot_id has a live row; adopt makes respawn idempotent for
-            # any kill timing. A same-name row that is NOT ours cannot
-            # exist (digest names collide only across identical keys).
+            # D16 respawn: the refused name carries our idempotency key's
+            # digest, so the colliding live row IS our identity — adopt it
+            # (a same-name row that is not ours cannot exist).
             existing = self._bot_repo.get_by_id_and_entity(bot_id, owner)
             if existing is None:
                 raise
@@ -543,17 +530,9 @@ class AvernetBotPlatform(BotPlatform):
                 return BotState.PROVISIONING.value
             if (bot_status_ not in _BOT_UP
                     and bool((bot.get("device_id") or "").strip())):
-                # A failed create-apply over a mid-boot row with a live
-                # device binding is not a provisioning verdict: under N-way
-                # concurrent persona creates the quota serialization makes
-                # apply reports flap FAILED while the durable publish
-                # pipeline (row + BaaS device) is still booting — a burst
-                # APPLY_FAILED here tore down healthy mid-boot bots and
-                # pushed the re-create into bot_service's duplicate-row
-                # trap. The device pipeline owns the outcome; the caller's
-                # own poll budget bounds the wait. An UP row keeps the
-                # apply verdict (config-side failure on a working bot,
-                # under the anti-duplicate rule).
+                # Mid-boot apply reports may flap FAILED under N-way quota
+                # serialization — a live device binding owns the outcome,
+                # so wait; an UP row keeps its apply verdict.
                 return BotState.PROVISIONING.value
             return BotState.APPLY_FAILED.value
         if job.status not in TERMINAL_STATUSES:
