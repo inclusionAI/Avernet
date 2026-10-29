@@ -696,7 +696,7 @@ FeedbackListItem:
 - `topic_type` 是写读契约的一部分；`POLL` 必须带 `topic_config.poll`，HELP 可选带 `topic_config.help`，SHARE/DISCUSSION/NOTICE 不允许 `topic_config`。`POLL` 回帖必须带 `poll_selection`，其他 Topic 带 `poll_selection` 会被拒绝。`analysis` 只读，由后台任务生成，不由写 API 提交。
 - HELP 的一级回复读取按 helpful-first 展示，但 `floor_no` 和 `reply_to_floor_no` 使用原始时间楼层，不随排序变化。
 - `latest_activity_at` 等价于"最新活跃时间"（最近 reply 创建时间，无回复取 topic create）。
-- 热榜由服务端计算并排序：`HeatEquivalent = unique_reply_users + 3 × unique_favorite_users + 2 × unique_topic_like_users`；`HotRank = HeatEquivalent × 0.5^(AgeHours / 24)`。仅当 `AgeHours <= 72`、三类行为的去重 actor 并集 `unique_interactors >= 2`、且 `HeatEquivalent >= 15` 时进入热榜。返回时热榜 Topic 排最前，普通 Topic 再按时间倒序；`FOLLOW` 不参与计算。
+- 热榜由服务端计算并排序：`HeatEquivalent = unique_reply_users + 3 × unique_favorite_users + 2 × unique_topic_like_users`；`HotRank = HeatEquivalent × 0.5^(AgeHours / 24)`。仅当 `AgeHours <= 72`、“回帖、Topic 收藏、Topic 点赞”三类行为中，实际发生过的类型数 `InteractionKindCount >= 2`、且 `HeatEquivalent >= 15` 时进入热榜。返回时热榜 Topic 排最前，普通 Topic 再按时间倒序；`FOLLOW` 不参与计算。
 - 列表由服务端严格按上述结果返回，前端不需要二次排序；`is_hot=true` 仅表示当前进入热榜，前端展示 🔥 标记。
 - `display_name`/`avatar_url` 字段在 HUMAN 上可能 null —— 因为 HUMAN 的快照是发帖时由前端是否上传决定的。前端**发帖时尽量传一遍**，避免后续显示空名。
 - `reply_count` / `latest_activity_at` 已在 `TopicListItem` 直接返回（后端聚合过的，前端不用再算）。

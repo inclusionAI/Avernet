@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime, timezone
 
-from sqlalchemy import func, or_, tuple_, union_all
+from sqlalchemy import func, or_, tuple_
 
 from agentclaw.community.core.task.forum.interaction.models import (
     ForumActorRef,
@@ -69,33 +69,9 @@ class TopicCatalogRepositoryMixin:
                 db, ForumInteractionActionType.LIKE
             )
 
-            reply_rows = db.query(
-                ForumPostModel.topic_id.label("topic_id"),
-                ForumPostModel.author_type.label("actor_type"),
-                ForumPostModel.author_id.label("actor_id"),
-            )
-            favorite_rows = self._topic_actor_rows(
-                db, ForumInteractionActionType.FAVORITE
-            )
-            like_rows = self._topic_actor_rows(db, ForumInteractionActionType.LIKE)
-            actor_rows = union_all(reply_rows, favorite_rows, like_rows).subquery()
-            interactor_stats = (
-                db.query(
-                    actor_rows.c.topic_id.label("topic_id"),
-                    func.count(
-                        func.distinct(
-                            func.concat(
-                                actor_rows.c.actor_type,
-                                ":",
-                                actor_rows.c.actor_id,
-                            )
-                        )
-                    ).label("unique_interactors"),
-                )
-                .group_by(actor_rows.c.topic_id)
-                .subquery()
-            )
-
+            # Hot-list classification measures how many of the three caller-
+            # behavior dimensions exist, not how many individual callers
+            # appear when those dimensions are collapsed into one set.
             query = (
                 db.query(
                     ForumTopicModel,
@@ -106,7 +82,6 @@ class TopicCatalogRepositoryMixin:
                     favorite_stats.c.latest_interacted_at,
                     like_stats.c.unique_users,
                     like_stats.c.latest_interacted_at,
-                    interactor_stats.c.unique_interactors,
                 )
                 .outerjoin(
                     post_stats,
@@ -119,10 +94,6 @@ class TopicCatalogRepositoryMixin:
                 .outerjoin(
                     like_stats,
                     ForumTopicModel.topic_id == like_stats.c.topic_id,
-                )
-                .outerjoin(
-                    interactor_stats,
-                    ForumTopicModel.topic_id == interactor_stats.c.topic_id,
                 )
                 .filter(
                     ForumTopicModel.env == get_current_env(),
@@ -149,10 +120,7 @@ class TopicCatalogRepositoryMixin:
                     tuple_(
                         ForumTopicModel.author_type,
                         ForumTopicModel.author_id,
-                    ).in_(
-                        (author.type.value, author.id)
-                        for author in followed_authors
-                    )
+                    ).in_((author.type.value, author.id) for author in followed_authors)
                 )
 
             total = query.count()
@@ -179,8 +147,13 @@ class TopicCatalogRepositoryMixin:
                     / 3600,
                 )
                 hot_rank = heat_equivalent * 0.5 ** (age_hours / 24)
+                interaction_kind_count = sum(
+                    1 for count in (row[3], row[4], row[6]) if int(count or 0) > 0
+                )
                 is_hot = (
-                    age_hours <= 72 and int(row[8] or 0) >= 2 and heat_equivalent >= 15
+                    age_hours <= 72
+                    and interaction_kind_count >= 2
+                    and heat_equivalent >= 15
                 )
                 ranked_rows.append(
                     (
@@ -268,15 +241,4 @@ class TopicCatalogRepositoryMixin:
             )
             .group_by(ForumInteractionModel.target_id)
             .subquery()
-        )
-
-    def _topic_actor_rows(self, db, action_type):
-        return db.query(
-            ForumInteractionModel.target_id.label("topic_id"),
-            ForumInteractionModel.actor_type.label("actor_type"),
-            ForumInteractionModel.actor_id.label("actor_id"),
-        ).filter(
-            ForumInteractionModel.env == get_current_env(),
-            ForumInteractionModel.action_type == action_type.value,
-            ForumInteractionModel.target_type == ForumInteractionTargetType.TOPIC.value,
         )

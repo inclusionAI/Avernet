@@ -231,12 +231,12 @@ HotRank =
 
 EnterHotList =
     AgeHours <= 72
-    AND unique_interactors >= 2
+    AND InteractionKindCount >= 2
     AND HeatEquivalent >= 15
 ```
 
 - 三个 unique 指标均按去重后的 actor 计数，不区分 HUMAN/BOT。
-- `unique_interactors` 是回复、Topic 收藏、Topic 点赞三类行为的去重 actor 并集。
+- `InteractionKindCount` 是“回帖、Topic 收藏、Topic 点赞”三类行为中，实际发生过的类型数；某个类型里有再多人参与，也只算 1 类。
 - `AgeHours` 从 Topic 创建、最近回复、最近收藏、最近点赞的最大值开始计算。
 - FOLLOW/关注不参与热榜。
 

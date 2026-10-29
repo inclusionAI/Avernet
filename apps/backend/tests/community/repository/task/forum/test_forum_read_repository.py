@@ -63,9 +63,7 @@ def _reply(
     ).post
 
 
-def _topic_interaction(
-    session, topic_id, actor_id, action_type, *, created_at=None
-):
+def _topic_interaction(session, topic_id, actor_id, action_type, *, created_at=None):
     interaction = ForumInteractionModel(
         actor_type="HUMAN",
         actor_id=actor_id,
@@ -274,7 +272,46 @@ def test_hot_list_requires_heat_equivalent_at_least_fifteen(db):
     assert result.items[0].is_hot is False
 
 
-def test_hot_list_gate_ignores_follow_and_counts_unique_actors(db):
+def test_hot_list_requires_at_least_two_interaction_kinds(db):
+    repo = ForumRepository(db)
+    reply_only = _topic(repo, "hot-reply-only", title="reply only")
+
+    for index in range(1, 16):
+        _reply(
+            repo,
+            reply_only.topic_id,
+            f"hot-reply-{index}",
+            f"reply {index}",
+            author_id=f"reply-user-{index}",
+        )
+
+    reply_only_result = repo.list_topics(
+        keyword=None, status=None, offset=0, limit=20
+    ).items[0]
+    assert reply_only_result.is_hot is False
+
+
+def test_hot_list_accepts_reply_and_favorite_without_like(db):
+    repo = ForumRepository(db)
+    topic = _topic(repo, "hot-reply-and-favorite", title="reply and favorite")
+    for index in range(1, 16):
+        _reply(
+            repo,
+            topic.topic_id,
+            f"hot-reply-{index}",
+            f"reply {index}",
+            author_id=f"reply-user-{index}",
+        )
+
+    with db.orm_session() as session:
+        _topic_interaction(session, topic.topic_id, "reply-user-1", "FAVORITE")
+
+    result = repo.list_topics(keyword=None, status=None, offset=0, limit=20)
+
+    assert result.items[0].is_hot is True
+
+
+def test_hot_list_gate_ignores_follow_action(db):
     repo = ForumRepository(db)
     topic = _topic(repo, "hot-low-interaction", title="low interaction")
     _reply(repo, topic.topic_id, "low-reply", "same user", author_id="user-1")
@@ -296,9 +333,7 @@ def test_hot_list_gate_excludes_topics_older_than_three_days(db):
     created_at = datetime(2026, 10, 20, 0, 0)
 
     with db.orm_session() as session:
-        row = session.query(ForumTopicModel).filter_by(
-            topic_id=topic.topic_id
-        ).one()
+        row = session.query(ForumTopicModel).filter_by(topic_id=topic.topic_id).one()
         row.gmt_create = created_at
         row.gmt_modified = created_at
         for actor_id in ("user-1", "user-2"):
@@ -467,9 +502,10 @@ def test_list_posts_returns_reference_and_two_level_floor_groups(db):
     assert first_page.total == 2
     assert [item.post_id for item in first_page.items] == [first_floor.post_id]
     assert first_page.items[0].floor_no == 1
-    assert [
-        item.post_id for item in first_page.items[0].children
-    ] == [child.post_id, grandchild.post_id]
+    assert [item.post_id for item in first_page.items[0].children] == [
+        child.post_id,
+        grandchild.post_id,
+    ]
     assert first_page.items[0].children[0].reply_to_post_id == first_floor.post_id
     assert first_page.items[0].children[0].reply_to_floor_no == 1
     # A reply to a child has no floor-bearing target; it stays in the same group.
@@ -520,14 +556,20 @@ def test_list_posts_prioritizes_helpful_before_paging_without_renumbering_floors
     second_page = repo.list_posts(topic_id=topic.topic_id, offset=2, limit=2)
 
     assert first_page.total == 4
-    assert [item.post_id for item in first_page.items] == [second.post_id, third.post_id]
+    assert [item.post_id for item in first_page.items] == [
+        second.post_id,
+        third.post_id,
+    ]
     assert [item.floor_no for item in first_page.items] == [2, 3]
     assert [item.helpful for item in first_page.items] == [True, True]
     assert first_page.items[0].children[0].post_id == child.post_id
     assert first_page.items[0].children[0].reply_to_floor_no == 2
     assert first_page.items[0].children[0].helpful is False
 
-    assert [item.post_id for item in second_page.items] == [first.post_id, fourth.post_id]
+    assert [item.post_id for item in second_page.items] == [
+        first.post_id,
+        fourth.post_id,
+    ]
     assert [item.floor_no for item in second_page.items] == [1, 4]
     assert [item.helpful for item in second_page.items] == [False, False]
 
@@ -539,16 +581,20 @@ def test_list_topics_orders_by_latest_reply_activity(db):
     _reply(repo, first.topic_id, "req-active-reply", "reply revives first")
 
     with db.orm_session() as session:
-        first_row = session.query(ForumTopicModel).filter_by(
-            topic_id=first.topic_id
-        ).one()
-        second_row = session.query(ForumTopicModel).filter_by(
-            topic_id=second.topic_id
-        ).one()
+        first_row = (
+            session.query(ForumTopicModel).filter_by(topic_id=first.topic_id).one()
+        )
+        second_row = (
+            session.query(ForumTopicModel).filter_by(topic_id=second.topic_id).one()
+        )
         first_row.gmt_create = datetime(2026, 9, 20, 8, 0, tzinfo=timezone.utc)
         second_row.gmt_create = datetime(2026, 9, 20, 8, 10, tzinfo=timezone.utc)
         session.query(ForumPostModel).filter_by(topic_id=first.topic_id).update(
-            {ForumPostModel.gmt_create: datetime(2026, 9, 20, 8, 20, tzinfo=timezone.utc)}
+            {
+                ForumPostModel.gmt_create: datetime(
+                    2026, 9, 20, 8, 20, tzinfo=timezone.utc
+                )
+            }
         )
 
     result = repo.list_topics(keyword=None, status=None, offset=0, limit=20)
@@ -616,7 +662,9 @@ def test_update_topic_tags_preserves_other_analysis_projection(db):
 
     assert updated is not None
     assert updated.analysis.tags == ("工程", "架构")
-    assert updated.analysis.summary == ForumTopicSummaryRecord(content="Existing summary")
+    assert updated.analysis.summary == ForumTopicSummaryRecord(
+        content="Existing summary"
+    )
     assert updated.analysis.poll_result is None
     assert updated.analysis.poll_cursor_id == 7
 
@@ -624,9 +672,7 @@ def test_update_topic_tags_preserves_other_analysis_projection(db):
 def test_list_topics_counts_nested_replies_and_latest_child_activity(db):
     repo = ForumRepository(db)
     topic = _topic(repo, "topic", title="topic")
-    first_floor = _reply(
-        repo, topic.topic_id, "post-1", "first floor"
-    )
+    first_floor = _reply(repo, topic.topic_id, "post-1", "first floor")
     child = _reply(
         repo,
         topic.topic_id,
