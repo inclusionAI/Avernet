@@ -571,6 +571,14 @@ class AvernetBotPlatform(ChatLegMixin, BotPlatform):
         try:
             bot = self._bot_repo.get_by_id_and_entity(bot_id, owner)
             if bot is None:
+                # The live lookups filter ``is_delete == 0``, so a bot that
+                # was already soft-deleted reads exactly like one that never
+                # landed. Teardown runs on every slice, and the pending branch
+                # below re-purges managed files each time — for an already
+                # deleted bot there is nothing left to undo, and re-purging a
+                # finished creation only repeats its OSS work. Answer success.
+                if self._bot_repo.is_soft_deleted(bot_id, owner):
+                    return True
                 # Pending (or never landed a bot): undo what submission wrote.
                 return bool(self._manifest_seam.discard(
                     entity_id=owner, bot_id=bot_id, owner_id=owner,
