@@ -23,6 +23,7 @@ from agentclaw.community.core.bot_public_risk.tasks import (
     RiskTasks,
     SecurityProvider,
     SecurityProviderUnavailable,
+    SecuritySubmission,
 )
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.services.task_queue_service import (
@@ -40,7 +41,7 @@ def utc_now() -> datetime:
 
 
 class UnavailableRiskProvider:
-    def submit_agent_scan(self, agent_info: dict) -> str:
+    def submit_agent_scan(self, agent_info: dict) -> SecuritySubmission:
         raise SecurityProviderUnavailable("risk security provider unavailable")
 
     def get_agent_check_report(self, check_id: str):

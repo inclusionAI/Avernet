@@ -202,7 +202,7 @@ def test_legacy_current_and_submit_use_owner_locator_without_impersonation():
 def test_injector_constructs_application_with_test_builder_and_security_provider():
     from injector import InstanceProvider
     from agentclaw.community.core.bot_public_risk.application import RiskInputBuilder
-    from agentclaw.community.core.bot_public_risk.tasks import SecurityProvider
+    from agentclaw.community.core.bot_public_risk.tasks import SecurityProvider, SecurityReport, SecuritySubmission
     from agentclaw.community.core.task_queue.services.task_queue_service import (
         TaskQueueService,
     )
@@ -211,23 +211,25 @@ def test_injector_constructs_application_with_test_builder_and_security_provider
         BotPublicRiskModule,
     )
 
+    submissions = []
+    queued = []
+
     class Security:
         def submit_agent_scan(self, agent_info):
-            return "check"
+            submissions.append(agent_info)
+            return SecuritySubmission("check", SecurityReport("DETECTING", "https://example.test/check"))
 
         def get_agent_check_report(self, check_id):
             raise AssertionError("not queried by submission")
 
     class Queue:
-        def enqueue(self, *args, **kwargs):
-            return None
+        def enqueue(self, kind, *args, **kwargs):
+            queued.append(kind)
 
-    class ActualRepo(Records):
-        def create_or_replay(self, record):
-            self.row = replace(record, current_target_key="current")
-            return self.row, True
+    from agentclaw.community.core.bot_public_risk.repository import BotPublicRiskRepository
+    from tests.community.core.bot_public.test_risk_tasks import Db
 
-    repo = ActualRepo()
+    repo = BotPublicRiskRepository(Db())
 
     class TestBindings(Module):
         def configure(self, binder):
@@ -253,6 +255,15 @@ def test_injector_constructs_application_with_test_builder_and_security_provider
         },
     )
     assert created and row.client_scope == "openapi:u1"
+    assert row.phase == "CHECKING" and row.security_status == "DETECTING"
+    assert row.check_id == "check" and row.detail_url == "https://example.test/check"
+    assert repo.get(env="dev", risk_check_id=row.risk_check_id).detail_url == row.detail_url
+    replay, replay_created = service.submit(
+        bot=bot, actor_id="u1", surface="openapi",
+        body={"client_request_id": "x", "public_scope": "user", "visibility": "public", "view_depts": []},
+    )
+    assert not replay_created and replay.risk_check_id == row.risk_check_id
+    assert len(submissions) == 1 and queued == ["bot_public_risk_detecting"]
 
 
 def test_authorized_other_bot_cannot_read_or_refresh_record():
