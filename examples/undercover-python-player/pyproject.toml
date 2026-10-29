@@ -1,0 +1,19 @@
+[project]
+name = "undercover-python-player"
+version = "0.1.0"
+description = "Avernet BCN V3 pure-Python player for the undercover game"
+requires-python = ">=3.12"
+dependencies = ["websockets>=15,<17"]
+
+[dependency-groups]
+dev = ["pytest>=8,<9"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
