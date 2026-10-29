@@ -61,6 +61,16 @@ class EmbeddingProvider(Protocol):
         ...
 
 
+class AsyncEmbeddingProvider(Protocol):
+    """Online query embedding. Implement embed with async def, without blocking I/O."""
+
+    async def embed(self, text: str) -> list[float]: ...
+
+    @property
+    def dimension(self) -> int: ...
+
+
 __all__ = [
+    "AsyncEmbeddingProvider",
     "EmbeddingProvider",
 ]

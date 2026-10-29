@@ -295,6 +295,7 @@ def test_readiness_redacts_vector_store_failure_details() -> None:
     with TestClient(app) as client:
         response = client.get("/ready")
 
-    assert response.status_code == 200
+    assert response.status_code == 503
+    assert response.json()["ready"] is False
     assert response.json()["vector_store_error"] == "RuntimeError"
     assert "secret-value-must-not-leak" not in response.text

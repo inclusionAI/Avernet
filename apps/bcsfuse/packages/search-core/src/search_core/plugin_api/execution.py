@@ -1,9 +1,13 @@
-"""Physical execution permits outlive a caller timeout or cancellation."""
+"""Optional execution deadlines for synchronous or native async provider calls."""
 
 from typing import Protocol
 
 
 class CallExecutor(Protocol):
     async def call(self, function, *args):
-        """Run within a physical bound; reject saturation rather than queue work."""
+        """Await async-def providers directly; offload synchronous providers.
+
+        Return their result or raise on failure, timeout or cancellation.
+        An async provider must propagate cancellation and must not block the loop.
+        """
         ...

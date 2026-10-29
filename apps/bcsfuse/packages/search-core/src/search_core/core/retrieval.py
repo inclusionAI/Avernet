@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import math
 
 from search_core.api.errors import SearchUnavailable
@@ -13,9 +14,9 @@ from search_core.api.models import (
     SearchResult,
 )
 from search_core.core.ranking import reciprocal_rank_fusion
-from search_core.plugin_api.embedding import EmbeddingProvider
+from search_core.plugin_api.embedding import AsyncEmbeddingProvider, EmbeddingProvider
 from search_core.plugin_api.execution import CallExecutor
-from search_core.plugin_api.reranker import Reranker
+from search_core.plugin_api.reranker import AsyncReranker, Reranker
 from search_core.plugin_api.retrieval import RetrievalIndex
 
 
@@ -35,8 +36,8 @@ class HybridRetrievalService:
         self,
         *,
         index: RetrievalIndex,
-        embedding: EmbeddingProvider,
-        reranker: Reranker | None = None,
+        embedding: EmbeddingProvider | AsyncEmbeddingProvider,
+        reranker: Reranker | AsyncReranker | None = None,
         candidate_limit: int = 30,
         allow_partial: bool = False,
         execution: dict[str, CallExecutor] | None = None,
@@ -50,8 +51,12 @@ class HybridRetrievalService:
     async def _call(self, stage, function, *args):
         try:
             pool = self._execution.get(stage)
+            if pool is None and stage in {"vector", "keyword"}:
+                pool = self._execution.get("index")
             if pool is not None:
                 return await pool.call(function, *args)
+            if inspect.iscoroutinefunction(function):
+                return await function(*args)
             return await asyncio.to_thread(function, *args)
         except Exception as exc:
             raise _StageFailure(stage + "_unavailable") from exc
@@ -72,7 +77,7 @@ class HybridRetrievalService:
                 raise _StageFailure("embedding_unavailable")
             query_vector = tuple(vector)
             return await self._call(
-                "index",
+                "vector",
                 self._index.vector_search,
                 vector,
                 self._candidate_limit,
@@ -83,7 +88,7 @@ class HybridRetrievalService:
         results = await asyncio.gather(
             semantic(),
             self._call(
-                "index",
+                "keyword",
                 self._index.keyword_search,
                 request.query,
                 self._candidate_limit,

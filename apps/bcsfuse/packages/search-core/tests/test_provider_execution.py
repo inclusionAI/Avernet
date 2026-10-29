@@ -6,7 +6,6 @@ from unittest.mock import Mock
 
 import httpx
 import pytest
-
 from search_core.api.errors import SearchUnavailable
 from search_core.api.models import RetrievalRequest
 from search_core.config.embedding import EmbeddingSettings
@@ -173,3 +172,64 @@ def test_same_local_path_supports_distinct_collections(tmp_path):
     finally:
         first.close()
         second.close()
+
+
+@pytest.mark.parametrize("status", [402, 429, 503])
+def test_online_embedding_rejection_is_one_call_without_sleep(monkeypatch, status):
+    from search_core.core.observation import upstream_status
+
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(status, json={"error": "synthetic rejection"})
+
+    def no_sleep(*args):
+        raise AssertionError("online call must not sleep or retry")
+
+    monkeypatch.setattr("search_core.providers.embedding.time.sleep", no_sleep)
+    provider = RealEmbeddingProvider(
+        EmbeddingSettings(
+            base_url="https://models.example.test/v1",
+            auth_token="test-token",
+            model="example-embedding",
+            dimension=64,
+        ),
+        request_interval_ms=0,
+        max_retries=0,
+    )
+    provider._client = httpx.Client(transport=httpx.MockTransport(respond))
+    try:
+        for expected in range(1, 3):
+            with pytest.raises(Exception) as caught:
+                provider.embed("test")
+            assert upstream_status(caught.value) == status
+            assert len(calls) == expected
+    finally:
+        provider.close()
+
+
+@pytest.mark.parametrize("status", [402, 429, 503])
+def test_online_reranker_rejection_is_one_call(monkeypatch, status):
+    import requests
+    from search_core.core.observation import upstream_status
+
+    calls = []
+
+    def post(*args, **kwargs):
+        calls.append(1)
+        response = requests.Response()
+        response.status_code = status
+        response.raise_for_status()
+
+    monkeypatch.setattr("requests.post", post)
+    provider = HttpReranker(
+        base_url="https://models.example.test/v1",
+        api_key="test-token",
+        model="bge-reranker-v2-m3",
+    )
+    for expected in range(1, 3):
+        with pytest.raises(RuntimeError) as caught:
+            provider.rerank("test", [{"id": "a", "text": "test"}], 1)
+        assert upstream_status(caught.value) == status
+        assert len(calls) == expected

@@ -1,5 +1,6 @@
 """Concurrent Server reads, exclusive mutations; Local keeps its existing mutex."""
 
+import time
 from contextlib import contextmanager
 from threading import Condition, RLock, get_ident
 
@@ -36,16 +37,23 @@ class IndexLock:
                 self._condition.notify_all()
 
     @contextmanager
-    def read(self):
+    def read(self, timeout_seconds=0.0):
         if not self._concurrent:
             with self:
                 yield
             return
+        deadline = time.monotonic() + timeout_seconds
         with self._condition:
             while self._writer != get_ident() and (
                 self._writer is not None or self._waiting_writers
             ):
-                self._condition.wait()
+                if timeout_seconds > 0:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError("index read lock deadline exceeded")
+                    self._condition.wait(remaining)
+                else:
+                    self._condition.wait()
             self._readers += 1
         try:
             yield

@@ -157,7 +157,12 @@ class QdrantKeywordIndex:
             )
 
     def search(
-        self, query: str, top_k: int, filters: dict | None
+        self,
+        query: str,
+        top_k: int,
+        filters: dict | None,
+        *,
+        timeout: int | None = None,
     ) -> list[VectorSearchHit]:
         if not query.strip() or top_k <= 0:
             return []
@@ -197,6 +202,7 @@ class QdrantKeywordIndex:
                 using="text",
                 limit=top_k,
                 query_filter=models.Filter(must=conditions) if conditions else None,
+                **({"timeout": timeout} if timeout is not None else {}),
             ).points
         results, seen = [], set()
         exact_score = max((p.score for p in ranked), default=0.0) + 1.0
