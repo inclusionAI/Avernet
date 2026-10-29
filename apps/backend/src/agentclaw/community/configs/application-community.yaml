@@ -375,6 +375,13 @@ user_config:
   agentswarm:
     enabled: true
     artifact_store_root: "${AGENTSWARM_ARTIFACT_ROOT:-/tmp/agentswarm/artifacts}"
+    orchestration:
+      # Invariant loaded by AgentSwarmOrchestrationConfig.from_block:
+      # setup(900) + per_attempt(1800) ≤ slice_max(3600).
+      # Runtime requests may tighten per_attempt but never raise it.
+      per_attempt_timeout: 1800
+      setup_timeout: 900
+      slice_max_seconds: 3600
     # agentswarm-specific LLM — deliberately NOT shared with the top-level
     # `llm:` harness block. base_url + secret_name are required for any
     # agent execution; empty base_url keeps submits fail-closed with

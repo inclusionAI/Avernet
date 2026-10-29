@@ -52,12 +52,24 @@ class TerminationEvaluator:
         self._no_progress_threshold = no_progress_threshold
         self._windows: OrderedDict[str, _NoProgressWindow] = OrderedDict()
 
+    def _effective_turns(self, state: RunState) -> int:
+        opts = getattr(state.run, "run_options", None)
+        if opts is None:
+            return self._max_turns
+        return opts.resolved_max_turns(self._max_turns)
+
+    def _effective_total_agents(self, state: RunState) -> int:
+        opts = getattr(state.run, "run_options", None)
+        if opts is None:
+            return self._max_total_agents
+        return opts.resolved_max_total_agents(self._max_total_agents)
+
     def _reason(self, state: RunState) -> TerminationReason | None:
         if self._no_progress(state):
             return TerminationReason.NO_PROGRESS
-        if state.turn_count >= self._max_turns:
+        if state.turn_count >= self._effective_turns(state):
             return TerminationReason.TURN_BUDGET
-        if state.total_agents_spawned >= self._max_total_agents:
+        if state.total_agents_spawned >= self._effective_total_agents(state):
             return TerminationReason.MAX_AGENTS
         if self._wall_clock(state):
             return TerminationReason.WALL_CLOCK

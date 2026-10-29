@@ -146,6 +146,45 @@ class TestIdempotencyKeyCap:
         assert dto.idempotency_key == "k" * IDEMPOTENCY_KEY_MAX
 
 
+class TestRunOptionCaps:
+
+    def _options(self, **overrides):
+        opts = {"model_name": "DeepSeek-V4.1-Flash"}
+        opts.update(overrides)
+        return opts
+
+    def test_max_turns_999_accepted(self):
+        dto = SubmitRunDTO(**_body(options=self._options(max_turns=999)))
+        assert dto.options.max_turns == 999
+
+    def test_max_turns_over_999_rejected(self):
+        with pytest.raises(ValidationError) as exc:
+            SubmitRunDTO(**_body(options=self._options(max_turns=1000)))
+        assert ("options", "max_turns") in [e["loc"] for e in exc.value.errors()]
+
+    def test_max_turns_zero_rejected(self):
+        with pytest.raises(ValidationError):
+            SubmitRunDTO(**_body(options=self._options(max_turns=0)))
+
+    def test_max_total_agents_over_64_rejected(self):
+        with pytest.raises(ValidationError) as exc:
+            SubmitRunDTO(**_body(options=self._options(max_total_agents=65)))
+        assert ("options", "max_total_agents") in [e["loc"] for e in exc.value.errors()]
+
+    def test_per_attempt_timeout_at_1800_accepted_over_rejected(self):
+        dto = SubmitRunDTO(**_body(
+            options=self._options(per_attempt_timeout_seconds=1800.0)))
+        assert dto.options.per_attempt_timeout_seconds == 1800.0
+        with pytest.raises(ValidationError):
+            SubmitRunDTO(**_body(
+                options=self._options(per_attempt_timeout_seconds=1800.5)))
+
+    def test_unknown_option_field_rejected(self):
+        with pytest.raises(ValidationError) as exc:
+            SubmitRunDTO(**_body(options=self._options(bogus=1)))
+        assert "extra_forbidden" in _error_types(exc)
+
+
 class TestAgentSpecCaps:
 
     def test_over_length_name_rejected(self):

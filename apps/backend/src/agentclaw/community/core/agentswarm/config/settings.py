@@ -100,8 +100,8 @@ class LlmConfig:
 
 @dataclass(frozen=True)
 class AgentSwarmOrchestrationConfig:
-    max_turns: int = 50
-    max_total_agents: int = 100
+    max_turns: int = 999
+    max_total_agents: int = 256
     max_width: int = 8
     max_depth: int = 5
     repair_max: int = 2
