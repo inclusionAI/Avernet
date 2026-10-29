@@ -147,14 +147,14 @@ async def test_ordinary_or_operator_owner_cannot_remove_last_caller(world, resou
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("resource", ["mcp", "cli"])
-async def test_admin_does_not_bypass_owner_or_lock(world, resource, monkeypatch):
+async def test_non_admin_non_owner_and_admin_lock_checks(world, resource, monkeypatch):
     monkeypatch.setattr(
         "agentclaw.community.core.config.sofa.sofa_config",
-        SimpleNamespace(user_config={"admin": {"super_admin": ["owner", "other-admin"]}}),
+        SimpleNamespace(user_config={"admin": {"super_admin": ["owner"]}}),
     )
     _seed(world, resource)
     with pytest.raises(CallerIdentityPermissionError):
-        await _update(world, resource, actor_id="other-admin")
+        await _update(world, resource, actor_id="other-user")
     world.lock_repository.get_by_key.return_value = SimpleNamespace(
         id=7, holder_user_id="someone-else",
     )
@@ -200,7 +200,7 @@ async def test_admin_authorization_does_not_bypass_transaction_lock(world, resou
     # A lock appears after the service's optimistic unlocked check.
     with world.database.transactional_orm_session() as session:
         session.add(BotCollabLockModel(
-            lock_key="bot:owner", holder_user_id="someone-else", env="dev",
+            lock_key="bot:entity", holder_user_id="someone-else", env="dev",
         ))
     with pytest.raises(CallerLockEpochError):
         await _update(world, resource)
@@ -228,7 +228,7 @@ def test_repository_final_transition_requires_explicit_service_authorization(wor
     _seed(world, resource)
     args = dict(
         bot_pk=1, engine_type="openclaw", call_type=McpCallType.OWNER,
-        modifier_id="owner", lock_key="bot:owner", lock_holder_user_id="owner",
+        modifier_id="owner", lock_key="bot:entity", lock_holder_user_id="owner",
         lock_epoch=None,
     )
     if authorized:

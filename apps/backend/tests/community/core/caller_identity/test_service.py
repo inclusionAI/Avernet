@@ -257,7 +257,7 @@ async def test_cli_scope_failure_compensates_the_sparse_override() -> None:
         modifier_id="owner-1",
         expected_revision=1,
         expected_caller_config_revision=1,
-        lock_key="bot-1:owner-1",
+        lock_key="bot-1:entity-1",
         lock_holder_user_id="owner-1",
         lock_epoch=None,
         effective_server_codes=set(),
