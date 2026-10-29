@@ -1,4 +1,5 @@
 import { ChatLayoutPanelSlot } from '@/components/Workspace/ChatLayoutPanelSlot';
+import '@/components/Workspace/ChatPanel/ChatPanel.css';
 import { usePersistentChatLayoutPanelHost } from '@/components/Workspace/PersistentChatLayoutPanelHost';
 import { SidePanelCollapseButton } from '@/components/Workspace/SidePanelCollapseButton';
 import { TaskLinkedSession } from '@/components/Workspace/TaskLinkedSession';
@@ -23,9 +24,8 @@ import { GroupChatPlaceholder } from './GroupChatPlaceholder';
 import { GroupExecApprovalPanel } from './GroupExecApprovalPanel';
 import { GroupQuestionPanel } from './GroupQuestionPanel';
 import { buildGroupMentionConfig, isHumanOnlyMention } from './mentionHelpers';
-import { resolveSender } from './messageHelpers';
+export { resolveSender } from './messageHelpers';
 import { useGroupChatPaneActions } from './useGroupChatPaneActions';
-export { resolveSender };
 export function GroupChatPane(props: GroupChatPaneProps) {
   const {
     group,
@@ -166,7 +166,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
   return (
     // relative 供副屏右上「收起」悬浮钮绝对定位（SidePanelCollapseButton）。
     <section className="relative flex min-w-0 flex-1 flex-col bg-background">
-      <ChatLayout className="min-h-0 flex-1">
+      <ChatLayout className="workspace-chat-panel-layout min-h-0 flex-1">
         {linkedSession ? (
           <TaskLinkedSession target={linkedSession} userId={userIdentityId ?? undefined} onClose={closeLinkedSession} />
         ) : (
