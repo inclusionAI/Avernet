@@ -1,5 +1,6 @@
 // useBotPublicRisk：Bot 公开风险前置检测状态机 Hook（bot-public-risk-check，design D4/D5）。
 // - 弹窗打开恢复在途（getCurrent）、发起（client_request_id 幂等生命周期）、编辑器存续期 15s 轮询；
+// - 手动刷新（refreshCurrent，§2.2）：终局失败后立即查询原安全单同步最新结论，不重新建单；
 // - 4xx 终止轮询并提示（可重试错误静默继续）；审批态/关闭停止轮询；
 // - 与老前端（open-claw useBotPublicRisk）语义同构，但 userId 由协作身份上下文注入、record 派生不含
 //   legacy public_approval 双源合并（新版审批态由后端 phase=APPROVING 表达）。
@@ -9,6 +10,7 @@ import { deriveRiskUiState, type BotPublicRiskUiState } from '@/domain/collabora
 import {
   createBotPublicRiskCheck,
   getCurrentBotPublicRiskCheck,
+  refreshBotPublicRiskCheck,
   type BotPublicRiskCheckRecord,
 } from '@/services/collaborationPrivacy/botPublicRiskService';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -56,6 +58,7 @@ export interface BotPublicRiskCreateIntent {
 export function useBotPublicRisk({ botId, userId, publicScope = 'user', enabled = true }: UseBotPublicRiskOptions) {
   const [currentRecord, setCurrentRecord] = useState<BotPublicRiskCheckRecord | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const requestIdRef = useRef<string | null>(null);
   const requestIntentKeyRef = useRef<string | null>(null);
   const pollFatalRef = useRef<Error | null>(null);
@@ -106,6 +109,31 @@ export function useBotPublicRisk({ botId, userId, publicScope = 'user', enabled 
     },
     [botId, currentRecord, publicScope, userId],
   );
+
+  /**
+   * 手动刷新（终局失败兜底）：立即查询原安全单并更新本地视图（§2.2 手动刷新）。
+   * REJECT/NEEDS_ATTENTION 记录仍 current 且轮询已停——工单结论被外部改判后，
+   * 用户须不重新建单即可同步到最新状态；无当前记录时退化为恢复查询。
+   * outcome=NOT_QUERIED 仅按返回 record 更新展示，不构成任何检测结论。
+   */
+  const refreshCurrent = useCallback(async () => {
+    const riskCheckId = currentRecord?.risk_check_id;
+    if (!botId || !userId) return;
+    if (!riskCheckId) {
+      await queryCurrent();
+      return;
+    }
+    setIsRefreshing(true);
+    try {
+      const resp = await refreshBotPublicRiskCheck(botId, userId, riskCheckId);
+      const record = resp.data?.record ?? null;
+      if (record) setCurrentRecord(record);
+    } catch (error) {
+      notifyError((error as Error).message || '刷新检测状态失败，请稍后重试');
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [botId, currentRecord, queryCurrent, userId]);
 
   const uiState: BotPublicRiskUiState = useMemo(() => deriveRiskUiState(currentRecord), [currentRecord]);
 
@@ -160,7 +188,9 @@ export function useBotPublicRisk({ botId, userId, publicScope = 'user', enabled 
     currentRecord,
     uiState,
     isCreating,
+    isRefreshing,
     queryCurrent,
     create,
+    refreshCurrent,
   };
 }
