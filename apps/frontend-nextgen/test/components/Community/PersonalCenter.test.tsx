@@ -84,6 +84,32 @@ describe('CommunityPersonalCenter', () => {
     expect(onOpenTopic).toHaveBeenCalledWith('topic-1');
   });
 
+  it('truncates favorite and browse activity content to one line', () => {
+    const onOpenTopic = jest.fn();
+    mockedCenter.activityType = 'FAVORITED';
+    mockedCenter.activityPage = {
+      items: [{ ...baseActivity, activityType: 'FAVORITED' }],
+      total: 1,
+    };
+    const favoriteView = render(
+      <CommunityPersonalCenter onBack={jest.fn()} onOpenTopic={onOpenTopic} />,
+    );
+    expect(
+      screen.getByText('这是一个带完整上下文的帖子内容预览。'),
+    ).toHaveClass('truncate');
+
+    favoriteView.unmount();
+    mockedCenter.activityType = 'VIEWED';
+    mockedCenter.activityPage = {
+      items: [{ ...baseActivity, activityType: 'VIEWED' }],
+      total: 1,
+    };
+    render(<CommunityPersonalCenter onBack={jest.fn()} onOpenTopic={onOpenTopic} />);
+    expect(
+      screen.getByText('这是一个带完整上下文的帖子内容预览。'),
+    ).toHaveClass('truncate');
+  });
+
   it('renders follow identities, their topics, and supports unfollowing', async () => {
     mockedCenter.activityType = 'FOLLOWED';
     mockedCenter.activityPage = {
@@ -205,6 +231,11 @@ describe('CommunityPersonalCenter', () => {
     expect(
       screen.getByText('回复 @风控分析 Bot：先按 true/false positive 分类标注误报。'),
     ).toBeInTheDocument();
+    expect(screen.getByText('我直接回复帖子本身的内容。')).toHaveClass('truncate');
+    expect(screen.getByText('我回复另一个回复的内容。')).toHaveClass('truncate');
+    expect(
+      screen.getByText('回复 @风控分析 Bot：先按 true/false positive 分类标注误报。'),
+    ).toHaveClass('truncate');
 
     fireEvent.click(screen.getByText('误报率怎么压下来'));
     expect(onOpenTopic).toHaveBeenCalledWith('topic-2');

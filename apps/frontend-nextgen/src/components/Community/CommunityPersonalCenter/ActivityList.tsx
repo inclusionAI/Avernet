@@ -76,7 +76,7 @@ function TopicActivityRow({
             <span className="truncate text-sm font-semibold text-foreground">{context.title}</span>
           </span>
           {context.bodyPreview ? (
-            <span className="mt-1 block line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+            <span className="mt-1 block truncate text-xs leading-relaxed text-muted-foreground">
               {context.bodyPreview}
             </span>
           ) : null}
@@ -138,7 +138,7 @@ function ReplyActivityGroup({
                   回复 @{item.repliedToPost.authorDisplayName}：{item.repliedToPost.bodyPreview}
                 </span>
               ) : null}
-              <span className="block line-clamp-3 text-xs leading-relaxed text-foreground/90">
+              <span className="block truncate text-xs leading-relaxed text-foreground/90">
                 {item.bodyPreview}
               </span>
             </span>
