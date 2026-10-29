@@ -1,0 +1,62 @@
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/bbs/personal_center_schemas.py
+  s_785ac12e5de367::t_0a922ebbef9b91 12,14,20-22,27-28,31-34
+apps/backend/src/agentclaw/community/core/repository/implementations/task/forum/personal_center_activity_repository.py
+  s_785ac12e5de367::t_0a922ebbef9b91 34-36,46,195-251,253-257,264,415
+  s_785ac12e5de367::t_459bbe910f3c45 252
+  s_785ac12e5de367::t_3fb95e936d4f6b 258-263
+  s_785ac12e5de367::t_72035522d17241 265-266
+  s_785ac12e5de367::t_1352149b54c0b5 416-418
+apps/backend/src/agentclaw/community/core/task/forum/interaction/personal_center_activity_service.py
+  s_785ac12e5de367::t_0a922ebbef9b91 145-146,148-150
+apps/backend/src/agentclaw/community/core/task/forum/interaction/models.py
+  s_785ac12e5de367::t_0a922ebbef9b91 60,204
+apps/backend/tests/community/repository/task/forum/test_personal_center_activity_repository.py
+  s_785ac12e5de367::t_0b3fa40fd4ae32 136-155,171,178-179,196-257,262,275-277
+  s_785ac12e5de367::t_f7c382143d7ba2 258-261
+  s_785ac12e5de367::t_a7c12e44e88d13 263-265,272-274
+  s_785ac12e5de367::t_8885938cd654b2 278
+apps/frontend-nextgen/src/domain/community/mapper.ts
+  s_785ac12e5de367::t_0a922ebbef9b91 425-438,443,446
+apps/frontend-nextgen/src/domain/community/types.ts
+  s_785ac12e5de367::t_0a922ebbef9b91 173,179,181,228-229
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/bbs/router.py
+  s_785ac12e5de367::t_0b3fa40fd4ae32 574,578
+apps/frontend-nextgen/src/components/Community/CommunityPersonalCenter/ActivityList.tsx
+  s_785ac12e5de367::t_0b3fa40fd4ae32 60
+apps/frontend-nextgen/src/components/Community/CommunityPersonalCenter/model.ts
+  s_785ac12e5de367::t_0a922ebbef9b91 6
+apps/frontend-nextgen/test/components/Community/PersonalCenter.test.tsx
+  s_785ac12e5de367::t_0b3fa40fd4ae32 5-12,37,55,61-144
+  s_785ac12e5de367::t_c16cb7d286b9f1 145-146
+apps/frontend-nextgen/src/hooks/usePersonalCenter.ts
+  s_785ac12e5de367::t_0a922ebbef9b91 3-4,64-95,107
+apps/frontend-nextgen/src/components/Community/CommunityPersonalCenter/FollowList.tsx
+  s_785ac12e5de367::t_0a922ebbef9b91 1-246
+apps/backend/tests/community/endpoints/test_bbs_interaction_endpoints.py
+  s_785ac12e5de367::t_0b3fa40fd4ae32 377,385-408,410,569
+apps/frontend-nextgen/test/hooks/usePersonalCenter.test.tsx
+  s_785ac12e5de367::t_0b3fa40fd4ae32 12,29-31,74-97
+  s_785ac12e5de367::t_eb06c60e73375b 98-99
+apps/frontend-nextgen/src/components/Community/CommunityPersonalCenter/index.tsx
+  s_785ac12e5de367::t_0a922ebbef9b91 6,9,23,59-76
+apps/backend/tests/community/core/task/forum/interaction/test_personal_center_activity_service.py
+  s_785ac12e5de367::t_0b3fa40fd4ae32 164
+apps/frontend-nextgen/src/hooks/personalCenterModel.ts
+  s_785ac12e5de367::t_0a922ebbef9b91 1-5,18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e6819a1bbced4794b177eea03e6db1e704db5da7",
+  "prompts": {},
+  "sessions": {
+    "s_785ac12e5de367": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "09473ff1-a2db-4cd4-a9a5-e59dc77ed3e2",
+        "model": "antchat/GLM-5.2"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
