@@ -1,20 +1,20 @@
 import { Button } from '@/components/ui/Button';
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Empty } from '@/components/ui/Empty';
 import { Input } from '@/components/ui/Input';
 import { Modal, ModalContent, ModalFooter, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
-import { Switch } from '@/components/ui/Switch';
 import { Textarea } from '@/components/ui/Textarea';
 import type { BotEditorModel, BotEditorRoutine, BotEditorRoutineInput } from '@/domain/botEditor';
+import type { PendingRoutineToggle } from '@/hooks/useRoutineActivation';
 import {
   DEFAULT_ROUTINE_CRON,
-  getRoutineScheduleLabel,
   isRoutineSchedulePreset,
   ROUTINE_SCHEDULE_PRESETS,
 } from '@/services/botWorkshop/routineSchedule';
+import { cn } from '@/utils/cn';
 import { Plus } from 'lucide-react';
 import { useRef, useState } from 'react';
+import { RoutineCard } from './RoutineCard';
 import { RoutineExecutionEnvironment } from './RoutineExecutionEnvironment';
 
 const empty: BotEditorRoutineInput = {
@@ -27,15 +27,11 @@ const empty: BotEditorRoutineInput = {
   timeoutSecs: 1800,
 };
 
-function formatRoutineDate(value?: string) {
-  if (!value) return '—';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false });
-}
-
 export function RoutinePanel({
   routines,
   editable,
+  compact,
+  pendingRoutineToggle,
   onLoadModels,
   onSave,
   onToggle,
@@ -43,6 +39,10 @@ export function RoutinePanel({
 }: {
   routines: BotEditorRoutine[];
   editable: boolean;
+  /** 右侧调试面板展开时主区收窄，卡片退回单列（设计稿 artboard-079）。 */
+  compact?: boolean;
+  /** 启停中的任务等待态：开关进入 loading，成功后原位更新，不整页刷新列表。 */
+  pendingRoutineToggle?: PendingRoutineToggle;
   onLoadModels: () => Promise<BotEditorModel[]>;
   onSave: (input: BotEditorRoutineInput, id?: string) => Promise<void>;
   onToggle: (routine: BotEditorRoutine) => Promise<void>;
@@ -105,69 +105,36 @@ export function RoutinePanel({
   };
   return (
     <div className="flex min-h-full flex-col bg-background">
-      <div className="flex items-center justify-between gap-4 border-b border-border bg-card px-8 py-5 lg:px-10">
-        <div>
-          <h2 className="m-0 text-base font-semibold">定时任务</h2>
-          <p className="m-0 mt-1 text-sm text-muted-foreground">
+      <div className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-8 lg:px-10">
+        <div className="min-w-0">
+          <h2 className="m-0 truncate text-sm font-semibold">定时任务</h2>
+          <p className="m-0 mt-0.5 truncate text-xs text-muted-foreground">
             在当前 Bot 下维护自动触发规则；执行产生的任务实例统一到「我的任务/定时任务」查看。
           </p>
         </div>
-        <Button variant="outline" size="sm" disabled={!editable} leftIcon={<Plus className="size-4" />} onClick={() => edit()}>
+        <Button
+          variant="outline"
+          className="h-8 rounded-[10px] font-normal text-zinc-600"
+          disabled={!editable}
+          leftIcon={<Plus className="size-3.5" />}
+          onClick={() => edit()}
+        >
           新建任务
         </Button>
       </div>
       <div className="w-full px-6 py-6 lg:px-8">
         {routines.length ? (
-          <div className="grid gap-5 xl:grid-cols-2">
+          <div className={cn('grid gap-4', !compact && 'md:grid-cols-2 xl:grid-cols-3')}>
             {routines.map((item) => (
-              <section key={item.id} className="overflow-hidden rounded-2xl border border-border bg-card">
-                <div className="p-6">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <h3 className="m-0 truncate text-lg font-semibold tracking-tight">{item.name}</h3>
-                      <p className="m-0 mt-2 text-sm text-muted-foreground">更新时间：{formatRoutineDate(item.modifiedAt)}</p>
-                    </div>
-                  <Switch
-                    checked={item.enabled}
-                    disabled={!editable}
-                    aria-label={`${item.enabled ? '停用' : '启用'}${item.name}`}
-                    onCheckedChange={() => void onToggle(item)}
-                  />
-                  </div>
-                  <dl className={`mt-8 grid gap-5 ${item.nextRunAt ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
-                    <div>
-                      <dt className="text-sm text-muted-foreground">执行频率</dt>
-                      <dd className="m-0 mt-2 text-base">{getRoutineScheduleLabel(item.cron)}</dd>
-                    </div>
-                    {item.nextRunAt ? (
-                      <div>
-                        <dt className="text-sm text-muted-foreground">下次执行</dt>
-                        <dd className="m-0 mt-2 text-base">{formatRoutineDate(item.nextRunAt)}</dd>
-                      </div>
-                    ) : null}
-                    <div>
-                      <dt className="text-sm text-muted-foreground">执行配置</dt>
-                      <dd className="m-0 mt-2 truncate text-base">模型：{item.model || '跟随 Bot 默认模型'}</dd>
-                    </div>
-                  </dl>
-                </div>
-                <footer className="flex justify-end gap-3 border-t border-border bg-muted/30 px-6 py-3">
-                  <Button variant="outline" size="sm" disabled={!editable} aria-label={`编辑${item.name}`} onClick={() => edit(item)}>
-                    编辑
-                  </Button>
-                  <ConfirmDialog
-                    title="删除定时任务"
-                    description={`确认删除「${item.name}」？删除后无法恢复。`}
-                    confirmVariant="destructive"
-                    onConfirm={() => onDelete(item.id)}
-                    disabled={!editable}
-                  >
-                    <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" aria-label={`删除${item.name}`}>
-                      删除
-                    </Button>
-                  </ConfirmDialog>
-                </footer>
-              </section>
+              <RoutineCard
+                key={item.id}
+                item={item}
+                editable={editable}
+                pendingRoutineToggle={pendingRoutineToggle}
+                onToggle={onToggle}
+                onDelete={onDelete}
+                onEdit={edit}
+              />
             ))}
           </div>
         ) : (

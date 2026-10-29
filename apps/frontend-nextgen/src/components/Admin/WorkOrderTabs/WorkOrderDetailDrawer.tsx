@@ -66,6 +66,17 @@ export function WorkOrderDetailDrawer({
                 </Button>
               </div>
             ) : null}
+            {/* bot-public-risk-check：BOT_PUBLIC_RISK 通知的检测工单外链按钮（spec「通知详情外链按钮」）。 */}
+            {detail?.detailUrl ? (
+              <div className="mt-3">
+                <Button asChild variant="outline" size="sm">
+                  <a href={detail.detailUrl} target="_blank" rel="noopener noreferrer">
+                    <ExternalLink aria-hidden className="size-3.5" />
+                    查看检测工单
+                  </a>
+                </Button>
+              </div>
+            ) : null}
             {detail?.itemType === 'APPROVAL' ? (
               <dl className="mt-4 grid grid-cols-[80px_1fr] gap-x-3 gap-y-2 text-xs">
                 {detail.applicantName || detail.applicantUserId ? (

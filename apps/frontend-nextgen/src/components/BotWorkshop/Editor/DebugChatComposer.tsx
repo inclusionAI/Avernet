@@ -73,7 +73,7 @@ export function DebugChatComposer({
   };
 
   return (
-    <div className="border-t border-border px-5 py-4">
+    <div className="px-5 py-4">
       {files.length > 0 || upload.tasks.length > 0 ? (
         <div className="mb-2 flex flex-wrap gap-2" aria-label="调试会话附件">
           {files.map((file) => (

@@ -59,7 +59,7 @@ const TaskEscort: React.FC<TaskEscortProps> = ({ bot }) => {
   if (!bot) {
     return (
       <div className="flex min-h-full flex-col bg-card">
-        <div className="border-b border-border px-5 py-4">
+        <div className="flex h-14 shrink-0 items-center border-b border-border px-5">
           <h2 className="m-0 text-sm font-semibold">任务护航</h2>
         </div>
         <div className="px-5 py-4">
@@ -71,7 +71,7 @@ const TaskEscort: React.FC<TaskEscortProps> = ({ bot }) => {
 
   return (
     <div className="flex min-h-full flex-col bg-card">
-      <div className="border-b border-border px-5 py-4">
+      <div className="flex h-14 shrink-0 items-center border-b border-border px-5">
         <h2 className="m-0 text-sm font-semibold">任务护航</h2>
       </div>
       <div className="space-y-4 px-5 py-4">
