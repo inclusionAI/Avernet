@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import logging
 import mimetypes
+import time
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -22,6 +24,7 @@ from engine.community.core.session_files.models import (
     SessionFileExportSource,
     SessionFileView,
 )
+from engine.community.core.session_files.registration import register_workspace_file
 from engine.community.plugin_api.workspace_root import workspace_root_strict
 
 log = logging.getLogger("engine.session_files")
@@ -38,6 +41,51 @@ class SessionFileService:
     ) -> None:
         self._workspace_root_provider = workspace_root_provider
         self._default_baas_tenant = default_baas_tenant
+
+    def register_file(
+        self, *, session_key: str, workspace_relative_path: str
+    ) -> SessionFileView:
+        """Register a stable workspace snapshot; keep the original source intact."""
+        started = time.monotonic()
+        fields = {
+            "system": "engine", "operation": "session_files.register",
+            "sessionKey": session_key, "workspace_relative_path": workspace_relative_path,
+        }
+        log.info(
+            "engine.session_files.register.request system=engine sessionKey=%r workspace_relative_path=%r status=request",
+            session_key, workspace_relative_path, extra={**fields, "status": "request"},
+        )
+        try:
+            entry = register_workspace_file(
+                self._workspace_root(), session_key=session_key,
+                workspace_relative_path=workspace_relative_path,
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            code = "registration_failed"
+            if isinstance(exc, OSError) and exc.errno in {errno.ENOENT, errno.ENOTDIR, errno.ELOOP}:
+                code = "invalid_workspace_path"
+            error = exc if isinstance(exc, SessionFileError) else SessionFileError(code)
+            elapsed_ms = round((time.monotonic() - started) * 1000, 3)
+            log.warning(
+                "engine.session_files.register.failure system=engine sessionKey=%r workspace_relative_path=%r status=failed error_code=%s elapsed_ms=%s",
+                session_key, workspace_relative_path, str(error), elapsed_ms,
+                extra={**fields, "status": "failed", "error_code": str(error), "elapsed_ms": elapsed_ms},
+            )
+            if error is exc:
+                raise
+            raise error from exc
+        elapsed_ms = round((time.monotonic() - started) * 1000, 3)
+        log.info(
+            "engine.session_files.register.success system=engine sessionKey=%r workspace_relative_path=%r resource_id=%s status=ready size_bytes=%s elapsed_ms=%s",
+            session_key, workspace_relative_path, entry.resource_id, entry.size_bytes, elapsed_ms,
+            extra={**fields, "status": "ready", "resource_id": entry.resource_id,
+                   "size_bytes": entry.size_bytes, "elapsed_ms": elapsed_ms},
+        )
+        return SessionFileView(
+            resource_id=entry.resource_id, display_name=entry.filename,
+            size_bytes=entry.size_bytes, availability="ready",
+            uploaded_at=self._format_uploaded_at(entry.uploaded_at),
+        )
 
     def list_files(self, *, session_key: str) -> list[SessionFileView]:
         root = self._workspace_root()
@@ -118,6 +166,18 @@ class SessionFileService:
             resource_id,
             hash_identifier(session_key)[:16],
         )
+
+    def get_file_size(self, *, session_key: str, resource_id: str) -> int:
+        """Inspect delivery size independently of any external BaaS capability."""
+        root, entry = self._entry_for_session(session_key, resource_id)
+        availability, _, size_bytes, _ = self._current_file(root, entry)
+        if availability != "ready":
+            raise SessionFileError(f"resource_{availability}")
+        log.info(
+            "engine.session_files.delivery.size sessionKey=%r resource_id=%s size_bytes=%s",
+            session_key, resource_id, size_bytes,
+        )
+        return size_bytes
 
     def prepare_export_source(
         self,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import importlib
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -21,6 +22,7 @@ from agentclaw.community.api.tc_resource_ready_observer import (
     TcResourceReadyObserverProtocol,
 )
 from agentclaw.community.api.session_resource_service import SessionResourceServiceProtocol
+from agentclaw.community.api.engine_session_files import EngineSessionFilesProtocol
 from agentclaw.community.core.runtime_binding.service import RuntimeBindingResolutionService
 from agentclaw.community.core.session_resources.types import SessionResourceStatus
 from tests.community.adapters.http.openapi_v1.conftest import (
@@ -154,6 +156,33 @@ class _Observer:
         self.records.append(resource)
 
 
+class _EngineFiles:
+    def __init__(self, resources):
+        self.resources = resources
+
+    async def list_files(self, target, session_key, *, session_user_id=None):
+        self.resources.calls.append(("list", {
+            "owner_id": target.owner_id, "bot_id": target.bot_id,
+            "session_key": session_key, "actor_user_id": target.actor_user_id,
+            "stage": target.stage,
+            "session_user_id": session_user_id,
+        }))
+        return [{"resource_id": record.resource_id, "display_name": record.display_name,
+                 "status": record.status.value, "size_bytes": record.size_bytes}
+                for record in self.resources.ready_records]
+
+    async def open_content(self, target, session_key, resource_id, disposition, *, session_user_id=None):
+        _, upstream = await self.resources.open_session_file_content(
+            target=target, session_key=session_key, resource_id=resource_id, disposition=disposition,
+        )
+        return upstream
+
+    async def delete_file(self, target, session_key, resource_id):
+        self.resources.calls.append(("delete", {
+            "target": target, "session_key": session_key, "resource_id": resource_id,
+        }))
+
+
 class _RuntimeBindings:
     def __init__(self) -> None:
         self.requests: list[object] = []
@@ -191,6 +220,7 @@ def client(relay, resources, runtime_bindings, observer, friendships, expert):
             binder.bind(HumanBotFriendshipServiceProtocol, to=friendships)
             binder.bind(ExpertChatServiceProtocol, to=expert)
             binder.bind(SessionResourceServiceProtocol, to=resources)
+            binder.bind(EngineSessionFilesProtocol, to=_EngineFiles(resources))
             binder.bind(RuntimeBindingResolutionService, to=runtime_bindings)
             binder.bind(TcResourceReadyObserverProtocol, to=observer)
             # Mutations/content retain Check(MEMBER); list checks operator
@@ -226,7 +256,8 @@ def test_friend_list_checks_friendship_and_session_ownership_before_resources(
     assert owned[1][:4] == ("friend-1", BOT, OWNER, SESSION_ID)
     assert owned[2]["bcn_friend_authorized"] is True
     assert resources.calls == [("list", {
-        "owner_id": OWNER, "bot_id": BOT, "session_key": SESSION_ID, "ready_only": True,
+        "owner_id": OWNER, "bot_id": BOT, "session_key": SESSION_ID,
+        "actor_user_id": "friend-1", "stage": "draft", "session_user_id": "friend-1",
     })]
     assert relay.attempts == []
 
@@ -236,6 +267,109 @@ def test_owner_can_list_one_verified_friends_session(client, friendships, expert
     assert client.get(_base(), params={"f_user_id": "friend-1"}).status_code == 200
     owned = next(call for call in expert.calls if call[0] == "get_owned_chat_session")
     assert owned[1][:4] == ("friend-1", BOT, OWNER, SESSION_ID)
+
+
+@pytest.mark.parametrize("selector", [None, "online"])
+def test_friend_service_files_use_resolved_online_stage(client, friendships, expert, resources, selector):
+    from unittest.mock import Mock
+
+    friendships.allowed = True
+    expert.resolve_chat_stage = Mock(return_value="online")
+    params = {"f_user_id": "friend-1"}
+    if selector is not None:
+        params["stage"] = selector
+    ok(client.get(_base(), params=params))
+    assert resources.calls[-1][1]["stage"] == "online"
+    assert resources.calls[-1][1]["session_user_id"] == "friend-1"
+    assert client.get(_base() + "/sr_1/content", params=params).status_code == 200
+    assert resources.calls[-1][1]["target"].stage == "online"
+
+
+def test_owner_reads_friend_caller_files_from_friend_binding(
+    client, friendships, expert, resources,
+):
+    from unittest.mock import Mock, AsyncMock
+    from agentclaw.community.core.session_resources.engine_files import EngineSessionFilesService
+
+    friendships.allowed = True
+    expert.resolve_chat_stage = Mock(return_value="online")
+    bot_repository = Mock()
+    bot_repository.get_by_id_and_owner.return_value = {
+        "id": 1, "bot_id": BOT, "owner_id": OWNER,
+        "bot_type": "service", "call_type": "caller",
+    }
+    instances = Mock()
+
+    def instance(user_id, bot_id, owner_id):
+        assert (user_id, bot_id, owner_id) == ("friend-1", BOT, OWNER)
+        return {"status": "success", "ext": {"binding_id": 82}}
+
+    instances.get_instance.side_effect = instance
+    binding_repository = Mock()
+    binding_repository.get_by_id.return_value = SimpleNamespace(
+        id=82, status="ACTIVE", env="test", entity_id=OWNER,
+        applied_by="friend-1", apply_reason=f"caller_instance:{BOT}", device_provider="baas",
+    )
+    bindings = RuntimeBindingResolutionService(
+        bot_repository=bot_repository, binding_repository=binding_repository,
+        publish_repository=Mock(), caller_instance_repository=instances,
+        environment_provider=lambda: "test",
+    )
+    resolver = Mock()
+    resolver.resolve_for_binding.return_value = SimpleNamespace(conn_info={})
+    transport = SimpleNamespace(
+        invoke=AsyncMock(return_value={"files": [{
+            "resource_id": "workspace_friend", "display_name": "friend.txt",
+            "size_bytes": 10, "availability": "ready",
+        }]}), stream=AsyncMock(return_value=_Upstream()),
+    )
+    service = EngineSessionFilesService(bindings, resolver, transport, bot_repository)
+    client.app.state.injector.binder.bind(EngineSessionFilesProtocol, to=service)
+    assert ok(client.get(_base(), params={"f_user_id": "friend-1"}))["files"][0]["resource_id"] == "workspace_friend"
+    assert client.get(_base() + "/workspace_friend/content", params={"f_user_id": "friend-1"}).status_code == 200
+    assert instances.get_instance.call_count == 2
+    assert all(call.args == (82, "friend-1") for call in resolver.resolve_for_binding.call_args_list)
+    assert resources.calls == []
+
+
+@pytest.mark.parametrize("operation", ["list", "content", "delete"])
+def test_real_engine_boundary_does_not_leak_exception_credentials(client, operation, caplog):
+    from unittest.mock import Mock, AsyncMock
+    from agentclaw.community.core.session_resources.engine_files import EngineSessionFilesService
+    from agentclaw.community.plugin_api.device_adapter_transport import DeviceAdapterHTTPStatusError
+
+    secret = "Authorization: Bearer private-token Cookie=private-cookie Signature=private-signature"
+    transport = SimpleNamespace(
+        invoke=AsyncMock(side_effect=DeviceAdapterHTTPStatusError(503, secret)),
+        stream=AsyncMock(side_effect=ValueError(secret)),
+    )
+    bindings = Mock()
+    bindings.resolve.return_value = SimpleNamespace(binding_id=101)
+    resolver = Mock()
+    resolver.resolve_for_binding.return_value = SimpleNamespace(conn_info={})
+    client.app.state.injector.binder.bind(
+        EngineSessionFilesProtocol, to=EngineSessionFilesService(bindings, resolver, transport, Mock()),
+    )
+    with caplog.at_level("INFO"):
+        if operation == "delete":
+            response = client.delete(_base() + "/sr_1")
+        else:
+            response = client.get(_base() + ("/sr_1/content" if operation == "content" else ""))
+    assert response.status_code == 502
+    for value in ("private-token", "private-cookie", "private-signature"):
+        assert value not in caplog.text
+        assert value not in response.text
+    assert "session_files.engine.failure" in caplog.text
+
+
+def test_real_engine_preview_too_large_stays_413(client):
+    from unittest.mock import Mock, AsyncMock
+    from agentclaw.community.core.resources.service import FileTooLargeError
+
+    service = SimpleNamespace(open_content=AsyncMock(side_effect=FileTooLargeError("File too large for preview")),
+                              list_files=Mock(), delete_file=Mock())
+    client.app.state.injector.binder.bind(EngineSessionFilesProtocol, to=service)
+    assert client.get(_base() + "/sr_1/content").status_code == 413
 
 
 def test_friendship_source_failure_never_reads_resources(friend_client, friendships, resources):
@@ -344,17 +478,88 @@ def test_upload_resolves_binding_then_calls_legacy_service(
     assert relay.attempts == []
 
 
-def test_ready_list_and_delete_use_the_legacy_session_resource_service(
+def test_ready_list_and_delete_use_the_engine_session_file_service(
     client, relay, resources
 ):
     ready = ok(client.get(_base()))
     assert ready["files"][0]["status"] == "ready"
     assert resources.calls[-1][0] == "list"
-    assert resources.calls[-1][1]["ready_only"] is True
+    assert resources.calls[-1][1]["actor_user_id"] == OWNER
 
     ok(client.delete(_base() + "/sr_1"))
     assert resources.calls[-1][0] == "delete"
     assert relay.attempts == []
+
+
+def test_generated_file_roundtrip_reaches_real_engine_without_upload_record(
+    client, resources, runtime_bindings, tmp_path, monkeypatch,
+):
+    """Register on Engine, access through public API, retain the source after deletion."""
+    import httpx
+    from unittest.mock import Mock
+
+    from agentclaw.community.core.session_resources.engine_files import EngineSessionFilesService
+    from agentclaw.community.plugin_api.device_adapter_transport import DeviceAdapterStreamResponse
+
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[8] / "engine/adapter/src"))
+    engine_router = importlib.import_module("engine.community.api.session_files.router").router
+    engine_service_type = importlib.import_module("engine.community.core.session_files.service").SessionFileService
+    export_service_type = importlib.import_module("engine.community.core.session_files.export_service").SessionFileExportService
+    engine_service = engine_service_type(workspace_root_provider=lambda: tmp_path)
+    engine_app = FastAPI()
+    engine_injector = Injector()
+    engine_injector.binder.bind(engine_service_type, to=engine_service)
+    engine_injector.binder.bind(export_service_type, to=SimpleNamespace())
+    attach_injector(engine_app, engine_injector)
+    engine_app.include_router(engine_router)
+    source = tmp_path / "report.txt"
+    source.write_bytes(b"chat-generated-snapshot")
+
+    class _Transport:
+        async def invoke(self, _connection, method, path, *, params, timeout):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=engine_app), base_url="http://engine.test") as http:
+                response = await http.request(method, path, params=params)
+            response.raise_for_status()
+            return response.json()
+
+        async def stream(self, _connection, method, path, *, params, timeout):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=engine_app), base_url="http://engine.test") as http:
+                response = await http.request(method, path, params=params)
+
+            async def body():
+                yield response.content
+
+            return DeviceAdapterStreamResponse(response.status_code, response.headers, body(), response.aclose)
+
+    resolver = Mock()
+    resolver.resolve_for_binding.return_value = SimpleNamespace(conn_info={})
+    service = EngineSessionFilesService(runtime_bindings, resolver, _Transport(), Mock())
+    client.app.state.injector.binder.bind(EngineSessionFilesProtocol, to=service)
+    from fastapi.testclient import TestClient
+
+    with TestClient(engine_app) as engine_client:
+        registration = engine_client.post("/api/session-files", params={"sessionKey": SESSION_ID},
+                                         json={"workspace_relative_path": "report.txt"})
+        assert registration.status_code == 200, registration.text
+        view = registration.json()
+        resource_id = view["resource_id"]
+        direct = engine_client.get("/api/session-files", params={"sessionKey": SESSION_ID}).json()
+        assert direct["files"] == [view]
+
+    public = ok(client.get(_base()))["files"]
+    assert public[0]["resource_id"] == resource_id
+    assert public[0]["status"] == "ready"
+    content_url = _base() + f"/{resource_id}/content"
+    preview = client.get(content_url)
+    assert preview.status_code == 200 and preview.content == source.read_bytes()
+    download = client.get(content_url, params={"disposition": "attachment"})
+    assert download.status_code == 200 and download.content == source.read_bytes()
+    assert download.headers["content-disposition"].startswith("attachment;")
+    assert ok(client.get(_base().replace(SESSION_ID, "another-session")))["files"] == []
+    ok(client.delete(_base() + f"/{resource_id}"))
+    assert ok(client.get(_base()))["files"] == []
+    assert source.read_bytes() == b"chat-generated-snapshot"
+    assert resources.calls == []
 
 
 def test_content_filters_headers_and_closes_the_upstream(client, resources):
@@ -476,7 +681,7 @@ def test_complete_and_status_return_public_resources(client, resources, observer
     ]
 
 
-def test_openapi_never_exposes_raw_materialization_error_details(client, resources):
+def test_engine_list_does_not_expose_backend_materialization_error_details(client, resources):
     resources.ready_records = [
         SimpleNamespace(
             **{
@@ -488,7 +693,7 @@ def test_openapi_never_exposes_raw_materialization_error_details(client, resourc
 
     data = ok(client.get(_base()))
 
-    assert data["files"][0]["error_code"] == "materialization_failed"
+    assert data["files"][0]["error_code"] is None
     assert "private/device-a" not in str(data)
 
 

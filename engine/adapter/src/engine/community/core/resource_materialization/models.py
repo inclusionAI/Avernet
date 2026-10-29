@@ -111,7 +111,7 @@ class ManifestEntry(BaseModel):
     observed_inode: int | None = None
     uploaded_at: datetime | None = None
     baas_tenant: str | None = None
-    source_kind: Literal["baas_session_file", "temporary_url"] = "baas_session_file"
+    source_kind: Literal["baas_session_file", "temporary_url", "workspace_file"] = "baas_session_file"
     source_attachment_id: str | None = None
     source_url_hash: str | None = None
 

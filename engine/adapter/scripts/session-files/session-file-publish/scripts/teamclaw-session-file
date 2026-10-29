@@ -1,0 +1,160 @@
+#!/usr/bin/env python3
+"""Publish an Engine workspace file; standalone Python 3 standard library only."""
+
+import argparse
+import http.client
+import ipaddress
+import json
+import sys
+import time
+from pathlib import PurePosixPath, PureWindowsPath
+from urllib.parse import urlencode, urlsplit
+
+DEFAULT_ENGINE_URL = "http://127.0.0.1:20003"
+MAX_RESPONSE = 65536
+TIMEOUT_SECONDS = 30
+
+
+class Failure(Exception):
+    def __init__(self, code, exit_code, http_status=None):
+        self.code = code
+        self.exit_code = exit_code
+        self.http_status = http_status
+
+
+class Parser(argparse.ArgumentParser):
+    def error(self, message):
+        # COSEC: argparse errors can echo credential-bearing user arguments.
+        raise Failure("invalid_arguments", 2)
+
+
+def endpoint(raw):
+    """Return a numeric loopback host; never resolve an untrusted DNS name."""
+    try:
+        # COSEC: reject URL normalization, userinfo, paths, queries and fragments.
+        if any(ord(char) <= 32 or ord(char) == 127 for char in raw):
+            raise ValueError
+        parsed = urlsplit(raw)
+        if (parsed.scheme != "http" or not parsed.netloc or parsed.username is not None
+                or parsed.password is not None or parsed.path not in ("", "/")
+                or "?" in raw or "#" in raw or "%" in raw or "\\" in raw):
+            raise ValueError
+        host = parsed.hostname
+        if host == "localhost":
+            host = "127.0.0.1"
+        address = ipaddress.ip_address(host)
+        if not address.is_loopback:
+            raise ValueError
+        port = parsed.port if parsed.port is not None else 80
+        if not 1 <= port <= 65535 or parsed.netloc.endswith(":"):
+            raise ValueError
+        return str(address), port
+    except (TypeError, ValueError):
+        raise Failure("invalid_engine_url", 2) from None
+
+
+def validate_arguments(path, session_key):
+    # COSEC: lexical checks only; Engine owns filesystem/symlink containment.
+    if (not path or PurePosixPath(path).is_absolute() or PureWindowsPath(path).drive
+            or "\\" in path or ".." in path.split("/")
+            or str(PurePosixPath(path)) == "."
+            or any(ord(char) < 32 or ord(char) == 127 for char in path)
+            or not session_key or session_key != session_key.strip()
+            or any(ord(char) < 32 or ord(char) == 127 for char in session_key)):
+        raise Failure("invalid_arguments", 2)
+
+
+def view_from_response(raw):
+    try:
+        value = json.loads(raw)
+        if not isinstance(value, dict):
+            raise TypeError
+        if (any(not isinstance(value.get(key), str) or not value[key]
+                for key in ("resource_id", "display_name"))
+                or type(value.get("size_bytes")) is not int or value["size_bytes"] < 0
+                or value.get("availability") != "ready"
+                or "uploaded_at" not in value
+                or (value["uploaded_at"] is not None and not isinstance(value["uploaded_at"], str))):
+            raise ValueError
+        # COSEC: only return contract metadata, never arbitrary extra fields.
+        return {key: value[key] for key in (
+            "resource_id", "display_name", "size_bytes", "availability", "uploaded_at")}
+    except (TypeError, ValueError, UnicodeError, RecursionError):
+        raise Failure("invalid_response", 5) from None
+
+
+def log_event(event, **metadata):
+    print(json.dumps(dict(system="engine", direction="out", operation="publish", event=event,
+                          method="POST", path="/api/session-files", **metadata),
+                     sort_keys=True), file=sys.stderr)
+
+
+def publish(path, session_key, engine_url):
+    validate_arguments(path, session_key)
+    host, port = endpoint(engine_url)
+    started = time.monotonic()
+    context = {"sessionKey": session_key, "workspace_relative_path": path}
+    log_event("request", **context, http_status=None, elapsed_ms=0)
+    # COSEC: numeric loopback only; HTTPConnection ignores proxy/auth environment
+    # and never follows redirects. Do not read Backend/Gateway credentials.
+    connection = http.client.HTTPConnection(host, port, timeout=TIMEOUT_SECONDS)
+    status = None
+    try:
+        connection.request("POST", "/api/session-files?" + urlencode({"sessionKey": session_key}),
+                           body=json.dumps({"workspace_relative_path": path}).encode("utf-8"),
+                           headers={"Content-Type": "application/json", "Accept": "application/json"})
+        response = connection.getresponse()
+        status = response.status
+        if 300 <= status < 400:
+            raise Failure("redirect_rejected", 4, status)
+        if not 200 <= status < 300:
+            # COSEC: never read/echo arbitrary HTTP errors, reasons or Location.
+            raise Failure("engine_http_error", 4, status)
+        raw = response.read(MAX_RESPONSE + 1)
+        if len(raw) > MAX_RESPONSE:
+            raise Failure("invalid_response", 5)
+        view = view_from_response(raw)
+        log_event("success", **context, **view, http_status=status,
+                  elapsed_ms=round((time.monotonic() - started) * 1000))
+        return view
+    except Failure as exc:
+        if exc.http_status is None:
+            exc.http_status = status
+        raise
+    except TimeoutError:
+        raise Failure("engine_timeout", 3, status) from None
+    except (OSError, http.client.HTTPException):
+        raise Failure("engine_unreachable", 3, status) from None
+    finally:
+        connection.close()
+
+
+def main(argv=None):
+    parser = Parser(prog="teamclaw-session-file", description=__doc__, allow_abbrev=False)
+    commands = parser.add_subparsers(dest="command", required=True, parser_class=Parser)
+    command = commands.add_parser("publish", allow_abbrev=False)
+    command.add_argument("workspace_relative_path")
+    command.add_argument("--session-key", required=True)
+    command.add_argument("--engine-url", default=DEFAULT_ENGINE_URL)
+    started = time.monotonic()
+    args = None
+    try:
+        args = parser.parse_args(argv)
+        view = publish(args.workspace_relative_path, args.session_key, args.engine_url)
+        result, exit_code = {"ok": True, "code": "published", "file": view}, 0
+    except Failure as exc:
+        result, exit_code = {"ok": False, "code": exc.code}, exc.exit_code
+        if exc.http_status is not None:
+            result["http_status"] = exc.http_status
+        context = {}
+        if args is not None and exc.exit_code != 2:
+            context = {"sessionKey": args.session_key,
+                       "workspace_relative_path": args.workspace_relative_path}
+        log_event("failure", **context, code=exc.code, http_status=exc.http_status,
+                  elapsed_ms=round((time.monotonic() - started) * 1000))
+    print(json.dumps(result, ensure_ascii=True, sort_keys=True))
+    return exit_code
+
+
+if __name__ == "__main__":
+    sys.exit(main())

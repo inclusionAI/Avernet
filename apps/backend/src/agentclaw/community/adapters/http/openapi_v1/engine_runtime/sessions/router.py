@@ -79,6 +79,7 @@ from agentclaw.community.core.engine_runtime.errors import (
 )
 from agentclaw.community.core.engine_runtime.session_key import SessionKeyCodecRegistry
 from agentclaw.community.core.resources.service import FileTooLargeError
+from agentclaw.community.core.runtime_binding.models import RuntimeBindingRequest
 from agentclaw.community.core.expert_chat.errors import (
     BotNotFoundError as ExpertBotNotFoundError,
     ConnectionError as ExpertConnectionError,
@@ -747,21 +748,23 @@ async def list_ready_session_files(
     expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
     adapter: OpenApiSessionFileAdapter = Injected(OpenApiSessionFileAdapter),
 ) -> Envelope[SessionFileList]:
-    await authorize_file_list(
+    resolved_stage = await authorize_file_list(
         request=request, bot_id=bot_id, session_id=session_id, user_id=user_id,
         owner_id=owner_id, stage=stage, friend_user_id=f_user_id,
         relay=relay, friendships=friendships, expert=expert,
     )
     try:
-        records = adapter.list_ready(
-            owner_id=owner_id,
-            bot_id=bot_id,
+        records = await adapter.list_ready(
+            target=RuntimeBindingRequest(
+                bot_id=bot_id, owner_id=owner_id, actor_user_id=user_id, stage=resolved_stage,
+            ),
             session_key=session_id,
+            session_user_id=f_user_id,
         )
     except ValueError as exc:
         _session_file_not_found(exc)
     return envelope(
-        SessionFileList(files=[_session_file_resource(record) for record in records]),
+        SessionFileList(files=[SessionFile(**record) for record in records]),
         request,
     )
 
@@ -791,19 +794,23 @@ async def stream_session_file_content(
     expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
     adapter: OpenApiSessionFileAdapter = Injected(OpenApiSessionFileAdapter),
 ) -> StreamingResponse:
-    await authorize_file_list(
+    resolved_stage = await authorize_file_list(
         request=request, bot_id=bot_id, session_id=session_id, user_id=user_id,
         owner_id=owner_id, stage=stage, friend_user_id=f_user_id,
         relay=relay, friendships=friendships, expert=expert,
     )
     try:
-        record, upstream = await adapter.open_content(
-            owner_id=owner_id,
-            bot_id=bot_id,
+        upstream = await adapter.open_content(
+            target=RuntimeBindingRequest(
+                bot_id=bot_id, owner_id=owner_id, actor_user_id=user_id, stage=resolved_stage,
+            ),
             session_key=session_id,
+            session_user_id=f_user_id,
             resource_id=resource_id,
             disposition=disposition,
         )
+    except FileTooLargeError:
+        raise
     except ValueError as exc:
         if str(exc) == "resource_preview_too_large":
             raise FileTooLargeError("File too large for preview") from exc
@@ -818,8 +825,6 @@ async def stream_session_file_content(
         finally:
             await upstream.close()
     headers = _session_file_headers(upstream.headers)
-    if upstream.status_code == 200 and headers.get("Content-Type", "").split(";", 1)[0].lower() != "application/json":
-        headers.setdefault("Content-Disposition", f'{disposition}; filename="{record.filename}"')
     return StreamingResponse(
         body(),
         status_code=upstream.status_code,
@@ -845,9 +850,10 @@ async def delete_session_file(
         surface="sessions",
     )
     try:
-        adapter.delete(
-            owner_id=owner_id,
-            bot_id=bot_id,
+        await adapter.delete(
+            target=RuntimeBindingRequest(
+                bot_id=bot_id, owner_id=owner_id, actor_user_id=user_id, stage=stage.value,
+            ),
             session_key=session_id,
             resource_id=resource_id,
         )

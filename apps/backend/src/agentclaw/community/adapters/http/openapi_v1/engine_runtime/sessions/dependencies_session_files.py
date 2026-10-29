@@ -6,6 +6,8 @@ from typing import Any
 
 from injector import inject
 
+from agentclaw.community.api.engine_session_files import EngineSessionFilesProtocol
+
 from agentclaw.community.api.session_resource_service import (
     SessionResourceServiceProtocol,
 )
@@ -28,10 +30,12 @@ class OpenApiSessionFileAdapter:
         session_resources: SessionResourceServiceProtocol,
         runtime_bindings: RuntimeBindingResolutionService,
         resource_ready_observer: TcResourceReadyObserverProtocol,
+        engine_files: EngineSessionFilesProtocol,
     ) -> None:
         self._session_resources = session_resources
         self._runtime_bindings = runtime_bindings
         self._resource_ready_observer = resource_ready_observer
+        self._engine_files = engine_files
 
     def create_upload_intents(
         self,
@@ -82,14 +86,24 @@ class OpenApiSessionFileAdapter:
         self._resource_ready_observer.notify_in_background(record)
         return record
 
-    def list_ready(self, **kwargs: Any) -> Any:
-        return self._session_resources.list_resources(ready_only=True, **kwargs)
+    async def list_ready(
+        self, *, target: RuntimeBindingRequest, session_key: str, session_user_id: str | None = None,
+    ) -> Any:
+        return await self._engine_files.list_files(target, session_key, session_user_id=session_user_id)
 
-    async def open_content(self, **kwargs: Any) -> Any:
-        return await self._session_resources.open_session_file_content(**kwargs)
+    async def open_content(
+        self, *, target: RuntimeBindingRequest, session_key: str,
+        resource_id: str, disposition: str,
+        session_user_id: str | None = None,
+    ) -> Any:
+        return await self._engine_files.open_content(
+            target, session_key, resource_id, disposition, session_user_id=session_user_id,
+        )
 
-    def delete(self, **kwargs: Any) -> Any:
-        return self._session_resources.delete(**kwargs)
+    async def delete(
+        self, *, target: RuntimeBindingRequest, session_key: str, resource_id: str,
+    ) -> Any:
+        return await self._engine_files.delete_file(target, session_key, resource_id)
 
 
 __all__ = ["OpenApiSessionFileAdapter"]

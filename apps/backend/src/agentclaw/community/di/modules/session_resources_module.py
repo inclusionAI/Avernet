@@ -8,6 +8,8 @@ from injector import Binder, Module, inject, provider, singleton
 from agentclaw.community.api.session_resource_service import (
     SessionResourceServiceProtocol,
 )
+from agentclaw.community.api.engine_session_files import EngineSessionFilesProtocol
+from agentclaw.community.core.session_resources.engine_files import EngineSessionFilesService
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
@@ -37,6 +39,7 @@ from agentclaw.community.core.repository.implementations.platform.session_resour
 
 class SessionResourcesModule(Module):
     def configure(self, binder: Binder) -> None:
+        binder.bind(EngineSessionFilesProtocol, to=EngineSessionFilesService, scope=singleton)
         binder.bind(
             SessionResourceRepositoryProtocol,
             to=SessionResourceRepository,

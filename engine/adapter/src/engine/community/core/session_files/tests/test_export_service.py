@@ -161,6 +161,35 @@ async def test_original_transfer_is_shared_and_cached_without_upload(tmp_path: P
     assert client.upload_calls == []
 
 
+@pytest.mark.asyncio
+async def test_workspace_snapshot_uploads_before_share_and_retains_original(tmp_path: Path):
+    original = tmp_path / "generated.txt"
+    original.write_bytes(b"workspace-content")
+    service = SessionFileService(
+        workspace_root_provider=lambda: tmp_path, default_baas_tenant="team_claw"
+    )
+    view = service.register_file(session_key="a", workspace_relative_path="generated.txt")
+    original.write_bytes(b"subsequent-edit")
+    source = service.prepare_export_source(session_key="a", resource_id=view.resource_id)
+    assert source.requires_upload is True
+    assert source.transfer_id == ""
+    client = _SessionFileClient()
+    exports = SessionFileExportService(session_file_service=service, export_client=client)
+    assert (await exports.request_download(source=source, session_key="a")).state == "preparing"
+    await exports._jobs[(source.resource_id, source.content_hash, source.transfer_id)].task
+    result = await exports.request_download(source=source, session_key="a")
+    assert result.state == "ready"
+    assert client.grant_calls[0][0].transfer_id == ""
+    assert client.upload_calls[0][1] == b"workspace-content"
+    assert client.complete_calls[0].transfer_id == "replacement-transfer"
+    assert client.share_calls[0][0].transfer_id == "replacement-transfer"
+    entry = ManifestStore(tmp_path).get(view.resource_id)
+    assert entry.source_kind == "baas_session_file"
+    assert service.register_file(session_key="a", workspace_relative_path="generated.txt").resource_id != view.resource_id
+    service.delete_file(session_key="a", resource_id=view.resource_id)
+    assert original.read_bytes() == b"subsequent-edit"
+
+
 def test_missing_manifest_tenant_uses_injected_default_or_fails_closed(tmp_path: Path):
     service, session_key, _ = _write_file(tmp_path)
     entry = ManifestStore(tmp_path).get("sr_001")
