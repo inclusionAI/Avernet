@@ -92,6 +92,7 @@ export const TaskArtifactPreviewDrawer: React.FC<TaskArtifactPreviewDrawerProps>
     artifact.kind === 'url_link' ||
     ((artifact.kind === null || artifact.kind === undefined) && artifact.type === 'link');
   const isCodeArtifact = artifact.kind === 'code';
+  const isTextArtifact = artifact.kind === 'text';
   const isDetailArtifact = isLinkArtifact || isCodeArtifact;
   const linkUrl = artifact.linkRef?.url ?? artifact.url ?? null;
   const codeUrl = artifact.codeRef?.pullRequestUrl ?? artifact.url ?? null;
@@ -337,6 +338,10 @@ export const TaskArtifactPreviewDrawer: React.FC<TaskArtifactPreviewDrawerProps>
                 {isCodeArtifact ? '查看 PR' : '打开链接'}
               </a>
             ) : null
+          ) : isTextArtifact ? (
+            <span aria-hidden="true" style={{ ...actionStyle, visibility: 'hidden' }}>
+              下载文件
+            </span>
           ) : (
             <button
               type="button"
