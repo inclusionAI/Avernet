@@ -33,7 +33,12 @@
     },
     "agentswarm": {
       "artifact_store_root": "${AGENTSWARM_ARTIFACT_ROOT:-/tmp/agentswarm/artifacts}",
-      "enabled": true
+      "enabled": true,
+      "orchestration": {
+        "per_attempt_timeout": 1800,
+        "setup_timeout": 900,
+        "slice_max_seconds": 3600
+      }
     },
     "aidesktop_root": "~/.aidesktop",
     "antcode": {
