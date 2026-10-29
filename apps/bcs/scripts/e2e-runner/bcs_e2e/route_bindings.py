@@ -523,6 +523,15 @@ def validate_edge_case_bindings(value: object, profile: dict) -> dict:
                           "edge_admission_human_actor.read", "edge_admission_actor_kind.read"}
                 and profile["environment"].get("tier") == "preprod"):
             auth = "human_cookie"
+        if (operation == "structured.group.create"
+                and profile["environment"].get("tier") == "preprod"):
+            # Station-internal preprod ACE enforces the owning Human identity
+            # on the structured Group create route: a dedicated-Bot bearer
+            # only receives an SSO LOGIN envelope (decisionBy=ACE), while the
+            # Human cookie creates the Group for real. The community Singlebox
+            # contract keeps the authenticated Bot bearer (wire evidence
+            # 20261031; probe Groups were deleted and 404-verified).
+            auth = "human_cookie"
         if operation in {"structured_templates.list", "structured_templates.detail"}:
             expected_path = path
         elif operation.startswith("structured."):

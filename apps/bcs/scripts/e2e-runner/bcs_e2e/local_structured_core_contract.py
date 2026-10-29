@@ -256,9 +256,18 @@ def validate_structured_core_adapter(adapter: object) -> None:
 
 
 def _validate_result(requirement: StructuredCoreRequirement, result: AdapterCall,
-                     index: int) -> None:
+                     index: int, *, binding_auth: str | None = None) -> None:
     evidence = result.evidence
-    authenticated = requirement.actor == 'CEO'
+    # The reviewed actor per obligation is environment-bound: the community
+    # Singlebox contract keeps the authenticated CEO Bot bearer on structured
+    # Group create, while station-internal preprod ACE enforces the owning
+    # Human cookie (see the route_bindings preprod override). Remote adapters
+    # expose per-operation bindings and make that environment truth
+    # authoritative; adapters without bindings (owned-local Singlebox) keep
+    # the reviewed CEO actor.
+    authenticated = (binding_auth == 'authenticated_bot'
+                     if binding_auth is not None
+                     else requirement.actor == 'CEO')
     expected_effect = _STEP_EFFECTS.get(requirement.requirement_id, 'NONE')
     if (not isinstance(evidence, dict)
             or evidence.get('requirement_id') != requirement.requirement_id
@@ -294,7 +303,11 @@ def execute_structured_core_case(adapter: object) -> CaseExecution:
             if not isinstance(result, AdapterCall):
                 raise RunStateError(method_name + ' did not return AdapterCall')
             result.validate()
-            _validate_result(requirement, result, index)
+            operation = _REQUEST_OPERATIONS[index]
+            adapter_bindings = getattr(adapter, 'bindings', None) or {}
+            binding = adapter_bindings.get(operation) if isinstance(adapter_bindings, dict) else None
+            _validate_result(requirement, result, index,
+                             binding_auth=binding.get('auth') if isinstance(binding, dict) else None)
             steps.append(StepOutcome(requirement_id=requirement.requirement_id,
                                      method=method_name, status='PASS',
                                      data=dict(result.data),

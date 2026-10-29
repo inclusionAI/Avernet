@@ -192,11 +192,13 @@ class RemoteStructuredCoreAdapter:
                 'driver': {'source': 'manual',
                            'bot_ids': [self.driver_bot_id]},
             }
+        create_by_bot = (self.bindings['structured.group.create'].get('auth')
+                         == 'authenticated_bot')
         data, record = self.write_client.structured_call(
             'structured.group.create', body=body, expected=(200,))
         if (record.get('credentials_sent') is not True
-                or record.get('authorization_sent') is not True
-                or record.get('http_status') != 200):
+                or record.get('http_status') != 200
+                or create_by_bot != (record.get('authorization_sent') is True)):
             raise RunStateError(
                 'structured-core group create transport evidence differs from the fixed contract')
         group_id = self._nonempty(data.get('id') if isinstance(data, dict) else None,
@@ -206,7 +208,8 @@ class RemoteStructuredCoreAdapter:
             data={'group_id': group_id, 'label': GROUP_LABEL},
             evidence=self._evidence(record,
                                     requirement_id=requirement.requirement_id,
-                                    identity=DRIVER_BOT_IDENTITY,
+                                    identity=DRIVER_BOT_IDENTITY if create_by_bot
+                                    else HUMAN_COOKIE_IDENTITY,
                                     fixture_effect=_STEP_EFFECTS[requirement.requirement_id],
                                     group_id=group_id, label=GROUP_LABEL))
 

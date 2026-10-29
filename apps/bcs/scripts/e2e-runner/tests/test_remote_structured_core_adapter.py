@@ -91,8 +91,10 @@ REVIEWED_OPERATION = {
 
 
 DIRECT_BINDING_ROUTES = (
+    # Station-direct preprod: ACE enforces the Human cookie on structured
+    # Group create; the community Singlebox contract keeps the Bot bearer.
     ('structured.group.create', STRUCTURED_DIRECT_PATHS['structured.group.create'],
-     'authenticated_bot'),
+     'human_cookie'),
     ('structured.group.read', STRUCTURED_DIRECT_PATHS['structured.group.read'],
      'human_cookie'),
     ('structured.definition.read',
@@ -138,9 +140,13 @@ def base_profile(*, gateway=False, direct=False):
         binding = {'method': _EDGE_CASES[operation][0], 'path': path,
                    'api_face': 'internal-v1', 'auth': auth,
                    'response': response_mode, 'traceparent': 'disabled'}
-        if auth == 'authenticated_bot':
+        if auth == 'authenticated_bot' or operation == 'structured.group.create':
             binding['caller_actor_id'] = DRIVER
         bindings[operation] = binding
+    if gateway:
+        # Station Gateway face: ACE also enforces the Human cookie on
+        # structured Group create; the community bearer stays Singlebox-local.
+        bindings['structured.group.create']['auth'] = 'human_cookie'
     value['edge_case_bindings'] = bindings
     if direct:
         value['entrypoint'].update(kind='bcs-direct',
@@ -427,6 +433,18 @@ class RemoteStructuredCoreContractTests(unittest.TestCase):
             with self.subTest(mutation=name):
                 value = base_profile()
                 mutate(value)
+                with self.assertRaises(ConfigError):
+                    validate(value)
+
+    def test_station_preprod_structured_create_binds_the_human_cookie(self):
+        for flag in ('gateway', 'direct'):
+            with self.subTest(entrypoint=flag):
+                value = base_profile(**{flag: True})
+                self.assertEqual(
+                    value['edge_case_bindings']['structured.group.create']['auth'],
+                    'human_cookie')
+                value['edge_case_bindings']['structured.group.create']['auth'] = (
+                    'authenticated_bot')
                 with self.assertRaises(ConfigError):
                     validate(value)
 
