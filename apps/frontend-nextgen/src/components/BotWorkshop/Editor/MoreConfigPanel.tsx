@@ -42,8 +42,11 @@ export function MoreConfigPanel({
   if (tab === 'node')
     return (
       <div className="flex min-h-full flex-col bg-card">
-        <div className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border px-7">
-          <h2 className="m-0 truncate text-sm font-semibold tracking-tight">运行节点</h2>
+        <div className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-8 lg:px-10">
+          <div className="min-w-0">
+            <h2 className="m-0 truncate text-sm font-semibold">运行节点</h2>
+            <p className="m-0 mt-0.5 truncate text-xs text-muted-foreground">查看当前 Bot 绑定的运行节点与引擎连接状态。</p>
+          </div>
           <Badge tone={engineStatus?.running ? 'success' : 'neutral'}>
             {engineStatus?.running ? '运行中' : '未运行'}
           </Badge>
@@ -63,8 +66,11 @@ export function MoreConfigPanel({
   if (tab !== 'engine')
     return (
       <div className="flex min-h-full flex-col bg-card">
-        <div className="flex h-14 shrink-0 items-center border-b border-border px-7">
-          <h2 className="m-0 truncate text-sm font-semibold tracking-tight">{labels[tab]}</h2>
+        <div className="flex h-14 shrink-0 items-center border-b border-border bg-card px-8 lg:px-10">
+          <div className="min-w-0">
+            <h2 className="m-0 truncate text-sm font-semibold">{labels[tab]}</h2>
+            <p className="m-0 mt-0.5 truncate text-xs text-muted-foreground">该配置项即将开放，敬请期待。</p>
+          </div>
         </div>
         <div className="px-7 py-5">
           <Empty
@@ -76,9 +82,9 @@ export function MoreConfigPanel({
     );
   return (
     <div className="flex min-h-full flex-col bg-card">
-      <div className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border px-7">
+      <div className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-8 lg:px-10">
         <div className="min-w-0">
-          <h2 className="m-0 truncate text-sm font-semibold tracking-tight">引擎配置</h2>
+          <h2 className="m-0 truncate text-sm font-semibold">引擎配置</h2>
           <p className="m-0 mt-0.5 truncate text-xs text-muted-foreground">直接读写 Bot 草稿态的自由 JSON 配置。</p>
         </div>
         <div className="flex items-center gap-2">

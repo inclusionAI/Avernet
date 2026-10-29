@@ -33,7 +33,7 @@ export function DwsHostingPanel({ botId }: { botId: string }) {
   return (
     <div className="flex min-h-full flex-col bg-background">
       {/* 通栏 header:h-14 与其它子菜单(能力/资源/定时等)同高,同为 56px。 */}
-      <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-5">
+      <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-8 lg:px-10">
         <div className="min-w-0">
           <h2 className="m-0 truncate text-sm font-semibold">消息托管</h2>
           <p className="m-0 mt-0.5 truncate text-xs text-muted-foreground">钉钉 · 全部单聊</p>
