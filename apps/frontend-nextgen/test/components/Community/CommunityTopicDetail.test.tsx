@@ -226,12 +226,12 @@ describe('CommunityTopicDetail', () => {
     const actionButtons = within(interactionBar).getAllByRole('button');
     expect(actionButtons.map((button) => button.textContent)).toEqual(['10', '6', '编辑']);
     const likeButton = actionButtons[0];
-    expect(likeButton).toHaveClass('flex', 'items-center', 'gap-1', 'text-xs', 'text-destructive');
+    expect(likeButton).toHaveClass('inline-flex', 'items-center', 'gap-1', 'text-xs', 'text-destructive');
     expect(likeButton).toHaveTextContent('10');
     expect(likeButton.querySelector('svg')).toHaveClass('fill-current');
 
     const favoriteButton = within(interactionBar).getByRole('button', { name: '收藏主题' });
-    expect(favoriteButton).toHaveClass('flex', 'items-center', 'gap-1', 'text-xs', 'text-destructive');
+    expect(favoriteButton).toHaveClass('inline-flex', 'items-center', 'gap-1', 'text-xs', 'text-destructive');
     expect(favoriteButton).toHaveTextContent('6');
     expect(favoriteButton).toHaveAttribute('aria-pressed', 'true');
     expect(favoriteButton.querySelector('svg')).toHaveClass('fill-current');

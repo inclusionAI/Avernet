@@ -1,34 +1,19 @@
 import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { TopicFirstFloor } from './TopicFirstFloor';
 import type {
   CommunityAuthor,
   CommunityReply,
   CommunityTopic,
   ForumTargetRef,
-  InteractionStats,
   InteractionSummary,
 } from '@/domain/community/types';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { TopicInteractionBar } from '../TopicInteractionBar';
 import { Floor } from './Floor';
-import { PollPanel } from './PollPanel';
 import { ReplyComposer, type ReplyComposerPayload } from './ReplyComposer';
 import { TopicDetailHeader } from './TopicDetailHeader';
 import { buildReplyGroups } from './model';
-
-const EMPTY_STATS: InteractionStats = {
-  viewCount: 0,
-  likeCount: 0,
-  favoriteCount: 0,
-  followCount: 0,
-  acceptCount: 0,
-  topicCount: 0,
-  replyCount: 0,
-  acceptedReplyCount: 0,
-  replyParticipantCount: 0,
-  helpfulReplyCount: 0,
-};
 
 export interface CommunityTopicDetailProps {
   topic: CommunityTopic | null;
@@ -187,62 +172,24 @@ export function CommunityTopicDetail({
           ) : topic ? (
             <>
               {/* 楼主楼层仅在第 1 页显示：分页语义本身一直以一级楼层为单位。 */}
-              {replyPage === 1 && (
-                <Floor
+              {replyPage === 1 ? (
+                <TopicFirstFloor
                   topic={topic}
-                  floor={0}
-                  author={topic.author}
-                  body={topic.body}
-                  createdAt={topic.createdAt}
-                  contentExtra={
-                    <PollPanel
-                      topicType={topic.topicType}
-                      status={topic.status}
-                      poll={topic.topicConfig?.poll}
-                      pollStats={topic.analysis?.pollStats}
-                    />
-                  }
-                  topicActionRow={
-                    <TopicInteractionBar
-                      topicId={topic.id}
-                      topicStats={
-                        targetSummary
-                          ? {
-                              viewCount: targetSummary.viewCount,
-                              likeCount: targetSummary.likeCount,
-                              favoriteCount: targetSummary.favoriteCount,
-                              followCount: targetSummary.followCount,
-                              acceptCount: targetSummary.acceptCount,
-                              topicCount: targetSummary.topicCount,
-                              replyCount: targetSummary.replyCount,
-                              acceptedReplyCount: targetSummary.acceptedReplyCount,
-                              replyParticipantCount: targetSummary.replyParticipantCount,
-                              helpfulReplyCount: targetSummary.helpfulReplyCount,
-                            }
-                          : EMPTY_STATS
-                      }
-                      publishedAt={topic.createdAt}
-                      liked={(viewerTopicSummary?.likeCount ?? 0) > 0}
-                      favorited={(viewerTopicSummary?.favoriteCount ?? 0) > 0}
-                      likePending={likePending === true}
-                      favoritePending={favoritePending === true}
-                      canEdit={topic.canEdit}
-                      onLike={(target) => onLike?.(target)}
-                      onFavorite={(target) => onFavorite?.(target)}
-                      onEdit={onEditTopic}
-                    />
-                  }
-                  threadReplies={[]}
-                  expanded={false}
-                  onToggleThreadReplies={() => undefined}
-                  registerElement={registerReplyElement}
                   currentUserId={currentUserId}
+                  targetSummary={targetSummary}
+                  viewerTopicSummary={viewerTopicSummary}
                   getAuthorSummary={getSummaryFor}
                   loadAuthorSummary={loadSummaryFor}
                   followAuthor={followFor}
                   authorFollowLoading={authorFollowLoading}
+                  likePending={likePending}
+                  favoritePending={favoritePending}
+                  onLike={onLike}
+                  onFavorite={onFavorite}
+                  onEdit={onEditTopic}
+                  registerElement={registerReplyElement}
                 />
-              )}
+              ) : null}
               {floorGroups.map(({ reply, floorNo, children }) => (
                 <Floor
                   topic={topic}

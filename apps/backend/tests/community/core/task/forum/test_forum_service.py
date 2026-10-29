@@ -621,7 +621,7 @@ def test_set_post_helpful_allows_closed_help_without_closing_topic():
     assert [call["operation"] for call in repo.calls] == [
         "get_topic",
         "get_post",
-        "update_post_helpful",
+        "update_post_helpful_with_accept",
     ]
 
 

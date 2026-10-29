@@ -145,25 +145,27 @@ export function Floor({
           <div className="mt-2 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               {canReply && postId && onSubmitReply ? (
-                <button
-                  type="button"
-                  className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-auto min-h-0 gap-1 px-0 text-xs font-normal text-muted-foreground"
                   aria-label="回复"
                   onClick={() => setReplyTarget({ postId, authorName: author.displayName })}
                 >
                   <MessageSquare className="size-3.5" aria-hidden />
                   回复
-                </button>
+                </Button>
               ) : null}
               {postId && onLike ? (
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
+                  size="sm"
                   disabled={replyLikePending?.(postId) === true}
                   aria-label="点赞回复"
                   aria-pressed={liked}
                   onClick={() => postId && onLike?.(postId)}
                   className={cn(
-                    'flex items-center gap-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+                    'h-auto min-h-0 gap-1 px-0 text-xs font-normal transition-colors disabled:cursor-not-allowed disabled:opacity-40',
                     liked
                       ? 'text-destructive'
                       : 'text-muted-foreground hover:text-foreground',
@@ -171,17 +173,18 @@ export function Floor({
                 >
                   <Heart className={cn('size-3.5', liked && 'fill-current')} aria-hidden />
                   {likeCount}
-                </button>
+                </Button>
               ) : null}
               {postId && onFavoriteReply ? (
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
+                  size="sm"
                   disabled={replyFavoritePending?.(postId) === true}
                   aria-label="收藏回复"
                   aria-pressed={favorited}
                   onClick={() => postId && onFavoriteReply?.(postId)}
                   className={cn(
-                    'flex items-center gap-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+                    'h-auto min-h-0 gap-1 px-0 text-xs font-normal transition-colors disabled:cursor-not-allowed disabled:opacity-40',
                     favorited
                       ? 'text-destructive'
                       : 'text-muted-foreground hover:text-foreground',
@@ -189,7 +192,7 @@ export function Floor({
                 >
                   <Star className={cn('size-3.5', favorited && 'fill-current')} aria-hidden />
                   {favoriteCount}
-                </button>
+                </Button>
               ) : null}
               {floor > 0 && canToggleHelpful && onToggleHelpful ? (
                 <Button
