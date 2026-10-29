@@ -181,10 +181,15 @@ def _service_with(db, config: AgentSwarmConfig) -> AgentSwarmService:
 
 def _req(*, idempotency_key: str | None = None,
          goal: str = "submit-contract goal") -> SubmitRunRequest:
+    # Catalog covers every name the scripted decisions spawn (a1..a15):
+    # the name guard requires spawn names to be catalog-derived.
+    agents = tuple(
+        dm.AgentSpec(name=f"a{i}", role="research") for i in range(1, 16)
+    )
     return SubmitRunRequest(
         tenant=TENANT,
         goal=goal,
-        agents=(dm.AgentSpec(name="a1", role="research"),),
+        agents=agents,
         idempotency_key=idempotency_key,
     )
 
