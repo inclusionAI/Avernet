@@ -10,7 +10,7 @@ from agentclaw.community.core.bot_public_risk.repository import (
     RiskCheck,
     RiskCheckModel,
 )
-from agentclaw.community.core.bot_public_risk.tasks import RiskTasks, SecurityReport
+from agentclaw.community.core.bot_public_risk.tasks import RiskTasks, SecurityReport, SecuritySubmission
 
 
 class Db:
@@ -43,7 +43,7 @@ class Provider:
 
     def submit_agent_scan(self, payload):
         self.submissions.append(payload)
-        return "check-1"
+        return SecuritySubmission("check-1", SecurityReport("DETECTING"))
 
     def get_agent_check_report(self, check_id):
         self.queries.append(check_id)
@@ -72,9 +72,17 @@ def make():
     return tasks, repo, queue, provider, now, record
 
 
+def stage_pending(tasks, record):
+    """Stage an old queued submission to exercise recovery across deployment."""
+    saved, created = tasks.repo.create_or_replay(replace(record, next_action_at=tasks.clock()))
+    if created:
+        tasks._enqueue(saved, "bot_public_risk_submit")
+    return saved, created
+
+
 def test_submit_once_and_timeout_pauses_without_pass():
     tasks, repo, queue, provider, now, record = make()
-    tasks.start(record)
+    stage_pending(tasks, record)
     tasks.submit(env="dev", risk_check_id="a")
     tasks.submit(env="dev", risk_check_id="a")
     assert len(provider.submissions) == 1
@@ -91,7 +99,7 @@ def test_submit_once_and_timeout_pauses_without_pass():
 
 def test_reject_window_stays_fixed_and_manual_refresh_queries_original():
     tasks, repo, queue, provider, now, record = make()
-    tasks.start(record)
+    stage_pending(tasks, record)
     tasks.submit(env="dev", risk_check_id="a")
     now[0] += timedelta(seconds=30)
     provider.report = SecurityReport("REJECT", "https://example.test/report")
@@ -115,7 +123,7 @@ def test_reject_window_stays_fixed_and_manual_refresh_queries_original():
 
 def test_unverified_pass_requires_attention():
     tasks, repo, _, provider, now, record = make()
-    tasks.start(record)
+    stage_pending(tasks, record)
     tasks.submit(env="dev", risk_check_id="a")
     provider.report = SecurityReport("PASS")
     assert tasks.poll(env="dev", risk_check_id="a", manual=True) == "UPDATED"
@@ -124,7 +132,7 @@ def test_unverified_pass_requires_attention():
 
 def test_unknown_submission_and_reclaimed_intent_never_post_again():
     tasks, repo, _, provider, _, record = make()
-    tasks.start(record)
+    stage_pending(tasks, record)
 
     def fail(_):
         provider.submissions.append("unknown")
@@ -137,7 +145,7 @@ def test_unknown_submission_and_reclaimed_intent_never_post_again():
     assert repo.get(env="dev", risk_check_id="a").phase == "NEEDS_ATTENTION"
 
     tasks, repo, _, provider, _, record = make()
-    tasks.start(record)
+    stage_pending(tasks, record)
     initial = repo.get(env="dev", risk_check_id="a")
     repo.update_current(
         env="dev",
@@ -152,7 +160,7 @@ def test_unknown_submission_and_reclaimed_intent_never_post_again():
 
 def test_late_report_cannot_advance_replaced_record():
     tasks, repo, queue, provider, now, record = make()
-    tasks.start(record)
+    stage_pending(tasks, record)
     tasks.submit(env="dev", risk_check_id="a")
 
     def delayed(_):
@@ -178,7 +186,7 @@ def test_queue_failure_leaves_recoverable_record():
     import pytest
 
     with pytest.raises(RuntimeError):
-        tasks.start(record)
+        stage_pending(tasks, record)
     queue.enqueue = original
     tasks.recover(env="dev", now=now[0])
     assert queue.entries[-1][0][0] == "bot_public_risk_submit"
@@ -193,7 +201,7 @@ def test_queue_moves_reject_to_distinct_task_and_reschedules_detecting():
     from agentclaw.community.core.task_queue.types import Complete, Reschedule
 
     tasks, repo, queue, provider, now, record = make()
-    tasks.start(record)
+    stage_pending(tasks, record)
     tasks.submit(env="dev", risk_check_id="a")
     payload = {"tenant": "teamclaw", "env": "dev", "risk_check_id": "a"}
     handler = RiskTaskHandler(tasks, DETECTING, lambda: "dev")
@@ -208,7 +216,7 @@ def test_queue_moves_reject_to_distinct_task_and_reschedules_detecting():
 
 def test_advance_enqueue_failure_is_recoverable():
     tasks, repo, queue, provider, now, record = make()
-    tasks.start(record)
+    stage_pending(tasks, record)
     tasks.submit(env="dev", risk_check_id="a")
     provider.report = SecurityReport("PASS", valid_pass=True)
     original = queue.enqueue
@@ -229,7 +237,7 @@ def test_advance_enqueue_failure_is_recoverable():
 
 def test_detecting_after_reject_uses_original_window_and_refresh_does_not_extend():
     tasks, repo, _, provider, now, record = make()
-    tasks.start(record)
+    stage_pending(tasks, record)
     tasks.submit(env="dev", risk_check_id="a")
     original_deadline = now[0] + timedelta(minutes=5)
     now[0] += timedelta(seconds=30)
@@ -288,7 +296,7 @@ def test_real_queue_reclaims_crashed_submission_without_second_post():
             )
 
     tasks.queue = RealQueue()
-    tasks.start(record)
+    stage_pending(tasks, record)
     claimed = queue_repo.claim_batch(
         worker_id="first", env="dev", app="agentclaw", limit=1, lease_seconds=30
     )
@@ -327,7 +335,7 @@ def test_reject_notice_only_to_openapi_operator_and_deduplicated():
 
     tasks, repo, _, provider, now, record = make()
     record = replace(record, client_scope="openapi:operator")
-    tasks.start(record)
+    stage_pending(tasks, record)
     tasks.submit(env="dev", risk_check_id="a")
     provider.report = SecurityReport("REJECT", "https://example.test/report")
     tasks.poll(env="dev", risk_check_id="a", manual=True)
@@ -347,7 +355,7 @@ def test_failed_notice_retries_even_after_record_replaced():
 
     tasks, repo, _, provider, now, record = make()
     record = replace(record, client_scope="openapi:operator")
-    tasks.start(record)
+    stage_pending(tasks, record)
     tasks.submit(env="dev", risk_check_id="a")
     provider.report = SecurityReport("REJECT")
     tasks.poll(env="dev", risk_check_id="a", manual=True)
@@ -371,7 +379,7 @@ def test_failed_notice_retries_even_after_record_replaced():
 
 def test_legacy_events_never_notify():
     tasks, repo, queue, provider, now, record = make()
-    tasks.start(replace(record, client_scope="legacy:operator"))
+    stage_pending(tasks, replace(record, client_scope="legacy:operator"))
     tasks.submit(env="dev", risk_check_id="a")
     provider.report = SecurityReport("REJECT")
     tasks.poll(env="dev", risk_check_id="a", manual=True)
@@ -410,7 +418,7 @@ def test_notice_delivery_uses_existing_work_order_contract():
 
 def test_unknown_creation_and_timeout_stage_distinct_notices():
     tasks, repo, _, provider, now, record = make()
-    tasks.start(replace(record, client_scope="openapi:operator"))
+    stage_pending(tasks, replace(record, client_scope="openapi:operator"))
 
     def fail(_):
         raise TimeoutError()
@@ -423,7 +431,7 @@ def test_unknown_creation_and_timeout_stage_distinct_notices():
     assert set(notice) == {"CREATION_UNKNOWN"}
 
     tasks, repo, _, provider, now, record = make()
-    tasks.start(replace(record, client_scope="openapi:operator"))
+    stage_pending(tasks, replace(record, client_scope="openapi:operator"))
     tasks.submit(env="dev", risk_check_id="a")
     now[0] += timedelta(minutes=5)
     tasks.poll(env="dev", risk_check_id="a")
@@ -439,7 +447,7 @@ def test_unavailable_provider_is_known_failure_not_unknown_submission():
 
     tasks, repo, _, _, _, record = make()
     tasks.provider = UnavailableRiskProvider()
-    tasks.start(replace(record, client_scope="openapi:operator"))
+    stage_pending(tasks, replace(record, client_scope="openapi:operator"))
     tasks.submit(env="dev", risk_check_id="a")
     row = repo.get(env="dev", risk_check_id="a")
     assert row.phase == "NEEDS_ATTENTION"
@@ -494,11 +502,11 @@ def test_reclaimed_submit_keeps_late_valid_check_id_without_reposting(tmp_path):
         provider.submissions.append(payload)
         entered.set()
         assert release.wait(10)
-        return "check-1"
+        return SecuritySubmission("check-1", SecurityReport("DETECTING"))
 
     provider.submit_agent_scan = blocked
     record = replace(record, client_scope="openapi:operator")
-    tasks.start(record)
+    stage_pending(tasks, record)
     first = queue.claim_batch(
         worker_id="first", env="dev", app="agentclaw", limit=1, lease_seconds=30
     )[0]
@@ -537,7 +545,7 @@ def test_reclaimed_submit_keeps_late_valid_check_id_without_reposting(tmp_path):
 def test_late_check_id_does_not_revive_withdrawn_or_replaced_application():
     for change in ("withdraw", "replace"):
         tasks, repo, queue, provider, now, record = make()
-        tasks.start(record)
+        stage_pending(tasks, record)
         original = repo.get(env="dev", risk_check_id="a")
         assert repo.update_current(
             env="dev",
@@ -555,7 +563,7 @@ def test_late_check_id_does_not_revive_withdrawn_or_replaced_application():
                 replace(record, risk_check_id="b", client_request_id="req-b")
             )
         tasks._record_submission_result(
-            env="dev", risk_check_id="a", check_id="check-1"
+            env="dev", risk_check_id="a", check_id="check-1", report=SecurityReport("DETECTING")
         )
         old = repo.get(env="dev", risk_check_id="a")
         assert old.current_target_key is None and old.phase == "CLOSED"
@@ -572,7 +580,7 @@ def test_late_check_id_does_not_revive_withdrawn_or_replaced_application():
 
 def test_late_check_id_cannot_revive_other_failure_or_replace_existing_check():
     tasks, repo, queue, provider, now, record = make()
-    tasks.start(record)
+    stage_pending(tasks, record)
     row = repo.get(env="dev", risk_check_id="a")
     assert repo.update_current(
         env="dev",
@@ -583,7 +591,7 @@ def test_late_check_id_cannot_revive_other_failure_or_replace_existing_check():
             "workflow_json": '{"submission_intent":true,"error":"INPUT_OR_PERMISSION_INVALID"}',
         },
     )
-    tasks._record_submission_result(env="dev", risk_check_id="a", check_id="check-1")
+    tasks._record_submission_result(env="dev", risk_check_id="a", check_id="check-1", report=SecurityReport("DETECTING"))
     assert repo.get(env="dev", risk_check_id="a").check_id is None
     current = repo.get(env="dev", risk_check_id="a")
     assert repo.update_current(
@@ -593,7 +601,7 @@ def test_late_check_id_cannot_revive_other_failure_or_replace_existing_check():
         changes={"phase": "CHECKING", "check_id": "original-check"},
     )
     tasks._record_submission_result(
-        env="dev", risk_check_id="a", check_id="other-check"
+        env="dev", risk_check_id="a", check_id="other-check", report=SecurityReport("DETECTING")
     )
     assert repo.get(env="dev", risk_check_id="a").check_id == "original-check"
 
@@ -604,7 +612,7 @@ def test_late_check_during_notice_send_preserves_actual_delivery_result():
 
     for send_succeeds in (True, False):
         tasks, repo, _, _, now, record = make()
-        tasks.start(replace(record, client_scope="openapi:operator"))
+        stage_pending(tasks, replace(record, client_scope="openapi:operator"))
         row = repo.get(env="dev", risk_check_id="a")
         assert tasks._update(
             row,
@@ -623,7 +631,7 @@ def test_late_check_during_notice_send_preserves_actual_delivery_result():
         def send(**kwargs):
             calls.append(kwargs)
             tasks._record_submission_result(
-                env="dev", risk_check_id="a", check_id="check-1"
+                env="dev", risk_check_id="a", check_id="check-1", report=SecurityReport("DETECTING")
             )
             if not send_succeeds:
                 raise RuntimeError("delivery failed")
@@ -646,11 +654,11 @@ def test_slow_submission_never_extends_detecting_window():
     for seconds in (120, 300, 360):
         tasks, repo, queue, provider, now, record = make()
         start = now[0]
-        tasks.start(record)
+        stage_pending(tasks, record)
 
         def slow(_):
             now[0] += timedelta(seconds=seconds)
-            return "check-1"
+            return SecuritySubmission("check-1", SecurityReport("DETECTING"))
 
         provider.submit_agent_scan = slow
         tasks.submit(env="dev", risk_check_id="a")
@@ -670,14 +678,14 @@ def test_late_id_without_trustworthy_intent_time_pauses_automatic_polling():
 
     for started in (None, "invalid", "2099-01-01T00:00:00"):
         tasks, repo, _, _, now, record = make()
-        tasks.start(record)
+        stage_pending(tasks, record)
         row = repo.get(env="dev", risk_check_id="a")
         workflow = {"submission_intent": True}
         if started is not None:
             workflow["submission_started_at"] = started
         assert tasks._update(row, {"workflow_json": json.dumps(workflow)})
         tasks._record_submission_result(
-            env="dev", risk_check_id="a", check_id="check-1"
+            env="dev", risk_check_id="a", check_id="check-1", report=SecurityReport("DETECTING")
         )
         saved = repo.get(env="dev", risk_check_id="a")
         assert saved.check_id == "check-1"
@@ -688,7 +696,7 @@ def test_late_id_without_trustworthy_intent_time_pauses_automatic_polling():
 
 def test_poll_retries_notice_only_cas_and_persists_pass():
     tasks, repo, _, provider, _, record = make()
-    tasks.start(record)
+    stage_pending(tasks, record)
     tasks.submit(env="dev", risk_check_id="a")
     provider.report = SecurityReport("PASS", valid_pass=True)
     original = provider.get_agent_check_report
@@ -706,13 +714,13 @@ def test_poll_retries_notice_only_cas_and_persists_pass():
 
 def test_poll_never_overwrites_replacement_with_stale_report():
     tasks, repo, _, provider, _, record = make()
-    tasks.start(record)
+    stage_pending(tasks, record)
     tasks.submit(env="dev", risk_check_id="a")
     provider.report = SecurityReport("PASS", valid_pass=True)
     original = provider.get_agent_check_report
 
     def replaced(check_id):
-        tasks.start(replace(record, risk_check_id="b", client_request_id="other"))
+        stage_pending(tasks, replace(record, risk_check_id="b", client_request_id="other"))
         return original(check_id)
 
     provider.get_agent_check_report = replaced
@@ -723,7 +731,7 @@ def test_poll_never_overwrites_replacement_with_stale_report():
 def test_poll_does_not_overwrite_concurrent_withdrawal_pause_or_conclusion():
     for concurrent in ("withdraw", "pause", "conclusion", "check_id"):
         tasks, repo, _, provider, _, record = make()
-        tasks.start(record)
+        stage_pending(tasks, record)
         tasks.submit(env="dev", risk_check_id="a")
         provider.report = SecurityReport("PASS", valid_pass=True)
         original = provider.get_agent_check_report
@@ -749,7 +757,7 @@ def test_poll_repeated_contention_does_not_claim_update():
     import pytest
 
     tasks, repo, _, provider, _, record = make()
-    tasks.start(record)
+    stage_pending(tasks, record)
     tasks.submit(env="dev", risk_check_id="a")
     provider.report = SecurityReport("PASS", valid_pass=True)
     repo.update_current = lambda **kwargs: False
