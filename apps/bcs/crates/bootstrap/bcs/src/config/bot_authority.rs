@@ -74,8 +74,8 @@ pub struct TrustedAppScopeRuleConfig {
     /// Byte-exact tenant, or the reserved `"absent"`.
     pub tenant: String,
     /// Allowed actions from exactly:
-    /// `managers:sync | ownership:read |
-    /// ownership:accept | ownership:reject`. An empty
+    /// `managers:sync | ownership:read | ownership:accept |
+    /// ownership:reject | ownership:sync`. An empty
     /// set denies everything; unknown spellings fail
     /// configuration loading.
     #[serde(default)]

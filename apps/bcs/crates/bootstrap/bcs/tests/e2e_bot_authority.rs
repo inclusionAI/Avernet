@@ -29,6 +29,8 @@
 //! 5. second transfer (new target), then the normal
 //!    retirement path (`DELETE /bots/{id}`).
 //!
+//! Plus two later stories: trusted-apps default-deny and the ownership sync swap.
+//!
 //! Scope note (honest apertures, Plan 8.1):
 //! - The two-instance revoke-only-resource-qualification
 //!   and only-tighten-scope cases stay pinned where they
@@ -215,6 +217,7 @@ fn tampered_human_token(user_id: &str) -> String {
 const WALT: &str = "walt";
 const BOB: &str = "bob";
 const CAROL: &str = "carol";
+const DAVE: &str = "dave";
 
 fn urlencode(value: &str) -> String {
     let mut encoded = String::new();
@@ -535,7 +538,7 @@ fn trusted_apps_rule() -> Value {
     json!({
         "app": bcs_test_support::AUTHORITY_FIXTURE_APP_NAME,
         "tenant": TENANT,
-        "actions": ["managers:sync"],
+        "actions": ["managers:sync", "ownership:sync"],
     })
 }
 

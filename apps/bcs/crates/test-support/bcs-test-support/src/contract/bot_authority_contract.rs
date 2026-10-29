@@ -32,6 +32,8 @@ use bcs_service_api::types::bot_authority::{
     check_page_bounds, human_actor_id,
 };
 
+use super::bot_ownership_sync_contract::run_ownership_sync_contract;
+
 /// Storage access the harness uses to prepare/corrupt state.
 ///
 /// Implementations must keep every prepared edge in the unified
@@ -90,6 +92,34 @@ pub trait BotAuthorityContractFixture: Send + Sync {
     /// sequence. The manager-write scenarios use this to
     /// pin "no-op leaves no audit" and rollback semantics.
     async fn audit_rows(&self, env: &str) -> Vec<HarnessAuditRow>;
+
+    /// Current `ownership_version` of `bot_id` in `env` (0 when
+    /// absent) — the harness pins CAS increments without
+    /// exposing the version to any public view (spec §4.2).
+    async fn ownership_version(&self, env: &str, bot_id: &str) -> u64;
+
+    /// Seed one VALID pending transfer row (`expires_at` seven
+    /// days out) for `bot_id`: actor ids are the persisted
+    /// `human_<user>` spellings. Mirrors the transfer harness's
+    /// seed discipline so the ownership-sync closure scenario
+    /// observes a real pending.
+    async fn seed_pending_transfer(
+        &self,
+        env: &str,
+        bot_id: &str,
+        from_owner_actor: &str,
+        target_actor: &str,
+        expected_version: u64,
+    );
+
+    /// Decision state of the transfer row for `(bot, target)`:
+    /// `None` when absent.
+    async fn transfer_decision_state(
+        &self,
+        env: &str,
+        bot_id: &str,
+        target_actor: &str,
+    ) -> Option<HarnessTransferDecision>;
 }
 
 /// One authority audit row as the write scenarios observe it.
@@ -103,6 +133,16 @@ pub struct HarnessAuditRow {
     pub subject_id: String,
     pub before_state: Option<String>,
     pub after_state: Option<String>,
+}
+
+/// Pending/terminal decision columns of one transfer row as the
+/// ownership-sync closure scenario observes them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HarnessTransferDecision {
+    pub status: String,
+    pub decided_by_kind: Option<String>,
+    pub decided_by_id: Option<String>,
+    pub reason: Option<String>,
 }
 
 /// Full shared semantic suite for one bound environment.
@@ -194,6 +234,7 @@ pub async fn run_bot_authority_contract_with_scenarios(
     sync_accepts_1000_and_rejects_1001(fixture, env).await;
     report("sync_over_1000_stock_clears_beyond_first_page");
     sync_over_1000_stock_clears_beyond_first_page(fixture, env).await;
+    run_ownership_sync_contract(fixture, env, &mut report).await;
 }
 
 /// Roles are the union of the owner and manager edges, owner taking
@@ -818,7 +859,7 @@ async fn deleted_operator_cannot_edit_managers(
 static HARNESS_MUTATION: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(1);
 
-fn next_mutation_id() -> String {
+pub(crate) fn next_mutation_id() -> String {
     format!(
         "mutation-{}",
         HARNESS_MUTATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
@@ -856,7 +897,7 @@ fn service_sync(bot: &str, user_ids: Vec<&str>, app_id: i64, mutation_id: String
     }
 }
 
-fn mentions(err: &bcs_service_api::ServiceError, code: &str) -> bool {
+pub(crate) fn mentions(err: &bcs_service_api::ServiceError, code: &str) -> bool {
     err.to_string().contains(code)
 }
 

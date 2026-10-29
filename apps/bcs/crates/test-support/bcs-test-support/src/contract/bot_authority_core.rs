@@ -21,7 +21,7 @@ use bcs_service_api::core::BotAuthorityCoreService;
 use bcs_service_api::types::bot_authority::{
     human_actor_id, AuthorityMutation, BotAccessRelation, BotRoleQuery,
     ManagerEdit, ManagerEditAction, ManagerListQuery, ManagerSync,
-    TransferAction, TransferCommand, TransferKey,
+    OwnershipSync, TransferAction, TransferCommand, TransferKey,
 };
 
 use super::bot_authority_contract::BotAuthorityContractFixture;
@@ -216,6 +216,55 @@ pub async fn bot_authority_core_service_contract_tests(
         .await
         .expect("page after sync");
     assert_eq!(page.items, vec![TARGET.to_string()]);
+
+    // Ownership sync through the core (设计 S01/S06 core 面):
+    // Service-only, target shape gated, owner swapped + fully
+    // removed (no demotion).
+    let shape_rejected = core
+        .sync_ownership(OwnershipSync {
+            bot_id: "bot_core_live".into(),
+            owner_user_id: "  ".into(),
+            mutation: service_mutation("core-ownsync-shape"),
+        })
+        .await
+        .expect_err("blank target is a shape rejection");
+    assert!(shape_rejected.to_string().contains("invalid_request"), "{shape_rejected}");
+    let actor_denied = core
+        .sync_ownership(OwnershipSync {
+            bot_id: "bot_core_live".into(),
+            owner_user_id: STRANGER.into(),
+            mutation: mutation("core-ownsync-human"),
+        })
+        .await
+        .expect_err("Human mutation is denied at the core");
+    assert!(actor_denied.to_string().contains("bot_authority_operator_forbidden"), "{actor_denied}");
+    let swapped = core
+        .sync_ownership(OwnershipSync {
+            bot_id: "bot_core_live".into(),
+            owner_user_id: NEW_MANAGER.into(),
+            mutation: service_mutation("core-ownsync"),
+        })
+        .await
+        .expect("core ownership sync");
+    assert!(swapped.changed);
+    assert_eq!(
+        core.ownership("bot_core_live").await.expect("ownership").owner_user_id,
+        NEW_MANAGER
+    );
+    assert_eq!(
+        core.role(OWNER, "bot_core_live").await.expect("old owner role"),
+        None,
+        "the old owner is NOT demoted to manager by sync"
+    );
+    // Restore OWNER as owner for the transfer round trip that
+    // follows (sync again).
+    core.sync_ownership(OwnershipSync {
+        bot_id: "bot_core_live".into(),
+        owner_user_id: OWNER.into(),
+        mutation: service_mutation("core-ownsync-restore"),
+    })
+    .await
+    .expect("restore owner");
 
     // Transfer round trip through the core (Task-3 path):
     // request → read → accept moves the owner atomically;

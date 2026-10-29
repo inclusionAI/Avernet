@@ -15,8 +15,8 @@ use bcs_service_api::port::bot_authority::BotAuthorityPort;
 use bcs_service_api::types::bot_authority::{
     BotAccessRelation, BotOwnershipView, BotRoleQuery,
     ManagerEdit, ManagerListQuery, ManagerPage, ManagerSetChange,
-    ManagerSync, TransferCommand, TransferKey, TransferListQuery,
-    TransferPage, TransferOutcome,
+    ManagerSync, OwnershipChange, OwnershipSync, TransferCommand, TransferKey,
+    TransferListQuery, TransferOutcome, TransferPage,
 };
 
 /// A failing `BotAuthorityService` stub.
@@ -103,6 +103,16 @@ impl BotAuthorityService for NoopBotAuthorityService {
         _caller: &AuthenticatedCaller,
         _command: ManagerSync,
     ) -> Result<ManagerSetChange, ApplicationError> {
+        Err(ApplicationError::internal(
+            "bot authority service is not configured",
+        ))
+    }
+
+    async fn sync_ownership(
+        &self,
+        _caller: &AuthenticatedCaller,
+        _command: OwnershipSync,
+    ) -> Result<OwnershipChange, ApplicationError> {
         Err(ApplicationError::internal(
             "bot authority service is not configured",
         ))
@@ -291,6 +301,7 @@ pub async fn authority_service_fixture(
             "ownership:read".to_string(),
             "ownership:accept".to_string(),
             "ownership:reject".to_string(),
+            "ownership:sync".to_string(),
         ],
     )
     .expect("valid fixture scope rule");

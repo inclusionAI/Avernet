@@ -5,10 +5,11 @@
 - The SQL authority implementation (`DbBotAuthorityStore`) for the bot
   authority management edges (bot-authority spec §5/§6/§7): owner/manager
   edge reads and the registration/lifecycle composition steps, manager
-  single-item edits and trusted full-set sync, ownership transfer
+  single-item edits and trusted full-set sync, trusted ownership sync
+  (owner replace, previous owner fully removed), ownership transfer
   lifecycle (request/refresh/accept/reject/cancel with one pending row
   per `(env, bot_id, target_owner_actor_id)`), the paged reads behind
-  the eleven `/api/v1/collaboration/` authority routes, and the
+  the twelve `/api/v1/collaboration/` authority routes, and the
   `bot_authority_changes` permission-scope audit ledger.
 - One transaction per authority change, serialized on the Bot row:
   bot lock → owner guard → count guards → Human-existence guards →

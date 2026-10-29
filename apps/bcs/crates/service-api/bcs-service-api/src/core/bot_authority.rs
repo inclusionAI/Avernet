@@ -11,8 +11,9 @@ use async_trait::async_trait;
 use crate::ServiceResult;
 use crate::types::bot_authority::{
     BotAccessRelation, BotOwnershipView, BotRoleQuery, ManagerEdit, ManagerListQuery,
-    ManagerPage, ManagerSetChange, ManagerSync, TransferCommand, TransferKey, TransferListQuery,
-    TransferOutcome, TransferPage, TransferView,
+    ManagerPage, ManagerSetChange, ManagerSync, OwnershipChange, OwnershipSync,
+    TransferCommand, TransferKey, TransferListQuery, TransferOutcome, TransferPage,
+    TransferView,
 };
 
 /// Strict bot-authority reads and permission commands.
@@ -82,6 +83,11 @@ pub trait BotAuthorityCoreService: Send + Sync {
 
     /// Trusted full-set sync (spec §5.2). Task-2 write path.
     async fn sync_managers(&self, command: ManagerSync) -> ServiceResult<ManagerSetChange>;
+
+    /// Trusted ownership sync (2026-10-29 design §3): Service-actor
+    /// only; the Core maps the target user id to the actor id and
+    /// validates the target shape before forwarding.
+    async fn sync_ownership(&self, command: OwnershipSync) -> ServiceResult<OwnershipChange>;
 
     /// Transfer lifecycle command (request/refresh/accept/reject/
     /// cancel, spec §6). Task-3 write path.

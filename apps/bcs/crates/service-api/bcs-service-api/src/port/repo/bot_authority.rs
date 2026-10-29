@@ -35,8 +35,8 @@ use async_trait::async_trait;
 use crate::ServiceResult;
 use crate::types::bot_authority::{
     BotAccessRelation, BotOwnershipView, BotRoleQuery, ManagerEdit, ManagerListQuery, ManagerPage,
-    ManagerSetChange, ManagerSync, TransferCommand, TransferKey, TransferListQuery,
-    TransferOutcome, TransferPage, TransferView,
+    ManagerSetChange, ManagerSync, OwnershipChange, OwnershipSync, TransferCommand, TransferKey,
+    TransferListQuery, TransferOutcome, TransferPage, TransferView,
 };
 
 #[async_trait]
@@ -72,6 +72,9 @@ pub trait BotAuthorityRepoPort: Send + Sync {
 
     /// Trusted full-set manager sync (Task 2).
     async fn sync_managers(&self, command: ManagerSync) -> ServiceResult<ManagerSetChange>;
+
+    /// Trusted owner replace (ownership sync; Task 2026-10-29).
+    async fn sync_ownership(&self, command: OwnershipSync) -> ServiceResult<OwnershipChange>;
 
     /// Transfer lifecycle command (Task 3).
     async fn change_transfer(&self, command: TransferCommand) -> ServiceResult<TransferOutcome>;

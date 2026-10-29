@@ -45,8 +45,8 @@ use bcs_service_api::types::bot_authority::{
     check_page_bounds, human_actor_id, AuthorityActor, AuthorityMutation,
     BotAccessRelation, BotOwnershipView, BotRoleQuery, ManagerEdit,
     ManagerListQuery, ManagerPage, ManagerSetChange, ManagerSync,
-    TransferAction, TransferCommand, TransferKey, TransferListQuery,
-    TransferOutcome, TransferPage, TransferView,
+    OwnershipChange, OwnershipSync, TransferAction, TransferCommand,
+    TransferKey, TransferListQuery, TransferOutcome, TransferPage, TransferView,
 };
 
 use crate::authority_policy::{AuthorityAction, AuthorityServicePolicy};
@@ -341,6 +341,29 @@ impl BotAuthorityService for BotAuthorityServiceImpl {
                 .authorize(caller, AuthorityAction::ManagersSync, &command.bot_id)?;
         self.core
             .sync_managers(ManagerSync {
+                mutation: Self::mutation_of(&actor),
+                ..command
+            })
+            .await
+            .map_err(map_core_error)
+    }
+
+    async fn sync_ownership(
+        &self,
+        caller: &AuthenticatedCaller,
+        command: OwnershipSync,
+    ) -> Result<OwnershipChange, ApplicationError> {
+        // Ownership sync is trusted-App only (design §2): a
+        // Human-only credential is rejected, and a dual Human+App
+        // credential is processed as the App identity — never a
+        // Human fallback or bypass.
+        let actor = self.policy.authorize(
+            caller,
+            AuthorityAction::OwnershipSync,
+            &command.bot_id,
+        )?;
+        self.core
+            .sync_ownership(OwnershipSync {
                 mutation: Self::mutation_of(&actor),
                 ..command
             })

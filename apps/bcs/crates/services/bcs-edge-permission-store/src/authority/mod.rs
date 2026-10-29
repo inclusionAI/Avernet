@@ -30,6 +30,7 @@ mod audit;
 /// single transaction (one-way dependency, per plan §2).
 pub mod lifecycle;
 mod managers;
+mod ownership_sync;
 mod reads;
 mod transfers;
 mod transfers_support;

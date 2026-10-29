@@ -36,8 +36,9 @@ use bcs_service_api::port::repo::BotAuthorityRepoPort;
 use bcs_service_api::types::bot_authority::{
     AuthorityActorKind, BotAccessRelation, BotOwnershipView, BotRoleQuery,
     ManagerEdit, ManagerListQuery, ManagerPage, ManagerSetChange, ManagerSync,
-    TransferCommand, TransferKey, TransferListQuery, TransferOutcome, TransferPage,
-    TransferView, human_actor_id,
+    OwnershipChange, OwnershipSync, TransferCommand, TransferKey,
+    TransferListQuery, TransferOutcome, TransferPage, TransferView,
+    human_actor_id,
 };
 
 pub struct BotAuthorityCoreServiceImpl {
@@ -218,6 +219,37 @@ impl BotAuthorityCoreService for BotAuthorityCoreServiceImpl {
             .await
     }
 
+    async fn sync_ownership(
+        &self,
+        command: OwnershipSync,
+    ) -> bcs_service_api::ServiceResult<OwnershipChange> {
+        // Policy (design §2): sync is the trusted service command.
+        if command.mutation.actor.kind() != AuthorityActorKind::Service {
+            return Err(operator_forbidden(
+                "ownership sync is trusted-service only; Human operators use the ownership transfer commands",
+            ));
+        }
+        // Shape gate (design §5.1 step 4a): an empty/whitespace
+        // target is a malformed REQUEST value (invalid_request),
+        // rejected before any identity resolution.
+        let user = command.owner_user_id.as_str();
+        if user.is_empty() || user.trim() != user || user.chars().any(char::is_whitespace) {
+            return Err(ServiceError::InvalidOperation {
+                message: format!(
+                    "invalid_request: ownership sync target '{user}' is not a valid user id"
+                ),
+                request_id: None,
+            });
+        }
+        // Store 收到的是 Human actor id (port contract).
+        self.repo
+            .sync_ownership(OwnershipSync {
+                owner_user_id: human_actor_id(user),
+                ..command
+            })
+            .await
+    }
+
     async fn change_transfer(
         &self,
         command: TransferCommand,
@@ -320,7 +352,8 @@ mod tests {
         port::repo::BotAuthorityRepoPort,
         types::bot_authority::{
             AuthorityActor, AuthorityMutation, ManagerEdit, ManagerEditAction,
-            ManagerSync, TransferAction, TransferCommand, TransferKey,
+            ManagerSync, OwnershipChange, OwnershipSync, TransferAction,
+            TransferCommand, TransferKey,
         },
     };
     use std::collections::HashMap;
@@ -332,6 +365,8 @@ mod tests {
         roles: HashMap<(String, String), Option<BotAccessRelation>>,
         actor_inputs: std::sync::Mutex<Vec<String>>,
         transfer_commands: std::sync::Mutex<Vec<TransferCommand>>,
+        sync_ownership_calls: std::sync::Mutex<Vec<OwnershipSync>>,
+        sync_ownership_result: std::sync::Mutex<Option<OwnershipChange>>,
     }
 
     fn canned_transfer_view() -> TransferView {
@@ -431,6 +466,24 @@ mod tests {
             })
         }
 
+        async fn sync_ownership(
+            &self,
+            command: OwnershipSync,
+        ) -> bcs_service_api::ServiceResult<OwnershipChange> {
+            self.sync_ownership_calls
+                .lock()
+                .expect("core test recorder")
+                .push(command);
+            let change = self
+                .sync_ownership_result
+                .lock()
+                .expect("core test recorder")
+                .clone();
+            change.ok_or_else(|| {
+                ServiceError::InternalError("no canned ownership change".to_string())
+            })
+        }
+
         async fn change_transfer(
             &self,
             command: TransferCommand,
@@ -462,6 +515,8 @@ mod tests {
                 .collect(),
             actor_inputs: std::sync::Mutex::new(Vec::new()),
             transfer_commands: std::sync::Mutex::new(Vec::new()),
+            sync_ownership_calls: std::sync::Mutex::new(Vec::new()),
+            sync_ownership_result: std::sync::Mutex::new(None),
         });
         (
             BotAuthorityCoreServiceImpl::new(repo.clone(), "core-env"),

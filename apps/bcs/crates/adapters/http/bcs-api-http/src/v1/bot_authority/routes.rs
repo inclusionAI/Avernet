@@ -1,5 +1,5 @@
 //! The unified `/api/v1/collaboration/` authority
-//! route set (spec §5.1/§6.1): exactly the eleven frozen
+//! route set (spec §5.1/§6.1): exactly the twelve frozen
 //! method/path combos, each served through the
 //! `BotAuthorityService` application facade.
 //!
@@ -25,9 +25,10 @@ use bcs_service_api::application::v1::error::ApplicationError;
 use bcs_service_api::application::v1::identity::AuthenticatedCaller;
 use bcs_service_api::application::v1::bot_authority::{
     AuthorityActor, AuthorityMutation, ManagerEdit, ManagerEditAction,
-    ManagerListQuery, ManagerSync, TransferAction, TransferChange,
-    TransferCommand, TransferDirection, TransferKey, TransferListQuery,
-    TransferOutcome, DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT,
+    ManagerListQuery, ManagerSync, OwnershipSync, TransferAction,
+    TransferChange, TransferCommand, TransferDirection, TransferKey,
+    TransferListQuery, TransferOutcome, DEFAULT_PAGE_LIMIT,
+    MAX_PAGE_LIMIT,
 };
 
 use crate::v1::common::ApiState;
@@ -38,7 +39,8 @@ use crate::v1::common::{
 
 use super::dto;
 use super::dto::{
-    BotOwnershipDto, ManagerPageDto, ManagerSetChangeDto, SyncManagersBody,
+    BotOwnershipDto, ManagerPageDto, ManagerSetChangeDto,
+    OwnershipChangeDto, SyncManagersBody, SyncOwnershipBody,
     TransferPageDto, TransferViewDto,
 };
 
@@ -57,8 +59,12 @@ pub fn router() -> Router<ApiState> {
             "/bots/{bot_id}/managers/{user_id}",
             put(add_bot_manager).delete(remove_bot_manager),
         )
-        // Ownership surface (spec §6).
-        .route("/bots/{bot_id}/ownership", get(get_bot_ownership))
+        // Ownership surface (spec §6; the trusted sync is the
+        // 2026-10-29 ownership-sync design).
+        .route(
+            "/bots/{bot_id}/ownership",
+            get(get_bot_ownership).put(sync_bot_ownership),
+        )
         .route(
             "/bots/{bot_id}/ownership-transfers/{target_owner_actor_id}",
             put(request_ownership_transfer).get(get_ownership_transfer),
@@ -268,6 +274,42 @@ async fn get_bot_ownership(
         .await
         .map_err(|error| application_error_response(&request_id, error))?;
     let body = BotOwnershipDto::from(view);
+    Ok((
+        StatusCode::OK,
+        Json(Envelope::success(20_000, "OK", body, request_id.0)),
+    )
+        .into_response())
+}
+
+/// `PUT /bots/{bot_id}/ownership` — the trusted owner replace
+/// (设计 §3). Trusted-App rule (`ownership:sync`); the
+/// application rejects a Human identity with no App fallback.
+/// Missing bots are tolerated no-ops (200), never 404.
+async fn sync_bot_ownership(
+    State(state): State<ApiState>,
+    Extension(caller): Extension<AuthenticatedCaller>,
+    Extension(request_id): Extension<RequestId>,
+    Path(bot_id): Path<String>,
+    body: Result<Json<SyncOwnershipBody>, axum::extract::rejection::JsonRejection>,
+) -> Result<Response, ErrorResponse> {
+    let Json(body) = body
+        .map_err(|error| invalid_request(&request_id, error.body_text()))?;
+    let service = authority_service(&state, &request_id)?;
+    let change = service
+        .sync_ownership(
+            &caller,
+            OwnershipSync {
+                bot_id,
+                owner_user_id: body.owner_user_id,
+                // The application builds the real mutation from
+                // the verified identity; the adapter never
+                // constructs one.
+                mutation: placeholder_mutation(),
+            },
+        )
+        .await
+        .map_err(|error| application_error_response(&request_id, error))?;
+    let body = OwnershipChangeDto::from(change);
     Ok((
         StatusCode::OK,
         Json(Envelope::success(20_000, "OK", body, request_id.0)),

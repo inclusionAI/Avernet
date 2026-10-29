@@ -46,6 +46,7 @@ EXPECTED_OPERATIONS = {
     ("put", "/api/v1/collaboration/bots/{bot_id}/managers/{user_id}"),
     ("delete", "/api/v1/collaboration/bots/{bot_id}/managers/{user_id}"),
     ("get", "/api/v1/collaboration/bots/{bot_id}/ownership"),
+    ("put", "/api/v1/collaboration/bots/{bot_id}/ownership"),
     (
         "put",
         "/api/v1/collaboration/bots/{bot_id}/ownership-transfers/{target_owner_actor_id}",
@@ -119,11 +120,15 @@ def test_bot_authority_operations_carry_frozen_contract_ids() -> None:
         "sync_bot_managers"
         in operation_ids["/api/v1/collaboration/bots/{bot_id}/managers"]
     )
+    assert (
+        "sync_bot_ownership"
+        in operation_ids["/api/v1/collaboration/bots/{bot_id}/ownership"]
+    )
 
     # One unified path group only (no second Human/App URL
-    # group) and exactly 11 frozen verb/path combos.
+    # group) and exactly 12 frozen verb/path combos.
     assert len(operation_ids) == 8
-    assert sum(1 for m, p in EXPECTED_OPERATIONS if p in AUTHORITY_PATHS) == 11
+    assert sum(1 for m, p in EXPECTED_OPERATIONS if p in AUTHORITY_PATHS) == 12
     # Unique ids across the surface.
     assert len(flat_ids) == sum(len(ids) for ids in operation_ids.values())
 

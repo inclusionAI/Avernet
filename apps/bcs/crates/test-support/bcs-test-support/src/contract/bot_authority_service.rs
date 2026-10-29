@@ -2,7 +2,7 @@
 //! conformance harness (bot-authority spec §3.1/§5/§6).
 //!
 //! The facade is the ONLY route-facing surface for the
-//! eleven `/api/v1/collaboration/` authority routes. This
+//! twelve `/api/v1/collaboration/` authority routes. This
 //! harness runs the REAL composed fixture
 //! (`crate::bot_authority::authority_service_fixture`:
 //! real Core + real scope policy + invite gate stub) and
@@ -18,7 +18,7 @@
 use crate::bot_authority::AUTHORITY_FIXTURE_APP_NAME;
 use bcs_service_api::application::v1::bot_authority::{
     ManagerEdit, ManagerEditAction, ManagerListQuery,
-    ManagerSync, TransferAction, TransferCommand, TransferKey,
+    ManagerSync, OwnershipSync, TransferAction, TransferCommand, TransferKey,
 };
 use bcs_service_api::application::v1::identity::{
     AuthenticatedAppIdentity, AuthenticatedCaller,
@@ -56,6 +56,24 @@ fn app(app_id: i64) -> AuthenticatedCaller {
         app: Some(AuthenticatedAppIdentity {
             app_id,
             app_name: AUTHORITY_FIXTURE_APP_NAME.into(),
+            owners: "owner".into(),
+            app_type: "THIRD_PARTY".into(),
+        }),
+        access_key: None,
+    }
+}
+
+/// The untrusted-App denial caller (设计 §9.1): same tenant,
+/// but an app NAME the fixture rule never covers — the scope
+/// policy matches the verified app name, never the numeric id.
+fn untrusted_app() -> AuthenticatedCaller {
+    AuthenticatedCaller {
+        tenant: Some("tenant-a".into()),
+        user: None,
+        bot: None,
+        app: Some(AuthenticatedAppIdentity {
+            app_id: DENIED_APP_ID,
+            app_name: "Untrusted App".into(),
             owners: "owner".into(),
             app_type: "THIRD_PARTY".into(),
         }),
@@ -169,6 +187,76 @@ pub async fn bot_authority_service_contract_tests() {
         .await
         .expect("page after app sync");
     assert_eq!(page.items, vec![STRANGER.to_string()]);
+
+    // ── ownership sync (设计 §9.1 facade 面) ──
+    seed_bot(&fixture.bot_repo, "bot_ownsvc", OWNER, &[]).await;
+    seed_humans(&fixture.bot_repo, &["svc_next"]).await;
+
+    // An App whose NAME the trusted rule never covers is denied.
+    let error = fixture
+        .service
+        .sync_ownership(&untrusted_app(), OwnershipSync {
+            bot_id: "bot_ownsvc".into(),
+            owner_user_id: "svc_next".into(),
+            mutation: unused_mutation(),
+        })
+        .await
+        .expect_err("untrusted app denied");
+    assert!(error.to_string().contains("bot_authority_operator_forbidden"), "{error}");
+
+    // A PLAIN Human can never sync ownership.
+    let error = fixture
+        .service
+        .sync_ownership(&human(OWNER), OwnershipSync {
+            bot_id: "bot_ownsvc".into(),
+            owner_user_id: "svc_next".into(),
+            mutation: unused_mutation(),
+        })
+        .await
+        .expect_err("human-only denied");
+    assert!(error.to_string().contains("bot_authority_operator_forbidden"), "{error}");
+
+    // The scoped App swaps atomically: old owner fully removed,
+    // target owns the bot, manager set stripped bare (target was
+    // not seeded as manager here — the strip is a no-op proof
+    // covered by the store harness).
+    let change = fixture
+        .service
+        .sync_ownership(&app(TRUSTED_APP_ID), OwnershipSync {
+            bot_id: "bot_ownsvc".into(),
+            owner_user_id: "svc_next".into(),
+            mutation: unused_mutation(),
+        })
+        .await
+        .expect("trusted app syncs owner");
+    assert!(change.changed);
+    assert_eq!(change.owner_user_id.as_deref(), Some("svc_next"));
+    assert_eq!(change.previous_owner_user_id.as_deref(), Some(OWNER));
+    // The new owner reads the ownership view (Human rule); the
+    // old owner is denied every Human rule now.
+    let view = fixture
+        .service
+        .ownership(&human("svc_next"), "bot_ownsvc")
+        .await
+        .expect("new owner reads ownership");
+    assert_eq!(view.owner_user_id, "svc_next");
+    assert!(fixture
+        .service
+        .ownership(&human(OWNER), "bot_ownsvc")
+        .await
+        .is_err());
+
+    // Idempotent replay through the facade: zero diff.
+    let replay = fixture
+        .service
+        .sync_ownership(&app(TRUSTED_APP_ID), OwnershipSync {
+            bot_id: "bot_ownsvc".into(),
+            owner_user_id: "svc_next".into(),
+            mutation: unused_mutation(),
+        })
+        .await
+        .expect("replay");
+    assert!(!replay.changed);
 
     // An App OUTSIDE the trusted rule is denied even on the
     // covered bot.

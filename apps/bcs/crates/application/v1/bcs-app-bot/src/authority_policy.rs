@@ -35,7 +35,7 @@ use bcs_service_api::types::bot_authority::AuthorityActor;
 /// without a tenant (spec §3.1).
 pub const ABSENT_TENANT_TEXT: &str = "absent";
 
-/// One grantable trusted-App action. Only the four frozen
+/// One grantable trusted-App action. Only the five frozen
 /// spellings parse; everything else is a configuration
 /// error (spec §3.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -48,14 +48,17 @@ pub enum AuthorityAction {
     OwnershipAccept,
     /// `ownership:reject` — transfer rejection.
     OwnershipReject,
+    /// `ownership:sync` — trusted owner replace.
+    OwnershipSync,
 }
 
 impl AuthorityAction {
-    pub const ALL: [AuthorityAction; 4] = [
+    pub const ALL: [AuthorityAction; 5] = [
         AuthorityAction::ManagersSync,
         AuthorityAction::OwnershipRead,
         AuthorityAction::OwnershipAccept,
         AuthorityAction::OwnershipReject,
+        AuthorityAction::OwnershipSync,
     ];
 
     /// The frozen configuration spelling (case-exact).
@@ -65,6 +68,7 @@ impl AuthorityAction {
             AuthorityAction::OwnershipRead => "ownership:read",
             AuthorityAction::OwnershipAccept => "ownership:accept",
             AuthorityAction::OwnershipReject => "ownership:reject",
+            AuthorityAction::OwnershipSync => "ownership:sync",
         }
     }
 
