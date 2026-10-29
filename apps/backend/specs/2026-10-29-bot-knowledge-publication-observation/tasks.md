@@ -62,18 +62,19 @@
 - **Verification:** 新增观察调用边界/只读/无原生写入 guard + 现有模块/API 架构测试 15 passed；文档明确历史、重建、等待和运行文件限制。
 - **Acceptance mapping:** AC-04, AC-06, AC-08, AC-09, AC-10.
 
-## Task 5: Tests & Verification
+## Task 5 [x]: Tests & Verification
 - **Goal:** 检查全部 acceptance criteria，并形成可用于后续独立新 PR 的真实验证记录。
 - **Files:** 上述测试、SDD checklist；不以修改 unrelated CI/Singlebox 阈值消除失败。
 - **Done when:**
-  - [ ] 运行 plan 列出的定向 unit/HTTP/DI/e2e/architecture 测试，保留真实结果；未跑的不勾选。
-  - [ ] 检查辅助存储按完整唯一键读写、启用集合最多 101 行，无历史/累计禁用绑定扫描；对 1/1000/10000 额外禁用绑定验证查询形态不放大。
-  - [ ] 运行 Backend SAST、完整 Backend CI 与 changed-line gate；如失败，区分新增失败与干净基线失败。
-  - [ ] 检查每个新增/修改源文件不超过 1000 行，运行 diff whitespace 和静态检查，核对正常启动及路由唯一性。
-  - [ ] 独立检查源码/契约与 AC 映射；不从“单测通过”推断真实设备、数据库或部署通过。
-  - [ ] 保持 Singlebox pending/阈值原样，按交付门禁运行或披露未运行；不伪造 AGENTS.md 设备验收。
-  - [ ] 更新 spec/tasks 中实际完成项并汇总 DB 等待与真实环境未验证边界。提交/推送/新 PR 按后续明确授权处理，不合并、不部署。
+  - [x] 运行 plan 列出的定向 unit/HTTP/DI/e2e/architecture 测试，保留真实结果；未跑的不勾选。
+  - [x] 检查辅助存储按完整唯一键读写、启用集合最多 101 行，无历史/累计禁用绑定扫描；对 1/1000/10000 额外禁用绑定验证查询形态不放大。
+  - [x] 运行 Backend SAST、完整 Backend CI 与 changed-line gate；如失败，区分新增失败与干净基线失败。
+  - [x] 检查每个新增/修改源文件不超过 1000 行，运行 diff whitespace 和静态检查，核对正常启动及路由唯一性。
+  - [x] 独立检查源码/契约与 AC 映射；不从“单测通过”推断真实设备、数据库或部署通过。
+  - [x] 保持 Singlebox pending/阈值原样，按交付门禁运行或披露未运行；不伪造 AGENTS.md 设备验收。
+  - [x] 更新 spec/tasks 中实际完成项并汇总 DB 等待与真实环境未验证边界。提交/推送/新 PR 按后续明确授权处理，不合并、不部署。
 - **Depends on:** Tasks 1, 2, 3, 4.
+- **Verification:** 完整 Backend CI 27650 passed / 40 skipped / 2 subtests；line 90.65%、changed 99.19%，门禁通过；实际证据与未验收范围见 verification.md。三路分组评审及修复后的增量复审已收敛，无新的确认缺陷。
 - **Acceptance mapping:** AC-01 through AC-10.
 
 ---
