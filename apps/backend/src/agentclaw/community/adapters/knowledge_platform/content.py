@@ -109,6 +109,13 @@ class RemoteKnowledgeContentService(KnowledgeContentServiceProtocol):
             BASE + f"/sources/{segment(source_id)}/raw", headers=access.credentials
         )
 
+    async def yuque_connection(self, *, kb_id: str, access: ContentAccess):
+        return await self.client.call(
+            "GET",
+            BASE + "/data-source/connectors/yuque/connection",
+            headers=access.credentials,
+        )
+
     async def yuque_documents(
         self, *, kb_id: str, access: ContentAccess, query: str, offset: int, limit: int
     ):
