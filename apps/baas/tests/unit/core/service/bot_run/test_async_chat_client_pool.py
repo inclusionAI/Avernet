@@ -1050,7 +1050,6 @@ class TestOutboundAuthRefresh:
                 "is_reconnecting",
                 "has_active_sessions",
                 "active_session_count",
-                "refresh_outbound_auth_placeholder",
             ]
         )
         v3_like.is_connected = True
