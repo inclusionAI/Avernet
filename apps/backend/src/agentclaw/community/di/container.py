@@ -91,6 +91,10 @@ from agentclaw.community.di.modules.mcp_runtime_credentials_config_module import
 from agentclaw.community.di.modules.openapi_user_id_bypass_config_module import (
     OpenApiUserIdBypassConfigModule,
 )
+from agentclaw.community.di.modules.bot_manager_sync_module import (
+    BotManagerSyncModule,
+)
+from agentclaw.community.di.bot_manager_sync_config import ManagerSyncConfig
 from agentclaw.community.di.modules.owner_handoff_module import OwnerHandoffModule
 from agentclaw.community.di.modules.quality_module import QualityModule
 from agentclaw.community.di.modules.resources_module import ResourcesModule
@@ -245,6 +249,10 @@ def build_injector(
         BotFriendAuthModule(),
         HarnessModule(),
         BotCollaboratorModule(),
+        # Backend→BCS manager sync (default off): a strict config parse,
+        # a stack of (un)available plugins, the bounded dispatcher and
+        # its loop-owning lifecycle. Disabled binds zero resources.
+        BotManagerSyncModule(),
         BotAppGrantModule(),
         BotChatOpenModule(),
         CallerIdentityModule(),
@@ -309,6 +317,11 @@ def build_injector(
     # read a raising provider as "no bypass"). Resolving it here makes the
     # refusal a failed boot on every profile, pre/prod included.
     _app_injector.get(OpenApiUserIdBypassConfig)
+    # Manager-sync config: the strict parser refuses an unknown key, a
+    # mistyped value, or an enabled block with missing fields — and that
+    # refusal must be a failed boot on every profile (a disabled block is
+    # the default and resolves cleanly, so this costs one dict read).
+    _app_injector.get(ManagerSyncConfig)
 
     return _app_injector
 

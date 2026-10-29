@@ -14,6 +14,9 @@ from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.core.models.space_skill import SkillGrant, SkillSpaceBinding
+from agentclaw.community.core.bot_collaborator.manager_sync.dispatcher import (
+    DisabledBotManagerSync,
+)
 from agentclaw.community.core.skill_center.errors import SpaceSkillGrantForbiddenError
 from agentclaw.community.core.repository.implementations.skill_center.skill_editor_request import (
     SkillEditorRequestRepository,
@@ -404,6 +407,7 @@ def test_skill_application_auto_path_grants_and_notifies_without_owner_todo(db) 
         staff,
         MagicMock(),
         callbacks,
+        DisabledBotManagerSync(),
     )
     service = SpaceSkillEditorRequestService(
         work_orders, skill_repository, work_order_service, staff, lambda: "dev"
@@ -473,6 +477,7 @@ def test_concurrent_auto_applications_create_only_one_approved_order(
         staff,
         MagicMock(),
         callbacks,
+        DisabledBotManagerSync(),
     )
     service = SpaceSkillEditorRequestService(
         work_orders, skill_repository, work_order_service, staff, lambda: "dev"

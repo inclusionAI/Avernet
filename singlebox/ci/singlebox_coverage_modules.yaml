@@ -207,7 +207,23 @@ modules:
     router_api: *pending_router_denominator
     plugin_api: *pending_plugin_denominator
     thresholds:
+      # Existing non-regression threshold is unchanged by sync simplification.
       core_min_percent: 53.88
+
+  manager_sync:
+    system: backend
+    acceptance_targets:
+      - tests/community/acceptance/bot_collaborator
+    core_paths:
+      - src/agentclaw/community/core/bot_collaborator/manager_sync/
+    router_api: *pending_router_denominator
+    plugin_api: *pending_plugin_denominator
+    thresholds:
+      # Preserve the existing manager-sync gate. Singlebox uses direct BCS
+      # delivery with the same best-effort implementation as production;
+      # no Redis or alternate coordination mode is required. A passing
+      # coverage result alone does not prove the BCS roster is correct.
+      core_min_percent: 54.03
 
   cron:
     system: backend

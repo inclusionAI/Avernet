@@ -15,6 +15,9 @@ from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.core.config.sofa import sofa_config
 from agentclaw.community.adapters.http.spaces_management.router import router
+from agentclaw.community.core.bot_collaborator.manager_sync.dispatcher import (
+    DisabledBotManagerSync,
+)
 from agentclaw.community.api.space_management_service import (
     SpaceManagementServiceProtocol,
 )
@@ -56,6 +59,7 @@ def harness(monkeypatch):
         sc,
         staff,
         get_current_env,
+        DisabledBotManagerSync(),
     )
     app = FastAPI()
     app.include_router(router)

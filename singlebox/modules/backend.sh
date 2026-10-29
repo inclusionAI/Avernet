@@ -93,6 +93,12 @@ backend_start() {
     fi
 
     if [ "${SERVER_ENV:-dev}" = "local" ] || [ "${DEPLOY_PROFILE:-}" = "singlebox" ]; then
+        # The shared gateway-principal signing key — the same dev literal the
+        # gateway signs with (gateway.sh) and BCS verifies with (bcs.sh), and
+        # the key the Backend both verifies /openapi/v1 principals with and
+        # signs its own direct-BCS manager-sync service principals with. A
+        # clearly-marked synthetic stand-in: never a real secret, and an
+        # .env.local value overrides all ends together.
         export AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE="${AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}"
     fi
 

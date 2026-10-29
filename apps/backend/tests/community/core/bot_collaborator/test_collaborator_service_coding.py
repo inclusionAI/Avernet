@@ -15,6 +15,9 @@ from agentclaw.community.core.bot_collaborator.services.collaborator_service imp
     BotNotServiceTypeError,
     BotNotFoundError,
 )
+from agentclaw.community.core.bot_collaborator.manager_sync.dispatcher import (
+    DisabledBotManagerSync,
+)
 from agentclaw.community.core.bot_collaborator.models import (
     CollaboratorRecord,
     CollaboratorRole,
@@ -60,6 +63,7 @@ def service(collaborator_repo, bot_repo, template_service):
         passport_plugin=Mock(),
         credentials_admins_writer=Mock(),
         space_access_service=Mock(),
+        manager_sync=DisabledBotManagerSync(),
         member_management_capability_service=MemberManagementCapabilityService(
             engine_capabilities=(AICodingMemberManagementCapability(template_service),),
         ),
@@ -215,6 +219,7 @@ def _service_for_sync(passport):
         passport_plugin=passport,
         credentials_admins_writer=Mock(),
         space_access_service=Mock(),
+        manager_sync=DisabledBotManagerSync(),
     )
 
 
@@ -294,6 +299,7 @@ def test_on_collaboration_changed_delegates_admins_to_credentials_writer():
         passport_plugin=Mock(),
         credentials_admins_writer=writer,
         space_access_service=Mock(),
+        manager_sync=DisabledBotManagerSync(),
     )
 
     svc.on_collaboration_changed("bot1", "owner1", env="dev")

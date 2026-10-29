@@ -17,7 +17,7 @@ from injector import Module
 from agentclaw.community.di.profile import DeployProfile
 
 
-def _common_test_doubles() -> list[Module]:
+def _common_test_doubles(*, manager_sync_fake: bool) -> list[Module]:
     """The corp-free doubles shared by the ``test``/``singlebox`` and ``corp_test``
     columns — every LOCAL-stub concern that does **not** touch ``agentclaw.corp``.
 
@@ -55,6 +55,9 @@ def _common_test_doubles() -> list[Module]:
     from agentclaw.community.di.modules.infrastructure.test.bot_publish_approval import (
         TestBotPublishApprovalModule,
     )
+    from agentclaw.community.di.modules.infrastructure.test.bot_manager_sync import (
+        TestBotManagerSyncModule,
+    )
     from agentclaw.community.di.modules.infrastructure.test.eval_env import (
         TestEvalEnvModule,
     )
@@ -81,6 +84,8 @@ def _common_test_doubles() -> list[Module]:
         TestApprovalWorkflowModule(),
         TestStaffDeptModule(),
         TestBotPublishApprovalModule(),
+        # Singlebox uses the same real delivery stack as community.
+        *([TestBotManagerSyncModule()] if manager_sync_fake else []),
         # WorkspaceHostingService stub (offline DIMA) — corp-free.
         TestingAicodingModule(),
         # SQLite + per-module repos (TestingDatabaseModule owns the SQLite engine;
@@ -175,7 +180,7 @@ def modules_for(profile: DeployProfile) -> list[Module]:
             CommunityOutboundRulesModule,
         )
 
-        column = _common_test_doubles() + [
+        column = _common_test_doubles(manager_sync_fake=profile is DeployProfile.TEST) + [
             # Token vault — empty-key (encrypt = passthrough); no SecretResolver dep.
             TestTokenVaultModule(),
             # The reuse column's concerns, now community:
@@ -258,7 +263,7 @@ def modules_for(profile: DeployProfile) -> list[Module]:
             TestingDevicesModule,
         )
 
-        column: list[Module] = _common_test_doubles() + [
+        column: list[Module] = _common_test_doubles(manager_sync_fake=True) + [
             # Corp-flavored device doubles (MagicMock ARCA factory + config_corp).
             TestingDevicesModule(),
             # Prod outbound-rule builder / device-sync dispatcher (corp), reused

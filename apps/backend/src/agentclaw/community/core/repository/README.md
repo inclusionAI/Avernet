@@ -156,6 +156,7 @@ provides:
   - BotAppGrantRepositoryProtocol
   - UserAppGrantRepositoryProtocol
   - BotCollabLockRepositoryProtocol
+  - ManagerSyncReadRepository
   - SourceCredentialRepositoryProtocol
   - BotCollabLogRepositoryProtocol
   - BotConfigManifestRepositoryProtocol
@@ -293,6 +294,7 @@ provides:
   - BotCliToolRepository
   - BotStartupScriptRepository
   - CollaboratorRepository
+  - SqlManagerSyncReadRepository
   # task / forum
   - ForumRepository
   - ForumInteractionRepository
@@ -366,6 +368,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.space_membership
   - agentclaw.community.core.bot_management.owner_handoff
   - agentclaw.community.kernel.build_ignore
+  - agentclaw.community.kernel.bot_manager_sync   # SyncKey / SyncFacts / SpaceChange typed in ManagerSyncReadRepositoryProtocol
   - agentclaw.community.core.digital_employee.contracts
   - agentclaw.community.plugin_api.database    # DatabasePlugin — the injected session seam
   - agentclaw.community.plugin_api.models
@@ -425,3 +428,7 @@ rewrites are driven from.
 Changing the Space persistence constructor affects direct library callers and
 corporate composition roots: pass an explicit policy, never an optional fallback.
 See `core/space_knowledge/README.md` for capture/delivery rollout and rollback.
+
+`ManagerSyncReadRepositoryProtocol` is read-only: the bot collaborator manager
+sync projector sources its facts and key pages from it, and the sync path
+persists nothing — no queue table, no retry log, and no task record.

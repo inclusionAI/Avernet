@@ -144,6 +144,7 @@ internal_dependencies:
   - agentclaw.community.core.service_bot.file_count_service_protocol
   - agentclaw.community.kernel.build_ignore
   - agentclaw.community.kernel.publish_ignore
+  - agentclaw.community.kernel.bot_manager_sync  # submit-only DTOs (SyncReason / SubmissionResult / SpaceChange) — typed in bot_manager_sync.py
   - agentclaw.community.core.digital_employee.contracts
   - agentclaw.community.core.devices.repository.record  # DeviceBindingRecord input for provider-aware token target resolution
   - agentclaw.community.core.bot_collaborator.models # Collaborator records, roles and permission levels — typed in collaborator_service.py

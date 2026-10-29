@@ -307,6 +307,8 @@ run_acceptance_smoke() {
     RUN_ACCEPTANCE=1 \
       SINGLEBOX_ACCEPTANCE_REUSE_LIVE=1 \
       SINGLEBOX_ACCEPTANCE_KEEP_ARTIFACTS=1 \
+      SINGLEBOX_ACCEPTANCE_BCS_ADMIN_BIN="$bcs_coverage_dir/llvm-cov-target/debug/bcs-admin" \
+      SINGLEBOX_ACCEPTANCE_BCS_CONFIG_DIR="$coverage_standalone_runtime/bcs-config" \
       uv run pytest "${acceptance_targets[@]}" -q --junitxml "$junit_report"
   ) > "$acceptance_log" 2>&1 || rc=$?
   cat "$acceptance_log"

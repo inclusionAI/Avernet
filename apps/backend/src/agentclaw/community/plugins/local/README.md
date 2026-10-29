@@ -70,6 +70,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.auth
   - agentclaw.community.plugin_api.auth_relationship
   - agentclaw.community.plugin_api.base
+  - agentclaw.community.plugin_api.bcs_managers
   - agentclaw.community.plugin_api.bot_publish_approval
   - agentclaw.community.plugin_api.cache
   - agentclaw.community.plugin_api.database

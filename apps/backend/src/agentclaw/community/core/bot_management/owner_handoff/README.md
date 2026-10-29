@@ -17,7 +17,9 @@ consumes:
   - RuntimePassportTokenUpdaterProtocol
   - BotRepository
   - TaskQueueService
+  - BotManagerSyncProtocol
 internal_dependencies:
+  - agentclaw.community.api.bot_manager_sync
   - agentclaw.community.core.base
   - agentclaw.community.core.bot_management.owner_handoff
   - agentclaw.community.core.execution_identity.protocols
@@ -25,6 +27,7 @@ internal_dependencies:
   - agentclaw.community.core.task_queue
   - agentclaw.community.plugin_api
   - agentclaw.community.log
+  - agentclaw.community.kernel.bot_manager_sync
   - agentclaw.community.kernel.lifecycle
   - agentclaw.community.utils
 ```

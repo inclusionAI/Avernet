@@ -114,6 +114,15 @@ PROFILE_PAIRS: dict[str, tuple[str, str | None]] = {
 _HOME = os.path.expanduser("~")
 _CWD_PREFIX = os.path.abspath(os.curdir).rstrip(os.sep) + os.sep
 
+# Shipped code/yaml defaults contain literal paths under the repo's build-host
+# user home (``/home/admin``, e.g. di/config.py workspace roots,
+# application-singlebox.yaml nas/git dirs, cli-capabilities.yaml,
+# local-mcp-servers.yaml). Normalizing only ``$HOME`` keeps these literals
+# machine-dependent: on any host whose HOME is not /home/admin they survive
+# verbatim and the golden drifts. Canonicalize both the live HOME and the
+# baked-in host user so the snapshot stays machine-independent everywhere.
+_HOME_PREFIXES = tuple(p for p in (_HOME, "/home/admin") if p)
+
 
 def _load(name: str | None, config_dirs: tuple[Path, ...]) -> dict[str, Any]:
     if not name:
@@ -137,8 +146,10 @@ def _normalize(obj: Any) -> Any:
         return [_normalize(x) for x in obj]
     if isinstance(obj, str) and os.path.isabs(obj) and obj.startswith(_CWD_PREFIX):
         return "<CWD>/" + obj.removeprefix(_CWD_PREFIX).replace(os.sep, "/")
-    if isinstance(obj, str) and _HOME and _HOME in obj:
-        return obj.replace(_HOME, "~")
+    if isinstance(obj, str):
+        for prefix in _HOME_PREFIXES:
+            if prefix in obj:
+                return obj.replace(prefix, "~")
     return obj
 
 

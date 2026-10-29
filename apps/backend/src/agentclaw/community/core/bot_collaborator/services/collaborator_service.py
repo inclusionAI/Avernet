@@ -41,7 +41,16 @@ from agentclaw.community.core.bot_collaborator.services.collaborator_query_mixin
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
+from agentclaw.community.core.bot_collaborator.services.collaboration_effects import (
+    CollaborationEffects,
+)
+from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.api.bot_manager_sync import BotManagerSyncProtocol
+from agentclaw.community.core.bot_collaborator.manager_sync.notifications import (
+    notify_bot_manager_sync,
+)
+from agentclaw.community.kernel.bot_manager_sync import SyncReason
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.bot_collaborator.collaborator_service_protocol import CollaboratorServiceProtocol
 
@@ -92,6 +101,7 @@ class CollaboratorService(
         passport_plugin: PassportPlugin,
         credentials_admins_writer: "DeviceCredentialsAdminsWriter",
         space_access_service: SpaceAccessServiceProtocol,
+        manager_sync: BotManagerSyncProtocol,
         member_management_capability_service: MemberManagementCapabilityService
         | None = None,
     ) -> None:
@@ -105,12 +115,21 @@ class CollaboratorService(
                 写入器（对 service bot 解析在线 binding、对其它 bot 回退
                 ``resolve_for_bot``）。read-modify-write 既有文件，失败只 warning。
             space_access_service: Team Space 解析和成员校验服务。
+            manager_sync: BCS 管理集同步旁路的必填入口
+                （``BotManagerSyncProtocol``）。只在业务提交成功后的回调里
+                送出，失败绝不上抛、也绝不包住仓储写；未启用时注入
+                ``DisabledBotManagerSync``。
             member_management_capability_service: 成员管理能力服务，用于协调通用能力与各引擎定制逻辑。
         """
         self._collaborator_repo = collaborator_repo
         self._bot_repo = bot_repo
         self._passport_plugin = passport_plugin
         self._creds_writer = credentials_admins_writer
+        self._manager_sync = manager_sync
+        self._effects = CollaborationEffects(
+            passport_plugin=passport_plugin,
+            credentials_admins_writer=credentials_admins_writer,
+        )
         self._member_management_capability_service = (
             member_management_capability_service or MemberManagementCapabilityService()
         )
@@ -789,8 +808,10 @@ class CollaboratorService(
             "[leave_collaboration] Left: bot_id=%s, user_id=%s", bot_id, user_id
         )
 
-        # 4. 触发协作关系变更回调。
-        self.on_collaboration_changed(bot_id, owner_id_from_bot, env)
+        # 4. 触发协作关系变更回调。删除失败的 False 保持原返回值语义，
+        # 不再往下走：无真实变更不写成功同步，也不强制远端投影操作。
+        if success:
+            self.on_collaboration_changed(bot_id, owner_id_from_bot, env)
 
         return success
 
@@ -939,7 +960,21 @@ class CollaboratorService(
 
         owner_id_from_bot = bot["owner_id"]
 
-        # 2. 获取所有协作者
+        # 2. 提交一次 BCS 管理集同步旁路（统一通知点）。
+        # 在 Bot 解析成功后、读取完整 roster 与执行旧副作用之前送出 —— 此时
+        # 调用方的仓储写已提交（本回调只在业务提交成功后到达），PK 复用已解
+        # 析出的 bot["id"]，不为此新增 SQL。捕获范围只有本 notifier：仓储的
+        # insert/update/delete 不在 try 内，notifier 失败绝不能改变业务结果，
+        # 也不打印 exception body。
+        notify_bot_manager_sync(
+            self._manager_sync,
+            bot_pk=bot["id"],
+            env=env,
+            avernet_tenant=get_current_avernet_tenant(),
+            reason=SyncReason.COLLABORATOR_CHANGED,
+        )
+
+        # 3. 获取所有协作者
         collaborators = self._collaborator_repo.list_by_bot(
             bot_id=bot_id,
             owner_id=owner_id_from_bot,
@@ -950,42 +985,5 @@ class CollaboratorService(
             [{"user_id": c.user_id, "role": c.role} for c in collaborators],
         )
 
-        # 3. 通知所有协作者（TODO: 实现实际通知逻辑）
-        results = []
-
-        logger.info(
-            "[on_collaboration_changed] Results: %s, bot_id=%s, owner_id=%s",
-            results,
-            bot_id,
-            owner_id,
-        )
-
-        # 4. 同步 admin 协作者到 Passport 服务
-        # 注意：Passport 服务协议中 admins=[] 表示清空、admins=None 表示不更新；
-        # 这里要把 admin 全部移除时必须传 []，不能短路成 None。
-        admins = [c.user_id for c in collaborators if c.role == CollaboratorRole.ADMIN]
-        try:
-            self._passport_plugin.update_passport(
-                bot_id=bot_id,
-                user_id=owner_id_from_bot,
-                admins=admins,
-            )
-            logger.info(
-                "[on_collaboration_changed] Synced admins to the passport service: bot_id=%s, admins=%s",
-                bot_id,
-                admins,
-            )
-        except Exception as e:
-            logger.warning(
-                "[on_collaboration_changed] Failed to sync admins to the passport service: bot_id=%s, error=%s",
-                bot_id,
-                e,
-            )
-
-        # 5. 同步 admin 工号到运行设备的 .credentials 文件（ADMINS= 行）。
-        # 委托给 DeviceCredentialsAdminsWriter:对 service bot 解析在线 binding
-        # (ext.binding.online)、对其它 bot 回退 resolve_for_bot;失败只 warning，
-        # 不影响协作者变更主流程，也不回滚已完成的 Passport 服务同步。
-        self._creds_writer.sync_on_change(bot_id, owner_id_from_bot, admins)
-
-        return results
+        # 4. 结果列表 + Passport / .credentials 同步（原第 2-5 段，原样提取）。
+        return self._effects.apply(bot_id, owner_id_from_bot, collaborators)
