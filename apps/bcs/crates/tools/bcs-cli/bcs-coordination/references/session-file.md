@@ -10,7 +10,7 @@
   - `Pending` — 上传进行中，尚未完成
   - `Ready` — 上传完成，可下载/分享/删除
   - `Failed` — 上传失败，可删除后重传
-- 仅 `Ready` 状态的文件可下载、分享、删除
+- 仅 `Ready` 状态的文件可下载、分享；删除也可用于取消 `Pending` 上传或清理 `Failed` 文件
 
 ### 分享链接
 
@@ -50,7 +50,7 @@
 上传本地文件到 Session 工作区。
 
 ```bash
-bcs session file upload --session "<session_id>" --path <本地路径> [--name <文件名>] [--mime <MIME 类型>]
+bcs-cli session file upload --session "<session_id>" --path <本地路径> [--name <文件名>] [--mime <MIME 类型>]
 ```
 
 **参数说明：**
@@ -64,13 +64,13 @@ bcs session file upload --session "<session_id>" --path <本地路径> [--name <
 
 ```bash
 # 上传文件
-bcs session file upload --session "grp-001:1a2b3c4d" --path ./report.pdf
+bcs-cli session file upload --session "grp-001:1a2b3c4d" --path ./report.pdf
 
 # 指定 MIME 类型
-bcs session file upload --session "grp-001:1a2b3c4d" --path ./model.bin --mime application/octet-stream
+bcs-cli session file upload --session "grp-001:1a2b3c4d" --path ./model.bin --mime application/octet-stream
 
 # 自定义文件名
-bcs session file upload --session "grp-001:1a2b3c4d" --path ./data.csv --name "2026-Q3-report.csv"
+bcs-cli session file upload --session "grp-001:1a2b3c4d" --path ./data.csv --name "2026-Q3-report.csv"
 ```
 
 ---
@@ -78,23 +78,23 @@ bcs session file upload --session "grp-001:1a2b3c4d" --path ./data.csv --name "2
 ## session file list - 列出文件
 
 ```bash
-bcs session file list --session "<session_id>" [--prefix <前缀>] [--status <状态>] [--limit <数量>] [--offset <偏移>]
+bcs-cli session file list --session "<session_id>" [--prefix <前缀>] [--status <状态>] [--limit <数量>] [--offset <偏移>]
 ```
 
 **示例：**
 
 ```bash
 # 列出所有文件
-bcs session file list --session "grp-001:1a2b3c4d"
+bcs-cli session file list --session "grp-001:1a2b3c4d"
 
 # 按前缀筛选
-bcs session file list --session "grp-001:1a2b3c4d" --prefix "report"
+bcs-cli session file list --session "grp-001:1a2b3c4d" --prefix "report"
 
 # 按状态筛选
-bcs session file list --session "grp-001:1a2b3c4d" --status "Ready"
+bcs-cli session file list --session "grp-001:1a2b3c4d" --status "Ready"
 
 # 分页
-bcs session file list --session "grp-001:1a2b3c4d" --limit 20 --offset 0
+bcs-cli session file list --session "grp-001:1a2b3c4d" --limit 20 --offset 0
 ```
 
 ---
@@ -102,20 +102,20 @@ bcs session file list --session "grp-001:1a2b3c4d" --limit 20 --offset 0
 ## session file download - 下载
 
 ```bash
-bcs session file download --session "<session_id>" --file-id <file_id> [--out <输出路径>] [--ttl <秒数>]
+bcs-cli session file download --session "<session_id>" --file-id <file_id> [--out <输出路径>] [--ttl <秒数>]
 ```
 
 **示例：**
 
 ```bash
 # 下载到默认文件名
-bcs session file download --session "grp-001:1a2b3c4d" --file-id "f1a2b3c4"
+bcs-cli session file download --session "grp-001:1a2b3c4d" --file-id "f1a2b3c4"
 
 # 指定输出路径
-bcs session file download --session "grp-001:1a2b3c4d" --file-id "f1a2b3c4" --out ./downloaded.pdf
+bcs-cli session file download --session "grp-001:1a2b3c4d" --file-id "f1a2b3c4" --out ./downloaded.pdf
 
 # 设置下载链接有效期
-bcs session file download --session "grp-001:1a2b3c4d" --file-id "f1a2b3c4" --ttl 3600
+bcs-cli session file download --session "grp-001:1a2b3c4d" --file-id "f1a2b3c4" --ttl 3600
 ```
 
 ---
@@ -123,13 +123,13 @@ bcs session file download --session "grp-001:1a2b3c4d" --file-id "f1a2b3c4" --tt
 ## session file delete - 删除
 
 ```bash
-bcs session file delete --session "<session_id>" --file-id <file_id>
+bcs-cli session file delete --session "<session_id>" --file-id <file_id>
 ```
 
 **示例：**
 
 ```bash
-bcs session file delete --session "grp-001:1a2b3c4d" --file-id "f1a2b3c4"
+bcs-cli session file delete --session "grp-001:1a2b3c4d" --file-id "f1a2b3c4"
 ```
 
 > 可删除已完成的文件或取消进行中的上传。删除后对应的分享链接立即失效。
@@ -139,17 +139,17 @@ bcs session file delete --session "grp-001:1a2b3c4d" --file-id "f1a2b3c4"
 ## session file share - 生成分享链接
 
 ```bash
-bcs session file share --session "<session_id>" --file-id <file_id> [--ttl <秒数>]
+bcs-cli session file share --session "<session_id>" --file-id <file_id> [--ttl <秒数>]
 ```
 
 **示例：**
 
 ```bash
 # 使用默认有效期
-bcs session file share --session "grp-001:1a2b3c4d" --file-id "f1a2b3c4"
+bcs-cli session file share --session "grp-001:1a2b3c4d" --file-id "f1a2b3c4"
 
 # 设置 24 小时过期
-bcs session file share --session "grp-001:1a2b3c4d" --file-id "f1a2b3c4" --ttl 86400
+bcs-cli session file share --session "grp-001:1a2b3c4d" --file-id "f1a2b3c4" --ttl 86400
 ```
 
 **返回示例：**
@@ -167,13 +167,13 @@ bcs session file share --session "grp-001:1a2b3c4d" --file-id "f1a2b3c4" --ttl 8
 ## session file capabilities - 查询能力
 
 ```bash
-bcs session file capabilities --session "<session_id>"
+bcs-cli session file capabilities --session "<session_id>"
 ```
 
 **示例：**
 
 ```bash
-bcs session file capabilities --session "grp-001:1a2b3c4d"
+bcs-cli session file capabilities --session "grp-001:1a2b3c4d"
 ```
 
 **返回示例：**

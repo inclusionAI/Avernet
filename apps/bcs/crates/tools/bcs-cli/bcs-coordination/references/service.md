@@ -28,7 +28,7 @@
 ## service invoke - 发起服务调用
 
 ```bash
-bcs service invoke --group "<group_id>" [--input '<json>'] [--meta '<json>'] [--title "<标题>"] [--session-id "<复用id>"] [--caller-id "<调用方id>"] [--detach] [--timeout-ms <ms>]
+bcs-cli service invoke --group "<group_id>" [--input '<json>'] [--meta '<json>'] [--title "<标题>"] [--session-id "<复用id>"] [--caller-id "<调用方id>"] [--detach] [--timeout-ms <ms>]
 ```
 
 **参数说明：**
@@ -46,13 +46,13 @@ bcs service invoke --group "<group_id>" [--input '<json>'] [--meta '<json>'] [--
 
 ```bash
 # 阻塞等待完成
-bcs service invoke --group "svc-group-001" --input '{"query":"分析日志"}' --title "日志分析任务"
+bcs-cli service invoke --group "svc-group-001" --input '{"query":"分析日志"}' --title "日志分析任务"
 
 # 从文件读取 input，不等待
-bcs service invoke --group "svc-group-001" --input @request.json --detach
+bcs-cli service invoke --group "svc-group-001" --input @request.json --detach
 
 # 复用已有 session
-bcs service invoke --group "svc-group-001" --session-id "svc-group-001:aabb0011" --input '{"followup":true}'
+bcs-cli service invoke --group "svc-group-001" --session-id "svc-group-001:aabb0011" --input '{"followup":true}'
 ```
 
 ### 并发限制
@@ -75,7 +75,7 @@ bcs service invoke --group "svc-group-001" --session-id "svc-group-001:aabb0011"
 单次查询 ServiceInvocation Session 的当前状态：
 
 ```bash
-bcs service status <session_id> [--group "<group_id>"]
+bcs-cli service status <session_id> [--group "<group_id>"]
 ```
 
 Session ID 格式为 `{group_id}:{8_hex}`，`--group` 不传时从 ID 中自动解析。
@@ -83,7 +83,7 @@ Session ID 格式为 `{group_id}:{8_hex}`，`--group` 不传时从 ID 中自动�
 **示例：**
 
 ```bash
-bcs service status "svc-group-001:aabb0011"
+bcs-cli service status "svc-group-001:aabb0011"
 ```
 
 ---
@@ -93,13 +93,13 @@ bcs service status "svc-group-001:aabb0011"
 阻塞等待 ServiceInvocation Session 完成（或超时）：
 
 ```bash
-bcs service wait <session_id> [--group "<group_id>"] [--timeout-ms <ms>]
+bcs-cli service wait <session_id> [--group "<group_id>"] [--timeout-ms <ms>]
 ```
 
 **示例：**
 
 ```bash
-bcs service wait "svc-group-001:aabb0011" --timeout-ms 60000
+bcs-cli service wait "svc-group-001:aabb0011" --timeout-ms 60000
 ```
 
 ---
@@ -121,7 +121,7 @@ bcs service wait "svc-group-001:aabb0011" --timeout-ms 60000
 ```
 用户：帮我调用日志分析服务
 Bot：正在发起服务调用...
-[exec] bcs service invoke --group "svc-log-analyzer" --input '{"query":"最近1小时错误日志"}'
+[exec] bcs-cli service invoke --group "svc-log-analyzer" --input '{"query":"最近1小时错误日志"}'
 Bot：分析完成，结果：...
 ```
 
@@ -129,8 +129,8 @@ Bot：分析完成，结果：...
 
 ```
 Bot：提交异步任务...
-[exec] bcs service invoke --group "svc-batch" --input @batch.json --detach
+[exec] bcs-cli service invoke --group "svc-batch" --input @batch.json --detach
 Bot：任务已提交，session_id: svc-batch:aabb0011
-[exec] bcs service wait "svc-batch:aabb0011" --timeout-ms 300000
+[exec] bcs-cli service wait "svc-batch:aabb0011" --timeout-ms 300000
 Bot：任务完成，输出：...
 ```

@@ -24,7 +24,7 @@
 列出 BCS 网络中所有已注册的 Bot：
 
 ```bash
-bcs list
+bcs-cli list
 ```
 
 **返回示例：**
@@ -55,7 +55,7 @@ bcs list
 获取指定 Bot 的详细信息：
 
 ```bash
-bcs get <Bot UUID>
+bcs-cli get <Bot UUID>
 ```
 
 **参数说明：**
@@ -65,7 +65,7 @@ bcs get <Bot UUID>
 **示例：**
 
 ```bash
-bcs get "bot-001"
+bcs-cli get "bot-001"
 ```
 
 **返回示例：**
@@ -89,7 +89,7 @@ bcs get "bot-001"
 按条件搜索 BCS 网络中的 Bot：
 
 ```bash
-bcs discover --query "<搜索关键词>"
+bcs-cli discover --query "<搜索关键词>"
 ```
 
 **可选参数：**
@@ -104,19 +104,19 @@ bcs discover --query "<搜索关键词>"
 
 ```bash
 # 搜索数据库相关 Bot
-bcs discover --query "database"
+bcs-cli discover --query "database"
 
 # 搜索同时具备 code_review 和 sql 的部署相关 Bot
-bcs discover --query "deployment" --skill "code_review" --skill "sql"
+bcs-cli discover --query "deployment" --skill "code_review" --skill "sql"
 
 # 查找可协作的 Bot
-bcs discover --query "database" --collaborate-bot "$BCS_BOT_UUID"
+bcs-cli discover --query "database" --collaborate-bot "$BCN_BOT_UUID"
 
 # 只看 Public Bot
-bcs discover --visibility public
+bcs-cli discover --visibility public
 
 # 只看 Protected Bot
-bcs discover --visibility protected
+bcs-cli discover --visibility protected
 ```
 
 > **说明**：传入 `--collaborate-bot` 时，返回结果中每个 Bot 会包含 `is_friend` 字段。
@@ -129,7 +129,7 @@ bcs discover --visibility protected
 更新当前 Bot 的状态信息：
 
 ```bash
-bcs update-status --status "<状态>"
+bcs-cli update-status --status "<状态>"
 ```
 
 **参数说明：**
@@ -140,10 +140,10 @@ bcs update-status --status "<状态>"
 
 ```bash
 # 设为忙碌
-bcs update-status --status "busy"
+bcs-cli update-status --status "busy"
 
 # 设为在线
-bcs update-status --status "online"
+bcs-cli update-status --status "online"
 ```
 
 ---
@@ -153,7 +153,7 @@ bcs update-status --status "online"
 向另一个 Bot 发送消息，由 BCS 通过 WebSocket 或 HTTP Provider 投递。开启 Direct A2A 队列后，请求会按 Bot 并发上限和 Session 顺序执行：
 
 ```bash
-bcs chat --bot-uuid "<目标Bot UUID>" --message "<消息内容>" [--session-id "<会话ID>"] [--detach | --wait-until running] [--timeout-ms <毫秒>]
+bcs-cli chat --bot-uuid "<目标Bot UUID>" --message "<消息内容>" [--session-id "<会话ID>"] [--detach | --wait-until running] [--timeout-ms <毫秒>]
 ```
 
 **别名：** `invoke`
@@ -170,13 +170,13 @@ bcs chat --bot-uuid "<目标Bot UUID>" --message "<消息内容>" [--session-id 
 **示例：**
 
 ```bash
-bcs chat --bot-uuid "bot-dba" --message "请帮我查一下当前的锁等待情况"
+bcs-cli chat --bot-uuid "bot-dba" --message "请帮我查一下当前的锁等待情况"
 
 # 复用同一会话上下文继续追问
-bcs chat --bot-uuid "bot-dba" --session-id "bot-dba:aabb0011" --message "基于上次结论，下一步怎么处理？"
+bcs-cli chat --bot-uuid "bot-dba" --session-id "bot-dba:aabb0011" --message "基于上次结论，下一步怎么处理？"
 
 # 长耗时任务受理后返回，可能仍在排队
-bcs chat --bot-uuid "bot-dba" --message "请完整分析最近1小时的慢查询" --detach
+bcs-cli chat --bot-uuid "bot-dba" --message "请完整分析最近1小时的慢查询" --detach
 ```
 
 开启 Direct 队列后，离线或繁忙的 Bot 可以等待投递；未开启时沿用原直发路径。同一环境的 Session ID 只能属于 Group 或 Direct A2A 一种类型，类型冲突返回 `session_type_conflict`。
@@ -184,8 +184,8 @@ bcs chat --bot-uuid "bot-dba" --message "请完整分析最近1小时的慢查�
 ### 查询与取消 run
 
 ```bash
-bcs chat-run status --run-id "<run_id>"
-bcs chat-run cancel --run-id "<run_id>"
+bcs-cli chat-run status --run-id "<run_id>"
+bcs-cli chat-run cancel --run-id "<run_id>"
 ```
 
 `delivery.status` 和 `delivery.wait_reason` 说明排队或取消进度。`cancelling` / `cancel_unknown` 表示停止尚未确认，需要继续查询，不能对用户宣称任务已取消。
@@ -203,7 +203,7 @@ bcs chat-run cancel --run-id "<run_id>"
 
 ```
 Bot：(判断：只需要向DBA获取信息，无需拉群)
-[exec] bcs chat --bot-uuid "bot-dba" --message "用户遇到死锁问题，请帮忙分析原因"
+[exec] bcs-cli chat --bot-uuid "bot-dba" --message "用户遇到死锁问题，请帮忙分析原因"
 Bot：DBA回复：死锁是由于...
 ```
 
@@ -225,7 +225,7 @@ Bot：DBA回复：死锁是由于...
 
 ```
 Bot：(内部决策：需要向DBA确认细节)
-[exec] bcs chat --bot-uuid "bot-dba" --message "当前死锁的具体原因是什么？"
+[exec] bcs-cli chat --bot-uuid "bot-dba" --message "当前死锁的具体原因是什么？"
 Bot：DBA回复：死锁是由于...
 ```
 
@@ -233,7 +233,7 @@ Bot：DBA回复：死锁是由于...
 
 ```
 Bot：让我看看有哪些 Bot 可以协助处理数据库问题...
-[exec] bcs discover --query "database" --collaborate-bot "$BCS_BOT_UUID"
+[exec] bcs-cli discover --query "database" --collaborate-bot "$BCN_BOT_UUID"
 Bot：找到以下可协作的 Bot：
   - bot-dba (DBA专家) - Public
   - bot-data (数据分析师) - 好友

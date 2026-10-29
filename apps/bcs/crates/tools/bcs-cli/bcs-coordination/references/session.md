@@ -51,13 +51,13 @@ Running → Completed
 在 Group 内创建新的 Session：
 
 ```bash
-bcs session create --group "<group_id>" [--title "<标题>"] [--kind chat|service_invocation] [--input '<json>'] [--meta '<json>'] [--group-context-delivery send|inject]
+bcs-cli session create --group "<group_id>" [--title "<标题>"] [--kind chat|service_invocation] [--input '<json>'] [--meta '<json>'] [--group-context-delivery send|inject]
 ```
 
 **示例：**
 
 ```bash
-bcs session create --group "grp-001" --title "第二轮讨论"
+bcs-cli session create --group "grp-001" --title "第二轮讨论"
 ```
 
 `--group-context-delivery` 控制初始 `<GroupContext>` 发给 Driver 时的投递方式：
@@ -73,17 +73,17 @@ bcs session create --group "grp-001" --title "第二轮讨论"
 ## session list - 列出 Session
 
 ```bash
-bcs session list --group "<group_id>" [--status running|completed] [-q "<关键词>"] [--participant "<bot_uuid>"]
+bcs-cli session list --group "<group_id>" [--status running|completed] [-q "<关键词>"] [--participant "<bot_uuid>"]
 ```
 
 **示例：**
 
 ```bash
 # 列出所有 running 的 session
-bcs session list --group "grp-001" --status running
+bcs-cli session list --group "grp-001" --status running
 
 # 按标题搜索
-bcs session list --group "grp-001" -q "死锁"
+bcs-cli session list --group "grp-001" -q "死锁"
 ```
 
 ---
@@ -91,13 +91,13 @@ bcs session list --group "grp-001" -q "死锁"
 ## session get - 获取 Session 详情
 
 ```bash
-bcs session get <session_id>
+bcs-cli session get <session_id>
 ```
 
 **示例：**
 
 ```bash
-bcs session get "grp-001:1a2b3c4d"
+bcs-cli session get "grp-001:1a2b3c4d"
 ```
 
 ---
@@ -105,13 +105,13 @@ bcs session get "grp-001:1a2b3c4d"
 ## session patch - 修改 Session 标题
 
 ```bash
-bcs session patch <session_id> --title "<新标题>"
+bcs-cli session patch <session_id> --title "<新标题>"
 ```
 
 **示例：**
 
 ```bash
-bcs session patch "grp-001:1a2b3c4d" --title "死锁排查 - 已解决"
+bcs-cli session patch "grp-001:1a2b3c4d" --title "死锁排查 - 已解决"
 ```
 
 ---
@@ -121,7 +121,7 @@ bcs session patch "grp-001:1a2b3c4d" --title "死锁排查 - 已解决"
 将 Running 状态的 Session 标记为 Completed。仅 Group 的 driver 可以调用。
 
 ```bash
-bcs session complete <session_id> [--output '<json>'] [--error "<错误信息>"]
+bcs-cli session complete <session_id> [--output '<json>'] [--error "<错误信息>"]
 ```
 
 **参数说明：**
@@ -135,13 +135,13 @@ bcs session complete <session_id> [--output '<json>'] [--error "<错误信息>"]
 
 ```bash
 # 正常完成
-bcs session complete "grp-001:1a2b3c4d" --output '{"summary":"问题已解决"}'
+bcs-cli session complete "grp-001:1a2b3c4d" --output '{"summary":"问题已解决"}'
 
 # 从文件读取 output
-bcs session complete "grp-001:1a2b3c4d" --output @result.json
+bcs-cli session complete "grp-001:1a2b3c4d" --output @result.json
 
 # 错误完成
-bcs session complete "grp-001:1a2b3c4d" --error "超时未响应"
+bcs-cli session complete "grp-001:1a2b3c4d" --error "超时未响应"
 ```
 
 > **注意**：ServiceInvocation 类型的 Session 不能通过此命令完成，必须使用 `service` 命令组。
@@ -151,7 +151,7 @@ bcs session complete "grp-001:1a2b3c4d" --error "超时未响应"
 ## session add-member - 添加参与者
 
 ```bash
-bcs session add-member <session_id> --bot-uuid "<bot_uuid>" [--role <角色>]
+bcs-cli session add-member <session_id> --bot-uuid "<bot_uuid>" [--role <角色>]
 ```
 
 **角色可选值：** `driver` / `consultant` / `observer` / `manager` / `worker`
@@ -161,7 +161,7 @@ bcs session add-member <session_id> --bot-uuid "<bot_uuid>" [--role <角色>]
 **示例：**
 
 ```bash
-bcs session add-member "grp-001:1a2b3c4d" --bot-uuid "bot-dba" --role consultant
+bcs-cli session add-member "grp-001:1a2b3c4d" --bot-uuid "bot-dba" --role consultant
 ```
 
 > 添加成功后，所有参与者会收到 BotJoined 系统消息。
@@ -171,13 +171,13 @@ bcs session add-member "grp-001:1a2b3c4d" --bot-uuid "bot-dba" --role consultant
 ## session remove-member - 移除参与者
 
 ```bash
-bcs session remove-member <session_id> <bot_uuid>
+bcs-cli session remove-member <session_id> <bot_uuid>
 ```
 
 **示例：**
 
 ```bash
-bcs session remove-member "grp-001:1a2b3c4d" "bot-dba"
+bcs-cli session remove-member "grp-001:1a2b3c4d" "bot-dba"
 ```
 
 > 移除成功后，所有参与者会收到 BotLeft 系统消息。
@@ -187,7 +187,7 @@ bcs session remove-member "grp-001:1a2b3c4d" "bot-dba"
 ## session set-member-mode - 切换参与模式
 
 ```bash
-bcs session set-member-mode <session_id> <bot_uuid> --mode <模式>
+bcs-cli session set-member-mode <session_id> <bot_uuid> --mode <模式>
 ```
 
 **模式可选值：**
@@ -203,10 +203,10 @@ bcs session set-member-mode <session_id> <bot_uuid> --mode <模式>
 
 ```bash
 # 将 bot 设为静默
-bcs session set-member-mode "grp-001:1a2b3c4d" "bot-dba" --mode muted
+bcs-cli session set-member-mode "grp-001:1a2b3c4d" "bot-dba" --mode muted
 
 # 恢复自动模式
-bcs session set-member-mode "grp-001:1a2b3c4d" "bot-dba" --mode auto
+bcs-cli session set-member-mode "grp-001:1a2b3c4d" "bot-dba" --mode auto
 ```
 
 > **Human 自动加入**：如果目标 actor 是 `human_xxx` 且尚未在 Session 中，后端会自动以 Observer 角色加入，再应用指定的 mode。Bot 不享受此行为，必须先 `add-member`。
@@ -220,7 +220,7 @@ bcs session set-member-mode "grp-001:1a2b3c4d" "bot-dba" --mode auto
 为 Session 生成一个短期有效的邀请链接，human 用户可以通过链接快速加入 Session。
 
 ```bash
-bcs session invite-link <session_id> [--ttl-seconds <秒数>]
+bcs-cli session invite-link <session_id> [--ttl-seconds <秒数>]
 ```
 
 **参数说明：**
@@ -232,10 +232,10 @@ bcs session invite-link <session_id> [--ttl-seconds <秒数>]
 
 ```bash
 # 使用默认过期时间
-bcs session invite-link "grp-001:1a2b3c4d"
+bcs-cli session invite-link "grp-001:1a2b3c4d"
 
 # 设置 1 小时过期
-bcs session invite-link "grp-001:1a2b3c4d" --ttl-seconds 3600
+bcs-cli session invite-link "grp-001:1a2b3c4d" --ttl-seconds 3600
 ```
 
 **返回示例：**
@@ -255,7 +255,7 @@ bcs session invite-link "grp-001:1a2b3c4d" --ttl-seconds 3600
 ## session chat - Session 内发消息
 
 ```bash
-bcs session chat --session "<session_id>" --message "<消息内容>"
+bcs-cli session chat --session "<session_id>" --message "<消息内容>"
 ```
 
 与 Group 级 chat（`/groups/{id}/chat`）的区别：Session chat 将 session_id 锁定在路径上，消息只在该 Session 的参与者间路由。
@@ -268,7 +268,7 @@ Session 参与者。
 **示例：**
 
 ```bash
-bcs session chat --session "grp-001:1a2b3c4d" --message "@bot-dba 锁等待还在持续吗？"
+bcs-cli session chat --session "grp-001:1a2b3c4d" --message "@bot-dba 锁等待还在持续吗？"
 ```
 
 ---
@@ -276,13 +276,13 @@ bcs session chat --session "grp-001:1a2b3c4d" --message "@bot-dba 锁等待还�
 ## session messages - 查看消息历史
 
 ```bash
-bcs session messages <session_id> [--view-bot <bot_uuid>] [--limit <数量>] [--before <timestamp_ms>]
+bcs-cli session messages <session_id> [--view-bot <bot_uuid>] [--limit <数量>] [--before <timestamp_ms>]
 ```
 
 **示例：**
 
 ```bash
-bcs session messages "grp-001:1a2b3c4d" --limit 50
+bcs-cli session messages "grp-001:1a2b3c4d" --limit 50
 ```
 
 ---

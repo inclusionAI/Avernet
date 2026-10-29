@@ -7,10 +7,10 @@ Draft 保存文件原文，不属于聊天 Session，也不创建群、绑定 Bo
 ```bash
 # 为本次请求保留一个规范 UUID；创建未知时仍复用它。
 draft_id="$(uuidgen | tr '[:upper:]' '[:lower:]')"
-bcs collaboration draft create "$candidate_file" --draft-id "$draft_id" --title "协作定义"
-bcs collaboration draft get "$draft_id" --revision 1 --output "$new_file"
-bcs collaboration draft update "$draft_id" "$new_file" --expected-revision 1
-bcs collaboration draft validate "$draft_id" --revision 2
+bcs-cli collaboration draft create "$candidate_file" --draft-id "$draft_id" --title "协作定义"
+bcs-cli collaboration draft get "$draft_id" --revision 1 --output "$new_file"
+bcs-cli collaboration draft update "$draft_id" "$new_file" --expected-revision 1
+bcs-cli collaboration draft validate "$draft_id" --revision 2
 ```
 
 CLI 输出为 JSON，按命令读取实际结果：
@@ -28,8 +28,8 @@ CLI 输出为 JSON，按命令读取实际结果：
 以下动作仅在明确管理请求下执行：
 
 ```bash
-bcs collaboration draft revoke "$draft_id" --revision 2
-bcs collaboration draft delete "$draft_id"
+bcs-cli collaboration draft revoke "$draft_id" --revision 2
+bcs-cli collaboration draft delete "$draft_id"
 ```
 
 `revoke` 撤销该版本的读取，不影响其他版本；不得复制新版绕过撤销。`delete` 删除原文并保留 ID 删除标记，不能复用该 ID 恢复。两者均不能追回已下载内容。

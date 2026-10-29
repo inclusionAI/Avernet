@@ -14,10 +14,11 @@
 
 - 生成或修改自定义协作 YAML 前，必须读取 [custom-collaboration-schema.md](custom-collaboration-schema.md)。
 - YAML 中只声明逻辑 participant binding，不写真实 Bot UUID。运行或创建群时，再通过 CLI 参数把逻辑角色绑定到当前 session 或发现结果中的 Bot。
-- 不根据 YAML 外观猜测有效性。设计交付或建群前必须通过服务端校验：文件用 `bcs-cli collaboration validate`，已保存的 Draft 可校验指定版本；当前 session 一次性运行由 `bcs collaborate run` 的服务端接口执行同一套 authoring 和运行时校验。
-- 服务端固定拒绝当前运行时尚未实现的 `guard`、`action`、`output_contract`、`variables`、`events` 和 `input_schema`。`judge` 仅在当前 BCS 实例配置了 LLM provider 时可用。
+- 不根据 YAML 外观猜测有效性。设计交付或建群前必须通过服务端校验：文件用 `bcs-cli collaboration validate`，已保存的 Draft 可校验指定版本；当前 session 一次性运行由 `bcs-cli collaborate run` 的服务端接口执行同一套 authoring 和运行时校验。
+- 服务端固定拒绝当前运行时尚未实现的 `guard`、`action`、`output_contract`、`variables`、`events` 和 `input_schema`。`judge` 是否可用以当前 BCS 返回的校验结果为准。
 - 普通流程使用 v1 无环图；Loop 使用 v2 hierarchical，由服务端展开为无环执行图。外层图仍要求唯一零入度入口、唯一 `final_output` 出口，且所有节点从入口可达并能到达最终出口。
-- v2 可以在同一外层图中放置多个 Loop，各自维护执行次数和上一结果，通过外层 `transitions` 连接；不支持嵌套 Loop 或直接跳入另一个 Loop 的 body。具体字段及 outcome/target 区别见 [Fixed Loop](custom-collaboration-schema.md#fixed-loop)。
+- v2 支持同级和嵌套固定 Loop。每层的 `entry_node`、`result_node` 必须引用该层 body 中直属的 `bot_task` 或 `human_input`，不能引用子 Loop。节点通过同一作用域内的 `transitions` 连接；进入子 Loop 时指向其控制节点 ID，不能直接跳入它的 body，子 Loop 的 break/exhausted 出口也只能指向父 body 中的节点。具体字段及完整嵌套示例见 [Fixed Loop](custom-collaboration-schema.md#fixed-loop)。
+- 每个父轮次中的子 Loop 都从第 1 轮开始，上一轮结果只属于相同父执行路径下的当前 Loop，不跨父轮次继承。子 Loop 提前退出不会直接结束父 Loop；父 Loop 的继续或退出仍由自己的 `result_node` 决定。
 
 ## 选择执行方式
 
@@ -31,7 +32,7 @@
 2. **编写 YAML 前必须先查询权限**：
 
 ```bash
-bcs collaborate permission --session "$session_id"
+bcs-cli collaborate permission --session "$session_id"
 ```
 
 只以服务端响应为准：
@@ -52,7 +53,7 @@ candidate_file="$(mktemp "${TMPDIR:-/tmp}/avernet-session-collaboration.XXXXXX")
 5. 一次性提交 YAML、全部必需角色绑定和本次运行输入。无需自定义副屏时使用基础命令：
 
 ```bash
-bcs collaborate run "$candidate_file" \
+bcs-cli collaborate run "$candidate_file" \
   --session "$session_id" \
   --binding "planner=$initiator_bot_uuid" \
   --binding "researcher=$researcher_bot_uuid" \
@@ -69,7 +70,7 @@ panel_params_file="$(mktemp "${TMPDIR:-/tmp}/avernet-session-panel-params.XXXXXX
 # 向 "$panel_params_file" 写入 JSON object，例如：
 # {"runId":"{{bcs.run_id}}","scene":"release_review"}
 
-bcs collaborate run "$candidate_file" \
+bcs-cli collaborate run "$candidate_file" \
   --session "$session_id" \
   --binding "planner=$initiator_bot_uuid" \
   --binding "researcher=$researcher_bot_uuid" \
@@ -105,7 +106,7 @@ BCS 不会向自定义组件自动注入 `runId`、`groupId` 或 `sessionId`；�
 ```bash
 candidate_file="$(mktemp "${TMPDIR:-/tmp}/avernet-custom-collaboration.XXXXXX")"
 # 将候选 YAML 写入 "$candidate_file"
-bcs collaboration validate "$candidate_file"
+bcs-cli collaboration validate "$candidate_file"
 ```
 
 8. 修复全部错误并重试，最多修复两轮。仍失败时报告校验错误，不交付或创建猜测版本。
@@ -120,7 +121,7 @@ bcs collaboration validate "$candidate_file"
 10. 用户已明确要求或确认新建自定义协作群后，使用同一个已校验文件执行建群。每个 `--binding` 使用 `逻辑角色=Bot UUID`，且覆盖校验结果中所有 `required: true` 或 `assigned: true` 的角色：
 
 ```bash
-bcs collaboration create "$candidate_file" \
+bcs-cli collaboration create "$candidate_file" \
   --driver "$driver_bot_uuid" \
   --binding "planner=$driver_bot_uuid" \
   --binding "researcher=$researcher_bot_uuid" \
@@ -136,20 +137,21 @@ bcs collaboration create "$candidate_file" \
 需要开始执行时，显式创建 `service_invocation` Session：
 
 ```bash
-bcs session create --group "$group_id" --kind service_invocation --title "开始协同"
+bcs-cli session create --group "$group_id" --kind service_invocation --title "开始协同"
 ```
 
-该开关要求先升级服务端；服务端如果仍返回 Session ID，CLI 会报错并报告已创建的资源。
+该选项需要当前服务端支持；服务端如果仍返回 Session ID，CLI 会报错并报告已创建的资源。
 HTTP 请求若同时带非空 `event_subscriptions` 和 `create_initial_session=false`，会在写入前
 失败，因为现有事件订阅流程需要初始 Session。`start_initial_run` 只在创建初始 Session
 时生效，不能使 `--no-session` 请求启动运行。
 
-11. 建群成功后向用户返回 group ID、driver、participants 和可点击的 `chat_url`（若服务端提供），并保留响应中的 `session_id`（若非空）供后续 BCS Session 操作使用。`session_id` 是 BCS 会话标识，不等同于 OpenClaw `sessions_send` 所需的完整 `sessionKey`；使用 `sessions_send` 前先从会话列表解析对应 `sessionKey`，无法解析时改用 `bcs session chat --session "$session_id" --message "..."`。无论校验失败、建群失败还是成功，最后都执行 `rm -f -- "$candidate_file"`。
+11. 建群成功后向用户返回 group ID、driver、participants 和可点击的 `chat_url`（若服务端提供），并保留响应中的 `session_id`（若非空）供后续 BCS Session 操作使用。后续任务建议在新群继续，仅在用户要求时才从当前会话操作，遵循[建群后的会话交接](group.md#建群后的会话交接)。`session_id` 是 BCS 会话标识，不等同于 OpenClaw `sessions_send` 所需的完整 `sessionKey`；使用 `sessions_send` 前先从会话列表解析对应 `sessionKey`，无法解析时改用 `bcs-cli session chat --session "$session_id" --message "..."`。无论校验失败、建群失败还是成功，最后都执行 `rm -f -- "$candidate_file"`。
 
 ## 编写约束
 
 - 顶层只允许 `name`、可选 `metadata`、`participants` 和 `runtime`。
-- 保留 `runtime.kind: state_machine`。普通 DAG 使用 `version: 1`；固定 Loop 的 `version: 2` 需按 schema 校验，执行默认关闭，需服务端显式开启 `collaboration.loop_execution_enabled`；关闭时 preview 返回 `VALIDATION_ONLY_FEATURE`。
+- 保留 `runtime.kind: state_machine`。普通 DAG 使用 `version: 1`；同级和嵌套固定 Loop 都使用 `version: 2`、`graph_mode: hierarchical`。定义合法时仍可能返回 `VALIDATION_ONLY_FEATURE` 警告，表示当前服务端仅支持校验或预览；不能把预览通过当作可执行的保证，也不要为通过校验而擅自删除用户要求的循环或评审逻辑。
+- 嵌套深度及展开规模由服务端校验。超限时依据返回的错误定位定义并向用户说明，不在 authoring YAML 中添加服务端配置。
 - 不输出顶层 `api_version`、`id` 或 `version`；这些字段由 BCS 创建群时提供。
 - 不把真实 Bot UUID、token、私密地址或运行时 participant role 写进 YAML。
 - 真实 Bot UUID 只放在 `collaborate run --binding` 或 `collaboration create --binding` 参数中，不写入 YAML。
@@ -171,12 +173,15 @@ bcs-cli --no-json collaborate query --run "$run_id" --node "$execution_node_id"
 `--node`、`--graph`、`--pending` 互斥。不带选项查询 Run。节点 ID 必须复制自该 Run 的返回值，
 不能把 logical node 或 preview ID 当成 execution ID，更不能手工拼接 `ln-...`。
 iteration 从 1 开始，retry attempt 从 0 开始；相同 logical node 的不同 iteration 是不同节点。
+嵌套执行通过 `loop_path` 标识完整的外层到内层轮次；旧的 `loop_id`、`iteration`、
+`max_iterations` 只描述最近一层 Loop，不能单独用于区分不同父轮次。Graph 的 Loop descriptor
+使用 `outer/inner` 这样的逻辑路径作为 key，这些路径不是 authoring `targets` 或 execution ID。
 Graph 的 break/exhausted 说明不表示已经选路，实际选择以 source Node 的 outcome 为准。
 
 服务重启后的恢复不承诺外部 Bot 操作 exactly-once：checkpoint 仍为 `Delivering` 的 attempt 不会
 自动重发，而是等待回调或保存的超时策略；节点 retry 会使用新的 attempt 和 delivery request ID。
 Loop 下次执行及 rerun 也不是同一投递。涉及发布、付款等副作用时，必须在 Bot/Provider 中按业务
-操作键保证幂等，不能只依赖 BCS 的 request ID。详见 [Provider 投递语义](../../../../../docs/bot-provider-integration.zh-CN.md#幂等和-session)。
+操作键保证幂等，不能只依赖 BCS 的 request ID。
 
 人工用户使用现有认证/网关身份查询 `--pending`，阅读 LoopContext 后向其中的节点回复：
 
@@ -186,4 +191,5 @@ bcs-cli collaborate respond --run "$run_id" --node "$execution_node_id" --conten
 
 CLI 先核对该 execution ID 仍在服务端授权的待处理列表，只提交 `content`，不提交或修改 loop_context、
 iteration、outcome、actor。旧轮或未授权节点在 POST 前拒绝；查询后若状态变化，仍以服务端的冲突响应为准。
-Bot 身份不能借此充当人工用户。版本/能力警告和 authoring path 原样展示；生产 v2 仍默认关闭。
+Bot 身份不能借此充当人工用户。版本/能力警告和 authoring path 原样展示；是否允许新 Run/rerun
+以当前服务端校验和执行接口的实际结果为准，历史查询不代表允许执行。

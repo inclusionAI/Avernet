@@ -30,7 +30,7 @@
 ### 命令格式
 
 ```bash
-bcs fuse --group "<group_id>" --question "<协调问题>" --participants "Bot1,Bot2,Bot3"
+bcs-cli fuse --group "<group_id>" --question "<协调问题>" --participants "Bot1,Bot2,Bot3"
 ```
 
 **参数说明：**
@@ -42,7 +42,7 @@ bcs fuse --group "<group_id>" --question "<协调问题>" --participants "Bot1,B
 **示例：**
 
 ```bash
-bcs fuse --group "grp-002" --question "代码与PRD的超时时间冲突如何协调？" --participants "bot-001,bot-002,bot-003"
+bcs-cli fuse --group "grp-002" --question "代码与PRD的超时时间冲突如何协调？" --participants "bot-001,bot-002,bot-003"
 ```
 
 ### 返回结果
@@ -114,7 +114,7 @@ bcs fuse --group "grp-002" --question "代码与PRD的超时时间冲突如何�
     │   - 应该使用 bcs_fuse
     │
     ▼ 调用:
-    bcs fuse --group grp-001 \
+    bcs-cli fuse --group grp-001 \
         --question "这个方案从各角度是否可行" \
         --participants "bot-001,bot-002,bot-003"
     │
@@ -125,17 +125,21 @@ bcs fuse --group "grp-002" --question "代码与PRD的超时时间冲突如何�
 
 ## 使用场景
 
+以下建群示例先通过 `discover --collaborate-bot` 获取真实参与者 UUID，并向 `--context` 提供获准共享的任务背景；建群和后续会话操作遵循 [group.md](group.md)。
+
 ### 场景：Fusion 模式冲突协调
 
 ```
-用户：代码和PRD有冲突，帮我协调
-Bot：检测到需要多方协调，创建Fusion群聊...
-[exec] bcs create-group --driver "$BCS_BOT_UUID" --topic "代码与PRD超时时间冲突" --participants "bot-pm,bot-dba"
-Bot：<原样返回建群响应中的 chat_url，并结束当前激活>
+用户：代码和PRD有冲突，帮我拉群协调
+Bot：我先查找可协作的产品和数据库专家...
+[exec] bcs-cli discover --collaborate-bot "$BCN_BOT_UUID"
+Bot：(从发现结果选择真实 UUID，分别赋给 pm_bot_uuid、dba_bot_uuid)
+[exec] bcs-cli create-group --driver "$BCN_BOT_UUID" --topic "代码与PRD超时时间冲突" --participants "$pm_bot_uuid,$dba_bot_uuid" --context "需要协调已获准共享的代码与PRD中的超时时间差异"
+Bot：<原样返回 chat_url，保留 session_id，并提示用户在新群继续协作>
 
-(以下操作由新群 Session 内的 Bot 在收到群消息后执行，群 ID 和成员以当前 Session 为准)
+(以下操作由新群 Session 内的 Bot 在收到群消息后执行；group_id 和 participant_bot_uuids 使用当前新群的实际 ID 和成员 UUID)
 Bot：让我融合各方视角来分析这个冲突...
-[exec] bcs fuse --group "grp-002" --question "超时时间冲突如何协调" --participants "bot-001,bot-pm,bot-dba"
+[exec] bcs-cli fuse --group "$group_id" --question "超时时间冲突如何协调" --participants "$participant_bot_uuids"
 Bot：综合各方视角，建议将超时时间调整为45分钟，同时补充安全校验...
 ```
 
@@ -143,12 +147,14 @@ Bot：综合各方视角，建议将超时时间调整为45分钟，同时补充
 
 ```
 用户：发现一个复杂问题，把专家们拉个群讨论
-Bot：好的，我将创建专家会诊群...
-[exec] bcs create-group --driver "$BCS_BOT_UUID" --topic "复杂问题需要多专家讨论" --participants "bot-sec,bot-legal,bot-dba"
-Bot：<原样返回建群响应中的 chat_url，并结束当前激活>
+Bot：我先查找可协作的专家...
+[exec] bcs-cli discover --collaborate-bot "$BCN_BOT_UUID"
+Bot：(从发现结果选择真实 UUID，组成 participant_bot_uuids)
+[exec] bcs-cli create-group --driver "$BCN_BOT_UUID" --topic "复杂问题需要多专家讨论" --participants "$participant_bot_uuids" --context "本次需要共同分析的已获准共享的问题背景"
+Bot：<原样返回 chat_url，保留 session_id，并提示用户在新群继续协作>
 
-(以下操作由新群 Session 内的 Bot 在收到群消息后执行，群 ID 和成员以当前 Session 为准)
+(以下操作由新群 Session 内的 Bot 在收到群消息后执行；group_id 和 participant_bot_uuids 使用当前新群的实际 ID 和成员 UUID)
 Bot：让我融合各位专家的视角...
-[exec] bcs fuse --group "grp-003" --question "如何处理这个复杂问题" --participants "bot-001,bot-sec,bot-legal,bot-dba"
+[exec] bcs-cli fuse --group "$group_id" --question "如何处理这个复杂问题" --participants "$participant_bot_uuids"
 Bot：综合安全、法务、数据库专家的意见，建议采取以下方案...
 ```
