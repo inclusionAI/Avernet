@@ -137,4 +137,30 @@ class ManifestCreationSeam(Protocol):
         ...
 
 
-__all__ = ["ManifestCreationSeam"]
+def create_job_idempotency_key(
+    *, tenant: str, entity_id: str, bot_id: str
+) -> str:
+    """The enqueue key for one creation. Derived, never stored.
+
+    Both the submission (which enqueues) and the poll (which looks the job up)
+    compute it from values they already hold, so there is nothing to keep in
+    step and no column to add.
+
+    It carries the same three parts as the manifest's own storage key, and for
+    the same reason rather than for symmetry. The queue's dedup scope is
+    ``(env, app, task_type)`` and knows nothing about tenants or owners, so
+    anything left out of the key is something the lookup does not scope by —
+    and the poll's whole authorization argument is that a caller can only reach
+    rows keyed by the ``entity_id`` resolved from their own principal. Without
+    ``entity_id`` in here, another user's ``bot_id`` would find their pending
+    creation and hand back their authorization URL.
+
+    ``bot_id`` alone is documented as globally unique, so the other two parts
+    never change *which* row is found for a legitimate caller; they decide which
+    rows are reachable at all.
+    """
+    return f"create_with_manifest:{tenant}:{entity_id}:{bot_id}"
+
+
+
+__all__ = ["ManifestCreationSeam", "create_job_idempotency_key"]

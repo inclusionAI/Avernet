@@ -7,6 +7,8 @@ handler ever asks for a retry. Each step is therefore driven twice here.
 """
 from __future__ import annotations
 
+from agentclaw.community.core.bot_management.creation_source import validate_creation_source
+
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
@@ -229,6 +231,7 @@ def _handler(
     created: list[dict] = []
     relationships = relationships if relationships is not None else _Relationships()
     handler = BotCreateWithManifestHandler(
+        validate_creation_spec=validate_creation_source,
         manifest_seam_provider=lambda: seam,
         apply_service_provider=lambda: applies,
         bot_repository_provider=lambda: bots or _Bots(),
@@ -769,6 +772,7 @@ def _record_first(
 
     service = _RecordingBotService(bots, refuse=refuse)
     handler = BotCreateWithManifestHandler(
+        validate_creation_spec=validate_creation_source,
         manifest_seam_provider=lambda: seam,
         apply_service_provider=lambda: applies,
         bot_repository_provider=lambda: bots,

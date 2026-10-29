@@ -266,3 +266,9 @@ without releasing devices or credentials. Publishing calls it before tearing
 down any version container. Actual deletion repeats validation; current ownership
 selects the Bot row while transferable service-Bot resources are cleaned using
 immutable entity. Personal/default cleanup keeps its original Owner semantics.
+
+Creation provenance is owned here: `creation_source` freezes trusted source
+facts and their generic Manifest binding before the durable handoff, and
+validates their association when a task is consumed. The Manifest layer owns
+binding scope/document checks and does not interpret provenance. Existing task
+payload keys and initial Bot INSERT metadata remain unchanged.

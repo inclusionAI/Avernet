@@ -41,6 +41,7 @@ class _Seam:
         self.persisted: list[dict] = []
         self.started: list[dict] = []
         self.discarded: list[dict] = []
+        self.verified: list[dict] = []
 
     def preflight(self, **kwargs):
         self.preflighted.append(kwargs)
@@ -54,6 +55,9 @@ class _Seam:
         self.persisted.append(kwargs)
         return kwargs["spec_entity_id"] or f"staff_{kwargs['user_id']}"
 
+    def verify_binding(self, **kwargs):
+        self.verified.append(kwargs)
+
     def start_job(self, **kwargs):
         self.started.append(kwargs)
         if self.job_fails:
@@ -64,7 +68,7 @@ class _Seam:
         return True
 
 
-def _submit(seam, apply_result=None, passport=None):
+def _submit(seam, apply_result=None, passport=None, spec=_SPEC):
     passport = passport or MagicMock()
     # ``apply_agent_passport``, not ``applyFirst``: this endpoint never asks
     # Passport to skip approval, not even for a user's first bot, so the
@@ -87,7 +91,7 @@ def _submit(seam, apply_result=None, passport=None):
         bot_id="b_1",
         document=_DOCUMENT,
         modifier="u1",
-        spec=_SPEC,
+        spec=spec,
         context=_CONTEXT,
         bot_service=bot_service,
         passport_plugin=passport,
@@ -239,3 +243,33 @@ def test_trusted_expert_origin_survives_durable_creation_spec_round_trip():
     restored, context = creation_spec_from_payload(frozen)
     assert restored.expert_origin == origin
     assert context == _CONTEXT
+
+
+def test_submission_seals_source_and_binding_before_the_manifest_job():
+    from dataclasses import replace
+    from agentclaw.community.core.bot_management.expert_origin import ExpertOrigin
+
+    origin = ExpertOrigin("source", "writer", "Writer", "a" * 40, "b" * 64, "c" * 64)
+    seam = _Seam()
+    _submit(seam, spec=replace(_SPEC, expert_origin=origin))
+    frozen = seam.started[0]["spec"]
+    assert frozen["expert_origin"]["creation_task_key"].endswith(":u1:b_1")
+    assert frozen["manifest_binding"]["manifest_digest"] == origin.manifest_digest
+    assert frozen["manifest_binding"]["digest_encoding"] == origin.digest_encoding
+    assert seam.verified == [{"entity_id": "u1", "bot_id": "b_1", "manifest_digest": "c" * 64}]
+    assert origin.creation_task_key == ""
+
+
+def test_binding_refusal_discards_document_before_spending_authorization():
+    from dataclasses import replace
+    from agentclaw.community.core.bot_management.expert_origin import ExpertOrigin
+
+    origin = ExpertOrigin("source", "writer", "Writer", "a" * 40, "b" * 64, "c" * 64)
+    seam = _Seam()
+    seam.verify_binding = MagicMock(side_effect=ValueError("changed input"))
+    passport = MagicMock()
+    with pytest.raises(ValueError, match="changed input"):
+        _submit(seam, passport=passport, spec=replace(_SPEC, expert_origin=origin))
+    assert seam.discarded == [{"entity_id": "u1", "bot_id": "b_1"}]
+    assert not seam.started
+    passport.apply_agent_passport.assert_not_called()

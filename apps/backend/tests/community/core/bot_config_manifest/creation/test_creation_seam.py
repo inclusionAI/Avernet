@@ -7,6 +7,8 @@ type checker runs on this tree to do it.
 """
 from __future__ import annotations
 
+from agentclaw.community.core.bot_management.creation_source import validate_creation_source
+
 import inspect
 
 import pytest
@@ -93,6 +95,7 @@ def _seam(applies=None, manifests=None, scripts=None, jobs=None,
           purge_cli_tools=None):
     jobs = jobs or _Jobs()
     return BotCreationManifestSeam(
+        validate_creation_spec=validate_creation_source,
         manifest_service=manifests or _Manifests(),
         apply_service=applies or _Applies(),
         script_service_provider=lambda: scripts or _Scripts(),

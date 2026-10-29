@@ -23,6 +23,10 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Mapping
 
+from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
+from agentclaw.community.utils.env_utils import get_current_env
+
+from agentclaw.community.core.bot_management.creation_source import bind_creation_source
 from agentclaw.community.core.bot_management.expert_origin import ExpertOrigin
 from agentclaw.community.core.bot_management.create_context import (
     BotCreateContext,
@@ -645,6 +649,11 @@ def submit_bot_creation_with_manifest(
         engine_type=spec.engine_type,
         bot_type=spec.bot_type,
     )
+    payload_spec = bind_creation_source(
+        {**creation_spec_to_payload(spec, context), "nick_name": nick_name},
+        tenant=get_current_avernet_tenant(), env=get_current_env(),
+        entity_id=spec.entity_id, bot_id=bot_id,
+    )
     # The seam resolves the storage key and returns it: this module must not
     # import the manifest package (that closes a cycle through the creation
     # graph), and the key's rule belongs with the storage that depends on it.
@@ -668,6 +677,12 @@ def submit_bot_creation_with_manifest(
     # job exists there is no job to bound them, so this is the only place that
     # can.
     try:
+        binding = payload_spec.get("manifest_binding")
+        if binding is not None:
+            manifest_seam.verify_binding(
+                entity_id=entity_id, bot_id=bot_id,
+                manifest_digest=binding["manifest_digest"],
+            )
         return _apply_and_hand_off(
             nick_name=nick_name,
             manifest_seam=manifest_seam,
@@ -678,6 +693,7 @@ def submit_bot_creation_with_manifest(
             entity_id=entity_id,
             bot_name=bot_name,
             spec=spec,
+            payload_spec=payload_spec,
             context=context,
         )
     except Exception:
@@ -698,6 +714,7 @@ def _apply_and_hand_off(
     entity_id: str,
     bot_name: str | None,
     spec: BotCreateSpec,
+    payload_spec: dict[str, Any],
     context: BotCreateContext,
 ) -> ManifestCreationSubmitted:
     """Apply for the Passport, then hand the creation to its durable job.
@@ -758,7 +775,7 @@ def _apply_and_hand_off(
         entity_id=entity_id,
         user_id=user_id,
         document_owner=user_id,
-        spec={**creation_spec_to_payload(spec, context), "nick_name": nick_name},
+        spec=payload_spec,
         iframe_url=iframe_url,
         redirect_url=redirect_url,
     )

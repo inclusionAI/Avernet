@@ -52,6 +52,7 @@ from agentclaw.community.core.bot_config_manifest.creation import (
 )
 from agentclaw.community.core.bot_management.manifest_seam import (
     ManifestCreationSeam,
+    create_job_idempotency_key,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.plugin_api.passport import PassportPlugin
@@ -121,29 +122,6 @@ AUTHORIZATION_WINDOW_ELAPSED = "the authorization window elapsed"
 BOT_COULD_NOT_BE_PROVISIONED = "the bot could not be provisioned"
 
 
-def create_job_idempotency_key(
-    *, tenant: str, entity_id: str, bot_id: str
-) -> str:
-    """The enqueue key for one creation. Derived, never stored.
-
-    Both the submission (which enqueues) and the poll (which looks the job up)
-    compute it from values they already hold, so there is nothing to keep in
-    step and no column to add.
-
-    It carries the same three parts as the manifest's own storage key, and for
-    the same reason rather than for symmetry. The queue's dedup scope is
-    ``(env, app, task_type)`` and knows nothing about tenants or owners, so
-    anything left out of the key is something the lookup does not scope by —
-    and the poll's whole authorization argument is that a caller can only reach
-    rows keyed by the ``entity_id`` resolved from their own principal. Without
-    ``entity_id`` in here, another user's ``bot_id`` would find their pending
-    creation and hand back their authorization URL.
-
-    ``bot_id`` alone is documented as globally unique, so the other two parts
-    never change *which* row is found for a legitimate caller; they decide which
-    rows are reachable at all.
-    """
-    return f"create_with_manifest:{tenant}:{entity_id}:{bot_id}"
 
 
 #: How often the job looks again. Matches the existing publish poller's cadence.
@@ -305,6 +283,7 @@ class BotCreateWithManifestHandler:
     def __init__(
         self,
         *,
+        validate_creation_spec: Callable[[dict[str, Any]], None],
         manifest_seam_provider: Callable[[], ManifestCreationSeam],
         apply_service_provider: Callable[[], ApplyRunServiceProtocol],
         bot_repository_provider: Callable[[], BotRepository],
@@ -333,6 +312,7 @@ class BotCreateWithManifestHandler:
         # binds it. ``None`` leaves the row inert rather than live.
         grant_sweep_provider: Optional[Callable[[], BotAppGrantSweepProtocol]] = None,
     ) -> None:
+        self._validate_creation_spec = validate_creation_spec
         self._seam_provider = manifest_seam_provider
         self._applies_provider = apply_service_provider
         self._bots_provider = bot_repository_provider
@@ -372,8 +352,7 @@ class BotCreateWithManifestHandler:
         spec = payload["spec"]
         binding = spec.get("manifest_binding")
         try:
-            if spec.get("expert_origin") is not None and not binding:
-                raise ManifestBindingMismatchError("expert creation is missing its Manifest binding")
+            self._validate_creation_spec(spec)
             if binding is not None:
                 if (not isinstance(binding, dict)
                         or binding.get("entity_id") != entity_id
@@ -384,13 +363,6 @@ class BotCreateWithManifestHandler:
                         or binding.get("digest_encoding") != DIGEST_ENCODING):
                     raise ManifestBindingMismatchError("bound Manifest storage reference does not match creation")
                 bound_manifest_state(binding.get("manifest_digest"))
-                origin = spec.get("expert_origin")
-                if origin is not None and (
-                    not isinstance(origin, dict)
-                    or origin.get("manifest_digest") != binding["manifest_digest"]
-                    or origin.get("digest_encoding") != DIGEST_ENCODING
-                ):
-                    raise ManifestBindingMismatchError("expert origin does not match its Manifest binding")
                 self._seam_provider().verify_binding(
                     entity_id=entity_id, bot_id=bot_id,
                     manifest_digest=binding["manifest_digest"],

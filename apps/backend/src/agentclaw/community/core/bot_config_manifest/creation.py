@@ -218,6 +218,7 @@ class BotCreationManifestSeam(ManifestCreationSeam):
     def __init__(
         self,
         *,
+        validate_creation_spec: Callable[[dict[str, Any]], None],
         manifest_service: BotConfigManifestServiceProtocol,
         apply_service: ApplyRunServiceProtocol,
         script_service_provider: Callable[[], BotStartupScriptServiceProtocol],
@@ -228,6 +229,7 @@ class BotCreationManifestSeam(ManifestCreationSeam):
         purge_managed_files: Optional[Callable[[str, str], int]] = None,
         creation_sequence: Optional[Callable[[Optional[str]], CreationSequence]] = None,
     ) -> None:
+        self._validate_creation_spec = validate_creation_spec
         self._manifests = manifest_service
         self._applies = apply_service
         self._script_service_provider = script_service_provider
@@ -333,13 +335,10 @@ class BotCreationManifestSeam(ManifestCreationSeam):
                 or binding.get("digest_encoding") != DIGEST_ENCODING):
             raise ManifestBindingMismatchError("bound Manifest storage reference does not match creation")
         state = bound_manifest_state(binding.get("manifest_digest"))
-        origin = (job.payload.get("spec") or {}).get("expert_origin")
-        if origin is not None and (
-            not isinstance(origin, dict)
-            or origin.get("manifest_digest") != binding["manifest_digest"]
-            or origin.get("digest_encoding") != DIGEST_ENCODING
-        ):
-            raise ManifestBindingMismatchError("expert origin does not match its Manifest binding")
+        try:
+            self._validate_creation_spec(job.payload.get("spec") or {})
+        except ValueError as exc:
+            raise ManifestBindingMismatchError(str(exc)) from exc
         report = self._applies.last_apply(entity_id=entity_id, bot_id=bot_id)
         creation_report = report is not None and report.trigger in (
             CREATE_PRE_CONTAINER_TRIGGER, CREATE_ON_CONTAINER_TRIGGER,
@@ -430,19 +429,6 @@ class BotCreationManifestSeam(ManifestCreationSeam):
         is reading its status: enqueueing earlier would only mean a first run
         that finds nothing and reschedules.
         """
-        if spec.get("expert_origin"):
-            from agentclaw.community.core.bot_config_manifest.create_job import create_job_idempotency_key
-
-            origin = dict(spec["expert_origin"])
-            origin["creation_task_key"] = create_job_idempotency_key(
-                tenant=get_current_avernet_tenant(), entity_id=entity_id, bot_id=bot_id
-            )
-            spec = {**spec, "expert_origin": origin, "manifest_binding": {
-                "entity_id": entity_id, "bot_id": bot_id,
-                "tenant": get_current_avernet_tenant(), "env": get_current_env(),
-                "manifest_digest": origin["manifest_digest"],
-                "digest_encoding": "sha256-json-v1",
-            }}
         self._start_job(
             bot_id=bot_id,
             entity_id=entity_id,

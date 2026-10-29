@@ -51,6 +51,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
 )
+from agentclaw.community.adapters.http.openapi_v1.bots.schemas import BotCreate
 from agentclaw.community.api.apply_run_service import (
     ApplyRunServiceProtocol,
 )
@@ -76,7 +77,6 @@ from agentclaw.community.core.bot_config_manifest.creation import (
 from agentclaw.community.core.bot_inventory.protocols import (
     BusinessSpaceContextProtocol,
 )
-from agentclaw.community.core.bot_management.expert_origin import ExpertOrigin
 from agentclaw.community.core.bot_management.create_flow import (
     BotCreateContext,
     BotCreateDeploymentMode,
@@ -209,14 +209,11 @@ async def create_bot_with_manifest(
     )
 
 
-async def submit_manifest_creation(
-    *, body: BotCreateWithManifest, request: Request, owner_id: str, owner_name: str,
-    caller, bot_service: BotServiceProtocol, bot_repo: BotRepository,
-    passport_plugin: PassportPlugin, skill_set_factory: SkillSetServiceFactoryProtocol,
-    space_context: BusinessSpaceContextProtocol, manifest_seam: ManifestCreationSeam,
-    expert_origin: ExpertOrigin | None = None,
-) -> Envelope[BotCreateWithManifestAccepted]:
-    """One adapter mapping for both ordinary and expert Manifest submissions."""
+def prepare_manifest_creation(
+    *, body: BotCreate, owner_id: str, bot_repo: BotRepository,
+    space_context: BusinessSpaceContextProtocol,
+) -> tuple[str, BotCreateSpec, BotCreateContext]:
+    """Resolve the shared public Bot request into existing creation inputs."""
     _require_publicly_creatable_engine(body.engine)
     validate_engine_cluster(body.engine, body.cluster_name)
     _require_service_capable_engine(body.bot_type, body.engine)
@@ -225,6 +222,36 @@ async def submit_manifest_creation(
         header_space_id=body.space_id,
     )
     bot_id = generate_bot_id(owner_id, bot_repo)
+    return (
+        bot_id,
+        BotCreateSpec(
+            entity_id=owner_id,
+            engine_type=body.engine,
+            bot_type=body.bot_type,
+            bot_name=body.bot_name,
+            bot_desc=body.bot_desc,
+            space_id=current_space.numeric_id,
+            template_validation_mode=BotCreateTemplateValidationMode.PUBLIC,
+            engine_properties=_engine_properties_from_body(body),
+        ),
+        BotCreateContext(
+            deployment_mode=BotCreateDeploymentMode.CLOUD,
+            space_kind=current_space.kind,
+            space_quota=True,
+        ),
+    )
+
+
+async def submit_manifest_creation(
+    *, body: BotCreateWithManifest, request: Request, owner_id: str, owner_name: str,
+    caller, bot_service: BotServiceProtocol, bot_repo: BotRepository,
+    passport_plugin: PassportPlugin, skill_set_factory: SkillSetServiceFactoryProtocol,
+    space_context: BusinessSpaceContextProtocol, manifest_seam: ManifestCreationSeam,
+) -> Envelope[BotCreateWithManifestAccepted]:
+    """Map an ordinary Manifest request into the existing Bot creation flow."""
+    bot_id, spec, context = prepare_manifest_creation(
+        body=body, owner_id=owner_id, bot_repo=bot_repo, space_context=space_context,
+    )
     # Granted before submission for the reason the ordinary create is: nothing
     # is created until the user authorizes, and the poll is bot-scoped. A
     # no-op for a human caller. See ``creation_grant.py``.
@@ -236,22 +263,8 @@ async def submit_manifest_creation(
             bot_id=bot_id,
             document=body.config_manifest,
             modifier=owner_id,
-            spec=BotCreateSpec(
-                expert_origin=expert_origin,
-                entity_id=owner_id,
-                engine_type=body.engine,
-                bot_type=body.bot_type,
-                bot_name=body.bot_name,
-                bot_desc=body.bot_desc,
-                space_id=current_space.numeric_id,
-                template_validation_mode=BotCreateTemplateValidationMode.PUBLIC,
-                engine_properties=_engine_properties_from_body(body),
-            ),
-            context=BotCreateContext(
-                deployment_mode=BotCreateDeploymentMode.CLOUD,
-                space_kind=current_space.kind,
-                space_quota=True,
-            ),
+            spec=spec,
+            context=context,
             bot_service=bot_service,
             passport_plugin=passport_plugin,
             skill_set_factory=skill_set_factory,

@@ -631,3 +631,9 @@ Two things are close to authorization boundaries already:
   state that apply is guaranteed never to write or remove, so a document
   declaring one would be accepted and then never converge. Refusing it is what
   keeps "accepted" and "appliable" the same set.
+
+Creation-spec policy is supplied by the composition root as a required
+`validate_creation_spec` callable to the creation seam and worker. They invoke
+it before recovery admission or worker side effects, without importing the
+policy owner or inspecting its business fields. Manifest scope/document
+binding checks remain local to the Manifest compiler and creation seam.
