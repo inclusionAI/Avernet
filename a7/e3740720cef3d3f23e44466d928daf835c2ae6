@@ -1,0 +1,25 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/artifact.py
+  s_cecdc98e721f4b::t_8b6d39bdce961c 113-116
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_publishes_case_run.py
+  s_cecdc98e721f4b::t_f9af0d5b948fb0 34,36
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_publishes_contract.py
+  s_cecdc98e721f4b::t_eb32e0af835c94 1,13,16,23-32,408-609
+apps/bcs/scripts/e2e-runner/tests/test_provider_publishes_cli_case_run.py
+  s_cecdc98e721f4b::t_2cb845ff4ca7ef 36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a7e3740720cef3d3f23e44466d928daf835c2ae6",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "DeepSeek-V4.1-Flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
