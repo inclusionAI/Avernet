@@ -127,6 +127,16 @@ def world(persisted):
         Queue(),
     )
     manager_sync = MagicMock()
+    from agentclaw.community.core.repository.implementations.spaces.space import SpaceRepository
+    from agentclaw.community.core.repository.implementations.spaces.persistence_effects import NoKnowledgeSpacePersistenceEffects
+    from agentclaw.community.core.spaces.services.space_access_service import SpaceAccessService
+    from agentclaw.community.core.spaces.services.space_service import SpaceService
+    spaces_repo = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
+    space_staff = MagicMock()
+    space_staff.get_profile_by_work_no.return_value.nick_name = None
+    space_client = MagicMock()
+    spaces = SpaceService(spaces_repo, space_client, space_staff)
+    space_access = SpaceAccessService(spaces_repo)
 
     def service(
         policy=OwnerHandoffPolicy(enabled=True, recovery_enabled=True),
@@ -141,6 +151,8 @@ def world(persisted):
             queue,
             policy,
             notifier if notifier is not None else manager_sync,
+            spaces,
+            space_access,
         )
 
     return SimpleNamespace(
@@ -152,6 +164,10 @@ def world(persisted):
         runtime=runtime,
         queue=queue,
         manager_sync=manager_sync,
+        spaces=spaces,
+        spaces_repo=spaces_repo,
+        space_access=space_access,
+        space_client=space_client,
         service=service,
     )
 
