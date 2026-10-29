@@ -465,27 +465,25 @@ def test_bare_string_error_body_surfaces_raw_not_crash():
     assert "upstream refused" in out["error"]["message"], "原始错误不得被盖住"
 
 
-def test_error_body_read_failure_returns_structured_and_closes():
-    """P2 回归钉：错误响应头已到手（502），但错误体传输中断。
+def _make_broken_body_server():
+    """TCP 裸服务器：GET card 正常 200；POST /rpc 只回 502 响应头
+    （声明 Content-Length: 100）后立刻关连接——错误体永远到不了。
 
-    读体不得炸出 chat_send（上一版 aread 曾被移出 try）——必须结构化
-    返回 HTTP_502 + 传输异常文本进 message；读挂的临时 http client
-    未登记进 _runs、close() 兜不住它，必须就地关闭。
+    触发的具体传输异常形态不固定（RemoteProtocolError 或空串
+    ReadError），断言只钉结构化返回与资源关闭，不断言异常文本形态。
     """
-    from secbaas.community.core.service.bot_run._bot_a2a_client import (
-        BotA2aClient,
-    )
 
     class _BrokenBodyServer:
-        """TCP 裸服务器：GET card 正常 200；POST /rpc 只回 502 响应头
-        （声明 Content-Length: 100）后立刻关连接——错误体永远到不了。"""
-
         def __init__(self) -> None:
             self._sock = socket.socket()
-            self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self._sock.setsockopt(
+                socket.SOL_SOCKET, socket.SO_REUSEADDR, 1
+            )
             self._sock.bind(("127.0.0.1", 0))
             self._sock.listen(8)
-            self._thread = threading.Thread(target=self._serve, daemon=True)
+            self._thread = threading.Thread(
+                target=self._serve, daemon=True
+            )
             self._thread.start()
 
         def _serve(self) -> None:
@@ -533,7 +531,25 @@ def test_error_body_read_failure_returns_structured_and_closes():
         def base(self) -> str:
             return f"http://127.0.0.1:{self._sock.getsockname()[1]}"
 
-    srv = _BrokenBodyServer()
+    return _BrokenBodyServer()
+
+
+def test_error_body_read_failure_returns_structured_and_closes():
+    """P2 回归钉：错误响应头已到手（502），但错误体传输中断。
+
+    读体不得炸出 chat_send（上一版 aread 曾被移出 try）——必须结构化
+    返回 HTTP_502 + 可分诊 message；读挂的临时 http client 未登记进
+    _runs、close() 兜不住它，必须就地关闭。
+
+    真实 socket 断连触发的异常形态在 RemoteProtocolError（有文本）与
+    空串 ReadError 之间摆动——message 非空由实现层的空文本回退保证
+    （见 test_error_body_read_failure_empty_exc_message_falls_back）。
+    """
+    from secbaas.community.core.service.bot_run._bot_a2a_client import (
+        BotA2aClient,
+    )
+
+    srv = _make_broken_body_server()
     # httpx AsyncClient.__aexit__ 直接关 transport、不经 aclose()——connect
     # 阶段的 with 块不会计入。关闭断言只针对 chat_send 阶段创建的临时
     # client（read 失败的孤儿正是它——未登记进 _runs，close() 兜不住）。
@@ -571,9 +587,101 @@ def test_error_body_read_failure_returns_structured_and_closes():
         monkeypatch.undo()
     assert out["ok"] is False
     assert out["error"]["code"] == "HTTP_502", "状态码来自已到手的响应头"
-    assert out["error"]["message"], "读体失败的传输异常文本不得被吞成空"
+    assert out["error"]["message"], "空串传输异常须回退类名，不得为空"
     assert chat_phase, "chat_send 必须经由 _http 建临时 client"
-    assert all(e["closed"] for e in chat_phase), "读挂的临时 client 必须就地关闭"
+    assert all(e["closed"] for e in chat_phase), (
+        "读挂的临时 client 必须就地关闭"
+    )
+
+
+def test_error_body_read_failure_survives_resp_aclose_error():
+    """读体失败后 resp.aclose 再炸（best-effort 不得反噬清理）：
+    client 关闭与结构化返回都必须完成。"""
+    srv = _make_broken_body_server()
+
+    async def scenario():
+        client = await _connect_async(srv.base)
+        # connect 后再下补丁：card 探针自身的响应读取也走 Response.aclose，
+        # 全局炸会击穿 A2aUnavailableError 门（灰度回退承诺）。
+        real_aclose = httpx.Response.aclose
+
+        async def bomb_aclose(self):
+            raise RuntimeError("aclose also broken")
+
+        httpx.Response.aclose = bomb_aclose
+        try:
+            out = await client.chat_send(session_key="s", message="hi")
+        finally:
+            httpx.Response.aclose = real_aclose
+        await client.close()
+        return out
+
+    try:
+        out = _run(scenario())
+    finally:
+        srv.stop()
+    assert out["ok"] is False
+    assert out["error"]["code"] == "HTTP_502"
+    assert out["error"]["message"], "传输异常文本仍然要透出"
+
+
+def test_error_body_read_failure_empty_exc_message_falls_back():
+    """空文本传输异常（ReadError("")/ReadTimeout("")）确定性复现：
+    message 必须回退到异常类名，保证恒有可分诊内容（评审 P2）。
+
+    http_transport_factory + MockTransport 注入，响应头 502 到手、
+    读体时流抛空文本异常——不走真实 socket，形态完全确定。
+    """
+    from secbaas.community.core.service.bot_run._bot_a2a_client import (
+        BotA2aClient,
+    )
+
+    card = {
+        "supportedInterfaces": [
+            {"protocolBinding": "JSONRPC", "protocolVersion": "1.0"}
+        ]
+    }
+
+    def _client_for(exc: Exception) -> httpx.AsyncClient:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if "agent-card.json" in request.url.path:
+                return httpx.Response(200, json=card)
+
+            async def exploding_body():
+                yield b""
+                raise exc
+
+            return httpx.Response(
+                502,
+                headers={"content-type": "application/json"},
+                content=exploding_body(),
+            )
+
+        return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    async def scenario(exc: Exception) -> dict:
+        client = BotA2aClient(
+            base_url="http://testserver",
+            http_transport_factory=lambda: _client_for(exc),
+        )
+        hello = await client.connect()
+        assert hello["protocol"] == 1
+        out = await client.chat_send(session_key="s", message="hi")
+        await client.close()
+        return out
+
+    for exc, name in [
+        (httpx.ReadError(""), "ReadError"),
+        (httpx.ReadTimeout(""), "ReadTimeout"),
+    ]:
+        out = _run(scenario(exc))
+        assert out["ok"] is False, f"{name}: 读体失败必须结构化返回"
+        assert out["error"]["code"] == "HTTP_502", (
+            f"{name}: 状态码来自已到手的响应头"
+        )
+        assert out["error"]["message"] == name, (
+            f"{name}: 空文本必须回退异常类名"
+        )
 
 
 def test_string_error_field_body_surfaces_raw_not_crash():

@@ -330,7 +330,11 @@ class BotA2aClient:
                     "ok": False,
                     "error": {
                         "code": f"HTTP_{resp.status_code}",
-                        "message": str(e)[:200],
+                        # ReadError/ReadTimeout 的 str(e) 可为空串（本地
+                        # RST 场景实测）——空文本回退异常类名，保证
+                        # message 恒有可分诊内容（评审 P2：空串曾使回
+                        # 归测试在两种真实传输异常形态间随机翻转）。
+                        "message": str(e)[:200] or type(e).__name__,
                         "retryable": False,
                     },
                 }
