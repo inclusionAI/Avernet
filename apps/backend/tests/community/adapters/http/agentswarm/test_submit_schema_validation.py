@@ -166,9 +166,11 @@ class TestRunOptionCaps:
         with pytest.raises(ValidationError):
             SubmitRunDTO(**_body(options=self._options(max_turns=0)))
 
-    def test_max_total_agents_over_64_rejected(self):
+    def test_max_total_agents_at_256_accepted_over_rejected(self):
+        dto = SubmitRunDTO(**_body(options=self._options(max_total_agents=256)))
+        assert dto.options.max_total_agents == 256
         with pytest.raises(ValidationError) as exc:
-            SubmitRunDTO(**_body(options=self._options(max_total_agents=65)))
+            SubmitRunDTO(**_body(options=self._options(max_total_agents=257)))
         assert ("options", "max_total_agents") in [e["loc"] for e in exc.value.errors()]
 
     def test_per_attempt_timeout_at_1800_accepted_over_rejected(self):
