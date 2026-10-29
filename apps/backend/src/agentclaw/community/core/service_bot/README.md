@@ -305,3 +305,12 @@ mutate the Bot context, or fall back on lookup failure. Other engines never make
 this strategy-specific query; the shared draft flow retains its original context.
 Optional command-timeout forwarding remains infrastructure-only: omitted timeout
 arguments retain the existing provider call/default behavior.
+
+## Optional knowledge observation
+
+The existing verify-flow task attempts a best-effort knowledge-selection capture
+only at BUILDING entry. It is a lazy ordinary Service API call, not a publication
+transaction participant or success condition. Observer/provider errors are logged
+and isolated; actual native build/release failures retain their Fail results.
+Online success, restart, rollback, draft restore and publication ext/CAS remain
+unchanged. The record is last-observed display metadata, not runtime authority.

@@ -49,16 +49,17 @@
 - **Verification:** 注册端点及真实 HTTP/DI/DB 场景 11 passed；包含原 GET/PUT、原生状态 CAS/rollback_flip、provider mutation witness 与路由唯一性，不包含设备部署。
 - **Acceptance mapping:** AC-01, AC-03, AC-04, AC-05, AC-07, AC-08, AC-10.
 
-## Task 4 [~]: Lock down the small scope and document weak consistency
+## Task 4 [x]: Lock down the small scope and document weak consistency
 - **Goal:** 把非阻断和无事务联动变成可检查的约束，避免重新长成旧方案。
 - **Files:** `core/bot_knowledge/README.md`, `core/service_bot/README.md`, `tests/community/architecture/test_bot_knowledge_publication_observation.py` (new), `apps/backend/specs/2026-10-29-bot-knowledge-publication-observation/{spec,plan,tasks}.md` (repo-relative).
 - **Done when:**
-  - [ ] Context Boundary 与真实 API 依赖一致；文档解释 last_recorded/unrecorded/unavailable、空选择及权限边界。
-  - [ ] 架构回归证明记录未接入原生完成、上线、恢复或事务路径，且未引入 online_enabled、发布 ext 写入、新任务或新 Plugin。
-  - [ ] 同一发布单取消预发/回滚退回草稿后重建的弱一致限制、采集时间及无自动恢复语义可读且有对应测试。
-  - [ ] 明确整体 DB 故障、DB 等待、文件同步落后不在“辅助异常隔离成功”的保证范围内。
-  - [ ] 检查实际生产代码 diff；若超出计划中的普通 Module、一个任务集成入口、DI 和一个只读端点，先回到方案 review。
+  - [x] Context Boundary 与真实 API 依赖一致；文档解释 last_recorded/unrecorded/unavailable、空选择及权限边界。
+  - [x] 架构回归证明记录未接入原生完成、上线、恢复或事务路径，且未引入 online_enabled、发布 ext 写入、新任务或新 Plugin。
+  - [x] 同一发布单取消预发/回滚退回草稿后重建的弱一致限制、采集时间及无自动恢复语义可读且有对应测试。
+  - [x] 明确整体 DB 故障、DB 等待、文件同步落后不在“辅助异常隔离成功”的保证范围内。
+  - [x] 检查实际生产代码 diff；若超出计划中的普通 Module、一个任务集成入口、DI 和一个只读端点，先回到方案 review。
 - **Depends on:** Tasks 1, 2, 3.
+- **Verification:** 新增观察调用边界/只读/无原生写入 guard + 现有模块/API 架构测试 15 passed；文档明确历史、重建、等待和运行文件限制。
 - **Acceptance mapping:** AC-04, AC-06, AC-08, AC-09, AC-10.
 
 ## Task 5: Tests & Verification
