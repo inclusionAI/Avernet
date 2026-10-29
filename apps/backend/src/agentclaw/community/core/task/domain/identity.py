@@ -2,6 +2,20 @@
 from __future__ import annotations
 
 
+_INVALID_SINGLE_BOT_ASSIGNEES = {"NOT_DECIDED"}
+
+
+def is_dispatchable_single_bot_assignee(assignee: str | None) -> bool:
+    """Whether a Single-Bot node carries an actually dispatchable Bot identity.
+
+    Relay planning must never persist a decision placeholder as later runtime state.
+    ``NOT_DECIDED`` describes the fact that S5D has not produced a real
+    candidate; it is not a Bot ID and cannot be delivered to OpenAPI/BCS.
+    """
+    normalized = str(assignee or "").strip()
+    return bool(normalized) and normalized not in _INVALID_SINGLE_BOT_ASSIGNEES
+
+
 def compose_bot_identity(bot_id: str, owner_id: str | None = None) -> str:
     """Return the bot address expected by bot-addressed OpenAPI/BCS calls.
 

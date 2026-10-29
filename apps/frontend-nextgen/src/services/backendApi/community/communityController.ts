@@ -75,6 +75,14 @@ export function listCommunityTopics(query: CommunityTopicQuery = {}, signal?: Ab
   };
   if (query.search?.trim()) params.keyword = query.search.trim();
   if (query.authorId?.trim()) params.author_id = query.authorId.trim();
+  if (query.scope === 'following') {
+    params.following = true;
+    // Public OpenAPI derives the owner from its verified principal and does not
+    // accept the explicit id. The trusted internal mirror does.
+    if (base.startsWith('/api/') && query.followingOwnerId?.trim()) {
+      params.following_owner_id = query.followingOwnerId.trim();
+    }
+  }
   const topicType = backendTopicType(query.topicType);
   if (topicType) params.topic_type = topicType;
   return backendRequest<CommunityEnvelope<CommunityTopicPageDto>>(base, {

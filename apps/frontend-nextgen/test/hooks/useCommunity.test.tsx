@@ -124,6 +124,53 @@ describe('useCommunity', () => {
     });
   });
 
+  test('关注流按 scope=following 请求，由后端绑定当前登录人关注对象', async () => {
+    useCommunityStore.setState({ scope: 'following' });
+    const { result } = renderHook(() => useCommunity());
+
+    await flushDebouncedLoad();
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(mockedService.listTopics).toHaveBeenCalledWith({
+      search: '',
+      scope: 'following',
+      topicType: 'all',
+      followingOwnerId: '900003',
+      offset: 0,
+      limit: COMMUNITY_PAGE_SIZE,
+    });
+  });
+
+  test('列表加载后批量查询主题互动总量并写入 summary 缓存', async () => {
+    const targetSummary = {
+      scope: 'TARGET' as const,
+      target: { targetType: 'TOPIC' as const, id: topic.id },
+      viewCount: 12,
+      likeCount: 8,
+      favoriteCount: 3,
+      followCount: 0,
+      acceptCount: 0,
+      topicCount: 1,
+      replyCount: 1,
+      acceptedReplyCount: 0,
+      replyParticipantCount: 0,
+      helpfulReplyCount: 1,
+    };
+    mockedService.getInteractionSummaryBatch.mockResolvedValue([targetSummary]);
+    const { result } = renderHook(() => useCommunity());
+
+    await flushDebouncedLoad();
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(mockedService.listTopics).toHaveBeenCalledTimes(1);
+    expect(mockedService.getInteractionSummaryBatch).toHaveBeenCalledWith([
+      { target: { targetType: 'TOPIC', id: topic.id } },
+    ]);
+    expect(
+      result.current.interactions.getSummary({ target: { targetType: 'TOPIC', id: topic.id } }),
+    ).toEqual(targetSummary);
+  });
+
   test('类型筛选随列表请求下发', async () => {
     useCommunityStore.setState({ topicType: 'share' });
     const { result } = renderHook(() => useCommunity());
@@ -304,6 +351,91 @@ describe('useCommunity', () => {
     });
     expect(result.current.replySaving).toBe(false);
     expect(notifySuccess).toHaveBeenCalledWith('回复发布成功');
+  });
+
+  test('点赞回复写入 POST 互动目标并读取最新统计', async () => {
+    mockedService.getTopic.mockResolvedValue(topic);
+    const { result } = renderHook(() => useCommunity());
+    await flushDebouncedLoad();
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let succeeded = false;
+    await act(async () => {
+      succeeded = await result.current.likeReply('reply-1');
+    });
+
+    expect(succeeded).toBe(true);
+    expect(mockedService.createInteraction).toHaveBeenCalledWith({
+      actor: { actorType: 'HUMAN', id: '900003' },
+      actionType: 'LIKE',
+      target: { targetType: 'POST', id: 'reply-1' },
+      active: 1,
+    });
+  });
+
+  test('已点赞回复再次点击时写入 active=-1 以取消点赞', async () => {
+    mockedService.getTopic.mockResolvedValue(topic);
+    const viewerReplySummary = {
+      scope: 'ACTOR_TARGET' as const,
+      actor: { actorType: 'HUMAN' as const, id: '900003' },
+      target: { targetType: 'POST' as const, id: 'reply-1' },
+      viewCount: 0,
+      likeCount: 1,
+      favoriteCount: 0,
+      followCount: 0,
+      acceptCount: 0,
+      topicCount: 0,
+      replyCount: 0,
+      acceptedReplyCount: 0,
+      replyParticipantCount: 0,
+      helpfulReplyCount: 0,
+    };
+    mockedService.getInteractionSummaryBatch.mockImplementation(async (queries) =>
+      queries.map((query) =>
+        query.actor?.id === '900003' && query.target?.id === 'reply-1'
+          ? viewerReplySummary
+          : {
+              scope: 'TARGET' as const,
+              target: query.target,
+              viewCount: 0,
+              likeCount: 0,
+              favoriteCount: 0,
+              followCount: 0,
+              acceptCount: 0,
+              topicCount: 0,
+              replyCount: 0,
+              acceptedReplyCount: 0,
+              replyParticipantCount: 0,
+              helpfulReplyCount: 0,
+            },
+      ),
+    );
+    const { result } = renderHook(() => useCommunity());
+    await flushDebouncedLoad();
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.openTopic(topic);
+    });
+    expect(
+      result.current.interactions.getSummary({
+        actor: { actorType: 'HUMAN', id: '900003' },
+        target: { targetType: 'POST', id: 'reply-1' },
+      })?.likeCount,
+    ).toBe(1);
+
+    let succeeded = false;
+    await act(async () => {
+      succeeded = await result.current.likeReply('reply-1');
+    });
+
+    expect(succeeded).toBe(true);
+    expect(mockedService.createInteraction).toHaveBeenLastCalledWith({
+      actor: { actorType: 'HUMAN', id: '900003' },
+      actionType: 'LIKE',
+      target: { targetType: 'POST', id: 'reply-1' },
+      active: -1,
+    });
   });
 
   test('goToReplyPage 切换回帖分页', async () => {

@@ -39,8 +39,7 @@ describe('CommunityApiGateway interaction and Personal Center contracts', () => 
         scope: 'ACTOR',
         actor_type: 'HUMAN',
         actor_id: '149844',
-        follow_count: 2,
-        topic_count: 3,
+        stats: { follow_count: 2, topic_count: 3 },
       },
     });
     getCommunityInteractionSummaryBatch.mockResolvedValueOnce({
@@ -51,8 +50,7 @@ describe('CommunityApiGateway interaction and Personal Center contracts', () => 
             scope: 'TARGET',
             target_type: 'TOPIC',
             target_id: 'topic-1',
-            view_count: 4,
-            reply_participant_count: 5,
+            stats: { view_count: 4, reply_participant_count: 5 },
           },
         ],
       },
@@ -64,6 +62,7 @@ describe('CommunityApiGateway interaction and Personal Center contracts', () => 
       actor,
       actionType: 'FOLLOW',
       target: { targetType: 'HUMAN', id: '149844' },
+      active: 1,
     })).resolves.toBeUndefined();
     await expect(gateway.getInteractionSummary({ actor })).resolves.toMatchObject({
       scope: 'ACTOR',

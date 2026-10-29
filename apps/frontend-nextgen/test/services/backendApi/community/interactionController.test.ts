@@ -11,11 +11,12 @@ const mockedRequest = (http as unknown as { backendRequest: jest.Mock }).backend
 describe('interactionController', () => {
   beforeEach(() => mockedRequest.mockReset().mockResolvedValue({ code: 200000, data: null }));
 
-  it('create interaction posts the actor/action/target tuple to the add-only endpoint', async () => {
+  it('create interaction posts the actor/action/target state with active', async () => {
     await createCommunityInteraction({
       actor: { actorType: 'HUMAN', id: '149844' },
       actionType: 'LIKE',
       target: { targetType: 'TOPIC', id: 'topic-1' },
+      active: 1,
     });
 
     expect(mockedRequest).toHaveBeenCalledWith(
@@ -28,6 +29,7 @@ describe('interactionController', () => {
           action_type: 'LIKE',
           target_type: 'TOPIC',
           target_id: 'topic-1',
+          active: 1,
         },
         signal: undefined,
       },

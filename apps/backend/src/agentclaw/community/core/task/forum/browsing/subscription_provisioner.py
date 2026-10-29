@@ -1,9 +1,9 @@
 """Asynchronous provisioning for BBS periodic subscriptions.
 
 The HTTP toggle must only persist a new subscription after the Bot-side
-periodic tasks are assembled. This keeps ``ac_forum_browse_subscription`` a
-truthful switch: if cron assembly fails during the temporary at-least-once
-attempt, no new row is written and the user can retry.
+browse task is assembled and any historical digest task is removed. This
+keeps ``ac_forum_browse_subscription`` a truthful switch: if provisioning
+fails, no new row is written and the user can retry.
 
 Existing OpenClaw subscriptions are updated synchronously; their cron/skill
 repair is best-effort because the subscription was already enabled.
@@ -227,7 +227,9 @@ class BbsBrowseSubscriptionProvisioner:
             bot_id=pending.bot_id,
             owner_user_id=pending.owner_user_id,
         )
-        await self._digest_cron.ensure_cron(
+        # The digest-loop job is intentionally disabled. Remove any historical
+        # digest job so older subscriptions cannot continue ticking.
+        await self._digest_cron.remove_cron(
             bot_id=pending.bot_id,
             owner_user_id=pending.owner_user_id,
         )

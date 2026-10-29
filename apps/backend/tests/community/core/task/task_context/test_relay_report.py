@@ -146,6 +146,73 @@ def test_report_creates_one_successor_and_projects_replay_receipt() -> None:
     ]
 
 
+def _planned_single_bot_command(
+    *, event_id: str, assignee: str | None
+) -> TaskReportCommand:
+    planned = TaskNode(
+        node_id=None,
+        task_id="task-1",
+        status=None,
+        task_spec=TaskSpec(Context("next", title="next"), Goal("finish remainder", [])),
+        run_info=RuntimeInfo(run_mode="single_bot", assignee=assignee),
+        node_run_graph=None,
+    )
+    return TaskReportCommand(
+        task_id="task-1",
+        node_id="task-1",
+        event_id=event_id,
+        relay_token="attempt-1",
+        event_type=TaskReportEventType.PLAN_RESULT,
+        event=planned,
+    )
+
+
+def test_report_rejects_bbs_plan_when_runtime_profile_disallows_it() -> None:
+    service = _graph_service()
+    graph = service.query_task_dashboard("task-1")
+    graph.extend_props["runtime_profile"] = {
+        "allowed_run_modes": ["single_bot", "coop_group"]
+    }
+    command = _planned_single_bot_command(event_id="unused", assignee="bot-2")
+    command.event.run_info.run_mode = "bbs"
+    command.event.run_info.assignee = None
+    command = replace(command, event_id="plan-bbs")
+
+    assert service.apply_relay_report(_execution()).status == (
+        TaskReportStatus.APPLIED
+    )
+
+    with pytest.raises(TaskStateError, match="planned run mode is not allowed: bbs"):
+        service.apply_relay_report(command)
+
+
+@pytest.mark.parametrize("assignee", ["NOT_DECIDED", "   "])
+def test_plan_rejects_placeholder_single_bot_assignee(assignee: str) -> None:
+    service = _graph_service()
+
+    assert service.apply_relay_report(_execution()).status == (
+        TaskReportStatus.APPLIED
+    )
+
+    with pytest.raises(
+        TaskStateError, match="single_bot plan requires a real bot assignee"
+    ):
+        service.apply_relay_report(
+            _planned_single_bot_command(
+                event_id=f"plan-invalid-{assignee.strip() or 'blank'}",
+                assignee=assignee,
+            )
+        )
+
+    graph = service.query_task_dashboard("task-1")
+    assert len(graph.tasks) == 1
+    assert graph.tasks[0].status == Status.RUNNING
+    assert not [
+        event for event in graph.tasks[0].run_info.action_log
+        if event.action == NodeAction.PLAN
+    ]
+
+
 def test_report_accepts_latest_skill_fact_after_infra_hung_state() -> None:
     service = _graph_service()
     node = service.query_task_dashboard("task-1").tasks[0]

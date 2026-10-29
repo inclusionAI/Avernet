@@ -219,6 +219,22 @@ class TaskRuntimeProfile:
             allowed_run_modes=normalized or cls.allowed_run_modes,
         )
 
+    @classmethod
+    def run_modes_from_graph(cls, graph: Any) -> tuple[str, ...]:
+        """Return the frozen successor-mode policy stored on a runtime graph."""
+        extend_props = getattr(graph, "extend_props", None) or {}
+        if not isinstance(extend_props, dict):
+            return cls.allowed_run_modes
+        profile = extend_props.get("runtime_profile") or {}
+        if not isinstance(profile, dict):
+            return cls.allowed_run_modes
+        modes = profile.get("allowed_run_modes")
+        if not isinstance(modes, (list, tuple)) or not modes:
+            return cls.allowed_run_modes
+        return tuple(
+            dict.fromkeys(str(mode).strip() for mode in modes if str(mode).strip())
+        ) or cls.allowed_run_modes
+
     def to_dict(self) -> dict[str, Any]:
         profile = {
             "dispatcher_strategy": self.dispatcher_strategy,

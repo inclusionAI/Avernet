@@ -9,11 +9,15 @@ import time
 import uuid
 from typing import Any
 
-from agentclaw.community.core.task.domain.identity import compose_bot_identity
+from agentclaw.community.core.task.domain.identity import (
+    compose_bot_identity,
+    is_dispatchable_single_bot_assignee,
+)
 from agentclaw.community.core.task.domain.models import (
     TaskCallbackData,
     TaskNode,
     TaskNodePatch,
+    TaskRuntimeProfile,
     task_spec_instruction,
 )
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
@@ -245,6 +249,10 @@ class TaskExecutor(TaskExecutorOwnerMixin, TaskExecutorRelayMixin, TaskExecutorB
         已由 dispatcher 写入 ``run_info.extend_props.unauthorized_bots``(dashboard 暴露)。"""
         assignee = node.run_info.assignee
         assignee_owner_id = node.run_info.extend_props.get("assignee_owner_id")
+        if not is_dispatchable_single_bot_assignee(assignee):
+            raise TaskStateError(
+                "single_bot dispatch requires a real bot assignee"
+            )
         openapi_bot_id = compose_bot_identity(assignee, assignee_owner_id)
         loop_task_id = f"{node.task_id}::{node.node_id}"
         skill_report = self._node_skill_report_enabled(node)
@@ -374,13 +382,16 @@ class TaskExecutor(TaskExecutorOwnerMixin, TaskExecutorRelayMixin, TaskExecutorB
                 ],
                 "upstream_outputs": ctx.get("sibling_outputs") or {},
                 "relay_token": node.run_info.extend_props.get("relay_token"),
+                "allowed_run_modes": list(
+                    TaskRuntimeProfile.run_modes_from_graph(node.node_run_graph)
+                ),
             },
         )
         task_owner_id = self._resolve_owner_user_id(gf)
         gf.extend_props["owner_user_id"] = task_owner_id
 
         logger.info(
-            "[task][task-executor] singlebot_2_group 建群前 task=%s node=%s driver=%s collab=chat task_owner=%s",
+            "[task][task-executor] singlebot_2_group 建群前 task=%s node=%s driver=%s collab=manager_worker task_owner=%s",
             node.task_id, node.node_id, openapi_bot_id, task_owner_id,
         )
 
@@ -781,6 +792,7 @@ class TaskExecutor(TaskExecutorOwnerMixin, TaskExecutorRelayMixin, TaskExecutorB
                     relay_execution=bool(gf.extend_props.get("relay_execution")),
                     relay_blackboard=gf.extend_props.get("relay_blackboard"),
                     relay_token=gf.extend_props.get("relay_token"),
+                    allowed_run_modes=gf.extend_props.get("allowed_run_modes"),
                 )
             elif str(_task_instruction).lstrip().startswith("# 接自"):
                 # 接力协作群(static_plan):真正的多 bot 协作群 task_instruction 由 engine 从 TaskSpec 业务事实派生,未走

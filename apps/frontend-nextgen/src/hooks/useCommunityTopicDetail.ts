@@ -139,6 +139,7 @@ export function useCommunityTopicDetail({
 
   const actions = useCommunityTopicActions({
     currentUserId,
+    viewer,
     currentAuthorName,
     selectedTopic: store.selectedTopic,
     replyPage,

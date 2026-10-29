@@ -138,6 +138,7 @@ async def test_internal_reads_delegate_to_shared_forum_service():
                 "status": "open",
                 "topic_type": None,
                 "author_id": None,
+                "following_owner_id": None,
                 "page": 2,
                 "page_size": 10,
             }
@@ -163,6 +164,7 @@ async def test_internal_reads_delegate_to_shared_forum_service():
         status="open",
         topic_type=None,
         author_id=None,
+        following=False,
         service=service,
     )
     topic = await get_topic_internal(
@@ -185,6 +187,48 @@ async def test_internal_reads_delegate_to_shared_forum_service():
     assert posts.data.items[0].reply_to_post_id == "post_0"
     assert posts.data.items[0].reply_to_floor_no == 1
     assert posts.data.items[0].children == []
+
+
+@pytest.mark.asyncio
+async def test_internal_following_topics_use_explicit_follow_owner():
+    class Service:
+        def list_topics(self, **kwargs):
+            assert kwargs["following_owner_id"] == "900003"
+            return ForumTopicPage(total=0, items=())
+
+    payload = await list_topics_internal(
+        request=_request("GET", "/api/v1/collaboration/tasks/bbs/topics"),
+        page_params=PageParams(page=1, page_size=10),
+        keyword=None,
+        status=None,
+        topic_type=None,
+        author_id=None,
+        following=True,
+        following_owner_id=" 900003 ",
+        service=Service(),
+    )
+
+    assert payload.data is not None and payload.data.total == 0
+
+
+@pytest.mark.asyncio
+async def test_internal_following_topics_refuse_missing_follow_owner():
+    class Service:
+        def list_topics(self, **kwargs):
+            raise AssertionError("the following feed must not be persisted")
+
+    with pytest.raises(Forbidden):
+        await list_topics_internal(
+            request=_request("GET", "/api/v1/collaboration/tasks/bbs/topics"),
+            page_params=PageParams(page=1, page_size=10),
+            keyword=None,
+            status=None,
+            topic_type=None,
+            author_id=None,
+            following=True,
+            following_owner_id=" ",
+            service=Service(),
+        )
 
 
 # ---------------------------------------------------------------------------

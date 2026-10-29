@@ -1,4 +1,4 @@
-"""Domain tests for append-only BBS interaction events and summaries."""
+"""Domain tests for BBS interaction state and summaries."""
 
 from __future__ import annotations
 
@@ -94,6 +94,7 @@ class FakeRepository(ForumInteractionRepositoryProtocol):
             target_type=ForumInteractionTargetType(kwargs["target_type"]),
             target_id=kwargs["target_id"],
             env="test",
+            active=kwargs["active"],
             created_at=_NOW,
             updated_at=_NOW,
         )
@@ -197,6 +198,7 @@ def _request(
     target_id: str = "topic-1",
     actor_type: str = "HUMAN",
     actor_id: str = "user-a",
+    active: int = 1,
 ):
     return _service().record_interaction(
         actor_type=actor_type,
@@ -204,6 +206,7 @@ def _request(
         action_type=action_type,
         target_type=target_type,
         target_id=target_id,
+        active=active,
     )
 
 
@@ -212,7 +215,7 @@ def _request(
     [("TOPIC", "topic-1"), ("POST", "post-1")],
 )
 @pytest.mark.parametrize("action_type", ["VIEW", "LIKE", "FAVORITE", "FOLLOW"])
-def test_content_matrix_appends_one_event(action_type, target_type, target_id):
+def test_content_matrix_records_active_state(action_type, target_type, target_id):
     repo = FakeRepository()
     verifier = FakeVerifier()
 
@@ -222,6 +225,7 @@ def test_content_matrix_appends_one_event(action_type, target_type, target_id):
         action_type=action_type,
         target_type=target_type,
         target_id=target_id,
+        active=1,
     )
 
     assert repo.inserted == [
@@ -231,6 +235,7 @@ def test_content_matrix_appends_one_event(action_type, target_type, target_id):
             "action_type": action_type,
             "target_type": target_type,
             "target_id": target_id,
+            "active": 1,
         }
     ]
     expected_call = "topic" if target_type == "TOPIC" else "post"
@@ -251,6 +256,7 @@ def test_identity_target_only_accepts_follow(target_type):
         action_type="FOLLOW",
         target_type=target_type,
         target_id=target_id,
+        active=1,
     )
 
     assert repo.inserted == [
@@ -260,6 +266,38 @@ def test_identity_target_only_accepts_follow(target_type):
             "action_type": "FOLLOW",
             "target_type": target_type,
             "target_id": target_id,
+            "active": 1,
+        }
+    ]
+
+
+def test_active_state_is_validated_and_passed_to_persistence():
+    repo = FakeRepository()
+    with pytest.raises(ValidationError, match="active must be 1 or -1"):
+        _request(active=0)
+    with pytest.raises(ValidationError, match="active must be 1 or -1"):
+        _request(active=True)
+    with pytest.raises(ValidationError, match="active must be 1 or -1"):
+        _request(active=False)
+
+    record = _service(repository=repo).record_interaction(
+        actor_type="HUMAN",
+        actor_id="user-a",
+        action_type="LIKE",
+        target_type="TOPIC",
+        target_id="topic-1",
+        active=-1,
+    )
+
+    assert record.active == -1
+    assert repo.inserted == [
+        {
+            "actor_type": "HUMAN",
+            "actor_id": "user-a",
+            "action_type": "LIKE",
+            "target_type": "TOPIC",
+            "target_id": "topic-1",
+            "active": -1,
         }
     ]
 
@@ -286,6 +324,7 @@ def test_accept_requires_help_topic_and_first_level_post():
         action_type="ACCEPT",
         target_type="POST",
         target_id="post-1",
+        active=1,
     )
 
     assert repo.inserted[0]["action_type"] == "ACCEPT"
@@ -307,6 +346,7 @@ def test_accept_rejects_invalid_post_or_topic(topic, post, match):
             action_type="ACCEPT",
             target_type="POST",
             target_id="post-1",
+            active=1,
         )
 
 
@@ -319,6 +359,7 @@ def test_accept_requires_topic_author_identity():
             action_type="ACCEPT",
             target_type="POST",
             target_id="post-1",
+            active=1,
         )
 
 
@@ -331,6 +372,7 @@ def test_missing_topic_and_post_targets_are_not_writable():
             action_type="VIEW",
             target_type="TOPIC",
             target_id="missing",
+            active=1,
         )
     with pytest.raises(NotFound, match="post target"):
         _service(verifier=verifier).record_interaction(
@@ -339,6 +381,7 @@ def test_missing_topic_and_post_targets_are_not_writable():
             action_type="LIKE",
             target_type="POST",
             target_id="missing",
+            active=1,
         )
 
 
@@ -354,10 +397,11 @@ def test_identity_verifier_failure_is_not_treated_as_valid_target():
             action_type="FOLLOW",
             target_type="HUMAN",
             target_id="user-b",
+            active=1,
         )
 
 
-def test_repository_failure_prevents_a_successful_event():
+def test_repository_failure_prevents_a_successful_state():
     class FailingRepository(FakeRepository):
         def insert_interaction(self, **kwargs):
             raise RuntimeError("database unavailable")
@@ -369,6 +413,7 @@ def test_repository_failure_prevents_a_successful_event():
             action_type="LIKE",
             target_type="TOPIC",
             target_id="topic-1",
+            active=1,
         )
 
 

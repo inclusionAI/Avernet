@@ -1,4 +1,4 @@
-"""Repository tests for append-only BBS interaction events and summaries."""
+"""Repository tests for BBS interaction states and summaries."""
 
 from __future__ import annotations
 
@@ -6,6 +6,8 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
+
+from agentclaw.community.core.errors import ValidationError
 
 from agentclaw.community.core.repository.implementations.task.forum.forum_repository import (
     ForumRepository,
@@ -22,6 +24,7 @@ from agentclaw.community.core.task.forum.interaction.models import (
     ForumSummaryScope,
     ForumTargetRef,
 )
+from agentclaw.community.core.task.forum.interaction.time_utils import storage_now
 from agentclaw.community.core.task.forum.repository.models import (
     ForumInteractionModel,
     ForumPostModel,
@@ -36,7 +39,7 @@ class FailingDatabase:
         yield None
 
 
-def _events(repo, *, actor_type="HUMAN", actor_id="user-a"):
+def _events(repo, *, actor_type="HUMAN", actor_id="user-a", active=1):
     def add(action, target_type, target_id):
         repo.insert_interaction(
             actor_type=actor_type,
@@ -44,45 +47,218 @@ def _events(repo, *, actor_type="HUMAN", actor_id="user-a"):
             action_type=action,
             target_type=target_type,
             target_id=target_id,
+            active=active,
         )
 
     return add
 
 
-def test_interaction_repository_appends_repeated_actor_target_events(db):
+def test_interaction_repository_upserts_repeated_actor_target_state(db):
     repo = ForumInteractionRepository(db)
-    add = _events(repo)
 
+    before = storage_now()
     first = repo.insert_interaction(
         actor_type="HUMAN",
         actor_id="user-a",
         action_type="LIKE",
         target_type="TOPIC",
         target_id="topic-1",
+        active=1,
     )
+    between = storage_now()
     second = repo.insert_interaction(
         actor_type="HUMAN",
         actor_id="user-a",
         action_type="LIKE",
         target_type="TOPIC",
         target_id="topic-1",
+        active=-1,
+    )
+    after = storage_now()
+
+    assert first.active == 1
+    assert second.active == 0
+    assert before <= first.created_at <= between
+    assert first.created_at == first.updated_at
+    assert second.created_at == first.created_at
+    assert between <= second.updated_at <= after
+    assert second.updated_at >= first.updated_at
+    with db.orm_session() as session:
+        rows = session.query(
+            ForumInteractionModel.action_type,
+            ForumInteractionModel.target_id,
+            ForumInteractionModel.active,
+        ).all()
+    assert len(rows) == 1
+    assert rows[0] == ("LIKE", "topic-1", 0)
+
+
+def test_interaction_summaries_exclude_inactive_state(db):
+    repo = ForumInteractionRepository(db)
+    target = ForumTargetRef(type=ForumInteractionTargetType.TOPIC, id="topic-1")
+
+    repo.insert_interaction(
+        actor_type="HUMAN",
+        actor_id="user-a",
+        action_type="LIKE",
+        target_type="TOPIC",
+        target_id="topic-1",
+        active=1,
+    )
+    repo.insert_interaction(
+        actor_type="HUMAN",
+        actor_id="user-a",
+        action_type="LIKE",
+        target_type="TOPIC",
+        target_id="topic-1",
+        active=-1,
+    )
+    assert repo.batch_get_target_summaries((target,))[target].like_count == 0
+
+    repo.insert_interaction(
+        actor_type="HUMAN",
+        actor_id="user-a",
+        action_type="LIKE",
+        target_type="TOPIC",
+        target_id="topic-1",
+        active=1,
+    )
+    assert repo.batch_get_target_summaries((target,))[target].like_count == 1
+
+
+def test_three_distinct_likers_accumulate_topic_like_count(db):
+    repo = ForumInteractionRepository(db)
+    topic_id = "topic-three-likers"
+    likers = ("user-a", "user-b", "user-c")
+    target = ForumTargetRef(type=ForumInteractionTargetType.TOPIC, id=topic_id)
+
+    for actor_id in likers:
+        repo.insert_interaction(
+            actor_type="HUMAN",
+            actor_id=actor_id,
+            action_type="LIKE",
+            target_type="TOPIC",
+            target_id=topic_id,
+            active=1,
+        )
+
+    target_stats = repo.batch_get_target_summaries((target,))[target]
+    pairs = tuple(
+        ForumActorTargetRef(
+            actor=ForumActorRef(type=ForumActorType.HUMAN, id=actor_id),
+            target=target,
+        )
+        for actor_id in likers
+    )
+    pair_stats = repo.batch_get_actor_target_summaries(pairs)
+
+    assert target_stats.like_count == 3
+    assert all(pair_stats[pair].like_count == 1 for pair in pairs)
+    with db.orm_session() as session:
+        rows = session.query(
+            ForumInteractionModel.actor_id,
+            ForumInteractionModel.active,
+        ).filter(
+            ForumInteractionModel.action_type == "LIKE",
+            ForumInteractionModel.target_type == "TOPIC",
+            ForumInteractionModel.target_id == topic_id,
+        ).order_by(ForumInteractionModel.actor_id).all()
+    assert rows == [("user-a", 1), ("user-b", 1), ("user-c", 1)]
+
+
+def test_three_distinct_viewers_accumulate_topic_view_count(db):
+    repo = ForumInteractionRepository(db)
+    topic_id = "topic-three-viewers"
+    viewers = ("user-a", "user-b", "user-c")
+    target = ForumTargetRef(type=ForumInteractionTargetType.TOPIC, id=topic_id)
+
+    for actor_id in viewers:
+        repo.insert_interaction(
+            actor_type="HUMAN",
+            actor_id=actor_id,
+            action_type="VIEW",
+            target_type="TOPIC",
+            target_id=topic_id,
+            active=1,
+        )
+
+    target_stats = repo.batch_get_target_summaries((target,))[target]
+    pairs = tuple(
+        ForumActorTargetRef(
+            actor=ForumActorRef(type=ForumActorType.HUMAN, id=actor_id),
+            target=target,
+        )
+        for actor_id in viewers
+    )
+    pair_stats = repo.batch_get_actor_target_summaries(pairs)
+
+    assert target_stats.view_count == 3
+    assert all(pair_stats[pair].view_count == 1 for pair in pairs)
+    with db.orm_session() as session:
+        rows = session.query(
+            ForumInteractionModel.actor_id,
+            ForumInteractionModel.active,
+        ).filter(
+            ForumInteractionModel.action_type == "VIEW",
+            ForumInteractionModel.target_type == "TOPIC",
+            ForumInteractionModel.target_id == topic_id,
+        ).order_by(ForumInteractionModel.actor_id).all()
+    assert rows == [("user-a", 1), ("user-b", 1), ("user-c", 1)]
+
+
+def test_first_cancel_delta_without_existing_state_is_rejected(db):
+    repo = ForumInteractionRepository(db)
+
+    for invalid_active in (0, True, False, "1"):
+        with pytest.raises(ValidationError, match="active must be 1 or -1"):
+            repo.insert_interaction(
+                actor_type="HUMAN",
+                actor_id="user-a",
+                action_type="LIKE",
+                target_type="TOPIC",
+                target_id="topic-1",
+                active=invalid_active,
+            )
+    with pytest.raises(ValidationError, match="first interaction must"):
+        repo.insert_interaction(
+            actor_type="HUMAN",
+            actor_id="user-a",
+            action_type="LIKE",
+            target_type="TOPIC",
+            target_id="topic-1",
+            active=-1,
+        )
+    with db.orm_session() as session:
+        assert session.query(ForumInteractionModel).count() == 0
+
+
+def test_repeated_view_deltas_accumulate_into_view_count(db):
+    repo = ForumInteractionRepository(db)
+    target = ForumTargetRef(type=ForumInteractionTargetType.TOPIC, id="topic-1")
+    actor = ForumActorRef(type=ForumActorType.HUMAN, id="user-a")
+    pair = ForumActorTargetRef(actor=actor, target=target)
+
+    first = repo.insert_interaction(
+        actor_type="HUMAN",
+        actor_id="user-a",
+        action_type="VIEW",
+        target_type="TOPIC",
+        target_id="topic-1",
+        active=1,
+    )
+    second = repo.insert_interaction(
+        actor_type="HUMAN",
+        actor_id="user-a",
+        action_type="VIEW",
+        target_type="TOPIC",
+        target_id="topic-1",
+        active=1,
     )
 
-    assert first.actor_id == second.actor_id == "user-a"
-    with db.orm_session() as session:
-        rows = (
-            session.query(
-                ForumInteractionModel.action_type,
-                ForumInteractionModel.target_id,
-            )
-            .order_by(ForumInteractionModel.id)
-            .all()
-        )
-    assert len(rows) == 2
-    assert [(row.action_type, row.target_id) for row in rows] == [
-        ("LIKE", "topic-1"),
-        ("LIKE", "topic-1"),
-    ]
+    assert first.active == 1
+    assert second.active == 2
+    assert repo.batch_get_target_summaries((target,))[target].view_count == 2
+    assert repo.batch_get_actor_target_summaries((pair,))[pair].view_count == 2
 
 
 def test_summary_dimensions_and_topic_projections_do_not_share_counts(db):
@@ -112,7 +288,6 @@ def test_summary_dimensions_and_topic_projections_do_not_share_counts(db):
 
     repo = ForumInteractionRepository(db)
     _events(repo)("VIEW", "TOPIC", topic.topic_id)
-    _events(repo)("VIEW", "TOPIC", topic.topic_id)
     _events(repo)("LIKE", "TOPIC", topic.topic_id)
     _events(repo)("FAVORITE", "POST", first.post_id)
     _events(repo, actor_type="HUMAN", actor_id="user-b")("FOLLOW", "HUMAN", "user-a")
@@ -129,12 +304,12 @@ def test_summary_dimensions_and_topic_projections_do_not_share_counts(db):
         target_id=topic.topic_id,
     )
 
-    assert (target.view_count, target.like_count, target.follow_count) == (2, 1, 1)
+    assert (target.view_count, target.like_count, target.follow_count) == (1, 1, 1)
     assert target.reply_participant_count == 2
     assert target.helpful_reply_count == 0
     assert actor.follow_count == 1
     assert (actor.view_count, actor.like_count, actor.favorite_count) == (0, 0, 0)
-    assert (pair.view_count, pair.like_count, pair.follow_count) == (2, 1, 0)
+    assert (pair.view_count, pair.like_count, pair.follow_count) == (1, 1, 0)
     assert (pair.favorite_count, pair.topic_count, pair.reply_count) == (0, 0, 0)
 
 
@@ -183,19 +358,33 @@ def test_database_failure_propagates_and_never_returns_a_summary():
         repo.batch_get_target_summaries((target,))
 
 
-def test_interaction_ddl_and_orm_contract_stay_additive_and_unique_free():
+def test_interaction_ddl_and_orm_contract_define_active_unique_state():
     ddl_path = Path(
         "src/agentclaw/community/core/task/forum/sql/2026_10_27_forum_interaction.sql"
     )
+    migration_path = Path(
+        "src/agentclaw/community/core/task/forum/sql/"
+        "2026_10_28_forum_interaction_active_unique.sql"
+    )
+    amount_migration_path = Path(
+        "src/agentclaw/community/core/task/forum/sql/"
+        "2026_10_28_forum_interaction_active_unique_amount.sql"
+    )
     ddl = ddl_path.read_text()
+    migration = migration_path.read_text()
 
     assert "ac_forum_interaction" in ddl
-    assert "UNIQUE KEY" not in ddl
-    assert "uk_forum_interaction" not in ddl.upper()
-    assert "avernet_tenant" not in ddl
-    assert "active" not in ddl
-    assert "dedupe_date" not in ddl
-    assert "COLLATE utf8mb4_bin" in ddl
+    assert "`active`          int          NOT NULL DEFAULT 1" in ddl
+    assert "UNIQUE KEY `uk_forum_interaction_action`" in ddl
+    assert (
+        "(`env`, `actor_type`, `actor_id`, `action_type`, `target_type`, `target_id`)"
+        in ddl
+    )
+    assert "`active` int NOT NULL DEFAULT 1" in migration
+    assert "ADD UNIQUE KEY `uk_forum_interaction_action`" in migration
+    assert (
+        "MODIFY COLUMN `active` int NOT NULL DEFAULT 1" in amount_migration_path.read_text()
+    )
     columns = {column.name for column in ForumInteractionModel.__table__.columns}
     assert columns == {
         "id",
@@ -205,15 +394,18 @@ def test_interaction_ddl_and_orm_contract_stay_additive_and_unique_free():
         "target_type",
         "target_id",
         "env",
+        "active",
         "gmt_create",
         "gmt_modified",
     }
-    indexes = {index.name for index in ForumInteractionModel.__table__.indexes}
+    indexes = {
+    index.name: index.unique for index in ForumInteractionModel.__table__.indexes
+}
     assert indexes == {
-        "idx_forum_interaction_target",
-        "idx_forum_interaction_actor",
+        "uk_forum_interaction_action": True,
+        "idx_forum_interaction_target": False,
+        "idx_forum_interaction_actor": False,
     }
-    assert not any(index.unique for index in ForumInteractionModel.__table__.indexes)
 
 
 def test_helpful_accept_transaction_rolls_back_state_and_event(db, monkeypatch):
@@ -254,7 +446,7 @@ def test_helpful_accept_transaction_rolls_back_state_and_event(db, monkeypatch):
         assert session.query(ForumInteractionModel).count() == 0
 
 
-def test_helpful_accept_is_emitted_once_and_cleared_without_negative_event(db):
+def test_helpful_accept_updates_one_state_row_to_active(db):
     content_repo = ForumRepository(db)
     topic = content_repo.create_topic(
         author_type="HUMAN",
@@ -299,10 +491,12 @@ def test_helpful_accept_is_emitted_once_and_cleared_without_negative_event(db):
             ForumInteractionModel.action_type,
             ForumInteractionModel.target_type,
             ForumInteractionModel.target_id,
+            ForumInteractionModel.active,
         ).all()
     assert len(rows) == 1
     assert rows[0] == (
         "ACCEPT",
         "POST",
         post.post_id,
+        0,
     )

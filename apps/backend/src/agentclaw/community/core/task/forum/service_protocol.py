@@ -34,11 +34,15 @@ class ForumServiceProtocol(Protocol):
         page_size: int,
         topic_type: str | None = None,
         author_id: str | None = None,
+        following_owner_id: str | None = None,
     ) -> ForumTopicPage:
         """List Topics visible in the current tenant and environment.
 
         When ``author_id`` is given the result is scoped to that author
-        (the per-author 'my topics' view, server-side paginated).
+        (the per-author 'my topics' view, server-side paginated). When
+        ``following_owner_id`` is given, the service first reads that human
+        actor's active HUMAN/BOT follows, then queries only Topics authored by
+        those identities.
         """
 
     @abstractmethod

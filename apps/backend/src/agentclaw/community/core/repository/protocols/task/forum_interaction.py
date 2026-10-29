@@ -1,9 +1,9 @@
-"""Repository contract for BBS interaction event persistence and summaries."""
+"""Repository contract for BBS interaction state persistence and summaries."""
 
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from agentclaw.community.core.task.forum.interaction.models import (
@@ -26,8 +26,9 @@ class ForumInteractionRepositoryProtocol(Protocol):
         action_type: str,
         target_type: str,
         target_id: str,
+        active: Literal[1, -1],
     ) -> ForumInteractionRecord:
-        """Append one event in the current environment."""
+        """Apply a validated +1/-1 delta to the latest row for this action key."""
 
     @abstractmethod
     def get_summary(
@@ -56,4 +57,4 @@ class ForumInteractionRepositoryProtocol(Protocol):
     def batch_get_actor_target_summaries(
         self, pairs: tuple[ForumActorTargetRef, ...]
     ) -> dict[ForumActorTargetRef, ForumStatsRecord]:
-        """Read event counts for exact actor-target pairs."""
+        """Read active action counts for exact actor-target pairs."""

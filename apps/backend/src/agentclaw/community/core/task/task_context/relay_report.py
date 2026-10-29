@@ -12,6 +12,9 @@ from enum import Enum
 from typing import Any
 
 from agentclaw.community.core.task.domain.errors import TaskStateError
+from agentclaw.community.core.task.domain.identity import (
+    is_dispatchable_single_bot_assignee,
+)
 from agentclaw.community.core.task.domain.models import (
     NodeAction,
     NodeActionEvent,
@@ -25,6 +28,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskReportEventType,
     TaskReportResult,
     TaskReportStatus,
+    TaskRuntimeProfile,
 )
 from agentclaw.community.core.task.task_context.task_graph_support import (
     _relay_graph_output,
@@ -390,19 +394,19 @@ def apply_relay_report(
                 mode = next_node.run_info.run_mode
                 assignee = next_node.run_info.assignee
                 config = graph.extend_props.get("execution_config") or {}
-                allowed = (graph.extend_props.get("runtime_profile") or {}).get(
-                    "allowed_run_modes"
-                ) or ["single_bot", "coop_group", "bbs"]
+                allowed = TaskRuntimeProfile.run_modes_from_graph(graph)
                 if mode not in allowed:
-                    raise TaskStateError("planned run mode is not allowed")
+                    raise TaskStateError(f"planned run mode is not allowed: {mode}")
                 if mode == "coop_group" and config.get("intake_session_id"):
                     raise TaskStateError(
                         "Group relay handoff is not supported in the first release"
                     )
                 planned_group_formation: dict[str, Any] | None = None
                 if mode == "single_bot":
-                    if not assignee:
-                        raise TaskStateError("single_bot plan requires a bot assignee")
+                    if not is_dispatchable_single_bot_assignee(assignee):
+                        raise TaskStateError("single_bot plan requires a real bot assignee")
+                    assignee = str(assignee or "").strip()
+                    next_node.run_info.assignee = assignee
                     if (
                         next_node.run_info.extend_props.get("pending_group_formation")
                         is not None

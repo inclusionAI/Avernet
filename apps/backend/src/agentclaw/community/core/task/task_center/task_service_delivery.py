@@ -6,6 +6,9 @@ import json
 import logging
 
 from agentclaw.community.core.task.domain.errors import DispatchInProgress, TaskStateError
+from agentclaw.community.core.task.domain.identity import (
+    is_dispatchable_single_bot_assignee,
+)
 from agentclaw.community.core.task.domain.models import (
     NodeAction,
     Status,
@@ -22,6 +25,15 @@ _DEFAULT_DELIVERY_LEASE_MS = 60_000
 # redriver about Bot execution time. Ten minutes bounds crash recovery without
 # returning to the duplicate-dispatch behavior produced by the 60-second lease.
 _BBS_DELIVERY_LEASE_MS = 600_000
+
+
+_TERMINAL_NODE_STATUSES = {
+    Status.SUCCESS,
+    Status.DONE,
+    Status.FAILED,
+    Status.HUNG,
+    Status.CANCELLED,
+}
 
 
 def _relay_delivery_fields(
@@ -194,23 +206,22 @@ class TaskServiceDeliveryMixin:
         if not graph.is_relay:
             raise TaskStateError("node dispatch requires relay orchestration")
         node = next((item for item in graph.tasks if item.node_id == node_id), None)
-        if (
-            node is not None
-            and node.run_info.run_mode == "bbs"
-            and node.status not in {Status.PENDING, Status.RUNNING}
-        ):
-            # A terminal BBS baton cannot accept a new instruction, even when a
+        if node is not None and node.status in _TERMINAL_NODE_STATUSES:
+            # A terminal baton cannot accept a new instruction, even when a
             # legacy completion path cleared its owner or missed the graph-save
-            # settlement. Retire the stale row here; redispatching would fail
-            # "not runnable" forever and keep the redriver noisy.
+            # settlement. Previously this cleanup was BBS-only, which left
+            # terminal single_bot/coop_group intents to make the redriver noisy
+            # forever.
             stale_token = node.run_info.extend_props.get("relay_token")
             if stale_token and intents.settle_delivery_intent(
                 task_id, node_id, stale_token
             ):
                 logger.warning(
-                    "settled stale BBS delivery intent task=%s node=%s status=%s",
+                    "settled terminal relay delivery intent task=%s node=%s "
+                    "run_mode=%s status=%s",
                     task_id,
                     node_id,
+                    node.run_info.run_mode,
                     node.status.value,
                 )
                 return node
@@ -220,6 +231,17 @@ class TaskServiceDeliveryMixin:
         relay_token = node.run_info.extend_props.get("relay_token")
         if not relay_token:
             raise TaskStateError("relay delivery target has no run generation")
+        if (
+            node.run_info.run_mode == "single_bot"
+            and not is_dispatchable_single_bot_assignee(node.run_info.assignee)
+        ):
+            if intents.settle_delivery_intent(task_id, node_id, relay_token):
+                logger.warning(
+                    "settled invalid single_bot delivery intent task=%s node=%s",
+                    task_id,
+                    node_id,
+                )
+            raise TaskStateError("relay delivery target has an invalid assignee")
         lease_ms = (
             _BBS_DELIVERY_LEASE_MS
             if node.run_info.run_mode == "bbs"

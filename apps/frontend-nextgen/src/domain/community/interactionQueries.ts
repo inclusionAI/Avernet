@@ -24,6 +24,16 @@ function visiblePosts(replies: CommunityReply[]): CommunityReply[] {
   return result;
 }
 
+export function buildTopicListSummaryQueries(topics: CommunityTopic[]): InteractionSummaryQuery[] {
+  const queries = new Map<string, InteractionSummaryQuery>();
+  topics.forEach((topic) => {
+    const target: ForumTargetRef = { targetType: 'TOPIC', id: topic.id };
+    const query: InteractionSummaryQuery = { target };
+    queries.set(`${target.targetType}:${target.id}`, query);
+  });
+  return [...queries.values()];
+}
+
 export function buildTopicSummaryQueries(options: {
   topic: CommunityTopic;
   replies: CommunityReply[];
@@ -46,9 +56,17 @@ export function buildTopicSummaryQueries(options: {
   const authors = [topic.author, ...visiblePosts(replies).map((reply) => reply.author)];
   const uniqueAuthors = new Map<string, CommunityAuthor>();
   authors.forEach((author) => uniqueAuthors.set(`${author.type}:${author.id}`, author));
-  uniqueAuthors.forEach((author) => add({ actor: forumAuthorRef(author) }));
+  uniqueAuthors.forEach((author) => {
+    add({ actor: forumAuthorRef(author) });
+    add({
+      actor: viewer,
+      target: { targetType: author.type === 'bot' ? 'BOT' : 'HUMAN', id: author.id },
+    });
+  });
   visiblePosts(replies).forEach((reply) => {
-    add({ target: { targetType: 'POST', id: reply.id } });
+    const replyTarget: ForumTargetRef = { targetType: 'POST', id: reply.id };
+    add({ target: replyTarget });
+    add({ actor: viewer, target: replyTarget });
   });
 
   return [...queries.values()].slice(0, MAX_INTERACTION_SUMMARY_BATCH);

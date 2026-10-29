@@ -534,6 +534,10 @@ def claim_bbs_owner(
     """Claim centralized root BBS or a Relay target BBS node atomically."""
     with self._lock_for(task_id):
         graph = self._require_graph(task_id)
+        if "bbs" not in TaskRuntimeProfile.run_modes_from_graph(graph):
+            raise TaskStateError(
+                f"claim_bbs_owner: BBS run mode is not allowed by runtime profile task={task_id}"
+            )
         if not graph.extend_props.get("bbs_mode"):
             raise TaskStateError(f"claim_bbs_owner: task={task_id} 非 bbs_mode 任务")
         target_id = node_id or task_id

@@ -1276,12 +1276,13 @@ S5.3 直接使用 `TaskService.search_bots`，不新增 Bot 本地搜索包装�
 ```python
 next_node: TaskNode
 candidates: list[BotCandidate]
+allowed_run_modes: list[str]
 ```
 
 输出参数：
 
 ```python
-next_node: TaskNode
+next_node: TaskNode | None
 ```
 
 处理函数：
@@ -1290,12 +1291,15 @@ next_node: TaskNode
 def select_executor(
     next_node: TaskNode,
     candidates: list[BotCandidate],
-) -> TaskNode:
+    allowed_run_modes: list[str],
+) -> TaskNode | None:
     decision = select_from_candidates(
         next_spec=next_node.task_spec,
         candidates=candidates,
     )
     if decision.outcome == SearchOutcome.MISS:
+        if "bbs" not in allowed_run_modes:
+            return None
         next_node.run_info.run_mode = "bbs"
         next_node.run_info.assignee = None
         next_node.run_info.failure_reason = require(decision.miss_reason)
@@ -1315,7 +1319,9 @@ def select_executor(
     return next_node
 ```
 
-S5.4 不新增或复用 `SearchResult` 作为协议对象；Skill 的本地决策直接填充同一个未落图 `TaskNode.run_info`，随后随 `PLAN_RESULT` 一次上报。S5.2 已将 `task_gaps` 编入下一棒规格，S5.4 不重复接收缺口列表。Relay 首版的候选接口只返回 Bot，故 S5.4 **不支持 `HIT_GROUP`**；若本地决策意外产生该枚举，显式拒绝并重新决策，不把未经检索的 Group ID 写入图谱。`HIT_MULTI_BOTS` 仅允许可确定唯一 manager/master Bot 的 `manager_worker` 组群，Backend 创建成功后填写最终 Group ID；不满足条件的 chat/state_machine 组群不进入首版 Relay。`MISS` 必须显式为 `run_mode=bbs` 并带原因，不能仅凭 `assignee=None` 推断。用户在发起时显式选择已有 Group 属于首棒目标解析，不受 S5.4 限制。
+服务端下发的 S5d 允许执行模态白名单来自任务创建时冻结的 `runtime_profile.allowed_run_modes`。Bot 只能从白名单内选择 `run_mode`；`MISS` 仅在 `bbs` 被允许时转 BBS。若候选不足且 `bbs` 被禁用，S5.4 不伪造 HIT，必须转为规划失败：`event=None`、`task_acceptance_result=None`、`failure_reason=bbs_disabled_and_no_candidate`。
+
+S5.4 不新增或复用 `SearchResult` 作为协议对象；Skill 的本地决策直接填充同一个未落图 `TaskNode.run_info`，随后随 `PLAN_RESULT` 一次上报。对于 `run_mode=single_bot`，该值必须是 S5D 实际选中或根据任务目标冻结的真实 Bot ID；Backend 拒绝空白值和决策占位符（如 `NOT_DECIDED`）。S5.2 已将 `task_gaps` 编入下一棒规格，S5.4 不重复接收缺口列表。Relay 首版的候选接口只返回 Bot，故 S5.4 **不支持 `HIT_GROUP`**；若本地决策意外产生该枚举，显式拒绝并重新决策，不把未经检索的 Group ID 写入图谱。`HIT_MULTI_BOTS` 仅允许可确定唯一 manager/master Bot 的 `manager_worker` 组群，Backend 创建成功后填写最终 Group ID；不满足条件的 chat/state_machine 组群不进入首版 Relay。白名单允许时，`MISS` 必须显式为 `run_mode=bbs` 并带原因，不能仅凭 `assignee=None` 推断；白名单禁用 BBS 时按上述规划失败分支处理。用户在发起时显式选择已有 Group 属于首棒目标解析，不受 S5.4 限制。
 
 ### 9.5 S5.5：统一上报规划节点
 
@@ -1325,7 +1331,7 @@ S5.4 不新增或复用 `SearchResult` 作为协议对象；Skill 的本地决�
 | --- | --- | --- |
 | 根任务完成 | S5.1 返回 `task_gaps=[]` 和非空 `task_acceptance_result`；跳过 S5.2～S5.4 | `event=None`、`task_acceptance_result=上述根任务验收`、`failure_reason=None` |
 | 继续接力或 BBS | S5.2 初始化 `next_node`，S5.4 在同一节点填好 `run_info` | `event=next_node`、`task_acceptance_result=None`、`failure_reason=None` |
-| 规划失败 | S5.2 有缺口但无法生成节点，抛出 `PlanningUnavailable` | `event=None`、`task_acceptance_result=None`、`failure_reason=str(exc).strip()`（必须非空） |
+| 规划失败 | S5.2 有缺口但无法生成节点，或 S5.4 候选不足且 BBS 被白名单禁用 | `event=None`、`task_acceptance_result=None`、`failure_reason=str(exc).strip()`（必须非空） |
 
 处理函数即统一上报接口：
 
@@ -1336,7 +1342,7 @@ class TaskService:
 planning_report: TaskReportResult = await task_service.report(command)
 ```
 
-`PlanningUnavailable` 仅由 S5.2 产生；`planning_failure_reason` 是 Runtime 捕获该异常后填入 command 的错误分支值，不是 `TaskContext`、`TaskNode` 或 S5.1 的字段。S5.3 搜索不可用应重试搜索，不转换为规划失败上报。`execution_report` 是进入 S5 的前置校验结果，`task_service` 是 Runtime 调用依赖，二者都不是 S5.5 的业务入参。
+`PlanningUnavailable` 仅由 S5.2 产生；S5.4 在白名单禁用 BBS 且无候选时直接按规划失败分支上报 `bbs_disabled_and_no_candidate`；`planning_failure_reason` 是 Runtime 捕获该异常后填入 command 的错误分支值，不是 `TaskContext`、`TaskNode` 或 S5.1 的字段。S5.3 搜索不可用应重试搜索，不转换为规划失败上报。`execution_report` 是进入 S5 的前置校验结果，`task_service` 是 Runtime 调用依赖，二者都不是 S5.5 的业务入参。
 
 调用一次 `POST /api/v1/collaboration/tasks/callback/report`。Backend 原子应用：
 

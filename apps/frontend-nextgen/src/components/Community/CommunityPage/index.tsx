@@ -18,7 +18,7 @@ type CommunityTopicView = CommunityTopicFilter | 'following';
 
 const topicTypeOptions: Array<{ value: CommunityTopicView; label: string; disabledReason?: string }> = [
   { value: 'all', label: '全部' },
-  { value: 'following', label: '关注', disabledReason: '关注功能暂未开放' },
+  { value: 'following', label: '关注' },
   { value: 'discussion', label: '讨论' },
   { value: 'share', label: '分享' },
   { value: 'poll', label: '投票' },
@@ -30,8 +30,13 @@ export function CommunityPage() {
   const [publishOpen, setPublishOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [showPersonalCenter, setShowPersonalCenter] = useState(false);
+  const topicView: CommunityTopicView =
+    community.scope === 'following' ? 'following' : community.topicType;
   const hasFilter =
-    !!community.query.trim() || community.scope === 'mine' || community.topicType !== 'all';
+    !!community.query.trim() ||
+    community.scope === 'mine' ||
+    community.scope === 'following' ||
+    community.topicType !== 'all';
   const scrollRootRef = useRef<HTMLElement>(null);
 
   if (community.selectedTopic) {
@@ -40,6 +45,13 @@ export function CommunityPage() {
       <CommunityTopicDetail
         currentUserId={community.currentUserId}
         targetSummary={community.targetSummary?.(community.selectedTopic)}
+        viewerTopicSummary={community.interactions?.getSummary({
+          actor: { actorType: 'HUMAN', id: community.currentUserId },
+          target: {
+            targetType: 'TOPIC',
+            id: community.selectedTopic.id,
+          },
+        })}
         getAuthorSummary={community.getAuthorSummary}
         loadAuthorSummary={community.loadAuthorSummary}
         followAuthor={community.followAuthor}
@@ -48,6 +60,23 @@ export function CommunityPage() {
         favoritePending={community.interactions?.isActionPending('FAVORITE', topicTarget)}
         onLike={(target) => community.likeTopic?.(target)}
         onFavorite={(target) => community.favoriteTopic?.(target)}
+        getReplySummary={(postId) => community.interactions?.getSummary({ target: { targetType: 'POST', id: postId } })}
+        getReplyViewerSummary={(postId) =>
+          community.currentUserId
+            ? community.interactions?.getSummary({
+                actor: { actorType: 'HUMAN', id: community.currentUserId },
+                target: { targetType: 'POST', id: postId },
+              })
+            : undefined
+        }
+        replyLikePending={(postId) =>
+          community.interactions?.isActionPending('LIKE', { targetType: 'POST', id: postId })
+        }
+        replyFavoritePending={(postId) =>
+          community.interactions?.isActionPending('FAVORITE', { targetType: 'POST', id: postId })
+        }
+        onLikeReply={(postId) => void community.likeReply?.(postId)}
+        onFavoriteReply={(postId) => void community.favoriteReply?.(postId)}
         topic={community.selectedTopic}
         replies={community.replies}
         loading={community.detailLoading}
@@ -98,9 +127,9 @@ export function CommunityPage() {
 
   if (publishOpen) {
     return (
-      <div className='flex h-full flex-col'>
-        <main className='app-scrollbar min-h-0 flex-1 overflow-y-auto'>
-          <div className='flex w-full flex-col px-4 py-6 sm:px-6 lg:px-10'>
+      <div className="flex h-full flex-col">
+        <main className="app-scrollbar min-h-0 flex-1 overflow-y-auto">
+          <div className="flex w-full flex-col px-4 py-6 sm:px-6 lg:px-10">
             <PublishTopicModal
               open
               publishing={community.publishing}
@@ -114,43 +143,47 @@ export function CommunityPage() {
   }
 
   return (
-    <div className='flex h-full flex-col'>
-      <main ref={scrollRootRef} className='app-scrollbar min-h-0 flex-1 overflow-y-auto'>
-        <div className='flex w-full flex-col px-4 py-6 sm:px-6 lg:px-10'>
-          <header className='m-0 flex items-center gap-2'>
-            <Button variant='ghost' size='icon' onClick={() => history.push('/lab')} aria-label='返回实验室'>
-              <ArrowLeft className='size-4' aria-hidden />
+    <div className="flex h-full flex-col">
+      <main ref={scrollRootRef} className="app-scrollbar min-h-0 flex-1 overflow-y-auto">
+        <div className="flex w-full flex-col px-4 py-6 sm:px-6 lg:px-10">
+          <header className="m-0 flex items-center gap-2">
+            <Button variant="ghost" size="icon" onClick={() => history.push('/lab')} aria-label="返回实验室">
+              <ArrowLeft className="size-4" aria-hidden />
             </Button>
-            <h2 className='m-0 text-lg font-semibold text-foreground'>社区</h2>
+            <h2 className="m-0 text-lg font-semibold text-foreground">社区</h2>
           </header>
 
-          <section className='mt-4 flex flex-wrap items-center gap-3' aria-label='社区主题筛选'>
+          <section className="mt-4 flex flex-wrap items-center gap-3" aria-label="社区主题筛选">
             <Segmented<CommunityTopicView>
-              value={community.topicType}
+              value={topicView}
               onChange={(value) => {
-                if (value === 'following') return;
+                if (value === 'following') {
+                  community.setScope('following');
+                  return;
+                }
+                if (community.scope === 'following') community.setScope('all');
                 community.setTopicType(value);
               }}
-              aria-label='主题类型'
+              aria-label="主题类型"
               options={topicTypeOptions}
-              activeOptionClassName='bg-primary/10 text-primary hover:bg-primary/10'
-              className='h-9 w-full bg-background sm:w-2/5 sm:min-w-[240px] sm:max-w-[50%]'
+              activeOptionClassName="bg-primary/10 text-primary hover:bg-primary/10"
+              className="h-9 w-full bg-background sm:w-2/5 sm:min-w-[240px] sm:max-w-[50%]"
             />
-            <div className='relative w-full min-w-[160px] sm:ml-auto sm:w-40 sm:flex-none'>
+            <div className="relative w-full min-w-[160px] sm:ml-auto sm:w-40 sm:flex-none">
               <Search
-                className='pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground'
+                className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
                 aria-hidden
               />
               <Input
-                className='h-9 rounded-lg border-border bg-muted/30 pl-10 pr-4 text-sm'
+                className="h-9 rounded-lg border-border bg-muted/30 pl-10 pr-4 text-sm"
                 value={community.query}
                 onChange={(event) => community.setQuery(event.target.value)}
-                placeholder='搜索主题...'
-                aria-label='搜索社区主题'
+                placeholder="搜索主题..."
+                aria-label="搜索社区主题"
               />
             </div>
             <IconButton
-              label='个人中心'
+              label="个人中心"
               icon={
                 community.currentUser ? (
                   <Avatar
@@ -159,22 +192,22 @@ export function CommunityPage() {
                     size={20}
                   />
                 ) : (
-                  <UserRound className='size-4' aria-hidden />
+                  <UserRound className="size-4" aria-hidden />
                 )
               }
-              className='ml-auto size-9 rounded-full sm:ml-0'
+              className="ml-auto size-9 rounded-full sm:ml-0"
               onClick={() => setShowPersonalCenter(true)}
             />
             <Button
-              className='h-9 px-4 text-xs'
-              leftIcon={<Plus className='size-3.5' aria-hidden />}
+              className="h-9 px-4 text-xs"
+              leftIcon={<Plus className="size-3.5" aria-hidden />}
               onClick={() => setPublishOpen(true)}
             >
               发帖
             </Button>
           </section>
 
-          <div className='mt-4'>
+          <div className="mt-4">
             <CommunityTopicList
               topics={community.topics}
               loading={community.loading}
@@ -192,6 +225,11 @@ export function CommunityPage() {
               loadingMore={community.loadingMore}
               loadMoreError={community.loadMoreError}
               loadMore={community.loadMore}
+              getTopicSummary={(topic) =>
+                community.interactions?.getSummary({
+                  target: { targetType: 'TOPIC', id: topic.id },
+                })
+              }
               scrollRootRef={scrollRootRef}
             />
           </div>

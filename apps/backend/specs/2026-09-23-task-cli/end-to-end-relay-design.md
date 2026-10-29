@@ -470,7 +470,7 @@ class TaskGraphService:
 
 ### 10.3 `TaskPlanner` 与 `TaskDispatcher`：规划和派发边界
 
-`TaskPlanner` 仅供中心化模式调用。Relay S5.2 由 Bot Skill 初始化未落图 `TaskNode`，S5.4 在 Bot 本地选人，S5.5 才一次落图；统一 `TaskDispatcher` 在 Relay S6 不重复这些决策。Relay 首版 S5.4 只接受 `HIT_SINGLE`、`HIT_MULTI_BOTS`、`MISS`；`search_bots` 只返回 Bot 候选，故不支持 `HIT_GROUP`，意外得到该决策时显式拒绝，不伪造已检索的 Group 候选。`HIT_MULTI_BOTS` 仅允许可确定唯一协调 Bot 的 `manager_worker` 组群。用户发起任务时显式指定已有 Group 是根节点目标解析，仍受支持。S5.5 的图谱迁移从冻结运行配置读取 Relay `max_rounds` 并原子校验，超限则 HUNG，不创建后继；Bot 不传这个控制值。
+`TaskPlanner` 仅供中心化模式调用。Relay S5.2 由 Bot Skill 初始化未落图 `TaskNode`，S5.4 在 Bot 本地选人，S5.5 才一次落图；统一 `TaskDispatcher` 在 Relay S6 不重复这些决策。Relay 首版 S5.4 只接受 `HIT_SINGLE`、`HIT_MULTI_BOTS`、`MISS`，且只能从服务端下发指令携带的 `runtime_profile.allowed_run_modes` 白名单中选择；`search_bots` 只返回 Bot 候选，故不支持 `HIT_GROUP`，意外得到该决策时显式拒绝，不伪造已检索的 Group 候选。BBS 被白名单禁用且无候选时，S5.4 按规划失败上报 `bbs_disabled_and_no_candidate`，不得转 BBS。`HIT_MULTI_BOTS` 仅允许可确定唯一协调 Bot 的 `manager_worker` 组群。用户发起任务时显式指定已有 Group 是根节点目标解析，仍受支持。S5.5 的图谱迁移从冻结运行配置读取 Relay `max_rounds` 并原子校验，超限则 HUNG，不创建后继；Bot 不传这个控制值。
 
 ```python
 class TaskPlanner:

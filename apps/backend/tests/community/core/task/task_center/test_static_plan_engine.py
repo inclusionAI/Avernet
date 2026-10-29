@@ -229,3 +229,50 @@ def test_bbs_handoff_uses_single_bot_delivery_without_changing_bbs_origin():
     assert delivered.run_info.assignee == "rnd-bot"
     assert persisted.run_info.run_mode == "bbs"
     assert persisted.run_info.extend_props["bbs_status"] == "claimed_by_rnd"
+
+
+
+def test_static_plan_rejects_bbs_handoff_when_runtime_profile_disallows_bbs():
+    from types import SimpleNamespace
+
+    graph_service = TaskGraphService()
+    task_info = _task_info()
+    task_info.execution_config["runtime_profile"] = {
+        "allowed_run_modes": ["single_bot", "coop_group"]
+    }
+    graph_service.initialize_graph(task_info)
+    handoff = TaskNode(
+        node_id="handoff",
+        task_id="t1",
+        status=Status.PENDING,
+        task_spec=TaskSpec(
+            context=Context(
+                "",
+                {"static_input": {"unhandled_tasks": [{"id": "u1"}]}},
+                title="handoff",
+            ),
+            goal=Goal("implement", []),
+        ),
+        run_info=RuntimeInfo(run_mode="bbs"),
+        node_run_graph=None,  # type: ignore[arg-type]
+    )
+    graph_service.add_task_nodes([handoff], parent_node_id="t1")
+    runner = _Runner()
+    dispatcher = TaskDispatcher(graph_service, runner=runner)
+    runtime = SimpleNamespace(
+        by_id={"handoff": SimpleNamespace(node_type="bbs_handoff", bot_id="rnd-bot")}
+    )
+    side: list[tuple] = []
+
+    _run(dispatcher._prepare_static_into("t1", runtime, [handoff], side))
+
+    persisted = next(
+        node
+        for node in graph_service.query_task_dashboard("t1").tasks
+        if node.node_id == "handoff"
+    )
+    assert persisted.status == Status.HUNG
+    assert persisted.run_info.failure_reason == "bbs_disabled_and_no_candidate"
+    assert persisted.run_info.extend_props["hung_reason"] == "bbs_disabled"
+    assert side == []
+    assert runner.started == []

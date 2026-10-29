@@ -26,6 +26,7 @@ from typing import Protocol
 from agentclaw.community.core.task.domain.models import (
     TaskExecutionGraph,
     TaskNode,
+    TaskRuntimeProfile,
     effective_run_mode,
 )
 from agentclaw.community.core.task.domain.errors import DispatchError
@@ -183,6 +184,9 @@ class TaskDispatcher:
                 "task_instruction": task_spec_instruction(node.task_spec),
                 "acceptances": acceptances,
                 "manager_bot_id": manager_bot_id,
+                "allowed_run_modes": list(
+                    TaskRuntimeProfile.run_modes_from_graph(node.node_run_graph)
+                ),
             }
         )
         if not formation.extend_props["relay_token"]:
@@ -788,6 +792,18 @@ class TaskDispatcher:
             # 安全架构师 并落 session_id + 翻 claimed。
 
             if getattr(definition, "node_type", "bot") == "bbs_handoff":
+                graph = self._graph.query_task_dashboard(task_id)
+                if "bbs" not in TaskRuntimeProfile.run_modes_from_graph(graph):
+                    self._graph.update_task_node_info(
+                        TaskNodePatch(
+                            task_id=task_id,
+                            node_id=node.node_id,
+                            status=Status.HUNG,
+                            failure_reason="bbs_disabled_and_no_candidate",
+                            extend_props_patch={"hung_reason": "bbs_disabled"},
+                        )
+                    )
+                    continue
                 bot_id = getattr(definition, "bot_id", None) or ""
 
                 static_input = (

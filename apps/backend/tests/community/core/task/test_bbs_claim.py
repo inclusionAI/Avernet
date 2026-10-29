@@ -87,6 +87,21 @@ def test_relay_root_rejects_bbs_claim():
     assert root.run_info.extend_props.get("bbs_owner") is None
 
 
+def test_claim_rejects_bbs_when_runtime_profile_disallows_it():
+    svc = TaskGraphService()
+    info = _ti("p-no-bbs")
+    info.execution_config["runtime_profile"] = {
+        "allowed_run_modes": ["single_bot", "coop_group"]
+    }
+    svc.initialize_graph(info)
+    svc.update_task_graph_info(
+        "p-no-bbs", TaskGraphPatch(extend_props_patch={"bbs_mode": True})
+    )
+
+    with pytest.raises(TaskStateError, match="BBS run mode is not allowed"):
+        svc.claim_bbs_owner("p-no-bbs", "botA")
+
+
 def test_claim_writes_owner_and_claim_at_on_root():
     """root.run_info.extend_props['bbs_owner'/'bbs_claim_at'] 被写入。"""
     import time as _time

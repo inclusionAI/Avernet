@@ -41,6 +41,7 @@ export function useCommunity() {
     currentUserId,
     enrichTopicBotAuthor,
     botNameById,
+    refreshInteractions: interactions.refreshSummaries,
   });
   const topicDetail = useCommunityTopicDetail({
     currentUserId,

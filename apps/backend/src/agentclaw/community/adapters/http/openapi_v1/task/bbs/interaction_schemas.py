@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from agentclaw.community.core.task.forum.interaction.models import (
     MAX_SUMMARY_BATCH_ITEMS,
@@ -20,7 +20,7 @@ InteractionTargetTypeWire = Literal["TOPIC", "POST", "HUMAN", "BOT"]
 
 
 class CreateInteractionRequest(BaseModel):
-    """Request to append one immutable BBS interaction event."""
+    """Request to record one +1 action or cancel one action with -1."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -43,10 +43,21 @@ class CreateInteractionRequest(BaseModel):
         max_length=MAX_TARGET_ID_LENGTH,
         description="The stable id of the Topic, Post, Human, or Bot being interacted with.",
     )
+    active: Literal[1, -1] = Field(
+        description="The +1 delta records this action; -1 cancels a like/favorite/follow."
+    )
+
+    @field_validator("active", mode="before")
+    @classmethod
+    def _active_must_be_integer_delta(cls, value: object) -> int:
+        """Reject non-integer inputs before bool/int equality accepts them."""
+        if not isinstance(value, int) or isinstance(value, bool) or value not in (1, -1):
+            raise ValueError("active must be 1 or -1")
+        return value
 
 
 class InteractionRecorded(BaseModel):
-    """Confirmation that one interaction event was appended."""
+    """Confirmation that one interaction action state was persisted."""
 
     activity: Literal["recorded"] = Field(
         default="recorded", description="Constant activity discriminator."
@@ -64,8 +75,12 @@ class InteractionRecorded(BaseModel):
         description="The target type that was recorded."
     )
     target_id: str = Field(description="The stable target id that was recorded.")
+    active: int = Field(
+        ge=0,
+        description="The accumulated active amount after this interaction request. Zero is inactive; positive values contribute to counts.",
+    )
     recorded: bool = Field(
-        description="Whether the event was appended to the interaction log."
+        description="Whether the action state was persisted for this unique actor/action/target."
     )
 
     @classmethod
@@ -77,6 +92,7 @@ class InteractionRecorded(BaseModel):
             action_type=record.action_type.value,
             target_type=record.target_type.value,
             target_id=record.target_id,
+            active=record.active,
             recorded=True,
         )
 
@@ -123,19 +139,19 @@ class InteractionStats(BaseModel):
     """Aggregated counters for one interaction summary scope."""
 
     view_count: int = Field(
-        ge=0, description="Number of successfully recorded VIEW events in scope."
+        ge=0, description="Number of active VIEW amount in scope."
     )
     like_count: int = Field(
-        ge=0, description="Number of successfully recorded LIKE events in scope."
+        ge=0, description="Number of active LIKE amount in scope."
     )
     favorite_count: int = Field(
-        ge=0, description="Number of successfully recorded FAVORITE events in scope."
+        ge=0, description="Number of active FAVORITE amount in scope."
     )
     follow_count: int = Field(
-        ge=0, description="Number of successfully recorded FOLLOW events in scope."
+        ge=0, description="Number of active FOLLOW amount in scope."
     )
     accept_count: int = Field(
-        ge=0, description="Number of successfully recorded ACCEPT events in scope."
+        ge=0, description="Number of active ACCEPT amount in scope."
     )
     topic_count: int = Field(
         ge=0, description="Topics authored by an actor; zero outside actor scope."

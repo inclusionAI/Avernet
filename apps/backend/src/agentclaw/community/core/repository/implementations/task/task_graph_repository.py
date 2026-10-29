@@ -41,6 +41,12 @@ from agentclaw.community.plugin_api.database import DatabasePlugin
 
 
 _GRAPH_STATUS_KEY = "__graph_status"
+# Hard cap for one durable handoff's retry storm. This is a safety net for
+# unknown graph/status reconciliation bugs; legitimate retryable failures
+# also mark the intent EXHAUSTED after this many delivery attempts.
+_MAX_DELIVERY_ATTEMPTS = 100
+_DELIVERY_EXHAUSTED_STATE = "EXHAUSTED"
+
 _TERMINAL = {Status.DONE, Status.SUCCESS, Status.FAILED, Status.HUNG, Status.CANCELLED}
 
 
@@ -469,9 +475,15 @@ class TaskGraphRepository(TaskGraphBbsOverviewMixin, TaskGraphRepositoryProtocol
                     TaskDeliveryIntentModel.env == get_current_env(),
                     TaskDeliveryIntentModel.executor_app == get_current_executor_app(),
                     or_(
-                        TaskDeliveryIntentModel.state == "PENDING",
-                        and_(TaskDeliveryIntentModel.state == "DELIVERING",
-                             TaskDeliveryIntentModel.lease_until_ms < now),
+                        and_(
+                            TaskDeliveryIntentModel.state == "PENDING",
+                            TaskDeliveryIntentModel.attempt < _MAX_DELIVERY_ATTEMPTS,
+                        ),
+                        and_(
+                            TaskDeliveryIntentModel.state == "DELIVERING",
+                            TaskDeliveryIntentModel.lease_until_ms < now,
+                            TaskDeliveryIntentModel.attempt < _MAX_DELIVERY_ATTEMPTS,
+                        ),
                     ),
                 )
                 .order_by(TaskDeliveryIntentModel.id.asc())
@@ -502,6 +514,12 @@ class TaskGraphRepository(TaskGraphBbsOverviewMixin, TaskGraphRepositoryProtocol
             self._require_intent_scope(row)
             if row.relay_token != relay_token:
                 return "STALE", None
+            if row.state == _DELIVERY_EXHAUSTED_STATE:
+                return row.state, None
+            if row.attempt >= _MAX_DELIVERY_ATTEMPTS and row.state != "DELIVERED":
+                row.state = _DELIVERY_EXHAUSTED_STATE
+                db.flush()
+                return row.state, None
             if not (
                 row.state == "PENDING"
                 or (row.state == "DELIVERING" and row.lease_until_ms is not None and row.lease_until_ms < now)
@@ -531,7 +549,11 @@ class TaskGraphRepository(TaskGraphBbsOverviewMixin, TaskGraphRepositoryProtocol
             if row is None:
                 raise TaskStateError("delivery intent is not owned by this attempt")
             self._require_intent_scope(row)
-            row.state = "DELIVERED" if delivered else "PENDING"
+            row.state = (
+                "DELIVERED" if delivered
+                else "PENDING" if row.attempt < _MAX_DELIVERY_ATTEMPTS
+                else _DELIVERY_EXHAUSTED_STATE
+            )
             row.lease_until_ms = None
             row.lease_token = None
             row.last_error = None if delivered else str(error or "delivery_failed")[:1000]
