@@ -565,3 +565,8 @@ cargo test -p bcs-collaboration-store --test mysql_store \
 
 第3单元规划验证包括原bin发现、临时debug草稿编译和help/入口次序比较；
 完整release、宿主矩阵、业务/E2E门禁尚未执行，详见第3单元计划的验证边界。
+
+第 4 单元的详细执行边界、18 文件归属、SQL 委托保持性工具与数据库验收步骤见
+[Collaboration Store 实施计划](../plans/2026-10-29-bcs-collaboration-store-decomposition-implementation-plan.md)。
+规划已验证原版及临时拆分副本的 Store 默认/all-features 测试；真实 MySQL、交叉套件、
+架构与统一 E2E 门禁仍待实施阶段执行，不代表第 4 单元已落地。
