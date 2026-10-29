@@ -42,7 +42,9 @@ class CallerIdentityServiceProtocol(Protocol):
         actor_id: str,
         lock_epoch: int | None = None,
         entity_id: str | None = None,
-    ) -> CliCallTypeUpdateResult: ...
+    ) -> CliCallTypeUpdateResult:
+        """Edit as Owner or configured super admin under the target entity lock."""
+        ...
 
     def exchange_caller_token(
         self,
@@ -63,7 +65,9 @@ class CallerIdentityServiceProtocol(Protocol):
         actor_id: str,
         lock_epoch: int | None = None,
         entity_id: str | None = None,
-    ) -> McpCallTypeUpdateResult: ...
+    ) -> McpCallTypeUpdateResult:
+        """Edit as Owner or configured super admin; sync using the actual Owner."""
+        ...
 
     def get_context(
         self,
