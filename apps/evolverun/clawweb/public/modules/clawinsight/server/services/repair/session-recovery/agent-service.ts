@@ -40,6 +40,23 @@ export function recoveryTargetSnapshot(target: ResolvedBotTarget): AgentRuntimeT
     botType: target.botType === "service" ? "service" : "personal", botStatus: null, bindingStatus: null, observedAt: new Date().toISOString(), source: "clawweb_runtime_catalog" } };
 }
 
+function messageTargetChange(previous: AgentRuntimeTargetSnapshot["target"], current: ResolvedBotTarget): string {
+  const changes = [
+    ["发布版本", previous.runtimeIdentity?.version, current.runtimeIdentity?.version],
+    ["运行阶段", previous.runtimeIdentity?.stage, current.runtimeIdentity?.stage],
+    ["运行绑定", previous.bindingId, current.bindingId],
+    ["运行设备", previous.deviceId, current.deviceId],
+    ["运行实例", previous.deviceUuid, current.deviceUuid],
+    ["实例路由", previous.providerDeviceId, current.providerDeviceId],
+    ["沙箱", previous.sandboxId, current.sandboxId],
+    ["运行引擎", previous.activeEngine, current.activeEngine],
+    ["运行通道", previous.provider, current.provider],
+    ["运行环境", previous.environment, current.environment],
+  ].filter(([, before, after]) => (before ?? null) !== (after ?? null))
+    .map(([label, before, after]) => `${label}：${before ?? "未记录"} → ${after ?? "未记录"}`);
+  return `Bot 运行目标已变化${changes.length ? `（${changes.join("；")}）` : ""}，本次恢复消息未发送。`;
+}
+
 /** Business adapter over existing AIS dispatch, workload tickets, tool ledger and Bot runtime. */
 export class SessionRecoveryAgentService implements RecoveryAgentExecutor, SessionRecoveryAgentApi {
   private readonly executions: AgentExecutionService;
@@ -432,7 +449,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     return this.tool(task, body, "retry_message", task.level !== "debug", async markDispatched => {
       if (task.level === "debug") return { status: "not_intervened", dry_run: true, delivery_key: key, message: body.message, initial_message: initial };
       const currentTarget = await this.deps.targets.resolve({ environment: task.request.target.env, ownerId: task.request.target.entity_id, botId: task.request.target.bot_id, ...(task.request.target.runtime_identity ? { runtimeIdentity: task.request.target.runtime_identity } : {}) });
-      if (recoveryTargetSnapshot(currentTarget).fingerprint !== task.runtimeTarget!.fingerprint) fail(409, "目标运行位置已变化，不能投递旧方案的重试消息");
+      if (recoveryTargetSnapshot(currentTarget).fingerprint !== task.runtimeTarget!.fingerprint) fail(409, messageTargetChange(task.runtimeTarget!.target, currentTarget));
       const cronId = task.request.target.engine === "OC" ? cronJobId(task.request.session_key) : undefined;
       if (cronId) {
         const state = await new BotEngineOperations(this.deps.runtime).execute(task.runtimeTarget!.target, { method: "GET", path: "/api/cron/running" }, false)

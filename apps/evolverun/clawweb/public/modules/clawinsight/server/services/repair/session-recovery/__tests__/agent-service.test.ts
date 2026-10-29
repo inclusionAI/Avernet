@@ -13,7 +13,7 @@ const actor = { userId: "owner", isAdmin: false };
 const request = { event_id: "dispatch-fixture", tc_fault_label: null, delivery_key: "initial-1", diagnosis: "原任务执行受阻",
   target: { entity_id: "owner", bot_id: "default", env: "prod", engine: "OC" }, session_key: "agent:main:session:original" };
 let db: SqliteDatabase, tasks: SessionRecoveryTaskRepository, service: SessionRecoveryTaskService, agent: SessionRecoveryAgentService;
-let ais: AisExecutor, runtime: BotRuntime;
+let ais: AisExecutor, runtime: BotRuntime, target: ResolvedBotTarget;
 
 beforeEach(async () => {
   db = new SqliteDatabase(new Database(":memory:")); await runMigrations(db, "sqlite");
@@ -22,7 +22,7 @@ beforeEach(async () => {
     putObject: async (key, content) => { objects.set(key, Buffer.from(content)); return { etag: null }; },
     getObject: async key => ({ content: objects.get(key)!, etag: null, contentType: "application/json" }),
   });
-  const target: ResolvedBotTarget = { provider: "arca", environment: "prod", ownerId: "owner", botId: "default",
+  target = { provider: "arca", environment: "prod", ownerId: "owner", botId: "default",
     deviceId: "fixture", bindingId: "binding", sandboxId: "sandbox", activeEngine: "openclaw" };
   runtime = { sendMessage: vi.fn(), request: vi.fn(), executeShell: vi.fn() };
   ais = { execute: vi.fn<AisExecutor["execute"]>().mockResolvedValueOnce("job-1").mockResolvedValueOnce("job-2"),
@@ -36,6 +36,24 @@ beforeEach(async () => {
     resolveTarget: async () => recoveryTargetSnapshot(target) });
 });
 afterEach(() => { db.close(); vi.restoreAllMocks(); });
+
+it.each([
+  { change: { runtimeIdentity: { stage: "online", version: "V8" } }, detail: "发布版本：V7 → V8" },
+  { change: { bindingId: "binding-new" }, detail: "运行绑定：binding → binding-new" },
+  { change: { deviceId: "device-new" }, detail: "运行设备：fixture → device-new" },
+])("records the actual target change and an unsent receipt without weakening the guard: $detail", async ({ change, detail }) => {
+  target = { ...target, provider: "teclaw", activeEngine: "teclaw", botType: "service", runtimeIdentity: { stage: "online", version: "V7" } };
+  const ack = await service.create({ ...request, target: { ...request.target, engine: "TE" } }, actor);
+  await vi.waitFor(async () => expect((await tasks.find(ack.task_id))?.execution?.jobId).toBe("job-1"));
+  const frozen = (await tasks.find(ack.task_id))!;
+  target = { ...target, ...change } as ResolvedBotTarget;
+  const result = await agent.retryMessage(frozen, { clientRequestId: "target-change", purpose: "继续原任务", message: "请核实已有结果后继续" });
+  expect(result).toMatchObject({ status: "failed", result: { dispatched: false, error: { code: "recovery_execution_conflict", message: expect.stringContaining(detail) } } });
+  expect(runtime.sendMessage).not.toHaveBeenCalled();
+  const saved = (await tasks.find(ack.task_id))!;
+  expect(saved.runtimeTarget).toEqual(frozen.runtimeTarget);
+  expect(saved.timeline.find(event => event.event_id === result.toolCallId)?.payload.result).toMatchObject({ dispatched: false, error: { message: expect.stringContaining(detail) } });
+});
 
 it("provides cumulative read ranges and gaps without rereading the Bot or changing task state", async () => {
   const ack = await service.create(request, actor);
