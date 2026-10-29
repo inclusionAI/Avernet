@@ -18,6 +18,9 @@ from agentclaw.community.api.bot_knowledge_service import BotKnowledgeServicePro
 from agentclaw.community.api.knowledge_management_service import (
     KnowledgeManagementServiceProtocol,
 )
+from agentclaw.community.core.bot_knowledge.agents_md_sync import (
+    BotKnowledgeAgentsMdSync,
+)
 from agentclaw.community.core.knowledge_management.config import (
     KnowledgeManagementConfig,
 )
@@ -25,7 +28,7 @@ from agentclaw.community.di import Injected
 from agentclaw.community.kernel.knowledge import BotKnowledgeScope, KnowledgeError
 from agentclaw.community.kernel.knowledge_management import KnowledgeManagementError
 from agentclaw.community.utils.env_utils import get_current_env
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 router = APIRouter(
     prefix="/api/knowledge", tags=["knowledge-management"], route_class=KnowledgeRoute
@@ -71,8 +74,10 @@ def set_enabled(
     bot_id: str,
     kb_id: str,
     body: EnablementRequest,
+    background_tasks: BackgroundTasks,
     user: AuthenticatedUser = Depends(get_current_user),
     service: BotKnowledgeServiceProtocol = Injected(BotKnowledgeServiceProtocol),
+    agents_md_sync: BotKnowledgeAgentsMdSync = Injected(BotKnowledgeAgentsMdSync),
     config: KnowledgeManagementConfig = Injected(KnowledgeManagementConfig),
 ):
     def operation():
@@ -84,7 +89,16 @@ def set_enabled(
             expected_revision=body.expected_revision,
         )
 
-    return execute(config, operation)
+    result = execute(config, operation)
+    # The stored selection is the source of truth; the AGENTS.md section is a
+    # best-effort projection of it, so the sync runs after the response and
+    # swallows its own failures (never blocks or fails this request).
+    background_tasks.add_task(
+        agents_md_sync.sync,
+        scope=BotKnowledgeScope(bot_id, body.target_owner_id, get_current_env()),
+        actor_id=user.staffId,
+    )
+    return result
 
 
 def resolve_limit(limit, page_size):
