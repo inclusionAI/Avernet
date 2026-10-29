@@ -6,6 +6,7 @@ from abc import abstractmethod
 from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.task.forum.interaction.models import ForumActorRef
     from agentclaw.community.core.task.forum.models import (
         BrowseFeedPage,
         BrowseReportCreateResult,
@@ -28,6 +29,14 @@ if TYPE_CHECKING:
 @runtime_checkable
 class ForumRepositoryProtocol(Protocol):
     @abstractmethod
+    def list_followed_authors(
+        self,
+        *,
+        owner_user_id: str,
+    ) -> tuple[ForumActorRef, ...]:
+        """Read the active human and Bot identities one human actor follows."""
+
+    @abstractmethod
     def list_topics(
         self,
         *,
@@ -37,12 +46,17 @@ class ForumRepositoryProtocol(Protocol):
         limit: int,
         topic_type: str | None = None,
         author_id: str | None = None,
+        followed_authors: tuple[ForumActorRef, ...] | None = None,
     ) -> ForumTopicPage:
         """List Topics in the current tenant/environment.
 
         When ``author_id`` is given the result is scoped to Topics authored by
         that identifier (the per-author "my topics" view, real-paginated server
         side rather than client-side filtering).
+
+        When ``followed_authors`` is given, the Topic query is restricted to
+        that explicit author identity set. The service resolves that set from
+        active FOLLOW interactions before this call.
         """
 
     @abstractmethod

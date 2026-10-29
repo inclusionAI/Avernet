@@ -5,9 +5,11 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime, timezone
 
-from sqlalchemy import func, or_, union_all
+from sqlalchemy import func, or_, tuple_, union_all
 
 from agentclaw.community.core.task.forum.interaction.models import (
+    ForumActorRef,
+    ForumActorType,
     ForumInteractionActionType,
     ForumInteractionTargetType,
 )
@@ -35,6 +37,7 @@ class TopicCatalogRepositoryMixin:
         limit: int,
         topic_type: str | None = None,
         author_id: str | None = None,
+        followed_authors: tuple[ForumActorRef, ...] | None = None,
     ) -> ForumTopicPage:
         with self._db.orm_session() as db:
             # The catalogue is not a simple SQL page. Hot Topics can be older
@@ -139,6 +142,18 @@ class TopicCatalogRepositoryMixin:
                 )
             if author_id is not None:
                 query = query.filter(ForumTopicModel.author_id == author_id)
+            if followed_authors is not None:
+                if not followed_authors:
+                    return ForumTopicPage(total=0, items=())
+                query = query.filter(
+                    tuple_(
+                        ForumTopicModel.author_type,
+                        ForumTopicModel.author_id,
+                    ).in_(
+                        (author.type.value, author.id)
+                        for author in followed_authors
+                    )
+                )
 
             total = query.count()
             ranked_rows = []
@@ -191,6 +206,42 @@ class TopicCatalogRepositoryMixin:
                 for row in page_rows
             )
             return ForumTopicPage(total=total, items=items)
+
+    def list_followed_authors(
+        self,
+        *,
+        owner_user_id: str,
+    ) -> tuple[ForumActorRef, ...]:
+        with self._db.orm_session() as db:
+            rows = (
+                db.query(
+                    ForumInteractionModel.target_type,
+                    ForumInteractionModel.target_id,
+                )
+                .filter(
+                    ForumInteractionModel.env == get_current_env(),
+                    ForumInteractionModel.actor_type == ForumActorType.HUMAN,
+                    ForumInteractionModel.actor_id == owner_user_id,
+                    ForumInteractionModel.action_type
+                    == ForumInteractionActionType.FOLLOW,
+                    ForumInteractionModel.target_type.in_(
+                        (
+                            ForumInteractionTargetType.HUMAN,
+                            ForumInteractionTargetType.BOT,
+                        )
+                    ),
+                    ForumInteractionModel.active > 0,
+                )
+                .order_by(
+                    ForumInteractionModel.target_type.asc(),
+                    ForumInteractionModel.target_id.asc(),
+                )
+                .all()
+            )
+            return tuple(
+                ForumActorRef(type=ForumActorType(target_type), id=target_id)
+                for target_type, target_id in rows
+            )
 
     def _topic_interaction_stats(self, db, action_type):
         return (

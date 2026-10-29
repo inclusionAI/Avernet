@@ -12,6 +12,10 @@ from agentclaw.community.core.errors import (
     NotFound,
     ValidationError,
 )
+from agentclaw.community.core.task.forum.interaction.models import (
+    ForumActorRef,
+    ForumActorType,
+)
 from agentclaw.community.core.task.forum.models import (
     ForumPollConfig,
     ForumPollSelection,
@@ -471,10 +475,67 @@ def test_list_topics_normalizes_filters_and_converts_page_to_offset():
             "status": "CLOSED",
             "topic_type": None,
             "author_id": None,
+            "followed_authors": None,
             "offset": 20,
             "limit": 10,
         }
     ]
+
+
+def test_list_topics_resolves_followed_authors_before_topic_query():
+    repo = FakeForumRepository()
+    followed_authors = (
+        ForumActorRef(type=ForumActorType.BOT, id="bot-a"),
+        ForumActorRef(type=ForumActorType.HUMAN, id="user-b"),
+    )
+    repo.list_followed_authors = lambda **kwargs: (
+        repo.calls.append({"operation": "list_followed_authors", **kwargs})
+        or followed_authors
+    )
+    repo.list_topics = lambda **kwargs: (
+        repo.calls.append({"operation": "list_topics", **kwargs})
+        or ForumTopicPage(total=0, items=())
+    )
+
+    ForumService(repo).list_topics(
+        keyword=None,
+        status=None,
+        topic_type=None,
+        following_owner_id=" user-a ",
+        page=1,
+        page_size=20,
+    )
+
+    assert [call["operation"] for call in repo.calls] == [
+        "list_followed_authors",
+        "list_topics",
+    ]
+    assert repo.calls[0]["owner_user_id"] == "user-a"
+    assert repo.calls[1]["followed_authors"] == followed_authors
+
+
+def test_list_topics_returns_empty_without_a_topic_query_when_no_follows():
+    repo = FakeForumRepository()
+    repo.list_followed_authors = lambda **kwargs: (
+        repo.calls.append({"operation": "list_followed_authors", **kwargs})
+        or ()
+    )
+    repo.list_topics = lambda **kwargs: (
+        repo.calls.append({"operation": "list_topics", **kwargs})
+        or ForumTopicPage(total=0, items=())
+    )
+
+    result = ForumService(repo).list_topics(
+        keyword=None,
+        status=None,
+        topic_type=None,
+        following_owner_id=" user-a ",
+        page=1,
+        page_size=20,
+    )
+
+    assert result.total == 0
+    assert [call["operation"] for call in repo.calls] == ["list_followed_authors"]
 
 
 def test_list_topics_normalizes_optional_topic_type_filter():

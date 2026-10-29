@@ -1,5 +1,4 @@
 import { Button } from '@/components/ui/Button';
-import { Empty } from '@/components/ui/Empty';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
 import { Segmented } from '@/components/ui/Segmented';
@@ -31,8 +30,13 @@ export function CommunityPage() {
   const [publishOpen, setPublishOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [showPersonalCenter, setShowPersonalCenter] = useState(false);
-  const [topicView, setTopicView] = useState<CommunityTopicView>(community.topicType);
-  const hasFilter = !!community.query.trim() || community.scope === 'mine' || community.topicType !== 'all';
+  const topicView: CommunityTopicView =
+    community.scope === 'following' ? 'following' : community.topicType;
+  const hasFilter =
+    !!community.query.trim() ||
+    community.scope === 'mine' ||
+    community.scope === 'following' ||
+    community.topicType !== 'all';
   const scrollRootRef = useRef<HTMLElement>(null);
 
   if (community.selectedTopic) {
@@ -153,8 +157,11 @@ export function CommunityPage() {
             <Segmented<CommunityTopicView>
               value={topicView}
               onChange={(value) => {
-                setTopicView(value);
-                if (value === 'following') return;
+                if (value === 'following') {
+                  community.setScope('following');
+                  return;
+                }
+                if (community.scope === 'following') community.setScope('all');
                 community.setTopicType(value);
               }}
               aria-label="主题类型"
@@ -201,50 +208,30 @@ export function CommunityPage() {
           </section>
 
           <div className="mt-4">
-            {topicView === 'following' ? (
-              <div className="rounded-xl border border-border bg-card">
-                <Empty
-                  title="关注列表暂未开放"
-                  description="社区正在接入已关注用户与 Bot 的内容读取能力，当前还不能展示关注流。"
-                  action={
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setTopicView('all');
-                        community.setTopicType('all');
-                      }}
-                    >
-                      返回全部
-                    </Button>
-                  }
-                />
-              </div>
-            ) : (
-              <CommunityTopicList
-                topics={community.topics}
-                loading={community.loading}
-                error={community.error}
-                hasFilter={hasFilter}
-                onOpen={(topic) => void community.openTopic(topic)}
-                onRetry={() => void community.load()}
-                onClearFilter={() => {
-                  community.setQuery('');
-                  community.setScope('all');
-                  community.setTopicType('all');
-                }}
-                onPublish={() => setPublishOpen(true)}
-                hasMore={community.hasMore}
-                loadingMore={community.loadingMore}
-                loadMoreError={community.loadMoreError}
-                loadMore={community.loadMore}
-                getTopicSummary={(topic) =>
-                  community.interactions?.getSummary({
-                    target: { targetType: 'TOPIC', id: topic.id },
-                  })
-                }
-                scrollRootRef={scrollRootRef}
-              />
-            )}
+            <CommunityTopicList
+              topics={community.topics}
+              loading={community.loading}
+              error={community.error}
+              hasFilter={hasFilter}
+              onOpen={(topic) => void community.openTopic(topic)}
+              onRetry={() => void community.load()}
+              onClearFilter={() => {
+                community.setQuery('');
+                community.setScope('all');
+                community.setTopicType('all');
+              }}
+              onPublish={() => setPublishOpen(true)}
+              hasMore={community.hasMore}
+              loadingMore={community.loadingMore}
+              loadMoreError={community.loadMoreError}
+              loadMore={community.loadMore}
+              getTopicSummary={(topic) =>
+                community.interactions?.getSummary({
+                  target: { targetType: 'TOPIC', id: topic.id },
+                })
+              }
+              scrollRootRef={scrollRootRef}
+            />
           </div>
         </div>
       </main>

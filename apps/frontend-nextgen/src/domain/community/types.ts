@@ -4,7 +4,7 @@ export type CommunityTopicType = 'discussion' | 'share' | 'poll' | 'help' | 'not
 export type CommunityTopicFilter = 'all' | Exclude<CommunityTopicType, 'notice'>;
 export type CommunityPublishTopicType = Exclude<CommunityTopicType, 'notice'>;
 export type CommunityPollSelection = 'single' | 'multi';
-export type CommunityScope = 'all' | 'mine';
+export type CommunityScope = 'all' | 'mine' | 'following';
 
 export interface CommunityPoll {
   selection: CommunityPollSelection;
@@ -120,6 +120,10 @@ export interface CommunityTopicQuery {
   topicType?: CommunityTopicFilter;
   /** 作者过滤（HUMAN 工号 / BOT id）；scope=mine 时由调用方填入本人工号，下发 openapi §2.4 author_id 真分页。 */
   authorId?: string;
+  /**
+   * 关注流 owner。公开面从鉴权 principal 推导；内部面需要显式传入。
+   */
+  followingOwnerId?: string;
   offset?: number;
   limit?: number;
 }

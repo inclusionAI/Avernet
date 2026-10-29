@@ -5,6 +5,10 @@ from datetime import datetime, timezone
 import pytest
 
 from agentclaw.community.core.errors import NotFound
+from agentclaw.community.core.task.forum.interaction.models import (
+    ForumActorRef,
+    ForumActorType,
+)
 from agentclaw.community.core.task.forum.models import (
     TOPIC_STATUS_CLOSED,
     TOPIC_TYPE_HELP,
@@ -100,6 +104,86 @@ def test_list_topics_filters_status_searches_literal_wildcards_and_pages(db):
     assert [item.topic_id for item in closed.items] == [second.topic_id]
     assert beyond.total == 3
     assert beyond.items == ()
+
+
+def test_list_topics_filters_active_followers_for_owner(db):
+    repo = ForumRepository(db)
+    followed_bot_topic = repo.create_topic(
+        author_type="BOT",
+        author_id="bot-a",
+        client_request_id="req-follow-bot",
+        title="followed bot",
+        body="description",
+    ).topic
+    followed_human_topic = repo.create_topic(
+        author_type="HUMAN",
+        author_id="user-b",
+        client_request_id="req-follow-human",
+        title="followed human",
+        body="description",
+    ).topic
+    repo.create_topic(
+        author_type="BOT",
+        author_id="bot-b",
+        client_request_id="req-unfollowed",
+        title="unfollowed bot",
+        body="description",
+    )
+
+    with db.orm_session() as session:
+        session.add(
+            ForumInteractionModel(
+                actor_type="HUMAN",
+                actor_id="user-a",
+                action_type="FOLLOW",
+                target_type="BOT",
+                target_id="bot-a",
+                env=get_current_env(),
+                active=1,
+            )
+        )
+        session.add(
+            ForumInteractionModel(
+                actor_type="HUMAN",
+                actor_id="user-a",
+                action_type="FOLLOW",
+                target_type="HUMAN",
+                target_id="user-b",
+                env=get_current_env(),
+                active=1,
+            )
+        )
+        session.add(
+            ForumInteractionModel(
+                actor_type="HUMAN",
+                actor_id="user-a",
+                action_type="FOLLOW",
+                target_type="BOT",
+                target_id="bot-b",
+                env=get_current_env(),
+                active=0,
+            )
+        )
+
+    followed_authors = repo.list_followed_authors(owner_user_id="user-a")
+    assert followed_authors == (
+        ForumActorRef(type=ForumActorType.BOT, id="bot-a"),
+        ForumActorRef(type=ForumActorType.HUMAN, id="user-b"),
+    )
+
+    result = repo.list_topics(
+        keyword=None,
+        status=None,
+        offset=0,
+        limit=20,
+        followed_authors=followed_authors,
+    )
+
+    assert result.total == 2
+    assert {item.topic_id for item in result.items} == {
+        followed_bot_topic.topic_id,
+        followed_human_topic.topic_id,
+    }
 
 
 def test_list_topics_topic_type_filter_is_optional_and_combines_with_status(db):
@@ -308,6 +392,7 @@ def test_get_topic_returns_persisted_tags_and_poll_result(db):
         ForumPollResultOptionRecord(index=1, votes=1, percent=33),
     )
 
+
 def test_get_topic_returns_zero_vote_poll_result_before_task_writes_projection(db):
     repo = ForumRepository(db)
     topic = repo.create_topic(
@@ -335,6 +420,7 @@ def test_get_topic_returns_zero_vote_poll_result_before_task_writes_projection(d
         ForumPollResultOptionRecord(index=0, votes=0, percent=0),
         ForumPollResultOptionRecord(index=1, votes=0, percent=0),
     )
+
 
 def test_list_posts_orders_chronologically_and_keeps_total_on_empty_page(db):
     repo = ForumRepository(db)

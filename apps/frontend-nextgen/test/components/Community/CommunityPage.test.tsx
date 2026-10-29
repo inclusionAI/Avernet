@@ -98,10 +98,10 @@ describe('CommunityPage 滚动容器结构', () => {
     expect(followingButton).toBeEnabled();
     fireEvent.click(followingButton);
     expect(mockCommunityState.setTopicType).not.toHaveBeenCalled();
-    expect(followingButton).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByText('关注列表暂未开放')).toBeInTheDocument();
+    expect(mockCommunityState.setScope).toHaveBeenCalledWith('following');
+    expect(screen.getByText(topic.title)).toBeInTheDocument();
     fireEvent.click(within(topicTypeGroup).getByRole('button', { name: '分享' }));
-    expect(screen.queryByText('关注列表暂未开放')).not.toBeInTheDocument();
+    expect(screen.getByText(topic.title)).toBeInTheDocument();
     expect(topicTypeGroup).toHaveClass('bg-background', 'sm:w-2/5', 'sm:min-w-[240px]', 'sm:max-w-[50%]');
     expect(topicTypeGroup.compareDocumentPosition(searchInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(within(personalCenterButton).getByAltText('张三').getAttribute('src')).toBe(

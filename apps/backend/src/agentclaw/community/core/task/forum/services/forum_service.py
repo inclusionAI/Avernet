@@ -83,6 +83,7 @@ class ForumService(ForumServiceProtocol):
         page_size: int,
         topic_type: str | None = None,
         author_id: str | None = None,
+        following_owner_id: str | None = None,
     ) -> ForumTopicPage:
         normalized_keyword = self._optional_text(
             keyword, "keyword", MAX_SEARCH_KEYWORD_LENGTH
@@ -96,6 +97,22 @@ class ForumService(ForumServiceProtocol):
                 author_id, "author_id", MAX_AUTHOR_ID_LENGTH
             ).strip()
         )
+        normalized_following_owner = (
+            None
+            if following_owner_id is None
+            else self._required_text(
+                following_owner_id,
+                "following_owner_id",
+                MAX_AUTHOR_ID_LENGTH,
+            ).strip()
+        )
+        followed_authors = None
+        if normalized_following_owner is not None:
+            followed_authors = self._repository.list_followed_authors(
+                owner_user_id=normalized_following_owner
+            )
+            if not followed_authors:
+                return ForumTopicPage(total=0, items=())
         self._pagination(page, page_size)
         return self._repository.list_topics(
             keyword=normalized_keyword,
@@ -104,6 +121,7 @@ class ForumService(ForumServiceProtocol):
             offset=(page - 1) * page_size,
             limit=page_size,
             author_id=normalized_author,
+            followed_authors=followed_authors,
         )
 
     def get_topic(

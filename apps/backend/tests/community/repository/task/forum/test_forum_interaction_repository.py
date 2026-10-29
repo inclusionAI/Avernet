@@ -125,6 +125,87 @@ def test_interaction_summaries_exclude_inactive_state(db):
     )
     assert repo.batch_get_target_summaries((target,))[target].like_count == 1
 
+
+def test_three_distinct_likers_accumulate_topic_like_count(db):
+    repo = ForumInteractionRepository(db)
+    topic_id = "topic-three-likers"
+    likers = ("user-a", "user-b", "user-c")
+    target = ForumTargetRef(type=ForumInteractionTargetType.TOPIC, id=topic_id)
+
+    for actor_id in likers:
+        repo.insert_interaction(
+            actor_type="HUMAN",
+            actor_id=actor_id,
+            action_type="LIKE",
+            target_type="TOPIC",
+            target_id=topic_id,
+            active=1,
+        )
+
+    target_stats = repo.batch_get_target_summaries((target,))[target]
+    pairs = tuple(
+        ForumActorTargetRef(
+            actor=ForumActorRef(type=ForumActorType.HUMAN, id=actor_id),
+            target=target,
+        )
+        for actor_id in likers
+    )
+    pair_stats = repo.batch_get_actor_target_summaries(pairs)
+
+    assert target_stats.like_count == 3
+    assert all(pair_stats[pair].like_count == 1 for pair in pairs)
+    with db.orm_session() as session:
+        rows = session.query(
+            ForumInteractionModel.actor_id,
+            ForumInteractionModel.active,
+        ).filter(
+            ForumInteractionModel.action_type == "LIKE",
+            ForumInteractionModel.target_type == "TOPIC",
+            ForumInteractionModel.target_id == topic_id,
+        ).order_by(ForumInteractionModel.actor_id).all()
+    assert rows == [("user-a", 1), ("user-b", 1), ("user-c", 1)]
+
+
+def test_three_distinct_viewers_accumulate_topic_view_count(db):
+    repo = ForumInteractionRepository(db)
+    topic_id = "topic-three-viewers"
+    viewers = ("user-a", "user-b", "user-c")
+    target = ForumTargetRef(type=ForumInteractionTargetType.TOPIC, id=topic_id)
+
+    for actor_id in viewers:
+        repo.insert_interaction(
+            actor_type="HUMAN",
+            actor_id=actor_id,
+            action_type="VIEW",
+            target_type="TOPIC",
+            target_id=topic_id,
+            active=1,
+        )
+
+    target_stats = repo.batch_get_target_summaries((target,))[target]
+    pairs = tuple(
+        ForumActorTargetRef(
+            actor=ForumActorRef(type=ForumActorType.HUMAN, id=actor_id),
+            target=target,
+        )
+        for actor_id in viewers
+    )
+    pair_stats = repo.batch_get_actor_target_summaries(pairs)
+
+    assert target_stats.view_count == 3
+    assert all(pair_stats[pair].view_count == 1 for pair in pairs)
+    with db.orm_session() as session:
+        rows = session.query(
+            ForumInteractionModel.actor_id,
+            ForumInteractionModel.active,
+        ).filter(
+            ForumInteractionModel.action_type == "VIEW",
+            ForumInteractionModel.target_type == "TOPIC",
+            ForumInteractionModel.target_id == topic_id,
+        ).order_by(ForumInteractionModel.actor_id).all()
+    assert rows == [("user-a", 1), ("user-b", 1), ("user-c", 1)]
+
+
 def test_first_cancel_delta_without_existing_state_is_rejected(db):
     repo = ForumInteractionRepository(db)
 
