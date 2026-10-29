@@ -8,6 +8,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentclaw.community.api.work_order_service import WorkOrderServiceProtocol
+from agentclaw.community.core.bot_collaborator.manager_sync.dispatcher import (
+    DisabledBotManagerSync,
+)
 from agentclaw.community.core.spaces.errors import (
     PersonalSpaceInvariantError,
     SpaceCreatorInvariantError,
@@ -74,6 +77,7 @@ def _service(
     *,
     space: SpaceRecord | None = None,
     staff_dept: StaffDeptPlugin | None = None,
+    manager_sync=None,
 ):
     repository = MagicMock()
     access = MagicMock()
@@ -85,7 +89,13 @@ def _service(
             work_no="member-1", nick_name=None
         )
     return (
-        SpaceMemberService(repository, access, staff_dept, work_orders),
+        SpaceMemberService(
+            repository,
+            access,
+            staff_dept,
+            work_orders,
+            manager_sync if manager_sync is not None else DisabledBotManagerSync(),
+        ),
         repository,
         access,
         staff_dept,
@@ -373,3 +383,66 @@ def test_update_role_reports_missing_member() -> None:
             user_id="member-1",
             role=SpaceRole.OWNER,
         )
+
+
+def test_delete_member_submits_sync_hint_before_work_order() -> None:
+    manager_sync = MagicMock()
+    service, repository, _, _, work_orders = _service(manager_sync=manager_sync)
+    repository.delete_member.return_value = True
+    order: list[str] = []
+    manager_sync.request_space_sync.side_effect = lambda change: order.append("sync")
+    work_orders.create_work_order_event.side_effect = lambda **_: order.append(
+        "work_order"
+    )
+
+    assert service.delete_member(space_id=7, actor_id="owner-1", user_id="member-1")
+    assert order == ["sync", "work_order"]
+
+
+def test_add_member_submits_sync_hint_after_commit() -> None:
+    manager_sync = MagicMock()
+    service, repository, _, _, _ = _service(manager_sync=manager_sync)
+    repository.get_member.return_value = None
+    repository.add_member.return_value = _member()
+
+    service.add_member(
+        space_id=7, actor_id="owner-1", user_id="member-1", role=SpaceRole.MEMBER
+    )
+
+    manager_sync.request_space_sync.assert_called_once()
+    change = manager_sync.request_space_sync.call_args.args[0]
+    assert change.user_ids == ("member-1",)
+    assert set(change.space_refs) == {"7", "team:7", "spc-7"}
+
+
+def test_sync_submit_failure_keeps_committed_member_result() -> None:
+    manager_sync = MagicMock()
+    service, repository, _, _, work_orders = _service(manager_sync=manager_sync)
+    repository.delete_member.return_value = True
+    manager_sync.request_space_sync.side_effect = RuntimeError("queue closed")
+
+    assert service.delete_member(space_id=7, actor_id="owner-1", user_id="member-1")
+    work_orders.create_work_order_event.assert_called_once()
+
+
+def test_missing_member_delete_stays_silent_to_manager_sync() -> None:
+    manager_sync = MagicMock()
+    service, repository, _, _, _ = _service(manager_sync=manager_sync)
+    repository.delete_member.return_value = False
+
+    with pytest.raises(SpaceMemberNotFoundError, match="not found"):
+        service.delete_member(space_id=7, actor_id="owner-1", user_id="member-1")
+
+    manager_sync.request_space_sync.assert_not_called()
+
+
+def test_role_update_does_not_submit_sync_hint() -> None:
+    manager_sync = MagicMock()
+    service, repository, _, _, _ = _service(manager_sync=manager_sync)
+    repository.update_member_role.return_value = _member()
+
+    service.update_role(
+        space_id=7, actor_id="owner-1", user_id="member-1", role=SpaceRole.ADMIN
+    )
+
+    manager_sync.request_space_sync.assert_not_called()

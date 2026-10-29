@@ -56,7 +56,9 @@ consumes:
   - "SpaceAccessServiceProtocol"
   - "CachePlugin quota lock"
   - "CapabilityDesiredStateRepositoryProtocol"
+  - "BotManagerSyncProtocol (api) — best-effort manager-set refresh after an owner handoff commits or a Bot's Space assignment changes"
 internal_dependencies:
+  - agentclaw.community.api.bot_manager_sync
   - agentclaw.community.core.execution_identity.protocols
   - agentclaw.community.plugin_api.staff_dept
   - agentclaw.community.core.bot_inventory
@@ -98,6 +100,7 @@ internal_dependencies:
   - agentclaw.community.di.modules
   - agentclaw.community.kernel.lifecycle
   - agentclaw.community.kernel.device_dto    # CommandResult contract for coding-owned Arca backup execution
+  - agentclaw.community.kernel.bot_manager_sync    # SyncReason for the manager-set side-channel submits
   - agentclaw.community.log
   - agentclaw.community.plugin_api.devices
   - agentclaw.community.plugin_api.drm

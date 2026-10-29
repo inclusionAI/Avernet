@@ -1,8 +1,9 @@
 """Async-submit contract conformance gates (tasks 3.1-3.3):
 
 Submit must never execute the run: it hands a durable run row plus a
-READY dispatch to the queue and returns only the run_id, in well under two
-seconds, even for a goal that would take dozens of orchestrator turns.
+READY dispatch to the queue and returns only the run_id without entering
+handler, orchestrator, or LLM execution, even for a goal that would take
+dozens of orchestrator turns.
 Admission failures (tenant cap, missing LLM config) raise synchronously
 in the submit call and persist nothing. Once accepted, the run converges
 through the durable dispatch queue alone — the submitting client can vanish
@@ -22,7 +23,6 @@ locked separately in tests/community/adapters/http/agentswarm/.
 from __future__ import annotations
 
 import asyncio
-import time
 from types import SimpleNamespace
 
 import pytest
@@ -222,13 +222,13 @@ async def _drive_to_terminal(worker: AgentSwarmWorker, run_repo: RunRepository,
 
 
 class TestNonBlockingSubmit:
-    """3.1: submit of a 30+-turn run returns fast carrying only run_id,
-    with zero execution rows at return; the paused run converges once
-    the worker's durable queue is driven."""
+    """3.1: submit of a 30+-turn run returns only run_id without crossing
+    an execution boundary, with zero execution rows at return; the paused
+    run converges once the worker's durable queue is driven."""
 
     @pytest.mark.asyncio
-    async def test_submit_of_30_turn_goal_returns_fast_then_converges(
-            self, db):
+    async def test_submit_of_30_turn_goal_enqueues_then_converges(
+            self, db, monkeypatch):
         # A goal that would take 30 orchestrator turn-decisions to run:
         # spawn+wait over 15 agents (every wait blocks the turn on a
         # routed result, so the turn battery is genuinely long).
@@ -245,17 +245,46 @@ class TestNonBlockingSubmit:
         assert env.worker._task is None
         assert env.worker._running is False
 
-        started = time.monotonic()
-        run_id = await env.service.submit_async(
-            _req(idempotency_key="pause-42", goal="30-turn goal"),
-        )
-        elapsed = time.monotonic() - started
+        execution_attempted = asyncio.Event()
+        execution_boundaries: list[str] = []
 
-        # Non-blocking submit: a bare run_id, well inside the 2s bound
-        # (measured, not just plausible — the same script executed inline
-        # would burn 30 orchestrator turn cycles in the request).
+        async def forbid_execution(boundary: str) -> None:
+            execution_boundaries.append(boundary)
+            execution_attempted.set()
+            pytest.fail(
+                f"submit_async crossed the {boundary} execution boundary"
+            )
+
+        async def forbid_handler(*_args, **_kwargs):
+            await forbid_execution("handler")
+
+        async def forbid_orchestrator(*_args, **_kwargs):
+            await forbid_execution("orchestrator")
+
+        async def forbid_llm(*_args, **_kwargs):
+            await forbid_execution("LLM")
+
+        # Structural non-blocking proof: while the real service writes to the
+        # real SQLite repositories, every configured execution boundary is
+        # armed to fail immediately if submit tries to run the queued goal.
+        # The context restores those boundaries before the worker is driven.
+        with monkeypatch.context() as submit_guard:
+            submit_guard.setattr(
+                SwarmRunHandler, "handle_slice", forbid_handler,
+            )
+            submit_guard.setattr(
+                Orchestrator, "decide_turn", forbid_orchestrator,
+            )
+            submit_guard.setattr(
+                StubLLMProvider, "complete", forbid_llm,
+            )
+            run_id = await env.service.submit_async(
+                _req(idempotency_key="pause-42", goal="30-turn goal"),
+            )
+
         assert isinstance(run_id, str) and run_id
-        assert elapsed < 2.0
+        assert execution_boundaries == []
+        assert not execution_attempted.is_set()
 
         rid = dm.RunId(run_id)
         run = env.service.get_run(run_id, TENANT)
@@ -264,6 +293,7 @@ class TestNonBlockingSubmit:
         # The durable pair the contract requires: a run row plus one
         # READY dispatch for the paused worker's queue — and that is ALL.
         assert env.dispatch_repo.count_pending_dispatches() == 1
+        assert _dispatch_status(db, run_id) == "READY"
         assert _tenant_rows(db, om.AcAgentSwarmRunModel) == 1
         assert _tenant_rows(db, om.AcAgentSwarmRunDispatchModel) == 1
         assert _tenant_rows(db, om.AcAgentSwarmAgentModel) == 0
@@ -275,7 +305,8 @@ class TestNonBlockingSubmit:
         assert env.guard_repo.list_by_run(rid, TID) == []
 
         # Unpause: drive worker slices manually — the durable dispatch queue
-        # is the only execution driver — until the run converges.
+        # is the only execution driver — until the run converges. The bounded
+        # tick count is a liveness guard, not a submit-performance assertion.
         run = await _drive_to_terminal(env.worker, env.run_repo, run_id)
         assert run is not None, "run row vanished"
         assert run.status is dm.RunStatus.COMPLETED
