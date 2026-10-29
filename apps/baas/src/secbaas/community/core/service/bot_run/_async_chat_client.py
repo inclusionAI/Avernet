@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 from secbaas.community.api.sse import StreamChunk
@@ -220,6 +220,7 @@ class AsyncChatClient:
         interaction_service: BotInteractionService | None = None,
         a2a_mode: str = "off",
         sensitive_bypass_keys_loader: Callable[[], tuple[str, ...]] | None = None,
+        proxypass_token_minter: Callable[[], Awaitable[str]] | None = None,
     ):
         """初始化客户端
 
@@ -269,6 +270,7 @@ class AsyncChatClient:
         self._ignore_case = ignore_case
         self._interaction_service = interaction_service
         self._sensitive_bypass_keys_loader = sensitive_bypass_keys_loader
+        self._proxypass_token_minter = proxypass_token_minter
         self._interaction_tasks: dict[tuple[str, str], asyncio.Task[None]] = {}
 
         # 并发信号量：限制单连接总并发会话数，提供背压
@@ -356,6 +358,22 @@ class AsyncChatClient:
     def active_session_count(self) -> int:
         """当前活跃会话数（供连接池负载均衡使用）。"""
         return len(self._active_sessions)
+
+    def refresh_outbound_auth(self, headers: dict[str, str] | None) -> None:
+        """转发池层逐消息带来的最新鉴权头（P0：120s JWT 过期正修）。
+
+        外层 headers 快照同步保存（评审 P2 场景 1）：v3 附件 fallback
+        的懒建/重建握手（_ensure_v3_fallback）读的是外层快照——不同步
+        则附件 WS 携带过期 token。空 token（Local 平台）不覆盖。
+        duck-typed 转发内部 A2A 子客户端；v3 WS 握手早已完成、无请求
+        级鉴权，无此方法即跳过；未连接（_client=None）同样跳过。
+        """
+        token = (headers or {}).get("x-proxypass-token", "")
+        if token:
+            self.headers["x-proxypass-token"] = token
+        refresh = getattr(self._client, "refresh_proxypass_token", None)
+        if refresh is not None:
+            refresh(headers)
 
     async def connect(self) -> dict[str, Any]:
         """连接到服务器
@@ -1554,6 +1572,27 @@ class AsyncChatClient:
                         error="engine websocket is disconnected",
                     )
                     return
+
+                # 评审 P2 场景 2：后台答复派发不经过 pool.get——发 RPC 前经注入
+                # 的 minter 现签 proxypass token，不依赖下一条聊天消息带来的新
+                # 鲜头（120s TTL 快照在此路径仍可能过期）。仅 A2A 直连分支需要
+                # （v3 fallback 的 WS 握手鉴权，无请求级 token）。铸造失败回退
+                # last-known token（警告日志），不得阻断派发。
+                if client is self._client and self._proxypass_token_minter is not None:
+                    try:
+                        client.refresh_proxypass_token(
+                            {
+                                "x-proxypass-token": (
+                                    await self._proxypass_token_minter()
+                                )
+                            }
+                        )
+                    except Exception:
+                        logger.warning(
+                            "[interaction] proxypass re-mint failed; "
+                            "resolve continues on last-known token",
+                            exc_info=True,
+                        )
                 try:
                     exchange = await client.interaction_resolve(
                         interaction_id=command.interaction_id,

@@ -17,7 +17,7 @@ baas_session_id 通过 binding_info.baas_session_id 传递。
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -404,7 +404,12 @@ class BaasBotService(BotService):
             if default_tag:
                 headers["X-Agentclaw-Default-Tag"] = str(default_tag)
 
-        client = await self._client_pool.get(pool_key, conn_info.ws_url, headers)
+        client = await self._client_pool.get(
+            pool_key,
+            conn_info.ws_url,
+            headers,
+            token_minter=self._token_minter_for(binding_info, session_id, context),
+        )
 
         try:
             auth_token = context.build_auth_token() if context else None
@@ -501,7 +506,12 @@ class BaasBotService(BotService):
             if default_tag:
                 headers["X-Agentclaw-Default-Tag"] = str(default_tag)
 
-        client = await self._client_pool.get(pool_key, conn_info.ws_url, headers)
+        client = await self._client_pool.get(
+            pool_key,
+            conn_info.ws_url,
+            headers,
+            token_minter=self._token_minter_for(binding_info, session_id, context),
+        )
 
         auth_token = context.build_auth_token() if context else None
         app_id = context.app_id if context else None
@@ -586,7 +596,12 @@ class BaasBotService(BotService):
         pool_key = conn_info.target
         headers = {"x-proxypass-token": conn_info.token}
 
-        client = await self._client_pool.get(pool_key, conn_info.ws_url, headers)
+        client = await self._client_pool.get(
+            pool_key,
+            conn_info.ws_url,
+            headers,
+            token_minter=self._token_minter_for(binding_info, session_id, context),
+        )
 
         try:
             auth_token = context.build_auth_token() if context else None
@@ -815,7 +830,11 @@ class BaasBotService(BotService):
 
         try:
             client = await self._client_pool.get(
-                pool_key, conn_info.ws_url, headers, session_key=session_id
+                pool_key,
+                conn_info.ws_url,
+                headers,
+                session_key=session_id,
+                token_minter=self._token_minter_for(binding_info, session_id, context),
             )
 
             # 注意：chat.abort 的 run_id 是引擎侧 run 标识，与 baas_bot_run.run_id
@@ -903,6 +922,28 @@ class BaasBotService(BotService):
             tenant=tenant,
             device_affinity=session_consistency_key,
         )
+
+    def _token_minter_for(
+        self,
+        binding_info: BotBindingInfo,
+        session_id: str | None = None,
+        context: BotChatContext | None = None,
+    ) -> Callable[[], Awaitable[str]]:
+        """后台交互答复派发的按需续签闭包（评审 P2）。
+
+        绑定本服务真实的签发入口（_resolve_ws_connection_for_binding 的
+        resolve→token 管线）——不做任何池 key 形态解析；失败由调用方回退
+        last-known token。直连/无代理凭证场景 resolve 返回空串，客户端
+        空值守卫保持既有值。
+        """
+
+        async def _remint() -> str:
+            fresh = await self._resolve_ws_connection_for_binding(
+                binding_info, session_id, context
+            )
+            return fresh.token
+
+        return _remint
 
     async def _resolve_ws_connection_for_binding(
         self,
