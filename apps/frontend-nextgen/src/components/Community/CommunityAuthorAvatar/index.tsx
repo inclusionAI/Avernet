@@ -15,6 +15,7 @@ export interface CommunityAuthorAvatarProps {
   onLoadSummary?: () => void;
   onFollow?: () => void;
   followLoading?: boolean;
+  followed?: boolean;
 }
 
 function avatarContent(
@@ -51,6 +52,7 @@ export function CommunityAuthorAvatar({
   onLoadSummary,
   onFollow,
   followLoading,
+  followed = false,
 }: CommunityAuthorAvatarProps): JSX.Element {
   const [open, setOpen] = useState(false);
   const pendingCloseRef = useRef<number | undefined>(undefined);
@@ -137,9 +139,10 @@ export function CommunityAuthorAvatar({
             size="sm"
             className="mt-3 h-7 px-3 text-xs"
             loading={followLoading}
+            aria-pressed={followed}
             onClick={onFollow}
           >
-            关注
+            {followed ? '已关注' : '关注'}
           </Button>
         ) : null}
       </PopoverContent>

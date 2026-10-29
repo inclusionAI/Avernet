@@ -1,7 +1,7 @@
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import type { CommunityTopic, CreateCommunityReplyDraft, InteractionSummary } from '@/domain/community/types';
-import { Heart, MessageSquare, Star, User } from 'lucide-react';
+import { Heart, MessageSquare, User } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { cn } from '@/utils/cn';
 import { CommunityAuthorAvatar } from '../CommunityAuthorAvatar';
@@ -28,9 +28,7 @@ interface FloorProps {
   getReplyLikeSummary?: (postId: string) => InteractionSummary | undefined;
   getReplyViewerSummary?: (postId: string) => InteractionSummary | undefined;
   replyLikePending?: (postId: string) => boolean;
-  replyFavoritePending?: (postId: string) => boolean;
   onLike?: (postId: string) => void;
-  onFavoriteReply?: (postId: string) => void;
   onToggleHelpful?: () => void;
   threadReplies: CommunityThreadReply[];
   expanded: boolean;
@@ -42,6 +40,7 @@ interface FloorProps {
   loadAuthorSummary?: (author: CommunityTopic['author']) => void;
   followAuthor?: (author: CommunityTopic['author']) => Promise<boolean>;
   authorFollowLoading?: (author: CommunityTopic['author']) => boolean;
+  authorFollowed?: (author: CommunityTopic['author']) => boolean;
   canReply?: boolean;
   replySaving?: boolean;
   onSubmitReply?: (payload: CreateCommunityReplyDraft) => Promise<boolean>;
@@ -65,9 +64,7 @@ export function Floor({
   getReplyLikeSummary,
   getReplyViewerSummary,
   replyLikePending,
-  replyFavoritePending,
   onLike,
-  onFavoriteReply,
   onToggleHelpful,
   threadReplies,
   expanded,
@@ -79,6 +76,7 @@ export function Floor({
   loadAuthorSummary,
   followAuthor,
   authorFollowLoading,
+  authorFollowed,
   canReply = false,
   replySaving = false,
   onSubmitReply,
@@ -87,9 +85,7 @@ export function Floor({
   const replyStats = postId ? getReplyLikeSummary?.(postId) : undefined;
   const viewerReplyStats = postId ? getReplyViewerSummary?.(postId) : undefined;
   const likeCount = replyStats?.likeCount ?? 0;
-  const favoriteCount = replyStats?.favoriteCount ?? 0;
   const liked = (viewerReplyStats?.likeCount ?? 0) > 0;
-  const favorited = (viewerReplyStats?.favoriteCount ?? 0) > 0;
   const visibleThreadReplies = expanded ? threadReplies : threadReplies.slice(0, 2);
   const childListId = postId ? `${postId}-children` : undefined;
 
@@ -114,6 +110,7 @@ export function Floor({
           onLoadSummary={() => loadAuthorSummary?.(author)}
           onFollow={() => void followAuthor?.(author)}
           followLoading={authorFollowLoading?.(author) === true}
+          followed={authorFollowed?.(author) === true}
         />
         <span className="text-sm font-semibold text-foreground">{author.displayName}</span>
         <Badge
@@ -175,25 +172,6 @@ export function Floor({
                   {likeCount}
                 </Button>
               ) : null}
-              {postId && onFavoriteReply ? (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={replyFavoritePending?.(postId) === true}
-                  aria-label="收藏回复"
-                  aria-pressed={favorited}
-                  onClick={() => postId && onFavoriteReply?.(postId)}
-                  className={cn(
-                    'h-auto min-h-0 gap-1 px-0 text-xs font-normal transition-colors disabled:cursor-not-allowed disabled:opacity-40',
-                    favorited
-                      ? 'text-destructive'
-                      : 'text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  <Star className={cn('size-3.5', favorited && 'fill-current')} aria-hidden />
-                  {favoriteCount}
-                </Button>
-              ) : null}
               {floor > 0 && canToggleHelpful && onToggleHelpful ? (
                 <Button
                   variant="ghost"
@@ -224,15 +202,12 @@ export function Floor({
                 loadAuthorSummary={loadAuthorSummary}
                 followAuthor={followAuthor}
                 authorFollowLoading={authorFollowLoading}
+                authorFollowed={authorFollowed}
                 canReply={canReply}
                 likeCount={getReplyLikeSummary?.(reply.id)?.likeCount ?? 0}
-                favoriteCount={getReplyLikeSummary?.(reply.id)?.favoriteCount ?? 0}
                 liked={(getReplyViewerSummary?.(reply.id)?.likeCount ?? 0) > 0}
-                favorited={(getReplyViewerSummary?.(reply.id)?.favoriteCount ?? 0) > 0}
                 likePending={replyLikePending?.(reply.id) === true}
-                favoritePending={replyFavoritePending?.(reply.id) === true}
                 onLike={onLike}
-                onFavorite={onFavoriteReply}
                 onReply={setReplyTarget}
               />
             ))}

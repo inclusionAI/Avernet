@@ -95,6 +95,7 @@ export function usePersonalCenter(): UsePersonalCenterResult {
 
   return {
     ownerUserId,
+    identity,
     activityType,
     page,
     pageSize: PERSONAL_CENTER_PAGE_SIZE,

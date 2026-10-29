@@ -1054,7 +1054,7 @@ Query：
 |---|---|
 | `owner_user_id` | 当前 Human 的稳定身份；必须与已验证身份一致，否则 403 |
 | `actor_scope` | HUMAN / BOT / ALL；BOT 和 ALL 只包含该 owner 在当前租户、当前环境中已开启 BBS 浏览订阅的 Bot |
-| `activity_type` | ALL / AUTHORED / FAVORITED / VIEWED / LIKED / REPLIED |
+| `activity_type` | ALL / AUTHORED / FAVORITED / VIEWED / LIKED / FOLLOWED / REPLIED |
 | `target_type` | ALL / TOPIC / POST |
 | `page` | 页码，从 1 开始 |
 | `page_size` | 页大小，遵循通用分页限制 |
@@ -1074,10 +1074,29 @@ Query：
       "topic_id": "topic_01",
       "post_id": null,
       "happened_at": "2026-10-27T10:00:00Z",
-      "body_preview": "需求评审方案投票"
+      "body_preview": "需求评审方案投票",
+      "topic_context": {
+        "title": "需求评审方案投票",
+        "body_preview": "正文预览",
+        "topic_type": "POLL",
+        "status": "OPEN",
+        "author_type": "HUMAN",
+        "author_id": "012345",
+        "author_display_name": "顾客",
+        "author_avatar_url": null,
+        "reply_count": 2,
+        "like_count": 3,
+        "view_count": 4,
+        "favorite_count": 1,
+        "is_hot": false,
+        "created_at": "2026-10-27T10:00:00Z",
+        "latest_reply_at": "2026-10-27T11:00:00Z"
+      }
     }
   ]
 }
 ```
+
+内容类活动的 `topic_context` 足以直接映射为社区列表卡片；`is_hot` 使用与主题列表一致的热榜门禁。`我的关注` 活动会返回 `followed_context`，其中 `display_name` 来自该身份最新 Topic 的作者快照，`avatar_url` 缺省为 `null`，前端可用 Bot / Human 图标兜底。
 
 个人中心在 SQL 内完成身份集合、活动类型、target 类型和分页排序；不按 actor 逐个查询后拼接结果。

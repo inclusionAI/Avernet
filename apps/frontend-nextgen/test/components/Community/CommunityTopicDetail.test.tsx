@@ -73,8 +73,7 @@ describe('CommunityTopicDetail', () => {
     expect(props.onBack).toHaveBeenCalledTimes(1);
   });
 
-  test('回复展示汇总互动量，并用红色图标表示当前用户状态', async () => {
-    const user = userEvent.setup();
+  test('回复展示汇总互动量，并用红色图标表示当前用户状态', () => {
     const child: CommunityReply = {
       ...replies[0],
       id: 'child-reply',
@@ -119,7 +118,6 @@ describe('CommunityTopicDetail', () => {
       helpfulReplyCount: 0,
     });
     const onLikeReply = jest.fn();
-    const onFavoriteReply = jest.fn();
     renderDetail({
       currentUserId: 'human-current',
       replies: [floor],
@@ -133,7 +131,6 @@ describe('CommunityTopicDetail', () => {
           : viewerSummary(postId, 1, 0),
       replyLikePending: (postId) => postId === 'child-reply',
       onLikeReply,
-      onFavoriteReply,
     });
 
     const floorArticle = screen.getByText('一级回复正文').closest('article');
@@ -146,14 +143,9 @@ describe('CommunityTopicDetail', () => {
     expect(floorLikeButton).toHaveAttribute('aria-pressed', 'true');
     expect(floorLikeButton.querySelector('svg')).toHaveClass('fill-current');
 
-    const floorFavoriteButton = within(floorArticle as HTMLElement).getAllByRole('button', {
-      name: '收藏回复',
-    })[0];
-    expect(floorFavoriteButton).toHaveTextContent('4');
-    expect(floorFavoriteButton).toHaveClass('text-muted-foreground');
-    expect(floorFavoriteButton).toHaveAttribute('aria-pressed', 'false');
-    await user.click(floorFavoriteButton);
-    expect(onFavoriteReply).toHaveBeenCalledWith('floor-reply');
+    expect(
+      within(floorArticle as HTMLElement).queryByRole('button', { name: '收藏回复' }),
+    ).not.toBeInTheDocument();
 
     const childArticle = screen.getByText('楼中楼正文').closest('article');
     expect(childArticle).not.toBeNull();
@@ -164,14 +156,34 @@ describe('CommunityTopicDetail', () => {
     expect(childLikeButton).toHaveTextContent('5');
     expect(childLikeButton).toHaveClass('text-muted-foreground');
 
-    const childFavoriteButton = within(childArticle as HTMLElement).getByRole('button', {
-      name: '收藏回复',
-    });
-    expect(childFavoriteButton).toHaveTextContent('2');
-    expect(childFavoriteButton).toHaveClass('text-destructive');
-    expect(childFavoriteButton).toHaveAttribute('aria-pressed', 'true');
-    expect(childFavoriteButton.querySelector('svg')).toHaveClass('fill-current');
+    expect(
+      within(childArticle as HTMLElement).queryByRole('button', { name: '收藏回复' }),
+    ).not.toBeInTheDocument();
     expect(onLikeReply).not.toHaveBeenCalled();
+  });
+
+  test('顶栏回复入口排在结帖右侧并定位底部回复输入框', async () => {
+    const originalScrollIntoView = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = jest.fn();
+    try {
+      const user = userEvent.setup();
+      renderDetail({ currentUserId: 'human-current' });
+
+      const header = screen.getByRole('banner');
+      const closeButton = within(header).getByRole('button', { name: '结帖' });
+      const replyButton = within(header).getByRole('button', { name: '回复' });
+      expect(closeButton.compareDocumentPosition(replyButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+      const composer = screen.getByRole('region', { name: '回复主题' });
+      const composerBody = within(composer).getByRole('textbox', { name: '回复正文' });
+      const focusSpy = jest.spyOn(composerBody, 'focus');
+      await user.click(replyButton);
+
+      expect(Element.prototype.scrollIntoView).toHaveBeenCalledTimes(1);
+      expect(focusSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      Element.prototype.scrollIntoView = originalScrollIntoView;
+    }
   });
 
   test('主帖互动操作与发表时间同排且无横向分隔线', () => {
@@ -224,7 +236,8 @@ describe('CommunityTopicDetail', () => {
     expect(within(interactionBar).getByText('发表于：时间未知')).toBeInTheDocument();
 
     const actionButtons = within(interactionBar).getAllByRole('button');
-    expect(actionButtons.map((button) => button.textContent)).toEqual(['10', '6', '编辑']);
+    expect(actionButtons.map((button) => button.textContent)).toEqual(['10', '6']);
+    expect(within(interactionBar).queryByRole('button', { name: '编辑' })).not.toBeInTheDocument();
     const likeButton = actionButtons[0];
     expect(likeButton).toHaveClass('inline-flex', 'items-center', 'gap-1', 'text-xs', 'text-destructive');
     expect(likeButton).toHaveTextContent('10');
@@ -237,22 +250,20 @@ describe('CommunityTopicDetail', () => {
     expect(favoriteButton.querySelector('svg')).toHaveClass('fill-current');
     expect(within(interactionBar).getByLabelText('浏览 12 次')).toHaveTextContent('12');
 
-    const editButton = within(interactionBar).getByRole('button', { name: '编辑' });
+    const editButton = screen.getByRole('button', { name: '编辑' });
     expect(editButton).toBeEnabled();
     fireEvent.click(editButton);
     expect(onEditTopic).toHaveBeenCalledTimes(1);
   });
 
-  test('非发布人或已结帖主题仍然展示编辑入口但不可点击', () => {
+  test('非发布人或已结帖主题不展示编辑入口', () => {
     const onEditTopic = jest.fn();
     renderDetail({
       topic: { ...topic, canEdit: false },
       onEditTopic,
     });
 
-    const editButton = screen.getByRole('button', { name: '编辑' });
-    expect(editButton).toBeDisabled();
-    fireEvent.click(editButton);
+    expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument();
     expect(onEditTopic).not.toHaveBeenCalled();
   });
 

@@ -7,22 +7,29 @@ import { COMMUNITY_REPLY_PAGE_SIZE, useCommunity } from '@/hooks/useCommunity';
 import { history } from '@umijs/max';
 import { ArrowLeft, Plus, Search, UserRound } from 'lucide-react';
 import { Avatar } from '@/components/ui/Avatar';
+import type { ReactNode } from 'react';
 import { useRef, useState } from 'react';
 import { CommunityPersonalCenter } from '../CommunityPersonalCenter';
 import { CommunityTopicDetail } from '../CommunityTopicDetail';
 import { EditTopicModal } from '../CommunityTopicDetail/EditTopicModal';
 import { CommunityTopicList } from '../CommunityTopicList';
+import { TopicTypeIcon } from '../TopicTypeIcon';
 import { PublishTopicModal } from '../PublishTopicModal';
 
 type CommunityTopicView = CommunityTopicFilter | 'following';
 
-const topicTypeOptions: Array<{ value: CommunityTopicView; label: string; disabledReason?: string }> = [
+const topicTypeOptions: Array<{
+  value: CommunityTopicView;
+  label: string;
+  disabledReason?: string;
+  icon?: ReactNode;
+}> = [
   { value: 'all', label: '全部' },
   { value: 'following', label: '关注' },
-  { value: 'discussion', label: '讨论' },
-  { value: 'share', label: '分享' },
-  { value: 'poll', label: '投票' },
-  { value: 'help', label: '求助' },
+  { value: 'discussion', label: '讨论', icon: <TopicTypeIcon topicType='discussion' className='size-3.5' /> },
+  { value: 'share', label: '分享', icon: <TopicTypeIcon topicType='share' className='size-3.5' /> },
+  { value: 'poll', label: '投票', icon: <TopicTypeIcon topicType='poll' className='size-3.5' /> },
+  { value: 'help', label: '求助', icon: <TopicTypeIcon topicType='help' className='size-3.5' /> },
 ];
 
 export function CommunityPage() {
@@ -38,6 +45,18 @@ export function CommunityPage() {
     community.scope === 'following' ||
     community.topicType !== 'all';
   const scrollRootRef = useRef<HTMLElement>(null);
+
+  if (editOpen && community.selectedTopic) {
+    return (
+      <EditTopicModal
+        open
+        topic={community.selectedTopic}
+        saving={community.editSaving}
+        onOpenChange={setEditOpen}
+        onSave={community.updateTopic}
+      />
+    );
+  }
 
   if (community.selectedTopic) {
     const topicTarget = { targetType: 'TOPIC' as const, id: community.selectedTopic.id };
@@ -56,6 +75,7 @@ export function CommunityPage() {
         loadAuthorSummary={community.loadAuthorSummary}
         followAuthor={community.followAuthor}
         authorFollowLoading={community.authorFollowPending}
+        authorFollowed={community.isAuthorFollowed}
         likePending={community.interactions?.isActionPending('LIKE', topicTarget)}
         favoritePending={community.interactions?.isActionPending('FAVORITE', topicTarget)}
         onLike={(target) => community.likeTopic?.(target)}
@@ -72,11 +92,7 @@ export function CommunityPage() {
         replyLikePending={(postId) =>
           community.interactions?.isActionPending('LIKE', { targetType: 'POST', id: postId })
         }
-        replyFavoritePending={(postId) =>
-          community.interactions?.isActionPending('FAVORITE', { targetType: 'POST', id: postId })
-        }
         onLikeReply={(postId) => void community.likeReply?.(postId)}
-        onFavoriteReply={(postId) => void community.favoriteReply?.(postId)}
         topic={community.selectedTopic}
         replies={community.replies}
         loading={community.detailLoading}
@@ -97,18 +113,6 @@ export function CommunityPage() {
         replyPageCount={community.replyPageCount}
         replyPageSize={COMMUNITY_REPLY_PAGE_SIZE}
         onGoToReplyPage={(page) => void community.goToReplyPage?.(page)}
-      />
-    );
-  }
-
-  if (editOpen && community.selectedTopic) {
-    return (
-      <EditTopicModal
-        open
-        topic={community.selectedTopic}
-        saving={community.editSaving}
-        onOpenChange={setEditOpen}
-        onSave={community.updateTopic}
       />
     );
   }
