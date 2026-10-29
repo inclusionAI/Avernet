@@ -4,6 +4,9 @@ import pytest
 
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
+from agentclaw.community.adapters.http.bot_knowledge.router import (
+    router as bot_knowledge_router,
+)
 from agentclaw.community.adapters.http.knowledge_management.router import router
 from agentclaw.community.api.bot_knowledge_service import BotKnowledgeServiceProtocol
 from agentclaw.community.core.bot_knowledge.agents_md_sync import (
@@ -20,7 +23,9 @@ from fastapi_injector import attach_injector
 from injector import Injector
 
 PREFIX = "/api/knowledge/bots/bot/knowledge-bases/kb/enablement"
+LEGACY_PREFIX = "/api/bot-knowledge/bot/kb"
 BODY = {"target_owner_id": "owner", "enabled": True, "expected_revision": 0}
+LEGACY_BODY = {"owner_id": "owner", "enabled": True, "expected_revision": 0}
 
 
 class StubBotKnowledgeService:
@@ -38,6 +43,7 @@ class StubBotKnowledgeService:
             "kb_id": kb_id,
             "enabled": enabled,
             "revision": 1,
+            "runtime_selection": "current",
         }
 
 
@@ -54,6 +60,7 @@ def pair():
     service, sync = StubBotKnowledgeService(), StubAgentsMdSync()
     app = FastAPI()
     app.include_router(router)
+    app.include_router(bot_knowledge_router)
     app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
         id="SSO", staffId="actor", operatorName="login"
     )
@@ -82,6 +89,26 @@ def test_enablement_failure_never_schedules_the_agents_md_sync(pair):
     client, service, sync = pair
     service.error = KnowledgeError("REVISION_CONFLICT", 409)
     response = client.put(PREFIX, json=BODY)
+    assert response.status_code == 409
+    assert response.json() == {"detail": {"code": "REVISION_CONFLICT"}}
+    assert sync.calls == []
+    assert len(service.calls) == 1
+
+
+def test_legacy_enablement_success_schedules_the_agents_md_sync(pair):
+    client, service, sync = pair
+    response = client.put(LEGACY_PREFIX, json=LEGACY_BODY)
+    assert response.status_code == 200
+    assert response.json()["runtime_selection"] == "current"
+    assert sync.calls == [
+        (BotKnowledgeScope("bot", "owner", get_current_env()), "actor")
+    ]
+
+
+def test_legacy_enablement_failure_never_schedules_the_agents_md_sync(pair):
+    client, service, sync = pair
+    service.error = KnowledgeError("REVISION_CONFLICT", 409)
+    response = client.put(LEGACY_PREFIX, json=LEGACY_BODY)
     assert response.status_code == 409
     assert response.json() == {"detail": {"code": "REVISION_CONFLICT"}}
     assert sync.calls == []
