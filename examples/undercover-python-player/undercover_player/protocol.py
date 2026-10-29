@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass, field
 from time import time
@@ -181,7 +182,13 @@ class Run:
     terminal: bool = False
     aborted: bool = False
     result: str | None = None
+    final_sent: bool = False
     started_at_ms: int = field(default_factory=now_ms)
+    task: asyncio.Task[None] | None = field(default=None, repr=False, compare=False)
+    terminal_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False, compare=False)
+    abort_future: asyncio.Future[dict[str, object]] | None = field(
+        default=None, repr=False, compare=False
+    )
 
     def next_seq(self) -> int:
         self.seq += 1

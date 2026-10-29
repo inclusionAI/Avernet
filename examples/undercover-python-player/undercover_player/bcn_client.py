@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from collections import deque
@@ -29,6 +30,7 @@ from .protocol import (
     ALREADY_CONNECTED,
     INVALID_REQUEST,
     PROTOCOL_VERSION,
+    RUN_NOT_ABORTABLE,
     RUN_NOT_FOUND,
     SCOPE_MISMATCH,
     Run,
@@ -47,6 +49,19 @@ from .tasks import GameTask, TaskKind, TaskParseError, parse_task, vote_start_te
 LOGGER = logging.getLogger("undercover_player")
 _MAX_FRAME_BYTES = 8 * 1024 * 1024
 _FRAME_HISTORY = 1000
+# chat.abort 的本地确认预算：先等生成任务退出，再等最后一次 final 发送的锁。
+# 两者都有上界，避免慢生成/慢发送阻塞接收循环。
+_ABORT_GRACE_SECONDS = 5.0
+_ABORT_LOCK_SECONDS = 2.0
+_ABORT_RESPONSE_TIMEOUT = _ABORT_GRACE_SECONDS + _ABORT_LOCK_SECONDS + 1.0
+
+
+def _abort_error(code: str, message: str) -> dict[str, object]:
+    return {"ok": False, "code": code, "message": message}
+
+
+def _abort_error_frame(frame_id: str, code: str, message: str) -> dict[str, object]:
+    return error_response(frame_id, code, message, retryable=True)
 
 
 class HandshakeError(RuntimeError):
@@ -79,6 +94,7 @@ class BcnClient:
         self.last_error: str | None = None
         self._ws: Any = None
         self._tasks: dict[str, asyncio.Task[None]] = {}
+        self._aux_tasks: set[asyncio.Task[None]] = set()
         self._memory: dict[str, tuple[int | None, str | None]] = {}
         self._send_lock = asyncio.Lock()
         self._stopping = False
@@ -126,6 +142,9 @@ class BcnClient:
                 pass
         for task in list(self._tasks.values()):
             task.cancel()
+        for task in list(self._aux_tasks):
+            task.cancel()
+        self._aux_tasks.clear()
         self.stopped.set()
 
     # -------------------------------------------------------------- connection
@@ -263,11 +282,36 @@ class BcnClient:
             await self._send(error_response(frame_id, INVALID_REQUEST, str(error)))
             self._log("chat_send_rejected", frame_id=frame_id, error=str(error))
             return
-        if (
-            self.registry.get(chat.frame_id) is not None
-            or self.registry.tombstone_session(chat.frame_id) is not None
-        ):
-            # 同一 frame 重发：只重复 ACK，不重复生成/推进。
+        active = self.registry.get(chat.frame_id)
+        if active is not None:
+            if active.session_key != chat.session_key or active.session_id != chat.session_id:
+                # run id 全局唯一；同一 id 跨 session 重放是协议冲突，不能当成幂等重发。
+                await self._send(
+                    error_response(
+                        frame_id,
+                        INVALID_REQUEST,
+                        "run id is already active in another session",
+                        retryable=False,
+                    )
+                )
+                self._log("chat_send_scope_conflict", run_id=chat.frame_id, active_session=active.session_id)
+                return
+            await self._send(ok_response(chat.frame_id, {"run_id": chat.frame_id}))
+            self._log("chat_send_duplicate", run_id=chat.frame_id)
+            return
+        tombstone_session = self.registry.tombstone_session(chat.frame_id)
+        if tombstone_session is not None:
+            if tombstone_session != chat.session_key:
+                await self._send(
+                    error_response(
+                        frame_id,
+                        INVALID_REQUEST,
+                        "run id belongs to another session",
+                        retryable=False,
+                    )
+                )
+                self._log("chat_send_scope_conflict", run_id=chat.frame_id, tombstone_session=tombstone_session)
+                return
             await self._send(ok_response(chat.frame_id, {"run_id": chat.frame_id}))
             self._log("chat_send_duplicate", run_id=chat.frame_id)
             return
@@ -283,6 +327,7 @@ class BcnClient:
         if not self.registry.add(run):
             return
         task = asyncio.create_task(self._process_run(run), name=f"run-{chat.frame_id}")
+        run.task = task
         self._tasks[run.run_id] = task
         task.add_done_callback(lambda _task, run_id=run.run_id: self._tasks.pop(run_id, None))
 
@@ -304,9 +349,7 @@ class BcnClient:
         if run is None:
             tombstone_session = self.registry.tombstone_session(run_id)
             if tombstone_session is None:
-                await self._send(
-                    error_response(frame_id, RUN_NOT_FOUND, "unknown run_id", retryable=False)
-                )
+                await self._send(error_response(frame_id, RUN_NOT_FOUND, "unknown run_id", retryable=False))
                 self._log("abort_unknown", run_id=run_id)
                 return
             if tombstone_session != session_key:
@@ -322,13 +365,100 @@ class BcnClient:
             await self._send(error_response(frame_id, SCOPE_MISMATCH, "run_id does not belong to session_key"))
             self._log("abort_scope_mismatch", run_id=run_id)
             return
+        # 先同步置 aborted：即使生成任务忽略 CancelledError，之后也不能再发 final。
         run.aborted = True
-        task = self._tasks.get(run_id)
-        if task is not None and not task.done():
-            task.cancel()
-        self.registry.mark_terminal(run, aborted=True)
-        await self._send(ok_response(frame_id, {"aborted": True, "aborted_run_ids": [run_id]}))
-        self._log("aborted", run_id=run_id, session_id=run.session_id)
+        if run.abort_future is None:
+            run.abort_future = asyncio.get_running_loop().create_future()
+            task = run.task or self._tasks.get(run_id)
+            if task is not None and not task.done():
+                task.cancel()
+            self._spawn(self._finalize_abort(run, task))
+            self._log("abort_requested", run_id=run_id, session_id=run.session_id)
+        # 本地确认（任务退出 + final 发送锁排空）由后台完成；接收循环继续处理其它帧。
+        self._spawn(self._respond_to_abort(frame_id, run))
+
+    def _spawn(self, coroutine: Any) -> None:
+        task = asyncio.create_task(coroutine)
+        self._aux_tasks.add(task)
+        task.add_done_callback(self._aux_done)
+
+    def _aux_done(self, task: asyncio.Task[None]) -> None:
+        self._aux_tasks.discard(task)
+        with contextlib.suppress(BaseException):
+            task.exception()
+
+    async def _finalize_abort(self, run: Run, task: asyncio.Task[None] | None) -> None:
+        """等待生成任务真正退出，并排空可能正在发送的 final，再给出本地结论。"""
+
+        try:
+            if task is not None:
+                done, _pending = await asyncio.wait({task}, timeout=_ABORT_GRACE_SECONDS)
+                if not done:
+                    self._log("abort_timeout", run_id=run.run_id, grace_seconds=_ABORT_GRACE_SECONDS)
+                    self._resolve_abort(
+                        run,
+                        _abort_error(RUN_NOT_ABORTABLE, "generation did not stop within the abort grace period"),
+                    )
+                    return
+                with contextlib.suppress(BaseException):
+                    task.exception()
+            try:
+                async with asyncio.timeout(_ABORT_LOCK_SECONDS):
+                    async with run.terminal_lock:
+                        pass
+            except TimeoutError:
+                self._log("abort_send_lock_timeout", run_id=run.run_id)
+                self._resolve_abort(
+                    run,
+                    _abort_error(RUN_NOT_ABORTABLE, "final delivery is still in flight"),
+                )
+                return
+            if run.terminal and run.final_sent:
+                # final 已经发出，取消请求按协议幂等成功，但不能谎称这次取消生效。
+                result = {"ok": True, "payload": {"aborted": False, "aborted_run_ids": []}}
+            else:
+                self.registry.mark_terminal(run, aborted=True)
+                result = {"ok": True, "payload": {"aborted": True, "aborted_run_ids": [run.run_id]}}
+                self._log("aborted", run_id=run.run_id, session_id=run.session_id)
+            self._resolve_abort(run, result)
+        except Exception as error:  # noqa: BLE001 - abort 清理失败必须显式返回协议错误
+            self._log("abort_failed", run_id=run.run_id, error=f"{type(error).__name__}: {error}")
+            self._resolve_abort(run, _abort_error(RUN_NOT_ABORTABLE, "failed to confirm cancellation"))
+
+    def _resolve_abort(self, run: Run, result: dict[str, object]) -> None:
+        future = run.abort_future
+        if future is not None and not future.done():
+            future.set_result(result)
+
+    async def _respond_to_abort(self, frame_id: str, run: Run) -> None:
+        future = run.abort_future
+        if future is None:
+            await self._send(_abort_error_frame(frame_id, RUN_NOT_ABORTABLE, "abort state is missing"))
+            return
+        try:
+            result = await asyncio.wait_for(asyncio.shield(future), timeout=_ABORT_RESPONSE_TIMEOUT)
+        except TimeoutError:
+            # 生成器始终不退出：不能谎称已取消，保持 aborted 标记以继续抑制迟到 final。
+            await self._send(
+                _abort_error_frame(
+                    frame_id,
+                    RUN_NOT_ABORTABLE,
+                    "generation did not stop before the abort response deadline",
+                )
+            )
+            self._log("abort_response_timeout", run_id=run.run_id)
+            return
+        if result.get("ok") is True:
+            payload = result.get("payload")
+            await self._send(ok_response(frame_id, payload if isinstance(payload, dict) else {}))
+        else:
+            await self._send(
+                _abort_error_frame(
+                    frame_id,
+                    str(result.get("code") or RUN_NOT_ABORTABLE),
+                    str(result.get("message") or "abort failed"),
+                )
+            )
 
     async def _handle_chat_history(self, frame: dict[str, object]) -> None:
         frame_id = str(frame.get("id"))
@@ -406,16 +536,10 @@ class BcnClient:
                 self._log("answer_invalid", run_id=run.run_id, kind=task.kind.value, issue=issue)
                 self.registry.mark_terminal(run)
                 return
-            if run.aborted or run.terminal:
-                self._log("result_dropped_aborted", run_id=run.run_id)
+            sent = await self._send_final(run, text)
+            if not sent:
                 return
-            if run.expired():
-                self.registry.mark_terminal(run)
-                self._log("result_dropped_expired", run_id=run.run_id, deadline_ms=run.deadline_ms)
-                return
-            await self._send_final(run, text)
             self.history.append(run.session_key, text, session_id=run.session_id)
-            self.registry.mark_terminal(run, result=text)
             self._log(
                 "task_completed",
                 run_id=run.run_id,
@@ -434,6 +558,9 @@ class BcnClient:
         except Exception as error:
             self._log("task_failed", run_id=run.run_id, error=f"{type(error).__name__}: {error}")
             self.registry.mark_terminal(run)
+        finally:
+            if not run.terminal:
+                self.registry.mark_terminal(run, aborted=run.aborted)
 
     async def _answer(self, task: GameTask, run: Run) -> Answer:
         try:
@@ -465,17 +592,33 @@ class BcnClient:
             return "嗯，不太好说。"
         return None
 
-    async def _send_final(self, run: Run, text: str) -> None:
-        seq = run.next_seq()
-        frame = chat_event_frame(
-            run_id=run.run_id,
-            session_id=run.session_id,
-            seq=seq,
-            state="final",
-            content=text,
-        )
-        await self._send(frame)
-        self._log("final_sent", run_id=run.run_id, session_id=run.session_id, seq=seq, chars=len(text))
+    async def _send_final(self, run: Run, text: str) -> bool:
+        """在 run 级锁内做最后一次 aborted/expired 检查并发送 final。
+
+        返回 False 表示结果被抑制（取消或过期），调用方不得再写历史/标记完成。
+        """
+
+        async with run.terminal_lock:
+            if run.aborted or run.terminal:
+                self._log("result_dropped_aborted", run_id=run.run_id)
+                return False
+            if run.expired():
+                self.registry.mark_terminal(run)
+                self._log("result_dropped_expired", run_id=run.run_id, deadline_ms=run.deadline_ms)
+                return False
+            seq = run.next_seq()
+            frame = chat_event_frame(
+                run_id=run.run_id,
+                session_id=run.session_id,
+                seq=seq,
+                state="final",
+                content=text,
+            )
+            await self._send(frame)
+            run.final_sent = True
+            self.registry.mark_terminal(run, result=text)
+            self._log("final_sent", run_id=run.run_id, session_id=run.session_id, seq=seq, chars=len(text))
+            return True
 
     # ---------------------------------------------------------------- plumbing
 
@@ -493,7 +636,10 @@ class BcnClient:
             self.registry.mark_terminal(run)
         for task in list(self._tasks.values()):
             task.cancel()
+        for task in list(self._aux_tasks):
+            task.cancel()
         self._tasks.clear()
+        self._aux_tasks.clear()
         self._log("runs_cancelled", reason=reason)
 
     def _word_hash(self, word: str | None) -> str | None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import stat
 import tempfile
+import threading
 import unittest
 from contextlib import suppress
 from pathlib import Path
@@ -40,6 +41,39 @@ class ScriptedBrain:
         if self.delay:
             await asyncio.sleep(self.delay)
         return Answer(self.text, "test")
+
+
+class StubbornBrain:
+    """故意吞掉取消信号，用于验证 abort 必须等生成真正退出才响应。"""
+
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def answer(self, task, run_id: str) -> Answer:  # noqa: ANN001 - test double
+        self.started.set()
+        try:
+            await self.release.wait()
+        except asyncio.CancelledError:
+            # 模拟不守规矩的生成器：取消后继续等到测试放行。
+            await asyncio.shield(self.release.wait())
+        return Answer("平时不太动它，占地方。", "test")
+
+
+class ThreadBlockingBrain:
+    """用 to_thread 模拟同步 HTTP/线程：取消只停住等待，线程本身会继续跑完。"""
+
+    def __init__(self) -> None:
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    async def answer(self, task, run_id: str) -> Answer:  # noqa: ANN001 - test double
+        def worker() -> Answer:
+            self.started.set()
+            self.release.wait(timeout=5)
+            return Answer("平时不太动它，占地方。", "thread-test")
+
+        return await asyncio.to_thread(worker)
 
 
 class BcnClientTests(unittest.IsolatedAsyncioTestCase):
@@ -323,6 +357,143 @@ class BcnClientTests(unittest.IsolatedAsyncioTestCase):
         response = await self.fake.wait_for_response("abort-1")
         self.assertFalse(response["ok"])
         self.assertEqual(response["error"]["code"], "invalid_request")
+
+    async def test_ack_echoes_request_id_as_run_id(self) -> None:
+        await self._start()
+        run_id = "smnode-run-ack-1"
+        await self.fake.send(chat_send_frame(state_machine_text("speak_3", speech_instruction()), run_id=run_id))
+        response = await self.fake.wait_for_response(run_id)
+        self.assertTrue(response["ok"])
+        self.assertEqual(response["payload"], {"run_id": run_id})
+
+    async def test_abort_waits_for_stubborn_generator_to_stop(self) -> None:
+        brain = StubbornBrain()
+        client = await self._start(brain)
+        run_id = "smnode-run-stubborn-1"
+        await self.fake.send(chat_send_frame(state_machine_text("speak_3", speech_instruction()), run_id=run_id))
+        await self.fake.wait_for_response(run_id)
+        await asyncio.wait_for(brain.started.wait(), timeout=2)
+
+        await self.fake.send(
+            {
+                "type": "req",
+                "id": "abort-stubborn",
+                "method": "chat.abort",
+                "params": {"session_key": SESSION_KEY, "run_id": run_id},
+            }
+        )
+        await asyncio.sleep(0.2)
+        # 生成器还没退出，不能先 ACK。
+        with self.assertRaises(TimeoutError):
+            await self.fake.wait_for_response("abort-stubborn", timeout=0.2)
+        brain.release.set()
+        response = await self.fake.wait_for_response("abort-stubborn", timeout=3)
+        self.assertEqual(response["payload"], {"aborted": True, "aborted_run_ids": [run_id]})
+        finals = [
+            item
+            for item in client.sent_frames
+            if item.get("type") == "event" and item.get("payload", {}).get("runId") == run_id
+        ]
+        self.assertEqual(finals, [])
+
+    async def test_abort_before_final_send_suppresses_final(self) -> None:
+        await self._start(RulesBrain())
+        client = self.client
+        assert client is not None
+        original_send_final = client._send_final  # noqa: SLF001 - 注入 final 发送前窗口
+        final_waiting = asyncio.Event()
+        send_gate = asyncio.Event()
+
+        async def delayed_send_final(run, text):  # noqa: ANN001
+            final_waiting.set()
+            await send_gate.wait()
+            return await original_send_final(run, text)
+
+        client._send_final = delayed_send_final  # type: ignore[method-assign]
+        run_id = "smnode-run-final-window"
+        await self.fake.send(chat_send_frame(state_machine_text("speak_3", speech_instruction()), run_id=run_id))
+        await self.fake.wait_for_response(run_id)
+        await asyncio.wait_for(final_waiting.wait(), timeout=2)
+
+        await self.fake.send(
+            {
+                "type": "req",
+                "id": "abort-final-window",
+                "method": "chat.abort",
+                "params": {"session_key": SESSION_KEY, "run_id": run_id},
+            }
+        )
+        response = await self.fake.wait_for_response("abort-final-window", timeout=3)
+        self.assertEqual(response["payload"], {"aborted": True, "aborted_run_ids": [run_id]})
+        send_gate.set()
+        await asyncio.sleep(0.2)
+        finals = [
+            item
+            for item in client.sent_frames
+            if item.get("type") == "event" and item.get("payload", {}).get("runId") == run_id
+        ]
+        self.assertEqual(finals, [])
+
+    async def test_cross_session_duplicate_run_id_is_rejected(self) -> None:
+        client = await self._start()
+        run_id = "duplicate-across-sessions"
+        await self.fake.send(chat_send_frame(state_machine_text("speak_3", speech_instruction()), run_id=run_id))
+        await self.fake.wait_for_response(run_id)
+        conflicting = chat_send_frame(
+            state_machine_text("speak_3", speech_instruction()),
+            run_id=run_id,
+            session_key="other-group:ffffffff",
+            session_id="other-group:ffffffff",
+        )
+        await self.fake.send(conflicting)
+        response = await self.fake.wait_for(
+            lambda frame: frame.get("type") == "res" and frame.get("id") == run_id and frame.get("ok") is False,
+            timeout=2,
+        )
+        self.assertEqual(response["error"]["code"], "invalid_request")
+        # 原 run 的 final 可能先于冲突响应到达；直接检查客户端已发送帧，避免把 final
+        # 从 fake server 队列里误消费掉。
+        finals: list[dict[str, object]] = []
+        for _ in range(100):
+            finals = [
+                item
+                for item in client.sent_frames
+                if item.get("type") == "event" and item.get("payload", {}).get("runId") == run_id
+            ]
+            if finals:
+                break
+            await asyncio.sleep(0.02)
+        self.assertEqual(len(finals), 1)
+        payload = finals[0]["payload"]
+        self.assertEqual(payload["sessionId"], SESSION_ID)
+
+    async def test_late_thread_result_after_abort_is_suppressed(self) -> None:
+        brain = ThreadBlockingBrain()
+        client = await self._start(brain)
+        run_id = "smnode-run-thread-1"
+        await self.fake.send(chat_send_frame(state_machine_text("speak_3", speech_instruction()), run_id=run_id))
+        await self.fake.wait_for_response(run_id)
+        self.assertTrue(await asyncio.to_thread(brain.started.wait, 2))
+
+        await self.fake.send(
+            {
+                "type": "req",
+                "id": "abort-thread",
+                "method": "chat.abort",
+                "params": {"session_key": SESSION_KEY, "run_id": run_id},
+            }
+        )
+        response = await self.fake.wait_for_response("abort-thread", timeout=3)
+        self.assertEqual(response["payload"], {"aborted": True, "aborted_run_ids": [run_id]})
+        # 线程还在跑；放行后它也不能把 final 补发出去。
+        brain.release.set()
+        await asyncio.sleep(0.3)
+        finals = [
+            item
+            for item in client.sent_frames
+            if item.get("type") == "event" and item.get("payload", {}).get("runId") == run_id
+        ]
+        self.assertEqual(finals, [])
 
     async def test_rules_brain_works_without_model_credentials(self) -> None:
         config = self._config()

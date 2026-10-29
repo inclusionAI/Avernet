@@ -24,7 +24,10 @@ BCS/主持人 --chat.send(节点指令)--> 本玩家
 - `chat.send`：立即 ACK（`run_id` 用请求 id），解析 `[State Machine Task]` 或遗言任务，
   在节点超时前回传 `state=final` 的 V3 `chat` 事件。
 - `chat.inject`：只 ACK，不产生 final。
-- `chat.abort`：只取消精确 `run_id`；校验 `session_key`；取消后抑制该 run 的迟到输出。
+- `chat.abort`：只取消精确 `run_id` 并校验 `session_key`；先置 aborted、取消生成、
+  等待生成任务真正退出并排空 final 发送锁，确认后才响应；若生成器不退出则返回
+  `RUN_NOT_ABORTABLE`（retryable），不谎称取消。确认在后台完成，接收循环不被慢生成阻塞；
+  取消后该 run 的迟到输出（包括 `to_thread` 里继续跑的 HTTP 结果）不会再发 final。
 - 节点超时（`timeout_ms`，玩家节点默认 420s）后结果直接丢弃，不污染下一节点。
 - 重复 `chat.send` 只 ACK，不重复生成。
 - 心跳：60s `bot.status`；断线指数退避重连；持久化 token 复用身份。
@@ -152,8 +155,15 @@ node_id: speak_3
 ```
 
 - ACK：`{"type":"res","id":"<request id>","ok":true,"payload":{"run_id":"<request id>"}}`
-- `seq` 每个 run 从 1 递增；外层 `seq` 必须等于 payload `seq`；
-- `runId`/`sessionId` 必须精确回显，否则 BCS 会静默忽略事件，表现为节点卡住。
+- `seq` 每个 run 从 1 递增；外层 `seq` 必须等于 payload `seq`；BCS 按连接维护
+  `run_sequences`，首帧 seq 只要求递增，不要求特定起始值；
+- `runId`/`sessionId` 必须精确回显，否则 BCS 会静默忽略事件，表现为节点卡住；
+- run id 契约（已核对 BCS 源码）：state machine 的请求 id 就是
+  `delivery_request_id`，BCS 以它建立 `bot_run_context`，并把 ACK 中不同的
+  `run_id` 注册为 alias；task dispatch 的请求 id 就是 `task_id`。本实现直接让 ACK
+  `run_id` 等于请求 id，因此两类任务都走 canonical id，不依赖 alias；
+- 真实部署仍通过 `/ws/bot` 连接、HTTP `/bots/onboard` 注册；token 放
+  `bot.connect.params.token`，不是只在测试 fakeserver 里成立。
 
 ## 4. 离线测试（不需要 BCS/模型/OpenClaw）
 
