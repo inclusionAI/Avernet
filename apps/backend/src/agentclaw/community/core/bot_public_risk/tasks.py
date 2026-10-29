@@ -31,6 +31,12 @@ class SecurityReport:
     valid_pass: bool = False
 
 
+@dataclass(frozen=True)
+class SecuritySubmission:
+    check_id: str
+    report: SecurityReport
+
+
 class SecurityProviderUnavailable(RuntimeError):
     """No external submission was attempted because no provider is configured."""
 
@@ -38,13 +44,13 @@ class SecurityProviderUnavailable(RuntimeError):
 class SecurityProvider(Protocol):
     """Submit once and query by original check ID.
 
-    A submission returns a nonempty external ID. Errors after a request may
+    A submission returns its nonempty external ID and initial report. Errors after a request may
     have been sent are outcome-unknown and must not trigger a blind retry;
     SecurityProviderUnavailable means no external request was attempted.
     Query failures propagate without inventing a security conclusion. PASS is
     actionable when a successful original-checkId report supplies PASS.
     """
-    def submit_agent_scan(self, agent_info: dict) -> str: ...
+    def submit_agent_scan(self, agent_info: dict) -> SecuritySubmission: ...
     def get_agent_check_report(self, check_id: str) -> SecurityReport: ...
 
 
@@ -91,10 +97,13 @@ class RiskTasks:
 
     def start(self, record: RiskCheck) -> tuple[RiskCheck, bool]:
         saved, created = self.repo.create_or_replay(
-            replace(record, next_action_at=self.clock())
+            replace(record, next_action_at=self.clock() + timedelta(minutes=2))
         )
         if created:
-            self._enqueue(saved, SUBMIT)
+            self.submit(env=saved.env, risk_check_id=saved.risk_check_id)
+            saved = self.repo.get(env=saved.env, risk_check_id=saved.risk_check_id)
+            if saved is None:
+                raise RuntimeError("risk application disappeared during submission")
         return saved, created
 
     def _update(self, row: RiskCheck, changes: dict) -> bool:
@@ -154,15 +163,20 @@ class RiskTasks:
             return
         workflow["submission_intent"] = True
         workflow["submission_started_at"] = self.clock().isoformat()
-        if not self._update(row, {"workflow_json": json.dumps(workflow)}):
+        if not self._update(row, {
+            "workflow_json": json.dumps(workflow),
+            # Let the synchronous attempt finish before recovery examines its intent.
+            "next_action_at": self.clock() + timedelta(minutes=2),
+        }):
             return
         row = self.repo.get(env=env, risk_check_id=risk_check_id)
         if row is None or row.current_target_key is None or row.phase != "PREPARING":
             return
         try:
-            check_id = self.provider.submit_agent_scan(
+            submission = self.provider.submit_agent_scan(
                 json.loads(row.input_json)["agent_info"]
             )
+            check_id = submission.check_id
             if not isinstance(check_id, str) or not check_id.strip():
                 raise ValueError("missing check id")
         except SecurityProviderUnavailable:
@@ -188,11 +202,12 @@ class RiskTasks:
             )
             return
         self._record_submission_result(
-            env=env, risk_check_id=risk_check_id, check_id=check_id
+            env=env, risk_check_id=risk_check_id, check_id=check_id,
+            report=submission.report,
         )
 
     def _record_submission_result(
-        self, *, env: str, risk_check_id: str, check_id: str
+        self, *, env: str, risk_check_id: str, check_id: str, report: SecurityReport
     ) -> None:
         # A reclaimed lease may already have marked this same attempt unknown.
         # A real response is stronger evidence; retain it without repeating POST.
@@ -233,44 +248,61 @@ class RiskTasks:
             except (TypeError, ValueError):
                 # Old or malformed intent has no trustworthy start: do not extend it.
                 deadline = now
-            paused = now >= deadline
             workflow["detecting_deadline"] = deadline.isoformat()
             notice_changes = (
                 {"notification_due_at": _next_due(due_notices)}
                 if unknown and unknown["status"] != "sent"
                 else {}
             )
-            if self._update(
-                row,
-                {
-                    **notice_changes,
-                    "workflow_json": json.dumps(workflow),
-                    "phase": "CHECKING",
-                    "security_status": "DETECTING",
-                    "check_id": check_id,
-                    "auto_poll_paused": paused,
-                    "next_action_at": None
-                    if paused
-                    else min(now + timedelta(seconds=30), deadline),
-                    "auto_poll_until": deadline,
-                },
-            ):
-                if not paused:
-                    self._enqueue(
-                        row,
-                        DETECTING,
-                        max(
-                            0,
-                            int(
-                                (
-                                    min(now + timedelta(seconds=30), deadline) - now
-                                ).total_seconds()
-                            ),
-                        ),
-                    )
+            changes = self._report_changes(row, report, now, workflow)
+            changes.update(notice_changes)
+            changes.update(check_id=check_id, workflow_json=json.dumps(workflow))
+            if self._update(row, changes):
+                current = self.repo.get(env=env, risk_check_id=risk_check_id)
+                if current is not None and current.current_target_key is not None:
+                    self._enqueue_followup(current)
                 return
         # The returned ID must not be silently dropped on repeated contention.
         raise RuntimeError("could not persist security check result after contention")
+
+    def _enqueue_followup(self, row: RiskCheck) -> None:
+        if row.phase == "ADVANCING":
+            self._enqueue(row, ADVANCE)
+        elif row.phase == "CHECKING" and not row.auto_poll_paused:
+            delay = max(0, int((row.next_action_at - self.clock()).total_seconds()))
+            self._enqueue(row, REJECT if row.security_status == "REJECT" else DETECTING, delay)
+
+    @staticmethod
+    def _report_changes(row: RiskCheck, report: SecurityReport, now: datetime, workflow: dict) -> dict:
+        """Apply creation and polled reports with identical status/window rules."""
+        if report.status not in {"DETECTING", "REJECT", "PASS"}:
+            raise ValueError("unknown security report status")
+        changes = {
+            "security_status": report.status,
+            "detail_url": report.detail_url or row.detail_url,
+        }
+        if report.status == "PASS":
+            changes.update(
+                phase="ADVANCING" if report.valid_pass is True else "NEEDS_ATTENTION",
+                next_action_at=now if report.valid_pass is True else None,
+                auto_poll_paused=False,
+            )
+            if report.valid_pass is not True:
+                workflow["error"] = "PASS_UNVERIFIED"
+        else:
+            detection_deadline = workflow.get("detecting_deadline")
+            deadline = datetime.fromisoformat(detection_deadline) if detection_deadline else None
+            if report.status == "REJECT":
+                if not workflow.get("reject_started_at"):
+                    workflow["reject_started_at"] = now.isoformat()
+                deadline = datetime.fromisoformat(workflow["reject_started_at"]) + timedelta(hours=1)
+            interval = 300 if report.status == "REJECT" else 30
+            paused = deadline is None or now >= deadline
+            changes.update(
+                phase="CHECKING", auto_poll_until=deadline, auto_poll_paused=paused,
+                next_action_at=None if paused else min(now + timedelta(seconds=interval), deadline),
+            )
+        return changes
 
     def poll(self, *, env: str, risk_check_id: str, manual: bool = False):
         row = self.repo.get(env=env, risk_check_id=risk_check_id)
@@ -306,45 +338,7 @@ class RiskTasks:
             ) != observed:
                 return "NOT_QUERIED"
             workflow = json.loads(row.workflow_json)
-            changes = {"security_status": report.status, "detail_url": report.detail_url}
-            if report.status == "PASS":
-                changes.update(
-                    {
-                        "phase": "ADVANCING"
-                        if report.valid_pass is True
-                        else "NEEDS_ATTENTION",
-                        "next_action_at": now if report.valid_pass is True else None,
-                        "auto_poll_paused": False,
-                    }
-                )
-                if report.valid_pass is not True:
-                    workflow["error"] = "PASS_UNVERIFIED"
-            else:
-                # The two windows belong to different events. A return from
-                # REJECT to DETECTING must never inherit the longer window.
-                detection_deadline = workflow.get("detecting_deadline")
-                deadline = (
-                    datetime.fromisoformat(detection_deadline)
-                    if detection_deadline
-                    else None
-                )
-                if report.status == "REJECT":
-                    if not workflow.get("reject_started_at"):
-                        workflow["reject_started_at"] = now.isoformat()
-                    deadline = datetime.fromisoformat(
-                        workflow["reject_started_at"]
-                    ) + timedelta(hours=1)
-                interval = 300 if report.status == "REJECT" else 30
-                paused = deadline is None or now >= deadline
-                changes.update(
-                    {
-                        "auto_poll_until": deadline,
-                        "auto_poll_paused": paused,
-                        "next_action_at": None
-                        if paused
-                        else min(now + timedelta(seconds=interval), deadline),
-                    }
-                )
+            changes = self._report_changes(row, report, now, workflow)
             changes["workflow_json"] = json.dumps(workflow)
             if self._update(row, changes):
                 break

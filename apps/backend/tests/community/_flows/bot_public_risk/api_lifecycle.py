@@ -12,7 +12,7 @@ RISK_FLOWS = [
                 path="/api/bots/risk-flow/public/risk-checks",
                 headers={"x-user-id": "risk-owner"},
                 body={"client_request_id": "risk-request", "public": "1", "permission_owner": "owner", "friend_approval": "0"},
-                expect={"success": True},
+                expect={"success": True, "data": {"phase": "CHECKING", "security_status": "DETECTING", "detail_url": "https://example.test/risk-flow-check"}},
                 extract={"risk_id": "data.risk_check_id"},
             ),
             FlowStep(
