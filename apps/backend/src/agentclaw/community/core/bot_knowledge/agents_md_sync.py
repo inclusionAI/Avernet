@@ -77,30 +77,52 @@ def build_knowledge_section(entries: list[tuple[str, str | None]]) -> str:
     return "\n".join(lines)
 
 
+def _locate_section(content: str) -> tuple[int, int] | None:
+    """Fence seams: the earliest END, paired with the START just before it.
+
+    A stray marker pasted into hand-written text (a user quoting the section
+    header for notes) must never widen the replaced range. Pairing the
+    earliest END with the *closest* preceding START keeps the cut inside the
+    real section; a file whose stray markers cannot close into a pair is
+    refused outright, so the caller skips the update instead of touching the
+    file.
+    """
+    end_pos = content.find(KNOWLEDGE_SECTION_END_MARKER)
+    if end_pos == -1:
+        return None
+    start = content.rfind(KNOWLEDGE_SECTION_START_MARKER, 0, end_pos)
+    if start == -1:
+        return None
+    return start, end_pos + len(KNOWLEDGE_SECTION_END_MARKER)
+
+
 def apply_knowledge_section(content: str, section: str | None) -> str | None:
     """Insert, replace, or remove the fenced section in ``content``.
 
-    - ``section`` given, no existing start marker → append at the end of the
-      file (an empty file gets a minimal ``# AGENTS.md`` heading first).
-    - ``section`` given, complete marker pair → in-place replacement that
-      keeps the section's position relative to surrounding hand-written text.
+    - ``section`` given, no closable marker pair → append at the end of the
+      file (an empty file gets a minimal ``# AGENTS.md`` heading first); a
+      stray START without any END also counts as "no section" for reading
+      but the write is refused (below), never appended.
+    - ``section`` given, closable marker pair → in-place replacement that
+      keeps the section's position; everything outside the fence is carried
+      through byte-for-byte.
     - ``section`` ``None`` → remove the section; without a start marker the
       content is returned unchanged.
-    - start marker without its end marker → ``None``: the fence is broken and
-      the caller must skip rather than risk eating hand-written content.
+    - stray markers that cannot close into a pair (orphan START, orphan END,
+      an END ahead of any START) → ``None``: the caller must skip rather than
+      risk eating hand-written content.
     """
-    start = content.find(KNOWLEDGE_SECTION_START_MARKER)
-    if start == -1:
+    seams = _locate_section(content)
+    if seams is None:
         if section is None:
             return content
+        if KNOWLEDGE_SECTION_START_MARKER in content:
+            return None
         body = content.rstrip("\n")
         if not body:
             return f"# AGENTS.md\n\n{section}\n"
         return f"{body}\n\n{section}\n"
-    end = content.find(KNOWLEDGE_SECTION_END_MARKER, start)
-    if end == -1:
-        return None
-    end += len(KNOWLEDGE_SECTION_END_MARKER)
+    start, end = seams
     if section is None:
         while end < len(content) and content[end] == "\n":
             end += 1

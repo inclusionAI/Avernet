@@ -65,7 +65,89 @@ def test_apply_remove_without_marker_is_noop():
 def test_apply_broken_fence_returns_none():
     content = f"# 手写\n\n{KNOWLEDGE_SECTION_START_MARKER}\n孤儿段落"
     assert apply_knowledge_section(content, "SECTION") is None
-    assert apply_knowledge_section(content, None) is None
+    # Delete path: no closable pair, so the content passes through untouched
+    # (equivalent to a skip, but a natural no-op instead of a refusal).
+    assert apply_knowledge_section(content, None) == content
+
+
+# ---------- adversarial: hand-written content must survive every seam ----------
+
+
+def test_orphan_start_before_real_section_keeps_orphan_and_user_text():
+    """A stray START quoted in notes never widens the replaced range.
+
+    The earliest END pairs with the START just before it (the real section's);
+    the stray marker and the notes around it stay byte-for-byte.
+    """
+    real = build_knowledge_section([("kb1", None)])
+    new = build_knowledge_section([("kb2", None)])
+    notes = f"# 笔记\n\n{KNOWLEDGE_SECTION_START_MARKER}\n我引用了段落开头\n\n用户文字\n\n"
+    content = f"{notes}{real}\n\n尾部\n"
+    out = apply_knowledge_section(content, new)
+    assert out.startswith(notes)
+    assert out.endswith("\n\n尾部\n")
+    assert "`kb2`" in out and "`kb1`" not in out
+    assert out.count(KNOWLEDGE_SECTION_START_MARKER) == 2
+    assert out.count(KNOWLEDGE_SECTION_END_MARKER) == 1
+
+
+def test_orphan_start_after_real_section_is_kept():
+    real = build_knowledge_section([("kb1", None)])
+    new = build_knowledge_section([("kb2", None)])
+    content = f"# 头\n\n{real}\n\n引用：{KNOWLEDGE_SECTION_START_MARKER}\n"
+    out = apply_knowledge_section(content, new)
+    assert out == f"# 头\n\n{new}\n\n引用：{KNOWLEDGE_SECTION_START_MARKER}\n"
+
+
+def test_orphan_end_before_real_section_refuses_to_write():
+    real = build_knowledge_section([("kb1", None)])
+    content = f"# 笔记\n\n{KNOWLEDGE_SECTION_END_MARKER}\n\n{real}\n"
+    assert apply_knowledge_section(content, "SECTION") is None
+    assert apply_knowledge_section(content, None) == content
+
+
+def test_orphan_end_alone_still_appends_and_keeps_user_text():
+    content = f"# 笔记\n\n引用：{KNOWLEDGE_SECTION_END_MARKER}\n"
+    out = apply_knowledge_section(content, "SECTION")
+    assert out is not None
+    assert out.startswith("# 笔记\n\n引用：")
+    assert "SECTION" in out
+
+
+def test_crlf_file_outside_fence_is_carried_through():
+    real = build_knowledge_section([("kb1", None)])
+    new = build_knowledge_section([("kb2", None)])
+    content = f"# 头\r\n\r\n{real}\r\n\r\n尾部\r\n"
+    out = apply_knowledge_section(content, new)
+    assert out.startswith("# 头\r\n\r\n")
+    assert out.endswith("\r\n\r\n尾部\r\n")
+    assert "`kb2`" in out
+
+
+def test_bom_file_is_carried_through():
+    real = build_knowledge_section([("kb1", None)])
+    new = build_knowledge_section([("kb2", None)])
+    content = "﻿" + f"# 头\n\n{real}\n"
+    out = apply_knowledge_section(content, new)
+    assert out.startswith("﻿# 头\n\n")
+    assert "`kb2`" in out
+
+
+def test_fence_inner_user_content_is_reclaimed():
+    """Content pasted inside the fence is machine territory and is replaced."""
+    real = build_knowledge_section([("kb1", None)])
+    polluted = real.replace(
+        KNOWLEDGE_SECTION_END_MARKER,
+        f"我偷偷在段里写了话\n{KNOWLEDGE_SECTION_END_MARKER}",
+    )
+    content = f"# 头\n\n{polluted}\n"
+    out = apply_knowledge_section(content, build_knowledge_section([("kb1", None)]))
+    assert out == f"# 头\n\n{build_knowledge_section([('kb1', None)])}\n"
+
+
+def test_trailing_blank_lines_collapse_but_text_survives():
+    out = apply_knowledge_section("# 手写\n\n\n\n", "SECTION")
+    assert out == "# 手写\n\nSECTION\n"
 
 
 # ---------- fakes ----------
