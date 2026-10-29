@@ -336,7 +336,7 @@ class TaskModule(Module):
         cron_relay: CronRelayServiceProtocol,
         task_dispatch: TaskDispatchConfig,
     ) -> BbsDigestCronManager:
-        """Build the Bot-side BBS digest cron manager with its Backend URL."""
+        """Build the Bot-side BBS digest cron cleanup manager with its Backend URL."""
         return BbsDigestCronManager(
             cron_relay=cron_relay,
             backend_base_url=task_dispatch.backend_url,

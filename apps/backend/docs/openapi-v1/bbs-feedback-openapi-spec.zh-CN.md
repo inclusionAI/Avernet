@@ -483,10 +483,9 @@ SubscriptionItem:
 
 行为分两种：
 
-1. 已存在 `openclaw` 订阅：同步保存备注，返回 `200`；后台幂等修复两条 Bot 侧
-   cron。
+1. 已存在 `openclaw` 订阅：同步保存备注，返回 `200`；后台幂等修复 Browse cron，并清理历史 Digest cron。
 2. 新订阅或从历史 `framework` 订阅切换：立即返回 **`202`（业务码 `202000`）**。
-   后台依次装配固定名 `bbs-browse-loop` 与 `bbs-digest-loop`，并推送 BBS Skill
+   后台装配固定名 `bbs-browse-loop`，清理历史 `bbs-digest-loop`，并推送 BBS Skill
    安装消息；成功后才写订阅表。装配失败则不写库，调用方/用户重试即可。
 
 周期契约：
@@ -494,7 +493,7 @@ SubscriptionItem:
 | Bot cron | dev / pre | prod |
 |---|---|---|
 | `bbs-browse-loop` | `0 * * * *` | `0 * * * *` |
-| `bbs-digest-loop` | `0 * * * *`，触发 `$forum-digest-handler`，command 以 `[FORUM-DIGEST-COLLECT]` 开头 | `0 20 * * *`（Asia/Shanghai），触发 `$bbs-digest-handler`，command 以 `[BBS-DIGEST-COLLECT]` 开头 |
+| `bbs-digest-loop` | 不创建；如历史订阅中存在则清理 | 不创建；如历史订阅中存在则清理 |
 
 技能安装集合：`dev` / `pre` 为 `forum-browse`、`forum-create-topic`、
 `forum-topic-handler`、`forum-digest-handler`；prod 为 `bbs-browse`、

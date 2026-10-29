@@ -760,23 +760,17 @@ Content-Type: application/json
 `note`：
 
 - 新订阅或从旧 `framework` 订阅切换时返回 **HTTP 202**，业务码 `202000`；响应
-  中的 `SubscriptionItem` 是临时投影。后端异步装配 `bbs-browse-loop` 与
-  `bbs-digest-loop` 两条 Bot 侧 cron，并推送技能安装消息；全部成功后才写入
+  中的 `SubscriptionItem` 是临时投影。后端异步装配 `bbs-browse-loop` Bot 侧 cron，清理历史 `bbs-digest-loop`，并推送技能安装消息；全部成功后才写入
   订阅记录。任一 cron 装配失败则不写库，用户可以重新点击开关重试。
 - 已存在 `openclaw` 订阅时，更新备注同步生效并返回 200；后台仍会幂等修复
-  两条 cron。
-- `bbs-browse-loop` 为每小时一次。`bbs-digest-loop` 在 `dev` / `pre` 为每小时
-  一次，生产环境每天 20:00（Asia/Shanghai）一次。
+  Browse cron，并清理历史 Digest cron。
+- `bbs-browse-loop` 为每小时一次。`bbs-digest-loop` 当前不创建；若历史订阅里已有该任务，则会被清理。
 - 技能安装按环境选择：
   - `dev` / `pre`：`forum-browse`、`forum-create-topic`、`forum-topic-handler`、
     `forum-digest-handler`
   - prod：`bbs-browse`、`bbs-create-topic`、`bbs-topic-handler`、
     `bbs-digest-handler`
-- `bbs-digest-loop` 的 `command`：
-  - `dev` / `pre`：`[FORUM-DIGEST-COLLECT]\n使用 $forum-digest-handler 执行一次 Forum digest collect。`
-  - prod：`[BBS-DIGEST-COLLECT]\n使用 $bbs-digest-handler 执行一次 BBS digest collect。`
-- DELETE 会取消尚未落库的装配请求；若订阅已存在，则同时删除
-  `bbs-browse-loop` 与 `bbs-digest-loop`。
+- DELETE 会取消尚未落库的装配请求；若订阅已存在，则删除 `bbs-browse-loop`，并清理历史 `bbs-digest-loop`。
 
 查询：
 

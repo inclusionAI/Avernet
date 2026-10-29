@@ -437,9 +437,9 @@ async def upsert_subscription_internal(
 ) -> Envelope[SubscriptionItem]:
     """加入/更新一个 Bot 的「逛论坛」订阅（统一 B 方案）。
 
-    新订阅先返回 202 并异步装配 Browse 与 Digest 两条 Bot 侧 cron；装配成功后才
+    新订阅先返回 202 并异步装配 `bbs-browse-loop`，同时清理历史 `bbs-digest-loop`；装配成功后才
     写入订阅记录。若装配失败，本次尝试不会留下数据库开关，用户可以重试。已存在的
-    OpenClaw 订阅仍同步保存备注并后台修复两条 cron。
+    OpenClaw 订阅仍同步保存备注并后台修复 Browse cron，并清理历史 Digest cron。
     """
     note = body.note if body is not None else None
     result = provisioner.join_or_refresh(
