@@ -248,7 +248,6 @@ def test_the_contract_names_the_whole_seam():
         "find_job",
         "persist",
         "preflight",
-        "recovery_manifest_digest",
         "start_job",
         "verify_binding",
     ]
@@ -300,89 +299,3 @@ def test_bound_document_mismatch_stops_without_overwriting_user_document():
         seam.verify_binding(entity_id="e", bot_id="b", manifest_digest="0" * 64)
     assert manifests.puts == []
     assert manifests.deletes == []
-
-
-def _recoverable_seam():
-    from types import SimpleNamespace
-    from agentclaw.community.core.bot_config_manifest.binding import manifest_digest, bound_manifest_state, DIGEST_ENCODING
-    from agentclaw.community.core.bot_config_manifest.creation import CREATE_ON_CONTAINER_TRIGGER
-    from agentclaw.community.utils.env_utils import get_current_env
-    from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
-    from agentclaw.community.core.apply_engine.outcomes import ApplyStatus
-    from agentclaw.community.core.task_queue.types import TaskStatus
-
-    document = "schema_version: 1\nmanifest:\n  skills: []\n"
-    digest = manifest_digest(document)
-    job = SimpleNamespace(status=TaskStatus.SUCCEEDED, payload={"spec": {"manifest_binding": {
-        "manifest_digest": digest, "entity_id": "e", "bot_id": "b",
-        "digest_encoding": DIGEST_ENCODING, "tenant": get_current_avernet_tenant(), "env": get_current_env(),
-    }}})
-    manifests = _Manifests()
-    manifests.get = lambda **_: SimpleNamespace(document=document)
-    applies = _Applies()
-    applies.last_apply = lambda **_: SimpleNamespace(
-        status=ApplyStatus.PARTIAL, trigger=CREATE_ON_CONTAINER_TRIGGER, state=bound_manifest_state(digest)
-    )
-    seam = _seam(applies=applies, manifests=manifests, jobs=_Jobs(found=job))
-    return seam, job, applies, manifests, digest
-
-
-def test_failed_expert_creation_recovers_the_original_bound_document():
-    seam, _, _, manifests, digest = _recoverable_seam()
-    assert seam.recovery_manifest_digest(entity_id="e", bot_id="b") == digest
-    assert manifests.puts == []
-
-
-def test_recovery_refuses_changed_document_without_rewriting_it():
-    from types import SimpleNamespace
-    seam, _, _, manifests, _ = _recoverable_seam()
-    manifests.get = lambda **_: SimpleNamespace(document="schema_version: 1\nmanifest: {}\n")
-    with pytest.raises(ValueError, match="bound Manifest has changed"):
-        seam.recovery_manifest_digest(entity_id="e", bot_id="b")
-    assert manifests.puts == []
-    assert manifests.deletes == []
-
-
-@pytest.mark.parametrize("status", ["RUNNING", "SUCCEEDED"])
-def test_recovery_refuses_pending_or_successful_apply(status):
-    from types import SimpleNamespace
-    from agentclaw.community.core.apply_engine.outcomes import ApplyStatus
-    seam, _, applies, _, _ = _recoverable_seam()
-    report = applies.last_apply()
-    applies.last_apply = lambda **_: SimpleNamespace(status=ApplyStatus(status), trigger=report.trigger, state=report.state)
-    with pytest.raises(ValueError, match="ordinary Apply"):
-        seam.recovery_manifest_digest(entity_id="e", bot_id="b")
-
-
-def test_recovery_refuses_unrelated_explicit_apply_and_storage_scope():
-    from types import SimpleNamespace
-    from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import MANIFEST_STATE
-    from agentclaw.community.core.apply_engine.outcomes import ApplyStatus
-    seam, job, applies, _, _ = _recoverable_seam()
-    applies.last_apply = lambda **_: SimpleNamespace(status=ApplyStatus.FAILED, trigger="explicit", state=MANIFEST_STATE)
-    with pytest.raises(ValueError, match="ordinary Apply"):
-        seam.recovery_manifest_digest(entity_id="e", bot_id="b")
-    job.payload["spec"]["manifest_binding"]["entity_id"] = "another-owner"
-    with pytest.raises(ValueError, match="storage reference"):
-        seam.recovery_manifest_digest(entity_id="e", bot_id="b")
-
-
-def test_failed_bound_recovery_can_be_retried_without_new_creation():
-    from types import SimpleNamespace
-    seam, _, applies, _, digest = _recoverable_seam()
-    previous = applies.last_apply()
-    applies.last_apply = lambda **_: SimpleNamespace(status=previous.status, trigger="explicit", state=previous.state)
-    assert seam.recovery_manifest_digest(entity_id="e", bot_id="b") == digest
-
-
-@pytest.mark.parametrize("status", ["FAILED", "TIMED_OUT"])
-def test_terminal_job_failure_before_post_container_enqueue_remains_recoverable(status):
-    from types import SimpleNamespace
-    from agentclaw.community.core.task_queue.types import TaskStatus
-    from agentclaw.community.core.apply_engine.outcomes import ApplyStatus
-    seam, job, applies, _, digest = _recoverable_seam()
-    job.status = TaskStatus(status)
-    previous = applies.last_apply()
-    applies.last_apply = lambda **_: SimpleNamespace(status=ApplyStatus.SUCCEEDED,
-        trigger=CREATE_PRE_CONTAINER_TRIGGER, state=previous.state)
-    assert seam.recovery_manifest_digest(entity_id="e", bot_id="b") == digest

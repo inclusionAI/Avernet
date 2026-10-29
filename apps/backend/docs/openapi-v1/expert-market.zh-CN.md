@@ -34,7 +34,7 @@ Summary字段为 `expert_id/name/description/category/tags/creation_count/first_
 停止并保留当前用户文档。系统来源随真实Bot初始写入，普通PUT/PATCH元数据不能修改
 `expert_origin`，更新其他ext键保留来源。公开Bot DTO只增加只读 `expert_name`；普通Bot
 为null，不公开commit、摘要或内部来源对象。受理和等待授权不计数；每个真实Bot仅计一次，
-service草稿、建行后失败和软删仍计，恢复原Bot不重复。
+service草稿、建行后失败和软删仍计；查看原 Bot 详情不改变次数。
 
 OpenClaw沿原身份投递；Claude Code按声明顺序、源文件名标题及完整原文确定性组装
 `CLAUDE.md`。未证明身份运行消费的Teclaw组合在创建前明确拒绝；其他当前构建不支持的
@@ -42,21 +42,14 @@ Manifest扩展同样明确拒绝，不删除作者声明以降级通过。服务
 创建/配置完成不代表已发布生产。
 
 
-## 原 Bot 配置恢复与当前报告
+## 创建失败与只读详情
 
-Bot 已存在且创建初始化配置失败（包括 `PARTIAL`）时，在原有 owner-only
-`POST /openapi/v1/bots/{bot_id}/config-manifest/apply?user_id=...&recover_creation=true`
-显式恢复。此选择器只适用于同一用户存储作用域下的原绑定失败任务；任务仍运行、
-已配置成功、没有原绑定，或存储引用/清单摘要不一致时返回标准409。
-`dry_run=true` 可在同一绑定约束下预览。缺省 `recover_creation=false` 保持现有普通
-Apply 语义，用户创建完成后的配置不永久锁定初始模板。
+Bot 已存在且创建初始化配置失败（包括 `PARTIAL`）时，保留原 Bot、来源和累计创建次数。
+创建结果及 Bot 管理中的“专家创建详情”入口只读原创建任务与其失败报告；可查看条目错误、
+原 Bot 标识及进入管理的入口。查询失败与配置失败分别呈现，不将 `PARTIAL` 显示为成功。
+查看详情不提交创建或 Apply，不提供原清单重放或创建恢复模式。
 
-恢复返回202和新的 `apply_id`，沿既有
-`GET .../config-manifest/applies/{apply_id}` 查询该报告；只有 `SUCCEEDED` 表示配置完成，
-`PARTIAL` 与 `FAILED` 都保持配置失败。创建状态接口继续描述原创建任务；正式前端在
-创建结果及 Bot 管理的“专家配置与恢复”入口读取当前 `last-apply`，展示新编号和条目错误。
-恢复不重新创建 Bot、不改来源或累计次数、不重新编译 Git HEAD，也不回写旧清单。
-
-用户显式重试沿原生 Replace：仅省略类目才不操作，显式 resources（含 `[]`）清理
-workspace 非保护项后写入；不承诺保留所有用户输出。Git 模板更新或下架本身不触发
-已有 Bot 再 Apply，也不下线已有 Bot。首次创建 POST 结果未知且没有 bot_id 的边界保持不变。
+创建状态接口描述原创建任务，不使用后续普通 Apply 的结果改写创建历史。
+普通 Manifest Apply 保持现有行为，沿当前用户保存的清单执行；它不具有专家创建恢复语义。
+Git 模板更新或下架不触发已有 Bot 再 Apply，也不下线已有 Bot。
+首次创建 POST 结果未知且没有 bot_id 时不自动重发；已有 Bot 的配置失败不再次创建 Bot。

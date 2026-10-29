@@ -360,7 +360,6 @@ async def get_bot_create_with_manifest_status(
     # storage key, never a request parameter — see ``resolve_manifest_entity_id``.
     entity_id = owner_id
     bot = bot_repo.get_by_id_and_entity(bot_id, entity_id)
-    report = apply_service.last_apply(entity_id=entity_id, bot_id=bot_id)
 
     # Which order this bot's creation ran in (W8): with a record, the bot's
     # own engine decides; before one exists the answer does not matter, since
@@ -369,6 +368,9 @@ async def get_bot_create_with_manifest_status(
         apply_service.delivery_for_bot(bot).creation_sequence
         if bot is not None
         else CreationSequence.CREATE_BETWEEN_PHASES
+    )
+    report = apply_service.last_apply(
+        entity_id=entity_id, bot_id=bot_id, trigger=_terminal_trigger(sequence)
     )
     status = _creation_state(
         bot=bot,
@@ -478,13 +480,9 @@ def _creation_state(
             record,
         )
     if record.status is TaskStatus.SUCCEEDED:
-        # The job finished, so the creation is over — even though the newest
-        # apply record is not the post-container one. That happens when an
-        # explicit apply has landed since, which this endpoint deliberately does
-        # not report: it answers "how did the creation end", and
-        # `GET .../config-manifest/last-apply` answers "how is the bot
-        # configured now". Reading the creation's own record back would need a
-        # trigger-filtered query the design chose not to add.
+        # The job finished without a retained terminal-phase report. Later
+        # explicit applies are excluded by the trigger-filtered read: this
+        # endpoint describes the original creation, not current configuration.
         return (CreationState.READY, record)
     if record.status in TERMINAL_STATUSES:
         # The job gave up with the bot never reaching a container.

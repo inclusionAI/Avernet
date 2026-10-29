@@ -1,4 +1,4 @@
-import type { ExpertDetail, ExpertPage, ExpertQuery, ExpertBotAccepted, ExpertBotCreationStatus, ExpertApplyAccepted, ExpertApplyReport } from '@/domain/expertMarket';
+import type { ExpertDetail, ExpertPage, ExpertQuery, ExpertBotAccepted, ExpertBotCreationStatus } from '@/domain/expertMarket';
 import { backendRequest } from './httpClient';
 import { userScopedParams } from './bots/botController';
 import type { AvernetBotCreateRequest } from '@/domain/botWorkshop';
@@ -34,24 +34,6 @@ export function requestExpertBotCreation(expertId: string, body: AvernetBotCreat
 
 export function requestExpertBotCreationStatus(botId: string) {
   return backendRequest<BackendApiEnvelope<ExpertBotCreationStatus>>(`/openapi/v1/bots/${encodeURIComponent(botId)}/with-manifest/status`, {
-    method: 'GET', params: userScopedParams(),
-  });
-}
-
-/** Reuses the owner-only Apply route; never issues another Bot create. */
-export function requestExpertBotRecovery(botId: string) {
-  return backendRequest<BackendApiEnvelope<ExpertApplyAccepted>>(`/openapi/v1/bots/${encodeURIComponent(botId)}/config-manifest/apply`, {
-    method: 'POST', params: { ...userScopedParams(), recover_creation: true },
-  });
-}
-export function requestExpertBotApplyReport(botId: string, applyId: string) {
-  return backendRequest<BackendApiEnvelope<ExpertApplyReport>>(`/openapi/v1/bots/${encodeURIComponent(botId)}/config-manifest/applies/${encodeURIComponent(applyId)}`, {
-    method: 'GET', params: userScopedParams(),
-  });
-}
-
-export function requestExpertBotLastApply(botId: string) {
-  return backendRequest<BackendApiEnvelope<ExpertApplyReport>>(`/openapi/v1/bots/${encodeURIComponent(botId)}/config-manifest/last-apply`, {
     method: 'GET', params: userScopedParams(),
   });
 }

@@ -634,6 +634,6 @@ Two things are close to authorization boundaries already:
 
 Creation-spec policy is supplied by the composition root as a required
 `validate_creation_spec` callable to the creation seam and worker. They invoke
-it before recovery admission or worker side effects, without importing the
+it before worker side effects, without importing the
 policy owner or inspecting its business fields. Manifest scope/document
 binding checks remain local to the Manifest compiler and creation seam.

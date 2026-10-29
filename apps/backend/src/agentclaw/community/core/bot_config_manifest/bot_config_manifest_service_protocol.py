@@ -40,7 +40,7 @@ from agentclaw.community.core.apply_engine.capabilities import (
     CapabilityResolver,
 )
 from agentclaw.community.core.bot_config_manifest.binding import (
-    ManifestBindingMismatchError, ManifestRecoveryRefusedError, bound_manifest_state,
+    ManifestBindingMismatchError, bound_manifest_state,
 )
 from agentclaw.community.core.bot_config_manifest.schema import (
     MAX_DOCUMENT_BYTES,
@@ -81,7 +81,6 @@ MANIFEST_STATE = StateRef("manifest")
 
 __all__ = [
     "ManifestBindingMismatchError",
-    "ManifestRecoveryRefusedError",
     "bound_manifest_state",
     "BotConfigManifestServiceProtocol",
     "MANIFEST_STATE",

@@ -72626,18 +72626,6 @@
             }
           },
           {
-            "description": "Recover a failed bound initialization on this same bot using its original stored Manifest. A changed binding or a completed/running creation is refused with 409. False (default) preserves ordinary Apply of the current user document.",
-            "in": "query",
-            "name": "recover_creation",
-            "required": false,
-            "schema": {
-              "default": false,
-              "description": "Recover a failed bound initialization on this same bot using its original stored Manifest. A changed binding or a completed/running creation is refused with 409. False (default) preserves ordinary Apply of the current user document.",
-              "title": "Recover Creation",
-              "type": "boolean"
-            }
-          },
-          {
             "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
             "in": "query",
             "name": "user_id",

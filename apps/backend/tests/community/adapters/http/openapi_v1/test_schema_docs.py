@@ -173,3 +173,11 @@ def test_every_published_example_satisfies_its_own_schema():
         "published examples that do not satisfy their own schema:\n  "
         + "\n  ".join(problems)
     )
+
+
+def test_manifest_apply_publishes_only_the_ordinary_apply_contract():
+    operation = _document()["paths"]["/openapi/v1/bots/{bot_id}/config-manifest/apply"]["post"]
+    parameters = {item["name"] for item in operation["parameters"]}
+    assert "dry_run" in parameters
+    assert "recover_creation" not in parameters
+    assert "202" in operation["responses"]

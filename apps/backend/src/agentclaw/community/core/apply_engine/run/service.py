@@ -623,11 +623,11 @@ class ApplyRunService(ApplyRunServiceProtocol):
         return self._to_report(record, entity_id=entity_id, bot_id=bot_id)
 
     def last_apply(
-        self, *, entity_id: str, bot_id: str
+        self, *, entity_id: str, bot_id: str, trigger: str | None = None
     ) -> Optional[ApplyReport]:
-        """The newest report, or ``None`` when this bot has never applied."""
+        """The newest report, optionally for one trigger; no match is ``None``."""
         record = self._applies.latest(
-            env=get_current_env(), entity_id=entity_id, bot_id=bot_id
+            env=get_current_env(), entity_id=entity_id, bot_id=bot_id, trigger=trigger
         )
         return self._to_report(record, entity_id=entity_id, bot_id=bot_id)
 

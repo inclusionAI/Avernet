@@ -44,15 +44,10 @@ export interface ExpertBotCreationStatus extends ExpertBotAccepted {
     | 'AUTHORIZATION_REJECTED'
     | 'AUTHORIZATION_EXPIRED';
   message?: string;
-  recoverable?: boolean;
   bot?: Record<string, unknown> | null;
   apply?: ExpertApplyReport | null;
 }
 
-export interface ExpertApplyAccepted {
-  apply_id: string;
-  result: 'RUNNING';
-}
 export interface ExpertApplyReport {
   trigger?: string;
   state?: { kind: string; reference?: string | null };

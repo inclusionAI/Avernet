@@ -10,10 +10,6 @@ from agentclaw.community.core.apply_engine.compiler import StateRef
 DIGEST_ENCODING = "sha256-json-v1"
 
 
-class ManifestRecoveryRefusedError(ValueError):
-    """No failed bound creation is available to recover on this bot."""
-
-
 class ManifestBindingMismatchError(ValueError):
     """The stored document differs from the creation task binding."""
 
