@@ -11,6 +11,7 @@ from agentclaw.community.core.mcp.effective_mcp_state_reader_protocol import (
     EffectiveMCPStateReaderProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.bot_management.addressing import stable_resource_owner_id
 from agentclaw.community.core.repository.protocols.mcp_default_exclusion import (
     MCPDefaultExclusionReaderProtocol,
 )
@@ -57,7 +58,7 @@ class EffectiveMCPStateReader(EffectiveMCPStateReaderProtocol):
             bot_id=bot_id, owner_id=owner_id, bot=resolved_bot
         )
         excluded_codes = self._exclusion_reader.list_excluded_server_codes(
-            bot_id=bot_id, owner_id=owner_id
+            bot_id=bot_id, owner_id=stable_resource_owner_id(resolved_bot)
         )
         platform_defaults = (
             self._platform_default_mcp_policy.server_codes_for(resolved_bot)

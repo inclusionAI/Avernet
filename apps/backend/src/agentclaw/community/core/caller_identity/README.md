@@ -20,6 +20,13 @@ internal_dependencies:
 
 ### Change impact
 
+OpenAPI Caller context, MCP/CLI call-type writes and acli operations resolve
+their `OwnerIdDep` locator through `openapi_v1.bot_address` before passing an
+entity to Core. A legacy `owner_id` may identify the current Owner or the
+immutable entity; an explicit `entity_id` is an exact address. Core entity
+arguments remain strict, and `actor_id` remains the authenticated caller.
+This preserves access after handoff without granting the former Owner access.
+
 Explicit OpenAPI friend IAM preparation carries a server-verified
 `friend_user_id` and owned `session_id`. The adapter verifies friendship, resolves
 the effective chat stage, and loads the actual entity address from the exact

@@ -22,7 +22,7 @@ class BotCapabilitySnapshot:
     """
 
     bot_id: str
-    owner_id: str
+    owner_id: str  # Immutable Bot entity locator; retained legacy field name.
     skills: tuple[RegisteredSkillAsset, ...]
     installed_mcp_server_codes: frozenset[str]
 
