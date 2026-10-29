@@ -318,3 +318,7 @@ user_config:
       per_attempt_timeout: 1800
       setup_timeout: 900
       slice_max_seconds: 3600
+    executor:
+      # One engine chat round trip; default follows per_attempt timeout
+      # (long coding turns need the whole attempt budget).
+      bot_chat_timeout_seconds: 1800
