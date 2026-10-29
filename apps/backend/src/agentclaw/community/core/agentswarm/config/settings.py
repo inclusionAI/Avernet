@@ -279,9 +279,12 @@ class AgentSwarmExecutorConfig:
     """
 
     max_platform_workers: int = 4
-    # The bot persona chat leg's own deadline (host adapter): a loaded
-    # colima stack can legitimately serve a chat slower than the default.
-    bot_chat_timeout_seconds: float = 300.0
+    # The bot persona chat leg's own deadline (host adapter): one engine
+    # chat round trip may occupy the whole per-attempt task budget on
+    # long-running coding/review turns, so the default follows
+    # orchestration.per_attempt_timeout (1800s) rather than the old 300s
+    # slice cadence — setup(900) + chat(1800) still fits slice_max(3600).
+    bot_chat_timeout_seconds: float = 1800.0
 
     @classmethod
     def from_block(cls, block: dict) -> "AgentSwarmExecutorConfig":

@@ -538,8 +538,20 @@ class TestStatusNarrowTable:
              BotState.AUTHORIZATION_EXPIRED.value),
             (TaskStatus.FAILED, "the bot could not be provisioned: quota",
              BotState.CREATE_FAILED.value),
-            (TaskStatus.FAILED, "declined by user",
+            # The authorization's own terminal verdicts, verbatim from the
+            # service — the only path to REJECTED/EXPIRED by status.
+            (TaskStatus.FAILED, "authorization did not complete: REJECTED",
              BotState.AUTHORIZATION_REJECTED.value),
+            (TaskStatus.FAILED, "authorization did not complete: EXPIRED",
+             BotState.AUTHORIZATION_EXPIRED.value),
+            # A service-side terminal status is NOT a human decline: the
+            # PRE 04fadbbf incident died to a fabricated REJECTED here.
+            (TaskStatus.FAILED, "authorization did not complete: APPLY_FAILED",
+             BotState.CREATE_FAILED.value),
+            # Any other terminal job error is a platform failure too —
+            # never an authorization verdict nobody gave.
+            (TaskStatus.FAILED, "declined by user",
+             BotState.CREATE_FAILED.value),
         ]
         for status, err, want in cases:
             seam = _Seam()

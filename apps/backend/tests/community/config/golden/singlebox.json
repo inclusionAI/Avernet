@@ -34,6 +34,9 @@
     "agentswarm": {
       "artifact_store_root": "${AGENTSWARM_ARTIFACT_ROOT:-/tmp/agentswarm/artifacts}",
       "enabled": true,
+      "executor": {
+        "bot_chat_timeout_seconds": 1800
+      },
       "orchestration": {
         "per_attempt_timeout": 1800,
         "setup_timeout": 900,
