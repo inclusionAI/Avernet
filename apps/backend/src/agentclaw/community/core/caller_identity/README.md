@@ -63,16 +63,25 @@ at their known fields; there is no custom recursive boundary logging mechanism.
 These checks verify Backend behavior. Actual TeClaw append precedence and
 Caller identity require a separate deployed runtime integration test.
 
-### Admin-authorized final Owner transition
+### Admin-authorized call-type editing
 
-The MCP and CLI update services retain owner-only editing, active service Bot,
-engine and collaboration-lock checks. A configured `admin.super_admin` actor
-may additionally remove the final effective Caller override. The application
-service resolves membership from trusted configuration only for an Owner
-request; the repository receives a default-deny internal authorization and
-checks the aggregate while holding the Bot row lock. No HTTP authorization
-flag is accepted. Existing Passport synchronization and conditional
-compensation still apply. A successful update affects the current identity
-flow immediately and does not defer identity activation until publication.
-The `caller_owner_transition_authorized` diagnostic records the actor, Bot,
-resource kind/code, engine and environment without credentials.
+Only the MCP and CLI call-type mutation services allow the actual Bot Owner or
+an actor in configured `admin.super_admin` to edit. Other callers, including
+operator-only users and collaborators, remain denied; the shared owner-only
+asset guards and read policies are unchanged. Role membership is resolved from
+trusted configuration, with no HTTP authorization flag. The final effective
+Caller-to-Owner transition still requires a super admin.
+
+The authenticated actor remains the modifier and collaboration-lock holder.
+Active resource discovery and Passport queries/updates use the true current
+Owner, while preliminary checks, transactional writes and conditional
+compensation use the target lock key `bot_id:entity_id`. This immutable entity
+locator remains stable after an ownership handoff. Another holder's lock,
+missing/stale epochs and transaction-time lock races are still rejected.
+Existing active-service/engine checks and Passport synchronization/compensation
+remain in place; successful identity updates take effect immediately.
+
+The `caller_call_type_edit_authorized` / `caller_call_type_edit_denied` events
+record actor, Owner, entity, Bot, resource kind/code and the permission reason.
+The existing `caller_owner_transition_authorized` event records the final
+aggregate transition. Neither event logs credentials.
