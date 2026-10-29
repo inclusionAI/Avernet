@@ -29,6 +29,8 @@ Bootstrap publishes `planProtocol.allowedOperations` from the same definition us
 
 Owner waiting and effect waiting have separate deadlines. Owner expiry releases the execution while preserving the business task. A later decision creates a new execution for that task; an in-window decision continues the current execution. Effect waiting resumes the paused phase after reading new records, without resending initial advice. Old execution reports cannot overwrite new execution state.
 
+The wrapper may also release a running `observe` or `verify` execution before its Base budget expires. This preserves the business phase, evidence, delivery and observation deadline; normal maintenance starts a successor without resending advice or recording an execution failure. Release is conditional on the same execution and phase still being active. An authenticated control read remains available for an ended execution so its wrapper can exit normally; tool and result routes still reject its invalidated ticket.
+
 ## Handbook and Agent assessment
 
 Handbook content has one source: OCB `clawevolve-recovery-handbook/SKILL.md` and its topic directories, including `common/mcp/handbook.md`, `common/file-download/handbook.md` and scoped `custom/<team_key>/` content. It is packaged into the AIS Agent workspace only, not installed in the target Bot. The public catalog retains references without internal professional content. Each diagnostic category can select several candidate chapters, and several categories can share the same chapter. The Agent reads the applicable content based on the diagnosis and actual failure; a category match is not evidence of a particular cause.

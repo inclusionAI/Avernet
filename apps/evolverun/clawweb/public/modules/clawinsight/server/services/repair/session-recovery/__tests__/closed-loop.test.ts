@@ -695,6 +695,36 @@ it("old release cannot end a replacement execution after a version conflict", as
   expect((await current(task.taskId)).execution).toMatchObject({ executionId: "replacement", state: "dispatching", jobId: "replacement-job" });
 });
 
+it.each(["observe", "verify"] as const)("continues %s after a budget release without replaying the message or extending observation", async phase => {
+  let task = await toObserve(await create());
+  if (phase === "verify") {
+    await tasks.update(task.taskId, task.version, value => ({ ...value, version: value.version + 1, phase }));
+    task = await current(task.taskId);
+  }
+  const executionId = task.execution!.executionId, deadline = task.observationDeadlineAt;
+  const messageCount = vi.mocked(runtime.sendMessage).mock.calls.length;
+  await agent.report(task, { kind: "release", phase });
+  task = await current(task.taskId);
+  expect(task).toMatchObject({ status: "running", phase, observationDeadlineAt: deadline, execution: { state: "ended" } });
+  expect(task.executionRetry).toBeUndefined();
+  await service.maintenance();
+  task = await current(task.taskId);
+  expect(task.execution!.executionId).not.toBe(executionId);
+  expect(task).toMatchObject({ status: "running", phase, observationDeadlineAt: deadline });
+  expect(runtime.sendMessage).toHaveBeenCalledTimes(messageCount);
+  expect(task.pending_results).toEqual([]);
+});
+
+it("a budget release cannot retire an execution after its business phase changes", async () => {
+  const task = await toObserve(await create()), update = tasks.update.bind(tasks);
+  vi.spyOn(tasks, "update").mockImplementationOnce(async () => {
+    await update(task.taskId, task.version, value => ({ ...value, version: value.version + 1, phase: "plan" }));
+    return null;
+  });
+  await expect(agent.report(task, { kind: "release", phase: "observe" })).rejects.toMatchObject({ status: 409 });
+  expect(await current(task.taskId)).toMatchObject({ status: "running", phase: "plan", execution: { state: "dispatching" } });
+});
+
 it("old dispatch cannot attach its job to a replacement execution after a version conflict", async () => {
   let task = await create();
   await tasks.update(task.taskId, task.version, value => ({ ...value, version: value.version + 1,
