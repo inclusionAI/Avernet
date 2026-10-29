@@ -108,6 +108,7 @@ class TestParamPassthrough:
             ignore_case=False,
             interaction_service=None,
             sensitive_bypass_keys_loader=ANY,
+            proxypass_token_minter=None,
         )
 
         # 未注入 system_config_service 时，loader 返回空豁免列表
@@ -1016,9 +1017,7 @@ class TestOutboundAuthRefresh:
         pool._clients["sbx-own"] = [_ConnEntry(client=owner, a2a_mode="on")]
         headers = {"x-proxypass-token": "sample"}
 
-        result = await pool.get(
-            "sbx-own", "ws://h/ws", headers, session_key="sk-run"
-        )
+        result = await pool.get("sbx-own", "ws://h/ws", headers, session_key="sk-run")
         assert result is owner
         owner.refresh_outbound_auth.assert_called_once_with(headers)
         await pool.close_all()
@@ -1046,8 +1045,13 @@ class TestOutboundAuthRefresh:
 
         pool = AsyncChatClientPool(max_conns_per_sandbox=1)
         v3_like = MagicMock(
-            spec=["is_connected", "is_reconnecting", "has_active_sessions",
-                  "active_session_count", "refresh_outbound_auth_placeholder"]
+            spec=[
+                "is_connected",
+                "is_reconnecting",
+                "has_active_sessions",
+                "active_session_count",
+                "refresh_outbound_auth_placeholder",
+            ]
         )
         v3_like.is_connected = True
         v3_like.is_reconnecting = False
@@ -1055,8 +1059,28 @@ class TestOutboundAuthRefresh:
         v3_like.has_active_sessions = False
         pool._clients["sbx-v3"] = [_ConnEntry(client=v3_like, a2a_mode="off")]
 
-        result = await pool.get(
-            "sbx-v3", "ws://h/ws", {"x-proxypass-token": "t"}
-        )
+        result = await pool.get("sbx-v3", "ws://h/ws", {"x-proxypass-token": "t"})
         assert result is v3_like, "无转发方法时照常复用，不得炸"
+        await pool.close_all()
+
+    @pytest.mark.asyncio
+    async def test_new_connection_receives_minter_closure(self, mock_chat_client_class):
+        """池把 per-sandbox 现签闭包注入新连接——client 侧的交互派发
+        刷新依赖它（评审 P2 场景 2），闭包须携带 sandbox+uri。"""
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+
+        async def fake_minter(sandbox: str, uri: str) -> str:
+            return f"minted-for-{sandbox}"
+
+        pool = AsyncChatClientPool(
+            max_conns_per_sandbox=1, proxypass_token_minter=fake_minter
+        )
+        mock_cls, mock_client = mock_chat_client_class
+        target = "ARCA_ARCA-SANDBOX-x@0:20003"
+        await pool.get(target, "ws://h/ws", {})
+        kwargs = mock_cls.call_args.kwargs
+        closure = kwargs["proxypass_token_minter"]
+        assert await closure() == f"minted-for-{target}"
         await pool.close_all()

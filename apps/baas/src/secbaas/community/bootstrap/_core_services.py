@@ -296,18 +296,6 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         repository=bot_run_interaction_repository,
     )
 
-    chat_client_pool = providers.Singleton(
-        AsyncChatClientPool,
-        max_size=config.chat_client_pool.max_size,
-        max_conns_per_sandbox=config.chat_client_pool.max_conns_per_sandbox,
-        max_concurrent_per_conn=config.chat_client_pool.max_concurrent_per_conn,
-        session_key_timeout=config.chat_client_pool.session_key_timeout,
-        max_retries=config.chat_client_pool.max_retries,
-        retry_base_backoff=config.chat_client_pool.retry_base_backoff,
-        system_config_service=system_config_service,
-        interaction_service=bot_interaction_service,
-    )
-
     tenant_service = providers.Singleton(
         DefaultTenantManageService,
         tenant_repository=tenant_repo,
@@ -380,6 +368,36 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         device_repository=device_repo,
         device_template_service=device_template_service_infra,
         factory=paas_service_factory,
+    )
+
+    class _PoolProxypassMinter:
+        """池连通的按需现签入口——target（池 key）经 facade 复芽管线签发。
+
+        交互答复后台派发（不经过 pool.get 的无消息路径）在 ResolveInteraction
+        前 RPC 用；失败由调用方回退 last-known token。
+        """
+
+        def __init__(self, facade: PaasServiceFacade):
+            self._facade = facade
+
+        async def __call__(self, sandbox_key: str, uri: str) -> str:
+            return await self._facade.mint_proxypass_token_for_target(sandbox_key)
+
+    pool_proxypass_token_minter = providers.Singleton(
+        _PoolProxypassMinter, facade=paas_facade
+    )
+
+    chat_client_pool = providers.Singleton(
+        AsyncChatClientPool,
+        max_size=config.chat_client_pool.max_size,
+        max_conns_per_sandbox=config.chat_client_pool.max_conns_per_sandbox,
+        max_concurrent_per_conn=config.chat_client_pool.max_concurrent_per_conn,
+        session_key_timeout=config.chat_client_pool.session_key_timeout,
+        max_retries=config.chat_client_pool.max_retries,
+        retry_base_backoff=config.chat_client_pool.retry_base_backoff,
+        system_config_service=system_config_service,
+        interaction_service=bot_interaction_service,
+        proxypass_token_minter=pool_proxypass_token_minter,
     )
 
     dispatcher_local_paas_service = providers.Singleton(

@@ -1005,6 +1005,32 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
                 ),
             ) from e
 
+    @staticmethod
+    def _split_proxypass_target(target: str) -> tuple[str, int]:
+        """池 target 形态 {TYPE}_{device}@{template}:{port} → (device@tpl, port)。
+
+        交互答复派发等"无新消息"路径在 RPC 前现签 token 用——从连接池
+        key 还原设备与端口（type 前缀仅是 target 拼接形态，不参与解析）。
+        """
+        head, sep, port_s = target.rpartition(":")
+        if not sep or not port_s.isdigit() or "_" not in head:
+            raise ValueError(f"malformed proxypass target: {target!r}")
+        _, _, device_with_tpl = head.partition("_")
+        if not device_with_tpl:
+            raise ValueError(f"malformed proxypass target: {target!r}")
+        return device_with_tpl, int(port_s)
+
+    async def mint_proxypass_token_for_target(self, target: str) -> str:
+        """按连接池 target 现签一个 proxypass token（评审 P2：交互答复
+        后台派发不经过 pool.get，不能依赖下一条聊天消息携带的新鲜头）。
+
+        复用 resolve_invoke_http_info 的模版路由与 JWT 签发管线；失败
+        由调用方回退 last-known token（best-effort，不阻断派发）。
+        """
+        device_with_tpl, port = self._split_proxypass_target(target)
+        info = await self.resolve_invoke_http_info(device_with_tpl, port, "/")
+        return info.token
+
     async def resolve_invoke_http_info(
         self,
         paas_device_id: str,

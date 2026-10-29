@@ -3115,15 +3115,14 @@ def test_refresh_proxypass_token_updates_and_guards():
         BotA2aClient,
     )
 
-    client = BotA2aClient(
-        base_url="http://x", headers={"x-proxypass-token": "mock"}
-    )
+    client = BotA2aClient(base_url="http://x", headers={"x-proxypass-token": "mock"})
     client.refresh_proxypass_token({"x-proxypass-token": "placeholder"})
     assert client.headers["x-proxypass-token"] == "placeholder"
 
     client.refresh_proxypass_token({"x-proxypass-token": ""})
-    assert client.headers["x-proxypass-token"] == "placeholder", \
+    assert client.headers["x-proxypass-token"] == "placeholder", (
         "空 token（Local 平台）不得覆盖既有值"
+    )
 
     client.refresh_proxypass_token(None)
     assert client.headers["x-proxypass-token"] == "placeholder"

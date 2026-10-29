@@ -1989,3 +1989,130 @@ class TestRefreshOutboundAuth:
         client = AsyncChatClient(uri="ws://h/ws", headers={}, a2a_mode="grey")
         client._client = None
         client.refresh_outbound_auth({"x-proxypass-token": "x"})  # 不得炸
+
+
+import time as _time
+
+# ==================== proxypass token 快照同步 / 交互答复派发现签 ====================
+
+
+class TestRefreshSyncsOuterHeaders:
+    """外层 headers 必须随刷新同步——v3 附件 fallback 的懒建握手
+    （_ensure_v3_fallback）读的是外层快照，同步漏了附件 WS 就携带
+    过期 token（评审 P2 场景 1）。"""
+
+    def test_refresh_syncs_outer_headers_snapshot(self, mock_bot_ws):
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+
+        client = AsyncChatClient(uri="ws://h/ws", headers={"x-proxypass-token": "mock"})
+        a2a_like = MagicMock()
+        client._client = a2a_like
+        client.refresh_outbound_auth({"x-proxypass-token": "placeholder"})
+        assert client.headers["x-proxypass-token"] == "placeholder", (
+            "外层快照必须同步——附件 fallback 握手依赖它"
+        )
+        a2a_like.refresh_proxypass_token.assert_called_once_with(
+            {"x-proxypass-token": "placeholder"}
+        )
+
+    def test_refresh_ignores_empty_token_for_outer_snapshot(self, mock_bot_ws):
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+
+        client = AsyncChatClient(uri="ws://h/ws", headers={"x-proxypass-token": "mock"})
+        client.refresh_outbound_auth({"x-proxypass-token": ""})
+        client.refresh_outbound_auth(None)
+        assert client.headers["x-proxypass-token"] == "mock"
+
+
+class TestInteractionDispatchRemint:
+    """交互答复后台派发不经过 pool.get——ResolveInteraction 发 RPC 前
+    必须经注入的 minter 现签 token（评审 P2 场景 2）；铸造失败回退
+    last-known，不得阻断派发。"""
+
+    @staticmethod
+    def _make_client(minter):
+        import time as _time
+
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+        from secbaas.community.core.service.bot_run._interaction_protocol import (
+            EngineInteractionResolveExchange,
+        )
+
+        client = AsyncChatClient(
+            uri=(
+                "wss://agentclawproxy-pre.alipay.com/proxypass/"
+                "ARCA_ARCA-SANDBOX-x@0:20003/api/openclaw/ws"
+            ),
+            headers={},
+            a2a_mode="grey",
+        )
+        client._transport = "a2a"
+        a2a = MagicMock()
+        a2a.refresh_proxypass_token = MagicMock()
+        a2a.interaction_resolve = AsyncMock(
+            return_value=EngineInteractionResolveExchange(
+                request={"req": 1},
+                response={"resp": 1},
+                accepted=True,
+                error_message=None,
+            )
+        )
+        client._client = a2a
+        client._proxypass_token_minter = minter
+
+        svc = MagicMock()
+        cmd = MagicMock()
+        cmd.resolution.kind = "exec"
+        svc.claim_for_dispatch.return_value = cmd
+        client._interaction_service = svc
+        deadline = int(_time.time() * 1000) + 60_000
+        return client, a2a, svc
+
+    @pytest.mark.asyncio
+    async def test_remints_before_resolve(self, mock_bot_ws):
+        minter = AsyncMock(return_value="sample")
+        client, a2a, svc = self._make_client(minter)
+
+        await client._dispatch_interaction_answer(
+            session_key="sk",
+            interaction_id="i1",
+            deadline_ms=int(_time.time() * 1000) + 60_000,
+        )
+        minter.assert_awaited_once()
+        a2a.refresh_proxypass_token.assert_called_once_with(
+            {"x-proxypass-token": "sample"}
+        )
+        svc.should_poll.assert_not_called(), "成功派发后 task 应终结"
+        assert a2a.interaction_resolve.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_minter_failure_falls_back_without_blocking(self, mock_bot_ws):
+        minter = AsyncMock(side_effect=RuntimeError("mint down"))
+        client, a2a, svc = self._make_client(minter)
+
+        await client._dispatch_interaction_answer(
+            session_key="sk",
+            interaction_id="i1",
+            deadline_ms=int(_time.time() * 1000) + 60_000,
+        )
+        a2a.refresh_proxypass_token.assert_not_called()
+        assert a2a.interaction_resolve.await_count == 1, (
+            "铸造失败回退 last-known token，不得阻断派发"
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_minter_falls_back_without_blocking(self, mock_bot_ws):
+        client, a2a, svc = self._make_client(None)
+
+        await client._dispatch_interaction_answer(
+            session_key="sk",
+            interaction_id="i1",
+            deadline_ms=int(_time.time() * 1000) + 60_000,
+        )
+        assert a2a.interaction_resolve.await_count == 1
