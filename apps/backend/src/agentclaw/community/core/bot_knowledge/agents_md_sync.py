@@ -22,6 +22,7 @@ one.
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 from agentclaw.community.core.bot_knowledge.repository.store import (
@@ -94,7 +95,7 @@ def apply_knowledge_section(content: str, section: str | None) -> str | None:
             return content
         body = content.rstrip("\n")
         if not body:
-            return f"# AGENTS\n\n{section}\n"
+            return f"# AGENTS.md\n\n{section}\n"
         return f"{body}\n\n{section}\n"
     end = content.find(KNOWLEDGE_SECTION_END_MARKER, start)
     if end == -1:
@@ -132,19 +133,30 @@ class BotKnowledgeAgentsMdSync:
         self.repository = repository
         self.catalog = catalog
         self.identity = identity
+        # One lock per (bot, owner, env). Sync is a read-modify-write of the
+        # whole AGENTS.md; two enablement responses landing concurrently must
+        # not interleave it, or the later stale read can overwrite the earlier
+        # write (still self-healing on the next enablement, but needlessly).
+        # Process-local only — across workers the whole-rebuild idempotence
+        # remains the safety net.
+        self._locks: dict[str, asyncio.Lock] = {}
 
     async def sync(self, *, scope: BotKnowledgeScope, actor_id: str) -> None:
         """Rewrite the fenced section from the stored selection; never raises."""
-        try:
-            await self._sync(scope=scope, actor_id=actor_id)
-        except Exception:
-            logger.warning(
-                "[knowledge-agents-md] sync failed bot=%s owner=%s env=%s",
-                scope.bot_id,
-                scope.owner_id,
-                scope.env,
-                exc_info=True,
-            )
+        lock = self._locks.setdefault(
+            f"{scope.bot_id}|{scope.owner_id}|{scope.env}", asyncio.Lock()
+        )
+        async with lock:
+            try:
+                await self._sync(scope=scope, actor_id=actor_id)
+            except Exception:
+                logger.warning(
+                    "[knowledge-agents-md] sync failed bot=%s owner=%s env=%s",
+                    scope.bot_id,
+                    scope.owner_id,
+                    scope.env,
+                    exc_info=True,
+                )
 
     async def _sync(self, *, scope: BotKnowledgeScope, actor_id: str) -> None:
         bot = self.repository.get_bot(scope)

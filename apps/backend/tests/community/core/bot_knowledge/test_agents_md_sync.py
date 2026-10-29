@@ -1,5 +1,7 @@
 """AGENTS.md projection: fence discipline, idempotence, degradation."""
 
+import asyncio
+
 import pytest
 
 from agentclaw.community.core.bot_knowledge.agents_md_sync import (
@@ -30,7 +32,7 @@ def test_apply_appends_when_absent():
 
 
 def test_apply_creates_heading_for_empty_file():
-    assert apply_knowledge_section("", "SECTION") == "# AGENTS\n\nSECTION\n"
+    assert apply_knowledge_section("", "SECTION") == "# AGENTS.md\n\nSECTION\n"
 
 
 def test_apply_replaces_in_place_keeping_surroundings():
@@ -92,19 +94,24 @@ class ExplodingIdentity(FakeIdentity):
 
 
 class FakeDetailsCatalog:
-    def __init__(self, names=None, fail=False):
+    def __init__(self, names=None, fail=False, fail_batches=None, short=False):
         self.names = dict(names or {})
         self.fail = fail
+        self.fail_batches = set(fail_batches or ())
+        self.short = short
         self.calls = []
 
     def details(self, *, space_id, kb_ids, actor_id):
         self.calls.append(list(kb_ids))
-        if self.fail:
+        if self.fail or (
+            self.fail_batches and len(self.calls) in self.fail_batches
+        ):
             raise RuntimeError("catalog down")
-        return [
+        items = [
             {"kb_id": kb, "name": self.names.get(kb), "space_id": str(space_id)}
             for kb in kb_ids
         ]
+        return items[:-1] if self.short else items
 
 
 # ---------- component behaviour over the real repository ----------
@@ -229,3 +236,38 @@ def test_resolve_names_batches_by_twenty(knowledge):
     resolved = sync._resolve_names(space_id=1, kb_ids=ids, actor_id="owner")
     assert catalog.calls == [ids[:20], ids[20:40], ids[40:]]
     assert resolved == names
+
+
+def test_apply_remove_when_section_is_whole_file():
+    section = build_knowledge_section([("kb1", None)])
+    assert apply_knowledge_section(section, None) == ""
+
+
+def test_resolve_names_skips_short_batch(knowledge):
+    _, repo, _, _ = knowledge
+    catalog = FakeDetailsCatalog(names={"kb": "Name"}, short=True)
+    sync = make_sync(repo, catalog, FakeIdentity())
+    assert sync._resolve_names(space_id=1, kb_ids=["kb"], actor_id="owner") == {}
+
+
+def test_resolve_names_continues_after_failed_batch(knowledge):
+    _, repo, _, _ = knowledge
+    ids = [f"kb{i}" for i in range(21)]
+    names = {kb: f"名{kb}" for kb in ids}
+    catalog = FakeDetailsCatalog(names=names, fail_batches={2})
+    sync = make_sync(repo, catalog, FakeIdentity())
+    resolved = sync._resolve_names(space_id=1, kb_ids=ids, actor_id="owner")
+    assert resolved == {kb: name for kb, name in names.items() if kb != "kb20"}
+
+
+@pytest.mark.asyncio
+async def test_sync_concurrent_calls_produce_one_section(knowledge):
+    _, repo, service, scope = knowledge
+    enable(service, scope)
+    identity = FakeIdentity({"AGENTS.md": "# 手写\n"})
+    sync = make_sync(repo, FakeDetailsCatalog(names={"kb": "Name"}), identity)
+    await asyncio.gather(
+        sync.sync(scope=scope, actor_id="owner"),
+        sync.sync(scope=scope, actor_id="owner"),
+    )
+    assert identity.files["AGENTS.md"].count(KNOWLEDGE_SECTION_START_MARKER) == 1
