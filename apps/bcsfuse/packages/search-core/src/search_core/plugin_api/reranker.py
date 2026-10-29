@@ -3,6 +3,7 @@ Reranker 抽象层 - 简化版
 """
 
 from dataclasses import dataclass
+from typing import Protocol
 
 
 @dataclass
@@ -36,3 +37,11 @@ class Reranker:
             按分数降序排列的结果
         """
         raise NotImplementedError
+
+
+class AsyncReranker(Protocol):
+    """Online reranking. Implement with async def and propagate cancellation."""
+
+    async def rerank(
+        self, query: str, candidates: list[dict], top_k: int = 5
+    ) -> list[RerankResult]: ...

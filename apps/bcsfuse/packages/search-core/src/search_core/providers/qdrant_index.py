@@ -1,5 +1,7 @@
 """Dense and lexical retrieval through Qdrant Local or Server."""
 
+import math
+
 from search_core.config.qdrant import LOCAL_QDRANT, QdrantConnection
 from search_core.plugin_api.vector_point import VectorPoint
 from search_core.providers.index_lock import IndexLock
@@ -22,7 +24,16 @@ class QdrantRetrievalIndex:
         dimension: int,
         collection_name: str = "search",
         connection: QdrantConnection = LOCAL_QDRANT,
+        read_timeout_seconds: float = 0.0,
     ):
+        if not math.isfinite(read_timeout_seconds) or read_timeout_seconds < 0:
+            raise ValueError("read timeout must be finite and nonnegative")
+        self.read_timeout_seconds = read_timeout_seconds
+        self._query_options = (
+            {"timeout": max(1, math.ceil(read_timeout_seconds))}
+            if read_timeout_seconds and connection.mode == "server"
+            else {}
+        )
         self.connection = connection
         self._lock = IndexLock(concurrent_reads=connection.mode == "server")
         self._dense = dense_store(
@@ -91,26 +102,28 @@ class QdrantRetrievalIndex:
     def vector_search(self, vector, limit, filters, allowed_ids):
         if allowed_ids == frozenset() or any(not values for values in filters.values()):
             return []
-        with self._lock.read():
+        with self._lock.read(self.read_timeout_seconds):
             return self._dense.search(
                 vector,
                 top_k=limit,
                 filters=self._filters(filters, allowed_ids, "_external_id"),
+                **self._query_options,
             )
 
     def keyword_search(self, query, limit, filters, allowed_ids):
         if allowed_ids == frozenset() or any(not values for values in filters.values()):
             return []
-        with self._lock.read():
+        with self._lock.read(self.read_timeout_seconds):
             return self._keyword.search(
                 query,
                 limit,
                 self._filters(filters, allowed_ids, "_keyword_external_id"),
+                **self._query_options,
             )
 
     def get_vector_ids(self):
         """Snapshot IDs for recovery cleanup; never queried by online retrieval."""
-        with self._lock.read():
+        with self._lock.read(self.read_timeout_seconds):
             return sorted(
                 set(self._dense.get_vector_ids()) | set(self._keyword.get_vector_ids())
             )

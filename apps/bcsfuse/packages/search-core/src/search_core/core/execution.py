@@ -1,89 +1,65 @@
-"""Bounded synchronous dependency execution with deadlines and a small circuit."""
-
-from __future__ import annotations
+"""Deadlines for native async calls and host-owned synchronous workers."""
 
 import asyncio
+import inspect
 import math
 import time
 from concurrent.futures import ThreadPoolExecutor
-from threading import Lock
+from contextvars import copy_context
 
-from search_core.api.errors import SearchOverloaded, SearchUnavailable
+from search_core.core.observation import (
+    events,
+    failure_reason,
+    remaining_timeout,
+    upstream_status,
+)
 
 
-class ExecutionPool:
-    """No queued work. A timed-out call keeps its permit until it physically ends.
+class DeadlineExecutor:
+    """No local quota, retries or circuit; queued work expires with its caller.
 
-    Providers MUST additionally configure finite network timeouts. Python cannot
-    stop a running sync call; the bound prevents those calls multiplying.
+    Native async providers run on the event loop and never enter the thread pool.
+    The host shares a standard thread pool for synchronous providers and drains
+    it before closing clients.
+    Running synchronous calls cannot be forcibly stopped, so providers MUST also
+    configure finite network timeouts.
     """
 
     def __init__(
-        self,
-        *,
-        workers: int,
-        timeout_seconds: float,
-        failure_threshold: int = 3,
-        cooldown_seconds: float = 5.0,
+        self, executor: ThreadPoolExecutor, *, timeout_seconds: float, name: str
     ):
-        if workers < 1 or failure_threshold < 1:
-            raise ValueError("positive workers and failure threshold required")
-        if any(
-            not math.isfinite(v) or v <= 0 for v in (timeout_seconds, cooldown_seconds)
-        ):
-            raise ValueError("finite positive timeout and cooldown required")
-        self._executor = ThreadPoolExecutor(
-            max_workers=workers, thread_name_prefix="search-call"
-        )
-        self.workers, self.timeout = workers, timeout_seconds
-        self.threshold, self.cooldown = failure_threshold, cooldown_seconds
-        self._lock = Lock()
-        self._inflight = self._failures = 0
-        self._open_until = 0.0
-        self._closed = False
-
-    @property
-    def inflight(self):
-        with self._lock:
-            return self._inflight
-
-    def _finished(self, future):
-        with self._lock:
-            self._inflight -= 1
+        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+            raise ValueError("finite positive timeout required")
+        self._executor = executor
+        self.timeout, self.name = timeout_seconds, name
 
     async def call(self, function, *args):
-        with self._lock:
-            if self._closed or time.monotonic() < self._open_until:
-                raise SearchUnavailable("dependency circuit is open")
-            if self._inflight >= self.workers:
-                raise SearchOverloaded("dependency execution capacity occupied")
-            self._inflight += 1
+        started = time.monotonic()
+        timeout = remaining_timeout(self.timeout)
+        future = None
         try:
-            future = self._executor.submit(function, *args)
-        except BaseException:
-            with self._lock:
-                self._inflight -= 1
-            raise
-        future.add_done_callback(self._finished)
-        wrapped = asyncio.wrap_future(future)
-        # Consume late exceptions after timeout/cancellation without releasing a
-        # physical permit early or leaving an unobserved asyncio Future error.
-        wrapped.add_done_callback(lambda f: None if f.cancelled() else f.exception())
-        try:
-            result = await asyncio.wait_for(asyncio.shield(wrapped), self.timeout)
+            if timeout <= 0:
+                raise TimeoutError("request budget exhausted")
+            if inspect.iscoroutinefunction(function):
+                return await asyncio.wait_for(function(*args), timeout)
+            future = self._executor.submit(copy_context().run, function, *args)
+            # Cancellation propagates to queued work. A running SDK call must
+            # terminate using its own network timeout; the host drains on exit.
+            return await asyncio.wait_for(asyncio.wrap_future(future), timeout)
         except asyncio.CancelledError:
+            if future is not None:
+                future.cancel()
             raise
-        except Exception:
-            with self._lock:
-                self._failures += 1
-                if self._failures >= self.threshold:
-                    self._open_until = time.monotonic() + self.cooldown
+        except Exception as error:
+            if future is not None:
+                future.cancel()
+            events.record(
+                "search_stage_failure",
+                self.name,
+                "budget_exhausted" if timeout <= 0 else failure_reason(error),
+                elapsed_ms=round((time.monotonic() - started) * 1000, 2),
+                timeout_ms=round(timeout * 1000, 2),
+                error_type=type(error).__name__,
+                upstream_status=upstream_status(error),
+            )
             raise
-        with self._lock:
-            self._failures = 0
-        return result
-
-    def close(self):
-        with self._lock:
-            self._closed = True
-        self._executor.shutdown(wait=True, cancel_futures=True)

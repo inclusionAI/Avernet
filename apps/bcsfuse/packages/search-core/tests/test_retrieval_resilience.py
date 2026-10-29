@@ -1,12 +1,13 @@
-"""Degradation is opt-in; bounded physical calls survive request timeouts."""
+"""Degradation is opt-in; deadlines cancel queued work without invented quotas."""
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 
 import pytest
-from search_core.api.errors import SearchOverloaded, SearchUnavailable
+from search_core.api.errors import SearchUnavailable
 from search_core.api.models import RetrievalRequest
-from search_core.core.execution import ExecutionPool
+from search_core.core.execution import DeadlineExecutor
 from search_core.core.retrieval import HybridRetrievalService
 from search_core.plugin_api.vector_search_hit import VectorSearchHit
 
@@ -74,63 +75,74 @@ def test_stages_expose_one_query_vector_and_reranker_failure_keeps_fused_order()
     asyncio.run(run())
 
 
-def test_physical_permit_not_released_on_timeout_or_request_cancel():
+def test_more_than_64_calls_wait_for_execution_instead_of_local_rejection():
+    import time
+
+    async def run(executor):
+        call = DeadlineExecutor(executor, name="embedding", timeout_seconds=2)
+
+        def work(value):
+            time.sleep(0.002)
+            return value
+
+        assert await asyncio.gather(*(call.call(work, i) for i in range(128))) == list(
+            range(128)
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        asyncio.run(run(executor))
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+def test_timeout_or_cancellation_prevents_queued_obsolete_model_calls(cancel):
     entered, release = Event(), Event()
+    obsolete_calls = []
 
     def blocked():
         entered.set()
         release.wait(2)
-        return 1
 
-    async def run():
-        pool = ExecutionPool(workers=1, timeout_seconds=0.02, failure_threshold=10)
-        try:
-            with pytest.raises(TimeoutError):
-                await pool.call(blocked)
-            assert entered.is_set()
-            with pytest.raises(SearchOverloaded):
-                await pool.call(lambda: 2)
-            release.set()
-            for _ in range(100):
-                if pool.inflight == 0:
-                    break
-                await asyncio.sleep(0.002)
-            assert await pool.call(lambda: 2) == 2
-            release.clear()
-            task = asyncio.create_task(pool.call(blocked))
-            while pool.inflight == 0:
-                await asyncio.sleep(0)
+    async def run(executor):
+        call = DeadlineExecutor(executor, name="embedding", timeout_seconds=0.03)
+        task = asyncio.create_task(call.call(lambda: obsolete_calls.append(1)))
+        if cancel:
+            await asyncio.sleep(0.005)
             task.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await task
-            with pytest.raises(SearchOverloaded):
-                await pool.call(lambda: 3)
+        with pytest.raises(asyncio.CancelledError if cancel else TimeoutError):
+            await task
+        release.set()
+        assert await call.call(lambda: "recovered") == "recovered"
+        assert obsolete_calls == []
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        executor.submit(blocked)
+        assert entered.wait(1)
+        try:
+            asyncio.run(run(executor))
         finally:
             release.set()
-            pool.close()
-
-    asyncio.run(run())
 
 
-def test_circuit_opens_after_failures_and_recovers_after_cooldown():
-    def broken():
-        raise RuntimeError("down")
+def test_provider_quota_errors_do_not_trigger_retries_or_a_local_circuit():
+    calls = []
 
-    async def run():
-        pool = ExecutionPool(
-            workers=1, timeout_seconds=1, failure_threshold=1, cooldown_seconds=0.02
-        )
-        try:
-            with pytest.raises(RuntimeError):
-                await pool.call(broken)
-            with pytest.raises(SearchUnavailable):
-                await pool.call(lambda: 1)
-            await asyncio.sleep(0.03)
-            assert await pool.call(lambda: 1) == 1
-        finally:
-            pool.close()
+    class QuotaError(Exception):
+        status_code = 429
 
-    asyncio.run(run())
+    def quota():
+        calls.append(1)
+        raise QuotaError()
+
+    async def run(executor):
+        call = DeadlineExecutor(executor, name="reranker", timeout_seconds=1)
+        for _ in range(5):
+            with pytest.raises(QuotaError):
+                await call.call(quota)
+        assert calls == [1] * 5
+        assert await call.call(lambda: "recovered") == "recovered"
+
+    with ThreadPoolExecutor() as executor:
+        asyncio.run(run(executor))
 
 
 def test_no_success_when_all_recall_paths_fail_and_no_hidden_scope_bypass():
