@@ -19,6 +19,7 @@ bcs-protocol  = { workspace = true }
 dirs          = { workspace = true }
 libc          = "0.2"
 futures       = { workspace = true }
+semver        = "1"
 serde         = { workspace = true }
 serde_json    = { workspace = true }
 sha2          = { workspace = true }
