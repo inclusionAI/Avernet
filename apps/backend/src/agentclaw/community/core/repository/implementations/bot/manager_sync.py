@@ -93,8 +93,6 @@ class SqlManagerSyncReadRepository(ManagerSyncReadRepository):
             try:
                 with self._db.orm_session() as session:
                     return self._read_facts(session, key)
-            except (SnapshotUnavailable, SnapshotTooLarge):
-                raise
             except SQLAlchemyError as exc:
                 # A database failure is a known-unavailable snapshot — it
                 # must never surface as an empty roster fact set.
@@ -283,8 +281,6 @@ class SqlManagerSyncReadRepository(ManagerSyncReadRepository):
                         SyncKey(change.avernet_tenant, change.env, bot_pk)
                         for (bot_pk,) in rows
                     )
-            except (SnapshotUnavailable, SnapshotTooLarge):
-                raise
             except SQLAlchemyError as exc:
                 raise SnapshotUnavailable(READ_ERROR) from exc
 
@@ -351,8 +347,6 @@ class SqlManagerSyncReadRepository(ManagerSyncReadRepository):
                         SyncKey(avernet_tenant, env, bot_pk)
                         for (bot_pk,) in rows
                     )
-            except (SnapshotUnavailable, SnapshotTooLarge):
-                raise
             except SQLAlchemyError as exc:
                 raise SnapshotUnavailable(READ_ERROR) from exc
 

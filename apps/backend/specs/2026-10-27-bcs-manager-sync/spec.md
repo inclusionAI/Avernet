@@ -242,3 +242,19 @@ shared signing key and tenant-scoped authorization before enabling delivery.
 Before the short-lived split, `fc5fa08fb` passed all applicable remote checks
 (Unit Tests 40808582323, Singlebox Coverage 40808582389). Current-head CI evidence
 is recorded separately in the PR.
+
+## Further bounded reduction
+
+The sync service shares terminal diagnostic recording and returned outcomes;
+the dispatcher no longer exposes an unused clock override; the read repository
+lets domain errors propagate without redundant re-raise handlers. Retry reasons,
+attempt counts, cancellation, SQL error mapping and resource bounds are unchanged.
+These three production files shrink by 75 lines. The real singlebox story drops
+an unused canonical Bot/token registration and keeps only its actual stable
+projection target, reducing the test by 40 lines without removing assertions.
+The dedicated-loop lifecycle, repair API and protocol classifications remain
+intact; a threading redesign would add risk rather than safely simplify this PR.
+
+Release `828c4b1b5` was merged with the DI container conflict resolved by keeping
+both module sets and removing duplicate moved imports; DI/profile regression
+passed 74 tests. Full current-head results are recorded in the PR.

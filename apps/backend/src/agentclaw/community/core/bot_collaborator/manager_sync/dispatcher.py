@@ -12,7 +12,6 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import Callable
 
 from agentclaw.community.core.bot_collaborator.manager_sync.diagnostics import (
     SyncDiagnostics,
@@ -99,15 +98,12 @@ class BotManagerSyncDispatcher:
         reader: ManagerSyncReadRepository,
         policy: DispatcherPolicy | None = None,
         *,
-        clock: Callable[[], float] | None = None,
         env: str = "",
         diagnostics: SyncDiagnostics | None = None,
     ) -> None:
         self._service = service
         self._reader = reader
         self._policy = policy or DispatcherPolicy()
-        # Kept in the frozen constructor for callers that inject a clock.
-        self._clock = clock or time.monotonic
         self._env = env
         self._diagnostics = diagnostics or SyncDiagnostics()
 
