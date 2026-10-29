@@ -100,3 +100,18 @@ def test_initial_unverified_pass_does_not_schedule_approval():
     saved, _ = tasks.start(record)
     assert saved.phase == "NEEDS_ATTENTION" and saved.detail_url
     assert not any(e[0][0] == "bot_public_risk_advance" for e in queue.entries)
+
+
+def test_missing_creation_report_preserves_id_and_recovers_original_check():
+    tasks, repo, queue, provider, _, record = make()
+    provider.submit_agent_scan = lambda payload: SecuritySubmission("check-1", None)
+    saved, _ = tasks.start(record)
+    assert saved.check_id == "check-1" and saved.phase == "CHECKING"
+    assert json.loads(saved.workflow_json)["error"] == "INITIAL_REPORT_UNAVAILABLE"
+    assert queue.entries[-1][1]["delay_seconds"] == 0
+    provider.report = SecurityReport("PASS", "https://example.test/check-1", valid_pass=True)
+    tasks.poll(env="dev", risk_check_id="a", manual=True)
+    saved = repo.get(env="dev", risk_check_id="a")
+    assert saved.phase == "ADVANCING" and saved.detail_url
+    assert provider.queries == ["check-1"]
+    assert "error" not in json.loads(saved.workflow_json)

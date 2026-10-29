@@ -34,7 +34,7 @@ class SecurityReport:
 @dataclass(frozen=True)
 class SecuritySubmission:
     check_id: str
-    report: SecurityReport
+    report: SecurityReport | None
 
 
 class SecurityProviderUnavailable(RuntimeError):
@@ -207,7 +207,7 @@ class RiskTasks:
         )
 
     def _record_submission_result(
-        self, *, env: str, risk_check_id: str, check_id: str, report: SecurityReport
+        self, *, env: str, risk_check_id: str, check_id: str, report: SecurityReport | None
     ) -> None:
         # A reclaimed lease may already have marked this same attempt unknown.
         # A real response is stronger evidence; retain it without repeating POST.
@@ -254,7 +254,17 @@ class RiskTasks:
                 if unknown and unknown["status"] != "sent"
                 else {}
             )
-            changes = self._report_changes(row, report, now, workflow)
+            if report is None:
+                # Creation succeeded; preserve its ID and recover the missing report.
+                workflow["error"] = "INITIAL_REPORT_UNAVAILABLE"
+                report_value = SecurityReport("DETECTING")
+            else:
+                report_value = report
+            changes = self._report_changes(row, report_value, now, workflow)
+            if report is None:
+                workflow["error"] = "INITIAL_REPORT_UNAVAILABLE"
+                if not changes["auto_poll_paused"]:
+                    changes["next_action_at"] = now
             changes.update(notice_changes)
             changes.update(check_id=check_id, workflow_json=json.dumps(workflow))
             if self._update(row, changes):
@@ -277,6 +287,8 @@ class RiskTasks:
         """Apply creation and polled reports with identical status/window rules."""
         if report.status not in {"DETECTING", "REJECT", "PASS"}:
             raise ValueError("unknown security report status")
+        if workflow.get("error") == "INITIAL_REPORT_UNAVAILABLE":
+            workflow.pop("error")
         changes = {
             "security_status": report.status,
             "detail_url": report.detail_url or row.detail_url,

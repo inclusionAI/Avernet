@@ -7,7 +7,10 @@ initial security status and detail URL when supplied. The response remains
 Accepted: publication and any business approval are not complete.
 
 The outbound `SecurityProvider.submit_agent_scan` contract returns a
-`SecuritySubmission` containing `check_id` and its initial `SecurityReport`.
+`SecuritySubmission` containing `check_id` and its initial `SecurityReport`. A valid ID with an absent or
+malformed initial report is represented by `report=None`: preserve the ID,
+record INITIAL_REPORT_UNAVAILABLE and schedule an immediate original-ID query.
+This is distinct from an unknown creation outcome.
 Both creation and query reports use the same status validation, polling windows,
 and verified-PASS policy. Implementations must preserve the creation report,
 not return just the external ID. Community fallback remains explicitly
