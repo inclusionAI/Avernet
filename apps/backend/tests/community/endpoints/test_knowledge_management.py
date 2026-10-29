@@ -218,6 +218,14 @@ def _assert_real_composition(response, world):
         KnowledgeSourceRepository,
     )
 
+    if response.request.url.path.endswith("/conversation-knowledge-bases"):
+        from agentclaw.community.api.conversation_knowledge_service import (
+            ConversationKnowledgeServiceProtocol,
+        )
+
+        conversation = world.get(ConversationKnowledgeServiceProtocol)
+        assert conversation.source is world.get(KnowledgeSourceRepository)
+        assert conversation.catalog is world.get(KnowledgeCatalog)
     service = world.get(KnowledgeManagementServiceProtocol)
     assert service.source is world.get(KnowledgeSourceRepository)
     assert service.catalog is world.get(KnowledgeCatalog)
@@ -236,6 +244,11 @@ def _assert_real_composition(response, world):
 
 # Explicit endpoint inventory: do not derive coverage claims from the live router.
 CASES = [
+    (
+        "GET",
+        ROOT + "/bots/{bot_id}/conversation-knowledge-bases",
+        {"query_params": {"owner_id": ACTOR}},
+    ),
     (
         "GET",
         ROOT + "/bots/{bot_id}/knowledge-bases",

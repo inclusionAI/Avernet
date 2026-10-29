@@ -134,6 +134,7 @@ consumes:
 internal_dependencies:
   - agentclaw.community.core.bot_public_risk.service_protocol
   - agentclaw.community.kernel.knowledge_content
+  - agentclaw.community.kernel.knowledge  # BotKnowledgeScope used by the conversation knowledge contract
   - agentclaw.community.core.expert_market
   - agentclaw.community.core.bot_knowledge
   - agentclaw.community.core.space_knowledge

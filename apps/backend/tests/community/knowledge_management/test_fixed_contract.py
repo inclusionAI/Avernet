@@ -38,8 +38,12 @@ def test_one_route_per_method_and_path():
         (method, route.path) for route in router.routes for method in route.methods
     )
     assert all(count == 1 for count in routes.values())
-    assert len(routes) == 9  # KB-scoped candidates only; no unscoped Bot directory
+    assert len(routes) == 10  # Includes the separate conversation-only projection
     assert ("GET", "/api/knowledge/spaces/{space_id}/bots") not in routes
+    assert (
+        "GET",
+        "/api/knowledge/bots/{bot_id}/conversation-knowledge-bases",
+    ) in routes
 
 
 @pytest.mark.parametrize(

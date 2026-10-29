@@ -146,3 +146,13 @@ class GrantStatesRequest(StrictBody):
         if len({(item.bot_id, item.owner_id) for item in value}) != len(value):
             raise ValueError("Duplicate Bot identity")
         return value
+
+
+class ConversationKnowledgeItem(BaseModel):
+    kb_id: str
+    name: str
+
+
+class ConversationKnowledgePage(BaseModel):
+    items: list[ConversationKnowledgeItem]
+    next_cursor: int | None
