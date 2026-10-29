@@ -462,7 +462,7 @@ def create_bot_with_authorization(
         # earlier); re-applying would mint a second one. Skip straight to the
         # create step with the agent code the extension hands over — nothing
         # external is touched on this path.
-        passport_access = ""
+        passport_token = ""
         agent_code = override.preissued["agent_code"]
     else:
         passport_result = _apply_passport(
@@ -485,10 +485,10 @@ def create_bot_with_authorization(
             use_first_passport=use_first_passport,
         )
 
-        passport_access = passport_result.get("token") if passport_result else None
+        passport_token = passport_result.get("token") if passport_result else None
 
         # No token yet → authorization pending; nothing is created.
-        if not passport_access:
+        if not passport_token:
             iframe_url = passport_result.get("iframe_url") if passport_result else None
             redirect_url = passport_result.get("redirect_url") if passport_result else None
             # "Pending" is only a real state if the caller has somewhere to go. With
@@ -555,7 +555,7 @@ def create_bot_with_authorization(
     return Created(
         bot=result,
         is_first_bot=is_first_bot,
-        passport_token=passport_access,
+        passport_token=passport_token,
     )
 
 
