@@ -10,11 +10,15 @@ from agentclaw.community.adapters.http.knowledge_management.schemas import (
     BotCandidatePageResponse,
     CatalogItem,
     CatalogPageResponse,
+    ConversationKnowledgePage,
     EnablementRequest,
     GrantRequest,
     GrantStatesRequest,
 )
 from agentclaw.community.api.bot_knowledge_service import BotKnowledgeServiceProtocol
+from agentclaw.community.api.conversation_knowledge_service import (
+    ConversationKnowledgeServiceProtocol,
+)
 from agentclaw.community.api.knowledge_management_service import (
     KnowledgeManagementServiceProtocol,
 )
@@ -28,7 +32,7 @@ from agentclaw.community.di import Injected
 from agentclaw.community.kernel.knowledge import BotKnowledgeScope, KnowledgeError
 from agentclaw.community.kernel.knowledge_management import KnowledgeManagementError
 from agentclaw.community.utils.env_utils import get_current_env
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 
 router = APIRouter(
     prefix="/api/knowledge", tags=["knowledge-management"], route_class=KnowledgeRoute
@@ -274,6 +278,39 @@ def available(
         return service.available_for_bot(
             scope=BotKnowledgeScope(bot_id, owner_id, get_current_env()),
             actor_id=user.staffId,
+            cursor=cursor,
+            limit=limit,
+        )
+
+    return execute(config, operation)
+
+
+@router.get(
+    "/bots/{bot_id}/conversation-knowledge-bases",
+    response_model=ConversationKnowledgePage,
+)
+def conversation_knowledge(
+    bot_id: str,
+    owner_id: str,
+    request: Request,
+    cursor: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=20),
+    user: AuthenticatedUser = Depends(get_current_user),
+    service: ConversationKnowledgeServiceProtocol = Injected(
+        ConversationKnowledgeServiceProtocol
+    ),
+    config: KnowledgeManagementConfig = Injected(KnowledgeManagementConfig),
+):
+    def operation():
+        return service.list_for_bot(
+            scope=BotKnowledgeScope(bot_id, owner_id, get_current_env()),
+            actor_id=user.staffId,
+            request_headers={
+                key: value
+                for key, value in request.headers.items()
+                if key.lower()
+                in {"authorization", "cookie", "x-request-id", "x-trace-id"}
+            },
             cursor=cursor,
             limit=limit,
         )

@@ -24,11 +24,20 @@ from agentclaw.community.adapters.knowledge_platform.content_ports import (
 from agentclaw.community.adapters.knowledge_platform.identity import (
     DirectKnowledgeIdentity,
 )
+from agentclaw.community.api.conversation_knowledge_service import (
+    ConversationKnowledgeServiceProtocol,
+)
+from agentclaw.community.api.human_bot_friendship_service import (
+    HumanBotFriendshipServiceProtocol,
+)
 from agentclaw.community.api.knowledge_content_service import (
     KnowledgeContentServiceProtocol,
 )
 from agentclaw.community.api.knowledge_management_service import (
     KnowledgeManagementServiceProtocol,
+)
+from agentclaw.community.core.bot_collaborator.protocols import (
+    CollaboratorServiceProtocol,
 )
 from agentclaw.community.core.knowledge_management.config import (
     KnowledgeManagementConfig,
@@ -40,6 +49,9 @@ from agentclaw.community.core.knowledge_management.ports import (
 from agentclaw.community.core.knowledge_management.repository.source import (
     ExistingKnowledgeEnablementReader,
     KnowledgeSourceRepository,
+)
+from agentclaw.community.core.knowledge_management.services.conversation import (
+    ConversationKnowledgeService,
 )
 from agentclaw.community.core.knowledge_management.services.service import (
     KnowledgeManagementService,
@@ -163,3 +175,14 @@ class KnowledgeManagementModule(Module):
             get_current_env(),
             sync,
         )
+
+    @provider
+    @singleton
+    def conversation_service(
+        self,
+        source: KnowledgeSourceRepository,
+        catalog: KnowledgeCatalog,
+        collaborators: CollaboratorServiceProtocol,
+        friendships: HumanBotFriendshipServiceProtocol,
+    ) -> ConversationKnowledgeServiceProtocol:
+        return ConversationKnowledgeService(source, catalog, collaborators, friendships)

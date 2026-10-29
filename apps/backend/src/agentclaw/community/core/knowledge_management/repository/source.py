@@ -45,6 +45,19 @@ class KnowledgeSourceRepository:
 
         return BotKnowledgeRepository(self.db).get_bot(scope, actor_id=actor_id)
 
+    def conversation_bot(self, scope):
+        if (
+            not self.platform
+            or get_current_avernet_tenant() != self.platform
+            or scope.env != self.env
+        ):
+            raise KnowledgeManagementError("KNOWLEDGE_CHAT_ACCESS_DENIED")
+        from agentclaw.community.core.bot_knowledge.repository.store import (
+            BotKnowledgeRepository,
+        )
+
+        return BotKnowledgeRepository(self.db).get_bot(scope)
+
     def selections(self, *, bot, kb_ids):
         from agentclaw.community.core.bot_knowledge.repository.models import (
             BotKnowledgeBindingModel as Binding,
