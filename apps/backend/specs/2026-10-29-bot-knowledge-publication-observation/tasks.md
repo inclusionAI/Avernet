@@ -34,21 +34,22 @@
 - **Verification:** 构建任务/真实 DI 48 passed；公有 DB 插件未提供逐调用硬超时，内部 DB 适配器也未声明可供本功能复用的短截止时间。实际生产驱动配置与故障耗时未验证，不作硬时限保证。
 - **Acceptance mapping:** AC-03, AC-06, AC-09, AC-10.
 
-## Task 3: Expose publication reads without changing draft APIs
+## Task 3 [x]: Expose publication reads without changing draft APIs
 - **Goal:** 提供可按原生 publication_id 查询的只读端点，保持当前草稿开关及个人 Bot 行为。
 - **Files:** `adapters/http/bot_knowledge/router.py`, `tests/community/endpoints/test_bot_knowledge_router.py`, `tests/community/e2e/test_bot_knowledge_publication_selection.py` (new).
 - **Done when:**
-  - [ ] 新 GET 使用统一协议、认证与错误映射；旧 GET/PUT、CAS、分页及既有 enablement 别名不变。
-  - [ ] HTTP/DI 测试通过真实组装解析实现，不手工重绑被测业务服务。
-  - [ ] 覆盖草稿 A → 构建记录 A → 原生预发版本 A → 新草稿 B；读取旧发布版本仍为 A。
-  - [ ] 同一版本上线查询不写记录；返回记录不得改变原生部署状态，失败版本不得被包装成有效阶段。
-  - [ ] 选择为空、历史无记录、损坏、辅助读取失败、跨 Bot/租户/环境/空间以及旧 Owner 均有明确响应。
-  - [ ] 原生回滚所选历史版本有记录可读、无记录为 unrecorded；不自动改草稿选择，不查询全历史猜测版本。
-  - [ ] 前端接入未实现的范围写清楚，不把后端受控流程当作真实预发/生产验收。
+  - [x] 新 GET 使用统一协议、认证与错误映射；旧 GET/PUT、CAS、分页及既有 enablement 别名不变。
+  - [x] HTTP/DI 测试通过真实组装解析实现，不手工重绑被测业务服务。
+  - [x] 覆盖草稿 A → 构建记录 A → 原生预发版本 A → 新草稿 B；读取旧发布版本仍为 A。
+  - [x] 同一版本上线查询不写记录；返回记录不得改变原生部署状态，失败版本不得被包装成有效阶段。
+  - [x] 选择为空、历史无记录、损坏、辅助读取失败、跨 Bot/租户/环境/空间以及旧 Owner 均有明确响应。
+  - [x] 原生回滚所选历史版本有记录可读、无记录为 unrecorded；不自动改草稿选择，不查询全历史猜测版本。
+  - [x] 前端接入未实现的范围写清楚，不把后端受控流程当作真实预发/生产验收。
 - **Depends on:** Tasks 1, 2.
+- **Verification:** 注册端点及真实 HTTP/DI/DB 场景 11 passed；包含原 GET/PUT、原生状态 CAS/rollback_flip、provider mutation witness 与路由唯一性，不包含设备部署。
 - **Acceptance mapping:** AC-01, AC-03, AC-04, AC-05, AC-07, AC-08, AC-10.
 
-## Task 4: Lock down the small scope and document weak consistency
+## Task 4 [~]: Lock down the small scope and document weak consistency
 - **Goal:** 把非阻断和无事务联动变成可检查的约束，避免重新长成旧方案。
 - **Files:** `core/bot_knowledge/README.md`, `core/service_bot/README.md`, `tests/community/architecture/test_bot_knowledge_publication_observation.py` (new), `apps/backend/specs/2026-10-29-bot-knowledge-publication-observation/{spec,plan,tasks}.md` (repo-relative).
 - **Done when:**

@@ -4,7 +4,9 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
-from agentclaw.community.api.bot_knowledge_service import BotKnowledgeServiceProtocol
+from agentclaw.community.api.bot_knowledge_service import (
+    BotKnowledgePublicationSelectionProtocol, BotKnowledgeServiceProtocol,
+)
 from agentclaw.community.core.bot_knowledge.agents_md_sync import (
     BotKnowledgeAgentsMdSync,
 )
@@ -82,3 +84,21 @@ def enable(
         actor_id=user.staffId,
     )
     return result
+
+
+@router.get("/{bot_id}/publications/{publication_id}/selection")
+def publication_selection(
+    bot_id: str,
+    publication_id: int,
+    owner_id: str,
+    user: AuthenticatedUser = Depends(get_current_user),
+    service: BotKnowledgePublicationSelectionProtocol = Injected(BotKnowledgePublicationSelectionProtocol),
+):
+    """Last captured selection, not evidence of deployment or runtime access."""
+    return execute(
+        lambda: service.get_publication_selection(
+            scope=BotKnowledgeScope(bot_id, owner_id, get_current_env()),
+            actor_id=user.staffId,
+            publication_id=publication_id,
+        )
+    )
