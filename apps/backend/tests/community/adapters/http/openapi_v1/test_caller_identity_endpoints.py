@@ -28,8 +28,15 @@ from agentclaw.community.api.caller_identity_service import (
 )
 
 
-def _request() -> Request:
-    request = Request({"type": "http", "method": "PATCH", "path": "/"})
+def _request(entity_id: str = "owner") -> Request:
+    repository = Mock()
+    repository.list_matches_by_legacy_locator.side_effect = lambda bot_id, locator: [{
+        "id": 1, "bot_id": bot_id, "entity_id": entity_id, "owner_id": locator,
+    }]
+    app = FastAPI()
+    app.state.injector = SimpleNamespace(get=lambda _contract: repository)
+    request = Request({"type": "http", "method": "PATCH", "path": "/",
+                       "app": app, "query_string": b""})
     request.state.trace_id = "trace-caller"
     return request
 
@@ -192,3 +199,44 @@ async def test_cli_update_passes_only_the_current_users_lock_epoch_to_service():
         lock_epoch=38,
         entity_id="owner",
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["context", "mcp", "cli"])
+async def test_transferred_bot_passes_stable_entity_and_keeps_actor(kind):
+    service = Mock()
+    locks = Mock()
+    locks.get_lock_info.return_value = SimpleNamespace(lock=None)
+    request = _request(entity_id="original-entity")
+    if kind == "context":
+        service.get_context.return_value = SimpleNamespace(
+            capability="caller_identity.v1", stage=CallerIdentityStage.DRAFT,
+            publish_id=None, bot_call_type=McpCallType.OWNER,
+            mcp_call_types={}, cli_call_types={}, editable=True,
+        )
+        await get_caller_context(
+            "bot-1", request, "owner", "owner", RuntimeStage.DRAFT, None, service
+        )
+        call = service.get_context.call_args
+    else:
+        body = McpCallTypeUpdate(call_type=McpCallType.CALLER)
+        if kind == "mcp":
+            service.update_mcp_call_type = AsyncMock(return_value=McpCallTypeUpdateResult(
+                server_code="mcp.weather", call_type=McpCallType.CALLER,
+                bot_call_type=McpCallType.CALLER,
+            ))
+            await update_mcp_call_type(
+                "bot-1", "mcp.weather", body, request, "owner", "owner", service, locks
+            )
+            call = service.update_mcp_call_type.call_args
+        else:
+            service.update_cli_call_type = AsyncMock(return_value=CliCallTypeUpdateResult(
+                cli_code="dataphin", call_type=McpCallType.CALLER,
+                bot_call_type=McpCallType.CALLER,
+            ))
+            await update_cli_call_type(
+                "bot-1", "dataphin", body, request, "owner", "owner", service, locks
+            )
+            call = service.update_cli_call_type.call_args
+    assert call.kwargs["entity_id"] == "original-entity"
+    assert call.kwargs["actor_id"] == "owner"
