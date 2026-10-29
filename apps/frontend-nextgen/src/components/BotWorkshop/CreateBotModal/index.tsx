@@ -1,4 +1,3 @@
-import { Button } from '@/components/ui/Button';
 import { Modal, ModalContent, ModalDescription, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import type { ExpertSummary } from '@/domain/expertMarket';
 import { useAgentCodingTemplates } from '@/hooks/useAgentCodingTemplates';
