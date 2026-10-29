@@ -97,8 +97,9 @@ def test_activity_projection_mixes_actors_targets_and_activity_sources(db):
                 actor_id="user-a",
                 action_type="VIEW",
                 target_type="TOPIC",
-                target_id=topic.topic_id,
+                target_id=bot_topic.topic_id,
                 env="dev",
+                active=0,
                 gmt_create=base + timedelta(minutes=1),
                 gmt_modified=base + timedelta(minutes=1),
             ),
@@ -132,6 +133,26 @@ def test_activity_projection_mixes_actors_targets_and_activity_sources(db):
                 gmt_create=base + timedelta(minutes=4),
                 gmt_modified=base + timedelta(minutes=4),
             ),
+            ForumInteractionModel(
+                actor_type="HUMAN",
+                actor_id="user-a",
+                action_type="FOLLOW",
+                target_type="HUMAN",
+                target_id="user-b",
+                env="dev",
+                gmt_create=base + timedelta(minutes=5),
+                gmt_modified=base + timedelta(minutes=5),
+            ),
+            ForumInteractionModel(
+                actor_type="HUMAN",
+                actor_id="user-a",
+                action_type="FOLLOW",
+                target_type="BOT",
+                target_id="bot-b",
+                env="dev",
+                gmt_create=base + timedelta(minutes=6),
+                gmt_modified=base + timedelta(minutes=6),
+            ),
         ]
         session.add_all(rows)
 
@@ -147,19 +168,44 @@ def test_activity_projection_mixes_actors_targets_and_activity_sources(db):
         )
         for item in page.items
     }
-    assert page.total >= 7
+    assert page.total >= 9
     assert (PersonalCenterActivityType.AUTHORED, "HUMAN", "TOPIC", topic.topic_id, None) in keys
     assert (PersonalCenterActivityType.AUTHORED, "BOT", "TOPIC", bot_topic.topic_id, None) in keys
     assert (PersonalCenterActivityType.VIEWED, "HUMAN", "TOPIC", topic.topic_id, None) in keys
     assert (PersonalCenterActivityType.FAVORITED, "BOT", "TOPIC", bot_topic.topic_id, None) in keys
     assert (PersonalCenterActivityType.LIKED, "HUMAN", "TOPIC", topic.topic_id, None) in keys
     assert (PersonalCenterActivityType.LIKED, "BOT", "POST", child.post_id, child.post_id) in keys
+    assert (PersonalCenterActivityType.FOLLOWED, "HUMAN", "HUMAN", "user-b", None) in keys
+    assert (PersonalCenterActivityType.FOLLOWED, "HUMAN", "BOT", "bot-b", None) in keys
     assert (PersonalCenterActivityType.REPLIED, "HUMAN", "TOPIC", topic.topic_id, post.post_id) in keys
     assert (PersonalCenterActivityType.REPLIED, "BOT", "POST", post.post_id, child.post_id) in keys
 
     viewed = _list(activity_repo, activity_type=PersonalCenterActivityType.VIEWED)
     assert viewed.total == 1
-    assert viewed.items[0].happened_at == base + timedelta(minutes=1)
+    assert viewed.items[0].happened_at == base
+    topic_context = viewed.items[0].topic_context
+    assert topic_context is not None
+    assert topic_context.title == "Human topic"
+    assert topic_context.body_preview == "Human body"
+    assert topic_context.topic_type == "DISCUSSION"
+    assert topic_context.author_type == ForumActorType.HUMAN
+    assert topic_context.author_id == "user-a"
+    assert topic_context.reply_count == 2
+    assert topic_context.like_count == 1
+    assert topic_context.latest_reply_at is not None
+
+    nested_reply = next(
+        item
+        for item in page.items
+        if item.activity_type is PersonalCenterActivityType.REPLIED
+        and item.actor_type == ForumActorType.BOT
+    )
+    assert nested_reply.replied_to_post is not None
+    assert nested_reply.replied_to_post.post_id == post.post_id
+    assert nested_reply.replied_to_post.author_type == ForumActorType.HUMAN
+    assert nested_reply.replied_to_post.author_id == "user-a"
+    assert nested_reply.replied_to_post.author_display_name == "user-a"
+    assert nested_reply.replied_to_post.body_preview == "Human direct reply"
 
     liked_topic = _list(
         activity_repo,
@@ -170,8 +216,91 @@ def test_activity_projection_mixes_actors_targets_and_activity_sources(db):
     assert liked_topic.items[0].target_id == topic.topic_id
     assert liked_topic.items[0].post_id is None
 
+    all_human = _list(
+        activity_repo,
+        activity_type=PersonalCenterActivityType.ALL,
+        target_type=ForumInteractionTargetType.HUMAN,
+    )
+    assert all_human.total == 1
+    assert [item.activity_type for item in all_human.items] == [
+        PersonalCenterActivityType.FOLLOWED
+    ]
+    assert all_human.items[0].target_id == "user-b"
 
-def test_activity_pages_and_dedupes_on_the_database(db):
+
+def test_followed_identity_activity_keeps_only_latest_active_state(db):
+    content_repo = ForumRepository(db)
+    activity_repo = ForumPersonalCenterActivityRepository(db)
+    content_repo.create_topic(
+        author_type="BOT",
+        author_id="bot-b",
+        client_request_id="req-followed-bot-topic",
+        title="Bot topic",
+        body="Bot body",
+        author_display_name="协作 Bot",
+    )
+    with db.orm_session() as session:
+        base = datetime(2026, 10, 27, 12, 0)
+        session.add_all(
+            [
+                ForumInteractionModel(
+                    actor_type="HUMAN",
+                    actor_id="user-a",
+                    action_type="FOLLOW",
+                    target_type="HUMAN",
+                    target_id="user-b",
+                    env="dev",
+                    active=0,
+                    gmt_create=base,
+                    gmt_modified=base,
+                ),
+                ForumInteractionModel(
+                    actor_type="HUMAN",
+                    actor_id="user-a",
+                    action_type="FOLLOW",
+                    target_type="BOT",
+                    target_id="bot-b",
+                    env="dev",
+                    gmt_create=base + timedelta(minutes=2),
+                    gmt_modified=base + timedelta(minutes=2),
+                ),
+            ]
+        )
+
+    followed = _list(
+        activity_repo,
+        actors=(HUMAN,),
+        activity_type=PersonalCenterActivityType.FOLLOWED,
+    )
+
+    assert followed.total == 1
+    assert followed.items[0].activity_type is PersonalCenterActivityType.FOLLOWED
+    assert followed.items[0].target_type == ForumInteractionTargetType.BOT
+    assert followed.items[0].target_id == "bot-b"
+    assert followed.items[0].topic_id is None
+    assert followed.items[0].post_id is None
+    assert followed.items[0].body_preview == "协作 Bot"
+
+    human_only = _list(
+        activity_repo,
+        actors=(HUMAN,),
+        activity_type=PersonalCenterActivityType.FOLLOWED,
+        target_type=ForumInteractionTargetType.HUMAN,
+    )
+
+    assert human_only.total == 0
+
+    topic_filter = _list(
+        activity_repo,
+        actors=(HUMAN,),
+        activity_type=PersonalCenterActivityType.FOLLOWED,
+        target_type=ForumInteractionTargetType.TOPIC,
+    )
+
+    assert topic_filter.total == 0
+
+
+def test_activity_pages_orders_states_on_the_database(db):
     content_repo = ForumRepository(db)
     activity_repo = ForumPersonalCenterActivityRepository(db)
     topic_ids = []
@@ -185,19 +314,18 @@ def test_activity_pages_and_dedupes_on_the_database(db):
         ).topic
         topic_ids.append(topic.topic_id)
         with db.orm_session() as session:
-            for minute in (0, 5):
-                session.add(
-                    ForumInteractionModel(
-                        actor_type="HUMAN",
-                        actor_id="user-a",
-                        action_type="VIEW",
-                        target_type="TOPIC",
-                        target_id=topic.topic_id,
-                        env="dev",
-                        gmt_create=datetime(2026, 10, 27, 12, index * 10 + minute),
-                        gmt_modified=datetime(2026, 10, 27, 12, index * 10 + minute),
-                    )
+            session.add(
+                ForumInteractionModel(
+                    actor_type="HUMAN",
+                    actor_id="user-a",
+                    action_type="VIEW",
+                    target_type="TOPIC",
+                    target_id=topic.topic_id,
+                    env="dev",
+                    gmt_create=datetime(2026, 10, 27, 12, index * 10),
+                    gmt_modified=datetime(2026, 10, 27, 12, index * 10),
                 )
+            )
 
     page = _list(activity_repo, activity_type=PersonalCenterActivityType.VIEWED)
 

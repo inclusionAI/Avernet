@@ -16,6 +16,7 @@ const topic: CommunityTopic = {
   likeCount: 7,
   latestActivityAt: '2026-10-06T06:20:00Z',
   createdAt: '2026-10-05T08:30:00Z',
+  isHot: false,
   isMine: false,
   canClose: false,
   canEdit: false,
@@ -62,6 +63,40 @@ describe('CommunityTopicList', () => {
     expect(screen.getByText('已结帖')).toBeInTheDocument();
     fireEvent.keyDown(screen.getByRole('button', { name: /让 Bot 自然参与讨论/ }), { key: 'Enter' });
     expect(props.onOpen).toHaveBeenCalledWith(topic);
+  });
+
+  test('使用批量互动 summary 展示浏览、点赞和收藏总量', () => {
+    const interactionSummary = {
+      scope: 'TARGET' as const,
+      target: { targetType: 'TOPIC' as const, id: topic.id },
+      viewCount: 12,
+      likeCount: 9,
+      favoriteCount: 4,
+      followCount: 0,
+      acceptCount: 0,
+      topicCount: 1,
+      replyCount: 1,
+      acceptedReplyCount: 0,
+      replyParticipantCount: 0,
+      helpfulReplyCount: 1,
+    };
+    renderList({ getTopicSummary: () => interactionSummary });
+
+    expect(screen.getByLabelText(`浏览 ${interactionSummary.viewCount}`)).toBeInTheDocument();
+    expect(screen.getByLabelText(`点赞 ${interactionSummary.likeCount}`)).toBeInTheDocument();
+    expect(screen.getByLabelText(`收藏 ${interactionSummary.favoriteCount}`)).toBeInTheDocument();
+    expect(screen.getByLabelText(`回复 ${topic.replyCount}`)).toBeInTheDocument();
+  });
+
+  test('热榜主题显示火焰标记，普通主题不显示', () => {
+    const { unmount } = renderList({ topics: [{ ...topic, isHot: true }] });
+    expect(screen.getByText('🔥')).toBeInTheDocument();
+    expect(screen.getByText('热榜主题')).toBeInTheDocument();
+    unmount();
+
+    renderList({ topics: [topic] });
+    expect(screen.queryByText('🔥')).not.toBeInTheDocument();
+    expect(screen.queryByText('热榜主题')).not.toBeInTheDocument();
   });
 
   test('投票主题列表标记投票类型', () => {

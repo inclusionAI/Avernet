@@ -25,6 +25,9 @@ from agentclaw.community.core.task.domain.models import AcceptanceResult, Accept
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 from agentclaw.community.core.task.task_harness.harness import TaskHarness
 from agentclaw.community.core.task.task_harness.relay_runtime_policy import resolve_relay_resume_step
+from agentclaw.community.core.task.task_harness.relay_session_recovery import (
+    RelaySessionPreconditionError,
+)
 from agentclaw.community.core.task.task_harness.runtime_probe import (
     RuntimeProbeResult,
 )
@@ -214,7 +217,7 @@ class TestHarnessOnlyPollsExecutionLeaves:
         assert rec.patches == []
         assert len(recovery.nodes) == 1
 
-    def test_relay_resume_send_failure_does_not_consume_same_session_attempt(
+    def test_relay_resume_send_failures_are_bounded(
         self, svc, graph
     ):
         graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
@@ -224,31 +227,68 @@ class TestHarnessOnlyPollsExecutionLeaves:
         probe = _ScriptedProbe(_runtime_result("terminal_failed"))
         recovery = _FakeRelayRecovery(error=RuntimeError("service unavailable"))
         clock = _Clock(0.0)
-        rec = Recorder()
         h = TaskHarness(
-            svc, rec, clock=clock, default_sla_timeout=1,
+            svc, Recorder(), clock=clock, default_sla_timeout=1,
+            runtime_probe=probe, runtime_probe_threshold=1,
+            relay_recovery=recovery,
+            relay_resume_max_send_failures=5,
+        )
+        h.register("t1")
+        h._poll_once()
+
+        for i in range(1, 5):
+            clock.advance(10.0)
+            assert h._poll_once() == []
+            seen = h._runtime_seen[("t1", "c1")]
+            assert seen["resume_send_failures"] == i
+            assert seen["resume_attempts"] == 0
+            assert node.status == Status.RUNNING
+
+        clock.advance(10.0)
+        patches = h._poll_once()
+        assert len(patches) == 1
+        assert patches[0].status == Status.HUNG
+        assert "relay_harness_transport_exhausted" in patches[0].failure_reason
+        assert node.status == Status.HUNG
+
+    def test_relay_precondition_failures_do_not_fill_transport_failures(
+        self, svc, graph
+    ):
+        graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
+        _dispatch_running(svc, graph, "c1")
+        node = svc._get_node(graph, "c1")
+        probe = _ScriptedProbe(_runtime_result("terminal_failed"))
+        recovery = _FakeRelayRecovery(
+            error=RelaySessionPreconditionError(
+                "relay node has no existing session_id to resume"
+            )
+        )
+        clock = _Clock(0.0)
+        h = TaskHarness(
+            svc, Recorder(), clock=clock, default_sla_timeout=1,
             runtime_probe=probe, runtime_probe_threshold=1,
             relay_recovery=recovery,
         )
         h.register("t1")
         h._poll_once()
+
         clock.advance(10.0)
         assert h._poll_once() == []
-
         seen = h._runtime_seen[("t1", "c1")]
-        assert node.status == Status.RUNNING
-        assert recovery.nodes == []
-        assert "relay_harness_resume_attempts" not in node.run_info.extend_props
-        assert seen["resume_attempts"] == 0
-        assert seen["resume_send_failures"] == 1
-
-        recovery.error = None
-        clock.advance(10.0)
-        assert h._poll_once() == []
-        assert recovery.nodes == [node]
-        assert node.run_info.extend_props["relay_harness_resume_attempts"] == 1
-        assert seen["resume_attempts"] == 1
+        assert seen["resume_precondition_failures"] == 1
         assert seen["resume_send_failures"] == 0
+        assert seen["resume_attempts"] == 0
+        assert node.status == Status.RUNNING
+
+        clock.advance(10.0)
+        patches = h._poll_once()
+        assert len(patches) == 1
+        assert patches[0].status == Status.HUNG
+        assert "relay_harness_precondition_exhausted" in patches[0].failure_reason
+        props = patches[0].extend_props_patch or {}
+        assert props["relay_harness_precondition_failures"] == 2
+        assert props["harness_probe"]["resume_send_failures"] == 0
+        assert node.status == Status.HUNG
 
     def test_relay_resume_exhaustion_counts_only_delivered_resumes(
         self, svc, graph
@@ -352,6 +392,31 @@ class TestHarnessOnlyPollsExecutionLeaves:
         assert recovery.nodes == []
         assert "relay_harness_resume_attempts" not in node.run_info.extend_props
         assert rec.patches == []
+
+    def test_relay_probe_unavailable_has_a_finite_backstop(
+        self, svc, graph
+    ):
+        graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
+        _dispatch_running(svc, graph, "c1")
+        probe = _ScriptedProbe(_runtime_result("probe_unavailable"))
+        clock = _Clock(0.0)
+        h = TaskHarness(
+            svc, Recorder(), clock=clock, default_sla_timeout=1,
+            runtime_probe=probe, runtime_probe_threshold=1,
+            probe_unavailable_max_cycles=2,
+        )
+        h.register("t1")
+        h._poll_once()
+
+        clock.advance(10.0)
+        assert h._poll_once() == []
+        assert h._runtime_seen[("t1", "c1")]["probe_unavailable"] == 1
+
+        clock.advance(10.0)
+        patches = h._poll_once()
+        assert len(patches) == 1
+        assert patches[0].status == Status.HUNG
+        assert patches[0].failure_reason == "relay_harness_probe_unavailable_exhausted"
 
     def test_relay_active_no_progress_resumes_same_session(
         self, svc, graph

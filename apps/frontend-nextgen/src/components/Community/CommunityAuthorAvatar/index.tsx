@@ -4,7 +4,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover
 import type { CommunityAuthor } from '@/domain/community/types';
 import type { InteractionSummary } from '@/domain/community/types';
 import { Bot, User } from 'lucide-react';
-import type { CSSProperties } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 
 export interface CommunityAuthorAvatarProps {
   author: CommunityAuthor;
@@ -52,12 +52,33 @@ export function CommunityAuthorAvatar({
   onFollow,
   followLoading,
 }: CommunityAuthorAvatarProps): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const pendingCloseRef = useRef<number | undefined>(undefined);
+  const cancelPendingClose = useCallback(() => {
+    if (pendingCloseRef.current === undefined) return;
+    window.clearTimeout(pendingCloseRef.current);
+    pendingCloseRef.current = undefined;
+  }, []);
+  const openCard = useCallback(() => {
+    if (open) return;
+    setOpen(true);
+    if (!summaryLoading) onLoadSummary?.();
+  }, [open, onLoadSummary, summaryLoading]);
+  const closeCard = useCallback(() => {
+    cancelPendingClose();
+    setOpen(false);
+  }, [cancelPendingClose]);
+  const scheduleClose = useCallback(() => {
+    cancelPendingClose();
+    pendingCloseRef.current = window.setTimeout(() => setOpen(false), 150);
+  }, [cancelPendingClose]);
+  useEffect(() => cancelPendingClose, [cancelPendingClose]);
   const baseAvatar = avatarContent(author, size);
   if (!onLoadSummary || currentUserId === undefined) return baseAvatar;
   const isSelf = author.id === currentUserId && author.type === 'human';
 
   return (
-    <Popover onOpenChange={(open) => open && !summaryLoading && onLoadSummary()}>
+    <Popover open={open} onOpenChange={(next) => (next ? openCard() : closeCard())}>
       <PopoverTrigger asChild>
         <Button
           variant="ghost"
@@ -65,11 +86,18 @@ export function CommunityAuthorAvatar({
           className="rounded-full p-0 focus-visible:ring-2 focus-visible:ring-primary"
           style={{ width: size, height: size }}
           aria-label={`查看${author.displayName}资料`}
+          onMouseEnter={openCard}
+          onMouseLeave={scheduleClose}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            openCard();
+          }}
         >
           {baseAvatar}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-64">
+      <PopoverContent className="w-64" onMouseEnter={cancelPendingClose} onMouseLeave={closeCard}>
         <div className="flex items-center gap-3">
           {avatarContent(author, 40)}
           <div className="min-w-0 flex-1">

@@ -27,6 +27,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodeQueryCriteria,
     effective_run_mode,
 )
+from agentclaw.community.core.task.task_harness import relay_recovery_policy as recovery_policy
 from agentclaw.community.core.task.task_harness.relay_runtime_policy import (
     active_no_progress_cycle,
     resolve_relay_resume_step,
@@ -38,6 +39,7 @@ from agentclaw.community.core.task.task_harness.relay_resume_trajectory import (
 )
 from agentclaw.community.core.task.task_harness.relay_session_recovery import (
     RelaySessionRecovery,
+    RelaySessionPreconditionError,
     RelaySessionRecoveryError,
 )
 from agentclaw.community.core.task.task_harness.runtime_probe import (
@@ -77,8 +79,10 @@ class TaskHarness:
         runtime_probe: TaskRuntimeLivenessProbe | None = None,
         runtime_probe_threshold: float = 120.0,
         runtime_retry_threshold: int = 3,
+        probe_unavailable_max_cycles: int = 30,
         relay_recovery: RelaySessionRecovery | None = None,
         relay_resume_max_attempts: int = 2,
+        relay_resume_max_send_failures: int = 10,
         task_context_service: Any | None = None,
     ) -> None:
         """graph: TaskGraphService(只读查询 RUNNING + execution_config);on_harness_fn: 编排核复位入口。
@@ -99,8 +103,14 @@ class TaskHarness:
         self._runtime_probe = runtime_probe
         self._runtime_probe_threshold = runtime_probe_threshold
         self._runtime_retry_threshold = runtime_retry_threshold
+        self._probe_unavailable_max_cycles = max(
+            1, int(probe_unavailable_max_cycles)
+        )
         self._relay_recovery = relay_recovery
         self._relay_resume_max_attempts = max(1, int(relay_resume_max_attempts))
+        self._relay_resume_max_send_failures = max(
+            1, int(relay_resume_max_send_failures)
+        )
         self._task_context_service = task_context_service
         self._runtime_seen: dict[tuple[str, str], dict[str, Any]] = {}
         self._pending_seen_at: dict[
@@ -213,6 +223,7 @@ class TaskHarness:
                 "success_unreported": 0,
                 "resume_attempts": 0,
                 "resume_send_failures": 0,
+                "resume_precondition_failures": 0,
                 "probe_unavailable": 0,
                 "recovery_epoch_started_at": self._clock(),
             },
@@ -283,6 +294,15 @@ class TaskHarness:
             current["probe_unavailable"] = (
                 current.get("probe_unavailable", 0) + 1
             )
+            if current["probe_unavailable"] >= self._probe_unavailable_max_cycles:
+                return recovery_policy.relay_probe_unavailable_exhaustion_patch(
+                    node,
+                    current,
+                    max_probe_cycles=self._probe_unavailable_max_cycles,
+                    detail=detail,
+                    elapsed=elapsed,
+                    sla=sla,
+                )
         elif result.state == "unknown":
             current["unknown"] += 1
             current["no_progress"] = 0
@@ -317,22 +337,21 @@ class TaskHarness:
                     node, resume_step=resume_step
                 )
                 channel = resumed.channel
-            except Exception as exc:  # noqa: BLE001 - recoverable transport error
-                error_msg = f"{type(exc).__name__}: {exc}"[:500]
-                current["resume_send_failures"] += 1
-                logger.warning(
-                    "[task][harness] relay session resume send failed task=%s "
-                    "node=%s delivered_attempts=%d/%d send_failures=%d error=%s",
-                    task_id, node.node_id, attempts,
-                    self._relay_resume_max_attempts,
-                    current["resume_send_failures"], error_msg,
+            except Exception as exc:  # noqa: BLE001
+                if isinstance(exc, RelaySessionPreconditionError):
+                    return recovery_policy.relay_session_precondition_failure(
+                        exc, node, current,
+                        max_attempts=self._relay_resume_max_attempts,
+                        reason=reason, detail=detail, elapsed=elapsed, sla=sla,
+                    )
+                return recovery_policy.relay_session_send_failure(
+                    exc, node, current,
+                    max_send_failures=self._relay_resume_max_send_failures,
+                    reason=reason, detail=detail, elapsed=elapsed, sla=sla,
                 )
-                # A request/deployment failure means the resume prompt was not
-                # delivered to the Bot session. It is not a resume attempt and
-                # must not advance the same-session recovery budget.
-                return None
             current["resume_attempts"] = attempts + 1
             current["resume_send_failures"] = 0
+            current["resume_precondition_failures"] = 0
             # Open a new recovery epoch after a delivered resume.  The same-node
             # resume budget is cumulative, and the heartbeat baseline is cleared
             # so this prompt itself cannot be counted as fresh progress.
@@ -386,34 +405,14 @@ class TaskHarness:
                 current["success_unreported"] = 0
             return None
 
-        terminal_reason = f"relay_harness_resume_exhausted: {reason}"
-        logger.error(
-            "[task][harness] relay session resume exhausted task=%s node=%s "
-            "reason=%s attempts=%d/%d",
-            task_id, node.node_id, reason, attempts,
-            self._relay_resume_max_attempts,
-        )
-        return TaskNodePatch(
-            task_id=task_id,
-            node_id=node.node_id,
-            status=Status.HUNG,
-            failure_reason=terminal_reason,
-            extend_props_patch={
-                "relay_harness_resume_attempts": attempts,
-                "harness_probe": {
-                    **detail,
-                    "reason": reason,
-                    "elapsed_seconds": elapsed,
-                    "sla_seconds": sla,
-                    "unknown_count": current.get("unknown", 0),
-                    "no_progress_count": current.get("no_progress", 0),
-                    "success_unreported_count": current.get(
-                        "success_unreported", 0
-                    ),
-                    "resume_attempts": attempts,
-                    "terminal_reason": terminal_reason,
-                },
-            },
+        return recovery_policy.relay_resume_exhaustion_patch(
+            node,
+            current,
+            max_attempts=self._relay_resume_max_attempts,
+            reason=reason,
+            detail=detail,
+            elapsed=elapsed,
+            sla=sla,
         )
 
     def _await_runtime_harness(

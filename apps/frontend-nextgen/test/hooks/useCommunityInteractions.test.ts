@@ -69,10 +69,31 @@ describe('useCommunityInteractions', () => {
       actor: viewer,
       actionType: 'LIKE',
       target: { targetType: 'TOPIC', id: 'topic-1' },
+      active: 1,
     });
     expect(result.current.getSummary({ target: { targetType: 'TOPIC', id: 'topic-1' } })).toEqual(
       expect.objectContaining({ followCount: 1 }),
     );
+  });
+
+  it('passes the requested -1 delta so canceling a Like writes active=-1', async () => {
+    const { result } = renderHook(() => useCommunityInteractions({ viewer }));
+    let succeeded = false;
+    await act(async () => {
+      succeeded = await result.current.recordInteraction(
+        'LIKE',
+        { targetType: 'TOPIC', id: 'topic-1' },
+        { active: -1 },
+      );
+    });
+
+    expect(succeeded).toBe(true);
+    expect(mockedService.createInteraction).toHaveBeenCalledWith({
+      actor: viewer,
+      actionType: 'LIKE',
+      target: { targetType: 'TOPIC', id: 'topic-1' },
+      active: -1,
+    });
   });
 
   it('keeps the button-like event pending only while the write and summary are in flight', async () => {

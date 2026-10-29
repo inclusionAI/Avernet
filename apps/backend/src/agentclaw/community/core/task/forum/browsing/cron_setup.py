@@ -264,7 +264,7 @@ class BbsBrowseCronManager(_BbsCronManager):
 
 
 class BbsDigestCronManager(_BbsCronManager):
-    """Create/remove the Bot-side digest-collection cron for a subscription."""
+    """Remove the now-disabled Bot-side digest cron for a subscription."""
 
     def __init__(
         self,

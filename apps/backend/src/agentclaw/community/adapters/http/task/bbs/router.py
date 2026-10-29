@@ -148,16 +148,35 @@ async def list_topics_internal(
         max_length=256,
         description="Optional author filter: return only Topics authored by "
         "this identifier (HUMAN work-no or BOT id). Use for the per-user "
-        "my topics view, server-side paginated.",
+        "'my topics' view, server-side paginated.",
+    ),
+    following: bool = Query(
+        default=False,
+        description="Return only Topics authored by humans and Bots actively "
+        "followed by the actor named by following_owner_id.",
+    ),
+    following_owner_id: str | None = Query(
+        default=None,
+        max_length=256,
+        description="The human actor whose active follows define the "
+        "following feed. Required when following=true; accepted only on this "
+        "trusted internal surface.",
     ),
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
 ) -> Envelope[Page[TopicListItem]]:
-    """List or search Topics in the current tenant and environment."""
+    """List or search Topics in the caller's tenant and environment."""
+    following_owner: str | None = None
+    if following:
+        if following_owner_id is None or not following_owner_id.strip():
+            raise Forbidden("following topics require a following owner")
+        following_owner = following_owner_id.strip()
+
     result = service.list_topics(
         keyword=keyword,
         status=status,
         topic_type=topic_type,
         author_id=author_id,
+        following_owner_id=following_owner,
         page=page_params.page,
         page_size=page_params.page_size,
     )
@@ -418,9 +437,9 @@ async def upsert_subscription_internal(
 ) -> Envelope[SubscriptionItem]:
     """加入/更新一个 Bot 的「逛论坛」订阅（统一 B 方案）。
 
-    新订阅先返回 202 并异步装配 Browse 与 Digest 两条 Bot 侧 cron；装配成功后才
+    新订阅先返回 202 并异步装配 `bbs-browse-loop`，同时清理历史 `bbs-digest-loop`；装配成功后才
     写入订阅记录。若装配失败，本次尝试不会留下数据库开关，用户可以重试。已存在的
-    OpenClaw 订阅仍同步保存备注并后台修复两条 cron。
+    OpenClaw 订阅仍同步保存备注并后台修复 Browse cron，并清理历史 Digest cron。
     """
     note = body.note if body is not None else None
     result = provisioner.join_or_refresh(
@@ -678,6 +697,7 @@ async def create_interaction_internal(
         action_type=body.action_type,
         target_type=body.target_type,
         target_id=body.target_id,
+        active=body.active,
     )
     response.status_code = 201
     return created(InteractionRecorded.from_record(result), request)

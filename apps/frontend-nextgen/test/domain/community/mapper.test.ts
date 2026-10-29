@@ -1,4 +1,8 @@
-import { mapCommunityReplyDto, mapCommunityTopicDto } from '@/domain/community/mapper';
+import {
+  mapCommunityReplyDto,
+  mapCommunityTopicDto,
+  mapPersonalCenterActivityDto,
+} from '@/domain/community/mapper';
 import { enrichOwnership } from '@/domain/community/ownership';
 
 describe('community mapper', () => {
@@ -12,6 +16,7 @@ describe('community mapper', () => {
       reply_count: 2,
       like_count: 5,
       latest_activity_at: '2026-10-06T10:00:00Z',
+      is_hot: true,
       created_at: '2026-10-05T09:00:00Z',
       is_mine: true,
       can_close: true,
@@ -27,6 +32,7 @@ describe('community mapper', () => {
       replyCount: 2,
       likeCount: 5,
       latestActivityAt: '2026-10-06T10:00:00Z',
+      isHot: true,
       createdAt: '2026-10-05T09:00:00Z',
       isMine: true,
       canClose: true,
@@ -301,4 +307,54 @@ test('maps HELP topics while ignoring legacy expected-time config', () => {
 
   expect(mapped.topicType).toBe('help');
   expect(mapped.topicConfig).toBeUndefined();
+});
+
+
+test('maps personal-center topic and nested-reply contexts', () => {
+  const activity = mapPersonalCenterActivityDto({
+    activity_type: 'REPLIED',
+    actor_type: 'HUMAN',
+    actor_id: 'user-1',
+    target_type: 'POST',
+    target_id: 'post-parent',
+    topic_id: 'topic-1',
+    post_id: 'post-child',
+    happened_at: '2026-10-29T08:00:00Z',
+    body_preview: '我的楼中楼回复',
+    topic_context: {
+      title: '讨论主题',
+      body_preview: '正文预览',
+      topic_type: 'DISCUSSION',
+      author_type: 'BOT',
+      author_id: 'bot-1',
+      author_display_name: '协作助手',
+      reply_count: 3,
+      like_count: 4,
+      latest_reply_at: '2026-10-29T09:00:00Z',
+    },
+    replied_to_post: {
+      post_id: 'post-parent',
+      author_type: 'BOT',
+      author_id: 'bot-2',
+      author_display_name: '风控分析 Bot',
+      body_preview: '原始回复',
+    },
+  });
+
+  expect(activity?.topicContext).toMatchObject({
+    title: '讨论主题',
+    bodyPreview: '正文预览',
+    topicType: 'discussion',
+    author: { actorType: 'BOT', id: 'bot-1' },
+    authorDisplayName: '协作助手',
+    replyCount: 3,
+    likeCount: 4,
+    latestReplyAt: '2026-10-29T09:00:00Z',
+  });
+  expect(activity?.repliedToPost).toMatchObject({
+    postId: 'post-parent',
+    author: { actorType: 'BOT', id: 'bot-2' },
+    authorDisplayName: '风控分析 Bot',
+    bodyPreview: '原始回复',
+  });
 });

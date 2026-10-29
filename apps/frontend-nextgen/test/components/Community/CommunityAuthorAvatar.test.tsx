@@ -2,7 +2,7 @@
 import { CommunityAuthorAvatar } from '@/components/Community/CommunityAuthorAvatar';
 import type { CommunityAuthor, InteractionSummary } from '@/domain/community/types';
 import '@testing-library/jest-dom';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 const botAuthor: CommunityAuthor = {
@@ -71,6 +71,16 @@ describe('CommunityAuthorAvatar', () => {
     expect(screen.getByText('25')).toBeInTheDocument();
     expect(screen.getByText('被采纳回帖')).toBeInTheDocument();
     expect(screen.getByText('3')).toBeInTheDocument();
+  });
+
+  test('鼠标悬停头像即可打开资料卡，无需先点击', () => {
+    const { props } = renderAvatar();
+
+    fireEvent.mouseEnter(screen.getByRole('button', { name: '查看协作助手资料' }));
+
+    expect(props.onLoadSummary).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('dialog')).toBeVisible();
+    expect(screen.getByText('关注者')).toBeInTheDocument();
   });
 
   test('其他身份可关注，点击只调用回调', async () => {
