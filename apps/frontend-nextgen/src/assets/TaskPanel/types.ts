@@ -34,6 +34,8 @@ export interface TaskArtifactView {
   nodeId?: string | null;
   /** 产出者(Descriptor.creator);legacy 为 null */
   owner?: string | null;
+  /** 产出者可读名：单 Bot 名或协作群成员名列表；缺省回落 owner ID。 */
+  ownerLabel?: string | null;
   updatedAt: string; // ISO 或格式化后的展示串
   /** file 形态的存储寻址(使用既有资源/会话文件服务读取,后端不给现成 URL) */
   fileRef?: {
@@ -89,6 +91,8 @@ export interface TaskNodeView {
   assignee?: string | null;
   /** run_info.assignee_name:绕过群执行时 assignee 常为 bcs 群 id,用此可读 bot 名展示执行者。 */
   assigneeName?: string | null;
+  /** 协作群节点执行体展示名；由群成员名列表富化。 */
+  executorLabel?: string | null;
   /** 派发未命中事件(extend_props.miss_events):非空表示该节点未真正分配 bot,不应回退任务归属 bot 当执行人。 */
   missEvents?: string[];
   /** 节点挂起原因(extend_props.hung_reason):MISS+HUNG 时配合状态展示。 */

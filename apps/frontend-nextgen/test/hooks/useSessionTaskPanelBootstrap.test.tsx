@@ -101,6 +101,28 @@ describe('useSessionTaskPanelBootstrap', () => {
     expect(openTab).toHaveBeenCalledTimes(1);
   });
 
+  it('任务列表进入对话时优先打开用户点击的任务，而不是会话最新任务', async () => {
+    const { ref, openTab } = makePanelRef();
+    useTaskSidePanelStore.getState().setActiveTask('task-current');
+    useTaskSidePanelStore.getState().markTaskPanelOpenIntent('task-old');
+    mockListMyTasks.mockResolvedValue({
+      code: 0,
+      data: [
+        taskRecord('task-old', '2026-10-27 10:00:00'),
+        taskRecord('task-new', '2026-10-27 11:30:00'),
+      ],
+    });
+
+    renderHook(() =>
+      useSessionTaskPanelBootstrap({ sessionId: 'sess-1', userId: 'u1', panelRef: ref }),
+    );
+
+    await waitFor(() => expect(openTab).toHaveBeenCalledTimes(1));
+    expect(openTab.mock.calls[0][0]).toMatchObject({ id: 'task-task-old' });
+    expect(useTaskSidePanelStore.getState().activeTaskId).toBe('task-old');
+    expect(useTaskSidePanelStore.getState().taskPanelOpenIntentTaskId).toBeNull();
+  });
+
   it('已有活跃任务面板时，返回原会话不重新 bootstrap 当前副屏', async () => {
     const { ref, openTab } = makePanelRef();
     useTaskSidePanelStore.getState().setActiveTask('task-current');

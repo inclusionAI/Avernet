@@ -2,6 +2,8 @@
 /** TaskPanel 任务级产物列表：统一聚合节点产物与任务级产物，供任务总览及外部宿主复用。 */
 import React, { useMemo } from 'react';
 
+import { collectTaskGroupIds, enrichTaskGroupDisplay } from '../groupDisplay';
+import { useGroupMemberNames } from '../hooks/useGroupMemberNames';
 import type { TaskArtifactView, TaskView } from '../types';
 import { ArtifactsSection } from './ArtifactsSection';
 
@@ -10,6 +12,8 @@ export interface TaskArtifactsListProps {
   apiBaseUrl: string;
   title?: string;
   previewPortalContainer?: HTMLElement | null;
+  /** TaskPanelV2 已统一富化时传 false，避免同屏重复拉取群详情。 */
+  enrichGroupDisplay?: boolean;
 }
 
 export function collectTaskArtifacts(task: TaskView): TaskArtifactView[] {
@@ -28,8 +32,12 @@ export const TaskArtifactsList: React.FC<TaskArtifactsListProps> = ({
   apiBaseUrl,
   title,
   previewPortalContainer,
+  enrichGroupDisplay = true,
 }) => {
-  const artifacts = useMemo(() => collectTaskArtifacts(task), [task]);
+  const groupIds = useMemo(() => collectTaskGroupIds(task), [task]);
+  const groupMemberNames = useGroupMemberNames(enrichGroupDisplay ? groupIds : [], '');
+  const displayTask = useMemo(() => enrichTaskGroupDisplay(task, groupMemberNames), [task, groupMemberNames]);
+  const artifacts = useMemo(() => collectTaskArtifacts(displayTask), [displayTask]);
 
   return (
     <ArtifactsSection

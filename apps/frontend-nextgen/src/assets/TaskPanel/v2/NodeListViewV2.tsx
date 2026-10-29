@@ -45,7 +45,8 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
         const tone = PRESENT_TONES[present] ?? { label: present, color: C.textMuted };
         const isDone = present === 'done' || present === 'merged';
         const isGroup = node.runMode === 'coop_group' || node.runMode === 'bbs' || node.drillable === true;
-        const executorName = node.assigneeName || node.executor || '—';
+        const executorName =
+          node.executorLabel || node.assigneeName || (isGroup ? node.groupName : null) || node.executor || '—';
         const selected = nav.selectedNodeId === node.id;
         const target = resolveNodeSessionTarget(node, task);
         const isRootNode = node.id === rootNodeId;

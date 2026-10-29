@@ -3,7 +3,7 @@
  * 每个胶囊各发起一个任务），否则正常发送（透传 context 与 fileRefs）。发送后清空 draft + 清除选中态。
  *
  * 指令格式：
- * - 动态任务：/task-loop {指令}
+ * - 动态任务：/task-intent-recognition {指令}
  * - 工作流任务：/task workflow_id='{facade.command}' {指令}
  */
 import { buildTaskInstructions } from '@/services/tasks/taskMapper';
