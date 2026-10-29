@@ -63,19 +63,21 @@ describe('collaboration privacy accessible UI', () => {
       'utf8',
     );
     const hookSource = readFileSync(path.join(process.cwd(), 'src/hooks/useCollaborationPrivacy.ts'), 'utf8');
+    // 动作编排拆至子 Hook 后,notify/文案契约由主 Hook + 子 Hook 共同履行。
+    const actionsSource = readFileSync(path.join(process.cwd(), 'src/hooks/useCollaborationPrivacyActions.ts'), 'utf8');
     const helperSource = readFileSync(path.join(process.cwd(), 'src/hooks/collaborationPrivacyHelpers.ts'), 'utf8');
 
     expect(dialogSource).not.toContain('PageMessage');
     // 错误/成功经统一 notify 入口（全局上方居中、错误 6s、可关），页面 Hook 不单独设置位置。
     expect(hookSource).not.toContain("position: 'top-center'");
     expect(hookSource).toContain("from '@/components/ui/notify'");
-    expect(hookSource).toContain('notifyError');
-    expect(hookSource).toContain('notifySuccess');
+    expect(hookSource + actionsSource).toContain('notifyError');
+    expect(hookSource + actionsSource).toContain('notifySuccess');
     expect(hookSource).toContain('publicationSuccessMessage(config)');
     expect(helperSource).toContain('Bot 可见性已更新为不可见，当前立即生效');
     expect(helperSource).toContain('可见性变更申请已提交，当前可见性保持不变');
-    expect(hookSource).toContain('好友审批策略已更新为“无需审批”');
-    expect(hookSource).toContain('好友审批策略已更新为“全部审批”');
+    expect(actionsSource).toContain('好友审批策略已更新为“无需审批”');
+    expect(actionsSource).toContain('好友审批策略已更新为“全部审批”');
     expect(helperSource).toContain("config.scope === 'none'");
     expect(hookSource).not.toContain('setFeedback');
     expect(hookSource).not.toContain('Mock 审批');
