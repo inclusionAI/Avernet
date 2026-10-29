@@ -1,6 +1,30 @@
 # Verification: 服务 Bot 知识库分版本尽力记录
 
-## Scope
+## Current Delivery Verification
+- Current GitHub Release base: `ed61d43cbf0da75b04de2d872aa4eccdc0ddc8c7` (`REL20261029`).
+- Tested source/test head after rebase and review follow-up: `1e276db8d13520127e53f112e901283ad3af8c0d`.
+- Follow-up changes are limited to HTTP README boundary/response semantics and permanent Protocol/concrete registration in `test_service_api_conformance.py`; no feature behavior was changed.
+- Focused conformance/architecture/DI/boot/HTTP checks: **237 passed**, 0 failed before rebase.
+- Fresh full Backend CI after rebase: **27909 passed, 40 skipped, 2 subtests passed, 0 failed**, 439.67 seconds. Existing JUnit gate: 100.00% (27951/27951); line coverage: **90.71%**; changed-line coverage: **99.19%** (123/124). All existing thresholds passed unchanged.
+- Independent incremental review confirmed both previous gaps are addressed and found no new P2+; range-diff shows the original eight feature commits remain patch-equivalent, with only upstream surrounding context changing in the follow-up registry patch.
+- Source/test files remain identical to the tested head after this documentation-only verification update. Push, remote CI and deployment are separate evidence, not implied by local CI.
+
+```bash
+PATH="$PWD/apps/backend/.venv/bin:$PATH" \
+BACKEND_CI_SKIP_INSTALL=1 BACKEND_CI_PYTEST_WORKERS=8 \
+  bash apps/backend/scripts/ci_test.sh \
+  --base ed61d43cbf0da75b04de2d872aa4eccdc0ddc8c7 \
+  --head 1e276db8d13520127e53f112e901283ad3af8c0d
+```
+
+### Release Integration Limitation
+The new Release supports resolving an existing personal space for a legacy Bot
+whose persisted `space_id` is null. The observation still uses the persisted
+space ID, so such a legacy service Bot cannot be captured and returns the
+unrecorded result instead; native publication remains unaffected. This is an
+explicit missing-observation limitation, not a history migration in this PR.
+
+## Initial Verification Scope
 - Base: `2508dcabaa5f533321325e0549b724cd916650d9` (`REL20261029`).
 - Tested code/test head: `223090213aff10bf90d9885daa674e6f7bdf1858`.
 - Worktree: `feat/bot-knowledge-stage-best-effort`；原 PR #3177 未修改。
@@ -21,7 +45,7 @@
 | Backend local SAST block rules | passed，现有脚本 + flake8 fallback；未运行公司远端 SAST |
 | diff whitespace / 源文件行数 | passed；7 个修改/新增生产 Python 文件均小于 1000 行 |
 
-## Full Backend CI
+## Initial Full Backend CI
 
 在代码与测试 head `223090213aff10bf90d9885daa674e6f7bdf1858` 完成第二轮完整运行：
 
@@ -30,7 +54,7 @@
 - 全量行覆盖率 **90.65%**，门槛 75%。
 - 变更行覆盖率 **99.19%**（123/124），门槛 80%。
 - 原有 Backend CI/report gate **passed**；没有降低任何门槛。
-- 后续最终提交仅更新 SDD/验证文档，生产代码和测试相对此 head 不再变化。
+- 初次验证后的 `6aec60cb3` 仅更新 SDD/验证文档；后续 review 修复与 Release rebase 的验证以本文 Current Delivery Verification 为准。
 
 ```bash
 # Run from repository root with the backend virtualenv on PATH.
