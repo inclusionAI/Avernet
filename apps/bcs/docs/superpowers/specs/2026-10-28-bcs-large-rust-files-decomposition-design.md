@@ -1,10 +1,10 @@
 # BCS 超长 Rust 文件按职责拆分设计
 
 > 日期：2026-10-28
-> 状态：设计已确认；第 1 单元已随 #3240 合入；已获授权编写第 2 单元实施计划，第 2～5 单元尚未实施。
+> 状态：设计已确认；第 1 单元已随 #3240 合入；第 2 单元计划已生成，已获授权编写第 3 单元实施计划；第 2～5 单元尚未实施。
 > 源码基准：`dd316eb35`（`dev`，包含 #3209）。
 > 范围：下表五个源文件及完成其拆分所必需的 crate 内私有模块与测试装配。
-> 设计交付：本文、第 1 单元 [实施计划](../plans/2026-10-28-bcs-bot-event-contract-decomposition-implementation-plan.md)及第 2 单元 [实施计划](../plans/2026-10-28-bcs-runtime-progression-decomposition-implementation-plan.md)；本轮只更新规划文档。
+> 设计交付：本文、第 1 单元 [实施计划](../plans/2026-10-28-bcs-bot-event-contract-decomposition-implementation-plan.md)及第 2 单元 [实施计划](../plans/2026-10-28-bcs-runtime-progression-decomposition-implementation-plan.md)及第 3 单元 [实施计划](../plans/2026-10-28-bcs-cli-entry-decomposition-implementation-plan.md)；本轮只更新规划文档。
 
 ## 1. 决策与目标
 
@@ -154,6 +154,11 @@ fixture 放在该套件自己的 support 中，不扩成新的全仓测试框架
 已有 `agentpass.rs`、`collaboration_output.rs`、`collaboration_snapshot.rs` 保留原位置及父级。
 CLI library 的 `lib.rs`、`client.rs`、`oauth.rs` 不因消重而扩大修改范围。
 
+第 3 单元规划基准为 `b57b8e2d7`（文档 HEAD `f443d720a`）：main.rs 当前8,049行，
+run()含23个顶层命令arm；bin实际发现115项，103项按8个场景迁移，其余12项保留身份。
+原 `retired_service_policy_tests` 保持根模块身份，不恢复上游已退休的Service字段。
+计划限定29个搬迁源码文件及1个新增入口回归测试文件；完整归属和验证命令见第3单元计划。
+
 ### 4.2 执行数据流
 
 保持 `parse -> preview 早返回 -> 日志/调用者验证 -> 配置与鉴权 -> 命令分发` 的顺序。
@@ -164,8 +169,15 @@ CLI library 的 `lib.rs`、`client.rs`、`oauth.rs` 不因消重而扩大修改�
 不能通过宽泛兜底将错误命令静默接受。`run()` 中原嵌套 client 工厂提升为普通私有函数，
 仍在原调用时刻解析 token/Actor/TRACEPARENT，不改成启动时统一缓存所有命令的凭据。
 
+鉴权提取使用 std `ControlFlow` 区分继续执行与“已输出structured错误并成功退出”，
+不能用空headers表示终止。命令族消费唯一选中的原String/Option准备值，不额外clone；
+旧 `cli.json` 与 `structured_mode` 是不同语义，拆分时分别传递，不统一默认输出。
+Session File复用Session分支已经创建的client，Health/Connect仍保留各自的构造方式。
+
 `debug_request!`、`debug_response!` 保留为入口内部宏，声明在使用它们的子模块之前。
 不新增 `#[macro_export]`；不改变 library 已有宏的公开面。
+移动的tracing宏通过原入口的私有 `CLI_LOG_TARGET = module_path!()` 保留有效target，
+兼容独立binary和内部嵌入宿主；不把target硬编码为独立binary名称。
 
 ### 4.3 必须保留的兼容性
 
@@ -540,8 +552,8 @@ cargo test -p bcs-collaboration-store --test mysql_store \
 - 一致性：类型和状态留原父级；长 trait 采用唯一实现，不使用部分 trait impl。
 - 可执行性：给出每个模块的职责、特殊兼容点、逐单元验证和失败停止条件。
 - 门禁：承认源码搬移进入覆盖率分母，采用更严格文档约束，不改阈值或统计范围。
-- 权限与进度：第 1 单元已由 #3240 合入；用户已授权编写第 2 单元实施计划，
-  第 2 单元的实际实施仍需后续执行指令。
+- 权限与进度：第 1 单元已由 #3240 合入；第 2 单元计划已生成，用户已授权编写第 3 单元计划；
+  各后续单元实际实施仍需执行指令。
 - 初版设计证据：已检查源码、AST item 边界、现有模块布局、重启测试名称和 coverage 入口；
   设计阶段未执行构建、业务测试、数据库或 E2E。
 - 第 1 单元规划期证据：当时临时副本通过 AST 保持性及 Rust 名称解析/类型检查，
@@ -550,3 +562,6 @@ cargo test -p bcs-collaboration-store --test mysql_store \
 
 第 2 单元规划已重新检查上游基线、266 项发现及共享 fixture 传播；临时副本验证和
 子进程 phase 证据详见第 2 单元计划的“当前验证边界”，不等同于工作区实施或最终门禁通过。
+
+第3单元规划验证包括原bin发现、临时debug草稿编译和help/入口次序比较；
+完整release、宿主矩阵、业务/E2E门禁尚未执行，详见第3单元计划的验证边界。
