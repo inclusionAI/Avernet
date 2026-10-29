@@ -89,7 +89,9 @@ def test_ecb_denial_precedes_bot_directory_queries(world, operation):
     with pytest.raises(KnowledgeManagementError) as error:
         getattr(world.service, operation)(**ARGS)
     assert error.value.code == "KNOWLEDGE_REMOTE_ACCESS_DENIED"
-    assert [call[0] for call in world.catalog.calls] == ["detail"]
+    assert [call[0] for call in world.catalog.calls] == [
+        "grants" if operation == "authorized_bots" else "detail"
+    ]
     assert world.enabled.calls == []
     assert not any("ac_bots" in sql for sql in world.sql if sql.startswith("SELECT"))
 
@@ -322,7 +324,7 @@ def test_only_current_grant_page_enriched(world):
     }
     result = world.service.authorized_bots(**ARGS, cursor=100, limit=1)
     assert len(result["items"]) == 1
-    assert [call[0] for call in world.catalog.calls] == ["detail", "grants"]
+    assert [call[0] for call in world.catalog.calls] == ["grants"]
     assert set(world.enabled.calls[0]["bots"]) == {("bot", "other-owner")}
 
 

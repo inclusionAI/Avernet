@@ -72,11 +72,10 @@ def content():
                 return httpx.Response(200, json=options["metadata"])
         return httpx.Response(options["status"], json=options["body"])
 
-    def detail(**kwargs):
+    def authorize_space(**kwargs):
         scope.append(kwargs)
         if options["deny"]:
             raise KnowledgeError("SPACE_MEMBER_REQUIRED", 403)
-        return {"kb_id": kwargs["kb_id"]}
 
     config = KnowledgeIntegrationConfig(True, "https://ecb.test")
     remote = EcbKnowledgeContentClient(
@@ -95,7 +94,10 @@ def content():
             RemoteKnowledgeContentService(remote, prepare_test_access),
         ),
         (EcbKnowledgeContentClient, remote),
-        (KnowledgeManagementServiceProtocol, SimpleNamespace(detail=detail)),
+        (
+            KnowledgeManagementServiceProtocol,
+            SimpleNamespace(authorize_space=authorize_space),
+        ),
     ):
         injector.binder.bind(interface, to=CallableProvider(lambda value=value: value))
     app = FastAPI()
@@ -122,7 +124,7 @@ def test_scoped_list_and_only_session_cookie_forwarded(content):
         headers={"Cookie": "session=dummy; arbitrary=secret", "x-user-id": "spoof"},
     )
     assert response.status_code == 200
-    assert w.scope == [{"space_id": 1, "kb_id": "kb", "actor_id": "owner"}]
+    assert w.scope == [{"space_id": 1, "actor_id": "owner"}]
     request = w.seen[-1]
     assert (
         str(request.url)
@@ -277,6 +279,14 @@ def test_login_requirement_and_outage_not_turned_into_success(content):
     w.options.update(status=503, body={"detail": "must not echo secret"})
     response = w.client.get(w.prefix + "/sources")
     assert response.status_code == 503 and "secret" not in response.text
+
+
+def test_provider_access_denied_reaches_frontend_after_local_gate(content):
+    w = content
+    w.options.update(status=403, body={"detail": {"code": "KB_PERMISSION_DENIED"}})
+    assert w.client.get(w.prefix + "/sources").status_code == 403
+    assert w.scope == [{"space_id": 1, "actor_id": "owner"}]
+    assert len(w.seen) == 1
 
 
 def test_document_sync_run_status_is_scoped_to_exact_kb_and_source(content):
