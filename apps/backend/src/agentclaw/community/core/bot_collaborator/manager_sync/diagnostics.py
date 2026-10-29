@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import logging
+import threading
 from collections import Counter
 from enum import StrEnum
 from typing import Mapping
 
-from agentclaw.community.kernel.bot_manager_sync import SyncKey, SyncOutcome
+from agentclaw.community.kernel.bot_manager_sync import (
+    SubmissionResult,
+    SyncKey,
+    SyncOutcome,
+    SyncReason,
+)
 
 
 class SyncEvent(StrEnum):
@@ -24,6 +30,7 @@ class SyncEvent(StrEnum):
     SEND_DRIFT = "send_drift"
     SEND_REJECTED = "send_rejected"
     RETRIES_EXHAUSTED = "retries_exhausted"
+    SUBMIT_ADMITTED = "submit_admitted"
     SUBMIT_REJECTED = "submit_rejected"
     SPACE_EXPANSION_FAILED = "space_expansion_failed"
     SPACE_EXPANSION_TRUNCATED = "space_expansion_truncated"
@@ -59,10 +66,12 @@ class SyncDiagnostics:
             "agentclaw.community.manager_sync.diagnostics"
         )
         self._counted: Counter[tuple[str, str]] = Counter()
+        self._counted_lock = threading.Lock()
 
     @property
     def counted(self) -> Mapping[tuple[str, str], int]:
-        return dict(self._counted)
+        with self._counted_lock:
+            return dict(self._counted)
 
     def record(
         self,
@@ -72,21 +81,29 @@ class SyncDiagnostics:
         outcome: str,
         attempt: int = 0,
         counts: Mapping[str, int] | None = None,
+        reason: SyncReason | None = None,
     ) -> None:
         event_value = SyncEvent(event).value
         try:
             outcome_value = SyncOutcome(outcome).value
         except ValueError:
-            outcome_value = SyncRejection(outcome).value
-        self._counted[(event_value, outcome_value)] += 1
+            try:
+                outcome_value = SyncRejection(outcome).value
+            except ValueError:
+                outcome_value = SubmissionResult(outcome).value
+        reason_value = SyncReason(reason).value if reason is not None else None
+        with self._counted_lock:
+            self._counted[(event_value, outcome_value)] += 1
         extras = " ".join(
             f"{name}={int(value)}" for name, value in (counts or {}).items()
         )
         self._logger.log(
             logging.WARNING if event_value in _WARN_EVENTS else logging.INFO,
-            "manager_sync event=%s outcome=%s attempt=%d tenant=%s env=%s bot_pk=%d%s",
+            "manager_sync event=%s outcome=%s reason=%s attempt=%d "
+            "tenant=%s env=%s bot_pk=%d%s",
             event_value,
             outcome_value,
+            reason_value or "none",
             attempt,
             key.avernet_tenant,
             key.env,

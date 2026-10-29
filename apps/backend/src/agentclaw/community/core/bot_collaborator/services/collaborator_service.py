@@ -47,6 +47,9 @@ from agentclaw.community.core.bot_collaborator.services.collaboration_effects im
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.api.bot_manager_sync import BotManagerSyncProtocol
+from agentclaw.community.core.bot_collaborator.manager_sync.notifications import (
+    notify_bot_manager_sync,
+)
 from agentclaw.community.kernel.bot_manager_sync import SyncReason
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.bot_collaborator.collaborator_service_protocol import CollaboratorServiceProtocol
@@ -963,18 +966,13 @@ class CollaboratorService(
         # 析出的 bot["id"]，不为此新增 SQL。捕获范围只有本 notifier：仓储的
         # insert/update/delete 不在 try 内，notifier 失败绝不能改变业务结果，
         # 也不打印 exception body。
-        try:
-            self._manager_sync.request_sync(
-                bot_pk=bot["id"],
-                env=env,
-                avernet_tenant=get_current_avernet_tenant(),
-                reason=SyncReason.COLLABORATOR_CHANGED,
-            )
-        except Exception:
-            logger.error(
-                "manager sync notification rejected",
-                extra={"bot_pk": bot["id"], "env": env},
-            )
+        notify_bot_manager_sync(
+            self._manager_sync,
+            bot_pk=bot["id"],
+            env=env,
+            avernet_tenant=get_current_avernet_tenant(),
+            reason=SyncReason.COLLABORATOR_CHANGED,
+        )
 
         # 3. 获取所有协作者
         collaborators = self._collaborator_repo.list_by_bot(

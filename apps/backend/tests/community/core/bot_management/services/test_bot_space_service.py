@@ -57,8 +57,9 @@ def _service(*, bot: dict | None = None, space: SpaceRecord | None = None,
              manager_sync=None):
     repository = MagicMock()
     repository.get_by_id_and_owner.return_value = bot
+    # A successful repository update returns the full Bot row, including its PK.
     repository.update_space_by_owner.return_value = (
-        {**bot, "space_id": space.id}
+        {"id": 101, **bot, "space_id": space.id}
         if bot is not None and space is not None
         else None
     )
@@ -294,19 +295,23 @@ def test_default_env_falls_back_to_runtime_everywhere():
 
 def test_changed_assignment_submits_bot_space_changed_sync():
     from agentclaw.community.kernel.bot_manager_sync import SyncReason
+    from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 
-    bot = {"id": 101, "bot_id": "b1", "bot_type": "personal", "space_id": 7}
+    bot = {"id": 733, "bot_id": "b1", "bot_type": "personal", "space_id": 7}
     target = _space(space_id=42)
     manager_sync = MagicMock()
-    service, _, _, _ = _service(bot=bot, space=target, manager_sync=manager_sync)
+    service, repository, _, _ = _service(bot=bot, space=target, manager_sync=manager_sync)
 
-    service.change_space(bot_id="b1", owner_id="u1", space_id=42, env="prod")
+    result = service.change_space(bot_id="b1", owner_id="u1", space_id=42, env="prod")
 
-    manager_sync.request_sync.assert_called_once()
-    kwargs = manager_sync.request_sync.call_args.kwargs
-    assert kwargs["bot_pk"] == 101
-    assert kwargs["env"] == "prod"
-    assert kwargs["reason"] is SyncReason.BOT_SPACE_CHANGED
+    assert result.bot is repository.update_space_by_owner.return_value
+    assert result.bot["id"] == 733
+    manager_sync.request_sync.assert_called_once_with(
+        bot_pk=result.bot["id"],
+        env="prod",
+        avernet_tenant=get_current_avernet_tenant(),
+        reason=SyncReason.BOT_SPACE_CHANGED,
+    )
 
 
 def test_same_space_assignment_submits_nothing():

@@ -24,5 +24,5 @@ class TestSecretModule(Module):
         return LocalSecretResolver(
             gateway_principal_signing_key=os.environ.get(
                 "AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE", ""
-            ),
+            )
         )

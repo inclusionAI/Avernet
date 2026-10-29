@@ -5,6 +5,9 @@ from __future__ import annotations
 from injector import inject
 
 from agentclaw.community.api.bot_manager_sync import BotManagerSyncProtocol
+from agentclaw.community.core.bot_collaborator.manager_sync.notifications import (
+    notify_bot_manager_sync,
+)
 from agentclaw.community.core.bot_management.bot_space import (
     BotSpaceAccessProtocol,
     BotSpaceAssignmentResult,
@@ -23,11 +26,8 @@ from agentclaw.community.core.bot_management.bot_space_service_protocol import (
     BotSpaceServiceProtocol,
 )
 from agentclaw.community.kernel.bot_manager_sync import SyncReason
-from agentclaw.community.log import get_logger
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
-
-logger = get_logger()
 
 
 class BotSpaceService(BotSpaceServiceProtocol):
@@ -137,16 +137,11 @@ class BotSpaceService(BotSpaceServiceProtocol):
         # have moved. Best-effort submit with the EXPLICIT env threaded through
         # this business call (never re-collapsed to the process env): a
         # rejected submit leaves the Space change successful.
-        try:
-            self._manager_sync.request_sync(
-                bot_pk=updated["id"],
-                env=env,
-                avernet_tenant=get_current_avernet_tenant(),
-                reason=SyncReason.BOT_SPACE_CHANGED,
-            )
-        except Exception:
-            logger.error(
-                "manager sync notification rejected",
-                extra={"bot_pk": updated.get("id"), "env": env},
-            )
+        notify_bot_manager_sync(
+            self._manager_sync,
+            bot_pk=updated["id"],
+            env=env,
+            avernet_tenant=get_current_avernet_tenant(),
+            reason=SyncReason.BOT_SPACE_CHANGED,
+        )
         return BotSpaceAssignmentResult(bot=updated, space=space, changed=True)

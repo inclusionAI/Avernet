@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import threading
+from collections import Counter
 from unittest.mock import Mock
 
 import pytest
@@ -41,6 +44,101 @@ class GatedService:
         self.calls.append(key)
         await self.release.wait()
         return SyncOutcome.CONFIRMED
+
+
+class CoordinatedCounter(Counter):
+    """Force unlocked read-modify-write callers to observe the same value."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._gate = threading.Lock()
+        self._active = 0
+        self._release = threading.Event()
+
+    def __getitem__(self, key):
+        value = super().__getitem__(key)
+        with self._gate:
+            self._active += 1
+            if self._active == 2:
+                self._release.set()
+        self._release.wait(0.05)
+        with self._gate:
+            self._active -= 1
+        return value
+
+
+def test_diagnostics_counter_updates_are_atomic_and_snapshot_is_detached():
+    diagnostics = SyncDiagnostics(logger=Mock())
+    diagnostics._counted = CoordinatedCounter()
+    key = SyncKey("a", "dev", 1)
+
+    threads = [
+        threading.Thread(
+            target=diagnostics.record,
+            args=("submit_rejected",),
+            kwargs={"key": key, "outcome": "closed"},
+        )
+        for _ in range(2)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=1)
+        assert not thread.is_alive()
+
+    snapshot = diagnostics.counted
+    assert snapshot[("submit_rejected", "closed")] == 2
+    snapshot[("submit_rejected", "closed")] = 99
+    assert diagnostics.counted[("submit_rejected", "closed")] == 2
+
+
+def test_normal_admission_records_finite_reason(caplog):
+    caplog.set_level(logging.INFO)
+    diagnostics = SyncDiagnostics()
+    dispatcher = BotManagerSyncDispatcher(Mock(), Mock(), diagnostics=diagnostics)
+
+    assert submit(dispatcher, 1) is SubmissionResult.QUEUED
+    assert (
+        dispatcher.request_sync(
+            bot_pk=1,
+            env="dev",
+            avernet_tenant="a",
+            reason=SyncReason.OWNER_HANDOFF,
+        )
+        is SubmissionResult.COALESCED
+    )
+    assert (
+        dispatcher.request_space_sync(SpaceChange("a", "dev", ("space",), ()))
+        is SubmissionResult.QUEUED
+    )
+
+    assert diagnostics.counted[("submit_admitted", "queued")] == 2
+    assert diagnostics.counted[("submit_admitted", "coalesced")] == 1
+    messages = [
+        record.message
+        for record in caplog.records
+        if "submit_admitted" in record.message
+    ]
+    assert any("reason=collaborator_changed" in message for message in messages)
+    assert any("reason=owner_handoff" in message for message in messages)
+    assert any("reason=space_membership" in message for message in messages)
+
+
+def test_closed_rejection_precedes_environment_mismatch():
+    diagnostics = SyncDiagnostics(logger=Mock())
+    dispatcher = BotManagerSyncDispatcher(
+        Mock(), Mock(), env="dev", diagnostics=diagnostics
+    )
+    dispatcher.close_admission()
+
+    assert submit(dispatcher, env="pre") is SubmissionResult.REJECTED
+    assert (
+        dispatcher.request_space_sync(SpaceChange("a", "pre", ("space",), ()))
+        is SubmissionResult.REJECTED
+    )
+
+    assert diagnostics.counted[("submit_rejected", "closed")] == 2
+    assert ("submit_rejected", "env_mismatch") not in diagnostics.counted
 
 
 def test_queue_full_closed_and_env_rejections_are_finite(caplog):

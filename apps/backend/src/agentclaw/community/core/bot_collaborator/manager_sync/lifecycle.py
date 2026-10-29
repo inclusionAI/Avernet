@@ -49,6 +49,9 @@ _LOOP_READY_TIMEOUT_SECONDS = 5.0
 _ATTACH_TIMEOUT_SECONDS = 5.0
 _STOP_TIMEOUT_SECONDS = 10.0
 _JOIN_TIMEOUT_SECONDS = 10.0
+_STARTUP_COMPLETION_TIMEOUT_SECONDS = (
+    _LOOP_READY_TIMEOUT_SECONDS + _ATTACH_TIMEOUT_SECONDS + 1.0
+)
 
 #: How long shutdown lets already-admitted work finish before the
 #: worker tasks are cancelled. Bounded, never "wait until the queue is
@@ -71,7 +74,11 @@ class BotManagerSyncLifecycle(LifecycleBase):
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._started_lock = threading.Lock()
+        self._startup_claimed = False
         self._started = False
+        self._startup_done = threading.Event()
+        self._startup_done.set()
+        self._startup_abort = threading.Event()
 
     # -- Lifecycle ----------------------------------------------------------------
 
@@ -84,10 +91,26 @@ class BotManagerSyncLifecycle(LifecycleBase):
         backend finishes its startup regardless.
         """
         with self._started_lock:
-            if self._started:
+            if self._startup_claimed:
                 return
+            # A lifecycle instance is single-use: its dispatcher admission is
+            # permanently closed after failure or shutdown, so retrying startup
+            # would only reopen loop/thread ownership races without recovery.
+            self._startup_claimed = True
+            self._started = True
+            self._startup_abort.clear()
+            self._startup_done.clear()
+
+        def _start_and_signal() -> None:
+            try:
+                self._start_background()
+            finally:
+                # The synchronous operation owns this signal. Cancelling the
+                # awaiting coroutine cannot falsely report startup complete.
+                self._startup_done.set()
+
         try:
-            await asyncio.to_thread(self._start_background)
+            await asyncio.to_thread(_start_and_signal)
         except Exception:
             logger.error(
                 "[MANAGER-SYNC-LIFECYCLE] startup_failed syncer unavailable "
@@ -99,11 +122,19 @@ class BotManagerSyncLifecycle(LifecycleBase):
                 logger.error("[MANAGER-SYNC-LIFECYCLE] close_admission_failed")
             # Partial resources (thread/loop) must not outlive the
             # failed start: stop the loop where it runs and join it.
-            await asyncio.to_thread(self._stop_on_worker_loop)
+            with self._started_lock:
+                owns_cleanup = self._started
+                self._started = False
+            if owns_cleanup:
+                try:
+                    await asyncio.to_thread(self._stop_on_worker_loop)
+                except Exception:  # noqa: BLE001 — startup must still degrade cleanly
+                    logger.error("[MANAGER-SYNC-LIFECYCLE] startup_cleanup_failed")
             return
         with self._started_lock:
-            self._started = True
-        logger.info("[MANAGER-SYNC-LIFECYCLE] started")
+            still_started = self._started
+        if still_started:
+            logger.info("[MANAGER-SYNC-LIFECYCLE] started")
 
     async def shutdown(self) -> None:
         """Close admission, drain bounded, stop the loop, close bcs there.
@@ -114,8 +145,30 @@ class BotManagerSyncLifecycle(LifecycleBase):
         with self._started_lock:
             if not self._started:
                 return
-            self._started = False
+            startup_done = self._startup_done
         self._dispatcher.close_admission()
+        startup_finished = await asyncio.to_thread(
+            startup_done.wait,
+            _STARTUP_COMPLETION_TIMEOUT_SECONDS,
+        )
+        if not startup_finished:
+            self._startup_abort.set()
+            logger.error(
+                "[MANAGER-SYNC-LIFECYCLE] startup_wait_timeout — aborting startup"
+            )
+            startup_finished = await asyncio.to_thread(
+                startup_done.wait,
+                _JOIN_TIMEOUT_SECONDS,
+            )
+            if not startup_finished:
+                logger.error(
+                    "[MANAGER-SYNC-LIFECYCLE] startup_abort_timeout — "
+                    "continuing bounded shutdown"
+                )
+        with self._started_lock:
+            if not self._started:
+                return
+            self._started = False
         try:
             drained = await self._dispatcher.drain(_SHUTDOWN_DRAIN_SECONDS)
             if drained is False:
@@ -139,6 +192,8 @@ class BotManagerSyncLifecycle(LifecycleBase):
 
     def _start_background(self) -> None:
         """Spawn the loop thread; attach the dispatcher onto that loop."""
+        if self._startup_abort.is_set():
+            raise RuntimeError("manager-sync startup aborted")
         ready = threading.Event()
         start_loop = threading.Event()
         abort = threading.Event()
@@ -159,7 +214,7 @@ class BotManagerSyncLifecycle(LifecycleBase):
             # close itself instead of becoming an unowned daemon loop.
             start_loop.wait()
             try:
-                if not abort.is_set():
+                if not abort.is_set() and not self._startup_abort.is_set():
                     loop.run_forever()
             finally:
                 # Running synchronous repository calls cannot be stopped. Do
@@ -181,6 +236,11 @@ class BotManagerSyncLifecycle(LifecycleBase):
                     "[MANAGER-SYNC-LIFECYCLE] worker_loop_thread_lingers_after_start_timeout"
                 )
             raise RuntimeError("manager-sync worker loop did not become ready")
+        if self._startup_abort.is_set():
+            abort.set()
+            start_loop.set()
+            thread.join(timeout=_JOIN_TIMEOUT_SECONDS)
+            raise RuntimeError("manager-sync startup aborted")
         self._loop = loop_holder["loop"]
         self._thread = thread
         start_loop.set()

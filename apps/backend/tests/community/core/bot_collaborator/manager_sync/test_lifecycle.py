@@ -96,6 +96,99 @@ async def test_workers_and_delivery_pool_live_on_dedicated_loop():
 
 
 @pytest.mark.asyncio
+async def test_concurrent_startup_starts_background_loop_at_most_once(monkeypatch):
+    dispatcher = BotManagerSyncDispatcher(RecordingService(), Mock())
+    lifecycle = BotManagerSyncLifecycle(dispatcher, LoopCapturingBcs())
+    original_start = lifecycle._start_background
+    entered = threading.Event()
+    release = threading.Event()
+    start_calls = 0
+
+    def gated_start() -> None:
+        nonlocal start_calls
+        start_calls += 1
+        entered.set()
+        assert release.wait(5)
+        original_start()
+
+    monkeypatch.setattr(lifecycle, "_start_background", gated_start)
+    first = asyncio.create_task(lifecycle.startup())
+    assert await asyncio.to_thread(entered.wait, 5)
+    second = asyncio.create_task(lifecycle.startup())
+    await second
+
+    assert start_calls == 1
+    release.set()
+    await first
+    try:
+        assert dispatcher.stats.attached
+    finally:
+        await lifecycle.shutdown()
+    assert wait_loop_thread_gone()
+
+
+@pytest.mark.asyncio
+async def test_shutdown_waits_for_in_progress_startup_before_stopping(monkeypatch):
+    dispatcher = BotManagerSyncDispatcher(RecordingService(), Mock())
+    lifecycle = BotManagerSyncLifecycle(dispatcher, LoopCapturingBcs())
+    original_start = lifecycle._start_background
+    entered = threading.Event()
+    release = threading.Event()
+
+    def gated_start() -> None:
+        entered.set()
+        assert release.wait(5)
+        original_start()
+
+    monkeypatch.setattr(lifecycle, "_start_background", gated_start)
+    startup = asyncio.create_task(lifecycle.startup())
+    assert await asyncio.to_thread(entered.wait, 5)
+    shutdown = asyncio.create_task(lifecycle.shutdown())
+    await asyncio.sleep(0)
+    assert not shutdown.done()
+    assert submit(dispatcher) is SubmissionResult.REJECTED
+
+    release.set()
+    await asyncio.gather(startup, shutdown)
+
+    assert wait_loop_thread_gone()
+    assert dispatcher.stats.closed
+    assert not dispatcher.stats.attached
+
+
+@pytest.mark.asyncio
+async def test_cancelled_startup_then_shutdown_does_not_orphan_loop(monkeypatch):
+    dispatcher = BotManagerSyncDispatcher(RecordingService(), Mock())
+    lifecycle = BotManagerSyncLifecycle(dispatcher, LoopCapturingBcs())
+    original_start = lifecycle._start_background
+    entered = threading.Event()
+    release = threading.Event()
+
+    def gated_start() -> None:
+        entered.set()
+        assert release.wait(5)
+        original_start()
+
+    monkeypatch.setattr(lifecycle, "_start_background", gated_start)
+    startup = asyncio.create_task(lifecycle.startup())
+    assert await asyncio.to_thread(entered.wait, 5)
+    startup.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await startup
+
+    shutdown = asyncio.create_task(lifecycle.shutdown())
+    await asyncio.sleep(0)
+    assert not shutdown.done()
+    assert submit(dispatcher) is SubmissionResult.REJECTED
+    release.set()
+    await asyncio.wait_for(shutdown, 5)
+
+    assert wait_loop_thread_gone()
+    assert dispatcher.stats.closed
+    assert not dispatcher.stats.attached
+
+
+@pytest.mark.asyncio
 async def test_foreign_loop_cannot_stop_worker_owned_dispatcher():
     dispatcher = BotManagerSyncDispatcher(RecordingService(), Mock())
     lifecycle = BotManagerSyncLifecycle(dispatcher, LoopCapturingBcs())
@@ -120,7 +213,13 @@ async def test_start_failure_only_disables_syncer(monkeypatch, caplog):
     await lifecycle.startup()
     assert wait_loop_thread_gone()
     assert submit(dispatcher) is SubmissionResult.REJECTED
-    assert any("startup_failed" in record.message for record in caplog.records)
+    assert sum("startup_failed" in record.message for record in caplog.records) == 1
+    assert lifecycle._started is False
+    assert lifecycle._startup_done.is_set()
+
+    await lifecycle.startup()
+    assert sum("startup_failed" in record.message for record in caplog.records) == 1
+    assert not loop_thread_alive()
     await lifecycle.shutdown()
 
 

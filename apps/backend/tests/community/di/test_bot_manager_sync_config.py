@@ -1,7 +1,8 @@
 """Default-off configuration and shared production/singlebox delivery wiring."""
 from __future__ import annotations
 
-from types import SimpleNamespace
+import sys
+from types import ModuleType, SimpleNamespace
 
 import jwt
 import pytest
@@ -19,6 +20,7 @@ from agentclaw.community.di import DeployProfile, build_injector
 from agentclaw.community.di.bot_manager_sync_config import ManagerSyncConfig, parse_manager_sync_config
 from agentclaw.community.di.config import SecretNamesConfig
 from agentclaw.community.di.modules.bot_manager_sync_module import BotManagerSyncModule, ManagerSyncStack
+from agentclaw.community.di.profile_modules import modules_for
 from agentclaw.community.kernel.bot_manager_sync import SubmissionResult, SyncReason
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.plugins.community.bcs_managers import HttpBcsManagersPlugin
@@ -127,6 +129,36 @@ def test_missing_signing_key_disables_sync_without_affecting_business(caplog):
     assert isinstance(injector.get(BotManagerSyncProtocol), DisabledBotManagerSync)
     assert isinstance(injector.get(BotManagerSyncLifecycle), DisabledBotManagerSyncLifecycle)
     assert "no principal signing key resolved" in caplog.text
+
+
+def test_corp_test_profile_wires_recording_delivery_without_outbound_http(
+    monkeypatch,
+):
+    from agentclaw.community.di import modules_bootstrap
+
+    fake_devices_module = ModuleType(
+        "agentclaw.community.di.modules.testing_devices_module"
+    )
+    setattr(
+        fake_devices_module,
+        "TestingDevicesModule",
+        type("TestingDevicesModule", (Module,), {}),
+    )
+    monkeypatch.setitem(sys.modules, fake_devices_module.__name__, fake_devices_module)
+    monkeypatch.setattr(modules_bootstrap, "_test_corp_reuse_provider", lambda: [])
+
+    selected = [
+        module for module in modules_for(DeployProfile.CORP_TEST)
+        if type(module).__name__ == "TestBotManagerSyncModule"
+    ]
+
+    assert len(selected) == 1
+    injector = Injector(
+        [BotManagerSyncModule(), selected[0], _ConfigModule()], auto_bind=False
+    )
+    assert isinstance(
+        injector.get(ManagerSyncStack).bcs, RecordingBcsManagersPlugin
+    )
 
 
 @pytest.mark.parametrize("profile,plugin_type", [

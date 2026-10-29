@@ -19,7 +19,9 @@ ordering, a durable outbox, or eventual consistency.
 
 A fresh projection contains every explicit `admin` and `member` collaborator that is
 still eligible under the existing Team Space policy, excluding the current Backend
-Owner. IDs are deduplicated and sorted; more than 1,000 is an error. Passport and
+Owner. IDs are deduplicated and sorted; more than 1,000 **non-Owner** managers is an
+error. The repository applies the same exclusion before its bound, so 1,000
+managers plus an explicit Owner row is valid. Passport and
 device credential updates remain admin-only.
 
 A fact-read, stable-identity, eligibility, or projection failure sends nothing. It
@@ -31,7 +33,12 @@ must never clear BCS by substituting an empty roster.
 nonblocking notification surfaces. They perform bounded memory admission only and
 return `QUEUED`, `COALESCED`, `DISABLED`, or `REJECTED`. They never confirm remote
 state and never change a collaborator, work-order, Space, Bot-space, or Owner-handoff
-result.
+result. All business call sites use shared, transport-free post-commit
+notification helpers; only notification failures are isolated, never persistence
+failures. Normal admission emits `submit_admitted` with the finite trigger
+`SyncReason` and queued/coalesced outcome; the reason does not affect scheduling.
+Diagnostics increments and snapshots are protected by the same thread lock.
+Closed admission takes precedence over environment-mismatch diagnostics.
 
 Owner handoff uses the same ordinary refresh path as every other roster-affecting
 change. It does not invoke BCS owner transfer, establish owner alignment, or create a
@@ -39,7 +46,10 @@ persistent owner gate.
 
 ### Runtime
 
-- Keep the dedicated manager-sync background loop.
+- Keep the dedicated manager-sync background loop. Concurrent startup calls must
+  create at most one worker loop; failed startup closes admission and cleans up.
+  Each lifecycle instance is single-use: reactivation requires a new instance/
+  process, because its dispatcher admission remains closed after stop/failure.
 - Run 4 workers.
 - Bound Bot entries plus pending/expanding Space hints to 1,024 total, counting running entries.
 - Page Space fan-out and repair at 100 keys.
@@ -134,6 +144,20 @@ per-tenant bearer credentials.
 10. Architecture/config tests prove the coordinator Protocol and implementations are
     removed and the three-key configuration is the only accepted surface.
 
+### Singlebox CI readback
+
+The existing `manager_sync` / `bot_collaborator` acceptance targets include
+`test_manager_sync_bcs_projection.py`. The story registers an isolated Bot/Humans
+in real BCS, changes collaborators through Backend HTTP, and asserts the exact
+manager set via an authorized BCS Owner GET, including removal to empty. Its
+local-only fixture uses the existing backfill API and official `bcs-admin`
+ownership initialization for a fresh, isolated stable target before any
+collaborator writes; it does not prove the production registration lifecycle. It uses
+the real dispatcher, reader, principal signer and HTTP plugin, not a test sync
+call. When enabled, unavailable BCS or mismatched projection fails the story;
+coverage alone is not delivery evidence. This local-stack contract check does
+not replace external deployment acceptance.
+
 ### Live acceptance matrix
 
 The final live suite contains four normal flows:
@@ -170,12 +194,27 @@ not the whole-Backend or changed-line CI denominator. Log:
 `/tmp/manager-sync-simple-coverage.log`. Independent final review found no remaining
 blocking findings.
 
-Remote Backend CI and unified singlebox checks will be recorded after the requested
-push. External live acceptance has not been run: no isolated deployment/credentials
+The previous head `cd755b118` passed all applicable PR CI checks on 2026-10-29
+(Unit Tests run 40690684626, Singlebox Coverage run 40690684627). That result
+predates the review follow-up above; its new regression and CI results are
+recorded separately in the PR validation. External live acceptance has not been run: no isolated deployment/credentials
 were supplied for this execution. Local tests do not prove actual deployment rollout.
 An unscoped local SAST invocation traversed `.venv` dependencies; use the repository's
 commit-range-scoped invocation for the PR rather than treating dependency diagnostics
 as source regressions.
+
+### 2026-10-29 review follow-up
+
+The integrated Backend selection passed **1,124 tests** (42 existing warnings),
+including all affected business modules, reader, delivery/consumer, profile/config
+and the complete architecture suite. Log: `/tmp/pr3208-review-regression-final.log`.
+An earlier run exposed invalid Bot-space fixtures omitting the persisted primary
+key; these now match the real repository result rather than relying on a swallowed
+notification argument error. No production persistence contract was weakened.
+The CORP_TEST finding was a review false positive: its implicit default already
+selected recording delivery; selection is now explicit and regression-tested.
+New singlebox readback and this head's remote CI results are recorded separately
+in the PR; the previous head's green checks are not evidence for these changes.
 
 ## Compatibility and risk
 

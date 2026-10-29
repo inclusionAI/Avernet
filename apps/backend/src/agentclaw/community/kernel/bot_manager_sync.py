@@ -2,11 +2,10 @@
 
 Shared vocabulary for the Backend→BCS bot manager sync feature. Every
 layer exchanges these values: the api Service Protocol
-(``api/bot_manager_sync.py``), the core projector and later services,
+(``api/bot_manager_sync.py``), the core projector and sync services,
 the read repository contracts, and the plugin Protocols
 (``BcsManagersPlugin``). Names and shapes
-below are a type dictionary frozen by the task plan — later tasks fill
-in the implementations and must not rename or re-parameterize members.
+below form the common type dictionary for these implementations.
 
 Kernel discipline holds: stdlib only, no HTTP, no Redis, no database —
 pure data plus the two snapshot errors, so every layer can import this

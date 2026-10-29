@@ -23,8 +23,9 @@ sync state and uses no task queue.
 ## Projection
 
 `build_snapshot` includes explicit `admin` and `member` collaborators, excludes the
-current Backend Owner, applies the existing Team Space eligibility rule, deduplicates
-and sorts IDs, and rejects rosters above 1,000. The stable BCS identity uses the Bot's
+current Backend Owner before applying the 1,000-ID bound in both reader and
+projector, applies the existing Team Space eligibility rule, deduplicates
+and sorts IDs. An explicit Owner row does not consume manager capacity. The stable BCS identity uses the Bot's
 `entity_id`, not its Owner.
 
 Passport and device credentials remain admin-only; their filtered admin list is not
@@ -78,10 +79,14 @@ provides:
   - DisabledManagerSyncRepair
   - SyncRunPolicy
   - SyncDiagnostics
+  - notify_bot_manager_sync
+  - notify_space_manager_sync
 consumes:
+  - BotManagerSyncProtocol
   - ManagerSyncReadRepository
   - BcsManagersPlugin
 internal_dependencies:
+  - agentclaw.community.api.bot_manager_sync
   - agentclaw.community.kernel.bot_manager_sync
   - agentclaw.community.kernel.lifecycle
   - agentclaw.community.plugin_api.bcs_managers
@@ -98,3 +103,11 @@ manager permissions but must never change the committed Backend business result.
 BCS plugin consumer contract is covered under `tests/community/contracts/`; runtime,
 failure-isolation, resource-bound, repair, trigger, and projection tests live under
 `tests/community/core/bot_collaborator/manager_sync/`.
+
+## Notification diagnostics
+
+Business callers share the two notification helpers after their writes succeed.
+The helpers isolate only notifier exceptions, not database failures. Admission
+records finite queued/coalesced outcomes with an observability-only `SyncReason`;
+counters and their snapshots are thread-safe. Shutdown rejection is classified
+as closed even when the submitted environment also mismatches.

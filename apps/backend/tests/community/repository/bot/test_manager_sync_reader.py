@@ -427,6 +427,33 @@ def test_read_facts_reads_a_thousand_row_roster_within_budget(db, reader):
     assert all(fact.space_eligible for fact in facts.collaborators)
 
 
+@pytest.mark.parametrize("with_team", [False, True], ids=["no-team", "team"])
+def test_read_facts_accepts_owner_plus_thousand_nonowners(
+    db, reader, with_team
+):
+    owner_id = "owner-at-boundary"
+    nonowners = [f"user-{i:04d}" for i in range(1_000)]
+    roster = ((owner_id, "admin"), *[(user_id, "admin") for user_id in nonowners])
+    space_id = 121 if with_team else None
+    if with_team:
+        seed_space(db, space_id=space_id, env="dev")
+        seed_members(
+            db, space_id=space_id, env="dev", user_ids=[owner_id, *nonowners]
+        )
+    key = seed_sync_facts(
+        db, tenant="a", env="dev", bot_pk=118, entity_id="entity-118",
+        owner_id=owner_id, rows=roster, space_id=space_id,
+    )
+
+    facts = reader.read_facts(key)
+
+    assert len(facts.collaborators) == 1_001
+    assert sum(
+        fact.space_eligible and fact.user_id != owner_id
+        for fact in facts.collaborators
+    ) == 1_000
+
+
 def test_read_facts_raises_snapshot_too_large_without_truncating_eligibility(
     db, reader
 ):
@@ -450,13 +477,22 @@ def test_read_facts_raises_snapshot_too_large_without_truncating_eligibility(
         reader.read_facts(key)
 
 
-def test_read_facts_raises_snapshot_too_large_for_oversized_personal_roster(
-    db, reader
+@pytest.mark.parametrize("with_team", [False, True], ids=["no-team", "team"])
+def test_read_facts_rejects_owner_plus_thousand_and_one_nonowners(
+    db, reader, with_team
 ):
-    roster = tuple((f"user-{i:04d}", "admin") for i in range(1_001))
+    owner_id = "owner-over-boundary"
+    nonowners = [f"user-{i:04d}" for i in range(1_001)]
+    roster = ((owner_id, "admin"), *[(user_id, "admin") for user_id in nonowners])
+    space_id = 131 if with_team else None
+    if with_team:
+        seed_space(db, space_id=space_id, env="dev")
+        seed_members(
+            db, space_id=space_id, env="dev", user_ids=[owner_id, *nonowners]
+        )
     key = seed_sync_facts(
-        db, tenant="a", env="dev", bot_pk=19, entity_id="entity-19",
-        owner_id="owner", rows=roster, space_id=None,
+        db, tenant="a", env="dev", bot_pk=119, entity_id="entity-119",
+        owner_id=owner_id, rows=roster, space_id=space_id,
     )
 
     with pytest.raises(SnapshotTooLarge):

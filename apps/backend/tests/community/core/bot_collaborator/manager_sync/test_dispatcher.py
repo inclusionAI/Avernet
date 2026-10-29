@@ -240,6 +240,30 @@ async def test_close_rejects_all_new_admission_including_existing_key():
 
 
 @pytest.mark.asyncio
+async def test_accepted_space_hint_expands_after_admission_closes():
+    key = SyncKey("a", "dev", 11)
+    reader = Mock(page_space_keys=Mock(return_value=(key,)))
+    service = RecordingService()
+    dispatcher = BotManagerSyncDispatcher(
+        service,
+        reader,
+        policy=DispatcherPolicy(worker_count=1, max_keys=2),
+    )
+
+    assert (
+        dispatcher.request_space_sync(SpaceChange("a", "dev", ("space",), ()))
+        is SubmissionResult.QUEUED
+    )
+    dispatcher.close_admission()
+    await dispatcher.attach()
+    try:
+        assert await dispatcher.drain(5)
+        assert service.calls == [key]
+    finally:
+        await dispatcher.stop()
+
+
+@pytest.mark.asyncio
 async def test_submissions_from_threads_wake_workers_without_loss():
     service = RecordingService()
     dispatcher = BotManagerSyncDispatcher(

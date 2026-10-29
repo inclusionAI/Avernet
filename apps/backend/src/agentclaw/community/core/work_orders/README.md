@@ -38,6 +38,7 @@ consumes:
 consumed_by:
   - "adapters/http/openapi_v1/work_orders — public work-order and notification operations"
 internal_dependencies:
+  - agentclaw.community.core.bot_collaborator.manager_sync.notifications
   - agentclaw.community.core.base
   - agentclaw.community.core.repository
   - agentclaw.community.core.spaces
@@ -319,7 +320,8 @@ Structured phase logs include `work_order_id` (null before creation), `phase`,
 `outcome`, `env`, `duration_ms`, and exception class on failures. Relevant phases
 are `event_create`, `auto_callback`, `auto_finalize`, `auto_failure_record`,
 `manual_review`, `manual_callback`, `manual_finalize`, `bot_request_create`,
-`bot_post_commit_sync`, and `space_post_commit_sync`. Creation completion
+`bot_post_commit_sync`. Space manager hints use the shared manager-sync
+notification diagnostics rather than a separate work-order execution phase. Creation completion
 logs supply the newly allocated ID;
 confirmed remote/local failures carry `remote_confirmed=true`, and failed Bot
 sync carries `local_committed=true`. Completion logs describe database/API

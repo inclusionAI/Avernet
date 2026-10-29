@@ -20,6 +20,7 @@ and stay out of scope here.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from unittest.mock import MagicMock
 
@@ -471,14 +472,21 @@ def test_bot_space_change_with_no_assignment_change_stays_silent():
     notifier.request_sync.assert_not_called()
 
 
-def test_bot_space_change_survives_sync_submit_failure():
+def test_bot_space_change_survives_sync_submit_failure(caplog):
     service, _, notifier = _bot_space_case(
         bot=_moving_bot(space_id=7), space=_target_space()
     )
     notifier.request_sync.side_effect = RuntimeError("queue closed")
 
-    result = service.change_space(bot_id="b1", owner_id="u1", space_id=42)
+    with caplog.at_level(logging.ERROR, logger="start"):
+        result = service.change_space(bot_id="b1", owner_id="u1", space_id=42)
 
     assert result.changed is True
     assert result.bot["space_id"] == 42
     notifier.request_sync.assert_called_once()
+    failure = next(
+        record
+        for record in caplog.records
+        if record.getMessage() == "bot manager sync notification failed"
+    )
+    assert failure.bot_pk == 101

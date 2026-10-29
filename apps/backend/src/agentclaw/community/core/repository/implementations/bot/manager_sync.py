@@ -73,9 +73,9 @@ MEMBERSHIP_BATCH_SIZE = 100
 #: Hard page clamp — callers may ask for less, never for more.
 MAX_PAGE_LIMIT = 100
 
-#: The projected manager cap the projector enforces; the reader stops at
-#: the first point the verdict is decided (an eligible set already larger
-#: than this) instead of building facts it will throw away.
+#: The projected manager cap the projector enforces after Owner exclusion;
+#: the reader stops at the first point the verdict is decided instead of
+#: building facts it will throw away.
 MAX_ELIGIBLE_USER_IDS = 1000
 
 
@@ -161,11 +161,11 @@ class SqlManagerSyncReadRepository(ManagerSyncReadRepository):
         """
         raw_ref = "" if bot.space_id is None else str(bot.space_id).strip()
         if not raw_ref or raw_ref.startswith("personal:"):
-            return self._without_team_membership(user_ids)
+            return self._without_team_membership(user_ids, bot.owner_id)
 
         space = self._require_space_row(session, raw_ref, env)
         if space.space_type != SpaceType.TEAM.value:
-            return self._without_team_membership(user_ids)
+            return self._without_team_membership(user_ids, bot.owner_id)
 
         active: set[str] = set()
         for batch in _batched(user_ids, MEMBERSHIP_BATCH_SIZE):
@@ -175,13 +175,15 @@ class SqlManagerSyncReadRepository(ManagerSyncReadRepository):
             # The verdict is decided once the *eligible* set passes the
             # cap; every row judged so far was judged on its full batch,
             # so the remaining rows cannot un-decide it.
-            if len(active) > MAX_ELIGIBLE_USER_IDS:
+            if len(active - {bot.owner_id}) > MAX_ELIGIBLE_USER_IDS:
                 raise SnapshotTooLarge()
         return active
 
     @staticmethod
-    def _without_team_membership(user_ids: list[str]) -> set[str] | None:
-        if len(user_ids) > MAX_ELIGIBLE_USER_IDS:
+    def _without_team_membership(
+        user_ids: list[str], owner_id: str
+    ) -> set[str] | None:
+        if len(set(user_ids) - {owner_id}) > MAX_ELIGIBLE_USER_IDS:
             raise SnapshotTooLarge()
         return None
 

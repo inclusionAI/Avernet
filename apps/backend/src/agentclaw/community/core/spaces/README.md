@@ -38,6 +38,7 @@ consumed_by:
   - "core/market_favorites — Space membership authorization"
   - "core/bot_collaborator — Team Space membership guard for public Bot editors"
 internal_dependencies:
+  - agentclaw.community.core.bot_collaborator.manager_sync.notifications
   - agentclaw.community.api.bot_manager_sync
   - agentclaw.community.core.base
   - agentclaw.community.core.repository

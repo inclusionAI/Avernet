@@ -17,7 +17,7 @@ from injector import Module
 from agentclaw.community.di.profile import DeployProfile
 
 
-def _common_test_doubles(*, manager_sync_fake: bool = True) -> list[Module]:
+def _common_test_doubles(*, manager_sync_fake: bool) -> list[Module]:
     """The corp-free doubles shared by the ``test``/``singlebox`` and ``corp_test``
     columns — every LOCAL-stub concern that does **not** touch ``agentclaw.corp``.
 
@@ -258,7 +258,7 @@ def modules_for(profile: DeployProfile) -> list[Module]:
             TestingDevicesModule,
         )
 
-        column: list[Module] = _common_test_doubles() + [
+        column: list[Module] = _common_test_doubles(manager_sync_fake=True) + [
             # Corp-flavored device doubles (MagicMock ARCA factory + config_corp).
             TestingDevicesModule(),
             # Prod outbound-rule builder / device-sync dispatcher (corp), reused

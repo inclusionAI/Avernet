@@ -120,6 +120,12 @@ _IMPORT_EXCEPTIONS: frozenset[tuple[str, str]] = frozenset({
         "core/bot_collaborator/services/collaborator_service.py",
         "agentclaw.community.api.bot_manager_sync",
     ),
+    # Shared post-commit helpers consume the same transport-free Service API
+    # as their business callers; this is not an HTTP adapter dependency.
+    (
+        "core/bot_collaborator/manager_sync/notifications.py",
+        "agentclaw.community.api.bot_manager_sync",
+    ),
     # WorkOrderService consumes the manager-sync Service API Protocol via DI
     # (same pattern as publish_approval).
     (

@@ -47,7 +47,9 @@ Before enabling, verify:
 4. BCS has an explicit `trusted_apps` rule for `app="backend"`, the Backend tenant,
    and action `managers:sync`.
 5. The Bot has its stable Backend `entity_id` and is registered under the expected BCS
-   identity.
+   identity with initialized Bot Authority ownership. An owner read returning
+   `bot_ownership_not_initialized` is a deployment/governance precondition to
+   resolve with the existing BCS maintenance process, not by bypassing auth.
 6. Projected user IDs are valid BCS Humans. The syncer does not create Humans.
 
 Backend sends no Bearer token and does not route manager PUTs through the gateway.
@@ -72,7 +74,8 @@ X-Avernet-Principal: <backend service principal>
 ```
 
 The roster contains eligible explicit `admin` and `member` collaborators, excluding
-the current Backend Owner. Passport and device credentials remain admin-only.
+the current Backend Owner. The 1,000-ID cap is checked **after** Owner exclusion
+and deduplication in both reader and projector. Passport and device credentials remain admin-only.
 
 One round starts at most three sends in a 15-second budget. It retries `NOT_SENT` and
 `UNKNOWN` failures, including timeout and HTTP 5xx, with approximately 1s/2s plus
@@ -94,7 +97,13 @@ or copy manager rosters, JWTs, signing keys, or response bodies into incident no
 
 Useful distinctions:
 
+- `submit_admitted`: queued/coalesced locally; `reason` identifies collaborator,
+  Owner handoff, Space membership, Bot-space change, or repair. This is not a
+  delivery receipt and does not identify the origin of every coalesced send.
 - `submit_rejected`: local admission was full, closed, or received the wrong env.
+  Closed admission takes priority during shutdown.
+- Diagnostic counters use finite event/outcome labels and thread-safe snapshots;
+  trigger reasons appear in logs, never as arbitrary/high-cardinality labels.
 - `read_failed` / `projection_failed`: no BCS request was sent.
 - `send_rejected`: BCS permanently refused the request; check identity, tenant,
   `trusted_apps`, Bot/Human registration, and request shape.
@@ -253,3 +262,9 @@ configuration posture, test command, and actual result. Do not copy old Redis/ma
 review evidence into this contract. The earlier ordering/barrier design is historical
 only. The 2026-10-28 local 1,178-test selection is recorded in the feature spec; remote
 CI, unified singlebox, and external live acceptance remain separate evidence.
+
+The singlebox CI collaborator suite also exercises Backend HTTP changes followed
+by an exact BCS Owner-read projection assertion (`test_manager_sync_bcs_projection.py`).
+A passing test proves that isolated stack's real direct-delivery path, not external
+rollout or eventual consistency. TEST and CORP_TEST bind recording plugins and do
+not provide that evidence.

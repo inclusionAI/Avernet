@@ -5,6 +5,9 @@ from contextlib import contextmanager
 from time import monotonic
 
 from agentclaw.community.api.bot_manager_sync import BotManagerSyncProtocol
+from agentclaw.community.core.bot_collaborator.manager_sync.notifications import (
+    notify_space_manager_sync,
+)
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
@@ -88,18 +91,4 @@ def notify_space_membership_changed(
     Like the Bot hook above, this only submits work to the notifier: it
     never raises, never persists, and no HTTP runs in this file.
     """
-    try:
-        with execution_phase(
-            "space_post_commit_sync",
-            work_order_id=None,
-            env=change.env,
-            avernet_tenant=change.avernet_tenant,
-            space_ref_count=len(change.space_refs),
-            local_committed=True,
-        ):
-            sync.request_space_sync(change)
-    except Exception:
-        # execution_phase logs the exception class and identifiers, not payloads.
-        # The background reader extends the Space refs; if the Space no longer
-        # exists next round, the hint is simply dropped for repair.
-        return
+    notify_space_manager_sync(sync, change=change)

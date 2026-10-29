@@ -8,6 +8,9 @@ from uuid import uuid4
 from injector import inject
 
 from agentclaw.community.api.bot_manager_sync import BotManagerSyncProtocol
+from agentclaw.community.core.bot_collaborator.manager_sync.notifications import (
+    notify_bot_manager_sync,
+)
 from agentclaw.community.core.execution_identity.protocols import (
     RuntimePassportTokenUpdaterProtocol,
 )
@@ -21,11 +24,8 @@ from agentclaw.community.core.task_queue.services.task_queue_service import (
     TaskQueueService,
 )
 from agentclaw.community.kernel.bot_manager_sync import SyncReason
-from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
-
-logger = get_logger()
 
 TASK_TYPE = "bot_owner_handoff"
 PUBLIC_FIELDS = {
@@ -308,27 +308,17 @@ class OwnerHandoffService:
                 self._selected(row)
                 self._repo.finish(operation_id, worker)
                 # The owner change is durable — BCS's stale manager set must
-                # be refreshed via the side-channel only. The try/except is
-                # strictly local: the commit above succeeded, so a failed
-                # submit must NOT reach the outer error-state handling, must
-                # not re-enter any Passport admin path, and must not call a
-                # BCS owner transfer. Its return value is opaque.
-                try:
-                    self._manager_sync.request_sync(
-                        bot_pk=row["bot_pk"],
-                        env=row["env"],
-                        avernet_tenant=row["avernet_tenant"],
-                        reason=SyncReason.OWNER_HANDOFF,
-                    )
-                except Exception:
-                    logger.error(
-                        "owner committed; manager sync notification failed",
-                        extra={
-                            "operation_id": operation_id,
-                            "bot_pk": row["bot_pk"],
-                            "env": row["env"],
-                        },
-                    )
+                # be refreshed via the side-channel only. The shared helper
+                # contains the notification failure, so it cannot reach the
+                # outer error-state handling, re-enter a Passport admin path,
+                # or call a BCS owner transfer.
+                notify_bot_manager_sync(
+                    self._manager_sync,
+                    bot_pk=row["bot_pk"],
+                    env=row["env"],
+                    avernet_tenant=row["avernet_tenant"],
+                    reason=SyncReason.OWNER_HANDOFF,
+                )
                 return True
             else:
                 raise HandoffError("INVALID_HANDOFF_PHASE")

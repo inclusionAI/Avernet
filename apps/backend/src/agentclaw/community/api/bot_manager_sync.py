@@ -3,9 +3,9 @@
 The narrow contract business code calls to request a Backend→BCS
 manager-set sync. Two entry points cover single-Bot changes and
 Space-triggered fan-out; both only *submit* work — they never block on
-BCS and never read persistence themselves (the dispatch, read, and
-delivery pieces live behind later tasks, reached via DI against this
-Protocol).
+BCS and never read persistence themselves. DI supplies a bounded local
+dispatcher; its background workers read current facts and deliver a
+best-effort projection. Admission never confirms remote state.
 """
 from __future__ import annotations
 

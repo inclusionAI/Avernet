@@ -5,6 +5,9 @@ from __future__ import annotations
 from injector import inject
 
 from agentclaw.community.api.bot_manager_sync import BotManagerSyncProtocol
+from agentclaw.community.core.bot_collaborator.manager_sync.notifications import (
+    notify_space_manager_sync,
+)
 from agentclaw.community.core.work_orders.protocols import WorkOrderEventServiceProtocol
 from agentclaw.community.core.repository.protocols.spaces import SpaceRepositoryProtocol
 from agentclaw.community.core.spaces.errors import (
@@ -79,24 +82,20 @@ class SpaceMemberService(SpaceMemberServiceProtocol):
         strictly local: it never propagates, so a failed hint cannot change
         the committed business result; its return value is opaque.
         """
-        try:
-            self._manager_sync.request_space_sync(
-                SpaceChange(
-                    avernet_tenant=get_current_avernet_tenant(),
-                    env=env,
-                    space_refs=(
-                        str(space.id),
-                        f"team:{space.id}",
-                        space.space_code,
-                    ),
-                    user_ids=user_ids,
-                )
-            )
-        except Exception:
-            logger.error(
-                "manager sync notification rejected",
-                extra={"space_id": space.id, "env": env},
-            )
+        notify_space_manager_sync(
+            self._manager_sync,
+            change=SpaceChange(
+                avernet_tenant=get_current_avernet_tenant(),
+                env=env,
+                space_refs=(
+                    str(space.id),
+                    f"team:{space.id}",
+                    space.space_code,
+                ),
+                user_ids=user_ids,
+            ),
+            space_id=space.id,
+        )
 
     def _resolve_member_user_name(self, *, user_id: str) -> str:
         try:

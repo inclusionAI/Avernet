@@ -3,6 +3,9 @@
 from collections.abc import Callable
 
 from agentclaw.community.api.bot_manager_sync import BotManagerSyncProtocol
+from agentclaw.community.core.bot_collaborator.manager_sync.notifications import (
+    notify_space_manager_sync,
+)
 from agentclaw.community.core.spaces.space_management_service_protocol import (
     SpaceManagementServiceProtocol,
 )
@@ -64,20 +67,16 @@ class SpaceManagementService(SpaceManagementServiceProtocol):
         strictly local: it never propagates, so a failed hint cannot change
         the committed business result; its return value is opaque.
         """
-        try:
-            self._manager_sync.request_space_sync(
-                SpaceChange(
-                    avernet_tenant=get_current_avernet_tenant(),
-                    env=env,
-                    space_refs=space_refs,
-                    user_ids=user_ids,
-                )
-            )
-        except Exception:
-            logger.error(
-                "manager sync notification rejected",
-                extra={"space_id": space_id, "env": env},
-            )
+        notify_space_manager_sync(
+            self._manager_sync,
+            change=SpaceChange(
+                avernet_tenant=get_current_avernet_tenant(),
+                env=env,
+                space_refs=space_refs,
+                user_ids=user_ids,
+            ),
+            space_id=space_id,
+        )
 
     @staticmethod
     def _team_refs(space_id: int) -> tuple[str, ...]:

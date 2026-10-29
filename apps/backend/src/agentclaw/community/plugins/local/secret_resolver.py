@@ -39,10 +39,7 @@ class _LocalSecret:
 class LocalSecretResolver(MockSeam, SecretResolver):
     """Local resolver backed by application-singlebox.yaml for known secrets."""
 
-    def __init__(
-        self,
-        gateway_principal_signing_key: str = "",
-    ) -> None:
+    def __init__(self, gateway_principal_signing_key: str = "") -> None:
         self._gateway_principal_signing_key = gateway_principal_signing_key.strip()
 
     # B11: application-singlebox.yaml lives in the community subtree

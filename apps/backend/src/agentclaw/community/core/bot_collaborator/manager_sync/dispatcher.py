@@ -132,30 +132,31 @@ class BotManagerSyncDispatcher:
         avernet_tenant: str,
         reason: SyncReason,
     ) -> SubmissionResult:
-        """Admit a key from memory; ``reason`` never changes scheduling."""
+        """Admit a key from memory; ``reason`` is observability-only."""
 
-        del reason
         key = SyncKey(avernet_tenant, env, bot_pk)
-        if self._env and env != self._env:
-            self._note_rejected(key, SyncRejection.ENV_MISMATCH, "submission")
-            return SubmissionResult.REJECTED
         with self._mutex:
-            result = self._admit_key_locked(key)
-            rejection = self._rejection_for_locked(result)
+            if not self._closed and self._env and env != self._env:
+                result = SubmissionResult.REJECTED
+                rejection = SyncRejection.ENV_MISMATCH
+            else:
+                result = self._admit_locked(key, honor_closed=True)
+                rejection = self._rejection_for_locked(result)
         if rejection is not None:
             self._note_rejected(key, rejection, "submission")
+        else:
+            self._note_admitted(key, result, reason)
         return result
 
     def request_space_sync(self, change: SpaceChange) -> SubmissionResult:
         """Admit one bounded fan-out hint without reading persistence."""
 
         key = _space_level_key(change)
-        if self._env and change.env != self._env:
-            self._note_rejected(key, SyncRejection.ENV_MISMATCH, "space-fanout")
-            return SubmissionResult.REJECTED
         with self._mutex:
             if self._closed:
                 rejection = SyncRejection.CLOSED
+            elif self._env and change.env != self._env:
+                rejection = SyncRejection.ENV_MISMATCH
             elif self._capacity_used_locked() >= self._policy.max_keys:
                 rejection = SyncRejection.QUEUE_FULL
             else:
@@ -165,6 +166,11 @@ class BotManagerSyncDispatcher:
         if rejection is not None:
             self._note_rejected(key, rejection, "space-fanout")
             return SubmissionResult.REJECTED
+        self._note_admitted(
+            key,
+            SubmissionResult.QUEUED,
+            SyncReason.SPACE_MEMBERSHIP,
+        )
         return SubmissionResult.QUEUED
 
     async def attach(self) -> None:
@@ -247,24 +253,10 @@ class BotManagerSyncDispatcher:
                 attached=self._loop is not None,
             )
 
-    def _admit_key_locked(self, key: SyncKey) -> SubmissionResult:
-        # Shutdown rejects every request, including an already-known key.
-        if self._closed:
+    def _admit_locked(self, key: SyncKey, *, honor_closed: bool) -> SubmissionResult:
+        """Admit direct work or work from an already-accepted Space hint."""
+        if honor_closed and self._closed:
             return SubmissionResult.REJECTED
-        entry = self._entries.get(key)
-        if entry is not None:
-            if entry.running:
-                entry.dirty = True
-            return SubmissionResult.COALESCED
-        if self._capacity_used_locked() >= self._policy.max_keys:
-            return SubmissionResult.REJECTED
-        self._entries[key] = QueueEntry()
-        self._ready.append(key)
-        self._schedule_wakeup_locked()
-        return SubmissionResult.QUEUED
-
-    def _admit_expanded_key_locked(self, key: SyncKey) -> SubmissionResult:
-        """Admit work represented by an already-accepted Space hint."""
         entry = self._entries.get(key)
         if entry is not None:
             if entry.running:
@@ -377,7 +369,7 @@ class BotManagerSyncDispatcher:
                     ):
                         raise ValueError("space page returned an out-of-scope key")
                     with self._mutex:
-                        result = self._admit_expanded_key_locked(key)
+                        result = self._admit_locked(key, honor_closed=False)
                         if result is SubmissionResult.REJECTED:
                             rejected += len(keys) - index
                             self._rejected_space_keys += len(keys) - index
@@ -428,6 +420,16 @@ class BotManagerSyncDispatcher:
                 after_pk=after_pk,
                 limit=self._policy.page_size,
             )
+
+    def _note_admitted(
+        self, key: SyncKey, result: SubmissionResult, reason: SyncReason
+    ) -> None:
+        self._diagnostics.record(
+            SyncEvent.SUBMIT_ADMITTED,
+            key=key,
+            outcome=result,
+            reason=reason,
+        )
 
     def _note_rejected(self, key: SyncKey, reason: SyncRejection, scope: str) -> None:
         self._diagnostics.record(
