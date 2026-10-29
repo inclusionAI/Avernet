@@ -72,6 +72,8 @@ class Catalog:
 
     def authorized_bots(self, **kwargs):
         self.calls.append(("grants", kwargs))
+        if self.denied:
+            raise KnowledgeManagementError("KNOWLEDGE_REMOTE_ACCESS_DENIED")
         return self.grants
 
 

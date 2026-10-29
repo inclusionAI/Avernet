@@ -154,9 +154,12 @@ class KnowledgeManagementService:
 
     def authorized_bots(self, *, space_id, kb_id, actor_id, cursor=0, limit=20):
         page_size(limit, cursor)
-        # New catalog-detail enforces native READ. There is deliberately no
-        # per-Bot editor check here (nor a call to the write-side Bot service).
-        detail = self.detail(space_id=space_id, kb_id=kb_id, actor_id=actor_id)
+        require_id(kb_id)
+        # Provider-side native READ still gates this read: the authorized-bots
+        # endpoint rejects actors without KB_READ before any grant row is
+        # returned, so no catalog-detail preflight is made here. There is
+        # deliberately no per-Bot editor check either (nor a write-side call).
+        space = self._scope(space_id, actor_id)
         payload = self.catalog.authorized_bots(
             space_id=space_id,
             kb_id=kb_id,
@@ -236,7 +239,7 @@ class KnowledgeManagementService:
                     **grant,
                     **display,
                     "space_id": str(space_id),
-                    "space_name": detail["space_name"],
+                    "space_name": space["name"],
                     "bot_available": bot is not None,
                     "metadata_missing": bot is None,
                     "enabled": enabled.get(identity),
