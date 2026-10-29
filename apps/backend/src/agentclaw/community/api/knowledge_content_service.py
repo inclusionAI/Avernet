@@ -7,6 +7,11 @@ replacement hash CAS, upload conflicts, and schedule version CAS. No accepted ta
 is interpreted as business success. Providers sanitize reply headers and errors.
 Raw streams must release resources on exhaustion, cancellation and read failures.
 
+yuque_connection reports only the current actor's saved connector state and the
+configured provider authorization entry, never credentials. It does not assert
+remote token validity or MCP consent. The browser must recheck this state after
+a popup completion notice rather than trusting the notice as a grant.
+
 Session material is opaque to public orchestration, request-scoped and never logged.
 prepare_access interprets it using deployment-specific authentication; caller-supplied
 actor IDs cannot replace the authenticated identity. Unconfigured providers fail closed.
@@ -52,6 +57,9 @@ class KnowledgeContentServiceProtocol(Protocol):
     async def raw(
         self, *, kb_id: str, source_id: str, access: ContentAccess
     ) -> tuple[ContentReply, AsyncIterator[bytes] | None]: ...
+    async def yuque_connection(
+        self, *, kb_id: str, access: ContentAccess
+    ) -> ContentReply: ...
     async def yuque_documents(
         self, *, kb_id: str, access: ContentAccess, query: str, offset: int, limit: int
     ) -> ContentReply: ...
