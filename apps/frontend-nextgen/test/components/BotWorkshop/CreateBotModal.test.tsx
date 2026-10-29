@@ -347,38 +347,10 @@ test('详情入口固定专家，202后留弹窗等待原任务，Apply成功后
   expect(onClose).toHaveBeenCalledTimes(1);
 });
 
-test('管理入口两份草稿独立，换专家保留自定义名称和职责', async () => {
-  jest.mocked(backendRequest).mockResolvedValue({
-    code: 200000,
-    data: {
-      total: 2,
-      items: [identityExpert, { ...identityExpert, expert_id: 'architect', name: '架构师', description: '设计架构' }],
-    },
-  });
-  render(
-    <CreateBotModal
-      scenario="cloud"
-      spaces={[{ id: '10', name: '个人空间', ownership: 'personal', canCreate: true }]}
-      creating={false}
-      onClose={jest.fn()}
-      onSubmit={jest.fn()}
-    />,
-  );
-  fireEvent.change(screen.getByLabelText(/Bot 名称/), { target: { value: '空白草稿' } });
-  fireEvent.click(screen.getByRole('button', { name: '从专家模板创建' }));
-  fireEvent.click(await screen.findByRole('button', { name: '产品经理' }));
-  expect(screen.getByLabelText(/Bot 名称/)).toHaveValue('我的产品经理');
-  fireEvent.change(screen.getByLabelText(/Bot 名称/), { target: { value: '我的助手' } });
-  fireEvent.change(screen.getByPlaceholderText('简要说明这个 Bot 能帮助你完成什么'), {
-    target: { value: '自定义职责' },
-  });
-  fireEvent.click(screen.getByRole('button', { name: '架构师' }));
-  expect(screen.getByLabelText(/Bot 名称/)).toHaveValue('我的助手');
-  expect(screen.getByPlaceholderText('简要说明这个 Bot 能帮助你完成什么')).toHaveValue('自定义职责');
-  fireEvent.click(screen.getByRole('button', { name: '空白创建' }));
-  expect(screen.getByLabelText(/Bot 名称/)).toHaveValue('空白草稿');
-  fireEvent.click(screen.getByRole('button', { name: '从专家模板创建' }));
-  expect(screen.getByLabelText(/Bot 名称/)).toHaveValue('我的助手');
+test('普通创建入口不显示专家模板选项', () => {
+  render(<CreateBotModal scenario="cloud" spaces={[]} creating={false} onClose={jest.fn()} onSubmit={jest.fn()} />);
+  expect(screen.queryByRole('button', { name: '从专家模板创建' })).not.toBeInTheDocument();
+  expect(screen.queryByPlaceholderText('搜索专家名称、描述或标签')).not.toBeInTheDocument();
 });
 
 test('首次POST断连且无句柄时不自动重发，并明确提示结果未知', async () => {
@@ -493,37 +465,6 @@ test('专家创建沿原AgentPass授权显示并继续轮询到Apply完成', asy
   view.unmount();
   jest.useRealTimers();
 });
-
-test('模板切换只替换自动预填字段，取消和关闭重开不会保留草稿或创建Bot', async () => {
-  const request = jest.mocked(backendRequest);
-  request.mockResolvedValue({
-    code: 200000,
-    data: {
-      total: 2,
-      items: [identityExpert, { ...identityExpert, expert_id: 'architect', name: '架构师', description: '设计架构' }],
-    },
-  });
-  const props = {
-    spaces: [{ id: '10', name: '个人空间', ownership: 'personal' as const, canCreate: true }],
-    creating: false,
-    onClose: jest.fn(),
-    onSubmit: jest.fn(),
-  };
-  const view = render(<CreateBotModal {...props} scenario="cloud" />);
-  fireEvent.click(screen.getByRole('button', { name: '从专家模板创建' }));
-  fireEvent.click(await screen.findByRole('button', { name: '产品经理' }));
-  fireEvent.click(screen.getByRole('button', { name: '架构师' }));
-  expect(screen.getByLabelText(/Bot 名称/)).toHaveValue('我的架构师');
-  expect(screen.getByPlaceholderText('简要说明这个 Bot 能帮助你完成什么')).toHaveValue('设计架构');
-  fireEvent.click(screen.getByRole('button', { name: '取消' }));
-  expect(props.onClose).toHaveBeenCalledTimes(1);
-  expect(request.mock.calls.some(([path]) => path.endsWith('/bots'))).toBe(false);
-  view.rerender(<CreateBotModal {...props} />);
-  view.rerender(<CreateBotModal {...props} scenario="cloud" />);
-  expect(screen.getByLabelText(/Bot 名称/)).toHaveValue('');
-  expect(screen.getByRole('button', { name: '空白创建' })).toHaveAttribute('aria-pressed', 'true');
-});
-
 
 test('详情与模板入口自动名称使用我的前缀且总长最多40字符', async () => {
   const props = { spaces: [{ id: '10', name: '个人空间', ownership: 'personal' as const, canCreate: true }], creating: false, onClose: jest.fn(), onSubmit: jest.fn() };
