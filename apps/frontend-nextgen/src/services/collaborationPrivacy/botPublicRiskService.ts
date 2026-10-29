@@ -5,6 +5,7 @@
 export {
   createBotPublicRiskCheck,
   getCurrentBotPublicRiskCheck,
+  refreshBotPublicRiskCheck,
 } from '@/services/backendApi/collaboration/collaborationBotPublicRiskController';
 export type {
   BotPublicRiskCheckRecord,

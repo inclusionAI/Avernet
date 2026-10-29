@@ -4,12 +4,14 @@ import { useBotPublicRisk } from '@/hooks/useBotPublicRisk';
 import {
   createBotPublicRiskCheck,
   getCurrentBotPublicRiskCheck,
+  refreshBotPublicRiskCheck,
 } from '@/services/backendApi/collaboration/collaborationBotPublicRiskController';
 import { act, renderHook } from '@testing-library/react';
 
 jest.mock('@/services/backendApi/collaboration/collaborationBotPublicRiskController', () => ({
   createBotPublicRiskCheck: jest.fn(),
   getCurrentBotPublicRiskCheck: jest.fn(),
+  refreshBotPublicRiskCheck: jest.fn(),
 }));
 jest.mock('@/components/ui/notify', () => ({
   notifyError: jest.fn(),
@@ -18,6 +20,7 @@ jest.mock('@/components/ui/notify', () => ({
 
 const mockCreate = createBotPublicRiskCheck as jest.Mock;
 const mockCurrent = getCurrentBotPublicRiskCheck as jest.Mock;
+const mockRefresh = refreshBotPublicRiskCheck as jest.Mock;
 
 const rec = (phase: string, extra: Record<string, unknown> = {}) => ({
   risk_check_id: 'rk-1',
@@ -208,4 +211,56 @@ it('stops polling once the record reaches the approval phase', async () => {
     jest.advanceTimersByTime(45_000);
   });
   expect(mockCurrent).not.toHaveBeenCalled();
+});
+
+it('refreshes a failed record with the re-judged original ticket without creating a new one', async () => {
+  // REJECT 终局失败后轮询已停；原工单被外部改判为 PASS 并推进时，手动刷新同步最新记录。
+  mockCurrent.mockResolvedValueOnce(ok(rec('CHECKING', { security_status: 'REJECT' }), 200000));
+  const { result } = renderHook(() => useBotPublicRisk({ botId: 'b', userId: 'u' }));
+  await act(async () => {
+    await result.current.queryCurrent();
+  });
+  expect(result.current.uiState.kind).toBe('failed');
+
+  mockRefresh.mockResolvedValueOnce(
+    ok({ outcome: 'UPDATED', record: rec('ADVANCING', { security_status: 'PASS' }) }, 200000),
+  );
+  await act(async () => {
+    await result.current.refreshCurrent();
+  });
+
+  expect(mockRefresh).toHaveBeenCalledWith('b', 'u', 'rk-1');
+  expect(mockCreate).not.toHaveBeenCalled();
+  expect(result.current.uiState.kind).toBe('advancing');
+  expect(result.current.isRefreshing).toBe(false);
+});
+
+it('degrades refresh to a current query when no record id is held', async () => {
+  mockCurrent.mockResolvedValueOnce(ok(null, 200000));
+  const { result } = renderHook(() => useBotPublicRisk({ botId: 'b', userId: 'u' }));
+
+  await act(async () => {
+    await result.current.refreshCurrent();
+  });
+
+  expect(mockRefresh).not.toHaveBeenCalled();
+  expect(mockCurrent).toHaveBeenCalledWith('b', 'u', { public_scope: 'user' });
+});
+
+it('shows a server message and keeps the record when a manual refresh fails', async () => {
+  mockCurrent.mockResolvedValueOnce(ok(rec('CHECKING', { security_status: 'REJECT' }), 200000));
+  const { result } = renderHook(() => useBotPublicRisk({ botId: 'b', userId: 'u' }));
+  await act(async () => {
+    await result.current.queryCurrent();
+  });
+
+  mockRefresh.mockRejectedValueOnce(new Error('Conflict'));
+  await act(async () => {
+    await result.current.refreshCurrent();
+  });
+
+  const { notifyError } = jest.requireMock('@/components/ui/notify') as { notifyError: jest.Mock };
+  expect(notifyError).toHaveBeenCalledWith('Conflict');
+  expect(result.current.uiState.kind).toBe('failed');
+  expect(result.current.isRefreshing).toBe(false);
 });

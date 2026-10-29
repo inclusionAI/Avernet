@@ -57,12 +57,15 @@ interface PublicationEditorProps {
   onSubmit: (config: PublicConfig, deptEntries?: Array<{ deptNo: string; deptName: string }>) => void;
   /**
    * 公开风险前置检测状态（bot-public-risk-check；仅 audience==='user' 且非外部 Bot 时由宿主传入）。
-   * checking/advancing/approving → 已发起终态锁定；failed/attention → 失败提示 + 可编辑重发。
+   * checking/advancing/approving → 已发起终态锁定；failed/attention → 失败提示 + 可编辑重发，
+   * 并提供「刷新状态」入口（§2.2 手动刷新）：立即查询原安全单同步最新结论，不重新建单。
    */
   risk?: {
     uiState: BotPublicRiskUiState;
     record: BotPublicRiskCheckRecord | null;
     isCreating: boolean;
+    refreshCurrent?: () => void;
+    isRefreshing?: boolean;
   };
 }
 
@@ -165,7 +168,7 @@ export function PublicationEditor({
               className="font-medium text-primary hover:opacity-80"
               onClick={handleCollaborationSquareClick}
             >
-              [协作广场/公开Bot]
+              [发现/公开Bot]
             </a>
             {visibilityEditorDescription.trailing}
           </ModalDescription>
@@ -181,10 +184,16 @@ export function PublicationEditor({
             />
           ) : (
             <>
-              {riskOutcome === 'resolved' && riskActive ? (
-                <RiskFailureBanner kind={riskKind === 'attention' ? 'attention' : 'failed'} record={riskActive.record} />
-              ) : null}
+              {/* 流程预告条置顶常读（触发动线即出现，配置改回原值随 channel 收起） */}
               {showFlowBanner ? <RiskFlowPreviewBanner /> : null}
+              {riskOutcome === 'resolved' && riskActive ? (
+                <RiskFailureBanner
+                  kind={riskKind === 'attention' ? 'attention' : 'failed'}
+                  record={riskActive.record}
+                  onRefreshState={riskActive.refreshCurrent}
+                  refreshing={riskActive.isRefreshing}
+                />
+              ) : null}
               <ChoiceGroup
                 value={scope}
                 options={availableScopeOptions.map((option) => ({
