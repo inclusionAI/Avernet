@@ -40,9 +40,7 @@ export interface CommunityTopicDetailProps {
   getReplySummary?: (postId: string) => InteractionSummary | undefined;
   getReplyViewerSummary?: (postId: string) => InteractionSummary | undefined;
   replyLikePending?: (postId: string) => boolean;
-  replyFavoritePending?: (postId: string) => boolean;
   onLikeReply?: (postId: string) => void;
-  onFavoriteReply?: (postId: string) => void;
   onCloseTopic: () => Promise<boolean>;
   onEditTopic: () => void;
   onDeleteTopic: () => Promise<boolean>;
@@ -82,9 +80,7 @@ export function CommunityTopicDetail({
   getReplySummary,
   getReplyViewerSummary,
   replyLikePending,
-  replyFavoritePending,
   onLikeReply,
-  onFavoriteReply,
   onCloseTopic,
   onEditTopic,
   onDeleteTopic,
@@ -100,6 +96,7 @@ export function CommunityTopicDetail({
 }: CommunityTopicDetailProps) {
   const [expandedReplyIds, setExpandedReplyIds] = useState<Record<string, boolean>>({});
   const replyElementsRef = useRef(new Map<string, HTMLElement | null>());
+  const replyComposerRef = useRef<HTMLDivElement | null>(null);
 
   const replyOffset = (replyPage - 1) * replyPageSize;
   const floorGroups = useMemo(() => buildReplyGroups(replies, replyOffset + 1), [replies, replyOffset]);
@@ -109,6 +106,13 @@ export function CommunityTopicDetail({
     },
     [],
   );
+
+  const goToReplyComposer = useCallback(() => {
+    const composer = replyComposerRef.current?.querySelector('textarea');
+    if (!composer) return;
+    composer.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    composer.focus();
+  }, []);
 
   const locateTargetReply = useCallback((postId: string) => {
     const element = replyElementsRef.current.get(postId);
@@ -147,11 +151,13 @@ export function CommunityTopicDetail({
         replyPage={replyPage}
         replyPageCount={replyPageCount}
         replyLoading={replyLoading}
+        currentUserId={currentUserId}
         onBack={onBack}
         onCloseTopic={onCloseTopic}
         onEditTopic={onEditTopic}
         onDeleteTopic={onDeleteTopic}
         onGoToReplyPage={onGoToReplyPage}
+        onGoToReplyComposer={goToReplyComposer}
       />
       <main className="app-scrollbar min-h-0 flex-1 overflow-y-auto">
         <div className="flex w-full flex-col px-4 pb-6 sm:px-6 lg:px-10">
@@ -208,9 +214,7 @@ export function CommunityTopicDetail({
                   getReplyLikeSummary={getReplySummary}
                   getReplyViewerSummary={getReplyViewerSummary}
                   replyLikePending={isReplyLikePending}
-                  replyFavoritePending={replyFavoritePending}
                   onLike={onLikeReply}
-                  onFavoriteReply={onFavoriteReply}
                   onToggleHelpful={() => {
                     void onSetPostHelpful(reply.id, !reply.helpful);
                   }}
@@ -247,12 +251,14 @@ export function CommunityTopicDetail({
                 </div>
               )}
               {topic.status === 'open' && currentUserId && topic.topicType !== 'notice' ? (
-                <ReplyComposer
-                  topic={topic}
-                  submitLabel="回复主题"
-                  saving={replySaving}
-                  onSubmit={(payload) => onSubmitReply?.(payload) ?? Promise.resolve(false)}
-                />
+                <div ref={replyComposerRef}>
+                  <ReplyComposer
+                    topic={topic}
+                    submitLabel="回复主题"
+                    saving={replySaving}
+                    onSubmit={(payload) => onSubmitReply?.(payload) ?? Promise.resolve(false)}
+                  />
+                </div>
               ) : null}
             </>
           ) : null}

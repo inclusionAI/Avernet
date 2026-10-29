@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 import { PublishTopicModal } from '@/components/Community/PublishTopicModal';
 import '@testing-library/jest-dom';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 Element.prototype.hasPointerCapture ??= () => false;
@@ -29,6 +29,21 @@ describe('PublishTopicModal', () => {
     expect(group).toHaveTextContent('分享');
     expect(group).toHaveTextContent('投票');
     expect(group).toHaveTextContent('求助');
+  });
+
+  test('主题类型图标与主题列表一致，投票使用图表图标，分享使用发帖弹窗图标', () => {
+    renderEditor();
+    const group = screen.getByRole('group', { name: '主题类型' });
+    const expectedIcons: Record<string, string> = {
+      讨论: 'lucide-message-circle',
+      分享: 'lucide-share-2',
+      投票: 'lucide-chart-line',
+      求助: 'lucide-circle-question-mark',
+    };
+    for (const [label, iconClass] of Object.entries(expectedIcons)) {
+      const icon = within(group).getByRole('button', { name: label }).querySelector('svg');
+      expect(icon).toHaveClass(iconClass);
+    }
   });
 
   test('空标题和正文阻止提交并展示行内错误', async () => {

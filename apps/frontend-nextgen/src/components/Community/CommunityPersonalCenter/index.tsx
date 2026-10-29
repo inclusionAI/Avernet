@@ -1,3 +1,4 @@
+import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Pagination } from '@/components/ui/Pagination';
 import { Segmented } from '@/components/ui/Segmented';
@@ -44,7 +45,19 @@ export function CommunityPersonalCenter({
             <Button variant="ghost" size="icon" onClick={onBack} aria-label="返回">
               <ArrowLeft className="size-4" aria-hidden />
             </Button>
-            <h2 className="m-0 text-lg font-semibold text-foreground">我的</h2>
+            <div className="flex min-w-0 items-center gap-3">
+              <Avatar
+                name={center.identity?.displayName ?? center.ownerUserId}
+                src={center.identity?.avatarUrl}
+                size={40}
+              />
+              <div className="min-w-0">
+                <h2 className="m-0 text-lg font-semibold text-foreground">我的</h2>
+                <p className="m-0 mt-0.5 truncate text-xs text-muted-foreground">
+                  {center.identity?.displayName ?? center.ownerUserId}
+                </p>
+              </div>
+            </div>
           </header>
 
           <Segmented<PersonalCenterActivityType>

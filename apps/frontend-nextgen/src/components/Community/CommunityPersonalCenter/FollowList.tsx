@@ -5,6 +5,7 @@ import type { CommunityAuthor, CommunityTopic, PersonalCenterActivity } from '@/
 import { CommunityAuthorAvatar } from '../CommunityAuthorAvatar';
 import { TopicRow } from '../CommunityTopicList/TopicRow';
 import { communityService } from '@/services/community';
+import { resolveBotNames } from '@/services/collaborationSquare/collaborationSquareApiHelpers';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 export interface FollowListProps {
@@ -20,10 +21,17 @@ function followKey(item: PersonalCenterActivity): string {
   return `${item.target.targetType}:${item.target.id}`;
 }
 
-function followedAuthor(item: PersonalCenterActivity): CommunityAuthor {
+function followedAuthor(
+  item: PersonalCenterActivity,
+  botNameById: Record<string, string>,
+): CommunityAuthor {
   const isBot = item.target.targetType === 'BOT';
+  const botName = isBot ? botNameById[item.target.id] : '';
   const displayName =
-    item.followedContext?.displayName || item.bodyPreview.trim() || item.target.id;
+    botName ||
+    item.followedContext?.displayName ||
+    item.bodyPreview.trim() ||
+    item.target.id;
   return {
     type: isBot ? 'bot' : 'human',
     id: item.target.id,
@@ -34,16 +42,18 @@ function followedAuthor(item: PersonalCenterActivity): CommunityAuthor {
 
 function FollowIdentity({
   item,
+  botNameById,
   selected,
   onSelect,
   onUnfollow,
 }: {
   item: PersonalCenterActivity;
+  botNameById: Record<string, string>;
   selected: boolean;
   onSelect: (item: PersonalCenterActivity) => void;
   onUnfollow: (item: PersonalCenterActivity) => Promise<void>;
 }) {
-  const author = followedAuthor(item);
+  const author = followedAuthor(item, botNameById);
   return (
     <div
       role="button"
@@ -89,7 +99,9 @@ export function FollowList({
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [topics, setTopics] = useState<CommunityTopic[]>([]);
   const [topicsLoading, setTopicsLoading] = useState(false);
+  const [botNameById, setBotNameById] = useState<Record<string, string>>({});
   const topicsRequestRef = useRef(0);
+  const botNameRequestRef = useRef(0);
 
   const humanItems = useMemo(
     () => items.filter((item) => item.target.targetType === 'HUMAN'),
@@ -99,6 +111,7 @@ export function FollowList({
     () => items.filter((item) => item.target.targetType === 'BOT'),
     [items],
   );
+  const botIds = useMemo(() => [...new Set(botItems.map((item) => item.target.id))], [botItems]);
   const selectedItem = useMemo(
     () => items.find((item) => followKey(item) === selectedKey),
     [items, selectedKey],
@@ -107,6 +120,18 @@ export function FollowList({
   useEffect(() => {
     if (selectedKey && !selectedItem) setSelectedKey(null);
   }, [selectedItem, selectedKey]);
+
+  useEffect(() => {
+    if (!botIds.length) {
+      setBotNameById({});
+      return;
+    }
+    const requestId = ++botNameRequestRef.current;
+    void resolveBotNames(botIds).then((result) => {
+      if (requestId !== botNameRequestRef.current) return;
+      setBotNameById(result);
+    });
+  }, [botIds, botNameRequestRef]);
 
   useEffect(() => {
     if (!selectedItem) {
@@ -178,6 +203,7 @@ export function FollowList({
                 <FollowIdentity
                   key={followKey(item)}
                   item={item}
+                  botNameById={botNameById}
                   selected={followKey(item) === selectedKey}
                   onSelect={(next) => setSelectedKey(followKey(next))}
                   onUnfollow={onUnfollow}
@@ -196,6 +222,7 @@ export function FollowList({
                 <FollowIdentity
                   key={followKey(item)}
                   item={item}
+                  botNameById={botNameById}
                   selected={followKey(item) === selectedKey}
                   onSelect={(next) => setSelectedKey(followKey(next))}
                   onUnfollow={onUnfollow}
@@ -210,7 +237,7 @@ export function FollowList({
       {selectedItem ? (
         <section className="min-w-0 flex-1" aria-label="关注对象的帖子">
           <h3 className="mb-3 text-sm font-semibold text-foreground">
-            {followedAuthor(selectedItem).displayName} 的帖子
+            {followedAuthor(selectedItem, botNameById).displayName} 的帖子
           </h3>
           {topicsLoading ? (
             <div className="space-y-2">

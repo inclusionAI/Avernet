@@ -1,6 +1,6 @@
 import { Button } from '@/components/ui/Button';
 import type { CommunityReply, InteractionSummary } from '@/domain/community/types';
-import { Heart, MessageSquare, Star } from 'lucide-react';
+import { Heart, MessageSquare } from 'lucide-react';
 import { CommunityAuthorAvatar } from '../CommunityAuthorAvatar';
 import { formatDateTime, type ReplyElementRegistrar } from './model';
 import { cn } from '@/utils/cn';
@@ -19,13 +19,9 @@ interface ThreadReplyProps {
   authorFollowed?: (author: CommunityReply['author']) => boolean;
   canReply?: boolean;
   likeCount?: number;
-  favoriteCount?: number;
   liked?: boolean;
-  favorited?: boolean;
   likePending?: boolean;
-  favoritePending?: boolean;
   onLike?: (postId: string) => void;
-  onFavorite?: (postId: string) => void;
   onReply?: (target: { postId: string; authorName: string }) => void;
 }
 
@@ -43,13 +39,9 @@ export function ThreadReply({
   authorFollowed,
   canReply = false,
   likeCount = 0,
-  favoriteCount = 0,
   liked = false,
-  favorited = false,
   likePending = false,
-  favoritePending = false,
   onLike,
-  onFavorite,
   onReply,
 }: ThreadReplyProps) {
   return (
@@ -115,23 +107,6 @@ export function ThreadReply({
             >
               <Heart className={cn('size-3.5', liked && 'fill-current')} aria-hidden />
               {likeCount}
-            </Button>
-          ) : null}
-          {onFavorite ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={favoritePending}
-              aria-label="收藏回复"
-              aria-pressed={favorited}
-              onClick={() => onFavorite(reply.id)}
-              className={cn(
-                'h-auto min-h-0 gap-1 px-0 text-xs font-normal transition-colors disabled:cursor-not-allowed disabled:opacity-40',
-                favorited ? 'text-destructive' : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              <Star className={cn('size-3.5', favorited && 'fill-current')} aria-hidden />
-              {favoriteCount}
             </Button>
           ) : null}
         </div>

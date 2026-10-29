@@ -8,6 +8,8 @@ import type {
   PersonalCenterTopicContext,
 } from '@/domain/community/types';
 import { TopicRow } from '../CommunityTopicList/TopicRow';
+import { resolveBotNames } from '@/services/collaborationSquare/collaborationSquareApiHelpers';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { actorLabel } from './model';
 
 export interface ActivityListProps {
@@ -18,14 +20,20 @@ export interface ActivityListProps {
   onOpenTopic: (topicId: string) => void;
 }
 
-function fallbackTopicContext(item: PersonalCenterActivity): PersonalCenterTopicContext {
+function fallbackTopicContext(
+  item: PersonalCenterActivity,
+  botNames: BotNameById,
+): PersonalCenterTopicContext {
   return {
     title: item.bodyPreview.trim() || '社区主题',
     bodyPreview: '',
     topicType: 'discussion',
     status: 'open',
     author: item.actor,
-    authorDisplayName: `${actorLabel(item.actor.actorType)} · ${item.actor.id}`,
+    authorDisplayName:
+      item.actor.actorType === 'BOT' && botNames[item.actor.id]
+        ? `${actorLabel(item.actor.actorType)} · ${botNames[item.actor.id]}`
+        : `${actorLabel(item.actor.actorType)} · ${item.actor.id}`,
     replyCount: 0,
     likeCount: 0,
     viewCount: 0,
@@ -35,8 +43,11 @@ function fallbackTopicContext(item: PersonalCenterActivity): PersonalCenterTopic
   };
 }
 
-function activityTopic(item: PersonalCenterActivity): CommunityTopic | null {
-  const context = item.topicContext ?? fallbackTopicContext(item);
+function activityTopic(
+  item: PersonalCenterActivity,
+  botNames: BotNameById,
+): CommunityTopic | null {
+  const context = item.topicContext ?? fallbackTopicContext(item, botNames);
   return personalCenterActivityToTopic({ ...item, topicContext: context });
 }
 
@@ -86,7 +97,70 @@ function groupReplyActivities(items: PersonalCenterActivity[]): PersonalCenterAc
   return [...groups.values()];
 }
 
+type BotNameById = Record<string, string>;
+
+function activityBotIds(items: PersonalCenterActivity[]): string[] {
+  const ids = new Set<string>();
+  items.forEach((item) => {
+    if (item.actor.actorType === 'BOT') ids.add(item.actor.id);
+    if (item.topicContext?.author.actorType === 'BOT') ids.add(item.topicContext.author.id);
+    if (item.repliedToPost?.author.actorType === 'BOT') ids.add(item.repliedToPost.author.id);
+  });
+  return [...ids];
+}
+
+function resolvedBotName(existing: string, botId: string, names: BotNameById): string {
+  return names[botId] || existing || botId;
+}
+
+function withResolvedBotNames(
+  item: PersonalCenterActivity,
+  names: BotNameById,
+): PersonalCenterActivity {
+  const topicContext = item.topicContext;
+  const nextTopicContext =
+    topicContext?.author.actorType === 'BOT'
+      ? {
+          ...topicContext,
+          authorDisplayName: resolvedBotName(
+            topicContext.authorDisplayName,
+            topicContext.author.id,
+            names,
+          ),
+        }
+      : topicContext;
+  const repliedToPost = item.repliedToPost;
+  const nextRepliedToPost =
+    repliedToPost?.author.actorType === 'BOT'
+      ? {
+          ...repliedToPost,
+          authorDisplayName: resolvedBotName(
+            repliedToPost.authorDisplayName,
+            repliedToPost.author.id,
+            names,
+          ),
+        }
+      : repliedToPost;
+  return { ...item, topicContext: nextTopicContext, repliedToPost: nextRepliedToPost };
+}
+
 export function ActivityList({ items, loading, error, onRetry, onOpenTopic }: ActivityListProps) {
+  const [botNameById, setBotNameById] = useState<BotNameById>({});
+  const botNameRequestRef = useRef(0);
+  const botIds = useMemo(() => activityBotIds(items), [items]);
+
+  useEffect(() => {
+    if (!botIds.length) {
+      setBotNameById({});
+      return;
+    }
+    const requestId = ++botNameRequestRef.current;
+    void resolveBotNames(botIds).then((result) => {
+      if (requestId !== botNameRequestRef.current) return;
+      setBotNameById(result);
+    });
+  }, [botIds, botNameRequestRef]);
+
   if (loading) {
     return (
       <div className="overflow-hidden rounded-lg border border-border bg-card" aria-label="个人中心列表加载中">
@@ -125,7 +199,7 @@ export function ActivityList({ items, loading, error, onRetry, onOpenTopic }: Ac
         {groupReplyActivities(items).map((group, index) => (
           <ReplyActivityGroup
             key={group[0]?.topicId ?? `reply-group-${index}`}
-            items={group}
+            items={group.map((item) => withResolvedBotNames(item, botNameById))}
             onOpenTopic={onOpenTopic}
           />
         ))}
@@ -136,7 +210,7 @@ export function ActivityList({ items, loading, error, onRetry, onOpenTopic }: Ac
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-card" aria-label="个人中心内容列表">
       {items.map((item) => {
-        const topic = activityTopic(item);
+        const topic = activityTopic(withResolvedBotNames(item, botNameById), botNameById);
         if (!topic) return null;
         return (
           <TopicRow
