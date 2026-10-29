@@ -189,6 +189,21 @@ class TestRunOptionCaps:
             SubmitRunDTO(**_body(
                 options=self._options(bot_chat_timeout_seconds=3600.5)))
 
+    def test_resolve_caps_and_wire_caps_share_one_source(self):
+        # The stale-metadata re-clamps must equal the submit bounds:
+        # they now import the same RunOptions constants (the 64/256
+        # divergence class this replaces could silently shrink valid
+        # requests between the two layers).
+        from agentclaw.community.core.agentswarm.domain.models import (
+            WIRE_MAX_TOTAL_AGENTS_CAP as A, WIRE_MAX_TURNS_CAP as T,
+            WIRE_BOT_CHAT_TIMEOUT_CAP as C,
+        )
+        dto = SubmitRunDTO(**_body(options=self._options(
+            max_turns=T, max_total_agents=A, bot_chat_timeout_seconds=C)))
+        assert dto.options.max_turns == T
+        assert dto.options.max_total_agents == A
+        assert dto.options.bot_chat_timeout_seconds == C
+
     def test_unknown_option_field_rejected(self):
         with pytest.raises(ValidationError) as exc:
             SubmitRunDTO(**_body(options=self._options(bogus=1)))
