@@ -2372,33 +2372,3 @@ class TestFileTransferFacade:
         assert exc.operation == "pull_file"
         assert exc.original_error.code == ErrorCode.PLATFORM_ERROR
         assert "network timeout" in exc.original_error.message
-
-
-# ==================== mint_proxypass_token_for_target ====================
-
-
-class TestMintProxypassTokenForTarget:
-    """池 target（{TYPE}_{device}@{tpl}:{port}）→ 现签 proxypass token：
-    交互答复派发等无消息路径在 RPC 前的铸造入口（评审 P2 场景 2）。"""
-
-    @pytest.mark.asyncio
-    async def test_mints_via_resolve_invoke_http_info(self, facade):
-        from types import SimpleNamespace
-
-        facade.resolve_invoke_http_info = AsyncMock(
-            return_value=SimpleNamespace(token="minted-token")
-        )
-        tok = await facade.mint_proxypass_token_for_target(
-            "ARCA_ARCA-SANDBOX-x@0:20003"
-        )
-        assert tok == "minted-token"
-        args = facade.resolve_invoke_http_info.await_args
-        assert args.args[0] == "ARCA-SANDBOX-x@0"
-        assert args.args[1] == 20003
-
-    @pytest.mark.asyncio
-    async def test_malformed_target_raises(self, facade):
-        import pytest as _pytest
-
-        with _pytest.raises(ValueError):
-            await facade.mint_proxypass_token_for_target("not-a-target")

@@ -69,7 +69,6 @@ class AsyncChatClientPool:
         retry_base_backoff: float = 0.5,
         system_config_service: SystemConfigManageService | None = None,
         interaction_service: BotInteractionService | None = None,
-        proxypass_token_minter: Callable[[str, str], Awaitable[str]] | None = None,
     ) -> None:
         """初始化连接池
 
@@ -82,8 +81,6 @@ class AsyncChatClientPool:
             retry_base_backoff: 重连退避基数（秒）
             system_config_service: 系统配置服务，用于创建连接时读取运行开关
             interaction_service: 交互持久化与应答服务；仅在交互开关启用时注入连接
-            proxypass_token_minter: P2 无消息路径（交互答复派发）的按需现签
-                入口——(sandbox_key, uri) → 新 token；缺省 None 不铸造
         """
         self._max_size = max_size
         self._max_conns_per_sandbox = max_conns_per_sandbox
@@ -93,7 +90,6 @@ class AsyncChatClientPool:
         self._retry_base_backoff = retry_base_backoff
         self._system_config_service = system_config_service
         self._interaction_service = interaction_service
-        self._proxypass_token_minter = proxypass_token_minter
         # 敏感日志豁免片段缓存：(loaded_at, keys)；-inf 表示未加载
         self._bypass_keys_cache: tuple[float, tuple[str, ...]] = (
             float("-inf"),
@@ -119,6 +115,7 @@ class AsyncChatClientPool:
         uri: str,
         headers: dict[str, str] | None = None,
         session_key: str | None = None,
+        token_minter: Callable[[], Awaitable[str]] | None = None,
     ) -> AsyncChatClient:
         """获取该 sandbox_id 对应的连接（Least-Sessions 选择，On-demand 扩容）
 
@@ -243,11 +240,7 @@ class AsyncChatClientPool:
                     self._load_sensitive_bypass_keys,
                     self._system_config_service,
                 ),
-                proxypass_token_minter=(
-                    partial(self._proxypass_token_minter, sandbox_id, uri)
-                    if self._proxypass_token_minter is not None
-                    else None
-                ),
+                proxypass_token_minter=token_minter,
             )
             await new_client.connect()
 

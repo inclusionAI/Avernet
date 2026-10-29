@@ -13,6 +13,7 @@ Covers:
 
 import uuid
 from datetime import UTC, datetime
+from unittest.mock import ANY as _MOCK_ANY
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -1949,6 +1950,7 @@ class TestSendMessageExtended:
                 conn_info.target,
                 conn_info.ws_url,
                 {"x-proxypass-token": conn_info.token},
+                token_minter=_MOCK_ANY,
             )
 
 

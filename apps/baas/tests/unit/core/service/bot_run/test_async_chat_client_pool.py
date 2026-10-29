@@ -1063,23 +1063,34 @@ class TestOutboundAuthRefresh:
         await pool.close_all()
 
     @pytest.mark.asyncio
-    async def test_new_connection_receives_minter_closure(self, mock_chat_client_class):
-        """池把 per-sandbox 现签闭包注入新连接——client 侧的交互派发
-        刷新依赖它（评审 P2 场景 2），闭包须携带 sandbox+uri。"""
+    async def test_get_passes_caller_minter_to_new_connection(
+        self, mock_chat_client_class
+    ):
+        """per-get 闭包随建连透传（评审 P2：绑定真实签发上下文，池不做
+        key 解析）；复用不覆盖既有连接的闭包（建连上下文才是正确的铸造源）。
+        """
         from secbaas.community.core.service.bot_run._async_chat_client_pool import (
             AsyncChatClientPool,
         )
 
-        async def fake_minter(sandbox: str, uri: str) -> str:
-            return f"minted-for-{sandbox}"
-
-        pool = AsyncChatClientPool(
-            max_conns_per_sandbox=1, proxypass_token_minter=fake_minter
-        )
+        pool = AsyncChatClientPool(max_conns_per_sandbox=1)
         mock_cls, mock_client = mock_chat_client_class
-        target = "ARCA_ARCA-SANDBOX-x@0:20003"
-        await pool.get(target, "ws://h/ws", {})
-        kwargs = mock_cls.call_args.kwargs
-        closure = kwargs["proxypass_token_minter"]
-        assert await closure() == f"minted-for-{target}"
+
+        async def minter_a() -> str:
+            return "a"
+
+        async def minter_b() -> str:
+            return "b"
+
+        await pool.get(
+            "sbx", "ws://h/ws", {"x-proxypass-token": "t"}, token_minter=minter_a
+        )
+        kwargs1 = mock_cls.call_args.kwargs
+        assert kwargs1["proxypass_token_minter"] is minter_a
+
+        await pool.get(
+            "sbx", "ws://h/ws", {"x-proxypass-token": "t"}, token_minter=minter_b
+        )  # 复用：不建新连接
+        assert mock_cls.call_count == 1, "复用路径不得重建连接"
+        assert mock_client.proxypass_token_minter is not None
         await pool.close_all()

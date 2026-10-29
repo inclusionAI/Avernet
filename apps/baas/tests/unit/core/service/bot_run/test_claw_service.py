@@ -866,3 +866,66 @@ class TestMaterializeSession:
                 binding_info=arca_binding,
                 user_id="u-1",
             )
+
+
+# ==================== 后台答复续签闭包（评审 P2：真实签发上下文） ====================
+
+
+class TestTokenMinterForSandbox:
+    """池 key 不可逆（Claw 用裸设备 id）——续签必须绑定服务自己的
+    签发入口（_get_path_target→generate_proxy_token），不作 key 解析。
+    延迟审批答复派发依赖该闭包，token 过期后回复仍可成功。"""
+
+    @pytest.mark.asyncio
+    async def test_send_message_passes_real_minter_to_pool(
+        self, mock_pool, arca_binding
+    ):
+        """真链 wiring：ClawBotService.send_message → pool.get 携带
+        _token_minter_for 闭包——闭包经真实 secret_store 签发可续期。"""
+        from unittest.mock import AsyncMock as _AM
+
+        stub_pool = mock_pool
+        fake_client = MagicMock()
+        fake_client.send_message = _AM(return_value=("ok", []))
+        stub_pool.get = _AM(return_value=fake_client)
+        svc = ClawBotService(
+            config=_make_config(),
+            client_pool=stub_pool,
+            secret_store=_make_secret_store(),
+            engine_adapter_registry=BotEngineAdapterRegistry({}),
+        )
+
+        await svc.send_message(
+            session_id="sess-1",
+            message="hi",
+            binding_info=arca_binding,
+            timeout=5.0,
+        )
+        kwargs = stub_pool.get.await_args.kwargs
+        minter = kwargs["token_minter"]
+        assert minter is not None, "Claw 路径必须携带续签闭包"
+        token = await minter()
+        assert isinstance(token, str) and token, (
+            "闭包应经真实 secret_store 签出可用 token"
+        )
+        # 同一 sandbox 二次续签返回有效值（模拟答复延迟到达再派发）
+        assert isinstance(await minter(), str)
+
+    @pytest.mark.asyncio
+    async def test_minter_uses_secret_store_not_key_parsing(self, mock_pool):
+        """断言闭包内不出现设备/端口形态解析：签发 target 来自
+        _get_path_target（同一入口），secret_store 被按 target 调用。"""
+        svc = ClawBotService(
+            config=_make_config(),
+            client_pool=mock_pool,
+            secret_store=MagicMock(),
+            engine_adapter_registry=BotEngineAdapterRegistry({}),
+        )
+        svc._secret_store.generate_proxy_token.return_value = "re-minted"
+        minter = svc._token_minter_for("ARCA-SANDBOX-x@0")
+        target_used = svc._secret_store.generate_proxy_token
+        tok = await minter()
+        assert tok == "re-minted"
+        assert target_used.call_args.kwargs["target"] == svc._get_path_target(
+            "ARCA-SANDBOX-x@0"
+        )

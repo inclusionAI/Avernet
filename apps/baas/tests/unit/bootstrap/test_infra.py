@@ -63,7 +63,6 @@ class TestInfraContainerStandalone:
         container = InfraContainer()
         container.system_config_repo.override(MagicMock())
         container.bot_run_interaction_repository.override(MagicMock())
-        container.pool_proxypass_token_minter.override(MagicMock())
         pool = container.chat_client_pool()
         assert isinstance(pool, AsyncChatClientPool)
 
@@ -72,7 +71,6 @@ class TestInfraContainerStandalone:
         container = InfraContainer()
         container.system_config_repo.override(MagicMock())
         container.bot_run_interaction_repository.override(MagicMock())
-        container.pool_proxypass_token_minter.override(MagicMock())
         pool1 = container.chat_client_pool()
         pool2 = container.chat_client_pool()
         assert pool1 is pool2
@@ -137,7 +135,6 @@ class TestInfraContainerStandalone:
         container.device_binding_repo.override(mock_repo)
         container.system_config_repo.override(mock_repo)
         container.bot_run_interaction_repository.override(mock_repo)
-        container.pool_proxypass_token_minter.override(mock_repo)
 
         store = container.chat_client_pool()
         assert isinstance(store, AsyncChatClientPool)
