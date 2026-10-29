@@ -314,7 +314,26 @@ class BotA2aClient:
         # E1 错误二分：非 SSE 响应 = JSON-RPC 错误体（先不会有流）
         ctype = resp.headers.get("content-type", "")
         if resp.status_code != 200 or "text/event-stream" not in ctype:
-            raw = (await resp.aread()).decode(errors="replace")
+            try:
+                raw = (await resp.aread()).decode(errors="replace")
+            except Exception as e:
+                # 错误头已到手，但错误体传输仍可能中断（连接被掐/读超时）。
+                # 读挂不得炸穿 chat_send——那会绕过 ok 契约并把未登记进
+                # _runs 的临时 client 泄漏成孤儿（close() 兜不住它）。
+                # 状态码来自已到手的响应头，传输异常文本进 message。
+                try:
+                    await resp.aclose()
+                except Exception:
+                    pass
+                await client.aclose()
+                return {
+                    "ok": False,
+                    "error": {
+                        "code": f"HTTP_{resp.status_code}",
+                        "message": str(e)[:200],
+                        "retryable": False,
+                    },
+                }
             try:
                 parsed: Any = json.loads(raw)
             except Exception:

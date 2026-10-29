@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import socket
 import threading
 import time
 from typing import Any
@@ -462,6 +463,117 @@ def test_bare_string_error_body_surfaces_raw_not_crash():
     assert out["ok"] is False
     assert out["error"]["code"] == "HTTP_502", "解析不出对象时回退真实状态码"
     assert "upstream refused" in out["error"]["message"], "原始错误不得被盖住"
+
+
+def test_error_body_read_failure_returns_structured_and_closes():
+    """P2 回归钉：错误响应头已到手（502），但错误体传输中断。
+
+    读体不得炸出 chat_send（上一版 aread 曾被移出 try）——必须结构化
+    返回 HTTP_502 + 传输异常文本进 message；读挂的临时 http client
+    未登记进 _runs、close() 兜不住它，必须就地关闭。
+    """
+    from secbaas.community.core.service.bot_run._bot_a2a_client import (
+        BotA2aClient,
+    )
+
+    class _BrokenBodyServer:
+        """TCP 裸服务器：GET card 正常 200；POST /rpc 只回 502 响应头
+        （声明 Content-Length: 100）后立刻关连接——错误体永远到不了。"""
+
+        def __init__(self) -> None:
+            self._sock = socket.socket()
+            self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self._sock.bind(("127.0.0.1", 0))
+            self._sock.listen(8)
+            self._thread = threading.Thread(target=self._serve, daemon=True)
+            self._thread.start()
+
+        def _serve(self) -> None:
+            while True:
+                try:
+                    conn, _ = self._sock.accept()
+                except OSError:
+                    return
+                with conn:
+                    try:
+                        head = conn.recv(65536)
+                    except OSError:
+                        continue
+                    if head.startswith(b"GET"):
+                        body = json.dumps(
+                            {
+                                "supportedInterfaces": [
+                                    {
+                                        "protocolBinding": "JSONRPC",
+                                        "protocolVersion": "1.0",
+                                    }
+                                ]
+                            }
+                        ).encode()
+                        conn.sendall(
+                            b"HTTP/1.1 200 OK\r\n"
+                            b"Content-Type: application/json\r\n"
+                            b"Content-Length: "
+                            + str(len(body)).encode()
+                            + b"\r\n\r\n"
+                            + body
+                        )
+                    else:
+                        conn.sendall(
+                            b"HTTP/1.1 502 Bad Gateway\r\n"
+                            b"Content-Type: application/json\r\n"
+                            b"Content-Length: 100\r\n\r\n"
+                        )
+                        conn.close()  # 体永不到达 → aread 炸
+
+        def stop(self) -> None:
+            self._sock.close()
+
+        @property
+        def base(self) -> str:
+            return f"http://127.0.0.1:{self._sock.getsockname()[1]}"
+
+    srv = _BrokenBodyServer()
+    # httpx AsyncClient.__aexit__ 直接关 transport、不经 aclose()——connect
+    # 阶段的 with 块不会计入。关闭断言只针对 chat_send 阶段创建的临时
+    # client（read 失败的孤儿正是它——未登记进 _runs，close() 兜不住）。
+    made: list[dict[str, bool]] = []
+    orig_http = BotA2aClient._http
+
+    def counting_http(self, *, timeout=None):
+        created = orig_http.__get__(self, BotA2aClient)(timeout=timeout)
+        entry: dict[str, bool] = {"closed": False}
+        made.append(entry)
+        real_aclose = created.aclose
+
+        async def counting_aclose():
+            entry["closed"] = True
+            await real_aclose()
+
+        created.aclose = counting_aclose
+        return created
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(BotA2aClient, "_http", counting_http)
+
+    async def scenario():
+        client = await _connect_async(srv.base)
+        pre = len(made)
+        out = await client.chat_send(session_key="s", message="hi")
+        chat_phase = made[pre:]  # chat_send 创建的全部临时 client
+        await client.close()
+        return out, chat_phase
+
+    try:
+        out, chat_phase = _run(scenario())
+    finally:
+        srv.stop()
+        monkeypatch.undo()
+    assert out["ok"] is False
+    assert out["error"]["code"] == "HTTP_502", "状态码来自已到手的响应头"
+    assert out["error"]["message"], "读体失败的传输异常文本不得被吞成空"
+    assert chat_phase, "chat_send 必须经由 _http 建临时 client"
+    assert all(e["closed"] for e in chat_phase), "读挂的临时 client 必须就地关闭"
 
 
 def test_string_error_field_body_surfaces_raw_not_crash():
