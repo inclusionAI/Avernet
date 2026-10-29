@@ -274,3 +274,94 @@ def test_missing_auxiliary_table_is_unavailable_not_historical_absence(observati
         service.configs.get(bot_id="x", entity_id="y", env="dev", config_key="z")
         is None
     )
+
+
+@pytest.mark.parametrize("disabled_count", [1, 1000, 10000])
+def test_disabled_history_does_not_amplify_capture_or_read_queries(
+    observation, disabled_count
+):
+    from sqlalchemy import event, text
+
+    db, service, _ = observation
+    with db.orm_session() as session:
+        session.execute(
+            BotKnowledgeBindingModel.__table__.insert(),
+            [
+                dict(
+                    bot_pk=1,
+                    space_id=1,
+                    env="dev",
+                    kb_id=f"disabled-{index}",
+                    enabled=False,
+                    revision=1,
+                    updated_by="owner",
+                )
+                for index in range(disabled_count)
+            ],
+        )
+    engine = db.factory.kw["bind"]
+    statements = []
+
+    def record_sql(conn, cursor, statement, parameters, context, executemany):
+        statements.append((statement, parameters))
+
+    event.listen(engine, "before_cursor_execute", record_sql)
+    try:
+        assert service.record_build_selection(publication_id=101)
+        assert len(statements) == 6  # TEAM owner: five selects, one independent upsert.
+        selection = [
+            (sql, args) for sql, args in statements if "ac_bot_knowledge_binding" in sql
+        ]
+        assert len(selection) == 1
+        assert "LIMIT" in selection[0][0] and 101 in selection[0][1]
+        statements.clear()
+        assert read(observation)["kb_ids"] == ["kb"]
+        assert len(statements) == 5
+        assert all(sql.lstrip().upper().startswith("SELECT") for sql, _ in statements)
+    finally:
+        event.remove(engine, "before_cursor_execute", record_sql)
+    with db.orm_session() as session:
+        plan = session.execute(
+            text(
+                "EXPLAIN QUERY PLAN SELECT kb_id FROM ac_bot_knowledge_binding "
+                "WHERE avernet_tenant='teamclaw' AND env='dev' AND bot_pk=1 "
+                "AND space_id=1 AND enabled=1 ORDER BY kb_id LIMIT 101"
+            )
+        ).all()
+    assert any("idx_bk_enabled" in str(row) for row in plan)
+
+
+@pytest.mark.parametrize("enabled_count", [100, 101])
+def test_capture_enabled_limit_has_no_partial_write(observation, enabled_count):
+    db, service, _ = observation
+    with db.orm_session() as session:
+        session.execute(
+            BotKnowledgeBindingModel.__table__.insert(),
+            [
+                dict(
+                    bot_pk=1,
+                    space_id=1,
+                    env="dev",
+                    kb_id=f"enabled-{index}",
+                    enabled=True,
+                    revision=1,
+                    updated_by="owner",
+                )
+                for index in range(enabled_count - 1)
+            ],
+        )
+    assert service.record_build_selection(publication_id=101) is (enabled_count == 100)
+    result = read(observation)
+    if enabled_count == 100:
+        assert len(result["kb_ids"]) == 100
+    else:
+        assert result["observation_status"] == "unrecorded"
+
+
+def test_personal_bot_does_not_acquire_publication_observations(observation):
+    db, service, _ = observation
+    with db.orm_session() as session:
+        session.query(BotModel).filter_by(id=1).update({"bot_type": "personal"})
+    assert not service.record_build_selection(publication_id=101)
+    with pytest.raises(KnowledgeError, match="SERVICE_BOT_REQUIRED"):
+        read(observation)
