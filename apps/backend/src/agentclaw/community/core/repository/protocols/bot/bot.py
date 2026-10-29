@@ -423,6 +423,17 @@ class BotRepository(Protocol):
         ...
 
     @abstractmethod
+    def is_soft_deleted(self, bot_id: str, entity_id: str) -> bool:
+        """Whether a soft-deleted Bot already exists for this bot and entity.
+
+        Every ordinary lookup filters ``is_delete == 0``, so a caller that
+        must tell "already deleted" apart from "never landed" cannot use
+        them: both answer ``None``. This is that distinction, scoped to the
+        current env like every other query on the table.
+        """
+        ...
+
+    @abstractmethod
     def exists_by_bot_name(self, bot_name: str) -> bool:
         """Check if a bot with specific bot_name exists globally."""
         ...

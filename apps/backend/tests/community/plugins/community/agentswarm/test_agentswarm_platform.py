@@ -73,11 +73,15 @@ class _Apply:
 
 
 class _Repo:
-    def __init__(self, bot=None):
+    def __init__(self, bot=None, soft_deleted=False):
         self.bot = bot
+        self.soft_deleted = soft_deleted
 
     def get_by_id_and_entity(self, bot_id, entity_id):
         return self.bot
+
+    def is_soft_deleted(self, bot_id, entity_id):
+        return self.soft_deleted
 
 
 class _BotSvc:
@@ -661,6 +665,18 @@ class TestDelete:
         platform = _mk(repo=repo, bot_svc=bot_svc)
         assert platform.delete_bot("b1", owner_id="owner-1") is True
         assert bot_svc.deleted == [("b1", "owner-1")]
+
+    def test_already_soft_deleted_bot_is_not_discarded_again(self):
+        # The live lookups filter is_delete=0, so an already-deleted bot reads
+        # like a pending one. Re-discarding it repeats the managed-files purge
+        # on every teardown; a deleted bot has nothing left to undo.
+        seam = _Seam()
+        bot_svc = _BotSvc()
+        repo = _Repo(bot=None, soft_deleted=True)
+        platform = _mk(seam=seam, bot_svc=bot_svc, repo=repo)
+        assert platform.delete_bot("b1", owner_id="owner-1") is True
+        assert seam.discards == []
+        assert bot_svc.deleted == []
 
     def test_repository_failure_is_swallowed_to_false(self):
         class _Boom:
