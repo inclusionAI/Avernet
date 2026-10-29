@@ -1,0 +1,22 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/inventory.py
+  h_12dd6d063428b2 78-92
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_caller_execution_run.py
+  h_12dd6d063428b2 20,137-139
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_draft_group_run.py
+  h_12dd6d063428b2 31,223-225
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_edge_friend_mutations_run.py
+  h_12dd6d063428b2 31,252-254
+apps/bcs/scripts/e2e-runner/tests/test_local_edge_friend_mutations_gating.py
+  h_12dd6d063428b2 12,62,66-76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "df96ebbe3aac698711aabb6ec6125be2c8133612",
+  "prompts": {},
+  "humans": {
+    "h_12dd6d063428b2": {
+      "author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
