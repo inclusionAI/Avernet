@@ -170,6 +170,46 @@ class TestBotChatTimeoutOption:
         opts = RunOptions(bot_chat_timeout_seconds=99999.0)
         assert opts.resolved_bot_chat_timeout(1800.0) == 3600.0
 
+    def test_run_task_passes_the_resolved_timeout_to_the_platform(self):
+        """The route the option actually serves: run_task forwards the
+        resolved bot_chat_timeout_seconds into platform.chat's
+        timeout_seconds kwarg (and the call omits it when unset)."""
+        import asyncio as _aio
+        import json as _json
+        from agentclaw.community.plugins.community.agentswarm import (
+            bot_subagent as bs,
+        )
+
+        captured: list[dict] = []
+
+        class _RecordingPlatform:
+            def chat(self, bot_id, message, owner_id="", cancel_event=None,
+                     timeout_seconds=None):
+                captured.append({"bot_id": bot_id, "timeout": timeout_seconds})
+                return _json.dumps({"text": "ok"})
+
+        run = mk_run([])
+        run.owner_id = "owner-1"
+        run.run_options = RunOptions(bot_chat_timeout_seconds=2700.0)
+        sub = bs.AvernetSubagent(
+            mk_catalog_entry(), run, _RecordingPlatform(),
+            AgentId("a-1"), attempt=1)
+        sub._bot_id = "bot-run-1"
+
+        result = _aio.run(sub.run_task(TaskEnvelope(
+            name="coder_rust", objective="obj",
+            output_schema={}, boundaries="", parent_goal="")))
+        assert captured[0]["timeout"] == 2700.0
+        assert captured[0]["bot_id"] == "bot-run-1"
+        assert result.output == {"text": "ok"}
+
+        run.run_options = RunOptions()
+        captured.clear()
+        _aio.run(sub.run_task(TaskEnvelope(
+            name="coder_rust", objective="obj",
+            output_schema={}, boundaries="", parent_goal="")))
+        assert captured[0]["timeout"] is None
+
     def test_subagent_passes_timeout_only_when_requested(self):
         import functools
         import inspect
