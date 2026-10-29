@@ -553,6 +553,9 @@ class PublishFlowService(
             error_msg = "Build artifact path does not exist, please run the build first"
             logger.error(f"[PublishFlowService.execute_verify_release_phase] publish_id={publish_id}, {error_msg}")
             ext = self._get_latest_ext(publish_id)
+            PublishExtState.require_knowledge_snapshot(
+                (publish_record.ext or {}).get("knowledge_selection_snapshot"), ext,
+            )
             expected_ext = copy.deepcopy(ext)
             self._clear_retry_flag(ext)
             ext["error_message"] = error_msg
@@ -583,6 +586,9 @@ class PublishFlowService(
                 raise PublishFlowServiceError(f"Bot does not exist: {bot_id}")
 
             ext = self._get_latest_ext(publish_id)
+            PublishExtState.require_knowledge_snapshot(
+                (publish_record.ext or {}).get("knowledge_selection_snapshot"), ext,
+            )
 
             # ========== Determine whether the verify environment already has a Bot ==========
             verify_binding_id, bot_uuid = self._resolve_verify_binding(
@@ -613,6 +619,9 @@ class PublishFlowService(
 
             # Publish failed; update the status and error info
             ext = self._get_latest_ext(publish_id)
+            PublishExtState.require_knowledge_snapshot(
+                (publish_record.ext or {}).get("knowledge_selection_snapshot"), ext,
+            )
             expected_ext = copy.deepcopy(ext)
             self._clear_retry_flag(ext)
             ext["error_message"] = str(e)
@@ -762,6 +771,7 @@ class PublishFlowService(
         source_status: PublishStatus,
         ext: dict,
         expected_ext: dict | None,
+        observed_workflow_id: int | None = None,
     ) -> None:
         self._ext_state.update_status(
             publish_id=publish_id,
@@ -769,6 +779,8 @@ class PublishFlowService(
             source_status=source_status,
             ext=ext,
             expected_ext=expected_ext,
+            **({"observed_workflow_id": observed_workflow_id}
+               if observed_workflow_id is not None else {}),
         )
 
     # ── public accessors for the durable task handlers ───────────────────────

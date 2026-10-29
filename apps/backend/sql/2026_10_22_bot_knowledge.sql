@@ -1,5 +1,5 @@
 -- REVIEW ONLY: NOT executed. OceanBase MySQL-mode deployment DDL.
--- This file creates only current selection; no ac_space changes.
+-- This file creates working and production selection; no ac_space changes.
 -- Publication-query indexes are deferred separately in
 -- 2026_10_22_bot_knowledge_publish_indexes.sql. Do not execute them with this file.
 CREATE TABLE `ac_bot_knowledge_binding` (
@@ -12,6 +12,7 @@ CREATE TABLE `ac_bot_knowledge_binding` (
   `space_id` bigint(20) NOT NULL COMMENT '绑定所属空间ID',
   `kb_id` varchar(128) COLLATE utf8mb4_bin NOT NULL COMMENT '知识库ID',
   `enabled` boolean NOT NULL DEFAULT FALSE COMMENT '是否启用该知识库',
+  `online_enabled` boolean NOT NULL DEFAULT FALSE COMMENT '服务Bot生产态是否启用该知识库',
   `revision` bigint(20) NOT NULL COMMENT '当前绑定版本号，用于并发修改校验',
   `updated_by` varchar(128) COLLATE utf8mb4_bin NOT NULL COMMENT '最后修改人标识',
   PRIMARY KEY(`id`),

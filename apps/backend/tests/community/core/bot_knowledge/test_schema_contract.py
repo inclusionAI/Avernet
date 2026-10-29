@@ -26,6 +26,7 @@ def test_binding_model_matches_reviewed_columns_types_and_indexes():
         "space_id",
         "kb_id",
         "enabled",
+        "online_enabled",
         "revision",
         "updated_by",
     }
@@ -36,6 +37,9 @@ def test_binding_model_matches_reviewed_columns_types_and_indexes():
     assert table.c.gmt_create.onupdate is None
     assert table.c.gmt_modified.onupdate is not None
     assert isinstance(table.c.revision.type, BigInteger)
+    assert table.c.online_enabled.nullable is False
+    assert table.c.online_enabled.default.arg is False
+    assert table.c.online_enabled.server_default is not None
     assert all(column.comment for column in table.columns)
     assert table.comment == "Bot知识库当前启用配置"
     indexes = {
@@ -95,6 +99,7 @@ def test_database_defaults_populate_times_and_disabled_state(knowledge):
     with db.orm_session() as session:
         row = session.query(Binding).one()
         assert row.enabled is False
+        assert row.online_enabled is False
         assert isinstance(row.gmt_create, datetime)
         assert isinstance(row.gmt_modified, datetime)
         assert row.gmt_create == row.gmt_modified
@@ -135,3 +140,34 @@ def test_selection_update_preserves_creation_time_and_refreshes_modified(knowled
         row = session.query(Binding).one()
         assert row.gmt_create == old_time
         assert row.gmt_modified > old_time
+
+
+def test_existing_table_upgrade_adds_disabled_production_without_copying_draft():
+    ddl = (SQL_ROOT / "2026_10_26_bot_knowledge_online_selection.sql").read_text()
+    assert "ADD COLUMN `online_enabled` boolean NOT NULL DEFAULT FALSE" in ddl
+    assert "UPDATE " not in ddl
+    assert "DROP " not in ddl
+
+
+def test_upgrade_default_does_not_treat_existing_draft_as_published():
+    from sqlalchemy import create_engine
+
+    engine = create_engine("sqlite://")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE legacy_binding (id INTEGER PRIMARY KEY, enabled BOOLEAN NOT NULL)"
+            )
+        )
+        connection.execute(text("INSERT INTO legacy_binding VALUES (1, TRUE)"))
+        connection.execute(
+            text(
+                "ALTER TABLE legacy_binding ADD COLUMN online_enabled BOOLEAN NOT NULL DEFAULT FALSE"
+            )
+        )
+        assert tuple(
+            connection.execute(
+                text("SELECT enabled, online_enabled FROM legacy_binding")
+            ).one()
+        ) == (1, 0)
+    engine.dispose()

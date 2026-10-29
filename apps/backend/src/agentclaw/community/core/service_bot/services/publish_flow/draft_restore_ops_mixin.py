@@ -25,6 +25,7 @@ from agentclaw.community.core.service_bot.services.publish_flow.operation_runner
     to_baas_request_id,
 )
 from agentclaw.community.core.service_bot.types import PublishStage
+from agentclaw.community.kernel.knowledge import KnowledgeError
 from agentclaw.community.log import get_logger
 
 
@@ -261,20 +262,36 @@ class DraftRestoreOpsMixin:
             **result,
         }
         try:
-            self._publish_operation_repo.update_result(operation_id, final_result)
-            if operation.state == PublishOperationState.PENDING.value:
-                completed = self._publish_operation_repo.complete_without_workflow(
-                    operation_id
-                )
-            else:
-                completed = self._publish_operation_repo.complete(operation_id)
-            if completed is None:
-                current = self._publish_operation_repo.get_by_id(operation_id)
-                if current is None or current.state != PublishOperationState.COMPLETED.value:
-                    raise PublishFlowServiceError(
-                        "草稿恢复 operation 无法完成: "
-                        f"operation_id={operation_id}, state={getattr(current, 'state', None)}"
+            restored = self._publish_service.restore_draft_knowledge_selection(
+                draft_publish_id=draft_publish_id,
+                source_publish_id=source_publish_id,
+                operation_id=operation_id,
+                expected_attempt=operation.attempt,
+                final_result=final_result,
+            )
+            if restored is None:
+                self._publish_operation_repo.update_result(operation_id, final_result)
+                if operation.state == PublishOperationState.PENDING.value:
+                    completed = self._publish_operation_repo.complete_without_workflow(
+                        operation_id
                     )
+                else:
+                    completed = self._publish_operation_repo.complete(operation_id)
+                if completed is None:
+                    current = self._publish_operation_repo.get_by_id(operation_id)
+                    if current is None or current.state != PublishOperationState.COMPLETED.value:
+                        raise PublishFlowServiceError(
+                            "草稿恢复 operation 无法完成: "
+                            f"operation_id={operation_id}, state={getattr(current, 'state', None)}"
+                        )
+            elif not restored:
+                raise PublishFlowServiceError("Knowledge draft selection restore rejected")
+        except KnowledgeError as exc:
+            # Deterministic guards (identity, ledger state, deadline) never
+            # recover on retry; fail the attempt so the durable ledger keeps
+            # the terminal error instead of spinning until the deadline.
+            self._publish_operation_repo.fail(operation_id, str(exc))
+            raise PublishFlowServiceError(str(exc)) from exc
         except Exception as exc:
             raise DraftRestoreRetryableError(str(exc)) from exc
 

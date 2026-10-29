@@ -5,6 +5,7 @@ import copy
 from agentclaw.community.core.service_bot.repository.models import BotPublishRecord, PublishStatus
 from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
 from agentclaw.community.core.service_bot.services.publish_flow.errors import PublishFlowServiceError
+from agentclaw.community.core.service_bot.services.publish_flow.ext_state import PublishExtState
 from agentclaw.community.core.service_bot.types import OnlineDeployDecision
 from agentclaw.community.log import get_logger
 
@@ -53,6 +54,9 @@ class ReleasePhaseMixin:
             error_msg = "Build artifact path does not exist, please run the build first"
             logger.error(f"[PublishFlowService]{publish_id}, publish_record={publish_record},  {error_msg}")
             ext = self._get_latest_ext(publish_id)
+            PublishExtState.require_knowledge_snapshot(
+                (publish_record.ext or {}).get("knowledge_selection_snapshot"), ext,
+            )
             expected_ext = copy.deepcopy(ext)
             self._clear_retry_flag(ext)
             ext["error_message"] = error_msg
@@ -136,6 +140,9 @@ class ReleasePhaseMixin:
 
             # Publish failed; update the status and error info
             ext = self._get_latest_ext(publish_id)
+            PublishExtState.require_knowledge_snapshot(
+                (publish_record.ext or {}).get("knowledge_selection_snapshot"), ext,
+            )
             expected_ext = copy.deepcopy(ext)
             self._clear_retry_flag(ext)
             ext["error_message"] = str(e)

@@ -132,6 +132,7 @@ from agentclaw.community.di.modules.work_orders_module import WorkOrdersModule
 from agentclaw.community.di.openapi_user_id_bypass_config import (
     OpenApiUserIdBypassConfig,
 )
+from agentclaw.community.kernel.knowledge import KnowledgePublicationPolicy
 from agentclaw.community.di.profile import DeployProfile
 from agentclaw.community.di.profile_modules import modules_for
 from agentclaw.community.di.space_knowledge_capture_config import (
@@ -303,6 +304,8 @@ def build_injector(
     )
 
     _app_injector.get(OwnerHandoffPolicy)
+    # A lazy invalid policy would silently drop native publishing lifecycles.
+    _app_injector.get(KnowledgePublicationPolicy)
     _app_injector.get(TaskQueueConfig)
     _app_injector.get(SpaceKnowledgeCaptureConfig)
     _app_injector.get(CanonicalCenterStoreConfig)

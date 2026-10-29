@@ -23,6 +23,7 @@ internal_dependencies:
   - agentclaw.community.core.devices.services.baas_template_resolver
   - agentclaw.community.core.service_bot.services.deploy
   - agentclaw.community.core.workspace.constants
+  - agentclaw.community.kernel
   - agentclaw.community.log
 ```
 
@@ -64,3 +65,16 @@ except for the not-yet-deployed table, which is treated as no policy.
 
 See repository-root `docs/specs/2026-09-15-upfs-phase1/spec.md` for the shared
 Backend/BaaS contract, deployment prerequisites, limitations and review order.
+
+## Reserved publication summary
+
+`knowledge_online_selection` is maintained exclusively by knowledge publication
+completion in the same Session as native completion and binding changes. Generic
+config create/set/upsert/batch/update/delete methods reject that key and its
+case/accent/width/trailing-space aliases. Persistence also checks the actually
+matched key; the atomic put conflict branch preserves protected rows under the
+server's collation. Ordinary
+configuration keys keep their existing behavior. Operator reads remain available.
+The summary is a current result, not a second publication workflow or a cache
+which may be freely dropped. See core/bot_knowledge/README.md for scope and
+initialization semantics. No common-config schema change is required.

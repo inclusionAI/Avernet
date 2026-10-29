@@ -161,6 +161,7 @@ def _pf(*args, **kw):
             return image_policy_from_ext(record)
 
         publish_service.resolve_publish_image_pin.side_effect = _resolve_image_policy
+        publish_service.restore_draft_knowledge_selection.return_value = None
     if "channel_overrides_reader" not in kw:
         # Default to "no channels for this stage" ({}), so promotion delivers the
         # base artifact with channels cleared — tests that care about channels pass
@@ -4507,8 +4508,10 @@ async def test_retry_from_success_calls_restart_with_flag():
     result = await svc.retry(publish_id=1, operator="op")
     svc.execute_restart.assert_awaited_once()
     assert result.action == "restart"
-    rollback_ext = publish_service.update_publish_status_with_ext.call_args.kwargs["ext"]
-    assert rollback_ext["retry"] is True
+    publish_service.restore_failed_online_restart.assert_called_once_with(
+        publish_id=1, expected_ext=record.ext,
+    )
+    publish_service.update_publish_status_with_ext.assert_not_called()
 
 
 @pytest.mark.asyncio

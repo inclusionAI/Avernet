@@ -1,8 +1,11 @@
-"""Service API: current application selection, no grant or publication authority."""
+"""Service API: stage-aware application selection, never grant authority."""
 
 from abc import abstractmethod
 from typing import Protocol, runtime_checkable
-from agentclaw.community.kernel.knowledge import BotKnowledgeScope
+from agentclaw.community.kernel.knowledge import (
+    BotKnowledgeScope,
+    KnowledgeSelectionStage,
+)
 
 
 @runtime_checkable
@@ -25,6 +28,12 @@ class BotKnowledgeServiceProtocol(Protocol):
         actor_id: str,
         cursor: int = 0,
         limit: int = 20,
+        selection_stage: KnowledgeSelectionStage = "draft",
     ) -> dict: ...
     @abstractmethod
     def list_enabled_current(self, scope: BotKnowledgeScope) -> tuple[str, ...]: ...
+
+    @abstractmethod
+    def list_enabled(
+        self, scope: BotKnowledgeScope, *, selection_stage: KnowledgeSelectionStage
+    ) -> tuple[str, ...]: ...

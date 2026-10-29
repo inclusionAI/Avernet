@@ -76,6 +76,7 @@ class ReleaseRecordOps(Protocol):
         source_status: PublishStatus,
         target_status: PublishStatus,
         engine_overrides: dict | None = None,
+        knowledge_snapshot: dict | None = None,
     ) -> dict: ...
 
     def refresh_publish_handle(self, binding_id, publish_id) -> None: ...
@@ -246,6 +247,7 @@ class ReleaseStageRunner:
             source_status=spec.source_status,
             target_status=spec.target_status,
             engine_overrides=overrides,
+            knowledge_snapshot=(publish_record.ext or {}).get("knowledge_selection_snapshot"),
         )
         self._operation_runner.complete_operation(op)
 
@@ -361,6 +363,9 @@ class ReleaseStageRunner:
         # Reuse the existing binding; update ext (binding/publish refs, provider
         # per-stage promotion state, refresh the teclaw read handle).
         ext, expected_ext = self._ext_state.get_latest_ext_snapshot(publish_id)
+        PublishExtState.require_knowledge_snapshot(
+            (publish_record.ext or {}).get("knowledge_selection_snapshot"), ext,
+        )
         ext.setdefault("binding", {})[spec.stage.value] = existing_binding_id
         ext.setdefault("publish", {})[spec.stage.value] = baas_publish_id
         self._provider_behavior(device_provider).persist_stage_promotion(

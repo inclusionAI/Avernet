@@ -293,6 +293,9 @@ class BuildStageRunner:
                     raise ValueError("发布产物与当前数字员工能力不一致，请同步配置后重新构建")
                 result.artifact_ext["digital_employee_snapshot"] = frozen
             ext, expected_ext = self._ext_state.get_latest_ext_snapshot(publish_id)
+            PublishExtState.require_knowledge_snapshot(
+                (publish_record.ext or {}).get("knowledge_selection_snapshot"), ext,
+            )
             ext.pop("error_code", None)
             ext.pop("error_message", None)
             ext.pop("source_status", None)
@@ -331,6 +334,9 @@ class BuildStageRunner:
             logger.exception("[BuildStageRunner] Build failed: %s", e)
 
             ext, expected_ext = self._ext_state.get_latest_ext_snapshot(publish_id)
+            PublishExtState.require_knowledge_snapshot(
+                (publish_record.ext or {}).get("knowledge_selection_snapshot"), ext,
+            )
             PublishExtState.clear_retry_flag(ext)
             if isinstance(e, ServiceArtifactBuildError):
                 ext["error_code"] = e.code.value

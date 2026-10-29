@@ -47,6 +47,18 @@ class PublishDraftRestoreMixin:
     _publish_flow_service_provider: Callable[[], PublishFlowService]
     _task_queue_service: TaskQueueService
 
+    def restore_draft_knowledge_selection(
+        self, *, draft_publish_id: int, source_publish_id: int, operation_id: int,
+        expected_attempt: int, final_result: dict,
+    ) -> bool | None:
+        return self._repo.restore_draft_knowledge_selection(
+            draft_publish_id=draft_publish_id,
+            source_publish_id=source_publish_id,
+            operation_id=operation_id,
+            expected_attempt=expected_attempt,
+            final_result=final_result,
+        )
+
     def _latest_draft_restore_operation(
         self, publish_id: int
     ) -> PublishOperationRecord | None:

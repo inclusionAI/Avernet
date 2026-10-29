@@ -51,6 +51,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.file_count_runtime
   - agentclaw.community.core.base
   - agentclaw.community.kernel.build_ignore
+  - agentclaw.community.kernel.knowledge    # deterministic draft-restore knowledge guards terminate the attempt instead of retrying
   - agentclaw.community.core.repository.protocols.identity
   - agentclaw.community.core.user_list
   - agentclaw.community.core.repository.protocols.build_ignore
@@ -304,3 +305,21 @@ mutate the Bot context, or fall back on lookup failure. Other engines never make
 this strategy-specific query; the shared draft flow retains its original context.
 Optional command-timeout forwarding remains infrastructure-only: omitted timeout
 arguments retain the existing provider call/default behavior.
+
+
+### Knowledge selection completion
+
+Optional knowledge effects are repository-owned DB bookkeeping, not a new
+service-Bot stage. Existing progress polling, deployment ledger and retries are
+reused unchanged. Publication schema, BaaS deployment and queue behavior are not
+extended. Only the short local success CAS/binding write unit is atomic; actual
+DB failure leaves ONLINE_PUB so its existing progress poll can retry completion
+without issuing a new deployment. Missing historical knowledge does not reject
+native rollback/restore. See `core/bot_knowledge/README.md` for UNKNOWN semantics.
+
+Native retry admission after an online restart failure uses the restricted
+`restore_failed_online_restart` Service/Repository entry. This restores the prior
+stable state for re-issue, not a new observed publication success. It validates
+FAILED/source status, exact ext and the latest failed restart operation (including
+recreate) when knowledge integration is enabled. No HTTP bypass flag or knowledge
+effect is added; other retry branches and disabled compatibility remain native.

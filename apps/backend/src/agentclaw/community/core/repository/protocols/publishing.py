@@ -403,8 +403,26 @@ class BotPublishRepositoryProtocol(Protocol):
         target_status: str,
         expected_ext: Optional[Dict[str, Any]],
         ext: Dict[str, Any],
+        observed_workflow_id: int | None = None,
     ) -> Optional[BotPublishRecord]:
-        """Atomically replace status and ext when both snapshots still match."""
+        """CAS both snapshots; online observers pass the workflow actually queried.
+
+        The optional ID is completion evidence, not another stored native field.
+        When knowledge publication is enabled, SUCCESS requires an explicit ID.
+        Generic/legacy writers cannot infer observation from stored ext. Other
+        transitions and disabled integrations may omit it.
+        """
+        ...
+
+    @abstractmethod
+    def restore_failed_online_restart(
+        self, *, publish_id: int, expected_ext: Optional[Dict[str, Any]],
+    ) -> Optional[BotPublishRecord]:
+        """Restore FAILED/source_status=success for retry, with exact ext CAS.
+
+        Enabled integration additionally requires the latest failed online
+        restart ledger (including recreate). No observed ID or knowledge effect.
+        """
         ...
 
     @abstractmethod
@@ -448,6 +466,24 @@ class BotPublishRepositoryProtocol(Protocol):
 
         Returns:
             ``(demoted_ok, restored_ok)``: whether each CAS matched.
+        """
+        ...
+
+    @abstractmethod
+    def restore_draft_knowledge_selection(
+        self, *, draft_publish_id: int, source_publish_id: int, operation_id: int,
+        expected_attempt: int, final_result: dict,
+    ) -> bool | None:
+        """Atomically restore draft selection and complete its native operation.
+
+        Validate the locked ledger identity, current attempt/state and persisted
+        deadline. Selection, restore marker, result and COMPLETED share one real
+        transaction. Completed replays are no-ops; terminal, expired or replaced
+        attempts never write. Source lineage/tenant/environment/space must match;
+        an unknown snapshot fails closed unless no binding was ever configured.
+        Return None only when publication integration is disabled (the caller
+        completes the legacy operation). Return False when the draft no longer
+        exists; enabled failures raise and must never select legacy completion.
         """
         ...
 

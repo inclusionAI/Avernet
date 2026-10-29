@@ -115,6 +115,8 @@ class ProgressSyncMixin:
             source_status=source_status,
             ext=ext,
             expected_ext=expected_ext,
+            **({"observed_workflow_id": baas_publish_id}
+               if stage == PublishStage.ONLINE else {}),
         )
         logger.info(
             f"[PublishFlowService._handle_sync_success] "

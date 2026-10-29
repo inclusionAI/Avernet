@@ -374,7 +374,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         target_status: str,
         ext: Dict[str, Any],
         source_status: str,
-        expected_ext: Optional[Dict[str, Any]],
+        expected_ext: Optional[Dict[str, Any]], observed_workflow_id: int | None = None,
     ) -> BotPublishRecord:
         """更新发布记录状态和扩展字段（乐观锁）。
 
@@ -395,7 +395,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             source_status=source_status,
             target_status=target_status,
             expected_ext=expected_ext,
-            ext=ext,
+            ext=ext, **({"observed_workflow_id": observed_workflow_id} if observed_workflow_id is not None else {}),
         )
         if not record:
             raise PublishNotFoundError(
@@ -403,6 +403,19 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
                 f"publish_id={publish_id}, expected source_status={source_status}"
             )
         logger.info(f"[update_publish_status_with_ext] id={publish_id}, target_status={target_status}, source_status={source_status}")
+        return record
+
+    def restore_failed_online_restart(
+        self, *, publish_id: int, expected_ext: Optional[Dict[str, Any]],
+    ) -> BotPublishRecord:
+        """Restore a failed online restart for native retry, not publication."""
+        record = self._repo.restore_failed_online_restart(
+            publish_id=publish_id, expected_ext=expected_ext,
+        )
+        if record is None:
+            raise PublishNotFoundError(
+                f"Failed restart changed before retry: publish_id={publish_id}"
+            )
         return record
 
     def commit_built_artifact(

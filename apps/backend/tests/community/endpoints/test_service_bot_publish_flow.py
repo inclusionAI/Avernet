@@ -29,6 +29,8 @@ from agentclaw.community.core.repository.protocols.devices import DeviceBindingR
 from agentclaw.community.core.repository.protocols.platform import ResourceRepositoryProtocol
 from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
+from agentclaw.community.core.service_bot.services.bot_publish_service import BotPublishService
+from agentclaw.community.core.service_bot.services.publish_flow_service import PublishFlowService
 from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
@@ -356,14 +358,11 @@ def _seed_online_pub(world) -> None:
 
 
 def _seed_success(world) -> None:
-    _seed_draft(world)
-    _install_baas(world, progress_status="SUCCESS")
-    vbid = _binding(world, device_id=_VERIFY_UUID, status="ACTIVE")
-    obid = _binding(world, device_id=_ONLINE_UUID, status="ACTIVE")
-    _advance(world, _V1, PublishStatus.SUCCESS,
-             {"binding": {"verify": vbid, "online": obid},
-              "publish": {"verify": _BAAS_PUB_ID, "online": _BAAS_PUB_ID},
-              "config_artifact": _ARTIFACT})
+    _seed_online_pub(world)
+    # Observe the stubbed BaaS success through the real Flow/Service/Repository;
+    # an unobserved status write must remain rejected with publication enabled.
+    result = world.get(PublishFlowService).advance_publish_progress(_V1)
+    assert result.status == PublishStatus.SUCCESS
 
 
 def _assert_in_place_task(_response, world):
@@ -510,15 +509,9 @@ def _seed_scale_error(world) -> None:
 
 def _seed_scale_status(world) -> None:
     _seed_success(world)
-    repo = world.get(BotPublishRepositoryProtocol)
-    record = repo.get_by_id(_V1)
-    ext = record.ext or {}
-    ext["scale"] = {"publish_id": _BAAS_PUB_ID}
-    repo.update_status_with_ext(
-        publish_id=_V1,
-        target_status=record.status,
-        ext=ext,
-        source_status=record.status,
+    # Scale metadata changes ext only; do not synthesize another SUCCESS.
+    world.get(BotPublishService).mutate_publish_ext(
+        _V1, lambda ext: ext.update({"scale": {"publish_id": _BAAS_PUB_ID}}),
     )
     _install_baas(world, progress_status="SUCCESS")
 

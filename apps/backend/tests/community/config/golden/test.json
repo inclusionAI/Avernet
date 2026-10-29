@@ -38,6 +38,9 @@
       "fetch_transport_allowlist": [],
       "teclaw_platform_managed": false
     },
+    "bot_knowledge_publication": {
+      "enabled": true
+    },
     "business": {
       "retry_count": 3,
       "timeout": 30

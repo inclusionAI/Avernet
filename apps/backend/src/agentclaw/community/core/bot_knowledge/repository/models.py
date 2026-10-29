@@ -1,4 +1,4 @@
-"""One current application selection per logical Bot and knowledge base."""
+"""Working and production application selection per Bot and knowledge base."""
 
 from sqlalchemy import (
     TIMESTAMP,
@@ -55,6 +55,13 @@ class BotKnowledgeBindingModel(Base):
         default=False,
         server_default=false(),
         comment="是否启用该知识库",
+    )
+    online_enabled = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=false(),
+        comment="服务Bot生产态是否启用该知识库",
     )
     revision = Column(
         BigInteger,

@@ -78,6 +78,18 @@ class PublishExtState:
             raise PublishNotFoundError(f"Publish order not found: {publish_id}")
         return copy.deepcopy(latest_record.ext or {}), copy.deepcopy(latest_record.ext)
 
+    @staticmethod
+    def require_knowledge_snapshot(expected: dict | None, latest_ext: dict) -> None:
+        """An old build/deploy result cannot adopt a new publish generation."""
+        latest = latest_ext.get("knowledge_selection_snapshot")
+        generation = latest.get("generation") if isinstance(latest, dict) else None
+        expected_generation = expected.get("generation") if isinstance(expected, dict) else None
+        # Missing/corrupt optional knowledge metadata is not a native gate.
+        # A known NEW admission is still a stale-work fence, independently of
+        # whether optional knowledge capture succeeded for the old attempt.
+        if isinstance(generation, str) and generation != expected_generation:
+            raise PublishFlowServiceError("Publication attempt superseded")
+
     def mutate_and_update_ext(
         self,
         publish_id: int,
@@ -115,6 +127,7 @@ class PublishExtState:
         source_status: PublishStatus,
         ext: dict,
         expected_ext: dict | None,
+        observed_workflow_id: int | None = None,
     ) -> None:
         """Atomically update the publish record's status and ext fields.
 
@@ -128,6 +141,8 @@ class PublishExtState:
             ext=ext,
             source_status=source_status,
             expected_ext=expected_ext,
+            **({"observed_workflow_id": observed_workflow_id}
+               if observed_workflow_id is not None else {}),
         )
 
     def commit_built_artifact(

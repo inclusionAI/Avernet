@@ -1,7 +1,7 @@
 """ORM persistence shared by local SQLite and production MySQL."""
 
 from injector import inject
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
 
 from agentclaw.community.core.repository.protocols.config import (
@@ -11,6 +11,9 @@ from agentclaw.community.core.common_config.models import BotCommonConfigRecord
 
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.models import BotCommonConfig
+from agentclaw.community.kernel.knowledge import (
+    KNOWLEDGE_ONLINE_CONFIG_KEY, require_generic_bot_config_key,
+)
 
 
 class BotCommonConfigRepository(BotCommonConfigRepositoryProtocol):
@@ -82,6 +85,7 @@ class BotCommonConfigRepository(BotCommonConfigRepositoryProtocol):
     def create_record(
         self, *, bot_id: str, entity_id: str, env: str, config_key: str, config_value: str
     ) -> int:
+        require_generic_bot_config_key(config_key)
         with self._db.transactional_orm_session() as session:
             row = BotCommonConfig(bot_id=bot_id, entity_id=entity_id, env=env,
                                   config_key=config_key, config_value=config_value)
@@ -94,6 +98,7 @@ class BotCommonConfigRepository(BotCommonConfigRepositoryProtocol):
             row = session.query(BotCommonConfig).filter_by(id=config_id, is_delete=0).first()
             if row is None:
                 return False
+            require_generic_bot_config_key(row.config_key)
             row.config_value = config_value
             return True
 
@@ -102,12 +107,14 @@ class BotCommonConfigRepository(BotCommonConfigRepositoryProtocol):
             row = session.query(BotCommonConfig).filter_by(id=config_id, is_delete=0).first()
             if row is None:
                 return False
+            require_generic_bot_config_key(row.config_key)
             row.is_delete = 1
             return True
 
     def upsert_record(
         self, *, bot_id: str, entity_id: str, env: str, config_key: str, config_value: str
     ) -> int:
+        require_generic_bot_config_key(config_key)
         with self._db.transactional_orm_session() as session:
             row = session.query(BotCommonConfig).filter_by(
                 bot_id=bot_id, entity_id=entity_id, env=env, config_key=config_key
@@ -117,12 +124,15 @@ class BotCommonConfigRepository(BotCommonConfigRepositoryProtocol):
                                       config_key=config_key, config_value=config_value)
                 session.add(row)
             else:
+                require_generic_bot_config_key(row.config_key)
                 row.config_value = config_value
                 row.is_delete = 0
             session.flush()
             return row.id
 
     def batch_upsert_records(self, *, records: list[dict[str, str]]) -> list[int]:
+        for item in records:
+            require_generic_bot_config_key(item["config_key"])
         with self._db.transactional_orm_session() as session:
             ids = []
             for item in records:
@@ -134,6 +144,7 @@ class BotCommonConfigRepository(BotCommonConfigRepositoryProtocol):
                     row = BotCommonConfig(**item)
                     session.add(row)
                 else:
+                    require_generic_bot_config_key(row.config_key)
                     row.config_value = item["config_value"]
                     row.is_delete = 0
                 session.flush()
@@ -149,6 +160,7 @@ class BotCommonConfigRepository(BotCommonConfigRepositoryProtocol):
         config_key: str,
         config_value: str,
     ) -> None:
+        require_generic_bot_config_key(config_key)
         values = dict(
             bot_id=bot_id,
             entity_id=entity_id,
@@ -158,14 +170,25 @@ class BotCommonConfigRepository(BotCommonConfigRepositoryProtocol):
             is_delete=0,
         )
         with self._db.orm_session() as session:
+            existing = session.query(BotCommonConfig.config_key).filter_by(
+                bot_id=bot_id, entity_id=entity_id, env=env, config_key=config_key,
+            ).first()
+            if existing is not None:
+                require_generic_bot_config_key(existing[0])
             if session.get_bind().dialect.name == "mysql":
                 from sqlalchemy.dialects.mysql import insert
 
                 stmt = insert(BotCommonConfig).values(**values)
                 stmt = stmt.on_duplicate_key_update(
-                    config_value=config_value,
-                    is_delete=0,
-                    gmt_modified=func.now(),
+                    # The server compares using the column's actual collation.
+                    # Even a concurrent publisher INSERT cannot be overwritten
+                    # via an alias not covered by Unicode normalization.
+                    config_value=case((BotCommonConfig.config_key == KNOWLEDGE_ONLINE_CONFIG_KEY,
+                                       BotCommonConfig.config_value), else_=config_value),
+                    is_delete=case((BotCommonConfig.config_key == KNOWLEDGE_ONLINE_CONFIG_KEY,
+                                    BotCommonConfig.is_delete), else_=0),
+                    gmt_modified=case((BotCommonConfig.config_key == KNOWLEDGE_ONLINE_CONFIG_KEY,
+                                       BotCommonConfig.gmt_modified), else_=func.now()),
                 )
             else:
                 from sqlalchemy.dialects.sqlite import insert
@@ -173,6 +196,7 @@ class BotCommonConfigRepository(BotCommonConfigRepositoryProtocol):
                 stmt = insert(BotCommonConfig).values(**values)
                 stmt = stmt.on_conflict_do_update(
                     index_elements=["bot_id", "entity_id", "env", "config_key"],
+                    where=BotCommonConfig.config_key != KNOWLEDGE_ONLINE_CONFIG_KEY,
                     set_={
                         "config_value": config_value,
                         "is_delete": 0,
@@ -190,6 +214,7 @@ class BotCommonConfigRepository(BotCommonConfigRepositoryProtocol):
         config_key: str,
         config_value: str,
     ) -> None:
+        require_generic_bot_config_key(config_key)
         scope = dict(bot_id=bot_id, entity_id=entity_id, env=env, config_key=config_key)
         inserted = False
         try:

@@ -1,4 +1,4 @@
-"""Current application selection only. The knowledge platform owns grants."""
+"""Stage-aware application selection. The knowledge platform owns grants."""
 
 from agentclaw.community.core.bot_knowledge.protocols import BotKnowledgeServiceProtocol
 from agentclaw.community.core.bot_knowledge.repository.store import (
@@ -7,6 +7,8 @@ from agentclaw.community.core.bot_knowledge.repository.store import (
 from agentclaw.community.kernel.knowledge import (
     BotKnowledgeScope,
     KnowledgeError,
+    KnowledgeSelectionStage,
+    require_selection_stage,
     require_knowledge_id,
 )
 from agentclaw.community.plugin_api.knowledge_catalog import KnowledgeCatalogPlugin
@@ -59,7 +61,9 @@ class BotKnowledgeService(BotKnowledgeServiceProtocol):
         actor_id: str,
         cursor: int = 0,
         limit: int = 20,
+        selection_stage: KnowledgeSelectionStage = "draft",
     ) -> dict:
+        require_selection_stage(selection_stage)
         if (
             type(cursor) is not int
             or cursor < 0
@@ -68,9 +72,20 @@ class BotKnowledgeService(BotKnowledgeServiceProtocol):
         ):
             raise ValueError("invalid page")
         return self.repository.list_bindings(
-            scope=scope, actor_id=actor_id, cursor=cursor, limit=limit
+            scope=scope,
+            actor_id=actor_id,
+            cursor=cursor,
+            limit=limit,
+            selection_stage=selection_stage,
         )
 
     def list_enabled_current(self, scope: BotKnowledgeScope) -> tuple[str, ...]:
         """Application selection, NEVER platform authorization evidence."""
         return self.repository.list_enabled_current(scope)
+
+    def list_enabled(
+        self, scope: BotKnowledgeScope, *, selection_stage: KnowledgeSelectionStage
+    ) -> tuple[str, ...]:
+        """Application selection for an explicit stage; never platform authorization."""
+        require_selection_stage(selection_stage)
+        return self.repository.list_enabled(scope, selection_stage=selection_stage)

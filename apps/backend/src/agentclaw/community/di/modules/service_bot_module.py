@@ -30,6 +30,7 @@ from agentclaw.community.core.bot_management.engines.artifact_transfer import Ar
 from agentclaw.community.core.bot_management.engines.aicoding.artifact_transfer import AicodingArtifactTransferStrategy
 from agentclaw.community.core.bot_management.engines.aicoding.artifact_config import parse_fastdisk_publish_config
 from agentclaw.community.di.modules.config_module import read_user_config
+from agentclaw.community.kernel.knowledge import KnowledgePublicationPolicy
 
 from agentclaw.community.core.digital_employee.contracts import DigitalEmployeePublicationProtocol
 
@@ -263,6 +264,17 @@ class ServiceBotModule(Module):
             injector.get(DeviceBindingRepository), injector.get(CollaboratorServiceProtocol),
             injector.get(FileCountRuntime), env_utils.get_current_env(),
         )
+
+    @singleton
+    @provider
+    def knowledge_publication_policy(self) -> KnowledgePublicationPolicy:
+        config = read_user_config().get("bot_knowledge_publication", {})
+        if not isinstance(config, dict):
+            raise ValueError("bot_knowledge_publication must be a mapping")
+        enabled = config.get("enabled", False)
+        if type(enabled) is not bool:
+            raise ValueError("bot_knowledge_publication.enabled must be a boolean")
+        return KnowledgePublicationPolicy(enabled=enabled)
 
     def configure(self, binder: Binder) -> None:
         binder.bind(WorkspacePathFactory, to=WorkspacePathFactory, scope=singleton)

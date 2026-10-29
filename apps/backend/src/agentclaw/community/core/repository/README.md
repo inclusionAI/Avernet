@@ -362,6 +362,8 @@ consumes:
 internal_dependencies:
   - agentclaw.community.core.engine_runtime.stage  # stage vocabulary; SQL/runtime selection parity is covered by conformance tests
   - agentclaw.community.core.engine_runtime.errors
+  - agentclaw.community.core.bot_knowledge  # shared Bot lock and binding-model effects at publication CAS
+  - agentclaw.community.kernel.knowledge
   - agentclaw.community.core.space_knowledge.capture_guard
   - agentclaw.community.core.space_knowledge.repository
   - agentclaw.community.plugin_api.space_knowledge
@@ -432,3 +434,29 @@ See `core/space_knowledge/README.md` for capture/delivery rollout and rollback.
 `ManagerSyncReadRepositoryProtocol` is read-only: the bot collaborator manager
 sync projector sources its facts and key pages from it, and the sync path
 persists nothing — no queue table, no retry log, and no task record.
+
+### Optional knowledge publication persistence
+
+`publishing/knowledge_selection.py` contains the bounded local selection effects;
+`BotPublishRepository` owns their Session and commit. No native publication table
+schema, worker or queue state is added. Capture, actual online completion and
+explicit draft restore are local write units. Native status/ext CAS, operation
+ledger and attempt/deadline checks remain authoritative. Business-unknown history
+is recorded in existing ext instead of rejecting native advancement; SQL errors
+roll back the local write unit. Opted-in artifact PUT is staged before added
+locks; default-off preserves the native path. See `core/bot_knowledge/README.md`.
+
+Knowledge online completion uses the existing common-config unique key for its
+current result/watermark and bounded previous ID set. Version snapshots/results
+still live in publication.ext. No historical-result scan, unbounded binding
+clear, new table/index or independent config Session participates in completion.
+
+## Failed online restart retry persistence
+
+`BotPublishRepositoryProtocol.restore_failed_online_restart` is a dedicated
+internal native retry admission. It accepts only publish ID and expected ext,
+checks current FAILED/source_status=success, environment, exact ext and the
+latest failed restart/recreate ledger under the caller-owned local transaction.
+It restores SUCCESS and adds retry without applying knowledge completion.
+Generic SUCCESS CAS still requires observed workflow evidence; no HTTP bypass
+parameter, schema, Plugin, queue or external I/O under added locks is introduced.

@@ -146,13 +146,20 @@ class RetryOpsMixin:
         else:
             self._clear_retry_flag(ext)
         try:
-            self._update_publish_status(
-                publish_id=publish_id,
-                target_status=rollback_status,
-                source_status=PublishStatus.FAILED,
-                ext=ext,
-                expected_ext=expected_ext,
-            )
+            if rollback_status == PublishStatus.SUCCESS:
+                # Native restart retry restores a stable state before re-issue;
+                # it is not evidence of a new successful online deployment.
+                self._publish_service.restore_failed_online_restart(
+                    publish_id=publish_id, expected_ext=expected_ext,
+                )
+            else:
+                self._update_publish_status(
+                    publish_id=publish_id,
+                    target_status=rollback_status,
+                    source_status=PublishStatus.FAILED,
+                    ext=ext,
+                    expected_ext=expected_ext,
+                )
         except Exception as e:
             raise PublishFlowServiceError(
                 f"Status rollback failed: {rollback_status.value}, error={e}"

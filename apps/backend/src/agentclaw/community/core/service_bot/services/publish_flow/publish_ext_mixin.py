@@ -12,6 +12,7 @@ from __future__ import annotations
 import copy
 
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
+from agentclaw.community.core.service_bot.services.publish_flow.ext_state import PublishExtState
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
 
@@ -32,6 +33,7 @@ class PublishExtMixin:
         source_status: PublishStatus,
         target_status: PublishStatus,
         engine_overrides: dict | None = None,
+        knowledge_snapshot: dict | None = None,
     ) -> dict:
         """Persist a release into the publish record's ext + status.
 
@@ -40,6 +42,7 @@ class PublishExtMixin:
         ``source_status → target_status``. Re-reads the latest ext first (the
         authoritative snapshot). Returns the persisted ext."""
         ext = self._get_latest_ext(publish_id)
+        PublishExtState.require_knowledge_snapshot(knowledge_snapshot, ext)
         expected_ext = copy.deepcopy(ext)
         ext.setdefault("binding", {})[stage.value] = binding_id
         ext.setdefault("publish", {})[stage.value] = baas_publish_id

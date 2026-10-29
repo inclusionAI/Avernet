@@ -26,8 +26,9 @@ Design invariants:
   still-valid record points at. Superseded versions are reaped together by
   :meth:`cleanup` when the record is deleted.
 * **No I/O in :meth:`prepare`.** It returns a pending upload the caller performs
-  only AFTER the DB write is confirmed to persist, so a rejected write leaves no
-  orphan object.
+  after validating its native write, or stages a changed immutable object
+  before a knowledge-aware short transaction. A raced pre-staged object stays
+  under the same record prefix and is reaped by existing record cleanup.
 """
 from __future__ import annotations
 
@@ -75,14 +76,18 @@ class ConfigArtifactOffloader:
     # ── write ───────────────────────────────────────────────────
 
     def prepare(
-        self, ext: Optional[Dict[str, Any]], publish_id: int, env: str
+        self, ext: Optional[Dict[str, Any]], publish_id: int, env: str,
+        *, reserve_bytes: int = 0,
     ) -> Tuple[Optional[str], Optional[PendingUpload]]:
         """Produce the JSON string to store in the ext column, plus a pending
         object-storage upload.
 
         Returns ``(ext_json, pending)``; ``pending`` is a :data:`PendingUpload`
         to write via :meth:`upload`, or ``None``. Performs NO I/O — the caller
-        uploads ``pending`` only after confirming the DB write will persist.
+        ``reserve_bytes`` budgets bounded completion metadata during preflight;
+        callers still persist the canonical zero-reserve representation. The caller
+        uploads ``pending`` after write validation, or before its short DB-only
+        transaction (with the native status/ext CAS still enforced).
         """
         if ext is None:
             return None, None
@@ -97,9 +102,13 @@ class ConfigArtifactOffloader:
             return json.dumps(base, ensure_ascii=False), None
         artifact_json = json.dumps(artifact, ensure_ascii=False)
         size = len(artifact_json.encode("utf-8"))
-        if size <= ARTIFACT_OSS_THRESHOLD_BYTES:
-            base[ARTIFACT_KEY] = artifact
-            return json.dumps(base, ensure_ascii=False), None
+        base[ARTIFACT_KEY] = artifact
+        inline = json.dumps(base, ensure_ascii=False)
+        # The artifact shares TEXT with snapshots and other native metadata.
+        # Retain headroom for subsequent progress/result fields as before.
+        if size <= ARTIFACT_OSS_THRESHOLD_BYTES and len(inline.encode("utf-8")) + reserve_bytes <= 65535:
+            return inline, None
+        del base[ARTIFACT_KEY]
         digest = hashlib.sha1(artifact_json.encode("utf-8")).hexdigest()[:12]
         key = self._key(env, publish_id, digest)
         base[ARTIFACT_OSS_MARKER] = {
@@ -115,6 +124,11 @@ class ConfigArtifactOffloader:
                 "on read."
             ),
         }
+        if size <= ARTIFACT_OSS_THRESHOLD_BYTES:
+            base[ARTIFACT_OSS_MARKER]["note"] = (
+                "config_artifact plus sibling metadata exceeded the inline ext "
+                "budget; artifact stored in object storage at oss_key"
+            )
         return json.dumps(base, ensure_ascii=False), (key, artifact_json)
 
     def upload(self, pending: Optional[PendingUpload]) -> None:

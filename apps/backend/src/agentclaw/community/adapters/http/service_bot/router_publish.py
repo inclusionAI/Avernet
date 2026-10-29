@@ -5,6 +5,8 @@
 - 调用 core/service_bot/services/ 中的业务逻辑
 - Request/Response 类型来自同级 schemas.py
 """
+from agentclaw.community.kernel.knowledge import KnowledgeError
+
 import copy
 import json
 import time
@@ -747,6 +749,9 @@ async def update_publish_status(
             data=record.to_dict(),
             message="状态更新成功",
         )
+
+    except KnowledgeError as e:
+        return ApiResponse(success=False, message=e.code, error_code=e.status, data=None)
 
     except PublishNotFoundError as e:
         logger.warning(f"[update_publish_status] Publish not found: {e}")

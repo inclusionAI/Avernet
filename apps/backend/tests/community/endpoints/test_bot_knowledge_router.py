@@ -182,3 +182,90 @@ def put_current_selection_ok():
 )
 def put_current_selection_not_granted():
     """Even the Bot owner cannot enable knowledge absent from platform grants."""
+
+
+def _seed_service_selections(world: World) -> None:
+    from agentclaw.community.core.service_bot.repository.models import BotPublishModel
+
+    _seed_enabled(world)
+    with world.get(DatabasePlugin).orm_session() as session:
+        bot = (
+            session.query(BotModel).filter_by(bot_id=_BOT_ID, owner_id=_OWNER_ID).one()
+        )
+        bot.bot_type = "service"
+        session.add(
+            BotPublishModel(
+                source_bot_pk=bot.id,
+                source_bot_id=_BOT_ID,
+                publish_bot_id=f"{_BOT_ID}-pub",
+                name="Service",
+                owner_id=_OWNER_ID,
+                status="draft",
+                version=1,
+                env=get_current_env(),
+                permission_owner=_OWNER_ID,
+            )
+        )
+        row = session.query(BotKnowledgeBindingModel).one()
+        row.online_enabled = False
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/bot-knowledge/{bot_id}",
+    scenario="service_production_is_not_current_draft",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID},
+        query_params={"owner_id": _OWNER_ID, "selection_stage": "online"},
+        headers={"x-user-id": _OWNER_ID},
+    ),
+    seed=_seed_service_selections,
+    expect=ExpectSuccess(
+        json_contains={
+            "items": [
+                {"kb_id": _KB_ID, "enabled": False, "runtime_selection": "online"}
+            ],
+            "selection_stage": "online",
+        }
+    ),
+)
+def get_service_online_selection():
+    """Production reads never fall back to a newly enabled draft."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/bot-knowledge/{bot_id}",
+    scenario="invalid_selection_stage",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID},
+        query_params={"owner_id": _OWNER_ID, "selection_stage": "verify"},
+        headers={"x-user-id": _OWNER_ID},
+    ),
+    seed=_seed_bot,
+    expect=ExpectError(status=422),
+)
+def get_invalid_selection_stage():
+    """Only draft and online are valid selection views; verify shares draft."""
+
+
+@endpoint_test(
+    method="PUT",
+    path="/api/bot-knowledge/{bot_id}/{kb_id}",
+    scenario="production_state_is_not_client_writable",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID, "kb_id": _KB_ID},
+        headers={"x-user-id": _OWNER_ID},
+        json_body={
+            "owner_id": _OWNER_ID,
+            "enabled": True,
+            "online_enabled": True,
+            "expected_revision": 0,
+        },
+    ),
+    seed=_seed_bot,
+    expect=ExpectError(status=422),
+    extra_assertions=(_assert_no_selection,),
+)
+def put_cannot_set_production_selection():
+    """Only successful publishing, never a settings request, advances production."""
