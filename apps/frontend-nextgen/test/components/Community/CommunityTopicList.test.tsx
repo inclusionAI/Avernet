@@ -2,7 +2,7 @@
 import { CommunityTopicList } from '@/components/Community/CommunityTopicList';
 import type { CommunityTopic } from '@/domain/community/types';
 import '@testing-library/jest-dom';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import type { RefObject } from 'react';
 
 const topic: CommunityTopic = {
@@ -99,21 +99,28 @@ describe('CommunityTopicList', () => {
     expect(screen.queryByText('热榜主题')).not.toBeInTheDocument();
   });
 
-  test('投票主题列表标记投票类型', () => {
+  test('投票主题在标题后保留专属图标，类型列不显示图标', () => {
     renderList({ topics: [{ ...topic, topicType: 'poll' }] });
-    expect(screen.getByRole('img', { name: '投票主题' })).toBeInTheDocument();
-    expect(screen.getByText('投票')).toBeInTheDocument();
+
+    const titleRow = screen.getByText(topic.title).parentElement;
+    const pollIcon = within(titleRow as HTMLElement).getByRole('img', { name: '投票主题' });
+    expect(pollIcon.querySelector('svg')).toHaveClass('lucide-chart-line');
+    expect(screen.getByText(topic.title).compareDocumentPosition(pollIcon) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    const typeLabel = screen.getByText('投票').parentElement;
+    expect(typeLabel?.querySelector('svg')).not.toBeInTheDocument();
   });
 
-  test('分享主题显示附件标识，求助主题标题旁显示求助图标', () => {
-    const { unmount } = renderList({ topics: [{ ...topic, status: 'open', topicType: 'share' }] });
-    expect(screen.getByRole('img', { name: '分享附件' })).toBeInTheDocument();
+  test('分享和求助主题类型标签不显示图标，仅投票保留专属图标', () => {
+    const { unmount } = renderList({ topics: [{ ...topic, status: 'open', topicType: 'share', isHot: true }] });
+    const shareLabel = screen.getByText('分享').parentElement;
+    expect(shareLabel?.querySelector('svg')).not.toBeInTheDocument();
     expect(screen.getByText('分享')).toBeInTheDocument();
     unmount();
 
-    renderList({ topics: [{ ...topic, status: 'open', topicType: 'help' }] });
-    const helpIcon = screen.getByRole('img', { name: '求助' });
-    expect(helpIcon).toHaveClass('text-warning');
+    renderList({ topics: [{ ...topic, status: 'closed', topicType: 'help' }] });
+    const helpLabel = screen.getByText('已解决').closest('article')?.querySelector('span.bg-muted');
+    expect(helpLabel?.querySelector('svg')).not.toBeInTheDocument();
     expect(screen.getAllByText('求助')).toHaveLength(1);
   });
 

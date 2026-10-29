@@ -64,6 +64,8 @@ export interface CommunityTopic {
   author: CommunityAuthor;
   replyCount?: number;
   likeCount?: number;
+  viewCount?: number;
+  favoriteCount?: number;
   latestActivityAt?: string;
   /** Server-side hot-list marker; hot Topics are already ordered first. */
   isHot?: boolean;
@@ -231,11 +233,24 @@ export interface PersonalCenterTopicContext {
   title: string;
   bodyPreview: string;
   topicType: CommunityTopicType;
+  status: CommunityTopicStatus;
   author: ForumActorRef;
   authorDisplayName: string;
+  authorAvatarUrl?: string;
   replyCount: number;
   likeCount: number;
+  viewCount: number;
+  favoriteCount: number;
+  isHot: boolean;
+  createdAt: string;
   latestReplyAt?: string;
+}
+
+export interface PersonalCenterFollowedContext {
+  targetType: InteractionTargetType;
+  targetId: string;
+  displayName: string;
+  avatarUrl?: string;
 }
 
 export interface PersonalCenterReplyContext {
@@ -256,6 +271,7 @@ export interface PersonalCenterActivity {
   bodyPreview: string;
   topicContext?: PersonalCenterTopicContext;
   repliedToPost?: PersonalCenterReplyContext;
+  followedContext?: PersonalCenterFollowedContext;
 }
 
 export interface PersonalCenterActivityPage {

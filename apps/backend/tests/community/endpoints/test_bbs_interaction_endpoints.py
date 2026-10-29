@@ -26,6 +26,7 @@ from agentclaw.community.core.task.forum.interaction.models import (
     PersonalCenterActivityPage,
     PersonalCenterActivityRecord,
     PersonalCenterActivityType,
+    PersonalCenterFollowedContext,
     PersonalCenterReplyContext,
     PersonalCenterTopicContext,
 )
@@ -139,11 +140,17 @@ def _activity_page() -> PersonalCenterActivityPage:
         title="Topic title",
         body_preview="Topic body",
         topic_type="discussion",
+        status="OPEN",
         author_type=ForumActorType.HUMAN,
         author_id=_CALLER,
         author_display_name="Interaction Caller",
+        author_avatar_url="https://example.test/avatar.png",
         reply_count=2,
         like_count=3,
+        view_count=4,
+        favorite_count=1,
+        is_hot=True,
+        created_at=_NOW,
         latest_reply_at=_NOW,
     )
     return PersonalCenterActivityPage(
@@ -207,6 +214,12 @@ def _followed_activity_page() -> PersonalCenterActivityPage:
                 topic_id=None,
                 happened_at=_NOW,
                 body_preview="User B",
+                followed_context=PersonalCenterFollowedContext(
+                    target_type=ForumInteractionTargetType.HUMAN,
+                    target_id="user-b",
+                    display_name="User B",
+                    avatar_url="https://example.test/user-b.png",
+                ),
             ),
         ),
     )
@@ -243,6 +256,14 @@ def _seed_helpful(world):
     )
 
 
+def _assert_followed_projection(response, _world):
+    item = response.json()["data"]["items"][0]
+    assert item["followed_context"]["target_type"] == "HUMAN"
+    assert item["followed_context"]["target_id"] == "user-b"
+    assert item["followed_context"]["display_name"] == "User B"
+    assert item["followed_context"]["avatar_url"] == "https://example.test/user-b.png"
+
+
 def _assert_personal_center_projection(response, _world):
     items = response.json()["data"]["items"]
     viewed = next(
@@ -260,6 +281,11 @@ def _assert_personal_center_projection(response, _world):
     assert viewed["topic_context"]["reply_count"] == 2
     assert viewed["topic_context"]["like_count"] == 3
     assert viewed["topic_context"]["latest_reply_at"] is not None
+    assert viewed["topic_context"]["status"] == "OPEN"
+    assert viewed["topic_context"]["view_count"] == 4
+    assert viewed["topic_context"]["favorite_count"] == 1
+    assert viewed["topic_context"]["is_hot"] is True
+    assert viewed["topic_context"]["created_at"] is not None
     assert nested_reply["replied_to_post"]["post_id"] == "post_parent_1"
     assert nested_reply["replied_to_post"]["author_display_name"] == "Responder Bot"
     assert nested_reply["replied_to_post"]["body_preview"] == "Original reply"
@@ -459,6 +485,7 @@ def public_get_personal_center_activities_ok():
         _seed_personal_center_followed(world),
     ),
     expect=ExpectSuccess(status=200),
+    extra_assertions=(_assert_followed_projection,),
 )
 def public_get_personal_center_followed_activities_ok():
     """Serialize one identity follow without requiring a Topic context."""
@@ -647,6 +674,7 @@ def internal_get_personal_center_activities_ok():
     ),
     seed=_seed_personal_center_followed,
     expect=ExpectSuccess(status=200),
+    extra_assertions=(_assert_followed_projection,),
 )
 def internal_get_personal_center_followed_activities_ok():
     """Mirror identity-follow serialization without a Topic context."""

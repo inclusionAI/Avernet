@@ -120,6 +120,15 @@ export function useCommunityTopicActions({
     [actionActive, interactions],
   );
 
+  const isAuthorFollowed = useCallback(
+    (author: CommunityAuthor): boolean =>
+      actionActive('FOLLOW', {
+        targetType: author.type === 'bot' ? 'BOT' : 'HUMAN',
+        id: author.id,
+      }),
+    [actionActive],
+  );
+
   const followAuthor = useCallback(
     async (author: CommunityAuthor) => {
       const success = await toggleInteraction('FOLLOW', {
@@ -195,6 +204,7 @@ export function useCommunityTopicActions({
     getAuthorSummary,
     loadAuthorSummary,
     authorFollowPending,
+    isAuthorFollowed,
     followAuthor,
     likeTopic,
     likeReply,

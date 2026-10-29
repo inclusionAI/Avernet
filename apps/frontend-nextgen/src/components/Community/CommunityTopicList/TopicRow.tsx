@@ -1,8 +1,8 @@
 import { Badge } from '@/components/ui/Badge';
 import type { CommunityTopic, CommunityTopicType, InteractionSummary } from '@/domain/community/types';
-import { CircleHelp, Eye, Heart, Lock, MessageCircle, Paperclip, Star } from 'lucide-react';
+import { Eye, Heart, Lock, MessageCircle, Star } from 'lucide-react';
 import type { KeyboardEvent } from 'react';
-import { PollTypeIcon } from '../PollTypeIcon';
+import { TopicTypeIcon } from '../TopicTypeIcon';
 import { CommunityAuthorAvatar } from '../CommunityAuthorAvatar';
 
 const TOPIC_TYPE_LABELS: Record<CommunityTopicType, string> = {
@@ -52,9 +52,9 @@ export function TopicRow({
   // 列表行对齐原型 5 列：主题 / 类型 / 发帖人 / 互动数据 / 最新回复。
   const summary = getTopicSummary?.(topic);
   const replyCount = typeof topic.replyCount === 'number' ? topic.replyCount : 0;
-  const viewCount = summary?.viewCount ?? 0;
-  const likeCount = summary?.likeCount ?? (typeof topic.likeCount === 'number' ? topic.likeCount : 0);
-  const favoriteCount = summary?.favoriteCount ?? 0;
+  const viewCount = summary?.viewCount ?? topic.viewCount ?? 0;
+  const likeCount = summary?.likeCount ?? topic.likeCount ?? 0;
+  const favoriteCount = summary?.favoriteCount ?? topic.favoriteCount ?? 0;
   const hasReplies = replyCount > 0;
   const activityAt = hasReplies ? topic.latestActivityAt ?? topic.createdAt : topic.createdAt;
   const activityPrefix = hasReplies ? '最新回复：' : '发帖时间：';
@@ -70,23 +70,17 @@ export function TopicRow({
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <h3 className="m-0 min-w-0 truncate text-sm font-semibold text-foreground">{topic.title}</h3>
+          {topic.topicType === 'poll' ? (
+            <span className="inline-flex shrink-0" role="img" aria-label="投票主题">
+              <TopicTypeIcon topicType={topic.topicType} className="size-3.5 text-muted-foreground" />
+            </span>
+          ) : null}
           {topic.isHot ? (
             <span className="text-sm" aria-hidden>
               🔥
             </span>
           ) : null}
           {topic.isHot ? <span className="sr-only">热榜主题</span> : null}
-          {topic.topicType === 'poll' ? <PollTypeIcon className="size-4" /> : null}
-          {topic.topicType === 'share' ? (
-            <Paperclip
-              className="size-3.5 shrink-0 text-muted-foreground"
-              role="img"
-              aria-label="分享附件"
-            />
-          ) : null}
-          {topic.topicType === 'help' ? (
-            <CircleHelp className="size-4 shrink-0 text-warning" role="img" aria-label="求助" />
-          ) : null}
           {topic.topicType === 'notice' ? <Badge tone="warning">通知</Badge> : null}
           {topic.status === 'closed' && topic.topicType === 'help' ? (
             <Badge tone="success">已解决</Badge>
@@ -136,4 +130,3 @@ export function TopicRow({
     </article>
   );
 }
-

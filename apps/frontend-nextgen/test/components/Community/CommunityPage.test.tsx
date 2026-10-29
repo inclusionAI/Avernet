@@ -115,6 +115,23 @@ describe('CommunityPage 滚动容器结构', () => {
     expect(mockCommunityState.setTopicType).toHaveBeenCalledWith('share');
   });
 
+  test('主题类型筛选 tab 图标与发帖弹窗保持一致', () => {
+    render(<CommunityPage />);
+    const topicTypeGroup = screen.getByRole('group', { name: '主题类型' });
+    const expectedIcons: Record<string, string> = {
+      讨论: 'lucide-message-circle',
+      分享: 'lucide-share-2',
+      投票: 'lucide-chart-line',
+      求助: 'lucide-circle-question-mark',
+    };
+    for (const [label, iconClass] of Object.entries(expectedIcons)) {
+      const icon = within(topicTypeGroup)
+        .getByRole('button', { name: label })
+        .querySelector('svg');
+      expect(icon).toHaveClass(iconClass);
+    }
+  });
+
   test('详情视：回帖滚动 main 必须挂在 h-full flex 外层下', () => {
     mockCommunityState.selectedTopic = topic;
     render(<CommunityPage />);

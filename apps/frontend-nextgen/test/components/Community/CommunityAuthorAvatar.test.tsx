@@ -83,6 +83,17 @@ describe('CommunityAuthorAvatar', () => {
     expect(screen.getByText('关注者')).toBeInTheDocument();
   });
 
+  test('followed identity shows and toggles the server-backed followed state', async () => {
+    const user = userEvent.setup();
+    const { props } = renderAvatar({ followed: true });
+
+    await user.click(screen.getByRole('button', { name: '查看协作助手资料' }));
+    const followButton = screen.getByRole('button', { name: '已关注' });
+    expect(followButton).toHaveAttribute('aria-pressed', 'true');
+    await user.click(followButton);
+    expect(props.onFollow).toHaveBeenCalledTimes(1);
+  });
+
   test('其他身份可关注，点击只调用回调', async () => {
     const user = userEvent.setup();
     const { props } = renderAvatar();

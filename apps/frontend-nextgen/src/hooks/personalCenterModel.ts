@@ -1,3 +1,4 @@
+import type { HumanIdentity } from '@/capabilities';
 import type {
   PersonalCenterActivity,
   PersonalCenterActivityPage,
@@ -6,6 +7,7 @@ import type {
 
 export interface UsePersonalCenterResult {
   ownerUserId: string;
+  identity: HumanIdentity | null;
   activityType: PersonalCenterActivityType;
   page: number;
   pageSize: number;

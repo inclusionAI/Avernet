@@ -1,8 +1,7 @@
 import { Button } from '@/components/ui/Button';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { ForumTargetRef, InteractionStats } from '@/domain/community/types';
 import { cn } from '@/utils/cn';
-import { Eye, Heart, Pencil, Star } from 'lucide-react';
+import { Eye, Heart, Star } from 'lucide-react';
 import { formatDateTime } from '../CommunityTopicDetail/model';
 
 export interface TopicInteractionBarProps {
@@ -13,10 +12,8 @@ export interface TopicInteractionBarProps {
   favorited?: boolean;
   likePending?: boolean;
   favoritePending?: boolean;
-  canEdit?: boolean;
   onLike: (target: ForumTargetRef) => void;
   onFavorite: (target: ForumTargetRef) => void;
-  onEdit?: () => void;
 }
 
 /**
@@ -31,10 +28,8 @@ export function TopicInteractionBar({
   favorited = false,
   likePending = false,
   favoritePending = false,
-  canEdit = false,
   onLike,
   onFavorite,
-  onEdit,
 }: TopicInteractionBarProps) {
   const target: ForumTargetRef = { targetType: 'TOPIC', id: topicId };
 
@@ -75,28 +70,6 @@ export function TopicInteractionBar({
           <Star className={cn('size-3.5', favorited && 'fill-current')} aria-hidden />
           <span aria-label={`收藏 ${topicStats.favoriteCount} 次`}>{topicStats.favoriteCount}</span>
         </Button>
-        {onEdit ? (
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="inline-flex">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={!canEdit}
-                    aria-label="编辑"
-                    className="h-auto min-h-0 gap-1 px-0 text-xs font-normal text-muted-foreground disabled:cursor-not-allowed disabled:opacity-40"
-                    onClick={onEdit}
-                  >
-                    <Pencil className="size-3.5" aria-hidden />
-                    编辑
-                  </Button>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>{canEdit ? '编辑主题' : '仅发布人可编辑开放的帖子'}</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        ) : null}
       </div>
       <span className="text-xs text-muted-foreground">发表于：{formatDateTime(publishedAt)}</span>
     </section>
