@@ -2,12 +2,11 @@
 
 The story deliberately crosses both processes: collaborator mutations use the
 public Backend HTTP API, the production manager-sync worker signs and sends its
-real BCS PUT, and the registered Bot owner reads the resulting BCS roster.
+real BCS PUT, and the initialized Bot owner reads the resulting BCS roster.
 """
 from __future__ import annotations
 
 import os
-import re
 import subprocess
 import tempfile
 import time
@@ -48,11 +47,9 @@ _PRINCIPAL_KEY = os.environ.get(
 )
 _BCS_TENANT = "teamclaw"
 _LOCAL_SERVICE_KEY = os.environ.get("SINGLEBOX_BCS_SERVICE_KEY", "e2e-test-key")
-_REGISTERED_BOT_ID = re.compile(r"^bot_[0-9a-f]{8}$")
 
 
 def _fresh_staff_id(prefix: str) -> str:
-    """Return a local-BCS-compatible ASCII alphanumeric user id."""
     return f"{prefix}{uuid4().hex[:12]}"
 
 
@@ -100,43 +97,12 @@ def _ensure_human(client: httpx.Client, user_id: str) -> None:
     _assert_status(response, 200, "BCS human registration")
 
 
-def _register_owned_bot(client: httpx.Client, owner_id: str) -> str:
-    mock_headers = {"X-Mock-User-Id": owner_id, "X-Mock-Nick-Name": owner_id}
-    token_response = client.get("/register/token", headers=mock_headers)
-    _assert_status(token_response, 200, "BCS registration-token issuance")
-    token = token_response.json().get("token")
-    assert isinstance(token, str) and token, "BCS registration token was absent"
-
-    register_response = client.post(
-        "/register",
-        headers=mock_headers,
-        params={"token": token, "bot-name": "Manager sync acceptance"},
-    )
-    _assert_status(register_response, 200, "BCS trusted Bot registration")
-    bot_id = register_response.json().get("bot_uuid")
-    assert isinstance(bot_id, str) and _REGISTERED_BOT_ID.fullmatch(bot_id), (
-        "BCS trusted registration returned an unexpected Bot id shape"
-    )
-    return bot_id
-
-
 def _ensure_projection_target(
-    client: httpx.Client, *, bot_id: str, owner_id: str
-) -> str:
-    """Create the exact stable identity that the Backend projector addresses.
-
-    Trusted ``/register`` intentionally generates canonical ``bot_<hex>`` ids;
-    it does not accept the Backend's ``<bot_id>:<entity_id>`` identity. The
-    local singlebox backfill surface therefore materializes that exact target
-    with the same owner. This proves delivery/readback identity alignment, not
-    the separate production Bot-registration lifecycle.
-    """
-    bcs_bot_id = f"{bot_id}:{owner_id}"
+    client: httpx.Client, *, bcs_bot_id: str, owner_id: str
+) -> None:
     response = client.post(
         f"/admin/bots/{quote(bcs_bot_id, safe='')}/ensure",
-        # Canonical local E2E credential used by existing BCS stories. The
-        # public local config has an empty api_keys registry and explicitly
-        # accepts any non-empty fixture key for this backfill endpoint.
+        # Local config explicitly accepts a non-empty fixture key here.
         headers={"X-BCS-Service-Key": _LOCAL_SERVICE_KEY},
         json={
             "staff_no": owner_id,
@@ -149,7 +115,6 @@ def _ensure_projection_target(
     body = response.json()
     assert body.get("bot_uuid") == bcs_bot_id
     assert body.get("ensured") is True
-    return bcs_bot_id
 
 
 def _initialize_fixture_ownership(bcs_bot_id: str) -> None:
@@ -285,23 +250,21 @@ def _remove_collaborator(client: httpx.Client, row_id: int) -> None:
     assert response.json().get("success") is True, "Backend collaborator removal failed"
 
 
-@pytest.mark.acceptance
 def test_live_backend_worker_projects_exact_bcs_manager_roster(live_backend):
     """Admin/member add and removal converge through the real Backend→BCS path."""
     owner_id = _fresh_staff_id("owner")
     admin_id = _fresh_staff_id("admin")
     member_id = _fresh_staff_id("member")
+    bot_id = f"bot_{uuid4().hex[:8]}"
+    bcs_bot_id = f"{bot_id}:{owner_id}"
     created_rows: list[int] = []
-    registered_bot_id: str | None = None
-    bcs_bot_id: str | None = None
 
     with httpx.Client(base_url=_BCS_BASE_URL, timeout=30.0) as bcs_client:
         try:
-            registered_bot_id = _register_owned_bot(bcs_client, owner_id)
             for user_id in (owner_id, admin_id, member_id):
                 _ensure_human(bcs_client, user_id)
-            bcs_bot_id = _ensure_projection_target(
-                bcs_client, bot_id=registered_bot_id, owner_id=owner_id
+            _ensure_projection_target(
+                bcs_client, bcs_bot_id=bcs_bot_id, owner_id=owner_id
             )
             _initialize_fixture_ownership(bcs_bot_id)
 
@@ -313,7 +276,7 @@ def test_live_backend_worker_projects_exact_bcs_manager_roster(live_backend):
                 _seed_member_managed_bot(
                     backend_client,
                     owner_id=owner_id,
-                    bot_id=registered_bot_id,
+                    bot_id=bot_id,
                     active_engine="openclaw",
                 )
                 read_roster = lambda: _read_manager_ids(  # noqa: E731
@@ -325,7 +288,7 @@ def test_live_backend_worker_projects_exact_bcs_manager_roster(live_backend):
                     created_rows.append(
                         _add_collaborator(
                             backend_client,
-                            bot_id=registered_bot_id,
+                            bot_id=bot_id,
                             owner_id=owner_id,
                             user_id=admin_id,
                             role="admin",
@@ -334,7 +297,7 @@ def test_live_backend_worker_projects_exact_bcs_manager_roster(live_backend):
                     created_rows.append(
                         _add_collaborator(
                             backend_client,
-                            bot_id=registered_bot_id,
+                            bot_id=bot_id,
                             owner_id=owner_id,
                             user_id=member_id,
                             role="member",
@@ -355,16 +318,13 @@ def test_live_backend_worker_projects_exact_bcs_manager_roster(live_backend):
                         except Exception:
                             pass
         finally:
-            mock_headers = {
-                "X-Mock-User-Id": owner_id,
-                "X-Mock-Nick-Name": owner_id,
-            }
-            for bot_id in (bcs_bot_id, registered_bot_id):
-                if bot_id is None:
-                    continue
-                try:
-                    bcs_client.delete(
-                        f"/bots/{quote(bot_id, safe='')}", headers=mock_headers
-                    )
-                except httpx.HTTPError:
-                    pass
+            try:
+                bcs_client.delete(
+                    f"/bots/{quote(bcs_bot_id, safe='')}",
+                    headers={
+                        "X-Mock-User-Id": owner_id,
+                        "X-Mock-Nick-Name": owner_id,
+                    },
+                )
+            except httpx.HTTPError:
+                pass

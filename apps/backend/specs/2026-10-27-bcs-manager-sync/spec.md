@@ -2,8 +2,8 @@
 
 - Status: implemented; local regression passed, remote CI/live validation pending
 - Feature baseline: `be5b69b21`
-- Merge target: `REL20261029` (PR #3208). BCS local trusted-app configuration
-  is split into PR #3254 targeting `dev`; this Backend PR does not change BCS TOML.
+- Merge target: `REL20261029` (PR #3208), including the BCS local trusted-app
+  configuration. The temporary split PR #3254 is closed without merging.
 - Design: `/home/admin/workspace/docs/avernet/superpowers/specs/2026-10-26-backend-bcs-manager-sync-design.md`
 - Operations: `apps/backend/docs/bot-manager-sync-operations.md`
 
@@ -232,15 +232,13 @@ The older review and validation records describe an invalidated design and are
 historical only. The results above apply to the simplified contract; they do not
 establish eventual consistency or replace the unrun external live acceptance.
 
-## Release branch split (2026-10-29)
+## Release target (2026-10-29)
 
-PR #3208 targets `REL20261029`. The 14-line local BCS `trusted_apps` change is
-owned by independent `dev` PR #3254. Deployments must provide that BCS permission
-before enabling delivery; the Backend never bypasses BCS authorization. The
-singlebox coverage runner provisions the equivalent scoped permission only in
-its temporary test configuration so the release PR still exercises the real
-HTTP/principal/readback path without importing BCS deployment changes.
+PR #3208 targets `REL20261029` and includes the BCS local trusted-app rule.
+The temporary extraction to #3254 was cancelled at the user's request; no
+split-only runtime config injection remains. Deployments still need the correct
+shared signing key and tenant-scoped authorization before enabling delivery.
 
-Before the split, `fc5fa08fb` passed all applicable remote checks (Unit Tests
-40808582323, Singlebox Coverage 40808582389). The split heads require their own
-CI evidence, recorded in the two PRs.
+Before the short-lived split, `fc5fa08fb` passed all applicable remote checks
+(Unit Tests 40808582323, Singlebox Coverage 40808582389). Current-head CI evidence
+is recorded separately in the PR.

@@ -58,7 +58,7 @@ reset_case() {
     write_local_template
     export BCS_CONFIG_DIR="${TEST_ROOT}/${name}"
     export BCS_SERVER_ENV="local"
-    unset BCS_BOTCHAT_URL BCS_E2E_MOCK_BASE_URL BCS_E2E_JUDGE_API_KEY SINGLEBOX_COVERAGE
+    unset BCS_BOTCHAT_URL BCS_E2E_MOCK_BASE_URL BCS_E2E_JUDGE_API_KEY
     unset OPENCLAW_OPENAI_BASE_URL OPENCLAW_OPENAI_API_KEY OPENCLAW_OPENAI_MODEL_ID OPENAI_API_KEY
 }
 
@@ -74,24 +74,6 @@ assert_not_contains() {
     if grep -F "$unexpected" "$file" >/dev/null; then
         fail "${file} unexpectedly contains: ${unexpected}"
     fi
-}
-
-assert_trusted_app_counts() {
-    local file="$1"
-    local expected_tables="$2"
-    local expected_exact_rules="$3"
-    python3 - "$file" "$expected_tables" "$expected_exact_rules" <<'PY'
-import sys
-import tomllib
-from pathlib import Path
-
-trusted_apps = tomllib.loads(Path(sys.argv[1]).read_text(encoding="utf-8")).get(
-    "bot_authority", {}
-).get("trusted_apps", [])
-exact_rule = {"app": "backend", "tenant": "teamclaw", "actions": ["managers:sync"]}
-assert len(trusted_apps) == int(sys.argv[2]), trusted_apps
-assert sum(rule == exact_rule for rule in trusted_apps) == int(sys.argv[3]), trusted_apps
-PY
 }
 
 test_local_llm_stays_disabled_without_env_config() {
@@ -177,69 +159,6 @@ test_partial_env_config_does_not_enable_local_llm() {
     assert_contains "${BCS_CONFIG_DIR}/bcs-config.toml" 'type = "none"'
 }
 
-test_normal_runtime_does_not_add_coverage_authority() {
-    reset_case "normal-authority"
-
-    prepare_bcs_runtime_config
-
-    assert_not_contains "${BCS_CONFIG_DIR}/bcs-config.toml" 'app = "backend"'
-    assert_not_contains "${BCS_CONFIG_DIR}/bcs-config-local.toml" 'app = "backend"'
-}
-
-test_non_local_coverage_runtime_does_not_add_authority() {
-    reset_case "non-local-coverage-authority"
-    export BCS_SERVER_ENV="dev"
-    export SINGLEBOX_COVERAGE=1
-
-    prepare_bcs_runtime_config
-
-    assert_not_contains "${BCS_CONFIG_DIR}/bcs-config.toml" 'app = "backend"'
-    assert_not_contains "${BCS_CONFIG_DIR}/bcs-config-local.toml" 'app = "backend"'
-}
-
-test_coverage_runtime_keeps_tracked_template_unmodified() {
-    local temporary_bcs_dir="$BCS_DIR"
-    local tracked_template="${ROOT}/apps/bcs/configs/bcs-config-local.toml"
-    local template_snapshot="${TEST_ROOT}/tracked-bcs-config-local.toml"
-    cp "$tracked_template" "$template_snapshot"
-
-    export BCS_DIR="${ROOT}/apps/bcs"
-    export BCS_CONFIG_DIR="${TEST_ROOT}/coverage-tracked-template"
-    export BCS_SERVER_ENV="local"
-    export SINGLEBOX_COVERAGE=1
-    unset BCS_E2E_MOCK_BASE_URL OPENCLAW_OPENAI_BASE_URL OPENCLAW_OPENAI_API_KEY OPENCLAW_OPENAI_MODEL_ID
-
-    prepare_bcs_runtime_config
-
-    cmp -s "$tracked_template" "$template_snapshot" \
-        || fail "coverage runtime config modified the tracked BCS template"
-    assert_trusted_app_counts "${BCS_CONFIG_DIR}/bcs-config.toml" 1 1
-    assert_trusted_app_counts "${BCS_CONFIG_DIR}/bcs-config-local.toml" 1 1
-    export BCS_DIR="$temporary_bcs_dir"
-}
-
-test_coverage_runtime_reuses_existing_manager_sync_authority() {
-    reset_case "coverage-existing-authority"
-    cat >> "${BCS_DIR}/configs/bcs-config-local.toml" <<'EOF'
-
-[bot_authority]
-[[bot_authority.trusted_apps]]
-app = "backend"
-tenant = "teamclaw"
-actions = ["managers:sync"]
-EOF
-    export SINGLEBOX_COVERAGE=1
-
-    prepare_bcs_runtime_config
-
-    local config_file
-    for config_file in \
-        "${BCS_CONFIG_DIR}/bcs-config.toml" \
-        "${BCS_CONFIG_DIR}/bcs-config-local.toml"; do
-        assert_trusted_app_counts "$config_file" 1 1
-    done
-}
-
 test_e2e_mock_takes_precedence_over_env_config() {
     reset_case "e2e"
     export OPENCLAW_OPENAI_BASE_URL='https://llm.example.test/v1'
@@ -262,10 +181,6 @@ test_complete_env_config_enables_local_llm
 test_local_llm_resolves_openai_api_key_reference
 test_local_llm_rejects_unresolved_openai_api_key_reference
 test_partial_env_config_does_not_enable_local_llm
-test_normal_runtime_does_not_add_coverage_authority
-test_non_local_coverage_runtime_does_not_add_authority
-test_coverage_runtime_keeps_tracked_template_unmodified
-test_coverage_runtime_reuses_existing_manager_sync_authority
 test_e2e_mock_takes_precedence_over_env_config
 
 printf 'PASS: singlebox BCS runtime config tests\n'
