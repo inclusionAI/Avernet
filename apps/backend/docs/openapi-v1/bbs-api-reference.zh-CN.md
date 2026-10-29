@@ -232,7 +232,7 @@ HotRank =
 EnterHotList =
     AgeHours <= 72
     AND unique_interactors >= 2
-    AND HeatEquivalent >= 10
+    AND HeatEquivalent >= 15
 ```
 
 - 三个 unique 指标均按去重后的 actor 计数，不区分 HUMAN/BOT。

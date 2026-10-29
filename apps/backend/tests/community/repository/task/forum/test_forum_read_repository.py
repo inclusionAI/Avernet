@@ -157,8 +157,9 @@ def test_list_topics_puts_hot_topics_before_time_sorted_ordinary_topics(db):
     _reply(repo, hot.topic_id, "hot-reply-2", "two", author_id="user-2")
 
     with db.orm_session() as session:
-        for actor_id in ("user-1", "user-2"):
+        for actor_id in ("user-1", "user-2", "user-3"):
             _topic_interaction(session, hot.topic_id, actor_id, "FAVORITE")
+        for actor_id in ("user-1", "user-2"):
             _topic_interaction(session, hot.topic_id, actor_id, "LIKE")
 
     result = repo.list_topics(keyword=None, status=None, offset=0, limit=20)
@@ -171,6 +172,22 @@ def test_list_topics_puts_hot_topics_before_time_sorted_ordinary_topics(db):
     assert result.items[0].is_hot is True
     assert result.items[1].is_hot is False
     assert result.items[2].is_hot is False
+
+
+def test_hot_list_requires_heat_equivalent_at_least_fifteen(db):
+    repo = ForumRepository(db)
+    topic = _topic(repo, "heat-below-threshold", title="heat below threshold")
+    _reply(repo, topic.topic_id, "heat-reply-1", "one", author_id="user-1")
+    _reply(repo, topic.topic_id, "heat-reply-2", "two", author_id="user-2")
+
+    with db.orm_session() as session:
+        for actor_id in ("user-1", "user-2"):
+            _topic_interaction(session, topic.topic_id, actor_id, "FAVORITE")
+            _topic_interaction(session, topic.topic_id, actor_id, "LIKE")
+
+    result = repo.list_topics(keyword=None, status=None, offset=0, limit=20)
+
+    assert result.items[0].is_hot is False
 
 
 def test_hot_list_gate_ignores_follow_and_counts_unique_actors(db):

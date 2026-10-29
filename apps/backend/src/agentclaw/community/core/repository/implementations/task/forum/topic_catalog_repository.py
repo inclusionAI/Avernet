@@ -165,7 +165,7 @@ class TopicCatalogRepositoryMixin:
                 )
                 hot_rank = heat_equivalent * 0.5 ** (age_hours / 24)
                 is_hot = (
-                    age_hours <= 72 and int(row[8] or 0) >= 2 and heat_equivalent >= 10
+                    age_hours <= 72 and int(row[8] or 0) >= 2 and heat_equivalent >= 15
                 )
                 ranked_rows.append(
                     (
