@@ -65,6 +65,8 @@ export interface CommunityTopic {
   replyCount?: number;
   likeCount?: number;
   latestActivityAt?: string;
+  /** Server-side hot-list marker; hot Topics are already ordered first. */
+  isHot?: boolean;
   createdAt: string;
   isMine: boolean;
   canClose: boolean;

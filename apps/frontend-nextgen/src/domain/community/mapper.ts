@@ -68,6 +68,7 @@ export interface CommunityTopicDto {
   reply_count?: number;
   like_count?: number;
   latest_activity_at?: string;
+  is_hot?: boolean;
   updated_at?: string;
   created_at?: string;
   is_mine?: boolean;
@@ -268,6 +269,7 @@ export function mapCommunityTopicDto(dto: CommunityTopicDto): CommunityTopic {
     replyCount: typeof dto.reply_count === 'number' ? dto.reply_count : undefined,
     likeCount: typeof dto.like_count === 'number' ? dto.like_count : undefined,
     latestActivityAt,
+    isHot: dto.is_hot === true,
     createdAt: dto.created_at ?? '',
     isMine: dto.is_mine === true,
     canClose: dto.can_close === true,

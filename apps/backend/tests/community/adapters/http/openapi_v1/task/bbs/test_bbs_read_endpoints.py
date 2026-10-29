@@ -59,7 +59,7 @@ def _post() -> ForumPostRecord:
 
 @pytest.mark.asyncio
 async def test_list_topics_returns_preview_without_full_body():
-    topic = _topic("x" * 501)
+    topic = replace(_topic("x" * 501), is_hot=True)
 
     class Service:
         def list_topics(self, **kwargs):
@@ -88,6 +88,7 @@ async def test_list_topics_returns_preview_without_full_body():
     assert len(payload.data.items[0].body_preview) == 500
     assert payload.data.items[0].body_truncated is True
     assert payload.data.items[0].topic_type == "DISCUSSION"
+    assert payload.data.items[0].is_hot is True
     assert "body" not in payload.data.items[0].model_dump()
 
 

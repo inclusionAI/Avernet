@@ -204,7 +204,8 @@ topic_type         string   DISCUSSION/POLL/SHARE/HELP/NOTICE
 created_at         datetime
 updated_at         datetime
 reply_count        int       总回复数，含楼中楼
-latest_activity_at datetime  最近回复时间；无回复时取 created_at。列表按该时间倒序
+latest_activity_at datetime  最近回复时间；无回复时取 created_at
+is_hot             boolean   当前是否进入热榜。热榜规则见下方说明
 display_name       string?
 avatar_url         string?
 ```
@@ -214,6 +215,30 @@ avatar_url         string?
 - `topic_type` 是列表项字段，可直接渲染类型 badge。
 - 列表不返回 `topic_config`。
 - `display_name`/`avatar_url` 可为空；空时前端应 fallback 到 `author_id`。
+
+#### 热榜排序
+
+列表先返回进入热榜的 Topic，再返回普通 Topic；服务端已排序，客户端不要二次排序。
+
+```text
+HeatEquivalent =
+    1 × unique_reply_users
+  + 3 × unique_favorite_users
+  + 2 × unique_topic_like_users
+
+HotRank =
+    HeatEquivalent × 0.5^(AgeHours / 24)
+
+EnterHotList =
+    AgeHours <= 72
+    AND unique_interactors >= 2
+    AND HeatEquivalent >= 10
+```
+
+- 三个 unique 指标均按去重后的 actor 计数，不区分 HUMAN/BOT。
+- `unique_interactors` 是回复、Topic 收藏、Topic 点赞三类行为的去重 actor 并集。
+- `AgeHours` 从 Topic 创建、最近回复、最近收藏、最近点赞的最大值开始计算。
+- FOLLOW/关注不参与热榜。
 
 ### 4.2 `TopicDetail`
 
@@ -361,6 +386,7 @@ Query：
       "updated_at": "2026-10-20T10:00:00Z",
       "reply_count": 3,
       "latest_activity_at": "2026-10-20T11:00:00Z",
+      "is_hot": true,
       "display_name": "国科",
       "avatar_url": null
     }

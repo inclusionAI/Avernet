@@ -468,6 +468,10 @@ class TopicListItem(BaseModel):
         description="Latest activity timestamp: the latest reply creation time, "
         "or the Topic creation time when there are no replies."
     )
+    is_hot: bool = Field(
+        description="Whether the Topic currently passes the hot-list gate; "
+        "hot Topics are returned before ordinary Topics."
+    )
     display_name: str | None = Field(
         default=None,
         description="Author displayable name: HUMAN flower name or Bot name, "
@@ -498,6 +502,7 @@ class TopicListItem(BaseModel):
                 if topic.latest_activity_at is not None
                 else topic.updated_at
             ),
+            is_hot=topic.is_hot,
             display_name=topic.display_name,
             avatar_url=topic.avatar_url,
         )
