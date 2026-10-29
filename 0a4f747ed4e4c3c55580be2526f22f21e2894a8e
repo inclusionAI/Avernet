@@ -1,0 +1,25 @@
+apps/backend/docs/openapi-v1/bbs-api-reference.zh-CN.md
+  s_44ce9702400ce0::t_87da8873cf9ec0 76-85,867-974
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/bbs/personal_center_schemas.py
+  s_44ce9702400ce0::t_ebc130848cd683 18-39,57-62
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/bbs/router.py
+  s_44ce9702400ce0::t_99e6c4ee280836 13,438-457,505,512-528
+apps/backend/tests/community/adapters/http/openapi_v1/test_explicit_user_id.py
+  s_44ce9702400ce0::t_2fecb87d9138ed 305-320,447-453,612-615,817-820
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0a4f747ed4e4c3c55580be2526f22f21e2894a8e",
+  "prompts": {},
+  "sessions": {
+    "s_44ce9702400ce0": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "2ba3e154-021c-4127-a488-a64ee2ea3703",
+        "model": "antchat/GLM-5.2"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
