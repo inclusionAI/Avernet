@@ -16,6 +16,9 @@ from agentclaw.community.core.task.forum.interaction.models import (
 from agentclaw.community.core.task.forum.models import (
     ForumTopicPage,
 )
+from agentclaw.community.core.repository.implementations.task.forum.topic_hot import (
+    classify_topic_hot,
+)
 from agentclaw.community.core.task.forum.repository.models import (
     ForumInteractionModel,
     ForumPostModel,
@@ -129,31 +132,37 @@ class TopicCatalogRepositoryMixin:
             for row in query.all():
                 topic = row[0]
                 latest_activity_at = row[2] or topic.gmt_create
+                user_count = int(row[3] or 0)
+                favorite_user_count = int(row[4] or 0)
+                like_user_count = int(row[6] or 0)
                 heat_equivalent = (
-                    int(row[3] or 0) + 3 * int(row[4] or 0) + 2 * int(row[6] or 0)
-                )
-                latest_hot_at = max(
-                    (
-                        topic.gmt_create,
-                        row[2],
-                        row[5],
-                        row[7],
-                    ),
-                    key=lambda value: value or topic.gmt_create,
+                    user_count + 3 * favorite_user_count + 2 * like_user_count
                 )
                 age_hours = max(
                     0.0,
-                    (now - latest_hot_at.replace(tzinfo=timezone.utc)).total_seconds()
+                    (
+                        now
+                        - max(
+                            (
+                                topic.gmt_create,
+                                row[2],
+                                row[5],
+                                row[7],
+                            ),
+                            key=lambda value: value or topic.gmt_create,
+                        ).replace(tzinfo=timezone.utc)
+                    ).total_seconds()
                     / 3600,
                 )
                 hot_rank = heat_equivalent * 0.5 ** (age_hours / 24)
-                interaction_kind_count = sum(
-                    1 for count in (row[3], row[4], row[6]) if int(count or 0) > 0
-                )
-                is_hot = (
-                    age_hours <= 72
-                    and interaction_kind_count >= 2
-                    and heat_equivalent >= 15
+                is_hot = classify_topic_hot(
+                    created_at=topic.gmt_create,
+                    latest_reply_at=row[2],
+                    latest_favorite_at=row[5],
+                    latest_like_at=row[7],
+                    reply_participant_count=user_count,
+                    favorite_user_count=favorite_user_count,
+                    like_user_count=like_user_count,
                 )
                 ranked_rows.append(
                     (

@@ -6,6 +6,7 @@ import type {
   CommunityPollStatsOption,
   CommunityReply,
   CommunityTopic,
+  CommunityTopicStatus,
   CommunityTopicType,
   ForumActorRef,
   ForumTargetRef,
@@ -16,6 +17,7 @@ import type {
   InteractionTargetType,
   PersonalCenterActivity,
   PersonalCenterActivityType,
+  PersonalCenterFollowedContext,
   PersonalCenterReplyContext,
   PersonalCenterTopicContext,
 } from './types';
@@ -349,8 +351,14 @@ export interface PersonalCenterTopicContextDto {
   author_type?: string;
   author_id?: string;
   author_display_name?: string;
+  status?: string;
   reply_count?: number | null;
   like_count?: number | null;
+  view_count?: number | null;
+  favorite_count?: number | null;
+  is_hot?: boolean | null;
+  author_avatar_url?: string | null;
+  created_at?: string | null;
   latest_reply_at?: string | null;
   [key: string]: unknown;
 }
@@ -361,6 +369,14 @@ export interface PersonalCenterReplyContextDto {
   author_id?: string;
   author_display_name?: string;
   body_preview?: string;
+  [key: string]: unknown;
+}
+
+export interface PersonalCenterFollowedContextDto {
+  target_type?: string;
+  target_id?: string;
+  display_name?: string;
+  avatar_url?: string | null;
   [key: string]: unknown;
 }
 
@@ -376,6 +392,7 @@ export interface PersonalCenterActivityDto {
   body_preview?: string;
   topic_context?: PersonalCenterTopicContextDto | null;
   replied_to_post?: PersonalCenterReplyContextDto | null;
+  followed_context?: PersonalCenterFollowedContextDto | null;
   [key: string]: unknown;
 }
 
@@ -443,6 +460,10 @@ export function mapInteractionSummaryDto(dto: InteractionSummaryDto): Interactio
   return { scope, actor, target, ...mapInteractionStatsDto(dto.stats) };
 }
 
+function mapPersonalCenterTopicStatus(value: string | undefined): CommunityTopicStatus {
+  return value?.toUpperCase() === 'CLOSED' ? 'closed' : 'open';
+}
+
 export function mapPersonalCenterTopicContextDto(
   dto: PersonalCenterTopicContextDto | null | undefined,
 ): PersonalCenterTopicContext | undefined {
@@ -451,14 +472,32 @@ export function mapPersonalCenterTopicContextDto(
     title: dto.title ?? '',
     bodyPreview: dto.body_preview ?? '',
     topicType: mapTopicType(dto.topic_type),
+    status: mapPersonalCenterTopicStatus(dto.status),
     author: {
       actorType: interactionActorType(dto.author_type),
       id: dto.author_id?.trim() ?? '',
     },
     authorDisplayName: dto.author_display_name ?? dto.author_id ?? '',
+    authorAvatarUrl: dto.author_avatar_url?.trim() || undefined,
     replyCount: countOrZero(dto.reply_count),
     likeCount: countOrZero(dto.like_count),
+    viewCount: countOrZero(dto.view_count),
+    favoriteCount: countOrZero(dto.favorite_count),
+    isHot: dto.is_hot === true,
+    createdAt: dto.created_at ?? '',
     latestReplyAt: dto.latest_reply_at ?? undefined,
+  };
+}
+
+function mapPersonalCenterFollowedContextDto(
+  dto: PersonalCenterFollowedContextDto | null | undefined,
+): PersonalCenterFollowedContext | undefined {
+  if (!dto) return undefined;
+  return {
+    targetType: interactionTargetType(dto.target_type),
+    targetId: dto.target_id?.trim() ?? '',
+    displayName: dto.display_name ?? dto.target_id ?? '',
+    avatarUrl: dto.avatar_url?.trim() || undefined,
   };
 }
 
@@ -511,5 +550,38 @@ export function mapPersonalCenterActivityDto(
     bodyPreview: dto.body_preview ?? '',
     topicContext: mapPersonalCenterTopicContextDto(dto.topic_context),
     repliedToPost: mapPersonalCenterReplyContextDto(dto.replied_to_post),
+    followedContext: mapPersonalCenterFollowedContextDto(dto.followed_context),
+  };
+}
+
+export function personalCenterActivityToTopic(
+  activity: PersonalCenterActivity,
+): CommunityTopic | null {
+  const context = activity.topicContext;
+  if (!activity.topicId || !context) return null;
+  const authorType = context.author.actorType.toLowerCase() as CommunityAuthor['type'];
+  return {
+    id: activity.topicId,
+    title: context.title,
+    body: context.bodyPreview,
+    status: context.status,
+    topicType: context.topicType,
+    author: {
+      type: authorType,
+      id: context.author.id,
+      displayName: context.authorDisplayName,
+      avatarUrl: context.authorAvatarUrl,
+    },
+    replyCount: context.replyCount,
+    likeCount: context.likeCount,
+    viewCount: context.viewCount,
+    favoriteCount: context.favoriteCount,
+    latestActivityAt: context.latestReplyAt ?? context.createdAt,
+    isHot: context.isHot,
+    createdAt: context.createdAt,
+    isMine: false,
+    canClose: false,
+    canEdit: false,
+    canDelete: false,
   };
 }

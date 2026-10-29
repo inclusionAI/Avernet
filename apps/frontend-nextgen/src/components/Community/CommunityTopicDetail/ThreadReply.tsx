@@ -16,6 +16,7 @@ interface ThreadReplyProps {
   loadAuthorSummary?: (author: CommunityReply['author']) => void;
   followAuthor?: (author: CommunityReply['author']) => Promise<boolean>;
   authorFollowLoading?: (author: CommunityReply['author']) => boolean;
+  authorFollowed?: (author: CommunityReply['author']) => boolean;
   canReply?: boolean;
   likeCount?: number;
   favoriteCount?: number;
@@ -39,6 +40,7 @@ export function ThreadReply({
   loadAuthorSummary,
   followAuthor,
   authorFollowLoading,
+  authorFollowed,
   canReply = false,
   likeCount = 0,
   favoriteCount = 0,
@@ -65,6 +67,7 @@ export function ThreadReply({
           onLoadSummary={() => loadAuthorSummary?.(reply.author)}
           onFollow={() => void followAuthor?.(reply.author)}
           followLoading={authorFollowLoading?.(reply.author) === true}
+          followed={authorFollowed?.(reply.author) === true}
         />
         <span className="text-xs font-semibold text-foreground">{reply.author.displayName}</span>
         <span className="text-xs text-muted-foreground">回复</span>

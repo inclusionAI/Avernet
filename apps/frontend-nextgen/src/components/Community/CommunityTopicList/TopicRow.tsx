@@ -52,9 +52,9 @@ export function TopicRow({
   // 列表行对齐原型 5 列：主题 / 类型 / 发帖人 / 互动数据 / 最新回复。
   const summary = getTopicSummary?.(topic);
   const replyCount = typeof topic.replyCount === 'number' ? topic.replyCount : 0;
-  const viewCount = summary?.viewCount ?? 0;
-  const likeCount = summary?.likeCount ?? (typeof topic.likeCount === 'number' ? topic.likeCount : 0);
-  const favoriteCount = summary?.favoriteCount ?? 0;
+  const viewCount = summary?.viewCount ?? topic.viewCount ?? 0;
+  const likeCount = summary?.likeCount ?? topic.likeCount ?? 0;
+  const favoriteCount = summary?.favoriteCount ?? topic.favoriteCount ?? 0;
   const hasReplies = replyCount > 0;
   const activityAt = hasReplies ? topic.latestActivityAt ?? topic.createdAt : topic.createdAt;
   const activityPrefix = hasReplies ? '最新回复：' : '发帖时间：';

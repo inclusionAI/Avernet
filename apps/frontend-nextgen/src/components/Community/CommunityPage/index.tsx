@@ -39,6 +39,18 @@ export function CommunityPage() {
     community.topicType !== 'all';
   const scrollRootRef = useRef<HTMLElement>(null);
 
+  if (editOpen && community.selectedTopic) {
+    return (
+      <EditTopicModal
+        open
+        topic={community.selectedTopic}
+        saving={community.editSaving}
+        onOpenChange={setEditOpen}
+        onSave={community.updateTopic}
+      />
+    );
+  }
+
   if (community.selectedTopic) {
     const topicTarget = { targetType: 'TOPIC' as const, id: community.selectedTopic.id };
     return (
@@ -56,6 +68,7 @@ export function CommunityPage() {
         loadAuthorSummary={community.loadAuthorSummary}
         followAuthor={community.followAuthor}
         authorFollowLoading={community.authorFollowPending}
+        authorFollowed={community.isAuthorFollowed}
         likePending={community.interactions?.isActionPending('LIKE', topicTarget)}
         favoritePending={community.interactions?.isActionPending('FAVORITE', topicTarget)}
         onLike={(target) => community.likeTopic?.(target)}
@@ -97,18 +110,6 @@ export function CommunityPage() {
         replyPageCount={community.replyPageCount}
         replyPageSize={COMMUNITY_REPLY_PAGE_SIZE}
         onGoToReplyPage={(page) => void community.goToReplyPage?.(page)}
-      />
-    );
-  }
-
-  if (editOpen && community.selectedTopic) {
-    return (
-      <EditTopicModal
-        open
-        topic={community.selectedTopic}
-        saving={community.editSaving}
-        onOpenChange={setEditOpen}
-        onSave={community.updateTopic}
       />
     );
   }

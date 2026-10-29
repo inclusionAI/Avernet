@@ -9,6 +9,9 @@ from sqlalchemy.orm import aliased
 from agentclaw.community.core.repository.protocols.task.forum_personal_center_activity import (
     ForumPersonalCenterActivityRepositoryProtocol,
 )
+from agentclaw.community.core.repository.implementations.task.forum.topic_hot import (
+    classify_topic_hot,
+)
 from agentclaw.community.core.task.forum.interaction.models import (
     ForumActorRef,
     ForumActorType,
@@ -18,6 +21,7 @@ from agentclaw.community.core.task.forum.interaction.models import (
     PersonalCenterActivityRecord,
     PersonalCenterActivityType,
     PersonalCenterActorScope,
+    PersonalCenterFollowedContext,
     PersonalCenterReplyContext,
     PersonalCenterTopicContext,
 )
@@ -71,12 +75,64 @@ def _topic_latest_reply_at_subquery(db):
     )
 
 
-def _topic_like_count_subquery(db):
+def _topic_reply_participant_count_subquery(db):
     return (
-        db.query(func.coalesce(func.sum(ForumInteractionModel.active), 0))
+        db.query(
+            func.count(
+                func.distinct(
+                    func.concat(
+                        ForumPostModel.author_type,
+                        ":",
+                        ForumPostModel.author_id,
+                    )
+                )
+            )
+        )
+        .filter(ForumPostModel.topic_id == ForumTopicModel.topic_id)
+        .correlate(ForumTopicModel)
+        .scalar_subquery()
+    )
+
+
+def _topic_count_subquery(
+    db,
+    action_type: ForumInteractionActionType,
+    *,
+    distinct_users: bool = False,
+):
+    count = (
+        func.count(
+            func.distinct(
+                func.concat(
+                    ForumInteractionModel.actor_type,
+                    ":",
+                    ForumInteractionModel.actor_id,
+                )
+            )
+        )
+        if distinct_users
+        else func.coalesce(func.sum(ForumInteractionModel.active), 0)
+    )
+    return (
+        db.query(count)
         .filter(
             ForumInteractionModel.env == get_current_env(),
-            ForumInteractionModel.action_type == ForumInteractionActionType.LIKE,
+            ForumInteractionModel.action_type == action_type,
+            ForumInteractionModel.target_type == ForumInteractionTargetType.TOPIC,
+            ForumInteractionModel.target_id == ForumTopicModel.topic_id,
+            ForumInteractionModel.active > 0,
+        )
+        .correlate(ForumTopicModel)
+        .scalar_subquery()
+    )
+
+
+def _topic_latest_interaction_subquery(db, action_type: ForumInteractionActionType):
+    return (
+        db.query(func.max(ForumInteractionModel.gmt_create))
+        .filter(
+            ForumInteractionModel.env == get_current_env(),
+            ForumInteractionModel.action_type == action_type,
             ForumInteractionModel.target_type == ForumInteractionTargetType.TOPIC,
             ForumInteractionModel.target_id == ForumTopicModel.topic_id,
             ForumInteractionModel.active > 0,
@@ -91,14 +147,44 @@ def _topic_context_columns(db):
         ForumTopicModel.title.label("topic_title"),
         ForumTopicModel.body.label("topic_body"),
         ForumTopicModel.topic_type.label("topic_type"),
+        ForumTopicModel.status.label("topic_status"),
         ForumTopicModel.author_type.label("topic_author_type"),
         ForumTopicModel.author_id.label("topic_author_id"),
         func.coalesce(
             ForumTopicModel.author_display_name, ForumTopicModel.author_id
         ).label("topic_author_name"),
+        ForumTopicModel.gmt_create.label("topic_created_at"),
+        ForumTopicModel.author_avatar_url.label("topic_author_avatar_url"),
         _topic_reply_count_subquery(db).label("topic_reply_count"),
-        _topic_like_count_subquery(db).label("topic_like_count"),
+        _topic_reply_participant_count_subquery(db).label(
+            "topic_reply_participant_count"
+        ),
+        _topic_count_subquery(
+            db, ForumInteractionActionType.LIKE
+        ).label("topic_like_count"),
+        _topic_count_subquery(
+            db, ForumInteractionActionType.VIEW
+        ).label("topic_view_count"),
+        _topic_count_subquery(
+            db, ForumInteractionActionType.FAVORITE
+        ).label("topic_favorite_count"),
+        _topic_count_subquery(
+            db,
+            ForumInteractionActionType.FAVORITE,
+            distinct_users=True,
+        ).label("topic_favorite_user_count"),
+        _topic_count_subquery(
+            db,
+            ForumInteractionActionType.LIKE,
+            distinct_users=True,
+        ).label("topic_like_user_count"),
         _topic_latest_reply_at_subquery(db).label("topic_latest_reply_at"),
+        _topic_latest_interaction_subquery(
+            db, ForumInteractionActionType.FAVORITE
+        ).label("topic_latest_favorite_at"),
+        _topic_latest_interaction_subquery(
+            db, ForumInteractionActionType.LIKE
+        ).label("topic_latest_like_at"),
     ]
 
 
@@ -107,12 +193,22 @@ def _topic_context_null_columns():
         literal(None, String).label("topic_title"),
         literal(None, String).label("topic_body"),
         literal(None, String).label("topic_type"),
+        literal(None, String).label("topic_status"),
         literal(None, String).label("topic_author_type"),
         literal(None, String).label("topic_author_id"),
         literal(None, String).label("topic_author_name"),
+        literal(None, DateTime).label("topic_created_at"),
+        literal(None, String).label("topic_author_avatar_url"),
         null().label("topic_reply_count"),
+        null().label("topic_reply_participant_count"),
         null().label("topic_like_count"),
+        null().label("topic_view_count"),
+        null().label("topic_favorite_count"),
+        null().label("topic_favorite_user_count"),
+        null().label("topic_like_user_count"),
         literal(None, DateTime).label("topic_latest_reply_at"),
+        literal(None, DateTime).label("topic_latest_favorite_at"),
+        literal(None, DateTime).label("topic_latest_like_at"),
     ]
 
 
@@ -126,22 +222,62 @@ def _reply_context_null_columns():
     ]
 
 
+def _followed_context_null_columns():
+    return [
+        literal(None, String).label("followed_display_name"),
+        literal(None, String).label("followed_avatar_url"),
+    ]
+
+
 def _topic_context_from_row(
     row,
 ) -> PersonalCenterTopicContext | None:
     if row.topic_title is None:
         return None
     author_type = str(row.topic_author_type or "HUMAN")
+    reply_count = max(0, int(row.topic_reply_count or 0))
+    reply_participant_count = max(
+        0, int(row.topic_reply_participant_count or 0)
+    )
+    favorite_user_count = max(0, int(row.topic_favorite_user_count or 0))
+    like_user_count = max(0, int(row.topic_like_user_count or 0))
     return PersonalCenterTopicContext(
         title=row.topic_title,
         body_preview=(row.topic_body or "")[:500],
         topic_type=row.topic_type or "discussion",
+        status=row.topic_status or "OPEN",
         author_type=ForumActorType(author_type),
         author_id=row.topic_author_id or "",
         author_display_name=row.topic_author_name or row.topic_author_id or "",
-        reply_count=max(0, int(row.topic_reply_count or 0)),
+        created_at=row.topic_created_at,
+        author_avatar_url=row.topic_author_avatar_url,
+        reply_count=reply_count,
         like_count=max(0, int(row.topic_like_count or 0)),
+        view_count=max(0, int(row.topic_view_count or 0)),
+        favorite_count=max(0, int(row.topic_favorite_count or 0)),
+        is_hot=classify_topic_hot(
+            created_at=row.topic_created_at,
+            latest_reply_at=row.topic_latest_reply_at,
+            latest_favorite_at=row.topic_latest_favorite_at,
+            latest_like_at=row.topic_latest_like_at,
+            reply_participant_count=reply_participant_count,
+            favorite_user_count=favorite_user_count,
+            like_user_count=like_user_count,
+        ),
         latest_reply_at=row.topic_latest_reply_at,
+    )
+
+
+def _followed_context_from_row(
+    row,
+) -> PersonalCenterFollowedContext | None:
+    if row.followed_display_name is None:
+        return None
+    return PersonalCenterFollowedContext(
+        target_type=ForumInteractionTargetType(row.target_type),
+        target_id=row.target_id or "",
+        display_name=row.followed_display_name,
+        avatar_url=row.followed_avatar_url,
     )
 
 
@@ -227,6 +363,7 @@ def _selected_topic_query(
             ForumTopicModel.title.label("body_preview"),
             *_topic_context_columns(db),
             *_reply_context_null_columns(),
+            *_followed_context_null_columns(),
             literal(_ACTIVITY_ORDER[activity_type]).label("source_order"),
             deduped.c.source_id.label("source_id"),
         )
@@ -285,6 +422,7 @@ def _liked_post_query(
             ForumPostModel.body.label("body_preview"),
             *_topic_context_columns(db),
             *_reply_context_null_columns(),
+            *_followed_context_null_columns(),
             literal(_ACTIVITY_ORDER[PersonalCenterActivityType.LIKED]).label(
                 "source_order"
             ),
@@ -359,6 +497,19 @@ def _followed_identity_query(
         .correlate(deduped)
         .scalar_subquery()
     )
+    avatar_url_subquery = (
+        db.query(ForumTopicModel.author_avatar_url)
+        .filter(
+            ForumTopicModel.author_type == deduped.c.target_type,
+            ForumTopicModel.author_id == deduped.c.target_id,
+            ForumTopicModel.env == get_current_env(),
+            ForumTopicModel.avernet_tenant == get_current_avernet_tenant(),
+        )
+        .order_by(ForumTopicModel.id.desc())
+        .limit(1)
+        .correlate(deduped)
+        .scalar_subquery()
+    )
     return db.query(
         literal(PersonalCenterActivityType.FOLLOWED.value).label("activity_type"),
         deduped.c.actor_type.label("actor_type"),
@@ -373,6 +524,10 @@ def _followed_identity_query(
         ),
         *_topic_context_null_columns(),
         *_reply_context_null_columns(),
+        func.coalesce(display_name_subquery, deduped.c.target_id).label(
+            "followed_display_name"
+        ),
+        avatar_url_subquery.label("followed_avatar_url"),
         literal(_ACTIVITY_ORDER[PersonalCenterActivityType.FOLLOWED]).label(
             "source_order"
         ),
@@ -397,6 +552,7 @@ def _authored_query(
         ForumTopicModel.title.label("body_preview"),
         *_topic_context_columns(db),
         *_reply_context_null_columns(),
+        *_followed_context_null_columns(),
         literal(_ACTIVITY_ORDER[PersonalCenterActivityType.AUTHORED]).label(
             "source_order"
         ),
@@ -450,6 +606,7 @@ def _replied_query(
                 parent_post.body.label("replied_to_body"),
             ]
         ),
+        *_followed_context_null_columns(),
         literal(_ACTIVITY_ORDER[PersonalCenterActivityType.REPLIED]).label(
             "source_order"
         ),
@@ -615,6 +772,7 @@ class ForumPersonalCenterActivityRepository(
                 body_preview=(row.body_preview or "")[:500],
                 topic_context=_topic_context_from_row(row),
                 replied_to_post=_reply_context_from_row(row),
+                followed_context=_followed_context_from_row(row),
             )
             for row in rows
         )

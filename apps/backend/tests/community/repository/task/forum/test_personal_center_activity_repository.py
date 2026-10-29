@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from agentclaw.community.core.repository.implementations.task.forum.forum_repository import (
     ForumRepository,
@@ -193,6 +193,12 @@ def test_activity_projection_mixes_actors_targets_and_activity_sources(db):
     assert topic_context.reply_count == 2
     assert topic_context.like_count == 1
     assert topic_context.latest_reply_at is not None
+    assert topic_context.status == "OPEN"
+    assert topic_context.author_avatar_url is None
+    assert topic_context.view_count == 1
+    assert topic_context.favorite_count == 0
+    assert topic_context.is_hot is False
+    assert topic_context.created_at is not None
 
     nested_reply = next(
         item
@@ -226,6 +232,68 @@ def test_activity_projection_mixes_actors_targets_and_activity_sources(db):
         PersonalCenterActivityType.FOLLOWED
     ]
     assert all_human.items[0].target_id == "user-b"
+
+
+def test_topic_context_reuses_the_serving_hot_gate(db):
+    content_repo = ForumRepository(db)
+    activity_repo = ForumPersonalCenterActivityRepository(db)
+    topic = content_repo.create_topic(
+        author_type="HUMAN",
+        author_id="user-a",
+        client_request_id="req-hot-context",
+        title="Hot context topic",
+        body="Hot context body",
+    ).topic
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    with db.orm_session() as session:
+        session.add_all(
+            [
+                ForumInteractionModel(
+                    actor_type="HUMAN",
+                    actor_id="user-a",
+                    action_type="VIEW",
+                    target_type="TOPIC",
+                    target_id=topic.topic_id,
+                    env="dev",
+                    gmt_create=now,
+                    gmt_modified=now,
+                ),
+                *(
+                    ForumInteractionModel(
+                        actor_type="HUMAN",
+                        actor_id=f"favorite-user-{index}",
+                        action_type="FAVORITE",
+                        target_type="TOPIC",
+                        target_id=topic.topic_id,
+                        env="dev",
+                        gmt_create=now,
+                        gmt_modified=now,
+                    )
+                    for index in range(5)
+                ),
+                ForumInteractionModel(
+                    actor_type="HUMAN",
+                    actor_id="like-user",
+                    action_type="LIKE",
+                    target_type="TOPIC",
+                    target_id=topic.topic_id,
+                    env="dev",
+                    gmt_create=now,
+                    gmt_modified=now,
+                ),
+            ]
+        )
+
+    page = _list(
+        activity_repo,
+        actors=(HUMAN,),
+        activity_type=PersonalCenterActivityType.VIEWED,
+    )
+    context = page.items[0].topic_context
+
+    assert context is not None
+    assert context.is_hot is True
 
 
 def test_followed_identity_activity_keeps_only_latest_active_state(db):
@@ -280,6 +348,12 @@ def test_followed_identity_activity_keeps_only_latest_active_state(db):
     assert followed.items[0].topic_id is None
     assert followed.items[0].post_id is None
     assert followed.items[0].body_preview == "协作 Bot"
+    followed_context = followed.items[0].followed_context
+    assert followed_context is not None
+    assert followed_context.target_type == ForumInteractionTargetType.BOT
+    assert followed_context.target_id == "bot-b"
+    assert followed_context.display_name == "协作 Bot"
+    assert followed_context.avatar_url is None
 
     human_only = _list(
         activity_repo,

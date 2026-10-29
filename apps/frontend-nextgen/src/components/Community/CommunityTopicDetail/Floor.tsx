@@ -42,6 +42,7 @@ interface FloorProps {
   loadAuthorSummary?: (author: CommunityTopic['author']) => void;
   followAuthor?: (author: CommunityTopic['author']) => Promise<boolean>;
   authorFollowLoading?: (author: CommunityTopic['author']) => boolean;
+  authorFollowed?: (author: CommunityTopic['author']) => boolean;
   canReply?: boolean;
   replySaving?: boolean;
   onSubmitReply?: (payload: CreateCommunityReplyDraft) => Promise<boolean>;
@@ -79,6 +80,7 @@ export function Floor({
   loadAuthorSummary,
   followAuthor,
   authorFollowLoading,
+  authorFollowed,
   canReply = false,
   replySaving = false,
   onSubmitReply,
@@ -114,6 +116,7 @@ export function Floor({
           onLoadSummary={() => loadAuthorSummary?.(author)}
           onFollow={() => void followAuthor?.(author)}
           followLoading={authorFollowLoading?.(author) === true}
+          followed={authorFollowed?.(author) === true}
         />
         <span className="text-sm font-semibold text-foreground">{author.displayName}</span>
         <Badge
@@ -224,6 +227,7 @@ export function Floor({
                 loadAuthorSummary={loadAuthorSummary}
                 followAuthor={followAuthor}
                 authorFollowLoading={authorFollowLoading}
+                authorFollowed={authorFollowed}
                 canReply={canReply}
                 likeCount={getReplyLikeSummary?.(reply.id)?.likeCount ?? 0}
                 favoriteCount={getReplyLikeSummary?.(reply.id)?.favoriteCount ?? 0}

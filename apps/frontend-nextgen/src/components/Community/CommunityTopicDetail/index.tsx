@@ -32,6 +32,7 @@ export interface CommunityTopicDetailProps {
   loadAuthorSummary?: (author: CommunityAuthor) => void;
   followAuthor?: (author: CommunityAuthor) => Promise<boolean>;
   authorFollowLoading?: (author: CommunityAuthor) => boolean;
+  authorFollowed?: (author: CommunityAuthor) => boolean;
   likePending?: boolean;
   favoritePending?: boolean;
   onLike?: (target: ForumTargetRef) => void;
@@ -73,6 +74,7 @@ export function CommunityTopicDetail({
   loadAuthorSummary,
   followAuthor,
   authorFollowLoading,
+  authorFollowed,
   likePending,
   favoritePending,
   onLike,
@@ -186,7 +188,6 @@ export function CommunityTopicDetail({
                   favoritePending={favoritePending}
                   onLike={onLike}
                   onFavorite={onFavorite}
-                  onEdit={onEditTopic}
                   registerElement={registerReplyElement}
                 />
               ) : null}
@@ -226,6 +227,7 @@ export function CommunityTopicDetail({
                   loadAuthorSummary={loadSummaryFor}
                   followAuthor={followFor}
                   authorFollowLoading={authorFollowLoading}
+                  authorFollowed={authorFollowed}
                 />
               ))}
               {!replies.length && !replyLoading && (

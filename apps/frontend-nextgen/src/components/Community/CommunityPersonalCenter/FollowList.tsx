@@ -1,10 +1,10 @@
 import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
-import type { CommunityTopic, PersonalCenterActivity } from '@/domain/community/types';
-import { formatDateTime } from '../CommunityTopicDetail/model';
+import type { CommunityAuthor, CommunityTopic, PersonalCenterActivity } from '@/domain/community/types';
+import { CommunityAuthorAvatar } from '../CommunityAuthorAvatar';
+import { TopicRow } from '../CommunityTopicList/TopicRow';
 import { communityService } from '@/services/community';
-import { Lock } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 export interface FollowListProps {
@@ -20,8 +20,16 @@ function followKey(item: PersonalCenterActivity): string {
   return `${item.target.targetType}:${item.target.id}`;
 }
 
-function followName(item: PersonalCenterActivity): string {
-  return item.bodyPreview.trim() || item.target.id;
+function followedAuthor(item: PersonalCenterActivity): CommunityAuthor {
+  const isBot = item.target.targetType === 'BOT';
+  const displayName =
+    item.followedContext?.displayName || item.bodyPreview.trim() || item.target.id;
+  return {
+    type: isBot ? 'bot' : 'human',
+    id: item.target.id,
+    displayName,
+    avatarUrl: item.followedContext?.avatarUrl,
+  };
 }
 
 function FollowIdentity({
@@ -35,6 +43,7 @@ function FollowIdentity({
   onSelect: (item: PersonalCenterActivity) => void;
   onUnfollow: (item: PersonalCenterActivity) => Promise<void>;
 }) {
+  const author = followedAuthor(item);
   return (
     <div
       role="button"
@@ -50,16 +59,14 @@ function FollowIdentity({
         onSelect(item);
       }}
     >
-      <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-xs text-primary-foreground">
-        {followName(item).charAt(0).toUpperCase() || '?'}
-      </span>
+      <CommunityAuthorAvatar author={author} size={32} />
       <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-        {followName(item)}
+        {author.displayName}
       </span>
       <Button
         variant="ghost"
         className="h-auto rounded-none px-0 text-xs text-muted-foreground hover:text-foreground"
-        aria-label={`取消关注 ${followName(item)}`}
+        aria-label={`取消关注 ${author.displayName}`}
         onClick={(event) => {
           event.stopPropagation();
           void onUnfollow(item);
@@ -203,7 +210,7 @@ export function FollowList({
       {selectedItem ? (
         <section className="min-w-0 flex-1" aria-label="关注对象的帖子">
           <h3 className="mb-3 text-sm font-semibold text-foreground">
-            {followName(selectedItem)} 的帖子
+            {followedAuthor(selectedItem).displayName} 的帖子
           </h3>
           {topicsLoading ? (
             <div className="space-y-2">
@@ -212,28 +219,9 @@ export function FollowList({
               ))}
             </div>
           ) : topics.length ? (
-            <div className="space-y-2">
+            <div className="overflow-hidden rounded-lg border border-border bg-card">
               {topics.map((topic) => (
-                <Button
-                  key={topic.id}
-                  variant="outline"
-                  className="h-auto w-full justify-start rounded-lg p-3 text-left transition-colors hover:bg-muted/40"
-                  onClick={() => onOpenTopic(topic.id)}
-                >
-                  <span className="block w-full">
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span className="truncate text-sm font-semibold text-foreground">
-                        {topic.title}
-                      </span>
-                      {topic.status === 'closed' ? (
-                        <Lock className="size-3.5 shrink-0 text-muted-foreground" aria-label="已关闭" />
-                      ) : null}
-                    </span>
-                    <span className="mt-1 block text-xs text-muted-foreground">
-                      {topic.replyCount ?? 0} 回复 · {formatDateTime(topic.createdAt)}
-                    </span>
-                  </span>
-                </Button>
+                <TopicRow key={topic.id} topic={topic} onOpen={(next) => onOpenTopic(next.id)} />
               ))}
             </div>
           ) : (

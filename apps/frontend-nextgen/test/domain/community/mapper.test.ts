@@ -2,6 +2,7 @@ import {
   mapCommunityReplyDto,
   mapCommunityTopicDto,
   mapPersonalCenterActivityDto,
+  personalCenterActivityToTopic,
 } from '@/domain/community/mapper';
 import { enrichOwnership } from '@/domain/community/ownership';
 
@@ -325,11 +326,17 @@ test('maps personal-center topic and nested-reply contexts', () => {
       title: '讨论主题',
       body_preview: '正文预览',
       topic_type: 'DISCUSSION',
+      status: 'OPEN',
       author_type: 'BOT',
       author_id: 'bot-1',
       author_display_name: '协作助手',
+      author_avatar_url: 'https://example.test/bot.png',
       reply_count: 3,
       like_count: 4,
+      view_count: 5,
+      favorite_count: 6,
+      is_hot: true,
+      created_at: '2026-10-20T08:00:00Z',
       latest_reply_at: '2026-10-29T09:00:00Z',
     },
     replied_to_post: {
@@ -345,10 +352,16 @@ test('maps personal-center topic and nested-reply contexts', () => {
     title: '讨论主题',
     bodyPreview: '正文预览',
     topicType: 'discussion',
+    status: 'open',
     author: { actorType: 'BOT', id: 'bot-1' },
     authorDisplayName: '协作助手',
+    authorAvatarUrl: 'https://example.test/bot.png',
     replyCount: 3,
     likeCount: 4,
+    viewCount: 5,
+    favoriteCount: 6,
+    isHot: true,
+    createdAt: '2026-10-20T08:00:00Z',
     latestReplyAt: '2026-10-29T09:00:00Z',
   });
   expect(activity?.repliedToPost).toMatchObject({
@@ -356,5 +369,50 @@ test('maps personal-center topic and nested-reply contexts', () => {
     author: { actorType: 'BOT', id: 'bot-2' },
     authorDisplayName: '风控分析 Bot',
     bodyPreview: '原始回复',
+  });
+});
+
+
+test('maps a personal-center activity into the shared community topic row', () => {
+  const activity = mapPersonalCenterActivityDto({
+    activity_type: 'FAVORITED',
+    actor_type: 'HUMAN',
+    actor_id: 'user-1',
+    target_type: 'TOPIC',
+    target_id: 'topic-1',
+    topic_id: 'topic-1',
+    happened_at: '2026-10-29T10:00:00Z',
+    body_preview: '主题标题',
+    topic_context: {
+      title: '主题标题',
+      body_preview: '正文预览',
+      topic_type: 'HELP',
+      status: 'OPEN',
+      author_type: 'HUMAN',
+      author_id: 'user-2',
+      author_display_name: '顾客',
+      reply_count: 2,
+      like_count: 1,
+      view_count: 3,
+      favorite_count: 4,
+      is_hot: true,
+      created_at: '2026-10-28T08:00:00Z',
+    },
+  });
+
+  expect(personalCenterActivityToTopic(activity!)).toMatchObject({
+    id: 'topic-1',
+    title: '主题标题',
+    body: '正文预览',
+    status: 'open',
+    topicType: 'help',
+    author: { type: 'human', id: 'user-2', displayName: '顾客' },
+    replyCount: 2,
+    likeCount: 1,
+    viewCount: 3,
+    favoriteCount: 4,
+    latestActivityAt: '2026-10-28T08:00:00Z',
+    isHot: true,
+    createdAt: '2026-10-28T08:00:00Z',
   });
 });

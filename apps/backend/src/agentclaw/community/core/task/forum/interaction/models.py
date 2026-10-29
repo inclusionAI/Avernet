@@ -199,12 +199,28 @@ class PersonalCenterTopicContext:
     title: str
     body_preview: str
     topic_type: str
+    status: str
     author_type: ForumActorType
     author_id: str
     author_display_name: str
+    created_at: datetime
     reply_count: int
     like_count: int
+    view_count: int
+    favorite_count: int
+    is_hot: bool
+    author_avatar_url: Optional[str] = None
     latest_reply_at: Optional[datetime] = None
+
+
+@dataclass(frozen=True)
+class PersonalCenterFollowedContext:
+    """Identity display context for one followed HUMAN or BOT."""
+
+    target_type: ForumInteractionTargetType
+    target_id: str
+    display_name: str
+    avatar_url: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -233,6 +249,7 @@ class PersonalCenterActivityRecord:
     post_id: Optional[str] = None
     topic_context: Optional[PersonalCenterTopicContext] = None
     replied_to_post: Optional[PersonalCenterReplyContext] = None
+    followed_context: Optional[PersonalCenterFollowedContext] = None
 
 
 @dataclass(frozen=True)

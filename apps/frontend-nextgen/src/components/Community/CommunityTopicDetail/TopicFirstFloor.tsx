@@ -31,11 +31,11 @@ interface TopicFirstFloorProps {
   loadAuthorSummary?: (author: CommunityAuthor) => void;
   followAuthor?: (author: CommunityAuthor) => Promise<boolean>;
   authorFollowLoading?: (author: CommunityAuthor) => boolean;
+  authorFollowed?: (author: CommunityAuthor) => boolean;
   likePending?: boolean;
   favoritePending?: boolean;
   onLike?: (target: ForumTargetRef) => void;
   onFavorite?: (target: ForumTargetRef) => void;
-  onEdit: () => void;
   registerElement: (postId?: string) => (element: HTMLElement | null) => void;
 }
 
@@ -48,11 +48,11 @@ export function TopicFirstFloor({
   loadAuthorSummary,
   followAuthor,
   authorFollowLoading,
+  authorFollowed,
   likePending,
   favoritePending,
   onLike,
   onFavorite,
-  onEdit,
   registerElement,
 }: TopicFirstFloorProps) {
   return (
@@ -94,10 +94,8 @@ export function TopicFirstFloor({
           favorited={(viewerTopicSummary?.favoriteCount ?? 0) > 0}
           likePending={likePending === true}
           favoritePending={favoritePending === true}
-          canEdit={topic.canEdit}
           onLike={(target) => onLike?.(target)}
           onFavorite={(target) => onFavorite?.(target)}
-          onEdit={onEdit}
         />
       }
       threadReplies={[]}
@@ -109,6 +107,7 @@ export function TopicFirstFloor({
       loadAuthorSummary={loadAuthorSummary}
       followAuthor={followAuthor}
       authorFollowLoading={authorFollowLoading}
+      authorFollowed={authorFollowed}
     />
   );
 }
