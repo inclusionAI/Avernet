@@ -13,6 +13,10 @@ from fastapi_injector import attach_injector
 from injector import Injector, Module, provider, singleton
 
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
+from agentclaw.community.adapters.http.task.artifact_actor import (
+    ArtifactWriteActor,
+    resolve_artifact_write_actor,
+)
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.adapters.http.task.router import router as task_internal_router
 from agentclaw.community.api.task.task_artifact_service import (
@@ -124,6 +128,12 @@ def _client() -> tuple[TestClient, _StubArtifactRepo]:
         id="id-1",
         staffId="owner-1",
         operatorName="owner",
+    )
+    # POST 双凭证分支(spec §14)换用 actor 依赖——沿用同一登录用户身份打桩,
+    # 绕开轻量 injector 里未绑定的 AuthPlugin;GET 列表口仍走 get_current_user。
+    app.dependency_overrides[resolve_artifact_write_actor] = lambda: ArtifactWriteActor(
+        relay_token=None,
+        user=AuthenticatedUser(id="id-1", staffId="owner-1", operatorName="owner"),
     )
     attach_injector(app, injector)
     # 换用共享同一张空表的仓储,让 client 持有替身以便断言落库行

@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { ReplyComposer, type ReplyComposerPayload } from './ReplyComposer';
 import type {
   CommunityAuthor,
   CommunityReply,
@@ -9,7 +10,6 @@ import type {
   InteractionStats,
   InteractionSummary,
 } from '@/domain/community/types';
-import { CircleHelp } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Floor } from './Floor';
 import { PollPanel } from './PollPanel';
@@ -36,6 +36,7 @@ export interface CommunityTopicDetailProps {
   loading: boolean;
   error: string | null;
   closing: boolean;
+  deleting: boolean;
   helpfulPostId: string | null;
   onBack: () => void;
   currentUserId?: string;
@@ -49,10 +50,14 @@ export interface CommunityTopicDetailProps {
   onLike?: (target: ForumTargetRef) => void;
   onFavorite?: (target: ForumTargetRef) => void;
   onCloseTopic: () => Promise<boolean>;
+  onEditTopic: () => void;
+  onDeleteTopic: () => Promise<boolean>;
   onSetPostHelpful: (postId: string, helpful: boolean) => Promise<boolean>;
   // 回帖分页
   replyLoading: boolean;
   replyError: string | null;
+  replySaving?: boolean;
+  onSubmitReply?: (payload: ReplyComposerPayload) => Promise<boolean>;
   replyPage: number;
   replyPageCount: number;
   replyPageSize: number;
@@ -65,6 +70,7 @@ export function CommunityTopicDetail({
   loading,
   error,
   closing,
+  deleting,
   helpfulPostId,
   onBack,
   currentUserId,
@@ -78,9 +84,13 @@ export function CommunityTopicDetail({
   onLike,
   onFavorite,
   onCloseTopic,
+  onEditTopic,
+  onDeleteTopic,
   onSetPostHelpful,
   replyLoading,
   replyError,
+  replySaving = false,
+  onSubmitReply,
   replyPage,
   replyPageCount,
   replyPageSize,
@@ -137,11 +147,14 @@ export function CommunityTopicDetail({
       <TopicDetailHeader
         topic={topic}
         closing={closing}
+        deleting={deleting}
         replyPage={replyPage}
         replyPageCount={replyPageCount}
         replyLoading={replyLoading}
         onBack={onBack}
         onCloseTopic={onCloseTopic}
+        onEditTopic={onEditTopic}
+        onDeleteTopic={onDeleteTopic}
         onGoToReplyPage={onGoToReplyPage}
       />
       <main className="app-scrollbar min-h-0 flex-1 overflow-y-auto">
@@ -167,6 +180,7 @@ export function CommunityTopicDetail({
               {/* 楼主楼层仅在第 1 页显示：分页语义本身一直以一级楼层为单位。 */}
               {replyPage === 1 && (
                 <Floor
+                  topic={topic}
                   floor={0}
                   author={topic.author}
                   body={topic.body}
@@ -182,16 +196,6 @@ export function CommunityTopicDetail({
                   authorFollowLoading={authorFollowLoading}
                 />
               )}
-              {topic.topicType === 'help' && topic.topicConfig?.help?.expectedTime ? (
-                <section
-                  aria-label="求助设置"
-                  className="mb-4 flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-3"
-                >
-                  <CircleHelp className="size-4 text-warning" aria-hidden />
-                  <span className="text-xs font-medium text-muted-foreground">期望解决时间</span>
-                  <span className="text-sm text-foreground">{topic.topicConfig.help.expectedTime}</span>
-                </section>
-              ) : null}
               <PollPanel
                 topicType={topic.topicType}
                 status={topic.status}
@@ -219,6 +223,7 @@ export function CommunityTopicDetail({
               />
               {floorGroups.map(({ reply, floorNo, children }) => (
                 <Floor
+                  topic={topic}
                   key={reply.id}
                   floor={floorNo}
                   postId={reply.id}
@@ -239,6 +244,9 @@ export function CommunityTopicDetail({
                   onLocateTarget={locateTargetReply}
                   registerElement={registerReplyElement}
                   currentUserId={currentUserId}
+                  canReply={topic.topicType === 'discussion' || topic.topicType === 'share'}
+                  replySaving={replySaving}
+                  onSubmitReply={onSubmitReply}
                   getAuthorSummary={getSummaryFor}
                   loadAuthorSummary={loadSummaryFor}
                   followAuthor={followFor}
@@ -259,6 +267,14 @@ export function CommunityTopicDetail({
                   </Button>
                 </div>
               )}
+              {topic.status === 'open' && currentUserId && topic.topicType !== 'notice' ? (
+                <ReplyComposer
+                  topic={topic}
+                  submitLabel="回复主题"
+                  saving={replySaving}
+                  onSubmit={(payload) => onSubmitReply?.(payload) ?? Promise.resolve(false)}
+                />
+              ) : null}
             </>
           ) : null}
         </div>

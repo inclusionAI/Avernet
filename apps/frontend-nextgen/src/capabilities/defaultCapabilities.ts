@@ -14,6 +14,7 @@ import type {
   AppCapabilities,
   BotEngineOption,
   CapabilityResult,
+  CodingBotConversationHost,
   ConversationInstanceScopeCapability,
   HumanIdentity,
   InviteCodeGatePolicy,
@@ -249,6 +250,8 @@ export const defaultCapabilities: AppCapabilities = {
   // Open Core / 阿里云不具备内部 SkillCenter 与能力工坊产品入口，只展示用户自己的 Skill。
   getBotSkillPickerSources: () => ({ status: 'available', value: ['mine'] }),
   getBotSkillPickerDetailUrl: () => ({ status: 'unsupported', value: null }),
+  getBotEditorPanels: () => ({ status: 'available', value: [] }),
+  getConversationComposer: () => ({ status: 'available', value: null }),
   getBotMcpPickerEnabled: () => ({ status: 'available', value: false }),
   // Open Core 品牌：Avernet（横版 wordmark 用于页头；方版 mark 备用于登录/空态方形场景）。
   getProductBrand: (): CapabilityResult<ProductBrand> => ({
@@ -341,6 +344,11 @@ export const defaultCapabilities: AppCapabilities = {
   }),
   // Open Core 无多实例范围概念:对话菜单不渲染实例行,会话取数不限定实例(行为不变)。
   getConversationInstanceScope: (): CapabilityResult<ConversationInstanceScopeCapability | null> => ({
+    status: 'available',
+    value: null,
+  }),
+  // Open Core 没有 AIXCoding 微应用货源:Coding Bot 会话可选择,但工作区显式提示未配置。
+  getCodingBotConversationHost: (): CapabilityResult<CodingBotConversationHost | null> => ({
     status: 'available',
     value: null,
   }),

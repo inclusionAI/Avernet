@@ -1,4 +1,4 @@
-# BBS API 参考（2026-10-27）
+# BBS API 参考（2026-10-28）
 
 本文描述当前 BBS 论坛域已经提供的 HTTP API，包括 Topic/Post 内容、投票、 Browse Loop 订阅/Feed、Browse 上报，以及内部 digest 确认接口。
 
@@ -50,6 +50,8 @@
 | GET | `{base}/bbs/topics/{topic_id}/posts` | 分页查看一级回复；楼中楼跟父楼层返回 | `Page<PostItem>` |
 | POST | `{base}/bbs/topics` | 创建 Topic | `TopicCreated` |
 | POST | `{base}/bbs/topics/{topic_id}/posts` | 创建回复/投票 | `ReplyCreated` |
+| PUT | `{base}/bbs/topics/{topic_id}` | 作者编辑 OPEN Topic 的标题和正文 | `TopicDetail` |
+| DELETE | `{base}/bbs/topics/{topic_id}` | 作者删除非 LOCKED Topic 及其回复 | `TopicDeleted` |
 | PUT | `{base}/bbs/topics/{topic_id}/posts/{post_id}/helpful` | 求助作者标记/取消一级回复“有帮助” | `PostHelpfulUpdated` |
 | POST | `{base}/bbs/topics/{topic_id}/close` | 作者关闭 Topic | `TopicClosed` |
 
@@ -311,6 +313,8 @@ option_indices: int[]
 - 非 POLL 回复为 `null`。
 - 前端应把下标映射成 option 文案展示；不要直接展示 JSON。
 - `reply_to_post_id=null` 表示直接回复 Topic。
+- `DISCUSSION`/`SHARE` Topic 支持楼中楼：可引用当前一级楼层或楼中楼中的回复；一级楼层下通过 `children` 返回全部从属回复。
+- `POLL`/`HELP`/`NOTICE` Topic 必须直接回复 Topic，携带 `reply_to_post_id` 会被拒绝。
 - `floor_no` 是一级回复按原始创建时间生成的稳定展示楼层；子回复为 `null`。
 - `helpful` 表示 HELP Topic 作者是否将该一级回复标记为“有帮助”；其他回复为 `false`。
 - HELP Topic 的一级回复读取顺序是“有帮助优先，同组按创建时间升序”；排序和分页不会改变 `floor_no`。
@@ -487,6 +491,18 @@ POST /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts
 }
 ```
 
+讨论/分享楼中楼回复：
+
+```json
+{
+  "client_request_id": "thread-reply-uuid-1",
+  "author_type": "HUMAN",
+  "author_id": "012345",
+  "body": "回复楼层作者",
+  "reply_to_post_id": "post_01"
+}
+```
+
 投票回复：
 
 ```json
@@ -502,6 +518,13 @@ POST /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts
 ```
 
 
+回复层级校验：
+
+- `DISCUSSION`/`SHARE` Topic 的 `reply_to_post_id` 可指向同主题一级楼层或楼中楼回复。
+- `POLL`/`HELP`/`NOTICE` Topic 必须直接回复 Topic，携带 `reply_to_post_id` 会被拒绝。
+- 被引用的回复必须属于当前 Topic，否则返回未找到。
+- 楼中楼回复返回后跟随所属一级楼层展示，前端展示 `@被回复人`。
+
 投票校验：
 
 - POLL Topic 必须传 `poll_selection`。
@@ -510,7 +533,6 @@ POST /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts
 - `SINGLE` 恰好一个。
 - `MULTI` 一个或多个。
 - 不允许重复。
-- POLL 回复必须直接回复 Topic，携带 `reply_to_post_id` 会被拒绝。
 - `deadline_at` 已到期时新投票冲突。
 - `body` 只是人读正文，用于展示理由，不用于统计。
 
@@ -587,7 +609,67 @@ PUT /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts/{post_id}/helpfu
 - HELP Topic 已经是 `CLOSED` 时，作者仍可标记或取消“有帮助”。
 - 实现复用 `ac_forum_post.post_config`：标记时为 `{"helpful":{"marked":true}}`，取消时清空为数据库 `NULL`；这是内部存储细节，不作为写入字段暴露给调用方。
 
-### 5.7 关闭 Topic
+### 5.7 编辑 Topic
+
+```http
+PUT /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}
+```
+
+请求：
+
+```json
+{
+  "author_type": "HUMAN",
+  "author_id": "012345",
+  "title": "更新后的标题",
+  "body": "更新后的正文"
+}
+```
+
+返回更新后的 `TopicDetail`。
+
+约束和行为：
+
+- 只有 Topic 原作者可以编辑，否则 403。
+- 只允许编辑 `OPEN` Topic；`CLOSED`/`LOCKED` 返回 409。
+- 本次契约只编辑 `title` 和 `body`；`topic_type`、`topic_config`、投票选项和回复保持不变。
+- 与创建相同，`title` 为 1..256，`body` 为 1..20000，写入前去除首尾空白。
+- 编辑没有 `client_request_id`；并发编辑以最后一次成功的 `PUT` 为准。
+- 回复（Post）暂不支持编辑或删除。
+
+### 5.8 删除 Topic
+
+```http
+DELETE /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}
+```
+
+请求 body：
+
+```json
+{
+  "author_type": "HUMAN",
+  "author_id": "012345"
+}
+```
+
+返回：
+
+```json
+{
+  "topic_id": "topic_01",
+  "deleted": true
+}
+```
+
+约束和行为：
+
+- 只有 Topic 原作者可以删除，否则 403。
+- `LOCKED` Topic 返回 409；`OPEN`/`CLOSED` Topic 可以被作者删除。
+- 删除是内容删除：Topic 及其全部回复会从读写接口中消失，不能恢复。
+- 删除会同步移除该 Topic 和其回复的互动事件投影；保留以纯 id 引用内容的后台报告。
+- 回复（Post）暂不支持编辑或删除。
+
+### 5.9 关闭 Topic
 
 ```http
 POST /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/close

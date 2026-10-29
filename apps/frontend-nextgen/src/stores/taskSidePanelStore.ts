@@ -1,3 +1,4 @@
+import { useTaskUpdateAttentionStore } from '@/stores/taskUpdateAttentionStore';
 import { create } from 'zustand';
 
 /**
@@ -45,19 +46,24 @@ export interface TaskLinkedSessionTarget {
 }
 
 export interface TaskSidePanelState {
-  /** 当前活跃任务（多任务切换条的落点；聊天 tab 由 taskId 自带，不强依赖） */
+  /** 焦点任务：副屏当前渲染/用户当前关注的任务；同一会话可承载多个任务但不并发展示。 */
   activeTaskId: string | null;
   /** 按 task 分片的导航状态 */
   navByTask: Record<string, TaskNavRecord>;
   /** 待宿主消费的会话跳转；消费方调 consumePendingNavigation 置空 */
   pendingNavigation: TaskNavTarget | null;
+  /** 一次 openTab 的显式来源标记，用于区分用户切换与历史消息恢复。 */
+  taskPanelOpenIntentTaskId: string | null;
   /** 选中信号计数器（+1 = 消息流滚动定位一次），demo nodeScrollSignal 同源 */
   nodeScrollSignal: number;
   /** 会话宿主左侧 ChatArea 的联动会话；null = 展示宿主当前真实会话 */
   linkedSession: TaskLinkedSessionTarget | null;
   setActiveTask: (taskId: string) => void;
+  markTaskPanelOpenIntent: (taskId: string) => void;
+  consumeTaskPanelOpenIntent: (taskId: string) => boolean;
   selectRootNode: (taskId: string, nodeId: string, target?: TaskNavTarget | null) => void;
   selectNode: (taskId: string, nodeId: string, target: TaskNavTarget | null) => void;
+  requestTaskNavigation: (target: TaskNavTarget) => void;
   drillInto: (taskId: string, nodeId: string, target: TaskNavTarget | null) => void;
   backToOverview: (taskId: string) => void;
   consumePendingNavigation: () => void;
@@ -75,13 +81,24 @@ const initial = {
   activeTaskId: null,
   navByTask: {} as Record<string, TaskNavRecord>,
   pendingNavigation: null,
+  taskPanelOpenIntentTaskId: null,
   nodeScrollSignal: 0,
   linkedSession: null as TaskLinkedSessionTarget | null,
 };
 
-export const useTaskSidePanelStore = create<TaskSidePanelState>((set) => ({
+export const useTaskSidePanelStore = create<TaskSidePanelState>((set, get) => ({
   ...initial,
-  setActiveTask: (taskId) => set({ activeTaskId: taskId, pendingNavigation: null }),
+  setActiveTask: (taskId) => {
+    // 用户切到某任务（含新任务夺焦）即消费该任务的进展徽标。
+    useTaskUpdateAttentionStore.getState().clearTaskUpdate(taskId);
+    set({ activeTaskId: taskId, pendingNavigation: null, taskPanelOpenIntentTaskId: null });
+  },
+  markTaskPanelOpenIntent: (taskId) => set({ taskPanelOpenIntentTaskId: taskId }),
+  consumeTaskPanelOpenIntent: (taskId) => {
+    const matched = get().taskPanelOpenIntentTaskId === taskId;
+    if (matched) set({ taskPanelOpenIntentTaskId: null });
+    return matched;
+  },
   selectRootNode: (taskId, nodeId, target = null) =>
     set((s) => {
       const prev = s.navByTask[taskId] ?? emptyRecord;
@@ -119,8 +136,12 @@ export const useTaskSidePanelStore = create<TaskSidePanelState>((set) => ({
       const prev = s.navByTask[taskId] ?? emptyRecord;
       return { navByTask: { ...s.navByTask, [taskId]: { ...prev, drillStack: [] } } };
     }),
+  requestTaskNavigation: (target) => set({ pendingNavigation: target }),
   consumePendingNavigation: () => set({ pendingNavigation: null }),
   openLinkedSession: (target) => set({ linkedSession: target }),
   closeLinkedSession: () => set({ linkedSession: null }),
-  resetAll: () => set(initial),
+  resetAll: () => {
+    useTaskUpdateAttentionStore.getState().resetAll();
+    set(initial);
+  },
 }));

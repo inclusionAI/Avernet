@@ -141,4 +141,4 @@ class BaasConnInfoBuilder:
         if not bolt_id:
             return None
 
-        return self._bot_repo.get_by_id_and_owner(bolt_id, binding.entity_id)
+        return self._bot_repo.get_by_id_and_entity(bolt_id, binding.entity_id)

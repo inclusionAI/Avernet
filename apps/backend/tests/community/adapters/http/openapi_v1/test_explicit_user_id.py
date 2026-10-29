@@ -369,6 +369,8 @@ _NO_USER_DIMENSION = {
     ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics"),
     ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics/{{topic_id}}/posts"),
     ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics/{{topic_id}}/close"),
+    ("put", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics/{{topic_id}}"),
+    ("delete", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics/{{topic_id}}"),
     # BBS Browse-Loop runtime reporting: one bot reports a single Browse Run's
     # outcome; tenant-wide write, no user-id axis and no bot-id axis.
     ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/browse-reports"),
@@ -611,8 +613,10 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # The configured engine default-model read adds one Bot-path operation: 211 -> 212.
 # BBS interaction statistics adds five account-level routes with no Bot
 # dimension: helpful marking plus interaction write, summary, batch summary,
-# and Personal Center reads: 129 -> 134.
-_BOT_ID_PLACEMENT = {"path": 212, "query": 1, "none": 134}
+# and Personal Center reads: 129 -> 134. Topic edit and delete add two more
+# explicit-author account-level routes, both with no Bot dimension: 134 -> 136.
+# Risk-check routes add four user-scoped Bot-path operations: 212 -> 216.
+_BOT_ID_PLACEMENT = {"path": 216, "query": 1, "none": 136}
 
 
 def _schema() -> dict:
@@ -823,7 +827,7 @@ def test_the_pinned_number_of_operations_take_it():
     # DWS rollout eligibility also requires the explicit caller: 269 -> 270.
     # The genome registry (RSI-03) adds thirteen: 270 -> 283.
     # The default-model read adds one Bot-addressed user-scoped operation.
-    assert len(taking) == 284
+    assert len(taking) == 288
 
 
 def test_the_exempt_operations_take_none():

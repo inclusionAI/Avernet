@@ -1,6 +1,6 @@
 // @asset-migrated: teamclaw 自研资产
 /**
- * TaskPanelV2 —— 副屏壳层(spec §3.2):同会话多任务切换条(可选)
+ * TaskPanelV2 —— 副屏壳层(spec §3.2):同会话任务切换条(可选)
  *  + 面包屑即标题行(两级栈导航) + 收起按钮 + L1/L2 互斥渲染。
  * 下钻封顶 2 层:dagStack 顶即当前节点;节点在下一次轮询后消失时 L2 出空态,不卡栈。
  */
@@ -8,13 +8,13 @@ import React from 'react';
 
 import './TaskPanelV2.css';
 
-import { PanelToggle, ChevronRight } from '../icons';
-import { C } from '../tokens';
-import type { TaskView } from '../types';
+import { ChevronRight, PanelToggle } from '../icons';
 import { truncateText } from '../text';
-import type { TaskPanelNav } from './taskPanelNav';
+import { C, TASK_STATUS_TONES } from '../tokens';
+import type { TaskView } from '../types';
 import { TaskNodePanelV2 } from './TaskNodePanelV2';
 import { TaskOverviewV2 } from './TaskOverviewV2';
+import type { TaskPanelNav } from './taskPanelNav';
 
 export interface TaskPanelV2Props {
   task: TaskView;
@@ -25,7 +25,7 @@ export interface TaskPanelV2Props {
   onOpenSubTask?: (subTaskId: string) => void;
   /** 宿主注入的收起回调(SDK 面板级 handle 不暴露给 content,故由宿主决定行为) */
   onTogglePanel?: () => void;
-  /** 同一会话存在多个任务时，由宿主注入任务切换开关；单任务不注入。 */
+  /** 查询到任务记录时，由宿主注入任务切换开关；空/失败可不注入。 */
   switcher?: React.ReactNode;
   className?: string;
   style?: React.CSSProperties;
@@ -48,6 +48,7 @@ export const TaskPanelV2: React.FC<TaskPanelV2Props> = ({
   const nodeShort =
     (currentNodeId && task.dagNodes.find((dn) => dn.id === currentNodeId)?.short) ||
     (node ? truncateText(node.name, 8) : null);
+  const focusStatusLabel = TASK_STATUS_TONES[task.status]?.label ?? task.status;
 
   return (
     <section
@@ -69,7 +70,6 @@ export const TaskPanelV2: React.FC<TaskPanelV2Props> = ({
           display: 'flex',
           alignItems: 'center',
           gap: 4,
-          height: 40,
           padding: '0 12px',
           flexShrink: 0,
           borderBottom: `1px solid ${C.border}`,
@@ -78,7 +78,22 @@ export const TaskPanelV2: React.FC<TaskPanelV2Props> = ({
         }}
       >
         {currentNodeId === null ? (
-          <span style={{ fontWeight: 600 }}>任务总览</span>
+          <>
+            <span
+              title={`任务总览：${task.name}`}
+              style={{
+                minWidth: 0,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                fontWeight: 600,
+              }}
+            >
+              {task.name}
+            </span>
+            <span style={{ color: C.textSecondary }}>·</span>
+            <span style={{ color: C.textSecondary, whiteSpace: 'nowrap' }}>{focusStatusLabel}</span>
+          </>
         ) : (
           <>
             <button

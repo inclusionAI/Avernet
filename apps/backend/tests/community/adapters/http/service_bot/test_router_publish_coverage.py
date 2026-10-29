@@ -52,9 +52,10 @@ class ModelDumpResult(DictOnlyResult):
 
 
 class Record:
-    def __init__(self, *, owner_id="owner", source_bot_id="bot", ext=None):
+    def __init__(self, *, owner_id="owner", source_bot_id="bot", source_bot_pk=1, ext=None):
         self.owner_id = owner_id
         self.source_bot_id = source_bot_id
+        self.source_bot_pk = source_bot_pk
         self.ext = ext
 
     def to_dict(self):
@@ -86,7 +87,7 @@ async def test_extract_from_publish_id_all_paths():
     service.get_publish_by_id.return_value = None
     assert await router_publish.extract_from_publish_id("12", InterceptorContext(injector=injector)) == router_publish.PermissionParams()
 
-    service.get_publish_by_id.return_value = Record(owner_id="owner-1", source_bot_id="bot-1")
+    service.get_publish_by_id.return_value = Record(owner_id="owner-1", source_bot_id="bot-1", source_bot_pk=1)
     params = await router_publish.extract_from_publish_id("12", InterceptorContext(injector=injector))
     assert params.bot_id == "bot-1"
     assert params.owner_id == "owner-1"

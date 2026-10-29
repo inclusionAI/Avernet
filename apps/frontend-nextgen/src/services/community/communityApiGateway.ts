@@ -11,6 +11,7 @@ import type {
   CreateCommunityReplyInput,
   CreateCommunityTopicInput,
   InteractionSummary,
+  UpdateCommunityTopicInput,
   InteractionSummaryQuery,
   PersonalCenterActivity,
   PersonalCenterActivityPage,
@@ -24,10 +25,12 @@ import {
   closeCommunityTopic,
   createCommunityReply,
   createCommunityTopic,
+  deleteCommunityTopic,
   getCommunityTopic,
   listCommunityReplies,
   listCommunityTopics,
   setCommunityPostHelpful,
+  updateCommunityTopic,
 } from '@/services/backendApi/community/communityController';
 import {
   createCommunityInteraction,
@@ -73,6 +76,15 @@ export class CommunityApiGateway implements CommunityGateway {
     const created = requireData(await createCommunityReply(input, signal));
     if (!created.post_id) throw new Error('回复发布失败');
     return created.post_id;
+  }
+
+  async updateTopic(input: UpdateCommunityTopicInput, signal?: AbortSignal) {
+    return mapCommunityTopicDto(requireData(await updateCommunityTopic(input, signal)));
+  }
+
+  async deleteTopic(topicId: string, authorId: string, signal?: AbortSignal) {
+    const deleted = requireData(await deleteCommunityTopic(topicId, authorId, signal));
+    if (deleted.deleted === false) throw new Error('主题删除失败');
   }
 
   async setPostHelpful(

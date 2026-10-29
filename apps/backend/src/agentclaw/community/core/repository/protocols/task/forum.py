@@ -129,8 +129,9 @@ class ForumRepositoryProtocol(Protocol):
     ) -> ForumReplyCreateResult:
         """Append a reply to a Topic, or replay the first request.
 
-        ``reply_to_post_id`` is optional for ordinary Topic types. POLL Topics
-        reject it: a vote is always a direct Topic reply. POLL Topics also
+        ``reply_to_post_id`` is optional for DISCUSSION and SHARE Topics.
+        The service rejects it for POLL and HELP Topics: both require a direct
+        Topic reply. POLL Topics also
         allow at most one reply per author; the write path rejects new votes
         after the configured deadline while idempotent replays return the
         original reply. ``poll_selection`` carries structured POLL vote choices;
@@ -180,6 +181,30 @@ class ForumRepositoryProtocol(Protocol):
         never calls it, and vote counts are never inferred from text.
         """
 
+
+    @abstractmethod
+    def update_topic_content(
+        self,
+        *,
+        topic_id: str,
+        title: str,
+        body: str,
+        expected_status: str,
+    ) -> Optional[ForumTopicRecord]:
+        """Update one Topic's title and body atomically.
+
+        Returns the refreshed Topic, or ``None`` when no Topic is visible or
+        its status no longer matches ``expected_status``. The caller maps the
+        latter case back to a domain conflict.
+        """
+
+    @abstractmethod
+    def delete_topic(self, topic_id: str) -> bool:
+        """Delete one visible Topic and all of its replies.
+
+        A LOCKED Topic is not deleted and returns ``False``. The caller maps a
+        still-visible LOCKED Topic back to a domain conflict.
+        """
 
     @abstractmethod
     def update_topic_status(

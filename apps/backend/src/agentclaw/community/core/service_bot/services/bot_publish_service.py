@@ -1093,6 +1093,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         bot_id = publish_record.source_bot_id
         bot = self._bot_service.get_bot_by_address(
             bot_id=bot_id, user_id=publish_record.owner_id,
+            source_bot_pk=publish_record.source_bot_pk,
         )
         owner_id = str(bot["owner_id"])
         # Resolve and validate before destroying any published version resources.

@@ -14,7 +14,6 @@ import { installCompleteFallback } from './botChatCompleteFallback';
 import {
   BOT_MESSAGE_PAGE_SIZE,
   botSessionService,
-  resolveChatRuntimeStage,
   resolveUserId,
   withFriendBotRequestParams,
   type ChatBotView,
@@ -173,6 +172,13 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
     }
   }
 
+  private fetchIamToken(): Promise<string> {
+    const params = withFriendBotRequestParams(this.options.bot, this.options.userId, {
+      user_id: resolveUserId(this.options.userId),
+    });
+    return this.getIamTokenFn(this.options.bot.realBotId, params.user_id, this.options.bot.ownerId, params.stage);
+  }
+
   private async getChatUrl(): Promise<{ url: string; a2aBaseUrl: string | null }> {
     const resp = await getBotConnection(
       this.options.bot.realBotId,
@@ -210,12 +216,7 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
     // URL 已内含握手凭证;此处须单独拉取 IAM token 并注入 SDK,否则发送会被服务端拒(身份不明)。
     this.iamToken = this.directDesktop
       ? ''
-      : await this.getIamTokenFn(
-          this.options.bot.realBotId,
-          resolveUserId(this.options.userId),
-          this.options.bot.ownerId,
-          resolveChatRuntimeStage(this.options.bot),
-        );
+      : await this.fetchIamToken();
     // A2A M2 bootstrap seam：SDK 工厂两条候选——缓存命中同步换入 A2AProvider（两段式
     // 传输选择：探测未决时 takeCachedA2AProvider 内部 fire-and-forget 后台预热、
     // 本轮落回 v3；选择/锁定/禁令编排权威在 @/adapters/a2a/bootstrap.ts 单一编排点）。
@@ -251,12 +252,7 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
       // 不返回 xProxypassToken——避免 SDK 给内含 token 的 url 再次追加 x-proxypass-token。
       credentialProvider: async () => {
         if (this.directDesktop) return {};
-        const refreshed = await this.getIamTokenFn(
-          this.options.bot.realBotId,
-          resolveUserId(this.options.userId),
-          this.options.bot.ownerId,
-          resolveChatRuntimeStage(this.options.bot),
-        );
+        const refreshed = await this.fetchIamToken();
         this.iamToken = refreshed;
         return { xIAMToken: refreshed };
       },
@@ -368,12 +364,7 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
     // 发送前刷新 IAM token,确保 WS 请求帧携带最新身份凭证(与 supportProvider / open-claw 一致)。
     const freshIamToken = this.directDesktop
       ? ''
-      : await this.getIamTokenFn(
-          this.options.bot.realBotId,
-          resolveUserId(this.options.userId),
-          this.options.bot.ownerId,
-          resolveChatRuntimeStage(this.options.bot),
-        );
+      : await this.fetchIamToken();
     this.iamToken = freshIamToken;
     updateProviderIamToken(inner, freshIamToken);
     if (!inner.isConnected) await this.connect();

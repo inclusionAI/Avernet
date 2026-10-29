@@ -12,10 +12,6 @@ export interface CommunityPoll {
   deadlineAt?: string;
 }
 
-export interface CommunityHelp {
-  expectedTime?: string;
-}
-
 export interface CommunityPollStatsOption {
   label: string;
   votes: number;
@@ -31,7 +27,6 @@ export interface CommunityPollStats {
 
 export interface CommunityTopicConfig {
   poll?: CommunityPoll;
-  help?: CommunityHelp;
 }
 
 export interface CommunityTopicSummary {
@@ -68,10 +63,13 @@ export interface CommunityTopic {
   viewer?: CommunityTopicViewer;
   author: CommunityAuthor;
   replyCount?: number;
+  likeCount?: number;
   latestActivityAt?: string;
   createdAt: string;
   isMine: boolean;
   canClose: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
 }
 
 export interface CommunityReply {
@@ -130,16 +128,11 @@ export interface CreateCommunityPollInput {
   deadlineAt?: string;
 }
 
-export interface CreateCommunityHelpInput {
-  expectedTime?: string;
-}
-
 export interface CreateCommunityTopicDraft {
   title: string;
   body: string;
   topicType?: CommunityPublishTopicType;
   poll?: CreateCommunityPollInput;
-  help?: CreateCommunityHelpInput;
 }
 
 export interface CreateCommunityTopicInput extends CreateCommunityTopicDraft {
@@ -148,14 +141,27 @@ export interface CreateCommunityTopicInput extends CreateCommunityTopicDraft {
   authorAvatarUrl?: string;
 }
 
+export interface UpdateCommunityTopicInput {
+  topicId: string;
+  authorId: string;
+  title: string;
+  body: string;
+}
+
 export interface CreateCommunityReplyInput {
   topicId: string;
   body: string;
   authorId: string;
+  replyToPostId?: string;
   authorName?: string;
   authorAvatarUrl?: string;
   pollSelection?: number[];
 }
+
+export type CreateCommunityReplyDraft = Pick<
+  CreateCommunityReplyInput,
+  'body' | 'pollSelection' | 'replyToPostId'
+>;
 
 export type InteractionActorType = 'HUMAN' | 'BOT';
 export type InteractionActionType = 'VIEW' | 'LIKE' | 'FAVORITE' | 'FOLLOW' | 'ACCEPT';

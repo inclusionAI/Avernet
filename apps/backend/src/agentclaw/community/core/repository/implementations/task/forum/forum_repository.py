@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.errors import Conflict, NotFound
 from agentclaw.community.core.task.forum.models import (
+    TOPIC_STATUS_LOCKED,
     TOPIC_STATUS_OPEN,
     TOPIC_TYPE_DISCUSSION,
     TOPIC_TYPE_NOTICE,
@@ -811,6 +812,79 @@ class ForumRepository(BrowseRepositoryMixin, ForumRepositoryProtocol):
             topic.gmt_modified = datetime.now(timezone.utc)
             db.flush()
             return len(rows)
+
+    def update_topic_content(
+        self,
+        *,
+        topic_id: str,
+        title: str,
+        body: str,
+        expected_status: str,
+    ) -> ForumTopicRecord | None:
+        with self._transaction() as db:
+            row = (
+                db.query(ForumTopicModel)
+                .filter(
+                    ForumTopicModel.topic_id == topic_id,
+                    ForumTopicModel.status == expected_status,
+                    ForumTopicModel.env == get_current_env(),
+                    ForumTopicModel.avernet_tenant == get_current_avernet_tenant(),
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if row is None:
+                return None
+            row.title = title
+            row.body = body
+            row.gmt_modified = datetime.now(timezone.utc)
+            db.flush()
+            return self._topic_record(db, row)
+
+    def delete_topic(self, topic_id: str) -> bool:
+        """Delete Topic content and its direct interaction records together.
+
+        Interaction rows are string-keyed projections rather than foreign keys,
+        so they are removed explicitly for the deleted Topic and its Posts.
+        Published historical reports are retained; they reference content by
+        identifier and do not resurrect deleted Topic/Post rows.
+        """
+
+        with self._transaction() as db:
+            row = (
+                db.query(ForumTopicModel)
+                .filter(
+                    ForumTopicModel.topic_id == topic_id,
+                    ForumTopicModel.env == get_current_env(),
+                    ForumTopicModel.avernet_tenant == get_current_avernet_tenant(),
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if row is None or row.status == TOPIC_STATUS_LOCKED:
+                return False
+
+            post_ids = [
+                result[0]
+                for result in db.query(ForumPostModel.post_id)
+                .filter(ForumPostModel.topic_id == topic_id)
+                .all()
+            ]
+            if post_ids:
+                db.query(ForumInteractionModel).filter(
+                    ForumInteractionModel.target_type == "POST",
+                    ForumInteractionModel.target_id.in_(post_ids),
+                ).delete(synchronize_session=False)
+            db.query(ForumInteractionModel).filter(
+                ForumInteractionModel.target_type == "TOPIC",
+                ForumInteractionModel.target_id == topic_id,
+            ).delete(synchronize_session=False)
+            db.query(ForumPostModel).filter(
+                ForumPostModel.topic_id == topic_id
+            ).delete(synchronize_session=False)
+            db.delete(row)
+            db.flush()
+            return True
 
     def update_topic_status(
         self,

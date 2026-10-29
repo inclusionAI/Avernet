@@ -140,7 +140,7 @@ describe('TaskArtifactPreviewDrawer 链接与代码详情', () => {
       'https://docs.example/requirement',
     );
     expect(within(details).getByText('group-1')).toBeInTheDocument();
-    expect(within(details).getByText('2026-10-23T10:00:00.000Z')).toBeInTheDocument();
+    expect(within(details).getByText('2026-10-23 18:00')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '打开链接' })).toHaveAttribute(
       'href',
       'https://docs.example/requirement',

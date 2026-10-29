@@ -17,6 +17,10 @@ export interface PublicBotCatalogDto {
   is_friend?: boolean;
   friend_ext?: Record<string, unknown>;
   friend_check_in_strategy?: 'OPEN' | 'APPROVAL' | 'DEPT_FREE';
+  /** Bot→Bot 协作可见性（BCS visibility，public/protected/private）；缺失时按未知处理。 */
+  visibility?: string;
+  /** 人类用户可见性（BCS user_visibility，public/protected/private）；缺失时按未知处理。 */
+  user_visibility?: string;
 }
 
 /** 公开 Bot 普通搜索的 Gateway query。 */

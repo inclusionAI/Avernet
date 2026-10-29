@@ -91,6 +91,7 @@ class SkillSetMcpCollection:
             engine_type=effective_engine,
             operation=lambda: self._get_default_capabilities_template_type(
                 bot_id,
+                entity_id=entity_id,
                 strict=strict_policy_context,
             ),
             report_has_value=True,

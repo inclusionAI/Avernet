@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 from agentclaw.community.core.bot_management.token_vault import TokenVault
+from agentclaw.community.core.devices.services.device_context import DeviceConnectionUnavailableError
 from agentclaw.community.core.session_resources.baas_client import (
     SessionResourceBaasClient,
 )
@@ -19,6 +20,10 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterStreamResponse,
 )
 from agentclaw.community.adapters.http.session_resources.router import _domain_error
+from agentclaw.community.adapters.http.session_resources.router import create_upload_intents
+from agentclaw.community.adapters.http.session_resources.schemas import UploadIntentRequest
+from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
+from fastapi import HTTPException
 
 
 class _Repo:
@@ -254,6 +259,27 @@ def _intent(service):
         filename="report.txt",
         size_bytes=4,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("binding_id", [None, 91])
+async def test_upload_intent_maps_transient_device_failure_without_leaking_details(binding_id):
+    class UnavailableResolver(_Resolver):
+        def resolve_for_binding(self, binding_id, operator_id, *, bot_id):
+            raise DeviceConnectionUnavailableError("private binding=91")
+
+    service, repo, http = _service(resolver=UnavailableResolver())
+    body = UploadIntentRequest(
+        bot_id="bot-1", session_key="session", scope_type="personal_bot_chat",
+        engine_type="openclaw", binding_id=binding_id, files=[{"filename": "report.txt"}],
+    )
+    with pytest.raises(HTTPException) as error:
+        await create_upload_intents(body=body, user=AuthenticatedUser("id", "owner-1", "owner-1"), service=service)
+
+    assert error.value.status_code == 502
+    assert error.value.detail == "session_file_upstream_unavailable"
+    assert repo.value is None
+    assert http.calls == []
 
 
 def test_upload_intent_uses_session_api_and_persists_encrypted_session_key():

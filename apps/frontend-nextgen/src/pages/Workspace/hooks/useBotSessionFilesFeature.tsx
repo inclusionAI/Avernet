@@ -43,9 +43,11 @@ export function useBotSessionFilesFeature(
   const botId = bot?.botType === 'desktop' ? null : bot?.realBotId ?? null;
   const sessionId = session?.sessionId ?? null;
   const ownerId = bot?.ownerId;
-  // Only shared service conversations opt into online; my Bots retain the existing file request shape.
+  // 在线服务 Bot 的文件与会话使用同一运行阶段；草稿调试及个人 Bot 保留既有请求形态。
   const stage =
-    bot?.botType === 'service' && (bot.isTeamBot || bot.isFriendBot) ? resolveChatRuntimeStage(bot) : undefined;
+    bot?.botType === 'service' && (bot.isTeamBot || bot.isFriendBot || bot.runtimeStage === 'online')
+      ? resolveChatRuntimeStage(bot)
+      : undefined;
 
   const files = useBotSessionFiles(
     botId,

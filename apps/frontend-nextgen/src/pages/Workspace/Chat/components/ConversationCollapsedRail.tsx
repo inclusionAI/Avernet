@@ -4,8 +4,8 @@
 // 头像是干净的一列：不留任何贯穿线（首版细轨从半透明头像中间穿过，读成故障线，已撤）。
 // 好友在线信号点已移除(2026-10-21):metadata status 对已删除 Bot 仍残留 ACTIVE,
 // 绿点失真误导;死 Bot 好友关系/元数据同步问题另行立项推动后端修复。
-// 交互与展开态同口径：头像直达打开会话（不强迫展开侧栏）；AgentCoding Bot
-// 走专用 coding 对话；不可聊 Bot 保持降权占位（与分组「泊位」一致）；
+// 交互与展开态同口径：头像直达打开会话（不强迫展开侧栏）；Coding Bot 与普通 Bot
+// 共用同一条会话通道，不再绕行专用 coding 对话；不可聊/不可用 Bot 保持降权占位（与分组「泊位」一致）；
 // +N 溢出 / 空位虚线占位各有语义，均请求展开完整侧栏
 //（2026-10-14 体验修复：底端不再保留公开 Bot 发现入口）。
 import { Button, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui';
@@ -34,8 +34,6 @@ export interface ConversationCollapsedRailProps {
   onQuickOpen(view: ConversationBotView): void;
   /** 「+N 溢出 / 空位占位」入口：请求展开完整侧栏。 */
   onExpand(): void;
-  /** AgentCoding Bot 不建普通会话，直达专用 coding 对话页（与 Bot 行为一致）。 */
-  onOpenAgentCodingBot(bot: ConversationBotView['bot']): void;
 }
 
 /** 分组界珠：短轨 + 珠点，把「两组之间」编码为轨道上的一个结。 */
@@ -139,7 +137,6 @@ export function ConversationCollapsedRail({
   selectedSection,
   onQuickOpen,
   onExpand,
-  onOpenAgentCodingBot,
 }: ConversationCollapsedRailProps) {
   return (
     <TooltipProvider delayDuration={300}>
@@ -162,21 +159,9 @@ export function ConversationCollapsedRail({
                   visible.map((view) => {
                     const selected =
                       view.bot.botId === selectedBotId && section.id === selectedSection;
-                    // 与 Bot 行同口径：不可用 Bot 不允许通过 Coding 专用入口绕过禁用。
+                    // 与 Bot 行 handleToggle 同口径：不可用/不可聊 Bot 均不提供直达。
                     if (resolveBotUnavailable(view.bot, view.section).unavailable) {
                       return <NonInteractiveTile key={view.bot.botId} view={view} />;
-                    }
-                    // AgentCoding 直达 coding 对话；不可聊不提供直达。
-                    if (view.bot.isAgentCodingBot) {
-                      return (
-                        <BotTile
-                          key={view.bot.botId}
-                          view={view}
-                          selected={selected}
-                          tooltip={view.bot.displayName}
-                          onClick={() => onOpenAgentCodingBot(view.bot)}
-                        />
-                      );
                     }
                     if (!view.bot.chatable) return <NonInteractiveTile key={view.bot.botId} view={view} />;
                     return (

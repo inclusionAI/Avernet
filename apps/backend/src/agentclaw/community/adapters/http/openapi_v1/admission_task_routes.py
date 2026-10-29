@@ -28,6 +28,11 @@ TASK_BBS_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "POST",
         "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts",
     ): AdmissionMode.OPEN,
+    ("PUT", "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}"): AdmissionMode.OPEN,
+    (
+        "DELETE",
+        "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}",
+    ): AdmissionMode.OPEN,
     (
         "PUT",
         "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts/{post_id}/helpful",

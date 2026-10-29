@@ -41,6 +41,7 @@ export interface TaskRelationDto {
  * (apps/backend .../adapters/http/task/schemas.py TaskArtifactDescriptorDTO,2026-10-20 spec §7):
  * 只含安全引用元数据,不含任何临时下载凭证/字节 handle。
  * content 为 kind-tagged 引用元数据:text→{text};file→{storage_type,storage_id,file_name,file_id,file_type};
+ * object_file 用稳定对象 key,预览/下载只走后端原始字节代理接口。
  * url_link→{url,type};code→{code_base_name,code_base_address,pr_link,pr_desc}。
  */
 export interface TaskArtifactDescriptorDto {

@@ -10,8 +10,10 @@ import { useTaskConversationNavigationStore } from '@/stores/taskConversationNav
 import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import { useEffect } from 'react';
 
-/** 路由跳转/消息列表首帧完成后再探测节点执行时间窗。 */
+/** 会话 hydration 后分批探测消息时间窗，等待慢加载的历史消息挂载。 */
 const DOM_PROBE_DELAY_MS = 900;
+const DOM_PROBE_INTERVAL_MS = 500;
+const DOM_PROBE_MAX_RETRIES = 10;
 
 /**
  * 消费任务节点导航：记录原宿主 → 建立 TaskPanel 保活信号 → 走真实会话路由 → 定位消息时间窗。
@@ -64,9 +66,21 @@ export function useTaskSessionNavigationObserver(): void {
       }
     }
     if ((target.startTime ?? null) === null && (target.endTime ?? null) === null) return;
-    window.setTimeout(() => {
+    let attempts = 0;
+    const probe = () => {
+      // consumePendingNavigation 会立刻把 pending 置空并触发本 effect 复跑；不能因此取消探测。
+      // 用 navigationId 判断是否仍是本次任务导航，任务切换/面板收起后旧探测不再抢占滚动位置。
+      const currentNavigation = useTaskConversationNavigationStore.getState().navigation;
+      if (!currentNavigation || currentNavigation.id !== navigationId) return;
       const hit = scrollToMessageTimestampWindow(document, target.startTime ?? null, target.endTime ?? null);
-      if (!hit) console.info('[task-panel-v2] 时间窗消息未在会话 DOM 命中,已降级为仅跳转会话');
-    }, DOM_PROBE_DELAY_MS);
+      if (hit) return;
+      if (attempts >= DOM_PROBE_MAX_RETRIES) {
+        console.info('[task-panel-v2] 时间窗消息未在会话 DOM 命中,已降级为仅跳转会话');
+        return;
+      }
+      attempts += 1;
+      setTimeout(probe, DOM_PROBE_INTERVAL_MS);
+    };
+    setTimeout(probe, DOM_PROBE_DELAY_MS);
   }, [target]);
 }

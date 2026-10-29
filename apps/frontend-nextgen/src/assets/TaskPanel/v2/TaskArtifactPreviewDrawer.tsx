@@ -15,6 +15,7 @@ import { Close } from '../icons';
 import { SafeHtml } from '../SafeHtml';
 import { sanitizeMarkdownHtml } from '../sanitizeHtml';
 import { C } from '../tokens';
+import { formatArtifactUpdatedAt } from '../artifactTime';
 import type { TaskArtifactView } from '../types';
 
 const markdown = new MarkdownIt({ html: false, breaks: true, linkify: true });
@@ -141,7 +142,7 @@ export const TaskArtifactPreviewDrawer: React.FC<TaskArtifactPreviewDrawerProps>
               <DetailLink href={linkUrl} />
             </DetailRow>
             <DetailRow label="产出者">{artifact.owner || '未提供'}</DetailRow>
-            <DetailRow label="创建时间">{artifact.updatedAt || '未提供'}</DetailRow>
+            <DetailRow label="创建时间">{formatArtifactUpdatedAt(artifact.updatedAt) || '未提供'}</DetailRow>
           </dl>
         </div>
       );
@@ -159,7 +160,7 @@ export const TaskArtifactPreviewDrawer: React.FC<TaskArtifactPreviewDrawerProps>
             </DetailRow>
             <DetailRow label="PR 描述">{artifact.codeRef?.description ?? artifact.summary ?? '暂无描述'}</DetailRow>
             <DetailRow label="产出者">{artifact.owner || '未提供'}</DetailRow>
-            <DetailRow label="创建时间">{artifact.updatedAt || '未提供'}</DetailRow>
+            <DetailRow label="创建时间">{formatArtifactUpdatedAt(artifact.updatedAt) || '未提供'}</DetailRow>
           </dl>
         </div>
       );

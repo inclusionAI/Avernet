@@ -846,10 +846,16 @@ class DeviceService:
 
         entity_id = current.entity_id
         entity_type = current.entity_type
+        device_props = current.device_props
+        if current.device_provider == BAAS_DEVICE_PROVIDER and isinstance(device_props, dict):
+            # The release caller is transient, never trusted from stored props.
+            device_props = {k: v for k, v in device_props.items() if k != "_release_operator"}
+            if not device_props.get("entity_id") and operator.staff_id:
+                device_props["_release_operator"] = operator.staff_id
         allocated_device = AllocatedDevice(
             device_id=current.device_id,
             device_provider=current.device_provider,
-            device_props=current.device_props,
+            device_props=device_props,
         )
 
         # 物理释放与 DB 状态更新解耦：即使物理释放失败，也要更新 DB 状态为 RELEASED，
@@ -1042,16 +1048,14 @@ class DeviceService:
         if self._effective_binding_status(record) == DeviceBindingStatus.FAILED.value:
             raise InvalidDeviceStatusError("cannot get connection for failed device")
 
-        # Permission check: 检查是否是公开 Bot 或协作者
-        if record.entity_id != operator.staff_id:
-            is_public = False
+        from .binding_identity import bot_for_binding
+
+        bot = bot_for_binding(self._bot_query, record)
+        current_owner_id = (bot or {}).get("owner_id") or record.entity_id
+        # Permission check: current Owner, public Bot or collaborator.
+        if current_owner_id != operator.staff_id:
+            is_public = bot is not None and bot.get("public") == "1"
             is_collaborator = False
-            bot = None
-            try:
-                bot = self._bot_query.get_by_binding_id(binding_id)
-                is_public = bot is not None and bot.get("public") == "1"
-            except Exception as e:
-                logger.warning("[get_device_connection] Failed to check bot visibility: %s", e)
 
             # 检查协作者权限
             if not is_public and not is_collaborator:

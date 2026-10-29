@@ -51,6 +51,7 @@ function makeOptions(overrides: { messages?: ChatMessage[]; panelRef?: React.Ref
       messages: overrides.messages ?? makeMessages(),
       panelRef: overrides.panelRef ?? ({ current: handle } as React.RefObject<PanelHandle | null>),
       section: 'managed' as const,
+      userId: null,
       botId: 'bot-1',
       toggleFavorite: jest.fn().mockResolvedValue(true),
       favoritePending: jest.fn().mockReturnValue(false),

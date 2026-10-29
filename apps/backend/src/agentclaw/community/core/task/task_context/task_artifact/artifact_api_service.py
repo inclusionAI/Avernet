@@ -11,8 +11,11 @@ spec 2026-10-20-task-artifact-domain 之外的**独立 API 写口**:relay 回调
   compose 辅助——capture、手动登记与 session-file 补录共用单一事实源。
 - 幂等(§5.3):``TaskArtifactRepositoryProtocol.append`` select-first 查重,
   与 ``save_graph`` 内嵌写同键同口径;重复登记返回既有行,不插第二行。
-- dashboard 返回 manifest 前先观察节点 BCS session 的 Ready files,按完整
+- ``sync_session_files_and_list``:观察节点 BCS session 的 Ready files,按完整
   ``FileContent`` task-wide 去重并 append 新引用;BCS 失败降级,DB 失败上抛。
+  **2026-10-27:**dashboard 三个读口(``GET /dashboard`` 内外两副本 + ``GET /{task_id}``)
+  不再触发本方法,改为 ``(await)list_artifacts`` 纯收 DB 行;本方法作为独立能力保留,
+  仍由其单测覆盖,后续若需 BCS 回填可另行接入。
 
 Repo pattern(api/README"Where a Protocol is defined"):Protocol 定义于本(core)
 模块,实现继承之,``api/task/task_artifact_service.py`` 仅 re-export;
@@ -53,6 +56,9 @@ from agentclaw.community.core.task.task_runner.client.bcs_bot_token_provider imp
     BcsBotTokenProvider,
 )
 from agentclaw.community.core.task.task_runner.client.ports import BcsSessionFilesPort
+from agentclaw.community.core.task.task_context.relay_attempt import (
+    verify_relay_attempt,
+)
 
 if TYPE_CHECKING:
     from agentclaw.community.core.task.domain.models import TaskExecutionGraph, TaskNode
@@ -69,11 +75,18 @@ _SESSION_FILE_PAGE_SIZE = 100
 class TaskArtifactApiServiceProtocol(Protocol):
     """产物手动登记、按任务查询及 dashboard session-file 协调。"""
 
-    def add_artifact(self, item: "ArtifactReportItem") -> TaskArtifactRecord:
+    def add_artifact(
+        self, item: "ArtifactReportItem", *, relay_token: str | None = None
+    ) -> TaskArtifactRecord:
         """登记一条已解析产物(relay 同构 item;归属/attempt 与图交叉校验)。
 
+        ``relay_token``(spec §14.2)是可选的 relay 尝试 fence——非空时经
+        core ``verify_relay_attempt`` 对图上节点代次校验;creator 派生与其余
+        语义零改动。
+
         失败上抛域错误:``TaskNotFoundError``/``NodeNotFoundError``(404)、
-        ``TaskArtifactContentError``(422);幂等命中返回既有行不重复落库。
+        ``TaskStateError``(409,token 失配)、``TaskArtifactContentError``(422);
+        幂等命中返回既有行不重复落库。
         """
         ...
 
@@ -135,7 +148,9 @@ class TaskArtifactApiService(TaskArtifactApiServiceProtocol):
                 f"task={owner_app}, current={current_app}"
             )
 
-    def add_artifact(self, item: "ArtifactReportItem") -> TaskArtifactRecord:
+    def add_artifact(
+        self, item: "ArtifactReportItem", *, relay_token: str | None = None
+    ) -> TaskArtifactRecord:
         self._require_owned_task(item.task_id)
         graph = self._graph_repo.load_graph(item.task_id)
         if graph is None:
@@ -145,6 +160,10 @@ class TaskArtifactApiService(TaskArtifactApiServiceProtocol):
         )
         if node is None:
             raise NodeNotFoundError(item.node_id)
+        # relay 尝试 fence(spec §14.2):非空 token 对图上节点代次校验;
+        # creator 派生与其余归属逻辑零改动。
+        if relay_token is not None:
+            verify_relay_attempt(node, relay_token)
         # attempt 与图上快照交叉校验(§4 规则 4):不一致即拒,不采纳——
         # 防止手动登记把产物归档到不存在的执行轮次,污染幂等键。
         attempt = graph_node_attempt(node)

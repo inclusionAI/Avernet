@@ -1,6 +1,6 @@
 // @asset-migrated: teamclaw 自研资产
 /**
- * TaskSwitcherBar —— 副屏顶部多任务切换横条(PRD #6,数据源 listTasks,宿主注入)。
+ * TaskSwitcherBar —— 副屏顶部任务切换横条(PRD #6,数据源 listTasks,宿主注入)。
  * 横条:任务小标 + 当前任务名 + 状态 tag + 任务总数徽章;点击展开下拉切换。
  * demo 的全屏拖拽能力不产品化，副屏内入口由 TaskSwitcherControl 承载。
  */
@@ -14,12 +14,16 @@ export interface TaskSwitcherItem {
   title: string;
   status: 'running' | 'pending' | 'done';
   statusLabel: string;
+  /** 非焦点任务有进展但尚未被用户查看。 */
+  hasUnhandledUpdate?: boolean;
 }
 
 export interface TaskSwitcherProps {
   items: TaskSwitcherItem[];
   activeTaskId: string;
   onSelectTask: (taskId: string) => void;
+  /** 仅影响首帧；后续仍由用户点击横条控制。 */
+  defaultOpen?: boolean;
 }
 
 const STATUS_TONE: Record<TaskSwitcherItem['status'], { color: string; bg: string }> = {
@@ -47,12 +51,12 @@ const Tag: React.FC<{ item: TaskSwitcherItem }> = ({ item }) => {
   );
 };
 
-export const TaskSwitcherBar: React.FC<TaskSwitcherProps> = ({ items, activeTaskId, onSelectTask }) => {
-  const [open, setOpen] = useState(false);
-  // PRD 的切换横条只服务多任务会话；单任务继续保持「任务总览」直接置顶。
-  if (items.length <= 1) return null;
+export const TaskSwitcherBar: React.FC<TaskSwitcherProps> = ({ items, activeTaskId, onSelectTask, defaultOpen }) => {
+  const [open, setOpen] = useState(defaultOpen ?? false);
+  if (items.length === 0) return null;
 
   const active = items.find((i) => i.taskId === activeTaskId) ?? items[0];
+  const hasUnhandledUpdate = items.some((i) => i.hasUnhandledUpdate);
 
   return (
     <div style={{ position: 'relative', borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
@@ -62,6 +66,7 @@ export const TaskSwitcherBar: React.FC<TaskSwitcherProps> = ({ items, activeTask
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         style={{
+          position: 'relative',
           display: 'flex',
           alignItems: 'center',
           gap: 8,
@@ -75,7 +80,7 @@ export const TaskSwitcherBar: React.FC<TaskSwitcherProps> = ({ items, activeTask
           textAlign: 'left',
         }}
       >
-        <span style={{ fontSize: 11, color: C.textSecondary, flexShrink: 0 }}>任务</span>
+        <span style={{ fontSize: 12, color: C.textSecondary, flexShrink: 0 }}>任务</span>
         <span
           style={{
             flex: 1,
@@ -88,6 +93,7 @@ export const TaskSwitcherBar: React.FC<TaskSwitcherProps> = ({ items, activeTask
         >
           {active.title}
         </span>
+        <span style={{ color: C.textSecondary, flexShrink: 0 }}>·</span>
         <Tag item={active} />
         <span
           title="任务总数"
@@ -114,6 +120,21 @@ export const TaskSwitcherBar: React.FC<TaskSwitcherProps> = ({ items, activeTask
             flexShrink: 0,
           }}
         />
+        {hasUnhandledUpdate && (
+          <span
+            data-testid="task-switcher-attention-badge"
+            title="有任务新进展"
+            style={{
+              position: 'absolute',
+              top: 7,
+              right: 9,
+              width: 7,
+              height: 7,
+              borderRadius: 999,
+              background: C.danger,
+            }}
+          />
+        )}
       </button>
 
       {open && (
@@ -161,6 +182,18 @@ export const TaskSwitcherBar: React.FC<TaskSwitcherProps> = ({ items, activeTask
                     textAlign: 'left',
                   }}
                 >
+                  <span
+                    data-testid={i.hasUnhandledUpdate ? 'task-switcher-update-badge' : undefined}
+                    title={i.hasUnhandledUpdate ? '有新进展' : undefined}
+                    aria-hidden={!i.hasUnhandledUpdate || undefined}
+                    style={{
+                      width: i.hasUnhandledUpdate ? 6 : 0,
+                      height: 6,
+                      borderRadius: 999,
+                      background: C.danger,
+                      flexShrink: 0,
+                    }}
+                  />
                   <span
                     style={{
                       overflow: 'hidden',

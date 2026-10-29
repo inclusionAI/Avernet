@@ -10,21 +10,25 @@ from agentclaw.community.adapters.http.task.bbs.router import (
     close_topic_internal,
     create_reply_internal,
     create_topic_internal,
+    delete_topic_internal,
     get_topic_internal,
     list_posts_internal,
     list_topics_internal,
     read_router,
     router,
     set_post_helpful_internal,
+    update_topic_internal,
 )
 from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     CloseTopicRequestUnified,
     CreateReplyRequestUnified,
+    DeleteTopicRequestUnified,
     PollSelectionRequest,
     CreateTopicRequestUnified,
     PollConfigRequest,
     SetPostHelpfulRequest,
     TopicConfigRequest,
+    UpdateTopicRequestUnified,
 )
 from agentclaw.community.adapters.http.openapi_v1.contracts import PageParams
 from agentclaw.community.core.errors import Conflict, Forbidden, NotFound
@@ -92,6 +96,8 @@ def test_internal_router_mirrors_all_bbs_operations():
         # Content surface — unified writes (author declared in the body).
         ("POST", "/api/v1/collaboration/tasks/bbs/topics"),
         ("POST", "/api/v1/collaboration/tasks/bbs/topics/{topic_id}/posts"),
+        ("PUT", "/api/v1/collaboration/tasks/bbs/topics/{topic_id}"),
+        ("DELETE", "/api/v1/collaboration/tasks/bbs/topics/{topic_id}"),
         (
             "PUT",
             "/api/v1/collaboration/tasks/bbs/topics/{topic_id}/posts/{post_id}/helpful",
@@ -516,6 +522,79 @@ async def test_set_post_helpful_internal_delegates_declared_author_and_state():
     ]
     assert payload.data is not None
     assert payload.data.model_dump() == {"post_id": "post_1", "helpful": False}
+
+
+# ---------------------------------------------------------------------------
+# BBS Topic edit/delete — internal /api/v1/collaboration/tasks/bbs mirror tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_internal_update_topic_delegates_to_shared_forum_service():
+    class Service:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def update_topic(self, **kwargs):
+            self.calls.append({"op": "update_topic", **kwargs})
+            return dataclasses.replace(_topic(), title="Edited", body="New body")
+
+    service = Service()
+    payload = await update_topic_internal(
+        body=UpdateTopicRequestUnified(
+            author_type="BOT",
+            author_id="bot-a",
+            title="Edited",
+            body="New body",
+        ),
+        topic_id="topic_1",
+        request=_request("PUT", "/api/v1/collaboration/tasks/bbs/topics/topic_1"),
+        service=service,
+    )
+
+    assert service.calls == [
+        {
+            "op": "update_topic",
+            "topic_id": "topic_1",
+            "author_type": "BOT",
+            "author_id": "bot-a",
+            "title": "Edited",
+            "body": "New body",
+        }
+    ]
+    assert payload.data is not None
+    assert payload.data.title == "Edited"
+    assert payload.data.body == "New body"
+
+
+@pytest.mark.asyncio
+async def test_internal_delete_topic_delegates_to_shared_forum_service():
+    class Service:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def delete_topic(self, **kwargs):
+            self.calls.append({"op": "delete_topic", **kwargs})
+            return True
+
+    service = Service()
+    payload = await delete_topic_internal(
+        body=DeleteTopicRequestUnified(author_type="BOT", author_id="bot-a"),
+        topic_id="topic_1",
+        request=_request("DELETE", "/api/v1/collaboration/tasks/bbs/topics/topic_1"),
+        service=service,
+    )
+
+    assert service.calls == [
+        {
+            "op": "delete_topic",
+            "topic_id": "topic_1",
+            "author_type": "BOT",
+            "author_id": "bot-a",
+        }
+    ]
+    assert payload.data is not None
+    assert payload.data.model_dump() == {"topic_id": "topic_1", "deleted": True}
 
 
 # ---------------------------------------------------------------------------

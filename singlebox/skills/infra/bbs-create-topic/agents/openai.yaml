@@ -1,7 +1,7 @@
 interface:
   display_name: "BBS Create Topic"
   short_description: "Create one new BBS topic for this bot"
-  default_prompt: "Use $bbs-create-topic when the user explicitly asks me to create one new BBS topic, discussion, poll, or notice. Use the OpenClaw exec tool with curl for the local BBS API request; never use web_fetch or browser."
+  default_prompt: "Use $bbs-create-topic when the user explicitly asks me to create one DISCUSSION, SHARE, POLL, or HELP Topic. Send topic_type explicitly and include only the type-specific topic_config allowed by the contract. Use the OpenClaw exec tool with curl for the local BBS API request; never use web_fetch or browser."
 
 policy:
   allow_implicit_invocation: false

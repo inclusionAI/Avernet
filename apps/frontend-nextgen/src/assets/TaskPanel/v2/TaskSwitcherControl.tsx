@@ -1,7 +1,7 @@
 // @asset-migrated: teamclaw 自研资产
 /**
- * TaskSwitcherControl —— 副屏内可拖拽的多任务切换入口。
- * 默认仅展示悬浮按钮，点击控制顶部 TaskSwitcherBar 显隐；拖拽限制在 TaskPanel 内。
+ * TaskSwitcherControl —— 副屏内可拖拽的任务切换入口。
+ * 默认仅展示悬浮按钮，点击控制顶部 TaskSwitcherBar 显隐；单任务也可查看当前项；拖拽限制在 TaskPanel 内。
  */
 import React, { useEffect, useRef, useState } from 'react';
 
@@ -12,6 +12,11 @@ import { TaskSwitcherBar, type TaskSwitcherProps } from './TaskSwitcherBar';
 interface DragPosition {
   x: number;
   y: number;
+}
+
+interface TaskSwitcherControlProps extends TaskSwitcherProps {
+  /** 仅影响首帧；聊天副屏默认仅展示悬浮开关，宿主首次展示由用户点击开关触发。 */
+  defaultVisible?: boolean;
 }
 
 interface TaskSwitcherDragState extends DragPosition {
@@ -28,8 +33,8 @@ interface TaskSwitcherDragState extends DragPosition {
 const DRAG_MARGIN = 8;
 const DRAG_THRESHOLD = 4;
 
-export const TaskSwitcherControl: React.FC<TaskSwitcherProps> = (props) => {
-  const [visible, setVisible] = useState(false);
+export const TaskSwitcherControl: React.FC<TaskSwitcherControlProps> = (props) => {
+  const [visible, setVisible] = useState(props.defaultVisible ?? false);
   const [dragging, setDragging] = useState(false);
   const [position, setPosition] = useState<DragPosition | null>(null);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
@@ -77,15 +82,24 @@ export const TaskSwitcherControl: React.FC<TaskSwitcherProps> = (props) => {
     };
   }, [hasCustomPosition]);
 
-  if (props.items.length <= 1) return null;
+  if (props.items.length === 0) return null;
 
   const label = visible ? '隐藏任务切换' : '显示任务切换';
+  const hasUnhandledUpdate = props.items.some((item) => item.hasUnhandledUpdate);
 
   return (
     <>
-      {visible ? <TaskSwitcherBar {...props} /> : null}
+      {visible ? (
+        <TaskSwitcherBar
+          items={props.items}
+          activeTaskId={props.activeTaskId}
+          onSelectTask={props.onSelectTask}
+          defaultOpen={props.defaultOpen}
+        />
+      ) : null}
       <button
         type="button"
+        data-task-switcher-control="true"
         title={label}
         aria-label={label}
         aria-pressed={visible}
@@ -190,6 +204,22 @@ export const TaskSwitcherControl: React.FC<TaskSwitcherProps> = (props) => {
         }}
       >
         <TaskSwitcherIcon size={24} aria-hidden="true" />
+        {hasUnhandledUpdate && (
+          <span
+            data-testid="task-switcher-attention-badge"
+            title="有任务新进展"
+            style={{
+              position: 'absolute',
+              top: 9,
+              right: 9,
+              width: 8,
+              height: 8,
+              borderRadius: 999,
+              background: C.danger,
+              border: `1px solid ${C.surface}`,
+            }}
+          />
+        )}
       </button>
     </>
   );

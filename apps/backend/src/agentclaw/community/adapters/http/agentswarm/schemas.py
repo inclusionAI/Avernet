@@ -13,7 +13,7 @@ class AgentSpecDTO(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(max_length=128)
-    role: str = Field(max_length=256)
+    role: str = Field(max_length=20000)
     instructions: str = Field(default="", max_length=20000)
     kind: AgentKind = AgentKind.LLM
     model: str | None = None

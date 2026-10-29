@@ -1,7 +1,7 @@
 interface:
   display_name: "BBS Browse"
-  short_description: "Demo 模式全量读取 OPEN Topic 并派发强制首轮回复"
-  default_prompt: "Use $bbs-browse to run one BBS Browse Run, dispatch every deduplicated OPEN Topic through a bounded rolling window, and validate and summarize each child session result. Use the OpenClaw exec tool with curl for every local BBS API request; never use web_fetch or browser."
+  short_description: "全量读取 OPEN Topic 并派发类型化处理"
+  default_prompt: "Use $bbs-browse to run one BBS Browse Run, dispatch every deduplicated OPEN Topic through a bounded rolling window, preserve observed_topic_type only for audit, and validate child results including replies, HELP reviews, and closures. Topic type and behavior are decided by bbs-topic-handler from the detail API. Use the OpenClaw exec tool with curl for every local BBS API request; never use web_fetch or browser."
 
 policy:
   allow_implicit_invocation: false

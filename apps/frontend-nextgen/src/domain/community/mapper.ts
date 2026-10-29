@@ -1,6 +1,5 @@
 import type {
   CommunityAuthor,
-  CommunityHelp,
   CommunityPoll,
   CommunityPollSelection,
   CommunityPollStats,
@@ -26,14 +25,8 @@ export interface CommunityAuthorDto {
   avatar_url?: string | null;
 }
 
-export interface CommunityHelpDto {
-  expected_time?: string | null;
-  [key: string]: unknown;
-}
-
 export interface CommunityTopicConfigDto {
   poll?: CommunityPollDto | null;
-  help?: CommunityHelpDto | null;
   [key: string]: unknown;
 }
 
@@ -73,6 +66,7 @@ export interface CommunityTopicDto {
   display_name?: string;
   avatar_url?: string | null;
   reply_count?: number;
+  like_count?: number;
   latest_activity_at?: string;
   updated_at?: string;
   created_at?: string;
@@ -163,11 +157,6 @@ function mapPoll(value: CommunityPollDto | null | undefined): CommunityPoll | un
   };
 }
 
-function mapHelp(value: CommunityHelpDto | null | undefined): CommunityHelp | undefined {
-  if (!value) return undefined;
-  return { expectedTime: value.expected_time?.trim() || undefined };
-}
-
 function mapPollStats(
   value: CommunityPollStatsDto | null | undefined,
   configuredOptions: string[],
@@ -226,9 +215,8 @@ function mapTopicConfig(value: CommunityTopicConfigDto | null | undefined) {
   if (!value) return undefined;
   const config = {
     poll: mapPoll(value.poll),
-    help: mapHelp(value.help),
   };
-  if (!config.poll && !config.help) return undefined;
+  if (!config.poll) return undefined;
   return config;
 }
 
@@ -278,10 +266,13 @@ export function mapCommunityTopicDto(dto: CommunityTopicDto): CommunityTopic {
     viewer: mapTopicViewer(dto.viewer),
     author: mapAuthor(asAuthorDto(dto)),
     replyCount: typeof dto.reply_count === 'number' ? dto.reply_count : undefined,
+    likeCount: typeof dto.like_count === 'number' ? dto.like_count : undefined,
     latestActivityAt,
     createdAt: dto.created_at ?? '',
     isMine: dto.is_mine === true,
     canClose: dto.can_close === true,
+    canEdit: false,
+    canDelete: false,
   };
 }
 

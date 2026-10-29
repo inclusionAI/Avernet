@@ -164,9 +164,16 @@ class PublicAPIRoute(APIRoute):
                 require_check,
             )
 
+            from .bot_address import require_granted_collaboration_bot
+            bot_dependency = (
+                require_granted_collaboration_bot
+                if _consumes(endpoint, require_granted_collaboration_bot)
+                else None
+            )
+            gate = require_check(rule, bot_dependency=bot_dependency) if bot_dependency else require_check(rule)
             kwargs["dependencies"] = [
                 *(kwargs.get("dependencies") or []),
-                Depends(require_check(rule)),
+                Depends(gate),
             ]
         if isinstance(rule, Check) and rule.edit_lock is EDIT_LOCK:
             from agentclaw.community.adapters.http.openapi_v1.contracts import (
@@ -328,15 +335,17 @@ def _assert_check_rows_are_enforceable(
         resolve_owner_id,
     )
 
+    from .bot_address import require_granted_collaboration_bot
+
     divergent = sorted(
         f"{method} {path}"
         for (method, path), endpoint in checked_handlers
-        if not _consumes(endpoint, resolve_owner_id)
+        if not any(_consumes(endpoint, dependency) for dependency in (resolve_owner_id, require_granted_collaboration_bot))
     )
     if divergent:
         raise PublicRouteNotAuthorized(
             "these operations declare Check but their handler does not take "
-            "OwnerIdDep, so the gate would adjudicate the addressed owner while "
+            "OwnerIdDep or a resolved Bot dependency, so the gate would adjudicate a different identity while "
             "the handler acted on a different one (see bot_access's contract): "
             + ", ".join(divergent)
         )

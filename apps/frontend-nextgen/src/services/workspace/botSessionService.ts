@@ -54,7 +54,7 @@ export interface ChatBotView {
   templateName?: string;
   spaceId?: string;
   spaceName?: string;
-  /** 会话运行阶段；团队/好友服务 Bot 使用 online，个人 Bot 使用 draft。 */
+  /** 会话运行阶段；对话页目录中的服务 Bot 使用 online，个人 Bot 使用 draft；调试页可显式选择阶段。 */
   runtimeStage?: BotIamTokenStage;
   /** 标记来自当前用户好友关系，而非当前用户管理的 Bot。 */
   isFriendBot?: boolean;
@@ -116,18 +116,20 @@ export function resolveChatRuntimeStage(bot: ChatBotView): BotIamTokenStage {
   return bot.runtimeStage ?? (bot.botType === 'service' ? 'online' : 'draft');
 }
 
-/** 所有单聊请求补运行环境；好友补 f_user_id，团队补实体 owner。 */
+/** 服务 Bot 请求才显式指定阶段；非服务 Bot 依赖后端默认环境，并移除旧筛选条件中的 stage。 */
 export function withFriendBotRequestParams<T extends { user_id: string; owner_id?: string; stage?: BotIamTokenStage }>(
   bot: ChatBotView,
   userId: string,
   params: T,
-): T & { stage: BotIamTokenStage; f_user_id?: string } {
+): Omit<T, 'stage'> & { stage?: BotIamTokenStage; f_user_id?: string } {
+  const { stage: requestedStage, ...baseParams } = params;
+  const stage =
+    bot.isFriendBot || bot.isTeamBot || bot.runtimeStage === 'online'
+      ? resolveChatRuntimeStage(bot)
+      : requestedStage ?? resolveChatRuntimeStage(bot);
   return {
-    ...params,
-    stage:
-      bot.isFriendBot || bot.botType === 'personal' || (bot.isTeamBot && bot.botType === 'service')
-        ? resolveChatRuntimeStage(bot)
-        : params.stage ?? resolveChatRuntimeStage(bot),
+    ...baseParams,
+    ...(bot.botType === 'service' ? { stage } : {}),
     ...((bot.isFriendBot || bot.isTeamBot) && bot.ownerId ? { owner_id: bot.ownerId } : {}),
     ...(bot.isFriendBot ? { f_user_id: resolveUserId(userId) } : {}),
   };
@@ -263,7 +265,7 @@ function toOwnedBotView(dto: OwnedBotDto): ChatBotView {
     engine: dto.engine_type ?? dto.engine,
     ...permissions,
     botType: dto.bot_type,
-    runtimeStage: 'draft',
+    runtimeStage: dto.bot_type === 'service' ? 'online' : 'draft',
     isAgentCodingBot: runtime.isAgentCodingBot,
     templateType: runtime.templateType,
     templateName: runtime.templateName,
@@ -276,7 +278,7 @@ async function fetchOwnedBots(
   userId: string,
 ): Promise<DomainResult<{ bots: ChatBotView[]; hasAgentCodingBots: boolean }>> {
   try {
-    const resp = await listOwnedBotsApi({ user_id: resolveUserId(userId), page: 1, page_size: 100 });
+    const resp = await listOwnedBotsApi({ user_id: resolveUserId(userId), page: 1, page_size: 100, stage: 'online' });
     // 对话页的「已管理 Bot」目录保留全部可用 Bot。AgentCoding Bot 的行点击
     // 由对话页直接进入 coding-chat；普通 CC 仍由运行时分类保留，不误判。
     const owned = resp.data?.items ?? [];

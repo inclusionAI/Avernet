@@ -165,8 +165,8 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
               session.favorite === undefined
                 ? '收藏状态暂不可用，请重新加载会话列表'
                 : session.favorite
-                ? '取消收藏'
-                : '收藏会话'
+                  ? '取消收藏'
+                  : '收藏会话'
             }
             ariaLabel={session.favorite ? '取消收藏' : '收藏会话'}
             size="sm"
@@ -174,9 +174,7 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
               <Star
                 className={cn(
                   'h-3.5 w-3.5',
-                  session.favorite === undefined || !session.favorite
-                    ? 'text-muted-foreground'
-                    : 'fill-star text-star',
+                  session.favorite === undefined || !session.favorite ? 'text-muted-foreground' : 'fill-star text-star',
                 )}
               />
             }

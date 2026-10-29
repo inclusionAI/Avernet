@@ -1,11 +1,11 @@
 /** @jest-environment jsdom */
 // TaskPanelV2 壳:面包屑两级栈 + 收起按钮 + nav 注入/本地降级(spec §3.2)。
 import type { ResolvedSessionTarget } from '@/assets/TaskPanel/sessionResolution';
+import type { TaskView } from '@/assets/TaskPanel/types';
 import { TaskPanelV2, type TaskPanelV2Props } from '@/assets/TaskPanel/v2/TaskPanelV2';
 import { useLocalTaskPanelNav, type TaskPanelNav } from '@/assets/TaskPanel/v2/taskPanelNav';
-import type { TaskView } from '@/assets/TaskPanel/types';
-import { act, fireEvent, render, renderHook, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
+import { act, fireEvent, render, renderHook, screen } from '@testing-library/react';
 
 const baseTask = {
   id: 't1',
@@ -53,7 +53,15 @@ const baseTask = {
   ],
   dagNodes: [
     { id: 'n-solo', label: '规划与澄清', status: 'done', x: 0, y: 0, isCurrent: false, short: '规划与澄清' },
-    { id: 'n-group', label: '并行调研执行协作群节点', status: 'running', x: 0, y: 1, isCurrent: false, short: '并行调研执…' },
+    {
+      id: 'n-group',
+      label: '并行调研执行协作群节点',
+      status: 'running',
+      x: 0,
+      y: 1,
+      isCurrent: false,
+      short: '并行调研执…',
+    },
   ],
   dagEdges: [],
 } as unknown as TaskView;
@@ -79,11 +87,12 @@ const baseProps = (overrides?: Partial<TaskPanelV2Props>): TaskPanelV2Props => (
 });
 
 describe('TaskPanelV2 壳', () => {
-  it('L1 默认渲染:面包屑只显「任务总览」(纯文本),L1 内容区可见', () => {
+  it('L1 默认渲染焦点任务状态条:任务名 + 任务状态,L1 内容区可见', () => {
     render(<TaskPanelV2 {...baseProps()} />);
-    expect(screen.getByText('任务总览')).toBeTruthy();
-    // 纯文本不可点 → button role 不存在
-    expect(screen.queryByRole('button', { name: '任务总览' })).toBeNull();
+    expect(screen.queryByTitle('焦点任务')).toBeNull();
+    expect(screen.getByText('竞品分析')).toBeTruthy();
+    expect(screen.getByText('执行中')).toBeTruthy();
+    expect(screen.getByTitle('任务总览：竞品分析')).toBeTruthy();
   });
 
   it('收起按钮:注入 onTogglePanel 时渲染并回调;未注入不渲染(Ruling 6)', () => {
@@ -122,16 +131,16 @@ describe('TaskPanelV2 壳', () => {
     expect(screen.getByText(/节点数据缺失/)).toBeTruthy();
   });
 
-  it('多任务切换器槽位渲染在「任务总览」上方', () => {
+  it('多任务切换器槽位渲染在焦点任务状态条上方', () => {
     render(<TaskPanelV2 {...baseProps({ switcher: <div data-testid="switcher-bar">bar</div> })} />);
     const switcherNode = screen.getByTestId('switcher-bar');
-    const overviewTitle = screen.getByText('任务总览');
+    const overviewTitle = screen.getByTitle('任务总览：竞品分析');
     expect(switcherNode.compareDocumentPosition(overviewTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('未注入多任务切换器时顶部仍直接展示「任务总览」', () => {
+  it('未注入多任务切换器时顶部仍直接展示焦点任务状态条', () => {
     render(<TaskPanelV2 {...baseProps()} />);
-    const overviewTitle = screen.getByText('任务总览');
+    const overviewTitle = screen.getByTitle('任务总览：竞品分析');
     expect(overviewTitle).toBeTruthy();
     expect(overviewTitle.closest('[data-task-panel-root]')?.getAttribute('data-task-panel-root')).toBe('true');
   });

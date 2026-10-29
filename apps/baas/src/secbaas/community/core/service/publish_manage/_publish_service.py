@@ -743,6 +743,21 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
         # Snapshot config after replica_desired inference (must be AFTER
         # the elif needs_device_count block so corrected values are captured)
         extra_config = config.model_dump(exclude_none=True) if config else {}
+        if publish_type in (PublishType.UPDATE, PublishType.UPDATE_DEVICE):
+            from secbaas.community.core.service.bot_manage import merge_deploy_config
+
+            # The direct publish API also needs request-scoped image semantics.
+            # Persist an explicit null for a new update with no deployment config;
+            # an absent key remains the compatibility signal for legacy publishes.
+            deploy_config = merge_deploy_config(
+                bot.config.deploy_config if bot.config else None,
+                config.deploy_config if config else None,
+            )
+            extra_config["deploy_config"] = (
+                deploy_config.model_dump(exclude_none=True)
+                if deploy_config is not None
+                else None
+            )
 
         # Step 3: Generate batch configuration
         batch_configs = self._generate_batches(
@@ -795,16 +810,22 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                     callback_timeout_seconds=config.callback_timeout_seconds,
                     auto_approve_publish=config.auto_approve,
                 )
+            # Preserve the old clone's metadata when no deployment override was
+            # supplied, but never let clone fallback restore its previous image.
+            new_bot_extra_config = (
+                new_bot_config.model_dump(exclude_none=True)
+                if new_bot_config is not None
+                else dict(bot.config.model_dump(exclude_none=True))
+                if bot.config
+                else {}
+            )
+            new_bot_extra_config["deploy_config"] = extra_config["deploy_config"]
             try:
                 new_bot_id = self._bot_repo.try_insert_pending_bot(
                     source_bot_id=bot_id,
                     tenant=tenant,
                     env=env,
-                    extra_config=(
-                        new_bot_config.model_dump(exclude_none=True)
-                        if new_bot_config is not None
-                        else None
-                    ),
+                    extra_config=new_bot_extra_config,
                     name=config.bot_name if config else None,
                     template_uuid=config.template_uuid if config else None,
                     modifier=operator,
@@ -2859,6 +2880,18 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
             else BotConfig()
         )
 
+        # UPDATE_DEVICE has no target Bot row. Its immutable publish snapshot
+        # must win over the current Bot configuration, which can still contain
+        # an older image (or change while an approval is pending).
+        publish_config = publish_record.extra_config or {}
+        if "deploy_config" in publish_config:
+            from secbaas.community.api.device_manage import DeployConfig
+
+            snapshot = publish_config["deploy_config"]
+            new_bot_config.deploy_config = (
+                DeployConfig.model_validate(snapshot) if snapshot is not None else None
+            )
+
         record_repo = self._publish_record_repo
 
         pending_records = record_repo.list_by_publish_id_and_batch_id(
@@ -2891,13 +2924,7 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                 )
                 continue
 
-            record_repo.update_result(
-                record_id=record.id,
-                tenant=tenant,
-                env=env,
-                result_status=PublishRecordResult.PROCESSING.value,
-                modifier=operator,
-            )
+            image_config_ready = False
             try:
                 logger.info(
                     f"Setting device {device_record.id} (uuid={device_record.device_uuid}, "
@@ -2916,11 +2943,23 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                     else bot_record.template_uuid,
                     deploy_config=new_bot_config.deploy_config,
                 )
-                device_repo.update_device(
+                updated_rows = device_repo.update_device(
                     device_id=device_record.id,
                     tenant=tenant,
                     env=env,
                     extra_config=new_device_extra_config.model_dump(exclude_none=True),
+                    modifier=operator,
+                )
+                if updated_rows == 0:
+                    raise RuntimeError("Device configuration update affected no rows")
+                image_config_ready = True
+                # Only expose PROCESSING to callback/timeout retries after
+                # the operation's configuration is durable.
+                record_repo.update_result(
+                    record_id=record.id,
+                    tenant=tenant,
+                    env=env,
+                    result_status=PublishRecordResult.PROCESSING.value,
                     modifier=operator,
                 )
                 logger.info(
@@ -2968,7 +3007,9 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                     )
 
             except Exception as e:
-                retried = await self._drive_record_attempt(
+                # Never retry provider provisioning with stale configuration
+                # after a failed persistence write.
+                retried = image_config_ready and await self._drive_record_attempt(
                     record=record,
                     tenant=tenant,
                     operator=operator,

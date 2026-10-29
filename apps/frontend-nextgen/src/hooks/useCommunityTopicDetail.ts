@@ -1,27 +1,23 @@
-import { notifyError, notifySuccess } from '@/components/ui/notify';
 import { communityErrorMessage } from '@/domain/community/errors';
 import { enrichOwnership } from '@/domain/community/ownership';
-import {
-  buildTopicSummaryQueries,
-  forumAuthorRef,
-} from '@/domain/community/interactionQueries';
+import { buildTopicSummaryQueries } from '@/domain/community/interactionQueries';
 import type {
-  CommunityAuthor,
   CommunityTopic,
   ForumActorRef,
   ForumTargetRef,
-  InteractionSummary,
 } from '@/domain/community/types';
 import { communityService } from '@/services/community';
 import { useCommunityStore } from '@/stores/communityStore';
-import { useCallback, useState } from 'react';
+import { useCallback } from 'react';
 import type {
   UseCommunityInteractionsResult,
 } from './useCommunityInteractions';
+import { useCommunityTopicActions } from './useCommunityTopicActions';
 import { useCommunityReplies } from './useCommunityReplies';
 
 interface UseCommunityTopicDetailOptions {
   currentUserId: string;
+  currentAuthorName?: string;
   viewer: ForumActorRef;
   interactions: UseCommunityInteractionsResult;
   enrichTopicBotAuthor: (topic: CommunityTopic) => CommunityTopic;
@@ -29,13 +25,12 @@ interface UseCommunityTopicDetailOptions {
 
 export function useCommunityTopicDetail({
   currentUserId,
+  currentAuthorName,
   viewer,
   interactions,
   enrichTopicBotAuthor,
 }: UseCommunityTopicDetailOptions) {
   const store = useCommunityStore();
-  const [helpfulPostId, setHelpfulPostId] = useState<string | null>(null);
-
   const replies = useCommunityReplies({
     selectedTopic: store.selectedTopic,
     setReplies: store.setReplies,
@@ -45,6 +40,7 @@ export function useCommunityTopicDetail({
     openFirstReplyPage,
     goToReplyPage: baseGoToReplyPage,
     replyPage,
+    replyTotal,
   } = replies;
 
   const fetchTopicWithViewer = useCallback(async (topicId: string) => {
@@ -141,84 +137,15 @@ export function useCommunityTopicDetail({
     [baseGoToReplyPage, interactions, store.selectedTopic, viewer],
   );
 
-  const getAuthorSummary = useCallback(
-    (author: CommunityAuthor): InteractionSummary | undefined =>
-      interactions.getSummary({ actor: forumAuthorRef(author) }),
-    [interactions],
-  );
-
-  const loadAuthorSummary = useCallback((author: CommunityAuthor) => {
-    void interactions.refreshSummaries([{ actor: forumAuthorRef(author) }]);
-  }, [interactions]);
-
-  const authorFollowPending = useCallback((author: CommunityAuthor): boolean =>
-    interactions.isActionPending('FOLLOW', {
-      targetType: author.type === 'bot' ? 'BOT' : 'HUMAN',
-      id: author.id,
-    }), [interactions]);
-
-  const followAuthor = useCallback(
-    async (author: CommunityAuthor) => {
-      const success = await interactions.recordInteraction('FOLLOW', {
-        targetType: author.type === 'bot' ? 'BOT' : 'HUMAN',
-        id: author.id,
-      });
-      if (success) {
-        await interactions.refreshSummaries(
-          [{ actor: forumAuthorRef(author) }],
-          { force: true },
-        );
-      }
-      return success;
-    },
-    [interactions],
-  );
-
-  const likeTopic = useCallback(
-    (target: ForumTargetRef) => interactions.recordInteraction('LIKE', target),
-    [interactions],
-  );
-
-  const favoriteTopic = useCallback(
-    (target: ForumTargetRef) => interactions.recordInteraction('FAVORITE', target),
-    [interactions],
-  );
-
-  const targetSummary = useCallback(
-    (topic: CommunityTopic | null): InteractionSummary | undefined =>
-      topic
-        ? interactions.getSummary({ target: { targetType: 'TOPIC', id: topic.id } })
-        : undefined,
-    [interactions],
-  );
-
-  const setPostHelpful = useCallback(
-    async (postId: string, helpful: boolean) => {
-      const topic = store.selectedTopic;
-      if (!topic?.isMine || topic.topicType !== 'help') return false;
-      setHelpfulPostId(postId);
-      try {
-        await communityService.setPostHelpful(
-          topic.id,
-          postId,
-          topic.author.type === 'bot' ? 'BOT' : 'HUMAN',
-          topic.author.id,
-          helpful,
-        );
-        await goToReplyPage(replyPage);
-        notifySuccess(helpful ? '已标记为有帮助' : '已取消有帮助');
-        return true;
-      } catch (error) {
-        notifyError(communityErrorMessage(error, '有帮助状态更新失败'), {
-          title: '操作失败',
-        });
-        return false;
-      } finally {
-        setHelpfulPostId(null);
-      }
-    },
-    [goToReplyPage, replyPage, store.selectedTopic],
-  );
+  const actions = useCommunityTopicActions({
+    currentUserId,
+    currentAuthorName,
+    selectedTopic: store.selectedTopic,
+    replyPage,
+    replyTotal,
+    goToReplyPage,
+    interactions,
+  });
 
   const closeDetail = useCallback(() => {
     store.setSelectedTopic(null);
@@ -228,16 +155,8 @@ export function useCommunityTopicDetail({
     ...replies,
     openTopic,
     openTopicById,
+    ...actions,
     closeDetail,
-    setPostHelpful,
-    helpfulPostId,
-    getAuthorSummary,
-    loadAuthorSummary,
-    authorFollowPending,
-    followAuthor,
-    likeTopic,
-    favoriteTopic,
-    targetSummary,
     goToReplyPage,
   };
 }

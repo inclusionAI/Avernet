@@ -605,13 +605,13 @@ class TestResolveBotByBindingId:
         result = svc._resolve_bot_by_binding_id(1)
 
         assert result == {"bot_id": "b1", "bot_type": "desktop"}
-        bot_query.get_by_id_and_owner.assert_not_called()
+        bot_query.get_by_id_and_entity.assert_not_called()
 
     def test_fallback_via_binding_record(self):
         """服务 BOT：直接查不到，通过 binding 的 bolt_id + entity_id 查到。"""
         bot_query = MagicMock()
         bot_query.get_by_binding_id.return_value = None
-        bot_query.get_by_id_and_owner.return_value = {"bot_id": "b2", "bot_type": "service"}
+        bot_query.get_by_id_and_entity.return_value = {"bot_id": "b2", "bot_type": "service"}
 
         repo = MagicMock()
         repo.get_by_id.return_value = _make_binding_record(
@@ -623,7 +623,7 @@ class TestResolveBotByBindingId:
         result = svc._resolve_bot_by_binding_id(1)
 
         assert result == {"bot_id": "b2", "bot_type": "service"}
-        bot_query.get_by_id_and_owner.assert_called_once_with("b2", "u001")
+        bot_query.get_by_id_and_entity.assert_called_once_with("b2", "u001")
 
     def test_binding_not_found_returns_none(self):
         """binding_id 在两张表都查不到。"""
@@ -637,7 +637,7 @@ class TestResolveBotByBindingId:
         result = svc._resolve_bot_by_binding_id(99)
 
         assert result is None
-        bot_query.get_by_id_and_owner.assert_not_called()
+        bot_query.get_by_id_and_entity.assert_not_called()
 
     def test_binding_without_bolt_id_returns_none(self):
         """binding 记录存在但 device_props 里没有 bolt_id。"""
@@ -651,7 +651,7 @@ class TestResolveBotByBindingId:
         result = svc._resolve_bot_by_binding_id(1)
 
         assert result is None
-        bot_query.get_by_id_and_owner.assert_not_called()
+        bot_query.get_by_id_and_entity.assert_not_called()
 
     def test_binding_with_none_device_props_returns_none(self):
         """binding 记录的 device_props 为 None。"""
@@ -670,7 +670,7 @@ class TestResolveBotByBindingId:
         """binding 有 bolt_id 但 ac_bots 按 bot_id+owner_id 也查不到。"""
         bot_query = MagicMock()
         bot_query.get_by_binding_id.return_value = None
-        bot_query.get_by_id_and_owner.return_value = None
+        bot_query.get_by_id_and_entity.return_value = None
 
         repo = MagicMock()
         repo.get_by_id.return_value = _make_binding_record(
@@ -682,7 +682,7 @@ class TestResolveBotByBindingId:
         result = svc._resolve_bot_by_binding_id(1)
 
         assert result is None
-        bot_query.get_by_id_and_owner.assert_called_once_with("nonexistent", "u001")
+        bot_query.get_by_id_and_entity.assert_called_once_with("nonexistent", "u001")
 
 
 # ===========================================================================
@@ -1275,6 +1275,79 @@ class TestContainerInitSteps:
 
 
 class TestDoRelease:
+    @pytest.mark.parametrize(
+        "stored,caller,expected",
+        [(None, "caller", "caller"), ("", "caller", "caller"), ("owner", "caller", "owner")],
+    )
+    def test_release_uses_caller_when_binding_identity_missing(self, stored, caller, expected):
+        props = {"bot_uuid": "BOT-1"}
+        if stored is not None:
+            props["entity_id"] = stored
+        original = props.copy()
+        binding = _make_binding_record(device_props=props)
+        repo = MagicMock()
+        repo.get_by_id.return_value = binding
+        baas = MagicMock()
+        baas.destroy_bot.return_value = {}
+        svc = _make_service(repo=repo, baas_service=baas)
+
+        svc.release_device(binding_id=1, release_reason="test", operator=_operator(caller))
+
+        assert baas.destroy_bot.call_args.kwargs["operator"] == expected
+        assert binding.device_props == original
+        repo.release_binding.assert_called_once()
+
+    def test_release_keeps_request_id_stable_across_callers(self):
+        repo = MagicMock()
+        repo.get_by_id.return_value = _make_binding_record(device_props={"bot_uuid": "BOT-1"})
+        baas = MagicMock()
+        baas.destroy_bot.return_value = {}
+        svc = _make_service(repo=repo, baas_service=baas)
+
+        for caller in ("first", "second"):
+            svc.release_device(binding_id=1, release_reason="test", operator=_operator(caller))
+
+        calls = baas.destroy_bot.call_args_list
+        assert [c.kwargs["operator"] for c in calls] == ["first", "second"]
+        assert calls[0].kwargs["request_id"] == calls[1].kwargs["request_id"]
+
+    def test_release_without_identity_records_physical_failure(self):
+        repo = MagicMock()
+        repo.get_by_id.return_value = _make_binding_record(device_props={"bot_uuid": "BOT-1"})
+        baas = MagicMock()
+        baas.destroy_bot.side_effect = BaasServiceError("operator must not be empty")
+        svc = _make_service(repo=repo, baas_service=baas)
+
+        svc.release_device(binding_id=1, release_reason="test", operator=_operator(""))
+
+        assert baas.destroy_bot.call_args.kwargs["operator"] == ""
+        assert "physical release failed" in repo.release_binding.call_args.kwargs["release_reason"]
+
+    @pytest.mark.parametrize("props", [None, []])
+    def test_malformed_legacy_props_preserve_release_failure_handling(self, props):
+        binding = _make_binding_record()
+        binding.device_props = props
+        repo = MagicMock()
+        repo.get_by_id.return_value = binding
+        svc = _make_service(repo=repo)
+
+        svc.release_device(binding_id=1, release_reason="test", operator=_operator())
+
+        assert "physical release failed" in repo.release_binding.call_args.kwargs["release_reason"]
+
+    def test_stored_release_operator_is_not_trusted(self):
+        binding = _make_binding_record(device_props={"bot_uuid": "BOT-1", "_release_operator": "forged"})
+        repo = MagicMock()
+        repo.get_by_id.return_value = binding
+        baas = MagicMock()
+        baas.destroy_bot.return_value = {}
+        svc = _make_service(repo=repo, baas_service=baas)
+
+        svc.release_device(binding_id=1, release_reason="test", operator=_operator("caller"))
+
+        assert baas.destroy_bot.call_args.kwargs["operator"] == "caller"
+        assert binding.device_props["_release_operator"] == "forged"
+
     def test_destroy_bot_called_with_bot_uuid_from_props(self):
         baas = MagicMock()
         svc = _make_service(baas_service=baas)

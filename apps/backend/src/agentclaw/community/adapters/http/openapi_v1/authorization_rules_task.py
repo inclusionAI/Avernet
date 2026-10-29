@@ -48,6 +48,12 @@ TASK_BBS_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts"): NoCheck(
         "public BBS reply write; author declared in the body, no addressed bot"
     ),
+    ("PUT", "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}"): NoCheck(
+        "public BBS Topic edit; service verifies the declared author and OPEN status"
+    ),
+    ("DELETE", "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}"): NoCheck(
+        "public BBS Topic delete; service verifies the declared author and refuses LOCKED Topics"
+    ),
     (
         "PUT",
         "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts/{post_id}/helpful",

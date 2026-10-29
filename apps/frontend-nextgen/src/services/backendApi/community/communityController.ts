@@ -9,6 +9,7 @@ import type {
   CommunityTopicQuery,
   CreateCommunityReplyInput,
   CreateCommunityTopicInput,
+  UpdateCommunityTopicInput,
 } from '@/domain/community/types';
 import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope } from '../types';
@@ -37,6 +38,11 @@ export interface CommunityCreatedReplyDto {
 export interface CommunityPostHelpfulDto {
   post_id?: string;
   helpful?: boolean;
+}
+
+export interface CommunityTopicDeletedDto {
+  topic_id?: string;
+  deleted?: boolean;
 }
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -123,7 +129,6 @@ export function createCommunityTopic(input: CreateCommunityTopicInput, signal?: 
         options: string[];
         deadline_at?: string;
       };
-      help?: { expected_time?: string };
     };
     author_display_name?: string;
     author_avatar_url?: string;
@@ -142,10 +147,6 @@ export function createCommunityTopic(input: CreateCommunityTopicInput, signal?: 
         options: input.poll.options,
         ...(input.poll.deadlineAt ? { deadline_at: input.poll.deadlineAt } : {}),
       },
-    };
-  } else if (topicType === 'help' && input.help) {
-    data.topic_config = {
-      help: input.help.expectedTime ? { expected_time: input.help.expectedTime } : {},
     };
   }
   const displayName = input.authorName?.trim();
@@ -166,6 +167,7 @@ export function createCommunityReply(input: CreateCommunityReplyInput, signal?: 
     author_id: string;
     body: string;
     poll_selection?: { option_indices: number[] };
+    reply_to_post_id?: string;
     author_display_name?: string;
     author_avatar_url?: string;
   } = {
@@ -175,6 +177,7 @@ export function createCommunityReply(input: CreateCommunityReplyInput, signal?: 
     body: input.body,
   };
   if (input.pollSelection) data.poll_selection = { option_indices: [...input.pollSelection] };
+  if (input.replyToPostId) data.reply_to_post_id = input.replyToPostId;
   if (displayName) data.author_display_name = displayName;
   if (input.authorAvatarUrl) data.author_avatar_url = input.authorAvatarUrl;
 
@@ -203,6 +206,29 @@ export function setCommunityPostHelpful(
       },
       signal,
     },
+  );
+}
+
+export function updateCommunityTopic(input: UpdateCommunityTopicInput, signal?: AbortSignal) {
+  return backendRequest<CommunityEnvelope<CommunityTopicDto>>(
+    `${bbsApiBase()}/${encodeURIComponent(input.topicId)}`,
+    {
+      method: 'PUT',
+      data: {
+        author_type: 'HUMAN',
+        author_id: input.authorId,
+        title: input.title,
+        body: input.body,
+      },
+      signal,
+    },
+  );
+}
+
+export function deleteCommunityTopic(topicId: string, authorId: string, signal?: AbortSignal) {
+  return backendRequest<CommunityEnvelope<CommunityTopicDeletedDto>>(
+    `${bbsApiBase()}/${encodeURIComponent(topicId)}`,
+    { method: 'DELETE', data: { author_type: 'HUMAN', author_id: authorId }, signal },
   );
 }
 

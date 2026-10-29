@@ -43,7 +43,7 @@ export interface SessionRecoveryTaskApi extends SessionRecoveryApi {
   plan(taskId: string, version: number, plan: RecoveryPlan, finalSummary?: unknown): Promise<void>;
   finishApply(taskId: string, version: number, input: { applicable: boolean; success: boolean; summary: string }, finalSummary?: unknown): Promise<void>;
   finishForUserContinuation(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string }, finalSummary?: unknown): Promise<void>;
-  finishForOwnerHandoff(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string; effect?: Exclude<RecoveryJudgment["effect"], "not_intervened"> }, finalSummary?: unknown): Promise<void>;
+  finishForOwnerHandoff(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string; effect?: Exclude<RecoveryJudgment["effect"], "not_intervened">; delivery?: RecoveryJudgment["delivery"]; response?: RecoveryJudgment["response"] }, finalSummary?: unknown): Promise<void>;
   finishForTargetUnavailable(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string }, finalSummary?: unknown): Promise<void>;
   /** Only infrastructure callers supply failureCode; Agent business blocks are not technical alarms. */
   executionFailure(taskId: string, reason: string, executionId?: string, retryable?: boolean, finalSummary?: unknown, failureCode?: string): Promise<void>;

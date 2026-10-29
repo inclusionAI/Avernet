@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 import type { ConversationBotView } from '@/domain/conversation';
+import { defaultCapabilities, extendCapabilities } from '@/capabilities';
 import { firstPageOf, managedViewOf } from '@/pages/Workspace/Chat/hooks/conversationSessionCache';
 import { useConversationFavorites } from '@/pages/Workspace/Chat/hooks/useConversationFavorites';
 import { conversationFavoriteService } from '@/services/workspace/conversationFavoriteService';
@@ -45,6 +46,10 @@ function deferred() {
   });
   return { promise, resolve };
 }
+afterEach(() => {
+  extendCapabilities(defaultCapabilities);
+});
+
 beforeEach(() => {
   jest.resetAllMocks();
   useConversationStore.getState().reset();
@@ -61,6 +66,34 @@ it('favorites through the service and patches the latest session without changin
   expect(useConversationStore.getState().sessionsByBotId[view.bot.botId].sessions.items[0].favorite).toBe(true);
   expect(useConversationStore.getState().selectedSessionId).toBeNull();
 });
+it('routes Coding Bot favorite mutations through the embedded bridge', async () => {
+  const runSessionAction = jest.fn().mockResolvedValue({ ok: true, favorite: true });
+  extendCapabilities({
+    getCodingBotConversationHost: () => ({
+      status: 'available',
+      value: { Stage: () => null, runSessionAction },
+    }),
+  });
+  const codingView: ConversationBotView = {
+    ...view,
+    bot: { ...view.bot, engine: 'claude_code', isAgentCodingBot: true },
+  };
+  const { result } = renderFavorites(codingView);
+
+  await act(async () => {
+    await result.current.toggleFavorite(view.bot.botId, 'managed', 's1');
+  });
+
+  expect(runSessionAction).toHaveBeenCalledWith({
+    botId: 'b',
+    userId: 'user',
+    ownerId: 'owner',
+    action: { type: 'favorite', sessionId: 's1', favorite: true },
+  });
+  expect(toggle).not.toHaveBeenCalled();
+  expect(useConversationStore.getState().sessionsByBotId[view.bot.botId].sessions.items[0].favorite).toBe(true);
+});
+
 it('supports friend Bot sessions with their friend identity', async () => {
   const friend: ConversationBotView = { ...view, section: 'friend', bot: { ...view.bot, isFriendBot: true } };
   useConversationStore.getState().setFriendBotSessions(view.bot.botId, firstPageOf([session], 1));

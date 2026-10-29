@@ -132,6 +132,8 @@ consumes:
   - "No service impls at import time — Protocols only declare shape, they don't depend on concrete services"
   - "A small number of core dataclass / schema types used to type Protocol method signatures (see internal_dependencies)"
 internal_dependencies:
+  - agentclaw.community.core.bot_public_risk.service_protocol
+  - agentclaw.community.kernel.knowledge_content
   - agentclaw.community.core.expert_market
   - agentclaw.community.core.bot_knowledge
   - agentclaw.community.core.space_knowledge

@@ -29,11 +29,13 @@ export interface SquareBotCardProps {
   bot: PublicBot;
   activeActor: FriendRequestActor;
   busy: boolean;
+  /** 深链定位高亮：卡片被标记为分享深链的定位目标时短暂高亮。 */
+  highlighted?: boolean;
   onShare: (bot: PublicBot) => void;
   onPrimaryAction: (bot: PublicBot) => void;
 }
 
-export default function SquareBotCard({ bot, activeActor, busy, onShare, onPrimaryAction }: SquareBotCardProps) {
+export default function SquareBotCard({ bot, activeActor, busy, highlighted, onShare, onPrimaryAction }: SquareBotCardProps) {
   const applying = bot.relationshipStatus === 'applying';
   const owned = bot.isOwnedByLoggedInUser === true;
   const friend = bot.relationshipStatus === 'friend';
@@ -61,7 +63,13 @@ export default function SquareBotCard({ bot, activeActor, busy, onShare, onPrima
     <p tabIndex={0} className="m-0 min-h-10 line-clamp-2 break-words text-sm leading-5 text-muted-foreground">{description}</p>
   );
   return (
-    <Card className="flex h-full min-h-[156px] min-w-0 flex-col rounded-[22px] border-0 bg-muted/70 shadow-none">
+    <Card
+      data-bot-id={bot.id}
+      aria-current={highlighted ? 'true' : undefined}
+      className={`flex h-full min-h-[156px] min-w-0 flex-col rounded-[22px] border-0 shadow-none transition-[box-shadow,background-color] duration-500 ${
+        highlighted ? 'bg-primary/5 ring-2 ring-primary' : 'bg-muted/70'
+      }`}
+    >
       <CardHeader className="items-start gap-3 p-5 pb-0">
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-background text-primary">

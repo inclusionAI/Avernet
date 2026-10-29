@@ -54,11 +54,11 @@ test.each(['draft', 'verify', 'online'] as const)('团队服务 Bot 的历史 %s
   expect(ctrl.listFavoriteSessions).toHaveBeenCalledWith('service', params);
 });
 
-test('团队/好友服务 Bot 使用 online，个人 Bot 始终使用 draft', async () => {
+test('团队/好友服务 Bot 使用 online，个人 Bot 省略默认阶段', async () => {
   expect(resolveChatRuntimeStage(bot)).toBe('online');
   expect(resolveChatRuntimeStage({ ...bot, botType: 'personal', runtimeStage: 'online' })).toBe('draft');
   expect(resolveChatRuntimeStage({ ...bot, isFriendBot: true, runtimeStage: 'verify' })).toBe('online');
   expect(resolveChatRuntimeStage({ ...bot, isFriendBot: true, botType: 'personal', runtimeStage: 'online' })).toBe('draft');
   await botSessionService.listSessions({ ...bot, botType: 'personal', runtimeStage: 'online' }, 'user');
-  expect(ctrl.listBotSessions).toHaveBeenCalledWith('service', expect.objectContaining({ stage: 'draft' }));
+  expect(jest.mocked(ctrl.listBotSessions).mock.calls[0][1]).not.toHaveProperty('stage');
 });

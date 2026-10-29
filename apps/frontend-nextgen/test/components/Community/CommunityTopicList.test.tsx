@@ -13,10 +13,13 @@ const topic: CommunityTopic = {
   topicType: 'discussion',
   author: { type: 'bot', id: 'bot-1', displayName: '协作助手' },
   replyCount: 3,
+  likeCount: 7,
   latestActivityAt: '2026-10-06T06:20:00Z',
   createdAt: '2026-10-05T08:30:00Z',
   isMine: false,
   canClose: false,
+  canEdit: false,
+  canDelete: false,
 };
 
 type ListProps = React.ComponentProps<typeof CommunityTopicList>;
@@ -48,11 +51,13 @@ function renderList(overrides: Partial<ListProps> = {}, sizing?: { scrollHeight?
 }
 
 describe('CommunityTopicList', () => {
-  test('展示主题、作者、回复数与最新回复时间、结帖状态，支持键盘打开', () => {
+  test('展示主题类型、互动数据、最新回复时间与结帖状态，支持键盘打开', () => {
     const { props } = renderList();
     expect(screen.getByText(topic.title)).toBeInTheDocument();
     expect(screen.getByText('协作助手')).toBeInTheDocument();
-    expect(screen.getByText('3 回复')).toBeInTheDocument();
+    expect(screen.getByText('讨论')).toBeInTheDocument();
+    expect(screen.getByLabelText('回复 3')).toBeInTheDocument();
+    expect(screen.getByLabelText('点赞 7')).toBeInTheDocument();
     expect(screen.getByText(/最新回复/)).toBeInTheDocument();
     expect(screen.getByText('已结帖')).toBeInTheDocument();
     fireEvent.keyDown(screen.getByRole('button', { name: /让 Bot 自然参与讨论/ }), { key: 'Enter' });
@@ -62,15 +67,19 @@ describe('CommunityTopicList', () => {
   test('投票主题列表标记投票类型', () => {
     renderList({ topics: [{ ...topic, topicType: 'poll' }] });
     expect(screen.getByRole('img', { name: '投票主题' })).toBeInTheDocument();
-    expect(screen.queryByText('投票')).not.toBeInTheDocument();
+    expect(screen.getByText('投票')).toBeInTheDocument();
   });
 
-  test('分享主题显示附件标识，求助主题显示橙色类型标识', () => {
-    renderList({ topics: [{ ...topic, status: 'open', topicType: 'share' }] });
+  test('分享主题显示附件标识，求助主题标题旁显示求助图标', () => {
+    const { unmount } = renderList({ topics: [{ ...topic, status: 'open', topicType: 'share' }] });
     expect(screen.getByRole('img', { name: '分享附件' })).toBeInTheDocument();
+    expect(screen.getByText('分享')).toBeInTheDocument();
+    unmount();
 
     renderList({ topics: [{ ...topic, status: 'open', topicType: 'help' }] });
-    expect(screen.getByText('求助')).toHaveClass('text-warning');
+    const helpIcon = screen.getByRole('img', { name: '求助' });
+    expect(helpIcon).toHaveClass('text-warning');
+    expect(screen.getAllByText('求助')).toHaveLength(1);
   });
 
   test('已关闭求助显示已解决而不是普通已结帖', () => {
@@ -90,10 +99,13 @@ describe('CommunityTopicList', () => {
       createdAt: '2026-10-05T08:00:00Z',
       isMine: false,
       canClose: false,
+      canEdit: false,
+      canDelete: false,
     };
     renderList({ topics: [realTopic] });
     expect(screen.getByText('900003')).toBeInTheDocument();
-    expect(screen.getByText('0 回复')).toBeInTheDocument();
+    expect(screen.getByLabelText('回复 0')).toBeInTheDocument();
+    expect(screen.getByLabelText('点赞 0')).toBeInTheDocument();
     expect(screen.queryByText(/最新回复/)).not.toBeInTheDocument();
     expect(screen.getByText(/发帖时间/)).toBeInTheDocument();
   });

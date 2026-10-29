@@ -37,6 +37,26 @@ beforeEach(async () => {
 });
 afterEach(() => { db.close(); vi.restoreAllMocks(); });
 
+it("provides cumulative read ranges and gaps without rereading the Bot or changing task state", async () => {
+  const ack = await service.create(request, actor);
+  await vi.waitFor(async () => expect((await tasks.find(ack.task_id))?.execution?.jobId).toBe("job-1"));
+  const task = (await tasks.find(ack.task_id))!;
+  const page = (lines: number[]) => ({ status: "success" as const, exitCode: 0, stderr: "", durationMs: 1,
+    stdout: JSON.stringify({ session_id: "original", messages: lines.map(line_no => ({ line_no, record: { type: "message" } })), next_line: lines.at(-1)! + 1 }) });
+  vi.mocked(runtime.executeShell).mockResolvedValueOnce(page([1, 2])).mockResolvedValueOnce(page([5, 6])).mockResolvedValueOnce(page([3, 4]));
+  for (const [index, lines] of [[1, [1, 2]], [2, [5, 6]], [3, [3, 4]]] as const) {
+    const receipt = await agent.sessionRead((await tasks.find(task.taskId))!, { clientRequestId: `page-${index}`, purpose: "读取原会话记录", from_line: lines[0] });
+    if (index === 2) expect(receipt.result).toMatchObject({ session_read_coverage: [{ session_id: "original", provided_ranges: [[1, 2], [5, 6]], missing_ranges: [[3, 4]], scope: "provided_records_only" }] });
+  }
+  const saved = (await tasks.find(task.taskId))!;
+  expect((await agent.bootstrap(saved)).task.sessionReadCoverage).toEqual([{ session_id: "original", provided_ranges: [[1, 6]], missing_ranges: [], scope: "provided_records_only" }]);
+  expect(saved).toMatchObject({ phase: task.phase, status: task.status, version: task.version });
+  expect(runtime.executeShell).toHaveBeenCalledTimes(3); expect(runtime.sendMessage).not.toHaveBeenCalled();
+  await tasks.update(saved.taskId, saved.version, value => ({ ...value, version: value.version + 1 }));
+  const raw = (await db.query<{ config_json: string }>("SELECT config_json FROM ce_tasks WHERE task_id = ?", [task.taskId]))[0].config_json;
+  expect(raw).not.toContain("sessionReadCoverage");
+});
+
 it.each([null, "TC.MCP.PERMISSION"])("sends only the task output-token override on initial and resumed dispatches (%s)", async tc_fault_label => {
   const output = vi.spyOn(console, "info").mockImplementation(() => {});
   const ack = await service.create({ ...request, tc_fault_label }, actor);

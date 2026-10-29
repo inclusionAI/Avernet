@@ -131,7 +131,7 @@ class _StubDiscoverModule(Module):
     @provider
     def artifact_service(self) -> TaskArtifactApiServiceProtocol:
         class _EmptyArtifactService:
-            async def sync_session_files_and_list(self, graph, *, limit=200):
+            def list_artifacts(self, task_id, *, node_id=None, limit=200):
                 return []
 
         return _EmptyArtifactService()

@@ -1,3 +1,6 @@
+import { useBotEditorAddress } from './useBotEditorAddress';
+import { BotEditorExtensionContent } from './BotEditorExtensionContent';
+import { useBotEditorPanels } from './useBotEditorPanels';
 import { CapabilityPanel } from '@/components/BotWorkshop/Editor/CapabilityPanel';
 import { ChannelConfigPanel } from '@/components/BotWorkshop/Editor/ChannelConfigPanel';
 import { DetailDebugChat } from './DetailDebugChat';
@@ -12,7 +15,6 @@ import TaskEscort from '@/components/BotWorkshop/TaskEscort';
 import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { Spin } from '@/components/ui/Spin';
-import type { BotRuntimeStage } from '@/domain/botWorkshop';
 import { isSameHumanIdentity } from '@/domain/userIdentity';
 import { useBotAdvancedConfig } from '@/hooks/useBotAdvancedConfig';
 import { useBotEditor } from '@/hooks/useBotEditor';
@@ -23,7 +25,6 @@ import { useSpaceContext } from '@/hooks/useSpaceContext';
 import { isServiceVerification } from '@/services/botWorkshop/botPolicy';
 import { desktopCapabilityPolicy } from '@/services/botWorkshop/desktopCapabilityPolicy';
 import { cn } from '@/utils/cn';
-import { useLocation } from '@umijs/max';
 import React, { useEffect, useState } from 'react';
 import { DetailHeader } from './DetailHeader';
 import { DetailNavigation } from './DetailNavigation';
@@ -31,16 +32,8 @@ import { moreTabs } from './detailTabs';
 import { useHostingTabs } from './useHostingTabs';
 import { Points } from '@/tracking/points';import { Tracert } from '@/utils/tracert';
 const BotWorkshopDetailPage: React.FC = () => {
-  const params = new URLSearchParams(useLocation().search);
-  const id = params.get('id');
+  const { id, ownerId, requestedEditable, runtimeStage } = useBotEditorAddress();
   const openDesktopFolder = useDesktopFolder(id);
-  const ownerId = params.get('owner_id')?.trim() || undefined;
-  const requestedEditable = params.get('type') === 'edit';
-  const runtimeStageParam = params.get('runtime_stage');
-  const runtimeStage: BotRuntimeStage | undefined =
-    runtimeStageParam === 'draft' || runtimeStageParam === 'verify' || runtimeStageParam === 'online'
-      ? runtimeStageParam
-      : undefined;
   const currentSpaceId = useSpaceContext((state) => state.currentSpaceId);
   const requestIdentity = useBotWorkshopEditorIdentity();
   const detail = useBotWorkshopDetail(id, requestedEditable, requestIdentity.ready, ownerId, requestIdentity.userId);
@@ -69,13 +62,17 @@ const BotWorkshopDetailPage: React.FC = () => {
     desktopPolicy.markdown,
     desktopPolicy.channels,
   );
+  const { panels, additionalTabs } = useBotEditorPanels();
   const { tab, setTab, more, setMore, hostingAllowed, visibleMainTabs } = useHostingTabs(
     id,
     requestIdentity.userId,
     detail.bot,
     isOwner,
     desktopPolicy.routines,
+    additionalTabs,
+    JSON.stringify([addressedOwnerId, runtimeStage, currentSpaceId]),
   );
+  const ExtensionPanel = panels.find((panel) => `extension:${panel.id}` === tab)?.Panel;
   const [debugOpen, setDebugOpen] = useState(true); const [debugFullscreen, setDebugFullscreen] = useState(false);
   useEffect(() => {
     setDebugOpen(true);
@@ -204,6 +201,10 @@ const BotWorkshopDetailPage: React.FC = () => {
                 onSave={editor.saveEngineConfig}
                 onRestoreDefaults={editor.restoreDefaultEngineConfig}
               />
+            ) : ExtensionPanel ? (
+              <BotEditorExtensionContent Panel={ExtensionPanel} botId={bot.id} ownerId={addressedOwnerId}
+                spaceId={currentSpaceId === undefined ? undefined : String(currentSpaceId)}
+                serviceMode={bot.serviceMode} runtimeStage={runtimeStage} editable={editable} />
             ) : tab === 'hosting' && hostingAllowed ? (
               <DwsHostingPanel key={`${bot.id}:${bot.ownerId}`} botId={bot.id} />
             ) : tab === 'capability' ? (

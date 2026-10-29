@@ -6,8 +6,9 @@
 // - CollaborationPage 承接旧协作群分支,GroupWorkspaceArea 保持挂载。
 import * as botController from '@/services/backendApi/bots/botController';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
+import { defaultCapabilities, extendCapabilities } from '@/capabilities';
 import { conversationInitialState, useConversationStore } from '@/stores/conversationStore';
-import { beforeEach, describe, expect, it, jest } from '@jest/globals';
+import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -117,6 +118,13 @@ jest.mock('@/pages/Workspace/hooks/useBotChat', () => ({
   useBotChat: (...args: unknown[]) => mockUseBotChat(...(args as [])),
 }));
 
+// Coding Bot 主工作区只验证互斥边界;Embedded/publish 合同由 CodingBotStageBoundary 单测覆盖。
+jest.mock('@/pages/Workspace/Chat/CodingBotStageBoundary', () => ({
+  CodingBotStageBoundary: ({ bot, session }: { bot: { realBotId: string }; session: { sessionId: string } }) => (
+    <div data-testid="coding-bot-stage" data-bot-id={bot.realBotId} data-session-id={session.sessionId} />
+  ),
+}));
+
 // 交互舞台只替换接收端(保持传参装配的真实性);只读面板走真实组件。
 jest.mock('@/pages/Workspace/Chat/ConversationInteractiveStage', () => ({
   ConversationInteractiveStage: ({ headerActions }: { headerActions?: ReactNode }) => (
@@ -208,6 +216,10 @@ const CollaborationPage = (
   require('@/pages/Workspace/Collaboration') as typeof import('@/pages/Workspace/Collaboration')
 ).default;
 
+afterEach(() => {
+  extendCapabilities(defaultCapabilities);
+});
+
 beforeEach(() => {
   // 会话 Store 是模块级单例,测试间复位,避免选择/缓存串号。
   useConversationStore.setState({ ...conversationInitialState });
@@ -232,7 +244,7 @@ describe('ConversationPage(Task 8 组合页)', () => {
     await screen.findByText('我的 Bot');
   });
 
-  it('点击 AgentCoding Bot 直接进入专用 coding-chat', async () => {
+  it('点击 AgentCoding Bot 展开普通会话目录，不再进入专用 coding-chat', async () => {
     const conversationServiceMock = require('@/services/workspace/conversationService').conversationService as {
       listDirectory: jest.Mock;
     };
@@ -246,8 +258,9 @@ describe('ConversationPage(Task 8 组合页)', () => {
     render(<ConversationPage />);
     fireEvent.click(await screen.findByRole('button', { name: 'AgentCoding Bot' }));
 
-    expect(history.push).toHaveBeenCalledTimes(1);
-    expect(history.push).toHaveBeenCalledWith('/coding/coding-chat?botId=coding-bot');
+    expect(await screen.findByText('AgentCoding Bot 暂无会话')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '新建会话' })).toBeInTheDocument();
+    expect(history.push).not.toHaveBeenCalled();
   });
 
   it('origin=mine 选中会话渲染交互舞台(不渲染只读面板)', async () => {
@@ -288,10 +301,92 @@ describe('ConversationPage(Task 8 组合页)', () => {
 
     const stage = await screen.findByTestId('interactive-stage');
     expect(stage).toBeInTheDocument();
+    expect(mockUseBotChat).toHaveBeenCalledWith(
+      expect.objectContaining({ botId: 'bot-a:1' }),
+      expect.objectContaining({ sessionId: 's1' }),
+      expect.anything(),
+      undefined,
+      '101',
+    );
     // 主舞台 wrapper 是侧栏右侧的横向 flex item，必须允许收缩；否则普通会话的
     // 固有宽度会把 ChatLayout 连同 420px TaskPanel 推出可视区，初次只剩窄条可见。
     expect(stage.parentElement).toHaveClass('min-w-0');
     expect(screen.queryByText('请选择一个好友用户会话')).not.toBeInTheDocument();
+  });
+
+  it('识别出 Coding Bot 后，目标 Session 未就绪也先触发 Embedded 宿主预载', async () => {
+    const preload = jest.fn();
+    extendCapabilities({
+      getCodingBotConversationHost: () => ({
+        status: 'available',
+        value: { Stage: () => <div />, preload },
+      }),
+    });
+    const conversationServiceMock = require('@/services/workspace/conversationService').conversationService as {
+      listDirectory: jest.Mock;
+    };
+    conversationServiceMock.listDirectory.mockResolvedValueOnce({
+      ok: true,
+      data: { managedBots: [agentCodingBot], friendBots: [] },
+    });
+
+    render(<ConversationPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'AgentCoding Bot' }));
+
+    expect(await screen.findByText('AgentCoding Bot 暂无会话')).toBeInTheDocument();
+    expect(preload).toHaveBeenCalledTimes(1);
+  });
+
+  it('Coding Bot 选中会话时挂载 Embedded 边界且不初始化普通 Chat Runtime', async () => {
+    const conversationServiceMock = require('@/services/workspace/conversationService').conversationService as {
+      listDirectory: jest.Mock;
+    };
+    conversationServiceMock.listDirectory.mockResolvedValueOnce({
+      ok: true,
+      data: { managedBots: [agentCodingBot], friendBots: [] },
+    });
+    useConversationStore.setState({
+      ...conversationInitialState,
+      expandedBotIds: { 'coding-bot:2088': true },
+      originByManagedBotId: { 'coding-bot:2088': 'mine' },
+      selectedBotId: 'coding-bot:2088',
+      selectedSection: 'managed',
+      selectedOrigin: 'mine',
+      selectedScope: 'all',
+      selectedSessionId: 'coding-s1',
+      sessionsByBotId: {
+        'coding-bot:2088': {
+          botId: 'coding-bot:2088',
+          origin: 'mine',
+          scope: 'all',
+          sessions: {
+            ...emptyList,
+            items: [
+              {
+                sessionId: 'coding-s1',
+                botId: 'coding-bot:2088',
+                title: 'Coding 会话',
+                messageCount: 1,
+                gmtModified: '',
+                gmtCreate: '',
+              },
+            ],
+          },
+          friendDirectory: { items: [], loading: false, error: null },
+          friendGroups: {},
+        },
+      },
+    });
+
+    render(<ConversationPage />);
+
+    const stage = await screen.findByTestId('coding-bot-stage');
+    expect(stage).toHaveAttribute('data-bot-id', 'coding-bot');
+    expect(stage).toHaveAttribute('data-session-id', 'coding-s1');
+    expect(screen.queryByTestId('interactive-stage')).not.toBeInTheDocument();
+    expect(mockUseBotChat).not.toHaveBeenCalled();
+    expect(mockBotChat.chat.onRequest).not.toHaveBeenCalled();
+    expect(mockBotChat.send).not.toHaveBeenCalled();
   });
 
   it('对当前在线 managed 单聊读取版本，关闭提示后切换会话重新检查', async () => {
@@ -435,8 +530,8 @@ describe('ConversationPage(Task 8 组合页)', () => {
     expect(screen.queryByRole('button', { name: '新建会话' })).not.toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: /发送|消息|输入/ })).not.toBeInTheDocument();
 
-    // useBotChat(实时连接装配入口)接收到 null 目标:真实 Hook 对 null bot/session 不建连。
-    expect(mockUseBotChat).toHaveBeenCalledWith(null, null, expect.anything(), undefined, '101');
+    // 只读分支不挂载普通 Runtime,即使目录尚在解析也不能初始化实时连接装配入口。
+    expect(mockUseBotChat).not.toHaveBeenCalled();
 
     // 发送/重连/首条消息请求链路零调用。
     expect(mockBotChat.send).not.toHaveBeenCalled();

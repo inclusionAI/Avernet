@@ -189,6 +189,7 @@ async def extract_from_publish_id(publish_id: str, ctx) -> PermissionParams:
         return PermissionParams(
             bot_id=record.source_bot_id,
             owner_id=record.owner_id,
+            source_bot_pk=record.source_bot_pk,
         )
     except (ValueError, Exception):
         return PermissionParams()
@@ -398,11 +399,16 @@ async def get_publish_engine_config(
             )
 
         # 2. 解析引擎类型（路由层负责，传给 provider-blind 的服务）
-        engine_type = resolve_runtime_engine_for_bot(
-            bot_id=record.source_bot_id,
-            owner_id=record.owner_id,
-            bot_repo=bot_repo,
+        from agentclaw.community.core.bot_management.addressing import BotAddressResolver
+        from agentclaw.community.core.bot_management.engines.registry import resolve_bot_engine
+        from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
+
+        address = BotAddressResolver(bot_repo).resolve_publish_source(
+            source_bot_pk=record.source_bot_pk,
+            source_bot_id=record.source_bot_id,
+            legacy_owner_id=record.owner_id,
         )
+        engine_type = resolve_bot_engine(dict(address.bot)) or DEFAULT_ENGINE_TYPE
 
         # 3. 读取发布阶段引擎配置（按 binding 所在设备分流）。
         #    data 仅在容器内配置文件缺失/为空时为 {}；无法解析/读取设备等真实

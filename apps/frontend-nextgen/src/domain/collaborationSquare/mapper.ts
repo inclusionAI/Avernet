@@ -74,6 +74,10 @@ export interface PublicBotCatalogTransport {
   name?: string;
   owner_name?: string;
   is_friend?: boolean;
+  /** Bot→Bot 协作可见性（BCS visibility，public/protected/private）。 */
+  visibility?: string;
+  /** 人类用户可见性（BCS user_visibility，public/protected/private）。 */
+  user_visibility?: string;
   /** 智能搜索 Discovery 返回的推荐理由；short_profile 用于卡片「Profile」行。 */
   recommendation?: { short_profile?: string };
 }
@@ -161,6 +165,10 @@ export function mapPublicBotCatalogDto(value: PublicBotCatalogTransport, viewerU
   const friendRequestBotId = resolveFriendRequestBotId(value);
   const shortProfile = value.recommendation?.short_profile?.trim() || undefined;
   const isOwnedByLoggedInUser = Boolean(viewerUserId?.trim() && value.entity_id?.trim() === viewerUserId.trim());
+  const userPublic = value.user_visibility === 'public';
+  const botPublic = value.visibility === 'public';
+  // 两维独立公开设置派生分享链接的受众类型：仅单一维度公开时才携带（两类均公开时任意身份可见，无需干预）。
+  const audience = userPublic && !botPublic ? ('user' as const) : botPublic && !userPublic ? ('bot' as const) : undefined;
   return {
     id,
     name: value.name?.trim() || '未命名 Bot',
@@ -171,6 +179,7 @@ export function mapPublicBotCatalogDto(value: PublicBotCatalogTransport, viewerU
     ...(isOwnedByLoggedInUser ? { isOwnedByLoggedInUser: true } : {}),
     ...(friendRequestBotId && friendRequestBotId !== id ? { friendRequestBotId } : {}),
     ...(shortProfile ? { shortProfile } : {}),
+    ...(audience ? { audience } : {}),
   };
 }
 
@@ -342,5 +351,9 @@ export function parseSquareDeepLink(search: string, expected: SquareResource): S
   const resource = params.get('resource');
   const id = params.get('id')?.trim();
   const searchHint = params.get('name')?.trim();
-  return resource === expected && id ? { resource, id, ...(searchHint ? { searchHint } : {}) } : null;
+  const audienceParam = params.get('audience')?.trim();
+  const audience = audienceParam === 'user' || audienceParam === 'bot' ? audienceParam : undefined;
+  return resource === expected && id
+    ? { resource, id, ...(searchHint ? { searchHint } : {}), ...(audience ? { audience } : {}) }
+    : null;
 }

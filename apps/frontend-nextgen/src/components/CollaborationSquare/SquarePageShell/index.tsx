@@ -50,7 +50,7 @@ export function SquarePageShell({ resource }: { resource: SquareResource }) {
     reload: () => square.load(),
     loadMore: () => square.loadMore(),
     primaryAction: square.primaryBotAction,
-    share: (bot) => square.share('bot', bot.id, bot.name),
+    share: (bot) => square.share('bot', bot.id, bot.name, bot.audience),
     openProfile: square.openBotProfile,
     closeProfile: square.closeBotProfile,
     selectedBotId: square.selectedBotId,

@@ -103,9 +103,9 @@ class _StubArtifactApiService:
         self._artifact_repo = artifact_repo
         self.calls = []
 
-    async def sync_session_files_and_list(self, graph, *, limit=200):
-        self.calls.append(graph)
-        return self._artifact_repo.list_by_task(graph.task_id, limit=limit)
+    def list_artifacts(self, task_id, *, node_id=None, limit=200):
+        self.calls.append(task_id)
+        return self._artifact_repo.list_by_task(task_id, limit=limit)
 
 
 def _task_record(task_id="T-1", status=Status.RUNNING):

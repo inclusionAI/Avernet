@@ -105,7 +105,10 @@ def _make_service(
     data_init_service_provider=None,
 ) -> DeviceService:
     repo = repo or MagicMock()
-    bot_query = bot_query or MagicMock()
+    if bot_query is None:
+        bot_query = MagicMock()
+        bot_query.get_by_binding_id.return_value = None
+        bot_query.get_by_id_and_entity.return_value = None
     bot_sync = bot_sync or MagicMock()
     return DeviceService(
         repository=repo,
@@ -418,6 +421,17 @@ class TestListDevices:
 
 
 class TestReleaseDevice:
+    def test_non_baas_release_does_not_receive_transient_operator(self):
+        record = _make_record(device_props={"unrelated": "value"})
+        repo = MagicMock()
+        repo.get_by_id.return_value = record
+        svc = _make_service(repo=repo)
+        svc._do_release = MagicMock()
+
+        svc.release_device(binding_id=1, release_reason="test", operator=_make_operator("caller"))
+
+        assert svc._do_release.call_args.kwargs["device"].device_props == {"unrelated": "value"}
+
     def test_release_active_device(self):
         record = _make_record(status=DeviceBindingStatus.ACTIVE.value)
         released_record = _make_record(status=DeviceBindingStatus.RELEASED.value)
@@ -2073,6 +2087,7 @@ class TestListConnectableDevices:
             {"bot_id": "b1", "binding_id": 1, "owner_id": "u001"}
         ]
         svc = _make_service(repo=repo, bot_query=bot_query)
+        bot_query.get_by_binding_id.return_value = {"bot_id": "b1", "owner_id": "u001"}
         # Return a valid conn from _compose_device_conn_info
         fake_conn = DeviceConnectionInfo(
             type="local", target="localhost:20003", token="", engine_type="openclaw"
@@ -2812,3 +2827,22 @@ class TestEffectiveBindingStatusUsesStoredColumn:
             env=None,
         )
         assert total == 0 and items == []
+
+
+@pytest.mark.parametrize("actor,allowed", [("new-owner", True), ("old-owner", False), ("outsider", False)])
+def test_handoff_binding_entity_is_not_owner_authority(actor, allowed, monkeypatch):
+    repo = MagicMock()
+    repo.get_by_id.return_value = _make_record(entity_id="old-owner", status="ACTIVE")
+    query = MagicMock()
+    query.get_by_binding_id.return_value = {
+        "bot_id": "handoff-bot", "owner_id": "new-owner", "entity_id": "old-owner", "public": "0",
+    }
+    service = _make_service(repo=repo, bot_query=query)
+    injector = MagicMock()
+    injector.get.return_value.check_collaborator_permission.return_value = {"has_permission": False}
+    monkeypatch.setattr("agentclaw.community.di.get_app_injector", lambda: injector)
+    if allowed:
+        assert isinstance(service.get_device_connection(binding_id=1, operator=_make_operator(actor)), DeviceConnectionInfo)
+    else:
+        with pytest.raises(InvalidDeviceStatusError):
+            service.get_device_connection(binding_id=1, operator=_make_operator(actor))

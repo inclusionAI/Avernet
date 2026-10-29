@@ -3,5 +3,4 @@ export type DraftErrors = {
   body?: string;
   pollOptions?: string;
   pollDeadline?: string;
-  helpExpectedTime?: string;
 };

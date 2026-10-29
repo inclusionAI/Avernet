@@ -3616,7 +3616,7 @@ def test_handle_sync_success_skips_destroy_verify_bot_for_teclaw_online_publish(
     )
 
     assert result.status == PublishStatus.SUCCESS
-    bot_service.get_bot_by_address.assert_called_once_with(bot_id="bot-source", user_id="u1")
+    bot_service.get_bot_by_address.assert_called_once_with(bot_id="bot-source", user_id="u1", source_bot_pk=11)
     svc._destroy_bot_by_stage.assert_not_called()
 
 
@@ -3655,7 +3655,7 @@ def test_handle_sync_success_destroys_verify_bot_for_non_teclaw_online_publish()
     )
 
     assert result.status == PublishStatus.SUCCESS
-    bot_service.get_bot_by_address.assert_called_once_with(bot_id="bot-source", user_id="u1")
+    bot_service.get_bot_by_address.assert_called_once_with(bot_id="bot-source", user_id="u1", source_bot_pk=11)
     svc._destroy_bot_by_stage.assert_called_once_with(publish_record, PublishStage.VERIFY)
 
 

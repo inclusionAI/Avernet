@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import dataclasses
 
 import pytest
 from fastapi import Request, Response
@@ -9,11 +10,14 @@ from agentclaw.community.adapters.http.openapi_v1.task.bbs.router import (
     close_topic_unified,
     create_reply_unified,
     create_topic_unified,
+    delete_topic_unified,
     set_post_helpful_unified,
+    update_topic_unified,
 )
 from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     CloseTopicRequestUnified,
     CreateReplyRequestUnified,
+    DeleteTopicRequestUnified,
     PollSelectionRequest,
     CreateTopicRequestUnified,
     SetPostHelpfulRequest,
@@ -21,6 +25,7 @@ from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     PollConfigRequest,
     TopicConfigRequest,
     TopicDetail,
+    UpdateTopicRequestUnified,
 )
 from agentclaw.community.core.errors import Conflict, Forbidden, NotFound
 from agentclaw.community.core.task.forum.models import (
@@ -539,6 +544,79 @@ async def test_create_reply_unified_replay_returns_200():
 
     assert response.status_code == 200
     assert payload.code == 200000
+
+
+# ---------------------------------------------------------------------------
+# update_topic_unified / delete_topic_unified — author declared in the body
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_update_topic_unified_delegates_to_topic_edit_service():
+    class UpdateService:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def update_topic(self, **kwargs):
+            self.calls.append({"op": "update_topic", **kwargs})
+            return dataclasses.replace(_topic(), title="Edited", body="New body")
+
+    service = UpdateService()
+    payload = await update_topic_unified(
+        body=UpdateTopicRequestUnified(
+            author_type="HUMAN",
+            author_id="user-a",
+            title="Edited",
+            body="New body",
+        ),
+        topic_id="topic_1",
+        request=_request("PUT", "/openapi/v1/collaboration/tasks/bbs/topics/topic_1"),
+        service=service,
+    )
+
+    assert service.calls == [
+        {
+            "op": "update_topic",
+            "topic_id": "topic_1",
+            "author_type": "HUMAN",
+            "author_id": "user-a",
+            "title": "Edited",
+            "body": "New body",
+        }
+    ]
+    assert payload.data is not None
+    assert payload.data.title == "Edited"
+    assert payload.data.body == "New body"
+
+
+@pytest.mark.asyncio
+async def test_delete_topic_unified_delegates_to_topic_delete_service():
+    class DeleteService:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def delete_topic(self, **kwargs):
+            self.calls.append({"op": "delete_topic", **kwargs})
+            return True
+
+    service = DeleteService()
+    payload = await delete_topic_unified(
+        body=DeleteTopicRequestUnified(author_type="HUMAN", author_id="user-a"),
+        topic_id="topic_1",
+        request=_request("DELETE", "/openapi/v1/collaboration/tasks/bbs/topics/topic_1"),
+        service=service,
+    )
+
+    assert service.calls == [
+        {
+            "op": "delete_topic",
+            "topic_id": "topic_1",
+            "author_type": "HUMAN",
+            "author_id": "user-a",
+        }
+    ]
+    assert payload.data is not None
+    assert payload.data.model_dump() == {"topic_id": "topic_1", "deleted": True}
 
 
 # ---------------------------------------------------------------------------

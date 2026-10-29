@@ -24,6 +24,7 @@ from agentclaw.community.core.task.domain.models import (
 from agentclaw.community.core.task.domain.models import AcceptanceResult, AcceptanceVerdict
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 from agentclaw.community.core.task.task_harness.harness import TaskHarness
+from agentclaw.community.core.task.task_harness.relay_runtime_policy import resolve_relay_resume_step
 from agentclaw.community.core.task.task_harness.runtime_probe import (
     RuntimeProbeResult,
 )
@@ -107,11 +108,13 @@ class _FakeRelayRecovery:
     def __init__(self, error: Exception | None = None):
         self.error = error
         self.nodes = []
+        self.resume_steps = []
 
-    async def resume(self, node):
+    async def resume(self, node, *, resume_step=None):
         if self.error is not None:
             raise self.error
         self.nodes.append(node)
+        self.resume_steps.append(resume_step)
         from agentclaw.community.core.task.task_harness.relay_session_recovery import (
             RelayResumeResult,
         )
@@ -350,7 +353,7 @@ class TestHarnessOnlyPollsExecutionLeaves:
         assert "relay_harness_resume_attempts" not in node.run_info.extend_props
         assert rec.patches == []
 
-    def test_relay_active_no_progress_waits_for_engine_terminal_state(
+    def test_relay_active_no_progress_resumes_same_session(
         self, svc, graph
     ):
         graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
@@ -370,15 +373,34 @@ class TestHarnessOnlyPollsExecutionLeaves:
         h.register("t1")
         h._poll_once()
 
-        for _ in range(5):
+        for _ in range(3):
             clock.advance(10.0)
             assert h._poll_once() == []
+        assert recovery.nodes == []
 
+        clock.advance(10.0)
+        resets = h._poll_once()
+        assert resets == []
         assert node.status == Status.RUNNING
         assert node.run_info.extend_props["relay_token"] == "token-1"
-        assert recovery.nodes == []
-        assert "relay_harness_resume_attempts" not in node.run_info.extend_props
+        assert len(recovery.nodes) == 1
+        assert recovery.resume_steps == ["S1-S4a"]
+        assert node.run_info.extend_props["relay_harness_resume_attempts"] == 1
         assert rec.patches == []
+
+    def test_relay_resume_is_step_aware_after_accepted_execution(
+        self, svc, graph
+    ):
+        graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
+        _dispatch_running(svc, graph, "c1")
+        svc.update_task_node_info(
+            _patch("t1", "c1", execution_decision="ACCEPTED", actual_goal=Goal(
+                objective="done", acceptances=[]
+            ))
+        )
+        node = svc._get_node(graph, "c1")
+
+        assert resolve_relay_resume_step("t1", node, svc) == "S5"
 
     def test_relay_terminal_success_unreported_resumes_same_session(
         self, svc, graph
@@ -398,15 +420,16 @@ class TestHarnessOnlyPollsExecutionLeaves:
         )
         h.register("t1")
         h._poll_once()
-        for _ in range(3):
-            clock.advance(10.0)
-            assert h._poll_once() == []
 
-        clock.advance(6.0)
+        clock.advance(10.0)
+        h._poll_once()
+        clock.advance(360.0)
         resets = h._poll_once()
+
         assert resets == []
         assert node.status == Status.RUNNING
         assert len(recovery.nodes) == 1
+        assert recovery.resume_steps == ["S1-S4a"]
         assert node.run_info.extend_props["relay_harness_resume_run_id"] == "r-resume"
         assert rec.patches == []
 

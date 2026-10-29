@@ -19,6 +19,8 @@ export interface NavigationItem {
   icon: LucideIcon;
   section: NavigationSection;
   description: string;
+  /** Optional overlay placement, after the baseline section ordering. */
+  placement?: 'last';
 }
 
 // Open Core 基线一级导航项。内部专属入口已剥离（capability 注入），
@@ -110,7 +112,10 @@ export function getMergedNavigationItems(): NavigationItem[] {
   // Evolution stays last in the Bot group, including after internal overlays.
   const evolution = grouped.bot.findIndex((item) => item.id === 'evolution-factory');
   if (evolution >= 0) grouped.bot.push(...grouped.bot.splice(evolution, 1));
-  return [...grouped.collab, ...grouped.bot];
+  return [grouped.collab, grouped.bot].flatMap((items) => [
+    ...items.filter((item) => item.placement !== 'last'),
+    ...items.filter((item) => item.placement === 'last'),
+  ]);
 }
 
 export function getNavigationItem(pathname: string) {

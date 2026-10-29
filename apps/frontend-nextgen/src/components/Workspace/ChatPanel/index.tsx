@@ -2,6 +2,7 @@ import { getCapabilities } from '@/capabilities';
 import { Empty } from '@/components/ui';
 import { ChatMessageSkeleton } from '@/components/Workspace/ChatPanel/ChatMessageSkeleton';
 import { ChatPanelHeader } from '@/components/Workspace/ChatPanel/ChatPanelHeader';
+import './ChatPanel.css';
 import { ChatLayoutPanelSlot } from '@/components/Workspace/ChatLayoutPanelSlot';
 import { usePersistentChatLayoutPanelHost } from '@/components/Workspace/PersistentChatLayoutPanelHost';
 import { SidePanelCollapseButton } from '@/components/Workspace/SidePanelCollapseButton';
@@ -49,6 +50,7 @@ export function ChatPanel({
   modelSelector,
   fileChip,
   command,
+  composerHeader,
   fileToolbar,
   senderRef,
   mode,
@@ -178,7 +180,7 @@ export function ChatPanel({
   return (
     // relative 供副屏右上「收起」悬浮钮绝对定位（SidePanelCollapseButton）。
     <section className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-background">
-      <ChatLayout className="min-h-0 flex-1">
+      <ChatLayout className="workspace-chat-panel-layout min-h-0 flex-1">
         {linkedSession ? (
           <TaskLinkedSession
             target={linkedSession}
@@ -250,6 +252,7 @@ export function ChatPanel({
             placeholder="可使用 /file 引用文件、/link 引用链接、/skill 调用能力"
             fileChip={fileChip}
             command={command}
+            slots={{ header: composerHeader }}
             toolbar={{
               left:
                 taskComposer || modelSelector || connectionCopy.detail || fileToolbar ? (

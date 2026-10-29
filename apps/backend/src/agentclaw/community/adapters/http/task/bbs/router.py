@@ -16,6 +16,8 @@ from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     BrowseReportCreated,
     CloseTopicRequestUnified,
     CreateBrowseReportRequest,
+    DeleteTopicRequestUnified,
+    UpdateTopicRequestUnified,
     CreateReplyRequestUnified,
     domain_poll_selection,
     CreateTopicRequestUnified,
@@ -28,6 +30,7 @@ from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     SubscriptionItem,
     TopicClosed,
     TopicCreated,
+    TopicDeleted,
     TopicDetail,
     TopicListItem,
     BrowsSubscriptionJoinRequest,
@@ -272,6 +275,49 @@ async def create_reply_internal(
     payload = ReplyCreated(post_id=result.post.post_id)
     response.status_code = 201 if result.created else 200
     return created(payload, request) if result.created else envelope(payload, request)
+
+
+@read_router.put(
+    "/topics/{topic_id}", response_model=Envelope[TopicDetail]
+)
+@envelope_errors
+async def update_topic_internal(
+    body: UpdateTopicRequestUnified,
+    topic_id: TopicIdPath,
+    request: Request,
+    service: ForumServiceProtocol = Injected(ForumServiceProtocol),
+) -> Envelope[TopicDetail]:
+    """Edit one OPEN Topic with the declared author and title/body values."""
+
+    updated = service.update_topic(
+        topic_id=topic_id,
+        author_type=body.author_type,
+        author_id=body.author_id,
+        title=body.title,
+        body=body.body,
+    )
+    updated = enrich_bot_display_name(updated, request=request)
+    return envelope(TopicDetail.from_record(updated), request)
+
+
+@read_router.delete(
+    "/topics/{topic_id}", response_model=Envelope[TopicDeleted]
+)
+@envelope_errors
+async def delete_topic_internal(
+    body: DeleteTopicRequestUnified,
+    topic_id: TopicIdPath,
+    request: Request,
+    service: ForumServiceProtocol = Injected(ForumServiceProtocol),
+) -> Envelope[TopicDeleted]:
+    """Delete one non-LOCKED Topic and its replies as its declared author."""
+
+    deleted = service.delete_topic(
+        topic_id=topic_id,
+        author_type=body.author_type,
+        author_id=body.author_id,
+    )
+    return envelope(TopicDeleted(topic_id=topic_id, deleted=deleted), request)
 
 
 @read_router.put(

@@ -202,6 +202,10 @@ it.each(["assess", "observe", "plan", "verify"] as const)("notifies the Owner an
     ownerDeadlineAt: null, observationDeadlineAt: null, execution: { state: "ended" }, judgment: { effect: "not_recovered", summary } });
   expect(notifier.notify).toHaveBeenCalledExactlyOnceWith({ ownerId: "owner", taskId: task.taskId, kind: "result", effect: "not_recovered", summary });
   expect(task.timeline.some(event => event.kind === "notification" && event.payload.kind === "result" && event.payload.sent === true)).toBe(true);
+  const notice = actionNotifier.after.mock.calls.map(([value]) => value).find(value => value.kind === "result");
+  expect(task.timeline.find(event => event.event_id === notice?.eventId)).toMatchObject({
+    kind: "termination", summary, payload: { completion_reason: "owner_handoff" },
+  });
   expect(task.timeline.some(event => event.kind === "plan" || event.kind === "owner_decision")).toBe(false);
   await service.reportResults();
   expect(callbacks.at(-1)).toMatchObject({ status: "completed", completion_reason: "owner_handoff", effect: "not_recovered", intervention_status: phase === "observe" ? "performed" : "none" });
@@ -233,12 +237,52 @@ it.each(["assess", "observe", "plan", "verify"].flatMap(phase => ["recovered", "
     await service.maintenance(); expect(submissions).toHaveLength(1);
   });
 
+it.each(["acted", "replied"] as const)("saves confirmed delivery and %s on a direct Owner handoff from observation", async response => {
+  let task = await toObserve(await create());
+  await appendFile(sessionFile, JSON.stringify({ type: "message", id: "bot-response", message: { role: "assistant", content: "已按本次自愈指引重试，仍然受阻。" } }) + "\n");
+  const read = await inspect(task, "handoff-current-response"); task = await current(task.taskId);
+  expect(task.judgment).toBeNull();
+  await agent.report(task, { kind: "owner_handoff", phase: "observe", delivery: "confirmed", response,
+    effect: "not_recovered", summary: "指引已触达，Bot 重试后仍受阻，请 Owner 处理。", evidence_ids: [read.evidenceId] });
+  expect(await current(task.taskId)).toMatchObject({ status: "completed", completionReason: "owner_handoff",
+    judgment: { delivery: "confirmed", response, effect: "not_recovered" }, execution: { state: "ended" } });
+  expect(runtime.sendMessage).toHaveBeenCalledOnce();
+});
+
+it.each(["none", "unknown"] as const)("keeps unconfirmed delivery and response=%s when the handoff has no guidance", async response => {
+  let task = await create(); const read = await inspect(task, "handoff-without-guidance"); task = await current(task.taskId);
+  await agent.report(task, { kind: "owner_handoff", phase: "assess", delivery: "unconfirmed", response,
+    effect: "unknown", summary: "没有发送指引，现有证据不足以确认恢复，请 Owner 排查。", evidence_ids: [read.evidenceId] });
+  expect(await current(task.taskId)).toMatchObject({ status: "completed", judgment: { delivery: "unconfirmed", response, effect: "unknown" } });
+  expect(runtime.sendMessage).not.toHaveBeenCalled();
+});
+
+it.each([
+  { delivery: "confirmed", response: "acted" },
+  { delivery: "confirmed", response: "none" },
+  { delivery: "unconfirmed", response: "acted" },
+  { delivery: "unconfirmed", response: "replied" },
+  { delivery: "confirmed" },
+  { response: "none" },
+  { delivery: null, response: "none" },
+  { delivery: "unconfirmed", response: "invalid" },
+])("rejects an unsupported or incomplete Owner handoff judgment %j", async judgment => {
+  let task = await create();
+  await appendFile(sessionFile, JSON.stringify({ type: "message", id: "old-guidance", message: { role: "user", content: "[会话自愈：old-delivery]\n历史指引" } }) + "\n");
+  const read = await inspect(task, "handoff-unsupported-judgment"); task = await current(task.taskId);
+  await expect(agent.report(task, { kind: "owner_handoff", phase: "assess", ...judgment,
+    effect: "unknown", summary: "不能把历史消息或未确认的行动归因于本次自愈。", evidence_ids: [read.evidenceId] })).rejects.toMatchObject({ status: 422 });
+  expect(await current(task.taskId)).toMatchObject({ status: "running", version: task.version });
+  expect(notifier.notify).not.toHaveBeenCalled();
+});
+
 it.each([undefined, "recovered", "not_recovered", "unknown"] as const)("uses saved effect %s for an older handoff, or unknown when no judgment exists", async effect => {
   let task = await create(); const read = await inspect(task); task = await current(task.taskId);
   if (effect) task = (await tasks.update(task.taskId, task.version, value => ({ ...value, version: value.version + 1,
     judgment: { delivery: "unconfirmed", response: "none", effect, summary: "已有现场判断", evidence_ids: [read.evidenceId] } })))!;
   await agent.report(task, { kind: "owner_handoff", phase: "assess", summary: "请 Owner 查阅后续处理建议。", evidence_ids: [read.evidenceId] });
-  expect(await current(task.taskId)).toMatchObject({ status: "completed", judgment: { effect: effect ?? "unknown" } });
+  expect(await current(task.taskId)).toMatchObject({ status: "completed", judgment: {
+    effect: effect ?? "unknown", delivery: "unconfirmed", response: effect ? "none" : "unknown" } });
 });
 
 it.each(["not_intervened", "invalid", null, 1])("rejects invalid handoff effect %s without ending or notifying", async effect => {

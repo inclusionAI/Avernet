@@ -17,7 +17,7 @@ export function useConversationBotExpansion(userId: string | null) {
   }, [state, userId]);
   return useCallback(
     (view: ConversationBotView) => {
-      if (!userId || !view.bot.chatable || view.bot.isAgentCodingBot) return;
+      if (!userId || !view.bot.chatable) return;
       const target = conversationBotSelectionService.begin(view);
       pending.current = conversationBotSelectionService.complete(target) ? null : { userId, target };
     },
