@@ -1,0 +1,22 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/direct_chat_cli_case_leaf.py
+  h_12dd6d063428b2 597-602
+apps/bcs/scripts/e2e-runner/bcs_e2e/direct_chat_cli_case_run.py
+  h_12dd6d063428b2 4-14,25-26,67,82-93,142-149,159-160,174-183,190-297,392-412,433,436-478,489-519,542,545-557,559-561,572-633,645,653-676
+apps/bcs/scripts/e2e-runner/next-story-migrations.md
+  h_12dd6d063428b2 4139-4224
+apps/bcs/scripts/e2e-runner/tests/test_direct_chat_cli_case_leaf.py
+  h_12dd6d063428b2 346,377-476
+apps/bcs/scripts/e2e-runner/tests/test_direct_chat_cli_case_run.py
+  h_12dd6d063428b2 177,181-182,215-217,247-254,256-259,268-271,275-284,772,783-786,948-1317
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "34ce8d1fa23ce99a2de3f14efd556e1007ac5d60",
+  "prompts": {},
+  "humans": {
+    "h_12dd6d063428b2": {
+      "author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
