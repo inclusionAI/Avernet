@@ -1,0 +1,18 @@
+simulator/scripts/bcs_e2e_cohort.json
+  h_fa66fe7c023b4b 1-27
+simulator/scripts/bcs_e2e_cohort.sh
+  h_fa66fe7c023b4b 1-177
+simulator/scripts/bcs_e2e_env.sh
+  h_fa66fe7c023b4b 144-179
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "815c29631d7a4b3398abc06049ee26e2bf761b1d",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}
