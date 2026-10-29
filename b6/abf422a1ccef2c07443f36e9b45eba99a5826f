@@ -1,0 +1,26 @@
+apps/bcs/scripts/e2e-runner/next-story-migrations.md
+  h_12dd6d063428b2 3448,3480
+apps/bcs/scripts/e2e-runner/tests/test_local_session_public.py
+  h_12dd6d063428b2 264
+apps/bcs/scripts/e2e-runner/tests/test_local_session_sharing.py
+  h_12dd6d063428b2 97-98
+apps/bcs/scripts/e2e-runner/tests/test_remote_webhook_subscription_adapter.py
+  h_12dd6d063428b2 55,433,603
+apps/bcs/scripts/e2e-runner/tests/test_session_cli_group_invite.py
+  h_12dd6d063428b2 49
+apps/bcs/scripts/e2e-runner/tests/test_session_cli_session_invite.py
+  h_12dd6d063428b2 44
+apps/bcs/scripts/e2e-runner/tests/test_ws_evidence.py
+  h_12dd6d063428b2 39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b6abf422a1ccef2c07443f36e9b45eba99a5826f",
+  "prompts": {},
+  "humans": {
+    "h_12dd6d063428b2": {
+      "author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
