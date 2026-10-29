@@ -34,6 +34,7 @@ export function useBotEditor(
   const [skillSets, setSkillSets] = useState<BotCapabilitySet[]>([]);
   const skillSetActivation = useSkillSetActivation(botId, setSkillSets);
   const [mcps, setMcps] = useState<BotEditorMcp[]>([]);
+  const [capabilityLoadError, setCapabilityLoadError] = useState<string>();
   const candidates = useBotEditorCandidates(botId, spaceId);
   const [resources, setResources] = useState<BotEditorResource[]>([]);
   const [resourceLoadingPaths, setResourceLoadingPaths] = useState<string[]>([]);
@@ -54,6 +55,7 @@ export function useBotEditor(
       setSkills(data.skills);
       setSkillSets(data.skillSets);
       setMcps(data.mcps);
+      setCapabilityLoadError(data.capabilityLoadError);
       setResources(data.resources);
       setScreens(data.screens);
       setRoutines(data.routines);
@@ -94,6 +96,7 @@ export function useBotEditor(
     skillSets,
     pendingSkillSetToggle: skillSetActivation.pendingSkillSetToggle,
     mcps,
+    capabilityLoadError,
     ...candidates,
     resources,
     screens,

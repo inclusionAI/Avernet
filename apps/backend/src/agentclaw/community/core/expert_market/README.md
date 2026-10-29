@@ -10,7 +10,10 @@ entries stop discovery without deleting history. `first_added_at` never resets.
 
 `ExpertCatalogServiceProtocol` exposes list, categories and detail. The HTTP DTO
 selects display fields only: no Manifest, credentials, repository configuration or
-commit is returned. Searches match literal name/description/individual tags,
+commit is returned. Detail includes declared Registry MCP codes, derived from the
+stored Manifest so historical catalogue rows need no migration. These codes are
+template facts, not authorization or runtime status; MCP connection overrides
+are never included. Searches match literal name/description/individual tags,
 combine a single category, and sort the complete filtered set before pagination.
 Historical creation counts come from persisted Bot origins including soft-deleted
 rows; catalogue updates cannot change those facts.
@@ -72,6 +75,13 @@ structure and cannot withdraw prior entries. Failed fetch/tree enumeration never
 reconciles removals.
 
 ## Creation
+
+Expert templates support standard Local Skill packages from the same repository
+and commit. Explicit Skill and MCP categories keep the existing Replace contract;
+omitted and empty categories remain distinct, without default-set inheritance.
+`apply_policy` is explicitly refused both during scanning and when compiling a
+historical effective template. It is never stripped to create with weaker semantics.
+
 
 `POST /openapi/v1/experts/{expert_id}/bots` accepts the original `BotCreate` body
 and delegates to the original Manifest submission policy, quota and Passport

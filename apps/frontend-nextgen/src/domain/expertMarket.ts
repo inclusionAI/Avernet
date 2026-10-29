@@ -11,6 +11,8 @@ export interface ExpertSummary {
 export interface ExpertDetail extends ExpertSummary {
   identity: Array<{ type: string; content: string }>;
   skills: Array<{ name: string; description: string }>;
+  /** Older catalogue responses omit MCP declarations during rollout. */
+  mcp?: Array<{ server_code: string }>;
 }
 
 export interface ExpertQuery {
@@ -42,6 +44,20 @@ export interface ExpertBotCreationStatus extends ExpertBotAccepted {
     | 'AUTHORIZATION_REJECTED'
     | 'AUTHORIZATION_EXPIRED';
   message?: string;
+  recoverable?: boolean;
   bot?: Record<string, unknown> | null;
-  apply?: Record<string, unknown> | null;
+  apply?: ExpertApplyReport | null;
+}
+
+export interface ExpertApplyAccepted {
+  apply_id: string;
+  result: 'RUNNING';
+}
+export interface ExpertApplyReport {
+  trigger?: string;
+  state?: { kind: string; reference?: string | null };
+  apply_id: string;
+  result: 'RUNNING' | 'SUCCEEDED' | 'PARTIAL' | 'FAILED';
+  entries: Array<{ category: string; name: string; action: string; error?: string | null; note?: string | null }>;
+  notes?: string[];
 }

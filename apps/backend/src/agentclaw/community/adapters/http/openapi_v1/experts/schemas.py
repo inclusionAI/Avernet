@@ -33,6 +33,14 @@ class ExpertSkill(BaseModel):
     description: str = Field(description="Skill responsibilities.")
 
 
+class ExpertMcp(BaseModel):
+    """A template declaration, without connection overrides or authorization claims."""
+
+    server_code: str = Field(
+        description="Declared Registry MCP code; not an authorization or runtime status."
+    )
+
+
 class ExpertDetail(ExpertSummary):
     """Expert display data without execution documents or source credentials."""
 
@@ -40,3 +48,7 @@ class ExpertDetail(ExpertSummary):
         description="Declared identity files in author order."
     )
     skills: list[ExpertSkill] = Field(description="Declared local Skill metadata.")
+    mcp: list[ExpertMcp] = Field(
+        default_factory=list,
+        description="Declared MCP servers; connection overrides are omitted.",
+    )

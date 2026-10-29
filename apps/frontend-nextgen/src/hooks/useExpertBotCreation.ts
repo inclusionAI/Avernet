@@ -6,6 +6,9 @@ import type { AgentCodingTemplate } from '@/services/botWorkshop/agentCodingTemp
 import { mapBotDto } from '@/services/botWorkshop/botMapper';
 import {
   createExpertBot,
+  recoverExpertBot,
+  getExpertBotApplyReport,
+  getExpertBotLastApply,
   classifyExpertSubmissionFailure,
   getExpertBotCreationStatus,
   type ExpertBotAccepted,
@@ -15,8 +18,8 @@ import { useEffect, useRef, useState } from 'react';
 
 const TERMINAL = new Set(['READY', 'CREATE_FAILED', 'APPLY_FAILED', 'AUTHORIZATION_REJECTED', 'AUTHORIZATION_EXPIRED']);
 
-/** 专家创建只提交一次；202 后始终以原 Manifest 任务为事实源。 */
-export function useExpertBotCreation(open: boolean) {
+/** 专家创建只提交一次；初始化读原任务，恢复读新 Apply 报告。 */
+export function useExpertBotCreation(open: boolean, existingBotId?: string) {
   const [accepted, setAccepted] = useState<ExpertBotAccepted>();
   const [status, setStatus] = useState<ExpertBotCreationStatus>();
   const [error, setError] = useState<string>();
@@ -25,12 +28,23 @@ export function useExpertBotCreation(open: boolean) {
   const [initializing, setInitializing] = useState(false);
   const [initializationPending, setInitializationPending] = useState(false);
   const [afterCreateError, setAfterCreateError] = useState<string>();
+  const [recoveryId, setRecoveryId] = useState<string>();
+  const [recoveryLookupAfterId, setRecoveryLookupAfterId] = useState<string>();
+  const [recovering, setRecovering] = useState(false);
+  const recoverySubmitting = useRef(false);
+  const generation = useRef(0);
   const locked = useRef(false);
   const avatar = useRef<string>();
   const submitted = useRef<BotCreateInput>();
   const afterCreateStartedFor = useRef<string>();
+  useEffect(() => () => { generation.current += 1; }, []);
   useEffect(() => {
     if (open) return;
+    generation.current += 1;
+    setRecoveryId(undefined);
+    setRecoveryLookupAfterId(undefined);
+    setRecovering(false);
+    recoverySubmitting.current = false;
     setAccepted(undefined);
     setStatus(undefined);
     setError(undefined);
@@ -43,6 +57,9 @@ export function useExpertBotCreation(open: boolean) {
     afterCreateStartedFor.current = undefined;
     locked.current = false;
   }, [open]);
+  useEffect(() => {
+    if (open && existingBotId) setAccepted({ bot_id: existingBotId, iframe_url: '', redirect_url: '' });
+  }, [open, existingBotId]);
   useEffect(() => {
     if (!open || !accepted?.bot_id) return;
     let active = true;
@@ -97,16 +114,89 @@ export function useExpertBotCreation(open: boolean) {
       clearTimeout(timer);
     };
   }, [open, accepted?.bot_id]);
+  useEffect(() => {
+    if (!open || !accepted?.bot_id || (!recoveryId && recoveryLookupAfterId === undefined)) return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        const report = recoveryId
+          ? await getExpertBotApplyReport(accepted.bot_id, recoveryId)
+          : await getExpertBotLastApply(accepted.bot_id);
+        if (!active) return;
+        if (!recoveryId) {
+          // A lost POST response is not permission to repeat the write. Only
+          // a new bound recovery report can give this attempt a polling handle.
+          if (report.apply_id && report.apply_id !== recoveryLookupAfterId
+              && report.trigger === 'explicit' && report.state?.kind === 'manifest' && report.state.reference) {
+            setRecoveryId(report.apply_id);
+            setRecoveryLookupAfterId(undefined);
+            return;
+          }
+          timer = setTimeout(poll, 2000);
+          return;
+        }
+        if (report.apply_id !== recoveryId) throw new Error('配置恢复报告尚不可用，正在重试');
+        setError(undefined);
+        setStatus((current) => current && ({
+          ...current, apply: report, message: undefined,
+          state: report.result === 'RUNNING' ? 'APPLYING' : report.result === 'SUCCEEDED' ? 'READY' : 'APPLY_FAILED',
+        }));
+        if (report.result !== 'RUNNING') {
+          setRecovering(false);
+          return;
+        }
+      } catch (failure) {
+        if (!active) return;
+        setError(failure instanceof Error ? failure.message : '配置恢复状态查询失败，正在重试');
+      }
+      if (active) timer = setTimeout(poll, 2000);
+    };
+    void poll();
+    return () => { active = false; clearTimeout(timer); };
+  }, [open, accepted?.bot_id, recoveryId, recoveryLookupAfterId]);
   return {
     accepted,
     status,
     error,
     submitting,
+    recovering,
     unknown,
     initializing,
     initializationPending,
     afterCreateError,
     locked: submitting || Boolean(accepted) || unknown,
+    async recover() {
+      if (!accepted?.bot_id || status?.state !== 'APPLY_FAILED' || status.recoverable === false || recoverySubmitting.current || recovering) return;
+      recoverySubmitting.current = true;
+      setRecovering(true);
+      setError(undefined);
+      const version = generation.current;
+      let posted = false;
+      let previousApplyId = '';
+      try {
+        const previous = await getExpertBotLastApply(accepted.bot_id);
+        if (version !== generation.current) return;
+        previousApplyId = previous.apply_id || '';
+        posted = true;
+        const next = await recoverExpertBot(accepted.bot_id);
+        if (version !== generation.current) return;
+        setStatus((current) => current && ({ ...current, state: 'APPLYING', message: undefined }));
+        setRecoveryId(next.apply_id);
+      } catch (failure) {
+        if (version !== generation.current) return;
+        if (posted && classifyExpertSubmissionFailure(failure) === 'unknown') {
+          setRecoveryId(undefined);
+          setRecoveryLookupAfterId(previousApplyId);
+          setError('配置恢复请求结果未知，正在查询原 Bot 的最新报告，请勿重复提交。');
+        } else {
+          setRecovering(false);
+          setError(failure instanceof Error ? failure.message : '配置恢复未能确认，请到 Bot 管理查看');
+        }
+      } finally {
+        if (version === generation.current) recoverySubmitting.current = false;
+      }
+    },
     async submit(expertId: string, input: BotCreateInput) {
       if (locked.current) return;
       const body = toBotCreateRequest(input);

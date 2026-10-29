@@ -32200,6 +32200,14 @@
             "title": "Identity",
             "type": "array"
           },
+          "mcp": {
+            "description": "Declared MCP servers; connection overrides are omitted.",
+            "items": {
+              "$ref": "#/components/schemas/ExpertMcp"
+            },
+            "title": "Mcp",
+            "type": "array"
+          },
           "name": {
             "description": "Expert display name.",
             "title": "Name",
@@ -32255,6 +32263,21 @@
           "content"
         ],
         "title": "ExpertIdentity",
+        "type": "object"
+      },
+      "ExpertMcp": {
+        "description": "A template declaration, without connection overrides or authorization claims.",
+        "properties": {
+          "server_code": {
+            "description": "Declared Registry MCP code; not an authorization or runtime status.",
+            "title": "Server Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "server_code"
+        ],
+        "title": "ExpertMcp",
         "type": "object"
       },
       "ExpertSkill": {
@@ -72599,6 +72622,18 @@
               "default": false,
               "description": "Return the plan without performing it. Synchronous; it applies no part of your manifest and writes no apply record, so it mints no `apply_id` and appears in no history. Two caveats, both by design: a declared source MAY really be fetched (a preview that cannot tell you whether your sources are reachable and your digests match is a weak preview), bounded by the same per-apply fetch ledger a real apply uses — and the bytes acquired are kept as the platform's own copy, because that audit trail records acquisition, not delivery; and reading a bot's installed MCP set reconciles platform-managed installation rows against SkillSet membership, which any read of that state does. Nothing your manifest declares is applied to the bot.",
               "title": "Dry Run",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Recover a failed bound initialization on this same bot using its original stored Manifest. A changed binding or a completed/running creation is refused with 409. False (default) preserves ordinary Apply of the current user document.",
+            "in": "query",
+            "name": "recover_creation",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Recover a failed bound initialization on this same bot using its original stored Manifest. A changed binding or a completed/running creation is refused with 409. False (default) preserves ordinary Apply of the current user document.",
+              "title": "Recover Creation",
               "type": "boolean"
             }
           },

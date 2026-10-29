@@ -51,6 +51,8 @@ class ExpertCreationService(ExpertCreationServiceProtocol):
                 "expert creation source must be configured as a credential-free HTTPS Git URL"
             )
         document = deepcopy(value["manifest_template"])
+        if "apply_policy" in document:
+            raise ExpertCreationError("apply_policy is not supported for expert templates")
         if engine == "claude_code":
             entries = document["manifest"].get("identity")
             if entries:

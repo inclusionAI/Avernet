@@ -1,3 +1,4 @@
+import { ExpertConfigurationRecovery } from '@/components/BotWorkshop/ExpertConfigurationRecovery';
 import { useBotEditorAddress } from './useBotEditorAddress';
 import { BotEditorExtensionContent } from './BotEditorExtensionContent';
 import { useBotEditorPanels } from './useBotEditorPanels';
@@ -130,6 +131,7 @@ const BotWorkshopDetailPage: React.FC = () => {
         }}
         onReload={() => void detail.retry()}
       />
+      {isOwner && !verifying && bot.expertOriginName && <ExpertConfigurationRecovery key={bot.id} botId={bot.id} />}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <DetailNavigation
           hidden={debugFullscreen}
@@ -219,6 +221,8 @@ const BotWorkshopDetailPage: React.FC = () => {
                 skillSets={editor.skillSets}
                 mySkills={editor.skills.filter((skill) => skill.source === 'local')}
                 availableMcps={editor.availableMcps}
+                currentMcps={editor.mcps}
+                loadError={editor.capabilityLoadError}
                 marketSkills={editor.marketSkills}
                 skillCenterSkills={editor.skillCenterSkills}
                 workshopSkills={editor.workshopSkills}

@@ -25,6 +25,8 @@ export function ExpertCreationResult({
   unknown,
   input,
   onClose,
+  onRecover,
+  recovering,
 }: {
   botId?: string;
   status?: ExpertBotCreationStatus;
@@ -33,11 +35,13 @@ export function ExpertCreationResult({
   initializationPending?: boolean;
   afterCreateError?: string;
   unknown: boolean;
-  input: BotCreateInput;
+  input?: BotCreateInput;
   onClose: () => void;
+  onRecover?: () => void;
+  recovering?: boolean;
 }) {
   const locate = () => {
-    const spaceId = Number(input.spaceId);
+    const spaceId = Number(input?.spaceId);
     if (Number.isFinite(spaceId) && spaceId > 0) switchSpaceContext(spaceId);
     useBotWorkshopStore
       .getState()
@@ -55,7 +59,7 @@ export function ExpertCreationResult({
           ? LABELS[status.state] || status.state
           : '请求已受理，正在查询真实创建进度…'}
       </p>
-      {input.serviceMode === 'service' && status?.bot && (
+      {input?.serviceMode === 'service' && status?.bot && (
         <p className="text-sm text-muted-foreground">服务 Bot 草稿已创建，配置进度单独显示；发布请沿原发布流程操作。</p>
       )}
       {status?.message && <p className="whitespace-pre-wrap text-sm">{status.message}</p>}
@@ -68,6 +72,23 @@ export function ExpertCreationResult({
         </p>
       )}
       {botId && <p className="text-xs text-muted-foreground">Bot：{botId}</p>}
+      {status?.apply?.apply_id && (
+        <div aria-label="配置报告" className="space-y-1 text-sm">
+          <p>Apply：{status.apply.apply_id} · {status.apply.result}</p>
+          {(status.apply.entries || []).map((entry, index) => (
+            <p key={`${entry.category}:${entry.name}:${index}`}>
+              {entry.category} / {entry.name}：{entry.action}{entry.error ? ` · ${entry.error}` : ''}{entry.note ? ` · ${entry.note}` : ''}
+            </p>
+          ))}
+          {status.apply.notes?.map((note, index) => <p key={index}>{note}</p>)}
+        </div>
+      )}
+      {status?.state === 'APPLY_FAILED' && status.recoverable !== false && onRecover && (
+        <div className="space-y-2">
+          <p className="text-sm text-muted-foreground">重试会在原 Bot 按原清单替换声明的配置。若清单声明资源（含空列表），会清理工作区非保护项，请先保存需要保留的输出。</p>
+          <Button type="button" disabled={recovering || initializationPending} onClick={onRecover}>在原 Bot 重试配置</Button>
+        </div>
+      )}
       <div className="flex gap-2">
         <Button type="button" variant="secondary" disabled={initializationPending} onClick={onClose}>
           留在当前页面
