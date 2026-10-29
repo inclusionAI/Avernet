@@ -131,6 +131,15 @@ class ProviderKind(StrEnum):
         except ValueError:
             return cls.DEFAULT
 
+#: The single source of truth for the agentswarm submit wire caps.
+#: RunOptionsDTO imports these for its Field bounds and RunOptions.resolved_*
+#: re-clamps stale metadata with the same values — one definition, so the
+#: two layers can never drift apart again (the 64-vs-256 class of bug).
+WIRE_MAX_TURNS_CAP = 999
+WIRE_MAX_TOTAL_AGENTS_CAP = 256
+WIRE_BOT_CHAT_TIMEOUT_CAP = 3600.0
+
+
 @dataclass(frozen=True)
 class RunOptions:
     """Per-run operational parameters — the run's own execution contract.
@@ -240,11 +249,8 @@ class RunOptions:
             return float(config_value)
         return max(1.0, min(float(self.slice_max_seconds), float(config_value)))
 
-    # Mirrors RunOptionsDTO's wire caps: submit validates live requests,
-    # this re-clamps stale metadata rows that predate a schema change.
-    _WIRE_MAX_TURNS_CAP = 999
-    _WIRE_MAX_TOTAL_AGENTS_CAP = 64
-    _WIRE_BOT_CHAT_TIMEOUT_CAP = 3600.0
+    # The caps live at module level (WIRE_MAX_* below): annotated
+    # class attributes would become dataclass fields.
 
     def resolved_max_turns(self, config_value: int) -> int:
         """Effective orchestrator turn budget: the request replaces the
@@ -253,7 +259,7 @@ class RunOptions:
         churn — e.g. spawns blocked behind human-authorization parks."""
         if self.max_turns is None:
             return int(config_value)
-        return max(1, min(int(self.max_turns), self._WIRE_MAX_TURNS_CAP))
+        return max(1, min(int(self.max_turns), WIRE_MAX_TURNS_CAP))
 
     def resolved_max_total_agents(self, config_value: int) -> int:
         """Effective spawn ceiling: the request replaces the deployment
@@ -261,7 +267,7 @@ class RunOptions:
         if self.max_total_agents is None:
             return int(config_value)
         return max(1, min(int(self.max_total_agents),
-                          self._WIRE_MAX_TOTAL_AGENTS_CAP))
+                           WIRE_MAX_TOTAL_AGENTS_CAP))
 
     def resolved_bot_chat_timeout(self, config_value: float) -> float:
         """Effective engine-chat deadline: the request replaces the
@@ -271,4 +277,4 @@ class RunOptions:
         if self.bot_chat_timeout_seconds is None:
             return float(config_value)
         return max(1.0, min(float(self.bot_chat_timeout_seconds),
-                            self._WIRE_BOT_CHAT_TIMEOUT_CAP))
+                            WIRE_BOT_CHAT_TIMEOUT_CAP))
