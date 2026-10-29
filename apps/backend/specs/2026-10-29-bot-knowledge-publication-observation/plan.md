@@ -153,7 +153,7 @@ class BotKnowledgePublicationSelection:
 +Current selection plus best-effort publication observations;
 +# Document last_recorded/unrecorded/unavailable and non-authoritative semantics.
 # core/service_bot/README.md (Context Boundary)
-+  - agentclaw.community.api.bot_knowledge_service
++  - agentclaw.community.core.bot_knowledge.protocols
 +# Task adapter consumes the ordinary Service API; native transactions unchanged.
 ```
 
@@ -175,6 +175,8 @@ def test_observer_and_lazy_provider_failure_do_not_fail_native_build(): ...
 def test_real_binding_resolves_without_optional_remote_credentials(): ...
 # tests/community/e2e/test_bot_knowledge_publication_selection.py (new)
 def test_draft_a_staging_a_new_draft_b_keeps_version_a(): ...
+# tests/community/adapters/http/test_two_phase_boot.py (existing)
+# Extend the exact expected finalized route set with the new GET.
 # tests/community/architecture/test_bot_knowledge_publication_observation.py (new)
 def test_observation_is_not_in_native_completion_or_transaction_paths(): ...
 ```

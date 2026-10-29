@@ -63,7 +63,7 @@ from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
-    from agentclaw.community.api.bot_knowledge_service import BotKnowledgePublicationSelectionProtocol
+    from agentclaw.community.core.bot_knowledge.protocols import BotKnowledgePublicationSelectionProtocol
     from agentclaw.community.core.service_bot.services.publish_approval_service import (
         PublishApprovalService,
     )
