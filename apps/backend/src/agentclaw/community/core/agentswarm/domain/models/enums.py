@@ -52,6 +52,7 @@ class GuardKind(StrEnum):
     DEDUPE_REJECT = "dedupe_reject"
     DEPTH_EXCEEDED = "depth_exceeded"
     WIDTH_EXCEEDED = "width_exceeded"
+    NAME_UNRESOLVED = "name_unresolved"
     TIMEOUT = "timeout"
     KILL = "kill"
     STUCK = "stuck"

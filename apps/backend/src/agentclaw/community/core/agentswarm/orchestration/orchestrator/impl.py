@@ -197,7 +197,9 @@ class Orchestrator:
                     - state.routed_result_count
                     - state.terminal_without_result
                 )
-                guard = self._guards.check_dedup(state, envelope.objective)
+                guard = self._guards.check_name(state, envelope)
+                if guard is None:
+                    guard = self._guards.check_dedup(state, envelope.objective)
                 if guard is None:
                     guard = self._guards.check_depth(state, _ORCHESTRATOR_SPAWN_DEPTH)
                 if guard is None:
@@ -256,6 +258,7 @@ class Orchestrator:
             "kind": guard.kind.value,
             "name": envelope.name,
             "objective": envelope.objective,
+            "hint": (guard.details or {}).get("hint", ""),
         })
         del notes[:-_REJECTION_NOTES_PER_RUN]
 
@@ -378,6 +381,7 @@ class Orchestrator:
         if rejections:
             rendered = "; ".join(
                 f"{r['kind']} agent={r['name']!r} objective={r['objective']!r}"
+                + (f" hint={r['hint']!r}" if r.get("hint") else "")
                 for r in rejections
             )
             rejection_line = f"recent_guard_rejections={rendered}\n"
