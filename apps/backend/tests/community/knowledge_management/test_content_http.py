@@ -281,6 +281,14 @@ def test_login_requirement_and_outage_not_turned_into_success(content):
     assert response.status_code == 503 and "secret" not in response.text
 
 
+def test_provider_access_denied_reaches_frontend_after_local_gate(content):
+    w = content
+    w.options.update(status=403, body={"detail": {"code": "KB_PERMISSION_DENIED"}})
+    assert w.client.get(w.prefix + "/sources").status_code == 403
+    assert w.scope == [{"space_id": 1, "actor_id": "owner"}]
+    assert len(w.seen) == 1
+
+
 def test_document_sync_run_status_is_scoped_to_exact_kb_and_source(content):
     w = content
     body = {

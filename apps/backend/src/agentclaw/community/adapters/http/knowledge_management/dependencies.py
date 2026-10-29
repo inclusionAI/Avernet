@@ -44,9 +44,11 @@ class ContentContext:
             raise HTTPException(exc.status, detail={"code": exc.code}) from None
 
     async def authorize(self):
-        # Local space-membership gate only: every proxied provider operation
-        # enforces its own native KB ACL with the forwarded session, so a
-        # catalog-detail preflight here would only duplicate that round trip.
+        # Local space-membership gate only: each proxied operation carries its
+        # own native access control with the forwarded session — KB ACL on
+        # kb-scoped routes, KB-scoped prechecks for raw/sync, per-actor
+        # authorize_write on yuque import — so a catalog-detail preflight here
+        # would only duplicate that provider enforcement.
         def authorize_space():
             self.service.authorize_space(
                 space_id=self.space_id,
