@@ -6,6 +6,7 @@ import {
   resolvePrivacyLoadScope,
 } from '@/domain/collaborationPrivacy/loadScope';
 import type { CollaborationBot, PublicAudience, PublicConfig } from '@/domain/collaborationPrivacy/types';
+import { useBotPublicRisk } from '@/hooks/useBotPublicRisk';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import { collaborationPrivacyService } from '@/services/collaborationPrivacy';
 import { useCollaborationPrivacyStore } from '@/stores/collaborationPrivacyStore';
@@ -20,7 +21,6 @@ import {
   type ScopeViewerState,
 } from './collaborationPrivacyHelpers';
 import { useCollaborationPrivacyActions } from './useCollaborationPrivacyActions';
-import { useBotPublicRisk } from '@/hooks/useBotPublicRisk';
 import { useCopyBotId } from './useCopyBotId';
 
 /** 协作权限编排 Hook：默认按工作身份推导加载范围；传 fixedBotId 时按指定 Bot 弹窗加载（collab-permission-entry-migration）。isExternalBot 由外部 Bot 入口显式传入。 */
@@ -178,6 +178,8 @@ export function useCollaborationPrivacy({
       uiState: risk.uiState,
       record: risk.currentRecord,
       isCreating: risk.isCreating,
+      refreshCurrent: risk.refreshCurrent,
+      isRefreshing: risk.isRefreshing,
     },
     load,
     confirmation,
