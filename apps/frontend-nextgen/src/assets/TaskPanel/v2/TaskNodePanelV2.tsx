@@ -109,7 +109,7 @@ export const TaskNodePanelV2: React.FC<TaskNodePanelV2Props> = ({
               lineHeight: '18px',
             }}
           >
-            {node.assigneeName || node.executor || '—'}
+            {node.executorLabel || node.assigneeName || node.groupName || node.executor || '—'}
           </span>
           <span style={{ ...badgeStyle(presentTone.color), display: 'inline-flex' }}>{presentTone.label}</span>
           {/* 返工次数 = attemptCount-1(attempt 从 1 起算,首发不亮徽章) */}

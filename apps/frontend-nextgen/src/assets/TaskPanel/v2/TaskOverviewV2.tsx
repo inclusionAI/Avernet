@@ -97,7 +97,7 @@ export const TaskOverviewV2: React.FC<TaskOverviewV2Props> = ({ task, nav, apiBa
           </div>
         )}
       </section>
-      <TaskArtifactsList task={task} apiBaseUrl={apiBaseUrl} />
+      <TaskArtifactsList task={task} apiBaseUrl={apiBaseUrl} enrichGroupDisplay={false} />
     </div>
   );
 };

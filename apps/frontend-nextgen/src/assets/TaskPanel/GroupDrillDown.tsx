@@ -36,7 +36,7 @@ function isMockId(id: string): boolean {
   return id.startsWith('mock_');
 }
 
-async function fetchGroupDetail(groupId: string, bcsBaseUrl: string) {
+export async function fetchGroupDetail(groupId: string, bcsBaseUrl: string) {
   if (isMockId(groupId)) return null;
   const url = bcsBaseUrl
     ? `${bcsBaseUrl}/groups/${encodeURIComponent(groupId)}`

@@ -114,7 +114,7 @@ export const ArtifactsSection: React.FC<ArtifactsSectionProps> = ({
                 a.kind === 'url_link' || a.kind === 'code' || a.type === 'link';
               const hasPreviewActions = isInlineArtifact || isFileArtifact || isDetailArtifact;
               const hasPreviewButton = hasPreviewActions && !isExternalOnlyArtifact;
-              const hasDownloadAction = isInlineArtifact || isFileArtifact;
+              const hasDownloadAction = isFileArtifact;
               return (
                 <li
                   key={a.id}
@@ -155,7 +155,7 @@ export const ArtifactsSection: React.FC<ArtifactsSectionProps> = ({
                       {a.name}
                     </div>
                     <div style={{ fontSize: 11, color: C.textSecondary, marginTop: 2 }}>
-                      {[a.owner, time].filter(Boolean).join(' · ')}
+                      {[a.ownerLabel ?? a.owner, time].filter(Boolean).join(' · ')}
                     </div>
                     {a.kind === 'text' && a.summary && (
                       <div
@@ -195,6 +195,10 @@ export const ArtifactsSection: React.FC<ArtifactsSectionProps> = ({
                         >
                           {downloadingId === a.id ? '下载中…' : '下载'}
                         </button>
+                      ) : isInlineArtifact ? (
+                        <span aria-hidden="true" style={{ ...actionStyle, visibility: 'hidden' }}>
+                          下载
+                        </span>
                       ) : null}
                       {href ? (
                         <a

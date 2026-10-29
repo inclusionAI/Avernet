@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/Button';
 import type { TaskListItem } from '@/domain/tasks/models';
 import { getCollaborationBotConversationUrl, getCollaborationGroupConversationUrl } from '@/utils/collaborationSquare';
+import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import { history } from '@umijs/max';
 import { MessageCircle } from 'lucide-react';
 
@@ -40,7 +41,11 @@ export function ViewSessionButton({ record, label = '查看会话' }: { record: 
       variant="secondary"
       size="sm"
       leftIcon={<MessageCircle className="size-4" />}
-      onClick={() => history.push(conversationUrl)}
+      onClick={() => {
+        // 任务列表点击行携带焦点任务；目标会话按该任务而不是“最新任务”恢复 TaskPanel。
+        useTaskSidePanelStore.getState().markTaskPanelOpenIntent(record.task_id);
+        history.push(conversationUrl);
+      }}
     >
       {label}
     </Button>

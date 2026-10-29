@@ -90,6 +90,12 @@ jest.mock('@/services/workspace/managedBotConversationService', () => ({
 }));
 
 jest.mock('@/services/workspace/botSessionService', () => ({
+  splitBotId: (id: string) => {
+    const index = id.indexOf(':');
+    return index < 0
+      ? { realBotId: id }
+      : { realBotId: id.slice(0, index), ownerId: id.slice(index + 1) };
+  },
   botSessionService: {
     updateSessionTitle: jest.fn().mockResolvedValue({ ok: true, data: { sessionId: 's1', title: 't' } }),
     clearContext: jest.fn().mockResolvedValue({ ok: true, data: null }),

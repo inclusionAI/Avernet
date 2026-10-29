@@ -23,6 +23,8 @@ export interface TaskPanelNav {
   /** 选中任务根节点并恢复宿主当前会话，不打开任务联动会话。 */
   selectRootNode: (nodeId: string) => void;
   selectNode: (nodeId: string, target: ResolvedSessionTarget | null) => void;
+  /** 面板打开/焦点恢复时的默认选中，仅写选中态，不触发会话跳转。 */
+  selectDefaultNode: (nodeId: string) => void;
   drillInto: (nodeId: string, target: ResolvedSessionTarget | null) => void;
   backToOverview: () => void;
 }
@@ -48,6 +50,10 @@ export function useLocalTaskPanelNav(): TaskPanelNav {
     setRecord((r) => ({ ...r, selectedNodeId: nodeId }));
   }, []);
 
+  const selectDefaultNode = useCallback((nodeId: string) => {
+    setRecord((r) => (r.selectedNodeId === nodeId ? r : { ...r, selectedNodeId: nodeId }));
+  }, []);
+
   const drillInto = useCallback((nodeId: string, target: ResolvedSessionTarget | null) => {
     void target;
     setRecord((r) => ({
@@ -69,6 +75,7 @@ export function useLocalTaskPanelNav(): TaskPanelNav {
     drillStack: record.drillStack,
     selectRootNode,
     selectNode,
+    selectDefaultNode,
     drillInto,
     backToOverview,
   };

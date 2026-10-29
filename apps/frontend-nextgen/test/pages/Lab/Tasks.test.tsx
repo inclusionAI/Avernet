@@ -297,10 +297,10 @@ describe('LabTasksPage(实验室·任务体验页)', () => {
       expect(screen.queryByTestId('task-artifact-preview-drawer')).not.toBeInTheDocument();
       expect(screen.getByText('任务产物')).toBeInTheDocument();
 
+      expect(screen.queryByRole('button', { name: '下载产物 执行摘要' })).not.toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: '预览产物 执行摘要' }));
       expect(await screen.findByTestId('task-artifact-plain-text')).toHaveTextContent('纯文本执行摘要');
-      fireEvent.click(screen.getByRole('button', { name: '下载文件' }));
-      expect(await screen.findByRole('alert')).toHaveTextContent('纯文本类型的产物不支持下载。');
+      expect(screen.queryByRole('button', { name: '下载文件' })).not.toBeInTheDocument();
 
       fireEvent.click(screen.getByRole('button', { name: '关闭' }));
 

@@ -22,6 +22,8 @@ function execution(overrides: Partial<UseTaskExecutionResult> = {}): UseTaskExec
     selections: [],
     selectWorkflow: jest.fn(),
     selectDynamic: jest.fn(),
+    dynamicTaskEnabled: true,
+    dynamicTaskChecking: false,
     removeSelection: jest.fn(),
     clearSelection: jest.fn(),
     submit: jest.fn(),
@@ -80,6 +82,25 @@ describe('ComposerCapabilitiesMenu（胶囊双区拆分）', () => {
     const capabilityTrigger = screen.getByRole('button', { name: '通用协作能力' });
     expect(capabilityTrigger).toHaveAttribute('aria-haspopup', 'menu');
     expect(capabilityTrigger).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('未安装 task-intent-recognition 时任务行仍可见但禁用', async () => {
+    const onDynamicSelected = jest.fn();
+    const user = userEvent.setup();
+    render(
+      <ComposerCapabilitiesMenu
+        execution={execution({ dynamicTaskEnabled: false, dynamicTaskChecking: false })}
+        selections={[]}
+        onDynamicSelected={onDynamicSelected}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: '添加附件' }));
+    const taskRow = screen.getByRole('button', { name: '任务' });
+    expect(taskRow).toBeInTheDocument();
+    expect(taskRow).toBeDisabled();
+    await user.click(taskRow);
+    expect(onDynamicSelected).not.toHaveBeenCalled();
   });
 
   it('＋ 区维持原混排菜单：附件行与任务行同在，选动态任务回调生效', async () => {

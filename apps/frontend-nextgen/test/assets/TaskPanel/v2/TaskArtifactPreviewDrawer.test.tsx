@@ -75,6 +75,29 @@ describe('TaskArtifactPreviewDrawer 文本预览', () => {
     expect(markdown).toHaveClass('app-scrollbar', 'overflow-y-auto', 'px-6', 'py-4', 'text-sm', 'leading-6');
   });
 
+  it('纯文本产物不展示下载入口，保留关闭入口', () => {
+    mockedUseTaskArtifactPreview.mockReturnValue(textPreview({ text: '纯文本产物内容' }));
+
+    render(
+      <TaskArtifactPreviewDrawer
+        artifact={{
+          id: 'artifact-text',
+          name: '执行摘要',
+          type: 'document',
+          kind: 'text',
+          summary: '纯文本产物内容',
+          updatedAt: '',
+        }}
+        context={context}
+        onClose={jest.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('task-artifact-plain-text')).toHaveTextContent('纯文本产物内容');
+    expect(screen.queryByRole('button', { name: '下载文件' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '关闭' })).toBeInTheDocument();
+  });
+
   it('普通文本使用等宽排版，并在内容区底部展示截断提示', () => {
     mockedUseTaskArtifactPreview.mockReturnValue(
       textPreview({ text: '2026-10-22 INFO task completed', truncated: true }),

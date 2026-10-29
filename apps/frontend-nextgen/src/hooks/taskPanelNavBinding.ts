@@ -12,6 +12,7 @@ export interface TaskPanelNav {
   drillStack: string[];
   selectRootNode: (nodeId: string) => void;
   selectNode: (nodeId: string, target: TaskNavTarget | null) => void;
+  selectDefaultNode: (nodeId: string) => void;
   drillInto: (nodeId: string, target: TaskNavTarget | null) => void;
   backToOverview: () => void;
 }
@@ -37,6 +38,12 @@ export function useTaskPanelNavBinding(taskId: string): TaskPanelNav {
     },
     [taskId],
   );
+  const selectDefaultNode = useCallback(
+    (nodeId: string) => {
+      useTaskSidePanelStore.getState().selectRootNode(taskId, nodeId, null);
+    },
+    [taskId],
+  );
   const drillInto = useCallback(
     (nodeId: string, target: TaskNavTarget | null) => {
       useTaskSidePanelStore.getState().drillInto(taskId, nodeId, target);
@@ -52,6 +59,7 @@ export function useTaskPanelNavBinding(taskId: string): TaskPanelNav {
     drillStack: record?.drillStack ?? [],
     selectRootNode,
     selectNode,
+    selectDefaultNode,
     drillInto,
     backToOverview,
   };

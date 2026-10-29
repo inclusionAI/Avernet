@@ -33,6 +33,17 @@ describe('useTaskPanelNavBinding(taskId)', () => {
     expect(useTaskSidePanelStore.getState().navByTask['t1']?.drillStack).toEqual([]);
   });
 
+  it('默认节点回调只写分片选中态，不产生跳转与滚动信号', () => {
+    const { result } = renderHook(() => useTaskPanelNavBinding('t1'));
+
+    act(() => result.current.selectDefaultNode('n-first'));
+
+    const s = useTaskSidePanelStore.getState();
+    expect(s.navByTask['t1']?.selectedNodeId).toBe('n-first');
+    expect(s.pendingNavigation).toBeNull();
+    expect(s.nodeScrollSignal).toBe(0);
+  });
+
   it('根节点回调绑定当前 task，并退出任务联动会话', () => {
     const { result } = renderHook(() => useTaskPanelNavBinding('t1'));
     useTaskSidePanelStore.getState().openLinkedSession({ sessionId: 'sess-other', kind: 'bot', botId: 'bot-9' });

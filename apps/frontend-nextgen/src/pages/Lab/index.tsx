@@ -64,7 +64,7 @@ function LabFeatureCard({
         </div>
         {feature.headerExtra ? <div className="flex items-center gap-2">{feature.headerExtra}</div> : null}
       </div>
-      <p className="m-0 text-sm leading-6 text-muted-foreground">{feature.description}</p>
+      <p className="m-0 min-h-12 text-sm leading-6 text-muted-foreground">{feature.description}</p>
       <div className="flex items-center justify-between">
         <Button
           className="h-9 px-4 text-xs"

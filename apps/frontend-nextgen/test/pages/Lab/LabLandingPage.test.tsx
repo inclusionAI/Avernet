@@ -17,10 +17,18 @@ describe('LabLandingPage(实验室落地页)', () => {
     pushMock.mockClear();
   });
 
-  it('渲染社区与任务两张功能卡', () => {
+  it('渲染社区与任务两张功能卡，并为描述保留两行高度', () => {
     render(<LabLandingPage />);
     expect(screen.getByRole('article', { name: '社区' })).toBeTruthy();
     expect(screen.getByRole('article', { name: '任务' })).toBeTruthy();
+    for (const card of [
+      screen.getByRole('article', { name: '社区' }),
+      screen.getByRole('article', { name: '任务' }),
+    ]) {
+      const descriptions = within(card).getAllByText(/./, { selector: 'p' });
+      expect(descriptions).toHaveLength(1);
+      expect(descriptions[0].className).toContain('min-h-12');
+    }
   });
 
   it('任务卡:描述对齐 PRD 文案;开始体验跳任务列表页(任务类别)', () => {
