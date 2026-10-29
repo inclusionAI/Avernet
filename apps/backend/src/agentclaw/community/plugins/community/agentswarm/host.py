@@ -700,27 +700,41 @@ class AvernetBotPlatform(BotPlatform):
 
     def chat(self, bot_id: BotId, message: str, owner_id: str = "",
              session_key: str | None = None,
-             cancel_event: threading.Event | None = None) -> str:
+             cancel_event: threading.Event | None = None,
+             timeout_seconds: float | None = None) -> str:
         # Sync-out by SPI contract; async-in in the bridge worker that
         # carries this call: the engine leg runs its own asyncio.run loop
         # here and every wait inside it is bounded — the recv loop's
-        # ``_CHAT_TIMEOUT_SECONDS`` deadline and receive slices, either of
-        # which (or the caller's cancel_event) unwinds the worker back to
-        # the bridge pool instead of abandoning it.
+        # deadline and receive slices, either of which (or the caller's
+        # cancel_event) unwinds the worker back to the bridge pool
+        # instead of abandoning it. ``timeout_seconds`` is the per-call
+        # deadline from the run's own options; absent, the platform's
+        # deployment-configured default (executor.bot_chat_timeout_seconds)
+        # governs.
         owner = (owner_id or "").strip()
         if not owner:
             raise RuntimeError(
                 "provisioning requires the run's authenticated owner "
                 "(per-call owner_id); no ambient identity exists"
             )
+        deadline = (float(timeout_seconds)
+                    if timeout_seconds is not None
+                    else self._chat_timeout_seconds)
         try:
             return asyncio.run(self._chat_once(
-                bot_id, message, owner, session_key, cancel_event))
+                bot_id, message, owner, session_key, cancel_event,
+                timeout_seconds=deadline))
         except TimeoutError as exc:
             raise ChatTimeoutError(
                 f"engine chat for bot {bot_id} did not finish within "
-                f"{self._chat_timeout_seconds:.0f}s"
+                f"{deadline:.0f}s"
             ) from exc
+
+    @property
+    def chat_timeout_seconds(self) -> float:
+        """The deployment-configured chat deadline — the fallback the
+        per-run options resolve against."""
+        return self._chat_timeout_seconds
 
     def _engine_endpoint(self, bot_id: BotId, owner: str) -> tuple[str, str]:
         """Resolve the bot's chat endpoint via BaaS ws-info.
@@ -762,7 +776,8 @@ class AvernetBotPlatform(BotPlatform):
 
     async def _chat_once(self, bot_id: BotId, message: str, owner: str,
                          session_key: str | None,
-                         cancel_event: threading.Event | None) -> str:
+                         cancel_event: threading.Event | None,
+                         timeout_seconds: float | None = None) -> str:
         ws_url, token = self._engine_endpoint(bot_id, owner)
         ws = await self._connect_engine(ws_url, token)
         try:
@@ -775,7 +790,8 @@ class AvernetBotPlatform(BotPlatform):
             await self._reset_session(
                 ws, session_key or _DEFAULT_SESSION_KEY, cancel_event)
             return await self._chat_send(
-                ws, message, token, session_key, cancel_event)
+                ws, message, token, session_key, cancel_event,
+                timeout_seconds=timeout_seconds)
         finally:
             await ws.close()
 
@@ -919,7 +935,8 @@ class AvernetBotPlatform(BotPlatform):
 
     async def _chat_send(self, ws, message: str, token: str,
                          session_key: str | None,
-                         cancel_event: threading.Event | None) -> str:
+                         cancel_event: threading.Event | None,
+                         timeout_seconds: float | None = None) -> str:
         """One chat.send round: the adapter's zero-check gate requires an
         x-iam-token on every frame. OPEN_API:<kind>:<app> is the form it
         accepts for machine callers (no certified token; the check fails
@@ -950,7 +967,9 @@ class AvernetBotPlatform(BotPlatform):
         # the reply is discarded by definition, and quiet return keeps the
         # unwinding worker's bridge future free of an unretrieved
         # exception that only the dead await would have consumed.
-        deadline = asyncio.get_event_loop().time() + self._chat_timeout_seconds
+        deadline = asyncio.get_event_loop().time() + (
+            float(timeout_seconds) if timeout_seconds is not None
+            else self._chat_timeout_seconds)
         accumulated_text = ""
         while True:
             if cancel_event is not None and cancel_event.is_set():

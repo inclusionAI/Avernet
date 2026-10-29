@@ -17,8 +17,8 @@ from __future__ import annotations
 import asyncio
 
 from agentclaw.community.core.agentswarm.domain.models import (
-    AgentId, AgentKind, AgentSpec, Run, RunId, TaskEnvelope, TenantId,
-    RunStatus, RequestMetadata, EpochMillis, spawn_digest,
+    AgentId, AgentKind, AgentSpec, Run, RunId, RunOptions, TaskEnvelope,
+    TenantId, RunStatus, RequestMetadata, EpochMillis, spawn_digest,
 )
 from agentclaw.community.core.agentswarm.runtime.handler.impl import SwarmRunHandler
 from agentclaw.community.core.agentswarm.runtime.pool.impl import SubagentRuntime
@@ -153,6 +153,40 @@ class TestResolveKind:
         run = mk_run([catalog])
         kind = SwarmRunHandler._resolve_kind(run, "rust_coder")
         assert kind == AgentKind.BOT
+
+
+class TestBotChatTimeoutOption:
+    """RunOptions.bot_chat_timeout_seconds: the per-run engine-chat
+    deadline resolved against the platform's deployment default."""
+
+    def test_request_replaces_default_within_wire_cap(self):
+        opts = RunOptions(bot_chat_timeout_seconds=3600.0)
+        assert opts.resolved_bot_chat_timeout(1800.0) == 3600.0
+
+    def test_absent_request_falls_to_deployment_default(self):
+        assert RunOptions().resolved_bot_chat_timeout(1800.0) == 1800.0
+
+    def test_stale_metadata_clamped_to_wire_cap(self):
+        opts = RunOptions(bot_chat_timeout_seconds=99999.0)
+        assert opts.resolved_bot_chat_timeout(1800.0) == 3600.0
+
+    def test_subagent_passes_timeout_only_when_requested(self):
+        import functools
+        import inspect
+        from agentclaw.community.plugins.community.agentswarm import (
+            bot_subagent as bs,
+        )
+
+        run = mk_run([])
+        run.run_options = RunOptions(bot_chat_timeout_seconds=2700.0)
+        sub = bs.AvernetSubagent(
+            mk_catalog_entry(), run, object(), AgentId("a-1"), attempt=1)
+        assert sub._resolved_chat_timeout() == 2700.0
+        # without the option the subagent stays off the call signature,
+        # so platform implementations without the kwarg keep working
+        run.run_options = RunOptions()
+        # guard: _resolved_chat_timeout never touches the platform api
+        assert sub._resolved_chat_timeout() is None
 
 
 class TestExecutorKindCoercion:

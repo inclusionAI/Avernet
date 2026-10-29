@@ -49,6 +49,10 @@ class RunOptionsDTO(BaseModel):
     which may raise up to the deployment's slice room
     (slice_max_seconds minus per_attempt_timeout), so slow-env
     provisioning can be re-budgeted from the request alone.
+    bot_chat_timeout_seconds and the bot_chat/per-attempt pairing
+    follow the same slice math: the request may re-budget one engine
+    chat round trip up to 3600s, with the per-attempt wait_for as the
+    runtime cap.
     max_turns and max_total_agents are the run's own budgets: a
     request value replaces the deployment default, bounded by the
     wire caps below (a run may widen its turn budget for slow
@@ -65,6 +69,13 @@ class RunOptionsDTO(BaseModel):
     per_attempt_timeout_seconds: float | None = Field(
         default=None, gt=0, le=1800,
         description="Upper bound for one attempt task (seconds).")
+    bot_chat_timeout_seconds: float | None = Field(
+        default=None, gt=0, le=3600,
+        description="Upper bound for one engine chat round trip (seconds). "
+        "Replaces the deployment's executor.bot_chat_timeout_seconds "
+        "(default 1800) within this cap, so long-running turns can be "
+        "given more room without a redeploy; the per-attempt timeout "
+        "still bounds the whole leg.")
     setup_timeout_seconds: float | None = Field(
         default=None, gt=0, le=1800,
         description="Upper bound for one agent's provisioning phase "

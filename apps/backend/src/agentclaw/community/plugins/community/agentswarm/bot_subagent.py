@@ -161,6 +161,17 @@ class AvernetSubagent:
             f"{spawn_digest(str(self._run.run_id), str(self._agent_id), self._attempt, 12)}"
         )
 
+    def _resolved_chat_timeout(self) -> float | None:
+        """The per-run engine-chat deadline from the run's own options,
+        resolved against the platform's deployment-configured default.
+        None when the run carries no bot_chat_timeout_seconds — the
+        platform default then governs the chat leg."""
+        opts = getattr(self._run, "run_options", None)
+        if opts is None or opts.bot_chat_timeout_seconds is None:
+            return None
+        return opts.resolved_bot_chat_timeout(
+            getattr(self._platform, "chat_timeout_seconds", 1800.0))
+
     async def run_task(self, envelope: TaskEnvelope) -> SubagentResult:
         if self._bot_id is None:
             raise RuntimeError("setup not completed")
@@ -171,12 +182,15 @@ class AvernetSubagent:
         # continuing the orphaned turn's history.
         cancel = threading.Event()
         self._register_active_chat(cancel)
-        leg = functools.partial(
-            self._platform.chat,
+        chat_kwargs = dict(
             bot_id=self._bot_id, message=prompt,
             owner_id=self._run.owner_id,
             cancel_event=cancel,
         )
+        resolved_chat_timeout = self._resolved_chat_timeout()
+        if resolved_chat_timeout is not None:
+            chat_kwargs["timeout_seconds"] = resolved_chat_timeout
+        leg = functools.partial(self._platform.chat, **chat_kwargs)
         # Chat rides the module-scoped bounded bridge (host.py), not the raw
         # default executor: the pool caps how many engine chats the pod may
         # hold, and wrap_future bridges its thread future into this loop —

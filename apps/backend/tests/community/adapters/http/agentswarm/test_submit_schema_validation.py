@@ -181,6 +181,14 @@ class TestRunOptionCaps:
             SubmitRunDTO(**_body(
                 options=self._options(per_attempt_timeout_seconds=1800.5)))
 
+    def test_bot_chat_timeout_at_3600_accepted_over_rejected(self):
+        dto = SubmitRunDTO(**_body(
+            options=self._options(bot_chat_timeout_seconds=3600.0)))
+        assert dto.options.bot_chat_timeout_seconds == 3600.0
+        with pytest.raises(ValidationError):
+            SubmitRunDTO(**_body(
+                options=self._options(bot_chat_timeout_seconds=3600.5)))
+
     def test_unknown_option_field_rejected(self):
         with pytest.raises(ValidationError) as exc:
             SubmitRunDTO(**_body(options=self._options(bogus=1)))
