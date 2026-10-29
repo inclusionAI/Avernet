@@ -71,6 +71,31 @@ def _sse(data: Any) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+# SSE 空闲心跳：流订阅者在引擎忙窗（模型思考/工具执行等长静默段）
+# 没有任何字节输出，中间 L7（proxypass/SLB 等）会按 idle-timeout 掐断
+# 静默连接——BaaS 侧表现为 httpcore.ReadError、run 判失败（fail-hard
+# 无降级，2026-10-28 预发灰度 11 例断流实证）。注释帧是 SSE 保活标
+# 准做法：客户端一律忽略，wire 语义零污染；v3 WS 的等价物是协议
+# 层 ping/pong。15s 给常见 60s 代理 idle 线留 4 倍裕量。
+_SSE_KEEPALIVE_SECONDS = 15.0
+_SSE_KEEPALIVE_FRAME = ": keepalive\n\n"
+
+# _get_with_keepalive 的超时哨兵——与队列 None 终结信标严格区分。
+_KEEPALIVE_TICK = object()
+
+
+async def _get_with_keepalive(q: Any) -> Any:
+    """事件读取 + 空闲心跳：静默超时返回心跳哨兵，调用方回写注释帧。
+
+    q.get() 被取消不丢事件——put 只唤起 getter，值仍留在队列中下次
+    自取（asyncio.Queue 契约），wait_for 超时切走零损失。
+    """
+    try:
+        return await asyncio.wait_for(q.get(), _SSE_KEEPALIVE_SECONDS)
+    except asyncio.TimeoutError:
+        return _KEEPALIVE_TICK
+
+
 def _rpc_response(rid: Any, result: Any) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": rid, "result": result}
 
@@ -990,7 +1015,10 @@ async def _subscribe_context(params: dict[str, Any], req_id: Any,
     async def gen():
         try:
             while True:
-                ev = await q.get()
+                ev = await _get_with_keepalive(q)
+                if ev is _KEEPALIVE_TICK:
+                    yield _SSE_KEEPALIVE_FRAME
+                    continue
                 if ev is None:
                     return
                 yield _sse(_rpc_response(req_id,
@@ -1012,7 +1040,10 @@ def _stream_response(req_id: Any, rid: str, backlog: list, q: Any) -> Response:
                 yield _sse(_rpc_response(req_id,
                                          wire.kernel_event_to_wire(e)))
             while True:
-                ev = await q.get()
+                ev = await _get_with_keepalive(q)
+                if ev is _KEEPALIVE_TICK:
+                    yield _SSE_KEEPALIVE_FRAME
+                    continue
                 if ev is None:
                     return
                 yield _sse(_rpc_response(req_id,

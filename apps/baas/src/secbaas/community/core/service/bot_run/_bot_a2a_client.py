@@ -226,6 +226,19 @@ class BotA2aClient:
         self._session_runs.clear()
         await self._notify_disconnect()
 
+    def refresh_proxypass_token(self, headers: dict[str, str] | None) -> None:
+        """在线刷新 x-proxypass-token——池层逐消息转发的最新鉴权头。
+
+        proxypass JWT TTL 仅 120s 而池连接存活远超之；A2A HTTP 腿每
+        请求都要鉴权，构造时的快照必然过期（2026-10-29 预发 62 例过期
+        token 401 风暴的正修）。空 token（Local 平台）不覆盖；asyncio
+        单线程下赋值原子、请求构建处 {**self.headers} 拷贝，并发竞态
+        只会在新旧 token（均有效）间二选一，无害。
+        """
+        token = (headers or {}).get("x-proxypass-token", "")
+        if token:
+            self.headers["x-proxypass-token"] = token
+
     def tracks_session(self, session_key: str) -> bool:
         """取消归属查询（R4-1/R6-1）：判据 = 该 session 的 A2A run **在途**。
 
@@ -314,19 +327,61 @@ class BotA2aClient:
         # E1 错误二分：非 SSE 响应 = JSON-RPC 错误体（先不会有流）
         ctype = resp.headers.get("content-type", "")
         if resp.status_code != 200 or "text/event-stream" not in ctype:
-            data: dict[str, Any] = {}
             try:
-                data = json.loads((await resp.aread()).decode(errors="replace")) or {}
+                raw = (await resp.aread()).decode(errors="replace")
+            except Exception as e:
+                # 错误头已到手，但错误体传输仍可能中断（连接被掐/读超时）。
+                # 读挂不得炸穿 chat_send——那会绕过 ok 契约并把未登记进
+                # _runs 的临时 client 泄漏成孤儿（close() 兜不住它）。
+                # 状态码来自已到手的响应头，传输异常文本进 message。
+                try:
+                    await resp.aclose()
+                except Exception:
+                    pass
+                await client.aclose()
+                return {
+                    "ok": False,
+                    "error": {
+                        "code": f"HTTP_{resp.status_code}",
+                        # ReadError/ReadTimeout 的 str(e) 可为空串（本地
+                        # RST 场景实测）——空文本回退异常类名，保证
+                        # message 恒有可分诊内容（评审 P2：空串曾使回
+                        # 归测试在两种真实传输异常形态间随机翻转）。
+                        "message": str(e)[:200] or type(e).__name__,
+                        "retryable": False,
+                    },
+                }
+            try:
+                parsed: Any = json.loads(raw)
             except Exception:
-                pass
+                parsed = None
+            # 上游错误面不保证是 JSON-RPC 错误对象（2026-10-29 预发实证：
+            # 代理曾回 JSON 裸串，.get 直接炸成 AttributeError，把真实错
+            # 误盖住、run 被误报为代码异常）。两级 isinstance 守卫；解析
+            # 不出错误对象时原文截断进 message，让上游真身可见。
+            data: dict[str, Any] = parsed if isinstance(parsed, dict) else {}
+            err_raw: Any = data.get("error") if data else None
+            err_obj: Any = err_raw if isinstance(err_raw, dict) else {}
+            err_data: Any = err_obj.get("data")
+            if not isinstance(err_data, dict):
+                err_data = {}
+            # 信息丢失才透原文（生产实证形态）：body 合法 JSON 但非对象、或
+            # error 字段非对象。解析失败的垃圾体（代理 HTML 等）维持
+            # message 留空的既有契约，不造垃圾。
+            if parsed is not None and (
+                not isinstance(parsed, dict)
+                or (err_raw is not None and not isinstance(err_raw, dict))
+            ):
+                raw_snippet = raw[:200]
+            else:
+                raw_snippet = ""
             await resp.aclose()
             await client.aclose()
-            err = (data.get("error") or {}).get("data") or {}
             return {
                 "ok": False,
                 "error": {
-                    "code": err.get("reason", f"HTTP_{resp.status_code}"),
-                    "message": ((data.get("error") or {}).get("message", ""))[:200],
+                    "code": err_data.get("reason", f"HTTP_{resp.status_code}"),
+                    "message": str(err_obj.get("message") or raw_snippet)[:200],
                     "retryable": False,
                 },
             }
@@ -777,17 +832,40 @@ class BotA2aClient:
                     },
                 }
             body = resp.json()
-        if "error" in body:
+        # 同 E1 二分守卫（2026-10-29 预发同源实证）：错误面不保证对象形态——
+        # 裸串时 "error" in body 退化为子串检查、随后 .get/.get("result")
+        # 炸 AttributeError。isinstance 两级守卫，原文截断进 message。
+        if not isinstance(body, dict):
             return {
                 "ok": False,
                 "error": {
-                    "code": (body["error"].get("data") or {}).get(
-                        "reason", "a2a_error"
-                    ),
-                    "message": body["error"].get("message", "")[:200],
+                    "code": "a2a_error",
+                    "message": str(body)[:200],
                 },
             }
-        result = body.get("result") or {}
+        err_obj: Any = body.get("error")
+        if err_obj is not None:
+            if not isinstance(err_obj, dict):
+                return {
+                    "ok": False,
+                    "error": {
+                        "code": "a2a_error",
+                        "message": str(err_obj)[:200],
+                    },
+                }
+            err_data: Any = err_obj.get("data")
+            if not isinstance(err_data, dict):
+                err_data = {}
+            return {
+                "ok": False,
+                "error": {
+                    "code": err_data.get("reason", "a2a_error"),
+                    "message": str(err_obj.get("message", ""))[:200],
+                },
+            }
+        result = body.get("result")
+        if not isinstance(result, dict):
+            result = {}
         status = result.get("inject", "unknown")
         return {
             "ok": status in ("accepted", "duplicate_accepted", "duplicate_in_progress"),
