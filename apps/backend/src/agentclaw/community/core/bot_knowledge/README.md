@@ -13,6 +13,7 @@ provides:
   - BotKnowledgeService
   - BotKnowledgeRepository
   - BotKnowledgeAgentsMdSync
+  - BotKnowledgePublicationSelection
 consumes:
   - DatabasePlugin
   - KnowledgeCatalogPlugin
@@ -21,6 +22,7 @@ internal_dependencies:
   - agentclaw.community.kernel
   - agentclaw.community.plugin_api
   - agentclaw.community.core.base
+  - agentclaw.community.core.repository.protocols.config
   - agentclaw.community.core.bot_knowledge
   - agentclaw.community.core.bot_collaborator
   - agentclaw.community.core.knowledge_management
