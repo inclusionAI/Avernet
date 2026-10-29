@@ -11,7 +11,7 @@ Covers:
 """
 
 import asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -1950,3 +1950,42 @@ class TestBotSessionError:
         # Session should be cleaned up
         assert "sk-err" not in client._sessions
         assert "sk-err" not in client._active_sessions
+
+
+# ==================== outbound auth refresh ====================
+
+
+class TestRefreshOutboundAuth:
+    """A2A 传输的 x-proxypass-token TTL 仅 120s——池层逐消息转发的最新
+    头必须转给内部 A2A 子客户端；v3 WS/None 子客户端天然 no-op。"""
+
+    def test_forwards_to_a2a_client(self, mock_bot_ws):
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+
+        client = AsyncChatClient(uri="ws://h/ws", headers={}, a2a_mode="grey")
+        a2a_like = MagicMock()
+        client._client = a2a_like
+        headers = {"x-proxypass-token": "placeholder"}
+        client.refresh_outbound_auth(headers)
+        a2a_like.refresh_proxypass_token.assert_called_once_with(headers)
+
+    def test_noop_when_client_has_no_method(self, mock_bot_ws):
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+
+        client = AsyncChatClient(uri="ws://h/ws", headers={}, a2a_mode="off")
+        v3_like = MagicMock(spec=["is_connected", "close", "connect"])
+        client._client = v3_like
+        client.refresh_outbound_auth({"x-proxypass-token": "x"})  # 不得炸
+
+    def test_noop_when_client_is_none(self, mock_bot_ws):
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+
+        client = AsyncChatClient(uri="ws://h/ws", headers={}, a2a_mode="grey")
+        client._client = None
+        client.refresh_outbound_auth({"x-proxypass-token": "x"})  # 不得炸

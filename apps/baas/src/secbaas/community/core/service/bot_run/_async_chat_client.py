@@ -357,6 +357,17 @@ class AsyncChatClient:
         """当前活跃会话数（供连接池负载均衡使用）。"""
         return len(self._active_sessions)
 
+    def refresh_outbound_auth(self, headers: dict[str, str] | None) -> None:
+        """转发池层逐消息带来的最新鉴权头（P0：120s JWT 过期正修）。
+
+        duck-typed 转发：仅 A2A 传输实现了 refresh_proxypass_token；
+        v3 WS 握手早已完成、无请求级鉴权，无此方法即跳过；未连接
+        （_client=None）同样跳过。
+        """
+        refresh = getattr(self._client, "refresh_proxypass_token", None)
+        if refresh is not None:
+            refresh(headers)
+
     async def connect(self) -> dict[str, Any]:
         """连接到服务器
 

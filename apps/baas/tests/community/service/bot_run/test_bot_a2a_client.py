@@ -476,14 +476,10 @@ def _make_broken_body_server():
     class _BrokenBodyServer:
         def __init__(self) -> None:
             self._sock = socket.socket()
-            self._sock.setsockopt(
-                socket.SOL_SOCKET, socket.SO_REUSEADDR, 1
-            )
+            self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self._sock.bind(("127.0.0.1", 0))
             self._sock.listen(8)
-            self._thread = threading.Thread(
-                target=self._serve, daemon=True
-            )
+            self._thread = threading.Thread(target=self._serve, daemon=True)
             self._thread.start()
 
         def _serve(self) -> None:
@@ -589,9 +585,7 @@ def test_error_body_read_failure_returns_structured_and_closes():
     assert out["error"]["code"] == "HTTP_502", "状态码来自已到手的响应头"
     assert out["error"]["message"], "空串传输异常须回退类名，不得为空"
     assert chat_phase, "chat_send 必须经由 _http 建临时 client"
-    assert all(e["closed"] for e in chat_phase), (
-        "读挂的临时 client 必须就地关闭"
-    )
+    assert all(e["closed"] for e in chat_phase), "读挂的临时 client 必须就地关闭"
 
 
 def test_error_body_read_failure_survives_resp_aclose_error():
@@ -676,12 +670,8 @@ def test_error_body_read_failure_empty_exc_message_falls_back():
     ]:
         out = _run(scenario(exc))
         assert out["ok"] is False, f"{name}: 读体失败必须结构化返回"
-        assert out["error"]["code"] == "HTTP_502", (
-            f"{name}: 状态码来自已到手的响应头"
-        )
-        assert out["error"]["message"] == name, (
-            f"{name}: 空文本必须回退异常类名"
-        )
+        assert out["error"]["code"] == "HTTP_502", f"{name}: 状态码来自已到手的响应头"
+        assert out["error"]["message"] == name, f"{name}: 空文本必须回退异常类名"
 
 
 def test_string_error_field_body_surfaces_raw_not_crash():
@@ -3115,3 +3105,25 @@ def test_async_client_on_mode_malformed_card_raises_a2a_error(case, payload):
             _run(scenario())
     finally:
         srv.stop()
+
+
+# ── P0：proxypass token 在线刷新（120s TTL 快照过期的 62 例 401 风暴正修）──
+
+
+def test_refresh_proxypass_token_updates_and_guards():
+    from secbaas.community.core.service.bot_run._bot_a2a_client import (
+        BotA2aClient,
+    )
+
+    client = BotA2aClient(
+        base_url="http://x", headers={"x-proxypass-token": "mock"}
+    )
+    client.refresh_proxypass_token({"x-proxypass-token": "placeholder"})
+    assert client.headers["x-proxypass-token"] == "placeholder"
+
+    client.refresh_proxypass_token({"x-proxypass-token": ""})
+    assert client.headers["x-proxypass-token"] == "placeholder", \
+        "空 token（Local 平台）不得覆盖既有值"
+
+    client.refresh_proxypass_token(None)
+    assert client.headers["x-proxypass-token"] == "placeholder"

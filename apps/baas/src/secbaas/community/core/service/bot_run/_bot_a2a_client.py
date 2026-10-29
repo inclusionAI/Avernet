@@ -226,6 +226,19 @@ class BotA2aClient:
         self._session_runs.clear()
         await self._notify_disconnect()
 
+    def refresh_proxypass_token(self, headers: dict[str, str] | None) -> None:
+        """在线刷新 x-proxypass-token——池层逐消息转发的最新鉴权头。
+
+        proxypass JWT TTL 仅 120s 而池连接存活远超之；A2A HTTP 腿每
+        请求都要鉴权，构造时的快照必然过期（2026-10-29 预发 62 例过期
+        token 401 风暴的正修）。空 token（Local 平台）不覆盖；asyncio
+        单线程下赋值原子、请求构建处 {**self.headers} 拷贝，并发竞态
+        只会在新旧 token（均有效）间二选一，无害。
+        """
+        token = (headers or {}).get("x-proxypass-token", "")
+        if token:
+            self.headers["x-proxypass-token"] = token
+
     def tracks_session(self, session_key: str) -> bool:
         """取消归属查询（R4-1/R6-1）：判据 = 该 session 的 A2A run **在途**。
 
