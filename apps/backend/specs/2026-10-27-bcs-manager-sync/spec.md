@@ -2,7 +2,8 @@
 
 - Status: implemented; local regression passed, remote CI/live validation pending
 - Feature baseline: `be5b69b21`
-- Merge target: `dev`; release work is already merged, so no release/dev split remains
+- Merge target: `REL20261029` (PR #3208). BCS local trusted-app configuration
+  is split into PR #3254 targeting `dev`; this Backend PR does not change BCS TOML.
 - Design: `/home/admin/workspace/docs/avernet/superpowers/specs/2026-10-26-backend-bcs-manager-sync-design.md`
 - Operations: `apps/backend/docs/bot-manager-sync-operations.md`
 
@@ -230,3 +231,16 @@ current Backend facts when repair is needed.
 The older review and validation records describe an invalidated design and are
 historical only. The results above apply to the simplified contract; they do not
 establish eventual consistency or replace the unrun external live acceptance.
+
+## Release branch split (2026-10-29)
+
+PR #3208 targets `REL20261029`. The 14-line local BCS `trusted_apps` change is
+owned by independent `dev` PR #3254. Deployments must provide that BCS permission
+before enabling delivery; the Backend never bypasses BCS authorization. The
+singlebox coverage runner provisions the equivalent scoped permission only in
+its temporary test configuration so the release PR still exercises the real
+HTTP/principal/readback path without importing BCS deployment changes.
+
+Before the split, `fc5fa08fb` passed all applicable remote checks (Unit Tests
+40808582323, Singlebox Coverage 40808582389). The split heads require their own
+CI evidence, recorded in the two PRs.

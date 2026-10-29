@@ -68,6 +68,37 @@ prepare_bcs_runtime_config_resources() {
     fi
 }
 
+add_bcs_coverage_trusted_app() {
+    python3 - "$@" <<'PY'
+import sys
+import tomllib
+from pathlib import Path
+
+rule = {"app": "backend", "tenant": "teamclaw", "action": "managers:sync"}
+entry = (
+    "\n# Singlebox coverage fixture: exercise the real Backend-to-BCS manager-sync policy path.\n"
+    "[[bot_authority.trusted_apps]]\n"
+    f'app = "{rule["app"]}"\n'
+    f'tenant = "{rule["tenant"]}"\n'
+    f'actions = ["{rule["action"]}"]\n'
+)
+for name in sys.argv[1:]:
+    path = Path(name)
+    source = path.read_text(encoding="utf-8")
+    trusted_apps = tomllib.loads(source).get("bot_authority", {}).get("trusted_apps", [])
+    if any(
+        item.get("app") == rule["app"]
+        and item.get("tenant") == rule["tenant"]
+        and rule["action"] in item.get("actions", [])
+        for item in trusted_apps
+    ):
+        continue
+    updated = source.rstrip() + "\n" + entry
+    tomllib.loads(updated)
+    path.write_text(updated, encoding="utf-8")
+PY
+}
+
 prepare_bcs_runtime_config() {
     local template="${BCS_DIR}/configs/bcs-config-local.toml"
     local config_dir="${BCS_CONFIG_DIR:-${BCS_RUNTIME_CONFIG_DIR}}"
@@ -258,6 +289,10 @@ prepare_bcs_runtime_config() {
             "${QWENWORK_PYTHON:-python3}" "${SCRIPT_DIR}/qwenwork_provider.py" config \
                 --state "$SINGLEBOX_QWENWORK_PROVIDER_STATE" --config "$config_file" || return 1
         done
+    fi
+    if [ "${SINGLEBOX_COVERAGE:-0}" = "1" ] && [ "${BCS_SERVER_ENV:-}" = "local" ]; then
+        add_bcs_coverage_trusted_app "$base_config" "$local_config" || return 1
+        log_info "Ensured the Backend manager-sync trusted-App rule in the coverage runtime config"
     fi
     prepare_bcs_runtime_config_resources "$config_dir" || return 1
 

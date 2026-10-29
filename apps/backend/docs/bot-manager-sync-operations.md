@@ -39,6 +39,11 @@ manager-sync Redis keys are neither read nor automatically deleted; any cleanup
 must wait until no old-version sender uses that namespace. No SQL migration is
 needed.
 
+Release wiring: Backend PR #3208 targets `REL20261029`; the local BCS trust rule
+is shipped independently by dev PR #3254. Coverage supplies the same permission
+only in its temporary test config. A normal release checkout without that BCS
+configuration must provision it explicitly before enabling manager sync.
+
 Before enabling, verify:
 
 1. `bcs_base_url` is the BCS origin, not a gateway URL.
