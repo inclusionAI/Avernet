@@ -40,8 +40,9 @@ interface BotGeneralConfigDialogProps {
 const codingBotAbilitySettings = ['collaborationStatus'] as const;
 const generalConfigAbilitySettings = ['collaborationStatus', 'profilePublic'] as const;
 
-/** 配置域卡片：一卡一域（发布审批/可见性/好友审批/协作能力），白底弹窗上细边框即分组。 */
-const sectionCardClass = 'rounded-xl border border-border/60 bg-card px-4 py-3';
+/** 配置域卡片：一卡一域（发布审批/可见性/好友审批/协作能力），白底弹窗上细边框即分组。
+ *  内边距对齐卡内行距节奏（RelationCard/SettingRow 的 py-3/py-4），卡口与行间留白一致。 */
+const sectionCardClass = 'rounded-xl border border-border/60 bg-card px-5 py-4';
 
 function DialogLoadingState() {
   return (
@@ -99,8 +100,8 @@ export function BotGeneralConfigDialog({ bot, isExternalBot = false, onClose }: 
           <ModalTitle>通用配置</ModalTitle>
           <ModalDescription>管理该 Bot 在 BCN 网络中的协作状态及好友审批策略。</ModalDescription>
         </ModalHeader>
-        {/* 身份带：全弹窗唯一填充面（bg-muted/40），锚定「这是哪个 Bot 的配置」。 */}
-        <div className="flex min-w-0 items-center gap-2.5 rounded-xl bg-muted/40 px-4 py-3">
+        {/* 身份带：全弹窗唯一填充面（bg-muted/40），锚定「这是哪个 Bot 的配置」；左缘与下方分区卡片内容对齐。 */}
+        <div className="flex min-w-0 items-center gap-2.5 rounded-xl bg-muted/40 px-5 py-3">
           <Avatar name={bot.name} src={bot.avatarUrl} size={40} />
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center gap-2">

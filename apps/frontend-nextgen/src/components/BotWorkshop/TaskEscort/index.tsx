@@ -59,8 +59,11 @@ const TaskEscort: React.FC<TaskEscortProps> = ({ bot }) => {
   if (!bot) {
     return (
       <div className="flex min-h-full flex-col bg-card">
-        <div className="flex h-14 shrink-0 items-center border-b border-border px-5">
-          <h2 className="m-0 text-sm font-semibold">任务护航</h2>
+        <div className="flex h-14 shrink-0 items-center border-b border-border bg-card px-8 lg:px-10">
+          <div className="min-w-0">
+            <h2 className="m-0 text-sm font-semibold">任务护航</h2>
+            <p className="m-0 mt-0.5 truncate text-xs text-muted-foreground">配置护航流程，跟踪并分析 Bot 任务的执行日志。</p>
+          </div>
         </div>
         <div className="px-5 py-4">
           <Empty compact title="请选择一个 Bot" description="任务护航配置需要绑定具体 Bot。" />
@@ -71,8 +74,11 @@ const TaskEscort: React.FC<TaskEscortProps> = ({ bot }) => {
 
   return (
     <div className="flex min-h-full flex-col bg-card">
-      <div className="flex h-14 shrink-0 items-center border-b border-border px-5">
-        <h2 className="m-0 text-sm font-semibold">任务护航</h2>
+      <div className="flex h-14 shrink-0 items-center border-b border-border bg-card px-8 lg:px-10">
+        <div className="min-w-0">
+          <h2 className="m-0 text-sm font-semibold">任务护航</h2>
+          <p className="m-0 mt-0.5 truncate text-xs text-muted-foreground">配置护航流程，跟踪并分析 Bot 任务的执行日志。</p>
+        </div>
       </div>
       <div className="space-y-4 px-5 py-4">
         <div className="flex flex-wrap items-center gap-1 rounded-lg bg-[var(--color-panel-muted)] p-1">
