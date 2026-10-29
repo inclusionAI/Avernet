@@ -62,3 +62,17 @@ at their known fields; there is no custom recursive boundary logging mechanism.
 
 These checks verify Backend behavior. Actual TeClaw append precedence and
 Caller identity require a separate deployed runtime integration test.
+
+### Admin-authorized final Owner transition
+
+The MCP and CLI update services retain owner-only editing, active service Bot,
+engine and collaboration-lock checks. A configured `admin.super_admin` actor
+may additionally remove the final effective Caller override. The application
+service resolves membership from trusted configuration only for an Owner
+request; the repository receives a default-deny internal authorization and
+checks the aggregate while holding the Bot row lock. No HTTP authorization
+flag is accepted. Existing Passport synchronization and conditional
+compensation still apply. A successful update affects the current identity
+flow immediately and does not defer identity activation until publication.
+The `caller_owner_transition_authorized` diagnostic records the actor, Bot,
+resource kind/code, engine and environment without credentials.
