@@ -161,6 +161,8 @@ def test_handoff_consumer_refuses_local_capability_before_freezing(world, monkey
         Mock(),
         OwnerHandoffPolicy(enabled=True, recovery_enabled=True),
         DisabledBotManagerSync(),
+        Mock(),
+        Mock(),
     )
     with pytest.raises(HandoffError, match="UNSUPPORTED"):
         consumer.create(bot_pk=1, actor_id="A", new_owner_id="B", request_key="request")

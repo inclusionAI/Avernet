@@ -5,6 +5,7 @@ establish enterprise AAC behavior, which remains a deployment acceptance gate.
 """
 
 from agentclaw.community.api.owner_handoff_service import OwnerHandoffServiceProtocol
+from agentclaw.community.api.space_service import SpaceServiceProtocol, SpaceAccessServiceProtocol
 from agentclaw.community.core.bot_collaborator.manager_sync.dispatcher import (
     DisabledBotManagerSync,
 )
@@ -60,6 +61,8 @@ def _register_command(method, suffix, *, forbidden):
             Queue(),
             OwnerHandoffPolicy(enabled=True, recovery_enabled=True),
             DisabledBotManagerSync(),
+            world.get(SpaceServiceProtocol),
+            world.get(SpaceAccessServiceProtocol),
         )
         world.injector.binder.bind(OwnerHandoffServiceProtocol, to=service, scope=None)
         if not suffix:

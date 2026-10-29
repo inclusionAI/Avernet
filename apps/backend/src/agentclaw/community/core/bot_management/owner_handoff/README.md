@@ -18,12 +18,15 @@ consumes:
   - BotRepository
   - TaskQueueService
   - BotManagerSyncProtocol
+  - SpaceServiceProtocol
+  - SpaceAccessServiceProtocol
 internal_dependencies:
   - agentclaw.community.api.bot_manager_sync
   - agentclaw.community.core.base
   - agentclaw.community.core.bot_management.owner_handoff
   - agentclaw.community.core.execution_identity.protocols
   - agentclaw.community.core.repository.protocols
+  - agentclaw.community.core.spaces
   - agentclaw.community.core.task_queue
   - agentclaw.community.plugin_api
   - agentclaw.community.log
@@ -95,3 +98,26 @@ Production initiation remains disabled pending B8 real-device/AAC acceptance,
 verification of provider revocation idempotency and ALC→AEC invalidation,
 long-lived connection disposition, complete concurrent mutation acceptance,
 Frontend and SecBaaS integration. Unit doubles cannot establish those facts.
+
+## Space assignment during handoff
+
+Legacy NULL `space_id` remains NULL. A Bot assigned to its current Owner's
+PERSONAL Space moves to the new Owner's PERSONAL Space. The coordinator prepares
+that local Space and its ADMIN membership through SpaceService before freezing
+(creating it if absent, with no remote SC team request). A failed/cancelled
+handoff may leave that ordinary personal Space initialized, but never moves the
+Bot early. SC mapping remains governed by normal Space initialization/repair.
+TEAM assignment stays unchanged and requires the target Owner's ACTIVE
+membership; handoff does not grant membership or move a team Bot into a personal
+Space. Missing/deleted/mismatched spaces fail closed.
+
+Admission checks these relations before creating the journal or freezing the
+Bot. Final commit locks and rechecks the source, target and ACTIVE membership,
+then writes Owner/name/space and SUCCEEDED in the same transaction. A membership
+removed during credential work blocks completion and keeps the recoverable
+operation frozen; restore membership and retry. Existing manager-sync submission
+after commit observes both the new Owner and Space. Bot/entity keys and resource
+locators are unchanged. This changes no schema or frontend protocol, and does
+not backfill already-SUCCEEDED handoffs; use the existing authorized Bot Space
+assignment API for those. No new quota rule is introduced by responsibility
+handoff; the ordinary explicit Space-move API retains its own quota checks.

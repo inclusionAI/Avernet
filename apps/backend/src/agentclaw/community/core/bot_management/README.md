@@ -88,6 +88,7 @@ internal_dependencies:
   - agentclaw.community.core.resources
   - agentclaw.community.core.service_bot
   - agentclaw.community.core.bot_management.bot_space    # narrow cross-context Space membership contract
+  - agentclaw.community.core.spaces.space_service_protocol
   - agentclaw.community.core.spaces.errors    # typed Space membership failures propagated by Bot Space assignment
   - agentclaw.community.core.spaces.models    # SpaceRecord/SpaceType used by Bot Space assignment
   - agentclaw.community.core.spaces.protocols    # Space lookup used by quota configuration
