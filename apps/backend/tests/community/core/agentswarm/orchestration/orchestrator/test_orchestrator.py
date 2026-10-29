@@ -10,8 +10,8 @@ from agentclaw.community.core.agentswarm.config.settings import (
 )
 from agentclaw.community.core.agentswarm.domain.models import (
     AgentSpec, EpochMillis, FinishDecision,
-    HandoffDecision, ProviderKind, RequestMetadata, Run, RunId, RunStatus,
-    SpawnDecision, TenantId, TerminationReason, WaitDecision,
+    HandoffDecision, ProviderKind, RequestMetadata, Run, RunId, RunOptions,
+    RunStatus, SpawnDecision, TenantId, TerminationReason, WaitDecision,
 )
 from agentclaw.community.core.agentswarm.orchestration.orchestrator import (
     Orchestrator,
@@ -269,6 +269,62 @@ class TestTerminationEvaluator:
         assert (tv.evaluate(_mk_run_state("solo", turn=3))
                 == TerminationReason.NO_PROGRESS)
         assert len(tv._windows) == 0
+
+
+class TestPerRunBudgetOverrides:
+    # RunOptions.max_turns / max_total_agents replace the deployment
+    # defaults inside the evaluator (wire caps enforced at submit).
+
+    def _state(self, run_options=None, turn=0, spawned=0):
+        run = _mk_run()
+        run.run_options = run_options
+        return RunState(run=run, turn_count=turn, total_agents_spawned=spawned,
+                        routed_result_count=1)
+
+    def test_request_max_turns_widens_the_budget(self):
+        # Deployment default 50; the run asked for 200 — no TURN_BUDGET
+        # at the deployment number, fires only at the requested one.
+        tv = TerminationEvaluator(max_turns=50, no_progress_threshold=99)
+        assert tv.evaluate(self._state(RunOptions(max_turns=200),
+                                       turn=50)) is None
+        assert tv.evaluate(self._state(RunOptions(max_turns=200),
+                                       turn=199)) is None
+        assert (tv.evaluate(self._state(RunOptions(max_turns=200), turn=200))
+                == TerminationReason.TURN_BUDGET)
+
+    def test_request_max_turns_tightens_the_budget(self):
+        tv = TerminationEvaluator(max_turns=50, no_progress_threshold=99)
+        assert tv.evaluate(self._state(RunOptions(max_turns=10),
+                                       turn=9)) is None
+        assert (tv.evaluate(self._state(RunOptions(max_turns=10), turn=10))
+                == TerminationReason.TURN_BUDGET)
+
+    def test_stale_metadata_max_turns_clamped_to_wire_cap(self):
+        # A metadata row written before/outside the submit schema can
+        # carry an unbounded value; resolve still clamps to 999.
+        tv = TerminationEvaluator(max_turns=50, no_progress_threshold=99)
+        assert tv.evaluate(self._state(RunOptions(max_turns=99999),
+                                       turn=998)) is None
+        assert (tv.evaluate(self._state(RunOptions(max_turns=99999),
+                                         turn=999))
+                == TerminationReason.TURN_BUDGET)
+
+    def test_request_max_total_agents_overrides(self):
+        tv = TerminationEvaluator(max_total_agents=100,
+                                  no_progress_threshold=99)
+        assert (tv.evaluate(self._state(RunOptions(max_total_agents=15),
+                                        spawned=15))
+                == TerminationReason.MAX_AGENTS)
+        assert tv.evaluate(self._state(RunOptions(max_total_agents=15),
+                                       spawned=14)) is None
+
+    def test_run_without_options_keeps_deployment_budgets(self):
+        # run_options stays None for legacy runs — constructor values
+        # alone govern.
+        tv = TerminationEvaluator(max_turns=3, no_progress_threshold=99)
+        assert tv.evaluate(self._state(None, turn=3)) \
+            == TerminationReason.TURN_BUDGET
+        assert tv.evaluate(self._state(None, turn=2)) is None
 
 
 class TestGuardService:
@@ -549,6 +605,126 @@ class TestOrchestrator:
         assert [e.name for e in result["spawn"]] == ["r3"]
         assert not any(ge.kind.value == "width_exceeded"
                        for ge in result["guard_events"])
+
+    def test_width_retires_terminal_failed_agents(self):
+        # A FAILED agent never routes a result, so spawned-minus-routed
+        # counts it in flight forever — one genuine failure then wedges
+        # every later spawn at the cap. The terminal_without_result
+        # census frees exactly those agents.
+        script = json.dumps({
+            "kind": "spawn_agent",
+            "agents": [{"name": "r4", "objective": "o4"}],
+        })
+        stub = StubLLMProvider(script=[script])
+        orch = Orchestrator(
+            llm=stub, parser=DecisionParser(),
+            guards=GuardService(max_width=1),
+            config=AgentSwarmConfig(
+                orchestration=AgentSwarmOrchestrationConfig(repair_max=2),
+            ),
+        )
+        run = _mk_run()
+        state = RunState(run=run)
+        state.total_agents_spawned = 3
+        state.routed_result_count = 1
+        state.terminal_without_result = 2  # FAILED pair holds no capacity
+        result = asyncio.run(orch.decide_turn(run, state, lambda rid: []))
+        assert [e.name for e in result["spawn"]] == ["r4"]
+        assert not any(ge.kind.value == "width_exceeded"
+                       for ge in result["guard_events"])
+
+    def test_failed_agents_still_occupy_width_without_census(self):
+        # The inverse pin: without the census the same shape must reject —
+        # proves the census (not some other path) is what freed the slot.
+        script = json.dumps({
+            "kind": "spawn_agent",
+            "agents": [{"name": "r4", "objective": "o4"}],
+        })
+        stub = StubLLMProvider(script=[script])
+        orch = Orchestrator(
+            llm=stub, parser=DecisionParser(),
+            guards=GuardService(max_width=1),
+            config=AgentSwarmConfig(
+                orchestration=AgentSwarmOrchestrationConfig(repair_max=2),
+            ),
+        )
+        run = _mk_run()
+        state = RunState(run=run)
+        state.total_agents_spawned = 3
+        state.routed_result_count = 1
+        state.terminal_without_result = 0  # census dropped the retirement
+        result = asyncio.run(orch.decide_turn(run, state, lambda rid: []))
+        assert result["spawn"] == []
+        assert any(ge.kind.value == "width_exceeded"
+                   for ge in result["guard_events"])
+
+    def test_fully_deferred_spawn_consumes_no_turn_budget(self):
+        # Turn budget is real work: a spawn batch whose every envelope was
+        # width-deferred re-emits on later turns, and charging it would let
+        # the re-emissions burn the whole budget without any ever landing
+        # (a tech-team run died exactly this way at max_turns).
+        script = json.dumps({
+            "kind": "spawn_agent",
+            "agents": [
+                {"name": "r1", "objective": "o1"},
+                {"name": "r2", "objective": "o2"},
+            ],
+        })
+        stub = StubLLMProvider(script=[script])
+        orch = Orchestrator(
+            llm=stub, parser=DecisionParser(),
+            guards=GuardService(max_width=0),
+            config=AgentSwarmConfig(
+                orchestration=AgentSwarmOrchestrationConfig(repair_max=2),
+            ),
+        )
+        run = _mk_run()
+        state = RunState(run=run)
+        result = asyncio.run(orch.decide_turn(run, state, lambda rid: []))
+        assert result["spawn"] == []
+        assert len(result["defer_refs"]) == 2
+        assert state.turn_count == 0
+
+    def test_partially_landed_spawn_consumes_one_turn(self):
+        script = json.dumps({
+            "kind": "spawn_agent",
+            "agents": [
+                {"name": "r1", "objective": "o1"},
+                {"name": "r2", "objective": "o2"},
+            ],
+        })
+        stub = StubLLMProvider(script=[script])
+        orch = Orchestrator(
+            llm=stub, parser=DecisionParser(),
+            guards=GuardService(max_width=1),
+            config=AgentSwarmConfig(
+                orchestration=AgentSwarmOrchestrationConfig(repair_max=2),
+            ),
+        )
+        run = _mk_run()
+        state = RunState(run=run)
+        result = asyncio.run(orch.decide_turn(run, state, lambda rid: []))
+        assert len(result["spawn"]) == 1
+        assert state.turn_count == 1
+
+    def test_finish_consumes_a_turn(self):
+        # Handoff/Finish stay full-price decisions (the exemption is a
+        # Wait/free-capacity carve-out ONLY for deferred spawns).
+        script = json.dumps({"kind": "finish", "answer": "done"})
+        stub = StubLLMProvider(script=[script])
+        orch = Orchestrator(
+            llm=stub, parser=DecisionParser(),
+            guards=GuardService(max_width=8),
+            config=AgentSwarmConfig(
+                orchestration=AgentSwarmOrchestrationConfig(repair_max=2),
+            ),
+        )
+        run = _mk_run()
+        state = RunState(run=run)
+        state.routed_result_count = 1
+        result = asyncio.run(orch.decide_turn(run, state, lambda rid: []))
+        assert result["terminate"] == TerminationReason.FINISH
+        assert state.turn_count == 1
 
     def test_congested_spawn_batch_continues_without_terminating(self):
         # P0-8: a fully guard-rejected batch is transient congestion, not a

@@ -78,9 +78,9 @@ def test_ecb_revoked_read_never_prefetches_local_bot_data(
 ):
     upstream.reply(
         "GET",
-        "/api/v1/knowledge/integrations/tc/spaces/1/knowledge-bases/kb/catalog-detail",
+        "/api/v1/knowledge/integrations/tc/spaces/1/knowledge-bases/kb/authorized-bots",
         {"detail": {"code": "not_visible"}},
-        params={"actor_staff_no": "actor"},
+        params={"actor_staff_no": "actor", "cursor": 0, "limit": 20},
         status=status,
     )
     world.sql.clear()

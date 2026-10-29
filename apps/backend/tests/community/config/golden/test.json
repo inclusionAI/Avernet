@@ -237,7 +237,7 @@
       "enable_scheduled_scan": false,
       "enabled": true,
       "env": "prod",
-      "git_download_dir": "/home/admin/logs/tmp/sec/code",
+      "git_download_dir": "~/logs/tmp/sec/code",
       "max_concurrent_scans": 3,
       "mist_mode": "dev",
       "scan_interval_hours": 1,
@@ -263,8 +263,8 @@
     "workspace": {
       "aicoding_root": "~/.aicoding",
       "claude_code_root": "~/.claude_code",
-      "claude_code_session_root": "/home/admin/.claude",
-      "deepseek_harness_root": "/home/admin/.dsh",
+      "claude_code_session_root": "~/.claude",
+      "deepseek_harness_root": "~/.dsh",
       "hermes_root": "~/.hermes",
       "openclaw_root": "~/.openclaw"
     },

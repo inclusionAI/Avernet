@@ -1,11 +1,5 @@
 import type { BotEditorResource } from '@/domain/botEditor';
 
-export function formatResourceBytes(size: number) {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  return `${(size / 1024 / 1024).toFixed(1)} MB`;
-}
-
 export function buildVisibleResourceTree(resources: BotEditorResource[], expanded: string[]) {
   const children = new Map<string, BotEditorResource[]>();
   resources.forEach((item) => children.set(item.parentPath, [...(children.get(item.parentPath) ?? []), item]));

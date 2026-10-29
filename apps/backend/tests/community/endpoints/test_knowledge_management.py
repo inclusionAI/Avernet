@@ -113,6 +113,11 @@ def _answer(request):
         return httpx.Response(
             200, content=b"# Original", headers={"content-type": "text/markdown"}
         )
+    elif path.endswith("/connectors/yuque/connection"):
+        payload = {
+            "connected": False,
+            "authorization_url": "https://ecb.test/oauth/login",
+        }
     elif path.endswith("/sources/source"):
         payload = {"source_id": "source", "kb_id": "kb"}
     elif path.endswith("/sync-runs/run"):
@@ -284,6 +289,7 @@ CASES = [
     ),
     ("DELETE", KB + "/sources/{source_id}", {}),
     ("GET", KB + "/sources/{source_id}/raw", {}),
+    ("GET", KB + "/yuque/connection", {}),
     ("GET", KB + "/yuque/documents", {}),
     ("POST", KB + "/yuque/import", {"json_body": {"items": [{"doc_id": 1}]}}),
     ("POST", KB + "/sources/{source_id}/sync", {}),

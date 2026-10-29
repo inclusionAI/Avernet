@@ -44,15 +44,19 @@ class ContentContext:
             raise HTTPException(exc.status, detail={"code": exc.code}) from None
 
     async def authorize(self):
-        def read_detail():
-            return self.service.detail(
+        # Local space-membership gate only: each proxied operation carries its
+        # own native access control with the forwarded session — KB ACL on
+        # kb-scoped routes, KB-scoped prechecks for raw/sync, per-actor
+        # authorize_write on yuque import — so a catalog-detail preflight here
+        # would only duplicate that provider enforcement.
+        def authorize_space():
+            self.service.authorize_space(
                 space_id=self.space_id,
-                kb_id=self.kb_id,
                 actor_id=self.user.staffId,
             )
 
         await run_in_threadpool(
-            execute_sync_knowledge_command, self.config, read_detail
+            execute_sync_knowledge_command, self.config, authorize_space
         )
 
     async def call(self, operation, **kwargs):

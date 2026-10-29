@@ -9,7 +9,7 @@ import jwt
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
 from agentclaw.community.core.bot_public_risk.application import RiskInputBuilder
 from agentclaw.community.core.bot_public_risk.repository import BotPublicRiskRepository, RiskCheck
-from agentclaw.community.core.bot_public_risk.tasks import SecurityProvider, SecurityReport
+from agentclaw.community.core.bot_public_risk.tasks import SecurityProvider, SecurityReport, SecuritySubmission
 from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.utils.gateway_principal_config import init_principal_verifier_config
@@ -33,7 +33,7 @@ class Builder:
 
 class Security:
     def submit_agent_scan(self, agent_info):
-        return "security-check"
+        return SecuritySubmission("security-check", SecurityReport("DETECTING", "https://example.com/report"))
     def get_agent_check_report(self, check_id):
         assert check_id == "security-check"
         return SecurityReport(status="REJECT", detail_url="https://example.com/report")
@@ -67,8 +67,11 @@ def seed(world):
 
 def headers():
     now = int(time.time())
-    token = jwt.encode({"iss": "gateway", "aud": "backend", "iat": now, "exp": now + 3600,
-                        "principals": [{"type": "user", "subject": {"id": OWNER, "username": OWNER}, "resolved_by": {"method": "buc"}}]}, KEY, algorithm="HS256")
+    claims = {
+        "iss": "gateway", "aud": "backend", "iat": now, "exp": now + 3600,
+        "principals": [{"type": "user", "subject": {"id": OWNER, "username": OWNER}, "resolved_by": {"method": "buc"}}],
+    }
+    token = jwt.encode(claims, KEY, algorithm="HS256")
     return {PRINCIPAL_HEADER: token, "x-user-id": OWNER}
 
 
@@ -84,6 +87,8 @@ for surface in ("legacy", "openapi"):
         request_query = {**query, **({"public_scope": "user"} if result == "current" and surface == "openapi" else {})}
         data = body if result == "create" else None
         expected = {"success": True} if surface == "legacy" else {"code": 202000 if result == "create" else 200000}
+        if result == "create":
+            expected["data"] = {"phase": "CHECKING", "security_status": "DETECTING", "detail_url": "https://example.com/report"}
         if result == "refresh":
             expected["data"] = {"outcome": "UPDATED"}
         endpoint_test(method=method, path=base + suffix, scenario="happy", seed=seed,

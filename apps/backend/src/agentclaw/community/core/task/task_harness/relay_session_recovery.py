@@ -12,7 +12,10 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from agentclaw.community.core.task.domain.identity import compose_bot_identity
+from agentclaw.community.core.task.domain.identity import (
+    compose_bot_identity,
+    is_dispatchable_single_bot_assignee,
+)
 from agentclaw.community.core.task.domain.models import TaskNode
 
 logger = logging.getLogger("task.harness.relay")
@@ -63,6 +66,10 @@ class RelaySessionRecoveryError(RuntimeError):
     """Raised when an existing Relay execution session cannot be continued."""
 
 
+class RelaySessionPreconditionError(RelaySessionRecoveryError):
+    """A node lacks a same-session prerequisite and cannot be resumed here."""
+
+
 @dataclass(frozen=True)
 class RelayResumeResult:
     channel: str
@@ -96,7 +103,7 @@ class RelaySessionRecovery:
                     "relay resume has no BCS port for the existing group session"
                 )
             if not session_id:
-                raise RelaySessionRecoveryError(
+                raise RelaySessionPreconditionError(
                     "relay group node has no existing session_id to resume"
                 )
             caller_bearer = await self._resolve_group_bearer(group_id, node)
@@ -127,7 +134,7 @@ class RelaySessionRecovery:
             )
 
         if not session_id:
-            raise RelaySessionRecoveryError(
+            raise RelaySessionPreconditionError(
                 "relay node has no existing session_id to resume"
             )
         if self._bot is None:
@@ -135,9 +142,9 @@ class RelaySessionRecovery:
                 "relay resume has no OpenAPI Bot port for the existing session"
             )
         assignee = str(getattr(node.run_info, "assignee", "") or "")
-        if not assignee:
-            raise RelaySessionRecoveryError(
-                "relay node has no assignee for the existing session"
+        if not is_dispatchable_single_bot_assignee(assignee):
+            raise RelaySessionPreconditionError(
+                "relay node has no valid assignee for the existing session"
             )
         lifecycle_stage = str(props.get("lifecycle_stage") or "").strip()
         metadata: dict[str, Any] = {"session_id": session_id}

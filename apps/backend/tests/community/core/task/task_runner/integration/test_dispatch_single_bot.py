@@ -2,6 +2,7 @@ import asyncio
 
 import pytest
 
+from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
@@ -105,6 +106,26 @@ class _Ctx:
 
 def _run(coro):
     return asyncio.new_event_loop().run_until_complete(coro)
+
+
+def test_dispatch_single_bot_rejects_placeholder_assignee_without_delivery():
+    bot = _Bot()
+    executor = TaskExecutor(
+        bot=bot,
+        bcs=None,
+        formatter=PromptFormatterImpl(),
+        context=_Ctx(),
+        sink=None,
+        poller=_Poller(),
+        task_settings=_TaskSettingsOff(),
+    )
+
+    with pytest.raises(
+        TaskStateError, match="single_bot dispatch requires a real bot assignee"
+    ):
+        _run(executor.dispatch([_node(assignee="NOT_DECIDED")]))
+
+    assert bot.sent == []
 
 
 def test_dispatch_single_bot_registers_handle():

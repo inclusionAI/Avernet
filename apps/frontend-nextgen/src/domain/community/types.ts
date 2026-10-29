@@ -4,7 +4,7 @@ export type CommunityTopicType = 'discussion' | 'share' | 'poll' | 'help' | 'not
 export type CommunityTopicFilter = 'all' | Exclude<CommunityTopicType, 'notice'>;
 export type CommunityPublishTopicType = Exclude<CommunityTopicType, 'notice'>;
 export type CommunityPollSelection = 'single' | 'multi';
-export type CommunityScope = 'all' | 'mine';
+export type CommunityScope = 'all' | 'mine' | 'following';
 
 export interface CommunityPoll {
   selection: CommunityPollSelection;
@@ -65,6 +65,8 @@ export interface CommunityTopic {
   replyCount?: number;
   likeCount?: number;
   latestActivityAt?: string;
+  /** Server-side hot-list marker; hot Topics are already ordered first. */
+  isHot?: boolean;
   createdAt: string;
   isMine: boolean;
   canClose: boolean;
@@ -118,6 +120,10 @@ export interface CommunityTopicQuery {
   topicType?: CommunityTopicFilter;
   /** 作者过滤（HUMAN 工号 / BOT id）；scope=mine 时由调用方填入本人工号，下发 openapi §2.4 author_id 真分页。 */
   authorId?: string;
+  /**
+   * 关注流 owner。公开面从鉴权 principal 推导；内部面需要显式传入。
+   */
+  followingOwnerId?: string;
   offset?: number;
   limit?: number;
 }
@@ -165,17 +171,20 @@ export type CreateCommunityReplyDraft = Pick<
 
 export type InteractionActorType = 'HUMAN' | 'BOT';
 export type InteractionActionType = 'VIEW' | 'LIKE' | 'FAVORITE' | 'FOLLOW' | 'ACCEPT';
+/** Request-side increment: +1 records the action and -1 cancels it. */
+export type InteractionActiveDelta = 1 | -1;
 export type InteractionTargetType = 'TOPIC' | 'POST' | 'HUMAN' | 'BOT';
 export type InteractionSummaryScope = 'ACTOR' | 'TARGET' | 'ACTOR_TARGET';
 export type PersonalCenterActorScope = 'HUMAN' | 'BOT' | 'ALL';
-/** Personal Center exposes only the five concrete activity tabs; ALL is a backend-only aggregate. */
+/** Personal Center exposes only the concrete activity tabs; ALL is a backend-only aggregate. */
 export type PersonalCenterActivityType =
   | 'AUTHORED'
   | 'FAVORITED'
   | 'VIEWED'
   | 'LIKED'
+  | 'FOLLOWED'
   | 'REPLIED';
-export type PersonalCenterTargetFilter = 'ALL' | 'TOPIC' | 'POST';
+export type PersonalCenterTargetFilter = 'ALL' | 'TOPIC' | 'POST' | 'HUMAN' | 'BOT';
 
 export interface ForumActorRef {
   actorType: InteractionActorType;
@@ -215,16 +224,38 @@ export interface RecordInteractionInput {
   actor: ForumActorRef;
   actionType: InteractionActionType;
   target: ForumTargetRef;
+  active: InteractionActiveDelta;
+}
+
+export interface PersonalCenterTopicContext {
+  title: string;
+  bodyPreview: string;
+  topicType: CommunityTopicType;
+  author: ForumActorRef;
+  authorDisplayName: string;
+  replyCount: number;
+  likeCount: number;
+  latestReplyAt?: string;
+}
+
+export interface PersonalCenterReplyContext {
+  postId: string;
+  author: ForumActorRef;
+  authorDisplayName: string;
+  bodyPreview: string;
 }
 
 export interface PersonalCenterActivity {
   activityType: PersonalCenterActivityType;
   actor: ForumActorRef;
   target: ForumTargetRef;
-  topicId: string;
+  /** Topic context is absent when the activity target is a HUMAN or BOT identity. */
+  topicId?: string;
   postId?: string;
   happenedAt: string;
   bodyPreview: string;
+  topicContext?: PersonalCenterTopicContext;
+  repliedToPost?: PersonalCenterReplyContext;
 }
 
 export interface PersonalCenterActivityPage {

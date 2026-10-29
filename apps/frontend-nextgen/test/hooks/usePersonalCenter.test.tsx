@@ -9,27 +9,12 @@ import '@testing-library/jest-dom';
 jest.mock('@/hooks/useHumanIdentity', () => ({ useHumanIdentity: jest.fn() }));
 jest.mock('@/services/community', () => ({
   communityService: {
-    listBrowseSubscriptions: jest.fn(),
-    getInteractionSummaryBatch: jest.fn(),
+    createInteraction: jest.fn(),
     getPersonalCenterActivities: jest.fn(),
   },
 }));
 
 const mockedIdentity = useHumanIdentity as jest.MockedFunction<typeof useHumanIdentity>;
-const mockedSummaryBatch = communityService.getInteractionSummaryBatch as unknown as jest.Mock;
-const batchSummary = {
-  scope: 'ACTOR' as const,
-  followCount: 0,
-  viewCount: 0,
-  likeCount: 0,
-  favoriteCount: 0,
-  acceptCount: 0,
-  topicCount: 0,
-  replyCount: 0,
-  acceptedReplyCount: 0,
-  replyParticipantCount: 0,
-  helpfulReplyCount: 0,
-};
 
 describe('usePersonalCenter', () => {
   beforeEach(() => {
@@ -38,20 +23,21 @@ describe('usePersonalCenter', () => {
       identity: { userId: '149844', displayName: '当前用户', online: true },
       status: 'ready',
     });
-    jest.mocked(communityService.listBrowseSubscriptions).mockResolvedValue(['bot-A']);
-    jest.mocked(communityService.getInteractionSummaryBatch).mockResolvedValue([batchSummary, batchSummary]);
-    jest.mocked(communityService.getPersonalCenterActivities).mockResolvedValue({ items: [], total: 0 });
+    jest
+      .mocked(communityService.getPersonalCenterActivities)
+      .mockResolvedValue({ items: [], total: 0 });
+    jest
+      .mocked(communityService.createInteraction)
+      .mockResolvedValue(undefined);
   });
 
-  it('uses ALL as the default scope, reads subscription bots, then issues one batch summary', async () => {
+  it('loads the ALL actor and target activity list from the backend', async () => {
     const { result } = renderHook(() => usePersonalCenter());
-    expect(result.current.actorScope).toBe('ALL');
-    await waitFor(() => expect(communityService.getInteractionSummaryBatch).toHaveBeenCalledTimes(1));
-    expect(communityService.listBrowseSubscriptions).toHaveBeenCalledWith('149844');
-    expect(communityService.getInteractionSummaryBatch).toHaveBeenCalledWith([
-      { actor: { actorType: 'HUMAN', id: '149844' } },
-      { actor: { actorType: 'BOT', id: 'bot-A' } },
-    ]);
+    expect(result.current.activityType).toBe('AUTHORED');
+
+    await waitFor(() =>
+      expect(communityService.getPersonalCenterActivities).toHaveBeenCalledTimes(1),
+    );
     expect(communityService.getPersonalCenterActivities).toHaveBeenCalledWith({
       ownerUserId: '149844',
       actorScope: 'ALL',
@@ -62,31 +48,65 @@ describe('usePersonalCenter', () => {
     });
   });
 
-  it('switching BOT scope resets to page one and derives only actors from subscriptions', async () => {
+  it('switching content type resets to the first page', async () => {
     const { result } = renderHook(() => usePersonalCenter());
-    await waitFor(() => expect(communityService.getInteractionSummaryBatch).toHaveBeenCalledTimes(1));
-    act(() => result.current.setActorScope('BOT'));
-    await waitFor(() => {
-      expect(mockedSummaryBatch.mock.calls.length).toBeGreaterThan(1);
-    });
-    expect(communityService.getInteractionSummaryBatch).toHaveBeenLastCalledWith([
-      { actor: { actorType: 'BOT', id: 'bot-A' } },
-    ]);
+    await waitFor(() =>
+      expect(communityService.getPersonalCenterActivities).toHaveBeenCalledTimes(1),
+    );
+
+    act(() => result.current.goToPage(3));
+    await waitFor(() => expect(result.current.page).toBe(3));
+    act(() => result.current.setActivityType('REPLIED'));
+
     expect(result.current.page).toBe(1);
+    await waitFor(() =>
+      expect(communityService.getPersonalCenterActivities).toHaveBeenLastCalledWith({
+        ownerUserId: '149844',
+        actorScope: 'ALL',
+        activityType: 'REPLIED',
+        targetType: 'ALL',
+        page: 1,
+        pageSize: PERSONAL_CENTER_PAGE_SIZE,
+      }),
+    );
   });
 
-  it('retries summary statistics on reload and clears the stale error', async () => {
-    mockedSummaryBatch
-      .mockRejectedValueOnce(new Error('stats unavailable'))
-      .mockResolvedValue([batchSummary, batchSummary]);
+  it('cancels a follow with a negative active delta and refreshes the page', async () => {
+    const activity = {
+      activityType: 'FOLLOWED' as const,
+      actor: { actorType: 'HUMAN' as const, id: '149844' },
+      target: { targetType: 'BOT' as const, id: 'bot-a' },
+      happenedAt: '2026-10-27T10:00:00Z',
+      bodyPreview: 'bot-a',
+    };
+    const { result } = renderHook(() => usePersonalCenter());
+    await waitFor(() =>
+      expect(communityService.getPersonalCenterActivities).toHaveBeenCalledTimes(1),
+    );
+
+    await act(async () => {
+      await result.current.unfollow(activity);
+    });
+
+    expect(communityService.createInteraction).toHaveBeenCalledWith({
+      actor: { actorType: 'HUMAN', id: '149844' },
+      actionType: 'FOLLOW',
+      target: activity.target,
+      active: -1,
+    });
+    expect(communityService.getPersonalCenterActivities).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries the activity list on reload and clears a stale error', async () => {
+    jest
+      .mocked(communityService.getPersonalCenterActivities)
+      .mockRejectedValueOnce(new Error('activities unavailable'))
+      .mockResolvedValue({ items: [], total: 0 });
     const { result } = renderHook(() => usePersonalCenter());
     await waitFor(() => expect(result.current.error).not.toBeNull());
+
     act(() => result.current.reload());
     await waitFor(() => expect(result.current.error).toBeNull());
-    const lastActors = mockedSummaryBatch.mock.calls.at(-1)?.[0] ?? [];
-    expect(lastActors).toEqual([
-      { actor: { actorType: 'HUMAN', id: '149844' } },
-      { actor: { actorType: 'BOT', id: 'bot-A' } },
-    ]);
+    expect(communityService.getPersonalCenterActivities).toHaveBeenCalledTimes(2);
   });
 });

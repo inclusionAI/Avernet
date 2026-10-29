@@ -49,8 +49,10 @@ class RunOptionsDTO(BaseModel):
     which may raise up to the deployment's slice room
     (slice_max_seconds minus per_attempt_timeout), so slow-env
     provisioning can be re-budgeted from the request alone.
-    max_turns and max_total_agents are persisted with the run but do
-    not override the deployment's orchestrator budgets."""
+    max_turns and max_total_agents are the run's own budgets: a
+    request value replaces the deployment default, bounded by the
+    wire caps below (a run may widen its turn budget for slow
+    human-in-the-loop authorizations, or tighten its spawn ceiling)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -61,10 +63,10 @@ class RunOptionsDTO(BaseModel):
         default=None, gt=0, le=3600,
         description="Orchestrator deadline per slice (seconds).")
     per_attempt_timeout_seconds: float | None = Field(
-        default=None, gt=0, le=600,
+        default=None, gt=0, le=1800,
         description="Upper bound for one attempt task (seconds).")
     setup_timeout_seconds: float | None = Field(
-        default=None, gt=0, le=900,
+        default=None, gt=0, le=1800,
         description="Upper bound for one agent's provisioning phase "
         "(spawn + authorization + READY, seconds). Parked time waiting "
         "on human consent never counts against it. Falls to the "
@@ -72,10 +74,12 @@ class RunOptionsDTO(BaseModel):
         "deployment's slice room (slice_max_seconds minus "
         "per_attempt_timeout).")
     max_turns: int | None = Field(
-        default=None, ge=1, le=50,
-        description="Orchestrator decision-turn budget.")
+        default=None, ge=1, le=999,
+        description="Orchestrator decision-turn budget. Replaces the "
+        "deployment default within this cap — human-in-the-loop runs "
+        "(bot personas parked on authorization) can widen it.")
     max_total_agents: int | None = Field(
-        default=None, ge=1, le=64,
+        default=None, ge=1, le=256,
         description="Total spawn ceiling for the run.")
     max_width: int | None = Field(
         default=None, ge=1, le=16,

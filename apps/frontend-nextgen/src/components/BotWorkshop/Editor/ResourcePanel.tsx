@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/Input';
 import { Modal, ModalContent, ModalFooter, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import type { BotEditorResource, BotEditorResourcePreview } from '@/domain/botEditor';
 import { buildVisibleResourceTree } from '@/services/botWorkshop/resourceTree';
-import { ChevronRight, Folder, FolderPlus, Upload } from 'lucide-react';
+import { FolderPlus, Upload } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import { ResourcePanelRow } from './ResourcePanelRow';
 import { ResourcePreviewDrawer } from './ResourcePreviewDrawer';
@@ -46,7 +46,6 @@ export function ResourcePanel({
   const uploadRef = useRef<HTMLInputElement>(null);
   const uploadDirectoryRef = useRef('');
   const visibleResources = useMemo(() => buildVisibleResourceTree(resources, expanded), [expanded, resources]);
-  const breadcrumbSegments = useMemo(() => directory.split('/').filter(Boolean), [directory]);
   const uploadToDirectory = async (target: string, file: File) => {
     await onUpload(target ? `${target}/${file.name}` : file.name, file);
     if (target) await onLoadDirectory(target);
@@ -67,14 +66,14 @@ export function ResourcePanel({
   };
   return (
     <div className="flex min-h-full flex-col bg-background">
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border bg-card px-8 py-5 lg:px-10">
-        <div>
-          <h2 className="m-0 text-sm font-semibold tracking-tight">资源目录</h2>
-          <p className="m-0 mt-1 text-xs text-muted-foreground">上传文件、新建目录，支持预览、下载与删除。</p>
+      <div className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-8 lg:px-10">
+        <div className="min-w-0">
+          <h2 className="m-0 truncate text-sm font-semibold">资源目录</h2>
+          <p className="m-0 mt-0.5 truncate text-xs text-muted-foreground">上传文件、新建目录，支持预览、下载与删除。</p>
         </div>
-        <div className="flex max-w-full shrink-0 flex-wrap justify-end gap-2">
+        <div className="flex max-w-full shrink-0 justify-end gap-2">
           {desktop && onOpenFolder ? (
-            <Button variant="outline" size="sm" onClick={() => void onOpenFolder(directory || undefined)}>
+            <Button variant="outline" size="md" onClick={() => void onOpenFolder(directory || undefined)}>
               打开本地目录
             </Button>
           ) : null}
@@ -93,7 +92,7 @@ export function ResourcePanel({
           />
           <Button
             variant="outline"
-            size="sm"
+            size="md"
             disabled={!editable}
             leftIcon={<Upload className="size-4" />}
             onClick={() => {
@@ -104,7 +103,8 @@ export function ResourcePanel({
             上传文件
           </Button>
           <Button
-            size="sm"
+            variant="outline"
+            size="md"
             disabled={!editable}
             leftIcon={<FolderPlus className="size-4" />}
             onClick={() => {
@@ -116,30 +116,9 @@ export function ResourcePanel({
           </Button>
         </div>
       </div>
-      <div className="w-full px-8 pb-10 pt-6 lg:px-10">
-        <div className="mb-4 flex min-h-11 items-center gap-2 rounded-lg border border-border bg-card px-4">
-          <Folder aria-hidden className="size-4 shrink-0 text-zinc-400" />
-          <nav aria-label="当前目录路径" className="flex min-w-0 items-center gap-1.5 text-[13px]">
-            <span className="shrink-0 text-zinc-500 dark:text-zinc-400">根目录</span>
-            {breadcrumbSegments.map((segment, index) => (
-              <span key={`${index}:${segment}`} className="flex min-w-0 items-center gap-1.5">
-                <ChevronRight aria-hidden className="size-3 shrink-0 text-zinc-300 dark:text-zinc-600" />
-                <span
-                  className={`truncate ${
-                    index === breadcrumbSegments.length - 1
-                      ? 'font-medium text-foreground'
-                      : 'text-zinc-600 dark:text-zinc-400'
-                  }`}
-                >
-                  {segment}
-                </span>
-              </span>
-            ))}
-          </nav>
-          <span className="ml-auto hidden shrink-0 pl-4 text-xs text-zinc-400 sm:block">点击文件夹可切换上传位置</span>
-        </div>
+      <div className="w-full px-4 pb-6 pt-3">
         {resources.length ? (
-          <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+          <div>
             {visibleResources.map(({ item, depth }) => (
               <ResourcePanelRow
                 key={item.path}

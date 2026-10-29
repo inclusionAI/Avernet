@@ -33,7 +33,12 @@
     },
     "agentswarm": {
       "artifact_store_root": "${AGENTSWARM_ARTIFACT_ROOT:-/tmp/agentswarm/artifacts}",
-      "enabled": true
+      "enabled": true,
+      "orchestration": {
+        "per_attempt_timeout": 1800,
+        "setup_timeout": 900,
+        "slice_max_seconds": 3600
+      }
     },
     "aidesktop_root": "~/.aidesktop",
     "antcode": {
@@ -86,6 +91,11 @@
       "content_store_dir": "./data/manifest_content",
       "fetch_transport_allowlist": [],
       "teclaw_platform_managed": false
+    },
+    "bot_manager_sync": {
+      "bcs_base_url": "http://127.0.0.1:21000",
+      "enabled": true,
+      "env": "dev"
     },
     "bot_oss_config": {
       "access_key_secret": "oss_m_manual_agentclaw_botdata",
@@ -190,7 +200,7 @@
       "base_url": "http://127.0.0.1:9999"
     },
     "mock_tcauth": true,
-    "nas_mount_root": "/home/admin/.bot_shared_nas/arca/arcaagentclaw",
+    "nas_mount_root": "~/.bot_shared_nas/arca/arcaagentclaw",
     "openapi": {
       "user_id_bypass": []
     },
@@ -223,7 +233,7 @@
     "skill_scan": {
       "auth_app_key": "agentclaw",
       "enable_scheduled_scan": false,
-      "git_download_dir": "/home/admin/logs/tmp/sec/code",
+      "git_download_dir": "~/logs/tmp/sec/code",
       "max_concurrent_scans": 3,
       "mist_mode": "dev",
       "scan_interval_hours": 1,
@@ -371,7 +381,7 @@
       "base_url": "http://127.0.0.1:9999"
     },
     "oss_to_nas": {
-      "nas_root": "/home/admin/.bot_shared_nas/arca/arcaagentclaw",
+      "nas_root": "~/.bot_shared_nas/arca/arcaagentclaw",
       "oss_root": "/aidesktop"
     },
     "secret_names": {
@@ -389,7 +399,7 @@
       "enable_scheduled_scan": false,
       "enabled": true,
       "env": "prod",
-      "git_download_dir": "/home/admin/logs/tmp/sec/code",
+      "git_download_dir": "~/logs/tmp/sec/code",
       "max_concurrent_scans": 3,
       "mist_mode": "dev",
       "scan_interval_hours": 1,
@@ -415,8 +425,8 @@
     "workspace": {
       "aicoding_root": "~/.aicoding",
       "claude_code_root": "~/.claude_code",
-      "claude_code_session_root": "/home/admin/.claude",
-      "deepseek_harness_root": "/home/admin/.dsh",
+      "claude_code_session_root": "~/.claude",
+      "deepseek_harness_root": "~/.dsh",
       "hermes_root": "~/.hermes",
       "openclaw_root": "~/.openclaw"
     },

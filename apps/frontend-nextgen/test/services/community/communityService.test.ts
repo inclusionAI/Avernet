@@ -503,6 +503,7 @@ describe('CommunityService', () => {
       actor: { actorType: 'HUMAN' as const, id: '149844' },
       actionType: 'LIKE' as const,
       target: { targetType: 'TOPIC' as const, id: 'topic-1' },
+      active: 1 as const,
     };
     const query = { target: { targetType: 'TOPIC' as const, id: 'topic-1' } };
 
@@ -519,6 +520,7 @@ describe('CommunityService', () => {
         actor: { actorType: 'HUMAN', id: ' ' },
         actionType: 'LIKE',
         target: query.target,
+        active: 1 as const,
       }),
     ).rejects.toThrow('互动主体或目标不能为空');
     await expect(async () => service.getInteractionSummary({})).rejects.toThrow('缺少互动统计维度');

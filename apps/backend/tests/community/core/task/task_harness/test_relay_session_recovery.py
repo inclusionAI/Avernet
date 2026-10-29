@@ -4,8 +4,8 @@ import unittest
 
 from agentclaw.community.core.task.domain.identity import compose_bot_identity
 from agentclaw.community.core.task.task_harness.relay_session_recovery import (
+    RelaySessionPreconditionError,
     RelaySessionRecovery,
-    RelaySessionRecoveryError,
     relay_harness_resume_prompt,
 )
 from agentclaw.community.core.task.task_harness.runtime_probe import TaskRuntimeLivenessProbe
@@ -178,10 +178,26 @@ class RelaySessionRecoveryTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("继续执行当前未完成的 task-loop S5", bcs.session_calls[0]["message"])
         self.assertIn("不要重做 S1~S4", bcs.session_calls[0]["message"])
 
-    async def test_missing_session_fails_closed_without_dispatch(self):
+    async def test_missing_session_is_a_precondition_error(self):
         recovery = RelaySessionRecovery(bot=_FakeOpenApiBot())
-        with self.assertRaisesRegex(RelaySessionRecoveryError, "no existing session_id"):
+        with self.assertRaisesRegex(RelaySessionPreconditionError, "no existing session_id"):
             await recovery.resume(_Node(assignee="bot1"))
+
+    async def test_placeholder_assignee_is_a_precondition_error(self):
+        recovery = RelaySessionRecovery(bot=_FakeOpenApiBot())
+        with self.assertRaisesRegex(RelaySessionPreconditionError, "no valid assignee"):
+            await recovery.resume(
+                _Node(assignee="NOT_DECIDED", session_id="engine-session")
+            )
+
+    async def test_group_without_session_is_a_precondition_error(self):
+        recovery = RelaySessionRecovery(
+            bot=object(), bcs=_FakeBcs(), bot_tokens=_FakeTokens()
+        )
+        with self.assertRaisesRegex(
+            RelaySessionPreconditionError, "group node has no existing session_id"
+        ):
+            await recovery.resume(_Node(assignee="g1", group_id="g1"))
 
 
 class RuntimeProbeMessageCursorTest(unittest.IsolatedAsyncioTestCase):

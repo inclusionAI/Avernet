@@ -19,9 +19,7 @@ jest.mock('@/components/BotWorkshop/Editor/DebugChatComposer', () => ({
   DebugChatComposer: ({ userId }: { userId: string | null }) => <div data-testid="composer" data-user-id={userId} />,
 }));
 jest.mock('@/components/ui/Select', () => ({
-  Select: ({ onValueChange, children }: { onValueChange: (value: string) => void; children: ReactNode }) => (
-    <div><button type="button" onClick={() => onValueChange('__create_session__')}>测试新建会话</button>{children}</div>
-  ),
+  Select: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   SelectTrigger: () => null,
   SelectValue: () => null,
   SelectContent: () => null,
@@ -62,7 +60,7 @@ it.each(['bot_03e6abae', 'tc-bot:888888', 'human_888888'])(
     expect(chat).toHaveBeenLastCalledWith(expect.any(Object), null, undefined, expect.any(Function), '197262');
     expect(jest.mocked(useBotCapabilitySets)).toHaveBeenCalledWith(expect.any(Object), '197262');
     expect(screen.getByTestId('composer')).toHaveAttribute('data-user-id', '197262');
-    fireEvent.click(screen.getByRole('button', { name: '测试新建会话' }));
+    fireEvent.click(screen.getByRole('button', { name: '新建会话' }));
     await waitFor(() => expect(create).toHaveBeenCalledWith(expect.any(Object), '197262', 'Bot 工坊调试'));
     await act(async () => useWorkspaceStore.setState({ activeIdentityId: 'another-external-bot' }));
     expect(sessions).toHaveBeenCalledTimes(1);

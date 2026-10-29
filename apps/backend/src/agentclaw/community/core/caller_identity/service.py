@@ -6,6 +6,7 @@ from collections.abc import Mapping
 import time
 from typing import Any
 
+from agentclaw.community.core.access import admin_scopes
 from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
 from agentclaw.community.core.repository.protocols.bot import BotCollabLockRepositoryProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
@@ -173,6 +174,11 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
                 lock_key=lock_key,
                 lock_holder_user_id=actor_id,
                 lock_epoch=lock_epoch,
+                # COSEC: role comes from trusted config after owner/lock checks.
+                allow_owner_transition=(
+                    normalized_call_type is McpCallType.OWNER
+                    and actor_id in admin_scopes.super_admin()
+                ),
             )
         except CallerIdentityLockMismatchError as exc:
             raise CallerLockEpochError from exc
@@ -331,6 +337,11 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
                 lock_epoch=lock_epoch,
                 effective_server_codes=effective_server_codes,
                 effective_cli_codes=effective_cli_codes,
+                # COSEC: clients cannot supply this internal authorization.
+                allow_owner_transition=(
+                    normalized_call_type is McpCallType.OWNER
+                    and actor_id in admin_scopes.super_admin()
+                ),
             )
         except CallerIdentityLockMismatchError as exc:
             logger.warning(

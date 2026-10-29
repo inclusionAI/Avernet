@@ -2,6 +2,7 @@
 
 from unittest.mock import MagicMock
 
+import pytest
 from injector import Binder, Injector, InstanceProvider, Module
 
 from agentclaw.community.core.mcp.effective_mcp_state_reader_protocol import (
@@ -48,12 +49,13 @@ class _Dependencies(Module):
         )
 
 
-def test_production_binding_unions_all_runtime_mcp_sources_and_exclusions():
+@pytest.mark.parametrize("entity_id", ["owner", "original-entity"])
+def test_production_binding_unions_all_runtime_mcp_sources_and_exclusions(entity_id):
     dependencies = _Dependencies()
     dependencies.capabilities.active_capabilities.return_value = (
         BotCapabilitySnapshot(
             bot_id="bot-1",
-            owner_id="owner",
+            owner_id=entity_id,
             skills=(
                 RegisteredSkillAsset(
                     skill_id=1,
@@ -81,6 +83,7 @@ def test_production_binding_unions_all_runtime_mcp_sources_and_exclusions():
         bot={
             "bot_id": "bot-1",
             "owner_id": "owner",
+            "entity_id": entity_id,
             "env": "dev",
             "active_engine": "openclaw",
         },
@@ -89,4 +92,7 @@ def test_production_binding_unions_all_runtime_mcp_sources_and_exclusions():
     assert isinstance(reader, EffectiveMCPStateReader)
     assert codes == frozenset(
         {"mcp.explicit", "mcp.default", "mcp.dependency"}
+    )
+    dependencies.exclusions.list_excluded_server_codes.assert_called_once_with(
+        bot_id="bot-1", owner_id=entity_id
     )

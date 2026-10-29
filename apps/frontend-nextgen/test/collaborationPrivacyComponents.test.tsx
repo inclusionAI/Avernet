@@ -63,19 +63,21 @@ describe('collaboration privacy accessible UI', () => {
       'utf8',
     );
     const hookSource = readFileSync(path.join(process.cwd(), 'src/hooks/useCollaborationPrivacy.ts'), 'utf8');
+    // 动作编排拆至子 Hook 后,notify/文案契约由主 Hook + 子 Hook 共同履行。
+    const actionsSource = readFileSync(path.join(process.cwd(), 'src/hooks/useCollaborationPrivacyActions.ts'), 'utf8');
     const helperSource = readFileSync(path.join(process.cwd(), 'src/hooks/collaborationPrivacyHelpers.ts'), 'utf8');
 
     expect(dialogSource).not.toContain('PageMessage');
     // 错误/成功经统一 notify 入口（全局上方居中、错误 6s、可关），页面 Hook 不单独设置位置。
     expect(hookSource).not.toContain("position: 'top-center'");
     expect(hookSource).toContain("from '@/components/ui/notify'");
-    expect(hookSource).toContain('notifyError');
-    expect(hookSource).toContain('notifySuccess');
+    expect(hookSource + actionsSource).toContain('notifyError');
+    expect(hookSource + actionsSource).toContain('notifySuccess');
     expect(hookSource).toContain('publicationSuccessMessage(config)');
     expect(helperSource).toContain('Bot 可见性已更新为不可见，当前立即生效');
     expect(helperSource).toContain('可见性变更申请已提交，当前可见性保持不变');
-    expect(hookSource).toContain('好友审批策略已更新为“无需审批”');
-    expect(hookSource).toContain('好友审批策略已更新为“全部审批”');
+    expect(actionsSource).toContain('好友审批策略已更新为“无需审批”');
+    expect(actionsSource).toContain('好友审批策略已更新为“全部审批”');
     expect(helperSource).toContain("config.scope === 'none'");
     expect(hookSource).not.toContain('setFeedback');
     expect(hookSource).not.toContain('Mock 审批');
@@ -425,6 +427,73 @@ describe('collaboration privacy accessible UI', () => {
     expect(tooltipSource).toContain('ControlStateTooltip');
     expect(relationSource).not.toContain('Tooltip');
     expect(requestSource).not.toContain('Tooltip');
+  });
+
+  test('检测失败提示条提供手动刷新入口且与旧记录同步提示一致', () => {
+    const failedRecord = {
+      risk_check_id: 'rk-1',
+      phase: 'CHECKING',
+      security_status: 'REJECT',
+      detail_url: 'https://example.test/risk/rk-1',
+      auto_poll_paused: true,
+      auto_poll_until: null,
+      next_action_at: null,
+      target: { public_scope: 'user', visibility: 'PUBLIC', view_depts: [] },
+      error_reason: null,
+      invalidation_reason: null,
+      approval_puid: null,
+    };
+    const html = renderWithPortals(
+      <PublicationEditor
+        open
+        audience="user"
+        initialConfig={{ scope: 'all', organizationPaths: [] }}
+        risk={{
+          uiState: { kind: 'failed', record: failedRecord },
+          record: failedRecord,
+          isCreating: false,
+          refreshCurrent: jest.fn(),
+          isRefreshing: false,
+        }}
+        onSearch={jest.fn()}
+        onClose={jest.fn()}
+        onSubmit={jest.fn()}
+      />,
+    );
+
+    expect(html).toContain('Bot公开风险前置检测失败');
+    expect(html).toContain('刷新状态');
+    expect(html).toContain('工单结论如有更新，可刷新状态同步，无需重新发起。');
+  });
+
+  test('未提供刷新回调时失败提示条不渲染刷新按钮', () => {
+    const failedRecord = {
+      risk_check_id: 'rk-1',
+      phase: 'CHECKING',
+      security_status: 'REJECT',
+      detail_url: null,
+      auto_poll_paused: true,
+      auto_poll_until: null,
+      next_action_at: null,
+      target: { public_scope: 'user', visibility: 'PUBLIC', view_depts: [] },
+      error_reason: null,
+      invalidation_reason: null,
+      approval_puid: null,
+    };
+    const html = renderWithPortals(
+      <PublicationEditor
+        open
+        audience="user"
+        initialConfig={{ scope: 'all', organizationPaths: [] }}
+        risk={{ uiState: { kind: 'failed', record: failedRecord }, record: failedRecord, isCreating: false }}
+        onSearch={jest.fn()}
+        onClose={jest.fn()}
+        onSubmit={jest.fn()}
+      />,
+    );
+
+    expect(html).toContain('Bot公开风险前置检测失败');
+    expect(html).not.toContain('刷新状态');
   });
 
   test('Bot 可见性和好友审批编辑器使用单选组语义', () => {

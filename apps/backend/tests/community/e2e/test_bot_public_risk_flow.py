@@ -10,7 +10,7 @@ import uvicorn
 from injector import InstanceProvider
 
 from agentclaw.community.core.bot_public_risk.lifecycle import RiskTaskLifecycle
-from agentclaw.community.core.bot_public_risk.tasks import SecurityProvider, SecurityReport
+from agentclaw.community.core.bot_public_risk.tasks import SecurityProvider, SecurityReport, SecuritySubmission
 from agentclaw.community.core.task_queue.services.worker import TaskWorker
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.models import BotModel
@@ -29,7 +29,7 @@ class SecurityDouble:
     def submit_agent_scan(self, agent_info):
         assert agent_info["agentCode"] == "risk-flow-agent"
         self.submit_count += 1
-        return "risk-flow-check"
+        return SecuritySubmission("risk-flow-check", SecurityReport("DETECTING", "https://example.test/risk-flow-check"))
 
     def get_agent_check_report(self, check_id):
         assert check_id == "risk-flow-check"

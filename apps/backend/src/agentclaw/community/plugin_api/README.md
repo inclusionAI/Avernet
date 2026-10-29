@@ -17,12 +17,14 @@ provides:
   - "Plugin marker"
   - "@plugin_impl decorator + Mode/Flavor enums"
   - "IMPL_REGISTRY"
+  - "BcsManagersPlugin + BcsManagersError — full-replace delivery of a Bot's BCS manager set"
 consumes:
   []
 internal_dependencies:
   - agentclaw.community.kernel.knowledge
   - agentclaw.community.kernel.file_count
   - agentclaw.community.kernel.publish_ignore
+  - agentclaw.community.kernel.bot_manager_sync    # manager sync delivery DTOs
   - agentclaw.community.core.base
   - agentclaw.community.core.service_bot.services.baas_service  # BAAS dataclass (BotWsConnectionInfoResponse) typed in BaasServiceProtocol
   - agentclaw.community.core.service_bot.types                  # PublishStage enum, default value in BaasServiceProtocol signatures
@@ -136,6 +138,15 @@ The default implementation preserves configured addresses; the community runtime
 implementation selects the existing Claude Code Engine source layout. The
 factory's existing locator/device-I/O adapters remain responsible for address
 translation, including enterprise host addresses and Teclaw namespaces.
+
+`BcsManagersPlugin` is the outbound transport boundary for manager projection.
+`replace_managers` sends one full `ManagerSnapshot` under an explicit deadline;
+failures expose `BcsManagersError(kind, code)` without raw response bodies.
+NOT_SENT and UNKNOWN are eligible for the consumer's bounded best-effort retry;
+REJECTED ends the round. UNKNOWN does not prove whether BCS applied the write.
+There is no coordination plugin or persistent block. Consumer conformance lives
+in `tests/community/contracts/test_bcs_managers.py`, exercising the real
+`BotManagerSyncService` through the `world` fixture and asserting plugin calls.
 
 
 ## Token scope V2 and staff-directory errors

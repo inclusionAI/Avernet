@@ -1,8 +1,9 @@
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import type { CommunityTopic, CreateCommunityReplyDraft, InteractionSummary } from '@/domain/community/types';
-import { MessageSquare, User } from 'lucide-react';
-import { useState } from 'react';
+import { Heart, MessageSquare, Star, User } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
+import { cn } from '@/utils/cn';
 import { CommunityAuthorAvatar } from '../CommunityAuthorAvatar';
 import { formatDateTime, type CommunityThreadReply, type ReplyElementRegistrar } from './model';
 import { ReplyComposer, type ReplyComposerTarget } from './ReplyComposer';
@@ -20,6 +21,16 @@ interface FloorProps {
   helpful?: boolean;
   canToggleHelpful?: boolean;
   helpfulLoading?: boolean;
+  /** Content rendered after the body but before the topic action row (for poll panels). */
+  contentExtra?: ReactNode;
+  /** Full bottom-row replacement for the main Topic; replies keep the default row. */
+  topicActionRow?: ReactNode;
+  getReplyLikeSummary?: (postId: string) => InteractionSummary | undefined;
+  getReplyViewerSummary?: (postId: string) => InteractionSummary | undefined;
+  replyLikePending?: (postId: string) => boolean;
+  replyFavoritePending?: (postId: string) => boolean;
+  onLike?: (postId: string) => void;
+  onFavoriteReply?: (postId: string) => void;
   onToggleHelpful?: () => void;
   threadReplies: CommunityThreadReply[];
   expanded: boolean;
@@ -49,6 +60,14 @@ export function Floor({
   helpful = false,
   canToggleHelpful = false,
   helpfulLoading = false,
+  contentExtra,
+  topicActionRow,
+  getReplyLikeSummary,
+  getReplyViewerSummary,
+  replyLikePending,
+  replyFavoritePending,
+  onLike,
+  onFavoriteReply,
   onToggleHelpful,
   threadReplies,
   expanded,
@@ -65,6 +84,12 @@ export function Floor({
   onSubmitReply,
 }: FloorProps) {
   const [replyTarget, setReplyTarget] = useState<ReplyComposerTarget | null>(null);
+  const replyStats = postId ? getReplyLikeSummary?.(postId) : undefined;
+  const viewerReplyStats = postId ? getReplyViewerSummary?.(postId) : undefined;
+  const likeCount = replyStats?.likeCount ?? 0;
+  const favoriteCount = replyStats?.favoriteCount ?? 0;
+  const liked = (viewerReplyStats?.likeCount ?? 0) > 0;
+  const favorited = (viewerReplyStats?.favoriteCount ?? 0) > 0;
   const visibleThreadReplies = expanded ? threadReplies : threadReplies.slice(0, 2);
   const childListId = postId ? `${postId}-children` : undefined;
 
@@ -75,7 +100,11 @@ export function Floor({
   };
 
   return (
-    <article data-post-id={postId} ref={registerElement?.(postId)} className="border-b border-border/60 py-4 last:border-b-0">
+    <article
+      data-post-id={postId}
+      ref={registerElement?.(postId)}
+      className="border-b border-border/60 py-4 last:border-b-0"
+    >
       <div className="flex items-center gap-2">
         <CommunityAuthorAvatar
           author={author}
@@ -109,33 +138,77 @@ export function Floor({
         <div className="min-h-[120px]">
           <p className="m-0 whitespace-pre-wrap text-sm leading-relaxed text-foreground">{body}</p>
         </div>
-        <div className="mt-2 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            {canReply && postId && onSubmitReply ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2 text-[11px] text-primary"
-                leftIcon={<MessageSquare className="size-3.5" aria-hidden />}
-                onClick={() => setReplyTarget({ postId, authorName: author.displayName })}
-              >
-                回复
-              </Button>
-            ) : null}
-            {floor > 0 && canToggleHelpful && onToggleHelpful ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2 text-[11px] text-primary"
-                loading={helpfulLoading}
-                onClick={onToggleHelpful}
-              >
-                {helpful ? '取消有帮助' : '标记有帮助'}
-              </Button>
-            ) : null}
+        {contentExtra}
+        {topicActionRow ? (
+          topicActionRow
+        ) : (
+          <div className="mt-2 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              {canReply && postId && onSubmitReply ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-auto min-h-0 gap-1 px-0 text-xs font-normal text-muted-foreground"
+                  aria-label="回复"
+                  onClick={() => setReplyTarget({ postId, authorName: author.displayName })}
+                >
+                  <MessageSquare className="size-3.5" aria-hidden />
+                  回复
+                </Button>
+              ) : null}
+              {postId && onLike ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={replyLikePending?.(postId) === true}
+                  aria-label="点赞回复"
+                  aria-pressed={liked}
+                  onClick={() => postId && onLike?.(postId)}
+                  className={cn(
+                    'h-auto min-h-0 gap-1 px-0 text-xs font-normal transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+                    liked
+                      ? 'text-destructive'
+                      : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  <Heart className={cn('size-3.5', liked && 'fill-current')} aria-hidden />
+                  {likeCount}
+                </Button>
+              ) : null}
+              {postId && onFavoriteReply ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={replyFavoritePending?.(postId) === true}
+                  aria-label="收藏回复"
+                  aria-pressed={favorited}
+                  onClick={() => postId && onFavoriteReply?.(postId)}
+                  className={cn(
+                    'h-auto min-h-0 gap-1 px-0 text-xs font-normal transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+                    favorited
+                      ? 'text-destructive'
+                      : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  <Star className={cn('size-3.5', favorited && 'fill-current')} aria-hidden />
+                  {favoriteCount}
+                </Button>
+              ) : null}
+              {floor > 0 && canToggleHelpful && onToggleHelpful ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-[11px] text-primary"
+                  loading={helpfulLoading}
+                  onClick={onToggleHelpful}
+                >
+                  {helpful ? '取消有帮助' : '标记有帮助'}
+                </Button>
+              ) : null}
+            </div>
+            <span className="text-xs text-muted-foreground">发表于：{formatDateTime(createdAt)}</span>
           </div>
-          <span className="text-xs text-muted-foreground">发表于：{formatDateTime(createdAt)}</span>
-        </div>
+        )}
         {threadReplies.length > 0 ? (
           <div id={childListId} aria-label="楼中楼回复" className="mt-3 space-y-2 border-l border-border pl-3">
             {visibleThreadReplies.map(({ reply, targetAuthorName, targetPostId }) => (
@@ -152,6 +225,14 @@ export function Floor({
                 followAuthor={followAuthor}
                 authorFollowLoading={authorFollowLoading}
                 canReply={canReply}
+                likeCount={getReplyLikeSummary?.(reply.id)?.likeCount ?? 0}
+                favoriteCount={getReplyLikeSummary?.(reply.id)?.favoriteCount ?? 0}
+                liked={(getReplyViewerSummary?.(reply.id)?.likeCount ?? 0) > 0}
+                favorited={(getReplyViewerSummary?.(reply.id)?.favoriteCount ?? 0) > 0}
+                likePending={replyLikePending?.(reply.id) === true}
+                favoritePending={replyFavoritePending?.(reply.id) === true}
+                onLike={onLike}
+                onFavorite={onFavoriteReply}
                 onReply={setReplyTarget}
               />
             ))}

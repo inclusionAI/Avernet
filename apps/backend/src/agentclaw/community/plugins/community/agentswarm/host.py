@@ -330,6 +330,7 @@ class AvernetBotPlatform(BotPlatform):
         space_context: BusinessSpaceContextProtocol,
         baas_service: BaasService,
         max_platform_workers: int = _DEFAULT_MAX_PLATFORM_WORKERS,
+        chat_timeout_seconds: float = _CHAT_TIMEOUT_SECONDS,
     ) -> None:
         self._manifest_seam = manifest_seam
         self._bot_service = bot_service
@@ -339,7 +340,7 @@ class AvernetBotPlatform(BotPlatform):
         self._apply_service = apply_service
         self._space_context = space_context
         self._baas_service = baas_service
-        self._chat_timeout_seconds = _CHAT_TIMEOUT_SECONDS
+        self._chat_timeout_seconds = chat_timeout_seconds
         set_chat_bridge_max_workers(max_platform_workers)
 
 
@@ -370,18 +371,15 @@ class AvernetBotPlatform(BotPlatform):
         # knows the (run, agent) pair addresses the identical bot id.
         bot_id = (
             f"agent_swarm_{_idem_digest(idempotency_key, _HASHED_IDEMPOTENCY_ID_DIGITS)}")
-        # One persona per (run, spec): the same idempotency key derives the same
-        # bot identifier, so a retried setup rebinds the same creation instead of
-        # minting a second one (and soft-name collisions across concurrent runs
-        # are impossible: the name carries the key's digest).
-        bot_name = f"{spec.name}-{_idem_digest(idempotency_key, 8)}"
-        # A caller-supplied manifest document REPLACES the synthesized
-        # persona document: the spec's config_manifest is the full
-        # five-category bot_config_manifest exactly as the platform's
-        # with-manifest surface accepts it, so the platform's own
-        # preflight stays the single authority on its grammar. Blank
-        # (or whitespace-only) keeps today's behavior: identity-only
-        # synthesis from the spec's identity_file + instructions.
+        # One persona per (run, spec): the idempotency key derives the bot id,
+        # so retries rebind the same creation. The platform caps bot_name at
+        # 32 chars and a spec-derived name can exceed it: bot_name is the
+        # id-format digest (28 chars); the composite label rides bot_desc.
+        bot_name = bot_id
+        bot_desc_label = f"{spec.name}-{_idem_digest(idempotency_key, 8)}"
+        # A caller-supplied manifest REPLACES the synthesized persona
+        # document (the platform's own preflight validates its grammar);
+        # blank keeps identity-only synthesis.
         document = spec.config_manifest.strip() or yaml.safe_dump(
             {
                 "schema_version": 1,
@@ -412,7 +410,9 @@ class AvernetBotPlatform(BotPlatform):
                     engine_type=spec.engine or "openclaw",
                     bot_type=spec.bot_type or "personal",
                     bot_name=bot_name,
-                    bot_desc=spec.description or None,
+                    bot_desc=(f"{bot_desc_label} — {spec.description}"
+                              if (spec.description or "").strip()
+                              else bot_desc_label)[:1024],
                     template_validation_mode=BotCreateTemplateValidationMode.PUBLIC,
                     engine_properties={},
                 ),
@@ -427,14 +427,9 @@ class AvernetBotPlatform(BotPlatform):
                 manifest_seam=self._manifest_seam,
             )
         except BotNameExistsError:
-            # A D16 respawn after a mid-creation crash re-derives the same
-            # deterministic persona, and bot_service's name check refuses
-            # the re-create (upstream-owned, not idempotent). The refused
-            # name carries this idempotency key's digest, so the row it
-            # collides with is OUR identity: adopt it when the derived
-            # bot_id has a live row; adopt makes respawn idempotent for
-            # any kill timing. A same-name row that is NOT ours cannot
-            # exist (digest names collide only across identical keys).
+            # D16 respawn: the refused name carries our idempotency key's
+            # digest, so the colliding live row IS our identity — adopt it
+            # (a same-name row that is not ours cannot exist).
             existing = self._bot_repo.get_by_id_and_entity(bot_id, owner)
             if existing is None:
                 raise
@@ -535,17 +530,9 @@ class AvernetBotPlatform(BotPlatform):
                 return BotState.PROVISIONING.value
             if (bot_status_ not in _BOT_UP
                     and bool((bot.get("device_id") or "").strip())):
-                # A failed create-apply over a mid-boot row with a live
-                # device binding is not a provisioning verdict: under N-way
-                # concurrent persona creates the quota serialization makes
-                # apply reports flap FAILED while the durable publish
-                # pipeline (row + BaaS device) is still booting — a burst
-                # APPLY_FAILED here tore down healthy mid-boot bots and
-                # pushed the re-create into bot_service's duplicate-row
-                # trap. The device pipeline owns the outcome; the caller's
-                # own poll budget bounds the wait. An UP row keeps the
-                # apply verdict (config-side failure on a working bot,
-                # under the anti-duplicate rule).
+                # Mid-boot apply reports may flap FAILED under N-way quota
+                # serialization — a live device binding owns the outcome,
+                # so wait; an UP row keeps its apply verdict.
                 return BotState.PROVISIONING.value
             return BotState.APPLY_FAILED.value
         if job.status not in TERMINAL_STATUSES:
@@ -710,7 +697,7 @@ class AvernetBotPlatform(BotPlatform):
         except TimeoutError as exc:
             raise ChatTimeoutError(
                 f"engine chat for bot {bot_id} did not finish within "
-                f"{_CHAT_TIMEOUT_SECONDS:.0f}s"
+                f"{self._chat_timeout_seconds:.0f}s"
             ) from exc
 
     def _engine_endpoint(self, bot_id: BotId, owner: str) -> tuple[str, str]:

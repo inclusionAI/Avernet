@@ -234,3 +234,25 @@ class RunOptions:
         if self.slice_max_seconds is None:
             return float(config_value)
         return max(1.0, min(float(self.slice_max_seconds), float(config_value)))
+
+    # Mirrors RunOptionsDTO's wire caps: submit validates live requests,
+    # this re-clamps stale metadata rows that predate a schema change.
+    _WIRE_MAX_TURNS_CAP = 999
+    _WIRE_MAX_TOTAL_AGENTS_CAP = 256
+
+    def resolved_max_turns(self, config_value: int) -> int:
+        """Effective orchestrator turn budget: the request replaces the
+        deployment default (clamped). Wait/deferred decisions stay free,
+        so a widened budget only matters when real decisions actually
+        churn — e.g. spawns blocked behind human-authorization parks."""
+        if self.max_turns is None:
+            return int(config_value)
+        return max(1, min(int(self.max_turns), self._WIRE_MAX_TURNS_CAP))
+
+    def resolved_max_total_agents(self, config_value: int) -> int:
+        """Effective spawn ceiling: the request replaces the deployment
+        default (clamped)."""
+        if self.max_total_agents is None:
+            return int(config_value)
+        return max(1, min(int(self.max_total_agents),
+                          self._WIRE_MAX_TOTAL_AGENTS_CAP))

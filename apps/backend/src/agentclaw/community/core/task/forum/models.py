@@ -221,6 +221,9 @@ class ForumTopicRecord:
     # repository layer; ForumService enriches them for the openapi surface.
     reply_count: int = 0
     latest_activity_at: datetime | None = None
+    # Whether the Topic currently meets the serving-side hot-list gate. The
+    # concrete score stays internal because the client only renders a marker.
+    is_hot: bool = False
     display_name: str | None = None
     avatar_url: str | None = None
     viewer: ForumTopicViewerRecord | None = None

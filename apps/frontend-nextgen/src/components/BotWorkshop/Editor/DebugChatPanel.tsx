@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { Spin } from '@/components/ui/Spin';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { BotDomain, BotRuntimeStage } from '@/domain/botWorkshop';
 import { useBotChat } from '@/pages/Workspace/hooks/useBotChat';
 import { useBotCapabilitySets } from '@/pages/Workspace/hooks/useBotCapabilitySets';
@@ -36,7 +37,7 @@ export { getDebugMessageBlocks } from '@/components/BotWorkshop/Editor/DebugChat
 function DebugMessageContent({ content }: { content: string }) {
   const parsed = parseDebugChatMessageContent(content);
   return (
-    <div className="mt-1 space-y-1.5">
+    <div className="space-y-1.5">
       {parsed.fileNames.map((name, index) => (
         <span
           key={`${name}-${index}`}
@@ -142,45 +143,67 @@ export function DebugChatPanel({
 
   return (
     <aside className="flex h-full min-w-0 flex-1 flex-col bg-card">
-      <div className="flex min-h-14 items-center gap-3 border-b border-border px-5 py-3">
+      {/* 标题区不定下边框:h-14 与左侧 Bot 名称所在行同一基准线,顶部与左侧 header 同起点(对话区整体到顶)。 */}
+      <div className="flex h-14 shrink-0 items-center gap-3 px-5">
         <BotAvatar name={bot.name} avatarUrl={avatarUrl} className="size-7 rounded-full" />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <p className="m-0 truncate text-base font-semibold">调试对话</p>
-            <Badge tone={connection.tone}>{connection.text}</Badge>
-          </div>
-          <p className="m-0 mt-1 truncate text-xs text-muted-foreground">
-            Human-to-Agent ·{' '}
-            {chatBot.runtimeStage === 'online' ? '线上' : chatBot.runtimeStage === 'verify' ? '预发' : '草稿'}环境
-          </p>
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <p className="m-0 truncate text-base font-semibold">调试对话</p>
+          <Badge tone={connection.tone}>{connection.text}</Badge>
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="刷新调试会话"
-          leftIcon={<RefreshCw className="size-4" />}
-          onClick={() => void loadSessions()}
-        />
+        <TooltipProvider delayDuration={0}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="新建会话"
+                disabled={creatingSession}
+                leftIcon={
+                  creatingSession ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />
+                }
+                onClick={() => void create()}
+              />
+            </TooltipTrigger>
+            <TooltipContent>新建会话</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="刷新调试会话"
+                leftIcon={<RefreshCw className="size-4" />}
+                onClick={() => void loadSessions()}
+              />
+            </TooltipTrigger>
+            <TooltipContent>刷新调试会话</TooltipContent>
+          </Tooltip>
+          {onToggleFullscreen ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={fullscreen ? '还原调试对话窗口' : '全屏调试对话窗口'}
+                  aria-pressed={fullscreen}
+                  leftIcon={fullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+                  onClick={onToggleFullscreen}
+                />
+              </TooltipTrigger>
+              <TooltipContent>{fullscreen ? '还原' : '全屏'}</TooltipContent>
+            </Tooltip>
+          ) : null}
+        </TooltipProvider>
         <Select
           value={session?.sessionId ?? ''}
           onValueChange={(id) => {
-            if (id === '__create_session__') {
-              void create();
-              return;
-            }
             setSession(sessions.find((item) => item.sessionId === id) ?? null);
           }}
         >
-          <SelectTrigger className="w-44" aria-label="新建或切换调试会话" disabled={creatingSession}>
-            <SelectValue placeholder="请选择或新建会话" />
+          <SelectTrigger className="w-44" aria-label="历史会话" disabled={creatingSession}>
+            <SelectValue placeholder="历史会话" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="__create_session__">
-              <span className="inline-flex items-center gap-2 text-primary">
-                {creatingSession ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
-                新建会话
-              </span>
-            </SelectItem>
             {sessions.map((item) => (
               <SelectItem key={item.sessionId} value={item.sessionId}>
                 {item.title}
@@ -188,24 +211,18 @@ export function DebugChatPanel({
             ))}
           </SelectContent>
         </Select>
-        {onToggleFullscreen ? (
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={fullscreen ? '还原调试对话窗口' : '全屏调试对话窗口'}
-            aria-pressed={fullscreen}
-            leftIcon={fullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
-            onClick={onToggleFullscreen}
-          />
-        ) : null}
         {onClose ? (
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="关闭调试对话"
-            leftIcon={<X className="size-4" />}
-            onClick={onClose}
-          />
+          <>
+            {/* 关闭前的短分割线:与常规 icon 区隔,呼应左侧 header 的行末收口。 */}
+            <span aria-hidden className="h-5 w-px shrink-0 bg-border" />
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="关闭调试对话"
+              leftIcon={<X className="size-4" />}
+              onClick={onClose}
+            />
+          </>
         ) : null}
       </div>
       <div className="app-scrollbar min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-5">
@@ -225,12 +242,16 @@ export function DebugChatPanel({
                   isStreaming={debug.chat.isRequesting && index === debug.chat.messages.length - 1}
                 />
               ) : (
-                <div key={message.id} className="group flex items-start gap-3">
-                  <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-brand/15 text-xs text-brand">我</div>
-                  <div className="min-w-0 flex-1">
+                // 自身消息右置:同构主工作区 MessageSenderLayout(内容在前、头像殿后),
+                // 正文包 muted 圆角气泡,表面与对话协作的用户气泡一致(唯右上 4px)。
+                <div key={message.id} className="group flex min-w-0 items-start justify-end gap-3">
+                  <div className="flex min-w-0 flex-col items-end">
                     <p className="m-0 text-xs font-medium">我</p>
-                    <DebugMessageContent content={message.content} />
+                    <div className="mt-1 max-w-full rounded-2xl rounded-tr-[4px] bg-muted px-3 py-2">
+                      <DebugMessageContent content={message.content} />
+                    </div>
                   </div>
+                  <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-brand/15 text-xs text-brand">我</div>
                 </div>
               )
             ))}

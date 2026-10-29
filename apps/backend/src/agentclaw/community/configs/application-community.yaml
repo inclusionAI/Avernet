@@ -346,7 +346,8 @@ user_config:
   #   degrade to None (no boot failure, task runner falls back to stubs).
   openapi_bot:
     base_url: "${BASS_URL:-}"
-    api_key_secret: "${api_key_secret:-}"
+    api_key_secret: "${api_key_secret:-}"            # 非生产(pre/dev)Bearer api_key
+    api_key_secret_prod: "${api_key_secret_prod:-}"  # 生产/灰度(prod/gray)Bearer api_key；空 → prod env 时 port None(fail-closed)
     api_key_prefix: "${api_key_prefix:-}"
 
   bcs_client:
@@ -375,6 +376,13 @@ user_config:
   agentswarm:
     enabled: true
     artifact_store_root: "${AGENTSWARM_ARTIFACT_ROOT:-/tmp/agentswarm/artifacts}"
+    orchestration:
+      # Invariant loaded by AgentSwarmOrchestrationConfig.from_block:
+      # setup(900) + per_attempt(1800) ≤ slice_max(3600).
+      # Runtime requests may tighten per_attempt but never raise it.
+      per_attempt_timeout: 1800
+      setup_timeout: 900
+      slice_max_seconds: 3600
     # agentswarm-specific LLM — deliberately NOT shared with the top-level
     # `llm:` harness block. base_url + secret_name are required for any
     # agent execution; empty base_url keeps submits fail-closed with

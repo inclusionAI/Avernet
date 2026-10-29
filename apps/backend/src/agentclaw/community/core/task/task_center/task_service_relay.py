@@ -15,6 +15,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodePatch,
     TaskReportCommand,
     TaskReportResult,
+    TaskRuntimeProfile,
     task_spec_instruction,
 )
 from agentclaw.community.core.task.task_runner.client.relay_prompt import (
@@ -52,6 +53,7 @@ class TaskServiceRelayMixin:
                 {"id": item.id, "description": item.description}
                 for item in root.task_spec.goal.acceptances
             ],
+            allowed_run_modes=list(TaskRuntimeProfile.run_modes_from_graph(graph)),
         )
 
     async def report(self, command: TaskReportCommand) -> TaskReportResult:

@@ -61,7 +61,11 @@ import agentclaw.community.core.task.repository.models  # noqa: F401,E402
 
 
 # ===== domain helpers (mirrors test_engine.py minimal setup) =====
-def _task_info(task_id: str = "t1", max_depth: int = 3) -> TaskInfo:
+def _task_info(
+    task_id: str = "t1",
+    max_depth: int = 3,
+    runtime_profile: dict | None = None,
+) -> TaskInfo:
     return TaskInfo(task_id=task_id,
         task_spec=TaskSpec(
 
@@ -70,7 +74,11 @@ def _task_info(task_id: str = "t1", max_depth: int = 3) -> TaskInfo:
         ),
         source_type="bot",
         owner_bot_id="b1",
-        execution_config={"MAX_DEPTH": max_depth, "BBS_MAX_DEPTH": 3},
+        execution_config={
+            "MAX_DEPTH": max_depth,
+            "BBS_MAX_DEPTH": 3,
+            **({"runtime_profile": runtime_profile} if runtime_profile else {}),
+        },
     )
 
 
@@ -386,9 +394,17 @@ def _real_tcs(repo) -> TaskContextService:
     return TaskContextService(ts)
 
 
-def _drive_harness_exhausted_to_bbs(svc, *, task_id: str, engine_kwargs: dict) -> None:
+def _drive_harness_exhausted_to_bbs(
+    svc,
+    *,
+    task_id: str,
+    engine_kwargs: dict,
+    runtime_profile: dict | None = None,
+) -> None:
     """harness 重试耗尽(exec_stuck)→ 节点 HUNG → 冒泡到根 → _enter_root_bbs。"""
-    g = svc.initialize_graph(_task_info(task_id, max_depth=1))
+    svc.initialize_graph(
+        _task_info(task_id, max_depth=1, runtime_profile=runtime_profile)
+    )
     svc.add_task_nodes([_child("c1", task_id)], parent_node_id=task_id)
     svc.update_task_node_info(
         _patch(task_id, "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
@@ -399,6 +415,22 @@ def _drive_harness_exhausted_to_bbs(svc, *, task_id: str, engine_kwargs: dict) -
     with patch.object(eng, "_schedule_bbs_notify"):
         _run(eng.on_harness(_patch(task_id, "c1", exec_error="exec_failed_retry")))
     return eng
+
+
+def test_enter_root_bbs_respects_frozen_runtime_profile(svc):
+    """A task that disabled BBS remains HUNG and records why recovery was skipped."""
+    _drive_harness_exhausted_to_bbs(
+        svc,
+        task_id="t-no-bbs",
+        engine_kwargs={},
+        runtime_profile={"allowed_run_modes": ["single_bot", "coop_group"]},
+    )
+
+    g = svc._graphs.get("t-no-bbs")
+    assert g is not None
+    assert g.extend_props.get("bbs_mode") is not True
+    assert g.extend_props.get("hung_reason") == "bbs_disabled"
+    assert g.status == Status.HUNG
 
 
 def test_enter_root_bbs_emits_submit_enter_bbs_row_synchronously(svc):

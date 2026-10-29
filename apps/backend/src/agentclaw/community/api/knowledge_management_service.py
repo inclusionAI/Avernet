@@ -15,6 +15,10 @@ class KnowledgeManagementServiceProtocol(Protocol):
         """Read a knowledge-base card under native access checks."""
         ...
 
+    def authorize_space(self, *, space_id: int, actor_id: str) -> None:
+        """Gate a request on local space membership; the provider enforces the rest."""
+        ...
+
     def authorized_bots(
         self, *, space_id: int, kb_id: str, actor_id: str, cursor: int, limit: int
     ) -> dict:

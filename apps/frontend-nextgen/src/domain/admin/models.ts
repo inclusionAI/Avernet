@@ -80,6 +80,8 @@ export interface WorkOrder {
   content: string;
   /** 详情抽屉用的原始 JSON 文本（非文本型对象 content 经 JSON.stringify，列表/通知文本不填充）。 */
   contentRaw?: string;
+  /** 通知 content 对象内的外部详情链接（如 Bot 公开风险检测的安全工单）；用于列表内联链接与详情外链按钮。 */
+  detailUrl?: string;
   /** content 内的会话跳转链接（session_url）：抽屉据此渲染「打开会话」外链按钮，新标签页打开。 */
   sessionUrl?: string;
   status: WorkOrderStatus;

@@ -23,7 +23,7 @@ from agentclaw.community.api.knowledge_management_service import (
 )
 from agentclaw.community.kernel.knowledge import KnowledgeError
 from agentclaw.community.plugins.http_client import AsyncHttpxClient
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import CallableProvider, Injector
@@ -72,11 +72,10 @@ def content():
                 return httpx.Response(200, json=options["metadata"])
         return httpx.Response(options["status"], json=options["body"])
 
-    def detail(**kwargs):
+    def authorize_space(**kwargs):
         scope.append(kwargs)
         if options["deny"]:
             raise KnowledgeError("SPACE_MEMBER_REQUIRED", 403)
-        return {"kb_id": kwargs["kb_id"]}
 
     config = KnowledgeIntegrationConfig(True, "https://ecb.test")
     remote = EcbKnowledgeContentClient(
@@ -95,7 +94,10 @@ def content():
             RemoteKnowledgeContentService(remote, prepare_test_access),
         ),
         (EcbKnowledgeContentClient, remote),
-        (KnowledgeManagementServiceProtocol, SimpleNamespace(detail=detail)),
+        (
+            KnowledgeManagementServiceProtocol,
+            SimpleNamespace(authorize_space=authorize_space),
+        ),
     ):
         injector.binder.bind(interface, to=CallableProvider(lambda value=value: value))
     app = FastAPI()
@@ -110,6 +112,7 @@ def content():
             options=options,
             seen=seen,
             scope=scope,
+            injector=injector,
             prefix="/api/knowledge/spaces/1/knowledge-bases/kb",
         )
 
@@ -121,7 +124,7 @@ def test_scoped_list_and_only_session_cookie_forwarded(content):
         headers={"Cookie": "session=dummy; arbitrary=secret", "x-user-id": "spoof"},
     )
     assert response.status_code == 200
-    assert w.scope == [{"space_id": 1, "kb_id": "kb", "actor_id": "owner"}]
+    assert w.scope == [{"space_id": 1, "actor_id": "owner"}]
     request = w.seen[-1]
     assert (
         str(request.url)
@@ -276,6 +279,14 @@ def test_login_requirement_and_outage_not_turned_into_success(content):
     w.options.update(status=503, body={"detail": "must not echo secret"})
     response = w.client.get(w.prefix + "/sources")
     assert response.status_code == 503 and "secret" not in response.text
+
+
+def test_provider_access_denied_reaches_frontend_after_local_gate(content):
+    w = content
+    w.options.update(status=403, body={"detail": {"code": "KB_PERMISSION_DENIED"}})
+    assert w.client.get(w.prefix + "/sources").status_code == 403
+    assert w.scope == [{"space_id": 1, "actor_id": "owner"}]
+    assert len(w.seen) == 1
 
 
 def test_document_sync_run_status_is_scoped_to_exact_kb_and_source(content):
@@ -522,3 +533,47 @@ def test_business_job_explicit_wrong_kb_fails_closed(content):
         ],
     }
     assert content.client.get(content.prefix + "/ingest-jobs/job").status_code == 502
+
+
+def test_yuque_connection_projects_current_session_after_kb_gate(content):
+    w = content
+    w.options["body"] = {
+        "connected": False,
+        "authorization_url": "https://ecb.test/oauth/login",
+    }
+    response = w.client.get(w.prefix + "/yuque/connection")
+    assert response.status_code == 200
+    assert response.json()["connected"] is False
+    assert response.headers["cache-control"] == "no-store"
+    assert (
+        w.seen[-1].url.path
+        == "/api/v1/knowledge/data-source/connectors/yuque/connection"
+    )
+    assert w.seen[-1].url.query == b""
+    assert w.scope[-1]["actor_id"] == "owner"
+    w.options["deny"] = True
+    before = len(w.seen)
+    assert w.client.get(w.prefix + "/yuque/connection").status_code == 403
+    assert len(w.seen) == before
+
+
+def test_yuque_connection_requires_login_before_remote_request(content):
+    w = content
+
+    # Match the existing authentication dependency's HTTP contract, not a provider error.
+    def require_login():
+        raise HTTPException(401, detail={"code": "UNAUTHENTICATED"})
+
+    w.client.app.dependency_overrides[get_current_user] = require_login
+    assert w.client.get(w.prefix + "/yuque/connection").status_code == 401
+    assert w.seen == []
+
+
+def test_yuque_connection_disabled_before_remote_request(content):
+    w = content
+    w.injector.binder.bind(
+        KnowledgeManagementConfig,
+        to=CallableProvider(lambda: KnowledgeManagementConfig()),
+    )
+    assert w.client.get(w.prefix + "/yuque/connection").status_code == 503
+    assert w.seen == []

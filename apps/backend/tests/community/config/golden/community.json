@@ -11,6 +11,11 @@
         "model": "${AGENTSWARM_LLM_MODEL:-${LLM_BALANCED_MODEL:-glm-5.2}}",
         "secret_name": "${AGENTSWARM_LLM_SECRET_NAME:-LLM_AUTH_TOKEN}",
         "timeout_ms": "${AGENTSWARM_LLM_TIMEOUT_MS:-${LLM_DEFAULT_TIMEOUT_MS:-180000}}"
+      },
+      "orchestration": {
+        "per_attempt_timeout": 1800,
+        "setup_timeout": 900,
+        "slice_max_seconds": 3600
       }
     },
     "app": {
@@ -179,6 +184,7 @@
     "openapi_bot": {
       "api_key_prefix": "${api_key_prefix:-}",
       "api_key_secret": "${api_key_secret:-}",
+      "api_key_secret_prod": "${api_key_secret_prod:-}",
       "base_url": "${BASS_URL:-}"
     },
     "openclaw": {
@@ -353,7 +359,7 @@
       "enable_scheduled_scan": false,
       "enabled": false,
       "env": "prod",
-      "git_download_dir": "/home/admin/logs/tmp/sec/code",
+      "git_download_dir": "~/logs/tmp/sec/code",
       "max_concurrent_scans": 3,
       "mist_mode": "dev",
       "scan_interval_hours": 1,
@@ -379,8 +385,8 @@
     "workspace": {
       "aicoding_root": "<CWD>/data/workspace/aicoding",
       "claude_code_root": "<CWD>/data/workspace/claude_code",
-      "claude_code_session_root": "/home/admin/.claude",
-      "deepseek_harness_root": "/home/admin/.dsh",
+      "claude_code_session_root": "~/.claude",
+      "deepseek_harness_root": "~/.dsh",
       "hermes_root": "<CWD>/data/workspace/hermes",
       "openclaw_root": "<CWD>/data/workspace/openclaw"
     },

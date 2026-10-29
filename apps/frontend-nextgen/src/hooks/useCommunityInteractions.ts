@@ -6,6 +6,7 @@ import type {
   InteractionActionType,
   InteractionSummary,
   InteractionSummaryQuery,
+  InteractionActiveDelta,
   RecordInteractionInput,
 } from '@/domain/community/types';
 import { notifyError } from '@/components/ui/notify';
@@ -26,7 +27,7 @@ export interface UseCommunityInteractionsResult {
   recordInteraction: (
     actionType: InteractionActionType,
     target: ForumTargetRef,
-    options?: { refresh?: boolean },
+    options?: { active?: InteractionActiveDelta; refresh?: boolean },
   ) => Promise<boolean>;
   isActionPending: (actionType: InteractionActionType, target: ForumTargetRef) => boolean;
 }
@@ -109,13 +110,18 @@ export function useCommunityInteractions({
     async (
       actionType: InteractionActionType,
       target: ForumTargetRef,
-      options?: { refresh?: boolean },
+      options?: { active?: InteractionActiveDelta; refresh?: boolean },
     ) => {
       const actionKey = `${actionType}:${target.targetType}:${target.id}`;
       if (pendingActions[actionKey]) return false;
       setPendingActions((previous) => ({ ...previous, [actionKey]: true }));
       try {
-        const input: RecordInteractionInput = { actor: viewer, actionType, target };
+        const input: RecordInteractionInput = {
+          actor: viewer,
+          actionType,
+          target,
+          active: options?.active ?? 1,
+        };
         await communityService.createInteraction(input);
         if (options?.refresh !== false) {
           await refreshSummaries(targetQueries(target), { force: true });

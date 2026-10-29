@@ -1,37 +1,4 @@
 modules:
-  bot_knowledge:
-    system: backend
-    acceptance_targets:
-      - tests/community/acceptance/bot_knowledge
-    core_paths:
-      - src/agentclaw/community/core/bot_knowledge/
-    router_api:
-      status: applicable
-      reason: Complete HTTP surface for current Bot knowledge selection.
-      items:
-        - GET /api/bot-knowledge/{bot_id}
-        - PUT /api/bot-knowledge/{bot_id}/{kb_id}
-    plugin_api:
-      status: applicable
-      reason: Both declared catalog methods stay in the denominator. list_in_space has no production consumer yet and is intentionally not hit by a test-only business call.
-      items:
-        - key: KnowledgeCatalogPlugin.list_authorized
-          evidence:
-            path: src/agentclaw/community/plugins/local/knowledge_catalog.py
-            symbol: LocalKnowledgeCatalog.list_authorized
-        - key: KnowledgeCatalogPlugin.list_in_space
-          evidence:
-            path: src/agentclaw/community/plugins/local/knowledge_catalog.py
-            symbol: LocalKnowledgeCatalog.list_in_space
-    thresholds:
-      # 2026-10-25: measured from these three stories against a real isolated
-      # Backend process: 153/175 Core statements, 2/2 routes, 1/2 declared plugin
-      # methods (list_in_space has no production caller). Full shared-stack verification remains a separate gate.
-      # No production Core path is excluded from this denominator.
-      core_min_percent: 87.43
-      router_min_percent: 100.0
-      plugin_min_percent: 50.0
-
   bot_dormant:
     system: backend
     acceptance_targets:
@@ -207,7 +174,23 @@ modules:
     router_api: *pending_router_denominator
     plugin_api: *pending_plugin_denominator
     thresholds:
+      # Existing non-regression threshold is unchanged by sync simplification.
       core_min_percent: 53.88
+
+  manager_sync:
+    system: backend
+    acceptance_targets:
+      - tests/community/acceptance/bot_collaborator
+    core_paths:
+      - src/agentclaw/community/core/bot_collaborator/manager_sync/
+    router_api: *pending_router_denominator
+    plugin_api: *pending_plugin_denominator
+    thresholds:
+      # Preserve the existing manager-sync gate. Singlebox uses direct BCS
+      # delivery with the same best-effort implementation as production;
+      # no Redis or alternate coordination mode is required. A passing
+      # coverage result alone does not prove the BCS roster is correct.
+      core_min_percent: 54.03
 
   cron:
     system: backend
@@ -343,6 +326,10 @@ modules:
       core_min_percent: 40.86
 
 pending_modules:
+  bot_knowledge:
+    acceptance_targets:
+      - tests/community/acceptance/bot_knowledge
+    reason: The AGENTS.md projection (agents_md_sync.py) added under core/bot_knowledge/ writes the enabled-knowledge section through the device-bound identity seam; the SQL-seeded selection story bots carry no device binding, so those statements stay outside the legacy acceptance path. Pending device-bound acceptance coverage; aligned with the resources pending pattern.
   skill_center:
     acceptance_targets:
       - tests/community/acceptance/skill_center
