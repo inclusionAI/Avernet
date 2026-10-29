@@ -1,10 +1,13 @@
 """Current application selection. Platform grants are managed outside this API."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.api.bot_knowledge_service import BotKnowledgeServiceProtocol
+from agentclaw.community.core.bot_knowledge.agents_md_sync import (
+    BotKnowledgeAgentsMdSync,
+)
 from agentclaw.community.di import Injected
 from agentclaw.community.kernel.knowledge import BotKnowledgeScope, KnowledgeError
 from agentclaw.community.utils.env_utils import get_current_env
@@ -56,10 +59,12 @@ def enable(
     bot_id: str,
     kb_id: str,
     body: EnableRequest,
+    background_tasks: BackgroundTasks,
     user: AuthenticatedUser = Depends(get_current_user),
     service: BotKnowledgeServiceProtocol = Injected(BotKnowledgeServiceProtocol),
+    agents_md_sync: BotKnowledgeAgentsMdSync = Injected(BotKnowledgeAgentsMdSync),
 ):
-    return execute(
+    result = execute(
         lambda: service.set_enabled(
             scope=BotKnowledgeScope(bot_id, body.owner_id, get_current_env()),
             actor_id=user.staffId,
@@ -68,3 +73,12 @@ def enable(
             expected_revision=body.expected_revision,
         )
     )
+    # Same best-effort projection as the knowledge-management enablement route:
+    # the stored selection is the source of truth; the AGENTS.md section
+    # follows after the response and never blocks or fails this request.
+    background_tasks.add_task(
+        agents_md_sync.sync,
+        scope=BotKnowledgeScope(bot_id, body.owner_id, get_current_env()),
+        actor_id=user.staffId,
+    )
+    return result

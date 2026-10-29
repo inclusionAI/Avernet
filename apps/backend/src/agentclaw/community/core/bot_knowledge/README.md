@@ -12,17 +12,22 @@ purpose: Persist current knowledge selection independently of platform grants.
 provides:
   - BotKnowledgeService
   - BotKnowledgeRepository
+  - BotKnowledgeAgentsMdSync
 consumes:
   - DatabasePlugin
   - KnowledgeCatalogPlugin
+  - KnowledgeCatalog
 internal_dependencies:
   - agentclaw.community.kernel
   - agentclaw.community.plugin_api
   - agentclaw.community.core.base
   - agentclaw.community.core.bot_knowledge
   - agentclaw.community.core.bot_collaborator
-  - agentclaw.community.core.spaces
+  - agentclaw.community.core.knowledge_management
   - agentclaw.community.core.service_bot
+  - agentclaw.community.core.services
+  - agentclaw.community.core.spaces
+  - agentclaw.community.log
   - agentclaw.community.utils
 ```
 
@@ -55,6 +60,26 @@ A matching publication whose source was hard-deleted cannot be attributed to a
 tenant and fails closed (`BOT_DRAFT_REQUIRED`), including when ignoring it would
 otherwise reveal an older draft. No new publication ownership is inferred from
 business Bot/owner IDs alone, and no publication schema or DDL is changed.
+
+## AGENTS.md projection
+
+`PUT /bots/{bot_id}/knowledge-bases/{kb_id}/enablement` remains the only write;
+after a successful enablement change the router schedules
+`BotKnowledgeAgentsMdSync` (see `agents_md_sync.py`) as a background task. The
+binding table stays the single source of truth: the sync rereads the current
+selection, resolves display names through the `KnowledgeCatalog.details` port
+(batches of 20; a failed batch degrades to ids only), and rewrites one fenced
+`KNOWLEDGE_TOOLS` section inside the Bot's draft `AGENTS.md` through
+`IdentityService`'s provider-blind identity-file I/O.
+
+The fence markers are the only anchor for locating an existing section and
+must never be renamed after release — renaming would orphan every section
+already written into existing bots' `AGENTS.md` files and the next sync would
+append a second, stale copy. The sync is best-effort: it never fails the HTTP
+response, never mutates the stored selection, and skips the update when a
+broken fence (start marker without its end marker) suggests hand-editing
+damage rather than risk eating user-written content. An empty selection removes
+the section; an unchanged projection is not written back.
 
 ## Live local acceptance
 

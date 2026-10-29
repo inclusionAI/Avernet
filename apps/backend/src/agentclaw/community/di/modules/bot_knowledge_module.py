@@ -6,17 +6,21 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from injector import Module, inject, provider, singleton
+from injector import Injector, Module, inject, provider, singleton
 from agentclaw.community.di.profile import DeployProfile
 from agentclaw.community.plugins.community.knowledge_catalog import (
     UnavailableKnowledgeCatalog,
 )
 from agentclaw.community.plugins.local.knowledge_catalog import LocalKnowledgeCatalog
 from agentclaw.community.api.bot_knowledge_service import BotKnowledgeServiceProtocol
+from agentclaw.community.core.bot_knowledge.agents_md_sync import (
+    BotKnowledgeAgentsMdSync,
+)
 from agentclaw.community.core.bot_knowledge.repository.store import (
     BotKnowledgeRepository,
 )
 from agentclaw.community.core.bot_knowledge.service import BotKnowledgeService
+from agentclaw.community.core.knowledge_management.ports import KnowledgeCatalog
 from agentclaw.community.plugin_api.knowledge_catalog import KnowledgeCatalogPlugin
 
 
@@ -67,3 +71,24 @@ class BotKnowledgeModule(Module):
         self, repository: BotKnowledgeRepository, catalog: KnowledgeCatalogPlugin
     ) -> BotKnowledgeServiceProtocol:
         return BotKnowledgeService(repository, catalog)
+
+    @provider
+    @singleton
+    @inject
+    def agents_md_sync(
+        self,
+        injector: Injector,
+        repository: BotKnowledgeRepository,
+        catalog: KnowledgeCatalog,
+    ) -> BotKnowledgeAgentsMdSync:
+        """AGENTS.md projection of the current selection — constructed explicitly
+        so the ``IdentityService`` import stays function-level (its module
+        reaches the DI graph at module scope; an eager import here would walk
+        that chain into a circular import, as ``service_bot_module`` records)."""
+        from agentclaw.community.core.services.identity import IdentityService
+
+        return BotKnowledgeAgentsMdSync(
+            repository=repository,
+            catalog=catalog,
+            identity=injector.get(IdentityService),
+        )
