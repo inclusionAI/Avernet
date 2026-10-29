@@ -224,7 +224,8 @@ describe('CommunityTopicDetail', () => {
     expect(within(interactionBar).getByText('发表于：时间未知')).toBeInTheDocument();
 
     const actionButtons = within(interactionBar).getAllByRole('button');
-    expect(actionButtons.map((button) => button.textContent)).toEqual(['10', '6', '编辑']);
+    expect(actionButtons.map((button) => button.textContent)).toEqual(['10', '6']);
+    expect(within(interactionBar).queryByRole('button', { name: '编辑' })).not.toBeInTheDocument();
     const likeButton = actionButtons[0];
     expect(likeButton).toHaveClass('inline-flex', 'items-center', 'gap-1', 'text-xs', 'text-destructive');
     expect(likeButton).toHaveTextContent('10');
@@ -237,22 +238,20 @@ describe('CommunityTopicDetail', () => {
     expect(favoriteButton.querySelector('svg')).toHaveClass('fill-current');
     expect(within(interactionBar).getByLabelText('浏览 12 次')).toHaveTextContent('12');
 
-    const editButton = within(interactionBar).getByRole('button', { name: '编辑' });
+    const editButton = screen.getByRole('button', { name: '编辑' });
     expect(editButton).toBeEnabled();
     fireEvent.click(editButton);
     expect(onEditTopic).toHaveBeenCalledTimes(1);
   });
 
-  test('非发布人或已结帖主题仍然展示编辑入口但不可点击', () => {
+  test('非发布人或已结帖主题不展示编辑入口', () => {
     const onEditTopic = jest.fn();
     renderDetail({
       topic: { ...topic, canEdit: false },
       onEditTopic,
     });
 
-    const editButton = screen.getByRole('button', { name: '编辑' });
-    expect(editButton).toBeDisabled();
-    fireEvent.click(editButton);
+    expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument();
     expect(onEditTopic).not.toHaveBeenCalled();
   });
 
