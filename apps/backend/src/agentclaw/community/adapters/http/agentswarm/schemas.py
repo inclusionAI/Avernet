@@ -5,7 +5,8 @@ from typing import Annotated, Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agentclaw.community.core.agentswarm.domain.models import (
-    AgentKind, ProviderKind,
+    WIRE_BOT_CHAT_TIMEOUT_CAP, WIRE_MAX_TOTAL_AGENTS_CAP,
+    WIRE_MAX_TURNS_CAP, AgentKind, ProviderKind,
 )
 
 
@@ -70,7 +71,7 @@ class RunOptionsDTO(BaseModel):
         default=None, gt=0, le=1800,
         description="Upper bound for one attempt task (seconds).")
     bot_chat_timeout_seconds: float | None = Field(
-        default=None, gt=0, le=3600,
+        default=None, gt=0, le=WIRE_BOT_CHAT_TIMEOUT_CAP,
         description="Upper bound for one engine chat round trip (seconds). "
         "Replaces the deployment's executor.bot_chat_timeout_seconds "
         "(default 1800) within this cap, so long-running turns can be "
@@ -85,12 +86,12 @@ class RunOptionsDTO(BaseModel):
         "deployment's slice room (slice_max_seconds minus "
         "per_attempt_timeout).")
     max_turns: int | None = Field(
-        default=None, ge=1, le=999,
+        default=None, ge=1, le=WIRE_MAX_TURNS_CAP,
         description="Orchestrator decision-turn budget. Replaces the "
         "deployment default within this cap — human-in-the-loop runs "
         "(bot personas parked on authorization) can widen it.")
     max_total_agents: int | None = Field(
-        default=None, ge=1, le=256,
+        default=None, ge=1, le=WIRE_MAX_TOTAL_AGENTS_CAP,
         description="Total spawn ceiling for the run.")
     max_width: int | None = Field(
         default=None, ge=1, le=16,
