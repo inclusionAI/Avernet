@@ -142,7 +142,16 @@ class Orchestrator:
 
         decision = parse.decision
         state.recent_decision = decision
-        state.turn_count += 1
+        # Observation tick for the no-progress window: every decided turn,
+        # regardless of the turn-budget exemption below.
+        state.decision_count += 1
+        # Turn budget = real work, not poll cycles: Wait decisions and a
+        # SpawnDecision whose every envelope was guard-deferred (width/depth
+        # capacity, dedupe overlap) consume no turn — the deferral is
+        # WAIT-shaped, and charging it would let re-emitted spawn intents
+        # burn the whole budget without any of them ever landing.
+        if not isinstance(decision, (WaitDecision, SpawnDecision)):
+            state.turn_count += 1
 
         if isinstance(decision, FinishDecision):
             premature = self._guards.check_premature_finish(state)
@@ -178,10 +187,16 @@ class Orchestrator:
                 # recursive spawning is ever added — while width owns
                 # in-flight concurrency via this spawn's 0-based cohort
                 # position (a routed result retires an agent from the
-                # count, so a run of 20 sequential agents runs fine at
-                # max_width=8 / max_depth=5). The total-spawn census is
-                # owned by max_total_agents in the termination evaluator.
-                cohort_position = state.total_agents_spawned - state.routed_result_count
+                # count, and a terminal FAILED/KILLED agent that can never
+                # route one must retire too, or one genuine failure wedges
+                # the whole cohort at the width cap). The total-spawn
+                # census is owned by max_total_agents in the termination
+                # evaluator.
+                cohort_position = (
+                    state.total_agents_spawned
+                    - state.routed_result_count
+                    - state.terminal_without_result
+                )
                 guard = self._guards.check_dedup(state, envelope.objective)
                 if guard is None:
                     guard = self._guards.check_depth(state, _ORCHESTRATOR_SPAWN_DEPTH)
@@ -217,7 +232,12 @@ class Orchestrator:
             # (width/depth) or overlap (dedupe), not a verdict on the run:
             # leave terminate=None so the run continues — the turn-based
             # no-progress evaluator owns true no-progress via the flat
-            # routed_result_count streak.
+            # routed_result_count streak. A batch that landed at least one
+            # spawn did real work and consumes a turn; a fully deferred
+            # one (result["spawn"] empty) does not — see the turn-budget
+            # note at the top of decide_turn.
+            if result["spawn"]:
+                state.turn_count += 1
             return result
 
         result["terminate"] = TerminationReason.ERROR

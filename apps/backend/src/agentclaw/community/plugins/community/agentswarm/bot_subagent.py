@@ -154,11 +154,11 @@ class AvernetSubagent:
             raise RuntimeError(f"bot {self._bot_id} did not reach READY: {state}")
         self.executor_id = self._bot_id
         # The platform derives the persona name from the same key digest
-        # (f"{spec.name}-{digest8}"); mirror it so the journaled executor
-        # name is the identity the host actually provisioned under.
+        # (f"{spec.name}_{digest12}"); mirror the naming so the journaled
+        # executor name is the prefix chain the host provisioned under.
         self.executor_name = (
-            f"{self._spec.name}-"
-            f"{spawn_digest(str(self._run.run_id), str(self._agent_id), self._attempt, 8)}"
+            f"{self._spec.name}_"
+            f"{spawn_digest(str(self._run.run_id), str(self._agent_id), self._attempt, 12)}"
         )
 
     async def run_task(self, envelope: TaskEnvelope) -> SubagentResult:
