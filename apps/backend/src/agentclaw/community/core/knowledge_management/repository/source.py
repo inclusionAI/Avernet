@@ -74,8 +74,8 @@ class KnowledgeSourceRepository:
                 for row in rows
             }
 
-    def _query(self, session, space_id):
-        return (
+    def _queries(self, session, space_id):
+        query = (
             session.query(BotModel, SpaceMemberModel.user_name)
             .outerjoin(
                 SpaceMemberModel,
@@ -87,11 +87,30 @@ class KnowledgeSourceRepository:
                 ),
             )
             .filter(
-                BotModel.space_id == space_id,
                 BotModel.env == self.env,
                 BotModel.is_delete == 0,
             )
         )
+        explicit = query.filter(BotModel.space_id == space_id)
+        personal_owner = (
+            session.query(SpaceModel.personal_owner_id)
+            .filter(
+                SpaceModel.id == space_id,
+                SpaceModel.env == self.env,
+                SpaceModel.space_type == "PERSONAL",
+                SpaceModel.deleted_at.is_(None),
+            )
+            .scalar()
+        )
+        if personal_owner is None:
+            return (explicit,)
+        # Inventory treats unassigned historical Bots as their Owner's personal
+        # Bots. Keep disjoint, indexable branches; each caller bounds both before
+        # merging, without relying on a UNION's LIMIT/seek pushdown by the DB.
+        legacy = query.filter(
+            BotModel.space_id.is_(None), BotModel.owner_id == personal_owner
+        )
+        return explicit, legacy
 
     @staticmethod
     def _display(bot, member_name):
@@ -116,35 +135,45 @@ class KnowledgeSourceRepository:
         if not identities:
             return {}
         with self.db.orm_session() as session:
-            rows = (
-                self._query(session, space_id)
-                .filter(tuple_(BotModel.bot_id, BotModel.owner_id).in_(identities))
-                .limit(len(identities) + 1)
-                .all()
-            )
             result = {}
-            for bot, member_name in rows:
-                identity = (bot.bot_id, bot.owner_id)
-                if identity in result:
-                    raise KnowledgeManagementError("KNOWLEDGE_BOT_IDENTITY_AMBIGUOUS")
-                result[identity] = self._display(bot, member_name)
+            for query in self._queries(session, space_id):
+                rows = (
+                    query.filter(
+                        tuple_(BotModel.bot_id, BotModel.owner_id).in_(identities)
+                    )
+                    .limit(len(identities) + 1)
+                    .all()
+                )
+                for bot, member_name in rows:
+                    identity = (bot.bot_id, bot.owner_id)
+                    if identity in result:
+                        raise KnowledgeManagementError(
+                            "KNOWLEDGE_BOT_IDENTITY_AMBIGUOUS"
+                        )
+                    result[identity] = self._display(bot, member_name)
             return result
 
     def candidates(
         self, space_id: int, *, cursor: int, limit: int, keyword: str
     ) -> dict:
         with self.db.orm_session() as session:
-            query = self._query(session, space_id).filter(BotModel.id > cursor)
-            if keyword:
-                query = query.filter(
-                    or_(
-                        BotModel.bot_name.contains(keyword, autoescape=True),
-                        BotModel.owner_id.contains(keyword, autoescape=True),
-                        BotModel.owner_name.contains(keyword, autoescape=True),
-                        SpaceMemberModel.user_name.contains(keyword, autoescape=True),
+            rows = []
+            for query in self._queries(session, space_id):
+                query = query.filter(BotModel.id > cursor)
+                if keyword:
+                    query = query.filter(
+                        or_(
+                            BotModel.bot_name.contains(keyword, autoescape=True),
+                            BotModel.owner_id.contains(keyword, autoescape=True),
+                            BotModel.owner_name.contains(keyword, autoescape=True),
+                            SpaceMemberModel.user_name.contains(
+                                keyword, autoescape=True
+                            ),
+                        )
                     )
-                )
-            rows = query.order_by(BotModel.id).limit(limit + 1).all()
+                rows.extend(query.order_by(BotModel.id).limit(limit + 1).all())
+            # At most 2 * (limit + 1) rows, with disjoint physical space scopes.
+            rows.sort(key=lambda row: row[0].id)
             items = [self._display(bot, name) for bot, name in rows[:limit]]
             for item in items:
                 item.pop("bot_pk")
