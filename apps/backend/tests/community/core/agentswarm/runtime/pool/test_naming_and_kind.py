@@ -114,10 +114,45 @@ class TestResolveKind:
         kind = SwarmRunHandler._resolve_kind(run, "coder_rust")
         assert kind == AgentKind.LLM
 
-    def test_no_match_returns_llm(self):
-        run = mk_run([mk_catalog_entry("coder")])
+    def test_no_match_unanimous_bot_catalog_inherits_bot(self):
+        """PRE incident (run 88addaf6f, post-REL20261029 deploy): the
+        orchestrator named a spawn 'rust_coder' (language first), the
+        prefix match against catalog 'coder' missed, and dispatch labeled
+        the row llm while the pool's _unanimous_catalog_surface minted a
+        bot persona parked at the consent gate. The detail surfaces the
+        authorization descriptor only for kind=bot, so the human gate
+        was invisible and the run could never be approved. An unresolved
+        name in a unanimous catalog must predict the execution kind."""
+        run = mk_run([mk_catalog_entry("coder", kind=AgentKind.BOT)])
+        kind = SwarmRunHandler._resolve_kind(run, "rust_coder")
+        assert kind == AgentKind.BOT
+
+    def test_no_match_unanimous_llm_catalog_inherits_llm(self):
+        run = mk_run([mk_catalog_entry("analyst", kind=AgentKind.LLM)])
         kind = SwarmRunHandler._resolve_kind(run, "ghost")
         assert kind == AgentKind.LLM
+
+    def test_no_match_mixed_catalog_returns_llm(self):
+        """Was test_no_match_returns_llm: a mixed catalog has no unique
+        execution surface to inherit, so the llm default stands."""
+        run = mk_run([
+            mk_catalog_entry("coder", kind=AgentKind.BOT),
+            mk_catalog_entry("analyst", kind=AgentKind.LLM),
+        ])
+        kind = SwarmRunHandler._resolve_kind(run, "ghost")
+        assert kind == AgentKind.LLM
+
+    def test_no_match_empty_catalog_returns_llm(self):
+        run = mk_run([])
+        kind = SwarmRunHandler._resolve_kind(run, "ghost")
+        assert kind == AgentKind.LLM
+
+    def test_unanimous_string_kinds_coerce_before_inheritance(self):
+        catalog = mk_catalog_entry("coder", kind=AgentKind.BOT)
+        catalog.__dict__["kind"] = "bot"
+        run = mk_run([catalog])
+        kind = SwarmRunHandler._resolve_kind(run, "rust_coder")
+        assert kind == AgentKind.BOT
 
 
 class TestExecutorKindCoercion:
