@@ -103,6 +103,11 @@ async def raw(source_id: str, ctx=Depends(context)):
     return StreamingResponse(chunks, status_code=reply.status, headers=reply.headers)
 
 
+@router.get("/yuque/connection")
+async def yuque_connection(ctx=Depends(context)):
+    return await ctx.call("yuque_connection")
+
+
 @router.get("/yuque/documents")
 async def yuque_docs(
     q: str = Query("", max_length=2048),

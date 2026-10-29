@@ -23,7 +23,7 @@ from agentclaw.community.api.knowledge_management_service import (
 )
 from agentclaw.community.kernel.knowledge import KnowledgeError
 from agentclaw.community.plugins.http_client import AsyncHttpxClient
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import CallableProvider, Injector
@@ -110,6 +110,7 @@ def content():
             options=options,
             seen=seen,
             scope=scope,
+            injector=injector,
             prefix="/api/knowledge/spaces/1/knowledge-bases/kb",
         )
 
@@ -522,3 +523,47 @@ def test_business_job_explicit_wrong_kb_fails_closed(content):
         ],
     }
     assert content.client.get(content.prefix + "/ingest-jobs/job").status_code == 502
+
+
+def test_yuque_connection_projects_current_session_after_kb_gate(content):
+    w = content
+    w.options["body"] = {
+        "connected": False,
+        "authorization_url": "https://ecb.test/oauth/login",
+    }
+    response = w.client.get(w.prefix + "/yuque/connection")
+    assert response.status_code == 200
+    assert response.json()["connected"] is False
+    assert response.headers["cache-control"] == "no-store"
+    assert (
+        w.seen[-1].url.path
+        == "/api/v1/knowledge/data-source/connectors/yuque/connection"
+    )
+    assert w.seen[-1].url.query == b""
+    assert w.scope[-1]["actor_id"] == "owner"
+    w.options["deny"] = True
+    before = len(w.seen)
+    assert w.client.get(w.prefix + "/yuque/connection").status_code == 403
+    assert len(w.seen) == before
+
+
+def test_yuque_connection_requires_login_before_remote_request(content):
+    w = content
+
+    # Match the existing authentication dependency's HTTP contract, not a provider error.
+    def require_login():
+        raise HTTPException(401, detail={"code": "UNAUTHENTICATED"})
+
+    w.client.app.dependency_overrides[get_current_user] = require_login
+    assert w.client.get(w.prefix + "/yuque/connection").status_code == 401
+    assert w.seen == []
+
+
+def test_yuque_connection_disabled_before_remote_request(content):
+    w = content
+    w.injector.binder.bind(
+        KnowledgeManagementConfig,
+        to=CallableProvider(lambda: KnowledgeManagementConfig()),
+    )
+    assert w.client.get(w.prefix + "/yuque/connection").status_code == 503
+    assert w.seen == []
