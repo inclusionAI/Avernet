@@ -106,10 +106,11 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
       BCS_TEST_MYSQL_URL: mysql://bcs:bcs_test_only@127.0.0.1:3306/bcs_contract
-      # PR: actions/checkout checks out the synthetic merge commit, so compare
-      # against its first parent (the exact base tree used for that merge).
-      # push/dispatch: compare against dev (repo default branch) instead.
-      BCS_BASE_REF: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'origin/dev' }}
+      # Pushes compare the whole event range, not the already-updated origin/dev.
+      BCS_PUSH_BEFORE: ${{ github.event.before }}
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
+      CARGO_INCREMENTAL: "0"
     defaults:
       run:
         working-directory: apps/bcs
@@ -125,35 +126,8 @@ jobs:
 
       - name: Detect BCS changes vs base
         id: changes
-        # Run from the repo root: all git-diff pathspecs here are repo-relative
-        # ("-- apps/bcs"), which only resolve correctly from the root. The job default
-        # working-directory is apps/bcs, so override to the workspace root.
         working-directory: ${{ github.workspace }}
-        shell: bash
-        run: |
-          # Make sure the base ref is present locally (shallow clones may not have it).
-          git fetch --no-tags --depth=1 origin "${BCS_BASE_REF#origin/}" 2>/dev/null || true
-          # Compare the base ref against the working tree (not HEAD). PR runs check out a
-          # merge commit as HEAD, for which "<base>...HEAD" collapses to nothing (merge-base
-          # == base) and would wrongly report zero changes. Diffing base against the tree
-          # instead sees all PR-introduced changes regardless of merge-commit checkout.
-          mapfile -t files < <(git diff --name-only "${BCS_BASE_REF}" -- apps/bcs || true)
-          n=${#files[@]}
-          echo "bcs-changed-files-count=${n}" >> "$GITHUB_OUTPUT"
-          mapfile -t dsh_bcn_files < <(printf '%s\n' "${files[@]}" | grep '^apps/bcs/crates/plugins/deepseek-harness-channel-bcn/' || true)
-          if [ "${#dsh_bcn_files[@]}" -gt 0 ]; then
-            echo "dsh-bcn-changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "dsh-bcn-changed=false" >> "$GITHUB_OUTPUT"
-          fi
-          if [ "$n" -eq 0 ]; then
-            echo "skip-bcs=true" >> "$GITHUB_OUTPUT"
-            echo "No changes under apps/bcs vs ${BCS_BASE_REF}; skipping BCS tests."
-          else
-            echo "skip-bcs=false" >> "$GITHUB_OUTPUT"
-            echo "Detected ${n} changed file(s) under apps/bcs vs ${BCS_BASE_REF}."
-            printf '%s\n' "${files[@]}" | sed 's/^/  - /'
-          fi
+        run: python3 apps/bcs/scripts/ci/detect_changes.py
 
       - name: Set up Node.js for DeepSeek Harness BCN plugin
         if: steps.changes.outputs.dsh-bcn-changed == 'true'
@@ -185,25 +159,30 @@ jobs:
 
       - name: Install cargo-nextest and cargo-llvm-cov
         if: steps.changes.outputs.skip-bcs != 'true'
-        run: |
-          cargo install cargo-nextest --locked
-          cargo install cargo-llvm-cov --locked
+        run: bash scripts/install_cargo_test_tools.sh
 
-      - name: Cache Cargo registry and target
+      - name: Validate BCS CI tooling
         if: steps.changes.outputs.skip-bcs != 'true'
-        uses: actions/cache@v4
+        working-directory: ${{ github.workspace }}
+        run: python3 -m unittest discover -s singlebox/ci/tests -p 'test_bcs_*.py'
+
+      - name: Cache instrumented Rust dependencies
+        if: steps.changes.outputs.skip-bcs != 'true'
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            apps/bcs/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('apps/bcs/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+          workspaces: apps/bcs -> target/llvm-cov-target
+          shared-key: bcs-unit-coverage-v1
+          key: ${{ hashFiles('apps/bcs/scripts/cargo_test_tools.sha256') }}
+          env-vars: CARGO_PROFILE_ CARGO_INCREMENTAL
+          cache-workspace-crates: false
+          cache-bin: false
+          # Only trusted branch pushes publish reusable caches. PRs restore
+          # their base/default branch cache without saving a PR-private copy.
+          save-if: ${{ github.event_name == 'push' }}
 
       - name: Run unit tests with coverage
         if: steps.changes.outputs.skip-bcs != 'true'
-        run: bash scripts/ci_test.sh --coverage
+        run: bash scripts/ci_test.sh --coverage --reuse-build
 
       # One disposable-DB command gates two labeled phases: [phase 1/3] the
       # migration chain and [phase 2/3] the Group Store human-notify contract
@@ -211,15 +190,15 @@ jobs:
       # unmanaged database lifecycle for them.
       - name: Run MySQL full migration chain and Group Store notify contracts
         if: steps.changes.outputs.skip-bcs != 'true'
-        run: cargo test -p bcs-admin full_mysql_migration_chain_applies_and_preserves_history -- --ignored --nocapture
+        run: python3 scripts/ci_contract_test.py --package bcs-admin --binary bcs-admin --test full_mysql_migration_chain_applies_and_preserves_history
 
       - name: Run MySQL Group Context contract
         if: steps.changes.outputs.skip-bcs != 'true'
-        run: cargo test -p bcs-group-context-store --test conformance_group_context_repo_mysql -- --ignored
+        run: python3 scripts/ci_contract_test.py --package bcs-group-context-store --binary conformance_group_context_repo_mysql --test mysql_group_context_timestamps_roundtrip_in_utc_and_non_utc_sessions
 
       - name: Run MySQL DB plugin contract
         if: steps.changes.outputs.skip-bcs != 'true'
-        run: cargo test -p bcs-db-mysql --test conformance_db_plugin -- --ignored
+        run: python3 scripts/ci_contract_test.py --package bcs-db-mysql --binary conformance_db_plugin --test conformance_mysql_db_plugin_for_text_and_prepared_protocols
 
       # Bot-authority plan §6 gates (Task 8): four dedicated
       # disposable databases (one per service above). Each
@@ -232,8 +211,7 @@ jobs:
         env:
           BCS_TEST_MYSQL_URL: mysql://bcs:bcs_test_only@127.0.0.1:3307/bcs_authority_edge
         run: |
-          output=$(cargo test -p bcs-edge-permission-store --test authority_mysql \
-            authority_mysql_conformance -- --ignored --exact --nocapture 2>&1) \
+          output=$(python3 scripts/ci_contract_test.py --package bcs-edge-permission-store --binary authority_mysql --test authority_mysql_conformance 2>&1) \
             || { echo "$output"; exit 1; }
           echo "$output"
           echo "$output" | grep -q 'test result: ok. 1 passed; 0 failed; 0 ignored' \
@@ -246,8 +224,7 @@ jobs:
         env:
           BCS_TEST_MYSQL_URL: mysql://bcs:bcs_test_only@127.0.0.1:3308/bcs_authority_bot
         run: |
-          output=$(cargo test -p bcs-bot-store --test authority_mysql \
-            provider_lifecycle_mysql_conformance -- --ignored --exact --nocapture 2>&1) \
+          output=$(python3 scripts/ci_contract_test.py --package bcs-bot-store --binary authority_mysql --test provider_lifecycle_mysql_conformance 2>&1) \
             || { echo "$output"; exit 1; }
           echo "$output"
           echo "$output" | grep -q 'test result: ok. 1 passed; 0 failed; 0 ignored' \
@@ -260,8 +237,7 @@ jobs:
         env:
           BCS_TEST_MYSQL_URL: mysql://bcs:bcs_test_only@127.0.0.1:3309/bcs_authority_group
         run: |
-          output=$(cargo test -p bcs-group-store --test authority_mysql \
-            group_authorization_mysql_conformance -- --ignored --exact --nocapture 2>&1) \
+          output=$(python3 scripts/ci_contract_test.py --package bcs-group-store --binary authority_mysql --test group_authorization_mysql_conformance 2>&1) \
             || { echo "$output"; exit 1; }
           echo "$output"
           echo "$output" | grep -q 'test result: ok. 1 passed; 0 failed; 0 ignored' \
@@ -274,8 +250,7 @@ jobs:
         env:
           BCS_TEST_MYSQL_URL: mysql://bcs:bcs_test_only@127.0.0.1:3310/bcs_authority_session
         run: |
-          output=$(cargo test -p bcs-session-store --test authority_mysql \
-            session_authorization_mysql_conformance -- --ignored --exact --nocapture 2>&1) \
+          output=$(python3 scripts/ci_contract_test.py --package bcs-session-store --binary authority_mysql --test session_authorization_mysql_conformance 2>&1) \
             || { echo "$output"; exit 1; }
           echo "$output"
           echo "$output" | grep -q 'test result: ok. 1 passed; 0 failed; 0 ignored' \
@@ -285,32 +260,32 @@ jobs:
 
       - name: Run MySQL Eventing migration contract
         if: steps.changes.outputs.skip-bcs != 'true'
-        run: cargo test -p bcs-admin eventing_mysql_migration_applies_to_real_mysql -- --ignored
+        run: python3 scripts/ci_contract_test.py --package bcs-admin --binary bcs-admin --test eventing_mysql_migration_applies_to_real_mysql
 
       - name: Run MySQL HumanInput index migration contract
         if: steps.changes.outputs.skip-bcs != 'true'
-        run: cargo test -p bcs-admin human_input_index_migrations_apply_to_real_mysql -- --ignored
+        run: python3 scripts/ci_contract_test.py --package bcs-admin --binary bcs-admin --test human_input_index_migrations_apply_to_real_mysql
 
       - name: Run MySQL merged 016 migration contract
         if: steps.changes.outputs.skip-bcs != 'true'
-        run: cargo test -p bcs-admin merged_016_migration_applies_to_real_mysql -- --ignored
+        run: python3 scripts/ci_contract_test.py --package bcs-admin --binary bcs-admin --test merged_016_migration_applies_to_real_mysql
 
       - name: Run MySQL fixed Loop migration contract
         if: steps.changes.outputs.skip-bcs != 'true'
-        run: cargo test -p bcs-admin fixed_loop_migration_applies_to_real_mysql -- --ignored
+        run: python3 scripts/ci_contract_test.py --package bcs-admin --binary bcs-admin --test fixed_loop_migration_applies_to_real_mysql
 
       - name: Run MySQL fixed Loop snapshot and rerun contracts
         if: steps.changes.outputs.skip-bcs != 'true'
-        run: cargo test -p bcs-collaboration-store --test mysql_store real_mysql_fixed_loop_snapshot_and_rerun_contract -- --ignored
+        run: python3 scripts/ci_contract_test.py --package bcs-collaboration-store --binary mysql_store --test real_mysql_fixed_loop_snapshot_and_rerun_contract
 
       - name: Run MySQL Event Store and Delivery contracts
         if: steps.changes.outputs.skip-bcs != 'true'
-        run: cargo test -p bcs-event-store --test conformance_event_store_mysql -- --ignored
+        run: python3 scripts/ci_contract_test.py --package bcs-event-store --binary conformance_event_store_mysql --test mysql_event_store_passes_contract
 
       - name: Enforce coverage gates
         if: steps.changes.outputs.skip-bcs != 'true'
         env:
-          BCS_BASE_REF: ${{ env.BCS_BASE_REF }}
+          BCS_BASE_REF: ${{ steps.changes.outputs.base-ref }}
         working-directory: ${{ github.workspace }}/apps/bcs
         run: |
           python3 scripts/cov_gate.py \
