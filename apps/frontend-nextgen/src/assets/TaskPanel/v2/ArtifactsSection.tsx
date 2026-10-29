@@ -155,7 +155,7 @@ export const ArtifactsSection: React.FC<ArtifactsSectionProps> = ({
                       {a.name}
                     </div>
                     <div style={{ fontSize: 11, color: C.textSecondary, marginTop: 2 }}>
-                      {[a.owner, time].filter(Boolean).join(' · ')}
+                      {[a.ownerLabel ?? a.owner, time].filter(Boolean).join(' · ')}
                     </div>
                     {a.kind === 'text' && a.summary && (
                       <div

@@ -1,11 +1,20 @@
 /** @jest-environment jsdom */
 // TaskPanelV2 壳:面包屑两级栈 + 收起按钮 + nav 注入/本地降级(spec §3.2)。
 import type { ResolvedSessionTarget } from '@/assets/TaskPanel/sessionResolution';
+import { fetchGroupDetail } from '@/assets/TaskPanel/GroupDrillDown';
 import type { TaskView } from '@/assets/TaskPanel/types';
 import { TaskPanelV2, type TaskPanelV2Props } from '@/assets/TaskPanel/v2/TaskPanelV2';
 import { useLocalTaskPanelNav, type TaskPanelNav } from '@/assets/TaskPanel/v2/taskPanelNav';
-import { beforeEach, describe, expect, it, jest } from '@jest/globals';
-import { act, fireEvent, render, renderHook, screen } from '@testing-library/react';
+import { beforeEach, describe, expect, it } from '@jest/globals';
+import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
+
+jest.mock('@/assets/TaskPanel/GroupDrillDown', () => {
+  const actual = jest.requireActual('@/assets/TaskPanel/GroupDrillDown');
+  return {
+    ...actual,
+    fetchGroupDetail: jest.fn(),
+  };
+});
 
 const baseTask = {
   id: 't1',
@@ -143,6 +152,61 @@ describe('TaskPanelV2 壳', () => {
     const overviewTitle = screen.getByTitle('任务总览：竞品分析');
     expect(overviewTitle).toBeTruthy();
     expect(overviewTitle.closest('[data-task-panel-root]')?.getAttribute('data-task-panel-root')).toBe('true');
+  });
+});
+
+describe('TaskPanelV2 协作群成员名展示', () => {
+  it('步骤执行体与产物产出者显示群成员名列表或单 Bot 名，而不是内部 ID', async () => {
+    const mockedFetchGroupDetail = fetchGroupDetail as jest.Mock;
+    mockedFetchGroupDetail.mockResolvedValue({
+      group_id: 'bcs_grp_display',
+      name: '展示协作群',
+      status: 'active',
+      participants: [
+        { actor_id: 'bot-a:user-1', actor_kind: 'bot', name: '成员甲', role: 'driver', mode: 'auto' },
+        { actor_id: 'bot-b:user-1', actor_kind: 'bot', name: '成员乙', role: 'worker', mode: 'auto' },
+      ],
+    });
+    const groupTask = JSON.parse(JSON.stringify(baseTask)) as TaskView;
+    const groupNode = groupTask.nodes[1];
+    groupNode.runMode = 'coop_group';
+    groupNode.groupId = 'bcs_grp_display';
+    groupNode.assignee = 'bcs_grp_display';
+    groupNode.artifacts = [
+      {
+        id: 'artifact-group',
+        name: '群协作结论',
+        type: 'document',
+        kind: 'text',
+        nodeId: groupNode.id,
+        owner: 'bcs_grp_display',
+        summary: '群协作结论',
+        updatedAt: '2026-10-20T08:58:20.000Z',
+      },
+    ];
+    groupTask.artifacts = [
+      {
+        id: 'artifact-bot',
+        name: '单 Bot 结论',
+        type: 'document',
+        kind: 'text',
+        owner: groupTask.ownerBotId,
+        summary: '单 Bot 结论',
+        updatedAt: '2026-10-20T08:58:20.000Z',
+      },
+    ];
+
+    const view = render(<TaskPanelV2 {...baseProps({ task: groupTask })} />);
+
+    await waitFor(() => expect(mockedFetchGroupDetail).toHaveBeenCalledWith('bcs_grp_display', ''));
+    await waitFor(() => expect(screen.getAllByText('成员甲、成员乙').length).toBeGreaterThan(0));
+    expect(screen.queryByText('bcs_grp_display')).toBeNull();
+    expect(screen.getAllByText(/成员甲、成员乙/).length).toBe(2);
+
+    const botArtifactRow = screen.getAllByText('单 Bot 结论')[0].closest('li');
+    expect(botArtifactRow?.textContent).toContain('规划师');
+    expect(botArtifactRow?.textContent).not.toContain('bot-1');
+    view.unmount();
   });
 });
 

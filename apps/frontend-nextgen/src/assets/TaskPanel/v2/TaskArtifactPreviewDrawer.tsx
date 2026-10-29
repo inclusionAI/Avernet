@@ -142,7 +142,7 @@ export const TaskArtifactPreviewDrawer: React.FC<TaskArtifactPreviewDrawerProps>
             <DetailRow label="链接地址">
               <DetailLink href={linkUrl} />
             </DetailRow>
-            <DetailRow label="产出者">{artifact.owner || '未提供'}</DetailRow>
+            <DetailRow label="产出者">{(artifact.ownerLabel ?? artifact.owner) || '未提供'}</DetailRow>
             <DetailRow label="创建时间">{formatArtifactUpdatedAt(artifact.updatedAt) || '未提供'}</DetailRow>
           </dl>
         </div>
@@ -160,7 +160,7 @@ export const TaskArtifactPreviewDrawer: React.FC<TaskArtifactPreviewDrawerProps>
               <DetailLink href={codeUrl} />
             </DetailRow>
             <DetailRow label="PR 描述">{artifact.codeRef?.description ?? artifact.summary ?? '暂无描述'}</DetailRow>
-            <DetailRow label="产出者">{artifact.owner || '未提供'}</DetailRow>
+            <DetailRow label="产出者">{(artifact.ownerLabel ?? artifact.owner) || '未提供'}</DetailRow>
             <DetailRow label="创建时间">{formatArtifactUpdatedAt(artifact.updatedAt) || '未提供'}</DetailRow>
           </dl>
         </div>
@@ -237,9 +237,9 @@ export const TaskArtifactPreviewDrawer: React.FC<TaskArtifactPreviewDrawerProps>
     .filter(Boolean)
     .join(' · ');
   const artifactMeta = isLinkArtifact
-    ? ['链接产物', artifact.linkRef?.type, artifact.owner].filter(Boolean).join(' · ')
+    ? ['链接产物', artifact.linkRef?.type, artifact.ownerLabel ?? artifact.owner].filter(Boolean).join(' · ')
     : isCodeArtifact
-      ? ['代码产物', artifact.codeRef?.codeBaseName, artifact.owner].filter(Boolean).join(' · ')
+      ? ['代码产物', artifact.codeRef?.codeBaseName, artifact.ownerLabel ?? artifact.owner].filter(Boolean).join(' · ')
       : [fileRef?.storageId, meta].filter(Boolean).join(' · ');
 
   return createPortal(
