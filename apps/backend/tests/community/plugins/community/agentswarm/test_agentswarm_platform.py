@@ -25,6 +25,7 @@ import types
 import pytest
 
 import agentclaw.community.plugins.community.agentswarm.host as host_module
+import agentclaw.community.plugins.community.agentswarm.host_chat as host_chat_module
 from agentclaw.community.plugins.community.agentswarm.host import _idem_digest
 from agentclaw.community.core.agentswarm.domain.models import (
     BotCreateSpec, BotState,
@@ -735,7 +736,7 @@ class TestChat:
         # reset wait) and the chat proceeds: context freshness is an
         # answer-quality risk, never a liveness one.
         ws = _ScriptedEngineWs(reset_goes_silent=True)
-        monkeypatch.setattr(host_module, "_SESSION_RESET_SECONDS", 0.1)
+        monkeypatch.setattr(host_chat_module, "_SESSION_RESET_SECONDS", 0.1)
         platform = _mk()
         _patch_engine_routes(monkeypatch, ws)
         with caplog.at_level(
@@ -833,11 +834,11 @@ class TestChat:
         # reset prelude included: its own tiny bound abdicates first,
         # fail-soft, and the deadline below still bounds the chat.
         ws = _ScriptedEngineWs(reply="never", stall_seconds=30.0)
-        monkeypatch.setattr(host_module, "_CHAT_TIMEOUT_SECONDS", 0.05)
-        monkeypatch.setattr(host_module, "_RECV_SLICE_SECONDS", 0.05)
-        monkeypatch.setattr(host_module, "_SESSION_RESET_SECONDS", 0.05)
+        monkeypatch.setattr(host_chat_module, "_CHAT_TIMEOUT_SECONDS", 0.05)
+        monkeypatch.setattr(host_chat_module, "_RECV_SLICE_SECONDS", 0.05)
+        monkeypatch.setattr(host_chat_module, "_SESSION_RESET_SECONDS", 0.05)
         platform = _mk()
-        platform._chat_timeout_seconds = host_module._CHAT_TIMEOUT_SECONDS
+        platform._chat_timeout_seconds = host_chat_module._CHAT_TIMEOUT_SECONDS
         _patch_engine_routes(monkeypatch, ws)
         started = time.monotonic()
         with pytest.raises(host_module.ChatTimeoutError,
