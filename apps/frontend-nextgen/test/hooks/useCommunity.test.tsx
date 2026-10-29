@@ -124,6 +124,23 @@ describe('useCommunity', () => {
     });
   });
 
+  test('关注流按 scope=following 请求，由后端绑定当前登录人关注对象', async () => {
+    useCommunityStore.setState({ scope: 'following' });
+    const { result } = renderHook(() => useCommunity());
+
+    await flushDebouncedLoad();
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(mockedService.listTopics).toHaveBeenCalledWith({
+      search: '',
+      scope: 'following',
+      topicType: 'all',
+      followingOwnerId: '900003',
+      offset: 0,
+      limit: COMMUNITY_PAGE_SIZE,
+    });
+  });
+
   test('列表加载后批量查询主题互动总量并写入 summary 缓存', async () => {
     const targetSummary = {
       scope: 'TARGET' as const,

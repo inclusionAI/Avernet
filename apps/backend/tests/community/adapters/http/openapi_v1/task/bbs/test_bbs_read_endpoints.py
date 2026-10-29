@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 from fastapi import Request
@@ -12,6 +13,7 @@ from agentclaw.community.adapters.http.openapi_v1.task.bbs.router import (
     list_topics,
 )
 from agentclaw.community.adapters.http.openapi_v1.contracts import PageParams
+from agentclaw.community.core.errors import Forbidden
 from agentclaw.community.core.task.forum.models import (
     ForumPostPage,
     ForumPostRecord,
@@ -27,6 +29,10 @@ def _request(path: str) -> Request:
     request = Request(scope={"type": "http", "method": "GET", "path": path})
     request.state.trace_id = "trace-read"
     return request
+
+
+def _principal_user(user_id: str = "user-a") -> SimpleNamespace:
+    return SimpleNamespace(has_user=True, user_id=user_id)
 
 
 def _topic(body: str = "description") -> ForumTopicRecord:
@@ -68,6 +74,7 @@ async def test_list_topics_returns_preview_without_full_body():
                 "status": "open",
                 "topic_type": None,
                 "author_id": None,
+                "following_owner_id": None,
                 "page": 2,
                 "page_size": 5,
             }
@@ -80,6 +87,8 @@ async def test_list_topics_returns_preview_without_full_body():
         status="open",
         topic_type=None,
         author_id=None,
+        following=False,
+        principal=_principal_user(),
         service=Service(),
     )
 
@@ -90,6 +99,48 @@ async def test_list_topics_returns_preview_without_full_body():
     assert payload.data.items[0].topic_type == "DISCUSSION"
     assert payload.data.items[0].is_hot is True
     assert "body" not in payload.data.items[0].model_dump()
+
+
+@pytest.mark.asyncio
+async def test_list_topics_following_uses_verified_end_user_as_follow_owner():
+    class Service:
+        def list_topics(self, **kwargs):
+            assert kwargs["following_owner_id"] == "900003"
+            return ForumTopicPage(total=0, items=())
+
+    payload = await list_topics(
+        request=_request("/openapi/v1/collaboration/tasks/bbs/topics"),
+        page_params=PageParams(page=1, page_size=10),
+        keyword=None,
+        status=None,
+        topic_type=None,
+        author_id=None,
+        following=True,
+        principal=_principal_user("900003"),
+        service=Service(),
+    )
+
+    assert payload.data is not None and payload.data.total == 0
+
+
+@pytest.mark.asyncio
+async def test_list_topics_following_refuses_application_only_caller():
+    class Service:
+        def list_topics(self, **kwargs):
+            raise AssertionError("the following feed must not be persisted")
+
+    with pytest.raises(Forbidden):
+        await list_topics(
+            request=_request("/openapi/v1/collaboration/tasks/bbs/topics"),
+            page_params=PageParams(page=1, page_size=10),
+            keyword=None,
+            status=None,
+            topic_type=None,
+            author_id=None,
+            following=True,
+            principal=SimpleNamespace(has_user=False, user_id=""),
+            service=Service(),
+        )
 
 
 @pytest.mark.asyncio
@@ -191,6 +242,8 @@ async def test_list_topics_surfaces_stored_author_display():
         status=None,
         topic_type=None,
         author_id=None,
+        following=False,
+        principal=_principal_user(),
         service=Service(),
     )
 
