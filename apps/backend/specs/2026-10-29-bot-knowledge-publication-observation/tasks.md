@@ -19,18 +19,19 @@
 - **Verification:** 新用例先因缺少实现导入失败；实现后 41 passed。Context Boundary 增补真实 Repository contract 依赖随本任务提交。
 - **Acceptance mapping:** AC-02, AC-05, AC-07, AC-09.
 
-## Task 2 [~]: Wire one failure-isolated build observation
+## Task 2 [x]: Wire one failure-isolated build observation
 - **Goal:** 在既有异步构建入口接入尽力记录，原生构建和发布结果不受附属失败控制。
 - **Files:** `core/service_bot/services/publish_flow/tasks.py`, `di/modules/bot_knowledge_module.py`, `di/modules/service_bot_module.py`, `tests/community/core/service_bot/services/test_publish_tasks.py`, `tests/community/di/test_bot_knowledge_publication_selection.py` (new).
 - **Done when:**
-  - [ ] 只有 PublishVerifyFlowHandler 在 BUILDING 分支、原生 build 前调用记录；通过已有 lifecycle 传递惰性普通 Service API provider。
-  - [ ] 不更改 PublishFlowService、BuildStageRunner、原生 Repository、状态 CAS、事务或上线成功/恢复处理。
-  - [ ] 注入采集、保存、编码与惰性 provider 异常后，原生 build、verify release 与 poll 调度按原分支继续。
-  - [ ] 真实 build/release 失败仍返回原生 Fail；观察容错范围不包住原生阶段方法。
-  - [ ] BUILT/VALIDATE_PUB/VALIDATING/ONLINE_PUB/SUCCESS 的重放、上线、重启和回滚不新增记录写入。
-  - [ ] 真 DI 可解析，构造时没有 DB/远程 I/O；无需新平台凭证，不改变其他任务 handler。
-  - [ ] 核实连接/驱动等待配置并保留证据；不能把捕获异常当作硬耗时上限，不能暗增超时线程或全局数据库改造。
+  - [x] 只有 PublishVerifyFlowHandler 在 BUILDING 分支、原生 build 前调用记录；通过已有 lifecycle 传递惰性普通 Service API provider。
+  - [x] 不更改 PublishFlowService、BuildStageRunner、原生 Repository、状态 CAS、事务或上线成功/恢复处理。
+  - [x] 注入采集、保存、编码与惰性 provider 异常后，原生 build、verify release 与 poll 调度按原分支继续。
+  - [x] 真实 build/release 失败仍返回原生 Fail；观察容错范围不包住原生阶段方法。
+  - [x] BUILT/VALIDATE_PUB/VALIDATING/ONLINE_PUB/SUCCESS 的重放、上线、重启和回滚不新增记录写入。
+  - [x] 真 DI 可解析，构造时没有 DB/远程 I/O；无需新平台凭证，不改变其他任务 handler。
+  - [x] 核实连接/驱动等待配置并保留证据；不能把捕获异常当作硬耗时上限，不能暗增超时线程或全局数据库改造。
 - **Depends on:** Task 1.
+- **Verification:** 构建任务/真实 DI 48 passed；公有 DB 插件未提供逐调用硬超时，内部 DB 适配器也未声明可供本功能复用的短截止时间。实际生产驱动配置与故障耗时未验证，不作硬时限保证。
 - **Acceptance mapping:** AC-03, AC-06, AC-09, AC-10.
 
 ## Task 3: Expose publication reads without changing draft APIs

@@ -47,6 +47,7 @@ consumes:
   - "PassportPlugin"
   - "UserListRepositoryProtocol"
 internal_dependencies:
+  - agentclaw.community.api.bot_knowledge_service    # optional build observation Service API
   - agentclaw.community.kernel.file_count
   - agentclaw.community.plugin_api.file_count_runtime
   - agentclaw.community.core.base
