@@ -545,6 +545,15 @@ class SwarmRunHandler:
         for spec in run.agent_catalog:
             if name.startswith(spec.name):
                 return _coerce_kind(spec)
+        # Unresolved name: the pool's execution fallback
+        # (_unanimous_catalog_surface) inherits kind/engine/identity from
+        # a unanimous catalog, so the durable row must predict the same
+        # kind — an LLM-labeled row that actually executes as a bot parks
+        # at a consent gate the detail surfaces only for kind=bot, hiding
+        # the authorization URL from the human supervisor.
+        kinds = {_coerce_kind(spec) for spec in run.agent_catalog}
+        if len(kinds) == 1:
+            return kinds.pop()
         return AgentKind.LLM
 
     async def _await_refs(self, run_id: RunId, tenant: TenantId, refs: tuple[str, ...],
