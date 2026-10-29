@@ -133,6 +133,9 @@ class KnowledgeManagementService:
         )
         return fact | {"space_name": space["name"]}
 
+    def authorize_space(self, *, space_id, actor_id):
+        self._scope(space_id, actor_id)
+
     def candidates(self, *, space_id, kb_id, actor_id, cursor=0, limit=20, keyword=""):
         page_size(limit, cursor)
         if not isinstance(keyword, str) or len(keyword) > 128:
