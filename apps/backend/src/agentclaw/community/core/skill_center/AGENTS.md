@@ -26,6 +26,15 @@ DB 失败或歧义不能当作 Bot 不存在后猜测资源地址。路由顺序
 route snapshot 和 endpoint 测试固定。此变更不宣称真实转交事务、凭证及所有消费者
 已完成验收；后续 B7 单独实现和联合验证。
 
+交接后的 Legacy `my-skills` 经 `SkillQueryService.list_uploaded_skills` 先解析
+Bot、校验当前 Owner/协作者权限，再按 entity 读取原资产，不触发 Installation
+flush。无 Bot 的历史目录仅允许本人读取。仅传 Set ID 时从持久 Set 反查 Bot；
+历史 user/owner locator 必须解析到同一 Bot，显式 entity 优先于 user 路由别名。
+Default MCP/Set、排除项、能力快照及 AgentPass 范围使用稳定 entity；设备解析
+使用 Factory 已解析的当前 Owner (`_device_owner_id`)。人员 actor、执行身份和
+协作审计不因资源地址规范化而替换。MCP 投影仍遵循先提交 DB、尽力同步 Runtime
+的合同，真实设备文件是否收敛需要部署验收。
+
 ## 1. 从 OpenAPI 进入
 
 `community/adapters/http/openapi_v1/__init__.py` 是 Router 装配入口。所有下列路径均位于 `/openapi/v1/bots`；Space-owned 资源只是使用这个命名空间，不因此归属于某个 Bot。

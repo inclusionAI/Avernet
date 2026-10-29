@@ -374,11 +374,17 @@ async def list_user_skills(
     skill_service_factory: SkillServiceFactoryProtocol = Injected(
         SkillServiceFactoryProtocol
     ),
+    entity_id: Optional[str] = Query(None, description="Stable Bot entity locator"),
+    query_service: SkillQueryServiceProtocol = Injected(SkillQueryServiceProtocol),
 ) -> SkillListResponse:
     """List skills uploaded by user."""
-    service = skill_service_factory.create()
     effective_bot_id = bot_id or ctx.bot_id or "default"
-    skills = service.list_user_skills(user_id=user_id, bolt_id=effective_bot_id)
+    actor_id = str(ctx.user_id or user_id or "")
+    skills = query_service.list_uploaded_skills(
+        bot_id=effective_bot_id,
+        owner_id=entity_id or user_id or actor_id,
+        actor_id=actor_id,
+    )
     return SkillListResponse(
         success=True,
         data=[

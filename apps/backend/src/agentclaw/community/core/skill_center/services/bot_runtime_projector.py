@@ -23,6 +23,7 @@ from agentclaw.community.core.skill_center.capability_state_contract import (
     BotCapabilityStateReaderProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.bot_management.addressing import stable_resource_owner_id
 from agentclaw.community.core.repository.protocols.capability_desired_state import (
     CapabilityDesiredStateRepositoryProtocol,
 )
@@ -464,9 +465,9 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         try:
             started_at = time.perf_counter()
             effective_mcp_entries = service.collect_bot_active_mcps(
-                entity_id=str(bot.get("entity_id") or owner_id),
+                entity_id=stable_resource_owner_id(bot),
                 bot_id=bot_id,
-                user_id=owner_id,
+                user_id=stable_resource_owner_id(bot),
                 entity_type=bot.get("entity_type") or "staff",
                 engine_type=engine,
                 strict_policy_context=True,
@@ -490,7 +491,7 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         try:
             started_at = time.perf_counter()
             # Passport is the authority for the effective Default CLI scope.
-            effective_cli_items = self._passport.query_passport_clis(bot_id, owner_id)
+            effective_cli_items = self._passport.query_passport_clis(bot_id, stable_resource_owner_id(bot))
         except Exception as exc:
             self._log_plan_timing(
                 stage="query_passport_clis", bot_id=bot_id, engine=engine,
@@ -624,7 +625,7 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
                 len(plan.effective_cli_items),
                 0,
             )
-            passport = self._passport.query_agent_passport(plan.bot_id, plan.owner_id)
+            passport = self._passport.query_agent_passport(plan.bot_id, stable_resource_owner_id(plan.bot))
             if (plan.bot.get("ext") or {}).get("digital_employee"):
                 if self._employee_service_provider is None:
                     raise ValueError("Digital employee governance is not wired")
@@ -640,7 +641,7 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
             stage = "update"
             self._passport.update_passport(
                 bot_id=plan.bot_id,
-                user_id=plan.owner_id,
+                user_id=stable_resource_owner_id(plan.bot),
                 engine_type=plan.engine,
                 resource_scope=resource_scope,
             )

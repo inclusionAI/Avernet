@@ -1,4 +1,4 @@
-"""Resolve a fully qualified Bot address and its application grant once."""
+"""Resolve collaboration addresses and legacy Bot locators for OpenAPI callers."""
 
 from typing import Annotated
 
@@ -7,7 +7,10 @@ from fastapi import Depends, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import BotIdPath
 from agentclaw.community.adapters.http.openapi_v1.errors import BotAccessRefusedError
-from agentclaw.community.adapters.http.openapi_v1.principal import ActingCallerDep
+from agentclaw.community.adapters.http.openapi_v1.principal import (
+    ActingCallerDep,
+    ENTITY_ID_QUERY,
+)
 from agentclaw.community.core.bot_management.addressing import (
     BotAddressResolver,
     ResolvedBotContext,
@@ -53,3 +56,28 @@ async def require_granted_collaboration_bot(
 CollaborationBotDep = Annotated[
     ResolvedBotContext, Depends(require_granted_collaboration_bot)
 ]
+
+
+async def resolve_bot_entity(request: Request, *, bot_id: str, locator: str) -> str:
+    """Keep legacy Owner locators out of entity-only Core service arguments.
+
+    ``locator`` must come from OwnerIdDep, after its principal/grant checks.
+    Explicit entity addresses stay strict; only the legacy owner spelling (or
+    the authenticated user's default) uses owner/entity compatibility lookup.
+    This identifies the Bot; the route and Core service retain authorization.
+    """
+    repository = request.app.state.injector.get(BotRepository)
+    resolver = BotAddressResolver(repository)
+    try:
+        context = await asyncio.to_thread(
+            resolver.resolve,
+            bot_id=bot_id,
+            **(
+                {"entity_id": locator}
+                if request.query_params.get(ENTITY_ID_QUERY)
+                else {"legacy_owner_id": locator}
+            ),
+        )
+    except BotAddressNotFoundError as exc:
+        raise BotAccessRefusedError("Bot not found") from exc
+    return context.entity_id

@@ -194,7 +194,7 @@ async def get_skill_set_mcps(
     ),
 ) -> SkillSetMCPsResponse:
     """Get all MCP servers in a skill set."""
-    owner_id_hint = user_id or entity_id
+    owner_id_hint = entity_id or user_id
     # Get effective path parameters
     (
         effective_entity_id,
@@ -227,7 +227,7 @@ async def get_skill_set_mcps(
             engine_type=effective_engine,
             entity_type=effective_entity_type,
         )
-        mcps = service.get_set_mcp_servers(skill_set_id, user_id=ctx.user_id)
+        mcps = service.get_set_mcp_servers(skill_set_id, user_id=effective_entity_id)
     else:
         mcps = control_plane.list_mcps(
             bot_id=effective_bot_id,

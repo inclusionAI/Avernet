@@ -317,7 +317,7 @@ async def get_skill_set(
     ),
 ) -> SkillSetDetailResponse:
     """Get a skill set by ID."""
-    owner_id_hint = user_id or entity_id
+    owner_id_hint = entity_id or user_id
     # Get effective path parameters
     (
         effective_entity_id,
@@ -369,7 +369,7 @@ async def update_skill_set(
     ),
 ) -> SkillSetDetailResponse:
     """Update a skill set."""
-    owner_id_hint = request.user_id or entity_id
+    owner_id_hint = entity_id or request.user_id
     # Preserve omission so the legacy resolver can recover a non-default Bot.
     bot_id_hint = bot_id or request.bot_id
     (
@@ -429,7 +429,7 @@ async def delete_skill_set(
     ),
 ) -> MessageResponse:
     """Delete a skill set."""
-    owner_id_hint = user_id or entity_id
+    owner_id_hint = entity_id or user_id
     (
         effective_entity_id,
         effective_bot_id,

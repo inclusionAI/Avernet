@@ -31,6 +31,15 @@ class SkillQueryServiceProtocol(Protocol):
     ) -> tuple[int, list[dict[str, Any]]]: ...
 
     @abstractmethod
+    def list_uploaded_skills(
+        self, *, bot_id: str, owner_id: str, actor_id: str
+    ) -> list[dict[str, Any]]:
+        """Read owned assets without flushing Installation; legacy self-only
+        detached scopes retain their historical asset listing.
+        """
+        ...
+
+    @abstractmethod
     def get_local_skill(self, *, skill_id: str, actor_id: str) -> dict[str, Any]: ...
 
     @abstractmethod

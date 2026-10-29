@@ -476,7 +476,7 @@ async def test_runtime_reconcile_projects_full_mcp_desired_state():
         {
             "entity_id": "entity-1",
             "bot_id": "bot-1",
-            "user_id": "true-owner",
+            "user_id": "entity-1",
             "entity_type": "staff",
             "engine_type": "openclaw",
                 "strict_policy_context": True,
@@ -488,7 +488,7 @@ async def test_runtime_reconcile_projects_full_mcp_desired_state():
     assert passport.calls == [
         {
             "bot_id": "bot-1",
-            "user_id": "true-owner",
+            "user_id": "entity-1",
             "engine_type": "openclaw",
             "resource_scope": {
                 "mcp_codes": ["mcp.template-preset", "mcp.weather"],
@@ -548,7 +548,7 @@ async def test_projection_preserves_agentpass_only_caller_identity_without_spars
 
     class _HistoricalCallerPassport(_RuntimePassport):
         def query_agent_passport(self, bot_id: str, owner_id: str) -> dict:
-            assert (bot_id, owner_id) == ("bot-1", "true-owner")
+            assert (bot_id, owner_id) == ("bot-1", "entity-1")
             return {
                 "mcps": [
                     {"mcp_code": "mcp.weather", "identity_mode": "caller"},
