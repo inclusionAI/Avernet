@@ -34,6 +34,7 @@ from agentclaw.community.adapters.http.task.trajectory_html import render_trajec
 from agentclaw.community.adapters.http.task.schemas_artifact import (
     group_artifacts_by_node,
 )
+from agentclaw.community.adapters.http.task.schemas_execute_diagnostics import task_info_request_params_to_dict
 from agentclaw.community.adapters.http.task.schemas import (
     BbsTaskItemDTO,
     TaskExecutionGraphDTO,
@@ -67,7 +68,9 @@ from agentclaw.community.api.task.task_context_service import (
 )
 from agentclaw.community.core.task.domain.models import Status
 from agentclaw.community.di import Injected
+from agentclaw.community.log import get_logger
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
+
 
 def _validate_status_filter(status: str | None) -> None:
     """校验 status query(逗号分隔的运行时态枚举),任一 token 非法 → 400。"""
@@ -90,6 +93,8 @@ def _validate_single_status(status: str | None) -> str | None:
     return v
 
 
+logger = get_logger()
+
 router = APIRouter(prefix="/openapi/v1/collaboration/tasks", tags=["task"], route_class=PublicAPIRoute)
 
 # Handler-level principal dependency: `test_public_routes_require_principal` walks each
@@ -111,6 +116,10 @@ async def execute_task(
     """提交执行任务。task_id 服务端生成;持久化 task_info(PENDING)→ initialize_graph → on_execute 首帧。
 
     幂等:同 task_id 已建图(GraphAlreadyInitializedError)→ @envelope_errors 映射 409。"""
+    logger.info(
+        "[task_execute_openapi] request params=%s",
+        task_info_request_params_to_dict(body),
+    )
     del principal  # 鉴权经 PrincipalDep(require_principal);identity 不在此处使用。
     task_request = task_info_request_from_dto(body)
     result = await service.execute(task_request)
