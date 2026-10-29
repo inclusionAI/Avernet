@@ -53,9 +53,10 @@ or DI binding is introduced. The existing protocol declares eval_publish.
 
 The HTTP route reuses BotServiceProtocol.get_bot_by_address and
 BotPublishServiceProtocol.get_publish_by_id to validate resource addressing before
-calling eval_publish with its original publish_id/operator/biz_id arguments.
+calling eval_publish with publish_id/operator/biz_id and an optional resource_spec.
 Existing identity handling remains; PublicAPIRoute explicitly uses NoCheck.
-EvalPublishMixin is unchanged; no bot_address parameter is introduced.
+EvalPublishMixin merges an optional resource_spec into a copied template_config;
+no bot_address parameter is introduced.
 Internal Quality callers are unchanged.
 Neither publication facade is changed. Rollback removes the route and its
 admission/authorization registrations; no data migration is needed.
@@ -155,3 +156,25 @@ Validation of the CI integration fix (2026-10-29):
   Gateway's own config/architecture suites could not run successfully with the
   Backend interpreter: `pydantic_settings` and `pytestarch` are not installed.
 - Full Backend suite and Singlebox E2E were not rerun locally.
+
+
+## Per-deployment resource override
+
+The publish endpoint accepts optional positive integer Query parameters `cpu`
+(cores), `memory` (GiB), and `disk` (provider-defined capacity units/support).
+CPU and memory must be provided together; disk is optional but cannot be passed
+without both. Missing pairs, non-integers, and non-positive values return 422
+before provisioning. Example suffix: `&cpu=4&memory=8&disk=200`.
+This does not guarantee a 200 MB/GB volume: the storage provider must support the
+existing disk field and determines its interpretation.
+
+The adapter constructs the existing ResourceSpecification and forwards it via the
+Service API's additive optional `resource_spec=None` argument. EvalPublishMixin
+replaces the resource_spec entry in a copied template_config, preserving other
+settings and passing it through existing release_async/BaaS plumbing. Omitting
+disk in an override omits disk from the replacement resource specification; it
+does not inherit the old template's disk. No source Bot or publication config is
+persisted. With all three absent, existing configuration behavior is unchanged.
+Existing Quality callers need no changes. No Plugin API or database change.
+Tests cover real HTTP validation/forwarding and execution of the release callback,
+including no template, existing template, no override, and source immutability.

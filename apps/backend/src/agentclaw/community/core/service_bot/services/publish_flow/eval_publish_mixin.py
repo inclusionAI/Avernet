@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from agentclaw.community.kernel.device_dto import ResourceSpecification
+
 from agentclaw.community.core.service_bot.repository.models import (
     PublishOperationKind,
     PublishStatus,
@@ -42,6 +44,7 @@ class EvalPublishMixin:
         migration_path: str | None = None,
         config_artifact: str | None = None,
         docker_image: str | None = None,
+        resource_spec: ResourceSpecification | None = None,
     ) -> dict:
         """Publish to the eval environment.
 
@@ -65,6 +68,7 @@ class EvalPublishMixin:
                 publish_record.ext 中的值，用于 Eval DRAFT 构建路径。
             config_artifact: 外部传入的 config_artifact（可选）。优先级高于
                 publish_record.ext 中的值。
+            resource_spec: 本次发布的资源覆盖；None 保持原配置，不修改源 Bot。
             docker_image: 外部传入的镜像 pin（可选）。非空时跳过
                 resolve_publish_image_pin，用于 Eval DRAFT 构建路径。
         """
@@ -130,6 +134,13 @@ class EvalPublishMixin:
             if default_tag:
                 eval_envs[DYNAMIC_ENV_TAG_KEY] = default_tag
 
+            template_config = service_publish_template_config(bot)
+            if resource_spec is not None:
+                template_config = {
+                    **(template_config or {}),
+                    "resource_spec": resource_spec.to_dict(),
+                }
+
             release_kwargs: dict[str, Any] = dict(
                 bot=bot,
                 user_id=owner_id,
@@ -141,7 +152,7 @@ class EvalPublishMixin:
                 ext_info=ext_info,
                 extra_envs=eval_envs,
                 docker_image=image_pin_docker_image,
-                template_config=service_publish_template_config(bot),
+                template_config=template_config,
             )
             if template_uuid:
                 release_kwargs["template_uuid"] = template_uuid

@@ -46,7 +46,8 @@ def _auth(world):
     init_principal_verifier_config(_Resolver(), "gateway_principal_signing_key", strict=False)
 
 
-async def _publish(self, *, publish_id, operator, biz_id):
+async def _publish(self, *, publish_id, operator, biz_id, resource_spec=None):
+    assert resource_spec is None
     assert (publish_id, operator, biz_id) == (1, "operator-1", "task-1")
     return {"success": True, "publish_id": 1, "stage": "eval", "bot_uuid": "eval-1", "baas_publish_id": 42}
 
@@ -128,3 +129,37 @@ for _method, _path, _params in (
     endpoint_test(method=_method, path=_path, scenario="env_missing_principal", seed=_auth,
         input=CaseInput(path_params=_params, query_params={"owner_id": _OWNER, "operator": "operator-1"}),
         expect=ExpectError(status=401))(lambda: None)
+
+
+async def _publish_resources(self, *, publish_id, operator, biz_id, resource_spec):
+    assert resource_spec.to_dict() == {"cpu": 4, "memory": 8, "disk": 200}
+    return {"success": True, "publish_id": publish_id, "stage": "eval", "bot_uuid": "eval-1", "baas_publish_id": 42}
+
+
+def _seed_resources(world):
+    _seed(world)
+    bind_overrides(world, PublishFlowServiceProtocol, {"eval_publish": _publish_resources})
+
+
+@endpoint_test(method="POST", path=_PUBLISH, scenario="env_publish_resources", seed=_seed_resources,
+    input=CaseInput(path_params={"bot_id": _BOT, "publication_id": 1},
+        query_params={"owner_id": _OWNER, "operator": "operator-1", "cpu": 4, "memory": 8, "disk": 200}, headers=_headers()),
+    expect=ExpectSuccess(status=202, json_contains={"data": {"success": True}}))
+def publish_resources():
+    pass
+
+
+for _case, _resources in [
+    ("cpu_only", {"cpu": 4}), ("memory_only", {"memory": 8}),
+    ("disk_only", {"disk": 200}),
+    ("cpu_disk", {"cpu": 4, "disk": 200}),
+    ("memory_disk", {"memory": 8, "disk": 200}),
+    ("zero_cpu", {"cpu": 0, "memory": 8}),
+    ("negative_memory", {"cpu": 4, "memory": -1}),
+    ("zero_disk", {"cpu": 4, "memory": 8, "disk": 0}),
+    ("fractional_disk", {"cpu": 4, "memory": 8, "disk": "1.5"}),
+]:
+    endpoint_test(method="POST", path=_PUBLISH, scenario=f"env_publish_resources_{_case}", seed=_auth,
+        input=CaseInput(path_params={"bot_id": _BOT, "publication_id": 1},
+            query_params={"owner_id": _OWNER, "operator": "operator-1", **_resources}, headers=_headers()),
+        expect=ExpectError(status=422))(lambda: None)

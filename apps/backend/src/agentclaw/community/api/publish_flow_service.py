@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
+from agentclaw.community.kernel.device_dto import ResourceSpecification
+
 
 @runtime_checkable
 class PublishFlowServiceProtocol(Protocol):
@@ -37,11 +39,14 @@ class PublishFlowServiceProtocol(Protocol):
         migration_path: str | None = None,
         config_artifact: str | None = None,
         docker_image: str | None = None,
+        resource_spec: ResourceSpecification | None = None,
     ) -> dict[str, Any]:
         """Submit an eval deployment without advancing the main publication.
 
         Callers validate resource addressing and authorize the actor separately.
         Submission success is not readiness.
+        resource_spec replaces template resource settings for this deployment only;
+        None preserves existing defaults. Disk units/support are provider-defined.
         """
         ...
 

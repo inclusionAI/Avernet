@@ -40,7 +40,7 @@ async def test_publish_eval_env_handler(resource_services):
     assert result.data.bot_uuid == "eval-bot"
     assert result.data.baas_bot_status is None
     service.eval_publish.assert_awaited_once_with(
-        publish_id=7, operator="actor", biz_id="task-1",
+        publish_id=7, operator="actor", biz_id="task-1", resource_spec=None,
     )
 
 
@@ -242,3 +242,24 @@ async def test_non_service_bot_cannot_publish_eval_environment(resource_services
     )
     assert result.status_code == 409
     service.eval_publish.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("disk", [None, 200])
+async def test_publish_resource_spec_forwarded(resource_services, disk):
+    from agentclaw.community.kernel.device_dto import ResourceSpecification
+
+    service = Mock(eval_publish=AsyncMock(return_value={
+        "success": True, "publish_id": 7, "stage": "eval", "bot_uuid": "eval-bot",
+        "baas_publish_id": 42,
+    }))
+    request = Request({"type": "http", "method": "POST", "path": "/"})
+    result = await publish_eval_env(
+        "bot-1", 7, request, "actor", "owner", "task-1", service, *resource_services,
+        cpu=4, memory=8, disk=disk,
+    )
+    assert result.code == 202000
+    service.eval_publish.assert_awaited_once_with(
+        publish_id=7, operator="actor", biz_id="task-1",
+        resource_spec=ResourceSpecification(cpu=4, memory=8, disk=disk),
+    )
