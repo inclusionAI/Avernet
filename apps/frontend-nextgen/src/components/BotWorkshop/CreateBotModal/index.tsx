@@ -11,7 +11,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import { AuthorizationPanel } from './AuthorizationPanel';
 import { CreateBotFormFields } from './CreateBotFormFields';
 import { ExpertCreationResult } from './ExpertCreationResult';
-import { ExpertTemplatePicker } from './ExpertTemplatePicker';
 
 interface CreateBotModalProps {
   scenario?: BotCreateScenario;
@@ -63,8 +62,6 @@ const CreateBotModal: React.FC<CreateBotModalProps> = ({
       : suppliedSpaces;
   const [expertMode, setExpertMode] = useState(Boolean(fixedExpert));
   const [selectedExpert, setSelectedExpert] = useState<ExpertSummary | undefined>(fixedExpert);
-  const blankDraft = useRef<BotCreateInput>();
-  const templateDraft = useRef<BotCreateInput>();
   const [values, setValues] = useState<BotCreateInput>(() => initialValues('cloud', spaces));
   const [error, setError] = useState<string>();
   const [agentCodingError, setAgentCodingError] = useState<string>();
@@ -81,17 +78,6 @@ const CreateBotModal: React.FC<CreateBotModalProps> = ({
     }
   }, [expertCreation.status, onExpertCreated]);
   const busy = creating || expertCreation.submitting || expertCreation.initializationPending;
-  const selectExpert = (next: ExpertSummary) => {
-    setValues((current) => ({
-      ...current,
-      name: !current.name || current.name === expertBotName(selectedExpert) ? expertBotName(next) : current.name,
-      description:
-        !current.description || current.description === selectedExpert?.description.slice(0, 200)
-          ? next.description.slice(0, 200)
-          : current.description,
-    }));
-    setSelectedExpert(next);
-  };
   const isLocal = scenario === 'local';
   const isAgentCoding = values.engine === 'aicoding';
 
@@ -113,8 +99,6 @@ const CreateBotModal: React.FC<CreateBotModalProps> = ({
       );
       setSelectedExpert(fixedExpert);
       setExpertMode(Boolean(fixedExpert));
-      blankDraft.current = undefined;
-      templateDraft.current = undefined;
       setError(undefined);
       setAgentCodingError(undefined);
       agentCodingValidatorRef.current = null;
@@ -217,37 +201,7 @@ const CreateBotModal: React.FC<CreateBotModalProps> = ({
             />
           ) : (
             <>
-              {!isLocal && !fixedExpert && (
-                <div className="flex gap-2" aria-label="创建方式">
-                  {[false, true].map((mode) => (
-                    <Button
-                      key={String(mode)}
-                      type="button"
-                      variant={expertMode === mode ? 'secondary' : 'ghost'}
-                      disabled={busy}
-                      aria-pressed={expertMode === mode}
-                      onClick={() => {
-                        if (expertMode) templateDraft.current = values;
-                        else blankDraft.current = values;
-                        setValues(
-                          (mode ? templateDraft.current : blankDraft.current) || {
-                            ...values,
-                            name: mode ? expertBotName(selectedExpert) : '',
-                            description: mode ? selectedExpert?.description || '' : '',
-                          },
-                        );
-                        setExpertMode(mode);
-                      }}
-                    >
-                      {mode ? '从专家模板创建' : '空白创建'}
-                    </Button>
-                  ))}
-                </div>
-              )}
               <fieldset disabled={busy} className="min-w-0 space-y-4">
-                {expertMode && !fixedExpert && (
-                  <ExpertTemplatePicker selected={selectedExpert} onSelect={selectExpert} />
-                )}
                 <CreateBotFormFields
                   values={values}
                   setValues={setValues}
