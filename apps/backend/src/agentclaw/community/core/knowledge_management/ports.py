@@ -72,6 +72,13 @@ class KnowledgeDisplaySource(Protocol):
         """Resolve native Bot edit context for the current actor."""
         ...
 
+    def conversation_bot(self, scope) -> dict:
+        """Resolve a live composite Bot and its space, without an Editor grant.
+
+        Consumers must establish native conversation access before reading assets.
+        """
+        ...
+
     def selections(self, *, bot, kb_ids) -> dict:
         """Read persisted selections for the specified Bot and bases."""
         ...
