@@ -756,7 +756,7 @@ fn bot_authority_trusted_apps_parse_and_resolve() {
         [[bot_authority.trusted_apps]]
         app = "backend"
         tenant = "tenant-a"
-        actions = ["managers:sync"]
+        actions = ["managers:sync", "ownership:sync"]
 
         [[bot_authority.trusted_apps]]
         app = "backend-b"

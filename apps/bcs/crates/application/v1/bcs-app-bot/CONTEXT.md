@@ -47,7 +47,7 @@ trusted Human Principal verification boundary. The separate internal self facade
 requires Agent identity verification itself and supports Agents before registration.
 
 Bot-authority additions (bot-authority spec §5/§6) stay inside this crate:
-`BotAuthorityServiceImpl` serves the eleven frozen
+`BotAuthorityServiceImpl` serves the twelve frozen
 `/api/v1/collaboration/` authority routes from one injected Core/Hook
 pair. Admission is dual without fallback order violations — Human first
 (keeping the invite-code gate exactly as configured), then a Trusted App

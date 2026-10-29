@@ -8,6 +8,7 @@ pub mod bot_authority_contract;
 pub mod bot_authority_core;
 pub mod bot_authority_service;
 pub mod bot_mine_contract;
+pub mod bot_ownership_sync_contract;
 pub mod bot_transfer_contract;
 pub mod collaboration_draft;
 pub mod delivery_admission;
