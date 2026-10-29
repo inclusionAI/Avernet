@@ -1072,6 +1072,17 @@ class TestOrchestrator:
         assert "in_flight_agents" in system
         assert "recent_guard_rejections" in system
 
+    def test_system_prompt_states_spawn_naming_rule(self):
+        # Proactive prompt injection: the rule must be present BEFORE any
+        # rejection teaches it — spawn names are catalog-derived, the
+        # name guard drops anything else.
+        orch = self._mk_orchestrator([])
+        run = _mk_run()
+        system = orch._system_prompt(run)
+        assert "spawn name must be one of the available agent names" in system
+        assert "coder_rust" in system
+        assert "name guard" in system
+
     def test_prompt_surfaces_recently_rejected_agents(self):
         # Truncated batches must not be lost: rejections feed the next
         # prompts so the model can re-emit dropped agents once capacity
