@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import ssl
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -177,12 +178,45 @@ class LlmBrain:
         raise BrainUnavailable(f"no model prompt for task kind {task.kind}")
 
     async def _complete(self, messages: list[dict[str, str]]) -> str:
+        """请求一次模型；推理模型可能先消耗 reasoning token，空内容要放大预算重试。"""
+
+        budget = self._config.llm_max_tokens
+        ceiling = max(budget, self._config.llm_max_tokens_ceiling)
+        attempts = max(1, self._config.llm_max_attempts)
+        last_reason = ""
+        has_reasoning = False
+        for attempt in range(attempts):
+            request_messages = messages
+            if attempt and last_reason != "length":
+                request_messages = [
+                    *messages,
+                    {"role": "user", "content": "请直接输出任务要求的那一句话，不要输出思考过程。"},
+                ]
+            content, finish_reason, has_reasoning = await self._request(request_messages, budget)
+            last_reason = finish_reason or ""
+            text = content.strip()
+            if text and finish_reason != "length":
+                return text
+            # 空 content 或 finish_reason=length：说明 max_tokens 被思考/截断吃掉。
+            if attempt + 1 < attempts and budget < ceiling:
+                budget = min(budget * 2, ceiling)
+        raise BrainUnavailable(
+            "model returned no usable content "
+            f"(finish_reason={last_reason or 'unknown'}, reasoning_present={has_reasoning}, "
+            f"attempts={attempts}, max_tokens={budget})"
+        )
+
+    async def _request(
+        self,
+        messages: list[dict[str, str]],
+        max_tokens: int,
+    ) -> tuple[str, str | None, bool]:
         endpoint = _chat_endpoint(self._config.llm_base_url or "")
         payload = {
             "model": self._config.llm_model,
             "messages": messages,
             "temperature": 0.7,
-            "max_tokens": 96,
+            "max_tokens": max_tokens,
             "stream": False,
         }
         body = json.dumps(payload).encode("utf-8")
@@ -204,18 +238,34 @@ class LlmBrain:
             choices = data.get("choices")
             if not isinstance(choices, list) or not choices:
                 raise BrainUnavailable("model response has no choices")
-            message = choices[0].get("message") if isinstance(choices[0], dict) else None
-            content = message.get("content") if isinstance(message, dict) else None
+            choice = choices[0] if isinstance(choices[0], dict) else {}
+            message = choice.get("message") if isinstance(choice.get("message"), dict) else {}
+            content = message.get("content")
             if isinstance(content, str):
-                return content
-            if isinstance(content, list):
-                texts = [block.get("text", "") for block in content if isinstance(block, dict)]
-                return "".join(texts)
-            raise BrainUnavailable("model response content is empty")
+                text = content
+            elif isinstance(content, list):
+                text = "".join(
+                    block.get("text", "") for block in content if isinstance(block, dict)
+                )
+            else:
+                text = ""
+            reasoning = message.get("reasoning_content") or message.get("reasoning")
+            finish_reason = choice.get("finish_reason")
+            return text, finish_reason if isinstance(finish_reason, str) else None, bool(reasoning)
         except TimeoutError as error:
             raise BrainUnavailable("model request timed out") from error
         except (urllib.error.URLError, urllib.error.HTTPError, OSError, ValueError) as error:
-            raise BrainUnavailable(f"model request failed: {type(error).__name__}") from error
+            raise BrainUnavailable(f"model request failed: {type(error).__name__}{_tls_hint(error)}") from error
+
+
+def _tls_hint(error: BaseException) -> str:
+    """本机默认 CA 链对该服务可能报 CERTIFICATE_VERIFY_FAILED；只提示，不关闭校验。"""
+
+    reason = getattr(error, "reason", None)
+    text = f"{reason or ''} {error}"
+    if isinstance(reason, ssl.SSLCertVerificationError) or "CERTIFICATE_VERIFY_FAILED" in text:
+        return "; TLS CA verification failed, set SSL_CERT_FILE=/etc/ssl/cert.pem (never disable verification)"
+    return ""
 
 
 def _read_url(request: urllib.request.Request, timeout: float) -> str:

@@ -39,3 +39,15 @@ differential checks against the real referee parser (`undercover.py`).
 
 Fake BCS tests prove protocol handling only; they are not a substitute for the required
 three real mixed games, which have not been run yet.
+
+## Model budget and TLS
+
+Reasoning models such as DeepSeek Flash count reasoning tokens against `max_tokens`; a
+budget of 96 can produce `finish_reason=length` with empty `content`. The player defaults
+to `max_tokens=2048` and doubles the budget (up to 8192, at most 3 attempts) when content is
+empty or truncated before falling back to rules. Override with
+`UNDERCOVER_LLM_MAX_TOKENS`, `UNDERCOVER_LLM_MAX_TOKENS_CEILING`, and
+`UNDERCOVER_LLM_MAX_ATTEMPTS`.
+
+On hosts where Python's default CA chain fails with `CERTIFICATE_VERIFY_FAILED`, run with
+`SSL_CERT_FILE=/etc/ssl/cert.pem ./run.sh`. Never disable certificate verification.

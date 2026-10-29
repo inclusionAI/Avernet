@@ -48,6 +48,19 @@ def _env_flag(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env_int(name: str, default: int, *, minimum: int) -> int:
+    text = os.environ.get(name, "").strip()
+    if not text:
+        return default
+    try:
+        value = int(text)
+    except ValueError as error:
+        raise ValueError(f"{name} must be an integer") from error
+    if value < minimum:
+        raise ValueError(f"{name} must be >= {minimum}")
+    return value
+
+
 @dataclass(frozen=True)
 class PlayerConfig:
     """一次玩家进程的不可变配置。
@@ -74,6 +87,11 @@ class PlayerConfig:
     llm_api_key: str | None = None
     llm_model: str | None = None
     llm_timeout_seconds: float = 45.0
+    # DeepSeek Flash 等推理模型会把 reasoning token 计入 max_tokens；96 会在
+    # 生成最终一句话前就被截断，表现为 finish_reason=length 且 content 为空。
+    llm_max_tokens: int = 2048
+    llm_max_tokens_ceiling: int = 8192
+    llm_max_attempts: int = 3
     heartbeat_seconds: float = 60.0
     reconnect_initial_seconds: float = 1.0
     reconnect_max_seconds: float = 30.0
@@ -88,6 +106,11 @@ class PlayerConfig:
             raise ValueError("UNDERCOVER_LLM_TIMEOUT_SECONDS must be a number") from error
         if llm_timeout <= 0:
             raise ValueError("UNDERCOVER_LLM_TIMEOUT_SECONDS must be positive")
+        max_tokens = _env_int("UNDERCOVER_LLM_MAX_TOKENS", 2048, minimum=64)
+        ceiling = _env_int("UNDERCOVER_LLM_MAX_TOKENS_CEILING", 8192, minimum=64)
+        if ceiling < max_tokens:
+            raise ValueError("UNDERCOVER_LLM_MAX_TOKENS_CEILING must be >= UNDERCOVER_LLM_MAX_TOKENS")
+        attempts = _env_int("UNDERCOVER_LLM_MAX_ATTEMPTS", 3, minimum=1)
         return cls(
             bcs_url=os.environ.get("UNDERCOVER_BCS_URL", "http://127.0.0.1:21000").strip(),
             ws_url=os.environ.get("UNDERCOVER_BCS_WS_URL", "").strip() or None,
@@ -104,6 +127,9 @@ class PlayerConfig:
             llm_api_key=_optional_env("UNDERCOVER_LLM_API_KEY", "OPENCLAW_OPENAI_API_KEY"),
             llm_model=_optional_env("UNDERCOVER_LLM_MODEL", "OPENCLAW_OPENAI_MODEL_ID"),
             llm_timeout_seconds=llm_timeout,
+            llm_max_tokens=max_tokens,
+            llm_max_tokens_ceiling=ceiling,
+            llm_max_attempts=attempts,
             rules_only=_env_flag("UNDERCOVER_RULES_ONLY"),
         )
 

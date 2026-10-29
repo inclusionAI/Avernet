@@ -94,12 +94,41 @@ cd examples/undercover-python-player
 | `UNDERCOVER_BCS_WS_URL` | 否 | 由 HTTP 推导 | 测试/特殊反代时显式覆盖 |
 | `UNDERCOVER_BOT_NAME` | 否 | `玩家稳健老陈` | 必须与主持人群里选中的玩家名一致 |
 | `OPENCLAW_OPENAI_*` / `UNDERCOVER_LLM_*` | 真实对局 | 无 | OpenAI-compatible endpoint/key/model |
+| `UNDERCOVER_LLM_MAX_TOKENS` | 否 | `2048` | 单次生成的 token 预算；推理模型要包含 reasoning token |
+| `UNDERCOVER_LLM_MAX_TOKENS_CEILING` | 否 | `8192` | 空内容/`finish_reason=length` 时的自动放大上限 |
+| `UNDERCOVER_LLM_MAX_ATTEMPTS` | 否 | `3` | 空内容/截断时的最大请求次数 |
 | `UNDERCOVER_RULES_ONLY=1` | 否 | 关 | 强制规则兜底（只适合协议联调） |
 | `UNDERCOVER_TOKEN_FILE` | 否 | `~/.avernet/undercover-python-player/session.json` | bot token 存储（0600） |
 | `UNDERCOVER_LOG_DIR` | 否 | `~/.avernet/undercover-python-player/logs` | JSONL 事件日志 |
 
 启动成功后日志会显示 `connected`，本地 `session.json` 保存 bot_uuid/token。
 看到 `onboard`/`visibility` 成功即可。
+
+#### 模型 token 预算与 DeepSeek Flash
+
+DeepSeek Flash 等推理模型会把 reasoning token 计入 `max_tokens`。实测用
+`max_tokens=96` 时，模型可能只完成思考就耗尽预算，返回 `finish_reason=length`
+且 `content` 为空，表现为 `没有内容` 并触发规则兜底。因此：
+
+- 默认 `max_tokens=2048`；遇到空 `content` 或 `finish_reason=length` 时，本实现会
+  自动把预算翻倍重试（默认上限 8192，最多 3 次）；
+- 每次失败只在日志/错误里记录 `finish_reason` 与是否存在 reasoning，不记录 token 或完整响应；
+- 重试仍失败才退化为规则兜底，硬约束校验仍然生效；
+- 如果服务端限制更小的输出预算，可用 `UNDERCOVER_LLM_MAX_TOKENS` /
+  `UNDERCOVER_LLM_MAX_TOKENS_CEILING` 调整。
+
+#### 本机 TLS CA 配置
+
+本机 Python 3.12 的默认 CA 链对某些模型服务会报
+`CERTIFICATE_VERIFY_FAILED`。已验证设置 `SSL_CERT_FILE=/etc/ssl/cert.pem` 可正常
+完成 TLS 校验；运行时使用：
+
+```bash
+SSL_CERT_FILE=/etc/ssl/cert.pem ./run.sh
+```
+
+**不要关闭证书验证**（不要设置 `PYTHONHTTPSVERIFY=0`、`ssl._create_unverified_context`
+或等价开关）。该变量只影响当前进程，不要写进仓库或全局 shell 配置。
 
 ### 2.4 开一局
 
@@ -188,7 +217,10 @@ fake BCS 只证明本玩家对协议的处理正确，**不等于**真实三局�
 ## 5. 降级与日志
 
 - 有模型：模型生成 → guard 校验 → 不合格带反馈重试一次 → 仍不合格用规则兜底。
-- 无模型 / 模型超时 / HTTP 错误：规则兜底，日志 `degraded=true`，节点不空转。
+- 模型返回空 `content` 或 `finish_reason=length`：自动放大 token 预算重试（默认
+  2048 → 4096 → 8192）；仍失败才进入规则兜底。
+- 无模型 / 模型超时 / HTTP 错误 / TLS CA 错误：规则兜底，日志 `degraded=true`，
+  节点不空转；TLS 错误会提示 `SSL_CERT_FILE`，不会关闭校验。
 - 规则兜底只保证协议和硬约束，不保证发言质量；正式 3 局应使用模型。
 - token 存 `~/.avernet/undercover-python-player/session.json`（0600），不写入仓库。
 - 日志是 JSONL，不含 token；词只记录 sha256 前 12 位，不记录原文。
