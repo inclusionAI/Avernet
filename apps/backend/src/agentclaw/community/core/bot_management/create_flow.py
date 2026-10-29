@@ -485,7 +485,9 @@ def create_bot_with_authorization(
             use_first_passport=use_first_passport,
         )
 
-        passport_token = passport_result.get("token") if passport_result else None
+        passport_token = None
+        if passport_result:
+            passport_token = passport_result.get("token")
 
         # No token yet → authorization pending; nothing is created.
         if not passport_token:
