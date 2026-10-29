@@ -123,14 +123,24 @@ _CLAUDE_CODE_IDENTITY = "CLAUDE.md"
 _CREATION_TRIGGERS = frozenset({CREATE_PRE_CONTAINER_TRIGGER, CREATE_ON_CONTAINER_TRIGGER})
 _BOT_UP = frozenset({"ACTIVE"})
 _BOT_DEAD = frozenset({"FAILED", "DELETED", "INACTIVE"})
+#: The create job's ``Fail`` reason when the authorization ended terminally
+#: without the service issuing the license (create_job: "Declined, expired,
+#: or anything else terminal the service reports"). The reason carries the
+#: service's own status after the colon — the only place a genuine human
+#: rejection is named.
+_AUTHORIZATION_INCOMPLETE_PREFIX = "authorization did not complete:"
 
-# Upper bound on one engine chat round trip. It matches the swarm's own
-# slice budget (``orchestration.slice_max_seconds``/the ready-poll
-# deadline, 300s): a chat that has not answered by then cannot still
-# count. Keeps the blocked bridge thread from waiting forever on a hung
-# engine WebSocket, and bounds every receive slice in the recv loop so a
-# cancelled chat unwinds within one slice even while a socket recv hangs.
-_CHAT_TIMEOUT_SECONDS = 300.0
+# Upper bound on one engine chat round trip. It follows the swarm's own
+# per-attempt task budget (``orchestration.per_attempt_timeout``, 1800s
+# after the durable-persona raise; setup 900 + chat 1800 = 2700 still fits
+# the 3600s slice room): a long-running coding/review turn may legitimately
+# need the whole attempt budget, so capping the bridge at the old 300s
+# slice cadence killed healthy chats mid-turn and burned the retry budget
+# on fresh personas + fresh authorization gates. Keeps the blocked bridge
+# thread from waiting forever on a hung engine WebSocket, and bounds every
+# receive slice in the recv loop so a cancelled chat unwinds within one
+# slice even while a socket recv hangs.
+_CHAT_TIMEOUT_SECONDS = 1800.0
 
 # One receive slice inside the recv loop. Each slice sits well under the
 # conversation deadline; the loop re-checks the shared cancel event every
@@ -508,7 +518,19 @@ class AvernetBotPlatform(BotPlatform):
                 return BotState.AUTHORIZATION_EXPIRED.value
             if last_error.startswith(BOT_COULD_NOT_BE_PROVISIONED):
                 return BotState.CREATE_FAILED.value
-            return BotState.AUTHORIZATION_REJECTED.value
+            if last_error.startswith(_AUTHORIZATION_INCOMPLETE_PREFIX):
+                # The authorization's own terminal status, verbatim from the
+                # service — classify by what the service said, never by a
+                # default: anything but a reported REJECTED is not a human
+                # decline, and stamping REJECTED on it attributes to the user
+                # a decision they never made.
+                tail = last_error[len(_AUTHORIZATION_INCOMPLETE_PREFIX):].strip()
+                if tail == "REJECTED":
+                    return BotState.AUTHORIZATION_REJECTED.value
+                if tail == "EXPIRED":
+                    return BotState.AUTHORIZATION_EXPIRED.value
+                return BotState.CREATE_FAILED.value
+            return BotState.CREATE_FAILED.value
 
         bot_status_ = str(bot.get("status") or "")
         if bot_status_ in _BOT_DEAD:

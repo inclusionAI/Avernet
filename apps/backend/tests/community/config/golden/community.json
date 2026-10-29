@@ -6,6 +6,9 @@
     "agentswarm": {
       "artifact_store_root": "${AGENTSWARM_ARTIFACT_ROOT:-/tmp/agentswarm/artifacts}",
       "enabled": true,
+      "executor": {
+        "bot_chat_timeout_seconds": 1800
+      },
       "llm": {
         "base_url": "${AGENTSWARM_LLM_BASE_URL:-${LLM_BASE_URL:-}}",
         "model": "${AGENTSWARM_LLM_MODEL:-${LLM_BALANCED_MODEL:-glm-5.2}}",
