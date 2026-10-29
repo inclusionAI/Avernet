@@ -112,7 +112,7 @@ export function unwrapEnvelope<T>(env: Envelope<T>): T {
 /**
  * 构造任务指令消息列表，发给会话由 bot/skill 解析触发任务（多轮对齐补齐标题/目标/验收后开副屏）。
  * 一个任务只能绑一个 workflow_id，故逐胶囊出一条指令、各发起一个任务；输入正文作为每条任务的指令。
- * - 动态任务：/task-loop {指令}
+ * - 动态任务：/task-intent-recognition {指令}
  * - 工作流任务：/task workflow_id='{workflowId}' {指令}
  */
 export function buildTaskInstructions(content: string, selections: ComposerSelection[]): string[] {
@@ -120,6 +120,6 @@ export function buildTaskInstructions(content: string, selections: ComposerSelec
   return selections.map((selection) =>
     selection.kind === 'workflow'
       ? `/task workflow_id='${selection.workflow.command ?? selection.workflow.workflowId}' ${text}`
-      : `/task-loop ${text}`,
+      : `/task-intent-recognition ${text}`,
   );
 }
