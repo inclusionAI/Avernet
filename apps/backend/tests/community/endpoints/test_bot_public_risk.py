@@ -67,9 +67,9 @@ def seed(world):
 
 def headers():
     now = int(time.time())
-    token = jwt.encode({"iss": "gateway", "aud": "backend", "iat": now, "exp": now + 3600,
+    principal_header_value = jwt.encode({"iss": "gateway", "aud": "backend", "iat": now, "exp": now + 3600,
                         "principals": [{"type": "user", "subject": {"id": OWNER, "username": OWNER}, "resolved_by": {"method": "buc"}}]}, KEY, algorithm="HS256")
-    return {PRINCIPAL_HEADER: token, "x-user-id": OWNER}
+    return {PRINCIPAL_HEADER: principal_header_value, "x-user-id": OWNER}
 
 
 for surface in ("legacy", "openapi"):
