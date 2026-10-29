@@ -16,6 +16,7 @@ const topic: CommunityTopic = {
   likeCount: 7,
   latestActivityAt: '2026-10-06T06:20:00Z',
   createdAt: '2026-10-05T08:30:00Z',
+  isHot: false,
   isMine: false,
   canClose: false,
   canEdit: false,
@@ -85,6 +86,17 @@ describe('CommunityTopicList', () => {
     expect(screen.getByLabelText(`点赞 ${interactionSummary.likeCount}`)).toBeInTheDocument();
     expect(screen.getByLabelText(`收藏 ${interactionSummary.favoriteCount}`)).toBeInTheDocument();
     expect(screen.getByLabelText(`回复 ${topic.replyCount}`)).toBeInTheDocument();
+  });
+
+  test('热榜主题显示火焰标记，普通主题不显示', () => {
+    const { unmount } = renderList({ topics: [{ ...topic, isHot: true }] });
+    expect(screen.getByText('🔥')).toBeInTheDocument();
+    expect(screen.getByText('热榜主题')).toBeInTheDocument();
+    unmount();
+
+    renderList({ topics: [topic] });
+    expect(screen.queryByText('🔥')).not.toBeInTheDocument();
+    expect(screen.queryByText('热榜主题')).not.toBeInTheDocument();
   });
 
   test('投票主题列表标记投票类型', () => {

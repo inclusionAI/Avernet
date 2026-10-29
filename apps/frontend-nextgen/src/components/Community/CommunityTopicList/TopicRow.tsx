@@ -70,6 +70,12 @@ export function TopicRow({
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <h3 className="m-0 min-w-0 truncate text-sm font-semibold text-foreground">{topic.title}</h3>
+          {topic.isHot ? (
+            <span className="text-sm" aria-hidden>
+              🔥
+            </span>
+          ) : null}
+          {topic.isHot ? <span className="sr-only">热榜主题</span> : null}
           {topic.topicType === 'poll' ? <PollTypeIcon className="size-4" /> : null}
           {topic.topicType === 'share' ? (
             <Paperclip
