@@ -143,6 +143,7 @@ class RunOptions:
     slice_max_seconds: float | None = None
     per_attempt_timeout_seconds: float | None = None
     setup_timeout_seconds: float | None = None
+    bot_chat_timeout_seconds: float | None = None
     max_turns: int | None = None
     max_total_agents: int | None = None
     max_width: int | None = None
@@ -157,6 +158,7 @@ class RunOptions:
             slice_max_seconds=dto.slice_max_seconds,
             per_attempt_timeout_seconds=dto.per_attempt_timeout_seconds,
             setup_timeout_seconds=dto.setup_timeout_seconds,
+            bot_chat_timeout_seconds=getattr(dto, "bot_chat_timeout_seconds", None),
             max_turns=dto.max_turns,
             max_total_agents=dto.max_total_agents,
             max_width=dto.max_width,
@@ -184,6 +186,7 @@ class RunOptions:
             slice_max_seconds=val("slice_max_seconds", float),
             per_attempt_timeout_seconds=val("per_attempt_timeout_seconds", float),
             setup_timeout_seconds=val("setup_timeout_seconds", float),
+            bot_chat_timeout_seconds=val("bot_chat_timeout_seconds", float),
             max_turns=val("max_turns", int),
             max_total_agents=val("max_total_agents", int),
             max_width=val("max_width", int),
@@ -196,6 +199,7 @@ class RunOptions:
             "slice_max_seconds": self.slice_max_seconds,
             "per_attempt_timeout_seconds": self.per_attempt_timeout_seconds,
             "setup_timeout_seconds": self.setup_timeout_seconds,
+            "bot_chat_timeout_seconds": self.bot_chat_timeout_seconds,
             "max_turns": self.max_turns,
             "max_total_agents": self.max_total_agents,
             "max_width": self.max_width,
@@ -239,7 +243,8 @@ class RunOptions:
     # Mirrors RunOptionsDTO's wire caps: submit validates live requests,
     # this re-clamps stale metadata rows that predate a schema change.
     _WIRE_MAX_TURNS_CAP = 999
-    _WIRE_MAX_TOTAL_AGENTS_CAP = 256
+    _WIRE_MAX_TOTAL_AGENTS_CAP = 64
+    _WIRE_BOT_CHAT_TIMEOUT_CAP = 3600.0
 
     def resolved_max_turns(self, config_value: int) -> int:
         """Effective orchestrator turn budget: the request replaces the
@@ -257,3 +262,13 @@ class RunOptions:
             return int(config_value)
         return max(1, min(int(self.max_total_agents),
                           self._WIRE_MAX_TOTAL_AGENTS_CAP))
+
+    def resolved_bot_chat_timeout(self, config_value: float) -> float:
+        """Effective engine-chat deadline: the request replaces the
+        deployment default within the wire cap. The runtime per-attempt
+        wait_for caps any remaining overflow — a run may give its chats
+        more room than the pod default, bounded only by slice math."""
+        if self.bot_chat_timeout_seconds is None:
+            return float(config_value)
+        return max(1.0, min(float(self.bot_chat_timeout_seconds),
+                            self._WIRE_BOT_CHAT_TIMEOUT_CAP))
