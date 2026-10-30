@@ -132,6 +132,8 @@ export interface PublicBot {
   isOwnedByLoggedInUser?: boolean;
   /** 智能搜索 Discovery 响应的推荐理由简述（recommendation.short_profile），名称搜索无此字段。 */
   shortProfile?: string;
+  /** Bot 生命周期状态（Catalog DTO status；'ACTIVE' 表示可用，缺失时按可用处理）。老版分享链接落地反查用它做可用性兜底。 */
+  status?: string;
   /**
    * 公开受众类型（由 BCS visibility / user_visibility 两维独立设置派生）：
    * 'user' = 仅对用户公开，'bot' = 仅对 Bot 公开；两类均公开或字段缺失时无值。
