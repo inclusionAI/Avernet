@@ -431,6 +431,24 @@ class GitSyncService(GitSyncSubtreeIO, GitSyncStorageIO, LifecycleBase, GitSyncS
                 "[GitSyncService] Bootstrap: clone path failed (%s), "
                 "falling back to OSS tar", e,
             )
+            # A failed bootstrap may leave a bare repo on disk in an otherwise
+            # usable state. Prefer the existing-repo repair path before any
+            # OSS download; the fallback refuses to overwrite an existing
+            # target and would otherwise turn repairable clones into both
+            # clone/fallback failures.
+            repair_error: str | None = None
+            if self.config.local_bare_repo.exists():
+                logger.info(
+                    "[GitSyncService] Bootstrap: existing bare repo found "
+                    "after failed clone path; repairing before OSS fallback"
+                )
+                repair_result = await self._bootstrap_existing_result(
+                    {"success": False, "method": "existing_repair_attempted"}
+                )
+                if repair_result["success"]:
+                    repair_result["method"] = "clone_existing_repaired"
+                    return repair_result
+                repair_error = repair_result.get("error")
             try:
                 await self._download_from_oss_and_extract()
                 logger.info("[GitSyncService] Bootstrap: OSS fallback download completed")
@@ -443,7 +461,10 @@ class GitSyncService(GitSyncSubtreeIO, GitSyncStorageIO, LifecycleBase, GitSyncS
                 return {
                     "success": False,
                     "method": "failed",
-                    "error": f"clone and fallback both failed: {fe}",
+                    "error": "; ".join(filter(None, [
+                        repair_error,
+                        f"clone and fallback both failed: {fe}",
+                    ])),
                 }
 
     async def _bootstrap_existing_result(

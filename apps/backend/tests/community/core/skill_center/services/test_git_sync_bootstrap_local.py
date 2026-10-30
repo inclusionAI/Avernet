@@ -286,3 +286,71 @@ def test_ensure_skills_subtree_ready_reports_extract_failure(tmp_path):
     assert result["success"] is False
     assert result["method"] == "existing_repair_failed"
     assert "extract boom" in result["error"]
+
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_clone_failure_repairs_existing_bare_repo(tmp_path):
+    """Clone path failure should prefer repairing the existing bare repo."""
+    svc = _service_for_bootstrap_branch(tmp_path)
+    svc.config.local_bare_repo = tmp_path / "aiworkbench.git"
+    svc.config.local_bare_repo.mkdir(parents=True, exist_ok=True)
+
+    svc._clone_bare_repo = AsyncMock(side_effect=RuntimeError("clone boom"))
+
+    async def _run_sync(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    svc._git_fetch = AsyncMock(return_value={"success": True})
+    svc._sync_subtree = AsyncMock(return_value={"success": True})
+    svc._run_sync = _run_sync
+    svc._download_from_oss_and_extract = AsyncMock()
+    svc._bootstrap_existing_result = AsyncMock(
+        return_value={
+            "success": True,
+            "method": "existing_repaired",
+            "subtree": {"updated": True},
+        }
+    )
+
+    try:
+        result = await svc._bootstrap_clone_or_fallback()
+    finally:
+        svc._executor.shutdown(wait=True)
+
+    assert result["success"] is True, result
+    assert result["method"] == "clone_existing_repaired", result
+    assert result["subtree"]["updated"] is True, result
+    assert svc.config.local_bare_repo.exists()
+    svc._bootstrap_existing_result.assert_awaited_once()
+    svc._download_from_oss_and_extract.assert_not_awaited()
+
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_clone_failure_propagates_repair_failure(tmp_path):
+    """Repair failure must not be hidden by the OSS fallback refusal."""
+    svc = _service_for_bootstrap_branch(tmp_path)
+    svc.config.local_bare_repo = tmp_path / "aiworkbench.git"
+    svc.config.local_bare_repo.mkdir(parents=True, exist_ok=True)
+    svc._clone_bare_repo = AsyncMock(side_effect=RuntimeError("clone boom"))
+    svc._download_from_oss_and_extract = AsyncMock(side_effect=RuntimeError("OSS fallback target already exists"))
+    svc._bootstrap_existing_result = AsyncMock(
+        return_value={
+            "success": False,
+            "method": "existing_repair_failed",
+            "error": "repair boom",
+        }
+    )
+
+    try:
+        result = await svc._bootstrap_clone_or_fallback()
+    finally:
+        svc._executor.shutdown(wait=True)
+
+    assert result["success"] is False, result
+    assert result["method"] != "clone_existing_repaired", result
+    assert "OSS fallback target already exists" in (result.get("error") or ""), result
+    assert svc.config.local_bare_repo.exists()
+    svc._bootstrap_existing_result.assert_awaited_once()
+    svc._download_from_oss_and_extract.assert_awaited_once()
