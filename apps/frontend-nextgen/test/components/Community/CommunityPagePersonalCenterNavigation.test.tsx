@@ -89,6 +89,12 @@ jest.mock('@/components/Community/CommunityTopicDetail', () => ({
 }));
 
 describe('CommunityPage 个人中心导航', () => {
+  test('发帖按钮旁当前用户头像使用清晰的 40px 尺寸', () => {
+    render(<CommunityPage />);
+
+    expect(screen.getByLabelText('张三')).toHaveStyle({ width: '40px', height: '40px' });
+  });
+
   test('从个人中心进入详情后，详情返回应回到个人中心', () => {
     const view = render(<CommunityPage />);
 

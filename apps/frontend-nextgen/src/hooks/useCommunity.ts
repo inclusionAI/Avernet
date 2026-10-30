@@ -8,7 +8,7 @@ import type {
 } from '@/domain/community/types';
 import { communityService } from '@/services/community';
 import { useCommunityStore } from '@/stores/communityStore';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useBotAuthorEnricher } from './useBotAuthorEnricher';
 import { useCommunityInteractions } from './useCommunityInteractions';
 import { useCommunityTopicDetail } from './useCommunityTopicDetail';
@@ -32,13 +32,17 @@ export function useCommunity() {
     : null;
   // BOT 作者名兜底：后端 §4.1 不返 BOT作者 display_name 时，用本人 owned bots 的 bot_name 兜底。
   const { enrichTopicBotAuthor, botNameById } = useBotAuthorEnricher(currentUserId);
-  const interactionViewer: ForumActorRef = {
-    actorType: 'HUMAN',
-    id: currentUserId || 'current-user',
-  };
+  const interactionViewer = useMemo<ForumActorRef>(
+    () => ({
+      actorType: 'HUMAN',
+      id: currentUserId || 'current-user',
+    }),
+    [currentUserId],
+  );
   const interactions = useCommunityInteractions({ viewer: interactionViewer });
   const topicList = useCommunityTopicList({
     currentUserId,
+    viewer: interactionViewer,
     enrichTopicBotAuthor,
     botNameById,
     refreshInteractions: interactions.refreshSummaries,

@@ -118,17 +118,18 @@ describe('CommunityPage 滚动容器结构', () => {
   test('主题类型筛选 tab 图标与发帖弹窗保持一致', () => {
     render(<CommunityPage />);
     const topicTypeGroup = screen.getByRole('group', { name: '主题类型' });
-    const expectedIcons: Record<string, string> = {
-      讨论: 'lucide-message-circle',
-      分享: 'lucide-share-2',
-      投票: 'lucide-chart-line',
-      求助: 'lucide-circle-question-mark',
+    const expectedIcons: Record<string, string[]> = {
+      关注: ['community-follow-icon', 'lucide-user-round-check'],
+      讨论: ['lucide-message-circle'],
+      分享: ['lucide-share-2'],
+      投票: ['lucide-chart-line'],
+      求助: ['lucide-circle-question-mark'],
     };
-    for (const [label, iconClass] of Object.entries(expectedIcons)) {
+    for (const [label, iconClasses] of Object.entries(expectedIcons)) {
       const icon = within(topicTypeGroup)
         .getByRole('button', { name: label })
         .querySelector('svg');
-      expect(icon).toHaveClass(iconClass);
+      expect(icon).toHaveClass(...iconClasses);
     }
   });
 

@@ -1,7 +1,7 @@
 import { communityErrorMessage } from '@/domain/community/errors';
 import { buildTopicListSummaryQueries } from '@/domain/community/interactionQueries';
 import { COMMUNITY_PAGE_SIZE } from '@/domain/community/constants';
-import type { CommunityTopic } from '@/domain/community/types';
+import type { CommunityTopic, ForumActorRef } from '@/domain/community/types';
 import { communityService } from '@/services/community';
 import type { UseCommunityInteractionsResult } from './useCommunityInteractions';
 import { useCommunityStore } from '@/stores/communityStore';
@@ -9,11 +9,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 export function useCommunityTopicList({
   currentUserId,
+  viewer,
   enrichTopicBotAuthor,
   botNameById,
   refreshInteractions,
 }: {
   currentUserId: string;
+  viewer: ForumActorRef;
   enrichTopicBotAuthor: (topic: CommunityTopic) => CommunityTopic;
   botNameById: Record<string, string>;
   refreshInteractions: UseCommunityInteractionsResult['refreshSummaries'];
@@ -60,7 +62,7 @@ export function useCommunityTopicList({
         const items = page.items.map(enrichTopicBotAuthor);
         setTopics(items, page.total);
         setHasMore(items.length > 0 && items.length < page.total);
-        await refreshInteractions(buildTopicListSummaryQueries(items));
+        await refreshInteractions(buildTopicListSummaryQueries(items, viewer));
       }
     } catch (error) {
       if (requestId === requestRef.current) {
@@ -71,6 +73,7 @@ export function useCommunityTopicList({
     }
   }, [
     currentUserId,
+    viewer,
     enrichTopicBotAuthor,
     refreshInteractions,
     query,
@@ -120,7 +123,7 @@ export function useCommunityTopicList({
       });
       const appended = page.items.map(enrichTopicBotAuthor);
       appendTopics(appended);
-      await refreshInteractions(buildTopicListSummaryQueries(appended));
+      await refreshInteractions(buildTopicListSummaryQueries(appended, viewer));
       const loaded = previousCount + appended.length;
       setHasMore(appended.length > 0 && loaded < page.total);
     } catch (error) {
@@ -131,6 +134,7 @@ export function useCommunityTopicList({
   }, [
     appendTopics,
     currentUserId,
+    viewer,
     enrichTopicBotAuthor,
     hasMore,
     refreshInteractions,
