@@ -15,6 +15,7 @@ from agentclaw.community.core.repository.protocols.identity import (
     CallerIdentityRepositoryProtocol,
 )
 from agentclaw.community.log import get_logger
+from agentclaw.community.plugin_api.passport import PassportError
 from agentclaw.community.plugin_api.passport import (
     McpScopeItem,
     PassportPlugin,
@@ -107,9 +108,23 @@ class CliPassportScopeReconciler:
         )
         try:
             snapshot = self._build_snapshot(bot, requested_cli_identity_modes)
+        except Exception as exc:
+            logger.error(
+                "cli_passport_reconcile_failed bot_id=%s engine_type=%s error_type=%s duration_ms=%s",
+                bot_id, engine_type, type(exc).__name__, int((time.monotonic() - started) * 1000),
+            )
+            raise
+        try:
             updated = snapshot.changed or force_update
             if updated:
                 self._write(bot_id=bot_id, owner_id=owner_id, engine_type=engine_type, snapshot=snapshot)
+        except PassportError as exc:
+            updated = False
+            logger.warning(
+                "cli_passport_reconcile_degraded bot_id=%s engine_type=%s "
+                "status=degraded error_type=%s duration_ms=%s",
+                bot_id, engine_type, type(exc).__name__, int((time.monotonic() - started) * 1000),
+            )
         except Exception as exc:
             logger.error(
                 "cli_passport_reconcile_failed bot_id=%s engine_type=%s error_type=%s duration_ms=%s",
