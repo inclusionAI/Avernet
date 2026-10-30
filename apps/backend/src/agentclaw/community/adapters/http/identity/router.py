@@ -23,7 +23,7 @@ from agentclaw.community.core.bot_collaborator.interceptor.base import with_inte
 from agentclaw.community.core.bot_collaborator.interceptor.collaborator import (
     CollaboratorPermissionInterceptor,
 )
-from agentclaw.community.core.devices.services.device_context import (
+from agentclaw.community.core.devices.errors import (
     DeviceConnectionUnavailableError,
 )
 from agentclaw.community.core.services.identity import (
