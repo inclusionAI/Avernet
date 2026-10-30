@@ -337,6 +337,7 @@ pub use bcs_domain::{
 
 // Note: bcs-bot-connectors has been removed. Bot communication uses the streaming adapter.
 
+pub use port::repo::{StateMachineRunResultPayload, StateMachineRunResultCheckpoint, StateMachineRunResultStatus, StateMachineRunResultClaim, StateMachineRunResultOutcome, StateMachineRunResultTerminal, StateMachineRunTerminalReason, StateMachineRunFailedNode, STATE_MACHINE_RUN_RESULT_HEADER};
 pub use port::repo::{StateMachineChatResultPayload, StateMachineChatResultCheckpoint, StateMachineChatResultStatus, StateMachineChatResultClaim, StateMachineChatResultOutcome};
 
 pub use port::repo::{StateMachineTerminalImPayload, StateMachineTerminalImProgress, StateMachineTerminalImDelivery, StateMachineTerminalImStatus, StateMachineTerminalImCheckpoint, StateMachineTerminalImClaim};

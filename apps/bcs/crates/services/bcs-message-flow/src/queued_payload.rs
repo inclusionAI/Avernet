@@ -177,10 +177,11 @@ pub async fn read_bounded_queued_payload(
     })
 }
 
-// One-shot results retain the original history string rather than a Group
-// inbound envelope. Both Send sources and later bound Injects use this shape.
+// One-shot results (a Run's chat result or a manager RunResult) retain the
+// original history string rather than a Group inbound envelope. Both Send
+// sources and later bound Injects use this shape.
 fn canonical_text(message: &bcs_domain::PersistedMessage) -> Result<&str, String> {
-    if message.message_type == "chat"
+    if (message.message_type == "chat" || message.message_type == bcs_domain::RUN_RESULT_MESSAGE_TYPE)
         && message.visibility_domain == Some(bcs_domain::MessageVisibilityDomain::StateMachine)
         && let Some(text) = message.content.as_str() {
         return Ok(text);

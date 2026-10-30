@@ -944,6 +944,14 @@ pub trait CollaborationRuntimeService: Send + Sync {
         Err(CollaborationRuntimeError::InvalidRequest("terminal IM recovery is not configured".into()))
     }
 
+    /// Deliver persisted manager RunResult intents of failed or aborted Runs.
+    /// Uses an independent bounded Run cursor; no Run outcome changes.
+    async fn recover_state_machine_run_results(&self, after_run_id: Option<String>, limit: usize)
+        -> Result<StateMachineProgressionRecoveryPage, CollaborationRuntimeError> {
+        let _ = (after_run_id, limit);
+        Err(CollaborationRuntimeError::InvalidRequest("RunResult recovery is not configured".into()))
+    }
+
     /// Complete still-Running Service Sessions from their terminal Run's saved
     /// result and activation, preserving normal callback dispatch and preparing
     /// terminal IM intents before the Session leaves the recovery page.

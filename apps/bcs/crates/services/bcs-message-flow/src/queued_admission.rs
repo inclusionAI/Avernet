@@ -597,6 +597,10 @@ pub fn prepare_message_event(
     let Some(factory) = flow.event_record_factory.as_ref() else {
         return Ok(None);
     };
+    if message.message_type == bcs_domain::RUN_RESULT_MESSAGE_TYPE {
+        // Bot-only: humans learn about the Run from state_machine.run.* Events.
+        return Ok(None);
+    }
     let mut content = message.content.clone();
     if let Some(attachments) = content
         .get_mut("attachments")

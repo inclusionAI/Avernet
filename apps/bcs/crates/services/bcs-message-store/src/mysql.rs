@@ -462,6 +462,7 @@ impl MessageRepoPort for MySqlMessageStore {
             "group_id = ?".to_string(),
             "session_id = ?".to_string(),
             "message_type <> 'run_reply'".to_string(),
+            "message_type <> 'run_result'".to_string(),
         ];
 
         if !query.human_view.as_ref().is_some_and(|view| view.scope == bcs_domain::MessageViewScope::Participant) {
@@ -705,6 +706,7 @@ impl MessageRepoPort for MySqlMessageStore {
             "session_id = ?".to_string(),
             "env = ?".to_string(),
             "message_type <> 'run_reply'".to_string(),
+            "message_type <> 'run_result'".to_string(),
         ];
 
         match &owner_filter {

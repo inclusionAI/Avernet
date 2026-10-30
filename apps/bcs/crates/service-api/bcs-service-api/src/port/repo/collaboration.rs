@@ -164,6 +164,17 @@ pub enum StateMachineEventfulTransition {
         completed_at_ms: u64,
         event: AppendEventRecord,
     },
+    /// Move a Pending or Running Run to Failed or Aborted. The optional public
+    /// event and manager RunResult intent commit in the same local transaction,
+    /// so a crash after the CAS cannot lose the wake-up of the manager.
+    TerminateRun {
+        run_id: String,
+        status: StateMachineRunStatus,
+        error: Option<String>,
+        terminated_at_ms: u64,
+        event: Option<AppendEventRecord>,
+        result: Option<super::collaboration_run_result::StateMachineRunResultPayload>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -360,6 +371,36 @@ pub trait StateMachineRunRepoPort: Send + Sync {
     /// longer exists or matches. A same-activation Running Session is not stale.
     async fn supersede_terminal_im(&self, _run: &str) -> ServiceResult<bool> {
         Err(crate::ServiceError::InternalError("terminal IM retirement is not configured".into()))
+    }
+
+    /// Manager RunResult intent saved by `TerminateRun`.
+    async fn get_run_result(&self, _run: &str) -> ServiceResult<Option<super::collaboration_run_result::StateMachineRunResultCheckpoint>> {
+        Err(crate::ServiceError::InternalError("RunResult read is not configured".into()))
+    }
+    /// Run IDs after the exclusive cursor whose intent is Pending, or Delivering
+    /// with an expired lease. Zero limit returns empty.
+    async fn list_run_results_pending(&self, _after: Option<&str>, _limit: usize) -> ServiceResult<Vec<String>> {
+        Err(crate::ServiceError::InternalError("RunResult scan is not configured".into()))
+    }
+    /// Pending only, before the deadline, with an empty or expired lease.
+    async fn claim_run_result(&self, _run: &str, _owner: String, _now: u64, _until: u64) -> ServiceResult<Option<super::collaboration_run_result::StateMachineRunResultClaim>> {
+        Err(crate::ServiceError::InternalError("RunResult claim is not configured".into()))
+    }
+    /// Persist Pending -> Delivering before the publisher may send. Delivering
+    /// never returns to Pending unless the publisher proves nothing was sent.
+    async fn begin_run_result_send(&self, _claim: &super::collaboration_run_result::StateMachineRunResultClaim, _now: u64) -> ServiceResult<bool> {
+        Err(crate::ServiceError::InternalError("RunResult send barrier is not configured".into()))
+    }
+    /// Record the publisher outcome, fenced by owner, token and unexpired lease.
+    /// `Retry` returns the intent to Pending; every other outcome is terminal.
+    async fn finish_run_result(&self, _claim: &super::collaboration_run_result::StateMachineRunResultClaim,
+        _outcome: super::collaboration_run_result::StateMachineRunResultOutcome, _now: u64) -> ServiceResult<bool> {
+        Err(crate::ServiceError::InternalError("RunResult completion is not configured".into()))
+    }
+    /// Pending at the deadline becomes Expired; Delivering with an expired lease
+    /// becomes Failed because the send outcome is unknown. Nothing is resent.
+    async fn expire_run_result(&self, _run: &str, _now: u64) -> ServiceResult<bool> {
+        Err(crate::ServiceError::InternalError("RunResult expiry is not configured".into()))
     }
 
     /// Save immutable output, original Chat target and deadline before IO.

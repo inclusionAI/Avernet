@@ -6,6 +6,8 @@ mod collaboration_recovery;
 pub use collaboration_recovery::*;
 pub use collaboration_terminal_im::{StateMachineTerminalImPayload, StateMachineTerminalImProgress, StateMachineTerminalImDelivery, StateMachineTerminalImStatus, StateMachineTerminalImCheckpoint, StateMachineTerminalImClaim};
 pub mod collaboration_publication;
+pub mod collaboration_run_result;
+pub use collaboration_run_result::{StateMachineRunResultPayload, StateMachineRunResultCheckpoint, StateMachineRunResultStatus, StateMachineRunResultClaim, StateMachineRunResultOutcome, StateMachineRunResultTerminal, StateMachineRunTerminalReason, StateMachineRunFailedNode, STATE_MACHINE_RUN_RESULT_HEADER};
 pub use collaboration_publication::{StateMachineChatResultPayload, StateMachineChatResultCheckpoint, StateMachineChatResultStatus, StateMachineChatResultClaim, StateMachineChatResultOutcome};
 pub mod bot;
 pub mod bot_authority;

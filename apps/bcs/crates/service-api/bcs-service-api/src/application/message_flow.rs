@@ -393,6 +393,15 @@ pub trait MessageFlowService: Send + Sync {
         Err(service_not_configured("state-machine result publication"))
     }
 
+    /// Deliver a bot-only RunResult to the manager of a failed or aborted Run
+    /// through the Group queue (managed) or synchronous delivery (legacy).
+    async fn publish_state_machine_run_result(
+        &self,
+        _payload: crate::StateMachineRunResultPayload,
+    ) -> ServiceResult<crate::StateMachineRunResultOutcome> {
+        Err(service_not_configured("state-machine RunResult publication"))
+    }
+
     async fn handle_web_send(&self, cmd: WebSendCommand) -> ServiceResult<WebSendOutcome>;
 
     async fn handle_group_chat(&self, _cmd: GroupChatCommand) -> ServiceResult<GroupChatOutcome> {

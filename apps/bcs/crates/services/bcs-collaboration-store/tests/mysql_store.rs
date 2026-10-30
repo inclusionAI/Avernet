@@ -49,6 +49,9 @@ mod branch_skip;
 #[path = "support/failure_contract.rs"]
 mod failure_contract;
 
+#[path = "support/run_result_contract.rs"]
+mod run_result_contract;
+
 #[path = "support/judge_contract.rs"]
 mod judge_contract;
 

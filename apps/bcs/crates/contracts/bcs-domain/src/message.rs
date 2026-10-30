@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 
 /// Human-facing terminal failure projection; never Bot context or routed chat.
 pub const CHAT_ERROR_MESSAGE_TYPE: &str = "chat_error";
+/// Bot-only result for the manager of a failed or aborted StateMachine Run.
+/// Never part of human history, Workbench pushes or message Events.
+pub const RUN_RESULT_MESSAGE_TYPE: &str = "run_result";
 
 /// Business producer domain used to select the server-side projection.
 ///

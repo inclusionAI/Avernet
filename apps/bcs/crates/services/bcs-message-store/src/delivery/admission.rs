@@ -77,6 +77,24 @@ pub(crate) fn validate_admission(
         && command.message.sender_type == bcs_domain::SenderType::Bot
         && !command.message.run_id.is_empty()
         && command.message.content.is_string();
+    // A manager RunResult is the bot-only twin of a one-shot result: no message
+    // Event, never public, and addressed to exactly one Send target.
+    let run_result = command.message.message_type == bcs_domain::RUN_RESULT_MESSAGE_TYPE;
+    if run_result && (command.flow_kind != bcs_domain::message_delivery::DeliveryFlowKind::Group
+        || command.event.is_some()
+        || command.message.visibility_domain != bcs_domain::MessageVisibilityDomain::StateMachine
+        || command.message.audience != Some(bcs_domain::MessageAudience::FullOnly)
+        || command.message.sender_type != bcs_domain::SenderType::Bot
+        || command.message.run_id.is_empty()
+        || !command.message.content.is_string()
+        || command.targets.len() != 1
+        || command.targets[0].kind != DeliveryType::Send)
+    {
+        return Err(MessageDeliveryRepoError::Invalid(
+            "RunResult must be a bot-only Group Send with a run identity and no message event".into(),
+        ));
+    }
+    let state_machine_result = state_machine_result || run_result;
     if command.message_id.is_empty()
         || command.message.session_id.is_empty()
         || (!direct && command.message.group_id.is_empty())

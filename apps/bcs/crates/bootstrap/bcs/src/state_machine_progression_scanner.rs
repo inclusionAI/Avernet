@@ -59,6 +59,7 @@ async fn run(
     let mut cursor = None;
     let mut session_cursor = None;
     let mut im_cursor = None;
+    let mut result_cursor = None;
     let mut cleanup_cursor = None;
     let mut history_cursor = None;
     let mut history_due = tokio::time::Instant::now();
@@ -66,6 +67,7 @@ async fn run(
     let mut run_backoff = RecoveryBackoff::new(interval);
     let mut session_backoff = RecoveryBackoff::new(interval);
     let mut im_backoff = RecoveryBackoff::new(interval);
+    let mut result_backoff = RecoveryBackoff::new(interval);
     let mut cleanup_backoff = RecoveryBackoff::new(interval);
     let mut ticker = tokio::time::interval(interval);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -75,6 +77,7 @@ async fn run(
             cursor = None;
             session_cursor = None;
             im_cursor = None;
+            result_cursor = None;
             cleanup_cursor = None;
             history_cursor = None;
             continue;
@@ -82,10 +85,11 @@ async fn run(
         let run_page = when_ready(run_backoff.ready(), runtime.recover_state_machine_progression(cursor.clone(), batch_size));
         let session_page = when_ready(session_backoff.ready(), runtime.recover_state_machine_sessions(session_cursor.clone(), batch_size));
         let im_page = when_ready(im_backoff.ready(), runtime.recover_state_machine_terminal_im(im_cursor.clone(), batch_size));
+        let result_page = when_ready(result_backoff.ready(), runtime.recover_state_machine_run_results(result_cursor.clone(), batch_size));
         let cleanup_page = when_ready(cleanup_backoff.ready(), runtime.cleanup_state_machine_terminal_work(cleanup_cursor.clone(), batch_size));
         let history_page = when_ready(history_backoff.ready() && tokio::time::Instant::now() >= history_due,
             runtime.recover_state_machine_history(history_cursor.clone(), 100));
-        let scan = async { tokio::join!(run_page, session_page, im_page, cleanup_page, history_page) };
+        let scan = async { tokio::join!(run_page, session_page, im_page, cleanup_page, history_page, result_page) };
         tokio::pin!(scan);
         let result = loop {
             tokio::select! {
@@ -95,6 +99,7 @@ async fn run(
                         cursor = None;
                         session_cursor = None;
                         im_cursor = None;
+                        result_cursor = None;
                         cleanup_cursor = None;
                         history_cursor = None;
                         break None;
@@ -105,7 +110,23 @@ async fn run(
         // Demotion drops the in-flight page. Any completed CAS stays committed;
         // Bot requests with a send marker are not resent. An unsent checkpoint
         // or abandoned Judge lease can be claimed after expiry using saved input.
-        if let Some((runs, sessions, notifications, cleanup, history)) = result {
+        if let Some((runs, sessions, notifications, cleanup, history, run_results)) = result {
+            if let Some(run_results) = run_results {
+                match run_results {
+                    Ok(page) => {
+                        result_backoff.record_page(page.scanned, !page.failures.is_empty());
+                        result_cursor = page.next_run_id;
+                        for failure in page.failures {
+                            warn!(target: "state_machine_progression_scanner", run_id = %failure.run_id,
+                                error = %failure.error, "RunResult recovery failed");
+                        }
+                    }
+                    Err(error) => {
+                        result_backoff.record(true);
+                        warn!(target: "state_machine_progression_scanner", error = %error, "RunResult page failed");
+                    }
+                }
+            }
             if let Some(history) = history {
                 history_due = tokio::time::Instant::now() + Duration::from_secs(5);
                 match history {

@@ -37,7 +37,7 @@ impl CollaborationRuntime {
             Status::Superseded => return Ok(false),
             Status::Failed => {
                 let error = saved.error.ok_or_else(|| CollaborationRuntimeError::InvalidRequest("Chat result failure has no saved error".into()))?;
-                self.fail_run(run, format!("state-machine result publication failed: {error}")).await?;
+                self.fail_run(run, RunFailure::publication(format!("state-machine result publication failed: {error}"))).await?;
                 return Ok(false);
             }
             Status::Pending | Status::Delivering => {}
@@ -61,7 +61,7 @@ impl CollaborationRuntime {
             Status::Superseded => Ok(false),
             Status::Failed => {
                 let error = saved.error.ok_or_else(|| CollaborationRuntimeError::InvalidRequest("Chat result failure has no saved error".into()))?;
-                self.fail_run(run, format!("state-machine result publication failed: {error}")).await?;
+                self.fail_run(run, RunFailure::publication(format!("state-machine result publication failed: {error}"))).await?;
                 Ok(false)
             }
             Status::Pending | Status::Delivering => Ok(false),

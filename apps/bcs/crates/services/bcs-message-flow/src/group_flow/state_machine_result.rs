@@ -11,6 +11,11 @@ pub(super) struct ResultMessage {
 }
 
 impl ResultMessage {
+    /// A RunResult goes to the manager only: no Workbench push, no failure notice.
+    pub fn bot_only(&self) -> bool {
+        self.message.message_type == bcs_domain::RUN_RESULT_MESSAGE_TYPE
+    }
+
     pub fn validate(&self, saved: &PersistedMessage) -> ServiceResult<()> {
         let wanted = &self.message;
         if saved.group_id != wanted.group_id || saved.session_id != wanted.session_id

@@ -95,6 +95,9 @@ mod one_shot;
 #[path = "runtime_progression/result_publication.rs"]
 mod result_publication;
 
+#[path = "runtime_progression/run_result.rs"]
+mod run_result;
+
 #[path = "runtime_progression/human_input_activation.rs"]
 mod human_input_activation;
 

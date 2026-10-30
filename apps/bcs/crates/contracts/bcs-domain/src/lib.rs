@@ -83,6 +83,7 @@ pub use group_id::{
 };
 pub use message::{
     CHAT_ERROR_MESSAGE_TYPE,
+    RUN_RESULT_MESSAGE_TYPE,
     BCS_SESSION_OPENING_MESSAGE_SENDER, BCS_SESSION_OPENING_MESSAGE_SENDER_NAME,
     BCS_STATE_MACHINE_MESSAGE_SENDER, BCS_STATE_MACHINE_MESSAGE_SENDER_NAME, DeliveryType,
     GroupMessage, GroupMessageType, HumanMessageView, MessageAttachment, MessageAudience, MessageOwnerFilter,

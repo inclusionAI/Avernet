@@ -88,6 +88,10 @@ async fn exercise(db: Arc<MysqlDbPlugin>, snapshot: StateMachineRunSnapshot) -> 
     assert_eq!(store.get_run(&gap.run_id).await?.unwrap().status, StateMachineRunStatus::Pending);
     assert!(store.get_startup_failure(&gap.run_id).await?.is_none());
     db.execute(DbStatement::new("ALTER TABLE bcs_collaboration_delivery_checkpoints DROP CHECK reject_gap_failure")).await?;
+    run_result_contract::contract(&store, None).await;
+    run_result_contract::rollback_contract(&store, db.as_ref()).await;
+    db.execute(DbStatement::new(run_result_contract::HISTORY_SESSION)).await?;
+    run_result_contract::history_contract(&bcs_message_store::MySqlMessageStore::new(db.clone(), "test".into())).await;
 
     terminal_im_contract::terminal_im_contract(&store, &bcs_session_store::MySqlSessionStore::new(db.clone(), "test".into())).await;
     db.execute(DbStatement::new("INSERT INTO bcs_group_sessions (env, group_id, session_id, session_kind, status, input, activation_count, participants) VALUES ('test', 'opening-group', 'opening-session', 'chat', 'running', '{}', 1, '[]')")).await?;

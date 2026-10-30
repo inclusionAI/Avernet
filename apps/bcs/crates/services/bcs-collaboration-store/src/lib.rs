@@ -36,6 +36,7 @@ use bcs_service_api::port::repo::collaboration_history::*;
 mod opening;
 mod dispatch;
 mod publication;
+mod run_result;
 mod terminal_im;
 mod recovery_gap;
 mod terminal_cleanup;
@@ -97,6 +98,7 @@ struct StoreInner {
     openings: BTreeMap<String, bcs_service_api::StateMachineOpeningCheckpoint>,
     dispatches: BTreeMap<String, StateMachineDispatchCheckpoint>,
     publications: BTreeMap<String, bcs_service_api::StateMachineChatResultCheckpoint>,
+    run_results: BTreeMap<String, bcs_service_api::StateMachineRunResultCheckpoint>,
     startup_failures: BTreeMap<String, bcs_service_api::StateMachineStartupFailure>,
     terminal_notifications: BTreeMap<String, bcs_service_api::StateMachineTerminalImCheckpoint>,
     judge_leases: BTreeMap<(String, String), judge::JudgeLease>,
@@ -406,6 +408,12 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
     async fn finish_chat_result(&self, claim: &bcs_service_api::StateMachineChatResultClaim, outcome: bcs_service_api::StateMachineChatResultOutcome, now: u64) -> ServiceResult<bool> { self.finish_publication(claim, outcome, now).await }
     async fn expire_chat_result(&self, run: &str, now: u64) -> ServiceResult<bool> { self.expire_publication(run, now).await }
     async fn release_chat_result(&self, claim: &bcs_service_api::StateMachineChatResultClaim) -> ServiceResult<bool> { self.release_publication(claim).await }
+    async fn get_run_result(&self, run: &str) -> ServiceResult<Option<bcs_service_api::StateMachineRunResultCheckpoint>> { self.run_result_get(run).await }
+    async fn list_run_results_pending(&self, after: Option<&str>, limit: usize) -> ServiceResult<Vec<String>> { self.run_result_list_pending(after, limit).await }
+    async fn claim_run_result(&self, run: &str, owner: String, now: u64, until: u64) -> ServiceResult<Option<bcs_service_api::StateMachineRunResultClaim>> { self.run_result_claim(run, owner, now, until).await }
+    async fn begin_run_result_send(&self, claim: &bcs_service_api::StateMachineRunResultClaim, now: u64) -> ServiceResult<bool> { self.run_result_begin(claim, now).await }
+    async fn finish_run_result(&self, claim: &bcs_service_api::StateMachineRunResultClaim, outcome: bcs_service_api::StateMachineRunResultOutcome, now: u64) -> ServiceResult<bool> { self.run_result_finish(claim, outcome, now).await }
+    async fn expire_run_result(&self, run: &str, now: u64) -> ServiceResult<bool> { self.run_result_expire(run, now).await }
 
     async fn save_node_dispatch(&self, payload: StateMachineDispatchPayload) -> ServiceResult<bool> { self.save_dispatch(payload).await }
     async fn get_node_dispatch(&self, run: &str, node: &str, attempt: i32) -> ServiceResult<Option<StateMachineDispatchCheckpoint>> { self.get_dispatch(run, node, attempt).await }
@@ -1136,6 +1144,7 @@ fn state_machine_transition_events(
         | StateMachineEventfulTransition::CompleteNode { event, .. }
         | StateMachineEventfulTransition::ScheduleNodeRetry { event, .. }
         | StateMachineEventfulTransition::CompleteRun { event, .. } => vec![event.clone()],
+        StateMachineEventfulTransition::TerminateRun { event, .. } => event.iter().cloned().collect(),
     }
 }
 
@@ -1293,6 +1302,33 @@ fn apply_memory_state_machine_transition(
             run.error = None;
             run.updated_at = *completed_at_ms;
             run.completed_at = Some(*completed_at_ms);
+            Ok(true)
+        }
+        StateMachineEventfulTransition::TerminateRun {
+            run_id,
+            status,
+            error,
+            terminated_at_ms,
+            result,
+            ..
+        } => {
+            if !matches!(status, StateMachineRunStatus::Failed | StateMachineRunStatus::Aborted) {
+                return Err(ServiceError::InternalError("TerminateRun requires Failed or Aborted".into()));
+            }
+            let run = inner.runs.get_mut(run_id).ok_or_else(|| {
+                ServiceError::InternalError(format!("state machine run not found: {run_id}"))
+            })?;
+            if !matches!(run.status, StateMachineRunStatus::Pending | StateMachineRunStatus::Running) {
+                return Ok(false);
+            }
+            run.status = *status;
+            run.output = None;
+            run.error = error.clone();
+            run.updated_at = *terminated_at_ms;
+            run.completed_at = Some(*terminated_at_ms);
+            if let Some(payload) = result {
+                run_result::insert_memory_run_result(inner, run_id, payload)?;
+            }
             Ok(true)
         }
     }
@@ -2000,6 +2036,53 @@ impl GroupRuntimeBindingRepoPort for MySqlCollaborationStore {
     }
 }
 
+impl MySqlCollaborationStore {
+    /// Terminal CAS, optional public Event and optional RunResult intent in one
+    /// local transaction. A lost CAS commits nothing and returns false.
+    async fn commit_terminate_run(
+        &self,
+        run_id: &str,
+        status: StateMachineRunStatus,
+        error: Option<&str>,
+        terminated_at_ms: u64,
+        event: Option<&bcs_service_api::port::repo::AppendEventRecord>,
+        result: Option<&bcs_service_api::StateMachineRunResultPayload>,
+    ) -> ServiceResult<bool> {
+        if !matches!(status, StateMachineRunStatus::Failed | StateMachineRunStatus::Aborted) {
+            return Err(ServiceError::InternalError("TerminateRun requires Failed or Aborted".into()));
+        }
+        let mut steps = vec![DbTransactionStep::Execute(DbStatement::with_params(
+            format!(
+                "UPDATE bcs_state_machine_runs SET status = ?, output_text = NULL, error_message = ?, \
+                 updated_at_ms = ?, completed_at_ms = ?, {} WHERE env = ? AND run_id = ? \
+                 AND status IN ('pending', 'running') AND record_status = 'active'",
+                self.flavor.set_modified_now()
+            ),
+            vec![
+                DbValue::from(run_status_to_str(status)),
+                DbValue::from(error),
+                DbValue::from(terminated_at_ms),
+                DbValue::from(terminated_at_ms),
+                DbValue::from(self.env.as_str()),
+                DbValue::from(run_id),
+            ],
+        ).with_transaction_stop_on_no_rows())];
+        if let Some(payload) = result {
+            steps.push(self.run_result_insert_step(run_id, payload)?);
+        }
+        if let Some(event) = event {
+            let event_plan = EventAppendTransactionPlan::build(event, self.flavor, steps.len()).map_err(|error| {
+                ServiceError::InternalError(format!("prepare state-machine terminal Event: {error}"))
+            })?;
+            steps.extend(event_plan.steps);
+        }
+        let results = self.db.transaction(steps).await.map_err(|error| {
+            ServiceError::Conflict(format!("state-machine terminal transition failed: {error}"))
+        })?;
+        Ok(matches!(results.first(), Some(DbTransactionStepResult::Executed(result)) if result.affected_rows > 0))
+    }
+}
+
 #[async_trait]
 impl StateMachineRunRepoPort for MySqlCollaborationStore {
     async fn get_node_statuses(&self, run: &str, nodes: &[String]) -> ServiceResult<BTreeMap<String, StateMachineNodeStatus>> {
@@ -2039,6 +2122,12 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
     async fn finish_chat_result(&self, claim: &bcs_service_api::StateMachineChatResultClaim, outcome: bcs_service_api::StateMachineChatResultOutcome, now: u64) -> ServiceResult<bool> { self.finish_publication(claim, outcome, now).await }
     async fn expire_chat_result(&self, run: &str, now: u64) -> ServiceResult<bool> { self.expire_publication(run, now).await }
     async fn release_chat_result(&self, claim: &bcs_service_api::StateMachineChatResultClaim) -> ServiceResult<bool> { self.release_publication(claim).await }
+    async fn get_run_result(&self, run: &str) -> ServiceResult<Option<bcs_service_api::StateMachineRunResultCheckpoint>> { self.run_result_get(run).await }
+    async fn list_run_results_pending(&self, after: Option<&str>, limit: usize) -> ServiceResult<Vec<String>> { self.run_result_list_pending(after, limit).await }
+    async fn claim_run_result(&self, run: &str, owner: String, now: u64, until: u64) -> ServiceResult<Option<bcs_service_api::StateMachineRunResultClaim>> { self.run_result_claim(run, owner, now, until).await }
+    async fn begin_run_result_send(&self, claim: &bcs_service_api::StateMachineRunResultClaim, now: u64) -> ServiceResult<bool> { self.run_result_begin(claim, now).await }
+    async fn finish_run_result(&self, claim: &bcs_service_api::StateMachineRunResultClaim, outcome: bcs_service_api::StateMachineRunResultOutcome, now: u64) -> ServiceResult<bool> { self.run_result_finish(claim, outcome, now).await }
+    async fn expire_run_result(&self, run: &str, now: u64) -> ServiceResult<bool> { self.run_result_expire(run, now).await }
 
     async fn save_node_dispatch(&self, payload: StateMachineDispatchPayload) -> ServiceResult<bool> { self.save_dispatch(payload).await }
     async fn get_node_dispatch(&self, run: &str, node: &str, attempt: i32) -> ServiceResult<Option<StateMachineDispatchCheckpoint>> { self.get_dispatch(run, node, attempt).await }
@@ -2077,9 +2166,15 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
             DbSqlFlavor::Mysql => " FOR UPDATE",
             DbSqlFlavor::Sqlite => "",
         };
+        if let StateMachineEventfulTransition::TerminateRun { run_id, status, error, terminated_at_ms, event, result } = &transition {
+            return self.commit_terminate_run(run_id, *status, error.as_deref(), *terminated_at_ms, event.as_ref(), result.as_ref()).await;
+        }
         let mut steps = Vec::new();
         let events = state_machine_transition_events(&transition);
         match &transition {
+            StateMachineEventfulTransition::TerminateRun { .. } => {
+                return Err(ServiceError::InternalError("TerminateRun is committed separately".into()));
+            }
             StateMachineEventfulTransition::AcceptHistory(command) => { steps.extend(history::accept_sql(self, command)?); }
             StateMachineEventfulTransition::FinishJudge(command) => {
                 steps.extend(judge::finish_sql(self, command)?);

@@ -93,6 +93,13 @@ impl StateMachineResultPublisherPort for MessageFlowStateMachineResultPublisher 
     ) -> ServiceResult<()> {
         self.message_flow.publish_state_machine_result(cmd).await
     }
+
+    async fn publish_state_machine_run_result(
+        &self,
+        payload: bcs_service_api::StateMachineRunResultPayload,
+    ) -> ServiceResult<bcs_service_api::StateMachineRunResultOutcome> {
+        self.message_flow.publish_state_machine_run_result(payload).await
+    }
 }
 
 #[derive(Default)]

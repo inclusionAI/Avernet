@@ -114,6 +114,9 @@ mod terminal_im;
 
 #[path = "runtime_publication.rs"]
 mod publication;
+#[path = "runtime_run_result.rs"]
+mod run_result;
+use run_result::RunFailure;
 
 #[path = "runtime_opening.rs"]
 mod opening_recovery;
@@ -930,7 +933,7 @@ impl CollaborationRuntime {
             run_id: run.run_id.clone(), node_id: node_id.to_string(), attempt,
             error: error.clone(), completed_at_ms: now, action: StateMachineFailureAction::FailRun,
         }).await? {
-            self.fail_run(run, error).await?;
+            self.fail_run(run, RunFailure::node(node_id, attempt, error)).await?;
         }
         Ok(())
     }
@@ -1147,7 +1150,7 @@ impl CollaborationRuntime {
             return Ok(RerunStateMachineOutcome { view, created });
         }
         if let Err(error) = self.save_opening_payload(&run, opening_message).await {
-            self.fail_run(&run, error.to_string()).await?;
+            self.fail_run(&run, RunFailure::startup(error.to_string())).await?;
             return Err(error);
         }
         self.ensure_materialized_run_started(&mut run).await?;
@@ -1164,7 +1167,7 @@ impl CollaborationRuntime {
             .persist_saved_opening(&run)
             .await
         {
-            self.fail_run(&run, error.to_string()).await?;
+            self.fail_run(&run, RunFailure::startup(error.to_string())).await?;
             return Err(error);
         }
         self.publish_state_machine_panel_event(group, &run, opening_message)
@@ -1915,22 +1918,25 @@ impl CollaborationRuntime {
     async fn fail_run(
         &self,
         run: &StateMachineRun,
-        error: String,
+        failure: RunFailure,
     ) -> Result<Option<StateMachineRunView>, CollaborationRuntimeError> {
         let now = bcs_protocol::now_ms();
+        let artifacts = self.failure_artifacts(run, &failure, now).await?;
+        let error = failure.error;
+        let has_result = artifacts.result.is_some();
         let failed = self.runs
-            .update_run_status(
-                &run.run_id,
-                StateMachineRunStatus::Failed,
-                None,
-                Some(error.clone()),
-                now,
-                Some(now),
-            )
+            .commit_eventful_transition(StateMachineEventfulTransition::TerminateRun {
+                run_id: run.run_id.clone(),
+                status: StateMachineRunStatus::Failed,
+                error: Some(error.clone()),
+                terminated_at_ms: now,
+                event: artifacts.event,
+                result: artifacts.result,
+            })
             .await?;
         self.runs.supersede_inactive_node_dispatches(&run.run_id).await?;
         if !failed { return self.run_view(&run.run_id).await; }
-        let is_chat_session = self.is_chat_session(&run.session_id).await?;
+        let is_chat_session = artifacts.is_chat_session;
         if !is_chat_session && self.session_channel_outbound.is_some() {
             let snapshot = self.definitions.get_run_snapshot(&run.run_id).await?.ok_or_else(||
                 CollaborationRuntimeError::InvalidRequest("terminal IM requires original Run snapshot".into()))?;
@@ -1972,6 +1978,9 @@ impl CollaborationRuntime {
             "state_machine: run failed"
         );
         log_state_machine_run_failed(run, &error, session_complete_result);
+        if has_result {
+            self.deliver_run_result(&run.run_id).await;
+        }
         self.run_view(&run.run_id).await
     }
 
@@ -2099,7 +2108,7 @@ impl CollaborationRuntime {
             }
             return self.run_view(&run.run_id).await;
         }
-        self.fail_run(run, error).await
+        self.fail_run(run, RunFailure::node(node_id, attempt, error)).await
     }
 
     async fn evaluate_node_outcome(
@@ -3085,7 +3094,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             match render_state_machine_opening_message(&group, &run, session_title.as_deref()) {
                 Ok(message) => message,
                 Err(error) => {
-                    self.fail_run(&run, error.to_string()).await?;
+                    self.fail_run(&run, RunFailure::startup(error.to_string())).await?;
                     return Err(error);
                 }
             };
@@ -3209,7 +3218,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             .persist_saved_opening(&run)
             .await
         {
-            self.fail_run(&run, error.to_string()).await?;
+            self.fail_run(&run, RunFailure::startup(error.to_string())).await?;
             return Err(error);
         }
         self.publish_state_machine_panel_event(&group, &run, &opening_message)
@@ -4035,65 +4044,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         &self,
         cmd: CancelStateMachineRunCommand,
     ) -> Result<StateMachineRunView, CollaborationRuntimeError> {
-        let run = self
-            .runs
-            .get_run(&cmd.run_id)
-            .await?
-            .ok_or_else(|| CollaborationRuntimeError::RunNotFound(cmd.run_id.clone()))?;
-        let now = bcs_protocol::now_ms();
-        let reason = cmd.reason.clone();
-        let aborted = self.runs
-            .update_run_status(
-                &cmd.run_id,
-                StateMachineRunStatus::Aborted,
-                None,
-                cmd.reason,
-                now,
-                Some(now),
-            )
-            .await?;
-        self.runs.supersede_inactive_node_dispatches(&run.run_id).await?;
-        if !aborted {
-            return self.run_view(&cmd.run_id).await?
-                .ok_or_else(|| CollaborationRuntimeError::RunNotFound(cmd.run_id));
-        }
-        let is_chat_session = self.is_chat_session(&run.session_id).await?;
-        let (completed_session, session_missing) = if is_chat_session {
-            (None, false)
-        } else {
-            match self
-                .complete_service_session_for_run(&run, None, Some("aborted".to_string()))
-                .await
-            {
-                Ok(completed_session) => (completed_session, false),
-                Err(SessionUseCaseError::NotFound(_)) => (None, true),
-                Err(error) => {
-                    return Err(CollaborationRuntimeError::InvalidRequest(error.to_string()));
-                }
-            }
-        };
-        let session_complete_result = if is_chat_session {
-            "chat_preserved"
-        } else if session_missing {
-            "missing"
-        } else if completed_session.is_some() {
-            "completed"
-        } else {
-            "not_running"
-        };
-        info!(
-            run_id = %cmd.run_id,
-            group_id = %run.group_id,
-            session_id = %run.session_id,
-            definition_id = %run.definition_id,
-            definition_version = run.definition_version,
-            reason = ?reason,
-            session_complete_result = %session_complete_result,
-            "state_machine: run aborted"
-        );
-        self.run_view(&cmd.run_id)
-            .await?
-            .ok_or_else(|| CollaborationRuntimeError::RunNotFound(cmd.run_id))
+        self.abort_run(cmd, bcs_service_api::StateMachineRunTerminalReason::UserAborted).await
     }
     async fn lookup_delivery_correlation(
         &self,
@@ -4628,6 +4579,11 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         Ok(page)
     }
 
+    async fn recover_state_machine_run_results(&self, after_run_id: Option<String>, limit: usize)
+        -> Result<bcs_service_api::StateMachineProgressionRecoveryPage, CollaborationRuntimeError> {
+        self.recover_run_results(after_run_id, limit).await
+    }
+
     async fn recover_state_machine_sessions(
         &self,
         after_session_id: Option<String>,
@@ -4690,27 +4646,8 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         session_id: &str,
         reason: &str,
     ) -> Result<(), CollaborationRuntimeError> {
-        let mut first_error = None;
-        for run in self.runs.list_runs_by_session_id(session_id).await? {
-            if !matches!(
-                run.status,
-                StateMachineRunStatus::Pending | StateMachineRunStatus::Running
-            ) {
-                continue;
-            }
-            if let Err(error) = self
-                .cancel_state_machine_run(CancelStateMachineRunCommand {
-                    run_id: run.run_id,
-                    reason: Some(reason.to_string()),
-                })
-                .await
-            {
-                if first_error.is_none() {
-                    first_error = Some(error);
-                }
-            }
-        }
-        first_error.map_or(Ok(()), Err)
+        self.abort_session_runs(session_id, reason, bcs_service_api::StateMachineRunTerminalReason::SessionClosed)
+            .await
     }
 
     async fn cancel_group_runs(
@@ -4727,7 +4664,10 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             })?;
         let mut first_error = None;
         for session in sessions {
-            if let Err(error) = self.cancel_session_runs(&session.id, reason).await {
+            if let Err(error) = self
+                .abort_session_runs(&session.id, reason, bcs_service_api::StateMachineRunTerminalReason::GroupClosed)
+                .await
+            {
                 if first_error.is_none() {
                     first_error = Some(error);
                 }

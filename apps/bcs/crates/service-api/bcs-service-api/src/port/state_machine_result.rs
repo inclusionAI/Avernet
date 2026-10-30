@@ -27,4 +27,15 @@ pub trait StateMachineResultPublisherPort: Send + Sync {
         &self,
         cmd: StateMachineResultPublishCommand,
     ) -> ServiceResult<()>;
+
+    /// Deliver one bot-only RunResult to the manager of a failed or aborted Run.
+    /// `Delivered` acknowledges durable queue admission for a managed target or
+    /// synchronous acceptance for a legacy one. `Skipped` and `Retry` guarantee
+    /// that nothing was sent; `Uncertain` must never be retried.
+    async fn publish_state_machine_run_result(
+        &self,
+        _payload: crate::StateMachineRunResultPayload,
+    ) -> ServiceResult<crate::StateMachineRunResultOutcome> {
+        Err(crate::ServiceError::InternalError("state-machine RunResult publication is not configured".into()))
+    }
 }

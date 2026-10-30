@@ -281,7 +281,7 @@ impl MessageRepoPort for MemoryMessageRepo {
         };
 
         let limit = query.limit as usize;
-        let mut filtered: Vec<&PersistedMessage> = entry.messages.iter().filter(|m| m.message_type != "run_reply").collect();
+        let mut filtered: Vec<&PersistedMessage> = entry.messages.iter().filter(|m| m.message_type != "run_reply" && m.message_type != bcs_domain::RUN_RESULT_MESSAGE_TYPE).collect();
 
         if !query.human_view.as_ref().is_some_and(|view| view.scope == bcs_domain::MessageViewScope::Participant) {
             filtered.retain(|m| m.message_type != bcs_domain::STATE_MACHINE_HUMAN_INPUT_PROMPT_MESSAGE_TYPE);
@@ -403,7 +403,7 @@ impl MessageRepoPort for MemoryMessageRepo {
         };
 
         let limit = limit as usize;
-        let mut filtered: Vec<&PersistedMessage> = entry.messages.iter().filter(|m| m.message_type != "run_reply").collect();
+        let mut filtered: Vec<&PersistedMessage> = entry.messages.iter().filter(|m| m.message_type != "run_reply" && m.message_type != bcs_domain::RUN_RESULT_MESSAGE_TYPE).collect();
 
         if !human_view.as_ref().is_some_and(|view| view.scope == bcs_domain::MessageViewScope::Participant) {
             filtered.retain(|m| m.message_type != bcs_domain::STATE_MACHINE_HUMAN_INPUT_PROMPT_MESSAGE_TYPE);

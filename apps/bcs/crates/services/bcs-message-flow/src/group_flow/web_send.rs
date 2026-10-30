@@ -172,7 +172,7 @@ pub(super) async fn handle_web_send_with_result(
     backfill_bot_names(flow.registry.as_ref(), &mut group).await;
 
     let overlay = build_route_overlay(flow, &group).await;
-    let decision = if group.group_kind == GroupKind::Dm {
+    let mut decision = if group.group_kind == GroupKind::Dm {
         flow.routing
             .route_dm_with_overlay(&group, &cmd.message, &cmd.from_actor_id, &overlay)
             .await
@@ -184,6 +184,13 @@ pub(super) async fn handle_web_send_with_result(
         build_explicit_mention_decision(&group, &cmd.mentions, &cmd.message, &overlay)
     };
 
+    let bot_only = result_message.is_some_and(|result| result.bot_only());
+    if bot_only {
+        // A RunResult wakes only its manager; other Bots never observe it.
+        decision.targets.retain(|target| target.bot_uuid == cmd.from_actor_id && target.delivery_type == DeliveryType::Send);
+        decision.mentions.clear();
+        decision.hidden_mentions.clear();
+    }
     if result_message.is_some() {
         if !matches!(group.group_strategy, GroupStrategy::Chat | GroupStrategy::ManagerWorker)
             || !group.participants.iter().any(|p| p.is_bot() && p.bot_uuid == cmd.from_actor_id) {
@@ -739,7 +746,11 @@ pub(super) async fn handle_web_send_with_result(
             }
         }
     }
-    let frontend_deliveries = publish_web_user_message(flow, &cmd, &operation_id).await;
+    let frontend_deliveries = if bot_only {
+        Vec::new()
+    } else {
+        publish_web_user_message(flow, &cmd, &operation_id).await
+    };
 
     // Notify when @-mentioned (Send) bots failed delivery. A failed delivery
     // is reported as "已离线" when the bot is genuinely unreachable
@@ -748,7 +759,7 @@ pub(super) async fn handle_web_send_with_result(
     // transient HTTP provider webhook error), it is reported as a retryable
     // delivery failure instead, so a still-active bot is not wrongly shown as
     // offline.
-    {
+    if !bot_only {
         let failed_targets: Vec<&RoutingTarget> = decision
             .targets
             .iter()

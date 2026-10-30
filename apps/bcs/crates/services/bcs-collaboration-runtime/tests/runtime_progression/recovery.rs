@@ -206,8 +206,17 @@ impl StateMachineRunRepoPort for FaultyRuns {
     async fn commit_eventful_transition(&self, transition: bcs_service_api::port::repo::StateMachineEventfulTransition) -> ServiceResult<bool> {
         if matches!(&transition, bcs_service_api::port::repo::StateMachineEventfulTransition::FinishJudge(_))
             && self.fail_judge_finish.swap(false, Ordering::SeqCst) { return Err(injected()); }
+        if matches!(&transition, bcs_service_api::port::repo::StateMachineEventfulTransition::TerminateRun { status: StateMachineRunStatus::Failed, .. })
+            && self.fail_run_failure.swap(false, Ordering::SeqCst) { return Err(injected()); }
         self.inner.commit_eventful_transition(transition).await
     }
+
+    async fn get_run_result(&self, run: &str) -> ServiceResult<Option<bcs_service_api::StateMachineRunResultCheckpoint>> { self.inner.get_run_result(run).await }
+    async fn list_run_results_pending(&self, after: Option<&str>, limit: usize) -> ServiceResult<Vec<String>> { self.inner.list_run_results_pending(after, limit).await }
+    async fn claim_run_result(&self, run: &str, owner: String, now: u64, until: u64) -> ServiceResult<Option<bcs_service_api::StateMachineRunResultClaim>> { self.inner.claim_run_result(run, owner, now, until).await }
+    async fn begin_run_result_send(&self, claim: &bcs_service_api::StateMachineRunResultClaim, now: u64) -> ServiceResult<bool> { self.inner.begin_run_result_send(claim, now).await }
+    async fn finish_run_result(&self, claim: &bcs_service_api::StateMachineRunResultClaim, outcome: bcs_service_api::StateMachineRunResultOutcome, now: u64) -> ServiceResult<bool> { self.inner.finish_run_result(claim, outcome, now).await }
+    async fn expire_run_result(&self, run: &str, now: u64) -> ServiceResult<bool> { self.inner.expire_run_result(run, now).await }
 
     async fn create_run(&self, run: StateMachineRun, nodes: Vec<StateMachineNodeRun>) -> ServiceResult<()> {
         self.inner.create_run(run, nodes).await

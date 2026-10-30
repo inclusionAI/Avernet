@@ -63,6 +63,13 @@ impl MessageFlowService for InstrumentedMessageFlowService {
         self.inner.publish_state_machine_result(cmd).await
     }
 
+    async fn publish_state_machine_run_result(
+        &self,
+        payload: bcs_service_api::StateMachineRunResultPayload,
+    ) -> ServiceResult<bcs_service_api::StateMachineRunResultOutcome> {
+        self.inner.publish_state_machine_run_result(payload).await
+    }
+
     async fn handle_web_send(&self, cmd: WebSendCommand) -> ServiceResult<WebSendOutcome> {
         let result = self.inner.handle_web_send(cmd).await;
         self.record(
