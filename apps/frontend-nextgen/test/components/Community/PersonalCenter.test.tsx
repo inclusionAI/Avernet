@@ -4,11 +4,11 @@ import type { PersonalCenterTopicContext } from '@/domain/community/types';
 import type { UsePersonalCenterResult } from '@/hooks/usePersonalCenter';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { resolveBotNames } from '@/services/collaborationSquare/collaborationSquareApiHelpers';
+import { resolveBackendBotNames } from '@/services/community/botDisplayNames';
 import { communityService } from '@/services/community';
 
-jest.mock('@/services/collaborationSquare/collaborationSquareApiHelpers', () => ({
-  resolveBotNames: jest.fn(),
+jest.mock('@/services/community/botDisplayNames', () => ({
+  resolveBackendBotNames: jest.fn(),
 }));
 
 jest.mock('@/services/community', () => ({
@@ -75,9 +75,7 @@ describe('CommunityPersonalCenter', () => {
     mockedCenter.activityType = 'AUTHORED';
     mockedCenter.activityPage = { items: [{ ...baseActivity }], total: 1 };
     mockedCenter.unfollow = jest.fn();
-    jest.mocked(resolveBotNames).mockImplementation(
-      () => new Promise<Record<string, string>>(() => {}),
-    );
+    jest.mocked(resolveBackendBotNames).mockImplementation(async () => ({}));
   });
 
   it('renders topic activities with PRD content, stats, publisher, and elapsed time', () => {
@@ -105,6 +103,32 @@ describe('CommunityPersonalCenter', () => {
     expect(onOpenTopic).toHaveBeenCalledWith('topic-1');
   });
 
+  it('Bot 名称未解析完成时先展示加载态，不先渲染 bot id', () => {
+    mockedCenter.activityType = 'FAVORITED';
+    mockedCenter.activityPage = {
+      items: [
+        {
+          ...baseActivity,
+          activityType: 'FAVORITED',
+          topicContext: {
+            ...baseActivity.topicContext,
+            author: { actorType: 'BOT', id: 'bot-pending-name' },
+            authorDisplayName: 'bot-pending-name',
+          },
+        },
+      ],
+      total: 1,
+    };
+    jest.mocked(resolveBackendBotNames).mockImplementation(
+      () => new Promise<Record<string, string>>(() => {}),
+    );
+    const view = render(<CommunityPersonalCenter onBack={jest.fn()} onOpenTopic={jest.fn()} />);
+
+    expect(screen.getByLabelText('Bot 名称解析中')).toBeInTheDocument();
+    expect(screen.queryByText('bot-pending-name')).not.toBeInTheDocument();
+    view.unmount();
+  });
+
   it('个人中心帖子作者为 Bot 时优先展示解析出的 Bot 名称，而不是 Bot ID', async () => {
     mockedCenter.activityType = 'FAVORITED';
     mockedCenter.activityPage = {
@@ -122,14 +146,14 @@ describe('CommunityPersonalCenter', () => {
       total: 1,
     };
     jest
-      .mocked(resolveBotNames)
+      .mocked(resolveBackendBotNames)
       .mockResolvedValueOnce({ 'bot-post-author': '内容创作 Bot' });
 
     render(<CommunityPersonalCenter onBack={jest.fn()} onOpenTopic={jest.fn()} />);
 
     expect(await screen.findByText('内容创作 Bot')).toBeInTheDocument();
     expect(screen.queryByText('bot-post-author')).not.toBeInTheDocument();
-    expect(resolveBotNames).toHaveBeenCalledWith(['bot-A', 'bot-post-author']);
+    expect(resolveBackendBotNames).toHaveBeenCalledWith(['bot-post-author']);
   });
 
   it('truncates favorite and browse activity content to one line', () => {
@@ -258,14 +282,14 @@ describe('CommunityPersonalCenter', () => {
       total: 1,
     };
     jest
-      .mocked(resolveBotNames)
+      .mocked(resolveBackendBotNames)
       .mockResolvedValueOnce({ 'bot-lookup': '自动化协作 Bot' });
 
     render(<CommunityPersonalCenter onBack={jest.fn()} onOpenTopic={jest.fn()} />);
 
     expect(await screen.findByText('自动化协作 Bot')).toBeInTheDocument();
     expect(screen.queryByText('bot-lookup')).not.toBeInTheDocument();
-    expect(resolveBotNames).toHaveBeenCalledWith(['bot-lookup']);
+    expect(resolveBackendBotNames).toHaveBeenCalledWith(['bot-lookup']);
   });
 
   it('groups replies by topic and explains nested reply targets', () => {
