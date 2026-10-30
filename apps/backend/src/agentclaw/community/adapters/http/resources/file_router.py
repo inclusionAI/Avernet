@@ -43,6 +43,9 @@ from agentclaw.community.core.bot_management.errors import (
 from agentclaw.community.core.bot_management.services.engine_resolver import (
     resolve_runtime_engine_for_bot,
 )
+from agentclaw.community.core.devices.services.device_context import (
+    DeviceConnectionUnavailableError,
+)
 from agentclaw.community.core.devices.services.device_filesystem import (
     FileTooLargeError,
 )
@@ -334,6 +337,11 @@ async def download_file(
         )
     except FileTooLargeError as e:
         raise HTTPException(status_code=413, detail=str(e))
+    except DeviceConnectionUnavailableError as e:
+        raise HTTPException(
+            status_code=503,
+            detail="Device connection is temporarily unavailable",
+        ) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     if content is None:
