@@ -12,6 +12,8 @@ calls and auth header. The transport is the real one over a mocked
 ``BaasService``, so these also pin that ``http_info`` is resolved once per engine
 path rather than once per file.
 """
+import logging
+
 from unittest.mock import MagicMock
 
 import httpx
@@ -213,6 +215,28 @@ async def test_list_dir_returns_none_on_error():
     fs, baas = _fs()
     baas.invoke_http.side_effect = httpx.ConnectError("boom")
     assert await fs.list_dir("/some/dir") is None
+
+
+@pytest.mark.asyncio
+async def test_list_dir_returns_none_on_404_without_error_log(caplog):
+    # A 404 means the directory does not exist — an expected condition, so it must
+    # surface as None without raising or logging an operational ERROR (mirrors
+    # read_file). Regression guard for the CDO alert triggered by ERROR-level 404
+    # noise when a bot lists a missing directory (e.g. .../vendor).
+    caplog.set_level(logging.DEBUG)
+    fs, baas = _fs()
+    baas.invoke_http.return_value = _FakeResponse(status_code=404)
+    assert await fs.list_dir(_DEVICE_DIR) is None
+    assert not any(
+        r.levelno >= logging.ERROR and "list_dir" in r.getMessage()
+        for r in caplog.records
+    )
+    assert any(
+        r.levelno == logging.DEBUG
+        and "list_dir" in r.getMessage()
+        and "not found" in r.getMessage()
+        for r in caplog.records
+    )
 
 
 @pytest.mark.asyncio
