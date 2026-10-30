@@ -345,6 +345,13 @@ def generate_bot_id(owner_id: str, bot_repository: BotRepository) -> str:
 class BotService(BotServiceProtocol):
     """Bot service for managing bot lifecycle."""
 
+    # Optional lifecycle providers may be omitted by focused tests constructed
+    # with ``__new__``; keep a safe class default instead of requiring every
+    # lower-level restart test to know about desktop dispatch.
+    _desktop_bot_service_provider: (
+        "Callable[[], DesktopBotServiceProtocol] | None"
+    ) = None
+
     def __init__(
         self,
         repository: BotRepository,
@@ -4710,11 +4717,12 @@ class BotService(BotServiceProtocol):
         owner_id = raw_owner_id.strip() if isinstance(raw_owner_id, str) else None
         if (
             self._desktop_bot_service_provider is not None
-            and isinstance(bot_id, str) and bot_id
+            and isinstance(bot_id, str)
+            and bot_id
             and owner_id
         ):
             desktop_bot = self._repository.get_by_id_and_owner(bot_id, owner_id)
-            if desktop_bot.get("bot_type") == "desktop":
+            if desktop_bot and desktop_bot.get("bot_type") == "desktop":
                 desktop_service = self._desktop_bot_service_provider()
                 return desktop_service.restart(
                     bot_id=bot_id,
