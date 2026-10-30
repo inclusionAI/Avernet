@@ -1,0 +1,26 @@
+apps/frontend-nextgen/src/pages/Lab/Tasks/index.tsx
+  h_059e888e5e4e82 8,45-49,52,60-72,75,88,122,138
+apps/frontend-nextgen/src/pages/MyTask/MyTaskPage.tsx
+  h_059e888e5e4e82 5,66-70,73,82-94,155,171
+apps/frontend-nextgen/src/pages/MyTask/components/UserTaskTab.tsx
+  h_059e888e5e4e82 54,75,256,260
+apps/frontend-nextgen/src/pages/MyTask/components/ViewSessionButton.tsx
+  h_059e888e5e4e82 12-13,15-44,62,65-67
+apps/frontend-nextgen/test/pages/Lab/Tasks.test.tsx
+  h_059e888e5e4e82 27-28,33-45,183-218,382-415
+apps/frontend-nextgen/test/pages/MyTask/MyTaskPage.test.tsx
+  h_059e888e5e4e82 14-21
+apps/frontend-nextgen/test/pages/MyTask/ViewSessionButton.test.tsx
+  h_059e888e5e4e82 14-15,26-27,31-70
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "148d1bc84e60b8b5853a01100320f638b9743b91",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
