@@ -126,7 +126,8 @@ class QdrantKeywordIndex:
         for point in points:
             payload = dict(point.payload)
             content = (
-                payload.get("content")
+                payload.get("search_text")
+                or payload.get("content")
                 or payload.get("searchable_text")
                 or payload.get("content_preview")
                 or ""
