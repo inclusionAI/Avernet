@@ -1,0 +1,1454 @@
+{
+ "schema_version": 1,
+ "contract": "group-workspace-density-v1",
+ "parent_story": "story_user_operates_group_workspace",
+ "predicate_vocabulary": [
+  "status_eq",
+  "field_eq",
+  "field_not_empty",
+  "field_len_eq",
+  "field_ge",
+  "exit_zero",
+  "stdout_contains",
+  "stdout_contains_any",
+  "stdout_regex",
+  "any_of",
+  "read_present",
+  "read_field_eq",
+  "read_field_not_empty",
+  "read_field_len_eq",
+  "read_field_ge",
+  "not_found_state",
+  "settings_retired_form",
+  "settings_policy_form"
+ ],
+ "sources": {
+  "group.sh": "2bbb82c417261900265ce39f69aebb01633bb0700c4d7c71c1a2c9d7d9131c1d",
+  "stories.sh": "3025c6ee245a2a3b514fba18fe913bb8d1ad42dc37183602521f29c496a4f10f",
+  "source_root": "e2e-test"
+ },
+ "families": {
+  "api": 26,
+  "cli": 11,
+  "tail": 26
+ },
+ "atom_count": 63,
+ "gap_policy": "Missing event or absent field is NOT_RUN, never a fabricated PASS; present-but-failing evidence is FAIL; dual product forms are admitted explicitly (settings_retired_form).",
+ "density_requirements": [
+  {
+   "id": "WORKSPACE.api.create.status",
+   "family": "api",
+   "expectation": "create group returns 200",
+   "source_file": "group.sh",
+   "source_function": "test_create_group",
+   "line_start": 42,
+   "line_end": 42,
+   "source_quote": "assert_eq \"create group returns 200\" \"$HTTP_STATUS\" \"200\"",
+   "address": {
+    "journal": "api",
+    "kind": "operation",
+    "operation": "group-create-primary"
+   },
+   "checks": [
+    {
+     "type": "status_eq",
+     "value": 200
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.api.create.group-id",
+   "family": "api",
+   "expectation": "create group returns group_id",
+   "source_file": "group.sh",
+   "source_function": "test_create_group",
+   "line_start": 45,
+   "line_end": 45,
+   "source_quote": "assert_not_empty \"create group returns group_id\" \"$group_id\"",
+   "address": {
+    "journal": "api",
+    "kind": "operation",
+    "operation": "group-create-primary"
+   },
+   "checks": [
+    {
+     "type": "field_eq",
+     "path": "value.id",
+     "expected": {
+      "binding": "primary"
+     }
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.api.members.create.status",
+   "family": "api",
+   "expectation": "create group with members returns 200",
+   "source_file": "group.sh",
+   "source_function": "test_create_group_with_members",
+   "line_start": 52,
+   "line_end": 52,
+   "source_quote": "assert_eq \"create group with members returns 200\" \"$HTTP_STATUS\" \"200\"",
+   "address": {
+    "journal": "api",
+    "kind": "operation",
+    "operation": "group-create-with-members"
+   },
+   "checks": [
+    {
+     "type": "status_eq",
+     "value": 200
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.api.members.create.group-id",
+   "family": "api",
+   "expectation": "group with members has id",
+   "source_file": "group.sh",
+   "source_function": "test_create_group_with_members",
+   "line_start": 55,
+   "line_end": 55,
+   "source_quote": "assert_not_empty \"group with members has id\" \"$group_id\"",
+   "address": {
+    "journal": "api",
+    "kind": "operation",
+    "operation": "group-create-with-members"
+   },
+   "checks": [
+    {
+     "type": "field_eq",
+     "path": "value.id",
+     "expected": {
+      "binding": "members"
+     }
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.api.members.detail.status",
+   "family": "api",
+   "expectation": "get group detail returns 200",
+   "source_file": "group.sh",
+   "source_function": "test_create_group_with_members",
+   "line_start": 58,
+   "line_end": 58,
+   "source_quote": "assert_eq \"get group detail returns 200\" \"$HTTP_STATUS\" \"200\"",
+   "address": {
+    "journal": "api",
+    "kind": "read",
+    "path_template": "/groups/{members}",
+    "after_operation": "group-create-with-members"
+   },
+   "checks": [
+    {
+     "type": "read_present"
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.api.members.detail.participant-count",
+   "family": "api",
+   "expectation": "group has 3 participants",
+   "source_file": "group.sh",
+   "source_function": "test_create_group_with_members",
+   "line_start": 61,
+   "line_end": 61,
+   "source_quote": "assert_eq \"group has 3 participants\" \"$count\" \"3\"",
+   "address": {
+    "journal": "api",
+    "kind": "read",
+    "path_template": "/groups/{members}",
+    "after_operation": "group-create-with-members"
+   },
+   "checks": [
+    {
+     "type": "read_field_len_eq",
+     "path": "participants",
+     "value": 3
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.api.detail.status",
+   "family": "api",
+   "expectation": "get group detail returns 200",
+   "source_file": "group.sh",
+   "source_function": "test_get_group_detail",
+   "line_start": 71,
+   "line_end": 71,
+   "source_quote": "assert_eq \"get group detail returns 200\" \"$HTTP_STATUS\" \"200\"",
+   "address": {
+    "journal": "api",
+    "kind": "read",
+    "path_template": "/groups/{primary}",
+    "after_operation": "group-create-with-members"
+   },
+   "checks": [
+    {
+     "type": "read_present"
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.api.detail.group-id",
+   "family": "api",
+   "expectation": "detail has id",
+   "source_file": "group.sh",
+   "source_function": "test_get_group_detail",
+   "line_start": 72,
+   "line_end": 72,
+   "source_quote": "assert_not_empty \"detail has id\" \"$(json_field \"$RESPONSE\" \"id\")\"",
+   "address": {
+    "journal": "api",
+    "kind": "read",
+    "path_template": "/groups/{primary}",
+    "after_operation": "group-create-with-members"
+   },
+   "checks": [
+    {
+     "type": "read_field_eq",
+     "path": "id",
+     "expected": {
+      "binding": "primary"
+     }
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.api.detail.driver-bot",
+   "family": "api",
+   "expectation": "detail has driver_bot",
+   "source_file": "group.sh",
+   "source_function": "test_get_group_detail",
+   "line_start": 73,
+   "line_end": 73,
+   "source_quote": "assert_not_empty \"detail has driver_bot\" \"$(json_field \"$RESPONSE\" \"driver_bot\")\"",
+   "address": {
+    "journal": "api",
+    "kind": "read",
+    "path_template": "/groups/{primary}",
+    "after_operation": "group-create-with-members"
+   },
+   "checks": [
+    {
+     "type": "read_field_eq",
+     "path": "driver_bot",
+     "expected": {
+      "binding": "roles.CEO"
+     }
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.api.detail.group-kind",
+   "family": "api",
+   "expectation": "detail has group_kind",
+   "source_file": "group.sh",
+   "source_function": "test_get_group_detail",
+   "line_start": 74,
+   "line_end": 74,
+   "source_quote": "assert_not_empty \"detail has group_kind\" \"$(json_field \"$RESPONSE\" \"group_kind\")\"",
+   "address": {
+    "journal": "api",
+    "kind": "read",
+    "path_template": "/groups/{primary}",
+    "after_operation": "group-create-with-members"
+   },
+   "checks": [
+    {
+     "type": "read_field_not_empty",
+     "path": "group_kind"
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.api.detail.visibility",
+   "family": "api",
+   "expectation": "detail has visibility",
+   "source_file": "group.sh",
+   "source_function": "test_get_group_detail",
+   "line_start": 75,
+   "line_end": 75,
+   "source_quote": "assert_not_empty \"detail has visibility\" \"$(json_field \"$RESPONSE\" \"visibility\")\"",
+   "address": {
+    "journal": "api",
+    "kind": "read",
+    "path_template": "/groups/{primary}",
+    "after_operation": "group-create-with-members"
+   },
+   "checks": [
+    {
+     "type": "read_field_not_empty",
+     "path": "visibility"
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.api.patch.status",
+   "family": "api",
+   "expectation": "legacy group PATCH returns 200",
+   "source_file": "group.sh",
+   "source_function": "test_patch_group",
+   "line_start": 85,
+   "line_end": 85,
+   "source_quote": "assert_eq \"legacy group PATCH returns 200\" \"$HTTP_STATUS\" \"200\"",
+   "address": {
+    "journal": "api",
+    "kind": "operation",
+    "operation": "group-patch"
+   },
+   "checks": [
+    {
+     "type": "status_eq",
+     "value": 200
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.api.patch.responds-name",
+   "family": "api",
+   "expectation": "legacy group PATCH returns the new name",
+   "source_file": "group.sh",
+   "source_function": "test_patch_group",
+   "line_start": 86,
+   "line_end": 87,
+   "source_quote": "assert_eq \"legacy group PATCH returns the new name\" \"$(json_field \"$RESPONSE\" \"name\")\" \"legacy-patch-e2e\"",
+   "address": {
+    "journal": "api",
+    "kind": "operation",
+    "operation": "group-patch"
+   },
+   "checks": [
+    {
+     "type": "field_eq",
+     "path": "value.name",
+     "expected": "e2e-workspace-patched"
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.api.patch.persists-label",
+   "family": "api",
+   "expectation": "legacy group PATCH persists the label",
+   "source_file": "group.sh",
+   "source_function": "test_patch_group",
+   "line_start": 90,
+   "line_end": 91,
+   "source_quote": "assert_eq \"legacy group PATCH persists the label\" \"$(json_field \"$RESPONSE\" \"label\")\" \"legacy-patch-e2e\"",
+   "address": {
+    "journal": "api",
+    "kind": "read",
+    "path_template": "/groups/{primary}",
+    "after_operation": "group-patch"
+   },
+   "checks": [
+    {
+     "type": "read_field_eq",
+     "path": "label",
+     "expected": "e2e-workspace-patched"
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.api.patch.persists-context",
+   "family": "api",
+   "expectation": "legacy group PATCH persists the context",
+   "source_file": "group.sh",
+   "source_function": "test_patch_group",
+   "line_start": 92,
+   "line_end": 93,
+   "source_quote": "assert_eq \"legacy group PATCH persists the context\" \"$(json_field \"$RESPONSE\" \"context\")\" \"legacy-context-e2e\"",
+   "address": {
+    "journal": "api",
+    "kind": "read",
+    "path_template": "/groups/{primary}",
+    "after_operation": "group-patch"
+   },
+   "checks": [
+    {
+     "type": "read_field_eq",
+     "path": "context",
+     "expected": "e2e-workspace-context"
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.api.list.status",
+   "family": "api",
+   "expectation": "list groups returns 200",
+   "source_file": "group.sh",
+   "source_function": "test_list_groups",
+   "line_start": 102,
+   "line_end": 102,
+   "source_quote": "assert_eq \"list groups returns 200\" \"$HTTP_STATUS\" \"200\"",
+   "address": {
+    "journal": "api",
+    "kind": "read",
+    "path_template": "/groups?list-all",
+    "after_operation": null
+   },
+   "checks": [
+    {
+     "type": "read_present"
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.api.list.total-not-empty",
+   "family": "api",
+   "expectation": "list groups returns total",
+   "source_file": "group.sh",
+   "source_function": "test_list_groups",
+   "line_start": 105,
+   "line_end": 105,
+   "source_quote": "assert_not_empty \"list groups returns total\" \"$total\"",
+   "address": {
+    "journal": "api",
+    "kind": "read",
+    "path_template": "/groups?list-all",
+    "after_operation": null
+   },
+   "checks": [
+    {
+     "type": "read_field_not_empty",
+     "path": "total"
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.api.list.total-at-least-one",
+   "family": "api",
+   "expectation": "list groups has at least 1 group",
+   "source_file": "group.sh",
+   "source_function": "test_list_groups",
+   "line_start": 107,
+   "line_end": 109,
+   "source_quote": "pass \"list groups has at least 1 group\"",
+   "address": {
+    "journal": "api",
+    "kind": "read",
+    "path_template": "/groups?list-all",
+    "after_operation": null
+   },
+   "checks": [
+    {
+     "type": "read_field_ge",
+     "path": "total",
+     "value": 1
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.api.add.status",
+   "family": "api",
+   "expectation": "add member returns 200",
+   "source_file": "group.sh",
+   "source_function": "test_add_member",
+   "line_start": 123,
+   "line_end": 123,
+   "source_quote": "assert_eq \"add member returns 200\" \"$HTTP_STATUS\" \"200\"",
+   "address": {
+    "journal": "api",
+    "kind": "operation",
+    "operation": "group-member-add"
+   },
+   "checks": [
+    {
+     "type": "status_eq",
+     "value": 200
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.api.add.participant-count",
+   "family": "api",
+   "expectation": "group has 2 participants after add",
+   "source_file": "group.sh",
+   "source_function": "test_add_member",
+   "line_start": 128,
+   "line_end": 128,
+   "source_quote": "assert_eq \"group has 2 participants after add\" \"$count\" \"2\"",
+   "address": {
+    "journal": "api",
+    "kind": "read",
+    "path_template": "/groups/{primary}",
+    "after_operation": "group-member-add"
+   },
+   "checks": [
+    {
+     "type": "read_field_len_eq",
+     "path": "participants",
+     "value": 2
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.api.remove.status",
+   "family": "api",
+   "expectation": "remove member returns 200",
+   "source_file": "group.sh",
+   "source_function": "test_remove_member",
+   "line_start": 139,
+   "line_end": 139,
+   "source_quote": "assert_eq \"remove member returns 200\" \"$HTTP_STATUS\" \"200\"",
+   "address": {
+    "journal": "api",
+    "kind": "operation",
+    "operation": "group-member-remove"
+   },
+   "checks": [
+    {
+     "type": "status_eq",
+     "value": 200
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.api.remove.participant-count",
+   "family": "api",
+   "expectation": "group has 1 participant after remove",
+   "source_file": "group.sh",
+   "source_function": "test_remove_member",
+   "line_start": 144,
+   "line_end": 144,
+   "source_quote": "assert_eq \"group has 1 participant after remove\" \"$count\" \"1\"",
+   "address": {
+    "journal": "api",
+    "kind": "read",
+    "path_template": "/groups/{primary}",
+    "after_operation": "group-member-remove"
+   },
+   "checks": [
+    {
+     "type": "read_field_len_eq",
+     "path": "participants",
+     "value": 1
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.api.label.status",
+   "family": "api",
+   "expectation": "update label returns 200",
+   "source_file": "group.sh",
+   "source_function": "test_update_group_label",
+   "line_start": 160,
+   "line_end": 160,
+   "source_quote": "assert_eq \"update label returns 200\" \"$HTTP_STATUS\" \"200\"",
+   "address": {
+    "journal": "api",
+    "kind": "operation",
+    "operation": "group-label"
+   },
+   "checks": [
+    {
+     "type": "status_eq",
+     "value": 200
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.api.label.persists-label",
+   "family": "api",
+   "expectation": "label is updated",
+   "source_file": "group.sh",
+   "source_function": "test_update_group_label",
+   "line_start": 165,
+   "line_end": 165,
+   "source_quote": "assert_eq \"label is updated\" \"$label\" \"e2e-test-label\"",
+   "address": {
+    "journal": "api",
+    "kind": "read",
+    "path_template": "/groups/{primary}",
+    "after_operation": "group-label"
+   },
+   "checks": [
+    {
+     "type": "read_field_eq",
+     "path": "label",
+     "expected": "e2e-workspace-label"
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.api.visibility.status",
+   "family": "api",
+   "expectation": "update visibility returns 200",
+   "source_file": "group.sh",
+   "source_function": "test_update_group_visibility",
+   "line_start": 175,
+   "line_end": 175,
+   "source_quote": "assert_eq \"update visibility returns 200\" \"$HTTP_STATUS\" \"200\"",
+   "address": {
+    "journal": "api",
+    "kind": "operation",
+    "operation": "group-visibility"
+   },
+   "checks": [
+    {
+     "type": "status_eq",
+     "value": 200
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.api.visibility.persists-public",
+   "family": "api",
+   "expectation": "visibility is public",
+   "source_file": "group.sh",
+   "source_function": "test_update_group_visibility",
+   "line_start": 180,
+   "line_end": 180,
+   "source_quote": "assert_eq \"visibility is public\" \"$vis\" \"public\"",
+   "address": {
+    "journal": "api",
+    "kind": "read",
+    "path_template": "/groups/{primary}",
+    "after_operation": "group-visibility"
+   },
+   "checks": [
+    {
+     "type": "read_field_eq",
+     "path": "visibility",
+     "expected": "public"
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.cli.create.exit-and-id",
+   "family": "cli",
+   "expectation": "bcs-cli create-group returns the Group ID",
+   "source_file": "group.sh",
+   "source_function": "test_group_create_via_cli",
+   "line_start": 213,
+   "line_end": 213,
+   "source_quote": "fail \"bcs-cli create-group returned no group_id\"",
+   "address": {
+    "journal": "cli",
+    "kind": "operation",
+    "operation": "create-primary"
+   },
+   "checks": [
+    {
+     "type": "exit_zero"
+    },
+    {
+     "type": "stdout_regex",
+     "pattern": "^  ID: (.+)$",
+     "capture_eq": "cli_primary"
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.cli.create.roundtrip",
+   "family": "cli",
+   "expectation": "bcs-cli create-group + get-group round-trip ok",
+   "source_file": "group.sh",
+   "source_function": "test_group_create_via_cli",
+   "line_start": 218,
+   "line_end": 218,
+   "source_quote": "pass \"bcs-cli create-group + get-group round-trip ok ($gid)\"",
+   "address": {
+    "journal": "cli",
+    "kind": "operation",
+    "operation": "get-primary"
+   },
+   "checks": [
+    {
+     "type": "exit_zero"
+    },
+    {
+     "type": "stdout_contains",
+     "value": {
+      "binding": "cli_primary"
+     }
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.cli.get.exit",
+   "family": "cli",
+   "expectation": "get-group exited 0",
+   "source_file": "group.sh",
+   "source_function": "test_group_get_via_cli",
+   "line_start": 233,
+   "line_end": 233,
+   "source_quote": "fail \"get-group exited $BCS_CLI_EXIT\"",
+   "address": {
+    "journal": "cli",
+    "kind": "operation",
+    "operation": "get-primary"
+   },
+   "checks": [
+    {
+     "type": "exit_zero"
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.cli.get.id-and-driver",
+   "family": "cli",
+   "expectation": "get-group returns id + driver",
+   "source_file": "group.sh",
+   "source_function": "test_group_get_via_cli",
+   "line_start": 235,
+   "line_end": 235,
+   "source_quote": "pass \"get-group returns id + driver\"",
+   "address": {
+    "journal": "cli",
+    "kind": "operation",
+    "operation": "get-primary"
+   },
+   "checks": [
+    {
+     "type": "exit_zero"
+    },
+    {
+     "type": "stdout_contains",
+     "value": {
+      "binding": "cli_primary"
+     }
+    },
+    {
+     "type": "stdout_contains",
+     "value": {
+      "binding": "roles.PM"
+     }
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.cli.add.exit",
+   "family": "cli",
+   "expectation": "add-member exited 0",
+   "source_file": "group.sh",
+   "source_function": "test_group_add_member_via_cli",
+   "line_start": 255,
+   "line_end": 255,
+   "source_quote": "fail \"add-member exited $BCS_CLI_EXIT\"",
+   "address": {
+    "journal": "cli",
+    "kind": "operation",
+    "operation": "add-member"
+   },
+   "checks": [
+    {
+     "type": "exit_zero"
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.cli.add.echoes-member",
+   "family": "cli",
+   "expectation": "add-member via CLI ok",
+   "source_file": "group.sh",
+   "source_function": "test_group_add_member_via_cli",
+   "line_start": 250,
+   "line_end": 250,
+   "source_quote": "pass \"add-member via CLI ok\"",
+   "address": {
+    "journal": "cli",
+    "kind": "operation",
+    "operation": "get-after-add"
+   },
+   "checks": [
+    {
+     "type": "exit_zero"
+    },
+    {
+     "type": "stdout_contains",
+     "value": {
+      "binding": "roles.QA"
+     }
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.cli.fuse.exit-or-json",
+   "family": "cli",
+   "expectation": "fuse via CLI ok (exit 0 or payload)",
+   "source_file": "group.sh",
+   "source_function": "test_group_fuse_via_cli",
+   "line_start": 266,
+   "line_end": 266,
+   "source_quote": "pass \"fuse via CLI ok (exit 0)\"",
+   "address": {
+    "journal": "cli",
+    "kind": "operation",
+    "operation": "fuse"
+   },
+   "checks": [
+    {
+     "type": "any_of",
+     "checks": [
+      {
+       "type": "exit_zero"
+      },
+      {
+       "type": "stdout_contains",
+       "value": "{"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.cli.status.exit",
+   "family": "cli",
+   "expectation": "group-status exited 0",
+   "source_file": "group.sh",
+   "source_function": "test_group_status_via_cli",
+   "line_start": 292,
+   "line_end": 292,
+   "source_quote": "fail \"group-status exited $BCS_CLI_EXIT\"",
+   "address": {
+    "journal": "cli",
+    "kind": "operation",
+    "operation": "status-primary"
+   },
+   "checks": [
+    {
+     "type": "exit_zero"
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.cli.status.reflects-completed",
+   "family": "cli",
+   "expectation": "group-status via CLI ok",
+   "source_file": "group.sh",
+   "source_function": "test_group_status_via_cli",
+   "line_start": 287,
+   "line_end": 287,
+   "source_quote": "pass \"group-status via CLI ok\"",
+   "address": {
+    "journal": "cli",
+    "kind": "operation",
+    "operation": "get-after-status"
+   },
+   "checks": [
+    {
+     "type": "stdout_contains",
+     "value": "completed"
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.cli.terminate.exit",
+   "family": "cli",
+   "expectation": "terminate-group exited 0",
+   "source_file": "group.sh",
+   "source_function": "test_group_terminate_via_cli",
+   "line_start": 310,
+   "line_end": 310,
+   "source_quote": "fail \"terminate-group exited $BCS_CLI_EXIT\"",
+   "address": {
+    "journal": "cli",
+    "kind": "operation",
+    "operation": "terminate"
+   },
+   "checks": [
+    {
+     "type": "exit_zero"
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.cli.terminate.reflects",
+   "family": "cli",
+   "expectation": "terminate-group via CLI ok",
+   "source_file": "group.sh",
+   "source_function": "test_group_terminate_via_cli",
+   "line_start": 305,
+   "line_end": 305,
+   "source_quote": "pass \"terminate-group via CLI ok\"",
+   "address": {
+    "journal": "cli",
+    "kind": "operation",
+    "operation": "get-termination"
+   },
+   "checks": [
+    {
+     "type": "any_of",
+     "checks": [
+      {
+       "type": "exit_zero"
+      },
+      {
+       "type": "stdout_contains_any",
+       "values": [
+        "completed",
+        "closed",
+        "terminated"
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.tail.create.status",
+   "family": "tail",
+   "expectation": "driver creates the incident response group",
+   "source_file": "stories.sh",
+   "source_function": "_story_group_metadata_without_workspace",
+   "line_start": 433,
+   "line_end": 433,
+   "source_quote": "require_status \"driver creates the incident response group\" \"200\"",
+   "address": {
+    "journal": "incident",
+    "kind": "operation",
+    "operation": "incident-create"
+   },
+   "checks": [
+    {
+     "type": "status_eq",
+     "value": 200
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.tail.create.group-id",
+   "family": "tail",
+   "expectation": "incident response group has an id",
+   "source_file": "stories.sh",
+   "source_function": "_story_group_metadata_without_workspace",
+   "line_start": 436,
+   "line_end": 436,
+   "source_quote": "assert_not_empty \"incident response group has an id\" \"$group_id\"",
+   "address": {
+    "journal": "incident",
+    "kind": "operation",
+    "operation": "incident-create"
+   },
+   "checks": [
+    {
+     "type": "field_eq",
+     "path": "value.id",
+     "expected": {
+      "binding": "incident"
+     }
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.tail.read.status",
+   "family": "tail",
+   "expectation": "user reads the incident response group",
+   "source_file": "stories.sh",
+   "source_function": "_story_group_metadata_without_workspace",
+   "line_start": 440,
+   "line_end": 440,
+   "source_quote": "require_status \"user reads the incident response group\" \"200\"",
+   "address": {
+    "journal": "incident",
+    "kind": "operation",
+    "operation": "incident-detail"
+   },
+   "checks": [
+    {
+     "type": "status_eq",
+     "value": 200
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.tail.read.keep-label",
+   "family": "tail",
+   "expectation": "incident response group keeps its label",
+   "source_file": "stories.sh",
+   "source_function": "_story_group_metadata_without_workspace",
+   "line_start": 441,
+   "line_end": 441,
+   "source_quote": "assert_json_eq \"incident response group keeps its label\" \"$RESPONSE\" \"label\" \"Incident response room\"",
+   "address": {
+    "journal": "incident",
+    "kind": "operation",
+    "operation": "incident-detail"
+   },
+   "checks": [
+    {
+     "type": "field_eq",
+     "path": "value.label",
+     "expected": "Incident response room"
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.tail.mute.status",
+   "family": "tail",
+   "expectation": "participant mutes itself",
+   "source_file": "stories.sh",
+   "source_function": "_story_group_metadata_without_workspace",
+   "line_start": 444,
+   "line_end": 444,
+   "source_quote": "require_status \"participant mutes itself\" \"200\"",
+   "address": {
+    "journal": "incident",
+    "kind": "operation",
+    "operation": "participant-mode"
+   },
+   "checks": [
+    {
+     "type": "status_eq",
+     "value": 200
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.tail.mute.mode",
+   "family": "tail",
+   "expectation": "participant mode is muted",
+   "source_file": "stories.sh",
+   "source_function": "_story_group_metadata_without_workspace",
+   "line_start": 445,
+   "line_end": 445,
+   "source_quote": "assert_json_eq \"participant mode is muted\" \"$RESPONSE\" \"data.mode\" \"muted\"",
+   "address": {
+    "journal": "incident",
+    "kind": "operation",
+    "operation": "participant-mode"
+   },
+   "checks": [
+    {
+     "type": "field_eq",
+     "path": "value.data.mode",
+     "expected": "muted"
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.tail.mute.actor",
+   "family": "tail",
+   "expectation": "participant mode response identifies the actor",
+   "source_file": "stories.sh",
+   "source_function": "_story_group_metadata_without_workspace",
+   "line_start": 446,
+   "line_end": 446,
+   "source_quote": "assert_json_eq \"participant mode response identifies the actor\" \"$RESPONSE\" \"data.actor_id\" \"$BOT_ENG_UUID\"",
+   "address": {
+    "journal": "incident",
+    "kind": "operation",
+    "operation": "participant-mode"
+   },
+   "checks": [
+    {
+     "type": "field_eq",
+     "path": "value.data.actor_id",
+     "expected": {
+      "binding": "roles.ENG"
+     }
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.tail.workspace.write-gone",
+   "family": "tail",
+   "expectation": "deprecated group workspace writes are unavailable",
+   "source_file": "stories.sh",
+   "source_function": "_story_group_metadata_without_workspace",
+   "line_start": 450,
+   "line_end": 450,
+   "source_quote": "require_status \"deprecated group workspace writes are unavailable\" \"404\"",
+   "address": {
+    "journal": "incident",
+    "kind": "operation",
+    "operation": "workspace-put"
+   },
+   "checks": [
+    {
+     "type": "status_eq",
+     "value": 404
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.tail.workspace.read-gone",
+   "family": "tail",
+   "expectation": "deprecated group workspace reads are unavailable",
+   "source_file": "stories.sh",
+   "source_function": "_story_group_metadata_without_workspace",
+   "line_start": 453,
+   "line_end": 453,
+   "source_quote": "require_status \"deprecated group workspace reads are unavailable\" \"404\"",
+   "address": {
+    "journal": "incident",
+    "kind": "operation",
+    "operation": "workspace-get"
+   },
+   "checks": [
+    {
+     "type": "status_eq",
+     "value": 404
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.tail.routing.status",
+   "family": "tail",
+   "expectation": "driver configures structured routing",
+   "source_file": "stories.sh",
+   "source_function": "_story_group_metadata_without_workspace",
+   "line_start": 457,
+   "line_end": 457,
+   "source_quote": "require_status \"driver configures structured routing\" \"200\"",
+   "address": {
+    "journal": "incident",
+    "kind": "operation",
+    "operation": "routing-policy-put"
+   },
+   "checks": [
+    {
+     "type": "status_eq",
+     "value": 200
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.tail.routing.mode",
+   "family": "tail",
+   "expectation": "routing mode is persisted",
+   "source_file": "stories.sh",
+   "source_function": "_story_group_metadata_without_workspace",
+   "line_start": 458,
+   "line_end": 458,
+   "source_quote": "assert_json_eq \"routing mode is persisted\" \"$RESPONSE\" \"routing_policy.mode\" \"structured\"",
+   "address": {
+    "journal": "incident",
+    "kind": "operation",
+    "operation": "routing-policy-put"
+   },
+   "checks": [
+    {
+     "type": "field_eq",
+     "path": "value.routing_policy.mode",
+     "expected": "structured"
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.tail.routing.default-delivery",
+   "family": "tail",
+   "expectation": "default delivery is persisted",
+   "source_file": "stories.sh",
+   "source_function": "_story_group_metadata_without_workspace",
+   "line_start": 459,
+   "line_end": 459,
+   "source_quote": "assert_json_eq \"default delivery is persisted\" \"$RESPONSE\" \"routing_policy.default_bot_final_delivery\" \"inject_observers\"",
+   "address": {
+    "journal": "incident",
+    "kind": "operation",
+    "operation": "routing-policy-put"
+   },
+   "checks": [
+    {
+     "type": "field_eq",
+     "path": "value.routing_policy.default_bot_final_delivery",
+     "expected": "inject_observers"
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.tail.settings.gone-or-legacy",
+   "family": "tail",
+   "expectation": "retired group policy settings return Gone",
+   "source_file": "stories.sh",
+   "source_function": "_story_group_metadata_without_workspace",
+   "line_start": 462,
+   "line_end": 462,
+   "source_quote": "require_status \"retired group policy settings return Gone\" \"410\"",
+   "address": {
+    "journal": "incident",
+    "kind": "operation",
+    "operation": "settings-patch"
+   },
+   "checks": [
+    {
+     "type": "settings_retired_form"
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.tail.settings.policy-identified",
+   "family": "tail",
+   "expectation": "retired policy is identified",
+   "source_file": "stories.sh",
+   "source_function": "_story_group_metadata_without_workspace",
+   "line_start": 463,
+   "line_end": 463,
+   "source_quote": "assert_json_eq \"retired policy is identified\" \"$RESPONSE\" \"error\" \"service_policy_retired\"",
+   "address": {
+    "journal": "incident",
+    "kind": "operation",
+    "operation": "settings-patch"
+   },
+   "checks": [
+    {
+     "type": "settings_policy_form"
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.tail.message.status",
+   "family": "tail",
+   "expectation": "human posts a persistent group message",
+   "source_file": "stories.sh",
+   "source_function": "_story_group_metadata_without_workspace",
+   "line_start": 467,
+   "line_end": 467,
+   "source_quote": "require_status \"human posts a persistent group message\" \"200\"",
+   "address": {
+    "journal": "messages",
+    "kind": "operation",
+    "operation": "persistent-message"
+   },
+   "checks": [
+    {
+     "type": "status_eq",
+     "value": 200
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.tail.message.receives-id",
+   "family": "tail",
+   "expectation": "persistent message receives an id",
+   "source_file": "stories.sh",
+   "source_function": "_story_group_metadata_without_workspace",
+   "line_start": 468,
+   "line_end": 468,
+   "source_quote": "assert_json_not_empty \"persistent message receives an id\" \"$RESPONSE\" \"message_id\"",
+   "address": {
+    "journal": "messages",
+    "kind": "operation",
+    "operation": "persistent-message"
+   },
+   "checks": [
+    {
+     "type": "field_not_empty",
+     "path": "value.message_id"
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.tail.message.records-routing",
+   "family": "tail",
+   "expectation": "persistent message records routing targets",
+   "source_file": "stories.sh",
+   "source_function": "_story_group_metadata_without_workspace",
+   "line_start": 469,
+   "line_end": 469,
+   "source_quote": "assert_json_not_empty \"persistent message records routing targets\" \"$RESPONSE\" \"routed_to\"",
+   "address": {
+    "journal": "messages",
+    "kind": "operation",
+    "operation": "persistent-message"
+   },
+   "checks": [
+    {
+     "type": "field_not_empty",
+     "path": "value.routed_to"
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.tail.chat.status",
+   "family": "tail",
+   "expectation": "driver sends a live group chat message",
+   "source_file": "stories.sh",
+   "source_function": "_story_group_metadata_without_workspace",
+   "line_start": 473,
+   "line_end": 473,
+   "source_quote": "require_status \"driver sends a live group chat message\" \"200\"",
+   "address": {
+    "journal": "messages",
+    "kind": "operation",
+    "operation": "live-chat"
+   },
+   "checks": [
+    {
+     "type": "status_eq",
+     "value": 200
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.tail.chat.identifies-group",
+   "family": "tail",
+   "expectation": "group chat response identifies the group",
+   "source_file": "stories.sh",
+   "source_function": "_story_group_metadata_without_workspace",
+   "line_start": 474,
+   "line_end": 474,
+   "source_quote": "assert_json_eq \"group chat response identifies the group\" \"$RESPONSE\" \"group_id\" \"$group_id\"",
+   "address": {
+    "journal": "messages",
+    "kind": "operation",
+    "operation": "live-chat"
+   },
+   "checks": [
+    {
+     "type": "field_eq",
+     "path": "value.group_id",
+     "expected": {
+      "binding": "incident"
+     }
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.tail.chat.delivery-results",
+   "family": "tail",
+   "expectation": "group chat reports delivery results",
+   "source_file": "stories.sh",
+   "source_function": "_story_group_metadata_without_workspace",
+   "line_start": 475,
+   "line_end": 475,
+   "source_quote": "assert_json_not_empty \"group chat reports delivery results\" \"$RESPONSE\" \"delivery_results\"",
+   "address": {
+    "journal": "messages",
+    "kind": "operation",
+    "operation": "live-chat"
+   },
+   "checks": [
+    {
+     "type": "field_not_empty",
+     "path": "value.delivery_results"
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.tail.callback.status",
+   "family": "tail",
+   "expectation": "agent callback is delivered into the group",
+   "source_file": "stories.sh",
+   "source_function": "_story_group_metadata_without_workspace",
+   "line_start": 479,
+   "line_end": 479,
+   "source_quote": "require_status \"agent callback is delivered into the group\" \"200\"",
+   "address": {
+    "journal": "messages",
+    "kind": "operation",
+    "operation": "agent-callback"
+   },
+   "checks": [
+    {
+     "type": "status_eq",
+     "value": 200
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.tail.callback.identifies-group",
+   "family": "tail",
+   "expectation": "callback response identifies the group",
+   "source_file": "stories.sh",
+   "source_function": "_story_group_metadata_without_workspace",
+   "line_start": 480,
+   "line_end": 480,
+   "source_quote": "assert_json_eq \"callback response identifies the group\" \"$RESPONSE\" \"group_id\" \"$group_id\"",
+   "address": {
+    "journal": "messages",
+    "kind": "operation",
+    "operation": "agent-callback"
+   },
+   "checks": [
+    {
+     "type": "field_eq",
+     "path": "value.group_id",
+     "expected": {
+      "binding": "incident"
+     }
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.tail.callback.delivery-results",
+   "family": "tail",
+   "expectation": "callback reports delivery results",
+   "source_file": "stories.sh",
+   "source_function": "_story_group_metadata_without_workspace",
+   "line_start": 481,
+   "line_end": 481,
+   "source_quote": "assert_json_not_empty \"callback reports delivery results\" \"$RESPONSE\" \"delivery_results\"",
+   "address": {
+    "journal": "messages",
+    "kind": "operation",
+    "operation": "agent-callback"
+   },
+   "checks": [
+    {
+     "type": "field_not_empty",
+     "path": "value.delivery_results"
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.tail.delete.status",
+   "family": "tail",
+   "expectation": "driver closes the temporary incident group",
+   "source_file": "stories.sh",
+   "source_function": "_story_group_metadata_without_workspace",
+   "line_start": 484,
+   "line_end": 484,
+   "source_quote": "require_status \"driver closes the temporary incident group\" \"200\"",
+   "address": {
+    "journal": "delete",
+    "kind": "operation",
+    "operation": "incident-delete"
+   },
+   "checks": [
+    {
+     "type": "status_eq",
+     "value": 200
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.tail.delete.confirms-id",
+   "family": "tail",
+   "expectation": "group deletion confirms the id",
+   "source_file": "stories.sh",
+   "source_function": "_story_group_metadata_without_workspace",
+   "line_start": 485,
+   "line_end": 485,
+   "source_quote": "assert_json_eq \"group deletion confirms the id\" \"$RESPONSE\" \"id\" \"$group_id\"",
+   "address": {
+    "journal": "delete",
+    "kind": "operation",
+    "operation": "incident-delete"
+   },
+   "checks": [
+    {
+     "type": "field_eq",
+     "path": "value.id",
+     "expected": {
+      "binding": "incident"
+     }
+    }
+   ]
+  },
+  {
+   "id": "WORKSPACE.tail.delete.gone",
+   "family": "tail",
+   "expectation": "closed incident group is gone",
+   "source_file": "stories.sh",
+   "source_function": "_story_group_metadata_without_workspace",
+   "line_start": 487,
+   "line_end": 487,
+   "source_quote": "require_status \"closed incident group is gone\" \"404\"",
+   "address": {
+    "journal": "delete",
+    "kind": "state",
+    "state_key": "not_found"
+   },
+   "checks": [
+    {
+     "type": "not_found_state",
+     "value": 404
+    }
+   ]
+  }
+ ]
+}

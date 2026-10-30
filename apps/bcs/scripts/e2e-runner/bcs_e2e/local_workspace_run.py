@@ -95,6 +95,7 @@ def local_workspace_api_run(*, binary: Path, binary_sha256: str, state_dir: Path
     incident_case = {}
     message_case = {}
     delete_case = {}
+    density_roles = None
     error = None
     previous = signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
     try:
@@ -107,6 +108,9 @@ def local_workspace_api_run(*, binary: Path, binary_sha256: str, state_dir: Path
                     fixtures.apply(allow_write=True, role_identity=identities)
                     for role in fixtures.roles:
                         identities.verify(role)
+                    # Snapshot role IDs while the identity context is open: close()
+                    # clears its entries, and density bindings need IDs only.
+                    density_roles = identities.role_bot_ids()
                     from .local_workspace_api import OwnedLocalWorkspaceApi
                     case = OwnedLocalWorkspaceApi(identities).run()
                     if with_cli:
@@ -191,6 +195,24 @@ def local_workspace_api_run(*, binary: Path, binary_sha256: str, state_dir: Path
                       and delete_case.get('case_id') == 'LOCAL-WORKSPACE-DELETE-01'
                       and delete_case.get('run_id') == run_id
                       and read(runtime.root/'local-workspace-delete.json') == delete_case)
+        # Density seam (G1): frozen 63-atom projection over the retained
+        # journals. Purely observational — the seventeen-obligation gate above
+        # is untouched, and a projector failure is recorded as ERROR, never
+        # used to excuse or repair executor status.
+        from .group_workspace_density import (density_summary,
+                                               load_group_workspace_density_contract,
+                                               project_density,
+                                               workspace_density_bindings)
+        journals = {'api': case, 'cli': cli_case, 'incident': incident_case,
+                    'messages': message_case, 'delete': delete_case}
+        try:
+            density = project_density(
+                load_group_workspace_density_contract(), journals,
+                workspace_density_bindings(identities, journals, roles=density_roles))
+        except Exception as density_failure:
+            density = {'schema_version': 1, 'status': 'ERROR',
+                       'error_type': type(density_failure).__name__,
+                       'error_message': str(density_failure)}
         status = ('CANCELLED' if error is not None and has_cancellation(error) else
                   ('LOCAL_WORKSPACE_INCIDENT_ROUNDTRIP_PASS' if with_delete else
                    'LOCAL_WORKSPACE_MESSAGING_PASS' if with_messages else
@@ -215,7 +237,8 @@ def local_workspace_api_run(*, binary: Path, binary_sha256: str, state_dir: Path
                   'automatic_delete': False, 'remote_validation': 'NOT_RUN',
                   'api_journal': 'local-workspace-api.json',
                   'scope_note': 'Local API increment only; no CLI, incident, messaging or deletion qualification',
-                  'ready_to_execute': False}
+                  'ready_to_execute': False,
+                  'density': density, 'density_summary': density_summary(density)}
         if with_cli:
             result.update(cli_case=cli_case, cli_journal='local-workspace-cli.json',
                           remaining_parent_steps='INCIDENT_MESSAGES_DELETE_NOT_RUN',

@@ -24,6 +24,7 @@ from .local_role_identity import OwnedLocalRoleIdentity
 from .local_sqlite import OwnedSqliteDatabase
 from .local_workspace_api import OBLIGATIONS as API_OBLIGATIONS, workspace_source_binding
 from .local_workspace_cli import OBLIGATIONS as CLI_OBLIGATIONS
+from .workspace_retention import retain_value
 from .profile import fingerprint, identifier, unique_keys
 from .run_state import RunStateError, read, write
 
@@ -39,7 +40,12 @@ OPERATION_SEQUENCE = (
     'incident-create', 'incident-detail', 'participant-mode', 'workspace-put',
     'workspace-get', 'routing-policy-put', 'settings-patch', 'incident-readback',
 )
-OPERATION_EXPECTED_STATUS = {'workspace-put': 404, 'workspace-get': 404}
+# Dev PR #3173 retired Group service_spec policies station-wide. The story
+# tail requires the retired 410 face; the legacy 200 face is still admitted
+# for compatible builds (same dual admission as the session-completion and
+# workspace-roundtrip slices).
+OPERATION_EXPECTED_STATUS = {'workspace-put': 404, 'workspace-get': 404,
+                             'settings-patch': (200, 410)}
 WORKSPACE = {
     'decisions': ['ship the hotfix'],
     'notes': ['customer impact contained'],
@@ -269,11 +275,12 @@ class OwnedLocalWorkspaceIncident:
             headers['Authorization'] = 'Bearer ' + token
         request = Request(self.identities.origin + path, method=method, data=data, headers=headers)
         expected_status = OPERATION_EXPECTED_STATUS.get(operation, 200)
+        allowed = expected_status if isinstance(expected_status, tuple) else (expected_status,)
         try:
             try:
                 response = self.identities.opener.open(request, timeout=5)
             except HTTPError as error:
-                if error.code != expected_status:
+                if error.code not in allowed:
                     raise
                 response = error
             with response:
@@ -282,14 +289,15 @@ class OwnedLocalWorkspaceIncident:
                                    sensitive_values=((token,) if token else ()))
                 raw = response.read(65_537)
             self._active()
-            if response.status != expected_status or len(raw) > 65_536:
+            if response.status not in allowed or len(raw) > 65_536:
                 raise RunStateError('Workspace incident operation was not exactly confirmed')
-            if expected_status == 404:
-                result = {'http_status': expected_status}
+            if response.status == 404:
+                result = {'http_status': 404}
             else:
                 result = json.loads(raw.decode(), object_pairs_hook=unique_keys)
             if not isinstance(result, dict):
                 raise RunStateError('Workspace incident response is not an object')
+            event['value'] = retain_value(result)
             if handles:
                 group_id = identifier(result.get('id'), 'incident Group ID')
                 session_id = identifier(result.get('session_id'), 'incident initial Session ID')
@@ -327,6 +335,49 @@ class OwnedLocalWorkspaceIncident:
             raise RunStateError('Workspace incident operation failed; retain without retry') from None
 
     @staticmethod
+    def _settings_form(value):
+        """Dual settings face from the retained response body (PR #3173).
+
+        _operation returns the parsed response body, not the journal event, so
+        classification reads the body shapes directly: the retired face answers
+        the exact service_policy_retired body; the legacy face acknowledges with
+        the bounded service_spec payload.
+        """
+        if value == {'error': 'service_policy_retired',
+                     'message': 'service_spec settings have been retired'}:
+            return 'retired_410'
+        if (isinstance(value, dict) and value.get('id') is not None
+                and value.get('status') == 'ok'
+                and value.get('service_spec') == {'max_concurrency': 2}):
+            return 'service_spec_ack'
+        return None
+
+    @staticmethod
+    def _readback_form(readback):
+        """Group detail face: service_spec present (legacy) or absent (retired)."""
+        if not isinstance(readback, dict) or readback.get('id') is None:
+            return None
+        if 'service_spec' not in readback:
+            return 'retired_410'
+        return ('service_spec_ack'
+                if readback.get('service_spec') == {'max_concurrency': 2} else None)
+
+    @staticmethod
+    def _service_spec_form(service):
+        """Dual admission of the persisted service_spec column (PR #3173).
+
+        The retired build no longer persists the incident group's service_spec
+        column (NULL), while the legacy build stored the bounded dict. The
+        exact routing row stays the strict authority; the service_spec column
+        mirrors the executor-side dual admission in _settings_form.
+        """
+        if service is None:
+            return 'retired_null'
+        if service == {'max_concurrency': 2}:
+            return 'legacy_ack'
+        return None
+
+    @staticmethod
     def _participants(value):
         rows = value.get('participants')
         if (not isinstance(rows, list) or len(rows) != 3
@@ -360,7 +411,9 @@ class OwnedLocalWorkspaceIncident:
             raise RunStateError('Workspace incident exact stored rows are missing or duplicated')
         group = groups[0]
         routing = json.loads(group['routing_policy_json'], object_pairs_hook=unique_keys)
-        service = json.loads(group['service_spec'], object_pairs_hook=unique_keys)
+        service = (json.loads(group['service_spec'], object_pairs_hook=unique_keys)
+                   if group['service_spec'] is not None else None)
+        service_form = self._service_spec_form(service)
         expected_participants = {
             (self._id('CEO'), 'driver', 'bot', 'auto'),
             (self._id('PM'), 'consultant', 'bot', 'auto'),
@@ -371,7 +424,7 @@ class OwnedLocalWorkspaceIncident:
                 or routing != {'mode': 'structured',
                                'default_bot_final_delivery': 'inject_observers',
                                'sender_routes': {self._id('CEO'): [self._id('PM')]}}
-                or service != {'max_concurrency': 2}
+                or service_form is None
                 or set(participants) != expected_participants
                 or sessions != [(session_id, group_id, 'running', 'chat')]):
             raise RunStateError('Workspace incident stored configuration is not exact')
@@ -386,6 +439,7 @@ class OwnedLocalWorkspaceIncident:
             'status': 'PASS', 'group_rows': 1, 'participant_rows': 3,
             'initial_session_rows': 1, 'ledger_resources': 2,
             'workspace_routes': 'DEPRECATED_HTTP_404',
+            'service_spec_form': service_form,
         }
         self._save()
 
@@ -427,14 +481,24 @@ class OwnedLocalWorkspaceIncident:
                             'sender_routes': {self._id('CEO'): [self._id('PM')]}}
         # The current legacy GET projection exposes service_spec but not routing_policy;
         # routing persistence is independently checked from the exact owned DB row.
+        # PR #3173 retired the service_spec settings face station-wide, so the
+        # incident slice records the observed settings face instead of assuming
+        # the legacy projection; both faces are admitted explicitly.
+        settings_form = self._settings_form(settings)
+        readback_form = self._readback_form(readback)
+        self.state['settings_form'] = settings_form
         self._assert('WORKSPACE.routing-service',
                      routing == {'ok': True, 'routing_policy': expected_routing}
-                     and settings.get('id') == self.state['resources']['incident']['id']
-                     and settings.get('status') == 'ok'
-                     and settings.get('service_spec') == {'max_concurrency': 2}
+                     and settings_form is not None and settings_form == readback_form
+                     and (settings_form == 'retired_410'
+                          or settings.get('id') == readback.get('id'))
                      and readback.get('id') == self.state['resources']['incident']['id']
-                     and readback.get('service_spec') == {'max_concurrency': 2}
-                     and readback.get('latest_running_session_id') is None)
+                     # The current build exposes the incident room's running
+                     # initial Session in the detail projection (the CLI slice
+                     # pins the same projection for the primary Group); legacy
+                     # builds omitted the field. Both documented faces admitted.
+                     and readback.get('latest_running_session_id') in (
+                         None, self.state['resources']['incident']['initial_session']['id']))
         self._verify_storage()
 
     def run(self):

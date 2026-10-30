@@ -44,7 +44,43 @@ class IncidentGuardTests(unittest.TestCase):
             'decisions': ['ship the hotfix'], 'notes': ['customer impact contained'],
             'tasks': [], 'audit_log': []})
         self.assertEqual(OPERATION_EXPECTED_STATUS,
-                         {'workspace-put': 404, 'workspace-get': 404})
+                         {'workspace-put': 404, 'workspace-get': 404,
+                          'settings-patch': (200, 410)})
+
+    def test_settings_face_admits_retired_and_legacy_forms(self):
+        self.assertEqual(OwnedLocalWorkspaceIncident._settings_form(
+            {'error': 'service_policy_retired',
+             'message': 'service_spec settings have been retired'}), 'retired_410')
+        self.assertEqual(OwnedLocalWorkspaceIncident._settings_form(
+            {'id': 'grp', 'status': 'ok', 'service_spec': {'max_concurrency': 2}}),
+            'service_spec_ack')
+        self.assertIsNone(OwnedLocalWorkspaceIncident._settings_form(
+            {'error': 'unexpected_body'}))
+        self.assertIsNone(OwnedLocalWorkspaceIncident._settings_form(
+            {'id': 'grp', 'status': 'ok', 'service_spec': {'max_concurrency': 5}}))
+        self.assertIsNone(OwnedLocalWorkspaceIncident._settings_form('not-an-object'))
+        self.assertIsNone(OwnedLocalWorkspaceIncident._settings_form(None))
+        # legacy face keeps its response-id equality gate
+        self.assertEqual(OwnedLocalWorkspaceIncident._readback_form(
+            {'id': 'grp'}), 'retired_410')
+
+    def test_readback_face_distinguishes_retired_from_legacy_projection(self):
+        self.assertEqual(OwnedLocalWorkspaceIncident._readback_form(
+            {'id': 'grp', 'service_spec': {'max_concurrency': 2}}), 'service_spec_ack')
+        self.assertIsNone(OwnedLocalWorkspaceIncident._readback_form(
+            {'id': 'grp', 'service_spec': {'max_concurrency': 9}}))
+        self.assertIsNone(OwnedLocalWorkspaceIncident._readback_form('not-an-object'))
+        self.assertIsNone(OwnedLocalWorkspaceIncident._readback_form({'service_spec': {}}))
+
+    def test_persisted_service_spec_column_admits_retired_null_and_legacy_dict(self):
+        self.assertEqual(OwnedLocalWorkspaceIncident._service_spec_form(None),
+                         'retired_null')
+        self.assertEqual(OwnedLocalWorkspaceIncident._service_spec_form(
+            {'max_concurrency': 2}), 'legacy_ack')
+        self.assertIsNone(OwnedLocalWorkspaceIncident._service_spec_form(
+            {'max_concurrency': 5}))
+        self.assertIsNone(OwnedLocalWorkspaceIncident._service_spec_form({}))
+        self.assertIsNone(OwnedLocalWorkspaceIncident._service_spec_form('not-an-object'))
 
     def test_constructor_rejects_unmanaged_identity(self):
         with self.assertRaisesRegex(RunStateError, 'verified owned'):
