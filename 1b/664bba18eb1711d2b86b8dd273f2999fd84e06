@@ -1,0 +1,19 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/custom_collaboration/density.py
+  s_cecdc98e721f4b::t_bb08dee6ff5960 10-12,20-23,68-79,174-178
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1b664bba18eb1711d2b86b8dd273f2999fd84e06",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
