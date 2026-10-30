@@ -58,6 +58,7 @@ from .network_status_case_run import dual_network_actor_status_case_run
 from .network_read_case_run import dual_network_read_case_run
 from .structured_core_case_run import dual_structured_core_case_run
 from .structured_templates_case_run import dual_structured_templates_case_run
+from .structured_density.dual_case_run import dual_structured_density_case_run
 from .webhook_subscription_case_run import dual_webhook_subscription_case_run
 from .friend_connection_decision_case_run import dual_friend_connection_decision_case_run
 from .friend_public_accept_case_run import dual_friend_public_accept_case_run
@@ -615,6 +616,16 @@ def main(argv: list[str] | None = None) -> int:
                 confirm_run_id=args.confirm_run_id,
             )
             rc = 0 if report["status"] == "PASS" else 2
+        elif args.command == "dual-structured-density-run":
+            report = dual_structured_density_case_run(
+                profile_path=args.profile,
+                templates_profile_path=args.templates_profile,
+                state_dir=args.state_dir,
+                run_id=args.run_id,
+                allow_write=args.allow_write,
+                confirm_run_id=args.confirm_run_id,
+            )
+            rc = 0 if report["status"] == "PASS" else 2
         elif args.command == "dual-webhook-subscription-run":
             report = dual_webhook_subscription_case_run(
                 profile_path=args.profile,
@@ -1093,3 +1104,7 @@ def main(argv: list[str] | None = None) -> int:
         rc = 130
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return rc
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

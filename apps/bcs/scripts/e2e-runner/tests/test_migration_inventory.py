@@ -646,7 +646,7 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
         rows = {row['id']: row['executor_migration'] for row in legacy}
         self.assertEqual(
             rows['story_user_runs_structured_collaboration']['notes'],
-            ['STATION_DEFECT_R5_CAVEAT'])
+            ['STATION_DEFECT_R5_CAVEAT', 'DUAL_STRUCTURED_DENSITY_R12_PREPROD_PASS_20261031'])
         self.assertEqual(
             rows['story_user_builds_trusted_team']['notes'],
             ['FRESH_FIXTURE_R5G'])

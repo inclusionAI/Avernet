@@ -165,7 +165,7 @@
       "expectation": "Consume the pending Human queue as exactly one node at a time with loop depth 1..3, bounding path iteration and optionally returning loop context.",
       "story_lines": [
         264,
-        274
+        275
       ],
       "markers": [
         "nested-human-story"

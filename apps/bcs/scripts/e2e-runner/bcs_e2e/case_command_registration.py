@@ -37,6 +37,7 @@ CASE_COMMANDS = frozenset({
     "dual-channel-run",
     "dual-structured-core-run",
     "dual-structured-templates-run",
+    "dual-structured-density-run",
     "dual-webhook-subscription-run",
     "dual-friend-connection-decisions-run",
     "dual-friend-public-accept-run",
@@ -157,6 +158,15 @@ def register_case_commands(commands) -> None:
     structured_templates_case.add_argument("--run-id", required=True)
     structured_templates_case.add_argument("--confirm-run-id", required=True)
     structured_templates_case.add_argument("--allow-write", action="store_true")
+    structured_density_case = commands.add_parser(
+        "dual-structured-density-run",
+        help="Run the reviewed dual structured-collaboration density journey through Singlebox or preprod")
+    structured_density_case.add_argument("--profile", type=Path, required=True)
+    structured_density_case.add_argument("--templates-profile", type=Path, required=False)
+    structured_density_case.add_argument("--state-dir", type=Path, required=True)
+    structured_density_case.add_argument("--run-id", required=True)
+    structured_density_case.add_argument("--confirm-run-id", required=True)
+    structured_density_case.add_argument("--allow-write", action="store_true")
     webhook_subscription_case = commands.add_parser(
         "dual-webhook-subscription-run",
         help="Run the reviewed dual Event Webhook subscription lifecycle through Singlebox or preprod")

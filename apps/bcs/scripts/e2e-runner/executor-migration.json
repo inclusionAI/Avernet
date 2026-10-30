@@ -64,7 +64,8 @@
         "preprod_verdict": "PASS",
         "gates": [],
         "notes": [
-          "STATION_DEFECT_R5_CAVEAT"
+          "STATION_DEFECT_R5_CAVEAT",
+          "DUAL_STRUCTURED_DENSITY_R12_PREPROD_PASS_20261031"
         ]
       }
     },
