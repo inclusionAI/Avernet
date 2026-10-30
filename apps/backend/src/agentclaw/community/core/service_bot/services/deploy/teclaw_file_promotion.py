@@ -142,10 +142,12 @@ class TeclawFilePromotion:
         engine, because the platform is the side that holds them.
 
         Raises:
-            TeclawFilePromotionError: a listed file could not be read (the source
-                container is the source of truth, so a missing read is a hard
+            TeclawFilePromotionError: a listed file is really missing (the source
+                container is the source of truth, so an absent read is a hard
                 failure, not a silent skip), its OSS put failed, or a tool object
-                could not be copied.
+                could not be copied. A non-missing engine read failure is left
+                for the transport to surface rather than being translated into
+                "missing file" here.
         """
         store_base = f"teclaw/{env}/bolt_data"
         # Stage-scoped per-bot segment isolates each publish snapshot.
@@ -190,6 +192,16 @@ class TeclawFilePromotion:
                     continue
                 logical = engine_path.lstrip("/")  # "workspace/sub/x.csv"
                 content = await device_fs.read_file(logical)
+                if content is None:
+                    # ``read_file`` returning ``None`` currently means both
+                    # "absent" and "engine read error" by default. Re-read once
+                    # with ``preserve_read_errors``: a real presence/transport
+                    # failure must propagate, so it cannot be silently classified
+                    # as a missing file here. If it is still ``None``, the second
+                    # read tells us the source was genuinely gone.
+                    content = await device_fs.read_file(
+                        logical, preserve_read_errors=True
+                    )
                 if content is None:
                     raise TeclawFilePromotionError(
                         f"teclaw promotion: source file unreadable: {engine_path}"
