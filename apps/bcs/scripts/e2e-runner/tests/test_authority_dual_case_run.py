@@ -96,18 +96,25 @@ def blocked_execution_snapshot() -> dict:
             'error_type': dual._PREPROD_CREDENTIALS_UNAVAILABLE, 'ready_to_execute': False}
 
 
-def route_observations(*, health_status=200, health_body='ok', mint_status=401) -> list[dict]:
+def route_observations(*, health_status=200, health_body='ok',
+                       health_request_headers=None, health_body_class='json',
+                       health_json_token=False, mint_status=200,
+                       mint_body_class='html', mint_json_token=False) -> list[dict]:
     return [
         {'method': 'GET', 'url': 'https://bcs-pre.alipay.com/health',
-         'request_headers': [], 'observed_status': health_status, 'transport_error': None,
-         'body_status': health_body, 'route': 'health',
-         'expected': 'HTTP 200 with a healthy body status',
+         'request_headers': health_request_headers or [], 'observed_status': health_status,
+         'transport_error': None, 'body_status': health_body,
+         'body_class': health_body_class, 'json_token_key': health_json_token,
+         'route': 'health',
+         'expected': 'HTTP 200 with a healthy JSON body status (human cookie admitted)',
          'passed': health_status == 200 and health_body in ('ok', 'healthy')},
         {'method': 'GET', 'url': 'https://bcs-pre.alipay.com/register/token',
          'request_headers': [], 'observed_status': mint_status, 'transport_error': None,
-         'body_status': None, 'route': 'register-token-unauthenticated',
-         'expected': 'HTTP 401 or 403 without registration-plane mock admission',
-         'passed': mint_status in (401, 403)},
+         'body_status': None, 'body_class': mint_body_class,
+         'json_token_key': mint_json_token, 'route': 'register-token-unauthenticated',
+         'expected': ('no anonymous JSON token mint: the station ACE login gate (200 HTML) '
+                      'or a 401/403 rejection'),
+         'passed': not mint_json_token},
     ]
 
 
@@ -783,3 +790,61 @@ class AuthorityDualCaseRunTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+class StationAdmissionGateTests(unittest.TestCase):
+    """Station (in-China site) form: ACE SSO HTML gate on both frozen faces."""
+
+    def _html_fence(self, *, health_body: str, mint_body: str) -> str:
+        class Fence(BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path == '/health':
+                    body = health_body.encode()
+                else:
+                    body = mint_body.encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *_args):
+                pass
+
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Fence)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.server_close)
+        return 'http://127.0.0.1:' + str(server.server_address[1])
+
+    def test_station_html_login_gate_fails_closed_on_health_and_blocks_mint(self):
+        origin = self._html_fence(health_body='<html>pwdLogin.js injectInfo env:PROD</html>',
+                                  mint_body='<html>station ACE login gate</html>')
+        probes = dual._route_probes(origin)
+        health, mint = probes
+        self.assertEqual(health['observed_status'], 200)
+        self.assertEqual(health['body_class'], 'html')
+        self.assertIsNone(health['body_status'])
+        self.assertFalse(health['passed'])
+        self.assertEqual(mint['observed_status'], 200)
+        self.assertEqual(mint['body_class'], 'html')
+        self.assertFalse(mint['json_token_key'])
+        self.assertTrue(mint['passed'])
+        self.assertFalse(all(row['passed'] for row in probes))
+        self.assertEqual(dual._reason_priority(True, False)[0],
+                         dual._PREPROD_ROUTE_PROBE_MISMATCH)
+
+    def test_health_probe_attaches_only_the_cookie_name_when_values_present(self):
+        captured = {}
+
+        def fake_probe(url, *, headers=None):
+            key = 'health' if url.endswith('/health') else 'mint'
+            captured[key] = sorted(headers or {})
+            return {'method': 'GET', 'url': url, 'request_headers': sorted(headers or {}),
+                    'observed_status': 200, 'transport_error': None, 'body_status': 'ok',
+                    'body_class': 'json', 'json_token_key': False}
+
+        with patch.object(dual, '_http_probe', side_effect=fake_probe):
+            probes = dual._route_probes('https://bcs-pre.alipay.com',
+                                        {'Cookie': 'canary-value', 'Authorization': 'Bearer x'})
+        self.assertEqual(captured['health'], ['Cookie'])
+        self.assertEqual(captured['mint'], [])
+        self.assertEqual([row['passed'] for row in probes], [True, True])

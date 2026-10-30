@@ -275,6 +275,9 @@ def _http_probe(url: str, *, headers: dict | None = None) -> dict:
             except (UnicodeError, json.JSONDecodeError):
                 body = None
             observation['body_status'] = body.get('status') if isinstance(body, dict) else None
+            observation['body_class'] = ('json' if isinstance(body, dict)
+                                         else ('html' if body is None and raw else 'other'))
+            observation['json_token_key'] = bool(isinstance(body, dict) and body.get('token'))
     except urllib.error.HTTPError as error:
         # An HTTP status is an observed surface fact, never a transport failure.
         observation['observed_status'] = error.status
@@ -284,24 +287,35 @@ def _http_probe(url: str, *, headers: dict | None = None) -> dict:
         except (UnicodeError, json.JSONDecodeError):
             body = None
         observation['body_status'] = body.get('status') if isinstance(body, dict) else None
+        observation['body_class'] = ('json' if isinstance(body, dict)
+                                     else ('html' if body is None and raw else 'other'))
+        observation['json_token_key'] = bool(isinstance(body, dict) and body.get('token'))
         observation['transport_error'] = None
     except Exception as error:  # noqa: BLE001 - honest observation, never a raise
         observation['transport_error'] = type(error).__name__
     return observation
 
 
-def _route_probes(base_url: str) -> list[dict]:
-    """Credential-free route probes; always run, never retried."""
-    health = _http_probe(base_url + '/health')
+def _route_probes(base_url: str, values: dict | None = None) -> list[dict]:
+    """Read-only route probes; always run, never retried.
+
+    The station ACE gate answers bearer-only and anonymous requests with a
+    200 HTML SSO login page, so the health probe carries the validated Human
+    cookie beside the wire (duo admission model) while the mint probe stays
+    credential-free: an anonymous JSON token mint would be a disclosure.
+    """
+    health = _http_probe(base_url + '/health',
+                         headers={'Cookie': values['Cookie']} if values else None)
     health['route'] = 'health'
-    health['expected'] = 'HTTP 200 with a healthy body status'
+    health['expected'] = 'HTTP 200 with a healthy JSON body status (human cookie admitted)'
     health['passed'] = (health['observed_status'] == 200
                         and isinstance(health['body_status'], str)
                         and health['body_status'] in ('ok', 'healthy'))
     mint = _http_probe(base_url + '/register/token')
     mint['route'] = 'register-token-unauthenticated'
-    mint['expected'] = 'HTTP 401 or 403 without registration-plane mock admission'
-    mint['passed'] = mint['observed_status'] in (401, 403)
+    mint['expected'] = ('no anonymous JSON token mint: the station ACE login gate (200 HTML) '
+                        'or a 401/403 rejection')
+    mint['passed'] = not mint['json_token_key']
     return [health, mint]
 
 
@@ -387,8 +401,8 @@ def _reason_priority(admitted: bool, route_ok: bool) -> tuple[str, str]:
                 'expired driver tokens and human cookies are disclosed, never retried')
     if not route_ok:
         return (_PREPROD_ROUTE_PROBE_MISMATCH,
-                'credential-free route probes did not observe the frozen healthy or '
-                'unauthenticated-mint-rejection surface')
+                'route probes did not observe the frozen surface: cookie-admitted healthy '
+                'JSON on /health and no anonymous JSON token mint on /register/token')
     return (_PREPROD_ADMISSION_BLOCKED,
             'mutating journey outside frozen REMOTE_ADMISSION_GATED_READ_ONLY column')
 
@@ -398,7 +412,7 @@ def _authority_preprod_leg(*, profile: dict) -> tuple[CaseExecution, dict, dict 
     header_env = profile['auth']['header_env']
     base_url = profile['entrypoint']['origin']
     admission, values, closed = _admission(header_env)
-    route_probes = _route_probes(base_url)
+    route_probes = _route_probes(base_url, values)
     route_ok = all(row['passed'] is True for row in route_probes)
     authenticated: list[dict] = []
     if closed is not None:
