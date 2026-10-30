@@ -46,9 +46,25 @@ class HybridRetrievalService:
         execution: dict[str, CallExecutor] | None = None,
         keyword_enabled: bool = True,
         vector_enabled: bool = True,
+        group_by_source: bool = False,
+        recall_limit: int | None = None,
+        vector_min_score: float | None = None,
+        keyword_min_score: float | None = None,
     ):
         if not keyword_enabled and not vector_enabled:
             raise ValueError("at least one recall branch must be enabled")
+        for threshold in (vector_min_score, keyword_min_score):
+            if threshold is not None and (
+                isinstance(threshold, bool)
+                or not isinstance(threshold, (int, float))
+                or not math.isfinite(threshold)
+            ):
+                raise ValueError("minimum scores must be finite numbers or None")
+        self._thresholds = (vector_min_score, keyword_min_score)
+        self._group_by_source = group_by_source
+        self._recall_limit = candidate_limit if recall_limit is None else recall_limit
+        if type(self._recall_limit) is not int or self._recall_limit < candidate_limit:
+            raise ValueError("recall_limit must be at least candidate_limit")
         self._keyword_enabled = keyword_enabled
         self._vector_enabled = vector_enabled
         if candidate_limit <= 0:
@@ -99,12 +115,13 @@ class HybridRetrievalService:
                     "vector",
                     self._index.vector_search,
                     vector,
-                    self._candidate_limit,
+                    self._recall_limit,
                     request.filters,
                     request.allowed_ids,
                 )
             except Exception as exc:
                 raise _StageFailure("semantic_unavailable") from exc
+
 
         async def keyword():
             if not self._keyword_enabled:
@@ -114,12 +131,13 @@ class HybridRetrievalService:
                     "keyword",
                     self._index.keyword_search,
                     request.query,
-                    self._candidate_limit,
+                    self._recall_limit,
                     request.filters,
                     request.allowed_ids,
                 )
             except Exception as exc:
                 raise _StageFailure("keyword_unavailable") from exc
+
 
         results = await asyncio.gather(
             semantic(),
@@ -134,12 +152,8 @@ class HybridRetrievalService:
         )
         vector_failure = _exception_from(vector_marker)
         keyword_failure = _exception_from(keyword_marker)
-        vector_available = (
-            self._vector_enabled and vector_failure is None
-        )
-        keyword_available = (
-            self._keyword_enabled and keyword_failure is None
-        )
+        vector_available = self._vector_enabled and vector_failure is None
+        keyword_available = self._keyword_enabled and keyword_failure is None
 
         if not vector_available and not keyword_available:
             if not self._allow_partial:
@@ -164,13 +178,19 @@ class HybridRetrievalService:
                 available=False,
             )
 
-        vector_hits: tuple = (
-            () if not self._vector_enabled or vector_failure is not None
-            else tuple(vector_marker)
+        vector_hits = (
+            ()
+            if not self._vector_enabled or vector_failure is not None
+            else self._retrieved_hits(
+                vector_marker, self._thresholds[0], request.allowed_ids
+            )
         )
-        keyword_hits: tuple = (
-            () if not self._keyword_enabled or keyword_failure is not None
-            else tuple(keyword_marker)
+        keyword_hits = (
+            ()
+            if not self._keyword_enabled or keyword_failure is not None
+            else self._retrieved_hits(
+                keyword_marker, self._thresholds[1], request.allowed_ids
+            )
         )
         reasons = []
         if not self._vector_enabled:
@@ -192,6 +212,34 @@ class HybridRetrievalService:
             available=True,
         )
 
+    def _retrieved_hits(self, hits, threshold, allowed_ids):
+        hits = tuple(hits)
+        if allowed_ids is not None and any(
+            self._identity(hit) not in allowed_ids for hit in hits
+        ):
+            raise SearchUnavailable("index returned an unauthorized candidate")
+        if threshold is not None:
+            hits = tuple(
+                hit
+                for hit in hits
+                if math.isfinite(hit.score) and hit.score >= threshold
+            )
+        if not self._group_by_source:
+            return hits
+        unique = {}
+        for hit in sorted(hits, key=lambda hit: (-hit.score, hit.id)):
+            source = self._identity(hit)
+            unique.setdefault(source, hit.model_copy(update={"id": source}))
+        return tuple(unique.values())
+
+    def _identity(self, hit):
+        if not self._group_by_source:
+            return hit.id
+        source = hit.payload.get("source_id")
+        if not isinstance(source, str) or not source:
+            raise SearchUnavailable("document source identity missing")
+        return source
+
     async def rank(self, request: RetrievalRequest, recall: RecallResult) -> SearchResult:
         if not recall.available:
             raise SearchUnavailable("all recall paths unavailable")
@@ -212,7 +260,12 @@ class HybridRetrievalService:
                     [
                         {
                             "id": item.item_id,
-                            "text": str(hits[item.item_id].payload.get("content") or ""),
+                            "text": str(
+                                hits[item.item_id].payload.get("rerank_text")
+                                or hits[item.item_id].payload.get("search_text")
+                                or hits[item.item_id].payload.get("content")
+                                or ""
+                            ),
                         }
                         for item in ranking
                     ],
