@@ -76,16 +76,26 @@ export async function readPackScriptSnapshot(repoDir: string, workflowId: string
     return list(entry.oid);
   };
   const root = await list(baseCommit);
-  const direct = await directory(root.find(e => e.name === packId));
-  const packs = await directory(root.find(e => e.name === 'packs'));
-  const nested = packs && await directory(packs.find(e => e.name === packId));
+  const rootManifest = root.find(e => e.name === 'workflow.pack.yaml');
+  // A valid root Pack can contain an ordinary file with the same name as a
+  // candidate directory. Never treat symlinks or gitlinks as directories.
+  const candidateDirectory = async (entry: Entry | undefined) => {
+    if (rootManifest && entry?.type === 'blob' && ['100644', '100755'].includes(entry.mode)) return undefined;
+    return directory(entry);
+  };
+  const direct = await candidateDirectory(root.find(e => e.name === packId));
+  const packs = await candidateDirectory(root.find(e => e.name === 'packs'));
+  const nested = packs && await candidateDirectory(packs.find(e => e.name === packId));
   const manifest = (entries: Entry[] | undefined) => entries?.find(e => e.name === 'workflow.pack.yaml');
-  const directManifest = manifest(direct), nestedManifest = manifest(nested);
-  if (directManifest && nestedManifest) throw new Error('Pack manifest conflict');
-  const selectedManifest = directManifest ?? nestedManifest;
-  if (!selectedManifest) throw new Error('Pack manifest not found');
+  const candidates = [root, direct, nested]
+    .flatMap(entries => {
+      const candidate = manifest(entries);
+      return candidate && entries ? [{ manifest: candidate, entries }] : [];
+    });
+  if (candidates.length > 1) throw new Error('Pack manifest conflict');
+  if (!candidates.length) throw new Error('Pack manifest not found');
+  const { manifest: selectedManifest, entries } = candidates[0];
   if (selectedManifest.type !== 'blob' || !['100644', '100755'].includes(selectedManifest.mode)) throw new Error('Invalid pack manifest mode');
-  const entries = directManifest ? direct! : nested!;
   const readYamlObject = async (entry: Entry, label: string): Promise<Record<string, unknown>> => {
     if (entry.type !== 'blob' || !['100644', '100755'].includes(entry.mode)) throw new Error(`Invalid ${label} mode`);
     const sizeText = await text(['cat-file', '-s', entry.oid]);

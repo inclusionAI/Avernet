@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 
 use bcs_domain::{LedgerSummary, MessageAudience, MessageVisibilityDomain, SenderType};
 use bcs_protocol::{BcsFrame, GroupContext, RequestFrame};
+use bcs_service_api::application::caller_handoff::{HandoffScope, QueuedAdmissionReceipt};
 use bcs_service_api::{
     BotDeliveryCommand, BotDeliveryKind, ChatResponseMode, DeliveryType, FrontendDeliveryCommand,
     FrontendDeliveryKind, FrontendDeliveryResult, FrontendDeliveryTarget, Group, GroupStatus,

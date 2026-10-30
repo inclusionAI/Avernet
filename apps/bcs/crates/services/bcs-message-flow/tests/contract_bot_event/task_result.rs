@@ -47,7 +47,8 @@ async fn task_result_is_forwarded_back_to_manager_session() {
             payload: json!({
                 "message": "do work",
                 "bcs_session_id": "group-1:abcdef12",
-            }),
+        }),
+        caller_delegation: None,
         })
         .await
         .unwrap();
@@ -113,6 +114,7 @@ async fn manager_worker_task_result_preserves_manager_session_context() {
                 "message": "do work",
                 "bcs_session_id": "group-1:abcdef12",
             }),
+            caller_delegation: None,
         })
         .await
         .unwrap();
@@ -176,6 +178,7 @@ async fn manager_worker_task_result_records_independent_manager_run_context() {
                 "message": "do work",
                 "bcs_session_id": "group-1:abcdef12",
             }),
+            caller_delegation: None,
         })
         .await
         .unwrap();
@@ -251,6 +254,7 @@ async fn manager_worker_task_final_suffix_snapshot_persists_only_after_tool_resu
                 "message": "do work",
                 "bcs_session_id": "group-1:abcdef12",
             }),
+            caller_delegation: None,
         })
         .await
         .unwrap();
@@ -372,6 +376,7 @@ async fn duplicate_manager_worker_task_final_does_not_append_duplicate_result_hi
                 "message": "do work",
                 "bcs_session_id": "group-1:abcdef12",
             }),
+            caller_delegation: None,
         })
         .await
         .unwrap();
@@ -419,6 +424,7 @@ async fn manager_worker_task_final_from_non_target_bot_does_not_append_result_hi
                 "message": "do work",
                 "bcs_session_id": "group-1:abcdef12",
             }),
+            caller_delegation: None,
         })
         .await
         .unwrap();

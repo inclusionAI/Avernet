@@ -65,6 +65,7 @@ async fn single_node_run_completes_session_with_bot_final_text() {
             input: json!({"question": "review this"}),
             caller_id: None,
             authenticated_human: None,
+            caller_association: None,
         })
         .await
         .expect("start run");
@@ -349,6 +350,7 @@ async fn state_machine_bot_delivery_registers_message_flow_run_context() {
             input: json!({"question": "stream this"}),
             caller_id: None,
             authenticated_human: None,
+            caller_association: None,
         })
         .await
         .expect("start run");
@@ -401,6 +403,7 @@ async fn message_less_final_fails_attempt_and_schedules_retry() {
             input: json!({"question": "empty final should retry"}),
             caller_id: None,
             authenticated_human: None,
+            caller_association: None,
         })
         .await
         .expect("start run");
@@ -506,6 +509,7 @@ async fn state_machine_completion_finishes_service_without_callback() {
             input: json!({"question": "callback after completion"}),
             caller_id: None,
             authenticated_human: None,
+            caller_association: None,
         })
         .await
         .expect("start run");
@@ -562,6 +566,7 @@ async fn state_machine_runtime_logs_run_node_and_terminal_lifecycle() {
                 input: json!({"question": "logging"}),
                 caller_id: Some("caller-1".to_string()),
                 authenticated_human: None,
+                caller_association: None,
             })
             .await
             .expect("start run");

@@ -400,6 +400,19 @@ impl BcsServer {
             bcs_provider_http::BotTransportMux::new(ws_bot_delivery, provider_transport.clone()),
         );
         let bot_delivery = maybe_wrap_bot_delivery(&config, raw_bot_delivery);
+        // P1.4 caller dispatch gate: caller-enabled Bots are never
+        // content-dispatched on ordinary transports — they answer only on
+        // the protected caller wire. The decorator consults the
+        // authoritative configuration through the same control plane
+        // (cached path); unconfigured/disabled targets pass through
+        // unchanged, aborts and availability checks are never blocked.
+        // Not installable over the memory composition (no caller
+        // configuration storage there).
+        let bot_delivery: Arc<dyn BotDeliveryPort> =
+            Arc::new(bcs_bot::application::CallerConfigurationDeliveryGate::new(
+                bot_delivery,
+                provider_control_plane.clone(),
+            ));
         let raw_frontend_delivery: Arc<dyn FrontendDeliveryPort> =
             Arc::new(WorkbenchFrontendDelivery::new(
                 frontend_connections.clone(),
@@ -642,7 +655,82 @@ impl BcsServer {
         );
         let message_flow_builder = message_flow_builder.with_system_message(use_cases.system_message.clone()).with_direct_chat(a2a_chat_impl);
         let channel_slot = message_flow_builder.channel_slot();
-        let message_flow: Arc<dyn MessageFlowService> = crate::message_delivery_wiring::wire_with_leader(message_flow_builder, &config, leader_election.clone()).await?;
+        // P3.3 SQL speaking leases (spec §6.3): the durable store keyed by
+        // the resolved environment shares the SQL wiring family. The SAME
+        // instance feeds the flow's admission fence AND the WS lease
+        // command entrance — one store, one epoch.
+        let lease_store: Arc<
+            dyn bcs_service_api::port::repo::session_speaking_lease::SpeakingLeaseRepoPort,
+        > = Arc::new(bcs_session_store::SqlSpeakingLeaseRepo::new(
+            db_plugin.clone(),
+            crate::env::resolve_env(),
+            db_flavor,
+        ));
+        // Caller identity chain (spec §10.13.7): the optional
+        // [caller_identity] section assembles the identity plugin; absent
+        // keeps the protected dispatch unmounted (fail-closed, no caller
+        // execution is fabricated). The SAME provider transport instance
+        // serves the container gateway (H2A chat.send downlink) and the
+        // execution send port.
+        let caller_identity =
+            crate::caller_identity_wiring::assemble_caller_identity_plugin(&config)?;
+        let caller_protected = caller_identity.map(|identity| {
+            crate::message_delivery_wiring::CallerProtectedAssembly {
+                provider_core: provider_core.clone(),
+                gateway: provider_transport.clone(),
+                sender: provider_transport.clone(),
+                identity,
+                // Observe fan-out (§6.4) over the SAME shared provider
+                // transport — the factory reuses its client and outbound-URL
+                // guard; non-Provider targets simply stay un-fanned.
+                observe_injector_factory: Some(Arc::new(
+                    crate::message_delivery_wiring::ProviderObserveInjectorFactory {
+                        transport: provider_transport.clone(),
+                    },
+                )),
+            }
+        });
+        let wired_message_flow =
+            crate::message_delivery_wiring::wire_with_caller_assembly(
+            message_flow_builder,
+            &config,
+            leader_election.clone(),
+            // The same caller-capable control plane GroupManagement reads:
+            // presence here arms the per-message speaking-lease fence
+            // (web_send re-resolves over live per-bot caller
+            // configurations), so a lease-less Human send is rejected in
+            // lease_required groups. Without it the fence reads
+            // any_bot_caller_enabled as false (Plain) and never consults
+            // the lease store.
+            Some(provider_control_plane.clone()),
+            caller_protected,
+            Some(lease_store.clone()),
+        )
+        .await?;
+        // §15.83 S4 (review-VI P1): the production composition's single
+        // orchestration mount. The same pipeline instance that serves the
+        // delegate arm also implements the orchestration dispatch port and
+        // the instance registrar; with_caller_orchestration mounts the
+        // control-plane resolver alongside. No protected pipeline (no
+        // [caller_identity]) degrades to the Refusing resolver so a
+        // caller-enabled assignee never silently dispatches on the
+        // ordinary wire. The BcsMessageFlow type annotation keeps the
+        // concrete Arc so the pipeline can be read off it before the
+        // wider dyn MessageFlowService binding below.
+        let caller_orchestration_pipeline = wired_message_flow.caller_dispatch_pipeline.clone();
+        // Owner→caller relay (design 2026-10-30): the same CallerRelayState
+        // the admission seam captured into — bot-submitted caller-aware runs
+        // redeem here. Absent relay state (an explicit deployment opt-out)
+        // stays None and every bot submission keeps caller-closed behavior.
+        let caller_relay_redeemer = wired_message_flow.caller_relay.as_ref().map(|relay| {
+            std::sync::Arc::new(
+                bcs_message_flow::caller_relay::CallerRelaySubmissionRedeemer::new(
+                    relay.ledger.clone(),
+                ),
+            ) as std::sync::Arc<dyn bcs_service_api::port::CallerRelayRedeemerPort>
+        });
+        let message_flow: Arc<dyn MessageFlowService> = wired_message_flow;
+        let speaking_leases = Some(lease_store);
         let mut delivery_startup_guard = crate::message_delivery_wiring::StartupGuard(Some(message_flow.clone()));
         frontend_connections
             .set_bot_query(use_cases.bot_query.clone())
@@ -668,8 +756,7 @@ impl BcsServer {
                     )
                 }
             };
-            Arc::new(
-                CollaborationRuntime::new(
+            let collaboration_runtime_builder = CollaborationRuntime::new(
                     collaboration_store.clone(),
                     collaboration_store.clone(),
                     collaboration_store.clone(),
@@ -688,6 +775,28 @@ impl BcsServer {
             .with_history_persistence(config.state_machine_history.persistence_enabled)
             .with_history_cutoff_timestamp(config.message_history.state_machine_cutoff_timestamp)
                 .with_loop_instrumentation(state_machine_loop_instrumentation(metrics.as_ref()))
+                .with_caller_orchestration(
+                    Some(provider_control_plane.clone()),
+                    caller_orchestration_pipeline
+                        .clone()
+                        .map(|pipeline| pipeline as Arc<
+                            dyn bcs_service_api::port::OrchestrationCallerDispatchPort,
+                        >),
+                    caller_orchestration_pipeline
+                        .map(|pipeline| pipeline as Arc<
+                            dyn bcs_service_api::port::OrchestrationInstanceRegistrar,
+                        >),
+                );
+            // Owner→caller relay (design 2026-10-30): attach the redeemer
+            // AFTER the full-shape assembly so a relay capture can never
+            // register into a runtime that could not consume it; absent
+            // relay state keeps every bot submission caller-closed.
+            let collaboration_runtime = if let Some(redeemer) = caller_relay_redeemer.clone() {
+                collaboration_runtime_builder.with_caller_relay_redeemer(redeemer)
+            } else {
+                collaboration_runtime_builder
+            };
+            let collaboration_runtime = collaboration_runtime
                 .with_session_channel_outbound(session_channel_outbound)
                 .with_result_publisher(Arc::new(MessageFlowStateMachineResultPublisher::new(
                     message_flow.clone(),
@@ -696,8 +805,8 @@ impl BcsServer {
                 .with_frontend_delivery(frontend_delivery.clone())
                 .with_event_record_factory(
                     crate::eventing_wiring::event_record_factory(&config, event_repo.clone()),
-                ),
-            )
+                );
+            Arc::new(collaboration_runtime)
         };
         state_machine_terminal_observer.bind(collaboration_runtime.clone());
         let session_management = Arc::new(SessionManagementWithRuntimeCleanup::new(
@@ -935,6 +1044,7 @@ impl BcsServer {
             frontend_run_channels,
             session_authorization_core,
             delivery_admission,
+            speaking_leases,
             coordination_processed: Arc::new(Mutex::new(std::collections::HashMap::new())),
             leader_election,
             lifecycle,

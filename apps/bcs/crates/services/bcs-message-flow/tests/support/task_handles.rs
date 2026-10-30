@@ -95,7 +95,7 @@ async fn runtime_honors_custom_timeout_from_send_start_and_stops_once() {
     use std::time::Duration;
     let f = Fixture::new().await;
     let row = assign(&f, "45678901000000000000000000000000", Some(1)).await;
-    let runtime = DeliveryRuntime { policy:Some(f.live.clone()), service:f.service.clone(),
+    let runtime = DeliveryRuntime { caller_dispatch:None, policy:Some(f.live.clone()), service:f.service.clone(),
         preparation:Arc::new(QueuedGroupPreparation { flow:Arc::downgrade(&f.flow), deliveries:f.service.clone() }),
         transport:f.support.bot_delivery.clone(), config:DeliveryRuntimeConfig {
             max_safe_retries:0, pause_dispatch:false, bots:Default::default(), tick:Duration::from_millis(2),
@@ -201,7 +201,7 @@ async fn uncertain_notice_fact_survives_abort_rejection_and_restart_recovery() {
     let row = f.transition(&row, Event::TransportUnknown).await;
     let row = f.transition(&row, Event::CancelRequested).await;
     let row = f.transition(&row, Event::StartAbort).await;
-    let row = f.service.transition(DeliveryTransitionCommand { delivery_id:row.delivery_id.clone(),
+    let row = f.service.transition(DeliveryTransitionCommand { caller_dispatch_commit:None, caller_cancel:None, caller_terminal:None, delivery_id:row.delivery_id.clone(),
         expected_state_version:row.state.state_version, event:Event::AbortUnconfirmed,
         now_ms:chrono::Utc::now().timestamp_millis(), request_id:None, actor_id:None, reply:None,
         transport_context_json:Some(json!({"task_cancel_rejected":true})), deadline_at_ms:None }).await.unwrap();

@@ -27,6 +27,12 @@ use bcs_service_api::{
 };
 use bcs_service_api::types::{MessageViewScope, OpeningMessage};
 use bcs_service_api::port::{ParticipantViewBindingPort, ParticipantViewScopeChangeLease};
+use bcs_service_api::{
+    BotCallerConfiguration, BotCandidateReadQuery, BotControlPlaneCandidate,
+    BotControlPlaneCoreService, BotControlPlaneOwnedQuery, BotControlPlanePatch,
+    BotControlPlaneRecord, BotControlPlaneView, CallerIdentityConfig, CallerIdentitySnapshot,
+    CallerMinimumIsolation,
+};
 
 #[tokio::test]
 async fn interaction_resolve_uses_current_exact_session_relationships() {
@@ -2319,6 +2325,154 @@ async fn workbench_session_service_connects_for_owner_and_authorizes_owned_sende
         })
         .await
         .expect("human owner can send as owned bot");
+}
+
+/// Minimal caller-config plane fake: every single caller-configuration
+/// read answers with an ENABLED caller-identity snapshot, regardless of
+/// which bot or environment is asked.
+struct CallerEnabledControlPlane;
+
+#[async_trait]
+impl BotControlPlaneCoreService for CallerEnabledControlPlane {
+    async fn get_caller_configuration(
+        &self,
+        _bot_id: &str,
+        _env: &str,
+    ) -> ServiceResult<Option<BotCallerConfiguration>> {
+        Ok(Some(BotCallerConfiguration {
+            snapshot: Some(CallerIdentitySnapshot {
+                source_revision: 1,
+                caller_identity: CallerIdentityConfig {
+                    enabled: true,
+                    minimum_isolation: CallerMinimumIsolation::CallerContainer,
+                },
+            }),
+        }))
+    }
+
+    async fn get_record(
+        &self,
+        _bot_id: &str,
+        _env: &str,
+    ) -> ServiceResult<Option<BotControlPlaneRecord>> {
+        unimplemented!("not needed by this test")
+    }
+
+    async fn get(
+        &self,
+        _bot_id: &str,
+        _env: &str,
+    ) -> ServiceResult<Option<BotControlPlaneView>> {
+        unimplemented!("not needed by this test")
+    }
+
+    async fn get_by_ids(
+        &self,
+        _bot_ids: &[String],
+        _env: &str,
+    ) -> ServiceResult<Vec<BotControlPlaneView>> {
+        unimplemented!("not needed by this test")
+    }
+
+    async fn list_candidates(
+        &self,
+        _query: BotCandidateReadQuery,
+    ) -> ServiceResult<(Vec<BotControlPlaneCandidate>, u64)> {
+        unimplemented!("not needed by this test")
+    }
+
+    async fn list_by_creator(
+        &self,
+        _query: BotControlPlaneOwnedQuery,
+    ) -> ServiceResult<Vec<BotControlPlaneView>> {
+        unimplemented!("not needed by this test")
+    }
+
+    async fn patch(
+        &self,
+        _bot_id: &str,
+        _env: &str,
+        _patch: BotControlPlanePatch,
+    ) -> ServiceResult<Option<BotControlPlaneView>> {
+        unimplemented!("not needed by this test")
+    }
+}
+
+#[tokio::test]
+async fn state_machine_group_connect_requires_lease_with_caller_enabled_members() {
+    let fixture = Fixture::new()
+        .with_bot("driver", "Driver", "public", None)
+        .with_bot("helper", "Helper", "public", None)
+        .with_human("human_alice", "Alice");
+    let service = fixture
+        .service_with_limits(5, 10, 10)
+        .with_caller_config_plane(Arc::new(CallerEnabledControlPlane));
+
+    let mut cmd = create_cmd(
+        Some("human_alice"),
+        "driver",
+        vec![
+            participant("driver", Some("driver")),
+            participant("helper", Some("consultant")),
+            participant("human_alice", Some("consultant")),
+        ],
+    );
+    cmd.group_strategy = Some(GroupStrategy::StateMachine);
+    service.create_group(cmd).await.unwrap();
+
+    let connected = service
+        .connect(WorkbenchConnectCommand {
+            bound_actor_id: Some("human_alice".to_string()),
+            group_id: "group-under-test".to_string(),
+            session_id: None,
+            view_actor_id: Some("human_alice".to_string()),
+        })
+        .await
+        .expect("state_machine group with human + caller bot must connect");
+
+    assert_eq!(
+        connected.speaking_mode,
+        bcs_domain::speaking_lease::SessionSpeakingMode::LeaseRequired,
+        "state_machine groups expose lease_required when a caller bot is enabled"
+    );
+}
+
+#[tokio::test]
+async fn chat_group_connect_aggregates_a_caller_enabled_member_to_lease_required() {
+    let fixture = Fixture::new()
+        .with_bot("driver", "Driver", "public", None)
+        .with_human("human_alice", "Alice");
+    let service = fixture
+        .service_with_limits(5, 10, 10)
+        .with_caller_config_plane(Arc::new(CallerEnabledControlPlane));
+
+    service
+        .create_group(create_cmd(
+            Some("human_alice"),
+            "driver",
+            vec![
+                participant("driver", Some("driver")),
+                participant("human_alice", Some("consultant")),
+            ],
+        ))
+        .await
+        .unwrap();
+
+    let connected = service
+        .connect(WorkbenchConnectCommand {
+            bound_actor_id: Some("human_alice".to_string()),
+            group_id: "group-under-test".to_string(),
+            session_id: None,
+            view_actor_id: Some("human_alice".to_string()),
+        })
+        .await
+        .expect("chat group with human + caller bot must connect");
+
+    assert_eq!(
+        connected.speaking_mode,
+        bcs_domain::speaking_lease::SessionSpeakingMode::LeaseRequired,
+        "chat groups aggregate a caller-enabled member into LeaseRequired"
+    );
 }
 
 #[tokio::test]

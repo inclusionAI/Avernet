@@ -645,6 +645,7 @@ impl BcsServer {
             frontend_run_channels,
             session_authorization_core,
             delivery_admission,
+            speaking_leases: None,
             coordination_processed: Arc::new(Mutex::new(std::collections::HashMap::new())),
             leader_election,
             lifecycle,

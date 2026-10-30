@@ -1,6 +1,8 @@
 import type { GroupExecResolution } from '@/domain/collaboration/groupExecApprovals';
 import { GroupExecApprovalService, type GroupExecApprovalSnapshot } from './groupExecApprovalService';
 import type { GroupQuestionResolution } from '@/domain/collaboration/groupQuestions';
+import { parseConnectSpeakingMode } from '@/domain/collaboration/speakingLease';
+import { GroupSpeakingLeaseService, type SpeakingLeaseSnapshot } from './groupSpeakingLeaseService';
 import {
   createSessionToken,
   type SessionMessageAttachment,
@@ -11,10 +13,12 @@ import {
   type GroupChatProviderConfig,
 } from '@tc-chat/adapters';
 import type { AixContext, ChatMessage, ChatProvider } from '@tc-chat/core';
+import { normalizeHumanUserId } from '@/domain/userIdentity';
 import { GroupChatHistoryPaginator } from './groupChatHistoryPaginator';
 import {
   buildGroupChatPayload,
   buildGroupWsUrl,
+  isChatSendRejectionFrame,
   isDeliveryUpdatedFrame,
   isViewScopeChangedFrame,
   parseDeliveryStatusView,
@@ -57,6 +61,7 @@ type HydrationCapableGroupChatProvider = SdkGroupChatProvider & {
 };
 
 type SessionFrame = {
+  id?: string;
   method?: string;
   params?: Record<string, unknown>;
 };
@@ -79,6 +84,8 @@ interface GroupChatProviderOptions {
   /** 群 ID——BCS connect 帧的 group_id（旧「我的协作」协议）。 */
   groupId: string;
   identityId: string;
+  /** 登录 Human 的 userId；发言权持有者判定必须与认证连接一致。 */
+  authenticatedUserId?: string | null;
   /** HTTP 历史始终可读；只有实时连接及发送受此开关控制。 */
   liveEnabled?: boolean;
   /** 同源 ws(s) 前缀；测试 / SSR 场景下传入避免访问 window。默认基于 window.location 推导。 */
@@ -118,6 +125,23 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
   private readonly questionService: GroupQuestionService;
   private readonly execApprovalService: GroupExecApprovalService;
   /**
+   * 发言权租约生命周期 service——本 Provider 实例私有（快照/等待随实例隔离）。
+   * 组件只经 subscribeToSpeakingLease / acquireSpeakingLease 等方法消费。
+   */
+  private readonly speakingLeaseService: GroupSpeakingLeaseService;
+  /**
+   * 最近一次出站 connect 帧的 id：connect 应答以 id 识别，读取 speaking_mode
+   * 后即失效（undefined = 无在途 connect 应答可认领）。
+   */
+  private pendingConnectFrameId?: string;
+  /**
+   * 本连接周期在途的 chat.send 请求 id：服务端 ok:false 应答按 id 匹配后以
+   * chatSendError 广播给 UI（SDK 会静默吞掉请求失败——没有这层通知，用户
+   * 对"消息被服务端拒绝"毫无感知）。断开时整体清空。
+   */
+  private pendingChatSendFrameIds = new Set<string>();
+  private chatSendErrorListeners = new Set<(error: { code: string; message: string }) => void>();
+  /**
    * 拥有问答状态的连接周期（inner 身份校验）：只有当前周期的 inner 能驱动 questionService。
    * 断开、替换或异步初始化被 disconnect 废弃时置 null——旧回调迟到也不更新新连接状态。
    */
@@ -154,6 +178,15 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
     this.execApprovalService = new GroupExecApprovalService({
       groupId: options.groupId,
       bcsSessionId: options.sessionId,
+      send: (frame) => this.sendQuestionFrame(frame),
+      isConnected: () => this.isConnected,
+    });
+    const authenticatedHumanId = normalizeHumanUserId(options.authenticatedUserId, 'human');
+    const humanUserId = authenticatedHumanId || options.identityId;
+    this.speakingLeaseService = new GroupSpeakingLeaseService({
+      groupId: options.groupId,
+      // 服务端 holderActorId 形如 human_{userId}；认证 Human 优先，不能沿用 Bot 查看身份。
+      humanActorId: `human_${humanUserId}`,
       send: (frame) => this.sendQuestionFrame(frame),
       isConnected: () => this.isConnected,
     });
@@ -250,6 +283,42 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
     return this.questionService.resolve(key, resolution);
   }
 
+  /** 订阅发言权快照（委托 speakingLeaseService，订阅即回放当前状态）。 */
+  subscribeToSpeakingLease(listener: (snapshot: SpeakingLeaseSnapshot) => void): () => void {
+    return this.speakingLeaseService.subscribe(listener);
+  }
+
+  /**
+   * 获取（preempt=false）/ 抢占（preempt=true）发言权。
+   * 成功返回 true；被占用返回 false；指令失败拒绝 LeaseCommandError。
+   */
+  acquireSpeakingLease(preempt = false): Promise<boolean> {
+    return this.speakingLeaseService.acquire(preempt);
+  }
+
+  /** 释放当前持有的发言权；失败拒绝 LeaseCommandError，此刻不清 UI 状态。 */
+  releaseSpeakingLease(): Promise<void> {
+    return this.speakingLeaseService.release();
+  }
+
+  /** lease.current 补拍快照（含轮询收敛；失败落 error 态）。 */
+  refreshSpeakingLease(): Promise<void> {
+    return this.speakingLeaseService.refresh();
+  }
+
+  /**
+   * 订阅本连接 chat.send 的服务端拒绝（"无效操作/发言权缺失"等）：SDK 对请求
+   * 失败静默，UI 没有这层通知就感知不到消息根本没被接受。
+   */
+  subscribeToChatSendErrors(
+    listener: (error: { code: string; message: string }) => void,
+  ): () => void {
+    this.chatSendErrorListeners.add(listener);
+    return () => {
+      this.chatSendErrorListeners.delete(listener);
+    };
+  }
+
   private emitViewScopeChanged(): void {
     this.viewScopeListeners.forEach((listener) => listener());
   }
@@ -328,9 +397,11 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
       }
       // 断线（含 SDK 内部重连失败）立即结束问答响应等待并清空快照；connected 通知不重置——
       // connect ACK 后服务端重放的 Pending 必须保留（协议 §7.3），快照重建只发生在下一次真实握手。
+      // 发言权同步停轮询/到期定时器并立结在途租约请求，避免断开的连接周期继续驱动定时器。
       if (event.status === 'disconnected' && this.questionScopeInner === inner) {
         this.questionService.resetConnection();
         this.execApprovalService.resetConnection();
+        this.speakingLeaseService.resetConnection();
       }
       this.emitConnection(event);
     });
@@ -361,6 +432,8 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
       if (isConnectHandshake && this.questionScopeInner === inner) {
         this.questionService.resetConnection();
         this.execApprovalService.resetConnection();
+        // connect 应答以帧 id 识别：在途应答到达时读 speaking_mode（一个时刻至多一个）。
+        this.pendingConnectFrameId = (frame as SessionFrame).id;
       }
       if (!frame || typeof frame !== 'object') return originalSend(frame);
       const target = frame as SessionFrame;
@@ -369,7 +442,17 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
 
       const params: Record<string, unknown> = { ...target.params, session_id: sessionId };
       if (target.method === 'connect') params.view_actor_id = this.options.identityId;
-      if (target.method === 'chat.send') params.sessionKey = sessionId;
+      if (target.method === 'chat.send') {
+        params.sessionKey = sessionId;
+        if (typeof target.id === 'string') this.pendingChatSendFrameIds.add(target.id);
+        // lease_required 会话：服务端要求 chat.send 携带本会有效租约；临期（≤5s）
+        // 租约不注入——服务端逐条判定为权威，前端不据此放宽发送。
+        const leaseParams = this.speakingLeaseService.usableLeaseParams(Date.now());
+        if (leaseParams) {
+          params.leaseId = leaseParams.leaseId;
+          params.leaseEpoch = leaseParams.leaseEpoch;
+        }
+      }
       return originalSend({ ...target, params });
     };
   }
@@ -386,6 +469,32 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
     const originalOnMessage = transport.onMessage.bind(transport);
     transport.onMessage = (msg: unknown) => {
       if (!this.liveAllowed || this.inner !== inner) return;
+      // chat.send 请求失败可见化：ok:false 应答按在途 id 匹配后广播错误。
+      // 不吃帧——SDK 照常收到应答，这里只做旁路通知。
+      // 叠加兜底：id 追踪未接住（补丁时序/帧路径边角）但话术是已知提交侧
+      // 拒绝（"speaking lease …"等只可能源自消息提交流）的失败帧同样广播。
+      if (this.isChatSendErrorResponse(msg) || isChatSendRejectionFrame(msg)) {
+        const frame = msg as { id?: string; error?: { code?: string; message?: string } };
+        if (typeof frame.id === 'string') this.pendingChatSendFrameIds.delete(frame.id);
+        const error = frame.error ?? {};
+        this.chatSendErrorListeners.forEach((listener) =>
+          listener({
+            code: error.code ?? 'chat_send_failed',
+            message: error.message ?? '消息发送失败',
+          }),
+        );
+      }
+      if (this.questionScopeInner === inner && this.speakingLeaseService.handleFrame(msg)) {
+        return;
+      }
+      if (this.questionScopeInner === inner && this.isPendingConnectResponse(msg)) {
+        // connect 应答读 speaking_mode 后即失效；不吞帧——SDK 依赖 connect 应答，
+        // 读毕照常透传 originalOnMessage。
+        this.pendingConnectFrameId = undefined;
+        this.speakingLeaseService.setSpeakingMode(
+          parseConnectSpeakingMode((msg as { payload?: Record<string, unknown> }).payload),
+        );
+      }
       if (this.questionScopeInner === inner && (this.questionService.handleFrame(msg) || this.execApprovalService.handleFrame(msg))) {
         return;
       }
@@ -432,8 +541,11 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
     this.lifecycleSeq += 1;
     this.transportGeneration += 1;
     this.questionScopeInner = null;
+    this.pendingConnectFrameId = undefined;
+    this.pendingChatSendFrameIds.clear();
     this.questionService.resetConnection();
     this.execApprovalService.resetConnection();
+    this.speakingLeaseService.resetConnection();
     const inner = this.inner;
     this.inner = null;
     this.initializePromise = null;
@@ -447,6 +559,28 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
 
   private assertConnected(inner: SdkGroupChatProvider): void {
     if (!inner.isConnected) throw new Error('协作会话 WebSocket 未建立。');
+  }
+
+  /** 在途 connect 应答识别：res 帧 id 精确匹配最近一次出站 connect 帧。 */
+  private isPendingConnectResponse(msg: unknown): msg is { payload?: Record<string, unknown> } {
+    if (!this.pendingConnectFrameId || typeof msg !== 'object' || msg === null) return false;
+    const candidate = msg as Record<string, unknown>;
+    return (
+      candidate.type === 'res' && candidate.id === this.pendingConnectFrameId
+    );
+  }
+
+  /** 在途 chat.send 的失败应答识别：res、ok=false、id 命中本周期在途集合。 */
+  private isChatSendErrorResponse(msg: unknown): msg is {
+    id: string;
+    error?: { code?: string; message?: string };
+  } {
+    if (typeof msg !== 'object' || msg === null) return false;
+    const candidate = msg as Record<string, unknown>;
+    if (candidate.type !== 'res' || candidate.ok !== false) return false;
+    return (
+      typeof candidate.id === 'string' && this.pendingChatSendFrameIds.has(candidate.id)
+    );
   }
 
   async request(params: GroupChatRequest, messageId?: string): Promise<void> {

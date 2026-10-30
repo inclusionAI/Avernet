@@ -51,9 +51,14 @@ pub struct DeliveryRuntime {
     pub preparation: Arc<dyn ManagedDeliveryPreparationService>,
     pub transport: Arc<dyn BotDeliveryPort>,
     pub config: DeliveryRuntimeConfig,
+    /// Protected caller dispatch (spec §7.5.1). `None` keeps the §15.4
+    /// anti-downgrade guard: caller rows converge to Failed before any
+    /// context read (current production behavior until composition opts in).
+    pub caller_dispatch: Option<Arc<crate::caller_dispatch_pipeline::CallerDispatchPipeline>>,
 }
 
 enum WorkResult {
+    CallerFinished(String, bool),
     Prepared(
         PersistedMessageDelivery,
         ServiceResult<PreparedManagedDelivery>,
@@ -83,6 +88,9 @@ fn run_timeout_for(row: &PersistedMessageDelivery, provider_timeout: Duration) -
 
 fn event(row: &PersistedMessageDelivery, kind: Event) -> DeliveryTransitionCommand {
     DeliveryTransitionCommand {
+        caller_dispatch_commit: None,
+        caller_cancel: None,
+        caller_terminal: None,
         delivery_id: row.delivery_id.clone(),
         expected_state_version: row.state.state_version,
         event: kind,
@@ -93,6 +101,28 @@ fn event(row: &PersistedMessageDelivery, kind: Event) -> DeliveryTransitionComma
         transport_context_json: None,
         deadline_at_ms: None,
     }
+}
+
+/// The trusted ordinary sender facts a caller admission committed alongside
+/// the `caller_required` marker (written only by the trusted producers —
+/// caller_admission / queued_admission, never a request body). They are the
+/// envelope `from` zone's source; the protected caller subject never
+/// substitutes for them. None = the row predates the fact or was misbuilt:
+/// the protected dispatch fails closed rather than shipping `from: null`.
+pub(super) fn caller_channel_facts(row: &PersistedMessageDelivery) -> Option<(String, String)> {
+    let channel = row.semantic_projection_json.get("caller_channel")?;
+    let actor_id = channel
+        .get("actor_id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|id| !id.is_empty())?;
+    let actor_name = channel
+        .get("actor_name")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    Some((actor_id.to_string(), actor_name))
 }
 
 fn schedule_rows(rows: &[PersistedMessageDelivery], bot: &str) -> Vec<DeliveryScheduleEntry> {
@@ -152,6 +182,24 @@ impl DeliveryRuntime {
     }
     /// Deployment guarantees one scheduler per database. A
     /// shutdown aborts owned I/O futures and reconciles possible sends to Unknown.
+    /// Protected caller branch for one caller-required row (spec §7.5.1).
+    /// Never inserts the row into the ordinary preparation pipeline. The
+    /// method itself converges the row through the ordinary lifecycle
+    /// events; every outcome is fail-closed by construction.
+    /// Transition wrapper for the caller branch: CAS outcomes are advisory
+    /// here (a lost race means the row already converged elsewhere), and
+    /// storage failures surface as warnings — the scheduler retry policy
+    /// owns retry/backoff.
+    async fn transition_ok(&self, command: DeliveryTransitionCommand) -> Option<PersistedMessageDelivery> {
+        match self.transition(command).await {
+            Ok(row) => row,
+            Err(error) => {
+                tracing::warn!(%error, "caller protected dispatch: transition rejected");
+                None
+            }
+        }
+    }
+
     pub async fn run(
         self,
         mut shutdown: tokio::sync::watch::Receiver<bool>,
@@ -179,7 +227,11 @@ impl DeliveryRuntime {
         // same last-start timestamp without resetting rate history.
         let mut last_send: BTreeMap<String, u64> = BTreeMap::new();
         let mut cursors: BTreeMap<String, String> = BTreeMap::new();
+        // §15.98 visibility: bots whose rows got the NoPolicy wait-marker
+        // this run — they stop being re-scanned until a policy lands.
+        let mut no_policy_marked: BTreeSet<String> = BTreeSet::new();
         let mut preparing = BTreeSet::new();
+        let mut caller_tasks: BTreeMap<String, (String, futures::future::AbortHandle)> = BTreeMap::new();
         let mut aborting = BTreeSet::new();
         let mut work = JoinSet::new();
         let mut abort_work: JoinSet<(
@@ -200,12 +252,33 @@ impl DeliveryRuntime {
                 _ = shutdown.changed() => { break; }
                 _ = expiry_ticker.tick() => {
                     let expired = storage!(self.service.work_batch(DeliveryWorkBatch::Expired, now_ms(), "", 100));
-                    for row in expired { storage!(self.transition(event(&row, Event::QueueExpired))); }
+                    for row in expired {
+                        // A maybe-sent caller row never expires into a
+                        // "stopped" lane release: TTL lapse converts to a
+                        // cancel intent; only stop/terminal evidence settles
+                        // it (spec 队列 TTL 与执行期限).
+                        if matches!(row.state.status, Status::Unknown | Status::CancelUnknown)
+                            && row.semantic_projection_json.get("caller_required").is_some()
+                        {
+                            let mut command = event(&row, Event::CancelRequested);
+                            command.deadline_at_ms = Some(now_ms().saturating_add(self.config.cancel_timeout.as_millis() as i64));
+                            storage!(self.transition(command.clone()));
+                        } else {
+                            storage!(self.transition(event(&row, Event::QueueExpired)));
+                        }
+                    }
                 }
                 _ = ticker.tick() => {
                     let tick_started = Instant::now();
                     let rows = storage!(self.service.work_batch(DeliveryWorkBatch::Control, now_ms(), "", 32));
                     for row in &rows {
+                        if row.state.status == Status::Cancelling
+                            || (matches!(row.state.status, Status::Dispatching | Status::Running)
+                                && row.run_deadline_at_ms.is_some_and(|t| t <= now_ms())) {
+                            if let Some((_, handle)) = caller_tasks.get(&row.delivery_id) {
+                                handle.abort();
+                            }
+                        }
                         if row.state.status == Status::PendingContext && row.expire_at_ms.is_some_and(|t| t <= now_ms()) {
                             storage!(self.transition(event(row, Event::QueueExpired)));
                         } else if matches!(row.state.status, Status::Dispatching | Status::Running)
@@ -219,6 +292,27 @@ impl DeliveryRuntime {
                                     "task_timeout": true,
                                 }));
                             }
+                            storage!(self.transition(command.clone()));
+                        } else if row.state.status == Status::Unknown
+                            && row.run_deadline_at_ms.is_some_and(|t| t <= now_ms())
+                            && row.semantic_projection_json.get("caller_required").is_some()
+                        {
+                            // Run-deadline convergence (spec 队列 TTL 与执行期
+                            // 限): a maybe-sent caller dispatch never expires
+                            // into a "stopped" lane release, but its lapsed
+                            // execution budget is durable evidence the
+                            // dispatch will not settle on its own — convert
+                            // it to a cancel intent exactly like the queue-TTL
+                            // lapse, so the stop/terminal arbitration and the
+                            // manual resolution keep their authority.
+                            let mut command = event(row, Event::CancelRequested);
+                            command.deadline_at_ms = Some(now_ms().saturating_add(self.config.cancel_timeout.as_millis() as i64));
+                            tracing::warn!(
+                                delivery_id = %row.delivery_id,
+                                bot_id = %row.target_bot_id,
+                                run_deadline_at_ms = ?row.run_deadline_at_ms,
+                                "uncertain caller delivery passed its run deadline; converting to a cancel intent"
+                            );
                             storage!(self.transition(command.clone()));
                         } else if row.state.status == Status::Cancelling && !aborting.contains(&row.delivery_id) {
                             if row.cancel_deadline_at_ms.is_some_and(|t| t <= now_ms()) {
@@ -268,8 +362,31 @@ impl DeliveryRuntime {
                             self.service.observe_operation("budget_exhausted", tick_started.elapsed().as_secs_f64(), work.len(), true); break;
                         }
                         last_bot = bot.clone();
-                        let Some(policy) = policies.get(&bot) else { continue; };
-                        let active = storage!(self.service.active_count(&bot)) as usize;
+                        let Some(policy) = policies.get(&bot) else {
+                // §15.98 visibility: a policy-less bot's rows used to be
+                // invisible — never scanned, never claimed, no wait_reason.
+                // Mark them once so the stall is observable on the row.
+                if no_policy_marked.insert(bot.clone()) {
+                    let entries = storage!(self.service.queued_heads(&bot, "", 8));
+                    if !entries.is_empty() {
+                        let waiting: Vec<(String, bcs_domain::message_delivery::DeliveryWaitReason)> = entries
+                            .iter()
+                            .map(|entry| {
+                                (
+                                    entry.delivery_id.clone(),
+                                    bcs_domain::message_delivery::DeliveryWaitReason::NoPolicy,
+                                )
+                            })
+                            .collect();
+                        storage!(self.service.update_wait_reasons(waiting.clone(), now_ms()));
+                    }
+                }
+                continue;
+            };
+                        // Conservatively reserve capacity until the protected future finishes;
+                        // its StartSend may not have reached durable storage yet.
+                        let reserved = caller_tasks.values().filter(|(id, _)| id == &bot).count();
+                        let active = storage!(self.service.active_count(&bot)) as usize + reserved;
                         let after = cursors.get(&bot).map(String::as_str).unwrap_or("");
                         let mut entries = storage!(self.service.queued_heads(&bot, after, 8));
                         if entries.is_empty() && !after.is_empty() { entries = storage!(self.service.queued_heads(&bot, "", 8)); }
@@ -278,12 +395,22 @@ impl DeliveryRuntime {
                         let rate_ready = epoch.elapsed().as_millis() as u64 >= last_send.get(&bot).copied().unwrap_or(0).saturating_add(policy.min_send_interval_ms);
                         let transport_ready = !paused && active < policy.max_running && rate_ready;
                         let online = if transport_ready { self.bot_available(&bot).await } else { true };
-                        let selected = MessageDeliveryCore.select(DeliveryScheduleSnapshot {
+                        let selected = match MessageDeliveryCore.select(DeliveryScheduleSnapshot {
                             entries: &entries, max_running: policy.max_running.saturating_sub(active).max(1), bot_online: online,
                             paused, now_ms: now_ms(), monotonic_now_ms: epoch.elapsed().as_millis() as u64,
                             next_send_tick_ms: last_send.get(&bot).copied().unwrap_or(0).saturating_add(policy.min_send_interval_ms), after_session_id: None,
                             preparing_delivery_ids: &preparing,
-                        })?;
+                        }) {
+                            Ok(selected) => selected,
+                            // §15.98 visibility: one bot's corrupted
+                            // snapshot must cost THAT bot's tick, not the
+                            // whole scheduler loop.
+                            Err(error) => {
+                                tracing::error!(bot_id = %bot, error = ?error,
+                                    "delivery schedule snapshot rejected: skipping this bot this tick");
+                                continue;
+                            }
+                        };
                         if active >= policy.max_running {
                             storage!(self.service.update_wait_reasons(entries.iter().map(|d| (d.delivery_id.clone(), bcs_domain::message_delivery::DeliveryWaitReason::BotCapacity)).collect(), now_ms()));
                             continue;
@@ -321,6 +448,62 @@ impl DeliveryRuntime {
                             }
                             Some(DeliveryScheduleAction::Prepare { delivery_id, .. }) => {
                                 let row = storage!(self.get(&delivery_id)).ok_or(ManagedDeliveryError::NotFound)?;
+                                // Caller anti-downgrade guard (spec §7.5.1): the
+                                // key's presence alone decides for the ordinary
+                                // path — anomalous false/null reject too. With
+                                // no protected pipeline attached, or without the
+                                // committed digest/deadline facts, the row stays
+                                // fail-closed exactly as before.
+                                if row.semantic_projection_json.get("caller_required").is_some() {
+                                    // Plan-A identity-readiness gate (the P2
+                                    // admission race): the admission
+                                    // reserve()s this row's slot BEFORE the
+                                    // queue commit and publish()es only
+                                    // after it, so a tick landing in between
+                                    // sees a Reserved-but-unpublished slot.
+                                    // Reserved means the identity is still
+                                    // IN FLIGHT — park the attempt here (no
+                                    // StartSend, no last_send bump, no
+                                    // spawn) and pick the row up again on a
+                                    // later tick once the publish lands.
+                                    // Converging now would permanently fail
+                                    // an accepted task (retry:false) whose
+                                    // identity arrives microseconds later.
+                                    // Every other readiness (Published, or
+                                    // Gone via the None/Claimed slots)
+                                    // proceeds, so the fail-closed
+                                    // convergence and the DefinitelyNotSent
+                                    // evidence rules stay untouched — the
+                                    // queue TTL stays the parked row's
+                                    // convergence bound.
+                                    if let Some(pipeline) = self.caller_dispatch.as_ref() {
+                                        if matches!(
+                                            pipeline.dispatch_identity_readiness(&row).await,
+                                            bcs_service_api::application::caller_handoff::HandoffIdentityReadiness::Reserved
+                                        ) {
+                                            tracing::debug!(
+                                                delivery_id = %row.delivery_id,
+                                                bot_id = %row.target_bot_id,
+                                                "caller identity reserved but not yet published; the row parks this tick"
+                                            );
+                                            continue;
+                                        }
+                                    }
+                                    let (handle, registration) = futures::future::AbortHandle::new_pair();
+                                    caller_tasks.insert(delivery_id.clone(), (bot.clone(), handle));
+                                    preparing.insert(delivery_id.clone());
+                                    last_send.insert(bot.clone(), epoch.elapsed().as_millis() as u64);
+                                    let runtime = self.clone();
+                                    work.spawn(async move {
+                                        let result = futures::future::Abortable::new(
+                                            tokio::time::timeout(runtime.config.io_timeout,
+                                                runtime.attempt_caller_protected_dispatch(&row)),
+                                            registration,
+                                        ).await;
+                                        WorkResult::CallerFinished(delivery_id, matches!(result, Ok(Err(_))))
+                                    });
+                                    continue;
+                                }
                                 preparing.insert(delivery_id);
                                 let preparation = self.preparation.clone();
                                 let timeout = self.config.io_timeout;
@@ -338,6 +521,25 @@ impl DeliveryRuntime {
                 Some(result) = work.join_next(), if !work.is_empty() => {
                     let result = result.map_err(|_| ManagedDeliveryError::Conflict)?;
                     match result {
+                        WorkResult::CallerFinished(id, timed_out) => {
+                            preparing.remove(&id);
+                            caller_tasks.remove(&id);
+                            if timed_out {
+                                tracing::warn!(delivery_id = %id, "caller protected dispatch timed out; no automatic resend");
+                                if let Some(row) = storage!(self.get(&id)) {
+                                    let next = match row.state.status {
+                                        Status::Queued => Some(Event::PreparationFailed),
+                                        Status::Dispatching | Status::Running => Some(Event::TransportUnknown),
+                                        // Preserve cancellation and terminal evidence; abort work
+                                        // independently establishes stopped vs uncertain.
+                                        _ => None,
+                                    };
+                                    if let Some(next) = next {
+                                        storage!(self.transition(event(&row, next)));
+                                    }
+                                }
+                            }
+                        }
                         WorkResult::Prepared(prepared_row, result) => {
                             preparing.remove(&prepared_row.delivery_id);
                             let Some(current) = storage!(self.get(&prepared_row.delivery_id)) else { continue; };
@@ -350,18 +552,27 @@ impl DeliveryRuntime {
                             let bot = &row.target_bot_id;
                             let (policies, paused, retries, policy_version) = self.policies(&[bot.clone()]).await;
                             let Some(policy) = policies.get(bot) else { continue; };
-                            if storage!(self.service.active_count(bot)) >= policy.max_running as u64 { continue; }
+                            if storage!(self.service.active_count(bot)) + caller_tasks.values().filter(|(id, _)| id == bot).count() as u64 >= policy.max_running as u64 { continue; }
                             if storage!(self.service.lane_blocked(row)) { continue; }
                             let entries = schedule_rows(std::slice::from_ref(row), bot);
                             let excluded = entries.iter().filter(|e| e.delivery_id != row.delivery_id).map(|e| e.delivery_id.clone()).collect();
                             let rate_ready = epoch.elapsed().as_millis() as u64 >= last_send.get(bot).copied().unwrap_or(0).saturating_add(policy.min_send_interval_ms);
                             let transport_ready = !paused && rate_ready;
                             let online = if transport_ready { self.bot_available(bot).await } else { true };
-                            let selected = MessageDeliveryCore.select(DeliveryScheduleSnapshot {
+                            let selected = match MessageDeliveryCore.select(DeliveryScheduleSnapshot {
                                 entries: &entries, max_running: policy.max_running, bot_online: online,
                                 paused, now_ms: now_ms(), monotonic_now_ms: epoch.elapsed().as_millis() as u64,
                                 next_send_tick_ms: last_send.get(bot).copied().unwrap_or(0).saturating_add(policy.min_send_interval_ms), after_session_id: None, preparing_delivery_ids: &excluded,
-                            })?;
+                            }) {
+                                Ok(selected) => selected,
+                                // Same §15.98 demotion as the claim loop: a
+                                // corrupted record costs one bot one tick.
+                                Err(error) => {
+                                    tracing::error!(bot_id = %bot, error = ?error,
+                                        "delivery schedule snapshot rejected: skipping this bot this tick");
+                                    continue;
+                                }
+                            };
                             if matches!(selected.action, Some(DeliveryScheduleAction::Expire { .. })) {
                                 storage!(self.transition(event(row, Event::QueueExpired)));
                                 continue;
@@ -392,6 +603,31 @@ impl DeliveryRuntime {
                                 row.semantic_projection_json.get("expires_at_ms").and_then(|v| v.as_i64()).ok_or(ManagedDeliveryError::Conflict)?
                             } else { now_ms().saturating_add(run_timeout_for(row, self.config.run_timeout).as_millis() as i64) });
                             let Some(started) = storage!(self.transition(command.clone())) else { continue; };
+                            // §7.2.1 delegation-only lineage (review batch-3
+                            // §3.1): an ORDINARY Started row carrying the
+                            // trusted `caller_lineage` marker is an Owner
+                            // target of a lease-admitted Human turn — its
+                            // delegation-only root association registers
+                            // best-effort here (the ordinary dispatch never
+                            // depends on it). Without an attached pipeline
+                            // the marker is REPORTED, never silently
+                            // dropped (spec CALLER_LINEAGE_UNSUPPORTED).
+                            if started.semantic_projection_json.get("caller_lineage").is_some() {
+                                match self.caller_dispatch.as_ref() {
+                                    Some(pipeline) => {
+                                        pipeline
+                                            .register_delegation_only_lineage(&started, now_ms())
+                                            .await;
+                                    }
+                                    None => {
+                                        tracing::warn!(
+                                            delivery_id = %started.delivery_id,
+                                            bot_id = %started.target_bot_id,
+                                            "delegation-only lineage marker without a protected pipeline (CALLER_LINEAGE_UNSUPPORTED); derivation stays refused"
+                                        );
+                                    }
+                                }
+                            }
                             let request_id = started.request_id.clone().ok_or(ManagedDeliveryError::Conflict)?;
                             match &mut prepared.command.frame {
                                 BcsFrame::Request(frame) if frame.method == "chat.send" => frame.id = request_id.clone(),
@@ -488,3 +724,7 @@ impl DeliveryRuntime {
         outcome
     }
 }
+
+mod caller_delegate;
+
+mod caller_dispatch;

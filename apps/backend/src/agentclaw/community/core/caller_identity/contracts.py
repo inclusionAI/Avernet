@@ -63,6 +63,11 @@ class CallerMcpSyncError(InternalError):
         super().__init__("CALLER_MCP_SYNC_FAILED")
 
 
+class CallerBcsSyncError(InternalError):
+    def __init__(self) -> None:
+        super().__init__("CALLER_BCS_SYNC_FAILED")
+
+
 class CallerCliSyncError(InternalError):
     def __init__(self) -> None:
         super().__init__("CALLER_CLI_SYNC_FAILED")
@@ -141,6 +146,7 @@ class CallerContext:
 
 __all__ = [
     "CALLER_IDENTITY_CAPABILITY",
+    "CallerBcsSyncError",
     "CallerCallTypeInvalidError",
     "CallerCliNotFoundError",
     "CallerCliSyncError",

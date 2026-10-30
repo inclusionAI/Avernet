@@ -25,15 +25,16 @@ afterEach(async () => {
 })
 
 describe('pack scripts HTTP to local Git contract', () => {
-  it('returns the exact authorized local snapshot, without using a client-selected pack', async () => {
+  it.each(['pack', '.'])('returns the authorized snapshot for %s layout without using a client-selected pack', async layout => {
     root = mkdtempSync(path.join(tmpdir(), 'pack-scripts-api-'))
     const work = path.join(root, 'work'), bare = path.join(root, 'remote.git')
-    mkdirSync(path.join(work, 'pack', 'scripts'), { recursive: true })
-    mkdirSync(path.join(work, 'pack', 'workflows'))
+    const pack = path.join(work, layout)
+    mkdirSync(path.join(pack, 'scripts'), { recursive: true })
+    mkdirSync(path.join(pack, 'workflows'))
     git(work, 'init', '-q'); git(work, 'config', 'user.name', gitAuthor.name); git(work, 'config', 'user.email', gitAuthor.email)
-    writeFileSync(path.join(work, 'pack', 'workflow.pack.yaml'), 'id: pack\nworkflows:\n  - id: flow\n    file: workflows/flow.yaml\n')
-    writeFileSync(path.join(work, 'pack', 'workflows', 'flow.yaml'), 'id: flow\nnodes: []\n')
-    writeFileSync(path.join(work, 'pack', 'scripts', 'task.py'), 'print("ok")\n')
+    writeFileSync(path.join(pack, 'workflow.pack.yaml'), 'id: pack\nworkflows:\n  - id: flow\n    file: workflows/flow.yaml\n')
+    writeFileSync(path.join(pack, 'workflows', 'flow.yaml'), 'id: flow\nnodes: []\n')
+    writeFileSync(path.join(pack, 'scripts', 'task.py'), 'print("ok")\n')
     git(work, 'add', '.'); git(work, 'commit', '-qm', 'fixture'); const commit = git(work, 'rev-parse', 'HEAD')
     git(work, 'branch', 'wf/flow'); git(root, 'clone', '-q', '--bare', work, bare)
     const gitConfig = { remoteUrl: bare, username: 'fixture', email: gitAuthor.email, token: '' }
@@ -55,9 +56,9 @@ describe('pack scripts HTTP to local Git contract', () => {
       { path: 'scripts/task.py', content: 'print("ok")\n', mode: '100644' },
     ] })
     // An editor of only one workflow must never receive the full scripts tree of a shared Pack.
-    writeFileSync(path.join(work, 'pack', 'workflow.pack.yaml'), 'id: pack\nworkflows:\n  - id: flow\n    file: workflows/flow.yaml\n  - id: other\n    file: workflows/other.yaml\n')
-    writeFileSync(path.join(work, 'pack', 'workflows', 'other.yaml'), 'id: other\nnodes: []\n')
-    writeFileSync(path.join(work, 'pack', 'scripts', 'other.py'), 'confidential-other-workflow\n')
+    writeFileSync(path.join(pack, 'workflow.pack.yaml'), 'id: pack\nworkflows:\n  - id: flow\n    file: workflows/flow.yaml\n  - id: other\n    file: workflows/other.yaml\n')
+    writeFileSync(path.join(pack, 'workflows', 'other.yaml'), 'id: other\nnodes: []\n')
+    writeFileSync(path.join(pack, 'scripts', 'other.py'), 'confidential-other-workflow\n')
     git(work, 'add', '.'); git(work, 'commit', '-qm', 'shared pack'); git(work, 'push', bare, 'HEAD:refs/heads/wf/flow')
     const sharedResponse = await fetch(`http://127.0.0.1:${address.port}/api/workflows/flow/pack-scripts`)
     expect(sharedResponse.status).toBe(409)

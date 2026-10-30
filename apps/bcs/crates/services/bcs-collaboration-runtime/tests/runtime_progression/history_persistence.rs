@@ -150,7 +150,7 @@ fn start(yaml: String, human: bool) -> StartStateMachineRunCommand {
         authenticated_human: human.then(|| AuthenticatedHumanCaller {
             actor_id: "human_1001".into(),
             display_name: Some("Reviewer".into()),
-        }),
+        }), caller_association: None,
     }
 }
 fn response(run: &StateMachineRun, text: &str) -> RespondHumanNodeCommand {

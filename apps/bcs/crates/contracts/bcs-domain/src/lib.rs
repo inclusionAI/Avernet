@@ -12,6 +12,7 @@
 pub mod actor;
 pub mod attachment;
 pub mod bot_provider;
+pub mod caller_identity;
 pub mod channel;
 pub mod collaboration;
 pub mod edge_permission;
@@ -29,6 +30,9 @@ pub mod provider;
 pub mod provider_identity;
 pub mod provider_registration_token;
 pub mod register;
+pub mod speaking_lease;
+pub mod shared_stream;
+pub mod history_manifest;
 pub mod registry;
 pub mod routing;
 pub mod session;
@@ -123,3 +127,5 @@ pub use register::{RegisterTokenPayload, RegisterTokenError, encode as register_
 pub use session_file::{FileStatus, SessionFile, new_file_id};
 pub use share::{ShareTokenError, ShareTokenPayload, share_token_decode_and_verify, share_token_encode};
 pub mod state_machine_history;
+
+pub mod caller_identity_material;

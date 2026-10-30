@@ -370,6 +370,25 @@ pub(super) const SQLITE_DDL_STATEMENTS: &[&str] = &[
         current_msg_seq INTEGER NOT NULL DEFAULT 0,
         participant_join_seq TEXT DEFAULT NULL
     )",
+    // A2A child family note (plan §15.59): the in-group A2A tables moved OUT
+    // of this historical baseline into versioned migration 33 (review
+    // standards-1: committed baseline DDL is never amended). Fresh installs
+    // and upgrades both install them through the migration runner.
+    // ── speaking leases (P3, spec §6.3.1) ──────────────────
+    "CREATE TABLE IF NOT EXISTS bcs_session_speaking_leases (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        env TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        holder_actor_id TEXT NOT NULL DEFAULT '',
+        lease_id TEXT NOT NULL DEFAULT '',
+        epoch INTEGER NOT NULL DEFAULT 0,
+        expires_at_ms INTEGER NOT NULL DEFAULT 0,
+        released INTEGER NOT NULL DEFAULT 0,
+        UNIQUE (env, session_id)
+    )",
+    "CREATE INDEX IF NOT EXISTS idx_speaking_leases_session ON bcs_session_speaking_leases(env, session_id)",
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_sessions_id ON bcs_group_sessions(env, session_id)",
     "CREATE INDEX IF NOT EXISTS idx_sessions_group_status ON bcs_group_sessions(env, group_id, status)",
     "CREATE INDEX IF NOT EXISTS idx_sessions_group_kind_status ON bcs_group_sessions(env, group_id, session_kind, status)",

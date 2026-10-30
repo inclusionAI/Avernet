@@ -25,7 +25,7 @@ pub(crate) async fn reject_admitted(flow: &BcsMessageFlow, row: &bcs_domain::mes
     let reason = if row.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::RejectedCapacity {
         "Worker 任务队列已满，任务未发出"
     } else { "任务准入被拒绝，任务未发出" };
-    let cmd = TaskDispatchCommand { driver_bot_id:task.manager, group_id:row.group_id.clone(),
+    let cmd = TaskDispatchCommand { caller_delegation:None, driver_bot_id:task.manager, group_id:row.group_id.clone(),
         target_bot_id:task.worker_name, target_bot_name:None,
         payload:serde_json::json!({"assignment_intent_id":task.assignment_intent_id,
             "legacy_task_id":task.task_id, "bcs_session_id":row.session_id}) };

@@ -53,7 +53,7 @@ call application services; native tools use equivalent `task.status/task.cancel`
 WS methods. V1 intentionally permits global lookup within the store environment;
 refs are not credentials. Status batches contain 1–20 selectors, normalized and
 request-deduplicated. SQL uses three task-only indexes (task ID, intent ID and unresolved
-intent marker; SQLite migration 038, MySQL 037), one bounded-output batch query and no canonical-body reads. It groups
+intent marker; SQLite migration 038, MySQL 038), one bounded-output batch query and no canonical-body reads. It groups
 by full task identity before collision detection; both identity indexes can match. Unresolved request markers remain queryable
 as `unknown` until an authoritative assignment or rejection supersedes them;
 expired authoritative rows and persisted legacy Result intents still suppress an
@@ -68,6 +68,20 @@ Uncertainty notices are suppressed by either the authoritative assignment intent
 or the normalized task UUID, including native WS assignments without an intent.
 The SQL batch uses separate existing-index existence checks for those identities;
 this adds no database round trip, schema change, or canonical-message read.
+
+### MySQL migration numbering compatibility
+
+The task-handle migration is MySQL **038_task_handle_lookup.sql**; the merged
+dev chain already owns **037_session_speaking_leases.sql**. SQLite remains
+**038_task_handle_lookup.sql**. The MySQL renumbering preserves the original SQL
+bytes and was explicitly approved for this unmerged PR.
+
+A database that already recorded the old PR's **037_task_handle_lookup.sql**
+must not be upgraded as though it had applied the new dev 037 migration. Keep
+that database and its version/checksum records intact. Disposable PR validation
+must use a fresh database; a retained deployment needs an owned, separately
+reviewed reconciliation plan before adopting this chain. Do not delete, relabel,
+or overwrite applied migration records to make startup succeed.
 
 Confirmed terminal tasks leave the lookup after 24 hours; running/uncertain
 Worker tasks do not. In particular, uncertainty expiry with possible send is

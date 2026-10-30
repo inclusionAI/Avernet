@@ -35,6 +35,15 @@ pub struct BcsConfig {
     pub collaboration_drafts: Option<crate::collaboration_drafts::CollaborationDraftConfig>,
     #[serde(default)]
     pub state_machine_history: bcs_config_api::StateMachineHistoryConfig,
+    /// Optional caller identity service section (spec §10.13.7): absent =
+    /// no caller capability assembled and the anti-downgrade guard stays
+    /// closed; present = full validation at startup, fail closed.
+    #[serde(default)]
+    pub caller_identity: Option<bcs_config_api::CallerIdentityServiceConfig>,
+    /// Speaking-lease idle window (spec §10.13.9, §15.99): defaults to the
+    /// frozen 60s constant; absent section changes nothing.
+    #[serde(default)]
+    pub speaking_lease: bcs_config_api::SpeakingLeaseConfig,
     /// Address to bind to.
     #[serde(default = "default_bind")]
     pub bind: String,
@@ -431,6 +440,8 @@ impl Default for BcsConfig {
     fn default() -> Self {
         Self {
             collaboration_drafts: None,
+            caller_identity: None,
+            speaking_lease: Default::default(),
             state_machine_history: Default::default(),
             bind: default_bind(),
             port: default_port(),

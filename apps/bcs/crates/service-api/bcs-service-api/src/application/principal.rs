@@ -9,11 +9,7 @@ pub enum CallerContext {
     Admin(AdminActor),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HumanActor {
-    pub actor_id: String,
-    pub staff_no: String,
-}
+pub use bcs_domain::caller_identity_material::HumanActor;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BotActor {

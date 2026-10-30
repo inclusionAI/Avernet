@@ -15,8 +15,12 @@ use bcs_service_api::{
     BotSearchCandidateQuery, BotSearchFriendshipFilter, BotControlPlaneDescriptor, BotControlPlaneOwnedQuery, BotControlPlanePatch,
     BotControlPlaneRecord, BotControlPlaneRepoPort, BotTaskModesQuery, TaskModeMatch, ServiceError, ServiceResult,
 };
+use bcs_service_api::port::repo::bot_control_plane::{
+    BotCallerConfiguration, CallerConfigurationSync, CallerIdentitySnapshot,
+};
 
 use super::PersistentBotRepo;
+use super::caller_config::caller_cache_key;
 use crate::{BotInfo, bot_info_json_set, serialized_string_value};
 
 fn control_plane_record_from_row(row: &DbRow) -> ServiceResult<BotControlPlaneRecord> {
@@ -724,5 +728,130 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
         }
 
         self.get_control_plane(bot_id, env).await
+    }
+
+    // ── Per-Bot caller configuration (spec §10.7.2/§15.96) ─────────────
+    // Storage and cache mechanics live in `caller_config.rs`; these trait
+    // methods only adapt them to the port contracts.
+
+    async fn get_caller_configuration(
+        &self,
+        bot_id: &str,
+        env: &str,
+    ) -> ServiceResult<Option<BotCallerConfiguration>> {
+        // Read-through cache (§15.96): the sync write path invalidates the
+        // key on success, so same-process PATCH→read stays immediate;
+        // cross-process staleness is bounded by the per-class TTLs.
+        self.caller_config_cache
+            .get(&caller_cache_key(bot_id, env), || async {
+                self.read_caller_configuration_scoped(bot_id, env, None).await
+            })
+            .await
+    }
+
+    async fn get_caller_configurations(
+        &self,
+        bot_ids: &[String],
+        env: &str,
+    ) -> ServiceResult<Vec<(String, BotCallerConfiguration)>> {
+        // Dedup preserving first occurrence; fresh entries answer from the
+        // cache, the cold set loads in ONE round trip and refills it
+        // (including negative "missing/unconfigured" answers, so repeat
+        // scans stop touching storage).
+        let mut seen = std::collections::HashSet::new();
+        let mut ordered: Vec<String> = Vec::with_capacity(bot_ids.len());
+        for bot_id in bot_ids {
+            if seen.insert(bot_id.as_str()) {
+                ordered.push(bot_id.clone());
+            }
+        }
+        let mut resolved: std::collections::HashMap<String, Option<BotCallerConfiguration>> =
+            std::collections::HashMap::with_capacity(ordered.len());
+        let mut cold: Vec<String> = Vec::new();
+        for bot_id in &ordered {
+            if let Some(fresh) = self
+                .caller_config_cache
+                .peek(&caller_cache_key(bot_id, env))
+                .await
+            {
+                resolved.insert(bot_id.clone(), fresh);
+            } else {
+                cold.push(bot_id.clone());
+            }
+        }
+        // NOTE: insertion into the map then ordered assembly keeps the
+        // FIRST-OCCURRENCE contract of the port default.
+        if !cold.is_empty() {
+            let reloaded = self.read_caller_configurations_projected(env, &cold).await?;
+            let reloaded_ids = reloaded
+                .iter()
+                .map(|(bot_id, _)| bot_id.clone())
+                .collect::<std::collections::HashSet<_>>();
+            for (bot_id, config) in reloaded {
+                self.caller_config_cache
+                    .store(&caller_cache_key(&bot_id, env), Some(config.clone()));
+                resolved.insert(bot_id, Some(config));
+            }
+            for bot_id in &cold {
+                if !reloaded_ids.contains(bot_id) {
+                    // Target missing in this env: cache the negative answer
+                    // so repeated scans of a stale roster stop hitting SQL.
+                    self.caller_config_cache
+                        .store(&caller_cache_key(bot_id, env), None);
+                    resolved.insert(bot_id.clone(), None);
+                }
+            }
+        }
+        // FIRST-OCCURRENCE ordering follows `ordered`, not the HashMap.
+        let mut results = Vec::with_capacity(ordered.len());
+        for bot_id in ordered {
+            if let Some(Some(config)) = resolved.remove(&bot_id) {
+                results.push((bot_id, config));
+            }
+        }
+        Ok(results)
+    }
+
+    async fn sync_caller_configuration(
+        &self,
+        bot_id: &str,
+        env: &str,
+        snapshot: CallerIdentitySnapshot,
+    ) -> ServiceResult<Option<CallerConfigurationSync>> {
+        let outcome = self
+            .sync_caller_configuration_scoped(bot_id, env, None, snapshot)
+            .await?;
+        // Write-through invalidation: the next read of THIS process reloads,
+        // so same-instance PATCH→read stays immediate (§15.96).
+        self.caller_config_cache
+            .invalidate(&caller_cache_key(bot_id, env));
+        Ok(outcome)
+    }
+
+    async fn get_provider_caller_configuration(
+        &self,
+        bot_id: &str,
+        env: &str,
+        provider_id: &str,
+    ) -> ServiceResult<Option<BotCallerConfiguration>> {
+        // Admin-frequency route read-back: deliberately NOT cached —
+        // freshness after PATCH is its whole job.
+        self.read_caller_configuration_scoped(bot_id, env, Some(provider_id))
+            .await
+    }
+
+    async fn sync_provider_caller_configuration(
+        &self,
+        bot_id: &str,
+        env: &str,
+        provider_id: &str,
+        snapshot: CallerIdentitySnapshot,
+    ) -> ServiceResult<Option<CallerConfigurationSync>> {
+        let outcome = self
+            .sync_caller_configuration_scoped(bot_id, env, Some(provider_id), snapshot)
+            .await?;
+        self.caller_config_cache
+            .invalidate(&caller_cache_key(bot_id, env));
+        Ok(outcome)
     }
 }

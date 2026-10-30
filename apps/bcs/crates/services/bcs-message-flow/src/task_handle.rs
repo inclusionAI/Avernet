@@ -198,6 +198,7 @@ async fn cancel_inner(flow: &BcsMessageFlow, value: &str, reason: &str) -> Servi
                 if row.state.status == D::CancelUnknown || (row.state.status == D::Expired && row.state.may_have_been_sent) { return Ok(simple(S::Unknown)); }
                 if row.state.status != D::Cancelling {
                     let command = bcs_service_api::DeliveryTransitionCommand {
+                        caller_dispatch_commit: None, caller_cancel: None, caller_terminal: None,
                         delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
                         event: Event::CancelRequested, now_ms: chrono::Utc::now().timestamp_millis(),
                         request_id: None, actor_id: Some("task-manager".into()), reply: None,
@@ -289,6 +290,7 @@ pub(crate) fn schedule_legacy_timeout(flow: &BcsMessageFlow, task_id: String, se
         let result = cancel(&owner, task_id.clone(), crate::task_failure::TASK_TIMEOUT_REASON.into()).await;
         if matches!(result, Ok(ref result) if matches!(result.status, S::Unknown | S::CancelFailed)) {
             let cmd = bcs_service_api::TaskDispatchCommand {
+                caller_delegation: None,
                 driver_bot_id: task.driver_bot, group_id:task.group_id, target_bot_id:task.target_bot, target_bot_name:task.target_bot_name,
                 payload:serde_json::json!({"assignment_intent_id":task.assignment_intent_id, "bcs_session_id":task.session_id, "legacy_task_id":task_id, "timeout_unknown":true}),
             };

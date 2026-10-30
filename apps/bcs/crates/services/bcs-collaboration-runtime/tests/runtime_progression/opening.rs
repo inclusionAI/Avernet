@@ -61,6 +61,7 @@ async fn custom_opening_message_is_rendered_once_and_reused_from_history() {
             input: Value::Null,
             caller_id: None,
             authenticated_human: None,
+            caller_association: None,
         })
         .await
         .expect("start run");
@@ -111,6 +112,7 @@ async fn custom_opening_message_is_rendered_once_and_reused_from_history() {
             input: Value::Null,
             caller_id: None,
             authenticated_human: None,
+            caller_association: None,
         })
         .await
         .expect("start next run");
@@ -167,6 +169,7 @@ async fn opening_message_persistence_failure_fails_run_before_node_dispatch() {
             input: Value::Null,
             caller_id: None,
             authenticated_human: None,
+            caller_association: None,
         })
         .await
         .expect_err("opening message persistence failure must abort startup");

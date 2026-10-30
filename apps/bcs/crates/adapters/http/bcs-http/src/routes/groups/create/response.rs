@@ -84,6 +84,7 @@ pub(crate) async fn start_initial_state_machine_run_for_group(
     group: &GroupDetailResult,
     caller_id: Option<String>,
     authenticated_human: Option<bcs_service_api::AuthenticatedHumanCaller>,
+    headers: &HeaderMap,
 ) -> Result<Option<String>, HttpAdapterError> {
     let Some(session_id) = group.latest_running_session_id.as_deref() else {
         return Ok(None);
@@ -108,6 +109,64 @@ pub(crate) async fn start_initial_state_machine_run_for_group(
     if session.session_kind != SessionKind::ServiceInvocation {
         return Ok(None);
     }
+    let now_ms = bcs_protocol::now_ms() as i64;
+    // G1 Entry A (spec 2026-10-22): the group creator's trusted ingress
+    // rides the bootstrap run as an OPPORTUNISTIC association template —
+    // runtime stamps the run facts (§15.90). Gated on the composition's
+    // caller wiring: an unwired composition rejects the whole submission
+    // (runtime.rs no-registrar guard), which must never break group
+    // creation in caller-unwired deployments.
+    let caller_association =
+        if state.services.collaboration_runtime.caller_orchestration_wired() {
+            match state.caller_ingress_source.as_ref() {
+                Some(source) => match source.extract_caller_request(headers, now_ms).await {
+                    Ok(request) => Some(
+                        bcs_service_api::port::OrchestrationInstanceAssociation {
+                            workflow_run_id: String::new(),
+                            environment: state.manifest_env.clone(),
+                            group_id: String::new(),
+                            session_id: session.id.clone(),
+                            message_turn_id: String::new(),
+                            history_cutoff_seq: 0,
+                            // Run-budget fact, not an identity window: the
+                            // association is bounded by the instance budget so
+                            // the shared lineage ledger ages out strays.
+                            expires_at_ms: now_ms + 86400000,
+                            ingress: request.ingress,
+                            now_ms,
+                        },
+                    ),
+                    // Spec error-handling row: wired composition but the
+                    // extraction failed (expired or display-only principal)
+                    // → association=None, run 照建. Logged, never silent.
+                    Err(_) => {
+                        tracing::debug!(
+                            request_id = %bcs_observability::CurrentRequestId,
+                            group_id = %group.group_id,
+                            "state-machine bootstrap: caller ingress extraction failed (expired or display-only); association stays None"
+                        );
+                        None
+                    }
+                },
+                None => {
+                    tracing::debug!(
+                        request_id = %bcs_observability::CurrentRequestId,
+                        group_id = %group.group_id,
+                        "state-machine bootstrap: no caller ingress source; association stays None"
+                    );
+                    None
+                }
+            }
+        } else {
+            // Caller-unwired composition is a legitimate deployment shape;
+            // the bootstrap association is skipped (spec 非静默 requirement).
+            tracing::debug!(
+                request_id = %bcs_observability::CurrentRequestId,
+                group_id = %group.group_id,
+                "state-machine bootstrap: caller orchestration unwired; association stays None"
+            );
+            None
+        };
     let run = state
         .services
         .collaboration_runtime
@@ -121,7 +180,7 @@ pub(crate) async fn start_initial_state_machine_run_for_group(
             opening_message_override: None,
             input: session.input.clone().unwrap_or(Value::Null),
             caller_id,
-            authenticated_human,
+            authenticated_human, caller_association,
         })
         .await
         .map_err(collaboration_runtime_error_to_http)?;

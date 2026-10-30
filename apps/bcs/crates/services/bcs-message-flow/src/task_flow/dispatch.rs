@@ -130,13 +130,132 @@ pub async fn handle_task_dispatch(
             .ok_or_else(|| crate::queued_task::error("task manager missing"))?;
         let name = resolve_participant_name(flow, driver).await;
         let intent = crate::queued_task::TaskIntent { leg:crate::queued_task::TaskLeg::Dispatch,
-            task_id:effective_task_id.clone(), manager:cmd.driver_bot_id.clone(), worker:target_bot_id,
+            task_id:effective_task_id.clone(), manager:cmd.driver_bot_id.clone(), worker:target_bot_id.clone(),
             worker_name:target_bot_name, response_mode,
             assignment_intent_id:cmd.payload.get("assignment_intent_id").and_then(Value::as_str).map(str::to_owned),
             summary:message.chars().take(80).collect(), timeout_s };
-        let admission = crate::queued_task::command(flow, &group, &manager_session_id, intent,
+        let mut admission = crate::queued_task::command(flow, &group, &manager_session_id, intent,
             &message, cmd.payload.get("attachments"), &name, drain).await?;
-        output::admit_queued_dispatch(flow, &group, admission).await?;
+        // Existing admission owns the real task/run identity. Persist only
+        // the trusted coordination edge's non-secret parent/invocation and
+        // issuance purpose; no separate child registration or lifecycle.
+        if let Some(delegation) = cmd.caller_delegation.as_ref() {
+            // Target's own caller configuration decides the issuance
+            // purpose (spec §8.3, review P1-2): the SAME per-target read
+            // web_send performs (control-plane enabled snapshot).
+            // Caller-enabled Worker → Execution identity; an absent or
+            // disabled config → DelegationOnly middle-hop — never a
+            // blanket purpose either way.
+            let target_caller_enabled = match flow.caller_admission.as_ref() {
+                Some(deps) => deps
+                    .control_plane
+                    .get_caller_configuration(&target_bot_id, &bcs_config::resolve_env_str())
+                    .await
+                    .ok()
+                    .flatten()
+                    .and_then(|config| config.snapshot)
+                    .is_some_and(|snapshot| snapshot.caller_identity.enabled),
+                None => false,
+            };
+            let purpose = if target_caller_enabled { "execution" } else { "delegation_only" };
+            for target in admission.targets.iter_mut() {
+                if let Value::Object(map) = &mut target.semantic_projection_json {
+                    map.insert("caller_required".into(), Value::Bool(true));
+                    map.insert("caller_task".into(), Value::String(message.clone()));
+                    // Trusted ordinary sender facts of the assign's own
+                    // sender (the Manager): the protected dispatch guard reads
+                    // them BEFORE choosing the delegate branch, and the
+                    // delegate wire derives its envelope `from` from them.
+                    // Same position and trust level as the queued admission
+                    // seam's `caller_channel` (canonical sender id + resolved
+                    // participant name) — never the protected subject.
+                    map.insert("caller_channel".into(), serde_json::json!({
+                        "actor_id": cmd.driver_bot_id.clone(),
+                        "actor_name": name.clone(),
+                    }));
+                    // Nested under the DECLARED caller_delegation field: the
+                    // strict projection decode (deny_unknown_fields) accepts
+                    // the row on every task path (run this line through
+                    // intent/terminal/reply decoding unchanged).
+                    let mut nested = serde_json::Map::new();
+                    nested.insert("parent_run_id".to_string(), Value::String(delegation.parent_run_id.clone()));
+                    nested.insert("parent_attempt".to_string(), Value::from(delegation.parent_attempt));
+                    nested.insert("parent_bot_id".to_string(), Value::String(delegation.parent_bot_id.clone()));
+                    nested.insert("invocation_id".to_string(), Value::String(delegation.invocation_id.clone()));
+                    nested.insert("execution_purpose".to_string(), Value::String(purpose.to_string()));
+                    map.insert("caller_delegation".into(), Value::Object(nested));
+                }
+            }
+        }
+        // HEAD's output::admit_queued_dispatch discipline: the run
+        // identity, the operation registration and the frozen producer
+        // facts must precede the durable admit commit (F1); ours' caller
+        // projection above rides the same admission targets untouched.
+        let mut admission = admission;
+        if let Some(target) = admission.targets.first_mut() {
+            target.run_id = Some(uuid::Uuid::new_v4().to_string());
+        }
+        let real_run_id = admission.targets.first().and_then(|t| t.run_id.clone());
+        let committed_row = output::admit_queued_dispatch(flow, &group, admission).await?;
+        // Owner→caller identity relay (spec L62 direction): with the
+        // deployment's allowlist naming this exact (middle, target) edge,
+        // redeem the session's captured human ingress and park it on the
+        // worker's handoff scope — built from the COMMITTED row's own facts
+        // so the runtime's claim reads the identical key. The middle bot
+        // touches no token; budget and TTL are ledger-bound; any refusal
+        // stays fail-closed exactly like relay-disabled deployments (the
+        // row converges IdentityUnavailable later, nothing upgrades it).
+        if let Some(relay) = flow.caller_relay.as_ref() {
+            if cmd.caller_delegation.is_some()
+                && relay.allows_relay_edge(&cmd.driver_bot_id, &target_bot_id)
+            {
+                match (flow.caller_admission.as_ref(), committed_row.as_ref(),
+                       relay.ledger.redeem(&bcs_config::resolve_env_str(), &manager_session_id, now as i64)) {
+                    (Some(deps), Some(row), Some((root_turn, ingress))) => {
+                        let scope = HandoffScope {
+                            env: bcs_config::resolve_env_str(),
+                            session_id: row.session_id.clone(),
+                            group_id: Some(row.group_id.clone()),
+                            source_message_id: row.source_message_id.clone(),
+                            target_bot_id: row.target_bot_id.clone(),
+                        };
+                        let receipt = QueuedAdmissionReceipt::new(
+                            row.delivery_id.clone(), row.state.state_version, now as i64,
+                        );
+                        let parked = match deps.handoff.reserve(&scope, deps.reserve_ttl_ms, now as i64).await {
+                            Ok(()) => deps.handoff.publish(&scope, ingress, receipt).await,
+                            Err(error) => Err(error),
+                        };
+                        match parked {
+                            Ok(()) => tracing::info!(
+                                task = %effective_task_id,
+                                from = %cmd.driver_bot_id,
+                                to = %target_bot_id,
+                                root_turn = %root_turn,
+                                "CALLER_RELAY_PARKED: the session's captured human identity was relayed onto the worker's handoff scope"
+                            ),
+                            Err(error) => tracing::warn!(
+                                task = %effective_task_id,
+                                error = %error,
+                                "CALLER_RELAY_PARK_FAILED: identity did not park; the task stays fail-closed at claim time"
+                            ),
+                        }
+                    }
+                    (Some(_), Some(_), None) => tracing::warn!(
+                        task = %effective_task_id,
+                        "CALLER_RELAY_REFUSED: no live captured identity for this session (expired, unbudgeted or never spoken); the task stays fail-closed"
+                    ),
+                    (None, _, _) => tracing::warn!(
+                        task = %effective_task_id,
+                        "CALLER_RELAY_REFUSED: relay edge allowed but no caller admission seam; the task stays fail-closed"
+                    ),
+                    _ => {}
+                }
+            }
+        }
+        // finish_admission bookkeeping already ran inside
+        // admit_queued_dispatch; the entry read below stands in for the
+        // old acknowledged-row handle (real_run_id carries the shared identity).
         let entry = flow.task_store.get(&effective_task_id).await
             .ok_or_else(|| crate::queued_task::error("admitted task projection missing"))?;
         record_task_event(flow, "task.assigned", &entry, &cmd.driver_bot_id, now,
@@ -150,7 +269,11 @@ pub async fn handle_task_dispatch(
             ])).await?;
         emit_task_ledger_status(flow, &group, &group_id, Some(&manager_session_id), &cmd.driver_bot_id).await;
         return Ok(TaskDispatchOutcome { task_id:effective_task_id, status:"queued".into(),
+            real_run_id,
             bot_deliveries:Vec::new(), frontend_deliveries:Vec::new() });
+    }
+    if cmd.caller_delegation.is_some() {
+        return Err(crate::queued_task::error("caller delegation requires managed task admission"));
     }
     let operation_id = output::admit_output(
         flow, &group, &manager_session_id, &effective_task_id, &target_bot_id,
@@ -399,9 +522,21 @@ pub async fn handle_task_dispatch(
     )
     .await;
 
+    // The direct (legacy) branch never carries a delegation: the protected
+    // worker path is queue-backed by construction; a delegation here is a
+    // wiring error and refuses closed rather than dispatching ordinary.
+    if cmd.caller_delegation.is_some() {
+        return Err(ServiceError::InvalidOperation {
+            message: "caller delegation requires the queued protected path; direct dispatch refused".to_string(),
+            request_id: Some(effective_task_id),
+        });
+    }
     Ok(TaskDispatchOutcome {
         task_id: effective_task_id,
         status: "dispatched".to_string(),
+        // The direct branch's frame identity is the task id itself (the
+        // immediate chat.send the remainder of the legacy flow drives).
+        real_run_id: None,
         bot_deliveries: vec![result],
         frontend_deliveries: Vec::new(),
     })

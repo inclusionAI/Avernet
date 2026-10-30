@@ -99,7 +99,11 @@ async fn control_page(db: &dyn bcs_db_api::DbPlugin, env: &str, category: usize,
         0 => ("status = 'dispatching' AND run_deadline_at_ms <= ?", "run_deadline_at_ms, delivery_id"),
         1 => ("status = 'running' AND run_deadline_at_ms <= ?", "run_deadline_at_ms, delivery_id"),
         2 => ("status = 'cancelling' AND abort_request_id IS NULL", "delivery_id"),
-        _ => ("status = 'cancelling' AND cancel_deadline_at_ms <= ? AND abort_request_id IS NOT NULL", "cancel_deadline_at_ms, delivery_id"),
+        3 => ("status = 'cancelling' AND cancel_deadline_at_ms <= ? AND abort_request_id IS NOT NULL", "cancel_deadline_at_ms, delivery_id"),
+        // Uncertain sends whose execution budget lapsed (spec 队列 TTL 与执行
+        // 期限): never a "stopped" lane release — the runtime converts the
+        // lapsed deadline into a cancel intent for the delivery arbitration.
+        _ => ("status = 'unknown' AND run_deadline_at_ms <= ?", "run_deadline_at_ms, delivery_id"),
     };
     let mut params = vec![env.into()];
     if category != 2 { params.push(now.into()); }
@@ -632,8 +636,9 @@ impl MessageDeliveryRepoPort for MySqlMessageStore {
             let mut seen = BTreeSet::new();
             let mut full = Vec::new();
             // Reserve a share for each disjoint action before lending spare capacity.
-            for category in 0..4 {
-                let quota = (limit / 4 + usize::from(category < limit % 4)).max(1).min(limit - result.len());
+            let categories = 5;
+            for category in 0..categories {
+                let quota = (limit / categories + usize::from(category < limit % categories)).max(1).min(limit - result.len());
                 if quota == 0 { continue; }
                 let rows = control_page(self.db.as_ref(), &self.env, category, now_ms, quota).await?;
                 if rows.len() == quota { full.push((category, quota)); }

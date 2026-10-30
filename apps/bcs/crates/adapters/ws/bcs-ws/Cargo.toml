@@ -33,6 +33,8 @@ bcs-protocol    = { workspace = true }
 bcs-telemetry   = { workspace = true }
 bcs-observability = { workspace = true }
 bcs-route-security = { workspace = true }
+bcs-auth-api    = { workspace = true }
+bcs-config      = { workspace = true }
 
 [dev-dependencies]
 tokio-test  = "0.4"

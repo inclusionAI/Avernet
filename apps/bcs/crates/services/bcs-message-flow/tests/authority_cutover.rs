@@ -93,6 +93,7 @@ fn speak_as(entry: GroupChatCommand, sender: &str) -> GroupChatCommand {
 
 fn entry(caller: CallerContext) -> GroupChatCommand {
     GroupChatCommand {
+        caller_ingress: None,
         caller,
         group_id: "group-1".to_string(),
         requested_sender_id: None,

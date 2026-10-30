@@ -108,7 +108,7 @@ async fn confirmed_timeout_admits_one_manager_task_result() {
     let f = Fixture::new().await;
     let (task_id, row) = f.dispatch().await;
     let row = f.start(&row).await;
-    let cancelling = f.service.transition(DeliveryTransitionCommand {
+    let cancelling = f.service.transition(DeliveryTransitionCommand { caller_dispatch_commit: None, caller_cancel: None, caller_terminal: None,
         delivery_id:row.delivery_id.clone(), expected_state_version:row.state.state_version,
         event:Event::CancelRequested, now_ms:chrono::Utc::now().timestamp_millis(),
         request_id:None, actor_id:None, reply:None,
@@ -137,7 +137,7 @@ async fn unconfirmed_timeout_atomically_queues_one_system_send_to_manager() {
     let f = Fixture::new().await;
     let (task_id, row) = f.dispatch().await;
     let row = f.start(&row).await;
-    let cancelling = f.service.transition(DeliveryTransitionCommand {
+    let cancelling = f.service.transition(DeliveryTransitionCommand { caller_dispatch_commit: None, caller_cancel: None, caller_terminal: None,
         delivery_id:row.delivery_id.clone(), expected_state_version:row.state.state_version,
         event:Event::CancelRequested, now_ms:chrono::Utc::now().timestamp_millis(),
         request_id:None, actor_id:None, reply:None,
@@ -298,7 +298,7 @@ async fn callback_and_control_race_commit_one_result() {
     let f = Fixture::new().await;
     let (_, row) = f.dispatch().await;
     let row = f.start(&row).await;
-    let command = DeliveryTransitionCommand { delivery_id:row.delivery_id.clone(), expected_state_version:row.state.state_version,
+    let command = DeliveryTransitionCommand { caller_dispatch_commit: None, caller_cancel: None, caller_terminal: None, delivery_id:row.delivery_id.clone(), expected_state_version:row.state.state_version,
         event:Event::Aborted, now_ms:chrono::Utc::now().timestamp_millis(), request_id:None, actor_id:None,
         reply:None, transport_context_json:None, deadline_at_ms:None };
     let (_, callback) = tokio::join!(f.service.transition(command), f.flow.handle_bot_event(final_event(&row)));

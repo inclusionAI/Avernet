@@ -21,6 +21,8 @@ export interface ExternalAuthUser {
 
 export interface ExternalAuthState {
   status: ExternalAuthStatus;
+  /** 认证代次：每次成功认证（`setAuthenticated`）自增，用于识别“旧请求”的晚到 401。 */
+  authEpoch: number;
   user: ExternalAuthUser | null;
   loginUrl: string | null;
   isCheckingAuth: boolean;
@@ -39,6 +41,7 @@ export interface ExternalAuthState {
 
 const initialState = {
   status: 'unknown' as ExternalAuthStatus,
+  authEpoch: 0,
   user: null as ExternalAuthUser | null,
   loginUrl: null as string | null,
   isCheckingAuth: false,
@@ -50,7 +53,7 @@ const initialState = {
 export const useExternalAuthStore = create<ExternalAuthState>((set) => ({
   ...initialState,
   setCheckingAuth: (isCheckingAuth) => set({ isCheckingAuth }),
-  setAuthenticated: (user) => set({ status: 'authenticated', user, error: null, isCheckingAuth: false }),
+  setAuthenticated: (user) => set((state) => ({ status: 'authenticated', user, error: null, isCheckingAuth: false, authEpoch: state.authEpoch + 1 })),
   setUnauthenticated: () => set({ status: 'unauthenticated', user: null, error: null, isCheckingAuth: false }),
   setAuthError: (message) => set({ status: 'error', user: null, error: message, isCheckingAuth: false }),
   setLoginUrl: (loginUrl) => set({ loginUrl }),

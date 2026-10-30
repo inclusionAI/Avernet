@@ -151,7 +151,7 @@ Delivery recovery supports at most eight IDs in a single lookup.
 ## Task-handle lookup
 
 Task dispatch, server rejection and unresolved intent markers use three additive task-only indexes
-(SQLite 038/MySQL 037). `TaskPrefixes` combines <=20 normalized selectors in one
+(SQLite 038/MySQL 038). `TaskPrefixes` combines <=20 normalized selectors in one
 bound-parameter query; each index/selector yields <=2 distinct identities before
 fetching one latest row each. A single task's duplicate deliveries do not create
 ambiguity. No canonical bodies are loaded. Confirmed terminal retention is 24h;

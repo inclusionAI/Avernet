@@ -125,6 +125,13 @@ const GroupChatPage: React.FC<GroupChatPageProps> = ({
     sendMessage,
     abort,
     reconnect,
+    speakingLease,
+    speakingLeaseStatus,
+    isUpdatingSpeakingLease,
+    leaseNowMs,
+    speakingMode,
+    acquireSpeakingLease,
+    releaseSpeakingLease,
   } = useGroupChat({
     group,
     historyMessages,
@@ -862,6 +869,20 @@ const GroupChatPage: React.FC<GroupChatPageProps> = ({
             isRequesting={isRequesting}
             mentionCategories={mentionCategories}
             userId={userId}
+            speakingMode={speakingMode}
+            speakingLease={speakingLease}
+            speakingLeaseStatus={speakingLeaseStatus}
+            isUpdatingSpeakingLease={isUpdatingSpeakingLease}
+            leaseNowMs={leaseNowMs}
+            onAcquireSpeakingLease={() => {
+              void acquireSpeakingLease();
+            }}
+            onPreemptSpeakingLease={() => {
+              void acquireSpeakingLease({ preempt: true });
+            }}
+            onReleaseSpeakingLease={(lease) => {
+              void releaseSpeakingLease(lease);
+            }}
             wsStatus={wsStatus}
             retryCount={retryCount}
             onReconnect={reconnect}

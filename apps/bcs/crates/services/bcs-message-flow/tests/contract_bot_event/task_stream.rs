@@ -234,6 +234,7 @@ async fn manager_worker_task_result_defaults_to_text_after_last_tool_call() {
                 "message": "do work",
                 "bcs_session_id": "group-1:abcdef12",
             }),
+            caller_delegation: None,
         })
         .await
         .unwrap();
@@ -315,6 +316,7 @@ async fn manager_worker_task_result_uses_agent_tool_boundary_by_default() {
                 "message": "do work",
                 "bcs_session_id": "group-1:abcdef12",
             }),
+            caller_delegation: None,
         })
         .await
         .unwrap();
@@ -430,6 +432,7 @@ async fn manager_worker_task_result_uses_final_when_agent_tool_has_no_followup_t
                 "message": "do work",
                 "bcs_session_id": "group-1:abcdef12",
             }),
+            caller_delegation: None,
         })
         .await
         .unwrap();
@@ -512,6 +515,7 @@ async fn manager_worker_task_dispatch_uses_sse_for_eligible_provider_worker() {
             "message": "do work",
             "bcs_session_id": "group-1:abcdef12",
         }),
+        caller_delegation: None,
     })
     .await
     .expect("task.dispatch should deliver to provider worker");
@@ -559,6 +563,7 @@ async fn manager_worker_task_result_uses_sse_for_eligible_provider_manager() {
                 "message": "do work",
                 "bcs_session_id": "group-1:abcdef12",
             }),
+            caller_delegation: None,
         })
         .await
         .expect("task.dispatch should deliver to worker");
@@ -621,6 +626,7 @@ async fn manager_worker_provider_task_flow_uses_session_participant_tags() {
                 "message": "do work",
                 "bcs_session_id": "group-1:abcdef12",
             }),
+            caller_delegation: None,
         })
         .await
         .expect("task dispatch should use worker session tags");

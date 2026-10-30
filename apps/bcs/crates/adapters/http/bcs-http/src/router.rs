@@ -149,6 +149,11 @@ fn build_api_routes() -> Router<HttpAppState> {
                 .patch(routes::providers::patch_provider_bot),
         )
         .route(
+            "/providers/{provider_id}/bots/{provider_bot_ref}/caller",
+            get(routes::providers::get_provider_bot_caller_config)
+                .patch(routes::providers::patch_provider_bot_caller_config),
+        )
+        .route(
             "/providers/{provider_id}/bots/{bot_uuid}/attributes",
             get(routes::providers::get_provider_bot_attributes)
                 .patch(routes::providers::patch_provider_bot_attributes),

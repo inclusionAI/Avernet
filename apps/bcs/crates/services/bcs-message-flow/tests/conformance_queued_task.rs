@@ -44,7 +44,7 @@ impl Fixture {
         }).await.expect("scheduler must make progress");
     }
     async fn transition(&self, row: &PersistedMessageDelivery, event: Event) -> PersistedMessageDelivery {
-        self.service.transition(DeliveryTransitionCommand { delivery_id:row.delivery_id.clone(),
+        self.service.transition(DeliveryTransitionCommand { caller_dispatch_commit: None, caller_cancel: None, caller_terminal: None, delivery_id:row.delivery_id.clone(),
             expected_state_version:row.state.state_version, event, now_ms:chrono::Utc::now().timestamp_millis(),
             request_id:row.request_id.clone(), actor_id:None, reply:None, transport_context_json:None, deadline_at_ms:None }).await.unwrap()
     }
@@ -110,7 +110,7 @@ impl Fixture {
         let preparer = QueuedGroupPreparation { flow:Arc::downgrade(&self.flow), deliveries:self.service.clone() };
         let mut prepared = preparer.prepare(row).await.unwrap();
         prepared.transport_context_json["policy_version"] = json!(self.live.snapshot.read().await.version);
-        let started = self.service.transition(DeliveryTransitionCommand {
+        let started = self.service.transition(DeliveryTransitionCommand { caller_dispatch_commit: None, caller_cancel: None, caller_terminal: None,
             delivery_id:row.delivery_id.clone(), expected_state_version:row.state.state_version, event:Event::StartSend,
             now_ms:chrono::Utc::now().timestamp_millis(), request_id:None, actor_id:None, reply:None,
             transport_context_json:Some(prepared.transport_context_json), deadline_at_ms:Some(i64::MAX) }).await.unwrap();
@@ -122,9 +122,9 @@ impl Fixture {
 }
 
 fn dispatch_command() -> TaskDispatchCommand {
-    TaskDispatchCommand { driver_bot_id:"bot-driver".into(), group_id:"group-1".into(), target_bot_id:"bot-observer".into(),
+    TaskDispatchCommand { caller_delegation: None, driver_bot_id:"bot-driver".into(), group_id:"group-1".into(), target_bot_id:"bot-observer".into(),
         target_bot_name:None, payload:json!({"message":"TASK_BODY", "bcs_session_id":SESSION, "response_mode":"full",
-            "assignment_intent_id":"bcs_intent_assignment"}) }
+        "assignment_intent_id":"bcs_intent_assignment"}) }
 }
 fn final_event(row: &PersistedMessageDelivery) -> BotEventCommand {
     BotEventCommand { bot_id:row.target_bot_id.clone(), run_id:row.run_id.clone().unwrap(), group_id:"group-1".into(),
@@ -490,7 +490,7 @@ async fn actual_runtime_orders_worker_tasks_and_manager_results_on_independent_l
     f.context("bot-observer").await;
     let (first_task, first) = f.dispatch().await;
     let (_, second) = f.dispatch().await;
-    let worker = DeliveryRuntime { policy:Some(f.live.clone()), service:f.service.clone(),
+    let worker = DeliveryRuntime { caller_dispatch:None, policy:Some(f.live.clone()), service:f.service.clone(),
         preparation:Arc::new(QueuedGroupPreparation { flow:Arc::downgrade(&f.flow), deliveries:f.service.clone() }),
         transport:f.support.bot_delivery.clone(), config:DeliveryRuntimeConfig {
             max_safe_retries:0, pause_dispatch:false, bots:Default::default(), tick:Duration::from_millis(2),
@@ -527,7 +527,7 @@ async fn worker_task_deadline_precedes_provider_run_context_by_five_minutes() {
     let f = Fixture::new().await;
     f.context("bot-observer").await;
     let (_, task) = f.dispatch().await;
-    let worker = DeliveryRuntime { policy:Some(f.live.clone()), service:f.service.clone(),
+    let worker = DeliveryRuntime { caller_dispatch:None, policy:Some(f.live.clone()), service:f.service.clone(),
         preparation:Arc::new(QueuedGroupPreparation { flow:Arc::downgrade(&f.flow), deliveries:f.service.clone() }),
         transport:f.support.bot_delivery.clone(), config:DeliveryRuntimeConfig {
             max_safe_retries:0, pause_dispatch:false, bots:Default::default(), tick:Duration::from_millis(2),
@@ -591,7 +591,7 @@ async fn assert_runtime_timeout_with_abort_ack(provider: bool) {
     if provider {
         f.support.bot_delivery.set_provider_abort_run_ids(vec![task.run_id.clone().unwrap()]).await;
     }
-    let worker = DeliveryRuntime { policy:Some(f.live.clone()), service:f.service.clone(),
+    let worker = DeliveryRuntime { caller_dispatch:None, policy:Some(f.live.clone()), service:f.service.clone(),
         preparation:Arc::new(QueuedGroupPreparation { flow:Arc::downgrade(&f.flow), deliveries:f.service.clone() }),
         transport:f.support.bot_delivery.clone(), config:DeliveryRuntimeConfig {
             max_safe_retries:0, pause_dispatch:false, bots:Default::default(), tick:Duration::from_millis(2),
@@ -624,3 +624,248 @@ async fn assert_runtime_timeout_with_abort_ack(provider: bool) {
 
 #[path = "support/task_handles.rs"]
 mod task_handles;
+
+/// The ordinary task fixture with only the ephemeral Caller context.
+async fn delegate_fixture(
+    lineage_index: Arc<bcs_message_flow::caller_lineage::RootLineageIndex>,
+) -> Fixture {
+    let repo = Arc::new(MemoryMessageRepo::new());
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let mut group = support.group.get("group-1").await.unwrap();
+    group.group_strategy = GroupStrategy::ManagerWorker;
+    for p in &mut group.participants {
+        if p.bot_uuid == "bot-driver" { p.role = ParticipantRole::Manager; }
+        if p.bot_uuid == "bot-observer" { p.role = ParticipantRole::Worker; }
+    }
+    support.group.upsert(group).await.unwrap();
+    let live = Arc::new(LiveDeliveryPolicy::new(repo.clone(), Default::default()));
+    live.scheduler_available.store(true, Ordering::SeqCst);
+    let service = Arc::new(ManagedMessageDelivery::new(repo.clone()).with_policy(live.clone()));
+    let repo_handle: Arc<dyn MessageRepoPort> = repo.clone();
+    let flow = Fixture::configured_flow(&support, &service, &repo_handle, &live, move |flow| {
+        flow.with_caller_derivation(lineage_index)
+    })
+    .await;
+    let mut policy = DeliveryPolicy::default();
+    policy.flow_enabled.group = true; policy.flow_enabled.system = true; policy.flow_enabled.task = true;
+    policy.defaults.mode = BotDeliveryMode::Enforce;
+    policy.queue_ttl_ms = Some(300_000);
+    flow.replace_delivery_policy(admin(), 0, policy).await.unwrap();
+    Fixture { support, flow, service, repo, live }
+}
+
+#[tokio::test]
+async fn delegated_task_terminal_uses_existing_delivery_without_child_registry() {
+    // Only the existing task delivery owns completion. No child registry
+    // is constructed, and losing Caller context must not block the result.
+    let lineage_index = Arc::new(bcs_message_flow::caller_lineage::RootLineageIndex::new(8));
+    let f = delegate_fixture(lineage_index.clone()).await;
+    // The root lineage the coordination gate consults in production — the
+    // fixture registers it exactly as the root's Accepted send does.
+    let now = chrono::Utc::now().timestamp_millis();
+    assert!(lineage_index.register(
+        "run-manager",
+        bcs_message_flow::caller_lineage::RootLineage {
+            root_run_id: "root-run".into(),
+            environment: "env-caller".into(),
+            delegation_depth: 0,
+            attempt: 1,
+            message_turn_id: "canonical-turn".into(),
+            group_id: "group-1".into(),
+            session_id: SESSION.into(),
+            history_cutoff_seq: 0,
+            expires_at_ms: now + 600_000,
+            identity_subject: "root-pseudonym".into(),
+            identity_subject_type: bcs_service_api::application::caller_identity::CallerSubjectRefType::BcsEphemeral,
+            delegate_subject: "root-pseudonym".into(),
+            parent_execution: false,
+        },
+        now,
+    ));
+
+    // Dispatch with the delegation carrier: the trusted task_dispatch marks
+    // land on the admitted row's projection.
+    let mut cmd = dispatch_command();
+    cmd.caller_delegation = Some(bcs_service_api::CallerDelegationAssignment {
+        parent_run_id: "run-manager".into(),
+        parent_attempt: 1,
+        parent_bot_id: "bot-driver".into(),
+        invocation_id: "tool-call-1".into(),
+    });
+    let outcome = bcs_test_support::contract::application::queued_task::queued_task_dispatch_contract_tests(
+        f.flow.as_ref(), cmd).await;
+    let row = f.rows().await.into_iter()
+        .find(|r| r.semantic_projection_json["task"]["task_id"] == outcome.task_id).unwrap();
+    assert_eq!(row.semantic_projection_json["caller_delegation"]["parent_run_id"], "run-manager");
+    assert_eq!(row.semantic_projection_json["caller_delegation"]["invocation_id"], "tool-call-1");
+
+    // StartSend commits the real downstream identity the worker echoes.
+    // The ordinary preparation pipeline is deliberately NOT used here: a
+    // production caller row routes to the runtime's caller branch before
+    // any QueuedGroupPreparation — the fixture's direct transition drives
+    // the same StartSend CAS the runtime's delegate branch issues.
+    let policy_version = f.live.snapshot.read().await.version;
+    let started = f.service.transition(DeliveryTransitionCommand {
+        caller_dispatch_commit: None, caller_cancel: None, caller_terminal: None,
+        delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
+        event: Event::StartSend, now_ms: chrono::Utc::now().timestamp_millis(),
+        request_id: None, actor_id: None, reply: None,
+        transport_context_json: Some(json!({"policy_version": policy_version})),
+        deadline_at_ms: Some(i64::MAX),
+    }).await.unwrap();
+    assert!(started.run_id.is_some(), "the real downstream identity is in flight");
+    // Production faithfulness (review: 用经过真实 dispatch commit 的记录验证
+    // 终态): the protected dispatch pipeline parks the typed CAS facts on the
+    // row BEFORE the worker settles — the terminal commit's task_result
+    // decode must accept a dispatch-committed row, not only commit-free ones.
+    let committed = f.service.commit_caller_dispatch(
+        bcs_service_api::application::message_delivery::CommitCallerDispatchCommand {
+            delivery_id: started.delivery_id.clone(),
+            expected_state_version: started.state.state_version,
+            now_ms: now,
+            dispatch: bcs_service_api::port::CallerDispatchAssociation {
+                environment: started.env.clone(),
+                target_bot_id: started.target_bot_id.clone(),
+                provider_id: String::new(),
+                provider_bot_ref: String::new(),
+                session_id: started.session_id.clone(),
+                run_id: started.run_id.clone().unwrap(),
+                attempt: started.attempt_no,
+                dispatch_id: started.request_id.clone().unwrap(),
+            },
+            commit: bcs_service_api::application::message_delivery::CallerDispatchCommit {
+                request_digest: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".into(),
+                not_after_ms: now + 300_000,
+                control_revision: 0,
+            },
+        }).await.unwrap();
+    assert!(committed, "the typed dispatch commit parks its facts on the row");
+
+    // Identity expiry closes future inheritance, not the existing result path.
+    assert!(lineage_index.current("run-manager", now + 600_001).is_none());
+    f.flow.handle_bot_event(final_event(&started)).await.unwrap();
+    let settled = f.rows().await.into_iter()
+        .find(|r| r.semantic_projection_json["task"]["task_id"] == outcome.task_id).unwrap();
+    assert_eq!(settled.state.status, Status::Completed, "the delegated task settles through the ordinary commit path");
+    assert_eq!(
+        f.flow.task_store.get(&outcome.task_id).await.unwrap().status,
+        bcs_message_flow::task_store::TaskLedgerStatus::Replied,
+        "the task ledger marks the delegated task replied"
+    );
+}
+
+#[tokio::test]
+async fn a_delegated_dispatch_commits_the_manager_sender_channel_facts() {
+    // The REAL task_assign entrance — not the admit_caller fixture, which
+    // pre-populates caller_channel through the human admission seam — must
+    // write the sender facts the runtime's protected dispatch guard reads
+    // BEFORE choosing the delegate branch (DeliveryRuntime::attempt_caller_
+    // protected_dispatch → caller_channel_facts → PreparationFailed when
+    // absent). Without them every caller-chain manager→worker assign dies in
+    // preparation before the Provider wire is ever touched.
+    let lineage_index = Arc::new(bcs_message_flow::caller_lineage::RootLineageIndex::new(8));
+    let f = delegate_fixture(lineage_index.clone()).await;
+    let now = chrono::Utc::now().timestamp_millis();
+    assert!(lineage_index.register(
+        "run-manager",
+        bcs_message_flow::caller_lineage::RootLineage {
+            root_run_id: "root-run".into(),
+            environment: "env-caller".into(),
+            delegation_depth: 0,
+            attempt: 1,
+            message_turn_id: "canonical-turn".into(),
+            group_id: "group-1".into(),
+            session_id: SESSION.into(),
+            history_cutoff_seq: 0,
+            expires_at_ms: now + 600_000,
+            identity_subject: "root-pseudonym".into(),
+            identity_subject_type: bcs_service_api::application::caller_identity::CallerSubjectRefType::BcsEphemeral,
+            delegate_subject: "root-pseudonym".into(),
+            parent_execution: false,
+        },
+        now,
+    ));
+    let mut cmd = dispatch_command();
+    cmd.caller_delegation = Some(bcs_service_api::CallerDelegationAssignment {
+        parent_run_id: "run-manager".into(),
+        parent_attempt: 1,
+        parent_bot_id: "bot-driver".into(),
+        invocation_id: "tool-call-channel".into(),
+    });
+    let outcome = bcs_test_support::contract::application::queued_task::queued_task_dispatch_contract_tests(
+        f.flow.as_ref(), cmd).await;
+    let row = f.rows().await.into_iter()
+        .find(|r| r.semantic_projection_json["task"]["task_id"] == outcome.task_id).unwrap();
+    // The worker row's projection carries the trusted ordinary sender
+    // facts: the MANAGER that issued the assign, same position the queued
+    // admission seam uses (event.bot_id + resolved participant name).
+    assert_eq!(row.semantic_projection_json["caller_channel"]["actor_id"], "bot-driver");
+    assert_eq!(row.semantic_projection_json["caller_channel"]["actor_name"], "Driver");
+}
+
+#[tokio::test]
+async fn a_foreign_worker_claim_on_a_delegated_task_is_dropped_not_settled() {
+    // Existing task ownership rejects a foreign worker without a Caller registry.
+    let lineage_index = Arc::new(bcs_message_flow::caller_lineage::RootLineageIndex::new(8));
+    let f = delegate_fixture(lineage_index.clone()).await;
+    let now = chrono::Utc::now().timestamp_millis();
+    assert!(lineage_index.register(
+        "run-manager",
+        bcs_message_flow::caller_lineage::RootLineage {
+            root_run_id: "root-run".into(),
+            environment: "env-caller".into(),
+            delegation_depth: 0,
+            attempt: 1,
+            message_turn_id: "canonical-turn".into(),
+            group_id: "group-1".into(),
+            session_id: SESSION.into(),
+            history_cutoff_seq: 0,
+            expires_at_ms: now + 600_000,
+            identity_subject: "root-pseudonym".into(),
+            identity_subject_type: bcs_service_api::application::caller_identity::CallerSubjectRefType::BcsEphemeral,
+            delegate_subject: "root-pseudonym".into(),
+            parent_execution: false,
+        },
+        now,
+    ));
+    let mut cmd = dispatch_command();
+    cmd.caller_delegation = Some(bcs_service_api::CallerDelegationAssignment {
+        parent_run_id: "run-manager".into(),
+        parent_attempt: 1,
+        parent_bot_id: "bot-driver".into(),
+        invocation_id: "tool-call-2".into(),
+    });
+    let outcome = bcs_test_support::contract::application::queued_task::queued_task_dispatch_contract_tests(
+        f.flow.as_ref(), cmd).await;
+    let row = f.rows().await.into_iter()
+        .find(|r| r.semantic_projection_json["task"]["task_id"] == outcome.task_id).unwrap();
+    let policy_version = f.live.snapshot.read().await.version;
+    let started = f.service.transition(DeliveryTransitionCommand {
+        caller_dispatch_commit: None, caller_cancel: None, caller_terminal: None,
+        delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
+        event: Event::StartSend, now_ms: chrono::Utc::now().timestamp_millis(),
+        request_id: None, actor_id: None, reply: None,
+        transport_context_json: Some(json!({"policy_version": policy_version})),
+        deadline_at_ms: Some(i64::MAX),
+    }).await.unwrap();
+
+    // A FOREIGN worker's claim: the task event arrives from a stranger bot
+    // on the same run — the gate's worker mismatch drops it before the
+    // terminal commit; the task stays Dispatched (un-settled), never
+    // silently completed.
+    let mut foreign = final_event(&started);
+    foreign.bot_id = "bot-stranger".into();
+    f.flow.handle_bot_event(foreign).await.unwrap();
+    let row_after = f.rows().await.into_iter()
+        .find(|r| r.semantic_projection_json["task"]["task_id"] == outcome.task_id).unwrap();
+    assert_eq!(row_after.state.status, Status::Dispatching, "a foreign worker's claim never settles the delegated task");
+    // The ledger entry never reaches the settled outcome (the fixture's
+    // inline StartSend does not run the store-sync paths; the invariant
+    // under test is "not settled", not the Queued/Dispatched bookkeeping
+    // that managed recovery would sync in production).
+    assert_ne!(
+        f.flow.task_store.get(&outcome.task_id).await.unwrap().status,
+        bcs_message_flow::task_store::TaskLedgerStatus::Replied,
+        "a foreign claim never marks the delegated task replied"
+    );
+}

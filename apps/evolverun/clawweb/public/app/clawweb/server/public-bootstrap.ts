@@ -14,6 +14,8 @@ import {
   createRunsRouter,
   createWorkflowsRouter,
 } from "@avernet/workflow/server";
+import { createSubworkflowObservabilityRouter } from "@avernet/workflow/server/routes/subworkflow-observability";
+import { createSubworkflowAuthorizer } from "@avernet/workflow/server/routes/subworkflow-authorization";
 import { createPackScriptsRouter } from "@avernet/workflow/server/routes/pack-scripts";
 import { readPackScriptsFromRemote } from "@avernet/workflow/server/services/pack-script-read-service";
 import { createWorkflowNodeStatsRouter } from "@avernet/workflow/server/routes/workflow-node-stats";
@@ -211,6 +213,15 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
       app.use("/api/workflows", createWorkflowNodeStatsRouter(
         null, null, createWorkflowVersionComparisonService(db), botPermRepo,
       ));
+      // The public host only has a verified local-development identity. Production
+      // hosts must inject their own verified principal instead of trusting headers.
+      const authorizeSubworkflows = createSubworkflowAuthorizer(async request => {
+        const identity = resolveAuthMeIdentity(request, { environment: context.environment });
+        if (!identity) return null;
+        return { actorId: identity.userId, isAdmin: identity.userId === "dev_local"
+          || await adminUserRepo.hasRole([identity.userId, identity.userName], "admin") };
+      }, botPermRepo);
+      app.use("/api/runs", createSubworkflowObservabilityRouter(db, authorizeSubworkflows));
       app.use("/api/runs", createRunsRouter(
         flowRunRepo,
         nodeExecRepo,

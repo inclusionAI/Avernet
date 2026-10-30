@@ -598,6 +598,141 @@ class BcnService:
             )
             raise BcnServiceError(f"BCN delete_provider_bot error: {e}")
 
+    def sync_bot_caller_config(
+        self,
+        *,
+        teamclaw_bot_uuid: str,
+        owner_workno: str,
+        enabled: bool,
+        source_revision: int,
+    ) -> Dict[str, Any]:
+        """同步 Bot caller 配置快照到 BCS 权威端点。
+
+        调用 PATCH /providers/{provider_id}/bots/{provider_bot_ref}/caller,
+        按 ``source_revision`` CAS(BCS 侧 per-bot 单调版本)。成功 sync_status
+        ∈ {applied, unchanged};stale 表示 BCS 侧持有更高 revision(两边
+        计数器分叉),按错误传播,不静默吞掉。
+
+        只传非身份控制面数据(enabled / minimum_isolation);身份材料
+        (token / session / iam)绝不进入本链路 —— bcs-domain caller_identity
+        契约红线。
+
+        Args:
+            teamclaw_bot_uuid: TC 的 bot uuid
+            owner_workno: bot 所有者工号
+            enabled: bot 级 caller 开关(bot_call_type == CALLER)
+            source_revision: ac_bots.caller_config_revision(本次 bump 后的值)
+
+        Returns:
+            dict: skipped=True(env 无凭据跳过)/ sync_status + provider_bot_ref
+
+        Raises:
+            BcnServiceError: stale / 4xx / 5xx / 超时 / 其他网络异常
+        """
+        provider_bot_ref = f"{teamclaw_bot_uuid}:{owner_workno}"
+        env = get_current_env()
+
+        provider_cfg = _get_provider_config(env, self._config)
+        if not provider_cfg:
+            logger.info(
+                f"[BcnService.sync_bot_caller_config] env={env} skipped "
+                f"(no provider credentials), provider_bot_ref={provider_bot_ref}"
+            )
+            return {
+                "skipped": True,
+                "provider_bot_ref": provider_bot_ref,
+            }
+
+        provider_id = provider_cfg["provider_id"]
+        provider_admin_token = provider_cfg["provider_admin_token"]
+        payload: Dict[str, Any] = {
+            "snapshot": {
+                "source_revision": source_revision,
+                "caller_identity": {
+                    "enabled": enabled,
+                    "minimum_isolation": "caller_container",
+                },
+            }
+        }
+        path = f"/providers/{provider_id}/bots/{provider_bot_ref}/caller"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {provider_admin_token}",
+        }
+        logger.info(
+            f"[BcnService.sync_bot_caller_config] PATCH {path} "
+            f"enabled={enabled} source_revision={source_revision}"
+        )
+
+        try:
+            response = self._http.patch(
+                path, json=payload, headers=headers, timeout=self._timeout
+            )
+            response.raise_for_status()
+            body = response.json()
+            # 直达 BCS 返回裸 PATCH 响应;corp BCN 管理面包
+            # {"success": bool, "data": {...}}。有信封时解开,绝不杜撰载荷。
+            if isinstance(body, dict) and isinstance(body.get("success"), bool):
+                if not body["success"]:
+                    error_msg = (
+                        body.get("error")
+                        or body.get("message")
+                        or "Unknown error"
+                    )
+                    raise BcnServiceError(
+                        f"BCN caller config sync API error: {error_msg}"
+                    )
+                body = (
+                    body.get("data") if isinstance(body.get("data"), dict) else {}
+                )
+            sync_status = str((body or {}).get("sync_status") or "")
+            if sync_status not in ("applied", "unchanged"):
+                hint = (
+                    "stale = BCS holds a higher source_revision"
+                    if sync_status == "stale"
+                    else "unexpected response body"
+                )
+                raise BcnServiceError(
+                    f"BCN caller config sync rejected: sync_status={sync_status!r} "
+                    f"({hint}) provider_bot_ref={provider_bot_ref} "
+                    f"source_revision={source_revision}"
+                )
+            logger.info(
+                f"[BcnService.sync_bot_caller_config] OK "
+                f"provider_bot_ref={provider_bot_ref} sync_status={sync_status} "
+                f"enabled={enabled} source_revision={source_revision}"
+            )
+            return {
+                "skipped": False,
+                "sync_status": sync_status,
+                "provider_bot_ref": provider_bot_ref,
+            }
+        except httpx.HTTPStatusError as e:
+            error_body = e.response.text[:500] if e.response else "No response"
+            status = e.response.status_code if e.response else "N/A"
+            logger.error(
+                f"[BcnService.sync_bot_caller_config] HTTP error: "
+                f"status={status} body={error_body} "
+                f"provider_bot_ref={provider_bot_ref}"
+            )
+            raise BcnServiceError(
+                f"BCN caller config sync HTTP error: {status} - {error_body}"
+            )
+        except httpx.TimeoutException as e:
+            logger.error(
+                f"[BcnService.sync_bot_caller_config] Timeout: {e} "
+                f"provider_bot_ref={provider_bot_ref}"
+            )
+            raise BcnServiceError(f"BCN caller config sync timeout: {e}")
+        except BcnServiceError:
+            raise
+        except Exception as e:  # pragma: no cover - 传输层安全网
+            logger.error(
+                f"[BcnService.sync_bot_caller_config] Unexpected error: {e} "
+                f"provider_bot_ref={provider_bot_ref}"
+            )
+            raise BcnServiceError(f"BCN caller config sync error: {e}")
+
     def get_attributes(self, *, bot_uuid: str) -> Dict[str, Any]:
         """读取已注册 Bot 的协作属性 (Provider 管理 API GET)。
 

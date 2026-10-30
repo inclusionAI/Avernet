@@ -70,6 +70,7 @@ async fn human_input_timeout_ignores_global_retries_and_rejects_late_response() 
                 actor_id: "human_1001".to_string(),
                 display_name: Some("Reviewer".to_string()),
             }),
+            caller_association: None,
         })
         .await
         .expect("start Human timeout run");
@@ -135,7 +136,7 @@ async fn timeout_scanner_aborts_run_when_group_is_missing() {
             opening_message_override: None,
             input: json!({"question": "group will be deleted"}),
             caller_id: None,
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect("start run");
@@ -193,7 +194,7 @@ async fn timeout_scanner_aborts_run_when_session_is_missing() {
             opening_message_override: None,
             input: json!({"question": "session will be deleted"}),
             caller_id: None,
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect("start run");
@@ -255,6 +256,7 @@ async fn timeout_scanner_skips_invalid_candidate_and_processes_later_run() {
             input: json!({"question": "valid timeout"}),
             caller_id: None,
             authenticated_human: None,
+            caller_association: None,
         })
         .await
         .expect("start valid run");
@@ -356,6 +358,7 @@ async fn state_machine_explicit_node_timeout_overrides_provider_chat_default() {
             input: json!({"question": "stream this"}),
             caller_id: None,
             authenticated_human: None,
+            caller_association: None,
         })
         .await
         .expect("start run");
@@ -405,6 +408,7 @@ async fn start_run_fails_and_marks_node_failed_when_delivery_returns_not_deliver
             input: json!({"question": "review this"}),
             caller_id: None,
             authenticated_human: None,
+            caller_association: None,
         })
         .await;
 

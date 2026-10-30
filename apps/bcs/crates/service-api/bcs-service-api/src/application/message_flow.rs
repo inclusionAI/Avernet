@@ -35,7 +35,16 @@ pub enum ChatEventState {
     ToolCallEnd,
 }
 
-#[derive(Debug, Clone)]
+/// The lease coordinates a Human presents with a submission. Just the
+/// non-secret coordinates — holder identity always comes from the
+/// authenticated session, never from this claim.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WebSendLeaseClaim {
+    pub lease_id: String,
+    pub epoch: u64,
+}
+
+#[derive(Debug)]
 pub struct WebSendCommand {
     /// Request-only credential; only the bound direct provider may consume it.
     pub caller_execution: Option<super::caller_execution::CallerExecution>,
@@ -55,6 +64,47 @@ pub struct WebSendCommand {
     pub channel_sender_identity: Option<ChannelSenderIdentity>,
     pub sender_conn_id: Option<u64>,
     pub provider_bypass_headers: Vec<(String, String)>,
+    /// Strict same-authentication Human caller material (spec §7.5.1).
+    /// Runtime-only, no serde. Ingress itself is Clone for trusted connection
+    /// snapshots, but cloning this command removes it. Execution forwarding
+    /// must move the command or explicitly take/move its ingress; never use
+    /// a command clone as an identity-preserving dispatch.
+    pub caller_ingress: Option<
+        crate::application::caller_identity::AuthenticatedHumanCallerIngress,
+    >,
+    /// Speaking-lease claim presented by the submitting Human (spec §6.3):
+    /// the lease id + epoch returned by an acquire/preempt. Required for
+    /// Human speech in caller groups; plain groups never carry or check
+    /// it, and DM traffic does not fence on it.
+    pub speaking_lease: Option<WebSendLeaseClaim>,
+}
+
+impl Clone for WebSendCommand {
+    /// Cloning deliberately strips the strict caller ingress: a clone is a
+    /// duplicate/replay projection, and a replay must never carry identity
+    /// material (the handoff refuses re-publication anyway). The original's
+    /// one parked identity is untouched by clones of the command.
+    fn clone(&self) -> Self {
+        Self {
+            caller_execution: self.caller_execution.clone(),
+            caller: self.caller.clone(),
+            group_id: self.group_id.clone(),
+            session_id: self.session_id.clone(),
+            from_actor_id: self.from_actor_id.clone(),
+            from_name: self.from_name.clone(),
+            message: self.message.clone(),
+            mentions: self.mentions.clone(),
+            attachments: self.attachments.clone(),
+            thinking: self.thinking.clone(),
+            idempotency_key: self.idempotency_key.clone(),
+            source_im_message_id: self.source_im_message_id.clone(),
+            channel_sender_identity: self.channel_sender_identity.clone(),
+            sender_conn_id: self.sender_conn_id,
+            provider_bypass_headers: self.provider_bypass_headers.clone(),
+            caller_ingress: None,
+            speaking_lease: self.speaking_lease.clone(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -77,7 +127,7 @@ pub struct WebSendOutcome {
     pub delivery_results: Vec<MessageDeliveryResult>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct GroupChatCommand {
     pub caller: CallerContext,
     pub group_id: String,
@@ -85,6 +135,28 @@ pub struct GroupChatCommand {
     pub message: String,
     pub session_id: Option<String>,
     pub provider_bypass_headers: Vec<(String, String)>,
+    /// Strict same-authentication caller material (spec §7.5.1): set by a
+    /// Human-authenticated route; admission consumes it. No serde; command
+    /// clones strip identity exactly like `WebSendCommand`. Forward to
+    /// WebSendCommand by explicit move, not by cloning the command.
+    pub caller_ingress: Option<
+        crate::application::caller_identity::AuthenticatedHumanCallerIngress,
+    >,
+}
+
+impl Clone for GroupChatCommand {
+    /// Duplicate/replay projections never carry identity material.
+    fn clone(&self) -> Self {
+        Self {
+            caller: self.caller.clone(),
+            group_id: self.group_id.clone(),
+            requested_sender_id: self.requested_sender_id.clone(),
+            message: self.message.clone(),
+            session_id: self.session_id.clone(),
+            provider_bypass_headers: self.provider_bypass_headers.clone(),
+            caller_ingress: None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -237,6 +309,32 @@ pub struct TaskDispatchCommand {
     pub target_bot_id: String,
     pub target_bot_name: Option<String>,
     pub payload: Value,
+    /// Caller delegation (spec §8.3/P5.9, plan §15.71): a trusted-edge
+    /// assign with a live caller root lineage delegates toward a
+    /// caller-enabled worker. The two facts are non-secret correlation
+    /// ids (the assigning run and the assign invocation marker) — filled
+    /// ONLY by the coordination edge after the real-fact preflight; a
+    /// request body can never inject it. `None` keeps the ordinary task.
+    pub caller_delegation: Option<CallerDelegationAssignment>,
+}
+
+/// The delegation facts of one caller-chain assign (both non-secret run /
+/// correlation identities — never identity material).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallerDelegationAssignment {
+    /// The assigning (parent) bot's live run — the association's parent
+    /// anchor and the root-lineage slot key.
+    pub parent_run_id: String,
+    /// The assigning run's REAL attempt. This is the exact Material Ledger
+    /// key for the parent execution token; a zero/missing attempt never
+    /// becomes identity material.
+    pub parent_attempt: u32,
+    /// The assigning Bot. It must match the registered execution token's
+    /// target Bot, preventing another bot's token from being substituted.
+    pub parent_bot_id: String,
+    /// The actual assign invocation marker (the coordination echo's
+    /// toolCallId) — the association's idempotency identity.
+    pub invocation_id: String,
 }
 
 #[derive(Debug)]
@@ -245,6 +343,10 @@ pub struct TaskDispatchOutcome {
     /// `queued` means canonical message and target delivery are durable, not
     /// that the Worker has received it. Legacy direct dispatch uses `dispatched`.
     pub status: String,
+    /// The REAL downstream run identity of the admitted task (P5: the
+    /// original admission determines the identity; the association reads
+    /// it back verbatim). `None` on shapes without a durable admitted row.
+    pub real_run_id: Option<String>,
     pub bot_deliveries: Vec<BotDeliveryResult>,
     pub frontend_deliveries: Vec<FrontendDeliveryResult>,
 }

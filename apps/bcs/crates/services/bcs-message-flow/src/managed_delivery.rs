@@ -15,6 +15,16 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Weak};
 use tracing::Instrument;
 
+/// Fail-safe queue TTL when an admission carries NO expiry of its own and
+/// the live delivery policy configures NO `queue_ttl_ms` (the fresh-deploy
+/// default). Before §15.98 the policy overwrite turned that combination into
+/// a NULL expire — silent immortal queued rows for BOTH owner and caller
+/// flows; the floor bounds the damage until someone configures a real TTL.
+const QUEUE_TTL_FALLBACK_MS: i64 = 24 * 60 * 60 * 1000;
+
+/// Warn about the config gap once per process, not per admission.
+static QUEUE_TTL_FALLBACK_WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 pub(crate) const BOT_TERMINAL_ERROR_CODE: &str = "bot_terminal_error";
 
 // Once persistence starts, cancellation of the caller must not release the Bot
@@ -230,6 +240,19 @@ impl ManagedMessageDelivery {
                 event = Event::DefinitelyNotSent { retry: original.attempt_no <= policy.policy.safe_retry.as_ref().map_or(0, |retry| retry.max_retries) };
             }
         }
+        // Spec §6.8 execution-ready barrier (review-V P1-3): a barrier-parked
+        // Dispatching row is NOT restart uncertainty — its protected send was
+        // refused BEFORE acceptance (retryable HISTORY_NOT_READY), so the
+        // startup recovery sweep must leave it parked with its committed
+        // digest/attempt for the same-dispatch redrive. The run-deadline
+        // control remains its convergence bound.
+        if event == Event::Recover
+            && original.state.status == Status::Dispatching
+            && original.wait_reason
+                == Some(bcs_domain::message_delivery::DeliveryWaitReason::HistoryBarrier)
+        {
+            return Ok(original.clone());
+        }
         let mut changed = BTreeMap::new();
         if event == Event::CancelRequested
             && original.state.kind == DeliveryType::Inject
@@ -288,6 +311,9 @@ impl ManagedMessageDelivery {
         primary.state = outcome.state;
         if primary.state.status != original.state.status
             && matches!(primary.state.status, Status::Unknown | Status::CancelUnknown)
+            // Caller rows never re-arm the queue TTL: uncertainty resolves
+            // only on stop/terminal evidence, never on TTL expiry.
+            && primary.semantic_projection_json.get("caller_required").is_none()
         {
             primary.expire_at_ms = policy
                 .as_ref()
@@ -343,6 +369,17 @@ impl ManagedMessageDelivery {
             primary.abort_started_at_ms = Some(command.now_ms);
             primary.cancel_deadline_at_ms = command.deadline_at_ms;
         }
+        // Queue expiry is never a stop substitute for a maybe-sent caller
+        // dispatch: the batch loop converts TTL lapse into a cancel intent
+        // and any other caller of this CAS must not bypass the arbitration
+        // (spec 队列 TTL 与执行期限). A queued caller row that never started
+        // may still expire normally.
+        if matches!(command.event, Event::QueueExpired)
+            && primary.semantic_projection_json.get("caller_required").is_some()
+            && primary.state.may_have_been_sent
+        {
+            return Err(ManagedDeliveryError::Conflict);
+        }
         let cancel_reason = command.transport_context_json.as_ref().and_then(|v| v.get("cancel_reason")).and_then(|v| v.as_str()).map(str::to_owned);
         let task_timeout = command.transport_context_json.as_ref().and_then(|v| v.get("task_timeout")).and_then(|v| v.as_bool()) == Some(true);
         if event == Event::StartSend {
@@ -361,9 +398,131 @@ impl ManagedMessageDelivery {
             }
             primary.transport_context_json = command.transport_context_json;
             primary.run_deadline_at_ms = command.deadline_at_ms;
+            // Caller rows clear the queue TTL in the same CAS once the
+            // attempt authorizes: from here on the row keeps only the run
+            // deadline, and an uncertain attempt must not expire into a
+            // "stopped" lane release (spec 队列 TTL 与执行期限).
+            if primary.semantic_projection_json.get("caller_required").is_some() {
+                primary.expire_at_ms = None;
+            }
         }
         if event == Event::Accepted {
             primary.accepted_at_ms = Some(command.now_ms);
+        }
+        if event == Event::CommitCallerDispatch {
+            // Typed caller dispatch commit (§7.5.1/wire contract): merge the
+            // canonical digest/deadline/revision into the caller row's semantic
+            // projection. Never stamps submitted/accepted; never carries body,
+            // identity or binding material.
+            let Some(commit) = command.caller_dispatch_commit.clone() else {
+                return Err(ManagedDeliveryError::Conflict);
+            };
+            if commit.request_digest.len() != 71 || commit.not_after_ms <= command.now_ms {
+                return Err(ManagedDeliveryError::Conflict);
+            }
+            let deadline_ok = primary
+                .run_deadline_at_ms
+                .map(|run_deadline| commit.not_after_ms <= run_deadline)
+                .unwrap_or(true);
+            if !deadline_ok {
+                return Err(ManagedDeliveryError::Conflict);
+            }
+            if primary.semantic_projection_json.is_null() {
+                primary.semantic_projection_json = serde_json::json!({});
+            }
+            let object = match primary.semantic_projection_json.as_object_mut() {
+                Some(object) => object,
+                None => return Err(ManagedDeliveryError::Conflict),
+            };
+            // Idempotent at the same state version: identical payload = no
+            // conflict; a different payload at the same version conflicts.
+            if let Some(existing) = object.get("caller_dispatch") {
+                let identical = existing.get("version").and_then(|v| v.as_i64()) == Some(1)
+                    && existing.get("caller_request_digest").and_then(|v| v.as_str()) == Some(commit.request_digest.as_str())
+                    && existing.get("caller_not_after_ms").and_then(|v| v.as_i64()) == Some(commit.not_after_ms)
+                    && existing.get("caller_control_revision").and_then(|v| v.as_u64()) == Some(commit.control_revision);
+                if !identical {
+                    return Err(ManagedDeliveryError::Conflict);
+                }
+            } else {
+                object.insert(
+                    "caller_dispatch".to_string(),
+                    serde_json::json!({
+                        "version": 1i64,
+                        "caller_request_digest": commit.request_digest,
+                        "caller_not_after_ms": commit.not_after_ms,
+                        "caller_control_revision": commit.control_revision,
+                    }),
+                );
+            }
+        }
+        if command.caller_terminal.is_some() {
+            // Typed Provider terminal observation (spec "终态仲裁"): the
+            // outcome/event_seq/control_revision evidence becomes durable in
+            // the SAME CAS as the ordinary terminal transition. An already
+            // committed terminal is immutable — only the method-level
+            // duplicate pre-check may pass; in-place mutation refuses.
+            // Never a result body, identity or credential.
+            let Some(terminal) = command.caller_terminal.clone() else {
+                return Err(ManagedDeliveryError::Conflict);
+            };
+            if primary.semantic_projection_json.is_null() {
+                primary.semantic_projection_json = serde_json::json!({});
+            }
+            let object = match primary.semantic_projection_json.as_object_mut() {
+                Some(object) => object,
+                None => return Err(ManagedDeliveryError::Conflict),
+            };
+            if object.get("caller_terminal").is_some() {
+                return Err(ManagedDeliveryError::Conflict);
+            }
+            object.insert(
+                "caller_terminal".to_string(),
+                serde_json::json!({
+                    "version": 1i64,
+                    "outcome": terminal.outcome.as_str(),
+                    "event_seq": terminal.event_seq,
+                    "caller_control_revision": terminal.control_revision,
+                }),
+            );
+        }
+        if event == Event::CancelCallerDispatch {
+            // Typed caller cancel intent (spec §"取消意图与回执"): the stable
+            // cancel_request_id / frozen revision / reason / original not_after
+            // become durable in the SAME CAS that moves the row to Cancelling.
+            // A committed intent is never overwritten here — replay is
+            // pre-checked by `cancel_caller_dispatch`; the apply arm refuses
+            // any in-place mutation of an existing intent. Never identity
+            // material; the lane stays held until fenced/stopped evidence.
+            let Some(cancel) = command.caller_cancel.clone() else {
+                return Err(ManagedDeliveryError::Conflict);
+            };
+            if cancel.cancel_request_id.trim().is_empty() {
+                return Err(ManagedDeliveryError::Conflict);
+            }
+            if primary.semantic_projection_json.is_null() {
+                primary.semantic_projection_json = serde_json::json!({});
+            }
+            let object = match primary.semantic_projection_json.as_object_mut() {
+                Some(object) => object,
+                None => return Err(ManagedDeliveryError::Conflict),
+            };
+            if object.get("caller_cancel").is_some() {
+                return Err(ManagedDeliveryError::Conflict);
+            }
+            object.insert(
+                "caller_cancel".to_string(),
+                serde_json::json!({
+                    "version": 1i64,
+                    "cancel_request_id": cancel.cancel_request_id,
+                    "caller_control_revision": cancel.control_revision,
+                    "reason": cancel.reason.as_str(),
+                    "not_after_ms": cancel.not_after_ms,
+                    "cancel_state": "requested",
+                }),
+            );
+            primary.cancel_requested_at_ms = Some(command.now_ms);
+            primary.cancel_deadline_at_ms = Some(cancel.not_after_ms);
         }
         if matches!(
             event,
@@ -537,6 +696,257 @@ impl ManagedMessageDeliveryService for ManagedMessageDelivery {
     fn subscribe_changes(&self) -> Option<tokio::sync::broadcast::Receiver<Vec<PersistedMessageDelivery>>> {
         Some(self.subscribe())
     }
+
+    /// Typed caller dispatch commit (§7.5.1): the only legitimate producer of
+    /// the `caller_dispatch` projection keys. Six-field association must match
+    /// the committed row exactly (env/target/session/run/attempt/dispatch);
+    /// non-caller rows, wrong status, revision≠0 or misordered deadlines
+    /// refuse. Returns true when a new commit was written, false for an
+    /// identical same-version resubmission.
+    async fn commit_caller_dispatch(
+        &self,
+        command: bcs_service_api::application::message_delivery::CommitCallerDispatchCommand,
+    ) -> Result<bool, ManagedDeliveryError> {
+        let commit = command.commit;
+        if commit.request_digest.len() != 71 || commit.control_revision != 0 {
+            return Err(ManagedDeliveryError::Conflict);
+        }
+        if commit.not_after_ms <= command.now_ms {
+            return Err(ManagedDeliveryError::Conflict);
+        }
+        let row = self
+            .repo
+            .get_delivery(&command.delivery_id)
+            .await?
+            .ok_or(ManagedDeliveryError::NotFound)?;
+        if row.env != command.dispatch.environment
+            || row.target_bot_id != command.dispatch.target_bot_id
+            || row.session_id != command.dispatch.session_id
+            || row.run_id.as_deref() != Some(command.dispatch.run_id.as_str())
+            || row.attempt_no != command.dispatch.attempt
+            || row.request_id.as_deref() != Some(command.dispatch.dispatch_id.as_str())
+        {
+            return Err(ManagedDeliveryError::Conflict);
+        }
+        // Caller rows only: the ordinary path must never carry the keys.
+        if row.semantic_projection_json.get("caller_required").is_none() {
+            return Err(ManagedDeliveryError::Conflict);
+        }
+        // Idempotent same-version resubmission: an identical existing
+        // commit is a no-write success.
+        if let Some(existing) = row.semantic_projection_json.get("caller_dispatch") {
+            let identical = existing.get("version").and_then(|v| v.as_i64()) == Some(1)
+                && existing.get("caller_request_digest").and_then(|v| v.as_str())
+                    == Some(commit.request_digest.as_str())
+                && existing.get("caller_not_after_ms").and_then(|v| v.as_i64())
+                    == Some(commit.not_after_ms)
+                && existing.get("caller_control_revision").and_then(|v| v.as_u64())
+                    == Some(commit.control_revision);
+            if identical && row.state.state_version == command.expected_state_version {
+                return Ok(false);
+            }
+        }
+        // A changed payload at any version conflicts; stale versions persist
+        // through the ordinary CAS below.
+        let transition = self
+            .transition(DeliveryTransitionCommand {
+                delivery_id: command.delivery_id,
+                expected_state_version: command.expected_state_version,
+                event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::CommitCallerDispatch,
+                now_ms: command.now_ms,
+                request_id: Some(command.dispatch.dispatch_id.clone()),
+                actor_id: None,
+                reply: None,
+                transport_context_json: None,
+                deadline_at_ms: None,
+                caller_dispatch_commit: Some(commit),
+                caller_cancel: None,
+                caller_terminal: None,
+            })
+            .await
+            .map_err(|_| ManagedDeliveryError::Conflict)?;
+        let _ = transition;
+        Ok(true)
+    }
+
+    async fn cancel_caller_dispatch(
+        &self,
+        command: bcs_service_api::application::message_delivery::CancelCallerDispatchCommand,
+    ) -> Result<bool, ManagedDeliveryError> {
+        let cancel = command.cancel;
+        if cancel.cancel_request_id.trim().is_empty() {
+            return Err(ManagedDeliveryError::Conflict);
+        }
+        let row = self
+            .repo
+            .get_delivery(&command.delivery_id)
+            .await?
+            .ok_or(ManagedDeliveryError::NotFound)?;
+        if row.env != command.dispatch.environment
+            || row.target_bot_id != command.dispatch.target_bot_id
+            || row.session_id != command.dispatch.session_id
+            || row.run_id.as_deref() != Some(command.dispatch.run_id.as_str())
+            || row.attempt_no != command.dispatch.attempt
+            || row.request_id.as_deref() != Some(command.dispatch.dispatch_id.as_str())
+        {
+            return Err(ManagedDeliveryError::Conflict);
+        }
+        // Caller rows only: the ordinary path must never carry the keys.
+        if row.semantic_projection_json.get("caller_required").is_none() {
+            return Err(ManagedDeliveryError::Conflict);
+        }
+        // The intent freezes the committed dispatch facts: a revision or
+        // deadline that drifted from the persisted commit conflicts.
+        let Some(dispatch) = row.semantic_projection_json.get("caller_dispatch") else {
+            return Err(ManagedDeliveryError::Conflict);
+        };
+        if dispatch.get("caller_control_revision").and_then(|v| v.as_u64()) != Some(cancel.control_revision) {
+            return Err(ManagedDeliveryError::Conflict);
+        }
+        if dispatch.get("caller_not_after_ms").and_then(|v| v.as_i64()) != Some(cancel.not_after_ms) {
+            return Err(ManagedDeliveryError::Conflict);
+        }
+        // A durably committed intent is replay-idempotent only for the SAME
+        // intent at the row's current version; a different intent never
+        // overwrites a committed one (spec §"取消意图与回执" 1).
+        if let Some(existing) = row.semantic_projection_json.get("caller_cancel") {
+            let identical = existing.get("version").and_then(|v| v.as_i64()) == Some(1)
+                && existing.get("cancel_request_id").and_then(|v| v.as_str())
+                    == Some(cancel.cancel_request_id.as_str())
+                && existing.get("caller_control_revision").and_then(|v| v.as_u64())
+                    == Some(cancel.control_revision)
+                && existing.get("reason").and_then(|v| v.as_str()) == Some(cancel.reason.as_str())
+                && existing.get("not_after_ms").and_then(|v| v.as_i64()) == Some(cancel.not_after_ms)
+                && existing.get("cancel_state").and_then(|v| v.as_str()) == Some("requested");
+            if !identical {
+                return Err(ManagedDeliveryError::Conflict);
+            }
+            if matches!(row.state.status, Status::Cancelling | Status::CancelUnknown)
+                && row.state.state_version == command.expected_state_version
+            {
+                return Ok(false);
+            }
+            return Err(ManagedDeliveryError::Conflict);
+        }
+        let transition = self
+            .transition(DeliveryTransitionCommand {
+                delivery_id: command.delivery_id,
+                expected_state_version: command.expected_state_version,
+                event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::CancelCallerDispatch,
+                now_ms: command.now_ms,
+                request_id: Some(command.dispatch.dispatch_id.clone()),
+                actor_id: None,
+                reply: None,
+                transport_context_json: None,
+                deadline_at_ms: None,
+                caller_dispatch_commit: None,
+                caller_cancel: Some(cancel),
+                caller_terminal: None,
+            })
+            .await
+            .map_err(|_| ManagedDeliveryError::Conflict)?;
+        let _ = transition;
+        Ok(true)
+    }
+
+    async fn handle_caller_terminal(
+        &self,
+        command: bcs_service_api::application::message_delivery::CallerTerminalEventCommand,
+    ) -> Result<bcs_service_api::application::message_delivery::CallerTerminalReceipt, ManagedDeliveryError> {
+        let rows = self
+            .repo
+            .lookup(DeliveryLookup::Request(command.dispatch.dispatch_id.clone()))
+            .await?;
+        let row = rows
+            .into_iter()
+            .find(|row| {
+                row.env == command.dispatch.environment
+                    && row.target_bot_id == command.dispatch.target_bot_id
+                    && row.session_id == command.dispatch.session_id
+                    && row.run_id.as_deref() == Some(command.dispatch.run_id.as_str())
+                    && row.attempt_no == command.dispatch.attempt
+                    && row.request_id.as_deref() == Some(command.dispatch.dispatch_id.as_str())
+            })
+            .ok_or(ManagedDeliveryError::NotFound)?;
+        // Caller rows only; a terminal observation for the ordinary path is
+        // a contract violation, not a lifecycle event.
+        if row.semantic_projection_json.get("caller_required").is_none() {
+            return Err(ManagedDeliveryError::Conflict);
+        }
+        // The observation binds to committed dispatch facts — an
+        // uncommitted row has nothing a Provider could attest against.
+        if row.semantic_projection_json.get("caller_dispatch").is_none() {
+            return Err(ManagedDeliveryError::Conflict);
+        }
+        let receipt_for = |row: &PersistedMessageDelivery| {
+            let execution_state = serde_json::to_value(row.state.status)
+                .ok()
+                .and_then(|value| value.as_str().map(str::to_string))
+                .unwrap_or_else(|| "unknown".to_string());
+            bcs_service_api::application::message_delivery::CallerTerminalReceipt::Applied {
+                delivery_id: row.delivery_id.clone(),
+                execution_state,
+                state_version: row.state.state_version,
+            }
+        };
+        // 终态仲裁: an already-committed terminal is immutable — the exact
+        // triple (outcome, event_seq, control_revision) replays as a
+        // duplicate; anything else, including a higher sequence, conflicts.
+        if let Some(existing) = row.semantic_projection_json.get("caller_terminal") {
+            let identical = existing.get("version").and_then(|v| v.as_i64()) == Some(1)
+                && existing.get("outcome").and_then(|v| v.as_str())
+                    == Some(command.observation.outcome.as_str())
+                && existing.get("event_seq").and_then(|v| v.as_u64()) == Some(command.observation.event_seq)
+                && existing.get("caller_control_revision").and_then(|v| v.as_u64())
+                    == Some(command.observation.control_revision);
+            if !identical {
+                return Err(ManagedDeliveryError::Conflict);
+            }
+            return Ok(match receipt_for(&row) {
+                bcs_service_api::application::message_delivery::CallerTerminalReceipt::Applied {
+                    delivery_id,
+                    execution_state,
+                    state_version,
+                } => bcs_service_api::application::message_delivery::CallerTerminalReceipt::Duplicate {
+                    delivery_id,
+                    execution_state,
+                    state_version,
+                },
+                other => other,
+            });
+        }
+        // Outcome selects the ordinary terminal event; a cancellation that
+        // already committed keeps its logical Cancelled state and records
+        // the actual outcome independently.
+        let event = if matches!(row.state.status, Status::Cancelling | Status::CancelUnknown) {
+            Event::Aborted
+        } else {
+            match command.observation.outcome {
+                bcs_service_api::application::message_delivery::CallerTerminalOutcome::Completed => Event::Completed,
+                bcs_service_api::application::message_delivery::CallerTerminalOutcome::Failed => Event::Failed,
+                bcs_service_api::application::message_delivery::CallerTerminalOutcome::Aborted => Event::Aborted,
+            }
+        };
+        let updated = self
+            .transition(DeliveryTransitionCommand {
+                delivery_id: row.delivery_id.clone(),
+                expected_state_version: row.state.state_version,
+                event,
+                now_ms: command.now_ms,
+                request_id: Some(command.dispatch.dispatch_id.clone()),
+                actor_id: None,
+                reply: None,
+                transport_context_json: None,
+                deadline_at_ms: None,
+                caller_dispatch_commit: None,
+                caller_cancel: None,
+                caller_terminal: Some(command.observation),
+            })
+            .await
+            .map_err(|_| ManagedDeliveryError::Conflict)?;
+        Ok(receipt_for(&updated))
+    }
+
     async fn bounded_contexts(&self, carrier: &str, limit: usize) -> Result<BoundDeliveryContexts, ManagedDeliveryError> {
         let start = std::time::Instant::now();
         let result = self.repo.bounded_contexts(carrier, limit).await;
@@ -597,7 +1007,14 @@ impl ManagedMessageDeliveryService for ManagedMessageDelivery {
             let Some(reason) = reasons.get(&row.delivery_id) else {
                 continue;
             };
-            if row.state.status != Status::Queued || row.wait_reason == Some(*reason) {
+            // Review-V P1-3: the barrier marker is the one wait reason that
+            // rides a Dispatching (attempt-committed) row — every other
+            // reason stays Queued-only.
+            let barrier_park = matches!(
+                reason,
+                bcs_domain::message_delivery::DeliveryWaitReason::HistoryBarrier
+            ) && matches!(row.state.status, Status::Dispatching);
+            if (!barrier_park && row.state.status != Status::Queued) || row.wait_reason == Some(*reason) {
                 continue;
             }
             let expected_state_version = row.state.state_version;
@@ -749,11 +1166,48 @@ impl ManagedMessageDeliveryService for ManagedMessageDelivery {
                 }
                 target.max_queued = policy.policy.bot(&target.target_bot_id).max_queued;
             }
+            // §15.98: the policy expiry CAPS the admission's own TTL instead of
+            // replacing it (the old overwrite silently deleted a carried
+            // expiry whenever queue_ttl_ms was unset); with no source at
+            // all the fail-safe floor keeps rows mortal. The floor is
+            // anchored to the SERVER clock, never command.now_ms — the
+            // caller-provided clock may be arbitrary and must not decide
+            // the effective protection window.
             let policy_expiry = policy.policy.queue_ttl_ms.map(|ttl| command.now_ms.saturating_add(ttl as i64));
+            let admission_expiry = command.expire_at_ms;
+            let fallback_needed = policy_expiry.is_none()
+                && admission_expiry.is_none()
+                && command.targets.iter().any(|t| t.semantic_projection_json.get("caller_required").is_some());
+            if fallback_needed
+                && !QUEUE_TTL_FALLBACK_WARNED.swap(true, std::sync::atomic::Ordering::Relaxed)
+            {
+                tracing::warn!(
+                    "delivery policy sets no queue_ttl_ms and this caller admission carries no expiry: \
+                     applying the {}h fail-safe floor — configure queue_ttl_ms to take control",
+                    QUEUE_TTL_FALLBACK_MS / 3_600_000,
+                );
+            }
+            let cap = |expiry: i64| {
+                let mut capped = expiry;
+                if let Some(policy_expiry) = policy_expiry {
+                    capped = capped.min(policy_expiry);
+                }
+                if let Some(admission_expiry) = admission_expiry {
+                    capped = capped.min(admission_expiry);
+                }
+                capped
+            };
             command.expire_at_ms = if command.flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a {
                 let deadline = command.targets.first().and_then(|t| t.semantic_projection_json.get("expires_at_ms")).and_then(|v| v.as_i64()).ok_or(ManagedDeliveryError::Conflict)?;
-                Some(policy_expiry.map_or(deadline, |expiry| expiry.min(deadline)))
-            } else { policy_expiry };
+                Some(cap(deadline))
+            } else {
+                Some(match (admission_expiry, policy_expiry) {
+                    (Some(admission), Some(policy)) => admission.min(policy),
+                    (Some(admission), None) => admission,
+                    (None, Some(policy)) => policy,
+                    (None, None) => (bcs_protocol::now_ms() as i64).saturating_add(QUEUE_TTL_FALLBACK_MS),
+                })
+            };
           }
         }
         if !self
@@ -796,6 +1250,7 @@ impl ManagedMessageDeliveryService for ManagedMessageDelivery {
         for row in batch {
             cursor = row.delivery_id.clone();
             self.apply(DeliveryTransitionCommand {
+                caller_dispatch_commit: None,
                 delivery_id: row.delivery_id,
                 expected_state_version: row.state.state_version,
                 event: Event::Recover,
@@ -805,6 +1260,8 @@ impl ManagedMessageDeliveryService for ManagedMessageDelivery {
                 reply: None,
                 transport_context_json: None,
                 deadline_at_ms: None,
+                caller_cancel: None,
+                caller_terminal: None,
             })
             .await?;
         }

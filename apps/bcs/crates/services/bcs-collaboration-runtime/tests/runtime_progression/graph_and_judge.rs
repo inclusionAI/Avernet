@@ -56,7 +56,7 @@ async fn graph_view_returns_snapshot_edges_and_node_status() {
             opening_message_override: None,
             input: json!({"question": "graph"}),
             caller_id: None,
-            authenticated_human: None,
+            authenticated_human: None, caller_association: None,
         })
         .await
         .expect("start run");
@@ -132,6 +132,7 @@ async fn complete_transitions_support_fan_out_and_implicit_all_join() {
             input: json!({"question": "join"}),
             caller_id: None,
             authenticated_human: None,
+            caller_association: None,
         })
         .await
         .expect("start run");
@@ -227,6 +228,7 @@ async fn judged_node_routes_selected_outcome_and_skips_unselected_branch() {
             input: json!({"question": "judge branch"}),
             caller_id: None,
             authenticated_human: None,
+            caller_association: None,
         })
         .await
         .expect("start run");
@@ -318,6 +320,7 @@ async fn judged_node_publishes_bot_output_but_not_judge_message_to_workbench() {
             input: json!({"question": "judge branch"}),
             caller_id: None,
             authenticated_human: None,
+            caller_association: None,
         })
         .await
         .expect("start run");
@@ -384,6 +387,7 @@ async fn judged_node_failure_records_runtime_event_and_fails_run() {
             input: json!({"question": "judge branch"}),
             caller_id: None,
             authenticated_human: None,
+            caller_association: None,
         })
         .await
         .expect("start run");
@@ -466,6 +470,7 @@ async fn judged_node_timeout_records_runtime_event_and_fails_run() {
             input: json!({"question": "judge branch"}),
             caller_id: None,
             authenticated_human: None,
+            caller_association: None,
         })
         .await
         .expect("start run");
@@ -543,6 +548,7 @@ async fn judged_node_keeps_shared_merge_reachable_from_selected_branch() {
             input: json!({"question": "judge shared merge"}),
             caller_id: None,
             authenticated_human: None,
+            caller_association: None,
         })
         .await
         .expect("start run");

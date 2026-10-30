@@ -169,8 +169,197 @@ impl CollaborationRuntime {
         info!(run_id = %run.run_id, group_id = %group.id, session_id = %run.session_id, node_id = %p.node_id,
             attempt = p.attempt, assignee_bot_id = %p.assignee_bot_id, delivery_request_id = %p.delivery_request_id,
             "state_machine: node dispatch started");
-        let delivered = self.bot_delivery.deliver(BotDeliveryCommand { target, run_id: p.delivery_request_id.clone(), frame,
-            delivery_kind: BotDeliveryKind::TaskDispatch, provider_transport: bcs_service_api::ProviderTransportPreference::SseFirst, provider_bypass_headers: Vec::new() }).await;
+        // §15.83 S3 (spec §8.5 / review-V P1-1): a caller-ENABLED assignee
+        // routes the node through the protected caller wire — reusing the
+        // node's OWN run/attempt/dispatch lifecycle (the send marker above
+        // and the correlation/context bookkeeping stay exactly as they
+        // are); the instance's delegation-only association is the identity
+        // parent, never a data predecessor. An Ordinary resolution (or an
+        // unwired composition) keeps the historical direct delivery.
+        let delivered = if let (Some(port), Some(resolver)) =
+            (self.caller_node_dispatch.as_ref(), self.caller_policy_resolver.as_ref())
+        {
+            match resolver
+                .resolve(&p.assignee_bot_id, &bcs_config::resolve_env_str())
+                .await
+            {
+                // review-VI P1 refuse-closed: a caller-ENABLED assignee that
+                // this composition cannot route to the protected wire never
+                // rides the ordinary direct delivery — the refusal surfaces
+                // through the runtime's own failed-dispatch discipline.
+                bcs_service_api::port::OrchestrationAssigneeResolution::UnknownClosed => {
+                    info!(
+                        run_id = %p.run_id, node_id = %p.node_id, assignee = %p.assignee_bot_id,
+                        "orchestration: caller-enabled assignee refuses closed (no protected assembly or unreadable config)"
+                    );
+                    Err(ServiceError::DeliveryNotSent {
+                        code: "ORCHESTRATION_REFUSED",
+                        retryable: false,
+                    })
+                }
+                bcs_service_api::port::OrchestrationAssigneeResolution::Protected(policy) => {
+                    // The protected wire rides ONE provider heartbeat: a
+                    // non-Provider target cannot carry the runtime-only
+                    // extensions zone at all — refuse closed, same as the
+                    // runtime's own target-mismatch discipline.
+                    let accepted = match &target {
+                        BotDeliveryTarget::HttpProvider {
+                            provider_id, provider_bot_ref, bcs_to_provider_token, ..
+                        } => {
+                            let wire_text = match &frame {
+                                // The persisted chat.send frame carries the
+                                // task material as MessageContent content
+                                // blocks — never a bare `message.text`
+                                // string. Extract the text blocks so the
+                                // port's non-empty caller_task structural
+                                // check sees the real material.
+                                BcsFrame::Request(request) => request
+                                    .params
+                                    .as_ref()
+                                    .and_then(|params| params.get("message"))
+                                    .and_then(|message| message.get("content"))
+                                    .and_then(Value::as_array)
+                                    .map(|blocks| {
+                                        blocks
+                                            .iter()
+                                            .filter_map(|block| {
+                                                block.get("text").and_then(Value::as_str)
+                                            })
+                                            .collect::<Vec<_>>()
+                                            .join("\n")
+                                    })
+                                    .unwrap_or_default(),
+                                _ => String::new(),
+                            };
+                            port.dispatch_orchestration_node(
+                                &target,
+                                bcs_to_provider_token,
+                                policy,
+                                bcs_service_api::port::OrchestrationNodeDispatch {
+                                    environment: bcs_config::resolve_env_str(),
+                                    group_id: p.group_id.clone(),
+                                    session_id: p.session_id.clone(),
+                                    workflow_run_id: p.run_id.clone(),
+                                    node_id: p.node_id.clone(),
+                                    // The port contract is 1-based (it refuses
+                                    // `node_attempt <= 0`; the pipeline's
+                                    // per-attempt reservations and parent
+                                    // lineage count attempts from 1), while the
+                                    // runtime's node attempts are 0-based —
+                                    // normalize at this single boundary.
+                                    node_attempt: p.attempt + 1,
+                                    node_run_id: p.delivery_request_id.clone(),
+                                    assignee_bot_id: p.assignee_bot_id.clone(),
+                                    provider_id: provider_id.clone(),
+                                    provider_bot_ref: provider_bot_ref.clone(),
+                                    not_after_ms: p.deadline_ms as i64,
+                                    caller_task: wire_text,
+                                    // The persisted node frame's own sender
+                                    // identity — the trusted ordinary facts
+                                    // the envelope's `from` derives from.
+                                    channel_actor_id:
+                                        BCS_STATE_MACHINE_MESSAGE_SENDER.to_string(),
+                                    channel_actor_name:
+                                        BCS_STATE_MACHINE_MESSAGE_SENDER_NAME.to_string(),
+                                    control_revision: 0,
+                                    now_ms: bcs_protocol::now_ms() as i64,
+                                },
+                            )
+                            .await
+                        }
+                        _ => Err(
+                            bcs_service_api::port::OrchestrationDispatchError::InvalidInput,
+                        ),
+                    };
+                    match accepted {
+                        Ok(bcs_service_api::port::CallerDispatchAck::Accepted { .. }) => {
+                            Ok(bcs_service_api::BotDeliveryResult {
+                                target_bot_id: p.assignee_bot_id.clone(),
+                                delivered: true,
+                                error: None,
+                            })
+                        }
+                        Ok(bcs_service_api::port::CallerDispatchAck::Unknown) => Err(
+                            ServiceError::InternalError(
+                                "protected orchestration dispatch outcome unknown".into(),
+                            ),
+                        ),
+                        Ok(bcs_service_api::port::CallerDispatchAck::Rejected { error_code, retryable }) => {
+                            // Spec §6.8/§1842 (review-VII P1): a retryable
+                            // HISTORY_NOT_READY from the protected node wire
+                            // is a pre-acceptance barrier, not a terminal
+                            // rejection. The convergence stays with the
+                            // Workflow's OWN node attempt state — this attempt
+                            // closes as a retryable failure and the existing
+                            // node-retry lifecycle decides the bounded retry
+                            // (never a Managed converger, never an ordinary
+                            // re-delivery; the next attempt re-runs the
+                            // dispatch with the same node identity).
+                            if error_code == "HISTORY_NOT_READY" && retryable {
+                                info!(
+                                    run_id = %p.run_id, node_id = %p.node_id, assignee = %p.assignee_bot_id,
+                                    "orchestration: protected node dispatch hit the history barrier; converging via the node retry lifecycle"
+                                );
+                                // The SAME retry-vs-fail decision the deadline
+                                // path makes (runtime.rs:2050): bounded by the
+                                // node's approved max_attempts, expressed once
+                                // here as the failure action handed to the
+                                // node attempt machinery.
+                                let max_attempts = self
+                                    .runs
+                                    .get_node_run(&run.run_id, &p.node_id)
+                                    .await?
+                                    .map(|node_run| node_run.max_attempts.max(1))
+                                    .unwrap_or(1);
+                                let retry = p.attempt >= 0
+                                    && p.attempt.checked_add(1).is_some_and(|next| next < max_attempts);
+                                let error = "protected node dispatch: history not ready".to_string();
+                                if self.runs.expire_node_dispatch(FailStateMachineNodeAttempt {
+                                    run_id: p.run_id.clone(),
+                                    node_id: p.node_id.clone(),
+                                    attempt: p.attempt,
+                                    error,
+                                    completed_at_ms: bcs_protocol::now_ms(),
+                                    action: if retry { StateMachineFailureAction::Retry } else { StateMachineFailureAction::FailRun },
+                                }).await? {
+                                    Box::pin(self.resume_failed_node(compiled, group, run, &p.node_id, p.attempt)).await?;
+                                }
+                                return Ok(());
+                            }
+                            // The closed wire taxonomy is &'static str — the
+                            // dynamic gateway code travels in the log only.
+                            info!(
+                                run_id = %p.run_id, node_id = %p.node_id, assignee = %p.assignee_bot_id,
+                                error_code = %error_code, retryable,
+                                "orchestration: protected node dispatch rejected"
+                            );
+                            Err(ServiceError::DeliveryNotSent {
+                                code: "ORCHESTRATION_REJECTED",
+                                retryable,
+                            })
+                        }
+                        Err(error) => {
+                            info!(
+                                run_id = %p.run_id, node_id = %p.node_id, assignee = %p.assignee_bot_id,
+                                %error,
+                                "orchestration: protected node dispatch refused closed"
+                            );
+                            Err(ServiceError::DeliveryNotSent {
+                                code: "ORCHESTRATION_REFUSED",
+                                retryable: false,
+                            })
+                        }
+                    }
+                }
+                bcs_service_api::port::OrchestrationAssigneeResolution::Ordinary => {
+                    self.bot_delivery.deliver(BotDeliveryCommand { target, run_id: p.delivery_request_id.clone(), frame,
+                        delivery_kind: BotDeliveryKind::TaskDispatch, provider_transport: bcs_service_api::ProviderTransportPreference::SseFirst, provider_bypass_headers: Vec::new() }).await
+                }
+            }
+        } else {
+            self.bot_delivery.deliver(BotDeliveryCommand { target, run_id: p.delivery_request_id.clone(), frame,
+                delivery_kind: BotDeliveryKind::TaskDispatch, provider_transport: bcs_service_api::ProviderTransportPreference::SseFirst, provider_bypass_headers: Vec::new() }).await
+        };
         let (target_bot, accepted, error) = match &delivered {
             Ok(result) => (Some(result.target_bot_id.clone()), result.delivered, result.error.as_ref().map(|error| error.to_string())),
             Err(error) => (None, false, Some(error.to_string())),

@@ -29,7 +29,7 @@ async fn current_membership_controls_scope_without_retaining_group_history() {
         .with_bot_provider_repo(metadata);
     let provider = admin.register_provider_with_policy(
         "Local".into(), None, ProviderAuthMode::StaticBearer, "alice".into(),
-        None, None, None, None, Some(ProviderCollaborationScope::SameOwner),
+        None, None, None, None, Some(ProviderCollaborationScope::SameOwner), None,
     ).await.unwrap();
     let (local, _) = admin.register_provider_bot_with_bot_uuid(
         &provider.provider.provider_id, &provider.provider_admin_token,
@@ -64,7 +64,7 @@ async fn current_membership_controls_scope_without_retaining_group_history() {
     assert!(registry.collaboration_owner(&rejoined).await.is_err());
     assert!(admin.update_provider_with_policy(
         &provider.provider.provider_id, &provider.provider_admin_token, "alice",
-        None, None, None, None, None, None, None, Some(ProviderCollaborationScope::Standard),
+        None, None, None, None, None, None, None, Some(ProviderCollaborationScope::Standard), None,
     ).await.is_err(), "Provider administration cannot widen the boundary");
 
     let standard = admin.register_provider(
@@ -83,7 +83,7 @@ async fn current_membership_controls_scope_without_retaining_group_history() {
     public.visibility = "public".into(); groups.upsert(public).await.unwrap();
     assert!(matches!(admin.update_provider_with_policy(
         &standard.provider.provider_id, &standard.provider_admin_token, "alice",
-        Some("Rejected".into()), None, None, None, None, None, None, Some(ProviderCollaborationScope::SameOwner),
+        Some("Rejected".into()), None, None, None, None, None, None, Some(ProviderCollaborationScope::SameOwner), None,
     ).await, Err(ServiceError::Conflict(_))));
     assert_eq!(providers.get_provider(&standard.provider.provider_id).await.unwrap().unwrap().name, "Initially standard");
     groups.update_visibility("public", "private").await.unwrap();
@@ -91,7 +91,7 @@ async fn current_membership_controls_scope_without_retaining_group_history() {
     assert_eq!(registry.collaboration_owner(&foreign).await.unwrap(), None);
     admin.update_provider_with_policy(
         &standard.provider.provider_id, &standard.provider_admin_token, "alice",
-        None, None, None, None, None, None, None, Some(ProviderCollaborationScope::SameOwner),
+        None, None, None, None, None, None, None, Some(ProviderCollaborationScope::SameOwner), None,
     ).await.unwrap();
     let gate = providers.policy_gate();
     let lease = gate.read().await;

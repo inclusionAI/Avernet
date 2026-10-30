@@ -15,6 +15,7 @@ bcs-domain      = { workspace = true }
 bcs-group       = { workspace = true }
 bcs-channel-api = { workspace = true }
 bcs-config-api  = { workspace = true }
+bcs-config = { workspace = true }
 bcs-route-security = { workspace = true }
 bcs-service-api = { workspace = true }
 bcs-auth-api    = { workspace = true }
@@ -54,8 +55,10 @@ bcs-test-support = { workspace = true }
 [dev-dependencies]
 bcs-collaboration-draft = { workspace = true }
 bcs-app-collaboration-draft = { workspace = true }
-bcs-db-local = { workspace = true }
+bcs-message-flow = { workspace = true }
+async-trait = { workspace = true }
 bcs-db-api = { workspace = true }
+bcs-db-local = { workspace = true }
 bcs-collaboration-runtime = { workspace = true }
 bcs-collaboration-store = { workspace = true }
 bcs-message-store = { workspace = true }

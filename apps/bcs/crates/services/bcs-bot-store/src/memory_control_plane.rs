@@ -16,6 +16,10 @@ use bcs_service_api::{
     BotControlPlaneRecord, BotControlPlaneRepoPort, ServiceError,
     ServiceResult, UserVisibility,
 };
+use bcs_service_api::port::repo::bot_control_plane::{
+    BotCallerConfiguration, CallerConfigRevisionDecision, CallerConfigurationSync,
+    CallerIdentitySnapshot,
+};
 
 use super::MemoryBotRepo;
 use super::{PersistedCapabilities, unix_millis};
@@ -512,5 +516,139 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
             .await
             .insert(bot_id.to_string(), (created_at, now));
         self.get_control_plane(bot_id, env).await
+    }
+
+    // ── Per-Bot caller configuration (spec §10.7.2) ─────────────────────
+    // The memory repository keeps snapshots in a dedicated map keyed by
+    // (bot_id, env) — the in-process mirror of the `$.caller` sub-object
+    // the SQL repository stores inside `bcs_bots.bot_info`. No read cache:
+    // process-local map hits are already cheaper than any cache miss.
+
+    async fn get_caller_configuration(
+        &self,
+        bot_id: &str,
+        env: &str,
+    ) -> ServiceResult<Option<BotCallerConfiguration>> {
+        if !self.caller_target_exists(bot_id, env).await {
+            return Ok(None);
+        }
+        Ok(Some(BotCallerConfiguration {
+            snapshot: self
+                .caller_configurations
+                .read()
+                .await
+                .get(&(bot_id.to_string(), env.to_string()))
+                .cloned(),
+        }))
+    }
+
+    async fn get_caller_configurations(
+        &self,
+        bot_ids: &[String],
+        env: &str,
+    ) -> ServiceResult<Vec<(String, BotCallerConfiguration)>> {
+        // Dedup preserving first occurrence (port contract); process-local
+        // map reads make a single-pass loop the whole "batch".
+        let mut seen = HashSet::new();
+        let mut results = Vec::new();
+        for bot_id in bot_ids {
+            if !seen.insert(bot_id.as_str()) {
+                continue;
+            }
+            if !self.caller_target_exists(bot_id, env).await {
+                continue;
+            }
+            let snapshot = self
+                .caller_configurations
+                .read()
+                .await
+                .get(&(bot_id.clone(), env.to_string()))
+                .cloned();
+            if snapshot.is_some() {
+                results.push((bot_id.clone(), BotCallerConfiguration { snapshot }));
+            }
+        }
+        Ok(results)
+    }
+
+    async fn sync_caller_configuration(
+        &self,
+        bot_id: &str,
+        env: &str,
+        incoming: CallerIdentitySnapshot,
+    ) -> ServiceResult<Option<CallerConfigurationSync>> {
+        self.apply_caller_snapshot(bot_id, env, incoming).await
+    }
+
+    async fn get_provider_caller_configuration(
+        &self,
+        bot_id: &str,
+        env: &str,
+        _provider_id: &str,
+    ) -> ServiceResult<Option<BotCallerConfiguration>> {
+        // Memory repository: canonical provider ownership lives in the SQL
+        // binding store; the in-memory dev path keeps the plain read.
+        self.get_caller_configuration(bot_id, env).await
+    }
+
+    async fn sync_provider_caller_configuration(
+        &self,
+        bot_id: &str,
+        env: &str,
+        _provider_id: &str,
+        incoming: CallerIdentitySnapshot,
+    ) -> ServiceResult<Option<CallerConfigurationSync>> {
+        self.apply_caller_snapshot(bot_id, env, incoming).await
+    }
+}
+
+impl MemoryBotRepo {
+    /// Existence gate for caller-configuration targets: same semantics as
+    /// the SQL repository's non-deleted (bot_uuid, env) row.
+    async fn caller_target_exists(&self, bot_id: &str, env: &str) -> bool {
+        if self.deleted_bot_ids.read().await.contains(bot_id) {
+            return false;
+        }
+        let bots = self.bots.read().await;
+        let Some(bot) = bots.get(bot_id) else {
+            return false;
+        };
+        let record_env = bot.env.clone().unwrap_or_else(resolve_env);
+        record_env == env
+    }
+
+    /// Read-decide-write against the in-process snapshot map using the
+    /// same §10.7.2 revision matrix as the SQL CAS path.
+    async fn apply_caller_snapshot(
+        &self,
+        bot_id: &str,
+        env: &str,
+        incoming: CallerIdentitySnapshot,
+    ) -> ServiceResult<Option<CallerConfigurationSync>> {
+        if !self.caller_target_exists(bot_id, env).await {
+            return Ok(None);
+        }
+        let key = (bot_id.to_string(), env.to_string());
+        let mut configurations = self.caller_configurations.write().await;
+        let current = configurations.get(&key);
+        match incoming.compare_revision(current) {
+            Ok(CallerConfigRevisionDecision::Apply) => {
+                configurations.insert(key, incoming.clone());
+                Ok(Some(CallerConfigurationSync::Applied { snapshot: incoming }))
+            }
+            Ok(CallerConfigRevisionDecision::Unchanged) => Ok(Some(
+                CallerConfigurationSync::Unchanged {
+                    snapshot: current.expect("unchanged requires a stored snapshot").clone(),
+                },
+            )),
+            Ok(CallerConfigRevisionDecision::Stale) => Ok(Some(
+                CallerConfigurationSync::Stale {
+                    snapshot: current.expect("stale requires a stored snapshot").clone(),
+                },
+            )),
+            Err(conflict) => Ok(Some(CallerConfigurationSync::Conflict {
+                source_revision: conflict.source_revision,
+            })),
+        }
     }
 }

@@ -99,18 +99,23 @@ def publication_repo(monkeypatch):
 
 
 @pytest.fixture
-def client(bot_service, desktop_service, publication_repo):
+def access_service():
+    access = MagicMock()
+    access.get_operable_permission_levels.side_effect = lambda **kwargs: {
+        int(bot["id"]): PermissionLevel.OWNER for bot in kwargs["bots"]
+    }
+    return access
+
+
+@pytest.fixture
+def client(bot_service, desktop_service, publication_repo, access_service):
     class _M(Module):
         def configure(self, binder):
             space = NoopBusinessSpaceContext()
-            access = MagicMock()
-            access.get_operable_permission_levels.side_effect = lambda **kwargs: {
-                int(bot["id"]): PermissionLevel.OWNER for bot in kwargs["bots"]
-            }
             inventory = BotInventoryService(
                 bot_service=bot_service,
                 desktop_service=desktop_service,
-                access_service=access,
+                access_service=access_service,
                 business_space=space,
                 lifecycle_view=BotLifecycleView(ServiceLifecycleView(publication_repo)),
                 edit_lock_view=MagicMock(states_for_bots=MagicMock(return_value={})),
@@ -166,6 +171,55 @@ def test_list_inventory_carries_template_snapshot_verbatim(client):
     # Desktop rows carry no template identity.
     assert by_id["l1"]["template_type"] is None
     assert by_id["l1"]["template_config"] is None
+
+
+@pytest.mark.parametrize("engine", ["claude_code", "openclaw", "hermes", "deepseek_harness"])
+@pytest.mark.parametrize(
+    "status,display_state,actions",
+    [
+        ("RECYCLED", "dormant", ["view", "activate", "delete"]),
+        ("RECYCLING", "pending", ["view"]),
+        ("REACTIVATING", "pending", ["view"]),
+    ],
+)
+def test_inventory_recycled_personal_bot_activation(
+    client, bot_service, engine, status, display_state, actions,
+):
+    bot_service.list_bots_by_conditions.return_value = {
+        "total": 1,
+        "items": [{**CLOUD, "active_engine": engine, "status": status,
+                   "binding_id": None, "ext": {}}],
+    }
+
+    data = _ok(client.get("/openapi/v1/bots/all", params={"deploy_mode": "cloud"}))
+
+    item, = data["items"]
+    assert item["status"] == status
+    assert item["publish"] is None
+    assert item["display_state"] == display_state
+    assert item["actions"] == actions
+    assert {"chat", "edit", "restart", "engine_restart"}.isdisjoint(item["actions"])
+
+
+@pytest.mark.parametrize("level", [PermissionLevel.ADMIN, PermissionLevel.MEMBER])
+@pytest.mark.parametrize("explicit", [False, True])
+def test_inventory_recycled_bot_activation_is_owner_only(
+    client, bot_service, access_service, level, explicit,
+):
+    bot_service.list_bots_by_conditions.return_value = {
+        "total": 1,
+        "items": [{**CLOUD, "active_engine": "claude_code", "status": "RECYCLED",
+                   "owner_id": "other-owner", "binding_id": None}],
+    }
+    access_service.get_operable_permission_levels.side_effect = None
+    access_service.get_operable_permission_levels.return_value = {1: level}
+    access_service.has_explicit_membership.return_value = {1} if explicit else set()
+
+    data = _ok(client.get("/openapi/v1/bots/all", params={"deploy_mode": "cloud"}))
+
+    item, = data["items"]
+    assert item["display_state"] == "dormant"
+    assert item["actions"] == ["view"]
 
 
 def test_inventory_openapi_declares_upgrade_action(client):

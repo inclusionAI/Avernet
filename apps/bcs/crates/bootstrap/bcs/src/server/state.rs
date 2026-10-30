@@ -33,6 +33,13 @@ pub struct BcsServerState {
     pub delivery_admission:
         Arc<dyn bcs_service_api::application::v1::DeliveryAdmissionService>,
 
+    /// SQL speaking-lease store (spec §6.3, P3.3) shared by the flow's
+    /// admission fence and the WS lease command entrance — one store,
+    /// one epoch. `None` keeps lease commands answering an explicit
+    /// error instead of a fabricated lease.
+    pub speaking_leases:
+        Option<Arc<dyn bcs_service_api::port::repo::session_speaking_lease::SpeakingLeaseRepoPort>>,
+
     /// Coordination echo deduplication store shared by bot WebSocket reconnects.
     pub coordination_processed: Arc<Mutex<std::collections::HashMap<String, u64>>>,
 
@@ -335,6 +342,11 @@ impl Default for BcsServerState {
             Some(bot_authority.hook.clone()),
         ));
         frontend_connections.set_delivery_admission(delivery_admission.clone());
+        // Default composition has no SQL lease store wired: lease commands
+        // answer an explicit error (never a fabricated lease).
+        let speaking_leases: Option<
+            Arc<dyn bcs_service_api::port::repo::session_speaking_lease::SpeakingLeaseRepoPort>,
+        > = None;
         let output_admission: Arc<dyn bcs_service_api::OutputAdmissionPort> =
             Arc::new(bcs_ws::web::WorkbenchOutputAdmission::new(
                 frontend_connections.clone(),
@@ -762,6 +774,7 @@ impl Default for BcsServerState {
             frontend_run_channels,
             session_authorization_core,
             delivery_admission,
+            speaking_leases,
             coordination_processed: Arc::new(Mutex::new(std::collections::HashMap::new())),
             leader_election,
             lifecycle,

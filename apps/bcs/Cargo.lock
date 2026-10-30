@@ -286,6 +286,8 @@ dependencies = [
  "bcs-cache-api",
  "bcs-cache-local",
  "bcs-cache-redis",
+ "bcs-caller-identity-api",
+ "bcs-caller-identity-jwt",
  "bcs-channel",
  "bcs-channel-api",
  "bcs-channel-store",
@@ -962,6 +964,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-caller-identity-api"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcs-config-api",
+ "bcs-domain",
+ "inventory",
+ "serde_json",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "bcs-caller-identity-jwt"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcs-caller-identity-api",
+ "bcs-config-api",
+ "bcs-test-support",
+ "hex",
+ "hmac",
+ "inventory",
+ "jsonwebtoken",
+ "serde",
+ "sha2",
+ "thiserror 2.0.20",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "bcs-channel"
 version = "0.1.4-beta.3"
 dependencies = [
@@ -1098,6 +1131,7 @@ dependencies = [
  "bcs-channel-api",
  "bcs-channel-store",
  "bcs-collaboration-store",
+ "bcs-config",
  "bcs-config-api",
  "bcs-db-api",
  "bcs-db-local",
@@ -1238,6 +1272,7 @@ version = "0.1.4-beta.3"
 dependencies = [
  "base64 0.22.1",
  "chrono",
+ "hex",
  "hmac",
  "serde",
  "serde_json",
@@ -1412,8 +1447,10 @@ dependencies = [
  "async-trait",
  "bcs-bot",
  "bcs-bot-store",
+ "bcs-config",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-domain",
  "bcs-event-store",
  "bcs-friend",
  "bcs-group-store",
@@ -1504,6 +1541,7 @@ dependencies = [
  "bcs-group",
  "bcs-group-store",
  "bcs-jwt",
+ "bcs-message-flow",
  "bcs-message-store",
  "bcs-observability",
  "bcs-protocol",
@@ -1734,8 +1772,10 @@ dependencies = [
  "bcs-bot-store",
  "bcs-cache-api",
  "bcs-cache-local",
+ "bcs-caller-identity-api",
  "bcs-channel-api",
  "bcs-chat-run-store",
+ "bcs-config",
  "bcs-config-api",
  "bcs-db-api",
  "bcs-db-local",
@@ -1763,6 +1803,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "thiserror 2.0.20",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -2116,6 +2157,7 @@ dependencies = [
  "tokio",
  "tokio-test",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -2207,6 +2249,7 @@ dependencies = [
  "bcs-bot",
  "bcs-bot-store",
  "bcs-cache-api",
+ "bcs-caller-identity-api",
  "bcs-config",
  "bcs-db-api",
  "bcs-db-local",
@@ -2276,8 +2319,10 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "bcs-app-session",
+ "bcs-auth-api",
  "bcs-bot",
  "bcs-bot-store",
+ "bcs-config",
  "bcs-domain",
  "bcs-friend",
  "bcs-group",
@@ -3792,12 +3837,14 @@ dependencies = [
  "js-sys",
  "p256",
  "p384",
+ "pem",
  "rand 0.8.7",
  "rsa",
  "serde",
  "serde_json",
  "sha2",
  "signature",
+ "simple_asn1",
  "zeroize",
 ]
 
@@ -5459,6 +5506,18 @@ name = "simdutf8"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
+
+[[package]]
+name = "simple_asn1"
+version = "0.6.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d585997b0ac10be3c5ee635f1bab02d512760d14b7c468801ac8a01d9ae5f1d"
+dependencies = [
+ "num-bigint",
+ "num-traits",
+ "thiserror 2.0.20",
+ "time",
+]
 
 [[package]]
 name = "sketches-ddsketch"

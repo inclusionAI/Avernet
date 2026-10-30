@@ -16,6 +16,8 @@ import { Sender } from '@aix-chat/ui';
 import { LogOut, UserPlus } from 'lucide-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { GroupInfo, ParticipantMode } from '../../types';
+import type { SpeakingLease } from '../../utils/speakingLease';
+import SpeakingLeaseControl, { type SpeakingLeaseStatus } from '../SpeakingLeaseControl';
 
 interface ModeConfigItem {
   label: string;
@@ -52,6 +54,15 @@ interface UserCollabTabProps {
   onLeaveCollaboration: () => void;
   onSendMessage: (msg: string, mentions?: string[], senderId?: string) => void;
   onAbort: () => void;
+  speakingLease?: SpeakingLease;
+  speakingLeaseStatus: SpeakingLeaseStatus;
+  /** 服务端 connect 快照下的会话发言权语义；plain 会话不渲染发言权面板 */
+  speakingMode?: 'plain' | 'lease_required';
+  isUpdatingSpeakingLease?: boolean;
+  leaseNowMs?: number;
+  onAcquireSpeakingLease: () => void;
+  onPreemptSpeakingLease: () => void;
+  onReleaseSpeakingLease: (lease: SpeakingLease) => void;
 }
 
 const UserCollabTab: React.FC<UserCollabTabProps> = ({
@@ -76,6 +87,14 @@ const UserCollabTab: React.FC<UserCollabTabProps> = ({
   onLeaveCollaboration,
   onSendMessage,
   onAbort,
+  speakingLease,
+  speakingLeaseStatus,
+  speakingMode,
+  isUpdatingSpeakingLease,
+  leaseNowMs,
+  onAcquireSpeakingLease,
+  onPreemptSpeakingLease,
+  onReleaseSpeakingLease,
 }) => {
   const senderRef = useRef<SenderRef>(null);
   const [isSenderFocused, setIsSenderFocused] = useState(false);
@@ -255,6 +274,21 @@ const UserCollabTab: React.FC<UserCollabTabProps> = ({
           {isSessionLevel ? '退出当前会话' : '退出协作'}
         </button>
       </div>
+      {/* 服务端 connect 快照标记的 Caller 会话才渲染发言权面板；
+          plain 会话不展示，提交校验仍以服务端逐条判定为准。 */}
+      {speakingMode === 'lease_required' && (
+        <SpeakingLeaseControl
+          status={speakingLeaseStatus}
+          lease={speakingLease}
+          nowMs={leaseNowMs}
+          isRequesting={isUpdatingSpeakingLease}
+          onAcquire={onAcquireSpeakingLease}
+          onPreempt={onPreemptSpeakingLease}
+          onRelease={() =>
+            speakingLease && onReleaseSpeakingLease(speakingLease)
+          }
+        />
+      )}
       <div
         ref={senderContainerRef}
         onFocus={handleSenderFocusIn}

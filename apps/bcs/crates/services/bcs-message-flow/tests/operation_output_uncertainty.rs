@@ -50,6 +50,7 @@ async fn admission_error(commit: bool, reject: bool) {
     let run = row.run_id.clone().unwrap();
     assert!(!released.contains(&run), "durable managed Run must survive ACK loss");
     managed.transition(bcs_service_api::DeliveryTransitionCommand {
+            caller_dispatch_commit: None, caller_cancel: None, caller_terminal: None,
         delivery_id: row.delivery_id, expected_state_version: row.state.state_version,
         event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::StartSend,
         now_ms: row.created_at_ms + 1, request_id: None, actor_id: None, reply: None,

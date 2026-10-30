@@ -178,3 +178,18 @@ Group policy and Session callback columns, indexes and values remain unchanged;
 runtime stores no longer read or write those fields. This retirement adds no
 schema migration. Stop old binaries to prevent legacy scanners and callbacks
 from continuing to run. See `apps/bcs/specs/2026-10-27-retire-service-session-policies/spec.md`.
+
+Speaking-lease acquire/preempt/release/current reauthorize the authenticated
+Human through Workbench chat authorization on every command before touching the
+lease store. An owned Bot does not stand in for Human participation. Absent
+participants fail the same sender gate as chat.send. Session-bound credentials
+cannot address another Group; the bound Session supplies authorization context.
+The existing group-keyed lease wire/storage contract is unchanged. Authorization
+adds one group-service read per command (existing group cache applies); scoped
+Session authorization also reads that Session. No new membership cache is added.
+For a non-member, the reused authorization also checks owned Bots: up to the
+Group's Bot participant count registry reads (memory hits normally, database
+fallback on misses), before refusing a non-participating Human sender. A scoped
+Session fallback can read the Session twice. These are existing authorization
+costs now incurred by lease commands; no batching/cache rewrite is included here.
+The focused tests use memory stores and do not establish database load capacity.

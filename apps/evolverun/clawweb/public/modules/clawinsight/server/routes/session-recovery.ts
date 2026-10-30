@@ -1,5 +1,5 @@
 import { AgentToolCallIdempotencyConflictError, AgentToolCallWorkloadConflictError } from "../repositories/repair/agent-tool-call-record.js";
-import { logRepairEvent } from "../services/repair/common/logging.js";
+import { logRepairEvent, repairLogError } from "../services/repair/common/logging.js";
 import { resolveRepairRequestActor } from "../services/repair/common/request-actor.js";
 import { parseAgentExecutionTicket } from "../services/repair/common/agent-execution.js";
 import { AgentToolError } from "../services/repair/common/agent-tools/errors.js";
@@ -120,10 +120,9 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRouterOpti
       : (error as { type?: string })?.type === "entity.too.large" ? new SessionRecoveryError(413, "invalid_session_recovery", "请求过大")
       : (error as { type?: string })?.type === "entity.parse.failed" ? new SessionRecoveryError(422, "invalid_session_recovery", "JSON 格式无效")
       : new SessionRecoveryError(503, "recovery_unavailable", "自愈发送服务暂不可用；发送结果可能未知");
-    if (failure.status >= 500) console.error("[session-recovery] request failed", JSON.stringify({
-      method: req.method, path: redactPersistableText(req.path, 1024),
-      error: redactPersistableText(error instanceof Error ? error.stack ?? error.message : String(error), 4096),
-    }));
+    if (failure.status >= 500) logRepairEvent("session-recovery", "session_recovery_request", "failed", {
+      operation: `${req.method} ${redactPersistableText(req.path, 1024)}`, ...repairLogError(error),
+    });
     res.status(failure.status).json({ error: failure.code, message: failure.message });
   });
   return router;

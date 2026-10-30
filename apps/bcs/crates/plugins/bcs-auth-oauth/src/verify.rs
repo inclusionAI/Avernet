@@ -70,6 +70,12 @@ pub async fn verify_oauth_session(
     principal.user_id = Some(claims.sub.clone());
     principal.user_name = info.user_name.or(info.external_user_name);
     principal.avatar = info.avatar;
+    // The trusted session window actually verified above (unix seconds on the
+    // JWT). The strict caller-identity extraction converts it to the
+    // runtime-only ingress expiry; without it a display-only principal never
+    // becomes caller material. Converted seconds -> milliseconds here, the
+    // only direction the boundary allows.
+    principal.human_expires_at_ms = Some(claims.exp.saturating_mul(1000));
 
     Ok(Some(principal))
 }

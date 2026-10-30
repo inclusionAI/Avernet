@@ -25,6 +25,12 @@ use bcs_service_api::{
 };
 use serde::{Deserialize, Deserializer};
 use serde_json::{Map, Value, json};
+use bcs_protocol::http::provider::{
+    CallerConfigSyncStatusDto, PatchProviderBotCallerConfigRequest, ProviderBotCallerConfigResponse,
+    SyncProviderBotCallerConfigResponse,
+};
+use bcs_service_api::SyncProviderBotCallerConfigurationCommand;
+
 use tracing::{info, warn};
 
 use crate::mapping::capabilities::{to_core_skill, to_wire_skill};
@@ -118,6 +124,7 @@ pub async fn register_provider(
             created_by,
             protocol_version: req.protocol_version,
             coordination: req.coordination.map(coordination_from_wire),
+            caller_capabilities: req.caller_capabilities,
         })
         .await
         .map_err(provider_error)?;
@@ -198,6 +205,7 @@ pub async fn patch_provider(
             organization_management: req
                 .organization_management
                 .map(organization_management_from_wire),
+            caller_capabilities: req.caller_capabilities,
         })
         .await
         .map_err(provider_error)?;
@@ -789,6 +797,127 @@ where
     T::deserialize(deserializer).map(Some)
 }
 
+/// GET `/providers/{provider_id}/bots/{provider_bot_ref}/caller`.
+/// Read-back of the authoritative Bot caller configuration behind Provider
+/// admin auth. `snapshot: null` means "existing, never configured".
+pub async fn get_provider_bot_caller_config(
+    State(state): State<HttpAppState>,
+    Path((provider_id, provider_bot_ref)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Json<ProviderBotCallerConfigResponse>, ProviderRouteError> {
+    let provider_admin_token = bearer_token(&headers)?;
+    let bot_uuid = state
+        .services
+        .provider_management
+        .resolve_provider_bot_uuid_for_caller_config(&provider_id, &provider_bot_ref, &provider_admin_token)
+        .await
+        .map_err(provider_error)?;
+    let config = state
+        .services
+        .provider_management
+        .get_provider_bot_caller_configuration(
+            &provider_id,
+            &bot_uuid,
+            &bcs_config::resolve_env_str(),
+            &provider_admin_token,
+        )
+        .await
+        .map_err(provider_error)?;
+    info!(
+        provider_id,
+        provider_bot_ref,
+        configured = config.snapshot.is_some(),
+        "Provider Bot caller configuration read completed"
+    );
+    Ok(Json(ProviderBotCallerConfigResponse {
+        snapshot: config.snapshot.map(caller_snapshot_to_dto),
+    }))
+}
+
+/// PATCH `/providers/{provider_id}/bots/{provider_bot_ref}/caller`.
+/// Full-snapshot sync behind Provider admin auth. The response confirms the
+/// storage linearization only — never readiness or execution authorization.
+pub async fn patch_provider_bot_caller_config(
+    State(state): State<HttpAppState>,
+    Path((provider_id, provider_bot_ref)): Path<(String, String)>,
+    headers: HeaderMap,
+    body: Result<Json<PatchProviderBotCallerConfigRequest>, JsonRejection>,
+) -> Result<Json<SyncProviderBotCallerConfigResponse>, ProviderRouteError> {
+    let provider_admin_token = bearer_token(&headers)?;
+    let Json(body) = body.map_err(|_| {
+        warn!(
+            request_id = %bcs_observability::CurrentRequestId,
+            provider_id,
+            failure = "invalid_json_body",
+            "Provider Bot caller configuration patch rejected"
+        );
+        ProviderRouteError::bad_request("request body is invalid")
+    })?;
+    let bot_uuid = state
+        .services
+        .provider_management
+        .resolve_provider_bot_uuid_for_caller_config(&provider_id, &provider_bot_ref, &provider_admin_token)
+        .await
+        .map_err(provider_error)?;
+    let command = SyncProviderBotCallerConfigurationCommand::new(
+        provider_id.clone(),
+        bot_uuid,
+        bcs_config::resolve_env_str(),
+        bcs_domain::caller_identity::CallerIdentitySnapshot {
+            source_revision: body.snapshot.source_revision,
+            caller_identity: bcs_domain::caller_identity::CallerIdentityConfig {
+                enabled: body.snapshot.caller_identity.enabled,
+                minimum_isolation: bcs_domain::caller_identity::CallerMinimumIsolation::CallerContainer,
+            },
+        },
+    );
+    let (snapshot, sync_status) = match state
+        .services
+        .provider_management
+        .sync_provider_bot_caller_configuration(command, &provider_admin_token)
+        .await
+    {
+        Ok(bcs_service_api::port::repo::CallerConfigurationSync::Applied { snapshot }) => {
+            (Some(snapshot), CallerConfigSyncStatusDto::Applied)
+        }
+        Ok(bcs_service_api::port::repo::CallerConfigurationSync::Unchanged { snapshot }) => {
+            (Some(snapshot), CallerConfigSyncStatusDto::Unchanged)
+        }
+        Ok(bcs_service_api::port::repo::CallerConfigurationSync::Stale { snapshot }) => {
+            (Some(snapshot), CallerConfigSyncStatusDto::Stale)
+        }
+        Ok(bcs_service_api::port::repo::CallerConfigurationSync::Conflict { .. }) => {
+            return Err(ProviderRouteError {
+                status: StatusCode::CONFLICT,
+                message: "caller_configuration_revision_conflict".to_string(),
+            });
+        }
+        Err(error) => return Err(provider_error(error)),
+    };
+    info!(
+        provider_id,
+        provider_bot_ref,
+        sync_status = ?sync_status,
+        "Provider Bot caller configuration sync completed"
+    );
+    Ok(Json(SyncProviderBotCallerConfigResponse {
+        snapshot: snapshot.map(caller_snapshot_to_dto),
+        sync_status,
+    }))
+}
+
+fn caller_snapshot_to_dto(
+    snapshot: bcs_domain::caller_identity::CallerIdentitySnapshot,
+) -> bcs_protocol::http::provider::CallerIdentitySnapshotDto {
+    bcs_protocol::http::provider::CallerIdentitySnapshotDto {
+        source_revision: snapshot.source_revision,
+        caller_identity: bcs_protocol::http::provider::CallerIdentityConfigDto {
+            enabled: snapshot.caller_identity.enabled,
+            minimum_isolation: bcs_protocol::http::provider::CallerMinimumIsolationDto::CallerContainer,
+        },
+    }
+}
+
 fn bearer_token(headers: &HeaderMap) -> Result<String, ProviderRouteError> {
     bearer_token_with_message(headers, "valid provider admin token is required")
 }
@@ -887,6 +1016,17 @@ fn provider_to_response(provider: ProviderRecord) -> Result<ProviderInfoResponse
                 .map(organization_management_to_wire)
         })
         .transpose()?;
+    // Caller-capability readback (§10.7.3): an undeclared key stays absent
+    // from the response; a stored declaration that fails the strict shape
+    // surfaces as an error instead of a misleading partial readback.
+    let caller_capabilities = match config.get("caller_capabilities") {
+        None | Some(Value::Null) => None,
+        Some(value) => Some(
+            serde_json::from_value::<bcs_domain::caller_identity::ProviderCallerCapabilities>(
+                value.clone(),
+            )?,
+        ),
+    };
 
     let scope = bcs_service_api::ProviderCollaborationScope::from_config(&provider.config)?;
     Ok(ProviderInfoResponse {
@@ -901,6 +1041,7 @@ fn provider_to_response(provider: ProviderRecord) -> Result<ProviderInfoResponse
             .filter(|version| !version.is_empty()).unwrap_or("1.0").to_string(),
         coordination,
         organization_management,
+        caller_capabilities,
         disabled: provider.disabled,
         created_at: provider.created_at,
         updated_at: provider.updated_at,

@@ -20,6 +20,71 @@ describe('readPackScriptSnapshot', () => {
   it('handles missing refs and rejects when both are absent', async () => { await expect(readPackScriptSnapshot(repo, 'flow', 'pack')).rejects.toThrow(/not.found/i); const sha = git('rev-parse', 'HEAD'); ref('saved', sha); expect((await readPackScriptSnapshot(repo, 'flow', 'pack')).baseRef).toBe('origin/saved/flow'); });
   it('chooses descendants in either direction and rejects divergence', async () => { const first = git('rev-parse', 'HEAD'); put('pack/scripts/a.py', 'new'); const second = commit(); ref('wf', first); ref('saved', second); expect((await readPackScriptSnapshot(repo, 'flow', 'pack')).baseCommit).toBe(second); ref('wf', second); ref('saved', first); expect((await readPackScriptSnapshot(repo, 'flow', 'pack')).baseRef).toBe('origin/wf/flow'); git('checkout', '-q', '--detach', first); put('pack/scripts/a.py', 'other'); const third = commit(); ref('saved', third); await expect(readPackScriptSnapshot(repo, 'flow', 'pack')).rejects.toThrow(/conflict/i); });
   it('supports packs layout and rejects duplicate manifests', async () => { git('mv', 'pack', 'tmp-pack'); mkdirSync(path.join(repo, 'packs')); git('mv', 'tmp-pack', 'packs/pack'); ref('wf', commit()); expect((await readPackScriptSnapshot(repo, 'flow', 'pack')).files[0].path).toBe('scripts/a.py'); put('pack/workflow.pack.yaml', 'duplicate'); ref('wf', commit()); await expect(readPackScriptSnapshot(repo, 'flow', 'pack')).rejects.toThrow(/conflict/i); });
+  it('reads a root pack from the committed ref, not the working tree', async () => {
+    git('mv', 'pack/workflow.pack.yaml', 'workflow.pack.yaml');
+    git('mv', 'pack/workflows', 'workflows');
+    git('mv', 'pack/scripts', 'scripts');
+    commit(); git('update-index', '--chmod=+x', 'scripts/sub/empty.sh');
+    git('commit', '-qm', 'executable'); const sha = git('rev-parse', 'HEAD'); ref('wf', sha);
+    put('scripts/a.py', 'uncommitted');
+    expect(await readPackScriptSnapshot(repo, 'flow', 'pack')).toEqual({
+      workflowId: 'flow', packId: 'pack', baseCommit: sha, baseRef: 'origin/wf/flow',
+      files: [{ path: 'scripts/a.py', content: 'print(1)\r\n', mode: '100644' }, { path: 'scripts/sub/empty.sh', content: '', mode: '100755' }],
+    });
+  });
+  it.each(['README.md', 'workflow.pack.yaml', 'packs'])('reads a root Pack whose id %s is also a root file', async packId => {
+    git('mv', 'pack/workflow.pack.yaml', 'workflow.pack.yaml');
+    git('mv', 'pack/workflows', 'workflows'); git('mv', 'pack/scripts', 'scripts');
+    put('workflow.pack.yaml', `id: ${packId}\nworkflows: [flow]\n`);
+    if (packId !== 'workflow.pack.yaml') put(packId, 'ordinary file\n');
+    ref('wf', commit());
+    const result = await readPackScriptSnapshot(repo, 'flow', packId);
+    expect(result.packId).toBe(packId);
+    expect(result.files.map(file => file.path)).toEqual(['scripts/a.py', 'scripts/sub/empty.sh']);
+  });
+  it('reads a root Pack when packs/<packId> is an ordinary file', async () => {
+    git('mv', 'pack/workflow.pack.yaml', 'workflow.pack.yaml');
+    git('mv', 'pack/workflows', 'workflows'); git('mv', 'pack/scripts', 'scripts');
+    put('packs/pack', 'unrelated file\n'); ref('wf', commit());
+    expect((await readPackScriptSnapshot(repo, 'flow', 'pack')).files).toHaveLength(2);
+  });
+  it('rejects root manifest conflicts with either nested layout, even if the duplicate is invalid', async () => {
+    put('workflow.pack.yaml', 'not a valid manifest'); ref('wf', commit());
+    await expect(readPackScriptSnapshot(repo, 'flow', 'pack')).rejects.toThrow(/manifest conflict/i);
+    git('mv', 'pack', 'tmp-pack'); mkdirSync(path.join(repo, 'packs')); git('mv', 'tmp-pack', 'packs/pack');
+    ref('wf', commit());
+    await expect(readPackScriptSnapshot(repo, 'flow', 'pack')).rejects.toThrow(/manifest conflict/i);
+  });
+  it('enforces manifest and workflow identity for root packs', async () => {
+    git('mv', 'pack/workflow.pack.yaml', 'workflow.pack.yaml');
+    git('mv', 'pack/workflows', 'workflows'); git('mv', 'pack/scripts', 'scripts');
+    for (const manifest of [
+      'id: other\nworkflows: [flow]\n',
+      'id: pack\nworkflows: [other]\n',
+      'id: pack\nworkflows: [flow, other]\n',
+      'id: pack\nworkflows:\n  - id: flow\n    file: ../flow.yaml\n',
+    ]) {
+      put('workflow.pack.yaml', manifest); ref('wf', commit());
+      await expect(readPackScriptSnapshot(repo, 'flow', 'pack')).rejects.toThrow(/identity|workflow|shared|path/i);
+    }
+    put('workflow.pack.yaml', 'id: pack\nworkflows: [flow]\n');
+    put('workflows/flow.yaml', 'id: other\n'); ref('wf', commit());
+    await expect(readPackScriptSnapshot(repo, 'flow', 'pack')).rejects.toThrow(/workflow identity/i);
+    put('workflows/flow.yaml', 'id: flow\n'); ref('wf', commit());
+    expect((await readPackScriptSnapshot(repo, 'flow', 'pack')).files).toHaveLength(2);
+  });
+  it('rejects unsafe root pack entries and allows a pack without scripts', async () => {
+    git('mv', 'pack/workflow.pack.yaml', 'workflow.pack.yaml');
+    git('mv', 'pack/workflows', 'workflows'); git('mv', 'pack/scripts', 'scripts');
+    rmSync(path.join(repo, 'workflow.pack.yaml')); symlinkSync('/etc/passwd', path.join(repo, 'workflow.pack.yaml'));
+    ref('wf', commit()); await expect(readPackScriptSnapshot(repo, 'flow', 'pack')).rejects.toThrow(/manifest mode/i);
+    rmSync(path.join(repo, 'workflow.pack.yaml')); put('workflow.pack.yaml', 'id: pack\nworkflows: [flow]\n');
+    rmSync(path.join(repo, 'workflows/flow.yaml')); symlinkSync('/etc/passwd', path.join(repo, 'workflows/flow.yaml'));
+    ref('wf', commit()); await expect(readPackScriptSnapshot(repo, 'flow', 'pack')).rejects.toThrow(/workflow.*mode/i);
+    rmSync(path.join(repo, 'workflows/flow.yaml')); put('workflows/flow.yaml', 'id: flow\n');
+    rmSync(path.join(repo, 'scripts'), { recursive: true }); ref('wf', commit());
+    expect((await readPackScriptSnapshot(repo, 'flow', 'pack')).files).toEqual([]);
+  });
   it('rejects symlinks, unsupported files, invalid UTF-8 and binary content', async () => { symlinkSync('/etc/passwd', path.join(repo, 'pack/scripts/link.py')); ref('wf', commit()); await expect(readPackScriptSnapshot(repo, 'flow', 'pack')).rejects.toThrow(/(?:symlink|file|mode)/i); rmSync(path.join(repo, 'pack/scripts/link.py')); put('pack/scripts/invalid.py', Buffer.from([0xff])); ref('wf', commit()); await expect(readPackScriptSnapshot(repo, 'flow', 'pack')).rejects.toThrow(/utf|binary/i); put('pack/scripts/invalid.py', Buffer.from([0, 1])); ref('wf', commit()); await expect(readPackScriptSnapshot(repo, 'flow', 'pack')).rejects.toThrow(/utf|binary/i); rmSync(path.join(repo, 'pack/scripts/invalid.py')); put('pack/scripts/no.txt', 'hi'); ref('wf', commit()); await expect(readPackScriptSnapshot(repo, 'flow', 'pack')).rejects.toThrow(/extension|unsupported/i); });
   it('rejects gitlinks and oversized scripts', async () => {
     const sha = git('rev-parse', 'HEAD');

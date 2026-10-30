@@ -9,6 +9,8 @@ use serde_json::json;
 fn command(id: &str, name: &str, value: &str) -> WebSendCommand {
     WebSendCommand {
         caller_execution: None,
+        caller_ingress: None,
+        speaking_lease: None,
         caller: CallerContext::Human(HumanActor { actor_id: "human_1".into(), staff_no: "1".into() }),
         group_id: "group-1".into(), session_id: Some("group-1:headers".into()), from_actor_id: "human_1".into(),
         from_name: None, message: "hello".into(), mentions: vec!["bot-driver".into()], attachments: None,
@@ -101,6 +103,9 @@ async fn persists_route_per_send_restores_abort_and_relay_without_model_leakage(
     assert!(!frame.contains("carrier-zone") && !frame.contains("context-zone"));
     assert!(!serde_json::to_string(&view).unwrap().contains("carrier-zone"));
     let started = service.transition(DeliveryTransitionCommand {
+        caller_dispatch_commit: None,
+        caller_cancel: None,
+        caller_terminal: None,
         delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
         event: Event::StartSend, now_ms: chrono::Utc::now().timestamp_millis(), request_id: None, actor_id: None, reply: None,
         transport_context_json: Some(prepared.transport_context_json.clone()), deadline_at_ms: Some(i64::MAX),

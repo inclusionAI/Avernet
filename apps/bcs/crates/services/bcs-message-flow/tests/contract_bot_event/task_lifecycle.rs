@@ -40,6 +40,7 @@ async fn task_bot_final_event_is_forwarded_to_driver_and_task_replied() {
             target_bot_id: "bot-observer".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+                                                  caller_delegation: None,
         })
         .await
         .unwrap();
@@ -118,6 +119,7 @@ async fn duplicate_terminal_task_bot_event_is_ignored_after_reply() {
             target_bot_id: "bot-observer".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+                                                  caller_delegation: None,
         })
         .await
         .unwrap();
@@ -192,6 +194,7 @@ async fn terminal_task_bot_event_from_non_target_bot_is_ignored() {
             target_bot_id: "bot-observer".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+                                                  caller_delegation: None,
         })
         .await
         .unwrap();
@@ -244,6 +247,7 @@ async fn task_run_alias_requires_target_bot_and_dispatched_task() {
             target_bot_id: "bot-observer".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+                                                  caller_delegation: None,
         })
         .await
         .unwrap();
@@ -332,6 +336,7 @@ async fn task_ledger_notifications_are_sent_to_driver_after_dispatch_and_reply()
             target_bot_id: "bot-observer".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work", "bcs_session_id": "group-1:abcdef12"}),
+                                                                                        caller_delegation: None,
         })
         .await
         .unwrap();
@@ -395,6 +400,7 @@ async fn dispatch_transport_error_remains_pending_until_confirmed() {
             target_bot_id: "bot-observer".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+                                                  caller_delegation: None,
         })
         .await
     else {
@@ -441,6 +447,7 @@ async fn non_terminal_bot_event_does_not_mark_replied() {
             target_bot_id: "bot-observer".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+            caller_delegation: None,
         })
         .await
         .unwrap();
@@ -501,6 +508,7 @@ async fn task_dispatch_uses_manager_session_for_worker_context() {
                 "message": "do work",
                 "bcs_session_id": "group-1:abcdef12",
             }),
+              caller_delegation: None,
         })
         .await
         .unwrap();
