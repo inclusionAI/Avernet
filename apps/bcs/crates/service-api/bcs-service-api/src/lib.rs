@@ -108,7 +108,7 @@ pub use application::collaboration_runtime::{
     StateMachineJudgeOutputView, StateMachineNodeRunView, StateMachineNodeSubStatus,
     StateMachineProgressionRecoveryPage, StateMachineProgressionRecoveryFailure,
     StateMachineSessionRecoveryPage, StateMachineSessionRecoveryFailure,
-    StateMachineRunAccessCommand, StateMachineRunView, UpgradeGroupCollaborationDefinitionCommand,
+    StateMachineBotRunResultView, StateMachineRunAccessCommand, StateMachineRunView, UpgradeGroupCollaborationDefinitionCommand,
     ValidateCollaborationDefinitionYamlCommand,
 };
 pub use application::collaboration_template::{

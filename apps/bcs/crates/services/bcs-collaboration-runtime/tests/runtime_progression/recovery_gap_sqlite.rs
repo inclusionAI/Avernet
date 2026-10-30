@@ -67,6 +67,9 @@ async fn missing_facts_preserve_live_creator_then_fence_expired_creator() {
         if expire {
             h.age("snapshot").await;
             let page = h.runtime.recover_state_machine_progression(None, 10).await.unwrap(); assert!(page.failures.is_empty(), "{:?}", page.failures);
+            let summary = h.store.get_terminal_result(&run.run_id).await.unwrap().unwrap();
+            assert_eq!(summary.reason_category, Some(bcs_service_api::port::repo::StateMachineRunReason::StartupFailed));
+            assert!(summary.failed_node_id.is_none());
         }
         h.db.resume.notify_one();
         assert_eq!(creator.await.is_err(), expire);

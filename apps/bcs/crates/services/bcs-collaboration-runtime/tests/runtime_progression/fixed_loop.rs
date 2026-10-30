@@ -792,6 +792,7 @@ async fn timeout_retries_same_bot_iteration_and_fails_human_without_advancing() 
         assert_eq!(first.attempt, if human { 0 } else { 1 });
         assert_eq!(view.run.status, if human { StateMachineRunStatus::Failed } else { StateMachineRunStatus::Running });
         assert_eq!(h.delivery.commands.lock().await.len(), if human { 0 } else { 2 });
+        if human { assert_eq!(view.terminal_result.as_ref().unwrap().reason_category, Some(bcs_service_api::port::repo::StateMachineRunReason::HumanTimeout)); }
         if !human {
             assert_eq!(h.prompt(0).await, h.prompt(1).await);
             let deadline = first.timeout_deadline_ms.unwrap();
@@ -802,7 +803,6 @@ async fn timeout_retries_same_bot_iteration_and_fails_human_without_advancing() 
         assert_eq!(h.store.get_node_run(&run.run_id, &iteration_id(&plan, 2)).await.unwrap().unwrap().status, StateMachineNodeStatus::Pending);
     }
 }
-
 #[tokio::test]
 async fn one_shot_loop_uses_session_bindings_and_does_not_persist_a_group_definition() {
     let mut h = Harness::new(&[]).await;

@@ -220,7 +220,7 @@ impl BcsServer {
         let manager_worker_cutoff_timestamp =
             config.message_history.manager_worker_cutoff_timestamp;
         let session_repo = Arc::new(MemorySessionRepo::new().with_event_store(event_repo.clone()));
-        let message_repo: Arc<dyn MessageRepoPort> =
+        let message_repo =
             Arc::new(MemoryMessageRepo::new().with_event_store(event_repo.clone()).with_session_registry(session_repo.session_registry()));
         let group_session_metrics_snapshot: Arc<dyn GroupSessionMetricsSnapshotPort> =
             session_repo.clone();
@@ -394,6 +394,7 @@ impl BcsServer {
 
         let collaboration_store = Arc::new(
             MemoryCollaborationStore::new()
+                .with_message_store(message_repo.clone())
                 .with_event_store(event_repo.clone())
                 .with_session_repo(session_repo.clone()),
         );

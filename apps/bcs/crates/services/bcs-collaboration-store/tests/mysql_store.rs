@@ -1,3 +1,7 @@
+#[path = "support/disconnect_contract.rs"]
+mod disconnect_contract;
+#[path = "support/terminal_result_contract.rs"]
+mod terminal_result_contract;
 #[path = "support/history_contract.rs"]
 mod history_contract;
 #[path = "support/recovery_gap_contract.rs"]

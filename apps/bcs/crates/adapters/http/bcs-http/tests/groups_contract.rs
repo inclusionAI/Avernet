@@ -215,6 +215,7 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
         }
         Ok(StartStateMachineRunOutcome {
             view: StateMachineRunView {
+                terminal_result: None,
                 run: StateMachineRun {
                     run_id: "run-one-shot".to_string(),
                     root_run_id: Some("run-one-shot".to_string()),
@@ -272,6 +273,7 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
         }
         Ok(RerunStateMachineOutcome {
             view: StateMachineRunView {
+                terminal_result: None,
                 run: StateMachineRun {
                     run_id: "run-2".to_string(),
                     root_run_id: Some(cmd.source_run_id.clone()),

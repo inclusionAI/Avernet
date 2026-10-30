@@ -102,6 +102,7 @@ pub(super) fn finish_memory(inner: &mut StoreInner, command: &FinishStateMachine
     node.timeout_deadline_ms = None;
     if let StateMachineJudgeResult::Failed { action, .. } = &command.result {
         inner.node_failure_actions.insert(key.clone(), *action);
+        inner.failure_reasons.insert((claim.run_id.clone(), claim.node_id.clone(), claim.attempt), bcs_service_api::port::repo::StateMachineRunReason::NodeFailed);
     }
     let lease = inner.judge_leases.get_mut(&key).expect("validated Judge lease");
     lease.owner = None;
@@ -185,7 +186,7 @@ pub(super) fn finish_sql(store: &MySqlCollaborationStore, command: &FinishStateM
     };
     let retry_guard = if action == Some("retry") { " AND attempt >= 0 AND attempt < 2147483647 AND attempt + 1 < max_attempts" } else { "" };
     let (event_type, payload) = audit(&command.result)?;
-    Ok(vec![
+    let mut steps = vec![
         DbTransactionStep::Query(DbStatement::with_params(format!(
             "SELECT run_id, node_id FROM bcs_state_machine_node_runs WHERE env = ? AND run_id = ? AND node_id = ? AND attempt = ? \
              AND status = 'running' AND runtime_phase = 'judging' AND artifact_text IS NOT NULL AND record_status = 'active' \
@@ -204,7 +205,12 @@ pub(super) fn finish_sql(store: &MySqlCollaborationStore, command: &FinishStateM
             "INSERT INTO bcs_collaboration_events (env, state_machine_run_id, node_id, attempt, event_type, payload_json, created_at_ms, record_status) VALUES (?, ?, ?, ?, ?, ?, ?, 'active')",
             vec![DbTransactionParam::value(store.env.as_str()), DbTransactionParam::query_result(0, 0, "run_id"), DbTransactionParam::query_result(0, 0, "node_id"),
                 DbTransactionParam::value(claim.attempt), DbTransactionParam::value(event_type), DbTransactionParam::value(payload.to_string()), DbTransactionParam::value(command.completed_at_ms)])),
-    ])
+    ];
+    if action.is_some() {
+        steps.push(failure_metadata::step(&store.env, &claim.run_id, &claim.node_id, claim.attempt,
+            bcs_service_api::port::repo::StateMachineRunReason::NodeFailed, command.completed_at_ms)?);
+    }
+    Ok(steps)
 }
 
 pub(super) fn accept_history_input(inner: &mut StoreInner, run: &str, id: &str, attempt: i32) {

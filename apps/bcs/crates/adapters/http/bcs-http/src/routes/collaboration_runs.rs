@@ -202,6 +202,19 @@ pub async fn get_state_machine_run(
     }
 }
 
+pub async fn get_state_machine_run_result_for_bot(
+    State(state): State<HttpAppState>, Path(run_id): Path<String>, headers: HeaderMap,
+) -> Response {
+    let bot = match authenticated_bot_from_headers(&state, &headers).await {
+        Ok(bot) => bot, Err(error) => return error.into_response(),
+    };
+    match state.services.collaboration_runtime.get_state_machine_run_result_for_bot(&run_id, &bot).await {
+        Ok(Some(result)) => Json(result).into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, Json(serde_json::json!({"error":"not_found"}))).into_response(),
+        Err(error) => collaboration_error_to_response(error),
+    }
+}
+
 pub async fn rerun_state_machine_run(
     State(state): State<HttpAppState>,
     Path(source_run_id): Path<String>,

@@ -149,3 +149,19 @@ events:
     stream: session
     content_fields: [content]
     data_schema: "#/$defs/MessageCreatedData"
+
+  - event_type: state_machine.run.failed
+    family: state_machine.run.*
+    schema_version: "1.0"
+    subject_type: state_machine.run
+    required_scope: [group_id, session_id, run_id]
+    stream: state_machine_run
+    data_schema: "#/$defs/StateMachineRunAbnormalData"
+
+  - event_type: state_machine.run.aborted
+    family: state_machine.run.*
+    schema_version: "1.0"
+    subject_type: state_machine.run
+    required_scope: [group_id, session_id, run_id]
+    stream: state_machine_run
+    data_schema: "#/$defs/StateMachineRunAbnormalData"

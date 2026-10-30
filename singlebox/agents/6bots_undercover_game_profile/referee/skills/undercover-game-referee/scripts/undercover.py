@@ -20,6 +20,8 @@ token）。把探测、渲染、提交合成一条命令不是为了省事：裁
 from __future__ import annotations
 
 import argparse
+import importlib.util
+from types import SimpleNamespace
 import json
 import os
 import random
@@ -33,7 +35,17 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-STATE_VERSION = 6
+# Load sibling support when this file is also imported directly by contract tests.
+_recovery_spec = importlib.util.spec_from_file_location("undercover_recovery", Path(__file__).with_name("recovery.py"))
+_recovery = importlib.util.module_from_spec(_recovery_spec)
+_recovery_spec.loader.exec_module(_recovery)
+
+
+def recovery():
+    return _recovery.Recovery(SimpleNamespace(**globals()))
+
+
+STATE_VERSION = 7
 
 # 发言提交后没有主持人入口任务；只播报公开开场并释放当前激活。
 SUBMITTED_NEXT_ACTION = "原样播报 announcement 后结束激活；不追加工具调用，不宣称任何玩家已经完成。"
@@ -304,7 +316,14 @@ def save_state(state: dict[str, Any]) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(state, fh, ensure_ascii=False, indent=2)
+            fh.flush()
+            os.fsync(fh.fileno())
         os.replace(tmp, p)
+        directory = os.open(str(p.parent), os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
     except BaseException:
         if os.path.exists(tmp):
             os.unlink(tmp)
@@ -401,6 +420,12 @@ def speech_seats(state: dict[str, Any]) -> list[dict[str, Any]]:
 
 def require_submission(state: dict[str, Any], args: argparse.Namespace, kind: str) -> None:
     stage = "pk" if is_pk(state) else "regular"
+    current = state.get("recovery", {}).get("current")
+    if current and (getattr(args, "round", None) is None or getattr(args, "attempt", None) is None):
+        die("MISSING_SUBMISSION_SCOPE", "节点提交必须保留 --round/--stage/--attempt；不接受无归属的迟到产物。")
+    if current and (current["kind"] != kind or current["scope"] != _recovery.scope(state, kind)
+                    or current["attempt"] != getattr(args, "attempt", None)):
+        die("STALE_SUBMISSION", "提交不属于当前阶段运行，停止；不念稿、不覆盖记录。")
     if getattr(args, "stage", "regular") != stage:
         die("WRONG_STAGE", "提交不属于当前常规/PK 阶段，请使用当前节点指令。")
     attempt = getattr(args, "attempt", None)
@@ -1375,11 +1400,14 @@ def cmd_status(args: argparse.Namespace) -> None:
             compact=True,
         )
         return
+    result_action = recovery().inspect(args.session, args.failed_run) if getattr(args, "failed_run", None) else None
     state = load_state(args.session)
     ping = state["pending_ping"]
     brief = {
         "phase": state["phase"],
         "referee_uuid": state["referee_uuid"],
+        "recovery": _recovery.safe_status(state),
+        "run_result_action": result_action,
         "round": f"{state['round']}/{state['config']['max_rounds']}",
         "alive": [f"{s['seat']}号{s['display']}" for s in alive_seats(state)],
         # 只有「有 Bot 出局、要念遗言」才报出来。平票那种为了叫醒裁判而派的
@@ -1438,7 +1466,7 @@ def prepare_speak_run(session_id: str, retry: bool) -> dict[str, Any]:
         state = load_state(session_id)
         pk = state["phase"] in ("AWAIT_PK_SPEAK_START", "PK_SPEAK_RUNNING")
         if retry:
-            # 重开当前这一轮：上一次提交的运行失败了，而运行失败不会唤醒裁判。
+            # 重开当前阶段；open-* 已核实失败 run 并持久化恢复次数。
             # 轮次不推进、本轮记录不重建，只把同一份 YAML 重新渲染一次。
             require_phase(state, "SPEAK_RUNNING", "PK_SPEAK_RUNNING")
             if current_stage(state)["speeches"]:
@@ -1825,6 +1853,7 @@ def history_block(state: dict[str, Any]) -> str:
 
 
 def cmd_render_ping(args: argparse.Namespace) -> None:
+    result_action = recovery().inspect(args.session, args.failed_run) if getattr(args, "failed_run", None) else None
     state = load_state(args.session)
     ping = state["pending_ping"]
     if not ping:
@@ -1984,64 +2013,11 @@ def cmd_begin(args: argparse.Namespace) -> None:
 
 
 def cmd_open_round(args: argparse.Namespace) -> None:
-    """查槽位、渲染并提交；直接启动玩家，不向当前主持人激活自派入口。"""
-    # 开下一轮的正常入口是遗言回执那次激活；如果裁判在开票节点里就开下一轮，
-    # 和 collect 节点里开投是同一条死锁，见 SELF_LOCK。
-    busy = None if args.retry else self_lock_hint(args.session, "AWAIT_NEXT_ROUND")
-    require_run_slot(args.session, busy)
-    payload = prepare_speak_run(args.session, args.retry)
-    result = submit_run(
-        args.session,
-        payload["yaml_path"],
-        payload["input_path"],
-        payload["panel_params_path"],
-        payload["panel_tab"],
-        payload["bindings"],
-    )
-    emit(
-        {
-            "phase": payload["phase"],
-            "round": payload["round"],
-            "attempt": payload["attempt"],
-            "submitted": True,
-            "announcement": payload["announcement"],
-            "run_id": result.get("run_id") or (result.get("nodes") or [{}])[0].get("run_id"),
-            "next_action": SUBMITTED_NEXT_ACTION,
-        },
-        compact=True,
-    )
+    recovery().open(args, "speak")
 
 
 def cmd_open_vote(args: argparse.Namespace) -> None:
-    """主持人授权开投；玩家预备入口与当前主持人激活分离。
-
-    提交成功后直接结束。副屏展示开投和重开公告，不再给主持人自派开场节点。
-    """
-    # --retry 是卡住诊断在 VOTE_RUNNING 上重开，槽位被占就是「运行还活着」的正常
-    # 诊断结论；非 retry 的这条路上，槽位被占只可能是发言运行没收尾，见 SELF_LOCK。
-    busy = None if args.retry else self_lock_hint(args.session, "AWAIT_VOTE_START")
-    require_run_slot(args.session, busy)
-    payload = prepare_vote_run(args.session, args.retry)
-    result = submit_run(
-        args.session,
-        payload["yaml_path"],
-        payload["input_path"],
-        payload["panel_params_path"],
-        payload["panel_tab"],
-        payload["bindings"],
-    )
-    emit(
-        {
-            "phase": payload["phase"],
-            "round": payload["round"],
-            "attempt": payload["attempt"],
-            "submitted": True,
-            "run_id": result.get("run_id") or (result.get("nodes") or [{}])[0].get("run_id"),
-            "next_action": "立刻结束激活。主持人已提交开投，副屏负责显示开投提示和旧票作废说明；"
-            "本次不再播报、不追加工具调用。等待收齐投票后的独立计票节点。",
-        },
-        compact=True,
-    )
+    recovery().open(args, "vote")
 
 
 def build_public_result(state: dict[str, Any]) -> dict[str, Any]:
@@ -2251,6 +2227,7 @@ def main() -> None:
 
     p = with_session(sub.add_parser("status", help="当前阶段和下一步"))
     p.add_argument("--full", action="store_true", help="连出局名单、渲染次数、终局结果一起给")
+    p.add_argument("--failed-run", help="核验结果对应运行并返回安全恢复动作")
     p.set_defaults(func=cmd_status)
 
     p = with_session(sub.add_parser("render-speak-run", help="渲染本轮发言协作"))
@@ -2279,10 +2256,12 @@ def main() -> None:
 
     p = with_session(sub.add_parser("open-round", help="开一轮发言：查槽位、渲染、提交"))
     p.add_argument("--retry", action="store_true", help="重开当前这一轮的发言运行。轮次不推进。")
+    p.add_argument("--failed-run", help="关联失败 run，脚本查询服务端并幂等核验")
     p.set_defaults(func=cmd_open_round)
 
     p = with_session(sub.add_parser("open-vote", help="开投：查槽位、渲染、提交"))
     p.add_argument("--retry", action="store_true", help="重开当前这一轮的投票运行。之前的票作废。")
+    p.add_argument("--failed-run", help="关联失败 run，脚本查询服务端并幂等核验")
     p.set_defaults(func=cmd_open_vote)
 
     with_session(sub.add_parser("render-ping", help="渲染遗言或预备任务")).set_defaults(

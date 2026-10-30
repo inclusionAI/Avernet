@@ -39,6 +39,7 @@ impl CollaborationRuntimeService for RecordingRuntime {
         let session_id = command.session_id.clone().expect("Session launch pins id");
         Ok(StartStateMachineRunOutcome {
             view: StateMachineRunView {
+                terminal_result: None,
                 run: StateMachineRun {
                     run_id: format!("run-{session_id}"),
                     root_run_id: Some(format!("run-{session_id}")),

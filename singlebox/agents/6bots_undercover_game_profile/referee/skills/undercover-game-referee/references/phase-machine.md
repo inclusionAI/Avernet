@@ -255,42 +255,25 @@ uc open-round --session "$session_id"
    **立刻结束激活，一次都不要重试。**
 3. 和 S1 一样：成功后播报 announcement 并结束。
 
-## SX 卡住诊断
+## SX 自动恢复与最后兜底
 
-人类说"卡住了"就走这一节。运行失败不会唤醒我，所以人类这句话是唯一的入口——开场白里
-必须把"超过 5 分钟没动静回我一句『卡住了』"说清楚，每一轮都算数。先看现在在哪：
+`[State Machine Run Result]` 是独立的 `RUN_RESULT` 唤醒，不是 ECHO 或 WORKER_MSG。
+先执行 `uc status --session "$session_id" --failed-run "<run_id>"`：脚本核对服务端
+run 的会话、创建者、异常终态与本局当前阶段。不要依赖消息文本自行决定重开。
 
-```bash
-uc status --session "$session_id"
-```
+| `run_result_action.action` | 最后一个工具调用 |
+| --- | --- |
+| `retry-speak` | `uc open-round --session "$session_id" --retry --failed-run "<run_id>"` |
+| `retry-vote` | `uc open-vote --session "$session_id" --retry --failed-run "<run_id>"` |
+| `open-vote` | 汇总已落盘，`uc open-vote --session "$session_id" --failed-run "<run_id>"` |
+| `duplicate` / `stale` | 不重开 |
+| `follow-status` | 按 status 的事实状态交接，不重做已完成阶段 |
 
-（`status` 的会话 ID 不能省，见 [commands.md](commands.md#--session-什么时候必须给)。）
+同一会话、轮次、常规/PK、发言/投票阶段最多自动重开两次。重复结果不额外消耗次数；
+第三次失败、用户取消、范围失效或结果不可核验时停止并提示维护者。提交响应超时或丢失
+会保留不确定状态，只有服务端事实能唯一关联时才能确认，不能盲目再提交。
 
-然后按 `phase` 直接尝试重开当前这一轮——`open-*` 自己会先查协作槽位，所以这一条命令同时是诊断和恢复：
-
-```bash
-# phase = SPEAK_RUNNING 或 PK_SPEAK_RUNNING
-uc open-round --session "$session_id" --retry
-# phase = AWAIT_VOTE_START 或 AWAIT_PK_VOTE_START —— 注意这里**不带** --retry：这一轮的投票还没开过
-uc open-vote  --session "$session_id"
-# phase = VOTE_RUNNING 或 PK_VOTE_RUNNING
-uc open-vote  --session "$session_id" --retry
-```
-
-**`phase = AWAIT_VOTE_START` 时返回 `IN_COLLECT_NODE`** → 发言运行还挂在那儿没收尾。
-这一轮的汇总稿人类已经看到了，缺的只是开投。如实说：发言那一轮还没收尾，最多等到派单后
-10 分钟服务端判死，届时我再开投——然后结束激活，**不要重试、不要 `sleep` 着等**。
-判死之后人类再说一句"卡住了"，这条 `open-vote` 就能过。
-
-**`RUN_SLOT_BUSY` / `state_machine_run_active`** → 服务端仍认为运行活跃，不能据此排除队列卡住，而且这一条什么都没改。
-说一句还在等谁，结束激活。
-
-没有开场消息不能证明运行失败；以脚本的协作槽位检查为准，不猜测推进。
-返回 submitted=true 表示本次提交已接收。open-round 成功后播报 announcement；open-vote 提交后按返回提示立即结束激活，开投及重开提示由副屏显示。
-重开时发言 announcement 或投票副屏会说明旧发言/旧票作废；status --full 的 renders 可查看本轮渲染次数。
-
-**`--retry` 不能省。** 不带它的话阶段卫兵会拒绝——`open-vote` 只在 `AWAIT_VOTE_START` 放行，而这时 phase 早就是 `VOTE_RUNNING` 了。带上 `--retry` 时轮次不推进、本轮记录不重建，只是把同一份 YAML 重新渲染并重新提交。
-
-同一轮重开**最多两次**。第三次还是起不来就停下，如实说本局只能作废。
-
-**重开也提交不上，或者状态长时间不变** → 目前没有取消运行的命令。如实说本局只能作废，请新建一个会话重开。**不要假装还能救。**
+“卡住了”用于通知未送达、自动重试耗尽或主持人激活失败的最后兜底：先查 status。
+运行中使用同一个 `open-round --retry` 或 `open-vote --retry` 校验当前失败 run 和次数；
+已落盘发言则按事实开投。运行仍活跃、槽位被占或结果不可核验时停止，不 sleep 轮询。
+重开后旧发言或旧票作废，按脚本的公告与副屏提示说明。
