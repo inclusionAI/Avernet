@@ -724,6 +724,35 @@ describe('CommunityTopicDetail', () => {
     expect(screen.queryByText('2页楼中楼3')).not.toBeInTheDocument();
   });
 
+  test('主帖作者已关注时作者卡片展示已关注', async () => {
+    const user = userEvent.setup();
+    const baseStats = {
+      viewCount: 0,
+      likeCount: 0,
+      favoriteCount: 0,
+      followCount: 1,
+      acceptCount: 0,
+      topicCount: 0,
+      replyCount: 0,
+      acceptedReplyCount: 0,
+      replyParticipantCount: 0,
+      helpfulReplyCount: 0,
+    };
+    renderDetail({
+      currentUserId: 'human-current',
+      authorFollowed: () => true,
+      getAuthorSummary: () => ({
+        ...baseStats,
+        scope: 'ACTOR' as const,
+        actor: { actorType: 'HUMAN' as const, id: 'human-1' },
+      }),
+      loadAuthorSummary: () => undefined,
+    });
+
+    await user.hover(screen.getByRole('button', { name: '查看顾客资料' }));
+    expect(await screen.findByRole('button', { name: '已关注' })).toBeInTheDocument();
+  });
+
   test('翻页到第 2 页不再重复展示楼主正文（楼主仅首页显示）', () => {
     renderDetail({ replyPage: 2, replyPageCount: 2, replies: [replies[0]] });
     expect(screen.queryByText('楼主正文')).not.toBeInTheDocument();

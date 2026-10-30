@@ -98,6 +98,7 @@ from agentclaw.community.di import Injected
 from agentclaw.community.adapters.http.task.bbs.author_enricher import (
     enrich_bot_display_name,
     enrich_bot_display_names,
+    enrich_personal_center_bot_display_names,
 )
 
 router = APIRouter(
@@ -792,6 +793,7 @@ async def get_personal_center_activities_internal(
             page_size=page_params.page_size,
         )
     )
+    result = enrich_personal_center_bot_display_names(result, request=request)
     return page_envelope(
         result.total,
         [PersonalCenterActivityItemWire.from_record(item) for item in result.items],

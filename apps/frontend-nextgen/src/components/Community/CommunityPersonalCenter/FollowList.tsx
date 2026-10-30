@@ -6,7 +6,6 @@ import { CommunityAuthorAvatar } from '../CommunityAuthorAvatar';
 import { TopicRow } from '../CommunityTopicList/TopicRow';
 import { useEffect, useMemo, useState } from 'react';
 import { useFollowedAuthorTopics } from './useFollowedAuthorTopics';
-import { useResolvedBackendBotNames } from './useResolvedBackendBotNames';
 
 export interface FollowListProps {
   items: PersonalCenterActivity[];
@@ -21,47 +20,31 @@ function followKey(item: PersonalCenterActivity): string {
   return `${item.target.targetType}:${item.target.id}`;
 }
 
-function followedFallbackName(item: PersonalCenterActivity): string {
-  return (
-    item.followedContext?.displayName ||
-    item.bodyPreview.trim() ||
-    item.target.id
-  );
-}
-
-function followedAuthor(
-  item: PersonalCenterActivity,
-  botNameById: Record<string, string>,
-): CommunityAuthor {
+function followedAuthor(item: PersonalCenterActivity): CommunityAuthor {
   const isBot = item.target.targetType === 'BOT';
-  const botName = isBot ? botNameById[item.target.id] : '';
-  const displayName =
-    botName ||
-    item.followedContext?.displayName ||
-    item.bodyPreview.trim() ||
-    item.target.id;
   return {
     type: isBot ? 'bot' : 'human',
     id: item.target.id,
-    displayName,
+    displayName:
+      item.followedContext?.displayName ||
+      item.bodyPreview.trim() ||
+      item.target.id,
     avatarUrl: item.followedContext?.avatarUrl,
   };
 }
 
 function FollowIdentity({
   item,
-  botNameById,
   selected,
   onSelect,
   onUnfollow,
 }: {
   item: PersonalCenterActivity;
-  botNameById: Record<string, string>;
   selected: boolean;
   onSelect: (item: PersonalCenterActivity) => void;
   onUnfollow: (item: PersonalCenterActivity) => Promise<void>;
 }) {
-  const author = followedAuthor(item, botNameById);
+  const author = followedAuthor(item);
   return (
     <div
       role="button"
@@ -114,18 +97,6 @@ export function FollowList({
     () => items.filter((item) => item.target.targetType === 'BOT'),
     [items],
   );
-  const botIds = useMemo(
-    () => [
-      ...new Set(
-        botItems
-          .filter((item) => followedFallbackName(item) === item.target.id)
-          .map((item) => item.target.id),
-      ),
-    ],
-    [botItems],
-  );
-  const { names: botNameById, loading: botNamesLoading } =
-    useResolvedBackendBotNames(botIds);
   const selectedItem = useMemo(
     () => items.find((item) => followKey(item) === selectedKey),
     [items, selectedKey],
@@ -169,15 +140,6 @@ export function FollowList({
       </div>
     );
   }
-  if (botNamesLoading) {
-    return (
-      <div className="overflow-hidden rounded-lg border border-border bg-card" aria-label="Bot 名称解析中">
-        {[1, 2, 3].map((item) => (
-          <Skeleton.ListItem key={item} />
-        ))}
-      </div>
-    );
-  }
 
   return (
     <div className="flex h-full min-h-0 gap-4">
@@ -194,7 +156,6 @@ export function FollowList({
                 <FollowIdentity
                   key={followKey(item)}
                   item={item}
-                  botNameById={botNameById}
                   selected={followKey(item) === selectedKey}
                   onSelect={(next) => setSelectedKey(followKey(next))}
                   onUnfollow={onUnfollow}
@@ -213,7 +174,6 @@ export function FollowList({
                 <FollowIdentity
                   key={followKey(item)}
                   item={item}
-                  botNameById={botNameById}
                   selected={followKey(item) === selectedKey}
                   onSelect={(next) => setSelectedKey(followKey(next))}
                   onUnfollow={onUnfollow}
@@ -228,7 +188,7 @@ export function FollowList({
       {selectedItem ? (
         <section className="min-w-0 flex-1" aria-label="关注对象的帖子">
           <h3 className="mb-3 text-sm font-semibold text-foreground">
-            {followedAuthor(selectedItem, botNameById).displayName} 的帖子
+            {followedAuthor(selectedItem).displayName} 的帖子
           </h3>
           {topicsLoading ? (
             <div className="space-y-2">

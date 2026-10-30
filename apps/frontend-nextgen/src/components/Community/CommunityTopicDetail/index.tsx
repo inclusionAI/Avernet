@@ -190,6 +190,7 @@ export function CommunityTopicDetail({
                   loadAuthorSummary={loadSummaryFor}
                   followAuthor={followFor}
                   authorFollowLoading={authorFollowLoading}
+                  authorFollowed={authorFollowed}
                   likePending={likePending}
                   favoritePending={favoritePending}
                   onLike={onLike}
