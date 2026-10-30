@@ -37,7 +37,7 @@ export function BotSubpageShell({
 }: BotSubpageShellProps) {
   return (
     <main className="flex h-full min-h-0 flex-col bg-background">
-      <header className="flex h-16 shrink-0 items-center gap-3 border-b border-border bg-card px-4 sm:px-6">
+      <header className="flex h-16 shrink-0 items-center gap-3 border-b border-divider bg-card px-4 sm:px-6">
         <Button
           variant="ghost"
           size="icon"

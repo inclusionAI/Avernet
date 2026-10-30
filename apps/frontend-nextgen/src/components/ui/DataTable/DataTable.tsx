@@ -75,7 +75,7 @@ export function DataTable<Row>({
                   onClick={onRowClick && clickable ? () => onRowClick(row) : undefined}
                 />
                 {expanded ? (
-                  <tr className="border-b border-border bg-muted/20">
+                  <tr className="border-b border-divider bg-muted/20">
                     <td colSpan={columns.length} className="p-0">
                       {expanded}
                     </td>

@@ -160,7 +160,7 @@ describe('collaboration privacy accessible UI', () => {
     expect(html).toContain('text-xs font-semibold tracking-wide text-muted-foreground');
     expect(html).toContain('mb-3 flex items-center');
     expect(html).not.toContain('border-b border-border pb-2');
-    expect(html).toContain('divide-y divide-border');
+    expect(html).toContain('divide-y divide-divider');
 
     const collaborationPrivacyHelpersSource = readFileSync(
       path.join(process.cwd(), 'src/hooks/collaborationPrivacyHelpers.ts'),

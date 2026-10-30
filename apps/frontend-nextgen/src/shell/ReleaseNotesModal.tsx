@@ -35,7 +35,7 @@ export function ReleaseNotesModal({ open, data, onClose }: ReleaseNotesModalProp
     <Modal open={open} onOpenChange={(v) => !v && onClose()}>
       <ModalContent size="xl" showClose={false} className="flex max-h-[85vh] flex-col gap-0 p-0">
         {/* 标题栏 */}
-        <div className="flex flex-shrink-0 items-center justify-between border-b border-border px-6 py-4">
+        <div className="flex flex-shrink-0 items-center justify-between border-b border-divider px-6 py-4">
           <h2 className="text-base font-medium">版本发布说明</h2>
           <Button variant="ghost" size="sm" leftIcon={<X className="h-4 w-4" />} onClick={onClose}>
             关闭

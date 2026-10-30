@@ -39,7 +39,7 @@ function Th({ className, ...props }: React.ThHTMLAttributes<HTMLTableCellElement
 }
 
 function Td({ className, ...props }: React.TdHTMLAttributes<HTMLTableCellElement>) {
-  return <td className={cn('border-t border-border px-4 py-3 align-top text-xs', className)} {...props} />;
+  return <td className={cn('border-t border-divider px-4 py-3 align-top text-xs', className)} {...props} />;
 }
 
 export function RoutineTaskTab({
@@ -185,7 +185,7 @@ export function RoutineTaskTab({
                     return (
                       <tr
                         key={makeRoutineKey(item.botId, item.id, item.runtimeStage)}
-                        className="border-b border-border text-xs transition-colors hover:bg-muted/50"
+                        className="border-b border-divider text-xs transition-colors hover:bg-muted/50"
                       >
                         <Td className="max-w-[24rem]">
                           <div className="space-y-1">

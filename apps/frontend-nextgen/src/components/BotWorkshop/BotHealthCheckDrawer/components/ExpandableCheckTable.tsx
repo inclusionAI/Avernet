@@ -129,7 +129,7 @@ export function ExpandableCheckTable({ dimension }: ExpandableCheckTableProps) {
                 <col className="w-[18%]" />
               </colgroup>
               <thead>
-                <tr className="border-b border-[var(--color-border)] text-xs font-medium text-[var(--color-muted)]">
+                <tr className="border-b border-divider text-xs font-medium text-[var(--color-muted)]">
                   <th className="px-5 py-4 text-left">维度</th>
                   <th className="px-5 py-4 text-left">检测项目</th>
                   <th className="px-5 py-4 text-left">检测状态</th>
@@ -153,7 +153,7 @@ export function ExpandableCheckTable({ dimension }: ExpandableCheckTableProps) {
 
                   return (
                     <Fragment key={key}>
-                      <tr className="border-b border-[var(--color-border)] align-top text-sm last:border-b-0">
+                      <tr className="border-b border-divider align-top text-sm last:border-b-0">
                         {index === 0 ? (
                           <td
                             rowSpan={rowSpan}

@@ -15,7 +15,7 @@ export interface ManagePanelTabsProps<T extends string> {
 /** PRD 风格的 underline tabs，避免引入 antd。tab 多时横向滚动（不换行不收缩）。 */
 export function ManagePanelTabs<T extends string>({ value, options, onChange }: ManagePanelTabsProps<T>) {
   return (
-    <div className="sticky top-0 z-10 flex overflow-x-auto border-b border-border bg-background px-5 pt-3">
+    <div className="sticky top-0 z-10 flex overflow-x-auto border-b border-divider bg-background px-5 pt-3">
       {options.map((option) => {
         const active = option.value === value;
         return (

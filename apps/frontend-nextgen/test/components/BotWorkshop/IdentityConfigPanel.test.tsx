@@ -138,8 +138,8 @@ test('文件列表与右侧预览/操作区均无卡片外框,以分割线相隔
 
   // 分割线与 header 的 border-b 同色(border)同粗(1px)
   const divider = container.querySelector('.w-px');
-  expect(divider?.className).toContain('bg-border');
-  expect(divider?.className).not.toContain('bg-border/55');
+  expect(divider?.className).toContain('bg-divider');
+  expect(divider?.className).not.toContain('bg-divider/55');
 
   // 右侧预览/操作区不再有外框卡片;分割线右侧 20px 走道对齐设计稿
   const pane = container.querySelector('h3')?.parentElement?.parentElement;

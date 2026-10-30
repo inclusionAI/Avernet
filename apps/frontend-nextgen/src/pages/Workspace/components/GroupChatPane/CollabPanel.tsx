@@ -147,7 +147,7 @@ export function CollabPanel({ panel, activeRuns }: CollabPanelProps) {
   if (isHumanViewer) {
     if (!activeRuns) return null;
     return (
-      <div className="border-t border-border bg-background px-3 pb-1 pt-1.5 sm:px-6" data-testid="collab-panel">
+      <div className="border-t border-divider bg-background px-3 pb-1 pt-1.5 sm:px-6" data-testid="collab-panel">
         <div className="mx-auto w-[calc(100%-64px)] pl-3 pr-1.5">{activeRuns}</div>
       </div>
     );
@@ -156,7 +156,7 @@ export function CollabPanel({ panel, activeRuns }: CollabPanelProps) {
   // human 视角 absent:未加入底卡接管 composer 区（dmore artboard-010 底区，96px≈py-3+72 卡）。
   if (panel.humanAbsentOnly) {
     return (
-      <div className="border-t border-border bg-background px-3 pb-3 pt-3 sm:px-6">
+      <div className="border-t border-divider bg-background px-3 pb-3 pt-3 sm:px-6">
         <JoinBar joining={panel.joining} onJoin={() => setConfirmJoin(true)} humanName={panel.humanName} />
         <JoinConfirmDialog
           open={confirmJoin}
@@ -180,7 +180,7 @@ export function CollabPanel({ panel, activeRuns }: CollabPanelProps) {
   };
 
   return (
-    <div className="border-t border-border bg-background px-3 pb-3 pt-2 sm:px-6" data-testid="collab-panel">
+    <div className="border-t border-divider bg-background px-3 pb-3 pt-2 sm:px-6" data-testid="collab-panel">
       {!panel.identityLocked && (
         <div className="w-56">
           <Segmented

@@ -53,7 +53,7 @@ export function DomainTemplates({
           </thead>
           <tbody>
             {templates.data?.map((t) => (
-              <tr className="border-b border-border" key={t.templateName}>
+              <tr className="border-b border-divider" key={t.templateName}>
                 <td className="p-3">
                   <Checkbox
                     aria-label={`选择模板 ${t.templateName}`}

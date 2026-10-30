@@ -64,7 +64,7 @@ export function OptimizationPanel({ dimension }: OptimizationPanelProps) {
             patch.is_advise ? (
               <AdvicePatchCard key={String(patch.patch_id)} patch={patch} ordinal={index + 1} />
             ) : (
-              <Card key={String(patch.patch_id)} className="rounded-xl border-[var(--color-border)]">
+              <Card key={String(patch.patch_id)} className="rounded-xl border-divider">
                 <CardContent className="space-y-3 p-4">
                   <div className="text-sm font-semibold text-[var(--color-fg)]">
                     {index + 1}. {patch.name}
@@ -101,7 +101,7 @@ export function OptimizationPanel({ dimension }: OptimizationPanelProps) {
       ) : null}
 
       {showHealthyResult ? (
-        <Card className="rounded-xl border-[var(--color-border)]">
+        <Card className="rounded-xl border-divider">
           <CardContent className="py-6 text-center text-sm text-[var(--color-muted)]">
             <span className="text-[var(--color-success)]">未发现需要优化的问题，Bot 状态良好！</span>
           </CardContent>

@@ -31,7 +31,7 @@ function ObservationNode({
   return (
     <div>
       <div className="relative">
-        {level > 0 ? <span className="absolute left-[-16px] top-1/2 h-px w-4 bg-border" /> : null}
+        {level > 0 ? <span className="absolute left-[-16px] top-1/2 h-px w-4 bg-divider" /> : null}
         <Button
           variant="ghost"
           size="sm"
@@ -95,13 +95,13 @@ interface Props {
 
 export function BotChatTimeline({ detail, selection, onSelect }: Props) {
   return (
-    <section className="flex min-h-[560px] min-w-0 flex-col border-b border-border bg-muted lg:border-b-0 lg:border-r">
-      <div className="border-b border-border px-4 py-3">
+    <section className="flex min-h-[560px] min-w-0 flex-col border-b border-divider bg-muted lg:border-b-0 lg:border-r">
+      <div className="border-b border-divider px-4 py-3">
         <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Timeline</div>
         <div className="mt-1 truncate text-xs text-muted-foreground">当前：{detail.name || detail.id}</div>
       </div>
       <div className="app-scrollbar min-h-0 flex-1 overflow-auto p-3">
-        <div className="relative space-y-0 before:absolute before:bottom-3 before:left-[21px] before:top-4 before:w-px before:bg-border">
+        <div className="relative space-y-0 before:absolute before:bottom-3 before:left-[21px] before:top-4 before:w-px before:bg-divider">
           <Button
             variant="ghost"
             size="sm"

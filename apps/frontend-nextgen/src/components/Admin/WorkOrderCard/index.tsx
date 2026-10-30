@@ -78,7 +78,7 @@ export function WorkOrderCard({ workOrder: wo, onApprove, onReject, onView, canA
     <>
       <Card
         className={cn(
-          'flex cursor-pointer items-center gap-5 rounded-none border-x-0 border-t-0 border-border bg-transparent py-4 shadow-none transition-colors last:border-b-0 hover:bg-muted/50',
+          'flex cursor-pointer items-center gap-5 rounded-none border-x-0 border-t-0 border-divider bg-transparent py-4 shadow-none transition-colors last:border-b-0 hover:bg-muted/50',
           !isApproval && wo.isRead && 'opacity-75',
         )}
         onClick={() => onView?.(wo)}
