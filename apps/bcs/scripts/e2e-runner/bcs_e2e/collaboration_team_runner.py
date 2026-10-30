@@ -9,7 +9,7 @@ import shutil
 import time
 import uuid
 
-from .bounded_process import ProcessCaptureError, capture
+from .bounded_process import ProcessCaptureError, capture, stderr_failure_detail
 from .collaboration_team_http import (
     CollaborationTeamHttpError, read_formal_group_page,
 )
@@ -386,10 +386,13 @@ class CollaborationTeamRunner:
                               "--log-level", "error", *arguments],
                              cwd=root, environment=environment,
                              timeout_seconds=self.timeout,
-                             max_output_bytes=self.max_response_bytes)
+                             max_output_bytes=self.max_response_bytes,
+                             collect_stderr=True)
             if result.returncode != 0:
                 raise CollaborationTeamRunnerError(
-                    "collaboration-team product CLI returned nonzero")
+                    "collaboration-team product CLI returned nonzero: "
+                    + (stderr_failure_detail(result, [credential.encode()])
+                       or "<no stderr>"))
             if (credential.encode() in result.stdout
                     or credential.encode() in result.stderr):
                 raise CollaborationTeamRunnerError(

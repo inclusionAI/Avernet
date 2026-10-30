@@ -9,7 +9,7 @@ import shutil
 import time
 import uuid
 
-from .bounded_process import capture, ProcessCaptureError
+from .bounded_process import capture, ProcessCaptureError, stderr_failure_detail
 from .friend_cli_profile import validate_friend_cli_profile
 from .local_cli import require_cli_binary
 from .profile import unique_keys
@@ -163,9 +163,13 @@ class FriendCliRunner:
                 command, cwd=root, environment=environment,
                 timeout_seconds=self.profile["policy"]["timeout_seconds"],
                 max_output_bytes=self.profile["policy"]["max_response_bytes"],
+                collect_stderr=True,
             )
             if result.returncode != 0:
-                raise FriendCliRunnerError("friendship product CLI returned nonzero")
+                raise FriendCliRunnerError(
+                    "friendship product CLI returned nonzero: "
+                    + (stderr_failure_detail(result, [credential.encode()])
+                       or "<no stderr>"))
             raw = result.stdout
             if credential.encode() in raw:
                 raise FriendCliRunnerError("friendship product CLI emitted its credential")

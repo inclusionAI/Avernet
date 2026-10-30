@@ -19,7 +19,12 @@ import shutil
 import time
 import uuid
 
-from .bounded_process import ProcessCaptureError, capture
+from .bounded_process import (
+    ProcessCaptureError,
+    capture,
+    scrub_failure_text,
+    stderr_failure_detail,
+)
 from .local_cli import LocalCliError, require_cli_binary
 from .local_direct_chat_contract import REQUIREMENTS
 from .profile import (
@@ -478,11 +483,17 @@ class DirectChatCliRunner:
             result = capture(
                 command, cwd=root, environment=environment,
                 timeout_seconds=self.profile["policy"]["timeout_seconds"],
-                max_output_bytes=self.profile["policy"]["max_response_bytes"])
+                max_output_bytes=self.profile["policy"]["max_response_bytes"],
+                collect_stderr=True)
             if result.returncode != 0:
-                detail = result.stdout.strip().decode("utf-8", "replace")[:500]
+                detail = scrub_failure_text(
+                    result.stdout.strip().decode("utf-8", "replace"),
+                    secrets)[:500]
+                stderr_tail = (stderr_failure_detail(result, secrets)
+                               or "<no stderr>")
                 raise DirectChatCliRunnerError("direct chat product CLI returned "
-                    "nonzero: " + (detail or "<no output>"))
+                    "nonzero: " + (detail or "<no output>") + " | stderr: "
+                    + stderr_tail)
             raw = result.stdout
             if any(secret in raw for secret in secrets):
                 raise DirectChatCliRunnerError(

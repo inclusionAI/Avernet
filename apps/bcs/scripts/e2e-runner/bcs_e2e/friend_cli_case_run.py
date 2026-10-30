@@ -110,6 +110,7 @@ def dual_friend_cli_case_run(
             "completed_count": execution.completed_count,
             "total_count": execution.total_count,
             "error_type": execution.error_type,
+            "error_detail": execution.error_detail,
         },
         "resource_disposition": FIXTURE_EFFECT,
         "remote_validation": "NOT_RUN",

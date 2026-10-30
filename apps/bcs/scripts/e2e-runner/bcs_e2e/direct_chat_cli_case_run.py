@@ -26,7 +26,7 @@ import time
 from urllib.parse import quote
 
 from .case_adapters import AdapterCall
-from .case_executor import CaseExecution, StepOutcome
+from .case_executor import CaseExecution, StepOutcome, record_error_detail
 from .direct_chat_cli_case_leaf import (
     DIRECT_CHAT_ADAPTER_METHODS,
     DIRECT_CHAT_CLI_EFFECT,
@@ -708,6 +708,7 @@ def execute_direct_chat_case(adapter: object) -> CaseExecution:
     records: dict[str, dict] = {}
     projections: dict[str, dict] = {}
     error_type: str | None = None
+    first_error_detail: str | None = None
     try:
         ping_submit = adapter.submit_ping_run()
         records[DIRECT_CHAT_PING_SUBMIT_OPERATION] = _require_step_evidence(
@@ -739,13 +740,15 @@ def execute_direct_chat_case(adapter: object) -> CaseExecution:
         projections["ping_terminal"] = ping_terminal.data
     except Exception as error:
         error_type = type(error).__name__
+        first_error_detail = record_error_detail(error)
 
     def step(requirement_id: str, method: str, data: object,
              operations: tuple[str, ...]) -> StepOutcome:
         if error_type is not None:
             return StepOutcome(
                 requirement_id=requirement_id, method=method, status="NOT_RUN",
-                data=None, evidence={}, error_type=error_type)
+                data=None, evidence={}, error_type=error_type,
+                error_detail=first_error_detail)
         return StepOutcome(
             requirement_id=requirement_id, method=method, status="PASS",
             data=data,
@@ -755,7 +758,7 @@ def execute_direct_chat_case(adapter: object) -> CaseExecution:
                 "remote_validation": "NOT_RUN",
                 "grants_release_credit": False,
             },
-            error_type=None)
+            error_type=None, error_detail=None)
 
     if error_type is None:
         main_terminal_data = dict(projections["main_terminal"])
@@ -788,6 +791,7 @@ def execute_direct_chat_case(adapter: object) -> CaseExecution:
         total_count=5,
         error_type=error_type,
         ready_to_execute=error_type is None,
+        error_detail=first_error_detail,
     )
     execution.validate()
     return execution
@@ -881,7 +885,8 @@ def dual_direct_chat_case_run(
         "execution": {"status": execution.status,
                       "completed_count": execution.completed_count,
                       "total_count": execution.total_count,
-                      "error_type": execution.error_type},
+                      "error_type": execution.error_type,
+                      "error_detail": execution.error_detail},
         "resource_disposition": _CASES[case_key]["fixture_effect"],
         "remote_validation": "NOT_RUN", "grants_release_credit": False,
         "credential_kind": direct_chat_cli_credential_kind(profile),

@@ -28,7 +28,7 @@ import shutil
 import time
 import uuid
 
-from .bounded_process import ProcessCaptureError, capture
+from .bounded_process import ProcessCaptureError, capture, stderr_failure_detail
 from .local_cli import require_cli_binary
 from .profile import ConfigError, identifier, object_keys, origin, parsed_origin, unique_keys
 from .run_state import write
@@ -510,6 +510,7 @@ class OperatorCliRunner:
                 command, cwd=root, environment=environment,
                 timeout_seconds=self.profile["policy"]["timeout_seconds"],
                 max_output_bytes=self.profile["policy"]["max_response_bytes"],
+                collect_stderr=True,
             )
             raw = result.stdout
             # A station face may echo the submitted credential inside a
@@ -521,7 +522,9 @@ class OperatorCliRunner:
                     raw = raw.replace(secret, b"<redacted-credential>")
             exit_code = result.returncode
             if expect_zero and exit_code != 0:
-                raise OperatorCliRunnerError("operator product CLI returned nonzero")
+                raise OperatorCliRunnerError(
+                    "operator product CLI returned nonzero: "
+                    + (stderr_failure_detail(result, secrets) or "<no stderr>"))
         except ProcessCaptureError as error:
             public = OperatorCliRunnerError("operator product CLI process failed")
             if getattr(error, "child_shutdown_status", None) == "UNCONFIRMED":

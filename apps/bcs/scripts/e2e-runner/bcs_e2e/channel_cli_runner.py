@@ -11,7 +11,7 @@ import shutil
 import time
 import uuid
 
-from .bounded_process import ProcessCaptureError, capture
+from .bounded_process import ProcessCaptureError, capture, stderr_failure_detail
 from .channel_cli_profile import (
     CHANNEL_CLI_BIND_OPERATION,
     CHANNEL_CLI_CONVERSATION_EMPTY_OPERATION,
@@ -309,12 +309,19 @@ class ChannelCliRunner:
                 command, cwd=root, environment=environment,
                 timeout_seconds=self.profile["policy"]["timeout_seconds"],
                 max_output_bytes=self.profile["policy"]["max_response_bytes"],
+                collect_stderr=True,
             )
             raw = result.stdout
             if (credential.encode() in raw
                     or credential.encode() in result.stderr):
                 raise ChannelCliRunnerError(
                     "channel product CLI emitted its credential")
+            if (operation != CHANNEL_CLI_BIND_OPERATION
+                    and result.returncode != 0):
+                raise ChannelCliRunnerError(
+                    "channel product CLI returned nonzero: "
+                    + (stderr_failure_detail(result, [credential.encode()])
+                       or "<no stderr>"))
             if operation == CHANNEL_CLI_BIND_OPERATION:
                 data = self._parse_bind_output(result, secret)
             elif operation == CHANNEL_CLI_GROUP_CREATE_OPERATION:

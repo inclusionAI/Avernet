@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 from pathlib import Path
 import selectors
 import subprocess
@@ -91,3 +92,19 @@ def capture(command: list[str], *, timeout_seconds: float, max_output_bytes: int
             # Adapters project only this finite secondary state, never raw errors.
             original.child_shutdown_status = 'UNCONFIRMED'
             primary_error(original).child_shutdown_status = 'UNCONFIRMED'
+
+
+def scrub_failure_text(text: str, secrets) -> str:
+    """Scrub credential bytes and bearer patterns from bounded diagnostics."""
+    for secret in secrets:
+        if secret:
+            text = text.replace(secret.decode("utf-8", "replace"), "[REDACTED]")
+    return re.sub(r"(?i)bearer\s+[^\s]+", "Bearer [REDACTED]", text)
+
+
+def stderr_failure_detail(result, secrets=(), limit: int = 400) -> str:
+    """Bounded single-line credential-scrubbed stderr tail for nonzero exits."""
+    raw = getattr(result, "stderr", None) or b""
+    text = scrub_failure_text(raw.decode("utf-8", "replace"), secrets)
+    text = " ".join(text.split())
+    return text[-limit:]

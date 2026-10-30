@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from .case_adapters import AdapterCall
-from .case_executor import CaseExecution, StepOutcome
+from .case_executor import CaseExecution, StepOutcome, record_error_detail
 from .channel_cli_profile import (
     CHANNEL_CLI_BIND_OPERATION,
     validate_channel_cli_profile,
@@ -357,13 +357,15 @@ def execute_channel_cli_case(adapter: object) -> CaseExecution:
         raise RunStateError("channel CLI requires its shared adapter")
     steps: list[StepOutcome] = []
     error_type: str | None = None
+    first_error_detail: str | None = None
     completed = 0
     for method_name, requirement_id in zip(
             CHANNEL_CLI_ADAPTER_METHODS, plan["requirement_ids"]):
         if error_type is not None:
             steps.append(StepOutcome(
                 requirement_id=requirement_id, method=method_name,
-                status="NOT_RUN", data=None, evidence={}, error_type=None))
+                status="NOT_RUN", data=None, evidence={}, error_type=None,
+                error_detail=None))
             continue
         try:
             call = getattr(adapter, method_name)()
@@ -381,19 +383,24 @@ def execute_channel_cli_case(adapter: object) -> CaseExecution:
             steps.append(StepOutcome(
                 requirement_id=requirement_id, method=method_name,
                 status="PASS", data=dict(call.data),
-                evidence=dict(call.evidence), error_type=None))
+                evidence=dict(call.evidence), error_type=None,
+                error_detail=None))
             completed += 1
         except Exception as error:
             error_type = type(error).__name__
+            detail = record_error_detail(error)
+            if first_error_detail is None:
+                first_error_detail = detail
             steps.append(StepOutcome(
                 requirement_id=requirement_id, method=method_name,
                 status="NOT_RUN", data=None, evidence={},
-                error_type=error_type))
+                error_type=error_type, error_detail=detail))
     execution = CaseExecution(
         case_id=CHANNEL_CLI_CASE_ID, parent_id=PARENT,
         status="PASS" if error_type is None else "BLOCKED",
         steps=tuple(steps), completed_count=completed,
         total_count=len(CHANNEL_CLI_ADAPTER_METHODS),
-        error_type=error_type, ready_to_execute=error_type is None)
+        error_type=error_type, ready_to_execute=error_type is None,
+        error_detail=first_error_detail)
     execution.validate()
     return execution
