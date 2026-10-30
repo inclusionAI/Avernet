@@ -13,6 +13,7 @@ import asyncio
 import dataclasses
 import json
 import time
+import types
 import uuid
 from contextlib import contextmanager
 
@@ -602,6 +603,69 @@ class TestSubmitSync:
             "message": MessageRepository(db),
             "result": AgentResultRepository(db),
         }
+
+    @pytest.mark.asyncio
+    async def test_submit_sync_rereads_at_expiry_when_run_deleted_in_final_sleep(
+        self, db, monkeypatch,
+    ):
+        """The loop re-reads inside its body, after the sleep.
+
+        A wait that expires during that sleep therefore leaves the pre-sleep
+        ``run`` in hand -- a live-looking object whose row was deleted
+        meanwhile. The sibling test varies the deleter's timing (0.05s) and
+        relies on a second iteration, which made it a load-sensitive failure
+        in CI; this one pins the single-iteration path.
+        """
+        from sqlalchemy import update as _update
+
+        from agentclaw.community.core.agentswarm.service import impl as impl_mod
+
+        config = AgentSwarmConfig(
+            llm=LlmConfig(base_url="stub"),
+            orchestration=AgentSwarmOrchestrationConfig(slice_max_seconds=1.0),
+        )
+        service, _repos = self._service(db, config)
+        req = _req(idempotency_key="sync-vanish-final")
+        run_id = await service.submit_async(req)
+
+        real_sleep = asyncio.sleep
+
+        async def _no_sleep(_seconds):
+            await real_sleep(0)
+
+        clock = {"now": 0.0}
+        # Replace this module's own bindings with stubs: ``impl`` uses only
+        # ``asyncio.sleep`` and ``time.monotonic`` on this path, so the real
+        # modules (shared with the ORM) stay untouched.
+        monkeypatch.setattr(impl_mod, "time",
+                            types.SimpleNamespace(monotonic=lambda: clock["now"]))
+        monkeypatch.setattr(impl_mod, "asyncio",
+                            types.SimpleNamespace(sleep=_no_sleep))
+
+        reads = {"n": 0}
+        real_get = service.get_run
+
+        def _get_run(rid, tenant):
+            reads["n"] += 1
+            # Read 1 precedes the loop; read 2 is the loop body's. After that
+            # one, delete the row and let the clock pass the deadline, so the
+            # loop exits without another read -- exactly the CI shape.
+            if reads["n"] == 2:
+                with db.orm_session() as session:
+                    session.execute(
+                        _update(om.AcAgentSwarmRunModel).where(
+                            om.AcAgentSwarmRunModel.run_id == dm.RunId(run_id),
+                        ).values(is_deleted=True)
+                    )
+                clock["now"] = 10.0
+            return real_get(rid, tenant)
+
+        monkeypatch.setattr(service, "get_run", _get_run)
+
+        with pytest.raises(AgentSwarmSyncTimeoutError):
+            await service.submit_sync(req)
+        # The verdict came from a fresh read at expiry, not the stale object.
+        assert reads["n"] == 3
 
 
 class TestWorkerLifecycle:
