@@ -21,6 +21,7 @@ interface UseCommunityTopicActionsOptions {
   currentUserId: string;
   viewer: ForumActorRef;
   currentAuthorName?: string;
+  currentAuthorAvatarUrl?: string;
   selectedTopic: CommunityTopic | null;
   replyPage: number;
   replyTotal: number;
@@ -47,6 +48,7 @@ export function useCommunityTopicActions({
   currentUserId,
   viewer,
   currentAuthorName,
+  currentAuthorAvatarUrl,
   selectedTopic,
   replyPage,
   replyTotal,
@@ -66,6 +68,7 @@ export function useCommunityTopicActions({
           topicId: selectedTopic.id,
           authorId: currentUserId,
           ...(currentAuthorName ? { authorName: currentAuthorName } : {}),
+          ...(currentAuthorAvatarUrl ? { authorAvatarUrl: currentAuthorAvatarUrl } : {}),
         });
         const nextPage = input.replyToPostId
           ? replyPage
@@ -80,7 +83,15 @@ export function useCommunityTopicActions({
         setReplySaving(false);
       }
     },
-    [currentAuthorName, currentUserId, goToReplyPage, replyPage, replyTotal, selectedTopic],
+    [
+      currentAuthorAvatarUrl,
+      currentAuthorName,
+      currentUserId,
+      goToReplyPage,
+      replyPage,
+      replyTotal,
+      selectedTopic,
+    ],
   );
 
   const getAuthorSummary = useCallback(

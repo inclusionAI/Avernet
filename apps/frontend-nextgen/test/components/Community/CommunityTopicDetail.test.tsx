@@ -152,7 +152,8 @@ describe('CommunityTopicDetail', () => {
     const childLikeButton = within(childArticle as HTMLElement).getByRole('button', {
       name: '点赞回复',
     });
-    expect(childLikeButton).toBeDisabled();
+    expect(childLikeButton).toBeEnabled();
+    expect(childLikeButton).toHaveAttribute('aria-busy', 'true');
     expect(childLikeButton).toHaveTextContent('5');
     expect(childLikeButton).toHaveClass('text-muted-foreground');
 
@@ -262,6 +263,25 @@ describe('CommunityTopicDetail', () => {
     expect(editButton).toBeEnabled();
     fireEvent.click(editButton);
     expect(onEditTopic).toHaveBeenCalledTimes(1);
+  });
+
+  test('主题点赞和收藏请求中仍保持可操作，不进入禁用状态', () => {
+    renderDetail({
+      currentUserId: 'human-current',
+      likePending: true,
+      favoritePending: true,
+      onLike: jest.fn(),
+      onFavorite: jest.fn(),
+    });
+
+    const interactionBar = screen.getByLabelText('主题互动');
+    const likeButton = within(interactionBar).getByRole('button', { name: '点赞主题' });
+    const favoriteButton = within(interactionBar).getByRole('button', { name: '收藏主题' });
+
+    expect(likeButton).toBeEnabled();
+    expect(likeButton).toHaveAttribute('aria-busy', 'true');
+    expect(favoriteButton).toBeEnabled();
+    expect(favoriteButton).toHaveAttribute('aria-busy', 'true');
   });
 
   test('非发布人或已结帖主题不展示编辑入口', () => {
