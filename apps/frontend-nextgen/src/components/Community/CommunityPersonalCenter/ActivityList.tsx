@@ -99,7 +99,7 @@ function groupReplyActivities(items: PersonalCenterActivity[]): PersonalCenterAc
 
 type BotNameById = Record<string, string>;
 
-function missingBotName(displayName: string | undefined, botId: string, actorType: 'HUMAN' | 'BOT'): boolean {
+export function missingBotName(displayName: string | undefined, botId: string, actorType: 'HUMAN' | 'BOT'): boolean {
   if (actorType !== 'BOT') return false;
   const trimmed = displayName?.trim() ?? '';
   return !trimmed || trimmed === botId || trimmed === `${actorLabel('BOT')} · ${botId}`;
