@@ -18,8 +18,12 @@ from agentclaw.community.adapters.http.dependencies import (
 )
 
 from agentclaw.community.adapters.http.skill_center.skills import (
+    _build_upload_error_response,
     _classify_upload_validation_error,
     _is_runtime_upload_error,
+)
+from agentclaw.community.adapters.http.skill_center.skills_common import (
+    _resolve_underlying_manifest_error,
 )
 
 from agentclaw.community.core.skill_center.upload_error_codes import (
@@ -42,7 +46,13 @@ from agentclaw.community.core.skill_center.errors import (
 
 
 
-from agentclaw.community.core.skill_center.skill_metadata import SkillManifestError
+from agentclaw.community.core.skill_center.skill_metadata import (
+    SkillManifestError,
+    SkillManifestErrorCode,
+)
+from agentclaw.community.core.skill_center.skill_package import (
+    SkillPackageInvalidError,
+)
 
 
 from tests.community.api.skill_center._skills_api_fixtures import mock_ctx as mock_ctx, _upload_skill_di_app
@@ -652,3 +662,124 @@ class TestUploadSkillValidation:
                 "SKILL.md frontmatter is invalid: timeout in quoted value"
             )
 
+
+    # ── cause-chain preservation for wrapped manifest errors ──────────────
+    # ``SkillPackageValidator`` and ``LocalSkillUploadService`` wrap a
+    # validator-level ``SkillManifestError`` twice before it reaches the
+    # HTTP adapter.  The classifier must keep the actionable original code and
+    # message instead of collapsing to generic ``invalid_metadata``.
+
+    @staticmethod
+    def _wrap_manifest_error(manifest: SkillManifestError) -> LocalSkillInvalidPackageError:
+        """Reproduce the production packaging chain (claim -> pkg-detail -> service)."""
+        pkg_error = SkillPackageInvalidError("invalid_metadata")
+        pkg_error.__cause__ = manifest
+        service_error = LocalSkillInvalidPackageError("invalid_metadata")
+        service_error.__cause__ = pkg_error
+        return service_error
+
+    def test_resolve_underlying_manifest_error_walks_the_cause_chain(self):
+        manifest = SkillManifestError(
+            SkillManifestErrorCode.MISSING_NAME,
+            "SKILL.md must contain required field: name.",
+            field="name",
+        )
+        # A non-BaseException input returns None without raising.
+        assert _resolve_underlying_manifest_error("not-an-exception") is None
+
+        # The wrapped chain (service -> pkg -> manifest) is unwrapped.
+        assert _resolve_underlying_manifest_error(
+            self._wrap_manifest_error(manifest)
+        ) is manifest
+
+        # Errors without a manifest cause (e.g. invalid_zip / unsafe_file_path)
+        # yield None so callers fall back to the reason-string map untouched.
+        plain_package = SkillPackageInvalidError("unsafe_file_path")
+        plain_service = LocalSkillInvalidPackageError("unsafe_file_path")
+        plain_service.__cause__ = plain_package
+        assert _resolve_underlying_manifest_error(plain_service) is None
+
+    @pytest.mark.parametrize(
+        ("manifest_code", "expected_code"),
+        [
+            (
+                SkillManifestErrorCode.MISSING_NAME,
+                SkillUploadErrorCode.NAME_MISSING,
+            ),
+            (
+                SkillManifestErrorCode.MISSING_DESCRIPTION,
+                SkillUploadErrorCode.DESCRIPTION_MISSING,
+            ),
+            (
+                SkillManifestErrorCode.INVALID_NAME_TYPE,
+                SkillUploadErrorCode.MANIFEST_FIELD_TYPE_INVALID,
+            ),
+            (
+                SkillManifestErrorCode.EMPTY_NAME,
+                SkillUploadErrorCode.NAME_EMPTY,
+            ),
+            (
+                SkillManifestErrorCode.MISSING_FRONTMATTER,
+                SkillUploadErrorCode.MANIFEST_INVALID,
+            ),
+            (
+                SkillManifestErrorCode.INVALID_FRONTMATTER,
+                SkillUploadErrorCode.MANIFEST_INVALID,
+            ),
+        ],
+    )
+    def test_wrapped_manifest_error_keeps_precise_upload_code(
+        self, manifest_code, expected_code
+    ):
+        manifest = SkillManifestError(manifest_code, "manifest error", field="name")
+        error = self._wrap_manifest_error(manifest)
+
+        assert _classify_upload_validation_error(error) == expected_code
+
+    def test_wrapped_manifest_error_uses_underlying_message_in_response(self):
+        manifest = SkillManifestError(
+            SkillManifestErrorCode.MISSING_NAME,
+            "SKILL.md must contain required field: name.",
+            field="name",
+        )
+        error = self._wrap_manifest_error(manifest)
+
+        response = _build_upload_error_response(error)
+
+        assert response.success is False
+        assert response.error_code == SkillUploadErrorCode.NAME_MISSING
+        assert response.message == "SKILL.md must contain required field: name."
+
+    def test_wrapped_invalid_frontmatter_uses_underlying_parse_message(self):
+        manifest = SkillManifestError(
+            SkillManifestErrorCode.INVALID_FRONTMATTER,
+            "SKILL.md frontmatter is invalid: mapping expected but got list",
+        )
+        error = self._wrap_manifest_error(manifest)
+
+        response = _build_upload_error_response(error)
+
+        assert response.success is False
+        assert response.error_code == SkillUploadErrorCode.MANIFEST_INVALID
+        assert (
+            response.message
+            == "SKILL.md frontmatter is invalid: mapping expected but got list"
+        )
+
+    def test_invalid_metadata_without_manifest_cause_keeps_generic_message(self):
+        """Markdown-only SKILL.md yields ``metadata={}`` without a manifest
+        cause; the legacy reason-string path stays generic on purpose so
+        users still receive the documented "must define a valid name and
+        description" hint without a precise field-level pointer."""
+        pkg_error = SkillPackageInvalidError("invalid_metadata")
+        error = LocalSkillInvalidPackageError("invalid_metadata")
+        error.__cause__ = pkg_error
+
+        code = _classify_upload_validation_error(error)
+        response = _build_upload_error_response(error)
+
+        assert code == SkillUploadErrorCode.MANIFEST_INVALID
+        assert response.error_code == SkillUploadErrorCode.MANIFEST_INVALID
+        assert response.message == (
+            "SKILL.md must define a valid name and description"
+        )
