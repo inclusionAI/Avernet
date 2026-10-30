@@ -118,7 +118,7 @@ class TestDefensiveParsing:
             "retention": {"artifact_ttl_days": 30},
             "message_retention_tail": 10,
             "artifact_store_root": "/var/agentswarm",
-            "enabled": "false",
+            "agentswarm_enabled": "false",
         })
         assert cfg.orchestration.max_turns == 3
         assert cfg.orchestration.slice_max_seconds == 12.5
@@ -128,9 +128,9 @@ class TestDefensiveParsing:
         assert cfg.enabled is False
 
     def test_bool_accepts_yaml_truthy_strings(self):
-        assert AgentSwarmConfig.from_block({"enabled": "yes"}).enabled is True
-        assert AgentSwarmConfig.from_block({"enabled": "off"}).enabled is False
-        assert AgentSwarmConfig.from_block({"enabled": None}).enabled is True
+        assert AgentSwarmConfig.from_block({"agentswarm_enabled": "yes"}).enabled is True
+        assert AgentSwarmConfig.from_block({"agentswarm_enabled": "off"}).enabled is False
+        assert AgentSwarmConfig.from_block({"agentswarm_enabled": None}).enabled is True
 
     def test_egress_allows_hosts_tuple_and_drops_noise(self):
         egress = AgentSwarmEgressConfig.from_block(

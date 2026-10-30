@@ -32,8 +32,8 @@
       "base_url": "http://127.0.0.1:9999"
     },
     "agentswarm": {
+      "agentswarm_enabled": true,
       "artifact_store_root": "${AGENTSWARM_ARTIFACT_ROOT:-/tmp/agentswarm/artifacts}",
-      "enabled": true,
       "executor": {
         "bot_chat_timeout_seconds": 1800
       },

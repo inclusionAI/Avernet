@@ -404,6 +404,6 @@ class AgentSwarmConfig:
             message_retention_tail=_as_int(
                 block, "message_retention_tail",
                 cls().message_retention_tail, minimum=0),
-            enabled=_as_bool(block, "enabled", True),
+            enabled=_as_bool(block, "agentswarm_enabled", True),
         )
 
