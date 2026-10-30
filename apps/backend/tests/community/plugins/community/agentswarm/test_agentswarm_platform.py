@@ -684,6 +684,33 @@ class TestDelete:
         assert platform.delete_bot("b1", owner_id="owner-1") is True
         assert seam.discards == [("b1", "owner-1")]
 
+    def test_failed_creation_job_has_nothing_to_discard(self):
+        # An expired/declined authorization ends the creation before the phase
+        # that writes managed files. The adapter addresses the bot id
+        # deterministically from (run, agent, attempt), so teardown asks again
+        # on every slice; purging would list a prefix that cannot exist.
+        seam = _Seam()
+        seam.jobs["b1"] = types.SimpleNamespace(status=TaskStatus.FAILED)
+        platform = _mk(seam=seam, bot_svc=_BotSvc())
+        assert platform.delete_bot("b1", owner_id="owner-1") is True
+        assert seam.discards == []
+
+    def test_timed_out_creation_job_has_nothing_to_discard(self):
+        seam = _Seam()
+        seam.jobs["b1"] = types.SimpleNamespace(status=TaskStatus.TIMED_OUT)
+        platform = _mk(seam=seam, bot_svc=_BotSvc())
+        assert platform.delete_bot("b1", owner_id="owner-1") is True
+        assert seam.discards == []
+
+    def test_succeeded_creation_job_still_discards(self):
+        # A succeeded creation may have written files; the guard must not
+        # treat every terminal state as "nothing to undo".
+        seam = _Seam()
+        seam.jobs["b1"] = types.SimpleNamespace(status=TaskStatus.SUCCEEDED)
+        platform = _mk(seam=seam, bot_svc=_BotSvc())
+        assert platform.delete_bot("b1", owner_id="owner-1") is True
+        assert seam.discards == [("b1", "owner-1")]
+
     def test_created_bot_is_soft_deleted(self):
         repo = _Repo(bot={"status": "ACTIVE"})
         bot_svc = _BotSvc()
