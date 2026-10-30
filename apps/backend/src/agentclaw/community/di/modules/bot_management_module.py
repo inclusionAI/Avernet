@@ -135,6 +135,7 @@ from agentclaw.community.core.repository.protocols.bot import (
 from agentclaw.community.core.repository.protocols.bot import TemplateRepository
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.core.desktop_bot.services.desktop_bot_service import DesktopBotService
 from agentclaw.community.core.repository.protocols.identity import (
     CallerIdentityRepositoryProtocol,
 )
@@ -574,6 +575,9 @@ class BotManagementModule(Module):
             ),
             # Lazy (cycle-safe): baas bot 原地重启走 BaaSService.restart_bot。
             baas_service_provider=lambda: injector.get(BaasService),
+            # Lazy (framework-provided): DesktopBotModule raises before any
+            # provider can be derived from the return type.
+            desktop_bot_service_provider=lambda: injector.get(DesktopBotService),
             task_queue_service=task_queue_service,
             common_config_service=common_config_service,
             caller_identity_repo=caller_identity_repo,
