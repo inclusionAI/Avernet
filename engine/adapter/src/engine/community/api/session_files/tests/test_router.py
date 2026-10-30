@@ -134,6 +134,7 @@ def test_list_and_content_are_scoped_to_manifest_session(client):
                 "availability": "ready",
                 "uploaded_at": "2026-08-03T10:20:30Z",
                 "creator_type": None,
+                "creator_name": None,
                 "created_at": "2026-08-03T10:20:30Z",
             }
         ]

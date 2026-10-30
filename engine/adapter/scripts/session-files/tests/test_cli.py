@@ -149,6 +149,7 @@ class CliTests(unittest.TestCase):
                      json.dumps(dict(VIEW, size_bytes=True)).encode(),
                      json.dumps(dict(VIEW, availability="missing")).encode(),
                      json.dumps(dict(VIEW, creator_type="admin")).encode(),
+                     json.dumps(dict(VIEW, creator_name={"SECRET": "value"})).encode(),
                      json.dumps(dict(VIEW, created_at={"SECRET": "value"})).encode()]:
             with self.subTest(body=body[:20]), self.server(body=body) as (_, url):
                 status, data, err = self.invoke("publish", "a", "--session-key", "s", "--engine-url", url)
@@ -158,7 +159,7 @@ class CliTests(unittest.TestCase):
     def test_creation_metadata_is_allowlisted_and_old_engine_stays_compatible(self):
         self.assertEqual(self.cli.view_from_response(json.dumps(VIEW).encode()), VIEW)
         for creator in ["bot", "user", None]:
-            metadata = dict(creator_type=creator, created_at="2026-10-30T00:00:00Z")
+            metadata = dict(creator_type=creator, creator_name="报告助手" if creator == "bot" else "运海", created_at="2026-10-30T00:00:00Z")
             result = self.cli.view_from_response(json.dumps(dict(VIEW, **metadata, secret="SECRET")).encode())
             self.assertEqual(result, dict(VIEW, **metadata))
             self.assertNotIn("SECRET", json.dumps(result))

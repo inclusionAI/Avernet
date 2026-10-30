@@ -442,7 +442,7 @@ async def test_materialize_writes_atomic_file_manifest_and_callback(tmp_path: Pa
         workspace_root_provider=lambda: tmp_path,
     )
 
-    result = await service.materialize(_request(content))
+    result = await service.materialize(_request(content, creator_name="运海"))
 
     expected = (
         tmp_path / ".teamclaw/session-files/scope_abc/session_abc/sr_001/report.txt"
@@ -460,11 +460,13 @@ async def test_materialize_writes_atomic_file_manifest_and_callback(tmp_path: Pa
     assert entry.uploaded_at == datetime(2026, 8, 3, 10, 20, 30, tzinfo=UTC)
     assert entry.creator_type == "user"
     assert entry.created_at == entry.uploaded_at
-    replay = await service.materialize(_request(content, task_version=2, uploaded_at="2026-10-30T00:00:00Z"))
+    assert entry.creator_name == "运海"
+    replay = await service.materialize(_request(content, task_version=2, uploaded_at="2026-10-30T00:00:00Z", creator_name="其他用户"))
     assert replay.ready is True
     updated = service.manifest_store.get("sr_001")
     assert updated.created_at == entry.created_at
     assert updated.creator_type == "user"
+    assert updated.creator_name == "运海"
 
 
 @pytest.mark.asyncio

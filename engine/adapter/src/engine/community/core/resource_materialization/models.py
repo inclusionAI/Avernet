@@ -37,6 +37,7 @@ class MaterializationRequest(BaseModel):
     size_bytes: int | None = Field(default=None, ge=0)
     content_hash: str | None = Field(default=None, min_length=1, max_length=128)
     uploaded_at: datetime | None = None
+    creator_name: str | None = Field(default=None, max_length=255)
 
     def model_post_init(self, __context, /) -> None:
         if self.transfer_api_version == "session_v2":
@@ -115,6 +116,7 @@ class ManifestEntry(BaseModel):
     source_attachment_id: str | None = None
     source_url_hash: str | None = None
     creator_type: Literal["bot", "user"] | None = None
+    creator_name: str | None = None
     created_at: datetime | None = None
 
 

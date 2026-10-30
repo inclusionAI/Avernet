@@ -581,6 +581,7 @@ class ResourceMaterializationService:
                 observed_inode=getattr(observed, "st_ino", None),
                 uploaded_at=request.uploaded_at,
                 creator_type=current.creator_type if current else "user",
+                creator_name=current.creator_name if current else request.creator_name,
                 created_at=(current.created_at or current.uploaded_at) if current else (request.uploaded_at or datetime.now(UTC)),
                 baas_tenant=request.tenant,
                 source_kind="temporary_url"
@@ -603,6 +604,7 @@ class ResourceMaterializationService:
                 self._path_hash(canonical),
                 actual_size,
                 extra={"creator_type": entry.creator_type,
+                       "creator_name_present": entry.creator_name is not None,
                        "created_at": entry.created_at.isoformat() if entry.created_at else None},
             )
             return self._success_from_entry(entry)

@@ -143,6 +143,7 @@ class EngineSessionFilesService:
             or type(item.get("size_bytes")) is not int
             or item["size_bytes"] < 0
             or item.get("creator_type") not in (None, "bot", "user")
+            or (item.get("creator_name") is not None and not isinstance(item["creator_name"], str))
             or (item.get("created_at") is not None and not isinstance(item["created_at"], str))
             for item in files
         ):
@@ -155,6 +156,7 @@ class EngineSessionFilesService:
                 "status": item["availability"],
                 "size_bytes": item["size_bytes"],
                 "creator_type": item.get("creator_type"),
+                "creator_name": item.get("creator_name"),
                 "created_at": item.get("created_at"),
             }
             for item in files

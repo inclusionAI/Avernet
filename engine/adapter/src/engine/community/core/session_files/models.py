@@ -23,6 +23,7 @@ class SessionFileView:
     uploaded_at: str | None
     creator_type: Literal["bot", "user"] | None = None
     created_at: str | None = None
+    creator_name: str | None = None
 
     def as_dict(self) -> dict[str, str | int | None]:
         return {
@@ -32,6 +33,7 @@ class SessionFileView:
             "availability": self.availability,
             "uploaded_at": self.uploaded_at,
             "creator_type": self.creator_type,
+            "creator_name": self.creator_name,
             "created_at": self.created_at,
         }
 

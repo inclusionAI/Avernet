@@ -83,7 +83,9 @@ def view_from_response(raw):
             raise ValueError
         if value.get("created_at") is not None and not isinstance(value["created_at"], str):
             raise ValueError
-        for key in ("creator_type", "created_at"):
+        if value.get("creator_name") is not None and not isinstance(value["creator_name"], str):
+            raise ValueError("invalid_response")
+        for key in ("creator_type", "creator_name", "created_at"):
             if key in value:
                 view[key] = value[key]
         return view

@@ -3,9 +3,16 @@
 `POST /api/session-files?sessionKey=<exact-session-key>` accepts exactly
 `{"workspace_relative_path": "reports/result.txt"}` and returns the existing
 SessionFileView: `resource_id`, `display_name`, `size_bytes`,
-`availability`, `uploaded_at`, `creator_type`, `created_at`. It uses the existing trusted Engine/proxypass
+`availability`, `uploaded_at`, `creator_type`, `creator_name`, `created_at`. It uses the existing trusted Engine/proxypass
 boundary, like list/content/delete; it does not introduce another authentication
 transport. Never expose that trusted listener as a public unauthenticated API.
+
+`creator_name` preserves the initial user nickname or platform Bot name. Missing
+historical names stay null. Bot names come from deployment-owned
+`TEAMCLAW_BOT_NAME`, read through the default runtime identity provider; the
+registration HTTP body and CLI cannot choose them. User names arrive with the
+trusted Backend materialization request. Names are display metadata, not an
+additional authorization mechanism.
 
 Creation metadata is server-owned: Bot registrations use `creator_type=bot`,
 user uploads/attachments use `user`. `created_at` is the first resource creation

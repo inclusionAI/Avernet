@@ -129,7 +129,8 @@ class _PinnedManifestStore(ManifestStore):
 
 
 def register_workspace_file(
-    root: Path, *, session_key: str, workspace_relative_path: str
+    root: Path, *, session_key: str, workspace_relative_path: str,
+    creator_name: str | None = None,
 ) -> ManifestEntry:
     relative = Path(workspace_relative_path)
     # COSEC: only ordinary workspace sources; internal snapshots are never sources.
@@ -195,6 +196,7 @@ def register_workspace_file(
                     observed_inode=observed.st_ino,
                     uploaded_at=registered_at,
                     creator_type=existing.creator_type if existing else "bot",
+                    creator_name=existing.creator_name if existing else creator_name,
                     created_at=(existing.created_at or existing.uploaded_at) if existing else registered_at,
                     source_kind="workspace_live",
                 )

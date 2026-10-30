@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS ac_session_resource (
   tenant VARCHAR(128) NOT NULL,
   bot_uuid VARCHAR(128) NOT NULL,
   display_name VARCHAR(255) NOT NULL,
+  creator_name VARCHAR(255) NULL,
   filename VARCHAR(255) NOT NULL,
   device_path VARCHAR(2048) NOT NULL,
   workspace_relative_path VARCHAR(2048) NOT NULL,

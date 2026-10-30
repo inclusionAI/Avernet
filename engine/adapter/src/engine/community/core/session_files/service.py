@@ -29,6 +29,7 @@ from engine.community.core.session_files.registration import (
     observe_workspace_file, register_workspace_file,
 )
 from engine.community.plugin_api.workspace_root import workspace_root_strict
+from engine.community.plugin_api.runtime_identity import runtime_bot_name
 
 log = logging.getLogger("engine.session_files")
 
@@ -41,9 +42,13 @@ class SessionFileService:
         *,
         workspace_root_provider: Callable[[], Path | None] = workspace_root_strict,
         default_baas_tenant: str | None = None,
+        bot_name: str | None = None,
+        bot_name_provider: Callable[[], str | None] = runtime_bot_name,
     ) -> None:
         self._workspace_root_provider = workspace_root_provider
         self._default_baas_tenant = default_baas_tenant
+        configured_name = bot_name if bot_name is not None else bot_name_provider()
+        self._bot_name = (configured_name.strip() or None) if configured_name is not None else None
 
     def register_file(
         self, *, session_key: str, workspace_relative_path: str
@@ -62,6 +67,7 @@ class SessionFileService:
             entry = register_workspace_file(
                 self._workspace_root(), session_key=session_key,
                 workspace_relative_path=workspace_relative_path,
+                creator_name=self._bot_name,
             )
         except (OSError, RuntimeError, ValueError) as exc:
             code = "registration_failed"
@@ -83,6 +89,7 @@ class SessionFileService:
             session_key, workspace_relative_path, entry.resource_id, entry.size_bytes, elapsed_ms,
             extra={**fields, "status": "ready", "resource_id": entry.resource_id,
                    "creator_type": entry.creator_type,
+                   "creator_name_present": entry.creator_name is not None,
                    "created_at": self._format_uploaded_at(entry.created_at or entry.uploaded_at),
                    "size_bytes": entry.size_bytes, "elapsed_ms": elapsed_ms},
         )
@@ -91,6 +98,7 @@ class SessionFileService:
             size_bytes=entry.size_bytes, availability="ready",
             uploaded_at=self._format_uploaded_at(entry.uploaded_at),
             creator_type=entry.creator_type,
+            creator_name=entry.creator_name,
             created_at=self._format_uploaded_at(entry.created_at or entry.uploaded_at),
         )
 
@@ -117,6 +125,7 @@ class SessionFileService:
                 availability=availability,
                 uploaded_at=self._format_uploaded_at(entry.uploaded_at),
                 creator_type=entry.creator_type,
+                creator_name=entry.creator_name,
                 created_at=self._format_uploaded_at(entry.created_at or entry.uploaded_at),
             ))
         log.info(

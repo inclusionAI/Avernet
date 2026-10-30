@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
+from fastapi import Depends
 from injector import inject
+
+from agentclaw.community.adapters.http.openapi_v1.dependencies import Principal, require_principal
+from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 
 from agentclaw.community.api.engine_session_files import EngineSessionFilesProtocol
 
@@ -17,8 +21,23 @@ from agentclaw.community.api.tc_resource_ready_observer import (
 from agentclaw.community.core.runtime_binding.errors import (
     RuntimeBindingResolutionError,
 )
+from agentclaw.community.core.session_resources.types import safe_creator_name
 from agentclaw.community.core.runtime_binding.models import RuntimeBindingRequest
 from agentclaw.community.core.runtime_binding.service import RuntimeBindingResolutionService
+
+
+async def upload_actor_name(
+    user_id: UserIdDep,
+    principal: Annotated[Principal, Depends(require_principal)],
+) -> str | None:
+    user = getattr(principal, "user", None)
+    # COSEC: a verified principal may supply a name only for this exact actor.
+    if user is not None and user.id == user_id and user.display_name:
+        return safe_creator_name(user.display_name)
+    return None
+
+
+UploadActorNameDep = Annotated[str | None, Depends(upload_actor_name)]
 
 
 class OpenApiSessionFileAdapter:
@@ -47,6 +66,7 @@ class OpenApiSessionFileAdapter:
         stage: str,
         engine_type: str,
         files: list[tuple[str, int | None, str | None]],
+        creator_name: str | None = None,
     ) -> list[Any]:
         """Resolve one binding before creating legacy resource records."""
         try:
@@ -64,6 +84,8 @@ class OpenApiSessionFileAdapter:
         return [
             self._session_resources.create_upload_intent(
                 owner_id=owner_id,
+                actor_user_id=actor_user_id,
+                creator_name=creator_name,
                 bot_id=bot_id,
                 session_key=session_key,
                 scope_type="openapi_session",

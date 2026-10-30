@@ -41,6 +41,7 @@ def test_post_register_returns_view_and_uses_existing_session_scope(client, capl
         "availability",
         "uploaded_at",
         "creator_type",
+        "creator_name",
         "created_at",
     }
     assert view["availability"] == "ready"
@@ -88,6 +89,7 @@ def test_post_register_returns_view_and_uses_existing_session_scope(client, capl
         {},
         {"workspace_relative_path": 123},
         {"workspace_relative_path": "report", "creator_type": "user"},
+        {"workspace_relative_path": "report", "creator_name": "Other Bot"},
         {"workspace_relative_path": "report", "created_at": "2000-01-01T00:00:00Z"},
         {"workspace_relative_path": "report", "token": "test-token"},
         {"workspace_relative_path": None},

@@ -27,6 +27,7 @@ from agentclaw.community.core.session_resources.materialization import (
 from agentclaw.community.core.repository.protocols.platform import SessionResourceRepositoryProtocol
 from agentclaw.community.core.session_resources.service import SessionResourceService
 from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
+from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
 from agentclaw.community.plugin_api.http_client import (
     QUALIFIER_BAAS,
     HttpClient,
@@ -79,6 +80,7 @@ class SessionResourcesModule(Module):
         baas_config: BaasConfig,
         bot_repository: BotRepository,
         bot_friend_repository: BotFriendRepositoryProtocol,
+        staff_dept: StaffDeptPlugin,
     ) -> SessionResourceService:
         return SessionResourceService(
             repository=repository,
@@ -90,6 +92,7 @@ class SessionResourcesModule(Module):
             default_tenant=baas_config.tenant,
             bot_repository=bot_repository,
             bot_friend_repository=bot_friend_repository,
+            staff_dept=staff_dept,
         )
 
     @singleton

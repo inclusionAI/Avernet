@@ -413,7 +413,7 @@ def test_legacy_copies_keep_immutable_content_and_delete_behavior(tmp_path, sour
 async def test_live_edit_after_ready_export_uploads_new_bytes_and_keeps_path(tmp_path):
     path = tmp_path / "report"
     path.write_bytes(b"version one")
-    service = SessionFileService(workspace_root_provider=lambda: tmp_path, default_baas_tenant="tenant")
+    service = SessionFileService(workspace_root_provider=lambda: tmp_path, default_baas_tenant="tenant", bot_name="报告助手")
     view = service.register_file(session_key="a", workspace_relative_path="report")
     client = _SessionFileClient()
     exports = SessionFileExportService(session_file_service=service, export_client=client)
@@ -434,6 +434,7 @@ async def test_live_edit_after_ready_export_uploads_new_bytes_and_keeps_path(tmp
     assert entry.source_kind == "workspace_live"
     assert entry.relative_path == "report"
     assert entry.creator_type == "bot"
+    assert entry.creator_name == "报告助手"
     assert service.list_files(session_key="a")[0].created_at == view.created_at
     service.delete_file(session_key="a", resource_id=view.resource_id)
     assert path.exists()

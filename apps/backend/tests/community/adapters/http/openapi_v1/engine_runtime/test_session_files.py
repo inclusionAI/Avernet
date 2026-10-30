@@ -96,6 +96,7 @@ class _Resources:
             gmt_create=datetime(2026, 10, 30, tzinfo=UTC),
             resource_id=resource_id,
             display_name="report.txt",
+            creator_name=None,
             status=status,
             size_bytes=10,
             client_content_hash="hash",
@@ -469,6 +470,7 @@ def test_upload_resolves_binding_then_calls_legacy_service(
     data = response.json()["data"]
     assert data["files"][0]["resource_id"] == "sr_1"
     assert data["files"][0]["creator_type"] == "user"
+    assert data["files"][0]["creator_name"] is None
     assert data["files"][0]["created_at"] == "2026-10-30T00:00:00Z"
     assert "binding_id" not in str(data)
     assert "device_uuid" not in str(data)
@@ -557,6 +559,7 @@ def test_generated_file_roundtrip_reaches_real_engine_without_upload_record(
     assert public[0]["status"] == "ready"
     assert public[0]["creator_type"] == "bot"
     assert public[0]["created_at"] == view["created_at"]
+    assert public[0]["creator_name"] == view["creator_name"]
     content_url = _base() + f"/{resource_id}/content"
     preview = client.get(content_url)
     assert preview.status_code == 200 and preview.content == source.read_bytes()
@@ -725,3 +728,33 @@ def test_resource_lifecycle_failures_use_not_found_envelope(
 
     error = fails(response, 404)
     assert error["message"] == "Not found"
+
+
+@pytest.mark.parametrize("principal_id,name,expected", [
+    (OWNER, " 上传者 ", "上传者"), (OWNER, None, None),
+    ("different-user", "错误花名", None),
+])
+def test_upload_http_uses_only_verified_actor_name_when_actor_differs_from_owner(
+    client, relay, resources, runtime_bindings, principal_id, name, expected,
+):
+    from agentclaw.community.core.engine_runtime.models import BotFacts
+
+    actual_owner = "different-bot-owner"
+    relay.bots[(BOT, actual_owner)] = BotFacts(
+        bot_id=BOT, bot_type="personal", active_engine="openclaw", owner_id=actual_owner,
+    )
+    relay.add_operator(OWNER, bot_id=BOT, owner_id=actual_owner)
+    client.app.dependency_overrides[require_principal] = lambda: SimpleNamespace(
+        user_id=OWNER, user=SimpleNamespace(id=principal_id, display_name=name),
+    )
+    response = client.post(
+        _base() + "/upload-intents?entity_id=" + actual_owner,
+        json={"files": [{"filename": "a.txt"}]},
+    )
+    assert response.status_code == 201, response.json()
+    kwargs = resources.calls[0][1]
+    assert kwargs["actor_user_id"] == OWNER
+    assert kwargs["owner_id"] == actual_owner
+    assert kwargs["creator_name"] == expected
+    assert runtime_bindings.requests[0].actor_user_id == OWNER
+    assert runtime_bindings.requests[0].owner_id == actual_owner

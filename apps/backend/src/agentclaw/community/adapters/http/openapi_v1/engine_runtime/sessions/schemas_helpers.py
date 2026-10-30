@@ -290,6 +290,7 @@ def _session_file_resource(record: SessionResourceRecord) -> SessionFile:
         display_name=record.display_name,
         status=record.status.value,
         creator_type="user",
+        creator_name=record.creator_name,
         created_at=created_at.isoformat().replace("+00:00", "Z") if created_at else None,
         size_bytes=record.size_bytes,
         content_hash=record.client_content_hash,

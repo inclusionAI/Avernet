@@ -90,8 +90,18 @@ Stdout contains one JSON object for publish success/failure. `--help` is ordinar
 human-readable help with exit 0. Argument parser errors are sanitized JSON.
 
 ```json
-{"ok":true,"code":"published","file":{"resource_id":"sr_1","display_name":"result.pdf","size_bytes":12,"availability":"ready","uploaded_at":"2026-10-30T00:00:00Z","creator_type":"bot","created_at":"2026-10-30T00:00:00Z"}}
+{"ok":true,"code":"published","file":{"resource_id":"sr_1","display_name":"result.pdf","size_bytes":12,"availability":"ready","uploaded_at":"2026-10-30T00:00:00Z","creator_type":"bot","creator_name":"Report Assistant","created_at":"2026-10-30T00:00:00Z"}}
 ```
+
+`creator_name` is the first-registration display-name snapshot: the upload
+actor's nickname for user uploads, or the platform Bot name for generated files.
+Existing entries retain their original name, including unknown (`null`) names.
+Edits, retries and exports never replace it with a reader's or owner's name.
+The CLI cannot choose creator metadata. Backend supplies `TEAMCLAW_BOT_NAME`
+through normal personal/service runtime provisioning; already running containers
+without that metadata return `null` until their next normal provision. Historical
+unknown names are not backfilled. Before deploying the Backend increment, apply
+`apps/backend/src/agentclaw/community/core/session_resources/sql/2026_10_30_session_file_creator_name.sql`.
 
 | Exit | code | Meaning |
 | --- | --- | --- |

@@ -73,6 +73,34 @@ def test_registration_is_idempotent_by_session_and_path(tmp_path):
     assert len(service.list_files(session_key="a")) == 1
 
 
+def test_creator_name_is_first_registration_snapshot(tmp_path):
+    (tmp_path / "report").write_text("one")
+    first_service = SessionFileService(workspace_root_provider=lambda: tmp_path, bot_name="  报告助手  ")
+    first = first_service.register_file(session_key="a", workspace_relative_path="report")
+    assert first.creator_name == "报告助手"
+    assert ManifestStore(tmp_path).get(first.resource_id).creator_name == "报告助手"
+    renamed_service = SessionFileService(workspace_root_provider=lambda: tmp_path, bot_name="新名称")
+    (tmp_path / "report").write_text("edited")
+    repeated = renamed_service.register_file(session_key="a", workspace_relative_path="report")
+    assert repeated.creator_name == "报告助手"
+    assert renamed_service.list_files(session_key="a")[0].creator_name == "报告助手"
+    assert renamed_service.register_file(session_key="b", workspace_relative_path="report").creator_name == "新名称"
+    unknown = _service(tmp_path).register_file(session_key="c", workspace_relative_path="report")
+    assert unknown.creator_name is None
+    assert renamed_service.register_file(session_key="c", workspace_relative_path="report").creator_name is None
+
+
+@pytest.mark.parametrize("name, expected", [("  报告助手  ", "报告助手"), ("", None), ("bad\nname", None), ("x" * 256, None)])
+def test_platform_runtime_name_is_default_for_all_composition_profiles(tmp_path, monkeypatch, name, expected):
+    monkeypatch.setenv("TEAMCLAW_BOT_NAME", name)
+    (tmp_path / "report").write_text("one")
+    service = _service(tmp_path)
+    monkeypatch.setenv("TEAMCLAW_BOT_NAME", "later")
+    first = service.register_file(session_key="a", workspace_relative_path="report")
+    assert first.creator_name == expected
+    assert service.list_files(session_key="a")[0].creator_name == expected
+
+
 def test_concurrent_registrations_preserve_duplicates_and_unrelated_entries(tmp_path):
     for i in range(8):
         (tmp_path / f"{i}.txt").write_text(str(i))

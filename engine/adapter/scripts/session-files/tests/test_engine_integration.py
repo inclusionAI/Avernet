@@ -33,7 +33,7 @@ class EngineIntegrationTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
-        service = SessionFileService(workspace_root_provider=lambda: self.root)
+        service = SessionFileService(workspace_root_provider=lambda: self.root, bot_name="报告助手")
 
         class NoExternalExport:
             def __getattr__(self, name):
@@ -90,6 +90,7 @@ class EngineIntegrationTests(unittest.TestCase):
         self.assertEqual(view["size_bytes"], source.stat().st_size)
         self.assertIsInstance(view["uploaded_at"], str)
         self.assertEqual(view["creator_type"], "bot")
+        self.assertEqual(view["creator_name"], "报告助手")
         self.assertEqual(view["created_at"], view["uploaded_at"])
         params = {"sessionKey": self.session}
         listed = self.http.get("/api/session-files", params=params)

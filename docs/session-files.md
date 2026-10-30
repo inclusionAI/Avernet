@@ -18,6 +18,16 @@ stay null, since a BaaS transfer may itself have come from a Bot export. Legacy
 Engine and OpenAPI lists expose the same creation metadata; the standalone CLI
 also returns it when supported by Engine, retaining compatibility with old views.
 
+`creator_name` is a nullable display-name snapshot: the authenticated upload
+actor's nickname (not the Bot owner) or the platform Bot name. Backend stores
+upload names when issuing the intent and forwards them during materialization.
+Engine receives Bot names via deployment-owned `TEAMCLAW_BOT_NAME` on normal
+personal/service provisioning. Unknown names stay null; registration, retries,
+edits and exports preserve the first name. Existing containers without the new
+runtime metadata do not gain a name until normal reprovisioning, and existing
+unknown records are not backfilled. Before deploying Backend, apply
+`apps/backend/src/agentclaw/community/core/session_resources/sql/2026_10_30_session_file_creator_name.sql`.
+
 ## Default registration in Chat
 
 When the current Chat generates or modifies a completed output file, the product
@@ -63,7 +73,7 @@ unavailable, with no fallback to old bytes. Detected mutation during an operatio
 is rejected rather than serving mixed content.
 
 The result is the existing Engine view: `resource_id`, `display_name`,
-`size_bytes`, `availability`, `uploaded_at`, `creator_type` and `created_at`. It is immediately visible on
+`size_bytes`, `availability`, `uploaded_at`, `creator_type`, `creator_name` and `created_at`. It is immediately visible on
 `GET /api/session-files?sessionKey=...`. Deletion of a live entry removes only
 that session's association, preserving the original and associations in other
 sessions. A file does not become visible in another session without its own

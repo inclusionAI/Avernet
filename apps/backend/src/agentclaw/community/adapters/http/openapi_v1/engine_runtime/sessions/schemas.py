@@ -252,6 +252,9 @@ class SessionFile(BaseModel):
     creator_type: Literal["bot", "user"] | None = Field(
         default=None, description="Resource origin: bot-generated or user-uploaded; null when unknown.",
     )
+    creator_name: str | None = Field(
+        default=None, description="Creator display name captured on first creation; null when unknown.",
+    )
     created_at: str | None = Field(
         default=None, description="First session resource creation time in UTC ISO 8601; preserved across edits.",
     )
