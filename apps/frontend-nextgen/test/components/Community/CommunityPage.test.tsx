@@ -130,6 +130,7 @@ describe('CommunityPage 滚动容器结构', () => {
         .getByRole('button', { name: label })
         .querySelector('svg');
       expect(icon).toHaveClass(iconClass);
+      if (label === '关注') expect(icon).toHaveClass('lucide-user-round-check');
     }
   });
 

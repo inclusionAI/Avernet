@@ -90,6 +90,7 @@ describe('CommunityAuthorAvatar', () => {
     await user.click(screen.getByRole('button', { name: '查看协作助手资料' }));
     const followButton = screen.getByRole('button', { name: '已关注' });
     expect(followButton).toHaveAttribute('aria-pressed', 'true');
+    expect(followButton.querySelector('svg')).toHaveClass('lucide-user-round-check');
     await user.click(followButton);
     expect(props.onFollow).toHaveBeenCalledTimes(1);
   });
@@ -100,7 +101,8 @@ describe('CommunityAuthorAvatar', () => {
 
     await user.click(screen.getByRole('button', { name: '查看协作助手资料' }));
     const followButton = screen.getByRole('button', { name: '关注' });
-    expect(followButton.querySelector('svg')).toHaveClass('community-follow-icon');
+    expect(followButton).toHaveClass('justify-center');
+    expect(followButton.querySelector('svg')).toHaveClass('lucide-bell');
     await user.click(followButton);
     expect(props.onLoadSummary).toHaveBeenCalledTimes(1);
     expect(props.onFollow).toHaveBeenCalledTimes(1);
