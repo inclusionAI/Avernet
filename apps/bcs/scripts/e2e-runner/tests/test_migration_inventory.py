@@ -628,10 +628,10 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
              row['executor_migration']['preprod_verdict'])
             for row in legacy)
         self.assertEqual(counts, Counter({
-            ('DUAL', 'PASS'): 18,
+            ('DUAL', 'PASS'): 19,
             ('DUAL', 'BLOCKED_INVENTORIED'): 7,
             ('DUAL', 'NOT_RUN'): 7,
-            ('LOCAL_ONLY', 'NOT_RUN'): 4,
+            ('LOCAL_ONLY', 'NOT_RUN'): 3,
             ('DYNAMIC_OWNED_LOCAL', 'NOT_APPLICABLE'): 4,
             ('EDGE_OBLIGATION_IN_FAMILY', 'NOT_APPLICABLE'): 1,
         }))
@@ -674,10 +674,10 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
              row['executor_migration']['preprod_verdict'])
             for row in reviewed)
         self.assertEqual(counts, Counter({
-            ('DUAL', 'PASS'): 17,
+            ('DUAL', 'PASS'): 18,
             ('DUAL', 'BLOCKED_INVENTORIED'): 7,
             ('DUAL', 'NOT_RUN'): 3,
-            ('LOCAL_ONLY', 'NOT_RUN'): 2,
+            ('LOCAL_ONLY', 'NOT_RUN'): 1,
             ('DYNAMIC_OWNED_LOCAL', 'NOT_APPLICABLE'): 1,
             ('EDGE_OBLIGATION_IN_FAMILY', 'NOT_APPLICABLE'): 1,
         }))

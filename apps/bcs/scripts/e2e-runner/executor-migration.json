@@ -71,8 +71,8 @@
     {
       "id": "story_provider_operator_publishes_agent",
       "executor_migration": {
-        "mode": "LOCAL_ONLY",
-        "preprod_verdict": "NOT_RUN",
+        "mode": "DUAL",
+        "preprod_verdict": "PASS",
         "gates": [],
         "notes": []
       }
