@@ -24,7 +24,7 @@ from injector import inject
 from agentclaw.community.core.runtime_binding.service import RuntimeBindingResolutionService
 from agentclaw.community.core.runtime_binding.models import RuntimeBindingRequest
 
-from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError, BotService
 from agentclaw.community.core.repository.protocols.bot import TemplateRepository
 from agentclaw.community.core.cron.protocols import (
     BotInfoProvider,
@@ -140,7 +140,20 @@ class CronRelayService(CronTargetedOperationsMixin, CronRuntimeOperationsMixin, 
             )
         # 1. 获取用户的所有 bots
         if bot_id and bot_id != "all":
-            bot = self._bot_provider.get_bot(bot_id, user_id)
+            try:
+                bot = self._bot_provider.get_bot(bot_id, user_id)
+            except BotNotFoundError:
+                logger.info(
+                    "[list_all_crons] Bot not found; returning empty list: "
+                    "bot_id=%s user_id=%s",
+                    bot_id, user_id,
+                )
+                return {
+                    "success": True,
+                    "data": [],
+                    "total": 0,
+                    "failed_targets": [],
+                }
             bots = [bot]
         else:
             result = self._bot_provider.list_bots_by_owner_or_collaborator(
