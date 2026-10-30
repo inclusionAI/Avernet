@@ -101,6 +101,7 @@ pub use provider::{
     BotDeliveryTarget, CoordinationMode, CoordinationSurface, ProviderAuthMode,
     ProviderBotBinding, ProviderBotConnectionMode, ProviderCoordinationConfig,
     ProviderCredential, ProviderOrganizationManagementConfig, ProviderRecord, RedactedToken,
+    PROVIDER_PROTOCOL_A2A, normalize_provider_protocol_version,
 };
 pub use registry::{
     AgentCredentials, BindingChannel, BindingChannels, BotCapabilities, BotConnectParams,

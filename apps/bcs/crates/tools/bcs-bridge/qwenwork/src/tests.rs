@@ -453,6 +453,7 @@ fn bot_debug_redacts_engine_option_values() {
         permission_mode: None,
         engine_bin: None,
         engine_options: options,
+        a2a: None,
     };
     assert!(!format!("{bot:?}").contains("sensitive-value"));
 }

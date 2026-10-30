@@ -28,6 +28,10 @@ pub struct AppState {
     pub runs: RunRegistry,
     pub interactions: crate::interaction::InteractionRegistry,
     pub trace: Option<Arc<crate::engine::trace::TraceStore>>,
+    /// A2A tasks served for this Provider's A2A-enabled bots.
+    pub a2a: crate::a2a::A2aRegistry,
+    /// Outbound client for A2A push notifications.
+    pub http: reqwest::Client,
     /// Engines built at startup, keyed by `provider_bot_ref`.
     engines: HashMap<String, Arc<dyn crate::engine::Engine>>,
 }
@@ -62,6 +66,8 @@ impl AppState {
             runs: RunRegistry::new(),
             interactions: crate::interaction::InteractionRegistry::new(),
             trace,
+            a2a: crate::a2a::A2aRegistry::default(),
+            http: reqwest::Client::new(),
             engines: built,
         })
     }

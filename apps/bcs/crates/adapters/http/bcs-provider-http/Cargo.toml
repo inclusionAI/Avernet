@@ -14,6 +14,7 @@ workspace = true
 bcs-observability = { workspace = true }
 async-trait     = { workspace = true }
 bcs-domain      = { workspace = true }
+bcs-a2a-protocol = { workspace = true }
 bcs-protocol    = { workspace = true }
 bcs-route-security = { workspace = true }
 bcs-service-api = { workspace = true }
@@ -29,6 +30,8 @@ opentelemetry-http = { workspace = true }
 uuid            = { workspace = true }
 
 [dev-dependencies]
+bcs-bridge-core    = { workspace = true }
+tempfile           = { workspace = true }
 axum               = { workspace = true }
 tower              = { workspace = true, features = ["util"] }
 tracing-subscriber = { workspace = true }

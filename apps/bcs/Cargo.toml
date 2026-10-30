@@ -14,6 +14,7 @@ members = [
     # contracts
     "crates/contracts/bcs-domain",
     "crates/contracts/bcs-protocol",
+    "crates/contracts/bcs-a2a-protocol",
     # services
     "crates/services/bcs-config",
     "crates/services/bcs-eventing",
@@ -302,6 +303,7 @@ bcs-service-api  = { path = "crates/service-api/bcs-service-api" }
 bcs-services-container = { path = "crates/service-api/bcs-services-container" }
 bcs-domain       = { path = "crates/contracts/bcs-domain" }
 bcs-protocol     = { path = "crates/contracts/bcs-protocol" }
+bcs-a2a-protocol = { path = "crates/contracts/bcs-a2a-protocol" }
 bcs-config-api   = { path = "crates/service-api/bcs-config-api" }
 bcs-test-support = { path = "crates/test-support/bcs-test-support" }
 bcs-http         = { path = "crates/adapters/http/bcs-http" }

@@ -670,16 +670,12 @@ fn replace_admin_callback_url(config: &str, admin_callback_url: &str) -> Service
 }
 
 fn replace_protocol_version(config: &str, protocol_version: &str) -> ServiceResult<String> {
-    // Same validation as register: only "1.0" / "2.0" are supported.
-    let normalized = match protocol_version.trim() {
-        "" | "1.0" => "1.0",
-        "2.0" => "2.0",
-        other => {
-            return Err(ServiceError::InvalidOperation {
-                message: format!("unsupported protocol_version '{other}'"),
-                request_id: None,
-            });
-        }
+    // Same validation as register: "1.0", "2.0" or A2A.
+    let Some(normalized) = bcs_service_api::normalize_provider_protocol_version(Some(protocol_version)) else {
+        return Err(ServiceError::InvalidOperation {
+            message: format!("unsupported protocol_version '{}'", protocol_version.trim()),
+            request_id: None,
+        });
     };
     let mut value: Value = serde_json::from_str(config)?;
     let Some(downlink) = value.get_mut("downlink").and_then(Value::as_object_mut) else {
@@ -790,15 +786,11 @@ impl ProviderCoreService for ProviderCore {
         if let Some(url) = admin_callback_url.as_deref() {
             validate_outbound_url(&self.webhook_url_guard, "admin_callback_url", url)?;
         }
-        let protocol_version = match protocol_version.as_deref().map(str::trim) {
-            None | Some("") | Some("1.0") => "1.0",
-            Some("2.0") => "2.0",
-            Some(other) => {
-                return Err(ServiceError::InvalidOperation {
-                    message: format!("unsupported protocol_version '{other}'"),
-                    request_id: None,
-                });
-            }
+        let Some(protocol_version) = bcs_service_api::normalize_provider_protocol_version(protocol_version.as_deref()) else {
+            return Err(ServiceError::InvalidOperation {
+                message: format!("unsupported protocol_version '{}'", protocol_version.as_deref().unwrap_or_default().trim()),
+                request_id: None,
+            });
         };
         let created_by = created_by.trim().to_string();
         if created_by.is_empty() {

@@ -67,6 +67,23 @@ pub fn chat_delta(run_id: &str, text: &str) -> StreamEvent {
     })
 }
 
+/// A text delta tagged with its engine message segment. `raw.segment` is
+/// bridge-internal (never encoded on the BCN wire); the A2A projection uses
+/// `phase` to route `commentary` to progress and everything else to the result.
+pub fn chat_delta_segment(run_id: &str, text: &str, item_id: Option<&str>, phase: Option<&str>) -> StreamEvent {
+    let mut event = chat_delta(run_id, text);
+    if let (StreamEvent::Chat(chat), Some(item_id)) = (&mut event, item_id) {
+        chat.raw = json!({"segment": {"itemId": item_id, "phase": phase}});
+    }
+    event
+}
+
+/// `(itemId, phase)` attached by [`chat_delta_segment`], if any.
+pub fn delta_segment(chat: &ChatEvent) -> Option<(&str, Option<&str>)> {
+    let segment = chat.raw.get("segment")?;
+    Some((segment.get("itemId")?.as_str()?, segment.get("phase").and_then(Value::as_str)))
+}
+
 pub fn chat_final(run_id: &str, text: String) -> StreamEvent {
     // message.timestamp 是 BCS MessageContent 的必填字段(缺失会整条丢弃),勿删。
     let message = json!({"role":"assistant","content":[{"type":"text","text":text}],"timestamp": bcs_protocol::now_ms()});

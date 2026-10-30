@@ -8,7 +8,7 @@ use tokio::sync::RwLock;
 use crate::config::BotConfig;
 use crate::engine::SessionObserver;
 use crate::session_db::{self, SessionDb, SessionKey};
-pub use crate::session_db::SessionError;
+pub use crate::session_db::{A2aTaskRow, SessionError};
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct ConnectionIdentity {
@@ -136,6 +136,26 @@ impl SessionStore {
         let key = self.key(bot, s)?;
         let run = run_id.to_owned();
         self.access(move |conn| session_db::finish_batch(conn, &key, &run, delivered)).await
+    }
+
+    pub async fn save_a2a_task(&self, row: A2aTaskRow) -> Result<(), SessionError> {
+        let provider = self.provider.clone();
+        self.access(move |conn| session_db::save_a2a_task(conn, &provider, &row, bcs_protocol::now_ms())).await
+    }
+
+    pub async fn load_a2a_task(&self, task_id: &str) -> Result<Option<A2aTaskRow>, SessionError> {
+        let (provider, task_id) = (self.provider.clone(), task_id.to_owned());
+        self.access(move |conn| session_db::load_a2a_task(conn, &provider, &task_id)).await
+    }
+
+    pub async fn unfinished_a2a_tasks(&self, terminal: &'static [&'static str]) -> Result<Vec<A2aTaskRow>, SessionError> {
+        let provider = self.provider.clone();
+        self.access(move |conn| session_db::unfinished_a2a_tasks(conn, &provider, terminal)).await
+    }
+
+    pub async fn prune_a2a_tasks(&self, before_ms: u64) -> Result<usize, SessionError> {
+        let provider = self.provider.clone();
+        self.access(move |conn| session_db::prune_a2a_tasks(conn, &provider, before_ms)).await
     }
 
     pub fn observer(&self, bot: &str, session: &str, run: &str) -> Arc<dyn SessionObserver> {

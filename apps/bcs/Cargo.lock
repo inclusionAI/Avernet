@@ -403,6 +403,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-a2a-protocol"
+version = "0.1.4-beta.3"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "bcs-admin"
 version = "0.1.4-beta.3"
 dependencies = [
@@ -875,7 +883,10 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
+ "bcs-a2a-protocol",
  "bcs-protocol",
+ "bytes",
+ "chrono",
  "dirs",
  "futures",
  "libc",
@@ -1852,6 +1863,8 @@ version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "axum",
+ "bcs-a2a-protocol",
+ "bcs-bridge-core",
  "bcs-domain",
  "bcs-observability",
  "bcs-protocol",
@@ -1864,6 +1877,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tower",
  "tracing",

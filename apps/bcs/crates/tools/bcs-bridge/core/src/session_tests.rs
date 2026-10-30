@@ -32,6 +32,7 @@ impl Fixture {
             bot_id: None, token: None,
             model: None, cwd: dir.path().to_owned(), permission_mode: None, engine_bin: None,
             engine_options: toml::Table::new(),
+            a2a: None,
         }).collect();
         Self { dir, path, bots }
     }
@@ -90,7 +91,7 @@ async fn v1_migration_preserves_session_mapping_and_recovers_inflight_injects() 
     create_v1_database(&fixture);
     let store = fixture.open("provider-a");
     let version = store.access(|conn| Ok(conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?)).await.unwrap();
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
     assert_eq!(store.mapping("worker-a", "s-1").await.unwrap().engine_session_id.as_deref(), Some("engine-original"));
     let batch = store.claim_injects("worker-a", "s-1", "after-migration").await.unwrap();
     assert_eq!(ids(&batch), ["inject-original"]);
@@ -531,4 +532,20 @@ async fn v2_codex_migration_keeps_original_project_thread_and_receipts() {
         assert_eq!(violations, 0);
         Ok(())
     }).await.unwrap();
+}
+
+#[tokio::test]
+async fn a2a_task_snapshots_upsert_load_and_prune_per_provider() {
+    let fixture = Fixture::new();
+    let store = fixture.open("provider-a");
+    let row = |state: &str| A2aTaskRow { task_id: "t-1".into(), owner: "bcs".into(), bot: "worker-a".into(),
+        state: state.into(), snapshot: format!("{{\"state\":\"{state}\"}}") };
+    store.save_a2a_task(row("TASK_STATE_WORKING")).await.unwrap();
+    assert_eq!(store.unfinished_a2a_tasks(&["TASK_STATE_COMPLETED"]).await.unwrap(), vec![row("TASK_STATE_WORKING")]);
+    store.save_a2a_task(row("TASK_STATE_COMPLETED")).await.unwrap();
+    assert_eq!(store.load_a2a_task("t-1").await.unwrap(), Some(row("TASK_STATE_COMPLETED")));
+    assert!(store.unfinished_a2a_tasks(&["TASK_STATE_COMPLETED"]).await.unwrap().is_empty());
+    assert_eq!(store.load_a2a_task("missing").await.unwrap(), None);
+    assert_eq!(store.prune_a2a_tasks(bcs_protocol::now_ms() + 1).await.unwrap(), 1);
+    assert_eq!(store.load_a2a_task("t-1").await.unwrap(), None);
 }

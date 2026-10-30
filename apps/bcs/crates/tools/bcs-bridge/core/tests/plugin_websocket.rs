@@ -556,6 +556,7 @@ fn config_for(dir: &TempDir, addr: std::net::SocketAddr, bots: &[&str]) -> Provi
         bot_runtime_token: None,
         trace_dir: None,
         state_path: dir.path().join("bridge-state.sqlite3"),
+        a2a: None,
         bots: bots.iter().enumerate().map(|(index, name)| {
             let cwd = dir.path().join(name);
             std::fs::create_dir_all(&cwd).unwrap();
@@ -571,6 +572,7 @@ fn config_for(dir: &TempDir, addr: std::net::SocketAddr, bots: &[&str]) -> Provi
                 permission_mode: None,
                 engine_bin: Some(fixture.clone()),
                 engine_options: toml::Table::new(),
+                a2a: None,
             }
         }).collect(),
     }

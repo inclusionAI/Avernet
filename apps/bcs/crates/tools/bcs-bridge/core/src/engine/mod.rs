@@ -292,6 +292,7 @@ mod tests {
             permission_mode: None,
             engine_bin: None,
             engine_options: toml::Table::new(),
+            a2a: None,
         }
     }
 

@@ -22,6 +22,59 @@ fn default_reconnect_interval_ms() -> u64 { 1_000 }
 fn default_heartbeat_interval_ms() -> u64 { 30_000 }
 fn default_connect_timeout_ms() -> u64 { 10_000 }
 
+/// Provider-wide A2A server settings. A2A is served on the gateway listener.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderA2aConfig {
+    /// Externally reachable listener origin advertised in AgentCards, e.g.
+    /// `https://bridge.example.com`. Defaults to the request `Host`.
+    pub public_url: Option<String>,
+    /// Extra bearer tokens accepted from third-party A2A clients. The BCS
+    /// `bcs_to_provider_token` is always accepted.
+    #[serde(default)]
+    pub client_tokens: Vec<String>,
+    /// URL prefixes push notification webhooks may target. The `api_url`
+    /// origin (the registering BCS) is always allowed.
+    #[serde(default)]
+    pub push_url_allowlist: Vec<String>,
+    /// Terminal task snapshots stay queryable for this long.
+    #[serde(default = "default_a2a_task_ttl_secs")]
+    pub task_ttl_secs: u64,
+    /// Hard run deadline for A2A tasks.
+    #[serde(default = "default_a2a_task_timeout_ms")]
+    pub task_timeout_ms: u64,
+}
+
+fn default_a2a_task_ttl_secs() -> u64 { 24 * 3600 }
+fn default_a2a_task_timeout_ms() -> u64 { 3_600_000 }
+
+/// Per-bot AgentCard content; presence of the table enables A2A for the bot.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BotA2aConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub version: Option<String>,
+    #[serde(default)]
+    pub skills: Vec<A2aSkillConfig>,
+}
+
+fn default_true() -> bool { true }
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct A2aSkillConfig {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub examples: Vec<String>,
+}
+
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BotConfig {
@@ -40,6 +93,13 @@ pub struct BotConfig {
     /// Engine-specific settings, validated by the engine factory.
     #[serde(default)]
     pub engine_options: toml::Table,
+    /// Expose this bot as an A2A agent on the gateway listener.
+    #[serde(default)]
+    pub a2a: Option<BotA2aConfig>,
+}
+
+impl BotConfig {
+    pub fn a2a_enabled(&self) -> bool { self.a2a.as_ref().is_some_and(|a2a| a2a.enabled) }
 }
 
 impl std::fmt::Debug for BotConfig {
@@ -54,6 +114,7 @@ impl std::fmt::Debug for BotConfig {
             .field("permission_mode", &self.permission_mode)
             .field("engine_bin", &self.engine_bin)
             .field("engine_options", &self.engine_options.keys().collect::<Vec<_>>())
+            .field("a2a", &self.a2a)
             .finish()
     }
 }
@@ -74,6 +135,8 @@ pub struct ProviderConfig {
     pub trace_dir: Option<PathBuf>,
     #[serde(default = "default_state_path")]
     pub state_path: PathBuf,
+    #[serde(default)]
+    pub a2a: Option<ProviderA2aConfig>,
     #[serde(rename = "bot")]
     pub bots: Vec<BotConfig>,
 }
@@ -145,6 +208,20 @@ impl ProviderConfig {
             if bot.engine.trim().is_empty() {
                 return Err(ConfigError::Invalid("bot.engine must be nonempty"));
             }
+        }
+        if let Some(a2a) = &self.a2a {
+            if a2a.client_tokens.iter().any(|token| token.trim().is_empty()) {
+                return Err(ConfigError::Invalid("a2a.client_tokens must be nonempty"));
+            }
+            if a2a.task_ttl_secs == 0 || a2a.task_timeout_ms == 0 {
+                return Err(ConfigError::Invalid("a2a ttl and timeout must be positive"));
+            }
+            if a2a.public_url.as_deref().is_some_and(|url| url::Url::parse(url).map_or(true, |url| !matches!(url.scheme(), "http" | "https"))) {
+                return Err(ConfigError::Invalid("a2a.public_url must be an absolute http(s) URL"));
+            }
+        }
+        if self.mode == ConnectionMode::Plugin && self.bots.iter().any(BotConfig::a2a_enabled) {
+            return Err(ConfigError::Invalid("A2A requires gateway mode (it is served on the gateway listener)"));
         }
         match self.mode {
             ConnectionMode::Gateway => {

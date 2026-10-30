@@ -75,6 +75,21 @@ impl std::str::FromStr for ProviderBotConnectionMode {
     }
 }
 
+/// Provider downlink protocol selecting the A2A v1.0 JSON-RPC binding: BCS
+/// calls the bot as a standard A2A agent instead of the BCN webhook.
+pub const PROVIDER_PROTOCOL_A2A: &str = "a2a/1.0";
+
+/// Canonical downlink `protocol_version`: `1.0` (default), `2.0` or
+/// [`PROVIDER_PROTOCOL_A2A`] (`a2a` is accepted as an alias).
+pub fn normalize_provider_protocol_version(value: Option<&str>) -> Option<&'static str> {
+    match value.map(str::trim) {
+        None | Some("") | Some("1.0") => Some("1.0"),
+        Some("2.0") => Some("2.0"),
+        Some("a2a") | Some(PROVIDER_PROTOCOL_A2A) => Some(PROVIDER_PROTOCOL_A2A),
+        Some(_) => None,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderRecord {
     pub provider_id: String,
@@ -306,5 +321,30 @@ impl BotDeliveryTarget {
 
     pub fn is_http_provider(&self) -> bool {
         matches!(self, Self::HttpProvider { .. })
+    }
+
+    /// HTTP Provider whose downlink speaks A2A instead of BCN.
+    pub fn is_a2a_provider(&self) -> bool {
+        matches!(self, Self::HttpProvider { protocol_version, .. } if protocol_version == PROVIDER_PROTOCOL_A2A)
+    }
+}
+
+#[cfg(test)]
+mod protocol_tests {
+    use super::*;
+
+    #[test]
+    fn downlink_protocol_versions_normalize_and_select_a2a() {
+        for (input, expected) in [(None, Some("1.0")), (Some(" "), Some("1.0")), (Some("1.0"), Some("1.0")),
+            (Some("2.0"), Some("2.0")), (Some("a2a"), Some(PROVIDER_PROTOCOL_A2A)), (Some(" a2a/1.0 "), Some(PROVIDER_PROTOCOL_A2A)),
+            (Some("3.0"), None), (Some("a2a/0.3"), None)] {
+            assert_eq!(normalize_provider_protocol_version(input), expected, "{input:?}");
+        }
+        let target = |protocol_version: &str| BotDeliveryTarget::HttpProvider { bot_id: "b".into(), provider_id: "p".into(),
+            provider_bot_ref: "r".into(), webhook_url: "https://x".into(), bcs_to_provider_token: RedactedToken::new("t"),
+            protocol_version: protocol_version.into() };
+        assert!(target(PROVIDER_PROTOCOL_A2A).is_a2a_provider());
+        assert!(!target("2.0").is_a2a_provider());
+        assert!(!BotDeliveryTarget::WebSocket { bot_id: "b".into() }.is_a2a_provider());
     }
 }

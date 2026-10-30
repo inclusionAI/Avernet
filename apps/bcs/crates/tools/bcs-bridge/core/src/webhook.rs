@@ -24,7 +24,7 @@ pub fn router(state: Arc<AppState>) -> Router {
 pub fn multi_router(states: Vec<Arc<AppState>>) -> Router {
     let states: std::collections::BTreeMap<_, _> = states.into_iter()
         .map(|state| (state.config.provider_id.clone(), state)).collect();
-    Router::new().route("/webhook", post(handle_multi_webhook)).with_state(Arc::new(states))
+    Router::new().route("/webhook", post(handle_multi_webhook)).merge(crate::a2a::routes()).with_state(Arc::new(states))
 }
 
 async fn handle_multi_webhook(

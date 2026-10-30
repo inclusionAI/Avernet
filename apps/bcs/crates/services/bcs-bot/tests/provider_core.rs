@@ -1253,3 +1253,21 @@ async fn plugin_register_idempotent_keeps_same_bot_uuid_and_token() {
     assert_eq!(after_first, after_second, "token unchanged by idempotent re-register");
     assert!(is_mock_token(&after_first), "still MOCK (no plugin connected yet)");
 }
+
+#[tokio::test]
+async fn a2a_downlink_protocol_resolves_an_a2a_provider_target() {
+    let ctx = test_context();
+    let rejected = ctx.core.register_provider("Provider".to_string(), Some("https://agent.example.com/a2a".to_string()),
+        ProviderAuthMode::StaticBearer, "11111111".to_string(), Some("a2a/0.3".to_string()), None).await;
+    assert!(rejected.is_err(), "unknown downlink protocols stay rejected");
+    let registered = ctx.core.register_provider("Provider".to_string(), Some("https://agent.example.com/a2a".to_string()),
+        ProviderAuthMode::StaticBearer, "11111111".to_string(), Some("a2a".to_string()), None).await.expect("register a2a provider");
+    let (binding, _) = ctx.core.register_provider_bot_with_bot_uuid(&registered.provider.provider_id, &registered.provider_admin_token,
+        RegisterProviderBotParams { bot_name: "Agent".to_string(), summary: None, owners: vec!["11111111".to_string()],
+            provider_bot_ref: "agent-1".to_string(), ..Default::default() }).await.expect("register provider bot");
+    let target = ctx.registry.resolve_delivery_target(&binding.bot_uuid).await.expect("resolve delivery target");
+    assert!(target.is_a2a_provider(), "{target:?}");
+    let BotDeliveryTarget::HttpProvider { protocol_version, webhook_url, .. } = target else { panic!("expected http provider target") };
+    assert_eq!(protocol_version, bcs_domain::PROVIDER_PROTOCOL_A2A);
+    assert_eq!(webhook_url, "https://agent.example.com/a2a");
+}

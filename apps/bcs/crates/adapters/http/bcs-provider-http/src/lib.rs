@@ -31,6 +31,7 @@ use serde_json::Value;
 use tracing::{info, warn};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
+mod a2a;
 mod sse;
 
 use crate::sse::{IngestKind, SeqDecision, SeqDedup, classify, parse_sse_block};
@@ -156,6 +157,8 @@ pub struct HttpProviderTransport {
     event_ingest: std::sync::RwLock<Option<Arc<dyn ProviderEventIngestService>>>,
     bot_run_context: std::sync::RwLock<Option<Arc<dyn BotRunContextPort>>>,
     interactions: std::sync::RwLock<Option<std::sync::Weak<dyn InteractionService>>>,
+    /// A2A downlink state (`protocol_version = "a2a/1.0"` targets).
+    a2a: Arc<a2a::A2aDownlink>,
 }
 
 impl HttpProviderTransport {
@@ -190,6 +193,7 @@ impl HttpProviderTransport {
             event_ingest: std::sync::RwLock::new(None),
             bot_run_context: std::sync::RwLock::new(None),
             interactions: std::sync::RwLock::new(None),
+            a2a: Arc::default(),
         }
     }
 
@@ -240,6 +244,9 @@ impl InteractionProviderPort for HttpProviderTransport {
         &self,
         command: InteractionProviderCommand,
     ) -> ServiceResult<InteractionProviderAck> {
+        if command.target.is_a2a_provider() {
+            return self.resolve_a2a_interaction(command).await;
+        }
         let BotDeliveryTarget::HttpProvider {
             provider_id,
             provider_bot_ref,
@@ -330,6 +337,9 @@ impl BotDeliveryPort for HttpProviderTransport {
     }
 
     async fn deliver(&self, cmd: BotDeliveryCommand) -> ServiceResult<BotDeliveryResult> {
+        if cmd.target.is_a2a_provider() {
+            return self.deliver_a2a(cmd).await;
+        }
         let target_bot_id = cmd.target_bot_id().to_string();
         if matches!(
             cmd.delivery_kind,
@@ -687,6 +697,9 @@ impl BotDeliveryPort for HttpProviderTransport {
     }
 
     async fn abort(&self, cmd: BotAbortDeliveryCommand) -> ServiceResult<BotAbortDeliveryResult> {
+        if cmd.target.is_a2a_provider() {
+            return self.abort_a2a(cmd).await;
+        }
         let target_bot_id = cmd.target_bot_id().to_string();
         let BotDeliveryTarget::HttpProvider {
             provider_id,
@@ -806,6 +819,9 @@ impl GroupHistoryBotRequestPort for HttpProviderTransport {
         params: Value,
         timeout_ms: u64,
     ) -> Result<Value, String> {
+        if target.is_a2a_provider() {
+            return Err("history requests are not supported by A2A agents".to_string());
+        }
         let request_id = uuid::Uuid::new_v4().to_string();
         let frame = BcsFrame::Request(RequestFrame::new(
             request_id,

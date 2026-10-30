@@ -1,0 +1,15 @@
+[package]
+name         = "bcs-a2a-protocol"
+description  = "A2A (Agent2Agent) v1.0 wire types shared by BCS and bcs-bridge"
+version.workspace      = true
+edition.workspace      = true
+license.workspace      = true
+repository.workspace   = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde      = { workspace = true }
+serde_json = { workspace = true }

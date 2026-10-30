@@ -92,7 +92,7 @@ impl SessionDb {
         connection.pragma_update(None, "synchronous", "FULL")?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
         let version: i64 = connection.pragma_query_value(None, "user_version", |r| r.get(0))?;
-        if !matches!(version, 0 | 1 | 2 | 3) {
+        if !matches!(version, 0 | 1 | 2 | 3 | 4) {
             return Err(SessionError::Schema(version));
         }
         let tx = connection.transaction()?;
@@ -157,6 +157,20 @@ impl SessionDb {
                 ALTER TABLE injects_v3 RENAME TO injects;
                 CREATE INDEX injects_pending ON injects(provider,bot,session,engine,cwd,state,seq);
                 PRAGMA user_version = 3;
+            ")?;
+        }
+        if version < 4 {
+            // A2A task snapshots: queryable after the in-memory run is gone and
+            // across Bridge restarts. `snapshot` is the A2A `Task` JSON.
+            tx.execute_batch("
+                CREATE TABLE a2a_tasks (
+                    provider TEXT NOT NULL, task_id TEXT NOT NULL,
+                    owner TEXT NOT NULL, bot TEXT NOT NULL,
+                    state TEXT NOT NULL, snapshot TEXT NOT NULL, updated_at INTEGER NOT NULL,
+                    PRIMARY KEY (provider, task_id)
+                );
+                CREATE INDEX a2a_tasks_updated ON a2a_tasks(provider, updated_at);
+                PRAGMA user_version = 4;
             ")?;
         }
         // No other Bridge owns this database. Interrupted attempts are retried
@@ -294,4 +308,48 @@ pub(crate) fn finish_batch(conn: &mut Connection, key: &SessionKey, run: &str, d
     )?;
     tx.commit()?;
     Ok(())
+}
+
+/// One persisted A2A task snapshot row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct A2aTaskRow {
+    pub task_id: String,
+    pub owner: String,
+    pub bot: String,
+    pub state: String,
+    pub snapshot: String,
+}
+
+pub(crate) fn save_a2a_task(conn: &mut Connection, provider: &str, row: &A2aTaskRow, now_ms: u64) -> Result<(), SessionError> {
+    conn.execute(
+        "INSERT INTO a2a_tasks(provider,task_id,owner,bot,state,snapshot,updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7)
+         ON CONFLICT(provider,task_id) DO UPDATE SET state=excluded.state, snapshot=excluded.snapshot, updated_at=excluded.updated_at",
+        params![provider, row.task_id, row.owner, row.bot, row.state, row.snapshot, now_ms as i64],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn load_a2a_task(conn: &Connection, provider: &str, task_id: &str) -> Result<Option<A2aTaskRow>, SessionError> {
+    Ok(conn.query_row(
+        "SELECT task_id,owner,bot,state,snapshot FROM a2a_tasks WHERE provider=?1 AND task_id=?2",
+        params![provider, task_id],
+        |row| Ok(A2aTaskRow { task_id: row.get(0)?, owner: row.get(1)?, bot: row.get(2)?, state: row.get(3)?, snapshot: row.get(4)? }),
+    ).optional()?)
+}
+
+/// Rows whose state is not one of `terminal`, e.g. tasks interrupted by a restart.
+pub(crate) fn unfinished_a2a_tasks(conn: &Connection, provider: &str, terminal: &[&str]) -> Result<Vec<A2aTaskRow>, SessionError> {
+    let mut statement = conn.prepare("SELECT task_id,owner,bot,state,snapshot FROM a2a_tasks WHERE provider=?1")?;
+    let rows = statement.query_map(params![provider], |row| Ok(A2aTaskRow {
+        task_id: row.get(0)?, owner: row.get(1)?, bot: row.get(2)?, state: row.get(3)?, snapshot: row.get(4)? }))?;
+    let mut unfinished = Vec::new();
+    for row in rows {
+        let row = row?;
+        if !terminal.contains(&row.state.as_str()) { unfinished.push(row); }
+    }
+    Ok(unfinished)
+}
+
+pub(crate) fn prune_a2a_tasks(conn: &mut Connection, provider: &str, before_ms: u64) -> Result<usize, SessionError> {
+    Ok(conn.execute("DELETE FROM a2a_tasks WHERE provider=?1 AND updated_at < ?2", params![provider, before_ms as i64])?)
 }

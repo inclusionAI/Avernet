@@ -484,6 +484,9 @@ impl Engine for CodexAppServer {
 
         let mut deltas = String::new();
         let mut tools = ToolEvents::default();
+        // agentMessage item id -> phase (`commentary` | `final_answer`), so A2A
+        // can separate progress narration from the conclusion. BCN ignores it.
+        let mut phases: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         let mut questions = questions::Questions::new(&req, events.clone());
         // Same-dumpgarnered thinking snapshots were previously concatenated
         // per delta into `thinking` and re-sent inside every event; that
@@ -540,7 +543,9 @@ impl Engine for CodexAppServer {
                 "item/agentMessage/delta" | "agent/output_chunk" => {
                     if let Some(delta) = extract_delta(&value) {
                         deltas.push_str(&delta);
-                        if send_event(&events, sse::chat_delta(&req.run_id, &delta)).await {
+                        let item_id = value.pointer("/params/itemId").and_then(Value::as_str);
+                        let phase = item_id.and_then(|id| phases.get(id)).map(String::as_str);
+                        if send_event(&events, sse::chat_delta_segment(&req.run_id, &delta, item_id, phase)).await {
                             self.abort_turn(&mut cli, &thread_id, &turn_id).await?;
                             return Err(TurnError::Aborted);
                         }
@@ -555,6 +560,11 @@ impl Engine for CodexAppServer {
                     }
                 }
                 "item/started" => {
+                    if let Some(item) = value.pointer("/params/item")
+                        && item.get("type").and_then(Value::as_str) == Some("agentMessage")
+                        && let (Some(id), Some(phase)) = (item.get("id").and_then(Value::as_str), item.get("phase").and_then(Value::as_str)) {
+                        phases.insert(id.to_owned(), phase.to_owned());
+                    }
                     if let Some(event) = tools.started(&value, &req.run_id, &req.cwd)
                         && send_event(&events, event).await {
                         self.abort_turn(&mut cli, &thread_id, &turn_id).await?;

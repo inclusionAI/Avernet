@@ -31,7 +31,7 @@ a `mcporter_mcp` Provider does not match this handshake. V2 fallback remains sup
 | `bcs-bridge-app` | library | CLI application: `register`/`start`/`status`/`stop`, configuration, instance management, registration and the application plugin interfaces |
 | `bcs-bridge-cli` | binary | The open-source distribution: `bcs-bridge-app` with its default plugins; installs the `bcs-bridge` command |
 
-The only BCS dependency is the `bcs-protocol` contract crate.
+The only BCS dependencies are the `bcs-protocol` and `bcs-a2a-protocol` contract crates.
 
 ## Multiple Providers
 
@@ -40,6 +40,63 @@ deployment. Legacy TOML is read without rewriting; adding another Provider
 backs up and upgrades the same file to V2. See [compatibility, commands and
 isolation](MULTI_PROVIDER.md). Stop before registration changes; use
 `status --json` to check the selected Bot rather than just process readiness.
+
+## A2A server (gateway)
+
+A gateway bridge can also expose Bots as standard [A2A v1.0](https://a2a-protocol.org)
+agents (JSON-RPC binding). Any A2A client — including BCS with a Provider whose
+downlink `protocol_version` is `a2a/1.0` — can then call the local engine. Add a
+`[bot.a2a]` table to each Bot to expose; A2A is served on the gateway `listen`
+address next to `/webhook`:
+
+```toml
+[a2a]                                   # optional, Provider-wide
+public_url = "https://bridge.example.com" # origin advertised in AgentCards (default: request Host)
+client_tokens = ["<third-party-token>"]  # extra Bearer tokens; bcs_to_provider_token is always accepted
+push_url_allowlist = ["https://hooks.example.com/"] # push targets besides the api_url origin
+task_ttl_secs = 86400                    # terminal tasks stay queryable (SQLite) this long
+task_timeout_ms = 3600000
+
+[[bot]]
+provider_bot_ref = "my-bot"
+engine = "codex"
+cwd = "/work/repo"
+[bot.a2a]
+name = "Repo Coder"
+description = "Codex working in /work/repo"
+skills = [{ id = "coding", name = "Coding", description = "Changes code in the repo", tags = ["code"] }]
+```
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /a2a/<provider_id>/<bot_ref>/.well-known/agent-card.json` | Public AgentCard |
+| `POST /a2a/<provider_id>/<bot_ref>` | JSON-RPC (`A2A-Version: 1.0` and `Authorization: Bearer` required) |
+
+Supported methods: `SendMessage`, `SendStreamingMessage`, `GetTask`, `CancelTask`,
+`SubscribeToTask`, and the four push notification config methods. `ListTasks`
+and `GetExtendedAgentCard` are not supported.
+
+- **Three delivery modes over one task.** Each task has one ordered, seq-numbered
+  event log. Streaming (SSE) delivers it live, `GetTask` returns the folded
+  snapshot, and push notifications POST each event to an allowlisted webhook
+  (ordered, at least once, retried with backoff).
+- **Result vs. progress.** The task result is the `response` artifact: the
+  engine's conclusion. Codex `commentary` messages, tool calls and thinking are
+  WORKING status updates (Avernet `progress` extension); narration is kept in
+  `history`. Engines without message phases stream deltas into the artifact,
+  and the authoritative final text replaces it at the end.
+- **HITL.** An approval or question sets `TASK_STATE_INPUT_REQUIRED` with a readable
+  `status.message` and `metadata.{interactionId, interactionKind, engine_frame}`.
+  Answer with `SendMessage` on the same `taskId`. Send a `data` part
+  (`{"decision":"allow-once"}` or `{"action":"submit","answers":{...}}`), or plain
+  text when it is unambiguous: an offered decision, or the answer to a single
+  question. Streams stay open across input requests.
+- **Resume.** A task outlives client connections: a disconnect does not abort the
+  engine. `SubscribeToTask` with `Last-Event-ID` replays exactly after that event
+  (replay extension). Without it, the stream starts with a full task snapshot.
+  If the bridge restarts, tasks that were running are marked failed; terminal
+  snapshots stay queryable until `task_ttl_secs`.
+- Each `contextId` maps to one engine session. One task runs per context at a time.
 
 ## Usage
 

@@ -65,6 +65,7 @@ pub async fn serve_bridge_managed(
         }
         match AppState::new(provider, engines) {
             Ok(state) => {
+                crate::a2a::recover(&state).await;
                 let state = Arc::new(state);
                 match state.config.mode {
                     ConnectionMode::Plugin => plugins.push(state),

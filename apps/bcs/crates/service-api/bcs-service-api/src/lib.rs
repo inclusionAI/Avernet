@@ -333,6 +333,7 @@ pub use bcs_domain::{
     MAX_GENERATED_GROUP_ID_CHARS, MAX_SESSION_ID_CHARS, channel_group_id,
     generated_group_id,
     invite_token_encode, invite_token_decode_and_verify, invite_token_decode_no_expiry,
+    PROVIDER_PROTOCOL_A2A, normalize_provider_protocol_version,
 };
 
 // Note: bcs-bot-connectors has been removed. Bot communication uses the streaming adapter.
