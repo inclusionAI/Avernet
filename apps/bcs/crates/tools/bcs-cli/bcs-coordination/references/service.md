@@ -1,6 +1,6 @@
 # BCS 对外服务化调用命令
 
-将 Group 当作服务对外暴露，通过 Service Key 鉴权，支持输入/输出投递和 callback 通知。
+使用当前 Bot 身份调用 Group 服务，支持输入/输出投递和 callback 通知。
 
 ## 概念
 
@@ -10,10 +10,9 @@
 
 ### 鉴权
 
-- 使用 `X-BCS-Service-Key` 请求头（原始 key，服务端 SHA256 校验）
-- 优先级：`--service-key` 参数 > `BCS_SERVICE_KEY` 环境变量
-- 服务端 key registry 为空时（本地/dev）：anonymous 模式，无鉴权
-- **caller_principal 隔离**：同一 Group 下不同 key 互不可见对方的 Session
+- `service invoke`、`service status` 和 `service wait` 均使用当前 Bot 身份，由 CLI 自动使用已有的 `BCN_BOT_TOKEN`，或从当前 `$BOT_DATA_DIR/.bcs/session.json` 读取认证信息。
+- 不手动读取、复制或传递 token；缺少有效 Bot 身份时报告认证错误，不按匿名调用处理。
+- 服务会话按发起 Bot 隔离；查询或复用已有会话时，继续使用同一 Bot 身份。
 
 ## 命令列表
 
