@@ -89,6 +89,7 @@ source "$SCRIPT_DIR/collaboration_draft_story.sh"
 source "$SCRIPT_DIR/fixed_loop_story.sh"
 source "$SCRIPT_DIR/session_files.sh"
 source "$SCRIPT_DIR/session_owner_story.sh"
+source "$SCRIPT_DIR/task_handle_story.sh"
 source "$SCRIPT_DIR/service_policy_story.sh"
 source "$SCRIPT_DIR/edge_permission.sh"
 

@@ -28,7 +28,15 @@ class Bot {
     this.ws.on('message',data=>{const f=JSON.parse(data);if(f.type==='res'){const p=this.pending.get(f.id);if(p){clearTimeout(p.timer);this.pending.delete(f.id);f.ok?p.resolve(f.payload):p.reject(Error(JSON.stringify(f.error)));}return;}
       if(f.type!=='req')return;
       if(f.method==='chat.send'){this.sends.push(f);this.runs.set(f.id,f);this.send({type:'res',id:f.id,ok:true,payload:{run_id:f.id}});if(this.name==='Manager')setTimeout(()=>this.final(f,'ack'),20);}
-      else if(f.method==='chat.abort'){this.aborts++;const ids=f.params.run_id?[f.params.run_id]:[...this.runs.keys()];for(const id of ids)this.runs.delete(id);this.send({type:'res',id:f.id,ok:true,payload:{aborted:ids.length>0,aborted_run_ids:ids}});}
+      else if(f.method==='chat.abort'){
+        this.aborts++;if(this.ignoreAbort)return;
+        setTimeout(()=>{
+          if(this.rejectAbort){this.send({type:'res',id:f.id,ok:false,error:{code:'unknown_method',message:'chat.abort is unsupported'}});return;}
+          const ids=f.params.run_id?[f.params.run_id]:[...this.runs.keys()];
+          for(const id of ids)this.runs.delete(id);
+          this.send({type:'res',id:f.id,ok:true,payload:{aborted:ids.length>0,aborted_run_ids:ids}});
+        },this.abortDelayMs||0);
+      }
       else this.send({type:'res',id:f.id,ok:true,payload:f.method==='chat.history'?{messages:[]}:{}});
     });
     await new Promise((resolve,reject)=>{this.ws.once('open',resolve);this.ws.once('error',reject);});
@@ -45,11 +53,12 @@ class Bot {
     await manager.connect(); await worker.connect();
     console.log('connected isolated probe peers');
     original=await api('/admin/message-delivery/policy');
-    const policy=structuredClone(original.policy);policy.flow_enabled.task=true;policy.defaults.mode='enforce';policy.defaults.min_send_interval_ms=0;policy.defaults.max_queued=20;
+    const policy=structuredClone(original.policy);policy.flow_enabled.task=true;policy.flow_enabled.group=false;policy.flow_enabled.system=false;policy.defaults.mode='enforce';policy.defaults.max_running=1;policy.defaults.min_send_interval_ms=0;policy.defaults.max_queued=20;policy.task_timeout_min_s=1;policy.task_timeout_max_s=10500;policy.task_cancel_wait_ms=5000;policy.pause_dispatch=false;
     await api('/admin/message-delivery/policy',{expected_version:original.version,policy},null,'PUT');
     const g=await api('/groups',{driver_bot:manager.id,group_strategy:'manager_worker',label:'task-handle-live-probe',participants:[{bot_uuid:manager.id,role:'manager'},{bot_uuid:worker.id,role:'worker'}],create_initial_session:false},manager.token);
     const gid=g.group_id||g.id; assert(gid,JSON.stringify(g));
-    const s=await api(`/groups/${gid}/sessions`,{group_context_delivery:'inject'},manager.token); const sid=s.session_id||s.id;assert(sid,JSON.stringify(s));
+    const s=await api(`/groups/${gid}/sessions`,{group_context_delivery:'inject'},manager.token); let sid=s.session_id||s.id;assert(sid,JSON.stringify(s));
+    const newSession=async()=>{const next=await api(`/groups/${gid}/sessions`,{group_context_delivery:'inject'},manager.token);sid=next.session_id||next.id;assert(sid,JSON.stringify(next));};
     console.log('created isolated group and Session');
     const dispatch=(message,timeout_s)=>manager.request('task.dispatch',{group_id:gid,session_id:sid,target_bot:worker.id,message,response_mode:'full',...(timeout_s?{timeout_s}:{})});
     const ref=x=>'T-'+x.task_id.replaceAll('-','').slice(0,8);
@@ -58,7 +67,7 @@ class Bot {
     assert.equal(await status('T-00000000'),'not_found');
     const a=await dispatch('first probe'),b=await dispatch('second probe'); const ar=ref(a),br=ref(b);
     await until(()=>worker.sends.length===1,'first dispatched');assert.match(worker.text(worker.sends[0]),new RegExp('^\\[来自 .*ref='+ar+'\\]'));
-    assert.equal(await status(ar),'running');assert.equal(await status(br),'queued');
+    await until(async()=>await status(ar)==='running','first acceptance');assert.equal(await status(br),'queued');
     assert.equal((await cancel(br)).status,'cancelled'); assert.equal((await cancel(br)).status,'cancelled');
     worker.final(worker.sends[0],'Need more details to continue');
     await until(async()=>await status(ar)==='completed','first completion');
@@ -71,6 +80,7 @@ class Bot {
     const e=await dispatch('cancel live run'),er=ref(e);await until(async()=>await status(er)==='running','cancel probe running');assert.equal((await cancel(er)).status,'cancelled');assert.equal(worker.aborts,1);
     const f=await dispatch('timeout live run',1),fr=ref(f);await until(async()=>await status(fr)==='timed_out','custom timeout',8000);assert.equal(worker.aborts,2);
     assert.equal((await manager.request('task.status',{task_refs:[fr]})).tasks[0].status,'timed_out');
+    await require('./task_handle_scenarios.cjs')({api, until, manager, worker, dispatch, ref, status, cancel, policy, newSession});
     console.log('PASS: native WS assign; HTTP/WS status; FIFO; completed/failed; queued and running cancel; duplicate cancel; custom timeout; Manager result refs');
     console.log('TASK_REFS='+JSON.stringify([ar,br,cr,dr,er,fr]));
     console.log('NOT PROVEN: real model/plugin history continuation (probe peers are scripted)');

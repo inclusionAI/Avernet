@@ -49,6 +49,7 @@ async fn resolve_rows(flow: &BcsMessageFlow, value: &str, rows: &[PersistedMessa
     let mut covered_intents: std::collections::BTreeSet<_> = legacy_intents.iter().cloned().collect();
     let mut uncertain = std::collections::BTreeSet::new();
     for entry in flow.task_store.matching_handles(&prefix, cutoff.max(0) as u64).await {
+        covered_intents.insert(entry.task_id.replace('-', "").to_ascii_lowercase());
         if let Some(id) = entry.assignment_intent_id.as_deref().and_then(|id| id.strip_prefix("bcs_intent_")) {
             let id = id.to_ascii_lowercase();
             if !legacy_intents.contains(&id) && rows.iter().any(|row| row.semantic_projection_json["task_uncertain_id"] == id) {
@@ -73,6 +74,7 @@ async fn resolve_rows(flow: &BcsMessageFlow, value: &str, rows: &[PersistedMessa
         let Some(intent) = crate::queued_task::intent(row)? else { continue; };
         if let Some(id) = intent.assignment_intent_id.as_deref().and_then(|id| id.strip_prefix("bcs_intent_")) { covered_intents.insert(id.to_ascii_lowercase()); }
         let id = intent.task_id.replace('-', "").to_ascii_lowercase();
+        covered_intents.insert(id.clone());
         if id.starts_with(&prefix) || intent.assignment_intent_id.as_deref().unwrap_or("").trim_start_matches("bcs_intent_").to_ascii_lowercase().starts_with(&prefix) {
             tasks.insert(id, Task::Managed(row.clone()));
         }

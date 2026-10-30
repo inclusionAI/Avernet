@@ -39,9 +39,11 @@ pub(crate) async fn lookup_batch(repo: &MySqlMessageStore, prefixes: &[String], 
         else { uncertain.replace("semantic_projection_json", "pending.semantic_projection_json") };
     let known_intent = if repo.flavor == bcs_db_api::DbSqlFlavor::Mysql { "known.task_lookup_intent".to_string() }
         else { expression(repo, "task_lookup_intent").replace("semantic_projection_json", "known.semantic_projection_json").replace("flow_kind", "known.flow_kind") };
+    let known_task = if repo.flavor == bcs_db_api::DbSqlFlavor::Mysql { "known.task_lookup_id".to_string() }
+        else { identity.replace("semantic_projection_json", "known.semantic_projection_json").replace("flow_kind", "known.flow_kind") };
     for prefix in prefixes.iter().collect::<std::collections::BTreeSet<_>>() {
         let lower = prefix.to_ascii_lowercase(); let upper = format!("{lower}g");
-        arms.push(format!("SELECT * FROM bcs_message_deliveries WHERE env = ? AND delivery_id IN (SELECT delivery_id FROM (SELECT MIN(delivery_id) AS delivery_id FROM bcs_message_deliveries AS pending WHERE env = ? AND {uncertain} >= ? AND {uncertain} < ? AND NOT EXISTS (SELECT 1 FROM bcs_message_deliveries AS known WHERE known.env = pending.env AND {known_intent} = {outer_uncertain}) AND NOT EXISTS (SELECT 1 FROM legacy_intents AS legacy WHERE legacy.intent = {outer_uncertain}) GROUP BY {uncertain} LIMIT 2) AS uncertain_candidates)"));
+        arms.push(format!("SELECT * FROM bcs_message_deliveries WHERE env = ? AND delivery_id IN (SELECT delivery_id FROM (SELECT MIN(delivery_id) AS delivery_id FROM bcs_message_deliveries AS pending WHERE env = ? AND {uncertain} >= ? AND {uncertain} < ? AND NOT EXISTS (SELECT 1 FROM bcs_message_deliveries AS known WHERE known.env = pending.env AND {known_intent} = {outer_uncertain}) AND NOT EXISTS (SELECT 1 FROM bcs_message_deliveries AS known WHERE known.env = pending.env AND {known_task} = {outer_uncertain}) AND NOT EXISTS (SELECT 1 FROM legacy_intents AS legacy WHERE legacy.intent = {outer_uncertain}) GROUP BY {uncertain} LIMIT 2) AS uncertain_candidates)"));
         params.extend([repo.env.as_str().into(), repo.env.as_str().into(), lower.as_str().into(), upper.as_str().into()]);
     }
     let rows = repo.db.query(DbStatement::with_params(format!("WITH legacy_intents AS ({legacy}) {}", arms.join(" UNION ")), params)).await.map_err(|e| Error::Storage(e.to_string()))?;
@@ -53,10 +55,17 @@ pub(crate) fn memory(rows: &[PersistedMessageDelivery], prefix: &str, cutoff: i6
     validate_legacy(legacy_intents)?;
     let prefix = prefix.to_ascii_lowercase();
     let mut tasks = std::collections::BTreeMap::<String, PersistedMessageDelivery>::new();
-    let known_intents: std::collections::BTreeSet<_> = rows.iter().filter_map(|r| {
-        r.semantic_projection_json["task_rejected_id"].as_str().or_else(||
-            r.semantic_projection_json["task"]["assignment_intent_id"].as_str().and_then(|id| id.strip_prefix("bcs_intent_")))
-    }).collect();
+    let mut known_intents = std::collections::BTreeSet::new();
+    for row in rows {
+        let task = &row.semantic_projection_json["task"];
+        if let Some(id) = row.semantic_projection_json["task_rejected_id"].as_str().or_else(||
+            task["assignment_intent_id"].as_str().and_then(|id| id.strip_prefix("bcs_intent_"))) {
+            known_intents.insert(id.to_owned());
+        }
+        if row.flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::Task && task["leg"] == "dispatch" {
+            if let Some(id) = task["task_id"].as_str() { known_intents.insert(id.replace('-', "").to_ascii_lowercase()); }
+        }
+    }
     for row in rows {
         if let Some(id) = row.semantic_projection_json["task_uncertain_id"].as_str() {
             if known_intents.contains(id) || legacy_intents.iter().any(|known| known == id) { continue; }

@@ -369,6 +369,7 @@ async fn task_prefix_batch_is_indexed_deduplicates_and_retains_uncertain_expiry(
     assert!(plan.contains("idx_delivery_task_lookup_intent"), "{plan}");
     assert!(plan.contains("idx_delivery_task_lookup_id"), "{plan}");
     assert!(plan.contains("idx_delivery_task_lookup_uncertain"), "{plan}");
+    assert!(!plan.contains("SCAN known"), "uncertainty suppression must use indexed identity lookups: {plan}");
     recording.queries.lock().unwrap().clear();
     let prefixes = std::iter::once("abcdef12".to_string())
         .chain((1..20).map(|n| format!("{n:08x}"))).collect();

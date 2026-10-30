@@ -362,3 +362,29 @@ async fn unknown_notice_works_with_task_only_policy_and_manager_queue_off() {
 fn row_task_id(row: &PersistedMessageDelivery) -> &str {
     row.semantic_projection_json["task"]["task_id"].as_str().unwrap()
 }
+
+#[tokio::test]
+async fn native_task_uuid_suppresses_uncertainty_before_and_after_late_final() {
+    for sqlite in [false, true] {
+        let f = if sqlite {
+            let db = Arc::new(bcs_db_local::LocalSqliteDbPlugin::new().unwrap());
+            migrations::run_sqlite_migrations(db.as_ref()).await.unwrap();
+            use bcs_db_api::DbPlugin;
+            db.execute(bcs_db_api::DbStatement::new("INSERT INTO bcs_group_sessions (session_id, group_id, env, participants) VALUES ('group-1:task', 'group-1', 'dev', '[]')")).await.unwrap();
+            let repo = Arc::new(bcs_message_store::MySqlMessageStore::sqlite(db, "dev".into()));
+            Fixture::with_repos(repo.clone(), repo).await
+        } else { Fixture::new().await };
+        let mut command = dispatch_command();
+        command.payload.as_object_mut().unwrap().remove("assignment_intent_id");
+        let outcome = f.flow.handle_task_dispatch(command).await.unwrap();
+        let reference = outcome.task_id.replace('-', "")[..8].to_owned();
+        let row = f.rows().await.into_iter().find(|row| row_task_id(row) == outcome.task_id).unwrap();
+        let row = f.start(&row).await;
+        let row = f.transition(&row, Event::TransportUnknown).await;
+        assert_eq!(state(&f, &reference).await, S::Unknown, "the notice is not another task");
+        f.flow.handle_bot_event(final_event(&row)).await.unwrap();
+        assert_eq!(state(&f, &reference).await, S::Completed, "the final supersedes uncertainty");
+        let restarted = Fixture::make_flow(&f.support, &f.service, &f.repo, &f.live).await;
+        assert_eq!(restarted.task_status(vec![reference]).await.unwrap()[0].status, S::Completed);
+    }
+}

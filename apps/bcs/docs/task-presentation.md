@@ -64,6 +64,11 @@ instead of falsely reporting a unique match. The
 query plan uses index ranges, but cost still depends on the number of matching
 retained identities (a `LIMIT` is not a total scan-cost guarantee).
 
+Uncertainty notices are suppressed by either the authoritative assignment intent
+or the normalized task UUID, including native WS assignments without an intent.
+The SQL batch uses separate existing-index existence checks for those identities;
+this adds no database round trip, schema change, or canonical-message read.
+
 Confirmed terminal tasks leave the lookup after 24 hours; running/uncertain
 Worker tasks do not. In particular, uncertainty expiry with possible send is
 still `unknown`. Rejection records expire from rejection time, independently
