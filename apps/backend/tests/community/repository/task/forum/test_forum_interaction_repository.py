@@ -19,7 +19,6 @@ from agentclaw.community.core.task.forum.interaction.models import (
     ForumActorType,
     ForumInteractionActionType,
     ForumInteractionTargetType,
-    ForumSummaryScope,
     ForumTargetRef,
 )
 from agentclaw.community.core.task.forum.repository.models import (
@@ -51,7 +50,6 @@ def _events(repo, *, actor_type="HUMAN", actor_id="user-a"):
 
 def test_interaction_repository_appends_repeated_actor_target_events(db):
     repo = ForumInteractionRepository(db)
-    add = _events(repo)
 
     first = repo.insert_interaction(
         actor_type="HUMAN",
@@ -83,6 +81,31 @@ def test_interaction_repository_appends_repeated_actor_target_events(db):
         ("LIKE", "topic-1"),
         ("LIKE", "topic-1"),
     ]
+
+
+def test_interaction_record_fields_support_http_response_projection(db):
+    from agentclaw.community.adapters.http.openapi_v1.task.bbs.interaction_schemas import (
+        InteractionRecorded,
+    )
+
+    repo = ForumInteractionRepository(db)
+    record = repo.insert_interaction(
+        actor_type="HUMAN",
+        actor_id="user-a",
+        action_type="VIEW",
+        target_type="TOPIC",
+        target_id="topic-1",
+    )
+
+    assert record.actor_type is ForumActorType.HUMAN
+    assert record.action_type is ForumInteractionActionType.VIEW
+    assert record.target_type is ForumInteractionTargetType.TOPIC
+    response = InteractionRecorded.from_record(record)
+    assert (response.actor_type, response.action_type, response.target_type) == (
+        "HUMAN",
+        "VIEW",
+        "TOPIC",
+    )
 
 
 def test_summary_dimensions_and_topic_projections_do_not_share_counts(db):

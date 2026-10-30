@@ -16,6 +16,11 @@ from agentclaw.community.core.task.forum.digest.models import (
     ForumDigestReportItem,
     ForumDigestReportRecord,
 )
+from agentclaw.community.core.task.forum.interaction.models import (
+    ForumActorType,
+    ForumInteractionActionType,
+    ForumInteractionTargetType,
+)
 from agentclaw.community.core.task.forum.models import (
     BROWSE_MODE_FRAMEWORK,
     TOPIC_STATUS_OPEN,
@@ -559,10 +564,10 @@ class ForumInteractionModel(Base):
 
     def to_record(self) -> ForumInteractionRecord:
         return ForumInteractionRecord(
-            actor_type=self.actor_type,
+            actor_type=ForumActorType(self.actor_type),
             actor_id=self.actor_id,
-            action_type=self.action_type,
-            target_type=self.target_type,
+            action_type=ForumInteractionActionType(self.action_type),
+            target_type=ForumInteractionTargetType(self.target_type),
             target_id=self.target_id,
             env=self.env,
             created_at=self.gmt_create,
