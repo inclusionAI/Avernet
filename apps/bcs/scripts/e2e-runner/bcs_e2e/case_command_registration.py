@@ -29,6 +29,7 @@ from .dynamic_family.case_run import (DUAL_DRAFT_GROUP_COMMAND,
                                        DUAL_NESTED_FIXED_LOOP_COMMAND,
                                        DUAL_RESULT_QUEUE_COMMAND)
 from .workspace_field.dual_case_run import DUAL_WORKSPACE_FIELD_COMMAND
+from .delivery_density.contract import DUAL_DELIVERY_POLICY_DENSITY_COMMAND
 
 
 CASE_COMMANDS = frozenset({
@@ -48,6 +49,7 @@ CASE_COMMANDS = frozenset({
     DUAL_RESULT_QUEUE_COMMAND,
     DUAL_DRAFT_GROUP_COMMAND,
     DUAL_WORKSPACE_FIELD_COMMAND,
+    DUAL_DELIVERY_POLICY_DENSITY_COMMAND,
     "dual-webhook-subscription-run",
     "dual-friend-connection-decisions-run",
     "dual-friend-public-accept-run",
@@ -227,6 +229,14 @@ def register_case_commands(commands) -> None:
     workspace_field_case.add_argument("--run-id", required=True)
     workspace_field_case.add_argument("--confirm-run-id", required=True)
     workspace_field_case.add_argument("--allow-write", action="store_true")
+    delivery_policy_density_case = commands.add_parser(
+        "dual-delivery-policy-density-run",
+        help="Run the reviewed dual delivery-policy density projection through owned-local replay or preprod gap receipt")
+    delivery_policy_density_case.add_argument("--profile", type=Path, required=True)
+    delivery_policy_density_case.add_argument("--state-dir", type=Path, required=True)
+    delivery_policy_density_case.add_argument("--run-id", required=True)
+    delivery_policy_density_case.add_argument("--confirm-run-id", required=True)
+    delivery_policy_density_case.add_argument("--allow-write", action="store_true")
     webhook_subscription_case = commands.add_parser(
         "dual-webhook-subscription-run",
         help="Run the reviewed dual Event Webhook subscription lifecycle through Singlebox or preprod")
