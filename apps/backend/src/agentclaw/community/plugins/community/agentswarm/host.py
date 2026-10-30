@@ -136,6 +136,9 @@ _HASHED_IDEMPOTENCY_ID_DIGITS = 16
 #: service's own status after the colon — the only place a genuine human
 #: rejection is named.
 _AUTHORIZATION_INCOMPLETE_PREFIX = "authorization did not complete:"
+#: Stands in for the creation job when its read failed. Distinct from ``None``,
+#: which is the only answer that means "submission never landed a row".
+_UNREADABLE_JOB = object()
 
 @dataclass(frozen=True)
 class BotAuthorizationDescriptor:
@@ -578,6 +581,20 @@ class AvernetBotPlatform(ChatLegMixin, BotPlatform):
                 # deleted bot there is nothing left to undo, and re-purging a
                 # finished creation only repeats its OSS work. Answer success.
                 if self._bot_repo.is_soft_deleted(bot_id, owner):
+                    return True
+                # No bot and no creation job: submission never landed a row, so
+                # the creation job's pre-container phase never ran and the
+                # managed-files / CLI-tools prefixes were never written. There
+                # is nothing to discard, and asking anyway costs an object-store
+                # listing of a prefix that cannot exist — on every teardown of
+                # a slice whose creation never got that far.
+                try:
+                    job = self._manifest_seam.find_job(
+                        entity_id=owner, bot_id=bot_id,
+                    )
+                except Exception:  # noqa: BLE001 — unknown is not "nothing"
+                    job = _UNREADABLE_JOB
+                if job is None:
                     return True
                 # Pending (or never landed a bot): undo what submission wrote.
                 return bool(self._manifest_seam.discard(
