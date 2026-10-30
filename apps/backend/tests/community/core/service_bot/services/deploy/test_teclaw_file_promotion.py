@@ -261,3 +261,70 @@ async def test_reads_use_logical_namespace_relative_paths():
     # read_file is called with the logical (no leading slash) form so the teclaw
     # mapper maps it back to /workspace/... rather than mis-treating it as a host path.
     assert fs.read_calls == ["workspace/sub/a.md"]
+
+
+@pytest.mark.asyncio
+async def test_bak_backup_dirs_are_excluded_from_snapshot():
+    # Timestamped deploy/rotation backups (``<name>.bak.<timestamp>``) are stale
+    # snapshots of a previous workspace, not the running bot's live content; the
+    # live tree lives at the un-suffixed path. They must be swept over but never
+    # read or staged, at any depth — like ``node_modules``.
+    fs = _FakeDeviceFs(
+        listings={
+            "workspace": [
+                {"path": "/workspace/iif-source-inspection-agent/deploy.sh", "is_dir": False},
+                {"path": "/workspace/iif-source-inspection-agent.bak.20261029154228", "is_dir": True},
+                {"path": "/workspace/iif-source-inspection-agent.bak.20261029154228/deploy.sh", "is_dir": False},
+                {"path": "/workspace/iif-source-inspection-agent.bak.20261029154228/tests/test_delivery.py", "is_dir": False},
+            ],
+            "identity": [],
+        },
+        contents={
+            "workspace/iif-source-inspection-agent/deploy.sh": b"sh",
+            # backup contents must not be read/staged
+            "workspace/iif-source-inspection-agent.bak.20261029154228/deploy.sh": b"sh",
+            "workspace/iif-source-inspection-agent.bak.20261029154228/tests/test_delivery.py": b"py",
+        },
+    )
+    oss = _oss_ok()
+    refs = await _promo(oss).stage_files(device_fs=fs, **_ARGS)
+    assert [r["name"] for r in refs.resources] == ["deploy.sh"]
+    assert fs.read_calls == ["workspace/iif-source-inspection-agent/deploy.sh"]
+    stages = {c.args[0] for c in oss.put_object.call_args_list}
+    assert stages == {
+        f"teclaw/pre/bolt_data/{_PREFIX}/workspace/iif-source-inspection-agent/deploy.sh",
+    }
+    # none of the .bak paths reached the object store
+    assert not any(".bak." in k for k in stages)
+
+
+@pytest.mark.asyncio
+async def test_unreadable_bak_backup_file_does_not_fail_build():
+    # Reproduces the 2026-10-29 prod CDO: a deploy backup dir
+    # (``iif-source-inspection-agent.bak.20261029154228``) being garbage-collected
+    # reports paths via ``list_dir`` that ``read_file`` then 404s (None) on. It must
+    # be skipped as excluded, non-live content — not turned into a hard build
+    # failure that aborts promotion of an otherwise-intact live workspace.
+    fs = _FakeDeviceFs(
+        listings={
+            "workspace": [
+                {"path": "/workspace/iif-source-inspection-agent/src/app.py", "is_dir": False},
+                {
+                    "path": "/workspace/iif-source-inspection-agent.bak.20261029154228/tests/test_delivery.py",
+                    "is_dir": False,
+                },
+            ],
+            "identity": [],
+        },
+        contents={
+            "workspace/iif-source-inspection-agent/src/app.py": b"code",
+            # the backup file has no content → read_file returns None (404/being-deleted)
+        },
+    )
+    oss = _oss_ok()
+    refs = await _promo(oss).stage_files(device_fs=fs, **_ARGS)
+    assert [r["name"] for r in refs.resources] == ["app.py"]
+    assert (
+        "workspace/iif-source-inspection-agent.bak.20261029154228/tests/test_delivery.py"
+        not in fs.read_calls
+    )

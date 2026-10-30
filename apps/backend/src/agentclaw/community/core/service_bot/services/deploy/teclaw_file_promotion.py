@@ -39,6 +39,7 @@ matters: a bot created from a manifest has tools before it has a container.
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import dataclass, field
 
 from agentclaw.community.log import get_logger
@@ -79,6 +80,36 @@ _EXCLUDED_DIR_SEGMENTS = frozenset({"node_modules"})
 def _has_excluded_segment(engine_path: str) -> bool:
     """True if any path segment of ``engine_path`` names an excluded directory."""
     return not _EXCLUDED_DIR_SEGMENTS.isdisjoint(engine_path.split("/"))
+
+
+# Timestamped deployment/rotation backups of a running bot's workspace.
+# The bot's own release mechanism writes the previous snapshot as
+# ``<name>.bak.<timestamp>`` (e.g. ``iif-source-inspection-agent.bak.20261029154228``)
+# and asynchronously garbage-collects it; the live tree lives at the
+# un-suffixed path. Like ``node_modules`` these are not the running bot's
+# live content, and they trip the same "``list_dir`` reports a path the
+# engine then cannot ``read_file``" mismatch that turns a non-content
+# artefact into a hard build failure (see
+# ``test_unreadable_bak_backup_file_does_not_fail_build``). The timestamp is
+# digits only (at least 8, to cover ``yyyyMMddHHmmss`` and unix epochs).
+_BAK_BACKUP_RE = re.compile(r"^[^/]+\.bak\.\d{8,}$")
+
+
+def _has_bak_backup_segment(engine_path: str) -> bool:
+    """True if any path segment of ``engine_path`` is a ``<name>.bak.<digits>`` backup."""
+    return any(_BAK_BACKUP_RE.match(seg) for seg in engine_path.split("/"))
+
+
+def _is_excluded_snapshot_path(engine_path: str) -> bool:
+    """True if ``engine_path`` is non-authoritative content that must be skipped.
+
+    Regenerable dependency/build dirs (``node_modules``) and stale timestamped
+    deploy/rotation backups (``<name>.bak.<timestamp>``) are both listed by the
+    engine over a live, mutating container and then fail ``read_file``. They are
+    not the running bot's content, so skipping them avoids turning an engine
+    list-vs-read mismatch on non-content into a hard build failure.
+    """
+    return _has_excluded_segment(engine_path) or _has_bak_backup_segment(engine_path)
 
 
 class TeclawFilePromotionError(Exception):
@@ -186,7 +217,7 @@ class TeclawFilePromotion:
                 # hard-fails on an unreadable non-content file. No per-file log: a
                 # node_modules tree can hold tens of thousands of entries; the
                 # end-of-sweep summary covers what was actually staged.
-                if _has_excluded_segment(engine_path):
+                if _is_excluded_snapshot_path(engine_path):
                     continue
                 logical = engine_path.lstrip("/")  # "workspace/sub/x.csv"
                 content = await device_fs.read_file(logical)
