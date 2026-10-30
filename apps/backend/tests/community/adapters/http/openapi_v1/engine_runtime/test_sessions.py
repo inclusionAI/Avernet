@@ -15,6 +15,7 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineUpstreamError,
 )
 from agentclaw.community.core.engine_runtime.models import EngineResult
+from agentclaw.community.core.service_bot.baas_service_errors import BaasServiceError
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterTimeoutError,
 )
@@ -928,6 +929,7 @@ def test_caller_supplied_identity_is_rejected(client, relay):
         (EngineDeviceNotReadyError("cold"), 409, "Bot device is not ready"),
         (EngineResourceNotFoundError("gone"), 404, "Not found"),
         (EngineUpstreamError("boom"), 502, "Engine service error"),
+        (BaasServiceError("BaaS API error: 404 - no active device"), 502, "BaaS service error"),
         (DeviceAdapterTimeoutError("slow"), 504, "Engine request timed out"),
         (
             EngineCapabilityUnsupportedError("nope"),
