@@ -1,17 +1,11 @@
 import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
-import type {
-  CommunityAuthor,
-  CommunityTopic,
-  InteractionSummary,
-  PersonalCenterActivity,
-} from '@/domain/community/types';
-import { buildTopicListSummaryQueries } from '@/domain/community/interactionQueries';
+import type { CommunityAuthor, PersonalCenterActivity } from '@/domain/community/types';
 import { CommunityAuthorAvatar } from '../CommunityAuthorAvatar';
 import { TopicRow } from '../CommunityTopicList/TopicRow';
-import { communityService } from '@/services/community';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useFollowedAuthorTopics } from './useFollowedAuthorTopics';
 import { useResolvedBackendBotNames } from './useResolvedBackendBotNames';
 
 export interface FollowListProps {
@@ -111,10 +105,6 @@ export function FollowList({
   onOpenTopic,
 }: FollowListProps) {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const [topics, setTopics] = useState<CommunityTopic[]>([]);
-  const [topicSummariesById, setTopicSummariesById] = useState<Record<string, InteractionSummary>>({});
-  const [topicsLoading, setTopicsLoading] = useState(false);
-  const topicsRequestRef = useRef(0);
 
   const humanItems = useMemo(
     () => items.filter((item) => item.target.targetType === 'HUMAN'),
@@ -145,51 +135,8 @@ export function FollowList({
     if (selectedKey && !selectedItem) setSelectedKey(null);
   }, [selectedItem, selectedKey]);
 
-  useEffect(() => {
-    if (!selectedItem) {
-      setTopics([]);
-      setTopicSummariesById({});
-      return;
-    }
-    const requestId = topicsRequestRef.current + 1;
-    topicsRequestRef.current = requestId;
-    setTopicsLoading(true);
-    communityService
-      .listTopics({ authorId: selectedItem.target.id, limit: 20 })
-      .then((page) => {
-        if (requestId !== topicsRequestRef.current) return;
-        setTopics(page.items);
-        setTopicSummariesById({});
-        if (!page.items.length) return;
-
-        const queries = buildTopicListSummaryQueries(page.items);
-        void communityService
-          .getInteractionSummaryBatch(queries)
-          .then((summaries) => {
-            if (requestId !== topicsRequestRef.current) return;
-            const nextSummaries: Record<string, InteractionSummary> = {};
-            summaries.forEach((summary) => {
-              const target = summary.target;
-              if (target && target.targetType === 'TOPIC') {
-                nextSummaries[target.id] = summary;
-              }
-            });
-            setTopicSummariesById(nextSummaries);
-          })
-          .catch(() => {
-            if (requestId !== topicsRequestRef.current) return;
-            setTopicSummariesById({});
-          });
-      })
-      .catch(() => {
-        if (requestId !== topicsRequestRef.current) return;
-        setTopics([]);
-        setTopicSummariesById({});
-      })
-      .finally(() => {
-        if (requestId === topicsRequestRef.current) setTopicsLoading(false);
-      });
-  }, [selectedItem, topicsRequestRef]);
+  const { topics, summariesById: topicSummariesById, loading: topicsLoading } =
+    useFollowedAuthorTopics(selectedItem);
 
   if (loading) {
     return (
