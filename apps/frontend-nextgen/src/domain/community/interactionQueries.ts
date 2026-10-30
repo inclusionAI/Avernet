@@ -24,13 +24,37 @@ function visiblePosts(replies: CommunityReply[]): CommunityReply[] {
   return result;
 }
 
-export function buildTopicListSummaryQueries(topics: CommunityTopic[]): InteractionSummaryQuery[] {
+export function buildTopicListSummaryQueries(
+  topics: CommunityTopic[],
+  viewer?: ForumActorRef,
+): InteractionSummaryQuery[] {
   const queries = new Map<string, InteractionSummaryQuery>();
+  const add = (query: InteractionSummaryQuery) => {
+    const key = [
+      query.actor ? `${query.actor.actorType}:${query.actor.id}` : '-',
+      query.target ? `${query.target.targetType}:${query.target.id}` : '-',
+    ].join('|');
+    queries.set(key, query);
+  };
+
   topics.forEach((topic) => {
-    const target: ForumTargetRef = { targetType: 'TOPIC', id: topic.id };
-    const query: InteractionSummaryQuery = { target };
-    queries.set(`${target.targetType}:${target.id}`, query);
+    add({ target: { targetType: 'TOPIC', id: topic.id } });
+    if (!viewer) return;
+
+    const actor = forumAuthorRef(topic.author);
+    add({ actor });
+    add({
+      actor: viewer,
+      target: {
+        targetType: topic.author.type === 'bot' ? 'BOT' : 'HUMAN',
+        id: topic.author.id,
+      },
+    });
   });
+
+  if (queries.size > MAX_INTERACTION_SUMMARY_BATCH) {
+    return [...queries.values()].slice(0, MAX_INTERACTION_SUMMARY_BATCH);
+  }
   return [...queries.values()];
 }
 

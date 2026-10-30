@@ -9,13 +9,16 @@ validator asks them at ``PUT``; one definition keeps "accepted" and
 
 from __future__ import annotations
 
-__all__ = ["RESERVED_IDENTITY_FILES", "legal_identity_types"]
+__all__ = [
+    "RESERVED_IDENTITY_FILES",
+    "legal_identity_types",
+]
 
 #: Engine-generated runtime state. Apply never writes them and never removes
 #: them (work-items §3.2), so a document declaring one would be accepted and
 #: then never converge. Refused at write time instead, which is what keeps
 #: "accepted" and "appliable" the same set.
-RESERVED_IDENTITY_FILES: frozenset[str] = frozenset({"MEMORY.md", "IDENTITY.md"})
+RESERVED_IDENTITY_FILES: frozenset[str] = frozenset({"MEMORY.md"})
 
 
 def legal_identity_types(engine_type: str) -> frozenset[str]:

@@ -1,7 +1,7 @@
 import { Button } from '@/components/ui/Button';
 import type { ForumTargetRef, InteractionStats } from '@/domain/community/types';
 import { cn } from '@/utils/cn';
-import { Eye, Heart, Star } from 'lucide-react';
+import { Bookmark, Eye, Heart } from 'lucide-react';
 import { formatDateTime } from '../CommunityTopicDetail/model';
 
 export interface TopicInteractionBarProps {
@@ -43,32 +43,34 @@ export function TopicInteractionBar({
         <Button
           variant="ghost"
           size="sm"
-          disabled={likePending}
+          aria-busy={likePending}
           aria-label="点赞主题"
           aria-pressed={liked}
           onClick={() => onLike(target)}
           className={cn(
-            'h-auto min-h-0 gap-1 px-0 text-xs font-normal transition-colors disabled:cursor-not-allowed disabled:opacity-40',
-            liked ? 'text-destructive' : 'text-muted-foreground hover:text-foreground',
+            'h-auto min-h-0 gap-1.5 px-0 text-sm font-normal transition-colors',
+            liked
+              ? 'text-destructive hover:text-destructive'
+              : 'text-muted-foreground hover:text-foreground',
           )}
         >
-          <Heart className={cn('size-3.5', liked && 'fill-current')} aria-hidden />
+          <Heart className={cn('size-4', liked && 'fill-current')} aria-hidden />
           <span aria-label={`点赞 ${topicStats.likeCount} 次`}>{topicStats.likeCount}</span>
         </Button>
         <Button
           variant="ghost"
           size="sm"
-          disabled={favoritePending}
+          aria-busy={favoritePending}
           aria-label="收藏主题"
           aria-pressed={favorited}
           onClick={() => onFavorite(target)}
           className={cn(
-            'h-auto min-h-0 gap-1 px-0 text-xs font-normal transition-colors disabled:cursor-not-allowed disabled:opacity-40',
-            favorited ? 'text-destructive' : 'text-muted-foreground hover:text-foreground',
+            'h-auto min-h-0 gap-1.5 px-0 text-sm font-normal transition-colors',
+            favorited ? 'text-warning hover:text-warning' : 'text-muted-foreground hover:text-foreground',
           )}
         >
-          <Star className={cn('size-3.5', favorited && 'fill-current')} aria-hidden />
-          <span aria-label={`收藏 ${topicStats.favoriteCount} 次`}>{topicStats.favoriteCount}</span>
+          <Bookmark className={cn('size-4', favorited && 'fill-current')} aria-hidden />
+          <span>{favorited ? '已收藏' : '收藏'}</span>
         </Button>
       </div>
       <span className="text-xs text-muted-foreground">发表于：{formatDateTime(publishedAt)}</span>

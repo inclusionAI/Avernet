@@ -6,6 +6,7 @@ from agentclaw.community.core.task.domain.identity import compose_bot_identity
 from agentclaw.community.core.task.task_harness.relay_session_recovery import (
     RelaySessionPreconditionError,
     RelaySessionRecovery,
+    RELAY_HARNESS_RESUME_PROMPT,
     relay_harness_resume_prompt,
 )
 from agentclaw.community.core.task.task_harness.runtime_probe import TaskRuntimeLivenessProbe
@@ -93,10 +94,8 @@ class RelaySessionRecoveryTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.channel, "openapi_bot_session")
         self.assertEqual(result.session_id, "engine-session")
-        self.assertEqual(
-            relay_harness_resume_prompt(),
-            "继续执行当前未完成的 task-loop S1~S6。不要新建任务、不要重新澄清、不要重新提交 execute。如果当前步骤无法完成，请输出明确失败原因，并继续执行后续步骤。",
-        )
+        self.assertEqual(relay_harness_resume_prompt(), RELAY_HARNESS_RESUME_PROMPT)
+
         self.assertEqual(
             bot.calls,
             [
@@ -148,35 +147,22 @@ class RelaySessionRecoveryTest(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
-    async def test_openapi_resume_sends_step_aware_s5_prompt(self):
+    async def test_all_resume_steps_use_the_same_continuation_prompt(self):
         bot = _FakeOpenApiBot()
         recovery = RelaySessionRecovery(bot=bot)
         node = _Node(assignee="bot1", owner_id="146836", session_id="engine-session")
 
-        await recovery.resume(node, resume_step="S5")
+        for resume_step in (None, "S1-S4a", "S5", "S6"):
+            with self.subTest(resume_step=resume_step):
+                await recovery.resume(node, resume_step=resume_step)
 
-        self.assertIn("继续执行当前未完成的 task-loop S5", bot.calls[0]["message"])
-        self.assertIn("不要重做 S1~S4", bot.calls[0]["message"])
-
-    async def test_openapi_resume_sends_step_aware_s6_prompt(self):
-        bot = _FakeOpenApiBot()
-        recovery = RelaySessionRecovery(bot=bot)
-        node = _Node(assignee="bot1", owner_id="146836", session_id="engine-session")
-
-        await recovery.resume(node, resume_step="S6")
-
-        self.assertIn("继续执行当前未完成的 task-loop S6", bot.calls[0]["message"])
-        self.assertIn("不要重做 S1~S5", bot.calls[0]["message"])
-
-    async def test_bcs_resume_sends_step_aware_s5_prompt(self):
-        bcs = _FakeBcs()
-        recovery = RelaySessionRecovery(bot=object(), bcs=bcs, bot_tokens=_FakeTokens())
-        node = _Node(assignee="g1", group_id="g1", session_id="group-session")
-
-        await recovery.resume(node, resume_step="S5")
-
-        self.assertIn("继续执行当前未完成的 task-loop S5", bcs.session_calls[0]["message"])
-        self.assertIn("不要重做 S1~S4", bcs.session_calls[0]["message"])
+        self.assertEqual(
+            [call["message"] for call in bot.calls],
+            [RELAY_HARNESS_RESUME_PROMPT] * 4,
+        )
+        self.assertIn("从当前会话历史中获取 S1 到断点前已形成的上下文和结果", RELAY_HARNESS_RESUME_PROMPT)
+        self.assertIn("不要重做已完成步骤", RELAY_HARNESS_RESUME_PROMPT)
+        self.assertIn("从第一个未完成步骤继续执行，直到流程执行完为止", RELAY_HARNESS_RESUME_PROMPT)
 
     async def test_missing_session_is_a_precondition_error(self):
         recovery = RelaySessionRecovery(bot=_FakeOpenApiBot())

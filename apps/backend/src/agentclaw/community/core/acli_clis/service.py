@@ -74,6 +74,7 @@ from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
     resolve_operable_permission_level,
 )
+from agentclaw.community.core.bot_management.addressing import stable_resource_owner_id
 from agentclaw.community.core.caller_identity.contracts import (
     CallerIdentityPermissionError,
     CallerLockEpochError,
@@ -504,7 +505,7 @@ class AcliCliService(AcliCliServiceProtocol):
         if not lock_epoch_matches(
             self._locks,
             bot_id=bot_id,
-            owner_id=str(bot["owner_id"]),
+            owner_id=stable_resource_owner_id(bot),
             actor_id=actor_id,
             lock_epoch=lock_epoch,
         ):

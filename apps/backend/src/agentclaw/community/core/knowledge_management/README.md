@@ -70,6 +70,15 @@ selection reads and metadata batches are bounded; filtered pages may be empty
 with a non-null cursor. Clients must follow that cursor rather than mistake an
 empty page for completion. No per-KB transport fan-out or full-list scan is used.
 
+After admission and supported-Bot validation, one indexed existence query checks
+for local enabled selections under the exact tenant/environment/Bot PK/space.
+When none exist (including first use or all selections disabled), return an empty
+terminal page without contacting the provider or creating its tenant. This also
+applies to legacy personal Bots resolved from NULL space IDs. Any enabled row
+retains the existing provider grant/metadata checks and their errors; no provider
+404, denial or dependency failure is converted to an empty result. Existence-read
+failures also propagate rather than being treated as absence.
+
 Bot sharing does not require the chatting actor to hold a direct KB viewer ACL.
 After conversation admission, provider metadata is resolved using the trusted Bot
 Owner, and only reference IDs/names are returned. This never grants direct KB

@@ -25,7 +25,7 @@ export function FriendRequestConfirmModal({ bot, actor, actorName, onClose, onCo
         </ModalDescription>
         <p className="m-0 break-words text-left text-xs leading-5 text-muted-foreground">
           {isHuman
-            ? 'Bot Owner用户通过申请后，该申请身份可与该Bot单聊或发起群聊。'
+            ? 'Bot Owner用户通过申请后，该申请身份可与该Bot单聊。'
             : 'Bot Owner用户通过申请后，该申请身份仅可与该Bot发起群聊，不支持直接单聊。'}
         </p>
         <div className="mt-1 flex justify-center gap-3">

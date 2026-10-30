@@ -1,4 +1,5 @@
 import type { MessageViewScope } from '@/domain/collaboration/types';
+import { getPublicBotTargetId } from '@/domain/collaborationSquare/types';
 import type {
   BotCatalogViewer,
   FriendRequestActor,
@@ -66,6 +67,39 @@ export class CollaborationSquareService {
         signal,
       );
       const matched = result.items.find((bot) => bot.id === id);
+      if (matched) return matched;
+      if (page * pageSize >= result.total || result.items.length === 0) return null;
+      page += 1;
+    }
+    return null;
+  }
+  /**
+   * 老版分享链接落地反查：无名称提示时按 canonical 复合 ID（bot_id:owner_id）全量分页检索公开 Bot。
+   * 老版 id 与好友申请 canonical target 同构，直接按 getPublicBotTargetId 匹配；
+   * 仅接受含冒号的复合 ID，避免误吞其他用途的 id 参数。
+   */
+  async resolvePublicBotById(
+    targetId: string,
+    context?: HumanBotActionContext,
+    viewer?: BotCatalogViewer,
+    signal?: AbortSignal,
+  ) {
+    const id = targetId.trim();
+    if (!id || !id.includes(':')) return null;
+
+    const pageSize = 100;
+    let page = 1;
+    while (!signal?.aborted) {
+      const result = await this.gateway.listBotPage(
+        {
+          page,
+          pageSize,
+          ...(viewer ? { viewerActorType: viewer.viewerActorType, viewerActorId: viewer.viewerActorId } : {}),
+        },
+        context,
+        signal,
+      );
+      const matched = result.items.find((bot) => getPublicBotTargetId(bot) === id);
       if (matched) return matched;
       if (page * pageSize >= result.total || result.items.length === 0) return null;
       page += 1;

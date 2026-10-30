@@ -32,6 +32,7 @@ from agentclaw.community.di.modules.caller_identity_module import CallerIdentity
 
 def _context(*, exchange: bool = True, owner_id: str | None = "owner-1") -> CallerIamTokenContext:
     return CallerIamTokenContext(
+        entity_id="entity-1",
         bot_id="bot-1",
         owner_id=owner_id,
         stage=CallerIdentityStage.DRAFT,
@@ -176,7 +177,7 @@ async def test_owner_without_lock_updates_caller_service_target():
     )
 
     assert result.error is None
-    lock_repository.get_by_key.assert_called_once_with("bot-1:caller-1")
+    lock_repository.get_by_key.assert_called_once_with("bot-1:entity-1")
     assert runtime_bindings.resolve.call_count == 2
     identity.exchange_caller_identity.assert_called_once()
     assert identity.exchange_caller_identity.call_args.kwargs["binding_id"] == 31

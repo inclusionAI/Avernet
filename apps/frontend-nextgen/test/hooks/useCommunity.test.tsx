@@ -141,7 +141,7 @@ describe('useCommunity', () => {
     });
   });
 
-  test('列表加载后批量查询主题互动总量并写入 summary 缓存', async () => {
+  test('列表加载后批量预取主题、作者和关注状态并写入 summary 缓存', async () => {
     const targetSummary = {
       scope: 'TARGET' as const,
       target: { targetType: 'TOPIC' as const, id: topic.id },
@@ -165,6 +165,11 @@ describe('useCommunity', () => {
     expect(mockedService.listTopics).toHaveBeenCalledTimes(1);
     expect(mockedService.getInteractionSummaryBatch).toHaveBeenCalledWith([
       { target: { targetType: 'TOPIC', id: topic.id } },
+      { actor: { actorType: 'HUMAN', id: topic.author.id } },
+      {
+        actor: { actorType: 'HUMAN', id: '900003' },
+        target: { targetType: 'HUMAN', id: topic.author.id },
+      },
     ]);
     expect(
       result.current.interactions.getSummary({ target: { targetType: 'TOPIC', id: topic.id } }),
@@ -344,6 +349,7 @@ describe('useCommunity', () => {
       pollSelection: [0],
       authorId: '900003',
       authorName: '当前用户',
+      authorAvatarUrl: 'avatar.png',
     });
     expect(mockedService.listReplies).toHaveBeenLastCalledWith(pollTopic.id, {
       page: 1,

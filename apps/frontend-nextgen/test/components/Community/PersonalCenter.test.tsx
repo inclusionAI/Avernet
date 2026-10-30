@@ -4,16 +4,13 @@ import type { PersonalCenterTopicContext } from '@/domain/community/types';
 import type { UsePersonalCenterResult } from '@/hooks/usePersonalCenter';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { resolveBackendBotNames } from '@/services/community/botDisplayNames';
+import userEvent from '@testing-library/user-event';
 import { communityService } from '@/services/community';
-
-jest.mock('@/services/community/botDisplayNames', () => ({
-  resolveBackendBotNames: jest.fn(),
-}));
 
 jest.mock('@/services/community', () => ({
   communityService: {
     listTopics: jest.fn(),
+    getInteractionSummaryBatch: jest.fn(),
   },
 }));
 
@@ -75,7 +72,6 @@ describe('CommunityPersonalCenter', () => {
     mockedCenter.activityType = 'AUTHORED';
     mockedCenter.activityPage = { items: [{ ...baseActivity }], total: 1 };
     mockedCenter.unfollow = jest.fn();
-    jest.mocked(resolveBackendBotNames).mockImplementation(async () => ({}));
   });
 
   it('renders topic activities with PRD content, stats, publisher, and elapsed time', () => {
@@ -103,33 +99,45 @@ describe('CommunityPersonalCenter', () => {
     expect(onOpenTopic).toHaveBeenCalledWith('topic-1');
   });
 
-  it('Bot 名称未解析完成时先展示加载态，不先渲染 bot id', () => {
-    mockedCenter.activityType = 'FAVORITED';
-    mockedCenter.activityPage = {
-      items: [
-        {
-          ...baseActivity,
-          activityType: 'FAVORITED',
-          topicContext: {
-            ...baseActivity.topicContext,
-            author: { actorType: 'BOT', id: 'bot-pending-name' },
-            authorDisplayName: 'bot-pending-name',
-          },
-        },
-      ],
-      total: 1,
-    };
-    jest.mocked(resolveBackendBotNames).mockImplementation(
-      () => new Promise<Record<string, string>>(() => {}),
-    );
-    const view = render(<CommunityPersonalCenter onBack={jest.fn()} onOpenTopic={jest.fn()} />);
+  it('个人中心帖子作者与社区列表一致，支持悬浮查看资料和关注', async () => {
+    const user = userEvent.setup();
+    const onOpenTopic = jest.fn();
+    const loadAuthorSummary = jest.fn();
+    const followAuthor = jest.fn().mockResolvedValue(true);
 
-    expect(screen.getByLabelText('Bot 名称解析中')).toBeInTheDocument();
-    expect(screen.queryByText('bot-pending-name')).not.toBeInTheDocument();
-    view.unmount();
+    render(
+      <CommunityPersonalCenter
+        onBack={jest.fn()}
+        onOpenTopic={onOpenTopic}
+        currentUserId="149844"
+        getAuthorSummary={jest.fn()}
+        loadAuthorSummary={loadAuthorSummary}
+        followAuthor={followAuthor}
+        authorFollowLoading={jest.fn(() => false)}
+        authorFollowed={jest.fn(() => true)}
+      />,
+    );
+
+    const authorAvatar = screen.getByRole('button', { name: '查看协作助手资料' });
+    await user.hover(authorAvatar);
+    expect(loadAuthorSummary).toHaveBeenCalledWith({
+      type: 'bot',
+      id: 'bot-A',
+      displayName: '协作助手',
+      avatarUrl: undefined,
+    });
+    const followButton = screen.getByRole('button', { name: '已关注' });
+    await user.click(followButton);
+    expect(followAuthor).toHaveBeenCalledWith({
+      type: 'bot',
+      id: 'bot-A',
+      displayName: '协作助手',
+      avatarUrl: undefined,
+    });
+    expect(onOpenTopic).not.toHaveBeenCalled();
   });
 
-  it('个人中心帖子作者为 Bot 时优先展示解析出的 Bot 名称，而不是 Bot ID', async () => {
+  it('个人中心直接展示后端返回的帖子 Bot 名称', () => {
     mockedCenter.activityType = 'FAVORITED';
     mockedCenter.activityPage = {
       items: [
@@ -139,21 +147,39 @@ describe('CommunityPersonalCenter', () => {
           topicContext: {
             ...baseActivity.topicContext,
             author: { actorType: 'BOT', id: 'bot-post-author' },
-            authorDisplayName: 'bot-post-author',
+            authorDisplayName: '内容创作 Bot',
           },
         },
       ],
       total: 1,
     };
-    jest
-      .mocked(resolveBackendBotNames)
-      .mockResolvedValueOnce({ 'bot-post-author': '内容创作 Bot' });
 
     render(<CommunityPersonalCenter onBack={jest.fn()} onOpenTopic={jest.fn()} />);
 
-    expect(await screen.findByText('内容创作 Bot')).toBeInTheDocument();
+    expect(screen.getByText('内容创作 Bot')).toBeInTheDocument();
     expect(screen.queryByText('bot-post-author')).not.toBeInTheDocument();
-    expect(resolveBackendBotNames).toHaveBeenCalledWith(['bot-post-author']);
+  });
+
+  it('个人中心帖子发布者为 Human 时使用清晰的 32px 头像', () => {
+    mockedCenter.activityPage = {
+      items: [
+        {
+          ...baseActivity,
+          actor: { actorType: 'HUMAN', id: 'user-a' },
+          topicContext: {
+            ...baseActivity.topicContext,
+            author: { actorType: 'HUMAN', id: 'user-a' },
+            authorDisplayName: '李四',
+            authorAvatarUrl: 'https://example.com/lisi.png',
+          },
+        },
+      ],
+      total: 1,
+    };
+
+    render(<CommunityPersonalCenter onBack={jest.fn()} onOpenTopic={jest.fn()} />);
+
+    expect(screen.getByAltText('李四')).toHaveStyle({ width: '32px', height: '32px' });
   });
 
   it('truncates favorite and browse activity content to one line', () => {
@@ -180,6 +206,50 @@ describe('CommunityPersonalCenter', () => {
     expect(
       screen.getByText('这是一个带完整上下文的帖子内容预览。'),
     ).toHaveClass('truncate');
+  });
+
+  it('keeps liked topic and reply rows separate while distinguishing their source content', () => {
+    mockedCenter.activityType = 'LIKED';
+    mockedCenter.activityPage = {
+      items: [
+        {
+          ...baseActivity,
+          activityType: 'LIKED',
+          bodyPreview: '主题标题',
+          target: { targetType: 'TOPIC', id: 'topic-1' },
+          topicContext: {
+            ...baseActivity.topicContext,
+            title: '主题标题',
+            bodyPreview: '主题内容',
+          },
+        },
+        {
+          ...baseActivity,
+          activityType: 'LIKED',
+          bodyPreview: '这是一个需要完整 hover 展示的比较长回复内容',
+          target: { targetType: 'POST', id: 'post-1' },
+          postId: 'post-1',
+          topicContext: {
+            ...baseActivity.topicContext,
+            title: '主题标题',
+            bodyPreview: '主题内容',
+          },
+        },
+      ],
+      total: 2,
+    };
+
+    render(<CommunityPersonalCenter onBack={jest.fn()} onOpenTopic={jest.fn()} />);
+
+    expect(screen.getByText('帖子：主题标题')).toBeInTheDocument();
+    expect(screen.getByText('回复：这是一个需要完整 hover 展示的比较长回复内容')).toBeInTheDocument();
+    expect(screen.getByText('回复：这是一个需要完整 hover 展示的比较长回复内容')).toHaveClass('truncate');
+    expect(screen.getByTitle('这是一个需要完整 hover 展示的比较长回复内容')).toHaveAttribute(
+      'title',
+      '这是一个需要完整 hover 展示的比较长回复内容',
+    );
+    expect(screen.getByText('主题标题，主题内容')).toBeInTheDocument();
+    expect(screen.getByText('共 2 条')).toBeInTheDocument();
   });
 
   it('renders follow identities, their topics, and supports unfollowing', async () => {
@@ -235,6 +305,22 @@ describe('CommunityPersonalCenter', () => {
         total: 1,
       })
       .mockResolvedValue({ items: [], total: 0 });
+    jest.mocked(communityService.getInteractionSummaryBatch).mockResolvedValue([
+      {
+        scope: 'TARGET',
+        target: { targetType: 'TOPIC', id: 'topic-2' },
+        viewCount: 321,
+        likeCount: 123,
+        favoriteCount: 54,
+        followCount: 2,
+        acceptCount: 3,
+        topicCount: 1,
+        replyCount: 9,
+        acceptedReplyCount: 1,
+        replyParticipantCount: 4,
+        helpfulReplyCount: 1,
+      },
+    ]);
     const onOpenTopic = jest.fn();
     const onUnfollow = jest.fn().mockResolvedValue(undefined);
     mockedCenter.unfollow = onUnfollow;
@@ -256,13 +342,19 @@ describe('CommunityPersonalCenter', () => {
       }),
     );
     expect(screen.getByText('张三 的帖子')).toBeInTheDocument();
+    expect(await screen.findByLabelText('浏览 321')).toBeInTheDocument();
+    expect(screen.getByLabelText('点赞 123')).toBeInTheDocument();
+    expect(screen.getByLabelText('收藏 54')).toBeInTheDocument();
+    expect(communityService.getInteractionSummaryBatch).toHaveBeenCalledWith([
+      { target: { targetType: 'TOPIC', id: 'topic-2' } },
+    ]);
     fireEvent.click(screen.getByText('张三的主题'));
     expect(onOpenTopic).toHaveBeenCalledWith('topic-2');
     fireEvent.click(screen.getByRole('button', { name: '取消关注 张三' }));
     expect(onUnfollow).toHaveBeenCalledTimes(1);
   });
 
-  it('关注 Bot 时使用批量接口解析展示名称，避免直接展示 bot id', async () => {
+  it('关注 Bot 时直接展示后端返回的 Bot 名称', () => {
     mockedCenter.activityType = 'FOLLOWED';
     mockedCenter.activityPage = {
       items: [
@@ -271,25 +363,21 @@ describe('CommunityPersonalCenter', () => {
           actor: { actorType: 'HUMAN', id: '149844' },
           target: { targetType: 'BOT', id: 'bot-lookup' },
           happenedAt: '2026-10-27T10:00:00Z',
-          bodyPreview: 'bot-lookup',
+          bodyPreview: '自动化协作 Bot',
           followedContext: {
             targetType: 'BOT',
             targetId: 'bot-lookup',
-            displayName: 'bot-lookup',
+            displayName: '自动化协作 Bot',
           },
         },
       ],
       total: 1,
     };
-    jest
-      .mocked(resolveBackendBotNames)
-      .mockResolvedValueOnce({ 'bot-lookup': '自动化协作 Bot' });
 
     render(<CommunityPersonalCenter onBack={jest.fn()} onOpenTopic={jest.fn()} />);
 
-    expect(await screen.findByText('自动化协作 Bot')).toBeInTheDocument();
+    expect(screen.getByText('自动化协作 Bot')).toBeInTheDocument();
     expect(screen.queryByText('bot-lookup')).not.toBeInTheDocument();
-    expect(resolveBackendBotNames).toHaveBeenCalledWith(['bot-lookup']);
   });
 
   it('groups replies by topic and explains nested reply targets', () => {

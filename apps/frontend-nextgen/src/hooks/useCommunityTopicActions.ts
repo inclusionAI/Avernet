@@ -11,6 +11,7 @@ import type {
   InteractionActionType,
   InteractionActiveDelta,
   InteractionSummary,
+  InteractionSummaryQuery,
 } from '@/domain/community/types';
 import { communityService } from '@/services/community';
 import { useCallback, useState } from 'react';
@@ -20,6 +21,7 @@ interface UseCommunityTopicActionsOptions {
   currentUserId: string;
   viewer: ForumActorRef;
   currentAuthorName?: string;
+  currentAuthorAvatarUrl?: string;
   selectedTopic: CommunityTopic | null;
   replyPage: number;
   replyTotal: number;
@@ -46,6 +48,7 @@ export function useCommunityTopicActions({
   currentUserId,
   viewer,
   currentAuthorName,
+  currentAuthorAvatarUrl,
   selectedTopic,
   replyPage,
   replyTotal,
@@ -65,6 +68,7 @@ export function useCommunityTopicActions({
           topicId: selectedTopic.id,
           authorId: currentUserId,
           ...(currentAuthorName ? { authorName: currentAuthorName } : {}),
+          ...(currentAuthorAvatarUrl ? { authorAvatarUrl: currentAuthorAvatarUrl } : {}),
         });
         const nextPage = input.replyToPostId
           ? replyPage
@@ -79,7 +83,15 @@ export function useCommunityTopicActions({
         setReplySaving(false);
       }
     },
-    [currentAuthorName, currentUserId, goToReplyPage, replyPage, replyTotal, selectedTopic],
+    [
+      currentAuthorAvatarUrl,
+      currentAuthorName,
+      currentUserId,
+      goToReplyPage,
+      replyPage,
+      replyTotal,
+      selectedTopic,
+    ],
   );
 
   const getAuthorSummary = useCallback(
@@ -90,9 +102,17 @@ export function useCommunityTopicActions({
 
   const loadAuthorSummary = useCallback(
     (author: CommunityAuthor) => {
-      void interactions.refreshSummaries([{ actor: forumAuthorRef(author) }]);
+      const authorTarget: ForumTargetRef = {
+        targetType: author.type === 'bot' ? 'BOT' : 'HUMAN',
+        id: author.id,
+      };
+      const queries: InteractionSummaryQuery[] = [
+        { actor: forumAuthorRef(author) },
+        { actor: viewer, target: authorTarget },
+      ];
+      void interactions.refreshSummaries(queries);
     },
-    [interactions],
+    [interactions, viewer],
   );
 
   const authorFollowPending = useCallback(

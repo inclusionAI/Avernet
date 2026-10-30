@@ -309,7 +309,7 @@ user_config:
   # yaml block under `user_config:` (the same one the harness reads) — no
   # agentswarm-specific LLM config exists.
   agentswarm:
-    enabled: true
+    agentswarm_enabled: true
     artifact_store_root: "${AGENTSWARM_ARTIFACT_ROOT:-/tmp/agentswarm/artifacts}"
     orchestration:
       # Invariant loaded by AgentSwarmOrchestrationConfig.from_block:

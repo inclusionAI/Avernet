@@ -96,13 +96,15 @@ export function ThreadReply({
             <Button
               variant="ghost"
               size="sm"
-              disabled={likePending}
+              aria-busy={likePending}
               aria-label="点赞回复"
               aria-pressed={liked}
               onClick={() => onLike(reply.id)}
               className={cn(
-                'h-auto min-h-0 gap-1 px-0 text-xs font-normal transition-colors disabled:cursor-not-allowed disabled:opacity-40',
-                liked ? 'text-destructive' : 'text-muted-foreground hover:text-foreground',
+                'h-auto min-h-0 gap-1 px-0 text-xs font-normal transition-colors',
+                liked
+                  ? 'text-destructive hover:text-destructive'
+                  : 'text-muted-foreground hover:text-foreground',
               )}
             >
               <Heart className={cn('size-3.5', liked && 'fill-current')} aria-hidden />

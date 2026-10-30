@@ -58,6 +58,13 @@ export function useCollaborationSquareList({
   const loadMoreController = useRef<AbortController | null>(null);
   const loadingMoreRef = useRef(false);
   const [hasMore, setHasMore] = useState(false);
+  // 分页标记的同步镜像：executeLoad 里 setBots（store 同步通知）与 setHasMore（批处理）可能
+  // 分属两次渲染，深链定位与 loadMore 守卫需在同一轮次读到实时值，避免提前判定目标失效。
+  const hasMoreRef = useRef(false);
+  const applyHasMore = useCallback((value: boolean) => {
+    hasMoreRef.current = value;
+    setHasMore(value);
+  }, []);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
 
@@ -76,13 +83,13 @@ export function useCollaborationSquareList({
       currentGroupOffset.current = 0;
       if (resource === 'bot' && gateSmartEmpty && mode === 'smart' && !query.trim()) {
         setBots([]);
-        setHasMore(false);
+        applyHasMore(false);
         setLoading(false);
         setError(null);
         return;
       }
       if (resource === 'bot' && !humanBotContext) {
-        setHasMore(false);
+        applyHasMore(false);
         setLoading(humanIdentityStatus === 'loading');
         setError(humanIdentityStatus === 'loading' ? null : '当前工作身份不可用，请刷新后重试');
         return;
@@ -114,7 +121,7 @@ export function useCollaborationSquareList({
               );
           if (requestId === latestListRequest.current && !signal?.aborted) {
             setBots(page.items);
-            setHasMore(!isSmartSearch && COLLABORATION_SQUARE_PAGE_SIZE < page.total);
+            applyHasMore(!isSmartSearch && COLLABORATION_SQUARE_PAGE_SIZE < page.total);
           }
         } else if (resource === 'group') {
           const search = query.trim();
@@ -125,12 +132,12 @@ export function useCollaborationSquareList({
           if (requestId === latestListRequest.current && !signal?.aborted) {
             setGroups(page.items);
             currentGroupOffset.current = COLLABORATION_SQUARE_PAGE_SIZE;
-            setHasMore(currentGroupOffset.current < page.total);
+            applyHasMore(currentGroupOffset.current < page.total);
           }
         }
       } catch (error) {
         if (requestId === latestListRequest.current && (error as Error).name !== 'AbortError') {
-          setHasMore(false);
+          applyHasMore(false);
           setError(errorMessage(error));
         }
       } finally {
@@ -161,7 +168,7 @@ export function useCollaborationSquareList({
   );
 
   const loadMore = useCallback(async () => {
-    if (loadingMoreRef.current || hasMore === false) return;
+    if (loadingMoreRef.current || hasMoreRef.current === false) return;
     if (resource === 'bot' && botSearchMode !== 'name') return;
 
     const requestId = latestListRequest.current;
@@ -183,7 +190,7 @@ export function useCollaborationSquareList({
         if (requestId !== latestListRequest.current || controller.signal.aborted) return;
         appendBots(result.items);
         currentBotPage.current = page;
-        setHasMore(page * COLLABORATION_SQUARE_PAGE_SIZE < result.total);
+        applyHasMore(page * COLLABORATION_SQUARE_PAGE_SIZE < result.total);
       } else if (resource === 'group') {
         const search = groupQuery.trim();
         const offset = currentGroupOffset.current;
@@ -194,7 +201,7 @@ export function useCollaborationSquareList({
         if (requestId !== latestListRequest.current || controller.signal.aborted) return;
         appendGroups(result.items);
         currentGroupOffset.current = offset + COLLABORATION_SQUARE_PAGE_SIZE;
-        setHasMore(currentGroupOffset.current < result.total);
+        applyHasMore(currentGroupOffset.current < result.total);
       }
     } catch (error) {
       if (requestId === latestListRequest.current && (error as Error).name !== 'AbortError') {
@@ -207,7 +214,11 @@ export function useCollaborationSquareList({
         if (loadMoreController.current === controller) loadMoreController.current = null;
       }
     }
-  }, [appendBots, appendGroups, botQuery, botSearchMode, groupQuery, hasMore, humanBotContext, resource, viewerFields]);
+  }, [appendBots, appendGroups, botQuery, botSearchMode, groupQuery, humanBotContext, resource, viewerFields]);
+
+  // 深链定位经 ref 调用最新 loadMore，避免把不稳定的函数引用写进深链 effect 依赖。
+  const loadMoreRef = useRef<() => void>(() => undefined);
+  loadMoreRef.current = loadMore;
 
   useEffect(() => {
     // 任务广场由 useCollaborationSquareTask 独立加载，本 hook 仅服务 bot/group。
@@ -235,5 +246,5 @@ export function useCollaborationSquareList({
     [],
   );
 
-  return { load, loadMore, hasMore, loadingMore, loadMoreError };
+  return { load, loadMore, hasMore, hasMoreRef, loadMoreRef, loadingMore, loadMoreError };
 }

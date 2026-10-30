@@ -11,6 +11,14 @@ import { act, render, screen } from '@testing-library/react';
 jest.mock('@/hooks/useHumanIdentity', () => ({ useHumanIdentity: jest.fn() }));
 jest.mock('@/hooks/useWorkIdentityAccess', () => ({ useWorkIdentityAccess: jest.fn() }));
 jest.mock('@/pages/Workspace/hooks/useOwnedBots', () => ({ useOwnedBots: jest.fn() }));
+jest.mock('@/pages/Workspace/Chat/hooks/useConversationTeamDirectory', () => ({
+  useConversationTeamDirectory: () => ({
+    teamBots: [],
+    teamLoading: false,
+    teamError: null,
+    retryTeam: () => {},
+  }),
+}));
 jest.mock('@/pages/MyTask/hooks/useMyTaskTasks', () => ({ useMyTaskTasks: jest.fn() }));
 jest.mock('@/pages/MyTask/hooks/useRoutineTasks', () => ({
   ALL_ROUTINE_BOT_VALUE: '__all__',
