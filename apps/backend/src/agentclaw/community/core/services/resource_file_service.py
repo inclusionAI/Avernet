@@ -29,7 +29,7 @@ The HTTP adapter maps the returned plain dicts / bytes to its response schemas.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, AsyncIterator, Mapping
+from typing import Any, AsyncIterator, Mapping, Sequence
 
 from injector import inject
 
@@ -51,6 +51,7 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
 from agentclaw.community.core.devices.services.device_filesystem import (
+    DeviceFileSystem,
     FileTooLargeError as DeviceFileTooLargeError,
 )
 from agentclaw.community.core.resources.service import (
@@ -784,25 +785,20 @@ class ResourceFileService(ResourceFilePort):
         flag = entry.get("is_dir")
         return bool(flag) if isinstance(flag, (bool, int)) else None
 
-    async def upload_file(
+    async def _write_uploaded_file(
         self,
         *,
-        entity_type: str = "staff",
+        entity_type: str,
         entity_id: str,
         bot_id: str,
         engine_type: str,
         target_dir: str,
         filename: str,
         data: bytes,
-        preserve_structure: bool = False,
-        runtime_context: DeviceContext | None = None,
+        preserve_structure: bool,
+        device_fs: DeviceFileSystem,
     ) -> dict[str, Any]:
-        """Validate and write a single uploaded file under the workspace.
-
-        Extension allow-list + size cap applied uniformly (the same rules the local/
-        arca path enforced via ``FileService``). ``preserve_structure`` keeps the
-        relative path from a directory upload (filename contains ``/``).
-        """
+        """Validate one admitted upload and write it through the shared device."""
         if not filename:
             raise ValueError("Filename is required")
 
@@ -826,11 +822,6 @@ class ResourceFileService(ResourceFilePort):
             rel = f"{target_dir}/{safe}" if target_dir else safe
             final_name = safe
 
-        ctx = runtime_context or self._resolve_ctx(bot_id=bot_id, entity_id=entity_id)
-        device_fs = self._device_fs(
-            ctx, entity_type=entity_type, entity_id=entity_id,
-            bot_id=bot_id, engine_type=engine_type,
-        )
         await device_fs.write_file(self._logical(rel), data)
 
         size = len(data)
@@ -843,3 +834,99 @@ class ResourceFileService(ResourceFilePort):
             "size_human": FileNode._human_readable_size(size),
             "modified_at": datetime.now().isoformat(),
         }
+
+    async def upload_file(
+        self,
+        *,
+        entity_type: str = "staff",
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+        target_dir: str,
+        filename: str,
+        data: bytes,
+        preserve_structure: bool = False,
+        runtime_context: DeviceContext | None = None,
+        device_fs: DeviceFileSystem | None = None,
+    ) -> dict[str, Any]:
+        """Validate and write a single uploaded file under the workspace.
+
+        Extension allow-list + size cap applied uniformly (the same rules the local/
+        arca path enforced via ``FileService``). ``preserve_structure`` keeps the
+        relative path from a directory upload (filename contains ``/``).
+
+        ``device_fs`` is an internal batch-only seam: ordinary callers leave it
+        unset so this method resolves and dispatches its own device.
+        """
+        if device_fs is None:
+            ctx = runtime_context or self._resolve_ctx(
+                bot_id=bot_id, entity_id=entity_id
+            )
+            device_fs = self._device_fs(
+                ctx, entity_type=entity_type, entity_id=entity_id,
+                bot_id=bot_id, engine_type=engine_type,
+            )
+        return await self._write_uploaded_file(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            bot_id=bot_id,
+            engine_type=engine_type,
+            target_dir=target_dir,
+            filename=filename,
+            data=data,
+            preserve_structure=preserve_structure,
+            device_fs=device_fs,
+        )
+
+    async def upload_files(
+        self,
+        *,
+        entity_type: str = "staff",
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+        target_dir: str,
+        files: Sequence[Mapping[str, Any]],
+        preserve_structure: bool = False,
+        runtime_context: DeviceContext | None = None,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Upload a batch through **one** resolved device filesystem.
+
+        A multi-file browser upload used to build a new transport per file. On Baas
+        every new transport re-resolved ``/api/file/upload`` and in a burst this
+        could exhaust the remote binding pool. One dispatch keeps the transport's
+        per-endpoint cache across the entire batch while every file keeps its own
+        admission, naming and error outcome.
+        """
+        if not files:
+            return {"uploaded": [], "errors": []}
+
+        ctx = runtime_context or self._resolve_ctx(bot_id=bot_id, entity_id=entity_id)
+        device_fs = self._device_fs(
+            ctx, entity_type=entity_type, entity_id=entity_id,
+            bot_id=bot_id, engine_type=engine_type,
+        )
+        uploaded: list[dict[str, Any]] = []
+        errors: list[dict[str, Any]] = []
+        for file in files:
+            filename = file["filename"]
+            data = file["data"]
+            if not isinstance(filename, str) or not isinstance(data, bytes):
+                errors.append({"filename": filename, "error": "Malformed upload item"})
+                continue
+            try:
+                result = await self._write_uploaded_file(
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    bot_id=bot_id,
+                    engine_type=engine_type,
+                    target_dir=target_dir,
+                    filename=filename,
+                    data=data,
+                    preserve_structure=preserve_structure,
+                    device_fs=device_fs,
+                )
+                uploaded.append(result)
+            except Exception as exc:
+                errors.append({"filename": filename, "error": str(exc)})
+        return {"uploaded": uploaded, "errors": errors}

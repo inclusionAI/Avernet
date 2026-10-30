@@ -862,3 +862,74 @@ async def test_delete_dir_is_the_engines_tree_delete_with_no_probe():
     device_fs.list_dir.assert_not_awaited()
     device_fs.delete_tree = AsyncMock(return_value=False)
     assert await svc.delete_dir(**_COORDS, path="data") is False
+
+class TestUploadFiles:
+    def _fs(self) -> MagicMock:
+        fs = MagicMock()
+        fs.write_file = AsyncMock(return_value=None)
+        return fs
+
+    @pytest.mark.asyncio
+    async def test_batch_reuses_one_device_filesystem(self):
+        device_fs = self._fs()
+        svc, dispatcher = _svc(provider="baas", device_fs=device_fs)
+
+        result = await svc.upload_files(
+            **_COORDS,
+            target_dir="references",
+            files=[
+                {"filename": "a.md", "data": b"a"},
+                {"filename": "b.md", "data": b"b"},
+            ],
+        )
+
+        assert result["errors"] == []
+        assert [item["path"] for item in result["uploaded"]] == [
+            "references/a.md",
+            "references/b.md",
+        ]
+        assert dispatcher.dispatch_addressed.call_count == 1
+        assert device_fs.write_file.await_count == 2
+        assert device_fs.write_file.await_args_list == [
+            (("workspace/references/a.md", b"a"),),
+            (("workspace/references/b.md", b"b"),),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_batch_preserves_per_file_errors(self):
+        device_fs = self._fs()
+        svc, _ = _svc(provider="baas", device_fs=device_fs)
+
+        result = await svc.upload_files(
+            **_COORDS,
+            target_dir="references",
+            files=[
+                {"filename": "bad.exe", "data": b"no"},
+                {"filename": "good.md", "data": b"yes"},
+            ],
+        )
+
+        assert [item["path"] for item in result["uploaded"]] == ["references/good.md"]
+        assert result["errors"][0]["filename"] == "bad.exe"
+        assert device_fs.write_file.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_batch_uses_shared_context_and_device_without_extra_reads(self):
+        device_fs = self._fs()
+        svc, dispatcher = _svc(provider="baas", device_fs=device_fs)
+        context = MagicMock(provider="baas", bot_type="service")
+        svc._resolve_ctx = MagicMock(side_effect=AssertionError("must not re-resolve"))
+
+        result = await svc.upload_files(
+            **_COORDS,
+            target_dir="references",
+            files=[
+                {"filename": "a.md", "data": b"a"},
+                {"filename": "b.md", "data": b"b"},
+            ],
+            runtime_context=context,
+        )
+
+        assert result["uploaded"][0]["size"] == 1
+        assert dispatcher.dispatch_addressed.call_args.args[0] is context
+        assert dispatcher.dispatch_addressed.call_count == 1
