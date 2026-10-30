@@ -20,6 +20,7 @@ from tests.community.core.service_bot.services.deploy._noop_storage_policy impor
     NoopStoragePolicy,
 )
 from agentclaw.community.core.service_bot.services.baas_service import (
+    BaasBotNotFoundError,
     BaasService,
     BaasServiceError,
 )
@@ -90,3 +91,27 @@ class TestDestroyBotFailure:
         http.set_response("post", response)
         with pytest.raises(BaasServiceError, match="Failed to destroy bot"):
             service.destroy_bot("bot-1", operator="op", request_id="req-123456")
+
+    def test_http_404_bot_not_found_is_typed_no_op(self):
+        response = httpx.Response(
+            404,
+            json={"detail": {"error_code": "BOT_NOT_FOUND"}},
+            request=httpx.Request("POST", "https://baas.example/bot"),
+        )
+        http_error = httpx.HTTPStatusError(
+            "404", request=response.request, response=response
+        )
+        response = MagicMock()
+        response.raise_for_status.side_effect = http_error
+
+        service, http = _make_service()
+        http.set_response("post", response)
+        with pytest.raises(
+            BaasBotNotFoundError,
+            match="BaaS target Bot does not exist",
+        ):
+            service.destroy_bot(
+                "bot-1",
+                operator="op",
+                request_id="req-123456",
+            )

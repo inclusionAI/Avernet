@@ -17,6 +17,7 @@ from tests.community.core.service_bot.services.deploy._noop_storage_policy impor
     NoopStoragePolicy,
 )
 from agentclaw.community.core.service_bot.services.baas_service import (
+    BaasBotNotFoundError,
     BaasService,
     BaasServiceError,
     HttpConnectionInfo,
@@ -135,11 +136,11 @@ def test_get_http_info_binding_not_found_raises(baas_service, fake_binding_repo)
         )
 
 
-def test_get_http_info_404_raises(baas_service, http):
-    """Container/BaaS returns 404 -> raise BaasServiceError."""
+def test_get_http_info_404_raises_typed_error(baas_service, http):
+    """Container/BaaS 404 `bot_not_found` -> raise `BaasBotNotFoundError`."""
     http.set_response("get", _err_resp(404, {"error": "bot_not_found", "message": "Bot not found"}))
 
-    with pytest.raises(BaasServiceError, match="404"):
+    with pytest.raises(BaasBotNotFoundError, match="BaaS target Bot does not exist"):
         baas_service.get_http_info(bind_id=42, port=20010, path="/x")
 
 

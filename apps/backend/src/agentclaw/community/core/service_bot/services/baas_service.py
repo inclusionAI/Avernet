@@ -21,6 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 import base64
+import json
 import re
 import time
 import uuid
@@ -95,6 +96,100 @@ if TYPE_CHECKING:
     from agentclaw.community.core.common_config import CommonWhiteListService
 
 logger = get_logger()
+
+
+@dataclass(frozen=True)
+class _BaaSHTTPErrorInfo:
+    """Structured fields extracted from a BaaS HTTP error response."""
+
+    status: int
+    method: str
+    body: Dict[str, Any]
+    error_code: Optional[str] = None
+    error_type: Optional[str] = None
+    message: Optional[str] = None
+
+
+def _coerce_error_code(value: Any) -> Optional[str]:
+    """Render BaaS error codes defensively for empty values downstream."""
+    if value is None:
+        return None
+    value = str(value).strip()
+    return value.upper() if value else None
+
+
+def _parse_http_error(
+    message: str,
+    method: Optional[str] = None,
+) -> Optional[_BaaSHTTPErrorInfo]:
+    """Parse the project-owned ``BaaS API error: <status> - <json>`` message.
+
+    ``method`` narrows classification to the service's HTTP transport shapes and
+    keeps a proxy artifact 404 from being mistaken for a lifecycle call. The
+    body is retained for follow-ups, while normalizing the code name lets the
+    BaaS ``error`` and ``error_code`` spellings share one contract.
+    """
+    if not message.startswith("BaaS API error: "):
+        return None
+
+    payload = message[len("BaaS API error: ") :]
+    status_part, separator, body_part = payload.partition(" - ")
+    if not separator:
+        return None
+
+    try:
+        status = int(status_part.strip())
+    except ValueError:
+        return None
+
+    try:
+        body = json.loads(body_part)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(body, dict):
+        return None
+
+    detail = body.get("detail")
+    candidates = ((detail, body) if isinstance(detail, dict) else (body,))
+    error_code = None
+    error_type = None
+    error_message = None
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        error_code = error_code or candidate.get("error") or candidate.get("error_code")
+        error_type = error_type or candidate.get("error_type")
+        error_message = error_message or candidate.get("message")
+
+    method = (method or "").strip().upper()
+    if method not in {"GET", "POST", "PUT", "DELETE"}:
+        return None
+
+    return _BaaSHTTPErrorInfo(
+        status=status,
+        method=method,
+        body=body,
+        error_code=_coerce_error_code(error_code),
+        error_type=None if error_type is None else str(error_type),
+        message=None if error_message is None else str(error_message),
+    )
+
+
+def _is_baas_not_found_error(
+    e: "httpx.HTTPStatusError",
+    *,
+    method: str = "GET",
+) -> bool:
+    """Detect the BaaS 404 that names the target Bot as absent."""
+    info = _parse_http_error(
+        f"BaaS API error: {e.response.status_code} - {e.response.text}",
+        method=method,
+    )
+    return (
+        info is not None
+        and info.status == 404
+        and info.error_code == "BOT_NOT_FOUND"
+    )
 
 
 ENGINE_DIR_MOUNT_WHITELIST_BUSINESS_CODE = "nas_mount"
@@ -3734,9 +3829,11 @@ class BaasService:  # pragma: no cover
                 f"[BaasService.get_http_info] "
                 f"HTTP error: {e.response.status_code} - {e.response.text}"
             )
+            if _is_baas_not_found_error(e, method="GET"):
+                raise BaasBotNotFoundError("BaaS target Bot does not exist") from e
             raise BaasServiceError(
                 f"BaaS API error: {e.response.status_code} - {e.response.text}"
-            )
+            ) from e
         except BaasServiceError:
             raise
         except Exception as e:
