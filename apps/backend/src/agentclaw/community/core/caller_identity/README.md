@@ -85,3 +85,15 @@ The `caller_call_type_edit_authorized` / `caller_call_type_edit_denied` events
 record actor, Owner, entity, Bot, resource kind/code and the permission reason.
 The existing `caller_owner_transition_authorized` event records the final
 aggregate transition. Neither event logs credentials.
+
+## Stable edit-lock coordinates
+
+Caller MCP/CLI edits, lock-epoch checks, compensation and draft editability use
+`bot_id:entity_id` from the resolved Bot, matching CollaboratorLockService.
+Owner authorization, the lock holder and credential subjects remain personnel
+identities. `CallerIamTokenContext` carries the required resolved `entity_id`
+alongside the current `owner_id`; IAM refresh uses the entity for lock lookup and
+the Owner for permission and runtime requests. No browser request or response
+schema changes. Consumers constructing this internal context must supply entity;
+the in-repository producer and tests are updated together. A missing entity must
+not silently bypass another user's lock by querying a new Owner-qualified key.

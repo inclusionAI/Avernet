@@ -233,3 +233,17 @@ TaskService.execute
 
 语义事件记录持久化在 Graph 的 `_semantic_outbox` 中，并支持 pending/acked 状态。
 `handle_dispatch_requested` 通过 `TaskDispatcher._prepare_into` 与 `TaskRunner._drain` 完成派发准备和锁外投递；不再引入 `Centralized*Handler`，也不再使用多继承拼装中心化执行链路。
+
+## Owner handoff and BCS identity
+
+`BotServiceBcsBotIdentityResolver` resolves bare product IDs through authoritative
+Bot rows, then uses the shared `bcn_identity.bcn_bot_reference` rule from BCN
+registration: preserve a converted service's stored Provider reference, otherwise
+use entity for service Bots and the existing Owner-qualified reference for
+personal/default/desktop Bots. The narrow BotService contract includes `bot_type`,
+`entity_id`, current `owner_id` and `ext`. Missing required coordinates, corrupt
+stored references and ambiguous bare IDs (including default) fail closed. Already
+qualified IDs remain opaque, validated and unchanged. This is the established
+TeamClaw composite addressing contract, not an assumption that arbitrary external
+Providers' `bot_uuid` and `provider_bot_ref` are interchangeable. This resolver
+does not rewrite remote identities or grant permissions.
