@@ -1,0 +1,33 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/inventory.py
+  s_cecdc98e721f4b::t_e5cf1cfeac47c2 10,52,58-65,67-189,193,195-198,201,206,215
+apps/bcs/scripts/e2e-runner/bcs_e2e/trust_registration.py
+  s_cecdc98e721f4b::t_323dd06e748917 13,78
+apps/bcs/scripts/e2e-runner/executor-migration.json
+  s_cecdc98e721f4b::t_336dfa38ea4339 1-384
+apps/bcs/scripts/e2e-runner/manifest.json
+  s_cecdc98e721f4b::t_8b84b063aba649 3,209-250
+apps/bcs/scripts/e2e-runner/retained-file-manifest.json
+  s_cecdc98e721f4b::t_c74f975e5de0ba 3,209-250
+apps/bcs/scripts/e2e-runner/retained-manifest.json
+  s_cecdc98e721f4b::t_5efacdcd1549b2 3,209-250
+apps/bcs/scripts/e2e-runner/tests/test_migration_inventory.py
+  s_cecdc98e721f4b::t_afdae1642f7263 3,15-21,50,93,127,240,267,272-277,279,282,413,474,536-537,588-687
+apps/bcs/scripts/e2e-runner/trusted-team-manifest.json
+  s_cecdc98e721f4b::t_feda2110539b08 3,209-250
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d07e632733313dffc9d7a9b6e7367577eb805d10",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "GLM-5.3"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
