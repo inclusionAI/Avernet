@@ -14,7 +14,7 @@ const status = (value: unknown): string => typeof value === 'string' && STATUSES
 const timestamp = (value: unknown): number | null => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
 
 type Run = { flow_id: string; workflow_id: string; status: unknown; started_at: unknown; completed_at: unknown };
-type Event = { node_id: unknown; data_json: unknown };
+type Event = { node_id: unknown; attempt: unknown; data_json: unknown };
 type Node = { node_id: unknown; node_title: unknown; status: unknown; attempt: unknown };
 
 function childId(data: unknown): string | null {
@@ -70,16 +70,27 @@ export function createSubworkflowObservabilityRouter(db: IDatabase, authorize: R
         return;
       }
       const events = await db.query<Event>(
-        `SELECT node_id, data_json FROM flow_events WHERE flow_id = ? AND workflow_id = ? AND event_type IN ('subworkflow_linked', 'subworkflow_finished') ORDER BY time DESC, id DESC LIMIT ${EVENT_LIMIT}`,
+        `SELECT node_id, attempt, data_json FROM flow_events WHERE flow_id = ? AND workflow_id = ? AND event_type IN ('subworkflow_linked', 'subworkflow_finished') ORDER BY time DESC, id DESC LIMIT ${EVENT_LIMIT}`,
         [flowId, parent.workflow_id],
       );
-      const seen = new Set<string>();
-      const items: Array<{ parentNodeId: string | null; childFlowId: string; childWorkflowId: string; status: string; startedAt: number | null; completedAt: number | null; nodes: Array<{ nodeId: string; nodeTitle: string | null; status: string; attempt: number | null }> }> = [];
+      const candidates = new Map<string, { parentNodeId: string | null; parentAttempt: number | null }>();
       for (const event of events) {
         const id = childId(event.data_json);
-        if (!id || id === flowId || seen.has(id)) continue;
-        if (seen.size >= CHILD_LIMIT) break;
-        seen.add(id);
+        if (!id || id === flowId) continue;
+        const parentNodeId = validId(event.node_id) ? event.node_id : null;
+        const parentAttempt = typeof event.attempt === 'number' && Number.isSafeInteger(event.attempt) && event.attempt > 0 ? event.attempt : null;
+        const candidate = candidates.get(id);
+        if (candidate) {
+          // A newer finish event can omit attempt. Earlier evidence is usable
+          // only for the same known parent node, never from node state.
+          if (candidate.parentAttempt === null && candidate.parentNodeId !== null && candidate.parentNodeId === parentNodeId) candidate.parentAttempt = parentAttempt;
+          continue;
+        }
+        if (candidates.size >= CHILD_LIMIT) continue;
+        candidates.set(id, { parentNodeId, parentAttempt });
+      }
+      const items: Array<{ parentNodeId: string | null; parentAttempt: number | null; childFlowId: string; childWorkflowId: string; status: string; startedAt: number | null; completedAt: number | null; nodes: Array<{ nodeId: string; nodeTitle: string | null; status: string; attempt: number | null }> }> = [];
+      for (const [id, candidate] of candidates) {
         const child = await findRun(id);
         if (!child) continue; // Never disclose unknown, trial, or unauthorized identifiers.
         if (!validId(child.workflow_id)) throw new Error('Invalid stored workflow');
@@ -94,7 +105,7 @@ export function createSubworkflowObservabilityRouter(db: IDatabase, authorize: R
           status: status(row.status),
           attempt: typeof row.attempt === 'number' && Number.isSafeInteger(row.attempt) && row.attempt > 0 ? row.attempt : null,
         }));
-        items.push({ parentNodeId: validId(event.node_id) ? event.node_id : null, childFlowId: id,
+        items.push({ parentNodeId: candidate.parentNodeId, parentAttempt: candidate.parentAttempt, childFlowId: id,
           childWorkflowId: child.workflow_id, status: status(child.status), startedAt: timestamp(child.started_at),
           completedAt: timestamp(child.completed_at), nodes });
       }

@@ -3,7 +3,7 @@ import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { useFlowRun, useDbWorkflow, useEvolveDiagnoses, useEvolveSuggestions, useAnalyzeRun, useResetAnalysisRun, useAnalysisProgress, useRunEvolutionAnalysis } from '../api/hooks'
 import RunSummaryHeader from '../components/RunSummaryHeader'
 import NodeExecutionList from '../components/NodeExecutionList'
-import SubworkflowExecutionTree from '../components/SubworkflowExecutionTree'
+import SubworkflowLinks, { SubworkflowProvider, UnattributedSubworkflowLinks } from '../components/SubworkflowLinks'
 import RunDagView from '../components/RunDagView'
 import ErrorState from '../components/ErrorState'
 import SimpleRunLogsPanel from '../components/SimpleRunLogsPanel'
@@ -46,11 +46,14 @@ function formatAnalysisElapsed(elapsedMs: number): string {
 export default function RunDetail() {
   const { flowId } = useParams<{ flowId: string }>()
   const [searchParams] = useSearchParams()
+  return <RunDetailContent key={flowId} flowId={flowId ?? ''} searchParams={searchParams} ancestors={flowId ? [flowId] : []} />
+}
+
+function RunDetailContent({ flowId, searchParams, ancestors, readOnly = false }: { flowId: string; searchParams: URLSearchParams; ancestors: string[]; readOnly?: boolean }) {
   const fromWorkspace = searchParams.get('from') === 'workspace'
   const workspaceView = searchParams.get('workspaceView')
   const [activeTab, setActiveTab] = useState<TabId>('nodes')
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
-  const [showSubworkflows, setShowSubworkflows] = useState(false)
   const [analyzingNode, setAnalyzingNode] = useState<NodeExecution | null>(null)
   const [analyzeModalOpen, setAnalyzeModalOpen] = useState(false)
   const [autoHealRun, setAutoHealRun] = useState<FlowRun | null>(null)
@@ -173,7 +176,7 @@ export default function RunDetail() {
 
   return (
     <div className="mx-auto max-w-[1440px] px-5 py-5 lg:px-8">
-      <Link
+      {!readOnly && <Link
         to={
           fromWorkspace && run?.workflow_id
             ? workspaceReturnUrl
@@ -187,7 +190,7 @@ export default function RunDetail() {
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
         </svg>
         {fromWorkspace ? '返回任务护航' : '返回工作流'}
-      </Link>
+      </Link>}
 
       {runLoading ? (
         <div className="flex items-center justify-center py-16">
@@ -195,22 +198,23 @@ export default function RunDetail() {
         </div>
       ) : run ? (
         <>
-          <RunSummaryHeader run={run} nodeCount={nodeProgress.total} succeededCount={nodeProgress.succeeded} failedCount={nodeProgress.failed} onAutoHeal={(selected) => setAutoHealRun(selected)} onApproval={() => setApprovalCard(pendingApprovals[0] ?? approvalCards[0])} pendingApprovalCount={pendingApprovals.length} />
+          <RunSummaryHeader readOnly={readOnly} run={run} nodeCount={nodeProgress.total} succeededCount={nodeProgress.succeeded} failedCount={nodeProgress.failed} onAutoHeal={(selected) => setAutoHealRun(selected)} onApproval={() => setApprovalCard(pendingApprovals[0] ?? approvalCards[0])} pendingApprovalCount={pendingApprovals.length} />
 
-          <div className="mt-4">
+          {!readOnly && <div className="mt-4">
             <InterventionPanel
               flowId={flowId ?? ''}
               runStatus={run.status}
               nodes={nodes}
             />
-          </div>
+          </div>}
 
           <div className="mt-4">
-            <ApprovalPanel flowId={flowId ?? ''} />
+            <ApprovalPanel flowId={flowId ?? ''} readOnly={readOnly} />
           </div>
 
           <div className="mt-4">
             <EvolutionAnalysisPanel
+              readOnly={readOnly}
               workflowId={run.workflow_id ?? ''}
               flowId={flowId ?? ''}
               run={run}
@@ -232,7 +236,7 @@ export default function RunDetail() {
             />
           </div>
 
-          {run && (
+          {!readOnly && run && (
             <AnalyzeRunBotModal
               flowId={run.flow_id}
               workflowId={run.workflow_id}
@@ -242,14 +246,14 @@ export default function RunDetail() {
               onClose={() => setAnalyzeModalOpen(false)}
             />
           )}
-          {autoHealRun && (
+          {!readOnly && autoHealRun && (
             <AutoHealPanel
               run={autoHealRun}
               onClose={() => setAutoHealRun(null)}
               onRerunComplete={() => void refetchRun()}
             />
           )}
-          {approvalCard && run && (
+          {!readOnly && approvalCard && run && (
             <ApprovalSlidePanel
               card={approvalCard}
               run={run}
@@ -269,13 +273,9 @@ export default function RunDetail() {
           <div className="mt-4">
             {activeTab === 'nodes' && (
               <div className="space-y-4">
-                <div className="rounded-xl border border-slate-200 bg-white p-4">
-                  <button type="button" aria-expanded={showSubworkflows} onClick={() => setShowSubworkflows(value => !value)} className="text-sm font-semibold text-primary">
-                    {showSubworkflows ? '收起子工作流执行过程' : '查看子工作流执行过程'}
-                  </button>
-                  {showSubworkflows && <div className="mt-4"><SubworkflowExecutionTree key={flowId} flowId={flowId ?? ''} /></div>}
-                </div>
+                <SubworkflowProvider flowId={flowId}>
                 <NodeExecutionList
+                  readOnly={readOnly}
                   nodes={nodes}
                   onSelectNode={handleNodeSelect}
                   selectedNodeId={selectedNodeId ?? undefined}
@@ -286,7 +286,17 @@ export default function RunDetail() {
                     if (card) setApprovalCard(card)
                   }}
                   approvalNodeIds={pendingApprovalNodeIds}
+                  renderSubworkflowLinks={(node) => <SubworkflowLinks
+                    nodeId={node.node_id} ancestors={ancestors}
+                    renderRun={(childFlowId) => <RunDetailContent key={childFlowId} flowId={childFlowId} searchParams={new URLSearchParams()} ancestors={[...ancestors, childFlowId]} readOnly />}
+                  />}
                 />
+                <UnattributedSubworkflowLinks
+                  nodeIds={nodes.filter(node => node.executor_type === 'subworkflow').map(node => node.node_id)}
+                  ancestors={ancestors}
+                  renderRun={(childFlowId) => <RunDetailContent key={childFlowId} flowId={childFlowId} searchParams={new URLSearchParams()} ancestors={[...ancestors, childFlowId]} readOnly />}
+                />
+                </SubworkflowProvider>
               </div>
             )}
 
@@ -318,7 +328,7 @@ export default function RunDetail() {
           message={`未找到ID为: ${flowId}`}
         />
       )}
-      {analyzingNode && (
+      {!readOnly && analyzingNode && (
         <AnalysisModal node={analyzingNode} onClose={handleCloseAnalysis} />
       )}
     </div>
@@ -327,6 +337,7 @@ export default function RunDetail() {
 
 
 function EvolutionAnalysisPanel({
+  readOnly,
   flowId,
   workflowId,
   run,
@@ -346,6 +357,7 @@ function EvolutionAnalysisPanel({
   analysisError,
   onRetryAnalysisResult,
 }: {
+  readOnly: boolean
   flowId: string
   workflowId: string
   run: Parameters<typeof RunSummaryHeader>[0]['run']
@@ -396,7 +408,7 @@ function EvolutionAnalysisPanel({
           )}
         </div>
         <div className="flex items-center gap-2">
-          {analyzing && (
+          {!readOnly && analyzing && (
             <button
               type="button"
               onClick={onReset}
@@ -406,20 +418,20 @@ function EvolutionAnalysisPanel({
               {resetting ? '取消中...' : '取消分析'}
             </button>
           )}
-          <button
+          {!readOnly && <button
             type="button"
             onClick={onReanalyze}
             disabled={analyzing}
             className={`rounded-lg px-3 py-1.5 text-xs font-medium disabled:opacity-60 ${flowSuggestions.length > 0 ? 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
           >
             {analyzing ? '分析中...' : hasAnalyzed ? '重新分析' : '分析'}
-          </button>
+          </button>}
           {(run as FlowRun & { evolution_analysis_error?: string | null }).evolution_analysis_error && !analyzing && (
             <span className="max-w-[260px] truncate text-[10px] text-red-600" title={String((run as FlowRun & { evolution_analysis_error?: string | null }).evolution_analysis_error)}>
               {String((run as FlowRun & { evolution_analysis_error?: string | null }).evolution_analysis_error)}
             </span>
           )}
-          {flowSuggestions.length > 0 && !analysis && (
+          {!readOnly && flowSuggestions.length > 0 && !analysis && (
             <Link
               to={evolutionUrl()}
               className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
@@ -480,10 +492,10 @@ function EvolutionAnalysisPanel({
 
       {!analyzing && analysis?.status === 'completed' && (
         <div className="mt-3">
-          <AggregationProgress workflowId={workflowId} flowId={flowId} />
+          <AggregationProgress workflowId={workflowId} flowId={flowId} readOnly={readOnly} />
           <RunEvolutionAnalysis
             analysis={analysis}
-            renderOptimizeLink={(diagnosis) => diagnosis.proposal ? (
+            renderOptimizeLink={(diagnosis) => !readOnly && diagnosis.proposal ? (
               <Link
                 to={evolutionUrl(diagnosis)}
                 className="shrink-0 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
@@ -496,7 +508,7 @@ function EvolutionAnalysisPanel({
       )}
 
       {!analyzing && !analysisLoading && !analysis && !analysisError && !diagnosesLoading && !suggestionsLoading && flowDiagnoses.length === 0 && flowSuggestions.length === 0 && (
-        <p className="mt-3 text-xs text-slate-500">点击“分析”开始诊断。</p>
+        <p className="mt-3 text-xs text-slate-500">{readOnly ? '暂无分析结果。' : '点击“分析”开始诊断。'}</p>
       )}
     </section>
   )

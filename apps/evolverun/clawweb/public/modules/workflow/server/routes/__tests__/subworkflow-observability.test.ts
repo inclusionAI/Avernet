@@ -15,7 +15,7 @@ describe('subworkflow observability', () => {
   async function fixture() {
     const raw = new Database(':memory:');
     raw.exec(`CREATE TABLE flow_runs (flow_id TEXT PRIMARY KEY, workflow_id TEXT, status TEXT, started_at INTEGER, completed_at INTEGER, input_json TEXT, result_json TEXT);
-      CREATE TABLE flow_events (id INTEGER PRIMARY KEY, flow_id TEXT, workflow_id TEXT, node_id TEXT, event_type TEXT, time INTEGER, data_json TEXT, error_text TEXT);
+      CREATE TABLE flow_events (id INTEGER PRIMARY KEY, flow_id TEXT, workflow_id TEXT, node_id TEXT, event_type TEXT, attempt INTEGER, time INTEGER, data_json TEXT, error_text TEXT);
       CREATE INDEX event_flow ON flow_events(flow_id);
       CREATE TABLE node_executions (id INTEGER PRIMARY KEY, flow_id TEXT, workflow_id TEXT, node_id TEXT, node_title TEXT, status TEXT, attempt INTEGER, input_json TEXT, output_json TEXT, error_text TEXT);
       CREATE INDEX node_flow ON node_executions(flow_id);
@@ -56,10 +56,34 @@ describe('subworkflow observability', () => {
     const result = await f.get();
     expect(result.status).toBe(200);
     expect(result.headers.get('cache-control')).toBe('no-store');
-    expect(result.body).toEqual({ completeness: 'best_effort', items: [{ parentNodeId: 'parent-node', childFlowId: 'child', childWorkflowId: 'child-wf', status: 'succeeded', startedAt: 20, completedAt: 30,
+    expect(result.body).toEqual({ completeness: 'best_effort', items: [{ parentNodeId: 'parent-node', parentAttempt: null, childFlowId: 'child', childWorkflowId: 'child-wf', status: 'succeeded', startedAt: 20, completedAt: 30,
       nodes: [{ nodeId: 'node-1', nodeTitle: 'Safe title', status: 'succeeded', attempt: 2 }, { nodeId: 'node-1', nodeTitle: 'Safe title', status: 'succeeded', attempt: 1 }] }] });
     expect(JSON.stringify(result.body)).not.toMatch(/secret|untrusted/);
     expect(f.authorize.mock.calls.map(call => [call[1], call[2]])).toEqual([['parent-wf', 'view'], ['child-wf', 'view']]);
+  });
+
+  it('returns a valid parent attempt from the association event without guessing absent values', async () => {
+    const f = await fixture(); f.run('attempted'); f.run('unknown');
+    f.event('attempted'); f.event('unknown');
+    f.raw.prepare("UPDATE flow_events SET attempt = ? WHERE json_extract(data_json, '$.childFlowId') = ?").run(2, 'attempted');
+    const result = await f.get();
+    expect(result.status).toBe(200);
+    expect(result.body.items.find((item: { childFlowId: string }) => item.childFlowId === 'attempted').parentAttempt).toBe(2);
+    expect(result.body.items.find((item: { childFlowId: string }) => item.childFlowId === 'unknown').parentAttempt).toBeNull();
+  });
+
+  it('keeps a linked attempt when a newer finish event omits it for the same parent node', async () => {
+    const f = await fixture(); f.run('child'); f.event('child');
+    f.raw.prepare("UPDATE flow_events SET attempt = ? WHERE event_type = ?").run(2, 'subworkflow_linked');
+    f.event('child', 'subworkflow_finished');
+    expect((await f.get()).body.items[0].parentAttempt).toBe(2);
+  });
+
+  it('does not borrow an attempt from an event on a different parent node', async () => {
+    const f = await fixture(); f.run('child'); f.event('child', 'subworkflow_linked', 'node-a');
+    f.raw.prepare("UPDATE flow_events SET attempt = ? WHERE event_type = ?").run(2, 'subworkflow_linked');
+    f.event('child', 'subworkflow_finished', 'node-b');
+    expect((await f.get()).body.items[0]).toMatchObject({ parentNodeId: 'node-b', parentAttempt: null });
   });
 
   it('omits missing, trial and independently unauthorized children without exposing their IDs', async () => {
