@@ -402,7 +402,7 @@ impl ManagedDeliveryPreparationService for QueuedGroupPreparation {
             if task.leg == crate::queued_task::TaskLeg::Dispatch) {
             delivery.send_started_at_ms.and_then(|started| u64::try_from(started).ok())
                 .ok_or_else(|| invalid("task send start missing"))?
-                .saturating_add(flow.provider_chat_run_timeout_ms).max(deadline_ms.saturating_add(300_000))
+                .saturating_add(flow.provider_chat_run_timeout_ms).max(deadline_ms.saturating_add(crate::delivery_runtime::TASK_ABORT_RESERVE.as_millis() as u64))
         } else { deadline_ms };
         run_context
             .put_context(bcs_service_api::BotRunContext {
@@ -1062,6 +1062,16 @@ async fn prepare_queued_group_bounded(
         if let Some(params) = request.params.as_mut() {
             params["task_id"] = serde_json::json!(task_id);
             params["idempotency_key"] = serde_json::json!(row.idempotency_key);
+            if delivery_target.is_http_provider() {
+                if let Some(seconds) = projection.task.as_ref()
+                    .filter(|task| task.leg == crate::queued_task::TaskLeg::Dispatch)
+                    .and_then(|task| task.timeout_s) {
+                    let budget_ms = seconds.saturating_mul(1000)
+                        .saturating_add(crate::delivery_runtime::TASK_ABORT_RESERVE.as_millis() as u64)
+                        .max(flow.provider_chat_run_timeout_ms);
+                    params["timeout_ms"] = serde_json::json!(budget_ms);
+                }
+            }
         }
     }
     if let Some(identity) = source.content.get("channel_sender_identity") {

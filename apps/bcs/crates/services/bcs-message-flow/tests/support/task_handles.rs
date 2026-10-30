@@ -59,6 +59,60 @@ async fn cancel_wait_timeout_keeps_intent_then_final_wins() {
 }
 
 #[tokio::test]
+async fn cancel_persistence_failure_is_an_error_and_can_be_retried() {
+    for running in [false, true] {
+        let mut f = Fixture::new().await;
+        let row = assign(&f, "12345678000000000000000000000000", None).await;
+        if running { f.start(&row).await; }
+        let faults = Arc::new(failing_delivery::FailingDelivery::new(f.service.clone()));
+        faults.arm("transition", 1);
+        f.flow = Fixture::configured_flow(&f.support, &f.service, &f.repo, &f.live,
+            |flow| flow.with_managed_deliveries(faults.clone())).await;
+        let error = f.flow.cancel_task("12345678".into(), "stop".into()).await.unwrap_err();
+        assert!(matches!(error, bcs_service_api::ServiceError::InternalError(_)));
+        assert!(error.to_string().contains("injected transition"));
+        assert_eq!(faults.remaining(), 0);
+        let stored = f.rows().await.into_iter().find(|r| r.delivery_id == row.delivery_id).unwrap();
+        assert_eq!(stored.state.status, if running { Status::Dispatching } else { Status::Queued });
+        assert!(stored.cancel_reason.is_none(), "failed write cannot record a cancel intent");
+        f.live.snapshot.write().await.policy.task_cancel_wait_ms = 100;
+        let retry = f.flow.cancel_task("12345678".into(), "retry".into()).await.unwrap();
+        assert_eq!(retry.status, if running { S::Unknown } else { S::Cancelled });
+    }
+}
+
+#[tokio::test]
+async fn provider_custom_timeout_preserves_execution_and_abort_budgets() {
+    use bcs_message_flow::delivery_runtime::{DeliveryRuntime, DeliveryRuntimeConfig};
+    use std::time::Duration;
+    for timeout_s in [60, 4 * 60 * 60] {
+        let f = Fixture::new().await;
+        f.support.registry.set_delivery_target("bot-observer",
+            support::FakeRegistryService::provider_target("bot-observer")).await;
+        f.live.snapshot.write().await.policy.task_timeout_max_s = 5 * 60 * 60;
+        let row = assign(&f, "12345678000000000000000000000000", Some(timeout_s)).await;
+        let runtime = DeliveryRuntime { caller_dispatch:None, policy:Some(f.live.clone()), service:f.service.clone(),
+            preparation:Arc::new(QueuedGroupPreparation { flow:Arc::downgrade(&f.flow), deliveries:f.service.clone() }),
+            transport:f.support.bot_delivery.clone(), config:DeliveryRuntimeConfig {
+                max_safe_retries:0, pause_dispatch:false, bots:Default::default(), tick:Duration::from_millis(2),
+                expiry_tick:Duration::from_millis(20), io_timeout:Duration::from_secs(1), run_timeout:Duration::from_secs(3 * 60 * 60),
+                cancel_timeout:Duration::from_secs(1), startup_recovery_grace:Duration::ZERO, max_tasks:4, max_abort_tasks:1 } };
+        let (stop, shutdown) = tokio::sync::watch::channel(false);
+        let job = tokio::spawn(runtime.run(shutdown));
+        f.wait_frames(1).await;
+        let wire = serde_json::to_value(&f.support.bot_delivery.frames().await[0]).unwrap();
+        let expected = (timeout_s * 1000 + 300_000).max(f.flow.provider_chat_run_timeout_ms);
+        assert_eq!(wire["params"]["timeout_ms"], expected);
+        let started = f.rows().await.into_iter().find(|r| r.delivery_id == row.delivery_id).unwrap();
+        assert_eq!(started.run_deadline_at_ms.unwrap() - started.send_started_at_ms.unwrap(), timeout_s as i64 * 1000);
+        let context = f.flow.bot_run_context.as_ref().unwrap().get_context(started.run_id.as_ref().unwrap()).await.unwrap();
+        assert_eq!(context.deadline_ms as i64 - started.send_started_at_ms.unwrap(), expected as i64);
+        stop.send(true).unwrap();
+        job.await.unwrap().unwrap();
+    }
+}
+
+#[tokio::test]
 async fn absent_cancel_is_not_a_tombstone_and_timeout_is_clamped() {
     let f = Fixture::new().await;
     assert_eq!(f.flow.cancel_task("23456789".into(), "stop".into()).await.unwrap().status, S::NotFound);

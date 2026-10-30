@@ -70,7 +70,7 @@ fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
-const TASK_ABORT_RESERVE: Duration = Duration::from_secs(5 * 60);
+pub(crate) const TASK_ABORT_RESERVE: Duration = Duration::from_secs(5 * 60);
 
 fn run_timeout_for(row: &PersistedMessageDelivery, provider_timeout: Duration) -> Duration {
     let is_worker_task = row.flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::Task

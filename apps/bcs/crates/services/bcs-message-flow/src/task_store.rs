@@ -451,8 +451,9 @@ fn target_name(entry: &TaskEntry) -> String {
 }
 
 fn status_at(entry: &TaskEntry, now_ms: u64) -> TaskLedgerStatus {
+    let timeout_ms = entry.timeout_s.map(|seconds| seconds.saturating_mul(1000)).unwrap_or(TASK_TTL_MS);
     if !entry.managed && entry.status == TaskLedgerStatus::Dispatched
-        && now_ms.saturating_sub(entry.created_at_ms) > TASK_TTL_MS
+        && now_ms.saturating_sub(entry.created_at_ms) > timeout_ms
     {
         return TaskLedgerStatus::TimedOut;
     }
@@ -559,6 +560,25 @@ mod status_tests {
             .pending_targets_at("g1", Some("s1"), TASK_TTL_MS + 1)
             .await
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn legacy_completion_guard_uses_each_tasks_custom_timeout() {
+        for timeout_s in [60, 4 * 60 * 60] {
+            let store = TaskStore::new();
+            let mut entry = sample_entry("custom");
+            entry.session_id = Some("s1".into());
+            entry.timeout_s = Some(timeout_s);
+            entry.created_at_ms = 1234;
+            store.register(entry).await;
+            let deadline = 1234 + timeout_s * 1000;
+            let pending = store.pending_targets_at("g1", Some("s1"), deadline).await;
+            assert_eq!(pending, vec!["worker-1".to_string()]);
+            assert!(store.ledger_summary_at("g1", Some("s1"), deadline).await.timed_out.is_empty());
+            assert!(store.pending_targets_at("g1", Some("s1"), deadline + 1).await.is_empty());
+            assert_eq!(store.ledger_summary_at("g1", Some("s1"), deadline + 1).await.timed_out,
+                vec!["worker-1".to_string()]);
+        }
     }
 
     #[tokio::test]

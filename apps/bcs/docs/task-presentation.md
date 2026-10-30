@@ -96,7 +96,9 @@ The cancel wait defaults to 5000ms, configurable to 100–15000ms in delivery
 policy. It subscribes to post-commit delivery changes, with a 1s read fallback.
 Only confirmed stops or atomic never-sent cancellation return `cancelled`;
 ambiguous/absent refs never change any task. CAS conflicts re-read state. The
-legacy cancellation handler survives the synchronous wait and retains confirmed
+cancel service propagates persistence failures as application errors rather than
+successful `unknown` responses; unconfirmed transport outcomes remain `unknown`.
+The legacy cancellation handler survives the synchronous wait and retains confirmed
 stop facts while retrying terminal publication, without repeating abort. Stop
 confirmation shares the terminal-event lock with Worker finals; the winning
 terminal cannot be replaced by the other path. Uncertainty-notice dedup facts
@@ -108,7 +110,11 @@ managed Provider cancellation retains the existing pinned-scope safety checks.
 `timeout_s` is optional and clamped to policy min/max (defaults 1/10500 seconds).
 The managed deadline starts at send-start; omitted values retain the existing
 Provider timeout minus five-minute reserve. Legacy sends keep their existing
-context identity and get a retained deadline handler. There are no soft-timeout
+context identity and get a retained deadline handler. The legacy completion guard
+uses the same clamped custom timeout instead of the fixed default TTL. Queued
+HTTP Worker dispatches also carry an explicit Provider execution budget of at
+least the task timeout plus the five-minute abort reserve (or the larger existing
+Provider budget), matching their callback correlation lifetime. There are no soft-timeout
 reminders. Activity timestamps are process-local soft state and are omitted when
 lost. No automatic retry classification or retry budget is widened.
 

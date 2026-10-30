@@ -210,7 +210,7 @@ async fn cancel_inner(flow: &BcsMessageFlow, value: &str, reason: &str) -> Servi
                         Err(bcs_service_api::ManagedDeliveryError::Conflict
                             | bcs_service_api::ManagedDeliveryError::Lifecycle(bcs_service_api::core::message_delivery::DeliveryLifecycleError::StaleVersion { .. })
                             | bcs_service_api::ManagedDeliveryError::Repository(bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError::Conflict)) => {},
-                        Err(_) => return Ok(simple(S::Unknown)),
+                        Err(error) => return Err(ServiceError::InternalError(format!("task cancellation transition failed: {error}"))),
                     }
                 }
                 if let Some(receiver) = changes.as_mut() {

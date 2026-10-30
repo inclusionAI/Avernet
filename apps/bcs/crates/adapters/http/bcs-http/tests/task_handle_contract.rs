@@ -4,7 +4,7 @@ use bcs_service_api::{MessageFlowService, ServiceResult, TaskHandleStatus as S, 
 use std::sync::Arc;
 use tower::ServiceExt;
 
-struct Flow;
+struct Flow { cancel_storage_failure: bool }
 #[async_trait]
 impl MessageFlowService for Flow {
     async fn handle_bot_event(&self, _: bcs_service_api::BotEventCommand) -> ServiceResult<bcs_service_api::BotEventOutcome> { unreachable!() }
@@ -20,6 +20,9 @@ impl MessageFlowService for Flow {
     }
     async fn cancel_task(&self, reference: String, reason: String) -> ServiceResult<View> {
         assert_eq!(reason, "please stop");
+        if self.cancel_storage_failure {
+            return Err(bcs_service_api::ServiceError::InternalError("task cancellation persistence failed".into()));
+        }
         Ok(View::new(reference, S::Unknown))
     }
 }
@@ -31,7 +34,7 @@ async fn task_http_contract_is_minimal_and_does_not_treat_absence_as_stop() {
         ("/tasks/cancel", serde_json::json!({"task_ref":"T-1234abcd","reason":"please stop"}), serde_json::json!({"ref":"T-1234abcd","status":"unknown"})),
     ] {
         let mut services = bcs_services_container::Services::noop();
-        services.message_flow = Arc::new(Flow);
+        services.message_flow = Arc::new(Flow { cancel_storage_failure:false });
         let app = bcs_http::router::build_router(bcs_http::state::HttpAppState::new(services));
         let response = app.oneshot(Request::builder().method("POST").uri(path)
             .header("content-type", "application/json").body(Body::from(input.to_string())).unwrap()).await.unwrap();
@@ -39,4 +42,15 @@ async fn task_http_contract_is_minimal_and_does_not_treat_absence_as_stop() {
         let body = to_bytes(response.into_body(), 4096).await.unwrap();
         assert_eq!(serde_json::from_slice::<serde_json::Value>(&body).unwrap(), expected);
     }
+}
+
+#[tokio::test]
+async fn cancellation_storage_errors_return_service_unavailable() {
+    let mut services = bcs_services_container::Services::noop();
+    services.message_flow = Arc::new(Flow { cancel_storage_failure:true });
+    let app = bcs_http::router::build_router(bcs_http::state::HttpAppState::new(services));
+    let response = app.oneshot(Request::builder().method("POST").uri("/tasks/cancel")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::json!({"task_ref":"T-1234abcd","reason":"please stop"}).to_string())).unwrap()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
 }

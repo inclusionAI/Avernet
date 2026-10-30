@@ -24,6 +24,8 @@ mod migrations;
 mod queued_task_review;
 #[path = "support/task_status_notifications.rs"]
 mod task_status_notifications;
+#[path = "support/failing_delivery.rs"]
+mod failing_delivery;
 
 const SESSION: &str = "group-1:task";
 fn admin() -> CallerContext { CallerContext::Human(HumanActor { actor_id:"human_operator".into(), staff_no:"operator".into() }) }
