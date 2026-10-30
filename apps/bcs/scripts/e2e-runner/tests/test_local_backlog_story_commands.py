@@ -368,7 +368,7 @@ class DualEdgePermissionBacklogRegistrationTests(unittest.TestCase):
                 '--case', 'unknown-slice', '--state-dir', '/state',
                 '--run-id', 'run-1', '--confirm-run-id', 'run-1'])
 
-    def test_backlog_rows_flip_to_dual_case_receipts(self):
+    def test_backlog_rows_flip_to_executable_dual_receipts(self):
         rows = migration_plan()['local_backlog_case_slices']
         expected_ids = {'LOCAL-EDGE-TC-FRIEND-AUTH-SYNC-01',
                         'LOCAL-EDGE-DEPT-SCOPE-FRIEND-EXT-01'}
@@ -376,13 +376,13 @@ class DualEdgePermissionBacklogRegistrationTests(unittest.TestCase):
         self.assertEqual(len(rows), 2)
         for row in rows:
             with self.subTest(case_id=row['case_id']):
-                self.assertEqual(row['status'], 'DUAL_CASE_RECEIPT')
-                self.assertEqual(row['canonical_reporting'], 'DUAL_CASE_RECEIPT')
+                self.assertEqual(row['status'], 'DUAL_EXECUTION_READY')
+                self.assertEqual(row['canonical_reporting'], 'DUAL_EXECUTION_READY')
                 self.assertEqual(row['execution_command'],
-                                 'dual-edge-permission-backlog-run')
+                                 'dual-edge-friend-mutation-run')
                 self.assertEqual(row['report_command'], '')
                 self.assertEqual(row['required_parameters'], [
-                    'profile', 'case', 'state_dir', 'run_id',
+                    'profile', 'station_profile', 'case', 'state_dir', 'run_id',
                     'confirm_run_id', 'allow_write'])
                 self.assertEqual(row['remote_validation'], 'NOT_RUN')
                 self.assertFalse(row['release_parent_denominator'])

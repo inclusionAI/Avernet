@@ -367,7 +367,7 @@ class WriteClient:
         if not body:
             raise WriteTransportError("friend-mutation profile patch requires a field")
         path = binding["path"].replace(
-            "{bot_uuid}", quote(target_actor_id, safe=""))
+            "{bot_id}", quote(target_actor_id, safe=""))
         return self._friend_mutation_request(
             operation="friend_connection_mutation.visibility.write",
             binding_name="friend_connection_mutation.visibility.write",

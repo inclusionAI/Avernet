@@ -300,6 +300,9 @@ class ReadClient:
                 else:
                     bound_bot_id = identifier(bot_id, f"{operation}.bot_id")
                 path = path.replace("{bot_uuid}", quote(bound_bot_id, safe=""))
+            if "{bot_id}" in path:
+                bound_bot_id = identifier(bot_id, f"{operation}.bot_id")
+                path = path.replace("{bot_id}", quote(bound_bot_id, safe=""))
         elif operation in _WEBHOOK_PRINCIPAL_READS:
             # The reviewed public-v1 Event Subscription read core. Every
             # route is declared in the profile's opt-in cross-environment

@@ -214,7 +214,7 @@ FRIEND_MUTATION_CONNECTIONS_PATH = (
     "/openapi/v1/collaboration/friend-connections"
     "?actor_type=bot&actor_id={actor_id}&target_type=bot&page=1&page_size=20"
 )
-FRIEND_MUTATION_BOT_DETAIL_PATH = "/openapi/v1/collaboration/bots/{bot_uuid}"
+FRIEND_MUTATION_BOT_DETAIL_PATH = "/openapi/v1/collaboration/bots/{bot_id}"
 FRIEND_MUTATION_DISCOVER_PATH = "/openapi/v1/bots/discover?collaborate_bot={target_actor_id}"
 FRIEND_MUTATION_REVOKE_PATH = (
     "/openapi/v1/collaboration/friend-connections"
@@ -231,6 +231,7 @@ STATION_DISCOVER_ORGANIZATION_PATH = "/bots/discover?organization_code=DEMO"
 
 _FRIEND_MUTATION_GATEWAY_OPS = {
     "friend_connection_mutation.create",
+    "friend_connection_mutation.create_as_bot",
     "friend_connection_mutation.accept",
     "friend_connection_mutation.reject",
     "friend_connection_mutation.cancel",
@@ -256,6 +257,7 @@ _FRIEND_MUTATION_STATION_OPS = {
 }
 _FRIEND_MUTATION_PAIR_OPS = {
     "friend_connection_mutation.create",
+    "friend_connection_mutation.create_as_bot",
     "friend_connection_mutation.accept",
     "friend_connection_mutation.reject",
     "friend_connection_mutation.cancel",
@@ -443,6 +445,8 @@ _EDGE_CASES = {
     "webhook.delivery.read": ("GET", EVENT_DELIVERY_PATH, "gateway_principal"),
     "webhook.subscription.delete": ("DELETE", EVENT_SUBSCRIPTION_DELETE_PATH, "gateway_principal"),
     "friend_connection_mutation.create": ("POST", FRIEND_MUTATION_CREATE_PATH, "human_cookie"),
+    "friend_connection_mutation.create_as_bot":
+        ("POST", FRIEND_MUTATION_CREATE_PATH, "human_cookie_owned_bot"),
     "friend_connection_mutation.accept": ("POST", FRIEND_MUTATION_ACCEPT_PATH, "human_cookie"),
     "friend_connection_mutation.reject": ("POST", FRIEND_MUTATION_REJECT_PATH, "human_cookie"),
     "friend_connection_mutation.cancel": ("POST", FRIEND_MUTATION_CANCEL_PATH, "human_cookie"),

@@ -4,8 +4,10 @@ from __future__ import annotations
 import hashlib
 import os
 from typing import Any
+from urllib.parse import quote
 
 from .case_adapters import AdapterCall
+from .local_edge_backlog import MIXED_SCOPE, SCOPED_SHAPE, assert_dept_scope_parse
 from .profile import ConfigError
 from .route_bindings import require_edge_case_binding
 from .run_state import RunStateError
@@ -37,6 +39,8 @@ _STATION_OPERATIONS = (
 )
 _MUTATION_RELATIONSHIP = "bounded-owned-bot-mutations"
 _TRANSPORT = "public-v1-http"
+HUMAN_COOKIE_ENV = "BCS_E2E_HUMAN_COOKIE"
+STATION_BOT_TOKEN_ENV = "BCS_E2E_STATION_BOT_TOKEN"
 _GATEWAY_HUMAN_DISCOVER_REJECTIONS = {
     # The Gateway public-v1 face never serves human-Cookie bot discovery;
     # observed rejections honestly span the gateway auth/validation seams:
@@ -85,10 +89,12 @@ class RemoteEdgeFriendMutationAdapter:
         gateway_wrong_authorization = (
             gateway_environment.get("tier") == "preprod" and "Authorization" in gateway_headers
         )
-        if "Cookie" not in gateway_headers or gateway_wrong_authorization or not gateway_profile.get("browser_origin"):
+        if (gateway_headers != {"Cookie": HUMAN_COOKIE_ENV}
+                or gateway_wrong_authorization or not gateway_profile.get("browser_origin")):
             raise RunStateError("Edge friend mutations require a Cookie-bound Gateway browser context")
-        if "Cookie" not in station_headers or "Authorization" not in station_headers:
-            raise RunStateError("Edge friend mutations require the station dual-identity context")
+        if station_headers != {"Cookie": HUMAN_COOKIE_ENV,
+                               "Authorization": STATION_BOT_TOKEN_ENV}:
+            raise RunStateError("Edge friend mutations require the exact station dual-identity context")
         if gateway_profile.get("actors") != station_profile.get("actors"):
             raise RunStateError("Gateway and station profiles must declare the same dedicated actors")
         try:
@@ -107,6 +113,29 @@ class RemoteEdgeFriendMutationAdapter:
         self.writer = WriteClient(gateway_profile)
         self.station_reader = ReadClient(station_profile)
         self.station_writer: Any = None
+        # The station Bot never becomes a second user identity.  The public-v1
+        # copy of the Gateway profile exists solely for the department agent
+        # parser leg, which must call the mounted openapi Friend route with the
+        # dedicated Bot token while retaining the owning Human Cookie.
+        station_gateway_profile = dict(gateway_profile)
+        station_gateway_profile["auth"] = {
+            "header_env": {
+                "Cookie": HUMAN_COOKIE_ENV,
+                "Authorization": STATION_BOT_TOKEN_ENV,
+            }
+        }
+        station_bindings = {
+            operation: dict(binding)
+            for operation, binding in gateway_profile.get("edge_case_bindings", {}).items()
+        }
+        create = station_bindings.get("friend_connection_mutation.create")
+        if not isinstance(create, dict):
+            raise RunStateError("Edge red-case Bot create requires the public Friend create binding")
+        station_bindings["friend_connection_mutation.create_as_bot"] = {
+            **create, "auth": "human_cookie_owned_bot",
+        }
+        station_gateway_profile["edge_case_bindings"] = station_bindings
+        self.station_gateway_writer = WriteClient(station_gateway_profile)
         self._registered: dict[str, dict] = {}
         self._verify_ownership()
 
@@ -145,7 +174,8 @@ class RemoteEdgeFriendMutationAdapter:
             "projection": data,
             "requests": list(requests),
         }
-        secrets = {**self.reader.headers, **self.writer.headers, **self.station_reader.headers}
+        secrets = {**self.reader.headers, **self.writer.headers,
+                   **self.station_reader.headers, **self.station_gateway_writer.headers}
         station_writer = self.station_writer
         if station_writer is not None:
             secrets = {**secrets, **station_writer.headers}
@@ -697,20 +727,192 @@ class RemoteEdgeFriendMutationAdapter:
     def run_ensure_bot(self) -> AdapterCall:
         raise self._service_gap("run_ensure_bot")
 
+    def _openapi_binding(self, operation: str, client: Any | None = None) -> dict:
+        try:
+            return require_edge_case_binding(
+                (client or self.writer).profile, operation)
+        except (ConfigError, ValueError) as error:
+            raise RunStateError(str(error)) from None
+
+    def _openapi_call(self, client: Any, *, operation: str, path: str,
+                      body: dict, expected: tuple[int, ...],
+                      admit_error: bool = False) -> tuple[dict, dict]:
+        data, record = client._friend_mutation_request(
+            operation=operation, binding_name=operation, path=path, body=body,
+            expected=expected, admit_error=admit_error,
+            response_mode="public-envelope",
+        )
+        if record.get("http_status") not in expected:
+            raise RunStateError("Edge red-case transport status differs from the reviewed route")
+        return data, record
+
+    def _human_create(self, target_actor_id: str, *, expected: tuple[int, ...],
+                      message: str, admit_error: bool = False) -> tuple[dict, dict]:
+        operation = "friend_connection_mutation.create"
+        binding = self._openapi_binding(operation)
+        body = {"to_actor": self._actor(target_actor_id), "message": message}
+        return self._openapi_call(
+            self.writer, operation=operation, path=binding["path"], body=body,
+            expected=expected, admit_error=admit_error,
+        )
+
     def run_tc_friend_request_create_accept(self) -> AdapterCall:
-        raise self._service_gap("run_tc_friend_request_create_accept")
+        create, create_record = self._human_create(
+            self.member_actor_id, expected=(201,), message="tc friend-auth-sync preprod")
+        request_ids = self._valid_pending_create(create)
+        if len(request_ids) != 1:
+            raise RunStateError("TC friend create must return exactly one pending request")
+        request_id = request_ids[0]
+        operation = "friend_connection_mutation.accept"
+        binding = self._openapi_binding(operation)
+        path = binding["path"].replace(
+            "{request_id}", quote(request_id, safe=""))
+        accepted, accept_record = self._openapi_call(
+            self.writer, operation=operation, path=path, body={},
+            expected=(200,),
+        )
+        if (not isinstance(accepted, dict) or accepted.get("status") != "approved"
+                or accepted.get("request_id") != request_id
+                or type(accepted.get("edge_id")) is not int):
+            raise RunStateError("TC friend acceptance did not return the exact approved edge")
+        self.tc_friend_request = {"request_id": request_id, "member": self.member_actor_id}
+        return self._finish(
+            operation="friend.mutation.tc_friend_auth_sync_create_accept",
+            fixture_effect="OWNED_MEMBER_EDGE_RETAINED",
+            data={"request_id": request_id, "status": "approved",
+                  "member_bot_id": self.member_actor_id},
+            requests=[create_record, accept_record],
+        )
 
     def run_tc_friend_auth_sync_readdress(self) -> AdapterCall:
-        raise self._service_gap("run_tc_friend_auth_sync_readdress")
+        state = getattr(self, "tc_friend_request", None)
+        if not isinstance(state, dict) or state.get("request_id") is None:
+            raise RunStateError("TC sync obligation requires its completed create/accept step")
+        # BCS does not expose the backend-bound FriendAuthSync JWT on any
+        # public route.  A live PASS needs the reviewed work-order receiver's
+        # bounded sync receipt (principal only).  Until the credential window
+        # supplies that observation, the adapter fails closed instead of
+        # pretending that an approved HTTP row proves the signing re-address.
+        error = RunStateError(
+            "TC friend-auth sync requires a bounded external work-order receipt")
+        error.gap = {
+            "gap": "TC_FRIEND_AUTH_SYNC_RECEIPT_OBSERVATION",
+            "singlebox_closure": False,
+            "request_id": state["request_id"],
+            "tc_bot_id": state["member"],
+            "required_receipt": "one grant principal with iss=bcs and aud=backend",
+            "approver_identity": "authenticated human cookie principal",
+            "station_bot_token_env": STATION_BOT_TOKEN_ENV,
+        }
+        raise error
 
     def run_dept_scope_mixed_owner_patch(self) -> AdapterCall:
-        raise self._service_gap("run_dept_scope_mixed_owner_patch")
+        operation = "friend_connection_mutation.visibility.write"
+        binding = self._openapi_binding(operation)
+        path = binding["path"].replace(
+            "{bot_id}", quote(self.member_actor_id, safe=""))
+        body = {
+            "user_visibility": "protected",
+            "friend_check_in_strategy": "DEPT_FREE",
+            "friend_ext": MIXED_SCOPE["friend_ext"],
+        }
+        patched, record = self._openapi_call(
+            self.writer, operation=operation, path=path, body=body,
+            expected=(200,),
+        )
+        friend_ext = patched.get("friend_ext") if isinstance(patched, dict) else None
+        parsed = assert_dept_scope_parse(friend_ext, {
+            "no_check_scope_friend_deps": ["F4858", "蚂蚁集团-信贷事业群"],
+            "view_scope_user_friend_deps": [],
+            "view_scope_agent_friend_deps": ["L3480"],
+        })
+        self.dept_scope_state = {"mixed": parsed, "member": self.member_actor_id}
+        return self._finish(
+            operation="friend.mutation.dept_scope_mixed_owner_patch",
+            fixture_effect="OWNER_PATCHED_PROFILE",
+            data={"bot_id": self.member_actor_id, "scopes": parsed["scopes"],
+                  "dropped": parsed["dropped"]},
+            requests=[record],
+        )
 
     def run_dept_scope_human_no_check(self) -> AdapterCall:
-        raise self._service_gap("run_dept_scope_human_no_check")
+        created, record = self._human_create(
+            self.member_actor_id, expected=(201,),
+            message="owned-local no-check object friend_ext parse",
+        )
+        ids = self._valid_pending_create(created)
+        if len(ids) != 1:
+            raise RunStateError("Human friend create must return exactly one pending request")
+        return self._finish(
+            operation="friend.mutation.dept_scope_human_no_check",
+            fixture_effect="HUMAN_PENDING_REQUEST_RETAINED",
+            data={"request_id": ids[0], "status": "pending",
+                  "parser_path": "human-no-check"},
+            requests=[record],
+        )
+
+    def _dept_create(self, *, client: Any, operation: str, body: dict,
+                    expected: tuple[int, ...]) -> tuple[dict, dict]:
+        binding = self._openapi_binding(operation, client)
+        return self._openapi_call(
+            client, operation=operation, path=binding["path"], body=body,
+            expected=expected, admit_error=(403,) <= expected,
+        )
 
     def run_dept_scope_human_user_scope(self) -> AdapterCall:
-        raise self._service_gap("run_dept_scope_human_user_scope")
+        operation = "friend_connection_mutation.visibility.write"
+        binding = self._openapi_binding(operation)
+        path = binding["path"].replace(
+            "{bot_id}", quote(self.member_actor_id, safe=""))
+        patch_body = {"friend_ext": SCOPED_SHAPE["friend_ext"]}
+        patched, patch_record = self._openapi_call(
+            self.writer, operation=operation, path=path, body=patch_body,
+            expected=(200,),
+        )
+        parsed = assert_dept_scope_parse(patched.get("friend_ext", {}), {
+            "no_check_scope_friend_deps": ["F4858", "蚂蚁集团-信贷事业群"],
+            "view_scope_user_friend_deps": ["L3480"],
+            "view_scope_agent_friend_deps": ["L3480"],
+        })
+        created, create_record = self._dept_create(
+            client=self.writer,
+            operation="friend_connection_mutation.create",
+            body={"to_actor": self._actor(self.member_actor_id),
+                  "message": "owned-local scoped friend_ext parse"},
+            expected=(201, 403),
+        )
+        status = None
+        if create_record["http_status"] == 201:
+            ids = self._valid_pending_create(created)
+            if len(ids) != 1:
+                raise RunStateError("Human friend create must return exactly one pending request")
+            status = ids[0]
+        else:
+            status = "out_of_scope"
+        return self._finish(
+            operation="friend.mutation.dept_scope_human_user_scope",
+            fixture_effect="USER_SCOPE_PATCHED",
+            data={"scoped_patch_status": patch_record["http_status"],
+                  "human_create_http_status": create_record["http_status"],
+                  "human_create_outcome": status, "scopes": parsed["scopes"],
+                  "dropped": parsed["dropped"]},
+            requests=[patch_record, create_record],
+        )
 
     def run_dept_scope_bot_agent_scope(self) -> AdapterCall:
-        raise self._service_gap("run_dept_scope_bot_agent_scope")
+        created, record = self._dept_create(
+            client=self.station_gateway_writer,
+            operation="friend_connection_mutation.create_as_bot",
+            body={"from_actor": self._actor(self.driver_actor_id),
+                  "to_actor": self._actor(self.member_actor_id)},
+            expected=(201, 403),
+        )
+        status = self._valid_pending_create(created)[0] if record["http_status"] == 201 else "out_of_scope"
+        return self._finish(
+            operation="friend.mutation.dept_scope_bot_agent_scope",
+            fixture_effect="AGENT_SCOPE_PARSED",
+            data={"bot_create_http_status": record["http_status"],
+                  "bot_create_outcome": status, "caller_bot_id": self.driver_actor_id,
+                  "target_bot_id": self.member_actor_id},
+            requests=[record],
+        )

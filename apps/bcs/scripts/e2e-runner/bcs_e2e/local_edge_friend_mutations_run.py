@@ -24,7 +24,6 @@ from .edge_friend_mutation_case import (
     CASE_IDS,
     RELEASE_CASE_IDS,
     RELEASE_PARENT_IDS,
-    TOTAL_ASSERTION_COUNT,
     edge_friend_mutation_case_plan,
     edge_friend_mutation_source_binding,
 )
@@ -230,8 +229,19 @@ def local_edge_friend_mutations_run(*, binary: Path, binary_sha256: str,
                                     confirm_run_id: str,
                                     allow_local_processes: bool,
                                     allow_fixture_write: bool,
-                                    allow_write: bool) -> dict:
-    """Execute all nine Edge friend obligations in one owned runtime."""
+                                    allow_write: bool,
+                                    case_ids: tuple[str, ...] = CASE_IDS) -> dict:
+    """Execute the selected Edge friend obligations in one owned runtime.
+
+    ``case_ids`` defaults to the complete nine-Case suite and accepts only a
+    non-empty ordered subsequence of that frozen plan.  The two red Edge
+    TestCase migrations inherit this runtime, mock child and fixture lifecycle
+    without duplicating transport code or receipt assertions.
+    """
+    if (not case_ids or any(value not in CASE_IDS for value in case_ids)
+            or len(case_ids) != len(set(case_ids))
+            or list(case_ids) != [value for value in CASE_IDS if value in set(case_ids)]):
+        raise RunStateError('Edge friend-mutation selection must be a non-empty ordered subsequence')
     if not (allow_local_processes is True and allow_fixture_write is True
             and allow_write is True and confirm_run_id == run_id):
         raise RunStateError('Edge friend mutation requires process/fixture/business permissions and exact Run confirmation')
@@ -248,7 +258,7 @@ def local_edge_friend_mutations_run(*, binary: Path, binary_sha256: str,
         raise RunStateError('Edge friend mutation state directory parent cannot be a symlink')
     source = executor_digest()
     bindings = {case_id: edge_friend_mutation_source_binding(case_id)
-                for case_id in CASE_IDS}
+                for case_id in case_ids}
     legacy = current_manifest()['legacy_inventory']
     reviewed = reviewed_release_inventory()
     if set(RELEASE_PARENT_IDS) - {row['id'] for row in reviewed}:
@@ -266,14 +276,15 @@ def local_edge_friend_mutations_run(*, binary: Path, binary_sha256: str,
             mock.start()
             binding = {
                 'schema_version': 1, 'contract': SUITE, 'suite': SUITE,
-                'run_id': run_id, 'case_ids': list(CASE_IDS),
+                'run_id': run_id, 'case_ids': list(case_ids),
                 'release_parent_case_ids': list(RELEASE_CASE_IDS),
                 'backlog_case_ids': list(BACKLOG_CASE_IDS),
-                'expected_assertion_count': TOTAL_ASSERTION_COUNT,
+                'expected_assertion_count': sum(len(bindings[value]['requirements'])
+                                                for value in case_ids),
                 'executor_digest': source, 'bcs_binary_sha256': binary_sha256,
                 'selected_requirement_ids': {
                     case_id: [row['id'] for row in bindings[case_id]['requirements']]
-                    for case_id in CASE_IDS},
+                    for case_id in case_ids},
                 'source_bindings': bindings, 'legacy_inventory': legacy,
                 'runtime_dir': str(state_dir.resolve()),
                 'friend_work_order_base_url': mock.origin,
@@ -300,7 +311,7 @@ def local_edge_friend_mutations_run(*, binary: Path, binary_sha256: str,
                             identities.verify(role)
                         fixture_admission = OwnedEdgeFriendFixtureAdmission(
                             runtime, bot_id=identities.actor_id('CEO'))
-                        for case_id in CASE_IDS:
+                        for case_id in case_ids:
                             plan = edge_friend_mutation_case_plan(case_id)
                             adapter = OwnedEdgeFriendMutationsAdapter(
                                 runtime, identities, fixture_admission,
@@ -334,7 +345,7 @@ def local_edge_friend_mutations_run(*, binary: Path, binary_sha256: str,
     binding_record = read(binding_path) if binding_path.is_file() else {}
     expected_journals = {
         case_id: read(root / journal_filename(case_id))
-        for case_id in CASE_IDS
+        for case_id in case_ids
         if (root / journal_filename(case_id)).is_file()
     }
     runtime_record = runtime._record()
@@ -345,14 +356,14 @@ def local_edge_friend_mutations_run(*, binary: Path, binary_sha256: str,
         and binding_record == binding
         and mock_record is not None
         and mock_record.get('status') == 'STOPPED'
-        and len(cases) == len(CASE_IDS)
-        and set(expected_journals) == set(CASE_IDS)
+        and len(cases) == len(case_ids)
+        and set(expected_journals) == set(case_ids)
         and all(cases[index].get('case_id') == case_id
                  and expected_journals[case_id].get('status') == 'PASS'
                  and cases[index].get('status') == 'PASS'
                  and cases[index].get('error_type') is None
                  and cases[index].get('completed_count') == cases[index].get('total_count')
-                 for index, case_id in enumerate(CASE_IDS))
+                 for index, case_id in enumerate(case_ids))
         and all(step.get('status') == 'PASS' for journal in expected_journals.values()
                 for step in journal.get('steps', []))
         and runtime_record.get('status') == 'STOPPED'
@@ -364,7 +375,7 @@ def local_edge_friend_mutations_run(*, binary: Path, binary_sha256: str,
               else 'BLOCKED')
     result = {
         'schema_version': 1, 'status': status, 'run_id': run_id,
-        'suite': SUITE, 'case_ids': list(CASE_IDS),
+        'suite': SUITE, 'case_ids': list(case_ids),
         'release_parent_case_ids': list(RELEASE_CASE_IDS),
         'backlog_case_ids': list(BACKLOG_CASE_IDS), 'cases': cases,
         'executor_digest': source, 'shutdown': runtime_record,
@@ -375,7 +386,7 @@ def local_edge_friend_mutations_run(*, binary: Path, binary_sha256: str,
     if error is not None:
         result['error_type'] = type(error).__name__
     write(root / 'edge-friend-mutations-flow-report.json', result)
-    if mock_record is not None and set(expected_journals) == set(CASE_IDS):
+    if mock_record is not None and set(expected_journals) == set(case_ids) == set(CASE_IDS):
         try:
             from .local_edge_friend_mutations_reporting import (
                 publish_edge_friend_mutations,

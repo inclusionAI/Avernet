@@ -172,7 +172,7 @@ class Harness:
         self.registered[bot_name] = bot_id
         return {"bot_name": bot_name, "bot_uuid": bot_id, "bot_token": MEMBER_TOKEN}
 
-    def create(self, from_actor: str, to_actor: str) -> tuple[dict, dict, int]:
+    def create(self, from_actor: str, to_actor: str, *, pair_count: int | None = None) -> tuple[dict, dict, int]:
         self.writes.append(("create", {"from": from_actor, "to": to_actor}))
         if from_actor == to_actor:
             body = {"code": 40000, "message": "self", "data": {"error_code": "cannot_add_self"}}
@@ -191,7 +191,8 @@ class Harness:
         if matches:
             ids = [row["request_id"] for row in matches]
             return {"request_ids": ids, "edge_ids": [], "status": "pending", "auto_accepted": False}, {"operation": "create", "http_status": 201}, 201
-        ids = self._ids()[:max(1, self.pair_count)]
+        count = self.pair_count if pair_count is None else pair_count
+        ids = self._ids()[:max(1, count)]
         for index, request_id in enumerate(ids):
             sender, receiver = ((from_actor, to_actor) if index == 0 else (to_actor, from_actor))
             self.pending.append({
@@ -295,7 +296,7 @@ class FakeWrite:
     def __init__(self, profile: dict, harness: Harness):
         self.profile = profile
         self.harness = harness
-        station = profile["entrypoint"]["kind"] == "bcs-direct"
+        station = "Authorization" in profile.get("auth", {}).get("header_env", {})
         self.headers = {"Cookie": "human-cookie", "Authorization": "registered-owned-bot-token"} if station else {"Cookie": "human-cookie"}
 
     def create_edge_friend_request(self, from_actor_id, to_actor_id, *, expected=(201,), admit_error=False):
@@ -334,6 +335,57 @@ class FakeWrite:
         self.harness.edges.clear()
         self.harness.pending.clear()
         return {"success": True, "error": None, "data": {"revoked_edges": [7001, 7002]}}, {"operation": "station_revoke", "http_status": 200}
+
+    def _friend_mutation_request(self, *, operation, binding_name, path, body=None,
+                                    expected=(200,), admit_error=False,
+                                    response_mode="public-envelope"):
+        if body is None:
+            body = {}
+        record = {
+            "operation": operation, "binding_name": binding_name,
+            "path": path, "http_status": None,
+            "credentials_sent": "Cookie" in self.headers,
+            "authorization_sent": "Authorization" in self.headers,
+            "error_admitted": bool(admit_error and 403 in expected),
+        }
+        if operation == "friend_connection_mutation.create":
+            to_actor = body["to_actor"]["id"]
+            from_actor = body.get("from_actor", {}).get("id", HUMAN)
+            data, _, status = self.harness.create(
+                from_actor, to_actor,
+                pair_count=1 if from_actor == HUMAN else None,
+            )
+            record["http_status"] = status
+            record["submitted_to_actor"] = to_actor
+            return data, record
+        if operation == "friend_connection_mutation.create_as_bot":
+            to_actor = body["to_actor"]["id"]
+            data, _, status = self.harness.create(
+                body["from_actor"]["id"], to_actor)
+            record["http_status"] = status
+            record["submitted_to_actor"] = to_actor
+            return data, record
+        if operation == "friend_connection_mutation.accept":
+            request_id = path.split("/requests/", 1)[1].split("/", 1)[0]
+            row = next(item for item in self.harness.pending
+                       if item["request_id"] == request_id)
+            data, _, status = self.harness.decide(
+                action="accept", request_id=request_id,
+                from_actor=row["from_actor"]["id"],
+                to_actor=row["to_actor"]["id"])
+            data = {**data, "request_id": request_id}
+            record["http_status"] = status
+            return data, record
+        if operation == "friend_connection_mutation.visibility.write":
+            record["http_status"] = 200
+            record["submitted_friend_ext"] = dict(body.get("friend_ext", {}))
+            self.harness.writes.append((
+                "public_patch",
+                {"target": path.strip("/").rsplit("/", 1)[-1], "body": dict(body)},
+            ))
+            return {"bot_id": path.strip("/").rsplit("/", 1)[-1],
+                    "friend_ext": body.get("friend_ext", {})}, record
+        raise AssertionError("unsupported red-case fake write: " + operation)
 
 
 class ClientFactory:
@@ -479,23 +531,84 @@ class AdapterTest(unittest.TestCase):
         self.assertEqual(result.data["organization_no_requester_drift"]["code"], "forbidden")
         self.assertEqual(result.data["gateway_human_discover"]["code"], 401000)
 
-    def test_service_scope_fails_closed_at_each_executed_obligation(self):
+    def test_unadmitted_ensure_bot_service_scope_fails_closed(self):
         adapter, _ = self.adapter()
-        methods = (
-            "run_ensure_bot",
-            "run_tc_friend_request_create_accept",
-            "run_tc_friend_auth_sync_readdress",
-            "run_dept_scope_mixed_owner_patch",
-            "run_dept_scope_human_no_check",
-            "run_dept_scope_human_user_scope",
-            "run_dept_scope_bot_agent_scope",
-        )
+        methods = ("run_ensure_bot",)
         for method in methods:
             with self.subTest(method=method):
                 with self.assertRaisesRegex(RunStateError, "PREPROD_SERVICE_SCOPE_GAP") as context:
                     getattr(adapter, method)()
                 self.assertEqual(context.exception.gap["gap"], "PREPROD_SERVICE_SCOPE_GAP")
                 self.assertTrue(context.exception.gap["singlebox_closure"])
+
+    def test_red_tc_preprod_branch_executes_create_accept_then_fails_closed(self):
+        adapter, harness = self.adapter()
+        result = adapter.run_tc_friend_request_create_accept()
+        self.assertEqual(result.data["status"], "approved")
+        self.assertEqual(result.data["member_bot_id"], MEMBER)
+        self.assertEqual([row["operation"] for row in result.evidence["requests"]], [
+            "friend_connection_mutation.create",
+            "friend_connection_mutation.accept",
+        ])
+        self.assertEqual(result.evidence["requests"][0]["path"],
+                         "/openapi/v1/collaboration/friend-connections/requests")
+        self.assertEqual(result.evidence["requests"][1]["path"],
+                         "/openapi/v1/collaboration/friend-connections/requests/"
+                         + result.data["request_id"] + "/accept")
+        for record in result.evidence["requests"]:
+            self.assertTrue(record["credentials_sent"])
+            self.assertFalse(record["authorization_sent"])
+        self.assertEqual(result.evidence["remote_validation"], "NOT_RUN")
+        self.assertFalse(result.evidence["grants_release_credit"])
+        with self.assertRaisesRegex(RunStateError, "bounded external work-order receipt") as context:
+            adapter.run_tc_friend_auth_sync_readdress()
+        self.assertEqual(context.exception.gap["gap"],
+                         "TC_FRIEND_AUTH_SYNC_RECEIPT_OBSERVATION")
+        self.assertEqual(context.exception.gap["tc_bot_id"], MEMBER)
+        self.assertEqual(context.exception.gap["required_receipt"],
+                         "one grant principal with iss=bcs and aud=backend")
+
+    def test_red_dept_scope_preprod_branch_executes_all_four_obligations(self):
+        adapter, harness = self.adapter()
+        mixed = adapter.run_dept_scope_mixed_owner_patch()
+        self.assertEqual(mixed.data["scopes"], {
+            "no_check_scope_friend_deps": ["F4858", "蚂蚁集团-信贷事业群"],
+            "view_scope_user_friend_deps": [],
+            "view_scope_agent_friend_deps": ["L3480"],
+        })
+        self.assertEqual(mixed.evidence["requests"][0]["path"],
+                         "/openapi/v1/collaboration/bots/" + MEMBER)
+        self.assertEqual(mixed.data["dropped"], {
+            "no_check_scope_friend_deps": [],
+            "view_scope_user_friend_deps": [],
+            "view_scope_agent_friend_deps": [1],
+        })
+        no_check = adapter.run_dept_scope_human_no_check()
+        self.assertEqual(no_check.data["status"], "pending")
+        self.assertEqual(no_check.evidence["requests"][0]["path"],
+                         "/openapi/v1/collaboration/friend-connections/requests")
+        human_scope = adapter.run_dept_scope_human_user_scope()
+        self.assertEqual(human_scope.data["human_create_http_status"], 201)
+        self.assertEqual(human_scope.evidence["requests"][0]["path"],
+                         "/openapi/v1/collaboration/bots/" + MEMBER)
+        self.assertEqual(human_scope.data["scopes"], {
+            "no_check_scope_friend_deps": ["F4858", "蚂蚁集团-信贷事业群"],
+            "view_scope_user_friend_deps": ["L3480"],
+            "view_scope_agent_friend_deps": ["L3480"],
+        })
+        bot_scope = adapter.run_dept_scope_bot_agent_scope()
+        self.assertEqual(bot_scope.data["bot_create_http_status"], 201)
+        self.assertEqual(bot_scope.data["caller_bot_id"], DRIVER)
+        self.assertEqual(bot_scope.data["target_bot_id"], MEMBER)
+        self.assertEqual(bot_scope.evidence["requests"][0]["operation"],
+                         "friend_connection_mutation.create_as_bot")
+        self.assertEqual(bot_scope.evidence["requests"][0]["path"],
+                         "/openapi/v1/collaboration/friend-connections/requests")
+        self.assertTrue(bot_scope.evidence["requests"][0]["credentials_sent"])
+        self.assertTrue(bot_scope.evidence["requests"][0]["authorization_sent"])
+        for result in (mixed, no_check, human_scope, bot_scope):
+            self.assertEqual(result.evidence["remote_validation"], "NOT_RUN")
+            self.assertFalse(result.evidence["grants_release_credit"])
 
 
 if __name__ == "__main__":
