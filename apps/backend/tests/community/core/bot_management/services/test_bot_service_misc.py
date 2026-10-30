@@ -75,6 +75,9 @@ def _make_service() -> BotService:
     svc._bot_publish_provider = lambda: MagicMock()
     svc._device_service_provider = lambda: MagicMock()
     svc._restart_lock_repo = MagicMock()
+    manifest_apply_lock_repo = MagicMock()
+    manifest_apply_lock_repo.acquire.return_value = MagicMock(lock_token="manifest-token")
+    svc._manifest_apply_lock_repo = manifest_apply_lock_repo
     svc._template_service = MagicMock()
     svc._cleanup_service = MagicMock()
     svc._path_factory = MagicMock()
@@ -799,6 +802,106 @@ class TestDeleteBot:
         result = svc.delete_bot("mybot", "user001")
         assert result is True
 
+
+# ===========================================================================
+# delete_bot — serialized against configuration apply
+# ===========================================================================
+
+
+class TestDeleteBotApplyLock:
+    """A delete and the existing apply lock hold the same one-bot key, and
+    they do not overlap.
+
+    The goal is not to invent a new join: deletion after apply means seeing an
+    already-soft-deleted bot during a rewrite; deletion during apply means the
+    rewrite may touch a bot record the delete has already hidden. The existing
+    apply lock already owns exactly that distinction, so to narrow the race we
+    take the same lock first, refuse if another process has it, and release
+    under our token at every exit.
+    """
+
+    def test_locks_one_bot_before_any_destructive_side_effect(self):
+        """Same apply contract: lock first, no side effect while lock is held."""
+        svc = _make_service()
+        bot = _make_bot(binding_id=None)
+        svc._repository.get_by_id_and_owner.return_value = bot
+        svc._passport_plugin.destroy_passport.return_value = None
+        svc._repository.soft_delete_by_owner.return_value = True
+
+        assert svc.delete_bot("bot001", "user001") is True
+
+        # The narrow contract: config apply holds the exact same one-bot lock,
+        # so a racing rewrite cannot continue while this delete is mutating
+        # grants/device/passport/state.
+        assert svc._manifest_apply_lock_repo.acquire.call_args == mock_call(
+            env="dev",
+            entity_id="user001",
+            bot_id="bot001",
+            holder_user_id="user001",
+        )
+        assert svc._manifest_apply_lock_repo.release.call_args == mock_call(
+            env="dev",
+            entity_id="user001",
+            bot_id="bot001",
+            lock_token="manifest-token",
+        )
+
+    def test_refuses_to_delete_when_apply_is_already_holding_the_same_key(self):
+        """Held lock means an apply is inside its destructive side effects."""
+        svc = _make_service()
+        lock_repo = MagicMock()
+        lock_repo.acquire.return_value = None
+        svc._manifest_apply_lock_repo = lock_repo
+        bot = _make_bot(binding_id=None)
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        with pytest.raises(BotServiceError, match="configuration apply is in progress"):
+            svc.delete_bot("bot001", "user001")
+
+        svc._bot_app_grant_provider().revoke_all_for_bot.assert_not_called()
+        svc._passport_plugin.destroy_passport.assert_not_called()
+        svc._repository.soft_delete_by_owner.assert_not_called()
+        lock_repo.release.assert_not_called()
+
+    def test_validation_failure_leaves_nothing_to_release_and_side_effects_alone(self):
+        """Validation happens before the lock, so it cannot cover a held remnant."""
+        svc = _make_service()
+        bot = _make_bot(bot_id="earliest", binding_id=None)
+        svc._repository.get_by_id_and_owner.return_value = bot
+        svc._repository.list_by_owner.return_value = (1, [{
+            "bot_id": "earliest", "gmt_create": "2026-07-01 00:00:00",
+        }])
+
+        with pytest.raises(BotServiceError, match="首个创建"):
+            svc.delete_bot("earliest", "user001")
+
+        assert svc._manifest_apply_lock_repo.acquire.call_args is None
+        assert svc._manifest_apply_lock_repo.release.call_args is None
+        svc._bot_app_grant_provider().revoke_all_for_bot.assert_not_called()
+        svc._passport_plugin.destroy_passport.assert_not_called()
+        svc._repository.soft_delete_by_owner.assert_not_called()
+
+    def test_a_failed_destructive_side_effect_releases_the_delete_lock(self):
+        """Leaving a delete-held lock stranded wedges the apply indefinitely."""
+        svc = _make_service()
+        bot = _make_bot(binding_id=None)
+        svc._repository.get_by_id_and_owner.return_value = bot
+        svc._bot_app_grant_provider = lambda: MagicMock()
+        svc._cleanup_service.purge_startup_script.side_effect = RuntimeError("store down")
+
+        with pytest.raises(BotServiceError, match="Failed to delete bot"):
+            svc.delete_bot("bot001", "user001")
+
+        lock_repo = svc._manifest_apply_lock_repo
+        lock_repo.acquire.assert_called_once()
+        lock_repo.release.assert_called_once_with(
+            env="dev",
+            entity_id="user001",
+            bot_id="bot001",
+            lock_token="manifest-token",
+        )
+        svc._repository.soft_delete_by_owner.assert_not_called()
+        svc._passport_plugin.destroy_passport.assert_not_called()
 
 # ===========================================================================
 # delete_bot — earliest-bot protection (cannot delete the owner's first created bot)

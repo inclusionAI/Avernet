@@ -406,7 +406,6 @@ class BotManagementModule(Module):
     def bot_repository(self, db: DatabasePlugin) -> BotRepository:
         return UnifiedBotRepository(db)
 
-
     @singleton
     @provider
     @inject
@@ -518,6 +517,7 @@ class BotManagementModule(Module):
         template_service: TemplateService,
         collaborator_repo: CollaboratorRepositoryProtocol,
         restart_lock_repo: BotRestartLockRepositoryProtocol,
+        manifest_apply_lock_repo: BotConfigManifestApplyLockRepositoryProtocol,
         teclaw_provision_service_provider: Callable[[], TeclawProvisionService],
         baas_config: cfg.BaasConfig,
         policy_service: PolicyServiceProtocol,
@@ -561,6 +561,7 @@ class BotManagementModule(Module):
             workspace_hosting_service=_optional_get(injector, WorkspaceHostingService),
             collaborator_repo=collaborator_repo,
             restart_lock_repo=restart_lock_repo,
+            manifest_apply_lock_repo=manifest_apply_lock_repo,
             teclaw_provision_service_provider=teclaw_provision_service_provider,
             drm_reader=drm_reader,
             # Leaf BaaS reader for the by-owner list's live desktop status.

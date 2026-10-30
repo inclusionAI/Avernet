@@ -11,6 +11,7 @@ tests all import them from here so there is one place to change a field.
 import asyncio
 from pathlib import Path
 
+
 import httpx
 from injector import inject
 from pydantic import BaseModel, Field
@@ -51,6 +52,11 @@ from agentclaw.community.di.modules.skill_center_module import (
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
+
+
+_TRANSIENT_STATUS_CODES = {502, 504}
+_TRANSIENT_HTTP_DELAY_SECONDS = 0.1
+_TRANSIENT_HTTP_ATTEMPTS = 1
 
 
 # HTML comment markers for reference files section in AGENTS.md
@@ -372,18 +378,46 @@ class IdentityService(IdentityFilePort):
         return await self._read_through(device_fs, file_type)
 
     @staticmethod
-    async def _read_through(device_fs, file_type: str) -> str:
+    def _is_transient_status(exc: httpx.HTTPStatusError) -> bool:
+        """Whether the response is an infra-gateway retry, not a domain answer.
+
+        ``502/504`` mean the gateway/device did not answer the request
+        correctly, so the same identity read or write may be repeated.
+        ``404`` is the file's absence — a final domain answer and never a
+        retry; other 5xx mean the health of a remote repository and are left
+        to the existing error handling.
+        """
+        return exc.response.status_code in _TRANSIENT_STATUS_CODES
+
+    @staticmethod
+    async def _read_through(device_fs, file_type: str, *, attempts: int = 0) -> str:
         """One identity file, through an **already-resolved** ``device_fs``.
 
         Split out of :meth:`_device_read` so a caller reading many files for one
         runtime resolves that runtime once — see :meth:`list_bot_files`. The 404
         contract is the one described there and is not repeated.
+        ``attempts`` is the zero-based retry transition already completed; the
+        public callers start with no retry and the recursion below is therefore
+        effectively bounded by ``_TRANSIENT_HTTP_ATTEMPTS``.
         """
         try:
             content_bytes = await device_fs.read_file(f"{IDENTITY_NS}/{file_type}")
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
                 return ""
+            if attempts < _TRANSIENT_HTTP_ATTEMPTS and IdentityService._is_transient_status(e):
+                logger.warning(
+                    "[identity.read_through] transient HTTPStatusError, "
+                    "file_type=%s, status=%s, retrying once",
+                    file_type,
+                    e.response.status_code,
+                )
+                await asyncio.sleep(_TRANSIENT_HTTP_DELAY_SECONDS)
+                return await IdentityService._read_through(
+                    device_fs,
+                    file_type,
+                    attempts=attempts + 1,
+                )
             raise
         return content_bytes.decode("utf-8") if content_bytes else ""
 
@@ -405,9 +439,23 @@ class IdentityService(IdentityFilePort):
             owner_id=owner_id,
             engine_type=engine_type,
         )
-        await device_fs.write_file(
-            f"{IDENTITY_NS}/{file_type}", content.encode("utf-8")
-        )
+        try:
+            await device_fs.write_file(
+                f"{IDENTITY_NS}/{file_type}", content.encode("utf-8")
+            )
+        except httpx.HTTPStatusError as e:
+            if not IdentityService._is_transient_status(e):
+                raise
+            logger.warning(
+                "[identity.write] transient HTTPStatusError, file_type=%s, "
+                "status=%s, retrying once",
+                file_type,
+                e.response.status_code,
+            )
+            await asyncio.sleep(_TRANSIENT_HTTP_DELAY_SECONDS)
+            await device_fs.write_file(
+                f"{IDENTITY_NS}/{file_type}", content.encode("utf-8")
+            )
 
     async def read_identity_file(
         self,

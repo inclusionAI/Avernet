@@ -77,8 +77,14 @@ if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.engines.aicoding.restart_dependencies import (
         RestartBackupDependencies,
     )
+from agentclaw.community.core.apply_engine.repository.apply_models import (
+    BotConfigManifestApplyLockRecord,
+)
 from agentclaw.community.core.bot_management.repository.models import BotRestartLockRecord
 from agentclaw.community.core.repository.protocols.bot import BotRestartLockRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot import (
+    BotConfigManifestApplyLockRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.default_image_policy_listener import (
     DEFAULT_IMAGE_POLICY_VALUE,
@@ -364,6 +370,7 @@ class BotService(BotServiceProtocol):
         workspace_hosting_service: "Optional[WorkspaceHostingService]",
         collaborator_repo: CollaboratorRepositoryProtocol,
         restart_lock_repo: BotRestartLockRepositoryProtocol,
+        manifest_apply_lock_repo: BotConfigManifestApplyLockRepositoryProtocol,
         teclaw_provision_service_provider: "Callable[[], TeclawProvisionService]",
         device_status_client: "DeviceStatusClient",
         cron_auto_setup_service_provider: "Callable[[], CronAutoSetupService]",
@@ -430,6 +437,10 @@ class BotService(BotServiceProtocol):
         # unbound. Both use sites go through ``_require_workspace_hosting`` (B8).
         self._collaborator_repo = collaborator_repo
         self._restart_lock_repo = restart_lock_repo
+        # Another engine of the same one-per-bot key family as ``restart_lock``:
+        # deletion and apply may not run together, so the delete arm carries
+        # its own handle beside the restart one.
+        self._manifest_apply_lock_repo = manifest_apply_lock_repo
         # Lazy (cycle-safe): teclaw provisioning pulls in BaasService +
         # ConfigComposer, whose graphs transitively reach BotService.
         self._teclaw_provision_provider = teclaw_provision_service_provider
@@ -4025,6 +4036,7 @@ class BotService(BotServiceProtocol):
         if not user_id:
             raise BotServiceError("User ID is required for deleting bot")
 
+        manifest_lock_key = None
         try:
             bot = self.validate_delete_bot(bot_id, user_id)
             from agentclaw.community.core.bot_management.addressing import stable_resource_owner_id
@@ -4032,6 +4044,26 @@ class BotService(BotServiceProtocol):
                 stable_resource_owner_id(bot)
                 if bot.get("bot_type") == "service" and bot_id != "default"
                 else user_id
+            )
+
+            # Own the apply-side lock before the first destructive side
+            # effect. It is one more one-bot key in the existing apply lock's
+            # family, not a restart lock and not a cross-bucket key.
+            manifest_lock = self._manifest_apply_lock_repo.acquire(
+                env=get_current_env(),
+                entity_id=resource_owner_id,
+                bot_id=bot_id,
+                holder_user_id=user_id,
+            )
+            if manifest_lock is None:
+                raise BotServiceError(
+                    "Bot configuration apply is in progress; delete cannot run"
+                )
+            manifest_lock_key = (
+                get_current_env(),
+                resource_owner_id,
+                bot_id,
+                manifest_lock.lock_token,
             )
 
             # Withdraw every application authorization standing against this
@@ -4146,6 +4178,12 @@ class BotService(BotServiceProtocol):
                 logger.info(f"[bot_service.delete_bot] Skipping cleanup for default bot {bot_id} (restart scenario)")
 
             logger.info(f"[bot_service.delete_bot] Bot {bot_id} deleted successfully")
+            self._manifest_apply_lock_repo.release(
+                env=manifest_lock_key[0],
+                entity_id=manifest_lock_key[1],
+                bot_id=manifest_lock_key[2],
+                lock_token=manifest_lock_key[3],
+            )
             return True
         except BotNotFoundError:
             raise
@@ -4154,6 +4192,13 @@ class BotService(BotServiceProtocol):
             # 会被重新包成通用 BotServiceError，调用方看到 500 并可能无谓重试。
             raise
         except Exception as e:
+            if manifest_lock_key is not None:
+                self._manifest_apply_lock_repo.release(
+                    env=manifest_lock_key[0],
+                    entity_id=manifest_lock_key[1],
+                    bot_id=manifest_lock_key[2],
+                    lock_token=manifest_lock_key[3],
+                )
             logger.error(f"[bot_service.delete_bot] Failed to delete bot {bot_id}: {e}")
             raise BotServiceError(f"Failed to delete bot: {e}")
 
