@@ -16,6 +16,8 @@ import httpx
 from injector import inject
 from pydantic import BaseModel, Field
 
+from agentclaw.community.core.services.identity_publish_device import read_identity_from_publish_device
+
 from agentclaw.community.core.workspace.protected_entries import IDENTITY_FILE_NAMES
 from agentclaw.community.core.bot_config_surface.coords import BotConfigCoords
 from agentclaw.community.core.errors import InternalError
@@ -890,70 +892,19 @@ class IdentityService(IdentityFilePort):
         operator_id: str,
         engine_type: str,
     ) -> str | None:
-        """Read an identity file from a publish record's stage device binding.
-
-        Resolves the stage ``bind_id`` (``ext.binding`` online→verify) and reads
-        provider-blind via ``resolve_for_binding → dispatch_addressed →
-        device_fs.read_file("identity/<file>")`` — covering arca / baas / teclaw
-        uniformly (replaces the old ``ARCA_`` target string-sniff). Returns ``None``
-        when the publish record / stage binding can't be resolved.
-
-        Deliberately **not** ``engine_runtime.stage.resolve_stage_bind_id``,
-        which the stage-addressed read uses. The caller here named one publish
-        record, and that rule picks the newest record at a status — routing this
-        path through it would answer a question about release 7 from whichever
-        release is currently newest. Keyed by record, stay here; keyed by stage,
-        go there.
-        """
-        from agentclaw.community.core.service_bot.repository.models import (
-            select_stage_bind_id,
+        """Read an identity file from a publish record's stage device binding."""
+        return await read_identity_from_publish_device(
+            self._publish_repo,
+            self._resolver,
+            self._device_fs_dispatcher,
+            publish_id=publish_id,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            bot_id=bot_id,
+            file_type=file_type,
+            operator_id=operator_id,
+            engine_type=engine_type,
         )
-
-        try:
-            record = self._publish_repo.get_by_id(int(publish_id))
-            if not record:
-                logger.warning("[IdentityService] publish_id=%s not found", publish_id)
-                return None
-            ext = record.ext or {}
-            binding_info = ext.get("binding", {})
-            # Select by `record.status`; the final guard then treats a missing/0
-            # bind_id as "no stage binding" (binding PKs are ≥1, so 0 is never a
-            # real binding).
-            bind_id = select_stage_bind_id(binding_info, record.status)
-            if not bind_id:
-                logger.warning(
-                    "[IdentityService] publish_id=%s stage bind_id missing", publish_id
-                )
-                return None
-            try:
-                ctx = self._resolver.resolve_for_binding(
-                    int(bind_id), operator_id, bot_id=bot_id
-                )
-            except (DeviceNotBoundError, UnknownProviderError, ConnInfoBuildError) as e:
-                logger.warning(
-                    "[IdentityService] publish_id=%s bind_id=%s resolve failed: %s",
-                    publish_id,
-                    bind_id,
-                    e,
-                )
-                return None
-            device_fs = self._device_fs_dispatcher.dispatch_addressed(
-                ctx,
-                namespace=IDENTITY_NS,
-                entity_type=entity_type,
-                entity_id=entity_id,
-                bot_id=bot_id,
-                engine_type=engine_type,
-            )
-            content_bytes = await device_fs.read_file(f"{IDENTITY_NS}/{file_type}")
-            return content_bytes.decode("utf-8") if content_bytes else ""
-        except Exception as e:
-            logger.error(
-                "[IdentityService] publish read failed for publish_id=%s: %s",
-                publish_id,
-                e,
-            )
-            return None
 
     async def update_bot_file(
         self,
