@@ -378,7 +378,9 @@
         "mode": "DUAL",
         "preprod_verdict": "NOT_RUN",
         "gates": [],
-        "notes": []
+        "notes": [
+          "DRAFT_DELIVERY_DENSITY_24_OBLIGATIONS_20261031"
+        ]
       }
     },
     {
