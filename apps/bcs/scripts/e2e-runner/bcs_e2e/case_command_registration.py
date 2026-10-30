@@ -7,6 +7,7 @@ from pathlib import Path
 from .edge_read_case_run import CASE_KEYS as EDGE_CASE_KEYS
 from .network_read_case_run import CASE_KEYS as NETWORK_READ_CASE_KEYS
 from .edge_friend_mutation_case_run import CASE_KEYS as EDGE_FRIEND_MUTATION_CASE_KEYS
+from .edge_permission_backlog.case_run import CASE_KEYS as EDGE_PERMISSION_BACKLOG_CASE_KEYS
 from .session_service_cli_case_run import CASE_KEYS as SESSION_SERVICE_CASE_KEYS
 from .direct_chat_cli_case_run import CASE_KEYS as DIRECT_CHAT_CASE_KEYS
 from .delivery_policy_cli_case_run import CASE_KEYS as DELIVERY_POLICY_CASE_KEYS
@@ -48,6 +49,7 @@ CASE_COMMANDS = frozenset({
     "dual-network-status-run",
     "dual-friend-run",
     "dual-edge-friend-mutation-run",
+    "dual-edge-permission-backlog-run",
     "dual-session-service-run",
     "dual-operator-cli-run",
     "dual-direct-chat-run",
@@ -264,6 +266,15 @@ def register_case_commands(commands) -> None:
     edge_friend_mutation_case.add_argument("--run-id", required=True)
     edge_friend_mutation_case.add_argument("--confirm-run-id", required=True)
     edge_friend_mutation_case.add_argument("--allow-write", action="store_true")
+    edge_permission_backlog_case = commands.add_parser(
+        "dual-edge-permission-backlog-run",
+        help="Run the two backlog Edge-permission cases as offline dual receipts (local model + preprod placeholder)")
+    edge_permission_backlog_case.add_argument("--profile", type=Path, required=True)
+    edge_permission_backlog_case.add_argument("--case", choices=EDGE_PERMISSION_BACKLOG_CASE_KEYS, required=True)
+    edge_permission_backlog_case.add_argument("--state-dir", type=Path, required=True)
+    edge_permission_backlog_case.add_argument("--run-id", required=True)
+    edge_permission_backlog_case.add_argument("--confirm-run-id", required=True)
+    edge_permission_backlog_case.add_argument("--allow-write", action="store_true")
     session_service_case = commands.add_parser(
         "dual-session-service-run",
         help="Run the reviewed dual Session Service product-CLI stories through Singlebox or preprod")

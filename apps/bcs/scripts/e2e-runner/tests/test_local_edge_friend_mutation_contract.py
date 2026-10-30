@@ -240,10 +240,15 @@ class EdgeFriendMutationContractTests(unittest.TestCase):
                 self.assertTrue(row['independent_slice'])
                 self.assertFalse(row['release_parent_denominator'])
                 self.assertFalse(row['grants_release_credit'])
-                self.assertEqual(row['status'], 'LOCAL_EXECUTOR_ONLY_BACKLOG')
+                self.assertEqual(row['status'], 'DUAL_CASE_RECEIPT')
                 self.assertEqual(row['suite'], SUITE)
+                self.assertEqual(row['canonical_reporting'], 'DUAL_CASE_RECEIPT')
                 self.assertEqual(row['execution_command'],
-                                 'local-edge-friend-mutations-run')
+                                 'dual-edge-permission-backlog-run')
+                self.assertEqual(row['report_command'], '')
+                self.assertEqual(row['required_parameters'], [
+                    'profile', 'case', 'state_dir', 'run_id',
+                    'confirm_run_id', 'allow_write'])
                 self.assertEqual(
                     row['required_assertion_count'], expected[row['case_id']])
                 self.assertEqual(

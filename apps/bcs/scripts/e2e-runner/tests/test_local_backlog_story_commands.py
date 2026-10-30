@@ -341,5 +341,65 @@ class SlowJudgeBacklogTests(unittest.TestCase):
         self.assertNotIn('dual-provider-publishes-run', LOCAL_STORY_COMMANDS)
 
 
+
+class DualEdgePermissionBacklogRegistrationTests(unittest.TestCase):
+    def test_command_is_registered_only_in_the_dual_registry(self):
+        self.assertIn('dual-edge-permission-backlog-run', CASE_COMMANDS)
+        self.assertNotIn('dual-edge-permission-backlog-run', LOCAL_STORY_COMMANDS)
+        self.assertNotIn('local-edge-permission-backlog-run', LOCAL_STORY_COMMANDS)
+
+    def test_parser_accepts_the_offline_dual_flags(self):
+        from bcs_e2e.case_command_registration import register_case_commands
+        root_parser = argparse.ArgumentParser()
+        register_case_commands(root_parser.add_subparsers(dest='command', required=True))
+        parsed = root_parser.parse_args([
+            'dual-edge-permission-backlog-run', '--profile', '/preprod.json',
+            '--case', 'tc-friend-auth-sync', '--state-dir', '/state',
+            '--run-id', 'run-1', '--confirm-run-id', 'run-1', '--allow-write'])
+        self.assertEqual(parsed.command, 'dual-edge-permission-backlog-run')
+        self.assertEqual(parsed.profile, Path('/preprod.json'))
+        self.assertEqual(parsed.case, 'tc-friend-auth-sync')
+        self.assertEqual(parsed.state_dir, Path('/state'))
+        self.assertEqual(parsed.run_id, 'run-1')
+        self.assertTrue(parsed.allow_write)
+        with self.assertRaises(SystemExit):
+            root_parser.parse_args([
+                'dual-edge-permission-backlog-run', '--profile', '/preprod.json',
+                '--case', 'unknown-slice', '--state-dir', '/state',
+                '--run-id', 'run-1', '--confirm-run-id', 'run-1'])
+
+    def test_backlog_rows_flip_to_dual_case_receipts(self):
+        rows = migration_plan()['local_backlog_case_slices']
+        expected_ids = {'LOCAL-EDGE-TC-FRIEND-AUTH-SYNC-01',
+                        'LOCAL-EDGE-DEPT-SCOPE-FRIEND-EXT-01'}
+        rows = [row for row in rows if row['case_id'] in expected_ids]
+        self.assertEqual(len(rows), 2)
+        for row in rows:
+            with self.subTest(case_id=row['case_id']):
+                self.assertEqual(row['status'], 'DUAL_CASE_RECEIPT')
+                self.assertEqual(row['canonical_reporting'], 'DUAL_CASE_RECEIPT')
+                self.assertEqual(row['execution_command'],
+                                 'dual-edge-permission-backlog-run')
+                self.assertEqual(row['report_command'], '')
+                self.assertEqual(row['required_parameters'], [
+                    'profile', 'case', 'state_dir', 'run_id',
+                    'confirm_run_id', 'allow_write'])
+                self.assertEqual(row['remote_validation'], 'NOT_RUN')
+                self.assertFalse(row['release_parent_denominator'])
+                self.assertTrue(row['independent_slice'])
+                self.assertFalse(row['grants_release_credit'])
+
+    def test_executor_migration_rows_flip_to_dual_not_run(self):
+        from bcs_e2e.inventory import legacy_inventory_with_executor_migration
+        legacy = legacy_inventory_with_executor_migration()
+        rows = {row['id']: row['executor_migration'] for row in legacy}
+        for case_id in ('test_ep_tc_friend_auth_sync_readdressed_principal',
+                        'test_ep_dept_scope_parses_object_friend_ext_entries'):
+            with self.subTest(case_id=case_id):
+                self.assertEqual(rows[case_id]['mode'], 'DUAL')
+                self.assertEqual(rows[case_id]['preprod_verdict'], 'NOT_RUN')
+                self.assertEqual(rows[case_id]['gates'], [])
+                self.assertEqual(rows[case_id]['notes'], [])
+
 if __name__ == '__main__':
     unittest.main()

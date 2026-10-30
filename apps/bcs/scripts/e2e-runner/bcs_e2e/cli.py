@@ -62,6 +62,7 @@ from .webhook_subscription_case_run import dual_webhook_subscription_case_run
 from .friend_connection_decision_case_run import dual_friend_connection_decision_case_run
 from .friend_public_accept_case_run import dual_friend_public_accept_case_run
 from .edge_friend_mutation_case_run import dual_edge_friend_mutation_case_run
+from .edge_permission_backlog.case_run import dual_edge_permission_backlog_case_run
 from .edge_read_case_run import dual_edge_read_case_run
 from .case_command_registration import CASE_COMMANDS, register_case_commands
 from .remote_reconcile import remote_reconcile
@@ -651,6 +652,16 @@ def main(argv: list[str] | None = None) -> int:
                 run_id=args.run_id,
                 allow_write=args.allow_write,
                 confirm_run_id=args.confirm_run_id,
+            )
+            rc = 0 if report["status"] == "PASS" else 2
+        elif args.command == "dual-edge-permission-backlog-run":
+            report = dual_edge_permission_backlog_case_run(
+                profile_path=args.profile,
+                case_key=args.case,
+                state_dir=args.state_dir,
+                run_id=args.run_id,
+                confirm_run_id=args.confirm_run_id,
+                allow_write=args.allow_write,
             )
             rc = 0 if report["status"] == "PASS" else 2
         elif args.command == "dual-network-status-run":

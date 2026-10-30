@@ -302,7 +302,7 @@
     {
       "id": "test_ep_tc_friend_auth_sync_readdressed_principal",
       "executor_migration": {
-        "mode": "LOCAL_ONLY",
+        "mode": "DUAL",
         "preprod_verdict": "NOT_RUN",
         "gates": [],
         "notes": []
@@ -311,7 +311,7 @@
     {
       "id": "test_ep_dept_scope_parses_object_friend_ext_entries",
       "executor_migration": {
-        "mode": "LOCAL_ONLY",
+        "mode": "DUAL",
         "preprod_verdict": "NOT_RUN",
         "gates": [],
         "notes": []
