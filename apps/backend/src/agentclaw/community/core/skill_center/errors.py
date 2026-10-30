@@ -76,6 +76,9 @@ class LocalSkillInvalidPackageError(Exception):
 class LocalSkillTooLargeError(Exception):
     """A ZIP package exceeds a published upload limit."""
 
+    def __init__(self, message: str = "Skill package is too large.") -> None:
+        super().__init__(message)
+
 
 class LocalSkillNotReadyError(Exception):
     """The Bot cannot safely accept a mutation yet."""

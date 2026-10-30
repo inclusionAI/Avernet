@@ -477,6 +477,60 @@ class TestUploadSkillValidation:
             assert body["error_code"] == error_code
             assert body["message"] == message
 
+    def test_upload_too_large_logs_typed_nonempty_diagnostic(self, mock_ctx, caplog):
+        """A too-large upload must surface a non-empty, typed log diagnostic.
+
+        Regression for a CDO ``NEW`` error: ``[skills.upload_skill] Validation
+        error:`` was emitted with an *empty* message, because both
+        ``LocalSkillTooLargeError()`` and ``SkillPackageTooLargeError()`` were
+        raised without a message.  The user-facing envelope kept mapping the
+        error to "Skill package is too large." via ``isinstance`` in
+        ``_build_upload_error_response``, but the server log was unusable for
+        triage.
+        """
+        import logging
+
+        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (
+            client,
+            mock_svc,
+            _,
+            _,
+        ):
+            mock_svc.upload_local_skill_files.side_effect = LocalSkillTooLargeError()
+
+            with caplog.at_level(logging.ERROR, logger="start"):
+                response = client.post(
+                    "/api/skills/upload",
+                    files=[
+                        (
+                            "files",
+                            (
+                                "SKILL.md",
+                                b"---\nname: a\ndescription: a\n---",
+                                "text/markdown",
+                            ),
+                        )
+                    ],
+                    data={"file_paths": json.dumps(["SKILL.md"])},
+                )
+
+            body = response.json()
+            assert body["success"] is False
+            assert body["error_code"] == SkillUploadErrorCode.PACKAGE_TOO_LARGE
+            assert body["message"] == "Skill package is too large."
+
+            validation_records = [
+                record
+                for record in caplog.records
+                if record.levelname == "ERROR"
+                and "[skills.upload_skill] Validation error:" in record.getMessage()
+            ]
+            assert validation_records, "expected a Validation error log record"
+            logged = validation_records[0].getMessage()
+            assert "LocalSkillTooLargeError" in logged
+            assert "Skill package is too large" in logged
+            assert logged.strip() != "[skills.upload_skill] Validation error:"
+
     def test_upload_keeps_persistence_failure_distinct_from_runtime(self, mock_ctx):
         with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (
             client,
