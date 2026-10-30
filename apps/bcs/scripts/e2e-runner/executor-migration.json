@@ -360,7 +360,7 @@
         "mode": "DUAL",
         "preprod_verdict": "NOT_RUN",
         "gates": [],
-        "notes": []
+        "notes": ["SERVICE_POLICY_DENSITY_R1_PROJECTED_20261031"]
       }
     },
     {

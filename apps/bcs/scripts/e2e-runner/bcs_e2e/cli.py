@@ -65,6 +65,7 @@ from .dynamic_family.case_run import (dual_draft_group_case_run,
                                        dual_result_queue_case_run)
 from .workspace_field.dual_case_run import dual_workspace_field_command_handler
 from .delivery_density.reporting import dual_delivery_policy_density_case_run
+from .service_policy_density.reporting import dual_service_policy_density_case_run
 from .webhook_subscription_case_run import dual_webhook_subscription_case_run
 from .friend_connection_decision_case_run import dual_friend_connection_decision_case_run
 from .friend_public_accept_case_run import dual_friend_public_accept_case_run
@@ -682,6 +683,15 @@ def main(argv: list[str] | None = None) -> int:
             rc = dual_workspace_field_command_handler(args)
         elif args.command == "dual-delivery-policy-density-run":
             report = dual_delivery_policy_density_case_run(
+                profile_path=args.profile,
+                state_dir=args.state_dir,
+                run_id=args.run_id,
+                allow_write=args.allow_write,
+                confirm_run_id=args.confirm_run_id,
+            )
+            rc = 0 if report["status"] == "PASS" else 2
+        elif args.command == "dual-service-policy-density-run":
+            report = dual_service_policy_density_case_run(
                 profile_path=args.profile,
                 state_dir=args.state_dir,
                 run_id=args.run_id,

@@ -21,6 +21,7 @@ class DualWaveRegistrationTests(unittest.TestCase):
         self.assertIn("dual-draft-group-run", CASE_COMMANDS)
         self.assertIn("dual-workspace-field-run", CASE_COMMANDS)
         self.assertIn("dual-delivery-policy-density-run", CASE_COMMANDS)
+        self.assertIn("dual-service-policy-density-run", CASE_COMMANDS)
 
     def test_cli_builds_the_registered_parsers(self):
         from bcs_e2e.cli import main
@@ -28,7 +29,8 @@ class DualWaveRegistrationTests(unittest.TestCase):
         for command in ("dual-structured-density-run", "dual-fixed-loop-run",
                         "dual-nested-fixed-loop-run", "dual-result-queue-run",
                         "dual-draft-group-run", "dual-workspace-field-run",
-                        "dual-delivery-policy-density-run"):
+                        "dual-delivery-policy-density-run",
+                        "dual-service-policy-density-run"):
             with self.subTest(command=command):
                 with self.assertRaises(SystemExit) as caught:
                     main([command, "--help"])
