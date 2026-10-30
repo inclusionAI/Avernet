@@ -165,7 +165,7 @@
     {
       "id": "story_provider_callback_survives_slow_judge",
       "executor_migration": {
-        "mode": "LOCAL_ONLY",
+        "mode": "DUAL",
         "preprod_verdict": "NOT_RUN",
         "gates": [
           "MOCK"

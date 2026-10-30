@@ -430,6 +430,16 @@ def migration_plan() -> dict:
     provider_owner = provider_owner_source_binding()
     group_context = group_context_source_binding()
     service_policy_dual = service_policy_dual_source_binding()
+    from .provider_publishes.contract import (PARENT as PROVIDER_PUBLISHES_PARENT,
+                                               CASE_ID as PROVIDER_PUBLISHES_CASE_ID,
+                                               SUITE as PROVIDER_PUBLISHES_SUITE,
+                                               REQUIREMENTS as PROVIDER_PUBLISHES_REQUIREMENTS,
+                                               source_binding as provider_publishes_source_binding)
+    provider_publishes = provider_publishes_source_binding()
+    from .slow_judge.contract import (DUAL_SUITE as SLOW_JUDGE_DUAL_SUITE,
+                                      DUAL_CASE_ID as SLOW_JUDGE_DUAL_CASE_ID,
+                                      slow_judge_dual_source_binding)
+    slow_judge_dual = slow_judge_dual_source_binding()
     session_owner_slice = {
         'suite': SESSION_OWNER_SUITE, 'case_id': SESSION_OWNER_CASE_ID, 'case_version': 1,
         'legacy_id': session_owner['parent'], 'status': 'LOCAL_EXECUTOR_ONLY_BACKLOG',
@@ -580,6 +590,42 @@ def migration_plan() -> dict:
         'release_parent_denominator': False, 'independent_slice': True,
         'remote_validation': 'NOT_RUN', 'grants_release_credit': False,
         'source_map': 'service-policy-dual-migration-contract.json',
+    }
+    provider_publishes_dual_slice = {
+        'suite': PROVIDER_PUBLISHES_SUITE, 'case_id': PROVIDER_PUBLISHES_CASE_ID,
+        'case_version': 1, 'legacy_id': PROVIDER_PUBLISHES_PARENT,
+        'status': 'LOCAL_EXECUTOR_ONLY_BACKLOG',
+        'required_assertion_count': len(PROVIDER_PUBLISHES_REQUIREMENTS),
+        'requirement_ids': list(PROVIDER_PUBLISHES_REQUIREMENTS),
+        'canonical_reporting': 'DUAL_CASE_RECEIPT',
+        'execution_command': 'dual-provider-publishes-run',
+        'report_command': '',
+        'required_parameters': ['profile', 'binary', 'binary_sha256', 'cli_binary',
+                                'cli_binary_sha256', 'state_dir', 'run_id',
+                                'confirm_run_id', 'allow_write'],
+        'binary_kind': 'bcs', 'auto_build': False,
+        'environment': provider_publishes['environment'],
+        'release_parent_denominator': False, 'independent_slice': True,
+        'remote_validation': 'NOT_RUN', 'grants_release_credit': False,
+        'source_map': 'provider-publishes-migration-contract.json',
+    }
+    slow_judge_dual_slice = {
+        'suite': SLOW_JUDGE_DUAL_SUITE, 'case_id': SLOW_JUDGE_DUAL_CASE_ID,
+        'case_version': 1, 'legacy_id': judge['parent'],
+        'status': 'LOCAL_EXECUTOR_ONLY_BACKLOG',
+        'required_assertion_count': len(slow_judge_dual['requirements']),
+        'requirement_ids': [row['id'] for row in slow_judge_dual['requirements']],
+        'canonical_reporting': 'DUAL_CASE_RECEIPT',
+        'execution_command': 'dual-slow-judge-run',
+        'report_command': '',
+        'required_parameters': ['profile', 'binary', 'binary_sha256', 'cli_binary',
+                                'cli_binary_sha256', 'state_dir', 'run_id',
+                                'confirm_run_id', 'allow_write'],
+        'binary_kind': 'bcs', 'auto_build': False,
+        'environment': slow_judge_dual['environment'],
+        'release_parent_denominator': False, 'independent_slice': True,
+        'remote_validation': 'NOT_RUN', 'grants_release_credit': False,
+        'source_map': 'slow-judge-dual-migration-contract.json',
     }
     admission = admission_source_binding()
     friend_requests = friend_requests_list_source_binding()
@@ -736,14 +782,15 @@ def migration_plan() -> dict:
                    'grants_release_credit': False}
                   for plan in edge_friend_backlog_plans.values()],
                 session_owner_slice, draft_delivery_slice, provider_owner_slice,
-                group_context_slice, authority_dual_slice, service_policy_dual_slice],
+                group_context_slice, authority_dual_slice, service_policy_dual_slice,
+                provider_publishes_dual_slice, slow_judge_dual_slice],
             'local_partial_executors': [],
             'status': 'PLANNED_NOT_EXECUTABLE', 'ready_to_execute': False,
             'source_revision': contract['source_revision'], 'source_integrity': 'MATCHED',
             'legacy_inventory_count': len(inventory), 'mapped_story_count': len(contract['stories']),
             'migrated_story_count': 0, 'passed_assertion_count': 0,
             'scope': 'next three parent Stories only; requirements are not executed assertions',
-            'stories': contract['stories'], 'additional_source_maps': [network, sessions, provider, channel, channel_cli, direct_chat, structured, webhook, judge, fixed_loop, admission, friend_requests, friend_connections, bot_search, delivery_policy, operator_cli, collaboration_team, sessions_services, service_policy, authority, session_owner, draft_delivery, provider_owner, group_context, service_policy_dual, *edge_friend_mutation_maps],
+            'stories': contract['stories'], 'additional_source_maps': [network, sessions, provider, channel, channel_cli, direct_chat, structured, webhook, judge, fixed_loop, admission, friend_requests, friend_connections, bot_search, delivery_policy, operator_cli, collaboration_team, sessions_services, service_policy, authority, session_owner, draft_delivery, provider_owner, group_context, service_policy_dual, provider_publishes, slow_judge_dual, *edge_friend_mutation_maps],
             'cross_environment_source_candidates': {
                 **edge_read_adaptability(),
                 'cases': edge_read_adaptability()['cases'] + edge_search_adaptability()['cases'],

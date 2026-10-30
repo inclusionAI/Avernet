@@ -134,3 +134,40 @@ class DualTests(unittest.TestCase):
                  patch.object(dual, 'local_provider_publishes_run', return_value={'status': 'PASS', 'case': {'assertions': assertions}}):
                 result = dual.dual_provider_publishes_case_run(**kw)
             self.assertEqual(result['status'], 'BLOCKED')
+
+
+class DualProviderPublishesRegistrationTests(unittest.TestCase):
+    def test_cli_exposes_the_dual_command_and_ledger_pins_the_promotion(self):
+        from bcs_e2e.case_command_registration import CASE_COMMANDS
+        from bcs_e2e.inventory import load_executor_migration
+        self.assertIn('dual-provider-publishes-run', CASE_COMMANDS)
+        row = load_executor_migration()['story_provider_operator_publishes_agent']
+        self.assertEqual(row['mode'], 'DUAL')
+        self.assertEqual(row['preprod_verdict'], 'PASS')
+
+    def test_registration_seam_builds_the_frozen_nine_parameter_parser(self):
+        import argparse
+        from bcs_e2e.provider_publishes.dual_case_run import (
+            COMMAND, register_provider_publishes_dual_case_commands)
+        parser = argparse.ArgumentParser()
+        commands = parser.add_subparsers(dest='command')
+        register_provider_publishes_dual_case_commands(commands)
+        namespace = parser.parse_args([COMMAND] + [
+            '--profile', 'p', '--binary', 'b', '--binary-sha256', 's',
+            '--cli-binary', 'cb', '--cli-binary-sha256', 'cs',
+            '--state-dir', 'st', '--run-id', 'r', '--confirm-run-id', 'r',
+            '--allow-write'])
+        self.assertEqual(namespace.command, COMMAND)
+        self.assertTrue(namespace.allow_write)
+
+    def test_runner_help_exposes_the_command_contract(self):
+        import subprocess
+        runner = Path(__file__).resolve().parents[1] / 'runner.py'
+        completed = subprocess.run(
+            [sys.executable, str(runner), 'dual-provider-publishes-run', '--help'],
+            capture_output=True, text=True)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn('dual-provider-publishes-run', completed.stdout)
+        for flag in ('--profile', '--binary-sha256', '--cli-binary',
+                     '--confirm-run-id', '--allow-write'):
+            self.assertIn(flag, completed.stdout)

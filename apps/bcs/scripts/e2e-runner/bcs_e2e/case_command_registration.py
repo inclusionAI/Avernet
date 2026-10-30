@@ -19,6 +19,10 @@ from .session_owner.dual_case_run import (COMMAND as SESSION_OWNER_COMMAND,
                                           register_session_owner_dual_case_commands)
 from .authority.dual_case_run import (COMMAND as AUTHORITY_COMMAND,
                                       register_authority_dual_case_commands)
+from .provider_publishes.dual_case_run import (COMMAND as PROVIDER_PUBLISHES_COMMAND,
+                                               register_provider_publishes_dual_case_commands)
+from .slow_judge.dual_case_run import (COMMAND as SLOW_JUDGE_COMMAND,
+                                       register_slow_judge_dual_case_commands)
 
 
 CASE_COMMANDS = frozenset({
@@ -49,6 +53,8 @@ CASE_COMMANDS = frozenset({
     "dual-direct-chat-run",
     "dual-delivery-policy-run",
     "dual-provider-subbots-run",
+    PROVIDER_PUBLISHES_COMMAND,
+    SLOW_JUDGE_COMMAND,
     "dual-draft-delivery-run",
     "dual-service-policy-run",
     "dual-custom-collaboration-run",
@@ -335,6 +341,8 @@ def register_case_commands(commands) -> None:
     service_policy_case.add_argument("--allow-write", action="store_true")
     service_policy_case.add_argument("--binary", type=Path, required=True)
     service_policy_case.add_argument("--binary-sha256", required=True)
+    register_provider_publishes_dual_case_commands(commands)
+    register_slow_judge_dual_case_commands(commands)
     register_provider_owner_dual_case_commands(commands)
     register_session_owner_dual_case_commands(commands)
     register_authority_dual_case_commands(commands)

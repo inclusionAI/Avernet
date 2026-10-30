@@ -259,7 +259,7 @@ class GroupContextBacklogTests(unittest.TestCase):
 
     def test_group_context_row_is_backlog_with_explicit_report_gap(self):
         rows = migration_plan()['local_backlog_case_slices']
-        self.assertEqual(len(rows), 8)
+        self.assertEqual(len(rows), 10)
         row = next(row for row in rows if row['case_id'] == 'DUAL-GROUP-CONTEXT-CLI-01')
         self.assertEqual(row['suite'], 'dual-group-context-cli-v1')
         self.assertEqual(row['legacy_id'], 'story_cli_operator_manages_group_context')
@@ -277,6 +277,68 @@ class GroupContextBacklogTests(unittest.TestCase):
         self.assertFalse(row['release_parent_denominator'])
         self.assertTrue(row['independent_slice'])
         self.assertFalse(row['grants_release_credit'])
+
+
+
+
+class ProviderPublishesBacklogTests(unittest.TestCase):
+    def test_provider_publishes_is_a_backlog_row_without_release_credit(self):
+        rows = migration_plan()['local_backlog_case_slices']
+        row = next(row for row in rows if row['case_id'] == 'DUAL-PROVIDER-PUBLISHES-01')
+        self.assertEqual(row['suite'], 'dual-provider-publishes-v1')
+        self.assertEqual(row['legacy_id'], 'story_provider_operator_publishes_agent')
+        self.assertEqual(row['status'], 'LOCAL_EXECUTOR_ONLY_BACKLOG')
+        self.assertEqual(row['canonical_reporting'], 'DUAL_CASE_RECEIPT')
+        self.assertEqual(row['execution_command'], 'dual-provider-publishes-run')
+        self.assertEqual(row['report_command'], '')
+        self.assertEqual(row['required_assertion_count'], 98)
+        self.assertEqual(len(row['requirement_ids']), 98)
+        self.assertEqual(row['required_parameters'], [
+            'profile', 'binary', 'binary_sha256', 'cli_binary', 'cli_binary_sha256',
+            'state_dir', 'run_id', 'confirm_run_id', 'allow_write'])
+        self.assertEqual(row['environment'], {
+            'local': 'LOCAL_EXECUTOR_ONLY', 'preprod': 'BLOCKED_AT_ENTRY_NO_NETWORK'})
+        self.assertFalse(row['release_parent_denominator'])
+        self.assertTrue(row['independent_slice'])
+        self.assertEqual(row['remote_validation'], 'NOT_RUN')
+        self.assertFalse(row['grants_release_credit'])
+        self.assertEqual(row['source_map'], 'provider-publishes-migration-contract.json')
+
+
+class SlowJudgeBacklogTests(unittest.TestCase):
+    def test_slow_judge_is_a_backlog_row_without_release_credit(self):
+        rows = migration_plan()['local_backlog_case_slices']
+        row = next(row for row in rows if row['case_id'] == 'DUAL-SLOW-JUDGE-01')
+        self.assertEqual(row['suite'], 'dual-slow-judge-v1')
+        self.assertEqual(row['legacy_id'], 'story_provider_callback_survives_slow_judge')
+        self.assertEqual(row['status'], 'LOCAL_EXECUTOR_ONLY_BACKLOG')
+        self.assertEqual(row['canonical_reporting'], 'DUAL_CASE_RECEIPT')
+        self.assertEqual(row['execution_command'], 'dual-slow-judge-run')
+        self.assertEqual(row['report_command'], '')
+        self.assertEqual(row['required_assertion_count'], 22)
+        self.assertEqual(len(row['requirement_ids']), 22)
+        self.assertEqual(row['required_parameters'], [
+            'profile', 'binary', 'binary_sha256', 'cli_binary', 'cli_binary_sha256',
+            'state_dir', 'run_id', 'confirm_run_id', 'allow_write'])
+        self.assertEqual(row['environment'], {
+            'local': 'LOCAL_EXECUTOR_ONLY', 'preprod': 'REMOTE_JOURNEY_SEAM_PENDING'})
+        self.assertFalse(row['release_parent_denominator'])
+        self.assertTrue(row['independent_slice'])
+        self.assertEqual(row['remote_validation'], 'NOT_RUN')
+        self.assertFalse(row['grants_release_credit'])
+        self.assertEqual(row['source_map'], 'slow-judge-dual-migration-contract.json')
+
+    def test_dual_command_is_registered_without_a_duplicate_local_alias(self):
+        from bcs_e2e.case_command_registration import CASE_COMMANDS
+        self.assertIn('dual-slow-judge-run', CASE_COMMANDS)
+        self.assertNotIn('dual-slow-judge-run', LOCAL_STORY_COMMANDS)
+        self.assertIn('local-slow-judge-run', LOCAL_STORY_COMMANDS)
+        self.assertIn('local-slow-judge-report', LOCAL_STORY_COMMANDS)
+
+    def test_provider_publishes_dual_command_is_registered(self):
+        from bcs_e2e.case_command_registration import CASE_COMMANDS
+        self.assertIn('dual-provider-publishes-run', CASE_COMMANDS)
+        self.assertNotIn('dual-provider-publishes-run', LOCAL_STORY_COMMANDS)
 
 
 if __name__ == '__main__':
