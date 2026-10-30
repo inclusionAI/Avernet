@@ -32,6 +32,8 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillEditPausedError,
     LocalSkillInvalidPackageError,
     LocalSkillLayoutRollbackError,
+    LocalSkillRuntimeUnavailableError,
+    LocalSkillStorageError,
     LocalSkillTooLargeError,
 )
 from agentclaw.community.core.skill_center.upload_error_codes import (
@@ -283,8 +285,29 @@ async def upload_skill(
     except (ValueError, LocalSkillInvalidPackageError, LocalSkillTooLargeError) as e:
         logger.error(f"[skills.upload_skill] Validation error: {e}")
         return _build_upload_error_response(e)
+    except (LocalSkillRuntimeUnavailableError, LocalSkillStorageError) as e:
+        # Runtime/storage unavailable is the expected degraded category — the
+        # response builder already maps LocalSkillRuntimeUnavailableError to
+        # RUNTIME_UNAVAILABLE and a bare LocalSkillStorageError (e.g. a
+        # persistence failure) to UPLOAD_FAILED.  These bare exceptions carry
+        # an empty ``str(e)``, so the generic catch-all logged them as
+        # ``Unexpected error: `` with the upstream reason lost in
+        # ``__cause__`` (e.g. the teclaw ``/api/v1/file/skill-package``
+        # failure surfaced as the opaque CDO "[skills.upload_skill] Unexpected
+        # error:").  Log the cause chain here so the device/upstream reason is
+        # visible without changing the client-facing envelope.
+        logger.error(
+            f"[skills.upload_skill] runtime/storage unavailable: {e!r}"
+            f" (cause={e.__cause__!r})",
+            exc_info=True,
+        )
+        return _build_upload_error_response(e, include_upload_prefix=True)
     except Exception as e:
-        logger.error(f"[skills.upload_skill] Unexpected error: {e}", exc_info=True)
+        logger.error(
+            f"[skills.upload_skill] Unexpected error: {e!r}"
+            f" (cause={e.__cause__!r})",
+            exc_info=True,
+        )
         return _build_upload_error_response(e, include_upload_prefix=True)
 
 
