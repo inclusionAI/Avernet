@@ -619,8 +619,8 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
         self.assertEqual(counts, Counter({
             ('DUAL', 'PASS'): 18,
             ('DUAL', 'BLOCKED_INVENTORIED'): 7,
-            ('DUAL', 'NOT_RUN'): 3,
-            ('LOCAL_ONLY', 'NOT_RUN'): 8,
+            ('DUAL', 'NOT_RUN'): 5,
+            ('LOCAL_ONLY', 'NOT_RUN'): 6,
             ('DYNAMIC_OWNED_LOCAL', 'NOT_APPLICABLE'): 4,
             ('EDGE_OBLIGATION_IN_FAMILY', 'NOT_APPLICABLE'): 1,
         }))

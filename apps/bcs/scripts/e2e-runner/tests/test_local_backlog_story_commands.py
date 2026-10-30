@@ -100,8 +100,12 @@ class SessionOwnerCommandTests(unittest.TestCase):
         self.assertEqual(row['suite'], 'owned-local-session-owner-v1')
         self.assertEqual(row['legacy_id'], 'story_session_owner_permissions')
         self.assertEqual(row['status'], 'LOCAL_EXECUTOR_ONLY_BACKLOG')
-        self.assertEqual(row['execution_command'], 'local-session-owner-run')
-        self.assertEqual(row['report_command'], 'local-session-owner-report')
+        self.assertEqual(row['canonical_reporting'], 'DUAL_CASE_RECEIPT')
+        self.assertEqual(row['execution_command'], 'dual-session-owner-run')
+        self.assertEqual(row['report_command'], '')
+        self.assertEqual(row['required_parameters'], [
+            'profile', 'binary', 'binary_sha256', 'cli_binary', 'cli_binary_sha256',
+            'state_dir', 'run_id', 'confirm_run_id', 'allow_write'])
         self.assertEqual(row['environment'], {
             'local': 'LOCAL_EXECUTOR_ONLY', 'preprod': 'REMOTE_UNSUPPORTED'})
         self.assertFalse(row['release_parent_denominator'])
@@ -234,8 +238,12 @@ class ProviderOwnerCommandTests(unittest.TestCase):
         self.assertEqual(row['suite'], 'owned-local-provider-owner-v1')
         self.assertEqual(row['legacy_id'], 'story_provider_owner_isolation')
         self.assertEqual(row['status'], 'LOCAL_EXECUTOR_ONLY_BACKLOG')
-        self.assertEqual(row['execution_command'], 'local-provider-owner-run')
-        self.assertEqual(row['report_command'], 'local-provider-owner-report')
+        self.assertEqual(row['canonical_reporting'], 'DUAL_CASE_RECEIPT')
+        self.assertEqual(row['execution_command'], 'dual-provider-owner-run')
+        self.assertEqual(row['report_command'], '')
+        self.assertEqual(row['required_parameters'], [
+            'profile', 'binary', 'binary_sha256', 'cli_binary', 'cli_binary_sha256',
+            'state_dir', 'run_id', 'confirm_run_id', 'allow_write'])
         self.assertEqual(row['environment'], {
             'local': 'LOCAL_EXECUTOR_ONLY', 'preprod': 'REMOTE_UNSUPPORTED'})
         self.assertFalse(row['release_parent_denominator'])

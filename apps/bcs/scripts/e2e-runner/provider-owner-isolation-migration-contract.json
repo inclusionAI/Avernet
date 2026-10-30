@@ -1,0 +1,533 @@
+{
+  "contract": "provider-owner-isolation-migration-contract-v1",
+  "documented_gaps": {
+    "OWNED_LOCAL_PROVIDER_BOT_OWNER_EDGE_DRIFT": "Live owned-runtime replay on the current dev binary (first attempted 2026-10-30 against apps/bcs/target/debug/bcs, binary sha256 dcbc39f07cedb62c8764987caa9fb05983dd7b3b1e6185022281cf0daa73d8d3) blocks at story request 8: PUT /bots/{bot_uuid}/visibility answered 403 \"owner or manager role required for bot bot_...\" and GET /bots/{bot_uuid} answered 403 \"Not authorized to access bot\". Provider Bot registration records created_by but never seeds bcs-edge-permission owner/manager edges, and POST /me/ensure-human backfills only list_legacy_bots_for_owner (legacy registration path), so the minting Human never gains an authority role over provider-registered Bots. The upstream story was frozen at f181ba44 (2026-10-22, provider-scoped owner collaboration #2654) and predates the bot-authority model c6f001209 (2026-10-27, #2625) that made these surfaces require authority edges. The frozen map stays unmodified; the drift is recorded here and the slice stays LOCAL_EXECUTOR_ONLY BLOCKED until a reviewed product decision re-scopes either the seeding contract or the story.",
+    "PREPROD_PROVIDER_ADMIN_FACE_ABSENT": "The preprod faces expose group.* and session.* routes only (profiles/preprod.example.json route_bindings and the live preprod profile); the Provider registration/admin surface (/providers, /providers/{provider_id}/bots) is a BCS-internal face authenticated by the provider_admin_token bearer and admitted through loopback X-Mock-User-Id headers, neither of which exists on the preprod gateway, and no provider_admin_token credential channel is declared in any preprod profile auth.header_env. Remote preprod execution of this slice is unsupported by design, not by missing effort.",
+    "WORKBENCH_WS_MOCK_ADMISSION": "The Workbench WebSocket 101 upgrade and the owner/foreign connect projection boundary depend on loopback X-Mock-User-Id admission available only on the owned-local runtime; no preprod Workbench WebSocket evidence is claimed by this slice."
+  },
+  "dual_surface": {
+    "adaptability": {
+      "blocker": "The Provider registration/admin face is absent from the preprod public-v1 route bindings and no provider_admin_token credential channel exists there (PREPROD_PROVIDER_ADMIN_FACE_ABSENT), and the owned-local live replay currently blocks because provider-registered Bots receive no authority owner edges (OWNED_LOCAL_PROVIDER_BOT_OWNER_EDGE_DRIFT). Neither environment grants release credit.",
+      "case_id": "LOCAL-PROVIDER-OWNER-01",
+      "environments": [
+        "owned-local-full-story"
+      ],
+      "grants_release_credit": false,
+      "legacy_id": "story_provider_owner_isolation",
+      "local_executor_status": "LOCAL_EXECUTOR_ONLY",
+      "public_paths": [],
+      "remote_validation": "NOT_RUN",
+      "requirement_ids": [
+        "PROVIDER-OWNER.mock-human-bootstrap",
+        "PROVIDER-OWNER.provider-registration",
+        "PROVIDER-OWNER.provider-bot-mint",
+        "PROVIDER-OWNER.public-visibility-writes",
+        "PROVIDER-OWNER.public-group-create",
+        "PROVIDER-OWNER.restricted-scope-downgrade-denied",
+        "PROVIDER-OWNER.group-private-transition",
+        "PROVIDER-OWNER.same-owner-promotion",
+        "PROVIDER-OWNER.legacy-standard-downgrade-denied",
+        "PROVIDER-OWNER.restricted-bot-attach",
+        "PROVIDER-OWNER.foreign-member-add-denied",
+        "PROVIDER-OWNER.restricted-driver-foreign-member-denied",
+        "PROVIDER-OWNER.foreign-driver-group-denied",
+        "PROVIDER-OWNER.cross-provider-member-denied",
+        "PROVIDER-OWNER.restricted-group-visibility-upgrade-denied",
+        "PROVIDER-OWNER.private-bot-collaboration-without-friendship",
+        "PROVIDER-OWNER.invite-foreign-join-denied",
+        "PROVIDER-OWNER.session-owner-boundary",
+        "PROVIDER-OWNER.session-messages-owner-boundary",
+        "PROVIDER-OWNER.session-foreign-chat-denied",
+        "PROVIDER-OWNER.workbench-ws-owner-boundary",
+        "PROVIDER-OWNER.legacy-restore-on-restricted-bot-removal",
+        "PROVIDER-OWNER.restricted-member-readd-denied",
+        "PROVIDER-OWNER.cleanup-disposition"
+      ],
+      "selected_obligations": [
+        "mock-human-bootstrap",
+        "provider-registration",
+        "provider-bot-mint",
+        "public-visibility-writes",
+        "public-group-create",
+        "restricted-scope-downgrade-denied",
+        "group-private-transition",
+        "same-owner-promotion",
+        "legacy-standard-downgrade-denied",
+        "restricted-bot-attach",
+        "foreign-member-add-denied",
+        "restricted-driver-foreign-member-denied",
+        "foreign-driver-group-denied",
+        "cross-provider-member-denied",
+        "restricted-group-visibility-upgrade-denied",
+        "private-bot-collaboration-without-friendship",
+        "invite-foreign-join-denied",
+        "session-owner-boundary",
+        "session-messages-owner-boundary",
+        "session-foreign-chat-denied",
+        "workbench-ws-owner-boundary",
+        "legacy-restore-on-restricted-bot-removal",
+        "restricted-member-readd-denied",
+        "cleanup-disposition"
+      ]
+    },
+    "author_cli_pair_status": "author_cli_pair_admitted_frozen_not_consumed_by_family_journey",
+    "command": "dual-provider-owner-run",
+    "dual_legs": {
+      "owned_local": "local-provider-owner-run executor via dual-provider-owner-run",
+      "preprod": "bounded wrong-method route-surface probe plus named credential admission"
+    },
+    "function": "dual_provider_owner_case_run",
+    "grants_release_credit": false,
+    "module": "bcs_e2e.provider_owner_dual_case_run",
+    "preprod_route_probe_rows": 18,
+    "profile_contract": "dual-provider-owner-profile-v1",
+    "registration_seam": {
+      "case_command_registration_py": "DUAL_CASE_COMMANDS frozenset gains 'dual-provider-owner-run'; parser block mirrors the dual-draft-delivery-run block with --profile/--state-dir/--run-id/--confirm-run-id/--allow-write plus BOTH required biscuit pairs --binary/--binary-sha256 and --cli-binary/--cli-binary-sha256 and optional --leaf-root; the in-module register_provider_owner_dual_case_commands helper is the drop-in parser body",
+      "cli_py": "import block: from .provider_owner_dual_case_run import (CASE_KEYS as PROVIDER_OWNER_CASE_KEYS, COMMAND as PROVIDER_OWNER_COMMAND, dual_provider_owner_case_run); dispatch block mirroring the dual-draft-delivery-run shape: report = dual_provider_owner_case_run(profile_path=args.profile, state_dir=args.state_dir, run_id=args.run_id, allow_write=args.allow_write, confirm_run_id=args.confirm_run_id, binary=args.binary, binary_sha256=args.binary_sha256, cli_binary=args.cli_binary, cli_binary_sha256=args.cli_binary_sha256, leaf_root=getattr(args, 'leaf_root', None)); rc = 0 if report['status'] == 'PASS' else 2",
+      "executor_migration_json": "story_provider_owner_isolation row flips mode LOCAL_ONLY -> DUAL with preprod_verdict NOT_RUN and empty gates/notes; counts fence LOCAL_ONLY/NOT_RUN 8 -> 6 and DUAL/NOT_RUN 3 -> 5 requires the matching _EXPECTED_EXECUTOR_MIGRATION_COUNTS update in inventory.py",
+      "migration_inventory_py": "provider_owner_slice flips status LOCAL_EXECUTOR_ONLY_BACKLOG -> DUAL_CASE_RECEIPT, execution_command 'dual-provider-owner-run', required_parameters ['profile', 'binary', 'binary_sha256', 'cli_binary', 'cli_binary_sha256', 'state_dir', 'run_id', 'confirm_run_id', 'allow_write'], source_map 'provider-owner-isolation-migration-contract.json'",
+      "status": "DESCRIBE_ONLY_MAINLINE_WRITES"
+    },
+    "registration_status": "DESCRIBE_ONLY_MAINLINE_WRITES",
+    "report_contract": "dual-provider-owner-case-run-v1",
+    "required_binary_pairs": {
+      "author_cli": [
+        "--cli-binary",
+        "--cli-binary-sha256"
+      ],
+      "server": [
+        "--binary",
+        "--binary-sha256"
+      ]
+    },
+    "tier_selection": "profile environment.tier: local delegates to the frozen owned-local executor with all three allow flags and exact Run confirmation; preprod runs the bounded wrong-method route probe, the named credential admission check and always fail-closes BLOCKED"
+  },
+  "evidence": {
+    "binary_shelter": "~/.codex/bcs-e2e/20261031-wpe3-bcs-binary (server pair) and ~/.codex/bcs-e2e/20261031-wpe3-bcs-cli-binary (author pair), both sha256 fenced on entry",
+    "owned_local_root": "~/.codex/bcs-e2e/20261031-migration-wp2-owner-isolation/provider-owner",
+    "preprod_disclosure_root": "~/.codex/bcs-e2e/20261031-migration-wp2-owner-isolation-preprod/provider-owner"
+  },
+  "flat_module_budget_note": "provider dual module is flat at bcs_e2e top level; the flat source-file count moves 335 -> 336 of the 340 allowance enforced by bcs_e2e/artifact.py disk_digest; the stale allowance comment (335 of 340) is reported to mainline for adjudication; the session dual module lives in the session_owner subpackage and consumes no flat slot",
+  "grants_release_credit": false,
+  "local_backlog": {
+    "case_id": "LOCAL-PROVIDER-OWNER-01",
+    "contract_module": "bcs_e2e.provider_owner_contract",
+    "execution_command": "local-provider-owner-run",
+    "execution_module": "bcs_e2e.local_provider_owner_run.local_provider_owner_run",
+    "obligation_ids": [
+      "PROVIDER-OWNER.mock-human-bootstrap",
+      "PROVIDER-OWNER.provider-registration",
+      "PROVIDER-OWNER.provider-bot-mint",
+      "PROVIDER-OWNER.public-visibility-writes",
+      "PROVIDER-OWNER.public-group-create",
+      "PROVIDER-OWNER.restricted-scope-downgrade-denied",
+      "PROVIDER-OWNER.group-private-transition",
+      "PROVIDER-OWNER.same-owner-promotion",
+      "PROVIDER-OWNER.legacy-standard-downgrade-denied",
+      "PROVIDER-OWNER.restricted-bot-attach",
+      "PROVIDER-OWNER.foreign-member-add-denied",
+      "PROVIDER-OWNER.restricted-driver-foreign-member-denied",
+      "PROVIDER-OWNER.foreign-driver-group-denied",
+      "PROVIDER-OWNER.cross-provider-member-denied",
+      "PROVIDER-OWNER.restricted-group-visibility-upgrade-denied",
+      "PROVIDER-OWNER.private-bot-collaboration-without-friendship",
+      "PROVIDER-OWNER.invite-foreign-join-denied",
+      "PROVIDER-OWNER.session-owner-boundary",
+      "PROVIDER-OWNER.session-messages-owner-boundary",
+      "PROVIDER-OWNER.session-foreign-chat-denied",
+      "PROVIDER-OWNER.workbench-ws-owner-boundary",
+      "PROVIDER-OWNER.legacy-restore-on-restricted-bot-removal",
+      "PROVIDER-OWNER.restricted-member-readd-denied",
+      "PROVIDER-OWNER.cleanup-disposition"
+    ],
+    "registration_module": "bcs_e2e.local_backlog_story_commands.py",
+    "report_command": "local-provider-owner-report",
+    "status": "LOCAL_PROVIDER_OWNER_PASS",
+    "story_checks": 45,
+    "suite": "owned-local-provider-owner-v1"
+  },
+  "migration_target": "DUAL",
+  "obligations": [
+    {
+      "expectation": "Mock-admission loopback bootstrap: the story ensures the owner Human principal and a disjoint foreign Human principal exist through the loopback X-Mock-User-Id header before any business request; every later call carries the mock identity of exactly one of the two Humans.",
+      "id": "PROVIDER-OWNER.mock-human-bootstrap",
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (provider_scope_story.py --base-url \"$BCS_API_BASE_URL\" --owner \"$BCS_MOCK_USER_ID\"); this obligation rides inside that one child and is marker-counted in the frozen 45-check run; the child bootstraps owner and foreign Humans via the loopback X-Mock-User-Id header; local executor evidence: owned-provider-owner child receipt + flow report",
+      "story_lines": [
+        102,
+        103
+      ]
+    },
+    {
+      "expectation": "The story registers one disposable Provider with static_bearer auth, a placeholder webhook_url and collaboration_scope standard; the response carries the provider_id and the provider_admin_token used by later admin calls.",
+      "id": "PROVIDER-OWNER.provider-registration",
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (provider_scope_story.py --base-url \"$BCS_API_BASE_URL\" --owner \"$BCS_MOCK_USER_ID\"); this obligation rides inside that one child and is marker-counted in the frozen 45-check run; local executor evidence: owned-provider-owner child receipt + flow report",
+      "story_lines": [
+        104,
+        108
+      ]
+    },
+    {
+      "expectation": "Four provider Bots are minted through the provider admin token: one restricted-scope Bot owned by the owner, one Bot under a second standard-scope Provider owned by the owner, one restricted-scope Bot owned by the foreign Human (foreign scope), and later one owner-owned third Bot; each mint returns its bot_uuid.",
+      "id": "PROVIDER-OWNER.provider-bot-mint",
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (provider_scope_story.py --base-url \"$BCS_API_BASE_URL\" --owner \"$BCS_MOCK_USER_ID\"); this obligation rides inside that one child and is marker-counted in the frozen 45-check run; local executor evidence: owned-provider-owner child receipt + flow report",
+      "story_lines": [
+        109,
+        115
+      ]
+    },
+    {
+      "expectation": "The owner sets public visibility on its own two Bots and the foreign Human sets public visibility on its own foreign-scope Bot; each PUT /bots/{bot_uuid}/visibility succeeds for the minting owner only.",
+      "id": "PROVIDER-OWNER.public-visibility-writes",
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (provider_scope_story.py --base-url \"$BCS_API_BASE_URL\" --owner \"$BCS_MOCK_USER_ID\"); this obligation rides inside that one child and is marker-counted in the frozen 45-check run; local executor evidence: owned-provider-owner child receipt + flow report",
+      "story_lines": [
+        116,
+        118
+      ]
+    },
+    {
+      "expectation": "The standard-scope (cloud) Bot drives a public Group whose participants are the owner restricted-scope Bot and the owner Human (human_<owner>); group creation succeeds and returns the group id used by every later boundary exercise.",
+      "id": "PROVIDER-OWNER.public-group-create",
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (provider_scope_story.py --base-url \"$BCS_API_BASE_URL\" --owner \"$BCS_MOCK_USER_ID\"); this obligation rides inside that one child and is marker-counted in the frozen 45-check run; local executor evidence: owned-provider-owner child receipt + flow report",
+      "story_lines": [
+        119,
+        119
+      ]
+    },
+    {
+      "expectation": "While the restricted policy protects the group membership, PATCHing the restricted Provider to collaboration_scope same_owner together with a rename is rejected 409 and leaves the Provider metadata unchanged: name stays the original and collaboration_scope stays standard.",
+      "id": "PROVIDER-OWNER.restricted-scope-downgrade-denied",
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (provider_scope_story.py --base-url \"$BCS_API_BASE_URL\" --owner \"$BCS_MOCK_USER_ID\"); this obligation rides inside that one child and is marker-counted in the frozen 45-check run; local executor evidence: owned-provider-owner child receipt + flow report",
+      "story_lines": [
+        120,
+        122
+      ]
+    },
+    {
+      "expectation": "PATCHing the Group to visibility private succeeds; the private transition itself is not the policy barrier for restricted Provider Bots.",
+      "id": "PROVIDER-OWNER.group-private-transition",
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (provider_scope_story.py --base-url \"$BCS_API_BASE_URL\" --owner \"$BCS_MOCK_USER_ID\"); this obligation rides inside that one child and is marker-counted in the frozen 45-check run; local executor evidence: owned-provider-owner child receipt + flow report",
+      "story_lines": [
+        123,
+        123
+      ]
+    },
+    {
+      "expectation": "The provider admin token promotes the restricted Provider to collaboration_scope same_owner, and the promoted scope is observable through the authenticated provider metadata read-back.",
+      "id": "PROVIDER-OWNER.same-owner-promotion",
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (provider_scope_story.py --base-url \"$BCS_API_BASE_URL\" --owner \"$BCS_MOCK_USER_ID\"); this obligation rides inside that one child and is marker-counted in the frozen 45-check run; local executor evidence: owned-provider-owner child receipt + flow report",
+      "story_lines": [
+        124,
+        125
+      ]
+    },
+    {
+      "expectation": "Once any restricted-scope Bot is attached to the Group, downgrading the restricted Provider back to collaboration_scope standard is rejected 403: the restricted policy is a one-way gate for attached Bots.",
+      "id": "PROVIDER-OWNER.legacy-standard-downgrade-denied",
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (provider_scope_story.py --base-url \"$BCS_API_BASE_URL\" --owner \"$BCS_MOCK_USER_ID\"); this obligation rides inside that one child and is marker-counted in the frozen 45-check run; local executor evidence: owned-provider-owner child receipt + flow report",
+      "story_lines": [
+        126,
+        126
+      ]
+    },
+    {
+      "expectation": "Under the current restricted policy the owner mints a third restricted Bot, sets it public and adds it as a member of the private Group; the restricted attachment path itself succeeds.",
+      "id": "PROVIDER-OWNER.restricted-bot-attach",
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (provider_scope_story.py --base-url \"$BCS_API_BASE_URL\" --owner \"$BCS_MOCK_USER_ID\"); this obligation rides inside that one child and is marker-counted in the frozen 45-check run; local executor evidence: owned-provider-owner child receipt + flow report",
+      "story_lines": [
+        127,
+        130
+      ]
+    },
+    {
+      "expectation": "Adding the foreign-scope restricted Bot to the private Group is rejected 403: same_owner collaboration forbids cross-owner membership.",
+      "id": "PROVIDER-OWNER.foreign-member-add-denied",
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (provider_scope_story.py --base-url \"$BCS_API_BASE_URL\" --owner \"$BCS_MOCK_USER_ID\"); this obligation rides inside that one child and is marker-counted in the frozen 45-check run; local executor evidence: owned-provider-owner child receipt + flow report",
+      "story_lines": [
+        131,
+        131
+      ]
+    },
+    {
+      "expectation": "Creating a new Group driven by the owner restricted-scope Bot with the foreign-scope Bot as participant is rejected 403.",
+      "id": "PROVIDER-OWNER.restricted-driver-foreign-member-denied",
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (provider_scope_story.py --base-url \"$BCS_API_BASE_URL\" --owner \"$BCS_MOCK_USER_ID\"); this obligation rides inside that one child and is marker-counted in the frozen 45-check run; local executor evidence: owned-provider-owner child receipt + flow report",
+      "story_lines": [
+        132,
+        132
+      ]
+    },
+    {
+      "expectation": "Creating a new Group driven by the foreign-scope restricted Bot with the owner Bot as participant is rejected 403.",
+      "id": "PROVIDER-OWNER.foreign-driver-group-denied",
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (provider_scope_story.py --base-url \"$BCS_API_BASE_URL\" --owner \"$BCS_MOCK_USER_ID\"); this obligation rides inside that one child and is marker-counted in the frozen 45-check run; local executor evidence: owned-provider-owner child receipt + flow report",
+      "story_lines": [
+        133,
+        133
+      ]
+    },
+    {
+      "expectation": "Creating a public Group driven by the owner restricted-scope Bot with the standard-scope cloud Bot as participant is rejected 403: restricted Bots may not collaborate into public cross-scope Groups.",
+      "id": "PROVIDER-OWNER.cross-provider-member-denied",
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (provider_scope_story.py --base-url \"$BCS_API_BASE_URL\" --owner \"$BCS_MOCK_USER_ID\"); this obligation rides inside that one child and is marker-counted in the frozen 45-check run; local executor evidence: owned-provider-owner child receipt + flow report",
+      "story_lines": [
+        134,
+        134
+      ]
+    },
+    {
+      "expectation": "PATCHing the private Group back to public visibility is rejected 403 while restricted Provider Bots remain members.",
+      "id": "PROVIDER-OWNER.restricted-group-visibility-upgrade-denied",
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (provider_scope_story.py --base-url \"$BCS_API_BASE_URL\" --owner \"$BCS_MOCK_USER_ID\"); this obligation rides inside that one child and is marker-counted in the frozen 45-check run; local executor evidence: owned-provider-owner child receipt + flow report",
+      "story_lines": [
+        135,
+        135
+      ]
+    },
+    {
+      "expectation": "The exact private-Bot collaboration requirement needs no friendship: setting the cloud Bot private, creating a Group driven by the owner Bot with the private cloud Bot as participant succeeds, and the cloud Bot is restored to public afterwards.",
+      "id": "PROVIDER-OWNER.private-bot-collaboration-without-friendship",
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (provider_scope_story.py --base-url \"$BCS_API_BASE_URL\" --owner \"$BCS_MOCK_USER_ID\"); this obligation rides inside that one child and is marker-counted in the frozen 45-check run; local executor evidence: owned-provider-owner child receipt + flow report",
+      "story_lines": [
+        136,
+        139
+      ]
+    },
+    {
+      "expectation": "The invite-link surface mints an invite_token for the owner; the foreign Human joining through that link is rejected 403 while the owner Human joining through the same link succeeds.",
+      "id": "PROVIDER-OWNER.invite-foreign-join-denied",
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (provider_scope_story.py --base-url \"$BCS_API_BASE_URL\" --owner \"$BCS_MOCK_USER_ID\"); this obligation rides inside that one child and is marker-counted in the frozen 45-check run; local executor evidence: owned-provider-owner child receipt + flow report",
+      "story_lines": [
+        140,
+        142
+      ]
+    },
+    {
+      "expectation": "Creating a chat Session on the Group returns 201 with a session_id for the owner, while the foreign Human creating a Session on the same Group is rejected 403.",
+      "id": "PROVIDER-OWNER.session-owner-boundary",
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (provider_scope_story.py --base-url \"$BCS_API_BASE_URL\" --owner \"$BCS_MOCK_USER_ID\"); this obligation rides inside that one child and is marker-counted in the frozen 45-check run; local executor evidence: owned-provider-owner child receipt + flow report",
+      "story_lines": [
+        143,
+        144
+      ]
+    },
+    {
+      "expectation": "Reading Session messages succeeds for the owner Human and is rejected 400 for the foreign Human: session-scoped reads carry the owner boundary.",
+      "id": "PROVIDER-OWNER.session-messages-owner-boundary",
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (provider_scope_story.py --base-url \"$BCS_API_BASE_URL\" --owner \"$BCS_MOCK_USER_ID\"); this obligation rides inside that one child and is marker-counted in the frozen 45-check run; local executor evidence: owned-provider-owner child receipt + flow report",
+      "story_lines": [
+        145,
+        147
+      ]
+    },
+    {
+      "expectation": "Posting a chat message to the owner Session as the foreign Human is rejected 403 before any delivery occurs.",
+      "id": "PROVIDER-OWNER.session-foreign-chat-denied",
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (provider_scope_story.py --base-url \"$BCS_API_BASE_URL\" --owner \"$BCS_MOCK_USER_ID\"); this obligation rides inside that one child and is marker-counted in the frozen 45-check run; local executor evidence: owned-provider-owner child receipt + flow report",
+      "story_lines": [
+        148,
+        148
+      ]
+    },
+    {
+      "expectation": "The Workbench WebSocket answers the 101 Switching Protocols upgrade and the exact connect request projection respects the owner boundary: the owner Human connect converges ok=true and the foreign Human connect converges ok=false.",
+      "id": "PROVIDER-OWNER.workbench-ws-owner-boundary",
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (provider_scope_story.py --base-url \"$BCS_API_BASE_URL\" --owner \"$BCS_MOCK_USER_ID\"); this obligation rides inside that one child and is marker-counted in the frozen 45-check run; local executor evidence: owned-provider-owner child receipt + flow report",
+      "story_lines": [
+        149,
+        150
+      ]
+    },
+    {
+      "expectation": "Removing all restricted Bots from the Group membership restores legacy behavior without a permanent group policy: the visibility patch to public succeeds, the foreign Human joins through the earlier invite link, reads the Session messages and converges its Workbench connect to ok=true.",
+      "id": "PROVIDER-OWNER.legacy-restore-on-restricted-bot-removal",
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (provider_scope_story.py --base-url \"$BCS_API_BASE_URL\" --owner \"$BCS_MOCK_USER_ID\"); this obligation rides inside that one child and is marker-counted in the frozen 45-check run; local executor evidence: owned-provider-owner child receipt + flow report",
+      "story_lines": [
+        151,
+        157
+      ]
+    },
+    {
+      "expectation": "Re-adding the owner restricted-scope Bot to the restored legacy Group is still rejected 403, and the story prints the frozen live-API assertion count marker.",
+      "id": "PROVIDER-OWNER.restricted-member-readd-denied",
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (provider_scope_story.py --base-url \"$BCS_API_BASE_URL\" --owner \"$BCS_MOCK_USER_ID\"); this obligation rides inside that one child and is marker-counted in the frozen 45-check run; local executor evidence: owned-provider-owner child receipt + flow report",
+      "story_lines": [
+        158,
+        159
+      ]
+    },
+    {
+      "expectation": "Teardown deletes both Groups through the bot_id query of their respective drivers and deletes every minted provider Bot through the provider admin token; any cleanup failure fails the whole story instead of leaking provider state.",
+      "id": "PROVIDER-OWNER.cleanup-disposition",
+      "markers": [
+        "owned-local-provider-owner-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (provider_scope_story.py --base-url \"$BCS_API_BASE_URL\" --owner \"$BCS_MOCK_USER_ID\"); this obligation rides inside that one child and is marker-counted in the frozen 45-check run; teardown deletes every Group and provider Bot and restores legacy behavior; local executor evidence: owned-provider-owner child receipt + flow report",
+      "story_lines": [
+        161,
+        166
+      ]
+    }
+  ],
+  "obligations_count": 24,
+  "parent": "story_provider_owner_isolation",
+  "remote_validation": "NOT_RUN",
+  "schema_version": 1,
+  "shell_step_map": {
+    "parsed_upstream_steps": 1,
+    "parsed_step_meaning": "the gap matrix counts the single exit-gate assert_eq as the one parsed upstream assertion; the shell story is minimal (registration, header disclosure, one story child, exit gate)",
+    "steps": [
+      {
+        "step": 1,
+        "meaning": "story registration and header disclosure in the upstream shell harness (registration append plus the info line inside the story function)",
+        "shell_lines": [
+          "E2E_TESTS_STORIES+=(story_provider_owner_isolation)",
+          "info \"Story: Provider policy protects owner collaboration and private groups\""
+        ],
+        "maps_to_local_obligations": []
+      },
+      {
+        "step": 2,
+        "meaning": "single black-box story child; --owner fixes the loopback mock-admission principal provider-owner-story; the child prints the frozen \"45 live API assertions\" marker",
+        "shell_lines": [
+          "python3 \"$SCRIPT_DIR/provider_scope_story.py\" --base-url \"$BCS_API_BASE_URL\" \\",
+          "    --owner \"$BCS_MOCK_USER_ID\" || result=$?"
+        ],
+        "maps_to_local_obligations": [
+          "PROVIDER-OWNER.mock-human-bootstrap",
+          "PROVIDER-OWNER.provider-registration",
+          "PROVIDER-OWNER.provider-bot-mint",
+          "PROVIDER-OWNER.public-visibility-writes",
+          "PROVIDER-OWNER.public-group-create",
+          "PROVIDER-OWNER.restricted-scope-downgrade-denied",
+          "PROVIDER-OWNER.group-private-transition",
+          "PROVIDER-OWNER.same-owner-promotion",
+          "PROVIDER-OWNER.legacy-standard-downgrade-denied",
+          "PROVIDER-OWNER.restricted-bot-attach",
+          "PROVIDER-OWNER.foreign-member-add-denied",
+          "PROVIDER-OWNER.restricted-driver-foreign-member-denied",
+          "PROVIDER-OWNER.foreign-driver-group-denied",
+          "PROVIDER-OWNER.cross-provider-member-denied",
+          "PROVIDER-OWNER.restricted-group-visibility-upgrade-denied",
+          "PROVIDER-OWNER.private-bot-collaboration-without-friendship",
+          "PROVIDER-OWNER.invite-foreign-join-denied",
+          "PROVIDER-OWNER.session-owner-boundary",
+          "PROVIDER-OWNER.session-messages-owner-boundary",
+          "PROVIDER-OWNER.session-foreign-chat-denied",
+          "PROVIDER-OWNER.workbench-ws-owner-boundary",
+          "PROVIDER-OWNER.legacy-restore-on-restricted-bot-removal",
+          "PROVIDER-OWNER.restricted-member-readd-denied",
+          "PROVIDER-OWNER.cleanup-disposition"
+        ]
+      },
+      {
+        "step": 3,
+        "meaning": "case-level exit gate; the dual local window maps it to the CaseExecution PASS gate (24/24 obligations + frozen 45-check accounting); the dual preprod leg fail-closes BLOCKED with the documented Provider admin gap; the parsed-upstream count (parsed_upstream_steps=1) is this single exit-gate assertion",
+        "shell_lines": [
+          "assert_eq \"Provider owner boundary survives group/session/Workbench transitions\" \"$result\" \"0\""
+        ],
+        "maps_to_local_obligations": []
+      }
+    ],
+    "unmapped_local_obligations": 0,
+    "unmapped_shell_steps": 0
+  },
+  "upstream_parsed_assertions": 1,
+  "wave": "wp2-owner-isolation",
+  "registration_seam": {
+    "status": "DESCRIBE_ONLY_MAINLINE_WRITES",
+    "owner": "mainline (this task writes no registered command)",
+    "files": [
+      "cli.py",
+      "case_command_registration.py",
+      "migration_inventory.py",
+      "executor-migration.json"
+    ],
+    "cli_py": [
+      "cli.py: import block for the dual command plus a dispatch arm mirroring the dual-draft-delivery-run shape with both biscuit pairs (--binary/--binary-sha256 server pair, --cli-binary/--cli-binary-sha256 author pair) and optional --leaf-root; rc = 0 if report status is PASS else 2"
+    ],
+    "case_command_registration_py": [
+      "case_command_registration.py: DUAL_CASE_COMMANDS frozenset gains the dual command key; parser block with --profile, --state-dir, --run-id, --confirm-run-id, --allow-write, BOTH required biscuit pairs and optional --leaf-root; the in-module register_<family>_dual_case_commands helper is the drop-in parser body"
+    ],
+    "migration_inventory_py": [
+      "migration_inventory.py: family slice row flips status LOCAL_EXECUTOR_ONLY_BACKLOG -> DUAL_CASE_RECEIPT with execution_command, required_parameters and source_map; counts fence needs the matching _EXPECTED_EXECUTOR_MIGRATION_COUNTS update in inventory.py"
+    ],
+    "executor_migration_json": [
+      "executor-migration.json: story row flips mode LOCAL_ONLY -> DUAL with preprod_verdict NOT_RUN and empty gates/notes; counts fence LOCAL_ONLY/NOT_RUN 8 -> 6 and DUAL/NOT_RUN 3 -> 5"
+    ]
+  },
+  "upstream_assertions": {
+    "shell": 1,
+    "structural_python": 45,
+    "not_marker_counted_frozen": 5,
+    "note": "45 marker-counted live API assertions from the child receipt; separately frozen but NOT marker-counted: two explicit metadata asserts and three Workbench 101-upgrade guards"
+  }
+}

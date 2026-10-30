@@ -27,6 +27,7 @@ def _runner_root() -> Path:
 
 ROOT = _runner_root()
 sys.path.insert(0, str(ROOT))
+from bcs_e2e.case_command_registration import CASE_COMMANDS
 from bcs_e2e.inventory import current_manifest, executor_digest
 from bcs_e2e.local_provider_owner_reporting import build_provider_owner_report
 from bcs_e2e.local_provider_owner_run import (BINARY_KIND, OWNER_ID, STORY_CHECKS,
@@ -464,23 +465,31 @@ class ProviderOwnerEvidenceTamperTests(unittest.TestCase):
 
 
 class ProviderOwnerIndependentSliceFenceTests(unittest.TestCase):
-    def test_promoted_slice_uses_backlog_commands_without_release_credit(self):
+    def test_promoted_slice_uses_dual_commands_without_release_credit(self):
         self.assertNotIn(CASE_ID, {case.case_id for case in CASES})
         self.assertIn('local-provider-owner-run', LOCAL_STORY_COMMANDS)
         self.assertIn('local-provider-owner-report', LOCAL_STORY_COMMANDS)
+        self.assertIn('dual-provider-owner-run', CASE_COMMANDS)
         plan = migration_plan()
         registered = {row['case_id'] for row in plan['local_registered_executors']}
-        backlog = {row['case_id']: row for row in plan['local_backlog_case_slices']}
         independent = {row['case_id'] for row in plan['local_independent_slices']}
         self.assertNotIn(CASE_ID, registered)
         self.assertNotIn(CASE_ID, independent)
-        row = backlog[CASE_ID]
-        self.assertEqual(row['execution_command'], 'local-provider-owner-run')
-        self.assertEqual(row['report_command'], 'local-provider-owner-report')
+        row = next(item for item in plan['local_backlog_case_slices']
+                   if item['case_id'] == CASE_ID)
         self.assertEqual(row['status'], 'LOCAL_EXECUTOR_ONLY_BACKLOG')
+        self.assertEqual(row['canonical_reporting'], 'DUAL_CASE_RECEIPT')
+        self.assertEqual(row['execution_command'], 'dual-provider-owner-run')
+        self.assertEqual(row['report_command'], '')
+        self.assertEqual(row['required_parameters'], ['profile', 'binary', 'binary_sha256',
+                                                        'cli_binary', 'cli_binary_sha256',
+                                                        'state_dir', 'run_id',
+                                                        'confirm_run_id', 'allow_write'])
+        self.assertEqual(row['source_map'], 'provider-owner-isolation-migration-contract.json')
         self.assertFalse(row['release_parent_denominator'])
         self.assertTrue(row['independent_slice'])
         self.assertFalse(row['grants_release_credit'])
+        self.assertEqual(row['remote_validation'], 'NOT_RUN')
 
     def test_frozen_binding_declares_the_unmapped_backlog_parent(self):
         binding = provider_owner_source_binding()

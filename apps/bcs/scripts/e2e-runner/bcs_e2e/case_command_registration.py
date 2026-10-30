@@ -12,6 +12,10 @@ from .direct_chat_cli_case_run import CASE_KEYS as DIRECT_CHAT_CASE_KEYS
 from .delivery_policy_cli_case_run import CASE_KEYS as DELIVERY_POLICY_CASE_KEYS
 from .draft_delivery.dual_case_run import CASE_KEYS as DRAFT_DELIVERY_CASE_KEYS
 from .provider_subbots_case_run import CASE_KEYS as PROVIDER_SUBBOTS_CASE_KEYS
+from .provider_owner_dual_case_run import (COMMAND as PROVIDER_OWNER_COMMAND,
+                                            register_provider_owner_dual_case_commands)
+from .session_owner.dual_case_run import (COMMAND as SESSION_OWNER_COMMAND,
+                                          register_session_owner_dual_case_commands)
 
 
 CASE_COMMANDS = frozenset({
@@ -44,6 +48,8 @@ CASE_COMMANDS = frozenset({
     "dual-provider-subbots-run",
     "dual-draft-delivery-run",
     "dual-custom-collaboration-run",
+    PROVIDER_OWNER_COMMAND,
+    SESSION_OWNER_COMMAND,
 })
 
 
@@ -314,6 +320,8 @@ def register_case_commands(commands) -> None:
     draft_delivery_case.add_argument("--binary-sha256", required=True)
     draft_delivery_case.add_argument("--cli-binary", type=Path, required=True)
     draft_delivery_case.add_argument("--cli-binary-sha256", required=True)
+    register_provider_owner_dual_case_commands(commands)
+    register_session_owner_dual_case_commands(commands)
     custom_collaboration_case = commands.add_parser(
         "dual-custom-collaboration-run",
         help="Run the reviewed dual Custom-collaboration product-CLI story through Singlebox or preprod")

@@ -1,0 +1,298 @@
+{
+  "contract": "session-owner-permissions-migration-contract-v1",
+  "documented_gaps": {
+    "PREPROD_HUMAN_PRINCIPAL_FAMILY_SINGLE": "The story needs three distinct Human principals (manager/owner/outsider) plus per-Human Bot registration; the preprod pilot credential family is one Human Cookie plus its dedicated registered Bots (profile actors driver/member only), so the three-Human ownership isolation matrix cannot be expressed.",
+    "PREPROD_PARTICIPANT_ROUTES_UNBOUND": "participants PATCH/POST/DELETE, session collect add/remove, view_bot_id-scoped session listing, message history and Bot visibility are outside the reviewed public-v1 route bindings (route_bindings.py binds group/session CRUD, messages, token and the register trio only).",
+    "PREPROD_PRINCIPAL_MINTING_OPERATOR_KEY": "public-v1 X-Avernet-Principal tokens are minted from AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE; the owned-local Singlebox runtime mints from its per-run key while a gateway profile needs an operator-provisioned auth.principal_signing_key_env reference the preprod pilot profile does not declare.",
+    "PREPROD_STATION_BOOTSTRAP_FACE_ABSENT": "ensure-human, register-token, register, onboard, visibility PUT and station Bot delete are legacy station products with per-request X-Mock-User-Id admission on the owned-local runtime only; the preprod public-v1 gateway face exposes none of them and mock-header admission does not exist there."
+  },
+  "dual_surface": {
+    "adaptability": {
+      "api_face": "public-v1",
+      "blocker": "Owned-local executor ports all 60 run-phase HTTP assertions plus 4 cleanup dispositions in process; the preprod public-v1 gateway face lacks the station bootstrap legs, per-request mock admission, a three-Human pilot credential family, participants/collect/visibility routes and operator principal minting.",
+      "case_id": "LOCAL-SESSION-OWNER-01",
+      "environments": [
+        "owned-local-executor",
+        "preprod-public-v1"
+      ],
+      "grants_release_credit": false,
+      "legacy_id": "story_session_owner_permissions",
+      "local_executor_status": "LOCAL_FULL_EXECUTOR",
+      "local_face": "station-mock-admission+gateway-principal (owned-local runtime)",
+      "preprod_execution_status": "NOT_RUN_DOCUMENTED_GAPS",
+      "remote_validation": "NOT_RUN",
+      "requirement_ids": [
+        "SESSION-OWNER.bootstrap-ownership",
+        "SESSION-OWNER.group-session-creation",
+        "SESSION-OWNER.group-read-boundary",
+        "SESSION-OWNER.bot-mode-ownership",
+        "SESSION-OWNER.foreign-mutation-denied",
+        "SESSION-OWNER.human-self-service-scope",
+        "SESSION-OWNER.collection-history-actor-scope",
+        "SESSION-OWNER.membership-revocation-isolation",
+        "SESSION-OWNER.cleanup-disposition"
+      ],
+      "selected_obligations": [
+        "bootstrap-ownership",
+        "group-session-creation",
+        "group-read-boundary",
+        "bot-mode-ownership",
+        "foreign-mutation-denied",
+        "human-self-service-scope",
+        "collection-history-actor-scope",
+        "membership-revocation-isolation",
+        "cleanup-disposition"
+      ]
+    },
+    "author_cli_pair_status": "author_cli_pair_admitted_frozen_not_consumed_by_family_journey",
+    "command": "dual-session-owner-run",
+    "dual_legs": {
+      "owned_local": "local-session-owner-run executor via dual-session-owner-run",
+      "preprod": "bounded wrong-method route probe plus named credential admission plus offline RemoteSessionOwnerAdapter preflight gap receipt"
+    },
+    "function": "dual_session_owner_case_run",
+    "grants_release_credit": false,
+    "module": "bcs_e2e.session_owner.dual_case_run",
+    "preprod_route_probe_rows": 24,
+    "profile_contract": "dual-session-owner-profile-v1",
+    "registration_seam": {
+      "case_command_registration_py": "DUAL_CASE_COMMANDS frozenset gains 'dual-session-owner-run'; parser block with --profile plus BOTH required biscuit pairs --binary/--binary-sha256 and --cli-binary/--cli-binary-sha256, --state-dir, --run-id, --confirm-run-id, --allow-write and optional --leaf-root; the in-module register_session_owner_dual_case_commands helper is the drop-in parser body",
+      "cli_py": "import block: from bcs_e2e.session_owner.dual_case_run import (COMMAND, CASE_KEYS as SESSION_OWNER_DUAL_CASE_KEYS, dual_session_owner_case_run); dispatch block mirroring the dual-draft-delivery-run shape with both biscuit pairs and optional --leaf-root; rc = 0 if report['status'] == 'PASS' else 2",
+      "executor_migration_json": "story_session_owner_permissions row flips mode LOCAL_ONLY -> DUAL with preprod_verdict NOT_RUN and empty gates/notes; counts fence LOCAL_ONLY/NOT_RUN 8 -> 6 and DUAL/NOT_RUN 3 -> 5 requires the matching _EXPECTED_EXECUTOR_MIGRATION_COUNTS update in inventory.py",
+      "migration_inventory_py": "session_owner_slice flips status LOCAL_EXECUTOR_ONLY_BACKLOG -> DUAL_CASE_RECEIPT, execution_command 'dual-session-owner-run', required_parameters ['profile', 'binary', 'binary_sha256', 'cli_binary', 'cli_binary_sha256', 'state_dir', 'run_id', 'confirm_run_id', 'allow_write'], source_map 'session-owner-permissions-migration-contract.json'",
+      "status": "DESCRIBE_ONLY_MAINLINE_WRITES"
+    },
+    "registration_status": "DESCRIBE_ONLY_MAINLINE_WRITES",
+    "report_contract": "dual-session-owner-case-run-v1",
+    "required_binary_pairs": {
+      "author_cli": [
+        "--cli-binary",
+        "--cli-binary-sha256"
+      ],
+      "server": [
+        "--binary",
+        "--binary-sha256"
+      ]
+    },
+    "tier_selection": "profile environment.tier: local delegates to the frozen owned-local executor with all three allow flags and exact Run confirmation; preprod runs the bounded wrong-method route probe, the named credential admission check and the offline RemoteSessionOwnerAdapter preflight gap receipt, and always fail-closes BLOCKED"
+  },
+  "evidence": {
+    "binary_shelter": "~/.codex/bcs-e2e/20261031-wpe3-bcs-binary (server pair) and ~/.codex/bcs-e2e/20261031-wpe3-bcs-cli-binary (author pair), both sha256 fenced on entry",
+    "owned_local_root": "~/.codex/bcs-e2e/20261031-migration-wp2-owner-isolation/session-owner",
+    "preprod_disclosure_root": "~/.codex/bcs-e2e/20261031-migration-wp2-owner-isolation-preprod/session-owner"
+  },
+  "grants_release_credit": false,
+  "local_backlog": {
+    "case_id": "LOCAL-SESSION-OWNER-01",
+    "cleanup_checks": 4,
+    "contract_module": "bcs_e2e.session_owner.session_owner_contract",
+    "execution_command": "local-session-owner-run",
+    "execution_module": "bcs_e2e.session_owner.local_session_owner_run.local_session_owner_run",
+    "obligation_ids": [
+      "SESSION-OWNER.bootstrap-ownership",
+      "SESSION-OWNER.group-session-creation",
+      "SESSION-OWNER.group-read-boundary",
+      "SESSION-OWNER.bot-mode-ownership",
+      "SESSION-OWNER.foreign-mutation-denied",
+      "SESSION-OWNER.human-self-service-scope",
+      "SESSION-OWNER.collection-history-actor-scope",
+      "SESSION-OWNER.membership-revocation-isolation",
+      "SESSION-OWNER.cleanup-disposition"
+    ],
+    "registration_module": "bcs_e2e.local_backlog_story_commands.py",
+    "report_command": "local-session-owner-report",
+    "status": "LOCAL_SESSION_OWNER_PASS",
+    "story_checks": 60,
+    "suite": "owned-local-session-owner-v1"
+  },
+  "migration_target": "DUAL",
+  "obligations": [
+    {
+      "expectation": "Each Human principal is ensured through the station ensure-human leg, mints a one-time register token from the station, registers its disposable Bot with that token, and onboards it with the testing domain, review skill and local scope; the owner alone marks its Bot public afterwards. All bootstrap and visibility legs carry per-request mock admission on the station face only; the ownership ledger records the two Bot uuid/owner pairs.",
+      "id": "SESSION-OWNER.bootstrap-ownership",
+      "markers": [
+        "session-owner-permissions-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (session_owner_story.py --base-url \"$BCS_API_BASE_URL\"; no --owner because the child mints manager/owner/outsider Humans from the owned runtime signing key); this obligation rides inside that one child and is marker-counted in the frozen 60-assertion run; station ensure-human + one-time register token + register + onboard legs per Human; local executor evidence: owned-session-owner journal + flow report",
+      "story_lines": [
+        73,
+        101
+      ]
+    },
+    {
+      "expectation": "The manager creates a normal Group driven by its registered driver Bot, narrows the Group to private visibility, and opens exactly one Session titled for session-only participation; creation acknowledges 201 and the Group and Session ids join the ownership journal.",
+      "id": "SESSION-OWNER.group-session-creation",
+      "markers": [
+        "session-owner-permissions-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (session_owner_story.py --base-url \"$BCS_API_BASE_URL\"; no --owner because the child mints manager/owner/outsider Humans from the owned runtime signing key); this obligation rides inside that one child and is marker-counted in the frozen 60-assertion run; local executor evidence: owned-session-owner journal + flow report",
+      "story_lines": [
+        102,
+        112
+      ]
+    },
+    {
+      "expectation": "Before any invitation the owner is refused Group reads with 403 forbidden; once the manager adds the owned Bot as a Session-only participant the owner reads the Group while its participant projection still hides the Session-only Bot; the stranger Human stays refused.",
+      "id": "SESSION-OWNER.group-read-boundary",
+      "markers": [
+        "session-owner-permissions-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (session_owner_story.py --base-url \"$BCS_API_BASE_URL\"; no --owner because the child mints manager/owner/outsider Humans from the owned runtime signing key); this obligation rides inside that one child and is marker-counted in the frozen 60-assertion run; local executor evidence: owned-session-owner journal + flow report",
+      "story_lines": [
+        113,
+        117
+      ]
+    },
+    {
+      "expectation": "The owner flips its own Bot Session mode between muted and auto with exact echo and read-back; patching the manager driver Bot, selecting an invalid bot mode, widening the message view scope to full as non-manager, or selecting an invalid message view scope is refused with forbidden, invalid_participant_mode, message_view_scope_forbidden or invalid_message_view_scope and no denied patch partially writes.",
+      "id": "SESSION-OWNER.bot-mode-ownership",
+      "markers": [
+        "session-owner-permissions-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (session_owner_story.py --base-url \"$BCS_API_BASE_URL\"; no --owner because the child mints manager/owner/outsider Humans from the owned runtime signing key); this obligation rides inside that one child and is marker-counted in the frozen 60-assertion run; local executor evidence: owned-session-owner journal + flow report",
+      "story_lines": [
+        119,
+        131
+      ]
+    },
+    {
+      "expectation": "The owner cannot retitle or delete the manager Session, rename or delete the manager Group, invite the driver Bot into the Session, or patch a participant that never existed: foreign Session and Group mutations and the foreign invite answer forbidden, the manager missing-target read answers participant_not_found while the owner missing-target read answers forbidden.",
+      "id": "SESSION-OWNER.foreign-mutation-denied",
+      "markers": [
+        "session-owner-permissions-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (session_owner_story.py --base-url \"$BCS_API_BASE_URL\"; no --owner because the child mints manager/owner/outsider Humans from the owned runtime signing key); this obligation rides inside that one child and is marker-counted in the frozen 60-assertion run; local executor evidence: owned-session-owner journal + flow report",
+      "story_lines": [
+        132,
+        143
+      ]
+    },
+    {
+      "expectation": "A Human self-joins only through its owned active Bot: the owner Human joins present with full view scope by exact echo, bot modes and manager-absent writes are refused, a stranger cannot self-add or widen its scope, the manager may narrow the Human scope to participant, and the loopback pairs (participant/absent, full/present) echo and read back exactly.",
+      "id": "SESSION-OWNER.human-self-service-scope",
+      "markers": [
+        "session-owner-permissions-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (session_owner_story.py --base-url \"$BCS_API_BASE_URL\"; no --owner because the child mints manager/owner/outsider Humans from the owned runtime signing key); this obligation rides inside that one child and is marker-counted in the frozen 60-assertion run; local executor evidence: owned-session-owner journal + flow report",
+      "story_lines": [
+        145,
+        168
+      ]
+    },
+    {
+      "expectation": "Session listing scoped by view_bot_id answers 200 only for a Bot the requester owns and forbidden for the manager driver Bot; message history reads, collect add and collect remove succeed for the participating owner while collect add answers forbidden for the stranger.",
+      "id": "SESSION-OWNER.collection-history-actor-scope",
+      "markers": [
+        "session-owner-permissions-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (session_owner_story.py --base-url \"$BCS_API_BASE_URL\"; no --owner because the child mints manager/owner/outsider Humans from the owned runtime signing key); this obligation rides inside that one child and is marker-counted in the frozen 60-assertion run; local executor evidence: owned-session-owner journal + flow report",
+      "story_lines": [
+        170,
+        178
+      ]
+    },
+    {
+      "expectation": "Manager revocation of the owned Bot leaves the Human relation intact and the owner keeps Group reads while Bot-mode patches are refused; revoking the Human relation too denies the owner both Group and Session reads while the manager retains its Group read.",
+      "id": "SESSION-OWNER.membership-revocation-isolation",
+      "markers": [
+        "session-owner-permissions-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (session_owner_story.py --base-url \"$BCS_API_BASE_URL\"; no --owner because the child mints manager/owner/outsider Humans from the owned runtime signing key); this obligation rides inside that one child and is marker-counted in the frozen 60-assertion run; local executor evidence: owned-session-owner journal + flow report",
+      "story_lines": [
+        180,
+        188
+      ]
+    },
+    {
+      "expectation": "Teardown deletes the Session and the Group through the manager public face and both owned Bots through their station owners; every disposition failure fails the whole story instead of leaking owned state.",
+      "id": "SESSION-OWNER.cleanup-disposition",
+      "markers": [
+        "session-owner-permissions-compliance"
+      ],
+      "shell_note": "shell step 2 is the single python3 story child (session_owner_story.py --base-url \"$BCS_API_BASE_URL\"; no --owner because the child mints manager/owner/outsider Humans from the owned runtime signing key); this obligation rides inside that one child and is marker-counted in the frozen 60-assertion run; teardown disposals are the 4 cleanup HTTP assertions (64 total observed); local executor evidence: owned-session-owner journal + flow report",
+      "story_lines": [
+        190,
+        200
+      ]
+    }
+  ],
+  "obligations_count": 9,
+  "parent": "story_session_owner_permissions",
+  "remote_validation": "NOT_RUN",
+  "schema_version": 1,
+  "shell_step_map": {
+    "parsed_upstream_steps": 1,
+    "parsed_step_meaning": "the gap matrix counts the single exit-gate assert_eq as the one parsed upstream assertion; the shell story is minimal (registration, header disclosure, one story child, exit gate)",
+    "steps": [
+      {
+        "step": 1,
+        "meaning": "story registration and header disclosure in the upstream shell harness (registration append plus the info line inside the story function)",
+        "shell_lines": [
+          "E2E_TESTS_STORIES+=(story_session_owner_permissions)",
+          "info \"Story: Session-only members read Group details and owners control only their Bot mode\""
+        ],
+        "maps_to_local_obligations": []
+      },
+      {
+        "step": 2,
+        "meaning": "single self-contained story child; mints three Humans and gateway Principal tokens from the owned runtime signing key; prints the frozen \"60 HTTP assertions\" marker",
+        "shell_lines": [
+          "python3 \"$SCRIPT_DIR/session_owner_story.py\" --base-url \"$BCS_API_BASE_URL\" || result=$?"
+        ],
+        "maps_to_local_obligations": [
+          "SESSION-OWNER.bootstrap-ownership",
+          "SESSION-OWNER.group-session-creation",
+          "SESSION-OWNER.group-read-boundary",
+          "SESSION-OWNER.bot-mode-ownership",
+          "SESSION-OWNER.foreign-mutation-denied",
+          "SESSION-OWNER.human-self-service-scope",
+          "SESSION-OWNER.collection-history-actor-scope",
+          "SESSION-OWNER.membership-revocation-isolation",
+          "SESSION-OWNER.cleanup-disposition"
+        ]
+      },
+      {
+        "step": 3,
+        "meaning": "case-level exit gate; the dual local window maps it to the CaseExecution PASS gate (9/9 obligations + frozen 60+4 journal accounting); the dual preprod leg fail-closes BLOCKED with the four documented gaps; the parsed-upstream count (parsed_upstream_steps=1) is this single exit-gate assertion",
+        "shell_lines": [
+          "assert_eq \"Session ownership, Human scope, and membership revocation remain isolated\" \"$result\" \"0\""
+        ],
+        "maps_to_local_obligations": []
+      }
+    ],
+    "unmapped_local_obligations": 0,
+    "unmapped_shell_steps": 0
+  },
+  "subpackage_note": "session dual module lives inside the existing bcs_e2e/session_owner subpackage; it consumes no flat bcs_e2e/*.py slot",
+  "upstream_assertions": {
+    "cleanup_http": 4,
+    "run_http": 60,
+    "shell": 1,
+    "structural_python": 13
+  },
+  "upstream_parsed_assertions": 1,
+  "wave": "wp2-owner-isolation",
+  "registration_seam": {
+    "status": "DESCRIBE_ONLY_MAINLINE_WRITES",
+    "owner": "mainline (this task writes no registered command)",
+    "files": [
+      "cli.py",
+      "case_command_registration.py",
+      "migration_inventory.py",
+      "executor-migration.json"
+    ],
+    "cli_py": [
+      "cli.py: import block for the dual command plus a dispatch arm mirroring the dual-draft-delivery-run shape with both biscuit pairs (--binary/--binary-sha256 server pair, --cli-binary/--cli-binary-sha256 author pair) and optional --leaf-root; rc = 0 if report status is PASS else 2"
+    ],
+    "case_command_registration_py": [
+      "case_command_registration.py: DUAL_CASE_COMMANDS frozenset gains the dual command key; parser block with --profile, --state-dir, --run-id, --confirm-run-id, --allow-write, BOTH required biscuit pairs and optional --leaf-root; the in-module register_<family>_dual_case_commands helper is the drop-in parser body"
+    ],
+    "migration_inventory_py": [
+      "migration_inventory.py: family slice row flips status LOCAL_EXECUTOR_ONLY_BACKLOG -> DUAL_CASE_RECEIPT with execution_command, required_parameters and source_map; counts fence needs the matching _EXPECTED_EXECUTOR_MIGRATION_COUNTS update in inventory.py"
+    ],
+    "executor_migration_json": [
+      "executor-migration.json: story row flips mode LOCAL_ONLY -> DUAL with preprod_verdict NOT_RUN and empty gates/notes; counts fence LOCAL_ONLY/NOT_RUN 8 -> 6 and DUAL/NOT_RUN 3 -> 5"
+    ]
+  },
+  "flat_module_budget_note": "session dual module lives inside the existing bcs_e2e/session_owner subpackage (bcs_e2e/session_owner/dual_case_run.py); it consumes no flat bcs_e2e/*.py slot, so the flat source-file count stays at 336 of the 340 allowance enforced by bcs_e2e/artifact.py disk_digest (provider dual module consumes the single new flat slot 335 -> 336; artifact.py allowance comment is stale and is reported to mainline for adjudication, not modified by this wave)"
+}

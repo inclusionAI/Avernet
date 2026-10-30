@@ -329,7 +329,7 @@
     {
       "id": "story_provider_owner_isolation",
       "executor_migration": {
-        "mode": "LOCAL_ONLY",
+        "mode": "DUAL",
         "preprod_verdict": "NOT_RUN",
         "gates": [],
         "notes": []
@@ -338,7 +338,7 @@
     {
       "id": "story_session_owner_permissions",
       "executor_migration": {
-        "mode": "LOCAL_ONLY",
+        "mode": "DUAL",
         "preprod_verdict": "NOT_RUN",
         "gates": [],
         "notes": []

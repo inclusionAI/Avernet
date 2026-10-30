@@ -132,6 +132,9 @@ def disk_digest() -> str:
     # session_cli_contract and the public Session storage/deletion helpers to
     # local_session_public_storage, so the flat count grows by exactly those
     # two files (335 of 340).
+    # The dual Provider-owner promotion adds one flat focused dual case-run module
+    # (336 of 340); the dual Session-owner run lands in the session_owner subpackage
+    # and adds no flat file.
     if len(paths) > 340:
         raise ValueError('executor artifact exceeds its source-file budget')
     digest = hashlib.sha256()
