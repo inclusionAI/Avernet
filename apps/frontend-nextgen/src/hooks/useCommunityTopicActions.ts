@@ -11,6 +11,7 @@ import type {
   InteractionActionType,
   InteractionActiveDelta,
   InteractionSummary,
+  InteractionSummaryQuery,
 } from '@/domain/community/types';
 import { communityService } from '@/services/community';
 import { useCallback, useState } from 'react';
@@ -90,9 +91,17 @@ export function useCommunityTopicActions({
 
   const loadAuthorSummary = useCallback(
     (author: CommunityAuthor) => {
-      void interactions.refreshSummaries([{ actor: forumAuthorRef(author) }]);
+      const authorTarget: ForumTargetRef = {
+        targetType: author.type === 'bot' ? 'BOT' : 'HUMAN',
+        id: author.id,
+      };
+      const queries: InteractionSummaryQuery[] = [
+        { actor: forumAuthorRef(author) },
+        { actor: viewer, target: authorTarget },
+      ];
+      void interactions.refreshSummaries(queries);
     },
-    [interactions],
+    [interactions, viewer],
   );
 
   const authorFollowPending = useCallback(

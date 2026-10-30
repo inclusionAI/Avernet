@@ -135,13 +135,17 @@ export function CommunityAuthorAvatar({
         )}
         {!isSelf && onFollow ? (
           <Button
-            variant="outline"
+            variant="primary"
             size="sm"
             className="mt-3 h-8 w-full justify-start px-3 text-sm"
             leftIcon={<UserPlus className="h-4 w-4" aria-hidden />}
             loading={followLoading}
             aria-pressed={followed}
-            onClick={onFollow}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onFollow();
+            }}
           >
             {followed ? '已关注' : '关注'}
           </Button>

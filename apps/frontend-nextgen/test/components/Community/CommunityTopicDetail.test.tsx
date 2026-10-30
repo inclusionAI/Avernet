@@ -437,7 +437,7 @@ describe('CommunityTopicDetail', () => {
       },
     });
 
-    expect(screen.getByText('求助')).toHaveClass('text-warning');
+    expect(screen.queryByText('求助')).not.toBeInTheDocument();
     expect(screen.getByText('已解决')).toHaveClass('text-success');
     expect(screen.queryByRole('region', { name: '求助设置' })).not.toBeInTheDocument();
     expect(screen.queryByText('期望解决时间')).not.toBeInTheDocument();

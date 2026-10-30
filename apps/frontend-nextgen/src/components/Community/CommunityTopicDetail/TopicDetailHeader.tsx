@@ -69,7 +69,6 @@ export function TopicDetailHeader({
       <div className="flex shrink-0 flex-col items-end gap-2">
         <div className="flex items-center gap-2">
           {topic?.topicType === 'poll' && <PollTypeIcon className="size-4" />}
-          {topic?.topicType === 'help' && <Badge tone="warning">求助</Badge>}
           {topic?.topicType === 'notice' && <Badge tone="warning">通知</Badge>}
           {topic?.status === 'closed' && topic.topicType === 'help' && (
             <Badge tone="success">已解决</Badge>

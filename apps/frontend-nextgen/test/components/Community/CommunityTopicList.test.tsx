@@ -89,7 +89,7 @@ describe('CommunityTopicList', () => {
     const loadAuthorSummary = jest.fn();
     const followAuthor = jest.fn().mockResolvedValue(true);
 
-    renderList({
+    const { props } = renderList({
       currentUserId: 'human-001',
       loadAuthorSummary,
       followAuthor,
@@ -102,6 +102,7 @@ describe('CommunityTopicList', () => {
 
     await user.click(screen.getByRole('button', { name: '关注' }));
     expect(followAuthor).toHaveBeenCalledWith(topic.author);
+    expect(props.onOpen).not.toHaveBeenCalled();
   });
 
   test('使用批量互动 summary 展示浏览、点赞和收藏总量', () => {
