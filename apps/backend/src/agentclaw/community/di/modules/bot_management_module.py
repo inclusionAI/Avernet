@@ -526,7 +526,6 @@ class BotManagementModule(Module):
         drm_reader: DRMReaderPlugin,
         task_queue_service: TaskQueueService,
         common_config_service: CommonConfigService,
-        desktop_bot_service_provider: Callable[[], DesktopBotService],
         caller_identity_repo: CallerIdentityRepositoryProtocol,
         bot_quota_service: BotQuotaServiceProtocol,
         storage_policy: BotStoragePolicyProtocol,
@@ -576,7 +575,9 @@ class BotManagementModule(Module):
             ),
             # Lazy (cycle-safe): baas bot 原地重启走 BaaSService.restart_bot。
             baas_service_provider=lambda: injector.get(BaasService),
-            desktop_bot_service_provider=desktop_bot_service_provider,
+            # Lazy (framework-provided): DesktopBotModule raises before any
+            # provider can be derived from the return type.
+            desktop_bot_service_provider=lambda: injector.get(DesktopBotService),
             task_queue_service=task_queue_service,
             common_config_service=common_config_service,
             caller_identity_repo=caller_identity_repo,
