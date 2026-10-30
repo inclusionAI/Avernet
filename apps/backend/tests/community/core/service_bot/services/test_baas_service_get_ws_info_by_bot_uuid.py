@@ -19,6 +19,7 @@ from tests.community.core.service_bot.services.deploy._noop_storage_policy impor
 from agentclaw.community.core.service_bot.services.baas_service import (
     BaasService,
     BaasServiceError,
+    BaasTransientServiceError,
     BotWsConnectionInfoResponse,
 )
 
@@ -101,6 +102,76 @@ def _ws_info_by_bot_uuid_logged_calls(spy: MagicMock, level: str) -> list:
         if c.args and "get_ws_info_by_bot_uuid" in str(c.args[0])
     ]
 
+
+
+@pytest.mark.unit
+class TestBaasServiceWsInfoTransientRetry:
+    """Read-only ws-info lookup must tolerate one transient BaaS upstream blip."""
+
+    def _make_retry_service(self) -> BaasService:
+        """BaasService whose http client is replaced with a test spy."""
+        service = _make_service_with_response(
+            {
+                "code": 0,
+                "data": {
+                    "ws_url": "wss://baas.test/ws/BOT-xyz",
+                    "token": "tok123",
+                    "target": "TARGET-123",
+                    "expires_at": "2026-01-01T00:00:00Z",
+                },
+            }
+        )
+        service._http = MagicMock()
+        return service
+
+    def _transient_http_error(self, status_code: int):
+        """Build the upstream error seen by the retry boundary."""
+        request = httpx.Request(
+            "GET", "http://baas.test/api/v1/bots/BOT-xyz/ws-info"
+        )
+        response = httpx.Response(status_code, request=request, text="upstream failed")
+        return httpx.HTTPStatusError(
+            f"{status_code}", request=request, response=response
+        )
+
+    def test_5xx_is_retried_and_succeeds(self):
+        """A single transient 5xx falls through to the second ws-info call."""
+        service = self._make_retry_service()
+        success_response = service._http.get.return_value
+        service._http.get.side_effect = [
+            self._transient_http_error(500),
+            success_response,
+        ]
+
+        response = service._request_ws_info_response(
+            bot_uuid="BOT-xyz", params={"tenant": "tnt"}
+        )
+
+        assert response is success_response
+        assert service._http.get.call_count == 2
+
+    def test_5xx_after_retry_raises_transient_service_error(self):
+        """Two upstream failures preserve the public transient failure."""
+        service = self._make_retry_service()
+        service._http.get.side_effect = [
+            self._transient_http_error(500),
+            self._transient_http_error(500),
+        ]
+
+        with pytest.raises(BaasTransientServiceError, match="BaaS API transient error"):
+            service.get_ws_info_by_bot_uuid(bot_uuid="BOT-xyz")
+
+        assert service._http.get.call_count == 2
+
+    def test_4xx_is_not_retried(self):
+        """Permanent caller/server classification must not pay for retries."""
+        service = self._make_retry_service()
+        service._http.get.side_effect = [self._transient_http_error(404)]
+
+        with pytest.raises(BaasServiceError, match="BaaS API error"):
+            service.get_ws_info_by_bot_uuid(bot_uuid="BOT-xyz")
+
+        assert service._http.get.call_count == 1
 
 @pytest.mark.unit
 class TestGetWsInfoByBotUuid:

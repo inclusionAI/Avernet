@@ -402,6 +402,11 @@ class BotConfig:
         return result
 
 
+# A single immediate retry is enough for a read-only ws-info lookup because
+# the observed transient upstream 5xx recovered on the next retrieval.
+_BAAS_WS_INFO_MAX_ATTEMPTS = 2
+_BAAS_WS_INFO_RETRY_DELAY_SECONDS = 0.25
+
 class BaasService:  # pragma: no cover
     """BaaS 服务 - 与 BaaS 层 API 交互。
 
@@ -1975,6 +1980,55 @@ class BaasService:  # pragma: no cover
             ws_conn_mode=ws_conn_mode,
         )
 
+    def _request_ws_info_response(
+        self,
+        *,
+        bot_uuid: str,
+        params: dict[str, Any],
+    ) -> httpx.Response:
+        """Call the read-only BaaS ws-info endpoint with one bounded retry.
+
+        The observed failure mode is a temporary BaaS-side upstream error
+        (e.g. a transient DB pool exhaustion) on a read-only call. A single
+        immediate retry is enough to cover the short transient blip and does
+        not add retries to non-idempotent infrastructure. Callers still see
+        the existing mapped error if the retry also fails.
+        """
+        for attempt in range(_BAAS_WS_INFO_MAX_ATTEMPTS):
+            try:
+                response = self._http.get(
+                    f"/api/v1/bots/{bot_uuid}/ws-info",
+                    params=params,
+                    timeout=30.0,
+                )
+                response.raise_for_status()
+                return response
+            except httpx.HTTPStatusError as e:
+                if (_is_no_active_devices_response(e.response)
+                        or e.response.status_code < 500
+                        or attempt >= _BAAS_WS_INFO_MAX_ATTEMPTS - 1):
+                    raise
+                logger.warning(
+                    "[BaasService.get_ws_info_by_bot_uuid] transient upstream 5xx; retrying ws-info: "
+                    "bot_uuid=%s status_code=%s attempt=%d",
+                    bot_uuid,
+                    e.response.status_code,
+                    attempt + 1,
+                )
+                time.sleep(_BAAS_WS_INFO_RETRY_DELAY_SECONDS)
+            except httpx.RequestError as e:
+                if attempt >= _BAAS_WS_INFO_MAX_ATTEMPTS - 1:
+                    raise
+                logger.warning(
+                    "[BaasService.get_ws_info_by_bot_uuid] transient transport failure; retrying ws-info: "
+                    "bot_uuid=%s error=%s attempt=%d",
+                    bot_uuid,
+                    type(e).__name__,
+                    attempt + 1,
+                )
+                time.sleep(_BAAS_WS_INFO_RETRY_DELAY_SECONDS)
+        raise AssertionError("ws-info retry loop must return or raise")
+
     def get_ws_info_by_bot_uuid(
         self,
         bot_uuid: str,
@@ -2025,12 +2079,7 @@ class BaasService:  # pragma: no cover
             params["ws_conn_mode"] = ws_conn_mode
 
         try:
-            response = self._http.get(
-                f"/api/v1/bots/{bot_uuid}/ws-info",
-                params=params,
-                timeout=30.0,
-            )
-            response.raise_for_status()
+            response = self._request_ws_info_response(bot_uuid=bot_uuid, params=params)
 
             response_data = response.json()
 
