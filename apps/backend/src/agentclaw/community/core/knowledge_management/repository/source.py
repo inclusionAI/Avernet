@@ -58,6 +58,25 @@ class KnowledgeSourceRepository:
 
         return BotKnowledgeRepository(self.db).get_bot(scope)
 
+    def has_enabled_selection(self, *, bot) -> bool:
+        from agentclaw.community.core.bot_knowledge.repository.models import (
+            BotKnowledgeBindingModel as Binding,
+        )
+
+        with self.db.orm_session() as session:
+            return (
+                session.query(Binding.id)
+                .filter(
+                    Binding.avernet_tenant == get_current_avernet_tenant(),
+                    Binding.env == self.env,
+                    Binding.bot_pk == bot["id"],
+                    Binding.space_id == bot["space_id"],
+                    Binding.enabled.is_(True),
+                )
+                .first()
+                is not None
+            )
+
     def selections(self, *, bot, kb_ids):
         from agentclaw.community.core.bot_knowledge.repository.models import (
             BotKnowledgeBindingModel as Binding,

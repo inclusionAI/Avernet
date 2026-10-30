@@ -347,3 +347,64 @@ for method, path, inputs in CASES:
             json_contains={"detail": {"code": "KNOWLEDGE_INTEGRATION_UNAVAILABLE"}},
         ),
     )(lambda: None)
+
+
+def _seed_uninitialized_personal_conversation(world):
+    from agentclaw.community.core.spaces.repository.models import SpaceModel
+
+    make_staff_user(world, user_id=ACTOR)
+    with world.get(DatabasePlugin).orm_session() as session:
+        session.add(
+            SpaceModel(
+                id=1,
+                env=get_current_env(),
+                name="Personal",
+                space_code="personal-unused",
+                space_type="PERSONAL",
+                personal_owner_id=ACTOR,
+                created_by=ACTOR,
+                updated_by=ACTOR,
+            )
+        )
+        session.add(
+            BotModel(
+                bot_id="bot",
+                bot_name="Unused Bot",
+                owner_id=ACTOR,
+                creator_id=ACTOR,
+                entity_id=ACTOR,
+                entity_type="staff",
+                space_id=None,
+                env=get_current_env(),
+                bot_type="personal",
+            )
+        )
+    world.injector.binder.bind(
+        KnowledgeIntegrationConfig,
+        to=KnowledgeIntegrationConfig(True, "https://knowledge.test"),
+    )
+    world.injector.binder.bind(
+        KnowledgeManagementConfig, to=KnowledgeManagementConfig(True, "teamclaw")
+    )
+
+    def provider_must_not_run(*args, **kwargs):
+        raise AssertionError("An unused Bot must not query the remote provider")
+
+    world.get(Annotated[HttpClient, "knowledge"]).set_override(
+        "stream", provider_must_not_run
+    )
+
+
+endpoint_test(
+    method="GET",
+    path=ROOT + "/bots/{bot_id}/conversation-knowledge-bases",
+    scenario="uninitialized_personal_space_without_enabled_knowledge",
+    input=CaseInput(
+        path_params={"bot_id": "bot"},
+        query_params={"owner_id": ACTOR},
+        headers={"x-user-id": ACTOR},
+    ),
+    seed=_seed_uninitialized_personal_conversation,
+    expect=ExpectSuccess(json_equals={"items": [], "next_cursor": None}),
+    extra_assertions=(_assert_real_composition,),
+)(lambda: None)

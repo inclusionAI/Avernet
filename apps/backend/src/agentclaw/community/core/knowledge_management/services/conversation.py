@@ -79,6 +79,10 @@ class ConversationKnowledgeService:
         # Do not expose draft selections for published/service Bot conversations.
         if bot.get("bot_type") != "personal":
             raise KnowledgeManagementError("KNOWLEDGE_CONVERSATION_UNSUPPORTED")
+        # An unused Bot cannot expose any knowledge. Its space may never have
+        # initialized the provider tenant; do not make that normal state a 404.
+        if not self.source.has_enabled_selection(bot=bot):
+            return {"items": [], "next_cursor": None}
         space_id = bot["space_id"]
         page = self.catalog.page_authorized(
             scope=scope,

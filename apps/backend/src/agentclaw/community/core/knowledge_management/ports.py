@@ -19,6 +19,8 @@ class KnowledgeCatalog(Protocol):
 
         Cursor zero starts a page sequence; consumers forward it unchanged,
         never add a page size, and never prefetch the legacy complete list.
+        space_id must be a positive int; invalid ids fail locally as
+        INVALID_KNOWLEDGE_INPUT without provider I/O.
         """
         ...
 
@@ -76,6 +78,14 @@ class KnowledgeDisplaySource(Protocol):
         """Resolve a live composite Bot and its space, without an Editor grant.
 
         Consumers must establish native conversation access before reading assets.
+        """
+        ...
+
+    def has_enabled_selection(self, *, bot) -> bool:
+        """Read whether this exact tenant/env/Bot/space has any enabled selection.
+
+        Consumers must establish conversation access before querying this state.
+        This is a bounded local existence check, not provider authorization.
         """
         ...
 

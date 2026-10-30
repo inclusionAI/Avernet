@@ -280,7 +280,9 @@ class RemoteKnowledgeCatalog:
 
     def page_authorized(self, *, scope, space_id: int, cursor: int, limit: int) -> dict:
         if (
-            type(cursor) is not int
+            type(space_id) is not int
+            or not 0 < space_id <= 2**63 - 1
+            or type(cursor) is not int
             or not 0 <= cursor <= 2**63 - 1
             or type(limit) is not int
             or not 1 <= limit <= 20
