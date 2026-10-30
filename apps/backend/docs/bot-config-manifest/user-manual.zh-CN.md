@@ -307,10 +307,10 @@ SOUL.md、新实例从清单长出来，同一个 bot 两个实例人设不同�
 | --- | --- |
 | `skills` | **active skill set**。它等于声明；没列出的 skill 被移除 |
 | `identity` | **identity 文件集合**，减去保留名单（见 §8） |
-| `resources` | **仅声明的 `path` 子树**。声明的 `path` 之外一律不碰——workspace 是 bot 的工作区，不是清单的 |
+| `resources` | **workspace 根目录中未受保护的所有条目**。声明时全量替换，包括 bot 或用户手工创建的文件；保护项不受影响 |
 | `mcp` | **已启用的 server 集合** |
 
-`resources` 是绝不能读成「区域 = 整个 workspace」的那一个。
+未声明 `resources` 时不处理；`resources: []` 会清空所有未受保护的条目。详见 ADR 0022。
 
 **最容易搞错的是这三态，务必分清**：
 
@@ -858,15 +858,12 @@ resources:
 - **`strip_components` 不做魔法**：只按你写的层数剥，**不会**自动探测单一顶层目录
   ——同一份声明的行为不取决于归档内部长什么样。业务习惯 `zip -r kb.zip kb/` 打出
   的那层壳目录，就用 `strip_components: 1` 消掉。
-- **目录级所有权**：`path` 下整棵树归清单管辖，源里没有的文件在 apply 时被清除
-  （包括手工添加的）。**`path` 之外完全不碰。**
+- **资源全量替换**：声明 `resources` 时，workspace 根目录中所有未受保护条目都会被清除，再写入声明的文件，包括 `path` 之外手工添加的文件。
 - **嵌套禁止**：任何条目的 `path` 不得位于另一个目录条目之下（所有权无法定义），
   `PUT` 时拒绝。
 - **权限被拍平**：归档里的可执行位不保留。要装可执行物，那是 `cli_tools` 的事
   （§5.6）。
-- ⚠️ **替换有一个非原子窗口**：v1 的下发是「删掉整棵树、再逐文件写」。中途失败会
-  让这棵树停在缺失或半写状态，该条目记 `failed`、报告里说明这棵树状态未知。**别把
-  bot 运行期要写的目录声明成资源目录**。
+- ⚠️ **替换有一个非原子窗口**：v1 的下发是「清除所有未受保护的根项、再逐文件写」。中途失败可能留下缺失或半写的资源，报告记录失败。**不要把需要保留的运行期数据放在未受保护的范围内**，即使该路径未被声明也会被清除。
 
 ### 5.4 `mcp` — MCP servers
 
@@ -1157,14 +1154,12 @@ apply 一次**，让平台副本落上文件——否则第一份带 `platform` 
 1. **通过界面安装的 skill 会被移除**——当一份声明了 `skills` 的清单被应用时。
    对一个被声明的类目，清单是唯一的所有者：在那个类目上，**清单与界面互斥**。
 2. **被声明类目内、由 bot 自己创建的文件会被移除**，除非它在保留名单里。
-   保留名单**只有一个名字**，永不被 apply 写入、也永不被删除，无论清单声明与否：
-
-   ```text
-   MEMORY.md
-   ```
-
-   它是引擎生成的运行期状态。名单是有限、可枚举的——正因为如此，两个引擎系才
-   能对它达成同一份契约。
+   对 `identity`，`MEMORY.md` 是不可写、不可删除的保留项。对 `resources`，保护的是
+   workspace 根级 Identity 文件、`skills/`、`skills-pool/`、`skills-local/`、`state/`、
+   `conf/`、各引擎的 `<engine>_conf/` 以及根级点文件和点目录。未受保护目录会整棵
+   清除，其中的点文件也不会单独保留。完整规则见
+   [`protected_entries.py`](../../src/agentclaw/community/core/workspace/protected_entries.py) 和
+   [ADR 0022](../../../../docs/adr/0022-apply-engine-desired-state-and-observed-drift.zh-CN.md)。
 3. **首启有一段 ACTIVE-but-unconfigured 窗口**（§7），期间启动的扩容实例会看到
    只下发了一部分的内容。（之后实例不会发散：它们共享同一份挂载。）
 4. **首启时 `script` 跑在其他类目之前**（§5.5）。
@@ -2359,7 +2354,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 | --- | --- | --- | --- |
 | `identity` | `type` | 白名单枚举；claude_code 仅 `CLAUDE.md`；**`MEMORY.md` 写入即拒；`IDENTITY.md` 与其他文件统一按集合替换** | identity 文件集合（减保留名单） |
 | `skills` | `name` | 标识符，不含位置信息 | active skill set |
-| `resources` | `path` | workspace 相对；`/` 结尾 = 目录条目；禁绝对路径/`../`；禁嵌套；**来源只能是内联 `source` URL 或 `content`** | **仅被声明的 `path` 子树** |
+| `resources` | `path` | workspace 相对；`/` 结尾 = 目录条目；禁绝对路径/`../`；禁嵌套；**来源只能是内联 `source` URL 或 `content`** | **workspace 根目录中未受保护的所有条目** |
 | `mcp` | `server_code` | 平台注册表引用；可选封闭 Bot `config` | 已启用的 server 集合及显式 Bot override |
 | `engine_config` | `config` 对象 | **未开放**（附录 C） | 被声明的顶层键 |
 | `cli_tools` | `name` | 命令名，同 bot 内唯一；**字母或数字开头，只含字母数字与 `.` `_` `-`，≤128**；来源是 `oss` 或 git 声明（内联 `source` 或 `from`）；**非 git 源 `digest` 强制**，git 源以 commit SHA 钉扎、写 `digest` 反而被拒 | 清单下发的工具集合（含用 `…/cli-tools` API 装的） |

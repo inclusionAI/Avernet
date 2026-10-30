@@ -52,8 +52,8 @@ Two things are re-asked here rather than trusted:
 
 The write window: the transport has no rename, so a stop between the clear
 and the last member leaves the root partly written; the member's result row
-says ``failed`` and the next apply converges it. Costs: one recursive listing
-of the workspace in ``plan`` (no per-member ``exists`` probes); one listing
+says ``failed`` and the next apply converges it. Costs: one root listing and
+one recursive listing per unprotected root directory in ``plan``; one listing
 of the root and one delete per unprotected root entry, run concurrently, in
 the clear; one upload per member and one row rewrite in ``write``.
 """
@@ -100,7 +100,7 @@ ROOT_NOT_CLEARED_REASON = "resources root could not be cleared"
 
 
 class ResourcesRootNotListed(RuntimeError):
-    """The plan's one listing of the root could not be made.
+    """A workspace listing needed by the plan could not be made.
 
     Raised out of ``plan``, so the orchestrator aborts the category with the
     area untouched. Like ``ResourcesRootNotCleared`` it carries the stage's
@@ -213,7 +213,7 @@ class ResourcesMaterialiser(Materialiser):
         return ResolveResult(intents=tuple(intents), failures=tuple(failures))
 
     async def plan(self, ctx: ApplyContext, intents: Sequence[Intent]) -> CategoryPlan:
-        """Classify against one recursive listing of the workspace; what it has and the declaration lacks is ``removals``.
+        """Classify against unprotected workspace entries; undeclared files are ``removals``.
 
         The listing is the port's, which knows no policy; the protected root
         entries (``core/workspace/protected_entries``) are left out here, so
@@ -228,9 +228,16 @@ class ResourcesMaterialiser(Materialiser):
         """
         entity_type, entity_id, engine = _coords(ctx)
         try:
-            entries = await self._resources.list_entries(
-                entity_type=entity_type, entity_id=entity_id, bot_id=ctx.bot_id, engine_type=engine, recursive=True
-            )
+            coords = dict(entity_type=entity_type, entity_id=entity_id, bot_id=ctx.bot_id, engine_type=engine)
+            root = await self._resources.list_entries(**coords)
+            entries = []
+            for entry in root:
+                if is_protected_root_entry(entry.path):
+                    continue
+                if entry.is_dir:
+                    entries.extend(await self._resources.list_entries(**coords, prefix=entry.path, recursive=True))
+                else:
+                    entries.append(entry)
         except Exception as exc:  # noqa: BLE001 — the report gets the stage's words, the log gets the cause
             raise ResourcesRootNotListed() from exc
         listed = frozenset(

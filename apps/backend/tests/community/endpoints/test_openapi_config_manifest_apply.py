@@ -583,10 +583,10 @@ def _seed_bot_with_resource_manifest(world) -> None:
         return False
 
     listed: list[int] = []
-    clears: list[int] = []
+    root_listings: list[int] = []
 
     async def list_entries(_self, **kwargs):
-        (listed if kwargs.get("recursive") else clears).append(1)
+        (listed if kwargs.get("recursive") else root_listings).append(1)
         return ()
 
     async def delete_dir(_self, **_kwargs):
@@ -642,7 +642,7 @@ def _seed_bot_with_resource_manifest(world) -> None:
 
     _seed_bot_with_resource_manifest.uploads = uploads
     _seed_bot_with_resource_manifest.deletes = deletes
-    _seed_bot_with_resource_manifest.clears = clears
+    _seed_bot_with_resource_manifest.root_listings = root_listings
 
 
 def _resources_reached_the_write_chain(_response, world) -> None:
@@ -672,10 +672,8 @@ def _resources_reached_the_write_chain(_response, world) -> None:
         ("data/tools", "a.py"): b"x = 1\n",
         ("data/tools/sub", "b.py"): b"y = 2\n",
     }
-    # The resources root is owned whole: cleared once, before any member is
-    # written — the ownership rule, including files the new archive no longer
-    # ships and files the bot wrote there itself.
-    assert len(_seed_bot_with_resource_manifest.clears) == 1
+    # An empty root is listed once for planning and again for the clear.
+    assert len(_seed_bot_with_resource_manifest.root_listings) == 2
     assert _seed_bot_with_resource_manifest.deletes == []
 
 

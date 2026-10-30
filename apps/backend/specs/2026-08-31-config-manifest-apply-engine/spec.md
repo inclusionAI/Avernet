@@ -1,3 +1,5 @@
+> Historical design: resource ownership was superseded by [ADR 0022](../../../../docs/adr/0022-apply-engine-desired-state-and-observed-drift.md); declared resources replace all unprotected workspace entries.
+
 # Applying a Bot Config Manifest — the Engine, the Record, and the Two Fetch-Free Categories
 
 ## Summary

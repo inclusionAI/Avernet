@@ -224,6 +224,11 @@ def test_platform_resource_lists_like_a_device_and_deletes_a_directory() -> None
         WorkspaceEntry("data/kb", True),
         WorkspaceEntry("data/notes.txt", False),
     )
+    assert _run(port.list_entries(**coords, prefix="data", recursive=True)) == (
+        WorkspaceEntry("data/kb", True),
+        WorkspaceEntry("data/kb/faq.md", False),
+        WorkspaceEntry("data/notes.txt", False),
+    )
     assert _run(port.delete_dir(**coords, path="data/kb")) is True
     assert _run(port.list_entries(**coords, recursive=True)) == (
         WorkspaceEntry("data", True),
