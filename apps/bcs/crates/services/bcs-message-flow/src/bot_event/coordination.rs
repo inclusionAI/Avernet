@@ -51,6 +51,26 @@ pub(super) async fn maybe_handle_coordination_echo(
         );
         return Ok(None);
     };
+    claim_and_dispatch(flow, cmd, call, tool_call_id.to_string()).await
+}
+
+
+/// Shared claim→dispatch core for every coordination intake channel (the
+/// WS agent-event echo and the chat-final scan below): one place enforcing
+/// the v2 claim ledger semantics — run-context liveness/match, claim-once,
+/// post-claim run revalidation — before handing the resolved arguments to
+/// the protocol dispatch. Behavior is byte-identical to the former inline
+/// tail of `maybe_handle_coordination_echo`.
+async fn claim_and_dispatch(
+    flow: &BcsMessageFlow,
+    cmd: &BotEventCommand,
+    call: CoordinationCall,
+    tool_call_id: String,
+) -> ServiceResult<Option<CoordinationEchoDispatch>> {
+    // The original tail expects `tool_call_id` as a &str bound; reuse the
+    // verbatim body with a shadowed &str so the extracted code stays
+    // byte-level identical inside.
+    let tool_call_id = &tool_call_id[..];
     if let Some(intent_id) = call.intent_id.as_deref() {
         let port = flow.coordination_intents.as_ref()
             .ok_or_else(|| ServiceError::InternalError("coordination_store_unavailable".into()))?;
@@ -118,6 +138,7 @@ pub(super) async fn maybe_handle_coordination_echo(
 
     dispatch_coordination_call(flow, cmd, &call, Some(&tool_call_id)).await
 }
+
 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn dispatch_coordination_call(
