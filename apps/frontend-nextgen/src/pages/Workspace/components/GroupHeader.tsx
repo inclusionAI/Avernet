@@ -152,7 +152,7 @@ export function GroupHeader({
     <>
       {/* 命名查询容器：header 及其内部断点都量这一层宽度（element 不能查询自身）。 */}
       <div className="@container/group-header shrink-0">
-        <header className="flex h-12 items-center gap-2 border-b border-border bg-card px-3 @max-[30rem]/group-header:h-auto @max-[30rem]/group-header:flex-wrap @max-[30rem]/group-header:py-2 sm:px-4">
+        <header className="flex h-12 items-center gap-2 border-b border-divider bg-card px-3 @max-[30rem]/group-header:h-auto @max-[30rem]/group-header:flex-wrap @max-[30rem]/group-header:py-2 sm:px-4">
           {selectedGroup ? (
             /* 极窄（<30rem）wrapper basis-full 独占首行（flex-1 基线 0 不触发换行），图标钮列换到次行。 */
             <div className="flex min-w-0 max-w-full flex-1 items-center gap-2 @max-[30rem]/group-header:basis-full">

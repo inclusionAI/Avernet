@@ -148,7 +148,7 @@ export function CommunityTopicList({
         </div>
       )}
       {!loadingMore && loadMoreError && (
-        <div className="flex items-center justify-between gap-3 border-t border-border p-4">
+        <div className="flex items-center justify-between gap-3 border-t border-divider p-4">
           <p className="m-0 text-sm text-muted-foreground">{loadMoreError}</p>
           <Button variant="secondary" size="sm" onClick={() => void loadMore()}>
             重试

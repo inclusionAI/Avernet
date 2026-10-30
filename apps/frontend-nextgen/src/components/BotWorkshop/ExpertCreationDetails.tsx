@@ -17,7 +17,7 @@ function CreationReport({ botId, onClose }: { botId: string; onClose: () => void
 export function ExpertCreationDetails({ botId }: { botId: string }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="border-b border-border px-6 py-3">
+    <div className="border-b border-divider px-6 py-3">
       <Button type="button" variant="secondary" onClick={() => setOpen(!open)}>专家创建详情</Button>
       {open && <CreationReport key={botId} botId={botId} onClose={() => setOpen(false)} />}
     </div>

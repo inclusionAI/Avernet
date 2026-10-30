@@ -39,7 +39,7 @@ export function IdentityConfigPanel({
   }, [loadContent]);
   return (
     <div className="flex min-h-full flex-col bg-background">
-      <div className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-8 lg:px-10">
+      <div className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-divider bg-card px-8 lg:px-10">
         <div className="min-w-0">
           <h2 className="m-0 truncate text-sm font-semibold">MD 身份文档</h2>
           <p className="m-0 mt-0.5 truncate text-xs text-muted-foreground">配置 Bot 的规则、人格、知识和输出约束。</p>
@@ -67,7 +67,7 @@ export function IdentityConfigPanel({
           ))}
         </aside>
         {/* 分割线与 header 底边(1px border-border)同色同粗,self-stretch 从 header 底边直落页底;紧贴列表右缘(artboard-049 侧栏描边位置)。 */}
-        <div aria-hidden className="hidden w-px shrink-0 self-stretch bg-border md:block" />
+        <div aria-hidden className="hidden w-px shrink-0 self-stretch bg-divider md:block" />
         {/* 分割线右侧 20px 走道(md:ml-5)对齐设计稿侧栏右缘(188)到预览卡左缘(208)的间距。 */}
         <div className="flex min-w-0 flex-1 flex-col gap-3 pt-4 pb-6 md:ml-5">
           {/* artboard-049:工具栏与内容卡之间没有分割线,仅靠 12px 间距(gap-3)过渡。 */}

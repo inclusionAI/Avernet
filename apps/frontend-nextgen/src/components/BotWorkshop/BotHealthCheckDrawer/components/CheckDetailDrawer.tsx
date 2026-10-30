@@ -75,7 +75,7 @@ export function CheckDetailDrawer({ item, onOpenChange }: CheckDetailDrawerProps
                     <div className="overflow-hidden rounded-xl">
                       <table className="w-full border-collapse">
                         <thead>
-                          <tr className="border-b border-[var(--color-border)] text-xs font-medium text-[var(--color-muted)]">
+                          <tr className="border-b border-divider text-xs font-medium text-[var(--color-muted)]">
                             <th className="px-4 py-3 text-left">修复时间</th>
                             <th className="px-4 py-3 text-left">修复项</th>
                             <th className="px-4 py-3 text-left">状态</th>
@@ -85,7 +85,7 @@ export function CheckDetailDrawer({ item, onOpenChange }: CheckDetailDrawerProps
                           {repairs.map((record) => (
                             <tr
                               key={String(record.id)}
-                              className="border-b border-[var(--color-border)] text-sm last:border-b-0"
+                              className="border-b border-divider text-sm last:border-b-0"
                             >
                               <td className="px-4 py-3 tabular-nums text-[var(--color-fg)]">
                                 {formatDateTime(record.gmt_create)}

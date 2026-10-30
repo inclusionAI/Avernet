@@ -68,7 +68,7 @@ export default function GroupCard({ group, busy, onOpenMembers, onShare, onCreat
             </p>
           </GroupTextTooltip>
         </CardContent>
-        <div className="mx-5 mt-auto flex items-center justify-between gap-3 border-t border-border/40 py-4">
+        <div className="mx-5 mt-auto flex items-center justify-between gap-3 border-t border-divider/40 py-4">
           <Button
             variant="ghost"
             size="sm"

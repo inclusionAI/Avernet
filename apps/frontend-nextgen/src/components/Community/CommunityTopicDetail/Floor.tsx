@@ -99,7 +99,7 @@ export function Floor({
     <article
       data-post-id={postId}
       ref={registerElement?.(postId)}
-      className="border-b border-border/60 py-4 last:border-b-0"
+      className="border-b border-divider/60 py-4 last:border-b-0"
     >
       <div className="flex items-center gap-2">
         <CommunityAuthorAvatar
@@ -188,7 +188,7 @@ export function Floor({
           </div>
         )}
         {threadReplies.length > 0 ? (
-          <div id={childListId} aria-label="楼中楼回复" className="mt-3 space-y-2 border-l border-border pl-3">
+          <div id={childListId} aria-label="楼中楼回复" className="mt-3 space-y-2 border-l border-divider pl-3">
             {visibleThreadReplies.map(({ reply, targetAuthorName, targetPostId }) => (
               <ThreadReply
                 key={reply.id}

@@ -39,7 +39,7 @@ export interface ConversationCollapsedRailProps {
 /** 分组界珠：短轨 + 珠点，把「两组之间」编码为轨道上的一个结。 */
 function SectionKnot() {
   return (
-    <span aria-hidden="true" className="relative my-0.5 flex h-4 w-px justify-center bg-border">
+    <span aria-hidden="true" className="relative my-0.5 flex h-4 w-px justify-center bg-divider">
       <span className="absolute top-1/2 h-1 w-1 -translate-y-1/2 rounded-full bg-muted-foreground/60" />
     </span>
   );

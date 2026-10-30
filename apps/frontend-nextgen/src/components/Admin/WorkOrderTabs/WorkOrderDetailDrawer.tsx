@@ -117,7 +117,7 @@ export function WorkOrderDetailDrawer({
             )}
           </>
         )}
-        <div className="mt-6 flex items-center justify-end gap-2 border-t border-border pt-4">
+        <div className="mt-6 flex items-center justify-end gap-2 border-t border-divider pt-4">
           <Button size="sm" variant="ghost" onClick={onClose}>
             关闭
           </Button>

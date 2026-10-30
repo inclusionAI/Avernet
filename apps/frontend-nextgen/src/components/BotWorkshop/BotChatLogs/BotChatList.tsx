@@ -163,7 +163,7 @@ export function BotChatList({ page, onOpen, onPage, onPageSize }: Props) {
       width: 'w-[120px]',
       // sticky 右置操作列（首页 useBotTableColumns 同款语法，表头底色与其对齐）。
       className: 'sticky right-0 z-10 bg-card group-hover:bg-muted/40',
-      headerClassName: 'sticky right-0 z-10 bg-muted/50 border-l border-border/60',
+      headerClassName: 'sticky right-0 z-10 bg-muted/50 border-l border-divider/60',
       cell: (item) => (
         <Button
           variant="ghost"

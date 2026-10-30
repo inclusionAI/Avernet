@@ -109,7 +109,7 @@ export function NotificationBell({ size = 'md', className }: { size?: 'sm' | 'md
             </div>
           )}
         </div>
-        <div className="border-t border-border px-4 py-2">
+        <div className="border-t border-divider px-4 py-2">
           <Button variant="ghost" size="sm" className="w-full" onClick={() => goWorkOrders()}>
             查看全部
           </Button>

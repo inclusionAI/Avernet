@@ -25,7 +25,7 @@ const BotTableSkeleton: React.FC<BotTableSkeletonProps> = ({ rows = 6, showOwner
         </thead>
         <tbody>
           {Array.from({ length: rows }, (_, rowIndex) => (
-            <tr key={rowIndex} className="h-18 border-b border-border/60">
+            <tr key={rowIndex} className="h-18 border-b border-divider/60">
               {widths.map((width, columnIndex) => (
                 <td key={columnIndex} className={`px-4 ${width}`}>
                   {columnIndex === 0 ? (

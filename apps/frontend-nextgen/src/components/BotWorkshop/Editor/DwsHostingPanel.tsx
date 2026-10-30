@@ -33,7 +33,7 @@ export function DwsHostingPanel({ botId }: { botId: string }) {
   return (
     <div className="flex min-h-full flex-col bg-background">
       {/* 通栏 header:h-14 与其它子菜单(能力/资源/定时等)同高,同为 56px。 */}
-      <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-8 lg:px-10">
+      <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-divider bg-card px-8 lg:px-10">
         <div className="min-w-0">
           <h2 className="m-0 truncate text-sm font-semibold">消息托管</h2>
           <p className="m-0 mt-0.5 truncate text-xs text-muted-foreground">钉钉 · 全部单聊</p>
@@ -73,7 +73,7 @@ export function DwsHostingPanel({ botId }: { botId: string }) {
             条。相关会话已暂停自动处理。
           </p>
         )}
-        <section className="space-y-3 border-b border-border pb-5">
+        <section className="space-y-3 border-b border-divider pb-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h3 className="text-sm font-medium">钉钉授权</h3>
             <span className="text-xs text-muted-foreground">
@@ -167,7 +167,7 @@ export function DwsHostingPanel({ botId }: { botId: string }) {
             <span>转告本人</span>
             <span className="text-muted-foreground">Bot 内置钉钉通知</span>
           </div>
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-divider pt-4">
             <span className="text-xs text-muted-foreground">
               {dirty ? '有未保存的修改' : `已保存 · 版本 ${config!.version}`}
             </span>
@@ -184,7 +184,7 @@ export function DwsHostingPanel({ botId }: { botId: string }) {
             </Button>
           </div>
         </fieldset>
-        <section className="space-y-3 border-t border-border pt-5">
+        <section className="space-y-3 border-t border-divider pt-5">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-medium">会话接管</h3>
             <Button variant="outline" disabled={busy} onClick={() => hosting.list(0)}>
@@ -195,7 +195,7 @@ export function DwsHostingPanel({ botId }: { botId: string }) {
           {hosting.conversations?.items.map((item) => (
             <div
               key={item.conversation_id}
-              className="flex items-center justify-between gap-3 border-b border-border py-3"
+              className="flex items-center justify-between gap-3 border-b border-divider py-3"
             >
               <span className="min-w-0 break-all text-xs">{item.conversation_id}</span>
               <Button

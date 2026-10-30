@@ -214,7 +214,7 @@ export function DebugChatPanel({
         {onClose ? (
           <>
             {/* 关闭前的短分割线:与常规 icon 区隔,呼应左侧 header 的行末收口。 */}
-            <span aria-hidden className="h-5 w-px shrink-0 bg-border" />
+            <span aria-hidden className="h-5 w-px shrink-0 bg-divider" />
             <Button
               variant="ghost"
               size="icon"

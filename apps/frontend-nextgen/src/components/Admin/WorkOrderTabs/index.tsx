@@ -183,7 +183,7 @@ export function WorkOrderTabs() {
         {loading ? (
           <div className="px-5 pb-2">
             {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-4 border-b border-border py-4 last:border-b-0">
+              <div key={i} className="flex items-center gap-4 border-b border-divider py-4 last:border-b-0">
                 <div className="flex-1 space-y-2">
                   <Skeleton.Line className="w-2/5" />
                   <Skeleton.Line className="w-4/5" />
@@ -234,7 +234,7 @@ export function WorkOrderTabs() {
               ))}
             </div>
             {/* 分页：接入统一 Pagination 组件（计数 + 上/下一页图标按钮，右对齐） */}
-            <div className="flex items-center justify-end border-t border-border px-5 py-4">
+            <div className="flex items-center justify-end border-t border-divider px-5 py-4">
               <Pagination
                 current={pageNo}
                 pageSize={pageSize}

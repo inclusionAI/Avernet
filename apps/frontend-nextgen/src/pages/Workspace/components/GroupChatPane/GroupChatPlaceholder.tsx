@@ -7,7 +7,7 @@ export function GroupChatPlaceholder({ onOpenSessionList }: { onOpenSessionList?
     <section className="flex min-w-0 flex-1 flex-col bg-background">
       {/* 未选群也保留 <lg 双入口，否则内流侧栏隐藏后无法切换身份或选择群。 */}
       {onOpenSessionList ? (
-        <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-card px-3 sm:px-4 lg:hidden">
+        <div className="flex h-12 shrink-0 items-center gap-2 border-b border-divider bg-card px-3 sm:px-4 lg:hidden">
           <PrimaryNavToggle />
           <IconButton
             label="打开会话列表"
