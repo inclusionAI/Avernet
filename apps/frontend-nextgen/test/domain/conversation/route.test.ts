@@ -119,4 +119,31 @@ describe('Conversation route contract', () => {
       });
     });
   });
+
+  describe('legacy share link id alias', () => {
+    it('parses legacy id param as botId when bot param is absent', () => {
+      expect(parseConversationRoute('id=20260407_jmg31orw%3A152819')).toEqual({
+        botId: '20260407_jmg31orw:152819',
+      });
+    });
+
+    it('prefers bot param over legacy id alias', () => {
+      expect(parseConversationRoute('bot=bot-a%3A1&id=20260407_jmg31orw%3A152819')).toEqual({
+        botId: 'bot-a:1',
+      });
+    });
+
+    it('ignores legacy id without composite separator', () => {
+      expect(parseConversationRoute('id=not-a-composite-id')).toEqual({});
+    });
+
+    it('round-trips legacy id alias into canonical bot param', () => {
+      const route = parseConversationRoute('id=20260407_jmg31orw%3A152819');
+      expect(serializeConversationRoute(route)).toBe('bot=20260407_jmg31orw%3A152819');
+    });
+
+    it('ignores empty legacy id', () => {
+      expect(parseConversationRoute('id=')).toEqual({});
+    });
+  });
 });

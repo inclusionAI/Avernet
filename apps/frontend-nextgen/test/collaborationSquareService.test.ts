@@ -269,6 +269,47 @@ describe('collaboration square service', () => {
     await expect(service.resolveSharedBot('target', '项目助手', humanContext)).resolves.toBeNull();
   });
 
+  test('老版分享链接按 canonical 复合 ID 反查公开 Bot，无名称提示亦可命中', async () => {
+    const listBotPage = jest.fn(async () => ({
+      items: [publicBot('other'), { ...publicBot('uuid-a'), friendRequestBotId: '20260407_jmg31orw:152819' }],
+      total: 2,
+    }));
+    const service = new CollaborationSquareService(createGateway({ listBotPage }));
+
+    await expect(service.resolvePublicBotById('20260407_jmg31orw:152819', humanContext)).resolves.toEqual(
+      expect.objectContaining({ friendRequestBotId: '20260407_jmg31orw:152819' }),
+    );
+    expect(listBotPage).toHaveBeenCalledWith({ page: 1, pageSize: 100 }, humanContext, undefined);
+  });
+
+  test('老版分享链接反查兼容 bot_uuid 直接命中形态', async () => {
+    const listBotPage = jest.fn(async () => ({ items: [publicBot('20260407_jmg31orw:152819')], total: 1 }));
+    const service = new CollaborationSquareService(createGateway({ listBotPage }));
+
+    await expect(service.resolvePublicBotById('20260407_jmg31orw:152819', humanContext)).resolves.toEqual(
+      expect.objectContaining({ id: '20260407_jmg31orw:152819' }),
+    );
+  });
+
+  test('老版分享链接反查首页未命中时翻页直至列表耗尽', async () => {
+    const listBotPage = jest
+      .fn()
+      .mockResolvedValueOnce({ items: [publicBot('a')], total: 150 })
+      .mockResolvedValueOnce({ items: [publicBot('b')], total: 150 });
+    const service = new CollaborationSquareService(createGateway({ listBotPage }));
+
+    await expect(service.resolvePublicBotById('missing:9', humanContext)).resolves.toBeNull();
+    expect(listBotPage).toHaveBeenCalledTimes(2);
+  });
+
+  test('老版分享链接反查拒绝非复合 ID，不发起请求', async () => {
+    const listBotPage = jest.fn(async () => ({ items: [], total: 0 }));
+    const service = new CollaborationSquareService(createGateway({ listBotPage }));
+
+    await expect(service.resolvePublicBotById('not-composite', humanContext)).resolves.toBeNull();
+    expect(listBotPage).not.toHaveBeenCalled();
+  });
+
   test('Bot Discovery 与公开群查询原样交给 Gateway', async () => {
     const discoverBots = jest.fn(async () => []);
     const listGroups = jest.fn(async () => []);
