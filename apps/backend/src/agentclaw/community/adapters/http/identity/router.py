@@ -23,6 +23,9 @@ from agentclaw.community.core.bot_collaborator.interceptor.base import with_inte
 from agentclaw.community.core.bot_collaborator.interceptor.collaborator import (
     CollaboratorPermissionInterceptor,
 )
+from agentclaw.community.core.devices.errors import (
+    DeviceConnectionUnavailableError,
+)
 from agentclaw.community.core.services.identity import (
     IdentityFileContent,
     IdentityFileResponse,
@@ -71,6 +74,10 @@ async def get_bot_identity_file(
             entity_type, entity_id, bot_id, file_type, operator_id,
             publish_id=publish_id, engine_type=engine_type,
         )
+    except DeviceConnectionUnavailableError:
+        # The BaaS resolver tells us the device is transiently unavailable;
+        # return a 503 rather than turning this into a generic internal error.
+        raise HTTPException(status_code=503, detail="Device temporarily unavailable")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
