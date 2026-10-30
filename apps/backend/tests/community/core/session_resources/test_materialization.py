@@ -72,6 +72,7 @@ def _record(vault: TokenVault) -> SessionResourceRecord:
         tenant="tenant-1",
         bot_uuid="bot-uuid-1",
         display_name="a.txt",
+        creator_name="上传者",
         filename="a.txt",
         device_path="workspace/.teamclaw/session-files/scope-hash/session-hash/sr_001/a.txt",
         workspace_relative_path=".teamclaw/session-files/scope-hash/session-hash/sr_001/a.txt",
@@ -110,6 +111,7 @@ def test_handler_reloads_decrypts_and_dispatches_to_shared_engine_endpoint():
     assert body["transfer_api_version"] == "session_v2"
     assert body["workspace_relative_path"].startswith(".teamclaw/")
     assert body["uploaded_at"] == "2026-08-03T10:20:30Z"
+    assert body["creator_name"] == "上传者"
     assert "owner_id" not in body
 
 
@@ -163,7 +165,7 @@ def test_handler_leaves_upload_time_empty_for_legacy_record():
     handler = SessionResourceMaterializeHandler(
         _Resolver(),
         transport,
-        _Repo(replace(_record(vault), gmt_create=None)),
+        _Repo(replace(_record(vault), gmt_create=None, creator_name=None)),
         vault,
     )
 
@@ -171,6 +173,7 @@ def test_handler_leaves_upload_time_empty_for_legacy_record():
 
     assert isinstance(result, Complete)
     assert transport.calls[0][3]["uploaded_at"] is None
+    assert transport.calls[0][3]["creator_name"] is None
 
 
 def test_handler_ignores_stale_task_without_calling_engine():

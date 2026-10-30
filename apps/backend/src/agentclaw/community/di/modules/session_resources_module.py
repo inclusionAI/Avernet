@@ -8,6 +8,8 @@ from injector import Binder, Module, inject, provider, singleton
 from agentclaw.community.api.session_resource_service import (
     SessionResourceServiceProtocol,
 )
+from agentclaw.community.api.engine_session_files import EngineSessionFilesProtocol
+from agentclaw.community.core.session_resources.engine_files import EngineSessionFilesService
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
@@ -25,6 +27,7 @@ from agentclaw.community.core.session_resources.materialization import (
 from agentclaw.community.core.repository.protocols.platform import SessionResourceRepositoryProtocol
 from agentclaw.community.core.session_resources.service import SessionResourceService
 from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
+from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
 from agentclaw.community.plugin_api.http_client import (
     QUALIFIER_BAAS,
     HttpClient,
@@ -37,6 +40,7 @@ from agentclaw.community.core.repository.implementations.platform.session_resour
 
 class SessionResourcesModule(Module):
     def configure(self, binder: Binder) -> None:
+        binder.bind(EngineSessionFilesProtocol, to=EngineSessionFilesService, scope=singleton)
         binder.bind(
             SessionResourceRepositoryProtocol,
             to=SessionResourceRepository,
@@ -76,6 +80,7 @@ class SessionResourcesModule(Module):
         baas_config: BaasConfig,
         bot_repository: BotRepository,
         bot_friend_repository: BotFriendRepositoryProtocol,
+        staff_dept: StaffDeptPlugin,
     ) -> SessionResourceService:
         return SessionResourceService(
             repository=repository,
@@ -87,6 +92,7 @@ class SessionResourcesModule(Module):
             default_tenant=baas_config.tenant,
             bot_repository=bot_repository,
             bot_friend_repository=bot_friend_repository,
+            staff_dept=staff_dept,
         )
 
     @singleton

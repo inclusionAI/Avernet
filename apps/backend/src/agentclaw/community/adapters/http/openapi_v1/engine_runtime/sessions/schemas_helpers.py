@@ -1,6 +1,7 @@
 """Pure mapping and pagination helpers for the public sessions adapter."""
 from __future__ import annotations
 
+from datetime import UTC
 from typing import Any
 
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.schemas import (
@@ -279,10 +280,18 @@ def _history_page(
 
 
 def _session_file_resource(record: SessionResourceRecord) -> SessionFile:
+    created_at = record.gmt_create
+    if created_at is not None:
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=UTC)
+        created_at = created_at.astimezone(UTC)
     return SessionFile(
         resource_id=record.resource_id,
         display_name=record.display_name,
         status=record.status.value,
+        creator_type="user",
+        creator_name=record.creator_name,
+        created_at=created_at.isoformat().replace("+00:00", "Z") if created_at else None,
         size_bytes=record.size_bytes,
         content_hash=record.client_content_hash,
         task_version=record.task_version,

@@ -564,6 +564,7 @@ class BotService(BotServiceProtocol):
         template_type: "str | None",
         template_config: "Optional[Dict[str, Any]]",
         log_context: str,
+        bot_name: str | None = None,
     ) -> "Optional[Dict[str, Any]]":
         """Build engine-specific extra_envs via the provisioning strategy.
 
@@ -588,6 +589,8 @@ class BotService(BotServiceProtocol):
                 template_config=template_config,
             )
             extra_envs = strategy.build_extra_envs(ctx)
+            if isinstance(bot_name, str) and bot_name.strip():
+                extra_envs = {**(extra_envs or {}), "TEAMCLAW_BOT_NAME": bot_name.strip()}
             if extra_envs:
                 logger.info(
                     "[%s] Setting engine extra_envs for bot %s: %s",
@@ -2019,6 +2022,7 @@ class BotService(BotServiceProtocol):
                     template_type=template_type,
                     template_config=template_config,
                     log_context="bot_service.create_bot",
+                    bot_name=resolved_bot_name,
                 )
                 if resolved_active_engine == "openclaw":
                     extra_envs = {
@@ -2291,6 +2295,7 @@ class BotService(BotServiceProtocol):
                     template_type=bot_template_type,
                     template_config=resolved_template_config,
                     log_context="bot_service._allocate_device_async",
+                    bot_name=bot_record.get("bot_name") if bot_record else None,
                 )
                 if active_engine == "openclaw":
                     extra_envs = {
@@ -5169,6 +5174,7 @@ class BotService(BotServiceProtocol):
             template_type=bot_template_type,
             template_config=resolved_template_config,
             log_context="bot_service._restart_bot_baas",
+            bot_name=bot.get("bot_name"),
         )
         if active_engine == "openclaw":
             extra_envs = {

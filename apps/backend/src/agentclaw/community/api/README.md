@@ -128,10 +128,13 @@ provides:
   - TcResourceReadyObserverProtocol
   - AcliCliServiceProtocol
   - AgentSwarmServiceProtocol
+  - EngineSessionFilesProtocol
 consumes:
   - "No service impls at import time — Protocols only declare shape, they don't depend on concrete services"
   - "A small number of core dataclass / schema types used to type Protocol method signatures (see internal_dependencies)"
 internal_dependencies:
+  - agentclaw.community.core.runtime_binding.models # Trusted target for Engine session-file operations
+  - agentclaw.community.plugin_api.device_adapter_transport # Streaming response contract
   - agentclaw.community.core.expert_market
   - agentclaw.community.core.bot_knowledge
   - agentclaw.community.core.space_knowledge

@@ -6,7 +6,7 @@ import hashlib
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import BinaryIO, Literal
 
 from pydantic import BaseModel, Field, field_validator
 from urllib.parse import urlsplit
@@ -37,6 +37,7 @@ class MaterializationRequest(BaseModel):
     size_bytes: int | None = Field(default=None, ge=0)
     content_hash: str | None = Field(default=None, min_length=1, max_length=128)
     uploaded_at: datetime | None = None
+    creator_name: str | None = Field(default=None, max_length=255)
 
     def model_post_init(self, __context, /) -> None:
         if self.transfer_api_version == "session_v2":
@@ -111,9 +112,12 @@ class ManifestEntry(BaseModel):
     observed_inode: int | None = None
     uploaded_at: datetime | None = None
     baas_tenant: str | None = None
-    source_kind: Literal["baas_session_file", "temporary_url"] = "baas_session_file"
+    source_kind: Literal["baas_session_file", "temporary_url", "workspace_file", "workspace_live"] = "baas_session_file"
     source_attachment_id: str | None = None
     source_url_hash: str | None = None
+    creator_type: Literal["bot", "user"] | None = None
+    creator_name: str | None = None
+    created_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -128,10 +132,15 @@ class PreparedChatAttachment:
 
 @dataclass(frozen=True)
 class MaterializedContent:
-    """Controlled metadata for a file resolved from a ready manifest entry."""
+    """Controlled metadata for a file resolved from a ready manifest entry.
+
+    When stream is present, consume and close that pinned operation-local stream;
+    path is descriptive metadata and must never be reopened for delivery.
+    """
 
     path: Path
     filename: str
     media_type: str
     content_disposition: str
     size_bytes: int
+    stream: BinaryIO | None = None
