@@ -320,7 +320,7 @@
     {
       "id": "story_authority_user_journey",
       "executor_migration": {
-        "mode": "LOCAL_ONLY",
+        "mode": "DUAL",
         "preprod_verdict": "NOT_RUN",
         "gates": [],
         "notes": []

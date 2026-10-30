@@ -1,0 +1,1347 @@
+{
+  "schema_version": 1,
+  "parent": "story_authority_user_journey",
+  "suite": "owned-local-authority-dual-v1",
+  "case_id": "LOCAL-AUTHORITY-JOURNEY-02",
+  "dual_case_id": "DUAL-AUTHORITY-JOURNEY-01",
+  "dual_suite": "dual-authority-v1",
+  "obligation_prefix": "AUTHORITY-JOURNEY.",
+  "environment": {
+    "local": "LOCAL_EXECUTOR_ONLY",
+    "preprod": "REMOTE_ADMISSION_GATED_READ_ONLY"
+  },
+  "sources": {
+    "authority.sh": "/Users/shenlifang/work/codes/datamarket/teamclaw/Avernet/.worktree/e2e-dev-fresh/apps/bcs/scripts/e2e-test/authority.sh"
+  },
+  "source_revision": "c6f00120949078f14cb0d3602fb8301f2ccb1803",
+  "source_file_revisions": {
+    "authority.sh": "c6f00120949078f14cb0d3602fb8301f2ccb1803"
+  },
+  "story_checks": 42,
+  "story_markers": [
+    "Bot authority journey: {checks} live HTTP assertions passed"
+  ],
+  "business_envelope": {
+    "required_keys": [
+      "code",
+      "message",
+      "request_id",
+      "data"
+    ],
+    "data_shapes": [
+      "dict",
+      "list"
+    ],
+    "counted": false,
+    "note": "Hard precondition on every /api/v1/collaboration and /openapi/v1/collaboration business call; never counted as an obligation."
+  },
+  "registration_plane": {
+    "admission_headers": [
+      "X-Mock-User-Id",
+      "X-Mock-Nick-Name"
+    ],
+    "mint_path": "/register/token",
+    "register_path": "/register",
+    "register_query": [
+      "token",
+      "bot-name"
+    ],
+    "token_policy": "one-time per admitted mock human; wrong token rejected 403",
+    "mock_headers_forbidden_on_business_paths": true,
+    "bots_committed": 2,
+    "committed_id_shape": "bot_ + 8 lowercase hex (server-issued) or canonical uuid4",
+    "distinct_bot_ids": true
+  },
+  "principal": {
+    "header": "X-Avernet-Principal",
+    "algorithm": "HS256",
+    "key_id": "bare",
+    "type": "JWT",
+    "issuer": "gateway",
+    "audience": "bcs",
+    "tenant": "bcs-e2e",
+    "signing_key_env": "AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE",
+    "minted_fresh_per_business_request": true,
+    "subject_keys": [
+      "id",
+      "username",
+      "display_name",
+      "full_name",
+      "tenant_id"
+    ],
+    "expiry_window_seconds": 60
+  },
+  "authority_constants": {
+    "target_user_id": "002",
+    "mine_user_id": "137",
+    "never_user_id_shape": "never-seen-<uuid4 hex 12>",
+    "internal_prefix": "/api/v1/collaboration",
+    "public_prefix": "/openapi/v1/collaboration",
+    "owner_not_manager_error_code": "owner_not_manager",
+    "human_unknown_error_code": "bot_authority_human_unknown",
+    "transfer_window_max_renewal_ms": 300000,
+    "expires_at_unit": "epoch-milliseconds",
+    "disposition": "AUTHORITY_TWO_BOTS_CREATED_AND_RETAINED",
+    "http_call_count": 24,
+    "bootstrap_http_calls": 4,
+    "business_http_calls": 20
+  },
+  "owned_runtime_binary": {
+    "package": "bcs",
+    "hash_algorithm": "sha256",
+    "sha256": "899092e39ca461f04a59dce989d1a13bc85e61791099c532b98d7b3882cb745c",
+    "auto_build": false,
+    "required_arguments": [
+      "--binary",
+      "--binary-sha256"
+    ],
+    "role": "owned-bcs-server",
+    "reuse_provenance": "sheltered wpe3 owned-local BCS server binary reused without rebuild; sha256 verified before every run; no cargo build in this slice"
+  },
+  "cli_runtime_binary": {
+    "package": "bcs-cli",
+    "hash_algorithm": "sha256",
+    "sha256": "0e9f2e3f6df9e2533b1a2e77792cbeed80c1d71b25fd2c178a7d3f9a3b7b1e95",
+    "auto_build": false,
+    "required_arguments": [
+      "--cli-binary",
+      "--cli-binary-sha256"
+    ],
+    "role": "product-cli-readiness-gate-only",
+    "authority_business_verbs": "none-frozen",
+    "separation_note": "The frozen journey splits runtime roles: bcs owns the server leg; bcs-cli owns only the child readiness gate because the frozen bcs-cli exposes no authority business verbs.",
+    "reuse_provenance": "sheltered wpe3 bcs-cli binary reused without rebuild; sha256 verified before every run; no cargo build in this slice"
+  },
+  "authorization_note": "Preprod admission resolves only named environment references BCS_E2E_DRIVER_TOKEN and BCS_E2E_HUMAN_COOKIE from the live process environment; the frozen preprod column is REMOTE_ADMISSION_GATED_READ_ONLY, the mutating journey never executes against preprod in this slice, no leg stores a credential, and no release credit is granted.",
+  "redaction_tokens": [
+    "bot_token",
+    "X-Avernet-Principal",
+    "register?token",
+    "Bearer "
+  ],
+  "bootstrap_preconditions": [
+    {
+      "line": 49,
+      "literal": "_AU_STAFF_B=\"${BCS_E2E_AUTHORITY_STAFF_B:-002}\""
+    },
+    {
+      "line": 59,
+      "literal": "mint=\"$(curl --noproxy"
+    },
+    {
+      "line": 60,
+      "literal": "-H \"X-Mock-User-Id: $staff\""
+    },
+    {
+      "line": 61,
+      "literal": "-H \"X-Mock-Nick-Name: $staff\""
+    },
+    {
+      "line": 62,
+      "literal": "\"${BCS_API_BASE_URL}/register/token\")\""
+    },
+    {
+      "line": 74,
+      "literal": "\"${BCS_API_BASE_URL}/register?token=${enc_token}&bot-name=${enc_name}\")"
+    },
+    {
+      "line": 96,
+      "literal": "local prefix=\"/api/v1/collaboration\""
+    },
+    {
+      "line": 100,
+      "literal": "principal_a=$(python3 \"$probe\" principal"
+    },
+    {
+      "line": 110,
+      "literal": "principal_b=$(python3 \"$probe\" principal"
+    },
+    {
+      "line": 125,
+      "literal": "_au_register_fixture_bot \"$BCS_MOCK_USER_ID\""
+    },
+    {
+      "line": 133,
+      "literal": "_au_register_fixture_bot \"$_AU_STAFF_B\""
+    },
+    {
+      "line": 185,
+      "literal": "public_prefix=\"/openapi/v1/collaboration\""
+    },
+    {
+      "line": 186,
+      "literal": "mine_only_staff=\"${BCS_E2E_AUTHORITY_STAFF_MINE:-137}\""
+    },
+    {
+      "line": 187,
+      "literal": "principal_mine=$(python3 \"$probe\" principal"
+    }
+  ],
+  "requirements": [
+    {
+      "id": "AUTHORITY-JOURNEY.owner-ownership-read-status",
+      "expectation": "Owner principal GETs the internal ownership view and the read succeeds with HTTP 200.",
+      "story_lines": [
+        138,
+        139
+      ],
+      "anchors": [
+        {
+          "line": 138,
+          "literal": "_au_request GET \"${prefix}/bots/${owner_bot}/ownership\" \"$principal_a\""
+        },
+        {
+          "line": 139,
+          "literal": "require_status \"owner reads the collaboration ownership view\" \"200\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "GET",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/ownership",
+        "status": 200,
+        "actor": "owner",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.ownership-keeps-bot-id",
+      "expectation": "Ownership response data.bot_id equals the registered owner Bot id.",
+      "story_lines": [
+        140,
+        140
+      ],
+      "anchors": [
+        {
+          "line": 140,
+          "literal": "assert_json_eq \"ownership keeps the bot id\" \"$RESPONSE\" \"data.bot_id\" \"$owner_bot\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "GET",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/ownership",
+        "status": 200,
+        "actor": "owner",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.ownership-identifies-registered-owner",
+      "expectation": "Ownership response data.owner_user_id equals the registering owner human id.",
+      "story_lines": [
+        141,
+        142
+      ],
+      "anchors": [
+        {
+          "line": 141,
+          "literal": "assert_json_eq \"ownership identifies the registered owner\""
+        },
+        {
+          "line": 142,
+          "literal": "\"$RESPONSE\" \"data.owner_user_id\" \"$BCS_MOCK_USER_ID\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "GET",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/ownership",
+        "status": 200,
+        "actor": "owner",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.manager-page-empty-status",
+      "expectation": "Owner principal GETs the manager page while it is still empty with HTTP 200.",
+      "story_lines": [
+        145,
+        146
+      ],
+      "anchors": [
+        {
+          "line": 145,
+          "literal": "_au_request GET \"${prefix}/bots/${owner_bot}/managers\" \"$principal_a\""
+        },
+        {
+          "line": 146,
+          "literal": "require_status \"owner reads an empty manager page\" \"200\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "GET",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/managers",
+        "status": 200,
+        "actor": "owner",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.manager-page-starts-empty",
+      "expectation": "Fresh manager page reports data.total 0.",
+      "story_lines": [
+        147,
+        147
+      ],
+      "anchors": [
+        {
+          "line": 147,
+          "literal": "assert_json_eq \"manager page starts empty\" \"$RESPONSE\" \"data.total\" \"0\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "GET",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/managers",
+        "status": 200,
+        "actor": "owner",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.owner-manager-add-rejected-status",
+      "expectation": "Adding the owner human itself as a manager is rejected with HTTP 409.",
+      "story_lines": [
+        151,
+        152
+      ],
+      "anchors": [
+        {
+          "line": 151,
+          "literal": "_au_request PUT \"${prefix}/bots/${owner_bot}/managers/${BCS_MOCK_USER_ID}\" \"$principal_a\""
+        },
+        {
+          "line": 152,
+          "literal": "require_status \"adding the owner as a manager is rejected\" \"409\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "PUT",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/managers/{owner_user_id}",
+        "status": 409,
+        "actor": "owner",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.owner-manager-add-error-code",
+      "expectation": "Owner-as-manager add reports the stable error_code owner_not_manager.",
+      "story_lines": [
+        153,
+        154
+      ],
+      "anchors": [
+        {
+          "line": 153,
+          "literal": "assert_json_eq \"owner add uses the stable error code\""
+        },
+        {
+          "line": 154,
+          "literal": "\"$RESPONSE\" \"data.error_code\" \"owner_not_manager\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "PUT",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/managers/{owner_user_id}",
+        "status": 409,
+        "actor": "owner",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.manager-add-status",
+      "expectation": "Owner principal adds the registered target human as a manager with HTTP 200.",
+      "story_lines": [
+        156,
+        157
+      ],
+      "anchors": [
+        {
+          "line": 156,
+          "literal": "_au_request PUT \"${prefix}/bots/${owner_bot}/managers/${_AU_STAFF_B}\" \"$principal_a\""
+        },
+        {
+          "line": 157,
+          "literal": "require_status \"owner adds the target human as a manager\" \"200\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "PUT",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/managers/{target_user_id}",
+        "status": 200,
+        "actor": "owner",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.manager-add-added-one",
+      "expectation": "Manager add reports data.added 1.",
+      "story_lines": [
+        158,
+        158
+      ],
+      "anchors": [
+        {
+          "line": 158,
+          "literal": "assert_json_eq \"manager add reports one added\" \"$RESPONSE\" \"data.added\" \"1\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "PUT",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/managers/{target_user_id}",
+        "status": 200,
+        "actor": "owner",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.manager-page-populated-status",
+      "expectation": "Owner principal re-reads the populated manager page with HTTP 200.",
+      "story_lines": [
+        160,
+        161
+      ],
+      "anchors": [
+        {
+          "line": 160,
+          "literal": "_au_request GET \"${prefix}/bots/${owner_bot}/managers\" \"$principal_a\""
+        },
+        {
+          "line": 161,
+          "literal": "require_status \"owner reads the populated manager page\" \"200\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "GET",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/managers",
+        "status": 200,
+        "actor": "owner",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.manager-page-keeps-manager",
+      "expectation": "Populated manager page reports data.total 1.",
+      "story_lines": [
+        162,
+        162
+      ],
+      "anchors": [
+        {
+          "line": 162,
+          "literal": "assert_json_eq \"manager page keeps the manager\" \"$RESPONSE\" \"data.total\" \"1\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "GET",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/managers",
+        "status": 200,
+        "actor": "owner",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.manager-page-exposes-added-manager",
+      "expectation": "Manager page data.items contains the registered target human id.",
+      "story_lines": [
+        163,
+        164
+      ],
+      "anchors": [
+        {
+          "line": 163,
+          "literal": "assert_json_array_contains \"manager page exposes the added manager\""
+        },
+        {
+          "line": 164,
+          "literal": "\"$RESPONSE\" \"data.items\" \"$_AU_STAFF_B\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "GET",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/managers",
+        "status": 200,
+        "actor": "owner",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.manager-remove-status",
+      "expectation": "Owner principal removes the target manager with HTTP 200.",
+      "story_lines": [
+        167,
+        168
+      ],
+      "anchors": [
+        {
+          "line": 167,
+          "literal": "_au_request DELETE \"${prefix}/bots/${owner_bot}/managers/${_AU_STAFF_B}\" \"$principal_a\""
+        },
+        {
+          "line": 168,
+          "literal": "require_status \"owner removes the manager\" \"200\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "DELETE",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/managers/{target_user_id}",
+        "status": 200,
+        "actor": "owner",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.manager-remove-removed-one",
+      "expectation": "Manager removal reports data.removed 1.",
+      "story_lines": [
+        169,
+        169
+      ],
+      "anchors": [
+        {
+          "line": 169,
+          "literal": "assert_json_eq \"manager removal reports one removed\" \"$RESPONSE\" \"data.removed\" \"1\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "DELETE",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/managers/{target_user_id}",
+        "status": 200,
+        "actor": "owner",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.manager-absent-remove-status",
+      "expectation": "Idempotent removal of the now-absent manager still succeeds with HTTP 200.",
+      "story_lines": [
+        170,
+        171
+      ],
+      "anchors": [
+        {
+          "line": 170,
+          "literal": "_au_request DELETE \"${prefix}/bots/${owner_bot}/managers/${_AU_STAFF_B}\" \"$principal_a\""
+        },
+        {
+          "line": 171,
+          "literal": "require_status \"manager removal is idempotent for absent\" \"200\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "DELETE",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/managers/{target_user_id}",
+        "status": 200,
+        "actor": "owner",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.manager-absent-remove-removed-zero",
+      "expectation": "Absent manager removal reports data.removed 0.",
+      "story_lines": [
+        172,
+        172
+      ],
+      "anchors": [
+        {
+          "line": 172,
+          "literal": "assert_json_eq \"absent manager removal reports no change\" \"$RESPONSE\" \"data.removed\" \"0\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "DELETE",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/managers/{target_user_id}",
+        "status": 200,
+        "actor": "owner",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.manager-restore-status",
+      "expectation": "Owner principal restores the target manager before the transfer with HTTP 200.",
+      "story_lines": [
+        175,
+        176
+      ],
+      "anchors": [
+        {
+          "line": 175,
+          "literal": "_au_request PUT \"${prefix}/bots/${owner_bot}/managers/${_AU_STAFF_B}\" \"$principal_a\""
+        },
+        {
+          "line": 176,
+          "literal": "require_status \"manager is restored before the transfer\" \"200\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "PUT",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/managers/{target_user_id}",
+        "status": 200,
+        "actor": "owner",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.mine-ensured-human-mine-status",
+      "expectation": "Mine-ensured human principal reads the public bots/mine face with HTTP 200.",
+      "story_lines": [
+        197,
+        199
+      ],
+      "anchors": [
+        {
+          "line": 197,
+          "literal": "api_request_headers GET \"${public_prefix}/bots/mine?limit=20\""
+        },
+        {
+          "line": 198,
+          "literal": "\"X-Avernet-Principal: ${principal_mine}\""
+        },
+        {
+          "line": 199,
+          "literal": "require_status \"mine-ensured human reads its own mine\" \"200\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "GET",
+        "path_template": "/openapi/v1/collaboration/bots/mine",
+        "status": 200,
+        "actor": "mine",
+        "query": {
+          "limit": "20"
+        }
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.mine-manager-add-status",
+      "expectation": "Owner principal adds the mine-ensured human as a manager with HTTP 200.",
+      "story_lines": [
+        201,
+        202
+      ],
+      "anchors": [
+        {
+          "line": 201,
+          "literal": "_au_request PUT \"${prefix}/bots/${owner_bot}/managers/${mine_only_staff}\" \"$principal_a\""
+        },
+        {
+          "line": 202,
+          "literal": "require_status \"mine-ensured human is a valid manager add target\" \"200\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "PUT",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/managers/{mine_user_id}",
+        "status": 200,
+        "actor": "owner",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.mine-manager-add-added-one",
+      "expectation": "Mine-ensured manager add reports data.added 1.",
+      "story_lines": [
+        203,
+        204
+      ],
+      "anchors": [
+        {
+          "line": 203,
+          "literal": "assert_json_eq \"mine-ensured manager add reports one added\""
+        },
+        {
+          "line": 204,
+          "literal": "\"$RESPONSE\" \"data.added\" \"1\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "PUT",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/managers/{mine_user_id}",
+        "status": 200,
+        "actor": "owner",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.never-seen-manager-add-status",
+      "expectation": "Adding a never-seen human as a manager is rejected with HTTP 400.",
+      "story_lines": [
+        208,
+        209
+      ],
+      "anchors": [
+        {
+          "line": 208,
+          "literal": "_au_request PUT \"${prefix}/bots/${owner_bot}/managers/never-exists-$$\" \"$principal_a\""
+        },
+        {
+          "line": 209,
+          "literal": "require_status \"never-seen human is not a manager add target\" \"400\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "PUT",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/managers/{never_user_id}",
+        "status": 400,
+        "actor": "owner",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.never-seen-manager-error-code",
+      "expectation": "Unknown manager add reports the stable error_code bot_authority_human_unknown.",
+      "story_lines": [
+        210,
+        211
+      ],
+      "anchors": [
+        {
+          "line": 210,
+          "literal": "assert_json_eq \"unknown manager add uses the stable error code\""
+        },
+        {
+          "line": 211,
+          "literal": "\"$RESPONSE\" \"data.error_code\" \"bot_authority_human_unknown\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "PUT",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/managers/{never_user_id}",
+        "status": 400,
+        "actor": "owner",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.mine-manager-remove-status",
+      "expectation": "Owner principal removes the mine-ensured manager before the transfer with HTTP 200.",
+      "story_lines": [
+        215,
+        216
+      ],
+      "anchors": [
+        {
+          "line": 215,
+          "literal": "_au_request DELETE \"${prefix}/bots/${owner_bot}/managers/${mine_only_staff}\" \"$principal_a\""
+        },
+        {
+          "line": 216,
+          "literal": "require_status \"mine-ensured manager is removed before the transfer\" \"200\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "DELETE",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/managers/{mine_user_id}",
+        "status": 200,
+        "actor": "owner",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.mine-manager-remove-removed-one",
+      "expectation": "Mine-ensured manager removal reports data.removed 1.",
+      "story_lines": [
+        217,
+        218
+      ],
+      "anchors": [
+        {
+          "line": 217,
+          "literal": "assert_json_eq \"mine-ensured manager removal reports one removed\""
+        },
+        {
+          "line": 218,
+          "literal": "\"$RESPONSE\" \"data.removed\" \"1\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "DELETE",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/managers/{mine_user_id}",
+        "status": 200,
+        "actor": "owner",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.transfer-initiate-status",
+      "expectation": "Owner principal initiates the ownership transfer to the target human with HTTP 201.",
+      "story_lines": [
+        222,
+        223
+      ],
+      "anchors": [
+        {
+          "line": 222,
+          "literal": "_au_request PUT \"$transfer_path\" \"$principal_a\""
+        },
+        {
+          "line": 223,
+          "literal": "require_status \"owner initiates the ownership transfer\" \"201\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "PUT",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/ownership-transfers/{target_owner_actor_id}",
+        "status": 201,
+        "actor": "owner",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.transfer-initiate-pending",
+      "expectation": "Initiated transfer reports data.status pending.",
+      "story_lines": [
+        226,
+        226
+      ],
+      "anchors": [
+        {
+          "line": 226,
+          "literal": "assert_json_eq \"initiated transfer is pending\" \"$RESPONSE\" \"data.status\" \"pending\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "PUT",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/ownership-transfers/{target_owner_actor_id}",
+        "status": 201,
+        "actor": "owner",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.transfer-initiate-target-owner",
+      "expectation": "Initiated transfer names data.target_owner_user_id equal to the registered target human.",
+      "story_lines": [
+        227,
+        228
+      ],
+      "anchors": [
+        {
+          "line": 227,
+          "literal": "assert_json_eq \"initiated transfer names the target\""
+        },
+        {
+          "line": 228,
+          "literal": "\"$RESPONSE\" \"data.target_owner_user_id\" \"$_AU_STAFF_B\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "PUT",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/ownership-transfers/{target_owner_actor_id}",
+        "status": 201,
+        "actor": "owner",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.transfer-refresh-status",
+      "expectation": "Owner principal refresh of the same pending round succeeds with HTTP 200.",
+      "story_lines": [
+        230,
+        231
+      ],
+      "anchors": [
+        {
+          "line": 230,
+          "literal": "_au_request PUT \"$transfer_path\" \"$principal_a\""
+        },
+        {
+          "line": 231,
+          "literal": "require_status \"transfer refresh reuses the pending round\" \"200\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "PUT",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/ownership-transfers/{target_owner_actor_id}",
+        "status": 200,
+        "actor": "owner",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.transfer-refresh-window-renewed",
+      "expectation": "Refreshed expiry never shrinks and advances by less than 300000 ms (renewable re-stamp window).",
+      "story_lines": [
+        240,
+        245
+      ],
+      "anchors": [
+        {
+          "line": 240,
+          "literal": "assert_ok \"transfer refresh renews the window without shrinking it\""
+        },
+        {
+          "line": 243,
+          "literal": "assert new >= old, \"refreshed expiry must never shrink the window\""
+        },
+        {
+          "line": 244,
+          "literal": "assert new - old < 300_000, \"renewal stays within the re-stamp gap\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "PUT",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/ownership-transfers/{target_owner_actor_id}",
+        "status": 200,
+        "actor": "owner",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.transfer-target-read-status",
+      "expectation": "Target principal reads the pending transfer round with HTTP 200.",
+      "story_lines": [
+        247,
+        248
+      ],
+      "anchors": [
+        {
+          "line": 247,
+          "literal": "_au_request GET \"$transfer_path\" \"$principal_b\""
+        },
+        {
+          "line": 248,
+          "literal": "require_status \"target human reads the pending transfer\" \"200\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "GET",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/ownership-transfers/{target_owner_actor_id}",
+        "status": 200,
+        "actor": "target",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.transfer-target-read-pending",
+      "expectation": "Target read of the round reports data.status pending.",
+      "story_lines": [
+        249,
+        249
+      ],
+      "anchors": [
+        {
+          "line": 249,
+          "literal": "assert_json_eq \"target reads a pending transfer\" \"$RESPONSE\" \"data.status\" \"pending\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "GET",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/ownership-transfers/{target_owner_actor_id}",
+        "status": 200,
+        "actor": "target",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.transfer-accept-status",
+      "expectation": "Target principal accepts the ownership transfer with HTTP 200.",
+      "story_lines": [
+        251,
+        252
+      ],
+      "anchors": [
+        {
+          "line": 251,
+          "literal": "_au_request POST \"${transfer_path}/accept\" \"$principal_b\""
+        },
+        {
+          "line": 252,
+          "literal": "require_status \"target human accepts the ownership transfer\" \"200\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "POST",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/ownership-transfers/{target_owner_actor_id}/accept",
+        "status": 200,
+        "actor": "target",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.transfer-accept-accepted",
+      "expectation": "Accept records data.status accepted.",
+      "story_lines": [
+        253,
+        253
+      ],
+      "anchors": [
+        {
+          "line": 253,
+          "literal": "assert_json_eq \"accept records the accepted status\" \"$RESPONSE\" \"data.status\" \"accepted\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "POST",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/ownership-transfers/{target_owner_actor_id}/accept",
+        "status": 200,
+        "actor": "target",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.transferred-ownership-status",
+      "expectation": "New owner principal reads the ownership view after the transfer with HTTP 200.",
+      "story_lines": [
+        255,
+        256
+      ],
+      "anchors": [
+        {
+          "line": 255,
+          "literal": "_au_request GET \"${prefix}/bots/${owner_bot}/ownership\" \"$principal_b\""
+        },
+        {
+          "line": 256,
+          "literal": "require_status \"the new owner reads the collaboration ownership view\" \"200\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "GET",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/ownership",
+        "status": 200,
+        "actor": "target",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.transferred-ownership-owner-moved",
+      "expectation": "Transferred ownership names data.owner_user_id equal to the target human.",
+      "story_lines": [
+        257,
+        258
+      ],
+      "anchors": [
+        {
+          "line": 257,
+          "literal": "assert_json_eq \"ownership transfer moved the owner\""
+        },
+        {
+          "line": 258,
+          "literal": "\"$RESPONSE\" \"data.owner_user_id\" \"$_AU_STAFF_B\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "GET",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/ownership",
+        "status": 200,
+        "actor": "target",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.transferred-ledger-status",
+      "expectation": "New owner principal reads the transferred manager ledger with HTTP 200.",
+      "story_lines": [
+        260,
+        261
+      ],
+      "anchors": [
+        {
+          "line": 260,
+          "literal": "_au_request GET \"${prefix}/bots/${owner_bot}/managers\" \"$principal_b\""
+        },
+        {
+          "line": 261,
+          "literal": "require_status \"the new owner reads the transferred manager ledger\" \"200\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "GET",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/managers",
+        "status": 200,
+        "actor": "target",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.transferred-ledger-owner-names-target",
+      "expectation": "Transferred ledger data.owner.owner_user_id equals the target human.",
+      "story_lines": [
+        262,
+        263
+      ],
+      "anchors": [
+        {
+          "line": 262,
+          "literal": "assert_json_eq \"the transferred owner is in the ledger\""
+        },
+        {
+          "line": 263,
+          "literal": "\"$RESPONSE\" \"data.owner.owner_user_id\" \"$_AU_STAFF_B\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "GET",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/managers",
+        "status": 200,
+        "actor": "target",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.transferred-ledger-original-owner-plain-manager",
+      "expectation": "Transferred ledger data.items contains the original owner human as a plain manager.",
+      "story_lines": [
+        264,
+        265
+      ],
+      "anchors": [
+        {
+          "line": 264,
+          "literal": "assert_json_array_contains \"the original owner is now a plain manager\""
+        },
+        {
+          "line": 265,
+          "literal": "\"$RESPONSE\" \"data.items\" \"$BCS_MOCK_USER_ID\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "GET",
+        "path_template": "/api/v1/collaboration/bots/{bot_id}/managers",
+        "status": 200,
+        "actor": "target",
+        "query": null
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.received-inbox-status",
+      "expectation": "New owner principal lists received ownership transfers with HTTP 200.",
+      "story_lines": [
+        268,
+        269
+      ],
+      "anchors": [
+        {
+          "line": 268,
+          "literal": "_au_request GET \"${prefix}/ownership-transfers?direction=received\" \"$principal_b\""
+        },
+        {
+          "line": 269,
+          "literal": "require_status \"the new owner lists received transfers\" \"200\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "GET",
+        "path_template": "/api/v1/collaboration/ownership-transfers",
+        "status": 200,
+        "actor": "target",
+        "query": {
+          "direction": "received"
+        }
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.received-inbox-contains-bot",
+      "expectation": "Received inbox raw response body contains the accepted Bot id.",
+      "story_lines": [
+        270,
+        270
+      ],
+      "anchors": [
+        {
+          "line": 270,
+          "literal": "assert_contains \"received inbox contains the accepted bot\" \"$RESPONSE\" \"$owner_bot\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "GET",
+        "path_template": "/api/v1/collaboration/ownership-transfers",
+        "status": 200,
+        "actor": "target",
+        "query": {
+          "direction": "received"
+        }
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.sent-inbox-status",
+      "expectation": "Ex-owner principal lists sent ownership transfers with HTTP 200.",
+      "story_lines": [
+        272,
+        273
+      ],
+      "anchors": [
+        {
+          "line": 272,
+          "literal": "_au_request GET \"${prefix}/ownership-transfers?direction=sent\" \"$principal_a\""
+        },
+        {
+          "line": 273,
+          "literal": "require_status \"the ex-owner lists sent transfers\" \"200\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "GET",
+        "path_template": "/api/v1/collaboration/ownership-transfers",
+        "status": 200,
+        "actor": "owner",
+        "query": {
+          "direction": "sent"
+        }
+      }
+    },
+    {
+      "id": "AUTHORITY-JOURNEY.sent-inbox-contains-bot",
+      "expectation": "Sent outbox raw response body contains the accepted Bot id.",
+      "story_lines": [
+        274,
+        274
+      ],
+      "anchors": [
+        {
+          "line": 274,
+          "literal": "assert_contains \"sent outbox contains the accepted bot\" \"$RESPONSE\" \"$owner_bot\""
+        }
+      ],
+      "markers": [
+        "authority-journey-compliance"
+      ],
+      "primary": {
+        "method": "GET",
+        "path_template": "/api/v1/collaboration/ownership-transfers",
+        "status": 200,
+        "actor": "owner",
+        "query": {
+          "direction": "sent"
+        }
+      }
+    }
+  ],
+  "remote_validation": "NOT_RUN",
+  "grants_release_credit": false,
+  "release_parent_denominator": false,
+  "independent_slice": true,
+  "evidence_granularity": "OWNED_CHILD_RECEIPT",
+  "legacy_observer": {
+    "suite": "owned-local-authority-v1",
+    "case_id": "LOCAL-AUTHORITY-JOURNEY-01",
+    "obligations": 16,
+    "journal": "local-authority.json",
+    "binding": "authority-binding.json",
+    "flow": "authority-flow-report.json",
+    "status": "LOCAL_AUTHORITY_PASS",
+    "relation": "The legacy 16-obligation parent journal executor stays registered and untouched; this dual slice adds the fine-grained 42-obligation owned-child receipt for the same upstream shell story."
+  }
+}

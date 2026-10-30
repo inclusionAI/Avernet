@@ -259,7 +259,7 @@ class GroupContextBacklogTests(unittest.TestCase):
 
     def test_group_context_row_is_backlog_with_explicit_report_gap(self):
         rows = migration_plan()['local_backlog_case_slices']
-        self.assertEqual(len(rows), 6)
+        self.assertEqual(len(rows), 7)
         row = next(row for row in rows if row['case_id'] == 'DUAL-GROUP-CONTEXT-CLI-01')
         self.assertEqual(row['suite'], 'dual-group-context-cli-v1')
         self.assertEqual(row['legacy_id'], 'story_cli_operator_manages_group_context')

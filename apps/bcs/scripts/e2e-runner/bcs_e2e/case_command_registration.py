@@ -16,6 +16,8 @@ from .provider_owner_dual_case_run import (COMMAND as PROVIDER_OWNER_COMMAND,
                                             register_provider_owner_dual_case_commands)
 from .session_owner.dual_case_run import (COMMAND as SESSION_OWNER_COMMAND,
                                           register_session_owner_dual_case_commands)
+from .authority.dual_case_run import (COMMAND as AUTHORITY_COMMAND,
+                                      register_authority_dual_case_commands)
 
 
 CASE_COMMANDS = frozenset({
@@ -50,6 +52,7 @@ CASE_COMMANDS = frozenset({
     "dual-custom-collaboration-run",
     PROVIDER_OWNER_COMMAND,
     SESSION_OWNER_COMMAND,
+    AUTHORITY_COMMAND,
 })
 
 
@@ -322,6 +325,7 @@ def register_case_commands(commands) -> None:
     draft_delivery_case.add_argument("--cli-binary-sha256", required=True)
     register_provider_owner_dual_case_commands(commands)
     register_session_owner_dual_case_commands(commands)
+    register_authority_dual_case_commands(commands)
     custom_collaboration_case = commands.add_parser(
         "dual-custom-collaboration-run",
         help="Run the reviewed dual Custom-collaboration product-CLI story through Singlebox or preprod")
