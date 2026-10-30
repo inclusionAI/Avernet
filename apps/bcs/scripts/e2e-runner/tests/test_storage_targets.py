@@ -23,7 +23,7 @@ class StorageTargetTests(unittest.TestCase):
         self.profile = load(ROOT / "profiles/preprod.example.json")
         self.profile["entrypoint"]["origin"] = "https://gateway.example.test"
         self.profile["file_transfer"] = {"allowed_storage_origins": ["https://storage.example.test"]}
-        self.proxy = self.profile["entrypoint"]["origin"] + "/api/v1/collaboration/sessions/s-1/files/f-1/content"
+        self.proxy = self.profile["entrypoint"]["origin"] + "/sessions/s-1/files/f-1/content"
         self.signed = "https://storage.example.test/private-signature-path?Signature=issued-secret&partNumber=1"
 
     @contextlib.contextmanager
@@ -41,7 +41,7 @@ class StorageTargetTests(unittest.TestCase):
         return client.prepare("s-1", {"file_name": "x.txt", "size": size, "mime_type": "text/plain"})
 
     def test_signed_single_target_is_used_verbatim_without_product_auth_or_json_assumptions(self):
-        with self.client(Reply(envelope(self.target(self.signed), 201), 201), Reply(b"storage-xml-result", 200)) as (client, opener):
+        with self.client(Reply(self.target(self.signed), 201), Reply(b"storage-xml-result", 200)) as (client, opener):
             self.prepare(client)
             uploaded, record = client.upload("s-1", "f-1", b"payload")
         request = opener.open.call_args_list[1].args[0]
@@ -66,7 +66,7 @@ class StorageTargetTests(unittest.TestCase):
                       "part_count": 3, "parts": [{"part_number": n, "upload_url": url} for n, url in enumerate(urls, 1)]}
             uploads = [Reply(envelope({"file_id": "f-1", "status": "pending"}), 202) if proxy else Reply(b"", 204)
                        for _ in urls]
-            with self.subTest(proxy=proxy), self.client(Reply(envelope(target, 201), 201), *uploads) as (client, opener):
+            with self.subTest(proxy=proxy), self.client(Reply(target, 201), *uploads) as (client, opener):
                 self.prepare(client)
                 data, record = client.upload("s-1", "f-1", b"payload")
             requests = [call.args[0] for call in opener.open.call_args_list[1:]]
@@ -81,7 +81,7 @@ class StorageTargetTests(unittest.TestCase):
         target = {"file_id": "f-1", "mode": "multipart", "method": "PUT", "part_size": 4,
                   "part_count": 2, "parts": [{"part_number": 1, "upload_url": self.signed},
                                             {"part_number": 2, "upload_url": "https://unapproved.example.test/secret"}]}
-        with self.client(Reply(envelope(target, 201), 201)) as (client, opener):
+        with self.client(Reply(target, 201)) as (client, opener):
             data, _ = self.prepare(client)
             self.assertEqual(data["file_id"], "f-1")  # ID remains available for ledger/cleanup.
             with self.assertRaises(FileTransportError):
@@ -94,7 +94,7 @@ class StorageTargetTests(unittest.TestCase):
                    {"file_id": "f-1", "method": "PUT", "mode": "multipart", "part_size": 1,
                     "part_count": 99999, "parts": []}]
         for target in targets:
-            with self.subTest(target=target), self.client(Reply(envelope(target, 201), 201)) as (client, opener):
+            with self.subTest(target=target), self.client(Reply(target, 201)) as (client, opener):
                 self.prepare(client)
                 with self.assertRaises((FileTransportError, UploadTargetError)):
                     client.upload("s-1", "f-1", b"payload")
@@ -139,10 +139,10 @@ class StorageTargetTests(unittest.TestCase):
             self.assertEqual(opener.open.call_count, 1)
 
     def test_returned_share_target_must_match_token_and_is_not_rewritten(self):
-        target = self.profile["entrypoint"]["origin"] + "/api/v1/collaboration/sessions/shared-file/content?token=issued-share"
+        target = self.profile["entrypoint"]["origin"] + "/sessions/shared-file/content?token=issued-share"
         data = {"share_token": "issued-share", "share_url": target, "expires_at": 1}
         login = {"actionType": "LOGIN", "buserviceErrorCode": "USER_NOT_LOGIN", "decisionBy": "ACE"}
-        with self.client(Reply(envelope(data, 201), 201), Reply(login), Reply(b"payload")) as (client, opener):
+        with self.client(Reply(data, 201), Reply(login), Reply(b"payload")) as (client, opener):
             client.share("s-1", "f-1")
             client.shared_download("issued-share")
         request = opener.open.call_args_list[-1].args[0]
@@ -166,8 +166,8 @@ class StorageTargetTests(unittest.TestCase):
             self.assertFalse(proxy_target(prefix + path, expected, None))
 
     def test_exact_proxy_with_raw_colon_retains_auth_and_uses_returned_url(self):
-        url = self.profile["entrypoint"]["origin"] + "/api/v1/collaboration/sessions/group:session/files/f-1/content"
-        with self.client(Reply(envelope(self.target(url), 201), 201),
+        url = self.profile["entrypoint"]["origin"] + "/sessions/group:session/files/f-1/content"
+        with self.client(Reply(self.target(url), 201),
                          Reply(envelope({"file_id": "f-1", "status": "pending"}), 202)) as (client, opener):
             client.prepare("group:session", {"file_name": "x", "size": 7, "mime_type": "text/plain"})
             client.upload("group:session", "f-1", b"payload")

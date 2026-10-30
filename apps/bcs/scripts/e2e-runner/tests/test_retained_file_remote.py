@@ -379,7 +379,7 @@ class RetainedFileRemoteTests(unittest.TestCase):
         filename = f'e2e-{self.run_id}.txt'
         signed = self.signed_target('owned:session', filename)
         target = {'file_id': 'f-1', 'mode': 'single', 'method': 'PUT', 'upload_url': signed}
-        opener.open.side_effect = [Reply(envelope(target, 201), 201), Reply(b'', 204)]
+        opener.open.side_effect = [Reply(target, 201), Reply(b'', 204)]
         profile = copy.deepcopy(self.profile)
         profile['auth'] = {'header_env': {'Cookie': 'TEST_COOKIE', 'Authorization': 'TEST_AUTH'}}
         with patch.dict(os.environ, {'TEST_COOKIE': 'cookie-secret', 'TEST_AUTH': 'auth-secret'}, clear=True), \

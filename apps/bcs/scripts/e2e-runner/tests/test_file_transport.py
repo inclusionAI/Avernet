@@ -227,6 +227,7 @@ class FileTransportTests(unittest.TestCase):
             absent, record = client.verify_shared_deleted("issued-secret")
         self.assertIsNone(absent)
         self.assertEqual(record["operation"], "file.shared_verify_deleted")
+        self.assertTrue(record["response_envelope_request_id_absent"])
         request = opener.open.call_args.args[0]
         self.assertEqual(request.headers["Cookie"], "private-cookie")
         self.assertNotIn("issued-secret", json.dumps(record))
@@ -245,9 +246,45 @@ class FileTransportTests(unittest.TestCase):
             absent, record = client.verify_deleted("s-1", "f-1")
         self.assertIsNone(absent)
         self.assertEqual(record["http_status"], 404)
+        self.assertTrue(record["response_envelope_request_id_absent"])
         request = opener.open.call_args.args[0]
         self.assertIn("/sessions/s-1/files/f-1", request.full_url)
         self.assertEqual(request.headers["Cookie"], "private-cookie")
+
+    def test_station_file_deletion_records_header_correlation(self):
+        profile = self.profile()
+        profile["environment"]["tier"] = "preprod"
+        profile["entrypoint"]["kind"] = "gateway"
+        profile["entrypoint"]["origin"] = "https://gateway.example.test"
+        profile["auth"] = {"header_env": {"Cookie": "BCS_E2E_TEST_COOKIE"}}
+        missing = {"error": "FILE_NOT_FOUND", "message": "not found: file f-1"}
+        reply = Reply(missing, 404)
+        reply.headers = {"x-request-id": "station-req-1"}
+        opener = Mock(); opener.open.return_value = reply
+        with patch.dict(os.environ, {"BCS_E2E_TEST_COOKIE": "private-cookie"}), \
+                patch("bcs_e2e.file_transport.build_opener", return_value=opener):
+            client = RemoteFileClient(profile)
+            absent, record = client.verify_deleted("s-1", "f-1")
+        self.assertIsNone(absent)
+        self.assertEqual(record["response_header_request_id"], "station-req-1")
+        self.assertTrue(record["response_envelope_request_id_absent"])
+
+    def test_station_file_deletion_drift_lands_correlation_before_raise(self):
+        profile = self.profile()
+        profile["environment"]["tier"] = "preprod"
+        profile["entrypoint"]["kind"] = "gateway"
+        profile["entrypoint"]["origin"] = "https://gateway.example.test"
+        profile["auth"] = {"header_env": {"Cookie": "BCS_E2E_TEST_COOKIE"}}
+        opener = Mock(); opener.open.return_value = Reply(
+            {"error": "FILE_NOT_FOUND", "message": "drifted"}, 404)
+        with patch.dict(os.environ, {"BCS_E2E_TEST_COOKIE": "private-cookie"}), \
+                patch("bcs_e2e.file_transport.build_opener", return_value=opener):
+            client = RemoteFileClient(profile)
+            with self.assertRaises(FileTransportError) as caught:
+                client.verify_deleted("s-1", "f-1")
+        record = caught.exception.request_records[0]
+        self.assertTrue(record["response_envelope_request_id_absent"])
+        self.assertEqual(record["http_status"], 404)
 
     def test_preprod_share_binding_uses_reviewed_cross_origin_for_metadata(self):
         profile = self.profile()
@@ -297,6 +334,7 @@ class FileTransportTests(unittest.TestCase):
         self.assertIsNone(absent)
         self.assertEqual(record["http_status"], 404)
         self.assertEqual(record["operation"], "file.shared_metadata_verify_deleted")
+        self.assertTrue(record["response_envelope_request_id_absent"])
         self.assertEqual(record["path"], "/sessions/shared-file?[REDACTED]")
         request = opener.open.call_args.args[0]
         self.assertNotIn("Cookie", request.headers)

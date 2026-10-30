@@ -51,10 +51,21 @@ class BrowserContextTests(unittest.TestCase):
             self.assertNotIn('secret', str(caught.exception))
 
     def test_context_cannot_be_used_to_introduce_arbitrary_headers_or_local_auth(self):
-        for kind in ('bcs-direct', 'singlebox', 'mock'):
+        for kind in ('singlebox', 'mock'):
             profile = self.profile(); profile['entrypoint']['kind'] = kind
             with self.subTest(kind=kind), self.assertRaises(ConfigError):
                 browser_headers(profile)
+        # bcs-direct is an intentional station-direct browser-context binding
+        # (6dc8b954a/6cb819b06/ae4d0a323): authenticated gateway kinds return
+        # Origin/Referer only; a binding-less bcs-direct profile is still refused.
+        profile = self.profile(); profile['entrypoint']['kind'] = 'bcs-direct'
+        self.assertEqual(browser_headers(profile),
+                         {'Origin': profile['browser_origin'],
+                          'Referer': profile['browser_origin'] + '/'})
+        profile = self.profile(); profile['entrypoint']['kind'] = 'bcs-direct'
+        profile['auth']['header_env'] = {}
+        with self.assertRaises(ConfigError):
+            browser_headers(profile)
         profile = self.profile(); profile['auth']['header_env'] = {'X-Custom': 'TEST_HEADER'}
         with self.assertRaises(ConfigError): validate(profile)
 

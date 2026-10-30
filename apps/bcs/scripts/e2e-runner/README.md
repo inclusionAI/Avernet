@@ -2219,7 +2219,10 @@ Metadata distinguishes `response_header_request_id` from
 precedence for BCS correlation; header/body disagreement is explicitly flagged
 by `response_request_id_conflict`, not treated as an exact echo or proof that a
 gateway and BCS used the same ID. Header-only/error evidence selects `HEADER`;
-validated public envelopes select `ENVELOPE`. The ledger's selected-ID column
+validated public envelopes select `ENVELOPE`. Wire responses whose protocol
+carries no envelope request ID at all (the station legacy exact not-found
+dicts) record `response_envelope_request_id_absent` instead of fabricating an
+ID or silently skipping the correlation assessment. The ledger's selected-ID column
 is unchanged and source provenance remains in the Case evidence/report.
 
 IDs must satisfy the existing bounded identifier syntax. Invalid optional

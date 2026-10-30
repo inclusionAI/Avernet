@@ -1,6 +1,7 @@
 """Actual response ID provenance and error-to-log correlation contracts."""
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 import sys
@@ -17,6 +18,12 @@ from bcs_e2e.transport import ReadClient, ObservationError
 from bcs_e2e.write_transport import WriteClient, WriteTransportError
 from bcs_e2e.ws_transport import SessionWebSocketClient, WebSocketTransportError
 from test_write_transport import profile, Reply
+
+
+def envelope_profile():
+    p = copy.deepcopy(profile())
+    p["environment"]["tier"] = "local"
+    return p
 from test_file_transport import Reply as FileReply
 from test_ws_evidence import ReplySocket
 
@@ -167,7 +174,7 @@ class ResponseIdTests(unittest.TestCase):
     def test_file_and_read_envelopes_preserve_both_ids_without_claiming_equality(self):
         envelope = {'code': 20000, 'message': 'OK', 'request_id': 'body-id', 'data': {}}
         with patch.dict('os.environ', {'BCS_E2E_COOKIE': 'test-cookie'}):
-            reader, files = ReadClient(profile()), RemoteFileClient(profile())
+            reader, files = ReadClient(profile()), RemoteFileClient(envelope_profile())
         reader.opener = Mock()
         reader.opener.open.return_value = Reply(envelope, headers={'x-request-id': 'header-id'})
         record = reader.read('environment.read').evidence
@@ -190,7 +197,9 @@ class ResponseIdTests(unittest.TestCase):
         return client
 
     def test_file_actual_local_auth_headers_not_only_profile_credentials_are_filtered(self):
-        client = self.file_client()
+        with patch.dict('os.environ', {'BCS_E2E_COOKIE': 'test-cookie'}):
+            client = RemoteFileClient(envelope_profile())
+        client.opener = Mock()
         client.local_auth = Mock()  # Mock only the request-specific signing capability.
         client.local_auth.headers.return_value = {'X-Avernet-Principal': 'local-principal-value'}
         for code in (200, 403):
@@ -244,7 +253,9 @@ class ResponseIdTests(unittest.TestCase):
             self.assertNotIn('test-share-token', request.headers)
 
     def test_file_absence_envelope_ids_follow_same_validation_and_precedence(self):
-        client = self.file_client()
+        with patch.dict('os.environ', {'BCS_E2E_COOKIE': 'test-cookie'}):
+            client = RemoteFileClient(envelope_profile())
+        client.opener = Mock()
         for shared in (False, True):
             for returned in ('file-body-id', 'invalid id', 'test-share-token' if shared else 'test-cookie'):
                 reply = FileReply({'code': 40400, 'message': 'Not found', 'request_id': returned,

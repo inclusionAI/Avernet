@@ -198,7 +198,7 @@ class FailureEvidenceTests(unittest.TestCase):
         with self.assertRaises(FileTransportError) as caught: client.delete('s1', 'f1')
         self.assertEqual(caught.exception.request_records[0]['operation'], 'file.delete')
         self.assertEqual(caught.exception.request_records[0]['http_status'], 200)
-        base = p['entrypoint']['origin'] + '/api/v1/collaboration/sessions/s1/files/f1/content'
+        base = p['entrypoint']['origin'] + '/sessions/s1/files/f1/content'
         client.prepared[('s1', 'f1')] = {'size': 2, 'mime_type': 'text/plain', 'target': {
             'mode': 'multipart', 'method': 'PUT', 'part_size': 1, 'part_count': 2,
             'parts': [{'part_number': n, 'upload_url': base + f'?part={n}'} for n in (1, 2)]}}

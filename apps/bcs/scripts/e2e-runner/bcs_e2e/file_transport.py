@@ -487,6 +487,10 @@ class RemoteFileClient:
             operation="file.shared_metadata_verify_deleted",
             expected=(404,), include_auth=self._share_sso_required(), share=True,
         )
+        record = response.record
+        # Plain exact not-found dict carries no envelope request ID; keep the
+        # correlation assessment explicit like the gateway branch.
+        record["response_envelope_request_id_absent"] = True
         try:
             data = json.loads(response.body, object_pairs_hook=unique_keys)
         except (UnicodeError, json.JSONDecodeError):
@@ -529,6 +533,12 @@ class RemoteFileClient:
         if self.station_gateway:
             response = self._send("GET", path, operation="file.verify_deleted",
                                   expected=(404,), include_auth=True)
+            record = response.record
+            # The station legacy face answers with an exact plain dict that
+            # carries no envelope request ID. Mark the correlation assessment
+            # explicit so absence evidence matches the gateway contract shape
+            # instead of silently skipping correlation.
+            record["response_envelope_request_id_absent"] = True
             try:
                 data = json.loads(response.body, object_pairs_hook=unique_keys)
             except (UnicodeError, json.JSONDecodeError):
@@ -545,6 +555,10 @@ class RemoteFileClient:
             path = self._share_url(token)
             response = self._send("GET", path, operation="file.shared_verify_deleted",
                                   expected=(404,), include_auth=True, share=True)
+            record = response.record
+            # Plain exact not-found share dict carries no envelope request ID;
+            # keep the correlation assessment explicit like the gateway branch.
+            record["response_envelope_request_id_absent"] = True
             try:
                 data = json.loads(response.body, object_pairs_hook=unique_keys)
             except (UnicodeError, json.JSONDecodeError):

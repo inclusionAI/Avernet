@@ -197,7 +197,7 @@ def _summary(binding: dict, case: dict, issues: list):
     return {'schema_version': 1, 'run_id': binding['run_id'],
         'status': 'LOCAL_SUITE_PASS' if status == 'PASS' else status,
         'target': {'tier': 'local', 'environment_id': binding['run_id']},
-        'scope': {'suite': SUITE, 'selected_cases': [CASE_ID], 'legacy_inventory_count': len(binding['legacy_inventory']),
+        'scope': {'suite': SUITE, 'selected_cases': [CASE_ID], 'legacy_inventory_count': len(current_manifest()['legacy_inventory']),
                   'full_release_status': 'NOT_QUALIFIED', 'manifest_digest': fingerprint(binding),
                   'file_observation_contract': binding.get('contract')},
         'runner': {'executor_digest': binding['executor_digest']},
