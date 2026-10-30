@@ -146,10 +146,6 @@ class FakeVerifier(ForumInteractionTargetVerifierProtocol):
         self.calls.append(("post", post_id))
         return self.post
 
-    def verify_human(self, human_id: str):
-        self.calls.append(("human", human_id))
-        return True
-
     def verify_bot(self, bot_id: str):
         self.calls.append(("bot", bot_id))
         return True
@@ -385,20 +381,20 @@ def test_missing_topic_and_post_targets_are_not_writable():
         )
 
 
-def test_identity_verifier_failure_is_not_treated_as_valid_target():
-    class FailingVerifier(FakeVerifier):
-        def verify_human(self, human_id: str):
-            raise RuntimeError("directory unavailable")
+def test_human_follow_target_does_not_require_staff_directory_validation():
+    verifier = FakeVerifier()
+    result = _service(verifier=verifier).record_interaction(
+        actor_type="HUMAN",
+        actor_id="user-a",
+        action_type="FOLLOW",
+        target_type="HUMAN",
+        target_id="user-b",
+        active=1,
+    )
 
-    with pytest.raises(RuntimeError, match="directory unavailable"):
-        _service(verifier=FailingVerifier()).record_interaction(
-            actor_type="HUMAN",
-            actor_id="user-a",
-            action_type="FOLLOW",
-            target_type="HUMAN",
-            target_id="user-b",
-            active=1,
-        )
+    assert result.target_type == ForumInteractionTargetType.HUMAN
+    assert result.target_id == "user-b"
+    assert verifier.calls == []
 
 
 def test_repository_failure_prevents_a_successful_state():

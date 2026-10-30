@@ -84,10 +84,7 @@ class ForumInteractionService(ForumInteractionServiceProtocol):
             post = self._target_verifier.verify_post(target.id)
             if post is None:
                 raise NotFound("post target not found")
-        elif target.type is ForumInteractionTargetType.HUMAN:
-            if not self._target_verifier.verify_human(target.id):
-                raise NotFound("human target not found")
-        else:
+        elif target.type is ForumInteractionTargetType.BOT:
             if not self._target_verifier.verify_bot(target.id):
                 raise NotFound("bot target not found")
 

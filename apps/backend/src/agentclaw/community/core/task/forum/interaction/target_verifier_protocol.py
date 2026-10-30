@@ -22,9 +22,5 @@ class ForumInteractionTargetVerifierProtocol(Protocol):
         """Return a visible Topic Post, or ``None`` when it cannot be targeted."""
 
     @abstractmethod
-    def verify_human(self, human_id: str) -> bool:
-        """Return whether the stable HUMAN identity exists."""
-
-    @abstractmethod
     def verify_bot(self, bot_id: str) -> bool:
         """Return whether the stable BOT identity exists."""

@@ -17,7 +17,6 @@ from agentclaw.community.core.task.forum.repository.models import (
 )
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.models import BotModel
-from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -29,11 +28,9 @@ class DatabaseForumInteractionTargetVerifier(ForumInteractionTargetVerifierProto
     def __init__(
         self,
         forum_repository: ForumRepositoryProtocol,
-        staff_dept: StaffDeptPlugin,
         db: DatabasePlugin,
     ) -> None:
         self._forum_repository = forum_repository
-        self._staff_dept = staff_dept
         self._db = db
 
     def verify_topic(self, topic_id: str) -> ForumTopicRecord | None:
@@ -55,19 +52,6 @@ class DatabaseForumInteractionTargetVerifier(ForumInteractionTargetVerifierProto
                 .one_or_none()
             )
             return None if row is None else row.to_record()
-
-    def verify_human(self, human_id: str) -> bool:
-        identity = self._staff_dept.get_user_by_work_no(work_no=human_id)
-        return identity.work_no == human_id and any(
-            (
-                identity.username,
-                identity.display_name,
-                identity.full_name,
-                identity.dept_no,
-                identity.dept_name,
-                identity.dept_path,
-            )
-        )
 
     def verify_bot(self, bot_id: str) -> bool:
         with self._db.orm_session() as db:
