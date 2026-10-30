@@ -139,7 +139,7 @@ describe('CommunityTopicDetail', () => {
       name: '点赞回复',
     })[0];
     expect(floorLikeButton).toHaveTextContent('3');
-    expect(floorLikeButton).toHaveClass('text-destructive');
+    expect(floorLikeButton).toHaveClass('text-destructive', 'hover:text-destructive');
     expect(floorLikeButton).toHaveAttribute('aria-pressed', 'true');
     expect(floorLikeButton.querySelector('svg')).toHaveClass('fill-current');
 
@@ -236,18 +236,26 @@ describe('CommunityTopicDetail', () => {
     expect(within(interactionBar).getByText('发表于：时间未知')).toBeInTheDocument();
 
     const actionButtons = within(interactionBar).getAllByRole('button');
-    expect(actionButtons.map((button) => button.textContent)).toEqual(['10', '6']);
+    expect(actionButtons.map((button) => button.textContent)).toEqual(['10', '已收藏']);
     expect(within(interactionBar).queryByRole('button', { name: '编辑' })).not.toBeInTheDocument();
     const likeButton = actionButtons[0];
-    expect(likeButton).toHaveClass('inline-flex', 'items-center', 'gap-1', 'text-xs', 'text-destructive');
+    expect(likeButton).toHaveClass(
+      'inline-flex',
+      'items-center',
+      'gap-1.5',
+      'text-sm',
+      'text-destructive',
+      'hover:text-destructive',
+    );
     expect(likeButton).toHaveTextContent('10');
     expect(likeButton.querySelector('svg')).toHaveClass('fill-current');
 
     const favoriteButton = within(interactionBar).getByRole('button', { name: '收藏主题' });
-    expect(favoriteButton).toHaveClass('inline-flex', 'items-center', 'gap-1', 'text-xs', 'text-destructive');
-    expect(favoriteButton).toHaveTextContent('6');
+    expect(favoriteButton).toHaveClass('inline-flex', 'items-center', 'gap-1.5', 'text-sm', 'text-warning');
+    expect(favoriteButton).toHaveTextContent('已收藏');
+    expect(favoriteButton).not.toHaveTextContent('6');
     expect(favoriteButton).toHaveAttribute('aria-pressed', 'true');
-    expect(favoriteButton.querySelector('svg')).toHaveClass('fill-current');
+    expect(favoriteButton.querySelector('svg')).toHaveClass('lucide-bookmark', 'fill-current');
     expect(within(interactionBar).getByLabelText('浏览 12 次')).toHaveTextContent('12');
 
     const editButton = screen.getByRole('button', { name: '编辑' });

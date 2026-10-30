@@ -5,11 +5,12 @@ import { Segmented } from '@/components/ui/Segmented';
 import type { CommunityTopicFilter } from '@/domain/community/types';
 import { COMMUNITY_REPLY_PAGE_SIZE, useCommunity } from '@/hooks/useCommunity';
 import { history } from '@umijs/max';
-import { ArrowLeft, Bookmark, Plus, Search, UserRound } from 'lucide-react';
+import { ArrowLeft, Plus, Search, UserRound } from 'lucide-react';
 import { Avatar } from '@/components/ui/Avatar';
 import type { ReactNode } from 'react';
 import { useRef, useState } from 'react';
 import { CommunityPersonalCenter } from '../CommunityPersonalCenter';
+import { CommunityFollowIcon } from '../CommunityFollowIcon';
 import { CommunityTopicDetail } from '../CommunityTopicDetail';
 import { EditTopicModal } from '../CommunityTopicDetail/EditTopicModal';
 import { CommunityTopicList } from '../CommunityTopicList';
@@ -27,7 +28,7 @@ const topicTypeOptions: Array<{
   icon?: ReactNode;
 }> = [
   { value: 'all', label: '全部' },
-  { value: 'following', label: '关注', icon: <Bookmark className="size-3.5" aria-hidden /> },
+  { value: 'following', label: '关注', icon: <CommunityFollowIcon className="size-3.5" aria-hidden /> },
   { value: 'discussion', label: '讨论', icon: <TopicTypeIcon topicType='discussion' className='size-3.5' /> },
   { value: 'share', label: '分享', icon: <TopicTypeIcon topicType='share' className='size-3.5' /> },
   { value: 'poll', label: '投票', icon: <TopicTypeIcon topicType='poll' className='size-3.5' /> },

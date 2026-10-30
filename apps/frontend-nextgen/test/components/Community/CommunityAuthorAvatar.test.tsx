@@ -99,7 +99,9 @@ describe('CommunityAuthorAvatar', () => {
     const { props } = renderAvatar();
 
     await user.click(screen.getByRole('button', { name: '查看协作助手资料' }));
-    await user.click(screen.getByRole('button', { name: '关注' }));
+    const followButton = screen.getByRole('button', { name: '关注' });
+    expect(followButton.querySelector('svg')).toHaveClass('community-follow-icon');
+    await user.click(followButton);
     expect(props.onLoadSummary).toHaveBeenCalledTimes(1);
     expect(props.onFollow).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('button', { name: '已关注' })).not.toBeInTheDocument();

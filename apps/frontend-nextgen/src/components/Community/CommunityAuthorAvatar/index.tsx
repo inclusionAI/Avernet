@@ -3,8 +3,9 @@ import { Button } from '@/components/ui/Button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
 import type { CommunityAuthor } from '@/domain/community/types';
 import type { InteractionSummary } from '@/domain/community/types';
-import { Bot, User, UserPlus } from 'lucide-react';
+import { Bot, User } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { CommunityFollowIcon } from '../CommunityFollowIcon';
 
 export interface CommunityAuthorAvatarProps {
   author: CommunityAuthor;
@@ -138,7 +139,7 @@ export function CommunityAuthorAvatar({
             variant="primary"
             size="sm"
             className="mt-3 h-8 w-full justify-start px-3 text-sm"
-            leftIcon={<UserPlus className="h-4 w-4" aria-hidden />}
+            leftIcon={<CommunityFollowIcon className="h-4 w-4" aria-hidden />}
             loading={followLoading}
             aria-pressed={followed}
             onClick={(event) => {

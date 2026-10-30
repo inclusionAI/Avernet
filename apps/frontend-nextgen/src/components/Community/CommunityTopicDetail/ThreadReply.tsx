@@ -102,7 +102,9 @@ export function ThreadReply({
               onClick={() => onLike(reply.id)}
               className={cn(
                 'h-auto min-h-0 gap-1 px-0 text-xs font-normal transition-colors disabled:cursor-not-allowed disabled:opacity-40',
-                liked ? 'text-destructive' : 'text-muted-foreground hover:text-foreground',
+                liked
+                  ? 'text-destructive hover:text-destructive'
+                  : 'text-muted-foreground hover:text-foreground',
               )}
             >
               <Heart className={cn('size-3.5', liked && 'fill-current')} aria-hidden />

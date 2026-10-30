@@ -119,7 +119,7 @@ describe('CommunityPage 滚动容器结构', () => {
     render(<CommunityPage />);
     const topicTypeGroup = screen.getByRole('group', { name: '主题类型' });
     const expectedIcons: Record<string, string> = {
-      关注: 'lucide-bookmark',
+      关注: 'community-follow-icon',
       讨论: 'lucide-message-circle',
       分享: 'lucide-share-2',
       投票: 'lucide-chart-line',
