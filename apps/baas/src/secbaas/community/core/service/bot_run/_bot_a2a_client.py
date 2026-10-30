@@ -53,6 +53,28 @@ _CANCEL_EXT_URI = "https://avernet.local/a2a/ext/cancel/v1"
 _CANCEL_IDENTITY_TIMEOUT_SECONDS = 30.0
 
 
+def _exc_detail(exc: BaseException) -> str:
+    """Format ``exc`` with its underlying cause for diagnostics.
+
+    预发环境出站 httpx 跑在 sofa 埋点 send-hook 壳内（仓库外代码）：真实
+    传输异常（ReadError/RemoteProtocolError/ConnectTimeout 等）会被重包成
+    不透明的 ``Error in httpx send hook``，真因只存活在 ``__cause__`` /
+    ``__context__`` 上——裸取 ``str(exc)`` 会把这些 4xx/流层排障线索全部
+    吃掉（10-29 预发 4 例同款黑洞）。与 backend harness/services/llm.py
+    的 ``_exc_detail`` 同坑同修：cause 链 + 附带 request URL 一并上浮。
+    """
+    parts: list[str] = [f"{type(exc).__name__}: {exc}"]
+    cause = exc.__cause__ or exc.__context__
+    if cause is not None and cause is not exc:
+        parts.append(f"caused by {type(cause).__name__}: {cause}")
+    req = getattr(exc, "request", None)
+    if req is not None:
+        url = getattr(req, "url", None)
+        if url is not None:
+            parts.append(f"request={url}")
+    return " | ".join(parts)
+
+
 class A2aUnavailableError(RuntimeError):
     """目标不可用/非 JSONRPC 1.x——工厂回退 v3 的灰度门信号。"""
 
@@ -309,7 +331,7 @@ class BotA2aClient:
             await client.aclose()
             return {
                 "ok": False,
-                "error": {"code": "TRANSPORT_ERROR", "message": str(e)[:200]},
+                "error": {"code": "TRANSPORT_ERROR", "message": _exc_detail(e)[:200]},
             }
         # E1 错误二分：非 SSE 响应 = JSON-RPC 错误体（先不会有流）
         ctype = resp.headers.get("content-type", "")
@@ -370,7 +392,9 @@ class BotA2aClient:
         except Exception as e:
             logger.exception("BotA2aClient SSE consume failed rid=%s", ctx.rid)
             if not ctx.terminal_emitted:
-                await self._emit_terminal_error(ctx, "STREAM_ERROR", str(e)[:200])
+                await self._emit_terminal_error(
+                    ctx, "STREAM_ERROR", _exc_detail(e)[:200]
+                )
         finally:
             # R7-F1：消费终结即释放身份等待——流早夭（无 ID）时阻塞在
             # identity_ready 上的 abort 也能立即落回诚实 RUN_NOT_TRACKED。
@@ -660,7 +684,7 @@ class BotA2aClient:
                 "a2a": True,
                 "error": {
                     "code": "TRANSPORT_ERROR",
-                    "message": str(e)[:200],
+                    "message": _exc_detail(e)[:200],
                     "retryable": False,
                 },
             }

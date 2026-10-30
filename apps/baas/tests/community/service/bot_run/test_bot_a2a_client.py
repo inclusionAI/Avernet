@@ -23,6 +23,7 @@ from secbaas.community.api.bot_interaction._models import InteractionResolution
 from secbaas.community.core.service.bot_run._bot_a2a_client import (
     A2aUnavailableError,
     BotA2aClient,
+    _exc_detail,
     _RunCtx,
 )
 from secbaas.community.core.service.bot_run._interaction_protocol import (
@@ -2060,6 +2061,46 @@ def test_chat_send_transport_error_is_honest():
     assert out["ok"] is False
     assert out["error"]["code"] == "TRANSPORT_ERROR"
     assert out["error"]["message"], "透传原始错误供排障"
+
+
+def test_exc_detail_surfaces_send_hook_cause_chain():
+    """sofa send-hook 壳把真因藏进 __cause__——detail 必须带上 cause 链
+    和 request（10-29 预发 4 例「Error in httpx send hook」黑洞的对策钉）。"""
+    wrapper = RuntimeError("Error in httpx send hook")
+    wrapper.__cause__ = httpx.ReadError("peer closed connection mid-stream")
+    wrapper.request = httpx.Request("POST", "http://engine/rpc")
+    detail = _exc_detail(wrapper)
+    assert "Error in httpx send hook" in detail
+    assert "caused by ReadError: peer closed connection mid-stream" in detail
+    assert "request=http://engine/rpc" in detail
+
+
+def test_chat_send_transport_error_keeps_send_hook_cause_visible():
+    """chat.send 经 send-hook 壳炸连接 → TRANSPORT_ERROR 的 message 必须
+    显示壳下的真因类型，不得只回一句不透明的 wrapper 文本。"""
+
+    class _SendHookBoomClient(httpx.AsyncClient):
+        async def send(self, request, **kwargs):  # type: ignore[override]
+            try:
+                raise httpx.RemoteProtocolError(
+                    "peer closed connection without response"
+                )
+            except Exception as inner:
+                raise RuntimeError("Error in httpx send hook") from inner
+
+    async def scenario():
+        client = BotA2aClient(
+            base_url="http://unused", http_transport_factory=_SendHookBoomClient
+        )
+        client._connected = True
+        return await client.chat_send(session_key="s", message="hi")
+
+    out = _run(scenario())
+    assert out["ok"] is False
+    assert out["error"]["code"] == "TRANSPORT_ERROR"
+    assert "caused by RemoteProtocolError" in out["error"]["message"], (
+        "send-hook 壳后的真因必须在 message 可见"
+    )
 
 
 def test_chat_send_non_json_error_body_still_reports_http_status():
