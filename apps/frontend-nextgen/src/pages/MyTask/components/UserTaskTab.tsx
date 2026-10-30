@@ -51,6 +51,7 @@ export interface UserTaskTabProps {
   onPageChange: (page: number) => void;
   onPageSizeChange: (pageSize: number) => void;
   botNameMap: Record<string, string>;
+  ownerBotUserIdMap: Record<string, string>;
   ownerBotOptions?: UserTaskOwnerBotOption[];
   /** 实验室页专用列与操作布局；默认值保持“我的任务”现有行为。 */
   displayVariant?: 'default' | 'lab';
@@ -71,6 +72,7 @@ export function UserTaskTab({
   onPageChange,
   onPageSizeChange,
   botNameMap,
+  ownerBotUserIdMap,
   ownerBotOptions = [],
   displayVariant = 'default',
 }: UserTaskTabProps) {
@@ -251,11 +253,11 @@ export function UserTaskTab({
                                 >
                                   查看产物
                                 </Button>
-                                <ViewSessionButton record={record} label="进入对话" />
+                                <ViewSessionButton record={record} label="进入对话" ownerBotUserIdMap={ownerBotUserIdMap} />
                               </>
                             ) : (
                               <>
-                                <ViewSessionButton record={record} />
+                                <ViewSessionButton record={record} ownerBotUserIdMap={ownerBotUserIdMap} />
                                 <Button
                                   variant="secondary"
                                   size="sm"
