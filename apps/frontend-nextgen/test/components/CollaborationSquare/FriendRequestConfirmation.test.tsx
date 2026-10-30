@@ -32,7 +32,7 @@ it.each(['human', 'bot'] as const)('以 %s 身份确认后才发送申请', (typ
   expect(screen.getByRole('dialog')).not.toHaveTextContent('本次将为');
   expect(screen.getByRole('dialog', { name: 'Bot好友申请' })).toBeInTheDocument();
   const hint = screen.getByText(type === 'human'
-    ? 'Bot Owner用户通过申请后，该申请身份可与该Bot单聊或发起群聊。'
+    ? 'Bot Owner用户通过申请后，该申请身份可与该Bot单聊。'
     : 'Bot Owner用户通过申请后，该申请身份仅可与该Bot发起群聊，不支持直接单聊。');
   expect(hint).toHaveClass('text-left', 'text-xs', 'text-muted-foreground');
   expect(screen.getByText(/身份申请添加/)).toHaveClass('text-left');
