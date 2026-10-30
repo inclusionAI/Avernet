@@ -460,7 +460,9 @@ class BotBuildService:
             if migration_success and engine_type == "openclaw":
                 openclaw_configs_success = self._generate_openclaw_stage_configs(
                     bot_id=bot_id,
-                    owner_id=entity_id,
+                    # Channel/repository APIs use the current owner identity;
+                    # entity_id is the legacy resource locator and can differ.
+                    owner_id=bot.get("owner_id") or entity_id,
                     target_dir=target_dir,
                 )
 
