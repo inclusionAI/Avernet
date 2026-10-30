@@ -1,0 +1,37 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/case_command_registration.py
+  s_cecdc98e721f4b::t_a90e07bb5a5e75 32,52,232-239
+apps/bcs/scripts/e2e-runner/bcs_e2e/cli.py
+  s_cecdc98e721f4b::t_884859cbacd072 67,683-691
+apps/bcs/scripts/e2e-runner/bcs_e2e/delivery_density/__init__.py
+  s_cecdc98e721f4b::t_2c11b3d77095b8 1-89
+apps/bcs/scripts/e2e-runner/bcs_e2e/delivery_density/contract.py
+  s_cecdc98e721f4b::t_a40202c752bfb4 1-88
+apps/bcs/scripts/e2e-runner/bcs_e2e/delivery_density/obligations.py
+  s_cecdc98e721f4b::t_e91ba5b36b7760 1-414
+apps/bcs/scripts/e2e-runner/bcs_e2e/delivery_density/profile.py
+  s_cecdc98e721f4b::t_63c9ec6b1da47f 1-158
+apps/bcs/scripts/e2e-runner/bcs_e2e/delivery_density/reporting.py
+  s_cecdc98e721f4b::t_1cdff9c0198f62 1-180
+apps/bcs/scripts/e2e-runner/bcs_e2e/delivery_density/run.py
+  s_cecdc98e721f4b::t_1d53493a496fed 1-332
+apps/bcs/scripts/e2e-runner/tests/test_delivery_density.py
+  s_cecdc98e721f4b::t_af40705599b34f 1-461
+apps/bcs/scripts/e2e-runner/tests/test_registration_dual_waves.py
+  s_cecdc98e721f4b::t_d8c4f53046e0f9 16,23,30-31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6be8d936386b35871222190ed3e4a416a2a4f7ac",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
