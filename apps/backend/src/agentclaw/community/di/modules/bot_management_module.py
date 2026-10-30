@@ -135,6 +135,7 @@ from agentclaw.community.core.repository.protocols.bot import (
 from agentclaw.community.core.repository.protocols.bot import TemplateRepository
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.core.desktop_bot.services.desktop_bot_service import DesktopBotService
 from agentclaw.community.core.repository.protocols.identity import (
     CallerIdentityRepositoryProtocol,
 )
@@ -525,6 +526,7 @@ class BotManagementModule(Module):
         drm_reader: DRMReaderPlugin,
         task_queue_service: TaskQueueService,
         common_config_service: CommonConfigService,
+        desktop_bot_service_provider: Callable[[], DesktopBotService],
         caller_identity_repo: CallerIdentityRepositoryProtocol,
         bot_quota_service: BotQuotaServiceProtocol,
         storage_policy: BotStoragePolicyProtocol,
@@ -574,6 +576,7 @@ class BotManagementModule(Module):
             ),
             # Lazy (cycle-safe): baas bot 原地重启走 BaaSService.restart_bot。
             baas_service_provider=lambda: injector.get(BaasService),
+            desktop_bot_service_provider=desktop_bot_service_provider,
             task_queue_service=task_queue_service,
             common_config_service=common_config_service,
             caller_identity_repo=caller_identity_repo,

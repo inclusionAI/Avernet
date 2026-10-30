@@ -52,6 +52,9 @@ if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.services.teclaw_provision_service import (
         TeclawProvisionService,
     )
+    from agentclaw.community.core.desktop_bot.desktop_bot_service_protocol import (
+        DesktopBotServiceProtocol,
+    )
     from agentclaw.community.core.devices.services.baas_template_resolver import (
         BaasTemplateResolverProtocol,
     )
@@ -382,6 +385,9 @@ class BotService(BotServiceProtocol):
         bot_quota_service: "BotQuotaServiceProtocol | None" = None,
         bot_storage_policy: BotStoragePolicyProtocol | None = None,
         restart_backup_dependencies: "RestartBackupDependencies | None" = None,
+        desktop_bot_service_provider: (
+            "Callable[[], DesktopBotServiceProtocol] | None"
+        ) = None,
     ) -> None:
         self._repository = repository
         self._skills_pool_native_creation_policy = skills_pool_native_creation_policy
@@ -451,6 +457,8 @@ class BotService(BotServiceProtocol):
         self._runtime_reconciler = runtime_reconciler
         self._runtime_reconciler_provider = runtime_reconciler_provider
         self._bot_quota_service = bot_quota_service
+        self._desktop_bot_service_provider = desktop_bot_service_provider
+
     def _initialize_capability_installations(
         self, *, bot_id: str, owner_id: str, bot: "Dict[str, Any] | None" = None
     ) -> None:
@@ -4697,6 +4705,21 @@ class BotService(BotServiceProtocol):
 
     async def restart_bot_async(self, **kwargs) -> Dict[str, Any]:
         """HTTP adapter entrypoint; retain the synchronous lifecycle and engine policy."""
+        bot_id = kwargs.get("bot_id")
+        raw_owner_id = kwargs.get("user_id")
+        owner_id = raw_owner_id.strip() if isinstance(raw_owner_id, str) else None
+        if (
+            self._desktop_bot_service_provider is not None
+            and isinstance(bot_id, str) and bot_id
+            and owner_id
+        ):
+            desktop_bot = self._repository.get_by_id_and_owner(bot_id, owner_id)
+            if desktop_bot.get("bot_type") == "desktop":
+                desktop_service = self._desktop_bot_service_provider()
+                return desktop_service.restart(
+                    bot_id=bot_id,
+                    user_id=owner_id,
+                )
         bot = self.get_bot(kwargs['bot_id'], kwargs['user_id'])
         ctx, strategy = resolve_restart_strategy(bot)
         from agentclaw.community.core.bot_management.engines.restart_contract import RestartServices
