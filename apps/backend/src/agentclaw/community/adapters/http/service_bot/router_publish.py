@@ -1889,7 +1889,7 @@ async def rollback_publish(
         return ApiResponse(success=False, message=str(e), error_code=400, data=None)
 
     except BotPublishServiceError as e:
-        logger.error(f"[rollback_publish] Service error: {e}")
+        logger.warning(f"[rollback_publish] Service error: {e}")
         return ApiResponse(success=False, message=str(e), error_code=400, data=None)
 
     except PublishFlowServiceError as e:

@@ -801,8 +801,9 @@ async def test_can_rollback_publish_success_and_errors():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_rollback_publish_success_and_errors():
+async def test_rollback_publish_success_and_errors(caplog):
     """Test rollback_publish endpoint - happy and error cases."""
+    caplog.set_level("INFO")
     publish_service = MagicMock()
 
     # Happy case: rollback succeeds
@@ -838,13 +839,14 @@ async def test_rollback_publish_success_and_errors():
     )
     assert_error(resp, 400, "无法获取用户信息")
 
-    # Error cases: various exceptions
-    for exc, code in [
-        (PublishNotFoundError("missing"), 404),
-        (PublishStatusInvalidError("invalid status"), 400),
-        (BotPublishServiceError("service error"), 400),
-        (PublishFlowServiceError("flow error"), 500),
-        (RuntimeError("boom"), 500),
+    # Error cases: various exceptions. A rollback precondition violation is a
+    # well-handled 400 response, not a server-side anomaly.
+    for exc, code, level in [
+        (PublishNotFoundError("missing"), 404, "WARNING"),
+        (PublishStatusInvalidError("invalid status"), 400, "WARNING"),
+        (BotPublishServiceError("service error"), 400, "WARNING"),
+        (PublishFlowServiceError("flow error"), 500, "ERROR"),
+        (RuntimeError("boom"), 500, "ERROR"),
     ]:
         publish_service.rollback_publish = AsyncMock(side_effect=exc)
 
@@ -853,6 +855,11 @@ async def test_rollback_publish_success_and_errors():
         )
         assert resp.error_code == code
         assert resp.success is False
+        assert any(
+            record.levelname == level and record.getMessage().startswith("[rollback_publish]")
+            for record in caplog.records
+        )
+        caplog.clear()
 
         # Reset for next iteration
         publish_service.rollback_publish = AsyncMock(return_value={
