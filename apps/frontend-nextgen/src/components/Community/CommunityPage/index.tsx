@@ -10,6 +10,7 @@ import { Avatar } from '@/components/ui/Avatar';
 import type { ReactNode } from 'react';
 import { useRef, useState } from 'react';
 import { CommunityPersonalCenter } from '../CommunityPersonalCenter';
+import { CommunityFollowIcon } from '../CommunityFollowIcon';
 import { CommunityTopicDetail } from '../CommunityTopicDetail';
 import { EditTopicModal } from '../CommunityTopicDetail/EditTopicModal';
 import { CommunityTopicList } from '../CommunityTopicList';
@@ -18,6 +19,8 @@ import { PublishTopicModal } from '../PublishTopicModal';
 
 type CommunityTopicView = CommunityTopicFilter | 'following';
 
+const CURRENT_USER_AVATAR_SIZE = 40;
+
 const topicTypeOptions: Array<{
   value: CommunityTopicView;
   label: string;
@@ -25,7 +28,7 @@ const topicTypeOptions: Array<{
   icon?: ReactNode;
 }> = [
   { value: 'all', label: '全部' },
-  { value: 'following', label: '关注' },
+  { value: 'following', label: '关注', icon: <CommunityFollowIcon className="size-3.5" aria-hidden /> },
   { value: 'discussion', label: '讨论', icon: <TopicTypeIcon topicType='discussion' className='size-3.5' /> },
   { value: 'share', label: '分享', icon: <TopicTypeIcon topicType='share' className='size-3.5' /> },
   { value: 'poll', label: '投票', icon: <TopicTypeIcon topicType='poll' className='size-3.5' /> },
@@ -52,6 +55,12 @@ export function CommunityPage() {
       onOpenTopic={(topicId) => {
         void community.openTopicById?.(topicId);
       }}
+      currentUserId={community.currentUserId}
+      getAuthorSummary={community.getAuthorSummary}
+      loadAuthorSummary={community.loadAuthorSummary}
+      followAuthor={community.followAuthor}
+      authorFollowLoading={community.authorFollowPending}
+      authorFollowed={community.isAuthorFollowed}
     />
   );
   // Keep this wrapper in the tree in both detail and personal-center renders.
@@ -217,13 +226,13 @@ export function CommunityPage() {
                   <Avatar
                     name={community.currentUser.displayName}
                     src={community.currentUser.avatarUrl}
-                    size={20}
+                    size={CURRENT_USER_AVATAR_SIZE}
                   />
                 ) : (
                   <UserRound className="size-4" aria-hidden />
                 )
               }
-              className="ml-auto size-9 rounded-full sm:ml-0"
+              className="ml-auto size-10 rounded-full sm:ml-0"
               onClick={() => setShowPersonalCenter(true)}
             />
             <Button
@@ -258,6 +267,12 @@ export function CommunityPage() {
                   target: { targetType: 'TOPIC', id: topic.id },
                 })
               }
+              currentUserId={community.currentUserId}
+              getAuthorSummary={community.getAuthorSummary}
+              loadAuthorSummary={community.loadAuthorSummary}
+              followAuthor={community.followAuthor}
+              authorFollowLoading={community.authorFollowPending}
+              authorFollowed={community.isAuthorFollowed}
               scrollRootRef={scrollRootRef}
             />
           </div>

@@ -164,7 +164,7 @@ export function Floor({
                   className={cn(
                     'h-auto min-h-0 gap-1 px-0 text-xs font-normal transition-colors disabled:cursor-not-allowed disabled:opacity-40',
                     liked
-                      ? 'text-destructive'
+                      ? 'text-destructive hover:text-destructive'
                       : 'text-muted-foreground hover:text-foreground',
                   )}
                 >

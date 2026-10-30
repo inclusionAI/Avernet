@@ -3,7 +3,9 @@ import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { personalCenterActivityToTopic } from '@/domain/community/mapper';
 import type {
+  CommunityAuthor,
   CommunityTopic,
+  InteractionSummary,
   PersonalCenterActivity,
   PersonalCenterTopicContext,
 } from '@/domain/community/types';
@@ -16,6 +18,12 @@ export interface ActivityListProps {
   error: string | null;
   onRetry: () => void;
   onOpenTopic: (topicId: string) => void;
+  currentUserId?: string;
+  getAuthorSummary?: (author: CommunityAuthor) => InteractionSummary | undefined;
+  loadAuthorSummary?: (author: CommunityAuthor) => void;
+  followAuthor?: (author: CommunityAuthor) => Promise<boolean>;
+  authorFollowLoading?: (author: CommunityAuthor) => boolean;
+  authorFollowed?: (author: CommunityAuthor) => boolean;
 }
 
 function fallbackTopicContext(item: PersonalCenterActivity): PersonalCenterTopicContext {
@@ -37,7 +45,19 @@ function fallbackTopicContext(item: PersonalCenterActivity): PersonalCenterTopic
 
 function activityTopic(item: PersonalCenterActivity): CommunityTopic | null {
   const context = item.topicContext ?? fallbackTopicContext(item);
-  return personalCenterActivityToTopic({ ...item, topicContext: context });
+  const topic = personalCenterActivityToTopic({ ...item, topicContext: context });
+  if (!topic || item.activityType !== 'LIKED') return topic;
+
+  if (item.target.targetType === 'POST') {
+    const replyContent = item.bodyPreview.trim() || context.title;
+    const relatedTopicContent = [context.title, context.bodyPreview]
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .join('，');
+    return { ...topic, title: `回复：${replyContent}`, body: relatedTopicContent };
+  }
+
+  return { ...topic, title: `帖子：${topic.title}` };
 }
 
 function ReplyActivityGroup({
@@ -86,7 +106,19 @@ function groupReplyActivities(items: PersonalCenterActivity[]): PersonalCenterAc
   return [...groups.values()];
 }
 
-export function ActivityList({ items, loading, error, onRetry, onOpenTopic }: ActivityListProps) {
+export function ActivityList({
+  items,
+  loading,
+  error,
+  onRetry,
+  onOpenTopic,
+  currentUserId,
+  getAuthorSummary,
+  loadAuthorSummary,
+  followAuthor,
+  authorFollowLoading,
+  authorFollowed,
+}: ActivityListProps) {
   if (loading) {
     return (
       <div className="overflow-hidden rounded-lg border border-border bg-card" aria-label="个人中心列表加载中">
@@ -142,7 +174,18 @@ export function ActivityList({ items, loading, error, onRetry, onOpenTopic }: Ac
           <TopicRow
             key={`${item.actor.actorType}:${item.actor.id}:${item.activityType}:${item.target.targetType}:${item.target.id}`}
             topic={topic}
+            titleTooltip={
+              item.activityType === 'LIKED' && item.target.targetType === 'POST'
+                ? item.bodyPreview
+                : undefined
+            }
             onOpen={() => onOpenTopic(topic.id)}
+            currentUserId={currentUserId}
+            getAuthorSummary={getAuthorSummary}
+            loadAuthorSummary={loadAuthorSummary}
+            followAuthor={followAuthor}
+            authorFollowLoading={authorFollowLoading}
+            authorFollowed={authorFollowed}
           />
         );
       })}

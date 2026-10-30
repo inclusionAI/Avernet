@@ -5,6 +5,8 @@ import type { KeyboardEvent } from 'react';
 import { TopicTypeIcon } from '../TopicTypeIcon';
 import { CommunityAuthorAvatar } from '../CommunityAuthorAvatar';
 
+const TOPIC_AUTHOR_AVATAR_SIZE = 32;
+
 const TOPIC_TYPE_LABELS: Record<CommunityTopicType, string> = {
   discussion: '讨论',
   share: '分享',
@@ -36,12 +38,26 @@ export interface TopicRowProps {
   topic: CommunityTopic;
   getTopicSummary?: (topic: CommunityTopic) => InteractionSummary | undefined;
   onOpen: (topic: CommunityTopic) => void;
+  currentUserId?: string;
+  getAuthorSummary?: (author: CommunityTopic['author']) => InteractionSummary | undefined;
+  loadAuthorSummary?: (author: CommunityTopic['author']) => void;
+  followAuthor?: (author: CommunityTopic['author']) => Promise<boolean>;
+  titleTooltip?: string;
+  authorFollowLoading?: (author: CommunityTopic['author']) => boolean;
+  authorFollowed?: (author: CommunityTopic['author']) => boolean;
 }
 
 export function TopicRow({
   topic,
   getTopicSummary,
   onOpen,
+  currentUserId,
+  getAuthorSummary,
+  loadAuthorSummary,
+  followAuthor,
+  authorFollowLoading,
+  authorFollowed,
+  titleTooltip,
 }: TopicRowProps) {
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -69,7 +85,7 @@ export function TopicRow({
     >
       <div className="min-w-0">
         <div className="flex items-center gap-2">
-          <h3 className="m-0 min-w-0 truncate text-sm font-semibold text-foreground">{topic.title}</h3>
+          <h3 className="m-0 min-w-0 truncate text-sm font-semibold text-foreground" title={titleTooltip}>{topic.title}</h3>
           {topic.topicType === 'poll' ? (
             <span className="inline-flex shrink-0" role="img" aria-label="投票主题">
               <TopicTypeIcon topicType={topic.topicType} className="size-3.5 text-muted-foreground" />
@@ -100,7 +116,16 @@ export function TopicRow({
         </span>
       </div>
       <div className="flex min-w-0 items-center gap-2">
-        <CommunityAuthorAvatar author={topic.author} size={24} />
+        <CommunityAuthorAvatar
+          author={topic.author}
+          size={TOPIC_AUTHOR_AVATAR_SIZE}
+          currentUserId={currentUserId}
+          summary={getAuthorSummary?.(topic.author)}
+          onLoadSummary={() => loadAuthorSummary?.(topic.author)}
+          onFollow={() => void followAuthor?.(topic.author)}
+          followLoading={authorFollowLoading?.(topic.author) === true}
+          followed={authorFollowed?.(topic.author) === true}
+        />
         <span className="truncate text-xs text-muted-foreground">{topic.author.displayName}</span>
       </div>
       <div className="flex items-center justify-end gap-2 text-xs font-medium text-muted-foreground tabular-nums">

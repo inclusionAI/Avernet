@@ -4,6 +4,7 @@ import type { PersonalCenterTopicContext } from '@/domain/community/types';
 import type { UsePersonalCenterResult } from '@/hooks/usePersonalCenter';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { communityService } from '@/services/community';
 
 jest.mock('@/services/community', () => ({
@@ -98,6 +99,44 @@ describe('CommunityPersonalCenter', () => {
     expect(onOpenTopic).toHaveBeenCalledWith('topic-1');
   });
 
+  it('个人中心帖子作者与社区列表一致，支持悬浮查看资料和关注', async () => {
+    const user = userEvent.setup();
+    const onOpenTopic = jest.fn();
+    const loadAuthorSummary = jest.fn();
+    const followAuthor = jest.fn().mockResolvedValue(true);
+
+    render(
+      <CommunityPersonalCenter
+        onBack={jest.fn()}
+        onOpenTopic={onOpenTopic}
+        currentUserId="149844"
+        getAuthorSummary={jest.fn()}
+        loadAuthorSummary={loadAuthorSummary}
+        followAuthor={followAuthor}
+        authorFollowLoading={jest.fn(() => false)}
+        authorFollowed={jest.fn(() => true)}
+      />,
+    );
+
+    const authorAvatar = screen.getByRole('button', { name: '查看协作助手资料' });
+    await user.hover(authorAvatar);
+    expect(loadAuthorSummary).toHaveBeenCalledWith({
+      type: 'bot',
+      id: 'bot-A',
+      displayName: '协作助手',
+      avatarUrl: undefined,
+    });
+    const followButton = screen.getByRole('button', { name: '已关注' });
+    await user.click(followButton);
+    expect(followAuthor).toHaveBeenCalledWith({
+      type: 'bot',
+      id: 'bot-A',
+      displayName: '协作助手',
+      avatarUrl: undefined,
+    });
+    expect(onOpenTopic).not.toHaveBeenCalled();
+  });
+
   it('个人中心直接展示后端返回的帖子 Bot 名称', () => {
     mockedCenter.activityType = 'FAVORITED';
     mockedCenter.activityPage = {
@@ -119,6 +158,28 @@ describe('CommunityPersonalCenter', () => {
 
     expect(screen.getByText('内容创作 Bot')).toBeInTheDocument();
     expect(screen.queryByText('bot-post-author')).not.toBeInTheDocument();
+  });
+
+  it('个人中心帖子发布者为 Human 时使用清晰的 32px 头像', () => {
+    mockedCenter.activityPage = {
+      items: [
+        {
+          ...baseActivity,
+          actor: { actorType: 'HUMAN', id: 'user-a' },
+          topicContext: {
+            ...baseActivity.topicContext,
+            author: { actorType: 'HUMAN', id: 'user-a' },
+            authorDisplayName: '李四',
+            authorAvatarUrl: 'https://example.com/lisi.png',
+          },
+        },
+      ],
+      total: 1,
+    };
+
+    render(<CommunityPersonalCenter onBack={jest.fn()} onOpenTopic={jest.fn()} />);
+
+    expect(screen.getByAltText('李四')).toHaveStyle({ width: '32px', height: '32px' });
   });
 
   it('truncates favorite and browse activity content to one line', () => {
@@ -145,6 +206,50 @@ describe('CommunityPersonalCenter', () => {
     expect(
       screen.getByText('这是一个带完整上下文的帖子内容预览。'),
     ).toHaveClass('truncate');
+  });
+
+  it('keeps liked topic and reply rows separate while distinguishing their source content', () => {
+    mockedCenter.activityType = 'LIKED';
+    mockedCenter.activityPage = {
+      items: [
+        {
+          ...baseActivity,
+          activityType: 'LIKED',
+          bodyPreview: '主题标题',
+          target: { targetType: 'TOPIC', id: 'topic-1' },
+          topicContext: {
+            ...baseActivity.topicContext,
+            title: '主题标题',
+            bodyPreview: '主题内容',
+          },
+        },
+        {
+          ...baseActivity,
+          activityType: 'LIKED',
+          bodyPreview: '这是一个需要完整 hover 展示的比较长回复内容',
+          target: { targetType: 'POST', id: 'post-1' },
+          postId: 'post-1',
+          topicContext: {
+            ...baseActivity.topicContext,
+            title: '主题标题',
+            bodyPreview: '主题内容',
+          },
+        },
+      ],
+      total: 2,
+    };
+
+    render(<CommunityPersonalCenter onBack={jest.fn()} onOpenTopic={jest.fn()} />);
+
+    expect(screen.getByText('帖子：主题标题')).toBeInTheDocument();
+    expect(screen.getByText('回复：这是一个需要完整 hover 展示的比较长回复内容')).toBeInTheDocument();
+    expect(screen.getByText('回复：这是一个需要完整 hover 展示的比较长回复内容')).toHaveClass('truncate');
+    expect(screen.getByTitle('这是一个需要完整 hover 展示的比较长回复内容')).toHaveAttribute(
+      'title',
+      '这是一个需要完整 hover 展示的比较长回复内容',
+    );
+    expect(screen.getByText('主题标题，主题内容')).toBeInTheDocument();
+    expect(screen.getByText('共 2 条')).toBeInTheDocument();
   });
 
   it('renders follow identities, their topics, and supports unfollowing', async () => {

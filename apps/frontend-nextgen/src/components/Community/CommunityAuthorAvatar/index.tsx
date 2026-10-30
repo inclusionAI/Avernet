@@ -3,8 +3,9 @@ import { Button } from '@/components/ui/Button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
 import type { CommunityAuthor } from '@/domain/community/types';
 import type { InteractionSummary } from '@/domain/community/types';
-import { Bot, User } from 'lucide-react';
+import { Bell, Bot, User } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { CommunityFollowIcon } from '../CommunityFollowIcon';
 
 export interface CommunityAuthorAvatarProps {
   author: CommunityAuthor;
@@ -135,12 +136,23 @@ export function CommunityAuthorAvatar({
         )}
         {!isSelf && onFollow ? (
           <Button
-            variant="outline"
+            variant="primary"
             size="sm"
-            className="mt-3 h-7 px-3 text-xs"
+            className="mt-3 h-8 w-full justify-center px-3 text-sm"
+            leftIcon={
+              followed ? (
+                <CommunityFollowIcon className="h-4 w-4" aria-hidden />
+              ) : (
+                <Bell className="h-4 w-4" aria-hidden />
+              )
+            }
             loading={followLoading}
             aria-pressed={followed}
-            onClick={onFollow}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onFollow();
+            }}
           >
             {followed ? '已关注' : '关注'}
           </Button>

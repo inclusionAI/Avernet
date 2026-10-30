@@ -28,6 +28,13 @@ export interface CommunityTopicListProps {
   loadMore: () => void;
   /** 获取主题的互动总量；仅在命中列表批量 summary 后覆盖旧 likeCount。 */
   getTopicSummary?: (topic: CommunityTopic) => InteractionSummary | undefined;
+  /** 列表里的发帖者也支持悬停查看资料和关注。 */
+  currentUserId?: string;
+  getAuthorSummary?: (author: CommunityTopic['author']) => InteractionSummary | undefined;
+  loadAuthorSummary?: (author: CommunityTopic['author']) => void;
+  followAuthor?: (author: CommunityTopic['author']) => Promise<boolean>;
+  authorFollowLoading?: (author: CommunityTopic['author']) => boolean;
+  authorFollowed?: (author: CommunityTopic['author']) => boolean;
   /** 列表滚动容器（main），监听其 scroll 事件；由 CommunityPage 注入。 */
   scrollRootRef: RefObject<HTMLElement | null>;
 }
@@ -46,6 +53,12 @@ export function CommunityTopicList({
   loadMoreError,
   loadMore,
   getTopicSummary,
+  currentUserId,
+  getAuthorSummary,
+  loadAuthorSummary,
+  followAuthor,
+  authorFollowLoading,
+  authorFollowed,
   scrollRootRef,
 }: CommunityTopicListProps) {
   // 同步防抖：scroll 事件密集触发时，只放过一次 loadMore（直到本次加载结束）。
@@ -140,6 +153,12 @@ export function CommunityTopicList({
           topic={topic}
           getTopicSummary={getTopicSummary}
           onOpen={onOpen}
+          currentUserId={currentUserId}
+          getAuthorSummary={getAuthorSummary}
+          loadAuthorSummary={loadAuthorSummary}
+          followAuthor={followAuthor}
+          authorFollowLoading={authorFollowLoading}
+          authorFollowed={authorFollowed}
         />
       ))}
       {loadingMore && (

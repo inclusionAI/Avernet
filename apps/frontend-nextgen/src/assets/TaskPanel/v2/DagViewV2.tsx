@@ -1,8 +1,9 @@
 // @asset-migrated: teamclaw 自研资产
 /**
  * DagViewV2 —— 双模式 DAG 渲染:
- * - interactive:任务总览 L1 交互图,复用既有 DagView(拖拽/缩放),由 DagView 扩展的
+ * - interactive:任务级交互图,复用既有 DagView(拖拽/缩放),由 DagView 扩展的
  *   边语义渲染(rework/split_work = warning 虚线 + reason title)与下钻热区承担 PRD 语义;
+ *   当前 TaskPanel L1 隐藏入口,仅为后续恢复保留能力;
  * - readonly-exec:节点内执行流程(execDag,action_log 派生)的只读小图,静态分层纵向布局,
  *   不可点、不可选中、不可再下钻(两级栈封顶,Demo 同源约束)。
  */

@@ -1,7 +1,7 @@
 import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
-import type { CommunityAuthor, PersonalCenterActivity } from '@/domain/community/types';
+import type { CommunityAuthor, InteractionSummary, PersonalCenterActivity } from '@/domain/community/types';
 import { CommunityAuthorAvatar } from '../CommunityAuthorAvatar';
 import { TopicRow } from '../CommunityTopicList/TopicRow';
 import { useEffect, useMemo, useState } from 'react';
@@ -14,6 +14,12 @@ export interface FollowListProps {
   onRetry: () => void;
   onUnfollow: (item: PersonalCenterActivity) => Promise<void>;
   onOpenTopic: (topicId: string) => void;
+  currentUserId?: string;
+  getAuthorSummary?: (author: CommunityAuthor) => InteractionSummary | undefined;
+  loadAuthorSummary?: (author: CommunityAuthor) => void;
+  followAuthor?: (author: CommunityAuthor) => Promise<boolean>;
+  authorFollowLoading?: (author: CommunityAuthor) => boolean;
+  authorFollowed?: (author: CommunityAuthor) => boolean;
 }
 
 function followKey(item: PersonalCenterActivity): string {
@@ -86,6 +92,12 @@ export function FollowList({
   onRetry,
   onUnfollow,
   onOpenTopic,
+  currentUserId,
+  getAuthorSummary,
+  loadAuthorSummary,
+  followAuthor,
+  authorFollowLoading,
+  authorFollowed,
 }: FollowListProps) {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
@@ -204,6 +216,12 @@ export function FollowList({
                   topic={topic}
                   getTopicSummary={(next) => topicSummariesById[next.id]}
                   onOpen={(next) => onOpenTopic(next.id)}
+                  currentUserId={currentUserId}
+                  getAuthorSummary={getAuthorSummary}
+                  loadAuthorSummary={loadAuthorSummary}
+                  followAuthor={followAuthor}
+                  authorFollowLoading={authorFollowLoading}
+                  authorFollowed={authorFollowed}
                 />
               ))}
             </div>
