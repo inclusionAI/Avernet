@@ -148,3 +148,19 @@ for log rotation, retention and collection.
 ## 可选召回分支
 
 `HybridRetrievalService` 组合参数新增 `keyword_enabled`、`vector_enabled`，默认均为 true，现有 TC 调用不变。向量关闭时跳过查询 Embedding 和向量调用；关键词关闭时跳过关键词调用；至少开启一路。主动关闭的分支在结果 reasons 中记为 `keyword_disabled` / `vector_disabled`，结果为 degraded。关闭分支不算成功兜底：唯一开启的分支失败仍返回检索不可用；成功但无匹配则允许空结果。参数是服务组装能力，不开放给 HTTP 调用方，也不引入 DRM 依赖。
+
+## Optional bounded local cache primitive
+
+`core.memory_cache.MemoryCache` is a host-owned TTL/LRU utility with entry and
+estimated retained-byte limits. It copies values on reads/writes, expires entries
+on access or stats collection, and exposes counters without logging content.
+`clear()` invalidates entries; `retire()` also permanently disables future fills,
+including late requests from a replaced configuration. There is no background
+job, network dependency or request coalescing. Supported values are acyclic
+retrieval result dataclasses and built-in containers/scalars; byte accounting is
+an estimate, not a process RSS bound.
+
+The primitive does not enable caching in TC or change the HTTP contract. A host
+that wraps retrieval owns complete cache keys, trusted scope separation, data
+revision invalidation, successful-result admission and final eligibility checks.
+Hosts must keep authentication and overload protection outside cache shortcuts.
