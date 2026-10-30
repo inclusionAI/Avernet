@@ -10,8 +10,10 @@ from search_core.api.errors import SearchUnavailable
 from search_core.api.models import (
     RecallResult,
     RetrievalRequest,
+    ScoreDetails,
     SearchItem,
     SearchResult,
+    StageScore,
 )
 from search_core.core.ranking import reciprocal_rank_fusion
 from search_core.plugin_api.embedding import AsyncEmbeddingProvider, EmbeddingProvider
@@ -23,6 +25,30 @@ from search_core.plugin_api.retrieval import RetrievalIndex
 class _StageFailure(Exception):
     def __init__(self, reason: str):
         self.reason = reason
+
+
+def _stage_scores(scores):
+    # RRF counts each identity once. Keep the first occurrence and its order.
+    unique = {}
+    for key, value in scores:
+        unique.setdefault(key, value)
+    return {
+        key: StageScore(value, rank)
+        for rank, (key, value) in enumerate(unique.items(), 1)
+        if math.isfinite(value)
+    }
+
+
+def _stage_scores(scores):
+    # RRF counts each identity once. Keep the first occurrence and its order.
+    unique = {}
+    for key, value in scores:
+        unique.setdefault(key, value)
+    return {
+        key: StageScore(value, rank)
+        for rank, (key, value) in enumerate(unique.items(), 1)
+        if math.isfinite(value)
+    }
 
 
 class HybridRetrievalService:
@@ -248,6 +274,10 @@ class HybridRetrievalService:
             [[hit.id for hit in recall.vector_hits], [hit.id for hit in recall.keyword_hits]]
         )[: self._candidate_limit]
         scores = [(item.item_id, item.score) for item in ranking]
+        keyword_scores = _stage_scores((hit.id, hit.score) for hit in recall.keyword_hits)
+        vector_scores = _stage_scores((hit.id, hit.score) for hit in recall.vector_hits)
+        fusion_scores = _stage_scores(scores)
+        reranker_scores = {}
         reasons = list(recall.reasons)
         score_source = "rrf"
 
@@ -278,6 +308,7 @@ class HybridRetrievalService:
                 if any(not math.isfinite(item.score) for item in reranked):
                     raise ValueError("non-finite reranker score")
                 scores = [(item.candidate_id, item.score) for item in reranked]
+                reranker_scores = _stage_scores(scores)
                 score_source = "reranker"
             except ValueError as exc:
                 # Malformed model output can never be interpreted as an outage.
@@ -286,7 +317,23 @@ class HybridRetrievalService:
                 reasons.append("reranker_unavailable")
 
         return SearchResult(
-            items=_items(hits, scores[: request.limit], score_source),
+            items=tuple(
+                SearchItem(
+                    item_id=key,
+                    name=str(hits[key].payload.get("name") or ""),
+                    summary=str(hits[key].payload.get("content") or ""),
+                    score=score,
+                    score_source=score_source,
+                    score_details=ScoreDetails(
+                        keyword=keyword_scores.get(key),
+                        vector=vector_scores.get(key),
+                        rrf=fusion_scores.get(key),
+                        reranker=reranker_scores.get(key),
+                    ),
+                )
+                for key, score in scores[: request.limit]
+            ),
+
             status="degraded" if reasons else "ok",
             reasons=tuple(dict.fromkeys(reasons)),
         )
