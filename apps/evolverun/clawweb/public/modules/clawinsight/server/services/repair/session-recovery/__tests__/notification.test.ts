@@ -65,13 +65,15 @@ it.each(["message", "plan", "execution"] as const)("retains %s notices before an
 it.each(["message", "plan", "execution", "result"] as const)("routes %s to the exact Bot and Owner override only", async kind => {
   const { notifier, config, sender, task, events } = setup();
   task.request.target.bot_id = "default";
+  task.request.target.entity_id = "001234";
   config.findByKey.mockResolvedValue({ enabled: 1, config_json: JSON.stringify({ webhook: "https://business.invalid/send", timeout_seconds: 10,
     bot_webhooks: [{ bot_id: "default", entity_id: "another-owner", webhook: "https://another.invalid/send" },
-      { bot_id: "default", entity_id: "owner", webhook: "https://test.invalid/send" }] }) });
+      { bot_id: "default", entity_id: "001234", webhook: "https://test.invalid/send" }] }) });
   notifier.after({ ...message, kind });
   await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
   expect(sender.send).toHaveBeenCalledOnce();
   expect(sender.send.mock.calls[0][0]).toMatchObject({ webhook: "https://test.invalid/send", timeoutSeconds: 10 });
+  expect(sender.send.mock.calls[0][0].text).toContain("**Bot**：default\n\n**Entity ID**：001234");
   expect(JSON.stringify(events)).not.toMatch(/https:\/\/(test|business|another)\.invalid/);
 });
 it.each([["bot", "another-owner"], ["another-bot", "owner"]])("retains the default group for unmatched target %s/%s", async (bot_id, entity_id) => {

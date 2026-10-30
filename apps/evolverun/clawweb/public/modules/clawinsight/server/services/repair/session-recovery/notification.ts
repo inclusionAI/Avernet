@@ -152,7 +152,7 @@ function notificationContent(task: RecoveryStoredTask, event: RecoveryTimelineEv
   }
   const url = new URL("/insight", baseUrl);
   url.searchParams.set("module", "monitoring"); url.searchParams.set("recoveryTaskId", task.taskId);
-  const context = `**Bot**：${clip(task.request.target.bot_id, 150)}`;
+  const context = `**Bot**：${clip(task.request.target.bot_id, 150)}\n\n**Entity ID**：${clip(task.request.target.entity_id, 150)}`;
   return { title: `会话自愈｜${title}`, text: `## 会话自愈｜${title}\n\n${[context, ...sections].join("\n\n")}\n\n[查看完整任务与处理记录](${url.href})` };
 }
 
