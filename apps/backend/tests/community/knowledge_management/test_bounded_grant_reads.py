@@ -178,6 +178,40 @@ def test_bad_authorized_page_space_is_rejected_without_provider_io(space_id):
             )
 
 
+def test_available_for_bot_uses_resolved_bot_owner_for_provider_grants_and_details(
+    world,
+):
+    BotKnowledgeBindingModel.__table__.create(world.engine)
+    world.catalog.page_authorized = Mock(
+        return_value={"kb_ids": ["kb"], "next_cursor": None}
+    )
+    world.catalog.details = Mock(return_value=[fact()])
+    world.source.bot_context = Mock(
+        return_value={
+            "id": 1,
+            "bot_id": "bot",
+            "owner_id": "bot-owner",
+            "space_id": 1,
+            "bot_type": "personal",
+        }
+    )
+    world.service.available_for_bot(
+        scope=BotKnowledgeScope("bot", "owner", "pre"),
+        actor_id="owner",
+        cursor=0,
+        limit=1,
+    )
+    world.catalog.page_authorized.assert_called_once_with(
+        scope=BotKnowledgeScope("bot", "bot-owner", "pre"),
+        space_id=1,
+        cursor=0,
+        limit=1,
+    )
+    world.catalog.details.assert_called_once_with(
+        space_id=1, kb_ids=["kb"], actor_id="bot-owner"
+    )
+
+
 def test_service_consumes_only_one_page_and_preserves_provider_cursor(world):
     BotKnowledgeBindingModel.__table__.create(world.engine)
     world.catalog.list_authorized = Mock(side_effect=AssertionError("full list"))

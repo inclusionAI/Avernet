@@ -1,5 +1,6 @@
 """Compose provider facts with bounded, same-space workspace display data. No write access."""
 
+from agentclaw.community.kernel.knowledge import BotKnowledgeScope
 from agentclaw.community.core.knowledge_management.ports import (
     KnowledgeCatalog,
     KnowledgeDisplaySource,
@@ -312,15 +313,27 @@ class KnowledgeManagementService:
             raise KnowledgeManagementError("INVALID_KNOWLEDGE_INPUT")
         bot = self.source.bot_context(scope, actor_id)
         space_id = bot["space_id"]
+        # The caller's requested Owner is the selection-subscription identity;
+        # this may be a published-Bot Owner or a different client identity.
+        # ECB grant key uses the Bot that is actually stored under the resolved
+        # row (owner_id). Using the requested owner here can trigger a harmless
+        # 200 response whose payload belongs to that other identity and then
+        # fail scope validation before we read a page.
+        grant_scope = (
+            scope
+            if bot["owner_id"] == scope.owner_id
+            else BotKnowledgeScope(scope.bot_id, bot["owner_id"], scope.env)
+        )
         page = self.catalog.page_authorized(
-            scope=scope, space_id=space_id, cursor=cursor, limit=limit
+            scope=grant_scope, space_id=space_id, cursor=cursor, limit=limit
         )
         selected = page["kb_ids"]
         saved = self.source.selections(bot=bot, kb_ids=selected)
         # Only fetch this page's metadata, not every authorized KB on every request.
         space = self._scope(space_id, actor_id)
+        facts_owner = bot["owner_id"]
         facts = self.catalog.details(
-            space_id=space_id, kb_ids=selected, actor_id=actor_id
+            space_id=space_id, kb_ids=selected, actor_id=facts_owner
         )
         if not isinstance(facts, list) or len(facts) != len(selected):
             raise KnowledgeManagementError("KNOWLEDGE_CATALOG_INVALID")
