@@ -44,7 +44,13 @@ class HybridRetrievalService:
         fallback_index: RetrievalIndex | None = None,
         allow_partial: bool = False,
         execution: dict[str, CallExecutor] | None = None,
+        keyword_enabled: bool = True,
+        vector_enabled: bool = True,
     ):
+        if not keyword_enabled and not vector_enabled:
+            raise ValueError("at least one recall branch must be enabled")
+        self._keyword_enabled = keyword_enabled
+        self._vector_enabled = vector_enabled
         if candidate_limit <= 0:
             raise ValueError("candidate_limit must be positive")
         self._index = index
@@ -77,8 +83,12 @@ class HybridRetrievalService:
 
         async def semantic():
             nonlocal query_vector
+            if not self._vector_enabled:
+                return None
             try:
-                vector = await self._call("embedding", self._embedding.embed, request.query)
+                vector = await self._call(
+                    "embedding", self._embedding.embed, request.query
+                )
             except Exception as exc:
                 raise _StageFailure("semantic_unavailable") from exc
             if not vector or any(not math.isfinite(value) for value in vector):
@@ -97,6 +107,8 @@ class HybridRetrievalService:
                 raise _StageFailure("semantic_unavailable") from exc
 
         async def keyword():
+            if not self._keyword_enabled:
+                return None
             try:
                 return await self._call(
                     "keyword",
@@ -114,25 +126,60 @@ class HybridRetrievalService:
             keyword(),
             return_exceptions=True,
         )
-        vector_result = self._stage_result(results[0], "vector_unavailable")
-        keyword_result = self._stage_result(results[1], "keyword_unavailable")
-        vector_failure = _exception_from(vector_result)
-        keyword_failure = _exception_from(keyword_result)
+        vector_marker = None if not self._vector_enabled else self._stage_result(
+            results[0], "semantic_unavailable"
+        )
+        keyword_marker = None if not self._keyword_enabled else self._stage_result(
+            results[1], "keyword_unavailable"
+        )
+        vector_failure = _exception_from(vector_marker)
+        keyword_failure = _exception_from(keyword_marker)
+        vector_available = (
+            self._vector_enabled and vector_failure is None
+        )
+        keyword_available = (
+            self._keyword_enabled and keyword_failure is None
+        )
 
-        if vector_failure is not None and keyword_failure is not None:
+        if not vector_available and not keyword_available:
             if not self._allow_partial:
-                raise SearchUnavailable("retrieval dependency failed") from keyword_failure
+                raise SearchUnavailable("retrieval dependency failed") from (
+                    keyword_failure or vector_failure
+                )
+            reasons = []
+            if self._vector_enabled:
+                reasons.append(
+                    getattr(vector_failure, "reason", "semantic_unavailable")
+                )
+            else:
+                reasons.append("vector_disabled")
+            if self._keyword_enabled:
+                reasons.append(
+                    getattr(keyword_failure, "reason", "keyword_unavailable")
+                )
+            else:
+                reasons.append("keyword_disabled")
             return RecallResult(
-                reasons=("semantic_unavailable", "keyword_unavailable"),
+                reasons=tuple(dict.fromkeys(reasons)),
                 available=False,
             )
 
-        vector_hits: tuple = () if vector_failure is not None else tuple(vector_result)
-        keyword_hits: tuple = () if keyword_failure is not None else tuple(keyword_result)
+        vector_hits: tuple = (
+            () if not self._vector_enabled or vector_failure is not None
+            else tuple(vector_marker)
+        )
+        keyword_hits: tuple = (
+            () if not self._keyword_enabled or keyword_failure is not None
+            else tuple(keyword_marker)
+        )
         reasons = []
-        if vector_failure is not None:
-            reasons.append(getattr(vector_failure, "reason", "vector_unavailable"))
-        if keyword_failure is not None:
+        if not self._vector_enabled:
+            reasons.append("vector_disabled")
+        elif vector_failure is not None:
+            reasons.append(getattr(vector_failure, "reason", "semantic_unavailable"))
+        if not self._keyword_enabled:
+            reasons.append("keyword_disabled")
+        elif keyword_failure is not None:
             reasons.append(getattr(keyword_failure, "reason", "keyword_unavailable"))
 
         hits = {hit.id: hit for hit in [*keyword_hits, *vector_hits]}
