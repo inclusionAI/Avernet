@@ -18,6 +18,8 @@ import { PublishTopicModal } from '../PublishTopicModal';
 
 type CommunityTopicView = CommunityTopicFilter | 'following';
 
+const CURRENT_USER_AVATAR_SIZE = 40;
+
 const topicTypeOptions: Array<{
   value: CommunityTopicView;
   label: string;
@@ -217,13 +219,13 @@ export function CommunityPage() {
                   <Avatar
                     name={community.currentUser.displayName}
                     src={community.currentUser.avatarUrl}
-                    size={20}
+                    size={CURRENT_USER_AVATAR_SIZE}
                   />
                 ) : (
                   <UserRound className="size-4" aria-hidden />
                 )
               }
-              className="ml-auto size-9 rounded-full sm:ml-0"
+              className="ml-auto size-10 rounded-full sm:ml-0"
               onClick={() => setShowPersonalCenter(true)}
             />
             <Button
@@ -258,6 +260,12 @@ export function CommunityPage() {
                   target: { targetType: 'TOPIC', id: topic.id },
                 })
               }
+              currentUserId={community.currentUserId}
+              getAuthorSummary={community.getAuthorSummary}
+              loadAuthorSummary={community.loadAuthorSummary}
+              followAuthor={community.followAuthor}
+              authorFollowLoading={community.authorFollowPending}
+              authorFollowed={community.isAuthorFollowed}
               scrollRootRef={scrollRootRef}
             />
           </div>

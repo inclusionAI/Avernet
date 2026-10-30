@@ -121,6 +121,28 @@ describe('CommunityPersonalCenter', () => {
     expect(screen.queryByText('bot-post-author')).not.toBeInTheDocument();
   });
 
+  it('个人中心帖子发布者为 Human 时使用清晰的 32px 头像', () => {
+    mockedCenter.activityPage = {
+      items: [
+        {
+          ...baseActivity,
+          actor: { actorType: 'HUMAN', id: 'user-a' },
+          topicContext: {
+            ...baseActivity.topicContext,
+            author: { actorType: 'HUMAN', id: 'user-a' },
+            authorDisplayName: '李四',
+            authorAvatarUrl: 'https://example.com/lisi.png',
+          },
+        },
+      ],
+      total: 1,
+    };
+
+    render(<CommunityPersonalCenter onBack={jest.fn()} onOpenTopic={jest.fn()} />);
+
+    expect(screen.getByAltText('李四')).toHaveStyle({ width: '32px', height: '32px' });
+  });
+
   it('truncates favorite and browse activity content to one line', () => {
     const onOpenTopic = jest.fn();
     mockedCenter.activityType = 'FAVORITED';

@@ -418,10 +418,11 @@ describe('CommunityTopicDetail', () => {
     expect(onSubmitReply.mock.calls[0][0].replyToPostId).toBeUndefined();
   });
 
-  test('分享主题展示分享类型标识', () => {
+  test('分享主题详情页不再重复展示分享类型图标', () => {
     renderDetail({ topic: { ...topic, topicType: 'share' } });
 
-    expect(screen.getByText('分享')).toBeInTheDocument();
+    expect(screen.queryByText('分享')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('分享')).not.toBeInTheDocument();
   });
 
   test('求助主题不再展示期望解决时间，关闭后显示已解决', () => {
