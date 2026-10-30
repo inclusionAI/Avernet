@@ -374,7 +374,7 @@ user_config:
 
   # The swarm runtime's operational knobs and its own LLM endpoint.
   agentswarm:
-    enabled: true
+    agentswarm_enabled: true
     artifact_store_root: "${AGENTSWARM_ARTIFACT_ROOT:-/tmp/agentswarm/artifacts}"
     orchestration:
       # Invariant loaded by AgentSwarmOrchestrationConfig.from_block:
