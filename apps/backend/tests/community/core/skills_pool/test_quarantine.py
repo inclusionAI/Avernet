@@ -251,6 +251,43 @@ def test_uncertain_invalid_runtime_response_is_retried() -> None:
     records.mark_cleanup_failed.assert_not_called()
 
 
+def test_unbound_device_cleanup_is_recorded_and_not_retried() -> None:
+    records = MagicMock()
+    records.get_quarantine.return_value = _record()
+    records.claim_cleanup.return_value = True
+    layouts = MagicMock()
+    layouts.get.return_value = _layout()
+    runtime = MagicMock()
+    runtime.cleanup_quarantine = AsyncMock(
+        return_value=RuntimeQuarantineCleanupResult(
+            status=RuntimeQuarantineCleanupStatus.INVALID,
+            evidence={"reason": "device_not_bound"},
+        )
+    )
+    service = SkillsPoolQuarantineService(
+        quarantine_repository=records,
+        layout_repository=layouts,
+        runtime=runtime,
+        now=lambda: NOW,
+    )
+    handler = SkillsPoolQuarantineCleanupTaskHandler(service)
+
+    outcome = handler.handle(
+        {
+            "scope": {
+                "env": SCOPE.env,
+                "entity_id": SCOPE.entity_id,
+                "bot_id": SCOPE.bot_id,
+            },
+            "migration_generation": "generation-1",
+        }
+    )
+
+    assert outcome == Complete()
+    records.mark_cleanup_failed.assert_called_once()
+    records.record_cleanup_uncertain.assert_not_called()
+
+
 def test_structurally_invalid_cleanup_is_recorded_and_not_retried() -> None:
     records = MagicMock()
     records.get_quarantine.return_value = _record()
