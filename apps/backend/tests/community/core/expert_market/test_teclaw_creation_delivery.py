@@ -76,7 +76,7 @@ def test_native_expert_identity_is_present_in_the_first_teclaw_draft_artifact(
     assert artifact["version"] is None
     assert artifact["engine_ext"]["stage"] == "draft"
     assert artifact["ownership"]["identity_files"] == "platform"
-    assert {ref["name"] for ref in artifact["identity_files"]} == set(bodies)
+    assert {ref["name"] for ref in artifact["identity_files"]} == {name for name, content in bodies.items() if content}
     assert all(ref["name"] != "MEMORY.md" for ref in artifact["identity_files"])
     for ref in artifact["identity_files"]:
         assert ref["store"] == "bot-data"

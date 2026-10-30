@@ -6,7 +6,7 @@ What these pin, by the work item's acceptance criteria:
   engine's legal set re-asked at apply time rather than trusted from the PUT;
 - `source` and inline `content` both work, and inline carries no fetch fields;
 - MEMORY.md cannot be declared or removed; IDENTITY.md can be explicitly
-  written but survives omission and empty declarations;
+  written and follows ordinary category replacement;
 - a fetch failure aborts the whole category before the first write —
   §3.2's all-or-nothing, by construction because fetch belongs to the
   compiler, which runs before ``resolve``;
@@ -362,14 +362,14 @@ def test_declaring_one_file_removes_the_others_but_not_the_reserved():
     _, plan, written = _run(
         _apply(materialiser, _ctx(), [{"type": "RULES.md", "content": "new"}])
     )
-    assert plan.removals == ("SOUL.md",)
+    assert plan.removals == ("IDENTITY.md", "SOUL.md")
     # The removal is an empty write — the domain's absent≡empty contract.
-    assert [w["file_type"] for w in identity.writes] == ["RULES.md", "SOUL.md"]
+    assert [w["file_type"] for w in identity.writes] == ["RULES.md", "IDENTITY.md", "SOUL.md"]
     assert identity.writes[1]["content"] == ""
     # MEMORY.md is engine state: untouched by the write AND absent from the
     # removals — the reserved subtraction's removal half.
     assert identity.write_count(file_type="MEMORY.md") == 0
-    assert identity.files["IDENTITY.md"] == "profile"
+    assert identity.files["IDENTITY.md"] == ""
 
 
 def test_declared_empty_empties_the_area_but_not_the_reserved_names():
@@ -377,10 +377,10 @@ def test_declared_empty_empties_the_area_but_not_the_reserved_names():
         files={"RULES.md": "a", "SOUL.md": "b", "IDENTITY.md": "engine"}
     )
     _, plan, written = _run(_apply(materialiser, _ctx(), []))
-    assert plan.removals == ("RULES.md", "SOUL.md")
-    assert [w["file_type"] for w in identity.writes] == ["RULES.md", "SOUL.md"]
-    assert identity.write_count(file_type="IDENTITY.md") == 0
-    assert identity.files["IDENTITY.md"] == "engine"
+    assert plan.removals == ("IDENTITY.md", "RULES.md", "SOUL.md")
+    assert [w["file_type"] for w in identity.writes] == ["IDENTITY.md", "RULES.md", "SOUL.md"]
+    assert identity.write_count(file_type="IDENTITY.md") == 1
+    assert identity.files["IDENTITY.md"] == ""
 
 
 def test_a_changed_file_writes_the_new_body_as_an_update():

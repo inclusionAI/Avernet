@@ -77,7 +77,7 @@ provides:
   - BotConfigManifestApplyRecord  # the persisted apply row (table keeps its historical name)
   - Capabilities  # which constructs a bot can be told to have (capabilities.py); resolve_capabilities, capabilities_for_bot, CapabilityResolver
   - SourceKind  # and source_matrix: which (construct, source kind) pairs are open (support_matrix.py)
-  - legal_identity_types  # RESERVED_IDENTITY_FILES / OMISSION_PROTECTED_IDENTITY_FILES (identity_types.py)
+  - legal_identity_types  # RESERVED_IDENTITY_FILES (identity_types.py)
   - unpack_archive  # UnpackedTree, UnpackError, ARCHIVE_MEMBER_LIMIT, ARCHIVE_UNPACKED_LIMIT — the guarded archive unpack
   - CREATE_PRE_CONTAINER_TRIGGER  # and CREATE_ON_CONTAINER_TRIGGER, ALL_TRIGGERS (triggers.py)
   - CliToolService  # and the cli_tools package it moved with: CliToolDecl, CliToolStore, CliToolContext, the delivery ports, BotCliToolService, BotCliToolServiceProtocol

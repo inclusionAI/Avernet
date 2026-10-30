@@ -725,7 +725,8 @@ identity:
   校验并明确报错，而不是 apply 时静默跳过。
 - **`MEMORY.md` 声明即拒，且永不因替换而删除。**它仍为引擎运行期记忆。
 - **`IDENTITY.md` 在目标引擎原有白名单内可显式创建/覆盖。**显式空内容沿原空写
-  语义；未声明（包括 identity 省略、`identity: []`、仅声明 AGENTS.md）保留旧档案。
+  语义，与其他可配置身份文件一致。省略整个 identity 类目不操作；`identity: []` 清空
+  可管理集合；非空列表完整替换，未列出的 IDENTITY.md 同样移除。
   此能力不扩大 Claude Code 白名单，不修改 MEMORY、权限或 stage 隔离。
 - 其余引擎可能写入的文件（运行期会被引擎更新的那些）技术上可声明，但声明
   获胜语义会在每个 apply 点重置它们——SOUL.md、RULES.md 等人设/规则文件

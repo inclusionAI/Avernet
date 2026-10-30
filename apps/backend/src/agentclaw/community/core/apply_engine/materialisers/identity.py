@@ -30,12 +30,10 @@ An entry reaches ``resolve`` as the raw mapping, e.g. ``{"type": "SOUL.md",
 "source": {"protocol": "oss", "bucket": "team-artifacts",
 "key": "identity/soul.md", "auth": "oss-prod"}}``.
 
-The area this overwrites is the bot's identity file set, with two protections.
-``MEMORY.md`` remains engine-owned: neither declaration nor removal is allowed.
-``IDENTITY.md`` may be written explicitly on an engine that accepts it, but its
-omission never clears an existing profile. This keeps legacy AGENTS-only and
-empty identity declarations from gaining a new destructive effect. The validator
-and this module both enforce the declaration boundary.
+The area this overwrites is the bot's identity file set minus ``MEMORY.md``,
+which remains engine-owned and cannot be declared or removed. ``IDENTITY.md``
+follows the same replacement and empty-write rules as other configurable files.
+An undeclared identity category is left untouched by the orchestrator.
 
 **Same write path as the public API, by reuse rather than imitation.** The
 materialiser derives the entity pair exactly as the identity router does —
@@ -87,7 +85,6 @@ from agentclaw.community.core.apply_engine.capabilities import (
 )
 from agentclaw.community.core.apply_engine.identity_types import (
     RESERVED_IDENTITY_FILES,
-    OMISSION_PROTECTED_IDENTITY_FILES,
     legal_identity_types,
 )
 
@@ -119,8 +116,7 @@ class IdentityMaterialiser(Materialiser):
 
     A removal is an **empty write**, not a delete: the domain reads absent and
     empty as one state, and ``IdentityService`` exposes no delete. ``MEMORY.md``
-    never receives even that; an omitted ``IDENTITY.md`` is also protected from
-    removal.
+    never receives even that.
     """
 
     construct = Category.IDENTITY
@@ -200,10 +196,8 @@ class IdentityMaterialiser(Materialiser):
                 current = await self._identity.read_identity_file(
                     entity_type, entity_id, ctx.bot_id, intent.identity, ctx.owner_id
                 )
-            # DEVICE lists known empty files as False; those already equal
-            # empty text. PLATFORM omits names without a stored representation,
-            # so a missing zero-byte profile ref still needs creation.
-            if intent.identity in presence and current == intent.value:
+            # Absent and empty are the same domain state for every identity file.
+            if current == intent.value:
                 outcome = EntryOutcome.UNCHANGED.value
             elif not current:
                 outcome = EntryOutcome.CREATED.value
@@ -211,12 +205,11 @@ class IdentityMaterialiser(Materialiser):
                 outcome = EntryOutcome.UPDATED.value
             planned.append(PlannedEntry(intent, outcome))
 
-        # Cleanup protects both runtime memory and an omitted identity profile.
-        # Explicit IDENTITY.md writes above remain legal, including empty writes.
+        # A declared category replaces all configurable files; memory is engine-owned.
         existing = {
             file_type
             for file_type, exists in presence.items()
-            if exists and file_type not in OMISSION_PROTECTED_IDENTITY_FILES
+            if exists and file_type not in RESERVED_IDENTITY_FILES
         }
         removals = tuple(sorted(existing - declared))
         return CategoryPlan(entries=tuple(planned), removals=removals)

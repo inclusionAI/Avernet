@@ -1,7 +1,7 @@
 # Bot Config Manifest — 实现工作项拆分
 
-> 当前身份合同增量：IDENTITY.md 在目标 engine 原白名单内允许显式 Apply，遗漏/identity: []
-> 保留旧档案；MEMORY.md 仍禁止声明且不被清理。本文后续历史任务中的“双保留名不可写”
+> 当前身份合同增量：IDENTITY.md 在目标 engine 原白名单内按普通文件参与集合替换。
+> identity 类目缺省不操作，[] 清空可管理集合，非空列表完整替换；仅 MEMORY.md 禁止声明且不被清理。本文后续历史任务中的“双保留名不可写”
 > 以 manifest-schema.zh-CN.md §3.5 和 engine-convergence-contract.zh-CN.md A2 为准。
 
 

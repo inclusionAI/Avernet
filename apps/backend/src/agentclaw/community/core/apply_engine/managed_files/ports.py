@@ -124,10 +124,8 @@ class PlatformIdentity(_StorePort, IdentityFilePort):
     ) -> Any:
         scope = self._scope(entity_type, entity_id, bot_id)
         rel_path = _identity_path(file_type)
-        if not content and file_type != "IDENTITY.md":
-            # Ordinary identity absence is an empty write, represented by
-            # deletion. IDENTITY.md must retain an explicit empty object/ref:
-            # omitting its ref asks the engine to preserve the old profile.
+        if not content:
+            # Empty writes remove the stored object for every identity filename.
             await asyncio.to_thread(
                 self._store.delete, scope, rel_path=rel_path
             )

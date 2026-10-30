@@ -779,7 +779,8 @@ identity:
   时就报错，而不是 apply 时静默跳过。
 - **`MEMORY.md` 声明不了**：apply 永不写、永不删，`PUT` 明确拒绝。
 - **`IDENTITY.md` 可显式写入**：仅限目标 engine 原本允许该文件时，内容沿原身份
-  写入路径；显式空内容可清空。未声明或 `identity: []` 则保留已有档案。
+  写入路径；显式空内容可清空。省略 identity 类目不操作；`identity: []` 清空可管理
+  集合，非空列表完整替换，未列出的 IDENTITY.md 同样移除。
 - **优先取源、少用内联。**内联内容游离于版本控制之外，久了会变成「藏在配置里的
   第二份人设」，排查「这句话哪来的」要看两个地方。
 - apply 走的是现有 IdentityService，所以现有派生行为原样生效（例如
@@ -1156,14 +1157,13 @@ apply 一次**，让平台副本落上文件——否则第一份带 `platform` 
 1. **通过界面安装的 skill 会被移除**——当一份声明了 `skills` 的清单被应用时。
    对一个被声明的类目，清单是唯一的所有者：在那个类目上，**清单与界面互斥**。
 2. **被声明类目内、由 bot 自己创建的文件会被移除**，除非它在保留名单里。
-   保留名单**只有两个名字**，永不被 apply 写入、也永不被删除，无论清单声明与否：
+   保留名单**只有一个名字**，永不被 apply 写入、也永不被删除，无论清单声明与否：
 
    ```text
    MEMORY.md
-   IDENTITY.md
    ```
 
-   它们是引擎生成的运行期状态。名单是有限、可枚举的——正因为如此，两个引擎系才
+   它是引擎生成的运行期状态。名单是有限、可枚举的——正因为如此，两个引擎系才
    能对它达成同一份契约。
 3. **首启有一段 ACTIVE-but-unconfigured 窗口**（§7），期间启动的扩容实例会看到
    只下发了一部分的内容。（之后实例不会发散：它们共享同一份挂载。）
@@ -2357,7 +2357,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 
 | 类目 | 键字段 | 约束 | 被覆盖的区域 |
 | --- | --- | --- | --- |
-| `identity` | `type` | 白名单枚举；claude_code 仅 `CLAUDE.md`；**`MEMORY.md` 写入即拒；`IDENTITY.md` 显式可写、遗漏保留** | identity 文件集合（减保留名单） |
+| `identity` | `type` | 白名单枚举；claude_code 仅 `CLAUDE.md`；**`MEMORY.md` 写入即拒；`IDENTITY.md` 与其他文件统一按集合替换** | identity 文件集合（减保留名单） |
 | `skills` | `name` | 标识符，不含位置信息 | active skill set |
 | `resources` | `path` | workspace 相对；`/` 结尾 = 目录条目；禁绝对路径/`../`；禁嵌套；**来源只能是内联 `source` URL 或 `content`** | **仅被声明的 `path` 子树** |
 | `mcp` | `server_code` | 平台注册表引用；可选封闭 Bot `config` | 已启用的 server 集合及显式 Bot override |

@@ -19,10 +19,10 @@ reads each file's category and name off its path.
 Boundary metadata lives in the parent package's `README.md`
 (`core/bot_config_manifest`), which this package is part of.
 
-An explicit empty `IDENTITY.md` is stored as a zero-byte object and remains a
-compose reference, so the engine can distinguish clearing a declared profile
-from preserving an omitted one. Ordinary empty identity writes still remove
-objects; `MEMORY.md` is never admitted by the identity materialiser.
+All configurable identity files, including `IDENTITY.md`, share the same rules:
+an absent identity category does nothing, a declared category replaces the file
+set, and empty writes delete stored objects. Only `MEMORY.md` is protected from
+Manifest declarations and cleanup.
 
 A live Apply composes a complete snapshot from the current platform entities,
 including identity files retained by the materialiser. The snapshot does not

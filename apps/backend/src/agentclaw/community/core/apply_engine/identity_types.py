@@ -11,7 +11,6 @@ from __future__ import annotations
 
 __all__ = [
     "RESERVED_IDENTITY_FILES",
-    "OMISSION_PROTECTED_IDENTITY_FILES",
     "legal_identity_types",
 ]
 
@@ -20,12 +19,6 @@ __all__ = [
 #: then never converge. Refused at write time instead, which is what keeps
 #: "accepted" and "appliable" the same set.
 RESERVED_IDENTITY_FILES: frozenset[str] = frozenset({"MEMORY.md"})
-
-#: Preserve the cleanup boundary of existing manifests. IDENTITY.md is writable
-#: when explicitly declared, but its omission must not erase a bot's profile.
-OMISSION_PROTECTED_IDENTITY_FILES: frozenset[str] = RESERVED_IDENTITY_FILES | {
-    "IDENTITY.md"
-}
 
 
 def legal_identity_types(engine_type: str) -> frozenset[str]:

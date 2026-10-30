@@ -54,9 +54,9 @@ class IdentityFilePort(Protocol):
         stage: str = "draft",
     ) -> list[tuple[str, bool]]:
         """Known file states. A listed False is known empty/absent and equals
-        empty text; an omitted name has no materialised representation yet.
-        Device ports enumerate the whitelist (bool(content)); a platform port
-        enumerates stored objects, including explicit zero-byte profiles.
+        empty text; an omitted name also reads as empty text. Device ports
+        enumerate the whitelist (bool(content)); a platform port enumerates
+        its stored objects. Empty writes clear the corresponding domain value.
         """
         ...
 
