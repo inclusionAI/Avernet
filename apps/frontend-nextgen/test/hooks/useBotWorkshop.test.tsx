@@ -253,7 +253,7 @@ it('点击健康检查时导航到独立健康检查页面', async () => {
   await waitFor(() => expect(history.push).toHaveBeenCalledWith('/bot-workshop/health-check?id=bot-1'));
 });
 
-it('显式协作者可进入任意引擎的 Bot 会话', () => {
+it('后端授予 chat 时无需 edit 也可进入 Bot 会话', () => {
   mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined, userId: 'u2' });
   mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
   useWorkspaceStore.setState({ activeIdentityId: 'u2' });
@@ -273,10 +273,10 @@ it('显式协作者可进入任意引擎的 Bot 会话', () => {
   } as unknown as BotDomain;
 
   expect(result.current.canOpenConversation(collaboratorBot)).toBe(true);
-  expect(result.current.canOpenConversation(spaceMemberBot)).toBe(false);
+  expect(result.current.canOpenConversation(spaceMemberBot)).toBe(true);
 });
 
-it('非协作者不能从工坊进入普通引擎 Bot 会话', () => {
+it('线上服务 Bot 仅有 chat 没有 edit 时仍可对话', () => {
   mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined, userId: 'u2' });
   mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
   useWorkspaceStore.setState({ activeIdentityId: 'u2' });
@@ -285,11 +285,18 @@ it('非协作者不能从工坊进入普通引擎 Bot 会话', () => {
   const openclawSpaceMemberBot = {
     id: 'openclaw-bot',
     ownerId: 'owner-1',
+    serviceMode: 'service',
+    lifecycle: 'running',
     runtime: { isAgentCodingBot: false },
-    actions: ['view', 'chat'],
+    actions: ['view', 'chat', 'restart_publish', 'upgrade', 'offline'],
+    lock: { status: 'other' },
   } as unknown as BotDomain;
 
-  expect(result.current.canOpenConversation(openclawSpaceMemberBot)).toBe(false);
+  expect(result.current.canOpenConversation(openclawSpaceMemberBot)).toBe(true);
+  expect(result.current.canOpenConversation({ ...openclawSpaceMemberBot, actions: ['view', 'edit'] })).toBe(false);
+  expect(result.current.canOpenConversation({
+    ...openclawSpaceMemberBot, disabledActions: { chat: 'activate first' },
+  })).toBe(false);
 });
 
 it('无 Owner 匹配且后端未声明 chat 时不开放会话', () => {
@@ -309,7 +316,7 @@ it('无 Owner 匹配且后端未声明 chat 时不开放会话', () => {
     actions: ['view'],
   } as unknown as BotDomain;
 
-  expect(result.current.canOpenConversation(ownerBot)).toBe(true);
+  expect(result.current.canOpenConversation(ownerBot)).toBe(false);
   expect(result.current.canOpenConversation(restrictedBot)).toBe(false);
 });
 
