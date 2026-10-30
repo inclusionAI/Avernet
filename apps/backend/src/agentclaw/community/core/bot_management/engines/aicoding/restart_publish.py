@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from ..restart_contract import PublishedRestartServices
 from .restart_backup import RestartBackupBlocked
+from .restart_failure_log import log_restart_failure
 from .restart_state import ENGINES
 
 
@@ -44,6 +45,8 @@ class AicodingPublishedRestartMixin:
         try:
             return await restart()
         except RestartBackupBlocked as error:
+            log_restart_failure(error, bot_id=ctx.bot_id, phase="published_restart", owner_id=ctx.owner_id,
+                                publish_id=publish_id, binding_id=binding_id)
             self._persist_published_restart_veto(
                 services, publish_id=publish_id, stage=stage,
                 guard_id=guard_id, message=str(error),

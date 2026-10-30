@@ -17,11 +17,13 @@ from typing import Any, Callable
 from urllib.parse import quote
 
 from agentclaw.community.log import get_logger
+from agentclaw.community.utils.env_utils import get_current_env
 
 from .restart_arca import BoundArcaRestartExecutor, RestartBackupTargetChanged
 from .restart_dependencies import RestartBackupDependencies
 from .fastdisk_probe import detection_command, parse_detection_result
 from .restart_state import RestartSuperseded
+from .restart_failure_log import arca_identity, log_restart_failure, safe_log_field
 
 logger = get_logger()
 
@@ -114,6 +116,7 @@ def parse_result(result: Any, operation: str) -> dict[str, Any]:
 
 def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
                    bot_id: str, target_id: str, require_backup: bool = False,
+                   sandbox_id: str | None = None, owner_id: str | None = None,
                    strict_deadline: float | None = None) -> Callable[[], None]:
     """Wait outside the legacy restart lock; return a short receipt verifier."""
     started = time.monotonic()
@@ -131,13 +134,15 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
                        strict_deadline if strict_deadline is not None else float('inf'))
     action, boot, last_status = 'start', None, None
     last_log = started
+    observed_status = 'unknown'
 
     def log(phase, status, *, level='info', error_type='-', generation='-', reason='-'):
         getattr(logger, level)(
             "event=aicoding_restart_backup phase=%s status=%s bot_id=%s "
-            "target_id=%s operation_id=%s elapsed_ms=%s generation_id=%s error_type=%s reason=%s",
+            "target_id=%s operation_id=%s elapsed_ms=%s generation_id=%s error_type=%s reason=%s arca_id=%s env=%s owner_id=%s",
             phase, status, bot_id, target_id, operation_id,
             int((time.monotonic() - started) * 1000), generation, error_type, reason,
+            arca_identity(target_id, sandbox_id), get_current_env(), safe_log_field(owner_id),
         )
 
     def receipt(value):
@@ -161,6 +166,7 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
             if time.monotonic() >= deadline:
                 raise TimeoutError("重启备份超过等待预算")
             status = value['status']
+            observed_status = status
             if status == 'partial_success':
                 raise RestartBackupError('partial_backup', '最终快盘备份不完整')
             if require_backup and status in {'legacy', 'not_mounted'}:
@@ -195,9 +201,15 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
     except Exception as error:
         # Do not log raw command, stdout/stderr or exception text (may contain credentials).
         log('prepare', 'failed', level='warning', error_type=type(error).__name__, reason=error_reason(error))
+        if require_backup:
+            log_restart_failure(error, bot_id=bot_id, target_id=target_id, owner_id=owner_id,
+                                sandbox_id=sandbox_id, operation_id=operation_id, phase='prepare',
+                                elapsed_ms=int((time.monotonic() - started) * 1000),
+                                helper_status=observed_status)
         raise
 
     def verify():
+        observed_status = 'unknown'
         try:
             if (require_backup or execution is not None) and time.monotonic() >= deadline:
                 raise TimeoutError("重启备份超过等待预算")
@@ -205,6 +217,7 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
             # replacement container while holding the legacy short-lived lock.
             check_action = 'start' if status == 'not_mounted' else 'status'
             current = parse_result(execute(command(check_action, operation_id)), operation_id)
+            observed_status = current['status']
             if (require_backup or execution is not None) and time.monotonic() >= deadline:
                 raise TimeoutError("重启备份超过等待预算")
             if require_backup and current['status'] in {'failed', 'partial_success'}:
@@ -217,12 +230,17 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
             log('verify', 'allowed', generation=generation)
         except Exception as error:
             log('verify', 'failed', level='warning', error_type=type(error).__name__, reason=error_reason(error))
+            if require_backup:
+                log_restart_failure(error, bot_id=bot_id, target_id=target_id, owner_id=owner_id,
+                                    sandbox_id=sandbox_id, operation_id=operation_id, phase='verify',
+                                    elapsed_ms=int((time.monotonic() - started) * 1000),
+                                    helper_status=observed_status)
             raise
 
     return verify
 
 
-def _best_effort(callback, *, phase, bot_id, target_id, operation_id):
+def _best_effort(callback, *, phase, bot_id, target_id, operation_id, sandbox_id=None, owner_id=None):
     """Downgrade only backup I/O/result failures, never lifecycle writes/fences.
 
     No raw exception/output is logged: platform errors can contain credentials.
@@ -237,13 +255,14 @@ def _best_effort(callback, *, phase, bot_id, target_id, operation_id):
     logger.warning(
         "event=aicoding_restart_backup phase=%s status=degraded action=continue_restart "
         "bot_id=%s target_id=%s operation_id=%s error_type=%s reason=%s "
-        "data_loss_risk=true",
+        "data_loss_risk=true arca_id=%s env=%s owner_id=%s",
         phase, bot_id, target_id, operation_id, type(failure).__name__, error_reason(failure),
+        arca_identity(target_id, sandbox_id), get_current_env(), safe_log_field(owner_id),
     )
     return None
 
 
-def _backup_policy(callback, *, required, **identity):
+def _backup_policy(callback, *, required, physical_targets=(), **identity):
     if not required:
         return _best_effort(callback, **identity)
     try:
@@ -251,6 +270,8 @@ def _backup_policy(callback, *, required, **identity):
     except (RestartBackupTargetChanged, RestartBackupBlocked, RestartSuperseded):
         raise
     except Exception as error:
+        if not hasattr(error, "_coding_restart_log_context"):
+            log_restart_failure(error, physical_targets=physical_targets, **identity)
         raise RestartBackupBlocked(error_reason(error)) from error
 
 
@@ -284,6 +305,8 @@ def _attempt_backup(**kwargs):
     from .restart_state import current_restart
 
     identity = {key: kwargs[key] for key in ('bot_id', 'target_id', 'operation_id')}
+    identity['sandbox_id'] = kwargs.get('sandbox_id')
+    identity['owner_id'] = kwargs.get('owner_id')
     execution = current_restart.get()
     # A redelivery must not forget a previous successful detection. Persistence
     # errors must escape even the outer BaaS compatibility catch.
@@ -491,6 +514,7 @@ class AicodingRestartBackupMixin:
                         operation_id=None, restart_dependencies: RestartBackupDependencies | None = None,
                         strict_deadline: float | None = None):
         """Only coding engines probe runtime; no generic lifecycle/status changes."""
+        log_target, log_sandbox, log_targets = device_id, None, ()
         try:
             operation_id = _operation_id(operation_id)
             dependencies = restart_dependencies or RestartBackupDependencies()
@@ -507,11 +531,14 @@ class AicodingRestartBackupMixin:
                     return _query_inventory(target_runtime, **identity, phase='resolve')
 
                 confirmed = _confirmed_targets()
+                log_targets = confirmed
                 targets = _backup_policy(
                     inventory, required=bool(confirmed), phase='resolve', **identity,
+                    owner_id=ctx.owner_id, physical_targets=confirmed,
                 )
                 if confirmed and not confirmed.issubset(targets or {}):
                     raise RestartBackupBlocked('target_changed')
+                log_targets = tuple(targets or confirmed)
                 if targets == {}:
                     logger.info(
                         "event=aicoding_restart_backup phase=resolve status=skipped "
@@ -520,7 +547,7 @@ class AicodingRestartBackupMixin:
                     )
                 checks = [_attempt_backup(
                     execute=lambda cmd, target=physical: _execute_physical(target_runtime, target, cmd),
-                    operation_id=operation_id, bot_id=ctx.bot_id, target_id=physical,
+                    operation_id=operation_id, bot_id=ctx.bot_id, target_id=physical, owner_id=ctx.owner_id,
                     strict_deadline=strict_deadline,
                 ) for physical in (targets or {})]
 
@@ -531,6 +558,7 @@ class AicodingRestartBackupMixin:
                     current_targets = _backup_policy(
                         lambda: _query_inventory(target_runtime, **identity, phase='verify'),
                         required=required, phase='verify_inventory', **identity,
+                        owner_id=ctx.owner_id, physical_targets=log_targets,
                     )
                     # Once any target needs a durable fastdisk receipt, an
                     # unknown/changed inventory can no longer authorize mutation.
@@ -538,7 +566,8 @@ class AicodingRestartBackupMixin:
                             and set(current_targets) != set(targets)):
                         def changed():
                             raise RestartBackupError('target_changed', '备份期间目标容器清单变化')
-                        _backup_policy(changed, required=required, phase='verify_inventory', **identity)
+                        _backup_policy(changed, required=required, phase='verify_inventory', **identity,
+                                       owner_id=ctx.owner_id, physical_targets=log_targets)
                         return  # Never probe a changed target with an old receipt.
                     if targets is None and current_targets is not None:
                         # Retain the first valid observation, but never start
@@ -561,6 +590,7 @@ class AicodingRestartBackupMixin:
                 or _field(binding, 'device_provider') != execution.payload['provider']
             ):
                 raise RestartBackupError('target_changed', '目标容器已变化，禁止替换')
+            log_target = target
             provider = _field(binding, 'device_provider')
             if provider == 'baas':
                 # Existing BaaS inventory/POST contracts also work for FAILED
@@ -572,19 +602,20 @@ class AicodingRestartBackupMixin:
                         restart_dependencies=RestartBackupDependencies.for_instance(dependencies.baas_runtime()),
                         operation_id=operation_id, strict_deadline=strict_deadline),
                     required=bool(_confirmed_targets()),
-                    phase='prepare', bot_id=ctx.bot_id, target_id=target,
+                    phase='prepare', bot_id=ctx.bot_id, target_id=target, owner_id=ctx.owner_id,
                     operation_id=operation_id,
                 )
             elif provider == 'arca':
                 props = _field(binding, 'device_props') or {}
                 sandbox_id = props.get('sandbox_id')
+                log_sandbox = sandbox_id
                 if (execution is not None and 'sandbox_id' in execution.payload
                         and sandbox_id != execution.payload['sandbox_id']):
                     raise RestartBackupTargetChanged('Arca restart target changed')
                 if not isinstance(sandbox_id, str) or not sandbox_id:
                     def missing_sandbox():
                         raise RestartBackupError('missing_sandbox', '旧绑定缺少沙箱 ID')
-                    _best_effort(missing_sandbox, phase='resolve', bot_id=ctx.bot_id,
+                    _best_effort(missing_sandbox, phase='resolve', bot_id=ctx.bot_id, owner_id=ctx.owner_id,
                                  target_id=target, operation_id=operation_id)
                     check = None
                 else:
@@ -598,12 +629,19 @@ class AicodingRestartBackupMixin:
                     )
                     receipt_check = _attempt_backup(
                         execute=executor.execute, operation_id=operation_id,
-                        bot_id=ctx.bot_id, target_id=sandbox_id, strict_deadline=strict_deadline,
+                        bot_id=ctx.bot_id, target_id=sandbox_id, sandbox_id=sandbox_id, owner_id=ctx.owner_id,
+                        strict_deadline=strict_deadline,
                     )
 
                     def check():
-                        executor.verify()
-                        receipt_check()
+                        try:
+                            executor.verify()
+                            receipt_check()
+                        except Exception as error:
+                            log_restart_failure(error, bot_id=ctx.bot_id, target_id=sandbox_id, owner_id=ctx.owner_id,
+                                                sandbox_id=sandbox_id, operation_id=operation_id,
+                                                binding_id=binding_id, phase='verify_target')
+                            raise
             else:
                 def execute(cmd):
                     if _field(binding, 'status') in {'FAILED', 'STOPPED'}:
@@ -612,7 +650,7 @@ class AicodingRestartBackupMixin:
                 check = _attempt_backup(
                     execute=execute,
                     operation_id=operation_id,
-                    bot_id=ctx.bot_id, target_id=target, strict_deadline=strict_deadline,
+                    bot_id=ctx.bot_id, target_id=target, strict_deadline=strict_deadline, owner_id=ctx.owner_id,
                 )
 
             def verify():
@@ -634,6 +672,10 @@ class AicodingRestartBackupMixin:
                     check()
             return verify
         except Exception as error:
+            log_restart_failure(error, bot_id=ctx.bot_id, target_id=log_target, owner_id=ctx.owner_id,
+                                physical_targets=log_targets,
+                                sandbox_id=log_sandbox, operation_id=operation_id,
+                                binding_id=binding_id, phase="precondition")
             logger.error("event=aicoding_restart_backup phase=precondition status=blocked "
                          "bot_id=%s binding_id=%s target_id=%s error_type=%s reason=%s",
                          ctx.bot_id, binding_id, device_id, type(error).__name__, error_reason(error))

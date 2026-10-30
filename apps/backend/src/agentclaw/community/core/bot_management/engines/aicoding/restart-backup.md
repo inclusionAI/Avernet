@@ -147,6 +147,50 @@ Logs carry `event=aicoding_restart_backup`, phase, status/reason, Bot/target,
 operation, elapsed time and generation. The policy does not log raw output or
 exception messages. Poll logs occur on transitions or at most once per minute.
 
+## Restart failure alerts (2026-10-30)
+
+The coding strategy emits ERROR logs with `[AICODING_RESTART_FAILED]` and
+`event=aicoding_restart_failed` for confirmed-fastdisk backup vetoes, receipt
+verification failures, and blocking preparation errors. Ordinary task and
+published-restart exception handlers retain the underlying backup diagnostics
+and log before persisting failure, so a failed status write cannot hide the
+original backup error. This is diagnostic-only: no queue, retry, publication,
+status or replacement decisions are changed.
+
+Each record includes `bot_id`, `owner_id`, `env`, `arca_id`, raw `target_id`, `operation_id`, `phase`,
+`reason`, `error_type`, chained `cause_types`, `elapsed_ms`, `helper_status`,
+`binding_id`, `publish_id`, and a safe `stack`. Stages distinguish `prepare`,
+`verify`, `verify_target`, `precondition`, `task_failed`, and `published_restart`.
+Stack entries contain only filename, line number and function; raw exception
+messages, source lines, locals, commands and helper stdout/stderr are excluded.
+Unknown/unavailable fields use `-` rather than an invented value.
+
+`arca_id` comes from the captured direct-ARCA `sandbox_id` or a BaaS physical
+`provider_device_id` beginning with `ARCA-SANDBOX-`. Both `arca_id` and
+`target_id` preserve the complete routing identity, including any `@tenant`
+suffix (for example `@8`). Log formatting never changes provider execution
+parameters or tenant translation. Exception wrappers
+preserve the resolved physical target. Inventory verification errors retain the
+previously captured physical targets; when several containers are involved, emit
+one record per captured container rather than arbitrarily selecting a replica.
+`owner_id` comes from the Bot provisioning context or durable restart state, not
+the user triggering restart. `env` uses the existing `get_current_env()` data
+environment (`dev`/`pre`/`prod`; gray maps to prod), not the deployment profile or
+publish stage. These values do not require extra database/container lookups.
+A logical Bot/device ID is never labeled
+as an ARCA ID. Failures without a resolved physical target have `arca_id=-` and
+must be correlated by Bot/operation; logging performs no extra inventory or
+database I/O.
+
+Alert on ERROR plus `event=aicoding_restart_failed` (or the bracketed marker).
+Multiple phases can log the same failure: group/deduplicate by `bot_id` and
+`operation_id`, and use `arca_id`/`phase` for diagnosis. These logs cover this
+strategy's backup/precondition and exception failure boundaries, not a new
+universal event contract for all deployment/queue failures. Non-fastdisk or
+failed initial detection retains WARNING with `action=continue_restart`, without
+this failure marker. Lost-ownership `RestartSuperseded` also emits no new failure
+alarm. Other engines and shared lifecycle orchestration do not use this logger.
+
 ## Validation boundary
 
 Policy/entrypoint tests cover legacy helper absence, ACTIVE/PENDING/FAILED/

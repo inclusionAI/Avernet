@@ -96,6 +96,7 @@ def test_detection_failure_or_nonfastdisk_retains_best_effort(detected, caplog):
     assert execute.call_count == 2
     assert 'action=continue_restart' in caplog.text
     assert 'private' not in caplog.text and 'secret detector' not in caplog.text
+    assert 'AICODING_RESTART_FAILED' not in caplog.text
 
 
 def test_confirmed_fastdisk_poll_timeout_blocks():
@@ -153,11 +154,12 @@ async def test_instance_restart_uses_the_same_strict_strategy(engine):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('engine', ['openclaw', 'moltis', 'hermes'])
-async def test_non_coding_instance_never_detects_or_backs_up(engine):
+async def test_non_coding_instance_never_detects_or_backs_up(engine, caplog):
     runtime = Mock()
     await prepare_instance_restart(bot={'bot_id': 'b', 'owner_id': 'o', 'active_engine': engine},
                                    device_id='old', target_runtime=runtime)
     assert not runtime.mock_calls
+    assert 'AICODING_RESTART_FAILED' not in caplog.text
 
 # Actual BotService + durable handler, only external platform I/O is replaced.
 from tests.community.core.bot_management.aicoding.test_restart_service import lifecycle as lifecycle  # noqa: E402
@@ -166,17 +168,18 @@ from tests.community.core.bot_management.aicoding.test_restart_service import li
 @pytest.mark.asyncio
 @pytest.mark.parametrize('provider', ['baas', 'arca'])
 @pytest.mark.parametrize('outcome', ['failed', 'partial_success', 'legacy', 'not_mounted'])
-async def test_durable_failure_uses_existing_ui_fields_without_destroying_old_target(lifecycle, provider, outcome):
+async def test_durable_failure_uses_existing_ui_fields_without_destroying_old_target(lifecycle, provider, outcome, caplog, monkeypatch):
     from agentclaw.community.core.bot_management.engines.aicoding.restart_arca import ArcaRestartTransport
     from agentclaw.community.core.bot_management.engines.aicoding.restart_state import TASK_TYPE, task_key, journal
     from agentclaw.community.core.task_queue.types import Fail
 
+    monkeypatch.setenv('SERVER_ENV', 'pre')
     s = lifecycle
     s.binding.update(device_provider=provider, device_props={'sandbox_id': 'old-sandbox@8'})
     s.service._resolve_restart_target_provider = Mock(return_value=provider)
     s.service.stop_bot = Mock()
     s.service.start_bot = Mock()
-    s.platform.list_devices_by_bot_uuid.return_value = [{'provider_device_id': 'physical', 'status': 'ACTIVE'}]
+    s.platform.list_devices_by_bot_uuid.return_value = [{'provider_device_id': 'ARCA-SANDBOX-old@8', 'status': 'ACTIVE'}]
     s.service._restart_backup_dependencies = RestartBackupDependencies(
         baas_runtime=lambda: s.platform,
         arca_transport=lambda: ArcaRestartTransport(lambda **kw: execute(kw['shell_cmd'])),
@@ -198,6 +201,13 @@ async def test_durable_failure_uses_existing_ui_fields_without_destroying_old_ta
     assert '未执行销毁或替换' in s.repo.bot['ext']['start_message']
     assert journal(s.repo.bot)['phase'] == 'FAILED'
     assert s.repo.bot['ext']['unrelated'] == {'keep': True}
+    failures = [r.getMessage() for r in caplog.records if '[AICODING_RESTART_FAILED]' in r.getMessage()]
+    summary = next(line for line in failures if 'phase=task_failed' in line)
+    arca_id = 'old-sandbox@8' if provider == 'arca' else 'ARCA-SANDBOX-old@8'
+    assert f'bot_id=b arca_id={arca_id} ' in summary
+    assert f"operation_id={task.payload['operation_id']}" in summary
+    assert f'helper_status={outcome}' in summary
+    assert 'env=pre owner_id=o ' in summary
 
 
 def test_redelivery_does_not_downgrade_previous_fastdisk_confirmation():

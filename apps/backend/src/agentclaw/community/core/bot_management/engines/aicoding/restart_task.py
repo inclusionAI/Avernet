@@ -45,6 +45,7 @@ from .restart_state import (
 )
 
 from .restart_backup import RestartBackupBlocked
+from .restart_failure_log import log_restart_failure
 from .restart_baas import find_rejection
 
 logger = get_logger()
@@ -335,13 +336,12 @@ class AicodingRestartHandler:
                 if execution.verify_backup is not None and not isinstance(error, RestartBackupBlocked)
                 else _failure_message(error, fenced=execution.fenced)
             )
-            state.fail(message)
-            logger.error(
-                "coding restart blocked: bot_id=%s operation_id=%s error_type=%s",
-                state.bot_id,
-                state.operation_id,
-                type(error).__name__,
+            log_restart_failure(
+                error, bot_id=state.bot_id, operation_id=state.operation_id, owner_id=state.owner_id,
+                target_id=payload.get("device_id"), sandbox_id=payload.get("sandbox_id"),
+                binding_id=payload.get("binding_id"), phase="task_failed",
             )
+            state.fail(message)
             return Fail(message)
         finally:
             current_restart.reset(context_reset_handle)

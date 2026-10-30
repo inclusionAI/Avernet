@@ -40,14 +40,15 @@ def published(request):
 
     svc._mutate_and_update_ext.side_effect = mutate
     svc._publish_service.update_publish_status_with_ext.side_effect = save
-    baas.list_devices_by_bot_uuid = Mock(return_value=[{'provider_device_id': 'physical', 'status': 'ACTIVE'}])
+    baas.list_devices_by_bot_uuid = Mock(return_value=[{'provider_device_id': 'ARCA-SANDBOX-published@8', 'status': 'ACTIVE'}])
     return svc, ledger, baas, build, record
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('outcome', ['failed', 'partial_success', 'legacy', 'not_mounted'])
 @pytest.mark.parametrize('decision', [OnlineDeployDecision.UPGRADE, OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE])
-async def test_real_fastdisk_veto_persists_failure_and_finishes_task(published, outcome, decision):
+async def test_real_fastdisk_veto_persists_failure_and_finishes_task(published, outcome, decision, caplog, monkeypatch):
+    monkeypatch.setenv('SERVER_ENV', 'pre')
     svc, ledger, baas, build, record = published
     svc._decide_online_deploy = Mock(return_value=decision)
     operation = _operation_id(None, 'restart:1:online')
@@ -76,10 +77,18 @@ async def test_real_fastdisk_veto_persists_failure_and_finishes_task(published, 
         assert op is None
     assert isinstance(await handler._run(1, 'online', 'operator'), Fail)
     assert execute.call_count == 2  # Queue redelivery never re-detects or replaces.
+    summary = next(r.getMessage() for r in caplog.records
+                   if '[AICODING_RESTART_FAILED]' in r.getMessage()
+                   and 'phase=published_restart' in r.getMessage())
+    assert 'bot_id=b arca_id=ARCA-SANDBOX-published@8 ' in summary
+    assert f'operation_id={operation}' in summary
+    assert f'helper_status={outcome}' in summary
+    assert 'publish_id=1' in summary
+    assert 'env=pre owner_id=u1 ' in summary  # Bot owner, not restart operator.
 
 
 @pytest.mark.asyncio
-async def test_veto_status_persistence_failure_is_not_swallowed(published):
+async def test_veto_status_persistence_failure_is_not_swallowed(published, caplog):
     svc, _, baas, build, record = published
     operation = _operation_id(None, 'restart:1:online')
     execute = executor([response('failed', operation_id=operation)])
@@ -89,6 +98,9 @@ async def test_veto_status_persistence_failure_is_not_swallowed(published):
         await svc.execute_restart(1, 'online', 'operator')
     build.upgrade_async.assert_not_called()
     assert record.status == PublishStatus.SUCCESS.value
+    assert '[AICODING_RESTART_FAILED]' in caplog.text
+    assert 'phase=published_restart' in caplog.text
+    assert 'arca_id=ARCA-SANDBOX-published@8 ' in caplog.text
 
 
 @pytest.mark.asyncio
