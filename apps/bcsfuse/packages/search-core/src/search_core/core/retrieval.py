@@ -41,7 +41,13 @@ class HybridRetrievalService:
         candidate_limit: int = 30,
         allow_partial: bool = False,
         execution: dict[str, CallExecutor] | None = None,
+        keyword_enabled: bool = True,
+        vector_enabled: bool = True,
     ):
+        if not keyword_enabled and not vector_enabled:
+            raise ValueError("at least one recall branch must be enabled")
+        self._keyword_enabled = keyword_enabled
+        self._vector_enabled = vector_enabled
         if candidate_limit <= 0:
             raise ValueError("candidate_limit must be positive")
         self._index, self._embedding, self._reranker = index, embedding, reranker
@@ -72,6 +78,8 @@ class HybridRetrievalService:
 
         async def semantic():
             nonlocal query_vector
+            if not self._vector_enabled:
+                return None
             vector = await self._call("embedding", self._embedding.embed, request.query)
             if not vector or any(not math.isfinite(v) for v in vector):
                 raise _StageFailure("embedding_unavailable")
@@ -85,20 +93,32 @@ class HybridRetrievalService:
                 request.allowed_ids,
             )
 
-        results = await asyncio.gather(
-            semantic(),
-            self._call(
+        async def keyword():
+            if not self._keyword_enabled:
+                return None
+            return await self._call(
                 "keyword",
                 self._index.keyword_search,
                 request.query,
                 self._candidate_limit,
                 request.filters,
                 request.allowed_ids,
-            ),
+            )
+
+        results = await asyncio.gather(
+            semantic(),
+            keyword(),
             return_exceptions=True,
         )
         reasons, branches = [], []
+        available = False
         for position, result in enumerate(results):
+            if not (self._vector_enabled, self._keyword_enabled)[position]:
+                reasons.append(
+                    "vector_disabled" if position == 0 else "keyword_disabled"
+                )
+                branches.append(())
+                continue
             if isinstance(result, asyncio.CancelledError):
                 raise result
             if isinstance(result, Exception):
@@ -118,6 +138,7 @@ class HybridRetrievalService:
                 reasons.append(reason)
                 branches.append(())
             else:
+                available = True
                 hits = tuple(result)
                 if request.allowed_ids is not None and any(
                     h.id not in request.allowed_ids for h in hits
@@ -129,7 +150,7 @@ class HybridRetrievalService:
             branches[1],
             query_vector,
             tuple(dict.fromkeys(reasons)),
-            len(reasons) < 2,
+            available,
         )
 
     async def rank(
