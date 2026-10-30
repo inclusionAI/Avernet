@@ -17,7 +17,7 @@ async fn conformance_provider_discovery_includes_disabled_and_legacy_versions() 
         Arc::new(NoopRelationCoreService));
     let registered = core.register_provider_with_slug("Legacy".into(), None,
         ProviderAuthMode::AgentPass, "alice".into(), None, None,
-        Some("contract-legacy".into()), None).await.unwrap();
+        Some("contract-legacy".into()), None, None).await.unwrap();
     let id = &registered.provider.provider_id;
     // Downlink disabled and Provider disabled are independent states. An absent
     // protocol_version in historical config resolves to 1.0 for discovery.
@@ -47,7 +47,7 @@ async fn corrupt_provider_config_is_an_error_at_both_boundaries() {
         Arc::new(NoopRelationCoreService));
     let registered = core.register_provider_with_slug("Corrupt".into(), None,
         ProviderAuthMode::StaticBearer, "alice".into(), None, None,
-        Some("contract-corrupt".into()), None).await.unwrap();
+Some("contract-corrupt".into()), None, None).await.unwrap();
     assert!(store.update_provider_metadata(&registered.provider.provider_id, None,
         Some("not json"), None, 2).await.is_err(), "writes reject invalid policy configuration");
     // Historical corruption is seeded at the raw storage boundary, rather

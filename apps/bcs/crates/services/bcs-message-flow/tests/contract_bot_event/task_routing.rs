@@ -52,6 +52,7 @@ async fn manager_worker_task_dispatch_authorizes_manager_role_not_driver_bot_fie
             target_bot_id: "bot-worker".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+            caller_delegation: None,
         })
         .await
         .expect("manager role should be allowed to dispatch tasks");
@@ -94,6 +95,7 @@ async fn manager_worker_unknown_target_emits_public_group_notice() {
                 "message": "do work",
                 "bcs_session_id": "group-1:abcdef12",
             }),
+            caller_delegation: None,
         })
         .await
         .expect_err("unknown worker must reject task dispatch");
@@ -143,6 +145,7 @@ async fn task_dispatch_rejects_muted_target_without_delivery() {
             target_bot_id: "bot-worker".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+            caller_delegation: None,
         })
         .await
         .expect_err("muted target should not receive task dispatch");
@@ -197,6 +200,7 @@ async fn task_dispatch_rejects_target_muted_in_session_participants() {
                 "message": "do work",
                 "bcs_session_id": "group-1:abcdef12",
             }),
+            caller_delegation: None,
         })
         .await
         .expect_err("session-muted target should not receive task dispatch");
@@ -248,6 +252,7 @@ async fn task_dispatch_uses_legacy_wire_group_id_to_load_session_participants() 
             target_bot_id: "bot-worker".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+            caller_delegation: None,
         })
         .await
         .expect_err("legacy wire group id should resolve session participants");
@@ -413,6 +418,7 @@ async fn task_dispatch_blocking_interceptor_prevents_bot_delivery() {
             target_bot_id: "bot-observer".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+            caller_delegation: None,
         })
         .await;
 

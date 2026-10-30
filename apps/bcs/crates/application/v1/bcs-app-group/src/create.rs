@@ -342,7 +342,7 @@ impl GroupServiceImpl {
                     opening_message_override: None,
                     input: session.input.unwrap_or(Value::Null),
                     caller_id: Some(principal_actor_id),
-                    authenticated_human,
+                    authenticated_human, caller_association: None,
                 })
                 .await
             {

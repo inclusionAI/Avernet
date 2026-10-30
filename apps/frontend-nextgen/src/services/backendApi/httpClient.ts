@@ -1,5 +1,6 @@
 import { readLimitedResponse, ResponseTooLargeError } from './readLimitedResponse';
 import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
+import { useExternalAuthStore } from '@/stores/externalAuthStore';
 import { useIdentityStore } from '@/stores/identityStore';
 import { useLoginRedirectStore } from '@/stores/loginRedirectStore';
 import { useLoginStrategyStore } from '@/stores/loginStrategyStore';
@@ -87,8 +88,8 @@ export function triggerAceLoginRedirect(loginUrl?: string): void {
  * 由 `httpClient` ACE 体探测（oauth 模式分支）/ raw-fetch 旁路 / `useExternalAuthGuard` 主动 401 调用，
  * 副作用（弹 `ExternalLoginPromptModal`）在 Hook/组件层消费 `pendingLogin{mode:'prompt'}`（守分层）。
  */
-export function triggerLoginPrompt(): void {
-  useLoginRedirectStore.getState().requestPrompt();
+export function triggerLoginPrompt(fromEpoch?: number): void {
+  useLoginRedirectStore.getState().requestPrompt(fromEpoch);
 }
 
 /**
@@ -165,6 +166,8 @@ async function executeBackendRequest<T>(url: string, options: BackendRequestOpti
   const finalParams =
     options.injectUserId === false ? options.params : injectUserId(resolvedUrl, options.params, options.data);
   const requestUrl = withQuery(resolvedUrl, finalParams);
+  // 捕获请求发出时的认证代次：响应侧用它识别“晚到的上一代认证请求 401”（见 requestPrompt 防线）。
+  const requestAuthEpoch = useExternalAuthStore.getState().authEpoch;
   const response = await fetch(requestUrl, {
     method: options.method ?? 'GET',
     headers: {
@@ -216,7 +219,11 @@ async function executeBackendRequest<T>(url: string, options: BackendRequestOpti
     // 已在策略内单飞登记弹窗信号 → 静默上抛 AceLoginRedirectError 阻止 stale 渲染,不逐条报错
     // (spec: 会话过期/未登录场景统一导向登录弹窗);已确认未登录后的其余失败也静默,登录前的接口
     // 错误提示是噪音。两者均仍抛错,调用方可感知失败。ace-gateway 维持既有 BackendRequestError 路径。
-    const authDisposition = resolveAuthFailureDisposition({ status: response.status, data: inspectData });
+    const authDisposition = resolveAuthFailureDisposition({
+      status: response.status,
+      data: inspectData,
+      fromEpoch: requestAuthEpoch,
+    });
     if (authDisposition === 'login-prompt-silent') {
       throw new AceLoginRedirectError();
     }
@@ -259,7 +266,7 @@ async function executeBackendRequest<T>(url: string, options: BackendRequestOpti
     // loginStrategy 分支：外部(oauth-provider)→弹窗信号(不携带 ACE pubLogin url，由 /auth/url 取 provider)；
     // 内部(ace-gateway)现状→硬跳转。两者都抛 AceLoginRedirectError 阻止 stale 渲染。
     if (useLoginStrategyStore.getState().loginStrategy === 'oauth-provider') {
-      triggerLoginPrompt();
+      triggerLoginPrompt(requestAuthEpoch);
       // 外部模式不携带 ACE pubLogin url（provider url 由 /auth/url 取）；仍抛错阻止 stale 渲染。
       throw new AceLoginRedirectError();
     }
@@ -269,7 +276,7 @@ async function executeBackendRequest<T>(url: string, options: BackendRequestOpti
 
   // 网关误包形态(HTTP 2xx 但信封 code 落未登录段,如 40100/401000):与 !response.ok 的未登录路径
   // 同处置——登记弹窗信号(单飞)+ 静默上抛,避免误包体被无校验调用方当成功数据渲染或逐条报错。
-  if (resolveAuthFailureDisposition({ data: inspectData }) === 'login-prompt-silent') {
+  if (resolveAuthFailureDisposition({ data: inspectData, fromEpoch: requestAuthEpoch }) === 'login-prompt-silent') {
     throw new AceLoginRedirectError();
   }
 

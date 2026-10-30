@@ -57,6 +57,10 @@ pub struct RegisterProviderCommand {
     pub protocol_version: Option<String>,
     pub coordination: Option<ProviderCoordinationConfig>,
     pub collaboration_scope: Option<crate::ProviderCollaborationScope>,
+    /// Optional caller-capability declaration merged into the new provider's
+    /// config (`$.caller_capabilities`). None = undeclared, wire-backward
+    /// compatible with pre-caller registrations (§10.7.3).
+    pub caller_capabilities: Option<bcs_domain::caller_identity::ProviderCallerCapabilities>,
 }
 
 #[derive(Debug, Clone)]
@@ -79,6 +83,10 @@ pub struct UpdateProviderCommand {
     pub coordination: Option<ProviderCoordinationConfig>,
     pub organization_management: Option<ProviderOrganizationManagementConfig>,
     pub collaboration_scope: Option<crate::ProviderCollaborationScope>,
+    /// Optional caller-capability replacement; None preserves the stored
+    /// declaration. Removal is not expressible — disable via
+    /// `supports_caller: false` (§10.7.3).
+    pub caller_capabilities: Option<bcs_domain::caller_identity::ProviderCallerCapabilities>,
 }
 
 #[derive(Debug, Clone)]
@@ -248,6 +256,33 @@ pub struct ProviderBotTaskModesFilter {
     pub user_visibility: Option<UserVisibility>,
 }
 
+/// Command for the authenticated Provider-scoped caller configuration sync
+/// (spec §10.7.2). Credentials travel separately and are never part of the
+/// command. `snapshot` is the full authoritative-source snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncProviderBotCallerConfigurationCommand {
+    pub provider_id: String,
+    pub bot_id: String,
+    pub env: String,
+    pub snapshot: crate::port::repo::CallerIdentitySnapshot,
+}
+
+impl SyncProviderBotCallerConfigurationCommand {
+    pub fn new(
+        provider_id: impl Into<String>,
+        bot_id: impl Into<String>,
+        env: impl Into<String>,
+        snapshot: crate::port::repo::CallerIdentitySnapshot,
+    ) -> Self {
+        Self {
+            provider_id: provider_id.into(),
+            bot_id: bot_id.into(),
+            env: env.into(),
+            snapshot,
+        }
+    }
+}
+
 #[async_trait]
 pub trait ProviderManagementService: Send + Sync {
     /// Credential-free public discovery. Disabled Providers remain visible.
@@ -320,6 +355,68 @@ pub trait ProviderManagementService: Send + Sync {
         authenticated_staff_id: &str,
         disabled: bool,
     ) -> ServiceResult<ProviderRecord>;
+
+    /// Resolve a Provider's runtime bot reference to its canonical bot id for
+    /// the caller configuration sub-resource. Missing or disabled refs are
+    /// `BotNotFound` (HTTP 404). The default refuses.
+    async fn resolve_provider_bot_uuid_for_caller_config(
+        &self,
+        provider_id: &str,
+        provider_bot_ref: &str,
+        provider_admin_token: &str,
+    ) -> ServiceResult<String> {
+        let _ = (provider_id, provider_bot_ref, provider_admin_token);
+        Err(crate::types::ServiceError::InvalidOperation {
+            message: "resolve_provider_bot_uuid_for_caller_config is not configured".to_string(),
+            request_id: None,
+        })
+    }
+
+    /// Provider caller technical capabilities behind Provider admin auth.
+    /// Default refuses; overriders authenticate before any capability bytes
+    /// flow back.
+    async fn get_provider_caller_capabilities(
+        &self,
+        provider_id: &str,
+        provider_admin_token: &str,
+    ) -> ServiceResult<Option<crate::port::repo::ProviderCallerCapabilities>> {
+        let _ = (provider_id, provider_admin_token);
+        Err(crate::types::ServiceError::InvalidOperation {
+            message: "get_provider_caller_capabilities is not configured".to_string(),
+            request_id: None,
+        })
+    }
+
+    /// Provider-scoped caller configuration read-back behind Provider admin
+    /// auth (spec §10.7.2). Out-of-scope targets are a closed application
+    /// error, never a fabricated unconfigured snapshot.
+    async fn get_provider_bot_caller_configuration(
+        &self,
+        provider_id: &str,
+        bot_id: &str,
+        env: &str,
+        provider_admin_token: &str,
+    ) -> ServiceResult<crate::port::repo::BotCallerConfiguration> {
+        let _ = (provider_id, bot_id, env, provider_admin_token);
+        Err(crate::types::ServiceError::InvalidOperation {
+            message: "get_provider_bot_caller_configuration is not configured".to_string(),
+            request_id: None,
+        })
+    }
+
+    /// Provider-scoped caller configuration sync behind Provider admin auth.
+    /// The default refuses so no silent stub can claim success.
+    async fn sync_provider_bot_caller_configuration(
+        &self,
+        command: SyncProviderBotCallerConfigurationCommand,
+        provider_admin_token: &str,
+    ) -> ServiceResult<crate::port::repo::CallerConfigurationSync> {
+        let _ = (command, provider_admin_token);
+        Err(crate::types::ServiceError::InvalidOperation {
+            message: "sync_provider_bot_caller_configuration is not configured".to_string(),
+            request_id: None,
+        })
+    }
 }
 
 #[async_trait]

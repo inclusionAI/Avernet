@@ -5,6 +5,10 @@ pub mod admission;
 pub mod bot_management;
 pub mod bot_onboarding;
 pub mod bot_query;
+pub mod caller_container;
+pub mod caller_execution;
+pub mod caller_handoff;
+pub mod caller_identity;
 pub mod channel;
 pub mod collaboration_template;
 pub mod collaboration_runtime;
@@ -34,6 +38,10 @@ pub use actor_directory::*;
 pub use bot_management::*;
 pub use bot_onboarding::*;
 pub use bot_query::*;
+pub use caller_container::*;
+pub use caller_execution::*;
+pub use caller_handoff::*;
+pub use caller_identity::*;
 pub use channel::*;
 pub use collaboration_template::*;
 pub use collaboration_runtime::*;
@@ -60,4 +68,3 @@ pub use crate::port::{
 pub use admission::AdmissionService;
 pub use connect::{ConnectResult, ConnectService, ConnectStatus, RequestDirection, RequestsPage};
 
-pub mod caller_execution;

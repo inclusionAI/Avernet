@@ -25,6 +25,7 @@ import {
   useGroupChatProviders,
   type ProviderInfo,
 } from './useGroupChatProviders';
+import { useGroupSpeakingLease, type UseGroupSpeakingLeaseResult } from './useGroupSpeakingLease';
 
 /**
  * 将历史消息转换为 SDK 默认消息格式
@@ -420,7 +421,7 @@ export interface UseGroupChatConfig {
   refetchMessages?: (sessionId: string) => void | Promise<void>;
 }
 
-export interface UseGroupChatResult {
+export interface UseGroupChatResult extends UseGroupSpeakingLeaseResult {
   /** SDK 管理的消息列表 */
   messages: ChatMessage[];
   /** 群聊解析结果（用于追踪多个 Bot 的响应状态） */
@@ -506,6 +507,16 @@ export function useGroupChat(config: UseGroupChatConfig): UseGroupChatResult {
       : undefined;
   const provider = providerInfo?.provider ?? null;
   const isConnected = providerInfo?.isConnected ?? false;
+  const groupSpeakingLease = useGroupSpeakingLease({
+    providerInfo,
+    groupId: group?.id,
+    humanActorId: userId ? `human_${userId}` : undefined,
+  });
+  /**
+   * Workbench connect 快照下的会话发言权语义（服务端权威解析）。
+   * "plain" 会话不渲染发言权面板；消息提交校验仍以服务端逐条判定为准。
+   */
+  const speakingMode = providerInfo?.speakingMode;
 
   // 群聊结果状态
   const [groupResult, setGroupResult] = useState<GroupChatParseResult | null>(
@@ -790,11 +801,27 @@ export function useGroupChat(config: UseGroupChatConfig): UseGroupChatResult {
 
       if (onRequestRef.current) {
         onRequestRef.current(params);
+        if (groupSpeakingLease.speakingLeaseStatus === 'held') {
+          // The admission renewal happens after this fire-and-forget SDK request
+          // begins. Refresh current lease shortly after submission so the UI and
+          // next send use the renewed interval (or observe a preemption refusal).
+          setTimeout(() => {
+            void groupSpeakingLease.refreshSpeakingLease();
+          }, 500);
+        }
       } else {
         console.warn('[useGroupChat] onRequest not ready');
       }
     },
-    [group, provider, userId, activeSessionId, chatResult],
+    [
+      group,
+      provider,
+      userId,
+      activeSessionId,
+      chatResult,
+      groupSpeakingLease.refreshSpeakingLease,
+      groupSpeakingLease.speakingLeaseStatus,
+    ],
   );
 
   const groupChatAabort = useCallback(() => {
@@ -878,6 +905,7 @@ export function useGroupChat(config: UseGroupChatConfig): UseGroupChatResult {
       isRequesting: false,
       provider: null,
       isConnected: false,
+      speakingMode: undefined,
       wsStatus: 'disconnected',
       retryCount: 0,
       sendMessage: () => {
@@ -885,6 +913,7 @@ export function useGroupChat(config: UseGroupChatConfig): UseGroupChatResult {
       },
       abort: groupChatAabort,
       reconnect,
+      ...groupSpeakingLease,
     };
   }
 
@@ -894,10 +923,12 @@ export function useGroupChat(config: UseGroupChatConfig): UseGroupChatResult {
     isRequesting: chatResult.isRequesting,
     provider,
     isConnected,
+    speakingMode,
     wsStatus,
     retryCount,
     sendMessage,
     abort: groupChatAabort,
     reconnect,
+    ...groupSpeakingLease,
   };
 }

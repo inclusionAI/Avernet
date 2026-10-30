@@ -47,6 +47,7 @@ from agentclaw.community.core.caller_identity.guard import (
 )
 from agentclaw.community.core.caller_identity.session_validator import CallerSessionValidator
 from agentclaw.community.core.caller_identity.protocols import (
+    BcsCallerConfigSyncProtocol,
     CallerMcpSyncProtocol,
     CallerRuntimeUpdaterProtocol,
     CallerTokenProviderProtocol,
@@ -82,8 +83,10 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
         cli_scope_reconciler: CliPassportScopeReconciler | None = None,
         collaborator_service: CollaboratorServiceProtocol | None = None,
         session_validator: CallerSessionValidator,
+        bcs_caller_sync: BcsCallerConfigSyncProtocol,
     ) -> None:
         self._session_validator = session_validator
+        self._bcs_caller_sync = bcs_caller_sync
         self._bot_repository = bot_repository
         self._collaborator_repository = collaborator_repository
         self._collaborator_service = collaborator_service
@@ -207,6 +210,13 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
                 lock_epoch=lock_epoch,
             )
             raise CallerMcpSyncError
+
+        self._bcs_caller_sync.sync_caller_config(
+            bot_id=bot_id,
+            owner_id=str(bot["owner_id"]),
+            enabled=mutation.bot_call_type is McpCallType.CALLER,
+            source_revision=mutation.revision,
+        )
 
         logger.info(
             "caller_mcp_call_type_updated bot_id=%s server_code=%s call_type=%s "
@@ -374,6 +384,12 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
                 int((time.monotonic() - started) * 1000),
             )
             raise CallerCliSyncError from exc
+        self._bcs_caller_sync.sync_caller_config(
+            bot_id=bot_id,
+            owner_id=str(bot["owner_id"]),
+            enabled=mutation.bot_call_type is McpCallType.CALLER,
+            source_revision=mutation.caller_config_revision,
+        )
         logger.info(
             "cli_call_type_update_succeeded bot_id=%s cli_code=%s actor_id=%s "
             "call_type=%s bot_call_type=%s lock_epoch_supplied=%s duration_ms=%s",

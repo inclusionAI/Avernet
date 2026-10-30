@@ -86,7 +86,7 @@ pub(super) async fn maybe_handle_coordination_echo(
         }
         let mut resolved = call.clone();
         resolved.arguments = lease.arguments;
-        let dispatched = dispatch_coordination_call(flow, cmd, &resolved).await;
+        let dispatched = dispatch_coordination_call(flow, cmd, &resolved, Some(&tool_call_id)).await;
         let result = match &dispatched {
             Ok(Some(outcome)) => CoordinationResult { status: CoordinationStatus::Applied,
                 task_id: outcome.task_id.clone(), error_code: None },
@@ -116,13 +116,15 @@ pub(super) async fn maybe_handle_coordination_echo(
         return Ok(None);
     }
 
-    dispatch_coordination_call(flow, cmd, &call).await
+    dispatch_coordination_call(flow, cmd, &call, Some(&tool_call_id)).await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn dispatch_coordination_call(
     flow: &BcsMessageFlow,
     cmd: &BotEventCommand,
     call: &CoordinationCall,
+    tool_call_id: Option<&str>,
 ) -> ServiceResult<Option<CoordinationEchoDispatch>> {
     match call.tool.as_str() {
         TOOL_ASSIGN_TASK => {
@@ -152,6 +154,12 @@ pub(super) async fn dispatch_coordination_call(
             if let Some(session_id) = cmd.bcs_session_id.as_deref() {
                 payload["bcs_session_id"] = Value::String(session_id.to_string());
             }
+            // Identity inheritance consults the existing execution facts. No
+            // child registration follows admission: the delivery projection
+            // persists the non-secret parent/invocation association atomically.
+            let delegation = crate::caller_delegation::prepare_assignment(
+                flow, cmd, tool_call_id.unwrap_or_default(), target_bot_id,
+            ).await?;
             match crate::task_flow::handle_task_dispatch(
                 flow,
                 TaskDispatchCommand {
@@ -160,15 +168,18 @@ pub(super) async fn dispatch_coordination_call(
                     target_bot_id: target_bot_id.to_string(),
                     target_bot_name: None,
                     payload,
+                    caller_delegation: delegation.clone(),
                 },
             )
             .await
             {
-                Ok(outcome) => Ok(Some(CoordinationEchoDispatch {
-                    task_id: Some(outcome.task_id),
-                    bot_deliveries: outcome.bot_deliveries,
-                    frontend_deliveries: outcome.frontend_deliveries,
-                })),
+                Ok(outcome) => {
+                    Ok(Some(CoordinationEchoDispatch {
+                        task_id: Some(outcome.task_id),
+                        bot_deliveries: outcome.bot_deliveries,
+                        frontend_deliveries: outcome.frontend_deliveries,
+                    }))
+                }
                 Err(error) => {
                     warn!(
                         bot_id = %cmd.bot_id,

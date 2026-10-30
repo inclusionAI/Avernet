@@ -64,6 +64,14 @@ pub enum ServiceError {
         existing_provider_bot_ref: String,
     },
 
+    /// Registration committed but a post-commit initialization failed
+    /// (P1.3): the Bot/binding stay durable, nothing is auto-retried,
+    /// deleted or credential-replayed by BCS; the caller reconciles via
+    /// the authenticated management queries and may resubmit the same
+    /// command. Disabling the caller configuration can never unblock an
+    /// incomplete registration.
+    #[error("registration committed; caller reconciliation required")]
+    RegistrationReconciliationRequired,
     /// Request conflicts with an existing immutable or concurrently updated resource.
     #[error("Conflict: {0}")]
     Conflict(String),
@@ -221,7 +229,8 @@ impl ServiceError {
             Self::CannotAddSelf
             | Self::CannotAcceptRejected
             | Self::CannotRejectAccepted
-            | Self::PrivateBotCannotCollaborate => serde_json::Value::Null,
+            | Self::PrivateBotCannotCollaborate
+            | Self::RegistrationReconciliationRequired => serde_json::Value::Null,
         }
     }
 }

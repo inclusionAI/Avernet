@@ -30,6 +30,20 @@ class CallerMcpSyncProtocol(Protocol):
 
 
 @runtime_checkable
+class BcsCallerConfigSyncProtocol(Protocol):
+    """Push the Bot caller-config snapshot to the BCS authoritative sink."""
+
+    def sync_caller_config(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        enabled: bool,
+        source_revision: int,
+    ) -> None: ...
+
+
+@runtime_checkable
 class CallerTokenProviderProtocol(Protocol):
     """Issue an opaque Caller execution credential."""
 
@@ -116,6 +130,7 @@ class CallerIdentityTokenExchangeProtocol(Protocol):
 
 __all__ = [
     "CallerMcpSyncProtocol",
+    "BcsCallerConfigSyncProtocol",
     "CallerIdentityTokenExchangeProtocol",
     "CallerRuntimeUpdaterProtocol",
     "CallerTokenProviderProtocol",

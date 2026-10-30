@@ -10,6 +10,7 @@ version = { workspace = true }
 [dependencies]
 async-trait = { workspace = true }
 bcs-config = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
 bcs-db-api = { workspace = true }
 bcs-domain = { workspace = true }
 bcs-event-store = { workspace = true }

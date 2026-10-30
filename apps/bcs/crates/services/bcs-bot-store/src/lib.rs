@@ -21,7 +21,14 @@ use std::sync::Arc;
 use bcs_db_api::{DbPlugin, DbSqlFlavor, DbStatement};
 use bcs_db_api::DbValue as Value;
 use bcs_service_api::{
-    BindingChannels, BotCapabilities, RegisteredBot, ServiceError, ServiceResult, Skill,
+    BindingChannels, BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
+    BotSearchCandidateQuery, BotSearchFriendshipFilter,
+    BotCapabilities, BotControlPlaneDescriptor, BotControlPlaneOwnedQuery, BotControlPlanePatch,
+    BotControlPlaneRecord, BotControlPlaneRepoPort, BotTaskModesQuery, TaskModeMatch,
+    BotCallerConfiguration, CallerConfigRevisionDecision, CallerConfigurationSync,
+    CallerIdentitySnapshot, BotMetricCount,
+    BotMetricsSnapshotPort, ConnectStreamError, RegisteredBot, ServiceError, ServiceResult, Skill,
+    is_mock_token,
 };
 
 #[cfg(test)]
@@ -36,6 +43,7 @@ pub mod memory;
 pub mod persistent_repo;
 pub mod provider;
 pub mod provider_cache;
+mod caller_config_cache;
 
 #[cfg(test)]
 #[path = "../tests/unit/heartbeat.rs"]
@@ -75,6 +83,12 @@ pub mod memory_authority {
 }
 pub use persistent_repo::PersistentBotRepo;
 pub use provider::{DbProviderStore, MemoryProviderStore};
+
+/// [hits, negative_hits, misses, errors, invalidations, loads] of the
+/// caller-config read cache (§15.96), for diagnostics/metrics taps.
+pub fn caller_config_cache_statistics() -> [u64; 6] {
+    caller_config_cache::statistics()
+}
 
 /// Maximum time before a bot registration expires (5 minutes).
 const BOT_EXPIRY: Duration = Duration::from_secs(300);
@@ -246,7 +260,6 @@ impl RegisteredBotInner {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {

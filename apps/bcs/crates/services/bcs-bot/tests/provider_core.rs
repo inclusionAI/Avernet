@@ -1120,6 +1120,7 @@ async fn plugin_register_then_connect_promotes_mock_to_real_and_routes_websocket
                 provider_bot_ref: bot_ref.to_string(),
                 bot_uuid: Some(bot_ref.to_string()),
                 connection_mode: ProviderBotConnectionMode::Plugin,
+                initial_caller: None,
                 ..Default::default()
             },
         )
@@ -1190,6 +1191,7 @@ async fn plugin_register_over_existing_real_bot_preserves_token_no_binding() {
                 provider_bot_ref: bot_ref.to_string(),
                 bot_uuid: Some(bot_ref.to_string()),
                 connection_mode: ProviderBotConnectionMode::Plugin,
+                initial_caller: None,
                 ..Default::default()
             },
         )
@@ -1232,6 +1234,7 @@ async fn plugin_register_idempotent_keeps_same_bot_uuid_and_token() {
         provider_bot_ref: bot_ref.to_string(),
         bot_uuid: Some(bot_ref.to_string()),
         connection_mode: ProviderBotConnectionMode::Plugin,
+        initial_caller: None,
         ..Default::default()
     };
     let (first, _) = ctx

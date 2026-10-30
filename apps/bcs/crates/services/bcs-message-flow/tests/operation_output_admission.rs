@@ -378,6 +378,7 @@ async fn managed_run_runnable_before_caller_resumes_keeps_operation_identity() {
         .expect("one managed send row");
     let started = managed
         .transition(DeliveryTransitionCommand {
+            caller_dispatch_commit: None, caller_cancel: None, caller_terminal: None,
             delivery_id: row.delivery_id.clone(),
             expected_state_version: row.state.state_version,
             event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::StartSend,
@@ -658,6 +659,7 @@ async fn mixed_managed_and_direct_targets_share_one_operation_stream_set() {
     // managed row must be running before its callback is legal.
     managed
         .transition(DeliveryTransitionCommand {
+            caller_dispatch_commit: None, caller_cancel: None, caller_terminal: None,
             delivery_id: managed_row.delivery_id.clone(),
             expected_state_version: managed_row.state.state_version,
             event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::StartSend,

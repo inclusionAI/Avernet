@@ -1464,6 +1464,8 @@ fn delivery_error_code_label(error_code: DeliveryErrorCode) -> &'static str {
 fn service_error_code(error: &ServiceError) -> DeliveryErrorCode {
     match error {
         ServiceError::DeliveryNotSent { .. } => DeliveryErrorCode::InvalidOperation,
+        // A closed client-actionable outcome: reconcile and resubmit.
+        ServiceError::RegistrationReconciliationRequired => DeliveryErrorCode::InvalidOperation,
         ServiceError::BotNotFound(_)
         | ServiceError::GroupNotFound(_)
         | ServiceError::ParticipantNotFound(_)

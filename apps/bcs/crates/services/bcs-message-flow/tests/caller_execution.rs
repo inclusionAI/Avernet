@@ -9,6 +9,8 @@ use serde_json::json;
 
 fn command(id: &str, name: &str, value: &str) -> WebSendCommand {
     WebSendCommand {
+        caller_ingress: None,
+        speaking_lease: None,
         caller_execution: None,
         caller: CallerContext::Human(HumanActor { actor_id: "human_1".into(), staff_no: "1".into() }),
         group_id: "group-1".into(), session_id: Some("group-1:headers".into()), from_actor_id: "human_1".into(),

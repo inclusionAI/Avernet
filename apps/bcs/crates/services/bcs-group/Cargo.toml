@@ -32,6 +32,8 @@ serde_json = { workspace = true }
 # Workspace crates
 bcs-service-api = { workspace = true }
 bcs-group-store = { workspace = true }
+bcs-domain      = { workspace = true }
+bcs-config      = { workspace = true }
 
 [dev-dependencies]
 bcs-bot-store = { workspace = true }

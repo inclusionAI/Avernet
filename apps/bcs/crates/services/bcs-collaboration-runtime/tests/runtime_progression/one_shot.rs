@@ -118,6 +118,7 @@ async fn one_shot_session_run_uses_transient_bindings_keeps_chat_open_and_publis
             opening_message: Some(OpeningMessage::Text("Invalid {{bcs.unknown}}".to_string())),
             input: Value::Null,
             judge_available: false,
+            caller_association: None,
         })
         .await
         .expect_err("invalid one-shot opening message must be rejected");
@@ -150,6 +151,7 @@ async fn one_shot_session_run_uses_transient_bindings_keeps_chat_open_and_publis
             opening_message: None,
             input: json!({"question": "resolve this"}),
             judge_available: false,
+            caller_association: None,
         })
         .await
         .expect("start one-shot run");
@@ -291,7 +293,7 @@ async fn one_shot_session_run_uses_transient_bindings_keeps_chat_open_and_publis
         .rerun_state_machine_run(RerunStateMachineCommand {
             source_run_id: started.view.run.run_id.clone(),
             authenticated_human: None,
-        })
+                    })
         .await
         .expect_err("completed one-shot run must not be rerunnable");
     assert!(matches!(
@@ -353,6 +355,7 @@ async fn manager_worker_one_shot_human_input_consumes_the_assigned_human_chat_re
             opening_message: None,
             input: Value::Null,
             judge_available: false,
+            caller_association: None,
         })
         .await
         .expect("start one-shot HumanInput run");
@@ -368,6 +371,7 @@ async fn manager_worker_one_shot_human_input_consumes_the_assigned_human_chat_re
             caller_actor_id: "human_1001".to_string(),
             content: "确认".to_string(),
             source: HumanResponseSource::Http,
+            caller_ingress: None,
         })
         .await
         .expect("route manager-worker chat reply to one-shot HumanInput");

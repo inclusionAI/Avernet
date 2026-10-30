@@ -135,7 +135,8 @@ pub(super) fn build_use_case_bundle(
         .with_participant_view_bindings(participant_view_bindings)
         .with_bot_runtime(bot_use_cases.clone())
         .with_bot_authority(bot_authority_hook.clone())
-        .with_session_authorization(session_authorization),
+        .with_session_authorization(session_authorization)
+        .with_caller_config_plane(provider_control_plane.clone()),
     );
     let group_management_v1: Arc<dyn bcs_service_api::GroupManagementService> =
         Arc::new((*group_management).clone().for_v1_openapi());

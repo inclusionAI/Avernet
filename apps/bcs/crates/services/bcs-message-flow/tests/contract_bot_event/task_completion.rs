@@ -77,6 +77,7 @@ async fn ws_task_complete_blocked_returns_err_when_pending() {
         target_bot_id: "bot-observer".to_string(),
         target_bot_name: None,
         payload: json!({"message": "do work"}),
+            caller_delegation: None,
     })
     .await
     .unwrap();
@@ -132,6 +133,7 @@ async fn echo_task_complete_blocked_returns_ok_guarded_when_pending() {
         target_bot_id: "bot-observer".to_string(),
         target_bot_name: None,
         payload: json!({"message": "do work"}),
+        caller_delegation: None,
     })
     .await
     .unwrap();
@@ -184,6 +186,7 @@ async fn task_complete_allowed_when_no_pending() {
             target_bot_id: "bot-observer".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+            caller_delegation: None,
         })
         .await
         .unwrap();
@@ -301,6 +304,7 @@ async fn task_complete_pending_in_other_session_does_not_block() {
             "bcs_session_id": "group-1:pending",
             "message": "do work"
         }),
+        caller_delegation: None,
     })
     .await
     .unwrap();

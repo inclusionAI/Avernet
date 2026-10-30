@@ -34,6 +34,7 @@ pub mod permission_request;
 pub mod provider;
 pub mod relation;
 pub mod session;
+pub mod session_speaking_lease;
 pub mod session_registry;
 pub mod session_file;
 pub mod user_identity;
@@ -79,12 +80,14 @@ pub use organization::{
     UpsertOrganizationMemberRecord,
 };
 pub use provider::{
-    ProviderBotBindingRepoPort, ProviderBotDiscoveryRecord, ProviderBotDiscoverySelector,
-    ProviderCredentialRepoPort, ProviderRepoPort,
+    CallerTokenVisibility, ProviderBotBindingRepoPort, ProviderBotDiscoveryRecord,
+    ProviderBotDiscoverySelector, ProviderCallerCapabilities, ProviderCredentialRepoPort,
+    ProviderRepoPort,
 };
 pub use relation::RelationRepoPort;
 pub use permission_profile::PermissionProfileRepoPort;
 pub use permission_request::PermissionRequestRepoPort;
+pub use session_speaking_lease::*;
 pub use session::{
     AddSessionParticipantWithEvent, CompleteSessionWithEvent, CreateSessionWithEvent, NewSessionParams,
     RemoveSessionParticipantWithEvent, SessionRepoPort,

@@ -11,6 +11,7 @@ from agentclaw.community.core.caller_identity.protocols import (
 from agentclaw.community.core.caller_identity.credential import CallerToken
 from agentclaw.community.core.caller_identity.contracts import (
     CALLER_IDENTITY_CAPABILITY,
+    CallerBcsSyncError,
     CallerCallTypeInvalidError,
     CallerCliNotFoundError,
     CallerCliSyncError,
@@ -129,6 +130,7 @@ class CallerIdentityServiceProtocol(Protocol):
 
 __all__ = [
     "CALLER_IDENTITY_CAPABILITY",
+    "CallerBcsSyncError",
     "CallerCallTypeInvalidError",
     "CallerCliNotFoundError",
     "CallerCliSyncError",

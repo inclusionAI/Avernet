@@ -317,6 +317,52 @@ describe('groupChatProvider', () => {
     );
   });
 
+  it('发言权持有者按认证 Human 匹配，不沿用 Bot 查看身份', async () => {
+    sc.createSessionToken.mockResolvedValue({
+      code: 20000,
+      message: '',
+      request_id: 'r',
+      data: { token: 'tk', expires_at: 999 },
+    });
+    const provider = createGroupChatProvider({
+      sessionId: 's-lease',
+      groupId: 'g1',
+      identityId: 'bot_17739dc0',
+      authenticatedUserId: '900001',
+      createSdkProvider: fakeSdkProvider as unknown as Parameters<
+        typeof createGroupChatProvider
+      >[0]['createSdkProvider'],
+      wsOrigin: 'wss://x.test',
+    });
+    const snapshots: Array<{ status?: string; lease?: { leaseId: string } }> = [];
+    const unsubscribe = provider.subscribeToSpeakingLease((snapshot) => snapshots.push(snapshot));
+    await provider.connect();
+
+    const refreshPromise = provider.refreshSpeakingLease();
+    await Promise.resolve().then(() => {});
+    const request = lastOriginalSend.mock.calls.at(-1)?.[0] as { id?: string } | undefined;
+    const inner = (provider as unknown as { inner: { transport: { onMessage: (frame: unknown) => void } } }).inner;
+    inner.transport.onMessage({
+      type: 'res',
+      id: request?.id,
+      payload: {
+        status: 'held',
+        leaseId: 'lease-1',
+        epoch: 2,
+        expiresAt_ms: Date.now() + 60_000,
+        holderActorId: 'human_900001',
+      },
+    });
+    await refreshPromise;
+
+    expect(snapshots.at(-1)?.status).toBe('held');
+    expect(snapshots.at(-1)?.lease?.leaseId).toBe('lease-1');
+    unsubscribe();
+    // 收敛：断开连接停掉租约轮询/到期定时器，避免用例结束后定时器驱动迟到的
+    // 超时与日志（jest --runInBand 全绿但 exit 1 的根因）。
+    await provider.disconnect();
+  });
+
   it('断开后重连会重新获取 token、创建新的 SDK provider 并断开旧 provider', async () => {
     sc.createSessionToken
       .mockResolvedValueOnce({
@@ -842,4 +888,150 @@ test('exec approval is handled outside SDK and uses the active transport for res
   expect(pending).toEqual([]);
   inner.transport.onMessage(event);
   expect(pending).toEqual([]);
+});
+
+test('connect 应答读 speaking_mode 更新发言权快照，且 connect 应答透传给 SDK', async () => {
+  sc.createSessionToken.mockResolvedValue({ code: 20000, message: '', request_id: 'r',
+    data: { token: 'tk', expires_at: 999 } });
+  const provider = createGroupChatProvider({ sessionId: 's1', groupId: 'g1', identityId: 'me',
+    createSdkProvider: fakeSdkProvider as unknown as Parameters<typeof createGroupChatProvider>[0]['createSdkProvider'],
+    wsOrigin: 'wss://x.test' });
+  const snapshots: Array<{ speakingMode?: string }> = [];
+  provider.subscribeToSpeakingLease((snapshot) => snapshots.push(snapshot));
+  expect(snapshots[0].speakingMode).toBeUndefined();
+  await provider.connect();
+  const inner = (provider as unknown as {
+    inner: { transport: { send: jest.Mock; onMessage?: (msg: unknown) => void }; originalOnMessage: jest.Mock };
+  }).inner;
+
+  await inner.transport.send({ type: 'req', id: 'connect-9', method: 'connect', params: { group_id: 'g1' } });
+  inner.transport.onMessage?.({
+    type: 'res',
+    id: 'connect-9',
+    ok: true,
+    payload: { speaking_mode: 'lease_required' },
+  });
+
+  expect(snapshots.at(-1)!.speakingMode).toBe('lease_required');
+  // connect 应答不吞帧：SDK 依赖它标记连接就绪
+  expect(inner.originalOnMessage).toHaveBeenCalledWith(
+    expect.objectContaining({ type: 'res', id: 'connect-9' }),
+  );
+});
+
+test('chat.send 在持有有效租约时注入 leaseId/leaseEpoch，无租约不注入', async () => {
+  sc.createSessionToken.mockResolvedValue({ code: 20000, message: '', request_id: 'r',
+    data: { token: 'tk', expires_at: 999 } });
+  const provider = createGroupChatProvider({ sessionId: 's1', groupId: 'g1', identityId: 'me',
+    createSdkProvider: fakeSdkProvider as unknown as Parameters<typeof createGroupChatProvider>[0]['createSdkProvider'],
+    wsOrigin: 'wss://x.test' });
+  await provider.connect();
+  const inner = (provider as unknown as {
+    inner: { transport: { send: jest.Mock; onMessage?: (msg: unknown) => void } };
+  }).inner;
+
+  // 无租约：不允许出现 lease 字段
+  await inner.transport.send({ type: 'req', id: 'send-0', method: 'chat.send', params: { message: 'hi' } });
+  let lastCall = lastOriginalSend.mock.calls.at(-1);
+  expect(lastCall[0].params.leaseId).toBeUndefined();
+  expect(lastCall[0].params.leaseEpoch).toBeUndefined();
+
+  // 经包装层取权（服务端 holderActorId = human_me 与 identityId 对齐）
+  lastOriginalSend.mockImplementation(async (frame: Record<string, unknown>) => {
+    if (frame.method === 'lease.acquire') {
+      inner.transport.onMessage?.({
+        type: 'res',
+        id: frame.id as string,
+        ok: true,
+        payload: {
+          status: 'granted',
+          leaseId: 'lease-7',
+          epoch: 3,
+          expiresAt_ms: Date.now() + 60_000,
+          holderActorId: 'human_me',
+        },
+      });
+    }
+  });
+  await expect(provider.acquireSpeakingLease()).resolves.toBe(true);
+
+  // 持有有效租约：chat.send 注入服务端授予的 leaseId/epoch
+  await inner.transport.send({ type: 'req', id: 'send-1', method: 'chat.send', params: { message: 'hi again' } });
+  lastCall = lastOriginalSend.mock.calls.at(-1);
+  expect(lastCall[0].params.leaseId).toBe('lease-7');
+  expect(lastCall[0].params.leaseEpoch).toBe(3);
+  // 收敛：断开连接停掉租约轮询/到期定时器并立结在途请求，避免用例结束后定时器继续驱动。
+  await provider.disconnect();
+});
+
+test('chat.send 服务端拒绝按请求 id 匹配后广播给订阅者', async () => {
+  sc.createSessionToken.mockResolvedValue({ code: 20000, message: '', request_id: 'r',
+    data: { token: 'tk', expires_at: 999 } });
+  const provider = createGroupChatProvider({ sessionId: 's1', groupId: 'g1', identityId: 'me',
+    createSdkProvider: fakeSdkProvider as unknown as Parameters<typeof createGroupChatProvider>[0]['createSdkProvider'],
+    wsOrigin: 'wss://x.test' });
+  await provider.connect();
+  const inner = (provider as unknown as {
+    inner: { transport: { send: jest.Mock; onMessage?: (msg: unknown) => void } };
+  }).inner;
+  const errors: Array<{ code: string; message: string }> = [];
+  const unsubscribe = provider.subscribeToChatSendErrors((error) => errors.push(error));
+
+  // 在途 chat.send:其失败应答（BCS 回显请求 id）必须广播
+  await inner.transport.send({ type: 'req', id: 'send-rej-1', method: 'chat.send', params: { message: 'hi' } });
+  inner.transport.onMessage?.({
+    type: 'res',
+    id: 'send-rej-1',
+    ok: false,
+    error: { code: 'dispatch_error', message: 'Invalid operation on request unknown: speaking lease required' },
+  });
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toEqual({
+    code: 'dispatch_error',
+    message: 'Invalid operation on request unknown: speaking lease required',
+  });
+
+  // 其它请求的失败应答不属于 chat.send：不误报
+  await inner.transport.send({ type: 'req', id: 'send-rej-2', method: 'chat.send', params: { message: 'hi again' } });
+  inner.transport.onMessage?.({ type: 'res', id: 'not-a-chat-send', ok: false, error: { code: 'x' } });
+  expect(errors).toHaveLength(1);
+
+  unsubscribe();
+  await provider.disconnect();
+});
+
+test('chat.send 已知拒绝话术的失败应答在 id 未被追踪时仍广播（兜底）', async () => {
+  sc.createSessionToken.mockResolvedValue({ code: 20000, message: '', request_id: 'r',
+    data: { token: 'tk', expires_at: 999 } });
+  const provider = createGroupChatProvider({ sessionId: 's1', groupId: 'g1', identityId: 'me',
+    createSdkProvider: fakeSdkProvider as unknown as Parameters<typeof createGroupChatProvider>[0]['createSdkProvider'],
+    wsOrigin: 'wss://x.test' });
+  await provider.connect();
+  const inner = (provider as unknown as {
+    inner: { transport: { send: jest.Mock; onMessage?: (msg: unknown) => void } };
+  }).inner;
+  const errors: Array<{ code: string; message: string }> = [];
+  const unsubscribe = provider.subscribeToChatSendErrors((error) => errors.push(error));
+
+  // 未经过发送补丁登记的应答 id，但话术是已知提交侧拒绝：兜底广播。
+  inner.transport.onMessage?.({
+    type: 'res',
+    id: 'untracked-1',
+    ok: false,
+    error: { code: 'dispatch_error', message: 'Invalid operation on request unknown: speaking lease required' },
+  });
+  expect(errors).toHaveLength(1);
+  expect(errors[0].code).toBe('dispatch_error');
+
+  // 未知话术且 id 未被追踪：不误报。
+  inner.transport.onMessage?.({
+    type: 'res',
+    id: 'untracked-2',
+    ok: false,
+    error: { code: 'x', message: 'some unrelated failure' },
+  });
+  expect(errors).toHaveLength(1);
+
+  unsubscribe();
+  await provider.disconnect();
 });

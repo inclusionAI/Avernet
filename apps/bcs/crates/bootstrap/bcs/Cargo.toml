@@ -23,6 +23,7 @@ prometheus-metrics = ["dep:metrics", "dep:metrics-exporter-prometheus"]
 test-utils = []
 
 [dependencies]
+bcs-caller-identity-api = { workspace = true }
 bcs-observability = { workspace = true }
 # Async runtime
 tokio = { workspace = true }
@@ -82,6 +83,7 @@ chrono = { workspace = true }
 # Crypto for Alibaba Cloud signing
 sha2 = { workspace = true }
 hex = { workspace = true }
+bcs-caller-identity-jwt = { workspace = true }
 
 # Directories (for config file discovery)
 dirs = { workspace = true }

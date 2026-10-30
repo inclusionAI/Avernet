@@ -8,7 +8,7 @@ pub mod output_admission;
 
 pub const FRONTEND_WS_ENDPOINT: &str = "/ws";
 
-pub use auth::WorkbenchConnectionAuth;
+pub use auth::{CallerIngressSkipReason, WorkbenchConnectionAuth, ws_upgrade_caller_ingress};
 pub use connection_registry::WorkbenchConnectionRegistry;
 pub use dispatcher::{
     WebClientConnectionState, WebConnectionPhase, WebDispatchOutcome, WebDispatchState,

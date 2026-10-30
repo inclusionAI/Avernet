@@ -39,6 +39,7 @@ async fn manager_worker_task_dispatch_persists_dispatch_to_worker_history_after_
                 "message": "do work",
                 "bcs_session_id": "group-1:abcdef12",
             }),
+            caller_delegation: None,
         })
         .await
         .expect("task.dispatch should deliver to worker");
@@ -72,6 +73,7 @@ async fn manager_worker_task_dispatch_records_context_before_history_persistence
                 "message": "do work",
                 "bcs_session_id": "group-1:abcdef12",
             }),
+            caller_delegation: None,
         })
         .await
     });
@@ -116,6 +118,7 @@ async fn manager_worker_rejected_task_dispatch_persists_error_and_sends_result()
             target_bot_id: "bot-worker".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+            caller_delegation: None,
         })
         .await
         .expect_err("not-delivered task.dispatch should fail");
@@ -144,6 +147,7 @@ async fn manager_worker_task_dispatch_does_not_persist_when_delivery_errors() {
             target_bot_id: "bot-worker".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+            caller_delegation: None,
         })
         .await
         .expect_err("delivery error should fail task.dispatch");
@@ -177,6 +181,7 @@ async fn non_manager_worker_task_dispatch_does_not_persist_owner_tagged_dispatch
         target_bot_id: "bot-observer".to_string(),
         target_bot_name: None,
         payload: json!({"message": "do work"}),
+        caller_delegation: None,
     })
     .await
     .expect("legacy master_slave dispatch should remain deliverable");
@@ -367,6 +372,7 @@ async fn task_run_error_terminal_flushes_buffered_chat_segment() {
             target_bot_id: "bot-observer".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+            caller_delegation: None,
         })
         .await
         .unwrap();
@@ -446,6 +452,7 @@ async fn task_run_final_terminal_flushes_buffered_chat_segment() {
             target_bot_id: "bot-observer".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+            caller_delegation: None,
         })
         .await
         .unwrap();
@@ -536,6 +543,7 @@ async fn duplicate_task_final_does_not_append_second_history_row() {
             target_bot_id: "bot-observer".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+            caller_delegation: None,
         })
         .await
         .unwrap();
@@ -592,6 +600,7 @@ async fn task_final_from_non_target_bot_does_not_append_history() {
             target_bot_id: "bot-observer".to_string(),
             target_bot_name: None,
             payload: json!({"message": "do work"}),
+            caller_delegation: None,
         })
         .await
         .unwrap();

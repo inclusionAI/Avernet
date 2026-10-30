@@ -122,6 +122,7 @@ async fn one_shot_result_publication_failure_marks_run_failed_and_allows_rerun()
             opening_message: Some(opening_message.clone()),
             input: json!({"question": "resolve this"}),
             judge_available: false,
+            caller_association: None,
         })
         .await
         .expect("start one-shot run");

@@ -22,10 +22,10 @@ import type { GroupChatPaneProps } from './GroupChatPane.types';
 import { GroupChatPlaceholder } from './GroupChatPlaceholder';
 import { GroupExecApprovalPanel } from './GroupExecApprovalPanel';
 import { GroupQuestionPanel } from './GroupQuestionPanel';
+import { SpeakingLeaseStrip } from './SpeakingLeaseControl';
 import { buildGroupMentionConfig, isHumanOnlyMention } from './mentionHelpers';
-import { resolveSender } from './messageHelpers';
 import { useGroupChatPaneActions } from './useGroupChatPaneActions';
-export { resolveSender };
+export { resolveSender } from './messageHelpers';
 export function GroupChatPane(props: GroupChatPaneProps) {
   const {
     group,
@@ -39,7 +39,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     updateMemberScope,
     chat,
     questions,
-    execApprovals,
+    execApprovals, speakingLease,
     supportState,
     connectionStatus,
     historyOnly = false,
@@ -249,16 +249,15 @@ export function GroupChatPane(props: GroupChatPaneProps) {
                 switchingViewScope={collabPanel.switchingViewScope}
                 onViewScopeChange={(scope) => void collabPanel.setViewScope(scope)}
                 onLeave={() => collabPanel.leaveSession()}
-                onReconnect={() => {
-                  void reconnect();
-                }}
+                onReconnect={() => { void reconnect(); }}
               />
             ) : null}
+            <SpeakingLeaseStrip model={speakingLease} />
             <GroupChatComposer
               session={session}
               connectionStatus={connectionStatus}
               mentionConfig={mentionConfig}
-              onSend={handleGroupSend}
+              onSend={speakingLease?.composeSender(handleGroupSend) ?? handleGroupSend}
               draft={draft}
               onDraftChange={setDraft}
               inputRef={inputRef}

@@ -336,7 +336,7 @@ from agentclaw.community.core.caller_identity.contracts import (  # noqa: E402
     CallerIdentityPermissionError,
     CallerIdentityReadOnlyError,
     CallerLockEpochError,
-    CallerMcpNotFoundError, CallerMcpSyncError,
+    CallerMcpNotFoundError, CallerMcpSyncError, CallerBcsSyncError,
 )
 from agentclaw.community.adapters.http.acli_cli_status import ACLI_CLI_ERROR_STATUS  # noqa: E402
 from agentclaw.community.core.skill_center.errors import (  # noqa: E402
@@ -367,7 +367,7 @@ _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     CallerIdentityReadOnlyError: 409,
     CallerLockEpochError: 409,
     CallerMcpNotFoundError: 404,
-    CallerMcpSyncError: 500,
+    CallerMcpSyncError: 500, CallerBcsSyncError: 500,
     CallerCliNotFoundError: 404,
     CallerCliSyncError: 500,
     CallerCallTypeInvalidError: 500,

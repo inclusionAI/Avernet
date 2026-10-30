@@ -131,7 +131,7 @@ impl BcsChannelService {
                 authenticated_human: Some(AuthenticatedHumanCaller {
                     actor_id: actor_id.to_string(),
                     display_name: msg.im_user_nick.clone(),
-                }),
+                }), caller_association: None,
             })
             .await;
         if let Err(error) = start_result {

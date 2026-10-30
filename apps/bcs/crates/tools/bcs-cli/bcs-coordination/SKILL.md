@@ -58,6 +58,22 @@ WebSocket 连接路径（例如 `/ws/bot`）。只有用户明确指定地址或
 
 正常 Bot 运行时只需保证 `BOT_DATA_DIR` 指向当前 Bot；认证发现由 CLI 完成，skill 不接触 token 内容。
 
+### CLI 环境变量（完整清单）
+
+CLI 自身还读取以下环境变量（不设置即按默认行为，无需主动配置）：
+
+| 变量 | 作用 |
+| --- | --- |
+| `MOLTIS_BCS_URL` | `--url` 的默认值（服务器基地址） |
+| `BCS_API_BASE_URL` | `--url` 的兜底读取（早于 `MOLTIS_BCS_URL` 的旧名，帮助文本中有说明） |
+| `BCS_OAUTH_CLIENT_ID` / `BCS_OAUTH_CLIENT_SECRET` | 办公网 OAuth2 网关凭据 |
+| `BCS_COOKIE` | 覆盖 Cookie 鉴权头（人工调试用） |
+| `BCS_DEBUG` | debug 构建的额外调试输出 |
+| `tc_sdb_nenv` | 网络环境覆盖（一般由内部环境注入，不要手动设置） |
+| `TRACEPARENT` | 分布式追踪上下文透传 |
+
+兼容性说明：`--json` 是历史遗留的 no-op 参数，仅为不破坏既有脚本保留，不改变任何输出。
+
 ---
 
 ## 命令执行方式

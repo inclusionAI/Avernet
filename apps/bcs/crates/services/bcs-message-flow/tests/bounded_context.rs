@@ -20,8 +20,11 @@ fn admission(id: &str, text: serde_json::Value, kind: DeliveryType) -> AdmitMess
 }
 
 fn transition(row: &PersistedMessageDelivery, event: Event) -> DeliveryTransitionCommand {
-    DeliveryTransitionCommand { delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
-        event, now_ms: 100, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None }
+    DeliveryTransitionCommand {
+        caller_dispatch_commit: None, caller_cancel: None, caller_terminal: None,
+        delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
+        event, now_ms: 100, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
+    }
 }
 
 async fn fixture(texts: Vec<serde_json::Value>) -> (Arc<MemoryMessageRepo>, ManagedMessageDelivery, PersistedMessageDelivery) {

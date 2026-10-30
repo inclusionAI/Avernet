@@ -990,3 +990,6 @@ mod tests;
 
 pub mod state_machine_history;
 pub use state_machine_history::StateMachineHistoryConfig;
+
+mod caller_identity;
+pub use caller_identity::*;

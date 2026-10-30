@@ -4,7 +4,7 @@
 use super::*;
 use bcs_service_api::port::repo::message_delivery::{AdmitMessageDeliveries, MessageDeliveryRepoError};
 use bcs_service_api::{ManagedDeliveryError, OutputOperationAdmission};
-use bcs_domain::message_delivery::MessageDeliveryStatus;
+use bcs_domain::message_delivery::{MessageDeliveryStatus, PersistedMessageDelivery};
 
 pub(super) async fn admit_output(
     flow: &BcsMessageFlow, group: &Group, session: &str, run: &str, worker: &str,
@@ -30,7 +30,7 @@ pub(super) async fn admit_output(
 
 pub(super) async fn admit_queued_dispatch(
     flow: &BcsMessageFlow, group: &Group, mut command: AdmitMessageDeliveries,
-) -> ServiceResult<()> {
+) -> ServiceResult<Option<PersistedMessageDelivery>> {
     let service = flow.managed_deliveries.as_ref()
         .ok_or_else(|| crate::queued_task::error("task queue unavailable"))?;
     let target = command.targets.first_mut()
@@ -56,6 +56,16 @@ pub(super) async fn admit_queued_dispatch(
         matches!(row.state.status, MessageDeliveryStatus::Failed | MessageDeliveryStatus::RejectedCapacity)) {
         flow.release_output_runs(&operation, &[run]).await;
     }
+    // Relay helpers need the committed row's own facts (delivery id, state
+    // version, session, canonical turn) to park a handoff scope under the
+    // SAME key the runtime's claim will build. A duplicate or rejected
+    // admission parks nothing: hand back None and let finish_admission own
+    // the failure.
+    let committed = admitted
+        .deliveries
+        .iter()
+        .find(|row| matches!(row.state.status, MessageDeliveryStatus::Queued))
+        .cloned();
     crate::queued_task::finish_admission(flow, admitted).await?;
-    Ok(())
+    Ok(committed)
 }

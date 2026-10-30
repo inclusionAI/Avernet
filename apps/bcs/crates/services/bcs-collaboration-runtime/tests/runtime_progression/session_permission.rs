@@ -107,6 +107,7 @@ async fn current_session_permission_is_owned_by_chat_and_manager_group_driver() 
             opening_message: None,
             input: Value::Null,
             judge_available: false,
+            caller_association: None,
         })
         .await
         .expect_err("run start must re-check permission server-side");
@@ -203,6 +204,7 @@ async fn legacy_chat_session_allows_one_shot_run_for_participant_human_view() {
             opening_message: None,
             input: Value::Null,
             judge_available: false,
+            caller_association: None,
         })
         .await
         .expect("message scope must not block a one-shot state-machine run");
@@ -251,6 +253,7 @@ async fn human_run_owner_can_cancel_through_human_access_api() {
                 actor_id: "human_1001".to_string(),
                 display_name: Some("Reviewer".to_string()),
             }),
+            caller_association: None,
         })
         .await
         .expect("start Human run");
