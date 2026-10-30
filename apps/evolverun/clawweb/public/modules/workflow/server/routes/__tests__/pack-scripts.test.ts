@@ -25,18 +25,18 @@ async function request(deps: Parameters<typeof createPackScriptsRouter>[0], path
 describe('pack scripts read route', () => {
   it('does not expose a disabled host before identity or Git access', async () => {
     const deps = dependencies(); const res = await request({ ...deps, enabled: false });
-    expect(res.status).toBe(503); expect(deps.resolvePrincipal).not.toHaveBeenCalled();
+    expect(res.status).toBe(503); expect(await res.json()).toEqual({ error: 'Pack scripts unavailable', code: 'SERVICE_UNAVAILABLE' }); expect(deps.resolvePrincipal).not.toHaveBeenCalled();
     expect(deps.readSnapshot).not.toHaveBeenCalled();
   });
   it('rejects anonymous requests and forged identity headers before permission or Git', async () => {
     const deps = dependencies(); deps.resolvePrincipal.mockResolvedValue(null);
     const res = await request(deps, 'wf-1', { 'x-user-id': 'admin', cookie: 'user=admin' });
-    expect(res.status).toBe(401); expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(res.status).toBe(401); expect(await res.json()).toEqual({ error: 'Authentication required', code: 'AUTHENTICATION_REQUIRED' }); expect(res.headers.get('cache-control')).toBe('no-store');
     expect(deps.botPermRepo.hasEditPermission).not.toHaveBeenCalled(); expect(deps.workflowSpecRepo.findByWorkflowId).not.toHaveBeenCalled(); expect(deps.readSnapshot).not.toHaveBeenCalled();
   });
   it('requires explicit authorization before DB and Git', async () => {
     const deps = dependencies(); deps.botPermRepo.hasEditPermission.mockResolvedValue(false);
-    expect((await request(deps)).status).toBe(403);
+    const res = await request(deps); expect(res.status).toBe(403); expect(await res.json()).toEqual({ error: 'Forbidden', code: 'FORBIDDEN' });
     expect(deps.botPermRepo.hasEditPermission).toHaveBeenCalledWith('wf-1', 'trusted');
     expect(deps.workflowSpecRepo.findByWorkflowId).not.toHaveBeenCalled(); expect(deps.readSnapshot).not.toHaveBeenCalled();
   });
@@ -46,7 +46,7 @@ describe('pack scripts read route', () => {
   });
   it('returns 404 for missing row without reading Git', async () => {
     const deps = dependencies(); deps.workflowSpecRepo.findByWorkflowId.mockResolvedValue(null);
-    expect((await request(deps)).status).toBe(404); expect(deps.readSnapshot).not.toHaveBeenCalled();
+    const res = await request(deps); expect(res.status).toBe(404); expect(await res.json()).toEqual({ error: 'Workflow not found', code: 'WORKFLOW_NOT_FOUND' }); expect(deps.readSnapshot).not.toHaveBeenCalled();
   });
   it('fails closed without authoritative Pack access, even when workflow permission passes', async () => {
     const deps = dependencies(); const res = await request({ ...deps, authorizePackRead: undefined });
@@ -82,11 +82,11 @@ describe('pack scripts read route', () => {
     const res = await request(deps); expect(res.status).toBe(503); expect(await res.text()).not.toContain('private identity detail');
     expect(deps.botPermRepo.hasEditPermission).not.toHaveBeenCalled(); expect(deps.readSnapshot).not.toHaveBeenCalled();
   });
-  it.each([['Workflow ref conflict: histories diverged', 409], ['Pack manifest conflict', 409], ['Shared pack requires separate authorization', 409], ['Workflow snapshot not found', 404], ['Pack manifest not found', 404], ['fatal: secret /internal/repository script contents', 503]])('sanitizes snapshot error %s', async (message, status) => {
+  it.each([['Workflow ref conflict: histories diverged', 409, 'SNAPSHOT_CONFLICT'], ['Pack manifest conflict', 409, 'SNAPSHOT_CONFLICT'], ['Shared pack requires separate authorization', 409, 'SNAPSHOT_CONFLICT'], ['Workflow snapshot not found', 404, 'SNAPSHOT_NOT_FOUND'], ['Pack manifest not found', 404, 'SNAPSHOT_NOT_FOUND'], ['fatal: secret /internal/repository script contents', 503, 'SERVICE_UNAVAILABLE']])('sanitizes snapshot error %s', async (message, status, code) => {
     const deps = dependencies(); deps.readSnapshot.mockRejectedValue(new Error(message));
     const log = vi.spyOn(console, 'error'); try {
       const res = await request(deps); expect(res.status).toBe(status); expect(res.headers.get('cache-control')).toBe('no-store');
-      const body = await res.text(); expect(body).not.toContain(message); expect(body).not.toContain('/internal/repository'); expect(body).not.toContain('script contents');
+      const body = await res.text(); expect(JSON.parse(body).code).toBe(code); expect(body).not.toContain(message); expect(body).not.toContain('/internal/repository'); expect(body).not.toContain('script contents');
       expect(log).not.toHaveBeenCalled();
     } finally { log.mockRestore(); }
   });

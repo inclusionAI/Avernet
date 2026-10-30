@@ -35,12 +35,28 @@ describe('ScriptFilesTab', () => {
   })
 
   it.each([
-    [401, '请先登录'], [403, '没有编辑权限'], [404, '未找到'], [409, '冲突或共享 Pack'], [503, '服务暂不可用'],
+    [401, '请先登录'], [403, 'Pack 访问权限'], [404, '接口或资源未找到'], [409, '冲突或共享 Pack'], [503, '服务暂不可用'],
   ])('provides an actionable, sanitized message for HTTP %i', async (status, message) => {
     vi.mocked(fetchJson).mockRejectedValueOnce(Object.assign(new Error('sensitive private detail'), { status }))
     render(<ScriptFilesTab workflowId="wf-1" />)
     expect(await screen.findByRole('alert')).toHaveTextContent(message)
     expect(screen.queryByText(/sensitive private detail/)).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['{"code":"WORKFLOW_NOT_FOUND","error":"secret"}', '未找到工作流。'],
+    ['{"code":"SNAPSHOT_NOT_FOUND","error":"secret"}', '未找到工作流的 Git 快照或 Pack 清单。'],
+    ['{"error":"Workflow not found"}', '未找到工作流。'],
+    ['{"error":"Snapshot not found"}', '未找到工作流的 Git 快照或 Pack 清单。'],
+    ['<html>Cannot GET /private/secret</html>', '接口或资源未找到'],
+    ['not JSON secret', '接口或资源未找到'],
+    ['{"code":"UNKNOWN","error":"Snapshot not found","detail":"secret"}', '接口或资源未找到'],
+    ['null', '接口或资源未找到'],
+  ])('classifies a 404 response without exposing its body: %s', async (body, message) => {
+    vi.mocked(fetchJson).mockRejectedValueOnce(Object.assign(new Error(`API 404: ${body}`), { status: 404, body }))
+    render(<ScriptFilesTab workflowId="wf-1" />)
+    expect(await screen.findByRole('alert')).toHaveTextContent(message)
+    expect(screen.getByRole('alert')).not.toHaveTextContent('secret')
   })
 
   it('does not expose a raw Git error or show stale file contents after failure', async () => {
