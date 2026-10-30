@@ -19,6 +19,30 @@ interface TaskSwitcherControlProps extends TaskSwitcherProps {
   defaultVisible?: boolean;
 }
 
+const DRAG_MARGIN = 8;
+const DRAG_THRESHOLD = 4;
+
+interface RectSize {
+  width: number;
+  height: number;
+}
+
+/** 将已有悬浮按钮位置限制在当前任务面板内；position 为 null 表示尚无手动位置。 */
+export const clampTaskSwitcherPosition = (
+  current: DragPosition | null,
+  panelSize: RectSize,
+  buttonSize: RectSize,
+): DragPosition | null => {
+  if (!current) return current;
+  const maxX = Math.max(DRAG_MARGIN, panelSize.width - buttonSize.width - DRAG_MARGIN);
+  const maxY = Math.max(DRAG_MARGIN, panelSize.height - buttonSize.height - DRAG_MARGIN);
+  const next = {
+    x: Math.max(DRAG_MARGIN, Math.min(maxX, current.x)),
+    y: Math.max(DRAG_MARGIN, Math.min(maxY, current.y)),
+  };
+  return next.x === current.x && next.y === current.y ? current : next;
+};
+
 interface TaskSwitcherDragState extends DragPosition {
   pointerId: number;
   startClientX: number;
@@ -30,8 +54,6 @@ interface TaskSwitcherDragState extends DragPosition {
   moved: boolean;
 }
 
-const DRAG_MARGIN = 8;
-const DRAG_THRESHOLD = 4;
 
 export const TaskSwitcherControl: React.FC<TaskSwitcherControlProps> = (props) => {
   const [visible, setVisible] = useState(props.defaultVisible ?? false);
@@ -40,14 +62,12 @@ export const TaskSwitcherControl: React.FC<TaskSwitcherControlProps> = (props) =
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const dragRef = useRef<TaskSwitcherDragState | null>(null);
   const suppressClickRef = useRef(false);
-  const suppressClickTimerRef = useRef<number | null>(null);
+  const suppressClickTimerRef = useRef<number | undefined>(undefined);
   const hasCustomPosition = position !== null;
 
   useEffect(
     () => () => {
-      if (suppressClickTimerRef.current !== null) {
-        window.clearTimeout(suppressClickTimerRef.current);
-      }
+      window.clearTimeout(suppressClickTimerRef.current);
     },
     [],
   );
@@ -61,16 +81,7 @@ export const TaskSwitcherControl: React.FC<TaskSwitcherControlProps> = (props) =
     const keepButtonInPanel = () => {
       const panelRect = panel.getBoundingClientRect();
       const buttonRect = button.getBoundingClientRect();
-      setPosition((current) => {
-        if (!current) return current;
-        const maxX = Math.max(DRAG_MARGIN, panelRect.width - buttonRect.width - DRAG_MARGIN);
-        const maxY = Math.max(DRAG_MARGIN, panelRect.height - buttonRect.height - DRAG_MARGIN);
-        const next = {
-          x: Math.max(DRAG_MARGIN, Math.min(maxX, current.x)),
-          y: Math.max(DRAG_MARGIN, Math.min(maxY, current.y)),
-        };
-        return next.x === current.x && next.y === current.y ? current : next;
-      });
+      setPosition((current) => clampTaskSwitcherPosition(current, panelRect, buttonRect));
     };
 
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(keepButtonInPanel);
@@ -153,12 +164,10 @@ export const TaskSwitcherControl: React.FC<TaskSwitcherControlProps> = (props) =
           event.currentTarget.releasePointerCapture?.(event.pointerId);
           if (drag.moved) {
             suppressClickRef.current = true;
-            if (suppressClickTimerRef.current !== null) {
-              window.clearTimeout(suppressClickTimerRef.current);
-            }
+            window.clearTimeout(suppressClickTimerRef.current);
             suppressClickTimerRef.current = window.setTimeout(() => {
               suppressClickRef.current = false;
-              suppressClickTimerRef.current = null;
+              suppressClickTimerRef.current = undefined;
             }, 0);
           }
         }}
@@ -171,10 +180,9 @@ export const TaskSwitcherControl: React.FC<TaskSwitcherControlProps> = (props) =
         onClick={() => {
           if (suppressClickRef.current) {
             suppressClickRef.current = false;
-            if (suppressClickTimerRef.current !== null) {
-              window.clearTimeout(suppressClickTimerRef.current);
-              suppressClickTimerRef.current = null;
-            }
+            // suppression definitely has an in-flight timer; clear it before closing the window.
+            window.clearTimeout(suppressClickTimerRef.current!);
+            suppressClickTimerRef.current = undefined;
             return;
           }
           setVisible((current) => !current);

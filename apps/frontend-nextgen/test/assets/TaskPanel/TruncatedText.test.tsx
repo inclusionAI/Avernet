@@ -68,4 +68,12 @@ describe('TruncatedText 截断悬浮 tooltip', () => {
     fireEvent.blur(target);
     expect(tipEl()).toBeNull();
   });
+  it('锚点尺寸为空时自动隐藏 tooltip，避免卸载残留', () => {
+    const value = '锚点尺寸为空时自动隐藏 tooltip';
+    const { container } = render(<TruncatedText value={value} maxLength={5} />);
+    fireEvent.mouseOver(container.firstChild as HTMLElement, { relatedTarget: null });
+
+    expect(tipEl()).toBeNull();
+  });
+
 });

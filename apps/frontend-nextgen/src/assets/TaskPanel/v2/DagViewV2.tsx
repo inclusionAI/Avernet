@@ -46,16 +46,16 @@ function layoutExecDag(steps: ExecDagStep[], stepEdges: ExecDagEdge[]): { boxes:
   // 最长路径分层:level(n) = max(level(前驱)) + 1;入度 0 为第 0 层
   const level = new Map<string, number>();
   const indegC = new Map(indeg);
-  const queue = steps.filter((s) => (indeg.get(s.id) ?? 0) === 0);
+  const queue = steps.filter((s) => indeg.get(s.id) === 0);
   queue.forEach((s) => level.set(s.id, 0));
   let guard = 0;
   while (queue.length && guard++ < steps.length + 5) {
     const cur = queue.shift()!;
-    const curLevel = level.get(cur.id) ?? 0;
+    const curLevel = level.get(cur.id)!;
     for (const e of stepEdges) {
       if (e.from !== cur.id) continue;
       if ((level.get(e.to) ?? -1) < curLevel + 1) level.set(e.to, curLevel + 1);
-      const remain = (indegC.get(e.to) ?? 0) - 1;
+      const remain = indegC.get(e.to)! - 1;
       indegC.set(e.to, remain);
       if (remain === 0) queue.push(steps.find((s) => s.id === e.to)!);
     }
@@ -72,7 +72,7 @@ function layoutExecDag(steps: ExecDagStep[], stepEdges: ExecDagEdge[]): { boxes:
     const lv = level.get(s.id) ?? 0;
     const idx = perLevel.get(lv) ?? 0;
     perLevel.set(lv, idx + 1);
-    const levelSize = levelCount.get(lv) ?? 1;
+    const levelSize = levelCount.get(lv)!;
     const widthAtLevel = levelSize * EXEC_NODE_W + (levelSize - 1) * 8;
     const x = Math.max(10, 190 - widthAtLevel / 2) + idx * (EXEC_NODE_W + 8);
     return { id: s.id, label: s.label, x, y: 12 + lv * (EXEC_NODE_H + EXEC_Y_GAP) };

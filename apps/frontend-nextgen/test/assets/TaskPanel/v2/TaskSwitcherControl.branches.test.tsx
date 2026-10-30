@@ -1,11 +1,11 @@
 /** @jest-environment jsdom */
 // TaskSwitcherControl 的拖拽、取消、边距与生命周期分支。
-import { TaskSwitcherControl } from '@/assets/TaskPanel/v2/TaskSwitcherControl';
+import { clampTaskSwitcherPosition, TaskSwitcherControl } from '@/assets/TaskPanel/v2/TaskSwitcherControl';
 import type { TaskSwitcherItem, TaskSwitcherProps } from '@/assets/TaskPanel/v2/TaskSwitcherBar';
 import { beforeAll, beforeEach, afterEach, describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within, act } from '@testing-library/react';
 
 
 const items: TaskSwitcherItem[] = [
@@ -215,5 +215,77 @@ describe('TaskSwitcherControl 手动事件', () => {
     expect(screen.getByText('竞品分析')).toBeInTheDocument();
     const contentRoot = screen.getByRole('button', { name: '隐藏任务切换' }).parentElement!;
     expect(within(contentRoot).getByText('竞品分析')).toBeInTheDocument();
+  });
+});
+
+describe('TaskSwitcherControl 位置计算与面板缺失', () => {
+  it('clampTaskSwitcherPosition 支持 null、原位置和越界位置', () => {
+    const current = { x: 20, y: 30 };
+    const panelSize = { width: 400, height: 600 };
+    const buttonSize = { width: 48, height: 48 };
+    expect(clampTaskSwitcherPosition(null, panelSize, buttonSize)).toBeNull();
+    expect(clampTaskSwitcherPosition(current, panelSize, buttonSize)).toBe(current);
+    expect(clampTaskSwitcherPosition({ x: -10, y: 900 }, panelSize, buttonSize)).toEqual({ x: 8, y: 544 });
+  });
+  it('没有任务面板时 pointerDown 不进入拖拽状态', () => {
+    render(<TaskSwitcherControl {...props()} />);
+    const button = screen.getByRole('button', { name: '显示任务切换' });
+    fireEvent.pointerDown(button, { button: 0, pointerId: 1, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(button, { pointerId: 1, clientX: 100, clientY: 100 });
+    fireEvent.pointerUp(button, { pointerId: 1 });
+    expect(button.style.left).toBe('');
+  });
+  it('已有手动位置但面板标记丢失时,定位监听不再注册', () => {
+    const { button, panel, view } = renderInPanel();
+    button.setPointerCapture = jest.fn(() => panel.removeAttribute('data-task-panel-root'));
+    fireEvent.pointerDown(button, { button: 0, pointerId: 1, clientX: 444, clientY: 594 });
+    fireEvent.pointerMove(button, { pointerId: 1, clientX: 344, clientY: 394 });
+    fireEvent.pointerUp(button, { pointerId: 1 });
+    expect(button.style.left).toBe('220px');
+    fireEvent(window, new Event('resize'));
+    expect(button.style.left).toBe('220px');
+    view.unmount();
+  });
+});
+describe('TaskSwitcherControl 抑制点击定时器', () => {
+  it('拖拽设为手动位置后,resize 若无变化仍保持同一位置对象', () => {
+    const { button, view } = renderInPanel();
+    fireEvent.pointerDown(button, { button: 0, pointerId: 1, clientX: 444, clientY: 594 });
+    fireEvent.pointerMove(button, { pointerId: 1, clientX: 344, clientY: 394 });
+    fireEvent.pointerUp(button, { pointerId: 1 });
+    fireEvent(window, new Event('resize'));
+    expect(button.style.left).toBe('220px');
+    view.unmount();
+  });
+  it('定时器到期后恢复点击并更新显隐状态', () => {
+    jest.useFakeTimers();
+    const { button, view } = renderInPanel();
+    fireEvent.pointerDown(button, { button: 0, pointerId: 1, clientX: 444, clientY: 594 });
+    fireEvent.pointerMove(button, { pointerId: 1, clientX: 344, clientY: 394 });
+    fireEvent.pointerUp(button, { pointerId: 1 });
+    act(() => {
+      jest.advanceTimersByTime(0);
+    });
+    fireEvent.click(button);
+    expect(screen.getByText('竞品分析')).toBeInTheDocument();
+    view.unmount();
+    jest.useRealTimers();
+  });
+  it('拖拽后立即点击会再次拖拽、清除旧定时器并保持抑制状态', () => {
+    jest.useFakeTimers();
+    const { button, view } = renderInPanel();
+    fireEvent.pointerDown(button, { button: 0, pointerId: 1, clientX: 444, clientY: 594 });
+    fireEvent.pointerMove(button, { pointerId: 1, clientX: 344, clientY: 394 });
+    fireEvent.pointerUp(button, { pointerId: 1 });
+    fireEvent.pointerDown(button, { button: 0, pointerId: 2, clientX: 344, clientY: 394 });
+    fireEvent.pointerMove(button, { pointerId: 2, clientX: 244, clientY: 294 });
+    fireEvent.pointerUp(button, { pointerId: 2 });
+    fireEvent.click(button);
+    expect(screen.queryByText('竞品分析')).toBeNull();
+    act(() => {
+      jest.advanceTimersByTime(0);
+    });
+    view.unmount();
+    jest.useRealTimers();
   });
 });

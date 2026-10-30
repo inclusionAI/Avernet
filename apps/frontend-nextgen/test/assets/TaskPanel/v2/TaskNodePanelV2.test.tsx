@@ -221,6 +221,22 @@ describe('TaskNodePanelV2(L2)三区', () => {
     expect(onOpenSubTask).toHaveBeenCalledWith('sub-9');
   });
 
+  it('未知 present 缺省与起止时间缺失时使用兜底文案', () => {
+    const node = {
+      ...baseNode,
+      status: 'unknown',
+      present: undefined,
+      attemptCount: undefined,
+      startedAt: null,
+      endAt: '2026-10-20 15:00',
+    } as unknown as TaskNodeView;
+    render(<TaskNodePanelV2 {...props({ node })} />);
+
+    expect(screen.getByText('unknown')).toBeTruthy();
+    expect(screen.queryByText(/次返工/)).toBeNull();
+    expect(screen.getByText(/未开始 · 完成 2026-10-20 15:00/)).toBeTruthy();
+  });
+
   it('Review Focus #4:drillStack 顶节点已不存在(L2 数据变更)→ 空态而非崩溃;返回可用', () => {
     const nav = makeNav();
     render(<TaskNodePanelV2 {...props({ node: null, nav })} />);

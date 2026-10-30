@@ -42,6 +42,7 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
     <ul style={{ listStyle: 'none', margin: 0, padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
       {task.nodes.map((node) => {
         const present = node.present ?? node.status;
+        const attemptCount = node.attemptCount ?? 0;
         const tone = PRESENT_TONES[present] ?? { label: present, color: C.textMuted };
         const isDone = present === 'done' || present === 'merged';
         const isGroup = node.runMode === 'coop_group' || node.runMode === 'bbs' || node.drillable === true;
@@ -125,8 +126,8 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
                   {executorName}
                 </span>
                 {/* 返工次数 = attemptCount-1(action_log 的 attempt 从 1 起算,首发不亮徽章) */}
-                {(node.attemptCount ?? 0) > 1 && (
-                  <span style={badgeStyle(C.warning)}>第 {(node.attemptCount ?? 0) - 1} 次返工</span>
+                {attemptCount > 1 && (
+                  <span style={badgeStyle(C.warning)}>第 {attemptCount - 1} 次返工</span>
                 )}
                 {node.needsHitl && present === 'running' && <span style={badgeStyle(C.warning)}>人工处理</span>}
               </div>

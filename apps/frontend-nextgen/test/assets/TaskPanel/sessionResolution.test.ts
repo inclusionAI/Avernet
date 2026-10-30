@@ -95,4 +95,77 @@ describe('resolveNodeSessionTarget', () => {
     expect(resolveNodeSessionTarget(node({ runMode: 'single_bot' }), baseView({ mainSessionId: null }))).toBeNull();
     expect(resolveNodeSessionTarget(node({}), baseView({ mainSessionId: null }))).toBeNull();
   });
+
+  it('缺失时间窗与节点 assignee 时回落到任务 owner', () => {
+    const target = resolveNodeSessionTarget(
+      node({ sessionId: 'session-bot', assignee: null, startedAtMs: null, endAtMs: null }),
+      baseView(),
+    );
+    expect(target).toMatchObject({ kind: 'bot', botId: 'bot-owner', startTime: null, endTime: null });
+
+    const groupWithoutId = resolveNodeSessionTarget(
+      node({ sessionId: 'bcs_grp_902:round:1', groupId: null, startedAtMs: null, endAtMs: null }),
+      baseView({ sourceGroupId: null }),
+    );
+    expect(groupWithoutId).toMatchObject({ kind: 'group', groupId: null, botId: null, startTime: null, endTime: null });
+  });
+
+  it('single_bot 缺 assignee 时回落到 owner Bot', () => {
+    const target = resolveNodeSessionTarget(node({ runMode: 'single_bot', assignee: null }), baseView());
+    expect(target).toMatchObject({ kind: 'bot', botId: 'bot-owner' });
+  });
+
+  it('派生单会话非群串时 kind unknown，空派生会话回落群主会话', () => {
+    const uniqueBot = resolveNodeSessionTarget(
+      node({ runMode: 'coop_group', groupId: null }),
+      baseView({ derivedSessionIds: ['not-group-session'], sourceGroupId: 'g-source' }),
+    );
+    expect(uniqueBot).toMatchObject({ kind: 'unknown', groupId: 'g-source', botId: null });
+
+    const groupMain = resolveNodeSessionTarget(
+      node({ runMode: 'coop_group', groupId: null }),
+      baseView({ derivedSessionIds: undefined, mainSessionId: 'bcs_grp_main', sourceGroupId: 'g-main' }),
+    );
+    expect(groupMain).toMatchObject({ kind: 'group', groupId: 'g-main', botId: 'bot-owner' });
+  });
+
+  it('owner 与 sourceGroupId 均缺失时可解析为 null', () => {
+    const directBot = resolveNodeSessionTarget(
+      node({ sessionId: 'session-bot', assignee: null }),
+      baseView({ ownerBotId: null as never }),
+    );
+    expect(directBot).toMatchObject({ kind: 'bot', botId: null });
+
+    const singleBot = resolveNodeSessionTarget(
+      node({ runMode: 'single_bot', assignee: null }),
+      baseView({ ownerBotId: null as never }),
+    );
+    expect(singleBot).toMatchObject({ kind: 'bot', botId: null });
+
+    const uniqueUnknown = resolveNodeSessionTarget(
+      node({ runMode: 'coop_group', groupId: null }),
+      baseView({ derivedSessionIds: ['plain-session'], sourceGroupId: null, ownerBotId: null as never }),
+    );
+    expect(uniqueUnknown).toMatchObject({ kind: 'unknown', groupId: null, botId: null });
+
+    const groupMain = resolveNodeSessionTarget(
+      node({ runMode: 'coop_group', groupId: null }),
+      baseView({ derivedSessionIds: [], mainSessionId: 'bcs_grp_fallback', sourceGroupId: null, ownerBotId: null as never }),
+    );
+    expect(groupMain).toMatchObject({ kind: 'group', groupId: null, botId: null });
+  });
+
+  it('未知 run_mode 分别回落群主会话与单 Bot 主会话', () => {
+    const groupFallback = resolveNodeSessionTarget(
+      node({ runMode: 'unknown_mode', groupId: null }),
+      baseView({ mainSessionId: 'bcs_grp_fallback', sourceGroupId: null, ownerBotId: null as never }),
+    );
+    expect(groupFallback).toMatchObject({ kind: 'group', groupId: null, botId: null });
+
+    const botFallback = resolveNodeSessionTarget(
+      node({ runMode: 'unknown_mode', groupId: 'ignored' }),
+      baseView({ mainSessionId: 'agent:main:session:bot', sourceGroupId: 'g-ignored' }),
+    );
+    expect(botFallback).toMatchObject({ kind: 'bot', groupId: null, botId: 'bot-owner' });
+  });
 });

@@ -17,11 +17,16 @@ function isGroupNode(node: TaskNodeView | undefined): boolean {
   );
 }
 
+function groupSessionGroupId(sessionId: string | null | undefined): string | null {
+  if (!sessionId?.startsWith('bcs_grp_')) return null;
+  return sessionId.split(':')[0];
+}
+
 export function collectTaskGroupIds(task: TaskView): string[] {
   const ids = new Set<string>();
   for (const node of task.nodes) {
     if (!isGroupNode(node)) continue;
-    const id = node.groupId ?? node.assignee;
+    const id = node.groupId ?? node.assignee ?? groupSessionGroupId(node.sessionId);
     if (id?.trim()) ids.add(id.trim());
   }
   return [...ids];
@@ -30,6 +35,10 @@ export function collectTaskGroupIds(task: TaskView): string[] {
 function joinNames(names: string[]): string | null {
   const uniqueNames = [...new Set(names.map((name) => name.trim()).filter(Boolean))];
   return uniqueNames.length ? uniqueNames.join('、') : null;
+}
+
+function nodeGroupIdentifier(node: TaskNodeView): string | null {
+  return node.groupId ?? node.assignee ?? groupSessionGroupId(node.sessionId);
 }
 
 function memberLabel(groupId: string | null | undefined, groups: GroupMemberInfoByGroupId): string | null {
@@ -52,8 +61,8 @@ function resolveArtifactOwnerLabel(
 ): string | null {
   const owner = artifact.owner?.trim();
   if (!owner) return null;
-  const directGroup = groups[owner];
-  if (directGroup) return joinNames(directGroup.names);
+  const directGroupLabel = groups[owner] ? joinNames(groups[owner].names) : null;
+  if (directGroupLabel) return directGroupLabel;
   const actorName = actorMemberName(owner, groups);
   if (actorName) return actorName;
   if (owner === task.ownerBotId && task.ownerBotName.trim()) return task.ownerBotName;
@@ -61,7 +70,7 @@ function resolveArtifactOwnerLabel(
     return owner === task.sourceGroupId && task.mainSessionName?.trim() ? task.mainSessionName : owner;
   }
   if (isGroupNode(node)) {
-    const groupLabel = memberLabel(node.groupId ?? node.assignee, groups);
+    const groupLabel = memberLabel(nodeGroupIdentifier(node), groups);
     if (groupLabel) return groupLabel;
   }
   if (owner === node.assignee && node.assigneeName?.trim()) return node.assigneeName;
@@ -76,7 +85,7 @@ export function enrichTaskGroupDisplay(task: TaskView, groups: GroupMemberInfoBy
   if (!Object.keys(groups).length) return task;
   const mapNode = (node: TaskNodeView): TaskNodeView => {
     if (!isGroupNode(node)) return node;
-    const label = memberLabel(node.groupId ?? node.assignee, groups);
+    const label = memberLabel(nodeGroupIdentifier(node), groups);
     return label ? { ...node, executorLabel: label } : node;
   };
   const mapArtifacts = (artifacts: TaskArtifactView[], node?: TaskNodeView): TaskArtifactView[] =>

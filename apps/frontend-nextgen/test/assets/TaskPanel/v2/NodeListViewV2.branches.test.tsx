@@ -140,3 +140,16 @@ describe('NodeListViewV2', () => {
     expect(screen.queryByTitle('查看子任务')).toBeNull();
   });
 });
+
+describe('NodeListViewV2 返工兜底分支', () => {
+  it('attemptCount 缺失时不渲染返工徽章', () => {
+    const noAttemptTask = {
+      ...task,
+      nodes: [makeNode('n-no-attempt')],
+    } as TaskView;
+    render(<NodeListViewV2 task={noAttemptTask} nav={makeNav()} />);
+
+    expect(screen.getByRole('button', { name: '选中节点 节点-n-no-attempt' })).toBeInTheDocument();
+    expect(screen.queryByText(/次返工/)).toBeNull();
+  });
+});

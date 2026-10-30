@@ -184,3 +184,10 @@ describe('TaskSwitcherControl', () => {
     expect(screen.getByRole('button', { name: '隐藏任务切换' })).toBeTruthy();
   });
 });
+
+describe('TaskSwitcherBar 活动任务兜底', () => {
+  it('activeTaskId 不在任务列表时回退展示第一个任务', () => {
+    render(<TaskSwitcherBar {...props({ activeTaskId: 'missing-task' })} />);
+    expect(screen.getByText('竞品分析')).toBeTruthy();
+  });
+});

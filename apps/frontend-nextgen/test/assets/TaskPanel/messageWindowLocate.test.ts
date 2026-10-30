@@ -23,6 +23,19 @@ describe('locateMessageWindowTimestamp', () => {
     expect(locateMessageWindowTimestamp(msgs, 5, 8)).toBe(10);
   });
 
+  it('只有 startTime → 定位到 start 之后的第一条消息', () => {
+    expect(locateMessageWindowTimestamp(msgs, 25, null)).toBe(30);
+  });
+
+  it('双向窗口越过最新消息时定位到最早消息', () => {
+    expect(locateMessageWindowTimestamp(msgs, 60, 70)).toBe(10);
+  });
+
+  it('两个单边界都越过最新消息时定位到最早消息', () => {
+    expect(locateMessageWindowTimestamp(msgs, 60, null)).toBe(10);
+    expect(locateMessageWindowTimestamp(msgs, null, 60)).toBe(10);
+  });
+
   it('无时间窗(均为 null)→ null', () => {
     expect(locateMessageWindowTimestamp(msgs, null, null)).toBeNull();
   });
@@ -72,6 +85,15 @@ describe('scrollToMessageTimestampWindow(DOM best-effort)', () => {
 
   it('无消息 DOM 命中 → false 不抛错(降级由调用方记录)', () => {
     setupDom([]);
+    expect(scrollToMessageTimestampWindow(document, 1, 2)).toBe(false);
+  });
+
+  it('非法时间戳候选会被过滤并返回 false', () => {
+    document.body.innerHTML = '';
+    const el = document.createElement('div');
+    el.setAttribute('data-ts', 'not-a-number');
+    document.body.appendChild(el);
+
     expect(scrollToMessageTimestampWindow(document, 1, 2)).toBe(false);
   });
 

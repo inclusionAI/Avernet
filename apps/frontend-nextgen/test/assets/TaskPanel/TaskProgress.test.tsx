@@ -7,7 +7,7 @@ import type { TaskView } from '@/assets/TaskPanel/types';
 import { describe, expect, it } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 
 
@@ -67,6 +67,38 @@ describe('TaskInfoTab metadata', () => {
     expect(screen.getByText('动态任务')).toHaveStyle('font-size: 11px');
   });
 
+  it('运行时长覆盖空开始时间、无效时间和秒级时长', () => {
+    expect(formatRuntimeDuration(null, '2026-08-22T10:00:00+08:00')).toBe('—');
+    expect(formatRuntimeDuration('invalid', '2026-08-22T10:00:00+08:00')).toBe('—');
+    expect(formatRuntimeDuration('2026-08-22T10:00:20+08:00', '2026-08-22T10:00:00+08:00')).toBe('—');
+    expect(formatRuntimeDuration('2026-08-22T10:00:00+08:00', '2026-08-22T10:00:20+08:00')).toBe('20秒');
+  });
+
+  it('workflow 且带模板与父任务时展示关联元信息', () => {
+    const task = makeTask([]);
+    task.taskType = 'workflow';
+    task.template = '应急处理模板';
+    task.parentTaskId = 'parent-task';
+    render(<TaskInfoTab task={task} />);
+
+    expect(screen.getByText('关联模板')).toBeInTheDocument();
+    expect(screen.getByText('应急处理模板')).toBeInTheDocument();
+    expect(screen.getByText('父任务')).toBeInTheDocument();
+    expect(screen.getByText('parent-task')).toBeInTheDocument();
+  });
+
+  it('无验收标准与信息字段时渲染空态和占位符', () => {
+    const task = makeTask([]);
+    task.acceptances = [];
+    task.description = '';
+    task.goal = '';
+    task.createdAt = '';
+    render(<TaskInfoTab task={task} />);
+
+    expect(screen.getByText('暂无')).toBeInTheDocument();
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0);
+  });
+
   it('运行中的任务按当前时间计算运行时长', () => {
     expect(
       formatRuntimeDuration('2026-08-22T10:00:00+08:00', null, new Date('2026-08-22T10:01:05+08:00').getTime()),
@@ -82,6 +114,21 @@ describe('MarkdownCell', () => {
     expect(screen.getByText('平台差异化执行')).toBeInTheDocument();
   });
 });
+
+  it('空内容渲染占位符，长内容可展开后收起', () => {
+    const { rerender } = render(<MarkdownCell content="   " />);
+    expect(screen.getByText('—')).toBeInTheDocument();
+
+    rerender(
+      <MarkdownCell content={'## 完整内容\n\n- 第一条\n- 第二条\n- 第三条\n- 第四条\n- 第五条'} />,
+    );
+    const expanded = screen.getByRole('button', { name: '展开全部 ▾' });
+    fireEvent.click(expanded);
+    expect(screen.getByRole('button', { name: '收起 ▴' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '收起 ▴' }));
+    expect(screen.getByRole('button', { name: '展开全部 ▾' })).toBeInTheDocument();
+  });
 
 describe('truncateText', () => {
   it('按 Unicode 字符截断,省略号计入最大长度', () => {

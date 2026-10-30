@@ -21,12 +21,11 @@ export function locateMessageWindowTimestamp(
     if (inWindow.length) return inWindow[0].ts;
     // 窗口空时优先取起点后的第一条；没有则保留向会话顶部定位的能力。
     const after = messages.filter((m) => m.ts >= start);
-    return after.length ? after[0].ts : messages[0]?.ts ?? null;
+    return after.length ? after[0].ts : messages[0].ts;
   }
-  const bound = start !== null ? start : end;
-  if (bound === null) return null; // 前面已保证二者必有其一,此行为收窄辅助
+  const bound = start !== null ? start : end!;
   const fromBound = messages.filter((m) => m.ts >= bound);
-  return fromBound.length ? fromBound[0].ts : messages[0]?.ts ?? null;
+  return fromBound.length ? fromBound[0].ts : messages[0].ts;
 }
 
 /** 消息 DOM 时间戳候选属性(不同 SDK 版本暴露差异,best-effort 全试)。 */
@@ -41,8 +40,7 @@ function collectMessageCandidates(root: ParentNode): MessageDomCandidate[] {
   const candidates: MessageDomCandidate[] = [];
   for (const attr of TS_ATTRS) {
     for (const el of Array.from(root.querySelectorAll(`[${attr}]`))) {
-      const raw = el.getAttribute(attr);
-      const ts = raw !== null ? Number(raw) : NaN;
+      const ts = Number(el.getAttribute(attr));
       if (!Number.isNaN(ts)) candidates.push({ ts, el });
     }
   }
@@ -63,8 +61,6 @@ export function scrollToMessageTimestampWindow(
   if (!candidates.length) return false;
 
   const targetTs = locateMessageWindowTimestamp(candidates, startTime, endTime);
-  if (targetTs === null) return false;
-
   const hit = candidates.filter((c) => c.ts === targetTs);
   hit[hit.length - 1].el.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
   return true;

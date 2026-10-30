@@ -86,6 +86,7 @@ export const TaskNodePanelV2: React.FC<TaskNodePanelV2Props> = ({
   void task;
 
   const present = node.present ?? node.status;
+  const attemptCount = node.attemptCount ?? 0;
   const presentTone = PRESENT_TONES[present] ?? { label: present, color: C.textMuted };
   const groupEmbedEnabled = node.drillable === true && !!bcsBaseUrl;
   const goal = node.taskSpec?.instruction || node.taskSpec?.target || '';
@@ -113,8 +114,8 @@ export const TaskNodePanelV2: React.FC<TaskNodePanelV2Props> = ({
           </span>
           <span style={{ ...badgeStyle(presentTone.color), display: 'inline-flex' }}>{presentTone.label}</span>
           {/* 返工次数 = attemptCount-1(attempt 从 1 起算,首发不亮徽章) */}
-          {(node.attemptCount ?? 0) > 1 && (
-            <span style={badgeStyle(C.warning)}>第 {(node.attemptCount ?? 0) - 1} 次返工</span>
+          {attemptCount > 1 && (
+            <span style={badgeStyle(C.warning)}>第 {attemptCount - 1} 次返工</span>
           )}
           {node.needsHitl && <span style={badgeStyle(C.warning)}>人工处理</span>}
           {node.hasSubTask && node.subTaskId && onOpenSubTask && (

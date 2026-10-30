@@ -52,7 +52,8 @@ function isSafeImageSource(value: string): boolean {
   return /^(?:https?:|\/(?!\/)|\.\.?\/|\?)/i.test(value);
 }
 
-function renderSafeNode(node: Node, key: string): ReactNode {
+/** Exposed for deterministic node-type tests; component rendering remains private through SafeHtml. */
+export function renderSafeNode(node: Node, key: string): ReactNode {
   if (node.nodeType === Node.TEXT_NODE) {
     return node.textContent ?? '';
   }
