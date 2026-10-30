@@ -1,0 +1,63 @@
+apps/bcs/scripts/e2e-runner/README.md
+  s_cecdc98e721f4b::t_1e2ab87510f458 254,348,1761,2259,2570,2576,2664,2769,2948,3009,3112,3137,3174,3351,3432,3511,3559,3607,3651
+apps/bcs/scripts/e2e-runner/bcs_e2e/artifact.py
+  s_cecdc98e721f4b::t_b3721a6a57b883 113-117
+apps/bcs/scripts/e2e-runner/bcs_e2e/inventory.py
+  s_cecdc98e721f4b::t_4eb2f810caf0be 67,71,73-76,84,93
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_edge_friend_mutation_extras.py
+  s_cecdc98e721f4b::t_360c5e8d444bd1 1
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_service_policy_contract.py
+  s_cecdc98e721f4b::t_2348bc9092546e 1-197
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_service_policy_reporting.py
+  s_cecdc98e721f4b::t_6956eb9cd1ac31 1-243
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_service_policy_run.py
+  s_cecdc98e721f4b::t_47982ff10f258d 1-248
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_story_commands.py
+  s_cecdc98e721f4b::t_78a59835e1cb3f 71-72,282,294,306,318,330-342,734-750,800
+apps/bcs/scripts/e2e-runner/bcs_e2e/migration_inventory.py
+  s_cecdc98e721f4b::t_5482c65333532e 311-314,368-381,520-521,542
+apps/bcs/scripts/e2e-runner/bcs_e2e/reporting.py
+  s_cecdc98e721f4b::t_a38abe3e4e3017 578-580
+apps/bcs/scripts/e2e-runner/migration-freeze-review-20261029.md
+  s_cecdc98e721f4b::t_571cf54af71d78 514-552
+apps/bcs/scripts/e2e-runner/next-story-migrations.md
+  s_cecdc98e721f4b::t_03c0af107691c8 16,353,529,652,1032,1061,1086,1119,1174,1283,1345,1395,1430,1488,1677,1754,1797,1882,1921,1933,3944,4222
+apps/bcs/scripts/e2e-runner/retained-file.md
+  s_cecdc98e721f4b::t_343e140084049f 8
+apps/bcs/scripts/e2e-runner/retained-serial-admission.md
+  s_cecdc98e721f4b::t_e61ba96f27f34d 125,189
+apps/bcs/scripts/e2e-runner/service-policy-migration-contract.json
+  s_cecdc98e721f4b::t_2f5be744c43860 1-132
+apps/bcs/scripts/e2e-runner/tests/test_local_coverage_suite.py
+  s_cecdc98e721f4b::t_1851653236c20e 21,62,66-67,69-70,89,91,109,151,164,189,196,207,223,230,241,258,286-287
+apps/bcs/scripts/e2e-runner/tests/test_local_custom_collaboration_run.py
+  s_cecdc98e721f4b::t_ca50628aaf3016 98,279
+apps/bcs/scripts/e2e-runner/tests/test_local_entry_switch.py
+  s_cecdc98e721f4b::t_600b0139123657 34,39,59,61,71,82
+apps/bcs/scripts/e2e-runner/tests/test_local_service_policy_contract.py
+  s_cecdc98e721f4b::t_eb265880d4038d 1-155
+apps/bcs/scripts/e2e-runner/tests/test_local_service_policy_run.py
+  s_cecdc98e721f4b::t_6241a11cda5723 1-400
+apps/bcs/scripts/e2e-runner/tests/test_local_story_commands.py
+  s_cecdc98e721f4b::t_2f567da94a334e 72-73
+apps/bcs/scripts/e2e-runner/tests/test_migration_inventory.py
+  s_cecdc98e721f4b::t_5a3c837cf1cee9 260,262,361,400,461,523
+apps/bcs/scripts/e2e-runner/trusted-team-acceptance.md
+  s_cecdc98e721f4b::t_325afd0c53aed6 50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4191d2b7171798514944bf7e493c48e94578987a",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

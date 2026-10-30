@@ -1,0 +1,31 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/adapters.py
+  s_cecdc98e721f4b::t_f2fff6da23fa67 387
+apps/bcs/scripts/e2e-runner/bcs_e2e/remote_edge_friend_mutation_adapter.py
+  s_cecdc98e721f4b::t_4de54c04c8dae7 221-224
+apps/bcs/scripts/e2e-runner/bcs_e2e/route_bindings.py
+  s_cecdc98e721f4b::t_33bedaf9f9a076 154,165,198-201,205,210,215,219
+apps/bcs/scripts/e2e-runner/bcs_e2e/transport.py
+  s_cecdc98e721f4b::t_d30dbd45288344 199
+apps/bcs/scripts/e2e-runner/tests/test_remote_edge_friend_mutation_adapter.py
+  s_cecdc98e721f4b::t_37cba44e5598c5 591-601
+apps/bcs/scripts/e2e-runner/tests/test_remote_edge_friend_mutation_transport.py
+  s_cecdc98e721f4b::t_be9bf7338dda9e 448
+apps/bcs/scripts/e2e-runner/tests/test_remote_edge_read_adapter.py
+  s_cecdc98e721f4b::t_27336c08779775 374
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bb0ae0f1c16d4255d39a19f3ddc2e41e0801cff7",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
