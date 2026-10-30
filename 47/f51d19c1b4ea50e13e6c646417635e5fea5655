@@ -1,0 +1,57 @@
+apps/bcs/scripts/e2e-runner/authority-dual-migration-contract.json
+  s_cecdc98e721f4b::t_2c350a85c7b2de 1-1347
+apps/bcs/scripts/e2e-runner/bcs_e2e/authority/__init__.py
+  s_cecdc98e721f4b::t_64bbbc1797f194 1
+apps/bcs/scripts/e2e-runner/bcs_e2e/authority/checks.py
+  s_cecdc98e721f4b::t_f7942bd0091979 1-582
+apps/bcs/scripts/e2e-runner/bcs_e2e/authority/contract.py
+  s_cecdc98e721f4b::t_a6d5de7985a611 1-344
+apps/bcs/scripts/e2e-runner/bcs_e2e/authority/dual_case_run.py
+  s_cecdc98e721f4b::t_8d0cb5245a1e5a 1-714
+apps/bcs/scripts/e2e-runner/bcs_e2e/authority/reporting.py
+  s_cecdc98e721f4b::t_4371c272fb3cdb 1-176
+apps/bcs/scripts/e2e-runner/bcs_e2e/authority/run.py
+  s_cecdc98e721f4b::t_c5837a453b030b 1-366
+apps/bcs/scripts/e2e-runner/bcs_e2e/authority/story.py
+  s_cecdc98e721f4b::t_8b150b2f40496d 1-596
+apps/bcs/scripts/e2e-runner/bcs_e2e/case_command_registration.py
+  s_cecdc98e721f4b::t_1c30b36be5b47f 19-20,55,328
+apps/bcs/scripts/e2e-runner/bcs_e2e/cli.py
+  s_cecdc98e721f4b::t_ae5c2d1ee337ce 47,767-779
+apps/bcs/scripts/e2e-runner/bcs_e2e/inventory.py
+  s_cecdc98e721f4b::t_dbcf5b0af4c6eb 91-92
+apps/bcs/scripts/e2e-runner/bcs_e2e/migration_inventory.py
+  s_cecdc98e721f4b::t_6710d581cbd827 503-563,719
+apps/bcs/scripts/e2e-runner/executor-migration.json
+  s_cecdc98e721f4b::t_3422db418ff9d1 323
+apps/bcs/scripts/e2e-runner/tests/test_authority_checks.py
+  s_cecdc98e721f4b::t_8568067f3e89b6 1-306
+apps/bcs/scripts/e2e-runner/tests/test_authority_contract.py
+  s_cecdc98e721f4b::t_86d39919289281 1-333
+apps/bcs/scripts/e2e-runner/tests/test_authority_dual_case_run.py
+  s_cecdc98e721f4b::t_4edf0d35c28d1a 1-785
+apps/bcs/scripts/e2e-runner/tests/test_authority_run.py
+  s_cecdc98e721f4b::t_0bad1d733092d7 1-472
+apps/bcs/scripts/e2e-runner/tests/test_authority_story.py
+  s_cecdc98e721f4b::t_1f00f81838d9ae 1-776
+apps/bcs/scripts/e2e-runner/tests/test_local_backlog_story_commands.py
+  s_cecdc98e721f4b::t_3834415e29d31e 262
+apps/bcs/scripts/e2e-runner/tests/test_migration_inventory.py
+  s_cecdc98e721f4b::t_314987a12916b4 583,586,594,623-624,669-670
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "47f51d19c1b4ea50e13e6c646417635e5fea5655",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
