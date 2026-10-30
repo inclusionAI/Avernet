@@ -1,0 +1,76 @@
+name: 写稿审稿发表协作
+metadata:
+  description: 写稿、审稿、不通过重写、发表的自定义协作工作流
+  labels:
+    category: content
+participants:
+  writer:
+    display_name: 写稿
+    description: 负责起草和修订稿件
+    required: true
+  reviewer:
+    display_name: 审稿
+    description: 负责审核稿件质量并给出修改意见
+    required: true
+  publisher:
+    display_name: 发表
+    description: 负责最终发表通过审核的稿件
+    required: true
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 2
+    graph_mode: hierarchical
+    projection:
+      default_visibility: shared
+    defaults:
+      node_timeout_ms: 120000
+      max_attempts: 2
+    nodes:
+      review_loop:
+        kind: loop
+        display_name: 写稿审稿循环
+        loop:
+          mode: fixed
+          max_iterations: 3
+          entry_node: writing
+          result_node: review
+          continue_outcomes: [complete]
+          break_outcomes: []
+          exhausted_outcome: exhausted
+          nodes:
+            writing:
+              kind: bot_task
+              display_name: 写稿
+              assignee:
+                type: bot_binding
+                binding: writer
+              instruction: |
+                根据上游输入或上一轮审稿意见撰写或修订稿件，输出完整稿件文本。
+              transitions:
+                complete:
+                  targets:
+                    - review
+            review:
+              kind: bot_task
+              display_name: 审稿
+              assignee:
+                type: bot_binding
+                binding: reviewer
+              instruction: |
+                审核稿件质量，给出具体修改意见和评分。如果稿件质量达标，明确说明"建议通过"。
+        transitions:
+          exhausted:
+            display_name: 审稿轮次结束
+            targets: [publish]
+      publish:
+        kind: bot_task
+        display_name: 发表
+        assignee:
+          type: bot_binding
+          binding: publisher
+        instruction: |
+          将最终稿件发表，输出发表结果。
+        final_output: true
+
+# second revision

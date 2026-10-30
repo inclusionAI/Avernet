@@ -1,0 +1,188 @@
+{
+  "status": "DESCRIBE_ONLY_NOT_APPLIED",
+  "cli_py": {
+    "import": "from .provider_publishes.dual_case_run import COMMAND as PROVIDER_PUBLISHES_COMMAND, dual_provider_publishes_case_run",
+    "dispatch": "elif args.command == PROVIDER_PUBLISHES_COMMAND: report = dual_provider_publishes_case_run(profile_path=args.profile, binary=args.binary, binary_sha256=args.binary_sha256, cli_binary=args.cli_binary, cli_binary_sha256=args.cli_binary_sha256, state_dir=args.state_dir, run_id=args.run_id, confirm_run_id=args.confirm_run_id, allow_write=args.allow_write); return 0 if report['status'] == 'PASS' else 2"
+  },
+  "case_command_registration_py": {
+    "import": "from .provider_publishes.dual_case_run import COMMAND as PROVIDER_PUBLISHES_COMMAND, register_provider_publishes_dual_case_commands",
+    "CASE_COMMANDS_add": "PROVIDER_PUBLISHES_COMMAND",
+    "register_case_commands_append": "register_provider_publishes_dual_case_commands(commands)"
+  },
+  "migration_inventory_py": {
+    "variable": "provider_publishes_slice",
+    "append_to": "migration_plan()[local_backlog_case_slices]",
+    "literal_row": {
+      "suite": "owned-local-provider-publishes-v1",
+      "case_id": "DUAL-PROVIDER-PUBLISHES-01",
+      "case_version": 1,
+      "legacy_id": "story_provider_operator_publishes_agent",
+      "status": "LOCAL_EXECUTOR_ONLY_BACKLOG",
+      "required_assertion_count": 98,
+      "requirement_ids": [
+        "PROVIDER-PUBLISHES.register.status",
+        "PROVIDER-PUBLISHES.register.provider-registration-returns-provider-id",
+        "PROVIDER-PUBLISHES.slug-read.status",
+        "PROVIDER-PUBLISHES.slug-read.slug-discovery-keeps-provider-id",
+        "PROVIDER-PUBLISHES.slug-read.slug-discovery-returns-the-registered-slug",
+        "PROVIDER-PUBLISHES.slug-read.slug-discovery-returns-provider-name",
+        "PROVIDER-PUBLISHES.slug-read.slug-discovery-returns-auth-mode",
+        "PROVIDER-PUBLISHES.slug-read.slug-discovery-returns-protocol-version",
+        "PROVIDER-PUBLISHES.slug-read.slug-discovery-starts-enabled",
+        "PROVIDER-PUBLISHES.slug-read.slug-discovery-exposes-only-basic-public-fields",
+        "PROVIDER-PUBLISHES.collaboration-slug-read.status",
+        "PROVIDER-PUBLISHES.collaboration-slug-read.collaboration-slug-discovery-preserves-the-public-projection",
+        "PROVIDER-PUBLISHES.collaboration-slug-missing.status",
+        "PROVIDER-PUBLISHES.collaboration-slug-invalid.status",
+        "PROVIDER-PUBLISHES.slug-missing.status",
+        "PROVIDER-PUBLISHES.slug-invalid.status",
+        "PROVIDER-PUBLISHES.duplicate-slug-conflict.status",
+        "PROVIDER-PUBLISHES.read.status",
+        "PROVIDER-PUBLISHES.read.provider-metadata-keeps-id",
+        "PROVIDER-PUBLISHES.read.provider-metadata-keeps-protocol-auth-mode",
+        "PROVIDER-PUBLISHES.read.provider-starts-enabled",
+        "PROVIDER-PUBLISHES.update.status",
+        "PROVIDER-PUBLISHES.update.provider-name-update-is-persisted",
+        "PROVIDER-PUBLISHES.update.provider-id-is-stable-across-update",
+        "PROVIDER-PUBLISHES.old-slug-missing.status",
+        "PROVIDER-PUBLISHES.renamed-slug-read.status",
+        "PROVIDER-PUBLISHES.renamed-slug-read.renamed-slug-keeps-provider-id",
+        "PROVIDER-PUBLISHES.renamed-slug-read.slug-discovery-reflects-metadata-update",
+        "PROVIDER-PUBLISHES.bot-publish.status",
+        "PROVIDER-PUBLISHES.bot-publish.provider-agent-receives-bcs-bot-id",
+        "PROVIDER-PUBLISHES.bot-publish.static-bearer-agent-receives-runtime-token",
+        "PROVIDER-PUBLISHES.bot-publish.provider-agent-keeps-provider-ref",
+        "PROVIDER-PUBLISHES.bot-update.status",
+        "PROVIDER-PUBLISHES.bot-update.patch-keeps-provider-bot-id-stable",
+        "PROVIDER-PUBLISHES.bot-update.patch-keeps-provider-ref-stable",
+        "PROVIDER-PUBLISHES.bot-update.patch-updates-bot-name",
+        "PROVIDER-PUBLISHES.bot-update.patch-appends-domain",
+        "PROVIDER-PUBLISHES.bot-update.patch-clears-scopes",
+        "PROVIDER-PUBLISHES.attributes-read-denied.status",
+        "PROVIDER-PUBLISHES.attributes-write-denied.status",
+        "PROVIDER-PUBLISHES.org-create.status",
+        "PROVIDER-PUBLISHES.org-create.organization-creation-keeps-its-code",
+        "PROVIDER-PUBLISHES.org-list.status",
+        "PROVIDER-PUBLISHES.org-list.organization-list-includes-the-created-organization",
+        "PROVIDER-PUBLISHES.org-read.status",
+        "PROVIDER-PUBLISHES.org-read.organization-read-keeps-its-name",
+        "PROVIDER-PUBLISHES.org-update.status",
+        "PROVIDER-PUBLISHES.org-update.organization-update-is-persisted",
+        "PROVIDER-PUBLISHES.candidate-list-before.status",
+        "PROVIDER-PUBLISHES.candidate-list-before.organization-candidates-include-the-provider-bot",
+        "PROVIDER-PUBLISHES.candidate-before.status",
+        "PROVIDER-PUBLISHES.candidate-before.candidate-detail-reports-a-non-member-before-adding-it",
+        "PROVIDER-PUBLISHES.candidate-before.candidate-detail-keeps-the-requested-bot-id",
+        "PROVIDER-PUBLISHES.member-add.status",
+        "PROVIDER-PUBLISHES.member-add.organization-member-keeps-its-role",
+        "PROVIDER-PUBLISHES.candidate-list-after.status",
+        "PROVIDER-PUBLISHES.candidate-list-after.organization-candidates-exclude-the-active-member",
+        "PROVIDER-PUBLISHES.candidate-after.status",
+        "PROVIDER-PUBLISHES.candidate-after.candidate-detail-reports-an-active-member",
+        "PROVIDER-PUBLISHES.member-profile.status",
+        "PROVIDER-PUBLISHES.member-profile.organization-member-profile-update-is-persisted",
+        "PROVIDER-PUBLISHES.member-read.status",
+        "PROVIDER-PUBLISHES.member-read.organization-member-read-keeps-the-bot-id",
+        "PROVIDER-PUBLISHES.member-list.status",
+        "PROVIDER-PUBLISHES.member-list.organization-member-list-includes-the-provider-bot",
+        "PROVIDER-PUBLISHES.admin-start.status",
+        "PROVIDER-PUBLISHES.admin-start.organization-admin-run-returns-a-run-id",
+        "PROVIDER-PUBLISHES.admin-start.organization-admin-run-keeps-its-organization",
+        "PROVIDER-PUBLISHES.admin-start.organization-admin-run-keeps-its-target-bot",
+        "PROVIDER-PUBLISHES.admin-read.status",
+        "PROVIDER-PUBLISHES.admin-read.organization-admin-run-read-keeps-its-run-id",
+        "PROVIDER-PUBLISHES.admin-read.organization-admin-run-read-keeps-its-target-bot",
+        "PROVIDER-PUBLISHES.admin-read.organization-admin-run-read-exposes-status",
+        "PROVIDER-PUBLISHES.member-remove.status",
+        "PROVIDER-PUBLISHES.bot-list.status",
+        "PROVIDER-PUBLISHES.bot-list.published-provider-agent-appears-in-provider-list",
+        "PROVIDER-PUBLISHES.roster-denied.status",
+        "PROVIDER-PUBLISHES.roster-denied.task-mode-roster-guardrail-names-provider-allow-list",
+        "PROVIDER-PUBLISHES.agentpass-negative.status",
+        "PROVIDER-PUBLISHES.agentpass-negative.non-agentpass-credential-resolves-no-agent-code",
+        "PROVIDER-PUBLISHES.agentpass-negative.non-agentpass-credential-resolves-no-provider-binding",
+        "PROVIDER-PUBLISHES.unknown-run-callback.status",
+        "PROVIDER-PUBLISHES.unknown-run-callback.late-provider-callback-reports-run-not-found",
+        "PROVIDER-PUBLISHES.takeover-denied.status",
+        "PROVIDER-PUBLISHES.takeover-denied.delivery-switch-guardrail-names-provider-allow-list",
+        "PROVIDER-PUBLISHES.disable.status",
+        "PROVIDER-PUBLISHES.disable.provider-disable-is-persisted",
+        "PROVIDER-PUBLISHES.disabled-slug-read.status",
+        "PROVIDER-PUBLISHES.disabled-slug-read.slug-discovery-reports-disabled-provider",
+        "PROVIDER-PUBLISHES.enable.status",
+        "PROVIDER-PUBLISHES.enable.provider-enable-is-persisted",
+        "PROVIDER-PUBLISHES.enabled-slug-read.status",
+        "PROVIDER-PUBLISHES.enabled-slug-read.slug-discovery-reports-re-enabled-provider",
+        "PROVIDER-PUBLISHES.bot-retire.status",
+        "PROVIDER-PUBLISHES.bot-retire.provider-agent-deletion-is-acknowledged",
+        "PROVIDER-PUBLISHES.bot-retire.provider-agent-deletion-keeps-provider-ref",
+        "PROVIDER-PUBLISHES.bot-list-empty.status",
+        "PROVIDER-PUBLISHES.bot-list-empty.provider-agent-list-is-empty-after-retirement"
+      ],
+      "canonical_reporting": "DUAL_CASE_RECEIPT",
+      "execution_command": "dual-provider-publishes-run",
+      "report_command": "",
+      "required_parameters": [
+        "profile",
+        "binary",
+        "binary_sha256",
+        "cli_binary",
+        "cli_binary_sha256",
+        "state_dir",
+        "run_id",
+        "confirm_run_id",
+        "allow_write"
+      ],
+      "binary_kind": "bcs",
+      "auto_build": false,
+      "environment": {
+        "local": "LOCAL_EXECUTOR_ONLY",
+        "preprod": "BLOCKED_AT_ENTRY_NO_NETWORK"
+      },
+      "release_parent_denominator": false,
+      "independent_slice": true,
+      "remote_validation": "NOT_RUN",
+      "grants_release_credit": false,
+      "source_map": "provider-publishes-migration-contract.json"
+    }
+  },
+  "executor_migration_json": {
+    "id": "story_provider_operator_publishes_agent",
+    "executor_migration": {
+      "mode": "DUAL",
+      "preprod_verdict": "NOT_RUN",
+      "gates": [],
+      "notes": []
+    }
+  },
+  "counter_changes": {
+    "bcs_e2e/inventory.py": {
+      "DUAL/NOT_RUN": [
+        6,
+        7
+      ],
+      "LOCAL_ONLY/NOT_RUN": [
+        5,
+        4
+      ]
+    },
+    "tests/test_migration_inventory.py": {
+      "DUAL/NOT_RUN": [
+        6,
+        7
+      ],
+      "LOCAL_ONLY/NOT_RUN": [
+        5,
+        4
+      ],
+      "local_backlog_case_slices": [
+        7,
+        8
+      ],
+      "append_case_id": "DUAL-PROVIDER-PUBLISHES-01",
+      "test_name": "test_backlog_registry_has_eight_independent_rows_outside_release_credit"
+    }
+  },
+  "boolean_seam_guard": "registered = COMMAND in CASE_COMMANDS; planned = any(row.get(\"execution_command\") == COMMAND for row in migration_plan()[\"local_backlog_case_slices\"]); assert registered == planned",
+  "grants_release_credit": false
+}
