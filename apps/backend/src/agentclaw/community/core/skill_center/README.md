@@ -158,6 +158,7 @@ internal_dependencies:
   - agentclaw.community.core.repository.protocols.space_skill_offline
   - agentclaw.community.core.repository.space_skill_offline_types
   - agentclaw.community.core.service_bot.service_artifact_lineage_reader_protocol
+  - agentclaw.community.core.service_bot.baas_service_errors
   - agentclaw.community.core.work_orders
   - agentclaw.community.core.repository.protocols.skill_installation
   - agentclaw.community.core.repository.protocols.skills_pool    # Skills Pool repository contracts consumed by this module

@@ -56,7 +56,7 @@ from agentclaw.community.core.skill_center.version_resolution_contract import (
     SkillVersionResolutionError,
     SkillVersionResolverProtocol,
 )
-from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
+from agentclaw.community.core.service_bot.baas_service_errors import BaasServiceError
 from agentclaw.community.core.spaces.errors import SpaceError
 from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
 from agentclaw.community.utils.env_utils import get_current_env
