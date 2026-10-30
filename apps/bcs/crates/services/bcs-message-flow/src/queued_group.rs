@@ -859,7 +859,7 @@ async fn prepare_queued_group_bounded(
         .message_repo
         .as_ref()
         .ok_or_else(|| invalid("queue message repository unavailable"))?;
-    let (mut group, source) = revalidate_queued_access(flow, row).await?;
+    let (group, source) = revalidate_queued_access(flow, row).await?;
     let limits = match &flow.delivery_policy { Some(p) => p.snapshot.read().await.policy.clone(), None => Default::default() };
     let payload = read_bounded_queued_payload(repo.as_ref(), row, contexts, total, limits.max_context_messages, limits.max_context_bytes, |d, text| {
         let projection = QueuedGroupProjection::decode(d)?;

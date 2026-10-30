@@ -27,7 +27,7 @@ inventory::submit! { CallerIdentityPluginFactory { name: "duplicate", build } }
 inventory::submit! { CallerIdentityPluginFactory { name: "duplicate", build } }
 
 fn config(name: &str) -> CallerIdentityServiceConfig {
-    CallerIdentityServiceConfig { plugin: name.into(), jwt: None, options: Default::default() }
+    CallerIdentityServiceConfig { plugin: name.into(), jwt: None, relay: None, options: Default::default() }
 }
 
 #[test]
