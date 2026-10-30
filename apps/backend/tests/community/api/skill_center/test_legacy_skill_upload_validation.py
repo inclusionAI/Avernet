@@ -588,6 +588,46 @@ class TestUploadSkillValidation:
             assert "database write failed" in caplog.text
             assert "Unexpected error: " not in caplog.text
 
+    def test_upload_generic_exception_logs_cause_in_unexpected_envelope(
+        self, mock_ctx, caplog
+    ):
+        # Covers the generic catch-all path (skills_upload_routes.py
+        # `except Exception`): a non-typed, non-runtime-pattern exception still
+        # gets repr + __cause__ surfaced in the "Unexpected error:" log and an
+        # UPLOAD_FAILED envelope, preserving prior client-facing behaviour.
+        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (
+            client,
+            mock_svc,
+            _,
+            _,
+        ):
+            error = RuntimeError("unhandled marker xyz")
+            error.__cause__ = ValueError("ctx detail")
+            mock_svc.upload_local_skill_files.side_effect = error
+
+            response = client.post(
+                "/api/skills/upload",
+                files=[
+                    (
+                        "files",
+                        (
+                            "SKILL.md",
+                            b"---\nname: a\ndescription: a\n---",
+                            "text/markdown",
+                        ),
+                    )
+                ],
+                data={"file_paths": json.dumps(["SKILL.md"])},
+            )
+
+            body = response.json()
+            assert body["success"] is False
+            assert body["error_code"] == SkillUploadErrorCode.UPLOAD_FAILED
+            # The generic envelope now logs repr + cause instead of {e} alone.
+            assert "Unexpected error:" in caplog.text
+            assert "RuntimeError('unhandled marker xyz')" in caplog.text
+            assert "ctx detail" in caplog.text
+
     @pytest.mark.parametrize(
         ("message", "expected_code"),
         [
