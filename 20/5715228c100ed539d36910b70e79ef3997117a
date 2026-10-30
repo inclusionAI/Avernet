@@ -1,0 +1,39 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/case_command_registration.py
+  s_cecdc98e721f4b::t_fa698c99d9f3cd 31,50,222-229
+apps/bcs/scripts/e2e-runner/bcs_e2e/cli.py
+  s_cecdc98e721f4b::t_d3e01aa57c7f7f 66,680-681
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_field/__init__.py
+  s_cecdc98e721f4b::t_3cd341ef460ec6 1-47
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_field/build_group_workspace_field_obligations.py
+  s_cecdc98e721f4b::t_49e16affcb1b86 1-168
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_field/dual_case_run.py
+  s_cecdc98e721f4b::t_123b345150c1fa 1-522
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_field/group_workspace_field_obligations.py
+  s_cecdc98e721f4b::t_fe1361b4fb5e7b 1-310
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_field/profile.py
+  s_cecdc98e721f4b::t_6c6d646e8d26b9 1-159
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_field/workspace-field-obligations-contract.json
+  s_cecdc98e721f4b::t_1245731187decd 1-1285
+apps/bcs/scripts/e2e-runner/tests/test_registration_dual_waves.py
+  s_cecdc98e721f4b::t_8631eb76cfda79 22,29
+apps/bcs/scripts/e2e-runner/tests/test_workspace_field_dual_case_run.py
+  s_cecdc98e721f4b::t_c58a7ec3ee6bac 1-637
+apps/bcs/scripts/e2e-runner/tests/test_workspace_field_obligations.py
+  s_cecdc98e721f4b::t_084172e479512d 1-107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "205715228c100ed539d36910b70e79ef3997117a",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
