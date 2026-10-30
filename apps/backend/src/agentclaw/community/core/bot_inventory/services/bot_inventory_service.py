@@ -128,7 +128,17 @@ class BotInventoryService(BotInventoryServiceProtocol):
                 for row in cloud_rows
                 if row.get("bot_type") != "service"
             )
-            service_cards = self._lifecycle.service_cards(bots=service_rows)
+            service_cards = {}
+            owners = {str(row.get("owner_id") or owner_id) for row in service_rows}
+            for source_owner in owners:
+                owned_rows = [
+                    row for row in service_rows
+                    if str(row.get("owner_id") or owner_id) == source_owner
+                ]
+                service_cards.update({
+                    (source_owner, bot_id): cards
+                    for bot_id, cards in self._lifecycle.service_cards(bots=owned_rows).items()
+                })
             for row in service_rows:
                 bot_id = str(row.get("bot_id") or "")
                 bot_owner_id = str(row.get("owner_id") or owner_id)
@@ -136,7 +146,7 @@ class BotInventoryService(BotInventoryServiceProtocol):
                 level = levels.get(int(row.get("id") or 0), PermissionLevel.NONE)
                 service_rows_by_pair[pair] = row
                 service_levels_by_pair[pair] = level
-                lifecycle_cards = service_cards.get(bot_id, ())
+                lifecycle_cards = service_cards.get((bot_owner_id, bot_id), ())
                 if any(card.has_draft for card in lifecycle_cards):
                     service_draft_pairs.add(pair)
                 cards.extend(
@@ -181,11 +191,11 @@ class BotInventoryService(BotInventoryServiceProtocol):
             service_levels_by_pair=service_levels_by_pair,
             service_draft_pairs=service_draft_pairs,
         )
-        page_cards = self._attach_page_templates(page_cards)
+        page_cards = self._attach_page_templates(page_cards, owner_id=owner_id)
         return page_cards, total
 
     def _attach_page_templates(
-        self, items: list[BotInventoryItem]
+        self, items: list[BotInventoryItem], *, owner_id: str
     ) -> list[BotInventoryItem]:
         """Attach template_config onto the returned page slice only.
 
@@ -197,9 +207,13 @@ class BotInventoryService(BotInventoryServiceProtocol):
 
         Attach is verbatim (2026-09-01 passthrough decision): the stored
         snapshot is deep-copied onto the read model, secrets included — the
-        listing is owner-scoped, so that echoes the caller's own input.
+        snapshot is returned only for the caller's own Bots. Shared cards never
+        load or return another owner's creation configuration.
         """
-        bot_ids = [item.bot_id for item in items if item.template_type]
+        bot_ids = [
+            item.bot_id for item in items
+            if item.template_type and item.owner_entity_id == owner_id
+        ]
         if not bot_ids:
             return items
         ext_by_bot_id = self._template_port.list_template_configs_by_bot_ids(
@@ -207,7 +221,7 @@ class BotInventoryService(BotInventoryServiceProtocol):
         )
         enriched: list[BotInventoryItem] = []
         for item in items:
-            if not item.template_type:
+            if not item.template_type or item.owner_entity_id != owner_id:
                 enriched.append(item)
                 continue
             attached = template_config_for_public(ext_by_bot_id.get(item.bot_id))
@@ -273,6 +287,12 @@ class BotInventoryService(BotInventoryServiceProtocol):
         engine: str | None,
         bot_ids: list[str] | None = None,
     ) -> list[Mapping[str, Any]]:
+        records = (
+            self._access.list_user_collaborations(user_id=owner_id)
+            if space.kind == "personal" and bot_ids is None else []
+        )
+        shared = {record.bot_pk: record for record in records}
+        shared_ids = sorted({record.bot_id for record in records})
         engines = _cloud_fetch_engines(engine)
         rows: list[Mapping[str, Any]] = []
         for eng in engines:
@@ -285,14 +305,43 @@ class BotInventoryService(BotInventoryServiceProtocol):
                     bot_ids=bot_ids,
                 )
             )
+            if shared_ids:
+                rows.extend(self._fetch_cloud_pages(
+                    engine=eng, owner_id=owner_id, space=space,
+                    keyword=keyword, bot_ids=shared_ids, owned_only=False,
+                ))
+        matching_shared = [
+            row for row in rows
+            if (record := shared.get(int(row.get("id") or 0))) is not None
+            and record.bot_id == row.get("bot_id")
+            and record.owner_id == row.get("owner_id")
+        ]
+        shared_levels = self._access.get_operable_permission_levels(
+            bots=matching_shared, user_id=owner_id,
+        ) if matching_shared else {}
+        effective_shared = {
+            int(row["id"]) for row in matching_shared
+            if shared_levels.get(int(row["id"]), PermissionLevel.NONE) >= PermissionLevel.MEMBER
+        }
         # aicoding is claude_code's internal runtime form (PR #1719 engine/form
         # vocabulary split): engine=aicoding fetches aicoding + claude_code
         # batches, then collapses them to the aicoding runtime read model here.
         if len(engines) > 1:
             rows = _select_aicoding_runtime_rows(rows)
         visible: list[Mapping[str, Any]] = []
+        seen: set[tuple[int, str, str]] = set()
         for row in rows:
             if row.get("bot_type") not in (None, "", "personal", "service"):
+                continue
+            pk = int(row.get("id") or 0)
+            identity = (pk, str(row.get("owner_id") or ""), str(row.get("bot_id") or ""))
+            if identity in seen:
+                continue
+            if pk in effective_shared:
+                seen.add(identity)
+                visible.append(row)
+                continue
+            if row.get("owner_id") != owner_id and space.kind == "personal":
                 continue
             try:
                 self._business_space.assert_bot_visible_in_current_space(
@@ -302,6 +351,7 @@ class BotInventoryService(BotInventoryServiceProtocol):
                 )
             except BotInventoryPermissionError:
                 continue
+            seen.add(identity)
             visible.append(row)
         return visible
 
@@ -313,6 +363,7 @@ class BotInventoryService(BotInventoryServiceProtocol):
         space: BusinessSpaceRef,
         keyword: str | None,
         bot_ids: list[str] | None,
+        owned_only: bool = True,
     ) -> list[Mapping[str, Any]]:
         """Page through one engine's matching bots until exhausted.
 
@@ -327,7 +378,7 @@ class BotInventoryService(BotInventoryServiceProtocol):
         total: int | None = None
         while True:
             result = self._bot.list_bots_by_conditions(
-                owner_id=owner_id if space.kind == "personal" else None,
+                owner_id=owner_id if space.kind == "personal" and owned_only else None,
                 space_id=space.space_id if space.kind == "team" else None,
                 bot_name=keyword,
                 engine=engine,
@@ -484,6 +535,27 @@ class BotInventoryService(BotInventoryServiceProtocol):
         )
         bot_id = str(row.get("bot_id") or "")
         publication_id = lifecycle_card.publication_id if lifecycle_card else None
+        source_owner = str(row.get("owner_id") or owner_id)
+        shared_view = (
+            current_space is not None and current_space.kind == "personal"
+            and source_owner != owner_id
+        )
+        if shared_view and not row.get("space_id"):
+            source_space = BusinessSpaceRef(
+                space_id=f"personal:{source_owner}", name="Personal", kind="personal",
+            )
+        else:
+            source_space = self._business_space.bot_space(
+                bot={**dict(row), "ext": ext},
+                owner_id=owner_id,
+                current_space=None if shared_view else current_space,
+            )
+        if shared_view and source_space is None:
+            space_id = str(row["space_id"])
+            source_space = BusinessSpaceRef(space_id=space_id, name=space_id, kind="unknown")
+        card_id = f"service:{bot_id}:{publication_id}" if publication_id is not None else bot_id
+        if shared_view:
+            card_id = f"shared:{source_owner}:{card_id}"
         return BotInventoryItem(
             bot_id=bot_id,
             bot_name=str(row.get("bot_name") or ""),
@@ -502,22 +574,14 @@ class BotInventoryService(BotInventoryServiceProtocol):
             owner_entity_id=str(
                 row.get("owner_id") or row.get("entity_id") or owner_id
             ),
-            space=self._business_space.bot_space(
-                bot={**dict(row), "ext": ext},
-                owner_id=owner_id,
-                current_space=current_space,
-            ),
+            space=source_space,
             avatar_url=_optional_str(ext.get("avatar_url") or row.get("avatar_url")),
             machine_id=_optional_str(ext.get("machine_id") or row.get("machine_id")),
             mount_path=_optional_str(ext.get("mount_path") or row.get("mount_path")),
             passport_id=_passport_id(ext),
             actions=actions,
             disabled_actions=disabled or None,
-            card_id=(
-                f"service:{bot_id}:{publication_id}"
-                if publication_id is not None
-                else bot_id
-            ),
+            card_id=card_id,
             publication_id=publication_id,
             publication_version=(lifecycle_card.version if lifecycle_card else None),
             live_version=(lifecycle_card.live_version if lifecycle_card else None),
@@ -659,11 +723,12 @@ def _select_aicoding_runtime_rows(
     the engine arm. The two batches are disjoint by ``active_engine``; the
     bot_id dedup is a defensive guard against upstream duplication only.
     """
-    seen: set[str] = set()
+    seen: set[tuple[str, str]] = set()
     out: list[Mapping[str, Any]] = []
     for row in rows:
         bot_id = str(row.get("bot_id") or "")
-        if bot_id in seen:
+        key = (str(row.get("owner_id") or ""), bot_id)
+        if key in seen:
             continue
         if not uses_aicoding_runtime(
             active_engine=row.get("active_engine"),
@@ -671,6 +736,6 @@ def _select_aicoding_runtime_rows(
             template_config=None,
         ):
             continue
-        seen.add(bot_id)
+        seen.add(key)
         out.append(row)
     return out
