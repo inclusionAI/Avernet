@@ -1,0 +1,2863 @@
+{
+  "meta": {
+    "generated_at": "2026-10-31T03:22:12+0800",
+    "generated_by": "read-only assembler (planck) for r7/r8 coverage evidence",
+    "baseline_commit": {
+      "short": "1f996eda4",
+      "full": "1f996eda403aaf7ace8699e15569630e25dd131e",
+      "note": "任务基线：已提交口径唯一基准"
+    },
+    "observed_head": {
+      "collection_short": "76a79fd00",
+      "collection_note": "2026-10-31 03:04 采集时刻 HEAD（基线后仅 1 笔 TLS 波次）；41 行数值采集自该工作区状态",
+      "delivery_short": "992f9f815",
+      "delivery_note": "交付复核 HEAD（基线后共 7 笔 committed 波次，meta.landing_wave_observation 与 MD §3）；行数值与桶判定仍按基线 1f996eda4 committed 口径，landing 不计入闭合"
+    },
+    "sources": [
+      {
+        "path": "/Users/shenlifang/.codex/attachments/13383616-472d-4860-8bc2-ea14fe1f01d8/pasted-text-1.txt",
+        "what": "上游 41 用例名册 + roster 战况（池 2026-10-29 第三发 324/386）"
+      },
+      {
+        "path": "/Users/shenlifang/.codex/bcs-e2e/assertion-gap-matrix-20261031.md",
+        "what": "2026-10-31 07:39 审计快照（parsed/本地投影/义务旧值/漂移基准）"
+      },
+      {
+        "path": "/Users/shenlifang/work/codes/datamarket/teamclaw/Avernet/.worktree/e2e-dev-fresh/apps/bcs/scripts/e2e-runner/executor-migration.json",
+        "what": "committed 执行器 mode 权威（DUAL 36/DYNAMIC_OWNED_LOCAL 4/EDGE_OBLIGATION_IN_FAMILY 1）"
+      },
+      {
+        "path": "/Users/shenlifang/work/codes/datamarket/teamclaw/Avernet/.worktree/e2e-dev-fresh/apps/bcs/scripts/e2e-runner/manifest.json",
+        "what": "legacy inventory（NOT_MIGRATED 谱系）"
+      },
+      {
+        "path": "/Users/shenlifang/work/codes/datamarket/teamclaw/Avernet/.worktree/e2e-dev-fresh/apps/bcs/scripts/e2e-runner/migration-contracts.json",
+        "what": "契约索引"
+      },
+      {
+        "path": "/Users/shenlifang/work/codes/datamarket/teamclaw/Avernet/.worktree/e2e-dev-fresh/apps/bcs/scripts/e2e-runner/*-migration-contract.json（39 份）+ group-workspace-density-contract.json + trusted-team-manifest.json",
+        "what": "义务数实测源（dirty 两份取 git show 1f996eda4 基线版）"
+      },
+      {
+        "path": "/Users/shenlifang/work/codes/datamarket/teamclaw/Avernet/.worktree/e2e-dev-fresh/apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_service_completion.py:47 / local_session_contract.py:68 / local_file_story.py",
+        "what": "WP-B 代码锚 44/87/12"
+      },
+      {
+        "path": "/Users/shenlifang/work/codes/datamarket/teamclaw/Avernet/.worktree/e2e-dev-fresh",
+        "what": "git log --oneline -25 / git status --porcelain（基线后 landing 波次观测）"
+      },
+      {
+        "path": "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence",
+        "what": "r5-r8 预发收据根（r8 权威最新轮）"
+      },
+      {
+        "path": "/Users/shenlifang/.codex/bcs-e2e/20261031-migration-wpc-local",
+        "what": "wpc owned-local 套件（junit 9/9 PASS，今日观测刷新 #30/#32/#33/#35/#37/#38/#39/#40/#41 本地投影）"
+      },
+      {
+        "path": "/Users/shenlifang/.codex/bcs-e2e/20261031-migration-wpb-r1 / -r2 / -split",
+        "what": "WP-B session/service/file 回填实弹"
+      },
+      {
+        "path": "/Users/shenlifang/.codex/bcs-e2e/20261031-migration-wp2-authority-local / -preprod",
+        "what": "authority WP2 双腿"
+      },
+      {
+        "path": "/Users/shenlifang/.codex/bcs-e2e/e2e-dev-fresh-authority-live-1 / -live-2-reports-offline",
+        "what": "authority owned-local LIVE 42/42"
+      },
+      {
+        "path": "/Users/shenlifang/.codex/bcs-e2e/20261030-dual-service-policy-local-live",
+        "what": "service-policy 本地 LIVE"
+      },
+      {
+        "path": "/Users/shenlifang/.codex/bcs-e2e/20261031-migration-wpa-provider-subbots-local-r1..r3",
+        "what": "subbots 本地腿"
+      },
+      {
+        "path": "/Users/shenlifang/.codex/bcs-e2e/20261031-migration-wpe3-draft-delivery-local-live-r5 / -preprod",
+        "what": "draft-delivery 双腿"
+      },
+      {
+        "path": "/Users/shenlifang/.codex/bcs-e2e/20261031-migration-wp-mock-material",
+        "what": "mock 物料盘点（webhook/judge 缺口）"
+      },
+      {
+        "path": "/Users/shenlifang/.codex/bcs-e2e/binaries/bcs-cli-preprod-r8",
+        "what": "r8 CLI 二进制（sha256 前缀 5abecdc6…；≠ B 树 debug 前缀 0e9f2e3f…；收据注记，不作等价主张）"
+      },
+      {
+        "path": "/Users/shenlifang/.codex/bcs-e2e/preprod.json",
+        "what": "当前预发 profile（12 route_bindings；actor 引用名无密文）"
+      }
+    ]
+  },
+  "discipline": {
+    "baseline_rule": "全部计数以已提交基线 1f996eda4 为准；76a79fd00（基线后唯一提交）与 39 条 dirty/untracked 路径仅为 landing 波次观测",
+    "pending_landing_rule": "六个补丁族（P0-P6）涉及行一律标 ⏳pending-landing（语义=基线 1f996eda4 口径缺口义务未闭合；基线后 L1-L7 committed 波次不改判；P0/P2/P5 截至交付无落地证据——无证据≠落地否定）；空结果不作负证据",
+    "no_fabrication_rule": "† 全绿单例分母不伪造（17 只）；NOT_RUN/BLOCKED 不美化为 PASS；快照旧值与 committed 新值双记",
+    "observation_vs_inference": "每行 basis 标注观测源；族归属/队列分数为推断并注记",
+    "remote_validation_rule": "r5-r8 全部预发收据 remote_validation=NOT_RUN、grants_release_credit=false（2026-09-20 起记账规则）；本图 verdict 桶按 preprod-tier 实弹 status，收据自身字段全局披露",
+    "redaction": "不回显任何 cookie/token/authorization 值；仅引用环境变量名、文件路径、二进制 digest 前缀"
+  },
+  "totals": {
+    "rows": 41,
+    "dual_environment": {
+      "DUAL": 37,
+      "LOCAL_ONLY": 4,
+      "NONE": 0,
+      "note": "DUAL=36 registered + #30 EDGE_OBLIGATION_IN_FAMILY 族内近似计入；快照 27/13/1 已过时（见对账节）"
+    },
+    "gap_none_rows": {
+      "count": 6,
+      "cases": [
+        16,
+        21,
+        22,
+        29,
+        30,
+        36
+      ]
+    },
+    "preprod_verdict": {
+      "PASS": 17,
+      "PARTIAL": 1,
+      "BLOCKED": 15,
+      "NOT_RUN": 8,
+      "PASS_cases": [
+        1,
+        2,
+        3,
+        10,
+        16,
+        17,
+        21,
+        22,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        39
+      ],
+      "PARTIAL_cases": [
+        7
+      ],
+      "BLOCKED_cases": [
+        4,
+        5,
+        6,
+        8,
+        9,
+        11,
+        12,
+        13,
+        14,
+        15,
+        18,
+        19,
+        20,
+        37,
+        38
+      ],
+      "NOT_RUN_cases": [
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        40,
+        41
+      ]
+    },
+    "pending_landing_rows": {
+      "count": 23,
+      "cases": [
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        13,
+        14,
+        15,
+        18,
+        20,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        37,
+        38,
+        40,
+        41
+      ],
+      "additional_dirty_observed": [
+        12,
+        19
+      ],
+      "note": "六补丁族缺口义务并集 23 行（基线口径；L1-L7 landing 不改判）；交付时在飞 dirty 仅剩 #12 draft_delivery 2 文件（族归属未定）；#19/#28 代码面已随 f2905e2d3 committed（归属由推断升为观测，仍不计基线闭合）"
+    },
+    "obligations_committed_sum": 674,
+    "upstream_parsed_known_sum": 638,
+    "upstream_poolab": "324绿/386（2026-10-29 第三发；17 只全绿†单例分母未给）"
+  },
+  "rows": [
+    {
+      "no": 1,
+      "case_id": "story_human_manages_delivery_policy",
+      "upstream_file": "stories.sh",
+      "upstream": {
+        "roster_verdict": "全绿†",
+        "parsed_green": null,
+        "parsed_total": null,
+        "dagger": true,
+        "snapshot_parsed_count": 22
+      },
+      "local_projection": {
+        "leaves": "PASS 1/1 叶",
+        "obligations": 10,
+        "obligations_basis": "contract:delivery-policy-migration-contract.json requirements=10（committed 实测）"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "基线已注册 dual 命令；r6 实弹 PASS"
+      },
+      "preprod_latest": {
+        "verdict": "PASS",
+        "round": "r6",
+        "detail": "1/1 叶 PASS（delivery-policy-stdout.json）",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r6-delivery-policy/delivery-policy-stdout.json"
+        ]
+      },
+      "gap": {
+        "kind": "COUNT_GAP（密度）",
+        "parsed_minus_obligations": 12,
+        "detail": "parsed 22 − 义务 10 = 12（上游无原生 assertion-id，未逐条定位）"
+      },
+      "materials": [],
+      "pending_landing": [],
+      "queue": {
+        "rank": 9,
+        "gap_qty": 12,
+        "feasibility": 3,
+        "score": 36,
+        "basis": "密度 delta=12×3；零新物料，可直接 dual 腿内逐字段展开"
+      },
+      "source_contracts": [
+        "delivery-policy-migration-contract.json"
+      ],
+      "note": ""
+    },
+    {
+      "no": 2,
+      "case_id": "story_user_prepares_agent_network",
+      "upstream_file": "stories.sh",
+      "upstream": {
+        "roster_verdict": "全绿†",
+        "parsed_green": null,
+        "parsed_total": null,
+        "dagger": true,
+        "snapshot_parsed_count": 11
+      },
+      "local_projection": {
+        "leaves": "PASS 8/8 叶",
+        "obligations": 8,
+        "obligations_basis": "contract:network-migration-contract.json requirements=8（committed 实测）"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "r7 八腿全 PASS（bots-query/mine、actor-list/search/status、bots-paged、platform-asset、register）"
+      },
+      "preprod_latest": {
+        "verdict": "PASS",
+        "round": "r7",
+        "detail": "8/8 叶 PASS（r7-progress.tsv network×8 rc=0）",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r7-preprod/network"
+        ]
+      },
+      "gap": {
+        "kind": "COUNT_GAP（密度）",
+        "parsed_minus_obligations": 3,
+        "detail": "parsed 11 − 义务 8 = 3（未逐条定位）"
+      },
+      "materials": [],
+      "pending_landing": [],
+      "queue": {
+        "rank": 26,
+        "gap_qty": 3,
+        "feasibility": 3,
+        "score": 9,
+        "basis": "密度 delta=3×3；零物料"
+      },
+      "source_contracts": [
+        "network-migration-contract.json"
+      ],
+      "note": ""
+    },
+    {
+      "no": 3,
+      "case_id": "story_user_runs_structured_collaboration",
+      "upstream_file": "stories.sh",
+      "upstream": {
+        "roster_verdict": "全绿†",
+        "parsed_green": null,
+        "parsed_total": null,
+        "dagger": true,
+        "snapshot_parsed_count": 43
+      },
+      "local_projection": {
+        "leaves": "PASS 1/1 叶",
+        "obligations": 17,
+        "obligations_basis": "contract:structured-migration-contract.json requirements=17（committed 实测）"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "r7 structured-core r2 + structured-templates 双 PASS；r5 core 叶 BLOCKED（WriteTransportError）不再复现"
+      },
+      "preprod_latest": {
+        "verdict": "PASS",
+        "round": "r7",
+        "detail": "core-r2 PASS + templates PASS（r7-progress.tsv）",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r7-preprod/structured-core",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r7-preprod/structured-templates"
+        ]
+      },
+      "gap": {
+        "kind": "COUNT_GAP（密度）",
+        "parsed_minus_obligations": 26,
+        "detail": "parsed 43 − 义务 17 = 26（structured Group/Join/Leave/Message 逐字段）"
+      },
+      "materials": [],
+      "pending_landing": [],
+      "queue": {
+        "rank": 4,
+        "gap_qty": 26,
+        "feasibility": 3,
+        "score": 78,
+        "basis": "密度 delta=26×3；零新物料，最高纯行动项"
+      },
+      "source_contracts": [
+        "structured-migration-contract.json"
+      ],
+      "note": ""
+    },
+    {
+      "no": 4,
+      "case_id": "story_provider_operator_publishes_agent",
+      "upstream_file": "stories.sh",
+      "upstream": {
+        "roster_verdict": "全绿†",
+        "parsed_green": null,
+        "parsed_total": null,
+        "dagger": true,
+        "snapshot_parsed_count": 98
+      },
+      "local_projection": {
+        "leaves": "NOT_RUN 0/1 叶",
+        "obligations": 98,
+        "obligations_basis": "contract:provider-publishes-migration-contract.json requirements=98（committed 96bb3ab9e；verdict.json obligation_summary baseline=42+field=56=98；legacy provider-migration 32 为旧口径）"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "dual-publishes 已注册（02297df18 第 19 dual PASS slice 谱系）；r8 首实弹 BLOCKED 0/98"
+      },
+      "preprod_latest": {
+        "verdict": "BLOCKED",
+        "round": "r8",
+        "detail": "PREPROD_PROVIDER_PUBLISHES_CREDENTIALS_UNAVAILABLE（verdict.json reason_class）；console 见 USER_NOT_LOGIN/credential-resolves-no-agent-code/no-provider-binding；义务面 0/98；remote_validation=NOT_RUN；grants_release_credit=false",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r8-preprod/provider-publishes",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r8-preprod/provider-publishes/provider-publishes-r8-state/provider-publishes-dual-run.json",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r8-preprod/provider-publishes/provider-publishes-r8-state/verdict.json"
+        ]
+      },
+      "gap": {
+        "kind": "DENSITY_CLOSED+EXECUTION_GAP",
+        "parsed_minus_obligations": 0,
+        "detail": "密度闭合 98/98；执行缺口 98（凭证门：人类 cookie 2026-10-29 过期 + provider 物料）；⏳P4"
+      },
+      "materials": [
+        "人类 cookie 刷新（用户授权物料）",
+        "provider principal signing key 环境引用",
+        "provider_admin_token 环境引用",
+        "frozen S04 本地形态契约"
+      ],
+      "pending_landing": [
+        "P4"
+      ],
+      "queue": {
+        "rank": 3,
+        "gap_qty": 98,
+        "feasibility": 1,
+        "score": 98,
+        "basis": "执行缺口 98×1；物料门控（cookie 刷新需用户授权+P4+frozen S04 本地形态）"
+      },
+      "source_contracts": [
+        "provider-publishes-migration-contract.json"
+      ],
+      "note": ""
+    },
+    {
+      "no": 5,
+      "case_id": "story_provider_owner_isolation",
+      "upstream_file": "provider_scope_story.sh",
+      "upstream": {
+        "roster_verdict": "全绿†",
+        "parsed_green": null,
+        "parsed_total": null,
+        "dagger": true,
+        "snapshot_parsed_count": 1
+      },
+      "local_projection": {
+        "leaves": "NOT_RUN 0/1 叶",
+        "obligations": 24,
+        "obligations_basis": "contract:provider-owner-isolation-migration-contract.json 与 provider-owner-migration-contract.json requirements=24（双文件同 parent，取一不计重）"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "dual 注册已提交（842de97a0）；r8 BLOCKED 0/24 FULL_STORY_NOT_EXECUTED"
+      },
+      "preprod_latest": {
+        "verdict": "BLOCKED",
+        "round": "r8",
+        "detail": "PREPROD_PROVIDER_OWNER_FULL_STORY_NOT_EXECUTED；completed 0/24；remote_validation=NOT_RUN",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r8-preprod/provider-owner",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r8-preprod/provider-owner/provider-owner-r8-leaf"
+        ]
+      },
+      "gap": {
+        "kind": "EXECUTION_GAP",
+        "parsed_minus_obligations": -23,
+        "detail": "上游 parsed† 无分母（snapshot parsed=1）；义务 24 全部未执行；⏳P4"
+      },
+      "materials": [
+        "活体准入境姿态（⏳P4）",
+        "provider 域 driver/member 分离凭证"
+      ],
+      "pending_landing": [
+        "P4"
+      ],
+      "queue": {
+        "rank": 7,
+        "gap_qty": 24,
+        "feasibility": 2,
+        "score": 48,
+        "basis": "执行缺口 24×2；P4 准入落地后可实弹"
+      },
+      "source_contracts": [
+        "provider-owner-isolation-migration-contract.json",
+        "provider-owner-migration-contract.json"
+      ],
+      "note": ""
+    },
+    {
+      "no": 6,
+      "case_id": "story_session_owner_permissions",
+      "upstream_file": "session_owner_story.sh",
+      "upstream": {
+        "roster_verdict": "全绿†",
+        "parsed_green": null,
+        "parsed_total": null,
+        "dagger": true,
+        "snapshot_parsed_count": 1
+      },
+      "local_projection": {
+        "leaves": "NOT_RUN 0/1 叶",
+        "obligations": 9,
+        "obligations_basis": "contract:session-owner-migration-contract.json / session-owner-permissions-migration-contract.json requirements=9（双文件同 parent，取一）"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "dual 注册已提交（842de97a0）；r8 BLOCKED 0/9 FULL_STORY_NOT_EXECUTED；收据 documented_gaps.PREPROD_HUMAN_PRINCIPAL_FAMILY_SINGLE：三 Human（manager/owner/outsider）矩阵在 pilot 凭证族（一 cookie+其 registered bots）下不可表达"
+      },
+      "preprod_latest": {
+        "verdict": "BLOCKED",
+        "round": "r8",
+        "detail": "PREPROD_SESSION_OWNER_FULL_STORY_NOT_EXECUTED；completed 0/9；preprod_probe absent_count=6（基线 404）；remote_validation=NOT_RUN",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r8-preprod/session-owner",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r8-preprod/session-owner/session-owner-r8-leaf"
+        ]
+      },
+      "gap": {
+        "kind": "EXECUTION_GAP",
+        "parsed_minus_obligations": -8,
+        "detail": "上游 parsed† 无分母（snapshot parsed=1）；义务 9 全部未执行；⏳P4"
+      },
+      "materials": [
+        "三 Human principal 凭证族（用户物料/GAP）",
+        "⏳P4"
+      ],
+      "pending_landing": [
+        "P4"
+      ],
+      "queue": {
+        "rank": 18,
+        "gap_qty": 9,
+        "feasibility": 2,
+        "score": 18,
+        "basis": "执行缺口 9×2；凭证族扩展先决"
+      },
+      "source_contracts": [
+        "session-owner-migration-contract.json",
+        "session-owner-permissions-migration-contract.json"
+      ],
+      "note": ""
+    },
+    {
+      "no": 7,
+      "case_id": "story_user_operates_group_workspace",
+      "upstream_file": "stories.sh",
+      "upstream": {
+        "roster_verdict": "26绿/45",
+        "parsed_green": 26,
+        "parsed_total": 45,
+        "dagger": false,
+        "snapshot_parsed_count": 59
+      },
+      "local_projection": {
+        "leaves": "PASS 10/10 叶",
+        "obligations": 17,
+        "obligations_basis": "快照口径义务=17（case 级）；committed group-workspace-density-contract.json atom_count=63（密度预言机口径 api26/cli11/tail26，非义务计数）；在飞 workspace-migration-contract.json=43=17+26field（untracked，⏳P0）"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "r8 九叶 PASS（detail/fuse/member/cli-status/create-get/list/incident-core/roundtrip/group-governance）+ group-lifecycle BLOCKED（新信号：relationships: retained Workspace CLI effect admission differs）；incident-core r7 NO_STATUS→r8 PASS"
+      },
+      "preprod_latest": {
+        "verdict": "PARTIAL",
+        "round": "r8",
+        "detail": "9/10 叶 PASS；group-lifecycle BLOCKED（r8-progress.tsv rc=2；blocked-verdicts：exec=None 全空——该叶未落 state 目录，见卫生注）",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r8-preprod/workspace",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r8-preprod/r8-progress.tsv",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r8-preprod/r8-blocked-verdicts.txt"
+        ]
+      },
+      "gap": {
+        "kind": "COUNT_GAP（密度）+⏳P0",
+        "parsed_minus_obligations": 42,
+        "detail": "parsed 59 − 义务 17 = 42（快照口径）；在飞契约 43=17+26field 层；P0 落地后残余 16；⏳P0 pending-landing"
+      },
+      "materials": [],
+      "pending_landing": [
+        "P0"
+      ],
+      "queue": {
+        "rank": 1,
+        "gap_qty": 42,
+        "feasibility": 3,
+        "score": 126,
+        "basis": "密度 delta=42×3；零新物料（r8 9/10 基础）；P0 契约落地后逐字段展开，残余 16"
+      },
+      "source_contracts": [],
+      "note": "⏳P0=未提交 untracked workspace-migration-contract.json；obligation 口径三重注（17/43/63）"
+    },
+    {
+      "no": 8,
+      "case_id": "story_user_builds_trusted_team",
+      "upstream_file": "stories.sh",
+      "upstream": {
+        "roster_verdict": "2绿/17",
+        "parsed_green": 2,
+        "parsed_total": 17,
+        "dagger": false,
+        "snapshot_parsed_count": 18
+      },
+      "local_projection": {
+        "leaves": "PASS 8/BLOCKED 5/总叶 13",
+        "obligations": 58,
+        "obligations_basis": "trusted-team-manifest.json cases[0].assertions=58（finalization_assertions=12；registration_status=LOCAL_EXECUTOR_ONLY 为本地套件锚，executor-migration mode=DUAL 为准）"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "r7 network 叶 PASS；friend CLI 叶 r8 BLOCKED（friend-cli FriendCliRunnerError 0/1；friend-decisions r3/public-accept r3 RunStateError：exact finite pending request / already friends no idempotent pass）"
+      },
+      "preprod_latest": {
+        "verdict": "BLOCKED",
+        "round": "r8",
+        "detail": "本地 8P/5B/13 叶；预发 friend 族叶 r8 BLOCKED（fixture 污损对+运行时类）；trusted-team 双登记但 friend 实弹叶未绿",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r8-preprod/cli-defects",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r8-preprod/friend-decisions",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r8-preprod/friend-public-accept",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r7-preprod/network"
+        ]
+      },
+      "gap": {
+        "kind": "DEFECT+FIXTURE（上游红 15）",
+        "parsed_minus_obligations": -40,
+        "detail": "义务 58 已超上游 parsed 18（密度超集不冲抵）；阻塞点=上游 15 条红（2/17）+5 叶 BLOCKED；⏳P6 部分叶"
+      },
+      "materials": [
+        "fixture 新鲜对（friend 配对）",
+        "站内 friend-connections CLI 路径对齐"
+      ],
+      "pending_landing": [
+        "P6"
+      ],
+      "queue": {
+        "rank": 22,
+        "gap_qty": 15,
+        "feasibility": 1,
+        "score": 15,
+        "basis": "上游红 15×1；5 叶 unblock 需 fixture 卫生+P6"
+      },
+      "source_contracts": [
+        "trusted-team-manifest.json"
+      ],
+      "note": "本地 13 叶=8 PASS+5 BLOCKED（快照 A2）"
+    },
+    {
+      "no": 9,
+      "case_id": "story_operator_coordinates_with_cli",
+      "upstream_file": "stories.sh",
+      "upstream": {
+        "roster_verdict": "23绿/26",
+        "parsed_green": 23,
+        "parsed_total": 26,
+        "dagger": false,
+        "snapshot_parsed_count": 28
+      },
+      "local_projection": {
+        "leaves": "NOT_RUN 0/1 叶",
+        "obligations": 13,
+        "obligations_basis": "contract:operator-cli-migration-contract.json requirements=13（committed 实测）"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "r8 近空收据：仅 binding/profile，console JSON {status:BLOCKED, ready_to_execute:false, reason: operator CLI remote transport requires the reviewed duo credentials}"
+      },
+      "preprod_latest": {
+        "verdict": "BLOCKED",
+        "round": "r8",
+        "detail": "operator-cli-r8-state 无 run.json（近空收据）；duo 凭据未审查到位；health 先绿约束仍在",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r8-preprod/operator-cli",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r8-preprod/operator-cli/operator-cli-r8-state"
+        ]
+      },
+      "gap": {
+        "kind": "COUNT_GAP+MATERIAL",
+        "parsed_minus_obligations": 15,
+        "detail": "parsed 28 − 义务 13 = 15（health/list/get/discover/visibility/connect/onboard-web/direct-onboard/update-status/chat/cancel/group-list/friend-list 逐字段）；⏳P2/P3"
+      },
+      "materials": [
+        "5-bot actor token 套件（GAP 未给原名）",
+        "reviewed duo 凭据（用户物料）",
+        "health 先绿"
+      ],
+      "pending_landing": [
+        "P2",
+        "P3"
+      ],
+      "queue": {
+        "rank": 10,
+        "gap_qty": 15,
+        "feasibility": 2,
+        "score": 30,
+        "basis": "密度 delta=15×2；5-bot actor token 套件+duo 凭据+health 先绿"
+      },
+      "source_contracts": [
+        "operator-cli-migration-contract.json"
+      ],
+      "note": ""
+    },
+    {
+      "no": 10,
+      "case_id": "story_user_validates_external_channel_setup",
+      "upstream_file": "stories.sh",
+      "upstream": {
+        "roster_verdict": "6绿/8",
+        "parsed_green": 6,
+        "parsed_total": 8,
+        "dagger": false,
+        "snapshot_parsed_count": 13
+      },
+      "local_projection": {
+        "leaves": "PASS 1/1 叶",
+        "obligations": 6,
+        "obligations_basis": "contract:channel-http-migration-contract.json requirements=6（committed 实测）"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "r8 channel-bindings PASS（PUBLIC-CHANNEL-BINDINGS-01）"
+      },
+      "preprod_latest": {
+        "verdict": "PASS",
+        "round": "r8",
+        "detail": "bindings-r8 PASS（r7 bindings-r2 亦 PASS；r7 bindings r1 BLOCKED 为 profile 路径不一致已修）",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r8-preprod/channel-bindings",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r8-preprod/channel-bindings/bindings-r8-state/channel-bindings-run.json"
+        ]
+      },
+      "gap": {
+        "kind": "COUNT_GAP（密度）",
+        "parsed_minus_obligations": 7,
+        "detail": "parsed 13 − 义务 6 = 7（disabled bridge 错误码/message、pause/delete no-op、target-scoped empty list、no phantom binding）；⏳P1/P3 诊断性"
+      },
+      "materials": [],
+      "pending_landing": [
+        "P1",
+        "P3"
+      ],
+      "queue": {
+        "rank": 16,
+        "gap_qty": 7,
+        "feasibility": 3,
+        "score": 21,
+        "basis": "密度 delta=7×3；零物料"
+      },
+      "source_contracts": [
+        "channel-http-migration-contract.json"
+      ],
+      "note": ""
+    },
+    {
+      "no": 11,
+      "case_id": "story_cli_operator_validates_channel_management",
+      "upstream_file": "cli-stories.sh",
+      "upstream": {
+        "roster_verdict": "2绿/4",
+        "parsed_green": 2,
+        "parsed_total": 4,
+        "dagger": false,
+        "snapshot_parsed_count": 16
+      },
+      "local_projection": {
+        "leaves": "NOT_RUN 0/1 叶",
+        "obligations": 9,
+        "obligations_basis": "contract:channel-cli-migration-contract.json requirements=9（committed 实测）"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "r8 cli-defects/channel-cli BLOCKED 0/9 ChannelCliRunnerError（credential_kind=human_cookie；remote_validation=NOT_RUN；console 混合非纯 JSON，run.json 权威）"
+      },
+      "preprod_latest": {
+        "verdict": "BLOCKED",
+        "round": "r8",
+        "detail": "DUAL-CHANNEL-CLI-01 BLOCKED 0/9；上游注明 sim 无 DingTalk 凭据按设计红",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r8-preprod/cli-defects/channel-cli-r8-state/channel-cli-run.json"
+        ]
+      },
+      "gap": {
+        "kind": "COUNT_GAP+MATERIAL",
+        "parsed_minus_obligations": 7,
+        "detail": "parsed 16 − 义务 9 = 7（真实 DingTalk/OAuth conversation lookup、redacted bind contract、unbind missing、no phantom binding）；⏳P3"
+      },
+      "materials": [
+        "DingTalk-OAuth conversation lookup 凭据（站内 GAP）"
+      ],
+      "pending_landing": [
+        "P3"
+      ],
+      "queue": {
+        "rank": 28,
+        "gap_qty": 7,
+        "feasibility": 1,
+        "score": 7,
+        "basis": "delta=7×1；站内凭据门控"
+      },
+      "source_contracts": [
+        "channel-cli-migration-contract.json"
+      ],
+      "note": ""
+    },
+    {
+      "no": 12,
+      "case_id": "story_collaboration_draft_delivery",
+      "upstream_file": "collaboration_draft_story.sh",
+      "upstream": {
+        "roster_verdict": "0绿/2",
+        "parsed_green": 0,
+        "parsed_total": 2,
+        "dagger": false,
+        "snapshot_parsed_count": 32
+      },
+      "local_projection": {
+        "leaves": "NOT_RUN 0/1 叶",
+        "obligations": 32,
+        "obligations_basis": "contract:draft-delivery-migration-contract.json requirements=32（committed 实测；story_checks=65）"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "dual 注册已提交（538b6dd6b 批）；r8 首实弹 BLOCKED 0/32 PREPROD_DRAFT_DELIVERY_STORY_BLOCKED（office OAuth SDK 缺/身份通道 302 产品缺陷在案）；draft_delivery 3 文件在飞 dirty（族归属未定，同纪律不计闭合）"
+      },
+      "preprod_latest": {
+        "verdict": "BLOCKED",
+        "round": "r8",
+        "detail": "0/32；disposition=DISPOSABLE_PREPROD_DRAFT_TOMBSTONED；remote_validation=NOT_RUN",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r8-preprod/draft-delivery",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r8-preprod/draft-delivery/draft-delivery-r8-state/draft-delivery-dual-run.json"
+        ]
+      },
+      "gap": {
+        "kind": "COUNT_GAP+DEFECT",
+        "parsed_minus_obligations": 24,
+        "detail": "parsed 32 − 义务 32 = 0（密度闭合）；执行缺口 32；office OAuth SDK（RC1 public bcs-cli）+ 身份通道 302（RC2 产品缺陷在案）；在飞 dirty 观察"
+      },
+      "materials": [
+        "office OAuth SDK（RC1 public bcs-cli 物料）",
+        "身份通道 302 缺陷修复（产品在案）"
+      ],
+      "pending_landing": [],
+      "queue": {
+        "rank": 6,
+        "gap_qty": 24,
+        "feasibility": 2,
+        "score": 48,
+        "basis": "执行缺口按密度口径 24（parsed 32−legacy 8）×2；SDK/302 门控"
+      },
+      "source_contracts": [
+        "draft-delivery-migration-contract.json"
+      ],
+      "note": "在飞 dirty：bcs_e2e/draft_delivery/{dual_case_run,story}.py + tests/test_draft_delivery_dual_case_run.py + 76a79fd00 亦触 story.py"
+    },
+    {
+      "no": 13,
+      "case_id": "story_user_has_direct_agent_conversation",
+      "upstream_file": "stories.sh",
+      "upstream": {
+        "roster_verdict": "0绿/2",
+        "parsed_green": 0,
+        "parsed_total": 2,
+        "dagger": false,
+        "snapshot_parsed_count": 14
+      },
+      "local_projection": {
+        "leaves": "NOT_RUN 0/1 叶",
+        "obligations": 5,
+        "obligations_basis": "contract:direct-chat-migration-contract.json requirements=5（committed 实测）"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "r8 BLOCKED 0/5 RunStateError；cancel 非 cancelled 终态=产品缺陷在案（20261029-direct-chat-preprod-r4-cancel-race.log）"
+      },
+      "preprod_latest": {
+        "verdict": "BLOCKED",
+        "round": "r8",
+        "detail": "DUAL-DIRECT-CHAT-01 RunStateError 0/5；disposition=TWO_OWNED_DIRECT_RUNS_CANCELLED_RETAINED_NO_GROUP_OR_SESSION_DELETE",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r8-preprod/direct-chat",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261029-direct-chat-preprod-r4/direct-chat-preprod-r4-cancel-race.log"
+        ]
+      },
+      "gap": {
+        "kind": "COUNT_GAP+DEFECT",
+        "parsed_minus_obligations": 9,
+        "detail": "parsed 14 − 义务 5 = 9（async 202→run/session id、read-back state、cancel 幂等/终态完整链路）；cancel 终态缺陷在案；⏳P1/P3"
+      },
+      "materials": [
+        "cancel 终态缺陷修复（产品在案）"
+      ],
+      "pending_landing": [
+        "P1",
+        "P3"
+      ],
+      "queue": {
+        "rank": 13,
+        "gap_qty": 9,
+        "feasibility": 3,
+        "score": 27,
+        "basis": "delta=9×3；缺陷修复即重跑"
+      },
+      "source_contracts": [
+        "direct-chat-migration-contract.json"
+      ],
+      "note": ""
+    },
+    {
+      "no": 14,
+      "case_id": "story_cli_operator_creates_custom_collaboration",
+      "upstream_file": "cli-stories.sh",
+      "upstream": {
+        "roster_verdict": "0绿/1",
+        "parsed_green": 0,
+        "parsed_total": 1,
+        "dagger": false,
+        "snapshot_parsed_count": 37
+      },
+      "local_projection": {
+        "leaves": "NOT_RUN 0/1 叶",
+        "obligations": 3,
+        "obligations_basis": "contract:custom-collaboration-migration-contract.json requirements=3（committed 96bb3ab9e 同批 af06206f3 dualize）"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "r8 BLOCKED 0/37 RunStateError CASE_CONTRACT_VIOLATION trial_permission（r6 为 PRODUCT_CLI_NONZERO_EXIT trial_create_group——漂移注：阻塞点从 CLI 非零退出漂到合同违反）"
+      },
+      "preprod_latest": {
+        "verdict": "BLOCKED",
+        "round": "r8",
+        "detail": "custom-collaboration-run.json RunStateError 0/37；public-failure-class:CASE_CONTRACT_VIOLATION",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r8-preprod/custom-collab",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r8-preprod/custom-collab/custom-collab-r8-state/custom-collaboration-run.json"
+        ]
+      },
+      "gap": {
+        "kind": "COUNT_GAP+DEFECT",
+        "parsed_minus_obligations": 34,
+        "detail": "parsed 37 − 义务 3 = 34（YAML two-role/nodes、permission session/group、one-shot graph、pending Human、AixUI panel、cancel terminal、persistent group）；trial_permission 合同缺陷在案；⏳P3"
+      },
+      "materials": [
+        "trial_permission 合同缺陷修复（产品在案）"
+      ],
+      "pending_landing": [
+        "P3"
+      ],
+      "queue": {
+        "rank": 5,
+        "gap_qty": 34,
+        "feasibility": 2,
+        "score": 68,
+        "basis": "密度 delta=34×2；缺陷修复先决"
+      },
+      "source_contracts": [
+        "custom-collaboration-migration-contract.json"
+      ],
+      "note": ""
+    },
+    {
+      "no": 15,
+      "case_id": "story_cli_operator_builds_collaboration_team",
+      "upstream_file": "cli-stories.sh",
+      "upstream": {
+        "roster_verdict": "13绿/14",
+        "parsed_green": 13,
+        "parsed_total": 14,
+        "dagger": false,
+        "snapshot_parsed_count": 30
+      },
+      "local_projection": {
+        "leaves": "NOT_RUN 0/1 叶",
+        "obligations": 8,
+        "obligations_basis": "contract:collaboration-team-migration-contract.json requirements=8（committed 实测）"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "r8 BLOCKED 0/8 CollaborationTeamRunnerError（protect-visibility PASS 后继叶阻塞）"
+      },
+      "preprod_latest": {
+        "verdict": "BLOCKED",
+        "round": "r8",
+        "detail": "collaboration-team-run.json BLOCKED 0/8；disposition=REQUEST_AND_GROUP_HISTORY_RETAINED",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r8-preprod/collab-team",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r8-preprod/collab-team/collab-team-r8-state/collaboration-team-run.json"
+        ]
+      },
+      "gap": {
+        "kind": "COUNT_GAP+MATERIAL",
+        "parsed_minus_obligations": 22,
+        "detail": "parsed 30 − 义务 8 = 22（protect/request/reject CLI、driver/member、current-bot list vs formal API、fuse recommendation）；站内 legacy friend CLI 路径；⏳P3"
+      },
+      "materials": [
+        "站内 legacy friend CLI 路径对齐"
+      ],
+      "pending_landing": [
+        "P3"
+      ],
+      "queue": {
+        "rank": 8,
+        "gap_qty": 22,
+        "feasibility": 2,
+        "score": 44,
+        "basis": "delta=22×2；站内路径物料"
+      },
+      "source_contracts": [
+        "collaboration-team-migration-contract.json"
+      ],
+      "note": ""
+    },
+    {
+      "no": 16,
+      "case_id": "story_cli_operator_runs_sessions_and_services",
+      "upstream_file": "cli-stories.sh",
+      "upstream": {
+        "roster_verdict": "0绿/1",
+        "parsed_green": 0,
+        "parsed_total": 1,
+        "dagger": false,
+        "snapshot_parsed_count": 44
+      },
+      "local_projection": {
+        "leaves": "PASS 4/4 叶",
+        "obligations": 44,
+        "obligations_basis": "WP-B 回填已提交：代码 SESSION_SERVICE_ASSERTION_IDS=44（local_session_service_completion.py:47 守卫）；legacy 契约 sessions-services-migration-contract.json requirements=4（4 切片面）；wpb-r1 运行时 total_count 双证"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "r6 session-service 4/4 PASS（service-complete/lifecycle/member-chat/roundtrip）；WP-B 密度回填 4→44 已闭合"
+      },
+      "preprod_latest": {
+        "verdict": "PASS",
+        "round": "r6",
+        "detail": "4/4 叶 PASS（r6-session-service 收据）；义务 44/44 代码+运行时双证",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r6-session-service",
+          "/Users/shenlifang/.codex/bcs-e2e/20261031-migration-wpb-r1"
+        ]
+      },
+      "gap": {
+        "kind": "NONE",
+        "parsed_minus_obligations": 0,
+        "detail": "密度闭合（44≥44）；WP-B 2026-10-31 committed"
+      },
+      "materials": [],
+      "pending_landing": [],
+      "queue": null,
+      "source_contracts": [
+        "sessions-services-migration-contract.json"
+      ],
+      "note": "快照义务=4 为 WP-B 前旧值"
+    },
+    {
+      "no": 17,
+      "case_id": "story_cli_operator_manages_group_context",
+      "upstream_file": "cli-stories.sh",
+      "upstream": {
+        "roster_verdict": "0绿/1",
+        "parsed_green": 0,
+        "parsed_total": 1,
+        "dagger": false,
+        "snapshot_parsed_count": 18
+      },
+      "local_projection": {
+        "leaves": "PASS 1/1 叶",
+        "obligations": 9,
+        "obligations_basis": "contract:group-context-migration-contract.json requirements=9（committed 实测）"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "r6 group-context PASS 1/1"
+      },
+      "preprod_latest": {
+        "verdict": "PASS",
+        "round": "r6",
+        "detail": "group-context-stdout.json PASS",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r6-group-context/group-context-stdout.json"
+        ]
+      },
+      "gap": {
+        "kind": "COUNT_GAP（密度）",
+        "parsed_minus_obligations": 9,
+        "detail": "parsed 18 − 义务 9 = 9（group/session/round add/get/update/list 逐字段与清理）"
+      },
+      "materials": [],
+      "pending_landing": [],
+      "queue": {
+        "rank": 14,
+        "gap_qty": 9,
+        "feasibility": 3,
+        "score": 27,
+        "basis": "delta=9×3；零物料（既有 dual-group-context-run 内扩展）"
+      },
+      "source_contracts": [
+        "group-context-migration-contract.json"
+      ],
+      "note": ""
+    },
+    {
+      "no": 18,
+      "case_id": "story_authority_user_journey",
+      "upstream_file": "authority.sh",
+      "upstream": {
+        "roster_verdict": "0绿/1",
+        "parsed_green": 0,
+        "parsed_total": 1,
+        "dagger": false,
+        "snapshot_parsed_count": 42
+      },
+      "local_projection": {
+        "leaves": "owned-local LIVE 42/42（obl 42）",
+        "obligations": 42,
+        "obligations_basis": "contract:authority-dual-migration-contract.json story_checks=42（committed 47f51d19c；legacy authority-migration 16 为 WP-A 前旧值——快照 B.2「42/16」之 16 即旧值）"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "本地 owned runtime 42/42 LIVE（e2e-dev-fresh-authority-live-1 与 -live-2-reports-offline）；预发 r8 BLOCKED-at-entry 0/42（route probe 不匹配+准入阻塞；REMOTE_ADMISSION_GATED_READ_ONLY 只读探针姿态维持）"
+      },
+      "preprod_latest": {
+        "verdict": "BLOCKED",
+        "round": "r8",
+        "detail": "PREPROD_AUTHORITY_ROUTE_PROBE_MISMATCH + ADMISSION_BLOCKED；completed 0/42；credential_kind=preprod_driver_bot_bearer_and_human_cookie_refs；remote_validation=NOT_RUN；本地 LIVE 不主张预发信用",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r8-preprod/authority",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-migration-wp2-authority-preprod",
+          "/Users/shenlifang/.codex/bcs-e2e/e2e-dev-fresh-authority-live-1",
+          "/Users/shenlifang/.codex/bcs-e2e/e2e-dev-fresh-authority-live-2-reports-offline"
+        ]
+      },
+      "gap": {
+        "kind": "DENSITY_CLOSED+EXECUTION_GAP",
+        "parsed_minus_obligations": 0,
+        "detail": "密度闭合 42/42（本地 LIVE）；预发执行缺口 42（route-probe 声明绑定 vs 实际 + 准入境）；⏳P4"
+      },
+      "materials": [
+        "route-probe 诊断（声明绑定 vs 实际路径）",
+        "活体准入境姿态（⏳P4）"
+      ],
+      "pending_landing": [
+        "P4"
+      ],
+      "queue": {
+        "rank": 2,
+        "gap_qty": 42,
+        "feasibility": 3,
+        "score": 126,
+        "basis": "执行缺口 42×3；本地 42/42 已闭，预发腿准入诊断后零新物料"
+      },
+      "source_contracts": [
+        "authority-dual-migration-contract.json",
+        "authority-migration-contract.json"
+      ],
+      "note": ""
+    },
+    {
+      "no": 19,
+      "case_id": "story_retired_service_policy",
+      "upstream_file": "service_policy_story.sh",
+      "upstream": {
+        "roster_verdict": "0绿/1",
+        "parsed_green": 0,
+        "parsed_total": 1,
+        "dagger": false,
+        "snapshot_parsed_count": 23
+      },
+      "local_projection": {
+        "leaves": "NOT_RUN 0/1 叶",
+        "obligations": 8,
+        "obligations_basis": "contract:service-policy-dual-migration-contract.json（基线版 git show）requirements=8；上游 parsed=23 checks（快照 B.2）"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "dual 注册已提交（81cc98121 bearer preprod leg）；r8 首实弹 BLOCKED 0/8 PREPROD_SERVICE_POLICY_STORY_BLOCKED；期望 410 实得 200 的 sim/产品形态差待核对；service_policy 4 文件在飞 dirty（族归属未定）"
+      },
+      "preprod_latest": {
+        "verdict": "BLOCKED",
+        "round": "r8",
+        "detail": "0/8；disposition=DISPOSABLE_PREPROD_GROUPS_AND_SESSIONS_DELETED_DRIVER_BOT_RETAINED",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r8-preprod/service-policy",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-migration-wps-service-policy-preprod",
+          "/Users/shenlifang/.codex/bcs-e2e/20261030-dual-service-policy-local-live"
+        ]
+      },
+      "gap": {
+        "kind": "COUNT_GAP+DEFECT?",
+        "parsed_minus_obligations": 15,
+        "detail": "parsed 23 checks − 义务 8 = 15（legacy policy absent create/read、410 retired、invocation not blocked、running conflict、chat completion guard）；410/200 形态差；⏳在飞 dirty 观察（不在六补丁命名族）"
+      },
+      "materials": [
+        "410 retired 形态差核对（sim vs 产品）"
+      ],
+      "pending_landing": [],
+      "queue": {
+        "rank": 11,
+        "gap_qty": 15,
+        "feasibility": 2,
+        "score": 30,
+        "basis": "delta=15×2；形态差核对+P4 关联"
+      },
+      "source_contracts": [
+        "service-policy-dual-migration-contract.json",
+        "service-policy-migration-contract.json"
+      ],
+      "note": "在飞 dirty：service_policy/{contract,dual_case_run,story}.py + service-policy-dual-migration-contract.json"
+    },
+    {
+      "no": 20,
+      "case_id": "story_provider_operator_manages_subbots",
+      "upstream_file": "e2e.sh（正文内嵌）",
+      "upstream": {
+        "roster_verdict": "0绿/1",
+        "parsed_green": 0,
+        "parsed_total": 1,
+        "dagger": false,
+        "snapshot_parsed_count": 1
+      },
+      "local_projection": {
+        "leaves": "NOT_RUN 0/1 叶",
+        "obligations": 15,
+        "obligations_basis": "contract:provider-subbots-migration-contract.json requirements=15（committed 实测）"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "快照 NONE→基线 DUAL（注册已落）；wpa routeprobe 故事级 BLOCKED 但内嵌 preprod_probe 9/9 mounted PASS（修正「控制面缺失」旧读法）；r8 BLOCKED 0/15 PREPROD_FULL_STORY_NOT_EXECUTED（assertion_summary：required=131 observed=0 obligations=15；credential_kind=preprod_human_cookie_route_probe）"
+      },
+      "preprod_latest": {
+        "verdict": "BLOCKED",
+        "round": "r8",
+        "detail": "0/15；disposition=PROVIDER_RETIRED_SUBBOTS_TOMBSTONED；probe PASS 9/9；材料=provider principal signing key + provider_admin_token 环境引用",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r8-preprod/provider-subbots",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261030-migration-wpa-provider-subbots-routeprobe-r1",
+          "/Users/shenlifang/.codex/bcs-e2e/20261031-migration-wpa-provider-subbots-local-r3"
+        ]
+      },
+      "gap": {
+        "kind": "EXECUTION_GAP（+wrapper 未义务化）",
+        "parsed_minus_obligations": null,
+        "detail": "上游 parsed=1 wrapper（131 live HTTP checks 未义务化）；义务 15 全未执行；⏳P4"
+      },
+      "materials": [
+        "provider principal signing key 环境引用",
+        "provider_admin_token 环境引用"
+      ],
+      "pending_landing": [
+        "P4"
+      ],
+      "queue": {
+        "rank": 12,
+        "gap_qty": 15,
+        "feasibility": 2,
+        "score": 30,
+        "basis": "执行缺口 15×2；probe 9/9 已 mounted，凭证物料到位即可实弹"
+      },
+      "source_contracts": [
+        "provider-subbots-migration-contract.json"
+      ],
+      "note": ""
+    },
+    {
+      "no": 21,
+      "case_id": "story_user_runs_and_shares_sessions",
+      "upstream_file": "stories.sh",
+      "upstream": {
+        "roster_verdict": "8绿/9",
+        "parsed_green": 8,
+        "parsed_total": 9,
+        "dagger": false,
+        "snapshot_parsed_count": 9
+      },
+      "local_projection": {
+        "leaves": "CLI 8/8 PASS + owned-local 87/87",
+        "obligations": 87,
+        "obligations_basis": "WP-B：代码 local_session_contract.py:68 断言 (31,6,50,87)；legacy 契约 session-migration-contract.json requirements=9（SESSION.* 9 切片面）；wpb 运行时 87/87"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "r8 session 8/8 PASS（create-get/bot-groups/group-invite/session-invite/invite-join/lifecycle/complete-invoke/collection）；public-jwt-ws 腿 r6 session-public BLOCKED 历史（wpb 本地 public-r3/flow-r6 PASS）"
+      },
+      "preprod_latest": {
+        "verdict": "PASS",
+        "round": "r8",
+        "detail": "8/8 CLI 叶 PASS（r8-progress.tsv session×8 rc=0；DUAL-SESSION-CLI-* run.json PASS）；public/flow 腿 r6 BLOCKED 历史另注",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r8-preprod/session",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r6-session-public",
+          "/Users/shenlifang/.codex/bcs-e2e/20261031-migration-wpb-r1"
+        ]
+      },
+      "gap": {
+        "kind": "NONE",
+        "parsed_minus_obligations": 0,
+        "detail": "密度闭合（义务 87 ≥ parsed 9）；WP-B 9→87 committed；public/flow 腿为历史阻塞注记非当前缺口"
+      },
+      "materials": [],
+      "pending_landing": [],
+      "queue": null,
+      "source_contracts": [
+        "session-migration-contract.json"
+      ],
+      "note": "r8 session 8 叶与契约 9 切片差 1=public-jwt-ws（r6 BLOCKED 腿）"
+    },
+    {
+      "no": 22,
+      "case_id": "story_session_file_workspace",
+      "upstream_file": "session_files.sh",
+      "upstream": {
+        "roster_verdict": "0绿/1",
+        "parsed_green": 0,
+        "parsed_total": 1,
+        "dagger": false,
+        "snapshot_parsed_count": 12
+      },
+      "local_projection": {
+        "leaves": "PASS 1/1 叶",
+        "obligations": 12,
+        "obligations_basis": "WP-B：local_file_story REQUIREMENTS=12（CLI-FILE.*）；无独立迁移契约文件；wpb-r1 运行时 total_count=12 PASS 双证（快照义务=10 为旧值）"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "r7 file-session r2 PASS、r3 BLOCKED（FileTransportError「file operation returned HTTP 303」8/12 步=瞬时镜头）、r4 同参 PASS 12/12——r4 为最新"
+      },
+      "preprod_latest": {
+        "verdict": "PASS",
+        "round": "r7",
+        "detail": "file-session-r4 PASS 12/12（r7-progress.tsv：r2 rc=0 / r3 rc=2 / r4 rc=0）",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r7-preprod/session-file"
+        ]
+      },
+      "gap": {
+        "kind": "NONE",
+        "parsed_minus_obligations": 0,
+        "detail": "密度闭合（12≥12）；WP-B 10→12 committed；r3 303 为瞬时镜头不实列为缺口"
+      },
+      "materials": [],
+      "pending_landing": [],
+      "queue": null,
+      "source_contracts": [],
+      "note": "无 *-migration-contract.json 专属文件；义务锚 local_file_story.py"
+    },
+    {
+      "no": 23,
+      "case_id": "story_fixed_loop_human_editor_workflow",
+      "upstream_file": "fixed_loop_story.sh → fixed_loop_story.py",
+      "upstream": {
+        "roster_verdict": "0绿/1",
+        "parsed_green": 0,
+        "parsed_total": 1,
+        "dagger": false,
+        "snapshot_parsed_count": 1
+      },
+      "local_projection": {
+        "leaves": "NOT_RUN 0/1 叶",
+        "obligations": 8,
+        "obligations_basis": "contract:fixed-loop-migration-contract.json requirements=8（committed 实测）"
+      },
+      "dual": {
+        "status": "LOCAL_ONLY",
+        "executor_migration_mode": "DYNAMIC_OWNED_LOCAL",
+        "note": "executor-migration committed mode=DYNAMIC_OWNED_LOCAL；dual-fixed-loop 注册 rg 空（committed 与 dirty 树均无）；⏳P5 在飞登记缺位"
+      },
+      "preprod_latest": {
+        "verdict": "NOT_RUN",
+        "round": "—",
+        "detail": "无预发腿（设计 owned-local）；预发不应按 dual 计",
+        "evidence_path": [
+          "/Users/shenlifang/work/codes/datamarket/teamclaw/Avernet/.worktree/e2e-dev-fresh/apps/bcs/scripts/e2e-runner/bcs_e2e/migration_inventory.py"
+        ]
+      },
+      "gap": {
+        "kind": "ALL_UNEXECUTED（设计 LOCAL_ONLY）",
+        "parsed_minus_obligations": -7,
+        "detail": "parsed†=1 ≤ 义务 8；动态 owned runtime+fresh fixture；⏳P5"
+      },
+      "materials": [
+        "fresh owned runtime",
+        "动态 provider/driver/observer bot 物料"
+      ],
+      "pending_landing": [
+        "P5"
+      ],
+      "queue": {
+        "rank": 35,
+        "gap_qty": 8,
+        "feasibility": 1,
+        "score": 8,
+        "basis": "推断补入：LOCAL_ONLY 车道同规则（obl 8×1）；任务装配队列未列 #23",
+        "lane": "LOCAL_ONLY"
+      },
+      "source_contracts": [
+        "fixed-loop-migration-contract.json"
+      ],
+      "note": ""
+    },
+    {
+      "no": 24,
+      "case_id": "story_nested_fixed_loop_workflows",
+      "upstream_file": "fixed_loop_story.sh → nested_fixed_loop_story.py",
+      "upstream": {
+        "roster_verdict": "0绿/1",
+        "parsed_green": 0,
+        "parsed_total": 1,
+        "dagger": false,
+        "snapshot_parsed_count": 1
+      },
+      "local_projection": {
+        "leaves": "NOT_RUN 0/1 叶",
+        "obligations": 16,
+        "obligations_basis": "contract:nested-fixed-loop-migration-contract.json requirements=16（committed 实测）"
+      },
+      "dual": {
+        "status": "LOCAL_ONLY",
+        "executor_migration_mode": "DYNAMIC_OWNED_LOCAL",
+        "note": "同 #23；⏳P5"
+      },
+      "preprod_latest": {
+        "verdict": "NOT_RUN",
+        "round": "—",
+        "detail": "无预发腿（设计 owned-local）",
+        "evidence_path": [
+          "/Users/shenlifang/work/codes/datamarket/teamclaw/Avernet/.worktree/e2e-dev-fresh/apps/bcs/scripts/e2e-runner/bcs_e2e/migration_inventory.py"
+        ]
+      },
+      "gap": {
+        "kind": "ALL_UNEXECUTED（设计 LOCAL_ONLY）",
+        "parsed_minus_obligations": -15,
+        "detail": "parsed†=1 ≤ 义务 16（nested Bot/三级 Human routing/isolation/skips/history/stale-event fences）"
+      },
+      "materials": [
+        "fresh owned runtime",
+        "动态 bot 物料"
+      ],
+      "pending_landing": [
+        "P5"
+      ],
+      "queue": {
+        "rank": 21,
+        "gap_qty": 16,
+        "feasibility": 1,
+        "score": 16,
+        "basis": "obl 16×1；LOCAL_ONLY 车道"
+      },
+      "source_contracts": [
+        "nested-fixed-loop-migration-contract.json"
+      ],
+      "note": ""
+    },
+    {
+      "no": 25,
+      "case_id": "story_state_machine_result_queue",
+      "upstream_file": "fixed_loop_story.sh → result_queue_story.py",
+      "upstream": {
+        "roster_verdict": "0绿/1",
+        "parsed_green": 0,
+        "parsed_total": 1,
+        "dagger": false,
+        "snapshot_parsed_count": 1
+      },
+      "local_projection": {
+        "leaves": "NOT_RUN 0/1 叶",
+        "obligations": 18,
+        "obligations_basis": "contract:result-queue-migration-contract.json requirements=18（committed 实测）"
+      },
+      "dual": {
+        "status": "LOCAL_ONLY",
+        "executor_migration_mode": "DYNAMIC_OWNED_LOCAL",
+        "note": "同 #23；⏳P5"
+      },
+      "preprod_latest": {
+        "verdict": "NOT_RUN",
+        "round": "—",
+        "detail": "无预发腿（设计 owned-local）",
+        "evidence_path": [
+          "/Users/shenlifang/work/codes/datamarket/teamclaw/Avernet/.worktree/e2e-dev-fresh/apps/bcs/scripts/e2e-runner/bcs_e2e/migration_inventory.py"
+        ]
+      },
+      "gap": {
+        "kind": "ALL_UNEXECUTED（设计 LOCAL_ONLY）",
+        "parsed_minus_obligations": -17,
+        "detail": "parsed†=1 ≤ 义务 18（owner Send/observer Inject/bound context/unique history）"
+      },
+      "materials": [
+        "fresh owned runtime",
+        "动态 bot 物料"
+      ],
+      "pending_landing": [
+        "P5"
+      ],
+      "queue": {
+        "rank": 19,
+        "gap_qty": 18,
+        "feasibility": 1,
+        "score": 18,
+        "basis": "obl 18×1；LOCAL_ONLY 车道"
+      },
+      "source_contracts": [
+        "result-queue-migration-contract.json"
+      ],
+      "note": ""
+    },
+    {
+      "no": 26,
+      "case_id": "story_collaboration_draft_group_launch",
+      "upstream_file": "collaboration_draft_story.sh → collaboration_draft_group_story.py",
+      "upstream": {
+        "roster_verdict": "0绿/1",
+        "parsed_green": 0,
+        "parsed_total": 1,
+        "dagger": false,
+        "snapshot_parsed_count": 1
+      },
+      "local_projection": {
+        "leaves": "NOT_RUN 0/1 叶",
+        "obligations": 17,
+        "obligations_basis": "contract:draft-group-migration-contract.json requirements=17（committed 实测）"
+      },
+      "dual": {
+        "status": "LOCAL_ONLY",
+        "executor_migration_mode": "DYNAMIC_OWNED_LOCAL",
+        "note": "同 #23；⏳P5"
+      },
+      "preprod_latest": {
+        "verdict": "NOT_RUN",
+        "round": "—",
+        "detail": "无预发腿（设计 owned-local）",
+        "evidence_path": [
+          "/Users/shenlifang/work/codes/datamarket/teamclaw/Avernet/.worktree/e2e-dev-fresh/apps/bcs/scripts/e2e-runner/bcs_e2e/migration_inventory.py"
+        ]
+      },
+      "gap": {
+        "kind": "ALL_UNEXECUTED（设计 LOCAL_ONLY）",
+        "parsed_minus_obligations": -16,
+        "detail": "parsed†=1 ≤ 义务 17（3-bot author/driver/reviewer draft group launch 与授权）"
+      },
+      "materials": [
+        "fresh owned runtime",
+        "动态 bot 物料"
+      ],
+      "pending_landing": [
+        "P5"
+      ],
+      "queue": {
+        "rank": 20,
+        "gap_qty": 17,
+        "feasibility": 1,
+        "score": 17,
+        "basis": "obl 17×1；LOCAL_ONLY 车道"
+      },
+      "source_contracts": [
+        "draft-group-migration-contract.json"
+      ],
+      "note": ""
+    },
+    {
+      "no": 27,
+      "case_id": "story_user_receives_group_event_webhooks",
+      "upstream_file": "stories.sh（mock 在场才挂载）",
+      "upstream": {
+        "roster_verdict": "1绿/2",
+        "parsed_green": 1,
+        "parsed_total": 2,
+        "dagger": false,
+        "snapshot_parsed_count": 2
+      },
+      "local_projection": {
+        "leaves": "NOT_RUN 0/1 叶",
+        "obligations": 20,
+        "obligations_basis": "contract:webhook-migration-contract.json requirements=20（committed 实测）"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "dual webhook 命令已注册（538b6dd6b 批 mock judge receiver 同批）；mock 门未挂载→预发 NOT_RUN"
+      },
+      "preprod_latest": {
+        "verdict": "NOT_RUN",
+        "round": "—",
+        "detail": "mock 门（receiver origin 未给）；⏳P1 诊断性关联",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/20261031-migration-wp-mock-material"
+        ]
+      },
+      "gap": {
+        "kind": "MOCK_GATE",
+        "parsed_minus_obligations": -18,
+        "detail": "义务 20 ≥ parsed 2（超集）；receiver origin GAP；缺 8 操作 edge_case_bindings + principal_signing_key_env 引用 + mock sink；⏳P1"
+      },
+      "materials": [
+        "webhook receiver origin（GAP 未给）",
+        "8 操作 edge_case_bindings",
+        "principal_signing_key_env 环境变量引用",
+        "mock sink"
+      ],
+      "pending_landing": [
+        "P1"
+      ],
+      "queue": {
+        "rank": 17,
+        "gap_qty": 20,
+        "feasibility": 1,
+        "score": 20,
+        "basis": "obl 20×1；receiver origin 物料门控"
+      },
+      "source_contracts": [
+        "webhook-migration-contract.json"
+      ],
+      "note": ""
+    },
+    {
+      "no": 28,
+      "case_id": "story_provider_callback_survives_slow_judge",
+      "upstream_file": "stories.sh（mock 在场才挂载）",
+      "upstream": {
+        "roster_verdict": "1绿/2",
+        "parsed_green": 1,
+        "parsed_total": 2,
+        "dagger": false,
+        "snapshot_parsed_count": 2
+      },
+      "local_projection": {
+        "leaves": "NOT_RUN 0/1 叶",
+        "obligations": 22,
+        "obligations_basis": "contract:slow-judge-dual-migration-contract.json（基线版 git show）与 judge-migration-contract.json requirements=22"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "dual slow-judge 命令已注册（81dd0c8cf）；mock 门未挂载→预发 NOT_RUN；slow_judge 3 文件在飞 dirty（倾向 #28 mock 门物料，族归属注记）"
+      },
+      "preprod_latest": {
+        "verdict": "NOT_RUN",
+        "round": "—",
+        "detail": "mock 门（judge mock 控制未给）；⏳P1 诊断性关联",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/20261031-migration-wp-mock-material"
+        ]
+      },
+      "gap": {
+        "kind": "MOCK_GATE",
+        "parsed_minus_obligations": -20,
+        "detail": "义务 22 ≥ parsed 2（超集）；judge request observation/slow delay/provider callback/retire；⏳P1"
+      },
+      "materials": [
+        "judge mock 控制（GAP）",
+        "mock sink"
+      ],
+      "pending_landing": [
+        "P1"
+      ],
+      "queue": {
+        "rank": 15,
+        "gap_qty": 22,
+        "feasibility": 1,
+        "score": 22,
+        "basis": "obl 22×1；judge mock 门控"
+      },
+      "source_contracts": [
+        "slow-judge-dual-migration-contract.json",
+        "judge-migration-contract.json"
+      ],
+      "note": ""
+    },
+    {
+      "no": 29,
+      "case_id": "test_ep_admission",
+      "upstream_file": "edge_permission.sh",
+      "upstream": {
+        "roster_verdict": "全绿†",
+        "parsed_green": null,
+        "parsed_total": null,
+        "dagger": true,
+        "snapshot_parsed_count": 2
+      },
+      "local_projection": {
+        "leaves": "PASS 1/1 叶",
+        "obligations": 2,
+        "obligations_basis": "contract:edge-admission-migration-contract.json requirements=2（committed 实测）"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "r7 edge-read admission PASS（PUBLIC-EDGE-ADMISSION-01；r5 同名 PASS）"
+      },
+      "preprod_latest": {
+        "verdict": "PASS",
+        "round": "r7",
+        "detail": "r7-progress.tsv edge-read/admission rc=0；r5-edge-read/admission-stdout.json PASS",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r7-preprod/edge-read",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r5-edge-read/admission-stdout.json"
+        ]
+      },
+      "gap": {
+        "kind": "NONE",
+        "parsed_minus_obligations": 0,
+        "detail": "覆盖 FULL（义务 2 ≥ parsed 2；r5/r7 实弹 PASS）"
+      },
+      "materials": [],
+      "pending_landing": [],
+      "queue": null,
+      "source_contracts": [
+        "edge-admission-migration-contract.json"
+      ],
+      "note": ""
+    },
+    {
+      "no": 30,
+      "case_id": "test_ep_ensure_bot",
+      "upstream_file": "edge_permission.sh",
+      "upstream": {
+        "roster_verdict": "全绿†",
+        "parsed_green": null,
+        "parsed_total": null,
+        "dagger": true,
+        "snapshot_parsed_count": 1
+      },
+      "local_projection": {
+        "leaves": "PASS 1/1（族内近似；wpc ENSURE-BOT-01 PASS）",
+        "obligations": 1,
+        "obligations_basis": "executor-migration mode=EDGE_OBLIGATION_IN_FAMILY（族内近似）；快照义务 1；wpc junit LOCAL-EDGE-ENSURE-BOT-01 PASS（今日观测刷新）"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "EDGE_OBLIGATION_IN_FAMILY",
+        "note": "基线无独立 dual 命令；按族内近似计入 DUAL 桶（任务三分法）；wpc 本地套件复证 PASS"
+      },
+      "preprod_latest": {
+        "verdict": "PASS",
+        "round": "r7",
+        "detail": "r7 edge-read/admission 叶内近似覆盖（族内）；wpc owned-local LOCAL-EDGE-ENSURE-BOT-01 PASS（2026-10-31）",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r7-preprod/edge-read",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-migration-wpc-local/owned-local/junit.xml"
+        ]
+      },
+      "gap": {
+        "kind": "NONE",
+        "parsed_minus_obligations": 0,
+        "detail": "覆盖 FULL（族内近似 1≥1）；独立腿注册为近似非精确——如实注"
+      },
+      "materials": [],
+      "pending_landing": [],
+      "queue": null,
+      "source_contracts": [],
+      "note": "_bucket 计入 PASS*（带星：族内近似）"
+    },
+    {
+      "no": 31,
+      "case_id": "test_ep_bot_search",
+      "upstream_file": "edge_permission.sh",
+      "upstream": {
+        "roster_verdict": "全绿†",
+        "parsed_green": null,
+        "parsed_total": null,
+        "dagger": true,
+        "snapshot_parsed_count": 13
+      },
+      "local_projection": {
+        "leaves": "PASS 1/1 叶",
+        "obligations": 13,
+        "obligations_basis": "contract:edge-bot-search-migration-contract.json requirements=13（committed 实测；快照义务=12 为漂移旧值）"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "r7 edge-read bot-search-gw PASS（PUBLIC-EDGE-BOT-SEARCH-CANDIDATES-01）"
+      },
+      "preprod_latest": {
+        "verdict": "PASS",
+        "round": "r7",
+        "detail": "r7-progress.tsv edge-read/bot-search-gw rc=0；r5 同腿 PASS",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r7-preprod/edge-read",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r5-edge-read/bot-search-gw-stdout.json"
+        ]
+      },
+      "gap": {
+        "kind": "COUNT_GAP（快照口径，已漂移追平）",
+        "parsed_minus_obligations": 1,
+        "detail": "快照 delta=1（parsed 13−义务 12）；committed 契约 13 已追平 parsed 13——漂移resolved 注记，不改 NONE=6 计数；如actionable 余 1 条字段级核对"
+      },
+      "materials": [],
+      "pending_landing": [],
+      "queue": {
+        "rank": 32,
+        "gap_qty": 1,
+        "feasibility": 1,
+        "score": 1,
+        "basis": "快照口径 delta=1×1；committed 已追平（观察项）"
+      },
+      "source_contracts": [
+        "edge-bot-search-migration-contract.json"
+      ],
+      "note": ""
+    },
+    {
+      "no": 32,
+      "case_id": "test_ep_error_and_admission_branches",
+      "upstream_file": "edge_permission.sh",
+      "upstream": {
+        "roster_verdict": "全绿†",
+        "parsed_green": null,
+        "parsed_total": null,
+        "dagger": true,
+        "snapshot_parsed_count": 7
+      },
+      "local_projection": {
+        "leaves": "PASS 1/1 叶",
+        "obligations": 1,
+        "obligations_basis": "local_edge_friend_mutations_run.py 九义务分派（snapshot per-case 义务 1）；wpc junit 复证 PASS"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "r5-bulk 腿 rc=0 PASS（预发面实弹；收据 LOCAL-EDGE-ERROR-ADMISSION-BRANCHES-01，environment tier=preprod，remote_validation=NOT_RUN）；wpc 本地复证 PASS"
+      },
+      "preprod_latest": {
+        "verdict": "PASS",
+        "round": "r5",
+        "detail": "r5-bulk bulk-results.tsv rc=0；r5-edge-mutation STDOUBT PASS；wpc junit PASS",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r5-bulk/bulk-results.tsv",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r5-edge-mutation/error-admission-branches-stdout.json",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-migration-wpc-local/owned-local/junit.xml"
+        ]
+      },
+      "gap": {
+        "kind": "COUNT_GAP（密度）",
+        "parsed_minus_obligations": 6,
+        "detail": "parsed 7 − 义务 1 = 6（未逐条定位）"
+      },
+      "materials": [],
+      "pending_landing": [],
+      "queue": {
+        "rank": 30,
+        "gap_qty": 6,
+        "feasibility": 1,
+        "score": 6,
+        "basis": "delta=6×1"
+      },
+      "source_contracts": [],
+      "note": "mutation 族收据形态注：LOCAL-EDGE id + preprod-tier profile + remote_validation=NOT_RUN"
+    },
+    {
+      "no": 33,
+      "case_id": "test_ep_connect_private_and_discover_branches",
+      "upstream_file": "edge_permission.sh",
+      "upstream": {
+        "roster_verdict": "全绿†",
+        "parsed_green": null,
+        "parsed_total": null,
+        "dagger": true,
+        "snapshot_parsed_count": 8
+      },
+      "local_projection": {
+        "leaves": "PASS 1/1 叶",
+        "obligations": 1,
+        "obligations_basis": "同 #32 九义务分派；wpc junit 复证 PASS"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "r5-bulk rc=0；LOCAL-EDGE-CONNECT-PRIVATE-DISCOVER-01 PASS（preprod-tier profile）；wpc 复证"
+      },
+      "preprod_latest": {
+        "verdict": "PASS",
+        "round": "r5",
+        "detail": "同 #32 形态",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r5-bulk/bulk-results.tsv",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r5-edge-mutation/connect-private-discover-stdout.json",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-migration-wpc-local/owned-local/junit.xml"
+        ]
+      },
+      "gap": {
+        "kind": "COUNT_GAP（密度）",
+        "parsed_minus_obligations": 7,
+        "detail": "parsed 8 − 义务 1 = 7"
+      },
+      "materials": [],
+      "pending_landing": [],
+      "queue": {
+        "rank": 29,
+        "gap_qty": 7,
+        "feasibility": 1,
+        "score": 7,
+        "basis": "delta=7×1"
+      },
+      "source_contracts": [],
+      "note": ""
+    },
+    {
+      "no": 34,
+      "case_id": "test_ep_friend_connections_friend_request_and_list",
+      "upstream_file": "edge_permission.sh",
+      "upstream": {
+        "roster_verdict": "全绿†",
+        "parsed_green": null,
+        "parsed_total": null,
+        "dagger": true,
+        "snapshot_parsed_count": 3
+      },
+      "local_projection": {
+        "leaves": "PASS 1/1 叶",
+        "obligations": 2,
+        "obligations_basis": "contract:edge-friend-connections-list-migration-contract.json requirements=2（committed 实测）"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "r7 edge-read friend-connections PASS（PUBLIC-EDGE-FRIEND-CONNECTIONS-LIST-01）"
+      },
+      "preprod_latest": {
+        "verdict": "PASS",
+        "round": "r7",
+        "detail": "r7-progress.tsv edge-read/friend-connections rc=0；r5 同腿 PASS",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r7-preprod/edge-read",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r5-edge-read/friend-connections-stdout.json"
+        ]
+      },
+      "gap": {
+        "kind": "COUNT_GAP（密度）",
+        "parsed_minus_obligations": 1,
+        "detail": "parsed 3 − 义务 2 = 1"
+      },
+      "materials": [],
+      "pending_landing": [],
+      "queue": {
+        "rank": 33,
+        "gap_qty": 1,
+        "feasibility": 1,
+        "score": 1,
+        "basis": "delta=1×1"
+      },
+      "source_contracts": [
+        "edge-friend-connections-list-migration-contract.json"
+      ],
+      "note": ""
+    },
+    {
+      "no": 35,
+      "case_id": "test_ep_friend_connections_friend_accept_reject_cancel",
+      "upstream_file": "edge_permission.sh",
+      "upstream": {
+        "roster_verdict": "全绿†",
+        "parsed_green": null,
+        "parsed_total": null,
+        "dagger": true,
+        "snapshot_parsed_count": 2
+      },
+      "local_projection": {
+        "leaves": "PASS 1/1 叶",
+        "obligations": 1,
+        "obligations_basis": "同 #32 九义务分派；wpc junit 复证 PASS"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "r5-edge-mutation accept-reject-cancel PASS（preprod-tier profile；remote_validation=NOT_RUN）；wpc 复证"
+      },
+      "preprod_latest": {
+        "verdict": "PASS",
+        "round": "r5",
+        "detail": "LOCAL-EDGE-FRIEND-ACCEPT-REJECT-CANCEL-01 PASS",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r5-edge-mutation/accept-reject-cancel-stdout.json",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-migration-wpc-local/owned-local/junit.xml"
+        ]
+      },
+      "gap": {
+        "kind": "COUNT_GAP（密度）",
+        "parsed_minus_obligations": 1,
+        "detail": "parsed 2 − 义务 1 = 1"
+      },
+      "materials": [],
+      "pending_landing": [],
+      "queue": {
+        "rank": 34,
+        "gap_qty": 1,
+        "feasibility": 1,
+        "score": 1,
+        "basis": "delta=1×1"
+      },
+      "source_contracts": [],
+      "note": ""
+    },
+    {
+      "no": 36,
+      "case_id": "test_ep_friend_connections_friend_requests_list",
+      "upstream_file": "edge_permission.sh",
+      "upstream": {
+        "roster_verdict": "全绿†",
+        "parsed_green": null,
+        "parsed_total": null,
+        "dagger": true,
+        "snapshot_parsed_count": 1
+      },
+      "local_projection": {
+        "leaves": "PASS 1/1 叶",
+        "obligations": 3,
+        "obligations_basis": "contract:edge-friend-requests-list-migration-contract.json requirements=3（committed 实测）"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "r7 edge-read friend-requests PASS（PUBLIC-EDGE-FRIEND-REQUESTS-LIST-01）"
+      },
+      "preprod_latest": {
+        "verdict": "PASS",
+        "round": "r7",
+        "detail": "r7-progress.tsv edge-read/friend-requests rc=0；r5 同腿 PASS",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r7-preprod/edge-read",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r5-edge-read/friend-requests-stdout.json"
+        ]
+      },
+      "gap": {
+        "kind": "NONE",
+        "parsed_minus_obligations": -2,
+        "detail": "覆盖 FULL（义务 3 ≥ parsed 1）"
+      },
+      "materials": [],
+      "pending_landing": [],
+      "queue": null,
+      "source_contracts": [
+        "edge-friend-requests-list-migration-contract.json"
+      ],
+      "note": ""
+    },
+    {
+      "no": 37,
+      "case_id": "test_ep_friend_connections_friend_revoke",
+      "upstream_file": "edge_permission.sh",
+      "upstream": {
+        "roster_verdict": "全绿†",
+        "parsed_green": null,
+        "parsed_total": null,
+        "dagger": true,
+        "snapshot_parsed_count": null
+      },
+      "local_projection": {
+        "leaves": "PASS 1/1（wpc 2026-10-31 刷新；快照 0/1 NOT_RUN 已过时）",
+        "obligations": 1,
+        "obligations_basis": "同 #32 九义务分派；wpc junit LOCAL-EDGE-FRIEND-REVOKE-01 PASS（今日观测）"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "r5/r6 mutation 腿 BLOCKED（E9：station legacy revoke did not revoke exactly both edges；revoked_edges=[]）——preprod-tier station 面实弹观测；wpc 本地今日 PASS；r8 backlog 未重挂本腿；⏳P6 dual-edge-friend-mutation-run 登记已由 L5/341e19f62 committed 翻 DUAL_EXECUTION_READY（交付复核观测）；基线口径缺口与预发实弹腿仍未闭合"
+      },
+      "preprod_latest": {
+        "verdict": "BLOCKED",
+        "round": "r5/r6",
+        "detail": "E9 产品缺陷在案（revoke 未恰好撤双边）；收据 status=BLOCKED；remote_validation=NOT_RUN；wpc 本地刷新 PASS 不冲抵预发缺陷在案",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r5-edge-mutation/revoke-stdout.json",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r6-edge-mutation/revoke-stdout.json",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-migration-wpc-local/owned-local/junit.xml"
+        ]
+      },
+      "gap": {
+        "kind": "DEFECT+EXECUTION_GAP",
+        "parsed_minus_obligations": null,
+        "detail": "上游 parsed† 分母未给；E9 缺陷在案（产品在案）；义务 1；wpc 本地 PASS；预发 dual 腿 ⏳P6"
+      },
+      "materials": [
+        "E9 缺陷修复核对（产品在案）"
+      ],
+      "pending_landing": [
+        "P6"
+      ],
+      "queue": {
+        "rank": 31,
+        "gap_qty": 1,
+        "feasibility": 3,
+        "score": 3,
+        "basis": "obl 1×3；E9 修复即重跑；wpc 本地已绿"
+      },
+      "source_contracts": [],
+      "note": "revoke 收据 documented_gaps.PREPROD_SERVICE_SCOPE_GAP 点名 ensure-bot/tc/dept 凭证批"
+    },
+    {
+      "no": 38,
+      "case_id": "test_ep_friend_connections_full_lifecycle",
+      "upstream_file": "edge_permission.sh",
+      "upstream": {
+        "roster_verdict": "全绿†",
+        "parsed_green": null,
+        "parsed_total": null,
+        "dagger": true,
+        "snapshot_parsed_count": 7
+      },
+      "local_projection": {
+        "leaves": "PASS 1/1（wpc 2026-10-31 刷新；快照 0/1 NOT_RUN 已过时）",
+        "obligations": 1,
+        "obligations_basis": "同 #32 九义务分派；wpc junit LOCAL-EDGE-FRIEND-FULL-LIFECYCLE-01 PASS"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "r5/r6 mutation 腿 BLOCKED（E10：friendship was not revoked 连带）；wpc 本地今日 PASS；⏳P6"
+      },
+      "preprod_latest": {
+        "verdict": "BLOCKED",
+        "round": "r5/r6",
+        "detail": "E10 产品缺陷在案（full-lifecycle 连带）；remote_validation=NOT_RUN",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r5-edge-mutation/full-lifecycle-stdout.json",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r6-edge-mutation/full-lifecycle-stdout.json",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-migration-wpc-local/owned-local/junit.xml"
+        ]
+      },
+      "gap": {
+        "kind": "COUNT_GAP+DEFECT",
+        "parsed_minus_obligations": 6,
+        "detail": "parsed 7 − 义务 1 = 6；E10 缺陷在案；⏳P6"
+      },
+      "materials": [
+        "E10 缺陷修复核对（产品在案）"
+      ],
+      "pending_landing": [
+        "P6"
+      ],
+      "queue": {
+        "rank": 24,
+        "gap_qty": 6,
+        "feasibility": 2,
+        "score": 12,
+        "basis": "delta=6×2；缺陷修复先决"
+      },
+      "source_contracts": [],
+      "note": ""
+    },
+    {
+      "no": 39,
+      "case_id": "test_ep_friend_connections_mutual_auto_approve",
+      "upstream_file": "edge_permission.sh",
+      "upstream": {
+        "roster_verdict": "全绿†",
+        "parsed_green": null,
+        "parsed_total": null,
+        "dagger": true,
+        "snapshot_parsed_count": 8
+      },
+      "local_projection": {
+        "leaves": "PASS 1/1 叶",
+        "obligations": 1,
+        "obligations_basis": "同 #32 九义务分派；wpc junit 复证 PASS"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "r5/r6 mutation 腿 PASS（preprod-tier profile；remote_validation=NOT_RUN）；wpc 复证"
+      },
+      "preprod_latest": {
+        "verdict": "PASS",
+        "round": "r5/r6",
+        "detail": "LOCAL-EDGE-FRIEND-MUTUAL-AUTO-APPROVE-01 PASS",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r5-edge-mutation/mutual-auto-approve-stdout.json",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r6-edge-mutation/mutual-auto-approve-stdout.json",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-migration-wpc-local/owned-local/junit.xml"
+        ]
+      },
+      "gap": {
+        "kind": "COUNT_GAP（密度）",
+        "parsed_minus_obligations": 7,
+        "detail": "parsed 8 − 义务 1 = 7"
+      },
+      "materials": [],
+      "pending_landing": [],
+      "queue": {
+        "rank": 27,
+        "gap_qty": 7,
+        "feasibility": 1,
+        "score": 7,
+        "basis": "delta=7×1"
+      },
+      "source_contracts": [],
+      "note": ""
+    },
+    {
+      "no": 40,
+      "case_id": "test_ep_tc_friend_auth_sync_readdressed_principal",
+      "upstream_file": "edge_permission.sh",
+      "upstream": {
+        "roster_verdict": "1绿/2",
+        "parsed_green": 1,
+        "parsed_total": 2,
+        "dagger": false,
+        "snapshot_parsed_count": 2
+      },
+      "local_projection": {
+        "leaves": "PASS（wpc owned-local 2026-10-31 刷新；快照 NOT_RUN 已过时）",
+        "obligations": 5,
+        "obligations_basis": "contract:tc-friend-auth-sync-migration-contract.json obligations=5（requirements=1 wrapper；committed 98e893e87 扩展；快照义务=1 旧值）"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "wpc 本地 LOCAL-EDGE-TC-FRIEND-AUTH-SYNC-01 PASS；wpc-tc-preprod 探针收据 BLOCKED 0/2（credential_kind=human_cookie+registered_bot_token_presence）；r8 backlog dual 离线收据已发、preprod 腿 NOT_RUN（BLOCKED_INVENTORY 为 r8 判定器状态；L5/341e19f62 后 inventory lane 已翻 DUAL_EXECUTION_READY——登记面 landing 见 §3）"
+      },
+      "preprod_latest": {
+        "verdict": "NOT_RUN",
+        "round": "r8",
+        "detail": "r8-progress.tsv edge-permission-backlog：preprod=NOT_RUN（离线 dual 收据已发出）；wpc 预发探针 BLOCKED 0/2 准入窗口如实披露；本地 wpc PASS",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r8-preprod/edge-permission-backlog",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-migration-wpc-tc-preprod",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-migration-wpc-local/owned-local/local-edge-friend-mutations-LOCAL-EDGE-TC-FRIEND-AUTH-SYNC-01.json"
+        ]
+      },
+      "gap": {
+        "kind": "DENSITY_SURPLUS+EXECUTION_GAP",
+        "parsed_minus_obligations": -3,
+        "detail": "义务 5 ≥ parsed 2（超集）；预发执行缺口（准入凭证窗口）；station bot token 环境变量引用 GAP；⏳P6"
+      },
+      "materials": [
+        "station bot token 环境变量引用（GAP 未给原名）",
+        "人类 cookie 准入窗口（wpc 探针凭证种类观测）"
+      ],
+      "pending_landing": [
+        "P6"
+      ],
+      "queue": {
+        "rank": 25,
+        "gap_qty": 5,
+        "feasibility": 2,
+        "score": 10,
+        "basis": "obl 5×2；station bot token 物料"
+      },
+      "source_contracts": [
+        "tc-friend-auth-sync-migration-contract.json"
+      ],
+      "note": ""
+    },
+    {
+      "no": 41,
+      "case_id": "test_ep_dept_scope_parses_object_friend_ext_entries",
+      "upstream_file": "edge_permission.sh",
+      "upstream": {
+        "roster_verdict": "5绿/6",
+        "parsed_green": 5,
+        "parsed_total": 6,
+        "dagger": false,
+        "snapshot_parsed_count": 4
+      },
+      "local_projection": {
+        "leaves": "PASS（wpc owned-local 2026-10-31 刷新；快照 NOT_RUN 已过时）",
+        "obligations": 7,
+        "obligations_basis": "contract:dept-scope-friend-ext-migration-contract.json obligations=7（requirements=1 wrapper；committed 98e893e87；快照义务=1 旧值；roster 上游总=6 vs snapshot parsed=4 双口径注）"
+      },
+      "dual": {
+        "status": "DUAL",
+        "executor_migration_mode": "DUAL",
+        "note": "wpc 本地 LOCAL-EDGE-DEPT-SCOPE-FRIEND-EXT-01 PASS；wpc-dept-preprod 探针 BLOCKED 0/4（同凭证窗口）；r8 backlog preprod=NOT_RUN"
+      },
+      "preprod_latest": {
+        "verdict": "NOT_RUN",
+        "round": "r8",
+        "detail": "同 #40 形态；mixed object/string/garbage dept-scope 解析义务 7 条本地闭合",
+        "evidence_path": [
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-regression-r8-preprod/edge-permission-backlog",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-migration-wpc-dept-preprod",
+          "/Users/shenlifang/.codex/bcs-e2e/preprod-live-evidence/20261031-migration-wpc-local/owned-local/local-edge-friend-mutations-LOCAL-EDGE-DEPT-SCOPE-FRIEND-EXT-01.json"
+        ]
+      },
+      "gap": {
+        "kind": "DENSITY_SURPLUS+EXECUTION_GAP",
+        "parsed_minus_obligations": -3,
+        "detail": "义务 7 ≥ parsed 4（snapshot）/roster 总 6（双口径注）；预发执行缺口；station bot token 环境变量引用 GAP；⏳P6"
+      },
+      "materials": [
+        "station bot token 环境变量引用（GAP）",
+        "人类 cookie 准入窗口"
+      ],
+      "pending_landing": [
+        "P6"
+      ],
+      "queue": {
+        "rank": 23,
+        "gap_qty": 7,
+        "feasibility": 2,
+        "score": 14,
+        "basis": "obl 7×2；station bot token 物料"
+      },
+      "source_contracts": [
+        "dept-scope-friend-ext-migration-contract.json"
+      ],
+      "note": ""
+    }
+  ],
+  "migration_queue": {
+    "rule": "score=缺口量×实弹可行性（1-3）；缺口量口径逐行标 basis（密度 delta / 执行缺口 / 上游红数 / 义务数）；LOCAL_ONLY 车道不入预发 dual 队列但同规则列示",
+    "ranked": [
+      {
+        "rank": 1,
+        "gap_qty": 42,
+        "feasibility": 3,
+        "score": 126,
+        "basis": "密度 delta=42×3；零新物料（r8 9/10 基础）；P0 契约落地后逐字段展开，残余 16",
+        "no": 7,
+        "case_id": "story_user_operates_group_workspace"
+      },
+      {
+        "rank": 2,
+        "gap_qty": 42,
+        "feasibility": 3,
+        "score": 126,
+        "basis": "执行缺口 42×3；本地 42/42 已闭，预发腿准入诊断后零新物料",
+        "no": 18,
+        "case_id": "story_authority_user_journey"
+      },
+      {
+        "rank": 3,
+        "gap_qty": 98,
+        "feasibility": 1,
+        "score": 98,
+        "basis": "执行缺口 98×1；物料门控（cookie 刷新需用户授权+P4+frozen S04 本地形态）",
+        "no": 4,
+        "case_id": "story_provider_operator_publishes_agent"
+      },
+      {
+        "rank": 4,
+        "gap_qty": 26,
+        "feasibility": 3,
+        "score": 78,
+        "basis": "密度 delta=26×3；零新物料，最高纯行动项",
+        "no": 3,
+        "case_id": "story_user_runs_structured_collaboration"
+      },
+      {
+        "rank": 5,
+        "gap_qty": 34,
+        "feasibility": 2,
+        "score": 68,
+        "basis": "密度 delta=34×2；缺陷修复先决",
+        "no": 14,
+        "case_id": "story_cli_operator_creates_custom_collaboration"
+      },
+      {
+        "rank": 6,
+        "gap_qty": 24,
+        "feasibility": 2,
+        "score": 48,
+        "basis": "执行缺口按密度口径 24（parsed 32−legacy 8）×2；SDK/302 门控",
+        "no": 12,
+        "case_id": "story_collaboration_draft_delivery"
+      },
+      {
+        "rank": 7,
+        "gap_qty": 24,
+        "feasibility": 2,
+        "score": 48,
+        "basis": "执行缺口 24×2；P4 准入落地后可实弹",
+        "no": 5,
+        "case_id": "story_provider_owner_isolation"
+      },
+      {
+        "rank": 8,
+        "gap_qty": 22,
+        "feasibility": 2,
+        "score": 44,
+        "basis": "delta=22×2；站内路径物料",
+        "no": 15,
+        "case_id": "story_cli_operator_builds_collaboration_team"
+      },
+      {
+        "rank": 9,
+        "gap_qty": 12,
+        "feasibility": 3,
+        "score": 36,
+        "basis": "密度 delta=12×3；零新物料，可直接 dual 腿内逐字段展开",
+        "no": 1,
+        "case_id": "story_human_manages_delivery_policy"
+      },
+      {
+        "rank": 10,
+        "gap_qty": 15,
+        "feasibility": 2,
+        "score": 30,
+        "basis": "密度 delta=15×2；5-bot actor token 套件+duo 凭据+health 先绿",
+        "no": 9,
+        "case_id": "story_operator_coordinates_with_cli"
+      },
+      {
+        "rank": 11,
+        "gap_qty": 15,
+        "feasibility": 2,
+        "score": 30,
+        "basis": "delta=15×2；形态差核对+P4 关联",
+        "no": 19,
+        "case_id": "story_retired_service_policy"
+      },
+      {
+        "rank": 12,
+        "gap_qty": 15,
+        "feasibility": 2,
+        "score": 30,
+        "basis": "执行缺口 15×2；probe 9/9 已 mounted，凭证物料到位即可实弹",
+        "no": 20,
+        "case_id": "story_provider_operator_manages_subbots"
+      },
+      {
+        "rank": 13,
+        "gap_qty": 9,
+        "feasibility": 3,
+        "score": 27,
+        "basis": "delta=9×3；缺陷修复即重跑",
+        "no": 13,
+        "case_id": "story_user_has_direct_agent_conversation"
+      },
+      {
+        "rank": 14,
+        "gap_qty": 9,
+        "feasibility": 3,
+        "score": 27,
+        "basis": "delta=9×3；零物料（既有 dual-group-context-run 内扩展）",
+        "no": 17,
+        "case_id": "story_cli_operator_manages_group_context"
+      },
+      {
+        "rank": 15,
+        "gap_qty": 22,
+        "feasibility": 1,
+        "score": 22,
+        "basis": "obl 22×1；judge mock 门控",
+        "no": 28,
+        "case_id": "story_provider_callback_survives_slow_judge"
+      },
+      {
+        "rank": 16,
+        "gap_qty": 7,
+        "feasibility": 3,
+        "score": 21,
+        "basis": "密度 delta=7×3；零物料",
+        "no": 10,
+        "case_id": "story_user_validates_external_channel_setup"
+      },
+      {
+        "rank": 17,
+        "gap_qty": 20,
+        "feasibility": 1,
+        "score": 20,
+        "basis": "obl 20×1；receiver origin 物料门控",
+        "no": 27,
+        "case_id": "story_user_receives_group_event_webhooks"
+      },
+      {
+        "rank": 18,
+        "gap_qty": 9,
+        "feasibility": 2,
+        "score": 18,
+        "basis": "执行缺口 9×2；凭证族扩展先决",
+        "no": 6,
+        "case_id": "story_session_owner_permissions"
+      },
+      {
+        "rank": 19,
+        "gap_qty": 18,
+        "feasibility": 1,
+        "score": 18,
+        "basis": "obl 18×1；LOCAL_ONLY 车道",
+        "no": 25,
+        "case_id": "story_state_machine_result_queue"
+      },
+      {
+        "rank": 20,
+        "gap_qty": 17,
+        "feasibility": 1,
+        "score": 17,
+        "basis": "obl 17×1；LOCAL_ONLY 车道",
+        "no": 26,
+        "case_id": "story_collaboration_draft_group_launch"
+      },
+      {
+        "rank": 21,
+        "gap_qty": 16,
+        "feasibility": 1,
+        "score": 16,
+        "basis": "obl 16×1；LOCAL_ONLY 车道",
+        "no": 24,
+        "case_id": "story_nested_fixed_loop_workflows"
+      },
+      {
+        "rank": 22,
+        "gap_qty": 15,
+        "feasibility": 1,
+        "score": 15,
+        "basis": "上游红 15×1；5 叶 unblock 需 fixture 卫生+P6",
+        "no": 8,
+        "case_id": "story_user_builds_trusted_team"
+      },
+      {
+        "rank": 23,
+        "gap_qty": 7,
+        "feasibility": 2,
+        "score": 14,
+        "basis": "obl 7×2；station bot token 物料",
+        "no": 41,
+        "case_id": "test_ep_dept_scope_parses_object_friend_ext_entries"
+      },
+      {
+        "rank": 24,
+        "gap_qty": 6,
+        "feasibility": 2,
+        "score": 12,
+        "basis": "delta=6×2；缺陷修复先决",
+        "no": 38,
+        "case_id": "test_ep_friend_connections_full_lifecycle"
+      },
+      {
+        "rank": 25,
+        "gap_qty": 5,
+        "feasibility": 2,
+        "score": 10,
+        "basis": "obl 5×2；station bot token 物料",
+        "no": 40,
+        "case_id": "test_ep_tc_friend_auth_sync_readdressed_principal"
+      },
+      {
+        "rank": 26,
+        "gap_qty": 3,
+        "feasibility": 3,
+        "score": 9,
+        "basis": "密度 delta=3×3；零物料",
+        "no": 2,
+        "case_id": "story_user_prepares_agent_network"
+      },
+      {
+        "rank": 27,
+        "gap_qty": 8,
+        "feasibility": 1,
+        "score": 8,
+        "basis": "推断补入：LOCAL_ONLY 车道同规则（obl 8×1）；任务装配队列未列 #23",
+        "lane": "LOCAL_ONLY",
+        "no": 23,
+        "case_id": "story_fixed_loop_human_editor_workflow"
+      },
+      {
+        "rank": 28,
+        "gap_qty": 7,
+        "feasibility": 1,
+        "score": 7,
+        "basis": "delta=7×1",
+        "no": 39,
+        "case_id": "test_ep_friend_connections_mutual_auto_approve"
+      },
+      {
+        "rank": 29,
+        "gap_qty": 7,
+        "feasibility": 1,
+        "score": 7,
+        "basis": "delta=7×1；站内凭据门控",
+        "no": 11,
+        "case_id": "story_cli_operator_validates_channel_management"
+      },
+      {
+        "rank": 30,
+        "gap_qty": 7,
+        "feasibility": 1,
+        "score": 7,
+        "basis": "delta=7×1",
+        "no": 33,
+        "case_id": "test_ep_connect_private_and_discover_branches"
+      },
+      {
+        "rank": 31,
+        "gap_qty": 6,
+        "feasibility": 1,
+        "score": 6,
+        "basis": "delta=6×1",
+        "no": 32,
+        "case_id": "test_ep_error_and_admission_branches"
+      },
+      {
+        "rank": 32,
+        "gap_qty": 1,
+        "feasibility": 3,
+        "score": 3,
+        "basis": "obl 1×3；E9 修复即重跑；wpc 本地已绿",
+        "no": 37,
+        "case_id": "test_ep_friend_connections_friend_revoke"
+      },
+      {
+        "rank": 33,
+        "gap_qty": 1,
+        "feasibility": 1,
+        "score": 1,
+        "basis": "快照口径 delta=1×1；committed 已追平（观察项）",
+        "no": 31,
+        "case_id": "test_ep_bot_search"
+      },
+      {
+        "rank": 34,
+        "gap_qty": 1,
+        "feasibility": 1,
+        "score": 1,
+        "basis": "delta=1×1",
+        "no": 34,
+        "case_id": "test_ep_friend_connections_friend_request_and_list"
+      },
+      {
+        "rank": 35,
+        "gap_qty": 1,
+        "feasibility": 1,
+        "score": 1,
+        "basis": "delta=1×1",
+        "no": 35,
+        "case_id": "test_ep_friend_connections_friend_accept_reject_cancel"
+      }
+    ],
+    "top3": [
+      {
+        "rank": 1,
+        "no": 7,
+        "score": 126
+      },
+      {
+        "rank": 2,
+        "no": 18,
+        "score": 126
+      },
+      {
+        "rank": 3,
+        "no": 4,
+        "score": 98
+      }
+    ],
+    "non_queued_none_gap": [
+      16,
+      21,
+      22,
+      29,
+      30,
+      36
+    ],
+    "local_only_lane": [
+      23,
+      24,
+      25,
+      26
+    ]
+  },
+  "material_gaps": [
+    {
+      "id": "M1",
+      "item": "5-bot actor token 套件（operator story 角色矩阵；原名 GAP 未给）",
+      "cases": [
+        9
+      ],
+      "status": "GAP-用户物料"
+    },
+    {
+      "id": "M2",
+      "item": "webhook receiver origin（另需 8 操作 edge_case_bindings、principal_signing_key_env 环境变量引用、mock sink）",
+      "cases": [
+        27
+      ],
+      "status": "GAP-用户物料"
+    },
+    {
+      "id": "M3",
+      "item": "station bot token 环境变量引用（名称 GAP 未给）",
+      "cases": [
+        40,
+        41
+      ],
+      "status": "GAP-用户物料"
+    },
+    {
+      "id": "M4",
+      "item": "人类 cookie 刷新授权（2026-10-29 过期/USER_NOT_LOGIN 观测；凭据刷新需用户授权）",
+      "cases": [
+        4,
+        40,
+        41
+      ],
+      "status": "GAP-用户授权"
+    },
+    {
+      "id": "M5",
+      "item": "provider principal signing key + provider_admin_token 环境引用",
+      "cases": [
+        20
+      ],
+      "status": "GAP-用户物料"
+    },
+    {
+      "id": "M6",
+      "item": "office OAuth SDK（RC1 public bcs-cli）/ 身份通道 302（RC2 产品缺陷在案）",
+      "cases": [
+        12
+      ],
+      "status": "物料+产品在案"
+    },
+    {
+      "id": "M7",
+      "item": "DingTalk-OAuth conversation lookup（站内凭据）",
+      "cases": [
+        11
+      ],
+      "status": "GAP-站内"
+    },
+    {
+      "id": "M8",
+      "item": "judge mock 控制 + mock sink",
+      "cases": [
+        28
+      ],
+      "status": "GAP-用户物料"
+    },
+    {
+      "id": "M9",
+      "item": "friend fixture 新鲜对（exact finite pending / already friends 观测）",
+      "cases": [
+        8
+      ],
+      "status": "fixture 卫生"
+    },
+    {
+      "id": "M10",
+      "item": "fresh owned runtime + 动态 provider/driver/observer bot",
+      "cases": [
+        23,
+        24,
+        25,
+        26
+      ],
+      "status": "GAP-运行时物料"
+    },
+    {
+      "id": "M11",
+      "item": "产品在案缺陷：E9 revoke 空边 / E10 full-lifecycle 连带 / direct-chat cancel 非 cancelled 终态 / custom trial_permission 合同 / workspace group-lifecycle 准入差异 / draft 302 / service-policy 410 形态差",
+      "cases": [
+        37,
+        38,
+        13,
+        14,
+        7,
+        12,
+        19
+      ],
+      "status": "产品在案（不阻塞本地登记，阻塞预发实弹）"
+    },
+    {
+      "id": "M12",
+      "item": "三 Human principal 凭证族（session-owner 矩阵；r8 documented_gaps.PREPROD_HUMAN_PRINCIPAL_FAMILY_SINGLE）+ duo 凭据（operator）+ authority route-probe 诊断",
+      "cases": [
+        6,
+        9,
+        18
+      ],
+      "status": "GAP-用户物料/诊断"
+    }
+  ],
+  "receipt_hygiene_notes": [
+    "r8 edge-permission-backlog MISSING_CONSOLE：判定器按 *-console.txt 查找，实际文件命名 <label>-<env>-console.txt——命名卫生缺口，非执行缺口；preprod=NOT_RUN 以 r8-progress.tsv 环境分栏为权威",
+    "r8 channel-cli/friend-cli console 为混合非纯 JSON；以 state/run.json 为权威（0/9、0/1）",
+    "r8 operator-cli 近空收据：仅 binding/profile，console JSON 载 ready_to_execute=false 与 duo 凭据要求原文（无密文）",
+    "r8 workspace/group-lifecycle BLOCKED 但无 state 目录（exec=None 全空）——落盘卫生缺口同族登记",
+    "r8 CLI 二进制 ~/.codex/bcs-e2e/binaries/bcs-cli-preprod-r8（sha256 前缀 5abecdc6…）≠ B 树 apps/bcs/target/debug/bcs-cli（前缀 0e9f2e3f…b1e95）；收据按此注记，不作等价主张",
+    "r7 session-file r3 BLOCKED（FileTransportError HTTP 303）→ r4 同参 PASS 12/12：瞬时镜头，r4 为最新",
+    "mutation 族（#32/#33/#35/#37/#38/#39）收据形态：LOCAL-EDGE-* case_id + environment tier=preprod（gateway public-v1 / station bcs-direct）+ status 实弹值 + remote_validation=NOT_RUN；verdict 桶按实弹 status，记账字段全局披露",
+    "wpc-local owned-local 套件 LOCAL_SUITE_PASS（junit 9/9）但 summary full_release_status=NOT_QUALIFIED：本地套件绿 ≠ release qualification",
+    "r5-bulk bulk-results.tsv 54 叶无 status 列（wrapper_rc 推断：rc=0×43 / rc=2×11）；快照 case-status 口径 42/12 与 wrapper-rc 口径 43/11 的差异如实保留",
+    "committed migration_inventory.py 残留 legacy 切片 status=LOCAL_EXECUTOR_ONLY（如 retired-service-policy/authority 旧切片行）与 executor-migration.json DUAL 并存：mode 权威取 executor-migration.json（观测）；trusted-team-manifest registration_status 同注（#8）",
+    "provider-subbots r8 收据内嵌 preprod_probe 9/9 mounted PASS + assertion_summary required=131 observed=0 obligations=15；wpa routeprobe（2026-10-30）故事级 BLOCKED 但 probe 9/9 mounted——修正「控制面缺失」旧读法"
+  ],
+  "snapshot_reconciliation": [
+    "双环境化：快照 27/13/1 → committed 实测 36 DUAL + 1 EDGE_OBLIGATION_IN_FAMILY + 4 DYNAMIC_OWNED_LOCAL → 任务三分法 37/4/0（subbots/service-policy/draft-delivery/publishes/provider-owner/session-owner/authority/custom/slow-judge/webhook 的 dualize 提交均 ≤ 基线：a1e822861 谱系至 1f996eda4）",
+    "#4 义务 32→98（provider-publishes-migration-contract 96bb3ab9e；r8 verdict.json baseline42+field56=98）",
+    "#16 4→44、#21 9→87、#22 10→12（WP-B 2026-10-31 committed：代码锚+运行时 total_count 双证）",
+    "#18 16→42（authority-dual story_checks=42；快照 B.2「42/16」之 16 为 WP-A 前旧值）",
+    "#31 12→13、#40 1→5、#41 1→7（committed 契约实测；98e893e87 edge backlog 义务扩展）",
+    "#40/#41 本地 NOT_RUN→PASS、#37/#38 本地 0/1→PASS（wpc owned-local junit 9/9，2026-10-31 今日观测；快照 07:39 未含）",
+    "#7 义务口径三重：快照 17（case 级）/ committed density 契约 atom_count=63（api26+cli11+tail26，密度预言机非义务）/ 在飞 43=17+26field（⏳P0）",
+    "r5 bulk wrapper-rc 43/11（今日实测 tsv）vs 快照 case-status 42/12：口径差（wrapper rc vs case status）如实保留",
+    "快照 B.1「执行器 31/309、backlog 6/52、independent 4/60、maps 33/274」为 07:39 口径，本图不重算该分母（不伪造）；本地 assertions tally 152=101PASS+51NOT_RUN 同注",
+    "caller_execution_story（caller-execution-migration-contract.json requirements=9）不在 41 名录——independent 切片，不入本图",
+    "cases_preprod_20261031-r6.tsv 为 45 腿 recipe（上一轮批次口径）；本图 41 用例名册以 roster 附件为准，粒度不同不逐腿对冲",
+    "session-migration-contract requirements=9 中含 public-jwt-ws 切片（r6 session-public BLOCKED 历史腿）——#21 最新 verdict 取 r8 session 8/8，public/flow 腿历史注记",
+    "【交付复核】基线后 7 笔 committed 波次（76a79fd00→992f9f815，§3 L1-L7）；executor-migration.json 在 1f996eda4..992f9f815 无 diff（dual mode 权威稳定）；service-policy-dual-/slow-judge-dual- 两契约经 f2905e2d3 仅 cookie_reference 描述文本各 2 行，计数口径不变",
+    "第三源对账（新观测）：executor-migration.json 登记器 preprod_verdict（PASS=19/BLOCKED_INVENTORIED=7/NOT_RUN=10/NOT_APPLICABLE=5）vs 本图实弹桶（PASS=17/PARTIAL=1/BLOCKED=15/NOT_RUN=8）——同向 27 行；NOT_APPLICABLE 5=LOCAL_ONLY #23-26 + EDGE_OBLIGATION_IN_FAMILY #30（本图 #30 族内近似 PASS*）；滞后差异 9 行（登记器字段未随 r8 实弹收据更新，推断）：下行 3 行 #3 trusted_team 登记 PASS vs 本图 BLOCKED(r6)、#4 provider 登记 PASS vs 本图 BLOCKED(r8 0/15)、#7 workspace 登记 PASS vs 本图 PARTIAL(9/10 叶)；NOT_RUN→BLOCKED 6 行 #6 #12 #18 #19 #20 #21；本图以 preprod-tier 实弹收据 status 为准（§0.4）"
+  ],
+  "landing_wave_observation": {
+    "collection_head": "76a79fd00（2026-10-31 03:04 采集时刻；基线后仅 1 笔 TLS 波次；41 行数值采集自该工作区状态）",
+    "delivery_head": "992f9f815（交付复核；基线后共 7 笔 committed 波次；dirty 由采集时 35 modified+4 untracked 收敛为交付时 2 modified+2 untracked）",
+    "committed_post_baseline": [
+      {
+        "sha": "76a79fd00",
+        "subject": "fix(bcs-e2e): pin fail-closed TLS context on preprod child transports",
+        "family": "P1",
+        "files": "bcs_e2e/authority/dual_case_run.py、bcs_e2e/draft_delivery/story.py、bcs_e2e/service_policy/story.py、tests/test_preprod_child_tls_context.py(+74)"
+      },
+      {
+        "sha": "f2905e2d3",
+        "subject": "fix(bcs-e2e): attach validated human cookie beside bearer on station duo faces",
+        "family": "P4 站内 duo 凭证面；#12/#19/#28 契约 cookie_reference 描述文本",
+        "files": "bcs_e2e/draft_delivery/{story,dual_case_run}.py、bcs_e2e/service_policy/{contract,dual_case_run,story}.py、bcs_e2e/slow_judge/contract.py、service-policy-dual-migration-contract.json 与 slow-judge-dual-migration-contract.json（各 2 行描述文本，requirements/obligations 计数不变）、对应 tests"
+      },
+      {
+        "sha": "b8de7082b",
+        "subject": "fix(bcs-e2e): carry bounded scrubbed stderr detail through CLI family receipts",
+        "family": "P3",
+        "files": "bcs_e2e/bounded_process.py(+17)、channel/friend/operator CLI case_run+runner、collaboration_team_{contract,runner}.py、direct_chat_cli_case_{leaf,run}.py、remote_channel_cli_adapter.py、tests/test_preprod_cli_stderr_diagnostics.py(+386)"
+      },
+      {
+        "sha": "3c6d6f374",
+        "subject": "feat(bcs-e2e): honest read-only preprod admission surface for provider publishes",
+        "family": "P4 provider 准入面",
+        "files": "bcs_e2e/provider_publishes/{dual_case_run.py(+343),README.md(+28)}、tests/test_provider_publishes_dual_case_run.py、tests/test_provider_publishes_preprod_admission.py(+432)"
+      },
+      {
+        "sha": "341e19f62",
+        "subject": "feat(bcs-e2e): execute red Edge friend-mutation cases on the dual friend-mutation runtime",
+        "family": "P6 edge 红边 dual",
+        "files": "bcs_e2e/local_edge_friend_mutations_run.py、bcs_e2e/remote_edge_friend_mutation_adapter.py(+222)、bcs_e2e/migration_inventory.py（edge lane 翻 DUAL_EXECUTION_READY/execution_command=dual-edge-friend-mutation-run/+station_profile 参数）、bcs_e2e/route_bindings.py（create_as_bot）、transport.py/write_transport.py、tests/test_edge_red_edge_dual_registration.py(+204) 等 9 文件"
+      },
+      {
+        "sha": "a632d9749",
+        "subject": "fix(bcs-e2e): refreeze authority route probes for the station ACE HTML gate",
+        "family": "P4 authority probe 面",
+        "files": "bcs_e2e/authority/dual_case_run.py、tests/test_authority_dual_case_run.py"
+      },
+      {
+        "sha": "992f9f815",
+        "subject": "test(bcs-e2e): sync edge friend mutation contract guards to DUAL_EXECUTION_READY",
+        "family": "P6 guards",
+        "files": "tests/test_local_edge_friend_mutation_contract.py"
+      }
+    ],
+    "still_in_flight_at_delivery": {
+      "modified_tracked": 2,
+      "untracked": 2,
+      "files": [
+        "bcs_e2e/draft_delivery/story.py（M）",
+        "tests/test_draft_delivery_story.py（M）",
+        "workspace-migration-contract.json（untracked；P0 密度契约 requirements=43=17+26field 主体未落地）",
+        "coverage-map/（本图任务产物，untracked）"
+      ],
+      "note": "采集时 dirty 35M+4?? 的六补丁主体已随 committed_post_baseline 落地；交付时残余 draft_delivery 2 文件（#12 附加在飞观察，族归属未定）；workspace-migration-contract.json untracked 对应 P0 主体未落地"
+    },
+    "no_landing_evidence": {
+      "families": "P0 workspace 字段密度契约（workspace 路径无 committed 波次、当前无 dirty——仅 untracked 契约 JSON）、P2 operator profile 环境变量名（b8de7082b 对 operator_cli_case_run.py/operator_cli_runner.py 仅 +1/+7 行 stderr 管道，非环境变量名修复；无 committed 波次亦无 dirty）、P5 fixed-loop DUAL 注册（341e19f62 翻的是 edge friend-mutation lane 的 DUAL_EXECUTION_READY/dual-edge-friend-mutation-run，非 dual-fixed-loop 注册；committed/dirty 树均未见 fixed-loop dual 注册）",
+      "discipline": "无落地证据≠落地否定；如实记，不作负证据断言"
+    },
+    "pending_landing_semantics": "⏳Pn=「基线 1f996eda4 口径缺口义务未闭合」；波次 committed 只缩小代码面/登记面，不改基线口径闭合判定；预发实弹腿（remote_validation=NOT_RUN 收据）与用户物料门控（M1-M12）不因 landing 自动闭合",
+    "dual_source_recheck": "executor-migration.json 于 1f996eda4..992f9f815 无 diff（git diff 空）；mode 分布复核 DUAL=36/DYNAMIC_OWNED_LOCAL=4(#23-26)/EDGE_OBLIGATION_IN_FAMILY=1(#30)，与本图三分法 37/4/0 一致",
+    "contract_text_wave_note": "f2905e2d3 对 service-policy-dual-/slow-judge-dual-migration-contract.json 各 2 行 diff 仅 cookie_reference 描述文本（duo credential 存在性校验+伴 bearer 附着，值不落盘）；requirements/obligations 计数不变，本图按基线版计数不受影响",
+    "executor_verdict_field_reconciliation": {
+      "source": "executor-migration.json rows[].executor_migration.preprod_verdict（登记器口径，committed 未变）",
+      "dist": "PASS=19/BLOCKED_INVENTORIED=7/NOT_RUN=10/NOT_APPLICABLE=5",
+      "vs_map": "同向 27 行；NOT_APPLICABLE 5=LOCAL_ONLY #23-26 + EDGE_OBLIGATION_IN_FAMILY #30（本图 #30 族内近似 PASS*）；滞后差异 9 行（登记器字段未随 r8 实弹收据更新，推断）：下行 3 行 #3 trusted_team 登记 PASS vs 本图 BLOCKED(r6)、#4 provider 登记 PASS vs 本图 BLOCKED(r8 0/15)、#7 workspace 登记 PASS vs 本图 PARTIAL(9/10 叶)；NOT_RUN→BLOCKED 6 行 #6 #12 #18 #19 #20 #21",
+      "ruling": "本图 verdict 桶以 preprod-tier 实弹收据 status 为准（§0.4）；登记器 preprod_verdict 字段待同步"
+    }
+  }
+}
