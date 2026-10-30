@@ -41,9 +41,12 @@ class ServiceDeviceProvider(DeviceSourceProvider):
         device_binding_repo: "DeviceBindingRepository",
         paas_facade: "PaasServiceFacade",
         config: BotHealthCheckerConfig | None = None,
-        query_service: "DeviceBindingQueryService | None" = None,
+        *,
+        query_service: "DeviceBindingQueryService",
     ):
-        super().__init__(device_binding_repo, paas_facade, config, query_service)
+        super().__init__(
+            device_binding_repo, paas_facade, config, query_service=query_service
+        )
 
     @property
     def provider_type(self) -> DeviceProviderType:
@@ -72,19 +75,12 @@ class ServiceDeviceProvider(DeviceSourceProvider):
         Returns:
             PaasDeviceInfo 列表
         """
-        if self._query_service is not None:
-            devices = self._query_service.list_paas_device_by_bot_service(
-                bot_id=bot_id,
-                entity_id=entity_id,
-                statuses=statuses,
-                env=env,
-            )
-        else:
-            devices = self._device_binding_repo.list_paas_device_by_bot_service(
-                bot_id=bot_id,
-                entity_id=entity_id,
-                statuses=statuses,
-            )
+        devices = self._query_service.list_paas_device_by_bot_service(
+            bot_id=bot_id,
+            entity_id=entity_id,
+            statuses=statuses,
+            env=env,
+        )
 
         return [
             PaasDeviceInfo(

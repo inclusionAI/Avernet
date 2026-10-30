@@ -3,6 +3,10 @@ from typing import Any, Protocol, runtime_checkable
 from ._record import BotRecord, RestoredBotRecord
 
 
+class BotRecordConflictError(Exception):
+    """A live bot record already occupies the requested unique-key slot."""
+
+
 @runtime_checkable
 class BotRepository(Protocol):
     """Protocol for bot repository."""
@@ -136,54 +140,6 @@ class BotRepository(Protocol):
 
     def soft_delete(self, *, bot_id: int, tenant: str, env: str, modifier: str) -> None:
         """Soft delete bot with tenant+env isolation by setting is_deleted to the record ID (per D-04)."""
-        ...
-
-    def insert_bot_record(
-        self,
-        *,
-        source_bot_id: int,
-        tenant: str,
-        env: str,
-        status: str,
-        extra_config: dict[str, Any] | None = None,
-        name: str | None = None,
-        template_uuid: str | None = None,
-        modifier: str = "system",
-    ) -> int:
-        """Clone an existing bot record with a new status.
-
-        Copies all fields from the source bot record, overriding status
-        and optionally extra_config/name/template_uuid. The clone is a
-        fresh INSERT; previously soft-deleted rows are left untouched.
-        Does not guard against concurrent clones — use ``try_insert_pending_bot``
-        when the clone must reserve a PENDING slot atomically.
-        Returns the new record ID.
-        """
-        ...
-
-    def try_insert_pending_bot(
-        self,
-        *,
-        source_bot_id: int,
-        tenant: str,
-        env: str,
-        extra_config: dict[str, Any] | None = None,
-        name: str | None = None,
-        template_uuid: str | None = None,
-        modifier: str = "system",
-    ) -> int:
-        """Atomically clone the source bot into a PENDING record.
-
-        Atomicity comes from the unique key, not transaction scope: the
-        repository method session and the nested insert session are
-        separate transactions, and the unique key is the final arbiter.
-        Raises the repository's conflict error when a live PENDING record
-        already exists for the same ``bot_uuid``; the caller must abort
-        rather than delete the incumbent record. A soft-deleted PENDING
-        record occupies a distinct unique-key slot (``is_deleted = bot_id``),
-        so the live slot stays free and the clone is a fresh INSERT;
-        soft-deleted records are left untouched. Returns the new record ID.
-        """
         ...
 
     def reconcile_unclaimed_pending_bots(

@@ -14,6 +14,7 @@ class AcBotPublishRepository(Protocol):
         self,
         *,
         source_bot_id: str,
+        binding_key: str,
         status: str = "success",
         owner_id: str | None = None,
         env: str | None = None,
@@ -23,6 +24,7 @@ class AcBotPublishRepository(Protocol):
         self,
         *,
         source_bot_id: str,
+        binding_key: str,
         status: str = "success",
         owner_id: str | None = None,
         env: str | None = None,
@@ -35,6 +37,7 @@ class AcBotPublishRepository(Protocol):
 
         Args:
             source_bot_id: 原始 bot_id
+            binding_key: binding JSON 子键，由调用方选择（如 verify/online）
             status: 发布状态（validating/success）
             owner_id: 所有者 ID
             env: 环境参数，可选

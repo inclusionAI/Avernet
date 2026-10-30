@@ -39,7 +39,8 @@ class DeviceSourceProvider(ABC):
         device_binding_repo: "DeviceBindingRepository",
         paas_facade: "PaasServiceFacade",
         config: BotHealthCheckerConfig | None = None,
-        query_service: "DeviceBindingQueryService | None" = None,
+        *,
+        query_service: "DeviceBindingQueryService",
     ):
         """初始化 Provider。
 
@@ -47,7 +48,7 @@ class DeviceSourceProvider(ABC):
             device_binding_repo: 设备绑定仓库（简单 CRUD）
             paas_facade: PaaS 服务门面
             config: 配置对象，为 None 时使用默认配置
-            query_service: 跨表查询编排服务，推荐传入
+            query_service: 必需的跨表查询编排服务
         """
         self._device_binding_repo = device_binding_repo
         self._paas_facade = paas_facade
@@ -156,20 +157,12 @@ class DeviceSourceProvider(ABC):
                 refresh_fail_count=refresh_fail_count,
             )
         elif device.source_table == "baas_device":
-            if self._query_service is not None:
-                self._query_service.update_baas_device_ttl_by_id(
-                    baas_device_id=int(device.source_table_id),
-                    ttl_expiration_time=ttl_expiration_time,
-                    ttl_expiration_timestamp=ttl_expiration_timestamp,
-                    refresh_fail_count=refresh_fail_count,
-                )
-            else:
-                self._device_binding_repo.update_baas_device_ttl_by_id(
-                    baas_device_id=int(device.source_table_id),
-                    ttl_expiration_time=ttl_expiration_time,
-                    ttl_expiration_timestamp=ttl_expiration_timestamp,
-                    refresh_fail_count=refresh_fail_count,
-                )
+            self._query_service.update_baas_device_ttl_by_id(
+                baas_device_id=int(device.source_table_id),
+                ttl_expiration_time=ttl_expiration_time,
+                ttl_expiration_timestamp=ttl_expiration_timestamp,
+                refresh_fail_count=refresh_fail_count,
+            )
 
     def _update_device_refresh_fail_count_to_db(self, device: PaasDeviceInfo) -> None:
         """仅将 refresh_fail_count 写回数据库（TTL 无有效值时使用）。"""
@@ -182,16 +175,10 @@ class DeviceSourceProvider(ABC):
                 refresh_fail_count=device.refresh_fail_count,
             )
         elif device.source_table == "baas_device":
-            if self._query_service is not None:
-                self._query_service.update_baas_device_refresh_fail_count_by_id(
-                    baas_device_id=int(device.source_table_id),
-                    refresh_fail_count=device.refresh_fail_count,
-                )
-            else:
-                self._device_binding_repo.update_baas_device_refresh_fail_count_by_id(
-                    baas_device_id=int(device.source_table_id),
-                    refresh_fail_count=device.refresh_fail_count,
-                )
+            self._query_service.update_baas_device_refresh_fail_count_by_id(
+                baas_device_id=int(device.source_table_id),
+                refresh_fail_count=device.refresh_fail_count,
+            )
 
     @abstractmethod
     async def list_paas_device_by_bot(

@@ -7,6 +7,7 @@ constraints, and keyset pagination.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -59,7 +60,9 @@ class TestExpiredPagination:
         _insert_device(provider_type="ARCA", sandbox_id="sbx-arca")
         _insert_device(provider_type="TECLAW", sandbox_id="sbx-teclaw")
 
-        result = repo.list_expired_paginated(default_ttl_minutes=0, grace_seconds=3600)
+        result = repo.list_expired_paginated(
+            default_ttl_minutes=0, due_before=datetime.now() - timedelta(seconds=3600)
+        )
         provider_types = {row["provider_type"] for row in result}
         assert "TECLAW" not in provider_types
 
@@ -68,7 +71,9 @@ class TestExpiredPagination:
         repo = self._repo()
         device_id = _insert_device(sandbox_id="sbx-due", extra_config=None)
 
-        result = repo.list_expired_paginated(default_ttl_minutes=0, grace_seconds=3600)
+        result = repo.list_expired_paginated(
+            default_ttl_minutes=0, due_before=datetime.now() - timedelta(seconds=3600)
+        )
         ids = {row["id"] for row in result}
         assert device_id in ids
 
@@ -77,7 +82,9 @@ class TestExpiredPagination:
         repo = self._repo()
         device_id = _insert_device(sandbox_id="sbx-not-due", extra_config=None)
 
-        result = repo.list_expired_paginated(default_ttl_minutes=10080, grace_seconds=0)
+        result = repo.list_expired_paginated(
+            default_ttl_minutes=10080, due_before=datetime.now() - timedelta(seconds=0)
+        )
         ids = {row["id"] for row in result}
         assert device_id not in ids
 
@@ -93,7 +100,9 @@ class TestExpiredPagination:
             provider_device_props={"ttl_expiration_timestamp": past_ms},
         )
 
-        result = repo.list_expired_paginated(default_ttl_minutes=10080, grace_seconds=0)
+        result = repo.list_expired_paginated(
+            default_ttl_minutes=10080, due_before=datetime.now() - timedelta(seconds=0)
+        )
         ids = {row["id"] for row in result}
         assert device_id in ids
 
@@ -109,7 +118,9 @@ class TestExpiredPagination:
             provider_device_props={"ttl_expiration_timestamp": future_ms},
         )
 
-        result = repo.list_expired_paginated(default_ttl_minutes=0, grace_seconds=3600)
+        result = repo.list_expired_paginated(
+            default_ttl_minutes=0, due_before=datetime.now() - timedelta(seconds=3600)
+        )
         ids = {row["id"] for row in result}
         assert device_id not in ids
 
@@ -123,7 +134,9 @@ class TestExpiredPagination:
             extra_config={"deploy_config": {"ttl_in_minutes": 10080}},
         )
 
-        result = repo.list_expired_paginated(default_ttl_minutes=0, grace_seconds=3600)
+        result = repo.list_expired_paginated(
+            default_ttl_minutes=0, due_before=datetime.now() - timedelta(seconds=3600)
+        )
         ids = {row["id"] for row in result}
         assert device_id not in ids
 
@@ -138,7 +151,9 @@ class TestExpiredPagination:
         )
 
         # default=0 → both fall back to 0 → deadline = gmt_create → due.
-        result = repo.list_expired_paginated(default_ttl_minutes=0, grace_seconds=3600)
+        result = repo.list_expired_paginated(
+            default_ttl_minutes=0, due_before=datetime.now() - timedelta(seconds=3600)
+        )
         ids = {row["id"] for row in result}
         assert missing_id in ids
         assert zero_id in ids
@@ -161,7 +176,9 @@ class TestExpiredPagination:
             extra_config=None,
         )
 
-        result = repo.list_expired_paginated(default_ttl_minutes=0, grace_seconds=3600)
+        result = repo.list_expired_paginated(
+            default_ttl_minutes=0, due_before=datetime.now() - timedelta(seconds=3600)
+        )
         sandboxes = {row["provider_device_id"] for row in result}
         assert None not in sandboxes
 
@@ -176,7 +193,10 @@ class TestExpiredPagination:
         last_id = 0
         while True:
             page = repo.list_expired_paginated(
-                last_id=last_id, limit=2, default_ttl_minutes=0, grace_seconds=3600
+                last_id=last_id,
+                limit=2,
+                default_ttl_minutes=0,
+                due_before=datetime.now() - timedelta(seconds=3600),
             )
             if not page:
                 break

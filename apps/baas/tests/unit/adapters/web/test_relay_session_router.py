@@ -20,16 +20,20 @@ from secbaas.community.core.repository.ws_relay_session import (
     WsRelaySessionRecord,
     WsRelaySessionRepository,
 )
+from secbaas.community.core.service.ws_relay_session import WsRelaySessionService
 from tests.unit.adapters.web.conftest import iter_api_routes
 
 
 def _patch_repo(mock_repo):
     """Override DI-injected Provide[...] dependency for ws_relay_session_repository."""
+    mock_repo.update_active.return_value = 1
+    mock_repo.update_closed.return_value = 1
+    service = WsRelaySessionService(mock_repo)
     old_overrides = dict(app.dependency_overrides)
     for route in iter_api_routes(app):
         for dep in route.dependant.dependencies:
             if isinstance(dep.call, Provide):
-                app.dependency_overrides[dep.call] = lambda: mock_repo
+                app.dependency_overrides[dep.call] = lambda: service
     return old_overrides
 
 
@@ -132,15 +136,6 @@ class TestPutRelaySession:
         mock_repo = MagicMock(spec=WsRelaySessionRepository)
         record = _make_record(session_id="closed-session", status="closed")
         mock_repo.get_by_session_id.return_value = record
-
-        # _validate_transition raises DeviceCreationError for invalid transition
-        def raise_conflict(current, target):
-            raise DeviceCreationError(
-                error_code="RELAY_STATE_CONFLICT",
-                message=f"Invalid state transition: {current} -> {target}",
-            )
-
-        mock_repo._validate_transition.side_effect = raise_conflict
 
         old = _patch_repo(mock_repo)
         try:

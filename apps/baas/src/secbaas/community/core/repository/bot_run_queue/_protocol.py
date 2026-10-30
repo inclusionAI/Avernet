@@ -36,12 +36,10 @@ class BotRunQueueRepository(Protocol):
         worker_id: str,
         *,
         candidates: int = 5,
-        max_running: int | None = None,
     ) -> BotRunQueueRecord | None:
         """无锁乐观认领指定 bot 的一个 PENDING 工作项（PENDING→RUNNING）。
 
-        ``max_running`` 为 None 时不限并发；否则认领前统计该 bot 当前
-        RUNNING（在途）数，达到上限即返回 None，实现跨进程的全局并发上限。
+        仅提供有界原子出队能力；并发准入在 Worker 中独立判断，非严格全局配额。
         """
         ...
 
@@ -94,8 +92,8 @@ class BotRunQueueRepository(Protocol):
         """
         ...
 
-    def scan_timeout(self, limit: int = 200) -> list[BotRunQueueRecord]:
-        """扫描 PENDING/RUNNING 中已超时的工作项（meta.timeout 已过期）。"""
+    def list_unfinished(self, limit: int = 200) -> list[BotRunQueueRecord]:
+        """有界读取 PENDING/RUNNING 快照；超时策略由 Worker 在 Session 外决定。"""
         ...
 
     def find_running_by_session(self, session_id: str) -> list[BotRunQueueRecord]:

@@ -138,6 +138,11 @@ class TestPublishRepositoryProtocol:
             creator="test_user",
             modifier="test_user",
             name="Status Change",
+            publisher="test_user",
+            replica_desired=1,
+            batch_capacity=5,
+            batch_number=1,
+            cooldown_seconds=0,
         )
 
         original = publish_repository.get_by_id(publish_id, TEST_TENANT, TEST_ENV)
@@ -187,6 +192,11 @@ class TestPublishRepositoryProtocol:
             modifier="test_user",
             name="Original Name",
             extra_config={"old_key": "old_value"},
+            publisher="test_user",
+            replica_desired=1,
+            batch_capacity=5,
+            batch_number=1,
+            cooldown_seconds=0,
         )
 
         result = publish_repository.update_publish(
@@ -239,6 +249,12 @@ class TestPublishRepositoryProtocol:
             status="PENDING",
             creator="test_user",
             modifier="test_user",
+            name="Publish-CREATE",
+            publisher="test_user",
+            replica_desired=1,
+            batch_capacity=5,
+            batch_number=1,
+            cooldown_seconds=0,
         )
         publish_id_2 = publish_repository.insert_publish(
             tenant=TEST_TENANT,
@@ -249,6 +265,12 @@ class TestPublishRepositoryProtocol:
             status="SUCCESS",
             creator="test_user",
             modifier="test_user",
+            name="Publish-UPDATE",
+            publisher="test_user",
+            replica_desired=1,
+            batch_capacity=5,
+            batch_number=1,
+            cooldown_seconds=0,
         )
         publish_id_3 = publish_repository.insert_publish(
             tenant=TEST_TENANT,
@@ -259,6 +281,12 @@ class TestPublishRepositoryProtocol:
             status="REJECTED",
             creator="test_user",
             modifier="test_user",
+            name="Publish-UPDATE",
+            publisher="test_user",
+            replica_desired=1,
+            batch_capacity=5,
+            batch_number=1,
+            cooldown_seconds=0,
         )
 
         records = publish_repository.list_by_bot_id(bot_id, TEST_TENANT, TEST_ENV)
@@ -304,6 +332,12 @@ class TestPublishRepositoryProtocol:
             status="PENDING",
             creator="test_user",
             modifier="test_user",
+            name="Publish-CREATE",
+            publisher="test_user",
+            replica_desired=1,
+            batch_capacity=5,
+            batch_number=1,
+            cooldown_seconds=0,
         )
 
         active = publish_repository.get_active_by_bot_id(bot_id, TEST_TENANT, TEST_ENV)
@@ -336,6 +370,12 @@ class TestPublishRepositoryProtocol:
             status="SUCCESS",
             creator="test_user",
             modifier="test_user",
+            name="Publish-CREATE",
+            publisher="test_user",
+            replica_desired=1,
+            batch_capacity=5,
+            batch_number=1,
+            cooldown_seconds=0,
         )
 
         active = publish_repository.get_active_by_bot_id(bot_id, TEST_TENANT, TEST_ENV)
@@ -366,6 +406,12 @@ class TestPublishRepositoryProtocol:
             status="REVOKED",
             creator="test_user",
             modifier="test_user",
+            name="Publish-CREATE",
+            publisher="test_user",
+            replica_desired=1,
+            batch_capacity=5,
+            batch_number=1,
+            cooldown_seconds=0,
         )
 
         active = publish_repository.get_active_by_bot_id(bot_id, TEST_TENANT, TEST_ENV)
@@ -401,6 +447,11 @@ class TestPublishRepositoryProtocol:
             creator="test_user",
             modifier="test_user",
             name="To Be Deleted",
+            publisher="test_user",
+            replica_desired=1,
+            batch_capacity=5,
+            batch_number=1,
+            cooldown_seconds=0,
         )
 
         # Verify it exists before delete
@@ -454,6 +505,12 @@ class TestPublishRepositoryProtocol:
             status="PENDING",
             creator="test_user",
             modifier="test_user",
+            name="Publish-CREATE",
+            publisher="test_user",
+            replica_desired=1,
+            batch_capacity=5,
+            batch_number=1,
+            cooldown_seconds=0,
         )
         publish_id_2 = publish_repository.insert_publish(
             tenant=TEST_TENANT,
@@ -464,6 +521,12 @@ class TestPublishRepositoryProtocol:
             status="PENDING",
             creator="test_user",
             modifier="test_user",
+            name="Publish-CREATE",
+            publisher="test_user",
+            replica_desired=1,
+            batch_capacity=5,
+            batch_number=1,
+            cooldown_seconds=0,
         )
 
         # Soft delete publish_id_1

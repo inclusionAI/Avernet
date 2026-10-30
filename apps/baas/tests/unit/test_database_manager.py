@@ -104,10 +104,14 @@ class TestScopedOrmSession:
         plugin.orm_session.return_value.__enter__.return_value = mock_session
 
         dm.init_plugin(plugin)
-        dm._scoped_sessions = []
 
         with dm.scoped_orm_session() as s:
             assert s is mock_session
-            assert len(dm._scoped_sessions) == 1
+            with dm.orm_session() as joined:
+                assert joined is s
 
-        assert len(dm._scoped_sessions) == 0
+        plugin.orm_session.return_value.__exit__.assert_called_once_with(
+            None, None, None
+        )
+        mock_session.commit.assert_not_called()
+        mock_session.close.assert_not_called()

@@ -129,14 +129,6 @@ class DeviceBindingRepository(Protocol):
         sort_order: str = "desc",
     ) -> tuple[int, list[tuple["DeviceBindingRecord", dict[str, Any]]]]: ...
 
-    def list_sandboxes_by_bot(
-        self,
-        *,
-        bot_id: str,
-        entity_id: str,
-        env: str | None = None,
-    ) -> tuple[dict[str, Any] | None, list["DeviceBindingRecord"]]: ...
-
     def get_binding_by_sandbox_id(
         self,
         *,
@@ -176,27 +168,6 @@ class DeviceBindingRepository(Protocol):
         env: str = "prod",
     ) -> dict[str, Any] | None: ...
 
-    def get_publish_binding(
-        self,
-        *,
-        source_bot_id: str,
-        status: str,  # "validating" | "success"
-    ) -> int | None: ...
-
-    def list_paas_device_by_bot_personal(
-        self,
-        *,
-        bot_id: str,
-        binding_id: int,
-    ) -> list[dict[str, Any]]: ...
-
-    def list_paas_device_by_bot_service(
-        self,
-        *,
-        bot_id: str,
-        statuses: list[str],  # ["draft", "validating", "online"]
-    ) -> list[dict[str, Any]]: ...
-
     def update_baas_device_ttl(
         self,
         *,
@@ -228,14 +199,6 @@ class DeviceBindingRepository(Protocol):
         refresh_fail_count: int,
     ) -> None: ...
 
-    def export_device_all(self) -> list[tuple[str, str, str]]: ...
-
-    def export_device_list(
-        self,
-        *,
-        env: str = "pre",
-    ) -> list[tuple[str, str, str]]: ...
-
     def get_baas_device_by_id(
         self, *, baas_device_id: int
     ) -> dict[str, Any] | None: ...
@@ -263,13 +226,14 @@ class DeviceBindingRepository(Protocol):
     def list_bindings_by_id_asc(
         self,
         *,
+        due_before: str,
         last_id: int = 0,
         limit: int = 100,
     ) -> list[DeviceBindingRecord]:
         """查询 ac_entity_device_binding 中 ACTIVE 且有 sandbox_id 的记录，
         按 id ASC 排序，取前 limit 条。
 
-        用于 DeviceTtlTimer 定时任务：仅处理 TTL 在 24 小时内（已到期或即将
+        用于 DeviceTtlTimer 定时任务：仅处理 TTL 不晚于调用方指定的 due_before（已到期或即将
         到期）的个人 bot 设备。
         """
         ...
@@ -277,13 +241,26 @@ class DeviceBindingRepository(Protocol):
     def list_baas_devices_by_id_asc(
         self,
         *,
+        due_before: str,
         last_id: int = 0,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         """查询 baas_device 中 ACTIVE 且有 sandbox_id 的记录，
         按 id ASC 排序，取前 limit 条。
 
-        用于 DeviceTtlTimer 定时任务：仅处理 TTL 在 24 小时内（已到期或即将
+        用于 DeviceTtlTimer 定时任务：仅处理 TTL 不晚于调用方指定的 due_before（已到期或即将
         到期）的服务 bot 设备。
         """
+        ...
+
+    def list_export_rows(
+        self,
+        *,
+        env: str | None,
+        status: str,
+        device_provider: str,
+        offset: int,
+        limit: int,
+    ) -> list[tuple[str, str | dict[str, Any] | None]]:
+        """有界投影；env=None 明确表示管理员跨环境导出。"""
         ...

@@ -42,6 +42,7 @@ class TestAcBotPublishRepositoryProtocol:
         result = ac_bot_publish_repository.get_binding_id(
             source_bot_id=f"nonexistent_bot_{_generate_uuid()}",
             status="success",
+            binding_key="online",
         )
         assert result is None
 

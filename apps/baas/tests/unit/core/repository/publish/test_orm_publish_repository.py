@@ -221,8 +221,8 @@ class TestPublishRecord:
 
 
 class TestInsertPublish:
-    def test_insert_with_minimal_defaults(self, repo, mock_session):
-        """Insert with only required fields; defaults are applied."""
+    def test_insert_with_resolved_creation_values(self, repo, mock_session):
+        """Persist caller-resolved required creation fields without policy."""
         result = repo.insert_publish(
             tenant="t1",
             env="prod",
@@ -232,6 +232,12 @@ class TestInsertPublish:
             status="PENDING",
             creator="creator-x",
             modifier="modifier-x",
+            name="Publish-CREATE",
+            publisher="creator-x",
+            replica_desired=1,
+            batch_capacity=5,
+            batch_number=1,
+            cooldown_seconds=0,
         )
 
         assert result == 42
@@ -244,13 +250,13 @@ class TestInsertPublish:
         assert added_model.domain == "example.com"
         assert added_model.bot_id == 5
         assert added_model.publish_type == "CREATE"
-        assert added_model.name == "Publish-CREATE"  # default
+        assert added_model.name == "Publish-CREATE"  # caller resolved
         assert added_model.description is None
-        assert added_model.publisher == "creator-x"  # default = creator
-        assert added_model.replica_desired == 1  # default
-        assert added_model.batch_capacity == 5  # default
-        assert added_model.batch_number == 1  # default
-        assert added_model.cooldown_seconds == 0  # default
+        assert added_model.publisher == "creator-x"  # caller resolved from creator
+        assert added_model.replica_desired == 1  # caller resolved
+        assert added_model.batch_capacity == 5  # caller resolved
+        assert added_model.batch_number == 1  # caller resolved
+        assert added_model.cooldown_seconds == 0  # caller resolved
         assert added_model.config_version is None
         assert added_model.status == "PENDING"
         assert added_model.last_publish_id is None
@@ -318,6 +324,12 @@ class TestInsertPublish:
             creator="c",
             modifier="m",
             extra_config={"k1": "v1", "nested": {"a": 1}},
+            name="Publish-RESTART",
+            publisher="c",
+            replica_desired=1,
+            batch_capacity=5,
+            batch_number=1,
+            cooldown_seconds=0,
         )
         added_model = mock_session.add.call_args[0][0]
         extra_config_str = added_model.extra_config
@@ -335,12 +347,18 @@ class TestInsertPublish:
             creator="c",
             modifier="m",
             extra_config=None,
+            name="Publish-DESTROY",
+            publisher="c",
+            replica_desired=1,
+            batch_capacity=5,
+            batch_number=1,
+            cooldown_seconds=0,
         )
         added_model = mock_session.add.call_args[0][0]
         assert added_model.extra_config is None
 
-    def test_insert_with_publisher_none_defaults_to_creator(self, repo, mock_session):
-        """When publisher is None, it defaults to creator."""
+    def test_insert_persists_resolved_publisher(self, repo, mock_session):
+        """Persist the publisher resolved by the Service."""
         repo.insert_publish(
             tenant="t1",
             env="dev",
@@ -350,15 +368,18 @@ class TestInsertPublish:
             status="PENDING",
             creator="creator-user",
             modifier="mod-user",
-            publisher=None,
+            publisher="creator-user",
+            name="Publish-CREATE",
+            replica_desired=1,
+            batch_capacity=5,
+            batch_number=1,
+            cooldown_seconds=0,
         )
         added_model = mock_session.add.call_args[0][0]
         assert added_model.publisher == "creator-user"
 
-    def test_insert_with_name_none_defaults_to_publish_type_prefix(
-        self, repo, mock_session
-    ):
-        """When name is None, it defaults to 'Publish-{publish_type}'."""
+    def test_insert_persists_resolved_name(self, repo, mock_session):
+        """Persist the name resolved by the Service."""
         repo.insert_publish(
             tenant="t1",
             env="dev",
@@ -368,13 +389,18 @@ class TestInsertPublish:
             status="PENDING",
             creator="c",
             modifier="m",
-            name=None,
+            name="Publish-RESTART",
+            publisher="c",
+            replica_desired=1,
+            batch_capacity=5,
+            batch_number=1,
+            cooldown_seconds=0,
         )
         added_model = mock_session.add.call_args[0][0]
         assert added_model.name == "Publish-RESTART"
 
-    def test_insert_defaults_for_numeric_fields(self, repo, mock_session):
-        """replica_desired=None → 1, batch_capacity=None → 5, batch_number=None → 1, cooldown_seconds=None → 0."""
+    def test_insert_persists_resolved_numeric_fields(self, repo, mock_session):
+        """Numeric values are required, and are persisted without repository defaults."""
         repo.insert_publish(
             tenant="t1",
             env="dev",
@@ -384,10 +410,12 @@ class TestInsertPublish:
             status="PENDING",
             creator="c",
             modifier="m",
-            replica_desired=None,
-            batch_capacity=None,
-            batch_number=None,
-            cooldown_seconds=None,
+            replica_desired=1,
+            batch_capacity=5,
+            batch_number=1,
+            cooldown_seconds=0,
+            name="Publish-UPDATE",
+            publisher="c",
         )
         added_model = mock_session.add.call_args[0][0]
         assert added_model.replica_desired == 1

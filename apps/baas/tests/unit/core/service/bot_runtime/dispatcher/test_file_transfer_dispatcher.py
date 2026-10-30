@@ -97,7 +97,9 @@ def file_backend():
 
 @pytest.fixture
 def ticket_repo():
-    return MagicMock()
+    repository = MagicMock()
+    repository.compare_and_set_status.return_value = 1
+    return repository
 
 
 @pytest.fixture
@@ -354,7 +356,12 @@ class TestDispatchCompleteUpload:
         result = await dispatcher.dispatch_complete_upload("tf-001")
         assert isinstance(result, CompleteUploadResponse)
         assert result.status == "UPLOAD_COMPLETED"
-        ticket_repo.update_status.assert_called_once_with("tf-001", "UPLOAD_COMPLETED")
+        ticket_repo.compare_and_set_status.assert_called_once_with(
+            "tf-001",
+            "UPLOAD_COMPLETED",
+            None,
+            expected_statuses=frozenset(["CREATED", "UPLOADING", "UPLOAD_COMPLETED"]),
+        )
 
     @pytest.mark.asyncio
     async def test_single_missing_object(self, dispatcher, ticket_repo, file_backend):
@@ -431,7 +438,7 @@ class TestDispatchCompleteUpload:
         def _raise_cas(*args, **kwargs):
             raise TransferStateConflictError("conflict")
 
-        ticket_repo.update_status.side_effect = _raise_cas
+        ticket_repo.compare_and_set_status.side_effect = _raise_cas
 
         result = await dispatcher.dispatch_complete_upload("tf-001")
         assert result.status == "DONE"
@@ -451,7 +458,7 @@ class TestDispatchCompleteUpload:
         def _raise_cas(*args, **kwargs):
             raise TransferStateConflictError("conflict")
 
-        ticket_repo.update_status.side_effect = _raise_cas
+        ticket_repo.compare_and_set_status.side_effect = _raise_cas
 
         with pytest.raises(TransferStateConflictError):
             await dispatcher.dispatch_complete_upload("tf-001")
@@ -521,7 +528,14 @@ class TestDispatchCancelUpload:
         result = await dispatcher.dispatch_cancel_upload("tf-001")
         assert result.status == "CANCELLED"
         # Should still call update_status("CANCELLED") after recovering
-        ticket_repo.update_status.assert_called_once_with("tf-001", "CANCELLED")
+        ticket_repo.compare_and_set_status.assert_called_once_with(
+            "tf-001",
+            "CANCELLED",
+            None,
+            expected_statuses=frozenset(
+                ["CREATED", "UPLOADING", "PULLING", "CANCELLED"]
+            ),
+        )
 
     @pytest.mark.asyncio
     async def test_cancel_multipart_abort_other_error_raises(
@@ -552,7 +566,7 @@ class TestDispatchCancelUpload:
         def _raise_cas(*args, **kwargs):
             raise TransferStateConflictError("conflict")
 
-        ticket_repo.update_status.side_effect = _raise_cas
+        ticket_repo.compare_and_set_status.side_effect = _raise_cas
 
         result = await dispatcher.dispatch_cancel_upload("tf-001")
         assert result.status == "DONE"
@@ -570,7 +584,7 @@ class TestDispatchCancelUpload:
         def _raise_cas(*args, **kwargs):
             raise TransferStateConflictError("conflict")
 
-        ticket_repo.update_status.side_effect = _raise_cas
+        ticket_repo.compare_and_set_status.side_effect = _raise_cas
 
         with pytest.raises(ValueError, match="already completed"):
             await dispatcher.dispatch_cancel_upload("tf-001")
@@ -587,7 +601,7 @@ class TestDispatchCancelUpload:
         def _raise_cas(*args, **kwargs):
             raise TransferStateConflictError("conflict")
 
-        ticket_repo.update_status.side_effect = _raise_cas
+        ticket_repo.compare_and_set_status.side_effect = _raise_cas
 
         with pytest.raises(TransferStateConflictError):
             await dispatcher.dispatch_cancel_upload("tf-001")
@@ -667,7 +681,7 @@ class TestDispatchDeleteTransfer:
         def _raise_cas(*args, **kwargs):
             raise TransferStateConflictError("conflict")
 
-        ticket_repo.update_status.side_effect = _raise_cas
+        ticket_repo.compare_and_set_status.side_effect = _raise_cas
 
         result = await dispatcher.dispatch_delete_transfer("tf-001", tenant="t1")
         assert isinstance(result, DeleteTransferResponse)
@@ -691,7 +705,7 @@ class TestDispatchDeleteTransfer:
         def _raise_cas(*args, **kwargs):
             raise TransferStateConflictError("conflict")
 
-        ticket_repo.update_status.side_effect = _raise_cas
+        ticket_repo.compare_and_set_status.side_effect = _raise_cas
 
         with pytest.raises(TransferStateConflictError):
             await dispatcher.dispatch_delete_transfer("tf-001", tenant="t1")

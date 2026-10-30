@@ -8,6 +8,10 @@ from secbaas.community.core.repository.bot_device_rel import (
     BotDeviceRelRepository,
 )
 from secbaas.community.core.repository.device import DeviceRepository
+from secbaas.community.core.service.bot_manage._cloning import (
+    clone_bot_record,
+    try_insert_pending_bot,
+)
 from secbaas.community.core.utils.env_utils import get_current_env
 
 mysql_connector = pytest.importorskip("mysql.connector")
@@ -377,7 +381,8 @@ class TestBotRepositoryProtocol:
             status="ACTIVE",
         )
 
-        clone_id = bot_repository.insert_bot_record(
+        clone_id = clone_bot_record(
+            bot_repository,
             source_bot_id=original_id,
             tenant=TEST_TENANT,
             env=TEST_ENV,

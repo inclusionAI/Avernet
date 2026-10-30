@@ -263,41 +263,34 @@ VALID_TRANSITIONS_CASES = [
 ]
 
 
-class TestUpdateStatus:
-    @pytest.mark.parametrize("src_status,new_status", VALID_TRANSITIONS_CASES)
-    def test_valid_transition(self, repo, mock_session, src_status, new_status):
-        """CAS update returns 1 -- valid transition succeeds with no exception."""
-        mock_session.query.return_value.filter.return_value.update.return_value = 1
+class TestCompareAndSetStatus:
+    @pytest.mark.parametrize("affected", [0, 1])
+    def test_returns_driver_count_without_diagnostic_read(
+        self, repo, mock_session, affected
+    ):
+        query = mock_session.query.return_value.filter.return_value
+        query.update.return_value = affected
 
-        # Should not raise
-        repo.update_status("tf-001", new_status)
-
-    def test_invalid_transition_conflict(self, repo, mock_session):
-        """CAS update returns 0, fallback finds ticket with conflicting status."""
-        mock_session.query.return_value.filter.return_value.update.return_value = 0
-        # Fallback first() returns a model with status=DELETED (terminal)
-        fallback_row = MagicMock()
-        fallback_row.status = "DELETED"
-        mock_session.query.return_value.filter.return_value.first.return_value = (
-            fallback_row
+        assert (
+            repo.compare_and_set_status(
+                "tf-001",
+                "FAILED",
+                "timeout",
+                expected_statuses=frozenset({"UPLOADING"}),
+            )
+            == affected
         )
 
-        with pytest.raises(TransferStateConflictError):
-            repo.update_status("tf-001", "UPLOADING")
+        query.update.assert_called_once()
+        assert query.update.call_args.args[0]["error_message"] == "timeout"
+        query.first.assert_not_called()
+        assert mock_session.query.call_count == 1
 
-    def test_not_found(self, repo, mock_session):
-        """CAS update returns 0, fallback query returns None -- TransferNotFoundError."""
-        mock_session.query.return_value.filter.return_value.update.return_value = 0
-        mock_session.query.return_value.filter.return_value.first.return_value = None
-
-        with pytest.raises(TransferNotFoundError, match="not found"):
-            repo.update_status("nonexistent", "DONE")
-
-    def test_cas_update_uses_env_filter(self, repo, mock_session):
-        """Verify the .filter() chain includes SessionFileTicketModel.env condition."""
-        mock_session.query.return_value.filter.return_value.update.return_value = 1
-
-        repo.update_status("tf-001", "UPLOADING")
-
-        # The filter() chain should have been called with env condition
-        assert mock_session.query.return_value.filter.call_count >= 1
+    def test_write_failure_propagates(self, repo, mock_session):
+        query = mock_session.query.return_value.filter.return_value
+        query.update.side_effect = RuntimeError("database unavailable")
+        with pytest.raises(RuntimeError, match="database unavailable"):
+            repo.compare_and_set_status(
+                "tf-001", "FAILED", expected_statuses=frozenset({"UPLOADING"})
+            )
+        query.first.assert_not_called()

@@ -35,6 +35,10 @@ from secbaas.community.api.session_file_sharing import (
 )
 from secbaas.community.logger import get_logger
 
+from ._ticket_status import (
+    update_ticket_status,
+)
+
 if TYPE_CHECKING:
     from secbaas.community.core.repository.session_file_ticket import (
         SessionTicketRepository,
@@ -381,7 +385,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
         # Session goes directly to DONE — no UPLOAD_COMPLETED intermediate
         try:
             await asyncio.to_thread(
-                self._ticket_repo.update_status, transfer_id, "DONE"
+                update_ticket_status, self._ticket_repo, transfer_id, "DONE"
             )
         except TransferStateConflictError:
             # CAS failed — a concurrent operation may have transitioned
@@ -474,7 +478,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
         # CAS-aware status update
         try:
             await asyncio.to_thread(
-                self._ticket_repo.update_status, transfer_id, "CANCELLED"
+                update_ticket_status, self._ticket_repo, transfer_id, "CANCELLED"
             )
         except TransferStateConflictError:
             ticket = await asyncio.to_thread(
@@ -723,7 +727,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
         # CAS-aware status update
         try:
             await asyncio.to_thread(
-                self._ticket_repo.update_status, ticket.transfer_id, "DELETED"
+                update_ticket_status, self._ticket_repo, ticket.transfer_id, "DELETED"
             )
         except TransferStateConflictError:
             ticket = await asyncio.to_thread(

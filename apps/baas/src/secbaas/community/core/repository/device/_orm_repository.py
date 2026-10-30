@@ -1,7 +1,7 @@
 """ORM-based device repository for baas_device table."""
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 from secbaas.community.api.device_manage import DeviceStatus
@@ -600,8 +600,8 @@ class OrmDeviceRepository(OrmConnectionMixin, DeviceRepository):
         *,
         last_id: int = 0,
         limit: int = 100,
-        grace_seconds: int = 0,
-        default_ttl_minutes: int = 10080,
+        due_before: datetime,
+        default_ttl_minutes: int,
     ) -> list[dict[str, Any]]:
         """查询 baas_device 中已到期的 ACK pod 设备，按 id ASC keyset 分页。
 
@@ -611,7 +611,7 @@ class OrmDeviceRepository(OrmConnectionMixin, DeviceRepository):
         当其缺失时回退到派生 deadline = ``gmt_create`` + effective lifetime（分钟），
         其中 effective lifetime 优先取每 bot 的
         ``extra_config.deploy_config.ttl_in_minutes``（JSON 路径），缺失/零值时
-        回退到 ``default_ttl_minutes``。到期判定加入 ``grace_seconds`` 余量。
+        回退到 ``default_ttl_minutes``。调用方已在 ``due_before`` 中计算时钟及宽限期。
         """
         from sqlalchemy import Integer, case, func, text
 
@@ -637,28 +637,25 @@ class OrmDeviceRepository(OrmConnectionMixin, DeviceRepository):
         sandbox_id_expr = DeviceModel.provider_device_props.op("->>")("$.sandbox_id")
 
         is_sqlite = self._session.bind.dialect.name == "sqlite"
-        now = datetime.now()
-        now_ms = int(now.timestamp() * 1000)
+        cutoff_ms = int(due_before.timestamp() * 1000)
 
         if is_sqlite:
             # deadline = gmt_create + effective_lifetime 分钟，用 julianday 比较。
             deadline_days = func.julianday(DeviceModel.gmt_create) + (
                 effective_lifetime / 1440.0
             )
-            cutoff_days = func.julianday(now) - (grace_seconds / 86400.0)
+            cutoff_days = func.julianday(due_before)
             fallback_expired = deadline_days <= cutoff_days
         else:
             deadline_expr = func.timestampadd(
                 text("MINUTE"), effective_lifetime, DeviceModel.gmt_create
             )
-            cutoff = now - timedelta(seconds=grace_seconds)
-            fallback_expired = deadline_expr <= cutoff
+            fallback_expired = deadline_expr <= due_before
 
         # 有 ttl_expiration_timestamp 用其判定到期；否则用派生 deadline。
-        # 到期判定：ttl_expiration_timestamp（毫秒）早于 now - grace（即到期已过
-        # grace 秒），与 fallback 的 deadline <= now - grace 语义保持一致。
+        # 显式截止时间与 fallback 比较保持一致；时钟/宽限期由调用方决定。
         has_ts = ttl_ts.isnot(None)
-        ts_expired = ttl_ts <= (now_ms - grace_seconds * 1000)
+        ts_expired = ttl_ts <= cutoff_ms
         expired_filter = case((has_ts, ts_expired), else_=fallback_expired)
 
         rows = (

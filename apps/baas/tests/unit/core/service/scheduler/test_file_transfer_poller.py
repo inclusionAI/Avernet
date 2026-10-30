@@ -68,6 +68,7 @@ def _make_ticket(**overrides):
 def _make_poller(config=None, **overrides):
     lock_service = MagicMock()
     ticket_repo = MagicMock()
+    ticket_repo.compare_and_set_status.return_value = 1
     file_backend = MagicMock()
     paas_facade = MagicMock()
 
@@ -205,7 +206,7 @@ class TestProcessSingleTicket:
 
         assert result == "pull_success"
         transitions = [
-            c.args[1] for c in poller._ticket_repo.update_status.call_args_list
+            c.args[1] for c in poller._ticket_repo.compare_and_set_status.call_args_list
         ]
         assert "UPLOAD_COMPLETED" in transitions
         assert "DONE" in transitions
@@ -236,8 +237,20 @@ class TestProcessSingleTicket:
         result = asyncio.run(poller._process_single_ticket(ticket))
 
         assert result == "timed_out"
-        poller._ticket_repo.update_status.assert_called_with(
-            "tf-001", "FAILED", "Upload timed out"
+        poller._ticket_repo.compare_and_set_status.assert_called_with(
+            "tf-001",
+            "FAILED",
+            "Upload timed out",
+            expected_statuses=frozenset(
+                [
+                    "CREATED",
+                    "UPLOADING",
+                    "UPLOAD_COMPLETED",
+                    "PULLING",
+                    "PUSHING",
+                    "FAILED",
+                ]
+            ),
         )
 
     def test_terminal_state_skipped(self):
@@ -297,7 +310,7 @@ class TestProcessSingleTicket:
         # Verify no FAILED transition was made — transient errors are retried
         failed_calls = [
             c
-            for c in poller._ticket_repo.update_status.call_args_list
+            for c in poller._ticket_repo.compare_and_set_status.call_args_list
             if c.args[1] == "FAILED"
         ]
         assert len(failed_calls) == 0
@@ -320,7 +333,7 @@ class TestProcessDownloadTicket:
 
         # Should transition: CREATED -> PUSHING -> DONE
         transitions = [
-            c.args[1] for c in poller._ticket_repo.update_status.call_args_list
+            c.args[1] for c in poller._ticket_repo.compare_and_set_status.call_args_list
         ]
         assert "PUSHING" in transitions
         assert "DONE" in transitions
@@ -343,8 +356,20 @@ class TestProcessDownloadTicket:
         result = asyncio.run(poller._process_download_ticket(ticket))
 
         assert result == "timed_out"
-        poller._ticket_repo.update_status.assert_called_with(
-            "tf-001", "FAILED", "Download timed out"
+        poller._ticket_repo.compare_and_set_status.assert_called_with(
+            "tf-001",
+            "FAILED",
+            "Download timed out",
+            expected_statuses=frozenset(
+                [
+                    "CREATED",
+                    "UPLOADING",
+                    "UPLOAD_COMPLETED",
+                    "PULLING",
+                    "PUSHING",
+                    "FAILED",
+                ]
+            ),
         )
 
     def test_terminal_state_skipped(self):
@@ -374,6 +399,7 @@ class TestProcessDownloadTicket:
         query.first.return_value = MagicMock(
             status=stored_status, error_message="Download timed out"
         )
+        query.first.return_value.to_record.return_value = query.first.return_value
         poller = _make_poller(ticket_repo=OrmTicketRepository(database))
         ticket = _make_ticket(
             direction="DOWNLOAD",

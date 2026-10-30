@@ -30,14 +30,17 @@ class WsRelaySessionRepository(Protocol):
         session_id: str,
         connected_server_instance: str,
         connected_route_info: dict[str, Any],
-    ) -> None:
-        """Update status to 'active' with routing information."""
+        expected_statuses: frozenset[str],
+    ) -> int:
+        """CAS routing/status, filtered by env and source states; return affected rows."""
         ...
 
-    def update_closed(self, *, session_id: str) -> None:
-        """Update status to 'closed' and set gmt_close."""
-        ...
+    def update_closed(
+        self, *, session_id: str, expected_statuses: frozenset[str] | None = None
+    ) -> int:
+        """Write closed/gmt_close by env; return affected rows.
 
-    def _validate_transition(self, current: str, target: str) -> None:
-        """Validate state transition. Raises DeviceCreationError on conflict."""
+        Service transitions supply source states for CAS. None intentionally
+        means unconditional terminal cleanup (LocalPaasService failure path).
+        """
         ...

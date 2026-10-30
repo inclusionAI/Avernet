@@ -27,6 +27,7 @@ def _make_service() -> BotHealthCheckerService:
         device_repo=mock_device_repo,
         paas_facade=mock_paas_facade,
         config=BotHealthCheckerConfig(),
+        query_service=MagicMock(),
         health_provider_factory=mock_health_factory,
     )
 
@@ -41,7 +42,7 @@ class TestCheckAliveByBotUnsupported:
 
         # Mock binding
         service._device_binding_repo = MagicMock()
-        service._device_binding_repo.get_bot_binding = MagicMock(
+        service._query_service.get_bot_binding = MagicMock(
             return_value={
                 "bot_type": "service",
                 "binding_id": 1,
@@ -94,7 +95,7 @@ class TestCheckAliveByBotUnsupported:
         service = _make_service()
 
         service._device_binding_repo = MagicMock()
-        service._device_binding_repo.get_bot_binding = MagicMock(
+        service._query_service.get_bot_binding = MagicMock(
             return_value={
                 "bot_type": "personal",
                 "binding_id": 1,
@@ -136,7 +137,7 @@ class TestCheckAliveByBotUnsupported:
         service = _make_service()
 
         service._device_binding_repo = MagicMock()
-        service._device_binding_repo.get_bot_binding = MagicMock(
+        service._query_service.get_bot_binding = MagicMock(
             return_value={
                 "bot_type": "personal",
                 "binding_id": 1,
@@ -206,7 +207,7 @@ class TestCheckAliveByBotUnsupported:
         service = _make_service()
 
         service._device_binding_repo = MagicMock()
-        service._device_binding_repo.get_bot_binding = MagicMock(
+        service._query_service.get_bot_binding = MagicMock(
             return_value={
                 "bot_type": "personal",
                 "binding_id": 1,
@@ -249,7 +250,7 @@ class TestCheckAliveByBotUnsupported:
         service = _make_service()
 
         service._device_binding_repo = MagicMock()
-        service._device_binding_repo.get_bot_binding = MagicMock(
+        service._query_service.get_bot_binding = MagicMock(
             return_value={
                 "bot_type": "personal",
                 "binding_id": 1,

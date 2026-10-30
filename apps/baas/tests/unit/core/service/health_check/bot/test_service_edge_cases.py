@@ -32,6 +32,7 @@ def _make_service(
         device_repo=mock_device_repo or MagicMock(),
         paas_facade=mock_paas_facade or MagicMock(),
         config=BotHealthCheckerConfig(),
+        query_service=MagicMock(),
         health_provider_factory=mock_health_factory or MagicMock(),
     )
 
@@ -44,7 +45,7 @@ class TestListAllActiveBotDevice:
         """bot_type=None queries Repository without filter."""
         service = _make_service()
 
-        service._device_binding_repo.list_all_active_bot_device = MagicMock(
+        service._query_service.list_all_active_bot_device = MagicMock(
             return_value=(
                 3,
                 [
@@ -82,7 +83,7 @@ class TestListAllActiveBotDevice:
 
         assert total == 3
         assert len(items) == 3
-        service._device_binding_repo.list_all_active_bot_device.assert_called_with(
+        service._query_service.list_all_active_bot_device.assert_called_with(
             page=1, page_size=20, env="prod", bot_type=None
         )
 
@@ -91,7 +92,7 @@ class TestListAllActiveBotDevice:
         """bot_type='personal' queries Repository with filter."""
         service = _make_service()
 
-        service._device_binding_repo.list_all_active_bot_device = MagicMock(
+        service._query_service.list_all_active_bot_device = MagicMock(
             return_value=(
                 1,
                 [
@@ -113,7 +114,7 @@ class TestListAllActiveBotDevice:
 
         assert total == 1
         assert len(items) == 1
-        service._device_binding_repo.list_all_active_bot_device.assert_called_with(
+        service._query_service.list_all_active_bot_device.assert_called_with(
             page=1, page_size=20, env="prod", bot_type="personal"
         )
 
@@ -122,7 +123,7 @@ class TestListAllActiveBotDevice:
         """bot_type='service' queries Repository with filter."""
         service = _make_service()
 
-        service._device_binding_repo.list_all_active_bot_device = MagicMock(
+        service._query_service.list_all_active_bot_device = MagicMock(
             return_value=(
                 2,
                 [
@@ -152,7 +153,7 @@ class TestListAllActiveBotDevice:
 
         assert total == 2
         assert len(items) == 2
-        service._device_binding_repo.list_all_active_bot_device.assert_called_with(
+        service._query_service.list_all_active_bot_device.assert_called_with(
             page=1, page_size=20, env="prod", bot_type="service"
         )
 
@@ -161,7 +162,7 @@ class TestListAllActiveBotDevice:
         """Repository exception wraps into BotHealthCheckerError."""
         service = _make_service()
 
-        service._device_binding_repo.list_all_active_bot_device = MagicMock(
+        service._query_service.list_all_active_bot_device = MagicMock(
             side_effect=RuntimeError("DB error")
         )
 
@@ -179,7 +180,7 @@ class TestEdgeCases:
     @pytest.mark.asyncio
     async def test_check_health_bot_not_found(self) -> None:
         service = _make_service()
-        service._device_binding_repo.get_bot_binding = MagicMock(return_value=None)
+        service._query_service.get_bot_binding = MagicMock(return_value=None)
 
         with pytest.raises(SandboxNotFoundError):
             await service.check_health_by_bot(
@@ -189,7 +190,7 @@ class TestEdgeCases:
     @pytest.mark.asyncio
     async def test_check_alive_bot_not_found(self) -> None:
         service = _make_service()
-        service._device_binding_repo.get_bot_binding = MagicMock(return_value=None)
+        service._query_service.get_bot_binding = MagicMock(return_value=None)
 
         with pytest.raises(SandboxNotFoundError):
             await service.check_alive_by_bot(
@@ -199,7 +200,7 @@ class TestEdgeCases:
     @pytest.mark.asyncio
     async def test_check_health_missing_bot_type(self) -> None:
         service = _make_service()
-        service._device_binding_repo.get_bot_binding = MagicMock(
+        service._query_service.get_bot_binding = MagicMock(
             return_value={
                 "bot_type": None,
                 "binding_id": 10,
@@ -215,7 +216,7 @@ class TestEdgeCases:
     @pytest.mark.asyncio
     async def test_check_alive_missing_bot_type(self) -> None:
         service = _make_service()
-        service._device_binding_repo.get_bot_binding = MagicMock(
+        service._query_service.get_bot_binding = MagicMock(
             return_value={
                 "bot_type": None,
                 "binding_id": 10,
@@ -232,7 +233,7 @@ class TestEdgeCases:
     async def test_extend_ttl_general_exception(self) -> None:
         """Non-sandbox exceptions wrap into BotHealthCheckerError."""
         service = _make_service()
-        service._device_binding_repo.get_bot_binding = MagicMock(
+        service._query_service.get_bot_binding = MagicMock(
             side_effect=RuntimeError("Unexpected DB error")
         )
 
@@ -245,7 +246,7 @@ class TestEdgeCases:
     async def test_check_health_general_exception(self) -> None:
         """Non-sandbox exceptions wrap into BotHealthCheckerError."""
         service = _make_service()
-        service._device_binding_repo.get_bot_binding = MagicMock(
+        service._query_service.get_bot_binding = MagicMock(
             side_effect=RuntimeError("Unexpected error")
         )
 
@@ -258,7 +259,7 @@ class TestEdgeCases:
     async def test_check_alive_general_exception(self) -> None:
         """Non-sandbox exceptions wrap into BotHealthCheckerError."""
         service = _make_service()
-        service._device_binding_repo.get_bot_binding = MagicMock(
+        service._query_service.get_bot_binding = MagicMock(
             side_effect=RuntimeError("Unexpected error")
         )
 
@@ -271,7 +272,7 @@ class TestEdgeCases:
     async def test_missing_identity_empty_paas_device_id_is_error(self) -> None:
         """paas_device_id 为空时 status=ERROR（task 5.3/5.9 补充）。"""
         service = _make_service()
-        service._device_binding_repo.get_bot_binding = MagicMock(
+        service._query_service.get_bot_binding = MagicMock(
             return_value={
                 "bot_type": "personal",
                 "binding_id": 1,
@@ -300,7 +301,7 @@ class TestEdgeCases:
     async def test_missing_identity_none_provider_type_is_error(self) -> None:
         """provider_type 为 None 时 status=ERROR（task 5.3/5.9 补充）。"""
         service = _make_service()
-        service._device_binding_repo.get_bot_binding = MagicMock(
+        service._query_service.get_bot_binding = MagicMock(
             return_value={
                 "bot_type": "personal",
                 "binding_id": 1,
@@ -329,7 +330,7 @@ class TestEdgeCases:
     async def test_list_paas_device_general_exception(self) -> None:
         """Non-sandbox exceptions wrap into BotHealthCheckerError."""
         service = _make_service()
-        service._device_binding_repo.get_bot_binding = MagicMock(
+        service._query_service.get_bot_binding = MagicMock(
             side_effect=RuntimeError("Unexpected error")
         )
 

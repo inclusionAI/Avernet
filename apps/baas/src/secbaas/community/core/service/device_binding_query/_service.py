@@ -1,9 +1,10 @@
-"""Device Binding Query Service — 编排多步查询，替代 Repository 中的复杂 JOIN SQL。
+"""Device Binding Query Service — 编排无需同一事务的多步读取与结果处理。
 
-将跨表查询拆解为简单的单表 Repository 调用 + Python JSON 解析。
-Repository 只做 CRUD，编排逻辑在 Service。
+每个 Repository 调用结束后再进行分支、装配和导出格式化。
+Repository 保留 SQL 过滤、JOIN 投影及需要同一事务的原子数据库操作。
 """
 
+import json
 from typing import Any
 
 from secbaas.community.core.repository.ac_bot import AcBotRepository
@@ -20,9 +21,9 @@ logger = get_logger("core-service")
 
 
 class DeviceBindingQueryService:
-    """编排跨表查询，替代 DeviceBindingRepository 中的复杂 JOIN / JSON_EXTRACT。
+    """编排独立短查询，不要求跨调用的强一致快照。
 
-    依赖注入各单表 Repository，用 Python 串起多步查询逻辑。
+    依赖注入各 Repository；不因查询使用 JOIN 或 JSON_EXTRACT 就拆开 SQL。
     """
 
     def __init__(
@@ -123,7 +124,9 @@ class DeviceBindingQueryService:
     ) -> int | None:
         """获取发布记录的 binding_id（已由 AcBotPublishRepository 在 Python 中解析 JSON）。"""
         return self._ac_bot_publish_repo.get_binding_id(
-            source_bot_id=source_bot_id, status=status
+            source_bot_id=source_bot_id,
+            status=status,
+            binding_key="verify" if status == "validating" else "online",
         )
 
     # ── 设备列表查询 ──
@@ -248,7 +251,11 @@ class DeviceBindingQueryService:
         对齐 0525 SQL: 取所有匹配的 binding_id（去重），env 在此层过滤。
         """
         binding_ids = self._ac_bot_publish_repo.get_binding_ids(
-            source_bot_id=bot_id, status="validating", owner_id=entity_id, env=env
+            source_bot_id=bot_id,
+            status="validating",
+            binding_key="verify",
+            owner_id=entity_id,
+            env=env,
         )
         if not binding_ids:
             return []
@@ -265,7 +272,11 @@ class DeviceBindingQueryService:
         对齐 0525 SQL: 取所有匹配的 binding_id（去重），env 在此层过滤。
         """
         binding_ids = self._ac_bot_publish_repo.get_binding_ids(
-            source_bot_id=bot_id, status="success", owner_id=entity_id, env=env
+            source_bot_id=bot_id,
+            status="success",
+            binding_key="online",
+            owner_id=entity_id,
+            env=env,
         )
         if not binding_ids:
             return []
@@ -424,6 +435,43 @@ class DeviceBindingQueryService:
             baas_device_id=baas_device_id,
             refresh_fail_count=refresh_fail_count,
         )
+
+    def export_device_all(self) -> list[tuple[str, str, str]]:
+        """管理员跨环境导出；每页 Session 返回后才格式化。"""
+        return self._export_devices(env=None)
+
+    def export_device_list(self, *, env: str = "pre") -> list[tuple[str, str, str]]:
+        return self._export_devices(env=env)
+
+    def _export_devices(self, *, env: str | None) -> list[tuple[str, str, str]]:
+        result: list[tuple[str, str, str]] = []
+        offset = 0
+        page_size = 200
+        while True:
+            rows = self._binding_repo.list_export_rows(
+                env=env,
+                status="ACTIVE",
+                device_provider="arca",
+                offset=offset,
+                limit=page_size,
+            )
+            for entity_id, raw_props in rows:
+                try:
+                    props = (
+                        json.loads(raw_props)
+                        if isinstance(raw_props, str)
+                        else (raw_props or {})
+                    )
+                except (json.JSONDecodeError, TypeError):
+                    props = {}
+                if not isinstance(props, dict):
+                    props = {}
+                result.append(
+                    (entity_id, props.get("bolt_id", ""), props.get("sandbox_id", ""))
+                )
+            if len(rows) < page_size:
+                return result
+            offset += len(rows)
 
     # ── 辅助方法 ──
 

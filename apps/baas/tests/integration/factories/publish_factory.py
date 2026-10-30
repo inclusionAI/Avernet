@@ -33,6 +33,12 @@ class PublishFactory:
             "modifier": DEFAULT_TEST_MODIFIER,
         }
         defaults.update(overrides)
+        defaults.setdefault("name", f"Publish-{defaults['publish_type']}")
+        defaults.setdefault("publisher", defaults["creator"])
+        defaults.setdefault("replica_desired", 1)
+        defaults.setdefault("batch_capacity", 5)
+        defaults.setdefault("batch_number", 1)
+        defaults.setdefault("cooldown_seconds", 0)
         return int(self.publish_repo.insert_publish(**defaults))
 
     def create_batch(self, tenant: str, publish_id: int, **overrides: Any) -> int:

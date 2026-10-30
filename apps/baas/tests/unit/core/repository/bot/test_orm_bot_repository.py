@@ -184,9 +184,6 @@ class TestBotModelToRecord:
         assert record.sla_grade is None
 
 
-# ==================== BotRecord dataclass ====================
-
-
 class TestBotRecord:
     def test_creates_bot_record(self):
         now = datetime.now()
@@ -245,9 +242,6 @@ class TestBotRecord:
 
         assert record.description is None
         assert record.template_uuid is None
-
-
-# ==================== insert_bot ====================
 
 
 class TestInsertBot:
@@ -336,9 +330,6 @@ class TestInsertBot:
         assert model.extra_config is None
 
 
-# ==================== get_by_id ====================
-
-
 class TestGetById:
     def test_found(self, repo, mock_session):
         model, record = _make_mock_bot_model(
@@ -362,9 +353,6 @@ class TestGetById:
         assert result is None
 
 
-# ==================== get_by_id_including_deleted ====================
-
-
 class TestGetByIdIncludingDeleted:
     def test_found_including_deleted(self, repo, mock_session):
         model, record = _make_mock_bot_model(id_val=5, is_deleted=5)
@@ -382,9 +370,6 @@ class TestGetByIdIncludingDeleted:
         result = repo.get_by_id_including_deleted(999, "t1", "dev")
 
         assert result is None
-
-
-# ==================== get_by_bot_uuid ====================
 
 
 class TestGetByBotUuid:
@@ -416,9 +401,6 @@ class TestGetByBotUuid:
         mock_session.query.assert_called_once()
 
 
-# ==================== list_by_bot_uuid ====================
-
-
 class TestListByBotUuid:
     def test_returns_multiple(self, repo, mock_session):
         model1, rec1 = _make_mock_bot_model(id_val=1, bot_uuid="bot-1")
@@ -447,9 +429,6 @@ class TestListByBotUuid:
         repo.list_by_bot_uuid("bot-1", "t1", "dev")
 
         mock_session.query.assert_called_once()
-
-
-# ==================== list_by_bot_uuid_only_including_deleted ====================
 
 
 class TestListByBotUuidOnlyIncludingDeleted:
@@ -494,9 +473,6 @@ class TestListByBotUuidOnlyIncludingDeleted:
             "uuid-only lookup must carry exactly ONE predicate (no tenant/env/is_deleted)"
         )
         mock_session.query.assert_called_once()
-
-
-# ==================== update_bot ====================
 
 
 class TestUpdateBot:
@@ -585,9 +561,6 @@ class TestUpdateBot:
         assert update_dict["modifier"] == "new-mod"
 
 
-# ==================== update_status ====================
-
-
 class TestUpdateStatus:
     def test_update_status(self, repo, mock_session):
         repo.update_status(
@@ -612,9 +585,6 @@ class TestUpdateStatus:
         mock_session.query.return_value.filter.assert_called_once()
 
 
-# ==================== soft_delete ====================
-
-
 class TestSoftDelete:
     def test_soft_delete(self, repo, mock_session):
         repo.soft_delete(bot_id=5, tenant="t1", env="dev", modifier="admin")
@@ -633,257 +603,6 @@ class TestSoftDelete:
 
         mock_session.query.assert_called_once()
         mock_session.query.return_value.filter.assert_called_once()
-
-
-# ==================== insert_bot_record ====================
-
-
-class TestInsertBotRecord:
-    def test_source_not_found_raises_value_error(self, repo, mock_session):
-        """get_by_id called internally returns None."""
-        mock_session.query.return_value.filter.return_value.first.return_value = None
-
-        with pytest.raises(ValueError, match="Source bot not found"):
-            repo.insert_bot_record(
-                source_bot_id=999, tenant="t1", env="dev", status="PENDING"
-            )
-
-    def test_basic_clone(self, repo, mock_session):
-        source_model, _ = _make_mock_bot_model(
-            id_val=5,
-            bot_uuid="bot-src",
-            name="Source Bot",
-            status="ACTIVE",
-            description="Source Desc",
-        )
-
-        mock_session.query.return_value.filter.return_value.first.return_value = (
-            source_model
-        )
-
-        result = repo.insert_bot_record(
-            source_bot_id=5, tenant="t1", env="dev", status="FAILED"
-        )
-
-        assert result is not None
-        mock_session.add.assert_called_once()
-        mock_session.flush.assert_called_once()
-        added_model = mock_session.add.call_args[0][0]
-        assert added_model.template_uuid == "tpl-001"
-
-    def test_clone_with_template_override(self, repo, mock_session):
-        source_model, _ = _make_mock_bot_model(
-            id_val=5,
-            bot_uuid="bot-src",
-            template_uuid="TEMPLATE-old",
-        )
-        mock_session.query.return_value.filter.return_value.first.return_value = (
-            source_model
-        )
-
-        result = repo.insert_bot_record(
-            source_bot_id=5,
-            tenant="t1",
-            env="dev",
-            status="FAILED",
-            template_uuid="TEMPLATE-new",
-        )
-
-        assert result is not None
-        added_model = mock_session.add.call_args[0][0]
-        assert added_model.template_uuid == "TEMPLATE-new"
-
-    def test_live_pending_clone_no_longer_soft_deletes_incumbent(
-        self, repo, mock_session
-    ):
-        """A live PENDING row must never be destroyed by a concurrent clone."""
-        source_model, source_record = _make_mock_bot_model(
-            id_val=5, bot_uuid="bot-src", name="Source Bot", status="ACTIVE"
-        )
-        pending_model, pending_record = _make_mock_bot_model(
-            id_val=10, bot_uuid="bot-src", status="PENDING"
-        )
-
-        mock_session.query.return_value.filter.return_value.first.side_effect = [
-            source_model,
-            pending_model,
-        ]
-        mock_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
-
-        result = repo.insert_bot_record(
-            source_bot_id=5, tenant="t1", env="dev", status="PENDING"
-        )
-
-        assert result is not None
-        repo._rel_repo.soft_delete_by_bot_id.assert_not_called()
-
-    def test_clone_with_soft_deleted_pending_inserts_fresh_row(
-        self, repo, mock_session
-    ):
-        """A soft-deleted PENDING row is left untouched; the clone is a fresh INSERT (previously reviving it deadlocked the live UK slot)."""
-        source_model, source_record = _make_mock_bot_model(
-            id_val=5, bot_uuid="bot-src", status="ACTIVE"
-        )
-
-        mock_session.query.return_value.filter.return_value.first.return_value = (
-            source_model
-        )
-        dead_pending = mock_session.query.return_value.filter.return_value.order_by.return_value.first.return_value
-        dead_pending.id = 77
-        mock_session.query.return_value.filter.return_value.update.return_value = 1
-
-        result = repo.insert_bot_record(
-            source_bot_id=5, tenant="t1", env="dev", status="PENDING"
-        )
-
-        assert result is not None
-        mock_session.query.return_value.filter.return_value.update.assert_not_called()
-        mock_session.add.assert_called_once()
-        added_model = mock_session.add.call_args[0][0]
-        assert added_model.status == "PENDING"
-
-    def test_clone_with_name_override(self, repo, mock_session):
-        source_model, source_record = _make_mock_bot_model(
-            id_val=5, bot_uuid="bot-src", name="Source Bot", status="ACTIVE"
-        )
-        mock_session.query.return_value.filter.return_value.first.return_value = (
-            source_model
-        )
-        mock_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
-
-        result = repo.insert_bot_record(
-            source_bot_id=5,
-            tenant="t1",
-            env="dev",
-            status="PENDING",
-            name="Custom Name",
-        )
-
-        assert result is not None
-
-    def test_clone_with_extra_config_override(self, repo, mock_session):
-        source_model, source_record = _make_mock_bot_model(
-            id_val=5,
-            bot_uuid="bot-src",
-            status="ACTIVE",
-            extra_config={"old": "config"},
-        )
-        mock_session.query.return_value.filter.return_value.first.return_value = (
-            source_model
-        )
-        mock_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
-
-        result = repo.insert_bot_record(
-            source_bot_id=5,
-            tenant="t1",
-            env="dev",
-            status="PENDING",
-            extra_config={"new": "config"},
-        )
-
-        assert result is not None
-
-    def test_non_pending_status_skips_cleanup(self, repo, mock_session):
-        source_model, _ = _make_mock_bot_model(
-            id_val=5, bot_uuid="bot-src", status="ACTIVE"
-        )
-        mock_session.query.return_value.filter.return_value.first.return_value = (
-            source_model
-        )
-
-        result = repo.insert_bot_record(
-            source_bot_id=5, tenant="t1", env="dev", status="FAILED"
-        )
-
-        assert result is not None
-        first_call_count = (
-            mock_session.query.return_value.filter.return_value.first.call_count
-        )
-        assert first_call_count == 1
-
-    def test_clone_uses_modifier_parameter(self, repo, mock_session):
-        source_model, _ = _make_mock_bot_model(
-            id_val=5, bot_uuid="bot-src", status="ACTIVE"
-        )
-        mock_session.query.return_value.filter.return_value.first.return_value = (
-            source_model
-        )
-
-        repo.insert_bot_record(
-            source_bot_id=5,
-            tenant="t1",
-            env="dev",
-            status="FAILED",
-            modifier="custom-mod",
-        )
-
-        added_model = mock_session.add.call_args[0][0]
-        assert added_model.modifier == "custom-mod"
-
-
-# ==================== try_insert_pending_bot ====================
-
-
-class TestTryInsertPendingBot:
-    def test_source_not_found_raises_value_error(self, repo, mock_session):
-        mock_session.query.return_value.filter.return_value.first.return_value = None
-
-        with pytest.raises(ValueError, match="Source bot not found"):
-            repo.try_insert_pending_bot(source_bot_id=999, tenant="t1", env="dev")
-
-    def test_live_pending_raises_conflict(self, repo, mock_session):
-        """A concurrent UPDATE that already holds the PENDING slot must win."""
-        source_model, _ = _make_mock_bot_model(
-            id_val=5, bot_uuid="bot-src", status="ACTIVE"
-        )
-        pending_model, _ = _make_mock_bot_model(
-            id_val=10, bot_uuid="bot-src", status="PENDING"
-        )
-        mock_session.query.return_value.filter.return_value.first.return_value = (
-            source_model
-        )
-        mock_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = pending_model
-
-        with pytest.raises(BotRecordConflictError, match="already exists"):
-            repo.try_insert_pending_bot(source_bot_id=5, tenant="t1", env="dev")
-
-        mock_session.add.assert_not_called()
-
-    def test_inserts_when_slot_free(self, repo, mock_session):
-        source_model, _ = _make_mock_bot_model(
-            id_val=5, bot_uuid="bot-src", status="ACTIVE"
-        )
-        mock_session.query.return_value.filter.return_value.first.return_value = (
-            source_model
-        )
-        mock_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
-
-        result = repo.try_insert_pending_bot(source_bot_id=5, tenant="t1", env="dev")
-
-        assert result == 42
-        added_model = mock_session.add.call_args[0][0]
-        assert added_model.status == "PENDING"
-
-    def test_integrity_error_translated_to_conflict(self, repo, mock_session):
-        """The unique key is the final arbiter when the lock is bypassed."""
-        from sqlalchemy.exc import IntegrityError
-
-        source_model, _ = _make_mock_bot_model(
-            id_val=5, bot_uuid="bot-src", status="ACTIVE"
-        )
-        mock_session.query.return_value.filter.return_value.first.side_effect = [
-            source_model,
-            None,
-        ]
-        mock_session.flush.side_effect = IntegrityError(
-            "stmt", {}, Exception("Duplicate entry")
-        )
-
-        with pytest.raises(BotRecordConflictError):
-            repo.try_insert_pending_bot(source_bot_id=5, tenant="t1", env="dev")
-
-
-# ==================== list_bots ====================
 
 
 class TestListBots:
@@ -954,9 +673,6 @@ class TestListBots:
         )
 
 
-# ==================== get_active_by_bot_uuid ====================
-
-
 class TestGetActiveByBotUuid:
     def test_found(self, repo, mock_session):
         model, record = _make_mock_bot_model(
@@ -991,9 +707,6 @@ class TestGetActiveByBotUuid:
             repo.get_active_by_bot_uuid("bot-abc", "t1", "dev")
 
 
-# ==================== get_active_by_bot_uuid_only ====================
-
-
 class TestGetActiveByBotUuidOnly:
     def test_found(self, repo, mock_session):
         model, record = _make_mock_bot_model(
@@ -1015,38 +728,39 @@ class TestGetActiveByBotUuidOnly:
         assert result is None
 
 
-# ==================== complete_destroy ====================
-
-
 class TestCompleteDestroy:
-    def test_complete_destroy_calls_two_updates(self, repo, mock_session):
+    def test_complete_destroy_is_one_atomic_patch(self, repo, mock_session):
         repo.complete_destroy(bot_id=5, tenant="t1", env="dev", modifier="admin")
+        update = mock_session.query.return_value.filter.return_value.update
+        update.assert_called_once()
+        patch = update.call_args.args[0]
+        assert patch["status"] == "RELEASED"
+        assert patch["is_deleted"] == 5
+        assert patch["modifier"] == "admin"
+        assert mock_session.query.call_count == 1
 
-        assert (
-            mock_session.query.return_value.filter.return_value.update.call_count == 2
-        )
+    def test_complete_destroy_preserves_tenant_env_and_live_filters(
+        self, repo, mock_session
+    ):
+        from secbaas.community.core.repository.bot import BotModel
 
-        # First update: status = RELEASED
-        call_kwargs_1 = (
-            mock_session.query.return_value.filter.return_value.update.call_args_list[0]
-        )
-        update_dict_1 = call_kwargs_1[0][0]
-        assert update_dict_1["status"] == "RELEASED"
-        assert update_dict_1["modifier"] == "admin"
-
-        call_kwargs_2 = (
-            mock_session.query.return_value.filter.return_value.update.call_args_list[1]
-        )
-        update_dict_2 = call_kwargs_2[0][0]
-        assert update_dict_2["is_deleted"] == 5
-
-    def test_complete_destroy_uses_is_deleted_filter(self, repo, mock_session):
-        repo.complete_destroy(bot_id=5, tenant="t1", env="dev", modifier="admin")
-
-        assert mock_session.query.call_count == 2
-
-
-# ==================== complete_update_transfer ====================
+        with patch(
+            "secbaas.community.core.repository.bot._orm_repository.BotModel", BotModel
+        ):
+            repo.complete_destroy(bot_id=5, tenant="t1", env="dev", modifier="admin")
+        conditions = mock_session.query.return_value.filter.call_args.args
+        assert [condition.left.name for condition in conditions] == [
+            "id",
+            "tenant",
+            "env",
+            "is_deleted",
+        ]
+        assert [condition.right.value for condition in conditions] == [
+            5,
+            "t1",
+            "dev",
+            0,
+        ]
 
 
 class TestCompleteUpdateTransfer:
@@ -1101,9 +815,6 @@ class TestCompleteUpdateTransfer:
         )
 
 
-# ==================== init/constructor ====================
-
-
 class TestConstructor:
     def test_constructor_sets_attributes(self, mock_database):
         rel_repo = MagicMock()
@@ -1118,151 +829,3 @@ class TestConstructor:
 
         assert repo._database is mock_database
         assert repo._rel_repo is rel_repo
-
-
-# ==================== restore_bot_record_by_id ====================
-
-
-class TestRestoreBotRecordById:
-    """restore_bot_record_by_id: single-transaction admin restore."""
-
-    def _set_up_success_mocks(self, mock_session, *, retired=2):
-        """Wire the query-mock chains for a successful restore.
-
-        ``populate_existing()`` produces its own mock branch, so the initial
-        PK select (``filter().first``) and the post-restore re-select
-        (``filter().populate_existing().first``) are wired separately; the
-        two UPDATEs share the ``filter().update`` chain, whose return value
-        is the sibling-retire rowcount.
-        """
-        pre_model, _ = _make_mock_bot_model(
-            id_val=7, bot_uuid="bot-rst", status="RELEASED", is_deleted=7
-        )
-        pre_model.status = "RELEASED"
-        pre_model.is_deleted = 7
-        pre_model.bot_uuid = "bot-rst"
-        post_model, post_record = _make_mock_bot_model(
-            id_val=7, bot_uuid="bot-rst", status="ACTIVE", is_deleted=0
-        )
-        mock_session.query.return_value.filter.return_value.first.return_value = (
-            pre_model
-        )
-        select_chain = mock_session.query.return_value.filter.return_value
-        select_chain.populate_existing.return_value.first.return_value = post_model
-        select_chain.update.return_value = retired
-        return pre_model, post_model, post_record
-
-    def test_not_found_returns_none(self, repo, mock_session):
-        mock_session.query.return_value.filter.return_value.first.return_value = None
-
-        result = repo.restore_bot_record_by_id(bot_id=999, modifier="admin")
-
-        assert result is None
-        mock_session.query.return_value.filter.return_value.update.assert_not_called()
-
-    def test_target_selected_by_pk_without_env_or_tenant_or_deleted_filter(
-        self, repo, mock_session
-    ):
-        self._set_up_success_mocks(mock_session)
-
-        repo.restore_bot_record_by_id(bot_id=7, modifier="admin")
-
-        first_filter_call = mock_session.query.return_value.filter.call_args_list[0]
-        assert len(first_filter_call.args) == 1, (
-            "PK lookup must carry exactly ONE predicate (no is_deleted/tenant/env)"
-        )
-
-    def test_retire_siblings_before_revive(self, repo, mock_session):
-        self._set_up_success_mocks(mock_session, retired=2)
-
-        snapshot = repo.restore_bot_record_by_id(bot_id=7, modifier="admin")
-
-        update_calls = (
-            mock_session.query.return_value.filter.return_value.update.call_args_list
-        )
-        assert len(update_calls) == 2
-
-        retire_dict = update_calls[0].args[0]
-        assert update_calls[0].kwargs == {"synchronize_session": False}
-        assert retire_dict["status"] == "RELEASED"
-        from secbaas.community.core.repository.bot import _orm_repository
-
-        assert retire_dict["is_deleted"] is _orm_repository.BotModel.id, (
-            "sibling tombstone must be the row's own id (SQL expression), not literal"
-        )
-        assert retire_dict["modifier"] == "admin"
-        assert "gmt_modified" in retire_dict
-
-        revive_dict = update_calls[1].args[0]
-        assert update_calls[1].kwargs == {"synchronize_session": False}
-        assert revive_dict["is_deleted"] == 0
-        assert revive_dict["status"] == "ACTIVE"
-        assert revive_dict["modifier"] == "admin"
-        assert "gmt_modified" in revive_dict
-        assert isinstance(snapshot, RestoredBotRecord)
-
-    def test_sibling_retire_filter_is_uuid_only_cross_env(self, repo, mock_session):
-        self._set_up_success_mocks(mock_session)
-
-        repo.restore_bot_record_by_id(bot_id=7, modifier="admin")
-
-        retire_filter_call = mock_session.query.return_value.filter.call_args_list[1]
-        assert len(retire_filter_call.args) == 3, (
-            "sibling match must be exactly: bot_uuid + id != target + is_deleted = 0"
-        )
-
-    def test_snapshot_carries_pre_state_and_retired_count(self, repo, mock_session):
-        _, _, post_record = self._set_up_success_mocks(mock_session, retired=3)
-
-        snapshot = repo.restore_bot_record_by_id(bot_id=7, modifier="op.alice")
-
-        assert isinstance(snapshot, RestoredBotRecord)
-        assert snapshot.record is post_record
-        assert snapshot.previous_status == "RELEASED"
-        assert snapshot.previous_is_deleted == 7
-        assert snapshot.retired_sibling_count == 3
-
-    def test_no_live_siblings(self, repo, mock_session):
-        _, _, post_record = self._set_up_success_mocks(mock_session, retired=0)
-
-        snapshot = repo.restore_bot_record_by_id(bot_id=7, modifier="admin")
-
-        assert snapshot.retired_sibling_count == 0
-        assert snapshot.record is post_record
-
-    def test_integrity_error_on_retire_maps_to_conflict(self, repo, mock_session):
-        from sqlalchemy.exc import IntegrityError
-
-        pre_model, _, _ = self._set_up_success_mocks(mock_session)
-        mock_session.query.return_value.filter.return_value.update.side_effect = (
-            IntegrityError("UPDATE baas_bot", {}, Exception("UNIQUE constraint failed"))
-        )
-
-        with pytest.raises(BotRecordConflictError, match="rolled back"):
-            repo.restore_bot_record_by_id(bot_id=7, modifier="admin")
-
-    def test_integrity_error_on_revive_maps_to_conflict(self, repo, mock_session):
-        from sqlalchemy.exc import IntegrityError
-
-        self._set_up_success_mocks(mock_session)
-        update_mock = mock_session.query.return_value.filter.return_value.update
-        update_mock.side_effect = [
-            1,
-            IntegrityError(
-                "UPDATE baas_bot", {}, Exception("UNIQUE constraint failed")
-            ),
-        ]
-
-        with pytest.raises(BotRecordConflictError):
-            repo.restore_bot_record_by_id(bot_id=7, modifier="admin")
-        assert update_mock.call_count == 2, "sibling retire must run before revive"
-
-    def test_modifier_forwarded_to_both_updates(self, repo, mock_session):
-        _, _, _ = self._set_up_success_mocks(mock_session)
-
-        repo.restore_bot_record_by_id(bot_id=7, modifier="op.bob")
-
-        update_calls = (
-            mock_session.query.return_value.filter.return_value.update.call_args_list
-        )
-        assert all(c.args[0]["modifier"] == "op.bob" for c in update_calls)

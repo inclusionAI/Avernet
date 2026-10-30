@@ -14,16 +14,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Literal
 
 from dependency_injector.wiring import Provide, inject
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from secbaas.community.bootstrap import ApplicationContainer
 from secbaas.community.logger import get_logger
 
 if TYPE_CHECKING:
-    from secbaas.community.core.repository.ws_relay_session import (
-        WsRelaySessionRepository,
-    )
+    from secbaas.community.api.paas import WsRelaySessionService
 
 logger = get_logger("router")
 
@@ -55,22 +53,14 @@ class RelaySessionResponse(BaseModel):
 @inject
 async def get_relay_session(
     session_id: str,
-    repo: WsRelaySessionRepository = Depends(
-        Provide[ApplicationContainer.repository.ws_relay_session_repository]
+    service: WsRelaySessionService = Depends(
+        Provide[ApplicationContainer.services.ws_relay_session_service]
     ),
 ):
     """Query relay session routing info by session_id."""
     logger.info("GET relay-sessions/%s", session_id)
 
-    record = repo.get_by_session_id(session_id)
-    if record is None:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "error_code": "RELAY_SESSION_NOT_FOUND",
-                "message": f"Relay session {session_id} not found",
-            },
-        )
+    record = service.get_by_session_id(session_id)
 
     return {
         "id": record.id,
@@ -94,8 +84,8 @@ async def get_relay_session(
 async def update_relay_session(
     session_id: str,
     body: UpdateRelaySessionRequest,
-    repo: WsRelaySessionRepository = Depends(
-        Provide[ApplicationContainer.repository.ws_relay_session_repository]
+    service: WsRelaySessionService = Depends(
+        Provide[ApplicationContainer.services.ws_relay_session_service]
     ),
 ):
     """Update relay session status (active/close).
@@ -108,66 +98,10 @@ async def update_relay_session(
     """
     logger.info("PUT relay-sessions/%s status=%s", session_id, body.status)
 
-    record = repo.get_by_session_id(session_id)
-    if record is None:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "error_code": "RELAY_SESSION_NOT_FOUND",
-                "message": f"Relay session {session_id} not found",
-            },
-        )
-
-    target_status = body.status
-
-    # Idempotency: same status is a no-op (D-05)
-    if record.status == target_status:
-        logger.info(
-            "PUT relay-sessions/%s: idempotent no-op (already %s)",
-            session_id,
-            target_status,
-        )
-        return {"session_id": session_id, "status": record.status}
-
-    # State transition validation
-    # _validate_transition raises DeviceCreationError on illegal transition,
-    # which is caught by the existing device_creation_exception_handler in app.py
-    repo._validate_transition(record.status, target_status)
-
-    if target_status == "active":
-        server_instance = body.connected_server_instance or ""
-        route_info = body.connected_route_info or {}
-
-        # Validate: active status requires routing information
-        if not server_instance.strip():
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error_code": "INVALID_PARAMS",
-                    "message": "connected_server_instance is required for active status",
-                },
-            )
-        if not route_info:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error_code": "INVALID_PARAMS",
-                    "message": "connected_route_info is required for active status",
-                },
-            )
-
-        repo.update_active(
-            session_id=session_id,
-            connected_server_instance=server_instance,
-            connected_route_info=route_info,
-        )
-    elif target_status == "closed":
-        repo.update_closed(session_id=session_id)
-
-    logger.info(
-        "PUT relay-sessions/%s: transition %s -> %s done",
-        session_id,
-        record.status,
-        target_status,
+    status = service.update_status(
+        session_id=session_id,
+        status=body.status,
+        connected_server_instance=body.connected_server_instance,
+        connected_route_info=body.connected_route_info,
     )
-    return {"session_id": session_id, "status": target_status}
+    return {"session_id": session_id, "status": status}

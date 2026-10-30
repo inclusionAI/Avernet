@@ -39,7 +39,9 @@ def mock_session_ticket_repo() -> MagicMock:
         SessionTicketRepository,
     )
 
-    return MagicMock(spec=SessionTicketRepository)
+    repository = MagicMock(spec=SessionTicketRepository)
+    repository.compare_and_set_status.return_value = 1
+    return repository
 
 
 # ── Helper functions ──────────────────────────────────────────────────

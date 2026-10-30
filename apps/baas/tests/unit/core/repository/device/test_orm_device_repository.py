@@ -7,7 +7,7 @@ and update_device err_msg flow.
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -16,8 +16,6 @@ from secbaas.community.core.repository.device import (
     DeviceRecord,
     OrmDeviceRepository,
 )
-
-# ==================== Fixtures ====================
 
 
 @pytest.fixture
@@ -122,9 +120,6 @@ def _make_mock_device_model(
     return model
 
 
-# ==================== insert_device ====================
-
-
 class TestInsertDevice:
     def test_insert_returns_id(self, repository, mock_session):
         # simulate auto-increment after flush
@@ -218,9 +213,6 @@ class TestInsertDevice:
         assert added_model.status == "PENDING"
 
 
-# ==================== get_by_id ====================
-
-
 class TestGetById:
     def test_found(self, repository, mock_session):
         model = _make_mock_device_model(id_val=5, device_uuid="DEVICE-FOUND")
@@ -240,9 +232,6 @@ class TestGetById:
 
         result = repository.get_by_id(999, "test_tenant", "prod")
         assert result is None
-
-
-# ==================== get_by_ids ====================
 
 
 class TestGetByIds:
@@ -266,9 +255,6 @@ class TestGetByIds:
         result = repository.get_by_ids([], "test_tenant", "prod")
         assert result == {}
         mock_session.query.assert_not_called()
-
-
-# ==================== get_by_device_uuid ====================
 
 
 class TestGetByDeviceUuid:
@@ -311,9 +297,6 @@ class TestGetByDeviceUuid:
         assert result is None
 
 
-# ==================== get_by_device_uuid_only ====================
-
-
 class TestGetByDeviceUuidOnly:
     def test_found(self, repository, mock_session):
         model = _make_mock_device_model(id_val=10, device_uuid="DEVICE-GLOBAL")
@@ -330,9 +313,6 @@ class TestGetByDeviceUuidOnly:
 
         result = repository.get_by_device_uuid_only("MISSING")
         assert result is None
-
-
-# ==================== list_by_device_uuid ====================
 
 
 class TestListByDeviceUuid:
@@ -358,9 +338,6 @@ class TestListByDeviceUuid:
         assert result == []
 
 
-# ==================== get_active_by_device_uuid ====================
-
-
 class TestGetActiveByDeviceUuid:
     def test_found(self, repository, mock_session):
         model = _make_mock_device_model(
@@ -383,9 +360,6 @@ class TestGetActiveByDeviceUuid:
             "NONEXISTENT", "test_tenant", "prod"
         )
         assert result is None
-
-
-# ==================== get_active_or_updating_by_device_uuid ====================
 
 
 class TestGetActiveOrUpdatingByDeviceUuid:
@@ -424,9 +398,6 @@ class TestGetActiveOrUpdatingByDeviceUuid:
         assert result is None
 
 
-# ==================== get_by_provider_device_id_like ====================
-
-
 class TestGetByProviderDeviceIdLike:
     def test_found(self, repository, mock_session):
         model = _make_mock_device_model(id_val=8, provider_device_id="sandbox-abc-123")
@@ -443,9 +414,6 @@ class TestGetByProviderDeviceIdLike:
 
         result = repository.get_by_provider_device_id_like("nonexistent")
         assert result is None
-
-
-# ==================== get_by_provider_device_id (exact) ====================
 
 
 class TestGetByProviderDeviceId:
@@ -466,9 +434,6 @@ class TestGetByProviderDeviceId:
         assert result is None
 
 
-# ==================== get_by_provider_device_id_prefix ====================
-
-
 class TestGetByProviderDeviceIdPrefix:
     def test_found(self, repository, mock_session):
         model = _make_mock_device_model(
@@ -487,9 +452,6 @@ class TestGetByProviderDeviceIdPrefix:
 
         result = repository.get_by_provider_device_id_prefix("no-match", "dev")
         assert result is None
-
-
-# ==================== update_device ====================
 
 
 class TestUpdateDevice:
@@ -599,9 +561,6 @@ class TestUpdateDevice:
         mock_session.query.return_value.filter.return_value.update.assert_called_once()
 
 
-# ==================== _build_err_msg_prefix ====================
-
-
 class TestBuildErrMsgPrefix:
     def test_short_message_fits(self):
         repository = OrmDeviceRepository(database=MagicMock())
@@ -643,9 +602,6 @@ class TestBuildErrMsgPrefix:
         assert result.endswith("\n")
 
 
-# ==================== update_status ====================
-
-
 class TestUpdateStatus:
     def test_updates_status(self, repository, mock_session):
         repository.update_status(
@@ -659,9 +615,6 @@ class TestUpdateStatus:
         update_dict = call_kwargs[0][0]
         assert update_dict["status"] == "FAILED"
         assert "gmt_modified" in update_dict
-
-
-# ==================== soft_delete ====================
 
 
 class TestSoftDelete:
@@ -678,9 +631,6 @@ class TestSoftDelete:
         assert update_dict["is_deleted"] == 10
         assert update_dict["modifier"] == "admin"
         assert "gmt_modified" in update_dict
-
-
-# ==================== soft_delete_by_device_uuid ====================
 
 
 class TestSoftDeleteByDeviceUuid:
@@ -707,9 +657,6 @@ class TestSoftDeleteByDeviceUuid:
             "MISSING", "test_tenant", "prod", "admin"
         )
         assert result == 0
-
-
-# ==================== update_status_by_device_uuid ====================
 
 
 class TestUpdateStatusByDeviceUuid:
@@ -758,9 +705,6 @@ class TestUpdateStatusByDeviceUuid:
         assert result == 0
 
 
-# ==================== list_expired_paginated ====================
-
-
 class TestListExpiredPaginated:
     def _mock_query_chain(self, mock_session, rows, dialect="mysql"):
         """Configure the chain `query().filter().order_by().limit().all()` and the
@@ -773,7 +717,9 @@ class TestListExpiredPaginated:
         self._mock_query_chain(mock_session, [model], dialect="mysql")
 
         result = repository.list_expired_paginated(
-            limit=100, grace_seconds=0, default_ttl_minutes=10080
+            limit=100,
+            default_ttl_minutes=10080,
+            due_before=datetime.now() - timedelta(seconds=0),
         )
 
         assert len(result) == 1
@@ -788,7 +734,9 @@ class TestListExpiredPaginated:
         self._mock_query_chain(mock_session, [model], dialect="sqlite")
 
         result = repository.list_expired_paginated(
-            limit=100, grace_seconds=30, default_ttl_minutes=10080
+            limit=100,
+            default_ttl_minutes=10080,
+            due_before=datetime.now() - timedelta(seconds=30),
         )
 
         assert len(result) == 1
@@ -799,7 +747,11 @@ class TestListExpiredPaginated:
     def test_empty_result(self, repository, mock_session):
         self._mock_query_chain(mock_session, [], dialect="mysql")
 
-        result = repository.list_expired_paginated(limit=100)
+        result = repository.list_expired_paginated(
+            limit=100,
+            due_before=datetime.now() - timedelta(seconds=0),
+            default_ttl_minutes=10080,
+        )
 
         assert result == []
 
@@ -808,14 +760,16 @@ class TestListExpiredPaginated:
         model_b = _make_mock_device_model(id_val=22, device_uuid="D-22")
         self._mock_query_chain(mock_session, [model_a, model_b], dialect="mysql")
 
-        result = repository.list_expired_paginated(last_id=20, limit=10)
+        result = repository.list_expired_paginated(
+            last_id=20,
+            limit=10,
+            due_before=datetime.now() - timedelta(seconds=0),
+            default_ttl_minutes=10080,
+        )
 
         assert [r["id"] for r in result] == [21, 22]
         model_a.to_record.assert_called_once()
         model_b.to_record.assert_called_once()
-
-
-# ==================== list_devices ====================
 
 
 class TestListDevices:
@@ -886,221 +840,3 @@ class TestListDevices:
 
         assert total == 0
         assert items == []
-
-
-# ==================== list_by_bot_id ====================
-
-
-class TestListByBotId:
-    def test_returns_devices_with_join(self, repository, mock_session):
-        model1 = _make_mock_device_model(id_val=1, device_uuid="D1")
-        model2 = _make_mock_device_model(id_val=2, device_uuid="D2")
-        mock_session.query.return_value.join.return_value.filter.return_value.order_by.return_value.all.return_value = [
-            model1,
-            model2,
-        ]
-
-        result = repository.list_by_bot_id(
-            bot_id=100,
-            tenant="test_tenant",
-            env="prod",
-        )
-
-        assert len(result) == 2
-        assert result[0].device_uuid == "D1"
-        assert result[1].device_uuid == "D2"
-        model1.to_record.assert_called_once()
-        model2.to_record.assert_called_once()
-
-    def test_empty_result(self, repository, mock_session):
-        mock_session.query.return_value.join.return_value.filter.return_value.order_by.return_value.all.return_value = []
-
-        result = repository.list_by_bot_id(
-            bot_id=999,
-            tenant="test_tenant",
-            env="prod",
-        )
-        assert result == []
-
-
-# ==================== list_active_devices_by_bot_id ====================
-
-
-class TestListActiveDevicesByBotId:
-    def test_returns_active_devices(self, repository, mock_session):
-        model1 = _make_mock_device_model(id_val=1, device_uuid="D1", status="ACTIVE")
-        model2 = _make_mock_device_model(id_val=2, device_uuid="D2", status="ACTIVE")
-        mock_session.query.return_value.join.return_value.filter.return_value.order_by.return_value.all.return_value = [
-            model1,
-            model2,
-        ]
-
-        result = repository.list_active_devices_by_bot_id(bot_id=100)
-
-        assert len(result) == 2
-        assert result[0].device_uuid == "D1"
-        assert result[1].device_uuid == "D2"
-
-    def test_empty_result(self, repository, mock_session):
-        mock_session.query.return_value.join.return_value.filter.return_value.order_by.return_value.all.return_value = []
-
-        result = repository.list_active_devices_by_bot_id(bot_id=999)
-        assert result == []
-
-
-# ==================== list_devices_by_bot_ids ====================
-
-
-class TestListDevicesByBotIds:
-    def test_returns_devices_grouped_by_bot(self, repository, mock_session):
-        model1 = _make_mock_device_model(id_val=1, device_uuid="D1")
-        model2 = _make_mock_device_model(id_val=2, device_uuid="D2")
-        model3 = _make_mock_device_model(id_val=3, device_uuid="D3")
-        mock_session.query.return_value.join.return_value.filter.return_value.order_by.return_value.all.return_value = [
-            (model1, 100),
-            (model2, 100),
-            (model3, 200),
-        ]
-
-        result = repository.list_devices_by_bot_ids(
-            bot_ids=[100, 200],
-            tenant="test_tenant",
-            env="prod",
-        )
-
-        assert isinstance(result, dict)
-        assert len(result[100]) == 2
-        assert len(result[200]) == 1
-        assert result[100][0].device_uuid == "D1"
-        assert result[100][1].device_uuid == "D2"
-        assert result[200][0].device_uuid == "D3"
-
-    def test_empty_bot_ids_returns_empty_dict(self, repository, mock_session):
-        result = repository.list_devices_by_bot_ids(
-            bot_ids=[],
-            tenant="test_tenant",
-            env="prod",
-        )
-        assert result == {}
-        mock_session.query.assert_not_called()
-
-    def test_maps_bot_id_correctly(self, repository, mock_session):
-        model1 = _make_mock_device_model(id_val=1, device_uuid="D1")
-        model2 = _make_mock_device_model(id_val=2, device_uuid="D2")
-        mock_session.query.return_value.join.return_value.filter.return_value.order_by.return_value.all.return_value = [
-            (model1, 10),
-            (model2, 20),
-        ]
-
-        result = repository.list_devices_by_bot_ids(
-            bot_ids=[10, 20],
-            tenant="test_tenant",
-            env="prod",
-        )
-
-        assert len(result[10]) == 1
-        assert result[10][0].device_uuid == "D1"
-        assert result[20][0].device_uuid == "D2"
-
-    def test_no_matching_bots_returns_empty_lists(self, repository, mock_session):
-        mock_session.query.return_value.join.return_value.filter.return_value.order_by.return_value.all.return_value = []
-
-        result = repository.list_devices_by_bot_ids(
-            bot_ids=[100, 200, 300],
-            tenant="test_tenant",
-            env="prod",
-        )
-
-        assert result == {100: [], 200: [], 300: []}
-
-
-# ==================== list_active_local_devices_by_machine_user ====================
-
-
-class TestListActiveLocalDevicesByMachineUser:
-    """Test list_active_local_devices_by_machine_user for Phase 33."""
-
-    def test_returns_matching_devices(self, repository, mock_session):
-        model1 = _make_mock_device_model(
-            id_val=1,
-            device_uuid="DEVICE-001",
-            provider_type="local",
-            provider_device_id="container1--machine-001--user-001@42",
-            status="ACTIVE",
-        )
-        model2 = _make_mock_device_model(
-            id_val=2,
-            device_uuid="DEVICE-002",
-            provider_type="local",
-            provider_device_id="container2--machine-001--user-001@43",
-            status="ACTIVE",
-        )
-        mock_session.query.return_value.filter.return_value.order_by.return_value.all.return_value = [
-            model1,
-            model2,
-        ]
-
-        result = repository.list_active_local_devices_by_machine_user(
-            machine_id="machine-001",
-            user_id="user-001",
-            env="prod",
-        )
-
-        assert len(result) == 2
-        assert result[0].device_uuid == "DEVICE-001"
-        assert result[1].device_uuid == "DEVICE-002"
-
-    def test_empty_result_returns_empty_list(self, repository, mock_session):
-        mock_session.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
-
-        result = repository.list_active_local_devices_by_machine_user(
-            machine_id="machine-999",
-            user_id="user-999",
-            env="prod",
-        )
-
-        assert result == []
-
-
-# ==================== batch_update_status_to_offline ====================
-
-
-class TestBatchUpdateStatusToOffline:
-    """Test batch_update_status_to_offline for Phase 33."""
-
-    def test_updates_multiple_devices(self, repository, mock_session):
-        mock_session.query.return_value.filter.return_value.update.return_value = 3
-
-        result = repository.batch_update_status_to_offline(
-            device_ids=[1, 2, 3],
-            env="prod",
-        )
-
-        assert result == 3
-        mock_session.query.return_value.filter.return_value.update.assert_called_once()
-        call_kwargs = (
-            mock_session.query.return_value.filter.return_value.update.call_args
-        )
-        update_dict = call_kwargs[0][0]
-        assert update_dict["status"] == "OFFLINE"
-        assert "gmt_modified" in update_dict
-
-    def test_empty_list_returns_zero(self, repository, mock_session):
-        result = repository.batch_update_status_to_offline(
-            device_ids=[],
-            env="prod",
-        )
-
-        assert result == 0
-        mock_session.query.assert_not_called()
-
-    def test_single_device_update(self, repository, mock_session):
-        mock_session.query.return_value.filter.return_value.update.return_value = 1
-
-        result = repository.batch_update_status_to_offline(
-            device_ids=[42],
-            env="dev",
-        )
-
-        assert result == 1
-        mock_session.query.return_value.filter.return_value.update.assert_called_once()

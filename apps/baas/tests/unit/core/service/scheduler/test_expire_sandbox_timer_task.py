@@ -4,6 +4,7 @@ Covers keyset pagination, disabled/dry_run/lock short-circuits, per-row bot stop
 BotManageService.stop_bot, device->bot resolution, and bounded page concurrency.
 """
 
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
@@ -278,9 +279,14 @@ class TestRun:
             ),
             repo=repo,
         )
-        await task.run()
+        now = datetime(2026, 10, 29, 12, 0, 0)
+        with patch(
+            "secbaas.community.core.service.scheduler._tasks._expire_sandbox_timer_task.datetime"
+        ) as clock:
+            clock.now.return_value = now
+            await task.run()
         call = repo.list_expired_paginated.call_args
-        assert call.kwargs["grace_seconds"] == 300
+        assert call.kwargs["due_before"] == datetime(2026, 10, 29, 11, 55, 0)
         assert call.kwargs["default_ttl_minutes"] == 1440
 
     @pytest.mark.asyncio

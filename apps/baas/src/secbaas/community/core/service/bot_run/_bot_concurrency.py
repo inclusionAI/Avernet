@@ -3,12 +3,11 @@
 包含：
 - ``BotConcurrencyManager``：缓存 bot_qpm_config，定期全量刷新，热更新生效。
 
-语义：某 bot 在**全集群同时最多执行的请求数**（全局并发上限），**不是**每秒/每分钟
-的请求速率。表名/字段沿用历史命名 ``qpm``（``bot_qpm_config.qpm``），仅为兼容，
+语义：某 bot 的**集群并发准入目标**，**不是**每秒/每分钟的请求速率。表名/字段沿用历史命名 ``qpm``（``bot_qpm_config.qpm``），仅为兼容，
 不要按 "queries per minute" 理解。
 
-真正的限流在队列层按 RUNNING 在途数强制：``claim_pending_by_bot(max_running=...)``，
-Worker 把该 bot 的并发上限作为 ``max_running`` 传入即可（见 ``_worker.py``）。
+Worker 在短查询返回后比较 RUNNING 在途数，再调用原子出队（见 ``_worker.py``）。
+计数与出队不是原子配额：并发 Worker 可能同时通过，不能承诺严格的集群上限。
 """
 
 from __future__ import annotations

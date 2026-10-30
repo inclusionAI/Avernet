@@ -93,6 +93,7 @@ from secbaas.community.core.service.sse import (
 )
 from secbaas.community.core.service.template_manage import DefaultDeviceTemplateService
 from secbaas.community.core.service.tenant_manage import DefaultTenantManageService
+from secbaas.community.core.service.ws_relay_session import WsRelaySessionService
 from secbaas.community.spi.sandbox import PaasSandboxPlugins
 
 
@@ -276,6 +277,11 @@ class CoreServiceContainer(containers.DeclarativeContainer):
     # 评测环境 Plugin 依赖（由 ApplicationContainer 注入 real/stub 实现）
     eval_consistency_check = providers.Dependency()
     eval_session_log = providers.Dependency()
+
+    ws_relay_session_service = providers.Singleton(
+        WsRelaySessionService,
+        repository=ws_relay_session_repo,
+    )
 
     # ── Auth service ──────────────────────────────────────────────────────────
 

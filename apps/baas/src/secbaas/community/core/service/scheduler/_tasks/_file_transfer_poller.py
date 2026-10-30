@@ -19,6 +19,9 @@ from secbaas.community.core.repository.file_transfer_ticket import (
     TicketRepository,
 )
 from secbaas.community.core.service.distributed_lock import DistributedLockService
+from secbaas.community.core.service.file_transfer import (
+    update_ticket_status,
+)
 from secbaas.community.core.service.paas import PaasServiceFacade
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.file_transfer import FileTransferBackend
@@ -217,8 +220,8 @@ class FileTransferPoller:
                     ticket.gmt_create,
                     self._config.upload_timeout_seconds,
                 )
-                self._ticket_repo.update_status(
-                    transfer_id, "FAILED", "Upload timed out"
+                update_ticket_status(
+                    self._ticket_repo, transfer_id, "FAILED", "Upload timed out"
                 )
                 return "timed_out"
 
@@ -275,10 +278,10 @@ class FileTransferPoller:
                     # Recovery: if ticket is already UPLOAD_COMPLETED (stuck
                     # from a previous cycle), skip the redundant transition.
                     if ticket.status != "UPLOAD_COMPLETED":
-                        self._ticket_repo.update_status(
-                            transfer_id, "UPLOAD_COMPLETED", None
+                        update_ticket_status(
+                            self._ticket_repo, transfer_id, "UPLOAD_COMPLETED", None
                         )
-                    self._ticket_repo.update_status(transfer_id, "DONE", None)
+                    update_ticket_status(self._ticket_repo, transfer_id, "DONE", None)
                     return "retention_done"
 
                 # Normal path: UPLOAD_COMPLETED -> PULLING -> pull_file -> DONE
@@ -287,8 +290,8 @@ class FileTransferPoller:
                 # PULLING must be excluded here because PULLING -> UPLOAD_COMPLETED
                 # is not a valid transition (backward rollback not allowed).
                 if ticket.status not in ("UPLOAD_COMPLETED", "PULLING"):
-                    self._ticket_repo.update_status(
-                        transfer_id, "UPLOAD_COMPLETED", None
+                    update_ticket_status(
+                        self._ticket_repo, transfer_id, "UPLOAD_COMPLETED", None
                     )
 
                 # Transition to PULLING before the pull_file call.
@@ -297,7 +300,9 @@ class FileTransferPoller:
                 # transition), skip the redundant status update and retry
                 # pull_file directly.
                 if ticket.status != "PULLING":
-                    self._ticket_repo.update_status(transfer_id, "PULLING", None)
+                    update_ticket_status(
+                        self._ticket_repo, transfer_id, "PULLING", None
+                    )
 
                 download_url = await asyncio.to_thread(
                     self._file_backend.generate_download_url,
@@ -318,7 +323,7 @@ class FileTransferPoller:
                     device_path=ticket.device_path,
                 )
 
-                self._ticket_repo.update_status(transfer_id, "DONE", None)
+                update_ticket_status(self._ticket_repo, transfer_id, "DONE", None)
                 log.info(
                     "[FileTransferPoller] pull_file succeeded for ticket %s",
                     transfer_id,
@@ -382,8 +387,8 @@ class FileTransferPoller:
                     ticket.gmt_create,
                     self._config.upload_timeout_seconds,
                 )
-                self._ticket_repo.update_status(
-                    transfer_id, "FAILED", "Download timed out"
+                update_ticket_status(
+                    self._ticket_repo, transfer_id, "FAILED", "Download timed out"
                 )
                 return "timed_out"
 
@@ -433,7 +438,9 @@ class FileTransferPoller:
                 if ticket.status != "PUSHING":
                     # Transition CREATED → PUSHING on first OSS detection
                     # (VALID_TRANSITIONS: ("CREATED", "PUSHING") already exists)
-                    self._ticket_repo.update_status(transfer_id, "PUSHING", None)
+                    update_ticket_status(
+                        self._ticket_repo, transfer_id, "PUSHING", None
+                    )
 
                 # Generate download URL (D-17 step 2) — idempotent
                 download_url = await asyncio.to_thread(
@@ -446,7 +453,7 @@ class FileTransferPoller:
                 self._ticket_repo.update_urls(transfer_id, download_url=download_url)
 
                 # Transition PUSHING → DONE (D-17 step 4)
-                self._ticket_repo.update_status(transfer_id, "DONE", None)
+                update_ticket_status(self._ticket_repo, transfer_id, "DONE", None)
 
                 log.info(
                     "[FileTransferPoller] DOWNLOAD ticket %s completed "

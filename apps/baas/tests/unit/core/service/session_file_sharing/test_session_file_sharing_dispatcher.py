@@ -77,7 +77,9 @@ def file_backend():
 
 @pytest.fixture
 def ticket_repo():
-    return MagicMock()
+    repository = MagicMock()
+    repository.compare_and_set_status.return_value = 1
+    return repository
 
 
 @pytest.fixture
@@ -145,11 +147,6 @@ class TestDispatchCompleteUploadSingle:
 
         with pytest.raises(TransferNotFoundError):
             await dispatcher.dispatch_complete_upload(transfer_id="nonexistent")
-
-
-# ============================================================================
-# TestDispatchGetUploadUrl — all 8 test cases
-# ============================================================================
 
 
 class TestDispatchGetUploadUrl:
@@ -399,11 +396,6 @@ class TestDispatchGetUploadUrl:
             )
 
 
-# ============================================================================
-# TestDispatchCompleteUploadFull — tests 4-11 extending existing 3
-# ============================================================================
-
-
 class TestDispatchCompleteUploadFull:
     """Additional complete_upload tests beyond the 3 existing SINGLE-path tests."""
 
@@ -421,7 +413,7 @@ class TestDispatchCompleteUploadFull:
         assert result.transfer_id == "tf-001"
         assert result.status == "DONE"
         # update_status should NOT be called for already-DONE tickets
-        ticket_repo.update_status.assert_not_called()
+        ticket_repo.compare_and_set_status.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_complete_terminal_state_rejects(
@@ -451,7 +443,12 @@ class TestDispatchCompleteUploadFull:
         assert result.transfer_id == "tf-001"
         assert result.status == "DONE"
         file_backend.complete_multipart_upload.assert_called_once()
-        ticket_repo.update_status.assert_called_once_with("tf-001", "DONE")
+        ticket_repo.compare_and_set_status.assert_called_once_with(
+            "tf-001",
+            "DONE",
+            None,
+            expected_statuses=frozenset(["CREATED", "UPLOADING", "DONE"]),
+        )
 
     @pytest.mark.asyncio
     async def test_complete_multipart_no_parts(
@@ -480,7 +477,7 @@ class TestDispatchCompleteUploadFull:
 
         # First call returns the CREATED ticket, second call returns DONE
         ticket_repo.get_by_transfer_id.side_effect = [ticket, done_ticket]
-        ticket_repo.update_status.side_effect = TransferStateConflictError(
+        ticket_repo.compare_and_set_status.side_effect = TransferStateConflictError(
             f"CAS conflict for {ticket.transfer_id}"
         )
 
@@ -502,7 +499,7 @@ class TestDispatchCompleteUploadFull:
         still_created = _make_ticket(status="CREATED")
 
         ticket_repo.get_by_transfer_id.side_effect = [ticket, still_created]
-        ticket_repo.update_status.side_effect = TransferStateConflictError(
+        ticket_repo.compare_and_set_status.side_effect = TransferStateConflictError(
             f"CAS conflict for {ticket.transfer_id}"
         )
 
@@ -535,11 +532,6 @@ class TestDispatchCompleteUploadFull:
         ticket_repo.get_by_transfer_id.assert_called_with("tf-001", tenant="my-tenant")
 
 
-# ============================================================================
-# TestCancelUpload — 8 test cases
-# ============================================================================
-
-
 class TestCancelUpload:
     """Tests for dispatch_cancel_upload covering success, idempotency, multipart, and errors."""
 
@@ -554,7 +546,12 @@ class TestCancelUpload:
         assert isinstance(result, SessionCancelUploadResponse)
         assert result.transfer_id == "tf-001"
         assert result.status == "CANCELLED"
-        ticket_repo.update_status.assert_called_once_with("tf-001", "CANCELLED")
+        ticket_repo.compare_and_set_status.assert_called_once_with(
+            "tf-001",
+            "CANCELLED",
+            None,
+            expected_statuses=frozenset(["CREATED", "UPLOADING", "CANCELLED"]),
+        )
 
     @pytest.mark.asyncio
     async def test_cancel_idempotent_already_cancelled(
@@ -569,7 +566,7 @@ class TestCancelUpload:
         assert isinstance(result, SessionCancelUploadResponse)
         assert result.transfer_id == "tf-001"
         assert result.status == "CANCELLED"
-        ticket_repo.update_status.assert_not_called()
+        ticket_repo.compare_and_set_status.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_cancel_idempotent_already_done(
@@ -652,7 +649,7 @@ class TestCancelUpload:
 
         cancelled_ticket = _make_ticket(status="CANCELLED")
         ticket_repo.get_by_transfer_id.side_effect = [ticket, cancelled_ticket]
-        ticket_repo.update_status.side_effect = TransferStateConflictError(
+        ticket_repo.compare_and_set_status.side_effect = TransferStateConflictError(
             f"CAS conflict for {ticket.transfer_id}"
         )
 
@@ -661,11 +658,6 @@ class TestCancelUpload:
         assert isinstance(result, SessionCancelUploadResponse)
         assert result.transfer_id == "tf-001"
         assert result.status == "CANCELLED"
-
-
-# ============================================================================
-# TestGetShareLink — 5 test cases
-# ============================================================================
 
 
 class TestGetShareLink:
@@ -790,11 +782,6 @@ class TestGetShareLink:
         assert exc_info.value.current_status == "CREATED"
 
 
-# ============================================================================
-# TestGetTransferStatus — 4 test cases
-# ============================================================================
-
-
 class TestGetTransferStatus:
     """Tests for dispatch_get_transfer_status covering success, not-found, ownership, and FAILED."""
 
@@ -850,11 +837,6 @@ class TestGetTransferStatus:
         assert result.error_message == "test error"
 
 
-# ============================================================================
-# TestDeleteTransfer — 6 test cases
-# ============================================================================
-
-
 class TestDeleteTransfer:
     """Tests for dispatch_delete_transfer covering success, idempotency, and errors."""
 
@@ -873,7 +855,12 @@ class TestDeleteTransfer:
         file_backend.delete_object.assert_called_once_with(
             ticket.fileservice_staging_path
         )
-        ticket_repo.update_status.assert_called_once_with(ticket.transfer_id, "DELETED")
+        ticket_repo.compare_and_set_status.assert_called_once_with(
+            ticket.transfer_id,
+            "DELETED",
+            None,
+            expected_statuses=frozenset(["DONE", "FAILED", "CANCELLED", "DELETED"]),
+        )
 
     @pytest.mark.asyncio
     async def test_delete_idempotent_already_deleted(
@@ -937,7 +924,7 @@ class TestDeleteTransfer:
 
         deleted_ticket = _make_ticket(status="DELETED")
         ticket_repo.get_by_transfer_id.side_effect = [ticket, deleted_ticket]
-        ticket_repo.update_status.side_effect = TransferStateConflictError(
+        ticket_repo.compare_and_set_status.side_effect = TransferStateConflictError(
             f"CAS conflict for {ticket.transfer_id}"
         )
 
@@ -947,248 +934,3 @@ class TestDeleteTransfer:
         assert result.transfer_id == ticket.transfer_id
         assert result.previous_status == "DONE"
         assert result.new_status == "DELETED"
-
-
-# ============================================================================
-# TestSessionFileUrlProjection — end-to-end projection of all three return
-# points with a real AliyunAckSessionFileUrlProjector (D-03/D-05)
-# ============================================================================
-
-
-class TestSessionFileUrlProjection:
-    """aliyun end-to-end: upload-url SINGLE, MULTIPART per-part, and
-    share_url are projected; shape-invariant fields keep their values."""
-
-    @pytest.fixture
-    def aliyun_projector(self):
-        return AliyunAckSessionFileUrlProjector(
-            proxy_base_url="https://bff.example.com",
-            deploy_tenant="aliyun",
-        )
-
-    @pytest.fixture
-    def projected_dispatcher(self, file_backend, ticket_repo, aliyun_projector):
-        return DefaultSessionFileSharingDispatcher(
-            file_transfer_backend=file_backend,
-            ticket_repo=ticket_repo,
-            session_file_url_projector=aliyun_projector,
-        )
-
-    @pytest.mark.asyncio
-    async def test_single_upload_url_projected(
-        self, projected_dispatcher, file_backend
-    ):
-        original = (
-            "https://bucket.internal-oss.example.com"
-            "/baas-file-transfer/dev/t/sess-001/tf-single/data.csv"
-            "?OSSAccessKeyId=AK&Expires=169&Signature=sigXYZ"
-        )
-        file_backend.generate_upload_url.return_value = original
-        file_backend.build_session_staging_path.return_value = (
-            "file-transfers/test/t1/sess-001/tf-single/data.csv"
-        )
-
-        result = await projected_dispatcher.dispatch_get_upload_url(
-            tenant="test-tenant",
-            session_id="sess-001",
-            filename="data.csv",
-            file_size=0,
-        )
-
-        assert result.type == "SINGLE"
-        assert result.http_method == "PUT"
-        assert result.transfer_id is not None and len(result.transfer_id) > 0
-        assert result.expires_at is not None
-        projected = urlsplit(result.upload_url)
-        assert projected.scheme == "https"
-        assert projected.netloc == "bff.example.com"
-        assert projected.path.startswith("/api/v1/file-transfer-proxy/")
-        assert projected.query == urlsplit(original).query
-
-    @pytest.mark.asyncio
-    async def test_multipart_part_urls_projected(
-        self, projected_dispatcher, file_backend
-    ):
-        part_count = 3  # ceil(100MB / 40MB) — part_size drives the count
-        mock_parts = [
-            MagicMock(
-                part_number=i,
-                upload_url=(
-                    f"https://bucket.internal-oss.example.com/part/{i}"
-                    f"?uploadId=MP-SESS&partNumber={i}&Signature=sig{i}"
-                ),
-            )
-            for i in range(1, part_count + 1)
-        ]
-        mock_session = MagicMock()
-        mock_session.session_id = "mp-sess-abc"
-        mock_session.parts = mock_parts
-        file_backend.initiate_multipart_upload.return_value = mock_session
-        file_backend.build_session_staging_path.return_value = (
-            "file-transfers/test/t1/sess-001/tf-multi/big.zip"
-        )
-
-        result = await projected_dispatcher.dispatch_get_upload_url(
-            tenant="test-tenant",
-            session_id="sess-001",
-            filename="big.zip",
-            file_size=104_857_600,  # 100MB
-            part_size=41_943_040,  # 40MB
-        )
-
-        assert result.type == "MULTIPART"
-        # upload_session_id is an OSS multipart id, not a URL — never projected
-        assert result.upload_session_id == "mp-sess-abc"
-        assert result.part_count == part_count
-        assert result.part_size == 41_943_040
-        assert len(result.parts) == part_count
-        for entry, part in zip(result.parts, mock_parts):
-            projected = urlsplit(entry["upload_url"])
-            assert projected.netloc == "bff.example.com"
-            assert projected.path.startswith("/api/v1/file-transfer-proxy/")
-            assert projected.query == urlsplit(part.upload_url).query
-            assert entry["part_number"] == part.part_number
-            assert entry["http_method"] == "PUT"
-            assert entry["expires_at"] is not None
-
-    @pytest.mark.asyncio
-    async def test_share_url_projected(
-        self, projected_dispatcher, file_backend, ticket_repo
-    ):
-        ticket = _make_ticket(status="DONE")
-        ticket_repo.get_by_transfer_id.return_value = ticket
-        original = (
-            "https://bucket.internal-oss.example.com"
-            "/baas-file-transfer/dev/t/sess-001/tf-001/data.csv"
-            "?OSSAccessKeyId=AK&Expires=169&Signature=sigXYZ"
-        )
-        file_backend.generate_download_url.return_value = original
-
-        result = await projected_dispatcher.dispatch_get_share_link(
-            transfer_id="tf-001",
-            tenant="test-tenant",
-            session_id="sess-001",
-        )
-
-        assert result.transfer_id == "tf-001"
-        assert result.expires_at is not None
-        projected = urlsplit(result.share_url)
-        assert projected.netloc == "bff.example.com"
-        assert projected.path.startswith("/api/v1/file-transfer-proxy/")
-        assert projected.query == urlsplit(original).query
-
-    @pytest.mark.asyncio
-    async def test_missing_proxy_refuses_before_response(
-        self, file_backend, ticket_repo
-    ):
-        """D-06: dispatch_get_upload_url raises the 503 error before any
-        response is returned — and before any ticket is persisted."""
-        unfilled = DefaultSessionFileSharingDispatcher(
-            file_transfer_backend=file_backend,
-            ticket_repo=ticket_repo,
-            session_file_url_projector=AliyunAckSessionFileUrlProjector(
-                proxy_base_url="",
-                deploy_tenant="aliyun",
-            ),
-        )
-        file_backend.generate_upload_url.return_value = (
-            "https://bucket.internal-oss.example.com/key?Signature=sig"
-        )
-        file_backend.build_session_staging_path.return_value = "file-transfers/x"
-
-        with pytest.raises(SessionFileTransferProxyUnavailableError):
-            await unfilled.dispatch_get_upload_url(
-                tenant="test-tenant",
-                session_id="sess-001",
-                filename="data.csv",
-                file_size=0,
-            )
-
-        ticket_repo.create_ticket.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_multipart_projection_failure_aborts_session(
-        self, file_backend, ticket_repo
-    ):
-        """WR-03 (88): a D-06 refusal on the MULTIPART path aborts the
-        just-initiated OSS multipart session so no uploadId leaks."""
-        unfilled = DefaultSessionFileSharingDispatcher(
-            file_transfer_backend=file_backend,
-            ticket_repo=ticket_repo,
-            session_file_url_projector=AliyunAckSessionFileUrlProjector(
-                proxy_base_url="",
-                deploy_tenant="aliyun",
-            ),
-        )
-        mock_parts = [
-            MagicMock(
-                part_number=1,
-                upload_url=(
-                    "https://bucket.internal-oss.example.com/part/1"
-                    "?uploadId=MP-SESS&partNumber=1&Signature=sig1"
-                ),
-            )
-        ]
-        mock_session = MagicMock()
-        mock_session.session_id = "mp-sess-leak"
-        mock_session.parts = mock_parts
-        file_backend.initiate_multipart_upload.return_value = mock_session
-        file_backend.build_session_staging_path.return_value = (
-            "file-transfers/test/t1/sess-001/tf-leak/big.zip"
-        )
-
-        with pytest.raises(SessionFileTransferProxyUnavailableError):
-            await unfilled.dispatch_get_upload_url(
-                tenant="test-tenant",
-                session_id="sess-001",
-                filename="big.zip",
-                file_size=104_857_600,  # 100MB -> MULTIPART
-            )
-
-        file_backend.abort_multipart_upload.assert_called_once_with(
-            "file-transfers/test/t1/sess-001/tf-leak/big.zip",
-            "mp-sess-leak",
-        )
-        ticket_repo.create_ticket.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_multipart_projection_failure_abort_error_preserved(
-        self, file_backend, ticket_repo
-    ):
-        """WR-03 (88): even when the abort roundtrip fails, the client still
-        receives the original 503 (the cleanup error never masks it)."""
-        unfilled = DefaultSessionFileSharingDispatcher(
-            file_transfer_backend=file_backend,
-            ticket_repo=ticket_repo,
-            session_file_url_projector=AliyunAckSessionFileUrlProjector(
-                proxy_base_url="",
-                deploy_tenant="aliyun",
-            ),
-        )
-        mock_parts = [
-            MagicMock(part_number=1, upload_url="https://oss.example.com/part/1")
-        ]
-        mock_session = MagicMock()
-        mock_session.session_id = "mp-sess-leak2"
-        mock_session.parts = mock_parts
-        file_backend.initiate_multipart_upload.return_value = mock_session
-        file_backend.build_session_staging_path.return_value = (
-            "file-transfers/test/t1/sess-001/tf-leak2/big.zip"
-        )
-        file_backend.abort_multipart_upload.side_effect = Exception(
-            "NoSuchUpload: upload session not found"
-        )
-
-        with pytest.raises(SessionFileTransferProxyUnavailableError):
-            await unfilled.dispatch_get_upload_url(
-                tenant="test-tenant",
-                session_id="sess-001",
-                filename="big.zip",
-                file_size=104_857_600,  # 100MB -> MULTIPART
-            )
-
-        file_backend.abort_multipart_upload.assert_called_once_with(
-            "file-transfers/test/t1/sess-001/tf-leak2/big.zip",
-            "mp-sess-leak2",
-        )
-        ticket_repo.create_ticket.assert_not_called()

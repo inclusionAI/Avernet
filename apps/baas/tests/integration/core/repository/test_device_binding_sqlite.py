@@ -273,7 +273,9 @@ class TestListBaasDevicesByIdAscProviderFilter:
             provider_type="TECLAW", sandbox_id="sbx-teclaw", ttl="2026-01-01 00:00:00"
         )
 
-        result = repo.list_baas_devices_by_id_asc(limit=100)
+        result = repo.list_baas_devices_by_id_asc(
+            due_before="2099-01-01 00:00:00", limit=100
+        )
 
         returned_ids = {row["id"] for row in result}
         provider_types = {row["provider_type"] for row in result}
@@ -298,7 +300,12 @@ class TestListBaasDevicesByIdAscProviderFilter:
             provider_type="ARCA", sandbox_id="sbx-far", ttl=far_ttl
         )
 
-        result = repo.list_baas_devices_by_id_asc(limit=100)
+        result = repo.list_baas_devices_by_id_asc(
+            due_before=(datetime.now() + timedelta(hours=24)).strftime(
+                "%Y-%m-%d %H:%M:%S"
+            ),
+            limit=100,
+        )
 
         returned_ids = {row["id"] for row in result}
         assert due_id in returned_ids

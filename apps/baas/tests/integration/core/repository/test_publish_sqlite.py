@@ -77,6 +77,11 @@ class TestPublishSqliteOrmEquivalence:
             name="Sqlite Publish",
             description="ORM→ORM comparison",
             extra_config=extra,
+            publisher="u",
+            replica_desired=1,
+            batch_capacity=5,
+            batch_number=1,
+            cooldown_seconds=0,
         )
         assert publish_id > 0
 
@@ -110,6 +115,11 @@ class TestPublishSqliteOrmEquivalence:
             name="Null Publish",
             description=None,
             extra_config=None,
+            publisher="u",
+            replica_desired=1,
+            batch_capacity=5,
+            batch_number=1,
+            cooldown_seconds=0,
         )
         record = repo.get_by_id(publish_id, TEST_TENANT, TEST_ENV)
         assert record is not None
@@ -132,6 +142,11 @@ class TestPublishSqliteOrmEquivalence:
             modifier="u",
             name="JSON Publish",
             extra_config=extra,
+            publisher="u",
+            replica_desired=1,
+            batch_capacity=5,
+            batch_number=1,
+            cooldown_seconds=0,
         )
         record = repo.get_by_id(publish_id, TEST_TENANT, TEST_ENV)
         assert record is not None
@@ -151,6 +166,11 @@ class TestPublishSqliteOrmEquivalence:
             creator="orig",
             modifier="orig",
             name="Status Publish",
+            publisher="orig",
+            replica_desired=1,
+            batch_capacity=5,
+            batch_number=1,
+            cooldown_seconds=0,
         )
         repo.update_status(
             publish_id=publish_id,
@@ -178,6 +198,12 @@ class TestPublishSqliteOrmEquivalence:
             status="PENDING",
             creator="test_user",
             modifier="test_user",
+            name="Publish-CREATE",
+            publisher="test_user",
+            replica_desired=1,
+            batch_capacity=5,
+            batch_number=1,
+            cooldown_seconds=0,
         )
         assert publish_id > 0
 
@@ -208,6 +234,12 @@ class TestPublishSqliteOrmEquivalence:
             status="PENDING",
             creator="test_user",
             modifier="test_user",
+            name="Publish-CREATE",
+            publisher="test_user",
+            replica_desired=1,
+            batch_capacity=5,
+            batch_number=1,
+            cooldown_seconds=0,
         )
         repo.update_status(
             publish_id=publish_id,
@@ -233,6 +265,12 @@ class TestPublishSqliteOrmEquivalence:
             status="PENDING",
             creator="test_user",
             modifier="test_user",
+            name="Publish-CREATE",
+            publisher="test_user",
+            replica_desired=1,
+            batch_capacity=5,
+            batch_number=1,
+            cooldown_seconds=0,
         )
         repo.soft_delete(
             publish_id=publish_id,
@@ -256,6 +294,12 @@ class TestPublishSqliteOrmEquivalence:
             status="PENDING",
             creator="test_user",
             modifier="test_user",
+            name="Publish-CREATE",
+            publisher="test_user",
+            replica_desired=1,
+            batch_capacity=5,
+            batch_number=1,
+            cooldown_seconds=0,
         )
         records = repo.list_by_bot_id(bot_id, TEST_TENANT, TEST_ENV)
         assert len(records) >= 1

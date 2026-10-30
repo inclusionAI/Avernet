@@ -34,6 +34,6 @@ class TransferStatus(StrEnum):
 # Cancel path:  CREATED/UPLOADING -> CANCELLED
 # Failure path: UPLOADING -> FAILED
 # Delete path:  DONE/FAILED/CANCELLED -> DELETED
-# Same-state:   idempotent no-op (handled by update_status CAS logic)
+# Same-state:   idempotent no-op (handled by the service CAS policy)
 #
-# VALID_TRANSITIONS is defined in _orm_repository.py (single source of truth).
+# Transition policy lives in core/service/session_file_sharing/_ticket_status.py.

@@ -10,13 +10,13 @@ orientation.
 
 - `docs/adr/` is the authority for BaaS architecture **decisions** and their
   consequences. Start at its [`README.md`](docs/adr/README.md) index; the
-  current set is ADR-0001 … ADR-0014.
+  current set is ADR-0001 … ADR-0017.
 - Orientation set: ADR-0001 (layering and where code belongs), ADR-0003
   (the spi ↔ plugins seam for any new backend), ADR-0007 (how the two
   editions relate). ADR-0005/0004 before touching publish or lifecycle code;
-  ADR-0010 before writing any repository; ADR-0014 before adding scheduled
-  work; ADR-0015 before adding any dependency wiring (one-way assembly:
-  `bootstrap/` wires everything, nothing reaches back).
+  ADR-0010 and ADR-0016/0017 before writing any repository; ADR-0014 before
+  adding scheduled work; ADR-0015 before adding any dependency wiring (one-way
+  assembly: `bootstrap/` wires everything, nothing reaches back).
 - Legacy notes and the pre-split `docs/ARCHITECTURE.md` diagram are history;
   where an ADR says superseded, the ADR wins.
 
@@ -25,7 +25,7 @@ orientation.
 Any hard-to-reverse BaaS decision — a new layering rule, protocol or state
 machine change, a new external seam, a change to the packaging split — gets
 an ADR **before** implementation, following the README recipe: next number is
-0016, use the seven required sections, and cite verified `## Evidence` paths
+0018, use the seven required sections, and cite verified `## Evidence` paths
 (code wins over prose).
 
 ## Two-edition rules

@@ -22,6 +22,10 @@ from secbaas.community.core.repository.bot import (
     BotRecordConflictError,
     BotRepository,
 )
+from secbaas.community.core.service.bot_manage._cloning import (
+    clone_bot_record,
+    try_insert_pending_bot,
+)
 from secbaas.community.core.utils.env_utils import get_current_env
 
 pytestmark = pytest.mark.integration
@@ -54,14 +58,16 @@ class TestConcurrentPendingCloneReservation:
         """A live PENDING clone blocks a second clone without deleting the first."""
         source_id, _ = _insert_active_source(bot_repository)
 
-        first_id = bot_repository.try_insert_pending_bot(
+        first_id = try_insert_pending_bot(
+            bot_repository,
             source_bot_id=source_id,
             tenant=TEST_TENANT,
             env=TEST_ENV,
         )
 
         with pytest.raises(BotRecordConflictError):
-            bot_repository.try_insert_pending_bot(
+            try_insert_pending_bot(
+                bot_repository,
                 source_bot_id=source_id,
                 tenant=TEST_TENANT,
                 env=TEST_ENV,
@@ -82,7 +88,8 @@ class TestConcurrentPendingCloneReservation:
         """A freed PENDING slot (soft-deleted) can be reused by the next clone."""
         source_id, _ = _insert_active_source(bot_repository)
 
-        first_id = bot_repository.try_insert_pending_bot(
+        first_id = try_insert_pending_bot(
+            bot_repository,
             source_bot_id=source_id,
             tenant=TEST_TENANT,
             env=TEST_ENV,
@@ -91,7 +98,8 @@ class TestConcurrentPendingCloneReservation:
             bot_id=first_id, tenant=TEST_TENANT, env=TEST_ENV, modifier="test_user"
         )
 
-        second_id = bot_repository.try_insert_pending_bot(
+        second_id = try_insert_pending_bot(
+            bot_repository,
             source_bot_id=source_id,
             tenant=TEST_TENANT,
             env=TEST_ENV,
@@ -113,7 +121,8 @@ class TestConcurrentPendingCloneReservation:
         """A soft-deleted PENDING candidate stays soft-deleted; the next clone inserts a fresh live row."""
         source_id, _ = _insert_active_source(bot_repository)
 
-        first_id = bot_repository.try_insert_pending_bot(
+        first_id = try_insert_pending_bot(
+            bot_repository,
             source_bot_id=source_id,
             tenant=TEST_TENANT,
             env=TEST_ENV,
@@ -122,7 +131,8 @@ class TestConcurrentPendingCloneReservation:
             bot_id=first_id, tenant=TEST_TENANT, env=TEST_ENV, modifier="test_user"
         )
 
-        second_id = bot_repository.try_insert_pending_bot(
+        second_id = try_insert_pending_bot(
+            bot_repository,
             source_bot_id=source_id,
             tenant=TEST_TENANT,
             env=TEST_ENV,
@@ -160,7 +170,8 @@ class TestConcurrentPendingCloneReservation:
         """
         source_id, bot_uuid = _insert_active_source(bot_repository)
 
-        winner_id = bot_repository.try_insert_pending_bot(
+        winner_id = try_insert_pending_bot(
+            bot_repository,
             source_bot_id=source_id,
             tenant=TEST_TENANT,
             env=TEST_ENV,
@@ -169,7 +180,8 @@ class TestConcurrentPendingCloneReservation:
         )
 
         with pytest.raises(BotRecordConflictError):
-            bot_repository.insert_bot_record(
+            clone_bot_record(
+                bot_repository,
                 source_bot_id=source_id,
                 tenant=TEST_TENANT,
                 env=TEST_ENV,

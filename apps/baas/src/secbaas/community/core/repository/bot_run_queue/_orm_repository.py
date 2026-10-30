@@ -119,7 +119,6 @@ class OrmBotRunQueueRepository(OrmConnectionMixin, BotRunQueueRepository):
         worker_id: str,
         *,
         candidates: int = 5,
-        max_running: int | None = None,
     ) -> BotRunQueueRecord | None:
         """无锁乐观认领指定 bot 的一个 PENDING 工作项。
 
@@ -129,16 +128,13 @@ class OrmBotRunQueueRepository(OrmConnectionMixin, BotRunQueueRepository):
         并发 Worker 中只有一个能把某行从 PENDING 翻成 RUNNING（affected=1），
         其余 affected=0 自动跳到下一候选。OB(InnoDB) 与 SQLite 行为一致。
 
-        ``max_running`` 为 None 时不限并发；否则认领前统计该 bot 的 RUNNING
-        （在途）数，达到上限即返回 None —— 由此实现跨进程的全局并发上限
-        （各 Worker 进程查同一张队列表，计数天然全局一致）。
+        只负责有界候选选择、条件认领与结果回读；并发准入由 Worker 在
+        独立计数 Session 返回后决定，不提供严格跨进程配额。
 
         同 session 串行不在此处保证 —— 由上层 DistributedLockService 的
         session 维度锁负责（见 core/service 层）。
         """
         env = get_current_env()
-        if max_running is not None and self._count_running(bot_id, env) >= max_running:
-            return None
         rows = (
             self._session.query(BotRunQueueModel.run_id)
             .filter(
@@ -215,28 +211,7 @@ class OrmBotRunQueueRepository(OrmConnectionMixin, BotRunQueueRepository):
                 synchronize_session=False,
             )
         )
-        affected = int(updated)
-        if affected == 0:
-            row = (
-                self._session.query(BotRunQueueModel)
-                .filter(BotRunQueueModel.run_id == run_id)
-                .first()
-            )
-            cur_status = row.status if row else "NOT_FOUND"
-            log.warning(
-                "[bot-run-queue:release] run_id=%s worker=%s updated=0 cur_status=%s "
-                "(expected RUNNING owned by worker, may have been reset/reclaimed/DONE)",
-                run_id,
-                worker_id,
-                cur_status,
-            )
-        else:
-            log.info(
-                "[bot-run-queue:release] run_id=%s worker=%s RUNNING->PENDING",
-                run_id,
-                worker_id,
-            )
-        return affected
+        return int(updated)
 
     @with_orm_session
     def mark_done(self, run_id: str, worker_id: str) -> int:
@@ -257,28 +232,7 @@ class OrmBotRunQueueRepository(OrmConnectionMixin, BotRunQueueRepository):
                 synchronize_session=False,
             )
         )
-        affected = int(updated)
-        if affected == 0:
-            row = (
-                self._session.query(BotRunQueueModel)
-                .filter(BotRunQueueModel.run_id == run_id)
-                .first()
-            )
-            cur_status = row.status if row else "NOT_FOUND"
-            log.warning(
-                "[bot-run-queue:mark_done] run_id=%s worker=%s updated=0 cur_status=%s "
-                "(expected RUNNING owned by worker, executor may have released/reclaimed)",
-                run_id,
-                worker_id,
-                cur_status,
-            )
-        else:
-            log.info(
-                "[bot-run-queue:mark_done] run_id=%s worker=%s RUNNING->DONE",
-                run_id,
-                worker_id,
-            )
-        return affected
+        return int(updated)
 
     @with_orm_session
     def force_done(self, run_id: str) -> int:
@@ -414,11 +368,11 @@ class OrmBotRunQueueRepository(OrmConnectionMixin, BotRunQueueRepository):
         return bool(meta.get("abort_requested"))
 
     @with_orm_session
-    def scan_timeout(self, limit: int = 200) -> list[BotRunQueueRecord]:
-        """扫描 PENDING/RUNNING 中已超时的工作项。
+    def list_unfinished(self, limit: int = 200) -> list[BotRunQueueRecord]:
+        """Return oldest nonterminal snapshots; callers decide timeout policy.
 
-        查询非终态行，在 Python 层解析 meta.timeout 判断是否超时
-        （meta 是 JSON Text，跨数据库 JSON 函数兼容性差）。
+        Preserve the bounded scan order/limit. No deadline is evaluated while
+        holding this repository's Session.
         """
         env = get_current_env()
         rows = (
@@ -431,17 +385,7 @@ class OrmBotRunQueueRepository(OrmConnectionMixin, BotRunQueueRepository):
             .limit(limit)
             .all()
         )
-        now = datetime.now()
-        result: list[BotRunQueueRecord] = []
-        for row in rows:
-            meta = json.loads(row.meta) if row.meta else {}
-            timeout = meta.get("timeout")
-            if timeout is None or row.gmt_create is None:
-                continue
-            deadline = row.gmt_create + timedelta(seconds=float(timeout))
-            if now > deadline:
-                result.append(row.to_record())
-        return result
+        return [row.to_record() for row in rows]
 
     @with_orm_session
     def find_running_by_session(self, session_id: str) -> list[BotRunQueueRecord]:

@@ -1,17 +1,7 @@
-"""OrmWsRelaySessionRepository unit tests.
+"""Relay repository persistence, projection and conditional UPDATE tests.
 
-Covers the 15 behaviors specified in the Phase 65-01 PLAN:
-  Test 1-3: WsRelaySessionModel structural checks (tablename, columns, unique constraint)
-  Test 4-5: to_record() JSON deserialization (valid JSON, defensive invalid JSON)
-  Test 6: WsRelaySessionRecord dataclass slots + field types
-  Test 7: WsRelaySessionRepository Protocol has 5 abstract methods
-  Test 8: OrmWsRelaySessionRepository.__init__ stores database
-  Test 9: insert_init creates Model with init defaults and env from get_current_env()
-  Test 10: get_by_session_id filters by session_id AND env
-  Test 11: update_active updates status/connected_server_instance/connected_route_info/gmt_modified
-  Test 12: update_closed updates status/closed/gmt_close/gmt_modified
-  Test 13: _validate_transition enforces state machine rules
-  Test 14: __init__.py exports 5 symbols
+State-machine, idempotency and failed-CAS interpretation are tested in the
+relay Service suite; this module covers env isolation and SQL parameters.
 """
 
 import json
@@ -329,7 +319,6 @@ class TestProtocol:
             "get_by_session_id",
             "update_active",
             "update_closed",
-            "_validate_transition",
         }
         actual_methods = {
             name
@@ -471,6 +460,7 @@ class TestUpdateActive:
 
         repository.update_active(
             session_id=session_id,
+            expected_statuses=frozenset({"init"}),
             connected_server_instance="proxy-instance-1",
             connected_route_info={"host": "10.0.0.1", "port": 8080},
         )
@@ -502,7 +492,12 @@ class TestUpdateClosed:
         filter_chain = MagicMock()
         query.filter.return_value = filter_chain
 
-        repository.update_closed(session_id=session_id)
+        filter_chain.filter.return_value = filter_chain
+        filter_chain.update.return_value = 1
+        result = repository.update_closed(
+            session_id=session_id, expected_statuses=frozenset({"init", "active"})
+        )
+        assert result == 1
 
         # Verify filter was called
         assert query.filter.called
@@ -512,58 +507,6 @@ class TestUpdateClosed:
         assert update_kwargs["status"] == "closed"
         assert "gmt_close" in update_kwargs
         assert "gmt_modified" in update_kwargs
-
-
-# ==================== Test 13: _validate_transition ====================
-
-
-class TestValidateTransition:
-    """Tests for _validate_transition (Test 13)."""
-
-    def test_init_to_active_allowed(self, repository):
-        """init -> active is a valid transition."""
-        # Should not raise
-        repository._validate_transition("init", "active")
-
-    def test_active_to_closed_allowed(self, repository):
-        """active -> closed is a valid transition."""
-        repository._validate_transition("active", "closed")
-
-    def test_init_to_closed_allowed(self, repository):
-        """init -> closed is a valid transition."""
-        repository._validate_transition("init", "closed")
-
-    def test_same_status_idempotent(self, repository):
-        """Same -> same is idempotent (no-op)."""
-        repository._validate_transition("init", "init")
-        repository._validate_transition("active", "active")
-        repository._validate_transition("closed", "closed")
-
-    def test_closed_to_active_raises(self, repository):
-        """closed -> active is a reverse transition, must raise."""
-        from secbaas.community.api.device_manage._errors import DeviceCreationError
-
-        with pytest.raises(DeviceCreationError) as exc_info:
-            repository._validate_transition("closed", "active")
-        assert exc_info.value.error_code == "RELAY_STATE_CONFLICT"
-
-    def test_active_to_init_raises(self, repository):
-        """active -> init is a reverse transition, must raise."""
-        from secbaas.community.api.device_manage._errors import DeviceCreationError
-
-        with pytest.raises(DeviceCreationError):
-            repository._validate_transition("active", "init")
-
-    def test_closed_to_init_raises(self, repository):
-        """closed -> init is a reverse transition, must raise."""
-        from secbaas.community.api.device_manage._errors import DeviceCreationError
-
-        with pytest.raises(DeviceCreationError):
-            repository._validate_transition("closed", "init")
-
-    def test_closed_to_closed_idempotent(self, repository):
-        """closed -> closed is idempotent, no raise."""
-        repository._validate_transition("closed", "closed")
 
 
 # ==================== Test 14: __init__.py exports ====================

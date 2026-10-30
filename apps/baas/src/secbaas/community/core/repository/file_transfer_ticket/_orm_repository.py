@@ -8,49 +8,10 @@ from ._orm_model import FileTransferTicketModel
 from ._protocol import (
     TicketRepository,
     TransferNotFoundError,
-    TransferStateConflictError,
 )
 from ._record import TicketRecord
 
 log = get_logger("orm")
-
-# Upload path: CREATED->UPLOADING->UPLOAD_COMPLETED->PULLING->DONE
-# Retention path: CREATED->UPLOADING->UPLOAD_COMPLETED->DONE (device_path IS NULL)  [Phase 69]
-# Download path: CREATED->PUSHING->DONE
-# Cancel path: any non-terminal upload state -> CANCELLED (terminal)  [Phase 72]
-# Delete staging path: DONE/FAILED/CANCELLED -> DELETED (terminal)  [Phase 72]
-# Failure: any non-terminal state -> FAILED
-# Same-state: idempotent no-op
-VALID_TRANSITIONS = frozenset(
-    {
-        ("CREATED", "UPLOADING"),
-        ("UPLOADING", "UPLOAD_COMPLETED"),
-        ("CREATED", "UPLOAD_COMPLETED"),  # v1.5: complete_upload + poller OSS detection
-        ("UPLOAD_COMPLETED", "PULLING"),
-        (
-            "UPLOAD_COMPLETED",
-            "DONE",
-        ),  # Phase 69: retention mode shortcut (device_path IS NULL)
-        ("PULLING", "DONE"),
-        ("CREATED", "PUSHING"),
-        ("PUSHING", "DONE"),
-        # Failure from any non-terminal state
-        ("CREATED", "FAILED"),
-        ("UPLOADING", "FAILED"),
-        ("UPLOAD_COMPLETED", "FAILED"),
-        ("PULLING", "FAILED"),
-        ("PUSHING", "FAILED"),
-        # Phase 72: Cancel upload -- non-terminal upload states -> CANCELLED
-        # (UPLOAD_COMPLETED deliberately excluded: OSS object already exists, cannot cancel)
-        ("CREATED", "CANCELLED"),
-        ("UPLOADING", "CANCELLED"),
-        ("PULLING", "CANCELLED"),
-        # Phase 72: Delete staging -- terminal states -> DELETED
-        ("DONE", "DELETED"),
-        ("FAILED", "DELETED"),
-        ("CANCELLED", "DELETED"),
-    }
-)
 
 
 class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
@@ -123,63 +84,33 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
         return records
 
     @with_orm_session
-    def update_status(
+    def compare_and_set_status(
         self,
         transfer_id: str,
         new_status: str,
         error_message: str | None = None,
-    ) -> None:
-        log.info(
-            "update_status: transfer_id=%s, new_status=%s", transfer_id, new_status
-        )
+        *,
+        expected_statuses: frozenset[str],
+    ) -> int:
+        """One conditional write; transition policy belongs to the service.
+
+        Return the driver's affected-row count. No fallback SELECT is executed
+        while this UPDATE's connection/locks are held.
+        """
         from sqlalchemy import func
 
-        env = get_current_env()
-        # CAS-style atomic UPDATE: only modify the row if its current
-        # status is one of the allowed source states for new_status
-        # (plus new_status itself — same-state is idempotent).
-        allowed_current = {new_status} | {
-            src for (src, dst) in VALID_TRANSITIONS if dst == new_status
-        }
-        update_kwargs = {
-            "status": new_status,
-            "gmt_modified": func.now(),
-        }
+        update_kwargs = {"status": new_status, "gmt_modified": func.now()}
         if error_message is not None:
             update_kwargs["error_message"] = error_message
-        result = (
+        return (
             self._session.query(FileTransferTicketModel)
             .filter(
                 FileTransferTicketModel.transfer_id == transfer_id,
-                FileTransferTicketModel.env == env,
-                FileTransferTicketModel.status.in_(allowed_current),
+                FileTransferTicketModel.env == get_current_env(),
+                FileTransferTicketModel.status.in_(expected_statuses),
             )
             .update(update_kwargs, synchronize_session=False)
         )
-        if result == 0:
-            # Either ticket not found or invalid transition — distinguish
-            # via a fallback query for the error message.
-            row = (
-                self._session.query(FileTransferTicketModel)
-                .filter(
-                    FileTransferTicketModel.transfer_id == transfer_id,
-                    FileTransferTicketModel.env == env,
-                )
-                .first()
-            )
-            if row is None:
-                raise TransferNotFoundError(transfer_id)
-            # Some backends report changed rows rather than matched rows.
-            # Accept an already-satisfied update, but do not hide an error
-            # message that was requested and has not been persisted.
-            if row.status != new_status or (
-                error_message is not None and row.error_message != error_message
-            ):
-                raise TransferStateConflictError(
-                    f"Cannot transition from {row.status} to {new_status}: "
-                    "ticket is in a conflicting or terminal state."
-                )
-        log.info("[file-transfer:update_status] result: done")
 
     @with_orm_session
     def get_by_transfer_id(

@@ -9,6 +9,7 @@ column layout BAAS expects.
 
 from __future__ import annotations
 
+from sqlalchemy import BigInteger, Integer, MetaData
 from sqlalchemy.engine import Engine
 
 from secbaas.community.spi.database import EXTERNALLY_OWNED_TABLES, Base
@@ -21,4 +22,14 @@ def create_external_tables(engine: Engine) -> None:
     tables = [
         t for t in Base.metadata.sorted_tables if t.name in EXTERNALLY_OWNED_TABLES
     ]
-    Base.metadata.create_all(engine, tables=tables, checkfirst=True)
+    # SQLite requires an exact INTEGER PRIMARY KEY for generated rowids.
+    # Copy DDL metadata so this test-only adaptation never mutates the mapped
+    # models (which are also used by MySQL/MariaDB contract tests).
+    metadata = MetaData()
+    for table in tables:
+        copied = table.to_metadata(metadata)
+        if engine.dialect.name == "sqlite":
+            for column in copied.primary_key.columns:
+                if isinstance(column.type, BigInteger):
+                    column.type = Integer()
+    metadata.create_all(engine, checkfirst=True)

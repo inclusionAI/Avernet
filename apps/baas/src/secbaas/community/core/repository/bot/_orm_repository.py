@@ -9,15 +9,12 @@ from secbaas.community.core.repository import OrmConnectionMixin, with_orm_sessi
 from secbaas.community.core.repository.bot_device_rel import BotDeviceRelRepository
 from secbaas.community.logger import get_logger
 
+from ._conflicts import bot_slot_conflict
 from ._orm_model import BotModel
-from ._protocol import BotRepository
+from ._protocol import BotRecordConflictError, BotRepository
 from ._record import BotRecord, RestoredBotRecord
 
 log = get_logger("orm")
-
-
-class BotRecordConflictError(Exception):
-    """Raised when a live bot record already occupies the requested UK slot."""
 
 
 class OrmBotRepository(OrmConnectionMixin, BotRepository):
@@ -29,6 +26,7 @@ class OrmBotRepository(OrmConnectionMixin, BotRepository):
         self._database = database
         self._rel_repo = rel_repo
 
+    @bot_slot_conflict
     @with_orm_session
     def insert_bot(
         self,
@@ -388,158 +386,6 @@ class OrmBotRepository(OrmConnectionMixin, BotRepository):
         log.info("[bot:soft_delete] result: done")
 
     @with_orm_session
-    def insert_bot_record(
-        self,
-        *,
-        source_bot_id: int,
-        tenant: str,
-        env: str,
-        status: str,
-        extra_config: dict[str, Any] | None = None,
-        name: str | None = None,
-        template_uuid: str | None = None,
-        modifier: str = "system",
-    ) -> int:
-        """Clone a bot record as a fresh INSERT.
-
-        DEPRECATED for PENDING clones: use :meth:`try_insert_pending_bot`,
-        which detects live-slot conflicts explicitly. The clone is always a
-        fresh INSERT; previously soft-deleted ``(tenant, env, bot_uuid,
-        status)`` rows are left untouched — reviving one would occupy the
-        live unique-key slot and conflict with the subsequent INSERT.
-        """
-        log.info(
-            "insert_bot_record: source_bot_id=%s, tenant=%s, env=%s, status=%s",
-            source_bot_id,
-            tenant,
-            env,
-            status,
-        )
-        source = self.get_by_id(source_bot_id, tenant, env)
-        if source is None:
-            raise ValueError(f"Source bot not found: {source_bot_id}")
-
-        try:
-            return self.insert_bot(
-                bot_uuid=source.bot_uuid,
-                tenant=source.tenant,
-                env=source.env,
-                domain=source.domain,
-                creator=source.creator,
-                modifier=modifier,
-                status=status,
-                name=name if name is not None else source.name,
-                description=source.description,
-                template_uuid=(
-                    template_uuid if template_uuid is not None else source.template_uuid
-                ),
-                replica_desired=source.replica_desired,
-                replica_minimum=source.replica_minimum,
-                replica_maximum=source.replica_maximum,
-                auto_scaling_enabled=source.auto_scaling_enabled,
-                sla_grade=source.sla_grade,
-                extra_config=extra_config
-                if extra_config is not None
-                else source.extra_config,
-            )
-        except IntegrityError as exc:
-            raise BotRecordConflictError(
-                f"Bot record already exists for bot_uuid={source.bot_uuid} "
-                f"status={status} tenant={tenant} env={env}"
-            ) from exc
-
-    @with_orm_session
-    def try_insert_pending_bot(
-        self,
-        *,
-        source_bot_id: int,
-        tenant: str,
-        env: str,
-        extra_config: dict[str, Any] | None = None,
-        name: str | None = None,
-        template_uuid: str | None = None,
-        modifier: str = "system",
-    ) -> int:
-        """Atomically reserve the PENDING slot for a bot and clone it.
-
-        This method's session and the nested ``insert_bot`` session are
-        separate transactions; atomicity is guaranteed by the unique key
-        ``uk_tnt_bot_uuid_env_status_del`` (the final arbiter), not by
-        transaction scope:
-
-        * An existing live PENDING row for the same ``bot_uuid`` raises
-          :class:`BotRecordConflictError` — the caller must treat that as a
-          concurrent UPDATE and abort, never delete the incumbent row.
-        * A soft-deleted PENDING row occupies a distinct UK slot
-          (``soft_delete`` sets ``is_deleted = bot_id``, not 0), so the live
-          slot ``(tenant, env, bot_uuid, PENDING, is_deleted=0)`` is free.
-          The clone is always a fresh INSERT and previously soft-deleted
-          clones are left untouched as history. Reviving such a row would
-          occupy the live slot and conflict with the subsequent INSERT —
-          the historical MySQL 1205 self-deadlock — so revival must not be
-          reintroduced.
-        * The unique key remains the final arbiter via :class:`IntegrityError`.
-
-        Returns the new record ID.
-        """
-        log.info(
-            "try_insert_pending_bot: source_bot_id=%s, tenant=%s, env=%s",
-            source_bot_id,
-            tenant,
-            env,
-        )
-        source = self.get_by_id(source_bot_id, tenant, env)
-        if source is None:
-            raise ValueError(f"Source bot not found: {source_bot_id}")
-
-        live_pending = (
-            self._session.query(BotModel)
-            .filter(
-                BotModel.bot_uuid == source.bot_uuid,
-                BotModel.tenant == tenant,
-                BotModel.env == env,
-                BotModel.status == "PENDING",
-                BotModel.is_deleted == 0,
-            )
-            .order_by(BotModel.id.desc())
-            .first()
-        )
-        if live_pending is not None:
-            raise BotRecordConflictError(
-                f"PENDING bot record already exists for bot_uuid="
-                f"{source.bot_uuid} (id={live_pending.id})"
-            )
-
-        try:
-            return self.insert_bot(
-                bot_uuid=source.bot_uuid,
-                tenant=source.tenant,
-                env=source.env,
-                domain=source.domain,
-                creator=source.creator,
-                modifier=modifier,
-                status="PENDING",
-                name=name if name is not None else source.name,
-                description=source.description,
-                template_uuid=(
-                    template_uuid if template_uuid is not None else source.template_uuid
-                ),
-                replica_desired=source.replica_desired,
-                replica_minimum=source.replica_minimum,
-                replica_maximum=source.replica_maximum,
-                auto_scaling_enabled=source.auto_scaling_enabled,
-                sla_grade=source.sla_grade,
-                extra_config=extra_config
-                if extra_config is not None
-                else source.extra_config,
-            )
-        except IntegrityError as exc:
-            raise BotRecordConflictError(
-                f"PENDING bot record already exists for bot_uuid="
-                f"{source.bot_uuid} tenant={tenant} env={env}"
-            ) from exc
-
-    @with_orm_session
     def reconcile_unclaimed_pending_bots(
         self,
         bot_uuid: str,
@@ -652,18 +498,6 @@ class OrmBotRepository(OrmConnectionMixin, BotRepository):
         ).update(
             {
                 "status": "RELEASED",
-                "modifier": modifier,
-                "gmt_modified": sa_func.now(),
-            },
-            synchronize_session=False,
-        )
-        self._session.query(BotModel).filter(
-            BotModel.id == bot_id,
-            BotModel.tenant == tenant,
-            BotModel.env == env,
-            BotModel.is_deleted == 0,
-        ).update(
-            {
                 "is_deleted": bot_id,
                 "modifier": modifier,
                 "gmt_modified": sa_func.now(),

@@ -28,7 +28,7 @@ import asyncio
 import re
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import uuid4
 
 from secbaas.community.api.bot_manage import BotManageService
@@ -240,7 +240,8 @@ class ExpireSandboxTimerTask:
                     rows = self._device_repo.list_expired_paginated(
                         last_id=last_id,
                         limit=effective_batch,
-                        grace_seconds=self._config.grace_seconds,
+                        due_before=datetime.now()
+                        - timedelta(seconds=self._config.grace_seconds),
                         default_ttl_minutes=self._config.default_ttl_minutes,
                     )
                     break

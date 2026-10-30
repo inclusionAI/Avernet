@@ -30,6 +30,7 @@ from uuid import uuid4
 
 import pytest
 
+from secbaas.community.bootstrap import get_container
 from secbaas.community.core.repository.device import DeviceRepository
 from secbaas.community.core.repository.device_binding import (
     DeviceBindingRecord,
@@ -693,7 +694,9 @@ class TestDeviceBindingRepositoryProtocol:
         """get_publish_binding returns None for non-existent source_bot_id — this
         works without inserting data because the query just returns nothing."""
         assert (
-            device_binding_repository.get_publish_binding(
+            get_container()
+            .services.device_binding_query_service()
+            .get_publish_binding(
                 source_bot_id=_uid(),
                 status="validating",
             )
@@ -741,9 +744,13 @@ class TestDeviceBindingRepositoryProtocol:
             ttl_expiration_time="2025-01-01 00:00:00",
         )
 
-        results = repo.list_paas_device_by_bot_personal(
-            bot_id="bot-personal-1",  # bot_id is just for logging
-            binding_id=binding_id,
+        results = (
+            get_container()
+            .services.device_binding_query_service()
+            .list_paas_device_by_bot_personal(
+                bot_id="bot-personal-1",  # bot_id is just for logging
+                binding_id=binding_id,
+            )
         )
         assert len(results) == 1
         assert results[0]["paas_device_id"] == sandbox_id
@@ -758,9 +765,13 @@ class TestDeviceBindingRepositoryProtocol:
         device_binding_repository: DeviceBindingRepository,
         db_transaction,
     ):
-        bot_info, sandboxes = device_binding_repository.list_sandboxes_by_bot(
-            bot_id=_uid(),
-            entity_id=ENTITY_ID,
+        bot_info, sandboxes = (
+            get_container()
+            .services.device_binding_query_service()
+            .list_sandboxes_by_bot(
+                bot_id=_uid(),
+                entity_id=ENTITY_ID,
+            )
         )
         assert bot_info is None
         assert sandboxes == []
@@ -784,7 +795,9 @@ class TestDeviceBindingRepositoryProtocol:
             device_props=_make_device_props(sandbox_id=sandbox_id, bolt_id=bolt_id),
         )
 
-        results = repo.export_device_all()
+        results = (
+            get_container().services.device_binding_query_service().export_device_all()
+        )
         assert len(results) >= 1
         # Find our record
         matching = [r for r in results if r[2] == sandbox_id]
@@ -806,7 +819,11 @@ class TestDeviceBindingRepositoryProtocol:
             device_props=_make_device_props(sandbox_id=sandbox_id, bolt_id=bolt_id),
         )
 
-        results = repo.export_device_list(env=TEST_ENV)
+        results = (
+            get_container()
+            .services.device_binding_query_service()
+            .export_device_list(env=TEST_ENV)
+        )
         matching = [r for r in results if r[2] == sandbox_id]
         assert len(matching) == 1
         assert matching[0][0] == ENTITY_ID
@@ -819,7 +836,11 @@ class TestDeviceBindingRepositoryProtocol:
     ):
         """export_device_list returns empty for an env with no bindings."""
         _insert(repo=device_binding_repository, env=TEST_ENV)
-        results = device_binding_repository.export_device_list(env="nonexistent_env")
+        results = (
+            get_container()
+            .services.device_binding_query_service()
+            .export_device_list(env="nonexistent_env")
+        )
         # Should not contain records with TEST_ENV
         matching = [r for r in results if r[0] == ENTITY_ID]
         assert len(matching) == 0

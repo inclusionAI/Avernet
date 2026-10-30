@@ -140,7 +140,8 @@ class BotHealthCheckerService(BotHealthCheckerServiceProtocol):
         paas_facade: "PaasServiceFacade",
         config: BotHealthCheckerConfig | None = None,
         health_provider_factory: PaaSHealthProviderFactory | None = None,
-        query_service: "DeviceBindingQueryService | None" = None,
+        *,
+        query_service: "DeviceBindingQueryService",
     ):
         """初始化 BotHealthCheckerService。
 
@@ -150,7 +151,7 @@ class BotHealthCheckerService(BotHealthCheckerServiceProtocol):
             paas_facade: PaaS 服务门面
             config: 配置对象，为 None 时使用默认配置
             health_provider_factory: PaaS Health Provider 工厂，为 None 时创建默认实例
-            query_service: 跨表查询编排服务，为 None 时回退到 repository 直接查询
+            query_service: 必需的跨表查询编排服务，无 repository fallback
         """
         self._device_binding_repo = device_binding_repo
         self._device_repo = device_repo
@@ -210,21 +211,13 @@ class BotHealthCheckerService(BotHealthCheckerServiceProtocol):
         )
 
         try:
-            # 优先使用 query_service（Python 编排），回退到 repository
-            if self._query_service is not None:
-                total, bindings = self._query_service.list_all_active_bot_device(
-                    page=page,
-                    page_size=page_size,
-                    env=env,
-                    bot_type=bot_type,
-                )
-            else:
-                total, bindings = self._device_binding_repo.list_all_active_bot_device(
-                    page=page,
-                    page_size=page_size,
-                    env=env,
-                    bot_type=bot_type,
-                )
+            # 查询编排固定委托 QueryService
+            total, bindings = self._query_service.list_all_active_bot_device(
+                page=page,
+                page_size=page_size,
+                env=env,
+                bot_type=bot_type,
+            )
             items = [BotDeviceInfo.from_binding_dict(b) for b in bindings]
             return total, items
 
@@ -255,18 +248,11 @@ class BotHealthCheckerService(BotHealthCheckerServiceProtocol):
         Raises:
             SandboxNotFoundError: Bot 不存在
         """
-        if self._query_service is not None:
-            binding = self._query_service.get_bot_binding(
-                bot_id=bot_id,
-                entity_id=entity_id,
-                env=env,
-            )
-        else:
-            binding = self._device_binding_repo.get_bot_binding(
-                bot_id=bot_id,
-                entity_id=entity_id,
-                env=env,
-            )
+        binding = self._query_service.get_bot_binding(
+            bot_id=bot_id,
+            entity_id=entity_id,
+            env=env,
+        )
         if binding is None:
             raise SandboxNotFoundError(
                 f"Bot not found: bot_id={bot_id}, entity_id={entity_id}"
