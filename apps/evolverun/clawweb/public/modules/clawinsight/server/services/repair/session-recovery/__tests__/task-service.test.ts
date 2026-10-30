@@ -4,6 +4,10 @@ import { SessionRecoveryError } from "../errors.js";
 import type { RecoveryStoredTask, RecoveryTaskStore } from "../task-contracts.js";
 import { SessionRecoveryTaskService } from "../task-service.js";
 import { parseRequest } from "../validation.js";
+import { logRepairEvent } from "../../common/logging.js";
+vi.mock("../../common/logging.js", async importOriginal => ({
+  ...await importOriginal<typeof import("../../common/logging.js")>(), logRepairEvent: vi.fn(),
+}));
 const request = { event_id: "evt", tc_fault_label: "TC.MCP.CALL", delivery_key: "send1", diagnosis: "操作失败",
   session_key: "agent:main:session:original", target: { bot_id: "default", entity_id: "owner", env: "prod", engine: "OC" } };
 const actor = { userId: "owner", isAdmin: false };
@@ -38,13 +42,13 @@ function setup(callbackFails = false) {
 
 describe("self-healing task orchestration", () => {
   it("counts a failed creation once without exposing diagnosis or credentials or replacing the error", async () => {
-    const output = vi.spyOn(console, "info").mockImplementation(() => {});
+    const output = vi.mocked(logRepairEvent).mockClear();
     const { service, deps } = setup();
     const error = Object.assign(new Error("target resolution failed; password=private-value"), { code: "TARGET_LOOKUP_FAILED" });
     deps.resolveTarget = async () => { throw error; };
     await expect(service.create({ ...request, diagnosis: "PRIVATE_DIAGNOSIS" }, actor)).rejects.toBe(error);
-    expect(output.mock.calls[0][0]).toMatch(/^\[session-recovery\] /);
-    const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[session-recovery] ".length)));
+    expect(output.mock.calls[0][0]).toBe("session-recovery");
+    const events = output.mock.calls.map(([_scope, job, event, fields]) => ({ job, event, ...fields }));
     expect(events).toEqual([expect.objectContaining({ job: "session_recovery_task", event: "CREATE_FAILED", outcome: "failed",
       count: 1, eventId: "evt", botId: "default", environment: "pre", targetEnvironment: "prod", errorCode: "TARGET_LOOKUP_FAILED" })]);
     expect(events[0].reason).toContain("target resolution failed");
@@ -52,7 +56,7 @@ describe("self-healing task orchestration", () => {
   });
 
   it("does not count accepted duplicates, invalid inputs or expected conflicts as creation failures", async () => {
-    const output = vi.spyOn(console, "info").mockImplementation(() => {});
+    const output = vi.mocked(logRepairEvent).mockClear();
     const { service, deps } = setup();
     const first = await service.create(request, actor); await flush();
     expect(await service.create(request, actor)).toEqual(first);
@@ -61,13 +65,13 @@ describe("self-healing task orchestration", () => {
     await expect(service.create({ ...request, event_id: "forbidden" }, { userId: "other", isAdmin: false })).rejects.toMatchObject({ status: 403 });
     deps.resolveTarget = async () => { throw new SessionRecoveryError(422, "invalid_recovery_target", "binding mismatch"); };
     await expect(service.create({ ...request, event_id: "mismatch" }, actor)).rejects.toMatchObject({ status: 422 });
-    const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[session-recovery] ".length)));
+    const events = output.mock.calls.map(([_scope, job, event, fields]) => ({ job, event, ...fields }));
     expect(events.filter(event => event.event === "created")).toHaveLength(1);
     expect(events.filter(event => event.event === "CREATE_FAILED")).toEqual([]);
   });
 
   it("counts only exhausted technical execution and does not recount duplicate or ordinary blocked results", async () => {
-    const output = vi.spyOn(console, "info").mockImplementation(() => {});
+    const output = vi.mocked(logRepairEvent).mockClear();
     const { service } = setup();
     const { task_id } = await service.create(request, actor); await flush();
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -76,14 +80,14 @@ describe("self-healing task orchestration", () => {
     await service.executionFailure(task_id, "late duplicate", undefined, true, undefined, "AIS_EXECUTION_FAILED");
     const blocked = await service.create({ ...request, event_id: "blocked" }, actor); await flush();
     await service.executionFailure(blocked.task_id, "业务受阻，需要现场证据");
-    const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[session-recovery] ".length)));
+    const events = output.mock.calls.map(([_scope, job, event, fields]) => ({ job, event, ...fields }));
     expect(events.filter(event => event.event === "retry_scheduled")).toHaveLength(2);
     expect(events.filter(event => event.event === "EXECUTION_FAILED")).toEqual([expect.objectContaining({
       taskId: task_id, eventId: "evt", phase: "assess", attempt: 3, count: 1, environment: "pre", errorCode: "AIS_EXECUTION_FAILED" })]);
   });
 
   it("records terminal technical failure before releasing the Agent and only after persistence succeeds", async () => {
-    const output = vi.spyOn(console, "info").mockImplementation(() => {});
+    const output = vi.mocked(logRepairEvent).mockClear();
     const { service, agent, deps } = setup();
     const first = await service.create(request, actor); await flush();
     agent.release.mockRejectedValueOnce(new Error("release storage unavailable"));
@@ -92,12 +96,12 @@ describe("self-healing task orchestration", () => {
     const second = await service.create({ ...request, event_id: "persist-failure" }, actor); await flush();
     vi.spyOn(deps.tasks, "update").mockRejectedValueOnce(new Error("state write unavailable"));
     await expect(service.executionFailure(second.task_id, "startup failed", undefined, false, undefined, "AGENT_START_FAILED")).rejects.toThrow("state write unavailable");
-    const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[session-recovery] ".length)));
+    const events = output.mock.calls.map(([_scope, job, event, fields]) => ({ job, event, ...fields }));
     expect(events.filter(event => event.event === "EXECUTION_FAILED").map(event => event.taskId)).toEqual([first.task_id]);
   });
 
   it("does not turn verification failure, Owner rejection, cancellation or debug execution into a technical alarm", async () => {
-    const output = vi.spyOn(console, "info").mockImplementation(() => {});
+    const output = vi.mocked(logRepairEvent).mockClear();
     const { service, records } = setup();
     const verify = await service.create(request, actor); await flush();
     const task = records.get(verify.task_id)!;
@@ -111,22 +115,22 @@ describe("self-healing task orchestration", () => {
     await service.terminate(cancel.task_id, actor);
     const debug = await service.create({ ...request, event_id: "debug", execution_level: "debug" }, actor); await flush();
     await service.executionFailure(debug.task_id, "debug execution interrupted", undefined, false, undefined, "AIS_EXECUTION_FAILED");
-    const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[session-recovery] ".length)));
+    const events = output.mock.calls.map(([_scope, job, event, fields]) => ({ job, event, ...fields }));
     expect(events.filter(event => event.event === "EXECUTION_FAILED")).toEqual([]);
     expect(events.filter(event => event.event === "state_changed").map(event => event.status)).toContain("canceled");
   });
 
   it("retains the cause of a maintenance scan failure without emitting task failure counters", async () => {
-    const output = vi.spyOn(console, "info").mockImplementation(() => {});
+    const output = vi.mocked(logRepairEvent).mockClear();
     const { service, deps } = setup();
     vi.spyOn(deps.tasks, "listForMaintenance").mockRejectedValueOnce(new Error("scan DB unavailable"));
     await expect(service.maintenance()).rejects.toThrow("scan DB unavailable");
-    const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[session-recovery] ".length)));
+    const events = output.mock.calls.map(([_scope, job, event, fields]) => ({ job, event, ...fields }));
     expect(events).toEqual([expect.objectContaining({ job: "session_recovery_maintenance", event: "scan_failed", reason: "scan DB unavailable" })]);
   });
 
   it("does not count an optimistic write conflict before a later successful terminal settlement", async () => {
-    const output = vi.spyOn(console, "info").mockImplementation(() => {});
+    const output = vi.mocked(logRepairEvent).mockClear();
     const { service, deps, records } = setup();
     const { task_id } = await service.create(request, actor); await flush();
     vi.spyOn(deps.tasks, "update").mockImplementationOnce(async (id, _version, change) => {
@@ -134,7 +138,7 @@ describe("self-healing task orchestration", () => {
       return null;
     });
     await service.executionFailure(task_id, "AIS failed", undefined, false, undefined, "AIS_EXECUTION_FAILED");
-    const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[session-recovery] ".length)));
+    const events = output.mock.calls.map(([_scope, job, event, fields]) => ({ job, event, ...fields }));
     expect(events.filter(event => event.event === "EXECUTION_FAILED")).toHaveLength(1);
     expect(events.filter(event => event.event === "state_changed")).toHaveLength(1);
   });

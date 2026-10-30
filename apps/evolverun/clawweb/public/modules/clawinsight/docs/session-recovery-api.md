@@ -297,9 +297,13 @@ Agent 根据适用手册及当前现场，确认剩余阻塞或非阻塞优化�
 
 ## 失败监控与排障日志
 
-自愈沿用 `[session-recovery]` 前缀，通过现有 console 输出单行 JSON；Repair 共用执行监测使用 `[agent-execution-monitor]`。日志字段白名单与错误脱敏位于 Repair 的 `common/logging.ts`，不依赖工作流日志或继承工作流上下文。内部 Host 仍写入既有 `/home/admin/logs/clawweb/start.log`，不新增 logger、日志文件、轮转或部署配置。监控继续按 `job`、`event` 筛选，失败事件和计数口径不变。
+自愈日志由 Repair 的 `common/logging.ts` 写入 `~/logs/clawweb/clawweb-session-recovery.log`，不重复输出到 console。每行以容器本地时间 `yyyy-MM-dd HH:mm:ss.SSS` 开头，随后是 `[session-recovery]` 和单行 JSON；JSON 内的 `ts` 仍为 UTC ISO 时间。日志字段白名单和错误脱敏保持不变，不依赖工作流日志或继承工作流上下文。Repair 共用执行监测仍通过原 console 入口输出 `[agent-execution-monitor]`。
 
-分钟统计仅筛选 `job=session_recovery_task` 且 `event` 为下表两个值，对 `count` 求和；按事件类型和控制面环境分组。不要按 console 级别筛选：既有后台日志入口统一使用 `console.info`，失败语义在 `event` / `outcome` 中。
+部署启动脚本应提前创建目录和文件，重启时保留已有内容。轮转与保留由部署配置管理，应用只追加固定文件，不自行改名或滚动；每次写入重新打开路径，支持 `copytruncate` 及文件替换。写入失败仅报告一次目的文件错误，恢复后可重新报告，不影响任务执行。
+
+内部 Host 的采集路径为 `/home/admin/logs/clawweb/clawweb-session-recovery.log`，已有 `clawweb/*.log` 的 logrotate 规则覆盖此文件。AntMonitor 和日志查询平台需采集这个文件，并确认预发与生产机器覆盖范围。时间戳解析从第 0 位开始，格式为 `yyyy-MM-dd HH:mm:ss.SSS`，与容器本地时区一致；不要使用 JSON 内位置不固定的 UTC `ts` 作为采集时间。
+
+分钟统计仅筛选 `job=session_recovery_task` 且 `event` 为下表两个值，对 `count` 求和；按事件类型和控制面环境分组。失败语义在 `event` / `outcome` 中，不按日志级别筛选。
 
 | event | count | 计数边界 |
 | --- | --- | --- |
