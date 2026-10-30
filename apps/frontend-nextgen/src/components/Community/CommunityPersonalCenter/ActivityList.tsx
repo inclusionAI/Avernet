@@ -3,7 +3,9 @@ import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { personalCenterActivityToTopic } from '@/domain/community/mapper';
 import type {
+  CommunityAuthor,
   CommunityTopic,
+  InteractionSummary,
   PersonalCenterActivity,
   PersonalCenterTopicContext,
 } from '@/domain/community/types';
@@ -16,6 +18,12 @@ export interface ActivityListProps {
   error: string | null;
   onRetry: () => void;
   onOpenTopic: (topicId: string) => void;
+  currentUserId?: string;
+  getAuthorSummary?: (author: CommunityAuthor) => InteractionSummary | undefined;
+  loadAuthorSummary?: (author: CommunityAuthor) => void;
+  followAuthor?: (author: CommunityAuthor) => Promise<boolean>;
+  authorFollowLoading?: (author: CommunityAuthor) => boolean;
+  authorFollowed?: (author: CommunityAuthor) => boolean;
 }
 
 function fallbackTopicContext(item: PersonalCenterActivity): PersonalCenterTopicContext {
@@ -86,7 +94,19 @@ function groupReplyActivities(items: PersonalCenterActivity[]): PersonalCenterAc
   return [...groups.values()];
 }
 
-export function ActivityList({ items, loading, error, onRetry, onOpenTopic }: ActivityListProps) {
+export function ActivityList({
+  items,
+  loading,
+  error,
+  onRetry,
+  onOpenTopic,
+  currentUserId,
+  getAuthorSummary,
+  loadAuthorSummary,
+  followAuthor,
+  authorFollowLoading,
+  authorFollowed,
+}: ActivityListProps) {
   if (loading) {
     return (
       <div className="overflow-hidden rounded-lg border border-border bg-card" aria-label="个人中心列表加载中">
@@ -143,6 +163,12 @@ export function ActivityList({ items, loading, error, onRetry, onOpenTopic }: Ac
             key={`${item.actor.actorType}:${item.actor.id}:${item.activityType}:${item.target.targetType}:${item.target.id}`}
             topic={topic}
             onOpen={() => onOpenTopic(topic.id)}
+            currentUserId={currentUserId}
+            getAuthorSummary={getAuthorSummary}
+            loadAuthorSummary={loadAuthorSummary}
+            followAuthor={followAuthor}
+            authorFollowLoading={authorFollowLoading}
+            authorFollowed={authorFollowed}
           />
         );
       })}

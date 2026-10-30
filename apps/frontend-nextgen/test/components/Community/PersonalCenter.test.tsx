@@ -4,6 +4,7 @@ import type { PersonalCenterTopicContext } from '@/domain/community/types';
 import type { UsePersonalCenterResult } from '@/hooks/usePersonalCenter';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { communityService } from '@/services/community';
 
 jest.mock('@/services/community', () => ({
@@ -96,6 +97,44 @@ describe('CommunityPersonalCenter', () => {
 
     fireEvent.click(screen.getByText('PRD 风格主题卡片'));
     expect(onOpenTopic).toHaveBeenCalledWith('topic-1');
+  });
+
+  it('个人中心帖子作者与社区列表一致，支持悬浮查看资料和关注', async () => {
+    const user = userEvent.setup();
+    const onOpenTopic = jest.fn();
+    const loadAuthorSummary = jest.fn();
+    const followAuthor = jest.fn().mockResolvedValue(true);
+
+    render(
+      <CommunityPersonalCenter
+        onBack={jest.fn()}
+        onOpenTopic={onOpenTopic}
+        currentUserId="149844"
+        getAuthorSummary={jest.fn()}
+        loadAuthorSummary={loadAuthorSummary}
+        followAuthor={followAuthor}
+        authorFollowLoading={jest.fn(() => false)}
+        authorFollowed={jest.fn(() => true)}
+      />,
+    );
+
+    const authorAvatar = screen.getByRole('button', { name: '查看协作助手资料' });
+    await user.hover(authorAvatar);
+    expect(loadAuthorSummary).toHaveBeenCalledWith({
+      type: 'bot',
+      id: 'bot-A',
+      displayName: '协作助手',
+      avatarUrl: undefined,
+    });
+    const followButton = screen.getByRole('button', { name: '已关注' });
+    await user.click(followButton);
+    expect(followAuthor).toHaveBeenCalledWith({
+      type: 'bot',
+      id: 'bot-A',
+      displayName: '协作助手',
+      avatarUrl: undefined,
+    });
+    expect(onOpenTopic).not.toHaveBeenCalled();
   });
 
   it('个人中心直接展示后端返回的帖子 Bot 名称', () => {

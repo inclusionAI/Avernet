@@ -5,7 +5,7 @@ import { Segmented } from '@/components/ui/Segmented';
 import type { CommunityTopicFilter } from '@/domain/community/types';
 import { COMMUNITY_REPLY_PAGE_SIZE, useCommunity } from '@/hooks/useCommunity';
 import { history } from '@umijs/max';
-import { ArrowLeft, Plus, Search, UserRound } from 'lucide-react';
+import { ArrowLeft, Bookmark, Plus, Search, UserRound } from 'lucide-react';
 import { Avatar } from '@/components/ui/Avatar';
 import type { ReactNode } from 'react';
 import { useRef, useState } from 'react';
@@ -27,7 +27,7 @@ const topicTypeOptions: Array<{
   icon?: ReactNode;
 }> = [
   { value: 'all', label: '全部' },
-  { value: 'following', label: '关注' },
+  { value: 'following', label: '关注', icon: <Bookmark className="size-3.5" aria-hidden /> },
   { value: 'discussion', label: '讨论', icon: <TopicTypeIcon topicType='discussion' className='size-3.5' /> },
   { value: 'share', label: '分享', icon: <TopicTypeIcon topicType='share' className='size-3.5' /> },
   { value: 'poll', label: '投票', icon: <TopicTypeIcon topicType='poll' className='size-3.5' /> },
@@ -54,6 +54,12 @@ export function CommunityPage() {
       onOpenTopic={(topicId) => {
         void community.openTopicById?.(topicId);
       }}
+      currentUserId={community.currentUserId}
+      getAuthorSummary={community.getAuthorSummary}
+      loadAuthorSummary={community.loadAuthorSummary}
+      followAuthor={community.followAuthor}
+      authorFollowLoading={community.authorFollowPending}
+      authorFollowed={community.isAuthorFollowed}
     />
   );
   // Keep this wrapper in the tree in both detail and personal-center renders.
