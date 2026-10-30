@@ -530,6 +530,8 @@ class BcnService:
 
         Returns:
             BCN 删除结果摘要。dev / local 环境无 provider 凭据时返回 skipped=True。
+            409 ``retirement_cleanup_pending`` 时返回 retirement_cleanup_pending=True
+            （retirement 已提交、外部清理待重试），不抛异常。
 
         Raises:
             BcnServiceError: 4xx/5xx / 超时 / 其他网络异常
@@ -563,6 +565,29 @@ class BcnService:
 
         try:
             response = self._http.delete(path, headers=headers, timeout=self._timeout)
+
+            # 409 retirement_cleanup_pending 是已约定的终态：BCN 已提交不可回滚的
+            # retirement（tombstone/权限清理 durable），仅 post-commit 外部清理失败待
+            # 重试（spec §7.1；ERROR_RETIREMENT_CLEANUP_PENDING）。沿用
+            # register_provider_bot 对 409 的处理约定：不当作失败抛出，返回 pending 结果，
+            # 上级 best-effort 同步可继续；按 WARNING 记账，避免把已处理的终态记成 ERROR
+            # 产生生产 CDO 新增异常噪声。
+            if response.status_code == 409 and "retirement_cleanup_pending" in (
+                response.text or ""
+            ):
+                logger.warning(
+                    f"[BcnService.delete_provider_bot] retirement committed, "
+                    f"cleanup pending (retryable): "
+                    f"provider_bot_ref={provider_bot_ref} "
+                    f"body={response.text[:500]}"
+                )
+                return {
+                    "deleted": False,
+                    "retirement_cleanup_pending": True,
+                    "provider_id": provider_id,
+                    "provider_bot_ref": provider_bot_ref,
+                }
+
             response.raise_for_status()
             logger.info(
                 f"[BcnService.delete_provider_bot] OK "
