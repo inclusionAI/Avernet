@@ -2,13 +2,21 @@
 from __future__ import annotations
 
 import hashlib
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+# Reviewed flat focused-module allowance; the history of increments is
+# documented below disk_digest.
+FLAT_FILE_BUDGET = 340
 
 
-def disk_digest() -> str:
-    paths = [ROOT / 'runner.py', *sorted((ROOT / 'bcs_e2e').glob('*.py'))]
+def _artifact_paths() -> list[Path]:
+    return [ROOT / 'runner.py', *sorted((ROOT / 'bcs_e2e').glob('*.py'))]
+
+
+def disk_digest() -> str | None:
+    paths = _artifact_paths()
     # Keep the executor inventory small, but leave room for focused modules;
     # the old hard cap blocked splitting oversized adapters while still
     # enforcing the stricter per-file 1,000-line CI limit. The dual Workspace
@@ -135,8 +143,11 @@ def disk_digest() -> str:
     # The dual Provider-owner promotion adds one flat focused dual case-run module
     # (336 of 340); the dual Session-owner run lands in the session_owner subpackage
     # and adds no flat file.
-    if len(paths) > 340:
-        raise ValueError('executor artifact exceeds its source-file budget')
+    # R1 tolerant aperture (2026-10-31): a budget breach must not poison
+    # package import (pytest collection, --help, read-only probes). The
+    # budget gate closes fail-closed at Run time in process_digest().
+    if len(paths) > FLAT_FILE_BUDGET:
+        return None
     digest = hashlib.sha256()
     for path in paths:
         if path.is_symlink() or not path.is_file() or path.stat().st_size > 1_048_576:
@@ -147,11 +158,30 @@ def disk_digest() -> str:
     return digest.hexdigest()
 
 
-# Imported by package __init__ before cli, adapters, pilot or other leaf modules.
+# Imported by package __init__ before cli, adapters, pilot or other leaf
+# modules. None when the flat executor artifact breaches its reviewed
+# module budget; the breach fails closed at Run time instead of breaking
+# every import consumer.
 PROCESS_EXECUTOR_DIGEST = disk_digest()
+
+if PROCESS_EXECUTOR_DIGEST is None:
+    print(
+        'bcs_e2e: executor artifact breaches its flat source-file budget '
+        f'(>{FLAT_FILE_BUDGET} focused modules); receipts gate closed at '
+        'process_digest() until the allowance is reviewed or split',
+        file=sys.stderr,
+    )
 
 
 def process_digest() -> str:
-    if disk_digest() != PROCESS_EXECUTOR_DIGEST:
+    if PROCESS_EXECUTOR_DIGEST is None:
+        raise ValueError(
+            f'executor artifact breaches its flat source-file budget '
+            f'(>{FLAT_FILE_BUDGET} focused bcs_e2e/*.py modules plus '
+            'runner.py); split oversized modules or land a reviewed '
+            'allowance increment in bcs_e2e/artifact.py before starting a Run'
+        )
+    current = disk_digest()
+    if current is None or current != PROCESS_EXECUTOR_DIGEST:
         raise ValueError('runner source changed after process import; start a fresh process and Run')
     return PROCESS_EXECUTOR_DIGEST
