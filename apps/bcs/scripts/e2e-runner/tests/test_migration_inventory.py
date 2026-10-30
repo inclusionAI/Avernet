@@ -631,9 +631,8 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
             for row in legacy)
         self.assertEqual(counts, Counter({
             ('DUAL', 'PASS'): 19,
-            ('DUAL', 'BLOCKED_INVENTORIED'): 7,
+            ('DUAL', 'BLOCKED_INVENTORIED'): 11,
             ('DUAL', 'NOT_RUN'): 10,
-            ('DYNAMIC_OWNED_LOCAL', 'NOT_APPLICABLE'): 4,
             ('EDGE_OBLIGATION_IN_FAMILY', 'NOT_APPLICABLE'): 1,
         }))
         gated = {
@@ -676,9 +675,8 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
             for row in reviewed)
         self.assertEqual(counts, Counter({
             ('DUAL', 'PASS'): 18,
-            ('DUAL', 'BLOCKED_INVENTORIED'): 7,
+            ('DUAL', 'BLOCKED_INVENTORIED'): 8,
             ('DUAL', 'NOT_RUN'): 4,
-            ('DYNAMIC_OWNED_LOCAL', 'NOT_APPLICABLE'): 1,
             ('EDGE_OBLIGATION_IN_FAMILY', 'NOT_APPLICABLE'): 1,
         }))
         ids = {row['id'] for row in reviewed}

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
+import os
 import signal
 
 from .case_executor import execute_fixed_loop_case
@@ -23,6 +25,22 @@ from .run_state import RunStateError, read, write
 # exhausted Run consumes the remaining two (revise, revise).
 _JUDGE_OUTCOMES = ('revise', 'approved', 'revise', 'revise')
 _PROVIDER_RECEIPT_LIMIT = 8
+
+
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def validate_fixed_loop_binary(binary: Path, binary_sha256: str) -> Path:
+    """Freeze the owned BCS server binary before launching anything."""
+    binary = Path(binary).absolute()
+    if binary.is_symlink() or not binary.is_file():
+        raise RunStateError('Fixed Loop BCS binary must be a regular frozen file')
+    if not binary.is_file() or not os.access(binary, os.X_OK):
+        raise RunStateError('Fixed Loop BCS binary must be executable')
+    if _sha256(binary.read_bytes()) != binary_sha256:
+        raise RunStateError('Fixed Loop BCS binary digest differs from its frozen declaration')
+    return binary
 
 
 def local_fixed_loop_run(*, binary: Path, binary_sha256: str, state_dir: Path, run_id: str,

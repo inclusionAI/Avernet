@@ -24,6 +24,10 @@ from .provider_publishes.dual_case_run import (COMMAND as PROVIDER_PUBLISHES_COM
                                                register_provider_publishes_dual_case_commands)
 from .slow_judge.dual_case_run import (COMMAND as SLOW_JUDGE_COMMAND,
                                        register_slow_judge_dual_case_commands)
+from .dynamic_family.case_run import (DUAL_DRAFT_GROUP_COMMAND,
+                                       DUAL_FIXED_LOOP_COMMAND,
+                                       DUAL_NESTED_FIXED_LOOP_COMMAND,
+                                       DUAL_RESULT_QUEUE_COMMAND)
 
 
 CASE_COMMANDS = frozenset({
@@ -38,6 +42,10 @@ CASE_COMMANDS = frozenset({
     "dual-structured-core-run",
     "dual-structured-templates-run",
     "dual-structured-density-run",
+    DUAL_FIXED_LOOP_COMMAND,
+    DUAL_NESTED_FIXED_LOOP_COMMAND,
+    DUAL_RESULT_QUEUE_COMMAND,
+    DUAL_DRAFT_GROUP_COMMAND,
     "dual-webhook-subscription-run",
     "dual-friend-connection-decisions-run",
     "dual-friend-public-accept-run",
@@ -167,6 +175,48 @@ def register_case_commands(commands) -> None:
     structured_density_case.add_argument("--run-id", required=True)
     structured_density_case.add_argument("--confirm-run-id", required=True)
     structured_density_case.add_argument("--allow-write", action="store_true")
+    fixed_loop_case = commands.add_parser(
+        "dual-fixed-loop-run",
+        help="Run the reviewed dual fixed-Loop human-editor workflow through owned-local replay or preprod gap receipt")
+    fixed_loop_case.add_argument("--profile", type=Path, required=True)
+    fixed_loop_case.add_argument("--state-dir", type=Path, required=True)
+    fixed_loop_case.add_argument("--run-id", required=True)
+    fixed_loop_case.add_argument("--confirm-run-id", required=True)
+    fixed_loop_case.add_argument("--allow-write", action="store_true")
+    fixed_loop_case.add_argument("--binary", type=Path, required=True)
+    fixed_loop_case.add_argument("--binary-sha256", required=True)
+    nested_fixed_loop_case = commands.add_parser(
+        "dual-nested-fixed-loop-run",
+        help="Run the reviewed dual nested fixed-Loop workflows through owned-local replay or preprod gap receipt")
+    nested_fixed_loop_case.add_argument("--profile", type=Path, required=True)
+    nested_fixed_loop_case.add_argument("--state-dir", type=Path, required=True)
+    nested_fixed_loop_case.add_argument("--run-id", required=True)
+    nested_fixed_loop_case.add_argument("--confirm-run-id", required=True)
+    nested_fixed_loop_case.add_argument("--allow-write", action="store_true")
+    nested_fixed_loop_case.add_argument("--binary", type=Path, required=True)
+    nested_fixed_loop_case.add_argument("--binary-sha256", required=True)
+    nested_fixed_loop_case.add_argument("--cli-binary", type=Path, required=False)
+    nested_fixed_loop_case.add_argument("--driver", required=False)
+    result_queue_case = commands.add_parser(
+        "dual-result-queue-run",
+        help="Run the reviewed dual state-machine result-queue story through owned-local replay or preprod gap receipt")
+    result_queue_case.add_argument("--profile", type=Path, required=True)
+    result_queue_case.add_argument("--state-dir", type=Path, required=True)
+    result_queue_case.add_argument("--run-id", required=True)
+    result_queue_case.add_argument("--confirm-run-id", required=True)
+    result_queue_case.add_argument("--allow-write", action="store_true")
+    result_queue_case.add_argument("--binary", type=Path, required=True)
+    result_queue_case.add_argument("--binary-sha256", required=True)
+    draft_group_case = commands.add_parser(
+        "dual-draft-group-run",
+        help="Run the reviewed dual collaboration draft-group launch story through owned-local replay or preprod gap receipt")
+    draft_group_case.add_argument("--profile", type=Path, required=True)
+    draft_group_case.add_argument("--state-dir", type=Path, required=True)
+    draft_group_case.add_argument("--run-id", required=True)
+    draft_group_case.add_argument("--confirm-run-id", required=True)
+    draft_group_case.add_argument("--allow-write", action="store_true")
+    draft_group_case.add_argument("--binary", type=Path, required=True)
+    draft_group_case.add_argument("--binary-sha256", required=True)
     webhook_subscription_case = commands.add_parser(
         "dual-webhook-subscription-run",
         help="Run the reviewed dual Event Webhook subscription lifecycle through Singlebox or preprod")

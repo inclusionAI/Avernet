@@ -177,8 +177,8 @@
     {
       "id": "story_fixed_loop_human_editor_workflow",
       "executor_migration": {
-        "mode": "DYNAMIC_OWNED_LOCAL",
-        "preprod_verdict": "NOT_APPLICABLE",
+        "mode": "DUAL",
+        "preprod_verdict": "BLOCKED_INVENTORIED",
         "gates": [],
         "notes": []
       }
@@ -186,8 +186,8 @@
     {
       "id": "story_nested_fixed_loop_workflows",
       "executor_migration": {
-        "mode": "DYNAMIC_OWNED_LOCAL",
-        "preprod_verdict": "NOT_APPLICABLE",
+        "mode": "DUAL",
+        "preprod_verdict": "BLOCKED_INVENTORIED",
         "gates": [],
         "notes": []
       }
@@ -195,8 +195,8 @@
     {
       "id": "story_state_machine_result_queue",
       "executor_migration": {
-        "mode": "DYNAMIC_OWNED_LOCAL",
-        "preprod_verdict": "NOT_APPLICABLE",
+        "mode": "DUAL",
+        "preprod_verdict": "BLOCKED_INVENTORIED",
         "gates": [],
         "notes": []
       }
@@ -375,8 +375,8 @@
     {
       "id": "story_collaboration_draft_group_launch",
       "executor_migration": {
-        "mode": "DYNAMIC_OWNED_LOCAL",
-        "preprod_verdict": "NOT_APPLICABLE",
+        "mode": "DUAL",
+        "preprod_verdict": "BLOCKED_INVENTORIED",
         "gates": [],
         "notes": []
       }

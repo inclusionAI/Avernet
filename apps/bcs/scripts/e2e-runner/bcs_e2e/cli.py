@@ -59,6 +59,10 @@ from .network_read_case_run import dual_network_read_case_run
 from .structured_core_case_run import dual_structured_core_case_run
 from .structured_templates_case_run import dual_structured_templates_case_run
 from .structured_density.dual_case_run import dual_structured_density_case_run
+from .dynamic_family.case_run import (dual_draft_group_case_run,
+                                       dual_fixed_loop_case_run,
+                                       dual_nested_fixed_loop_case_run,
+                                       dual_result_queue_case_run)
 from .webhook_subscription_case_run import dual_webhook_subscription_case_run
 from .friend_connection_decision_case_run import dual_friend_connection_decision_case_run
 from .friend_public_accept_case_run import dual_friend_public_accept_case_run
@@ -624,6 +628,52 @@ def main(argv: list[str] | None = None) -> int:
                 run_id=args.run_id,
                 allow_write=args.allow_write,
                 confirm_run_id=args.confirm_run_id,
+            )
+            rc = 0 if report["status"] == "PASS" else 2
+        elif args.command == "dual-fixed-loop-run":
+            report = dual_fixed_loop_case_run(
+                profile_path=args.profile,
+                state_dir=args.state_dir,
+                run_id=args.run_id,
+                allow_write=args.allow_write,
+                confirm_run_id=args.confirm_run_id,
+                binary=args.binary,
+                binary_sha256=args.binary_sha256,
+            )
+            rc = 0 if report["status"] == "PASS" else 2
+        elif args.command == "dual-nested-fixed-loop-run":
+            report = dual_nested_fixed_loop_case_run(
+                profile_path=args.profile,
+                state_dir=args.state_dir,
+                run_id=args.run_id,
+                allow_write=args.allow_write,
+                confirm_run_id=args.confirm_run_id,
+                binary=args.binary,
+                binary_sha256=args.binary_sha256,
+                cli_binary=args.cli_binary or Path(),
+                driver=args.driver or '',
+            )
+            rc = 0 if report["status"] == "PASS" else 2
+        elif args.command == "dual-result-queue-run":
+            report = dual_result_queue_case_run(
+                profile_path=args.profile,
+                state_dir=args.state_dir,
+                run_id=args.run_id,
+                allow_write=args.allow_write,
+                confirm_run_id=args.confirm_run_id,
+                binary=args.binary,
+                binary_sha256=args.binary_sha256,
+            )
+            rc = 0 if report["status"] == "PASS" else 2
+        elif args.command == "dual-draft-group-run":
+            report = dual_draft_group_case_run(
+                profile_path=args.profile,
+                state_dir=args.state_dir,
+                run_id=args.run_id,
+                allow_write=args.allow_write,
+                confirm_run_id=args.confirm_run_id,
+                binary=args.binary,
+                binary_sha256=args.binary_sha256,
             )
             rc = 0 if report["status"] == "PASS" else 2
         elif args.command == "dual-webhook-subscription-run":
