@@ -9,7 +9,8 @@ are cached only within a single request, so a shared parent/child workflow is
 authorized once per request and rechecked on the next request.
 
 A 200 response has exactly this shape (times are stored integer epoch values;
-nullable fields are `null` when unavailable):
+nullable fields are `null` when unavailable). This example illustrates the
+response schema, not a guarantee that running children are discoverable:
 
 ```json
 {"items":[{"parentNodeId":"node-1","childFlowId":"child-1","childWorkflowId":"child-workflow","status":"running","startedAt":123,"completedAt":null,"nodes":[{"nodeId":"task-1","nodeTitle":"Task","status":"running","attempt":1}]}],"completeness":"best_effort"}
@@ -23,7 +24,9 @@ nullable fields are `null` when unavailable):
   lookup work. It takes `parentNodeId` from the newest usable event for that
   child. Malformed or missing historical events are ignored; `parentNodeId`
   is null if the event has no valid node ID. Event payload workflow IDs and
-  statuses are not trusted.
+  statuses are not trusted. The reader accepts both event types, but current
+  ClawMind/TaskGuard does not emit `subworkflow_linked`; its available discovery
+  evidence is `subworkflow_finished` only.
 - Each child is resolved against `flow_runs`, then checked against the
   per-request authorization decision for its **stored** workflow ID. Node rows
   are read only after that check succeeds. Missing, unauthorized and trial children are
@@ -55,4 +58,21 @@ flow and node flow-ID indexes are expected for bounded per-flow lookup.
 
 ## Runtime and rollout limitations
 
-TaskGuard emits `subworkflow_linked` after creating a child flow. The event uses the existing best-effort event persistence, and is not an authoritative lineage record. Ordinary child runs may not have a `flow_runs` row, depending on the TaskFlow adapter. In those cases the read API intentionally omits the child rather than disclosing an unverified identifier. ClawMind and the internal ClawWeb host are separate repositories and are not modified by this change; their use requires separate integration and verification. Do not treat this event-based compatibility view as complete or production-ready real-time tracing. Durable association, crash recovery, attempt identity, nested-parent correctness and production host authorization require follow-up before that claim can be made.
+This PR does not include any TaskGuard code changes or add write-side
+observability. Current ClawMind/TaskGuard does not emit `subworkflow_linked`;
+only existing `subworkflow_finished` events are available for discovery. Event
+persistence is best effort, not an authoritative lineage record. In production,
+a child is not guaranteed to be visible while it is running, and even a finished
+child is visible only if suitable evidence and the required stored records are
+available and authorized.
+
+Ordinary child runs are not guaranteed to be visible: depending on the TaskFlow
+adapter, they may lack a `flow_runs` row. In that case the read API intentionally
+omits the child rather than disclosing an unverified identifier. Adding or
+improving write-side event and run-record production requires a separate change;
+it is not delivered by this read-only PR. ClawMind and the internal ClawWeb host
+are separate repositories and are not modified by this change; their use requires
+separate integration and verification. Do not treat this event-based compatibility
+view as complete or production-ready real-time tracing. Durable association, crash
+recovery, attempt identity, nested-parent correctness and production host
+authorization require follow-up before that claim can be made.
