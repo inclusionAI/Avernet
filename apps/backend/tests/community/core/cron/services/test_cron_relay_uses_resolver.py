@@ -35,6 +35,9 @@ from agentclaw.community.core.devices.services.device_context import DeviceConte
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
+from agentclaw.community.core.service_bot.baas_service_errors import (
+    BaasServiceError,
+)
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 
 
@@ -1177,6 +1180,95 @@ class TestRuntimeQueryConcurrency:
 
         assert all(result["success"] for result in results)
         assert transport.invoke.await_count == len(targets)
+
+class TestCronListSendHookRetry:
+    """The PRE tracing hook can wrap a transient transport failure opaquely.
+
+    Keep this narrow: cron listing GETs are idempotent, so retrying once can
+    recover the observed failure without changing other failure semantics.
+    """
+
+    @staticmethod
+    def _make_target() -> CronRuntimeTarget:
+        return CronRuntimeTarget(
+            bot_id="20260820_ojz5blks",
+            bot_name="Bot",
+            owner_id="owner-1",
+            bot_type="personal",
+            runtime_stage="draft",
+            binding_id=42,
+        )
+
+    @staticmethod
+    def _make_service_for_target() -> tuple[CronRelayService, MagicMock]:
+        device_provider = MagicMock()
+        device_provider.get_device.return_value = _make_device()
+
+        resolver = MagicMock()
+        resolver.resolve_for_bot.return_value = _make_ctx(
+            binding_id=42,
+            bot_id="20260820_ojz5blks",
+            user_id="owner-1",
+        )
+
+        transport = MagicMock()
+        svc = _make_service(
+            device_provider=device_provider,
+            resolver=resolver,
+            transport=transport,
+        )
+        return svc, transport
+
+    @pytest.mark.asyncio
+    async def test_send_hook_failure_is_retried_once(self):
+        svc, transport = self._make_service_for_target()
+        transport.invoke = AsyncMock(
+            side_effect=[
+                BaasServiceError(
+                    "Failed to get http info: Error in httpx send hook"
+                ),
+                {"success": True, "data": [{"id": "task-1"}]},
+            ]
+        )
+
+        result = await svc._fetch_runtime_target_crons(
+            self._make_target(), "owner-1"
+        )
+
+        assert result == {"success": True, "data": [{"id": "task-1"}]}
+        assert transport.invoke.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_persistent_send_hook_failure_stays_cron_api_failed(self):
+        svc, transport = self._make_service_for_target()
+        error = BaasServiceError(
+            "Failed to get http info: Error in httpx send hook"
+        )
+        transport.invoke = AsyncMock(side_effect=error)
+
+        result = await svc._fetch_runtime_target_crons(
+            self._make_target(), "owner-1"
+        )
+
+        assert result == {"success": False, "reason": "cron_api_failed", "error": str(error)}
+        assert transport.invoke.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_non_send_hook_failure_is_not_retried(self):
+        svc, transport = self._make_service_for_target()
+        transport.invoke = AsyncMock(side_effect=ValueError("deliberate adapter failure"))
+
+        result = await svc._fetch_runtime_target_crons(
+            self._make_target(), "owner-1"
+        )
+
+        assert result == {
+            "success": False,
+            "reason": "cron_api_failed",
+            "error": "deliberate adapter failure",
+        }
+        assert transport.invoke.await_count == 1
+
 
 
 class TestListRunningCronsOwnerId:
