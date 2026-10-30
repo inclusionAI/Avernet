@@ -13,12 +13,30 @@ type Snapshot = {
 type State = { workflowId: string; loading: boolean; error: string | null; snapshot: Snapshot | null }
 const emptyState = (workflowId: string): State => ({ workflowId, loading: true, error: null, snapshot: null })
 
+// Only inspect known structured responses; never display server-provided text.
+function notFoundMessage(error: unknown): string {
+  const body = (error as { body?: unknown } | null)?.body
+  if (typeof body === 'string') {
+    try {
+      const value: unknown = JSON.parse(body)
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        const result = value as { code?: unknown; error?: unknown }
+        if (result.code === 'WORKFLOW_NOT_FOUND' || (result.code === undefined && result.error === 'Workflow not found')) return '未找到工作流。'
+        if (result.code === 'SNAPSHOT_NOT_FOUND' || (result.code === undefined && result.error === 'Snapshot not found')) return '未找到工作流的 Git 快照或 Pack 清单。'
+      }
+    } catch {
+      // Older hosts and proxies may return HTML or plain text instead of JSON.
+    }
+  }
+  return '接口或资源未找到，请检查服务版本和路由配置。'
+}
+
 function readError(error: unknown): string {
   const status = (error as { status?: unknown } | null)?.status
   switch (status) {
     case 401: return '请先登录，再查看脚本。'
-    case 403: return '没有编辑权限，无法查看脚本。'
-    case 404: return '未找到工作流或 Git 快照。'
+    case 403: return '没有工作流编辑权限或 Pack 访问权限，无法查看脚本。'
+    case 404: return notFoundMessage(error)
     case 409: return '脚本快照存在分支冲突或共享 Pack，暂无法安全读取。'
     case 503: return '脚本服务暂不可用，请检查配置后重试。'
     default: return '无法读取脚本，请稍后重试。'
