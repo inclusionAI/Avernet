@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
 
 from agentclaw.community.core.service_bot.services.deploy.managed_composer import (
@@ -21,6 +22,7 @@ from tests.community.core.service_bot.services.deploy._noop_storage_policy impor
 )
 from agentclaw.community.core.service_bot.services import baas_service as baas_service_module
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
+from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
 from agentclaw.community.plugins.local.http_client import LocalHttpClient
 from agentclaw.community.plugins.local.outbound_rules import NoopOutboundRuleProvider
 
@@ -119,6 +121,82 @@ class TestBaasServiceHttpMethods:
         assert call.args[0] == "/api/v1/publishes/42/progress"
         assert call.kwargs["params"]["tenant"] == "tnt"
         assert call.kwargs["params"]["include_devices"] == "true"
+
+    def test_get_publish_progress_retries_once_after_remote_protocol_error(
+        self, monkeypatch
+    ):
+        service, http = _make_service()
+        success = _resp({"status": "SUCCESS", "current_stage": "online"})
+        attempts = 0
+
+        def _fail_then_succeed(*args, **kwargs):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise httpx.RemoteProtocolError("Server disconnected")
+            return success
+
+        http.set_override("get", _fail_then_succeed)
+        sleep = MagicMock()
+        monkeypatch.setattr(baas_service_module.time, "sleep", sleep)
+
+        result = service.get_publish_progress(42)
+
+        assert result["status"] == "SUCCESS"
+        assert len(http.calls_to("get")) == 2
+        sleep.assert_called_once_with(0.1)
+
+        second = http.calls_to("get")[1]
+        assert second.args[0] == "/api/v1/publishes/42/progress"
+        assert second.kwargs["params"] == {"tenant": "tnt"}
+        assert second.kwargs["timeout"] == 30.0
+
+    def test_get_publish_progress_retries_once_after_wrapped_remote_error(
+        self, monkeypatch
+    ):
+        service, http = _make_service()
+        success = _resp({"status": "ACTIVE", "current_stage": "deploying"})
+        attempts = 0
+
+        def _parice_then_succeed(*args, **kwargs):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                cause = httpx.RemoteProtocolError("Server disconnected")
+                try:
+                    raise cause
+                except httpx.RemoteProtocolError as caught:
+                    raise RuntimeError("Error in httpx send hook") from caught
+            return success
+
+        http.set_override("get", _parice_then_succeed)
+        sleep = MagicMock()
+        monkeypatch.setattr(baas_service_module.time, "sleep", sleep)
+
+        result = service.get_publish_progress(42)
+
+        assert result["status"] == "ACTIVE"
+        assert len(http.calls_to("get")) == 2
+        sleep.assert_called_once_with(0.1)
+
+    def test_get_publish_progress_does_not_retry_http_status_errors(self):
+        service, http = _make_service()
+        error_response = MagicMock()
+        error_response.status_code = 404
+        error_response.text = "not found"
+        error_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "404",
+            request=httpx.Request(
+                "GET", "http://baas.test/api/v1/publishes/42/progress"
+            ),
+            response=error_response,
+        )
+        http.set_response("get", error_response)
+
+        with pytest.raises(BaasServiceError, match="BaaS API error: 404"):
+            service.get_publish_progress(42)
+
+        assert len(http.calls_to("get")) == 1
 
     def test_get_bot(self):
         service, http = _make_service()
