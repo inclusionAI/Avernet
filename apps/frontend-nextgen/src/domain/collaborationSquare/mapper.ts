@@ -80,6 +80,8 @@ export interface PublicBotCatalogTransport {
   user_visibility?: string;
   /** 智能搜索 Discovery 返回的推荐理由；short_profile 用于卡片「Profile」行。 */
   recommendation?: { short_profile?: string };
+  /** Bot 生命周期状态（'ACTIVE' 为可用；老版分享链接落地反查的可用性兜底依据）。 */
+  status?: string;
 }
 
 export interface CollaborationGroupDetailTransport {
@@ -179,6 +181,7 @@ export function mapPublicBotCatalogDto(value: PublicBotCatalogTransport, viewerU
     ...(isOwnedByLoggedInUser ? { isOwnedByLoggedInUser: true } : {}),
     ...(friendRequestBotId && friendRequestBotId !== id ? { friendRequestBotId } : {}),
     ...(shortProfile ? { shortProfile } : {}),
+    ...(value.status?.trim() ? { status: value.status.trim() } : {}),
     ...(audience ? { audience } : {}),
   };
 }

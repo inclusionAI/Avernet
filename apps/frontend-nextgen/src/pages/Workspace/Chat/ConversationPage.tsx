@@ -6,6 +6,7 @@ import type { ConversationBotSection } from '@/domain/conversation/types';
 import { isManagedConversationSection } from '@/domain/conversation/types';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import { ChatMessageSkeleton } from '@/components/Workspace/ChatPanel/ChatMessageSkeleton';
+import { FriendRequestConfirmModal } from '@/components/CollaborationSquare/FriendRequestConfirmModal';
 import { history } from '@umijs/max';
 import { getCapabilities } from '@/capabilities';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
@@ -27,6 +28,7 @@ import { useConversationSessions } from './hooks/useConversationSessions';
 import { useConversationUrlSync } from './hooks/useConversationUrlSync';
 import { useConversationDeepLinkSessionHydration } from './hooks/useConversationDeepLinkSessionHydration';
 import { useManagedBotOthers } from './hooks/useManagedBotOthers';
+import { useLegacyShareLinkGuard } from './hooks/useLegacyShareLinkGuard';
 
 export default function ConversationPage(): JSX.Element {
   const { identity: human } = useHumanIdentity();
@@ -66,6 +68,33 @@ export default function ConversationPage(): JSX.Element {
       hydrated,
     });
   useConversationUrlSync({ hydrated, selection, onRouteSelection });
+  // 老版分享链接落地守护：无好友关系时反查公开 Bot 并唤起好友申请弹窗（plan §2.2）。
+  const legacyShareLinkKnownBotIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const view of managedAndTeamBots) ids.add(view.bot.botId);
+    for (const view of directory.friendBots) ids.add(view.bot.botId);
+    return ids;
+  }, [managedAndTeamBots, directory.friendBots]);
+  const legacyShareLinkFriendBotIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const view of directory.friendBots) ids.add(view.bot.botId);
+    return ids;
+  }, [directory.friendBots]);
+  // 列表就绪判据须"非 loading 且无错误"：loading 态缓存一写入对象即存在，若据此创建会话，
+  // 在途列表响应返回后将以不含新会话的旧列表覆盖前置缓存，新会话行从左侧消失、选中不可见。
+  const legacyShareFriendSessions = store.friendBotSessionsByBotId[store.selectedBotId ?? ''];
+  const legacyShareLinkGuard = useLegacyShareLinkGuard({
+    hydrated,
+    selectedBotId: store.selectedBotId,
+    knownBotIds: legacyShareLinkKnownBotIds,
+    friendBotIds: legacyShareLinkFriendBotIds,
+    createSession: sessions.createSession,
+    friendSessionsLoaded: Boolean(
+      legacyShareFriendSessions && !legacyShareFriendSessions.loading && !legacyShareFriendSessions.error,
+    ),
+    selectedSection: store.selectedSection,
+    userId,
+  });
   useConversationDeepLinkSessionHydration({
     userId,
     managedBots: managedAndTeamBots,
@@ -215,6 +244,15 @@ export default function ConversationPage(): JSX.Element {
           )}
         </div>
       </div>
+      {legacyShareLinkGuard.legacyBot && human && (
+        <FriendRequestConfirmModal
+          bot={legacyShareLinkGuard.legacyBot}
+          actor={{ type: 'human', id: human.userId }}
+          actorName={human.displayName || human.userId}
+          onClose={legacyShareLinkGuard.onClose}
+          onConfirm={legacyShareLinkGuard.onConfirm}
+        />
+      )}
     </div>
   );
 }
