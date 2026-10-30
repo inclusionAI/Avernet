@@ -182,7 +182,7 @@ export function ResizableWorkspaceSidebar({
         'relative shrink-0 flex-col overflow-visible transition-[width] duration-300 ease-in-out',
         // 左侧栏右缘分割线按稿 lighten（1px #EEE ≈ border-border/60，与导航侧 0.5px 区分层级）+ muted 底 + lg 以下隐藏；
         // 右侧副屏左缘分割线维持全强度 token、全屏段显示、底色随 className
-        isRight ? 'flex border-l border-border' : 'hidden border-r border-border/60 bg-muted/20 lg:flex',
+        isRight ? 'flex border-l border-divider' : 'hidden border-r border-divider/60 bg-muted/20 lg:flex',
         dragging && 'transition-none',
         className,
       )}

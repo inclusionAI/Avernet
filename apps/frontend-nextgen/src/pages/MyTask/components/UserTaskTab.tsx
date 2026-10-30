@@ -33,7 +33,7 @@ function Th({ className, ...props }: React.ThHTMLAttributes<HTMLTableCellElement
 }
 
 function Td({ className, ...props }: React.TdHTMLAttributes<HTMLTableCellElement>) {
-  return <td className={cn('border-t border-border px-4 py-3 align-top text-xs', className)} {...props} />;
+  return <td className={cn('border-t border-divider px-4 py-3 align-top text-xs', className)} {...props} />;
 }
 
 export interface UserTaskTabProps {
@@ -192,7 +192,7 @@ export function UserTaskTab({
                       <tr
                         key={record.task_id}
                         className={cn(
-                          'border-b border-border text-xs transition-colors hover:bg-muted/50',
+                          'border-b border-divider text-xs transition-colors hover:bg-muted/50',
                           active && 'bg-secondary',
                         )}
                       >

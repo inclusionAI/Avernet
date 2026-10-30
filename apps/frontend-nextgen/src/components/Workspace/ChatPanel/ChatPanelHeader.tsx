@@ -56,7 +56,7 @@ export function ChatPanelHeader({
 
   return (
     <ChatLayout.Header
-      className="flex h-12 items-center justify-between border-b border-border bg-card px-3 sm:px-4"
+      className="flex h-12 items-center justify-between border-b border-divider bg-card px-3 sm:px-4"
       slotRight={
         actions ??
         (onManageFiles ? (

@@ -78,7 +78,7 @@ export function RoutineCard({
         <dd className="m-0 mt-0.5 line-clamp-2 break-words text-[13px] leading-5">{item.command}</dd>
       </dl>
       {/* artboard-075/079:卡内内容与底部操作药丸之间有 #EEEEEE 分割线（宽随内容区）。 */}
-      <div className="mt-4 flex justify-end gap-2 border-t border-border/55 pt-3">
+      <div className="mt-4 flex justify-end gap-2 border-t border-divider/55 pt-3">
         <Button
           variant="outline"
           size="sm"

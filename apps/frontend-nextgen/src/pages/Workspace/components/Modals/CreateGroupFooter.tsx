@@ -17,7 +17,7 @@ export function CreateGroupFooter({
   onSubmit,
 }: CreateGroupFooterProps) {
   return (
-    <div data-testid="create-group-modal-footer" className="flex items-center gap-4 border-t border-border px-6 py-4">
+    <div data-testid="create-group-modal-footer" className="flex items-center gap-4 border-t border-divider px-6 py-4">
       <div className="min-w-0 flex-1">
         {yamlValidationError ? (
           <p role="alert" className="m-0 text-left text-xs text-destructive">

@@ -246,7 +246,7 @@ export function ComposerCapabilitiesMenu({
          * 好友 Bot 会话与协作群不传 → 文案区与竖分隔线均不渲染，＋ 区独立保留。 */}
         {capabilitySets ? (
           <>
-            <span aria-hidden="true" className="mx-2.5 h-4 w-px bg-border" />
+            <span aria-hidden="true" className="mx-2.5 h-4 w-px bg-divider" />
             <Popover
               open={capabilityOpen}
               onOpenChange={(next) => {

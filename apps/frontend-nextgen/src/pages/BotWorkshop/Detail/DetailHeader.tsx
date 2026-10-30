@@ -34,8 +34,8 @@ export function DetailHeader({
     // 对话区可见(lg+)时补右描边,与下方面板区的 border-r 接成一条竖线。
     <header
       className={cn(
-        'flex h-14 shrink-0 items-center gap-2 border-b border-border bg-card px-4 sm:px-6',
-        debugOpen && 'lg:border-r lg:border-border',
+        'flex h-14 shrink-0 items-center gap-2 border-b border-divider bg-card px-4 sm:px-6',
+        debugOpen && 'lg:border-r lg:border-divider',
       )}
     >
       <Button

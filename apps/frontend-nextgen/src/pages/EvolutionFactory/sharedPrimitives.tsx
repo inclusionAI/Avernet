@@ -39,7 +39,7 @@ export function ListSkeleton({
         </thead>
         <tbody>
           {Array.from({ length: rows }, (_, rowIndex) => (
-            <tr key={rowIndex} className="h-18 border-b border-border/60">
+            <tr key={rowIndex} className="h-18 border-b border-divider/60">
               {widths.map((width, columnIndex) => (
                 <td key={columnIndex} className={cn('px-4 align-middle', width)}>
                   {columnIndex === 0 ? (

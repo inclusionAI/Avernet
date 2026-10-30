@@ -124,13 +124,13 @@ export function AppSidebar({
   if (collapsed)
     return (
       // 右缘分割线按稿走 0.5px 发丝线 + 浅色（#EEE ≈ border-border/60），与 Bot 列表右缘 1px 分割线拉开层级
-      <aside className="relative hidden w-14 shrink-0 flex-col border-r-[0.5px] border-border/60 bg-background py-1 lg:flex">
+      <aside className="relative hidden w-14 shrink-0 flex-col border-r border-divider bg-background py-1 lg:flex">
         {shell}
       </aside>
     );
 
   return (
-    <aside className="relative hidden w-[var(--shell-sidebar-width)] shrink-0 flex-col border-r-[0.5px] border-border/60 bg-background py-1 lg:flex">
+    <aside className="relative hidden w-[var(--shell-sidebar-width)] shrink-0 flex-col border-r border-divider bg-background py-1 lg:flex">
       {shell}
     </aside>
   );

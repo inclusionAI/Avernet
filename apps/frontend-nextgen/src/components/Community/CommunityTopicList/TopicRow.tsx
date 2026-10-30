@@ -65,7 +65,7 @@ export function TopicRow({
       tabIndex={0}
       onClick={() => onOpen(topic)}
       onKeyDown={handleKeyDown}
-      className="grid grid-cols-[1fr_100px_140px_150px_176px] items-center gap-3 border-b border-border/60 px-4 py-3 outline-none transition-colors last:border-b-0 hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+      className="grid grid-cols-[1fr_100px_140px_150px_176px] items-center gap-3 border-b border-divider/60 px-4 py-3 outline-none transition-colors last:border-b-0 hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
     >
       <div className="min-w-0">
         <div className="flex items-center gap-2">

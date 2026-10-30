@@ -151,12 +151,12 @@ const BotWorkshopDetailPage: React.FC = () => {
               'app-scrollbar min-w-0 flex-1 overflow-y-auto bg-background lg:max-w-none',
               // 去掉旧版的 lg:w-[56%] 定宽:flex-1 撑满左列,面板 header/内容右缘
               // 才能与上方 bot 名称所在 header 对齐;右描边仅在对话区可见的 lg+ 生效。
-              debugOpen && !debugFullscreen && 'lg:border-r lg:border-border',
+              debugOpen && !debugFullscreen && 'lg:border-r lg:border-divider',
               debugFullscreen && 'hidden',
             )}
           >
             {verifying ? (
-              <p className="border-b border-border bg-muted px-6 py-3 text-sm text-muted-foreground">
+              <p className="border-b border-divider bg-muted px-6 py-3 text-sm text-muted-foreground">
                 预发验证中，配置已锁定；请在右侧对话区验证 Bot。
               </p>
             ) : null}

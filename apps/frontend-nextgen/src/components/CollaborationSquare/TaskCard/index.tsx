@@ -119,7 +119,7 @@ export default function TaskCard({ task, onOpenDetail }: TaskCardProps) {
             {task.goal ? <TooltipContent className="max-w-xs break-words">{task.goal}</TooltipContent> : null}
           </Tooltip>
         </TooltipProvider>
-        <div className="mt-auto border-t border-border pt-3">
+        <div className="mt-auto border-t border-divider pt-3">
           <p className="m-0 mb-2 text-xs font-medium text-muted-foreground">验收标准</p>
           {task.acceptanceCriteria.length > 0 ? (
             <div className="flex flex-wrap gap-1.5">

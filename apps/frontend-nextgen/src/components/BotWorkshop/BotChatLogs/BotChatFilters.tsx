@@ -125,7 +125,7 @@ export function BotChatFilters({ value, loading, onChange, onQuery, onReset }: P
               </label>
             ))}
           </div>
-          <div className="flex items-center justify-between border-t border-border pt-3">
+          <div className="flex items-center justify-between border-t border-divider pt-3">
             <Button
               variant="ghost"
               size="sm"

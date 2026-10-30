@@ -11,7 +11,7 @@ const COLORS: Record<StatCardProps['color'], string> = {
   red: 'bg-[var(--color-error-soft)] border-[var(--color-error-soft)] text-[var(--color-error)]',
   yellow: 'bg-[var(--color-warning-soft)] border-[var(--color-warning-soft)] text-[var(--color-warning)]',
   blue: 'bg-[var(--color-primary-soft)] border-[var(--color-primary-soft)] text-[var(--color-primary)]',
-  gray: 'bg-[var(--color-panel-muted)] border-[var(--color-border)] text-[var(--color-muted)]',
+  gray: 'bg-[var(--color-panel-muted)] border-divider text-[var(--color-muted)]',
 };
 
 export const TaskEscortStatCard: React.FC<StatCardProps> = ({ label, value, color }) => (

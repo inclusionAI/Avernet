@@ -89,7 +89,7 @@ function ProductSubmenu({ items }: { items: HelpLink[] }) {
         />
       </Button>
       {open && (
-        <div className="mt-0.5 space-y-0.5 border-l border-border pl-2 ml-3">
+        <div className="mt-0.5 space-y-0.5 border-l border-divider pl-2 ml-3">
           {items.map((l) => (
             <a key={l.label} href={l.href} target="_blank" rel="noopener noreferrer" className={ROW_CLASS}>
               <LinkIcon icon={l.icon} />

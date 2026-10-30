@@ -34,7 +34,7 @@ export function MenuSection({ divider = false, children }: { divider?: boolean; 
   if (items.length === 0) return null;
   return (
     <>
-      {divider ? <div className="-mx-1.5 my-1 h-px bg-border" /> : null}
+      {divider ? <div className="-mx-1.5 my-1 h-px bg-divider" /> : null}
       {items}
     </>
   );

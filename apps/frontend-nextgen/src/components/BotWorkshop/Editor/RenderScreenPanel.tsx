@@ -40,7 +40,7 @@ export function RenderScreenPanel({
   };
   return (
     <div className="flex min-h-full flex-col bg-card">
-      <div className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-8 lg:px-10">
+      <div className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-divider bg-card px-8 lg:px-10">
         <div className="min-w-0">
           <h2 className="m-0 truncate text-sm font-semibold">副屏组件库</h2>
           <p className="m-0 mt-0.5 truncate text-xs text-muted-foreground">维护当前 Bot 可加载的 UMD CDN 映射。</p>

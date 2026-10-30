@@ -149,7 +149,7 @@ export function BotAbilitySettings({
       {grid ? (
         <div className="grid grid-cols-1 gap-x-8 sm:grid-cols-2">{rows}</div>
       ) : (
-        <div className="divide-y divide-border">{rows}</div>
+        <div className="divide-y divide-divider">{rows}</div>
       )}
     </>
   );
@@ -182,7 +182,7 @@ export function BotVisibilitySettings({
           content={showUserVisibility ? botVisibilitySection.description : visibilityAudience.bot.description}
         />
       </div>
-      <div className="divide-y divide-border">
+      <div className="divide-y divide-divider">
         {showUserVisibility && (
           <RelationCard
             audience="user"
@@ -238,7 +238,7 @@ export function PublishApprovalSettings({
           content="控制共同编辑者发布该 Bot 前是否需要 Owner 审批；仅团队空间 Bot 展示本组。"
         />
       </div>
-      <div className="divide-y divide-border">
+      <div className="divide-y divide-divider">
         <SettingRow
           label="共同编辑者发布需 Owner 审批"
           description="开启后，共同编辑者发布该 Bot 前需经 Owner 审批；关闭后可直接发布。"

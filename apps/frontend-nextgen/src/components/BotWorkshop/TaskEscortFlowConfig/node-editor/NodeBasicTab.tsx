@@ -180,7 +180,7 @@ export function NodeBasicTab({ node, spec, onChange }: NodeBasicTabProps) {
       </div>
 
       {executorFields.length > 0 && (
-        <div className="border-t border-border pt-2">
+        <div className="border-t border-divider pt-2">
           <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             执行器配置
           </label>

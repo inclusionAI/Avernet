@@ -50,7 +50,7 @@ export function ExternalLoginPromptModal(): React.ReactElement {
           </ModalHeader>
         </div>
 
-        <div aria-hidden className="h-px bg-border" />
+        <div aria-hidden className="h-px bg-divider" />
 
         {/* 行动区:能力脊背(为何) → 登录 CTA(如何) */}
         <section className="flex flex-col gap-3">
@@ -67,7 +67,7 @@ export function ExternalLoginPromptModal(): React.ReactElement {
                     <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-background text-primary ring-1 ring-inset ring-primary/25">
                       <Icon className="size-4" />
                     </span>
-                    {!isLast && <span className="mt-1 w-px grow bg-border" />}
+                    {!isLast && <span className="mt-1 w-px grow bg-divider" />}
                   </span>
                   <span className={cn('flex min-w-0 flex-col gap-0.5', !isLast && 'pb-3.5')}>
                     <span className="text-sm font-medium leading-5 text-foreground">{title}</span>

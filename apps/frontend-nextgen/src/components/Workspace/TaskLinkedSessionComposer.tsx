@@ -280,7 +280,7 @@ export function TaskLinkedSessionComposer({
   return (
     <div
       data-testid="task-linked-session-composer"
-      className="flex shrink-0 flex-col gap-1.5 border-t border-border bg-background px-3 py-2 sm:px-6"
+      className="flex shrink-0 flex-col gap-1.5 border-t border-divider bg-background px-3 py-2 sm:px-6"
     >
       <Sender
         className="sender-shell w-full"

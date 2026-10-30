@@ -74,16 +74,16 @@ export function SpaceMemberList({
 
   // 底部行：未加入团队→左提示 + 右申请加入按钮；个人空间→左提示
   const bottomBar = joinableTeam ? (
-    <div className="mt-auto flex items-center justify-between border-t border-border pt-3">
+    <div className="mt-auto flex items-center justify-between border-t border-divider pt-3">
       <CaptionText className="m-0">您尚未加入此团队，可申请加入，待管理员审批通过后即可访问。</CaptionText>
       <Button size="sm" variant="primary" onClick={() => setJoinOpen(true)} className="shrink-0">
         申请加入
       </Button>
     </div>
   ) : isPersonal ? (
-    <CaptionText className="mt-auto border-t border-border pt-3">个人空间仅含您本人，不可添加或移除成员。</CaptionText>
+    <CaptionText className="mt-auto border-t border-divider pt-3">个人空间仅含您本人，不可添加或移除成员。</CaptionText>
   ) : manageable && DELETE_SPACE_SUPPORTED ? (
-    <div className="mt-auto flex items-center justify-end border-t border-border pt-3">
+    <div className="mt-auto flex items-center justify-end border-t border-divider pt-3">
       <ConfirmDialog
         title="确认删除该团队空间？"
         description={`删除后「${space.spaceName}」及其资源将离线，且不可撤销`}
@@ -120,12 +120,12 @@ export function SpaceMemberList({
       <Card className="overflow-hidden shadow-sm">
         {loading ? (
           <>
-            <div className="grid grid-cols-[minmax(0,1fr)_160px_80px] border-b border-border bg-muted/50 px-4 py-2.5">
+            <div className="grid grid-cols-[minmax(0,1fr)_160px_80px] border-b border-divider bg-muted/50 px-4 py-2.5">
               <Skeleton.Block className="h-3 w-10" />
               <Skeleton.Block className="h-3 w-8" />
               <Skeleton.Block className="ml-auto h-3 w-8" />
             </div>
-            <ul className="m-0 list-none divide-y divide-border p-0">
+            <ul className="m-0 list-none divide-y divide-divider p-0">
               {Array.from({ length: 4 }).map((_, i) => (
                 <li key={i} className="grid grid-cols-[minmax(0,1fr)_160px_80px] items-center px-4 py-2.5">
                   <div className="flex items-center gap-2">
@@ -146,14 +146,14 @@ export function SpaceMemberList({
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-[minmax(0,1fr)_160px_80px] border-b border-border bg-muted/50 px-4 py-2.5">
+            <div className="grid grid-cols-[minmax(0,1fr)_160px_80px] border-b border-divider bg-muted/50 px-4 py-2.5">
               <TableHeaderText as="span">成员</TableHeaderText>
               <TableHeaderText as="span">角色</TableHeaderText>
               <TableHeaderText as="span" className="text-right">
                 操作
               </TableHeaderText>
             </div>
-            <ul className="m-0 list-none divide-y divide-border p-0">
+            <ul className="m-0 list-none divide-y divide-divider p-0">
               {members.map((m) => (
                 <SpaceMemberRow
                   key={m.userId}
