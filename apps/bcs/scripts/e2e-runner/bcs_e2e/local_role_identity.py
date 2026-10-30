@@ -213,6 +213,10 @@ class OwnedLocalRoleIdentity:
         except Exception:
             raise LocalRoleIdentityError('local session state-machine Run transport failed') from None
 
+    def role_bot_ids(self) -> dict[str, str]:
+        """Public role to Bot-ID projection for density bindings; never tokens."""
+        return {role: entry[0] for role, entry in self._entries.items()}
+
     def actor_id(self, role: str) -> str:
         """Return a verified role's Bot ID without exposing its credential."""
         self._require_roles((role,))

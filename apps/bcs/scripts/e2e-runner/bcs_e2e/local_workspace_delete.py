@@ -20,6 +20,7 @@ from .local_sqlite import OwnedSqliteDatabase
 from .local_workspace_messages import OwnedLocalWorkspaceMessages
 from .profile import fingerprint, unique_keys
 from .run_state import RunStateError, read, write
+from .workspace_retention import retain_value
 
 CASE_ID = 'LOCAL-WORKSPACE-DELETE-01'
 OBLIGATIONS = ('WORKSPACE.incident-delete',)
@@ -162,6 +163,7 @@ class OwnedLocalWorkspaceDelete:
             value=json.loads(raw.decode(),object_pairs_hook=unique_keys)
             if len(raw)>16_384 or response.status!=200 or value!={'id':self.group_id,'deleted':True}:
                 raise RunStateError('Incident deletion response was not exact')
+            event['value']=retain_value(value)
             event['status']='ACKNOWLEDGED'
             self._save()
         except BaseException as error:

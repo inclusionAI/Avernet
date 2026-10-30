@@ -30,6 +30,7 @@ from .local_workspace_context import FUSION_CONTEXT, verify_workspace_context
 from .profile import fingerprint, identifier, unique_keys
 from .run_state import RunStateError, read, write
 from .trust_baseline import visibility
+from .workspace_retention import retain_text, retain_value
 
 CASE_ID = 'LOCAL-WORKSPACE-CLI-01'
 OBLIGATIONS = (
@@ -362,6 +363,8 @@ class OwnedLocalWorkspaceCli:
                                             'bearer': 'OWNED_LOCAL_PM_BEARER'}[auth_mode]
             reply = exchange.response
             output = result.stdout.decode('utf-8')
+            event['value'] = retain_value(reply)
+            event['stdout'], event['stdout_truncated'] = retain_text(output)
             self._accept_output(operation, reply, output, handles, request_id)
             event.update(status='ACKNOWLEDGED', resource_binding='BOUND')
             self._save()

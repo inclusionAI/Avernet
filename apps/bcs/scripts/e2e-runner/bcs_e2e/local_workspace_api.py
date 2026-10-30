@@ -17,6 +17,7 @@ from urllib.parse import quote
 from urllib.request import Request
 
 from .correlation import record_response_id
+from .workspace_retention import MAX_RETAINED_READS, retain_value
 from .errors import has_cancellation
 from .inventory import executor_digest
 from .ledger import Ledger
@@ -193,6 +194,11 @@ class OwnedLocalWorkspaceApi:
             value = json.loads(raw.decode('utf-8'), object_pairs_hook=unique_keys)
             if not isinstance(value, dict):
                 raise RunStateError('workspace read response is not an object')
+            self.state['reads'].append({'method': 'GET', 'path': path,
+                'after_operation': self.state['operations'][-1]['operation'] if self.state['operations'] else None,
+                'value': retain_value(value)})
+            if len(self.state['reads']) > MAX_RETAINED_READS:
+                raise RunStateError('workspace retained reads exceed their finite bound')
             return value
         except HTTPError as error:
             error.close()
@@ -305,6 +311,7 @@ class OwnedLocalWorkspaceApi:
             result = json.loads(raw.decode('utf-8'), object_pairs_hook=unique_keys)
             if not isinstance(result, dict):
                 raise RunStateError('workspace mutation response is not an object')
+            event['value'] = retain_value(result)
             event['status'] = 'ACKNOWLEDGED'
             self._save()
             return result
@@ -413,6 +420,7 @@ class OwnedLocalWorkspaceApi:
             if len(raw) > 65_536:
                 raise RunStateError('workspace Group creation response exceeds its byte budget')
             result = json.loads(raw.decode('utf-8'), object_pairs_hook=unique_keys)
+            event['value'] = retain_value(result)
             group_id = identifier(result.get('id'), 'workspace Group ID')
             session_id = identifier(result.get('session_id'), 'workspace initial Session ID')
             expected_ids = [self._id(role) for role in participants]
@@ -624,6 +632,7 @@ class OwnedLocalWorkspaceApi:
             },
             'verified_roles': list(ROLES),
             'operations': [],
+            'reads': [],
             'resources': {},
             'assertions': [],
             'storage_verification': {'status': 'NOT_RUN'},

@@ -9,6 +9,7 @@ import uuid
 from urllib.request import Request
 
 from .errors import has_cancellation
+from .workspace_retention import retain_value
 from .ledger import Ledger
 from .local_workspace_incident import CASE_ID as INCIDENT_CASE, OBLIGATIONS as INCIDENT_OBLIGATIONS, OwnedLocalWorkspaceIncident
 from .local_sqlite import OwnedSqliteDatabase
@@ -101,6 +102,7 @@ class OwnedLocalWorkspaceMessages:
             result = json.loads(raw.decode(), object_pairs_hook=unique_keys)
             if not isinstance(result, dict):
                 raise RunStateError('Workspace message response is not an object')
+            event['value'] = retain_value(result)
             event['status'] = 'ACKNOWLEDGED'
             self._save()
             return result
@@ -109,6 +111,14 @@ class OwnedLocalWorkspaceMessages:
             event['error_type'] = type(error).__name__
             if hasattr(error, 'code'):
                 event['http_status'] = error.code
+                # Retain the bounded failure body verbatim (PR #3173 dual-
+                # admission discipline): a 500 carries the ServiceError text
+                # that classifies the failed branch; never replay from it.
+                try:
+                    event['error_body'] = error.read(65_537).decode(
+                        'utf-8', 'replace')[:65_536]
+                except BaseException:
+                    event['error_body'] = None
                 error.close()
             self._invalidated = True
             try:
