@@ -167,7 +167,7 @@ export function useBotWorkshop() {
     spaceId,
     currentSpaceKind: currentSpace?.spaceType === 'TEAM' ? 'team' : 'personal',
     canOpenConversation: (bot: BotDomain) =>
-      Boolean(currentOpenApiUserId && (bot.ownerId === currentOpenApiUserId || bot.actions.includes('edit'))),
+      Boolean(currentOpenApiUserId && bot.actions.includes('chat') && !bot.disabledActions?.chat),
     canEnterDetail,
     loading: requestIdentity.loading || spaceLoading || !spaceInitialized || state.loading,
     error: requestIdentity.error ?? spaceError ?? state.error,
@@ -190,8 +190,8 @@ export function useBotWorkshop() {
     canOpenTaskInstances: (bot: BotDomain) =>
       Boolean(currentOpenApiUserId && (bot.ownerId === currentOpenApiUserId || bot.actions.includes('edit'))),
     containerUserId: requestIdentity.userId,
-    canViewContainers: (bot: BotDomain) => Boolean(currentOpenApiUserId && (bot.ownerId === currentOpenApiUserId || bot.actions.includes('edit'))),
-    canRestartContainer: (bot: BotDomain) => Boolean(currentOpenApiUserId && bot.ownerId === currentOpenApiUserId),
+    canViewContainers: (bot: BotDomain) => Boolean(bot.runtime.engine !== 'teclaw' && currentOpenApiUserId && (bot.ownerId === currentOpenApiUserId || bot.actions.includes('edit'))),
+    canRestartContainer: (bot: BotDomain) => Boolean(bot.runtime.engine !== 'teclaw' && currentOpenApiUserId && bot.ownerId === currentOpenApiUserId),
     creating: createFlow.creating,
     createAuthorization: createFlow.authorization,
     createSpaces: state.createScenario

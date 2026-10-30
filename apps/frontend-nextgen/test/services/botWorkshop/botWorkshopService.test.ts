@@ -530,6 +530,7 @@ describe('botWorkshopService.restartPublish（服务卡 restarting 词表分裂�
     const bot = mapBotDto({
       bot_id: 'service-publish-bot',
       bot_name: '知识检索服务',
+      owner_entity_id: 'owner-1',
       engine: 'openclaw',
       kind: 'service',
       bot_type: 'service',
@@ -540,7 +541,7 @@ describe('botWorkshopService.restartPublish（服务卡 restarting 词表分裂�
     await botWorkshopService.restartPublish(bot);
 
     expect(mockedRestartLifecycle).toHaveBeenCalledTimes(1);
-    expect(mockedRestartLifecycle).toHaveBeenCalledWith('service-publish-bot', stage);
+    expect(mockedRestartLifecycle).toHaveBeenCalledWith('service-publish-bot', stage, bot.ownerId);
   });
 
   test.each([

@@ -286,7 +286,7 @@ export const botWorkshopService = {
   async restartPublish(bot: BotDomain) {
     const stage = restartPublishStageOf(bot.lifecycle);
     if (!stage) throw new Error('当前发布状态不支持重启发布');
-    await botEditorService.restartLifecycle(bot.id, stage);
+    await botEditorService.restartLifecycle(bot.id, stage, bot.ownerId);
   },
   async enableService(id: string) {
     await upgradeBotToService(id);

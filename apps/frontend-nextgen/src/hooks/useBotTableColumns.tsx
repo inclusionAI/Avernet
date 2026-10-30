@@ -149,7 +149,7 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
                 entry.enabled
                   ? collaborationAllowsConversation
                     ? undefined
-                    : '申请协作权限后才可对话'
+                    : bot.disabledActions?.chat || '申请协作权限后才可对话'
                   : entry.disabledReason
               }
               onOpenLogs={onOpenLogs}

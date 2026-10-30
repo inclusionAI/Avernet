@@ -30,7 +30,7 @@ export function ServicePublicationDrawer({
   onClose: () => void;
   onChanged?: () => Promise<void>;
 }) {
-  const publications = useServicePublications(bot?.id);
+  const publications = useServicePublications(bot?.id, bot?.ownerId);
   const run = (action: ServicePublicationAction, item: ServicePublication) => {
     if (action === 'publish_staging') {
       Tracert.click(Points.botWorkshop.publishPre, { bot_id: bot?.id });
