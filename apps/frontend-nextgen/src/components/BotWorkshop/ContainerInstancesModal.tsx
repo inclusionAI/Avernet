@@ -37,7 +37,7 @@ export function ContainerInstancesModal({ bot, userId, canRestart = false, onClo
   const [restartingId, setRestartingId] = React.useState<string>();
   const [copiedId, setCopiedId] = React.useState<string>();
   const load = React.useCallback(async () => {
-    if (!bot || !userId) return;
+    if (!bot || !userId || bot.runtime.engine === 'teclaw') return;
     setLoading(true);
     setError('');
     try {
@@ -55,7 +55,7 @@ export function ContainerInstancesModal({ bot, userId, canRestart = false, onClo
   }, [bot, load]);
 
   const restart = async (instance: ContainerInstance) => {
-    if (!bot || !userId || instance.status !== 'abnormal' || !canRestart) return;
+    if (!bot || !userId || bot.runtime.engine === 'teclaw' || instance.status !== 'abnormal' || !canRestart) return;
     setRestartingId(instance.id);
     try {
       await botContainerService.restart(bot.id, instance.id, userId);

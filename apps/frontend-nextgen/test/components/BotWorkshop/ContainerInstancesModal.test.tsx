@@ -19,6 +19,12 @@ describe('ContainerInstancesModal', () => {
     list.mockReset();
   });
 
+  it('Teclaw 即使被传入详情弹窗也不查询容器', () => {
+    const bot = mapBotDto({ bot_id: 'teclaw-1', engine: 'teclaw', bot_type: 'service' }).item;
+    render(<ContainerInstancesModal bot={bot} userId="user-1" onClose={jest.fn()} />);
+    expect(list).not.toHaveBeenCalled();
+  });
+
   it('renders the legacy-style instance fields and does not invent absent resource metrics', async () => {
     list.mockResolvedValue({
       botId: 'service-1',
