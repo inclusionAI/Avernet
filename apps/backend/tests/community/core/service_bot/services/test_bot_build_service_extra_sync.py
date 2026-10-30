@@ -12,12 +12,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock
+import json
+from unittest.mock import MagicMock, call
 
 import pytest
 
 from agentclaw.community.core.service_bot.services.bot_build_service import (
-    BotBuildMigrationError,
     BotBuildService,
 )
 from agentclaw.community.core.workspace.engine_sandbox import EngineBuildPlan
@@ -192,14 +192,81 @@ class TestMigrateBotInstanceExtraSync:
 
 
 @pytest.mark.unit
-def test_mcp_config_skipped_when_device_returns_non_json_stdout():
-    """exec_shell_new 在 local 落基类返非 JSON 回显串→json.loads 失败软返 False，
-    迁移链不阻塞、device 完全可注入可控（坐实唯一 🟠 为评估误判）。"""
+def test_mcp_mcporter_content_is_written(tmp_path: Path):
+    """Valid mcporter content is copied without a separate source lookup."""
     service = BotBuildService.__new__(BotBuildService)
     service._device_service = MagicMock()
     service._device_service.exec_shell_new.return_value = MagicMock(
-        stdout="Command executed on dev-1: cat mcporter.json", exit_code=0,
+        stdout="[1, 2, 3]",
+        exit_code=0,
     )
-    ok = service._generate_mcp_config(device_id="dev-1", target_dir="/tmp/x")
+    target_dir = tmp_path / "target"
+    ok = service._generate_mcp_config(device_id="dev-1", target_dir=target_dir)
+
+    assert ok is True
+    assert json.loads(
+        (target_dir / "workspace" / "config" / "mcporter.json").read_text(
+            encoding="utf-8",
+        )
+    ) == [1, 2, 3]
+    service._device_service.exec_shell_new.assert_called_once_with(
+        device_id="dev-1",
+        shell_cmd="cat /home/admin/.mcporter/mcporter.json",
+    )
+
+
+@pytest.mark.unit
+def test_mcp_fallback_reads_pretty_name_when_mcporter_is_missing(tmp_path: Path):
+    """A missing read-only source file uses the container OS description."""
+    service = BotBuildService.__new__(BotBuildService)
+    service._device_service = MagicMock()
+
+    def fake_exec_shell_new(*, device_id: str, shell_cmd: str):
+        results = {
+            "cat /home/admin/.mcporter/mcporter.json": MagicMock(
+                stdout="",
+                stderr="cat: ...: No such file or directory",
+                exit_code=1,
+            ),
+            "cat /etc/os-release": MagicMock(
+                stdout='PRETTY_NAME="Arca Linux Test"\nID=arca',
+                stderr="",
+                exit_code=0,
+            ),
+        }
+        return results[shell_cmd]
+
+    service._device_service.exec_shell_new.side_effect = fake_exec_shell_new
+    target_dir = tmp_path / "target"
+    ok = service._generate_mcp_config(device_id="dev-1", target_dir=target_dir)
+
+    assert ok is True
+    assert json.loads(
+        (target_dir / "workspace" / "config" / "mcporter.json").read_text(
+            encoding="utf-8",
+        )
+    ) == {"context": "Arca Linux Test"}
+    assert service._device_service.exec_shell_new.call_count == 2
+    service._device_service.exec_shell_new.assert_has_calls([
+        call(
+            device_id="dev-1",
+            shell_cmd="cat /home/admin/.mcporter/mcporter.json",
+        ),
+        call(device_id="dev-1", shell_cmd="cat /etc/os-release"),
+    ])
+
+
+@pytest.mark.unit
+def test_mcp_fallback_is_safe_when_source_context_is_unavailable(tmp_path: Path):
+    """The migration degrades to false instead of creating an empty config."""
+    service = BotBuildService.__new__(BotBuildService)
+    service._device_service = MagicMock()
+    service._device_service.exec_shell_new.side_effect = [
+        MagicMock(stdout="", stderr="missing file", exit_code=1),
+        MagicMock(stdout="ID=arca", stderr="", exit_code=0),
+    ]
+    target_dir = tmp_path / "target"
+    ok = service._generate_mcp_config(device_id="dev-1", target_dir=target_dir)
+
     assert ok is False
-    service._device_service.exec_shell_new.assert_called()
+    assert not list(target_dir.rglob("mcporter.json"))
