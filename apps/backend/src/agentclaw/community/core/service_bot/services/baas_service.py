@@ -1168,10 +1168,9 @@ class BaasService:  # pragma: no cover
             device_count=device_count,
             ttl_in_minutes=ttl_in_minutes,
         )
-        return self._post_teclaw(
+        return self._post_teclaw_with_retry(
             path=f"/api/v1/bots/{bot_uuid}/update",
             payload=payload,
-            action="update_teclaw_bot",
         )
 
     def _build_teclaw_payload(
@@ -1218,6 +1217,24 @@ class BaasService:  # pragma: no cover
             payload["description"] = description
         return payload
 
+    @staticmethod
+    def _request_error_from_tracing_wrapper(exc: BaseException) -> httpx.RequestError | None:
+        """Unwrap an httpx request error hidden by the ant_baselib send hook.
+
+        ``ant_baselib.tracer.patches.httpx_client`` re-raises every httpx transport
+        failure as a plain ``HttpxCallingException``; the original ``RequestError``
+        is preserved on ``__cause__`` or ``__context__``.  Matching on the message
+        alone therefore misses the concrete transport type.
+        """
+        current: BaseException | None = exc
+        visited: set[int] = set()
+        while current is not None and id(current) not in visited:
+            if isinstance(current, httpx.RequestError):
+                return current
+            visited.add(id(current))
+            current = current.__cause__ or current.__context__
+        return None
+
     def _post_teclaw(
         self, *, path: str, payload: Dict[str, Any], action: str
     ) -> Dict[str, Any]:
@@ -1241,8 +1258,38 @@ class BaasService:  # pragma: no cover
             raise
         except Exception as e:
             logger.error("[BaasService.%s] failed: %s", action, e)
-            raise BaasServiceError(f"{action} failed: {e}")
+            raise BaasServiceError(f"{action} failed: {e}") from e
 
+    def _post_teclaw_with_retry(
+        self, path: str, payload: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Run an idempotent TeClaw update POST with one transport retry.
+
+        ``request_id`` is part of the BaaS UpdateBot contract, so re-submitting
+        the same payload is safe after a transport-level failure (and not after
+        a definitive HTTP/business failure).  We still narrowly retry only the
+        ant_baselib wrapper's ``httpx.RequestError`` causes here; any wrapper
+        mask hides the exact network error but not the response/status level.
+        """
+        try:
+            return self._post_teclaw(
+                path=path, payload=payload, action="update_teclaw_bot"
+            )
+        except BaasServiceError as first:
+            cause = self._request_error_from_tracing_wrapper(first)
+            response = getattr(first, "response", None)
+            if response is not None or cause is None:
+                raise
+
+            logger.warning(
+                "[BaasService.update_teclaw_bot] transport failure before each retry: "
+                "first=%r cause=%r",
+                first,
+                cause,
+            )
+            return self._post_teclaw(
+                path=path, payload=payload, action="update_teclaw_bot"
+            )
     def destroy_bot(
         self,
         bot_uuid: str,
