@@ -652,7 +652,7 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
             ['FRESH_FIXTURE_R5G'])
         self.assertEqual(
             rows['story_cli_operator_manages_group_context']['notes'],
-            ['ROSTER_LAG'])
+            ['ROSTER_LAG', 'GROUP_CONTEXT_DENSITY_9_OBLIGATIONS_20261031'])
         self.assertEqual(rows['test_ep_ensure_bot'], {
             'mode': 'EDGE_OBLIGATION_IN_FAMILY',
             'preprod_verdict': 'NOT_APPLICABLE',

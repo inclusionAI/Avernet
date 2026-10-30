@@ -146,7 +146,8 @@
         "preprod_verdict": "PASS",
         "gates": [],
         "notes": [
-          "ROSTER_LAG"
+          "ROSTER_LAG",
+          "GROUP_CONTEXT_DENSITY_9_OBLIGATIONS_20261031"
         ]
       }
     },
