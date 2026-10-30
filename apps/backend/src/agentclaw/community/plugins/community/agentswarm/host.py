@@ -139,6 +139,10 @@ _AUTHORIZATION_INCOMPLETE_PREFIX = "authorization did not complete:"
 #: Stands in for the creation job when its read failed. Distinct from ``None``,
 #: which is the only answer that means "submission never landed a row".
 _UNREADABLE_JOB = object()
+#: Creation-job outcomes that prove nothing was written to the bot's store.
+#: A creation that ends these ways never reached the phase that writes managed
+#: files, so there is no prefix to purge — only a teardown that would list one.
+_COMMITTED_NOTHING_STATUSES = frozenset({TaskStatus.FAILED, TaskStatus.TIMED_OUT})
 
 @dataclass(frozen=True)
 class BotAuthorizationDescriptor:
@@ -595,6 +599,17 @@ class AvernetBotPlatform(ChatLegMixin, BotPlatform):
                 except Exception:  # noqa: BLE001 — unknown is not "nothing"
                     job = _UNREADABLE_JOB
                 if job is None:
+                    return True
+                # A creation job that ended without a bot never ran a phase
+                # that writes managed files: the pre-container phase only runs
+                # for a creation that still might land, and an expired or
+                # declined authorization ends before it. The managed-files
+                # purge would therefore list a prefix that cannot exist — and
+                # this adapter addresses the bot id deterministically from
+                # (run, agent, attempt), so teardown asks again on every
+                # slice even though no bot was ever created. Only the failed
+                # terminal states prove that; a succeeded job's files are real.
+                if getattr(job, "status", None) in _COMMITTED_NOTHING_STATUSES:
                     return True
                 # Pending (or never landed a bot): undo what submission wrote.
                 return bool(self._manifest_seam.discard(
