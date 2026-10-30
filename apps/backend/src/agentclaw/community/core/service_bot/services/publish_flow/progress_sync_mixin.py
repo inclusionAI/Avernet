@@ -18,6 +18,7 @@ from agentclaw.community.core.service_bot.repository.models import (
     PublishOperationKind,
     PublishStatus,
 )
+from agentclaw.community.core.service_bot.baas_service_errors import BaasTransientServiceError
 from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
     PublishNotFoundError,
@@ -422,6 +423,16 @@ class ProgressSyncMixin:
         try:
             progress = self.get_baas_publish_progress(
                 baas_publish_id=baas_publish_id,
+            )
+        except BaasTransientServiceError as e:
+            logger.warning(
+                f"[PublishFlowService.advance_publish_progress] "
+                f"Transient BaaS progress failure: publish_id={publish_id}, error={e}"
+            )
+            return PublishFlowResult(
+                publish_id=publish_id,
+                status=current_status,
+                message=f"Failed to get BaaS publish progress: {str(e)}",
             )
         except Exception as e:
             logger.error(f"[PublishFlowService.advance_publish_progress] Failed to get progress: {e}")
