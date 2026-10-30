@@ -164,3 +164,63 @@ The primitive does not enable caching in TC or change the HTTP contract. A host
 that wraps retrieval owns complete cache keys, trusted scope separation, data
 revision invalidation, successful-result admission and final eligibility checks.
 Hosts must keep authentication and overload protection outside cache shortcuts.
+
+## Multiple retrieval documents per source (opt-in)
+
+A retrieval point may carry `source_id`, `search_text`, `rerank_text` and explicit
+filter fields. `search_text` feeds keyword indexing; its vector is supplied by
+the host. Reranking prefers `rerank_text`, then `search_text`, then legacy
+`content`. Empty rerank text falls back to recall text. Full business objects
+are not required in the vector payload. The old `content`/`name` path remains
+supported for TC and existing providers.
+
+`HybridRetrievalService(group_by_source=True)` requires every returned document
+to have a nonempty `source_id`. Within each recall branch it keeps the highest
+scoring document per source (ties by document ID), then fuses source IDs and
+reranks each source once. The vector representative supplies rerank text if a
+source appears in both branches; otherwise the keyword representative is used.
+There is no cross-scale comparison of raw keyword and vector scores. The host
+may batch-enrich final source IDs with business display metadata.
+
+`recall_limit` bounds documents fetched per branch, independently of the fused
+source `candidate_limit`; it defaults to the latter and must be at least as
+large. This is bounded over-recall, not a guarantee of filling the requested
+number of distinct sources. There is no iterative refill loop.
+
+Optional `vector_min_score` and `keyword_min_score` default to `None` (disabled).
+They use higher-is-better finite raw scores and are applied after retrieval,
+before grouping/fusion. They are independent of reranker scores and RRF scores;
+no probability interpretation or universal numerical default is defined. A
+successful branch with all candidates filtered is a valid empty result. These
+options are host configuration, not untrusted HTTP request fields.
+
+In grouped mode trusted allowed IDs refer to sources. The host index adapter
+must translate this into a `source_id` prefilter, not point-ID filtering. The
+service verifies returned source scope before thresholding/grouping. No implicit
+list of all sources is constructed. TC keeps document/item-ID semantics because
+it does not opt into grouping.
+
+`SqlIndexDocuments.load_many(ids)` provides a bounded batch read (up to 256 IDs),
+scoped by environment and index key. Source manifests, leases, atomic group
+publication, retired-document deletion and final source checks belong to the
+business host. No Agent Card semantics are added to the public SQL schema.
+
+Durable documents also expose a business-neutral `source_id` (legacy fallback:
+document ID). The SQL writer projects it from the point payload into an indexed
+column; consumers must not maintain the two independently. `load_by_source`
+reads a complete source group in one SQL statement, including tombstones, scoped
+by environment and index key. The host still validates its current manifest.
+
+`iter_version_batches` and `iter_change_versions_since` yield bounded pages of
+`DocumentVersion(id, source_id, version, is_deleted, modified_at)` without reading
+vectors or payloads. The latter includes the starting timestamp, sorts by
+modification time and ID, and captures a timestamp upper bound. Consumers compare
+versions before loading changed source groups and advance their checkpoint only
+after applying the whole page. A timestamp cursor does not order transaction
+commits; a lower-frequency full version check must repair late commits. These
+iterators retain deletion records; physically removing them is not supported
+by incremental replay. Original full-record iterators remain available.
+
+Sync frequency, per-instance staggering, readiness and source preparation remain
+host responsibilities. SQLite upgrades its local schema transactionally;
+managed databases require explicit migration before this adapter is deployed.
