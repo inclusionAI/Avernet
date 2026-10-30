@@ -390,6 +390,112 @@ describe('useCollaborationSquare Bot Search', () => {
     unmount();
   });
 
+  test('Bot 分享深链目标不在第一页时自动加载更多并定位高亮', async () => {
+    // 重名分享名称命中多页：第一页 24 条不含目标，深链继续加载第二页并命中定位，不误判失效
+    const target = { ...resultBot('bot:target'), name: '项目助手' };
+    const firstPageOthers = Array.from({ length: 24 }, (_, index) => resultBot(`bot:dup-${index}`));
+    const listPending: PendingRequest[] = [];
+    jest.spyOn(collaborationSquareBotService, 'listBotPage').mockImplementation(
+      (query, context, signal) =>
+        new Promise<{ items: PublicBot[]; total: number }>((resolve) => {
+          listPending.push({ query, context, signal, resolve });
+        }),
+    );
+    window.history.replaceState(
+      {},
+      '',
+      '/collaboration-square/bots?resource=bot&id=bot%3Atarget&name=%E9%A1%B9%E7%9B%AE%E5%8A%A9%E6%89%8B',
+    );
+
+    const { unmount } = renderHook(() => useCollaborationSquare('bot'));
+    await act(async () => {
+      jest.advanceTimersByTime(0);
+      await Promise.resolve();
+    });
+    // 初始列表加载完成 → 深链对齐名称搜索
+    await act(async () => {
+      listPending[0].resolve(botPage([]));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      jest.advanceTimersByTime(1000);
+      await Promise.resolve();
+    });
+    expect(listPending).toHaveLength(2);
+    expect(listPending[1].query).toEqual({ search: '项目助手', page: 1, pageSize: 24, ...viewerFields });
+    // 名称搜索第一页 24 条重名结果、不含目标 → 深链自动请求第二页
+    await act(async () => {
+      listPending[1].resolve(botPage(firstPageOthers, 25));
+      await Promise.resolve();
+      jest.advanceTimersByTime(0);
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(listPending).toHaveLength(3));
+    expect(listPending[2].query).toEqual({ search: '项目助手', page: 2, pageSize: 24, ...viewerFields });
+    // 第二页加载完成并含目标 → 列表内定位高亮，不清深链参数
+    await act(async () => {
+      listPending[2].resolve(botPage([target], 25));
+      await Promise.resolve();
+      jest.advanceTimersByTime(0);
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(useSquareHighlightStore.getState().highlightBotId).toBe('bot:target'));
+    expect(mockedNotifyError).not.toHaveBeenCalled();
+    expect(window.location.search).toContain('id=bot%3Atarget');
+    unmount();
+  });
+
+  test('Bot 分享深链分页耗尽仍未命中时才按目标失效处理', async () => {
+    // 重名结果两页共 25 条都不含目标：第一页缺失不提前判定，翻完所有分页后才按目标失效
+    const others = Array.from({ length: 25 }, (_, index) => resultBot(`bot:dup-${index}`));
+    const listPending: PendingRequest[] = [];
+    jest.spyOn(collaborationSquareBotService, 'listBotPage').mockImplementation(
+      (query, context, signal) =>
+        new Promise<{ items: PublicBot[]; total: number }>((resolve) => {
+          listPending.push({ query, context, signal, resolve });
+        }),
+    );
+    window.history.replaceState(
+      {},
+      '',
+      '/collaboration-square/bots?resource=bot&id=bot%3Atarget&name=%E9%A1%B9%E7%9B%AE%E5%8A%A9%E6%89%8B',
+    );
+
+    const { unmount } = renderHook(() => useCollaborationSquare('bot'));
+    await act(async () => {
+      jest.advanceTimersByTime(0);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      listPending[0].resolve(botPage([]));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      jest.advanceTimersByTime(1000);
+      await Promise.resolve();
+    });
+    // 第一页 24 条不含目标但分页未耗尽：不按目标失效，继续加载第二页
+    await act(async () => {
+      listPending[1].resolve(botPage(others.slice(0, 24), 25));
+      await Promise.resolve();
+      jest.advanceTimersByTime(0);
+      await Promise.resolve();
+    });
+    expect(mockedNotifyError).not.toHaveBeenCalled();
+    await waitFor(() => expect(listPending).toHaveLength(3));
+    // 第二页为最后一页：加载耗尽后仍未命中才按目标失效
+    await act(async () => {
+      listPending[2].resolve(botPage(others.slice(24), 25));
+      await Promise.resolve();
+      jest.advanceTimersByTime(0);
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(mockedNotifyError).toHaveBeenCalledWith('内容已取消公开或对当前账号不可见'));
+    expect(window.location.search).toBe('');
+    expect(useSquareHighlightStore.getState().highlightBotId).toBeNull();
+    unmount();
+  });
+
   test('身份中途就绪（冷加载失败后恢复）后列表按分享名称重载并定位高亮成功', async () => {
     // 阶段 1：身份不可用（对应线上冷加载「当前工作身份不可用」），列表被门控不加载，深链不做判定
     mockedUseHumanIdentity.mockReturnValue({ identity: null, status: 'error', error: '身份未加载' });
