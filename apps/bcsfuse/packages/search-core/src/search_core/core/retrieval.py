@@ -43,9 +43,25 @@ class HybridRetrievalService:
         execution: dict[str, CallExecutor] | None = None,
         keyword_enabled: bool = True,
         vector_enabled: bool = True,
+        group_by_source: bool = False,
+        recall_limit: int | None = None,
+        vector_min_score: float | None = None,
+        keyword_min_score: float | None = None,
     ):
         if not keyword_enabled and not vector_enabled:
             raise ValueError("at least one recall branch must be enabled")
+        for threshold in (vector_min_score, keyword_min_score):
+            if threshold is not None and (
+                isinstance(threshold, bool)
+                or not isinstance(threshold, (int, float))
+                or not math.isfinite(threshold)
+            ):
+                raise ValueError("minimum scores must be finite numbers or None")
+        self._thresholds = (vector_min_score, keyword_min_score)
+        self._group_by_source = group_by_source
+        self._recall_limit = candidate_limit if recall_limit is None else recall_limit
+        if type(self._recall_limit) is not int or self._recall_limit < candidate_limit:
+            raise ValueError("recall_limit must be at least candidate_limit")
         self._keyword_enabled = keyword_enabled
         self._vector_enabled = vector_enabled
         if candidate_limit <= 0:
@@ -88,7 +104,7 @@ class HybridRetrievalService:
                 "vector",
                 self._index.vector_search,
                 vector,
-                self._candidate_limit,
+                self._recall_limit,
                 request.filters,
                 request.allowed_ids,
             )
@@ -100,7 +116,7 @@ class HybridRetrievalService:
                 "keyword",
                 self._index.keyword_search,
                 request.query,
-                self._candidate_limit,
+                self._recall_limit,
                 request.filters,
                 request.allowed_ids,
             )
@@ -141,9 +157,22 @@ class HybridRetrievalService:
                 available = True
                 hits = tuple(result)
                 if request.allowed_ids is not None and any(
-                    h.id not in request.allowed_ids for h in hits
+                    self._identity(h) not in request.allowed_ids for h in hits
                 ):
                     raise SearchUnavailable("index returned an unauthorized candidate")
+                threshold = self._thresholds[position]
+                if threshold is not None:
+                    hits = tuple(
+                        h
+                        for h in hits
+                        if math.isfinite(h.score) and h.score >= threshold
+                    )
+                if self._group_by_source:
+                    unique = {}
+                    for h in sorted(hits, key=lambda h: (-h.score, h.id)):
+                        source = self._identity(h)
+                        unique.setdefault(source, h.model_copy(update={"id": source}))
+                    hits = tuple(unique.values())
                 branches.append(hits)
         return RecallResult(
             branches[0],
@@ -152,6 +181,14 @@ class HybridRetrievalService:
             tuple(dict.fromkeys(reasons)),
             available,
         )
+
+    def _identity(self, hit):
+        if not self._group_by_source:
+            return hit.id
+        source = hit.payload.get("source_id")
+        if not isinstance(source, str) or not source:
+            raise SearchUnavailable("document source identity missing")
+        return source
 
     async def rank(
         self, request: RetrievalRequest, recall: RecallResult
@@ -174,7 +211,12 @@ class HybridRetrievalService:
                     [
                         {
                             "id": r.item_id,
-                            "text": str(hits[r.item_id].payload.get("content") or ""),
+                            "text": str(
+                                hits[r.item_id].payload.get("rerank_text")
+                                or hits[r.item_id].payload.get("search_text")
+                                or hits[r.item_id].payload.get("content")
+                                or ""
+                            ),
                         }
                         for r in ranking
                     ],

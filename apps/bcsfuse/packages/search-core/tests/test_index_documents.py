@@ -50,3 +50,64 @@ def test_environment_and_model_generation_isolate_every_read_and_change(tmp_path
     assert list(next_model.iter_versions(10)) == []
     with pytest.raises(ValueError):
         sqlite_index_documents(path, environment="", index_key="x")
+
+
+def test_lightweight_changes_and_source_lookup_are_scoped(tmp_path):
+    path = str(tmp_path / "source.db")
+    store = sqlite_index_documents(path, environment="local", index_key="one")
+    with sqlite3.connect(path) as conn:
+        for key in ("a", "b"):
+            store.save_in_transaction(
+                conn.cursor(),
+                IndexDocument(
+                    VectorPoint(id=key, vector=[1.0], payload={"source_id": "source"}),
+                    1,
+                    is_deleted=key == "b",
+                ),
+            )
+    pages = list(store.iter_change_versions_since(0, 1))
+    assert len(pages) == 2
+    assert {v.id for page in pages for v in page} == {"a", "b"}
+    assert all(
+        v.source_id == "source" and not hasattr(v, "point")
+        for page in pages
+        for v in page
+    )
+    assert {d.id for d in store.load_by_source("source")} == {"a", "b"}
+    other = sqlite_index_documents(path, environment="prod", index_key="one")
+    assert other.load_by_source("source") == []
+    assert list(other.iter_version_batches(10)) == []
+
+
+def test_local_schema_upgrade_preserves_legacy_source_ids(tmp_path):
+    path = str(tmp_path / "old.db")
+    with sqlite3.connect(path) as conn:
+        conn.execute("""CREATE TABLE search_index_documents (
+            environment TEXT,index_key TEXT,id TEXT,vector TEXT,payload TEXT,extra TEXT,
+            source_revision INTEGER,version INTEGER,is_deleted INTEGER,gmt_modify REAL,
+            PRIMARY KEY(environment,index_key,id))""")
+        conn.execute("""INSERT INTO search_index_documents VALUES
+            ('local','one','doc','[1]','{"source_id":"agent"}','{}',1,1,0,100)""")
+    store = sqlite_index_documents(path, environment="local", index_key="one")
+    assert [d.id for d in store.load_by_source("agent")] == ["doc"]
+    assert next(iter(store.iter_version_batches(10)))[0].source_id == "agent"
+
+
+def test_local_migration_failure_rolls_back_schema_for_safe_retry(tmp_path):
+    path = str(tmp_path / "old.db")
+    with sqlite3.connect(path) as conn:
+        conn.execute("""CREATE TABLE search_index_documents (
+            environment TEXT,index_key TEXT,id TEXT,vector TEXT,payload TEXT,extra TEXT,
+            source_revision INTEGER,version INTEGER,is_deleted INTEGER,gmt_modify REAL,
+            PRIMARY KEY(environment,index_key,id))""")
+        conn.execute("""INSERT INTO search_index_documents VALUES
+            ('local','one','doc','[1]','broken-json','{}',1,1,0,100)""")
+    with pytest.raises(ValueError):
+        sqlite_index_documents(path, environment="local", index_key="one")
+    with sqlite3.connect(path) as conn:
+        assert "source_id" not in {
+            r[1] for r in conn.execute("PRAGMA table_info(search_index_documents)")
+        }
+        conn.execute("UPDATE search_index_documents SET payload='{}'")
+    store = sqlite_index_documents(path, environment="local", index_key="one")
+    assert store.load_by_source("doc")[0].id == "doc"
