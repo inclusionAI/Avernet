@@ -10,7 +10,7 @@ currently uses the default query-based ranking; no personalization is implied.
 | Request field | Contract |
 | --- | --- |
 | `query` | Required nonblank string, at most 4096 characters; outer whitespace is removed |
-| `limit` | Integer 1–20; default 5 |
+| `limit` | Strict positive integer; default 5. The default HTTP router retains the original 1–20 bound. Hosts may select `SearchBody` to let their application clamp to a runtime maximum. |
 | `filters` | Field to string-array map; AND between fields, OR within each array; an empty array matches nothing |
 | `scene` | Default `default`; each application must reject unsupported scenes |
 | `extensions` | Business options validated by the application, never authority or provider configuration |
@@ -21,6 +21,15 @@ reranking for this request; true inherits the injected TC service's configured
 model and does not enable a model that the host has disabled. Agent Search's
 composition root supplies its filter allowlist; no extensions are enabled yet.
 Unknown fields/types are invalid. Unsupported business options return 400.
+
+`create_search_router(request_model=SearchBody)` delegates the upper bound to
+the application; the default `BoundedSearchBody` retains HTTP 422 for values
+above 20, preserving TC's existing opt-in v2 contract. Agent Search selects
+`SearchBody` and clamps before retrieval and cache lookup using its request's
+configuration snapshot. A larger positive value is not an invalid argument in
+that application. Zero, negative, boolean, string, fractional and null HTTP
+values remain invalid. TR hosts reusing `SearchBody` must call the same
+application normalization; the transport itself does not read DRM.
 
 The authenticated caller and allowed IDs come from a required host callback,
 never from the body. The callback accepts `fastapi.Request`, returns
@@ -35,6 +44,80 @@ comparable across sources. TC exposes complete Profile keys as IDs and returns
 `worker_id` and `profile_key` in extensions; its name is empty until a reliable
 name source is supplied. A valid empty result is HTTP 200 with an empty list.
 Search failures must not be converted to an empty success by new providers.
+
+Items produced by the hybrid retrieval pipeline additionally include optional
+`scoreDetails`. Existing `summary`, numeric `score`, `score_source` and
+`extensions` retain their meanings and types. Each present stage has a finite
+`value` and a one-based ordinal `rank`:
+
+```json
+{
+  "score": 0.86,
+  "score_source": "reranker",
+  "scoreDetails": {
+    "keyword": {"value": 5.3, "rank": 2},
+    "vector": {"value": 0.78, "rank": 1},
+    "rrf": {"value": 0.03252247488101534, "rank": 1},
+    "reranker": {"value": 0.86, "rank": 1}
+  }
+}
+```
+
+The numbers are illustrative. Keyword/vector values are the original index
+scores, not normalized probabilities. Their ranks refer to the candidate lists
+actually passed into RRF, after configured thresholds and optional source
+grouping, not global ranks across the index. Grouping retains the highest-scoring
+Doc per source in each branch; different branches may select different Docs.
+RRF uses these ranks, not a sum of raw scores. Its rank is before reranking;
+reranker rank follows the validated provider output order. Final filtering can
+leave gaps in these stage ranks. Evidence never changes the existing result order.
+
+Disabled, failed, or nonmatching stages are omitted in HTTP, not represented as
+zero; zero is a valid score. An unavailable/non-finite raw score is not fabricated.
+Missing evidence alone does not identify a failure: use request `status`,
+`reasons` and effective policy as well. Rerank failure preserves RRF and recall
+details without a reranker entry. Cache hits retain the original result's scores;
+details are not proof of fresh model execution. Legacy TC adapters and direct
+business-policy results without evidence omit `scoreDetails` entirely.
+No additional index/model call is made to populate this object.
+
+Hosts may additionally return `effective`, a small description of the applied
+request parameters:
+
+```json
+{
+  "items": [],
+  "status": "degraded",
+  "reasons": ["vector_disabled", "reranker_disabled"],
+  "effective": {
+    "limit": 20,
+    "retrieval": {
+      "keyword_enabled": true,
+      "vector_enabled": false,
+      "rerank_enabled": false
+    }
+  }
+}
+```
+
+`effective.limit` is the normalized maximum result count, not the number of
+matches. Clamping alone does not cause degradation. `effective.retrieval`
+describes the switches enabled for this request; it is **not an execution
+trace**. A cache hit can skip providers, and an enabled provider can fail.
+`status` and `reasons` describe the result: `ok` means no reported degradation,
+not proof that every provider ran; `degraded` still returns usable results
+(possibly empty) with reasons such as `embedding_unavailable`,
+`reranker_unavailable`, or intentionally disabled branches. HTTP errors retain
+the existing error contract below, rather than masquerading as degraded success.
+
+The business application supplies these values from the same configuration
+snapshot used to execute the request, after retrieval/cache lookup. It must not
+echo an unclamped request or reread configuration after a DRM update. Hosts that
+cannot determine provider switches omit `retrieval`; existing TC services omit
+`effective` entirely, preserving their response. No query text, authorization
+scope, internal provider configuration or credentials are echoed in this object.
+Non-HTTP adapters must explicitly map it into their versioned response contract;
+adding it to the Python result does not update a generated RPC contract.
 
 | Failure | HTTP status |
 | --- | --- |
