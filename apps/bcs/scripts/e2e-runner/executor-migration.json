@@ -116,7 +116,9 @@
         "mode": "DUAL",
         "preprod_verdict": "BLOCKED_INVENTORIED",
         "gates": [],
-        "notes": []
+        "notes": [
+          "COLLAB_TEAM_DENSITY_22_OBLIGATIONS_20261031"
+        ]
       }
     },
     {

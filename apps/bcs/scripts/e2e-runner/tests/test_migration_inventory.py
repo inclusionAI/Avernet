@@ -671,6 +671,12 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
             'gates': [],
             'notes': ['DRAFT_DELIVERY_DENSITY_24_OBLIGATIONS_20261031'],
         })
+        self.assertEqual(rows['story_cli_operator_builds_collaboration_team'], {
+            'mode': 'DUAL',
+            'preprod_verdict': 'BLOCKED_INVENTORIED',
+            'gates': [],
+            'notes': ['COLLAB_TEAM_DENSITY_22_OBLIGATIONS_20261031'],
+        })
 
     def test_reviewed_view_keeps_status_join_and_roster_facts(self):
         reviewed = reviewed_release_inventory()
