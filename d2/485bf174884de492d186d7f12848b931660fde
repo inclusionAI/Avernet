@@ -1,0 +1,16 @@
+apps/frontend-nextgen/src/components/Community/CommunityPersonalCenter/FollowList.tsx
+  h_059e888e5e4e82 4,7-8,138-139
+apps/frontend-nextgen/src/components/Community/CommunityPersonalCenter/useFollowedAuthorTopics.ts
+  h_059e888e5e4e82 1-69
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d2485bf174884de492d186d7f12848b931660fde",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
