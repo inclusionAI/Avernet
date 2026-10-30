@@ -55,11 +55,29 @@ its normal ephemeral registration/runtime credentials; they remain in memory
 and the retained product DB, never in source or published receipts. Memory
 reference clearing is not secure erasure.
 
-Preprod always records `NOT_RUN`, `BLOCKED-at-entry`, reason class
-`PREPROD_PROVIDER_PUBLISHES_CREDENTIALS_UNAVAILABLE`, zero network requests and
-`grants_release_credit=false`. The cookie-expiry/USER_NOT_LOGIN context is
-operator-provided, not a fresh probe result; `observed_status` stays null. Even
-an environment containing credential values cannot unlock this leg.
+Preprod fail-closes honestly in three disclosed stages instead of statically
+refusing. A sealed v1 profile carries no gateway origin, auth refs or driver
+Bot, so no probe can be constructed: it blocks at entry with reason class
+`PREPROD_PROVIDER_PUBLISHES_PROFILE_SEALED_V1`, zero network requests and its
+v2 upgrade path disclosed. A v2 gateway profile first admits every declared
+credential reference by NAME from the process environment (presence plus
+bounded ASCII shape; values are never stored or echoed): a gap records
+`PREPROD_PROVIDER_CREDENTIALS_REQUIRED` with verdict `NOT_RUN` and zero network
+requests. With the named references loaded, the leg runs one live read-only
+admission probe through the shared `ReadClient` (`environment.read`,
+`identity.read`, driver Bot `bot.read`): a failure records `BLOCKED` with
+reason class `PREPROD_PROVIDER_PUBLISHES_ADMISSION_PROBE_FAILED` and a
+sanitized `error_detail` plus the sanitized evidence projections issued so far.
+A passed probe still cannot execute the journey: no preprod
+provider-admin write journey child is published in this wave, so the leg
+fail-closes at the seam with reason class
+`PREPROD_PROVIDER_PUBLISHES_JOURNEY_SEAM_PENDING`, all 98 obligations `NOT_RUN`
+and the named gaps `PREPROD_PROVIDER_ADMIN_WRITE_FACE_ABSENT`,
+`PREPROD_PROVIDER_REGISTRATION_PRECONDITIONS_PENDING` and
+`PREPROD_PROVIDER_JOURNEY_CHILD_UNPUBLISHED` disclosed. Every branch keeps
+`grants_release_credit=false`, `remote_validation=NOT_RUN` and
+`resource_disposition=NO_REMOTE_RESOURCES_CREATED`; `observed_status` stays
+null unless a probe read answered, and then it is the probe's own HTTP status.
 
 ## Disposition and scope of PASS
 

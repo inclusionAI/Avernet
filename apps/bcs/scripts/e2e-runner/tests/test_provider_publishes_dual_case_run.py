@@ -95,22 +95,35 @@ class DualTests(unittest.TestCase):
             dual.dual_provider_publishes_case_run(**self.kw)
         self.assertFalse(self.state.exists())
 
-    def test_preprod_zero_network_even_when_environment_has_credentials(self):
+    def test_preprod_sealed_v1_profile_blocks_honestly_without_network(self):
+        # The static "credentials unavailable" refusal is gone: a sealed v1 profile
+        # carries no gateway material, so it blocks at entry with its v2 upgrade
+        # path disclosed and provably zero network activity.
         self.profile.write_text(json.dumps(dual.profile_for('preprod')))
         with patch.object(dual, 'validate_binary', side_effect=lambda p, *_: p), \
              patch('socket.socket', side_effect=AssertionError('network forbidden')), \
              patch.object(dual, 'local_provider_publishes_run', side_effect=AssertionError('local forbidden')), \
+             patch.object(dual, 'ReadClient', side_effect=AssertionError('probe must not be built for a sealed profile')), \
              patch.dict('os.environ', {'BCS_E2E_HUMAN_COOKIE': 'not-a-real-credential'}):
             result = dual.dual_provider_publishes_case_run(**self.kw)
         self.assertEqual(result['status'], 'BLOCKED')
-        self.assertEqual(result['reason_class'], dual.PREPROD_REASON)
+        self.assertEqual(result['reason_class'], dual.PREPROD_PROFILE_SEALED_V1)
         self.assertEqual(result['preprod_blocker']['network_requests'], 0)
         self.assertIsNone(result['preprod_blocker']['observed_status'])
+        self.assertEqual(result['preprod_blocker']['error_detail'], None)
         self.assertEqual(result['remote_validation'], 'NOT_RUN')
         self.assertEqual(result['remote_entry_status'], 'BLOCKED-at-entry')
         self.assertEqual(result['obligation_summary']['not_run'], 98)
         self.assertFalse(result['grants_release_credit'])
-        self.assertNotIn('not-a-real-credential', (self.state/'provider-publishes-dual-run.json').read_text())
+        sealed = result['preprod_admission']['named_gaps']['PREPROD_PROFILE_SEALED_V1_NO_ADMISSION_MATERIAL']
+        self.assertIn('dual-provider-publishes-profile-v2', sealed)
+        self.assertIn('blocked-no-network', sealed)
+        self.assertEqual(result['preprod_admission']['profile_schema_version'], 1)
+        report_text = (self.state/'provider-publishes-dual-run.json').read_text()
+        self.assertNotIn('PREPROD_PROVIDER_PUBLISHES_CREDENTIALS_UNAVAILABLE', report_text)
+        self.assertNotIn('cookie expired', report_text)
+        self.assertNotIn('USER_NOT_LOGIN', report_text)
+        self.assertNotIn('not-a-real-credential', report_text)
 
     def test_case_level_pass_cannot_fabricate_field_passes(self):
         local = {'status': 'PASS', 'case': {'assertions': []}}
