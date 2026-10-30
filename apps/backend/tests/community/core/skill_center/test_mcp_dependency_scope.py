@@ -61,6 +61,25 @@ class TestStoredShapes:
         ) == ("mcp.center",)
 
 
+class TestToolCodes:
+    """Historical Skill Center rows can carry tool-shaped codes."""
+
+    def test_tool_codes_do_not_stall_the_server_projection(self):
+        assert mcp_dependency_codes(
+            ["mcp.valid", "mcp__feature-search__searchProByFeatureName"]
+        ) == ("mcp.valid",)
+
+    def test_tool_dicts_are_skipped_without_rejecting_the_row(self):
+        assert mcp_dependency_codes(
+            [{"server_code": "mcp.a"}, {"code": "mcp__feature-search__tool"}]
+        ) == ("mcp.a",)
+
+    def test_tool_codes_will_not_cause_server_code_to_appear(self):
+        assert mcp_dependency_codes(
+            [{"code": "mcp__feature-search__tool"}]
+        ) == ()
+
+
 class TestUnrecognisedShapes:
     """A dropped dependency is an MCP the Skill needs and never receives."""
 
