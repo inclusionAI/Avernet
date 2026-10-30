@@ -73,6 +73,7 @@ from agentclaw.community.core.bot_collaborator.protocols import (
     resolve_operable_permission_level,
 )
 from agentclaw.community.core.bot_management.addressing import BotAddressResolver
+from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
 from agentclaw.community.core.repository.protocols.bot import (
     BotCollabLogRepositoryProtocol,
     BotRepository,
@@ -340,6 +341,12 @@ def _level(
             .resolve(bot_id=bot_id, legacy_owner_id=owner_id)
             .bot
         )
+    except BotAddressNotFoundError:
+        logger.warning(
+            "[bot_access] no such bot under addressed owner: bot=%s; refusing",
+            for_log(bot_id),
+        )
+        return PermissionLevel.NONE
     except Exception:
         logger.exception(
             "[bot_access] bot lookup failed for bot=%s; refusing", for_log(bot_id)
