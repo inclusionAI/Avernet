@@ -39,6 +39,13 @@ import re
 import sys
 import urllib.parse
 
+# Script-mode child: make the shared bcs_e2e package importable so this
+# live leg reuses the fail-closed TLS trust context (macOS framework
+# Python ships no default CA bundle for bare HTTPSConnection).
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from bcs_e2e.transport import tls_context  # noqa: E402
+
 # Frozen literals; the dual contract pins this surface beside the flat
 # owned-local contract (local 23 checks, bearer 20 checks).
 EXPECTED_CHECKS = 20
@@ -117,7 +124,8 @@ class Story:
     def _exchange(self, method: str, path: str, *, body=None):
         payload = None if body is None else json.dumps(body).encode('utf-8')
         connection = http.client.HTTPSConnection(self.host, self.port,
-                                                 timeout=HTTP_TIMEOUT_SECONDS)
+                                                 timeout=HTTP_TIMEOUT_SECONDS,
+                                                 context=tls_context())
         try:
             connection.putrequest(method, self.prefix + path)
             for name, value in self._headers().items():

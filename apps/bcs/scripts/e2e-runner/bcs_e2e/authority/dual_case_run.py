@@ -24,14 +24,14 @@ import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
-from urllib.request import ProxyHandler, build_opener
+from urllib.request import HTTPSHandler, ProxyHandler, build_opener
 
 from ..case_executor import CaseExecution, StepOutcome
 from ..inventory import assert_reviewed_parent, executor_digest, reviewed_release_inventory
 from ..profile import (ConfigError, fingerprint, identifier, object_keys, origin,
                        require_resolved)
 from ..run_state import RunStateError, write
-from ..transport import NoRedirect
+from ..transport import NoRedirect, tls_context
 from .checks import scan_redaction
 from .contract import (CASE_ID as SOURCE_CASE_ID, DISPOSITION, ENVIRONMENT, INTERNAL_PREFIX,
                        MINE_USER_ID, PARENT, PRINCIPAL_SIGNING_KEY_ENV, PUBLIC_PREFIX,
@@ -257,7 +257,8 @@ def _admission(header_env: dict) -> tuple[dict, dict | None, AuthorityClosedErro
 
 
 def _probe_opener() -> object:
-    return build_opener(ProxyHandler({}), NoRedirect())
+    return build_opener(HTTPSHandler(context=tls_context()),
+                       ProxyHandler({}), NoRedirect())
 
 
 def _http_probe(url: str, *, headers: dict | None = None) -> dict:

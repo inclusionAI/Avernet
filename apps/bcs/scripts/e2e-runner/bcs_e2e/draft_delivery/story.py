@@ -31,6 +31,13 @@ import sys
 import urllib.parse
 import uuid
 
+# Script-mode child: make the shared bcs_e2e package importable so this
+# live leg reuses the fail-closed TLS trust context (macOS framework
+# Python ships no default CA bundle for bare HTTPSConnection).
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from bcs_e2e.transport import tls_context  # noqa: E402
+
 EXPECTED_CHECKS = 65
 MARKER_PREFIX = 'Draft delivery story: '
 MARKER_SUFFIX = ' live HTTP assertions passed'
@@ -87,8 +94,13 @@ class Story:
 
     def request(self, label: str, method: str, path: str, *, body=None,
                 token: str = '', expected_status=200, mock_identity: bool = True):
-        connection = (http.client.HTTPSConnection if self.base.scheme == 'https'
-                      else http.client.HTTPConnection)(self.base.netloc, timeout=HTTP_TIMEOUT_SECONDS)
+        if self.base.scheme == 'https':
+            connection = http.client.HTTPSConnection(self.base.netloc,
+                                                     timeout=HTTP_TIMEOUT_SECONDS,
+                                                     context=tls_context())
+        else:
+            connection = http.client.HTTPConnection(self.base.netloc,
+                                                    timeout=HTTP_TIMEOUT_SECONDS)
         payload = None if body is None else json.dumps(body).encode('utf-8')
         try:
             connection.putrequest(method, self.base.path + path)
