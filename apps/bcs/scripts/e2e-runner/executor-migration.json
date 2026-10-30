@@ -54,7 +54,9 @@
         "mode": "DUAL",
         "preprod_verdict": "BLOCKED_INVENTORIED",
         "gates": [],
-        "notes": []
+        "notes": [
+          "DIRECT_DENSITY_14_OBLIGATIONS_20261031"
+        ]
       }
     },
     {
@@ -102,7 +104,9 @@
         "mode": "DUAL",
         "preprod_verdict": "BLOCKED_INVENTORIED",
         "gates": [],
-        "notes": []
+        "notes": [
+          "CUSTOM_COLLAB_DENSITY_37_OBLIGATIONS_20261031"
+        ]
       }
     },
     {
@@ -360,7 +364,9 @@
         "mode": "DUAL",
         "preprod_verdict": "NOT_RUN",
         "gates": [],
-        "notes": ["SERVICE_POLICY_DENSITY_R1_PROJECTED_20261031"]
+        "notes": [
+          "SERVICE_POLICY_DENSITY_R1_PROJECTED_20261031"
+        ]
       }
     },
     {
