@@ -141,6 +141,9 @@ describe('useLegacyShareLinkGuard', () => {
         hydrated: true,
         selectedBotId: legacyId,
         knownBotIds: new Set(['other:1']),
+        friendBotIds: new Set<string>(),
+        friendSessionsLoaded: true,
+        selectedSection: 'friend' as const,
         userId: '900003',
       }),
     );
