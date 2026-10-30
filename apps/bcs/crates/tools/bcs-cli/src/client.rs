@@ -1791,8 +1791,7 @@ impl BcsClient {
         let url = format!("{}/groups/{}", self.base_url, group_id);
 
         let response = self
-            .http_client
-            .get(&url)
+            .add_auth(self.http_client.get(&url))
             .send()
             .await
             .context("Failed to get group")?;
@@ -2037,9 +2036,7 @@ impl BcsClient {
         };
 
         let response = self
-            .http_client
-            .post(&url)
-            .json(&payload)
+            .add_auth(self.http_client.post(&url).json(&payload))
             .send()
             .await
             .context("Failed to fuse context")?;
