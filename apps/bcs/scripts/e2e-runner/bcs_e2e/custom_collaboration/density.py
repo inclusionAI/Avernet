@@ -7,6 +7,9 @@ fabricated PASS; a present-but-failing observation is FAIL.  Definition
 clauses only prove the submitted, successfully validated frozen fixture, not
 runtime consumption.  The owned-local runner and the dual product-CLI
 executor both feed the same event/bindings contract into ``project``.
+The three frozen parent obligations ride first with
+``legacy-parent`` evidence; their statuses come from the caller's
+``base_statuses``; the 34 atomic rows follow.
 """
 from __future__ import annotations
 
@@ -14,7 +17,10 @@ import hashlib
 import json
 from pathlib import Path
 
-from ..local_operator_cli_contract import custom_collaboration_source_binding
+from ..local_operator_cli_contract import (
+    CUSTOM_COLLABORATION_REQUIREMENTS,
+    custom_collaboration_source_binding,
+)
 from ..run_state import RunStateError
 
 PREFIX = 'CUSTOM-COLLABORATION.'
@@ -56,6 +62,18 @@ def requirements() -> list[dict]:
                 or not isinstance(row.get('expectation'), str) or not row['expectation']
                 or not isinstance(row.get('command'), str) or not row['command']):
             raise RunStateError('custom collaboration density obligation row changed')
+    return [dict(row) for row in rows]
+
+
+def parent_requirements() -> list[dict]:
+    """Frozen three parent obligations (contract source of truth)."""
+    binding = custom_collaboration_source_binding()
+    rows = binding.get('requirements')
+    if (not isinstance(rows, list)
+            or len(rows) != len(CUSTOM_COLLABORATION_REQUIREMENTS)
+            or [row.get('id') for row in rows]
+            != list(CUSTOM_COLLABORATION_REQUIREMENTS)):
+        raise RunStateError('custom collaboration parent obligation set changed')
     return [dict(row) for row in rows]
 
 
@@ -153,7 +171,11 @@ def project(events: dict, bindings: dict, base_statuses: dict) -> dict:
     removed = events.get('persistent_deleted', {})
     check('persistent-cleanup', 'persistent_deleted', identity(removed.get('id'), persistent)
           and removed.get('deleted') is True)
-    rows_out = []
+    rows_out = [
+        {**row, 'status': base_statuses.get(row['id'], 'NOT_RUN'),
+         'evidence_event': 'legacy-parent'}
+        for row in parent_requirements()
+    ]
     for requirement in requirements():
         key = requirement['id'][len(PREFIX):]
         if key in checks:
