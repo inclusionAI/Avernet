@@ -4,6 +4,10 @@ import { createMonitoringRecoveryTrigger, SESSION_RECOVERY_ALLOWLIST_KEY } from 
 import { SessionRecoveryError } from "../../repair/session-recovery/errors.js";
 
 import { runtimeIdentity } from "./runtime-identity-fixture.js";
+import { logRepairEvent } from "../../repair/common/logging.js";
+vi.mock("../../repair/common/logging.js", async importOriginal => ({
+  ...await importOriginal<typeof import("../../repair/common/logging.js")>(), logRepairEvent: vi.fn(),
+}));
 const bot = { bot_id: "default", entity_id: "001234", env: "prod" };
 const event: DiagnosisEvent = {
   schemaVersion: DIAGNOSIS_V4_VERSION, runtimeIdentity: { ...runtimeIdentity, OWNER_ID: bot.entity_id }, eventId: "event-1", diagnosisId: "event-1", botId: "default",
@@ -111,12 +115,12 @@ describe("monitoring automatic recovery", () => {
   });
 
   it("returns a retryable error only for allowed targets when the recovery service is unavailable", async () => {
-    const output = vi.spyOn(console, "info").mockImplementation(() => {});
+    const output = vi.mocked(logRepairEvent).mockClear();
     const { config } = setup();
     const trigger = createMonitoringRecoveryTrigger({ config, service: null });
     await trigger.trigger({ ...event, entityId: "another-owner" });
     await expect(trigger.trigger(event)).rejects.toMatchObject({ code: "NOT_READY" });
-    const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[session-recovery] ".length)));
+    const events = output.mock.calls.map(([_scope, job, event, fields]) => ({ job, event, ...fields }));
     expect(events.filter(event => event.event === "CREATE_FAILED")).toEqual([expect.objectContaining({
       eventId: event.eventId, botId: "default", errorCode: "recovery_not_ready", count: 1 })]);
   });

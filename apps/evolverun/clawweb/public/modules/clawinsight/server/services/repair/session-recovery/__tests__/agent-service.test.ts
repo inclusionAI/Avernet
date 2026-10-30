@@ -8,6 +8,10 @@ import { SessionRecoveryTaskRepository } from "../../../../repositories/repair/s
 import { AgentToolCallRepository } from "../../../../repositories/repair/agent-tool-call-repository.js";
 import { SessionRecoveryTaskService } from "../task-service.js";
 import { SessionRecoveryAgentService, recoveryTargetSnapshot } from "../agent-service.js";
+import { logRepairEvent } from "../../common/logging.js";
+vi.mock("../../common/logging.js", async importOriginal => ({
+  ...await importOriginal<typeof import("../../common/logging.js")>(), logRepairEvent: vi.fn(),
+}));
 
 const actor = { userId: "owner", isAdmin: false };
 const request = { event_id: "dispatch-fixture", tc_fault_label: null, delivery_key: "initial-1", diagnosis: "原任务执行受阻",
@@ -76,7 +80,7 @@ it("provides cumulative read ranges and gaps without rereading the Bot or changi
 });
 
 it.each([null, "TC.MCP.PERMISSION"])("sends only the task output-token override on initial and resumed dispatches (%s)", async tc_fault_label => {
-  const output = vi.spyOn(console, "info").mockImplementation(() => {});
+  const output = vi.mocked(logRepairEvent).mockClear();
   const ack = await service.create({ ...request, tc_fault_label }, actor);
   await vi.waitFor(async () => expect((await tasks.find(ack.task_id))?.execution?.jobId).toBe("job-1"));
   for (const attempt of [1, 2]) {
@@ -96,14 +100,14 @@ it.each([null, "TC.MCP.PERMISSION"])("sends only the task output-token override 
   expect(runtime.sendMessage).not.toHaveBeenCalled();
   expect(runtime.request).not.toHaveBeenCalled();
   expect(runtime.executeShell).not.toHaveBeenCalled();
-  const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[session-recovery] ".length)));
+  const events = output.mock.calls.map(([_scope, job, event, fields]) => ({ job, event, ...fields }));
   expect(events.filter(event => event.event === "dispatched")).toEqual([1, 2].map(attempt => expect.objectContaining({
     taskId: ack.task_id, executionId: expect.any(String), jobId: `job-${attempt}`, attempt, environment: "pre" })));
   expect(JSON.stringify(events)).not.toContain("executionTicket");
 });
 
 it("counts an AIS failure once after committing its terminal task state despite repeated callbacks", async () => {
-  const output = vi.spyOn(console, "info").mockImplementation(() => {});
+  const output = vi.mocked(logRepairEvent).mockClear();
   const { task_id } = await service.create(request, actor);
   await vi.waitFor(async () => expect((await tasks.find(task_id))?.execution?.jobId).toBe("job-1"));
   const task = (await tasks.find(task_id))!, repo = new EvolveRepository(db);
@@ -111,21 +115,21 @@ it("counts an AIS failure once after committing its terminal task state despite 
   const report = { status: "failed" as const, errorCode: "TASK_TIMEOUT", errorMessage: "runtime interrupted", retryable: false };
   await agent.handleAisStatus({ task: (await repo.findTask(task_id))!, step, report });
   await agent.handleAisStatus({ task: (await repo.findTask(task_id))!, step: (await repo.findStep(step.step_id))!, report });
-  const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[session-recovery] ".length)));
+  const events = output.mock.calls.map(([_scope, job, event, fields]) => ({ job, event, ...fields }));
   expect(events.filter(event => event.event === "EXECUTION_FAILED")).toEqual([expect.objectContaining({
     taskId: task_id, executionId: task.execution!.executionId, jobId: "job-1", errorCode: "TASK_TIMEOUT", count: 1 })]);
   expect((await tasks.find(task_id))!.status).toBe("failed");
 });
 
 it("logs a failed read once from the settled tool audit without logging request or output bodies", async () => {
-  const output = vi.spyOn(console, "info").mockImplementation(() => {});
+  const output = vi.mocked(logRepairEvent).mockClear();
   const { task_id } = await service.create(request, actor);
   await vi.waitFor(async () => expect((await tasks.find(task_id))?.execution?.jobId).toBe("job-1"));
   vi.mocked(runtime.executeShell).mockRejectedValueOnce(new Error("reader unavailable; password=private-value"));
   const task = (await tasks.find(task_id))!, input = { clientRequestId: "read-1", purpose: "PRIVATE_PURPOSE" };
   const first = await agent.sessionRead(task, input), second = await agent.sessionRead(task, input);
   expect(first.status).toBe("failed"); expect(second.toolCallId).toBe(first.toolCallId);
-  const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[session-recovery] ".length)));
+  const events = output.mock.calls.map(([_scope, job, event, fields]) => ({ job, event, ...fields }));
   expect(events.filter(event => event.event === "tool_settled")).toEqual([expect.objectContaining({
     taskId: task_id, toolCallId: first.toolCallId, operation: "session_read", outcome: "failed" })]);
   expect(JSON.stringify(events)).not.toMatch(/PRIVATE_PURPOSE|private-value|PRIVATE_DIAGNOSIS/);
@@ -135,7 +139,7 @@ it.each([
   '{"success":false,"message":"PRIVATE_SESSION_BODY","data":{"executionTicket":"PRIVATE_TICKET"}}',
   '{"success":false,"message":"PRIVATE_SESSION_BODY"}',
 ])("does not log provider response bodies during dispatch retries or final failure: %s", async body => {
-  const output = vi.spyOn(console, "info").mockImplementation(() => {});
+  const output = vi.mocked(logRepairEvent).mockClear();
   vi.mocked(ais.execute).mockReset().mockRejectedValue(new Error(`AIS executeSnapshot failed: ${body}`));
   const { task_id } = await service.create(request, actor);
   await vi.waitFor(async () => expect((await tasks.find(task_id))?.executionRetry?.failures).toBe(1));
@@ -145,7 +149,7 @@ it.each([
       executionRetry: { ...value.executionRetry!, retryAt: 1 } }));
     await agent.start((await tasks.find(task_id))!);
   }
-  const events = output.mock.calls.map(([line]) => JSON.parse(String(line).slice("[session-recovery] ".length)));
+  const events = output.mock.calls.map(([_scope, job, event, fields]) => ({ job, event, ...fields }));
   expect(events.filter(event => event.event === "dispatch_failed")).toHaveLength(3);
   expect(events.filter(event => event.event === "EXECUTION_FAILED")).toHaveLength(1);
   expect(JSON.stringify(events)).not.toMatch(/PRIVATE_SESSION_BODY|PRIVATE_TICKET/);

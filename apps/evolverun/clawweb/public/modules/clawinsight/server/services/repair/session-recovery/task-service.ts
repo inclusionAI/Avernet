@@ -532,9 +532,11 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       try {
         await this.deps.reporter.report(result);
         await this.deps.tasks.acknowledgeResult(task.taskId, result.result_version, attempt);
-      } catch {
+      } catch (error) {
         await this.deps.tasks.failResult(task.taskId, result.result_version, attempt);
-        console.error("[session-recovery] result callback failed", task.taskId, result.result_version);
+        logRepairEvent("session-recovery", "session_recovery_reporting", "callback_failed", {
+          environment: this.deps.controlPlaneEnvironment, taskId: task.taskId, eventId: task.request.event_id,
+          stateVersion: result.result_version, attempt, ...repairLogError(error) });
         break;
       }
     }
