@@ -106,7 +106,8 @@ def project(events: dict, bindings: dict, base_statuses: dict) -> dict:
     valid = events.get('validate', {})
     summary = valid.get('summary', {}) if isinstance(valid, dict) else {}
     definition = events.get('definition', {})
-    canonical = definition.get('canonical') is True and definition.get('clauses', {})
+    canonical_clauses = (definition.get('clauses', {})
+                         if definition.get('canonical') is True else {})
     syntax_pass = valid.get('valid') is True
     check('yaml-valid', 'validate', syntax_pass)
     check('yaml-role-count', 'validate',
@@ -116,7 +117,7 @@ def project(events: dict, bindings: dict, base_statuses: dict) -> dict:
     for key in ('yaml-planner-required', 'yaml-reviewer-required', 'yaml-plan-assignee',
                 'yaml-review-assignee', 'yaml-acyclic', 'yaml-plan-review-edge',
                 'yaml-review-final'):
-        check(key, 'definition', syntax_pass and canonical.get(key) is True)
+        check(key, 'definition', syntax_pass and canonical_clauses.get(key) is True)
     trial_group = bindings.get('trial_group') or ''
     trial_session = bindings.get('trial_session') or ''
     run_id = bindings.get('run_id') or ''
@@ -202,5 +203,5 @@ def verify(receipt: dict) -> bool:
     try:
         base = {r['id']: r['status'] for r in receipt['requirements'][:3]}
         return receipt == project(receipt['observations'], receipt['bindings'], base)
-    except (KeyError, TypeError, ValueError, RunStateError):
+    except (KeyError, TypeError, ValueError, AttributeError, RunStateError):
         return False
