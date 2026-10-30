@@ -18,6 +18,12 @@ combine a single category, and sort the complete filtered set before pagination.
 Historical creation counts come from persisted Bot origins including soft-deleted
 rows; catalogue updates cannot change those facts.
 
+Detail also exposes workspace-relative resource destinations, without resource
+content or source paths. These are declarations, not execution status: `null`
+means omitted/no operation, `[]` clears non-protected workspace items, and a
+nonempty array clears those items before writing the declared files. Ordinary
+user output can be removed by an explicit resource declaration.
+
 ## Context Boundary
 
 ```yaml
@@ -39,7 +45,7 @@ consumed_by:
   - "core.skill_center.services.git_sync — existing synchronization lifecycle"
   - "adapters.http.openapi_v1.experts — authenticated discovery DTOs"
 internal_dependencies:
-  - agentclaw.community.core.apply_engine  # capability resolution and CLI verifier
+  - agentclaw.community.core.apply_engine  # capability resolution
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.base
   - agentclaw.community.core.repository
@@ -104,5 +110,14 @@ from the latest expert catalogue or Git.
 An internal `ExpertOrigin` travels into the initial Bot INSERT with avatar and
 Passport ext fields. Ordinary Bot metadata updates reject that system key.
 The public Bot DTO exposes only `expert_name`; internal provenance remains in
-`ext.expert_origin`. Teclaw expert creation is explicitly refused until runtime
-consumption can be proven for that identity adapter.
+`ext.expert_origin`. Teclaw keeps the same native identity declarations and uses
+its existing device or platform delivery selected by the deployment. Target
+creation preflight, filename validation and Factory checks remain authoritative;
+this adapter neither switches engines nor changes the delivery mode.
+
+Expert templates do not support `cli_tools`, including an empty array. Scanning
+and creation compilation both refuse the category rather than removing it.
+This restriction does not change general Manifest CLI tools or management APIs.
+ACLI integration will be specified after Manifest supports it. Skills can still
+use commands already available in the runtime; resources retain their ordinary
+workspace-relative destination semantics.

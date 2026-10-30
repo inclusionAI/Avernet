@@ -14,9 +14,6 @@ from agentclaw.community.core.apply_engine.capabilities import (
     resolve_capabilities,
 )
 from agentclaw.community.core.bot_config_manifest.schema import validate_document
-from agentclaw.community.core.apply_engine.cli_tools.verify import (
-    verify_amd64_elf,
-)
 from agentclaw.community.core.expert_market.models import ExpertScope, ScanResult
 from agentclaw.community.core.expert_market.protocols import (
     ExpertCatalogRepositoryProtocol,
@@ -164,11 +161,12 @@ class ExpertScanner(ExpertScannerProtocol):
         if set(template) - {"schema_version", "manifest"}:
             raise ValueError("expert templates cannot declare sources or scripts")
         manifest = template.get("manifest")
+        if isinstance(manifest, dict) and "cli_tools" in manifest:
+            raise ValueError("cli_tools is not supported for expert templates")
         if not isinstance(manifest, dict) or set(manifest) - {
             "identity",
             "skills",
             "mcp",
-            "cli_tools",
             "resources",
         }:
             raise ValueError("invalid expert manifest categories")
@@ -212,11 +210,11 @@ class ExpertScanner(ExpertScannerProtocol):
                         raise ValueError("referenced content is missing")
                     for item in selected:
                         references[item] = source.read(item)
-                    if category_name in ("identity", "cli_tools") and selected != [
+                    if category_name == "identity" and selected != [
                         subpath
                     ]:
                         raise ValueError(
-                            "identity and CLI references must be a single file"
+                            "identity references must be a single file"
                         )
                     if category_name == "identity":
                         content = references[subpath].decode("utf-8")
@@ -234,10 +232,6 @@ class ExpertScanner(ExpertScannerProtocol):
                             raise ValueError("Skill names must agree")
                         skills.append(
                             {"name": package.name, "description": package.description}
-                        )
-                    elif category_name == "cli_tools":
-                        verify_amd64_elf(
-                            references[subpath], name=entry.get("name", "")
                         )
                 if category_name == "identity":
                     if not isinstance(content, str):

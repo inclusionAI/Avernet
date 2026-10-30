@@ -41,6 +41,12 @@ class ExpertMcp(BaseModel):
     )
 
 
+class ExpertResource(BaseModel):
+    """A resource destination without source locations or file content."""
+
+    path: str = Field(description="Workspace-relative destination; directory paths end in /.")
+
+
 class ExpertDetail(ExpertSummary):
     """Expert display data without execution documents or source credentials."""
 
@@ -51,4 +57,12 @@ class ExpertDetail(ExpertSummary):
     mcp: list[ExpertMcp] = Field(
         default_factory=list,
         description="Declared MCP servers; connection overrides are omitted.",
+    )
+    resources: list[ExpertResource] | None = Field(
+        default=None,
+        description=(
+            "Declared workspace-relative resource destinations, without source or content. "
+            "Null means omitted/no operation; [] clears non-protected workspace items; "
+            "a nonempty list clears non-protected items before writing these resources."
+        ),
     )
