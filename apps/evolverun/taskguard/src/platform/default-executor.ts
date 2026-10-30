@@ -88,6 +88,7 @@ export function createDefaultExecutorDispatch(
     templateCtx: TemplateContext,
     flowState: FlowState,
     flowId: string,
+    runSubworkflowDeps?: SubworkflowDeps,
   ): Promise<ExecutorResult> => {
     const nodeType = node.executor.type;
 
@@ -332,13 +333,14 @@ export function createDefaultExecutorDispatch(
     // ── subworkflow: Delegate to executeSubworkflow with injected deps ──
 
     if (nodeType === "subworkflow") {
-      if (!subworkflowDeps) {
+      const swDeps = subworkflowDeps ?? runSubworkflowDeps;
+      if (!swDeps) {
         return {
           status: "failed",
           error: `subworkflow node ${node.id}: subworkflow execution is not available in MCP Server mode (no SubworkflowDeps provided)`,
         };
       }
-      return executeSubworkflow(node, templateCtx, flowState, flowId, subworkflowDeps);
+      return executeSubworkflow(node, templateCtx, flowState, flowId, swDeps);
     }
 
     // ── loop-group: Must be materialized by controller before execution ──

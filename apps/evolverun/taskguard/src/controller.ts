@@ -923,6 +923,7 @@ function launchAsyncExecution(
       pendingRedrive = null;
       _workflowSpecByFlowId.set(flowId, workflow);
       launchAsyncExecution(deps, workflow, redrive.state, flowId, redrive.revision, {
+        debug: options?.debug,
         _conflictRedrivesLeft: redrive.retriesLeft,
       });
     }
@@ -973,6 +974,7 @@ async function asyncAwareExecuteLoop(
   state: FlowState,
   flowId: string,
   revision: number,
+  debug?: boolean,
 ): Promise<ExecuteLoopOutcome> {
   const { execution } = loadConfig().app;
 
@@ -996,7 +998,7 @@ async function asyncAwareExecuteLoop(
         // Engine has exited — safe to launch a fresh async execution that
         // will re-read state from TaskFlow (via the state we pass in).
         console.log(`[async-exec] in-flight engine exited after ${waited}ms — launching fresh execution for flow ${flowId}`);
-        launchAsyncExecution(deps, workflow, state, flowId, revision);
+        launchAsyncExecution(deps, workflow, state, flowId, revision, { debug });
         return { status: "running", message: "异步引擎已启动（等待前序引擎退出后）" };
       }
 
@@ -1011,12 +1013,12 @@ async function asyncAwareExecuteLoop(
     // No async engine running — this is a resume from waiting state.
     // Launch a new async execution to continue in the background.
     console.log(`[async-exec] no active engine for flow ${flowId} — launching async execution for resume`);
-    launchAsyncExecution(deps, workflow, state, flowId, revision);
+    launchAsyncExecution(deps, workflow, state, flowId, revision, { debug });
     return { status: "running", message: "异步引擎已启动" };
   }
 
   // Sync mode: await executeLoop directly (original behavior)
-  return executeLoop(deps, workflow, state, flowId, revision);
+  return executeLoop(deps, workflow, state, flowId, revision, debug);
 }
 
 /**
@@ -3355,7 +3357,7 @@ async function executeNodeWithRetry(
         }
       }
 
-      const result = await deps.executeNode(effectiveNode, ctx, state, flowId);
+      const result = await deps.executeNode(effectiveNode, ctx, state, flowId, deps.subworkflowDeps);
       const durationMs = Date.now() - nodeStartTime;
 
       if (result.status === "waiting") {
@@ -3975,15 +3977,6 @@ export async function executeWorkflowForTest(
   const state = ensureFlowStateDefaults(params.state);
   state.flowHooks ??= {};
 
-  if (!params.deps.subworkflowDeps && (params.deps.resolvedWorkflows || params.deps.workflowSpecApiRepo || (params.deps.db && params.deps.db.dbType !== "noop"))) {
-    params.deps.subworkflowDeps = buildSubworkflowDepsForExecution(
-      params.deps,
-      state,
-      params.flowId,
-      params.debug,
-    );
-  }
-
   if (params.runStartHooks) {
     const outcome = await runFlowStartHooks({
       deps: params.deps,
@@ -4001,6 +3994,7 @@ export async function executeWorkflowForTest(
     state,
     params.flowId,
     params.revision,
+    params.debug,
   );
 }
 
@@ -4019,6 +4013,7 @@ type ExecutorDispatchFn = (
   templateCtx: TemplateContext,
   flowState: FlowState,
   flowId: string,
+  subworkflowDeps?: import("./executors/subworkflow.js").SubworkflowDeps,
 ) => Promise<ExecutorResult>;
 
 // ── Controller ──
@@ -4860,6 +4855,7 @@ async function executeSubworkflowChild(
   parentNodeId: string,
   parentFlowId: string,
   depth: number,
+  debug?: boolean,
 ): Promise<SubworkflowCompletionResult> {
   const childState = buildChildFlowState(
     childWorkflow,
@@ -4904,6 +4900,14 @@ async function executeSubworkflowChild(
   });
 
   const childFlowId = readFlowId(flow);
+  // Like other flow events, persistence is best-effort and is not a delivery guarantee.
+  appendFlowEvent(parentFlowState, {
+    type: "subworkflow_linked",
+    flowId: parentFlowId,
+    workflowId: parentFlowState.workflowId,
+    nodeId: parentNodeId,
+    data: { childFlowId, childWorkflowId: childWorkflow.id, depth },
+  });
   const childRevision = (flow as Record<string, unknown>).revision as number | undefined ?? 1;
 
   try {
@@ -4914,6 +4918,7 @@ async function executeSubworkflowChild(
       flowId: childFlowId,
       revision: childRevision,
       runStartHooks: true,
+      debug,
     });
 
     const isComplete = isWorkflowComplete(childWorkflow, childState.nodeStates);
@@ -5009,6 +5014,8 @@ async function executeSubworkflowChild(
   }
 }
 
+export const executeSubworkflowChildForTest = executeSubworkflowChild;
+
 function buildSubworkflowDepsForExecution(
   deps: ControllerDeps,
   parentFlowState: FlowState,
@@ -5028,6 +5035,7 @@ function buildSubworkflowDepsForExecution(
         parentNodeId,
         parentFlowId,
         depth,
+        debug,
       );
     },
   };
@@ -7967,7 +7975,7 @@ export async function handleRetry(
     `已重试 ${targetNode.title}，并重置下游节点：${resetNodeIds.join(", ")}`,
     `${flowId}:${targetNodeId}:manual-retry`,
   );
-  const outcome = await asyncAwareExecuteLoop(deps, workflow, state, flowId, newRevision);
+  const outcome = await asyncAwareExecuteLoop(deps, workflow, state, flowId, newRevision, params.debug);
   const tailMessage =
     outcome.status === "failed" ? `已重试 ${targetNode.title}，但后续节点仍失败，详情见上方工作流消息。`
     : outcome.status === "waiting" ? `已重试 ${targetNode.title}，流程已进入等待状态，请按上方提示继续。`
@@ -12963,7 +12971,15 @@ async function executeLoop(
   state: FlowState,
   flowId: string,
   currentRevision: number,
+  debug?: boolean,
 ): Promise<ExecuteLoopOutcome> {
+  // Bind automatically resolved subworkflows to this run, never to the shared
+  // caller-owned deps. Recursive children receive the unbound deps and bind
+  // again to their own state; explicitly injected deps remain unchanged.
+  if (!deps.subworkflowDeps && (deps.resolvedWorkflows || deps.workflowSpecApiRepo || (deps.db && deps.db.dbType !== "noop"))) {
+    deps = { ...deps, subworkflowDeps: buildSubworkflowDepsForExecution(deps, state, flowId, debug) };
+  }
+
   // Set global chatInject so module-scope functions (completeFlowRun, emitNodeEvent)
   // can send notifications to teclaw when flow completes or nodes fail.
   setGlobalChatInject(deps.chatInject, flowId);

@@ -306,6 +306,8 @@ function eventMessage(event: FlowEvent): string {
       return "BCS 协作回调拒绝";
     case "subworkflow_started":
       return `${node} 子流程启动`;
+    case "subworkflow_linked":
+      return `${node} 子流程已关联`;
     case "subworkflow_finished":
       return `${node} 子流程完成`;
     default:

@@ -1091,7 +1091,7 @@ export function createExecutorDispatch(
   workflow?: WorkflowSpec,
   subworkflowDepsGetter?: () => SubworkflowDeps | undefined,
   packRoot?: string,
-): (node: WorkflowNode, templateCtx: TemplateContext, flowState: FlowState, flowId: string) => Promise<ExecutorResult> {
+): ControllerDeps["executeNode"] {
   const compressionDefaults = loadConfig().app.contextCompression;
   const sessionCompressionConfig = loadConfig().app.sessionCompression;
   const llmConfig = loadConfig().app.llm;
@@ -1628,7 +1628,7 @@ export function createExecutorDispatch(
     }
   }
 
-  return async (node, templateCtx, flowState, flowId) => {
+  return async (node, templateCtx, flowState, flowId, runSubworkflowDeps) => {
     // ── skipWhen: 通用闸,所有节点类型,在 type-specific 分发之前 ──
     const skipWhen = readNodeSkipWhen(node);
     if (skipWhen && evaluateSkipWhenConditions(skipWhen, templateCtx)) {
@@ -1693,7 +1693,7 @@ export function createExecutorDispatch(
       case "collaboration":
         return executeCollaborationDelivery(node, templateCtx, flowState, flowId);
       case "subworkflow":
-        const swDeps = subworkflowDepsGetter?.();
+        const swDeps = subworkflowDepsGetter?.() ?? runSubworkflowDeps;
         if (!swDeps) {
           return { status: "failed", error: `subworkflow node ${node.id}: subworkflow execution is not available in this context` };
         }

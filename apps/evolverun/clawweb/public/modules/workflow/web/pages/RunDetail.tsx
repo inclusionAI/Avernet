@@ -3,6 +3,7 @@ import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { useFlowRun, useDbWorkflow, useEvolveDiagnoses, useEvolveSuggestions, useAnalyzeRun, useResetAnalysisRun, useAnalysisProgress, useRunEvolutionAnalysis } from '../api/hooks'
 import RunSummaryHeader from '../components/RunSummaryHeader'
 import NodeExecutionList from '../components/NodeExecutionList'
+import SubworkflowExecutionTree from '../components/SubworkflowExecutionTree'
 import RunDagView from '../components/RunDagView'
 import ErrorState from '../components/ErrorState'
 import SimpleRunLogsPanel from '../components/SimpleRunLogsPanel'
@@ -49,6 +50,7 @@ export default function RunDetail() {
   const workspaceView = searchParams.get('workspaceView')
   const [activeTab, setActiveTab] = useState<TabId>('nodes')
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  const [showSubworkflows, setShowSubworkflows] = useState(false)
   const [analyzingNode, setAnalyzingNode] = useState<NodeExecution | null>(null)
   const [analyzeModalOpen, setAnalyzeModalOpen] = useState(false)
   const [autoHealRun, setAutoHealRun] = useState<FlowRun | null>(null)
@@ -267,6 +269,12 @@ export default function RunDetail() {
           <div className="mt-4">
             {activeTab === 'nodes' && (
               <div className="space-y-4">
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <button type="button" aria-expanded={showSubworkflows} onClick={() => setShowSubworkflows(value => !value)} className="text-sm font-semibold text-primary">
+                    {showSubworkflows ? '收起子工作流执行过程' : '查看子工作流执行过程'}
+                  </button>
+                  {showSubworkflows && <div className="mt-4"><SubworkflowExecutionTree key={flowId} flowId={flowId ?? ''} /></div>}
+                </div>
                 <NodeExecutionList
                   nodes={nodes}
                   onSelectNode={handleNodeSelect}

@@ -1458,6 +1458,7 @@ export type FlowEventType =
   | "collaboration_result_received"
   | "collaboration_result_rejected"
   | "subworkflow_started"
+  | "subworkflow_linked"
   | "subworkflow_finished"
   | "node_validation_result"
   | "validation_failed"

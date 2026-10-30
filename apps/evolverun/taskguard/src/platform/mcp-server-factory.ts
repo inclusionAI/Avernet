@@ -24,6 +24,7 @@ import { createClawmindInlineServer, createInlineServerDepsFromTaskFlow } from "
 import type { TeClawConfig } from "../config/types.js";
 import { ApiClient } from "../db/api-client.js";
 import { FlowRunApiRepository } from "../db/api-repositories/flow-run-api-repository.js";
+import { FlowEventApiRepository } from "../db/api-repositories/event-api-repository.js";
 import { NodeExecutionApiRepository } from "../db/api-repositories/node-execution-api-repository.js";
 import { HttpCallbackConfigApiRepository } from "../db/api-repositories/http-callback-config-api-repository.js";
 import { HttpCallbackLogApiRepository } from "../db/api-repositories/http-callback-log-api-repository.js";
@@ -32,7 +33,7 @@ import { createDatabase } from "../db/factory.js";
 import type { IDatabase } from "../db/types.js";
 import { WorkflowSpecApiRepository } from "../db/api-repositories/workflow-spec-api-repository.js";
 import { createLogger } from "./logger.js";
-import { setFlowRunRepository, setNodeExecutionRepository, setWorkflowNotificationConfig, setHttpCallbackRepositories, setHttpCallbackLogRepository, reloadHttpCallbackConfigs, setEngineName, setRunLogUploader, setGuardianAgent } from "../controller.js";
+import { setEventRepository, setFlowRunRepository, setNodeExecutionRepository, setWorkflowNotificationConfig, setHttpCallbackRepositories, setHttpCallbackLogRepository, reloadHttpCallbackConfigs, setEngineName, setRunLogUploader, setGuardianAgent } from "../controller.js";
 import { loadConfig } from "../config/loader.js";
 import { resolveEngineName } from "./types.js";
 
@@ -176,6 +177,7 @@ export async function createMcpServerBase(config: McpServerConfig): Promise<McpS
           maxRetries: 3,
         });
         flowRunApiRepo = new FlowRunApiRepository(apiClient);
+        setEventRepository(new FlowEventApiRepository(apiClient));
         setFlowRunRepository(flowRunApiRepo);
         const nodeExecApiRepo = new NodeExecutionApiRepository(apiClient);
         setNodeExecutionRepository(nodeExecApiRepo);
