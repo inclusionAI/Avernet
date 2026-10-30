@@ -349,6 +349,7 @@ describe('useCommunity', () => {
       pollSelection: [0],
       authorId: '900003',
       authorName: '当前用户',
+      authorAvatarUrl: 'avatar.png',
     });
     expect(mockedService.listReplies).toHaveBeenLastCalledWith(pollTopic.id, {
       page: 1,

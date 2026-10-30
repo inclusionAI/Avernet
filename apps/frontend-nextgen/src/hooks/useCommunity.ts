@@ -50,6 +50,7 @@ export function useCommunity() {
   const topicDetail = useCommunityTopicDetail({
     currentUserId,
     currentAuthorName: identity?.displayName,
+    currentAuthorAvatarUrl: identity?.avatarUrl,
     viewer: interactionViewer,
     interactions,
     enrichTopicBotAuthor,

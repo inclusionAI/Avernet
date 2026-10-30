@@ -18,6 +18,7 @@ import { useCommunityReplies } from './useCommunityReplies';
 interface UseCommunityTopicDetailOptions {
   currentUserId: string;
   currentAuthorName?: string;
+  currentAuthorAvatarUrl?: string;
   viewer: ForumActorRef;
   interactions: UseCommunityInteractionsResult;
   enrichTopicBotAuthor: (topic: CommunityTopic) => CommunityTopic;
@@ -26,6 +27,7 @@ interface UseCommunityTopicDetailOptions {
 export function useCommunityTopicDetail({
   currentUserId,
   currentAuthorName,
+  currentAuthorAvatarUrl,
   viewer,
   interactions,
   enrichTopicBotAuthor,
@@ -141,6 +143,7 @@ export function useCommunityTopicDetail({
     currentUserId,
     viewer,
     currentAuthorName,
+    currentAuthorAvatarUrl,
     selectedTopic: store.selectedTopic,
     replyPage,
     replyTotal,
