@@ -1,0 +1,31 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/service_policy_density/__init__.py
+  s_cecdc98e721f4b::t_613f87492d255b 1-104
+apps/bcs/scripts/e2e-runner/bcs_e2e/service_policy_density/contract.py
+  s_cecdc98e721f4b::t_5bd4c9758a9000 1-154
+apps/bcs/scripts/e2e-runner/bcs_e2e/service_policy_density/obligations.py
+  s_cecdc98e721f4b::t_30dead21be4db3 1-560
+apps/bcs/scripts/e2e-runner/bcs_e2e/service_policy_density/profile.py
+  s_cecdc98e721f4b::t_1b2b37b805e980 1-164
+apps/bcs/scripts/e2e-runner/bcs_e2e/service_policy_density/reporting.py
+  s_cecdc98e721f4b::t_22c92373093e3f 1-182
+apps/bcs/scripts/e2e-runner/bcs_e2e/service_policy_density/run.py
+  s_cecdc98e721f4b::t_b754cb96e5f03f 1-365
+apps/bcs/scripts/e2e-runner/tests/test_service_policy_density.py
+  s_cecdc98e721f4b::t_6cfbbc5b284b77 1-765
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "92628575b5c59d6004a25a56269f7277bce7feaf",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
