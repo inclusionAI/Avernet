@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .case_adapters import AdapterCall
-from .case_executor import CaseExecution, StepOutcome
+from .case_executor import CaseExecution, StepOutcome, record_error_detail
 from .run_state import RunStateError
 
 FRIENDSHIP_PARENT = "story_user_builds_trusted_team"
@@ -159,6 +159,7 @@ def execute_friend_connection_decision_case(adapter: object) -> CaseExecution:
     validate_friend_connection_decision_adapter(adapter)
     steps = []
     error_type = None
+    first_error_detail: str | None = None
     completed = 0
     for requirement_id, method_name, accepted in (
             ("FRIEND.protected-reject", "reject_friend_connection_request", False),
@@ -181,14 +182,20 @@ def execute_friend_connection_decision_case(adapter: object) -> CaseExecution:
             completed += 1
         except Exception as error:
             error_type = type(error).__name__
+            detail = record_error_detail(error)
+            if first_error_detail is None:
+                first_error_detail = detail
             steps.append(StepOutcome(requirement_id=requirement_id,
                                       method=method_name, status="NOT_RUN",
-                                      data=None, evidence={}, error_type=error_type))
+                                      data=None, evidence={},
+                                      error_type=error_type,
+                                      error_detail=detail))
     execution = CaseExecution(
         case_id=CASE_ID, parent_id=FRIENDSHIP_PARENT,
         status="PASS" if error_type is None else "BLOCKED",
         steps=tuple(steps), completed_count=completed, total_count=2,
-        error_type=error_type, ready_to_execute=error_type is None,
+        error_type=error_type, error_detail=first_error_detail,
+        ready_to_execute=error_type is None,
     )
     execution.validate()
     return execution
