@@ -5,8 +5,8 @@ import type { CommunityAuthor, CommunityTopic, PersonalCenterActivity } from '@/
 import { CommunityAuthorAvatar } from '../CommunityAuthorAvatar';
 import { TopicRow } from '../CommunityTopicList/TopicRow';
 import { communityService } from '@/services/community';
-import { resolveBotNames } from '@/services/collaborationSquare/collaborationSquareApiHelpers';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useResolvedBackendBotNames } from './useResolvedBackendBotNames';
 
 export interface FollowListProps {
   items: PersonalCenterActivity[];
@@ -19,6 +19,14 @@ export interface FollowListProps {
 
 function followKey(item: PersonalCenterActivity): string {
   return `${item.target.targetType}:${item.target.id}`;
+}
+
+function followedFallbackName(item: PersonalCenterActivity): string {
+  return (
+    item.followedContext?.displayName ||
+    item.bodyPreview.trim() ||
+    item.target.id
+  );
 }
 
 function followedAuthor(
@@ -99,9 +107,7 @@ export function FollowList({
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [topics, setTopics] = useState<CommunityTopic[]>([]);
   const [topicsLoading, setTopicsLoading] = useState(false);
-  const [botNameById, setBotNameById] = useState<Record<string, string>>({});
   const topicsRequestRef = useRef(0);
-  const botNameRequestRef = useRef(0);
 
   const humanItems = useMemo(
     () => items.filter((item) => item.target.targetType === 'HUMAN'),
@@ -111,7 +117,18 @@ export function FollowList({
     () => items.filter((item) => item.target.targetType === 'BOT'),
     [items],
   );
-  const botIds = useMemo(() => [...new Set(botItems.map((item) => item.target.id))], [botItems]);
+  const botIds = useMemo(
+    () => [
+      ...new Set(
+        botItems
+          .filter((item) => followedFallbackName(item) === item.target.id)
+          .map((item) => item.target.id),
+      ),
+    ],
+    [botItems],
+  );
+  const { names: botNameById, loading: botNamesLoading } =
+    useResolvedBackendBotNames(botIds);
   const selectedItem = useMemo(
     () => items.find((item) => followKey(item) === selectedKey),
     [items, selectedKey],
@@ -120,18 +137,6 @@ export function FollowList({
   useEffect(() => {
     if (selectedKey && !selectedItem) setSelectedKey(null);
   }, [selectedItem, selectedKey]);
-
-  useEffect(() => {
-    if (!botIds.length) {
-      setBotNameById({});
-      return;
-    }
-    const requestId = ++botNameRequestRef.current;
-    void resolveBotNames(botIds).then((result) => {
-      if (requestId !== botNameRequestRef.current) return;
-      setBotNameById(result);
-    });
-  }, [botIds, botNameRequestRef]);
 
   useEffect(() => {
     if (!selectedItem) {
@@ -184,6 +189,15 @@ export function FollowList({
     return (
       <div className="rounded-lg border border-border bg-card">
         <Empty title="暂无关注" description="当前身份还没有关注用户或 Bot。" />
+      </div>
+    );
+  }
+  if (botNamesLoading) {
+    return (
+      <div className="overflow-hidden rounded-lg border border-border bg-card" aria-label="Bot 名称解析中">
+        {[1, 2, 3].map((item) => (
+          <Skeleton.ListItem key={item} />
+        ))}
       </div>
     );
   }

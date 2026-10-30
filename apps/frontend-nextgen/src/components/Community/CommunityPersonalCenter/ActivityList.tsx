@@ -8,9 +8,9 @@ import type {
   PersonalCenterTopicContext,
 } from '@/domain/community/types';
 import { TopicRow } from '../CommunityTopicList/TopicRow';
-import { resolveBotNames } from '@/services/collaborationSquare/collaborationSquareApiHelpers';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo } from 'react';
 import { actorLabel } from './model';
+import { useResolvedBackendBotNames } from './useResolvedBackendBotNames';
 
 export interface ActivityListProps {
   items: PersonalCenterActivity[];
@@ -99,12 +99,30 @@ function groupReplyActivities(items: PersonalCenterActivity[]): PersonalCenterAc
 
 type BotNameById = Record<string, string>;
 
+function missingBotName(displayName: string | undefined, botId: string, actorType: 'HUMAN' | 'BOT'): boolean {
+  if (actorType !== 'BOT') return false;
+  const trimmed = displayName?.trim() ?? '';
+  return !trimmed || trimmed === botId || trimmed === `${actorLabel('BOT')} · ${botId}`;
+}
+
 function activityBotIds(items: PersonalCenterActivity[]): string[] {
   const ids = new Set<string>();
   items.forEach((item) => {
-    if (item.actor.actorType === 'BOT') ids.add(item.actor.id);
-    if (item.topicContext?.author.actorType === 'BOT') ids.add(item.topicContext.author.id);
-    if (item.repliedToPost?.author.actorType === 'BOT') ids.add(item.repliedToPost.author.id);
+    if (
+      missingBotName(
+        item.topicContext?.authorDisplayName,
+        item.topicContext?.author.id ?? '',
+        item.topicContext?.author.actorType ?? 'HUMAN',
+      )
+    ) {
+      ids.add(item.topicContext!.author.id);
+    }
+    if (missingBotName(item.repliedToPost?.authorDisplayName, item.repliedToPost?.author.id ?? '', item.repliedToPost?.author.actorType ?? 'HUMAN')) {
+      ids.add(item.repliedToPost!.author.id);
+    }
+    if (!item.topicContext && missingBotName('', item.actor.id, item.actor.actorType)) {
+      ids.add(item.actor.id);
+    }
   });
   return [...ids];
 }
@@ -145,21 +163,9 @@ function withResolvedBotNames(
 }
 
 export function ActivityList({ items, loading, error, onRetry, onOpenTopic }: ActivityListProps) {
-  const [botNameById, setBotNameById] = useState<BotNameById>({});
-  const botNameRequestRef = useRef(0);
   const botIds = useMemo(() => activityBotIds(items), [items]);
-
-  useEffect(() => {
-    if (!botIds.length) {
-      setBotNameById({});
-      return;
-    }
-    const requestId = ++botNameRequestRef.current;
-    void resolveBotNames(botIds).then((result) => {
-      if (requestId !== botNameRequestRef.current) return;
-      setBotNameById(result);
-    });
-  }, [botIds, botNameRequestRef]);
+  const { names: botNameById, loading: botNamesLoading } =
+    useResolvedBackendBotNames(botIds);
 
   if (loading) {
     return (
@@ -189,6 +195,15 @@ export function ActivityList({ items, loading, error, onRetry, onOpenTopic }: Ac
     return (
       <div className="rounded-lg border border-border bg-card">
         <Empty title="暂无内容" description="当前身份在这个分类下还没有社区记录。" />
+      </div>
+    );
+  }
+  if (botNamesLoading) {
+    return (
+      <div className="overflow-hidden rounded-lg border border-border bg-card" aria-label="Bot 名称解析中">
+        {[1, 2, 3].map((item) => (
+          <Skeleton.ListItem key={item} />
+        ))}
       </div>
     );
   }
