@@ -116,6 +116,7 @@ class CliCallTypeUpdateResult:
 
 @dataclass(frozen=True, slots=True)
 class CallerIamTokenContext:
+    entity_id: str
     bot_id: str
     owner_id: str | None
     stage: CallerIdentityStage

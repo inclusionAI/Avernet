@@ -7,6 +7,7 @@ import time
 from typing import Any
 
 from agentclaw.community.core.access import admin_scopes
+from agentclaw.community.core.bot_management.addressing import stable_resource_owner_id
 from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
 from agentclaw.community.core.repository.protocols.bot import BotCollabLockRepositoryProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
@@ -189,7 +190,7 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
         if server_code not in effective_mcps:
             raise CallerMcpNotFoundError
 
-        lock_key = f"{bot_id}:{bot['entity_id']}"
+        lock_key = f"{bot_id}:{stable_resource_owner_id(bot)}"
         lock = self._lock_repository.get_by_key(lock_key)
         if lock_epoch is None:
             if lock is not None:
@@ -360,7 +361,7 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
             for item in current_cli_items
             if item.get("cli_code")
         }
-        lock_key = f"{bot_id}:{bot['entity_id']}"
+        lock_key = f"{bot_id}:{stable_resource_owner_id(bot)}"
         # COSEC: the target entity's lock is independent of the editing actor.
         lock = self._lock_repository.get_by_key(lock_key)
         if (lock_epoch is None and lock is not None) or (
@@ -569,6 +570,7 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
             binding_id is not None,
         )
         return CallerIamTokenContext(
+            entity_id=stable_resource_owner_id(bot),
             bot_id=bot_id,
             owner_id=str(bot.get("owner_id") or "") or None,
             stage=resolved_stage,
@@ -688,7 +690,7 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
                 modifier_id=actor_id,
                 effective_server_codes=effective_server_codes,
                 expected_revision=mutation.revision,
-                lock_key=f"{bot_id}:{bot['entity_id']}",
+                lock_key=f"{bot_id}:{stable_resource_owner_id(bot)}",
                 lock_holder_user_id=actor_id,
                 lock_epoch=lock_epoch,
             )
@@ -732,7 +734,7 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
                 modifier_id=actor_id,
                 expected_revision=mutation.revision,
                 expected_caller_config_revision=mutation.caller_config_revision,
-                lock_key=f"{bot_id}:{bot['entity_id']}",
+                lock_key=f"{bot_id}:{stable_resource_owner_id(bot)}",
                 lock_holder_user_id=actor_id,
                 lock_epoch=lock_epoch,
                 effective_server_codes=effective_server_codes,
@@ -814,12 +816,12 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
         return load_bot(self._bot_repository, bot_id=bot_id, entity_id=entity_id)
 
     def _holds_lock(self, bot: Mapping[str, Any], actor_id: str) -> bool:
-        lock = self._lock_repository.get_by_key(f"{bot['bot_id']}:{bot['owner_id']}")
+        lock = self._lock_repository.get_by_key(f"{bot['bot_id']}:{stable_resource_owner_id(bot)}")
         return lock is not None and lock.holder_user_id == actor_id
 
     def _can_edit_draft(self, bot: Mapping[str, Any], actor_id: str) -> bool:
         """Permit an owner when no collaboration lock has been created yet."""
-        lock = self._lock_repository.get_by_key(f"{bot['bot_id']}:{bot['owner_id']}")
+        lock = self._lock_repository.get_by_key(f"{bot['bot_id']}:{stable_resource_owner_id(bot)}")
         return lock is None or lock.holder_user_id == actor_id
 
     @staticmethod

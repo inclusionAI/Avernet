@@ -52,6 +52,7 @@ internal_dependencies:
   - agentclaw.community.core.acli_clis
   - agentclaw.community.core.base
   - agentclaw.community.core.bot_collaborator
+  - agentclaw.community.core.bot_management.addressing # stable entity locator for the shared edit lock
   - agentclaw.community.core.caller_identity
   - agentclaw.community.core.errors
   - agentclaw.community.core.mcp
@@ -63,3 +64,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api
   - agentclaw.community.utils
 ```
+
+CLI writes resolve the Bot before checking its current Owner and stable
+`bot_id:entity_id` edit lock. Owner handoff changes the authorized person, not
+the lock address; an existing lock held by somebody else must still block writes.

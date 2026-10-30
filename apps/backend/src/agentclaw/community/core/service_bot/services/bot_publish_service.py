@@ -1441,6 +1441,12 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         switch_result = self._bcn_service.switch_bot(teamclaw_bot_uuid=bot_id, owner_workno=current_owner_id, name=bot.get("bot_name") or bot_id, summary=bot.get("bot_desc") or "")
         logger.info(f"[upgrade_bot_to_service] BCN switch_bot succeeded: bot_id={bot_id}, owner_id={current_owner_id}, websocket_kicked={switch_result.get('websocket_kicked')}, idempotent_replay={switch_result.get('idempotent_replay')}")
 
+        # switch_bot addressed the existing personal binding, not a new entity
+        # reference. Preserve it atomically with the type change before restart.
+        if current_owner_id != resource_owner_id:
+            service_ext = dict(service_ext or {})
+            service_ext["bcn_provider_bot_ref"] = f"{bot_id}:{current_owner_id}"
+
         # 6. 更新 bot_type 为 "service"
         update_fields = {"bot_type": "service"}
         if service_ext != bot.get("ext"):
