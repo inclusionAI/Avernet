@@ -13,6 +13,8 @@ export interface ExpertDetail extends ExpertSummary {
   skills: Array<{ name: string; description: string }>;
   /** Older catalogue responses omit MCP declarations during rollout. */
   mcp?: Array<{ server_code: string }>;
+  /** Null/omitted = no operation; [] = clear non-protected workspace items. */
+  resources?: Array<{ path: string }> | null;
 }
 
 export interface ExpertQuery {

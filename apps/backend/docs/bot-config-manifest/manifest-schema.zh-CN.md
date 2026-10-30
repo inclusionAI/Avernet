@@ -723,11 +723,11 @@ identity:
   AGENTS/USER/TOOLS/HEARTBEAT/BOOTSTRAP/KNOWLEDGE/CLAUDE/GREETING/README
   .md）；**claude_code 引擎仅允许 `CLAUDE.md`**。写入时按 bot 当前引擎
   校验并明确报错，而不是 apply 时静默跳过。
-- **保留名单：`MEMORY.md` 与 `IDENTITY.md` 声明即拒。**这两个是引擎生成的
-  运行期状态，apply **永不写入、也永不移除**它们——它们是类目覆盖（§1）
-  唯一的例外。两者都在 `VALID_IDENTITY_FILES` 里，所以上一条会放行，必须
-  在 `PUT` 时单独拒绝：否则用户会得到一份「被接受、却永远收敛不了」的文档。
-  名单**有限且可枚举**，正因如此它才是两个引擎系都能同意并检查的契约。
+- **`MEMORY.md` 声明即拒，且永不因替换而删除。**它仍为引擎运行期记忆。
+- **`IDENTITY.md` 在目标引擎原有白名单内可显式创建/覆盖。**显式空内容沿原空写
+  语义，与其他可配置身份文件一致。省略整个 identity 类目不操作；`identity: []` 清空
+  可管理集合；非空列表完整替换，未列出的 IDENTITY.md 同样移除。
+  此能力不扩大 Claude Code 白名单，不修改 MEMORY、权限或 stage 隔离。
 - 其余引擎可能写入的文件（运行期会被引擎更新的那些）技术上可声明，但声明
   获胜语义会在每个 apply 点重置它们——SOUL.md、RULES.md 等人设/规则文件
   才是本类目的主场景。

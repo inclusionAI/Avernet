@@ -55,6 +55,13 @@ class ExpertCatalogService(ExpertCatalogServiceProtocol):
             {"server_code": entry["server_code"]}
             for entry in value["manifest_template"]["manifest"].get("mcp", [])
         ]
+        manifest = value["manifest_template"]["manifest"]
+        # None means omitted (no resource operation); [] is an explicit clear.
+        value["resources"] = (
+            [{"path": entry["path"]} for entry in manifest["resources"]]
+            if "resources" in manifest
+            else None
+        )
         return value
 
     def categories(self, *, tenant):

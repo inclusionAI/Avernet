@@ -31,10 +31,6 @@ class ExpertCreationService(ExpertCreationServiceProtocol):
 
     def compile(self, *, tenant: str, expert_id: str, engine: str) -> CompiledExpert:
         value = self.catalog.get(tenant=tenant, expert_id=expert_id)
-        if engine == "teclaw":
-            raise ExpertCreationError(
-                "this expert identity combination has no proven Teclaw runtime consumer"
-            )
         commit = value["source_commit"]
         if not re.fullmatch(r"[0-9a-f]{40}", commit):
             raise ExpertCreationError("expert source requires a complete commit SHA")
@@ -51,6 +47,8 @@ class ExpertCreationService(ExpertCreationServiceProtocol):
                 "expert creation source must be configured as a credential-free HTTPS Git URL"
             )
         document = deepcopy(value["manifest_template"])
+        if "cli_tools" in document["manifest"]:
+            raise ExpertCreationError("cli_tools is not supported for expert templates")
         if "apply_policy" in document:
             raise ExpertCreationError("apply_policy is not supported for expert templates")
         if engine == "claude_code":

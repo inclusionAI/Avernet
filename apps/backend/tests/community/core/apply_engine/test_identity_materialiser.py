@@ -5,8 +5,8 @@ What these pin, by the work item's acceptance criteria:
 - entries materialise through ``IdentityService``'s write path, with the
   engine's legal set re-asked at apply time rather than trusted from the PUT;
 - `source` and inline `content` both work, and inline carries no fetch fields;
-- the area is the identity file set **minus the reserved names**, and both
-  halves of that subtraction are pinned (never written, never removed);
+- MEMORY.md cannot be declared or removed; IDENTITY.md can be explicitly
+  written and follows ordinary category replacement;
 - a fetch failure aborts the whole category before the first write —
   §3.2's all-or-nothing, by construction because fetch belongs to the
   compiler, which runs before ``resolve``;
@@ -20,9 +20,12 @@ type, duplicates, no source form) and the fetch (keep_last, pins, receipts)
 are asserted at the seam they now live on, and the engine facts (legal set,
 reserved names, UTF-8) at the materialiser's.
 """
+
 from __future__ import annotations
 
 import tempfile
+
+import pytest
 
 import ast
 import asyncio
@@ -89,7 +92,9 @@ def identity_rig(files: dict[str, str] | None = None, *, source_session=None):
     objects = seeded_object_store({SOUL_KEY: SOUL_BODY})
     content = FakeManifestContent()
     resolver = DeclaredSourceResolver(content, FakeObjectCredentials(), objects)
-    materialiser = compiling_identity(identity, resolver, content, source_session=source_session)
+    materialiser = compiling_identity(
+        identity, resolver, content, source_session=source_session
+    )
     return materialiser, identity, objects, content
 
 
@@ -177,9 +182,7 @@ def test_the_engines_legal_set_is_reasked_at_apply_time():
     # A bot's engine can change after the document was accepted; applying a
     # RULES.md to a claude_code bot must fail the entry, not silently skip.
     materialiser, identity, _, _ = identity_rig()
-    resolved = _run(
-        materialiser.resolve(_ctx(engine_type="claude_code"), [DECLARED])
-    )
+    resolved = _run(materialiser.resolve(_ctx(engine_type="claude_code"), [DECLARED]))
     assert not resolved.ok
     assert "SOUL.md" in resolved.failures[0].reason
     # The compiler accepted the entry: the legal set is the materialiser's refusal.
@@ -188,11 +191,8 @@ def test_the_engines_legal_set_is_reasked_at_apply_time():
 
 
 def test_a_reserved_name_is_refused_even_though_the_validator_also_refuses_it():
-    # The belt exists because the engines' legal sets *contain* both reserved
-    # files: a document that reaches a materialiser without the validator in
-    # its history (a hand-built apply in W8) must still be refused — the
-    # guarantee "never written, never removed" cannot depend on another layer
-    # remembering to check.
+    # Runtime memory stays forbidden even for a declaration that bypassed
+    # schema validation. A profile is independently writable.
     materialiser, identity, _, _ = identity_rig()
     resolved = _run(
         materialiser.resolve(
@@ -204,10 +204,39 @@ def test_a_reserved_name_is_refused_even_though_the_validator_also_refuses_it():
         )
     )
     assert not resolved.ok
-    assert {f.identity for f in resolved.failures} == {"MEMORY.md", "IDENTITY.md"}
-    # Both compiled: the reserved subtraction is the materialiser's own belt.
+    assert {f.identity for f in resolved.failures} == {"MEMORY.md"}
+    # Both compiled: runtime memory refusal belongs to the materialiser too.
     assert materialiser.last_declaration.failures == ()
     assert identity.writes == []
+
+
+@pytest.mark.parametrize("engine", ["openclaw", "teclaw"])
+def test_explicit_profile_writes_then_converges_and_empty_clears(engine):
+    materialiser, identity, _, _ = identity_rig(
+        {"IDENTITY.md": "old", "MEMORY.md": "memory"}
+    )
+    entries = [{"type": "IDENTITY.md", "content": "expert profile"}]
+    resolved, plan, written = _run(
+        _apply(materialiser, _ctx(engine_type=engine), entries)
+    )
+    assert resolved.ok
+    assert [item.outcome.value for item in written] == ["updated"]
+    assert identity.files["IDENTITY.md"] == "expert profile"
+    assert identity.files["MEMORY.md"] == "memory"
+    identity.writes.clear()
+    _, _, written = _run(_apply(materialiser, _ctx(engine_type=engine), entries))
+    assert [item.outcome.value for item in written] == ["unchanged"]
+    assert identity.writes == []
+    resolved, _, _ = _run(
+        _apply(
+            materialiser,
+            _ctx(engine_type=engine),
+            [{"type": "IDENTITY.md", "content": ""}],
+        )
+    )
+    assert resolved.ok
+    assert identity.files["IDENTITY.md"] == ""
+    assert identity.files["MEMORY.md"] == "memory"
 
 
 def test_the_same_file_type_declared_twice_is_refused():
@@ -249,7 +278,10 @@ def test_one_failed_fetch_aborts_the_whole_category_no_writes():
             _ctx(),
             [
                 {"type": "RULES.md", "source": oss_source(ok_key)},
-                {"type": "SOUL.md", "source": oss_source(SOUL_KEY, bucket="down-bucket")},
+                {
+                    "type": "SOUL.md",
+                    "source": oss_source(SOUL_KEY, bucket="down-bucket"),
+                },
             ],
         )
     )
@@ -320,18 +352,24 @@ def test_the_second_apply_of_an_unchanged_document_writes_nothing():
 
 def test_declaring_one_file_removes_the_others_but_not_the_reserved():
     materialiser, identity, _, _ = identity_rig(
-        files={"RULES.md": "old", "SOUL.md": "old", "MEMORY.md": "engine state"}
+        files={
+            "RULES.md": "old",
+            "SOUL.md": "old",
+            "MEMORY.md": "engine state",
+            "IDENTITY.md": "profile",
+        }
     )
     _, plan, written = _run(
         _apply(materialiser, _ctx(), [{"type": "RULES.md", "content": "new"}])
     )
-    assert plan.removals == ("SOUL.md",)
+    assert plan.removals == ("IDENTITY.md", "SOUL.md")
     # The removal is an empty write — the domain's absent≡empty contract.
-    assert [w["file_type"] for w in identity.writes] == ["RULES.md", "SOUL.md"]
+    assert [w["file_type"] for w in identity.writes] == ["RULES.md", "IDENTITY.md", "SOUL.md"]
     assert identity.writes[1]["content"] == ""
     # MEMORY.md is engine state: untouched by the write AND absent from the
     # removals — the reserved subtraction's removal half.
     assert identity.write_count(file_type="MEMORY.md") == 0
+    assert identity.files["IDENTITY.md"] == ""
 
 
 def test_declared_empty_empties_the_area_but_not_the_reserved_names():
@@ -339,10 +377,10 @@ def test_declared_empty_empties_the_area_but_not_the_reserved_names():
         files={"RULES.md": "a", "SOUL.md": "b", "IDENTITY.md": "engine"}
     )
     _, plan, written = _run(_apply(materialiser, _ctx(), []))
-    assert plan.removals == ("RULES.md", "SOUL.md")
-    assert [w["file_type"] for w in identity.writes] == ["RULES.md", "SOUL.md"]
-    assert identity.write_count(file_type="IDENTITY.md") == 0
-    assert identity.files["IDENTITY.md"] == "engine"
+    assert plan.removals == ("IDENTITY.md", "RULES.md", "SOUL.md")
+    assert [w["file_type"] for w in identity.writes] == ["IDENTITY.md", "RULES.md", "SOUL.md"]
+    assert identity.write_count(file_type="IDENTITY.md") == 1
+    assert identity.files["IDENTITY.md"] == ""
 
 
 def test_a_changed_file_writes_the_new_body_as_an_update():
@@ -479,9 +517,7 @@ class _StaticGit:
             tree_bytes=len(self.body),
             files=lambda subpath=None, file_limit=None: [],
             read_file=lambda subpath=None, file_limit=None: (
-                self.body
-                if subpath
-                else _raise_no_subpath()
+                self.body if subpath else _raise_no_subpath()
             ),
         )
 
@@ -519,7 +555,9 @@ def test_an_identity_entry_can_read_one_file_from_a_git_source():
 
 def test_a_git_identity_without_subpath_is_a_resolve_failure():
     materialiser, identity, _, _ = _git_rig(
-        sources={"id": {"protocol": "git", "url": "https://git.corp/id.git", "ref": "main"}}
+        sources={
+            "id": {"protocol": "git", "url": "https://git.corp/id.git", "ref": "main"}
+        }
     )
     resolved = _run(materialiser.resolve(_ctx(), [{"type": "RULES.md", "from": "id"}]))
     assert not resolved.ok
@@ -547,7 +585,9 @@ def test_a_moved_ref_on_the_git_road_lands_in_the_note():
 
 def test_the_git_road_files_its_bytes_with_the_store():
     git = _StaticGit()
-    materialiser, identity, _, content = _git_rig(git, sources={"id": IDENTITY_GIT_SOURCE})
+    materialiser, identity, _, content = _git_rig(
+        git, sources={"id": IDENTITY_GIT_SOURCE}
+    )
     result, _, _ = _run(
         _apply(materialiser, _ctx(), [{"type": "RULES.md", "from": "id"}])
     )
@@ -557,3 +597,18 @@ def test_the_git_road_files_its_bytes_with_the_store():
     assert content.store_calls[-1]["source_url"] == (
         f"git+https://git.corp/id.git@{'a' * 40}:files/rules.md"
     )
+
+
+@pytest.mark.parametrize("original", [None, "old profile"])
+def test_empty_profile_converges_with_device_empty_presence_semantics(original):
+    files = {} if original is None else {"IDENTITY.md": original}
+    materialiser, identity, _, _ = identity_rig(files)
+    entries = [{"type": "IDENTITY.md", "content": ""}]
+    _, _, first = _run(_apply(materialiser, _ctx(), entries))
+    writes_after_first = len(identity.writes)
+    _, _, second = _run(_apply(materialiser, _ctx(), entries))
+    assert [entry.outcome.value for entry in second] == ["unchanged"]
+    assert len(identity.writes) == writes_after_first
+    if original is None:
+        assert [entry.outcome.value for entry in first] == ["unchanged"]
+        assert identity.writes == []

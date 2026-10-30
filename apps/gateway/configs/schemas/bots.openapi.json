@@ -32236,6 +32236,21 @@
             "title": "Name",
             "type": "string"
           },
+          "resources": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ExpertResource"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Declared workspace-relative resource destinations, without source or content. Null means omitted/no operation; [] clears non-protected workspace items; a nonempty list clears non-protected items before writing these resources.",
+            "title": "Resources"
+          },
           "skills": {
             "description": "Declared local Skill metadata.",
             "items": {
@@ -32265,6 +32280,21 @@
           "skills"
         ],
         "title": "ExpertDetail",
+        "type": "object"
+      },
+      "ExpertResource": {
+        "description": "A resource destination without source locations or file content.",
+        "properties": {
+          "path": {
+            "description": "Workspace-relative destination; directory paths end in /.",
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "ExpertResource",
         "type": "object"
       },
       "ExpertIdentity": {

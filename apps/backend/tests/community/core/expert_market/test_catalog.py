@@ -235,3 +235,15 @@ def test_standard_skill_metadata_is_persisted_and_invalid_package_preserves_old_
     assert (
         catalog.get(scope, "other")["identity"][0]["content"] == "其他合法专家继续更新"
     )
+
+
+@pytest.mark.parametrize("declaration", ["[]", "[{name: review-cli, from: aiworkbench, subpath: missing}]"])
+def test_expert_cli_declarations_are_rejected_before_content_resolution(catalog, tmp_path, declaration):
+    folder = write_expert(tmp_path)
+    with (folder / "manifest.yaml").open("a") as manifest:
+        manifest.write(f"  cli_tools: {declaration}\n")
+    scope = ExpertScope("tenant-a", "dev", "aiworkbench")
+    result = ExpertScanner(catalog).scan(tmp_path, source_commit="a" * 40, scope=scope)
+    assert result.valid == 0
+    assert result.invalid == 1
+    assert catalog.get(scope, "writer") is None

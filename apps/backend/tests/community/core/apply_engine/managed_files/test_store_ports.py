@@ -113,6 +113,53 @@ def test_identity_declared_empty_removes_everything_but_reserved_names() -> None
     assert store.list(_SCOPE, category=CATEGORY_IDENTITY) == []
 
 
+def test_identity_profile_is_delivered_then_cleared_like_other_identity_files() -> (
+    None
+):
+    from agentclaw.community.core.apply_engine.managed_files.reader import (
+        ManagedFilesComposeReader,
+    )
+    from agentclaw.community.core.config_compose.models import ComposeRequest
+
+    store, objects = _store()
+    materialiser = _identity(PlatformIdentity(store))
+    _, written = _run(
+        _apply(
+            materialiser, _ctx(), [{"type": "IDENTITY.md", "content": "expert profile"}]
+        )
+    )
+    assert [(entry.identity, entry.outcome.value) for entry in written] == [
+        ("IDENTITY.md", "created")
+    ]
+    reader = ManagedFilesComposeReader(
+        store=store, declared_state_provider=lambda: None
+    )
+    files = reader.identity_files(
+        ComposeRequest(
+            entity_type="staff",
+            entity_id="u_owner",
+            bot_id="b_1",
+            user_id="u_owner",
+            engine_type="teclaw",
+        )
+    )
+    assert len(files) == 1
+    assert files[0].name == "IDENTITY.md"
+    assert files[0].store == "bot-data"
+    assert files[0].path.endswith("/identity/IDENTITY.md")
+    assert objects.objects[f"{_BASE}/{files[0].path}"] == b"expert profile"
+    _run(_apply(materialiser, _ctx(), [{"type": "IDENTITY.md", "content": ""}]))
+    request = ComposeRequest(entity_type="staff", entity_id="u_owner", bot_id="b_1", user_id="u_owner", engine_type="teclaw")
+    assert reader.identity_files(request) == []
+    puts_before = len(objects.puts)
+    _, unchanged = _run(_apply(materialiser, _ctx(), [{"type": "IDENTITY.md", "content": ""}]))
+    assert [entry.outcome.value for entry in unchanged] == ["unchanged"]
+    assert len(objects.puts) == puts_before
+    _run(_apply(materialiser, _ctx(), [{"type": "IDENTITY.md", "content": "restored"}]))
+    _run(_apply(materialiser, _ctx(), []))
+    assert reader.identity_files(request) == []
+
+
 # ── resources ─────────────────────────────────────────────────────────────
 
 
