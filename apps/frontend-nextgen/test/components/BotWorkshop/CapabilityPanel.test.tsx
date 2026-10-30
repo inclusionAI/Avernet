@@ -40,7 +40,6 @@ test('a member already shown in a real set is not presented again as an ungroupe
     id: 'real-set', name: '评审能力', isDefault: false, active: true,
     skills: facts.mySkills, mcps: facts.currentMcps, clis: [],
   }]} />);
-  const current = screen.getByRole('region', { name: 'Bot 当前能力' });
-  expect(within(current).queryByText('writing-review')).not.toBeInTheDocument();
-  expect(within(current).queryByText('project-tools')).not.toBeInTheDocument();
+  // 全部成员已归入能力集时整块隐藏，不在能力面板顶部常驻空态文案
+  expect(screen.queryByRole('region', { name: 'Bot 当前能力' })).not.toBeInTheDocument();
 });
