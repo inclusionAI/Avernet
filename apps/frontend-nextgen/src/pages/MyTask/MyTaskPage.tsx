@@ -2,6 +2,7 @@ import { PageHeader } from '@/components/Common/PageHeader';
 import { Skeleton } from '@/components/ui/Skeleton';
 import type { IdentityView } from '@/domain/collaboration';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
+import { useConversationTeamDirectory } from '@/pages/Workspace/Chat/hooks/useConversationTeamDirectory';
 import { useWorkIdentityAccess } from '@/hooks/useWorkIdentityAccess';
 import { useOwnedBots } from '@/pages/Workspace/hooks/useOwnedBots';
 import { useEffect, useMemo, useState } from 'react';
@@ -62,9 +63,14 @@ export default function MyTaskPage() {
     ownerUserId || null,
     isUserIdentity && Boolean(ownerUserId),
   );
+  const { teamBots, teamLoading: teamBotsLoading } = useConversationTeamDirectory(ownerUserId || null);
+  const conversationBots = useMemo(
+    () => [...chatBots, ...teamBots.map((item) => item.bot)],
+    [chatBots, teamBots],
+  );
   const botNameMap = useMemo(() => {
     const map: Record<string, string> = {};
-    chatBots.forEach((bot) => {
+    conversationBots.forEach((bot) => {
       const botName = bot.displayName || bot.botId;
       const botIdKey = normalizeBotNameKey(bot.botId);
       const realBotIdKey = normalizeBotNameKey(bot.realBotId);
@@ -73,7 +79,19 @@ export default function MyTaskPage() {
     });
     if (currentRoutineBot) map[normalizeBotNameKey(currentRoutineBot.botId)] = currentRoutineBot.botName;
     return map;
-  }, [chatBots, currentRoutineBot]);
+  }, [conversationBots, currentRoutineBot]);
+  const ownerBotUserIdMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    conversationBots.forEach((bot) => {
+      const ownerId = bot.ownerId?.trim();
+      if (!ownerId) return;
+      const botIdKey = normalizeBotNameKey(bot.botId);
+      const realBotIdKey = normalizeBotNameKey(bot.realBotId);
+      if (botIdKey) map[botIdKey] = ownerId;
+      if (realBotIdKey) map[realBotIdKey] = ownerId;
+    });
+    return map;
+  }, [conversationBots]);
   const routineBotOptions = useMemo(
     () => routineBots.map((bot) => ({ value: bot.botId, label: bot.botName })),
     [routineBots],
@@ -134,7 +152,7 @@ export default function MyTaskPage() {
               total={userTaskTotal}
               page={userTaskPage}
               pageSize={userTaskPageSize}
-              loading={humanIdentityStatus === 'loading' || ownedBotsLoading || userLoading}
+              loading={humanIdentityStatus === 'loading' || ownedBotsLoading || teamBotsLoading || userLoading}
               error={userError}
               statusFilter={userTaskStatusFilter}
               onStatusFilterChange={(status) => {
@@ -150,6 +168,7 @@ export default function MyTaskPage() {
                 setUserTaskPage(DEFAULT_PAGE);
               }}
               botNameMap={botNameMap}
+              ownerBotUserIdMap={ownerBotUserIdMap}
             />
           ) : isBotIdentity ? (
             <RoutineTaskTab

@@ -5,6 +5,7 @@ import type { UserTaskOwnerBotOption } from '@/pages/MyTask/components/userTaskF
 import { UserTaskTab } from '@/pages/MyTask/components/UserTaskTab';
 import { useMyTaskTasks } from '@/pages/MyTask/hooks/useMyTaskTasks';
 import type { UserTaskStatusFilter } from '@/pages/MyTask/userTaskUtils';
+import { useConversationTeamDirectory } from '@/pages/Workspace/Chat/hooks/useConversationTeamDirectory';
 import { useOwnedBots } from '@/pages/Workspace/hooks/useOwnedBots';
 import { history } from '@umijs/max';
 import { useMemo, useState } from 'react';
@@ -41,9 +42,14 @@ export default function LabTasksPage() {
     Boolean(ownerUserId),
   );
   const { chatBots, isLoading: ownedBotsLoading } = useOwnedBots(ownerUserId || null, Boolean(ownerUserId));
+  const { teamBots, teamLoading: teamBotsLoading } = useConversationTeamDirectory(ownerUserId || null);
+  const conversationBots = useMemo(() => [
+    ...chatBots,
+    ...teamBots.map((item) => item.bot),
+  ], [chatBots, teamBots]);
   const botNameMap = useMemo(() => {
     const map: Record<string, string> = {};
-    chatBots.forEach((bot) => {
+    conversationBots.forEach((bot) => {
       const botName = bot.displayName || bot.botId;
       const botIdKey = normalizeBotNameKey(bot.botId);
       const realBotIdKey = normalizeBotNameKey(bot.realBotId);
@@ -51,10 +57,22 @@ export default function LabTasksPage() {
       if (realBotIdKey) map[realBotIdKey] = botName;
     });
     return map;
-  }, [chatBots]);
+  }, [conversationBots]);
+  const ownerBotUserIdMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    conversationBots.forEach((bot) => {
+      const ownerId = bot.ownerId?.trim();
+      if (!ownerId) return;
+      const botIdKey = normalizeBotNameKey(bot.botId);
+      const realBotIdKey = normalizeBotNameKey(bot.realBotId);
+      if (botIdKey) map[botIdKey] = ownerId;
+      if (realBotIdKey) map[realBotIdKey] = ownerId;
+    });
+    return map;
+  }, [conversationBots]);
   const ownerBotOptions = useMemo<UserTaskOwnerBotOption[]>(() => {
     const options = new Map<string, UserTaskOwnerBotOption>();
-    chatBots.forEach((bot) => {
+    conversationBots.forEach((bot) => {
       const botId = normalizeBotNameKey(bot.botId);
       const realBotId = normalizeBotNameKey(bot.realBotId);
       const value = realBotId || botId;
@@ -67,7 +85,7 @@ export default function LabTasksPage() {
       });
     });
     return Array.from(options.values()).sort((left, right) => left.label.localeCompare(right.label, 'zh-CN'));
-  }, [chatBots]);
+  }, [conversationBots]);
 
   return (
     <main className="app-scrollbar h-full min-h-0 overflow-y-auto">
@@ -101,7 +119,7 @@ export default function LabTasksPage() {
           total={total}
           page={page}
           pageSize={pageSize}
-          loading={loading || ownedBotsLoading}
+          loading={loading || ownedBotsLoading || teamBotsLoading}
           error={error}
           statusFilter={statusFilter}
           onStatusFilterChange={(status) => {
@@ -117,6 +135,7 @@ export default function LabTasksPage() {
             setPage(DEFAULT_PAGE);
           }}
           botNameMap={botNameMap}
+          ownerBotUserIdMap={ownerBotUserIdMap}
           ownerBotOptions={ownerBotOptions}
           displayVariant="lab"
         />
