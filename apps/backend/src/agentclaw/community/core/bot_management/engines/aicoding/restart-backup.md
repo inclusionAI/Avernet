@@ -11,10 +11,14 @@ restarts persist positive confirmations across redelivery.
 Published restart policy lives in `restart_publish.py`, contributed by
 `AicodingProvisioningStrategy`. It owns the guard, terminal failure/replay handling,
 exact-operation failure and status/ext CAS for the existing frontend fields.
-Shared publish orchestration only calls the declared `execute_published_restart`
-and `acquire_restart_workflow` strategy hooks. Default implementations delegate
-without extra I/O or engine metadata. The generic operation runner retains its
-adopt-before-issue logic and has no backup exception or coding-state knowledge.
+Shared publish orchestration stays in its original `execute_restart` method and
+only calls the declared `published_restart_scope` and `acquire_restart_workflow`
+strategy hooks. No second common execution function or workflow callback is
+introduced. The scope owns entry checks and failure handling: an empty result
+permits execution; a populated result returns an existing/handled failure. Coding
+fills the result only after required failure persistence succeeds. Default scopes
+perform no I/O, add no engine metadata and never suppress exceptions. The generic
+operation runner retains its adopt-before-issue logic and has no backup exception or coding-state knowledge.
 Only the coding strategy catches `RestartBackupBlocked`; transient/post-submit
 failures retain the existing crash-resume behavior. No shared service is patched
 or reconfigured per request.

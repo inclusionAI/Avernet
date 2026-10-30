@@ -12,10 +12,11 @@ cycle), so everything both sides need lives here.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Iterator, Optional
 
 from agentclaw.community.core.bot_management.errors import BotTemplateInvalidError
 from agentclaw.community.core.workspace.runtime_identity import ENGINE_FORM_KEY
@@ -264,17 +265,19 @@ class EngineProvisioningStrategy(ABC):
         """
         return restart(**kwargs)
 
-    async def execute_published_restart(
-        self, ctx: BotProvisioningContext, restart: Callable[[], Awaitable[dict]], *,
-        services: PublishedRestartServices,
+    @contextmanager
+    def published_restart_scope(
+        self, ctx: BotProvisioningContext, *, services: PublishedRestartServices,
         publish_id: int, stage: str, binding_id: int, source_status: str,
-    ) -> dict:
-        """Run the prepared common publish flow; default adds no policy or I/O.
+    ) -> Iterator[dict]:
+        """Keep shared orchestration in place; engines own entry/exit policy.
 
-        Concrete engines may own precondition-failure persistence and replay
-        handling through services. The callback retains provider orchestration.
+        Yield an empty result to proceed, or a populated result to return before
+        executing the workflow. If a policy consumes a workflow exception, it
+        must populate that same result after any required persistence succeeds.
+        The default performs no I/O and never suppresses exceptions.
         """
-        return await restart()
+        yield {}
 
     async def acquire_restart_workflow(self, ctx, op, issue, *, runner):
         """Keep the runner's exact operation identity and crash/adoption contract."""

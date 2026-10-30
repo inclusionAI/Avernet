@@ -5,7 +5,9 @@ wraps those calls without replacing shared services or changing other engines.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 from copy import deepcopy
+from typing import Iterator
 from uuid import uuid4
 
 from ..restart_contract import PublishedRestartServices
@@ -15,12 +17,14 @@ from .restart_state import ENGINES
 
 
 class AicodingPublishedRestartMixin:
-    async def execute_published_restart(
-        self, ctx, restart, *, services: PublishedRestartServices,
+    @contextmanager
+    def published_restart_scope(
+        self, ctx, *, services: PublishedRestartServices,
         publish_id: int, stage: str, binding_id: int, source_status: str,
-    ) -> dict:
+    ) -> Iterator[dict]:
         if str(ctx.active_engine or "").strip().lower() not in ENGINES:
-            return await restart()
+            yield {}
+            return
 
         from agentclaw.community.core.service_bot.repository.models import PublishStatus
 
@@ -30,7 +34,8 @@ class AicodingPublishedRestartMixin:
         blocked = ((record.ext or {}).get("restart") or {}).get("precondition_error") or {}
         if record.status == PublishStatus.FAILED.value and blocked.get("stage") == stage:
             # A queue redelivery must not forget a terminal backup veto.
-            return {"success": False, "message": blocked["message"]}
+            yield {"success": False, "message": blocked["message"]}
+            return
 
         guard_id = uuid4().hex
 
@@ -42,8 +47,9 @@ class AicodingPublishedRestartMixin:
             state.pop("precondition_error", None)
 
         services.mutate_ext(publish_id=publish_id, mutator=claim)
+        outcome = {}
         try:
-            return await restart()
+            yield outcome
         except RestartBackupBlocked as error:
             log_restart_failure(error, bot_id=ctx.bot_id, phase="published_restart", owner_id=ctx.owner_id,
                                 publish_id=publish_id, binding_id=binding_id)
@@ -51,7 +57,7 @@ class AicodingPublishedRestartMixin:
                 services, publish_id=publish_id, stage=stage,
                 guard_id=guard_id, message=str(error),
             )
-            return {"success": False, "message": str(error)}
+            outcome.update(success=False, message=str(error))
 
     @staticmethod
     def _persist_published_restart_veto(

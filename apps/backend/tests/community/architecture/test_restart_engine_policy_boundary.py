@@ -40,3 +40,18 @@ def test_instance_dispatch_does_not_assemble_coding_backup_dependencies():
                    for node in ast.walk(dispatcher))
     assert any(isinstance(node, ast.Attribute) and node.attr == 'prepare_restart_async'
                for node in ast.walk(dispatcher))
+
+
+def test_published_restart_keeps_common_workflow_in_its_original_entrypoint():
+    tree = ast.parse((_CORE / (_FLOW + 'restart_mixin.py')).read_text())
+    mixin = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == 'RestartMixin')
+    methods = {node.name: node for node in mixin.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    assert '_execute_prepared_restart' not in methods
+    entry = methods['execute_restart']
+    assert any(isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+               and node.func.id == 'acquire_deploy_workflow' for node in ast.walk(entry))
+    assert any(isinstance(node, ast.With) and any(
+        isinstance(item.context_expr, ast.Call)
+        and isinstance(item.context_expr.func, ast.Attribute)
+        and item.context_expr.func.attr == 'published_restart_scope'
+        for item in node.items) for node in ast.walk(entry))

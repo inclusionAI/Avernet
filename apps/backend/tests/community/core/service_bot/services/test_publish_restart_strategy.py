@@ -1,4 +1,6 @@
 """Published restart crosses the same engine seam for coding and default policies."""
+from asyncio import CancelledError
+from contextlib import contextmanager
 from copy import deepcopy
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -61,9 +63,14 @@ async def test_shared_flow_calls_registered_strategy_not_a_concrete_engine():
     calls = []
 
     class OtherPolicy(DefaultProvisioningStrategy):
-        async def execute_published_restart(self, ctx, restart, **kwargs):
-            calls.append('execute')
-            return await super().execute_published_restart(ctx, restart, **kwargs)
+        @contextmanager
+        def published_restart_scope(self, ctx, **kwargs):
+            calls.append('enter')
+            with super().published_restart_scope(ctx, **kwargs) as outcome:
+                try:
+                    yield outcome
+                finally:
+                    calls.append('exit')
 
         async def acquire_restart_workflow(self, ctx, op, issue, *, runner):
             calls.append('acquire')
@@ -73,7 +80,7 @@ async def test_shared_flow_calls_registered_strategy_not_a_concrete_engine():
     with patch('agentclaw.community.core.service_bot.services.publish_flow.restart_mixin.resolve_restart_strategy',
                return_value=(ctx, OtherPolicy())):
         assert (await svc.execute_restart(1, 'online', 'operator'))['success']
-    assert calls == ['execute', 'acquire']
+    assert calls == ['enter', 'acquire', 'exit']
     build.upgrade_async.assert_awaited_once()
     assert 'guard' not in record.ext['restart']
 
@@ -169,10 +176,84 @@ async def test_default_strategy_never_reads_or_writes_failure_state(engine):
     error = RuntimeError('original provider failure')
     restart = AsyncMock(side_effect=error)
     with pytest.raises(RuntimeError) as caught:
-        await strategy.execute_published_restart(
-            ctx, restart, services=services, publish_id=1, stage='online',
+        with strategy.published_restart_scope(
+            ctx, services=services, publish_id=1, stage='online',
             binding_id=42, source_status=PublishStatus.SUCCESS.value,
-        )
+        ) as outcome:
+            assert outcome == {}
+            await restart()
     assert caught.value is error
     restart.assert_awaited_once_with()
     assert not services.mock_calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('when', ['before', 'error'])
+async def test_shared_flow_uses_another_engine_scope_result_without_classifying_it(when):
+    svc, _, baas, build, record = _setup('other-engine')
+    before = deepcopy(record.ext)
+    expected = {'success': False, 'message': 'another engine policy'}
+    error = RuntimeError('provider unavailable')
+    build.upgrade_async.side_effect = error
+    calls = []
+
+    class OtherPolicy(DefaultProvisioningStrategy):
+        @contextmanager
+        def published_restart_scope(self, ctx, **kwargs):
+            outcome = dict(expected) if when == 'before' else {}
+            calls.append('enter')
+            try:
+                yield outcome
+            except RuntimeError as caught:
+                assert caught is error
+                calls.append('error')
+                outcome.update(expected)
+            finally:
+                calls.append('exit')
+
+    ctx, _ = resolve_restart_strategy(svc._bot_service.get_bot_by_address.return_value)
+    with patch('agentclaw.community.core.service_bot.services.publish_flow.restart_mixin.resolve_restart_strategy',
+               return_value=(ctx, OtherPolicy())):
+        assert await svc.execute_restart(1, 'online', 'operator') == expected
+    if when == 'before':
+        assert calls == ['enter', 'exit']
+        assert record.ext == before
+        svc._mutate_and_update_ext.assert_not_called()
+        build.upgrade_async.assert_not_awaited()
+    else:
+        assert calls == ['enter', 'error', 'exit']
+        build.upgrade_async.assert_awaited_once()
+    svc._publish_service.update_publish_status_with_ext.assert_not_called()
+    baas.list_devices_by_bot_uuid.assert_not_called()
+    baas.post_bots_api.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('engine', ['openclaw', 'other-engine'])
+@pytest.mark.parametrize('error', [RuntimeError('provider failure'), RestartBackupBlocked('backup_failed')])
+async def test_default_flow_propagates_provider_error_without_engine_failure_writes(engine, error):
+    svc, ledger, _, build, record = _setup(engine)
+    build.upgrade_async.side_effect = error
+    with pytest.raises(type(error)) as caught:
+        await svc.execute_restart(1, 'online', 'operator')
+    assert caught.value is error
+    assert record.status == PublishStatus.SUCCESS.value
+    assert record.ext['restart'] == {'restarting': True}
+    svc._publish_service.update_publish_status_with_ext.assert_not_called()
+    assert ledger.get_latest_by_kind(1, 'restart', 'online').state == PublishOperationState.PENDING.value
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('engine', ['aicoding', 'claude_code'])
+async def test_coding_scope_does_not_turn_cancellation_into_a_backup_veto(engine):
+    svc, ledger, _, build, record = _setup(engine)
+    error = CancelledError()
+    build.upgrade_async.side_effect = error
+    with pytest.raises(CancelledError) as caught:
+        await svc.execute_restart(1, 'online', 'operator')
+    assert caught.value is error
+    assert record.status == PublishStatus.SUCCESS.value
+    assert record.ext['restart']['restarting'] is True
+    assert 'precondition_error' not in record.ext['restart']
+    svc._publish_service.update_publish_status_with_ext.assert_not_called()
+    assert ledger.get_latest_by_kind(1, 'restart', 'online').state == PublishOperationState.PENDING.value

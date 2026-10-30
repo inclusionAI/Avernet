@@ -199,13 +199,22 @@ restarts translate the terminal engine veto to the existing publish FAILED and
 finish the task without issuing a provider workflow. All veto classification,
 operation failure, guard ownership, replay checks and failure persistence live in
 `engines/aicoding/restart_publish.py`; there is no shared backup exception.
-The common publish flow resolves a strategy and calls `execute_published_restart`
-and `acquire_restart_workflow`. Its existing persistence operations are supplied
-as `PublishedRestartServices`; only the strategy interprets its restart metadata.
-Default strategies delegate unchanged, without probing, metadata or status writes.
+The common publish flow keeps its original orchestration inside `execute_restart`
+and enters the strategy's `published_restart_scope`; it does not extract a second
+common execution function. The scope yields an empty result to proceed, or a
+populated result to return before workflow execution. Only an engine that handles
+an exception may fill that result on exit, after its required persistence succeeds.
+The default scope performs no I/O and propagates exceptions unchanged. Workflow
+acquisition still calls `acquire_restart_workflow`. Existing persistence operations
+are supplied as `PublishedRestartServices`; only the strategy interprets its
+restart metadata. Default strategies add no probing, metadata or status writes.
 The operation runner accepts an acquisition callback, preserves the exact operation
 identity and workflow adoption, and knows nothing about coding or backup failures.
 No HTTP endpoint, frontend, database schema or container-script change is needed.
+The internal `published_restart_scope` hook replaces the callback-based
+`execute_published_restart` hook; deploy the common flow, base strategy and coding
+strategy together. Third-party overrides of the former hook must implement the
+scope contract instead. Ordinary Bot restart hooks and task payloads are unchanged.
 
 The scripts may retain a maintenance barrier after partial backup, and a timed-out
 backup worker may still be running. Backend does **not** delete that barrier or
