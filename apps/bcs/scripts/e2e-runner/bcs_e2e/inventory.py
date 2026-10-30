@@ -214,6 +214,53 @@ def reviewed_release_inventory(manifest: dict | None = None) -> list[dict]:
     return reviewed
 
 
+def binding_matches_reviewed_release(binding_inventory: object) -> bool:
+    """Guard: a frozen binding inventory covers the reviewed 31-story denominator.
+
+    Bindings frozen before the reviewed cut carry the whole 41-row manifest
+    snapshot, so any id set between the reviewed denominator and the full
+    manifest is admitted; every row id must come from the manifest and be
+    distinct. The ten known-unmapped backlog rows are exempt from drift
+    detection by design; the reviewed rows are the enforced surface.
+    """
+    try:
+        if not isinstance(binding_inventory, list) or not binding_inventory:
+            return False
+        ids = [identifier(row['id'], 'binding legacy inventory row ID') for row in binding_inventory]
+        if len(ids) != len(set(ids)):
+            return False
+        manifest_ids = {row['id'] for row in current_manifest()['legacy_inventory']}
+        reviewed_ids = {row['id'] for row in reviewed_release_inventory()}
+        return reviewed_ids <= set(ids) <= manifest_ids
+    except (KeyError, TypeError, ValueError, ConfigError, RunStateError):
+        return False
+
+
+def binding_freezes_reviewed_release_rows(binding_inventory: object) -> bool:
+    """Guard: the reviewed rows inside a frozen binding match the manifest verbatim.
+
+    Stronger than the id-coverage guard: each reviewed row (all fields, in
+    manifest order) must be byte-equal to the manifest snapshot. Backlog rows
+    stay exempt so pre-cut bindings remain readable; reviewed drift fails closed.
+    """
+    try:
+        if not isinstance(binding_inventory, list) or not binding_inventory:
+            return False
+        ids = [identifier(row['id'], 'binding legacy inventory row ID') for row in binding_inventory]
+        if len(ids) != len(set(ids)):
+            return False
+        manifest = current_manifest()['legacy_inventory']
+        manifest_ids = {row['id'] for row in manifest}
+        reviewed_ids = {row['id'] for row in reviewed_release_inventory()}
+        mapping = {row['id']: row for row in binding_inventory}
+        if not reviewed_ids <= set(ids) <= manifest_ids:
+            return False
+        base = [row for row in manifest if row['id'] in reviewed_ids]
+        return [mapping[row['id']] for row in base] == base
+    except (KeyError, TypeError, ValueError, ConfigError, RunStateError):
+        return False
+
+
 def assert_reviewed_parent(parent_id: str, *, family: str) -> str:
     """Fail closed unless a dual parent is a reviewed release parent.
 

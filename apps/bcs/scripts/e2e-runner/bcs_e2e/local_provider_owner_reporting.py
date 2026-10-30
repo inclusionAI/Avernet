@@ -17,7 +17,7 @@ import os
 from pathlib import Path
 import stat
 
-from .inventory import current_manifest, executor_digest
+from .inventory import binding_matches_reviewed_release, executor_digest
 from .local_provider_owner_run import (BINARY_KIND, OWNER_ID, STORY_CHECKS,
                                        STORY_ERR_LOG_NAME, STORY_LOG_NAME)
 from .profile import fingerprint
@@ -80,8 +80,7 @@ def _bound(root):
              and binding.get('selected_requirement_ids') == list(REQUIREMENTS)
              and binding.get('bcs_binary_sha256') and len(binding['bcs_binary_sha256']) == 64
              and binding.get('environment') == ENVIRONMENT
-             and len(binding.get('legacy_inventory', [])) == len(current_manifest()['legacy_inventory'])
-             and len({row['id'] for row in binding.get('legacy_inventory', [])}) == len(current_manifest()['legacy_inventory']),
+             and binding_matches_reviewed_release(binding.get('legacy_inventory', [])),
              'Provider owner frozen binding is invalid')
     source_binding = binding.get('source_binding', {})
     original = provider_owner_source_binding()

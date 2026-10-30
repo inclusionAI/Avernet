@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import stat
 
-from .inventory import current_manifest, executor_digest
+from .inventory import binding_matches_reviewed_release, executor_digest
 from .profile import fingerprint
 from .run_state import RunStateError, read
 
@@ -90,8 +90,7 @@ def _bound(root: Path):
              and binding.get('expected_assertion_count')
                  == sum(len(binding['selected_requirement_ids'][parent]) for parent in parents)
              and set(binding.get('source_bindings', {})) == set(parents)
-             and len(binding.get('legacy_inventory', [])) == len(current_manifest()['legacy_inventory'])
-             and len({row['id'] for row in binding['legacy_inventory']}) == len(current_manifest()['legacy_inventory']),
+             and binding_matches_reviewed_release(binding.get('legacy_inventory', [])),
              'Edge read frozen complete binding is invalid')
     for parent in parents:
         plan = plans[parent]

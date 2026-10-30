@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import stat
 
-from .inventory import current_manifest, executor_digest
+from .inventory import binding_freezes_reviewed_release_rows, executor_digest
 from .local_custom_collaboration_case import (
     CASE_ID,
     REQUIREMENTS,
@@ -109,7 +109,7 @@ def _bound(root: Path) -> dict:
         and binding.get('fixture_set') == 'pilot'
         and binding.get('fixture_roles') == list(ROLES)
         and binding.get('store_messages') is False
-        and legacy == current_manifest()['legacy_inventory']
+        and binding_freezes_reviewed_release_rows(legacy)
         and isinstance(binding.get('executor_digest'), str)
         and len(binding['executor_digest']) == 64
         and isinstance(binding.get('bcs_binary_sha256'), str)

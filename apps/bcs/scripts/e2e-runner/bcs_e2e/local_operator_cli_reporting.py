@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 import stat
 
-from .inventory import current_manifest, executor_digest
+from .inventory import binding_matches_reviewed_release, executor_digest
 from .local_operator_cli import (
     CLI_TIMEOUT_SECONDS,
     RESOURCE_DISPOSITION,
@@ -120,8 +120,7 @@ def _bound(root):
              and binding.get('selected_requirement_ids') == list(REQUIREMENTS)
              and binding.get('source_binding', {}).get('parent') == PARENT
              and [r['id'] for r in binding['source_binding']['requirements']] == list(REQUIREMENTS)
-             and len(binding.get('legacy_inventory', [])) == len(current_manifest()['legacy_inventory'])
-             and len({r['id'] for r in binding['legacy_inventory']}) == len(current_manifest()['legacy_inventory'])
+             and binding_matches_reviewed_release(binding.get('legacy_inventory', []))
              and binding.get('store_messages') is False
              and isinstance(binding.get('cli_binary_sha256'), str)
              and len(binding['cli_binary_sha256']) == 64

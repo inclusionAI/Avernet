@@ -2,7 +2,7 @@
 from pathlib import Path
 import sqlite3
 
-from .inventory import current_manifest, executor_digest
+from .inventory import binding_matches_reviewed_release, executor_digest
 from .ledger import Ledger, LedgerError
 from .local_session_reporting import (
     _sha, _exclusive, _require, V1_REQUIREMENTS, SOURCES as PUBLIC_SOURCES,
@@ -33,7 +33,7 @@ def _bound(root):
              and binding.get('selected_requirement_ids') == list(V1_REQUIREMENTS[:6])
              and binding.get('parent_requirement_ids') == list(V1_REQUIREMENTS)
              and [row['id'] for row in binding['source_binding']['requirements']] == list(V1_REQUIREMENTS)
-             and len(binding.get('legacy_inventory', [])) == len(current_manifest()['legacy_inventory']) and binding.get('store_messages') is True
+             and binding_matches_reviewed_release(binding.get('legacy_inventory', [])) and binding.get('store_messages') is True
              and binding.get('public_journal_digest') == fingerprint(read(root/'local-session-public.json'))
              and {k: v for k, v in binding.items() if k != 'public_journal_digest'} == plan,
              'Session sharing original plan or binding differs')

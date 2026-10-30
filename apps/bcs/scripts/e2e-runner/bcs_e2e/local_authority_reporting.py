@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 import stat
 
-from .inventory import current_manifest, executor_digest
+from .inventory import binding_matches_reviewed_release, executor_digest
 from .local_authority_contract import (
     CALLS, CASE_ID, COMPLETION, EXPECTED_HTTP_CALLS, PARENT, PRIMARY,
     REQUIREMENTS, STAFF_B, STAFF_MINE, STATUS, SUITE,
@@ -91,8 +91,7 @@ def _bound(root):
              and binding.get('source_binding', {}).get('grants_release_credit') is False
              and binding.get('source_binding', {}).get('evidence_granularity') == 'OWNED_PARENT_JOURNAL'
              and [row['id'] for row in binding['source_binding']['requirements']] == list(REQUIREMENTS)
-             and len(binding.get('legacy_inventory', [])) == len(current_manifest()['legacy_inventory'])
-             and len({row['id'] for row in binding.get('legacy_inventory', [])}) == len(current_manifest()['legacy_inventory']),
+             and binding_matches_reviewed_release(binding.get('legacy_inventory', [])),
              'Authority frozen binding is invalid')
     return binding
 

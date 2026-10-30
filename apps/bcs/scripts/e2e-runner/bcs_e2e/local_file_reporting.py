@@ -13,7 +13,7 @@ from pathlib import Path
 import stat
 
 from .errors import has_cancellation
-from .inventory import ROOT, current_manifest, executor_digest
+from .inventory import binding_matches_reviewed_release, ROOT, current_manifest, executor_digest
 from .migration_inventory import validate_contract
 from .profile import fingerprint
 from .run_state import RunStateError, read, write
@@ -82,7 +82,7 @@ def _bound(root: Path):
              and binding.get('case_id') == CASE_ID and type(binding.get('case_version')) is int
              and binding['case_version'] == 1 and binding.get('runtime_dir') == str(root)
              and binding.get('required_assertions') == ['CLI-FILE.'+r for r in REQUIREMENTS]
-             and binding.get('cli_leaves') == list(LEAVES) and len(binding.get('legacy_inventory', [])) == len(current_manifest()['legacy_inventory']),
+             and binding.get('cli_leaves') == list(LEAVES) and binding_matches_reviewed_release(binding.get('legacy_inventory', [])),
              'CLI-file frozen source inventory is invalid')
     return binding
 

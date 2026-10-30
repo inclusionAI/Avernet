@@ -16,7 +16,7 @@ from .edge_friend_mutation_case import (
     TOTAL_ASSERTION_COUNT,
     edge_friend_mutation_case_plan,
 )
-from .inventory import current_manifest, executor_digest, reviewed_release_inventory
+from .inventory import binding_matches_reviewed_release, executor_digest, reviewed_release_inventory
 from .local_edge_friend_mutations_run import journal_filename
 from .profile import fingerprint
 from .run_state import RunStateError, read
@@ -84,8 +84,7 @@ def _bound(root: Path):
              and binding.get('expected_assertion_count') == TOTAL_ASSERTION_COUNT
              and set(binding.get('source_bindings', {})) == set(CASE_IDS)
              and set(binding.get('selected_requirement_ids', {})) == set(CASE_IDS)
-             and len(binding.get('legacy_inventory', [])) == len(current_manifest()['legacy_inventory'])
-             and len({row['id'] for row in binding['legacy_inventory']}) == len(current_manifest()['legacy_inventory'])
+             and binding_matches_reviewed_release(binding.get('legacy_inventory', []))
              and set(PARENTS) == {plans[case_id].parent_id for case_id in CASE_IDS},
              'Edge friend-mutation frozen complete binding is invalid')
     for case_id in CASE_IDS:

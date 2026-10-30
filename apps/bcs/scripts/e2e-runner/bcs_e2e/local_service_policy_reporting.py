@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 import stat
 
-from .inventory import current_manifest, executor_digest
+from .inventory import binding_matches_reviewed_release, executor_digest
 from .local_service_policy_contract import (CASE_ID, REQUIREMENTS, STATUS, SUITE, STORY_CHECKS)
 from .local_service_policy_run import BINARY_KIND, STORY_ERR_LOG_NAME, STORY_LOG_NAME
 from .profile import fingerprint
@@ -76,8 +76,7 @@ def _bound(root):
              and binding.get('source_binding', {}).get('release_parent_denominator') is True
              and [row['id'] for row in binding['source_binding']['requirements']] == list(REQUIREMENTS)
              and binding.get('source_binding', {}).get('story_checks') == STORY_CHECKS
-             and len(binding.get('legacy_inventory', [])) == len(current_manifest()['legacy_inventory'])
-             and len({row['id'] for row in binding.get('legacy_inventory', [])}) == len(current_manifest()['legacy_inventory']),
+             and binding_matches_reviewed_release(binding.get('legacy_inventory', [])),
              'Service policy frozen binding is invalid')
     return binding
 

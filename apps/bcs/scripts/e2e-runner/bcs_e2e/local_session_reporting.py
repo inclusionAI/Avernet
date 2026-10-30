@@ -10,7 +10,7 @@ from pathlib import Path
 import stat
 import sqlite3
 
-from .inventory import current_manifest, executor_digest
+from .inventory import binding_matches_reviewed_release, executor_digest
 from .ledger import Ledger, LedgerError
 from .local_session_contract import PUBLIC_ASSERTION_IDS
 from .profile import fingerprint
@@ -72,8 +72,7 @@ def _bound(root):
              and binding.get('store_messages') is True
              and binding.get('source_binding', {}).get('parent') == 'story_user_runs_and_shares_sessions'
              and [r['id'] for r in binding['source_binding']['requirements']] == list(V1_REQUIREMENTS)
-             and len(binding.get('legacy_inventory', [])) == len(current_manifest()['legacy_inventory'])
-             and len({r['id'] for r in binding['legacy_inventory']}) == len(current_manifest()['legacy_inventory']),
+             and binding_matches_reviewed_release(binding.get('legacy_inventory', [])),
              'Session public frozen complete binding is invalid')
     return binding
 

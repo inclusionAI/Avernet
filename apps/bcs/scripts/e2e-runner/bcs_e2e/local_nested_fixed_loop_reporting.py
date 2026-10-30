@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 import stat
 
-from .inventory import current_manifest, executor_digest
+from .inventory import binding_matches_reviewed_release, executor_digest
 from .local_nested_fixed_loop_contract import (ASSERTION_IDS, CASE_ID, MARKER_KEYS, PARENT, REQUIREMENTS,
                                          STATUS, SUITE)
 from .local_nested_fixed_loop_run import (BINARY_KIND, HUMAN_ID, MOCK_ERR_LOG_NAME, MOCK_LOG_NAME,
@@ -84,8 +84,7 @@ def _bound(root):
              and binding.get('source_binding', {}).get('parent') == PARENT
              and [row['id'] for row in binding['source_binding']['requirements']] == list(REQUIREMENTS)
              and binding.get('mock_child', {}).get('expected_webhook_requests') == 0
-             and len(binding.get('legacy_inventory', [])) == len(current_manifest()['legacy_inventory'])
-             and len({row['id'] for row in binding['legacy_inventory']}) == len(current_manifest()['legacy_inventory'])
+             and binding_matches_reviewed_release(binding.get('legacy_inventory', []))
              and PARENT in {row['id'] for row in binding.get('legacy_inventory', [])},
              'Nested fixed-loop frozen binding is invalid')
     return binding

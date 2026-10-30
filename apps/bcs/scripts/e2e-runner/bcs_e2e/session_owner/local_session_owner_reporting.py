@@ -17,7 +17,7 @@ import os
 from pathlib import Path
 import stat
 
-from ..inventory import current_manifest, executor_digest
+from ..inventory import binding_matches_reviewed_release, executor_digest
 from ..profile import fingerprint
 from ..run_state import RunStateError, read
 from .session_owner_contract import (CASE_ID, CLEANUP_CHECKS, DOCUMENTED_GAPS,
@@ -91,8 +91,7 @@ def _bound(root):
              and binding.get('source_binding', {}).get('independent_slice') is True
              and [row['id'] for row in binding['source_binding']['requirements']] == list(REQUIREMENTS)
              and binding.get('source_binding', {}).get('story_checks') == STORY_CHECKS
-             and len(binding.get('legacy_inventory', [])) == len(current_manifest()['legacy_inventory'])
-             and len({row['id'] for row in binding.get('legacy_inventory', [])}) == len(current_manifest()['legacy_inventory']),
+             and binding_matches_reviewed_release(binding.get('legacy_inventory', [])),
              'Session owner frozen binding is invalid')
     return binding
 

@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 import stat
 
-from .inventory import current_manifest, executor_digest
+from .inventory import binding_matches_reviewed_release, executor_digest
 from .ledger import Ledger, LedgerError
 from .profile import fingerprint
 from .run_state import RunStateError, read
@@ -116,7 +116,7 @@ def _bound(root):
              and binding.get('selected_requirement_ids')==list(V1_REQUIREMENTS)
              and binding.get('report_inventory')==frozen_inventory()
              and [row['id'] for row in binding['parent']['requirements']]==list(V1_REQUIREMENTS)
-             and len(binding.get('legacy_inventory',[]))==len(current_manifest()['legacy_inventory'])
+             and binding_matches_reviewed_release(binding.get('legacy_inventory', []))
              and binding.get('store_messages') is True,'Workspace complete frozen binding is invalid')
     return binding
 

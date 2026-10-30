@@ -8,7 +8,7 @@ from pathlib import Path
 import stat
 
 from .case_rewrite import fixed_loop_case_rewrite
-from .inventory import current_manifest, executor_digest
+from .inventory import binding_matches_reviewed_release, executor_digest
 from .local_fixed_loop_contract import (ASSERTION_IDS, CASE_ID, PARENT, SUITE)
 from .profile import fingerprint
 from .run_state import RunStateError, read
@@ -71,8 +71,7 @@ def _bound(root: Path) -> dict:
              and binding.get('adapter_family') == 'OwnedLocalCaseAdapter'
              and binding.get('source_binding', {}).get('parent') == PARENT
              and [row.get('id') for row in binding['source_binding']['requirements']] == list(plan.requirement_ids)
-             and len(binding.get('legacy_inventory', [])) == len(current_manifest()['legacy_inventory'])
-             and len({row.get('id') for row in binding.get('legacy_inventory', [])}) == len(current_manifest()['legacy_inventory']),
+             and binding_matches_reviewed_release(binding.get('legacy_inventory', [])),
              'Fixed Loop frozen complete binding is invalid')
     return binding
 

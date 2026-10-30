@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import stat
 
-from .inventory import current_manifest, executor_digest
+from .inventory import binding_freezes_reviewed_release_rows, executor_digest
 from .local_operator_cli_contract import (
     SESSIONS_SERVICES_PARENT,
     SESSIONS_SERVICES_REQUIREMENTS,
@@ -162,7 +162,7 @@ def _bound(root: Path) -> dict:
         and binding.get('execution_profile_contract')
         == SESSION_CLI_COMPLETE_INVOKE_PROFILE_CONTRACT
         and binding.get('execution_profile_path') == EXECUTION_PROFILE_PATH
-        and legacy == current_manifest()['legacy_inventory']
+        and binding_freezes_reviewed_release_rows(legacy)
         and isinstance(binding.get('executor_digest'), str)
         and len(binding['executor_digest']) == 64
         and isinstance(binding.get('bcs_binary_sha256'), str)

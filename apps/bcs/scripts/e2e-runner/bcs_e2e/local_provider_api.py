@@ -19,7 +19,7 @@ import time
 import uuid
 from urllib.parse import quote, urlsplit
 
-from .inventory import current_manifest, executor_digest
+from .inventory import binding_matches_reviewed_release, current_manifest, executor_digest
 from .local_provider_contract import CASE_ID, SUITE, REQUIREMENTS, provider_source_binding
 from .local_provider_sink import OwnedLocalProviderSink
 from .local_provider_storage import OwnedLocalProviderStorage
@@ -120,7 +120,7 @@ class OwnedLocalProviderApi:
                     'sink_url_sha256': hashlib.sha256(self.sink.url.encode()).hexdigest()}
         _require(executor_digest() == self.executor_digest and self.binding == expected
                  and read(self.binding_path) == expected
-                 and len(expected['legacy_inventory']) == len(current_manifest()['legacy_inventory'])
+                 and binding_matches_reviewed_release(expected['legacy_inventory'])
                  and fingerprint(source) == self.source_binding_digest
                  and fingerprint(read(self.identities.fixtures.path)) == self.fixture_digest,
                  'Provider executor, source, binding, or fixture artifact changed')

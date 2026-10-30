@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import stat
 
-from .inventory import current_manifest, executor_digest
+from .inventory import binding_matches_reviewed_release, executor_digest
 from .profile import fingerprint
 from .run_state import RunStateError, read
 
@@ -69,8 +69,7 @@ def _bound(root):
              and binding.get('selected_requirement_ids') == list(V1_REQUIREMENTS)
              and binding.get('source_binding', {}).get('parent') == 'story_user_receives_group_event_webhooks'
              and [r['id'] for r in binding['source_binding']['requirements']] == list(V1_REQUIREMENTS)
-             and len(binding.get('legacy_inventory', [])) == len(current_manifest()['legacy_inventory'])
-             and len({r['id'] for r in binding['legacy_inventory']}) == len(current_manifest()['legacy_inventory']),
+             and binding_matches_reviewed_release(binding.get('legacy_inventory', [])),
              'Event Webhook frozen complete binding is invalid')
     return binding
 
