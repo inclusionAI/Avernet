@@ -45,7 +45,19 @@ function fallbackTopicContext(item: PersonalCenterActivity): PersonalCenterTopic
 
 function activityTopic(item: PersonalCenterActivity): CommunityTopic | null {
   const context = item.topicContext ?? fallbackTopicContext(item);
-  return personalCenterActivityToTopic({ ...item, topicContext: context });
+  const topic = personalCenterActivityToTopic({ ...item, topicContext: context });
+  if (!topic || item.activityType !== 'LIKED') return topic;
+
+  if (item.target.targetType === 'POST') {
+    const replyContent = item.bodyPreview.trim() || context.title;
+    const relatedTopicContent = [context.title, context.bodyPreview]
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .join('，');
+    return { ...topic, title: `回复：${replyContent}`, body: relatedTopicContent };
+  }
+
+  return { ...topic, title: `帖子：${topic.title}` };
 }
 
 function ReplyActivityGroup({
@@ -162,6 +174,11 @@ export function ActivityList({
           <TopicRow
             key={`${item.actor.actorType}:${item.actor.id}:${item.activityType}:${item.target.targetType}:${item.target.id}`}
             topic={topic}
+            titleTooltip={
+              item.activityType === 'LIKED' && item.target.targetType === 'POST'
+                ? item.bodyPreview
+                : undefined
+            }
             onOpen={() => onOpenTopic(topic.id)}
             currentUserId={currentUserId}
             getAuthorSummary={getAuthorSummary}

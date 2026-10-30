@@ -42,6 +42,7 @@ export interface TopicRowProps {
   getAuthorSummary?: (author: CommunityTopic['author']) => InteractionSummary | undefined;
   loadAuthorSummary?: (author: CommunityTopic['author']) => void;
   followAuthor?: (author: CommunityTopic['author']) => Promise<boolean>;
+  titleTooltip?: string;
   authorFollowLoading?: (author: CommunityTopic['author']) => boolean;
   authorFollowed?: (author: CommunityTopic['author']) => boolean;
 }
@@ -56,6 +57,7 @@ export function TopicRow({
   followAuthor,
   authorFollowLoading,
   authorFollowed,
+  titleTooltip,
 }: TopicRowProps) {
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -83,7 +85,7 @@ export function TopicRow({
     >
       <div className="min-w-0">
         <div className="flex items-center gap-2">
-          <h3 className="m-0 min-w-0 truncate text-sm font-semibold text-foreground">{topic.title}</h3>
+          <h3 className="m-0 min-w-0 truncate text-sm font-semibold text-foreground" title={titleTooltip}>{topic.title}</h3>
           {topic.topicType === 'poll' ? (
             <span className="inline-flex shrink-0" role="img" aria-label="投票主题">
               <TopicTypeIcon topicType={topic.topicType} className="size-3.5 text-muted-foreground" />

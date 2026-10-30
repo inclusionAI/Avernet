@@ -208,6 +208,50 @@ describe('CommunityPersonalCenter', () => {
     ).toHaveClass('truncate');
   });
 
+  it('keeps liked topic and reply rows separate while distinguishing their source content', () => {
+    mockedCenter.activityType = 'LIKED';
+    mockedCenter.activityPage = {
+      items: [
+        {
+          ...baseActivity,
+          activityType: 'LIKED',
+          bodyPreview: '主题标题',
+          target: { targetType: 'TOPIC', id: 'topic-1' },
+          topicContext: {
+            ...baseActivity.topicContext,
+            title: '主题标题',
+            bodyPreview: '主题内容',
+          },
+        },
+        {
+          ...baseActivity,
+          activityType: 'LIKED',
+          bodyPreview: '这是一个需要完整 hover 展示的比较长回复内容',
+          target: { targetType: 'POST', id: 'post-1' },
+          postId: 'post-1',
+          topicContext: {
+            ...baseActivity.topicContext,
+            title: '主题标题',
+            bodyPreview: '主题内容',
+          },
+        },
+      ],
+      total: 2,
+    };
+
+    render(<CommunityPersonalCenter onBack={jest.fn()} onOpenTopic={jest.fn()} />);
+
+    expect(screen.getByText('帖子：主题标题')).toBeInTheDocument();
+    expect(screen.getByText('回复：这是一个需要完整 hover 展示的比较长回复内容')).toBeInTheDocument();
+    expect(screen.getByText('回复：这是一个需要完整 hover 展示的比较长回复内容')).toHaveClass('truncate');
+    expect(screen.getByTitle('这是一个需要完整 hover 展示的比较长回复内容')).toHaveAttribute(
+      'title',
+      '这是一个需要完整 hover 展示的比较长回复内容',
+    );
+    expect(screen.getByText('主题标题，主题内容')).toBeInTheDocument();
+    expect(screen.getByText('共 2 条')).toBeInTheDocument();
+  });
+
   it('renders follow identities, their topics, and supports unfollowing', async () => {
     mockedCenter.activityType = 'FOLLOWED';
     mockedCenter.activityPage = {
