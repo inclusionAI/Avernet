@@ -160,6 +160,24 @@ def test_bad_authorized_page_is_rejected(changes):
             )
 
 
+@pytest.mark.parametrize(
+    "space_id",
+    [None, 0, -1, "1", 1.0, True, 2**63],
+)
+def test_bad_authorized_page_space_is_rejected_without_provider_io(space_id):
+    def refuse(request):
+        raise AssertionError("invalid space ids must never reach the provider")
+
+    with httpx.Client(transport=httpx.MockTransport(refuse)) as http:
+        with pytest.raises(KnowledgeManagementError, match="INVALID_KNOWLEDGE_INPUT"):
+            catalog(http).page_authorized(
+                scope=BotKnowledgeScope("bot", "owner", "pre"),
+                space_id=space_id,
+                cursor=10,
+                limit=2,
+            )
+
+
 def test_service_consumes_only_one_page_and_preserves_provider_cursor(world):
     BotKnowledgeBindingModel.__table__.create(world.engine)
     world.catalog.list_authorized = Mock(side_effect=AssertionError("full list"))
