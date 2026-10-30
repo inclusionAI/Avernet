@@ -1,7 +1,7 @@
 {
   "bearer_identity": {
     "actor": "driver",
-    "cookie_reference": "admitted but never attached to any request",
+    "cookie_reference": "presence-validated and attached beside the driver Bot bearer on every station request (duo credential: Human cookie for station ACE admission; the value is never journaled)",
     "expected_status": 200,
     "match_field": "bot_uuid",
     "method": "GET",

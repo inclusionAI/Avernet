@@ -5,8 +5,9 @@ The owned-local leg delegates unchanged to the frozen flat black-box executor
 preprod leg spawns the bearer black-box child
 (``service_policy/story.py``, 20 story checks) against the reviewed
 bcs-direct origin and resolves the driver Bot bearer and the Human Cookie
-only from named process-environment references; the cookie is admitted for
-presence and never attached to any request. No leg stores a credential.
+only from named process-environment references; both travel on the wire as
+a duo request (Human cookie for station ACE admission, driver Bot bearer
+for journey actor attribution). No leg stores a credential.
 
 The registration obligation maps honestly on preprod: the shared dedicated
 pool driver Bot is pre-admitted, so the runner never registers Bots and

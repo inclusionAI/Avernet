@@ -101,7 +101,7 @@ def obligation_records() -> dict:
         REQUIREMENTS[0]: {
             'transport': 'product-http', 'route': 'GET /bots/{driver_bot_id}',
             'status': 200, 'actor_match': True, 'driver_bot': DRIVER_BOT,
-            'cookie_mode': 'presence_validated_never_attached'},
+            'cookie_mode': 'duo_attached_after_presence_validation'},
         REQUIREMENTS[1]: {
             'transport': 'none', 'disposition': REGISTRATION_DISPOSITION,
             'driver_bot_deletion_forbidden': True},
@@ -1116,6 +1116,29 @@ class ServicePolicyDualCaseRunTests(unittest.TestCase):
         self.assertEqual(report['executor_digest'], executor_digest())
         self.assertTrue(report['source_binding_digest'])
         self.assertTrue(report['flat_source_binding_digest'])
+
+
+class DuoCookieAdmissionTests(unittest.TestCase):
+    """Station-form duo credential: validated Human cookie rides with the bearer."""
+
+    def test_bearer_child_attaches_human_cookie_beside_driver_bearer(self):
+        from bcs_e2e.service_policy.story import Story
+        with patch.dict(os.environ, {DRIVER_ENV: DRIVER_CANARY,
+                                     COOKIE_ENV: COOKIE_CANARY}):
+            story = Story('https://bcs-pre.alipay.com', DRIVER_BOT,
+                          bearer_token_env=DRIVER_ENV, cookie_env=COOKIE_ENV)
+        headers = story._headers()
+        self.assertEqual(headers['Authorization'], 'Bearer ' + DRIVER_CANARY)
+        self.assertEqual(headers['Cookie'], COOKIE_CANARY)
+        self.assertIn(COOKIE_CANARY, story.secrets)
+
+    def test_bearer_child_fail_closes_when_cookie_reference_missing(self):
+        from bcs_e2e.service_policy.story import Story, StoryFailure
+        with patch.dict(os.environ, {DRIVER_ENV: DRIVER_CANARY}, clear=False):
+            os.environ.pop(COOKIE_ENV, None)
+            with self.assertRaises(StoryFailure):
+                Story('https://bcs-pre.alipay.com', DRIVER_BOT,
+                      bearer_token_env=DRIVER_ENV, cookie_env=COOKIE_ENV)
 
 
 if __name__ == '__main__':

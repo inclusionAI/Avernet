@@ -62,14 +62,25 @@ class StoryFailure(AssertionError):
 class Story:
     def __init__(self, base_url: str, human: str, fixture: Path, cli_binary: Path, *,
                  identity_mode: str = 'register', bearer_token_env: str = '',
-                 fixture_hash: str = FIXTURE_HASH):
+                 cookie_env: str = '', fixture_hash: str = FIXTURE_HASH):
         self.base = urllib.parse.urlsplit(base_url.rstrip('/'))
         self.human = human
         self.fixture = fixture
         self.cli_binary = cli_binary
         self.identity_mode = identity_mode
         self.bearer_token_env = bearer_token_env
-        self.fixture_hash = fixture_hash
+        self.cookie_env = cookie_env
+        cookie = os.environ.get(cookie_env, '') if cookie_env else ''
+        if cookie and (not cookie.isascii()
+                       or any(ord(char) < 32 or ord(char) == 127 for char in cookie)
+                       or len(cookie) > 8192):
+            raise StoryFailure('human cookie environment reference is unsafe')
+        # Station form adaptation: the legacy Draft face sits behind the
+        # station ACE, which answers bearer-only requests with a 302 SSO
+        # redirect. In bearer identity mode the validated Human cookie is
+        # attached beside the author bearer (duo request); its value is
+        # never journaled (responses record method/path/status/cache only).
+        self._human_cookie = cookie if identity_mode == 'bearer' else ''
         self.checks = 0
         self.responses: list[dict] = []
         self.author_token = ''
@@ -90,6 +101,8 @@ class Story:
             headers['X-Mock-Nick-Name'] = 'Draft delivery operator'
         if token:
             headers['Authorization'] = 'Bearer ' + token
+        if self._human_cookie:
+            headers['Cookie'] = self._human_cookie
         return headers
 
     def request(self, label: str, method: str, path: str, *, body=None,
@@ -581,6 +594,8 @@ class Story:
             'schema_version': 2,
             'draft_id': draft_id,
             'identity_mode': self.identity_mode,
+            'cookie_mode': ('duo_attached_after_presence_validation'
+                            if self._human_cookie else 'not_attached'),
             'fixture': {'content_hash': original_hash, 'updated_content_hash': updated_hash,
                         'size_bytes': FIXTURE_BYTES},
             'author': {'uuid': self.author_uuid or None,
@@ -601,13 +616,15 @@ def main(argv=None) -> int:
     parser.add_argument('--identity-mode', choices=('register', 'bearer'),
                         default='register')
     parser.add_argument('--bearer-token-env', default='')
+    parser.add_argument('--cookie-env', default='')
     args = parser.parse_args(argv)
     work = Path.cwd() / 'draft-cli-work'
     if work.exists():
         raise StoryFailure('CLI work directory must be fresh')
     work.mkdir(mode=0o700)
     story = Story(args.base_url, args.human, Path(args.fixture), Path(args.cli_binary),
-                  identity_mode=args.identity_mode, bearer_token_env=args.bearer_token_env)
+                  identity_mode=args.identity_mode, bearer_token_env=args.bearer_token_env,
+                  cookie_env=args.cookie_env)
     story.work = work
     evidence = story.run()
     if story.checks != EXPECTED_CHECKS:

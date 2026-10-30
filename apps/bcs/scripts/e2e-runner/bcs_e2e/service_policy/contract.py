@@ -160,7 +160,7 @@ def frozen_dual_contract() -> dict:
             'expected_status': 200,
             'match_field': 'bot_uuid',
             'actor': 'driver',
-            'cookie_reference': 'admitted but never attached to any request',
+            'cookie_reference': 'presence-validated and attached beside the driver Bot bearer on every station request (duo credential: Human cookie for station ACE admission; the value is never journaled)',
         },
         'registration_plane': {
             'local': 'mock-admission headers plus one-time token registration',

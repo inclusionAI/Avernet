@@ -280,6 +280,9 @@ class DraftDeliveryDualTests(unittest.TestCase):
         self.assertIn('--identity-mode', argv)
         self.assertEqual(argv[argv.index('--identity-mode') + 1], 'bearer')
         self.assertEqual(argv[argv.index('--bearer-token-env') + 1], DRIVER_ENV)
+        self.assertIn('--cookie-env', argv)
+        self.assertEqual(argv[argv.index('--cookie-env') + 1],
+                         'BCS_E2E_HUMAN_COOKIE')
         self.assertIn(str(cli_binary), argv)
         self.assertNotIn(str(server), argv)
         self.assertIn(str(evidence), argv)
@@ -726,6 +729,33 @@ class DraftDeliveryDualTests(unittest.TestCase):
         self.assertEqual([obligation for obligation, _ in dual.OBLIGATION_CHECKS],
                          list(REQUIREMENTS))
         self.assertEqual(dual._HEADER_ENV, {'Authorization': DRIVER_ENV, 'Cookie': COOKIE_ENV})
+
+
+class DuoCookieAdmissionTests(unittest.TestCase):
+    """Station-form duo credential on the Draft legacy face."""
+
+    def test_bearer_child_attaches_cookie_beside_author_bearer(self):
+        from unittest.mock import patch
+        from bcs_e2e.draft_delivery.story import Story
+        with patch.dict('os.environ', {'BCS_E2E_DRIVER_TOKEN': 'author-canary',
+                                       'BCS_E2E_HUMAN_COOKIE': 'cookie-canary'}):
+            story = Story('https://bcs-pre.alipay.com', '39464',
+                          Path('/tmp/draft-fixture.yaml'), Path('/tmp/bcs-cli'),
+                          identity_mode='bearer', bearer_token_env='BCS_E2E_DRIVER_TOKEN',
+                          cookie_env='BCS_E2E_HUMAN_COOKIE')
+        headers = story._headers(token='author-canary')
+        self.assertEqual(headers['Authorization'], 'Bearer author-canary')
+        self.assertEqual(headers['Cookie'], 'cookie-canary')
+
+    def test_register_mode_and_missing_cookie_never_attach(self):
+        from bcs_e2e.draft_delivery.story import Story
+        story = Story('http://127.0.0.1:1', '39464', Path('/tmp/f.yaml'),
+                      Path('/tmp/bcs-cli'), identity_mode='register')
+        self.assertNotIn('Cookie', story._headers(token='t'))
+        bearer = Story('https://bcs-pre.alipay.com', '39464', Path('/tmp/f.yaml'),
+                       Path('/tmp/bcs-cli'), identity_mode='bearer',
+                       bearer_token_env='BCS_E2E_DRIVER_TOKEN', cookie_env='')
+        self.assertNotIn('Cookie', bearer._headers(token='t'))
 
 
 if __name__ == '__main__':

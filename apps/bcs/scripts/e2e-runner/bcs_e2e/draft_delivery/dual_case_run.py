@@ -253,7 +253,8 @@ def _preprod_argv(*, base_url: str, human: str, cli_binary: Path,
             '--evidence-file', str(evidence_path),
             '--cli-binary', str(cli_binary),
             '--identity-mode', 'bearer',
-            '--bearer-token-env', _DRIVER_ENV]
+            '--bearer-token-env', _DRIVER_ENV,
+            '--cookie-env', _COOKIE_ENV]
 
 
 def _launch_preprod_story(*, base_url: str, human: str, cli_binary: Path, work: Path,

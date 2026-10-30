@@ -1,6 +1,6 @@
 {
   "auth": {
-    "cookie_reference": "admitted for presence and never attached to any request",
+    "cookie_reference": "presence-validated and attached beside the driver Bot bearer on every station request (duo credential: Human cookie for station ACE admission; the value is never journaled)",
     "header_env": {
       "Authorization": "BCS_E2E_DRIVER_TOKEN",
       "Cookie": "BCS_E2E_HUMAN_COOKIE"

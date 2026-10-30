@@ -211,7 +211,7 @@ def frozen_dual_contract() -> dict:
             'local': 'owned-local',
             'preprod': 'preprod-driver-bot-bearer',
             'header_env': dict(HEADER_ENV),
-            'cookie_reference': 'admitted for presence and never attached to any request',
+            'cookie_reference': 'presence-validated and attached beside the driver Bot bearer on every station request (duo credential: Human cookie for station ACE admission; the value is never journaled)',
         },
         'judge_gate': {
             'local': dict(JUDGE_BLOCKS['local']),

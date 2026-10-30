@@ -22,9 +22,11 @@ pre-admitted dedicated-pool driver Bot bearer identity:
 - teardown deletes exactly the three Sessions and two Groups the story
   created; the shared driver Bot is never registered and never deleted.
 
-The Human Cookie environment reference is admitted for presence only and is
-never attached to any request. Only the driver Bot bearer travels on the
-wire. The child emits only the frozen marker on stdout, writes one bounded
+Station form adaptation: the Human Cookie is presence-validated and then
+attached beside the driver Bot bearer on every request (duo credential).
+The station ACE admits legacy writes only with the Human cookie; the driver
+Bot bearer keeps the journey actor attribution. The cookie value is bounded,
+never journaled, and swept by the evidence redaction gate. The child emits only the frozen marker on stdout, writes one bounded
 non-secret evidence file exclusively, and sweeps every credential canary
 before the write.
 """
@@ -94,9 +96,11 @@ class Story:
                 or any(ord(char) < 32 or ord(char) == 127 for char in cookie)
                 or len(cookie) > MAX_CREDENTIAL_BYTES):
             raise StoryFailure('human cookie environment reference is not loaded or unsafe')
-        # The cookie is presence-validated only; its value is dropped here and
-        # never attached to any request on this story.
-        del cookie
+        # Station form: the ACE legacy write surface answers bearer-only
+        # requests with an SSO login envelope, so the validated Human cookie
+        # travels beside the driver Bot bearer (duo request). The value stays
+        # bounded in memory and is swept by the evidence redaction gate.
+        self._human_cookie = cookie
         self.scheme = base.scheme
         self.host = base.hostname
         self.port = base.port or 443
@@ -105,7 +109,7 @@ class Story:
         self.bearer_token_env = bearer_token_env
         self.cookie_env = cookie_env
         self._bearer_token = token
-        self.secrets = [token]
+        self.secrets = [token, cookie]
         self.checks = 0
         self.groups: list[str] = []
         self.sessions: list[str] = []
@@ -118,8 +122,11 @@ class Story:
         self.checks += 1
 
     def _headers(self) -> dict:
-        return {'Authorization': 'Bearer ' + self._bearer_token,
-                'Content-Type': 'application/json'}
+        headers = {'Authorization': 'Bearer ' + self._bearer_token,
+                   'Content-Type': 'application/json'}
+        if self._human_cookie:
+            headers['Cookie'] = self._human_cookie
+        return headers
 
     def _exchange(self, method: str, path: str, *, body=None):
         payload = None if body is None else json.dumps(body).encode('utf-8')
@@ -175,7 +182,7 @@ class Story:
         self.obligations[requirement] = {
             'transport': 'product-http', 'route': 'GET /bots/{driver_bot_id}',
             'status': status, 'actor_match': True, 'driver_bot': self.driver_bot,
-            'cookie_mode': 'presence_validated_never_attached'}
+            'cookie_mode': 'duo_attached_after_presence_validation'}
 
     def _registration_disposition(self) -> None:
         requirement = NOT_APPLICABLE_REQUIREMENT
