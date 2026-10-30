@@ -165,7 +165,11 @@ class TeclawFilePromotion:
                     "(engine unreachable/error) — refusing to ship an incomplete snapshot"
                 )
             for entry in entries:
-                if entry.get("is_dir"):
+                # Skip both directory entries and symlinks: promotion can stage
+                # real file bytes only, and some symlinked listing entries are
+                # reported as non-directories but still cannot be read as files
+                # (they can point outside the bot-owned content tree).
+                if entry.get("is_dir") or entry.get("is_link"):
                     continue
                 engine_path = entry.get("path") or ""  # e.g. "/workspace/sub/x.csv"
                 if not engine_path:
