@@ -45,89 +45,113 @@ export function CommunityPage() {
     community.scope === 'following' ||
     community.topicType !== 'all';
   const scrollRootRef = useRef<HTMLElement>(null);
+  const selectedTopic = community.selectedTopic;
+  const personalCenter = (
+    <CommunityPersonalCenter
+      onBack={() => setShowPersonalCenter(false)}
+      onOpenTopic={(topicId) => {
+        void community.openTopicById?.(topicId);
+      }}
+    />
+  );
+  // Keep this wrapper in the tree in both detail and personal-center renders.
+  // Replacing it with the bare component would remount CommunityPersonalCenter
+  // and lose the active tab, page, and followed-author selection state.
+  const personalCenterLayer = showPersonalCenter ? (
+    <div
+      aria-hidden={Boolean(selectedTopic)}
+      className={selectedTopic ? 'hidden' : 'contents'}
+    >
+      {personalCenter}
+    </div>
+  ) : null;
+  const topicDetail = selectedTopic ? (
+    <CommunityTopicDetail
+      currentUserId={community.currentUserId}
+      targetSummary={community.targetSummary?.(selectedTopic)}
+      viewerTopicSummary={community.interactions?.getSummary({
+        actor: { actorType: 'HUMAN', id: community.currentUserId },
+        target: {
+          targetType: 'TOPIC',
+          id: selectedTopic.id,
+        },
+      })}
+      getAuthorSummary={community.getAuthorSummary}
+      loadAuthorSummary={community.loadAuthorSummary}
+      followAuthor={community.followAuthor}
+      authorFollowLoading={community.authorFollowPending}
+      authorFollowed={community.isAuthorFollowed}
+      likePending={community.interactions?.isActionPending('LIKE', {
+        targetType: 'TOPIC',
+        id: selectedTopic.id,
+      })}
+      favoritePending={community.interactions?.isActionPending('FAVORITE', {
+        targetType: 'TOPIC',
+        id: selectedTopic.id,
+      })}
+      onLike={(target) => community.likeTopic?.(target)}
+      onFavorite={(target) => community.favoriteTopic?.(target)}
+      getReplySummary={(postId) => community.interactions?.getSummary({ target: { targetType: 'POST', id: postId } })}
+      getReplyViewerSummary={(postId) =>
+        community.currentUserId
+          ? community.interactions?.getSummary({
+              actor: { actorType: 'HUMAN', id: community.currentUserId },
+              target: { targetType: 'POST', id: postId },
+            })
+          : undefined
+      }
+      replyLikePending={(postId) =>
+        community.interactions?.isActionPending('LIKE', { targetType: 'POST', id: postId })
+      }
+      onLikeReply={(postId) => void community.likeReply?.(postId)}
+      topic={selectedTopic}
+      replies={community.replies}
+      loading={community.detailLoading}
+      error={community.detailError}
+      closing={community.closing}
+      deleting={community.deleting}
+      helpfulPostId={community.helpfulPostId}
+      onBack={community.closeDetail}
+      onCloseTopic={community.closeTopic}
+      onEditTopic={() => setEditOpen(true)}
+      onDeleteTopic={community.deleteTopic}
+      onSetPostHelpful={community.setPostHelpful}
+      replyLoading={community.replyLoading}
+      replyError={community.replyError}
+      replySaving={community.replySaving}
+      onSubmitReply={community.createReply}
+      replyPage={community.replyPage}
+      replyPageCount={community.replyPageCount}
+      replyPageSize={COMMUNITY_REPLY_PAGE_SIZE}
+      onGoToReplyPage={(page) => void community.goToReplyPage?.(page)}
+    />
+  ) : null;
 
-  if (editOpen && community.selectedTopic) {
+  if (editOpen && selectedTopic) {
     return (
-      <EditTopicModal
-        open
-        topic={community.selectedTopic}
-        saving={community.editSaving}
-        onOpenChange={setEditOpen}
-        onSave={community.updateTopic}
-      />
+      <>
+        {personalCenterLayer}
+        <EditTopicModal
+          open
+          topic={selectedTopic}
+          saving={community.editSaving}
+          onOpenChange={setEditOpen}
+          onSave={community.updateTopic}
+        />
+      </>
     );
   }
 
-  if (community.selectedTopic) {
-    const topicTarget = { targetType: 'TOPIC' as const, id: community.selectedTopic.id };
+  if (topicDetail) {
     return (
-      <CommunityTopicDetail
-        currentUserId={community.currentUserId}
-        targetSummary={community.targetSummary?.(community.selectedTopic)}
-        viewerTopicSummary={community.interactions?.getSummary({
-          actor: { actorType: 'HUMAN', id: community.currentUserId },
-          target: {
-            targetType: 'TOPIC',
-            id: community.selectedTopic.id,
-          },
-        })}
-        getAuthorSummary={community.getAuthorSummary}
-        loadAuthorSummary={community.loadAuthorSummary}
-        followAuthor={community.followAuthor}
-        authorFollowLoading={community.authorFollowPending}
-        authorFollowed={community.isAuthorFollowed}
-        likePending={community.interactions?.isActionPending('LIKE', topicTarget)}
-        favoritePending={community.interactions?.isActionPending('FAVORITE', topicTarget)}
-        onLike={(target) => community.likeTopic?.(target)}
-        onFavorite={(target) => community.favoriteTopic?.(target)}
-        getReplySummary={(postId) => community.interactions?.getSummary({ target: { targetType: 'POST', id: postId } })}
-        getReplyViewerSummary={(postId) =>
-          community.currentUserId
-            ? community.interactions?.getSummary({
-                actor: { actorType: 'HUMAN', id: community.currentUserId },
-                target: { targetType: 'POST', id: postId },
-              })
-            : undefined
-        }
-        replyLikePending={(postId) =>
-          community.interactions?.isActionPending('LIKE', { targetType: 'POST', id: postId })
-        }
-        onLikeReply={(postId) => void community.likeReply?.(postId)}
-        topic={community.selectedTopic}
-        replies={community.replies}
-        loading={community.detailLoading}
-        error={community.detailError}
-        closing={community.closing}
-        deleting={community.deleting}
-        helpfulPostId={community.helpfulPostId}
-        onBack={community.closeDetail}
-        onCloseTopic={community.closeTopic}
-        onEditTopic={() => setEditOpen(true)}
-        onDeleteTopic={community.deleteTopic}
-        onSetPostHelpful={community.setPostHelpful}
-        replyLoading={community.replyLoading}
-        replyError={community.replyError}
-        replySaving={community.replySaving}
-        onSubmitReply={community.createReply}
-        replyPage={community.replyPage}
-        replyPageCount={community.replyPageCount}
-        replyPageSize={COMMUNITY_REPLY_PAGE_SIZE}
-        onGoToReplyPage={(page) => void community.goToReplyPage?.(page)}
-      />
+      <>
+        {personalCenterLayer}
+        {topicDetail}
+      </>
     );
   }
 
-  if (showPersonalCenter) {
-    return (
-      <CommunityPersonalCenter
-        onBack={() => setShowPersonalCenter(false)}
-        onOpenTopic={(topicId) => {
-          setShowPersonalCenter(false);
-          void community.openTopicById?.(topicId);
-        }}
-      />
-    );
-  }
+  if (showPersonalCenter) return <>{personalCenterLayer}</>;
 
   if (publishOpen) {
     return (

@@ -14,6 +14,7 @@ jest.mock('@/services/community/botDisplayNames', () => ({
 jest.mock('@/services/community', () => ({
   communityService: {
     listTopics: jest.fn(),
+    getInteractionSummaryBatch: jest.fn(),
   },
 }));
 
@@ -235,6 +236,22 @@ describe('CommunityPersonalCenter', () => {
         total: 1,
       })
       .mockResolvedValue({ items: [], total: 0 });
+    jest.mocked(communityService.getInteractionSummaryBatch).mockResolvedValue([
+      {
+        scope: 'TARGET',
+        target: { targetType: 'TOPIC', id: 'topic-2' },
+        viewCount: 321,
+        likeCount: 123,
+        favoriteCount: 54,
+        followCount: 2,
+        acceptCount: 3,
+        topicCount: 1,
+        replyCount: 9,
+        acceptedReplyCount: 1,
+        replyParticipantCount: 4,
+        helpfulReplyCount: 1,
+      },
+    ]);
     const onOpenTopic = jest.fn();
     const onUnfollow = jest.fn().mockResolvedValue(undefined);
     mockedCenter.unfollow = onUnfollow;
@@ -256,6 +273,12 @@ describe('CommunityPersonalCenter', () => {
       }),
     );
     expect(screen.getByText('张三 的帖子')).toBeInTheDocument();
+    expect(await screen.findByLabelText('浏览 321')).toBeInTheDocument();
+    expect(screen.getByLabelText('点赞 123')).toBeInTheDocument();
+    expect(screen.getByLabelText('收藏 54')).toBeInTheDocument();
+    expect(communityService.getInteractionSummaryBatch).toHaveBeenCalledWith([
+      { target: { targetType: 'TOPIC', id: 'topic-2' } },
+    ]);
     fireEvent.click(screen.getByText('张三的主题'));
     expect(onOpenTopic).toHaveBeenCalledWith('topic-2');
     fireEvent.click(screen.getByRole('button', { name: '取消关注 张三' }));
