@@ -117,7 +117,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     }
     const beforeDispatch = await this.required(task.taskId);
     if (beforeDispatch.status === "canceled") {
-      await this.stopTerminatedExecution(contract.stepId, null); return;
+      await this.stopTerminatedExecution(contract.stepId, null, task.request.target.entity_id); return;
     }
     const envelope = { taskType: "session_recovery", taskId: task.taskId, stepId: contract.stepId, attempt: executionNo,
       input: { taskId: task.taskId, executionId: issued.execution.executionId,
@@ -144,15 +144,15 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     logRepairEvent("session-recovery", "session_recovery_execution", "dispatched", { environment: this.deps.controlPlaneEnvironment,
       taskId: task.taskId, eventId: task.request.event_id, executionId: issued.execution.executionId,
       stepId: contract.stepId, jobId, attempt: executionNo, phase: task.phase, elapsedMs: this.now() - dispatchStartedAt });
-    await this.deps.repo.markExternalDispatched(contract.stepId, jobId, { executionId: issued.execution.executionId, jobId });
+    await this.deps.repo.markExternalDispatched(contract.stepId, jobId, { executionId: issued.execution.executionId, jobId, submittedBy: task.request.target.entity_id });
     const latest = await this.required(task.taskId);
-    if (latest.status === "canceled") { await this.stopTerminatedExecution(contract.stepId, jobId); return; }
+    if (latest.status === "canceled") { await this.stopTerminatedExecution(contract.stepId, jobId, task.request.target.entity_id); return; }
     if (latest.execution?.executionId !== issued.execution.executionId || latest.execution.state === "ended") {
-      await this.deps.ais.stopExecution(jobId); return;
+      await this.deps.ais.stopExecution(jobId, task.request.target.entity_id); return;
     }
     const saved = await this.save(latest, value => ({ ...value, execution: { ...value.execution!, jobId } }), issued.execution.executionId);
-    if (saved.status === "canceled") await this.stopTerminatedExecution(contract.stepId, jobId);
-    else if (saved.execution?.executionId !== issued.execution.executionId || saved.execution.state === "ended") await this.deps.ais.stopExecution(jobId);
+    if (saved.status === "canceled") await this.stopTerminatedExecution(contract.stepId, jobId, task.request.target.entity_id);
+    else if (saved.execution?.executionId !== issued.execution.executionId || saved.execution.state === "ended") await this.deps.ais.stopExecution(jobId, task.request.target.entity_id);
   }
   async release(input: RecoveryStoredTask, onlyWaitingOwner = false): Promise<void> {
     const task = await this.required(input.taskId);
@@ -188,7 +188,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     const stepId = task.aisExecution?.stepId;
     const step = stepId ? await this.deps.repo.findStep(stepId) : null;
     const jobId = task.execution?.jobId ?? step?.bot_run_id ?? null;
-    const termination = stepId ? await this.stopTerminatedExecution(stepId, jobId) : { status: "stop_pending" as const, aisJobId: null };
+    const termination = stepId ? await this.stopTerminatedExecution(stepId, jobId, task.request.target.entity_id) : { status: "stop_pending" as const, aisJobId: null };
     // Retain interrupted writes as unknown; cancellation never claims to roll back a dispatched operation.
     for (;;) {
       const calls = await this.deps.audit.listActiveToolCalls(task.taskId, 500);
@@ -209,7 +209,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     }
     return termination;
   }
-  private async stopTerminatedExecution(stepId: string, jobId: string | null): Promise<RecoveryTermination> {
+  private async stopTerminatedExecution(stepId: string, jobId: string | null, userId: string): Promise<RecoveryTermination> {
     const step = await this.deps.repo.findStep(stepId);
     if (step && !["succeeded", "failed", "canceled"].includes(step.status)) {
       await this.deps.repo.updateStepStatus(stepId, { status: "canceled", retryable: false,
@@ -218,7 +218,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     }
     if (!jobId) return { status: "stop_pending", aisJobId: null };
     let status: "remote_stopped" | "remote_stop_failed" = "remote_stopped";
-    try { await this.deps.ais.stopExecution(jobId); }
+    try { await this.deps.ais.stopExecution(jobId, userId); }
     catch {
       status = "remote_stop_failed";
       try {

@@ -54,6 +54,13 @@ describe('Workflow Repair Git-backed AIS execution', () => {
     if(mode==='valid')await expect(result).resolves.toEqual({status:'failed',error});
     else await expect(result).rejects.toThrow();
   });
+  it('stops with the original submission identity supplied by the lifecycle', async () => {
+    const stopExecution = vi.fn();
+    const adapter = createRepairAisExecution({} as IDatabase, { stopExecution } as unknown as AistudioService,
+      {} as RepairGitStore, 1, 'https://clawweb.example');
+    await adapter.stop({ jobId: 'job', actorId: '001234' } as Parameters<typeof adapter.stop>[0]);
+    expect(stopExecution).toHaveBeenCalledWith('job', '001234');
+  });
   it('declares its existing v1 integration transport for historical goal generation', () => {
     const adapter = createRepairAisExecution({} as IDatabase, {} as AistudioService, {} as RepairGitStore, 1, 'https://clawweb.example');
     expect(adapter.integrationVersion).toBe('workflow-proposal-plan/v1');

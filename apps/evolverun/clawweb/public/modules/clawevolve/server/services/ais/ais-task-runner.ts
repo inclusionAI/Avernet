@@ -13,6 +13,15 @@ export type AisTaskDefinition<TConfig> = {
   buildGlobalParams(config: TConfig, uploadArtifacts: Record<string, unknown>): Record<string, string>;
 };
 
+/** Read the original submitter from the existing dispatch receipt. */
+export function submittedAisUser(responseJson: string | null): string | null {
+  try {
+    const userId: unknown = JSON.parse(responseJson ?? "{}")?.submittedBy;
+    return typeof userId === "string" && !!userId.trim() && userId.length <= 128 && !/[\r\n\0]/u.test(userId)
+      ? userId : null;
+  } catch { return null; }
+}
+
 /** Platform-neutral AIS dispatch for ClawEvolve tasks. */
 export class AisTaskRunner<TConfig extends { artifacts: Record<string, AisArtifactSpec> }> {
   constructor(
