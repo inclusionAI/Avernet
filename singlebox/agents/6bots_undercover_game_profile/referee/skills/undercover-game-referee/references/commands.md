@@ -46,9 +46,9 @@ GroupContext 里抄。
 | 命令 | 顶掉了什么 | 用在哪 |
 | --- | --- | --- |
 | `begin` | 查询当前 session 成员并校验投递接收者身份 | S0 |
-| `open-round` | `collaborate permission` + `render-speak-run` + `collaborate run` | S1 / S5 / SX |
+| `open-round` | `collaborate permission` + `render-speak-run` + `collaborate run` | S1 / S5 / SR / SX |
 | `finish` | `session complete`，统一运行环境并支持关闭重试 | S4 |
-| `open-vote` | `collaborate permission` + `render-vote-run` + `collaborate run` | S3 / SX |
+| `open-vote` | `collaborate permission` + `render-vote-run` + `collaborate run` | S3 / SR / SX |
 
 它们会自己调 `bcs-cli`（认证仍由 CLI 负责，脚本不碰 token）。下面的 `render-*` 是维护者测试用的底层命令，主持人运行时不调用。
 
@@ -109,10 +109,30 @@ uc init --session S --referee-uuid R --human human_123 \
 `--full` 额外给 `eliminated`、`human_seat`、`renders`、`result`。`renders` 是本轮各运行渲染
 过几次，例如 `{"speak": 1, "vote": 2}` 表示投票重开过一次——只在卡住诊断时需要。
 
+### `recover`
+
+```bash
+uc recover --session S --run-id R --failure-reason REASON
+```
+
+收到 RUN_RESULT 时的第一个也是唯一一个恢复命令：按当前 phase 等同于 `open-round --retry`、
+`open-vote --retry` 或 `recap`，其余阶段返回 `recovered: false`。`USER_ABORTED`、`STALE_RUN`、
+`RETRY_LIMIT` 与 open-* 相同。
+
+### `recap`
+
+```bash
+uc recap --session S
+```
+
+我自己的 collect / tally 节点失败时，转述稿或开票稿没发出去。`recap` 只读，复述已经落盘的公开内容：
+`AWAIT_VOTE_START` / `AWAIT_PK_VOTE_START` 给 `speeches`（座位、名字、展示文本）；
+`AWAIT_NEXT_ROUND` / `AWAIT_PK_SPEAK_START` 给 `counts`、`tie`、`eliminated`。不含词和身份；其他阶段返回 `WRONG_PHASE`。
+
 ### `open-round`
 
 ```bash
-uc open-round --session S [--retry]
+uc open-round --session S [--retry [--run-id R] [--failure-reason REASON]]
 ```
 
 开一轮发言：查协作槽位 → 渲染 → 提交，一条命令做完。返回 `round`、`attempt`、
@@ -123,6 +143,10 @@ uc open-round --session S [--retry]
 
 槽位被占时返回 `RUN_SLOT_BUSY`，**这时状态没有任何改动**，可以安全重试。
 
+`--retry` 照抄 RunResult 的 `run_id` 和 `reason` 时，脚本多做三道检查，任一不过都不改状态：
+`USER_ABORTED`（reason 是 user_aborted，不重开）、`STALE_RUN`（不是本阶段当前的运行，静默结束）、
+`RETRY_LIMIT`（本轮这一阶段已经重开过两次，人工和自动共用次数）。
+
 例外是 phase 还停在 `AWAIT_NEXT_ROUND` 的那次：那说明投票运行没收尾，绝大多数时候是因为
 我把 S4 和 S5 挤进了同一次激活——我此刻就是那个运行的末节点。这时返回的是 **`IN_TALLY_NODE`**，
 **立刻结束激活，一次都不要重试**。
@@ -130,7 +154,7 @@ uc open-round --session S [--retry]
 ### `open-vote`
 
 ```bash
-uc open-vote --session S [--retry]
+uc open-vote --session S [--retry [--run-id R] [--failure-reason REASON]]
 ```
 
 同上。

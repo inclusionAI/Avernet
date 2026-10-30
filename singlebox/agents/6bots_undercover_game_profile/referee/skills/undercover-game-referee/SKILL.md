@@ -58,6 +58,17 @@ BCS_AUTH_FAILED / BCS_FORBIDDEN / 身份或名单不符：报告故障并结束�
 
 `reveal` 为新版投票副屏直接发布公开结算文件，成功后才确认揭晓。遇到 `RESULT_PUBLISH_FAILED`，报告失败；修复后重试原命令，脚本会核对已有文件。已成功揭晓只需补发文件时执行 `uc publish-result --session "$session_id"`，不再念终局稿。
 
+## 运行结果唤醒
+
+消息以 `[State Machine Run Result]` 开头就是 RUN_RESULT：我提交的运行失败或被取消，BCS 只发给我，人类看不到。它不是迟到的 WORKER_MSG，必须处理；字段只给我判断，一个都不念。
+
+第一个工具调用就是 `uc recover --session "$session_id" --run-id <run_id> --failure-reason <reason>`（两个值照抄消息字段），不先查 status。它在这一次调用里核对并重开当前阶段：
+
+1. 返回 announcement：原样播报后结束；返回投票重开：立刻结束，不说话。
+2. 返回 speeches 或开票结果（我自己的 collect / tally 失败过）：照 next_action 补念，再按下表对应行继续。
+3. USER_ABORTED：按 boards.md「本阶段已取消」说一句，结束。RETRY_LIMIT：按「重开上限」说一句，结束。
+4. STALE_RUN / RUN_SLOT_BUSY / recovered=false：已有新运行或无需处理，静默结束。
+
 ## 普通消息与回灌
 
 非节点唤醒时先 `uc status --session "$session_id"`，按下面处理。
@@ -74,14 +85,14 @@ BCS_AUTH_FAILED / BCS_FORBIDDEN / 身份或名单不符：报告故障并结束�
 | AWAIT_NEXT_ROUND + 遗言回执 | `uc mask --session "$session_id" --seat N --text '<原话>'`；只念返回 text，不附和；最后 `uc open-round --session "$session_id"` |
 | AWAIT_NEXT_ROUND + 人类“继续” | 按既有规则跳过等待，最后 `uc open-round --session "$session_id"` |
 | FINISHED | 不重复 reveal/结束会话；ECHO 静默结束，人类询问才提示新建会话 |
-| 运行中 + 迟到 WORKER_MSG | 不推进、不调用脚本 |
+| 运行中 + 迟到 WORKER_MSG（RUN_RESULT 除外） | 不推进、不调用脚本 |
 
 若 NO_GAME 收到的消息已明确要求开始，begin 后继续发牌；否则保留人类确认开始的步骤。
 
 开场按 begin 返回的配置说明人数与卧底数、只给词不告知身份、轮流发言后同时投票、
 一次平票 PK 及胜负规则（默认 6 人 1 卧底，卧底全出局平民胜，剩两人或轮数用完卧底仍在则卧底胜）。
 还须说明：human 先加入当前会话；每轮在副屏发言、投票；不点他人节点看词；
-超过五分钟无进展回复“卡住了”。话术用中文、名字带号数，不输出命令或内部状态。
+运行失败时我会自动重开，超过五分钟仍无进展再回复“卡住了”。话术用中文、名字带号数，不输出命令或内部状态。
 
 ## 末节点与恢复
 
@@ -93,7 +104,7 @@ open-round 成功后播报 announcement；open-vote 提交后按返回提示立�
 提交失败如实报告，不播报成功开场；submitted=true 也不代表任何玩家已完成。
 派遗言时身后不能有等待执行的节点。遗言回执公开，词与身份不可泄露。
 
-“卡住了”：查 status，SPEAK_RUNNING / PK_SPEAK_RUNNING 用 open-round --retry；VOTE_RUNNING / PK_VOTE_RUNNING 用 open-vote --retry；
+“卡住了”是 RUN_RESULT 之外的兜底：查 status，SPEAK_RUNNING / PK_SPEAK_RUNNING 用 open-round --retry；VOTE_RUNNING / PK_VOTE_RUNNING 用 open-vote --retry；
 AWAIT_VOTE_START / AWAIT_PK_VOTE_START 用 open-vote；AWAIT_PK_SPEAK_START 用 open-round（都不加 --retry）。都带当前 --session。
 IN_COLLECT_NODE / IN_TALLY_NODE 立即结束，不重试；RUN_SLOT_BUSY 说明仍在等待，结束。
-重开最多两次，按对应阶段的开场告知旧票/发言作废；仍失败请新建会话，不猜测推进。细节见阶段机 SX。
+同一轮重开最多两次（第三次脚本返回 RETRY_LIMIT），按对应阶段的开场告知旧票/发言作废；仍失败请新建会话，不猜测推进。细节见阶段机 SX。

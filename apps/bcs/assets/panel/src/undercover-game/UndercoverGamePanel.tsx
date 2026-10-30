@@ -62,7 +62,7 @@ const LABELS=stateLabels;
 function errorMessage(e:unknown){return e instanceof Error?e.message:'请求失败。'}
 function deadlineText(value?:number){if(!value)return '从容思考，留意场上发言';const s=Math.max(0,Math.ceil((value-Date.now())/1000));return s<=0?'已到期':`剩余 ${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;}
 function byteLength(value:string){return typeof TextEncoder!=='undefined'?new TextEncoder().encode(value).length:unescape(encodeURIComponent(value)).length;}
-function transitionText(params:UndercoverGamePanelParams,status:string){if(status==='failed'||status==='aborted')return '本阶段未正常完成，请刷新或告诉主持人卡住了。';if(params.phase.toLowerCase().includes('speak'))return '本轮发言已结束，主持人正在打开投票。';if(params.phase.toLowerCase().includes('vot'))return '投票已收齐，主持人正在计票或准备下一轮。';return '主持人正在准备下一阶段。';}
+function transitionText(params:UndercoverGamePanelParams,status:string){if(status==='failed')return '本阶段未正常完成，主持人正在自动重开；长时间没有动静再告诉主持人卡住了。';if(status==='aborted')return '本阶段未正常完成，运行已被取消；需要继续时告诉主持人卡住了。';if(params.phase.toLowerCase().includes('speak'))return '本轮发言已结束，主持人正在打开投票。';if(params.phase.toLowerCase().includes('vot'))return '投票已收齐，主持人正在计票或准备下一轮。';return '主持人正在准备下一阶段。';}
 function InvalidPanel({error,className,style}:{error:string;className?:string;style?:CSSProperties}){return <Container className={className} style={style}><ErrorBox role="alert"><strong>面板参数无效</strong><br/>{error}</ErrorBox></Container>}
 
 function GamePanel({params,className,style,onInteraction,onAction}:{params:UndercoverGamePanelParams;className?:string;style?:CSSProperties;onInteraction?:UndercoverGamePanelProps['onInteraction'];onAction?:UndercoverGamePanelProps['onAction']}){

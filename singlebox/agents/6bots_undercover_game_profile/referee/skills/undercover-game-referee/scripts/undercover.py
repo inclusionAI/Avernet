@@ -1390,6 +1390,10 @@ def cmd_status(args: argparse.Namespace) -> None:
         "pending_ping": (ping or {}).get("bot_name") if (ping or {}).get("kind") == "eulogy" else None,
         "next_action": NEXT_ACTION.get(state["phase"], "先跑 status"),
     }
+    kind = stage_kind(state["phase"])
+    if kind and state["rounds"]:
+        brief["attempt"] = current_stage(state).get("renders", {}).get(kind, 0)
+        brief["run_id"] = current_stage(state).get("run_ids", {}).get(kind)
     if state["phase"] == "FINISHED":
         if state.get("public_result") and not state.get("revealed_at"):
             brief["next_action"] = (
@@ -1416,10 +1420,51 @@ def cmd_status(args: argparse.Namespace) -> None:
             ],
             "human_seat": next(s["seat"] for s in state["seats"] if s["kind"] == "human"),
             "pending_ping_detail": ping,
-            "renders": (state["rounds"][-1].get("renders", {}) if state["rounds"] else {}),
+            "renders": (current_stage(state).get("renders", {}) if state["rounds"] else {}),
             "result": state["result"],
         }
     )
+
+
+# 同一轮同一阶段最多渲染三次：首次加两次重开。人工「卡住了」和自动重开共用这个计数。
+MAX_STAGE_RENDERS = 3
+
+
+def stage_kind(phase: str) -> str | None:
+    """运行中的阶段对应哪一种运行；其余阶段没有在跑的运行。"""
+    if phase in ("SPEAK_RUNNING", "PK_SPEAK_RUNNING"):
+        return "speak"
+    if phase in ("VOTE_RUNNING", "PK_VOTE_RUNNING"):
+        return "vote"
+    return None
+
+
+def guard_retry(state: dict[str, Any], kind: str, run_id: str | None, failure_reason: str | None) -> None:
+    """重开之前的三道闸：手动取消不重开、旧运行的结果不重开、超过次数不重开。"""
+    if failure_reason == "user_aborted":
+        die("USER_ABORTED", "这次运行是被手动取消的，不自动重开。用一句平实的话告诉人类本阶段已取消，结束激活。")
+    stage = current_stage(state)
+    saved = stage.get("run_ids", {}).get(kind)
+    if run_id and saved and saved != run_id:
+        die("STALE_RUN", "这条运行结果属于已经被替换的旧运行。静默结束激活，不重开、不说话。")
+    if stage.get("renders", {}).get(kind, 0) >= MAX_STAGE_RENDERS:
+        die("RETRY_LIMIT", "本轮这一阶段已经重开过两次，不再重开。按 boards.md「重开上限」说一句话，结束激活。")
+
+
+def remember_run(session_id: str, kind: str, run_id: str | None) -> None:
+    """把刚提交的运行记在当前阶段上，供运行结果核对是不是同一个运行。"""
+    if not run_id:
+        return
+    with locked(session_id):
+        state = load_state(session_id)
+        current_stage(state).setdefault("run_ids", {})[kind] = run_id
+        save_state(state)
+
+
+def submitted_run_id(result: dict[str, Any]) -> str | None:
+    """bcs-cli 把运行放在 run.run_id；旧格式在顶层或第一个节点上。"""
+    return ((result.get("run") or {}).get("run_id") or result.get("run_id")
+            or (result.get("nodes") or [{}])[0].get("run_id"))
 
 
 def bump_render(state: dict[str, Any], kind: str) -> int:
@@ -1433,7 +1478,8 @@ def run_file_kind(kind: str, rnd: int, attempt: int) -> str:
     return f"{kind}-r{rnd}" if attempt <= 1 else f"{kind}-r{rnd}-retry{attempt - 1}"
 
 
-def prepare_speak_run(session_id: str, retry: bool) -> dict[str, Any]:
+def prepare_speak_run(session_id: str, retry: bool, run_id: str | None = None,
+                      failure_reason: str | None = None) -> dict[str, Any]:
     with locked(session_id):
         state = load_state(session_id)
         pk = state["phase"] in ("AWAIT_PK_SPEAK_START", "PK_SPEAK_RUNNING")
@@ -1441,6 +1487,7 @@ def prepare_speak_run(session_id: str, retry: bool) -> dict[str, Any]:
             # 重开当前这一轮：上一次提交的运行失败了，而运行失败不会唤醒裁判。
             # 轮次不推进、本轮记录不重建，只把同一份 YAML 重新渲染一次。
             require_phase(state, "SPEAK_RUNNING", "PK_SPEAK_RUNNING")
+            guard_retry(state, "speak", run_id, failure_reason)
             if current_stage(state)["speeches"]:
                 die(
                     "ALREADY_SPOKEN",
@@ -1575,13 +1622,15 @@ def cmd_speeches_set(args: argparse.Namespace) -> None:
     )
 
 
-def prepare_vote_run(session_id: str, retry: bool) -> dict[str, Any]:
+def prepare_vote_run(session_id: str, retry: bool, run_id: str | None = None,
+                     failure_reason: str | None = None) -> dict[str, Any]:
     with locked(session_id):
         state = load_state(session_id)
         if retry:
             # 投票运行失败不会唤醒裁判，phase 却已经推到 VOTE_RUNNING 了。
             # 没有这条路，卡住诊断走到重开那一步就会被阶段卫兵拦死。
             require_phase(state, "VOTE_RUNNING", "PK_VOTE_RUNNING")
+            guard_retry(state, "vote", run_id, failure_reason)
         else:
             require_phase(state, "AWAIT_VOTE_START", "AWAIT_PK_VOTE_START")
         state["phase"] = "PK_VOTE_RUNNING" if is_pk(state) else "VOTE_RUNNING"
@@ -1983,13 +2032,67 @@ def cmd_begin(args: argparse.Namespace) -> None:
     )
 
 
+def remembered(session_id: str, kind: str, result: dict[str, Any]) -> str | None:
+    run_id = submitted_run_id(result)
+    remember_run(session_id, kind, run_id)
+    return run_id
+
+
+def cmd_recap(args: argparse.Namespace) -> None:
+    """主持人自己的 collect / tally 节点失败时，转述稿或开票稿没有发出去。
+
+    这里只复述已经落盘的公开内容（发言展示文本、票数、出局者），不含词和身份，
+    主持人照此用自己的口吻补念一遍，然后继续下一步。
+    """
+    state = load_state(args.session)
+    phase = state["phase"]
+    if not state["rounds"]:
+        die("WRONG_PHASE", "还没有任何一轮，不需要补念。")
+    stage = current_stage(state)
+    if phase in ("AWAIT_VOTE_START", "AWAIT_PK_VOTE_START"):
+        speeches = [{"seat": int(seat), "player": seat_of(state, int(seat))["display"], "text": rec["display"]}
+                    for seat, rec in sorted(stage["speeches"].items(), key=lambda kv: int(kv[0]))]
+        emit({"phase": phase, "round": state["round"], "stage": "speak", "speeches": speeches,
+              "next_action": "用自己的口吻把这些发言按座位逐条念一遍，念完 open-vote。"}, compact=True)
+        return
+    if phase in ("AWAIT_NEXT_ROUND", "AWAIT_PK_SPEAK_START"):
+        out = seat_of(state, stage["eliminated"]) if stage.get("eliminated") else None
+        emit({"phase": phase, "round": state["round"], "stage": "vote", "counts": stage.get("counts", {}),
+              "tie": bool(stage.get("tie")), "eliminated": f"{out['seat']}号{out['display']}" if out else None,
+              "next_action": "用自己的口吻补念这次开票结果，然后按 S4 继续（派遗言或开下一轮）。"}, compact=True)
+        return
+    die("WRONG_PHASE", "当前阶段没有需要补念的转述稿或开票稿。", phase=phase)
+
+
+def cmd_recover(args: argparse.Namespace) -> None:
+    """RUN_RESULT 的一步恢复：核对后重开当前阶段，或给出补念内容。
+
+    模型服务限流时每一次模型调用都可能要等几十秒，所以把「查状态、选命令、重开」
+    压成一次工具调用：重开在这次调用里就提交，主持人只需按返回播报或结束。
+    """
+    if getattr(args, "failure_reason", None) == "user_aborted":
+        die("USER_ABORTED", "这次运行是被手动取消的，不自动重开。用一句平实的话告诉人类本阶段已取消，结束激活。")
+    phase = load_state(args.session)["phase"]
+    retry = argparse.Namespace(session=args.session, retry=True, run_id=args.run_id,
+                               failure_reason=getattr(args, "failure_reason", None))
+    kind = stage_kind(phase)
+    if kind == "speak":
+        cmd_open_round(retry)
+    elif kind == "vote":
+        cmd_open_vote(retry)
+    elif phase in ("AWAIT_VOTE_START", "AWAIT_PK_VOTE_START", "AWAIT_NEXT_ROUND", "AWAIT_PK_SPEAK_START"):
+        cmd_recap(args)
+    else:
+        emit({"phase": phase, "recovered": False, "next_action": "这条运行结果不需要处理，静默结束激活。"}, compact=True)
+
+
 def cmd_open_round(args: argparse.Namespace) -> None:
     """查槽位、渲染并提交；直接启动玩家，不向当前主持人激活自派入口。"""
     # 开下一轮的正常入口是遗言回执那次激活；如果裁判在开票节点里就开下一轮，
     # 和 collect 节点里开投是同一条死锁，见 SELF_LOCK。
     busy = None if args.retry else self_lock_hint(args.session, "AWAIT_NEXT_ROUND")
     require_run_slot(args.session, busy)
-    payload = prepare_speak_run(args.session, args.retry)
+    payload = prepare_speak_run(args.session, args.retry, getattr(args, "run_id", None), getattr(args, "failure_reason", None))
     result = submit_run(
         args.session,
         payload["yaml_path"],
@@ -2005,7 +2108,7 @@ def cmd_open_round(args: argparse.Namespace) -> None:
             "attempt": payload["attempt"],
             "submitted": True,
             "announcement": payload["announcement"],
-            "run_id": result.get("run_id") or (result.get("nodes") or [{}])[0].get("run_id"),
+            "run_id": remembered(args.session, "speak", result),
             "next_action": SUBMITTED_NEXT_ACTION,
         },
         compact=True,
@@ -2021,7 +2124,7 @@ def cmd_open_vote(args: argparse.Namespace) -> None:
     # 诊断结论；非 retry 的这条路上，槽位被占只可能是发言运行没收尾，见 SELF_LOCK。
     busy = None if args.retry else self_lock_hint(args.session, "AWAIT_VOTE_START")
     require_run_slot(args.session, busy)
-    payload = prepare_vote_run(args.session, args.retry)
+    payload = prepare_vote_run(args.session, args.retry, getattr(args, "run_id", None), getattr(args, "failure_reason", None))
     result = submit_run(
         args.session,
         payload["yaml_path"],
@@ -2036,7 +2139,7 @@ def cmd_open_vote(args: argparse.Namespace) -> None:
             "round": payload["round"],
             "attempt": payload["attempt"],
             "submitted": True,
-            "run_id": result.get("run_id") or (result.get("nodes") or [{}])[0].get("run_id"),
+            "run_id": remembered(args.session, "vote", result),
             "next_action": "立刻结束激活。主持人已提交开投，副屏负责显示开投提示和旧票作废说明；"
             "本次不再播报、不追加工具调用。等待收齐投票后的独立计票节点。",
         },
@@ -2277,13 +2380,28 @@ def main() -> None:
     p.add_argument("--max-rounds", type=int, default=6)
     p.set_defaults(func=cmd_begin)
 
+    retry_help = ("与 --retry 同用：运行结果里的 run_id。和本阶段记录的运行不一致时返回 STALE_RUN，不重开。")
+    reason_help = "与 --retry 同用：运行结果里的 reason。user_aborted 返回 USER_ABORTED，不重开。"
     p = with_session(sub.add_parser("open-round", help="开一轮发言：查槽位、渲染、提交"))
     p.add_argument("--retry", action="store_true", help="重开当前这一轮的发言运行。轮次不推进。")
+    p.add_argument("--run-id", default=None, help=retry_help)
+    p.add_argument("--failure-reason", default=None, help=reason_help)
     p.set_defaults(func=cmd_open_round)
 
     p = with_session(sub.add_parser("open-vote", help="开投：查槽位、渲染、提交"))
     p.add_argument("--retry", action="store_true", help="重开当前这一轮的投票运行。之前的票作废。")
+    p.add_argument("--run-id", default=None, help=retry_help)
+    p.add_argument("--failure-reason", default=None, help=reason_help)
     p.set_defaults(func=cmd_open_vote)
+
+    with_session(sub.add_parser("recap", help="补念：转述稿或开票稿没发出去时复述已落盘的公开内容")).set_defaults(
+        func=cmd_recap
+    )
+
+    p = with_session(sub.add_parser("recover", help="收到 RUN_RESULT：一次调用完成核对与重开"))
+    p.add_argument("--run-id", required=True, help="运行结果里的 run_id")
+    p.add_argument("--failure-reason", required=True, help="运行结果里的 reason")
+    p.set_defaults(func=cmd_recover)
 
     with_session(sub.add_parser("render-ping", help="渲染遗言或预备任务")).set_defaults(
         func=cmd_render_ping

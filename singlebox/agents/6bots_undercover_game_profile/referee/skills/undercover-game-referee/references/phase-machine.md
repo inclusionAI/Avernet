@@ -4,6 +4,7 @@
 
 | phase | 唤醒类型 | 执行 |
 | --- | --- | --- |
+| 任意 | `RUN_RESULT`（消息以 `[State Machine Run Result]` 开头） | 先走 [SR 运行结果](#sr-运行结果)，优先于下面所有行 |
 | `NO_GAME`（还没开局） | `SESSION_START` | [S0 开局](#s0-开局) |
 | `FINISHED` **但这次是新会话把我叫醒的** | 任意 | 会话 ID 传错了。停下核对 `--session`，**不念稿、不 reveal、不结束会话** |
 | `NO_GAME`（还没开局） | `HUMAN_MSG` | 先做 S0；如果人类这句话就是要开始，紧接着做 S1 |
@@ -28,7 +29,7 @@
 
 任何格子里没写的组合：说清当前进行到哪、人类可以做什么，**不推进**。
 
-`SPEAK_RUNNING` / `VOTE_RUNNING` / `PK_SPEAK_RUNNING` / `PK_VOTE_RUNNING` 下的 `WORKER_MSG` 一律是迟到的回执，回一句无关紧要的话即可，**绝不推进阶段、绝不调用任何脚本命令**，没有例外。
+`SPEAK_RUNNING` / `VOTE_RUNNING` / `PK_SPEAK_RUNNING` / `PK_VOTE_RUNNING` 下的 `WORKER_MSG` 一律是迟到的回执，回一句无关紧要的话即可，**绝不推进阶段、绝不调用任何脚本命令**，没有例外。`RUN_RESULT` 不是回执：它是 BCS 告诉我运行已经失败或被取消，走 [SR](#sr-运行结果)。
 
 **节点唤醒按节点正文执行，写入命令由脚本校验当前阶段。** 运行失败之后，失败前派出去的节点仍可能迟到几十秒才把产物送回来。命令报告阶段不符就只回一句"这条是迟到的回执，已忽略"，不继续写入、不念稿——照着它往下走会让人类以为一切正常。
 
@@ -255,10 +256,42 @@ uc open-round --session "$session_id"
    **立刻结束激活，一次都不要重试。**
 3. 和 S1 一样：成功后播报 announcement 并结束。
 
+## SR 运行结果
+
+运行失败或被取消时，BCS 会给我发一条只有我能看到的消息，开头固定是 `[State Machine Run Result]`，
+后面是 `run_id`、`workflow`、`status`、`reason`、`failed_node`、`attempt`、`completed_nodes`。
+它在运行结束、协作槽位释放之后才发出，所以这里可以直接重开。
+
+第一个工具调用就是这一条，不先查 status（模型服务限流时每多一次调用都可能多等几十秒）：
+
+```bash
+uc recover --session "$session_id" --run-id <run_id> --failure-reason <reason>
+```
+
+`<run_id>`、`<reason>` 照抄消息里的字段。脚本按当前 phase 一次做完：
+
+| phase | `recover` 做什么 | 我接着做什么 |
+| --- | --- | --- |
+| `SPEAK_RUNNING` / `PK_SPEAK_RUNNING` | 等同 `open-round --retry`，重开发言 | 原样播报 announcement，结束 |
+| `VOTE_RUNNING` / `PK_VOTE_RUNNING` | 等同 `open-vote --retry`，重开投票 | 立刻结束，不说话 |
+| `AWAIT_VOTE_START` / `AWAIT_PK_VOTE_START` | 等同 `recap`：我自己的 collect 节点失败，转述稿没发出去 | 补念发言后 `uc open-vote`（不带 --retry） |
+| `AWAIT_NEXT_ROUND` / `AWAIT_PK_SPEAK_START` | 等同 `recap`：我自己的 tally 节点失败，开票稿没发出去 | 补念开票结果后按上表继续 |
+| 其余 | 返回 `recovered: false` | 静默结束 |
+
+返回码：
+
+- `STALE_RUN` 或 `RUN_SLOT_BUSY`：已经有新的运行在跑（比如人类先说了"卡住了"），**静默结束，不说话**。
+- `RETRY_LIMIT`：本轮这一阶段已经重开过两次。按 boards.md「重开上限」说一句，结束。
+- `USER_ABORTED`：同第一行。
+
+重开的播报和 SX 一样：发言重开播报 announcement；投票重开静默，副屏会说明旧票作废。
+`failed_node`、`reason` 这些字段只给我判断用，**一个都不念给人类**。
+
 ## SX 卡住诊断
 
-人类说"卡住了"就走这一节。运行失败不会唤醒我，所以人类这句话是唯一的入口——开场白里
-必须把"超过 5 分钟没动静回我一句『卡住了』"说清楚，每一轮都算数。先看现在在哪：
+人类说"卡住了"就走这一节。运行失败时 BCS 会先发 RUN_RESULT 把我叫醒（见 SR），这一节是它之外的兜底：
+比如我处理 RUN_RESULT 时自己的激活失败了，或者运行还活着但长时间没有进展。开场白里仍要把
+"超过 5 分钟没动静回我一句『卡住了』"说清楚，每一轮都算数。先看现在在哪：
 
 ```bash
 uc status --session "$session_id"
@@ -280,7 +313,7 @@ uc open-vote  --session "$session_id" --retry
 **`phase = AWAIT_VOTE_START` 时返回 `IN_COLLECT_NODE`** → 发言运行还挂在那儿没收尾。
 这一轮的汇总稿人类已经看到了，缺的只是开投。如实说：发言那一轮还没收尾，最多等到派单后
 10 分钟服务端判死，届时我再开投——然后结束激活，**不要重试、不要 `sleep` 着等**。
-判死之后人类再说一句"卡住了"，这条 `open-vote` 就能过。
+判死之后 BCS 会发来 RUN_RESULT，我按 SR 继续；万一没收到，人类再说一句"卡住了"，这条 `open-vote` 就能过。
 
 **`RUN_SLOT_BUSY` / `state_machine_run_active`** → 服务端仍认为运行活跃，不能据此排除队列卡住，而且这一条什么都没改。
 说一句还在等谁，结束激活。
@@ -291,6 +324,6 @@ uc open-vote  --session "$session_id" --retry
 
 **`--retry` 不能省。** 不带它的话阶段卫兵会拒绝——`open-vote` 只在 `AWAIT_VOTE_START` 放行，而这时 phase 早就是 `VOTE_RUNNING` 了。带上 `--retry` 时轮次不推进、本轮记录不重建，只是把同一份 YAML 重新渲染并重新提交。
 
-同一轮重开**最多两次**。第三次还是起不来就停下，如实说本局只能作废。
+同一轮重开**最多两次**，自动和人工重开共用次数，第三次脚本直接返回 `RETRY_LIMIT`。拦住就停下，如实说本局只能作废。
 
 **重开也提交不上，或者状态长时间不变** → 目前没有取消运行的命令。如实说本局只能作废，请新建一个会话重开。**不要假装还能救。**

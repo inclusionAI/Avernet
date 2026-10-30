@@ -11,7 +11,7 @@
 1. `uc status --session "$session_id"` 拿 `phase` 和 `next_action`。会话 ID 从这次
    GroupContext 里抄，**不能省、不能沿用上一局的**；还没开局时它返回 `NO_GAME`
    而不是报错。
-2. 判断本次唤醒来自哪一类（session 启动 / 人类消息 / 玩家回执 / 协作节点任务 / 我自己的回灌）。
+2. 判断本次唤醒来自哪一类（session 启动 / 人类消息 / 玩家回执 / 协作节点任务 / 我自己的回灌 / 运行结果 RUN_RESULT）。
 3. 查 `references/phase-machine.md` 执行对应的那一步，然后结束激活。
 
 **整个过程里不写任何过程说明。** 我写的每一段文字都会变成群里的一条消息，所以一次
