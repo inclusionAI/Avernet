@@ -489,3 +489,35 @@ class ChannelCliCaseTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ChannelCliContextEnvTests(unittest.TestCase):
+    """A1 guard: the cookie context carries the station environment selector."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        self.state = self.root / "state"
+        self.state.mkdir()
+        self.binary = self.root / "bcs-cli"
+        self.binary.write_bytes(b"#!/bin/sh\nexit 0\n")
+        self.binary.chmod(0o700)
+        self.digest = hashlib.sha256(self.binary.read_bytes()).hexdigest()
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+
+    def test_human_cookie_context_injects_station_env(self):
+        profile = validate_channel_cli_profile(channel_profile_value(preprod=True))
+        runner = ChannelCliRunner(profile, binary=self.binary,
+                                   binary_sha256=self.digest,
+                                   state_dir=self.state)
+        _, _, environment = runner._context("driver", "human_cookie", "human-cookie")
+        self.assertEqual(environment["BCS_COOKIE"], "human-cookie")
+        self.assertEqual(environment["tc_sdb_nenv"], "production")
+
+    def test_owned_bot_context_keeps_station_env_out(self):
+        profile = validate_channel_cli_profile(channel_profile_value(preprod=False))
+        runner = ChannelCliRunner(profile, binary=self.binary,
+                                   binary_sha256=self.digest,
+                                   state_dir=self.state)
+        _, session_file, environment = runner._context("driver", "owned_local_bot_token", "token")
+        self.assertNotIn("tc_sdb_nenv", environment)
+        self.assertEqual(json.loads(session_file.read_text(encoding="utf-8"))["token"], "token")
