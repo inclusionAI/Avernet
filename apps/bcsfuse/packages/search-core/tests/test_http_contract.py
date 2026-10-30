@@ -3,15 +3,24 @@
 import asyncio
 
 import pytest
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.testclient import TestClient
+from search_core.adapters.http import create_search_router
+from search_core.adapters.http.routes import SearchBody
 from search_core.api.errors import (
     SearchOverloaded,
     SearchUnavailable,
     UnsupportedSearchOption,
 )
-from search_core.api.models import SearchItem, SearchResult, VerifiedIdentity
-from search_core.adapters.http import create_search_router
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.testclient import TestClient
+from search_core.api.models import (
+    EffectiveRetrieval,
+    EffectiveSearch,
+    ScoreDetails,
+    SearchItem,
+    SearchResult,
+    StageScore,
+    VerifiedIdentity,
+)
 
 
 class Application:
@@ -55,6 +64,7 @@ def test_same_request_and_response_contract(operation):
             headers={"authorization": "Bearer test-only"},
         )
     assert result.status_code == 200
+    assert set(result.json()) == {"items", "status", "reasons"}
     assert result.json()["items"] == [
         {
             "id": "agent:1",
@@ -138,3 +148,102 @@ def test_capacity_rejection_is_distinct_from_dependency_failure():
             headers={"authorization": "Bearer test-only"},
         )
     assert response.status_code == 429
+
+
+def test_host_can_delegate_positive_limit_to_application_policy():
+    service = Application()
+    with client_for(service, request_model=SearchBody) as client:
+        response = client.post(
+            "/api/v2/search",
+            json={"query": "x", "limit": 21},
+            headers={"authorization": "Bearer test-only"},
+        )
+        schema = client.get("/openapi.json").json()["components"]["schemas"][
+            "SearchBody"
+        ]
+    assert response.status_code == 200
+    assert service.calls[0][0].limit == 21
+    assert "maximum" not in schema["properties"]["limit"]
+
+
+@pytest.mark.parametrize("operation", ["search", "recommend"])
+def test_response_preserves_effective_parameters_and_degradation(operation):
+    class DegradedApplication:
+        async def execute(self, command, identity):
+            return SearchResult(
+                status="degraded",
+                reasons=("embedding_unavailable",),
+                effective=EffectiveSearch(
+                    limit=3,
+                    retrieval=EffectiveRetrieval(True, True, False),
+                ),
+            )
+
+    with client_for(DegradedApplication()) as client:
+        response = client.post(
+            f"/api/v2/{operation}",
+            json={"query": "x", "limit": 5},
+            headers={"authorization": "Bearer test-only"},
+        )
+    assert response.status_code == 200
+    assert response.json() == {
+        "items": [],
+        "status": "degraded",
+        "reasons": ["embedding_unavailable"],
+        "effective": {
+            "limit": 3,
+            "retrieval": {
+                "keyword_enabled": True,
+                "vector_enabled": True,
+                "rerank_enabled": False,
+            },
+        },
+    }
+
+
+def test_response_omits_unknown_retrieval_configuration():
+    class Application:
+        async def execute(self, command, identity):
+            return SearchResult(effective=EffectiveSearch(limit=command.limit))
+
+    with client_for(Application()) as client:
+        response = client.post(
+            "/api/v2/search",
+            json={"query": "x"},
+            headers={"authorization": "Bearer test-only"},
+        )
+    assert response.json()["effective"] == {"limit": 5}
+
+
+@pytest.mark.parametrize("operation", ["search", "recommend"])
+def test_stage_scores_are_additive_and_missing_stages_are_omitted(operation):
+    class Application:
+        async def execute(self, command, identity):
+            return SearchResult(
+                items=(
+                    SearchItem(
+                        "a",
+                        "A",
+                        "summary",
+                        0.01,
+                        "rrf",
+                        score_details=ScoreDetails(
+                            keyword=StageScore(0.0, 2), rrf=StageScore(0.01, 1)
+                        ),
+                    ),
+                )
+            )
+
+    with client_for(Application()) as client:
+        response = client.post(
+            f"/api/v2/{operation}",
+            json={"query": "x"},
+            headers={"authorization": "Bearer test-only"},
+        )
+    item = response.json()["items"][0]
+    assert item["score"] == 0.01 and item["score_source"] == "rrf"
+    assert item["summary"] == "summary"
+    assert item["scoreDetails"] == {
+        "keyword": {"value": 0.0, "rank": 2},
+        "rrf": {"value": 0.01, "rank": 1},
+    }

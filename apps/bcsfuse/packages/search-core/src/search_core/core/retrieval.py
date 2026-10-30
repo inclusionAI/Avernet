@@ -10,8 +10,10 @@ from search_core.api.errors import SearchUnavailable
 from search_core.api.models import (
     RecallResult,
     RetrievalRequest,
+    ScoreDetails,
     SearchItem,
     SearchResult,
+    StageScore,
 )
 from search_core.core.ranking import reciprocal_rank_fusion
 from search_core.plugin_api.embedding import AsyncEmbeddingProvider, EmbeddingProvider
@@ -23,6 +25,18 @@ from search_core.plugin_api.retrieval import RetrievalIndex
 class _StageFailure(Exception):
     def __init__(self, reason):
         self.reason = reason
+
+
+def _stage_scores(scores):
+    # RRF counts each identity once. Keep the first occurrence and its order.
+    unique = {}
+    for key, value in scores:
+        unique.setdefault(key, value)
+    return {
+        key: StageScore(value, rank)
+        for rank, (key, value) in enumerate(unique.items(), 1)
+        if math.isfinite(value)
+    }
 
 
 class HybridRetrievalService:
@@ -200,6 +214,10 @@ class HybridRetrievalService:
             [[h.id for h in recall.vector_hits], [h.id for h in recall.keyword_hits]]
         )[: self._candidate_limit]
         scores = [(r.item_id, r.score) for r in ranking]
+        keyword_scores = _stage_scores((h.id, h.score) for h in recall.keyword_hits)
+        vector_scores = _stage_scores((h.id, h.score) for h in recall.vector_hits)
+        fusion_scores = _stage_scores(scores)
+        reranker_scores = {}
         reasons = list(recall.reasons)
         score_source = "rrf"
         if self._reranker is not None and ranking:
@@ -230,6 +248,7 @@ class HybridRetrievalService:
                 if any(not math.isfinite(r.score) for r in reranked):
                     raise ValueError("non-finite reranker score")
                 scores = [(r.candidate_id, r.score) for r in reranked]
+                reranker_scores = _stage_scores(scores)
                 score_source = "reranker"
             except Exception as exc:
                 if not self._allow_partial:
@@ -243,6 +262,12 @@ class HybridRetrievalService:
                     summary=str(hits[key].payload.get("content") or ""),
                     score=score,
                     score_source=score_source,
+                    score_details=ScoreDetails(
+                        keyword=keyword_scores.get(key),
+                        vector=vector_scores.get(key),
+                        rrf=fusion_scores.get(key),
+                        reranker=reranker_scores.get(key),
+                    ),
                 )
                 for key, score in scores[: request.limit]
             ),

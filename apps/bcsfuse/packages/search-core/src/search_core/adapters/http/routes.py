@@ -12,7 +12,12 @@ from search_core.api.errors import (
     SearchUnavailable,
     UnsupportedSearchOption,
 )
-from search_core.api.models import SearchCommand, VerifiedIdentity
+from search_core.api.models import (
+    EffectiveSearch,
+    ScoreDetails,
+    SearchCommand,
+    VerifiedIdentity,
+)
 from search_core.api.services import SearchApplication
 from search_core.core.observation import events
 
@@ -23,7 +28,7 @@ class SearchBody(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     query: str = Field(min_length=1, max_length=4096)
-    limit: int = Field(default=5, ge=1, le=20)
+    limit: int = Field(default=5, ge=1)
     filters: dict[str, list[str]] = Field(default_factory=dict)
     scene: str = Field(default="default", min_length=1, max_length=128)
     extensions: dict[str, Any] = Field(default_factory=dict)
@@ -36,6 +41,12 @@ class SearchBody(BaseModel):
         return value.strip()
 
 
+class BoundedSearchBody(SearchBody):
+    """Keep the original HTTP contract unless a host owns limit normalization."""
+
+    limit: int = Field(default=5, ge=1, le=20)
+
+
 class ItemBody(BaseModel):
     id: str
     name: str
@@ -43,12 +54,14 @@ class ItemBody(BaseModel):
     score: float
     score_source: str
     extensions: dict[str, str]
+    scoreDetails: ScoreDetails | None = None
 
 
 class ResultBody(BaseModel):
     items: list[ItemBody]
     status: Literal["ok", "degraded"]
     reasons: list[str]
+    effective: EffectiveSearch | None = None
 
 
 def create_search_router(
@@ -56,6 +69,7 @@ def create_search_router(
     authenticate: Authenticator,
     *,
     timeout_seconds: float = 2.0,
+    request_model: type[SearchBody] = BoundedSearchBody,
 ) -> APIRouter:
     """The host owns provider lifecycle; no permissive auth default exists.
 
@@ -68,7 +82,7 @@ def create_search_router(
 
     def endpoint(operation):
         async def execute(
-            body: SearchBody,
+            body: request_model,
             identity: Annotated[VerifiedIdentity, Depends(authenticate)],
         ):
             command = SearchCommand(
@@ -107,11 +121,13 @@ def create_search_router(
                         score=item.score,
                         score_source=item.score_source,
                         extensions=item.extensions,
+                        scoreDetails=item.score_details,
                     )
                     for item in result.items
                 ],
                 status=result.status,
                 reasons=list(result.reasons),
+                effective=result.effective,
             )
 
         return execute
@@ -122,6 +138,7 @@ def create_search_router(
             endpoint(operation),
             methods=["POST"],
             response_model=ResultBody,
+            response_model_exclude_none=True,
             name=f"{operation}_v2",
         )
     return router
