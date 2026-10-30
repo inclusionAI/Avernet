@@ -11,6 +11,7 @@ from .session_service_cli_case_run import CASE_KEYS as SESSION_SERVICE_CASE_KEYS
 from .direct_chat_cli_case_run import CASE_KEYS as DIRECT_CHAT_CASE_KEYS
 from .delivery_policy_cli_case_run import CASE_KEYS as DELIVERY_POLICY_CASE_KEYS
 from .draft_delivery.dual_case_run import CASE_KEYS as DRAFT_DELIVERY_CASE_KEYS
+from .service_policy.dual_case_run import CASE_KEYS as SERVICE_POLICY_CASE_KEYS
 from .provider_subbots_case_run import CASE_KEYS as PROVIDER_SUBBOTS_CASE_KEYS
 from .provider_owner_dual_case_run import (COMMAND as PROVIDER_OWNER_COMMAND,
                                             register_provider_owner_dual_case_commands)
@@ -49,6 +50,7 @@ CASE_COMMANDS = frozenset({
     "dual-delivery-policy-run",
     "dual-provider-subbots-run",
     "dual-draft-delivery-run",
+    "dual-service-policy-run",
     "dual-custom-collaboration-run",
     PROVIDER_OWNER_COMMAND,
     SESSION_OWNER_COMMAND,
@@ -323,6 +325,16 @@ def register_case_commands(commands) -> None:
     draft_delivery_case.add_argument("--binary-sha256", required=True)
     draft_delivery_case.add_argument("--cli-binary", type=Path, required=True)
     draft_delivery_case.add_argument("--cli-binary-sha256", required=True)
+    service_policy_case = commands.add_parser(
+        "dual-service-policy-run",
+        help="Run the retired service policy story through owned-local or the preprod bcs-direct bearer face")
+    service_policy_case.add_argument("--profile", type=Path, required=True)
+    service_policy_case.add_argument("--state-dir", type=Path, required=True)
+    service_policy_case.add_argument("--run-id", required=True)
+    service_policy_case.add_argument("--confirm-run-id", required=True)
+    service_policy_case.add_argument("--allow-write", action="store_true")
+    service_policy_case.add_argument("--binary", type=Path, required=True)
+    service_policy_case.add_argument("--binary-sha256", required=True)
     register_provider_owner_dual_case_commands(commands)
     register_session_owner_dual_case_commands(commands)
     register_authority_dual_case_commands(commands)

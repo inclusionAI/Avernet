@@ -320,6 +320,7 @@ def migration_plan() -> dict:
                                                 REQUIREMENTS as POLICY_REQUIREMENTS,
                                                 SUITE as POLICY_SUITE,
                                                 service_policy_source_binding)
+    from .service_policy.contract import service_policy_dual_source_binding
     from .local_authority_contract import (CASE_ID as AUTHORITY_CASE_ID,
                                             REQUIREMENTS as AUTHORITY_REQUIREMENTS,
                                             SUITE as AUTHORITY_SUITE,
@@ -428,6 +429,7 @@ def migration_plan() -> dict:
     draft_delivery = draft_delivery_source_binding()
     provider_owner = provider_owner_source_binding()
     group_context = group_context_source_binding()
+    service_policy_dual = service_policy_dual_source_binding()
     session_owner_slice = {
         'suite': SESSION_OWNER_SUITE, 'case_id': SESSION_OWNER_CASE_ID, 'case_version': 1,
         'legacy_id': session_owner['parent'], 'status': 'LOCAL_EXECUTOR_ONLY_BACKLOG',
@@ -560,6 +562,24 @@ def migration_plan() -> dict:
         'release_parent_denominator': False, 'independent_slice': True,
         'remote_validation': 'NOT_RUN', 'grants_release_credit': False,
         'source_map': 'authority-dual-migration-contract.json',
+    }
+    service_policy_dual_slice = {
+        'suite': 'dual-service-policy-v1', 'case_id': 'DUAL-SERVICE-POLICY-01',
+        'case_version': 1, 'legacy_id': 'story_retired_service_policy',
+        'status': 'LOCAL_EXECUTOR_ONLY_BACKLOG',
+        'required_assertion_count': len(POLICY_REQUIREMENTS),
+        'requirement_ids': list(POLICY_REQUIREMENTS),
+        'canonical_reporting': 'DUAL_CASE_RECEIPT',
+        'execution_command': 'dual-service-policy-run',
+        'report_command': '',
+        'required_parameters': ['profile', 'binary', 'binary_sha256', 'state_dir',
+                                'run_id', 'confirm_run_id', 'allow_write'],
+        'binary_kind': 'bcs', 'auto_build': False,
+        'environment': {'local': 'LOCAL_EXECUTOR_ONLY',
+                        'preprod': 'REMOTE_BEARER_MUTATING_ADMITTED'},
+        'release_parent_denominator': False, 'independent_slice': True,
+        'remote_validation': 'NOT_RUN', 'grants_release_credit': False,
+        'source_map': 'service-policy-dual-migration-contract.json',
     }
     admission = admission_source_binding()
     friend_requests = friend_requests_list_source_binding()
@@ -716,14 +736,14 @@ def migration_plan() -> dict:
                    'grants_release_credit': False}
                   for plan in edge_friend_backlog_plans.values()],
                 session_owner_slice, draft_delivery_slice, provider_owner_slice,
-                group_context_slice, authority_dual_slice],
+                group_context_slice, authority_dual_slice, service_policy_dual_slice],
             'local_partial_executors': [],
             'status': 'PLANNED_NOT_EXECUTABLE', 'ready_to_execute': False,
             'source_revision': contract['source_revision'], 'source_integrity': 'MATCHED',
             'legacy_inventory_count': len(inventory), 'mapped_story_count': len(contract['stories']),
             'migrated_story_count': 0, 'passed_assertion_count': 0,
             'scope': 'next three parent Stories only; requirements are not executed assertions',
-            'stories': contract['stories'], 'additional_source_maps': [network, sessions, provider, channel, channel_cli, direct_chat, structured, webhook, judge, fixed_loop, admission, friend_requests, friend_connections, bot_search, delivery_policy, operator_cli, collaboration_team, sessions_services, service_policy, authority, session_owner, draft_delivery, provider_owner, group_context, *edge_friend_mutation_maps],
+            'stories': contract['stories'], 'additional_source_maps': [network, sessions, provider, channel, channel_cli, direct_chat, structured, webhook, judge, fixed_loop, admission, friend_requests, friend_connections, bot_search, delivery_policy, operator_cli, collaboration_team, sessions_services, service_policy, authority, session_owner, draft_delivery, provider_owner, group_context, service_policy_dual, *edge_friend_mutation_maps],
             'cross_environment_source_candidates': {
                 **edge_read_adaptability(),
                 'cases': edge_read_adaptability()['cases'] + edge_search_adaptability()['cases'],

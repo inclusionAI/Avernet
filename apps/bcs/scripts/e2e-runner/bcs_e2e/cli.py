@@ -42,6 +42,7 @@ from .operator_cli_case_run import dual_operator_cli_case_run
 from .direct_chat_cli_case_run import dual_direct_chat_case_run
 from .delivery_policy_cli_case_run import dual_delivery_policy_case_run
 from .draft_delivery.dual_case_run import dual_draft_delivery_case_run
+from .service_policy.dual_case_run import dual_service_policy_case_run
 from .provider_owner_dual_case_run import dual_provider_owner_case_run
 from .session_owner.dual_case_run import dual_session_owner_case_run
 from .authority.dual_case_run import dual_authority_case_run
@@ -734,6 +735,17 @@ def main(argv: list[str] | None = None) -> int:
                 binary_sha256=args.binary_sha256,
                 cli_binary=args.cli_binary,
                 cli_binary_sha256=args.cli_binary_sha256,
+            )
+            rc = 0 if report["status"] == "PASS" else 2
+        elif args.command == "dual-service-policy-run":
+            report = dual_service_policy_case_run(
+                profile_path=args.profile,
+                state_dir=args.state_dir,
+                run_id=args.run_id,
+                allow_write=args.allow_write,
+                confirm_run_id=args.confirm_run_id,
+                binary=args.binary,
+                binary_sha256=args.binary_sha256,
             )
             rc = 0 if report["status"] == "PASS" else 2
         elif args.command == "dual-provider-owner-run":

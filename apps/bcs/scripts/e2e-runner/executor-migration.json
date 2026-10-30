@@ -356,7 +356,7 @@
     {
       "id": "story_retired_service_policy",
       "executor_migration": {
-        "mode": "LOCAL_ONLY",
+        "mode": "DUAL",
         "preprod_verdict": "NOT_RUN",
         "gates": [],
         "notes": []

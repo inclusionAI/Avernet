@@ -589,10 +589,10 @@ class MigrationInventoryTests(unittest.TestCase):
         self.assertEqual(nested_fixed_loop_source_binding()['parent'],
                          'story_nested_fixed_loop_workflows')
 
-    def test_backlog_registry_has_seven_independent_rows_outside_release_credit(self):
+    def test_backlog_registry_has_eight_independent_rows_outside_release_credit(self):
         result = migration_plan()
         rows = result['local_backlog_case_slices']
-        self.assertEqual(len(rows), 7)
+        self.assertEqual(len(rows), 8)
         self.assertEqual([row['case_id'] for row in rows], [
             'LOCAL-EDGE-TC-FRIEND-AUTH-SYNC-01',
             'LOCAL-EDGE-DEPT-SCOPE-FRIEND-EXT-01',
@@ -601,6 +601,7 @@ class MigrationInventoryTests(unittest.TestCase):
             'LOCAL-PROVIDER-OWNER-01',
             'DUAL-GROUP-CONTEXT-CLI-01',
             'DUAL-AUTHORITY-JOURNEY-01',
+            'DUAL-SERVICE-POLICY-01',
         ])
         registered = {row['case_id'] for row in result['local_registered_executors']}
         for row in rows:
@@ -629,8 +630,8 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
         self.assertEqual(counts, Counter({
             ('DUAL', 'PASS'): 18,
             ('DUAL', 'BLOCKED_INVENTORIED'): 7,
-            ('DUAL', 'NOT_RUN'): 6,
-            ('LOCAL_ONLY', 'NOT_RUN'): 5,
+            ('DUAL', 'NOT_RUN'): 7,
+            ('LOCAL_ONLY', 'NOT_RUN'): 4,
             ('DYNAMIC_OWNED_LOCAL', 'NOT_APPLICABLE'): 4,
             ('EDGE_OBLIGATION_IN_FAMILY', 'NOT_APPLICABLE'): 1,
         }))
@@ -675,8 +676,8 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
         self.assertEqual(counts, Counter({
             ('DUAL', 'PASS'): 17,
             ('DUAL', 'BLOCKED_INVENTORIED'): 7,
-            ('DUAL', 'NOT_RUN'): 2,
-            ('LOCAL_ONLY', 'NOT_RUN'): 3,
+            ('DUAL', 'NOT_RUN'): 3,
+            ('LOCAL_ONLY', 'NOT_RUN'): 2,
             ('DYNAMIC_OWNED_LOCAL', 'NOT_APPLICABLE'): 1,
             ('EDGE_OBLIGATION_IN_FAMILY', 'NOT_APPLICABLE'): 1,
         }))

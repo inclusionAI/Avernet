@@ -1,0 +1,268 @@
+{
+  "bearer_identity": {
+    "actor": "driver",
+    "cookie_reference": "admitted but never attached to any request",
+    "expected_status": 200,
+    "match_field": "bot_uuid",
+    "method": "GET",
+    "route": "/bots/{driver_bot_id}"
+  },
+  "case_id": "LOCAL-SERVICE-POLICY-01",
+  "dual_case_id": "DUAL-SERVICE-POLICY-01",
+  "dual_suite": "dual-service-policy-v1",
+  "effects": {
+    "bot_registration": "FORBIDDEN",
+    "disposable_groups": 2,
+    "disposable_sessions": 3,
+    "implicit_effects": "PREPROD_FULL_PILOT_EFFECT_ADMISSION_20261030",
+    "shared_driver_bot_deletion": "FORBIDDEN",
+    "teardown_contract": "DELETE every disposable Group and Session; any teardown failure fails the story"
+  },
+  "environment": {
+    "local": "LOCAL_EXECUTOR_ONLY",
+    "preprod": "REMOTE_BEARER_MUTATING_ADMITTED"
+  },
+  "evidence_granularity": "OWNED_CHILD_RECEIPT",
+  "grants_release_credit": false,
+  "identity_modes": {
+    "local": "register",
+    "preprod": "bearer"
+  },
+  "independent_slice": true,
+  "local_observer": {
+    "case_id": "LOCAL-SERVICE-POLICY-01",
+    "relation": "the promoted reviewed-release parent keeps its frozen owned-local black-box executor; this dual contract only adds the preprod bearer leg beside it",
+    "status": {
+      "local": "LOCAL_EXECUTOR_ONLY",
+      "preprod": "REMOTE_UNSUPPORTED"
+    },
+    "suite": "owned-local-service-policy-v1"
+  },
+  "obligation_prefix": "SERVICE-POLICY.",
+  "owned_runtime_binary": {
+    "auto_build": false,
+    "hash_algorithm": "sha256",
+    "package": "bcs",
+    "required_arguments": [
+      "--binary",
+      "--binary-sha256"
+    ],
+    "reuse_provenance": "sheltered 20261031-wpe3 frozen owned-local BCS server binary; sha256 verified before every run; no cargo build in this slice",
+    "role": "owned-bcs-server",
+    "sha256": "899092e39ca461f04a59dce989d1a13bc85e61791099c532b98d7b3882cb745c"
+  },
+  "parent": "story_retired_service_policy",
+  "redaction_tokens": [
+    "bot_token",
+    "X-BCS-Bot-Token",
+    "Bearer ",
+    "starpoint-data",
+    "x-proxypass-token"
+  ],
+  "registration_plane": {
+    "local": "mock-admission headers plus one-time token registration",
+    "note": "the preprod driver Bot is pre-admitted in the dedicated pool; the runner never registers Bots on shared preprod",
+    "preprod": "REMOTE_NOT_APPLICABLE_PRE_ADMITTED_DRIVER"
+  },
+  "release_parent_denominator": false,
+  "remote_validation": "NOT_RUN",
+  "requirements": [
+    {
+      "expectation": "Mock-admission loopback bootstrap: the fixture ensures the local Human principal endpoint answers and reads a one-time registration token before any business request; every later call carries the Human mock identity headers.",
+      "id": "SERVICE-POLICY.mock-human-bootstrap",
+      "preprod_mode": "BEARER_IDENTITY_CONFIRM",
+      "story_lines": [
+        57,
+        58
+      ]
+    },
+    {
+      "expectation": "The story registers the disposable Policy-story-driver Bot with the one-time token and onboards it with testing domain, review skill and local scope; the lifetime is provider-free with no scripted Provider or Judge mock.",
+      "id": "SERVICE-POLICY.provider-free-bot-registration",
+      "preprod_mode": "REMOTE_NOT_APPLICABLE_PRE_ADMITTED_DRIVER",
+      "story_lines": [
+        59,
+        67
+      ]
+    },
+    {
+      "expectation": "Both legacy service_spec encodings (a disabled policy object and a null compatibility shim) stay accepted at group creation while persisting nothing: the created group, the read-back group and every response payload are free of service_spec and retired_service_spec.",
+      "id": "SERVICE-POLICY.legacy-encoding-ignored",
+      "preprod_mode": "LIVE_BEARER_REPLAY",
+      "story_lines": [
+        68,
+        78
+      ]
+    },
+    {
+      "expectation": "Patching group settings with a legacy service_spec is rejected as Gone with status 410 and the exact service_policy_retired error; the retirement is observable instead of silently ignored.",
+      "id": "SERVICE-POLICY.retired-settings-gone",
+      "preprod_mode": "LIVE_BEARER_REPLAY",
+      "story_lines": [
+        80,
+        83
+      ]
+    },
+    {
+      "expectation": "Neither the retired disabled flag nor max_concurrency=1 gates service invocation: two distinct service_invocation Sessions return 202 running with session_kind service_invocation, each persists its submitted input, and the two invocations never share a Session id.",
+      "id": "SERVICE-POLICY.invocation-lifecycle",
+      "preprod_mode": "LIVE_BEARER_REPLAY",
+      "story_lines": [
+        84,
+        95
+      ]
+    },
+    {
+      "expectation": "Retirement does not allow reactivating a running invocation: posting the session_id of a running invocation is refused with 409 and a running-shaped error while the stored input stays unmodified.",
+      "id": "SERVICE-POLICY.running-reactivation-denied",
+      "preprod_mode": "LIVE_BEARER_REPLAY",
+      "story_lines": [
+        97,
+        102
+      ]
+    },
+    {
+      "expectation": "A completed chat Session cannot be converted into a service invocation (400 with a not-service_invocation error), and the completed chat Session keeps its completed status and output intact after the refused conversion.",
+      "id": "SERVICE-POLICY.chat-session-guard",
+      "preprod_mode": "LIVE_BEARER_REPLAY",
+      "story_lines": [
+        104,
+        115
+      ]
+    },
+    {
+      "expectation": "Teardown deletes every Session with the bot_id query, both Groups with the bot_id query and the disposable Bot; any cleanup failure fails the whole story instead of leaking state.",
+      "id": "SERVICE-POLICY.cleanup-disposition",
+      "preprod_mode": "LIVE_BEARER_REPLAY",
+      "story_lines": [
+        118,
+        129
+      ]
+    }
+  ],
+  "schema_version": 1,
+  "source_file_revisions": {
+    "service_policy_story.py": "9dfc6c2a226c67a3537105e5d9c5c2fd2e69220b",
+    "service_policy_story.sh": "fbec4aadd1aa747e5d2e2f80136d8a884c594e76"
+  },
+  "source_revision": "31bbfdc933ebf5e9361a273ea16b668326092b48",
+  "sources": {
+    "service_policy_story.py": "66aa329bf8e3ca31e563f244514098203cfd1bfc68fbefa7ed865aa7f1c722f9",
+    "service_policy_story.sh": "be1c8bbc2f7d37d69cdab2f77f77fffcd78ca61be720b4a0341fdb72e6a145c5"
+  },
+  "station_routes": [
+    {
+      "actor": "driver",
+      "method": "GET",
+      "note": "bearer identity confirmation for the pre-admitted driver Bot",
+      "path": "/bots/{driver_bot_id}",
+      "station_status": 200
+    },
+    {
+      "accepted_status": [
+        200,
+        201
+      ],
+      "actor": "driver",
+      "method": "POST",
+      "note": "legacy service_spec payload accepted while persisting nothing",
+      "path": "/groups",
+      "station_status": 200
+    },
+    {
+      "actor": "driver",
+      "method": "GET",
+      "note": "read-back proves the retired policy never persisted",
+      "path": "/groups/{group_id}",
+      "station_status": 200
+    },
+    {
+      "actor": "driver",
+      "error": "service_policy_retired",
+      "method": "PATCH",
+      "note": "retired settings surface stays Gone",
+      "path": "/groups/{group_id}/settings",
+      "station_status": 410
+    },
+    {
+      "actor": "driver",
+      "method": "POST",
+      "note": "service_invocation Session creation",
+      "path": "/services/{group_id}/sessions",
+      "station_status": 202
+    },
+    {
+      "actor": "driver",
+      "method": "GET",
+      "note": "invocation input round-trip read",
+      "path": "/services/{group_id}/sessions/{session_id}",
+      "station_status": 200
+    },
+    {
+      "actor": "driver",
+      "method": "POST",
+      "note": "running-invocation reactivation guard",
+      "path": "/services/{group_id}/sessions",
+      "station_status": 409
+    },
+    {
+      "actor": "driver",
+      "method": "POST",
+      "note": "chat Session creation for the conversion guard",
+      "path": "/groups/{group_id}/sessions",
+      "station_status": 201
+    },
+    {
+      "actor": "driver",
+      "method": "POST",
+      "note": "chat Session completion",
+      "path": "/sessions/{session_id}/complete",
+      "station_status": 200
+    },
+    {
+      "actor": "driver",
+      "method": "GET",
+      "note": "completed chat Session read-back",
+      "path": "/sessions/{session_id}",
+      "station_status": 200
+    },
+    {
+      "actor": "driver",
+      "error": "not service_invocation",
+      "method": "POST",
+      "note": "completed chat Session conversion refusal",
+      "path": "/services/{group_id}/sessions",
+      "station_status": 400
+    },
+    {
+      "accepted_status": [
+        200,
+        204
+      ],
+      "actor": "driver",
+      "method": "DELETE",
+      "note": "disposable Session teardown",
+      "path": "/sessions/{session_id}?bot_id={driver_bot_id}",
+      "station_status": 200
+    },
+    {
+      "accepted_status": [
+        200,
+        204
+      ],
+      "actor": "driver",
+      "method": "DELETE",
+      "note": "disposable Group teardown",
+      "path": "/groups/{group_id}?bot_id={driver_bot_id}",
+      "station_status": 200
+    }
+  ],
+  "story_checks": {
+    "bearer": 20,
+    "local": 23
+  },
+  "story_markers": [
+    "Retired service policy story: {checks} HTTP/response checks passed"
+  ],
+  "suite": "owned-local-service-policy-v1"
+}
