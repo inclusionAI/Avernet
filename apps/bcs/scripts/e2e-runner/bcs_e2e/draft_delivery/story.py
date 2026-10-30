@@ -151,6 +151,12 @@ class Story:
                                          + self.base.path).rstrip('/')
         if self.author_token:
             environment['BCN_BOT_TOKEN'] = self.author_token
+        if self.identity_mode == 'bearer' and self._human_cookie:
+            # The station ACE gate answers bearer-only product-CLI writes with
+            # a 200/302 SSO HTML envelope, so the pinned CLI (which reads the
+            # BCS_COOKIE env seam) must receive the validated Human cookie
+            # beside the author bearer. Register mode keeps mock identity only.
+            environment['BCS_COOKIE'] = self._human_cookie
         argv = [str(self.cli_binary), '--json', 'collaboration', *arguments]
         try:
             done = subprocess.run(argv, cwd=str(self.work), env=environment,

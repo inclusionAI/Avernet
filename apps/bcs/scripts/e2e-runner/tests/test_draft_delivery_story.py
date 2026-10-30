@@ -6,6 +6,7 @@ the real binary path is proven by the owned-local live run.
 """
 import io
 import json
+import subprocess
 import os
 import sys
 import tempfile
@@ -25,6 +26,7 @@ from bcs_e2e.draft_delivery.checks import verify_all_obligations
 from bcs_e2e.draft_delivery.contract import FIXTURE_SOURCE, REQUIREMENTS, STORY_CHECKS
 from bcs_e2e.draft_delivery.story import (EXPECTED_CHECKS, FIXTURE_BYTES, Story,
                                           StoryFailure)
+import bcs_e2e.draft_delivery.story as story_module
 
 FIXTURE = FIXTURE_SOURCE
 REGISTRATION_TOKEN = 'registration-secret-only-in-memory'
@@ -327,6 +329,66 @@ class FakeCli:
             return {'exit_code': 0, 'stdout': '', 'stderr_bytes': 0,
                     'json': {'deleted': True}}
         raise AssertionError('unexpected CLI verb: ' + ' '.join(arguments))
+
+
+class DraftCliCookieForwardingTests(unittest.TestCase):
+    """Bearer-mode product-CLI subprocesses receive the validated Human cookie."""
+
+    def _story(self, identity_mode: str, cookie_env: str = 'BCS_E2E_HUMAN_COOKIE'):
+        with patch.dict('os.environ', {'BCS_E2E_DRAFT_AUTHOR_TOKEN': AUTHOR_TOKEN,
+                                        'BCS_E2E_HUMAN_COOKIE': 'duo-cookie-canary'}):
+            return Story('http://127.0.0.1:1', 'e2ehuman', FIXTURE,
+                         Path('/unused/product-cli'), identity_mode=identity_mode,
+                         bearer_token_env='BCS_E2E_DRAFT_AUTHOR_TOKEN',
+                         cookie_env=cookie_env)
+
+    def _capture(self, argv):
+        return subprocess.CompletedProcess(argv, 0, stdout=b'{"saved": true}', stderr=b'')
+
+    def test_bearer_mode_cli_subprocess_env_carries_bcs_cookie(self):
+        story = self._story('bearer')
+        captured = {}
+
+        def fake_run(argv, **kwargs):
+            captured['argv'] = argv
+            captured['env'] = kwargs.get('env') or {}
+            return self._capture(argv)
+
+        with patch.object(story_module.subprocess, 'run', side_effect=fake_run):
+            receipt = story.cli('guard', ['draft', 'create', 'x.yaml'])
+        self.assertEqual(receipt['exit_code'], 0)
+        self.assertEqual(captured['env'].get('BCS_COOKIE'), 'duo-cookie-canary')
+        self.assertEqual(captured['env'].get('MOLTIS_BCS_URL'), 'http://127.0.0.1:1')
+
+    def test_register_mode_cli_subprocess_env_has_no_cookie(self):
+        story = self._story('register')
+        captured = {}
+
+        def fake_run(argv, **kwargs):
+            captured['env'] = kwargs.get('env') or {}
+            return self._capture(argv)
+
+        with patch.object(story_module.subprocess, 'run', side_effect=fake_run):
+            story.cli('guard', ['preview', 'x.yaml'])
+        self.assertNotIn('BCS_COOKIE', captured['env'])
+
+    def test_absent_cookie_env_leaves_the_cli_subprocess_without_cookie(self):
+        with patch.dict('os.environ', {'BCS_E2E_DRAFT_AUTHOR_TOKEN': AUTHOR_TOKEN},
+                        clear=True):
+            story = Story('http://127.0.0.1:1', 'e2ehuman', FIXTURE,
+                          Path('/unused/product-cli'), identity_mode='bearer',
+                          bearer_token_env='BCS_E2E_DRAFT_AUTHOR_TOKEN',
+                          cookie_env='BCS_E2E_HUMAN_COOKIE')
+            self.assertEqual(story._human_cookie, '')
+            captured = {}
+
+            def fake_run(argv, **kwargs):
+                captured['env'] = kwargs.get('env') or {}
+                return self._capture(argv)
+
+            with patch.object(story_module.subprocess, 'run', side_effect=fake_run):
+                story.cli('guard', ['draft', 'create', 'x.yaml'])
+        self.assertNotIn('BCS_COOKIE', captured['env'])
 
 
 class DraftDeliveryStoryTests(unittest.TestCase):
