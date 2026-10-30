@@ -1,0 +1,1285 @@
+{
+  "schema_version": 1,
+  "contract": "workspace-field-obligations-v1",
+  "parent_story": "story_user_operates_group_workspace",
+  "obligation_counts": {
+    "baseline": 17,
+    "field": 26,
+    "total": 43
+  },
+  "atom_count": 63,
+  "atom_contract": "group-workspace-density-contract.json",
+  "baseline_atom_rollup": {
+    "WORKSPACE.create": [
+      "WORKSPACE.api.create.status",
+      "WORKSPACE.api.create.group-id",
+      "WORKSPACE.api.members.create.status",
+      "WORKSPACE.api.members.create.group-id",
+      "WORKSPACE.api.members.detail.status",
+      "WORKSPACE.api.members.detail.participant-count"
+    ],
+    "WORKSPACE.detail": [
+      "WORKSPACE.api.detail.status",
+      "WORKSPACE.api.detail.group-id",
+      "WORKSPACE.api.detail.driver-bot",
+      "WORKSPACE.api.detail.group-kind",
+      "WORKSPACE.api.detail.visibility"
+    ],
+    "WORKSPACE.patch": [
+      "WORKSPACE.api.patch.status",
+      "WORKSPACE.api.patch.responds-name",
+      "WORKSPACE.api.patch.persists-label",
+      "WORKSPACE.api.patch.persists-context"
+    ],
+    "WORKSPACE.list": [
+      "WORKSPACE.api.list.status",
+      "WORKSPACE.api.list.total-not-empty",
+      "WORKSPACE.api.list.total-at-least-one"
+    ],
+    "WORKSPACE.members": [
+      "WORKSPACE.api.add.status",
+      "WORKSPACE.api.add.participant-count",
+      "WORKSPACE.api.remove.status",
+      "WORKSPACE.api.remove.participant-count"
+    ],
+    "WORKSPACE.label": [
+      "WORKSPACE.api.label.status",
+      "WORKSPACE.api.label.persists-label"
+    ],
+    "WORKSPACE.visibility": [
+      "WORKSPACE.api.visibility.status",
+      "WORKSPACE.api.visibility.persists-public"
+    ],
+    "WORKSPACE.cli-create-get": [
+      "WORKSPACE.cli.create.exit-and-id",
+      "WORKSPACE.cli.create.roundtrip",
+      "WORKSPACE.cli.get.exit",
+      "WORKSPACE.cli.get.id-and-driver"
+    ],
+    "WORKSPACE.cli-add-member": [
+      "WORKSPACE.cli.add.exit",
+      "WORKSPACE.cli.add.echoes-member"
+    ],
+    "WORKSPACE.cli-fuse": [
+      "WORKSPACE.cli.fuse.exit-or-json"
+    ],
+    "WORKSPACE.cli-status": [
+      "WORKSPACE.cli.status.exit",
+      "WORKSPACE.cli.status.reflects-completed",
+      "WORKSPACE.cli.terminate.exit",
+      "WORKSPACE.cli.terminate.reflects"
+    ],
+    "WORKSPACE.incident-group": [
+      "WORKSPACE.tail.create.status",
+      "WORKSPACE.tail.create.group-id",
+      "WORKSPACE.tail.read.status",
+      "WORKSPACE.tail.read.keep-label"
+    ],
+    "WORKSPACE.participant-mode": [
+      "WORKSPACE.tail.mute.status",
+      "WORKSPACE.tail.mute.mode",
+      "WORKSPACE.tail.mute.actor"
+    ],
+    "WORKSPACE.workspace": [
+      "WORKSPACE.tail.workspace.write-gone",
+      "WORKSPACE.tail.workspace.read-gone"
+    ],
+    "WORKSPACE.routing-service": [
+      "WORKSPACE.tail.routing.status",
+      "WORKSPACE.tail.routing.mode",
+      "WORKSPACE.tail.routing.default-delivery",
+      "WORKSPACE.tail.settings.gone-or-legacy",
+      "WORKSPACE.tail.settings.policy-identified"
+    ],
+    "WORKSPACE.messages": [
+      "WORKSPACE.tail.message.status",
+      "WORKSPACE.tail.message.receives-id",
+      "WORKSPACE.tail.message.records-routing",
+      "WORKSPACE.tail.chat.status",
+      "WORKSPACE.tail.chat.identifies-group",
+      "WORKSPACE.tail.chat.delivery-results",
+      "WORKSPACE.tail.callback.status",
+      "WORKSPACE.tail.callback.identifies-group",
+      "WORKSPACE.tail.callback.delivery-results"
+    ],
+    "WORKSPACE.incident-delete": [
+      "WORKSPACE.tail.delete.status",
+      "WORKSPACE.tail.delete.confirms-id",
+      "WORKSPACE.tail.delete.gone"
+    ]
+  },
+  "obligations": [
+    {
+      "obligation_id": "WORKSPACE.create",
+      "kind": "COARSE",
+      "expectation": "Creation returns an exact group ID; a three-participant group preserves all participants.",
+      "source_functions": [
+        "test_create_group",
+        "test_create_group_with_members"
+      ],
+      "parent_obligation": null,
+      "atom_ids": [
+        "WORKSPACE.api.create.status",
+        "WORKSPACE.api.create.group-id",
+        "WORKSPACE.api.members.create.status",
+        "WORKSPACE.api.members.create.group-id",
+        "WORKSPACE.api.members.detail.status",
+        "WORKSPACE.api.members.detail.participant-count"
+      ],
+      "field_name": null,
+      "write_path": null,
+      "read_path": null,
+      "error_envelope": {
+        "status": "source-defined",
+        "shape": "source-defined",
+        "code": null
+      },
+      "concurrency_isolation": "story-owned fixture resource"
+    },
+    {
+      "obligation_id": "WORKSPACE.detail",
+      "kind": "COARSE",
+      "expectation": "Read-back preserves ID, driver, kind and visibility.",
+      "source_functions": [
+        "test_get_group_detail"
+      ],
+      "parent_obligation": null,
+      "atom_ids": [
+        "WORKSPACE.api.detail.status",
+        "WORKSPACE.api.detail.group-id",
+        "WORKSPACE.api.detail.driver-bot",
+        "WORKSPACE.api.detail.group-kind",
+        "WORKSPACE.api.detail.visibility"
+      ],
+      "field_name": null,
+      "write_path": null,
+      "read_path": null,
+      "error_envelope": {
+        "status": "source-defined",
+        "shape": "source-defined",
+        "code": null
+      },
+      "concurrency_isolation": "story-owned fixture resource"
+    },
+    {
+      "obligation_id": "WORKSPACE.patch",
+      "kind": "COARSE",
+      "expectation": "PATCH name/context are independently read back as label/context.",
+      "source_functions": [
+        "test_patch_group"
+      ],
+      "parent_obligation": null,
+      "atom_ids": [
+        "WORKSPACE.api.patch.status",
+        "WORKSPACE.api.patch.responds-name",
+        "WORKSPACE.api.patch.persists-label",
+        "WORKSPACE.api.patch.persists-context"
+      ],
+      "field_name": null,
+      "write_path": null,
+      "read_path": null,
+      "error_envelope": {
+        "status": "source-defined",
+        "shape": "source-defined",
+        "code": null
+      },
+      "concurrency_isolation": "story-owned fixture resource"
+    },
+    {
+      "obligation_id": "WORKSPACE.list",
+      "kind": "COARSE",
+      "expectation": "A bounded list contains the exact newly created group, not merely an unrelated nonzero total.",
+      "source_functions": [
+        "test_list_groups"
+      ],
+      "parent_obligation": null,
+      "atom_ids": [
+        "WORKSPACE.api.list.status",
+        "WORKSPACE.api.list.total-not-empty",
+        "WORKSPACE.api.list.total-at-least-one"
+      ],
+      "field_name": null,
+      "write_path": null,
+      "read_path": null,
+      "error_envelope": {
+        "status": "source-defined",
+        "shape": "source-defined",
+        "code": null
+      },
+      "concurrency_isolation": "story-owned fixture resource"
+    },
+    {
+      "obligation_id": "WORKSPACE.members",
+      "kind": "COARSE",
+      "expectation": "Add/remove changes the exact participant membership and expected cardinality.",
+      "source_functions": [
+        "test_add_member",
+        "test_remove_member"
+      ],
+      "parent_obligation": null,
+      "atom_ids": [
+        "WORKSPACE.api.add.status",
+        "WORKSPACE.api.add.participant-count",
+        "WORKSPACE.api.remove.status",
+        "WORKSPACE.api.remove.participant-count"
+      ],
+      "field_name": null,
+      "write_path": null,
+      "read_path": null,
+      "error_envelope": {
+        "status": "source-defined",
+        "shape": "source-defined",
+        "code": null
+      },
+      "concurrency_isolation": "story-owned fixture resource"
+    },
+    {
+      "obligation_id": "WORKSPACE.label",
+      "kind": "COARSE",
+      "expectation": "An authorized label mutation succeeds and persists; authentication denial is not a pass.",
+      "source_functions": [
+        "test_update_group_label"
+      ],
+      "parent_obligation": null,
+      "atom_ids": [
+        "WORKSPACE.api.label.status",
+        "WORKSPACE.api.label.persists-label"
+      ],
+      "field_name": null,
+      "write_path": null,
+      "read_path": null,
+      "error_envelope": {
+        "status": "source-defined",
+        "shape": "source-defined",
+        "code": null
+      },
+      "concurrency_isolation": "story-owned fixture resource"
+    },
+    {
+      "obligation_id": "WORKSPACE.visibility",
+      "kind": "COARSE",
+      "expectation": "Visibility update succeeds and public visibility is read back.",
+      "source_functions": [
+        "test_update_group_visibility"
+      ],
+      "parent_obligation": null,
+      "atom_ids": [
+        "WORKSPACE.api.visibility.status",
+        "WORKSPACE.api.visibility.persists-public"
+      ],
+      "field_name": null,
+      "write_path": null,
+      "read_path": null,
+      "error_envelope": {
+        "status": "source-defined",
+        "shape": "source-defined",
+        "code": null
+      },
+      "concurrency_isolation": "story-owned fixture resource"
+    },
+    {
+      "obligation_id": "WORKSPACE.cli-create-get",
+      "kind": "COARSE",
+      "expectation": "Actual CLI creation/get preserve exact group/driver identity.",
+      "source_functions": [
+        "test_group_create_via_cli",
+        "test_group_get_via_cli"
+      ],
+      "parent_obligation": null,
+      "atom_ids": [
+        "WORKSPACE.cli.create.exit-and-id",
+        "WORKSPACE.cli.create.roundtrip",
+        "WORKSPACE.cli.get.exit",
+        "WORKSPACE.cli.get.id-and-driver"
+      ],
+      "field_name": null,
+      "write_path": null,
+      "read_path": null,
+      "error_envelope": {
+        "status": "source-defined",
+        "shape": "source-defined",
+        "code": null
+      },
+      "concurrency_isolation": "story-owned fixture resource"
+    },
+    {
+      "obligation_id": "WORKSPACE.cli-add-member",
+      "kind": "COARSE",
+      "expectation": "Actual CLI add-member is verified by an independent CLI read.",
+      "source_functions": [
+        "test_group_add_member_via_cli"
+      ],
+      "parent_obligation": null,
+      "atom_ids": [
+        "WORKSPACE.cli.add.exit",
+        "WORKSPACE.cli.add.echoes-member"
+      ],
+      "field_name": null,
+      "write_path": null,
+      "read_path": null,
+      "error_envelope": {
+        "status": "source-defined",
+        "shape": "source-defined",
+        "code": null
+      },
+      "concurrency_isolation": "story-owned fixture resource"
+    },
+    {
+      "obligation_id": "WORKSPACE.cli-fuse",
+      "kind": "COARSE",
+      "expectation": "Actual CLI fusion produces the required recommendation; arbitrary JSON on a nonzero exit does not pass.",
+      "source_functions": [
+        "test_group_fuse_via_cli"
+      ],
+      "parent_obligation": null,
+      "atom_ids": [
+        "WORKSPACE.cli.fuse.exit-or-json"
+      ],
+      "field_name": null,
+      "write_path": null,
+      "read_path": null,
+      "error_envelope": {
+        "status": "source-defined",
+        "shape": "source-defined",
+        "code": null
+      },
+      "concurrency_isolation": "story-owned fixture resource"
+    },
+    {
+      "obligation_id": "WORKSPACE.cli-status",
+      "kind": "COARSE",
+      "expectation": "Actual CLI completion and termination have independently observed expected states.",
+      "source_functions": [
+        "test_group_status_via_cli",
+        "test_group_terminate_via_cli"
+      ],
+      "parent_obligation": null,
+      "atom_ids": [
+        "WORKSPACE.cli.status.exit",
+        "WORKSPACE.cli.status.reflects-completed",
+        "WORKSPACE.cli.terminate.exit",
+        "WORKSPACE.cli.terminate.reflects"
+      ],
+      "field_name": null,
+      "write_path": null,
+      "read_path": null,
+      "error_envelope": {
+        "status": "source-defined",
+        "shape": "source-defined",
+        "code": null
+      },
+      "concurrency_isolation": "story-owned fixture resource"
+    },
+    {
+      "obligation_id": "WORKSPACE.incident-group",
+      "kind": "COARSE",
+      "expectation": "Bot-originated three-participant creation returns ID and preserves the label.",
+      "source_functions": [
+        "_story_group_metadata_without_workspace"
+      ],
+      "parent_obligation": null,
+      "atom_ids": [
+        "WORKSPACE.tail.create.status",
+        "WORKSPACE.tail.create.group-id",
+        "WORKSPACE.tail.read.status",
+        "WORKSPACE.tail.read.keep-label"
+      ],
+      "field_name": null,
+      "write_path": null,
+      "read_path": null,
+      "error_envelope": {
+        "status": "source-defined",
+        "shape": "source-defined",
+        "code": null
+      },
+      "concurrency_isolation": "story-owned fixture resource"
+    },
+    {
+      "obligation_id": "WORKSPACE.participant-mode",
+      "kind": "COARSE",
+      "expectation": "ENG mutes itself; returned actor ID and mode match.",
+      "source_functions": [
+        "_story_group_metadata_without_workspace"
+      ],
+      "parent_obligation": null,
+      "atom_ids": [
+        "WORKSPACE.tail.mute.status",
+        "WORKSPACE.tail.mute.mode",
+        "WORKSPACE.tail.mute.actor"
+      ],
+      "field_name": null,
+      "write_path": null,
+      "read_path": null,
+      "error_envelope": {
+        "status": "source-defined",
+        "shape": "source-defined",
+        "code": null
+      },
+      "concurrency_isolation": "story-owned fixture resource"
+    },
+    {
+      "obligation_id": "WORKSPACE.workspace",
+      "kind": "COARSE",
+      "expectation": "Deprecated Workspace PUT and GET return 404; the Group keeps metadata, participant mode, routing, and service settings instead of legacy Workspace state.",
+      "source_functions": [
+        "_story_group_metadata_without_workspace"
+      ],
+      "parent_obligation": null,
+      "atom_ids": [
+        "WORKSPACE.tail.workspace.write-gone",
+        "WORKSPACE.tail.workspace.read-gone"
+      ],
+      "field_name": null,
+      "write_path": null,
+      "read_path": null,
+      "error_envelope": {
+        "status": "source-defined",
+        "shape": "source-defined",
+        "code": null
+      },
+      "concurrency_isolation": "story-owned fixture resource"
+    },
+    {
+      "obligation_id": "WORKSPACE.routing-service",
+      "kind": "COARSE",
+      "expectation": "Driver structured routes/default delivery and bounded service concurrency persist.",
+      "source_functions": [
+        "_story_group_metadata_without_workspace"
+      ],
+      "parent_obligation": null,
+      "atom_ids": [
+        "WORKSPACE.tail.routing.status",
+        "WORKSPACE.tail.routing.mode",
+        "WORKSPACE.tail.routing.default-delivery",
+        "WORKSPACE.tail.settings.gone-or-legacy",
+        "WORKSPACE.tail.settings.policy-identified"
+      ],
+      "field_name": null,
+      "write_path": null,
+      "read_path": null,
+      "error_envelope": {
+        "status": "source-defined",
+        "shape": "source-defined",
+        "code": null
+      },
+      "concurrency_isolation": "story-owned fixture resource"
+    },
+    {
+      "obligation_id": "WORKSPACE.messages",
+      "kind": "COARSE",
+      "expectation": "Persistent message ID/routing, live chat and callback group/delivery results match the exact owned scope.",
+      "source_functions": [
+        "_story_group_metadata_without_workspace"
+      ],
+      "parent_obligation": null,
+      "atom_ids": [
+        "WORKSPACE.tail.message.status",
+        "WORKSPACE.tail.message.receives-id",
+        "WORKSPACE.tail.message.records-routing",
+        "WORKSPACE.tail.chat.status",
+        "WORKSPACE.tail.chat.identifies-group",
+        "WORKSPACE.tail.chat.delivery-results",
+        "WORKSPACE.tail.callback.status",
+        "WORKSPACE.tail.callback.identifies-group",
+        "WORKSPACE.tail.callback.delivery-results"
+      ],
+      "field_name": null,
+      "write_path": null,
+      "read_path": null,
+      "error_envelope": {
+        "status": "source-defined",
+        "shape": "source-defined",
+        "code": null
+      },
+      "concurrency_isolation": "story-owned fixture resource"
+    },
+    {
+      "obligation_id": "WORKSPACE.incident-delete",
+      "kind": "COARSE",
+      "expectation": "Exact incident group deletion is confirmed and independently returns not-found only after admitted execution convergence.",
+      "source_functions": [
+        "_story_group_metadata_without_workspace"
+      ],
+      "parent_obligation": null,
+      "atom_ids": [
+        "WORKSPACE.tail.delete.status",
+        "WORKSPACE.tail.delete.confirms-id",
+        "WORKSPACE.tail.delete.gone"
+      ],
+      "field_name": null,
+      "write_path": null,
+      "read_path": null,
+      "error_envelope": {
+        "status": "source-defined",
+        "shape": "source-defined",
+        "code": null
+      },
+      "concurrency_isolation": "story-owned fixture resource"
+    },
+    {
+      "obligation_id": "WORKSPACE.api.members.detail.participant-count",
+      "kind": "FIELD",
+      "expectation": "group has 3 participants",
+      "source_functions": [
+        "test_create_group_with_members"
+      ],
+      "parent_obligation": "WORKSPACE.create",
+      "decomposition_group": "WORKSPACE.create",
+      "atom_ids": [
+        "WORKSPACE.api.members.detail.participant-count"
+      ],
+      "field_name": "participants[]",
+      "write_path": "POST /groups.participants",
+      "read_path": "GET /groups/{group_id}.participants",
+      "error_envelope": {
+        "status": 200,
+        "shape": "json",
+        "code": null
+      },
+      "concurrency_isolation": "group_id",
+      "predicate": "atom_projection",
+      "source_file": "group.sh",
+      "source_function": "test_create_group_with_members",
+      "line_start": 61,
+      "line_end": 61,
+      "source_quote": "assert_eq \"group has 3 participants\" \"$count\" \"3\""
+    },
+    {
+      "obligation_id": "WORKSPACE.api.add.participant-count",
+      "kind": "FIELD",
+      "expectation": "group has 2 participants after add",
+      "source_functions": [
+        "test_add_member"
+      ],
+      "parent_obligation": "WORKSPACE.members",
+      "decomposition_group": "WORKSPACE.members",
+      "atom_ids": [
+        "WORKSPACE.api.add.participant-count"
+      ],
+      "field_name": "participants[]",
+      "write_path": "POST /groups/{group_id}/members.bot_uuid",
+      "read_path": "GET /groups/{group_id}.participants",
+      "error_envelope": {
+        "status": 200,
+        "shape": "json",
+        "code": null
+      },
+      "concurrency_isolation": "group_id",
+      "predicate": "atom_projection",
+      "source_file": "group.sh",
+      "source_function": "test_add_member",
+      "line_start": 128,
+      "line_end": 128,
+      "source_quote": "assert_eq \"group has 2 participants after add\" \"$count\" \"2\""
+    },
+    {
+      "obligation_id": "WORKSPACE.api.remove.participant-count",
+      "kind": "FIELD",
+      "expectation": "group has 1 participant after remove",
+      "source_functions": [
+        "test_remove_member"
+      ],
+      "parent_obligation": "WORKSPACE.members",
+      "decomposition_group": "WORKSPACE.members",
+      "atom_ids": [
+        "WORKSPACE.api.remove.participant-count"
+      ],
+      "field_name": "participants[]",
+      "write_path": "DELETE /groups/{group_id}/members/{bot_uuid}",
+      "read_path": "GET /groups/{group_id}.participants",
+      "error_envelope": {
+        "status": 200,
+        "shape": "json",
+        "code": null
+      },
+      "concurrency_isolation": "group_id",
+      "predicate": "atom_projection",
+      "source_file": "group.sh",
+      "source_function": "test_remove_member",
+      "line_start": 144,
+      "line_end": 144,
+      "source_quote": "assert_eq \"group has 1 participant after remove\" \"$count\" \"1\""
+    },
+    {
+      "obligation_id": "WORKSPACE.api.patch.responds-name",
+      "kind": "FIELD",
+      "expectation": "legacy group PATCH returns the new name",
+      "source_functions": [
+        "test_patch_group"
+      ],
+      "parent_obligation": "WORKSPACE.patch",
+      "decomposition_group": "WORKSPACE.patch",
+      "atom_ids": [
+        "WORKSPACE.api.patch.responds-name"
+      ],
+      "field_name": "name",
+      "write_path": "PATCH /groups/{group_id}.name",
+      "read_path": "PATCH response.name",
+      "error_envelope": {
+        "status": 200,
+        "shape": "json",
+        "code": null
+      },
+      "concurrency_isolation": "group_id",
+      "predicate": "atom_projection",
+      "source_file": "group.sh",
+      "source_function": "test_patch_group",
+      "line_start": 86,
+      "line_end": 87,
+      "source_quote": "assert_eq \"legacy group PATCH returns the new name\" \\\n        \"$(json_field \"$RESPONSE\" \"name\")\" \"legacy-patch-e2e\""
+    },
+    {
+      "obligation_id": "WORKSPACE.api.patch.persists-label",
+      "kind": "FIELD",
+      "expectation": "legacy group PATCH persists the label",
+      "source_functions": [
+        "test_patch_group"
+      ],
+      "parent_obligation": "WORKSPACE.patch",
+      "decomposition_group": "WORKSPACE.patch",
+      "atom_ids": [
+        "WORKSPACE.api.patch.persists-label"
+      ],
+      "field_name": "label",
+      "write_path": "PATCH /groups/{group_id}.name",
+      "read_path": "GET /groups/{group_id}.label",
+      "error_envelope": {
+        "status": 200,
+        "shape": "json",
+        "code": null
+      },
+      "concurrency_isolation": "group_id",
+      "predicate": "atom_projection",
+      "source_file": "group.sh",
+      "source_function": "test_patch_group",
+      "line_start": 90,
+      "line_end": 91,
+      "source_quote": "assert_eq \"legacy group PATCH persists the label\" \\\n        \"$(json_field \"$RESPONSE\" \"label\")\" \"legacy-patch-e2e\""
+    },
+    {
+      "obligation_id": "WORKSPACE.api.patch.persists-context",
+      "kind": "FIELD",
+      "expectation": "legacy group PATCH persists the context",
+      "source_functions": [
+        "test_patch_group"
+      ],
+      "parent_obligation": "WORKSPACE.patch",
+      "decomposition_group": "WORKSPACE.patch",
+      "atom_ids": [
+        "WORKSPACE.api.patch.persists-context"
+      ],
+      "field_name": "context",
+      "write_path": "PATCH /groups/{group_id}.context",
+      "read_path": "GET /groups/{group_id}.context",
+      "error_envelope": {
+        "status": 200,
+        "shape": "json",
+        "code": null
+      },
+      "concurrency_isolation": "group_id",
+      "predicate": "atom_projection",
+      "source_file": "group.sh",
+      "source_function": "test_patch_group",
+      "line_start": 92,
+      "line_end": 93,
+      "source_quote": "assert_eq \"legacy group PATCH persists the context\" \\\n        \"$(json_field \"$RESPONSE\" \"context\")\" \"legacy-context-e2e\""
+    },
+    {
+      "obligation_id": "WORKSPACE.api.visibility.persists-public",
+      "kind": "FIELD",
+      "expectation": "visibility is public",
+      "source_functions": [
+        "test_update_group_visibility"
+      ],
+      "parent_obligation": "WORKSPACE.visibility",
+      "decomposition_group": "WORKSPACE.visibility",
+      "atom_ids": [
+        "WORKSPACE.api.visibility.persists-public"
+      ],
+      "field_name": "visibility",
+      "write_path": "PUT /groups/{group_id}/visibility.visibility",
+      "read_path": "GET /groups/{group_id}.visibility",
+      "error_envelope": {
+        "status": 200,
+        "shape": "json",
+        "code": null
+      },
+      "concurrency_isolation": "group_id",
+      "predicate": "atom_projection",
+      "source_file": "group.sh",
+      "source_function": "test_update_group_visibility",
+      "line_start": 180,
+      "line_end": 180,
+      "source_quote": "assert_eq \"visibility is public\" \"$vis\" \"public\""
+    },
+    {
+      "obligation_id": "WORKSPACE.cli.fuse.error-payload-shape",
+      "kind": "FIELD",
+      "expectation": "On nonzero bcs-cli fuse exit the payload must be structured JSON; a bare nonzero exit with no payload fails.",
+      "source_functions": [
+        "test_group_fuse_via_cli"
+      ],
+      "parent_obligation": "WORKSPACE.cli-fuse",
+      "decomposition_group": "WORKSPACE.cli-fuse",
+      "atom_ids": [
+        "WORKSPACE.cli.fuse.exit-or-json"
+      ],
+      "field_name": "error_payload",
+      "write_path": "bcs-cli fuse --group {group_id}",
+      "read_path": "CLI stdout JSON object",
+      "error_envelope": {
+        "status": "nonzero",
+        "shape": "json-object",
+        "code": "fuse_error"
+      },
+      "concurrency_isolation": "group_id+caller_bot",
+      "predicate": "fuse_error_payload_shape",
+      "source_file": "group.sh",
+      "source_function": "test_group_fuse_via_cli",
+      "line_start": 269,
+      "line_end": 273,
+      "source_quote": "if _cli_contains \"$BCS_CLI_STDOUT\" \"{\"; then\n            warn \"fuse returned non-zero but JSON payload; accepting\"\n            pass \"fuse via CLI returned a payload\"; TESTS_PASSED=$((TESTS_PASSED+1))\n        else\n            fail \"fuse exited $BCS_CLI_EXIT with no payload\"; TESTS_FAILED=$((TESTS_FAILED+1))"
+    },
+    {
+      "obligation_id": "WORKSPACE.tail.create.group-id",
+      "kind": "FIELD",
+      "expectation": "incident response group has an id",
+      "source_functions": [
+        "_story_group_metadata_without_workspace"
+      ],
+      "parent_obligation": "WORKSPACE.incident-group",
+      "decomposition_group": "WORKSPACE.tail-metadata",
+      "atom_ids": [
+        "WORKSPACE.tail.create.group-id"
+      ],
+      "field_name": "id",
+      "write_path": "POST /groups.driver_bot+label+participants",
+      "read_path": "POST response.id",
+      "error_envelope": {
+        "status": 200,
+        "shape": "json",
+        "code": null
+      },
+      "concurrency_isolation": "group_id+driver_bot",
+      "predicate": "atom_projection",
+      "source_file": "stories.sh",
+      "source_function": "_story_group_metadata_without_workspace",
+      "line_start": 436,
+      "line_end": 436,
+      "source_quote": "assert_not_empty \"incident response group has an id\" \"$group_id\""
+    },
+    {
+      "obligation_id": "WORKSPACE.tail.read.keep-label",
+      "kind": "FIELD",
+      "expectation": "incident response group keeps its label",
+      "source_functions": [
+        "_story_group_metadata_without_workspace"
+      ],
+      "parent_obligation": "WORKSPACE.incident-group",
+      "decomposition_group": "WORKSPACE.tail-metadata",
+      "atom_ids": [
+        "WORKSPACE.tail.read.keep-label"
+      ],
+      "field_name": "label",
+      "write_path": "POST /groups.label",
+      "read_path": "GET /groups/{group_id}.label",
+      "error_envelope": {
+        "status": 200,
+        "shape": "json",
+        "code": null
+      },
+      "concurrency_isolation": "group_id",
+      "predicate": "atom_projection",
+      "source_file": "stories.sh",
+      "source_function": "_story_group_metadata_without_workspace",
+      "line_start": 441,
+      "line_end": 441,
+      "source_quote": "assert_json_eq \"incident response group keeps its label\" \"$RESPONSE\" \"label\" \"Incident response room\""
+    },
+    {
+      "obligation_id": "WORKSPACE.tail.mute.mode",
+      "kind": "FIELD",
+      "expectation": "participant mode is muted",
+      "source_functions": [
+        "_story_group_metadata_without_workspace"
+      ],
+      "parent_obligation": "WORKSPACE.participant-mode",
+      "decomposition_group": "WORKSPACE.tail-metadata",
+      "atom_ids": [
+        "WORKSPACE.tail.mute.mode"
+      ],
+      "field_name": "data.mode",
+      "write_path": "PUT /groups/{group_id}/participants/{actor_id}/mode.mode",
+      "read_path": "PUT response.data.mode",
+      "error_envelope": {
+        "status": 200,
+        "shape": "json",
+        "code": null
+      },
+      "concurrency_isolation": "group_id+actor_id",
+      "predicate": "atom_projection",
+      "source_file": "stories.sh",
+      "source_function": "_story_group_metadata_without_workspace",
+      "line_start": 445,
+      "line_end": 445,
+      "source_quote": "assert_json_eq \"participant mode is muted\" \"$RESPONSE\" \"data.mode\" \"muted\""
+    },
+    {
+      "obligation_id": "WORKSPACE.tail.mute.actor",
+      "kind": "FIELD",
+      "expectation": "participant mode response identifies the actor",
+      "source_functions": [
+        "_story_group_metadata_without_workspace"
+      ],
+      "parent_obligation": "WORKSPACE.participant-mode",
+      "decomposition_group": "WORKSPACE.tail-metadata",
+      "atom_ids": [
+        "WORKSPACE.tail.mute.actor"
+      ],
+      "field_name": "data.actor_id",
+      "write_path": "PUT /groups/{group_id}/participants/{actor_id}/mode.actor",
+      "read_path": "PUT response.data.actor_id",
+      "error_envelope": {
+        "status": 200,
+        "shape": "json",
+        "code": null
+      },
+      "concurrency_isolation": "group_id+actor_id",
+      "predicate": "atom_projection",
+      "source_file": "stories.sh",
+      "source_function": "_story_group_metadata_without_workspace",
+      "line_start": 446,
+      "line_end": 446,
+      "source_quote": "assert_json_eq \"participant mode response identifies the actor\" \"$RESPONSE\" \"data.actor_id\" \"$BOT_ENG_UUID\""
+    },
+    {
+      "obligation_id": "WORKSPACE.tail.workspace.write-gone",
+      "kind": "FIELD",
+      "expectation": "deprecated group workspace writes are unavailable",
+      "source_functions": [
+        "_story_group_metadata_without_workspace"
+      ],
+      "parent_obligation": "WORKSPACE.workspace",
+      "decomposition_group": "WORKSPACE.tail-metadata",
+      "atom_ids": [
+        "WORKSPACE.tail.workspace.write-gone"
+      ],
+      "field_name": "workspace write",
+      "write_path": "PUT /groups/{group_id}/workspace",
+      "read_path": "error envelope",
+      "error_envelope": {
+        "status": 404,
+        "shape": "json",
+        "code": "not_found"
+      },
+      "concurrency_isolation": "group_id",
+      "predicate": "atom_projection",
+      "source_file": "stories.sh",
+      "source_function": "_story_group_metadata_without_workspace",
+      "line_start": 450,
+      "line_end": 450,
+      "source_quote": "require_status \"deprecated group workspace writes are unavailable\" \"404\" || return"
+    },
+    {
+      "obligation_id": "WORKSPACE.tail.workspace.read-gone",
+      "kind": "FIELD",
+      "expectation": "deprecated group workspace reads are unavailable",
+      "source_functions": [
+        "_story_group_metadata_without_workspace"
+      ],
+      "parent_obligation": "WORKSPACE.workspace",
+      "decomposition_group": "WORKSPACE.tail-metadata",
+      "atom_ids": [
+        "WORKSPACE.tail.workspace.read-gone"
+      ],
+      "field_name": "workspace read",
+      "write_path": "GET /groups/{group_id}/workspace",
+      "read_path": "error envelope",
+      "error_envelope": {
+        "status": 404,
+        "shape": "json",
+        "code": "not_found"
+      },
+      "concurrency_isolation": "group_id",
+      "predicate": "atom_projection",
+      "source_file": "stories.sh",
+      "source_function": "_story_group_metadata_without_workspace",
+      "line_start": 453,
+      "line_end": 453,
+      "source_quote": "require_status \"deprecated group workspace reads are unavailable\" \"404\" || return"
+    },
+    {
+      "obligation_id": "WORKSPACE.tail.routing.mode",
+      "kind": "FIELD",
+      "expectation": "routing mode is persisted",
+      "source_functions": [
+        "_story_group_metadata_without_workspace"
+      ],
+      "parent_obligation": "WORKSPACE.routing-service",
+      "decomposition_group": "WORKSPACE.tail-metadata",
+      "atom_ids": [
+        "WORKSPACE.tail.routing.mode"
+      ],
+      "field_name": "routing_policy.mode",
+      "write_path": "PUT /groups/{group_id}/routing-policy.mode",
+      "read_path": "PUT response.routing_policy.mode",
+      "error_envelope": {
+        "status": 200,
+        "shape": "json",
+        "code": null
+      },
+      "concurrency_isolation": "group_id",
+      "predicate": "atom_projection",
+      "source_file": "stories.sh",
+      "source_function": "_story_group_metadata_without_workspace",
+      "line_start": 458,
+      "line_end": 458,
+      "source_quote": "assert_json_eq \"routing mode is persisted\" \"$RESPONSE\" \"routing_policy.mode\" \"structured\""
+    },
+    {
+      "obligation_id": "WORKSPACE.tail.routing.default-delivery",
+      "kind": "FIELD",
+      "expectation": "default delivery is persisted",
+      "source_functions": [
+        "_story_group_metadata_without_workspace"
+      ],
+      "parent_obligation": "WORKSPACE.routing-service",
+      "decomposition_group": "WORKSPACE.tail-metadata",
+      "atom_ids": [
+        "WORKSPACE.tail.routing.default-delivery"
+      ],
+      "field_name": "routing_policy.default_bot_final_delivery",
+      "write_path": "PUT /groups/{group_id}/routing-policy.default_bot_final_delivery",
+      "read_path": "PUT response.routing_policy.default_bot_final_delivery",
+      "error_envelope": {
+        "status": 200,
+        "shape": "json",
+        "code": null
+      },
+      "concurrency_isolation": "group_id",
+      "predicate": "atom_projection",
+      "source_file": "stories.sh",
+      "source_function": "_story_group_metadata_without_workspace",
+      "line_start": 459,
+      "line_end": 459,
+      "source_quote": "assert_json_eq \"default delivery is persisted\" \"$RESPONSE\" \"routing_policy.default_bot_final_delivery\" \"inject_observers\""
+    },
+    {
+      "obligation_id": "WORKSPACE.tail.settings.gone-or-legacy",
+      "kind": "FIELD",
+      "expectation": "retired group policy settings return Gone",
+      "source_functions": [
+        "_story_group_metadata_without_workspace"
+      ],
+      "parent_obligation": "WORKSPACE.routing-service",
+      "decomposition_group": "WORKSPACE.tail-metadata",
+      "atom_ids": [
+        "WORKSPACE.tail.settings.gone-or-legacy"
+      ],
+      "field_name": "service_spec",
+      "write_path": "PATCH /groups/{group_id}/settings.service_spec",
+      "read_path": "error envelope",
+      "error_envelope": {
+        "status": 410,
+        "shape": "json",
+        "code": "service_policy_retired"
+      },
+      "concurrency_isolation": "group_id",
+      "predicate": "atom_projection",
+      "source_file": "stories.sh",
+      "source_function": "_story_group_metadata_without_workspace",
+      "line_start": 462,
+      "line_end": 462,
+      "source_quote": "require_status \"retired group policy settings return Gone\" \"410\" || return"
+    },
+    {
+      "obligation_id": "WORKSPACE.tail.settings.policy-identified",
+      "kind": "FIELD",
+      "expectation": "retired policy is identified",
+      "source_functions": [
+        "_story_group_metadata_without_workspace"
+      ],
+      "parent_obligation": "WORKSPACE.routing-service",
+      "decomposition_group": "WORKSPACE.tail-metadata",
+      "atom_ids": [
+        "WORKSPACE.tail.settings.policy-identified"
+      ],
+      "field_name": "error",
+      "write_path": "PATCH /groups/{group_id}/settings.service_spec",
+      "read_path": "response.error",
+      "error_envelope": {
+        "status": 410,
+        "shape": "json",
+        "code": "service_policy_retired"
+      },
+      "concurrency_isolation": "group_id",
+      "predicate": "atom_projection",
+      "source_file": "stories.sh",
+      "source_function": "_story_group_metadata_without_workspace",
+      "line_start": 463,
+      "line_end": 463,
+      "source_quote": "assert_json_eq \"retired policy is identified\" \"$RESPONSE\" \"error\" \"service_policy_retired\""
+    },
+    {
+      "obligation_id": "WORKSPACE.tail.message.receives-id",
+      "kind": "FIELD",
+      "expectation": "persistent message receives an id",
+      "source_functions": [
+        "_story_group_metadata_without_workspace"
+      ],
+      "parent_obligation": "WORKSPACE.messages",
+      "decomposition_group": "WORKSPACE.tail-metadata",
+      "atom_ids": [
+        "WORKSPACE.tail.message.receives-id"
+      ],
+      "field_name": "message_id",
+      "write_path": "POST /groups/{group_id}/messages.message",
+      "read_path": "POST response.message_id",
+      "error_envelope": {
+        "status": 200,
+        "shape": "json",
+        "code": null
+      },
+      "concurrency_isolation": "group_id+message_id",
+      "predicate": "atom_projection",
+      "source_file": "stories.sh",
+      "source_function": "_story_group_metadata_without_workspace",
+      "line_start": 468,
+      "line_end": 468,
+      "source_quote": "assert_json_not_empty \"persistent message receives an id\" \"$RESPONSE\" \"message_id\""
+    },
+    {
+      "obligation_id": "WORKSPACE.tail.message.records-routing",
+      "kind": "FIELD",
+      "expectation": "persistent message records routing targets",
+      "source_functions": [
+        "_story_group_metadata_without_workspace"
+      ],
+      "parent_obligation": "WORKSPACE.messages",
+      "decomposition_group": "WORKSPACE.tail-metadata",
+      "atom_ids": [
+        "WORKSPACE.tail.message.records-routing"
+      ],
+      "field_name": "routed_to",
+      "write_path": "POST /groups/{group_id}/messages.routing",
+      "read_path": "POST response.routed_to",
+      "error_envelope": {
+        "status": 200,
+        "shape": "json",
+        "code": null
+      },
+      "concurrency_isolation": "group_id+message_id",
+      "predicate": "atom_projection",
+      "source_file": "stories.sh",
+      "source_function": "_story_group_metadata_without_workspace",
+      "line_start": 469,
+      "line_end": 469,
+      "source_quote": "assert_json_not_empty \"persistent message records routing targets\" \"$RESPONSE\" \"routed_to\""
+    },
+    {
+      "obligation_id": "WORKSPACE.tail.chat.identifies-group",
+      "kind": "FIELD",
+      "expectation": "group chat response identifies the group",
+      "source_functions": [
+        "_story_group_metadata_without_workspace"
+      ],
+      "parent_obligation": "WORKSPACE.messages",
+      "decomposition_group": "WORKSPACE.tail-metadata",
+      "atom_ids": [
+        "WORKSPACE.tail.chat.identifies-group"
+      ],
+      "field_name": "group_id",
+      "write_path": "POST /groups/{group_id}/chat.message",
+      "read_path": "POST response.group_id",
+      "error_envelope": {
+        "status": 200,
+        "shape": "json",
+        "code": null
+      },
+      "concurrency_isolation": "group_id+message_id",
+      "predicate": "atom_projection",
+      "source_file": "stories.sh",
+      "source_function": "_story_group_metadata_without_workspace",
+      "line_start": 474,
+      "line_end": 474,
+      "source_quote": "assert_json_eq \"group chat response identifies the group\" \"$RESPONSE\" \"group_id\" \"$group_id\""
+    },
+    {
+      "obligation_id": "WORKSPACE.tail.chat.delivery-results",
+      "kind": "FIELD",
+      "expectation": "group chat reports delivery results",
+      "source_functions": [
+        "_story_group_metadata_without_workspace"
+      ],
+      "parent_obligation": "WORKSPACE.messages",
+      "decomposition_group": "WORKSPACE.tail-metadata",
+      "atom_ids": [
+        "WORKSPACE.tail.chat.delivery-results"
+      ],
+      "field_name": "delivery_results",
+      "write_path": "POST /groups/{group_id}/chat.delivery_results",
+      "read_path": "POST response.delivery_results",
+      "error_envelope": {
+        "status": 200,
+        "shape": "json",
+        "code": null
+      },
+      "concurrency_isolation": "group_id+message_id",
+      "predicate": "atom_projection",
+      "source_file": "stories.sh",
+      "source_function": "_story_group_metadata_without_workspace",
+      "line_start": 475,
+      "line_end": 475,
+      "source_quote": "assert_json_not_empty \"group chat reports delivery results\" \"$RESPONSE\" \"delivery_results\""
+    },
+    {
+      "obligation_id": "WORKSPACE.tail.callback.identifies-group",
+      "kind": "FIELD",
+      "expectation": "callback response identifies the group",
+      "source_functions": [
+        "_story_group_metadata_without_workspace"
+      ],
+      "parent_obligation": "WORKSPACE.messages",
+      "decomposition_group": "WORKSPACE.tail-metadata",
+      "atom_ids": [
+        "WORKSPACE.tail.callback.identifies-group"
+      ],
+      "field_name": "group_id",
+      "write_path": "POST /groups/{group_id}/callback.message",
+      "read_path": "POST response.group_id",
+      "error_envelope": {
+        "status": 200,
+        "shape": "json",
+        "code": null
+      },
+      "concurrency_isolation": "group_id+callback_id",
+      "predicate": "atom_projection",
+      "source_file": "stories.sh",
+      "source_function": "_story_group_metadata_without_workspace",
+      "line_start": 480,
+      "line_end": 480,
+      "source_quote": "assert_json_eq \"callback response identifies the group\" \"$RESPONSE\" \"group_id\" \"$group_id\""
+    },
+    {
+      "obligation_id": "WORKSPACE.tail.callback.delivery-results",
+      "kind": "FIELD",
+      "expectation": "callback reports delivery results",
+      "source_functions": [
+        "_story_group_metadata_without_workspace"
+      ],
+      "parent_obligation": "WORKSPACE.messages",
+      "decomposition_group": "WORKSPACE.tail-metadata",
+      "atom_ids": [
+        "WORKSPACE.tail.callback.delivery-results"
+      ],
+      "field_name": "delivery_results",
+      "write_path": "POST /groups/{group_id}/callback.delivery_results",
+      "read_path": "POST response.delivery_results",
+      "error_envelope": {
+        "status": 200,
+        "shape": "json",
+        "code": null
+      },
+      "concurrency_isolation": "group_id+callback_id",
+      "predicate": "atom_projection",
+      "source_file": "stories.sh",
+      "source_function": "_story_group_metadata_without_workspace",
+      "line_start": 481,
+      "line_end": 481,
+      "source_quote": "assert_json_not_empty \"callback reports delivery results\" \"$RESPONSE\" \"delivery_results\""
+    },
+    {
+      "obligation_id": "WORKSPACE.tail.delete.confirms-id",
+      "kind": "FIELD",
+      "expectation": "group deletion confirms the id",
+      "source_functions": [
+        "_story_group_metadata_without_workspace"
+      ],
+      "parent_obligation": "WORKSPACE.incident-delete",
+      "decomposition_group": "WORKSPACE.tail-metadata",
+      "atom_ids": [
+        "WORKSPACE.tail.delete.confirms-id"
+      ],
+      "field_name": "id",
+      "write_path": "DELETE /groups/{group_id}?bot_id={driver_bot}",
+      "read_path": "DELETE response.id",
+      "error_envelope": {
+        "status": 200,
+        "shape": "json",
+        "code": null
+      },
+      "concurrency_isolation": "group_id+driver_bot",
+      "predicate": "atom_projection",
+      "source_file": "stories.sh",
+      "source_function": "_story_group_metadata_without_workspace",
+      "line_start": 485,
+      "line_end": 485,
+      "source_quote": "assert_json_eq \"group deletion confirms the id\" \"$RESPONSE\" \"id\" \"$group_id\""
+    },
+    {
+      "obligation_id": "WORKSPACE.tail.delete.gone",
+      "kind": "FIELD",
+      "expectation": "closed incident group is gone",
+      "source_functions": [
+        "_story_group_metadata_without_workspace"
+      ],
+      "parent_obligation": "WORKSPACE.incident-delete",
+      "decomposition_group": "WORKSPACE.tail-metadata",
+      "atom_ids": [
+        "WORKSPACE.tail.delete.gone"
+      ],
+      "field_name": "deleted group",
+      "write_path": "GET /groups/{group_id}",
+      "read_path": "error envelope",
+      "error_envelope": {
+        "status": 404,
+        "shape": "json",
+        "code": "not_found"
+      },
+      "concurrency_isolation": "group_id",
+      "predicate": "atom_projection",
+      "source_file": "stories.sh",
+      "source_function": "_story_group_metadata_without_workspace",
+      "line_start": 487,
+      "line_end": 487,
+      "source_quote": "require_status \"closed incident group is gone\" \"404\" || return"
+    }
+  ],
+  "sources": {
+    "group.sh": "2bbb82c417261900265ce39f69aebb01633bb0700c4d7c71c1a2c9d7d9131c1d",
+    "stories.sh": "3025c6ee245a2a3b514fba18fe913bb8d1ad42dc37183602521f29c496a4f10f",
+    "migration-contracts.json": "9de6702c25ddec7452a385d230179e8b5eb1e4ddc13095dba68ae0579860f630",
+    "group-workspace-density-contract.json": "8151f8fb1b5e92934b026fe3d429d583b54fc06127bf4d52f7f32556c8b5152a"
+  },
+  "dual_shape": {
+    "local": {
+      "executor": "owned-local",
+      "validation": "OFFLINE_FAKE_TRANSPORT",
+      "remote_validation": "NOT_RUN"
+    },
+    "preprod": {
+      "profiles": [
+        "human-cookie",
+        "owned-bot"
+      ],
+      "validation": "NOT_RUN_RECEIPT",
+      "remote_validation": "NOT_RUN"
+    }
+  },
+  "release_credit": {
+    "grants_release_credit": false,
+    "preprod_live": "NOT_RUN"
+  },
+  "field_net_inflow": {
+    "extracted_clauses_total": 43,
+    "field_rows": 26,
+    "already_registered_as_baseline": 17,
+    "plumbing_excluded": [
+      "status guards",
+      "implicit CLI wrapper exit",
+      "empty-id setup guards",
+      "cleanup return"
+    ]
+  },
+  "upstream_mapping_note": "The 63 atom table is the evidence oracle. The 43 obligations are a coarse 17-row roll-up plus 26 source-anchored FIELD rows; duplicate status/plumbing clauses are retained in the atom roll-up but not counted as new FIELD obligations."
+}

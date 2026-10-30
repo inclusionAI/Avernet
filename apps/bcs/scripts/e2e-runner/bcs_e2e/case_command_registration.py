@@ -28,6 +28,7 @@ from .dynamic_family.case_run import (DUAL_DRAFT_GROUP_COMMAND,
                                        DUAL_FIXED_LOOP_COMMAND,
                                        DUAL_NESTED_FIXED_LOOP_COMMAND,
                                        DUAL_RESULT_QUEUE_COMMAND)
+from .workspace_field.dual_case_run import DUAL_WORKSPACE_FIELD_COMMAND
 
 
 CASE_COMMANDS = frozenset({
@@ -46,6 +47,7 @@ CASE_COMMANDS = frozenset({
     DUAL_NESTED_FIXED_LOOP_COMMAND,
     DUAL_RESULT_QUEUE_COMMAND,
     DUAL_DRAFT_GROUP_COMMAND,
+    DUAL_WORKSPACE_FIELD_COMMAND,
     "dual-webhook-subscription-run",
     "dual-friend-connection-decisions-run",
     "dual-friend-public-accept-run",
@@ -217,6 +219,14 @@ def register_case_commands(commands) -> None:
     draft_group_case.add_argument("--allow-write", action="store_true")
     draft_group_case.add_argument("--binary", type=Path, required=True)
     draft_group_case.add_argument("--binary-sha256", required=True)
+    workspace_field_case = commands.add_parser(
+        "dual-workspace-field-run",
+        help="Run the reviewed dual workspace-field density journey through Singlebox or preprod")
+    workspace_field_case.add_argument("--profile", type=Path, required=True)
+    workspace_field_case.add_argument("--state-dir", type=Path, required=True)
+    workspace_field_case.add_argument("--run-id", required=True)
+    workspace_field_case.add_argument("--confirm-run-id", required=True)
+    workspace_field_case.add_argument("--allow-write", action="store_true")
     webhook_subscription_case = commands.add_parser(
         "dual-webhook-subscription-run",
         help="Run the reviewed dual Event Webhook subscription lifecycle through Singlebox or preprod")

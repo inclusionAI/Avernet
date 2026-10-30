@@ -63,6 +63,7 @@ from .dynamic_family.case_run import (dual_draft_group_case_run,
                                        dual_fixed_loop_case_run,
                                        dual_nested_fixed_loop_case_run,
                                        dual_result_queue_case_run)
+from .workspace_field.dual_case_run import dual_workspace_field_command_handler
 from .webhook_subscription_case_run import dual_webhook_subscription_case_run
 from .friend_connection_decision_case_run import dual_friend_connection_decision_case_run
 from .friend_public_accept_case_run import dual_friend_public_accept_case_run
@@ -676,6 +677,8 @@ def main(argv: list[str] | None = None) -> int:
                 binary_sha256=args.binary_sha256,
             )
             rc = 0 if report["status"] == "PASS" else 2
+        elif args.command == "dual-workspace-field-run":
+            rc = dual_workspace_field_command_handler(args)
         elif args.command == "dual-webhook-subscription-run":
             report = dual_webhook_subscription_case_run(
                 profile_path=args.profile,
