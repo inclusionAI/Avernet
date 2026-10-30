@@ -404,6 +404,17 @@ stage.resolve_stage_bind_id`'s rule, shared with the connection service so a
                 raise EngineCapabilityUnsupportedError(
                     f"engine does not support {path}"
                 ) from exc
+            # A stale AgentClaw sandbox is the one expected runtime state that
+            # is represented by an HTTP error from the provider. It is distinct
+            # from the generic upstream failure, which must continue to map to
+            # "Engine service error" for callers.
+            if (
+                exc.status_code == 500
+                and "sandbox info not exist" in exc.response_text
+            ):
+                raise EngineDeviceNotReadyError(
+                    f"engine device is not ready for {path}"
+                ) from exc
             raise EngineUpstreamError(
                 f"engine returned HTTP {exc.status_code} for {path}"
             ) from exc
