@@ -407,14 +407,34 @@ def test_subpath_escape_is_refused(serve):
 
 def test_a_symlink_member_is_refused(tmp_path):
     bare = _serve_repo(tmp_path, symlink_member=True)
+    checkout = _client().fetch(GitSourceSpec(url=f"file://{bare}", ref="main"))
+    assert checkout.read_file("root.txt") == b"root\n"
     with pytest.raises(FetchRefusedError, match="forbidden member"):
-        _client().fetch(GitSourceSpec(url=f"file://{bare}", ref="main"))
+        checkout.files("pkg")
+    with pytest.raises(FetchRefusedError, match="forbidden member"):
+        checkout.files()
+    with pytest.raises(FetchRefusedError, match="forbidden member"):
+        checkout.files("pkg/escape")
+    with pytest.raises(FetchRefusedError, match="forbidden member"):
+        checkout.files("pkg//escape")
+    with pytest.raises(FetchRefusedError, match="forbidden member"):
+        checkout.read_file("pkg/escape")
+    with pytest.raises(FetchRefusedError, match="forbidden member"):
+        checkout.read_file("pkg/escape/passwd")
 
 
 def test_a_gitlink_member_is_refused(tmp_path):
     bare = _serve_repo(tmp_path, gitlink_member=True)
+    checkout = _client().fetch(GitSourceSpec(url=f"file://{bare}", ref="main"))
+    assert checkout.read_file("root.txt") == b"root\n"
     with pytest.raises(FetchRefusedError, match="forbidden member"):
-        _client().fetch(GitSourceSpec(url=f"file://{bare}", ref="main"))
+        checkout.files("vendor")
+    with pytest.raises(FetchRefusedError, match="forbidden member"):
+        checkout.files("vendor/sub")
+    with pytest.raises(FetchRefusedError, match="forbidden member"):
+        checkout.files()
+    with pytest.raises(FetchRefusedError, match="forbidden member"):
+        checkout.read_file("vendor/sub/file")
 
 
 def test_unknown_ref_is_a_fetch_failure(serve):
