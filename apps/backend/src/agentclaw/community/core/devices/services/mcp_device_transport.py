@@ -22,6 +22,29 @@ from agentclaw.community.core.devices.services.mcp_device_payload import (
 
 logger = get_logger()
 
+
+def _safe_mcp_log_data(
+        mcp_data: Dict[str, Any],
+        config: Optional[DeviceMCPConfig] = None,
+) -> Dict[str, Any]:
+    """Return a non-secret summary of MCP data for logs."""
+    fields: Dict[str, Any] = {}
+    if not mcp_data:
+        return {}
+
+    # I want "server_code" and "transport" to always be obvious keys. Don't
+    # let logging call out missing keys as None.
+    if mcp_data.get("server_code"):
+        fields["server_code"] = mcp_data.get("server_code")
+    if mcp_data.get("transport"):
+        fields["transport"] = mcp_data.get("transport")
+    if mcp_data.get("transport_protocol"):
+        fields["transport_protocol"] = mcp_data.get("transport_protocol")
+
+    if config:
+        fields["configured_transport"] = config.transport
+    return fields
+
 _TIMEOUT = 30  # seconds
 
 
@@ -122,8 +145,8 @@ def probe_mcp(
     try:
         response = transport.get(f"{_MCP_PATH}/{server_code}")
         return response.status_code == 200
-    except Exception as e:
-        logger.warning("[mcp_transport] 探测设备上的 MCP %s 失败: %s", server_code, e)
+    except Exception as error:
+        logger.warning("[mcp_transport] 探测设备上的 MCP %s 失败: %s", server_code, error)
         return False
 
 
@@ -162,8 +185,8 @@ def filter_servers(
     except HttpClientRequestError as e:
         logger.exception("[mcp_transport] Failed to sync all MCPs: %s", e)
         return False
-    except Exception as e:
-        logger.exception("[mcp_transport] Unexpected error during sync all: %s", e)
+    except Exception as error:
+        logger.exception("[mcp_transport] Unexpected error during sync all: %s", error)
         return False
 
 
@@ -186,12 +209,11 @@ def push_single_mcp(
             url_override=url_override,
             strict_transport_protocol=strict_transport_protocol,
         )
-
         try:
             _create_mcp(transport, config)
             logger.info("[mcp_transport] Created MCP %s on device", config.server_code)
-        except Exception as e:
-            if is_already_exists_error(e):
+        except Exception as error:
+            if is_already_exists_error(error):
                 logger.info("[mcp_transport] MCP %s already exists, updating...", config.server_code)
                 _update_mcp(transport, config)
                 logger.info("[mcp_transport] Updated MCP %s on device", config.server_code)
@@ -200,12 +222,15 @@ def push_single_mcp(
 
         return True
 
-    except HttpClientRequestError as e:
-        logger.exception("[mcp_transport] Failed to sync single MCP: %s", e)
+    except HttpClientRequestError as error:
+        logger.exception(
+            "[mcp_transport] Failed to sync single MCP after send: %s",
+            _safe_mcp_log_data(mcp_data, config),
+        )
         sc = mcp_data.get("server_code") or mcp_data.get("serverCode")
-        raise Exception(f"Network error syncing {sc}: {e}") from e
-    except Exception as e:
-        logger.exception("[mcp_transport] Unexpected error during sync single: %s", e)
+        raise Exception(f"Network error syncing {sc}: {error}") from error
+    except Exception as error:
+        logger.exception("[mcp_transport] Unexpected error during sync single: %s", error)
         raise
 
 
@@ -218,8 +243,8 @@ def remove_mcp(
         _delete_mcp(transport, server_code)
         logger.info("[mcp_transport] Removed MCP %s from device", server_code)
         return True
-    except Exception as e:
-        logger.error("[mcp_transport] Failed to remove MCP %s from device: %s", server_code, e)
+    except Exception as error:
+        logger.error("[mcp_transport] Failed to remove MCP %s from device: %s", server_code, error)
         return False
 
 
