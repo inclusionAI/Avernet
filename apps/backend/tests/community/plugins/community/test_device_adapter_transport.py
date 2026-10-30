@@ -129,6 +129,23 @@ def test_invoke_multipart_forwards_replayable_package_and_provider_header():
     }
 
 
+def test_invoke_multipart_maps_baas_transient_error():
+    transport, baas = _transport()
+    baas.get_http_info.side_effect = BaasTransientServiceError(
+        "BaaS API transient error: 503"
+    )
+
+    with pytest.raises(DeviceConnectionUnavailableError):
+        asyncio.run(
+            transport.invoke_multipart(
+                {"binding_id": 17, "engine_port": 20003},
+                "/api/skills/local/apply",
+                files={"file": ("weather.zip", b"zip", "application/zip")},
+                data={"skill_name": "weather"},
+            )
+        )
+
+
 @pytest.mark.parametrize(
     ("status", "expected"),
     [
