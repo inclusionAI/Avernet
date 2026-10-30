@@ -43,12 +43,12 @@ export function TopicInteractionBar({
         <Button
           variant="ghost"
           size="sm"
-          disabled={likePending}
+          aria-busy={likePending}
           aria-label="点赞主题"
           aria-pressed={liked}
           onClick={() => onLike(target)}
           className={cn(
-            'h-auto min-h-0 gap-1.5 px-0 text-sm font-normal transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+            'h-auto min-h-0 gap-1.5 px-0 text-sm font-normal transition-colors',
             liked
               ? 'text-destructive hover:text-destructive'
               : 'text-muted-foreground hover:text-foreground',
@@ -60,12 +60,12 @@ export function TopicInteractionBar({
         <Button
           variant="ghost"
           size="sm"
-          disabled={favoritePending}
+          aria-busy={favoritePending}
           aria-label="收藏主题"
           aria-pressed={favorited}
           onClick={() => onFavorite(target)}
           className={cn(
-            'h-auto min-h-0 gap-1.5 px-0 text-sm font-normal transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+            'h-auto min-h-0 gap-1.5 px-0 text-sm font-normal transition-colors',
             favorited ? 'text-warning hover:text-warning' : 'text-muted-foreground hover:text-foreground',
           )}
         >
