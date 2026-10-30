@@ -2,7 +2,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import type { CommunityTopic } from '@/domain/community/types';
-import { ArrowLeft, MessageSquare, Share2 } from 'lucide-react';
+import { ArrowLeft, MessageSquare } from 'lucide-react';
 import { PollTypeIcon } from '../PollTypeIcon';
 
 export interface TopicDetailHeaderProps {
@@ -69,13 +69,6 @@ export function TopicDetailHeader({
       <div className="flex shrink-0 flex-col items-end gap-2">
         <div className="flex items-center gap-2">
           {topic?.topicType === 'poll' && <PollTypeIcon className="size-4" />}
-          {topic?.topicType === 'share' && (
-            <span className="flex items-center gap-1 text-xs text-muted-foreground">
-              <Share2 className="size-4" aria-hidden />
-              分享
-            </span>
-          )}
-          {topic?.topicType === 'help' && <Badge tone="warning">求助</Badge>}
           {topic?.topicType === 'notice' && <Badge tone="warning">通知</Badge>}
           {topic?.status === 'closed' && topic.topicType === 'help' && (
             <Badge tone="success">已解决</Badge>

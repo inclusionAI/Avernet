@@ -1,15 +1,13 @@
 // @asset-migrated: teamclaw 自研资产
 /**
- * TaskOverviewV2 —— Level1 任务总览,PRD 两区结构:步骤区(节点视图/DAG 视图双切换)+ 产物区。
+ * TaskOverviewV2 —— Level1 任务总览,PRD 两区结构:步骤区仅展示节点视图 + 产物区。
  * 交互语义(PRD 方案A):点根节点恢复宿主会话，点其他节点联动会话；
- * 节点/DAG 视图当前均隐藏下钻入口，暂不提供节点副屏下钻展示。
+ * 节点视图当前隐藏下钻入口，暂不提供节点副屏下钻展示。
  */
-import React, { useState } from 'react';
+import React from 'react';
 
-import { resolveNodeSessionTarget } from '../sessionResolution';
 import { C } from '../tokens';
 import type { TaskView } from '../types';
-import { DagViewV2 } from './DagViewV2';
 import { NodeListViewV2 } from './NodeListViewV2';
 import { TaskArtifactsList } from './TaskArtifactsList';
 import type { TaskPanelNav } from './taskPanelNav';
@@ -23,83 +21,19 @@ export interface TaskOverviewV2Props {
   onOpenSubTask?: (subTaskId: string) => void;
 }
 
-type StepView = 'node' | 'dag';
-
-const ViewSwitchButton: React.FC<{
-  active: boolean;
-  title: string;
-  label: string;
-  onClick: () => void;
-}> = ({ active, title, label, onClick }) => (
-  <button
-    type="button"
-    title={title}
-    onClick={onClick}
-    style={{
-      border: 'none',
-      background: active ? C.surface : 'transparent',
-      color: active ? C.primary : C.textSecondary,
-      fontSize: 12,
-      padding: '4px 10px',
-      borderRadius: 6,
-      cursor: 'pointer',
-      boxShadow: active ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
-      fontWeight: active ? 600 : 400,
-    }}
-  >
-    {label}
-  </button>
-);
-
-export const TaskOverviewV2: React.FC<TaskOverviewV2Props> = ({ task, nav, apiBaseUrl, onOpenSubTask }) => {
-  const [view, setView] = useState<StepView>('node');
-  const rootNodeId = task.nodes[0]?.id;
-
-  return (
-    <div data-testid="task-overview-v2" style={{ minHeight: '100%' }}>
-      <section>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px 0' }}>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 14, fontWeight: 600, color: C.textPrimary }}>步骤</span>
-            <span style={{ fontSize: 11, color: C.textSecondary }}>点击查看会话</span>
-          </div>
-          <div style={{ display: 'inline-flex', gap: 2, background: C.surfaceAlt, borderRadius: 6, padding: 2 }}>
-            <ViewSwitchButton
-              active={view === 'node'}
-              title={view === 'node' ? '当前为节点视图' : '切换到节点视图'}
-              label="节点视图"
-              onClick={() => setView('node')}
-            />
-            <ViewSwitchButton
-              active={view === 'dag'}
-              title={view === 'dag' ? '当前为 DAG 视图' : '切换到 DAG 视图'}
-              label="DAG视图"
-              onClick={() => setView('dag')}
-            />
-          </div>
+export const TaskOverviewV2: React.FC<TaskOverviewV2Props> = ({ task, nav, apiBaseUrl, onOpenSubTask }) => (
+  <div data-testid="task-overview-v2" style={{ minHeight: '100%' }}>
+    <section>
+      <div style={{ display: 'flex', alignItems: 'center', padding: '12px 16px 0' }}>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: C.textPrimary }}>步骤</span>
+          <span style={{ fontSize: 11, color: C.textSecondary }}>点击查看会话</span>
         </div>
-        {view === 'node' ? (
-          <NodeListViewV2 task={task} nav={nav} onOpenSubTask={onOpenSubTask} />
-        ) : (
-          <div style={{ height: 420, minHeight: 0 }}>
-            <DagViewV2
-              view="interactive"
-              nodes={task.dagNodes}
-              edges={task.dagEdges}
-              selectedId={nav.selectedNodeId}
-              onNodeClick={(id) => {
-                const node = task.nodes.find((n) => n.id === id);
-                if (!node) return;
-                if (id === rootNodeId) nav.selectRootNode(id);
-                else nav.selectNode(id, resolveNodeSessionTarget(node, task));
-              }}
-            />
-          </div>
-        )}
-      </section>
-      <TaskArtifactsList task={task} apiBaseUrl={apiBaseUrl} enrichGroupDisplay={false} />
-    </div>
-  );
-};
+      </div>
+      <NodeListViewV2 task={task} nav={nav} onOpenSubTask={onOpenSubTask} />
+    </section>
+    <TaskArtifactsList task={task} apiBaseUrl={apiBaseUrl} enrichGroupDisplay={false} />
+  </div>
+);
 
 export default TaskOverviewV2;

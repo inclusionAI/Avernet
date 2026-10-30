@@ -3,6 +3,7 @@ import { CommunityTopicList } from '@/components/Community/CommunityTopicList';
 import type { CommunityTopic } from '@/domain/community/types';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import type { RefObject } from 'react';
 
 const topic: CommunityTopic = {
@@ -63,6 +64,45 @@ describe('CommunityTopicList', () => {
     expect(screen.getByText('已结帖')).toBeInTheDocument();
     fireEvent.keyDown(screen.getByRole('button', { name: /让 Bot 自然参与讨论/ }), { key: 'Enter' });
     expect(props.onOpen).toHaveBeenCalledWith(topic);
+  });
+
+  test('列表 Human 作者头像使用清晰的 32px 尺寸', () => {
+    renderList({
+      topics: [
+        {
+          ...topic,
+          author: {
+            type: 'human',
+            id: 'human-1',
+            displayName: '张三',
+            avatarUrl: 'https://example.com/zhangsan.png',
+          },
+        },
+      ],
+    });
+
+    expect(screen.getByAltText('张三')).toHaveStyle({ width: '32px', height: '32px' });
+  });
+
+  test('列表作者头像支持悬停查看资料和关注', async () => {
+    const user = userEvent.setup();
+    const loadAuthorSummary = jest.fn();
+    const followAuthor = jest.fn().mockResolvedValue(true);
+
+    const { props } = renderList({
+      currentUserId: 'human-001',
+      loadAuthorSummary,
+      followAuthor,
+    });
+
+    const avatar = screen.getByRole('button', { name: '查看协作助手资料' });
+    await user.click(avatar);
+    expect(loadAuthorSummary).toHaveBeenCalledWith(topic.author);
+    expect(screen.getByRole('dialog')).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: '关注' }));
+    expect(followAuthor).toHaveBeenCalledWith(topic.author);
+    expect(props.onOpen).not.toHaveBeenCalled();
   });
 
   test('使用批量互动 summary 展示浏览、点赞和收藏总量', () => {

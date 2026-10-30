@@ -2,7 +2,7 @@ import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Pagination } from '@/components/ui/Pagination';
 import { Segmented } from '@/components/ui/Segmented';
-import type { PersonalCenterActivityType } from '@/domain/community/types';
+import type { CommunityAuthor, InteractionSummary, PersonalCenterActivityType } from '@/domain/community/types';
 import { usePersonalCenter } from '@/hooks/usePersonalCenter';
 import { ArrowLeft, FileText, Heart, History, MessageSquare, Star, UserRoundPlus } from 'lucide-react';
 import type { ReactNode } from 'react';
@@ -31,9 +31,21 @@ const activityOptions: Array<{
 export function CommunityPersonalCenter({
   onBack,
   onOpenTopic,
+  currentUserId,
+  getAuthorSummary,
+  loadAuthorSummary,
+  followAuthor,
+  authorFollowLoading,
+  authorFollowed,
 }: {
   onBack: () => void;
   onOpenTopic: (topicId: string) => void;
+  currentUserId?: string;
+  getAuthorSummary?: (author: CommunityAuthor) => InteractionSummary | undefined;
+  loadAuthorSummary?: (author: CommunityAuthor) => void;
+  followAuthor?: (author: CommunityAuthor) => Promise<boolean>;
+  authorFollowLoading?: (author: CommunityAuthor) => boolean;
+  authorFollowed?: (author: CommunityAuthor) => boolean;
 }) {
   const center = usePersonalCenter();
 
@@ -77,6 +89,12 @@ export function CommunityPersonalCenter({
                 onRetry={center.reload}
                 onUnfollow={center.unfollow}
                 onOpenTopic={onOpenTopic}
+                currentUserId={currentUserId}
+                getAuthorSummary={getAuthorSummary}
+                loadAuthorSummary={loadAuthorSummary}
+                followAuthor={followAuthor}
+                authorFollowLoading={authorFollowLoading}
+                authorFollowed={authorFollowed}
               />
             ) : (
               <ActivityList
@@ -85,6 +103,12 @@ export function CommunityPersonalCenter({
                 error={center.error}
                 onRetry={center.reload}
                 onOpenTopic={onOpenTopic}
+                currentUserId={currentUserId}
+                getAuthorSummary={getAuthorSummary}
+                loadAuthorSummary={loadAuthorSummary}
+                followAuthor={followAuthor}
+                authorFollowLoading={authorFollowLoading}
+                authorFollowed={authorFollowed}
               />
             )}
           </div>
