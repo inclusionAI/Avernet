@@ -331,7 +331,7 @@ class ProviderSubbotsDualTests(unittest.TestCase):
             "mode": "DUAL",
             "preprod_verdict": "NOT_RUN",
             "gates": [],
-            "notes": [],
+            "notes": ["DUAL_SUBBOTS_DENSITY_D4_131_LEAVES"],
         })
 
         profile_path = self._write_profile(provider_profile(), "cli")

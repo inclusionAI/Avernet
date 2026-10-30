@@ -5,6 +5,10 @@ The preprod leg is deliberately a bounded route-surface probe until the
 Provider control plane has a fully admitted remote execution contract.  It
 uses wrong-method requests on the reviewed paths, so the probe cannot create,
 disable, delete or otherwise mutate a Provider or Bot.
+
+Both legs additionally project the 131-leaf density contract: local PASS
+flows only through the frozen child receipt collective, while preprod stays
+BLOCKED_INVENTORIED with named documented gaps and network_requests=0.
 """
 from __future__ import annotations
 
@@ -42,6 +46,15 @@ from .provider_subbots.contract import (
     STORY_CHECKS,
     SUITE as SOURCE_SUITE,
     provider_subbots_source_binding,
+)
+from .provider_subbots.density import (
+    DENSITY_CONTRACT_ID,
+    DENSITY_LEAVES,
+    DENSITY_PREFIX,
+    LOCAL_DERIVATION,
+    STATUS_BLOCKED_INVENTORIED,
+    build_case_density_projection,
+    density_contract_digest,
 )
 from .provider_subbots.run import local_provider_subbots_run
 from .run_state import RunStateError, write
@@ -207,6 +220,10 @@ def provider_subbots_case_plan() -> dict:
         "requirement_ids": list(REQUIREMENTS),
         "requirement_count": len(REQUIREMENTS),
         "story_checks": STORY_CHECKS,
+        "density_contract": DENSITY_CONTRACT_ID,
+        "density_prefix": DENSITY_PREFIX,
+        "density_leaves": DENSITY_LEAVES,
+        "density_contract_digest": density_contract_digest(),
         "source_binding_digest": fingerprint(binding),
         "probe_operations": [row["operation"] for row in _PROBE_ROWS],
     }
@@ -237,6 +254,12 @@ def provider_subbots_adaptability() -> dict:
         "local_executor_status": "LOCAL_FULL_EXECUTOR",
         "preprod_executor_status": "ROUTE_PROBE_ONLY_AWAITING_FULL_STORY_CREDENTIALS",
         "required_assertion_count": STORY_CHECKS,
+        "density_contract": DENSITY_CONTRACT_ID,
+        "density_leaves": DENSITY_LEAVES,
+        "density_local_derivation": LOCAL_DERIVATION,
+        "density_preprod_status": STATUS_BLOCKED_INVENTORIED,
+        "density_remote_validation": "NOT_RUN",
+        "density_grants_release_credit": False,
         "remote_validation": "NOT_RUN",
         "grants_release_credit": False,
         "blocker": (
@@ -589,7 +612,7 @@ def run_preprod_route_probe(profile: dict, *, client: object | None = None) -> d
     }
 
 
-def _assertion_summary(result: dict | None, probe: dict) -> dict:
+def _assertion_summary(result: dict | None, probe: dict, density: dict) -> dict:
     observed = 0
     if isinstance(result, dict):
         observed = result.get("child_receipt", {}).get("observed_checks", 0)
@@ -599,6 +622,14 @@ def _assertion_summary(result: dict | None, probe: dict) -> dict:
         "obligation_count": len(REQUIREMENTS),
         "preprod_probe_required_count": probe.get("required_count", 0),
         "preprod_probe_observed_count": len(probe.get("checks", [])),
+        "density_leaf_total": density["leaves_total"],
+        "density_leaf_pass_count": density["counts"]["pass"],
+        "density_leaf_not_run_count": density["counts"]["not_run"],
+        "density_counting_rule": (
+            "The 131 density leaves equal the frozen child receipt denominator; local PASS "
+            "flows only through the frozen child receipt collective, while preprod and any "
+            "partial or failing receipt stay honestly NOT_RUN."
+        ),
         "counting_rule": (
             "The frozen child count is 131 live HTTP assertions; every observed "
             "count is taken from the actual child receipt or probe response list."
@@ -667,6 +698,9 @@ def dual_provider_subbots_case_run(
         "profile_digest": digest,
         "executor_digest": artifact,
         "source_binding_digest": fingerprint(source_binding),
+        "density_contract": DENSITY_CONTRACT_ID,
+        "density_contract_digest": density_contract_digest(),
+        "density_leaves": DENSITY_LEAVES,
         "requirement_ids": list(REQUIREMENTS),
         "state_dir": str(state_dir),
     }
@@ -695,6 +729,7 @@ def dual_provider_subbots_case_run(
             f"provider subbots {case_key} case execution is unavailable: {error}"
         ) from None
 
+    density_projection = build_case_density_projection(tier, local_result, probe)
     status = "PASS" if execution.status == "PASS" else "BLOCKED"
     report = {
         "schema_version": SCHEMA_VERSION,
@@ -719,7 +754,8 @@ def dual_provider_subbots_case_run(
             "story_checks": STORY_CHECKS,
             "source_case_id": SOURCE_CASE_ID,
         },
-        "assertion_summary": _assertion_summary(local_result, probe),
+        "assertion_summary": _assertion_summary(local_result, probe, density_projection),
+        "density_projection": density_projection,
         "preprod_probe": probe or None,
         "case": execution.snapshot(),
         "execution": {

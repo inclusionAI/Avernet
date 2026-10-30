@@ -355,7 +355,9 @@
         "mode": "DUAL",
         "preprod_verdict": "NOT_RUN",
         "gates": [],
-        "notes": []
+        "notes": [
+          "DUAL_SUBBOTS_DENSITY_D4_131_LEAVES"
+        ]
       }
     },
     {
