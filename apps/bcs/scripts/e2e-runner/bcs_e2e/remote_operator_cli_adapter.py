@@ -25,7 +25,7 @@ import os
 import uuid
 
 from .case_adapters import AdapterCall
-from .case_executor import CaseExecution, StepOutcome
+from .case_executor import CaseExecution, StepOutcome, record_error_detail
 from .local_operator_cli_contract import (
     COMMANDS,
     PARENT,
@@ -624,6 +624,7 @@ def execute_operator_cli_case(adapter: object) -> CaseExecution:
         raise RunStateError("operator CLI requires its shared adapter")
     steps: list[StepOutcome] = []
     error_type: str | None = None
+    first_error_detail: str | None = None
     completed = 0
     for method_name, requirement_id in zip(
             OPERATOR_CLI_ADAPTER_METHODS, plan["requirement_ids"]):
@@ -655,15 +656,20 @@ def execute_operator_cli_case(adapter: object) -> CaseExecution:
             completed += 1
         except Exception as error:
             error_type = type(error).__name__
+            detail = record_error_detail(error)
+            first_error_detail = detail
             steps.append(StepOutcome(
                 requirement_id=requirement_id, method=method_name,
                 status="NOT_RUN", data=None, evidence={},
-                error_type=error_type, error_gap=getattr(error, "gap", None)))
+                error_type=error_type, error_gap=getattr(error, "gap", None),
+                error_detail=detail))
     execution = CaseExecution(
         case_id=OPERATOR_CLI_CASE_ID, parent_id=PARENT,
         status="PASS" if error_type is None else "BLOCKED",
         steps=tuple(steps), completed_count=completed,
         total_count=len(OPERATOR_CLI_ADAPTER_METHODS),
-        error_type=error_type, ready_to_execute=error_type is None)
+        error_type=error_type,
+        error_detail=first_error_detail,
+        ready_to_execute=error_type is None)
     execution.validate()
     return execution

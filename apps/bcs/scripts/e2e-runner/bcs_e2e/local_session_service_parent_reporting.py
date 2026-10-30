@@ -241,7 +241,8 @@ def _case_valid(root: Path, binding: dict, case: dict) -> bool:
         method, effect, _requirement = ASSERTION_METHODS[assertion_id]
         if (not isinstance(step, dict)
                 or set(step) != {'requirement_id', 'method', 'status', 'data',
-                                 'evidence', 'error_type', 'error_gap'}
+                                 'evidence', 'error_type', 'error_gap',
+                                 'error_detail'}
                 or step.get('requirement_id') != assertion_id
                 or step.get('method') != method
                 or step.get('status') != 'PASS'

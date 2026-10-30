@@ -22,6 +22,11 @@ sys.path.insert(0, str(ROOT))
 from bcs_e2e.case_executor import CaseExecution, StepOutcome, record_error_detail
 from bcs_e2e.run_state import RunStateError
 import test_workspace_group_lifecycle as ws
+import test_remote_workspace_cli_create_get_adapter as cg
+from bcs_e2e.workspace_cli_create_get_contract import (
+    RemoteWorkspaceCliCreateGetAdapter,
+    execute_workspace_cli_create_get_case,
+)
 
 DETAIL = "network probe message for diagnostics"
 
@@ -29,6 +34,9 @@ FORWARDING_FILES = [
     "session_file_core_case_run.py",
     "friend_connection_decision_case_run.py",
     "friend_public_accept_case_run.py",
+    "edge_friend_mutation_case_run.py",
+    "custom_collaboration_cli_case_run.py",
+    "collaboration_team_case_run.py",
 ]
 
 
@@ -119,27 +127,57 @@ class SpineLensStaticTests(unittest.TestCase):
                 "workspace_group_lifecycle_contract.py",
                 "session_file_core_contract.py",
                 "local_friend_connection_decision_contract.py",
-                "local_friend_public_accept_contract.py"):
+                "local_friend_public_accept_contract.py",
+                "workspace_roundtrip_contract.py",
+                "remote_operator_cli_adapter.py"):
             source = (RUNNER / name).read_text(encoding="utf-8")
             self.assertIn("record_error_detail(", source, name)
             self.assertIn("first_error_detail", source, name)
             self.assertIn("error_detail=first_error_detail", source, name)
             self.assertIn("error_detail=detail", source, name)
+
+
+
+
+class CliContractLensStaticTests(unittest.TestCase):
+    def test_single_step_custom_contracts_forward_detail(self):
+        for name in (
+                "workspace_cli_create_get_contract.py",
+                "workspace_cli_detail_contract.py",
+                "workspace_cli_fuse_contract.py",
+                "workspace_cli_list_contract.py",
+                "workspace_cli_member_contract.py",
+                "workspace_cli_status_contract.py",
+                "custom_collaboration_cli_case_run.py"):
+            source = (RUNNER / name).read_text(encoding="utf-8")
+            self.assertIn("record_error_detail(", source, name)
+            self.assertIn("first_error_detail", source, name)
+            self.assertIn("error_detail=first_error_detail", source, name)
+
+
+class ValidatorLensStaticTests(unittest.TestCase):
+    def test_strict_step_validators_admit_error_detail_key(self):
+        for name in ("local_collaboration_team_reporting.py",
+                     "local_session_service_parent_reporting.py"):
+            source = (RUNNER / name).read_text(encoding="utf-8")
+            self.assertIn("'error_detail'}", source, name)
+
+
+class WorkspaceCliCreateGetLensTests(unittest.TestCase):
+    def test_blocked_first_step_carries_detail(self):
+        class BoomAdapter(RemoteWorkspaceCliCreateGetAdapter):
+            def create_retained_workspace_group(self):
+                raise RunStateError(DETAIL)
+
+        adapter = BoomAdapter(cg.profile_value(), cg.ScriptedRunner())
+        execution = execute_workspace_cli_create_get_case(adapter)
+        self.assertEqual(execution.status, "BLOCKED")
+        self.assertEqual(execution.error_type, "RunStateError")
+        self.assertEqual(execution.error_detail, DETAIL)
+        snapshot = execution.snapshot()
+        self.assertEqual(snapshot["error_detail"], DETAIL)
+        self.assertEqual(snapshot["steps"][0]["error_detail"], DETAIL)
 
 
 if __name__ == "__main__":
     unittest.main()
-
-
-class SpineLensStaticTests(unittest.TestCase):
-    def test_lensed_custom_spines_capture_first_failure_detail(self):
-        for name in (
-                "workspace_group_lifecycle_contract.py",
-                "session_file_core_contract.py",
-                "local_friend_connection_decision_contract.py",
-                "local_friend_public_accept_contract.py"):
-            source = (RUNNER / name).read_text(encoding="utf-8")
-            self.assertIn("record_error_detail(", source, name)
-            self.assertIn("first_error_detail", source, name)
-            self.assertIn("error_detail=first_error_detail", source, name)
-            self.assertIn("error_detail=detail", source, name)

@@ -27,7 +27,7 @@ OUTPUTS = ('reports/summary.json', 'reports/junit.xml', 'reports/summary.md')
 COMPLETION = 'owned-local-collaboration-team-completion-v1'
 RESOURCE_DISPOSITION = 'OWNED_RUNTIME_BUSINESS_HISTORY_RETAINED'
 _STEP_KEYS = {'requirement_id', 'method', 'status', 'data', 'evidence',
-              'error_type', 'error_gap'}
+              'error_type', 'error_gap', 'error_detail'}
 
 
 def _require(condition, message):

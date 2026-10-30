@@ -100,11 +100,11 @@ def case():
         'schema_version': 1, 'case_id': CASE_ID, 'parent_id': PARENT,
         'status': 'PASS',
         'completed_count': 8, 'total_count': 8, 'ready_to_execute': True,
-        'error_type': None,
+        'error_type': None, 'error_detail': None,
         'steps': [{
             'requirement_id': REQUIREMENT_IDS[index], 'method': ADAPTER_METHODS[index],
             'status': 'PASS', 'data': data[index], 'error_type': None,
-            'error_gap': None,
+            'error_gap': None, 'error_detail': None,
             'evidence': {
                 'case_operation': f'operation-{index}',
                 'requests': [request(index, 'PRODUCT_HTTP' if index == 4 else 'PRODUCT_CLI')],

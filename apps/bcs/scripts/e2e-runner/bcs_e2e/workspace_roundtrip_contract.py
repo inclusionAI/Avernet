@@ -23,7 +23,7 @@ from dataclasses import dataclass
 import json
 
 from .case_adapters import AdapterCall
-from .case_executor import CaseExecution, StepOutcome
+from .case_executor import CaseExecution, StepOutcome, record_error_detail
 from .run_state import RunStateError
 from .write_transport import WriteClient
 from .workspace_cli_profile import (
@@ -401,6 +401,7 @@ def execute_workspace_roundtrip_case(adapter: object) -> CaseExecution:
     driver_credential = adapter._credential_kind("driver")
     steps: list[StepOutcome] = []
     error_type: str | None = None
+    first_error_detail: str | None = None
     completed = 0
     for requirement_id, method_name in zip(REQUIREMENT_IDS, CASE_METHODS):
         if error_type is not None:
@@ -450,16 +451,20 @@ def execute_workspace_roundtrip_case(adapter: object) -> CaseExecution:
             completed += 1
         except Exception as error:
             error_type = type(error).__name__
+            detail = record_error_detail(error)
+            first_error_detail = detail
             steps.append(StepOutcome(requirement_id=requirement_id,
                                       method=method_name, status="NOT_RUN",
                                       data=None, evidence={},
-                                      error_type=error_type))
+                                      error_type=error_type,
+                                      error_detail=detail))
     execution = CaseExecution(
         case_id=CASE_ID, parent_id=WORKSPACE_PARENT,
         status="PASS" if error_type is None else "BLOCKED",
         steps=tuple(steps), completed_count=completed,
         total_count=len(REQUIREMENT_IDS),
         error_type=error_type, ready_to_execute=error_type is None,
+        error_detail=first_error_detail,
     )
     execution.validate()
     return execution

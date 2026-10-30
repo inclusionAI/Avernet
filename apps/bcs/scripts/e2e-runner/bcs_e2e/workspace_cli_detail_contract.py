@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .case_adapters import AdapterCall
-from .case_executor import CaseExecution, StepOutcome
+from .case_executor import CaseExecution, StepOutcome, record_error_detail
 from .run_state import RunStateError
 from .workspace_cli_profile import (
     validate_workspace_cli_detail_profile,
@@ -137,6 +137,7 @@ def execute_workspace_cli_detail_case(adapter: object) -> CaseExecution:
     validate_workspace_cli_detail_adapter(adapter)
     error_type: str | None = None
     error_gap: str | None = None
+    first_error_detail: str | None = None
     completed = 0
     records: list[dict] = []
     group_id = ""
@@ -161,6 +162,8 @@ def execute_workspace_cli_detail_case(adapter: object) -> CaseExecution:
     except Exception as error:
         error_type = type(error).__name__
         error_gap = str(error) or None
+        detail = record_error_detail(error)
+        first_error_detail = detail
 
     data = {
         "group_id": group_id,
@@ -184,12 +187,14 @@ def execute_workspace_cli_detail_case(adapter: object) -> CaseExecution:
         evidence=evidence if error_type is None else {},
         error_type=error_type,
         error_gap=error_gap,
+        error_detail=first_error_detail,
     )
     execution = CaseExecution(
         case_id=CASE_ID, parent_id=WORKSPACE_PARENT,
         status="PASS" if error_type is None else "BLOCKED",
         steps=(step,), completed_count=completed, total_count=1,
         error_type=error_type, ready_to_execute=error_type is None,
+        error_detail=first_error_detail,
     )
     execution.validate()
     return execution

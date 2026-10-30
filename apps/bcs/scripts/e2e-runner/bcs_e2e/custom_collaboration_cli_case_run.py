@@ -49,7 +49,7 @@ import json
 import re
 
 from .case_adapters import AdapterCall
-from .case_executor import CaseExecution, StepOutcome
+from .case_executor import CaseExecution, StepOutcome, record_error_detail
 from .custom_collaboration_cli_leaf import (
     CUSTOM_COLLABORATION_CASE_METHODS,
     CUSTOM_COLLABORATION_CLI_EFFECT,
@@ -594,6 +594,7 @@ def execute_custom_collaboration_case(adapter: object) -> CaseExecution:
     records: dict[str, dict] = {}
     projections: dict[str, object] = {}
     error_type: str | None = None
+    first_error_detail: str | None = None
     adapter.failed_method = None
     adapter.failure_class = None
     try:
@@ -605,6 +606,8 @@ def execute_custom_collaboration_case(adapter: object) -> CaseExecution:
     except Exception as error:
         error_type = type(error).__name__
         adapter.failure_class = public_failure_class(error)
+        detail = record_error_detail(error)
+        first_error_detail = detail
 
     def step(requirement_id: str, method: str, data: object,
              methods: tuple[str, ...], effect: str) -> StepOutcome:
@@ -612,7 +615,8 @@ def execute_custom_collaboration_case(adapter: object) -> CaseExecution:
             return StepOutcome(requirement_id=requirement_id, method=method,
                                status="NOT_RUN", data=None, evidence={},
                                error_type=error_type,
-                               error_gap=adapter.failure_class)
+                               error_gap=adapter.failure_class,
+                               error_detail=first_error_detail)
         return StepOutcome(
             requirement_id=requirement_id, method=method, status="PASS", data=data,
             evidence={"requests": [dict(records[name]) for name in methods],
@@ -713,7 +717,8 @@ def execute_custom_collaboration_case(adapter: object) -> CaseExecution:
             density_steps.append(StepOutcome(
                 requirement_id=row["id"], method=method, status="NOT_RUN",
                 data=None, evidence={}, error_type=error_type,
-                error_gap=adapter.failure_class))
+                error_gap=adapter.failure_class,
+                error_detail=first_error_detail))
             continue
         if row["status"] == "PASS":
             operation = operation_for_method[method]
@@ -751,6 +756,7 @@ def execute_custom_collaboration_case(adapter: object) -> CaseExecution:
         status="PASS" if complete else "BLOCKED", steps=steps,
         completed_count=completed, total_count=len(REQUIREMENTS),
         error_type=error_type or (None if complete else "DensityEvidenceGap"),
+        error_detail=first_error_detail,
         ready_to_execute=complete)
     execution.validate()
     return execution
@@ -840,7 +846,8 @@ def dual_custom_collaboration_case_run(
         "execution": {"status": execution.status,
                       "completed_count": execution.completed_count,
                       "total_count": execution.total_count,
-                      "error_type": execution.error_type},
+                      "error_type": execution.error_type,
+                      "error_detail": execution.error_detail},
         "failed_method": (adapter.failed_method
                           if execution.error_type is not None else None),
         "failure_class": (adapter.failure_class

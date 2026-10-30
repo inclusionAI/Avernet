@@ -322,6 +322,7 @@ def dual_edge_friend_mutation_case_run(
             "completed_count": execution.completed_count,
             "total_count": execution.total_count,
             "error_type": execution.error_type,
+            "error_detail": execution.error_detail,
         },
         "credential_kind": CREDENTIAL_KIND,
         "resource_disposition": disposition,
