@@ -1,7 +1,13 @@
 """Bot restart (re-deploy) operations, mixed into PublishFlowService."""
 from __future__ import annotations
 
-from agentclaw.community.core.bot_management.engines.registry import prepare_instance_restart
+from functools import partial
+
+from agentclaw.community.core.bot_management.engines.registry import (
+    prepare_instance_restart,
+    resolve_restart_strategy,
+)
+from agentclaw.community.core.bot_management.engines.restart_contract import PublishedRestartServices
 
 from agentclaw.community.core.service_bot.repository.models import (
     PublishOperationKind,
@@ -304,73 +310,189 @@ class RestartMixin:
         if not migration_path and not config_artifact:
             return {"success": False, "message": f"Missing build artifact: publish_id={publish_id}"}
 
-        # Mark restart in progress, and note that every failure return above this
-        # point leaves it untouched — the restart task's failure branch relies on
-        # that to avoid clearing a concurrent restart's marker. Cleared on an
-        # observed terminal workflow by sync_restart_progress, which the restart
-        # poll now drives.
-        def _set_restarting_flag(latest_ext: dict) -> None:
-            latest_ext.setdefault("restart", {})["restarting"] = True
+        ctx, strategy = resolve_restart_strategy(bot)
+        with strategy.published_restart_scope(
+            ctx,
+            services=PublishedRestartServices(
+                get_record=self._publish_service.get_publish_by_id,
+                mutate_ext=self._mutate_and_update_ext,
+                update_status=self._update_publish_status,
+            ),
+            publish_id=publish_id, stage=stage, binding_id=binding_id,
+            source_status=publish_record.status,
+        ) as policy_result:
+            if policy_result:
+                return policy_result
+            # Mark restart in progress, and note that every failure return above this
+            # point leaves it untouched — the restart task's failure branch relies on
+            # that to avoid clearing a concurrent restart's marker. Cleared on an
+            # observed terminal workflow by sync_restart_progress, which the restart
+            # poll now drives.
+            def _set_restarting_flag(latest_ext: dict) -> None:
+                latest_ext.setdefault("restart", {})["restarting"] = True
 
-        self._mutate_and_update_ext(publish_id=publish_id, mutator=_set_restarting_flag)
+            self._mutate_and_update_ext(publish_id=publish_id, mutator=_set_restarting_flag)
 
-        version = f"{publish_record.version}"
-        # STORED overrides slot: reproduce what was promoted (not a live re-fetch),
-        # so restarting a non-latest stage never delivers another stage's channels.
-        delivery = self._ext_state.compose_stored(publish_record.ext or {}, stage_enum)
-        skills_env = service_publish_extra_envs(publish_record.ext, bot)
-        image_pin = self.resolve_publish_image_pin(
-            publish_record, device_provider=self.device_provider(bot)
-        )
-
-        # A prior recreate that crashed between its ext write and its
-        # complete_operation left a dangling op. That crashed leg IS this restart
-        # request's deploy (ext.restart/publish.<stage> already point at its
-        # workflow), and RESTART_TASK is at-least-once — so a redelivery must
-        # finish the recreate's bookkeeping and return its existing workflow, NOT
-        # open a second RESTART op and issue another deploy (which would leave two
-        # concurrent deploy workflows for one restart). Short-circuit when found.
-        recreate_wid = self._finalize_dangling_recreate_op(publish_id, stage_enum, ext)
-        if recreate_wid is not None:
-            self.refresh_publish_handle(binding_id, recreate_wid)
-            logger.info(
-                "[PublishFlowService.execute_restart] resumed crashed recreate "
-                "(idempotent redelivery): publish_id=%s stage=%s restart_publish_id=%s",
-                publish_id, stage_enum.value, recreate_wid,
+            version = f"{publish_record.version}"
+            # STORED overrides slot: reproduce what was promoted (not a live re-fetch),
+            # so restarting a non-latest stage never delivers another stage's channels.
+            delivery = self._ext_state.compose_stored(publish_record.ext or {}, stage_enum)
+            skills_env = service_publish_extra_envs(publish_record.ext, bot)
+            image_pin = self.resolve_publish_image_pin(
+                publish_record, device_provider=self.device_provider(bot)
             )
-            return {"success": True,
-                    "message": f"Restart submitted, stage: {stage_enum.value}",
-                    "stage": stage_enum.value, "restart_publish_id": recreate_wid}
 
-        # Provider-aware reuse-vs-recreate decision (online stage). Any non-UPGRADE
-        # decision recreates *directly* rather than issuing the in-place UPGRADE:
-        # a teclaw not-live target's UPDATE cannot rebuild a gone container (it
-        # would silently fail the publish), and a DESTROYING/gone target's UPDATE
-        # is rejected with an error the atom does not classify as BOT_NOT_FOUND —
-        # both would strand the restart. Before recreating we open+abandon a fresh
-        # RESTART op so ``sync_restart_progress`` (which prefers the latest RESTART
-        # op's workflow id) does not read a stale earlier restart, and instead
-        # falls back to the ``ext.restart`` handle the recreate writes.
-        if stage_enum == PublishStage.ONLINE:
-            decision = self._decide_online_deploy(publish_record, bot)
-            if decision not in (
-                OnlineDeployDecision.UPGRADE,
-                OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE,
-                OnlineDeployDecision.FIRST_RELEASE,
-            ):
-                raise PublishFlowServiceError(
-                    f"Unhandled online deploy decision: {decision}"
+            # A prior recreate that crashed between its ext write and its
+            # complete_operation left a dangling op. That crashed leg IS this restart
+            # request's deploy (ext.restart/publish.<stage> already point at its
+            # workflow), and RESTART_TASK is at-least-once — so a redelivery must
+            # finish the recreate's bookkeeping and return its existing workflow, NOT
+            # open a second RESTART op and issue another deploy (which would leave two
+            # concurrent deploy workflows for one restart). Short-circuit when found.
+            recreate_wid = self._finalize_dangling_recreate_op(publish_id, stage_enum, ext)
+            if recreate_wid is not None:
+                self.refresh_publish_handle(binding_id, recreate_wid)
+                logger.info(
+                    "[PublishFlowService.execute_restart] resumed crashed recreate "
+                    "(idempotent redelivery): publish_id=%s stage=%s restart_publish_id=%s",
+                    publish_id, stage_enum.value, recreate_wid,
                 )
-            if decision != OnlineDeployDecision.UPGRADE:
-                # Release the record's now-stale online binding before recreating
-                # (the recreate below mints a fresh one and rewrites
-                # ext.binding.<stage>), so the old binding does not linger ACTIVE
-                # pointing at a gone/retired bot. For RETIRE_THEN_FIRST_RELEASE we
-                # destroy the still-registered bot first and stash its destroy id;
-                # for FIRST_RELEASE the target is already gone (RELEASED/DESTROYING,
-                # e.g. an external BaaS deletion) so no destroy is issued.
+                return {"success": True,
+                        "message": f"Restart submitted, stage: {stage_enum.value}",
+                        "stage": stage_enum.value, "restart_publish_id": recreate_wid}
+
+            # Provider-aware reuse-vs-recreate decision (online stage). Any non-UPGRADE
+            # decision recreates *directly* rather than issuing the in-place UPGRADE:
+            # a teclaw not-live target's UPDATE cannot rebuild a gone container (it
+            # would silently fail the publish), and a DESTROYING/gone target's UPDATE
+            # is rejected with an error the atom does not classify as BOT_NOT_FOUND —
+            # both would strand the restart. Before recreating we open+abandon a fresh
+            # RESTART op so ``sync_restart_progress`` (which prefers the latest RESTART
+            # op's workflow id) does not read a stale earlier restart, and instead
+            # falls back to the ``ext.restart`` handle the recreate writes.
+            if stage_enum == PublishStage.ONLINE:
+                decision = self._decide_online_deploy(publish_record, bot)
+                if decision not in (
+                    OnlineDeployDecision.UPGRADE,
+                    OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE,
+                    OnlineDeployDecision.FIRST_RELEASE,
+                ):
+                    raise PublishFlowServiceError(
+                        f"Unhandled online deploy decision: {decision}"
+                    )
+                if decision != OnlineDeployDecision.UPGRADE:
+                    # Release the record's now-stale online binding before recreating
+                    # (the recreate below mints a fresh one and rewrites
+                    # ext.binding.<stage>), so the old binding does not linger ACTIVE
+                    # pointing at a gone/retired bot. For RETIRE_THEN_FIRST_RELEASE we
+                    # destroy the still-registered bot first and stash its destroy id;
+                    # for FIRST_RELEASE the target is already gone (RELEASED/DESTROYING,
+                    # e.g. an external BaaS deletion) so no destroy is issued.
+                    destroy_publish_id = None
+                    if decision == OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE:
+                        await prepare_instance_restart(
+                            bot=bot,
+                            device_id=bot_uuid,
+                            target_runtime=self._baas_service,
+                            restart_key=f'restart:{publish_id}:{stage_enum.value}',
+                        )
+                        destroy_publish_id = self._build_service.retire_superseded_bot(
+                            bot_uuid, operator=operator
+                        )
+                    self._release_binding(
+                        binding_id, destroy_publish_id=destroy_publish_id
+                    )
+                    # Supersede any prior RESTART op with a fresh abandoned one, so
+                    # restart-status reads the recreate's workflow (via ext.restart).
+                    superseding_op = self._operation_runner.open_operation(
+                        publish_id=publish_id,
+                        kind=PublishOperationKind.RESTART,
+                        stage=stage_enum,
+                        bot_uuid=bot_uuid,
+                        operator=operator,
+                    )
+                    self._operation_runner.abandon_operation(
+                        superseding_op, f"{decision.value} -> recreate"
+                    )
+                    logger.info(
+                        "[PublishFlowService.execute_restart] decision=%s -> recreate: "
+                        "publish_id=%s bot_uuid=%s stage=%s",
+                        decision.value, publish_id, bot_uuid, stage_enum.value,
+                    )
+                    return await self._recreate_restart_target(
+                        publish_id=publish_id,
+                        stage_enum=stage_enum,
+                        publish_record=publish_record,
+                        bot=bot,
+                        migration_path=migration_path,
+                        version=version,
+                        delivery=delivery,
+                        skills_env=skills_env,
+                        docker_image=image_pin.docker_image,
+                        operator=operator,
+                        in_place=in_place,
+                    )
+
+            async def _issue():
+                await prepare_instance_restart(
+                    bot=bot, device_id=bot_uuid, target_runtime=self._baas_service,
+                    restart_key=f'restart:{publish_id}:{stage_enum.value}',
+                )
+                return await self._build_service.upgrade_async(
+                    bot_uuid=bot_uuid,
+                    bot=bot,
+                    user_id=publish_record.owner_id,
+                    device_count=1,
+                    migration_path=migration_path,
+                    publish_stage=stage_enum,
+                    version=version,
+                    delivery=delivery,
+                    ext_info={
+                        "skills_manifest": publish_record.ext["skills_manifest"]
+                    } if publish_record.ext.get("skills_manifest") is not None else None,
+                    extra_envs=skills_env,
+                    docker_image=image_pin.docker_image,
+                    template_config=service_publish_template_config(bot),
+                    in_place=in_place,
+                )
+            # NOTE: transient errors out of the atom are NOT caught + failed here. A
+            # genuine crash leaves the op non-terminal so the durable task retry
+            # re-runs and the SAME op resumes → adopt-by-query (existing bot).
+            # Catching + fail_operation would open a fresh attempt on retry and
+            # re-issue a second restart. The one classified signal is BOT_NOT_FOUND:
+            # the atom abandons the RESTART op and the recreate leg runs as its own
+            # fresh, crash-safe first-release op (new bot + NEW binding) — the same
+            # guarantee upgrade_release's fallback has, replacing the former inline
+            # recreate whose crash window could orphan a second bot.
+            try:
+                op = await acquire_deploy_workflow(
+                    self._operation_runner,
+                    publish_id=publish_id,
+                    kind=PublishOperationKind.RESTART,
+                    stage=stage_enum,
+                    operator=operator,
+                    issue=_issue,
+                    bot_uuid=bot_uuid,
+                    bot_gone_reason="BOT_NOT_FOUND -> recreate",
+                    acquire=partial(
+                        strategy.acquire_restart_workflow, ctx, runner=self._operation_runner,
+                    ),
+                )
+            except TargetBotGoneError as e:
+                logger.warning(
+                    "[PublishFlowService.execute_restart] target bot gone (%s), "
+                    "recreating via first release: publish_id=%s bot_uuid=%s stage=%s",
+                    e.error_code, publish_id, bot_uuid, stage_enum.value,
+                )
+                # Secondary net (mirrors upgrade_release). Either way the recreate
+                # below mints a fresh binding and rewrites ext.binding.<stage>, so the
+                # record's current binding must be released or it lingers ACTIVE
+                # pointing at the gone bot. A DEVICE_NOT_FOUND means the record still
+                # lingers with a gone container, so retire it first (and stash the
+                # destroy id); a BOT_NOT_FOUND means the bot is already fully gone (no
+                # destroy needed → destroy_publish_id=None).
                 destroy_publish_id = None
-                if decision == OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE:
+                if e.error_code == "DEVICE_NOT_FOUND":
                     await prepare_instance_restart(
                         bot=bot,
                         device_id=bot_uuid,
@@ -382,23 +504,6 @@ class RestartMixin:
                     )
                 self._release_binding(
                     binding_id, destroy_publish_id=destroy_publish_id
-                )
-                # Supersede any prior RESTART op with a fresh abandoned one, so
-                # restart-status reads the recreate's workflow (via ext.restart).
-                superseding_op = self._operation_runner.open_operation(
-                    publish_id=publish_id,
-                    kind=PublishOperationKind.RESTART,
-                    stage=stage_enum,
-                    bot_uuid=bot_uuid,
-                    operator=operator,
-                )
-                self._operation_runner.abandon_operation(
-                    superseding_op, f"{decision.value} -> recreate"
-                )
-                logger.info(
-                    "[PublishFlowService.execute_restart] decision=%s -> recreate: "
-                    "publish_id=%s bot_uuid=%s stage=%s",
-                    decision.value, publish_id, bot_uuid, stage_enum.value,
                 )
                 return await self._recreate_restart_target(
                     publish_id=publish_id,
@@ -413,114 +518,33 @@ class RestartMixin:
                     operator=operator,
                     in_place=in_place,
                 )
+            restart_publish_id = op.baas_publish_id
 
-        async def _issue():
-            await prepare_instance_restart(
-                bot=bot, device_id=bot_uuid, target_runtime=self._baas_service,
-                restart_key=f'restart:{publish_id}:{stage_enum.value}',
-            )
-            return await self._build_service.upgrade_async(
-                bot_uuid=bot_uuid,
-                bot=bot,
-                user_id=publish_record.owner_id,
-                device_count=1,
-                migration_path=migration_path,
-                publish_stage=stage_enum,
-                version=version,
-                delivery=delivery,
-                ext_info={
-                    "skills_manifest": publish_record.ext["skills_manifest"]
-                } if publish_record.ext.get("skills_manifest") is not None else None,
-                extra_envs=skills_env,
-                docker_image=image_pin.docker_image,
-                template_config=service_publish_template_config(bot),
-                in_place=in_place,
-            )
-        # NOTE: transient errors out of the atom are NOT caught + failed here. A
-        # genuine crash leaves the op non-terminal so the durable task retry
-        # re-runs and the SAME op resumes → adopt-by-query (existing bot).
-        # Catching + fail_operation would open a fresh attempt on retry and
-        # re-issue a second restart. The one classified signal is BOT_NOT_FOUND:
-        # the atom abandons the RESTART op and the recreate leg runs as its own
-        # fresh, crash-safe first-release op (new bot + NEW binding) — the same
-        # guarantee upgrade_release's fallback has, replacing the former inline
-        # recreate whose crash window could orphan a second bot.
-        try:
-            op = await acquire_deploy_workflow(
-                self._operation_runner,
-                publish_id=publish_id,
-                kind=PublishOperationKind.RESTART,
-                stage=stage_enum,
-                operator=operator,
-                issue=_issue,
-                bot_uuid=bot_uuid,
-                bot_gone_reason="BOT_NOT_FOUND -> recreate",
-            )
-        except TargetBotGoneError as e:
-            logger.warning(
-                "[PublishFlowService.execute_restart] target bot gone (%s), "
-                "recreating via first release: publish_id=%s bot_uuid=%s stage=%s",
-                e.error_code, publish_id, bot_uuid, stage_enum.value,
-            )
-            # Secondary net (mirrors upgrade_release). Either way the recreate
-            # below mints a fresh binding and rewrites ext.binding.<stage>, so the
-            # record's current binding must be released or it lingers ACTIVE
-            # pointing at the gone bot. A DEVICE_NOT_FOUND means the record still
-            # lingers with a gone container, so retire it first (and stash the
-            # destroy id); a BOT_NOT_FOUND means the bot is already fully gone (no
-            # destroy needed → destroy_publish_id=None).
-            destroy_publish_id = None
-            if e.error_code == "DEVICE_NOT_FOUND":
-                await prepare_instance_restart(
-                    bot=bot,
-                    device_id=bot_uuid,
-                    target_runtime=self._baas_service,
-                    restart_key=f'restart:{publish_id}:{stage_enum.value}',
+            # Refresh the teclaw read handle to the restart workflow (best-effort).
+            self.refresh_publish_handle(binding_id, restart_publish_id)
+
+            # Dual-write ext.restart.<stage> for sync_restart_progress / #157 (the
+            # ledger op is the source of truth; ext is the read handle).
+            try:
+                def _mutate(latest_ext: dict) -> None:
+                    latest_ext.setdefault("restart", {})[stage_enum.value] = restart_publish_id
+
+                self._mutate_and_update_ext(publish_id=publish_id, mutator=_mutate)
+            except Exception as save_error:
+                logger.warning(
+                    "[PublishFlowService.execute_restart] failed to save ext.restart: "
+                    "publish_id=%s error=%s", publish_id, save_error,
                 )
-                destroy_publish_id = self._build_service.retire_superseded_bot(
-                    bot_uuid, operator=operator
-                )
-            self._release_binding(
-                binding_id, destroy_publish_id=destroy_publish_id
+
+            self._operation_runner.complete_operation(op)
+            logger.info(
+                "[PublishFlowService.execute_restart] restart submitted: bot_uuid=%s "
+                "stage=%s restart_publish_id=%s", bot_uuid, stage_enum.value, restart_publish_id,
             )
-            return await self._recreate_restart_target(
-                publish_id=publish_id,
-                stage_enum=stage_enum,
-                publish_record=publish_record,
-                bot=bot,
-                migration_path=migration_path,
-                version=version,
-                delivery=delivery,
-                skills_env=skills_env,
-                docker_image=image_pin.docker_image,
-                operator=operator,
-                in_place=in_place,
-            )
-        restart_publish_id = op.baas_publish_id
+            return {"success": True, "message": f"Restart submitted, stage: {stage_enum.value}",
+                    "stage": stage_enum.value, "restart_publish_id": restart_publish_id}
+        return policy_result
 
-        # Refresh the teclaw read handle to the restart workflow (best-effort).
-        self.refresh_publish_handle(binding_id, restart_publish_id)
-
-        # Dual-write ext.restart.<stage> for sync_restart_progress / #157 (the
-        # ledger op is the source of truth; ext is the read handle).
-        try:
-            def _mutate(latest_ext: dict) -> None:
-                latest_ext.setdefault("restart", {})[stage_enum.value] = restart_publish_id
-
-            self._mutate_and_update_ext(publish_id=publish_id, mutator=_mutate)
-        except Exception as save_error:
-            logger.warning(
-                "[PublishFlowService.execute_restart] failed to save ext.restart: "
-                "publish_id=%s error=%s", publish_id, save_error,
-            )
-
-        self._operation_runner.complete_operation(op)
-        logger.info(
-            "[PublishFlowService.execute_restart] restart submitted: bot_uuid=%s "
-            "stage=%s restart_publish_id=%s", bot_uuid, stage_enum.value, restart_publish_id,
-        )
-        return {"success": True, "message": f"Restart submitted, stage: {stage_enum.value}",
-                "stage": stage_enum.value, "restart_publish_id": restart_publish_id}
     def _finalize_dangling_recreate_op(
         self, publish_id: int, stage_enum: PublishStage, ext: dict
     ) -> int | None:

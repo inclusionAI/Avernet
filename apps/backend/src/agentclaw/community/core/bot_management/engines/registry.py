@@ -582,12 +582,10 @@ async def prepare_instance_restart(*, bot: dict, device_id: str, target_runtime:
     Published/caller paths hold no restart lock, so the engine-owned async
     adapter runs the returned verifier inline (coding offloads both phases).
     """
-    from .aicoding.restart_dependencies import RestartBackupDependencies
-
     ctx, strategy = resolve_restart_strategy(bot)
     await strategy.prepare_restart_async(
         ctx, device_id=device_id,
-        restart_dependencies=RestartBackupDependencies.for_instance(target_runtime),
+        target_runtime=target_runtime,
         operation_id=operation_id, restart_key=restart_key
     )
 

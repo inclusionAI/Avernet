@@ -42,9 +42,9 @@ from ..provisioning import (
 from ...services.aicoding.dima_workspace_capability import has_dima_workspace_enabled
 from .restart_backup import AicodingRestartBackupMixin
 from .restart_task import AicodingDurableRestartMixin
+from .restart_publish import AicodingPublishedRestartMixin
 from .restart_baas import AicodingSubmissionMixin
 from .hosted_workspace_mixin import AicodingHostedWorkspaceMixin
-
 
 # Legacy coding template types.  This is only used for old call sites that
 # identify coding bots by template_type (applicationCoding/personalCoding).
@@ -164,7 +164,7 @@ class AicodingBaasEngineBucketResolver:
         )
 
 
-class AicodingProvisioningStrategy(AicodingSubmissionMixin, AicodingDurableRestartMixin, AicodingRestartBackupMixin, AicodingHostedWorkspaceMixin, EngineProvisioningStrategy):
+class AicodingProvisioningStrategy(AicodingSubmissionMixin, AicodingDurableRestartMixin, AicodingPublishedRestartMixin, AicodingRestartBackupMixin, AicodingHostedWorkspaceMixin, EngineProvisioningStrategy):
     """Provisioning strategy shared by ``aicoding`` and ``claude_code`` engines."""
     def __init__(self, engine_type: str) -> None:
         self._engine_type = engine_type

@@ -1,6 +1,29 @@
 # Coding-only restart backup
 
-## Best-effort policy (2026-10-12)
+## Confirmed-fastdisk policy (2026-10-30)
+
+Backend sends the embedded publication detector. Unknown/failed initial detection
+uses the best-effort policy below; a positively confirmed fastdisk target requires
+a successful, complete backup receipt within 300 seconds. Failure, partial backup,
+missing capability or unconfirmed result blocks replacement. Ordinary durable
+restarts persist positive confirmations across redelivery.
+
+Published restart policy lives in `restart_publish.py`, contributed by
+`AicodingProvisioningStrategy`. It owns the guard, terminal failure/replay handling,
+exact-operation failure and status/ext CAS for the existing frontend fields.
+Shared publish orchestration stays in its original `execute_restart` method and
+only calls the declared `published_restart_scope` and `acquire_restart_workflow`
+strategy hooks. No second common execution function or workflow callback is
+introduced. The scope owns entry checks and failure handling: an empty result
+permits execution; a populated result returns an existing/handled failure. Coding
+fills the result only after required failure persistence succeeds. Default scopes
+perform no I/O, add no engine metadata and never suppress exceptions. The generic
+operation runner retains its adopt-before-issue logic and has no backup exception or coding-state knowledge.
+Only the coding strategy catches `RestartBackupBlocked`; transient/post-submit
+failures retain the existing crash-resume behavior. No shared service is patched
+or reconfigured per request.
+
+## Non-fastdisk / unconfirmed best-effort policy (2026-10-12)
 
 Backup is attempted, but backup-only failures log sanitized warnings and do not
 block restart. This includes inventory, command, timeout, receipt and runtime boot-identity
@@ -128,6 +151,50 @@ Logs carry `event=aicoding_restart_backup`, phase, status/reason, Bot/target,
 operation, elapsed time and generation. The policy does not log raw output or
 exception messages. Poll logs occur on transitions or at most once per minute.
 
+## Restart failure alerts (2026-10-30)
+
+The coding strategy emits ERROR logs with `[AICODING_RESTART_FAILED]` and
+`event=aicoding_restart_failed` for confirmed-fastdisk backup vetoes, receipt
+verification failures, and blocking preparation errors. Ordinary task and
+published-restart exception handlers retain the underlying backup diagnostics
+and log before persisting failure, so a failed status write cannot hide the
+original backup error. This is diagnostic-only: no queue, retry, publication,
+status or replacement decisions are changed.
+
+Each record includes `bot_id`, `owner_id`, `env`, `arca_id`, raw `target_id`, `operation_id`, `phase`,
+`reason`, `error_type`, chained `cause_types`, `elapsed_ms`, `helper_status`,
+`binding_id`, `publish_id`, and a safe `stack`. Stages distinguish `prepare`,
+`verify`, `verify_target`, `precondition`, `task_failed`, and `published_restart`.
+Stack entries contain only filename, line number and function; raw exception
+messages, source lines, locals, commands and helper stdout/stderr are excluded.
+Unknown/unavailable fields use `-` rather than an invented value.
+
+`arca_id` comes from the captured direct-ARCA `sandbox_id` or a BaaS physical
+`provider_device_id` beginning with `ARCA-SANDBOX-`. Both `arca_id` and
+`target_id` preserve the complete routing identity, including any `@tenant`
+suffix (for example `@8`). Log formatting never changes provider execution
+parameters or tenant translation. Exception wrappers
+preserve the resolved physical target. Inventory verification errors retain the
+previously captured physical targets; when several containers are involved, emit
+one record per captured container rather than arbitrarily selecting a replica.
+`owner_id` comes from the Bot provisioning context or durable restart state, not
+the user triggering restart. `env` uses the existing `get_current_env()` data
+environment (`dev`/`pre`/`prod`; gray maps to prod), not the deployment profile or
+publish stage. These values do not require extra database/container lookups.
+A logical Bot/device ID is never labeled
+as an ARCA ID. Failures without a resolved physical target have `arca_id=-` and
+must be correlated by Bot/operation; logging performs no extra inventory or
+database I/O.
+
+Alert on ERROR plus `event=aicoding_restart_failed` (or the bracketed marker).
+Multiple phases can log the same failure: group/deduplicate by `bot_id` and
+`operation_id`, and use `arca_id`/`phase` for diagnosis. These logs cover this
+strategy's backup/precondition and exception failure boundaries, not a new
+universal event contract for all deployment/queue failures. Non-fastdisk or
+failed initial detection retains WARNING with `action=continue_restart`, without
+this failure marker. Lost-ownership `RestartSuperseded` also emits no new failure
+alarm. Other engines and shared lifecycle orchestration do not use this logger.
+
 ## Validation boundary
 
 Policy/entrypoint tests cover legacy helper absence, ACTIVE/PENDING/FAILED/
@@ -229,9 +296,10 @@ transport still blocks replacement. Binding/database checks stay outside that
 boundary. This is dependency consolidation, not a new common provider API: BaaS
 continues to use inventory and Arca continues to pin the old binding's sandbox.
 
-The `prepare_instance_restart` published/Caller dispatcher preserves its existing
-`target_runtime` argument and wraps it with `RestartBackupDependencies.for_instance`
-before invoking the engine hook. No provider-specific backup factory is passed
+The `prepare_instance_restart` published/Caller dispatcher passes its existing
+`target_runtime` argument unchanged to the engine hook. Only the coding strategy
+wraps it with `RestartBackupDependencies.for_instance`; default/other engines do
+not construct coding backup dependencies. No provider-specific backup factory is passed
 through BotService or the engine hook anymore. BotService's existing BaaS service
 dependency remains for non-backup lifecycle operations; this change does not
 remove that shared functionality.

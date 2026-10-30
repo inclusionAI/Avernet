@@ -183,3 +183,10 @@ def test_running_backup_polls_before_final_verification(target):
         assert call.kwargs['device'].device_props == {'sandbox_id': 'old-sandbox@8'}
         assert OPERATION in call.kwargs['shell_cmd']
     s.runtime.assert_not_called()
+
+
+@pytest.fixture(autouse=True)
+def nonfastdisk_compatibility_scope(monkeypatch):
+    """Legacy backup/fence tests; real detection and strict policy have their own suite."""
+    from agentclaw.community.core.bot_management.engines.aicoding import restart_backup
+    monkeypatch.setattr(restart_backup, "_detect_fastdisk", lambda *args, **kwargs: False)

@@ -442,12 +442,10 @@ class PublishRestartHandler(_PublishTaskBase):
         )
         if not result or not result.get("success"):
             message = (result or {}).get("message", "unknown error")
-            # Deliberately does NOT touch ext.restart.restarting. Every
-            # ``success: False`` return in execute_restart is a preflight check
-            # that runs *before* the marker is written (record / binding / device
-            # / bot / artifact); past that write it only ever returns success or
-            # raises. So this branch means *this* execution never set the marker,
-            # and anything present belongs to someone else — ``restart_bot`` does
+            # Deliberately does NOT touch ext.restart.restarting. Preflight
+            # failures never wrote it; engine policies own any failure
+            # state they wrote. Anything still
+            # present may belong to someone else — ``restart_bot`` does
             # not reject a restart while one is in flight, so a concurrent
             # restart's marker (and its poll's wait state) can be sitting there.
             # Clearing it would strand that restart exactly the way this task

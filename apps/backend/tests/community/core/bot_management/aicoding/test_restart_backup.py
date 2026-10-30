@@ -605,9 +605,7 @@ async def test_instance_dispatch_uses_strategy_contract_not_coding_type():
     prepared.assert_called_once()
     assert prepared.call_args.args == (ctx,)
     kwargs = prepared.call_args.kwargs
-    dependencies = kwargs.pop('restart_dependencies')
-    assert kwargs == dict(device_id='target', operation_id=None, restart_key=None)
-    assert dependencies.baas_runtime() is runtime
+    assert kwargs == dict(device_id='target', target_runtime=runtime, operation_id=None, restart_key=None)
     assert not runtime.mock_calls
 
 
@@ -760,3 +758,10 @@ def test_non_baas_provider_retains_backup_attempt_and_binding_guard(engine, stat
         verify()
     runtime_provider.assert_not_called()
     repository.update_by_owner.assert_not_called()
+
+
+@pytest.fixture(autouse=True)
+def nonfastdisk_compatibility_scope(monkeypatch):
+    """Legacy backup/fence tests; real detection and strict policy have their own suite."""
+    from agentclaw.community.core.bot_management.engines.aicoding import restart_backup
+    monkeypatch.setattr(restart_backup, "_detect_fastdisk", lambda *args, **kwargs: False)

@@ -120,7 +120,8 @@ Shared stop/start primitives and allocation lock handoff remain unchanged.
 `RestartBackupDependencies` envelope and its BaaS runtime contract. DI supplies
 it once; BotService and both coding executors pass the same envelope rather
 than separate provider-specific backup factories. Published/Caller dispatch
-adapts its existing runtime into this envelope without changing its callers.
+passes the existing runtime unchanged; only the coding strategy adapts it into
+this envelope. Other engines do not construct backup dependencies.
 
 ## Stable Bot addressing
 
@@ -167,18 +168,61 @@ See the 2026-10-08 durable-restart spec for recovery and query limitations.
 
 ### Restart backup scope
 
-Direct `arca` bindings do not run runtime backup probes, archives, or receipt
-verification, regardless of binding status. They keep the existing stop/start
-recovery path, including when the old sandbox has already been destroyed.
-Binding identity verification, restart locking, and the durable mutation fence
-still run before replacement. The source binding provider determines this
-policy, even if allocation will migrate the replacement to BaaS.
+Only explicit `aicoding` / `claude_code` restart strategies run the guard. Direct
+ARCA uses the captured old binding's sandbox/tenant through the existing
+backup-only transport; BaaS uses the physical devices returned by its inventory.
+No normal exec permission, provider transport or non-coding lifecycle is changed.
 
-BaaS bindings and BaaS instance restarts retain inventory checks, runtime backup,
-and receipt verification. An empty or unqueryable BaaS inventory and backup
-failures still block replacement. This change adds no API, schema, configuration,
-or frontend migration; it only removes the backup dependency from direct ARCA
-restart. Normal stop/start failures continue to propagate.
+Before backup, Backend sends the embedded read-only publication detector to the
+old container (`engines/aicoding/fastdisk_probe.py`). It does not require an
+installed detector. The gate checks both workspace and sessions against actual
+mountpoints and source/target inode identity, and preserves the scripts' valid
+pending-cutover marker semantics. A ready marker alone is not proof of a live
+mount. **Initial detection failure is treated as non-fastdisk** for restart
+compatibility; publication/restore still fail closed on detection errors.
+
+For a confirmed fastdisk target, `/opt/agentclaw/bin/restart_backup start/status`
+must return `committed` with a matching operation, boot identity, generation and
+successful backup receipt. `partial_success`, degraded completeness, failure,
+missing helper, missing mounts, malformed output, transport error and unconfirmed
+timeout block replacement. Strict backup has a shared **300-second wait budget**
+across replicas; command durations count against that budget and receipts are
+checked again before mutation. Non-fastdisk/unknown detection retains the
+existing best-effort backup behavior and its original budget. Binding checks,
+restart locks and mutation fences remain mandatory in either case.
+
+Ordinary durable restarts persist positive target confirmations monotonically in
+`ext.coding_restart.fastdisk_targets`, so redelivery cannot downgrade them. A
+failure reuses `status`, `ext.start_status` and `ext.start_message`. Published
+restarts translate the terminal engine veto to the existing publish FAILED and
+`ext.error_message` fields using status/ext CAS, preserve the old binding, and
+finish the task without issuing a provider workflow. All veto classification,
+operation failure, guard ownership, replay checks and failure persistence live in
+`engines/aicoding/restart_publish.py`; there is no shared backup exception.
+The common publish flow keeps its original orchestration inside `execute_restart`
+and enters the strategy's `published_restart_scope`; it does not extract a second
+common execution function. The scope yields an empty result to proceed, or a
+populated result to return before workflow execution. Only an engine that handles
+an exception may fill that result on exit, after its required persistence succeeds.
+The default scope performs no I/O and propagates exceptions unchanged. Workflow
+acquisition still calls `acquire_restart_workflow`. Existing persistence operations
+are supplied as `PublishedRestartServices`; only the strategy interprets its
+restart metadata. Default strategies add no probing, metadata or status writes.
+The operation runner accepts an acquisition callback, preserves the exact operation
+identity and workflow adoption, and knows nothing about coding or backup failures.
+No HTTP endpoint, frontend, database schema or container-script change is needed.
+The internal `published_restart_scope` hook replaces the callback-based
+`execute_published_restart` hook; deploy the common flow, base strategy and coding
+strategy together. Third-party overrides of the former hook must implement the
+scope contract instead. Ordinary Bot restart hooks and task payloads are unchanged.
+
+The scripts may retain a maintenance barrier after partial backup, and a timed-out
+backup worker may still be running. Backend does **not** delete that barrier or
+force restart; investigate/repair the existing backup operation before retrying.
+Published retries retain their existing deterministic helper operation key (so a
+failed receipt on the same container is not silently replaced with a new attempt).
+A committed backup is a recoverable generation, not a zero-RPO promise: live
+writes after the backup are outside this guard's guarantees.
 
 ## Engine release inspection
 

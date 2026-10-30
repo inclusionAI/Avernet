@@ -73,6 +73,10 @@ class RestartState:
                 raise RestartSuperseded("Restart operation or phase changed")
             ext = deepcopy(bot.get("ext") or {})
             ext[KEY] = {**old, **changes}
+            if 'fastdisk_targets' in changes:
+                # Monotone across concurrent deliveries and CAS retries.
+                ext[KEY]['fastdisk_targets'] = sorted(set(old.get('fastdisk_targets', []))
+                                                    | set(changes['fastdisk_targets']))
             failed = changes.get("phase") == "FAILED"
             # Reuse the existing public startup-error contract. The journal's
             # copy remains an operation-scoped audit/recovery record, not a new
