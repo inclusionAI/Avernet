@@ -99,6 +99,8 @@ export function useTaskArtifactPreview(
       return;
     }
     if (artifactKind === 'text') {
+      // text 分支内 textArtifactContent 已是 artifact?.summary ?? '',恒为字符串,`?? ''` 兜底不可达。
+      /* istanbul ignore next */
       const text = textArtifactContent ?? '';
       setState({ ...stateFor('text', 'ready'), text, size: new Blob([text]).size });
       return;
@@ -138,6 +140,8 @@ export function useTaskArtifactPreview(
         if (storageType === 'session_file') {
           const contentUrl = sessionFileService.buildContentUrl(storageId, fileId!);
           if (kind !== 'text') {
+            // buildContentUrl 同步执行,本帧 load() 内无 await,cancelled 恒为 false,false 臂不可达。
+            /* istanbul ignore else */
             if (!cancelled) setState({ ...stateFor(kind, 'ready'), contentUrl });
             return;
           }

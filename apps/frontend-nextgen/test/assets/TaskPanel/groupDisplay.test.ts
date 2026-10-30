@@ -68,6 +68,16 @@ describe('collectTaskGroupIds', () => {
     );
     expect(ids).toEqual(['g-1', 'g-2', 'bcs_grp_session']);
   });
+
+  it('group 节点 sessionId 非 bcs_grp_ 前缀 → groupSessionGroupId 返回 null,不计入', () => {
+    const ids = collectTaskGroupIds(
+      task({}, [
+        // runMode 判定为群节点,但 groupId/assignee 缺省、sessionId 非 bcs_grp_ → id 解析为 null,不收集
+        node({ id: 'plain', runMode: 'coop_group', groupId: null, assignee: null, sessionId: 'regular-session' }),
+      ]),
+    );
+    expect(ids).toEqual([]);
+  });
 });
 
 describe('enrichTaskGroupDisplay', () => {
@@ -167,6 +177,68 @@ describe('enrichTaskGroupDisplay', () => {
       groups,
     );
     expect(visibleName.nodes[0].artifacts[0].ownerLabel).toBe('业务群');
+  });
+
+  it('群节点产物 owner 不匹配 assignee/groupId 且群无成员名 → 命中最终 return owner 兜底', () => {
+    const groups = { 'g-x': { names: [], nameByActorId: {} } };
+    const result = enrichTaskGroupDisplay(
+      task({ sourceGroupId: 'g-x' }, [
+        node({
+          id: 'group',
+          runMode: 'coop_group',
+          groupId: 'g-x',
+          assignee: 'g-x',
+          artifacts: [artifact('orphan-owner')],
+        }),
+      ]),
+      groups,
+    );
+    // owner 'orphan-owner' 既非 assignee('g-x')也非 groupId('g-x'),群无成员名 →
+    // resolveArtifactOwnerLabel 走到最后 return owner,label===owner 不变 → ownerLabel 未设置
+    expect(result.nodes[0].artifacts[0].ownerLabel).toBeUndefined();
+  });
+
+  it('群节点带成员名且产物 owner 陌生 → 命中 line 74 groupLabel 兜底返回节点群名', () => {
+    const groups = { 'g-1': { names: ['群成员A'], nameByActorId: {} } };
+    const result = enrichTaskGroupDisplay(
+      task(
+        { ownerBotId: 'bot-owner' },
+        [
+          node({
+            id: 'group',
+            runMode: 'coop_group',
+            groupId: 'g-1',
+            artifacts: [artifact('mystery')], // 非群 key、非 actor、非 ownerBot
+          }),
+        ],
+      ),
+      groups,
+    );
+    // owner 'mystery' 无直配群/actor/ownerBot,directGroupLabel null → 命中 isGroupNode 块,
+    // memberLabel(节点群 'g-1') = '群成员A' 非空 → 返回 groupLabel(line 74 true)
+    expect(result.nodes[0].artifacts[0].ownerLabel).toBe('群成员A');
+  });
+
+  it('非群节点的产物 owner 命中 assigneeName 兜底(命中 isGroupNode false 分支)', () => {
+    const groups = { 'g-1': { names: ['群成员'], nameByActorId: {} } };
+    const result = enrichTaskGroupDisplay(
+      task(
+        { ownerBotId: 'bot-owner' },
+        [
+          node({
+            id: 'bot',
+            runMode: 'single_bot',
+            groupId: null,
+            assignee: 'bot-worker',
+            assigneeName: '执行Bot',
+            artifacts: [artifact('bot-worker')],
+          }),
+        ],
+      ),
+      groups,
+    );
+    // 非群节点 → isGroupNode false → 跳过群名块 → owner===assignee && assigneeName 非空 → 返回 '执行Bot'
+    expect(result.nodes[0].artifacts[0].ownerLabel).toBe('执行Bot');
   });
 
   it('label 与原始 owner 相同时保持产物对象不变', () => {

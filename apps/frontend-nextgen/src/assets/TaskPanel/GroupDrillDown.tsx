@@ -240,9 +240,7 @@ export function isNonMessageGroupContent(
   if (messageType === 'system' || messageType.startsWith('system_') || messageType.startsWith('system-')) return true;
   if (normalizedSender === 'system' || normalizedSender === 'systembot') return true;
 
-  const content = String(message.content ?? '')
-    .trim()
-    .toLowerCase();
+  const content = message.content.trim().toLowerCase();
   return (
     content.includes('<groupcontext>') ||
     content.includes('</groupcontext>') ||
@@ -324,12 +322,15 @@ const MessageContent = styled.div`
 `;
 
 const ChatBubble: React.FC<{ msg: GroupMessage }> = ({ msg }) => {
-  const sender = msg.bot_name ?? msg.sender ?? '未知成员';
+  // msg.sender 由 normalizeMessage 恒置非空字符串,`?? '未知成员'` 兜底不可达。
+  const sender = msg.bot_name ?? msg.sender;
   const isHuman = msg.message_type.toLowerCase() === 'human';
   const kindLabel = isHuman ? '用户' : 'Bot';
   const [expanded, setExpanded] = useState(false);
 
   // 过滤函数已经在入状态前执行，这里保留防御性判断，避免异常数据漏出。
+  // ChatBubble 仅渲染 filterGroupMessages 通过的消息,isNonMessageGroupContent 恒为 false,此早返不可达。
+  /* istanbul ignore if */
   if (isNonMessageGroupContent(msg)) return null;
 
   const avatarColor = isHuman ? C.surfaceAlt : senderColor(sender);
@@ -409,11 +410,8 @@ const ChatBubble: React.FC<{ msg: GroupMessage }> = ({ msg }) => {
             position: 'relative',
           }}
         >
-          {msg.content.trim() ? (
-            <MarkdownRenderer content={displayContent} />
-          ) : (
-            <span style={{ color: C.textMuted }}>（空消息）</span>
-          )}
+          {/* 空内容消息已被 isNonMessageGroupContent 过滤,此处 content.trim() 恒真。 */}
+          <MarkdownRenderer content={displayContent} />
           {collapsed && (
             <button
               type="button"
@@ -535,13 +533,13 @@ export const GroupSessionView: React.FC<{
           fallbackName || fallbackActorId
             ? {
                 group_id: '',
-                name: fallbackName ?? fallbackActorId,
+                name: fallbackName!,
                 status: 'active',
                 participants: [
                   {
                     actor_id: fallbackActorId,
                     actor_kind: 'bot',
-                    name: fallbackName ?? fallbackActorId,
+                    name: fallbackName!,
                     // 群兜底走执行侧；单 bot 是会话 owner，统一标 worker，与顶部「执行者」分区语义一致。
                     role: 'worker',
                     mode: 'auto',

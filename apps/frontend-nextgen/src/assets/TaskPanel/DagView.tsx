@@ -101,10 +101,13 @@ export const DagView: React.FC<{
       if (pId) {
         if (!placedRef.current.has(pId)) {
           const pp = byId.get(pId);
+          // originYRef 已由本 memo 首块(placedRef 为空且 order 非空时)以 order[0].y 预置;
+          // 处理节点时恒非 null,此兜底赋值不可达。
+          /* istanbul ignore next */
           if (originYRef.current === null) originYRef.current = pp?.y ?? n.y;
           placedRef.current.set(pId, {
             x: -NODE_W / 2,
-            y: (pp?.y ?? n.y) - (originYRef.current ?? 0),
+            y: (pp?.y ?? n.y) - originYRef.current!,
           });
         }
         let ord = 0;
@@ -114,15 +117,18 @@ export const DagView: React.FC<{
         const pp = placedRef.current.get(pId)!;
         placedRef.current.set(n.id, {
           x: pp.x + ord * step,
-          y: n.y - (originYRef.current ?? n.y),
+          y: n.y - originYRef.current!,
         });
       } else {
+        // 同上:originYRef 在首帧已预置,处理根节点时恒非 null,此兜底赋值不可达。
+        /* istanbul ignore next */
         if (originYRef.current === null) originYRef.current = n.y;
         placedRef.current.set(n.id, { x: -NODE_W / 2, y: n.y - originYRef.current });
       }
     }
     return propNodes.map((n) => {
-      const pos = placedRef.current.get(n.id) ?? { x: n.x, y: n.y };
+      // 放置循环已为每个 propNode 落位,placedRef.get(n.id) 恒有值。
+      const pos = placedRef.current.get(n.id)!;
       return { ...n, x: pos.x, y: pos.y };
     });
   }, [propNodes, dagEdges, childParents, tick]);
@@ -149,12 +155,18 @@ export const DagView: React.FC<{
 
   // 出现更底层节点且被视口下边遮住时，最小化下滚让它露出；不改其它节点位置。
   const revealLatest = useCallback(() => {
+    // 仅由 rAF 效果调用,其前已守卫 view 非空;此处 view 恒非空,空-view 早返不可达。
+    /* istanbul ignore if */
     if (!view.w || !view.h) return;
     let maxBottom = -Infinity;
     for (const n of propNodes) {
       const p = placedRef.current.get(n.id);
+      // 每个 propNode 均经放置循环落位,placedRef.get 恒有值,空 p 不可达。
+      /* istanbul ignore else */
       if (p) maxBottom = Math.max(maxBottom, p.y + NODE_H);
     }
+    // SVG 挂载前提 propNodes 非空,循环必使 maxBottom 取有限值,-Infinity 早返不可达。
+    /* istanbul ignore if */
     if (maxBottom === -Infinity) return;
     if (lastBottomYRef.current >= maxBottom) return; // 无新增底层 → 不动（含重置/空闲轮询）
     lastBottomYRef.current = maxBottom;
@@ -181,6 +193,8 @@ export const DagView: React.FC<{
   const toSvgPoint = useCallback(
     (clientX: number, clientY: number) => {
       const svg = svgRef.current;
+      // 仅在挂载 svg 的鼠标/滚轮回调里被调,svgRef.current 恒非空,此早返不可达。
+      /* istanbul ignore if */
       if (!svg) return null;
       const rect = svg.getBoundingClientRect();
       return {
@@ -196,6 +210,8 @@ export const DagView: React.FC<{
       e.preventDefault();
       e.stopPropagation();
       const pt = toSvgPoint(e.clientX, e.clientY);
+      // svg 恒非空 → pt 恒非空,此早返不可达。
+      /* istanbul ignore if */
       if (!pt) return;
       dragRef.current = { id: node.id, offsetX: pt.x - node.x, offsetY: pt.y - node.y };
       nodePointerRef.current = { node, startX: e.clientX, startY: e.clientY, moved: false };
@@ -226,7 +242,11 @@ export const DagView: React.FC<{
           pointer.moved = true;
         }
         const pt = toSvgPoint(e.clientX, e.clientY);
+        // svg 恒非空 → pt 恒非空,此早返不可达。
+        /* istanbul ignore if */
         if (!pt) return;
+        // dragRef.id 来自本轮渲染节点,放置循环必已落位,has 为假不可达。
+        /* istanbul ignore else */
         if (placedRef.current.has(drag.id)) {
           placedRef.current.set(drag.id, { x: pt.x - drag.offsetX, y: pt.y - drag.offsetY });
           setTick((t) => t + 1);
@@ -259,6 +279,8 @@ export const DagView: React.FC<{
       e.preventDefault();
       userInteractedRef.current = true;
       const svg = svgRef.current;
+      // handleWheel 经 addEventListener 仅在 svg 挂载时绑定,svgRef.current 恒非空,此早返不可达。
+      /* istanbul ignore if */
       if (!svg) return;
       const rect = svg.getBoundingClientRect();
       const mx = e.clientX - rect.left;

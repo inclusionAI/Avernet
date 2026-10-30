@@ -104,6 +104,15 @@ describe('TaskInfoTab metadata', () => {
       formatRuntimeDuration('2026-08-22T10:00:00+08:00', null, new Date('2026-08-22T10:01:05+08:00').getTime()),
     ).toBe('1分5秒');
   });
+
+  it('覆盖整分(seconds=0)、整小时与带余分钟分支', () => {
+    // 正好整分 → `${minutes}分钟`(命中 seconds 三元 false 臂)
+    expect(formatRuntimeDuration('2026-08-22T10:00:00+08:00', '2026-08-22T10:02:00+08:00')).toBe('2分钟');
+    // 整小时 → `${hours}小时`(命中 remainingMinutes 三元 false 臂)
+    expect(formatRuntimeDuration('2026-08-22T10:00:00+08:00', '2026-08-22T11:00:00+08:00')).toBe('1小时');
+    // 带余分钟 → `${hours}小时${remainingMinutes}分钟`(命中 remainingMinutes 三元 true 臂)
+    expect(formatRuntimeDuration('2026-08-22T10:00:00+08:00', '2026-08-22T11:05:00+08:00')).toBe('1小时5分钟');
+  });
 });
 
 describe('MarkdownCell', () => {

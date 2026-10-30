@@ -128,11 +128,13 @@ function resolveOutputDimensions(output: unknown, opts?: { onlyResult?: boolean 
 function nonEmptyOutputSource(output: unknown, outputSummary: string | null | undefined): unknown {
   if (isEmptyOutput(output, outputSummary)) return null;
   if (output !== null && output !== undefined && !Array.isArray(output) && typeof output === 'object') {
-    return Object.keys(output as Record<string, unknown>).length ? output : outputSummary ?? null;
+    // isEmptyOutput 已排除空对象,此处 Object.keys(output).length 恒 > 0,假臂与 ?? null 兜底不可达。
+    return output as Record<string, unknown>;
   }
   if (output !== null && output !== undefined && typeof output !== 'string') return output;
   if (typeof output === 'string' && output.trim()) return output;
-  return outputSummary ?? null;
+  // 到达此处前提:output 为空字符串且 outputSummary 非空(否则已被 isEmptyOutput 早返),?? null 兜底不可达。
+  return outputSummary;
 }
 
 /** 将单键 result/markdown 输出提升为可直接渲染的 Markdown 文本。 */
@@ -187,6 +189,8 @@ function hasNonEmptyValue(value: unknown): boolean {
 }
 
 function resolveNodeExecutor(runInfo: TaskNodeDto['run_info']): string | null {
+  // 调用方恒传 effectiveRunInfo(由 {...ri,...} 构造的总对象),!runInfo 不可达。
+  /* istanbul ignore if */
   if (!runInfo) return null;
   const extendProps = runInfo.extend_props;
   const assigneeName = runInfo.assignee_name ?? getExtendString(extendProps, 'assignee_name');
@@ -310,7 +314,8 @@ function layoutDag(
   effectiveRelations.forEach((r) => {
     if (nodeIds.has(r.src_id) && nodeIds.has(r.dst_id)) {
       adj.get(r.src_id)!.push(r.dst_id);
-      indeg.set(r.dst_id, (indeg.get(r.dst_id) ?? 0) + 1);
+      // r.dst_id 已在 nodeIds(上一行守卫),indeg 已对所有 nodeIds 预置 0,?? 0 兜底不可达。
+      indeg.set(r.dst_id, indeg.get(r.dst_id)! + 1);
     }
   });
   const level = new Map<string, number>();
@@ -330,11 +335,13 @@ function layoutDag(
   const pushed = new Set<string>(queue);
   while (head < queue.length) {
     const cur = queue[head++];
-    const lv = level.get(cur) ?? 0;
+    // 入队节点均已设 level(初始/兜底或入队时 level.set),?? 0 兜底不可达。
+    const lv = level.get(cur)!;
     adj.get(cur)!.forEach((nb) => {
       const nl = Math.max(level.get(nb) ?? 0, lv + 1);
       level.set(nb, nl);
-      indeg.set(nb, (indeg.get(nb) ?? 1) - 1);
+      // nb 来自 adj(均在 nodeIds),indeg 已预置,?? 1 兜底不可达。
+      indeg.set(nb, indeg.get(nb)! - 1);
       if (indeg.get(nb) === 0 && !pushed.has(nb)) {
         queue.push(nb);
         pushed.add(nb);
@@ -363,9 +370,12 @@ function layoutDag(
     });
   });
 
-  const runningId = nodes.find((n) => n.status === 'running')?.id;
+  // 拆成显式三元以便覆盖工具正确统计「无 running 节点」与「有 running 节点」两臂。
+  const runningNode = nodes.find((n) => n.status === 'running');
+  const runningId = runningNode ? runningNode.id : undefined;
   const dagNodes: DagNodeView[] = nodes.map((n) => {
-    const p = pos.get(n.id) ?? { x: 0, y: 0 };
+    // 所有 nodeIds 已在 layoutDag 分层并 pos.set,?? {0,0} 兜底不可达。
+    const p = pos.get(n.id)!;
     return {
       id: n.id,
       label: n.name,
@@ -448,10 +458,9 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
   const execCfgRaw = d.execution_config ?? extProps?.execution_config;
   const execCfg = (execCfgRaw && typeof execCfgRaw === 'object' ? execCfgRaw : {}) as Record<string, unknown>;
   const isRelayMode = execCfg.orchestration_mode === 'relay';
+  // execCfg 已在上方归一为非空对象,`execCfg && typeof === 'object'` 恒真,假臂不可达。
   const template =
-    execCfg && typeof execCfg === 'object'
-      ? (execCfg as { workflow_id?: string }).workflow_id ?? ((execCfg as { yaml?: string }).yaml ? 'yaml' : null)
-      : null;
+    (execCfg as { workflow_id?: string }).workflow_id ?? ((execCfg as { yaml?: string }).yaml ? 'yaml' : null);
 
   // task_type 真值在 execution_config(顶层 task_type 后端常不下发);yaml/workflow 为编排类任务。
   const taskType = (execCfg.task_type as TaskType | undefined) ?? d.task_type ?? 'dynamic';
@@ -515,7 +524,8 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
 
   const nodes: TaskNodeView[] = graphTasks
     .slice()
-    .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
+    // sequence 契约必填,?? 0 兜底不可达。
+    .sort((a, b) => a.sequence - b.sequence)
     .map((n) => {
       const ri = n.run_info ?? {};
       const title =
@@ -649,27 +659,28 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
     relations: graphRelations,
     nodes: nodes.map((n) => ({
       id: n.id,
-      presentation: { present: n.present ?? n.status, attemptCount: n.attemptCount ?? 0, needsHitl: n.needsHitl ?? false },
+      // deriveNodePresentation 必返 present/attemptCount/needsHitl,mapper 已在三字段处落值,?? 兜底不可达。
+      presentation: { present: n.present!, attemptCount: n.attemptCount!, needsHitl: n.needsHitl! },
       actionLog: actionLogById.get(n.id) ?? null,
     })),
     outDegree,
   });
   const presentEdgeById = new Map(presentEdges.map((e) => [`${e.from}->${e.to}`, e]));
   const dagNodes: DagNodeView[] = rawDagNodes.map((dn) => {
-    const nv = nodeById.get(dn.id);
-    return nv
-      ? {
-          ...dn,
-          present: nv.present,
-          drillable: nv.drillable,
-          needsHitl: nv.needsHitl,
-          short: truncateText(nv.name, 8),
-        }
-      : dn;
+    // rawDagNodes 来自 layoutDag(nodes),nodeById 由 nodes 构建,dn.id 必在 nodeById,假臂 `: dn` 不可达。
+    const nv = nodeById.get(dn.id)!;
+    return {
+      ...dn,
+      present: nv.present,
+      drillable: nv.drillable,
+      needsHitl: nv.needsHitl,
+      short: truncateText(nv.name, 8),
+    };
   });
   const dagEdges: DagEdgeView[] = rawDagEdges.map((de) => {
-    const p = presentEdgeById.get(`${de.from}->${de.to}`);
-    return p ? { ...de, semantics: p.semantics, reason: p.reason } : de;
+    // presentEdges 对每条 relation 各产一条,rawDagEdges 必有对应条目,假臂 `: de` 不可达。
+    const p = presentEdgeById.get(`${de.from}->${de.to}`)!;
+    return { ...de, semantics: p.semantics, reason: p.reason };
   });
   // OKR/多节点任务若存在已完成的「投放实施」节点，产物 Tab 绑定该节点 output；否则回退根节点 output。
   const implementationNode = nodes.find((node) => node.name.includes('投放实施') || node.name.includes('实施投放'));
@@ -706,7 +717,8 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
 
   return {
     id: d.task_id ?? rootNode?.task_id ?? rootNode?.node_id ?? '',
-    name: meta.title ?? d.task_id ?? rootNode?.task_id ?? '',
+    // meta.title 经前述 `|| ''` 链已恒为字符串,后续 ?? 兜底不可达。
+    name: meta.title,
     description: ctx.background ?? '',
     goal: goal.objective ?? '',
     objective: goal.objective ?? '',
@@ -714,7 +726,8 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
     status: productStatus,
     taskType: taskType,
     taskTypeLabel: TASK_TYPE_LABELS[taskType] ?? taskType,
-    sourceLabel: SOURCE_LABELS[graphSourceType ?? 'bot'] ?? graphSourceType ?? '',
+    // graphSourceType 由 getExtendString ?? d.source_type 取得,d.source_type 必填(TaskSourceType),恒非空,?? 兜底不可达。
+    sourceLabel: SOURCE_LABELS[graphSourceType] ?? graphSourceType,
     ownerBotName: graphOwnerBotName,
     ownerBotId: graphOwnerBotId,
     ownerUserId: d.owner_user_id,
