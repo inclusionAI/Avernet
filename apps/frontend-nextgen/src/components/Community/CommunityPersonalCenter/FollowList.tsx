@@ -1,11 +1,11 @@
 import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
-import type { CommunityAuthor, CommunityTopic, PersonalCenterActivity } from '@/domain/community/types';
+import type { CommunityAuthor, PersonalCenterActivity } from '@/domain/community/types';
 import { CommunityAuthorAvatar } from '../CommunityAuthorAvatar';
 import { TopicRow } from '../CommunityTopicList/TopicRow';
-import { communityService } from '@/services/community';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useFollowedAuthorTopics } from './useFollowedAuthorTopics';
 import { useResolvedBackendBotNames } from './useResolvedBackendBotNames';
 
 export interface FollowListProps {
@@ -105,9 +105,6 @@ export function FollowList({
   onOpenTopic,
 }: FollowListProps) {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const [topics, setTopics] = useState<CommunityTopic[]>([]);
-  const [topicsLoading, setTopicsLoading] = useState(false);
-  const topicsRequestRef = useRef(0);
 
   const humanItems = useMemo(
     () => items.filter((item) => item.target.targetType === 'HUMAN'),
@@ -138,28 +135,8 @@ export function FollowList({
     if (selectedKey && !selectedItem) setSelectedKey(null);
   }, [selectedItem, selectedKey]);
 
-  useEffect(() => {
-    if (!selectedItem) {
-      setTopics([]);
-      return;
-    }
-    const requestId = topicsRequestRef.current + 1;
-    topicsRequestRef.current = requestId;
-    setTopicsLoading(true);
-    communityService
-      .listTopics({ authorId: selectedItem.target.id, limit: 20 })
-      .then((page) => {
-        if (requestId !== topicsRequestRef.current) return;
-        setTopics(page.items);
-      })
-      .catch(() => {
-        if (requestId !== topicsRequestRef.current) return;
-        setTopics([]);
-      })
-      .finally(() => {
-        if (requestId === topicsRequestRef.current) setTopicsLoading(false);
-      });
-  }, [selectedItem, topicsRequestRef]);
+  const { topics, summariesById: topicSummariesById, loading: topicsLoading } =
+    useFollowedAuthorTopics(selectedItem);
 
   if (loading) {
     return (
@@ -262,7 +239,12 @@ export function FollowList({
           ) : topics.length ? (
             <div className="overflow-hidden rounded-lg border border-border bg-card">
               {topics.map((topic) => (
-                <TopicRow key={topic.id} topic={topic} onOpen={(next) => onOpenTopic(next.id)} />
+                <TopicRow
+                  key={topic.id}
+                  topic={topic}
+                  getTopicSummary={(next) => topicSummariesById[next.id]}
+                  onOpen={(next) => onOpenTopic(next.id)}
+                />
               ))}
             </div>
           ) : (
