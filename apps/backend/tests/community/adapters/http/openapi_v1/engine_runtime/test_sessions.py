@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from unittest.mock import AsyncMock
 
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions import (
     converter_creation,
@@ -15,6 +16,7 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineUpstreamError,
 )
 from agentclaw.community.core.engine_runtime.models import EngineResult
+from agentclaw.community.core.expert_chat.errors import SessionCreateError
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterTimeoutError,
 )
@@ -1000,6 +1002,31 @@ def test_omitted_friend_selector_never_falls_back_to_bcn(
     assert fails(response, 404)["message"] == "Not found"
     assert friendships.calls == []
     assert expert.calls == []
+
+
+def test_friend_session_create_failure_is_a_mapped_runtime_error(
+    make_client, relay, friendships, expert
+):
+    """A known expert-chat create failure is routable, not a 500 escape.
+
+    The friend link can be valid even after that service fails to create the
+    session; map the domain error so callers see the same runtime envelope as
+    other runtime dependencies instead of an unhandled exception.
+    """
+    friendships.allowed = True
+    expert.create_chat_session = AsyncMock(
+        side_effect=SessionCreateError("create failed")
+    )
+    client = make_client(router, caller="friend-1")
+
+    response = client.post(
+        _base(),
+        params={"owner_id": OWNER, "f_user_id": "friend-1"},
+        json={"title": "Friend session"},
+    )
+
+    assert fails(response, 409)["message"] == "Bot device is not ready"
+    assert relay.calls == []
 
 
 def test_owner_can_address_one_bcn_friend_without_device_wide_access(
