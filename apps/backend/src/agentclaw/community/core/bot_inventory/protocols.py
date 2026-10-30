@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
 
-from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+from agentclaw.community.core.bot_collaborator.models import CollaboratorRecord, PermissionLevel
 from agentclaw.community.core.bot_inventory.types import (
     BotAction,
     BusinessSpaceRef,
@@ -101,6 +101,10 @@ class DesktopBotInventoryPort(Protocol):
 @runtime_checkable
 class BotInventoryAccessPort(Protocol):
     """Batch Bot permission projection consumed by the inventory read model."""
+
+    def list_user_collaborations(
+        self, user_id: str, env: str | None = None,
+    ) -> list[CollaboratorRecord]: ...
 
     def get_operable_permission_levels(
         self,
