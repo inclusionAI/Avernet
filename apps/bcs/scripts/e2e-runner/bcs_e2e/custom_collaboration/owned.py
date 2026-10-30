@@ -190,7 +190,8 @@ def run_density_case(runtime, *, state_dir: Path, binary: Path, binary_sha256: s
         'case_id': CASE_ID, 'legacy_id': CUSTOM_COLLABORATION_PARENT, 'run_id': runtime.run_id,
         'assertions': [{'id': row['id'], 'status': row['status']}
                        for row in density['requirements']],
-        'selected_requirement_ids': list(REQUIREMENTS), 'parent_requirement_count': 3,
+        'selected_requirement_ids': list(REQUIREMENTS),
+        'parent_requirement_count': len(REQUIREMENTS),
         'full_parent_coverage': 'LOCAL_PARENT_REQUIREMENTS_ONLY', 'operations': operations,
         'persistent_group_cleanup': 'DELETED' if persistent_deleted else 'UNCONFIRMED',
         'binary_sha256': binary_sha256, 'yaml_path': str(yaml_path),
