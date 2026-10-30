@@ -2,7 +2,7 @@
   "convergence_decisions": [
     {
       "date": "2026-10-29",
-      "decision": "The one-shot trial Run is converged onto the group-domain transport on both tiers: the trial Group is created through the reviewed persistent-form product-CLI create leaf (planner/reviewer bindings stored on the Group, group_strategy=state_machine pinned by the server), and the single Run is started by the raw group-domain HTTP exit POST /groups/{group_id}/state-machine-runs beside the frozen product CLI. The frozen bcs-cli exposes no group-domain run verb and is never modified; the native verb is a product gap tracked by DIMA with this surgery. Run-domain CLI reads, the respond guard refusal, the Run cancel, the session read, and the exact owned Group delete with 404 proof follow unchanged. The session-domain membership, permission and session-domain run-start leaves of the frozen owned-local parent are not re-chained on either tier; the difference is pinned in the trial projection and disclosed in the case report.",
+      "decision": "The one-shot trial Run is converged onto the group-domain transport on both tiers: the trial Group is created through the reviewed persistent-form product-CLI create leaf (planner/reviewer bindings stored on the Group, group_strategy=state_machine pinned by the server), and the single Run is started by the raw group-domain HTTP exit POST /groups/{group_id}/state-machine-runs beside the frozen product CLI. The frozen bcs-cli exposes no group-domain run verb and is never modified; the native verb is a product gap tracked by DIMA with this surgery. Run-domain CLI reads, the respond guard refusal, the Run cancel, the session read, and the exact owned Group delete with 404 proof follow unchanged. The session-domain membership, permission and session-domain run-start leaves of the frozen owned-local parent are not re-chained on either tier; the difference is pinned in the trial projection and disclosed in the case report. Superseded 2026-10-31 by 20261030-s14-session-domain-run-start-restored: the reviewed one-shot Run transport is the session-domain product-CLI 'collaborate run' leaf on both tiers; the raw group-domain HTTP exit stays a declared fallback route binding and is never executed.",
       "decision_id": "custom-collaboration-trial-group-domain-transport",
       "frozen_requirements_unchanged": true,
       "live_evidence": {
@@ -18,6 +18,16 @@
         ]
       },
       "scope": "CUSTOM-COLLABORATION.trial-one-shot-lifecycle transport convergence (Singlebox and preprod)"
+    },
+    {
+      "decision_id": "20261030-s14-session-membership-permission-rechained",
+      "date": "2026-10-30",
+      "decision": "The session-domain membership and permission leaves are re-chained on both tiers through the frozen product bcs-cli (upstream cli-stories.sh:180-196 anchors: session add-member --role consultant as the driver, collaborate permission --session). Wave-2 had excluded them while every preprod leg was BLOCKED; the density increment requires their real assertions on both tiers. The human participant is the case-owned Human fixture; effect admission for the dedicated fixture-pool Bots was granted by the operator for this change."
+    },
+    {
+      "decision_id": "20261030-s14-session-domain-run-start-restored",
+      "date": "2026-10-30",
+      "decision": "The one-shot Run start is restored to the upstream session-domain product CLI leaf (cli-stories.sh:206-209: collaborate run <yaml> --session <id> --binding planner=<driver> --binding reviewer=<member> --input <trial input>) as the primary dual transport, symmetric with the owned-local parent. The group-domain raw HTTP exit stays declared in route_bindings as the documented fallback for tiers where the frozen CLI session verb is unavailable; the r13 derived-session dual projections are retired with this decision."
     }
   ],
   "parent": "story_cli_operator_creates_custom_collaboration",
@@ -25,22 +35,382 @@
     {
       "command": "bcs-cli collaboration validate <yaml>",
       "expectation": "Product CLI validation reports valid=true with exactly two participants and two nodes, without persisting resources or exposing YAML contents.",
-      "id": "CUSTOM-COLLABORATION.validate-yaml"
+      "id": "CUSTOM-COLLABORATION.validate-yaml",
+      "source": {
+        "file": "cli-stories.sh",
+        "line_start": 156,
+        "line_end": 163,
+        "text": "    _cli_story_run \"operator validates custom collaboration YAML\" \"\" \\\n        collaboration validate \"$yaml_file\" || {\n        rm -f \"$yaml_file\"\n        return\n    }\n    assert_json_eq \"custom collaboration YAML is valid\" \"$BCS_CLI_STDOUT\" \"valid\" \"true\"\n    assert_json_eq \"custom collaboration exposes two roles\" \"$BCS_CLI_STDOUT\" \"summary.participants\" \"2\"\n    assert_json_eq \"custom collaboration exposes two nodes\" \"$BCS_CLI_STDOUT\" \"summary.nodes\" \"2\""
+      }
     },
     {
       "command": "bcs-cli collaboration create <yaml> --driver <driver> --binding planner=<driver> --binding reviewer=<reviewer> --context <context> --topic <topic>",
       "expectation": "Product CLI creates the exact two-role custom collaboration Group with its initial Session handle; CLI readback reports driver, participants, and group_strategy=state_machine before cleanup.",
-      "id": "CUSTOM-COLLABORATION.create-persistent-group"
+      "id": "CUSTOM-COLLABORATION.create-persistent-group",
+      "source": {
+        "file": "cli-stories.sh",
+        "line_start": 257,
+        "line_end": 277,
+        "text": "    _cli_story_run \"operator creates the custom collaboration group\" PM \\\n        collaboration create \"$yaml_file\" --driver \"$BOT_PM_UUID\" \\\n        --binding \"planner=$BOT_PM_UUID\" --binding \"reviewer=$BOT_ENG_UUID\" \\\n        --context \"Review release readiness through a custom workflow\" \\\n        --topic \"CLI custom release workflow\" || {\n        rm -f \"$yaml_file\"\n        return\n    }\n    group_id=$(json_path \"$BCS_CLI_STDOUT\" \"id\")\n    assert_not_empty \"custom collaboration group returns an id\" \"$group_id\"\n    assert_contains \"custom collaboration group contains its driver\" \"$BCS_CLI_STDOUT\" \"$BOT_PM_UUID\"\n    assert_contains \"custom collaboration group contains its reviewer\" \"$BCS_CLI_STDOUT\" \"$BOT_ENG_UUID\"\n    rm -f \"$yaml_file\"\n    [[ -n \"$group_id\" ]] || return\n\n    api_get \"/groups/${group_id}\"\n    require_status \"operator reads the custom collaboration group\" \"200\" || return\n    assert_json_eq \"custom collaboration group uses state-machine strategy\" \"$RESPONSE\" \"group_strategy\" \"state_machine\"\n\n    api_delete \"/groups/${group_id}?bot_id=${BOT_PM_UUID}\"\n    require_status \"custom collaboration fixture is cleaned up\" \"200\" || return"
+      }
     },
     {
       "command": "bcs-cli create-group + session add-member + collaborate permission + collaborate run + collaborate query --graph/--pending + collaborate respond guard + session messages + run cancel/session read/group delete",
       "expectation": "Product CLI creates the owned temporary chat Group, joins the exact Human session member, confirms current-session state-machine permission, starts the one-shot Run with fixed bindings/input, reads the exact graph, pending Human, guarded respond refusal, restored state-machine history, then cancels the Run and deletes the temporary Group while the Session remains running.",
-      "id": "CUSTOM-COLLABORATION.trial-one-shot-lifecycle"
+      "id": "CUSTOM-COLLABORATION.trial-one-shot-lifecycle",
+      "source": {
+        "file": "cli-stories.sh",
+        "line_start": 165,
+        "line_end": 255,
+        "text": "    _cli_story_create_pm_group \"CLI one-shot custom collaboration trial\" || {\n        rm -f \"$yaml_file\"\n        return\n    }\n    trial_group_id=\"$CLI_STORY_GROUP_ID\"\n    trial_session_id=$(printf '%s\\n' \"$BCS_CLI_STDOUT\" | sed -n 's/^  Session: //p' | head -1)\n    assert_not_empty \"one-shot trial group returns its current session\" \"$trial_session_id\"\n    if [[ -z \"$trial_session_id\" ]]; then\n        api_delete \"/groups/${trial_group_id}?bot_id=${BOT_PM_UUID}\"\n        rm -f \"$yaml_file\"\n        return\n    fi\n\n    # Pending-input reads authorize the Human, independently of the Bot token\n    # used to start a one-shot Run. Join the operator to the trial session.\n    _cli_story_run \"operator joins the trial session as a Human\" PM \\\n        session add-member \"$trial_session_id\" \\\n        --bot-uuid \"human_${BCS_MOCK_USER_ID}\" --role consultant || {\n        api_delete \"/groups/${trial_group_id}?bot_id=${BOT_PM_UUID}\"\n        rm -f \"$yaml_file\"\n        return\n    }\n\n    _cli_story_run \"operator checks current-session state-machine permission\" PM \\\n        collaborate permission --session \"$trial_session_id\" || {\n        api_delete \"/groups/${trial_group_id}?bot_id=${BOT_PM_UUID}\"\n        rm -f \"$yaml_file\"\n        return\n    }\n    assert_json_eq \"group owner may run a one-shot state machine\" \"$BCS_CLI_STDOUT\" \"allowed\" \"true\"\n    assert_json_eq \"permission belongs to the current session\" \"$BCS_CLI_STDOUT\" \"session_id\" \"$trial_session_id\"\n    assert_json_eq \"permission belongs to the temporary chat group\" \"$BCS_CLI_STDOUT\" \"group_id\" \"$trial_group_id\"\n\n    _cli_story_run \"operator trials the custom collaboration in the current session\" PM \\\n        collaborate run \"$yaml_file\" --session \"$trial_session_id\" \\\n        --binding \"planner=$BOT_PM_UUID\" --binding \"reviewer=$BOT_ENG_UUID\" \\\n        --input '{\"question\":\"Review the release workflow before persisting it.\"}' || {\n        api_delete \"/groups/${trial_group_id}?bot_id=${BOT_PM_UUID}\"\n        rm -f \"$yaml_file\"\n        return\n    }\n    run_id=$(json_path \"$BCS_CLI_STDOUT\" \"run.run_id\")\n    assert_not_empty \"one-shot custom collaboration returns a run id\" \"$run_id\"\n    assert_json_eq \"one-shot run stays in the current session\" \"$BCS_CLI_STDOUT\" \"run.session_id\" \"$trial_session_id\"\n    assert_json_eq \"one-shot run stays in the temporary chat group\" \"$BCS_CLI_STDOUT\" \"run.group_id\" \"$trial_group_id\"\n    if [[ -z \"$run_id\" ]]; then\n        api_delete \"/groups/${trial_group_id}?bot_id=${BOT_PM_UUID}\"\n        rm -f \"$yaml_file\"\n        return\n    fi\n\n    _cli_story_run \"operator queries the exact one-shot execution graph\" PM \\\n        collaborate query --run \"$run_id\" --graph || return\n    assert_json_eq \"CLI graph keeps the Run identity\" \"$BCS_CLI_STDOUT\" \"run.run_id\" \"$run_id\"\n    _cli_story_run \"operator checks pending Human input through CLI\" PM \\\n        collaborate query --run \"$run_id\" --pending || return\n    assert_eq \"Bot-only workflow exposes no Human response target\" \"$BCS_CLI_STDOUT\" \"[]\"\n    # Exercise the reply guard against a real Bot-only Run; it must never POST\n    # a Human response to a node absent from the authorized pending list.\n    if bcs_cli_json PM collaborate respond --run \"$run_id\" --node plan --content \"invalid Human reply\"; then\n        assert_eq \"CLI refuses a non-pending Human node\" \"accepted\" \"rejected\"\n    else\n        assert_contains \"CLI explains that the node is not pending\" \"$BCS_CLI_STDERR\" \"not pending\"\n    fi\n\n    _cli_story_run \"operator reloads current-session history after the one-shot run\" PM \\\n        session messages \"$trial_session_id\" --view-bot \"$BOT_PM_UUID\" --limit 50 || {\n        bot_post \"/state-machine-runs/${run_id}/cancel\" PM '{\"reason\":\"E2E cleanup\"}'\n        api_delete \"/groups/${trial_group_id}?bot_id=${BOT_PM_UUID}\"\n        rm -f \"$yaml_file\"\n        return\n    }\n    assert_contains \"one-shot history restores the AixUI state-machine panel\" \\\n        \"$BCS_CLI_STDOUT\" \"bcsPanel.StateMachineRunView\"\n    assert_contains \"restored AixUI panel points at the one-shot run\" \"$BCS_CLI_STDOUT\" \"$run_id\"\n\n    bot_post \"/state-machine-runs/${run_id}/cancel\" PM \\\n        '{\"reason\":\"E2E one-shot trial completed\"}'\n    require_status \"operator cancels the one-shot trial\" \"200\" || return\n    cleanup_status=$(json_path \"$RESPONSE\" \"run.status\")\n    case \"$cleanup_status\" in\n        aborted|completed|failed) cleanup_status=\"terminal\" ;;\n    esac\n    assert_eq \"one-shot trial is terminal after cleanup\" \"$cleanup_status\" \"terminal\"\n\n    api_get \"/sessions/${trial_session_id}\"\n    require_status \"operator reads the chat session after the one-shot trial\" \"200\" || return\n    assert_json_eq \"one-shot execution preserves the chat session\" \"$RESPONSE\" \"status\" \"running\"\n\n    api_delete \"/groups/${trial_group_id}?bot_id=${BOT_PM_UUID}\"\n    require_status \"one-shot custom collaboration fixture is cleaned up\" \"200\" || return"
+      }
     }
   ],
   "schema_version": 1,
   "source_revision": "8559a7a5258a2cb6750befec187e50aa85060cc6",
   "sources": {
     "cli-stories.sh": "576031c026007346206ec1d77666f04852908f9fec5fe29c9c9e255c5977b13d"
-  }
+  },
+  "density_requirements": [
+    {
+      "id": "CUSTOM-COLLABORATION.yaml-valid",
+      "method": "validate_yaml",
+      "command": "validate_yaml",
+      "expectation": "Source-backed field contract: yaml-valid. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 161,
+      "line_end": 161,
+      "source_quote": "    assert_json_eq \"custom collaboration YAML is valid\" \"$BCS_CLI_STDOUT\" \"valid\" \"true\""
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.yaml-role-count",
+      "method": "validate_yaml",
+      "command": "validate_yaml",
+      "expectation": "Source-backed field contract: yaml-role-count. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 162,
+      "line_end": 162,
+      "source_quote": "    assert_json_eq \"custom collaboration exposes two roles\" \"$BCS_CLI_STDOUT\" \"summary.participants\" \"2\""
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.yaml-node-count",
+      "method": "validate_yaml",
+      "command": "validate_yaml",
+      "expectation": "Source-backed field contract: yaml-node-count. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 163,
+      "line_end": 163,
+      "source_quote": "    assert_json_eq \"custom collaboration exposes two nodes\" \"$BCS_CLI_STDOUT\" \"summary.nodes\" \"2\""
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.yaml-planner-required",
+      "method": "validate_yaml",
+      "command": "validate_yaml",
+      "expectation": "Source-backed field contract: yaml-planner-required. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 125,
+      "line_end": 127,
+      "source_quote": "  planner:\n    display_name: Release planner\n    required: true"
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.yaml-reviewer-required",
+      "method": "validate_yaml",
+      "command": "validate_yaml",
+      "expectation": "Source-backed field contract: yaml-reviewer-required. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 128,
+      "line_end": 130,
+      "source_quote": "  reviewer:\n    display_name: Engineering reviewer\n    required: true"
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.yaml-plan-assignee",
+      "method": "validate_yaml",
+      "command": "validate_yaml",
+      "expectation": "Source-backed field contract: yaml-plan-assignee. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 137,
+      "line_end": 142,
+      "source_quote": "      plan:\n        kind: bot_task\n        display_name: Plan release\n        assignee:\n          type: bot_binding\n          binding: planner"
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.yaml-review-assignee",
+      "method": "validate_yaml",
+      "command": "validate_yaml",
+      "expectation": "Source-backed field contract: yaml-review-assignee. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 147,
+      "line_end": 152,
+      "source_quote": "      review:\n        kind: bot_task\n        display_name: Review release\n        assignee:\n          type: bot_binding\n          binding: reviewer"
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.yaml-acyclic",
+      "method": "validate_yaml",
+      "command": "validate_yaml",
+      "expectation": "Source-backed field contract: yaml-acyclic. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 135,
+      "line_end": 135,
+      "source_quote": "    graph_mode: acyclic"
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.yaml-plan-review-edge",
+      "method": "validate_yaml",
+      "command": "validate_yaml",
+      "expectation": "Source-backed field contract: yaml-plan-review-edge. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 144,
+      "line_end": 146,
+      "source_quote": "        transitions:\n          complete:\n            targets: [review]"
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.yaml-review-final",
+      "method": "validate_yaml",
+      "command": "validate_yaml",
+      "expectation": "Source-backed field contract: yaml-review-final. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 147,
+      "line_end": 154,
+      "source_quote": "      review:\n        kind: bot_task\n        display_name: Review release\n        assignee:\n          type: bot_binding\n          binding: reviewer\n        instruction: Review the plan and produce the final recommendation.\n        final_output: true\" > \"$yaml_file\""
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.trial-group-id",
+      "method": "trial_create_group",
+      "command": "trial_create_group",
+      "expectation": "Source-backed field contract: trial-group-id. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 67,
+      "line_end": 67,
+      "source_quote": "    assert_not_empty \"CLI-created group returns an id\" \"$CLI_STORY_GROUP_ID\""
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.trial-session-id",
+      "method": "trial_create_group",
+      "command": "trial_create_group",
+      "expectation": "Source-backed field contract: trial-session-id. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 170,
+      "line_end": 171,
+      "source_quote": "    trial_session_id=$(printf '%s\\n' \"$BCS_CLI_STDOUT\" | sed -n 's/^  Session: //p' | head -1)\n    assert_not_empty \"one-shot trial group returns its current session\" \"$trial_session_id\""
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.human-member",
+      "method": "trial_add_member",
+      "command": "trial_add_member",
+      "expectation": "Source-backed field contract: human-member. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 180,
+      "line_end": 182,
+      "source_quote": "    _cli_story_run \"operator joins the trial session as a Human\" PM \\\n        session add-member \"$trial_session_id\" \\\n        --bot-uuid \"human_${BCS_MOCK_USER_ID}\" --role consultant || {"
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.human-consultant",
+      "method": "trial_add_member",
+      "command": "trial_add_member",
+      "expectation": "Source-backed field contract: human-consultant. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 180,
+      "line_end": 182,
+      "source_quote": "    _cli_story_run \"operator joins the trial session as a Human\" PM \\\n        session add-member \"$trial_session_id\" \\\n        --bot-uuid \"human_${BCS_MOCK_USER_ID}\" --role consultant || {"
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.permission-allowed",
+      "method": "trial_permission",
+      "command": "trial_permission",
+      "expectation": "Source-backed field contract: permission-allowed. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 194,
+      "line_end": 194,
+      "source_quote": "    assert_json_eq \"group owner may run a one-shot state machine\" \"$BCS_CLI_STDOUT\" \"allowed\" \"true\""
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.permission-session",
+      "method": "trial_permission",
+      "command": "trial_permission",
+      "expectation": "Source-backed field contract: permission-session. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 195,
+      "line_end": 195,
+      "source_quote": "    assert_json_eq \"permission belongs to the current session\" \"$BCS_CLI_STDOUT\" \"session_id\" \"$trial_session_id\""
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.permission-group",
+      "method": "trial_permission",
+      "command": "trial_permission",
+      "expectation": "Source-backed field contract: permission-group. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 196,
+      "line_end": 196,
+      "source_quote": "    assert_json_eq \"permission belongs to the temporary chat group\" \"$BCS_CLI_STDOUT\" \"group_id\" \"$trial_group_id\""
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.run-id",
+      "method": "trial_start_run",
+      "command": "trial_start_run",
+      "expectation": "Source-backed field contract: run-id. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 206,
+      "line_end": 207,
+      "source_quote": "    run_id=$(json_path \"$BCS_CLI_STDOUT\" \"run.run_id\")\n    assert_not_empty \"one-shot custom collaboration returns a run id\" \"$run_id\""
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.run-session",
+      "method": "trial_start_run",
+      "command": "trial_start_run",
+      "expectation": "Source-backed field contract: run-session. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 208,
+      "line_end": 208,
+      "source_quote": "    assert_json_eq \"one-shot run stays in the current session\" \"$BCS_CLI_STDOUT\" \"run.session_id\" \"$trial_session_id\""
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.run-group",
+      "method": "trial_start_run",
+      "command": "trial_start_run",
+      "expectation": "Source-backed field contract: run-group. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 209,
+      "line_end": 209,
+      "source_quote": "    assert_json_eq \"one-shot run stays in the temporary chat group\" \"$BCS_CLI_STDOUT\" \"run.group_id\" \"$trial_group_id\""
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.graph-run-id",
+      "method": "trial_query_graph",
+      "command": "trial_query_graph",
+      "expectation": "Source-backed field contract: graph-run-id. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 218,
+      "line_end": 218,
+      "source_quote": "    assert_json_eq \"CLI graph keeps the Run identity\" \"$BCS_CLI_STDOUT\" \"run.run_id\" \"$run_id\""
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.pending-human-empty",
+      "method": "trial_query_pending",
+      "command": "trial_query_pending",
+      "expectation": "Source-backed field contract: pending-human-empty. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 219,
+      "line_end": 221,
+      "source_quote": "    _cli_story_run \"operator checks pending Human input through CLI\" PM \\\n        collaborate query --run \"$run_id\" --pending || return\n    assert_eq \"Bot-only workflow exposes no Human response target\" \"$BCS_CLI_STDOUT\" \"[]\""
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.respond-refused",
+      "method": "trial_respond_guard",
+      "command": "trial_respond_guard",
+      "expectation": "Source-backed field contract: respond-refused. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 222,
+      "line_end": 225,
+      "source_quote": "    # Exercise the reply guard against a real Bot-only Run; it must never POST\n    # a Human response to a node absent from the authorized pending list.\n    if bcs_cli_json PM collaborate respond --run \"$run_id\" --node plan --content \"invalid Human reply\"; then\n        assert_eq \"CLI refuses a non-pending Human node\" \"accepted\" \"rejected\""
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.respond-not-pending",
+      "method": "trial_respond_guard",
+      "command": "trial_respond_guard",
+      "expectation": "Source-backed field contract: respond-not-pending. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 227,
+      "line_end": 227,
+      "source_quote": "        assert_contains \"CLI explains that the node is not pending\" \"$BCS_CLI_STDERR\" \"not pending\""
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.panel-component",
+      "method": "trial_messages",
+      "command": "trial_messages",
+      "expectation": "Source-backed field contract: panel-component. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 237,
+      "line_end": 238,
+      "source_quote": "    assert_contains \"one-shot history restores the AixUI state-machine panel\" \\\n        \"$BCS_CLI_STDOUT\" \"bcsPanel.StateMachineRunView\""
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.panel-run",
+      "method": "trial_messages",
+      "command": "trial_messages",
+      "expectation": "Source-backed field contract: panel-run. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 239,
+      "line_end": 239,
+      "source_quote": "    assert_contains \"restored AixUI panel points at the one-shot run\" \"$BCS_CLI_STDOUT\" \"$run_id\""
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.cancel-terminal",
+      "method": "cancel_trial_run",
+      "command": "cancel_trial_run",
+      "expectation": "Source-backed field contract: cancel-terminal. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 244,
+      "line_end": 248,
+      "source_quote": "    cleanup_status=$(json_path \"$RESPONSE\" \"run.status\")\n    case \"$cleanup_status\" in\n        aborted|completed|failed) cleanup_status=\"terminal\" ;;\n    esac\n    assert_eq \"one-shot trial is terminal after cleanup\" \"$cleanup_status\" \"terminal\""
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.session-running",
+      "method": "read_trial_session",
+      "command": "read_trial_session",
+      "expectation": "Source-backed field contract: session-running. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 250,
+      "line_end": 252,
+      "source_quote": "    api_get \"/sessions/${trial_session_id}\"\n    require_status \"operator reads the chat session after the one-shot trial\" \"200\" || return\n    assert_json_eq \"one-shot execution preserves the chat session\" \"$RESPONSE\" \"status\" \"running\""
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.persistent-id",
+      "method": "create_persistent_group",
+      "command": "create_persistent_group",
+      "expectation": "Source-backed field contract: persistent-id. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 265,
+      "line_end": 266,
+      "source_quote": "    group_id=$(json_path \"$BCS_CLI_STDOUT\" \"id\")\n    assert_not_empty \"custom collaboration group returns an id\" \"$group_id\""
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.persistent-driver",
+      "method": "create_persistent_group",
+      "command": "create_persistent_group",
+      "expectation": "Source-backed field contract: persistent-driver. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 267,
+      "line_end": 267,
+      "source_quote": "    assert_contains \"custom collaboration group contains its driver\" \"$BCS_CLI_STDOUT\" \"$BOT_PM_UUID\""
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.persistent-reviewer",
+      "method": "create_persistent_group",
+      "command": "create_persistent_group",
+      "expectation": "Source-backed field contract: persistent-reviewer. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 268,
+      "line_end": 268,
+      "source_quote": "    assert_contains \"custom collaboration group contains its reviewer\" \"$BCS_CLI_STDOUT\" \"$BOT_ENG_UUID\""
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.persistent-strategy",
+      "method": "read_persistent_group",
+      "command": "read_persistent_group",
+      "expectation": "Source-backed field contract: persistent-strategy. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 272,
+      "line_end": 274,
+      "source_quote": "    api_get \"/groups/${group_id}\"\n    require_status \"operator reads the custom collaboration group\" \"200\" || return\n    assert_json_eq \"custom collaboration group uses state-machine strategy\" \"$RESPONSE\" \"group_strategy\" \"state_machine\""
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.trial-cleanup",
+      "method": "delete_trial_group",
+      "command": "delete_trial_group",
+      "expectation": "Source-backed field contract: trial-cleanup. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 254,
+      "line_end": 254,
+      "source_quote": "    api_delete \"/groups/${trial_group_id}?bot_id=${BOT_PM_UUID}\""
+    },
+    {
+      "id": "CUSTOM-COLLABORATION.persistent-cleanup",
+      "method": "delete_persistent_group",
+      "command": "delete_persistent_group",
+      "expectation": "Source-backed field contract: persistent-cleanup. Missing observations never grant PASS.",
+      "source_file": "cli-stories.sh",
+      "line_start": 276,
+      "line_end": 276,
+      "source_quote": "    api_delete \"/groups/${group_id}?bot_id=${BOT_PM_UUID}\""
+    }
+  ]
 }

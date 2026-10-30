@@ -13,24 +13,17 @@ notes, never silently repaired:
   is not expressible through the cleanup ``WriteClient.call`` placeholder
   vocabulary, so the cancel step derives a per-run cleanup Profile with the
   literal quoted path; the frozen Profile keeps the contract shape.
-- The trial obligation is converged onto the group-domain transport (live
-  preprod evidence 2026-10-29, diag4c probe-b/probe-b3): the one-shot trial
-  Group is created through the reviewed persistent-create leaf (participant
-  bindings stored on the Group), the single Run is started by the raw
-  group-domain HTTP leaf ``POST /groups/{group_id}/state-machine-runs`` --
-  the frozen product CLI exposes no group-domain run verb and is never
-  modified -- and run-domain CLI reads, the respond guard, the cancel and
-  the exact owned delete follow. The session-domain membership, permission
-  and session-domain Run-start leaves of the frozen owned-local parent are
-  not re-chained on either tier; the difference is pinned in the trial
-  projection and disclosed in the case report.
-- The group-domain Run start derives a run-scoped Session (prefix
-  group_id + ':', station-finalized completed/aborted on abort) beside the
-  create-bound consultant Session of the frozen owned-local parent. The
-  history-restore leaf reads the run-scoped handle while the Run-cancel
-  Session-preservation read keeps the create-bound handle (live r13 binding
-  drift corrected; the projection carries both handles plus the
-  station-finalization disclosure).
+- The trial obligation rides the session-domain product CLI exactly as the
+  frozen owned-local parent (S14 dual-write arbitration, 2026-10-30): the
+  persistent-form trial Group is created through the reviewed create leaf, the
+  Human consultant membership, the trial authority and the one-shot Run start
+  (``collaborate run <yaml> --session <id> --binding planner=<driver>
+  --binding reviewer=<member> --input <TRIAL_INPUT>``) are re-chained onto
+  their upstream-anchored session-domain leaves, and the run-domain reads, the
+  respond guard, the cancel and the exact owned delete follow. The raw
+  group-domain HTTP Run start remains only as a declared fallback route
+  binding (the frozen Profile keeps its reviewed contract shape) and is never
+  executed on either tier.
 - Blocked runs project one scrubbed public failure class (receipt keys
   ``failed_method``/``failure_class`` plus every frozen step's ``error_gap``;
   live r1-r4 showed all-first-step NOT_RUN blocks whose failing leaf was
@@ -70,7 +63,6 @@ from .custom_collaboration_cli_leaf import (
     CREATE_PERSISTENT_GROUP_OPERATION,
     DECLARED_CLEANUP_ROUTES,
     GROUP_DELETE_OPERATION,
-    GROUP_RUN_START_OPERATION,
     GROUP_VERIFY_DELETED_OPERATION,
     READ_PERSISTENT_GROUP_OPERATION,
     REQUIREMENTS as CUSTOM_COLLABORATION_REQUIREMENTS,
@@ -80,7 +72,10 @@ from .custom_collaboration_cli_leaf import (
     _HTTP_PRODUCT_OPERATIONS,
     _HTTP_SCENARIO_OPERATIONS,
     _STEP_EFFECTS,
+    TRIAL_ADD_MEMBER_OPERATION,
     TRIAL_CREATE_GROUP_OPERATION,
+    TRIAL_PERMISSION_OPERATION,
+    TRIAL_START_RUN_OPERATION,
     TRIAL_MESSAGES_OPERATION,
     TRIAL_QUERY_GRAPH_OPERATION,
     TRIAL_QUERY_PENDING_OPERATION,
@@ -94,7 +89,11 @@ from .custom_collaboration_cli_leaf import (
     participant_ids,
     validate_custom_collaboration_cli_profile,
 )
-from .local_cli import TRIAL_INPUT
+from .custom_collaboration.density import (
+    definition_evidence,
+    panel_evidence,
+    project,
+)
 from .inventory import executor_digest
 from .local_custom_collaboration_case import (
     CUSTOM_COLLABORATION_PARENT,
@@ -102,6 +101,10 @@ from .local_custom_collaboration_case import (
     custom_collaboration_source_binding,
 )
 from .local_custom_collaboration_run import DEFINITION_YAML
+from .local_operator_cli_contract import (
+    CUSTOM_COLLABORATION_COMMANDS,
+    custom_collaboration_source_binding as operator_source_binding,
+)
 from .profile import ConfigError, fingerprint, identifier, require_resolved, unique_keys
 from .run_state import RunStateError, write
 from .workspace_cli_commands import WorkspaceCliRunnerError
@@ -179,6 +182,13 @@ def custom_collaboration_cli_case_plan() -> dict:
     """Freeze the dual Custom-collaboration plan from its reviewed source."""
     binding = custom_collaboration_source_binding()
     plan = custom_collaboration_case_plan()
+    operator_binding = operator_source_binding()
+    base_commands: list[str] = []
+    for row in operator_binding["requirements"]:
+        if row["command"] not in base_commands:
+            base_commands.append(row["command"])
+    if base_commands != list(CUSTOM_COLLABORATION_COMMANDS):
+        raise RunStateError("custom collaboration base source commands changed")
     requirement_ids = [row["id"] for row in binding["requirements"]]
     if (binding["parent"] != PARENT or requirement_ids != list(REQUIREMENTS)
             or plan["requirement_ids"] != list(REQUIREMENTS) or plan["legacy_id"] != PARENT
@@ -196,8 +206,8 @@ def custom_collaboration_cli_case_plan() -> dict:
         "cli_operations": list(CUSTOM_COLLABORATION_CLI_OPERATIONS),
         "cleanup_operations": sorted(_HTTP_PRODUCT_OPERATIONS),
         "scenario_http_operations": sorted(_HTTP_SCENARIO_OPERATIONS),
-        "source_commands": [row["command"] for row in binding["requirements"]],
-        "source_expectations": [row["expectation"] for row in binding["requirements"]],
+        "source_commands": base_commands,
+        "source_expectations": [row["expectation"] for row in operator_binding["requirements"]],
     }
 
 
@@ -218,26 +228,20 @@ def custom_collaboration_cli_adaptability() -> dict:
         "remote_validation": "NOT_RUN", "grants_release_credit": False,
         "blocker": (
             "Mock-verified Singlebox and preprod product-CLI contexts through the "
-            "reviewed collaboration leaves. The trial obligation is converged onto "
-            "the group-domain transport: the persistent-form trial Group rides the "
-            "reviewed create leaf and the one-shot Run is started by the raw "
-            "group-domain exit POST /groups/{group_id}/state-machine-runs beside "
-            "the frozen CLI, while every reviewed cleanup exit rides the WriteClient "
-            "binding vocabulary (diag4c probe-b/b3, 2026-10-29: 202 running with a "
-            "derived Session, CLI graph projection, empty pending, respond guard "
-            "refusal, cancel 200, Group DELETE -> 404 with the Run aborted and the "
-            "Session 404). The frozen product CLI exposes no group-domain run verb, "
-            "so the native verb is a product-gap DIMA filed with this surgery; "
-            "the CLI binary is never modified. Real preprod Bot runtimes did not "
-            "consume the bot_task node inside the live 75s window (plan node "
-            "awaiting_response until cancel); consumption is disclosed as a live "
-            "condition, never asserted. The group-domain Run start derives a "
-            "run-scoped Session (station-finalized completed/aborted on abort) "
-            "beside the create-bound consultant Session that carries the "
-            "preserved-running obligation: the history-restore leaf reads the "
-            "run-scoped handle and the Session-preservation read keeps the "
-            "create-bound handle (r13 live binding drift corrected 2026-10-29). "
-            "Live effect admission and real preprod credentials remain separate gates."),
+            "reviewed collaboration leaves, including the upstream-anchored "
+            "session-domain membership, authority and one-shot Run-start leaves. "
+            "The trial obligation rides the session-domain product CLI exactly as "
+            "the frozen owned-local parent (create consultative Group, add the "
+            "Human consultant, grant trial authority, start the one-shot Run "
+            "through collaborate run, read the graph and pending Human inputs, "
+            "prove the respond guard refusal, restore the AixUI history, cancel "
+            "the Run, preserve the consultant Session running, then delete both "
+            "exact Groups with 404 proof); the raw group-domain HTTP Run start "
+            "stays a declared fallback route binding and is never executed. "
+            "Real preprod Bot runtimes did not consume the bot_task node inside "
+            "the live 75s window (plan node awaiting_response until cancel); "
+            "consumption is disclosed as a live condition, never asserted. Live "
+            "effect admission and real preprod credentials remain separate gates."),
     }
 
 
@@ -257,9 +261,7 @@ class RemoteLocalCustomCollaborationAdapter:
         self.trial_group_id: str | None = None
         self.trial_group_session_handle: str | None = None
         self.trial_session_id: str | None = None
-        self.trial_run_session_id: str | None = None
         self.trial_run_id: str | None = None
-        self.trial_run_created_by: object | None = None
         self.persistent_group_id: str | None = None
         self.fixture_effect = CUSTOM_COLLABORATION_CLI_EFFECT
         self.cleanup_client = WriteClient(self._cleanup_profile(self.profile))
@@ -278,6 +280,11 @@ class RemoteLocalCustomCollaborationAdapter:
                                "origin": profile["entrypoint"]["origin"],
                                "api_face": "legacy", "manifest_face": "legacy"}
         return value
+
+    @property
+    def human_actor_id(self) -> str:
+        """Upstream identifier form of the Human consultant (``human_<id>``)."""
+        return "human_" + self.human_id
 
     def _credential_kind(self) -> str:
         return custom_collaboration_cli_credential_kind(self.profile)
@@ -364,38 +371,61 @@ class RemoteLocalCustomCollaborationAdapter:
         self.trial_session_id = data["session_id"]
         return call
 
-    def trial_start_run(self) -> AdapterCall:
-        if self.trial_group_id is None or self.trial_run_id is not None:
-            raise RunStateError("Custom collaboration one-shot Run requires its Group")
-        call = self._http(GROUP_RUN_START_OPERATION, case_class="trial-run-start",
-                          group_id=self.trial_group_id,
-                          body={"definition_yaml": DEFINITION_YAML, "input": TRIAL_INPUT},
-                          expected=(200, 201, 202))
+    def trial_add_member(self) -> AdapterCall:
+        if self.trial_session_id is None:
+            raise RunStateError("Custom collaboration trial membership requires its Session")
+        call = self._cli(TRIAL_ADD_MEMBER_OPERATION, case_class="trial-add-member",
+                         session_id=self.trial_session_id, human_id=self.human_actor_id)
         data = call.data
-        run = data.get("run") if isinstance(data, dict) else None
-        bound_group = (run or {}).get("group_id", self.trial_group_id)
+        rows = data.get("participants") if isinstance(data, dict) else None
+        if (not isinstance(rows, list)
+                or (data.get("session_id") or data.get("id")) != self.trial_session_id
+                or not any(isinstance(row, dict)
+                           and (row.get("bot_uuid") or row.get("actor_id")) == self.human_actor_id
+                           and row.get("role") == "consultant" for row in rows)):
+            raise RunStateError("custom collaboration trial membership differs")
+        return call
+
+    def trial_permission(self) -> AdapterCall:
+        if self.trial_session_id is None or self.trial_group_id is None:
+            raise RunStateError("Custom collaboration trial authority requires its identities")
+        call = self._cli(TRIAL_PERMISSION_OPERATION, case_class="trial-permission",
+                         session_id=self.trial_session_id)
+        data = call.data
+        if (not isinstance(data, dict) or data.get("allowed") is not True
+                or (data.get("session_id") or data.get("id")) != self.trial_session_id
+                or data.get("group_id") != self.trial_group_id
+                or data.get("policy_version") != "session_state_machine_v1"
+                or data.get("group_strategy") != "chat"
+                or data.get("caller_bot_id") != self.driver_id):
+            raise RunStateError("custom collaboration trial authority differs")
+        return call
+
+    def trial_start_run(self) -> AdapterCall:
+        if (self.trial_group_id is None or self.trial_session_id is None
+                or self.trial_run_id is not None):
+            raise RunStateError("Custom collaboration one-shot Run requires its Group")
+        call = self._cli(TRIAL_START_RUN_OPERATION, case_class="trial-run-start",
+                         yaml_path=self.runner.definition_path,
+                         session_id=self.trial_session_id)
+        run = call.data.get("run") if isinstance(call.data, dict) else None
         if (not isinstance(run, dict) or not run.get("run_id")
-                or not (run.get("session_id") or "").startswith(self.trial_group_id + ":")
-                or bound_group != self.trial_group_id
+                or run.get("session_id") != self.trial_session_id
+                or run.get("group_id") != self.trial_group_id
                 or run.get("status") not in ("running", "waiting")):
-            raise RunStateError("custom collaboration group-domain Run start differs")
+            raise RunStateError("custom collaboration session-domain Run start differs")
         self.trial_run_id = run["run_id"]
-        # The group-domain Run start derives a run-scoped Session beside the
-        # create-bound consultant Session; it never overwrites the
-        # Session-preservation binding.
-        self.trial_run_session_id = run["session_id"]
-        self.trial_run_created_by = run.get("created_by")
         return call
 
     def trial_query_graph(self) -> AdapterCall:
-        if self.trial_run_id is None or self.trial_run_session_id is None:
+        if self.trial_run_id is None:
             raise RunStateError("custom collaboration graph read requires its Run")
         call = self._cli(TRIAL_QUERY_GRAPH_OPERATION, case_class="trial-query-graph",
                          run_id=self.trial_run_id)
         data = call.data
         run = data.get("run") if isinstance(data, dict) else None
         if (not isinstance(run, dict) or run.get("run_id") != self.trial_run_id
-                or run.get("session_id") != self.trial_run_session_id
+                or run.get("session_id") != self.trial_session_id
                 or run.get("group_id") != self.trial_group_id
                 or not isinstance(data.get("nodes"), list) or not data["nodes"]):
             raise RunStateError("custom collaboration execution graph differs")
@@ -420,13 +450,13 @@ class RemoteLocalCustomCollaborationAdapter:
         return call
 
     def trial_messages(self) -> AdapterCall:
-        if self.trial_run_session_id is None or self.trial_run_id is None:
+        if self.trial_session_id is None or self.trial_run_id is None:
             raise RunStateError("custom collaboration history read requires its Run")
         # The restored bcsPanel.StateMachineRunView history rides the
-        # run-scoped derived Session (live r13 green), never the create-bound
-        # consultant Session.
+        # create-bound consultant Session that owns the one-shot Run (the
+        # session-domain Run start never derives a second handle).
         call = self._cli(TRIAL_MESSAGES_OPERATION, case_class="trial-messages",
-                         session_id=self.trial_run_session_id, run_id=self.trial_run_id)
+                         session_id=self.trial_session_id, run_id=self.trial_run_id)
         if not isinstance(call.data, list):
             raise RunStateError("custom collaboration restored history differs")
         return call
@@ -597,26 +627,19 @@ def execute_custom_collaboration_case(adapter: object) -> CaseExecution:
             "trial_group_session_handle": adapter.trial_group_session_handle,
             "trial_session_id": adapter.trial_session_id,
             "trial_session_origin": "create_bound_consultant_session",
-            "trial_run_session_id": adapter.trial_run_session_id,
-            "trial_run_session_origin": "group_domain_run_derived",
-            "station_session_finalization": (
-                "the run-scoped derived Session is finalized completed/aborted "
-                "by the station on abort; the create-bound consultant Session "
-                "carries the preserved-running obligation"),
             "trial_run_id": adapter.trial_run_id,
-            "run_start_transport": "raw_group_domain_http",
-            "run_start_created_by": adapter.trial_run_created_by,
+            "run_start_transport": "product_cli_session_domain",
+            "session_domain_leaves": ["trial_add_member", "trial_permission",
+                                      "trial_start_run"],
             "pending_human_inputs": 0,
             "respond_guard": "REFUSED", "restored_history": True, "run_cancelled": True,
             "session_preserved_running": True, "group_cleanup": "DELETED",
             "group_delete_verified_404": True,
             "converged_transport": (
-                "persistent-form trial Group via the reviewed create leaf; one-shot "
-                "Run started by the raw group-domain HTTP leaf; run-domain CLI "
-                "reads, respond guard, cancel and exact delete follow"),
-            "session_domain_leaves_not_rechained": [
-                "trial_add_member", "trial_permission",
-                "session_domain_run_start (collaborate run)"]}
+                "persistent-form trial Group via the reviewed create leaf; Human "
+                "consultant membership, trial authority and the one-shot Run start "
+                "ride the upstream-anchored session-domain product-CLI leaves; "
+                "run-domain CLI reads, respond guard, cancel and exact delete follow")}
         create_data = {
             "group_id": adapter.persistent_group_id,
             "readback_group_strategy": "state_machine", "group_cleanup": "DELETED",
@@ -625,7 +648,8 @@ def execute_custom_collaboration_case(adapter: object) -> CaseExecution:
         step(REQUIREMENTS[0], "validate_yaml", projections.get("validate_yaml"),
              ("validate_yaml",), CUSTOM_COLLABORATION_VALIDATE_EFFECT),
         step(REQUIREMENTS[2], "trial_one_shot_lifecycle", trial_data, (
-            "trial_create_group", "trial_start_run", "trial_query_graph",
+            "trial_create_group", "trial_add_member", "trial_permission",
+            "trial_start_run", "trial_query_graph",
             "trial_query_pending", "trial_respond_guard", "trial_messages",
             "cancel_trial_run", "read_trial_session",
             "delete_trial_group", "verify_trial_group_deleted"),
@@ -635,11 +659,99 @@ def execute_custom_collaboration_case(adapter: object) -> CaseExecution:
             "delete_persistent_group", "verify_persistent_group_deleted"),
             CUSTOM_COLLABORATION_CREATE_EFFECT),
     )
+    # Density is projected from actual leaf payloads through the same
+    # event/bindings contract as the owned-local executor (S14 arbitration:
+    # one projector, session-domain CLI transport, declared HTTP fallback).
+    events: dict = {}
+    bindings: dict = {"driver": adapter.driver_id, "reviewer": adapter.member_id,
+                      "human": adapter.human_actor_id}
+    base_statuses: dict = {}
+    if error_type is None:
+        validate_data = projections.get("validate_yaml") or {}
+        events["validate"] = {key: validate_data.get(key) for key in ("valid", "summary")}
+        events["definition"] = definition_evidence(DEFINITION_YAML)
+        trial_create = projections.get("trial_create_group") or {}
+        events["trial"] = {"session_id": trial_create.get("session_id")}
+        membership = projections.get("trial_add_member") or {}
+        events["member"] = {
+            "session_id": membership.get("session_id") or membership.get("id"),
+            "participants": membership.get("participants", [])}
+        permission = projections.get("trial_permission") or {}
+        events["permission"] = {key: permission.get(key)
+                                for key in ("allowed", "session_id", "group_id")}
+        started_run = (projections.get("trial_start_run") or {}).get("run") or {}
+        events["run"] = {key: started_run.get(key) for key in ("run_id", "session_id", "group_id")}
+        graph_run = (projections.get("trial_query_graph") or {}).get("run") or {}
+        events["graph"] = {"run_id": graph_run.get("run_id")}
+        events["pending"] = projections.get("trial_query_pending")
+        guard = projections.get("trial_respond_guard") or {}
+        events["guard"] = {"exit_code": guard.get("exit_code"),
+                           "not_pending": guard.get("not_pending")}
+        events["panel"] = panel_evidence(projections.get("trial_messages") or [],
+                                         adapter.trial_run_id)
+        events["cancel"] = projections.get("cancel_trial_run") or {}
+        events["session"] = projections.get("read_trial_session") or {}
+        events["trial_deleted"] = projections.get("delete_trial_group") or {}
+        events["persistent"] = projections.get("create_persistent_group") or {}
+        events["persistent_read"] = projections.get("read_persistent_group") or {}
+        events["persistent_deleted"] = projections.get("delete_persistent_group") or {}
+        bindings.update(trial_group=adapter.trial_group_id or "",
+                        trial_session=adapter.trial_session_id or "",
+                        run_id=adapter.trial_run_id or "",
+                        persistent_group=adapter.persistent_group_id or "")
+        base_statuses = {REQUIREMENTS[0]: "PASS", REQUIREMENTS[1]: "PASS",
+                         REQUIREMENTS[2]: "PASS"}
+    density_rows = project(events, bindings, base_statuses)["requirements"]
+    operation_for_method = {method: operation
+                            for operation, method in CUSTOM_COLLABORATION_CASE_METHODS}
+    density_steps = []
+    for row in density_rows:
+        if row["id"] in (REQUIREMENTS[0], REQUIREMENTS[1], REQUIREMENTS[2]):
+            continue
+        method = row["method"]
+        if error_type is not None:
+            density_steps.append(StepOutcome(
+                requirement_id=row["id"], method=method, status="NOT_RUN",
+                data=None, evidence={}, error_type=error_type,
+                error_gap=adapter.failure_class))
+            continue
+        if row["status"] == "PASS":
+            operation = operation_for_method[method]
+            if operation in SCENARIO_CLEANUP_OPERATIONS:
+                # The shared Group delete/proof routes serve both cleanup
+                # segments at once; a density row observes exactly one segment,
+                # so its effect follows the observed segment - the same rule
+                # _require_step_evidence applies to the shared routes.
+                fixture_effect = (CUSTOM_COLLABORATION_CREATE_EFFECT
+                                  if "persistent" in method
+                                  else CUSTOM_COLLABORATION_TRIAL_EFFECT)
+            else:
+                fixture_effect = _STEP_EFFECTS[operation]
+            density_steps.append(StepOutcome(
+                requirement_id=row["id"], method=method, status="PASS", data=row,
+                evidence={"requests": [records[method]],
+                          "fixture_effect": fixture_effect,
+                          "remote_validation": "NOT_RUN",
+                          "grants_release_credit": False}, error_type=None))
+        elif row["status"] == "FAIL":
+            density_steps.append(StepOutcome(
+                requirement_id=row["id"], method=method, status="FAIL",
+                data=None, evidence={}, error_type="DensityAssertionFailed",
+                error_gap=None))
+        else:
+            density_steps.append(StepOutcome(
+                requirement_id=row["id"], method=method, status="NOT_RUN",
+                data=None, evidence={}, error_type="DensityEvidenceGap",
+                error_gap="SOURCE_FIELD_NOT_OBSERVED"))
+    steps += tuple(density_steps)
+    completed = sum(row.status == "PASS" for row in steps)
+    complete = completed == len(REQUIREMENTS)
     execution = CaseExecution(
         case_id=DUAL_CUSTOM_COLLAB_CASE_ID, parent_id=PARENT,
-        status="PASS" if error_type is None else "BLOCKED", steps=steps,
-        completed_count=3 if error_type is None else 0, total_count=3,
-        error_type=error_type, ready_to_execute=error_type is None)
+        status="PASS" if complete else "BLOCKED", steps=steps,
+        completed_count=completed, total_count=len(REQUIREMENTS),
+        error_type=error_type or (None if complete else "DensityEvidenceGap"),
+        ready_to_execute=complete)
     execution.validate()
     return execution
 

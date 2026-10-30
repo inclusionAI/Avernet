@@ -8,7 +8,8 @@ import unittest
 from unittest.mock import patch
 
 from bcs_e2e.inventory import KNOWN_UNMAPPED_LEGACY_IDS
-from bcs_e2e.local_custom_collaboration_case import CASE_ID
+from bcs_e2e.local_custom_collaboration_case import (CASE_ID, DENSITY_REQUIREMENTS,
+                                                         DENSITY_SPECS, REQUIREMENTS)
 from bcs_e2e.local_custom_collaboration_reporting import (
     build_custom_collaboration_report,
 )
@@ -130,13 +131,11 @@ class CustomCollaborationLifecycleTests(unittest.TestCase):
                 {'id': 'CUSTOM-COLLABORATION.validate-yaml', 'status': 'PASS'},
                 {'id': 'CUSTOM-COLLABORATION.create-persistent-group', 'status': 'PASS'},
                 {'id': 'CUSTOM-COLLABORATION.trial-one-shot-lifecycle', 'status': 'PASS'},
-            ],
-            'selected_requirement_ids': [
-                'CUSTOM-COLLABORATION.validate-yaml',
-                'CUSTOM-COLLABORATION.create-persistent-group',
-                'CUSTOM-COLLABORATION.trial-one-shot-lifecycle',
-            ],
-            'parent_requirement_count': 3,
+            ] + [{'id': name, 'status': 'PASS'} for name in DENSITY_REQUIREMENTS],
+            'density_observations': {f"CUSTOM-COLLABORATION.{name}": True
+                                     for name, _method, _first, _last in DENSITY_SPECS},
+            'selected_requirement_ids': list(REQUIREMENTS),
+            'parent_requirement_count': 37,
             'full_parent_coverage': 'LOCAL_PARENT_REQUIREMENTS_ONLY',
             'operations': {
                 'validate': {'status': 'LOCAL_CUSTOM_COLLABORATION_VALIDATE_PASS',
@@ -158,12 +157,8 @@ class CustomCollaborationLifecycleTests(unittest.TestCase):
             'legacy_counts': {
                 'case_id': CASE_ID,
                 'legacy_id': 'story_cli_operator_creates_custom_collaboration',
-                'requirement_ids': [
-                    'CUSTOM-COLLABORATION.validate-yaml',
-                    'CUSTOM-COLLABORATION.create-persistent-group',
-                    'CUSTOM-COLLABORATION.trial-one-shot-lifecycle',
-                ],
-                'parent_requirement_count': 3,
+                'requirement_ids': list(REQUIREMENTS),
+                'parent_requirement_count': 37,
             },
         }
         write(root / 'local-custom-collaboration.json', result)
@@ -273,7 +268,7 @@ class CustomCollaborationLifecycleTests(unittest.TestCase):
         self.assertEqual(canonical['status'], 'LOCAL_SUITE_PASS')
         self.assertEqual(canonical['scope']['full_release_status'], 'NOT_QUALIFIED')
         self.assertEqual(canonical['scope']['full_story_status'], 'LOCAL_INTEGRATED')
-        self.assertEqual(len(canonical['requirements']), 3)
+        self.assertEqual(len(canonical['requirements']), 37)
 
     def test_release_parent_guard_reads_reviewed_denominator_not_the_raw_freeze(self):
         without_parent = [{'id': f'other-{index}'} for index in range(31)]

@@ -13,6 +13,7 @@ from .local_custom_collaboration_case import (
     REQUIREMENTS,
     SUITE,
     custom_collaboration_case_plan,
+    custom_collaboration_source_binding,
 )
 from .local_custom_collaboration_run import (
     BINDING_CONTRACT,
@@ -25,7 +26,6 @@ from .local_custom_collaboration_run import (
 )
 from .local_operator_cli_contract import (
     CUSTOM_COLLABORATION_PARENT,
-    custom_collaboration_source_binding,
 )
 from .profile import fingerprint
 from .run_state import RunStateError, read

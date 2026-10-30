@@ -17,7 +17,7 @@ from .local_custom_collaboration_case import (
 )
 from .local_bot_ws import OwnedLocalBotWebSocket
 from .local_fixtures import OwnedLocalFixtures
-from .local_operator_cli_contract import custom_collaboration_source_binding
+from .local_custom_collaboration_case import custom_collaboration_source_binding
 from .owned_bcs import OwnedBcsProcess
 from .profile import fingerprint, identifier
 from .run_state import RunStateError, read, write
@@ -176,7 +176,8 @@ def local_custom_collaboration_run(*, binary: Path, binary_sha256: str,
                                    cli_binary: Path, cli_binary_sha256: str,
                                    state_dir: Path, run_id: str,
                                    confirm_run_id: str, allow_local_processes: bool,
-                                   allow_fixture_write: bool, allow_write: bool) -> dict:
+                                   allow_fixture_write: bool, allow_write: bool,
+                                   density: bool = False) -> dict:
     """Start, provision, execute, publish, and stop one owned Run.
 
     The caller separately confirms process, fixture-write and business-write
@@ -204,6 +205,9 @@ def local_custom_collaboration_run(*, binary: Path, binary_sha256: str,
                        cli_binary_sha256=cli_binary_sha256, run_id=run_id,
                        state_dir=state_dir, executor=executor, source=source,
                        legacy=legacy)
+
+    if density:
+        binding['density_enabled'] = True
 
     runtime = None
     case: dict = {}
@@ -253,7 +257,7 @@ def local_custom_collaboration_run(*, binary: Path, binary_sha256: str,
                             binary_sha256=cli_binary_sha256, yaml_path=definition,
                             driver_id=driver_id, reviewer_id=roles['member']['bot_id'],
                             human_id='human_' + runtime.inputs.human_id,
-                            driver_token=driver_token)
+                            driver_token=driver_token, **({"density": True} if density else {}))
                 finally:
                     credential.clear()
                     credentials = credential.summary()

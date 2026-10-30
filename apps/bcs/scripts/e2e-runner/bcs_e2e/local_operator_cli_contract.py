@@ -152,7 +152,7 @@ def custom_collaboration_source_binding():
                  'requirements'} <= set(value)
                 or not set(value) <= {'schema_version', 'source_revision', 'parent',
                                       'sources', 'requirements',
-                                      'convergence_decisions'}
+                                      'convergence_decisions', 'density_requirements'}
                 or value['schema_version'] != 1
                 or value['parent'] != CUSTOM_COLLABORATION_PARENT
                 or not re.fullmatch('[0-9a-f]{40}', value['source_revision'])
@@ -174,6 +174,8 @@ def custom_collaboration_source_binding():
         raw = path.read_bytes()
         if hashlib.sha256(raw).hexdigest() != value['sources']['cli-stories.sh']:
             raise ValueError
+        from .local_custom_collaboration_case import validate_density_contract
+        validate_density_contract(value.get('density_requirements'), raw.decode())
         body = _function_body(raw.decode(), value['parent'])
         anchors = (
             '_cli_story_run "operator validates custom collaboration YAML" ""',

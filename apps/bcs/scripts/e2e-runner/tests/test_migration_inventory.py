@@ -24,6 +24,9 @@ from bcs_e2e.local_draft_group_contract import draft_group_source_binding
 from bcs_e2e.local_nested_fixed_loop_contract import (
     nested_fixed_loop_source_binding)
 from bcs_e2e.local_result_queue_contract import result_queue_source_binding
+from bcs_e2e.local_custom_collaboration_case import (
+    CUSTOM_COLLABORATION_REQUIREMENTS, DENSITY_REQUIREMENTS, DENSITY_SPECS,
+    custom_collaboration_source_binding as owned_custom_collaboration_source_binding)
 from bcs_e2e.local_operator_cli_contract import (
     collaboration_team_source_binding,
     custom_collaboration_source_binding,
@@ -192,7 +195,15 @@ class MigrationInventoryTests(unittest.TestCase):
                          'the Run and deletes the temporary Group while the Session '
                          'remains running.')
         self.assertEqual([row['decision_id'] for row in binding['convergence_decisions']],
-                         ['custom-collaboration-trial-group-domain-transport'])
+                         ['custom-collaboration-trial-group-domain-transport',
+                          '20261030-s14-session-membership-permission-rechained',
+                          '20261030-s14-session-domain-run-start-restored'])
+        owned = owned_custom_collaboration_source_binding()
+        self.assertEqual([row['id'] for row in owned['requirements']],
+                         list(CUSTOM_COLLABORATION_REQUIREMENTS + DENSITY_REQUIREMENTS))
+        self.assertEqual(len(owned['density_requirements']), len(DENSITY_SPECS))
+        self.assertEqual(owned['density_requirements'][0]['id'], 'CUSTOM-COLLABORATION.yaml-valid')
+        self.assertEqual(owned['density_requirements'][-1]['id'], 'CUSTOM-COLLABORATION.persistent-cleanup')
         for scenario in ('remove', 'command', 'expectation', 'unknown_key',
                          'malformed_decision'):
             value = copy.deepcopy(binding)
@@ -217,12 +228,10 @@ class MigrationInventoryTests(unittest.TestCase):
                      if r['case_id'] == 'LOCAL-CUSTOM-COLLABORATION-LIFECYCLE-01')
         self.assertEqual(local['legacy_id'], 'story_cli_operator_creates_custom_collaboration')
         self.assertEqual(local['status'], 'LOCAL_EXECUTOR_ONLY')
-        self.assertEqual(local['required_assertion_count'], 3)
-        self.assertEqual(local['requirement_ids'], [
-            'CUSTOM-COLLABORATION.validate-yaml',
-            'CUSTOM-COLLABORATION.create-persistent-group',
-            'CUSTOM-COLLABORATION.trial-one-shot-lifecycle',
-        ])
+        self.assertEqual(local['required_assertion_count'],
+                         len(CUSTOM_COLLABORATION_REQUIREMENTS + DENSITY_REQUIREMENTS))
+        self.assertEqual(local['requirement_ids'],
+                         list(CUSTOM_COLLABORATION_REQUIREMENTS + DENSITY_REQUIREMENTS))
         self.assertEqual(local['canonical_reporting'], 'INTEGRATED_LOCAL')
         self.assertEqual(local['execution_command'], 'run_custom_collaboration_case')
         self.assertEqual(local['remote_validation'], 'NOT_RUN')

@@ -25,13 +25,12 @@ from .local_cli import (
     CUSTOM_COLLABORATION_TOPIC,
     LocalCliError,
     TRIAL_CONTEXT,
+    TRIAL_INPUT,
     TRIAL_TOPIC,
     require_cli_binary,
 )
 from .local_custom_collaboration_run import DEFINITION_PATH, DEFINITION_YAML
-from .local_operator_cli_contract import (
-    CUSTOM_COLLABORATION_REQUIREMENTS as REQUIREMENTS,
-)
+from .local_custom_collaboration_case import REQUIREMENTS, DENSITY_SPECS
 from .profile import (
     ConfigError,
     identifier,
@@ -63,19 +62,24 @@ TRIAL_QUERY_GRAPH_OPERATION = "custom_collaboration_cli.trial_query_graph"
 TRIAL_QUERY_PENDING_OPERATION = "custom_collaboration_cli.trial_query_pending"
 TRIAL_RESPOND_GUARD_OPERATION = "custom_collaboration_cli.trial_respond_guard"
 TRIAL_MESSAGES_OPERATION = "custom_collaboration_cli.trial_messages"
+TRIAL_ADD_MEMBER_OPERATION = "custom_collaboration_cli.trial_add_member"
+TRIAL_PERMISSION_OPERATION = "custom_collaboration_cli.trial_permission"
+TRIAL_START_RUN_OPERATION = "custom_collaboration_cli.trial_start_run"
 
 # Cleanup WriteClient exits (PRODUCT_HTTP) on the reviewed legacy routes.
 RUN_CANCEL_OPERATION = "custom_collaboration_cli.run.cancel"
 SESSION_READ_OPERATION = "custom_collaboration_cli.session.read"
 GROUP_DELETE_OPERATION = "custom_collaboration_cli.group.delete"
 GROUP_VERIFY_DELETED_OPERATION = "custom_collaboration_cli.group.verify_deleted"
-# Converged group-domain Run start (live preprod evidence 2026-10-29,
-# diag4c probe-b:b3): one raw HTTP leaf beside the frozen bcs-cli, which
-# exposes no group-domain run verb and is never modified.
+# Declared fallback exit only (S14 arbitration, 2026-10-30): the reviewed
+# one-shot Run transport is the session-domain product-CLI leaf
+# "collaborate run"; this group-domain HTTP entry stays in the frozen
+# route_bindings/profile contract shape but is never executed by the case.
 GROUP_RUN_START_OPERATION = "custom_collaboration_cli.run.start_group_domain"
 
 CUSTOM_COLLABORATION_CLI_OPERATIONS = (
-    VALIDATE_YAML_OPERATION, TRIAL_CREATE_GROUP_OPERATION, TRIAL_QUERY_GRAPH_OPERATION,
+    VALIDATE_YAML_OPERATION, TRIAL_CREATE_GROUP_OPERATION, TRIAL_ADD_MEMBER_OPERATION,
+    TRIAL_PERMISSION_OPERATION, TRIAL_START_RUN_OPERATION, TRIAL_QUERY_GRAPH_OPERATION,
     TRIAL_QUERY_PENDING_OPERATION, TRIAL_RESPOND_GUARD_OPERATION,
     TRIAL_MESSAGES_OPERATION, CREATE_PERSISTENT_GROUP_OPERATION,
     READ_PERSISTENT_GROUP_OPERATION,
@@ -84,9 +88,11 @@ _HTTP_PRODUCT_OPERATIONS = frozenset({
     RUN_CANCEL_OPERATION, SESSION_READ_OPERATION,
     GROUP_DELETE_OPERATION, GROUP_VERIFY_DELETED_OPERATION,
 })
-# Scenario (non-cleanup) HTTP exits: the converged group-domain Run start
-# belongs to the reviewed trial obligation, never to the cleanup segment.
-_HTTP_SCENARIO_OPERATIONS = frozenset({GROUP_RUN_START_OPERATION})
+# Scenario (non-cleanup) HTTP exits: none execute. The group-domain Run
+# start is a declared fallback entry (route_bindings/profile shape only);
+# the reviewed one-shot Run transport is the session-domain product-CLI
+# leaf (S14 arbitration 2026-10-30).
+_HTTP_SCENARIO_OPERATIONS = frozenset()
 # The Group delete and delete-proof routes serve both cleanup segments;
 # their fixture_effect is labelled per segment, never per route name.
 SCENARIO_CLEANUP_OPERATIONS = frozenset({GROUP_DELETE_OPERATION,
@@ -98,7 +104,8 @@ CUSTOM_COLLABORATION_REQUIREMENT_OPERATIONS = {
         CREATE_PERSISTENT_GROUP_OPERATION, READ_PERSISTENT_GROUP_OPERATION,
         GROUP_DELETE_OPERATION, GROUP_VERIFY_DELETED_OPERATION),
     "CUSTOM-COLLABORATION.trial-one-shot-lifecycle": (
-        TRIAL_CREATE_GROUP_OPERATION, GROUP_RUN_START_OPERATION,
+        TRIAL_CREATE_GROUP_OPERATION, TRIAL_ADD_MEMBER_OPERATION,
+        TRIAL_PERMISSION_OPERATION, TRIAL_START_RUN_OPERATION,
         TRIAL_QUERY_GRAPH_OPERATION, TRIAL_QUERY_PENDING_OPERATION,
         TRIAL_RESPOND_GUARD_OPERATION, TRIAL_MESSAGES_OPERATION,
         RUN_CANCEL_OPERATION, SESSION_READ_OPERATION,
@@ -107,7 +114,9 @@ CUSTOM_COLLABORATION_REQUIREMENT_OPERATIONS = {
 CUSTOM_COLLABORATION_CASE_METHODS = (
     (VALIDATE_YAML_OPERATION, "validate_yaml"),
     (TRIAL_CREATE_GROUP_OPERATION, "trial_create_group"),
-    (GROUP_RUN_START_OPERATION, "trial_start_run"),
+    (TRIAL_ADD_MEMBER_OPERATION, "trial_add_member"),
+    (TRIAL_PERMISSION_OPERATION, "trial_permission"),
+    (TRIAL_START_RUN_OPERATION, "trial_start_run"),
     (TRIAL_QUERY_GRAPH_OPERATION, "trial_query_graph"),
     (TRIAL_QUERY_PENDING_OPERATION, "trial_query_pending"),
     (TRIAL_RESPOND_GUARD_OPERATION, "trial_respond_guard"),
@@ -121,6 +130,12 @@ CUSTOM_COLLABORATION_CASE_METHODS = (
     (GROUP_DELETE_OPERATION, "delete_persistent_group"),
     (GROUP_VERIFY_DELETED_OPERATION, "verify_persistent_group_deleted"),
 )
+# Empty operation tuples denote intentionally unchained session-domain leaves.
+CUSTOM_COLLABORATION_REQUIREMENT_OPERATIONS.update({
+    "CUSTOM-COLLABORATION." + name: tuple(op for op, candidate in CUSTOM_COLLABORATION_CASE_METHODS
+                                         if candidate == method)
+    for name, method, _, _ in DENSITY_SPECS
+})
 _STEP_EFFECTS = {
     VALIDATE_YAML_OPERATION: CUSTOM_COLLABORATION_VALIDATE_EFFECT,
     CREATE_PERSISTENT_GROUP_OPERATION: CUSTOM_COLLABORATION_CREATE_EFFECT,
@@ -132,7 +147,9 @@ _STEP_EFFECTS = {
     TRIAL_MESSAGES_OPERATION: CUSTOM_COLLABORATION_TRIAL_EFFECT,
     RUN_CANCEL_OPERATION: CUSTOM_COLLABORATION_TRIAL_EFFECT,
     SESSION_READ_OPERATION: CUSTOM_COLLABORATION_TRIAL_EFFECT,
-    GROUP_RUN_START_OPERATION: CUSTOM_COLLABORATION_TRIAL_EFFECT,
+    TRIAL_ADD_MEMBER_OPERATION: CUSTOM_COLLABORATION_TRIAL_EFFECT,
+    TRIAL_PERMISSION_OPERATION: CUSTOM_COLLABORATION_TRIAL_EFFECT,
+    TRIAL_START_RUN_OPERATION: CUSTOM_COLLABORATION_TRIAL_EFFECT,
 }
 CUSTOM_COLLABORATION_CLI_RELATIONSHIPS = {
     "yaml_validation": "read-only-no-durable-resource",
@@ -179,6 +196,12 @@ LEAF_ARGUMENTS = {
         "driver", ("collaborate", "respond"), ("run_id",)),
     TRIAL_MESSAGES_OPERATION: (
         "driver", ("session", "messages"), ("session_id", "run_id")),
+    TRIAL_ADD_MEMBER_OPERATION: (
+        "driver", ("session", "add-member"), ("session_id", "human_id")),
+    TRIAL_PERMISSION_OPERATION: (
+        "driver", ("collaborate", "permission"), ("session_id",)),
+    TRIAL_START_RUN_OPERATION: (
+        "driver", ("collaborate", "run"), ("yaml_path", "session_id")),
 }
 # Static tail after the leaf head; tokens are substituted from the case
 # identities exactly once, mirroring the owned-local parent argv.
@@ -205,6 +228,16 @@ LEAF_ARGUMENT_TEMPLATES = {
         "--run", "{run_id}", "--node", "plan", "--content", "invalid Human reply"),
     TRIAL_MESSAGES_OPERATION: (
         "{session_id}", "--view-bot", "{driver}", "--limit", "50"),
+    # Upstream-anchored session-domain trial leaves (cli-stories.sh
+    # 180-182, 194-196, 206-209): membership, authority and the one-shot
+    # Run start ride the frozen product CLI exactly as the owned-local
+    # parent does; the Human participant keeps the upstream identifier form.
+    TRIAL_ADD_MEMBER_OPERATION: (
+        "{session_id}", "--bot-uuid", "{human}", "--role", "consultant"),
+    TRIAL_PERMISSION_OPERATION: ("--session", "{session_id}"),
+    TRIAL_START_RUN_OPERATION: (
+        "{yaml_path}", "--session", "{session_id}", "--binding", "planner={driver}",
+        "--binding", "reviewer={member}", "--input", TRIAL_INPUT),
 }
 
 
@@ -505,7 +538,7 @@ class CustomCollaborationCliRunner:
             raise CustomCollaborationCliRunnerError(
                 "custom collaboration CLI leaf arguments differ from the case plan")
         values = {"driver": self.driver_id, "member": self.member_id,
-                  "human": self.human_id}
+                  "human": "human_" + self.human_id}
         if "yaml_path" in kwargs:
             self._require_definition()
             if not isinstance(kwargs["yaml_path"], Path):
@@ -625,6 +658,7 @@ class CustomCollaborationCliRunner:
             raise CustomCollaborationCliRunnerError(
                 "custom collaboration CLI operations cannot be reordered or skipped")
         role, arguments = self._contract(operation, **kwargs)
+        exit_status = 0
         credential_kind, token, cookie = self._credentials()
         # Live preprod r1/r2: the station ACE gateway identity-gates the
         # validation route even though the BCS application serves it
@@ -659,7 +693,10 @@ class CustomCollaborationCliRunner:
                 if result.returncode == 0:
                     raise CustomCollaborationCliRunnerError(
                         "custom collaboration respond guard did not refuse")
-                data = {"guard_refused": True, "node": "plan"}
+                exit_status = result.returncode
+                data = {"guard_refused": True, "node": "plan",
+                        "exit_code": result.returncode,
+                        "not_pending": b"not pending" in result.stderr}
             else:
                 if result.returncode != 0:
                     raise CustomCollaborationCliRunnerError(
@@ -699,7 +736,7 @@ class CustomCollaborationCliRunner:
             "transport": "PRODUCT_CLI", "operation": operation, "caller_role": role,
             "command_arguments": list(arguments),
             "http_method_declared": "CLI", "route_declared": "product-cli",
-            "credential_kind": credential_kind, "exit_status": 0,
+            "credential_kind": credential_kind, "exit_status": exit_status,
             "elapsed_ms": round((time.monotonic() - started) * 1000, 2),
             "remote_validation": "NOT_RUN", "grants_release_credit": False}}
 
@@ -782,6 +819,38 @@ class CustomCollaborationCliRunner:
                     or kwargs["run_id"] not in serialized):
                 raise CustomCollaborationCliRunnerError(
                     "custom collaboration restored history differs")
+            return value
+        if operation == TRIAL_ADD_MEMBER_OPERATION:
+            value = _json_object(raw, "trial membership")
+            rows = value.get("participants")
+            if (not isinstance(rows, list)
+                    or (value.get("session_id") or value.get("id")) != kwargs["session_id"]
+                    or not any(isinstance(row, dict)
+                               and (row.get("bot_uuid") or row.get("actor_id")) == kwargs["human_id"]
+                               and row.get("role") == "consultant" for row in rows)):
+                raise CustomCollaborationCliRunnerError(
+                    "custom collaboration trial membership projection differs")
+            return value
+        if operation == TRIAL_PERMISSION_OPERATION:
+            value = _json_object(raw, "trial permission")
+            if (value.get("allowed") is not True
+                    or (value.get("session_id") or value.get("id")) != kwargs["session_id"]
+                    or value.get("policy_version") != "session_state_machine_v1"
+                    or value.get("group_strategy") != "chat"
+                    or value.get("caller_bot_id") != self.driver_id):
+                raise CustomCollaborationCliRunnerError(
+                    "custom collaboration trial permission projection differs")
+            return value
+        if operation == TRIAL_START_RUN_OPERATION:
+            value = _json_object(raw, "one-shot Run start")
+            run = value.get("run")
+            if (not isinstance(run, dict)
+                    or not isinstance(run.get("run_id"), str) or not run["run_id"]
+                    or run.get("session_id") != kwargs["session_id"]
+                    or not isinstance(run.get("group_id"), str) or not run["group_id"]
+                    or run.get("status") not in ("running", "waiting")):
+                raise CustomCollaborationCliRunnerError(
+                    "custom collaboration one-shot Run start projection differs")
             return value
         raise CustomCollaborationCliRunnerError(
             "custom collaboration CLI leaf is outside the reviewed plan")

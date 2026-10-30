@@ -30,13 +30,15 @@ from bcs_e2e.custom_collaboration_cli_leaf import (
     CUSTOM_COLLABORATION_CLI_OPERATIONS, CUSTOM_COLLABORATION_CLI_PROFILE_CONTRACT, CUSTOM_COLLABORATION_CLI_RELATIONSHIPS,
     CUSTOM_COLLABORATION_CREATE_EFFECT, CUSTOM_COLLABORATION_REQUIREMENT_OPERATIONS, CUSTOM_COLLABORATION_TRIAL_EFFECT,
     CUSTOM_COLLABORATION_VALIDATE_EFFECT, DECLARED_CLI_EXIT_ROUTES, DEFINITION_YAML, GROUP_DELETE_OPERATION,
-    GROUP_RUN_START_OPERATION, GROUP_VERIFY_DELETED_OPERATION, LEAF_ARGUMENTS, READ_PERSISTENT_GROUP_OPERATION,
-    RUN_CANCEL_OPERATION, SCENARIO_CLEANUP_OPERATIONS, SESSION_READ_OPERATION, TRIAL_CREATE_GROUP_OPERATION,
-    TRIAL_MESSAGES_OPERATION, TRIAL_QUERY_GRAPH_OPERATION, TRIAL_QUERY_PENDING_OPERATION,
-    TRIAL_RESPOND_GUARD_OPERATION, VALIDATE_YAML_OPERATION, _HTTP_PRODUCT_OPERATIONS, _HTTP_SCENARIO_OPERATIONS,
+    GROUP_VERIFY_DELETED_OPERATION, LEAF_ARGUMENTS, READ_PERSISTENT_GROUP_OPERATION,
+    RUN_CANCEL_OPERATION, SCENARIO_CLEANUP_OPERATIONS, SESSION_READ_OPERATION, TRIAL_ADD_MEMBER_OPERATION,
+    TRIAL_CREATE_GROUP_OPERATION, TRIAL_MESSAGES_OPERATION, TRIAL_PERMISSION_OPERATION, TRIAL_QUERY_GRAPH_OPERATION,
+    TRIAL_QUERY_PENDING_OPERATION, TRIAL_RESPOND_GUARD_OPERATION, TRIAL_START_RUN_OPERATION, VALIDATE_YAML_OPERATION,
+    _HTTP_PRODUCT_OPERATIONS, _HTTP_SCENARIO_OPERATIONS,
     _STEP_EFFECTS, CustomCollaborationCliRunner, CustomCollaborationCliRunnerError,
     custom_collaboration_step_credential_kind, expected_step_transport, validate_custom_collaboration_cli_profile)
 from bcs_e2e.local_cli import CUSTOM_COLLABORATION_CONTEXT, CUSTOM_COLLABORATION_TOPIC, TRIAL_CONTEXT, TRIAL_INPUT, TRIAL_TOPIC
+from bcs_e2e.local_custom_collaboration_case import DENSITY_SPECS
 from bcs_e2e.local_operator_cli_contract import CUSTOM_COLLABORATION_COMMANDS
 from bcs_e2e.migration_inventory import migration_plan
 from bcs_e2e.profile import ConfigError, fingerprint
@@ -51,10 +53,6 @@ DRIVER_TOKEN, MEMBER_TOKEN, HUMAN_COOKIE = "secret-driver-token-value", "secret-
 TRIAL_GROUP, TRIAL_SESSION = "grp-custom-trial-0001", "grp-custom-trial-0001:00000001"
 PERSIST_GROUP, PERSIST_SESSION = "grp-custom-persistent-0002", "grp-custom-persistent-0002:00000001"
 TRIAL_RUN = "run-custom-e2e-0001"
-# Run-scoped Session derived by the group-domain Run start: deliberately
-# distinct from the create-bound consultant Session so the split binding is
-# locked (r13 live binding drift regression).
-TRIAL_RUN_SESSION = "grp-custom-trial-0001:90000001"
 SECRETS = {DRIVER_TOKEN_ENV: DRIVER_TOKEN, MEMBER_TOKEN_ENV: MEMBER_TOKEN, COOKIE_ENV: HUMAN_COOKIE}
 
 
@@ -103,8 +101,8 @@ def preprod_profile(auth=None):
     return validate_custom_collaboration_cli_profile(profile_value(preprod=True, auth=auth))
 
 
-def completed(returncode, stdout):
-    return subprocess.CompletedProcess(["bcs-cli"], returncode, stdout, b"")
+def completed(returncode, stdout, stderr=b""):
+    return subprocess.CompletedProcess(["bcs-cli"], returncode, stdout, stderr)
 
 
 def bytes_json(value):
@@ -114,6 +112,7 @@ def bytes_json(value):
 def cli_projection(profile, operation, **kwargs):
     driver, member = profile["actors"]["driver"]["bot_id"], profile["actors"]["member"]["bot_id"]
     human, session = "human_" + profile["human"]["user_id"], kwargs.get("session_id", TRIAL_SESSION)
+    group = kwargs.get("group_id", TRIAL_GROUP)
     if operation == VALIDATE_YAML_OPERATION:
         return {"valid": True, "summary": {"participants": 2, "nodes": 2}}
     if operation == CREATE_PERSISTENT_GROUP_OPERATION:
@@ -122,12 +121,18 @@ def cli_projection(profile, operation, **kwargs):
         return {"id": PERSIST_GROUP, "driver_bot": driver, "group_strategy": "state_machine", "participants": [{"bot_uuid": driver}, {"bot_uuid": member}]}
     if operation == TRIAL_CREATE_GROUP_OPERATION:
         return {"id": TRIAL_GROUP, "session_id": TRIAL_SESSION, "driver_bot": driver, "participants": [driver, member], "created": True}
+    if operation == TRIAL_ADD_MEMBER_OPERATION:
+        return {"session_id": session, "participants": [driver, member, {"bot_uuid": human, "role": "consultant"}]}
+    if operation == TRIAL_PERMISSION_OPERATION:
+        return {"allowed": True, "session_id": session, "group_id": group, "policy_version": "session_state_machine_v1", "group_strategy": "chat", "caller_bot_id": driver}
+    if operation == TRIAL_START_RUN_OPERATION:
+        return {"run": {"run_id": TRIAL_RUN, "session_id": session, "group_id": group, "status": "running"}}
     if operation == TRIAL_QUERY_GRAPH_OPERATION:
-        return {"run": {"run_id": kwargs["run_id"], "session_id": TRIAL_RUN_SESSION, "group_id": TRIAL_GROUP}, "nodes": [{"node_id": "plan", "status": "completed"}, {"node_id": "review", "status": "running"}]}
+        return {"run": {"run_id": kwargs["run_id"], "session_id": session, "group_id": group}, "nodes": [{"node_id": "plan", "status": "completed"}, {"node_id": "review", "status": "running"}]}
     if operation == TRIAL_QUERY_PENDING_OPERATION:
         return []
     if operation == TRIAL_RESPOND_GUARD_OPERATION:
-        return {"guard_refused": True, "node": "plan"}
+        return {"guard_refused": True, "node": "plan", "exit_code": 1, "not_pending": True}
     if operation == TRIAL_MESSAGES_OPERATION:
         return [{"view": "bcsPanel.StateMachineRunView", "run_id": kwargs["run_id"], "session_id": session}]
     raise AssertionError(operation)
@@ -170,10 +175,6 @@ class FakeWriteClient:
             path = self.profile["route_bindings"][operation]["path"]
             run_id = path.split("/state-machine-runs/", 1)[1].rsplit("/cancel", 1)[0]
             return ({"run": {"run_id": run_id, "status": "aborted"}}, self.record(operation, 200))
-        if operation == GROUP_RUN_START_OPERATION:
-            run = {"run_id": TRIAL_RUN, "session_id": session_id or TRIAL_RUN_SESSION,
-                   "group_id": group_id, "status": "running", "created_by": "human_" + HUMAN}
-            return ({"run": run}, self.record(operation, 202))
         if operation == GROUP_DELETE_OPERATION:
             return ({"deleted": True, "id": group_id}, self.record(operation, 200))
         if operation == GROUP_VERIFY_DELETED_OPERATION:
@@ -227,12 +228,21 @@ class SequenceCapture:
             if context == TRIAL_CONTEXT:
                 return completed(0, bytes_json({"id": TRIAL_GROUP, "session_id": TRIAL_SESSION, "driver_bot": driver, "participants": [driver, member], "created": True}))
             return completed(0, bytes_json({"id": PERSIST_GROUP, "session_id": PERSIST_SESSION, "driver_bot": driver, "participants": [driver, member], "created": True}))
+        if argv[:2] == ["session", "add-member"]:
+            return completed(0, bytes_json({"session_id": argv[2], "participants": [driver, member, {"bot_uuid": human, "role": "consultant"}]}))
+        if argv[:2] == ["collaborate", "permission"]:
+            return completed(0, bytes_json({"allowed": True, "session_id": argv[argv.index("--session") + 1], "group_id": group, "policy_version": "session_state_machine_v1", "group_strategy": "chat", "caller_bot_id": driver}))
+        if argv[:2] == ["collaborate", "run"]:
+            run_session = argv[argv.index("--session") + 1]
+            return completed(0, bytes_json({"run": {"run_id": TRIAL_RUN, "session_id": run_session, "group_id": group, "status": "running"}}))
         if argv[:2] == ["collaborate", "query"] and "--graph" in argv:
-            return completed(0, bytes_json({"run": {"run_id": TRIAL_RUN, "session_id": TRIAL_RUN_SESSION, "group_id": group}, "nodes": [{"node_id": "plan", "status": "completed"}, {"node_id": "review", "status": "running"}]}))
+            return completed(0, bytes_json({"run": {"run_id": TRIAL_RUN, "session_id": session, "group_id": group}, "nodes": [{"node_id": "plan", "status": "completed"}, {"node_id": "review", "status": "running"}]}))
         if argv[:2] == ["collaborate", "query"]:
             return completed(0, b"[]")
         if argv[:2] == ["collaborate", "respond"]:
-            return completed(self.guard_exit, b'{"allowed": true}' if self.guard_exit == 0 else b"guard refused by policy")
+            if self.guard_exit != 0:
+                return completed(self.guard_exit, b"{}", stderr=b"guard refused: exact Human reply not pending")
+            return completed(0, b'{"allowed": true}')
         if argv[:2] == ["session", "messages"]:
             return completed(0, bytes_json([{"view": "bcsPanel.StateMachineRunView", "run_id": TRIAL_RUN, "session_id": argv[2]}]))
         if argv[:1] == ["get-group"]:
@@ -284,7 +294,7 @@ class CustomCollaborationPlanAndRegistryTests(unittest.TestCase):
         self.assertEqual((row["case_id"], row["legacy_id"], row["requirement_ids"]), (DUAL_CUSTOM_COLLAB_CASE_ID, PARENT, list(REQUIREMENTS)))
         self.assertEqual(row["environments"], ["singlebox-product-cli", "preprod-product-cli"])
         self.assertEqual((row["cli_surface"], row["local_executor_status"], row["remote_validation"], row["grants_release_credit"]), ("product-bcs-cli-collaboration", "LOCAL_FULL_PARENT_EXECUTOR", "NOT_RUN", False))
-        self.assertIn("WriteClient", row["blocker"])
+        self.assertIn("session-domain", row["blocker"])
 
     def test_report_is_registered_in_the_case_inventory(self):
         rows = migration_plan()["cross_environment_product_cli_case_slices"]
@@ -375,7 +385,7 @@ class CustomCollaborationProfileValidatorTests(unittest.TestCase):
         self.assertTrue(all(expected_step_transport(op) == "PRODUCT_CLI" for op in CUSTOM_COLLABORATION_CLI_OPERATIONS))
         self.assertTrue(all(expected_step_transport(op) == "PRODUCT_HTTP" for op in _HTTP_PRODUCT_OPERATIONS | _HTTP_SCENARIO_OPERATIONS))
         for tier_profile in (local_profile(), preprod_profile(trio_auth()), preprod_profile(cookie_auth())):
-            for operation in (VALIDATE_YAML_OPERATION, GROUP_RUN_START_OPERATION, RUN_CANCEL_OPERATION):
+            for operation in (VALIDATE_YAML_OPERATION, TRIAL_START_RUN_OPERATION, RUN_CANCEL_OPERATION):
                 if operation == VALIDATE_YAML_OPERATION:
                     expected = ("none"
                                 if tier_profile["environment"]["tier"] == "local"
@@ -403,40 +413,36 @@ class CustomCollaborationExecutionTests(unittest.TestCase):
 
     def test_dual_pass_collects_ordered_evidence_and_step_data(self):
         adapter, runner, execution = self.chain()
-        self.assertEqual((execution.status, execution.completed_count, execution.total_count, execution.error_type), ("PASS", 3, 3, None))
-        self.assertEqual([step.requirement_id for step in execution.steps], [REQUIREMENTS[0], REQUIREMENTS[2], REQUIREMENTS[1]])
-        self.assertEqual([step.method for step in execution.steps], ["validate_yaml", "trial_one_shot_lifecycle", "create_persistent_group"])
+        self.assertEqual((execution.status, execution.completed_count, execution.total_count, execution.error_type), ("PASS", 37, 37, None))
+        self.assertEqual([step.requirement_id for step in execution.steps],
+                         [REQUIREMENTS[0], REQUIREMENTS[2], REQUIREMENTS[1]]
+                         + ["CUSTOM-COLLABORATION." + name for name, _m, _f, _l in DENSITY_SPECS])
+        self.assertEqual([step.method for step in execution.steps], ["validate_yaml", "trial_one_shot_lifecycle", "create_persistent_group"]
+                         + [method for _name, method, _f, _l in DENSITY_SPECS])
         cli_order = [operation for operation, _ in CUSTOM_COLLABORATION_CASE_METHODS
                      if operation not in _HTTP_PRODUCT_OPERATIONS | _HTTP_SCENARIO_OPERATIONS]
         self.assertEqual([call[0] for call in runner.calls], cli_order)
-        validate, trial, create = execution.steps
+        validate, trial, create = execution.steps[:3]
         self.assertEqual(validate.data, {"valid": True, "summary": {"participants": 2, "nodes": 2}})
         self.assertEqual(trial.data, {
             "trial_group_id": TRIAL_GROUP, "trial_group_strategy": "state_machine",
             "trial_group_session_handle": TRIAL_SESSION, "trial_session_id": TRIAL_SESSION,
             "trial_session_origin": "create_bound_consultant_session",
-            "trial_run_session_id": TRIAL_RUN_SESSION,
-            "trial_run_session_origin": "group_domain_run_derived",
-            "station_session_finalization": (
-                "the run-scoped derived Session is finalized completed/aborted "
-                "by the station on abort; the create-bound consultant Session "
-                "carries the preserved-running obligation"),
-            "trial_run_id": TRIAL_RUN,
-            "run_start_transport": "raw_group_domain_http", "run_start_created_by": "human_" + HUMAN,
+            "trial_run_id": TRIAL_RUN, "run_start_transport": "product_cli_session_domain",
+            "session_domain_leaves": ["trial_add_member", "trial_permission",
+                                      "trial_start_run"],
             "pending_human_inputs": 0, "respond_guard": "REFUSED", "restored_history": True,
             "run_cancelled": True, "session_preserved_running": True, "group_cleanup": "DELETED",
             "group_delete_verified_404": True,
             "converged_transport": (
-                "persistent-form trial Group via the reviewed create leaf; one-shot "
-                "Run started by the raw group-domain HTTP leaf; run-domain CLI "
-                "reads, respond guard, cancel and exact delete follow"),
-            "session_domain_leaves_not_rechained": [
-                "trial_add_member", "trial_permission",
-                "session_domain_run_start (collaborate run)"]})
+                "persistent-form trial Group via the reviewed create leaf; Human "
+                "consultant membership, trial authority and the one-shot Run start "
+                "ride the upstream-anchored session-domain product-CLI leaves; "
+                "run-domain CLI reads, respond guard, cancel and exact delete follow")})
         self.assertEqual(create.data, {"group_id": PERSIST_GROUP, "readback_group_strategy": "state_machine", "group_cleanup": "DELETED", "group_delete_verified_404": True})
         self.assertEqual(adapter.persistent_group_id, PERSIST_GROUP)
         records = [record for step in execution.steps for record in step.evidence["requests"]]
-        self.assertEqual(len(records), len(CUSTOM_COLLABORATION_CASE_METHODS))
+        self.assertEqual(len(records), len(CUSTOM_COLLABORATION_CASE_METHODS) + len(DENSITY_SPECS))
         for (operation, _method), record in zip(CUSTOM_COLLABORATION_CASE_METHODS, records):
             self.assertEqual(record["transport"], expected_step_transport(operation))
             self.assertTrue(record["caller_role"])
@@ -458,23 +464,27 @@ class CustomCollaborationExecutionTests(unittest.TestCase):
         self.assertEqual(binding["path"], f"/state-machine-runs/{quote(TRIAL_RUN, safe='')}/cancel")
         self.assertEqual((cancel.calls[0][0], cancel.calls[0][1]["body"]), (RUN_CANCEL_OPERATION, {"reason": "E2E one-shot trial completed"}))
 
-    def test_trial_session_bindings_split_create_bound_and_run_derived(self):
+    def test_trial_session_bindings_pin_the_create_bound_session(self):
         adapter, runner, execution = self.chain()
         self.assertEqual(execution.status, "PASS")
-        # r13 live binding-drift lock: the create-bound consultant Session is
-        # the Session-preservation read target, while the run-scoped derived
-        # Session from the group-domain Run start carries the run-domain reads
-        # and the restored history leaf.
+        # S14 session-domain convergence: the create-bound consultant Session
+        # carries every session-domain leaf (membership, authority, one-shot
+        # Run start, restored history); the raw group-domain HTTP Run start is
+        # a declared fallback route binding and is never executed, so no
+        # run-scoped derived Session is projected.
+        self.assertFalse(hasattr(adapter, "trial_run_session_id"))
         self.assertEqual((adapter.trial_session_id, adapter.trial_group_session_handle),
                          (TRIAL_SESSION, TRIAL_SESSION))
-        self.assertEqual(adapter.trial_run_session_id, TRIAL_RUN_SESSION)
         seen = {}
         for operation, kwargs in FakeWriteClient.instances[0].calls:
             seen.setdefault(operation, []).append(kwargs)
-        self.assertEqual(seen[GROUP_RUN_START_OPERATION][0]["session_id"], "")
         self.assertEqual(seen[SESSION_READ_OPERATION][0]["session_id"], TRIAL_SESSION)
         cli_kwargs = {operation: kwargs for operation, kwargs in runner.calls}
-        self.assertEqual(cli_kwargs[TRIAL_MESSAGES_OPERATION]["session_id"], TRIAL_RUN_SESSION)
+        self.assertEqual(cli_kwargs[TRIAL_ADD_MEMBER_OPERATION]["session_id"], TRIAL_SESSION)
+        self.assertEqual(cli_kwargs[TRIAL_ADD_MEMBER_OPERATION]["human_id"], "human_" + HUMAN)
+        self.assertEqual(cli_kwargs[TRIAL_PERMISSION_OPERATION]["session_id"], TRIAL_SESSION)
+        self.assertEqual(cli_kwargs[TRIAL_START_RUN_OPERATION]["session_id"], TRIAL_SESSION)
+        self.assertEqual(cli_kwargs[TRIAL_MESSAGES_OPERATION]["session_id"], TRIAL_SESSION)
         self.assertEqual(cli_kwargs[TRIAL_QUERY_GRAPH_OPERATION]["run_id"], TRIAL_RUN)
 
     def test_failed_leaf_or_drifted_projection_blocks_without_release_credit(self):
@@ -522,8 +532,8 @@ class CustomCollaborationExecutionTests(unittest.TestCase):
 
         good = _require_step_evidence(adapter, record(), VALIDATE_YAML_OPERATION)
         self.assertEqual(good["transport"], "PRODUCT_CLI")
-        for operation, case_class, effect in ((RUN_CANCEL_OPERATION, "cleanup-cancel", CUSTOM_COLLABORATION_TRIAL_EFFECT), (GROUP_RUN_START_OPERATION, "trial-run-start", CUSTOM_COLLABORATION_TRIAL_EFFECT), (GROUP_DELETE_OPERATION, "persistent-cleanup-delete", CUSTOM_COLLABORATION_CREATE_EFFECT), (GROUP_VERIFY_DELETED_OPERATION, "cleanup-verify-deleted", CUSTOM_COLLABORATION_TRIAL_EFFECT)):
-            accepted = _require_step_evidence(adapter, record(transport="PRODUCT_HTTP", caller_role="case_owned_driver", credential_kind=custom_collaboration_step_credential_kind(adapter.profile, operation), case_class=case_class, fixture_effect=effect), operation)
+        for operation, case_class, effect, transport, role in ((RUN_CANCEL_OPERATION, "cleanup-cancel", CUSTOM_COLLABORATION_TRIAL_EFFECT, "PRODUCT_HTTP", "case_owned_driver"), (TRIAL_START_RUN_OPERATION, "trial-run-start", CUSTOM_COLLABORATION_TRIAL_EFFECT, "PRODUCT_CLI", "driver"), (GROUP_DELETE_OPERATION, "persistent-cleanup-delete", CUSTOM_COLLABORATION_CREATE_EFFECT, "PRODUCT_HTTP", "case_owned_driver"), (GROUP_VERIFY_DELETED_OPERATION, "cleanup-verify-deleted", CUSTOM_COLLABORATION_TRIAL_EFFECT, "PRODUCT_HTTP", "case_owned_driver")):
+            accepted = _require_step_evidence(adapter, record(transport=transport, caller_role=role, credential_kind=custom_collaboration_step_credential_kind(adapter.profile, operation), case_class=case_class, fixture_effect=effect), operation)
             self.assertEqual(accepted["fixture_effect"], effect)
         for overrides in ({"transport": "PRODUCT_HTTP"}, {"caller_role": ""}, {"credential_kind": "human_cookie"}, {"remote_validation": "CLOSED"}, {"grants_release_credit": True}, {"fixture_effect": "OTHER_EFFECT"}):
             with self.subTest(overrides=overrides):
@@ -544,13 +554,13 @@ class CustomCollaborationExecutionTests(unittest.TestCase):
         seen = {}
         for operation, kwargs in FakeWriteClient.instances[0].calls:
             seen.setdefault(operation, []).append(kwargs)
+        self.assertEqual([operation for operation, _ in FakeWriteClient.instances[0].calls], [SESSION_READ_OPERATION, GROUP_DELETE_OPERATION, GROUP_VERIFY_DELETED_OPERATION, GROUP_DELETE_OPERATION, GROUP_VERIFY_DELETED_OPERATION])
         self.assertEqual(seen[SESSION_READ_OPERATION][0]["session_id"], TRIAL_SESSION)
         self.assertEqual(seen[SESSION_READ_OPERATION][0]["group_id"], TRIAL_GROUP)
         self.assertEqual([kwargs["group_id"] for kwargs in seen[GROUP_DELETE_OPERATION]], [TRIAL_GROUP, PERSIST_GROUP])
         self.assertEqual([kwargs["group_id"] for kwargs in seen[GROUP_VERIFY_DELETED_OPERATION]], [TRIAL_GROUP, PERSIST_GROUP])
-        self.assertEqual(seen[GROUP_RUN_START_OPERATION][0]["group_id"], TRIAL_GROUP)
-        self.assertEqual(seen[GROUP_RUN_START_OPERATION][0]["body"], {"definition_yaml": DEFINITION_YAML, "input": TRIAL_INPUT})
-        self.assertEqual(seen[GROUP_RUN_START_OPERATION][0]["expected"], (200, 201, 202))
+        for kwargs in seen[GROUP_DELETE_OPERATION]:
+            self.assertEqual(kwargs["expected"], (200,))
         for kwargs in seen[GROUP_VERIFY_DELETED_OPERATION]:
             self.assertEqual((kwargs["expected"], kwargs["parse_error"]), ((404,), True))
 
@@ -597,7 +607,7 @@ class CustomCollaborationLeafRunnerTests(unittest.TestCase):
             yield capture
 
     def kwargs_for(self, operation):
-        values = {"yaml_path": self.state / cc_run.DEFINITION_FILE, "group_id": PERSIST_GROUP, "session_id": TRIAL_SESSION, "run_id": TRIAL_RUN}
+        values = {"yaml_path": self.state / cc_run.DEFINITION_FILE, "group_id": PERSIST_GROUP, "session_id": TRIAL_SESSION, "run_id": TRIAL_RUN, "human_id": "human_" + HUMAN}
         return {name: values[name] for name in LEAF_ARGUMENTS[operation][2]}
 
     def test_reviewed_leaf_argvs_freeze_the_owned_parent_forms(self):
@@ -605,6 +615,9 @@ class CustomCollaborationLeafRunnerTests(unittest.TestCase):
         rows = {
             VALIDATE_YAML_OPERATION: ("operator", ("collaboration", "validate", yaml)),
             TRIAL_CREATE_GROUP_OPERATION: ("driver", ("collaboration", "create", yaml, "--driver", DRIVER_BOT, "--binding", f"planner={DRIVER_BOT}", "--binding", f"reviewer={MEMBER_BOT}", "--context", TRIAL_CONTEXT, "--topic", TRIAL_TOPIC)),
+            TRIAL_ADD_MEMBER_OPERATION: ("driver", ("session", "add-member", TRIAL_SESSION, "--bot-uuid", "human_" + HUMAN, "--role", "consultant")),
+            TRIAL_PERMISSION_OPERATION: ("driver", ("collaborate", "permission", "--session", TRIAL_SESSION)),
+            TRIAL_START_RUN_OPERATION: ("driver", ("collaborate", "run", yaml, "--session", TRIAL_SESSION, "--binding", f"planner={DRIVER_BOT}", "--binding", f"reviewer={MEMBER_BOT}", "--input", TRIAL_INPUT)),
             TRIAL_QUERY_GRAPH_OPERATION: ("driver", ("collaborate", "query", "--run", TRIAL_RUN, "--graph")),
             TRIAL_QUERY_PENDING_OPERATION: ("driver", ("collaborate", "query", "--run", TRIAL_RUN, "--pending")),
             TRIAL_RESPOND_GUARD_OPERATION: ("driver", ("collaborate", "respond", "--run", TRIAL_RUN, "--node", "plan", "--content", "invalid Human reply")),
@@ -697,17 +710,17 @@ class CustomCollaborationLeafRunnerTests(unittest.TestCase):
 
     def test_respond_guard_refusal_branches(self):
         def walked(guard_exit, through_guard):
-            ops = CUSTOM_COLLABORATION_CLI_OPERATIONS[:5 if through_guard else 4]
+            ops = CUSTOM_COLLABORATION_CLI_OPERATIONS[:8 if through_guard else 7]
             runner = self.fresh()
             with patch.dict(os.environ, SECRETS), patch.object(cc_leaf, "capture", SequenceCapture(local_profile(), guard_exit=guard_exit)):
                 for operation in ops:
-                    runner.execute(operation, **{key: value for key, value in {"yaml_path": self.state / cc_run.DEFINITION_FILE, "session_id": TRIAL_SESSION, "run_id": TRIAL_RUN}.items() if key in LEAF_ARGUMENTS[operation][2]})
+                    runner.execute(operation, **{key: value for key, value in {"yaml_path": self.state / cc_run.DEFINITION_FILE, "session_id": TRIAL_SESSION, "run_id": TRIAL_RUN, "human_id": "human_" + HUMAN}.items() if key in LEAF_ARGUMENTS[operation][2]})
             return runner
         self.assertEqual(walked(1, True).executed[-1], TRIAL_RESPOND_GUARD_OPERATION)
         pattern = walked(1, False)
         with patch.dict(os.environ, SECRETS), patch.object(cc_leaf, "capture", SequenceCapture(local_profile())):
             guard = pattern.execute(TRIAL_RESPOND_GUARD_OPERATION, run_id=TRIAL_RUN)
-        self.assertEqual((guard["data"], guard["evidence"]["exit_status"]), ({"guard_refused": True, "node": "plan"}, 0))
+        self.assertEqual((guard["data"], guard["evidence"]["exit_status"]), ({"guard_refused": True, "node": "plan", "exit_code": 1, "not_pending": True}, 1))
         zero = walked(0, False)
         with patch.dict(os.environ, SECRETS), patch.object(cc_leaf, "capture", SequenceCapture(local_profile(), guard_exit=0)):
             with self.assertRaisesRegex(CustomCollaborationCliRunnerError, "did not refuse"):
@@ -761,6 +774,9 @@ class CustomCollaborationLeafRunnerTests(unittest.TestCase):
             (CREATE_PERSISTENT_GROUP_OPERATION, bytes_json({"id": PERSIST_GROUP, "session_id": PERSIST_SESSION, "driver_bot": DRIVER_BOT, "participants": [DRIVER_BOT, MEMBER_BOT], "created": True}), {}),
             (READ_PERSISTENT_GROUP_OPERATION, bytes_json({"id": PERSIST_GROUP, "driver_bot": DRIVER_BOT, "group_strategy": "state_machine", "participants": [{"bot_uuid": DRIVER_BOT}, {"bot_uuid": MEMBER_BOT}]}), {"group_id": PERSIST_GROUP}),
             (TRIAL_CREATE_GROUP_OPERATION, bytes_json({"id": TRIAL_GROUP, "session_id": TRIAL_SESSION, "driver_bot": DRIVER_BOT, "participants": [DRIVER_BOT, MEMBER_BOT], "created": True}), {}),
+            (TRIAL_ADD_MEMBER_OPERATION, bytes_json({"session_id": TRIAL_SESSION, "participants": [DRIVER_BOT, MEMBER_BOT, {"bot_uuid": "human_" + HUMAN, "role": "consultant"}]}), {"session_id": TRIAL_SESSION, "human_id": "human_" + HUMAN}),
+            (TRIAL_PERMISSION_OPERATION, bytes_json({"allowed": True, "session_id": TRIAL_SESSION, "group_id": TRIAL_GROUP, "policy_version": "session_state_machine_v1", "group_strategy": "chat", "caller_bot_id": DRIVER_BOT}), {"session_id": TRIAL_SESSION}),
+            (TRIAL_START_RUN_OPERATION, bytes_json({"run": {"run_id": TRIAL_RUN, "session_id": TRIAL_SESSION, "group_id": TRIAL_GROUP, "status": "running"}}), {"session_id": TRIAL_SESSION}),
             (TRIAL_QUERY_GRAPH_OPERATION, bytes_json({"run": {"run_id": TRIAL_RUN, "session_id": TRIAL_SESSION, "group_id": TRIAL_GROUP}, "nodes": [{"node_id": "plan", "status": "completed"}]}), {"run_id": TRIAL_RUN}),
             (TRIAL_QUERY_PENDING_OPERATION, b"[]", {}),
             (TRIAL_MESSAGES_OPERATION, bytes_json([{"view": "bcsPanel.StateMachineRunView", "run_id": TRIAL_RUN, "session_id": TRIAL_SESSION}]), {"session_id": TRIAL_SESSION, "run_id": TRIAL_RUN}),
@@ -770,6 +786,9 @@ class CustomCollaborationLeafRunnerTests(unittest.TestCase):
             (CREATE_PERSISTENT_GROUP_OPERATION, bytes_json({"id": PERSIST_GROUP, "session_id": PERSIST_SESSION, "driver_bot": MEMBER_BOT, "participants": [DRIVER_BOT], "created": True}), {}),
             (READ_PERSISTENT_GROUP_OPERATION, bytes_json({"id": "other", "driver_bot": DRIVER_BOT, "group_strategy": "chat", "participants": [DRIVER_BOT]}), {"group_id": PERSIST_GROUP}),
             (TRIAL_CREATE_GROUP_OPERATION, bytes_json({"id": TRIAL_GROUP, "session_id": TRIAL_SESSION, "driver_bot": DRIVER_BOT, "participants": [MEMBER_BOT], "created": True}), {}),
+            (TRIAL_ADD_MEMBER_OPERATION, bytes_json({"session_id": TRIAL_SESSION, "participants": [DRIVER_BOT, MEMBER_BOT]}), {"session_id": TRIAL_SESSION, "human_id": "human_" + HUMAN}),
+            (TRIAL_PERMISSION_OPERATION, bytes_json({"allowed": False, "session_id": TRIAL_SESSION, "group_id": TRIAL_GROUP, "policy_version": "session_state_machine_v1", "group_strategy": "chat", "caller_bot_id": DRIVER_BOT}), {"session_id": TRIAL_SESSION}),
+            (TRIAL_START_RUN_OPERATION, bytes_json({"run": {"run_id": TRIAL_RUN, "session_id": "other-session", "group_id": TRIAL_GROUP, "status": "running"}}), {"session_id": TRIAL_SESSION}),
             (TRIAL_QUERY_GRAPH_OPERATION, bytes_json({"run": {"run_id": "other"}, "nodes": []}), {"run_id": TRIAL_RUN}),
             (TRIAL_QUERY_PENDING_OPERATION, bytes_json([{"human": True}]), {}),
             (TRIAL_MESSAGES_OPERATION, bytes_json([{"view": "other", "run_id": "absent"}]), {"session_id": TRIAL_SESSION, "run_id": TRIAL_RUN}),
@@ -826,12 +845,12 @@ class CustomCollaborationLeafRunnerTests(unittest.TestCase):
                 with patch.dict(os.environ, SECRETS), patch.object(cc_leaf, "capture", SequenceCapture(profile)), patch.object(cc_run, "WriteClient", FakeWriteClient):
                     adapter = DualCustomCollaborationAdapter(profile, runner)
                     execution = execute_custom_collaboration_case(adapter)
-                self.assertEqual((execution.status, execution.completed_count), ("PASS", 3))
+                self.assertEqual((execution.status, execution.completed_count), ("PASS", 37))
                 self.assertEqual(runner.executed, list(CUSTOM_COLLABORATION_CLI_OPERATIONS))
-                self.assertEqual([operation for operation, _ in FakeWriteClient.instances[0].calls], [GROUP_RUN_START_OPERATION, SESSION_READ_OPERATION, GROUP_DELETE_OPERATION, GROUP_VERIFY_DELETED_OPERATION, GROUP_DELETE_OPERATION, GROUP_VERIFY_DELETED_OPERATION])
+                self.assertEqual([operation for operation, _ in FakeWriteClient.instances[0].calls], [SESSION_READ_OPERATION, GROUP_DELETE_OPERATION, GROUP_VERIFY_DELETED_OPERATION, GROUP_DELETE_OPERATION, GROUP_VERIFY_DELETED_OPERATION])
                 self.assertEqual([operation for operation, _ in FakeWriteClient.instances[-1].calls], [RUN_CANCEL_OPERATION])
                 records = [record for step in execution.steps for record in step.evidence["requests"]]
-                self.assertEqual(len(records), len(CUSTOM_COLLABORATION_CASE_METHODS))
+                self.assertEqual(len(records), len(CUSTOM_COLLABORATION_CASE_METHODS) + len(DENSITY_SPECS))
                 for (operation, _method), record in zip(CUSTOM_COLLABORATION_CASE_METHODS, records):
                     self.assertEqual(record["transport"], expected_step_transport(operation))
                     self.assertEqual(record["credential_kind"], custom_collaboration_step_credential_kind(profile, operation))
@@ -918,7 +937,7 @@ class CustomCollaborationRunEntryTests(unittest.TestCase):
 
         report, state_dir = self.entry(runner=FailingChainRunner, real_executor=True)
         self.assertEqual(report["status"], "BLOCKED")
-        self.assertEqual(report["execution"], {"status": "BLOCKED", "completed_count": 0, "total_count": 3, "error_type": "RunStateError"})
+        self.assertEqual(report["execution"], {"status": "BLOCKED", "completed_count": 0, "total_count": 37, "error_type": "RunStateError"})
         self.assertEqual(report["case"]["status"], "BLOCKED")
         self.assertFalse(report["grants_release_credit"])
         self.assertEqual(report["remote_validation"], "NOT_RUN")

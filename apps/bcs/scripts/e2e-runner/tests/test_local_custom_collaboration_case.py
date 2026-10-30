@@ -8,6 +8,9 @@ from unittest.mock import Mock, patch
 from bcs_e2e.local_cli import LocalCliError
 from bcs_e2e.local_custom_collaboration_case import (
     CASE_ID,
+    DENSITY_REQUIREMENTS,
+    DENSITY_SPECS,
+    REQUIREMENTS,
     custom_collaboration_case_adaptability,
     custom_collaboration_case_plan,
     run_custom_collaboration_case,
@@ -39,12 +42,12 @@ class LocalCustomCollaborationCaseTests(unittest.TestCase):
         plan = custom_collaboration_case_plan()
         self.assertEqual(plan["case_id"], CASE_ID)
         self.assertEqual(plan["legacy_id"], "story_cli_operator_creates_custom_collaboration")
-        self.assertEqual(plan["requirement_ids"], [
-            "CUSTOM-COLLABORATION.validate-yaml",
-            "CUSTOM-COLLABORATION.create-persistent-group",
-            "CUSTOM-COLLABORATION.trial-one-shot-lifecycle",
-        ])
-        self.assertEqual(plan["parent_requirement_count"], 3)
+        self.assertEqual(plan["requirement_ids"],
+                         ["CUSTOM-COLLABORATION.validate-yaml",
+                          "CUSTOM-COLLABORATION.create-persistent-group",
+                          "CUSTOM-COLLABORATION.trial-one-shot-lifecycle"]
+                         + list(DENSITY_REQUIREMENTS))
+        self.assertEqual(plan["parent_requirement_count"], 37)
         adaptability = custom_collaboration_case_adaptability()
         self.assertEqual(adaptability["local_executor_status"], "LOCAL_FULL_PARENT_EXECUTOR")
         self.assertEqual(adaptability["remote_validation"], "NOT_RUN")
@@ -53,13 +56,24 @@ class LocalCustomCollaborationCaseTests(unittest.TestCase):
 
     def test_success_executes_validate_trial_create_then_exact_cleanup(self):
         calls = []
+        def density_atoms(*methods):
+            return {f"CUSTOM-COLLABORATION.{name}": True
+                    for name, method, _first, _last in DENSITY_SPECS if method in methods}
         children = {
-            "validate": {"status": "LOCAL_CUSTOM_COLLABORATION_VALIDATE_PASS"},
-            "trial": {"status": "LOCAL_CUSTOM_COLLABORATION_TRIAL_PASS"},
+            "validate": {"status": "LOCAL_CUSTOM_COLLABORATION_VALIDATE_PASS",
+                         "density_observations": density_atoms("validate_yaml")},
+            "trial": {"status": "LOCAL_CUSTOM_COLLABORATION_TRIAL_PASS",
+                      "density_observations": density_atoms(
+                          "trial_create_group", "trial_add_member", "trial_permission",
+                          "trial_start_run", "trial_query_graph", "trial_query_pending",
+                          "trial_respond_guard", "trial_messages", "cancel_trial_run",
+                          "read_trial_session", "delete_trial_group")},
             "create": {
                 "status": "LOCAL_CUSTOM_COLLABORATION_CREATE_GROUP_PASS",
                 "group_id": "custom-participants-group",
                 "session_id": "custom-participants-group:initial",
+                "density_observations": density_atoms(
+                    "create_persistent_group", "read_persistent_group"),
             },
         }
         def validate(*args, **kwargs):
@@ -94,11 +108,10 @@ class LocalCustomCollaborationCaseTests(unittest.TestCase):
         self.assertEqual(calls[3][3], "/groups/custom-participants-group?bot_id=bot-driver")
         self.assertEqual(result["status"], "LOCAL_CUSTOM_COLLABORATION_LIFECYCLE_PASS")
         self.assertEqual(result["case_id"], CASE_ID)
-        self.assertEqual(result["assertions"], [
-            {"id": "CUSTOM-COLLABORATION.validate-yaml", "status": "PASS"},
-            {"id": "CUSTOM-COLLABORATION.create-persistent-group", "status": "PASS"},
-            {"id": "CUSTOM-COLLABORATION.trial-one-shot-lifecycle", "status": "PASS"},
-        ])
+        self.assertEqual(result["assertions"],
+                         [{"id": name, "status": "PASS"} for name in REQUIREMENTS])
+        self.assertEqual(len(result["density_observations"]), len(DENSITY_SPECS))
+        self.assertTrue(all(result["density_observations"].values()))
         self.assertEqual(result["persistent_group_cleanup"], "DELETED")
         self.assertEqual(result["full_parent_coverage"], "LOCAL_PARENT_REQUIREMENTS_ONLY")
         self.assertEqual(result["remote_validation"], "NOT_RUN")

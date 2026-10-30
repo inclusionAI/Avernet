@@ -352,7 +352,12 @@ def create_custom_collaboration_group(runtime: OwnedBcsProcess, *, state_dir: Pa
             failure.credential_context = str(root)
             failure.credential_cleanup = 'UNCONFIRMED'
             raise failure from cleanup_error
-    return {'status': 'LOCAL_CUSTOM_COLLABORATION_CREATE_GROUP_PASS',
+    from .local_custom_collaboration_case import project_density
+    density = project_density("create_persistent_group", created, driver_id=driver_id,
+                              reviewer_id=reviewer_id)
+    density.update(project_density("read_persistent_group", read_group, group_id=group_id))
+    return {'density_observations': density,
+            'status': 'LOCAL_CUSTOM_COLLABORATION_CREATE_GROUP_PASS',
             'case_id': case_id,
             'parent_requirement_id': binding['requirements'][1]['id'],
             'operation': 'cli.collaboration.create.get-group',
@@ -554,6 +559,13 @@ def run_custom_collaboration_trial(runtime: OwnedBcsProcess, *, state_dir: Path,
     started = time.monotonic()
     trial_group_id = trial_session_id = run_id = ''
     graph_valid = False
+    from .local_custom_collaboration_case import project_density
+    density = {}
+
+    def observe(method, data):
+        density.update(project_density(method, data, group_id=trial_group_id,
+                       session_id=trial_session_id, run_id=run_id,
+                       driver_id=driver_id, reviewer_id=reviewer_id, human_id=human_id))
     try:
         write(context, {'token': driver_token, 'bot_uuid': driver_id,
                         'api_base_url': runtime.inputs.origin})
@@ -565,6 +577,7 @@ def run_custom_collaboration_trial(runtime: OwnedBcsProcess, *, state_dir: Path,
             raise LocalCliError('custom collaboration CLI emitted its credential')
         trial_group_id, trial_session_id = _parse_trial_group(
             group_raw, driver_id, reviewer_id)
+        observe("trial_create_group", {"id": trial_group_id, "session_id": trial_session_id})
         member_raw = _execute_custom_collaboration(
             binary, environment, root,
             ('session', 'add-member', trial_session_id, '--bot-uuid', human_id,
@@ -577,6 +590,7 @@ def run_custom_collaboration_trial(runtime: OwnedBcsProcess, *, state_dir: Path,
         if member_id != trial_session_id:
             raise LocalCliError('custom-collaboration trial Session identity differs')
 
+        observe("trial_add_member", member)
         permission_raw = _execute_custom_collaboration(
             binary, environment, root,
             ('collaborate', 'permission', '--session', trial_session_id), timeout_seconds)
@@ -593,6 +607,7 @@ def run_custom_collaboration_trial(runtime: OwnedBcsProcess, *, state_dir: Path,
                 or permission.get('group_strategy') != 'chat'):
             raise LocalCliError('custom-collaboration trial permission differs from the owned expectation')
 
+        observe("trial_permission", permission)
         run_raw = _execute_custom_collaboration(
             binary, environment, root,
             ('collaborate', 'run', str(yaml_path), '--session', trial_session_id,
@@ -606,6 +621,7 @@ def run_custom_collaboration_trial(runtime: OwnedBcsProcess, *, state_dir: Path,
         if run['session_id'] != trial_session_id or run['group_id'] != trial_group_id:
             raise LocalCliError('custom-collaboration Run ownership differs from the owned expectation')
 
+        observe("trial_start_run", run_value)
         graph_raw = _execute_custom_collaboration(
             binary, environment, root,
             ('collaborate', 'query', '--run', run_id, '--graph'), timeout_seconds)
@@ -614,6 +630,7 @@ def run_custom_collaboration_trial(runtime: OwnedBcsProcess, *, state_dir: Path,
         graph = _custom_json_object(graph_raw, 'custom-collaboration execution graph')
         graph_valid = _trial_graph(graph, run_id, trial_session_id, trial_group_id)
 
+        observe("trial_query_graph", graph)
         pending_raw = _execute_custom_collaboration(
             binary, environment, root,
             ('collaborate', 'query', '--run', run_id, '--pending'), timeout_seconds)
@@ -622,16 +639,19 @@ def run_custom_collaboration_trial(runtime: OwnedBcsProcess, *, state_dir: Path,
         if _custom_json_array(pending_raw, 'custom-collaboration pending Human inputs'):
             raise LocalCliError('Bot-only custom-collaboration Run must expose no pending Human input')
 
+        observe("trial_query_pending", _custom_json_array(pending_raw, "pending Human inputs"))
         guard = capture([str(binary), '--json', '--log-level', 'error', 'collaborate',
                          'respond', '--run', run_id, '--node', 'plan',
                          '--content', 'invalid Human reply'],
                         cwd=root, environment=environment, timeout_seconds=timeout_seconds,
-                        max_output_bytes=65_536)
+                        max_output_bytes=65_536, collect_stderr=True)
         if guard.returncode == 0:
             raise LocalCliError('custom-collaboration respond guard did not refuse')
-        if driver_token.encode() in guard.stdout:
+        if driver_token.encode() in guard.stdout or driver_token.encode() in guard.stderr:
             raise LocalCliError('custom collaboration CLI emitted its credential')
 
+        observe("trial_respond_guard", {"guard_refused": guard.returncode != 0,
+                                       "not_pending": b"not pending" in guard.stderr})
         history_raw = _execute_custom_collaboration(
             binary, environment, root,
             ('session', 'messages', trial_session_id, '--view-bot', driver_id,
@@ -644,6 +664,7 @@ def run_custom_collaboration_trial(runtime: OwnedBcsProcess, *, state_dir: Path,
                 or run_id not in serialized_history):
             raise LocalCliError('custom-collaboration restored history differs from the owned expectation')
 
+        observe("trial_messages", history)
         cancelled = _request_trial_json(runtime, 'POST',
                                         f'/state-machine-runs/{quote(run_id, safe="")}/cancel',
                                         {'reason': 'E2E one-shot trial completed'},
@@ -652,18 +673,21 @@ def run_custom_collaboration_trial(runtime: OwnedBcsProcess, *, state_dir: Path,
         if (not isinstance(cancel_run, dict) or cancel_run.get('run_id') != run_id
                 or cancel_run.get('status') not in ('aborted', 'completed', 'failed')):
             raise LocalCliError('custom-collaboration Run cancellation differs from the owned expectation')
+        observe("cancel_trial_run", cancelled)
         session = _request_trial_json(runtime, 'GET',
                                      f'/sessions/{quote(trial_session_id, safe="")}', None,
                                      driver_token, 200)
         if ((session.get('session_id') or session.get('id')) != trial_session_id
                 or session.get('group_id') != trial_group_id or session.get('status') != 'running'):
             raise LocalCliError('custom-collaboration trial Session preservation differs')
+        observe("read_trial_session", session)
         deleted = _request_trial_json(
             runtime, 'DELETE',
             f'/groups/{quote(trial_group_id, safe="")}?bot_id={quote(driver_id, safe="")}',
             None, driver_token, 200)
         if deleted.get('deleted') is not True or deleted.get('id') != trial_group_id:
             raise LocalCliError('custom-collaboration trial Group cleanup differs')
+        observe("delete_trial_group", deleted)
     except BaseException as operation_error:
         cleanup_unconfirmed = False
         try:
@@ -701,7 +725,8 @@ def run_custom_collaboration_trial(runtime: OwnedBcsProcess, *, state_dir: Path,
             failure.credential_cleanup = 'UNCONFIRMED'
             failure.credential_context = str(root)
             raise failure
-    return {'status': 'LOCAL_CUSTOM_COLLABORATION_TRIAL_PASS',
+    return {'density_observations': density,
+            'status': 'LOCAL_CUSTOM_COLLABORATION_TRIAL_PASS',
             'case_id': case_id,
             'parent_requirement_id': binding['requirements'][2]['id'],
             'operation': 'cli.collaboration.trial',
@@ -774,7 +799,9 @@ def validate_collaboration_yaml(runtime: OwnedBcsProcess, *, state_dir: Path,
             or summary.get('participants') != 2 or summary.get('nodes') != 2):
         raise LocalCliError('product CLI collaboration summary differs from the owned expectation')
     shutil.rmtree(root)
-    return {'status': 'LOCAL_CUSTOM_COLLABORATION_VALIDATE_PASS',
+    from .local_custom_collaboration_case import project_density
+    return {'density_observations': project_density("validate_yaml", value),
+            'status': 'LOCAL_CUSTOM_COLLABORATION_VALIDATE_PASS',
             'case_id': case_id,
             'parent_requirement_id': binding['requirements'][0]['id'],
             'operation': 'cli.collaboration.validate',
