@@ -1,0 +1,32 @@
+apps/frontend-nextgen/test/assets/TaskPanel/commonUi.test.tsx
+  h_059e888e5e4e82 1-62
+apps/frontend-nextgen/test/assets/TaskPanel/v2/NodeListViewV2.branches.test.tsx
+  h_059e888e5e4e82 1-142
+apps/frontend-nextgen/test/assets/TaskPanel/v2/TaskArtifactPreviewDrawer.branches.test.tsx
+  h_059e888e5e4e82 1-254
+apps/frontend-nextgen/test/assets/TaskPanel/v2/TaskArtifactPreviewDrawer.ssr.test.tsx
+  h_059e888e5e4e82 1-55
+apps/frontend-nextgen/test/assets/TaskPanel/v2/TaskArtifactsList.branches.test.tsx
+  h_059e888e5e4e82 1-107
+apps/frontend-nextgen/test/assets/TaskPanel/v2/TaskInfoSection.test.tsx
+  h_059e888e5e4e82 1-53
+apps/frontend-nextgen/test/assets/TaskPanel/v2/TaskOverviewV2.branches.test.tsx
+  h_059e888e5e4e82 1-89
+apps/frontend-nextgen/test/assets/TaskPanel/v2/TaskPanelV2.branches.test.tsx
+  h_059e888e5e4e82 1-124
+apps/frontend-nextgen/test/assets/TaskPanel/v2/TaskSwitcherControl.branches.test.tsx
+  h_059e888e5e4e82 1-219
+apps/frontend-nextgen/test/assets/TaskPanel/v2/taskPanelNav.test.ts
+  h_059e888e5e4e82 1-44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "31cb3063524b1d027135e4272b7655ccb0155a8a",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
