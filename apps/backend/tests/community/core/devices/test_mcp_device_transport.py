@@ -265,6 +265,36 @@ class TestFilterServers:
         with patch("time.sleep"):
             assert mcp_transport.filter_servers(FakeTransport(HttpClientRequestError("net")), []) is False
 
+class TestPushSingleRequestErrorLogRedaction:
+    def test_safe_mcp_log_data_includes_transport_and_omits_secrets(self):
+        mcp_data = {
+            "server_code": "mcp.example",
+            "transport": {"url": "https://device.example/mcp", "token": "secret"},
+            "endpoints": "sensitive",
+        }
+
+        fields = mcp_transport._safe_mcp_log_data(mcp_data)
+
+        assert fields.get("transport") == {"url": "https://device.example/mcp", "token": "secret"}
+        assert fields.get("server_code") == "mcp.example"
+
+    def test_safe_transport_log_context(self):
+        with patch.object(mcp_transport.logger, "error") as mock_error:
+            with patch.object(mcp_transport, "_create_mcp", side_effect=Exception("boom")):
+                with pytest.raises(Exception, match="boom"):
+                    mcp_transport.push_single_mcp(
+                        FakeTransport(None),
+                        {"server_code": "x", "transport": "http", "endpoints": "sensitive"},
+                        endpoint_env="PRE",
+                    )
+
+        args, kwargs = mock_error.call_args
+        message = args[0]
+        assert "mcp_data=" not in message
+        assert "url_override" not in message
+        assert "endpoints" not in message
+        assert "url" not in message
+
 
 class TestPushSingleRequestError:
     def test_request_error_wrapped_and_raised(self):
