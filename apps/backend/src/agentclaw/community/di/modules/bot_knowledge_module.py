@@ -12,7 +12,12 @@ from agentclaw.community.plugins.community.knowledge_catalog import (
     UnavailableKnowledgeCatalog,
 )
 from agentclaw.community.plugins.local.knowledge_catalog import LocalKnowledgeCatalog
-from agentclaw.community.api.bot_knowledge_service import BotKnowledgeServiceProtocol
+from agentclaw.community.api.bot_knowledge_service import (
+    BotKnowledgePublicationSelectionProtocol, BotKnowledgeServiceProtocol,
+)
+from agentclaw.community.core.bot_knowledge.publication_selection import BotKnowledgePublicationSelection
+from agentclaw.community.core.repository.protocols.config import BotCommonConfigRepositoryProtocol
+from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.core.bot_knowledge.agents_md_sync import (
     BotKnowledgeAgentsMdSync,
 )
@@ -71,6 +76,14 @@ class BotKnowledgeModule(Module):
         self, repository: BotKnowledgeRepository, catalog: KnowledgeCatalogPlugin
     ) -> BotKnowledgeServiceProtocol:
         return BotKnowledgeService(repository, catalog)
+
+    @provider
+    @singleton
+    @inject
+    def publication_selection(
+        self, db: DatabasePlugin, configs: BotCommonConfigRepositoryProtocol,
+    ) -> BotKnowledgePublicationSelectionProtocol:
+        return BotKnowledgePublicationSelection(db, configs)
 
     @provider
     @singleton

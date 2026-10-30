@@ -28,3 +28,16 @@ class BotKnowledgeServiceProtocol(Protocol):
     ) -> dict: ...
     @abstractmethod
     def list_enabled_current(self, scope: BotKnowledgeScope) -> tuple[str, ...]: ...
+
+
+@runtime_checkable
+class BotKnowledgePublicationSelectionProtocol(Protocol):
+    """Optional version display data; not publication or runtime authority."""
+
+    @abstractmethod
+    def record_build_selection(self, *, publication_id: int) -> bool: ...
+
+    @abstractmethod
+    def get_publication_selection(
+        self, *, scope: BotKnowledgeScope, actor_id: str, publication_id: int,
+    ) -> dict: ...

@@ -63,6 +63,7 @@ from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.bot_knowledge.protocols import BotKnowledgePublicationSelectionProtocol
     from agentclaw.community.core.service_bot.services.publish_approval_service import (
         PublishApprovalService,
     )
@@ -310,6 +311,13 @@ class PublishVerifyFlowHandler(_PublishTaskBase):
     idempotency guard that keeps the create/release from re-running.
     """
 
+    def __init__(
+        self, *, flow: "PublishFlowService", task_queue_service: TaskQueueService,
+        selection_provider: Callable[[], BotKnowledgePublicationSelectionProtocol],
+    ) -> None:
+        super().__init__(flow=flow, task_queue_service=task_queue_service)
+        self._selection_provider = selection_provider
+
     @property
     def task_type(self) -> str:
         return VERIFY_FLOW_TASK
@@ -328,6 +336,12 @@ class PublishVerifyFlowHandler(_PublishTaskBase):
         # (FAILED + ext.error_message); the Fail outcome mirrors it onto the task
         # so the queue row is semantically honest (FAILED, not SUCCEEDED).
         if status == PublishStatus.BUILDING:
+            # Optional display data, independent of native state/transactions.
+            # The outer guard also isolates lazy provider-construction failures.
+            try:
+                self._selection_provider().record_build_selection(publication_id=publish_id)
+            except Exception:
+                logger.exception("Knowledge observation failed: publication_id=%s", publish_id)
             build_result = await self._flow.execute_build_phase(record, operator)
             if build_result.status != PublishStatus.BUILT:
                 return Fail(
@@ -748,16 +762,19 @@ class PublishTaskLifecycle(LifecycleBase):
         flow: "PublishFlowService",
         task_queue_service: TaskQueueService,
         approval_service_provider: Callable[[], "PublishApprovalService"],
+        selection_provider: Callable[[], BotKnowledgePublicationSelectionProtocol],
     ) -> None:
         self._registry = registry
         self._flow = flow
         self._task_queue_service = task_queue_service
         self._approval_service_provider = approval_service_provider
+        self._selection_provider = selection_provider
 
     async def bootstrap(self) -> None:
         self._registry.register(
             PublishVerifyFlowHandler(
-                flow=self._flow, task_queue_service=self._task_queue_service
+                flow=self._flow, task_queue_service=self._task_queue_service,
+                selection_provider=self._selection_provider,
             )
         )
         self._registry.register(

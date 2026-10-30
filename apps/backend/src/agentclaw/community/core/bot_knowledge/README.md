@@ -1,9 +1,10 @@
 # Bot knowledge
 
-Current application selection only; external platforms own grants. The platform catalog uses
+Current selection and best-effort publication observations; external platforms own grants. The platform catalog uses
 the existing business Bot ID and target user identifier; no new UUID contract.
-Service Bots require the current draft editing state. No knowledge versions,
-release hooks, audit tables or membership synchronization are introduced.
+Service Bots require the current draft editing state. Version observations are
+optional display data, not a new knowledge lifecycle or publication authority.
+No new tables or membership synchronization are introduced.
 
 ## Context Boundary
 
@@ -13,14 +14,17 @@ provides:
   - BotKnowledgeService
   - BotKnowledgeRepository
   - BotKnowledgeAgentsMdSync
+  - BotKnowledgePublicationSelection
 consumes:
   - DatabasePlugin
+  - BotCommonConfigRepositoryProtocol
   - KnowledgeCatalogPlugin
   - KnowledgeCatalog
 internal_dependencies:
   - agentclaw.community.kernel
   - agentclaw.community.plugin_api
   - agentclaw.community.core.base
+  - agentclaw.community.core.repository.protocols.config
   - agentclaw.community.core.bot_knowledge
   - agentclaw.community.core.bot_collaborator
   - agentclaw.community.core.knowledge_management
@@ -80,6 +84,47 @@ response, never mutates the stored selection, and skips the update when a
 broken fence (start marker without its end marker) suggests hand-editing
 damage rather than risk eating user-written content. An empty selection removes
 the section; an unchanged projection is not written back.
+
+## Publication selection observations
+
+The existing build task attempts `record_build_selection` only while BUILDING,
+using a separate session before the native build. Source Bot PK, current tenant,
+environment and space scope the capture. It rereads at most 101 enabled IDs,
+stores at most 100, and never turns an invalid source/space into an empty record.
+`ac_bot_common_config` holds one last observation per source/tenant/env/publication;
+no `online_enabled`, Bot ext or publication ext is added or modified.
+
+`GET /api/bot-knowledge/{bot_id}/publications/{publication_id}/selection`
+requires the same current Owner/Editor standing as current-selection reads. The
+publication must belong to that source Bot and environment. Callers use the
+native publication card's ID/status; this endpoint never chooses a live version,
+advances progress, grants access, or asserts that deployed files match the record.
+
+- `last_recorded` + IDs + `captured_at`: last successful capture, including `[]`
+  for explicit all-off. It is not proof that the current build was captured.
+- `unrecorded` + null: absent, malformed or wrong-scope observation; never fall
+  back to current draft or interpret this as all-off.
+- `unavailable` + null: optional storage failed. Current access/resource-check
+  failures remain ordinary errors, not optional-data degradation.
+
+Historical Bots receive no migration, backfill or file refresh. Their existing
+files, draft choices and original lifecycle keep their semantics. Only later
+normal BUILDING executions attempt a record. Online promotion, restart and
+rollback do not copy configuration; a rollback-selected historical version may
+have no record. Draft restore never restores its checkboxes through this feature.
+
+A reused publication can be rebuilt: successful capture replaces its observation;
+failure may leave an older record and its original timestamp. No generation,
+compensation, retry job or consistency guarantee with AGENTS.md is introduced.
+Generic common-config operators retain their existing management privileges;
+this is neither a tamper-proof audit log nor runtime authorization.
+
+Failures are logged and cannot alter native task results or publication state.
+The task-level guard includes lazy-provider resolution, but deliberately excludes
+native build/release execution. Exception isolation is not time isolation: SQL
+uses existing connection/driver waits, and the entire DB being unavailable can
+still break native publication. Live production timeout/topology validation and
+device-bound AGENTS.md acceptance remain separate from local HTTP/DB evidence.
 
 ## Live local acceptance
 

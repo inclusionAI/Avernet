@@ -310,6 +310,7 @@ def test_finalize_mounts_the_di_conditional_routers(preload_then_finalize):
         "/local/sql/execute",
         "/api/bot-knowledge/{bot_id}",
         "/api/bot-knowledge/{bot_id}/{kb_id}",
+        "/api/bot-knowledge/{bot_id}/publications/{publication_id}/selection",
     }, (
         "finalize should mount exactly the profile's OptionalRouters on top of "
         f"the constructed surface; it added {sorted(after - before)}"
