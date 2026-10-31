@@ -26,7 +26,8 @@ from bcs_e2e.local_authority_reporting import (
 from bcs_e2e.local_authority_run import (
     BINARY_KIND, EXPECTED_RESOURCES, FORBIDDEN_JOURNAL_SUBSTRINGS as RUN_FORBIDDEN,
     local_authority_run, validate_authority_binary)
-from bcs_e2e.inventory import current_manifest, executor_digest
+from bcs_e2e.inventory import (
+    KNOWN_UNMAPPED_LEGACY_IDS, current_manifest, executor_digest)
 from bcs_e2e.profile import fingerprint
 from bcs_e2e.run_state import RunStateError, read
 
@@ -342,7 +343,9 @@ class BoundGuardTests(unittest.TestCase):
             'store-messages': lambda value: value.__setitem__('store_messages', True),
             'parent': lambda value: value['source_binding'].__setitem__('parent', 'story_rogue'),
             'denominator': lambda value: value['source_binding'].__setitem__('release_parent_denominator', False),
-            'legacy-inventory': lambda value: value['legacy_inventory'].pop(),
+            'legacy-inventory-reviewed-row': lambda value: value['legacy_inventory'].remove(
+                next(row for row in value['legacy_inventory']
+                     if row['id'] == 'story_human_manages_delivery_policy')),
         }
         for mutation, apply in mutations.items():
             value = copy.deepcopy(original)
@@ -352,6 +355,15 @@ class BoundGuardTests(unittest.TestCase):
                 _bound(self.root)
         (self.root / 'authority-binding.json').write_text(json.dumps(original), encoding='utf-8')
         self.assertEqual(_bound(self.root), original)
+        # Backlog rows stay exempt from the reviewed-denominator freeze by
+        # design (5aae6c12d): dropping one must keep the binding valid.
+        value = copy.deepcopy(original)
+        backlog_id = sorted(KNOWN_UNMAPPED_LEGACY_IDS)[0]
+        value['legacy_inventory'].remove(
+            next(row for row in value['legacy_inventory'] if row['id'] == backlog_id))
+        (self.root / 'authority-binding.json').write_text(json.dumps(value), encoding='utf-8')
+        self.assertEqual(_bound(self.root), value)
+        (self.root / 'authority-binding.json').write_text(json.dumps(original), encoding='utf-8')
 
     def test_executor_drift_refuses_the_binding(self):
         with patch('bcs_e2e.local_authority_reporting.executor_digest', return_value='rogue-digest'):

@@ -106,9 +106,17 @@ class CustomCollaborationLifecycleTests(unittest.TestCase):
         self.run_manifest_patcher = patch(
             'bcs_e2e.local_custom_collaboration_run.current_manifest',
             return_value={'legacy_inventory': raw_legacy})
-        self.reporting_manifest_patcher = patch(
-            'bcs_e2e.local_custom_collaboration_reporting.current_manifest',
+        # 5aae6c12d unified frozen-binding guards on the reviewed release
+        # denominator: the reporting module no longer reads the raw manifest
+        # (current_manifest import removed), so the fixture world is patched at
+        # the inventory namespace, where the guard helper resolves it. The run
+        # module keeps its own directly-imported names patched above.
+        self.inventory_manifest_patcher = patch(
+            'bcs_e2e.inventory.current_manifest',
             return_value={'legacy_inventory': raw_legacy})
+        self.inventory_reviewed_patcher = patch(
+            'bcs_e2e.inventory.reviewed_release_inventory',
+            return_value=reviewed_legacy)
         self.digest_patcher = patch(
             'bcs_e2e.local_custom_collaboration_run.executor_digest',
             return_value='e' * 64)
@@ -116,8 +124,8 @@ class CustomCollaborationLifecycleTests(unittest.TestCase):
             'bcs_e2e.local_custom_collaboration_reporting.executor_digest',
             return_value='e' * 64)
         for patcher in (self.inventory_patcher, self.run_manifest_patcher,
-                        self.reporting_manifest_patcher, self.digest_patcher,
-                        self.reporting_digest_patcher):
+                        self.inventory_manifest_patcher, self.inventory_reviewed_patcher,
+                        self.digest_patcher, self.reporting_digest_patcher):
             patcher.start()
             self.addCleanup(patcher.stop)
 
