@@ -45,6 +45,18 @@ idem_key = f(task_id, step_id, attempt)          # deterministic
 n. on terminal event: UPDATE {state=COMPLETED|FAILED}
 ```
 
+**Attempt semantics.** A reconciliation resend **reuses the recorded
+`idem_key` of the unresolved attempt** — never a fresh one. `attempt`
+increments only once the prior attempt is proven terminal at the agent
+(`failed`), or the key is still unknown after that attempt's maximum
+in-flight delivery delay (see window sizing below) has elapsed. Rationale:
+fencing guards storage writes, not an HTTP send a zombie already launched. If
+the old owner stalls between INSERT and send, a successor that bumped to
+`(t, S, 2)` races the zombie's late `(t, S, 1)` — two distinct keys, two
+executions. With the key reused, the zombie's late first delivery
+deduplicates against the successor's resend (same key, identical payload
+regenerated from the same durable state).
+
 All writes carry the executor lease's fencing token (Doc 02). A crash at any
 point leaves a durable record a successor can act on. This extends BCS's
 existing persist-before-dispatch discipline one hop outward: nothing in
@@ -58,7 +70,7 @@ queryable via `GetTask`. On takeover, for every dispatch record not terminal:
 
 | State found | Probe result | Action |
 | --- | --- | --- |
-| `SENDING` | key unknown at agent | first delivery never arrived → send (safe) |
+| `SENDING` | key unknown at agent | first delivery never arrived → resend **with the same key** (safe — a racing late original dedups against it) |
 | `SENDING` | key known → existing task returned | id recovered; continue below |
 | `DISPATCHED` | task `working` / `input-required` | subscribe and wait |
 | `DISPATCHED` | task `completed` / `failed` | fetch result, advance — **no re-execution** |
@@ -96,7 +108,7 @@ fork; vanilla A2A traffic flows unchanged:
 | Dedup | same key ⇒ same task, atomically checked at execution admission; same key with conflicting payload ⇒ keep first, flag error |
 | Probe semantics | idempotent-resend inside the window; retry-only flag honored with atomic known/unknown judgment |
 | Retention floor | terminal task state **and** the key seen-set retained ≥ the agreed window; within it, "task not found" provably means "never arrived" |
-| Window sizing | ≥ worst-case (lease TTL + takeover RTO + reconciliation sweep) with margin; one clock for both retentions |
+| Window sizing | ≥ worst-case (**max in-flight delivery delay of one attempt** — dispatch timeout × retry budget + max network/queue delay — + lease TTL + takeover RTO + reconciliation sweep) with margin; one clock for both retentions. The first term is what makes "not found ⇒ never arrived" sound: without it, a zombie's late original send can land *after* the window closes, age out of the seen-set, and re-execute as a "new" request. Senders must therefore also bound an attempt's total send-with-retries lifetime, so this term is finite by construction |
 | Declaration | extension URI in the AgentCard / registration capability flag (Doc 04) |
 | Escape hatch | a probe landing **outside** the window is undecidable: no automatic resend of side-effecting steps — surface "outcome unknown, verify" to the caller for reconciliation |
 
