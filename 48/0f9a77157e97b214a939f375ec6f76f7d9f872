@@ -1,0 +1,18 @@
+apps/frontend-nextgen/src/components/Community/CommunityPersonalCenter/ActivityList.tsx
+  h_059e888e5e4e82 48-60,177-181
+apps/frontend-nextgen/src/components/Community/CommunityTopicList/TopicRow.tsx
+  h_059e888e5e4e82 45,60,88
+apps/frontend-nextgen/test/components/Community/PersonalCenter.test.tsx
+  h_059e888e5e4e82 211-254
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "480f9a77157e97b214a939f375ec6f76f7d9f872",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
