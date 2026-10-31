@@ -41,7 +41,7 @@ use bcs_service_api::{
     TaskMessageCommand, backfill_bot_names, backfill_participant_names, message_log_json,
 };
 use serde_json::Value;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::BcsMessageFlow;
 use crate::MSG_LOG_TARGET;
@@ -276,6 +276,34 @@ pub async fn handle_bot_event(
         try_channel_outbound(flow, &cmd).await;
     }
     let mut bot_deliveries = Vec::new();
+
+    // Chat-final coordination claim (provider manager bots have no
+    // tool_call_end agent-event echo): scan the terminal final's reply
+    // text for the v2 stored-receipt frame the MCP tool printed — the
+    // ecosystem contract already mandates masters echo the full raw output
+    // ("…否则 BCS 无法识别 MCP 调用结果"). Gated on a live owner→caller
+    // session capture inside; groups without one keep the exact
+    // pre-feature silent-orphan behavior. This runs BEFORE the terminal
+    // settlement below so the shared claim core still sees the run alive.
+    if managed_terminal {
+        let final_text = extract_message_text(&cmd.event_payload);
+        match maybe_handle_coordination_chat_final(flow, &cmd, &final_text).await {
+            Ok(Some(coordination)) => {
+                bot_deliveries.extend(coordination.bot_deliveries);
+                frontend_deliveries.extend(coordination.frontend_deliveries);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                debug!(
+                    bot_id = %cmd.bot_id,
+                    group_id = %cmd.group_id,
+                    run_id = %cmd.run_id,
+                    error = %error,
+                    "chat-final coordination claim settled as no-op"
+                );
+            }
+        }
+    }
 
     // Persist tool call events (identified by payload.stream == "tool", distinguished by payload.data.phase)
     if let Some((data, phase)) = tool_event_phase(&cmd.event_payload) {
