@@ -25,6 +25,7 @@ from agentclaw.community.core.apply_engine.compiler import (
 from agentclaw.community.core.apply_engine.completion import (
     ApplyCompletionHandler,
     ApplyOutcome,
+    CompletionPublisher,
     outcome_of,
 )
 from agentclaw.community.core.apply_engine.desired_state import DesiredState
@@ -302,7 +303,7 @@ def test_giving_up_on_an_apply_that_already_ended_republishes_its_report_unchang
 
 def test_a_kind_without_a_subscriber_is_told_nothing(rig) -> None:
     service, _, recorder, queue, _, _ = rig
-    service._completion.clear()  # the Manifest's case: no row in the map
+    service._completion = CompletionPublisher({})  # the Manifest's case: no row in the map
     service.run_apply_task(_start(service, queue))
     assert recorder.notices == []
 

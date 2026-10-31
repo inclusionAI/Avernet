@@ -68,6 +68,7 @@ provides:
   - ApplyCompletionHandler  # completion.py: a producer's subscriber, told when an apply of its kind ends
   - ApplyOutcome
   - StateCompletionHandlers  # kind → subscriber, the second map beside the compilers
+  - CompletionPublisher  # completion.py: hands an ended apply's outcome to its kind's subscriber (run service, unstartable path)
   - Compiled
   - ContentReader  # imported from core/content_store; ContentStoreProtocol inherits it
   - Category  # the construct vocabulary (constructs.py)

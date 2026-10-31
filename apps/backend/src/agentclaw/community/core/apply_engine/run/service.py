@@ -48,7 +48,7 @@ from agentclaw.community.core.apply_engine.compiler import (
 from agentclaw.community.core.apply_engine.carry_forward import (
     carry_forward,
 )
-from agentclaw.community.core.apply_engine.completion import StateCompletionHandlers, outcome_of
+from agentclaw.community.core.apply_engine.completion import CompletionPublisher, StateCompletionHandlers
 from agentclaw.community.core.apply_engine.context import ApplyContext
 from agentclaw.community.core.apply_engine.delivery import (
     DeliveryStrategy,
@@ -189,7 +189,7 @@ class ApplyRunService(ApplyRunServiceProtocol):
         self._compilers = dict(compilers)
         # One subscriber per state kind, told when an apply of that kind ends
         # (``completion.py``). A kind with no row — the Manifest — is told nothing.
-        self._completion = dict(completion_handlers)
+        self._completion = CompletionPublisher(completion_handlers)
 
     # ── starting ────────────────────────────────────────────────────────────
 
@@ -466,7 +466,9 @@ class ApplyRunService(ApplyRunServiceProtocol):
                     )
                     # Before the lock is released, so the producer's record is in place before the
                     # bot's next apply can start.
-                    publish_error = self._publish(ctx.env, ctx.entity_id, ctx.bot_id, state, report)
+                    publish_error = self._completion.publish(
+                        env=ctx.env, entity_id=ctx.entity_id, bot_id=ctx.bot_id, state=state, report=report
+                    )
             finally:
                 # The lock is held until the producer has heard: a subscriber that has not settled yet
                 # (a genome promotion moving ``active``) must not see the bot's next apply start first.
@@ -521,7 +523,7 @@ class ApplyRunService(ApplyRunServiceProtocol):
                     bot_id,
                 )
                 publish_error = terminate_unstartable(
-                    self._applies, self._locks, payload, exc, publish=self._publish
+                    self._applies, self._locks, payload, exc, publisher=self._completion
                 )
                 if publish_error is not None:
                     raise publish_error
@@ -581,7 +583,9 @@ class ApplyRunService(ApplyRunServiceProtocol):
                         record=record,
                         status=ApplyStatus(record.status),
                     )
-                publish_error = self._publish(env, entity_id, bot_id, state, report)
+                publish_error = self._completion.publish(
+                    env=env, entity_id=entity_id, bot_id=bot_id, state=state, report=report
+                )
             finally:
                 self._locks.release(
                     env=env,
@@ -603,7 +607,9 @@ class ApplyRunService(ApplyRunServiceProtocol):
         report = report_from_payload(
             json.loads(record.report) if record.report else {}, record=record, status=ApplyStatus(record.status)
         )
-        publish_error = self._publish(env, entity_id, bot_id, state_of_payload(payload), report)
+        publish_error = self._completion.publish(
+            env=env, entity_id=entity_id, bot_id=bot_id, state=state_of_payload(payload), report=report
+        )
         if publish_error is not None:
             raise publish_error  # still locked: the queue's next re-run publishes again
         # The run that wrote the terminal report may have died before unlocking, or kept the lock because its
@@ -615,22 +621,6 @@ class ApplyRunService(ApplyRunServiceProtocol):
             lock_token=str(payload["lock_token"]),
         )
         return True
-
-    def _publish(
-        self, env: str, entity_id: str, bot_id: str, state: StateRef, report: ApplyReport
-    ) -> Exception | None:
-        """Tell the kind's subscriber how the apply ended; answer what it raised, for the caller to re-raise."""
-        handler = self._completion.get(state.kind)
-        if handler is None:
-            return None
-        try:
-            handler.on_finished(env=env, entity_id=entity_id, bot_id=bot_id, state=state, outcome=outcome_of(report))
-        except Exception as exc:  # noqa: BLE001 - surfaced to the caller, which keeps the lock
-            logger.exception(
-                "[manifest_apply] completion handler raised, apply_id=%s, kind=%s", report.apply_id, state.kind
-            )
-            return exc
-        return None
 
     def _rebuild(self, payload: dict) -> tuple[ApplyContext, DesiredStateCompiler, StateRef]:
         """The context, and the compiler the payload's state reference names."""

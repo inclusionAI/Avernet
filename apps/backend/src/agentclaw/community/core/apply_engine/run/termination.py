@@ -15,9 +15,10 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Callable, Optional
+from typing import Optional
 
 from agentclaw.community.core.apply_engine.compiler import LEGACY_STATE, StateRef, state_ref_from_payload
+from agentclaw.community.core.apply_engine.completion import CompletionPublisher
 from agentclaw.community.core.apply_engine.outcomes import (
     ApplyReport,
     ApplyStatus,
@@ -74,14 +75,14 @@ def terminate_unstartable(
     payload: dict,
     exc: Exception,
     *,
-    publish: Callable[[str, str, str, StateRef, ApplyReport], Exception | None],
+    publisher: CompletionPublisher,
 ) -> Exception | None:
     """Record a FAILED report, publish it, and release the lock for an apply that cannot run.
 
     Both halves matter. Without the report the row polls ``RUNNING`` until
     its lock goes stale; without the release the bot is locked against every
     future apply for the whole TTL. ``publish`` tells the state's producer
-    (``completion.py``) between the two; what it raised is answered, for the
+    (``CompletionPublisher``) between the two; what it raised is answered, for the
     caller to re-raise, and the lock stays held until the queue's re-run has
     published (see ``ApplyRunService._run``).
     """
@@ -110,7 +111,9 @@ def terminate_unstartable(
             status=report.status.value,
             report=json.dumps(report.as_payload()),
         )
-        publish_error = publish(env, entity_id, bot_id, report.state, report)
+        publish_error = publisher.publish(
+            env=env, entity_id=entity_id, bot_id=bot_id, state=report.state, report=report
+        )
         return publish_error
     finally:
         if publish_error is None:
