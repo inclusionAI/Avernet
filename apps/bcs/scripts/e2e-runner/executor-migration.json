@@ -80,7 +80,9 @@
         "mode": "DUAL",
         "preprod_verdict": "PASS",
         "gates": [],
-        "notes": []
+        "notes": [
+            "PROVIDER_PUBLISHES_DENSITY_98_OBLIGATIONS_20261031"
+          ]
       }
     },
     {

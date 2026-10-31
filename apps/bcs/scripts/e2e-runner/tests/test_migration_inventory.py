@@ -796,3 +796,13 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
                 self.assertEqual(row['gates'], [])
                 self.assertEqual(len(row['notes']), 1)
                 self.assertEqual(row['notes'], face_by_id[case_id]['notes'])
+
+    def test_provider_publishes_density_locks_row_7_face_note(self):
+        statuses = load_executor_migration()
+        row = statuses['story_provider_operator_publishes_agent']
+        self.assertEqual(row['mode'], 'DUAL')
+        self.assertEqual(row['preprod_verdict'], 'PASS')
+        self.assertEqual(row['gates'], [])
+        self.assertEqual(
+            row['notes'],
+            ['PROVIDER_PUBLISHES_DENSITY_98_OBLIGATIONS_20261031'])
