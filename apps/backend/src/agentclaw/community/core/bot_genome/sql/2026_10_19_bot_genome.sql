@@ -74,7 +74,7 @@ CREATE TABLE `ac_genome_ref` (
   `moved_actor`    varchar(1100) NOT NULL,
   `run_id`         varchar(64)   DEFAULT NULL,
   `reason`         varchar(1024) DEFAULT NULL,
-  `labels`         varchar(256)  NOT NULL DEFAULT '[]' COMMENT 'JSON list of strings; today only "partial", on active',
+  `labels`         varchar(256)  NOT NULL DEFAULT '[]' COMMENT 'JSON list of strings; today only "partial", on active or previous',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_bot_ref` (`avernet_tenant`, `env`, `entity_id`, `bot_id`, `name`) GLOBAL
 ) AUTO_INCREMENT_MODE = 'ORDER' DEFAULT CHARSET = utf8mb4

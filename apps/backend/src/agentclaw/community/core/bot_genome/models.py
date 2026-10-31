@@ -279,7 +279,8 @@ class GenomeRef:
     moved_at: datetime
     moved_by: Provenance
     reason: str | None = None
-    #: What the last move says about the ref; today only ``RefLabel.PARTIAL`` on ``active``. Rewritten on every move.
+    #: What the last move says about the ref; today only ``RefLabel.PARTIAL``, on ``active`` or carried to ``previous``
+    #: with the revision. Rewritten on every move.
     labels: tuple[str, ...] = ()
 
 

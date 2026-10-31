@@ -105,7 +105,7 @@ class GenomeRefRow(BaseModel):
     moved_actor: str
     run_id: Optional[str] = None
     reason: Optional[str] = None
-    labels: str = "[]"  #: JSON list of strings; today only ``"partial"``, on ``active``
+    labels: str = "[]"  #: JSON list of strings; today only ``"partial"``, on ``active`` or ``previous``
 
 
 class SettleResult(StrEnum):
@@ -259,7 +259,7 @@ class GenomeRefModel(Base):
     run_id = Column(String(64), nullable=True)
     reason = Column(String(1024), nullable=True)
     labels = Column(
-        String(256), nullable=False, default="[]", comment='JSON list of strings; today only "partial", on active'
+        String(256), nullable=False, default="[]", comment='JSON list of strings; today only "partial", on active or previous'
     )
 
     __table_args__ = (UniqueConstraint("avernet_tenant", "env", "entity_id", "bot_id", "name", name="uk_bot_ref"),)

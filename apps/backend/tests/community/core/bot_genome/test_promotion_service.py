@@ -105,7 +105,9 @@ async def test_a_partial_delivery_moves_the_refs_and_labels_active_partial(world
     assert partial.status == PromotionStatus.APPLIED_PARTIAL
     assert _refs(world) == {"active": r1} and _labels(world) == {"active": ("partial",)}
     await world.promote(r2, expected=r1, actor=OWNER)
-    assert _labels(world) == {"active": (), "previous": ()}, "the next complete delivery clears the label"
+    assert _labels(world) == {"active": (), "previous": ("partial",)}, (
+        "the next complete delivery clears active's label; previous keeps the one it had as active"
+    )
 
 
 @pytest.mark.asyncio
