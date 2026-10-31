@@ -235,7 +235,13 @@ class _PersistedSkillQuery:
         return row
 
 
-def _seed(db: _Database, bots: BotRepository, skills: SkillRepository) -> int:
+def _seed(db: _Database, bots: BotRepository, skills: SkillRepository, *, overlap: bool) -> int:
+    """A bot with a ``dependent`` local skill, Direct MCP servers and an active ordinary set.
+
+    With ``overlap`` the set supplies ``dependent`` and ``mcp.explicit`` too — what the document declares — so
+    the apply must be refused; without it the set supplies only ``mcp.set``, and ``dependent``,
+    ``mcp.explicit`` and ``mcp.omit`` are Direct.
+    """
     bots.insert(
         {
             "bot_id": "bot-1",
@@ -274,23 +280,15 @@ def _seed(db: _Database, bots: BotRepository, skills: SkillRepository) -> int:
         )
         session.add(skill_set)
         session.flush()
+        supplied = ["mcp.explicit"] if overlap else ["mcp.set"]
         session.add_all(
-            [
-                SkillSetSkill(
-                    skill_set_id=skill_set.id, skill_id=skill_id, env="dev"
-                ),
-                SkillSetMCPServer(
-                    skill_set_id=skill_set.id,
-                    server_code="mcp.explicit",
-                    name="explicit",
-                    env="dev",
-                ),
-                SkillSetMCPServer(
-                    skill_set_id=skill_set.id,
-                    server_code="mcp.omit",
-                    name="omit",
-                    env="dev",
-                ),
+            ([SkillSetSkill(skill_set_id=skill_set.id, skill_id=skill_id, env="dev")] if overlap else [])
+            + [
+                SkillSetMCPServer(skill_set_id=skill_set.id, server_code=code, name=code, env="dev")
+                for code in supplied
+            ]
+            + [
+                BotMCPInstallation(bot_id="bot-1", owner_id="entity-1", server_code="mcp.set", env="dev"),
                 BotSkillInstallation(
                     bot_id="bot-1", owner_id="entity-1", skill_id=skill_id, env="dev"
                 ),
@@ -332,13 +330,13 @@ def _context(bot: dict, *, apply_id: str | None) -> ApplyContext:
     )
 
 
-@pytest.mark.asyncio
-async def test_combined_full_replace_dry_run_and_apply_use_real_persistence():
+def _rig(*, overlap: bool):
+    """The real persistence, reader and activation service behind both materialisers, and the parsed document."""
     db = _Database()
     bots = BotRepository(db)
     skills = SkillRepository(db)
     desired = CapabilityDesiredStateRepository(db)
-    original_skill_id = _seed(db, bots, skills)
+    original_skill_id = _seed(db, bots, skills, overlap=overlap)
     versions = SkillVersionResolver(SkillVersionRepository(db))
     reader = BotCapabilityStateReader(desired, bots, skills, versions)
     runtime = _Runtime()
@@ -400,6 +398,44 @@ manifest:
     bot = bots.get_by_id_and_owner("bot-1", "owner")
     assert bot is not None
 
+    return db, reader, runtime, uploads, orchestrator, parsed, bot, original_skill_id
+
+
+@pytest.mark.asyncio
+async def test_a_declaration_that_overlaps_a_skill_set_is_refused_before_anything_is_written():
+    """The set supplies the declared skill and MCP server: dry run and apply both refuse, and neither the set
+    nor any Installation changes."""
+    db, _reader, runtime, _uploads, orchestrator, parsed, bot, skill_id = _rig(overlap=True)
+    for apply_id, dry_run in (("", True), ("apply-1", False)):
+        report = await orchestrator.apply(
+            _context(bot, apply_id=apply_id or None),
+            parsed,
+            apply_id=apply_id,
+            trigger="explicit",
+            started_at=datetime.now(),
+            dry_run=dry_run,
+        )
+        assert report.status is ApplyStatus.FAILED
+        failed = {
+            (c.construct, e.identity) for c in report.categories for e in c.entries if e.outcome is EntryOutcome.FAILED
+        }
+        assert failed == {(Category.SKILLS, "dependent"), (Category.MCP, "mcp.explicit")}
+    assert runtime.scopes == []
+    with db.orm_session() as session:
+        assert session.query(SkillSetSkill).count() == 1
+        assert session.query(SkillSetMCPServer).count() == 1
+        assert {row.skill_id for row in session.query(BotSkillInstallation)} == {skill_id}
+        assert {row.server_code for row in session.query(BotMCPInstallation)} == {
+            "mcp.explicit", "mcp.omit", "mcp.set",
+        }
+
+
+@pytest.mark.asyncio
+async def test_combined_full_replace_dry_run_and_apply_use_real_persistence():
+    """No overlap: the declaration replaces the Direct skills and MCP servers, and what the set supplies
+    (``mcp.set``) is neither counted nor removed."""
+    db, reader, runtime, uploads, orchestrator, parsed, bot, original_skill_id = _rig(overlap=False)
+
     dry_run = await orchestrator.apply(
         _context(bot, apply_id=None),
         parsed,
@@ -421,11 +457,11 @@ manifest:
     assert dry_dependency.outcome is EntryOutcome.UPDATED
     assert runtime.scopes == []
     with db.orm_session() as session:
-        assert session.query(SkillSetSkill).count() == 1
-        assert session.query(SkillSetMCPServer).count() == 2
+        assert session.query(SkillSetMCPServer).count() == 1
         assert {row.server_code for row in session.query(BotMCPInstallation)} == {
             "mcp.explicit",
             "mcp.omit",
+            "mcp.set",
         }
 
     report = await orchestrator.apply(
@@ -448,13 +484,13 @@ manifest:
     assert dependency.outcome is EntryOutcome.UPDATED
     assert "Skill dependency" in (dependency.note or "")
     with db.orm_session() as session:
-        assert session.query(SkillSetSkill).count() == 0
-        assert session.query(SkillSetMCPServer).count() == 0
+        assert session.query(SkillSetMCPServer).count() == 1, "the set is untouched"
         assert {row.skill_id for row in session.query(BotSkillInstallation)} == {
             original_skill_id
         }
         assert {row.server_code for row in session.query(BotMCPInstallation)} == {
-            "mcp.explicit"
+            "mcp.explicit",
+            "mcp.set",
         }
         overrides = session.query(BotMCPConfig).all()
         assert [row.server_code for row in overrides] == ["mcp.explicit"]
@@ -467,6 +503,6 @@ manifest:
     }
     assert reader.active_mcp_server_codes(
         bot_id="bot-1", owner_id="owner", bot=bot
-    ) | derived == {"mcp.explicit", "mcp.dep"}
+    ) | derived == {"mcp.explicit", "mcp.set", "mcp.dep"}
     assert uploads.packages.keys() == {"dependent"}
     assert runtime.scopes

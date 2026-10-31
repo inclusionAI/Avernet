@@ -452,8 +452,24 @@ def build_materialisers(
     return {m.construct: m for m in materialisers}
 
 
+@runtime_checkable
+class ChecksSetSupply(Protocol):
+    """A materialiser whose area the bot's skill sets also supply (today ``skills`` and ``mcp``).
+
+    An apply speaks only for the bot's Direct entries. Before anything is written, the orchestrator asks each
+    such materialiser which declared entries a set supplies; any answer refuses the whole apply, so a Direct
+    claim never has to touch a set and the bot is left exactly as it was.
+    """
+
+    @abstractmethod
+    async def set_conflicts(self, ctx: ApplyContext, entries: Sequence[Any]) -> tuple[ResolveFailure, ...]:
+        """One failure per declared entry the bot's skill sets supply; read-only."""
+        ...
+
+
 __all__ = [
     "CategoryPlan",
+    "ChecksSetSupply",
     "ConfirmedPartialWriteError",
     "Intent",
     "Materialiser",

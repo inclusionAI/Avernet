@@ -50,20 +50,11 @@ class ActivationPort(Protocol):
     ) -> dict[str, dict]: ...
 
     @abstractmethod
-    def apply_direct_mcp_codes(
-        self, *, bot_id: str, owner_id: str, actor_id: str,
-        server_codes: set[str],
-    ) -> set[str]: ...
-
-    @abstractmethod
-    def set_managed_mcp_codes(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        actor_id: str,
-        server_codes: set[str],
-    ) -> set[str]: ...
+    def set_supplied_capabilities(
+        self, *, bot_id: str, owner_id: str, actor_id: str
+    ) -> tuple[frozenset[str], frozenset[str]]:
+        """(skill runtime names, MCP server codes) the bot's Sets supply; an apply leaves them alone."""
+        ...
 
     @abstractmethod
     async def activate_mcp(
@@ -105,7 +96,7 @@ class ActivationPort(Protocol):
     @abstractmethod
     async def remove_apply_skill(
         self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
-        apply_id: str | None, remove_inactive_memberships: bool,
+        apply_id: str | None,
     ) -> Any: ...
 
     @abstractmethod
