@@ -52,7 +52,7 @@ impl A2aChat {
         let delivery_target = bcs_observability::observe_result("chat.delivery.resolve", self
             .registry
             .resolve_delivery_target(&cmd.target_bot_id)).await?;
-        let target_is_http_provider = delivery_target.is_http_provider();
+        let target_is_gateway = delivery_target.is_gateway();
         if !bcs_observability::observe_value("chat.delivery.available", self.bot_delivery.is_available(&delivery_target)).await {
             self.emit_run_lifecycle(
                 DirectChatRunEvent::Failed,
@@ -66,7 +66,7 @@ impl A2aChat {
 
         let submit_on_provider_ack =
             cmd.async_mode
-                && target_is_http_provider
+                && target_is_gateway
                 && is_detached_wait_mode(cmd.caller_wait_mode.as_deref());
         let completion_policy = if submit_on_provider_ack {
             ChatRunCompletionPolicy::DetachDeliveryAck

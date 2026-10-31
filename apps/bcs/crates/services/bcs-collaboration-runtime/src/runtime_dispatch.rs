@@ -5,6 +5,9 @@ use bcs_service_api::{StateMachineDispatchPayload, StateMachineDispatchTarget, S
 fn target_reference(target: &BotDeliveryTarget) -> StateMachineDispatchTarget {
     match target {
         BotDeliveryTarget::WebSocket { .. } => StateMachineDispatchTarget::WebSocket,
+        BotDeliveryTarget::A2a { provider_id, provider_bot_ref, interface, .. } => StateMachineDispatchTarget::A2a {
+            provider_id: provider_id.clone(), provider_bot_ref: provider_bot_ref.clone(), interface: interface.clone(),
+        },
         BotDeliveryTarget::HttpProvider { provider_id, provider_bot_ref, protocol_version, .. } => StateMachineDispatchTarget::HttpProvider {
             provider_id: provider_id.clone(), provider_bot_ref: provider_bot_ref.clone(), protocol_version: protocol_version.clone(),
         },

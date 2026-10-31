@@ -155,6 +155,7 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
     SqliteMigration { version: 36, name: "collaboration_drafts" },
     SqliteMigration { version: 37, name: "bot_authority" },
     SqliteMigration { version: 38, name: "task_handle_lookup" },
+    SqliteMigration { version: 39, name: "bot_a2a" },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -519,6 +520,13 @@ async fn apply_sqlite_migration_body(
         // unique index, and the two authority tables/indexes.
         37 => add_sqlite_bot_authority_schema(db).await,
         38 => add_sqlite_task_handle_lookup(db).await,
+        39 => {
+            let steps = include_str!("../../../../migrations/sqlite/039_bot_a2a.sql")
+                .split(';').map(str::trim).filter(|sql| !sql.is_empty())
+                .map(|sql| DbTransactionStep::Execute(DbStatement::new(sql))).collect();
+            db.transaction(steps).await?;
+            Ok(())
+        }
         _ => Ok(()),
     }
 }
@@ -650,3 +658,7 @@ mod collection_migration_tests;
 #[cfg(test)]
 #[path = "migrations/eventing_migration_tests.rs"]
 mod eventing_migration_tests;
+
+#[cfg(test)]
+#[path = "migrations/a2a_tests.rs"]
+mod a2a_tests;

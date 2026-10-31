@@ -67,6 +67,9 @@ fn build_api_routes() -> Router<HttpAppState> {
             get(routes::bots::get_bot).delete(routes::bots::leave_bot),
         )
         .route("/providers", post(routes::providers::register_provider))
+        .route("/bots/{id}/agent-card", get(routes::bot_agent_card::get))
+        .route("/providers/{provider_id}/bots/{bot_uuid}/a2a", get(routes::a2a_bots::get).put(routes::a2a_bots::configure))
+        .route("/providers/{provider_id}/bots/{bot_uuid}/a2a/card:refresh", post(routes::a2a_bots::refresh))
         .route("/providers/by-slug/{slug}", get(routes::providers::get_provider_by_slug))
         .route("/api/v1/collaboration/providers/by-slug/{slug}", get(routes::providers::get_provider_by_slug))
         .route(

@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 use bcs_service_api::application::collaboration_draft::CollaborationDraftService;
+use bcs_service_api::application::a2a_bot::A2aBotManagementService;
 
 use bcs_service_api::{
     A2aChatRunService, A2aChatService, ActorDirectoryService, BotDeliveryPort, BotDiscoveryService,
@@ -89,6 +90,8 @@ pub struct Services {
     pub provider_bot_core: Arc<dyn ProviderBotCoreService>,
     /// Provider management application service.
     pub provider_management: Arc<dyn ProviderManagementService>,
+    /// Absent in memory-only test servers without durable A2A configuration.
+    pub a2a_bot_management: Option<Arc<dyn A2aBotManagementService>>,
     /// Provider bot event application service.
     pub provider_bot_events: Arc<dyn ProviderBotEventService>,
     /// Organization management application service.
@@ -168,6 +171,7 @@ pub struct ServicesBuilder {
     provider_core: Option<Arc<dyn ProviderCoreService>>,
     provider_bot_core: Option<Arc<dyn ProviderBotCoreService>>,
     provider_management: Option<Arc<dyn ProviderManagementService>>,
+    a2a_bot_management: Option<Arc<dyn A2aBotManagementService>>,
     provider_bot_events: Option<Arc<dyn ProviderBotEventService>>,
     organization_management: Option<Arc<dyn OrganizationManagementService>>,
     group_query: Option<Arc<dyn GroupQueryService>>,
@@ -237,6 +241,11 @@ impl ServicesBuilder {
     /// Set the human interaction orchestration service.
     pub fn interactions(mut self, service: Arc<dyn InteractionService>) -> Self {
         self.interactions = Some(service);
+        self
+    }
+
+    pub fn a2a_bot_management(mut self, service: Arc<dyn A2aBotManagementService>) -> Self {
+        self.a2a_bot_management = Some(service);
         self
     }
 
@@ -491,6 +500,7 @@ impl ServicesBuilder {
             provider_core: required(self.provider_core, "provider_core")?,
             provider_bot_core: required(self.provider_bot_core, "provider_bot_core")?,
             provider_management: required(self.provider_management, "provider_management")?,
+            a2a_bot_management: self.a2a_bot_management,
             provider_bot_events: required(self.provider_bot_events, "provider_bot_events")?,
             organization_management: required(
                 self.organization_management,
@@ -610,6 +620,7 @@ impl ServicesBuilder {
             provider_bot_core: self
                 .provider_bot_core
                 .unwrap_or_else(|| Arc::new(NoopProviderBotCoreService)),
+            a2a_bot_management: self.a2a_bot_management,
             provider_management: self
                 .provider_management
                 .unwrap_or_else(|| Arc::new(NoopProviderManagementService)),

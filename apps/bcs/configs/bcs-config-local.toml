@@ -285,3 +285,8 @@ schema_version = 1
 name = "bcsPanel"
 type = "file"
 file = "assets/panel/dist/index.umd.js"
+
+[a2a_input]
+# Human approval wait is separate from the existing execution timeout.
+wait_timeout_ms = 600000
+total_timeout_ms = 1800000

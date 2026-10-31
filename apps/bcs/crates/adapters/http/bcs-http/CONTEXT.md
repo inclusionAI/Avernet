@@ -2,6 +2,13 @@
 
 ## Provides
 
+`POST /providers/{provider_id}/bots` accepts optional `agent_card_url` and
+dispatches that branch to A2aBotManagementService. Missing/null preserves the
+legacy Provider management path. Provider/Bot registration handlers live under
+routes/providers/registration.rs; HTTP does not fetch Cards or write stores.
+The request/atomicity/duplicate contract is documented in
+docs/specs/a2a/provider-admin-registration-v1.md at the repository root.
+
 `GET /api/v1/collaboration/providers/by-slug/{slug}` is unauthenticated and exposes only Provider
 identity, name, auth mode, enabled status, protocol version and audit timestamps.
 The legacy `/providers/by-slug/{slug}` remains an alias with identical responses
@@ -108,3 +115,18 @@ Group policy and Session callback columns, indexes and values remain unchanged;
 runtime stores no longer read or write those fields. This retirement adds no
 schema migration. Stop old binaries to prevent legacy scanners and callbacks
 from continuing to run. See `apps/bcs/specs/2026-10-27-retire-service-session-policies/spec.md`.
+
+## A2A Card administration
+
+`PUT /providers/{provider_id}/bots/{bot_uuid}/a2a` accepts exactly one of source Card URL or
+inline JSON Card plus the expected configuration revision. `POST .../a2a/card:refresh` re-fetches only the
+saved source. Both extract a Provider-admin Bearer and call
+`A2aBotManagementService`; core affiliation/authorization rules remain in the
+service. Memory-only test servers may omit this durable capability and return
+503 explicitly. Neither route submits a probe task or exposes credential values.
+
+`GET /bots/{id}/agent-card` calls the same authorized Bot detail use case and
+returns the registered source Card, or 404 for a legacy Bot. It does not advertise
+BCS as an A2A server. Detail, discovery, search and batched query views carry the
+full optional `agent_card` alongside existing fields; legacy responses omit it.
+Legacy Bot JSON projections are isolated in routes/bot_views.rs.

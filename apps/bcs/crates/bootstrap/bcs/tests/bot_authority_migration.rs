@@ -243,7 +243,7 @@ async fn bot_authority_upgrade_preserves_legacy_rows_and_extends_runtime() {
 
     bcs::migrations::run_sqlite_migrations(db.as_ref())
         .await
-        .expect("run migration chain with 037");
+        .expect("run migration chain through A2A 038");
 
     // The complete chain is recorded exactly once; a re-run changes nothing.
     let history = db
@@ -260,6 +260,7 @@ async fn bot_authority_upgrade_preserves_legacy_rows_and_extends_runtime() {
         authority.get("name"),
         Some(&DbValue::String("bot_authority".into()))
     );
+    assert_eq!(history.last().expect("A2A migration present").get("name"),Some(&DbValue::String("bot_a2a".into())));
     bcs::migrations::run_sqlite_migrations(db.as_ref())
         .await
         .expect("idempotent re-run");

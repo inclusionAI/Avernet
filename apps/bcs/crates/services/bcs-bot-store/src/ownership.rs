@@ -60,24 +60,7 @@ fn initialization_invalid(detail: String) -> ServiceError {
 pub(crate) fn verified_initialization(
     initialization: &OwnershipInitialization,
 ) -> ServiceResult<(String, String)> {
-    let owner = initialization.owner_user_id.trim();
-    if owner.is_empty() {
-        return Err(initialization_invalid(
-            "owner_user_id must not be blank".to_string(),
-        ));
-    }
-    if owner != initialization.owner_user_id {
-        return Err(initialization_invalid(
-            "owner_user_id must not carry surrounding whitespace".to_string(),
-        ));
-    }
-    if owner.starts_with("human_") {
-        return Err(initialization_invalid(
-            "owner_user_id must be the raw User ID, not a persisted \
-             Human actor id"
-                .to_string(),
-        ));
-    }
+    let owner = verified_owner(initialization)?;
     match &initialization.mutation.actor {
         AuthorityActor::Human { user_id } => {
             if user_id != owner {
@@ -97,6 +80,28 @@ pub(crate) fn verified_initialization(
     }
     validate_mutation(&initialization.mutation)?;
     Ok((owner.to_string(), format!("human_{owner}")))
+}
+
+fn verified_owner(initialization: &OwnershipInitialization) -> ServiceResult<&str> {
+    let owner = initialization.owner_user_id.trim();
+    if owner.is_empty() {
+        return Err(initialization_invalid(
+            "owner_user_id must not be blank".to_string(),
+        ));
+    }
+    if owner != initialization.owner_user_id {
+        return Err(initialization_invalid(
+            "owner_user_id must not carry surrounding whitespace".to_string(),
+        ));
+    }
+    if owner.starts_with("human_") {
+        return Err(initialization_invalid(
+            "owner_user_id must be the raw User ID, not a persisted \
+             Human actor id"
+                .to_string(),
+        ));
+    }
+    Ok(owner)
 }
 
 /// Mutation ids are server-generated idempotence keys, never
@@ -200,11 +205,33 @@ pub(crate) fn ownership_authorization_steps(
 ) -> ServiceResult<OwnershipSteps> {
     let (owner, owner_actor) = verified_initialization(initialization)?;
     let actor_id = owner_actor.clone();
-    // Audit identity is the real initiator — the verified
-    // Human of the registration token (spec §3.1 mutation
-    // rules). No token or credential enters audit rows.
-    let actor_kind = "human";
+    build_ownership_steps(flavor, env, bot_id, initialization, human_session_token,
+        steps_base, (owner, owner_actor, "human", actor_id))
+}
 
+/// Separate Provider-admin admission; the Human-token operation stays strict.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn provider_ownership_authorization_steps(
+    flavor: DbSqlFlavor, env: &str, bot_id: &str, provider_id: &str,
+    initialization: &OwnershipInitialization, human_session_token: &str, steps_base: usize,
+) -> ServiceResult<OwnershipSteps> {
+    let owner = verified_owner(initialization)?.to_string();
+    if provider_id.trim().is_empty() || !matches!(&initialization.mutation.actor,
+        AuthorityActor::Provider {provider_id:actor} if actor == provider_id) {
+        return Err(initialization_invalid("Provider registration actor does not match the verified Provider".into()));
+    }
+    validate_mutation(&initialization.mutation)?;
+    let owner_actor = owner_actor_id(&owner);
+    build_ownership_steps(flavor, env, bot_id, initialization, human_session_token,
+        steps_base, (owner, owner_actor, "provider", format!("provider_{provider_id}")))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_ownership_steps(
+    flavor: DbSqlFlavor, env: &str, bot_id: &str, initialization: &OwnershipInitialization,
+    human_session_token: &str, steps_base: usize,
+    (owner, owner_actor, actor_kind, actor_id): (String, String, &str, String),
+) -> ServiceResult<OwnershipSteps> {
     let mut steps: Vec<DbTransactionStep> = Vec::new();
     // (absolute-ish step index, result column) pairs the
     // final guard statement must bind.

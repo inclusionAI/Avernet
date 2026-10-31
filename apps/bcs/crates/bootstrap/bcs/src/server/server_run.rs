@@ -276,6 +276,8 @@ impl BcsServer {
             .map_err(|e| crate::BcsError::InvalidConfig(format!("Invalid address: {}", e)))?;
 
         self.initialize_lifecycle().await?;
+        let _a2a_card_refresh = self.state.services.a2a_bot_management.clone()
+            .map(super::a2a_wiring::start_card_refresh);
         let ws_leadership = crate::ws_leadership::start(self.state.clone()).await;
         let _state_machine_timeout_handle = self.spawn_state_machine_timeout_scanner();
         let state_machine_progression_handle = Arc::new(Mutex::new(self.spawn_state_machine_progression_scanner()));

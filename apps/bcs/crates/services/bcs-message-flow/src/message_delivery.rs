@@ -124,6 +124,7 @@ impl MessageDeliveryCoreService for MessageDeliveryCore {
                     _ => return Err(invalid()),
                 },
                 Event::Submitted if active(current.status) => current.status,
+                Event::RunDeadlineAdjusted if matches!(current.status, Status::Dispatching | Status::Running) => current.status,
                 Event::DefinitelyNotSent { retry } => {
                     let status = match current.status {
                         Status::Dispatching => {
@@ -205,7 +206,8 @@ impl MessageDeliveryCoreService for MessageDeliveryCore {
                 _ => return Err(invalid()),
             }
         };
-        if next == current.status && result.state.may_have_been_sent == current.may_have_been_sent {
+        if next == current.status && result.state.may_have_been_sent == current.may_have_been_sent
+            && event != Event::RunDeadlineAdjusted {
             // A typed caller dispatch commit changes the row (projection merge)
             // even though the status stays Dispatching; it must persist.
             if matches!(event, Event::CommitCallerDispatch) {

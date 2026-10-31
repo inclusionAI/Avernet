@@ -1,3 +1,6 @@
+#[path = "bot_views.rs"]
+mod views;
+use views::*;
 use axum::{
     Json,
     extract::{Path, Query, State},
@@ -368,100 +371,6 @@ pub async fn query_bots(
     Ok(Json(Value::Array(entries)))
 }
 
-fn list_bot_entry_to_json(bot: BotListEntry) -> Value {
-    let wire_capabilities = to_wire_capabilities(bot.capabilities);
-    let skill_names: Vec<String> = wire_capabilities
-        .skills
-        .iter()
-        .map(|s| s.name.clone())
-        .collect();
-    let mut caps =
-        serde_json::to_value(&wire_capabilities).unwrap_or_else(|_| serde_json::json!({}));
-    if let Some(obj) = caps.as_object_mut() {
-        obj.insert("skills".to_string(), serde_json::json!(skill_names));
-    }
-
-    serde_json::json!({
-        "bot_uuid": bot.bot_uuid,
-        "capabilities": caps,
-        "created_by": bot.created_by
-    })
-}
-
-fn bot_detail_to_json(bot: BotDetailResult) -> Value {
-    serde_json::json!({
-        "bot_uuid": bot.bot_uuid,
-        "capabilities": to_wire_capabilities(bot.capabilities),
-        "status": actor_status_to_wire(bot.status),
-        "created_by": bot.created_by,
-        "actor_kind": bot.actor_kind,
-        "env": bot.env,
-        "dynamic_status": to_wire_dynamic_status_response(bot.dynamic_status),
-    })
-}
-
-fn bot_query_entry_to_paged_json(bot: BotQueryEntry) -> Value {
-    serde_json::json!({
-        "bot_uuid": bot.bot_uuid,
-        "capabilities": to_wire_capabilities(bot.capabilities),
-        "created_by": bot.created_by
-    })
-}
-
-fn bot_query_entry_to_my_json(bot: BotQueryEntry) -> Value {
-    let wire_capabilities = to_wire_capabilities(bot.capabilities);
-    let skill_names: Vec<String> = wire_capabilities
-        .skills
-        .iter()
-        .map(|s| s.name.clone())
-        .collect();
-    let mut caps =
-        serde_json::to_value(&wire_capabilities).unwrap_or_else(|_| serde_json::json!({}));
-    if let Some(obj) = caps.as_object_mut() {
-        obj.insert("skills".to_string(), serde_json::json!(skill_names));
-    }
-
-    // Spec §8 mine row: the sampled per-item
-    // relation rides the legacy page additively
-    // (absent on pages without a sampled
-    // relation).
-    let access_relation =
-        bot.access_relation.map(Value::String);
-
-    serde_json::json!({
-        "bot_uuid": bot.bot_uuid,
-        "capabilities": caps,
-        "visibility": bot.visibility,
-        "created_by": bot.created_by,
-        "actor_kind": bot.actor_kind,
-        "env": bot.env,
-        "status": actor_status_to_wire(bot.status),
-        "dynamic_status": to_wire_dynamic_status_response(bot.dynamic_status),
-        "access_relation": access_relation,
-    })
-}
-
-fn bot_query_entry_to_query_json(bot: BotQueryEntry) -> Value {
-    serde_json::json!({
-        "bot_uuid": bot.bot_uuid,
-        "capabilities": to_wire_capabilities(bot.capabilities),
-        "visibility": bot.visibility,
-        "status": actor_status_to_wire(bot.status),
-        "actor_kind": bot.actor_kind,
-        "dynamic_status": to_wire_dynamic_status_response(bot.dynamic_status),
-    })
-}
-
-fn bot_visibility_to_json(result: BotVisibilityQueryResult) -> Value {
-    serde_json::json!({
-        "success": true,
-        "data": {
-            "bot_uuid": result.bot_uuid,
-            "visibility": result.visibility
-        }
-    })
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FriendshipFilter {
     All,
@@ -630,6 +539,7 @@ pub async fn search_bots(
         .items
         .into_iter()
         .map(|bot| BotSearchEntry {
+            agent_card: bot.agent_card,
             bot_uuid: bot.bot_uuid,
             name: bot.capabilities.name,
             summary: bot.capabilities.summary,

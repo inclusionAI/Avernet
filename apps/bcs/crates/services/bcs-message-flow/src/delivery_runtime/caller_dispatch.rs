@@ -116,17 +116,7 @@ impl DeliveryRuntime {
                 // proof; the dev request-scoped cache credential never rides it.
                 caller_expires_at_ms: None,
                 version: 1,
-                owner: match &context.target {
-                    bcs_domain::BotDeliveryTarget::HttpProvider { .. } => {
-                        bcs_service_api::port::chat_run::BotRunTransportOwner::HttpProvider {
-                            provider_id: context.provider_id.clone(),
-                            provider_bot_ref: context.provider_bot_ref.clone(),
-                        }
-                    }
-                    bcs_domain::BotDeliveryTarget::WebSocket { .. } => {
-                        bcs_service_api::port::chat_run::BotRunTransportOwner::WebSocket
-                    }
-                },
+                owner: bcs_service_api::port::chat_run::BotRunTransportOwner::from_target(&context.target),
                 connection_id: None,
                 downstream_session_key: row.session_id.clone(),
                 downstream_run_id: None,

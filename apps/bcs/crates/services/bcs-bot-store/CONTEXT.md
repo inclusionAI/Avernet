@@ -153,3 +153,43 @@ exact provider) and the conditional write re-asserts the same ownership
 inside its WHERE clause, so Bots of other providers, unbound Bots and
 disabled bindings are out of scope without ever being reported
 "unconfigured".
+
+## A2A Card storage
+
+`DbA2aBotStore` implements `A2aBotRepoPort` using only raw `agent_card`,
+nullable `agent_card_url` and `agent_card_revision` on `bcs_bots` after MySQL 038 /
+SQLite 039. One explicit read returns one Card; one CAS commits all three fields
+and updates the generic Bot audit time. Writes fence environment, Provider/ref,
+active Gateway mode and revision; failures propagate. Routes and credential
+references are derived, never duplicated in this store.
+Refresh reads at most 16 URL-backed snapshots in one bot_uuid keyset query, not
+one ID query plus per-Card lookups. Availability projects only interfaces for at
+most 256 IDs. No persistent refresh/error state or additional cache exists.
+See docs/specs/a2a/minimal-card-registration-v1.md for access costs and limits.
+
+Full Card queries select only Bot identity and Card payload in batches of 256.
+Discovery evaluates Card names/descriptions and skill IDs/names/descriptions/tags
+in SQL before selecting matching payloads. A nonmatching A2A identity remains
+distinguishable from a legacy Bot, preventing stale capability fallback. Search
+count and pagination share the same predicate. SQL flavor is explicitly injected;
+SQLite uses JSON extraction and MySQL uses JSON_SEARCH with a literal escape
+character and bound values. See the
+[MySQL JSON search contract](https://dev.mysql.com/doc/refman/8.0/en/json-search-functions.html).
+Provider database implementations and tests are separated into provider_db.rs
+and provider_tests.rs; the existing Provider behavior remains covered by its suite.
+
+
+A2A strict registration extends the existing ownership composite with a checked
+Card UPDATE inside the same transaction, after the new Bot/binding and before
+ownership/profile/audit steps. Identity, credential scope and initial revision
+are checked before writing. It adds one single-row statement, no network or new
+schema. Failure of Card or a later ownership step rolls back every lifecycle row.
+
+
+Provider-admin A2A admission uses the separate
+`create_provider_admin_a2a_bot_with_ownership` operation. Its ownership builder
+requires a Provider actor exactly matching the Bot's Provider; the old Human
+registration operations still reject Provider actors. Both paths reuse the
+same SQL transaction/guard statements, differing only in verified audit identity.
+No credential reaches audit rows; no post-commit owner/profile/Card write is
+introduced. A rollback includes Bot, binding, Card, Human/owner and default profile.

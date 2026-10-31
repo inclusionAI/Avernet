@@ -1,6 +1,5 @@
 //! Extracted verbatim from `server.rs`: BcsServer infrastructure assembly (storage/leader/plugins).
 use super::*;
-
 impl BcsServer {
     /// Create a new BCS server with storage (async).
     ///
@@ -14,7 +13,6 @@ impl BcsServer {
         )
         .await
     }
-
     /// Create a new BCS server with externally supplied infrastructure plugins.
     pub async fn new_with_infrastructure(
         config: BcsConfig,
@@ -22,7 +20,6 @@ impl BcsServer {
         extensions: BcsServerExtensions,
     ) -> crate::Result<Self> {
         use bcs_service_api::BotRegistryCoreService;
-
         let group_session_secret_access = crate::http_adapter::build_secret_access(&config).await?;
         let invite_token_secret = resolve_invite_token_secret(&config);
         let gateway_principal_verifier = build_gateway_principal_verifier_from_secret_access(
@@ -49,7 +46,6 @@ impl BcsServer {
             db_adapter_ready = infrastructure_plugins.db().is_some(),
             "Selected infrastructure plugins"
         );
-
         // Run SQLite DDL initialization when local SQLite is selected.
         if infrastructure_plugins.db_kind() == DbPluginKind::LocalSqlite {
             if let Some(db) = infrastructure_plugins.db() {
@@ -67,7 +63,6 @@ impl BcsServer {
                 );
             }
         }
-
         let db_plugin = infrastructure_plugins.db().ok_or_else(|| {
             crate::BcsError::StorageInitError(
                 "LocalSqlite storage selected but DbPlugin handle is unavailable".to_string(),
@@ -77,7 +72,6 @@ impl BcsServer {
         let db_flavor = db_sql_flavor(&db_kind);
         let event_repo = crate::eventing_wiring::db_event_repo(db_plugin.clone(), db_flavor);
         let provider_repos = db_provider_repos(db_plugin.clone(), &db_kind, config.provider_http.downlink_detection_source);
-
         let cache_plugin = infrastructure_plugins
             .cache()
             .unwrap_or_else(|| Arc::new(bcs_cache_local::InMemoryCachePlugin::new()));
@@ -94,7 +88,9 @@ impl BcsServer {
             provider_repos.provider_repo.clone(),
             provider_repos.provider_credentials.clone(),
             provider_repos.provider_bindings.clone(),
-        ).with_bot_provider_repo(provider_repos.bot_providers.clone()));
+        ).with_bot_provider_repo(provider_repos.bot_providers.clone())
+            .with_a2a_route_policy(outbound_url_guard.clone(),config.a2a_grpc.as_ref().map(|mesh|mesh.routes.iter().map(|route|route.interface_url.clone()).collect()).unwrap_or_default())
+            .with_a2a_cards(Arc::new(bcs_bot_store::a2a::DbA2aBotStore::new(db_plugin.clone(), crate::env::resolve_env(), db_flavor))));
         let bot_registry: Arc<dyn BotRegistryCoreService> = bot_core_arc.clone();
 
         let leader_election_registration = if extensions.leader_election.is_some() {
@@ -175,6 +171,10 @@ impl BcsServer {
                 channel_binding_cleanup.clone(),
                 build_bot_catalog_cleanup(&config),
             );
+        let (a2a_bot_management, a2a_card_queries) = super::a2a_wiring::build_card_management(
+            db_plugin.clone(), db_flavor, provider_repos.bot_providers.clone(),
+            provider_core.clone(), outbound_url_guard.clone(), config.a2a_grpc.as_ref(),
+        )?;
         let (organization_core, organization_management) = db_organization_services(
             db_plugin.clone(),
             &db_kind,
@@ -395,19 +395,13 @@ impl BcsServer {
             bcs_provider_http::HttpProviderTransport::with_url_guard(outbound_url_guard.clone())
                 .with_chat_run_timeout_ms(config.provider_chat_run_timeout_ms),
         );
+        let a2a_transport = super::a2a_wiring::build_delivery(db_plugin.clone(), db_flavor,
+            provider_repos.provider_credentials.clone(), outbound_url_guard.clone(), config.a2a_grpc.as_ref())?;
         let provider_stream_gray_list = create_provider_stream_gray_list(&config);
         let raw_bot_delivery: Arc<dyn BotDeliveryPort> = Arc::new(
-            bcs_provider_http::BotTransportMux::new(ws_bot_delivery, provider_transport.clone()),
+            bcs_provider_http::BotTransportMux::new(ws_bot_delivery, provider_transport.clone()).with_a2a(a2a_transport.clone()),
         );
         let bot_delivery = maybe_wrap_bot_delivery(&config, raw_bot_delivery);
-        // P1.4 caller dispatch gate: caller-enabled Bots are never
-        // content-dispatched on ordinary transports — they answer only on
-        // the protected caller wire. The decorator consults the
-        // authoritative configuration through the same control plane
-        // (cached path); unconfigured/disabled targets pass through
-        // unchanged, aborts and availability checks are never blocked.
-        // Not installable over the memory composition (no caller
-        // configuration storage there).
         let bot_delivery: Arc<dyn BotDeliveryPort> =
             Arc::new(bcs_bot::application::CallerConfigurationDeliveryGate::new(
                 bot_delivery,
@@ -629,6 +623,7 @@ impl BcsServer {
             message_flow_builder.system_queue_port(),
             bot_registry.clone(),
             bot_core_arc.clone(),
+            Some(a2a_card_queries),
             organization_core.clone(),
             bot_connections.clone() as Arc<dyn bcs_service_api::BotConnectionControlPort>,
             sessions.clone(),
@@ -655,73 +650,12 @@ impl BcsServer {
         );
         let message_flow_builder = message_flow_builder.with_system_message(use_cases.system_message.clone()).with_direct_chat(a2a_chat_impl);
         let channel_slot = message_flow_builder.channel_slot();
-        // P3.3 SQL speaking leases (spec §6.3): the durable store keyed by
-        // the resolved environment shares the SQL wiring family. The SAME
-        // instance feeds the flow's admission fence AND the WS lease
-        // command entrance — one store, one epoch.
-        let lease_store: Arc<
-            dyn bcs_service_api::port::repo::session_speaking_lease::SpeakingLeaseRepoPort,
-        > = Arc::new(bcs_session_store::SqlSpeakingLeaseRepo::new(
-            db_plugin.clone(),
-            crate::env::resolve_env(),
-            db_flavor,
-        ));
-        // Caller identity chain (spec §10.13.7): the optional
-        // [caller_identity] section assembles the identity plugin; absent
-        // keeps the protected dispatch unmounted (fail-closed, no caller
-        // execution is fabricated). The SAME provider transport instance
-        // serves the container gateway (H2A chat.send downlink) and the
-        // execution send port.
-        let caller_identity =
-            crate::caller_identity_wiring::assemble_caller_identity_plugin(&config)?;
-        let caller_protected = caller_identity.map(|identity| {
-            crate::message_delivery_wiring::CallerProtectedAssembly {
-                provider_core: provider_core.clone(),
-                gateway: provider_transport.clone(),
-                sender: provider_transport.clone(),
-                identity,
-                // Observe fan-out (§6.4) over the SAME shared provider
-                // transport — the factory reuses its client and outbound-URL
-                // guard; non-Provider targets simply stay un-fanned.
-                observe_injector_factory: Some(Arc::new(
-                    crate::message_delivery_wiring::ProviderObserveInjectorFactory {
-                        transport: provider_transport.clone(),
-                    },
-                )),
-            }
-        });
-        let wired_message_flow =
-            crate::message_delivery_wiring::wire_with_caller_assembly(
-            message_flow_builder,
-            &config,
-            leader_election.clone(),
-            // The same caller-capable control plane GroupManagement reads:
-            // presence here arms the per-message speaking-lease fence
-            // (web_send re-resolves over live per-bot caller
-            // configurations), so a lease-less Human send is rejected in
-            // lease_required groups. Without it the fence reads
-            // any_bot_caller_enabled as false (Plain) and never consults
-            // the lease store.
-            Some(provider_control_plane.clone()),
-            caller_protected,
-            Some(lease_store.clone()),
-        )
-        .await?;
-        // §15.83 S4 (review-VI P1): the production composition's single
-        // orchestration mount. The same pipeline instance that serves the
-        // delegate arm also implements the orchestration dispatch port and
-        // the instance registrar; with_caller_orchestration mounts the
-        // control-plane resolver alongside. No protected pipeline (no
-        // [caller_identity]) degrades to the Refusing resolver so a
-        // caller-enabled assignee never silently dispatches on the
-        // ordinary wire. The BcsMessageFlow type annotation keeps the
-        // concrete Arc so the pipeline can be read off it before the
-        // wider dyn MessageFlowService binding below.
+        let (wired_message_flow, lease_store) = super::infrastructure_helpers::wire_caller_flow(
+            &config, db_plugin.clone(), db_flavor, message_flow_builder,
+            leader_election.clone(), provider_core.clone(), provider_control_plane.clone(),
+            provider_transport.clone(),
+        ).await?;
         let caller_orchestration_pipeline = wired_message_flow.caller_dispatch_pipeline.clone();
-        // Owner→caller relay (design 2026-10-30): the same CallerRelayState
-        // the admission seam captured into — bot-submitted caller-aware runs
-        // redeem here. Absent relay state (an explicit deployment opt-out)
-        // stays None and every bot submission keeps caller-closed behavior.
         let caller_relay_redeemer = wired_message_flow.caller_relay.as_ref().map(|relay| {
             std::sync::Arc::new(
                 bcs_message_flow::caller_relay::CallerRelaySubmissionRedeemer::new(
@@ -729,6 +663,7 @@ impl BcsServer {
                 ),
             ) as std::sync::Arc<dyn bcs_service_api::port::CallerRelayRedeemerPort>
         });
+        let a2a_deliveries = wired_message_flow.managed_deliveries.clone().ok_or_else(|| crate::BcsError::InvalidConfig("A2A delivery budgets unavailable".into()))?;
         let message_flow: Arc<dyn MessageFlowService> = wired_message_flow;
         let speaking_leases = Some(lease_store);
         let mut delivery_startup_guard = crate::message_delivery_wiring::StartupGuard(Some(message_flow.clone()));
@@ -892,13 +827,15 @@ impl BcsServer {
 
         // Build services bundle
         let message_flow = maybe_wrap_message_flow(&config, message_flow);
-        let interactions = create_interaction_service(
+        let interactions = create_interaction_service_with_a2a(
             provider_transport.clone(),
             bot_connections.clone(),
             use_cases.interaction_authorization.clone(),
             frontend_delivery.clone(),
             config.async_chat_run_retention_ms,
+            Some(a2a_transport.clone()),
         );
+        super::a2a_wiring::bind_input(&a2a_transport,interactions.clone(),a2a_deliveries,bot_run_context.clone(),&config)?;
         interaction_terminal_observer.set_service(interactions.clone());
         let channel_repos = if channel_bridge_enabled(&config) {
             channel_repos_with_storage(&infrastructure_plugins).await?
@@ -943,28 +880,11 @@ impl BcsServer {
         let provider_event_ingest: Arc<dyn bcs_service_api::ProviderEventIngestService> =
             provider_bot_events_impl.clone();
         let provider_bot_events: Arc<dyn ProviderBotEventService> = provider_bot_events_impl;
+        a2a_transport.set_ingest(provider_event_ingest.clone(), bot_run_context.clone())?;
         provider_transport.set_ingest(provider_event_ingest, bot_run_context.clone());
-        let group_context_repo: Arc<dyn bcs_group_context_store::GroupContextRepo> = match db_kind {
-            DbPluginKind::LocalSqlite => {
-                Arc::new(bcs_group_context_store::SqlGroupContextStore::sqlite(db_plugin.clone()))
-            }
-            DbPluginKind::Mysql => {
-                Arc::new(bcs_group_context_store::SqlGroupContextStore::oceanbase(db_plugin.clone()))
-            }
-            DbPluginKind::External(provider) => {
-                panic!(
-                    "external database plugin '{provider}' has no group-context store wiring"
-                )
-            }
-        };
-        let group_context_service: Arc<dyn bcs_service_api::GroupContextApplicationService> =
-            Arc::new(bcs_app_session::GroupContextAddAccessGuard::new(
-                Arc::new(bcs_app_group_context::GroupContextApplicationServiceImpl::new(
-                    group_context_repo,
-                )),
-                sessions.clone(),
-                session_repo.clone(),
-            ));
+        let group_context_service = super::infrastructure_helpers::group_context_service(
+            db_kind.clone(), db_plugin.clone(), sessions.clone(), session_repo.clone(),
+        );
         let services = ServicesBuilder::default()
             .registry(bot_registry.clone())
             .bot_authority(bot_authority.service.clone())
@@ -997,6 +917,7 @@ impl BcsServer {
             .provider_core(provider_core)
             .provider_bot_core(provider_bot_core)
             .provider_management(provider_management)
+            .a2a_bot_management(a2a_bot_management)
             .organization_management(organization_management)
             .provider_bot_events(provider_bot_events)
             .group_management(group_management)

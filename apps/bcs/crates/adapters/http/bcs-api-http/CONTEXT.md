@@ -127,3 +127,8 @@ derives authentication mode from the Provider configuration and validates the
 parent/slug split. No separate request slug or expected auth mode is consumed.
 Gateway Principal checks retain the signed Bot UUID and reject a mismatching
 Actor; bootstrap additionally injects current persisted-state validation.
+
+Scoped A2A registration also accepts an optional JSON body containing inline
+agent_card or agent_card_url. Query/body duplicates and mixed sources are rejected.
+An omitted A2A display name is passed to the application for Card.name defaults;
+legacy registrations still require names. See minimal-card-registration-v1.md.

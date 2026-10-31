@@ -223,3 +223,23 @@ Group policy and Session callback columns, indexes and values remain unchanged;
 runtime stores no longer read or write those fields. This retirement adds no
 schema migration. Stop old binaries to prevent legacy scanners and callbacks
 from continuing to run. See `apps/bcs/specs/2026-10-27-retire-service-session-policies/spec.md`.
+
+## A2A input composition
+
+The optional `a2a_grpc` configuration is validated before startup and injected
+into both Card selection and the shared delivery adapter. Bootstrap owns this
+concrete binding choice. Its explicit routes map selected Card interfaces to
+deployment-owned MOSN metadata; the adapter dials only the local sidecar. An
+absent configuration preserves HTTP-only selection. Core owns no tonic types,
+channels, registry calls or transport-specific routing headers.
+
+The infrastructure composition root passes full Card declarations to the outbound
+adapter and wires its InteractionProviderPort into the existing Provider mux.
+It injects the same managed-delivery service and tracked Run-context port used by
+the queue, the generic RunBudgetCore and a weak InteractionService back-reference.
+There is no adapter-to-concrete-service import or strong service cycle.
+`a2a_input.wait_timeout_ms` (600000) and `total_timeout_ms` (1800000) configure
+independent human-wait/total caps; typed config validation enforces positive
+wait <= total <= one day. Execution continues to use its existing timeout.
+Test-only server constructors retain the legacy mux unless explicitly configured;
+the production infrastructure path enables the supported Structured Input profile.

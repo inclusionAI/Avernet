@@ -463,22 +463,8 @@ impl BcsMessageFlow {
                     terminal: false,
                 })
                 .await;
-            let (transport_owner, provider_bypass_headers) = match delivery_target {
-                BotDeliveryTarget::WebSocket { .. } => {
-                    (BotRunTransportOwner::WebSocket, Vec::new())
-                }
-                BotDeliveryTarget::HttpProvider {
-                    provider_id,
-                    provider_bot_ref,
-                    ..
-                } => (
-                    BotRunTransportOwner::HttpProvider {
-                        provider_id: provider_id.clone(),
-                        provider_bot_ref: provider_bot_ref.clone(),
-                    },
-                    provider_bypass_headers.to_vec(),
-                ),
-            };
+            let transport_owner = BotRunTransportOwner::from_target(delivery_target);
+            let provider_bypass_headers = if delivery_target.is_http_provider() { provider_bypass_headers.to_vec() } else { Vec::new() };
             run_context
                 .register_active_run(ActiveBotRunContext {
                     canonical_run_id: run_id.to_string(),

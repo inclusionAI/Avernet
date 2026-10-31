@@ -404,6 +404,20 @@ pub trait ManagedMessageDeliveryService: Send + Sync {
     /// Best-effort post-commit observations; status callers must re-read on lag.
     fn subscribe_changes(&self) -> Option<tokio::sync::broadcast::Receiver<Vec<PersistedMessageDelivery>>> { None }
 
+    /// Trusted transport lost observation of an already-issued canonical Send.
+    /// Retain its occupied slot and cancellation intent. Never terminalizes,
+    /// retries submission, revives terminal work or accepts a request alias.
+    async fn mark_run_transport_unknown(
+        &self,_scope:&crate::BotRunScope,_run_id:&str,_now_ms:u64,
+    )->Result<(),ManagedDeliveryError> {Err(ManagedDeliveryError::Conflict)}
+
+    /// Internal budgeting only. Requires the exact canonical Run and scope,
+    /// an unexpired Dispatching/Running Send and a future deadline. This does
+    /// not release the Session slot, alter ownership or authorize new I/O.
+    async fn reschedule_run_deadline(
+        &self, _scope: &crate::BotRunScope, _run_id: &str, _deadline_ms: u64, _now_ms: u64,
+    ) -> Result<(), ManagedDeliveryError> { Err(ManagedDeliveryError::Conflict) }
+
     async fn admit_batch(&self, _commands: Vec<AdmitMessageDeliveries>) -> Result<Vec<DeliveryAdmissionResult>, ManagedDeliveryError> {
         Err(ManagedDeliveryError::Conflict)
     }

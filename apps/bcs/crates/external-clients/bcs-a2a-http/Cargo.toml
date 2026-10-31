@@ -1,0 +1,44 @@
+[package]
+name = "bcs-a2a-http"
+description = "Outbound A2A protocol adaptation for BCS"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+a2a = { package = "a2a-lf", version = "=0.4.2" }
+a2a-client = { package = "a2a-client-lf", version = "=0.2.9", default-features = false, features = ["rustls-tls"] }
+a2a-pb = "=0.3.2"
+tonic = { version = "0.14", features = ["transport"] }
+prost = "0.14"
+prost-types = "0.14"
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+percent-encoding = "2"
+serde = { workspace = true }
+serde_json = { workspace = true }
+futures = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+bcs-route-security = { workspace = true }
+bcs-service-api = { workspace = true }
+bcs-protocol = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+bcs-domain = { workspace = true }
+bcs-interaction = { workspace = true }
+bcs-message-store = { workspace = true }
+bcs-test-support = { workspace = true }
+bcs-db-api = { workspace = true }
+bcs-db-local = { workspace = true }
+bcs-chat-run-store = { workspace = true }
+bcs-bot-store = { workspace = true }
+bcs-message-flow = { workspace = true }
+axum = { workspace = true }

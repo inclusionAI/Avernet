@@ -1,3 +1,5 @@
+#[path = "bot_delivery.rs"]
+mod delivery;
 #[path = "bot_coordination.rs"]
 mod coordination;
 
@@ -47,6 +49,9 @@ pub struct BotCore {
     provider_credentials: Option<Arc<dyn ProviderCredentialRepoPort>>,
     pub(super) provider_bindings: Option<Arc<dyn ProviderBotBindingRepoPort>>,
     pub(super) bot_providers: Option<Arc<dyn BotProviderRepoPort>>,
+    a2a_cards: Option<Arc<dyn bcs_service_api::port::repo::a2a_bot::A2aBotRepoPort>>,
+    a2a_url_guard:bcs_route_security::OutboundUrlGuard,
+    a2a_grpc_urls:Vec<String>,
 }
 
 impl BotCore {
@@ -69,6 +74,9 @@ impl BotCore {
             provider_credentials: None,
             provider_bindings: None,
             bot_providers: None,
+            a2a_cards: None,
+            a2a_url_guard:bcs_route_security::OutboundUrlGuard::strict(),
+            a2a_grpc_urls:vec![],
         }
     }
 
@@ -84,7 +92,19 @@ impl BotCore {
             provider_credentials: Some(provider_credentials),
             provider_bindings: Some(provider_bindings),
             bot_providers: None,
+            a2a_cards: None,
+            a2a_url_guard:bcs_route_security::OutboundUrlGuard::strict(),
+            a2a_grpc_urls:vec![],
         }
+    }
+
+    pub fn with_a2a_route_policy(mut self, guard:bcs_route_security::OutboundUrlGuard, grpc_urls:Vec<String>)->Self {
+        self.a2a_url_guard=guard;self.a2a_grpc_urls=grpc_urls;self
+    }
+
+    pub fn with_a2a_cards(mut self, cards: Arc<dyn bcs_service_api::port::repo::a2a_bot::A2aBotRepoPort>) -> Self {
+        self.a2a_cards = Some(cards);
+        self
     }
 
     pub fn with_bot_provider_repo(mut self, repo: Arc<dyn BotProviderRepoPort>) -> Self {
@@ -383,104 +403,11 @@ impl BotRegistryCoreService for BotCore {
     }
 
     async fn resolve_delivery_target(&self, bot_id: &str) -> ServiceResult<BotDeliveryTarget> {
-        let bot = self
-            .repo
-            .get(bot_id)
-            .await
-            .ok_or_else(|| ServiceError::BotNotFound(bot_id.to_string()))?;
+        self.resolve_delivery_target_impl(bot_id,false).await
+    }
 
-        let Some(bindings) = &self.provider_bindings else {
-            debug!(bot_id = %bot_id, "resolve_delivery_target: provider_bindings repo not configured, fallback to websocket");
-            return Ok(BotDeliveryTarget::WebSocket { bot_id: bot.bot_uuid });
-        };
-        let Some(binding) = bindings.get_binding_by_bot_uuid(bot_id).await? else {
-            debug!(bot_id = %bot_id, "resolve_delivery_target: no provider binding, fallback to websocket");
-            return Ok(BotDeliveryTarget::WebSocket { bot_id: bot.bot_uuid });
-        };
-        if binding.disabled {
-            warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, provider_id = %binding.provider_id, "resolve_delivery_target: provider bot binding disabled");
-            return Err(ServiceError::InvalidOperation {
-                message: format!("provider bot '{}' is disabled", bot_id),
-                request_id: None,
-            });
-        }
-
-        let providers = self.provider_repo.as_ref().ok_or_else(|| {
-            ServiceError::InternalError("provider repo not configured".to_string())
-        })?;
-        let provider = providers
-            .get_provider(&binding.provider_id)
-            .await?
-            .ok_or_else(|| {
-                warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, provider_id = %binding.provider_id, "resolve_delivery_target: provider not found");
-                ServiceError::InvalidOperation {
-                    message: format!("provider '{}' not found", binding.provider_id),
-                    request_id: None,
-                }
-            })?;
-        if provider.disabled {
-            warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, provider_id = %provider.provider_id, "resolve_delivery_target: provider disabled");
-            return Err(ServiceError::InvalidOperation {
-                message: format!("provider '{}' is disabled", provider.provider_id),
-                request_id: None,
-            });
-        }
-        let downlink = parse_downlink_config(&provider.config)?;
-        if !downlink.enabled {
-            warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, provider_id = %provider.provider_id, "resolve_delivery_target: provider downlink disabled");
-            return Err(ServiceError::InvalidOperation {
-                message: format!("provider '{}' downlink is disabled", provider.provider_id),
-                request_id: None,
-            });
-        }
-
-        let credentials = self.provider_credentials.as_ref().ok_or_else(|| {
-            ServiceError::InternalError("provider credential repo not configured".to_string())
-        })?;
-        let credential = credentials
-            .get_credential_by_kind(&provider.provider_id, "downlink_bcs_to_provider")
-            .await?
-            .ok_or_else(|| {
-                warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, provider_id = %provider.provider_id, "resolve_delivery_target: downlink credential not found");
-                ServiceError::InvalidOperation {
-                    message: format!(
-                        "provider '{}' downlink credential not found",
-                        provider.provider_id
-                    ),
-                    request_id: None,
-                }
-            })?;
-        if credential.disabled {
-            warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, provider_id = %provider.provider_id, "resolve_delivery_target: downlink credential disabled");
-            return Err(ServiceError::InvalidOperation {
-                message: format!(
-                    "provider '{}' downlink credential is disabled",
-                    provider.provider_id
-                ),
-                request_id: None,
-            });
-        }
-
-        let webhook_url = binding.webhook_url.as_ref().or(downlink.webhook_url.as_ref())
-            .ok_or_else(|| ServiceError::InvalidOperation {
-                message: "missing_delivery_endpoint: configure a Bot or Provider webhook_url".to_string(),
-                request_id: None,
-            })?.clone();
-        info!(
-            bot_id = %bot_id,
-            provider_id = %provider.provider_id,
-            provider_bot_ref = %binding.provider_bot_ref,
-            protocol_version = %downlink.protocol_version,
-            "resolve_delivery_target: resolved http provider target"
-        );
-        Ok(BotDeliveryTarget::HttpProvider {
-            bot_id: bot.bot_uuid,
-            provider_id: provider.provider_id,
-            provider_bot_ref: binding.provider_bot_ref,
-            webhook_url,
-            bcs_to_provider_token: RedactedToken::new(credential.secret_value),
-            protocol_version: downlink.protocol_version,
-        })
+    async fn resolve_abort_target(&self,bot_id:&str)->ServiceResult<BotDeliveryTarget> {
+        self.resolve_delivery_target_impl(bot_id,true).await
     }
 
     async fn resolve_coordination_surface(
@@ -765,114 +692,8 @@ impl BotRegistryCoreService for BotCore {
     /// exactly — but read failures PROPAGATE instead of
     /// the legacy warn-and-degrade, so a store outage can
     /// never masquerade as "unreachable".
-    async fn try_runtime_activity_for(
-        &self,
-        bot_ids: &[String],
-    ) -> ServiceResult<RuntimeActivitySnapshot> {
-        let observed_at_ms = unix_millis_now();
-        // ONE observation of the current instance's WS
-        // connection set.
-        let ws_connected = self
-            .repo
-            .list_connected()
-            .await
-            .into_iter()
-            .collect::<HashSet<_>>();
-        let mut active: HashSet<String> = bot_ids
-            .iter()
-            .filter(|bot_id| ws_connected.contains(*bot_id))
-            .cloned()
-            .collect();
-        let mut provider_candidates = bot_ids
-            .iter()
-            .filter(|bot_id| !ws_connected.contains(*bot_id))
-            .cloned()
-            .collect::<Vec<_>>();
-        // The core NEVER returns duplicates regardless of
-        // caller input.
-        provider_candidates.dedup();
-
-        let Some(provider_bindings) = &self.provider_bindings else {
-            return Ok(self.activity_snapshot(observed_at_ms, bot_ids, active));
-        };
-        let Some(provider_repo) = &self.provider_repo else {
-            return Ok(self.activity_snapshot(observed_at_ms, bot_ids, active));
-        };
-        let Some(provider_credentials) = &self.provider_credentials else {
-            return Ok(self.activity_snapshot(observed_at_ms, bot_ids, active));
-        };
-
-        // Bounded provider resolution: at most
-        // AUTHORITY_QUERY_CHUNK ids per bindings query (spec
-        // §8.0: 有界块数而非 N 次 DB 往返).
-        let mut bindings = Vec::new();
-        for chunk in provider_candidates.chunks(
-            bcs_service_api::types::bot_authority::AUTHORITY_QUERY_CHUNK,
-        ) {
-            bindings.extend(
-                provider_bindings
-                    .list_bindings_by_bot_uuids(chunk)
-                    .await?,
-            );
-        }
-        let provider_ids = bindings
-            .iter()
-            .filter(|binding| !binding.disabled)
-            .map(|binding| binding.provider_id.clone())
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
-        if provider_ids.is_empty() {
-            return Ok(self.activity_snapshot(observed_at_ms, bot_ids, active));
-        }
-
-        let providers = provider_repo
-            .list_providers_by_ids(&provider_ids)
-            .await?
-            .into_iter()
-            .map(|provider| (provider.provider_id.clone(), provider))
-            .collect::<HashMap<_, _>>();
-        let credentials = provider_credentials
-            .list_credentials_by_kind_for_providers(
-                &provider_ids,
-                "downlink_bcs_to_provider",
-            )
-            .await?
-            .into_iter()
-            .map(|credential| (credential.provider_id.clone(), credential))
-            .collect::<HashMap<_, _>>();
-
-        // Same routability predicates as the legacy
-        // per-bot target resolution: binding, provider and
-        // credential enabled, downlink enabled and one
-        // delivery endpoint resolvable.
-        for binding in bindings {
-            if binding.disabled {
-                continue;
-            }
-            let Some(provider) = providers.get(&binding.provider_id) else {
-                continue;
-            };
-            if provider.disabled {
-                continue;
-            }
-            let Ok(downlink) = parse_downlink_config(&provider.config) else {
-                continue;
-            };
-            if !downlink.enabled
-                || binding.webhook_url.as_ref().or(downlink.webhook_url.as_ref()).is_none()
-            {
-                continue;
-            }
-            let Some(credential) = credentials.get(&binding.provider_id) else {
-                continue;
-            };
-            if credential.disabled {
-                continue;
-            }
-            active.insert(binding.bot_uuid);
-        }
-        Ok(self.activity_snapshot(observed_at_ms, bot_ids, active))
+    async fn try_runtime_activity_for(&self, bot_ids: &[String]) -> ServiceResult<RuntimeActivitySnapshot> {
+        self.try_runtime_activity_for_impl(bot_ids).await
     }
 
     /// Batch check runtime-active actors for owner-facing
@@ -885,109 +706,8 @@ impl BotRegistryCoreService for BotCore {
     /// degraded-success shape — the mine path does NOT use
     /// it any more; [`Self::try_runtime_activity_for`] is
     /// the strict §8.0 observation.
-    async fn list_runtime_active_bot_ids(
-        &self,
-        bot_ids: &[String],
-    ) -> Vec<String> {
-        let mut active = HashSet::new();
-        let mut provider_candidates = Vec::new();
-        for bot_id in bot_ids {
-            if self.repo.is_connected(bot_id).await {
-                active.insert(bot_id.clone());
-            } else {
-                provider_candidates.push(bot_id.clone());
-            }
-        }
-
-        let Some(provider_bindings) = &self.provider_bindings else {
-            return active.into_iter().collect();
-        };
-        let Some(provider_repo) = &self.provider_repo else {
-            return active.into_iter().collect();
-        };
-        let Some(provider_credentials) = &self.provider_credentials else {
-            return active.into_iter().collect();
-        };
-
-        let bindings = match provider_bindings
-            .list_bindings_by_bot_uuids(&provider_candidates)
-            .await
-        {
-            Ok(bindings) => bindings,
-            Err(error) => {
-                warn!(request_id = %bcs_observability::CurrentRequestId, error = %error, "list_runtime_active_bot_ids: failed to list provider bindings");
-                return active.into_iter().collect();
-            }
-        };
-        let provider_ids = bindings
-            .iter()
-            .filter(|binding| !binding.disabled)
-            .map(|binding| binding.provider_id.clone())
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
-        if provider_ids.is_empty() {
-            return active.into_iter().collect();
-        }
-
-        let providers = match provider_repo.list_providers_by_ids(&provider_ids).await {
-            Ok(providers) => providers,
-            Err(error) => {
-                warn!(request_id = %bcs_observability::CurrentRequestId, error = %error, "list_runtime_active_bot_ids: failed to list providers");
-                return active.into_iter().collect();
-            }
-        };
-        let credentials = match provider_credentials
-            .list_credentials_by_kind_for_providers(
-                &provider_ids,
-                "downlink_bcs_to_provider",
-            )
-            .await
-        {
-            Ok(credentials) => credentials,
-            Err(error) => {
-                warn!(request_id = %bcs_observability::CurrentRequestId, error = %error, "list_runtime_active_bot_ids: failed to list provider credentials");
-                return active.into_iter().collect();
-            }
-        };
-
-        let providers = providers
-            .into_iter()
-            .map(|provider| (provider.provider_id.clone(), provider))
-            .collect::<HashMap<_, _>>();
-        let credentials = credentials
-            .into_iter()
-            .map(|credential| (credential.provider_id.clone(), credential))
-            .collect::<HashMap<_, _>>();
-
-        for binding in bindings {
-            if binding.disabled {
-                continue;
-            }
-            let Some(provider) = providers.get(&binding.provider_id) else {
-                continue;
-            };
-            if provider.disabled {
-                continue;
-            }
-            let Ok(downlink) = parse_downlink_config(&provider.config) else {
-                continue;
-            };
-            if !downlink.enabled
-                || binding.webhook_url.as_ref().or(downlink.webhook_url.as_ref()).is_none()
-            {
-                continue;
-            }
-            let Some(credential) = credentials.get(&binding.provider_id) else {
-                continue;
-            };
-            if credential.disabled {
-                continue;
-            }
-            active.insert(binding.bot_uuid);
-        }
-
-        active.into_iter().collect()
+    async fn list_runtime_active_bot_ids(&self, bot_ids: &[String]) -> Vec<String> {
+        self.list_runtime_active_bot_ids_impl(bot_ids).await
     }
 
     async fn is_effectively_online(&self, bot_id: &str) -> bool {
@@ -1002,7 +722,7 @@ impl BotRegistryCoreService for BotCore {
         }
         matches!(
             bcs_observability::observe_result("bot.online.delivery_target", self.resolve_delivery_target(bot_id)).await,
-            Ok(BotDeliveryTarget::HttpProvider { .. })
+            Ok(BotDeliveryTarget::HttpProvider { .. } | BotDeliveryTarget::A2a { .. })
         )
     }
 

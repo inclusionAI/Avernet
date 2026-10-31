@@ -191,7 +191,13 @@ pub struct PatchProviderRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisterProviderBotRequest {
-    pub name: String,
+    /// Optional A2A display alias; legacy registrations still require a name.
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub agent_card_url: Option<String>,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub agent_card: Option<Value>,
     /// Overrides the Provider's default downlink URL for this Bot.
     #[serde(default)]
     pub webhook_url: Option<String>,

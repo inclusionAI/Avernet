@@ -72,6 +72,8 @@ pub(super) fn validate_loaded_config(config: &BcsConfig) -> Result<(), Box<dyn s
             "collaboration.nested_loop_execution_enabled requires collaboration.loop_execution_enabled=true",
         )));
     }
+    config.a2a_input.validate().map_err(crate::BcsError::InvalidConfig)?;
+    if let Some(grpc)=&config.a2a_grpc { grpc.validate().map_err(crate::BcsError::InvalidConfig)?; }
     config.provider_http.validate().map_err(|e| {
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
