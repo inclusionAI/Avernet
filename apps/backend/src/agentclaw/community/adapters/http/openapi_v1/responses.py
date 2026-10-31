@@ -197,6 +197,7 @@ from agentclaw.community.core.caller_identity.contracts import (
     CallerMcpNotFoundError,
     CallerMcpSyncError,
 )
+from agentclaw.community.core.service_bot.baas_service_errors import BaasServiceError
 from agentclaw.community.core.engine_runtime.errors import (
     EngineBotTypeNotSupportedError,
     EngineHistoryDepthExceededError,
@@ -770,6 +771,13 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # A sibling of the entry above, not its base — see the block comment. Order
     # between these two is therefore free.
     DeviceAdapterHTTPStatusError: (502, "Engine service error"),
+    # BaaS is the upstream dependency for BaaS/Teclaw device routing. A raw
+    # BaaS-service failure must keep the public contract: a fixed 502 rather
+    # than e.g. BaaS 4xx or the internal "internal error" when the site of
+    # failure is the device dependency. This is a base-class-last mapping, so
+    # any existing downstream specialization can override it while the generic
+    # upstream failure still reaches an Envelope instead of 500.
+    BaasServiceError: (502, "BaaS service error"),
     # MCP category (Track B). These share no base with BotServiceError, so their
     # order among themselves is free — but they must sit above the BotServiceError
     # fallback like everything else. Fixed public messages: the header-validation

@@ -587,6 +587,15 @@ def test_transport_timeout_maps_to_504():
     assert _lookup(DeviceAdapterTimeoutError("slow"))[0] == 504
 
 
+def test_baas_service_error_is_mapped_to_a_stable_public_response():
+    """BaaS service exceptions stay inside the Envelope and don't leak text."""
+    from agentclaw.community.core.service_bot.baas_service_errors import (
+        BaasServiceError,
+    )
+
+    assert _lookup(BaasServiceError("BaaS 503 upstream")) == (502, "BaaS service error")
+
+
 def test_the_two_501s_say_different_things():
     """They answer different questions and must not be merged.
 
