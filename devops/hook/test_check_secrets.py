@@ -58,6 +58,32 @@ FALSE_POSITIVE_LINES = [
 def test_indirection_templates_and_identifier_shapes_are_not_credentials(line: str) -> None:
     assert _findings(_diff(line)) == []
 
+@pytest.mark.parametrize(
+    "line",
+    [
+        'INTEGRATION_TOKEN = "AUTHORITY_DENSITY_42_OBLIGATIONS_20261031"',
+        'COMPLETION_WAVE_TOKEN = "SERVICE_POLICY_DENSITY_15_OBLIGATIONS_20261031"',
+        'PROPOSAL_TOKEN = "CHANNEL_DENSITY_14_OBLIGATIONS_20261031"',
+        'WAVE_ID = "DUAL_SUBBOTS_DENSITY_D4_131_LEAVES"',
+    ],
+)
+def test_date_stamped_uppercase_roster_markers_are_not_credentials(line: str) -> None:
+    assert _findings(_diff(line)) == []
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        'PROPOSAL_TOKEN = "aMixedCaseSecretValue_20261031"',
+        'PROPOSAL_TOKEN = "f47ac10b58cc4372a910b20261031abcdef"',
+        'PROPOSAL_TOKEN = "DEADBEEFCAFE1234_20261031"',
+    ],
+)
+def test_date_suffix_alone_never_exempts_real_secret_shapes(line: str) -> None:
+    findings = _findings(_diff(line))
+    assert len(findings) == 1
+    assert findings[0].rule == "credential-like assignment"
+
 
 TRUE_POSITIVE_LINES = [
     "auth_" + "token" + ' = "gHt9Km2Qx7Zw3Rd8Yv5"',

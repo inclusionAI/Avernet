@@ -99,6 +99,15 @@ IDENTIFIER_SHAPED_VALUE_RE = re.compile(
     r"(?i)^[A-Za-z][A-Za-z0-9]*(?:[._-](?:[A-Za-z][A-Za-z0-9]*|[0-9]{1,4}))+[._-]?$"
 )
 
+
+# Date-stamped uppercase roster/wave markers (e.g. wave tokens frozen into
+# migration contracts and density rosters, "<NAME>_<n>_OBLIGATIONS_20261031")
+# are semantic identifiers by convention, not credentials: all-caps snake
+# shape plus a final YYYYMMDD segment. Genuine secrets stay in scope -
+# lowercase/mixed-case values, digit-led values, long hex blobs and UUID
+# segments all still fail this shape.
+ROSTER_MARKER_VALUE_RE = re.compile(r"^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+_20\d{6}$")
+
 # A bare RHS name is a variable reference, never a plaintext credential.
 PYTHON_NAME_RE = re.compile(r"^[A-Za-z_]\w*$")
 
@@ -125,6 +134,8 @@ def _looks_like_plaintext_value(value: str) -> bool:
     if "{" in value and "}" in value:
         return False
     if len(value) <= 64 and IDENTIFIER_SHAPED_VALUE_RE.fullmatch(value):
+        return False
+    if ROSTER_MARKER_VALUE_RE.fullmatch(value):
         return False
     # A high-entropy value is a strong signal. Password/secret assignments are
     # also suspicious at a lower threshold because human-generated secrets can
