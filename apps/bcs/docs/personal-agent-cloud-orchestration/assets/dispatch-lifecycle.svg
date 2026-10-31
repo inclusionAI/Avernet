@@ -54,7 +54,7 @@
 
   <!-- rules footer -->
   <rect x="40" y="398" width="850" height="74" rx="8" fill="#f2f5f3" stroke="#b9c6bf"/>
-  <text x="56" y="420" font-size="11" fill="#1c2420"><tspan font-weight="bold">Attempt rule:</tspan> reconciliation resends reuse the recorded key; attempt++ only after the prior attempt is terminal (failed)</text>
-  <text x="56" y="436" font-size="11" fill="#1c2420">or its max in-flight delivery delay elapsed with the key still unknown.</text>
+  <text x="56" y="420" font-size="11" fill="#1c2420"><tspan font-weight="bold">Attempt rule:</tspan> reconciliation resends reuse the recorded key; attempt++ only after the prior attempt failed with a declared no-effect,</text>
+  <text x="56" y="436" font-size="11" fill="#1c2420">or its max in-flight delivery delay elapsed with the key still unknown. failed with effect occurred/unknown ⇒ reconcile, never auto-retry.</text>
   <text x="56" y="460" font-size="11" fill="#1c2420"><tspan font-weight="bold">Window rule:</tspan> retention ≥ max in-flight delivery delay + lease TTL + takeover RTO + reconciliation sweep.</text>
 </svg>

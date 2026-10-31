@@ -50,9 +50,14 @@ n. on terminal event: UPDATE {state=COMPLETED|FAILED}
 
 **Attempt semantics.** A reconciliation resend **reuses the recorded
 `idem_key` of the unresolved attempt** — never a fresh one. `attempt`
-increments only once the prior attempt is proven terminal at the agent
-(`failed`), or the key is still unknown after that attempt's maximum
-in-flight delivery delay (see window sizing below) has elapsed. Rationale:
+increments (issuing a fresh key) only once the prior attempt is **provably
+retryable**: it ended `failed` with a **declared no-effect**, or the key is
+still unknown after that attempt's maximum in-flight delivery delay (see
+window sizing below) has elapsed. For an `external_side_effect` step a bare
+`failed` is not that proof — the purchase may have completed before a later
+sub-operation failed; a `failed` whose effect statement is `occurred` or
+`unknown` routes to outcome reconciliation (surface to the caller, or
+compensate) and never earns a fresh key automatically. Rationale:
 fencing guards storage writes, not an HTTP send a zombie already launched. If
 the old owner stalls between INSERT and send, a successor that bumped to
 `(t, S, 2)` races the zombie's late `(t, S, 1)` — two distinct keys, two
@@ -111,6 +116,7 @@ fork; vanilla A2A traffic flows unchanged:
 | --- | --- |
 | Key convention | `idem_key` in request metadata, derived from `(run_id, step_id, attempt)` — run-scoped, not task-scoped, so a later refinement round of the same task never dedups against an earlier run's dispatches |
 | Dedup | same key ⇒ same task, atomically checked at execution admission; same key with conflicting payload ⇒ keep first, flag error |
+| Failure effect statement | a terminal `failed` on a side-effecting task declares `effect: none / occurred / unknown`; a fresh-key retry is permitted only on `none` — `occurred` and `unknown` go to outcome reconciliation, never automatic retry |
 | Probe semantics | idempotent-resend inside the window; retry-only flag honored with atomic known/unknown judgment |
 | Retention floor | terminal task state **and** the key seen-set retained ≥ the agreed window; within it, "task not found" provably means "never arrived" |
 | Window sizing | ≥ worst-case (**max in-flight delivery delay of one attempt** — dispatch timeout × retry budget + max network/queue delay — + lease TTL + takeover RTO + reconciliation sweep) with margin; one clock for both retentions. The first term is what makes "not found ⇒ never arrived" sound: without it, a zombie's late original send can land *after* the window closes, age out of the seen-set, and re-execute as a "new" request. Senders must therefore also bound an attempt's total send-with-retries lifetime, so this term is finite by construction |
