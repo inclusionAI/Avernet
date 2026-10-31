@@ -72,8 +72,6 @@ class FakeApplier:
     the apply's end: it publishes an outcome to the real settler, as the apply engine would.
     """
 
-    kind = "fake"
-
     def __init__(self) -> None:
         self.refuse: Exception | None = None
         self.on_preflight = None

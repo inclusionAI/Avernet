@@ -24,8 +24,6 @@ GENOME_PROMOTION_TRIGGER = "genome_promotion"
 
 
 class DirectApplier(RevisionApplier):
-    kind = "direct"
-
     def __init__(self, *, applies: ApplyRunServiceProtocol, bots: BotRepository) -> None:
         self._applies = applies
         self._bots = bots

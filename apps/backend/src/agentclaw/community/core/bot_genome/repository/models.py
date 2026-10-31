@@ -185,7 +185,6 @@ class GenomePromotionRow(BaseModel):
     actor_run_id: Optional[str] = None  #: the evolution run, for a ``strategy_run`` actor
     reason: str
     status: str
-    apply_kind: str
     apply_id: Optional[str] = None  #: the apply run delivering it, once started
     apply_detail: str = ""
     created_at: datetime
@@ -321,7 +320,6 @@ class GenomePromotionModel(Base):
     actor_run_id = Column(String(64), nullable=True, comment="the evolution run, for strategy_run")
     reason = Column(String(1024), nullable=False)
     status = Column(String(16), nullable=False, comment="pending/applying/applied/applied_partial/apply_failed")
-    apply_kind = Column(String(16), nullable=False, comment="the applier that took it (direct/…)")
     apply_id = Column(String(32), nullable=True, comment="the apply run delivering it, once started")
     apply_detail = Column(String(1024), nullable=False, default="", comment="one line on how the delivery went")
     created_at = Column(DateTime, nullable=False)

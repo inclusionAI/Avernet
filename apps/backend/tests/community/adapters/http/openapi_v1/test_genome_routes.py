@@ -135,7 +135,6 @@ def _promotion() -> Promotion:
         actor=OWNER,
         reason="ship",
         status=PromotionStatus.APPLIED,
-        apply_kind="direct",
         apply_id="ap_1",
         apply_detail="apply ap_1: applied",
         created_at=NOW,

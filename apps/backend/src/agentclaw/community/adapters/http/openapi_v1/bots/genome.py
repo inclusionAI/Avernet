@@ -206,7 +206,6 @@ def _promotion(promotion: Promotion) -> PromotionPayload:
         actor=promotion.actor.as_dict(),
         reason=promotion.reason,
         status=promotion.status.value,
-        apply_kind=promotion.apply_kind,
         apply_id=promotion.apply_id,
         apply_detail=promotion.apply_detail,
         created_at=promotion.created_at,

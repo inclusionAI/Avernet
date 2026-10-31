@@ -339,9 +339,6 @@ class PromotableRef(StrEnum):       # the refs a promotion moves (01-genome.md Â
     ACTIVE = "active"
     CANARY = "canary"
 
-class ApplyKind(StrEnum):
-    DIRECT = "direct"                     # an apply run of the revision's compiled desired state (RSI-04)
-
 @dataclass(frozen=True)
 class Actor:
     kind: ActorKind
@@ -361,7 +358,6 @@ class Promotion:
     actor: Actor
     reason: str
     status: PromotionStatus
-    apply_kind: ApplyKind
     apply_id: str | None            # the apply run delivering it; None until it started
     apply_detail: str               # short human-readable progress or failure text
     created_at: str
@@ -383,7 +379,6 @@ class Promotion:
   "actor": {"kind": "user", "id": "user_owner_17"},
   "reason": "Reviewed diff and verification report; escalation fix is correct.",
   "status": "applied",
-  "apply_kind": "direct",
   "apply_id": "apl_3f1",                       // the apply run; its state reference names the promotion
   "apply_detail": "apply apl_3f1: applied",
   "created_at": "2026-10-08T09:12:00Z",
@@ -1254,7 +1249,6 @@ Example response (`200`):
     "actor": {"kind": "user", "id": "user_owner_17"},
     "reason": "Reviewed diff and verification report; escalation fix is correct.",
     "status": "applying",
-    "apply_kind": "direct",
     "apply_id": "apl_3f1",
     "apply_detail": "",                         // empty until the apply ends
     "created_at": "2026-10-08T09:12:00Z",
@@ -1351,7 +1345,6 @@ Example response (`201`):
   "actor": {"kind": "user", "id": "user_owner_17"},
   "reason": "r42 mis-routes VIP refunds",
   "status": "applying",
-  "apply_kind": "direct",
   "apply_id": "apl_40c",
   "apply_detail": "",
   "created_at": "2026-10-09T08:02:00Z",

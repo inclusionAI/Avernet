@@ -303,9 +303,6 @@ class PromotionPayload(BaseModel):
         "then `applied` (the refs moved), `applied_partial` (the refs moved; part of the revision was not delivered "
         "and `active` is labelled `partial`) or `apply_failed` (nothing moved)."
     )
-    apply_kind: Literal["direct"] = Field(
-        description="Which delivery seam took the promotion: `direct`, an apply run of the revision's desired state."
-    )
     apply_id: str | None = Field(
         description="The apply run delivering it (read its report under the bot's applies); null until it started."
     )

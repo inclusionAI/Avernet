@@ -125,7 +125,6 @@ class GenomePromotionService(GenomePromotionServiceProtocol):
                 actor_run_id=actor.run_id,
                 reason=reason,
                 status=PromotionStatus.PENDING.value,
-                apply_kind=self._applier.kind,
                 created_at=now,
             )
         )
@@ -198,7 +197,6 @@ def _promotion(row: GenomePromotionRow) -> Promotion:
         actor=Provenance(ProvenanceKind(row.actor_kind), row.actor_id, run_id=row.actor_run_id),
         reason=row.reason,
         status=PromotionStatus(row.status),
-        apply_kind=row.apply_kind,
         apply_id=row.apply_id,
         apply_detail=row.apply_detail,
         created_at=row.created_at,

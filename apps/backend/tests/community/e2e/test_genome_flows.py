@@ -181,7 +181,8 @@ def test_capture_patch_diff_draft_promote_deliver_and_go_back(app_with_testing_m
     )
     assert r.status_code == 201, r.text
     promoted = r.json()["data"]
-    assert (promoted["status"], promoted["apply_kind"], promoted["settled_at"]) == ("applying", "direct", None)
+    assert (promoted["status"], promoted["settled_at"]) == ("applying", None)
+    assert "apply_kind" not in promoted
     assert client.get(f"{genome}/refs", params=query).json()["data"]["refs"] == refs_before
 
     # 6. the apply runs: the promotion settles, active moves, and the bot reads as r2

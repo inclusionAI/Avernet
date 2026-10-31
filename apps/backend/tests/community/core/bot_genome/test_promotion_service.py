@@ -67,11 +67,10 @@ async def test_promote_files_the_promotion_and_starts_its_delivery_without_movin
     first = await world.promotion.promote(
         BOT, revision="r1", ref="active", expected_revision=None, actor=OWNER, reason="first"
     )
-    assert (first.revision, first.from_revision, first.status, first.apply_kind, first.apply_id) == (
+    assert (first.revision, first.from_revision, first.status, first.apply_id) == (
         r1,
         None,
         PromotionStatus.APPLYING,
-        "fake",
         "ap_1",
     )
     assert first.going_back is False and first.actor == OWNER and first.settled_at is None
@@ -208,7 +207,7 @@ async def test_a_delivery_that_does_not_start_is_recorded_failed_with_nothing_mo
     )
     assert _refs(world) == {} and world.registry.get_revision(BOT, r1).revision.status == RevisionStatus.DRAFT
     row = world.promotions.get(env="dev", entity_id=BOT.entity_id, bot_id=BOT.bot_id, promotion_id=failed.id)
-    assert row.status == "apply_failed" and row.apply_kind == "fake"
+    assert row.status == "apply_failed" and row.apply_id is None
 
 
 @pytest.mark.asyncio

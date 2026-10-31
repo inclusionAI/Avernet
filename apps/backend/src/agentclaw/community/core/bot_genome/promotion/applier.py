@@ -23,12 +23,6 @@ __all__ = ["RevisionApplier"]
 
 @runtime_checkable
 class RevisionApplier(Protocol):
-    @property
-    @abstractmethod
-    def kind(self) -> str:
-        """The applier's name on the promotion row (``apply_kind``)."""
-        ...
-
     @abstractmethod
     def preflight(self, bot: BotRef, state: DesiredState) -> None:
         """Raise ``NotAppliable`` or ``PromotionUnsupported`` before anything is written."""
