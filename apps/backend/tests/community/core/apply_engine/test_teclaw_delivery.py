@@ -220,9 +220,9 @@ class _Recording:
         self.calls.append(("list_installed_mcps", kw))
         return {"a"}
 
-    def platform_default_mcp_codes(self, **kw):
-        self.calls.append(("platform_default_mcp_codes", kw))
-        return frozenset({"p"})
+    def set_supplied_capabilities(self, **kw):
+        self.calls.append(("set_supplied_capabilities", kw))
+        return frozenset({"s"}), frozenset({"p"})
 
     async def activate_mcp(self, **kw):
         self.calls.append(("activate_mcp", kw))
@@ -247,7 +247,7 @@ def test_record_only_activation_passes_project_false_on_every_write() -> None:
     ids = dict(bot_id="b", owner_id="o", actor_id="a")
 
     assert wrapped.list_installed_mcps(**ids) == {"a"}
-    assert wrapped.platform_default_mcp_codes(**ids) == frozenset({"p"})
+    assert wrapped.set_supplied_capabilities(**ids) == (frozenset({"s"}), frozenset({"p"}))
     _run(wrapped.activate_mcp(server_code="s", **ids))
     _run(wrapped.deactivate_mcp(server_code="s", **ids))
     _run(wrapped.activate_skill(skill_id="7", **ids))
@@ -256,5 +256,5 @@ def test_record_only_activation_passes_project_false_on_every_write() -> None:
     writes = [(name, kw) for name, kw in inner.calls if name.startswith(("activate", "deactivate"))]
     assert [name for name, _ in writes] == ["activate_mcp", "deactivate_mcp", "activate_skill", "deactivate_skill"]
     assert all(kw["project"] is False for _, kw in writes)
-    reads = [kw for name, kw in inner.calls if name in ("list_installed_mcps", "platform_default_mcp_codes")]
+    reads = [kw for name, kw in inner.calls if name in ("list_installed_mcps", "set_supplied_capabilities")]
     assert all("project" not in kw for kw in reads)

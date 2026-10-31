@@ -28,7 +28,7 @@ codebase that pass ``project`` at all.
 """
 from __future__ import annotations
 
-from typing import Any, Iterable
+from typing import Any
 
 from agentclaw.community.core.ports.activation_port import (
     ActivationPort,
@@ -42,8 +42,8 @@ class _DelegatingActivation(ActivationPort):
     """Forward reads unchanged and pin every write to ``project``.
 
     ``list_installed_mcps`` answers a ``set[str]`` of server codes, e.g.
-    ``{"gh", "old"}``; ``platform_default_mcp_codes`` answers an iterable of
-    the same. The four writes answer the service's own result dict, which
+    ``{"gh", "old"}``; ``set_supplied_capabilities`` answers the skill names
+    and server codes the bot's skill sets supply. The writes answer the service's own result dict, which
     ``mcp`` and ``skills`` discard.
 
     Subclasses set ``_PROJECT`` and add nothing else; writing the delegation
@@ -62,13 +62,6 @@ class _DelegatingActivation(ActivationPort):
 
     def list_installed_mcps(self, *, bot_id: str, owner_id: str, actor_id: str) -> set[str]:
         return self._inner.list_installed_mcps(
-            bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
-        )
-
-    def platform_default_mcp_codes(
-        self, *, bot_id: str, owner_id: str, actor_id: str
-    ) -> Iterable[str]:
-        return self._inner.platform_default_mcp_codes(
             bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
         )
 

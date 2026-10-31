@@ -29,7 +29,7 @@ of resolving to an inherited ``...`` stub that silently returns ``None``.
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import Any, Iterable, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -38,11 +38,6 @@ class ActivationPort(Protocol):
 
     @abstractmethod
     def list_installed_mcps(self, *, bot_id: str, owner_id: str, actor_id: str) -> set[str]: ...
-
-    @abstractmethod
-    def platform_default_mcp_codes(
-        self, *, bot_id: str, owner_id: str, actor_id: str
-    ) -> Iterable[str]: ...
 
     @abstractmethod
     def get_mcp_overrides(

@@ -816,11 +816,6 @@ class FakeActivationService:
     ) -> set[str]:
         return set(self.installed)
 
-    def platform_default_mcp_codes(
-        self, *, bot_id: str, owner_id: str, actor_id: str
-    ) -> frozenset[str]:
-        return frozenset(self.platform_defaults)
-
     def get_mcp_overrides(
         self, *, bot_id: str, owner_id: str, actor_id: str
     ) -> dict[str, dict]:

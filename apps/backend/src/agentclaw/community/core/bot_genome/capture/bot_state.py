@@ -4,7 +4,9 @@ Each category is read through the same service the Manifest materialisers
 and the compose collector read through, so capture sees what apply sees:
 
 - persona: ``IdentityFilePort`` (``list_bot_files`` / ``read_identity_file``);
-- skills: ``BotCapabilityStateReaderProtocol.active_skill_assets``, classified
+- skills: ``BotCapabilityStateReaderProtocol.active_skill_assets`` less the
+  runtime names the bot's skill sets supply (a revision, like an apply,
+  speaks only for Direct skills), classified
   by locator prefix as the skill set service records them (``local://`` files
   via the factory's package storage, ``center://`` by name,
   ``git://<path>`` as a shared-repository skill);
@@ -12,8 +14,9 @@ and the compose collector read through, so capture sees what apply sees:
   lists), at ``data/<row path>`` in the workspace, bytes through
   ``ResourceFileService.read_file``; files Manifest apply wrote outside those
   rows are not captured (noted for RSI-04, which fixes the resources road);
-- MCP: ``DirectActivationServiceProtocol.list_installed_mcps`` minus the
-  platform defaults, the bot override from ``MCPConfigServiceProtocol``;
+- MCP: ``DirectActivationServiceProtocol.list_installed_mcps`` minus what the
+  bot's skill sets supply (``set_supplied_capabilities``, the platform defaults
+  included), the bot override from ``MCPConfigServiceProtocol``;
 - script: ``BotStartupScriptServiceProtocol.get_body`` with the ``${BOT_*}``
   substitution apply performs.
 
@@ -117,7 +120,12 @@ class PlatformBotStateReader(BotStateReader):
 
     async def skills(self, bot: BotRef) -> tuple[CapturedSkill, ...]:
         captured: list[CapturedSkill] = []
+        supplied, _codes = self._activation.set_supplied_capabilities(
+            bot_id=bot.bot_id, owner_id=bot.owner_id, actor_id=bot.owner_id
+        )
         for asset in self._capabilities.active_skill_assets(bot_id=bot.bot_id, owner_id=bot.owner_id):
+            if asset.name in supplied:
+                continue  # a skill set's, not the bot's own: outside the revision as it is outside an apply
             locator = str(asset.git_path or "")
             if locator.startswith(LOCAL_PREFIX):
                 _, storage = self._skill_factory.local_skill_package_storage_for_locator(
@@ -180,9 +188,8 @@ class PlatformBotStateReader(BotStateReader):
 
     async def mcp_servers(self, bot: BotRef) -> tuple[CapturedMcpServer, ...]:
         who = dict(bot_id=bot.bot_id, owner_id=bot.owner_id, actor_id=bot.owner_id)
-        codes = set(self._activation.list_installed_mcps(**who)) - set(
-            self._activation.platform_default_mcp_codes(**who)
-        )
+        _names, supplied = self._activation.set_supplied_capabilities(**who)
+        codes = set(self._activation.list_installed_mcps(**who)) - set(supplied)
         servers = []
         for code in sorted(codes):
             override = self._mcp_config.get_bot_override(bot_id=bot.bot_id, owner_id=bot.owner_id, server_code=code)
