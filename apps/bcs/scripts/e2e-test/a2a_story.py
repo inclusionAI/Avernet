@@ -16,6 +16,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote, urlsplit
 
 from provider_scope_story import Story
+from a2a_workbench import abort_task
+
+TOOLS = "https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensions/tools/v1.md"
 
 
 class Peer:
@@ -23,6 +26,8 @@ class Peer:
         self.bearer = ""
         self.requests = []
         self.tasks = {}
+        self.cancels = []
+        self.stops = {}
         self.card_reads = 0
         self.legacy_requests = 0
         self.mode = "stream"
@@ -66,6 +71,21 @@ class Peer:
 
             def do_POST(self):
                 path = urlsplit(self.path).path
+                if path.startswith("/a2a/tasks/") and path.endswith(":cancel"):
+                    if not self.authenticated():
+                        return
+                    self.rfile.read(int(self.headers.get("Content-Length", "0")))
+                    task_id = unquote(path.rsplit("/", 1)[-1][:-7])
+                    with peer.lock:
+                        task = peer.tasks[task_id]
+                        task["status"]["state"] = "TASK_STATE_CANCELED"
+                        peer.cancels.append(task_id)
+                        stopped = peer.stops.get(task_id)
+                        response = copy.deepcopy(task)
+                    if stopped:
+                        stopped.set()
+                    self.json_response(200, response)
+                    return
                 if path != "/a2a/message:stream":
                     with peer.lock:
                         peer.legacy_requests += 1
@@ -76,7 +96,7 @@ class Peer:
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 with peer.lock:
                     # Group/session lifecycle notifications also use the real A2A link.
-                    # Acknowledge them separately from the four human request assertions.
+                    # Acknowledge them separately from the human request assertions.
                     question = any("A2A question " in part.get("text", "")
                                    for part in body["message"].get("parts", []))
                     if question:
@@ -90,6 +110,11 @@ class Peer:
                             "artifacts": [{"artifactId": "answer", "parts": [{"text": text}]}]}
                     peer.tasks[task_id] = task
                     mode = peer.mode if question else "message"
+                    if mode in ("wait", "replacement"):
+                        task["status"]["state"] = "TASK_STATE_WORKING"
+                        task["artifacts"] = []
+                    if mode == "wait":
+                        peer.stops[task_id] = threading.Event()
                     if not question:
                         text = "A2A setup acknowledged"
                 initial = {"task": {"id": task_id, "contextId": context,
@@ -98,7 +123,7 @@ class Peer:
                 if mode == "message":
                     events = [{"message": {"messageId": "peer-message-" + str(sequence),
                                "contextId": context, "role": "ROLE_AGENT", "parts": [{"text": text}]}}]
-                elif mode == "stream":
+                elif mode in ("stream", "tools", "replacement"):
                     events += [
                         {"artifactUpdate": {"taskId": task_id, "contextId": context,
                          "artifact": {"artifactId": "answer", "parts": [{"text": "A2A-ANSWER-"}]},
@@ -109,17 +134,60 @@ class Peer:
                         {"statusUpdate": {"taskId": task_id, "contextId": context,
                          "status": {"state": "TASK_STATE_COMPLETED"}}},
                     ]
+                if mode == "tools":
+                    assert TOOLS in self.headers.get("A2A-Extensions", "")
+                    records = [
+                        {"phase": "start", "toolCallId": "e2e-call-" + str(sequence),
+                         "name": "query_order", "args": {"id": "e2e-order"}},
+                        {"phase": "result", "toolCallId": "e2e-call-" + str(sequence),
+                         "name": "query_order", "isError": False,
+                         "result": {"content": [{"type": "text", "text": "fixture-tool-result"}]}},
+                    ]
+                    observations = []
+                    for record in records:
+                        event = {"statusUpdate": {"taskId": task_id, "contextId": context,
+                            "status": {"state": "TASK_STATE_WORKING", "message": {
+                            "messageId": "observation-" + record["phase"], "role": "ROLE_AGENT",
+                            "metadata": {TOOLS: {"version": "1"}}, "parts": [{"data": record}]}}}}
+                        observations.extend([event, copy.deepcopy(event)])
+                    events[2:2] = observations
+                elif mode == "wait":
+                    events.append({"artifactUpdate": {"taskId": task_id, "contextId": context,
+                        "artifact": {"artifactId": "answer", "parts": [{"text": "A2A-WAITING-" + str(sequence)}]},
+                        "append": False}})
+                    # Complete a tool while the Task remains active; its text segment becomes visible.
+                    events.append({"statusUpdate": {"taskId": task_id, "contextId": context,
+                        "status": {"state": "TASK_STATE_WORKING", "message": {
+                        "messageId": "waiting-tool", "role": "ROLE_AGENT",
+                        "metadata": {TOOLS: {"version": "1"}}, "parts": [{"data": {
+                        "phase": "start", "toolCallId": "cancel-call", "name": "slow_tool", "args": {}}}]}}}})
+                    events.append({"statusUpdate": {"taskId": task_id, "contextId": context,
+                        "status": {"state": "TASK_STATE_WORKING", "message": {
+                        "messageId": "waiting-result", "role": "ROLE_AGENT",
+                        "metadata": {TOOLS: {"version": "1"}}, "parts": [{"data": {
+                        "phase": "result", "toolCallId": "cancel-call", "name": "slow_tool",
+                        "isError": False, "result": {"content": [{"type": "text", "text": "tool finished"}]}}}]}}}})
+                elif mode == "replacement":
+                    events = events[:2] + [{"artifactUpdate": {"taskId": task_id, "contextId": context,
+                        "artifact": {"artifactId": "answer", "parts": [{"text": "unsupported replacement"}]},
+                        "append": False}}]
                 # recover mode closes after the initial Task; GetTask supplies the final snapshot.
                 frames = [("data:" + json.dumps(event, ensure_ascii=False) + "\n\n").encode()
                           for event in events]
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
-                self.send_header("Content-Length", str(sum(map(len, frames))))
+                if mode == "wait":
+                    self.send_header("Connection", "close")
+                    self.close_connection = True
+                else:
+                    self.send_header("Content-Length", str(sum(map(len, frames))))
                 self.end_headers()
                 for frame in frames:
                     self.wfile.write(frame)
                     self.wfile.flush()
                     time.sleep(0.02)
+                if mode == "wait":
+                    assert peer.stops[task_id].wait(30), "Active task was not canceled"
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.server.daemon_threads = True
@@ -128,7 +196,7 @@ class Peer:
         self.card = {"name": "A2A public E2E", "description": "Initial description", "version": "1",
                      "supportedInterfaces": [{"url": self.base + "/a2a", "protocolBinding": "HTTP+JSON",
                                               "protocolVersion": "1.0"}],
-                     "capabilities": {"streaming": True}, "defaultInputModes": ["text/plain"],
+                     "capabilities": {"streaming": True, "extensions": [{"uri": TOOLS, "required": False}]}, "defaultInputModes": ["text/plain"],
                      "defaultOutputModes": ["text/plain"], "skills": [{"id": "e2e", "name": "Query",
                      "description": "Full skill description", "tags": ["e2e"], "futureField": {"keep": True}}]}
 
@@ -215,27 +283,80 @@ class A2aStory(Story):
         self.policy_revision = applied["version"]
         group = self.group(bot_id, [bot_id, "human_" + self.owner])
         session = self.request("POST", "/groups/" + group + "/sessions", {}, status=201)["session_id"]
-        for sequence, mode in enumerate(["stream", "stream", "message", "recover"], start=1):
+        for sequence, mode in enumerate(["stream", "stream", "message", "recover", "tools", "wait",
+                                         "stream", "replacement", "stream"], start=1):
+            before = self.history(session)
+            before_ids = {message["id"] for message in before}
             with self.peer.lock:
                 self.peer.mode = mode
             self.request("POST", "/sessions/" + session + "/chat", {"message": "A2A question " + str(sequence)})
+            if mode in ("wait", "replacement"):
+                task_id = "peer-task-" + str(sequence)
+                deadline = time.monotonic() + 20
+                while time.monotonic() < deadline:
+                    with self.peer.lock:
+                        admitted = task_id in self.peer.tasks
+                    if admitted:
+                        break
+                    time.sleep(0.05)
+                else:
+                    raise AssertionError("A2A task was not submitted")
+                if mode == "wait":
+                    # Visible output proves that BCS saved the initial Task identity.
+                    while time.monotonic() < deadline:
+                        if any(visible_text(message.get("content", "")) == "A2A-WAITING-" + str(sequence)
+                               for message in self.history(session)):
+                            break
+                        time.sleep(0.05)
+                    else:
+                        raise AssertionError("Active Task identity was not ingested")
+                    result = abort_task(self.base, self.owner, group, session, bot_id)
+                    assert result["payload"]["aborted"], "Active A2A Run was not aborted"
+                    self.checks += 2
+                while time.monotonic() < deadline:
+                    with self.peer.lock:
+                        canceled = task_id in self.peer.cancels
+                    if canceled:
+                        break
+                    time.sleep(0.05)
+                else:
+                    raise AssertionError("Exact remote Task was not canceled: " + mode)
+                # The next real chat.send verifies that confirmed cleanup frees the queue slot.
+                continue
             expected = "A2A-ANSWER-" + str(sequence)
             deadline = time.monotonic() + 30
             while time.monotonic() < deadline:
-                history = self.request("GET", "/sessions/" + session + "/messages?limit=100")
-                messages = history if isinstance(history, list) else history.get("messages", [])
-                count = sum(expected == visible_text(message.get("content", "")) for message in messages)
+                messages = self.history(session)
+                fresh = [message for message in messages if message["id"] not in before_ids]
+                count = sum(expected == visible_text(message.get("content", "")) for message in fresh)
+                if mode == "tools":
+                    # Tool boundaries split text into separate history segments.
+                    text = "".join(visible_text(message.get("content", "")) for message in sorted(fresh, key=lambda row: row["timestamp"])
+                                   if message.get("role") == "assistant")
+                    count = int(text == expected)
                 if count:
+                    if mode == "tools":
+                        tools = [message for message in fresh if message.get("role") == "tool_result"]
+                        assert len(tools) == 1, "Equal tool observations were duplicated"
+                        assert tools[0]["metadata"]["tool_call_id"] == "e2e-call-5"
+                        assert tools[0]["content"] == "fixture-tool-result"
+                        self.checks += 3
                     assert count == 1, "A2A final text was duplicated"
                     break
                 time.sleep(0.1)
             else:
                 raise AssertionError("A2A output did not reach visible history: " + mode)
-        assert len(self.peer.requests) == 4, "Recovery must not resubmit a message"
+        assert len(self.peer.requests) == 9, "Recovery must not resubmit a message"
         assert self.peer.legacy_requests == 0, "A2A Bot used the legacy Provider webhook"
-        assert len({request["message"]["messageId"] for request in self.peer.requests}) == 4
+        assert len({request["message"]["messageId"] for request in self.peer.requests}) == 9
         assert all(request["message"].get("contextId") == "peer-context" for request in self.peer.requests[1:])
-        print(f"A2A story: {self.checks} live HTTP assertions and four protocol deliveries passed")
+        assert self.peer.cancels == ["peer-task-6", "peer-task-8"], "Cancellation widened beyond the active Task"
+        assert all(request["message"]["messageId"] not in self.peer.cancels for request in self.peer.requests)
+        print(f"A2A story: {self.checks} live boundary assertions and nine protocol deliveries passed")
+
+    def history(self, session):
+        history = self.request("GET", "/sessions/" + session + "/messages?limit=100")
+        return history if isinstance(history, list) else history.get("messages", [])
 
     def cleanup(self):
         try:

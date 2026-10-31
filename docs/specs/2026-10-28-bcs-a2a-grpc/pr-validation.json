@@ -76,7 +76,7 @@
     "unknown_outcomes": "Maintainer deferred restart ownership recovery and manual-unlock management; uncertain outcomes remain blocked and never auto-expire solely from the local deadline."
   },
   "local_repair_regressions": {
-    "current_status": "Native MySQL store and full current-head CI remain pending.",
+    "current_status": "Card configuration 12, delivery recovery 17 and native MySQL storage 1 all passed; full mandatory MySQL and latest-head CI remain pending.",
     "targets": [
       "conformance_a2a_configuration",
       "conformance_a2a_delivery",
@@ -89,6 +89,12 @@
     "Delivery_recovery": {
       "passed": 17,
       "failed": 0
+    },
+    "native_MySQL": {
+      "passed": 1,
+      "failed": 0,
+      "migrations": 39,
+      "covers": "Shared Card/Run contracts, JSON search, many Runs per Task, audit columns, CHECK rejection and transactional rollback"
     }
   },
   "ci_fixture_repairs": {
@@ -110,7 +116,7 @@
     "additional_fix": "The v20-to-v39 suffix applies 19 migrations, not 18."
   },
   "static_checks": {
-    "changed_source_files": 226,
+    "changed_source_files": 230,
     "largest_source_lines": 1000,
     "rust_parser": "all changed Rust sources accepted; stdout only, no source formatted",
     "frozen_sql": "existing SQL unchanged; only two new 039 SQL files added",
@@ -125,7 +131,7 @@
     "apps/bcs/crates/test-support/bcs-test-support/src/contract/a2a_bot.rs": "bff70cb957fed62148ec891e40c685db1035039a0cfd266a76166ec2fc294104",
     "apps/bcs/crates/tools/bcs-admin/src/migrate_human_input_index_tests.rs": "4fbddacb020ee96d3a85e88cd669425ba47d50e695ee664a81946cbe31319a17",
     "apps/bcs/crates/tools/bcs-admin/src/migrate_mysql_chain_tests.rs": "ba752d91352075b1c48d8c2ba62416ef0e6154538b9d21403f0546b3ba999bf0",
-    "apps/bcs/scripts/e2e-test/a2a_story.py": "15c052294b2eed5b2ea7a0778eb7a148704b03a4f4cc096ffe8ceb9226446ab7",
+    "apps/bcs/scripts/e2e-test/a2a_story.py": "3097e7bdc22fed1894322abd829de0596108c4f52cc5ee33c42330d6846b80e5",
     "apps/bcs/crates/services/bcs-bot-store/tests/a2a_mysql.rs": "9d6c99ccfe8a622f6ea60be38da913d117f2d23cbe93f9b42964df699da6c61d",
     "apps/bcs/crates/services/bcs-bot-store/tests/support/a2a_mysql_cases.rs": "43b68b8cbde39c84461275c64eb2c62283cb067b8f41f409201edc3c8b8953f2"
   },
@@ -136,5 +142,36 @@
     "no persistent monitor tool available in this session; CI monitored in active turn"
   ],
   "native_mysql_ci": "Existing mandatory full-chain gate invokes the shared A2A storage cases on its migrated disposable schema; no extra MySQL service required.",
-  "native_mysql_failure_injection_probe": "Temporary CHECK rejection and transactional rollback verified with schema-only privileges on isolated native MySQL; no SUPER grant."
+  "native_mysql_failure_injection_probe": "Temporary CHECK rejection and transactional rollback verified with schema-only privileges on isolated native MySQL; no SUPER grant.",
+  "ci_latest_completed": {
+    "head": "f58cdf8140bbecefe2482a27eda9912b07f4f90e",
+    "unit": {
+      "passed": 8414,
+      "failed": 0,
+      "skipped": 63
+    },
+    "mandatory_mysql": "Failed only on stale v20 suffix count 18 instead of 19; corrected in follow-up.",
+    "singlebox": {
+      "job_url": "https://github.com/inclusionAI/Avernet/actions/runs/41216431007/job/124581808586",
+      "runtime_line_percent": 51.71,
+      "method_percent": 45.94,
+      "http_endpoints": "173/173",
+      "cli_leaves": "66/66",
+      "changed_line_percent": 56.86,
+      "limitation": "Old configured >50 gate passed, but below documented >60 requirement. Follow-up aligns active gates to60 and adds tool, cancellation and confirmed-cleanup public E2E cases."
+    }
+  },
+  "expanded_live_acceptance": {
+    "result": "Nine deliveries passed against baseline binary with only unchanged-refresh assertion omitted from temporary local probe; tracked story retains that assertion for current CI.",
+    "cases": [
+      "negotiated tool start/result duplicates collapse to one history record",
+      "text before and after tool joins without replay",
+      "Workbench chat.abort cancels exact remote Task",
+      "unsupported replacement cancels exact remote Task",
+      "normal sends succeed after cancellation and cleanup"
+    ],
+    "latest_head_ci": "pending",
+    "boundary_checks": 64,
+    "synchronization": "Cancellation waits for persisted text at a completed tool boundary; no fixed sleep assumes remote identity has been saved."
+  }
 }

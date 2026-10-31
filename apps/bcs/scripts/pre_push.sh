@@ -126,14 +126,14 @@ bcs_parallel_gates() {
   echo ""
   echo "== launching bcs gates in parallel =="
   printf '  unit: apps/bcs/scripts/ci_test.sh --fast-fail %s  (log: %s)\n' "${unit_cov_args[*]:-}" "$unit_log"
-  printf '  e2e:  apps/bcs/scripts/e2e_coverage.sh --bcs-line-min 41 --bcs-method-min 36 --force-rebuild --changed-base-ref %s --changed-line-min 50   (log: %s)\n' "$base" "$e2e_log"
+  printf '  e2e:  apps/bcs/scripts/e2e_coverage.sh --bcs-line-min 41 --bcs-method-min 36 --force-rebuild --changed-base-ref %s --changed-line-min 60   (log: %s)\n' "$base" "$e2e_log"
   echo ""
 
   _launch_tagged unit "$unit_exit" \
     "$bcs_dir/scripts/ci_test.sh" --base "$base" --head "$head" --fast-fail "${unit_cov_args[@]+"${unit_cov_args[@]}"}"
   local u_reader=$_TASK_READER u_pid=$_TASK_PID
   _launch_tagged e2e "$e2e_exit" \
-    "$bcs_dir/scripts/e2e_coverage.sh" --bcs-line-min 41 --bcs-method-min 36 --force-rebuild --changed-base-ref "$base" --changed-line-min 50
+    "$bcs_dir/scripts/e2e_coverage.sh" --bcs-line-min 41 --bcs-method-min 36 --force-rebuild --changed-base-ref "$base" --changed-line-min 60
   local e_reader=$_TASK_READER e_pid=$_TASK_PID
 
   # Wait for the first gate to finish (exitfile written) or die abnormally.
@@ -265,5 +265,5 @@ elif [[ $unit_on -eq 1 ]]; then
   run_required "$bcs_dir/scripts/ci_test.sh" --base "$base" --head "$head" --fast-fail "${unit_cov_args[@]+"${unit_cov_args[@]}"}"
   bcs_coverage_gate "$base" || exit 1
 else
-  run_required "$bcs_dir/scripts/e2e_coverage.sh" --bcs-line-min 41 --bcs-method-min 36 --force-rebuild --changed-base-ref "$base" --changed-line-min 50
+  run_required "$bcs_dir/scripts/e2e_coverage.sh" --bcs-line-min 41 --bcs-method-min 36 --force-rebuild --changed-base-ref "$base" --changed-line-min 60
 fi
