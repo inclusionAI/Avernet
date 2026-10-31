@@ -34,10 +34,18 @@ from .session_file_core_contract import SESSION_CLI_CREATE_GET_CASE_ID
 from .session_file_core_contract import execute_session_cli_bot_groups_case
 from .session_file_core_contract import execute_session_cli_create_get_case
 from .workspace_cli_commands import WorkspaceCliRunnerError
-from .workspace_cli_runner import RemoteSessionCliGroupInviteAdapter, RemoteSessionCliSessionInviteAdapter
-from .workspace_cli_runner import SESSION_CLI_GROUP_INVITE_CASE_ID, SESSION_CLI_GROUP_INVITE_EFFECT
-from .workspace_cli_runner import SESSION_CLI_SESSION_INVITE_CASE_ID, SESSION_CLI_SESSION_INVITE_EFFECT
-from .workspace_cli_runner import execute_session_cli_group_invite_case, execute_session_cli_session_invite_case
+from .workspace_cli_group_invite import RemoteSessionCliGroupInviteAdapter
+from .workspace_cli_session_invite import RemoteSessionCliSessionInviteAdapter
+from .workspace_cli_group_invite import (
+    SESSION_CLI_GROUP_INVITE_CASE_ID,
+    SESSION_CLI_GROUP_INVITE_EFFECT,
+)
+from .workspace_cli_session_invite import (
+    SESSION_CLI_SESSION_INVITE_CASE_ID,
+    SESSION_CLI_SESSION_INVITE_EFFECT,
+)
+from .workspace_cli_group_invite import execute_session_cli_group_invite_case
+from .workspace_cli_session_invite import execute_session_cli_session_invite_case
 from .workspace_cli_runner import WorkspaceCliRunner
 
 SCHEMA_VERSION = 1

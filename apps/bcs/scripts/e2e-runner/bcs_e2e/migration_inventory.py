@@ -207,7 +207,8 @@ def migration_plan() -> dict:
         session_cli_invite_join_adaptability,
         session_cli_lifecycle_adaptability,
     )
-    from .workspace_cli_runner import session_cli_group_invite_adaptability, session_cli_session_invite_adaptability
+    from .workspace_cli_group_invite import session_cli_group_invite_adaptability
+    from .workspace_cli_session_invite import session_cli_session_invite_adaptability
     from .local_network_contract import (
         network_actor_list_adaptability, network_actor_search_adaptability,
         network_bots_mine_adaptability, network_bots_paged_adaptability,

@@ -17,12 +17,12 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(ROOT))
-from bcs_e2e.workspace_cli_runner import (
+from bcs_e2e.workspace_cli_runner import WorkspaceCliRunner
+from bcs_e2e.workspace_cli_session_invite import (
     SESSION_CLI_SESSION_INVITE_CASE_ID,
     RemoteSessionCliSessionInviteAdapter,
     execute_session_cli_session_invite_case,
     session_cli_session_invite_adaptability,
-    WorkspaceCliRunner,
 )
 from bcs_e2e.session_cli_profile import (
     SESSION_CLI_SESSION_INVITE_CREATE_OPERATION,

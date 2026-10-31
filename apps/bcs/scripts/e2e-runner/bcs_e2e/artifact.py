@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 # Reviewed flat focused-module allowance; the history of increments is
 # documented below disk_digest.
-FLAT_FILE_BUDGET = 340
+FLAT_FILE_BUDGET = 344
 
 
 def _artifact_paths() -> list[Path]:
@@ -143,6 +143,12 @@ def disk_digest() -> str | None:
     # The dual Provider-owner promotion adds one flat focused dual case-run module
     # (336 of 340); the dual Session-owner run lands in the session_owner subpackage
     # and adds no flat file.
+    # The 1,000-line source-limit splits of the oversize Workspace CLI
+    # runner and the owned-local fixed-Loop case move the two dual
+    # Session-invite halves, their shared invite-URL/HTTP-evidence helpers
+    # and the fixed-Loop core machinery into four focused modules instead of
+    # growing the two oversized files, so the allowance grows by exactly
+    # those four files (343 of 344).
     # R1 tolerant aperture (2026-10-31): a budget breach must not poison
     # package import (pytest collection, --help, read-only probes). The
     # budget gate closes fail-closed at Run time in process_digest().

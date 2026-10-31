@@ -18,12 +18,12 @@ TEST_ROOT = Path(__file__).resolve().parent
 ROOT = TEST_ROOT.parent
 sys.path.insert(0, str(TEST_ROOT))
 sys.path.insert(0, str(ROOT))
-from bcs_e2e.workspace_cli_runner import (
+from bcs_e2e.workspace_cli_runner import WorkspaceCliRunner
+from bcs_e2e.workspace_cli_group_invite import (
     SESSION_CLI_GROUP_INVITE_CASE_ID,
     RemoteSessionCliGroupInviteAdapter,
     execute_session_cli_group_invite_case,
     session_cli_group_invite_adaptability,
-    WorkspaceCliRunner,
 )
 from bcs_e2e.workspace_cli_profile import (
     ConfigError,

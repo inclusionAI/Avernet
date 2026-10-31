@@ -14,7 +14,7 @@ from .session_cli_profile import (
     validate_session_cli_complete_invoke_profile,
     validate_session_cli_lifecycle_profile,
 )
-from .workspace_cli_runner import _invite_url_matches_product_shape
+from .workspace_cli_http_evidence import _invite_url_matches_product_shape
 from .write_transport import WriteClient
 
 
