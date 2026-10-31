@@ -224,7 +224,9 @@
         "mode": "DUAL",
         "preprod_verdict": "PASS",
         "gates": [],
-        "notes": []
+        "notes": [
+            "Wave-D3 密度叠加层 dual-edge-permission-density-v1 离线闭合：Frozen 2 义务 + 1 密度叶 == parsed 3（dual-edge-permission-density-v1）；r5 读腿收据 20261031-regression-r5-edge-read/friend-connections-stdout.json 与 r7 状态腿 20261031-regression-r7-preprod/edge-read/friend-connections-state/edge-friend-connections-run.json（公共 face PUBLIC-EDGE-FRIEND-CONNECTIONS-LIST-01，contract dual-edge-read-case-run-v1，status=PASS，remote_validation=NOT_RUN）；本地读轮留存在本族为 LEG_ABSENT（读片走 dual-edge-read-run 族）；annex 叶跨族引证 r5 mutation 轮 error-admission 收据 create 行（friend_connection_mutation.create 6 行中 3 行 201 且 request id 回显）；22 叶族内 ENROLLMENT=NOT_ENROLLED fail-close，本行不获得任何密度执行信用；committed verdict 维持 PASS 现状不变，笔记增量仅补水注记；⏳pending-landing"
+          ]
       }
     },
     {
@@ -233,7 +235,9 @@
         "mode": "DUAL",
         "preprod_verdict": "PASS",
         "gates": [],
-        "notes": []
+        "notes": [
+            "Wave-D3 密度叠加层 dual-edge-permission-density-v1 离线闭合：Frozen 1 义务 + 1 密度叶 == parsed 2（dual-edge-permission-density-v1）；r5 双腿收据 20261031-regression-r5-edge-mutation/accept-reject-cancel-stdout.json（status=PASS，remote_validation=NOT_RUN）；wpc 本地轮 junit 行 LOCAL-EDGE-FRIEND-ACCEPT-REJECT-CANCEL-01 PASS 1/1；22 叶族内 ENROLLMENT=NOT_ENROLLED fail-close，本行不获得任何密度执行信用；committed verdict 维持 PASS 现状不变，笔记增量仅补水注记；⏳pending-landing"
+          ]
       }
     },
     {
@@ -278,7 +282,9 @@
         "mode": "DUAL",
         "preprod_verdict": "PASS",
         "gates": [],
-        "notes": []
+        "notes": [
+            "Wave-D3 密度叠加层 dual-edge-permission-density-v1 离线闭合：Frozen 1 义务 + 7 密度叶 == parsed 8（dual-edge-permission-density-v1）；r5 与 r6 双腿收据 20261031-regression-r5-edge-mutation/ 与 20261031-regression-r6-edge-mutation/ 下 mutual-auto-approve-stdout.json（双轮 status=PASS，remote_validation=NOT_RUN；r5/r6 peer bot 不同，口径 一致）；wpc 本地轮 junit 行 LOCAL-EDGE-FRIEND-MUTUAL-AUTO-APPROVE-01 PASS 1/1；身份交叉核对 member=20261010_gekng5hk:39464 出现在双轮 admissions 方向键；22 叶族内 ENROLLMENT=NOT_ENROLLED fail-close，本行不获得任何密度执行信用；committed verdict 维持 PASS 现状不变，笔记增量仅补水注记；⏳pending-landing"
+          ]
       }
     },
     {
@@ -296,7 +302,9 @@
         "mode": "DUAL",
         "preprod_verdict": "PASS",
         "gates": [],
-        "notes": []
+        "notes": [
+            "Wave-D3 密度叠加层 dual-edge-permission-density-v1 离线闭合：Frozen 1 义务 + 6 密度叶 == parsed 7（dual-edge-permission-density-v1）；r5 双腿收据 20261031-regression-r5-edge-mutation/error-admission-branches-stdout.json（status=PASS，remote_validation=NOT_RUN，grants_release_credit=false）；wpc 本地轮 20261031-migration-wpc-local-owned-edge-3 junit 行 LOCAL-EDGE-ERROR-ADMISSION-BRANCHES-01 PASS 1/1；22 叶族内 ENROLLMENT=NOT_ENROLLED fail-close，本行不获得任何密度执行信用；committed verdict 维持 PASS 现状不变，笔记增量仅补水注记；⏳pending-landing"
+          ]
       }
     },
     {
@@ -305,7 +313,9 @@
         "mode": "DUAL",
         "preprod_verdict": "PASS",
         "gates": [],
-        "notes": []
+        "notes": [
+            "Wave-D3 密度叠加层 dual-edge-permission-density-v1 离线闭合：Frozen 1 义务 + 7 密度叶 == parsed 8（dual-edge-permission-density-v1）；r5 双腿收据 20261031-regression-r5-edge-mutation/connect-private-discover-stdout.json（status=PASS，remote_validation=NOT_RUN）；wpc 本地轮 junit 行 LOCAL-EDGE-CONNECT-PRIVATE-DISCOVER-01 PASS 1/1；产品在案 PD-PRIVATE-CREATE-500（preprod 500 vs 契约 403）与 PD-DISCOVER-BRANCH-DRIFT（org 分支 403 vs 契约 400、role 包装 invalid_operation）在密度分类中如实披露；22 叶族内 ENROLLMENT=NOT_ENROLLED fail-close，本行不获得任何密度执行信用；committed verdict 维持 PASS 现状不变，笔记增量仅补水注记；⏳pending-landing"
+          ]
       }
     },
     {
