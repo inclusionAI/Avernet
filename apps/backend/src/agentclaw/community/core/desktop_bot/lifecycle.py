@@ -16,7 +16,7 @@ from agentclaw.community.core.desktop_bot.services.desktop_bot_service import De
 from agentclaw.community.core.desktop_bot.status_mapping import StatusDecision, map_baas_to_local
 from agentclaw.community.di.config import DesktopBotPeriodicScanConfig
 from agentclaw.community.kernel.lifecycle import LifecycleBase
-from agentclaw.community.plugin_api.cache import CachePlugin
+from agentclaw.community.plugin_api.cache import CacheLockInfrastructureError, CachePlugin
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.log import get_logger
 
@@ -295,6 +295,8 @@ class DesktopBotLifecycle(LifecycleBase):
             token = self._cache.acquire_lock(
                 self._scan_lock_key, ttl=_SCAN_LOCK_TTL_SECONDS,
             )
+        except CacheLockInfrastructureError:
+            token = None
         except Exception as e:
             logger.warning(
                 "[periodic-scan] acquire_lock failed, skip round: %s", e,
