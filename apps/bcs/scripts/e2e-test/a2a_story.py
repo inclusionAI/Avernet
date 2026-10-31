@@ -276,7 +276,7 @@ class A2aStory(Story):
         assert search["items"][0]["agent_card"] == inline
         for skill, expected in [("e2e", 1), ("absent-legacy-skill", 0)]:
             found = self.request("GET", "/bots/discover?" + urlencode({"q": alias.lower(), "skill": skill}))
-            assert len(found["bots"]) == expected, "Alias must compose with Card skill filtering"
+            assert len(found["bots"]) == expected, f"Alias/Card skill {skill}: expected {expected}, received {len(found['bots'])}"
             if expected:
                 assert found["bots"][0]["bot_uuid"] == inline_bot["bot_uuid"]
                 assert found["bots"][0]["agent_card"] == inline

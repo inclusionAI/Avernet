@@ -852,7 +852,7 @@ fn append_provider_discovery_selector_sql(
             let pattern = like_pattern(query);
             let (card_sql, card_params) = crate::a2a_search::card_text_match(flavor, "b.agent_card", query);
             sql.push_str(&format!(" AND (LOWER(pb.bot_uuid) LIKE ? OR \
-                (b.agent_card IS NULL AND (LOWER(b.name) LIKE ? OR LOWER(COALESCE(b.bot_info, '')) LIKE ?)) OR \
+                LOWER(b.name) LIKE ? OR (b.agent_card IS NULL AND LOWER(COALESCE(b.bot_info, '')) LIKE ?) OR \
                 (b.agent_card IS NOT NULL AND ({card_sql})))"));
             for _ in 0..3 {
                 params.push(DbValue::from(pattern.as_str()));

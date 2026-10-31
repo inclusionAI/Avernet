@@ -524,3 +524,14 @@
         assert_eq!(page.records.len(), 1);
         assert_eq!(page.records[0].bot_uuid, "bot-c");
     }
+
+
+    #[path="../tests/support/a2a_provider_alias.rs"]
+    mod a2a_provider_alias;
+
+    #[tokio::test]
+    async fn offline_card_alias_uses_provider_discovery_and_organization_candidate_paths() {
+        let db=sqlite_provider_db().await;
+        let store=DbProviderStore::sqlite(db.clone());
+        a2a_provider_alias::verify(db,&store).await;
+    }

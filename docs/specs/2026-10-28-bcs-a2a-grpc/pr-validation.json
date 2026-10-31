@@ -116,7 +116,7 @@
     "additional_fix": "The v20-to-v39 suffix applies 19 migrations, not 18."
   },
   "static_checks": {
-    "changed_source_files": 230,
+    "changed_source_files": 231,
     "largest_source_lines": 1000,
     "rust_parser": "all changed Rust sources accepted; stdout only, no source formatted",
     "frozen_sql": "existing SQL unchanged; only two new 039 SQL files added",
@@ -131,9 +131,12 @@
     "apps/bcs/crates/test-support/bcs-test-support/src/contract/a2a_bot.rs": "bff70cb957fed62148ec891e40c685db1035039a0cfd266a76166ec2fc294104",
     "apps/bcs/crates/tools/bcs-admin/src/migrate_human_input_index_tests.rs": "4fbddacb020ee96d3a85e88cd669425ba47d50e695ee664a81946cbe31319a17",
     "apps/bcs/crates/tools/bcs-admin/src/migrate_mysql_chain_tests.rs": "ba752d91352075b1c48d8c2ba62416ef0e6154538b9d21403f0546b3ba999bf0",
-    "apps/bcs/scripts/e2e-test/a2a_story.py": "6005bf04da24d4b785c116d8990c96d7df54756d4c4fc3500d4f139e9630158c",
+    "apps/bcs/scripts/e2e-test/a2a_story.py": "d9fd88f17a9dcb99343d13d352366b2b0732f31438dad0e494d75d7e851a11a8",
     "apps/bcs/crates/services/bcs-bot-store/tests/a2a_mysql.rs": "9d6c99ccfe8a622f6ea60be38da913d117f2d23cbe93f9b42964df699da6c61d",
-    "apps/bcs/crates/services/bcs-bot-store/tests/support/a2a_mysql_cases.rs": "4f8e7910d5e09974de86969c35f1f200555e04a28041b61ac3990672eaa81b5a"
+    "apps/bcs/crates/services/bcs-bot-store/tests/support/a2a_mysql_cases.rs": "3cc6248ec04fcb48a365257b14c2a954a7c0e5662c99881a85e71523ee283e1a",
+    "apps/bcs/crates/services/bcs-bot-store/src/provider.rs": "f16f8d06d4bc952303ec163eb0b2fe52f3589c3e5bf26ad5b6916a40e300ac7d",
+    "apps/bcs/crates/services/bcs-bot-store/src/provider_db.rs": "f21818a9398d9249493920497a90549c73662b09589b17d135d8749957c81beb",
+    "apps/bcs/crates/services/bcs-bot-store/tests/support/a2a_provider_alias.rs": "207c5121d5e0a9c6e34eb59fc60f9dfe248fb70b3845dc197d9c4e456d7434cc"
   },
   "limits": [
     "frontend standalone typecheck blocked by installed @types/d3-dispatch syntax",
@@ -192,6 +195,13 @@
       "native MySQL shared alias/literal/skill filtering",
       "live HTTP alias search and discovery with positive/negative Card skill selectors"
     ],
-    "status": "Local focused tests running; latest-head CI pending after publication."
+    "status": "Local Core5, SQLite store9 and native MySQL1 passed; 2aac23fd CI passed 8415 units and native MySQL, but live discovery exposed the additional Provider selector path."
+  },
+  "alias_provider_followup": {
+    "failed_job": "https://github.com/inclusionAI/Avernet/actions/runs/41221634720/job/124597224165",
+    "cause": "Offline Gateway discovery obtains candidates through the Provider binding selector, which also excluded local names for Card rows. The earlier Memory registry fixture bypassed this source.",
+    "fix": "Match local names in Provider discovery and organization candidate SQL; retain Card-only legacy exclusion and skill selectors.",
+    "test": "One shared actual SQL Provider contract on SQLite and native MySQL, including offline Gateway aliases, Card query text, legacy isolation and organization count/paging; live HTTP alias assertion retained.",
+    "status": "Focused checks running; follow-up CI pending; no gate lowered."
   }
 }

@@ -458,7 +458,7 @@ impl OrganizationCandidateReadPort for DbProviderStore {
         if let Some(q) = query.q.as_deref().map(str::trim).filter(|q| !q.is_empty()) {
             let (card_sql, card_params) = crate::a2a_search::card_text_match(self.flavor, "b.agent_card", q);
             filter_sql.push_str(&format!(" AND (LOWER(pb.bot_uuid) LIKE ? OR \
-                (b.agent_card IS NULL AND (LOWER(b.name) LIKE ? OR LOWER(COALESCE(b.bot_info, '')) LIKE ?)) OR \
+                LOWER(b.name) LIKE ? OR (b.agent_card IS NULL AND LOWER(COALESCE(b.bot_info, '')) LIKE ?) OR \
                 (b.agent_card IS NOT NULL AND ({card_sql})))"));
             let pattern = like_pattern(q);
             for _ in 0..3 {

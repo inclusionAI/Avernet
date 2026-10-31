@@ -1,4 +1,6 @@
 //! Shared native MySQL cases for the isolated store test and full-chain CI gate.
+#[path="a2a_provider_alias.rs"]
+mod provider_alias;
 use std::sync::Arc;
 use bcs_bot_store::a2a::DbA2aBotStore;
 use bcs_chat_run_store::a2a::DbA2aRunStore;
@@ -69,5 +71,6 @@ pub async fn verify(db:Arc<dyn DbPlugin>) {
         assert!(rows[0].get_string("modified").unwrap().is_some());
     }
     bcs_test_support::contract::a2a_bot::a2a_many_run_task_contract_tests(&runs,run()).await;
+    provider_alias::verify(db.clone(),&bcs_bot_store::DbProviderStore::mysql(db.clone())).await;
     println!("A2A MySQL: Card/Run, JSON search, transactional failure and shared Task contracts passed");
 }

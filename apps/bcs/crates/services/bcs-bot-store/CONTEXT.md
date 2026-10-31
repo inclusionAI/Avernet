@@ -174,7 +174,10 @@ in SQL before selecting matching payloads. A nonmatching A2A identity remains
 distinguishable from a legacy Bot, preventing stale capability fallback. Search
 count and pagination share the same predicate. Display aliases do not enable
 legacy skill/summary matching; explicit skill selectors still require Card skills.
-The alias predicate uses the existing SQL queries and pagination/batch bounds. SQL flavor is explicitly injected;
+The alias predicate uses the existing SQL queries and pagination/batch bounds.
+Offline Gateway discovery also matches the alias in the Provider binding selector;
+organization candidate counts/pages use the same name rule. A live registry
+entry is not required to discover an enabled Gateway Bot. SQL flavor is explicitly injected;
 SQLite uses JSON extraction and MySQL uses JSON_SEARCH with a literal escape
 character and bound values. See the
 [MySQL JSON search contract](https://dev.mysql.com/doc/refman/8.0/en/json-search-functions.html).
