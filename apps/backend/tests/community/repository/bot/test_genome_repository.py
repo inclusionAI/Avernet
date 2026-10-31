@@ -317,7 +317,6 @@ def test_promotions_round_trip_list_and_finish(db):
             actor_id="u1",
             reason="ship",
             status="applying",
-            apply_kind="pending",
             created_at=created_at,
         )
 
@@ -439,7 +438,6 @@ def _in_flight(revision_id: str, promotion_id: str, from_revision_id: str | None
         actor_id="u1",
         reason="r",
         status="pending",
-        apply_kind="direct",
         created_at=NOW,
     )
 

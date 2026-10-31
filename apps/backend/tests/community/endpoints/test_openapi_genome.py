@@ -213,7 +213,6 @@ def _seed_promotion_row(world) -> str:
             actor_id=_OWNER,
             reason="seed",
             status="applied",
-            apply_kind="direct",
             apply_id="ap_seed",
             apply_detail="apply ap_seed: applied",
             created_at=datetime.now(timezone.utc).replace(tzinfo=None),

@@ -257,7 +257,7 @@ Repository (`core/repository/{protocols,implementations}/bot/genome.py`):
 ## 7. HTTP (`adapters/http/openapi_v1/bots/`)
 
 - `schemas_genome.py`: `PromotionPayload.status` literal gains `pending`,
-  `applied_partial`; `apply_kind` literal `direct` only; new `apply_id`,
+  `applied_partial`; `apply_kind` dropped (one seam); new `apply_id`,
   `settled_at`; ref payload gains `labels` (a list). The
   `created_at` description drops "when the refs moved". Center skill entry
   schema loses `center_version`.

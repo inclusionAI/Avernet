@@ -393,7 +393,6 @@ class Promotion:
     actor: Provenance  #: who promoted
     reason: str  #: why, as the actor said
     status: PromotionStatus
-    apply_kind: str  #: which delivery seam took it: ``direct`` (an apply run, RSI-04)
     apply_id: str | None  #: the apply run delivering it; ``None`` until it started, or when it never did
     apply_detail: str  #: one line on how the delivery went; a failure never quotes an exception's text
     created_at: datetime  #: when the promotion was asked for

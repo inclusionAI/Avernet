@@ -143,7 +143,7 @@ latest published version (ADR 0002), and a new Center version is not drift.
 - [ ] A promotion of a service bot targets its draft and is delivered the same
       way; a personal bot's as described. (Verify/online: #3212.)
 - [ ] `PendingDeliveryApplier` is gone; the bound applier is the direct one
-      (`apply_kind: direct`).
+      (the promotion records no applier kind: there is one seam).
 
 ### Labels on refs
 

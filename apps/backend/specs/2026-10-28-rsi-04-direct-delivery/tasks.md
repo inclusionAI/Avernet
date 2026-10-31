@@ -118,7 +118,7 @@
 - **Goal:** The genome API shows the lifecycle and the partial marker.
 - **Files:** `adapters/http/openapi_v1/bots/{genome,schemas_genome,errors_genome}.py`; `test_genome_routes.py`, `endpoints/test_openapi_genome.py`, `test_domain_error_status_map_complete.py`
 - **Done when:**
-  - [x] Promotion payload: statuses, `apply_kind: direct`, `apply_id`, `settled_at`; ref payload `labels`; 409 `apply_in_progress`.
+  - [x] Promotion payload: statuses, `apply_id`, `settled_at` (`apply_kind` dropped in review: one delivery seam, nothing to tell apart); ref payload `labels`; 409 `apply_in_progress`.
   - [x] Gateway OpenAPI regenerated if the genome routes are published there.
 - **Depends on:** Task 9
 - **Notes:** a busy bot answers 409 with business code 409109, the code the apply route's own busy refusal uses. The genome routes are not published in the Gateway OpenAPI, so nothing to regenerate.
