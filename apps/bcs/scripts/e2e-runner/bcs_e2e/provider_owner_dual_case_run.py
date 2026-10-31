@@ -126,7 +126,7 @@ REGISTRATION_SEAM = {
         "source_map 'provider-owner-isolation-migration-contract.json'"),
     'executor_migration_json': (
         "executor-migration.json: story_provider_owner_isolation row flips mode LOCAL_ONLY -> DUAL with "
-        "preprod_verdict NOT_RUN and empty gates/notes; counts fence "
+        "preprod_verdict NOT_RUN, empty gates, one registered owner-isolation note (r2 local live legs); counts fence "
         "LOCAL_ONLY/NOT_RUN 8 -> 6 and DUAL/NOT_RUN 3 -> 5 requires the matching "
         "_EXPECTED_EXECUTOR_MIGRATION_COUNTS update in inventory.py"),
 }
