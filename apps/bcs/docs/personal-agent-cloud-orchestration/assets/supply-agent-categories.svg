@@ -45,7 +45,7 @@
   <line x1="320" y1="302" x2="366" y2="282" stroke="#5c6a62" marker-end="url(#ar)" marker-start="url(#ar)"/>
 
   <!-- right: dial-out -->
-  <text x="600" y="76" font-size="12.5" font-weight="bold" fill="#5c6a62">DIAL-OUT (webhook + SSE — BCN connects to platform)</text>
+  <text x="600" y="76" font-size="12.5" font-weight="bold" fill="#5c6a62">DIAL-OUT (webhook + SSE — BCN dials out)</text>
 
   <rect x="600" y="104" width="280" height="88" rx="10" fill="#ffffff" stroke="#b9c6bf"/>
   <text x="740" y="124" font-size="12" font-weight="bold" text-anchor="middle" fill="#1c2420">C1 · engine adapter (in-house provider)</text>
