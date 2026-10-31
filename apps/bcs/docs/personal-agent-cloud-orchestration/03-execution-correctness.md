@@ -36,7 +36,10 @@ before the request leaves**; the server-assigned task id is a cached
 convenience learned later.
 
 ```
-idem_key = f(task_id, step_id, attempt)          # deterministic
+idem_key = f(run_id, step_id, attempt)           # deterministic; run_id is
+                                                 # globally unique per workflow
+                                                 # run, so keys never collide
+                                                 # across a task's runs
 
 1. INSERT dispatch record {run, step, attempt, idem_key, state=SENDING}
 2. send A2A message, idem_key in metadata
@@ -104,7 +107,7 @@ fork; vanilla A2A traffic flows unchanged:
 
 | Clause | Content |
 | --- | --- |
-| Key convention | `idem_key` in request metadata, derived from `(task_id, step_id, attempt)` |
+| Key convention | `idem_key` in request metadata, derived from `(run_id, step_id, attempt)` — run-scoped, not task-scoped, so a later refinement round of the same task never dedups against an earlier run's dispatches |
 | Dedup | same key ⇒ same task, atomically checked at execution admission; same key with conflicting payload ⇒ keep first, flag error |
 | Probe semantics | idempotent-resend inside the window; retry-only flag honored with atomic known/unknown judgment |
 | Retention floor | terminal task state **and** the key seen-set retained ≥ the agreed window; within it, "task not found" provably means "never arrived" |

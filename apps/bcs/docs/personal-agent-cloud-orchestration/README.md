@@ -93,7 +93,7 @@ from **fenced, expiring leases in the shared DB**, not from ring agreement.
 Hash = placement; lease = ownership. → [Doc 02](02-availability-architecture.md)
 
 **Execution correctness.** Every outbound dispatch is written ahead with a
-client-generated idempotency key `(task_id, step_id, attempt)` before the
+client-generated idempotency key `(run_id, step_id, attempt)` before the
 request leaves. Recovery is pull-based: the supply agent holds queryable Task
 state (A2A `GetTask`), so a takeover node resolves "dispatched, outcome
 unknown" by reading, not re-sending. The guarantees ride a named **BCN A2A
