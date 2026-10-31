@@ -221,7 +221,7 @@ export function GroupParticipantPicker({
             data-testid="group-participant-list"
             className={cn(
               'app-scrollbar min-h-[180px] max-h-[320px] overflow-y-auto pb-2',
-              cardMode ? 'space-y-1.5' : 'divide-y divide-border',
+              cardMode ? 'space-y-1.5' : 'divide-y divide-divider',
               fillAvailableHeight && 'h-full max-h-none',
               listViewportClassName,
             )}

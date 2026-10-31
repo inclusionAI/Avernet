@@ -577,7 +577,7 @@ def test_restart_device_allows_super_admin_and_explicit_collaborators(monkeypatc
     repo = MagicMock()
     repo.get_by_id.return_value = _make_record(id=1001, entity_id="owner-001")
     bot_repo = MagicMock()
-    bot_repo.get_by_id_and_owner.return_value = {"bot_id": "bot-001", "owner_id": "owner-001"}
+    bot_repo.get_by_id_and_entity.return_value = {"bot_id": "bot-001", "owner_id": "owner-001"}
     collaborators = MagicMock()
     collaborators.check_collaborator_permission.return_value = {"has_permission": True}
     baas = MagicMock()
@@ -589,7 +589,7 @@ def test_restart_device_allows_super_admin_and_explicit_collaborators(monkeypatc
 
     assert result == {"publish_id": 42}
     if actor != "super-admin":
-        bot_repo.get_by_id_and_owner.assert_called_once_with("bot-001", "owner-001")
+        bot_repo.get_by_id_and_entity.assert_called_once_with("bot-001", "owner-001")
     assert baas.restart_devices.call_args.kwargs["operator"] == actor
     if actor == "super-admin":
         collaborators.check_collaborator_permission.assert_not_called()
@@ -607,7 +607,7 @@ def test_restart_device_denies_without_explicit_target_membership(monkeypatch, m
     repo = MagicMock()
     repo.get_by_id.return_value = _make_record(id=1001, entity_id="owner-001")
     bot_repo = MagicMock()
-    bot_repo.get_by_id_and_owner.return_value = (
+    bot_repo.get_by_id_and_entity.return_value = (
         None if missing == "bot" else {} if missing == "identity"
         else {"bot_id": "bot-001", "owner_id": "owner-001", "public": "1"}
     )
@@ -678,7 +678,7 @@ def test_restart_http_applies_real_service_authorization(monkeypatch, caplog, ac
     repo = MagicMock()
     repo.get_by_id.return_value = _make_record(id=12934, entity_id="owner-001")
     bot_repo = MagicMock()
-    bot_repo.get_by_id_and_owner.return_value = {"bot_id": "bot-001", "owner_id": "owner-001"}
+    bot_repo.get_by_id_and_entity.return_value = {"bot_id": "bot-001", "owner_id": "owner-001"}
     collaborators = MagicMock()
     collaborators.check_collaborator_permission.return_value = {"has_permission": actor == "editor"}
     baas = MagicMock()

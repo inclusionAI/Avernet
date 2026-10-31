@@ -12,6 +12,8 @@ makes a SkillSet-bridged Skill answerable before anything else wrote its row.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from enum import StrEnum
 from typing import Any, Callable, Protocol, TYPE_CHECKING
 
@@ -212,6 +214,27 @@ class SkillQueryService(SkillQueryServiceProtocol):
         )
 
     # ── Detail ──────────────────────────────────────────────────────
+
+    def list_uploaded_skills(
+        self, *, bot_id: str, owner_id: str, actor_id: str
+    ) -> list[dict[str, Any]]:
+        """List the Bot's owned assets using its immutable resource identity."""
+        if not actor_id:
+            raise LocalSkillNotFoundError()
+        try:
+            bot = self._bot_addresses.resolve(
+                bot_id=bot_id, legacy_owner_id=owner_id
+            ).bot
+        except BotAddressNotFoundError:
+            # Historical self-owned catalogs may outlive their Bot. A missing
+            # Bot never grants access to another user's detached assets.
+            if actor_id != owner_id:
+                raise LocalSkillNotFoundError() from None
+            resource_owner = actor_id
+        else:
+            self._authorize_view_access(bot_id=bot_id, bot=bot, actor_id=actor_id)
+            resource_owner = stable_resource_owner_id(bot)
+        return self._skill_repo.list_skills(resource_owner, bolt_id=bot_id)
 
     def get_local_skill(self, *, skill_id: str, actor_id: str) -> dict[str, Any]:
         """The legacy self-addressed Local detail: the Skill selects its Bot."""
@@ -493,15 +516,20 @@ class SkillQueryService(SkillQueryServiceProtocol):
             ).bot
         except BotAddressNotFoundError:
             raise LocalSkillNotFoundError() from None
+        self._authorize_view_access(bot_id=bot_id, bot=bot, actor_id=actor_id)
+        return bot
+
+    def _authorize_view_access(
+        self, *, bot_id: str, bot: Mapping[str, Any], actor_id: str
+    ) -> None:
         current_owner = str(bot["owner_id"])
         if actor_id == current_owner:
-            return bot
+            return
         permission = self._collaborators.check_collaborator_permission(
             bot_id, current_owner, actor_id, PermissionLevel.MEMBER
         )
         if not permission.get("has_permission"):
             raise LocalSkillNotFoundError()
-        return bot
 
     @staticmethod
     def _is_exact_local_skill(skill: dict[str, Any] | None) -> bool:

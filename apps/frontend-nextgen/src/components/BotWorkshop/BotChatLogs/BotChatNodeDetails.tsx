@@ -40,7 +40,7 @@ export function BotChatNodeDetails({ detail, selection }: { detail: BotChatDetai
 
   return (
     <section className="flex min-h-[560px] min-w-0 flex-col bg-card">
-      <header className="border-b border-border px-5 py-4">
+      <header className="border-b border-divider px-5 py-4">
         <div className="flex items-center gap-2">
           <span className="flex size-6 items-center justify-center rounded bg-primary/10">
             {iconFor(selection)}
@@ -72,7 +72,7 @@ export function BotChatNodeDetails({ detail, selection }: { detail: BotChatDetai
           </div>
         </dl>
       </header>
-      <div className="border-b border-border px-5 py-3">
+      <div className="border-b border-divider px-5 py-3">
         <Segmented
           value={tab}
           options={[

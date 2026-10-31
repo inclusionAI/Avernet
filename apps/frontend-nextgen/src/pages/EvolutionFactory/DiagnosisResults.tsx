@@ -59,7 +59,7 @@ export function DiagnosisResults({ output }: { output: JsonObject }) {
           <summary className="cursor-pointer text-sm font-medium">
             问题与优化建议 · {array(diagnosis.issues).length}
           </summary>
-          <div className="mt-3 divide-y divide-border">
+          <div className="mt-3 divide-y divide-divider">
             {array(diagnosis.issues).map((issue, i) => (
               <div key={i} className="py-3 first:pt-0">
                 <div className="flex flex-wrap items-center gap-2">
@@ -93,11 +93,11 @@ export function DiagnosisResults({ output }: { output: JsonObject }) {
       {caseItems.length > 0 && (
         <section className="rounded-xl border border-border p-4">
           <h4 className="mb-3 text-sm font-semibold">诊断 Case</h4>
-          <div className="divide-y divide-border">{caseItems.slice(0, 3).map(renderCase)}</div>
+          <div className="divide-y divide-divider">{caseItems.slice(0, 3).map(renderCase)}</div>
           {caseItems.length > 3 && (
-            <details className="mt-3 border-t border-border pt-3">
+            <details className="mt-3 border-t border-divider pt-3">
               <summary className="cursor-pointer text-xs text-primary">查看其余 {caseItems.length - 3} 个 Case</summary>
-              <div className="mt-3 divide-y divide-border">{caseItems.slice(3).map(renderCase)}</div>
+              <div className="mt-3 divide-y divide-divider">{caseItems.slice(3).map(renderCase)}</div>
             </details>
           )}
         </section>

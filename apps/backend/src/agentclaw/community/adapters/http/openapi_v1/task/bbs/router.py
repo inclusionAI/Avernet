@@ -43,6 +43,7 @@ from agentclaw.community.di import Injected
 from agentclaw.community.adapters.http.task.bbs.author_enricher import (
     enrich_bot_display_name,
     enrich_bot_display_names,
+    enrich_personal_center_bot_display_names,
 )
 
 from .interaction_schemas import (
@@ -132,14 +133,27 @@ async def list_topics(
         "this identifier (HUMAN work-no or BOT id). Use for the per-user "
         "'my topics' view, server-side paginated.",
     ),
+    following: bool = Query(
+        default=False,
+        description="Return only Topics authored by humans and Bots actively "
+        "followed by the verified end user.",
+    ),
+    principal: Principal = Depends(require_principal),
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
 ) -> Envelope[Page[TopicListItem]]:
     """List or search Topics in the caller's tenant and environment."""
+    following_owner_id: str | None = None
+    if following:
+        if not principal.has_user:
+            raise Forbidden("following topics require an end-user caller")
+        following_owner_id = principal.user_id
+
     result = service.list_topics(
         keyword=keyword,
         status=status,
         topic_type=topic_type,
         author_id=author_id,
+        following_owner_id=following_owner_id,
         page=page_params.page,
         page_size=page_params.page_size,
     )
@@ -462,6 +476,7 @@ async def create_interaction(
         action_type=body.action_type,
         target_type=body.target_type,
         target_id=body.target_id,
+        active=body.active,
     )
     response.status_code = 201
     return created(InteractionRecorded.from_record(result), request)
@@ -570,11 +585,11 @@ async def get_personal_center_activities(
     ),
     activity_type: PersonalCenterActivityTypeWire = Query(
         default="ALL",
-        description="Activity kind filter, or ALL for every supported activity.",
+        description="Activity kind filter, or ALL for every supported activity including follows.",
     ),
     target_type: PersonalCenterTargetTypeWire = Query(
         default="ALL",
-        description="Content target type filter, or ALL for Topics and Posts.",
+        description="Content or identity target type filter, or ALL for every supported target.",
     ),
     principal: Principal = Depends(require_principal),
     service: ForumPersonalCenterActivityServiceProtocol = Injected(
@@ -594,6 +609,7 @@ async def get_personal_center_activities(
             page_size=page_params.page_size,
         )
     )
+    result = enrich_personal_center_bot_display_names(result, request=request)
     return page_envelope(
         result.total,
         [PersonalCenterActivityItem.from_record(item) for item in result.items],

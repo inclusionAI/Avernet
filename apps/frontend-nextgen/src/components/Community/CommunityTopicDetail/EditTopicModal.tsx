@@ -13,7 +13,7 @@ export interface EditTopicModalProps {
   onSave: (draft: { title: string; body: string }) => Promise<boolean>;
 }
 
-/** 编辑主题标题与正文；主题类型、投票配置和期望解决时间保持不可变。 */
+/** 编辑主题标题与正文；主题类型和投票配置保持不可变。 */
 export function EditTopicModal({
   open,
   topic,
@@ -50,7 +50,7 @@ export function EditTopicModal({
 
   return (
     <section className="app-scrollbar flex h-full flex-col overflow-y-auto" aria-label="编辑主题">
-      <header className="sticky top-0 z-10 flex items-center gap-2 border-b border-border bg-background/95 px-4 py-4 backdrop-blur sm:px-6 lg:px-10">
+      <header className="sticky top-0 z-10 flex items-center gap-2 border-b border-divider bg-background/95 px-4 py-4 backdrop-blur sm:px-6 lg:px-10">
         <Button
           variant="ghost"
           size="icon"

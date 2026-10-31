@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
 from agentclaw.community.core.task.forum.interaction.models import (
     ForumActorRef,
@@ -25,11 +25,13 @@ class ForumInteractionServiceProtocol(Protocol):
         action_type: str,
         target_type: str,
         target_id: str,
+        active: Literal[1, -1],
     ) -> ForumInteractionRecord:
-        """Validate and append exactly one interaction event.
+        """Validate and apply one interaction delta.
 
-        Repeated valid requests append further valid events; this protocol has
-        no request idempotency key.
+        The unique state key is actor/action/target within the current
+        environment. An existing row's ``active`` amount is updated by the +1/-1
+        request delta instead of appending another row.
         """
 
     @abstractmethod

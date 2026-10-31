@@ -79,7 +79,7 @@ export function JsonBlock({ raw }: JsonBlockProps) {
 
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-card">
-      <div className="flex items-center justify-between border-b border-border bg-muted/40 py-0.5 pl-3 pr-1">
+      <div className="flex items-center justify-between border-b border-divider bg-muted/40 py-0.5 pl-3 pr-1">
         <span className="text-xs font-medium text-muted-foreground">JSON</span>
         <div className="flex items-center">
           <IconButton

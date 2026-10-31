@@ -13,9 +13,12 @@ import * as http from '@/services/backendApi/httpClient';
 
 // list/get/posts/create/close 均由 capability getBbsApiBase 注入前缀——mock 为当前公开 task 域路径。
 jest.mock('@/capabilities', () => ({
-  getCapabilities: () => ({
-    getBbsApiBase: () => ({ status: 'available', value: '/openapi/v1/collaboration/tasks/bbs/topics' }),
-  }),
+  getCapabilities: jest.fn(() => ({
+    getBbsApiBase: jest.fn(() => ({
+      status: 'available',
+      value: '/openapi/v1/collaboration/tasks/bbs/topics',
+    })),
+  })),
 }));
 jest.mock('@/services/backendApi/httpClient');
 const mockedRequest = (http as unknown as { backendRequest: jest.Mock }).backendRequest;
@@ -31,6 +34,41 @@ describe('communityController', () => {
       method: 'GET',
       params: { page: 2, page_size: 10, keyword: 'Bot' },
       signal: undefined,
+    });
+  });
+
+  test('公开面 scope=following 只下发 following，不泄露显式关注 owner', async () => {
+    await listCommunityTopics({ scope: 'following', followingOwnerId: '900003', offset: 0, limit: 20 });
+
+    expect(mockedRequest.mock.calls[0][1].params).toEqual({
+      page: 1,
+      page_size: 20,
+      following: true,
+    });
+  });
+
+  test('内部面 scope=following 额外下发当前登录人 following_owner_id', async () => {
+    const capabilities = jest.requireMock('@/capabilities');
+    capabilities.getCapabilities.mockImplementationOnce(() => ({
+      getBbsApiBase: () => ({
+        status: 'available',
+        value: '/api/v1/collaboration/tasks/bbs/topics',
+      }),
+    }));
+
+    await listCommunityTopics({
+      scope: 'following',
+      followingOwnerId: ' 900003 ',
+      offset: 0,
+      limit: 20,
+    });
+
+    expect(mockedRequest.mock.calls[0][0]).toBe('/api/v1/collaboration/tasks/bbs/topics');
+    expect(mockedRequest.mock.calls[0][1].params).toEqual({
+      page: 1,
+      page_size: 20,
+      following: true,
+      following_owner_id: '900003',
     });
   });
 
@@ -195,7 +233,7 @@ describe('communityController', () => {
     });
   });
 
-  test('创建分享主题不下发 topic_config，创建求助主题下发 expected_time', async () => {
+  test('分享和求助主题均不下发 topic_config', async () => {
     await createCommunityTopic({
       title: '分享资料',
       body: '正文',
@@ -209,16 +247,14 @@ describe('communityController', () => {
       authorId: 'u1',
       authorName: '张三',
       topicType: 'help',
-      help: { expectedTime: '希望本周内' },
     });
 
     const shareData = mockedRequest.mock.calls[0][1].data;
+    const helpData = mockedRequest.mock.calls[1][1].data;
     expect(shareData).toMatchObject({ topic_type: 'SHARE' });
     expect(shareData).not.toHaveProperty('topic_config');
-    expect(mockedRequest.mock.calls[1][1].data).toMatchObject({
-      topic_type: 'HELP',
-      topic_config: { help: { expected_time: '希望本周内' } },
-    });
+    expect(helpData).toMatchObject({ topic_type: 'HELP' });
+    expect(helpData).not.toHaveProperty('topic_config');
   });
 
   test('authorAvatarUrl 缺勤时不发 author_avatar_url 快照；author_display_name 仍下发（§2.1 不传则 null）', async () => {

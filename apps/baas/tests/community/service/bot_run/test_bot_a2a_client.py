@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import socket
 import threading
 import time
 from typing import Any
@@ -416,6 +417,284 @@ def test_gate_rejection_not_ok(gate_server):
     out = _run(scenario())
     assert out["ok"] is False
     assert out["error"]["code"] == "auth_required"
+
+
+# ── E1-robust: 上游错误面不是 JSON-RPC 错误对象（裸串/字符串 error 字段）──
+
+
+def make_stringified_error_app(body: Any, status_code: int = 200) -> FastAPI:
+    """错误面速写：body 原样 JSON 化返回——含 JSON 裸串与非对象 error 字段。
+
+    2026-10-29 预发实证：代理层曾回 JSON 裸串错误体，E1 二分把它当
+    JSON-RPC 错误对象 .get，炸成 AttributeError 并盖住真实错误。
+    """
+    app = FastAPI()
+
+    @app.get("/.well-known/agent-card.json")
+    def card() -> dict:
+        return {
+            "supportedInterfaces": [
+                {"protocolBinding": "JSONRPC", "protocolVersion": "1.0"}
+            ]
+        }
+
+    @app.post("/rpc")
+    async def rpc(request: Request) -> Any:
+        await request.json()
+        return JSONResponse(body, status_code=status_code)
+
+    return app
+
+
+def test_bare_string_error_body_surfaces_raw_not_crash():
+    """HTTP 502 + JSON 裸串 body：不得炸 AttributeError，原文必须进 message。"""
+    srv = LiveServer(make_stringified_error_app("upstream refused", 502))
+    try:
+
+        async def scenario():
+            client = await _connect_async(srv.base)
+            out = await client.chat_send(session_key="s", message="hi")
+            await client.close()
+            return out
+
+        out = _run(scenario())
+    finally:
+        srv.stop()
+    assert out["ok"] is False
+    assert out["error"]["code"] == "HTTP_502", "解析不出对象时回退真实状态码"
+    assert "upstream refused" in out["error"]["message"], "原始错误不得被盖住"
+
+
+def _make_broken_body_server():
+    """TCP 裸服务器：GET card 正常 200；POST /rpc 只回 502 响应头
+    （声明 Content-Length: 100）后立刻关连接——错误体永远到不了。
+
+    触发的具体传输异常形态不固定（RemoteProtocolError 或空串
+    ReadError），断言只钉结构化返回与资源关闭，不断言异常文本形态。
+    """
+
+    class _BrokenBodyServer:
+        def __init__(self) -> None:
+            self._sock = socket.socket()
+            self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self._sock.bind(("127.0.0.1", 0))
+            self._sock.listen(8)
+            self._thread = threading.Thread(target=self._serve, daemon=True)
+            self._thread.start()
+
+        def _serve(self) -> None:
+            while True:
+                try:
+                    conn, _ = self._sock.accept()
+                except OSError:
+                    return
+                with conn:
+                    try:
+                        head = conn.recv(65536)
+                    except OSError:
+                        continue
+                    if head.startswith(b"GET"):
+                        body = json.dumps(
+                            {
+                                "supportedInterfaces": [
+                                    {
+                                        "protocolBinding": "JSONRPC",
+                                        "protocolVersion": "1.0",
+                                    }
+                                ]
+                            }
+                        ).encode()
+                        conn.sendall(
+                            b"HTTP/1.1 200 OK\r\n"
+                            b"Content-Type: application/json\r\n"
+                            b"Content-Length: "
+                            + str(len(body)).encode()
+                            + b"\r\n\r\n"
+                            + body
+                        )
+                    else:
+                        conn.sendall(
+                            b"HTTP/1.1 502 Bad Gateway\r\n"
+                            b"Content-Type: application/json\r\n"
+                            b"Content-Length: 100\r\n\r\n"
+                        )
+                        conn.close()  # 体永不到达 → aread 炸
+
+        def stop(self) -> None:
+            self._sock.close()
+
+        @property
+        def base(self) -> str:
+            return f"http://127.0.0.1:{self._sock.getsockname()[1]}"
+
+    return _BrokenBodyServer()
+
+
+def test_error_body_read_failure_returns_structured_and_closes():
+    """P2 回归钉：错误响应头已到手（502），但错误体传输中断。
+
+    读体不得炸出 chat_send（上一版 aread 曾被移出 try）——必须结构化
+    返回 HTTP_502 + 可分诊 message；读挂的临时 http client 未登记进
+    _runs、close() 兜不住它，必须就地关闭。
+
+    真实 socket 断连触发的异常形态在 RemoteProtocolError（有文本）与
+    空串 ReadError 之间摆动——message 非空由实现层的空文本回退保证
+    （见 test_error_body_read_failure_empty_exc_message_falls_back）。
+    """
+    from secbaas.community.core.service.bot_run._bot_a2a_client import (
+        BotA2aClient,
+    )
+
+    srv = _make_broken_body_server()
+    # httpx AsyncClient.__aexit__ 直接关 transport、不经 aclose()——connect
+    # 阶段的 with 块不会计入。关闭断言只针对 chat_send 阶段创建的临时
+    # client（read 失败的孤儿正是它——未登记进 _runs，close() 兜不住）。
+    made: list[dict[str, bool]] = []
+    orig_http = BotA2aClient._http
+
+    def counting_http(self, *, timeout=None):
+        created = orig_http.__get__(self, BotA2aClient)(timeout=timeout)
+        entry: dict[str, bool] = {"closed": False}
+        made.append(entry)
+        real_aclose = created.aclose
+
+        async def counting_aclose():
+            entry["closed"] = True
+            await real_aclose()
+
+        created.aclose = counting_aclose
+        return created
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(BotA2aClient, "_http", counting_http)
+
+    async def scenario():
+        client = await _connect_async(srv.base)
+        pre = len(made)
+        out = await client.chat_send(session_key="s", message="hi")
+        chat_phase = made[pre:]  # chat_send 创建的全部临时 client
+        await client.close()
+        return out, chat_phase
+
+    try:
+        out, chat_phase = _run(scenario())
+    finally:
+        srv.stop()
+        monkeypatch.undo()
+    assert out["ok"] is False
+    assert out["error"]["code"] == "HTTP_502", "状态码来自已到手的响应头"
+    assert out["error"]["message"], "空串传输异常须回退类名，不得为空"
+    assert chat_phase, "chat_send 必须经由 _http 建临时 client"
+    assert all(e["closed"] for e in chat_phase), "读挂的临时 client 必须就地关闭"
+
+
+def test_error_body_read_failure_survives_resp_aclose_error():
+    """读体失败后 resp.aclose 再炸（best-effort 不得反噬清理）：
+    client 关闭与结构化返回都必须完成。"""
+    srv = _make_broken_body_server()
+
+    async def scenario():
+        client = await _connect_async(srv.base)
+        # connect 后再下补丁：card 探针自身的响应读取也走 Response.aclose，
+        # 全局炸会击穿 A2aUnavailableError 门（灰度回退承诺）。
+        real_aclose = httpx.Response.aclose
+
+        async def bomb_aclose(self):
+            raise RuntimeError("aclose also broken")
+
+        httpx.Response.aclose = bomb_aclose
+        try:
+            out = await client.chat_send(session_key="s", message="hi")
+        finally:
+            httpx.Response.aclose = real_aclose
+        await client.close()
+        return out
+
+    try:
+        out = _run(scenario())
+    finally:
+        srv.stop()
+    assert out["ok"] is False
+    assert out["error"]["code"] == "HTTP_502"
+    assert out["error"]["message"], "传输异常文本仍然要透出"
+
+
+def test_error_body_read_failure_empty_exc_message_falls_back():
+    """空文本传输异常（ReadError("")/ReadTimeout("")）确定性复现：
+    message 必须回退到异常类名，保证恒有可分诊内容（评审 P2）。
+
+    http_transport_factory + MockTransport 注入，响应头 502 到手、
+    读体时流抛空文本异常——不走真实 socket，形态完全确定。
+    """
+    from secbaas.community.core.service.bot_run._bot_a2a_client import (
+        BotA2aClient,
+    )
+
+    card = {
+        "supportedInterfaces": [
+            {"protocolBinding": "JSONRPC", "protocolVersion": "1.0"}
+        ]
+    }
+
+    def _client_for(exc: Exception) -> httpx.AsyncClient:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if "agent-card.json" in request.url.path:
+                return httpx.Response(200, json=card)
+
+            async def exploding_body():
+                yield b""
+                raise exc
+
+            return httpx.Response(
+                502,
+                headers={"content-type": "application/json"},
+                content=exploding_body(),
+            )
+
+        return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    async def scenario(exc: Exception) -> dict:
+        client = BotA2aClient(
+            base_url="http://testserver",
+            http_transport_factory=lambda: _client_for(exc),
+        )
+        hello = await client.connect()
+        assert hello["protocol"] == 1
+        out = await client.chat_send(session_key="s", message="hi")
+        await client.close()
+        return out
+
+    for exc, name in [
+        (httpx.ReadError(""), "ReadError"),
+        (httpx.ReadTimeout(""), "ReadTimeout"),
+    ]:
+        out = _run(scenario(exc))
+        assert out["ok"] is False, f"{name}: 读体失败必须结构化返回"
+        assert out["error"]["code"] == "HTTP_502", f"{name}: 状态码来自已到手的响应头"
+        assert out["error"]["message"] == name, f"{name}: 空文本必须回退异常类名"
+
+
+def test_string_error_field_body_surfaces_raw_not_crash():
+    """200 + error 字段是字符串（非对象）：同款两级守卫，原文可见。"""
+    srv = LiveServer(
+        make_stringified_error_app(
+            {"jsonrpc": "2.0", "id": 1, "error": "gate exploded"}
+        )
+    )
+    try:
+
+        async def scenario():
+            client = await _connect_async(srv.base)
+            out = await client.chat_send(session_key="s", message="hi")
+            await client.close()
+            return out
+
+        out = _run(scenario())
+    finally:
+        srv.stop()
+    assert out["ok"] is False
+    assert out["error"]["code"] == "HTTP_200", "error 非对象时 reason 不可得"
+    assert "gate exploded" in out["error"]["message"]
 
 
 # ── hitl: 真实 dataclass + exchange ──
@@ -2445,6 +2724,38 @@ async def _inject_scenario(srv: LiveServer, **inject_kwargs: Any) -> dict:
     return out
 
 
+def test_chat_inject_bare_string_error_body_no_crash():
+    """200 + JSON 裸串 body：isinstance 守卫 + 原文进 message。"""
+    app, _ = make_inject_app(
+        lambda body: JSONResponse('"inject refused"', status_code=200)
+    )
+    srv = LiveServer(app)
+    try:
+        out = _run(_inject_scenario(srv))
+    finally:
+        srv.stop()
+    assert out["ok"] is False
+    assert "inject refused" in out["error"]["message"]
+
+
+def test_chat_inject_string_error_field_no_crash():
+    """200 + error 字段是字符串：error 三键守卫，原文进 message。"""
+    app, _ = make_inject_app(
+        lambda body: JSONResponse(
+            {"jsonrpc": "2.0", "id": body["id"], "error": "inject refused"},
+            status_code=200,
+        )
+    )
+    srv = LiveServer(app)
+    try:
+        out = _run(_inject_scenario(srv))
+    finally:
+        srv.stop()
+    assert out["ok"] is False
+    assert out["error"]["code"] == "a2a_error"
+    assert "inject refused" in out["error"]["message"]
+
+
 def test_chat_inject_rejects_attachments_without_wire_side_effects():
     app, state = make_inject_app(_accepted_inject)
     srv = LiveServer(app)
@@ -2794,3 +3105,24 @@ def test_async_client_on_mode_malformed_card_raises_a2a_error(case, payload):
             _run(scenario())
     finally:
         srv.stop()
+
+
+# ── P0：proxypass token 在线刷新（120s TTL 快照过期的 62 例 401 风暴正修）──
+
+
+def test_refresh_proxypass_token_updates_and_guards():
+    from secbaas.community.core.service.bot_run._bot_a2a_client import (
+        BotA2aClient,
+    )
+
+    client = BotA2aClient(base_url="http://x", headers={"x-proxypass-token": "mock"})
+    client.refresh_proxypass_token({"x-proxypass-token": "placeholder"})
+    assert client.headers["x-proxypass-token"] == "placeholder"
+
+    client.refresh_proxypass_token({"x-proxypass-token": ""})
+    assert client.headers["x-proxypass-token"] == "placeholder", (
+        "空 token（Local 平台）不得覆盖既有值"
+    )
+
+    client.refresh_proxypass_token(None)
+    assert client.headers["x-proxypass-token"] == "placeholder"

@@ -2561,6 +2561,69 @@ async def test_sse_slow_consumer_kicked_and_stream_closes(monkeypatch):
     assert any("先行块" in chunk for chunk in chunks)
 
 
+# ── SSE 空闲心跳：静默窗保活，事件不丢、终结信标不误吞 ─────────────────────
+
+@pytest.mark.asyncio
+async def test_stream_response_emits_keepalive_on_idle(monkeypatch):
+    """引擎静默窗发 SSE 注释帧保活；心跳后事件照常抵达，终结信标收线。
+
+    线上事故（10-28 灰度 11 例断流）：run 流在引擎长静默窗（思考/工具
+    执行）无字节输出，中间 L7 按 idle-timeout 掐死连接。心跳注释帧是
+    wire 层唯一保活手段，且必须与队列 None 终结信标严格区分。
+    """
+    monkeypatch.setattr(R, "_kernel", kernel_mod.A2aKernel())
+    monkeypatch.setattr(R, "_SSE_KEEPALIVE_SECONDS", 0.05)
+    k = R._kernel
+    rid, _ = await k.open_run("ka", "k", "first", "d")
+    backlog, q = await k.subscribe(rid, since_seq=0)
+    resp = R._stream_response(11, rid, backlog, q)
+
+    out: list[str] = []
+
+    async def consume():
+        async for chunk in resp.body_iterator:
+            out.append(chunk)
+
+    task = asyncio.create_task(consume())
+    await asyncio.sleep(0.12)          # > 2×0.05s：至少一个心跳窗已过
+
+    assert R._SSE_KEEPALIVE_FRAME in out, "静默窗必须发出注释帧心跳"
+
+    await k.publish_delta(rid, "心跳后抵达")
+    q.put_nowait(None)                 # 终结信标：流收线契约
+    await asyncio.wait_for(task, 2)
+
+    assert any("心跳后抵达" in c for c in out), "心跳不得吞掉后续事件"
+    assert k.runs[rid].subscribers == [], "收线后必须摘除订阅者"
+
+
+@pytest.mark.asyncio
+async def test_subscribe_context_emits_keepalive_on_idle(monkeypatch):
+    """SubscribeToContext 长订阅同样有静默窗，心跳保活语义与 run 流一致。"""
+    monkeypatch.setattr(R, "_kernel", kernel_mod.A2aKernel())
+    monkeypatch.setattr(R, "_SSE_KEEPALIVE_SECONDS", 0.05)
+    k = R._kernel
+    resp = await R._subscribe_context({"contextId": "ka-sc"}, "ctx-ka", None)
+    assert resp.media_type == "text/event-stream"
+
+    out: list[str] = []
+
+    async def consume():
+        async for chunk in resp.body_iterator:
+            out.append(chunk)
+
+    task = asyncio.create_task(consume())
+    await asyncio.sleep(0.12)
+    assert R._SSE_KEEPALIVE_FRAME in out, "上下文订阅静默窗同样需要心跳"
+
+    k.publish_engine_inject("ka-sc", "后台注入", "inject-ka-1")
+    k._context_subs["ka-sc"][0].put_nowait(None)
+
+    await asyncio.wait_for(task, 2)
+    assert any("后台注入" in c for c in out), "心跳后事件必须照常送达"
+    assert k._context_subs.get("ka-sc") == [], "收线后必须摘除订阅"
+
+
 # ── wire 形状单测 ───────────────────────────────────────────────────────────
 
 def test_wire_artifact_update_merges_extra_metadata():

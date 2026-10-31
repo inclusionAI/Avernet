@@ -132,6 +132,9 @@ consumes:
   - "No service impls at import time — Protocols only declare shape, they don't depend on concrete services"
   - "A small number of core dataclass / schema types used to type Protocol method signatures (see internal_dependencies)"
 internal_dependencies:
+  - agentclaw.community.core.bot_public_risk.service_protocol
+  - agentclaw.community.kernel.knowledge_content
+  - agentclaw.community.kernel.knowledge  # BotKnowledgeScope used by the conversation knowledge contract
   - agentclaw.community.core.expert_market
   - agentclaw.community.core.bot_knowledge
   - agentclaw.community.core.space_knowledge
@@ -142,6 +145,7 @@ internal_dependencies:
   - agentclaw.community.core.service_bot.file_count_service_protocol
   - agentclaw.community.kernel.build_ignore
   - agentclaw.community.kernel.publish_ignore
+  - agentclaw.community.kernel.bot_manager_sync  # submit-only DTOs (SyncReason / SubmissionResult / SpaceChange) — typed in bot_manager_sync.py
   - agentclaw.community.core.digital_employee.contracts
   - agentclaw.community.core.devices.repository.record  # DeviceBindingRecord input for provider-aware token target resolution
   - agentclaw.community.core.bot_collaborator.models # Collaborator records, roles and permission levels — typed in collaborator_service.py

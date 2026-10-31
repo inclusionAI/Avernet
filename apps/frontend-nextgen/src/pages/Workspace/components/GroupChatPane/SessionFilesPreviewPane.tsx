@@ -115,7 +115,7 @@ function PreviewBody({ file, preview, onDownload }: PreviewBodyProps) {
           </pre>
         )}
         {preview.truncated ? (
-          <div className="shrink-0 border-t border-border px-6 py-3 text-xs text-muted-foreground">
+          <div className="shrink-0 border-t border-divider px-6 py-3 text-xs text-muted-foreground">
             内容较长，仅显示部分，请下载查看完整内容。
           </div>
         ) : null}
@@ -172,7 +172,7 @@ export function PreviewPane({
         <>
           {/* 两行预览头：工具行（返回 + 文件操作）与 meta 行（文件名 + 类型 badge + 大小）分离，
               最小副屏宽度下 badge 不再与长文件名/操作按钮挤同一行。 */}
-          <header className="flex flex-col gap-1.5 border-b border-border px-4 py-2.5">
+          <header className="flex flex-col gap-1.5 border-b border-divider px-4 py-2.5">
             <div className="flex items-center gap-2">
               {onBack ? (
                 <Button

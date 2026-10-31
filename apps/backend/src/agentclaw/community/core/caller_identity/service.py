@@ -6,6 +6,8 @@ from collections.abc import Mapping
 import time
 from typing import Any
 
+from agentclaw.community.core.access import admin_scopes
+from agentclaw.community.core.bot_management.addressing import stable_resource_owner_id
 from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
 from agentclaw.community.core.repository.protocols.bot import BotCollabLockRepositoryProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
@@ -42,8 +44,6 @@ from agentclaw.community.core.caller_identity.credential import (
 )
 from agentclaw.community.core.caller_identity.guard import (
     load_bot,
-    lock_epoch_matches,
-    require_owner_of_active_service_bot,
 )
 from agentclaw.community.core.caller_identity.session_validator import CallerSessionValidator
 from agentclaw.community.core.caller_identity.protocols import (
@@ -104,6 +104,46 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
             else None
         )
 
+    @staticmethod
+    def _authorize_call_type_edit(
+        bot: Mapping[str, Any] | None,
+        *,
+        bot_id: str,
+        actor_id: str,
+        call_type: McpCallType,
+        resource_type: str,
+        resource_code: str,
+    ) -> bool:
+        """Authorize only call-type mutations, without widening shared asset guards."""
+        owner_id = str(bot.get("owner_id") or "") if bot is not None else ""
+        entity_id = str(bot["entity_id"]) if bot is not None else ""
+        # COSEC: only trusted configuration grants cross-owner edit authority.
+        # Owner Caller requests need no elevated role; Owner intent does.
+        is_super_admin = (
+            bot is not None
+            and (actor_id != owner_id or call_type is McpCallType.OWNER)
+            and actor_id in admin_scopes.super_admin()
+        )
+        context = (bot_id, actor_id, owner_id, entity_id, resource_type, resource_code)
+        fields = "bot_id=%s actor_id=%s owner_id=%s entity_id=%s resource_type=%s resource_code=%s"
+        if bot is None or (actor_id != owner_id and not is_super_admin):
+            logger.warning(
+                "caller_call_type_edit_denied " + fields + " reason=%s",
+                *context, "bot_not_found" if bot is None else "not_owner_or_super_admin",
+            )
+            raise CallerIdentityPermissionError
+        if bot.get("bot_type") != "service" or bot.get("status") != "ACTIVE":
+            logger.warning(
+                "caller_call_type_edit_denied " + fields + " reason=inactive_or_non_service",
+                *context,
+            )
+            raise CallerIdentityReadOnlyError
+        logger.info(
+            "caller_call_type_edit_authorized " + fields + " reason=%s",
+            *context, "owner" if actor_id == owner_id else "super_admin",
+        )
+        return is_super_admin
+
     async def update_mcp_call_type(
         self,
         *,
@@ -129,18 +169,16 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
                     bot_id,
                 )
                 raise CallerIdentityAmbiguousError from exc
-        # COSEC: an entity-scoped lookup does not authorize the request; the
-        # authenticated actor must still be the Bot owner.
-        if bot is None or str(bot.get("owner_id") or "") != actor_id:
-            raise CallerIdentityPermissionError
-        if bot.get("bot_type") != "service" or bot.get("status") != "ACTIVE":
-            raise CallerIdentityReadOnlyError
-
+        is_super_admin = self._authorize_call_type_edit(
+            bot, bot_id=bot_id, actor_id=actor_id, call_type=normalized_call_type,
+            resource_type="mcp", resource_code=server_code,
+        )
+        owner_id = str(bot["owner_id"])
         engine_type = str(bot["active_engine"])
         active_mcps = self._mcp_provider.collect_bot_active_mcps(
             entity_id=str(bot["entity_id"]),
             bot_id=bot_id,
-            user_id=actor_id,
+            user_id=owner_id,
             entity_type=str(bot.get("entity_type") or "staff"),
             engine_type=engine_type,
         )
@@ -152,7 +190,7 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
         if server_code not in effective_mcps:
             raise CallerMcpNotFoundError
 
-        lock_key = f"{bot_id}:{actor_id}"
+        lock_key = f"{bot_id}:{stable_resource_owner_id(bot)}"
         lock = self._lock_repository.get_by_key(lock_key)
         if lock_epoch is None:
             if lock is not None:
@@ -176,6 +214,11 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
                 lock_key=lock_key,
                 lock_holder_user_id=actor_id,
                 lock_epoch=lock_epoch,
+                # COSEC: membership was verified from server-side config.
+                allow_owner_transition=(
+                    normalized_call_type is McpCallType.OWNER
+                    and is_super_admin
+                ),
             )
         except CallerIdentityLockMismatchError as exc:
             raise CallerLockEpochError from exc
@@ -188,7 +231,7 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
                 engine_type,
             )
             result = await self._mcp_sync_service.sync_mcp_identity_to_agent_principal(
-                user_id=actor_id,
+                user_id=owner_id,
                 entity_id=str(bot["entity_id"]),
                 bot_id=bot_id,
                 entity_type=str(bot.get("entity_type") or "staff"),
@@ -257,7 +300,11 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
         )
         normalized_call_type = self._parse_call_type(call_type)
         bot = self._get_bot(bot_id, entity_id)
-        require_owner_of_active_service_bot(bot, actor_id)
+        is_super_admin = self._authorize_call_type_edit(
+            bot, bot_id=bot_id, actor_id=actor_id, call_type=normalized_call_type,
+            resource_type="cli", resource_code=cli_code,
+        )
+        owner_id = str(bot["owner_id"])
         if self._cli_scope_reconciler is None:
             logger.error(
                 "cli_call_type_update_failed bot_id=%s cli_code=%s actor_id=%s "
@@ -300,7 +347,7 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
         active_mcps = self._mcp_provider.collect_bot_active_mcps(
             entity_id=str(bot["entity_id"]),
             bot_id=bot_id,
-            user_id=actor_id,
+            user_id=owner_id,
             entity_type=str(bot.get("entity_type") or "staff"),
             engine_type=engine_type,
         )
@@ -314,13 +361,12 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
             for item in current_cli_items
             if item.get("cli_code")
         }
-        lock_key = f"{bot_id}:{actor_id}"
-        if not lock_epoch_matches(
-            self._lock_repository,
-            bot_id=bot_id,
-            owner_id=str(bot["owner_id"]),
-            actor_id=actor_id,
-            lock_epoch=lock_epoch,
+        lock_key = f"{bot_id}:{stable_resource_owner_id(bot)}"
+        # COSEC: the target entity's lock is independent of the editing actor.
+        lock = self._lock_repository.get_by_key(lock_key)
+        if (lock_epoch is None and lock is not None) or (
+            lock_epoch is not None
+            and (lock is None or lock.holder_user_id != actor_id or lock.id != lock_epoch)
         ):
             logger.warning(
                 "cli_call_type_update_failed bot_id=%s cli_code=%s actor_id=%s "
@@ -341,6 +387,11 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
                 lock_epoch=lock_epoch,
                 effective_server_codes=effective_server_codes,
                 effective_cli_codes=effective_cli_codes,
+                # COSEC: clients cannot supply this internal authorization.
+                allow_owner_transition=(
+                    normalized_call_type is McpCallType.OWNER
+                    and is_super_admin
+                ),
             )
         except CallerIdentityLockMismatchError as exc:
             logger.warning(
@@ -519,6 +570,7 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
             binding_id is not None,
         )
         return CallerIamTokenContext(
+            entity_id=stable_resource_owner_id(bot),
             bot_id=bot_id,
             owner_id=str(bot.get("owner_id") or "") or None,
             stage=resolved_stage,
@@ -638,7 +690,7 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
                 modifier_id=actor_id,
                 effective_server_codes=effective_server_codes,
                 expected_revision=mutation.revision,
-                lock_key=f"{bot_id}:{actor_id}",
+                lock_key=f"{bot_id}:{stable_resource_owner_id(bot)}",
                 lock_holder_user_id=actor_id,
                 lock_epoch=lock_epoch,
             )
@@ -682,7 +734,7 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
                 modifier_id=actor_id,
                 expected_revision=mutation.revision,
                 expected_caller_config_revision=mutation.caller_config_revision,
-                lock_key=f"{bot_id}:{actor_id}",
+                lock_key=f"{bot_id}:{stable_resource_owner_id(bot)}",
                 lock_holder_user_id=actor_id,
                 lock_epoch=lock_epoch,
                 effective_server_codes=effective_server_codes,
@@ -764,12 +816,12 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
         return load_bot(self._bot_repository, bot_id=bot_id, entity_id=entity_id)
 
     def _holds_lock(self, bot: Mapping[str, Any], actor_id: str) -> bool:
-        lock = self._lock_repository.get_by_key(f"{bot['bot_id']}:{bot['owner_id']}")
+        lock = self._lock_repository.get_by_key(f"{bot['bot_id']}:{stable_resource_owner_id(bot)}")
         return lock is not None and lock.holder_user_id == actor_id
 
     def _can_edit_draft(self, bot: Mapping[str, Any], actor_id: str) -> bool:
         """Permit an owner when no collaboration lock has been created yet."""
-        lock = self._lock_repository.get_by_key(f"{bot['bot_id']}:{bot['owner_id']}")
+        lock = self._lock_repository.get_by_key(f"{bot['bot_id']}:{stable_resource_owner_id(bot)}")
         return lock is None or lock.holder_user_id == actor_id
 
     @staticmethod

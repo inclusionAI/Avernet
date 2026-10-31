@@ -171,7 +171,8 @@ class ProgressSyncMixin:
             return
         owner_id = self._get_owner_id(publish_record)
         bot = self._bot_service.get_bot_by_address(
-            bot_id=publish_record.source_bot_id, user_id=owner_id
+            bot_id=publish_record.source_bot_id, user_id=owner_id,
+            source_bot_pk=publish_record.source_bot_pk,
         )
         if not bot:
             return
@@ -257,6 +258,7 @@ class ProgressSyncMixin:
         bot = self._bot_service.get_bot_by_address(
             bot_id=publish_record.source_bot_id,
             user_id=owner_id,
+            source_bot_pk=publish_record.source_bot_pk,
         )
         if not bot:
             raise PublishFlowServiceError(

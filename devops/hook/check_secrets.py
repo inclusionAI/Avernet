@@ -88,6 +88,9 @@ NON_SECRET_VALUE_RE = re.compile(
 
 # These values name entries in the existing secret resolver, not credentials.
 SECRET_REFERENCE_RE = re.compile(r"^other_manual_agentclaw_[a-z0-9_]+$")
+# The adapter maps this public protocol label to senderId=agentswarm and
+# msgType=tcApp2a; it is not a certified token. Keep this exact, not prefix-wide.
+PUBLIC_PROTOCOL_LABELS = frozenset({"OPEN_API:app:agentswarm"})
 PYTHON_ATTRIBUTE_RE = re.compile(r"^\(*[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+\)*$")
 
 
@@ -106,7 +109,7 @@ def _looks_like_plaintext_value(value: str) -> bool:
     # such as `"KEY=" + value` as a literal credential.
     if any(char.isspace() for char in value):
         return False
-    if (len(value) < 12 or PLACEHOLDER_RE.fullmatch(value)
+    if (value in PUBLIC_PROTOCOL_LABELS or len(value) < 12 or PLACEHOLDER_RE.fullmatch(value)
             or NON_SECRET_VALUE_RE.fullmatch(value) or SECRET_REFERENCE_RE.fullmatch(value)):
         return False
     # A high-entropy value is a strong signal. Password/secret assignments are

@@ -6,7 +6,7 @@ import { lifecycleLabel } from './BotCard/config';
 
 function InfoItem({ label, value }: { label: string; value?: string }) {
   return (
-    <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 border-b border-border py-3 text-sm">
+    <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 border-b border-divider py-3 text-sm">
       <dt className="text-muted-foreground">{label}</dt>
       <dd className="min-w-0 break-words text-foreground">{value || '—'}</dd>
     </div>

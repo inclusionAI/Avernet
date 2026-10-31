@@ -225,13 +225,20 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
         scope = self._repository.resolve_legacy_set_scope(set_id=set_id)
         if scope is None:
             return None
-        if owner_id_hint is not None and owner_id_hint != scope.owner_id:
-            raise SkillSetControlPlaneNotFoundError()
         bot = self._bot(
             bot_id=scope.bot_id,
             owner_id=scope.owner_id,
             user_id=actor_id,
         )
+        if owner_id_hint is not None and owner_id_hint != scope.owner_id:
+            try:
+                hinted = self._bot_address_resolver.resolve(
+                    bot_id=scope.bot_id, legacy_owner_id=owner_id_hint
+                )
+            except BotAddressNotFoundError:
+                raise SkillSetControlPlaneNotFoundError() from None
+            if hinted.bot_pk != bot["id"]:
+                raise SkillSetControlPlaneNotFoundError()
         return LegacySkillSetScope(
             owner_id=stable_resource_owner_id(bot),
             bot_id=scope.bot_id,

@@ -12,7 +12,10 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from agentclaw.community.core.task.domain.identity import compose_bot_identity
+from agentclaw.community.core.task.domain.identity import (
+    compose_bot_identity,
+    is_dispatchable_single_bot_assignee,
+)
 from agentclaw.community.core.task.domain.models import TaskNode
 
 logger = logging.getLogger("task.harness.relay")
@@ -20,47 +23,24 @@ logger = logging.getLogger("task.harness.relay")
 
 RELAY_HARNESS_RESUME_PROMPT = (
     "继续执行当前未完成的 task-loop S1~S6。不要新建任务、不要重新澄清、"
-    "不要重新提交 execute。如果当前步骤无法完成，请输出明确失败原因，"
-    "并继续执行后续步骤。"
+    "不要重新提交 execute。请从当前会话历史中获取 S1 到断点前已形成的"
+    "上下文和结果，不要重做已完成步骤；从第一个未完成步骤继续执行，"
+    "直到流程执行完为止。当前步骤无法完成时，请输出明确失败原因并按协议收口。"
 )
 
 
 def relay_harness_resume_prompt(resume_step: str | None = None) -> str:
-    """Build one step-aware same-session continuation prompt.
-
-    ``resume_step`` is Harness-local recovery metadata.  It is not persisted and
-    does not add a new task-loop protocol step or report event.
-    """
-    if resume_step == "S6":
-        return (
-            "继续执行当前未完成的 task-loop S6。"
-            "不要新建任务、不要重新澄清、不要重新提交 execute、"
-            "不要重做 S1~S5；请直接依据已接纳的 PLAN_RESULT 完成本棒收口、"
-            "等待或交接。如果当前步骤无法完成，请输出明确失败原因，"
-            "并继续执行后续步骤。"
-        )
-    if resume_step == "S5":
-        return (
-            "继续执行当前未完成的 task-loop S5。"
-            "不要新建任务、不要重新澄清、不要重新提交 execute、"
-            "不要重做 S1~S4；请基于已接纳的 EXECUTION_RESULT 刷新剩余缺口，"
-            "并完成下一棒规划、搜索、执行者决策和 PLAN_RESULT 上报。"
-            "如果当前步骤无法完成，请输出明确失败原因，"
-            "并继续执行后续步骤。"
-        )
-    if resume_step == "S1-S4a":
-        return (
-            "继续执行当前未完成的 task-loop S1~S4a。"
-            "不要新建任务、不要重新澄清、不要重新提交 execute；"
-            "先重新读取 S1 权威上下文，再从第一个未完成步骤继续，"
-            "直到完成 S4b 上报。如果当前步骤无法完成，"
-            "请输出明确失败原因，并继续执行后续步骤。"
-        )
+    """Return the single same-session continuation instruction."""
     return RELAY_HARNESS_RESUME_PROMPT
+
 
 
 class RelaySessionRecoveryError(RuntimeError):
     """Raised when an existing Relay execution session cannot be continued."""
+
+
+class RelaySessionPreconditionError(RelaySessionRecoveryError):
+    """A node lacks a same-session prerequisite and cannot be resumed here."""
 
 
 @dataclass(frozen=True)
@@ -96,7 +76,7 @@ class RelaySessionRecovery:
                     "relay resume has no BCS port for the existing group session"
                 )
             if not session_id:
-                raise RelaySessionRecoveryError(
+                raise RelaySessionPreconditionError(
                     "relay group node has no existing session_id to resume"
                 )
             caller_bearer = await self._resolve_group_bearer(group_id, node)
@@ -127,7 +107,7 @@ class RelaySessionRecovery:
             )
 
         if not session_id:
-            raise RelaySessionRecoveryError(
+            raise RelaySessionPreconditionError(
                 "relay node has no existing session_id to resume"
             )
         if self._bot is None:
@@ -135,9 +115,9 @@ class RelaySessionRecovery:
                 "relay resume has no OpenAPI Bot port for the existing session"
             )
         assignee = str(getattr(node.run_info, "assignee", "") or "")
-        if not assignee:
-            raise RelaySessionRecoveryError(
-                "relay node has no assignee for the existing session"
+        if not is_dispatchable_single_bot_assignee(assignee):
+            raise RelaySessionPreconditionError(
+                "relay node has no valid assignee for the existing session"
             )
         lifecycle_stage = str(props.get("lifecycle_stage") or "").strip()
         metadata: dict[str, Any] = {"session_id": session_id}

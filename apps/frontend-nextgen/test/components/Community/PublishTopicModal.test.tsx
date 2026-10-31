@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 import { PublishTopicModal } from '@/components/Community/PublishTopicModal';
 import '@testing-library/jest-dom';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 Element.prototype.hasPointerCapture ??= () => false;
@@ -29,6 +29,21 @@ describe('PublishTopicModal', () => {
     expect(group).toHaveTextContent('分享');
     expect(group).toHaveTextContent('投票');
     expect(group).toHaveTextContent('求助');
+  });
+
+  test('主题类型图标与主题列表一致，投票使用图表图标，分享使用发帖弹窗图标', () => {
+    renderEditor();
+    const group = screen.getByRole('group', { name: '主题类型' });
+    const expectedIcons: Record<string, string> = {
+      讨论: 'lucide-message-circle',
+      分享: 'lucide-share-2',
+      投票: 'lucide-chart-line',
+      求助: 'lucide-circle-question-mark',
+    };
+    for (const [label, iconClass] of Object.entries(expectedIcons)) {
+      const icon = within(group).getByRole('button', { name: label }).querySelector('svg');
+      expect(icon).toHaveClass(iconClass);
+    }
   });
 
   test('空标题和正文阻止提交并展示行内错误', async () => {
@@ -122,22 +137,21 @@ describe('PublishTopicModal', () => {
     expect(onPublish).not.toHaveBeenCalled();
   });
 
-  test('求助主题提交可选期望解决时间', async () => {
+  test('求助主题不再展示求助设置，仅提交标题和正文', async () => {
     const user = userEvent.setup();
     const { props } = renderEditor();
 
     await user.click(screen.getByRole('button', { name: '求助' }));
-    expect(screen.getByRole('region', { name: '求助设置' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '求助设置' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/期望解决时间/)).not.toBeInTheDocument();
     await user.type(screen.getByLabelText('主题标题'), '接口联调失败');
     await user.type(screen.getByLabelText('正文'), '需要一起排查');
-    await user.type(screen.getByPlaceholderText('如：希望本周内'), ' 希望本周内 ');
     await user.click(screen.getByRole('button', { name: '发布' }));
 
     expect(props.onPublish).toHaveBeenCalledWith({
       title: '接口联调失败',
       body: '需要一起排查',
       topicType: 'help',
-      help: { expectedTime: '希望本周内' },
     });
   });
 

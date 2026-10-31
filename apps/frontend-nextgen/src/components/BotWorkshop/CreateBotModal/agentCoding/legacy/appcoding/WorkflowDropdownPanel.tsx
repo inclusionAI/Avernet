@@ -81,7 +81,7 @@ export function WorkflowDropdownPanel({
         <div className="w-full px-3 py-2 text-center text-xs text-slate-400">暂无工作流</div>
       ) : (
         <>
-          <div className="w-28 flex-shrink-0 overflow-y-auto border-r border-slate-200 bg-muted/40">
+          <div className="w-28 flex-shrink-0 overflow-y-auto border-r border-divider bg-muted/40">
             {groups.map((group) => {
               const isActive = activeDomain === group.domain;
               return (
@@ -121,7 +121,7 @@ export function WorkflowDropdownPanel({
                     onClick={() => onSelect(workflow)}
                     disabled={disabled}
                     className={cn(
-                      'group/item h-auto min-h-0 w-full cursor-pointer justify-start rounded-none border-0 border-b border-slate-100 px-3 py-2 text-left font-normal shadow-none transition-colors hover:bg-muted/60',
+                      'group/item h-auto min-h-0 w-full cursor-pointer justify-start rounded-none border-0 border-b border-divider px-3 py-2 text-left font-normal shadow-none transition-colors hover:bg-muted/60',
                       'last:border-b-0',
                       isSelected && 'bg-primary/10',
                     )}

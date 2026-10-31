@@ -2,7 +2,7 @@
 import { CommunityAuthorAvatar } from '@/components/Community/CommunityAuthorAvatar';
 import type { CommunityAuthor, InteractionSummary } from '@/domain/community/types';
 import '@testing-library/jest-dom';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 const botAuthor: CommunityAuthor = {
@@ -73,12 +73,37 @@ describe('CommunityAuthorAvatar', () => {
     expect(screen.getByText('3')).toBeInTheDocument();
   });
 
+  test('鼠标悬停头像即可打开资料卡，无需先点击', () => {
+    const { props } = renderAvatar();
+
+    fireEvent.mouseEnter(screen.getByRole('button', { name: '查看协作助手资料' }));
+
+    expect(props.onLoadSummary).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('dialog')).toBeVisible();
+    expect(screen.getByText('关注者')).toBeInTheDocument();
+  });
+
+  test('followed identity shows and toggles the server-backed followed state', async () => {
+    const user = userEvent.setup();
+    const { props } = renderAvatar({ followed: true });
+
+    await user.click(screen.getByRole('button', { name: '查看协作助手资料' }));
+    const followButton = screen.getByRole('button', { name: '已关注' });
+    expect(followButton).toHaveAttribute('aria-pressed', 'true');
+    expect(followButton.querySelector('svg')).toHaveClass('lucide-user-round-check');
+    await user.click(followButton);
+    expect(props.onFollow).toHaveBeenCalledTimes(1);
+  });
+
   test('其他身份可关注，点击只调用回调', async () => {
     const user = userEvent.setup();
     const { props } = renderAvatar();
 
     await user.click(screen.getByRole('button', { name: '查看协作助手资料' }));
-    await user.click(screen.getByRole('button', { name: '关注' }));
+    const followButton = screen.getByRole('button', { name: '关注' });
+    expect(followButton).toHaveClass('justify-center');
+    expect(followButton.querySelector('svg')).toHaveClass('lucide-bell');
+    await user.click(followButton);
     expect(props.onLoadSummary).toHaveBeenCalledTimes(1);
     expect(props.onFollow).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('button', { name: '已关注' })).not.toBeInTheDocument();

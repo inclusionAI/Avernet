@@ -817,9 +817,18 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         publish flow. The result is copied verbatim into
         ``BotConfigArtifact.engine_overrides`` by the composer. A bot with no active
         draft channels yields ``{}``, so the artifact keeps its default.
+
+        Match ChannelService's storage rule: only non-default service Bots use
+        their entity as the channel identity. Personal/default Bots retain the
+        legacy user identity, even when their entity differs from their Owner.
         """
+        channel_identity = req.user_id
+        if req.bot_id != "default":
+            bot = self._bot_repo.get_by_id_and_entity(req.bot_id, req.entity_id)
+            if bot is not None and bot.get("bot_type") == "service":
+                channel_identity = req.entity_id
         return self._overrides_reader.overrides_for_stage(
-            user_id=req.user_id,
+            user_id=channel_identity,
             bot_id=req.bot_id,
             accept_stages={None, "", "draft"},
         )

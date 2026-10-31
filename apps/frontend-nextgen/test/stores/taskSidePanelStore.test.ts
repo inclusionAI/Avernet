@@ -157,17 +157,18 @@ describe('taskSidePanelStore', () => {
     expect(s.navByTask['tB']?.drillStack).toEqual(['nB1']);
   });
 
-  it('setActiveTask 切换激活任务并清掉待消费跳转,不动下钻分片', () => {
+  it('setActiveTask 切换激活任务并清掉待消费跳转,重置目标任务导航', () => {
     useTaskSidePanelStore.getState().setActiveTask('t1');
     useTaskSidePanelStore.getState().drillInto('t1', 'n2', null);
     useTaskSidePanelStore.getState().selectNode('t1', 'n2', target('sess-main'));
 
-    useTaskSidePanelStore.getState().setActiveTask('t2');
+    useTaskSidePanelStore.getState().setActiveTask('t1');
 
     const s = useTaskSidePanelStore.getState();
-    expect(s.activeTaskId).toBe('t2');
+    expect(s.activeTaskId).toBe('t1');
     expect(s.pendingNavigation).toBeNull();
-    expect(s.navByTask['t1']?.drillStack).toEqual(['n2']);
+    expect(s.navByTask['t1']?.drillStack).toEqual([]);
+    expect(s.navByTask['t1']?.selectedNodeId).toBeNull();
   });
 
   it('resetAll 回到初始态', () => {

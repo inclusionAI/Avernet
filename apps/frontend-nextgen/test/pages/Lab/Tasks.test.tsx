@@ -24,10 +24,23 @@ jest.mock('@/hooks/useHumanIdentity', () => ({
 jest.mock('@/pages/Workspace/hooks/useOwnedBots', () => ({
   useOwnedBots: () => ({
     chatBots: [
-      { botId: 'b-9', realBotId: 'b-9', displayName: '调研助手' },
-      { botId: 'b-10:u-1', realBotId: 'b-10', displayName: '写作助手' },
+      { botId: 'b-9', realBotId: 'b-9', ownerId: 'u-9', displayName: '调研助手' },
+      { botId: 'b-10:u-1', realBotId: 'b-10', ownerId: 'u-1', displayName: '写作助手' },
     ],
     isLoading: false,
+  }),
+}));
+jest.mock('@/pages/Workspace/Chat/hooks/useConversationTeamDirectory', () => ({
+  useConversationTeamDirectory: () => ({
+    teamBots: [
+      {
+        bot: { botId: 'b-service:u-11', realBotId: 'b-service', ownerId: 'u-11', displayName: '服务助手' },
+        section: 'team',
+      },
+    ],
+    teamLoading: false,
+    teamError: null,
+    retryTeam: () => {},
   }),
 }));
 const mockListMyTasks = jest.fn();
@@ -167,6 +180,42 @@ const writingTaskListItem = {
   },
 };
 
+const serviceBotTaskListItem = {
+  ...listItem,
+  id: 4,
+  task_id: 't-service-4',
+  source_type: 'bot',
+  owner_user_id: 'creator-user-id',
+  owner_bot_id: 'b-service',
+  execution_config: {
+    ...listItem.execution_config,
+    main_session_id: 'sess-service',
+  },
+  task_spec: {
+    metadata: { title: '旧标题' },
+    context: { title: '服务 Bot 调研', background: '' },
+    goal: { objective: '整理服务调研结论', acceptances: [] },
+  },
+};
+
+const botTaskListItem = {
+  ...listItem,
+  id: 3,
+  task_id: 't-bot-3',
+  source_type: 'bot',
+  owner_user_id: 'creator-user-id',
+  owner_bot_id: 'b-10',
+  execution_config: {
+    ...listItem.execution_config,
+    main_session_id: 'sess-b10',
+  },
+  task_spec: {
+    metadata: { title: '旧标题' },
+    context: { title: 'Bot 调研', background: '' },
+    goal: { objective: '整理调研结论', acceptances: [] },
+  },
+};
+
 beforeEach(() => {
   jest.clearAllMocks();
   const push = jest.requireMock('@umijs/max').history.push;
@@ -297,10 +346,10 @@ describe('LabTasksPage(实验室·任务体验页)', () => {
       expect(screen.queryByTestId('task-artifact-preview-drawer')).not.toBeInTheDocument();
       expect(screen.getByText('任务产物')).toBeInTheDocument();
 
+      expect(screen.queryByRole('button', { name: '下载产物 执行摘要' })).not.toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: '预览产物 执行摘要' }));
       expect(await screen.findByTestId('task-artifact-plain-text')).toHaveTextContent('纯文本执行摘要');
-      fireEvent.click(screen.getByRole('button', { name: '下载文件' }));
-      expect(await screen.findByRole('alert')).toHaveTextContent('纯文本类型的产物不支持下载。');
+      expect(screen.queryByRole('button', { name: '下载文件' })).not.toBeInTheDocument();
 
       fireEvent.click(screen.getByRole('button', { name: '关闭' }));
 
@@ -329,5 +378,39 @@ describe('LabTasksPage(实验室·任务体验页)', () => {
     fireEvent.click(screen.getByRole('button', { name: '进入对话' }));
 
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith(expect.stringContaining('/workspace/collaboration')));
+  });
+
+  it('非本人管理的服务 Bot 任务从团队目录解析实际 owner', async () => {
+    mockListMyTasks.mockResolvedValue({
+      code: 0,
+      message: 'ok',
+      data: [serviceBotTaskListItem],
+      request_id: 'r',
+    });
+
+    render(<LabTasksPage />);
+    await waitFor(() => expect(screen.getByText('服务 Bot 调研')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: '进入对话' }));
+
+    expect(mockPush).toHaveBeenCalledWith('/workspace/chat?bot=b-service%3Au-11&session=sess-service');
+    expect(mockPush).not.toHaveBeenCalledWith(expect.stringContaining('creator-user-id'));
+  });
+
+  it('单 Bot 任务按 Bot 实际 owner 拼接对话路由', async () => {
+    mockListMyTasks.mockResolvedValue({
+      code: 0,
+      message: 'ok',
+      data: [botTaskListItem],
+      request_id: 'r',
+    });
+
+    render(<LabTasksPage />);
+    await waitFor(() => expect(screen.getByText('Bot 调研')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: '进入对话' }));
+
+    expect(mockPush).toHaveBeenCalledWith('/workspace/chat?bot=b-10%3Au-1&session=sess-b10');
+    expect(mockPush).not.toHaveBeenCalledWith(expect.stringContaining('creator-user-id'));
   });
 });

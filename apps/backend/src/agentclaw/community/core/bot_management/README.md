@@ -1,5 +1,15 @@
 # `agentclaw.community.core.bot_management`
 
+Publication consumers resolve their Bot through
+`BotAddressResolver.resolve_publish_source`: the stored `source_bot_pk` wins
+over both historical Owner values and new entity values in publish `owner_id`.
+The resolved Bot supplies the current Owner for authorization and the immutable
+entity for resource coordinates. `get_bot_by_address(..., source_bot_pk=...)`
+uses the same rule while retaining the enriched Bot response. Strict `get_bot`
+remains Owner-scoped. A missing non-default source or conflicting source ID is
+an error; only historical orphaned `default` lineages retain a unique legacy
+metadata lookup, without changing their source PK or published stage bindings.
+
 Bot lifecycle, creation policy, repository, engine resolution, render-screen models, and skill-set switching.
 
 ## Context Boundary
@@ -7,6 +17,8 @@ Bot lifecycle, creation policy, repository, engine resolution, render-screen mod
 ```yaml
 purpose: "Bot lifecycle, creation policy, repository, engine resolution, render-screen models, and skill-set switching."
 provides:
+  - bcn_bot_reference
+  - provider_address_kwargs
   - "OwnerHandoffServiceProtocol and durable OwnerHandoffService"
   - "BotService"
   - "BotCreateContext"
@@ -46,7 +58,9 @@ consumes:
   - "SpaceAccessServiceProtocol"
   - "CachePlugin quota lock"
   - "CapabilityDesiredStateRepositoryProtocol"
+  - "BotManagerSyncProtocol (api) — best-effort manager-set refresh after an owner handoff commits or a Bot's Space assignment changes"
 internal_dependencies:
+  - agentclaw.community.api.bot_manager_sync
   - agentclaw.community.core.execution_identity.protocols
   - agentclaw.community.plugin_api.staff_dept
   - agentclaw.community.core.bot_inventory
@@ -76,6 +90,7 @@ internal_dependencies:
   - agentclaw.community.core.resources
   - agentclaw.community.core.service_bot
   - agentclaw.community.core.bot_management.bot_space    # narrow cross-context Space membership contract
+  - agentclaw.community.core.spaces.space_service_protocol
   - agentclaw.community.core.spaces.errors    # typed Space membership failures propagated by Bot Space assignment
   - agentclaw.community.core.spaces.models    # SpaceRecord/SpaceType used by Bot Space assignment
   - agentclaw.community.core.spaces.protocols    # Space lookup used by quota configuration
@@ -88,6 +103,7 @@ internal_dependencies:
   - agentclaw.community.di.modules
   - agentclaw.community.kernel.lifecycle
   - agentclaw.community.kernel.device_dto    # CommandResult contract for coding-owned Arca backup execution
+  - agentclaw.community.kernel.bot_manager_sync    # SyncReason for the manager-set side-channel submits
   - agentclaw.community.log
   - agentclaw.community.plugin_api.devices
   - agentclaw.community.plugin_api.drm
@@ -101,6 +117,7 @@ internal_dependencies:
   - agentclaw.community.utils.env_utils
   - agentclaw.community.utils.secret_utils
   - agentclaw.community.core.access.policy_service_protocol  # Service API Protocol consumed by this module
+  - agentclaw.community.plugin_api.bot_create_extension  # the businessless create/delete lifecycle seam the flow drives
 ```
 
 ### Change impact
@@ -255,3 +272,58 @@ without releasing devices or credentials. Publishing calls it before tearing
 down any version container. Actual deletion repeats validation; current ownership
 selects the Bot row while transferable service-Bot resources are cleaned using
 immutable entity. Personal/default cleanup keeps its original Owner semantics.
+
+Creation provenance is owned here: `creation_source` freezes trusted source
+facts and their generic Manifest binding before the durable handoff, and
+validates their association when a task is consumed. The Manifest layer owns
+binding scope/document checks and does not interpret provenance. Existing task
+payload keys and initial Bot INSERT metadata remain unchanged.
+
+## BCN identity compatibility after Owner handoff
+
+BCN Owner transfer preserves `bot_uuid` and `provider_bot_ref`. A non-default
+service Bot's provider reference is `bot_id:entity_id`; its current Owner is a
+separate personnel value. `bcn_identity.provider_address_kwargs` accepts an
+already-resolved Bot and supplies that stable reference to create/start/restart,
+metadata synchronization and deletion. Deletion captures the reference from the
+live Bot before soft deletion. Missing service entity fails rather than
+registering another identity under the new Owner. Existing personal/default and
+desktop provider references retain their Owner-qualified registration contract.
+
+`BcnService.register_provider_bot` and `delete_provider_bot` accept an additive
+internal `provider_bot_ref` keyword. Omission retains the legacy contract for
+existing consumers; explicit values override only resource addressing, never the
+registration `owners` list. HTTP/OpenAPI request parameters, database schemas,
+BCN request fields and connection modes do not change. Provider registration,
+metadata sync and deletion retain their existing best-effort behavior. This does
+not implement the forthcoming BCN Owner-transfer/repair endpoints and does not
+claim that registration performs an Owner transfer. Provider UUID and reference
+are distinct external fields; no UUID is synthesized from a provider reference.
+
+Validation covers stable references across successive Owners, ambiguous locator
+rejection, pre-delete identity capture, current personnel in registration and
+unchanged personal/default/desktop calls. Production confirmation of existing
+service references relies on the established service `owner_id == entity_id`
+data baseline before handoff. Historical exceptions must be reconciled explicitly.
+The central BotService remains on the existing oversized-module waiver; this
+change adds no waiver. BCN lifecycle extraction remains follow-up cleanup.
+
+A personal Bot may already have a Provider binding whose suffix is a staff number
+while its entity is `staff_<number>`. Personal-to-service conversion keeps the
+existing switch request unchanged and, only for differing coordinates, persists
+its exact `bcn_provider_bot_ref` in Bot ext in the same update as `bot_type`.
+Service lifecycle calls honor that stored reference instead of constructing a
+second identity; the original ext is copied and other fields are preserved.
+This introduces no table/column or client input. Existing anomalous service
+bindings outside the validated pre-handoff baseline need explicit reconciliation;
+we do not infer a remote UUID from a Provider reference or overwrite its history.
+
+`bcn_identity.bcn_bot_reference` is also used by the Task/BCS bare-ID resolver and
+metadata synchronization. Registration and task routing therefore agree for
+staff-prefixed personal entities and converted services retaining their old
+binding. Already qualified BCS IDs are not reconstructed. This shared TeamClaw
+reference rule does not overwrite an external registration's returned UUID.
+Bot deletion computes and validates Provider coordinates immediately after Bot
+validation, before withdrawing grants, releasing devices, destroying credentials
+or soft deletion. The post-delete notification consumes only that captured value;
+a corrupt stored reference cannot strand an already-deleted Bot behind an error.

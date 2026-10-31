@@ -22,6 +22,7 @@ from agentclaw.community.adapters.http.auth.dependencies import require_operator
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.core.access.admin_scopes import super_admin
 from agentclaw.community.adapters.http.dependencies import RequestContext, get_request_context
+from agentclaw.community.core.bot_management.expert_origin import ExpertOriginReadOnlyError
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.bot_space_service import BotSpaceServiceProtocol
 from agentclaw.community.api.execution_identity_service import (
@@ -103,6 +104,12 @@ from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth import AuthPlugin
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
+from agentclaw.community.plugin_api.bot_create_extension import (
+    BotCreateExtension,
+    ExtensionBlocked,
+    ExtensionConflict,
+    ExtensionInvalidInput,
+)
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.passport import PassportError
 
@@ -132,6 +139,17 @@ def _sanitize_baas_status_ext_for_response(
     ):
         return _clear_baas_publish_failure_ext(ext)
     return dict(ext)
+
+
+def _extension_of(create_extension: Any) -> "BotCreateExtension | None":
+    """A bare FastAPI app (legacy tests driving handlers directly without
+    the injector) hands the raw ``Injected`` default through; only an
+    actually-resolved extension instance is usable, everything else degrades
+    to no extension and the flow runs unextended."""
+    from agentclaw.community.plugin_api.bot_create_extension import (
+        BotCreateExtension as _BCE,
+    )
+    return create_extension if isinstance(create_extension, _BCE) else None
 
 
 def _bot_create_spec(data: dict[str, Any], user_id: str) -> BotCreateSpec:
@@ -1162,6 +1180,7 @@ async def create_bot(
     passport_plugin: PassportPlugin = Injected(PassportPlugin),
     auth_rel_plugin: AuthRelationshipPlugin = Injected(AuthRelationshipPlugin),
     skill_set_factory: SkillSetServiceFactory = Injected(SkillSetServiceFactory),
+    create_extension: BotCreateExtension = Injected(BotCreateExtension),
 ) -> ApiResponse:
     """
     Create a new bot with Passport authorization flow.
@@ -1211,6 +1230,8 @@ async def create_bot(
             passport_plugin=passport_plugin,
             auth_rel_plugin=auth_rel_plugin,
             skill_set_factory=skill_set_factory,
+            create_extension=_extension_of(create_extension),
+            request=data,
             )
 
         # Passport not yet issued → guide the user through authorization.
@@ -1335,6 +1356,30 @@ async def create_bot(
             error_code=500,
             data=None,
         )
+    except ExtensionInvalidInput as e:
+        logger.warning(f"[bot_router.create_bot] create extension rejected: {e}")
+        return ApiResponse(
+            success=False,
+            message=str(e),
+            error_code=400,
+            data=None,
+        )
+    except ExtensionConflict as e:
+        logger.warning(f"[bot_router.create_bot] create extension conflict: {e}")
+        return ApiResponse(
+            success=False,
+            message=str(e),
+            error_code=409,
+            data=None,
+        )
+    except ExtensionBlocked as e:
+        logger.error(f"[bot_router.create_bot] create extension blocked: {e}")
+        return ApiResponse(
+            success=False,
+            message=str(e),
+            error_code=500,
+            data=e.data,
+        )
     except Exception as e:
         logger.error(f"[bot_router.create_bot] Unexpected error: {e}")
         return ApiResponse(
@@ -1352,6 +1397,7 @@ async def get_auth_status(
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     passport_plugin: PassportPlugin = Injected(PassportPlugin),
     auth_rel_plugin: AuthRelationshipPlugin = Injected(AuthRelationshipPlugin),
+    create_extension: BotCreateExtension = Injected(BotCreateExtension),
 ) -> ApiResponse:
     """
     轮询授权状态（非首Bot创建时使用）。
@@ -1410,6 +1456,8 @@ async def get_auth_status(
             bot_service=bot_service,
             passport_plugin=passport_plugin,
             auth_rel_plugin=auth_rel_plugin,
+            create_extension=_extension_of(create_extension),
+            request=data,
             )
 
         if result.status == AuthStatus.PENDING:
@@ -1492,6 +1540,15 @@ async def get_auth_status(
             error_code=500,
             data={"bot_id": e.bot_id, "retryable": True},
         )
+    except ExtensionConflict as e:
+        logger.warning(f"[bot_router.get_auth_status] extension conflict: {e}")
+        return ApiResponse(success=False, message=str(e), error_code=409, data=None)
+    except ExtensionInvalidInput as e:
+        logger.warning(f"[bot_router.get_auth_status] extension invalid input: {e}")
+        return ApiResponse(success=False, message=str(e), error_code=400, data=None)
+    except ExtensionBlocked as e:
+        logger.error(f"[bot_router.get_auth_status] extension blocked: {e}")
+        return ApiResponse(success=False, message=str(e), error_code=500, data=e.data)
     except Exception as e:
         logger.error(f"[bot_router.get_auth_status] Error: {e}")
         return ApiResponse(
@@ -2661,6 +2718,8 @@ async def update_bot(
             data=result,
         )
 
+    except ExpertOriginReadOnlyError as exc:
+        return ApiResponse(success=False, message=str(exc), error_code=400, data=None)
     except BotNotFoundError:
         return ApiResponse(
             success=False,
@@ -2705,6 +2764,7 @@ async def delete_bot(
     owner_id: Optional[str] = Query(None, description="Bot owner ID"),
     ctx: RequestContext = Depends(get_request_context),
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    create_extension: BotCreateExtension = Injected(BotCreateExtension),
 ) -> ApiResponse:
     """
     Delete a bot (soft delete).
@@ -2725,14 +2785,80 @@ async def delete_bot(
 
         resolved_owner_id = owner_id or operator_id
 
+        # The lifecycle extension settles its own dependents first; a failure
+        # aborts the delete before anything destructive runs.
+        ext = _extension_of(create_extension)
+        if ext is not None:
+            ext.before_delete(bot_id=bot_id, owner_id=resolved_owner_id)
         bot_service.delete_bot(bot_id=bot_id, user_id=resolved_owner_id)
+        ext = _extension_of(create_extension)
+        if ext is not None:
+            ext.on_delete_completed(bot_id=bot_id, owner_id=resolved_owner_id)
 
         return ApiResponse(
             success=True,
             message=f"Bot {bot_id} 已删除",
         )
 
+    except ExtensionBlocked as e:
+        logger.error(f"[bot_router.delete_bot] delete extension blocked: {e}")
+        return ApiResponse(
+            success=False,
+            message=str(e),
+            error_code=500,
+            data=e.data,
+        )
+    except ExtensionConflict as e:
+        logger.warning(f"[bot_router.delete_bot] delete extension conflict: {e}")
+        return ApiResponse(
+            success=False,
+            message=str(e),
+            error_code=409,
+            data=None,
+        )
+    except ExtensionInvalidInput as e:
+        logger.warning(f"[bot_router.delete_bot] delete extension rejected: {e}")
+        return ApiResponse(
+            success=False,
+            message=str(e),
+            error_code=400,
+            data=None,
+        )
     except BotNotFoundError:
+        # A not-found proves neither deletion nor ownership; the extension's
+        # own state decides whether a retry cleanup applies at all. The
+        # callback runs INSIDE this handler, so its own failures would
+        # otherwise escape every sibling mapping below — translate them here
+        # exactly like the pre-delete hook: a controlled rejection envelope
+        # on failure, and the plain not-found answer when the callback
+        # finishes (the callback itself owns the ownership/deleted proof and
+        # the no-cleanup-before-proof guarantee).
+        ext = _extension_of(create_extension)
+        if ext is not None:
+            try:
+                ext.on_delete_not_found(
+                    bot_id=bot_id, owner_id=resolved_owner_id
+                )
+            except ExtensionBlocked as e:
+                logger.error(
+                    f"[bot_router.delete_bot] delete not-found cleanup blocked: {e}"
+                )
+                return ApiResponse(
+                    success=False,
+                    message=str(e),
+                    error_code=500,
+                    data=e.data,
+                )
+            except Exception as e:
+                logger.error(
+                    f"[bot_router.delete_bot] delete not-found cleanup failed: {e}"
+                )
+                return ApiResponse(
+                    success=False,
+                    message=f"关联状态收尾失败: {str(e)}",
+                    error_code=500,
+                    data=None,
+                )
         return ApiResponse(
             success=False,
             message=f"Bot不存在: {bot_id}",
@@ -3489,6 +3615,8 @@ async def update_bot_ext(
             message="ext 更新成功",
         )
 
+    except ExpertOriginReadOnlyError as exc:
+        return ApiResponse(success=False, message=str(exc), error_code=400, data=None)
     except BotNotFoundError:
         return ApiResponse(
             success=False,

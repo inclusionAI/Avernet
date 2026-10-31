@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Callable, Optional, Dict, Any, List, Literal, Tuple, TYPE_CHECKING
 
 from agentclaw.community.core.common_config.bot_config_protocol import BotStoragePolicyProtocol
+from agentclaw.community.core.bot_management.bcn_identity import bcn_bot_reference, provider_address_kwargs
 from agentclaw.community.core.bot_management.capabilities import (
     is_template_factory_config,
 )
@@ -130,6 +131,7 @@ from agentclaw.community.core.devices.errors import (
     DeviceAllocateError,
     DeviceServiceError,
 )
+from agentclaw.community.core.bot_management.expert_origin import reject_expert_origin_update
 from agentclaw.community.core.devices.models import AllocatedDevice, DeviceAllocationMode, DeviceBindingStatus, OperatorContext, SynlinkMappingInfo
 from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
@@ -1689,6 +1691,7 @@ class BotService(BotServiceProtocol):
                     bot_name=resolved_bot_name or bot_id,
                     bot_summary=bot_desc or "",
                     connection_mode=connection_mode,
+                    **provider_address_kwargs(bot_data),
                     respect_drm=False,
                 )
             except Exception as e:
@@ -2485,19 +2488,25 @@ class BotService(BotServiceProtocol):
         thread.start()
         logger.info(f"[bot_service._allocate_device_async] Started background thread for bot {bot_id} device allocation")
 
-    def get_bot_by_address(self, bot_id: str, user_id: str) -> Dict[str, Any]:
+    def get_bot_by_address(self, bot_id: str, user_id: str, *, source_bot_pk: int | None = None) -> Dict[str, Any]:
         """Internal resource lookup; user_id is a legacy entity/Owner locator.
 
         This method does not authorize the actor. Callers must authorize separately;
         get_bot retains its strict current-Owner lookup contract.
+        Publication callers provide source_bot_pk so historical Owner values do
+        not have to match a current Owner or entity. Ordinary locators omit it.
         """
         from agentclaw.community.core.bot_management.addressing import BotAddressResolver
         from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
 
         try:
-            address = BotAddressResolver(self._repository).resolve(
-                bot_id=bot_id, legacy_owner_id=user_id,
-            )
+            resolver = BotAddressResolver(self._repository)
+            if source_bot_pk is not None:
+                address = resolver.resolve_publish_source(
+                    source_bot_pk=source_bot_pk, source_bot_id=bot_id, legacy_owner_id=user_id,
+                )
+            else:
+                address = resolver.resolve(bot_id=bot_id, legacy_owner_id=user_id)
         except BotAddressNotFoundError as exc:
             raise BotNotFoundError(f"Bot not found: {bot_id}") from exc
         return self.get_bot(bot_id=bot_id, user_id=address.current_owner_id)
@@ -3142,6 +3151,7 @@ class BotService(BotServiceProtocol):
             raise BotServiceError("User ID is required for updating bot")
 
         # Get bot by bot_id and owner_id (user_id)
+        reject_expert_origin_update(ext)
         bot = self._repository.get_by_id_and_owner(bot_id, user_id)
         if not bot:
             raise BotNotFoundError(f"Bot not found: {bot_id}")
@@ -3671,11 +3681,11 @@ class BotService(BotServiceProtocol):
     ) -> None:
         """Sync bot name and summary to BCN.
 
-        BCN 的 bot_id 格式为 "{tc_bot_id}:{owner_workno}"，例如 "20260421_gfdsz5vi:85020"。
+        服务 Bot 使用稳定 entity 后缀；个人/桌面 Bot 保留 owner 后缀，例如 "20260421_gfdsz5vi:85020"。
 
         Args:
             bot_id: TC 页面上的 bot_id
-            owner_id: Bot 所有者的工号
+            owner_id: 当前 Owner 或历史 entity locator
             bot_name: 新的 Bot 名称（如果更新了）
             bot_desc: 新的 Bot 简介（如果更新了）
             request_headers: 原始 HTTP 请求头，BCN 层会筛选需要透传的认证头
@@ -3683,14 +3693,13 @@ class BotService(BotServiceProtocol):
         try:
             from agentclaw.community.core.bot_management.services.bcn_service import BcnServiceError
 
-            # BCN 的 bot_id 格式: {tc_bot_id}:{owner_workno}
-            bcn_bot_id = f"{bot_id}:{owner_id}"
-
             # 获取当前 bot 信息，用于填充未更新的字段
-            bot = self._repository.get_by_id_and_owner(bot_id, owner_id)
-            if not bot:
-                logger.warning(f"[bot_service._sync_bot_to_bcn] Bot not found: {bot_id}")
-                return
+            from agentclaw.community.core.bot_management.addressing import BotAddressResolver
+
+            bot = BotAddressResolver(self._repository).resolve(
+                bot_id=bot_id, legacy_owner_id=owner_id
+            ).bot
+            bcn_bot_id = bcn_bot_reference(bot)
 
             # 使用传入的新值或现有的值
             final_name = bot_name if bot_name is not None else bot.get("bot_name", bot_id)
@@ -3742,6 +3751,7 @@ class BotService(BotServiceProtocol):
         connection_mode: Optional[Literal["plugin"]] = None,
         *,
         respect_drm: bool = True,
+        provider_bot_ref: str | None = None,
     ) -> None:
         """Register with BCN best effort.
 
@@ -3765,6 +3775,8 @@ class BotService(BotServiceProtocol):
                 "name": bot_name,
                 "summary": bot_summary,
             }
+            if provider_bot_ref is not None:
+                register_kwargs["provider_bot_ref"] = provider_bot_ref
             if connection_mode is not None:
                 register_kwargs["connection_mode"] = connection_mode
             result = self._bcn_service.register_provider_bot(
@@ -4027,6 +4039,8 @@ class BotService(BotServiceProtocol):
 
         try:
             bot = self.validate_delete_bot(bot_id, user_id)
+            # Resolve before grant withdrawal, device release or soft deletion.
+            provider_address = provider_address_kwargs(bot)
             from agentclaw.community.core.bot_management.addressing import stable_resource_owner_id
             resource_owner_id = (
                 stable_resource_owner_id(bot)
@@ -4131,7 +4145,7 @@ class BotService(BotServiceProtocol):
             if bot_id != "default":
                 self._sweep_startup_script_that_raced_the_deletion(bot_id, bot)
 
-            self._sync_provider_bot_delete_to_bcn(bot_id, user_id)
+            self._sync_provider_bot_delete_to_bcn(bot_id, user_id, **provider_address)
 
             # 清理关联的脏数据（仅限非 default bot）
             # default bot 是用户的默认 Bot，删除它通常是"重启"逻辑，应保留技能和配置
@@ -4213,12 +4227,16 @@ class BotService(BotServiceProtocol):
                 bot_id,
             )
 
-    def _sync_provider_bot_delete_to_bcn(self, bot_id: str, user_id: str) -> None:
+    def _sync_provider_bot_delete_to_bcn(
+        self, bot_id: str, user_id: str, *, provider_bot_ref: str | None = None,
+    ) -> None:
         """Best-effort sync of local bot deletion to BCN provider bot deletion."""
         try:
+            address = {} if provider_bot_ref is None else {"provider_bot_ref": provider_bot_ref}
             result = self._bcn_service.delete_provider_bot(
                 teamclaw_bot_uuid=bot_id,
                 owner_workno=user_id,
+                **address,
             )
             logger.info(
                 f"[bot_service._sync_provider_bot_delete_to_bcn] "
@@ -4646,6 +4664,7 @@ class BotService(BotServiceProtocol):
             bot_name=bot.get("bot_name") or bot_id,
             bot_summary=bot.get("bot_desc") or "",
             connection_mode=connection_mode,
+            **provider_address_kwargs(bot),
             respect_drm=False,
         )
         logger.info(
@@ -5143,6 +5162,7 @@ class BotService(BotServiceProtocol):
             bot_name=bot.get("bot_name") or bot_id,
             bot_summary=bot.get("bot_desc") or "",
             connection_mode=connection_mode,
+            **provider_address_kwargs(bot),
             respect_drm=False,
         )
 
@@ -6298,6 +6318,7 @@ class BotService(BotServiceProtocol):
             user_id: 用户 ID（用于权限检查）
             ext_update: 要更新的 ext 字段内容
         """
+        reject_expert_origin_update(ext_update)
         bot = self.get_bot(bot_id, user_id)
         ext = bot.get("ext") or {}
         if isinstance(ext, str):

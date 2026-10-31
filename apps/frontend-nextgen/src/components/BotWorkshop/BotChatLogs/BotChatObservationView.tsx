@@ -81,7 +81,7 @@ export function BotChatObservationView({
 
   return (
     <Card className="overflow-hidden shadow-sm">
-      <div className="flex flex-wrap items-center gap-4 border-b border-border px-4 py-3">
+      <div className="flex flex-wrap items-center gap-4 border-b border-divider px-4 py-3">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span>sessionID：</span>
           <strong className="max-w-[220px] truncate font-mono text-foreground">
@@ -101,7 +101,7 @@ export function BotChatObservationView({
           <span>Observation：{countObservations(detail.observations)}</span>
         </div>
       </div>
-      <div className="border-b border-border px-4 py-3">
+      <div className="border-b border-divider px-4 py-3">
         <RelationSegmented detail={detail} value={relationScope} onChange={onRelation} />
       </div>
       <div className="grid lg:grid-cols-[280px_300px_minmax(0,1fr)]">

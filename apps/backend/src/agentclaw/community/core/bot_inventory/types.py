@@ -112,6 +112,7 @@ class BotInventoryItem:
     status: str
     owner_entity_id: str
     space: BusinessSpaceRef | None
+    expert_name: str | None = None
     avatar_url: str | None = None
     machine_id: str | None = None
     mount_path: str | None = None

@@ -305,9 +305,11 @@ bot); the receipt it files is the platform's record of what the bot was served,
 true whether the apply proceeds.
 
 **The two fetching categories and their areas** (§3.2). `identity` overwrites
-the file set minus the reserved names — `MEMORY.md` and `IDENTITY.md` are
-refused in `resolve` and subtracted from the removals, both halves, so the
-guarantee holds for documents that never met the validator — writing through
+the file set with protected runtime memory and profile omission: `MEMORY.md`
+is refused in `resolve` and excluded from removals. `IDENTITY.md` may be explicitly
+written on engines that accept it, including an empty write, but is excluded from
+omission cleanup (including `identity: []`). Other identity files retain Replace
+semantics. The same rules hold for documents that never met the validator, writing through
 `IdentityService` with the router's own coordinates
 (`identity_coords_from_record`, resolved in core for exactly this consumer);
 "removal" is an empty write because the domain's own contract is that absent
@@ -626,8 +628,14 @@ Two things are close to authorization boundaries already:
   because the document is stored as written, read back verbatim by `GET`, and
   recorded as provenance by the platform's own materialisation. Redaction cannot
   un-store what three other places already hold.
-- **The reserved identity files (`MEMORY.md`, `IDENTITY.md`) are refused at
-  write time**, not skipped at apply time. They are engine-generated runtime
-  state that apply is guaranteed never to write or remove, so a document
-  declaring one would be accepted and then never converge. Refusing it is what
-  keeps "accepted" and "appliable" the same set.
+- **Runtime memory (`MEMORY.md`) is refused at write time**, not skipped at
+  apply time, and is never removed. `IDENTITY.md` is explicitly writable within
+  the engine's existing filename whitelist, but remains protected when omitted.
+  Claude Code still accepts only `CLAUDE.md`; expert identity adaptation does not
+  expand this native whitelist.
+
+Creation-spec policy is supplied by the composition root as a required
+`validate_creation_spec` callable to the creation seam and worker. They invoke
+it before worker side effects, without importing the
+policy owner or inspecting its business fields. Manifest scope/document
+binding checks remain local to the Manifest compiler and creation seam.

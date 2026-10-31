@@ -17,6 +17,7 @@ from agentclaw.community.core.bot_management.engines.registry import (
 )
 
 _UCT_SERVER_CODE = "mcp.ant.agentix.150490.uctmcptools"
+_ECB_KNOWLEDGE_MCP_SERVER_CODE = "mcp.ant.ecb.ecb-knowledge-mcp-service"
 
 
 # Per-engine default MCP server lists. Keep engine keys in sync with
@@ -34,6 +35,7 @@ _DEFAULT_MCP_SERVERS_BY_ENGINE: Dict[str, List[dict]] = {
         {"server_code": "mcp.ant.antcodemcp.code.mcpserver"},
         {"server_code": "mcp.ant.brwithub.worksummaryserver"},
         {"server_code": "mcp.ant.agentclawscs.bcs_mcp"},
+        {"server_code": _ECB_KNOWLEDGE_MCP_SERVER_CODE},
         {"server_code": "hitl"},
     ],
     "moltis": [],
@@ -50,6 +52,7 @@ _DEFAULT_MCP_SERVERS_BY_ENGINE: Dict[str, List[dict]] = {
         {"server_code": "mcp.ant.arkai.dimamcpserver"},
         {"server_code": "mcp.ant.homistudio.recordmcp"},
         {"server_code": "mcp.ant.rpc.dcanttouch.adminservice"},
+        {"server_code": _ECB_KNOWLEDGE_MCP_SERVER_CODE},
         # Local/stdio; resolved through LocalMCPRegistry, not MCP Center. Kept
         # last to match the other engines' lists, and the only entry here that
         # still carries a ``name``: the codes above are catalogued upstream, so
@@ -76,6 +79,7 @@ _DEFAULT_MCP_SERVERS_BY_ENGINE: Dict[str, List[dict]] = {
         {"server_code": "mcp.ant.faas.aixjiter.AixCodingMemoryMCP", "name": "AixCodingMemoryMCP", "description": "用于aixcoding memoryOS知识库查询"},
         {"server_code": "mcp.ant.faas.aixjiter.CodeUserMCP", "name": "CodeUserMCP", "description": "aixjiter CodeUser MCP 服务"},
         {"server_code": "mcp.ant.rgmcpserver.rgfastcheckmcpserver", "name": "星海MCP服务", "description": "星海MCP服务"},
+        {"server_code": _ECB_KNOWLEDGE_MCP_SERVER_CODE, "name": "TeamClaw知识库MCP", "description": "TeamClaw知识库MCP，覆盖知识库的查询等服务"},
         {"server_code": "hitl"},
         {"server_code": "clawmind"},
     ],
@@ -91,6 +95,7 @@ _DEFAULT_MCP_SERVERS_BY_ENGINE: Dict[str, List[dict]] = {
         {"server_code": "mcp.ant.antcodemcp.code.mcpserver"},
         {"server_code": "mcp.ant.brwithub.worksummaryserver"},
         {"server_code": "mcp.ant.agentclawscs.bcs_mcp"},
+        {"server_code": _ECB_KNOWLEDGE_MCP_SERVER_CODE},
         {"server_code": "hitl"},
     ],
     "aicoding": [
@@ -112,6 +117,7 @@ _DEFAULT_MCP_SERVERS_BY_ENGINE: Dict[str, List[dict]] = {
                 {"server_code": "mcp.ant.faas.aixjiter.AixCodingMemoryMCP", "name": "AixCodingMemoryMCP", "description": "用于aixcoding memoryOS知识库查询"},
                 {"server_code": "mcp.ant.faas.aixjiter.CodeUserMCP", "name": "CodeUserMCP", "description": "aixjiter CodeUser MCP 服务"},
                 {"server_code": "mcp.ant.rgmcpserver.rgfastcheckmcpserver", "name": "星海MCP服务", "description": "星海MCP服务"},
+                {"server_code": _ECB_KNOWLEDGE_MCP_SERVER_CODE, "name": "TeamClaw知识库MCP", "description": "TeamClaw知识库MCP，覆盖知识库的查询等服务"},
                 {"server_code": "hitl"},
                 {"server_code": "clawmind"},
     ],

@@ -211,7 +211,7 @@ export const BotItem = React.memo(function BotItem({
                 {[1, 2, 3].map((i) => (
                   <Skeleton.Block
                     key={i}
-                    className="h-[60px] w-full rounded-none border-b border-border last:border-b-0"
+                    className="h-[60px] w-full rounded-none border-b border-divider last:border-b-0"
                   />
                 ))}
               </div>

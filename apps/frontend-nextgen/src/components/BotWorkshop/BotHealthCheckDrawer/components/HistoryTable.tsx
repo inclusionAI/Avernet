@@ -27,7 +27,7 @@ export function HistoryTable({ history, showDetails, onViewDetail }: HistoryTabl
           <div className="overflow-hidden rounded-xl">
             <table className="w-full border-collapse">
               <thead>
-                <tr className="border-b border-[var(--color-border)] text-xs font-medium text-[var(--color-muted)]">
+                <tr className="border-b border-divider text-xs font-medium text-[var(--color-muted)]">
                   <th className="px-4 py-3 text-left">体检时间</th>
                   <th className="px-4 py-3 text-left">类型</th>
                   <th className="px-4 py-3 text-left">发起方</th>
@@ -40,7 +40,7 @@ export function HistoryTable({ history, showDetails, onViewDetail }: HistoryTabl
               <tbody>
                 {history.map((item) => {
                   return (
-                    <tr key={item.id} className="border-b border-[var(--color-border)] text-sm last:border-b-0">
+                    <tr key={item.id} className="border-b border-divider text-sm last:border-b-0">
                       <td className="px-4 py-3 tabular-nums text-[var(--color-fg)]">{formatDate(item.checkedAt)}</td>
                       <td className="px-4 py-3 text-[var(--color-fg)]">
                         {REPORT_TYPE_LABELS[item.scanReportType ?? 'normal'] ?? '默认'}

@@ -225,7 +225,7 @@ export function ArchitectNameField({
       {shouldShowDropdown && (
         <div className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
           {!loading && !error && loaded && isSearching && (
-            <div className="border-b border-slate-100 bg-slate-50/80 px-3 py-2 text-[11px] text-slate-400">
+            <div className="border-b border-divider bg-slate-50/80 px-3 py-2 text-[11px] text-slate-400">
               {`匹配到 ${matchedOptionCount} 项`}
             </div>
           )}

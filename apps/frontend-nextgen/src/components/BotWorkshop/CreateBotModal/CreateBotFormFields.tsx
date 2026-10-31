@@ -1,5 +1,6 @@
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { Switch } from '@/components/ui/Switch';
 import { Textarea } from '@/components/ui/Textarea';
 import { useBotEngineOptions } from '@/hooks/useBotEngineOptions';
@@ -185,15 +186,21 @@ export function CreateBotFormFields({
           <span id="create-bot-space-label" className="block">
             归属空间
           </span>
-          <div
-            aria-labelledby="create-bot-space-label"
-            className="flex h-9 w-full items-center truncate rounded-md border border-input bg-muted/30 px-3 text-xs font-normal text-foreground"
+          <Select
+            value={values.spaceId}
+            disabled={creating || isLocal}
+            onValueChange={(spaceId) => {
+              const space = spaces.find((item) => item.id === spaceId);
+              if (space) setValues((current) => ({ ...current, spaceId: space.id, ownership: space.ownership }));
+            }}
           >
-            {spaces[0]?.name ?? '当前空间不可用'}
-          </div>
-          <span className="block text-[10px] font-normal text-muted-foreground">
-            跟随当前工作空间，不支持在创建时切换
-          </span>
+            <SelectTrigger aria-labelledby="create-bot-space-label"><SelectValue placeholder="当前空间不可用" /></SelectTrigger>
+            <SelectContent>
+              {spaces.map((space) => (
+                <SelectItem key={space.id} value={space.id} disabled={!space.canCreate}>{space.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         <div className="flex flex-col gap-2 text-xs font-medium text-foreground">

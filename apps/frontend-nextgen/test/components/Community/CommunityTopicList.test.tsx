@@ -2,7 +2,8 @@
 import { CommunityTopicList } from '@/components/Community/CommunityTopicList';
 import type { CommunityTopic } from '@/domain/community/types';
 import '@testing-library/jest-dom';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import type { RefObject } from 'react';
 
 const topic: CommunityTopic = {
@@ -16,6 +17,7 @@ const topic: CommunityTopic = {
   likeCount: 7,
   latestActivityAt: '2026-10-06T06:20:00Z',
   createdAt: '2026-10-05T08:30:00Z',
+  isHot: false,
   isMine: false,
   canClose: false,
   canEdit: false,
@@ -64,19 +66,102 @@ describe('CommunityTopicList', () => {
     expect(props.onOpen).toHaveBeenCalledWith(topic);
   });
 
-  test('投票主题列表标记投票类型', () => {
-    renderList({ topics: [{ ...topic, topicType: 'poll' }] });
-    expect(screen.getByRole('img', { name: '投票主题' })).toBeInTheDocument();
-    expect(screen.getByText('投票')).toBeInTheDocument();
+  test('列表 Human 作者头像使用清晰的 32px 尺寸', () => {
+    renderList({
+      topics: [
+        {
+          ...topic,
+          author: {
+            type: 'human',
+            id: 'human-1',
+            displayName: '张三',
+            avatarUrl: 'https://example.com/zhangsan.png',
+          },
+        },
+      ],
+    });
+
+    expect(screen.getByAltText('张三')).toHaveStyle({ width: '32px', height: '32px' });
   });
 
-  test('分享主题显示附件标识，求助主题显示橙色类型标识', () => {
-    renderList({ topics: [{ ...topic, status: 'open', topicType: 'share' }] });
-    expect(screen.getByRole('img', { name: '分享附件' })).toBeInTheDocument();
-    expect(screen.getByText('分享')).toBeInTheDocument();
+  test('列表作者头像支持悬停查看资料和关注', async () => {
+    const user = userEvent.setup();
+    const loadAuthorSummary = jest.fn();
+    const followAuthor = jest.fn().mockResolvedValue(true);
 
-    renderList({ topics: [{ ...topic, status: 'open', topicType: 'help' }] });
-    expect(screen.getAllByText('求助')).toHaveLength(2);
+    const { props } = renderList({
+      currentUserId: 'human-001',
+      loadAuthorSummary,
+      followAuthor,
+    });
+
+    const avatar = screen.getByRole('button', { name: '查看协作助手资料' });
+    await user.click(avatar);
+    expect(loadAuthorSummary).toHaveBeenCalledWith(topic.author);
+    expect(screen.getByRole('dialog')).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: '关注' }));
+    expect(followAuthor).toHaveBeenCalledWith(topic.author);
+    expect(props.onOpen).not.toHaveBeenCalled();
+  });
+
+  test('使用批量互动 summary 展示浏览、点赞和收藏总量', () => {
+    const interactionSummary = {
+      scope: 'TARGET' as const,
+      target: { targetType: 'TOPIC' as const, id: topic.id },
+      viewCount: 12,
+      likeCount: 9,
+      favoriteCount: 4,
+      followCount: 0,
+      acceptCount: 0,
+      topicCount: 1,
+      replyCount: 1,
+      acceptedReplyCount: 0,
+      replyParticipantCount: 0,
+      helpfulReplyCount: 1,
+    };
+    renderList({ getTopicSummary: () => interactionSummary });
+
+    expect(screen.getByLabelText(`浏览 ${interactionSummary.viewCount}`)).toBeInTheDocument();
+    expect(screen.getByLabelText(`点赞 ${interactionSummary.likeCount}`)).toBeInTheDocument();
+    expect(screen.getByLabelText(`收藏 ${interactionSummary.favoriteCount}`)).toBeInTheDocument();
+    expect(screen.getByLabelText(`回复 ${topic.replyCount}`)).toBeInTheDocument();
+  });
+
+  test('热榜主题显示火焰标记，普通主题不显示', () => {
+    const { unmount } = renderList({ topics: [{ ...topic, isHot: true }] });
+    expect(screen.getByText('🔥')).toBeInTheDocument();
+    expect(screen.getByText('热榜主题')).toBeInTheDocument();
+    unmount();
+
+    renderList({ topics: [topic] });
+    expect(screen.queryByText('🔥')).not.toBeInTheDocument();
+    expect(screen.queryByText('热榜主题')).not.toBeInTheDocument();
+  });
+
+  test('投票主题在标题后保留专属图标，类型列不显示图标', () => {
+    renderList({ topics: [{ ...topic, topicType: 'poll' }] });
+
+    const titleRow = screen.getByText(topic.title).parentElement;
+    const pollIcon = within(titleRow as HTMLElement).getByRole('img', { name: '投票主题' });
+    expect(pollIcon.querySelector('svg')).toHaveClass('lucide-chart-line');
+    expect(screen.getByText(topic.title).compareDocumentPosition(pollIcon) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    const typeLabel = screen.getByText('投票').parentElement;
+    expect(typeLabel?.querySelector('svg')).not.toBeInTheDocument();
+  });
+
+  test('分享和求助主题类型标签不显示图标，仅投票保留专属图标', () => {
+    const { unmount } = renderList({ topics: [{ ...topic, status: 'open', topicType: 'share', isHot: true }] });
+    const shareLabel = screen.getByText('分享').parentElement;
+    expect(shareLabel?.querySelector('svg')).not.toBeInTheDocument();
+    expect(screen.getByText('分享')).toBeInTheDocument();
+    unmount();
+
+    renderList({ topics: [{ ...topic, status: 'closed', topicType: 'help' }] });
+    const helpLabel = screen.getByText('已解决').closest('article')?.querySelector('span.bg-muted');
+    expect(helpLabel?.querySelector('svg')).not.toBeInTheDocument();
+    expect(screen.getAllByText('求助')).toHaveLength(1);
   });
 
   test('已关闭求助显示已解决而不是普通已结帖', () => {

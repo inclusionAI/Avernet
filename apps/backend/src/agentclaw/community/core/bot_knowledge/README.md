@@ -12,17 +12,22 @@ purpose: Persist current knowledge selection independently of platform grants.
 provides:
   - BotKnowledgeService
   - BotKnowledgeRepository
+  - BotKnowledgeAgentsMdSync
 consumes:
   - DatabasePlugin
   - KnowledgeCatalogPlugin
+  - KnowledgeCatalog
 internal_dependencies:
   - agentclaw.community.kernel
   - agentclaw.community.plugin_api
   - agentclaw.community.core.base
   - agentclaw.community.core.bot_knowledge
   - agentclaw.community.core.bot_collaborator
-  - agentclaw.community.core.spaces
+  - agentclaw.community.core.knowledge_management
   - agentclaw.community.core.service_bot
+  - agentclaw.community.core.services
+  - agentclaw.community.core.spaces
+  - agentclaw.community.log
   - agentclaw.community.utils
 ```
 
@@ -55,6 +60,26 @@ A matching publication whose source was hard-deleted cannot be attributed to a
 tenant and fails closed (`BOT_DRAFT_REQUIRED`), including when ignoring it would
 otherwise reveal an older draft. No new publication ownership is inferred from
 business Bot/owner IDs alone, and no publication schema or DDL is changed.
+
+## AGENTS.md projection
+
+`PUT /bots/{bot_id}/knowledge-bases/{kb_id}/enablement` remains the only write;
+after a successful enablement change the router schedules
+`BotKnowledgeAgentsMdSync` (see `agents_md_sync.py`) as a background task. The
+binding table stays the single source of truth: the sync rereads the current
+selection, resolves display names through the `KnowledgeCatalog.details` port
+(batches of 20; a failed batch degrades to ids only), and rewrites one fenced
+`KNOWLEDGE_TOOLS` section inside the Bot's draft `AGENTS.md` through
+`IdentityService`'s provider-blind identity-file I/O.
+
+The fence markers are the only anchor for locating an existing section and
+must never be renamed after release — renaming would orphan every section
+already written into existing bots' `AGENTS.md` files and the next sync would
+append a second, stale copy. The sync is best-effort: it never fails the HTTP
+response, never mutates the stored selection, and skips the update when a
+broken fence (start marker without its end marker) suggests hand-editing
+damage rather than risk eating user-written content. An empty selection removes
+the section; an unchanged projection is not written back.
 
 ## Live local acceptance
 
@@ -96,3 +121,17 @@ indexes for fresh local schemas; that is not evidence they exist in an already
 running database. Deferring them does not change draft-check correctness, but
 production query/lock cost without them remains unverified. No automatic
 existing-database migration, production DDL, or deployment is performed here.
+
+## Legacy personal Bot selection
+
+For a Bot with NULL `space_id`, knowledge operations resolve the Owner's
+existing, undeleted PERSONAL space in the Bot's environment. They do not create
+a space or persist the effective space back to the Bot. Missing/deleted spaces
+remain unavailable. Explicit assignments never fall back, including invalid or
+deleted assignments. Native Owner/Editor and service-Bot draft rules remain.
+
+Current selections are stored and read using the effective space ID; the write
+transaction locks and re-resolves both Bot and space after the external grant
+check. A real intervening move is rejected, while normalizing NULL to the same
+personal space preserves selections and CAS revisions. Limits, binding pages
+and runtime selection reads use the same effective scope.

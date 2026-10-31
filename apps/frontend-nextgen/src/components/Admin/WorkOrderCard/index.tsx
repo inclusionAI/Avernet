@@ -7,13 +7,13 @@
 import { Button, Card, Modal, ModalContent, ModalFooter, ModalHeader, ModalTitle, Textarea } from '@/components/ui';
 import type { WorkOrder } from '@/domain/admin/models';
 import { workOrderService } from '@/services/admin/workOrderService';
+import { Points } from '@/tracking/points';
 import { cn } from '@/utils/cn';
 import { formatAbsoluteTime } from '@/utils/format';
+import { Tracert } from '@/utils/tracert';
 import { Eye } from 'lucide-react';
 import { useState } from 'react';
 import { Tag } from '../Tag';
-import { Points } from '@/tracking/points';
-import { Tracert } from '@/utils/tracert';
 
 export interface WorkOrderCardProps {
   workOrder: WorkOrder;
@@ -78,7 +78,7 @@ export function WorkOrderCard({ workOrder: wo, onApprove, onReject, onView, canA
     <>
       <Card
         className={cn(
-          'flex cursor-pointer items-center gap-5 rounded-none border-x-0 border-t-0 border-border bg-transparent py-4 shadow-none transition-colors last:border-b-0 hover:bg-muted/50',
+          'flex cursor-pointer items-center gap-5 rounded-none border-x-0 border-t-0 border-divider bg-transparent py-4 shadow-none transition-colors last:border-b-0 hover:bg-muted/50',
           !isApproval && wo.isRead && 'opacity-75',
         )}
         onClick={() => onView?.(wo)}
@@ -91,6 +91,22 @@ export function WorkOrderCard({ workOrder: wo, onApprove, onReject, onView, canA
           {wo.content ? (
             <div className="mt-1 whitespace-pre-wrap break-words text-xs leading-5 text-muted-foreground">
               {wo.content}
+            </div>
+          ) : null}
+          {/* bot-public-risk-check：BOT_PUBLIC_RISK 类通知在条目内提供检测工单外链；stopPropagation 防误触详情（F-04）。 */}
+          {wo.detailUrl ? (
+            <div className="mt-1">
+              <Button
+                asChild
+                variant="ghost"
+                size="sm"
+                className="h-auto p-0 text-primary underline-offset-2"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <a href={wo.detailUrl} target="_blank" rel="noopener noreferrer">
+                  查看检测工单
+                </a>
+              </Button>
             </div>
           ) : null}
           {wo.gmtModified ? (

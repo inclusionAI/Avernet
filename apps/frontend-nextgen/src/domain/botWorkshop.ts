@@ -37,6 +37,7 @@ export interface BotDomain {
   entityKey: string;
   name: string;
   description?: string;
+  expertOriginName?: string;
   spaceId?: string;
   spaceName?: string;
   /** 授权能力只跟随接口返回的 Bot 所属空间类型，不从 Bot 类型或部署形态推断。 */

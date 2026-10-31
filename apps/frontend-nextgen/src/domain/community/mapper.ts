@@ -1,12 +1,12 @@
 import type {
   CommunityAuthor,
-  CommunityHelp,
   CommunityPoll,
   CommunityPollSelection,
   CommunityPollStats,
   CommunityPollStatsOption,
   CommunityReply,
   CommunityTopic,
+  CommunityTopicStatus,
   CommunityTopicType,
   ForumActorRef,
   ForumTargetRef,
@@ -17,6 +17,9 @@ import type {
   InteractionTargetType,
   PersonalCenterActivity,
   PersonalCenterActivityType,
+  PersonalCenterFollowedContext,
+  PersonalCenterReplyContext,
+  PersonalCenterTopicContext,
 } from './types';
 
 export interface CommunityAuthorDto {
@@ -26,14 +29,8 @@ export interface CommunityAuthorDto {
   avatar_url?: string | null;
 }
 
-export interface CommunityHelpDto {
-  expected_time?: string | null;
-  [key: string]: unknown;
-}
-
 export interface CommunityTopicConfigDto {
   poll?: CommunityPollDto | null;
-  help?: CommunityHelpDto | null;
   [key: string]: unknown;
 }
 
@@ -75,6 +72,7 @@ export interface CommunityTopicDto {
   reply_count?: number;
   like_count?: number;
   latest_activity_at?: string;
+  is_hot?: boolean;
   updated_at?: string;
   created_at?: string;
   is_mine?: boolean;
@@ -164,11 +162,6 @@ function mapPoll(value: CommunityPollDto | null | undefined): CommunityPoll | un
   };
 }
 
-function mapHelp(value: CommunityHelpDto | null | undefined): CommunityHelp | undefined {
-  if (!value) return undefined;
-  return { expectedTime: value.expected_time?.trim() || undefined };
-}
-
 function mapPollStats(
   value: CommunityPollStatsDto | null | undefined,
   configuredOptions: string[],
@@ -227,9 +220,8 @@ function mapTopicConfig(value: CommunityTopicConfigDto | null | undefined) {
   if (!value) return undefined;
   const config = {
     poll: mapPoll(value.poll),
-    help: mapHelp(value.help),
   };
-  if (!config.poll && !config.help) return undefined;
+  if (!config.poll) return undefined;
   return config;
 }
 
@@ -281,6 +273,7 @@ export function mapCommunityTopicDto(dto: CommunityTopicDto): CommunityTopic {
     replyCount: typeof dto.reply_count === 'number' ? dto.reply_count : undefined,
     likeCount: typeof dto.like_count === 'number' ? dto.like_count : undefined,
     latestActivityAt,
+    isHot: dto.is_hot === true,
     createdAt: dto.created_at ?? '',
     isMine: dto.is_mine === true,
     canClose: dto.can_close === true,
@@ -331,9 +324,13 @@ export interface InteractionSummaryQueryDto {
   [key: string]: unknown;
 }
 
-export interface InteractionSummaryDto extends InteractionStatsDto {
+export interface InteractionSummaryDto {
   scope?: string;
-  [key: string]: unknown;
+  actor_type?: string;
+  actor_id?: string;
+  target_type?: string;
+  target_id?: string;
+  stats: InteractionStatsDto;
 }
 
 export interface InteractionRecordedDto {
@@ -342,7 +339,44 @@ export interface InteractionRecordedDto {
   action_type?: string;
   target_type?: string;
   target_id?: string;
+  active?: boolean;
   recorded?: boolean;
+  [key: string]: unknown;
+}
+
+export interface PersonalCenterTopicContextDto {
+  title?: string;
+  body_preview?: string;
+  topic_type?: string;
+  author_type?: string;
+  author_id?: string;
+  author_display_name?: string;
+  status?: string;
+  reply_count?: number | null;
+  like_count?: number | null;
+  view_count?: number | null;
+  favorite_count?: number | null;
+  is_hot?: boolean | null;
+  author_avatar_url?: string | null;
+  created_at?: string | null;
+  latest_reply_at?: string | null;
+  [key: string]: unknown;
+}
+
+export interface PersonalCenterReplyContextDto {
+  post_id?: string;
+  author_type?: string;
+  author_id?: string;
+  author_display_name?: string;
+  body_preview?: string;
+  [key: string]: unknown;
+}
+
+export interface PersonalCenterFollowedContextDto {
+  target_type?: string;
+  target_id?: string;
+  display_name?: string;
+  avatar_url?: string | null;
   [key: string]: unknown;
 }
 
@@ -356,6 +390,9 @@ export interface PersonalCenterActivityDto {
   post_id?: string | null;
   happened_at?: string;
   body_preview?: string;
+  topic_context?: PersonalCenterTopicContextDto | null;
+  replied_to_post?: PersonalCenterReplyContextDto | null;
+  followed_context?: PersonalCenterFollowedContextDto | null;
   [key: string]: unknown;
 }
 
@@ -373,12 +410,16 @@ function countOrZero(value: number | null | undefined): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
-function mapSummaryActor(dto: InteractionSummaryQueryDto): ForumActorRef | undefined {
+function mapSummaryActor(
+  dto: Pick<InteractionSummaryQueryDto, 'actor_type' | 'actor_id'>,
+): ForumActorRef | undefined {
   if (!dto.actor_type || !dto.actor_id) return undefined;
   return { actorType: interactionActorType(dto.actor_type), id: dto.actor_id };
 }
 
-function mapSummaryTarget(dto: InteractionSummaryQueryDto): ForumTargetRef | undefined {
+function mapSummaryTarget(
+  dto: Pick<InteractionSummaryQueryDto, 'target_type' | 'target_id'>,
+): ForumTargetRef | undefined {
   if (!dto.target_type || !dto.target_id) return undefined;
   return { targetType: interactionTargetType(dto.target_type), id: dto.target_id };
 }
@@ -416,7 +457,63 @@ export function mapInteractionSummaryDto(dto: InteractionSummaryDto): Interactio
   const actor = mapSummaryActor(dto);
   const target = mapSummaryTarget(dto);
   const scope = actor && target ? 'ACTOR_TARGET' : actor ? 'ACTOR' : 'TARGET';
-  return { scope, actor, target, ...mapInteractionStatsDto(dto) };
+  return { scope, actor, target, ...mapInteractionStatsDto(dto.stats) };
+}
+
+function mapPersonalCenterTopicStatus(value: string | undefined): CommunityTopicStatus {
+  return value?.toUpperCase() === 'CLOSED' ? 'closed' : 'open';
+}
+
+export function mapPersonalCenterTopicContextDto(
+  dto: PersonalCenterTopicContextDto | null | undefined,
+): PersonalCenterTopicContext | undefined {
+  if (!dto) return undefined;
+  return {
+    title: dto.title ?? '',
+    bodyPreview: dto.body_preview ?? '',
+    topicType: mapTopicType(dto.topic_type),
+    status: mapPersonalCenterTopicStatus(dto.status),
+    author: {
+      actorType: interactionActorType(dto.author_type),
+      id: dto.author_id?.trim() ?? '',
+    },
+    authorDisplayName: dto.author_display_name ?? dto.author_id ?? '',
+    authorAvatarUrl: dto.author_avatar_url?.trim() || undefined,
+    replyCount: countOrZero(dto.reply_count),
+    likeCount: countOrZero(dto.like_count),
+    viewCount: countOrZero(dto.view_count),
+    favoriteCount: countOrZero(dto.favorite_count),
+    isHot: dto.is_hot === true,
+    createdAt: dto.created_at ?? '',
+    latestReplyAt: dto.latest_reply_at ?? undefined,
+  };
+}
+
+function mapPersonalCenterFollowedContextDto(
+  dto: PersonalCenterFollowedContextDto | null | undefined,
+): PersonalCenterFollowedContext | undefined {
+  if (!dto) return undefined;
+  return {
+    targetType: interactionTargetType(dto.target_type),
+    targetId: dto.target_id?.trim() ?? '',
+    displayName: dto.display_name ?? dto.target_id ?? '',
+    avatarUrl: dto.avatar_url?.trim() || undefined,
+  };
+}
+
+function mapPersonalCenterReplyContextDto(
+  dto: PersonalCenterReplyContextDto | null | undefined,
+): PersonalCenterReplyContext | undefined {
+  if (!dto) return undefined;
+  return {
+    postId: dto.post_id ?? '',
+    author: {
+      actorType: interactionActorType(dto.author_type),
+      id: dto.author_id?.trim() ?? '',
+    },
+    authorDisplayName: dto.author_display_name ?? dto.author_id ?? '',
+    bodyPreview: dto.body_preview ?? '',
+  };
 }
 
 export function mapPersonalCenterActivityDto(
@@ -426,18 +523,65 @@ export function mapPersonalCenterActivityDto(
   const actorType = dto.actor_type?.toUpperCase();
   const targetId = dto.target_id?.trim();
   const actorId = dto.actor_id?.trim();
-  if (!['AUTHORED', 'FAVORITED', 'VIEWED', 'LIKED', 'REPLIED'].includes(activityType)) return null;
-  if (!actorId || !targetId || !dto.topic_id) return null;
+  const targetType = interactionTargetType(dto.target_type);
+  const validActivityTypes = [
+    'AUTHORED',
+    'FAVORITED',
+    'VIEWED',
+    'LIKED',
+    'FOLLOWED',
+    'REPLIED',
+  ];
+  if (!validActivityTypes.includes(activityType)) return null;
+  if (!actorId || !targetId) return null;
+  if (!dto.topic_id && !(activityType === 'FOLLOWED' && (targetType === 'HUMAN' || targetType === 'BOT'))) {
+    return null;
+  }
   return {
     activityType,
     actor: { actorType: interactionActorType(actorType), id: actorId },
     target: {
-      targetType: interactionTargetType(dto.target_type),
+      targetType,
       id: targetId,
     },
-    topicId: dto.topic_id,
+    topicId: dto.topic_id?.trim() || undefined,
     postId: dto.post_id?.trim() || undefined,
     happenedAt: dto.happened_at ?? '',
     bodyPreview: dto.body_preview ?? '',
+    topicContext: mapPersonalCenterTopicContextDto(dto.topic_context),
+    repliedToPost: mapPersonalCenterReplyContextDto(dto.replied_to_post),
+    followedContext: mapPersonalCenterFollowedContextDto(dto.followed_context),
+  };
+}
+
+export function personalCenterActivityToTopic(
+  activity: PersonalCenterActivity,
+): CommunityTopic | null {
+  const context = activity.topicContext;
+  if (!activity.topicId || !context) return null;
+  const authorType = context.author.actorType.toLowerCase() as CommunityAuthor['type'];
+  return {
+    id: activity.topicId,
+    title: context.title,
+    body: context.bodyPreview,
+    status: context.status,
+    topicType: context.topicType,
+    author: {
+      type: authorType,
+      id: context.author.id,
+      displayName: context.authorDisplayName,
+      avatarUrl: context.authorAvatarUrl,
+    },
+    replyCount: context.replyCount,
+    likeCount: context.likeCount,
+    viewCount: context.viewCount,
+    favoriteCount: context.favoriteCount,
+    latestActivityAt: context.latestReplyAt ?? context.createdAt,
+    isHot: context.isHot,
+    createdAt: context.createdAt,
+    isMine: false,
+    canClose: false,
+    canEdit: false,
+    canDelete: false,
   };
 }

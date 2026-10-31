@@ -19,12 +19,21 @@ B6 继续保持转交入口关闭。Legacy BFF Router 已按职责拆分，原 s
 skillsets.py 保留 Router 和历史导入接口；共享请求解析先解析 Bot，将稳定 entity
 用于资源路径，当前 Owner 仅用于元数据和权限。上传与基于持久 Skill 的删除也使用
 同一身份边界。SkillSetService 按职责拆分为行为模块，Default 模板查询使用 entity。
-Factory 的显式 entity 优先于历史 user_id 路由别名；Pool 路径不再使用当前 Owner。
+Factory 的显式 entity 优先于历史 user_id 路由别名；无状态 MCP 集合读取按方法参数 entity 定位默认模板，不能使用服务实例的旧 entity。Pool 路径不再使用当前 Owner。
 真实 actor 仍由每个命令显式传入，不能由上述路径参数获得人员授权。
 共享/离线/无 Bot 的历史目录流保留显式地址，不因此授予活跃 Bot 的访问权限。
 DB 失败或歧义不能当作 Bot 不存在后猜测资源地址。路由顺序及响应合同由 Legacy
 route snapshot 和 endpoint 测试固定。此变更不宣称真实转交事务、凭证及所有消费者
 已完成验收；后续 B7 单独实现和联合验证。
+
+交接后的 Legacy `my-skills` 经 `SkillQueryService.list_uploaded_skills` 先解析
+Bot、校验当前 Owner/协作者权限，再按 entity 读取原资产，不触发 Installation
+flush。无 Bot 的历史目录仅允许本人读取。仅传 Set ID 时从持久 Set 反查 Bot；
+历史 user/owner locator 必须解析到同一 Bot，显式 entity 优先于 user 路由别名。
+Default MCP/Set、排除项、能力快照及 AgentPass 范围使用稳定 entity；设备解析
+使用 Factory 已解析的当前 Owner (`_device_owner_id`)。人员 actor、执行身份和
+协作审计不因资源地址规范化而替换。MCP 投影仍遵循先提交 DB、尽力同步 Runtime
+的合同，真实设备文件是否收敛需要部署验收。
 
 ## 1. 从 OpenAPI 进入
 

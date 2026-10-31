@@ -182,7 +182,7 @@ export function GroupManagePanel(props: GroupManagePanelProps) {
 
             <Card className="rounded-lg bg-card p-3">
               <p className="m-0 mb-1 text-sm font-medium text-foreground">操作</p>
-              <div className="flex flex-col divide-y divide-border">
+              <div className="flex flex-col divide-y divide-divider">
                 <Button
                   ref={shareAnchorRef}
                   variant="ghost"

@@ -1,0 +1,100 @@
+{
+  "catalog": {
+    "items": [
+      {
+        "space_id": "1",
+        "space_name": "Actual space",
+        "kb_id": "kb",
+        "name": "Knowledge",
+        "description": "Provider description",
+        "kgbase_status": "ready",
+        "can_manage": true,
+        "document_count": 17,
+        "authorized_bot_count": 205,
+        "created_at": "2026-10-24T00:00:00Z",
+        "updated_at": null,
+        "updated_at_basis": "unavailable"
+      }
+    ],
+    "knowledge_bases": [
+      {
+        "space_id": "1",
+        "space_name": "Actual space",
+        "kb_id": "kb",
+        "name": "Knowledge",
+        "description": "Provider description",
+        "kgbase_status": "ready",
+        "can_manage": true,
+        "document_count": 17,
+        "authorized_bot_count": 205,
+        "created_at": "2026-10-24T00:00:00Z",
+        "updated_at": null,
+        "updated_at_basis": "unavailable"
+      }
+    ],
+    "next_cursor": null
+  },
+  "detail": {
+    "space_id": "1",
+    "space_name": "Actual space",
+    "kb_id": "kb",
+    "name": "Knowledge",
+    "description": "Provider description",
+    "kgbase_status": "ready",
+    "can_manage": true,
+    "document_count": 17,
+    "authorized_bot_count": 205,
+    "created_at": "2026-10-24T00:00:00Z",
+    "updated_at": null,
+    "updated_at_basis": "unavailable"
+  },
+  "authorized_bots": {
+    "items": [
+      {
+        "id": "grant-bot-owner",
+        "kb_id": "kb",
+        "platform": "teamclaw",
+        "platform_env": "pre",
+        "bot_id": "bot",
+        "user_id": "owner",
+        "bot_owner_id": "owner",
+        "granted": true,
+        "revision": 2,
+        "updated_by": "manager",
+        "bot_name": "Real bot",
+        "avatar_url": "https://img.example/avatar.png",
+        "owner_id": "owner",
+        "owner_name": "Existing nickname",
+        "bot_type": "personal",
+        "space_id": "1",
+        "space_name": "Actual space",
+        "bot_available": true,
+        "metadata_missing": false,
+        "enabled": false
+      },
+      {
+        "id": "grant-deleted-owner",
+        "kb_id": "kb",
+        "platform": "teamclaw",
+        "platform_env": "pre",
+        "bot_id": "deleted",
+        "user_id": "owner",
+        "bot_owner_id": "owner",
+        "granted": true,
+        "revision": 2,
+        "updated_by": "manager",
+        "bot_name": null,
+        "avatar_url": null,
+        "owner_id": "owner",
+        "owner_name": null,
+        "bot_type": null,
+        "space_id": "1",
+        "space_name": "Actual space",
+        "bot_available": false,
+        "metadata_missing": true,
+        "enabled": null
+      }
+    ],
+    "next_cursor": 17
+  }
+}

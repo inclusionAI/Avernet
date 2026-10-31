@@ -22,6 +22,12 @@ const mockCommunityState = {
   query: '',
   scope: 'all' as const,
   topicType: 'all' as const,
+  currentUser: {
+    type: 'human' as const,
+    id: 'human-1',
+    displayName: '张三',
+    avatarUrl: 'https://example.com/avatar.png',
+  },
   selectedTopic: null as CommunityTopic | null,
   topics: [topic],
   loading: false,
@@ -74,40 +80,57 @@ describe('CommunityPage 滚动容器结构', () => {
     expect(scrollMain.parentElement).toHaveClass('h-full', 'flex', 'flex-col');
   });
 
-
-  test('首页筛选 Tab 位于搜索框之前，发帖入口位于搜索框之后', () => {
+  test('主题类型筛选后移除范围按钮，保留可点击关注、当前用户头像和发帖入口', () => {
     render(<CommunityPage />);
 
     const topicTypeGroup = screen.getByRole('group', { name: '主题类型' });
-    const scopeGroup = screen.getByRole('group', { name: '主题范围' });
     const searchInput = screen.getByRole('textbox', { name: '搜索社区主题' });
     const personalCenterButton = screen.getByRole('button', { name: '个人中心' });
     const publishButton = screen.getByRole('button', { name: '发帖' });
 
-    expect(within(topicTypeGroup).getAllByRole('button').map((button) => button.textContent)).toEqual([
-      '全部',
-      '关注',
-      '讨论',
-      '分享',
-      '投票',
-      '求助',
-    ]);
+    expect(
+      within(topicTypeGroup)
+        .getAllByRole('button')
+        .map((button) => button.textContent),
+    ).toEqual(['全部', '关注', '讨论', '分享', '投票', '求助']);
+    expect(screen.queryByRole('group', { name: '主题范围' })).not.toBeInTheDocument();
     const followingButton = within(topicTypeGroup).getByRole('button', { name: '关注' });
-    expect(followingButton).toBeDisabled();
+    expect(followingButton).toBeEnabled();
     fireEvent.click(followingButton);
     expect(mockCommunityState.setTopicType).not.toHaveBeenCalled();
+    expect(mockCommunityState.setScope).toHaveBeenCalledWith('following');
+    expect(screen.getByText(topic.title)).toBeInTheDocument();
+    fireEvent.click(within(topicTypeGroup).getByRole('button', { name: '分享' }));
+    expect(screen.getByText(topic.title)).toBeInTheDocument();
     expect(topicTypeGroup).toHaveClass('bg-background', 'sm:w-2/5', 'sm:min-w-[240px]', 'sm:max-w-[50%]');
-    expect(within(scopeGroup).getAllByRole('button')).toHaveLength(2);
-    expect(topicTypeGroup.compareDocumentPosition(scopeGroup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(scopeGroup.compareDocumentPosition(searchInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(topicTypeGroup.compareDocumentPosition(searchInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(personalCenterButton).getByAltText('张三').getAttribute('src')).toBe(
+      'https://example.com/avatar.png',
+    );
     expect(searchInput.compareDocumentPosition(personalCenterButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(personalCenterButton).toBeEnabled();
-    expect(
-      personalCenterButton.compareDocumentPosition(publishButton) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    expect(personalCenterButton.compareDocumentPosition(publishButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     fireEvent.click(within(topicTypeGroup).getByRole('button', { name: '分享' }));
     expect(mockCommunityState.setTopicType).toHaveBeenCalledWith('share');
+  });
+
+  test('主题类型筛选 tab 图标与发帖弹窗保持一致', () => {
+    render(<CommunityPage />);
+    const topicTypeGroup = screen.getByRole('group', { name: '主题类型' });
+    const expectedIcons: Record<string, string[]> = {
+      关注: ['community-follow-icon', 'lucide-user-round-check'],
+      讨论: ['lucide-message-circle'],
+      分享: ['lucide-share-2'],
+      投票: ['lucide-chart-line'],
+      求助: ['lucide-circle-question-mark'],
+    };
+    for (const [label, iconClasses] of Object.entries(expectedIcons)) {
+      const icon = within(topicTypeGroup)
+        .getByRole('button', { name: label })
+        .querySelector('svg');
+      expect(icon).toHaveClass(...iconClasses);
+    }
   });
 
   test('详情视：回帖滚动 main 必须挂在 h-full flex 外层下', () => {

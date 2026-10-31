@@ -7,41 +7,51 @@ e2e flow and has been drained from SINGLEBOX_E2E_EXEMPT. The remaining
 modules still rest on the exempt list; they get drained one by one as
 real flows are added to cover them.
 """
+
 from __future__ import annotations
 
 import pytest
 
-from tests.community._flows.bot_knowledge.api_lifecycle import BOT_KNOWLEDGE_FLOWS
-from tests.community._flows.digital_employee.api_lifecycle import DIGITAL_EMPLOYEE_FLOWS
 from tests.community._flows.access.api_lifecycle import ACCESS_LIFECYCLE_FLOWS
 from tests.community._flows.bot_chat.api_lifecycle import BOT_CHAT_LIFECYCLE_FLOWS
-from tests.community._flows.bot_collaborator.api_lifecycle import BOT_COLLABORATOR_LIFECYCLE_FLOWS
-from tests.community._flows.bot_management.api_lifecycle import BOT_MANAGEMENT_LIFECYCLE_FLOWS
+from tests.community._flows.bot_collaborator.api_lifecycle import (
+    BOT_COLLABORATOR_LIFECYCLE_FLOWS,
+)
+from tests.community._flows.bot_knowledge.api_lifecycle import BOT_KNOWLEDGE_FLOWS
+from tests.community._flows.bot_management.api_lifecycle import (
+    BOT_MANAGEMENT_LIFECYCLE_FLOWS,
+)
+from tests.community._flows.bot_public_risk.api_lifecycle import RISK_FLOWS
 from tests.community._flows.cron.api_lifecycle import CRON_FLOWS
 from tests.community._flows.devices.api_lifecycle import DEVICES_LIFECYCLE_FLOWS
+from tests.community._flows.digital_employee.api_lifecycle import DIGITAL_EMPLOYEE_FLOWS
 from tests.community._flows.expert_chat.api_lifecycle import EXPERT_CHAT_FLOWS
 from tests.community._flows.expert_market.api_lifecycle import EXPERT_MARKET_FLOWS
 from tests.community._flows.harness.api_lifecycle import HARNESS_LIFECYCLE_FLOWS
+from tests.community._flows.knowledge_management.api_lifecycle import (
+    KNOWLEDGE_MANAGEMENT_FLOWS,
+)
 from tests.community._flows.mcp.api_lifecycle import MCP_FLOWS
 from tests.community._flows.quality.api_lifecycle import QUALITY_FLOWS
 from tests.community._flows.resources.api_lifecycle import RESOURCES_LIFECYCLE_FLOWS
 from tests.community._flows.skill_center.api_lifecycle import API_LIFECYCLE_FLOWS
+from tests.community._flows.space_knowledge.api_lifecycle import SPACE_KNOWLEDGE_FLOWS
 from tests.community._flows.tc_file_upload_integrations.api_lifecycle import (
     TC_FILE_UPLOAD_INTEGRATION_FLOWS,
 )
 from tests.community._flows.user_list.api_lifecycle import USER_LIST_FLOWS
-from tests.community._flows.space_knowledge.api_lifecycle import SPACE_KNOWLEDGE_FLOWS
 from tests.community.framework.flow_coverage import (
     SINGLEBOX_E2E_EXEMPT,
     all_core_modules,
     covered_modules,
 )
 
-
 # Plan C appends real flows here (or swaps for a registry). 新模块的流 import
 # 进来 extend 此列表。
 REGISTERED_FLOWS: list = [
     *BOT_KNOWLEDGE_FLOWS,
+    *RISK_FLOWS,
+    *KNOWLEDGE_MANAGEMENT_FLOWS,
     *SPACE_KNOWLEDGE_FLOWS,
     *DIGITAL_EMPLOYEE_FLOWS,
     *API_LIFECYCLE_FLOWS,

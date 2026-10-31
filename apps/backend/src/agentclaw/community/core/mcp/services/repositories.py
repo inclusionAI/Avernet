@@ -24,6 +24,9 @@ class BotMCPProvider(Protocol):
         user_id: str,
         entity_type: str = "staff",
         engine_type: Optional[str] = None,
+        *,
+        strict_policy_context: bool = False,
+        capability_snapshot: Any = None,
     ) -> List[dict[str, Any]]:
         """Collect active MCPs from the bot's active skill sets.
 

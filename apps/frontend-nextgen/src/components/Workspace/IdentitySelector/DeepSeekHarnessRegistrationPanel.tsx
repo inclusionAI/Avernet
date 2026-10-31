@@ -14,7 +14,7 @@ import { useState } from 'react';
 function Command({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0 rounded-lg border border-border bg-muted/40">
-      <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
+      <div className="flex items-center justify-between gap-2 border-b border-divider px-3 py-2">
         <span className="text-xs font-medium">{label}</span>
         <Button
           size="sm"

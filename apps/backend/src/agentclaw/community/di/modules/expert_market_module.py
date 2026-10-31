@@ -12,6 +12,13 @@ from agentclaw.community.core.expert_market.service import (
     ExpertCatalogService,
 )
 from agentclaw.community.plugin_api.database import DatabasePlugin
+from agentclaw.community.api.expert_creation_service import (
+    ExpertCreationServiceProtocol,
+)
+from agentclaw.community.core.expert_market.creation import (
+    ExpertCreationConfig,
+    ExpertCreationService,
+)
 
 
 class ExpertMarketModule(Module):
@@ -45,3 +52,26 @@ class ExpertMarketModule(Module):
         self, catalog: ExpertCatalogRepository, config: ExpertCatalogConfig
     ) -> ExpertCatalogServiceProtocol:
         return ExpertCatalogService(catalog, config)
+
+    @singleton
+    @provider
+    def expert_creation_config(
+        self, catalog_config: ExpertCatalogConfig
+    ) -> ExpertCreationConfig:
+        from agentclaw.community.di.modules.config_module import read_user_config
+
+        config = (read_user_config().get("expert_market", {}) or {}).get(
+            "creation_source", {}
+        ) or {}
+        return ExpertCreationConfig(
+            source_url=config.get("url", ""),
+            source_auth=config.get("auth", ""),
+            source_repo_id=catalog_config.source_repo_id,
+        )
+
+    @singleton
+    @provider
+    def expert_creation_service(
+        self, catalog: ExpertCatalogServiceProtocol, config: ExpertCreationConfig
+    ) -> ExpertCreationServiceProtocol:
+        return ExpertCreationService(catalog, config)

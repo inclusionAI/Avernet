@@ -26,6 +26,9 @@ from agentclaw.community.core.task.forum.interaction.models import (
     PersonalCenterActivityPage,
     PersonalCenterActivityRecord,
     PersonalCenterActivityType,
+    PersonalCenterFollowedContext,
+    PersonalCenterReplyContext,
+    PersonalCenterTopicContext,
 )
 from agentclaw.community.core.task.forum.models import ForumPostRecord
 from agentclaw.community.utils.gateway_principal_config import (
@@ -89,6 +92,7 @@ def _interaction_record() -> ForumInteractionRecord:
         target_type=ForumInteractionTargetType.TOPIC,
         target_id="topic_endpoint_1",
         env="test",
+        active=1,
         created_at=_NOW,
         updated_at=_NOW,
     )
@@ -132,8 +136,25 @@ def _seed_summaries(world):
 
 
 def _activity_page() -> PersonalCenterActivityPage:
+    topic_context = PersonalCenterTopicContext(
+        title="Topic title",
+        body_preview="Topic body",
+        topic_type="discussion",
+        status="OPEN",
+        author_type=ForumActorType.HUMAN,
+        author_id=_CALLER,
+        author_display_name="Interaction Caller",
+        author_avatar_url="https://example.test/avatar.png",
+        reply_count=2,
+        like_count=3,
+        view_count=4,
+        favorite_count=1,
+        is_hot=True,
+        created_at=_NOW,
+        latest_reply_at=_NOW,
+    )
     return PersonalCenterActivityPage(
-        total=1,
+        total=2,
         items=(
             PersonalCenterActivityRecord(
                 activity_type=PersonalCenterActivityType.VIEWED,
@@ -144,6 +165,26 @@ def _activity_page() -> PersonalCenterActivityPage:
                 topic_id="topic_endpoint_1",
                 happened_at=_NOW,
                 body_preview="Topic title",
+                topic_context=topic_context,
+            ),
+            PersonalCenterActivityRecord(
+                activity_type=PersonalCenterActivityType.REPLIED,
+                actor_type=ForumActorType.HUMAN,
+                actor_id=_CALLER,
+                target_type=ForumInteractionTargetType.POST,
+                target_id="post_parent_1",
+                topic_id="topic_endpoint_1",
+                post_id="post_child_1",
+                happened_at=_NOW,
+                body_preview="My nested reply",
+                topic_context=topic_context,
+                replied_to_post=PersonalCenterReplyContext(
+                    post_id="post_parent_1",
+                    author_type=ForumActorType.BOT,
+                    author_id="bot-1",
+                    author_display_name="Responder Bot",
+                    body_preview="Original reply",
+                ),
             ),
         ),
     )
@@ -152,6 +193,41 @@ def _activity_page() -> PersonalCenterActivityPage:
 def _seed_personal_center(world):
     def get_personal_center_activities(self, *_args, **_kwargs):
         return _activity_page()
+
+    bind_overrides(
+        world,
+        ForumPersonalCenterActivityServiceProtocol,
+        {"get_personal_center_activities": get_personal_center_activities},
+    )
+
+
+def _followed_activity_page() -> PersonalCenterActivityPage:
+    return PersonalCenterActivityPage(
+        total=1,
+        items=(
+            PersonalCenterActivityRecord(
+                activity_type=PersonalCenterActivityType.FOLLOWED,
+                actor_type=ForumActorType.HUMAN,
+                actor_id=_CALLER,
+                target_type=ForumInteractionTargetType.HUMAN,
+                target_id="user-b",
+                topic_id=None,
+                happened_at=_NOW,
+                body_preview="User B",
+                followed_context=PersonalCenterFollowedContext(
+                    target_type=ForumInteractionTargetType.HUMAN,
+                    target_id="user-b",
+                    display_name="User B",
+                    avatar_url="https://example.test/user-b.png",
+                ),
+            ),
+        ),
+    )
+
+
+def _seed_personal_center_followed(world):
+    def get_personal_center_activities(self, *_args, **_kwargs):
+        return _followed_activity_page()
 
     bind_overrides(
         world,
@@ -180,12 +256,48 @@ def _seed_helpful(world):
     )
 
 
+def _assert_followed_projection(response, _world):
+    item = response.json()["data"]["items"][0]
+    assert item["followed_context"]["target_type"] == "HUMAN"
+    assert item["followed_context"]["target_id"] == "user-b"
+    assert item["followed_context"]["display_name"] == "User B"
+    assert item["followed_context"]["avatar_url"] == "https://example.test/user-b.png"
+
+
+def _assert_personal_center_projection(response, _world):
+    items = response.json()["data"]["items"]
+    viewed = next(
+        item
+        for item in items
+        if item["activity_type"] == "VIEWED"
+    )
+    nested_reply = next(
+        item
+        for item in items
+        if item["activity_type"] == "REPLIED"
+    )
+    assert viewed["topic_context"]["title"] == "Topic title"
+    assert viewed["topic_context"]["body_preview"] == "Topic body"
+    assert viewed["topic_context"]["reply_count"] == 2
+    assert viewed["topic_context"]["like_count"] == 3
+    assert viewed["topic_context"]["latest_reply_at"] is not None
+    assert viewed["topic_context"]["status"] == "OPEN"
+    assert viewed["topic_context"]["view_count"] == 4
+    assert viewed["topic_context"]["favorite_count"] == 1
+    assert viewed["topic_context"]["is_hot"] is True
+    assert viewed["topic_context"]["created_at"] is not None
+    assert nested_reply["replied_to_post"]["post_id"] == "post_parent_1"
+    assert nested_reply["replied_to_post"]["author_display_name"] == "Responder Bot"
+    assert nested_reply["replied_to_post"]["body_preview"] == "Original reply"
+
+
 _CREATE_BODY = {
     "actor_type": "HUMAN",
     "actor_id": _CALLER,
     "action_type": "LIKE",
     "target_type": "TOPIC",
     "target_id": "topic_endpoint_1",
+    "active": 1,
 }
 _BATCH_BODY = {
     "items": [
@@ -215,7 +327,7 @@ _HELPFUL_BODY = {"author_type": "HUMAN", "author_id": _CALLER, "helpful": True}
     expect=ExpectSuccess(status=201),
 )
 def public_create_interaction_ok():
-    """Append one interaction event and return 201."""
+    """Upsert one interaction state and return 201."""
 
 
 @endpoint_test(
@@ -231,6 +343,21 @@ def public_create_interaction_ok():
 )
 def public_create_interaction_invalid_body():
     """Reject a create request without its complete actor/action/target tuple."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/collaboration/tasks/bbs/interactions",
+    scenario="invalid_active",
+    input=CaseInput(
+        headers={PRINCIPAL_HEADER: _principal()},
+        json_body={**_CREATE_BODY, "active": True},
+    ),
+    seed=_boot_verifier,
+    expect=ExpectError(status=422),
+)
+def public_create_interaction_rejects_boolean_active():
+    """Reject the former boolean active contract; only +1 and -1 are valid."""
 
 
 @endpoint_test(
@@ -314,6 +441,7 @@ def public_get_summary_batch_empty_items():
     ),
     seed=lambda world: (_boot_verifier(world), _seed_personal_center(world)),
     expect=ExpectSuccess(status=200),
+    extra_assertions=(_assert_personal_center_projection,),
 )
 def public_get_personal_center_activities_ok():
     """Read the signed-in owner's server-paged BBS activity projection."""
@@ -328,7 +456,7 @@ def public_get_personal_center_activities_ok():
         query_params={
             "owner_user_id": _CALLER,
             "activity_type": "LIKED",
-            "target_type": "HUMAN",
+            "target_type": "NOPE",
             "page": 1,
             "page_size": 20,
         },
@@ -336,8 +464,33 @@ def public_get_personal_center_activities_ok():
     seed=_boot_verifier,
     expect=ExpectError(status=422),
 )
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/collaboration/tasks/bbs/personal-center/activities",
+    scenario="followed_activities",
+    input=CaseInput(
+        headers={PRINCIPAL_HEADER: _principal()},
+        query_params={
+            "owner_user_id": _CALLER,
+            "activity_type": "FOLLOWED",
+            "target_type": "HUMAN",
+            "page": 1,
+            "page_size": 20,
+        },
+    ),
+    seed=lambda world: (
+        _boot_verifier(world),
+        _seed_personal_center_followed(world),
+    ),
+    expect=ExpectSuccess(status=200),
+    extra_assertions=(_assert_followed_projection,),
+)
+def public_get_personal_center_followed_activities_ok():
+    """Serialize one identity follow without requiring a Topic context."""
 def public_get_personal_center_activities_invalid_target_filter():
-    """Reject identity targets outside the Personal Center content filter."""
+    """Reject target values outside the Personal Center schema."""
 
 
 @endpoint_test(
@@ -399,7 +552,7 @@ def public_set_helpful_invalid_body():
     expect=ExpectSuccess(status=201),
 )
 def internal_create_interaction_ok():
-    """Mirror the public interaction write contract without gateway auth."""
+    """Mirror the public interaction state write without gateway auth."""
 
 
 @endpoint_test(
@@ -483,6 +636,7 @@ def internal_get_summary_batch_empty_items():
     ),
     seed=_seed_personal_center,
     expect=ExpectSuccess(status=200),
+    extra_assertions=(_assert_personal_center_projection,),
 )
 def internal_get_personal_center_activities_ok():
     """Mirror the trusted owner-scoped activity projection."""
@@ -496,13 +650,34 @@ def internal_get_personal_center_activities_ok():
         query_params={
             "owner_user_id": _CALLER,
             "activity_type": "LIKED",
-            "target_type": "BOT",
+            "target_type": "NOPE",
             "page": 1,
             "page_size": 20,
         }
     ),
     expect=ExpectError(status=422),
 )
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/v1/collaboration/tasks/bbs/personal-center/activities",
+    scenario="followed_activities",
+    input=CaseInput(
+        query_params={
+            "owner_user_id": _CALLER,
+            "activity_type": "FOLLOWED",
+            "target_type": "HUMAN",
+            "page": 1,
+            "page_size": 20,
+        }
+    ),
+    seed=_seed_personal_center_followed,
+    expect=ExpectSuccess(status=200),
+    extra_assertions=(_assert_followed_projection,),
+)
+def internal_get_personal_center_followed_activities_ok():
+    """Mirror identity-follow serialization without a Topic context."""
 def internal_get_personal_center_activities_invalid_target_filter():
     """Mirror the Personal Center target filter schema validation."""
 

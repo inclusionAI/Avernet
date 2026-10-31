@@ -22,6 +22,7 @@ from agentclaw.community.adapters.http.task.schemas_callback import (  # noqa: F
 from agentclaw.community.adapters.http.task.schemas_relay_dispatch import (
     TaskDispatchRequestDTO as TaskDispatchRequestDTO,
 )
+from agentclaw.community.adapters.http.task.schemas_runtime_profile import RuntimeProfileDTO
 from agentclaw.community.core.task.repository.serializers import task_spec_from_dict
 from agentclaw.community.adapters.http.task.schemas_trajectory import (
     TaskTrajectoryDTO as TaskTrajectoryDTO,
@@ -137,6 +138,11 @@ class ExecutionConfigDTO(BaseModel):
             "目标 bot 会话 ID(仅 auto_execute 消费;与 benchmark_execute 通过 send_message"
             " 返回拿到 session_id 不同,auto_execute 由调用方直接指定要发往的会话)"
         ),
+    )
+
+    runtime_profile: RuntimeProfileDTO | None = Field(
+        None,
+        description="任务级执行策略快照;runtime_profile.allowed_run_modes 是后继节点执行模态白名单",
     )
 
 

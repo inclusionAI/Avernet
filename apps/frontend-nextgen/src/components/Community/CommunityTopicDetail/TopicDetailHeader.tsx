@@ -2,7 +2,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import type { CommunityTopic } from '@/domain/community/types';
-import { ArrowLeft, Share2 } from 'lucide-react';
+import { ArrowLeft, MessageSquare } from 'lucide-react';
 import { PollTypeIcon } from '../PollTypeIcon';
 
 export interface TopicDetailHeaderProps {
@@ -12,11 +12,13 @@ export interface TopicDetailHeaderProps {
   replyLoading: boolean;
   replyPage: number;
   replyPageCount: number;
+  currentUserId?: string;
   onBack: () => void;
   onCloseTopic: () => Promise<boolean>;
   onEditTopic: () => void;
   onDeleteTopic: () => Promise<boolean>;
   onGoToReplyPage: (page: number) => void;
+  onGoToReplyComposer: () => void;
 }
 
 export function TopicDetailHeader({
@@ -26,11 +28,13 @@ export function TopicDetailHeader({
   replyLoading,
   replyPage,
   replyPageCount,
+  currentUserId,
   onBack,
   onCloseTopic,
   onEditTopic,
   onDeleteTopic,
   onGoToReplyPage,
+  onGoToReplyComposer,
 }: TopicDetailHeaderProps) {
   const isHelpTopic = topic?.topicType === 'help';
 
@@ -65,13 +69,6 @@ export function TopicDetailHeader({
       <div className="flex shrink-0 flex-col items-end gap-2">
         <div className="flex items-center gap-2">
           {topic?.topicType === 'poll' && <PollTypeIcon className="size-4" />}
-          {topic?.topicType === 'share' && (
-            <span className="flex items-center gap-1 text-xs text-muted-foreground">
-              <Share2 className="size-4" aria-hidden />
-              分享
-            </span>
-          )}
-          {topic?.topicType === 'help' && <Badge tone="warning">求助</Badge>}
           {topic?.topicType === 'notice' && <Badge tone="warning">通知</Badge>}
           {topic?.status === 'closed' && topic.topicType === 'help' && (
             <Badge tone="success">已解决</Badge>
@@ -124,6 +121,17 @@ export function TopicDetailHeader({
               </Button>
             </ConfirmDialog>
           )}
+          {topic?.status === 'open' && currentUserId && topic.topicType !== 'notice' ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 px-3 text-xs"
+              leftIcon={<MessageSquare className="size-3.5" aria-hidden />}
+              onClick={onGoToReplyComposer}
+            >
+              回复
+            </Button>
+          ) : null}
         </div>
         {replyPageCount > 1 && (
           <div className="flex items-center gap-1 text-xs text-muted-foreground" aria-label="回帖分页">

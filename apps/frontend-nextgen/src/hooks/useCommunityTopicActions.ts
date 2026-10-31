@@ -1,21 +1,27 @@
 import { notifyError, notifySuccess } from '@/components/ui/notify';
 import { COMMUNITY_REPLY_PAGE_SIZE } from '@/domain/community/constants';
 import { communityErrorMessage } from '@/domain/community/errors';
+import { forumAuthorRef } from '@/domain/community/interactionQueries';
 import type {
   CommunityAuthor,
   CommunityTopic,
   CreateCommunityReplyDraft,
+  ForumActorRef,
   ForumTargetRef,
+  InteractionActionType,
+  InteractionActiveDelta,
   InteractionSummary,
+  InteractionSummaryQuery,
 } from '@/domain/community/types';
-import { forumAuthorRef } from '@/domain/community/interactionQueries';
 import { communityService } from '@/services/community';
 import { useCallback, useState } from 'react';
 import type { UseCommunityInteractionsResult } from './useCommunityInteractions';
 
 interface UseCommunityTopicActionsOptions {
   currentUserId: string;
+  viewer: ForumActorRef;
   currentAuthorName?: string;
+  currentAuthorAvatarUrl?: string;
   selectedTopic: CommunityTopic | null;
   replyPage: number;
   replyTotal: number;
@@ -23,9 +29,26 @@ interface UseCommunityTopicActionsOptions {
   interactions: UseCommunityInteractionsResult;
 }
 
+function actionCount(
+  actionType: InteractionActionType,
+  summary: InteractionSummary | undefined,
+): number {
+  if (!summary) return 0;
+  if (actionType === 'LIKE') return summary.likeCount;
+  if (actionType === 'FAVORITE') return summary.favoriteCount;
+  if (actionType === 'FOLLOW') return summary.followCount;
+  return summary.acceptCount;
+}
+
+function replyTarget(postId: string): ForumTargetRef {
+  return { targetType: 'POST', id: postId };
+}
+
 export function useCommunityTopicActions({
   currentUserId,
+  viewer,
   currentAuthorName,
+  currentAuthorAvatarUrl,
   selectedTopic,
   replyPage,
   replyTotal,
@@ -45,6 +68,7 @@ export function useCommunityTopicActions({
           topicId: selectedTopic.id,
           authorId: currentUserId,
           ...(currentAuthorName ? { authorName: currentAuthorName } : {}),
+          ...(currentAuthorAvatarUrl ? { authorAvatarUrl: currentAuthorAvatarUrl } : {}),
         });
         const nextPage = input.replyToPostId
           ? replyPage
@@ -60,6 +84,7 @@ export function useCommunityTopicActions({
       }
     },
     [
+      currentAuthorAvatarUrl,
       currentAuthorName,
       currentUserId,
       goToReplyPage,
@@ -75,48 +100,92 @@ export function useCommunityTopicActions({
     [interactions],
   );
 
-  const loadAuthorSummary = useCallback((author: CommunityAuthor) => {
-    void interactions.refreshSummaries([{ actor: forumAuthorRef(author) }]);
-  }, [interactions]);
+  const loadAuthorSummary = useCallback(
+    (author: CommunityAuthor) => {
+      const authorTarget: ForumTargetRef = {
+        targetType: author.type === 'bot' ? 'BOT' : 'HUMAN',
+        id: author.id,
+      };
+      const queries: InteractionSummaryQuery[] = [
+        { actor: forumAuthorRef(author) },
+        { actor: viewer, target: authorTarget },
+      ];
+      void interactions.refreshSummaries(queries);
+    },
+    [interactions, viewer],
+  );
 
-  const authorFollowPending = useCallback((author: CommunityAuthor): boolean =>
-    interactions.isActionPending('FOLLOW', {
-      targetType: author.type === 'bot' ? 'BOT' : 'HUMAN',
-      id: author.id,
-    }), [interactions]);
+  const authorFollowPending = useCallback(
+    (author: CommunityAuthor): boolean =>
+      interactions.isActionPending('FOLLOW', {
+        targetType: author.type === 'bot' ? 'BOT' : 'HUMAN',
+        id: author.id,
+      }),
+    [interactions],
+  );
+
+  const actionActive = useCallback(
+    (actionType: InteractionActionType, target: ForumTargetRef): boolean => {
+      const summary = interactions.getSummary({ actor: viewer, target });
+      return actionCount(actionType, summary) > 0;
+    },
+    [interactions, viewer],
+  );
+
+  const toggleInteraction = useCallback(
+    (actionType: InteractionActionType, target: ForumTargetRef) => {
+      const active: InteractionActiveDelta = actionActive(actionType, target) ? -1 : 1;
+      return interactions.recordInteraction(actionType, target, { active });
+    },
+    [actionActive, interactions],
+  );
+
+  const isAuthorFollowed = useCallback(
+    (author: CommunityAuthor): boolean =>
+      actionActive('FOLLOW', {
+        targetType: author.type === 'bot' ? 'BOT' : 'HUMAN',
+        id: author.id,
+      }),
+    [actionActive],
+  );
 
   const followAuthor = useCallback(
     async (author: CommunityAuthor) => {
-      const success = await interactions.recordInteraction('FOLLOW', {
+      const success = await toggleInteraction('FOLLOW', {
         targetType: author.type === 'bot' ? 'BOT' : 'HUMAN',
         id: author.id,
       });
       if (success) {
-        await interactions.refreshSummaries(
-          [{ actor: forumAuthorRef(author) }],
-          { force: true },
-        );
+        await interactions.refreshSummaries([{ actor: forumAuthorRef(author) }], { force: true });
       }
       return success;
     },
-    [interactions],
+    [interactions, toggleInteraction],
   );
 
   const likeTopic = useCallback(
-    (target: ForumTargetRef) => interactions.recordInteraction('LIKE', target),
-    [interactions],
+    (target: ForumTargetRef) => toggleInteraction('LIKE', target),
+    [toggleInteraction],
+  );
+
+  const likeReply = useCallback(
+    (postId: string) => toggleInteraction('LIKE', replyTarget(postId)),
+    [toggleInteraction],
+  );
+
+  const favoriteReply = useCallback(
+    (postId: string) => toggleInteraction('FAVORITE', replyTarget(postId)),
+    [toggleInteraction],
   );
 
   const favoriteTopic = useCallback(
-    (target: ForumTargetRef) => interactions.recordInteraction('FAVORITE', target),
-    [interactions],
+    (target: ForumTargetRef) => toggleInteraction('FAVORITE', target),
+    [toggleInteraction],
   );
 
   const targetSummary = useCallback(
     (topic: CommunityTopic | null): InteractionSummary | undefined =>
-      topic
-        ? interactions.getSummary({ target: { targetType: 'TOPIC', id: topic.id } })
-        : undefined,
+      topic ? interactions.getSummary({ target: { targetType: 'TOPIC', id: topic.id } }) : undefined,
     [interactions],
   );
 
@@ -155,8 +224,11 @@ export function useCommunityTopicActions({
     getAuthorSummary,
     loadAuthorSummary,
     authorFollowPending,
+    isAuthorFollowed,
     followAuthor,
     likeTopic,
+    likeReply,
+    favoriteReply,
     favoriteTopic,
     targetSummary,
   };

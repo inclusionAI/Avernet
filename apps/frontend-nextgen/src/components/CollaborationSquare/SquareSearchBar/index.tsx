@@ -43,7 +43,7 @@ export default function SquareSearchBar({
         framed ? 'h-9 rounded-lg border border-input bg-background' : 'h-8',
       )}>
         {hasModeSelect && (
-          <div className="relative flex h-5 shrink-0 items-center border-r border-input">
+          <div className="relative flex h-5 shrink-0 items-center border-r border-divider">
             <Select value={mode} onValueChange={(value) => handleModeChange(value as BotSearchMode)}>
               <SelectTrigger
                 aria-label="Bot 搜索模式"

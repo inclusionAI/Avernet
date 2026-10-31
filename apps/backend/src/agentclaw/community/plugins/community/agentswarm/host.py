@@ -65,13 +65,9 @@ profiles without a platform side.
 from __future__ import annotations
 
 import asyncio
-import atexit
 import concurrent.futures
 import hashlib
-import json
-import ssl
 import threading
-import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -83,6 +79,16 @@ from agentclaw.community.core.agentswarm.domain.models import (
     NonRetryableProvisioningError,
 )
 from agentclaw.community.plugin_api.agentswarm.bot import BotPlatform
+
+# The engine-chat transport leg lives in host_chat.py (one cohesive
+# concern, one file); re-exported here so external callers, DI wiring
+# and the test seams keep importing from ``agentswarm.host``.
+from agentclaw.community.plugins.community.agentswarm.host_chat import (
+    ChatLegMixin, ChatTimeoutError, _CHAT_TIMEOUT_SECONDS,
+    _DEFAULT_MAX_PLATFORM_WORKERS, _ZERO_CHECK_OPEN_API_TOKEN,
+    chat_bridge_executor, set_chat_bridge_max_workers,
+    shutdown_chat_bridge,
+)
 from agentclaw.community.core.apply_engine.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.creation import (
     CREATE_ON_CONTAINER_TRIGGER, CREATE_PRE_CONTAINER_TRIGGER,
@@ -123,122 +129,20 @@ _CLAUDE_CODE_IDENTITY = "CLAUDE.md"
 _CREATION_TRIGGERS = frozenset({CREATE_PRE_CONTAINER_TRIGGER, CREATE_ON_CONTAINER_TRIGGER})
 _BOT_UP = frozenset({"ACTIVE"})
 _BOT_DEAD = frozenset({"FAILED", "DELETED", "INACTIVE"})
-
-# Upper bound on one engine chat round trip. It matches the swarm's own
-# slice budget (``orchestration.slice_max_seconds``/the ready-poll
-# deadline, 300s): a chat that has not answered by then cannot still
-# count. Keeps the blocked bridge thread from waiting forever on a hung
-# engine WebSocket, and bounds every receive slice in the recv loop so a
-# cancelled chat unwinds within one slice even while a socket recv hangs.
-_CHAT_TIMEOUT_SECONDS = 300.0
-
-# One receive slice inside the recv loop. Each slice sits well under the
-# conversation deadline; the loop re-checks the shared cancel event every
-# slice, so a chat cancelled from the asyncio side unwinds within one
-# slice of the set() rather than after the full remaining deadline.
-_RECV_SLICE_SECONDS = 1.0
-
-# Upper bound on one sessions.reset round (send + consuming its res),
-# the fresh-conversation prelude before every chat.send. The reset is
-# deliberately fail-soft: a slow or broken answer only warns — a
-# reset that never completes must not hold the chat leg (or its bridge
-# worker) hostage; the receive slices inside keep it cooperative with
-# the shared cancel event just like the chat loop.
-_SESSION_RESET_SECONDS = 10.0
 _HASHED_IDEMPOTENCY_ID_DIGITS = 16
-
-# One worker per concurrent engine chat the pod may carry: the default for
-# direct construction; the composition root sizes the bridge from
-# ``agentswarm.executor.max_platform_workers``.
-_DEFAULT_MAX_PLATFORM_WORKERS = 4
-
-# Engine chat transport: the in-pod adapter channel and its zero-check
-# machine-caller token (OPEN_API:<kind>:<app>; no certified token, and the
-# check itself fails open on its own infrastructure errors).
-_ENGINE_WS_PORT = 20003
-_ENGINE_WS_PATH = "/api/openclaw/ws"
-_ZERO_CHECK_OPEN_API_TOKEN = "OPEN_API:app:agentswarm"
-
-# Conversation addressing for a chat whose caller carries none: the
-# engine-served fixed session. The engine only serves sessions it knows
-# (a chat.send on a novel key is refused with no events), so the
-# reset-before-chat prelude resets this same key — the engine's blessed
-# fresh-conversation mechanism — instead of minting per-attempt keys.
-_DEFAULT_SESSION_KEY = "agent:main:default"
-
-# Module-scoped chat bridge (async-run-and-resume D-B): one bounded pool
-# whose workers carry sync ``BotPlatform.chat`` legs (one asyncio.run loop
-# per chat) off the swarm's event loop. Workers return to the pool after
-# every chat — cancelled or timed-out legs included — so repeated timeouts
-# cannot grow the live thread set past ``max_platform_workers``; the pool
-# only ever shuts down at process exit (atexit → ``shutdown_chat_bridge``).
-# The laziness lives inside a holder instance, not module globals: the
-# lazy double-checked-locking singleton shape is forbidden by
-# tests/community/architecture/test_no_dcl_singletons.
-class _ChatBridge:
-    """First-use-created chat pool; size pinned before the pool ever runs."""
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._max_workers: int | None = None
-        self._executor: concurrent.futures.ThreadPoolExecutor | None = None
-
-    def set_max_workers(self, max_workers: int) -> None:
-        """Called from ``AvernetBotPlatform.__init__`` (the DI provider passes
-        ``agentswarm.executor.max_platform_workers``); first call wins."""
-        with self._lock:
-            if self._executor is None:
-                self._max_workers = max(1, int(max_workers))
-
-    def executor(self) -> concurrent.futures.ThreadPoolExecutor:
-        with self._lock:
-            if self._executor is None:
-                self._executor = concurrent.futures.ThreadPoolExecutor(
-                    max_workers=self._max_workers or _DEFAULT_MAX_PLATFORM_WORKERS,
-                    thread_name_prefix="agentswarm-chat",
-                )
-            return self._executor
-
-    def shutdown(self) -> None:
-        """Process-exit close hook; during operation nothing calls this:
-        workers return to the pool after every leg, cancelled or not."""
-        with self._lock:
-            executor, self._executor = self._executor, None
-            self._max_workers = None
-        if executor is not None:
-            executor.shutdown(wait=True, cancel_futures=True)
-
-
-_CHAT_BRIDGE = _ChatBridge()
-
-
-def set_chat_bridge_max_workers(max_workers: int) -> None:
-    _CHAT_BRIDGE.set_max_workers(max_workers)
-
-
-def chat_bridge_executor() -> concurrent.futures.ThreadPoolExecutor:
-    return _CHAT_BRIDGE.executor()
-
-
-def shutdown_chat_bridge() -> None:
-    _CHAT_BRIDGE.shutdown()
-
-
-atexit.register(shutdown_chat_bridge)
-
-
-class ChatTimeoutError(RuntimeError):
-    """The engine chat leg did not answer within ``_CHAT_TIMEOUT_SECONDS``.
-
-    Raised by ``AvernetBotPlatform.chat`` when the bridge leg exceeds the
-    bounded wait: the recv loop's own deadline fires and the caller's
-    thread is freed with this error. The bridge thread is never abandoned
-    — the same deadline unwinds the recv loop inside the pool worker, and
-    the worker returns to the bridge pool. A chat cancelled through its
-    ``cancel_event`` (slice lost from the asyncio side) unwinds the same
-    way, within one receive slice.
-    """
-
+#: The create job's ``Fail`` reason when the authorization ended terminally
+#: without the service issuing the license (create_job: "Declined, expired,
+#: or anything else terminal the service reports"). The reason carries the
+#: service's own status after the colon — the only place a genuine human
+#: rejection is named.
+_AUTHORIZATION_INCOMPLETE_PREFIX = "authorization did not complete:"
+#: Stands in for the creation job when its read failed. Distinct from ``None``,
+#: which is the only answer that means "submission never landed a row".
+_UNREADABLE_JOB = object()
+#: Creation-job outcomes that prove nothing was written to the bot's store.
+#: A creation that ends these ways never reached the phase that writes managed
+#: files, so there is no prefix to purge — only a teardown that would list one.
+_COMMITTED_NOTHING_STATUSES = frozenset({TaskStatus.FAILED, TaskStatus.TIMED_OUT})
 
 @dataclass(frozen=True)
 class BotAuthorizationDescriptor:
@@ -302,7 +206,7 @@ def bot_id_for(run_id: str, agent_id: str) -> str:
     return f"agent_swarm_{_idem_digest(f'{run_id}:{agent_id}', _HASHED_IDEMPOTENCY_ID_DIGITS)}"
 
 
-class AvernetBotPlatform(BotPlatform):
+class AvernetBotPlatform(ChatLegMixin, BotPlatform):
     """Host-side BotPlatform over the backend's own creation and chat flows.
 
     The seam's methods are synchronous by contract. The async caller
@@ -330,6 +234,7 @@ class AvernetBotPlatform(BotPlatform):
         space_context: BusinessSpaceContextProtocol,
         baas_service: BaasService,
         max_platform_workers: int = _DEFAULT_MAX_PLATFORM_WORKERS,
+        chat_timeout_seconds: float = _CHAT_TIMEOUT_SECONDS,
     ) -> None:
         self._manifest_seam = manifest_seam
         self._bot_service = bot_service
@@ -339,7 +244,7 @@ class AvernetBotPlatform(BotPlatform):
         self._apply_service = apply_service
         self._space_context = space_context
         self._baas_service = baas_service
-        self._chat_timeout_seconds = _CHAT_TIMEOUT_SECONDS
+        self._chat_timeout_seconds = chat_timeout_seconds
         set_chat_bridge_max_workers(max_platform_workers)
 
 
@@ -370,18 +275,15 @@ class AvernetBotPlatform(BotPlatform):
         # knows the (run, agent) pair addresses the identical bot id.
         bot_id = (
             f"agent_swarm_{_idem_digest(idempotency_key, _HASHED_IDEMPOTENCY_ID_DIGITS)}")
-        # One persona per (run, spec): the same idempotency key derives the same
-        # bot identifier, so a retried setup rebinds the same creation instead of
-        # minting a second one (and soft-name collisions across concurrent runs
-        # are impossible: the name carries the key's digest).
-        bot_name = f"{spec.name}-{_idem_digest(idempotency_key, 8)}"
-        # A caller-supplied manifest document REPLACES the synthesized
-        # persona document: the spec's config_manifest is the full
-        # five-category bot_config_manifest exactly as the platform's
-        # with-manifest surface accepts it, so the platform's own
-        # preflight stays the single authority on its grammar. Blank
-        # (or whitespace-only) keeps today's behavior: identity-only
-        # synthesis from the spec's identity_file + instructions.
+        # One persona per (run, spec): the idempotency key derives the bot id,
+        # so retries rebind the same creation. The platform caps bot_name at
+        # 32 chars and a spec-derived name can exceed it: bot_name is the
+        # id-format digest (28 chars); the composite label rides bot_desc.
+        bot_name = bot_id
+        bot_desc_label = f"{spec.name}-{_idem_digest(idempotency_key, 8)}"
+        # A caller-supplied manifest REPLACES the synthesized persona
+        # document (the platform's own preflight validates its grammar);
+        # blank keeps identity-only synthesis.
         document = spec.config_manifest.strip() or yaml.safe_dump(
             {
                 "schema_version": 1,
@@ -412,7 +314,9 @@ class AvernetBotPlatform(BotPlatform):
                     engine_type=spec.engine or "openclaw",
                     bot_type=spec.bot_type or "personal",
                     bot_name=bot_name,
-                    bot_desc=spec.description or None,
+                    bot_desc=(f"{bot_desc_label} — {spec.description}"
+                              if (spec.description or "").strip()
+                              else bot_desc_label)[:1024],
                     template_validation_mode=BotCreateTemplateValidationMode.PUBLIC,
                     engine_properties={},
                 ),
@@ -427,14 +331,9 @@ class AvernetBotPlatform(BotPlatform):
                 manifest_seam=self._manifest_seam,
             )
         except BotNameExistsError:
-            # A D16 respawn after a mid-creation crash re-derives the same
-            # deterministic persona, and bot_service's name check refuses
-            # the re-create (upstream-owned, not idempotent). The refused
-            # name carries this idempotency key's digest, so the row it
-            # collides with is OUR identity: adopt it when the derived
-            # bot_id has a live row; adopt makes respawn idempotent for
-            # any kill timing. A same-name row that is NOT ours cannot
-            # exist (digest names collide only across identical keys).
+            # D16 respawn: the refused name carries our idempotency key's
+            # digest, so the colliding live row IS our identity — adopt it
+            # (a same-name row that is not ours cannot exist).
             existing = self._bot_repo.get_by_id_and_entity(bot_id, owner)
             if existing is None:
                 raise
@@ -513,7 +412,19 @@ class AvernetBotPlatform(BotPlatform):
                 return BotState.AUTHORIZATION_EXPIRED.value
             if last_error.startswith(BOT_COULD_NOT_BE_PROVISIONED):
                 return BotState.CREATE_FAILED.value
-            return BotState.AUTHORIZATION_REJECTED.value
+            if last_error.startswith(_AUTHORIZATION_INCOMPLETE_PREFIX):
+                # The authorization's own terminal status, verbatim from the
+                # service — classify by what the service said, never by a
+                # default: anything but a reported REJECTED is not a human
+                # decline, and stamping REJECTED on it attributes to the user
+                # a decision they never made.
+                tail = last_error[len(_AUTHORIZATION_INCOMPLETE_PREFIX):].strip()
+                if tail == "REJECTED":
+                    return BotState.AUTHORIZATION_REJECTED.value
+                if tail == "EXPIRED":
+                    return BotState.AUTHORIZATION_EXPIRED.value
+                return BotState.CREATE_FAILED.value
+            return BotState.CREATE_FAILED.value
 
         bot_status_ = str(bot.get("status") or "")
         if bot_status_ in _BOT_DEAD:
@@ -535,17 +446,9 @@ class AvernetBotPlatform(BotPlatform):
                 return BotState.PROVISIONING.value
             if (bot_status_ not in _BOT_UP
                     and bool((bot.get("device_id") or "").strip())):
-                # A failed create-apply over a mid-boot row with a live
-                # device binding is not a provisioning verdict: under N-way
-                # concurrent persona creates the quota serialization makes
-                # apply reports flap FAILED while the durable publish
-                # pipeline (row + BaaS device) is still booting — a burst
-                # APPLY_FAILED here tore down healthy mid-boot bots and
-                # pushed the re-create into bot_service's duplicate-row
-                # trap. The device pipeline owns the outcome; the caller's
-                # own poll budget bounds the wait. An UP row keeps the
-                # apply verdict (config-side failure on a working bot,
-                # under the anti-duplicate rule).
+                # Mid-boot apply reports may flap FAILED under N-way quota
+                # serialization — a live device binding owns the outcome,
+                # so wait; an UP row keeps its apply verdict.
                 return BotState.PROVISIONING.value
             return BotState.APPLY_FAILED.value
         if job.status not in TERMINAL_STATUSES:
@@ -675,6 +578,39 @@ class AvernetBotPlatform(BotPlatform):
         try:
             bot = self._bot_repo.get_by_id_and_entity(bot_id, owner)
             if bot is None:
+                # The live lookups filter ``is_delete == 0``, so a bot that
+                # was already soft-deleted reads exactly like one that never
+                # landed. Teardown runs on every slice, and the pending branch
+                # below re-purges managed files each time — for an already
+                # deleted bot there is nothing left to undo, and re-purging a
+                # finished creation only repeats its OSS work. Answer success.
+                if self._bot_repo.is_soft_deleted(bot_id, owner):
+                    return True
+                # No bot and no creation job: submission never landed a row, so
+                # the creation job's pre-container phase never ran and the
+                # managed-files / CLI-tools prefixes were never written. There
+                # is nothing to discard, and asking anyway costs an object-store
+                # listing of a prefix that cannot exist — on every teardown of
+                # a slice whose creation never got that far.
+                try:
+                    job = self._manifest_seam.find_job(
+                        entity_id=owner, bot_id=bot_id,
+                    )
+                except Exception:  # noqa: BLE001 — unknown is not "nothing"
+                    job = _UNREADABLE_JOB
+                if job is None:
+                    return True
+                # A creation job that ended without a bot never ran a phase
+                # that writes managed files: the pre-container phase only runs
+                # for a creation that still might land, and an expired or
+                # declined authorization ends before it. The managed-files
+                # purge would therefore list a prefix that cannot exist — and
+                # this adapter addresses the bot id deterministically from
+                # (run, agent, attempt), so teardown asks again on every
+                # slice even though no bot was ever created. Only the failed
+                # terminal states prove that; a succeeded job's files are real.
+                if getattr(job, "status", None) in _COMMITTED_NOTHING_STATUSES:
+                    return True
                 # Pending (or never landed a bot): undo what submission wrote.
                 return bool(self._manifest_seam.discard(
                     entity_id=owner, bot_id=bot_id, owner_id=owner,
@@ -687,314 +623,3 @@ class AvernetBotPlatform(BotPlatform):
             )
             return False
 
-    # ── chat ──────────────────────────────────────────────────────────────
-
-    def chat(self, bot_id: BotId, message: str, owner_id: str = "",
-             session_key: str | None = None,
-             cancel_event: threading.Event | None = None) -> str:
-        # Sync-out by SPI contract; async-in in the bridge worker that
-        # carries this call: the engine leg runs its own asyncio.run loop
-        # here and every wait inside it is bounded — the recv loop's
-        # ``_CHAT_TIMEOUT_SECONDS`` deadline and receive slices, either of
-        # which (or the caller's cancel_event) unwinds the worker back to
-        # the bridge pool instead of abandoning it.
-        owner = (owner_id or "").strip()
-        if not owner:
-            raise RuntimeError(
-                "provisioning requires the run's authenticated owner "
-                "(per-call owner_id); no ambient identity exists"
-            )
-        try:
-            return asyncio.run(self._chat_once(
-                bot_id, message, owner, session_key, cancel_event))
-        except TimeoutError as exc:
-            raise ChatTimeoutError(
-                f"engine chat for bot {bot_id} did not finish within "
-                f"{_CHAT_TIMEOUT_SECONDS:.0f}s"
-            ) from exc
-
-    def _engine_endpoint(self, bot_id: BotId, owner: str) -> tuple[str, str]:
-        """Resolve the bot's chat endpoint via BaaS ws-info.
-
-        The sandbox proxy only resolves targets the BaaS provider registry
-        knows (bot-uuid-minted targets close the WS 1008 in proxypass_ws),
-        so the connection pair always comes from the canonical
-        ``/api/v1/bots/{uuid}/ws-info`` resolution — never minted here.
-        """
-        bot = self._bot_repo.get_by_id_and_entity(bot_id, owner)
-        if bot is None:
-            raise RuntimeError(f"bot {bot_id} not found for chat")
-        bot_uuid = (bot.get("device_id") or "").strip()
-        if not bot_uuid:
-            raise RuntimeError(
-                f"bot {bot_id} has no runtime binding to chat through"
-            )
-        try:
-            info = self._baas_service.get_ws_info_by_bot_uuid(
-                bot_uuid=bot_uuid,
-                port=_ENGINE_WS_PORT,
-                path=_ENGINE_WS_PATH,
-            )
-        except Exception as exc:
-            logger.warning(
-                "[agentswarm][host-platform] baas ws-info failed for "
-                "bot=%s uuid=%s: %s", bot_id, bot_uuid, exc,
-            )
-            raise RuntimeError(
-                f"bot {bot_id} has no runtime binding to chat through"
-            ) from exc
-        ws_url = (getattr(info, "ws_url", "") or "").strip()
-        token = (getattr(info, "token", "") or "").strip()
-        if not ws_url or not token:
-            raise RuntimeError(
-                f"bot {bot_id} has no runtime binding to chat through"
-            )
-        return ws_url, token
-
-    async def _chat_once(self, bot_id: BotId, message: str, owner: str,
-                         session_key: str | None,
-                         cancel_event: threading.Event | None) -> str:
-        ws_url, token = self._engine_endpoint(bot_id, owner)
-        ws = await self._connect_engine(ws_url, token)
-        try:
-            # Reset-before-chat: the upcoming chat.send addresses one
-            # session key, and the engine's blessed fresh-conversation
-            # mechanism is sessions.reset on that key — a retried or
-            # respawned leg must not inherit the orphaned turn's history.
-            # Fail-soft inside: a failed reset only warns and the chat
-            # proceeds.
-            await self._reset_session(
-                ws, session_key or _DEFAULT_SESSION_KEY, cancel_event)
-            return await self._chat_send(
-                ws, message, token, session_key, cancel_event)
-        finally:
-            await ws.close()
-
-    async def _reset_session(self, ws, session_key: str,
-                             cancel_event: threading.Event | None) -> None:
-        """One fail-soft ``sessions.reset`` round for the conversation the
-        upcoming chat.send will address. The whole round trip is bounded
-        (``asyncio.wait_for`` over ``_SESSION_RESET_SECONDS``); on timeout,
-        transport error, or a refused reset the reset is abandoned with a
-        warning and the chat proceeds — prior-turn context may be
-        inherited, which is an answer quality risk, never a liveness one.
-        A cancelled chat unwinds the round quietly: its caller stopped
-        waiting, so there is nothing left to reset for."""
-        reset_id = str(uuid.uuid4())
-        reset_frame = {
-            "type": "req",
-            "id": reset_id,
-            "method": "sessions.reset",
-            "params": {
-                "key": session_key,
-                "x-iam-token": _ZERO_CHECK_OPEN_API_TOKEN,
-            },
-        }
-        try:
-            await asyncio.wait_for(
-                self._reset_session_round(ws, reset_frame, reset_id,
-                                          cancel_event),
-                timeout=_SESSION_RESET_SECONDS,
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            logger.warning(
-                "[agentswarm][host-platform] session reset failed; chat "
-                "proceeds, prior-turn context may be inherited "
-                "(session=%s): %s", session_key, exc,
-            )
-
-    async def _reset_session_round(self, ws, reset_frame: dict,
-                                   reset_id: str,
-                                   cancel_event: threading.Event | None
-                                   ) -> None:
-        """Send one sessions.reset frame and consume its res. The recv
-        wait runs in the chat's receive slices so a cancelled chat unwinds
-        the reset within one slice; frames that are not this reset's res
-        (stale events, unrelated responses) are ignored until it lands or
-        the outer bound fires."""
-        await ws.send(json.dumps(reset_frame))
-        while True:
-            if cancel_event is not None and cancel_event.is_set():
-                return
-            try:
-                raw = await asyncio.wait_for(
-                    ws.recv(), timeout=_RECV_SLICE_SECONDS)
-            except asyncio.TimeoutError:
-                continue
-            try:
-                data = json.loads(raw)
-            except json.JSONDecodeError:
-                continue
-            if data.get("type") != "res" or data.get("id") != reset_id:
-                continue
-            if not data.get("ok", False):
-                payload = data.get("payload")
-                raise RuntimeError(
-                    f"engine refused the reset: {payload!r}")
-            return
-
-    async def _connect_engine(self, ws_url: str, token: str) -> Any:
-        """Connect+handshake with bounded retry (15/30/60s)."""
-        for i in range(4):
-            try:
-                return await self._connect_engine_once(ws_url, token)
-            except ConnectionError as e:
-                if i == 3:
-                    raise
-                logger.warning("[agentswarm][host] engine connect %d/4: %s", i + 1, e)
-                await asyncio.sleep(15.0 * (2 ** i))
-
-    async def _connect_engine_once(self, ws_url: str, token: str) -> Any:
-        import websockets
-
-        ssl_context = None
-        if ws_url.startswith("wss://"):
-            ssl_context = ssl.create_default_context()
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_NONE
-        try:
-            ws = await asyncio.wait_for(
-                websockets.connect(
-                    ws_url,
-                    additional_headers={"x-proxypass-token": token},
-                    ssl=ssl_context,
-                    max_size=2 * 1024 * 1024,
-                ),
-                timeout=30,
-            )
-        except Exception as e:
-            raise ConnectionError(
-                f"engine websocket connect failed ({ws_url}): {e}"
-            ) from e
-
-        connect_frame = {
-            "type": "req",
-            "id": str(uuid.uuid4()),
-            "method": "connect",
-            "params": {
-                "minProtocol": 3,
-                "maxProtocol": 3,
-                "client": {
-                    "id": "cli",
-                    "version": "1.0.0",
-                    "platform": "MacIntel",
-                    "mode": "cli",
-                },
-                "role": "operator",
-                "x-moltis-mcp-token": token,
-                "scopes": [
-                    "operator.admin",
-                    "operator.read",
-                    "operator.write",
-                ],
-            },
-        }
-        try:
-            await ws.send(json.dumps(connect_frame))
-            raw = await asyncio.wait_for(ws.recv(), timeout=10)
-            resp = json.loads(raw)
-            if not resp.get("ok", False):
-                await ws.close()
-                raise ConnectionError(
-                    f"engine handshake failed: "
-                    f"{resp.get('error', {}).get('message', 'unknown error')}"
-                )
-            return ws
-        except ConnectionError:
-            raise
-        except Exception as e:
-            await ws.close()
-            raise ConnectionError(f"engine handshake failed: {e}") from e
-
-    async def _chat_send(self, ws, message: str, token: str,
-                         session_key: str | None,
-                         cancel_event: threading.Event | None) -> str:
-        """One chat.send round: the adapter's zero-check gate requires an
-        x-iam-token on every frame. OPEN_API:<kind>:<app> is the form it
-        accepts for machine callers (no certified token; the check fails
-        open on its own infrastructure errors). ``session_key`` names a
-        known engine conversation — the engine-served default when this
-        call carries none; a refuse answer (ok false or accepted false)
-        comes back as the res for the outstanding request id and fails the
-        leg immediately instead of eating the receive deadline (the live
-        engine never events a refused send)."""
-        request_id = str(uuid.uuid4())
-        chat_session_key = session_key or _DEFAULT_SESSION_KEY
-        request_frame = {
-            "type": "req",
-            "id": request_id,
-            "method": "chat.send",
-            "params": {
-                "sessionKey": chat_session_key,
-                "message": message,
-                "deliver": False,
-                "idempotencyKey": request_id,
-                "x-iam-token": _ZERO_CHECK_OPEN_API_TOKEN,
-            },
-        }
-        await ws.send(json.dumps(request_frame))
-
-        # A cancelled chat exits the loop with the empty sentinel: its
-        # caller stopped waiting when the asyncio side was cancelled, so
-        # the reply is discarded by definition, and quiet return keeps the
-        # unwinding worker's bridge future free of an unretrieved
-        # exception that only the dead await would have consumed.
-        deadline = asyncio.get_event_loop().time() + self._chat_timeout_seconds
-        accumulated_text = ""
-        while True:
-            if cancel_event is not None and cancel_event.is_set():
-                return ""
-            remaining = deadline - asyncio.get_event_loop().time()
-            if remaining <= 0:
-                raise TimeoutError(
-                    f"[host-platform][chat] timeout waiting for final: id={request_id}"
-                )
-            try:
-                raw = await asyncio.wait_for(
-                    ws.recv(),
-                    timeout=min(remaining, _RECV_SLICE_SECONDS),
-                )
-            except asyncio.TimeoutError:
-                continue
-            except Exception as e:
-                raise ConnectionError(f"[host-platform][chat] ws closed: {e}") from e
-
-            try:
-                data = json.loads(raw)
-            except json.JSONDecodeError:
-                continue
-            if data.get("type") == "res" and data.get("id") == request_id:
-                # The res for this very chat.send: a healthy send answers
-                # ok/accepted true (the ack before the events); ok false
-                # or accepted false is the engine's refusal, and no
-                # events follow — fail now, not at the deadline. Other res
-                # frames (late answers to earlier requests, say) keep
-                # being ignored.
-                payload = data.get("payload")
-                if (not data.get("ok", False)
-                        or (isinstance(payload, dict)
-                            and payload.get("accepted") is False)):
-                    detail = raw if len(raw) <= 300 else raw[:297] + "..."
-                    raise RuntimeError(
-                        f"[host-platform][chat] engine refused chat.send "
-                        f"for session {chat_session_key}: {detail}"
-                    )
-                continue
-            if data.get("type") != "event" or data.get("event") != "chat":
-                continue
-            payload = data.get("payload", {})
-            state = payload.get("state", "")
-            if state == "final":
-                for c in (payload.get("message", {}) or {}).get("content", []):
-                    if c.get("type") == "text":
-                        accumulated_text = c.get("text", "")
-                return accumulated_text
-            if state == "error":
-                raise RuntimeError(
-                    f"[host-platform][chat] agent error: "
-                    f"{payload.get('errorMessage', 'unknown')}"
-                )
-            if state == "aborted":
-                raise RuntimeError("[host-platform][chat] chat aborted")

@@ -38,6 +38,7 @@ consumes:
 consumed_by:
   - "adapters/http/openapi_v1/work_orders — public work-order and notification operations"
 internal_dependencies:
+  - agentclaw.community.core.bot_collaborator.manager_sync.notifications
   - agentclaw.community.core.base
   - agentclaw.community.core.repository
   - agentclaw.community.core.spaces
@@ -293,6 +294,13 @@ replace the committed APPROVED response with an error. Database write errors
 still propagate; this hook never owns persistence. There is no durable retry
 queue or guarantee of eventual synchronization in this change.
 
+Space-join approvals use the same best-effort post-commit posture via
+``notify_space_membership_changed``: manual review submits a Space-membership
+hint with the full refs the owner check already resolved, generic AUTO
+completion submits the validated numeric refs (the background resolver
+extends them while the Space exists), and neither a rejection, a terminal
+FAILED state nor a finalize failure ever notifies.
+
 A confirmed external decision followed by a local persistence failure raises
 `WorkOrderLocalFinalizeError` (public HTTP 500, business code `500201`, fixed
 message: external decision completed; local persistence failed; reconcile before
@@ -311,8 +319,10 @@ BCN idempotency/state reconciliation must be confirmed separately.
 Structured phase logs include `work_order_id` (null before creation), `phase`,
 `outcome`, `env`, `duration_ms`, and exception class on failures. Relevant phases
 are `event_create`, `auto_callback`, `auto_finalize`, `auto_failure_record`,
-`manual_review`, `manual_callback`, `manual_finalize`, `bot_request_create`, and
-`bot_post_commit_sync`. Creation completion logs supply the newly allocated ID;
+`manual_review`, `manual_callback`, `manual_finalize`, `bot_request_create`,
+`bot_post_commit_sync`. Space manager hints use the shared manager-sync
+notification diagnostics rather than a separate work-order execution phase. Creation completion
+logs supply the newly allocated ID;
 confirmed remote/local failures carry `remote_confirmed=true`, and failed Bot
 sync carries `local_committed=true`. Completion logs describe database/API
 phases, **not** external message delivery. Callbacks additionally log the remote

@@ -138,7 +138,7 @@ class BuildStageRunner:
             owner_id,
         )
 
-        bot = self._bot_service.get_bot_by_address(bot_id=bot_id, user_id=owner_id)
+        bot = self._bot_service.get_bot_by_address(bot_id=bot_id, user_id=owner_id, source_bot_pk=publish_record.source_bot_pk)
         if not bot:
             raise PublishFlowServiceError(f"Bot not found: {bot_id}")
 
@@ -282,6 +282,7 @@ class BuildStageRunner:
                 owner_id = self._ext_state.owner_id(publish_record)
                 bot = self._bot_service.get_bot_by_address(
                     bot_id=publish_record.source_bot_id, user_id=owner_id,
+                    source_bot_pk=publish_record.source_bot_pk,
                 )
                 employee_service = self._employee_publication_provider()
                 current = await asyncio.to_thread(employee_service.capture, bot)

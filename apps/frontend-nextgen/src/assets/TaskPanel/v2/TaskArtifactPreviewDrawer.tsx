@@ -62,7 +62,7 @@ function PreviewMessage({ children, danger = false }: { children: React.ReactNod
 
 function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="grid grid-cols-[96px_minmax(0,1fr)] gap-4 border-b border-border py-4 last:border-b-0">
+    <div className="grid grid-cols-[96px_minmax(0,1fr)] gap-4 border-b border-divider py-4 last:border-b-0">
       <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
       <dd className="m-0 min-w-0 whitespace-pre-wrap break-all text-sm leading-6 text-foreground">{children}</dd>
     </div>
@@ -92,6 +92,7 @@ export const TaskArtifactPreviewDrawer: React.FC<TaskArtifactPreviewDrawerProps>
     artifact.kind === 'url_link' ||
     ((artifact.kind === null || artifact.kind === undefined) && artifact.type === 'link');
   const isCodeArtifact = artifact.kind === 'code';
+  const isTextArtifact = artifact.kind === 'text';
   const isDetailArtifact = isLinkArtifact || isCodeArtifact;
   const linkUrl = artifact.linkRef?.url ?? artifact.url ?? null;
   const codeUrl = artifact.codeRef?.pullRequestUrl ?? artifact.url ?? null;
@@ -141,7 +142,7 @@ export const TaskArtifactPreviewDrawer: React.FC<TaskArtifactPreviewDrawerProps>
             <DetailRow label="链接地址">
               <DetailLink href={linkUrl} />
             </DetailRow>
-            <DetailRow label="产出者">{artifact.owner || '未提供'}</DetailRow>
+            <DetailRow label="产出者">{(artifact.ownerLabel ?? artifact.owner) || '未提供'}</DetailRow>
             <DetailRow label="创建时间">{formatArtifactUpdatedAt(artifact.updatedAt) || '未提供'}</DetailRow>
           </dl>
         </div>
@@ -159,7 +160,7 @@ export const TaskArtifactPreviewDrawer: React.FC<TaskArtifactPreviewDrawerProps>
               <DetailLink href={codeUrl} />
             </DetailRow>
             <DetailRow label="PR 描述">{artifact.codeRef?.description ?? artifact.summary ?? '暂无描述'}</DetailRow>
-            <DetailRow label="产出者">{artifact.owner || '未提供'}</DetailRow>
+            <DetailRow label="产出者">{(artifact.ownerLabel ?? artifact.owner) || '未提供'}</DetailRow>
             <DetailRow label="创建时间">{formatArtifactUpdatedAt(artifact.updatedAt) || '未提供'}</DetailRow>
           </dl>
         </div>
@@ -219,7 +220,7 @@ export const TaskArtifactPreviewDrawer: React.FC<TaskArtifactPreviewDrawerProps>
             </pre>
           )}
           {preview.truncated ? (
-            <div className="shrink-0 border-t border-border px-6 py-3 text-xs text-muted-foreground">
+            <div className="shrink-0 border-t border-divider px-6 py-3 text-xs text-muted-foreground">
               内容较长，仅显示部分，请下载查看完整内容。
             </div>
           ) : null}
@@ -236,9 +237,9 @@ export const TaskArtifactPreviewDrawer: React.FC<TaskArtifactPreviewDrawerProps>
     .filter(Boolean)
     .join(' · ');
   const artifactMeta = isLinkArtifact
-    ? ['链接产物', artifact.linkRef?.type, artifact.owner].filter(Boolean).join(' · ')
+    ? ['链接产物', artifact.linkRef?.type, artifact.ownerLabel ?? artifact.owner].filter(Boolean).join(' · ')
     : isCodeArtifact
-      ? ['代码产物', artifact.codeRef?.codeBaseName, artifact.owner].filter(Boolean).join(' · ')
+      ? ['代码产物', artifact.codeRef?.codeBaseName, artifact.ownerLabel ?? artifact.owner].filter(Boolean).join(' · ')
       : [fileRef?.storageId, meta].filter(Boolean).join(' · ');
 
   return createPortal(
@@ -337,6 +338,10 @@ export const TaskArtifactPreviewDrawer: React.FC<TaskArtifactPreviewDrawerProps>
                 {isCodeArtifact ? '查看 PR' : '打开链接'}
               </a>
             ) : null
+          ) : isTextArtifact ? (
+            <span aria-hidden="true" style={{ ...actionStyle, visibility: 'hidden' }}>
+              下载文件
+            </span>
           ) : (
             <button
               type="button"

@@ -20,7 +20,7 @@ from tests.community.framework import (
 )
 
 
-def seed_expert(world):
+def seed_expert(world, *, tenant="test"):
     _boot_verifier()
     with TemporaryDirectory() as folder:
         root = Path(folder)
@@ -45,7 +45,7 @@ def seed_expert(world):
         world.get(ExpertScanner).scan_git(
             root,
             source_commit=git("rev-parse", "HEAD"),
-            scope=ExpertScope("test", "dev", "aiworkbench"),
+            scope=ExpertScope(tenant, "dev", "aiworkbench"),
         )
 
 
@@ -132,4 +132,63 @@ def expert_detail_ok():
     expect=ExpectError(status=404),
 )
 def expert_detail_error():
+    pass
+
+
+def seed_creation(world):
+    from agentclaw.community.core.expert_market.creation import ExpertCreationConfig
+    from tests.community.endpoints.test_openapi_create_with_manifest import _seed_verifier
+    from agentclaw.community.utils.avernet_tenant import DEFAULT_AVERNET_TENANT
+    # The original create principal is user-only and resolves the default tenant.
+    seed_expert(world, tenant=DEFAULT_AVERNET_TENANT)
+    _seed_verifier(world)
+    world.injector.binder.bind(ExpertCreationConfig, to=ExpertCreationConfig("https://example.com/experts.git"))
+
+
+def creation_body():
+    return {"bot_name": "Expert created Bot", "bot_desc": "My expert", "engine": "openclaw", "cluster_name": "ACRA", "bot_type": "personal"}
+
+
+from tests.community.endpoints.test_openapi_create_with_manifest import _HEADERS as CREATE_HEADERS, _QUERY as CREATE_QUERY
+
+
+def assert_bound_creation(response, world):
+    from agentclaw.community.core.bot_management.manifest_seam import ManifestCreationSeam
+    from agentclaw.community.api.bot_config_manifest_service import BotConfigManifestServiceProtocol
+    from agentclaw.community.core.bot_config_manifest.binding import manifest_digest
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
+    data = response.json()["data"]
+    assert set(data) == {"bot_id", "iframe_url", "redirect_url"}
+    owner = CREATE_QUERY["user_id"]
+    job = world.get(ManifestCreationSeam).find_job(entity_id=owner, bot_id=data["bot_id"])
+    spec = job.payload["spec"]
+    binding = spec["manifest_binding"]
+    assert binding["entity_id"] == owner
+    assert binding["bot_id"] == data["bot_id"]
+    record = world.get(BotConfigManifestServiceProtocol).get(entity_id=owner, bot_id=data["bot_id"])
+    assert manifest_digest(record.document) == binding["manifest_digest"]
+    assert spec["expert_origin"]["creation_task_key"] == job.idempotency_key
+    assert len(spec["expert_origin"]["source_commit"]) == 40
+    assert spec["expert_origin"]["expert_name"] == "写作专家"
+    assert world.get(BotRepository).get_by_id_and_entity(data["bot_id"], owner) is None
+
+
+@endpoint_test(
+    method="POST", path="/openapi/v1/experts/{expert_id}/bots", scenario="identity_template_accepted",
+    seed=seed_creation,
+    input=CaseInput(path_params={"expert_id": "writer"}, headers=CREATE_HEADERS, query_params=CREATE_QUERY, json_body=creation_body()),
+    expect=ExpectSuccess(status=202, json_contains={"code": 202000}),
+    extra_assertions=(assert_bound_creation,),
+)
+def expert_creation_accepted():
+    pass
+
+
+@endpoint_test(
+    method="POST", path="/openapi/v1/experts/{expert_id}/bots", scenario="not_discoverable",
+    seed=seed_creation,
+    input=CaseInput(path_params={"expert_id": "missing"}, headers=CREATE_HEADERS, query_params=CREATE_QUERY, json_body=creation_body()),
+    expect=ExpectError(status=404),
+)
+def expert_creation_missing():
     pass

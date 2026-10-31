@@ -25,10 +25,10 @@ export function ChatHeaderRightPanel({ title, onClose, children }: ChatHeaderRig
       ariaLabel={`${title}面板`}
       onDismiss={onClose}
       {...WORKSPACE_RIGHT_PANEL_LAYOUT}
-      className="z-30 border-l border-border bg-card"
+      className="z-30 border-l border-divider bg-card"
     >
       <div className="flex h-full min-h-0 flex-col">
-        <div className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
+        <div className="flex h-12 shrink-0 items-center justify-between border-b border-divider px-4">
           <h3 className="m-0 text-sm font-medium text-foreground">{title}</h3>
           <IconButton label="关闭面板" icon={<X className="size-4" />} variant="ghost" size="sm" onClick={onClose} />
         </div>

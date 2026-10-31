@@ -160,7 +160,7 @@ export function WorkspaceIdentitySelector({
                 openerRef.current?.focus();
               }}
             >
-              <div className="border-b border-border/70 px-1.5 pb-2.5">
+              <div className="border-b border-divider/70 px-1.5 pb-2.5">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-1">
                     <p className="text-xs font-semibold text-foreground">{popoverTitle ?? '切换工作身份'}</p>

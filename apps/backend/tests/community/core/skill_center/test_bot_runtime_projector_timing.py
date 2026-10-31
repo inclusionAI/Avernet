@@ -173,11 +173,12 @@ def test_employee_projection_retains_online_mcp_after_draft_removal():
     employee.prepare_mcp_change.return_value = [old]
     projector._passport = passport
     projector._employee_service_provider = lambda: employee
-    bot = {"ext": {"digital_employee": {"status": "ACTIVE"}}}
+    bot = {"entity_id": "original-entity", "ext": {"digital_employee": {"status": "ACTIVE"}}}
     plan = SimpleNamespace(bot_id="bot-1", owner_id="owner-1", bot=bot, engine="openclaw",
                            projection=SimpleNamespace(mcp_server_codes=[]), identity_modes={}, effective_cli_items=[])
     projector._apply_passport_projection(plan=plan)
     employee.prepare_mcp_change.assert_called_once_with(bot, [], [old], "owner-1")
+    assert passport.update_passport.call_args.kwargs["user_id"] == "original-entity"
     scope = passport.update_passport.call_args.kwargs["resource_scope"]
     assert scope["mcp_codes"] == ["online-tool"]
     assert scope["mcp_items"][0]["identity_mode"] == "caller"

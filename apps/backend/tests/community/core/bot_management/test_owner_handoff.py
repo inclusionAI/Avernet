@@ -1,6 +1,7 @@
 """Real journal/aggregate transactions with an external protocol fixture."""
 
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -29,6 +30,7 @@ from agentclaw.community.core.bot_management.owner_handoff.service import (
 from agentclaw.community.core.repository.implementations.bot.owner_handoff import (
     OwnerHandoffRepository,
 )
+from agentclaw.community.kernel.bot_manager_sync import SyncReason
 from agentclaw.community.core.work_orders.repository.models import (
     WorkOrderModel,
     WorkOrderApproverModel,
@@ -124,10 +126,33 @@ def world(persisted):
         Runtime(),
         Queue(),
     )
+    manager_sync = MagicMock()
+    from agentclaw.community.core.repository.implementations.spaces.space import SpaceRepository
+    from agentclaw.community.core.repository.implementations.spaces.persistence_effects import NoKnowledgeSpacePersistenceEffects
+    from agentclaw.community.core.spaces.services.space_access_service import SpaceAccessService
+    from agentclaw.community.core.spaces.services.space_service import SpaceService
+    spaces_repo = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
+    space_staff = MagicMock()
+    space_staff.get_profile_by_work_no.return_value.nick_name = None
+    space_client = MagicMock()
+    spaces = SpaceService(spaces_repo, space_client, space_staff)
+    space_access = SpaceAccessService(spaces_repo)
 
-    def service(policy=OwnerHandoffPolicy(enabled=True, recovery_enabled=True)):
+    def service(
+        policy=OwnerHandoffPolicy(enabled=True, recovery_enabled=True),
+        notifier=None,
+    ):
         return OwnerHandoffService(
-            repo, passport, runtime, Staff(), bots, queue, policy
+            repo,
+            passport,
+            runtime,
+            Staff(),
+            bots,
+            queue,
+            policy,
+            notifier if notifier is not None else manager_sync,
+            spaces,
+            space_access,
         )
 
     return SimpleNamespace(
@@ -138,6 +163,11 @@ def world(persisted):
         passport=passport,
         runtime=runtime,
         queue=queue,
+        manager_sync=manager_sync,
+        spaces=spaces,
+        spaces_repo=spaces_repo,
+        space_access=space_access,
+        space_client=space_client,
         service=service,
     )
 
@@ -547,3 +577,64 @@ def test_authorized_retry_uses_private_scope_without_exposing_it(world):
     assert result["phase"] == "QUEUED" and "avernet_tenant" not in result
     assert len(world.queue.calls) == 2
     assert world.queue.calls[-1][0][1] == {"operation_id": op, "avernet_tenant": "teamclaw"}
+
+
+def test_committed_owner_submits_manager_sync_with_journal_facts(world):
+    op = begin(world)
+    drain(world, op)
+    world.manager_sync.request_sync.assert_called_once()
+    kwargs = world.manager_sync.request_sync.call_args.kwargs
+    assert kwargs["reason"] is SyncReason.OWNER_HANDOFF
+    assert kwargs["bot_pk"] == world.bot["id"]
+    assert kwargs["env"] == "dev"
+    assert kwargs["avernet_tenant"] == "teamclaw"
+    # The finishing step owns the only submit; a re-drive of a terminal
+    # journal never notifies twice.
+    assert world.service().step(op) is True
+    assert world.manager_sync.request_sync.call_count == 1
+
+
+def test_handoff_still_succeeds_when_sync_submit_fails(world):
+    op = begin(world)
+    for _ in range(5):
+        world.service().step(op)
+    assert world.repo.get(op)["phase"] == "COMMITTING_OWNER"
+    failing = MagicMock()
+    failing.request_sync.side_effect = RuntimeError("queue closed")
+
+    assert world.service(notifier=failing).step(op) is True
+    assert world.repo.get(op)["phase"] == "SUCCEEDED"
+    failing.request_sync.assert_called_once()
+
+
+def test_sync_submit_failure_does_not_reenter_passport_admin_sync(world):
+    op = begin(world)
+    for _ in range(5):
+        world.service().step(op)
+    assert world.repo.get(op)["phase"] == "COMMITTING_OWNER"
+    failing = MagicMock()
+    failing.request_sync.side_effect = RuntimeError("queue closed")
+    # The commit is durable before the notifier runs; the new logic must not
+    # compensate through the usual Passport admin-sync path.
+    world.passport.update_passport = MagicMock()
+
+    assert world.service(notifier=failing).step(op) is True
+    assert world.repo.get(op)["phase"] == "SUCCEEDED"
+    world.passport.update_passport.assert_not_called()
+    # And the handoff's own remote footprint is unchanged by the failure.
+    assert len(world.passport.issues) == 1
+    assert len(world.passport.retired) == 1
+
+
+def test_finish_failure_does_not_submit_manager_sync(world, monkeypatch):
+    op = begin(world)
+    for _ in range(5):
+        world.service().step(op)
+    assert world.repo.get(op)["phase"] == "COMMITTING_OWNER"
+
+    def failing(operation_id, worker):
+        raise RuntimeError("finish commit failed")
+
+    monkeypatch.setattr(world.repo, "finish", failing)
+    assert not world.service().step(op)
+    world.manager_sync.request_sync.assert_not_called()

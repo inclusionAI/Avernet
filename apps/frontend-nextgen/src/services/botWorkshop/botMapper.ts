@@ -160,6 +160,7 @@ export function mapBotDto(dto: BackendUnknownRecord, addressedBotId?: string, cu
     entityKey: asString(dto.card_id) ?? `${spaceId ?? 'unknown'}:${botType}:${id}`,
     name: asString(dto.bot_name) ?? asString(dto.name) ?? '未命名 Bot',
     description: asString(dto.bot_desc) ?? asString(dto.description),
+    expertOriginName: asString(dto.expert_name) ?? asString(asRecord(asRecord(dto.ext).expert_origin).expert_name),
     spaceId,
     spaceName,
     spaceKind: spaceKind === 'team' ? 'team' : 'personal',
@@ -176,8 +177,7 @@ export function mapBotDto(dto: BackendUnknownRecord, addressedBotId?: string, cu
       ? {
           entityType: entityType ?? (ownership === 'team' ? 'team' : 'staff'),
           entityId,
-          botPublishId:
-            asString(dto.bot_publish_id) ?? asString(dto.publish_id) ?? asString(asRecord(dto.publish).id),
+          botPublishId: asString(dto.bot_publish_id) ?? asString(dto.publish_id) ?? asString(asRecord(dto.publish).id),
         }
       : undefined,
     healthScore: asNumber(dto.health_score),

@@ -4,14 +4,29 @@ import { cn } from '@/utils/cn';
 import { ChevronLeft, ChevronRight, GripVertical } from 'lucide-react';
 import type { KeyboardEvent, ReactNode, PointerEvent as ReactPointerEvent } from 'react';
 import { useCallback, useId, useLayoutEffect, useRef, useState } from 'react';
+import {
+  WORKSPACE_SIDEBAR_COLLAPSED_WIDTH,
+  WORKSPACE_SIDEBAR_DEFAULT_WIDTH,
+  WORKSPACE_SIDEBAR_STORAGE_KEY,
+  WORKSPACE_SIDEBAR_MAX_WIDTH,
+  WORKSPACE_SIDEBAR_MIN_WIDTH,
+  clampWidth,
+  dynamicMaxWidth,
+  persistCollapsed,
+  persistWidth,
+  readStoredCollapsed,
+  readStoredWidth,
+} from './workspaceSidebarSizing';
 
-export const WORKSPACE_SIDEBAR_MIN_WIDTH = 280;
-export const WORKSPACE_SIDEBAR_DEFAULT_WIDTH = 320;
-export const WORKSPACE_SIDEBAR_MAX_WIDTH = 480;
-export const WORKSPACE_SIDEBAR_MAX_RATIO = 0.45;
-export const WORKSPACE_SIDEBAR_COLLAPSED_WIDTH = 56;
-export const WORKSPACE_SIDEBAR_STORAGE_KEY = 'teamclaw:workspace-sidebar-width';
-export const WORKSPACE_SIDEBAR_COLLAPSED_STORAGE_KEY = 'teamclaw:workspace-sidebar-collapsed';
+// 惯例出口保持不变：既有测试/消费方仍从本组件文件引侧栏尺寸常量。
+export {
+  WORKSPACE_SIDEBAR_COLLAPSED_WIDTH,
+  WORKSPACE_SIDEBAR_COLLAPSED_STORAGE_KEY,
+  WORKSPACE_SIDEBAR_DEFAULT_WIDTH,
+  WORKSPACE_SIDEBAR_MAX_WIDTH,
+  WORKSPACE_SIDEBAR_MIN_WIDTH,
+  WORKSPACE_SIDEBAR_STORAGE_KEY,
+} from './workspaceSidebarSizing';
 
 interface ResizableWorkspaceSidebarProps extends Omit<React.HTMLAttributes<HTMLElement>, 'children' | 'className'> {
   children: ReactNode;
@@ -28,53 +43,6 @@ interface ResizableWorkspaceSidebarProps extends Omit<React.HTMLAttributes<HTMLE
   /** 宽度持久化 key（默认为左栏 key）；不同面板传独立 key 避免互相覆盖。 */
   storageKey?: string;
   onDismiss?: () => void; // 右侧临时面板点击外部关闭；左侧常驻列表不启用。
-}
-
-function clampWidth(width: number, minWidth: number, maxWidth: number): number {
-  return Math.min(Math.max(Math.round(width), minWidth), maxWidth);
-}
-
-function readStoredWidth(key: string, defaultWidth: number, minWidth: number, maxWidth: number): number {
-  if (typeof window === 'undefined') return defaultWidth;
-  try {
-    const raw = window.localStorage.getItem(key);
-    if (raw === null) return defaultWidth;
-    const stored = Number(raw);
-    if (!Number.isFinite(stored)) return defaultWidth;
-    return Math.min(Math.max(Math.round(stored), minWidth), maxWidth);
-  } catch {
-    return defaultWidth;
-  }
-}
-
-function persistWidth(key: string, width: number): void {
-  try {
-    window.localStorage.setItem(key, String(Math.round(width)));
-  } catch {
-    // 浏览器禁用存储时仍保留当前会话内调宽能力。
-  }
-}
-
-function readStoredCollapsed(): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    return window.localStorage.getItem(WORKSPACE_SIDEBAR_COLLAPSED_STORAGE_KEY) === 'true';
-  } catch {
-    return false;
-  }
-}
-
-function persistCollapsed(collapsed: boolean): void {
-  try {
-    window.localStorage.setItem(WORKSPACE_SIDEBAR_COLLAPSED_STORAGE_KEY, String(collapsed));
-  } catch {
-    // 浏览器禁用存储时仍保留当前会话内收起能力。
-  }
-}
-
-function dynamicMaxWidth(containerWidth: number, minWidth: number, maxWidth: number): number {
-  if (containerWidth <= 0) return maxWidth;
-  return Math.max(minWidth, Math.min(maxWidth, Math.floor(containerWidth * WORKSPACE_SIDEBAR_MAX_RATIO)));
 }
 
 export function ResizableWorkspaceSidebar({
@@ -211,9 +179,10 @@ export function ResizableWorkspaceSidebar({
       data-collapsed={collapsed}
       {...rest}
       className={cn(
-        'relative shrink-0 flex-col overflow-visible border-border transition-[width] duration-300 ease-in-out',
-        // 左侧栏沿用既有视觉（右缘分割线 + muted 底 + lg 以下隐藏）；右侧副屏左缘分割线、全屏段显示、底色随 className
-        isRight ? 'flex border-l' : 'hidden border-r bg-muted/20 lg:flex',
+        'relative shrink-0 flex-col overflow-visible transition-[width] duration-300 ease-in-out',
+        // 左侧栏右缘分割线按稿 lighten（1px #EEE ≈ border-border/60，与导航侧 0.5px 区分层级）+ muted 底 + lg 以下隐藏；
+        // 右侧副屏左缘分割线维持全强度 token、全屏段显示、底色随 className
+        isRight ? 'flex border-l border-divider' : 'hidden border-r border-divider/60 bg-muted/20 lg:flex',
         dragging && 'transition-none',
         className,
       )}

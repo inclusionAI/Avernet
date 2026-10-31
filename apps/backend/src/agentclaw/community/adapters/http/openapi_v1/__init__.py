@@ -179,6 +179,7 @@ from .authorized_apps import user_router as user_authorized_apps_router
 from .bots import router as bots_router
 from .bots.classification import router as classification_router
 from .collaboration_bots import public_router as collaboration_public_router
+from agentclaw.community.adapters.http.bot_public.risk_routes import openapi_router as risk_openapi_router
 from .collaborating_bots import router as collaborating_bots_router
 from .task import task_router
 from .bots.engine_version import router as engine_version_router
@@ -683,6 +684,7 @@ def build_public_router() -> APIRouter:
         responses=USER_SCOPED_ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )
+    public.include_router(risk_openapi_router, responses=USER_SCOPED_ERROR_RESPONSES, dependencies=_PUBLIC_AUTH)
     # Task public surface (execute/dashboard/list) — served at the external
     # contract path the gateway's `collaboration-tasks` domain routes to the
     # backend (pulled out of the broad collaboration→bcs namespace). Not

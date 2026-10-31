@@ -1093,6 +1093,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         bot_id = publish_record.source_bot_id
         bot = self._bot_service.get_bot_by_address(
             bot_id=bot_id, user_id=publish_record.owner_id,
+            source_bot_pk=publish_record.source_bot_pk,
         )
         owner_id = str(bot["owner_id"])
         # Resolve and validate before destroying any published version resources.
@@ -1439,6 +1440,12 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         # 5. 调用 BCN switch_bot 接口切换绑定
         switch_result = self._bcn_service.switch_bot(teamclaw_bot_uuid=bot_id, owner_workno=current_owner_id, name=bot.get("bot_name") or bot_id, summary=bot.get("bot_desc") or "")
         logger.info(f"[upgrade_bot_to_service] BCN switch_bot succeeded: bot_id={bot_id}, owner_id={current_owner_id}, websocket_kicked={switch_result.get('websocket_kicked')}, idempotent_replay={switch_result.get('idempotent_replay')}")
+
+        # switch_bot addressed the existing personal binding, not a new entity
+        # reference. Preserve it atomically with the type change before restart.
+        if current_owner_id != resource_owner_id:
+            service_ext = dict(service_ext or {})
+            service_ext["bcn_provider_bot_ref"] = f"{bot_id}:{current_owner_id}"
 
         # 6. 更新 bot_type 为 "service"
         update_fields = {"bot_type": "service"}

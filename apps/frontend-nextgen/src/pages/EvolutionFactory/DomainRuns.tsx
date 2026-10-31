@@ -70,7 +70,7 @@ export function DomainRuns({
                     const template =
                       scope === 'domain' ? `Domain Run（${run.templateCount ?? '—'} 个模板）` : run.templateName;
                     return (
-                      <tr className="border-t border-border" key={run.benchRunId}>
+                      <tr className="border-t border-divider" key={run.benchRunId}>
                         <td className="p-3">
                           <Hint content={run.benchRunId}>
                             <Button

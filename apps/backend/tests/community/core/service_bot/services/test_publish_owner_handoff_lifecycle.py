@@ -114,9 +114,11 @@ def test_delete_preflight_blocks_before_destroying_version_resources(lifecycle, 
 
 
 @pytest.mark.asyncio
-async def test_approval_checks_and_new_auditor_use_current_owner(lifecycle):
+@pytest.mark.parametrize("entity_id", ["A", "staff_A"])
+async def test_approval_checks_and_new_auditor_use_current_owner(lifecycle, entity_id):
     with lifecycle.world.database.orm_session() as session:
         session.get(BotModel, lifecycle.world.pk).ext = '{"service_bot_config":{"should_approval":true}}'
+        session.get(BotModel, lifecycle.world.pk).entity_id = entity_id
     process = Mock()
     publish = Mock()
     approval = PublishApprovalService(
@@ -137,11 +139,14 @@ async def test_approval_checks_and_new_auditor_use_current_owner(lifecycle):
 
 
 @pytest.mark.asyncio
-async def test_build_reads_transferred_bot_and_keeps_artifact_resource_locator(lifecycle):
+@pytest.mark.parametrize("entity_id", ["A", "staff_A"])
+async def test_build_reads_transferred_bot_and_keeps_artifact_resource_locator(lifecycle, entity_id):
     from tests.community.core.service_bot.services.publish_flow.test_build_artifact_only import (
         _runner, _SimpleProducer,
     )
     producer = _SimpleProducer()
+    with lifecycle.world.database.orm_session() as session:
+        session.get(BotModel, lifecycle.world.pk).entity_id = entity_id
     observed = Mock(wraps=producer.produce_artifact)
     producer.produce_artifact = observed
     runner, ext = _runner(producer)
@@ -151,7 +156,7 @@ async def test_build_reads_transferred_bot_and_keeps_artifact_resource_locator(l
     assert result.migration_path == "/snapshot/1"
     request = observed.call_args.args[0]
     assert request.bot["owner_id"] == "B"
-    assert request.bot["entity_id"] == "A"
+    assert request.bot["entity_id"] == entity_id
     behavior = runner._provider_behaviors.resolve.return_value
     assert behavior.stage_build_files.call_args.kwargs["owner_id"] == "A"
 

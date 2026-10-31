@@ -129,6 +129,9 @@ def test_handoff_consumer_refuses_local_capability_before_freezing(world, monkey
         HandoffError,
         OwnerHandoffPolicy,
     )
+    from agentclaw.community.core.bot_collaborator.manager_sync.dispatcher import (
+        DisabledBotManagerSync,
+    )
 
     plugin = world.get(PassportPlugin)
     called = []
@@ -157,6 +160,9 @@ def test_handoff_consumer_refuses_local_capability_before_freezing(world, monkey
         bots,
         Mock(),
         OwnerHandoffPolicy(enabled=True, recovery_enabled=True),
+        DisabledBotManagerSync(),
+        Mock(),
+        Mock(),
     )
     with pytest.raises(HandoffError, match="UNSUPPORTED"):
         consumer.create(bot_pk=1, actor_id="A", new_owner_id="B", request_key="request")

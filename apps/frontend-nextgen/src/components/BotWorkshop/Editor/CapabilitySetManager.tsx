@@ -66,10 +66,10 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
   };
   return (
     <div className="flex min-h-full flex-col bg-background">
-      <div className="flex items-center justify-between border-b border-border bg-card px-8 py-5 lg:px-10">
-        <div>
-          <h2 className="m-0 text-base font-semibold">能力集管理</h2>
-          <p className="m-0 mt-1 text-sm text-muted-foreground">按能力集组织 Bot 引用的 Skill、MCP 与 CLI。</p>
+      <div className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-divider bg-card px-8 lg:px-10">
+        <div className="min-w-0">
+          <h2 className="m-0 truncate text-sm font-semibold">能力集管理</h2>
+          <p className="m-0 mt-0.5 truncate text-xs text-muted-foreground">按能力集组织 Bot 引用的 Skill、MCP 与 CLI。</p>
         </div>
         <Button
           variant="outline"
@@ -157,7 +157,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
                     ) : null}
                   </div>
                   {open ? (
-                    <div className="space-y-5 border-t border-border bg-background px-5 py-5">
+                    <div className="space-y-5 border-t border-divider bg-background px-5 py-5">
                       <CapabilityMembers
                         kind="skill"
                         items={set.skills}

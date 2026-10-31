@@ -1,18 +1,24 @@
 import { communityErrorMessage } from '@/domain/community/errors';
+import { buildTopicListSummaryQueries } from '@/domain/community/interactionQueries';
 import { COMMUNITY_PAGE_SIZE } from '@/domain/community/constants';
-import type { CommunityTopic } from '@/domain/community/types';
+import type { CommunityTopic, ForumActorRef } from '@/domain/community/types';
 import { communityService } from '@/services/community';
+import type { UseCommunityInteractionsResult } from './useCommunityInteractions';
 import { useCommunityStore } from '@/stores/communityStore';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 export function useCommunityTopicList({
   currentUserId,
+  viewer,
   enrichTopicBotAuthor,
   botNameById,
+  refreshInteractions,
 }: {
   currentUserId: string;
+  viewer: ForumActorRef;
   enrichTopicBotAuthor: (topic: CommunityTopic) => CommunityTopic;
   botNameById: Record<string, string>;
+  refreshInteractions: UseCommunityInteractionsResult['refreshSummaries'];
 }) {
   const {
     appendTopics,
@@ -29,6 +35,8 @@ export function useCommunityTopicList({
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const requestRef = useRef(0);
+  // “关注”是一级视图：不继承其它主题类型筛选，展示已关注作者的全部类型主题。
+  const listTopicType = scope === 'following' ? 'all' : topicType;
 
   const load = useCallback(async () => {
     const requestId = ++requestRef.current;
@@ -39,10 +47,13 @@ export function useCommunityTopicList({
       const page = await communityService.listTopics({
         search: query,
         scope: scope,
-        topicType: topicType,
+        topicType: listTopicType,
         // "我的"走 openapi §2.4 author_id 真分页：下发本人工号，后端过滤、total 为过滤后行数。
         ...(scope === 'mine' && currentUserId
           ? { authorId: currentUserId }
+          : {}),
+        ...(scope === 'following' && currentUserId
+          ? { followingOwnerId: currentUserId }
           : {}),
         offset: 0,
         limit: COMMUNITY_PAGE_SIZE,
@@ -51,6 +62,7 @@ export function useCommunityTopicList({
         const items = page.items.map(enrichTopicBotAuthor);
         setTopics(items, page.total);
         setHasMore(items.length > 0 && items.length < page.total);
+        await refreshInteractions(buildTopicListSummaryQueries(items, viewer));
       }
     } catch (error) {
       if (requestId === requestRef.current) {
@@ -61,10 +73,12 @@ export function useCommunityTopicList({
     }
   }, [
     currentUserId,
+    viewer,
     enrichTopicBotAuthor,
+    refreshInteractions,
     query,
     scope,
-    topicType,
+    listTopicType,
   ]);
 
   useEffect(() => {
@@ -97,15 +111,19 @@ export function useCommunityTopicList({
       const page = await communityService.listTopics({
         search: query,
         scope: scope,
-        topicType: topicType,
+        topicType: listTopicType,
         ...(scope === 'mine' && currentUserId
           ? { authorId: currentUserId }
+          : {}),
+        ...(scope === 'following' && currentUserId
+          ? { followingOwnerId: currentUserId }
           : {}),
         offset: previousCount,
         limit: COMMUNITY_PAGE_SIZE,
       });
       const appended = page.items.map(enrichTopicBotAuthor);
       appendTopics(appended);
+      await refreshInteractions(buildTopicListSummaryQueries(appended, viewer));
       const loaded = previousCount + appended.length;
       setHasMore(appended.length > 0 && loaded < page.total);
     } catch (error) {
@@ -114,13 +132,16 @@ export function useCommunityTopicList({
       setLoadingMore(false);
     }
   }, [
+    appendTopics,
     currentUserId,
+    viewer,
     enrichTopicBotAuthor,
     hasMore,
+    refreshInteractions,
     loadingMore,
     query,
     scope,
-    topicType,
+    listTopicType,
     topics,
   ]);
 

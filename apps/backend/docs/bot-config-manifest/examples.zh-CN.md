@@ -337,9 +337,10 @@ bot 当前引擎校验并明确报错，而不是 apply 时静默跳过。
 路径差异由 `path_factory` 现状处理）；teclaw 物化后以
 `FileRef{name, store, path}` 进 `identity_files[]`。
 
-**提醒**：`MEMORY.md` 与 `IDENTITY.md` 在**保留名单**上——apply 永不写入、
-永不移除，声明它们会在 `PUT` 时被拒（schema §3.5）。人设/规则类文件才是本
-类目的主场景。
+**提醒**：`MEMORY.md` 不可声明且永不移除。`IDENTITY.md` 在原引擎白名单允许时
+可显式写入并按普通文件参与集合替换：identity 类目缺省不操作、[] 清空、非空列表完整替换
+（schema §3.5）。Claude Code 仍只接受
+`CLAUDE.md`，由专家编排确定性合并多文件，不扩展原生白名单。
 
 ## 5. `resources` — 工作区资源（单文件与目录）
 

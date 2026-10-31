@@ -66,7 +66,7 @@ export function DetailNavigation<T extends string, U extends string>({
     <nav
       aria-label="Bot 编辑模块"
       className={cn(
-        'bot-editor-nav app-scrollbar flex w-20 shrink-0 flex-col items-center gap-2 overflow-y-auto border-r border-border bg-card py-3',
+        'bot-editor-nav app-scrollbar flex w-20 shrink-0 flex-col items-center gap-2 overflow-y-auto border-r border-divider bg-card py-3',
         hidden && 'hidden',
       )}
     >

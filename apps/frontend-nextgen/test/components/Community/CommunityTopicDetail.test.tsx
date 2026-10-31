@@ -73,6 +73,228 @@ describe('CommunityTopicDetail', () => {
     expect(props.onBack).toHaveBeenCalledTimes(1);
   });
 
+  test('回复展示汇总互动量，并用红色图标表示当前用户状态', () => {
+    const child: CommunityReply = {
+      ...replies[0],
+      id: 'child-reply',
+      body: '楼中楼正文',
+      author: { type: 'human', id: 'human-child', displayName: '桌面助手' },
+      replyToPostId: 'floor-reply',
+    };
+    const floor: CommunityReply = {
+      ...replies[0],
+      id: 'floor-reply',
+      body: '一级回复正文',
+      author: { type: 'human', id: 'human-floor', displayName: 'ClawMind' },
+      childReplies: [child],
+    };
+    const targetSummary = (postId: string, likeCount: number, favoriteCount: number) => ({
+      scope: 'TARGET' as const,
+      target: { targetType: 'POST' as const, id: postId },
+      viewCount: 0,
+      likeCount,
+      favoriteCount,
+      followCount: 0,
+      acceptCount: 0,
+      topicCount: 0,
+      replyCount: 0,
+      acceptedReplyCount: 0,
+      replyParticipantCount: 0,
+      helpfulReplyCount: 0,
+    });
+    const viewerSummary = (postId: string, likeCount: number, favoriteCount: number) => ({
+      scope: 'ACTOR_TARGET' as const,
+      actor: { actorType: 'HUMAN' as const, id: 'human-current' },
+      target: { targetType: 'POST' as const, id: postId },
+      viewCount: 0,
+      likeCount,
+      favoriteCount,
+      followCount: 0,
+      acceptCount: 0,
+      topicCount: 0,
+      replyCount: 0,
+      acceptedReplyCount: 0,
+      replyParticipantCount: 0,
+      helpfulReplyCount: 0,
+    });
+    const onLikeReply = jest.fn();
+    renderDetail({
+      currentUserId: 'human-current',
+      replies: [floor],
+      getReplySummary: (postId) =>
+        postId === 'child-reply'
+          ? targetSummary(postId, 5, 2)
+          : targetSummary(postId, 3, 4),
+      getReplyViewerSummary: (postId) =>
+        postId === 'child-reply'
+          ? viewerSummary(postId, 0, 1)
+          : viewerSummary(postId, 1, 0),
+      replyLikePending: (postId) => postId === 'child-reply',
+      onLikeReply,
+    });
+
+    const floorArticle = screen.getByText('一级回复正文').closest('article');
+    expect(floorArticle).not.toBeNull();
+    const floorLikeButton = within(floorArticle as HTMLElement).getAllByRole('button', {
+      name: '点赞回复',
+    })[0];
+    expect(floorLikeButton).toHaveTextContent('3');
+    expect(floorLikeButton).toHaveClass('text-destructive', 'hover:text-destructive');
+    expect(floorLikeButton).toHaveAttribute('aria-pressed', 'true');
+    expect(floorLikeButton.querySelector('svg')).toHaveClass('fill-current');
+
+    expect(
+      within(floorArticle as HTMLElement).queryByRole('button', { name: '收藏回复' }),
+    ).not.toBeInTheDocument();
+
+    const childArticle = screen.getByText('楼中楼正文').closest('article');
+    expect(childArticle).not.toBeNull();
+    const childLikeButton = within(childArticle as HTMLElement).getByRole('button', {
+      name: '点赞回复',
+    });
+    expect(childLikeButton).toBeEnabled();
+    expect(childLikeButton).toHaveAttribute('aria-busy', 'true');
+    expect(childLikeButton).toHaveTextContent('5');
+    expect(childLikeButton).toHaveClass('text-muted-foreground');
+
+    expect(
+      within(childArticle as HTMLElement).queryByRole('button', { name: '收藏回复' }),
+    ).not.toBeInTheDocument();
+    expect(onLikeReply).not.toHaveBeenCalled();
+  });
+
+  test('顶栏回复入口排在结帖右侧并定位底部回复输入框', async () => {
+    const originalScrollIntoView = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = jest.fn();
+    try {
+      const user = userEvent.setup();
+      renderDetail({ currentUserId: 'human-current' });
+
+      const header = screen.getByRole('banner');
+      const closeButton = within(header).getByRole('button', { name: '结帖' });
+      const replyButton = within(header).getByRole('button', { name: '回复' });
+      expect(closeButton.compareDocumentPosition(replyButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+      const composer = screen.getByRole('region', { name: '回复主题' });
+      const composerBody = within(composer).getByRole('textbox', { name: '回复正文' });
+      const focusSpy = jest.spyOn(composerBody, 'focus');
+      await user.click(replyButton);
+
+      expect(Element.prototype.scrollIntoView).toHaveBeenCalledTimes(1);
+      expect(focusSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      Element.prototype.scrollIntoView = originalScrollIntoView;
+    }
+  });
+
+  test('主帖互动操作与发表时间同排且无横向分隔线', () => {
+    const onLike = jest.fn();
+    const onFavorite = jest.fn();
+    const onEditTopic = jest.fn();
+    const baseStats = {
+      viewCount: 0,
+      likeCount: 0,
+      favoriteCount: 0,
+      followCount: 0,
+      acceptCount: 0,
+      topicCount: 0,
+      replyCount: 0,
+      acceptedReplyCount: 0,
+      replyParticipantCount: 0,
+      helpfulReplyCount: 0,
+    };
+    const targetSummary = {
+      ...baseStats,
+      scope: 'TARGET' as const,
+      target: { targetType: 'TOPIC' as const, id: topic.id },
+      viewCount: 12,
+      likeCount: 10,
+      favoriteCount: 6,
+    };
+    const viewerSummary = {
+      ...baseStats,
+      scope: 'ACTOR_TARGET' as const,
+      actor: { actorType: 'HUMAN' as const, id: 'human-current' },
+      target: { targetType: 'TOPIC' as const, id: topic.id },
+      likeCount: 1,
+      favoriteCount: 1,
+    };
+    renderDetail({
+      currentUserId: 'human-current',
+      targetSummary,
+      viewerTopicSummary: viewerSummary,
+      likePending: false,
+      favoritePending: false,
+      onLike,
+      onFavorite,
+      onEditTopic,
+    });
+
+    const interactionBar = screen.getByLabelText('主题互动');
+    expect(interactionBar).toHaveClass('mt-2', 'flex', 'items-center', 'justify-between', 'gap-3');
+    expect(interactionBar).not.toHaveClass('border-b', 'border-border/60');
+    expect(interactionBar).not.toHaveClass('rounded-xl', 'bg-card');
+    expect(within(interactionBar).getByText('发表于：时间未知')).toBeInTheDocument();
+
+    const actionButtons = within(interactionBar).getAllByRole('button');
+    expect(actionButtons.map((button) => button.textContent)).toEqual(['10', '已收藏']);
+    expect(within(interactionBar).queryByRole('button', { name: '编辑' })).not.toBeInTheDocument();
+    const likeButton = actionButtons[0];
+    expect(likeButton).toHaveClass(
+      'inline-flex',
+      'items-center',
+      'gap-1.5',
+      'text-sm',
+      'text-destructive',
+      'hover:text-destructive',
+    );
+    expect(likeButton).toHaveTextContent('10');
+    expect(likeButton.querySelector('svg')).toHaveClass('fill-current');
+
+    const favoriteButton = within(interactionBar).getByRole('button', { name: '收藏主题' });
+    expect(favoriteButton).toHaveClass('inline-flex', 'items-center', 'gap-1.5', 'text-sm', 'text-warning');
+    expect(favoriteButton).toHaveTextContent('已收藏');
+    expect(favoriteButton).not.toHaveTextContent('6');
+    expect(favoriteButton).toHaveAttribute('aria-pressed', 'true');
+    expect(favoriteButton.querySelector('svg')).toHaveClass('lucide-bookmark', 'fill-current');
+    expect(within(interactionBar).getByLabelText('浏览 12 次')).toHaveTextContent('12');
+
+    const editButton = screen.getByRole('button', { name: '编辑' });
+    expect(editButton).toBeEnabled();
+    fireEvent.click(editButton);
+    expect(onEditTopic).toHaveBeenCalledTimes(1);
+  });
+
+  test('主题点赞和收藏请求中仍保持可操作，不进入禁用状态', () => {
+    renderDetail({
+      currentUserId: 'human-current',
+      likePending: true,
+      favoritePending: true,
+      onLike: jest.fn(),
+      onFavorite: jest.fn(),
+    });
+
+    const interactionBar = screen.getByLabelText('主题互动');
+    const likeButton = within(interactionBar).getByRole('button', { name: '点赞主题' });
+    const favoriteButton = within(interactionBar).getByRole('button', { name: '收藏主题' });
+
+    expect(likeButton).toBeEnabled();
+    expect(likeButton).toHaveAttribute('aria-busy', 'true');
+    expect(favoriteButton).toBeEnabled();
+    expect(favoriteButton).toHaveAttribute('aria-busy', 'true');
+  });
+
+  test('非发布人或已结帖主题不展示编辑入口', () => {
+    const onEditTopic = jest.fn();
+    renderDetail({
+      topic: { ...topic, canEdit: false },
+      onEditTopic,
+    });
+
+    expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument();
+    expect(onEditTopic).not.toHaveBeenCalled();
+  });
+
   test('开放讨论展示 Human 主题回复入口并提交直接回复', async () => {
     const user = userEvent.setup();
     const onSubmitReply = jest.fn().mockResolvedValue(true);
@@ -88,64 +310,67 @@ describe('CommunityTopicDetail', () => {
     expect(onSubmitReply.mock.calls[0][0].pollSelection).toBeUndefined();
   });
 
-  test.each(['discussion', 'share'] as const)('开放 %s 主题每个楼层都有回复入口，且回复按钮排在首位', async (topicType) => {
-    const user = userEvent.setup();
-    const onSubmitReply = jest.fn().mockResolvedValue(true);
-    const child: CommunityReply = {
-      ...replies[0],
-      id: 'child-1',
-      body: '楼中楼正文',
-      author: { type: 'human', id: 'human-child', displayName: '桌面助手' },
-      replyToPostId: 'floor-1',
-    };
-    const floor: CommunityReply = {
-      ...replies[0],
-      id: 'floor-1',
-      body: '主楼层正文',
-      author: { type: 'human', id: 'human-floor', displayName: 'ClawMind' },
-      childReplies: [child],
-    };
+  test.each(['discussion', 'share'] as const)(
+    '开放 %s 主题每个楼层都有回复入口，且回复按钮排在首位',
+    async (topicType) => {
+      const user = userEvent.setup();
+      const onSubmitReply = jest.fn().mockResolvedValue(true);
+      const child: CommunityReply = {
+        ...replies[0],
+        id: 'child-1',
+        body: '楼中楼正文',
+        author: { type: 'human', id: 'human-child', displayName: '桌面助手' },
+        replyToPostId: 'floor-1',
+      };
+      const floor: CommunityReply = {
+        ...replies[0],
+        id: 'floor-1',
+        body: '主楼层正文',
+        author: { type: 'human', id: 'human-floor', displayName: 'ClawMind' },
+        childReplies: [child],
+      };
 
-    renderDetail({
-      topic: { ...topic, topicType },
-      replies: [floor],
-      currentUserId: 'human-current',
-      onSubmitReply,
-    });
+      renderDetail({
+        topic: { ...topic, topicType },
+        replies: [floor],
+        currentUserId: 'human-current',
+        onSubmitReply,
+      });
 
-    const floorArticle = screen.getByText('主楼层正文').closest('article');
-    expect(floorArticle).not.toBeNull();
-    if (!floorArticle) throw new Error('floor article is missing');
+      const floorArticle = screen.getByText('主楼层正文').closest('article');
+      expect(floorArticle).not.toBeNull();
+      if (!floorArticle) throw new Error('floor article is missing');
 
-    const floorReplyButton = within(floorArticle).getAllByRole('button', { name: '回复' })[0];
-    const floorActionRow = floorReplyButton.closest('div');
-    expect(floorActionRow).not.toBeNull();
-    if (!floorActionRow) throw new Error('floor action row is missing');
-    expect(within(floorActionRow).getAllByRole('button')[0]).toBe(floorReplyButton);
+      const floorReplyButton = within(floorArticle).getAllByRole('button', { name: '回复' })[0];
+      const floorActionRow = floorReplyButton.closest('div');
+      expect(floorActionRow).not.toBeNull();
+      if (!floorActionRow) throw new Error('floor action row is missing');
+      expect(within(floorActionRow).getAllByRole('button')[0]).toBe(floorReplyButton);
 
-    await user.click(floorReplyButton);
-    const inlineComposer = within(floorArticle).getByRole('region', { name: '回复 ClawMind' });
-    expect(within(inlineComposer).getByText('@ClawMind')).toBeInTheDocument();
-    await user.type(within(inlineComposer).getByRole('textbox', { name: '回复 ClawMind' }), '回复主楼层');
-    await user.click(within(inlineComposer).getByRole('button', { name: '回复楼层' }));
-    expect(onSubmitReply).toHaveBeenLastCalledWith({ body: '回复主楼层', replyToPostId: 'floor-1' });
+      await user.click(floorReplyButton);
+      const inlineComposer = within(floorArticle).getByRole('region', { name: '回复 ClawMind' });
+      expect(within(inlineComposer).getByText('@ClawMind')).toBeInTheDocument();
+      await user.type(within(inlineComposer).getByRole('textbox', { name: '回复 ClawMind' }), '回复主楼层');
+      await user.click(within(inlineComposer).getByRole('button', { name: '回复楼层' }));
+      expect(onSubmitReply).toHaveBeenLastCalledWith({ body: '回复主楼层', replyToPostId: 'floor-1' });
 
-    const childArticle = screen.getByText('楼中楼正文').closest('article');
-    expect(childArticle).not.toBeNull();
-    if (!childArticle) throw new Error('child article is missing');
-    const childReplyButton = within(childArticle).getByRole('button', { name: '回复' });
-    const childActionRow = childReplyButton.closest('div');
-    expect(childActionRow).not.toBeNull();
-    if (!childActionRow) throw new Error('child action row is missing');
-    expect(within(childActionRow).getAllByRole('button')[0]).toBe(childReplyButton);
+      const childArticle = screen.getByText('楼中楼正文').closest('article');
+      expect(childArticle).not.toBeNull();
+      if (!childArticle) throw new Error('child article is missing');
+      const childReplyButton = within(childArticle).getByRole('button', { name: '回复' });
+      const childActionRow = childReplyButton.closest('div');
+      expect(childActionRow).not.toBeNull();
+      if (!childActionRow) throw new Error('child action row is missing');
+      expect(within(childActionRow).getAllByRole('button')[0]).toBe(childReplyButton);
 
-    await user.click(childReplyButton);
-    const childComposer = within(floorArticle).getByRole('region', { name: '回复 桌面助手' });
-    expect(within(childComposer).getByText('@桌面助手')).toBeInTheDocument();
-    await user.type(within(childComposer).getByRole('textbox', { name: '回复 桌面助手' }), '回复楼中楼');
-    await user.click(within(childComposer).getByRole('button', { name: '回复楼层' }));
-    expect(onSubmitReply).toHaveBeenLastCalledWith({ body: '回复楼中楼', replyToPostId: 'child-1' });
-  });
+      await user.click(childReplyButton);
+      const childComposer = within(floorArticle).getByRole('region', { name: '回复 桌面助手' });
+      expect(within(childComposer).getByText('@桌面助手')).toBeInTheDocument();
+      await user.type(within(childComposer).getByRole('textbox', { name: '回复 桌面助手' }), '回复楼中楼');
+      await user.click(within(childComposer).getByRole('button', { name: '回复楼层' }));
+      expect(onSubmitReply).toHaveBeenLastCalledWith({ body: '回复楼中楼', replyToPostId: 'child-1' });
+    },
+  );
 
   test('投票主题支持 Human 主题投票，一级楼层不提供楼中楼回复', async () => {
     const user = userEvent.setup();
@@ -196,9 +421,7 @@ describe('CommunityTopicDetail', () => {
     await user.click(within(composer).getByRole('button', { name: '回复主题' }));
 
     expect(onSubmitReply).toHaveBeenCalledTimes(1);
-    expect(onSubmitReply).toHaveBeenCalledWith(
-      expect.objectContaining({ body: '我选方案 A', pollSelection: [0] }),
-    );
+    expect(onSubmitReply).toHaveBeenCalledWith(expect.objectContaining({ body: '我选方案 A', pollSelection: [0] }));
     expect(onSubmitReply.mock.calls[0][0].replyToPostId).toBeUndefined();
   });
 
@@ -206,7 +429,7 @@ describe('CommunityTopicDetail', () => {
     const user = userEvent.setup();
     const onSubmitReply = jest.fn().mockResolvedValue(true);
     renderDetail({
-      topic: { ...topic, topicType: 'help', topicConfig: { help: { expectedTime: '希望本周内' } } },
+      topic: { ...topic, topicType: 'help' },
       currentUserId: 'human-current',
       onSubmitReply,
     });
@@ -219,19 +442,18 @@ describe('CommunityTopicDetail', () => {
     const composer = screen.getByRole('region', { name: '回复主题' });
     await user.type(within(composer).getByRole('textbox', { name: '回复正文' }), '求助补充');
     await user.click(within(composer).getByRole('button', { name: '回复主题' }));
-    expect(onSubmitReply).toHaveBeenCalledWith(
-      expect.objectContaining({ body: '求助补充' }),
-    );
+    expect(onSubmitReply).toHaveBeenCalledWith(expect.objectContaining({ body: '求助补充' }));
     expect(onSubmitReply.mock.calls[0][0].replyToPostId).toBeUndefined();
   });
 
-  test('分享主题展示分享类型标识', () => {
+  test('分享主题详情页不再重复展示分享类型图标', () => {
     renderDetail({ topic: { ...topic, topicType: 'share' } });
 
-    expect(screen.getByText('分享')).toBeInTheDocument();
+    expect(screen.queryByText('分享')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('分享')).not.toBeInTheDocument();
   });
 
-  test('求助主题展示期望时间，关闭后显示已解决', () => {
+  test('求助主题不再展示期望解决时间，关闭后显示已解决', () => {
     renderDetail({
       topic: {
         ...topic,
@@ -240,13 +462,13 @@ describe('CommunityTopicDetail', () => {
         canEdit: false,
         canDelete: false,
         topicType: 'help',
-        topicConfig: { help: { expectedTime: '希望本周内' } },
       },
     });
 
-    expect(screen.getByText('求助')).toHaveClass('text-warning');
+    expect(screen.queryByText('求助')).not.toBeInTheDocument();
     expect(screen.getByText('已解决')).toHaveClass('text-success');
-    expect(screen.getByText('希望本周内')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '求助设置' })).not.toBeInTheDocument();
+    expect(screen.queryByText('期望解决时间')).not.toBeInTheDocument();
     expect(screen.queryByText('已结帖')).not.toBeInTheDocument();
   });
 
@@ -524,17 +746,41 @@ describe('CommunityTopicDetail', () => {
     expect(screen.getByText('1页楼中楼3')).toBeInTheDocument();
 
     firstRender.rerender(
-      <CommunityTopicDetail
-        {...firstRender.props}
-        replyPage={2}
-        replies={[makeFloor('floor-page-2', 2)]}
-      />,
+      <CommunityTopicDetail {...firstRender.props} replyPage={2} replies={[makeFloor('floor-page-2', 2)]} />,
     );
     expect(screen.getByText('2页楼中楼1')).toBeInTheDocument();
     expect(screen.getByText('2页楼中楼2')).toBeInTheDocument();
     expect(screen.queryByText('2页楼中楼3')).not.toBeInTheDocument();
   });
 
+  test('主帖作者已关注时作者卡片展示已关注', async () => {
+    const user = userEvent.setup();
+    const baseStats = {
+      viewCount: 0,
+      likeCount: 0,
+      favoriteCount: 0,
+      followCount: 1,
+      acceptCount: 0,
+      topicCount: 0,
+      replyCount: 0,
+      acceptedReplyCount: 0,
+      replyParticipantCount: 0,
+      helpfulReplyCount: 0,
+    };
+    renderDetail({
+      currentUserId: 'human-current',
+      authorFollowed: () => true,
+      getAuthorSummary: () => ({
+        ...baseStats,
+        scope: 'ACTOR' as const,
+        actor: { actorType: 'HUMAN' as const, id: 'human-1' },
+      }),
+      loadAuthorSummary: () => undefined,
+    });
+
+    await user.hover(screen.getByRole('button', { name: '查看顾客资料' }));
+    expect(await screen.findByRole('button', { name: '已关注' })).toBeInTheDocument();
+  });
 
   test('翻页到第 2 页不再重复展示楼主正文（楼主仅首页显示）', () => {
     renderDetail({ replyPage: 2, replyPageCount: 2, replies: [replies[0]] });

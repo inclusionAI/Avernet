@@ -14,7 +14,8 @@ export interface BotContainerInfoProps {
 }
 
 function isEligible(bot: BotDomain) {
-  return bot.deployment === 'cloud' && bot.serviceMode === 'service' && bot.lifecycle === 'running';
+  return bot.runtime.engine !== 'teclaw' &&
+    bot.deployment === 'cloud' && bot.serviceMode === 'service' && bot.lifecycle === 'running';
 }
 
 /**

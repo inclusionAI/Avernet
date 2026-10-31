@@ -7,6 +7,10 @@ from uuid import uuid4
 
 from injector import inject
 
+from agentclaw.community.api.bot_manager_sync import BotManagerSyncProtocol
+from agentclaw.community.core.bot_collaborator.manager_sync.notifications import (
+    notify_bot_manager_sync,
+)
 from agentclaw.community.core.execution_identity.protocols import (
     RuntimePassportTokenUpdaterProtocol,
 )
@@ -16,9 +20,16 @@ from agentclaw.community.core.bot_management.owner_handoff.contracts import (
     OwnerHandoffRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.spaces.errors import SpaceNotFoundError
+from agentclaw.community.core.spaces.models import SpaceType
+from agentclaw.community.core.spaces.space_service_protocol import (
+    SpaceAccessServiceProtocol,
+    SpaceServiceProtocol,
+)
 from agentclaw.community.core.task_queue.services.task_queue_service import (
     TaskQueueService,
 )
+from agentclaw.community.kernel.bot_manager_sync import SyncReason
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
 
@@ -50,10 +61,15 @@ class OwnerHandoffService:
         bots: BotRepository,
         queue: TaskQueueService,
         policy: OwnerHandoffPolicy,
+        manager_sync: BotManagerSyncProtocol,
+        spaces: SpaceServiceProtocol,
+        space_access: SpaceAccessServiceProtocol,
     ):
         self._repo, self._passport, self._runtime = repository, passport, runtime
         self._staff, self._queue, self._policy = staff, queue, policy
         self._bots = bots
+        self._manager_sync = manager_sync
+        self._spaces, self._space_access = spaces, space_access
 
     @staticmethod
     def _public(row):
@@ -101,6 +117,7 @@ class OwnerHandoffService:
             entity_id=bot["entity_id"],
         ):
             raise HandoffError("PASSPORT_HANDOFF_UNSUPPORTED")
+        self._prepare_personal_space(bot, actor_id, new_owner_id)
         row = self._repo.begin(
             bot_pk=bot_pk,
             actor_id=actor_id,
@@ -112,6 +129,28 @@ class OwnerHandoffService:
         if row["phase"] not in {"SUCCEEDED", "CANCELLED"}:
             self._enqueue(row)
         return self._public(row)
+
+    def _prepare_personal_space(self, bot, actor_id, new_owner_id):
+        # Do not provision on unauthorized requests or terminal idempotent
+        # replays. The repository remains authoritative and rechecks under lock.
+        if (
+            bot.get("space_id") is None
+            or bot.get("bot_type") != "service"
+            or bot["bot_id"] == "default"
+            or new_owner_id == bot["owner_id"]
+            or actor_id != bot["owner_id"] and actor_id not in self._policy.administrators
+        ):
+            return
+        try:
+            source = self._space_access.require_space(space_id=bot["space_id"])
+        except SpaceNotFoundError:
+            raise HandoffError("HANDOFF_SPACE_NOT_FOUND") from None
+        if source.space_type is SpaceType.PERSONAL:
+            if source.personal_owner_id != bot["owner_id"]:
+                raise HandoffError("HANDOFF_PERSONAL_SPACE_CONFLICT")
+            # Local identity/membership only. SC binding can be initialized by
+            # its normal entrypoint; no remote API runs in the handoff commit.
+            self._spaces.initialize_personal(user_id=new_owner_id, create_sc_team=False)
 
     def get(self, *, operation_id, actor_id):
         if not self._policy.enabled and not self._policy.recovery_enabled:
@@ -300,6 +339,18 @@ class OwnerHandoffService:
             elif phase == "COMMITTING_OWNER":
                 self._selected(row)
                 self._repo.finish(operation_id, worker)
+                # The owner change is durable — BCS's stale manager set must
+                # be refreshed via the side-channel only. The shared helper
+                # contains the notification failure, so it cannot reach the
+                # outer error-state handling, re-enter a Passport admin path,
+                # or call a BCS owner transfer.
+                notify_bot_manager_sync(
+                    self._manager_sync,
+                    bot_pk=row["bot_pk"],
+                    env=row["env"],
+                    avernet_tenant=row["avernet_tenant"],
+                    reason=SyncReason.OWNER_HANDOFF,
+                )
                 return True
             else:
                 raise HandoffError("INVALID_HANDOFF_PHASE")

@@ -74,7 +74,7 @@ export function GroupMembersModal({ open, group, members, loading, ownerUserName
                 <div
                   key={member.id}
                   className={`flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/50${
-                    isLast ? '' : ' border-b border-border'
+                    isLast ? '' : ' border-b border-divider'
                   }`}
                 >
                   <MemberAvatar member={member} />

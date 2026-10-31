@@ -1,35 +1,19 @@
 import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
-import { ReplyComposer, type ReplyComposerPayload } from './ReplyComposer';
+import { TopicFirstFloor } from './TopicFirstFloor';
 import type {
   CommunityAuthor,
   CommunityReply,
   CommunityTopic,
   ForumTargetRef,
-  InteractionStats,
   InteractionSummary,
 } from '@/domain/community/types';
-import { CircleHelp } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Floor } from './Floor';
-import { PollPanel } from './PollPanel';
-import { TopicInteractionBar } from '../TopicInteractionBar';
+import { ReplyComposer, type ReplyComposerPayload } from './ReplyComposer';
 import { TopicDetailHeader } from './TopicDetailHeader';
 import { buildReplyGroups } from './model';
-
-const EMPTY_STATS: InteractionStats = {
-  viewCount: 0,
-  likeCount: 0,
-  favoriteCount: 0,
-  followCount: 0,
-  acceptCount: 0,
-  topicCount: 0,
-  replyCount: 0,
-  acceptedReplyCount: 0,
-  replyParticipantCount: 0,
-  helpfulReplyCount: 0,
-};
 
 export interface CommunityTopicDetailProps {
   topic: CommunityTopic | null;
@@ -42,14 +26,21 @@ export interface CommunityTopicDetailProps {
   onBack: () => void;
   currentUserId?: string;
   targetSummary?: InteractionSummary;
+  /** Actor-target summary used only to render the current viewer's liked/favorited state. */
+  viewerTopicSummary?: InteractionSummary;
   getAuthorSummary?: (author: CommunityAuthor) => InteractionSummary | undefined;
   loadAuthorSummary?: (author: CommunityAuthor) => void;
   followAuthor?: (author: CommunityAuthor) => Promise<boolean>;
   authorFollowLoading?: (author: CommunityAuthor) => boolean;
+  authorFollowed?: (author: CommunityAuthor) => boolean;
   likePending?: boolean;
   favoritePending?: boolean;
   onLike?: (target: ForumTargetRef) => void;
   onFavorite?: (target: ForumTargetRef) => void;
+  getReplySummary?: (postId: string) => InteractionSummary | undefined;
+  getReplyViewerSummary?: (postId: string) => InteractionSummary | undefined;
+  replyLikePending?: (postId: string) => boolean;
+  onLikeReply?: (postId: string) => void;
   onCloseTopic: () => Promise<boolean>;
   onEditTopic: () => void;
   onDeleteTopic: () => Promise<boolean>;
@@ -76,14 +67,20 @@ export function CommunityTopicDetail({
   onBack,
   currentUserId,
   targetSummary,
+  viewerTopicSummary,
   getAuthorSummary,
   loadAuthorSummary,
   followAuthor,
   authorFollowLoading,
+  authorFollowed,
   likePending,
   favoritePending,
   onLike,
   onFavorite,
+  getReplySummary,
+  getReplyViewerSummary,
+  replyLikePending,
+  onLikeReply,
   onCloseTopic,
   onEditTopic,
   onDeleteTopic,
@@ -99,19 +96,23 @@ export function CommunityTopicDetail({
 }: CommunityTopicDetailProps) {
   const [expandedReplyIds, setExpandedReplyIds] = useState<Record<string, boolean>>({});
   const replyElementsRef = useRef(new Map<string, HTMLElement | null>());
+  const replyComposerRef = useRef<HTMLDivElement | null>(null);
 
   const replyOffset = (replyPage - 1) * replyPageSize;
-  const floorGroups = useMemo(
-    () => buildReplyGroups(replies, replyOffset + 1),
-    [replies, replyOffset],
-  );
+  const floorGroups = useMemo(() => buildReplyGroups(replies, replyOffset + 1), [replies, replyOffset]);
   const registerReplyElement = useCallback(
-    (postId?: string) =>
-      (element: HTMLElement | null) => {
-        if (postId) replyElementsRef.current.set(postId, element);
-      },
+    (postId?: string) => (element: HTMLElement | null) => {
+      if (postId) replyElementsRef.current.set(postId, element);
+    },
     [],
   );
+
+  const goToReplyComposer = useCallback(() => {
+    const composer = replyComposerRef.current?.querySelector('textarea');
+    if (!composer) return;
+    composer.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    composer.focus();
+  }, []);
 
   const locateTargetReply = useCallback((postId: string) => {
     const element = replyElementsRef.current.get(postId);
@@ -125,17 +126,15 @@ export function CommunityTopicDetail({
     setExpandedReplyIds((previous) => ({ ...previous, [postId]: !previous[postId] }));
   }, []);
 
-  const getSummaryFor = useCallback(
-    (author: CommunityAuthor) => getAuthorSummary?.(author),
-    [getAuthorSummary],
-  );
-  const loadSummaryFor = useCallback(
-    (author: CommunityAuthor) => loadAuthorSummary?.(author),
-    [loadAuthorSummary],
-  );
+  const getSummaryFor = useCallback((author: CommunityAuthor) => getAuthorSummary?.(author), [getAuthorSummary]);
+  const loadSummaryFor = useCallback((author: CommunityAuthor) => loadAuthorSummary?.(author), [loadAuthorSummary]);
   const followFor = useCallback(
     (author: CommunityAuthor) => followAuthor?.(author) ?? Promise.resolve(false),
     [followAuthor],
+  );
+  const isReplyLikePending = useCallback(
+    (postId?: string) => (postId ? replyLikePending?.(postId) === true : false),
+    [replyLikePending],
   );
 
   // 楼中楼是楼层页面内的局部展开状态；翻页后必须回到默认展示前 2 条。
@@ -152,11 +151,13 @@ export function CommunityTopicDetail({
         replyPage={replyPage}
         replyPageCount={replyPageCount}
         replyLoading={replyLoading}
+        currentUserId={currentUserId}
         onBack={onBack}
         onCloseTopic={onCloseTopic}
         onEditTopic={onEditTopic}
         onDeleteTopic={onDeleteTopic}
         onGoToReplyPage={onGoToReplyPage}
+        onGoToReplyComposer={goToReplyComposer}
       />
       <main className="app-scrollbar min-h-0 flex-1 overflow-y-auto">
         <div className="flex w-full flex-col px-4 pb-6 sm:px-6 lg:px-10">
@@ -179,59 +180,24 @@ export function CommunityTopicDetail({
           ) : topic ? (
             <>
               {/* 楼主楼层仅在第 1 页显示：分页语义本身一直以一级楼层为单位。 */}
-              {replyPage === 1 && (
-                <Floor
+              {replyPage === 1 ? (
+                <TopicFirstFloor
                   topic={topic}
-                  floor={0}
-                  author={topic.author}
-                  body={topic.body}
-                  createdAt={topic.createdAt}
-                  threadReplies={[]}
-                  expanded={false}
-                  onToggleThreadReplies={() => undefined}
-                  registerElement={registerReplyElement}
                   currentUserId={currentUserId}
+                  targetSummary={targetSummary}
+                  viewerTopicSummary={viewerTopicSummary}
                   getAuthorSummary={getSummaryFor}
                   loadAuthorSummary={loadSummaryFor}
                   followAuthor={followFor}
                   authorFollowLoading={authorFollowLoading}
+                  authorFollowed={authorFollowed}
+                  likePending={likePending}
+                  favoritePending={favoritePending}
+                  onLike={onLike}
+                  onFavorite={onFavorite}
+                  registerElement={registerReplyElement}
                 />
-              )}
-              {topic.topicType === 'help' && topic.topicConfig?.help?.expectedTime ? (
-                <section
-                  aria-label="求助设置"
-                  className="mb-4 flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-3"
-                >
-                  <CircleHelp className="size-4 text-warning" aria-hidden />
-                  <span className="text-xs font-medium text-muted-foreground">期望解决时间</span>
-                  <span className="text-sm text-foreground">{topic.topicConfig.help.expectedTime}</span>
-                </section>
               ) : null}
-              <PollPanel
-                topicType={topic.topicType}
-                status={topic.status}
-                poll={topic.topicConfig?.poll}
-                pollStats={topic.analysis?.pollStats}
-              />
-              <TopicInteractionBar
-                topicId={topic.id}
-                topicStats={targetSummary ? {
-                  viewCount: targetSummary.viewCount,
-                  likeCount: targetSummary.likeCount,
-                  favoriteCount: targetSummary.favoriteCount,
-                  followCount: targetSummary.followCount,
-                  acceptCount: targetSummary.acceptCount,
-                  topicCount: targetSummary.topicCount,
-                  replyCount: targetSummary.replyCount,
-                  acceptedReplyCount: targetSummary.acceptedReplyCount,
-                  replyParticipantCount: targetSummary.replyParticipantCount,
-                  helpfulReplyCount: targetSummary.helpfulReplyCount,
-                } : EMPTY_STATS}
-                likePending={likePending === true}
-                favoritePending={favoritePending === true}
-                onLike={(target) => onLike?.(target)}
-                onFavorite={(target) => onFavorite?.(target)}
-              />
               {floorGroups.map(({ reply, floorNo, children }) => (
                 <Floor
                   topic={topic}
@@ -246,6 +212,10 @@ export function CommunityTopicDetail({
                   helpful={reply.helpful}
                   canToggleHelpful={topic.topicType === 'help' && topic.isMine}
                   helpfulLoading={helpfulPostId === reply.id}
+                  getReplyLikeSummary={getReplySummary}
+                  getReplyViewerSummary={getReplyViewerSummary}
+                  replyLikePending={isReplyLikePending}
+                  onLike={onLikeReply}
                   onToggleHelpful={() => {
                     void onSetPostHelpful(reply.id, !reply.helpful);
                   }}
@@ -262,9 +232,12 @@ export function CommunityTopicDetail({
                   loadAuthorSummary={loadSummaryFor}
                   followAuthor={followFor}
                   authorFollowLoading={authorFollowLoading}
+                  authorFollowed={authorFollowed}
                 />
               ))}
-              {!replies.length && !replyLoading && <p className="py-6 text-center text-sm text-muted-foreground">暂时还没有回复</p>}
+              {!replies.length && !replyLoading && (
+                <p className="py-6 text-center text-sm text-muted-foreground">暂时还没有回复</p>
+              )}
               {replyLoading && (
                 <p aria-live="polite" className="py-3 text-center text-xs text-muted-foreground">
                   回复加载中...
@@ -279,12 +252,14 @@ export function CommunityTopicDetail({
                 </div>
               )}
               {topic.status === 'open' && currentUserId && topic.topicType !== 'notice' ? (
-                <ReplyComposer
-                  topic={topic}
-                  submitLabel="回复主题"
-                  saving={replySaving}
-                  onSubmit={(payload) => onSubmitReply?.(payload) ?? Promise.resolve(false)}
-                />
+                <div ref={replyComposerRef}>
+                  <ReplyComposer
+                    topic={topic}
+                    submitLabel="回复主题"
+                    saving={replySaving}
+                    onSubmit={(payload) => onSubmitReply?.(payload) ?? Promise.resolve(false)}
+                  />
+                </div>
               ) : null}
             </>
           ) : null}

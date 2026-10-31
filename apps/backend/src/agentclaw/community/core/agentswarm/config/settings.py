@@ -100,16 +100,16 @@ class LlmConfig:
 
 @dataclass(frozen=True)
 class AgentSwarmOrchestrationConfig:
-    max_turns: int = 50
-    max_total_agents: int = 100
+    max_turns: int = 999
+    max_total_agents: int = 256
     max_width: int = 8
     max_depth: int = 5
     repair_max: int = 2
     agent_max_attempts: int = 3
-    per_attempt_timeout: float = 300.0
-    setup_timeout: float = 300.0
+    per_attempt_timeout: float = 1800.0
+    setup_timeout: float = 900.0
     orchestrator_turn_interval: float = 1.0
-    slice_max_seconds: float = 900.0
+    slice_max_seconds: float = 3600.0
     slice_interval: float = 1.0
     respawn_max: int = 3
     reclaim_max: int = 5
@@ -117,7 +117,7 @@ class AgentSwarmOrchestrationConfig:
     poll_interval: float = 2.0
     poll_jitter: float = 0.5
     batch_size: int = 10
-    wall_clock_seconds: float = 3600.0
+    wall_clock_seconds: float = 86400.0
     no_progress_threshold: int = 3
     # Simulator-only fault injection: artificial delay inside each
     # subagent's setup() — llm and bot kind alike — defaulting to zero
@@ -279,6 +279,12 @@ class AgentSwarmExecutorConfig:
     """
 
     max_platform_workers: int = 4
+    # The bot persona chat leg's own deadline (host adapter): one engine
+    # chat round trip may occupy the whole per-attempt task budget on
+    # long-running coding/review turns, so the default follows
+    # orchestration.per_attempt_timeout (1800s) rather than the old 300s
+    # slice cadence — setup(900) + chat(1800) still fits slice_max(3600).
+    bot_chat_timeout_seconds: float = 1800.0
 
     @classmethod
     def from_block(cls, block: dict) -> "AgentSwarmExecutorConfig":
@@ -288,6 +294,9 @@ class AgentSwarmExecutorConfig:
             max_platform_workers=_as_int(
                 block, "max_platform_workers",
                 d.max_platform_workers, minimum=1),
+            bot_chat_timeout_seconds=_as_float(
+                block, "bot_chat_timeout_seconds",
+                d.bot_chat_timeout_seconds),
         )
 
 
@@ -395,6 +404,6 @@ class AgentSwarmConfig:
             message_retention_tail=_as_int(
                 block, "message_retention_tail",
                 cls().message_retention_tail, minimum=0),
-            enabled=_as_bool(block, "enabled", True),
+            enabled=_as_bool(block, "agentswarm_enabled", True),
         )
 

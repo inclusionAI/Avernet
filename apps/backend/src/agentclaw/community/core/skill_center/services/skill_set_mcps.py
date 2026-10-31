@@ -70,7 +70,7 @@ class SkillSetMcpCollection:
             )
         if capability_snapshot is not None and (
             capability_snapshot.bot_id != bot_id
-            or capability_snapshot.owner_id != user_id
+            or capability_snapshot.owner_id != entity_id
         ):
             raise ValueError("Capability snapshot belongs to a different Bot")
         effective_engine = engine_type if engine_type is not None else self.engine_type
@@ -91,6 +91,7 @@ class SkillSetMcpCollection:
             engine_type=effective_engine,
             operation=lambda: self._get_default_capabilities_template_type(
                 bot_id,
+                entity_id=entity_id,
                 strict=strict_policy_context,
             ),
             report_has_value=True,
@@ -116,7 +117,7 @@ class SkillSetMcpCollection:
             bot_id=bot_id,
             engine_type=effective_engine,
             operation=lambda: set(
-                self.skill_set_repo.get_all_excluded_mcps(user_id, bot_id)
+                self.skill_set_repo.get_all_excluded_mcps(entity_id, bot_id)
             ),
             item_count=len,
         )
@@ -132,7 +133,7 @@ class SkillSetMcpCollection:
             engine_type=effective_engine,
             operation=lambda: self._default_set_mcp_rows(
                 active_skill_sets,
-                user_id=user_id,
+                user_id=entity_id,
                 bot_id=bot_id,
                 engine_type=effective_engine,
                 template_type=effective_template_type,

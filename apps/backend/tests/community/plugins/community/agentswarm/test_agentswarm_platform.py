@@ -25,6 +25,7 @@ import types
 import pytest
 
 import agentclaw.community.plugins.community.agentswarm.host as host_module
+import agentclaw.community.plugins.community.agentswarm.host_chat as host_chat_module
 from agentclaw.community.plugins.community.agentswarm.host import _idem_digest
 from agentclaw.community.core.agentswarm.domain.models import (
     BotCreateSpec, BotState,
@@ -72,11 +73,15 @@ class _Apply:
 
 
 class _Repo:
-    def __init__(self, bot=None):
+    def __init__(self, bot=None, soft_deleted=False):
         self.bot = bot
+        self.soft_deleted = soft_deleted
 
     def get_by_id_and_entity(self, bot_id, entity_id):
         return self.bot
+
+    def is_soft_deleted(self, bot_id, entity_id):
+        return self.soft_deleted
 
 
 class _BotSvc:
@@ -184,7 +189,7 @@ def _job(status, last_error=None):
 
 
 def _mk(config=None, seam=None, apply_=None, repo=None, bot_svc=None,
-        bridge_workers=None):
+        bridge_workers=None, baas=None):
     return AvernetBotPlatform(
         manifest_seam=seam or _Seam(),
         bot_service=bot_svc or _BotSvc(),
@@ -193,7 +198,7 @@ def _mk(config=None, seam=None, apply_=None, repo=None, bot_svc=None,
         bot_repo=repo or _Repo(),
         apply_service=apply_ or _Apply(),
         space_context=_Space(),
-        baas_service=_Baas(),
+        baas_service=baas or _Baas(),
         max_platform_workers=bridge_workers or 4,
     )
 
@@ -239,6 +244,42 @@ class TestCreate:
                       owner_id="owner-1")
         assert first == again and first.startswith("agent_swarm_") and len(first) == 28
         assert [w["bot_id"] for w in seen] == [first, first]
+
+    def test_persona_name_is_id_format_desc_carries_the_label(self, monkeypatch):
+        # The platform caps bot_name at 32 chars and a spec-derived name
+        # (composite spawn name + digest) can exceed it, so the NAME is the
+        # id-format digest and the descriptive label rides bot_desc.
+        seen = self._record_submit(monkeypatch)
+        platform = _mk()
+        spec = BotCreateSpec(name="tester_rust_f9ed5997468d",
+                             description="writes rust tests")
+        bot_id = platform.create_bot(spec=spec, idempotency_key="run-9:a1",
+                                     owner_id="owner-1")
+        submitted = seen[0]
+        assert submitted["bot_id"] == bot_id == submitted["spec"].bot_name
+        assert len(bot_id) == 28
+        assert not submitted["spec"].bot_name.startswith("tester_rust")
+        desc = submitted["spec"].bot_desc
+        assert desc.startswith("tester_rust_f9ed5997468d-")
+        assert "writes rust tests" in desc
+
+    def test_persona_desc_label_only_without_role(self, monkeypatch):
+        seen = self._record_submit(monkeypatch)
+        platform = _mk()
+        spec = BotCreateSpec(name="scout")  # no description
+        platform.create_bot(spec=spec, idempotency_key="run-9:a2",
+                            owner_id="owner-1")
+        desc = seen[0]["spec"].bot_desc
+        # f"{spec.name}-{digest8}" and nothing else
+        assert desc.startswith("scout-") and len(desc) == len("scout-") + 8
+
+    def test_persona_desc_clamped_to_column_size(self, monkeypatch):
+        seen = self._record_submit(monkeypatch)
+        platform = _mk()
+        spec = BotCreateSpec(name="scout", description="x" * 20000)
+        platform.create_bot(spec=spec, idempotency_key="run-9:a3",
+                            owner_id="owner-1")
+        assert len(seen[0]["spec"].bot_desc) <= 1024
 
     def test_name_refusal_adopts_the_live_persona_row(self, monkeypatch):
         # D16 respawn after a mid-creation crash: bot_service's name check
@@ -324,9 +365,15 @@ class TestCreate:
         assert "type: SOUL.md" in document
         assert "File weekly reports." in document
         host_spec = w["spec"]
-        assert host_spec.bot_name == f"clerk-{first8(w['bot_id'][12:])}"
+        # Id-format naming contract: bot_name IS the derived id (the
+        # platform's 32-char bot_name cap forbids spec-derived names);
+        # the descriptive label moves into bot_desc ahead of the role.
+        assert host_spec.bot_name == w["bot_id"]
+        assert host_spec.bot_name.startswith("agent_swarm_")
+        assert host_spec.bot_desc.startswith(
+            f"clerk-{first8(w['bot_id'][12:])}")
+        assert "a filing clerk" in host_spec.bot_desc
         assert host_spec.engine_type == "openclaw"
-        assert host_spec.bot_desc == "a filing clerk"
         assert w["context"].deployment_mode.value == "cloud"
         assert document.count("template_display") == 0
 
@@ -496,8 +543,20 @@ class TestStatusNarrowTable:
              BotState.AUTHORIZATION_EXPIRED.value),
             (TaskStatus.FAILED, "the bot could not be provisioned: quota",
              BotState.CREATE_FAILED.value),
-            (TaskStatus.FAILED, "declined by user",
+            # The authorization's own terminal verdicts, verbatim from the
+            # service — the only path to REJECTED/EXPIRED by status.
+            (TaskStatus.FAILED, "authorization did not complete: REJECTED",
              BotState.AUTHORIZATION_REJECTED.value),
+            (TaskStatus.FAILED, "authorization did not complete: EXPIRED",
+             BotState.AUTHORIZATION_EXPIRED.value),
+            # A service-side terminal status is NOT a human decline: the
+            # PRE 04fadbbf incident died to a fabricated REJECTED here.
+            (TaskStatus.FAILED, "authorization did not complete: APPLY_FAILED",
+             BotState.CREATE_FAILED.value),
+            # Any other terminal job error is a platform failure too —
+            # never an authorization verdict nobody gave.
+            (TaskStatus.FAILED, "declined by user",
+             BotState.CREATE_FAILED.value),
         ]
         for status, err, want in cases:
             seam = _Seam()
@@ -594,11 +653,63 @@ class TestDelete:
 
     def test_pending_creation_is_discarded_not_soft_deleted(self):
         seam = _Seam()
+        seam.jobs["b1"] = object()
         bot_svc = _BotSvc()
         platform = _mk(seam=seam, bot_svc=bot_svc)
         assert platform.delete_bot("b1", owner_id="owner-1") is True
         assert seam.discards == [("b1", "owner-1")]
         assert bot_svc.deleted == []
+
+    def test_never_submitted_creation_has_nothing_to_discard(self):
+        # No bot and no creation job: submission never landed a row, so the
+        # pre-container phase never wrote the managed-files / CLI-tools
+        # prefixes. Discarding anyway lists a prefix that cannot exist, on
+        # every teardown of a slice whose creation never got that far.
+        seam = _Seam()
+        bot_svc = _BotSvc()
+        platform = _mk(seam=seam, bot_svc=bot_svc)
+        assert platform.delete_bot("b1", owner_id="owner-1") is True
+        assert seam.discards == []
+        assert bot_svc.deleted == []
+
+    def test_unreadable_job_still_discards(self):
+        # An unknown job state is not proof that nothing was written; only an
+        # absent row is. A failing read must fall back to the cleanup.
+        class _UnreadableSeam(_Seam):
+            def find_job(self, *, entity_id, bot_id):
+                raise RuntimeError("job store down")
+
+        seam = _UnreadableSeam()
+        platform = _mk(seam=seam, bot_svc=_BotSvc())
+        assert platform.delete_bot("b1", owner_id="owner-1") is True
+        assert seam.discards == [("b1", "owner-1")]
+
+    def test_failed_creation_job_has_nothing_to_discard(self):
+        # An expired/declined authorization ends the creation before the phase
+        # that writes managed files. The adapter addresses the bot id
+        # deterministically from (run, agent, attempt), so teardown asks again
+        # on every slice; purging would list a prefix that cannot exist.
+        seam = _Seam()
+        seam.jobs["b1"] = types.SimpleNamespace(status=TaskStatus.FAILED)
+        platform = _mk(seam=seam, bot_svc=_BotSvc())
+        assert platform.delete_bot("b1", owner_id="owner-1") is True
+        assert seam.discards == []
+
+    def test_timed_out_creation_job_has_nothing_to_discard(self):
+        seam = _Seam()
+        seam.jobs["b1"] = types.SimpleNamespace(status=TaskStatus.TIMED_OUT)
+        platform = _mk(seam=seam, bot_svc=_BotSvc())
+        assert platform.delete_bot("b1", owner_id="owner-1") is True
+        assert seam.discards == []
+
+    def test_succeeded_creation_job_still_discards(self):
+        # A succeeded creation may have written files; the guard must not
+        # treat every terminal state as "nothing to undo".
+        seam = _Seam()
+        seam.jobs["b1"] = types.SimpleNamespace(status=TaskStatus.SUCCEEDED)
+        platform = _mk(seam=seam, bot_svc=_BotSvc())
+        assert platform.delete_bot("b1", owner_id="owner-1") is True
+        assert seam.discards == [("b1", "owner-1")]
 
     def test_created_bot_is_soft_deleted(self):
         repo = _Repo(bot={"status": "ACTIVE"})
@@ -606,6 +717,18 @@ class TestDelete:
         platform = _mk(repo=repo, bot_svc=bot_svc)
         assert platform.delete_bot("b1", owner_id="owner-1") is True
         assert bot_svc.deleted == [("b1", "owner-1")]
+
+    def test_already_soft_deleted_bot_is_not_discarded_again(self):
+        # The live lookups filter is_delete=0, so an already-deleted bot reads
+        # like a pending one. Re-discarding it repeats the managed-files purge
+        # on every teardown; a deleted bot has nothing left to undo.
+        seam = _Seam()
+        bot_svc = _BotSvc()
+        repo = _Repo(bot=None, soft_deleted=True)
+        platform = _mk(seam=seam, bot_svc=bot_svc, repo=repo)
+        assert platform.delete_bot("b1", owner_id="owner-1") is True
+        assert seam.discards == []
+        assert bot_svc.deleted == []
 
     def test_repository_failure_is_swallowed_to_false(self):
         class _Boom:
@@ -681,7 +804,7 @@ class TestChat:
         # reset wait) and the chat proceeds: context freshness is an
         # answer-quality risk, never a liveness one.
         ws = _ScriptedEngineWs(reset_goes_silent=True)
-        monkeypatch.setattr(host_module, "_SESSION_RESET_SECONDS", 0.1)
+        monkeypatch.setattr(host_chat_module, "_SESSION_RESET_SECONDS", 0.1)
         platform = _mk()
         _patch_engine_routes(monkeypatch, ws)
         with caplog.at_level(
@@ -779,11 +902,11 @@ class TestChat:
         # reset prelude included: its own tiny bound abdicates first,
         # fail-soft, and the deadline below still bounds the chat.
         ws = _ScriptedEngineWs(reply="never", stall_seconds=30.0)
-        monkeypatch.setattr(host_module, "_CHAT_TIMEOUT_SECONDS", 0.05)
-        monkeypatch.setattr(host_module, "_RECV_SLICE_SECONDS", 0.05)
-        monkeypatch.setattr(host_module, "_SESSION_RESET_SECONDS", 0.05)
+        monkeypatch.setattr(host_chat_module, "_CHAT_TIMEOUT_SECONDS", 0.05)
+        monkeypatch.setattr(host_chat_module, "_RECV_SLICE_SECONDS", 0.05)
+        monkeypatch.setattr(host_chat_module, "_SESSION_RESET_SECONDS", 0.05)
         platform = _mk()
-        platform._chat_timeout_seconds = host_module._CHAT_TIMEOUT_SECONDS
+        platform._chat_timeout_seconds = host_chat_module._CHAT_TIMEOUT_SECONDS
         _patch_engine_routes(monkeypatch, ws)
         started = time.monotonic()
         with pytest.raises(host_module.ChatTimeoutError,
@@ -835,3 +958,255 @@ class TestBlankOwnerRefusal:
             platform.create_bot(spec=BotCreateSpec(name="scout"),
                                 idempotency_key="run-1:scout")
         assert seen == []
+
+# ── the engine-chat transport's own seams (host_chat.py) ────────────────
+
+class TestChatTimeoutProperty:
+
+    def test_property_exposes_the_deployment_default(self):
+        platform = _mk()
+        assert platform.chat_timeout_seconds == 1800.0
+
+
+class _BaasInfo(types.SimpleNamespace):
+    """ws-info stand-in with configurable url/token."""
+
+    def get_ws_info_by_bot_uuid(self, *, bot_uuid, port, path):
+        return self
+
+
+class _BaasRaiser:
+    def get_ws_info_by_bot_uuid(self, *, bot_uuid, port, path):
+        raise ConnectionError("baas down")
+
+
+class TestEngineEndpoint:
+
+    def test_missing_bot_row_is_not_found_for_chat(self):
+        platform = _mk(repo=_Repo(bot=None))
+        with pytest.raises(RuntimeError, match="not found for chat"):
+            platform._engine_endpoint("b1", "owner-1")
+
+    def test_bot_without_runtime_binding_refuses(self):
+        platform = _mk(repo=_Repo(bot={"status": "ACTIVE"}))
+        with pytest.raises(RuntimeError, match="no runtime binding"):
+            platform._engine_endpoint("b1", "owner-1")
+
+    def test_baas_ws_info_failure_is_a_binding_refusal(self):
+        platform = _mk(repo=_Repo(bot={"device_id": "dev-1"}),
+                       baas=_BaasRaiser())
+        with pytest.raises(RuntimeError, match="no runtime binding"):
+            platform._engine_endpoint("b1", "owner-1")
+
+    def test_empty_ws_pair_is_a_binding_refusal(self):
+        platform = _mk(
+            repo=_Repo(bot={"device_id": "dev-1"}),
+            baas=_BaasInfo(ws_url="  ", token=""),
+        )
+        with pytest.raises(RuntimeError, match="no runtime binding"):
+            platform._engine_endpoint("b1", "owner-1")
+
+    def test_resolved_pair_returns_the_endpoint(self):
+        platform = _mk(
+            repo=_Repo(bot={"device_id": "dev-1"}),
+            baas=_BaasInfo(ws_url="wss://engine/x", token="tok"),
+        )
+        assert platform._engine_endpoint("b1", "owner-1") \
+            == ("wss://engine/x", "tok")
+
+
+class _HandshakeWs:
+    """Answers the `connect` handshake per the scripted mode."""
+
+    def __init__(self, *, handshake_ok=True, recv_error=None):
+        self.handshake_ok = handshake_ok
+        self.recv_error = recv_error
+        self.closed = False
+
+    async def send(self, raw):
+        pass
+
+    async def recv(self):
+        if self.recv_error is not None:
+            raise self.recv_error
+        return json.dumps({
+            "type": "res", "ok": self.handshake_ok,
+            "payload": {"scopes": []},
+        })
+
+    async def close(self):
+        self.closed = True
+
+
+class TestConnectHandshake:
+
+    def _connect_once(self, monkeypatch, ws, url="ws://engine/x"):
+        seen: dict = {}
+
+        async def fake_connect(u, **kwargs):
+            seen["url"], seen["kwargs"] = u, kwargs
+            return ws
+
+        monkeypatch.setattr("websockets.connect", fake_connect)
+        fut = asyncio.run(
+            AvernetBotPlatform._connect_engine_once(None, url, "tok"))
+        return fut, seen
+
+    def test_handshake_ok_returns_the_socket(self, monkeypatch):
+        ws = _HandshakeWs(handshake_ok=True)
+        out, _ = self._connect_once(monkeypatch, ws)
+        assert out is ws
+
+    def test_wss_url_builds_an_unverified_ssl_context(self, monkeypatch):
+        import ssl as _ssl
+        ws = _HandshakeWs(handshake_ok=True)
+        out, seen = self._connect_once(
+            monkeypatch, ws, url="wss://engine/x")
+        assert out is ws
+        assert isinstance(
+            seen["kwargs"]["ssl"], _ssl.SSLContext)
+
+    def test_refused_handshake_closes_and_raises(self, monkeypatch):
+        ws = _HandshakeWs(handshake_ok=False)
+        with pytest.raises(ConnectionError,
+                           match="engine handshake failed"):
+            self._connect_once(monkeypatch, ws)
+        assert ws.closed
+
+    def test_broken_handshake_closes_and_raises(self, monkeypatch):
+        ws = _HandshakeWs(recv_error=ValueError("stream died"))
+        with pytest.raises(ConnectionError,
+                           match="engine handshake failed"):
+            self._connect_once(monkeypatch, ws)
+        assert ws.closed
+
+    def test_connect_transport_failure_raises_connection_error(
+            self, monkeypatch):
+        async def fake_connect(u, **kwargs):
+            raise OSError("dial refused")
+
+        monkeypatch.setattr("websockets.connect", fake_connect)
+        with pytest.raises(ConnectionError,
+                           match="engine websocket connect failed"):
+            asyncio.run(
+                AvernetBotPlatform._connect_engine_once(
+                    None, "ws://engine/x", "tok"))
+
+
+class _CannedEngineWs:
+    """Scripted chat frames for the receive loop: the reset res is
+    answered automatically, chat.send gets the scripted list, and an
+    empty script stalls into the (patched-short) deadline."""
+
+    def __init__(self, chat_frames, *, ack_refuse=False):
+        self.chat_frames = list(chat_frames)
+        self.ack_refuse = ack_refuse
+        self.pending: list = []
+        self.sent_frames: list = []
+        self.closed = False
+
+    async def send(self, raw):
+        frame = json.loads(raw)
+        self.sent_frames.append(frame)
+        if frame.get("method") == "sessions.reset":
+            self.pending.append({
+                "type": "res", "id": frame["id"], "ok": True,
+                "payload": {"ok": True},
+            })
+        elif frame.get("method") == "chat.send":
+            self.pending.append({
+                "type": "res", "id": frame["id"],
+                "ok": not self.ack_refuse,
+                "payload": ({"accepted": False}
+                            if self.ack_refuse else {"accepted": True}),
+            })
+            self.pending.extend(self.chat_frames)
+
+    async def recv(self):
+        if self.pending:
+            item = self.pending.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            if isinstance(item, str):
+                return item
+            return json.dumps(item)
+        await asyncio.sleep(30)
+
+    async def close(self):
+        self.closed = True
+
+
+class TestChatSendFrames:
+
+    def _chat(self, monkeypatch, ws, *, timeout=30.0):
+        monkeypatch.setattr(host_chat_module, "_CHAT_TIMEOUT_SECONDS",
+                            timeout)
+        monkeypatch.setattr(
+            AvernetBotPlatform, "_engine_endpoint",
+            lambda self, bot_id, owner: ("ws://fake", "tok"))
+
+        async def connect(self_, ws_url, token):
+            return ws
+
+        monkeypatch.setattr(AvernetBotPlatform, "_connect_engine", connect)
+
+        async def reset(self_, ws, session_key, cancel_event):
+            pass
+
+        monkeypatch.setattr(AvernetBotPlatform, "_reset_session", reset)
+        monkeypatch.setattr(AvernetBotPlatform, "_reset_session_round",
+                            reset)
+        platform = _mk()
+        platform._chat_timeout_seconds = timeout
+        return platform
+
+    def test_stale_frames_are_ignored_until_the_final_event(
+            self, monkeypatch):
+        ws = _CannedEngineWs([
+            "not json at all",
+            {"type": "res", "id": "unrelated", "ok": True},
+            {"type": "event", "event": "presence"},
+            {"type": "event", "event": "chat", "payload": {
+                "state": "final",
+                "message": {"content": [{"type": "text", "text": "42"}]},
+            }},
+        ])
+        platform = self._chat(monkeypatch, ws)
+        assert platform.chat("b1", "objective='x'", owner_id="owner-1") == "42"
+
+    def test_accepted_false_ack_is_the_engines_refusal(self, monkeypatch):
+        ws = _CannedEngineWs([], ack_refuse=True)
+        platform = self._chat(monkeypatch, ws)
+        with pytest.raises(RuntimeError, match="engine refused"):
+            platform.chat("b1", "x", owner_id="owner-1")
+
+    def test_agent_error_event_fails_the_leg(self, monkeypatch):
+        ws = _CannedEngineWs([
+            {"type": "event", "event": "chat", "payload": {
+                "state": "error", "errorMessage": "model on fire"},
+            }])
+        platform = self._chat(monkeypatch, ws)
+        with pytest.raises(RuntimeError, match="model on fire"):
+            platform.chat("b1", "x", owner_id="owner-1")
+
+    def test_aborted_event_fails_the_leg(self, monkeypatch):
+        ws = _CannedEngineWs([
+            {"type": "event", "event": "chat", "payload": {
+                "state": "aborted",
+            }}])
+        platform = self._chat(monkeypatch, ws)
+        with pytest.raises(RuntimeError, match="aborted"):
+            platform.chat("b1", "x", owner_id="owner-1")
+
+    def test_dead_socket_fails_as_connection_error(self, monkeypatch):
+        ws = _CannedEngineWs([ConnectionError("rcvd 1006 (closed)")])
+        platform = self._chat(monkeypatch, ws)
+        with pytest.raises(ConnectionError, match="ws closed"):
+            platform.chat("b1", "x", owner_id="owner-1")
+
+    def test_unanswered_chat_dies_at_the_deadline(self, monkeypatch):
+        ws = _CannedEngineWs([])
+        platform = self._chat(monkeypatch, ws, timeout=0.05)
+        monkeypatch.setattr(host_chat_module, "_RECV_SLICE_SECONDS", 0.01)
+        with pytest.raises(host_chat_module.ChatTimeoutError):
+            platform.chat("b1", "x", owner_id="owner-1")

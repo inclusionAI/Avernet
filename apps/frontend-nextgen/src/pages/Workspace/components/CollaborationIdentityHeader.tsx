@@ -14,7 +14,7 @@ export function CollaborationIdentityHeader({ readOnly = false }: { readOnly?: b
   const active = model.identities.find((identity) => identity.id === model.activeIdentityId);
   if (readOnly)
     return (
-      <section aria-label="当前协作身份" className="space-y-2 border-b border-border bg-background px-3 py-4">
+      <section aria-label="当前协作身份" className="space-y-2 border-b border-divider bg-background px-3 py-4">
         <p className="m-0 text-xs font-semibold">当前协作身份</p>
         {active ? (
           <div className="flex items-center gap-2 rounded-lg border border-border px-4 py-2">
@@ -27,7 +27,7 @@ export function CollaborationIdentityHeader({ readOnly = false }: { readOnly?: b
       </section>
     );
   return (
-    <section aria-label="当前协作身份" className="flex h-12 shrink-0 items-center border-b border-border px-3">
+    <section aria-label="当前协作身份" className="flex h-12 shrink-0 items-center border-b border-divider px-3">
       <WorkspaceIdentitySelector
         identities={model.identities}
         activeId={model.activeIdentityId}
