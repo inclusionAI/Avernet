@@ -417,3 +417,15 @@ Avernet 内提供不依赖 Harness 私有制品的 HTTP+JSON/SSE 测试 Agent，
 
 未重跑全工作区或真实 Harness E2E，未部署本轮到当前联调服务。隔离 MySQL
 测试实例已关闭。历史阶段证据不能替代本轮结果；临时 review 文档仍在仓库之外。
+
+
+Standalone A2A Message responses preserve an optional nonempty `contextId`.
+BCS validates it against the submitted context before publishing text, retains
+an existing context when the response omits it, and atomically saves a newly
+established context with the Completed run before publishing Final. Taskless
+runs keep `remote_task_id` and `task_version` absent. The existing
+`request_context_id` column stores this identity; no schema change is needed.
+The terminal transaction adds at most one scoped context upsert, with no
+per-token writes or additional recovery scan. A failed binding CAS rolls back
+the context upsert as well. Contexts remain isolated by the full Bot/Session,
+Provider/interface and route scope.

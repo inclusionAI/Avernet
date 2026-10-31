@@ -157,3 +157,15 @@ within a trusted scope. Repository CAS returns the committed projection and
 fences both run and shared Task revisions. Pending input is Task-owned; budgets
 and local states remain run-owned. Run-scoped cancellation rejects a shared Task
 with another active binding. See docs/specs/a2a/task-bindings-v1.md.
+
+
+Standalone A2A Message responses preserve an optional nonempty `contextId`.
+BCS validates it against the submitted context before publishing text, retains
+an existing context when the response omits it, and atomically saves a newly
+established context with the Completed run before publishing Final. Taskless
+runs keep `remote_task_id` and `task_version` absent. The existing
+`request_context_id` column stores this identity; no schema change is needed.
+The terminal transaction adds at most one scoped context upsert, with no
+per-token writes or additional recovery scan. A failed binding CAS rolls back
+the context upsert as well. Contexts remain isolated by the full Bot/Session,
+Provider/interface and route scope.

@@ -125,7 +125,9 @@ class Peer:
                 events = [initial]
                 if mode == "message":
                     events = [{"message": {"messageId": "peer-message-" + str(sequence),
-                               "contextId": context, "role": "ROLE_AGENT", "parts": [{"text": text}]}}]
+                               "role": "ROLE_AGENT", "parts": [{"text": text}]}}]
+                    if question:
+                        events[0]["message"]["contextId"] = context
                 elif mode in ("stream", "tools", "replacement", "queued"):
                     events += [
                         {"artifactUpdate": {"taskId": task_id, "contextId": context,
@@ -364,13 +366,33 @@ class A2aStory(Story):
             else:
                 raise AssertionError("A2A output did not reach visible history: " + mode)
         self.queued_rounds(session)
-        assert len(self.peer.requests) == 11, "Recovery must not resubmit a message"
+        self.message_context_rounds(group)
+        assert len(self.peer.requests) == 13, "Recovery must not resubmit a message"
         assert self.peer.legacy_requests == 0, "A2A Bot used the legacy Provider webhook"
-        assert len({request["message"]["messageId"] for request in self.peer.requests}) == 11
-        assert all(request["message"].get("contextId") == "peer-context" for request in self.peer.requests[1:])
+        assert len({request["message"]["messageId"] for request in self.peer.requests}) == 13
+        assert all(request["message"].get("contextId") == "peer-context" for request in self.peer.requests[1:11])
+        assert "contextId" not in self.peer.requests[11]["message"]
+        assert self.peer.requests[12]["message"]["contextId"] == "peer-context"
         assert self.peer.cancels == ["peer-task-6", "peer-task-8"], "Cancellation widened beyond the active Task"
         assert all(request["message"]["messageId"] not in self.peer.cancels for request in self.peer.requests)
-        print(f"A2A story: {self.checks} live boundary assertions and eleven protocol deliveries passed")
+        print(f"A2A story: {self.checks} live boundary assertions and thirteen protocol deliveries passed")
+
+    def message_context_rounds(self, group):
+        session = self.request("POST", "/groups/" + group + "/sessions", {}, status=201)["session_id"]
+        with self.peer.lock:
+            self.peer.mode = "message"
+        for sequence in (12, 13):
+            self.request("POST", "/sessions/" + session + "/chat", {"message": "A2A question " + str(sequence)})
+            deadline = time.monotonic() + 20
+            while time.monotonic() < deadline:
+                count = sum(visible_text(message.get("content", "")) == "A2A-ANSWER-" + str(sequence)
+                            for message in self.history(session))
+                if count == 1:
+                    break
+                assert count == 0, "Message-only text was duplicated"
+                time.sleep(0.1)
+            else:
+                raise AssertionError("Message-only continuation did not reach visible history")
 
     def queued_rounds(self, session):
         with self.peer.lock:

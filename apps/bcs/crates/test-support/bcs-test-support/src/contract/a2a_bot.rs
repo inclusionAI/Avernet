@@ -160,3 +160,29 @@ pub async fn a2a_many_run_task_contract_tests(
     assert_eq!(repo.get(&second.run_id).await.unwrap().unwrap().state,A2aRunState::Running);
     assert!(!repo.has_other_active_task_run(&second).await.unwrap());
 }
+
+/// Message-only responses establish a cross-round context with no Task row.
+pub async fn a2a_message_context_contract_tests(
+    repo: &dyn bcs_service_api::port::repo::a2a_run::A2aRunRepoPort,
+    mut record: bcs_service_api::port::repo::a2a_run::A2aRunRecord,
+) {
+    use bcs_service_api::port::repo::a2a_run::A2aRunState;
+    record.run_id="message-context-first".into();record.scope.session_id="message-context-session".into();
+    assert!(repo.create(&record).await.unwrap());
+    record.version=2;record.state=A2aRunState::Completed;record.context_id=Some("message-context".into());
+    let first=repo.compare_and_set(&record,1).await.unwrap().unwrap();
+    assert_eq!(first,record);assert!(first.remote_task_id.is_none());assert!(first.task_version.is_none());
+    assert_eq!(repo.context(&first.scope).await.unwrap(),first.context_id);
+    assert!(repo.active(&first.scope).await.unwrap().is_empty());
+    record.run_id="message-context-next".into();record.version=1;record.state=A2aRunState::Submitting;
+    assert!(repo.create(&record).await.unwrap());
+    let before=record.clone();record.version=2;record.state=A2aRunState::Completed;
+    record.context_id=Some("foreign-message-context".into());
+    assert!(repo.compare_and_set(&record,1).await.unwrap().is_none());
+    assert_eq!(repo.get(&record.run_id).await.unwrap(),Some(before));
+    assert_eq!(repo.context(&first.scope).await.unwrap(),first.context_id,"failed binding must roll back context upsert");
+    record.context_id=first.context_id.clone();
+    assert_eq!(repo.compare_and_set(&record,1).await.unwrap(),Some(record));
+    let mut other=first.scope;other.session_id="other-message-session".into();
+    assert!(repo.context(&other).await.unwrap().is_none());
+}

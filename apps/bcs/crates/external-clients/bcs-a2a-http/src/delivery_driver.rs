@@ -15,7 +15,13 @@ impl A2aHttpTransport {
                     self.save(record, A2aRunState::Running).await?;
                 }
                 Output::Delta(text) => self.emit(record, ChatEventState::Delta, Some(text), None).await?,
-                Output::MessageFinal(text) => {
+                Output::MessageFinal { text, context_id } => {
+                    if let Some(context) = context_id {
+                        if record.context_id.as_ref().is_some_and(|id|id != &context) {
+                            return Err(invalid("remote context changed"));
+                        }
+                        record.context_id = Some(context);
+                    }
                     if !text.is_empty() { self.emit(record, ChatEventState::Delta, Some(text), None).await?; }
                     self.save(record, A2aRunState::Completed).await?;
                     self.emit(record, ChatEventState::Final, None, None).await?;

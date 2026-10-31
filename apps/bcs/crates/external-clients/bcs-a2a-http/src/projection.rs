@@ -11,7 +11,7 @@ pub enum Output {
     /// Preserved extension/status message for the negotiated extension decoder.
     StatusMessage(a2a::Message),
     Tool(serde_json::Value),
-    MessageFinal(String),
+    MessageFinal { text: String, context_id: Option<String> },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -123,7 +123,10 @@ impl Projection {
                     return Err(ProjectionError::UnexpectedMessage);
                 }
                 if self.terminal.is_some() { return Err(ProjectionError::EventAfterTerminal); }
-                out.push(Output::MessageFinal(text(&message.parts)?));
+                if message.context_id.as_ref().is_some_and(String::is_empty) {
+                    return Err(ProjectionError::IdentityMismatch);
+                }
+                out.push(Output::MessageFinal { text: text(&message.parts)?, context_id: message.context_id });
                 self.terminal = Some(TaskState::Completed);
             }
         }

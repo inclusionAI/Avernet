@@ -46,6 +46,7 @@ async fn sqlite_remote_run_conformance() {
     let db = Arc::new(LocalSqliteDbPlugin::new().unwrap()); initialize(db.as_ref()).await;
     let store = DbA2aRunStore::new(db, "test".into(), DbSqlFlavor::Sqlite);
     a2a_run_repo_port_contract_tests(&store, initial()).await;
+    bcs_test_support::contract::a2a_bot::a2a_message_context_contract_tests(&store,initial()).await;
 }
 
 #[tokio::test]

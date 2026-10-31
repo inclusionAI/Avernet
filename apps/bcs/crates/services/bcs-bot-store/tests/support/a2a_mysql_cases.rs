@@ -55,6 +55,7 @@ pub async fn verify(db:Arc<dyn DbPlugin>) {
     assert!(cards.refreshable(None,16).await.unwrap().is_empty());
     let runs=DbA2aRunStore::new(db.clone(),"a2a-test".into(),DbSqlFlavor::Mysql);
     a2a_run_repo_port_contract_tests(&runs,run()).await;
+    bcs_test_support::contract::a2a_bot::a2a_message_context_contract_tests(&runs,run()).await;
     let mut first=run();first.run_id="failed-association".into();first.scope.session_id="another-session".into();
     assert!(runs.create(&first).await.unwrap());
     db.execute(DbStatement::new("ALTER TABLE bcs_a2a_contexts ADD CONSTRAINT reject_a2a_context CHECK (context_id <> 'another-context')")).await.unwrap();

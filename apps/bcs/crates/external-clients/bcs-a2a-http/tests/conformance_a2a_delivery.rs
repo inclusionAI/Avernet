@@ -21,9 +21,11 @@ use serde_json::{json, Value};
 
 #[path="support/terminal_publication.rs"]
 mod terminal_publication;
+#[path="support/message_context.rs"]
+mod message_context;
 
 #[derive(Clone, Copy)]
-enum Mode { Complete, Wait, MissingInitialTask, RecoverGet, DedupRetry, HttpError(u16), Terminal(&'static str), Message, CancelDenied, RecoverState, UnspecifiedFlood, Flapping, EmptyRecoveries }
+enum Mode { Complete, Wait, MissingInitialTask, RecoverGet, DedupRetry, HttpError(u16), Terminal(&'static str), Message, MessageContext { first: &'static str, next: Option<&'static str> }, CancelDenied, RecoverState, UnspecifiedFlood, Flapping, EmptyRecoveries }
 struct Agent {
     mode: Mode, sequence: AtomicUsize, requests: Mutex<Vec<Value>>, tasks: Mutex<HashMap<String, Value>>,
     cancels: Mutex<Vec<String>>,
@@ -50,8 +52,13 @@ async fn send(State(agent): State<Arc<Agent>>, headers: HeaderMap, Json(body): J
         "artifacts":[{"artifactId":"answer","parts":[{"text":"你好世界"}]}]});
     agent.tasks.lock().unwrap().insert(id.clone(), final_task.clone());
     let mut events = vec![json!({"task":{"id":id,"contextId":"remote-context", "status":{"state":"TASK_STATE_SUBMITTED"}}})];
-    if matches!(agent.mode,Mode::Message) {
+    if matches!(agent.mode,Mode::Message | Mode::MessageContext {..}) {
         events=vec![json!({"message":{"messageId":"standalone","role":"ROLE_AGENT","parts":[{"text":"无任务回复"}]}})];
+        if let Mode::MessageContext {first,next}=agent.mode {
+            if let Some(context)=if sequence==1 {Some(first)} else {next} {
+                events[0]["message"]["contextId"]=json!(context);
+            }
+        }
     } else if let Mode::Terminal(state)=agent.mode {
         events.push(json!({"statusUpdate":{"taskId":id,"contextId":"remote-context","status":{"state":state}}}));
     } else if matches!(agent.mode,Mode::DedupRetry) {

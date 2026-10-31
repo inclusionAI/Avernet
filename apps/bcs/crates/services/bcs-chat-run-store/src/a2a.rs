@@ -82,6 +82,7 @@ impl A2aRunRepoPort for DbA2aRunStore {
     }
     async fn compare_and_set(&self, record: &A2aRunRecord, expected_version: u64) -> ServiceResult<Option<A2aRunRecord>> {
         if expected_version.checked_add(1)!=Some(record.version)
+            || record.context_id.as_ref().is_some_and(String::is_empty)
             || (record.remote_task_id.is_some() && record.context_id.is_none())
             || (record.remote_task_id.is_none() && (record.task_version.is_some() || record.pending_input.is_some()))
             || record.interface.url!=record.scope.interface_url || record.interface.tenant!=record.scope.tenant {
@@ -90,16 +91,23 @@ impl A2aRunRepoPort for DbA2aRunStore {
         let scope_key=key(&record.scope)?;
         let remote_key=task_key(record)?;
         let mut steps=if let Some(remote_key)=&remote_key { self.task_steps(record,remote_key,&scope_key).await? } else {vec![]};
+        // A standalone Message can establish a context without a Task. Commit
+        // its scope mapping and terminal binding in the same fenced transaction.
+        let message_context=if remote_key.is_none() {record.context_id.clone()} else {None};
+        if record.state==A2aRunState::Completed {
+            if let Some(context)=&message_context {steps.push(self.context_step(record,&scope_key,context));}
+        }
         let mut params=vec![state(record.state).into(),num(record.version)?,num(record.deadline_ms)?,num(record.updated_at_ms)?];
-        params.extend(budget_values(record)?);params.push(opt(&remote_key));
+        params.extend(budget_values(record)?);params.push(opt(&remote_key));params.push(opt(&message_context));
         params.extend(vec![self.env.clone().into(),record.run_id.clone().into(),scope_key.into(),num(expected_version)?,
             // Already-bound runs cannot detach, change Task, or bypass its revision.
             record.task_version.map(num).transpose()?.unwrap_or(DbValue::Null),opt(&remote_key),
             record.task_version.map(num).transpose()?.unwrap_or(DbValue::Null),
+            opt(&remote_key),opt(&message_context),
             record.group_id.clone().into(),record.message_id.clone().into(),record.request_digest.clone().into(),
             record.interface.protocol_version.clone().into(),match record.interface.binding {bcs_service_api::types::a2a_bot::A2aBinding::HttpJson=>"http_json",_=>"grpc"}.into(),
             record.credential_kind.clone().into(),serde_json::to_string(&record.extensions).map_err(error)?.into()]);
-        steps.push(checked("UPDATE bcs_a2a_run_bindings SET state=?,version=?,deadline_ms=?,updated_at_ms=?,budget_remaining_ms=?,budget_total_deadline_ms=?,budget_input_wait_ms=?,budget_phase=?,budget_phase_started_ms=?,budget_phase_deadline_ms=?,task_key=?,gmt_modified=CURRENT_TIMESTAMP WHERE env=? AND run_id=? AND scope_key=? AND version=? AND state NOT IN ('completed','failed','canceled') AND ((task_key IS NULL AND ? IS NULL) OR (task_key=? AND ? IS NOT NULL)) AND group_id=? AND message_id=? AND request_digest=? AND protocol_version=? AND binding=? AND credential_kind=? AND extensions_json=?",params));
+        steps.push(checked("UPDATE bcs_a2a_run_bindings SET state=?,version=?,deadline_ms=?,updated_at_ms=?,budget_remaining_ms=?,budget_total_deadline_ms=?,budget_input_wait_ms=?,budget_phase=?,budget_phase_started_ms=?,budget_phase_deadline_ms=?,task_key=?,request_context_id=COALESCE(?,request_context_id),gmt_modified=CURRENT_TIMESTAMP WHERE env=? AND run_id=? AND scope_key=? AND version=? AND state NOT IN ('completed','failed','canceled') AND ((task_key IS NULL AND ? IS NULL) OR (task_key=? AND ? IS NOT NULL)) AND (? IS NOT NULL OR request_context_id IS NULL OR request_context_id=?) AND group_id=? AND message_id=? AND request_digest=? AND protocol_version=? AND binding=? AND credential_kind=? AND extensions_json=?",params));
         steps.push(DbTransactionStep::Query(DbStatement::with_params(format!("{SELECT_RUN} WHERE r.env=? AND r.run_id=?"),vec![self.env.clone().into(),record.run_id.clone().into()])));
         match self.db.transaction(steps).await {
             Ok(results)=>match results.last() {
