@@ -76,6 +76,19 @@ def list_device_files(
             dir=dir,
         )
     except DesktopBotServiceError as e:
+        # BaaS replies 503 MACHINE_NOT_CONNECTED when a desktop machine is
+        # offline.  Keep it out of the raw `HTTP error: 503` alarm bucket; this
+        # is an expected retryable client state, not a server fault.
+        if "MACHINE_NOT_CONNECTED" in str(e):
+            logger.info(
+                "[desktop.list_files] machine not connected: machine_id=%s",
+                machine_id,
+            )
+            return {
+                "success": False,
+                "message": "机器未连接，请连接后重试",
+                "error_code": 50303,
+            }
         logger.error("[desktop.list_files] Desktop bot service error: %s", e)
         return {"success": False, "message": f"查询目录失败: {e}", "error_code": 500}
     except Exception as e:
