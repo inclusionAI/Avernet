@@ -193,3 +193,10 @@ registration operations still reject Provider actors. Both paths reuse the
 same SQL transaction/guard statements, differing only in verified audit identity.
 No credential reaches audit rows; no post-commit owner/profile/Card write is
 introduced. A rollback includes Bot, binding, Card, Human/owner and default profile.
+
+The mandatory bcs-admin full MySQL migration-chain gate also runs the shared A2A
+Card/Run/Task/context store cases from tests/support/a2a_mysql_cases.rs, using the
+same already-migrated disposable schema. The isolated a2a_mysql test reuses those
+cases. Failure injection uses temporary CHECK constraints, without requiring
+privileged trigger creation. JSON search, CAS, rollback of Task/context association,
+shared Task references and all audit fields are exercised on native MySQL.

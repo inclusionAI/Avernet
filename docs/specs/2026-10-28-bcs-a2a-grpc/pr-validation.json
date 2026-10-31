@@ -1,5 +1,5 @@
 {
-  "recorded_at": "2026-10-31T15:44:23.788559+00:00",
+  "recorded_at": "2026-10-31T16:04:00.285520+00:00",
   "scope": "Frozen pre-publication evidence; use current PR checks for the final CI status.",
   "ci_results_url": "https://github.com/inclusionAI/Avernet/pull/3390/checks",
   "harness_sdk_included": false,
@@ -76,13 +76,20 @@
     "unknown_outcomes": "Maintainer deferred restart ownership recovery and manual-unlock management; uncertain outcomes remain blocked and never auto-expire solely from the local deadline."
   },
   "local_repair_regressions": {
-    "Card_first_run": "11 passed; one shared consumer assertion still expected the old increment. The assertion is updated and a full rerun is in progress.",
-    "current_status": "pending; macOS compiler/system waits have not produced a completed rerun at recording time",
+    "current_status": "Native MySQL store and full current-head CI remain pending.",
     "targets": [
       "conformance_a2a_configuration",
       "conformance_a2a_delivery",
       "a2a_mysql"
-    ]
+    ],
+    "Card_configuration": {
+      "passed": 12,
+      "failed": 0
+    },
+    "Delivery_recovery": {
+      "passed": 17,
+      "failed": 0
+    }
   },
   "ci_fixture_repairs": {
     "observed_head": "bf95d0d122af9ef69423379658b182e4a7921633",
@@ -99,10 +106,11 @@
       "real MySQL full-chain fixture expected 38 despite successfully applying all 39 migrations"
     ],
     "fix": "Initialize current schema before restart-stability assertions and expect all 39 migrations. Retain schema/history/legacy-data and frozen archive checks.",
-    "current_ci_result": "Refer to current PR checks; not frozen into this record."
+    "current_ci_result": "Refer to current PR checks; not frozen into this record.",
+    "additional_fix": "The v20-to-v39 suffix applies 19 migrations, not 18."
   },
   "static_checks": {
-    "changed_source_files": 225,
+    "changed_source_files": 226,
     "largest_source_lines": 1000,
     "rust_parser": "all changed Rust sources accepted; stdout only, no source formatted",
     "frozen_sql": "existing SQL unchanged; only two new 039 SQL files added",
@@ -116,13 +124,17 @@
     "apps/bcs/crates/external-clients/bcs-a2a-http/tests/conformance_a2a_delivery.rs": "24bacddb6b6f255d7b30bad301228bf51e2872dbddedfc0f924f8fd65ad18c78",
     "apps/bcs/crates/test-support/bcs-test-support/src/contract/a2a_bot.rs": "bff70cb957fed62148ec891e40c685db1035039a0cfd266a76166ec2fc294104",
     "apps/bcs/crates/tools/bcs-admin/src/migrate_human_input_index_tests.rs": "4fbddacb020ee96d3a85e88cd669425ba47d50e695ee664a81946cbe31319a17",
-    "apps/bcs/crates/tools/bcs-admin/src/migrate_mysql_chain_tests.rs": "b231bcf95896b7e7f53015b43c4806ac4cf7a105373db9dcd0044b07fb52e87e",
-    "apps/bcs/scripts/e2e-test/a2a_story.py": "15c052294b2eed5b2ea7a0778eb7a148704b03a4f4cc096ffe8ceb9226446ab7"
+    "apps/bcs/crates/tools/bcs-admin/src/migrate_mysql_chain_tests.rs": "ba752d91352075b1c48d8c2ba62416ef0e6154538b9d21403f0546b3ba999bf0",
+    "apps/bcs/scripts/e2e-test/a2a_story.py": "15c052294b2eed5b2ea7a0778eb7a148704b03a4f4cc096ffe8ceb9226446ab7",
+    "apps/bcs/crates/services/bcs-bot-store/tests/a2a_mysql.rs": "9d6c99ccfe8a622f6ea60be38da913d117f2d23cbe93f9b42964df699da6c61d",
+    "apps/bcs/crates/services/bcs-bot-store/tests/support/a2a_mysql_cases.rs": "43b68b8cbde39c84461275c64eb2c62283cb067b8f41f409201edc3c8b8953f2"
   },
   "limits": [
     "frontend standalone typecheck blocked by installed @types/d3-dispatch syntax",
     "architecture dependency/import gates have documented target-branch failures; full architecture gate not green",
     "live model and MOSN/gRPC evidence is historical and does not certify this commit",
     "no persistent monitor tool available in this session; CI monitored in active turn"
-  ]
+  ],
+  "native_mysql_ci": "Existing mandatory full-chain gate invokes the shared A2A storage cases on its migrated disposable schema; no extra MySQL service required.",
+  "native_mysql_failure_injection_probe": "Temporary CHECK rejection and transactional rollback verified with schema-only privileges on isolated native MySQL; no SUPER grant."
 }

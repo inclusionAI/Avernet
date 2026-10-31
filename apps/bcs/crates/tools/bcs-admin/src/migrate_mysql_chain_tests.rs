@@ -10,6 +10,9 @@ mod group_notify_contract;
 #[path = "../../../bootstrap/bcs/src/migrations.rs"]
 mod migration_chain_migrations;
 
+#[path = "../../../services/bcs-bot-store/tests/support/a2a_mysql_cases.rs"]
+mod a2a_store_contract;
+
 use super::*;
 use std::sync::Arc;
 use bcs_config_api::mysql::MysqlConnectionConfig;
@@ -148,7 +151,7 @@ async fn check_full_mysql_chain(db: Arc<dyn DbPlugin>, global: &MigrateGlobalArg
         assert!(report.contains("applied_versions=0\npending_versions=0"), "{report}");
         assert_eq!(chain_history(db).await?, records);
 
-        println!("[phase 2/3] Group Store human-notify contract on the migrated chain");
+        println!("[phase 2/3] Group, Provider and A2A repository contracts on the migrated chain");
         group_notify_contract::verify(migrated_db.clone(), |db, env| {
             bcs_group_store::MySqlGroupStore::new(Arc::clone(db), env.to_string())
         })
@@ -156,6 +159,8 @@ async fn check_full_mysql_chain(db: Arc<dyn DbPlugin>, global: &MigrateGlobalArg
         bcs_test_support::contract::provider_slug::provider_repo_port_contract_tests(
             &bcs_bot_store::provider::DbProviderStore::mysql(migrated_db.clone()),
         ).await;
+
+        a2a_store_contract::verify(migrated_db.clone()).await;
 
         // A completed historical prefix upgrades normally without rewriting its
         // records. The old IF NOT EXISTS spelling has the same DDL result here;
@@ -184,7 +189,7 @@ async fn check_full_mysql_chain(db: Arc<dyn DbPlugin>, global: &MigrateGlobalArg
         }
         let records = chain_history(db).await?;
         let report = apply_mysql_migrations(&args, global).await?;
-        assert!(report.contains("applied_versions=18\npending_versions=0"), "{report}");
+        assert!(report.contains("applied_versions=19\npending_versions=0"), "{report}");
         assert_eq!(chain_history(db).await?.into_iter().filter(|(version, _)| *version <= 20).collect::<Vec<_>>(), records);
         assert_eq!(db.query(DbStatement::new(retired_group_sql)).await?, retired_group);
         assert_eq!(db.query(DbStatement::new(retired_session_sql)).await?, retired_session);
