@@ -8,7 +8,7 @@ use serde_json::json;
 
 async fn database() -> Arc<LocalSqliteDbPlugin> {
     let db = Arc::new(LocalSqliteDbPlugin::new().unwrap());
-    db.execute(DbStatement::new("CREATE TABLE bcs_bots (bot_uuid TEXT NOT NULL, env TEXT NOT NULL, provider_id TEXT, provider_bot_ref TEXT, connection_mode TEXT, is_deleted INTEGER NOT NULL DEFAULT 0, gmt_modified TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (bot_uuid, env))")).await.unwrap();
+    db.execute(DbStatement::new("CREATE TABLE bcs_bots (bot_uuid TEXT NOT NULL, env TEXT NOT NULL, name TEXT, provider_id TEXT, provider_bot_ref TEXT, connection_mode TEXT, is_deleted INTEGER NOT NULL DEFAULT 0, gmt_modified TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (bot_uuid, env))")).await.unwrap();
     db.execute(DbStatement::new("INSERT INTO bcs_bots (bot_uuid,env,provider_id,provider_bot_ref,connection_mode,is_deleted) VALUES ('bot', 'test', 'provider', 'remote', 'gateway', 0), ('bot', 'other', 'provider', 'remote', 'gateway', 0), ('plugin', 'test', 'provider', 'plugin', 'plugin', 0)")).await.unwrap();
     for sql in bcs_db_api::split_sql_statements(include_str!("../../../../migrations/sqlite/039_bot_a2a.sql")).into_iter() {
         db.execute(DbStatement::new(sql)).await.unwrap();
@@ -58,6 +58,13 @@ async fn public_card_batch_is_lossless_fresh_bounded_and_scoped() {
     let ids=vec!["bot".into(),"plugin".into(),"absent".into(),"bot".into()];
     let cards=store.cards_for_bots(&ids).await.unwrap();
     assert_eq!(cards.len(),1);assert_eq!(cards["bot"],value.agent_card);
+    db.execute(DbStatement::new("UPDATE bcs_bots SET name='Billing %_exact' WHERE env='test' AND bot_uuid='bot'")).await.unwrap();
+    for query in ["BILLING", "%_exact"] {
+        assert_eq!(store.discovery_cards(&ids,Some(query),&[]).await.unwrap()["bot"],Some(value.agent_card.clone()));
+    }
+    assert_eq!(store.discovery_cards(&ids,Some("billing"),&["LOOKUP".into()]).await.unwrap()["bot"],Some(value.agent_card.clone()));
+    assert_eq!(store.discovery_cards(&ids,Some("billing"),&["legacy-skill".into()]).await.unwrap()["bot"],None);
+    assert_eq!(store.discovery_cards(&ids,Some("Billing X_exact"),&[]).await.unwrap()["bot"],None);
     let unmatched=store.discovery_cards(&ids,Some("absent-description"),&[]).await.unwrap();
     assert_eq!(unmatched.len(),1);assert_eq!(unmatched["bot"],None);
     let matches=store.discovery_cards(&ids,None,&["LOOKUP".into()]).await.unwrap();

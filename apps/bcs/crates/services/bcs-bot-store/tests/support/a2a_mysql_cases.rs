@@ -28,16 +28,18 @@ pub async fn verify(db:Arc<dyn DbPlugin>) {
     let names=columns.iter().map(|row|row.get_string("name").unwrap().unwrap()).collect::<Vec<_>>();
     assert_eq!(names,vec!["agent_card","agent_card_revision","agent_card_url"]);
 
-    db.execute(DbStatement::new("INSERT INTO bcs_bots (bot_uuid,name,env,provider_id,provider_bot_ref,connection_mode) VALUES ('a2a-bot','A2A','a2a-test','provider','remote','gateway')")).await.unwrap();
+    db.execute(DbStatement::new("INSERT INTO bcs_bots (bot_uuid,name,env,provider_id,provider_bot_ref,connection_mode) VALUES ('a2a-bot','Billing %_exact','a2a-test','provider','remote','gateway')")).await.unwrap();
     let cards=DbA2aBotStore::new(db.clone(),"a2a-test".into(),DbSqlFlavor::Mysql);
     a2a_bot_repo_port_contract_tests(&cards,card()).await;
-    for query in ["完整说明","100%_exact","foo~bar","invoice-tag","REFUND_LOOKUP"] {
+    for query in ["BILLING", "%_exact", "完整说明","100%_exact","foo~bar","invoice-tag","REFUND_LOOKUP"] {
         assert_eq!(cards.discovery_cards(&["a2a-bot".into()],Some(query),&[]).await.unwrap()["a2a-bot"],Some(card().agent_card),"{query}");
     }
-    for query in ["100X_exact","100%Xexact","fooXbar","not-present"] {
+    for query in ["Billing X_exact", "100X_exact","100%Xexact","fooXbar","not-present"] {
         assert_eq!(cards.discovery_cards(&["a2a-bot".into()],Some(query),&[]).await.unwrap()["a2a-bot"],None,"{query}");
     }
     assert_eq!(cards.discovery_cards(&["a2a-bot".into()],None,&["REFUND_LOOKUP".into()]).await.unwrap()["a2a-bot"],Some(card().agent_card));
+    assert_eq!(cards.discovery_cards(&["a2a-bot".into()],Some("billing"),&["REFUND_LOOKUP".into()]).await.unwrap()["a2a-bot"],Some(card().agent_card));
+    assert_eq!(cards.discovery_cards(&["a2a-bot".into()],Some("billing"),&["legacy-skill".into()]).await.unwrap()["a2a-bot"],None);
     assert!(DbA2aBotStore::new(db.clone(),"foreign".into(),DbSqlFlavor::Mysql).get("a2a-bot").await.unwrap().is_none());
     assert!(cards.availability_many(&["a2a-bot".into()]).await.unwrap()[0].ready);
     db.execute(DbStatement::new("ALTER TABLE bcs_bots ADD CONSTRAINT reject_a2a_card CHECK (agent_card_revision <> 2)")).await.unwrap();

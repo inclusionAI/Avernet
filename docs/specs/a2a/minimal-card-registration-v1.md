@@ -27,6 +27,12 @@ Names/default summaries are initialized at registration, not overwritten on Card
 refresh. Skills/descriptions/unknown fields remain in the full original Card.
 Card provider/owners/name never grant BCS ownership, visibility or permissions.
 
+Text search matches the local BCS display alias or Bot ID as well as Card
+name/description/skill text. Both candidate count/pagination and final discovery
+filtering apply this rule. Explicit skill selectors always use Card skills for
+Card-backed Bots; an alias match does not enable legacy capability/summary
+fallback. Existing BCS visibility, environment and caller filters still apply.
+
 Provider-scoped v2 `/register` also accepts the URL query or JSON body
 `{"agent_card":{...}}`; bot-name can be omitted for A2A (an explicitly blank
 scoped bot-name is still rejected). Query/body duplicates

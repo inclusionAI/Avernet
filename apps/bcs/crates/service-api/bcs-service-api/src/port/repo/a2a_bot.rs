@@ -9,6 +9,8 @@ pub trait A2aBotRepoPort: Send + Sync {
     /// not expose credentials, selected routes or management metadata.
     async fn cards_for_bots(&self, bot_uuids: &[String]) -> ServiceResult<std::collections::BTreeMap<String, serde_json::Value>>;
     /// Absent key: legacy Bot. None value: A2A Bot whose Card does not match.
+    /// Text query matches the local BCS display name/ID or Card text; skill
+    /// selectors always use Card skills. Local display names remain discoverable.
     /// Only matching Cards load their full payload; never fall back to legacy
     /// capabilities for a nonmatching A2A Bot.
     async fn discovery_cards(&self, bot_uuids: &[String], query: Option<&str>, skills: &[String])

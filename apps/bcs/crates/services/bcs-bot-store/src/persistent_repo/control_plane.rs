@@ -377,8 +377,8 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
         }
         if let Some(search_text) = search_text.as_ref() {
             let (card_sql, card_params) = crate::a2a_search::card_text_match(self.flavor, "b.agent_card", search_text);
-            predicates.push(format!("((b.agent_card IS NULL AND (INSTR(LOWER(COALESCE(b.name, '')), ?) > 0 OR \
-                INSTR(LOWER(COALESCE(b.bot_info, '')), ?) > 0)) OR \
+            predicates.push(format!("(INSTR(LOWER(COALESCE(b.name, '')), ?) > 0 OR \
+                (b.agent_card IS NULL AND INSTR(LOWER(COALESCE(b.bot_info, '')), ?) > 0) OR \
                 (b.agent_card IS NOT NULL AND ({card_sql})) OR INSTR(LOWER(b.bot_uuid), ?) > 0)"));
             params.extend(vec![Value::from(search_text.as_str()); 2]);
             params.extend(card_params);

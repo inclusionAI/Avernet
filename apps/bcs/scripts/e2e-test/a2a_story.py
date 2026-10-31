@@ -13,7 +13,7 @@ import threading
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import unquote, urlsplit
+from urllib.parse import unquote, urlsplit, urlencode
 
 from provider_scope_story import Story
 from a2a_workbench import abort_task
@@ -266,10 +266,20 @@ class A2aStory(Story):
         assert self.request("GET", "/bots/" + bot_id + "/agent-card")["description"] == "Inline replacement"
         with self.peer.lock:
             reads = self.peer.card_reads
-        inline_bot = self.request("POST", prefix, {"provider_bot_ref": "inline", "owners": [self.owner],
+        alias = "Billing-" + uuid.uuid4().hex
+        inline_bot = self.request("POST", prefix, {"provider_bot_ref": "inline", "name": alias, "owners": [self.owner],
                                   "agent_card": inline}, token=admin)
         self.bots.append((provider, inline_bot))
         assert self.peer.card_reads == reads, "Inline registration must not fetch a Card"
+        search = self.request("GET", "/bots/search?" + urlencode({"q": alias.lower(), "limit": 1}))
+        assert search["total"] == 1 and search["items"][0]["bot_uuid"] == inline_bot["bot_uuid"]
+        assert search["items"][0]["agent_card"] == inline
+        for skill, expected in [("e2e", 1), ("absent-legacy-skill", 0)]:
+            found = self.request("GET", "/bots/discover?" + urlencode({"q": alias.lower(), "skill": skill}))
+            assert len(found["bots"]) == expected, "Alias must compose with Card skill filtering"
+            if expected:
+                assert found["bots"][0]["bot_uuid"] == inline_bot["bot_uuid"]
+                assert found["bots"][0]["agent_card"] == inline
         assert not self.peer.requests, "Card administration must not submit work"
 
         policy = self.request("GET", "/admin/message-delivery/policy")

@@ -32,8 +32,8 @@ impl A2aBotRepoPort for DbA2aBotStore {
         let mut predicates = Vec::new(); let mut params = Vec::new();
         if let Some(query) = query {
             let (sql, values) = crate::a2a_search::card_text_match(flavor, "agent_card", query);
-            predicates.push(format!("(INSTR(LOWER(bot_uuid), ?) > 0 OR ({sql}))"));
-            params.push(DbValue::from(query.to_lowercase())); params.extend(values);
+            predicates.push(format!("(INSTR(LOWER(COALESCE(name, '')), ?) > 0 OR INSTR(LOWER(bot_uuid), ?) > 0 OR ({sql}))"));
+            params.extend(vec![DbValue::from(query.to_lowercase());2]); params.extend(values);
         }
         for skill in skills {
             let (sql, values) = crate::a2a_search::card_skill_match(flavor, "agent_card", skill);

@@ -168,10 +168,13 @@ most 256 IDs. No persistent refresh/error state or additional cache exists.
 See docs/specs/a2a/minimal-card-registration-v1.md for access costs and limits.
 
 Full Card queries select only Bot identity and Card payload in batches of 256.
-Discovery evaluates Card names/descriptions and skill IDs/names/descriptions/tags
+Discovery matches the local BCS display name/ID as well as Card
+names/descriptions and skill IDs/names/descriptions/tags
 in SQL before selecting matching payloads. A nonmatching A2A identity remains
 distinguishable from a legacy Bot, preventing stale capability fallback. Search
-count and pagination share the same predicate. SQL flavor is explicitly injected;
+count and pagination share the same predicate. Display aliases do not enable
+legacy skill/summary matching; explicit skill selectors still require Card skills.
+The alias predicate uses the existing SQL queries and pagination/batch bounds. SQL flavor is explicitly injected;
 SQLite uses JSON extraction and MySQL uses JSON_SEARCH with a literal escape
 character and bound values. See the
 [MySQL JSON search contract](https://dev.mysql.com/doc/refman/8.0/en/json-search-functions.html).

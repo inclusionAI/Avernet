@@ -85,6 +85,26 @@ async fn search_counts_and_pages_use_card_text_before_pagination() {
 }
 
 #[tokio::test]
+async fn card_bcs_alias_search_preserves_pagination_visibility_and_card_skill_authority() {
+    let f=fixture().await;
+    let query="bcs card";
+    let discovered=f.app.discover_bots(BotDiscoveryCommand {q:Some(query.into()),..Default::default()}).await.unwrap();
+    assert_eq!(discovered.count,2);
+    assert!(discovered.bots.iter().all(|bot|bot.bot_uuid!="card-private" && bot.agent_card==Some(f.record.agent_card.clone())));
+    let matching=f.app.discover_bots(BotDiscoveryCommand {q:Some(query.into()),skills:vec!["refund_lookup".into()],..Default::default()}).await.unwrap();
+    assert_eq!(matching.count,2);
+    let legacy=f.app.discover_bots(BotDiscoveryCommand {q:Some(query.into()),skills:vec!["legacy-skill".into()],..Default::default()}).await.unwrap();
+    assert_eq!(legacy.count,0,"An alias match must not authorize legacy skill fallback");
+    for (offset,id) in [(0,"card-1"),(1,"card-2")] {
+        let page=f.app.search_bots(SearchBotsCommand {q:Some(query.into()),limit:1,offset,..Default::default()}).await.unwrap();
+        assert_eq!(page.total,2);assert_eq!(page.items.len(),1);assert_eq!(page.items[0].bot_uuid,id);
+        assert_eq!(page.items[0].agent_card,Some(f.record.agent_card.clone()));
+    }
+    let absent=f.app.search_bots(SearchBotsCommand {q:Some(query.into()),limit:1,offset:2,..Default::default()}).await.unwrap();
+    assert_eq!(absent.total,2);assert!(absent.items.is_empty());
+}
+
+#[tokio::test]
 async fn details_keep_authority_and_refresh_without_copying_card_into_legacy_fields() {
     let mut f=fixture().await;
     let read=||BotDetailCommand {caller_actor_id:Some("human_alice".into()),bot_id:"card-private".into()};
