@@ -215,6 +215,29 @@ BCS_BRIDGE_TEST_CODEX_BIN=/absolute/path/to/codex \
   real_codex_socket_initialization_and_rpc_burst -- --ignored --nocapture
 ```
 
+## CLI environment in owned engine processes
+
+Every configured Bot supplies its nonempty `bot_id` as `BCN_ACTOR_BOT_ID` and
+its nonempty `token` as `BCN_BOT_TOKEN`. A missing or whitespace-only token adds
+no variable; Provider registration/webhook credentials and other Bots' sessions
+are not fallbacks. The environment is built per Bot, without changing the
+bridge process environment. `agentpass-subbots` also supplies `BCN_AUTH_MODE`;
+the CLI retains its existing policy of ignoring ambient tokens in that mode.
+
+The configured `api_url` supplies `BCS_API_BASE_URL` and `MOLTIS_BCS_URL` (the
+latter prevents a legacy CLI alias inherited from the shell from taking
+precedence). A distribution can implement `DeployProfile::cli_environment` to
+resolve non-secret CLI settings from saved endpoints. The application invokes
+this hook for each Provider when loading the validated startup configuration.
+`ExplicitProfile` returns no overrides; existing TOML files need no new fields.
+The resolved map lives in `ProviderConfig::cli_environment` only in memory.
+Registration and WebSocket endpoints are not changed by these overrides.
+
+The values reach owned Claude Code/Codex processes through `TurnRequest.env`.
+Persistent engines receive them when the process starts; restart bridge after
+changing Bot credentials or endpoints. Adapters attached to an existing desktop
+application do not currently propagate this environment to its tools.
+
 ## Codex process and thread lifecycle
 
 For `engine = "codex"`, each Bot owns one long-running `codex app-server`
@@ -267,7 +290,7 @@ fn main() -> std::process::ExitCode {
 | Interface | Crate | Default | Purpose |
 | --- | --- | --- | --- |
 | `engine::EngineFactory` | core | `claude-code`, `codex` | Create the engine for `engine = "<id>"`; validate `engine_options` |
-| `profile::DeployProfile` | app | `ExplicitProfile` (no built-in endpoints) | Default registration API and Bot WebSocket endpoints |
+| `profile::DeployProfile` | app | `ExplicitProfile` (no built-in endpoints) | Default registration/WS endpoints and runtime CLI environment |
 | `credentials::CredentialSource` | app | `EnvCredentials` | Webhook Bearer token per Provider (gateway mode) |
 | `identity::IdentityResolver` | app | `StaticBearer` | `provider_bot_ref` for the Token-selected Provider mode, with an optional preflight |
 

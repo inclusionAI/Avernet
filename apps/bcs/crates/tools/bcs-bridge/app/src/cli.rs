@@ -177,7 +177,7 @@ pub async fn run(cli: Cli, app: &BridgeApp) -> anyhow::Result<()> {
 
 pub(crate) async fn load_start(config_path: &std::path::Path, app: &BridgeApp, cwd_override: Option<&std::path::Path>) -> anyhow::Result<bcs_bridge_core::config::BridgeConfig> {
     let document = crate::multi_config::Document::load(config_path)?;
-    let mut providers = crate::multi_config::load_document(&document, config_path, app.credentials())
+    let mut providers = crate::multi_config::load_document_with_profile(&document, config_path, app.credentials(), app.profile())
         .map_err(|error| anyhow::anyhow!("Cannot load bridge configuration at {}: {error}", config_path.display()))?;
     if let Some(cwd) = cwd_override {
         if providers.len() != 1 || providers[0].config.bots.len() != 1
