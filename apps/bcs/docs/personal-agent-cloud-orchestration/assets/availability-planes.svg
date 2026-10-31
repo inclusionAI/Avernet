@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 640" font-family="Arial, Helvetica, sans-serif">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#5c6a62"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="920" height="640" fill="#fafbf9"/>
+  <text x="24" y="34" font-size="16" font-weight="bold" fill="#1c2420">The four availability planes</text>
+  <text x="24" y="54" font-size="11.5" fill="#5c6a62">Invariant: a node failure never fails or loses a task. Each plane answers one question.</text>
+
+  <!-- Plane 1: API -->
+  <rect x="40" y="72" width="840" height="110" rx="10" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="56" y="96" font-size="13" font-weight="bold" fill="#157a55">1 · API plane — who answers requests?</text>
+  <rect x="70" y="112" width="80" height="44" rx="8" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="110" y="138" font-size="12" text-anchor="middle" fill="#1c2420">LB</text>
+  <line x1="150" y1="134" x2="186" y2="134" stroke="#5c6a62" marker-end="url(#ar)"/>
+  <rect x="190" y="112" width="300" height="44" rx="8" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="340" y="132" font-size="11.5" text-anchor="middle" fill="#1c2420">any node serves any request</text>
+  <text x="340" y="148" font-size="10.5" text-anchor="middle" fill="#5c6a62">write to shared storage before ack</text>
+  <text x="530" y="132" font-size="11" fill="#157a55">⇒ survives N−1 node failures</text>
+  <text x="530" y="150" font-size="11" fill="#157a55">⇒ RPO = 0 for acked requests</text>
+
+  <!-- Plane 2: Executor -->
+  <rect x="40" y="198" width="840" height="140" rx="10" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="56" y="222" font-size="13" font-weight="bold" fill="#157a55">2 · Executor plane — who drives a task between rounds?</text>
+  <rect x="70" y="240" width="230" height="80" rx="8" fill="#e3f0e9" stroke="#157a55"/>
+  <text x="185" y="260" font-size="11.5" font-weight="bold" text-anchor="middle" fill="#1c2420">placement (optimization)</text>
+  <text x="185" y="278" font-size="10.5" text-anchor="middle" fill="#1c2420">hash(user_id, task_id) → node</text>
+  <text x="185" y="294" font-size="10" text-anchor="middle" fill="#5c6a62">keeps the episode warm;</text>
+  <text x="185" y="308" font-size="10" text-anchor="middle" fill="#5c6a62">mis-route = slow, never wrong</text>
+  <rect x="330" y="240" width="250" height="80" rx="8" fill="#ffffff" stroke="#1c2420" stroke-width="1.5"/>
+  <text x="455" y="260" font-size="11.5" font-weight="bold" text-anchor="middle" fill="#1c2420">ownership (correctness)</text>
+  <text x="455" y="278" font-size="10.5" text-anchor="middle" fill="#1c2420">fenced, expiring lease in shared DB</text>
+  <text x="455" y="294" font-size="10" text-anchor="middle" fill="#5c6a62">writes carry fencing token;</text>
+  <text x="455" y="308" font-size="10" text-anchor="middle" fill="#5c6a62">storage refuses stale tokens</text>
+  <text x="610" y="262" font-size="11" fill="#157a55">⇒ exactly one driver per task,</text>
+  <text x="610" y="278" font-size="11" fill="#157a55">even under partition / zombie</text>
+  <text x="610" y="300" font-size="10.5" fill="#5c6a62">takeover = claim lease,</text>
+  <text x="610" y="314" font-size="10.5" fill="#5c6a62">rehydrate, reconcile, resume</text>
+
+  <!-- Plane 3: Connection -->
+  <rect x="40" y="354" width="840" height="130" rx="10" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="56" y="378" font-size="13" font-weight="bold" fill="#157a55">3 · Connection plane — how do we reach supply agents?</text>
+  <rect x="70" y="396" width="250" height="70" rx="8" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="195" y="416" font-size="11.5" font-weight="bold" text-anchor="middle" fill="#1c2420">dial-in WS (node-pinned)</text>
+  <text x="195" y="432" font-size="10" text-anchor="middle" fill="#5c6a62">socket = the agent's presence;</text>
+  <text x="195" y="446" font-size="10" text-anchor="middle" fill="#5c6a62">only the agent's reconnect loop restores it</text>
+  <rect x="350" y="396" width="250" height="70" rx="8" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="475" y="416" font-size="11.5" font-weight="bold" text-anchor="middle" fill="#1c2420">dial-out HTTP + SSE</text>
+  <text x="475" y="432" font-size="10" text-anchor="middle" fill="#5c6a62">one exchange per dispatch;</text>
+  <text x="475" y="446" font-size="10" text-anchor="middle" fill="#5c6a62">re-attach by sequence number</text>
+  <text x="630" y="412" font-size="11" fill="#b3402e">net-new: connection-location</text>
+  <text x="630" y="428" font-size="11" fill="#b3402e">registry (bot → node) +</text>
+  <text x="630" y="444" font-size="11" fill="#b3402e">inter-node delivery forwarding</text>
+  <text x="630" y="464" font-size="10" fill="#5c6a62">queued deliveries delay, never drop</text>
+
+  <!-- Plane 4: Storage -->
+  <rect x="40" y="500" width="840" height="110" rx="10" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="56" y="524" font-size="13" font-weight="bold" fill="#157a55">4 · Storage plane — what must actually be highly available?</text>
+  <rect x="70" y="540" width="220" height="52" rx="8" fill="#ffffff" stroke="#1c2420" stroke-width="1.5"/>
+  <text x="180" y="562" font-size="11.5" font-weight="bold" text-anchor="middle" fill="#1c2420">MySQL (HA) + Redis</text>
+  <text x="180" y="580" font-size="10" text-anchor="middle" fill="#5c6a62">the one hard dependency (managed HA)</text>
+  <rect x="320" y="540" width="240" height="52" rx="8" fill="#ffffff" stroke="#9a6b0a" stroke-dasharray="5 4"/>
+  <text x="440" y="562" font-size="11.5" text-anchor="middle" fill="#9a6b0a">BCSFuse — out of execution path</text>
+  <text x="440" y="580" font-size="10" text-anchor="middle" fill="#5c6a62">search degrades to cache, tasks unaffected</text>
+  <text x="590" y="560" font-size="11" fill="#157a55">⇒ task survival reduces to</text>
+  <text x="590" y="576" font-size="11" fill="#157a55">the availability of one HA store</text>
+</svg>

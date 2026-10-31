@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 480" font-family="Arial, Helvetica, sans-serif">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#5c6a62"/>
+    </marker>
+    <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#157a55"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="920" height="480" fill="#fafbf9"/>
+  <text x="24" y="32" font-size="16" font-weight="bold" fill="#1c2420">Dispatch lifecycle and pull-based reconciliation</text>
+  <text x="24" y="52" font-size="11" fill="#5c6a62">idem_key = f(run_id, step_id, attempt) — written durably before the request leaves</text>
+
+  <!-- states -->
+  <rect x="40" y="90" width="220" height="64" rx="10" fill="#ffffff" stroke="#1c2420" stroke-width="1.5"/>
+  <text x="150" y="114" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#1c2420">SENDING</text>
+  <text x="150" y="132" font-size="10.5" text-anchor="middle" fill="#5c6a62">intent row INSERTed (fenced);</text>
+  <text x="150" y="146" font-size="10.5" text-anchor="middle" fill="#5c6a62">key chosen by BCN</text>
+
+  <line x1="260" y1="122" x2="356" y2="122" stroke="#5c6a62" marker-end="url(#ar)"/>
+  <text x="308" y="110" font-size="10.5" text-anchor="middle" fill="#1c2420">send (key in metadata)</text>
+  <text x="308" y="176" font-size="11" text-anchor="middle" fill="#b3402e">⚡ crash: id unknown</text>
+
+  <rect x="360" y="90" width="230" height="64" rx="10" fill="#ffffff" stroke="#1c2420" stroke-width="1.5"/>
+  <text x="475" y="114" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#1c2420">DISPATCHED</text>
+  <text x="475" y="132" font-size="10.5" text-anchor="middle" fill="#5c6a62">server_task_id recorded;</text>
+  <text x="475" y="146" font-size="10.5" text-anchor="middle" fill="#5c6a62">agent working</text>
+
+  <line x1="590" y1="122" x2="686" y2="122" stroke="#5c6a62" marker-end="url(#ar)"/>
+  <text x="638" y="110" font-size="10.5" text-anchor="middle" fill="#1c2420">terminal event</text>
+  <text x="638" y="176" font-size="11" text-anchor="middle" fill="#b3402e">⚡ crash: outcome limbo</text>
+
+  <rect x="690" y="90" width="200" height="64" rx="10" fill="#e3f0e9" stroke="#157a55" stroke-width="1.5"/>
+  <text x="790" y="114" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#157a55">COMPLETED / FAILED</text>
+  <text x="790" y="132" font-size="10.5" text-anchor="middle" fill="#5c6a62">result persisted before ack;</text>
+  <text x="790" y="146" font-size="10.5" text-anchor="middle" fill="#5c6a62">run advances</text>
+
+  <!-- reconciliation box -->
+  <rect x="150" y="230" width="620" height="150" rx="12" fill="#ffffff" stroke="#157a55" stroke-dasharray="6 4"/>
+  <text x="460" y="254" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#157a55">Takeover reconciliation — one pull per non-terminal record (reads are idempotent)</text>
+
+  <text x="180" y="282" font-size="11" font-weight="bold" fill="#1c2420">from SENDING — probe by key:</text>
+  <text x="200" y="300" font-size="10.5" fill="#1c2420">· key unknown ⇒ resend with the SAME key (safe: a racing late original dedups)</text>
+  <text x="200" y="316" font-size="10.5" fill="#1c2420">· key known ⇒ existing task returned, id recovered</text>
+
+  <text x="180" y="340" font-size="11" font-weight="bold" fill="#1c2420">from DISPATCHED — GetTask:</text>
+  <text x="200" y="358" font-size="10.5" fill="#1c2420">· working / input-required ⇒ subscribe and wait</text>
+  <text x="200" y="374" font-size="10.5" fill="#1c2420">· completed / failed ⇒ fetch result, advance — no re-execution</text>
+
+  <!-- arrows from recovery box to states -->
+  <line x1="200" y1="230" x2="150" y2="158" stroke="#157a55" stroke-dasharray="4 3" marker-end="url(#ag)"/>
+  <line x1="520" y1="230" x2="480" y2="158" stroke="#157a55" stroke-dasharray="4 3" marker-end="url(#ag)"/>
+  <line x1="720" y1="230" x2="770" y2="158" stroke="#157a55" stroke-dasharray="4 3" marker-end="url(#ag)"/>
+
+  <!-- rules footer -->
+  <rect x="40" y="398" width="850" height="74" rx="8" fill="#f2f5f3" stroke="#b9c6bf"/>
+  <text x="56" y="420" font-size="11" fill="#1c2420"><tspan font-weight="bold">Attempt rule:</tspan> reconciliation resends reuse the recorded key; attempt++ only after the prior attempt failed with a declared no-effect,</text>
+  <text x="56" y="436" font-size="11" fill="#1c2420">or its max in-flight delivery delay elapsed with the key still unknown. failed with effect occurred/unknown ⇒ reconcile, never auto-retry.</text>
+  <text x="56" y="460" font-size="11" fill="#1c2420"><tspan font-weight="bold">Window rule:</tspan> retention ≥ max in-flight delivery delay + lease TTL + takeover RTO + reconciliation sweep.</text>
+</svg>
