@@ -75,6 +75,12 @@ _BOT_DATA_STORE = "bot-data"
 # Skipping them by path segment (at any depth) avoids both problems.
 _EXCLUDED_DIR_SEGMENTS = frozenset({"node_modules"})
 
+# Files read from the engine and written to OSS at once. Each in-flight file holds
+# one worker thread of the loop's shared default executor (both calls are sync,
+# run via ``asyncio.to_thread``) and its whole content in memory, and every read
+# lands on the one source container, so this stays well below the executor size.
+_PROMOTION_CONCURRENCY = 8
+
 
 def _has_excluded_segment(engine_path: str) -> bool:
     """True if any path segment of ``engine_path`` names an excluded directory."""
@@ -152,6 +158,8 @@ class TeclawFilePromotion:
         rel_root = f"{entity_type}_{entity_id}/{bot_id}_{publish_id}_{stage}/teclaw"
         out = PromotedRefs()
 
+        # Plan: list both namespaces and pick the files to stage, in listing order.
+        planned: list[tuple[str, str]] = []  # (ns, logical path)
         for ns in self.NAMESPACES:
             entries = await device_fs.list_dir(ns, recursive=True)
             # ``list_dir`` returns None on a failed listing (engine unreachable /
@@ -188,11 +196,21 @@ class TeclawFilePromotion:
                 # end-of-sweep summary covers what was actually staged.
                 if _has_excluded_segment(engine_path):
                     continue
-                logical = engine_path.lstrip("/")  # "workspace/sub/x.csv"
+                planned.append((ns, engine_path.lstrip("/")))  # "workspace/sub/x.csv"
+
+        # Stage: read → put each planned file, up to ``_PROMOTION_CONCURRENCY`` at a
+        # time. The slot is held across both calls so in-flight file bytes stay
+        # bounded too. ``device_fs`` resolves its connection once per engine path
+        # and coalesces concurrent first resolutions, so the fan-out does not
+        # multiply binding lookups.
+        slots = asyncio.Semaphore(_PROMOTION_CONCURRENCY)
+
+        async def _stage_one(ns: str, logical: str) -> dict[str, str]:
+            async with slots:
                 content = await device_fs.read_file(logical)
                 if content is None:
                     raise TeclawFilePromotionError(
-                        f"teclaw promotion: source file unreadable: {engine_path}"
+                        f"teclaw promotion: source file unreadable: /{logical}"
                     )
                 rel = logical[len(ns):].lstrip("/")  # "sub/x.csv"
                 ref_path = f"{rel_root}/{ns}/{rel}"
@@ -202,13 +220,31 @@ class TeclawFilePromotion:
                     raise TeclawFilePromotionError(
                         f"teclaw promotion: OSS put_object failed for {oss_key!r}"
                     )
-                ref = {
+                return {
                     "name": rel.rsplit("/", 1)[-1],
                     "store": _BOT_DATA_STORE,
                     "path": ref_path,
                 }
-                target = out.resources if ns == WORKSPACE_NS else out.identity_files
-                target.append(ref)
+
+        # The first failure cancels the files not yet staged (one already inside
+        # ``to_thread`` finishes its call; its object lands under this stage's own
+        # prefix, as a mid-sweep failure always could). Re-raise that failure
+        # itself, not the ``ExceptionGroup`` the task group wraps it in, so callers
+        # keep seeing ``TeclawFilePromotionError`` (or the storage error) unchanged.
+        try:
+            async with asyncio.TaskGroup() as group:
+                tasks = [
+                    group.create_task(_stage_one(ns, logical))
+                    for ns, logical in planned
+                ]
+        except BaseExceptionGroup as failed:
+            raise failed.exceptions[0] from None
+
+        # Assemble in planning order, not completion order, so the composed
+        # artifact is identical from run to run.
+        for (ns, _logical), task in zip(planned, tasks):
+            target = out.resources if ns == WORKSPACE_NS else out.identity_files
+            target.append(task.result())
 
         # Off the event loop, like the ``put_object`` above: this reads the
         # metadata table and then copies each tool object — a server-side copy

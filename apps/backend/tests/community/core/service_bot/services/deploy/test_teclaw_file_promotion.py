@@ -1,4 +1,5 @@
 """Unit tests for TeclawFilePromotion (gather engine files → OSS → refs)."""
+import asyncio
 from unittest.mock import MagicMock
 
 from agentclaw.community.core.apply_engine.cli_tools.store import (
@@ -10,6 +11,9 @@ from tests.community.core.apply_engine.cli_tools._fakes import (
 
 import pytest
 
+from agentclaw.community.core.service_bot.services.deploy import (
+    teclaw_file_promotion,
+)
 from agentclaw.community.core.service_bot.services.deploy.teclaw_file_promotion import (
     PromotedRefs,
     TeclawFilePromotion,
@@ -261,3 +265,108 @@ async def test_reads_use_logical_namespace_relative_paths():
     # read_file is called with the logical (no leading slash) form so the teclaw
     # mapper maps it back to /workspace/... rather than mis-treating it as a host path.
     assert fs.read_calls == ["workspace/sub/a.md"]
+
+
+# ── bounded parallel sweep ─────────────────────────────────────────────
+
+
+class _SlowDeviceFs(_FakeDeviceFs):
+    """Reads yield to the loop, so concurrent reads overlap; tracks peak overlap.
+
+    ``delays`` (logical path → seconds) lets a test make earlier files finish later.
+    """
+
+    def __init__(self, *, delays=None, **kwargs):
+        super().__init__(**kwargs)
+        self._delays = delays or {}
+        self.in_flight = 0
+        self.peak_in_flight = 0
+
+    async def read_file(self, file_path):
+        self.in_flight += 1
+        self.peak_in_flight = max(self.peak_in_flight, self.in_flight)
+        try:
+            await asyncio.sleep(self._delays.get(file_path, 0.01))
+            return await super().read_file(file_path)
+        finally:
+            self.in_flight -= 1
+
+
+def _workspace(n):
+    paths = [f"workspace/f{i:02d}.txt" for i in range(n)]
+    return (
+        {"workspace": [{"path": f"/{p}", "is_dir": False} for p in paths], "identity": []},
+        {p: p.encode() for p in paths},
+        paths,
+    )
+
+
+@pytest.mark.asyncio
+async def test_files_are_staged_concurrently_up_to_the_bound():
+    listings, contents, paths = _workspace(3 * teclaw_file_promotion._PROMOTION_CONCURRENCY)
+    fs = _SlowDeviceFs(listings=listings, contents=contents)
+    oss = _oss_ok()
+
+    refs = await _promo(oss).stage_files(device_fs=fs, **_ARGS)
+
+    assert fs.peak_in_flight == teclaw_file_promotion._PROMOTION_CONCURRENCY
+    assert sorted(fs.read_calls) == paths
+    assert oss.put_object.call_count == len(paths)
+    assert len(refs.resources) == len(paths)
+
+
+@pytest.mark.asyncio
+async def test_refs_keep_listing_order_when_reads_finish_out_of_order():
+    listings = {
+        "workspace": [
+            {"path": "/workspace/slow.txt", "is_dir": False},
+            {"path": "/workspace/fast.txt", "is_dir": False},
+        ],
+        "identity": [{"path": "/identity/MEMORY.md", "is_dir": False}],
+    }
+    contents = {
+        "workspace/slow.txt": b"s", "workspace/fast.txt": b"f", "identity/MEMORY.md": b"m",
+    }
+    fs = _SlowDeviceFs(
+        listings=listings, contents=contents,
+        delays={"workspace/slow.txt": 0.05, "workspace/fast.txt": 0, "identity/MEMORY.md": 0},
+    )
+
+    refs = await _promo(_oss_ok()).stage_files(device_fs=fs, **_ARGS)
+
+    # The slow file finished last but is still first, as listed.
+    assert fs.read_calls[-1] == "workspace/slow.txt"
+    assert [r["name"] for r in refs.resources] == ["slow.txt", "fast.txt"]
+    assert [r["name"] for r in refs.identity_files] == ["MEMORY.md"]
+
+
+@pytest.mark.asyncio
+async def test_first_failure_raises_unwrapped_and_cancels_unstarted_files():
+    listings, contents, paths = _workspace(4 * teclaw_file_promotion._PROMOTION_CONCURRENCY)
+    del contents[paths[0]]  # first file unreadable → read_file returns None
+    fs = _SlowDeviceFs(
+        listings=listings, contents=contents, delays={paths[0]: 0},
+    )
+    oss = _oss_ok()
+
+    with pytest.raises(TeclawFilePromotionError, match="f00.txt") as excinfo:
+        await _promo(oss).stage_files(device_fs=fs, **_ARGS)
+
+    # The promotion error itself, not the task group's ExceptionGroup.
+    assert type(excinfo.value) is TeclawFilePromotionError
+    # Files still queued behind the bound were never read.
+    assert len(fs.read_calls) < len(paths)
+    assert oss.put_object.call_count < len(paths)
+
+
+@pytest.mark.asyncio
+async def test_storage_exception_propagates_unwrapped():
+    fs = _FakeDeviceFs(
+        listings={"workspace": [{"path": "/workspace/x", "is_dir": False}], "identity": []},
+        contents={"workspace/x": b"data"},
+    )
+    oss = MagicMock()
+    oss.put_object.side_effect = ConnectionError("oss down")
+
+    with pytest.raises(ConnectionError, match="oss down"):
+        await _promo(oss).stage_files(device_fs=fs, **_ARGS)
