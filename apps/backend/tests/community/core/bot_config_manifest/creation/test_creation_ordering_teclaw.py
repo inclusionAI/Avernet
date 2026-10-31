@@ -145,6 +145,7 @@ def _build(db):
             resource_service=FakeResourceFileService(),
             resource_rows=resource_rows_for()[0],
             cli_tool_service=object(),
+            shared_skills=object(),
         )
 
     applies = ApplyRunService(
@@ -152,6 +153,7 @@ def _build(db):
         apply_repository=BotConfigManifestApplyRepository(db),
         lock_repository=BotConfigManifestApplyLockRepository(db),
         compilers=manifest_compilers(manifests=_Manifests(), content=content, resolver=fetcher()),
+        completion_handlers={},
         task_queue_provider=lambda: queue,
         bot_repository=bots,
         # The platform-managed deployment: the store-backed bundle above, and

@@ -262,48 +262,47 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
         self, *, bot_id: str, owner_id: str, set_id: str
     ) -> set[str]: ...
     @abstractmethod
-    def claim_manifest_skill(
+    def set_supplied_capabilities(
+        self, *, bot_id: str, owner_id: str,
+        platform_default_codes: frozenset[str],
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> tuple[frozenset[str], frozenset[str]]:
+        """The skill runtime names and MCP codes the bot's Sets supply (an apply's conflicts)."""
+        ...
+    @abstractmethod
+    def claim_apply_skill(
         self, *, bot_id: str, owner_id: str, skill_id: str,
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
-        """Manifest-only conversion of one runtime name to a Direct Skill."""
+        """An apply's Direct Skill claim; refuses a runtime name a Set supplies."""
         ...
     @abstractmethod
-    def remove_manifest_skill(
+    def remove_apply_skill(
         self, *, bot_id: str, owner_id: str, skill_id: str,
-        remove_inactive_memberships: bool,
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
-        """Manifest removal; Local assets may detach inactive memberships."""
+        """An apply's removal of one Direct Skill; refuses one a Set supplies."""
         ...
     @abstractmethod
-    def claim_manifest_mcp(
+    def claim_apply_mcp(
         self, *, bot_id: str, owner_id: str, server_code: str,
         config: dict | None, platform_default_codes: frozenset[str],
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
-        """Manifest-only source conversion plus atomic override replacement."""
+        """An apply's Direct MCP claim plus atomic override; refuses a code a Set supplies."""
         ...
     @abstractmethod
-    def manifest_direct_mcp_exists(
-        self, *, bot_id: str, owner_id: str, server_code: str,
-        platform_default_codes: frozenset[str],
-        engine_type: str | None = None,
-        default_engine_types: tuple[str, ...] | None = None,
-    ) -> bool:
-        """Whether exclusion plus Installation already forms a Direct claim."""
-        ...
-    @abstractmethod
-    def remove_manifest_mcp(
+    def remove_apply_mcp(
         self, *, bot_id: str, owner_id: str, server_code: str,
         platform_default_codes: frozenset[str],
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
-        """Remove explicit MCP supply while preserving Default exclusions."""
+        """An apply's removal of one Direct MCP server; refuses one a Set supplies."""
         ...
     @abstractmethod
     def install_skill(
@@ -349,18 +348,6 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
     def list_installed_mcps(
         self, *, bot_id: str, owner_id: str, engine_type: str | None = None
     ) -> set[str]: ...
-    @abstractmethod
-    def set_managed_mcp_codes(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        server_codes: set[str],
-        engine_type: str | None = None,
-        default_engine_types: tuple[str, ...] | None = None,
-    ) -> set[str]:
-        """Return candidate codes whose SkillSet ownership forbids direct writes."""
-        ...
     @abstractmethod
     def set_skill_set_active(
         self,

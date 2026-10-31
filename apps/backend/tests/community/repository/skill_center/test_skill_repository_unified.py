@@ -128,6 +128,19 @@ def test_skill_create_get_update_delete(skills):
     assert skills.delete(sid) is False
 
 
+def test_center_assets_are_listed_by_runtime_name_online_only(skills, db):
+    online = skills.create({"name": "refund-policy", "git_path": "center://a"})
+    offline = skills.create({"name": "refund-policy", "git_path": "center://b"})
+    skills.create({"name": "refund-policy", "git_path": "git://team/refund-policy"})
+    skills.create({"name": "other", "git_path": "center://c"})
+    with db.orm_session() as session:
+        session.query(Skill).filter_by(id=int(offline["id"])).update(
+            {Skill.offline_at: datetime(2026, 10, 28)}, synchronize_session=False
+        )
+    assert [row["id"] for row in skills.list_center_by_name("refund-policy")] == [online["id"]]
+    assert skills.list_center_by_name("missing") == []
+
+
 def test_legacy_add_refuses_offline_skill_before_membership_write(skills, sets, db):
     skill = skills.create({"name": "offline", "git_path": "center://offline"})
     skill_set = sets.create({"name": "set", "is_active": False})

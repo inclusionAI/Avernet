@@ -297,7 +297,7 @@ class SkillSetManagedResourceError(DomainError):
     """A Direct command targets a resource managed by an ordinary SkillSet."""
 
 
-class ManifestDesiredStateCommittedError(RuntimeError):
+class ApplyDesiredStateCommittedError(RuntimeError):
     """A Manifest command committed desired state before a later step failed."""
 
 

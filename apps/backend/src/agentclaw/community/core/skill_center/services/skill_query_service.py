@@ -31,6 +31,11 @@ from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.center_skill_access import (
     CenterSkillAccessRepositoryProtocol,
 )
+from agentclaw.community.core.ports.shared_skill_port import (
+    SharedSkillAmbiguous,
+    SharedSkillNotFound,
+    SharedSkillPort,
+)
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.skill_center.canonical_center_store import (
     CanonicalCenterVersionIdentity,
@@ -134,7 +139,7 @@ class _AssetAdapter(Protocol):
     ) -> tuple[dict[str, Any], dict[str, Any], str]: ...
 
 
-class SkillQueryService(SkillQueryServiceProtocol):
+class SkillQueryService(SkillQueryServiceProtocol, SharedSkillPort):
     """Resolve one public ``skill_id`` (or a Bot scope) and answer for it."""
 
     @inject
@@ -266,6 +271,44 @@ class SkillQueryService(SkillQueryServiceProtocol):
             user_id=user_id,
         )
         return skill
+
+    # ── Shared skills by name or path (the apply engine's SharedSkillPort) ──
+
+    def find_center_skill(self, *, bot_id: str, owner_id: str, actor_id: str, name: str) -> str:
+        """The one online Center asset named ``name`` this bot and actor may use, by id."""
+        visible = [
+            str(skill["id"])
+            for skill in self._skill_repo.list_center_by_name(name)
+            if self._usable(skill_id=str(skill["id"]), bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
+        ]
+        if not visible:
+            raise SharedSkillNotFound(
+                f"no Skill Center skill named {name!r} is available to this bot (a market skill must be added first)"
+            )
+        if len(visible) > 1:
+            raise SharedSkillAmbiguous(f"{len(visible)} Skill Center skills named {name!r} are available to this bot")
+        return visible[0]
+
+    def find_repo_skill(self, *, bot_id: str, owner_id: str, actor_id: str, name: str, path: str) -> str:
+        """The shared-repository asset at ``git://<path>``, by id, when this bot and actor may use it."""
+        skill = self._skill_repo.get_by_git_path(f"git://{path}")
+        if skill is None or not self._usable(
+            skill_id=str(skill["id"]), bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
+        ):
+            raise SharedSkillNotFound(f"no shared-repository skill at {path!r} is available to this bot")
+        if skill.get("name") != name:
+            raise SharedSkillNotFound(
+                f"the shared-repository skill at {path!r} is named {skill.get('name')!r}, not {name!r}"
+            )
+        return str(skill["id"])
+
+    def _usable(self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str) -> bool:
+        """The same visibility and access rule ``resolve_skill`` enforces; not visible reads as not there."""
+        try:
+            self._resolve(skill_id=skill_id, bot_id=bot_id, owner_id=owner_id, user_id=actor_id)
+        except LocalSkillNotFoundError:
+            return False
+        return True
 
     # ── Legacy reference resolution ─────────────────────────────────
 

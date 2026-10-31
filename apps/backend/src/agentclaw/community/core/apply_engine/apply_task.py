@@ -34,7 +34,7 @@ from typing import Any, Callable, Optional
 
 from agentclaw.community.core.apply_engine.order import ApplyPhase
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
-from agentclaw.community.core.task_queue.types import Complete, TaskOutcome
+from agentclaw.community.core.task_queue.types import Complete, TaskOutcome, TaskRecord
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
 
@@ -204,6 +204,15 @@ class ApplyTaskHandler:
             return Complete()
         self._apply_service_provider().run_apply_task(payload)
         return Complete()
+
+    def on_give_up(self, task: TaskRecord) -> None:
+        """The queue gave up on this apply (deadline elapsed, or the task failed): end it and say so.
+
+        No run will write the report, so ``ApplyRunService.give_up`` writes it
+        ``FAILED``, releases the lock and tells the state's producer.
+        """
+        if task.payload:
+            self._apply_service_provider().give_up(task.payload)
 
 
 class ApplyTaskLifecycle(LifecycleBase):

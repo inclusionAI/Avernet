@@ -8,7 +8,8 @@ and the ``active``/``previous`` pair rely on.
 
 from __future__ import annotations
 
-from datetime import datetime
+import json
+from datetime import datetime, timezone
 from typing import Optional
 
 from injector import inject
@@ -28,6 +29,8 @@ from agentclaw.community.core.bot_genome.repository.models import (
     GenomeRefRow,
     GenomeRevisionModel,
     GenomeRevisionRow,
+    ProvenanceKind,
+    SettleResult,
 )
 from agentclaw.community.core.repository.protocols.bot.genome import (
     GenomePatchRepositoryProtocol,
@@ -40,6 +43,8 @@ from agentclaw.community.plugin_api.database import DatabasePlugin
 #: Insert attempts on a ``seq`` race before giving up (each attempt re-reads MAX(seq)).
 SEQ_RETRIES = 5
 _BOT_AXES = ("env", "entity_id", "bot_id")
+#: The promotion statuses that can still change; every other one is final.
+_IN_FLIGHT = ("pending", "applying")
 
 
 class _Conflict(Exception):
@@ -251,7 +256,7 @@ class GenomeRefRepository(GenomeRefRepositoryProtocol):
         name: str,
         revision_id: str,
         expected_revision_id: Optional[str],
-        moved_kind: str,
+        moved_kind: ProvenanceKind,
         moved_actor: str,
         run_id: Optional[str],
         reason: Optional[str],
@@ -284,7 +289,7 @@ class GenomeRefRepository(GenomeRefRepositoryProtocol):
         bot_id: str,
         revision_id: str,
         expected_active: Optional[str],
-        moved_kind: str,
+        moved_kind: ProvenanceKind,
         moved_actor: str,
         run_id: Optional[str],
         reason: Optional[str],
@@ -426,17 +431,22 @@ def _cas_move(
     name: str,
     revision_id: str,
     expected: Optional[str],
-    moved_kind: str,
+    moved_kind: ProvenanceKind,
     moved_actor: str,
     run_id: Optional[str],
     reason: Optional[str],
     moved_at: datetime,
+    labels: str = "[]",
 ) -> GenomeRefModel:
-    """One conditional move inside the caller's transaction; raises ``_Conflict`` when the CAS matches nothing."""
+    """One conditional move inside the caller's transaction; raises ``_Conflict`` when the CAS matches nothing.
+
+    Every move writes the ref's ``labels`` (``[]`` unless the mover passes some), so a label never outlives the
+    move it describes.
+    """
     axes = dict(env=env, entity_id=entity_id, bot_id=bot_id)
     stamp = dict(moved_kind=moved_kind, moved_actor=moved_actor, run_id=run_id, reason=reason, moved_at=moved_at)
     if expected is None:
-        row = GenomeRefModel(**axes, name=name, revision_id=revision_id, version=1, **stamp)
+        row = GenomeRefModel(**axes, name=name, revision_id=revision_id, version=1, labels=labels, **stamp)
         session.add(row)
         session.flush()  # uk_bot_ref decides who created it
     else:
@@ -447,7 +457,7 @@ def _cas_move(
             .filter(*_bot(GenomeRefModel, **axes))
             .filter(GenomeRefModel.name == name, GenomeRefModel.revision_id == expected)
             .update(
-                {"revision_id": revision_id, "version": GenomeRefModel.version + 1, **stamp},
+                {"revision_id": revision_id, "version": GenomeRefModel.version + 1, "labels": labels, **stamp},
                 synchronize_session=False,
             )
         )
@@ -460,15 +470,35 @@ def _cas_move(
 
 
 def _move_pair(
-    session, *, env: str, entity_id: str, bot_id: str, revision_id: str, expected_active: Optional[str], **stamp
+    session,
+    *,
+    env: str,
+    entity_id: str,
+    bot_id: str,
+    revision_id: str,
+    expected_active: Optional[str],
+    active_labels: str = "[]",
+    **stamp,
 ) -> tuple[GenomeRefModel, Optional[GenomeRefModel]]:
     """``active`` → ``revision_id`` by CAS and ``previous`` → the old ``active``, inside the caller's transaction.
 
     Re-promoting the revision ``active`` already points at (``revision_id == expected_active``) moves
     ``active`` onto itself (a logged, versioned move) and leaves ``previous`` as the one step back.
+    ``active_labels`` are ``active``'s new labels; ``previous`` takes the labels the old ``active`` had, so a
+    revision that was only partly delivered still says so when the bot goes back to it.
     """
     axes = dict(env=env, entity_id=entity_id, bot_id=bot_id)
-    active = _cas_move(session, **axes, name="active", revision_id=revision_id, expected=expected_active, **stamp)
+    old_active = _ref_row(session, **axes, name="active")
+    old_labels = old_active.labels if old_active is not None else "[]"
+    active = _cas_move(
+        session,
+        **axes,
+        name="active",
+        revision_id=revision_id,
+        expected=expected_active,
+        labels=active_labels,
+        **stamp,
+    )
     previous = None
     if expected_active is not None and expected_active != revision_id:
         current = _ref_row(session, **axes, name="previous")
@@ -478,6 +508,7 @@ def _move_pair(
             name="previous",
             revision_id=expected_active,
             expected=current.revision_id if current is not None else None,
+            labels=old_labels,
             **stamp,
         )
     return active, previous
@@ -530,48 +561,138 @@ class GenomePromotionRepository(GenomePromotionRepositoryProtocol):
             session.refresh(orm)
             return orm.to_record()
 
-    def start(
-        self,
-        row: GenomePromotionRow,
-        *,
-        expected_active: Optional[str],
-        expected_statuses: tuple[str, ...],
-        moved_at: datetime,
+    def mark_applying(
+        self, *, env: str, entity_id: str, bot_id: str, promotion_id: str, apply_id: str
     ) -> Optional[GenomePromotionRow]:
-        """The promotion's one write: move the ``active``/``previous`` pair, mark the revision, file the row.
+        with self._db.orm_session() as session:
+            updated = (
+                session.query(GenomePromotionModel)
+                .filter(*_bot(GenomePromotionModel, env=env, entity_id=entity_id, bot_id=bot_id))
+                .filter(GenomePromotionModel.promotion_id == promotion_id, GenomePromotionModel.status == "pending")
+                .update({"status": "applying", "apply_id": apply_id}, synchronize_session=False)
+            )
+            if updated != 1:
+                return None
+            row = self._one(session, env=env, entity_id=entity_id, bot_id=bot_id, promotion_id=promotion_id)
+            return row.to_record() if row is not None else None
 
-        One transaction, so a lost compare-and-swap, a status that moved out
-        of ``expected_statuses`` since the caller read it, or a failed write
-        leaves no ref moved, no status changed and no row. ``None`` on conflict.
-        """
-        axes = dict(env=row.env, entity_id=row.entity_id, bot_id=row.bot_id)
-        stamp = dict(
-            moved_kind=row.actor_kind,
-            moved_actor=row.actor_id,
-            run_id=row.actor_run_id,
-            reason=row.reason,
-            moved_at=moved_at,
-        )
+    def settle(
+        self,
+        *,
+        env: str,
+        entity_id: str,
+        bot_id: str,
+        promotion_id: str,
+        apply_id: str,
+        status: str,
+        apply_detail: str,
+        move_refs: bool,
+        labels: tuple[str, ...],
+        expected_statuses: tuple[str, ...],
+        settled_at: datetime,
+    ) -> SettleResult:
+        """One transaction per outcome: the refs, the revision and the row together, or the conflict recorded."""
+        axes = dict(env=env, entity_id=entity_id, bot_id=bot_id)
         try:
             with _transaction(self._db) as session:
-                _move_pair(session, **axes, revision_id=row.revision_id, expected_active=expected_active, **stamp)
-                updated = (
-                    session.query(GenomeRevisionModel)
-                    .filter(*_bot(GenomeRevisionModel, **axes))
-                    .filter(GenomeRevisionModel.revision_id == row.revision_id)
-                    .filter(GenomeRevisionModel.status.in_(expected_statuses))
-                    .update({"status": "promoted"}, synchronize_session=False)
+                row = (
+                    session.query(GenomePromotionModel)
+                    .filter(*_bot(GenomePromotionModel, **axes))
+                    .filter(GenomePromotionModel.promotion_id == promotion_id)
+                    .with_for_update()
+                    .one_or_none()
                 )
-                if updated != 1:
-                    # Not this bot's revision, or its status changed under us (verification rejected it).
-                    raise _Conflict(row.revision_id)
-                orm = GenomePromotionModel(**row.model_dump(exclude={"id", "gmt_create", "gmt_modified"}))
-                session.add(orm)
+                if row is None:
+                    return SettleResult.NOT_FOUND
+                if row.status not in _IN_FLIGHT:
+                    return SettleResult.ALREADY_SETTLED
+                if move_refs:
+                    _move_pair(
+                        session,
+                        **axes,
+                        revision_id=row.revision_id,
+                        expected_active=row.from_revision_id,
+                        active_labels=json.dumps(sorted(labels)),
+                        moved_kind=ProvenanceKind(row.actor_kind),
+                        moved_actor=row.actor_id,
+                        run_id=row.actor_run_id,
+                        reason=row.reason,
+                        moved_at=settled_at,
+                    )
+                    updated = (
+                        session.query(GenomeRevisionModel)
+                        .filter(*_bot(GenomeRevisionModel, **axes))
+                        .filter(GenomeRevisionModel.revision_id == row.revision_id)
+                        .filter(GenomeRevisionModel.status.in_(expected_statuses))
+                        .update({"status": "promoted"}, synchronize_session=False)
+                    )
+                    if updated != 1:
+                        # Its status moved while the apply ran (verification rejected it).
+                        raise _Conflict(row.revision_id)
+                row.status = status
+                # The worker can settle before the request records the association (or the request died first).
+                row.apply_id = apply_id
+                row.apply_detail = apply_detail
+                row.settled_at = settled_at
                 session.flush()
-                session.refresh(orm)
-                return orm.to_record()
+                return SettleResult.SETTLED
         except (_Conflict, IntegrityError):
-            return None
+            pass  # rolled back: no ref moved, no status changed
+        conflicted = self._settle_without_refs(
+            **axes,
+            promotion_id=promotion_id,
+            apply_id=apply_id,
+            status="apply_failed",
+            apply_detail="active moved, or the revision's status changed, while the apply ran; no ref moved",
+            settled_at=settled_at,
+        )
+        return SettleResult.REF_CONFLICT if conflicted else SettleResult.ALREADY_SETTLED
+
+    def fail_stale_pending(
+        self, *, env: str, entity_id: str, bot_id: str, older_than: datetime, apply_detail: str, settled_at: datetime
+    ) -> int:
+        with self._db.orm_session() as session:
+            return (
+                session.query(GenomePromotionModel)
+                .filter(*_bot(GenomePromotionModel, env=env, entity_id=entity_id, bot_id=bot_id))
+                .filter(
+                    GenomePromotionModel.status == "pending",
+                    GenomePromotionModel.apply_id.is_(None),
+                    GenomePromotionModel.created_at < older_than,
+                )
+                .update(
+                    {"status": "apply_failed", "apply_detail": apply_detail, "settled_at": settled_at},
+                    synchronize_session=False,
+                )
+            )
+
+    def _settle_without_refs(
+        self,
+        *,
+        env: str,
+        entity_id: str,
+        bot_id: str,
+        promotion_id: str,
+        apply_id: str | None,
+        status: str,
+        apply_detail: str,
+        settled_at: datetime,
+    ) -> bool:
+        """The row's final status with no ref move, only while it is in flight; whether it changed.
+
+        ``apply_id`` is the apply that ended, recorded on the row; ``None`` when no apply started (``finish``).
+        """
+        values = {"status": status, "apply_detail": apply_detail, "settled_at": settled_at}
+        if apply_id is not None:
+            values["apply_id"] = apply_id
+        with self._db.orm_session() as session:
+            updated = (
+                session.query(GenomePromotionModel)
+                .filter(*_bot(GenomePromotionModel, env=env, entity_id=entity_id, bot_id=bot_id))
+                .filter(GenomePromotionModel.promotion_id == promotion_id, GenomePromotionModel.status.in_(_IN_FLIGHT))
+                .update(values, synchronize_session=False)
+            )
+            return updated == 1
 
     def _one(
         self, session, *, env: str, entity_id: str, bot_id: str, promotion_id: str
@@ -616,12 +737,14 @@ class GenomePromotionRepository(GenomePromotionRepositoryProtocol):
         status: str,
         apply_detail: str,
     ) -> Optional[GenomePromotionRow]:
-        with self._db.orm_session() as session:
-            row = self._one(session, env=env, entity_id=entity_id, bot_id=bot_id, promotion_id=promotion_id)
-            if row is None:
-                return None
-            row.status = status
-            row.apply_detail = apply_detail
-            session.flush()
-            session.refresh(row)
-            return row.to_record()
+        self._settle_without_refs(
+            env=env,
+            entity_id=entity_id,
+            bot_id=bot_id,
+            promotion_id=promotion_id,
+            apply_id=None,
+            status=status,
+            apply_detail=apply_detail,
+            settled_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        )
+        return self.get(env=env, entity_id=entity_id, bot_id=bot_id, promotion_id=promotion_id)

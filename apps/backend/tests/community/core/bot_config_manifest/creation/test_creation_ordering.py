@@ -208,6 +208,7 @@ def _build(db, *, scripts=None):
         task_queue_provider=lambda: queue,
         bot_repository=_Bots(),
         compilers=manifest_compilers(manifests=manifests, content=content, git=FakeGitClient),
+        completion_handlers={},
         # The delivery seam, assembled the way the composition root
         # assembles it: a bundle of device-backed ports, one strategy
         # over it, and a lookup. The categories this suite's document

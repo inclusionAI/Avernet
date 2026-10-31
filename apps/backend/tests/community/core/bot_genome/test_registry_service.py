@@ -494,8 +494,8 @@ async def test_diff_and_compile(world: World) -> None:
 
 
 async def _promote_first(world: World, revision: str) -> None:
-    """``active`` is moved by promotion only; the fake applier accepts."""
-    await world.promotion.promote(BOT, revision=revision, ref="active", expected_revision=None, actor=OWNER, reason="x")
+    """``active`` is moved by promotion only, once its delivery ends; the fake applier accepts and it succeeds."""
+    await world.promote(revision, expected=None, actor=OWNER, reason="x")
 
 
 @pytest.mark.asyncio

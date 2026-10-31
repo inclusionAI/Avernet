@@ -115,15 +115,15 @@ class CapturedSkill:
     - ``SkillOrigin.LOCAL`` (a bot-owned upload): ``files`` holds the package's files, e.g.
       ``CapturedSkill("tidy", SkillOrigin.LOCAL, files=(CapturedFile("SKILL.md", …), CapturedFile("a.py", …)))``;
       capture keeps what ``SkillPackageValidator`` keeps and stores them as one acm-tree-v1 tree.
-    - ``SkillOrigin.CENTER`` (a Skill Center skill): ``center_version`` is the pinned version,
-      e.g. ``CapturedSkill("refund-policy", SkillOrigin.CENTER, center_version="v7")``.
+    - ``SkillOrigin.CENTER`` (a Skill Center skill): the name alone, e.g.
+      ``CapturedSkill("refund-policy", SkillOrigin.CENTER)``; the version in use is not recorded, since the bot
+      runs whatever the Center publishes (ADR 0002) and a new Center version is not drift.
     - ``SkillOrigin.REPO`` (the shared skills repository): ``repo_path`` is the path after ``git://`` on
       the skill row, e.g. ``CapturedSkill("weather", SkillOrigin.REPO, repo_path="team/weather")``.
     """
 
     name: str  #: the skill's name, which becomes the entry's key (``skills/<name>``)
     origin: SkillOrigin  #: where the files come from (the prefix of the skill row's locator)
-    center_version: str | None = None  #: ``center`` only: the Skill Center version in use
     repo_path: str | None = None  #: ``repo`` only: the skill's path inside the shared repository
     files: tuple[CapturedFile, ...] = ()  #: ``local`` only: the package's files, path relative to the skill root
 
@@ -289,16 +289,7 @@ async def capture_spec(
             digest = build.store(canonical_tree_bytes(list(validated.files)))
             entry = build.entry(LocalSkill, location, name=skill.name, origin="local", digest=digest)
         elif skill.origin == SkillOrigin.CENTER:
-            if not skill.center_version:
-                build.reasons.append(
-                    Reason(
-                        "skill_package", location, "a Skill Center skill without a pinned version cannot be recorded"
-                    )
-                )
-                continue
-            entry = build.entry(
-                CenterSkill, location, name=skill.name, origin="center", center_version=skill.center_version
-            )
+            entry = build.entry(CenterSkill, location, name=skill.name, origin="center")
         elif skill.origin == SkillOrigin.REPO:
             if not skill.repo_path:
                 build.reasons.append(

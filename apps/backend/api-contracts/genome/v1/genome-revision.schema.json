@@ -82,14 +82,13 @@
           }
         },
         {
-          "description": "A governed Skill Center skill, pinned by version (ADR 0010).",
+          "description": "A governed Skill Center skill, by name: the bot runs whatever version the Center publishes (ADR 0002), so no version is recorded.",
           "type": "object",
           "additionalProperties": false,
-          "required": ["name", "origin", "center_version"],
+          "required": ["name", "origin"],
           "properties": {
             "name": {"$ref": "#/definitions/skillName", "description": "The skill's name in Skill Center, and its key."},
-            "origin": {"description": "Marks this shape: a Skill Center skill.", "const": "center"},
-            "center_version": {"description": "The published Skill Center version this revision uses.", "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?![\\s\\S])"}
+            "origin": {"description": "Marks this shape: a Skill Center skill.", "const": "center"}
           }
         },
         {

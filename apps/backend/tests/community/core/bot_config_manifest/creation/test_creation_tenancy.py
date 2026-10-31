@@ -162,6 +162,7 @@ def _real_apply_service(manifests):
         apply_repository=BotConfigManifestApplyRepository(db),
         lock_repository=BotConfigManifestApplyLockRepository(db),
         compilers=manifest_compilers(manifests=manifests),
+        completion_handlers={},
         task_queue_provider=lambda: None,
         bot_repository=_NoBot(),
         # The delivery seam, assembled the way the composition root

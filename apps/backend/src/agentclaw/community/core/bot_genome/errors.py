@@ -102,5 +102,9 @@ class NotAppliable(GenomeError):
         super().__init__("; ".join(r.message for r in self.reasons) or "not appliable")
 
 
+class ApplyBusy(GenomeError):
+    """Another apply holds the bot's apply lock, so the promotion's delivery could not start; nothing moved."""
+
+
 class PromotionUnsupported(GenomeError):
     """Promotion is not supported for this bot kind yet (service bots)."""

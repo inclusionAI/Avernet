@@ -29,7 +29,7 @@ of resolving to an inherited ``...`` stub that silently returns ``None``.
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import Any, Iterable, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -40,30 +40,16 @@ class ActivationPort(Protocol):
     def list_installed_mcps(self, *, bot_id: str, owner_id: str, actor_id: str) -> set[str]: ...
 
     @abstractmethod
-    def platform_default_mcp_codes(
-        self, *, bot_id: str, owner_id: str, actor_id: str
-    ) -> Iterable[str]: ...
-
-    @abstractmethod
     def get_mcp_overrides(
         self, *, bot_id: str, owner_id: str, actor_id: str
     ) -> dict[str, dict]: ...
 
     @abstractmethod
-    def manifest_direct_mcp_codes(
-        self, *, bot_id: str, owner_id: str, actor_id: str,
-        server_codes: set[str],
-    ) -> set[str]: ...
-
-    @abstractmethod
-    def set_managed_mcp_codes(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        actor_id: str,
-        server_codes: set[str],
-    ) -> set[str]: ...
+    def set_supplied_capabilities(
+        self, *, bot_id: str, owner_id: str, actor_id: str
+    ) -> tuple[frozenset[str], frozenset[str]]:
+        """(skill runtime names, MCP server codes) the bot's Sets supply; an apply leaves them alone."""
+        ...
 
     @abstractmethod
     async def activate_mcp(
@@ -97,25 +83,25 @@ class ActivationPort(Protocol):
     ) -> Any: ...
 
     @abstractmethod
-    async def claim_manifest_skill(
+    async def claim_apply_skill(
         self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
         apply_id: str | None,
     ) -> Any: ...
 
     @abstractmethod
-    async def remove_manifest_skill(
+    async def remove_apply_skill(
         self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
-        apply_id: str | None, remove_inactive_memberships: bool,
+        apply_id: str | None,
     ) -> Any: ...
 
     @abstractmethod
-    async def claim_manifest_mcp(
+    async def claim_apply_mcp(
         self, *, server_code: str, config: dict | None, bot_id: str,
         owner_id: str, actor_id: str, apply_id: str | None,
     ) -> Any: ...
 
     @abstractmethod
-    async def remove_manifest_mcp(
+    async def remove_apply_mcp(
         self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str,
         apply_id: str | None,
     ) -> Any: ...

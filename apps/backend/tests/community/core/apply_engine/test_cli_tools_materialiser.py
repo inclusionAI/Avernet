@@ -372,7 +372,7 @@ def test_the_materialiser_is_registered_under_its_own_construct() -> None:
         mcp_config_service=object(),
         upload_service=object(), capability_reader=object(),
         package_validator=object(), content=object(),
-        resource_service=object(), resource_rows=object(), cli_tool_service=object(),
+        resource_service=object(), resource_rows=object(), cli_tool_service=object(), shared_skills=object(),
     )
     assert isinstance(registry[Category.CLI_TOOLS], CliToolsMaterialiser)
 

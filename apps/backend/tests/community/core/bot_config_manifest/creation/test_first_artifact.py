@@ -218,6 +218,7 @@ def _build(db):
             resource_service=PlatformResource(store),
             resource_rows=resource_rows_for()[0],
             cli_tool_service=object(),
+            shared_skills=object(),
         )
 
     queue = _InlineQueue()
@@ -226,6 +227,7 @@ def _build(db):
         apply_repository=BotConfigManifestApplyRepository(db),
         lock_repository=BotConfigManifestApplyLockRepository(db),
         compilers=manifest_compilers(manifests=_Manifests(), content=content, resolver=fetcher()),
+        completion_handlers={},
         task_queue_provider=lambda: queue,
         bot_repository=_Bots(),
         # The platform-managed deployment, assembled the way the composition

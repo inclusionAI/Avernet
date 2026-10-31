@@ -10,7 +10,6 @@ from agentclaw.community.core.content_store import canonical_tree_bytes
 from agentclaw.community.core.bot_genome.canonical import canonicalize
 from agentclaw.community.core.bot_genome.diff import diff_specs, unified_diff
 from agentclaw.community.core.bot_genome.spec_models import (
-    CenterSkill,
     GenomePolicy,
     GenomeSpec,
     MemorySpec,
@@ -104,7 +103,7 @@ def test_skills_report_members_and_the_description_only_tier() -> None:
     ]
     assert diff.risk_tier == "T2"
     d = spec_of(SUPPORT_BOT)
-    d.skills[1] = CenterSkill(name="refund-policy", origin="center", center_version="v8")
+    d.skills[1] = RepoSkill(name="refund-policy", origin="repo", repo_path="team/refund-policy")
     d.skills.append(RepoSkill(name="weather", origin="repo", repo_path="team/weather"))
     diff = _diff(a, d, blobs)
     assert [(x.gene, x.kind, x.diff) for x in diff.changes] == [

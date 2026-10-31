@@ -4,7 +4,7 @@
   "reason": "rationale is required",
   "record": {
     "patch_schema": 1,
-    "base": "sha256:9e21ea360e6d4bdb63a151d280a7f1802402a8294b5033c92239731bd1e8d1fe",
+    "base": "sha256:03dd8ae31e03dd12f9eca965000af1a4af950d867da49da4faa93f4d43153894",
     "ops": [
       {
         "op": "skill.remove",

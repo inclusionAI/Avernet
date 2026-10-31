@@ -28,7 +28,7 @@ codebase that pass ``project`` at all.
 """
 from __future__ import annotations
 
-from typing import Any, Iterable
+from typing import Any
 
 from agentclaw.community.core.ports.activation_port import (
     ActivationPort,
@@ -42,8 +42,8 @@ class _DelegatingActivation(ActivationPort):
     """Forward reads unchanged and pin every write to ``project``.
 
     ``list_installed_mcps`` answers a ``set[str]`` of server codes, e.g.
-    ``{"gh", "old"}``; ``platform_default_mcp_codes`` answers an iterable of
-    the same. The four writes answer the service's own result dict, which
+    ``{"gh", "old"}``; ``set_supplied_capabilities`` answers the skill names
+    and server codes the bot's skill sets supply. The writes answer the service's own result dict, which
     ``mcp`` and ``skills`` discard.
 
     Subclasses set ``_PROJECT`` and add nothing else; writing the delegation
@@ -65,13 +65,6 @@ class _DelegatingActivation(ActivationPort):
             bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
         )
 
-    def platform_default_mcp_codes(
-        self, *, bot_id: str, owner_id: str, actor_id: str
-    ) -> Iterable[str]:
-        return self._inner.platform_default_mcp_codes(
-            bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
-        )
-
     def get_mcp_overrides(
         self, *, bot_id: str, owner_id: str, actor_id: str
     ) -> dict[str, dict]:
@@ -79,34 +72,11 @@ class _DelegatingActivation(ActivationPort):
             bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
         )
 
-    def manifest_direct_mcp_codes(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        actor_id: str,
-        server_codes: set[str],
-    ) -> set[str]:
-        return self._inner.manifest_direct_mcp_codes(
-            bot_id=bot_id,
-            owner_id=owner_id,
-            actor_id=actor_id,
-            server_codes=server_codes,
-        )
-
-    def set_managed_mcp_codes(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        actor_id: str,
-        server_codes: set[str],
-    ) -> set[str]:
-        return self._inner.set_managed_mcp_codes(
-            bot_id=bot_id,
-            owner_id=owner_id,
-            actor_id=actor_id,
-            server_codes=server_codes,
+    def set_supplied_capabilities(
+        self, *, bot_id: str, owner_id: str, actor_id: str
+    ) -> tuple[frozenset[str], frozenset[str]]:
+        return self._inner.set_supplied_capabilities(
+            bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
         )
 
     # ── writes, each pinned to this family's projection choice ───────────
@@ -161,7 +131,7 @@ class _DelegatingActivation(ActivationPort):
             actor_id=actor_id, project=self._PROJECT,
         )
 
-    async def claim_manifest_skill(
+    async def claim_apply_skill(
         self,
         *,
         skill_id: str,
@@ -170,7 +140,7 @@ class _DelegatingActivation(ActivationPort):
         actor_id: str,
         apply_id: str | None,
     ) -> dict[str, Any]:
-        return await self._inner.claim_manifest_skill(
+        return await self._inner.claim_apply_skill(
             skill_id=skill_id,
             bot_id=bot_id,
             owner_id=owner_id,
@@ -179,7 +149,7 @@ class _DelegatingActivation(ActivationPort):
             project=self._PROJECT,
         )
 
-    async def remove_manifest_skill(
+    async def remove_apply_skill(
         self,
         *,
         skill_id: str,
@@ -187,19 +157,17 @@ class _DelegatingActivation(ActivationPort):
         owner_id: str,
         actor_id: str,
         apply_id: str | None,
-        remove_inactive_memberships: bool,
     ) -> dict[str, Any]:
-        return await self._inner.remove_manifest_skill(
+        return await self._inner.remove_apply_skill(
             skill_id=skill_id,
             bot_id=bot_id,
             owner_id=owner_id,
             actor_id=actor_id,
             apply_id=apply_id,
-            remove_inactive_memberships=remove_inactive_memberships,
             project=self._PROJECT,
         )
 
-    async def claim_manifest_mcp(
+    async def claim_apply_mcp(
         self,
         *,
         server_code: str,
@@ -209,7 +177,7 @@ class _DelegatingActivation(ActivationPort):
         actor_id: str,
         apply_id: str | None,
     ) -> dict[str, Any]:
-        return await self._inner.claim_manifest_mcp(
+        return await self._inner.claim_apply_mcp(
             server_code=server_code,
             config=config,
             bot_id=bot_id,
@@ -219,7 +187,7 @@ class _DelegatingActivation(ActivationPort):
             project=self._PROJECT,
         )
 
-    async def remove_manifest_mcp(
+    async def remove_apply_mcp(
         self,
         *,
         server_code: str,
@@ -228,7 +196,7 @@ class _DelegatingActivation(ActivationPort):
         actor_id: str,
         apply_id: str | None,
     ) -> dict[str, Any]:
-        return await self._inner.remove_manifest_mcp(
+        return await self._inner.remove_apply_mcp(
             server_code=server_code,
             bot_id=bot_id,
             owner_id=owner_id,

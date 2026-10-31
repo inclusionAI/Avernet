@@ -191,6 +191,7 @@ def world():
         # it is constructed per compile and must never be fetched through,
         # which FakeGitClient enforces.
         compilers=manifest_compilers(manifests=manifests, applies=applies, git=FakeGitClient),
+        completion_handlers={},
     )
     # Closes the loop: the fake worker needs the service it runs work for.
     queue.service = service

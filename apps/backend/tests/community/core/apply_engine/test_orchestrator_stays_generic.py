@@ -123,6 +123,7 @@ def test_every_registered_materialiser_has_a_place_in_the_order():
             resource_service=object(),
             resource_rows=object(),
             cli_tool_service=object(),
+            shared_skills=object(),
         )
     )
     assert registered <= ordered

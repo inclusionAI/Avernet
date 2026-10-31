@@ -140,6 +140,7 @@ def test_apply_declares_the_bar_w10_settled():
             resource_service=object(),
             resource_rows=object(),
             cli_tool_service=object(),
+            shared_skills=object(),
         )
     ),
 )
@@ -200,6 +201,7 @@ def test_apply_admission_mode_is_no_wider_than_the_categories_it_writes():
         resource_service=object(),
         resource_rows=object(),
         cli_tool_service=object(),
+        shared_skills=object(),
     ):
         for path in _CATEGORY_WRITE_PATHS[construct.value]:
             for (method, candidate), mode in ADMISSION.items():

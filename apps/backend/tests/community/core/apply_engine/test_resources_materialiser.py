@@ -1121,6 +1121,7 @@ def test_build_materialisers_registers_six():
         resource_service=object(),
         resource_rows=resource_rows_for()[0],
         cli_tool_service=object(),
+        shared_skills=object(),
     )
     assert Category.RESOURCES in registry
     assert len(registry) == 6
@@ -1332,6 +1333,7 @@ def _resources_engine(svc, fetcher, *, resource_rows=None):
             resource_service=svc,
             resource_rows=resource_rows or resource_rows_for()[0],
             cli_tool_service=object(),
+            shared_skills=object(),
         ),
         steps=_arca_steps
     )

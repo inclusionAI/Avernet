@@ -161,6 +161,7 @@ def _world(*, bot, mode, platform_activation=None, redeliver=None):
             resource_service=FakeResourceFileService(),
             resource_rows=resource_rows_for()[0],
             cli_tool_service=object(),
+            shared_skills=object(),
         )
 
     device_ports = device_port_bundle(activation_service=device_activation)
@@ -185,6 +186,7 @@ def _world(*, bot, mode, platform_activation=None, redeliver=None):
         apply_repository=BotConfigManifestApplyRepository(db),
         lock_repository=BotConfigManifestApplyLockRepository(db),
         compilers=manifest_compilers(manifests=_Manifests()),
+        completion_handlers={},
         task_queue_provider=lambda: queue,
         bot_repository=_Bots(bot),
         delivery_strategies=DeliveryStrategyFactory(

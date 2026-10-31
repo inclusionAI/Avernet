@@ -46,10 +46,11 @@ from agentclaw.community.core.bot_config_manifest.fetch.errors import (
 from agentclaw.community.core.apply_engine.registry import (
     ConfirmedPartialWriteError,
 )
-from agentclaw.community.core.apply_engine.desired_state import CenterSkillVersion, DesiredSkill
+from agentclaw.community.core.apply_engine.desired_state import CenterSkillByName, DesiredSkill, RepoSkillPath
 from agentclaw.community.core.content_store import decode_tree_bytes
 
 from ._fakes import (
+    FakeSharedSkills,
     FakeActivationService,
     FakeCapabilityReader,
     FakeManifestContent,
@@ -108,6 +109,7 @@ def skill_rig(
     local_assets: list | None = None,
     content: FakeManifestContent | None = None,
     source_session=None,
+    shared_skills=None,
 ) -> tuple:
     """(materialiser, uploads, activation, reader, objects, content).
 
@@ -127,7 +129,14 @@ def skill_rig(
     content = content or FakeManifestContent()
     resolver = DeclaredSourceResolver(content, FakeObjectCredentials(), objects)
     materialiser = compiling_skills(
-        uploads, activation, reader, real_validator(), resolver, content, source_session=source_session
+        uploads,
+        activation,
+        reader,
+        real_validator(),
+        resolver,
+        content,
+        source_session=source_session,
+        shared_skills=shared_skills,
     )
     return materialiser, uploads, activation, reader, objects, content
 
@@ -436,6 +445,23 @@ def test_skills_empty_physically_deletes_inactive_local_assets():
     assert uploads.uploads == []
 
 
+def test_a_local_package_an_inactive_set_references_is_neither_cleaned_up_nor_deleted():
+    """A set holds the package (an inactive set too), so deleting it would break that set: cleanup leaves it, and
+    a Direct installation of it, when omitted, is removed without deleting the package."""
+    referenced = skill_asset(22, "in-a-draft-set")
+    materialiser, uploads, activation, _reader, _, _ = skill_rig(
+        assets=[], local_assets=[referenced], member_ids={22}
+    )
+    _, plan, _ = _run(_apply(materialiser, _ctx(), []))
+    assert plan.removals == () and uploads.deleted == [] and activation.skill_deactivations == []
+
+    installed = skill_asset(23, "direct-and-in-a-draft-set")
+    materialiser, uploads, activation, _reader, _, _ = skill_rig(assets=[installed], member_ids={23})
+    _, plan, _ = _run(_apply(materialiser, _ctx(), []))
+    assert plan.removals == ("direct-and-in-a-draft-set",)
+    assert activation.skill_deactivations == [23] and uploads.deleted == []
+
+
 def test_local_cleanup_is_sorted_and_stops_on_first_failure():
     materialiser, uploads, activation, _reader, _, _ = skill_rig(
         assets=[],
@@ -498,59 +524,73 @@ def test_a_declared_name_matching_a_non_local_active_skill_becomes_local_direct(
     assert uploads.uploads
 
 
-def test_a_non_local_skill_is_skipped_not_failed_and_not_removed(caplog):
-    """A Center or repository skill is not delivered yet (#3103): a warning, nothing written, nothing removed.
-
-    The active skill of that name stays — the state declares it, so the
-    removal pass never sees it as undeclared — and the entry reports
-    ``skipped`` with the reason rather than failing the category or claiming
-    it converged.
-    """
-    import logging
-
+def test_a_center_and_a_repo_skill_are_claimed_as_the_shared_asset_itself():
+    """A revision's Center skill (by name) and repository skill (by path) are found through the lookup and the
+    shared asset becomes the Direct claim: nothing is uploaded or copied, and an active one reports ``updated``."""
+    shared = FakeSharedSkills(center={"triage": ["41"]}, repo={"team/weather": ("42", "weather")})
     materialiser, uploads, activation, _, _, _ = skill_rig(
-        assets=[skill_asset(9, "triage", git_path="git://default/x")],
+        assets=[skill_asset(41, "triage", git_path="center://triage")], shared_skills=shared
     )
     raw = materialiser.materialiser
     ctx = _ctx()
-    with caplog.at_level(logging.WARNING):
-        resolved = _run(raw.resolve(ctx, [DesiredSkill("triage", CenterSkillVersion("1.0.0"))]))
-    assert resolved.ok and resolved.failures == ()
-    assert any("does not deliver" in record.getMessage() and "3103" in record.getMessage() for record in caplog.records)
+    entries = [DesiredSkill("triage", CenterSkillByName()), DesiredSkill("weather", RepoSkillPath("team/weather"))]
+    resolved = _run(raw.resolve(ctx, entries))
+    assert resolved.ok
     plan = _run(raw.plan(ctx, resolved.intents))
-    assert [(p.intent.identity, p.outcome, p.requires_write) for p in plan.entries] == [("triage", "skipped", False)]
-    assert "3103" in (plan.entries[0].reason or "")
-    assert plan.removals == ()
-    assert plan.is_noop, "a deliberate skip writes nothing, so a plan of skips alone is a no-op"
-    # The real dry run: the projection keeps the reason (the skip is known before any write), no category is
-    # aborted, and the summary says PARTIAL (something declared is not on the bot), never FAILED: nothing failed.
-    from datetime import datetime
-
-    from agentclaw.community.core.apply_engine import order
-    from agentclaw.community.core.apply_engine.desired_state import Declaration, DesiredState
-    from agentclaw.community.core.apply_engine.orchestrator import ApplyOrchestrator
-    from agentclaw.community.core.apply_engine.outcomes import ApplyStatus, derive_status
-
-    orchestrator = ApplyOrchestrator({raw.construct: raw}, steps=lambda phase: order.APPLY_ORDER)
-    state = DesiredState(skills=Declaration((DesiredSkill("triage", CenterSkillVersion("1.0.0")),)))
-    preview = _run(
-        orchestrator.apply(ctx, state, apply_id="", trigger="dry_run", started_at=datetime.now(), dry_run=True)
-    )
-    assert [(e.identity, e.outcome.value, "3103" in (e.reason or "")) for e in preview.entries] == [
-        ("triage", "skipped", True)
-    ]
-    assert all(not category.aborted for category in preview.categories)
-    assert preview.status is ApplyStatus.PARTIAL
+    assert [(p.intent.identity, p.outcome) for p in plan.entries] == [("triage", "updated"), ("weather", "created")]
     written = _run(raw.write(ctx, plan))
-    assert [(entry.identity, entry.outcome.value) for entry in written] == [("triage", "skipped")]
-    assert "3103" in (written[0].reason or "")
-    assert written[0].note is None
-    from agentclaw.community.core.apply_engine.outcomes import CategoryResult
+    assert [(e.identity, e.outcome.value) for e in written] == [("triage", "updated"), ("weather", "created")]
+    assert activation.skill_activations == [41, 42] and uploads.uploads == []
+    assert [(kind, key) for kind, key, _ in shared.asked] == [("center", "triage"), ("repo", "team/weather")]
+    assert {actor for _, _, actor in shared.asked} == {ctx.actor_id}, "asked as the apply's principal"
 
-    only_skips = (CategoryResult(construct=raw.construct, entries=tuple(written), removals=(), aborted=False),)
-    assert derive_status(only_skips) is ApplyStatus.PARTIAL
-    assert uploads.uploads == []
-    assert activation.writes == 0
+
+def test_a_shared_skill_that_cannot_be_found_fails_its_entry_and_writes_nothing():
+    shared = FakeSharedSkills(center={"twice": ["1", "2"]}, repo={"team/storm": ("43", "storm")})
+    materialiser, uploads, activation, _, _, _ = skill_rig(shared_skills=shared)
+    raw = materialiser.materialiser
+    resolved = _run(
+        raw.resolve(
+            _ctx(),
+            [
+                DesiredSkill("missing", CenterSkillByName()),
+                DesiredSkill("twice", CenterSkillByName()),
+                DesiredSkill("weather", RepoSkillPath("team/weather")),
+                DesiredSkill("rain", RepoSkillPath("team/storm")),
+            ],
+        )
+    )
+    assert [(f.identity, f.reason) for f in resolved.failures] == [
+        ("missing", "no Skill Center skill named 'missing' is available to this bot"),
+        ("twice", "2 Skill Center skills named 'twice' are available to this bot"),
+        ("weather", "no shared-repository skill at 'team/weather' is available to this bot"),
+        ("rain", "the shared-repository skill at 'team/storm' is named 'storm', not 'rain'"),
+    ]
+    assert uploads.uploads == [] and activation.writes == 0
+
+
+def test_a_claimed_shared_skill_is_a_durable_write_when_a_later_claim_fails():
+    """A shared asset's claim commits on its own: a later failure is a partial write, not a clean failure."""
+    shared = FakeSharedSkills(center={"triage": ["41"], "summary": ["44"]})
+    materialiser, _, activation, _, _, _ = skill_rig(shared_skills=shared)
+    raw = materialiser.materialiser
+    ctx = _ctx()
+    resolved = _run(
+        raw.resolve(ctx, [DesiredSkill("summary", CenterSkillByName()), DesiredSkill("triage", CenterSkillByName())])
+    )
+    plan = _run(raw.plan(ctx, resolved.intents))
+    claim = activation.claim_apply_skill
+
+    async def _second_claim_fails(**kwargs):
+        if kwargs["skill_id"] == "41":
+            raise RuntimeError("claim refused")
+        return await claim(**kwargs)
+
+    activation.claim_apply_skill = _second_claim_fails
+    import pytest as _pytest
+
+    with _pytest.raises(ConfirmedPartialWriteError):
+        _run(raw.write(ctx, plan))
 
 
 def test_undeclared_members_of_the_area_are_removed_by_name():
@@ -570,6 +610,23 @@ def test_undeclared_members_of_the_area_are_removed_by_name():
     assert activation.skill_deactivations == [11]
     assert uploads.uploads[0]["name"] == "quality-check"
     assert activation.skill_activations  # source is converted to Direct
+
+
+def test_a_set_supplied_skill_is_never_removed_and_is_a_conflict_when_declared():
+    """The declaration speaks only for Direct skills: a name a skill set supplies is neither current nor
+    removable, and declaring it is a conflict the orchestrator refuses the apply on."""
+    materialiser, _, activation, _, _, _ = skill_rig(
+        assets=[skill_asset(11, "from-a-set"), skill_asset(12, "quality-check")],
+        packages={QC_KEY: QZ},
+    )
+    activation.set_skill_names = {"from-a-set"}
+    _, plan, _ = _run(_apply(materialiser, _ctx(), [_declared()]))
+    assert plan.removals == () and activation.skill_deactivations == []
+
+    raw = materialiser.materialiser
+    conflicts = _run(raw.set_conflicts(_ctx(), [DesiredSkill("from-a-set", CenterSkillByName())]))
+    assert [(c.identity, "skill sets" in c.reason) for c in conflicts] == [("from-a-set", True)]
+    assert _run(raw.set_conflicts(_ctx(), [DesiredSkill("quality-check", CenterSkillByName())])) == ()
 
 
 # ── parity with the upload path, by construction ───────────────────────────
@@ -749,7 +806,7 @@ def test_a_deactivation_conflict_mid_write_reports_partially_written():
             "RESOURCE_MANAGED_BY_SKILL_SET"
         )
 
-    activation.remove_manifest_skill = _conflicting_deactivate
+    activation.remove_apply_skill = _conflicting_deactivate
     import pytest as _pytest
 
     with _pytest.raises(
@@ -901,3 +958,13 @@ def test_git_keep_last_serves_the_stored_tree():
     assert [e.outcome.value for e in written] == ["created"]
     assert "keep_last" in written[0].note
     real_validator().validate_zip(uploads.uploads[0]["package"])
+
+
+def test_the_shared_skill_fake_keeps_the_ports_signatures() -> None:
+    """``FakeSharedSkills`` stands in for ``SkillQueryService`` here; a drifted signature would test nothing real."""
+    import inspect
+
+    from agentclaw.community.core.ports.shared_skill_port import SharedSkillPort
+
+    for name in ("find_center_skill", "find_repo_skill"):
+        assert inspect.signature(getattr(FakeSharedSkills, name)) == inspect.signature(getattr(SharedSkillPort, name))

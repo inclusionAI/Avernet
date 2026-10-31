@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
 
+from agentclaw.community.core.ports.shared_skill_port import SharedSkillPort
 from agentclaw.community.core.ports.resource_rows_port import WrittenFile
 from agentclaw.community.core.ports.resource_file_port import WorkspaceEntry
 from agentclaw.community.core.apply_engine.context import ApplyContext
@@ -783,6 +784,9 @@ class FakeActivationService:
     platform defaults would pass every test here while half-writing the category
     in production, which is exactly the gap this models. ``governed_skills``
     models the same refusal for skills: ids a Set or the default set supplies.
+
+    What the bot's Sets supply (``set_supplied_capabilities``) is ``set_managed`` plus ``platform_defaults``
+    for MCP, and ``set_skill_names`` for skills; the apply's claims refuse those, as the real repository does.
     """
 
     def __init__(
@@ -794,8 +798,8 @@ class FakeActivationService:
         self.installed = set(installed or ())
         self.platform_defaults = set(platform_defaults or ())
         self.set_managed: set[str] = set()
+        self.set_skill_names: set[str] = set()
         self.mcp_overrides: dict[str, dict] = {}
-        self.manifest_direct_mcps: set[str] = set()
         self.configured: list[tuple[str, dict | None]] = []
         self.governed_skills = set(governed_skills or ())
         self.activated: list[str] = []
@@ -812,31 +816,15 @@ class FakeActivationService:
     ) -> set[str]:
         return set(self.installed)
 
-    def platform_default_mcp_codes(
-        self, *, bot_id: str, owner_id: str, actor_id: str
-    ) -> frozenset[str]:
-        return frozenset(self.platform_defaults)
-
     def get_mcp_overrides(
         self, *, bot_id: str, owner_id: str, actor_id: str
     ) -> dict[str, dict]:
         return dict(self.mcp_overrides)
 
-    def manifest_direct_mcp_codes(
-        self, *, bot_id: str, owner_id: str, actor_id: str,
-        server_codes: set[str],
-    ) -> set[str]:
-        return set(server_codes) & self.manifest_direct_mcps
-
-    def set_managed_mcp_codes(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        actor_id: str,
-        server_codes: set[str],
-    ) -> set[str]:
-        return set(server_codes) & self.set_managed
+    def set_supplied_capabilities(
+        self, *, bot_id: str, owner_id: str, actor_id: str
+    ) -> tuple[frozenset[str], frozenset[str]]:
+        return frozenset(self.set_skill_names), frozenset(self.set_managed | self.platform_defaults)
 
     async def activate_mcp(
         self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str,
@@ -876,7 +864,6 @@ class FakeActivationService:
         self._refuse_if_platform_owned(server_code)
         self.deactivated.append(server_code)
         self.installed.discard(server_code)
-        self.manifest_direct_mcps.discard(server_code)
         self.mcp_overrides.pop(server_code, None)
         return {}
 
@@ -900,36 +887,34 @@ class FakeActivationService:
         self.skill_deactivations.append(int(skill_id))
         return {"id": skill_id, "changed": True}
 
-    async def claim_manifest_skill(
+    async def claim_apply_skill(
         self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
         apply_id: str | None, project: bool = True,
     ) -> dict[str, Any]:
         self.projections.append(project)
-        self.governed_skills.discard(int(skill_id))
+        self._refuse_if_governed(skill_id)
         self.installed_skills.add(int(skill_id))
         self.skill_activations.append(int(skill_id))
         return {"id": skill_id, "changed": True}
 
-    async def remove_manifest_skill(
+    async def remove_apply_skill(
         self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
-        apply_id: str | None, remove_inactive_memberships: bool,
-        project: bool = True,
+        apply_id: str | None, project: bool = True,
     ) -> dict[str, Any]:
         self.projections.append(project)
+        self._refuse_if_governed(skill_id)
         self.installed_skills.discard(int(skill_id))
-        self.governed_skills.discard(int(skill_id))
         self.skill_deactivations.append(int(skill_id))
         return {"id": skill_id, "changed": True}
 
-    async def claim_manifest_mcp(
+    async def claim_apply_mcp(
         self, *, server_code: str, config: dict | None, bot_id: str,
         owner_id: str, actor_id: str, apply_id: str | None,
         project: bool = True,
     ) -> dict[str, Any]:
         self.projections.append(project)
-        self.set_managed.discard(server_code)
+        self._refuse_if_set_supplied(server_code)
         self.installed.add(server_code)
-        self.manifest_direct_mcps.add(server_code)
         self.configured.append((server_code, config))
         if config:
             self.mcp_overrides[server_code] = dict(config)
@@ -937,16 +922,20 @@ class FakeActivationService:
             self.mcp_overrides.pop(server_code, None)
         return {}
 
-    async def remove_manifest_mcp(
+    async def remove_apply_mcp(
         self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str,
         apply_id: str | None, project: bool = True,
     ) -> dict[str, Any]:
         self.projections.append(project)
+        self._refuse_if_set_supplied(server_code)
         self.deactivated.append(server_code)
         self.installed.discard(server_code)
-        self.manifest_direct_mcps.discard(server_code)
         self.mcp_overrides.pop(server_code, None)
         return {}
+
+    def _refuse_if_set_supplied(self, server_code: str) -> None:
+        if server_code in self.set_managed | self.platform_defaults:
+            raise PlatformPolicyConflict("APPLY_SET_SUPPLIED")
 
     def _refuse_if_platform_owned(self, server_code: str) -> None:
         if server_code in self.platform_defaults:
@@ -1316,6 +1305,42 @@ async def unreachable_redeliver(ctx) -> None:
     raise AssertionError("this rig never reaches the closing redeliver")
 
 
+class FakeSharedSkills(SharedSkillPort):
+    """``SharedSkillPort`` over two dicts: Center name → skill ids visible to the bot, repo path → (id, name).
+
+    A name with several ids is ambiguous; a missing one is not found — the real lookup's three answers.
+    """
+
+    def __init__(
+        self, center: dict[str, list[str]] | None = None, repo: dict[str, tuple[str, str]] | None = None
+    ) -> None:
+        self.center = dict(center or {})
+        self.repo = dict(repo or {})
+        self.asked: list[tuple[str, str, str]] = []
+
+    def find_center_skill(self, *, bot_id: str, owner_id: str, actor_id: str, name: str) -> str:
+        from agentclaw.community.core.ports.shared_skill_port import SharedSkillAmbiguous, SharedSkillNotFound
+
+        self.asked.append(("center", name, actor_id))
+        ids = self.center.get(name, [])
+        if not ids:
+            raise SharedSkillNotFound(f"no Skill Center skill named {name!r} is available to this bot")
+        if len(ids) > 1:
+            raise SharedSkillAmbiguous(f"{len(ids)} Skill Center skills named {name!r} are available to this bot")
+        return ids[0]
+
+    def find_repo_skill(self, *, bot_id: str, owner_id: str, actor_id: str, name: str, path: str) -> str:
+        from agentclaw.community.core.ports.shared_skill_port import SharedSkillNotFound
+
+        self.asked.append(("repo", path, actor_id))
+        if path not in self.repo:
+            raise SharedSkillNotFound(f"no shared-repository skill at {path!r} is available to this bot")
+        skill_id, found = self.repo[path]
+        if found != name:
+            raise SharedSkillNotFound(f"the shared-repository skill at {path!r} is named {found!r}, not {name!r}")
+        return skill_id
+
+
 def device_port_bundle(
     *,
     script_service=None,
@@ -1331,6 +1356,7 @@ def device_port_bundle(
     resource_service=None,
     resource_rows=None,
     cli_tool_service=None,
+    shared_skills=None,
 ):
     """The device-backed bundle, over fakes, wrapped as the root wraps it.
 
@@ -1387,6 +1413,7 @@ def device_port_bundle(
         resource_service=DeviceResource(resource_service or FakeResourceFileService()),
         resource_rows=resource_rows or resource_rows_for()[0],
         cli_tool_service=cli_tool_service,
+        shared_skills=shared_skills or FakeSharedSkills(),
     )
     return lambda: bundle
 
@@ -1528,14 +1555,16 @@ def compiling_identity(identity_service, resolver, content, *, source_session=No
     return CompilingMaterialiser(materialiser, compile, source_session=source_session)
 
 
-def compiling_skills(uploads, activation, reader, validator, resolver, content, *, source_session=None):
+def compiling_skills(
+    uploads, activation, reader, validator, resolver, content, *, source_session=None, shared_skills=None
+):
     from agentclaw.community.core.apply_engine.materialisers.skills import SkillsMaterialiser
     from agentclaw.community.core.bot_config_manifest.compiler.entries.skills import compile_skills
 
     async def compile(session, entries):
         return await compile_skills(session, entries, resolver=resolver, content=content, validator=validator)
 
-    materialiser = SkillsMaterialiser(uploads, activation, reader, validator, content)
+    materialiser = SkillsMaterialiser(uploads, activation, reader, validator, content, shared_skills or FakeSharedSkills())
     return CompilingMaterialiser(materialiser, compile, source_session=source_session)
 
 

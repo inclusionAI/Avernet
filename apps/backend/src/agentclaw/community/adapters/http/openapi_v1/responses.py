@@ -91,7 +91,10 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
     UserIdMismatchError,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors_bot_create import BOT_CREATE_HTTP_ERRORS
-from agentclaw.community.adapters.http.openapi_v1.errors_genome import GENOME_ENVELOPE_ERRORS
+from agentclaw.community.adapters.http.openapi_v1.errors_genome import (
+    GENOME_ENVELOPE_ERROR_CODES,
+    GENOME_ENVELOPE_ERRORS,
+)
 from agentclaw.community.adapters.http.openapi_v1.errors_source_credentials import (
     SOURCE_CREDENTIALS_ENVELOPE_ERRORS,
 )
@@ -860,6 +863,7 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     SkillParameterValidationError: 422101,
     ManifestValidationError: 422109,
     ApplyInProgressError: 409109,
+    **GENOME_ENVELOPE_ERROR_CODES,
     CliToolConflictError: 409110,
     CliToolUnsupportedError: 409111,
     CliToolRefusedError: 422110,
