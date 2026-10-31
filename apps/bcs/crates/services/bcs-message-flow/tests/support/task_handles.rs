@@ -113,6 +113,33 @@ async fn provider_custom_timeout_preserves_execution_and_abort_budgets() {
 }
 
 #[tokio::test]
+async fn legacy_provider_custom_timeout_matches_callback_budget() {
+    for timeout_s in [None, Some(60), Some(4 * 60 * 60)] {
+        let f = Fixture::new().await;
+        f.support.registry.set_delivery_target("bot-observer",
+            support::FakeRegistryService::provider_target("bot-observer")).await;
+        let mut policy = f.live.snapshot.read().await.policy.clone();
+        policy.task_timeout_max_s = 5 * 60 * 60;
+        policy.bots.insert("bot-observer".into(), bcs_config_api::message_delivery::BotDeliveryOverride {
+            mode:Some(BotDeliveryMode::Off), ..Default::default()
+        });
+        f.flow.replace_delivery_policy(admin(), 1, policy).await.unwrap();
+        let mut cmd = dispatch_command();
+        if let Some(seconds) = timeout_s { cmd.payload["timeout_s"] = json!(seconds); }
+        let before = chrono::Utc::now().timestamp_millis() as u64;
+        let task = f.flow.handle_task_dispatch(cmd).await.unwrap();
+        let after = chrono::Utc::now().timestamp_millis() as u64;
+        assert!(f.rows().await.is_empty(), "Worker must use the direct path");
+        let wire = serde_json::to_value(&f.support.bot_delivery.frames().await[0]).unwrap();
+        let expected = timeout_s.map(|seconds| (seconds * 1000 + 300_000).max(f.flow.provider_chat_run_timeout_ms));
+        assert_eq!(wire["params"]["timeout_ms"], json!(expected));
+        let context = f.flow.bot_run_context.as_ref().unwrap().get_context(&task.task_id).await.unwrap();
+        let budget = expected.unwrap_or(f.flow.provider_chat_run_timeout_ms);
+        assert!((before + budget..=after + budget).contains(&context.deadline_ms));
+    }
+}
+
+#[tokio::test]
 async fn absent_cancel_is_not_a_tombstone_and_timeout_is_clamped() {
     let f = Fixture::new().await;
     assert_eq!(f.flow.cancel_task("23456789".into(), "stop".into()).await.unwrap().status, S::NotFound);

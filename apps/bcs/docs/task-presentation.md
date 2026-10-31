@@ -112,8 +112,8 @@ The managed deadline starts at send-start; omitted values retain the existing
 Provider timeout minus five-minute reserve. Legacy sends keep their existing
 context identity and get a retained deadline handler. The legacy completion guard
 uses the same clamped custom timeout instead of the fixed default TTL. Queued
-HTTP Worker dispatches also carry an explicit Provider execution budget of at
-least the task timeout plus the five-minute abort reserve (or the larger existing
+and legacy direct HTTP Worker dispatches also carry an explicit Provider execution
+budget of at least the task timeout plus the five-minute abort reserve (or the larger existing
 Provider budget), matching their callback correlation lifetime. There are no soft-timeout
 reminders. Activity timestamps are process-local soft state and are omitted when
 lost. No automatic retry classification or retry budget is widened.

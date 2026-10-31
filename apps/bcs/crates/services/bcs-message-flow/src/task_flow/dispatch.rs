@@ -391,7 +391,7 @@ pub async fn handle_task_dispatch(
     } else {
         &[]
     };
-    let frame = build_task_dispatch_frame(
+    let mut frame = build_task_dispatch_frame(
         &group,
         &cmd.driver_bot_id,
         &driver_name,
@@ -404,6 +404,16 @@ pub async fn handle_task_dispatch(
         provider_tags,
         now,
     );
+    if delivery_target.is_http_provider() {
+        if let (Some(seconds), BcsFrame::Request(request)) = (timeout_s, &mut frame) {
+            if let Some(params) = request.params.as_mut() {
+                let budget_ms = seconds.saturating_mul(1000)
+                    .saturating_add(crate::delivery_runtime::TASK_ABORT_RESERVE.as_millis() as u64)
+                    .max(flow.provider_chat_run_timeout_ms);
+                params["timeout_ms"] = serde_json::json!(budget_ms);
+            }
+        }
+    }
     let delivery_kind = BotDeliveryKind::TaskDispatch;
     if let Err(error) = flow.register_send_context(
         DeliveryType::Send,
