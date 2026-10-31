@@ -10,6 +10,9 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
+from agentclaw.community.core.service_bot.baas_service_errors import (
+    BaasNoActiveDevicesError,
+)
 from agentclaw.community.core.service_bot.services.deploy.managed_composer import (
     ManagedDeployConfigComposer,
 )
@@ -144,11 +147,28 @@ def test_get_http_info_404_raises(baas_service, http):
 
 
 def test_get_http_info_503_raises(baas_service, http):
-    """No active devices -> raise BaasServiceError."""
+    """Non-contract 503 also remains a generic BaasServiceError."""
     http.set_response("get", _err_resp(503, {"error": "no_active_devices", "message": "No active devices"}))
 
     with pytest.raises(BaasServiceError, match="503"):
         baas_service.get_http_info(bind_id=42, port=20010, path="/x")
+
+
+@pytest.mark.parametrize("status_code", [404, 503])
+def test_get_http_info_no_active_devices_raises(baas_service, http, status_code):
+    """Structured BaaS offline contract is typed separately, like ws-info."""
+    body = {
+        "detail": {
+            "error": "NO_ACTIVE_DEVICES",
+            "message": "No active devices available",
+        }
+    }
+    http.set_response("get", _err_resp(status_code, body))
+
+    with pytest.raises(BaasNoActiveDevicesError) as raised:
+        baas_service.get_http_info(bind_id=42, port=20010, path="/x")
+
+    assert raised.value.status_code == status_code
 
 
 def test_get_http_info_business_code_nonzero_raises(baas_service, http):
