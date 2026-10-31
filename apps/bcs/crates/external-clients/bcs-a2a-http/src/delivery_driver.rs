@@ -17,8 +17,9 @@ impl A2aHttpTransport {
                 Output::Delta(text) => self.emit(record, ChatEventState::Delta, Some(text), None).await?,
                 Output::MessageFinal(text) => {
                     if !text.is_empty() { self.emit(record, ChatEventState::Delta, Some(text), None).await?; }
+                    self.save(record, A2aRunState::Completed).await?;
                     self.emit(record, ChatEventState::Final, None, None).await?;
-                    self.save(record, A2aRunState::Completed).await?; finished = true;
+                    finished = true;
                     self.runtime()?.contexts.mark_provider_transport_terminal(&record.run_id).await;
                 }
                 Output::Status(state) => match state {
@@ -28,8 +29,8 @@ impl A2aHttpTransport {
                             TaskState::Canceled => (ChatEventState::Aborted, A2aRunState::Canceled),
                             _ => (ChatEventState::Error, A2aRunState::Failed),
                         };
-                        self.emit(record, state, None, (remote == A2aRunState::Failed).then_some("remote_task_failed")).await?;
                         self.save(record, remote).await?;
+                        self.emit(record, state, None, (remote == A2aRunState::Failed).then_some("remote_task_failed")).await?;
                         self.runtime()?.contexts.mark_provider_transport_terminal(&record.run_id).await;
                         finished = true;
                     }

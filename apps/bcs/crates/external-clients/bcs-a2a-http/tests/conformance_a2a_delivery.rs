@@ -19,6 +19,9 @@ use bcs_service_api::port::repo::a2a_run::{A2aRunRepoPort, A2aRunState};
 use bcs_service_api::types::a2a_bot::{A2aBinding, A2aInterface, A2aUpdateMode};
 use serde_json::{json, Value};
 
+#[path="support/terminal_publication.rs"]
+mod terminal_publication;
+
 #[derive(Clone, Copy)]
 enum Mode { Complete, Wait, MissingInitialTask, RecoverGet, DedupRetry, HttpError(u16), Terminal(&'static str), Message, CancelDenied, RecoverState, UnspecifiedFlood, Flapping, EmptyRecoveries }
 struct Agent {
@@ -134,7 +137,7 @@ impl ProviderEventIngestService for Ingest {
 
 struct Fixture {
     transport: A2aHttpTransport, target: BotDeliveryTarget, runs: Arc<DbA2aRunStore>, contexts: Arc<MemoryBotRunContextStore>,
-    ingest: Arc<Ingest>, agent: Arc<Agent>, server: tokio::task::JoinHandle<()>,
+    ingest: Arc<Ingest>, agent: Arc<Agent>, server: tokio::task::JoinHandle<()>, db: Arc<LocalSqliteDbPlugin>,
 }
 impl Drop for Fixture { fn drop(&mut self) { self.server.abort(); } }
 fn now() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64 }
@@ -150,7 +153,7 @@ async fn fixture(mode: Mode) -> Fixture {
     for sql in bcs_db_api::split_sql_statements(include_str!("../../../../migrations/sqlite/039_bot_a2a.sql")).into_iter() {
         db.execute(DbStatement::new(sql)).await.unwrap();
     }
-    let runs = Arc::new(DbA2aRunStore::new(db, "test".into(), DbSqlFlavor::Sqlite));
+    let runs = Arc::new(DbA2aRunStore::new(db.clone(), "test".into(), DbSqlFlavor::Sqlite));
     let credentials = Arc::new(MemoryProviderStore::new());
     credentials.insert_credential(ProviderCredential { provider_id:"provider".into(), credential_kind:"downlink_bcs_to_provider".into(),
         secret_value:"test-a2a-bearer".into(), disabled:false, created_at:1, updated_at:1 }).await.unwrap();
@@ -160,7 +163,7 @@ async fn fixture(mode: Mode) -> Fixture {
     let target = BotDeliveryTarget::A2a { bot_id:"bot".into(), provider_id:"provider".into(), provider_bot_ref:"demo".into(),
         interface:A2aInterface { url:base, tenant:None, protocol_version:"1.0".into(), binding:A2aBinding::HttpJson, update_mode:A2aUpdateMode::Stream },
         credential_kind:"downlink_bcs_to_provider".into(), bearer:RedactedToken::new("test-a2a-bearer"), card_revision:1, extensions:vec![] };
-    Fixture { transport,target,runs,contexts,ingest,agent,server }
+    Fixture { transport,target,runs,contexts,ingest,agent,server,db }
 }
 async fn command(f: &Fixture, run: &str) -> BotDeliveryCommand {
     f.contexts.put_context(BotRunContext { run_id:run.into(),bot_id:"bot".into(),group_id:"group".into(),bcs_session_id:Some("session".into()),deadline_ms:now()+60_000,terminal:false }).await;
@@ -171,7 +174,8 @@ async fn command(f: &Fixture, run: &str) -> BotDeliveryCommand {
 async fn completed(f: &Fixture, run: &str) {
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            if f.runs.get(run).await.unwrap().is_some_and(|r|r.state==A2aRunState::Completed) { break; }
+            if f.runs.get(run).await.unwrap().is_some_and(|r|r.state==A2aRunState::Completed)
+                && f.contexts.get_provider_transport(run).await==Some(bcs_service_api::ProviderRunTransport::Terminal) { break; }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     }).await.unwrap();

@@ -143,6 +143,8 @@ impl A2aHttpTransport {
     }
 
     async fn emit_payload(&self, record: &A2aRunRecord, state: ChatEventState, mut payload: Value) -> ServiceResult<()> {
+        let terminal=matches!(state,ChatEventState::Final | ChatEventState::Error | ChatEventState::Aborted);
+        if terminal && !record.state.is_terminal() {return Err(invalid("terminal correlation must be committed before ingestion"));}
         let runtime = self.runtime()?;
         let ingest = runtime.ingest.upgrade().ok_or_else(||invalid("event ingestion stopped"))?;
         payload["run_id"] = json!(record.run_id);
@@ -151,13 +153,30 @@ impl A2aHttpTransport {
         let event_type = if matches!(state, ChatEventState::ToolCallStart | ChatEventState::ToolCallEnd) {
             payload["ts"] = json!(now_ms()); "agent"
         } else { "chat.event" };
-        ingest.ingest_provider_event(ProviderEventIngestCommand {
+        let command=ProviderEventIngestCommand {
             source: ProviderEventSource::A2a { binding: record.interface.binding, update_mode: record.interface.update_mode },
             event: BotEventCommand { bot_id: record.scope.bot_id.clone(), run_id: record.run_id.clone(),
                 group_id: record.group_id.clone(), bcs_session_id: Some(record.scope.session_id.clone()),
                 event_type: event_type.into(), event_payload: payload, state },
-        }).await?;
-        Ok(())
+        };
+        if !terminal {ingest.ingest_provider_event(command).await?;return Ok(());}
+        // Managed ingestion fences duplicate terminals by Run. Retry this same
+        // terminal only: never replay its text, rewrite its confirmed state or
+        // resubmit/cancel remote work after a local publication failure.
+        for attempt in 0..3 {
+            match ingest.ingest_provider_event(command.clone()).await {
+                Ok(_) => return Ok(()),
+                Err(error) if attempt==2 => {
+                    tracing::error!(run_id=%record.run_id,"A2A terminal notification exhausted ingestion retries; local completion unconfirmed");
+                    if self.tracking_lost(record).await.is_err() {
+                        tracing::error!(run_id=%record.run_id,"A2A terminal ingestion failure could not preserve local tracking state");
+                    }
+                    return Err(error);
+                }
+                Err(_) => tokio::time::sleep(Duration::from_millis(250)).await,
+            }
+        }
+        unreachable!("terminal ingestion loop returns on its final attempt")
     }
 }
 

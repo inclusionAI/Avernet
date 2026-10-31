@@ -55,6 +55,29 @@ not reset it. Repeated healthy disconnections therefore do not consume a single
 lifetime quota. Confirmed cleanup terminals also mark the local transport Terminal
 only after their error terminal is accepted by event ingestion.
 
+Every lane-releasing Final/Error/Aborted is preceded by a successful terminal
+correlation CAS, including standalone Message completion. Ingestion may release
+the managed lane before its callback returns; the next Send must already see
+the old correlation as terminal. A failed CAS publishes no terminal.
+
+After that commit, a failed terminal notification gets at most three ingestion
+attempts, 250ms apart, with identical Run/scope/payload. This relies on managed
+ingestion's durable terminal guard; it does not replay text, repeat the CAS,
+resubmit a remote request or cancel a known terminal Task. Exhaustion preserves
+the confirmed remote terminal, attempts the existing scoped tracking-lost
+transition for the managed delivery, propagates failure and does not mark the
+local transport Terminal. The phase-one queue remains conservative when local
+publication cannot be confirmed. There is no restart outbox/replay claim.
+
+The normal terminal path retains its existing one correlation CAS and one
+ingestion call; no token-path database work is added. Failure adds at most two
+calls to the existing terminal ingestion pipeline and one tracking-lost
+transition/invalidation. Each pipeline call retains its own storage retry policy;
+this does not bound those internal retries or claim one call equals one SQL.
+No additional correlation writes, queue scans or remote RPCs occur on notification
+retry. The queued public HTTP story and SQL-backed delivery conformance tests
+cover the handoff ordering and persistence/ingestion failures.
+
 Phase one requires a single BCS instance and an enabled, serialized Bot/Session
 queue. The active-scope read plus Run insert is not a cross-instance atomic
 admission primitive; direct parallel sends are outside that deployment contract.

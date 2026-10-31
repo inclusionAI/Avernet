@@ -31,6 +31,7 @@ class Peer:
         self.card_reads = 0
         self.legacy_requests = 0
         self.mode = "stream"
+        self.release_terminal = threading.Event()
         self.lock = threading.Lock()
         peer = self
 
@@ -110,6 +111,8 @@ class Peer:
                             "artifacts": [{"artifactId": "answer", "parts": [{"text": text}]}]}
                     peer.tasks[task_id] = task
                     mode = peer.mode if question else "message"
+                    if mode == "queued":
+                        task["status"]["state"] = "TASK_STATE_WORKING"
                     if mode in ("wait", "replacement"):
                         task["status"]["state"] = "TASK_STATE_WORKING"
                         task["artifacts"] = []
@@ -123,7 +126,7 @@ class Peer:
                 if mode == "message":
                     events = [{"message": {"messageId": "peer-message-" + str(sequence),
                                "contextId": context, "role": "ROLE_AGENT", "parts": [{"text": text}]}}]
-                elif mode in ("stream", "tools", "replacement"):
+                elif mode in ("stream", "tools", "replacement", "queued"):
                     events += [
                         {"artifactUpdate": {"taskId": task_id, "contextId": context,
                          "artifact": {"artifactId": "answer", "parts": [{"text": "A2A-ANSWER-"}]},
@@ -182,7 +185,11 @@ class Peer:
                 else:
                     self.send_header("Content-Length", str(sum(map(len, frames))))
                 self.end_headers()
-                for frame in frames:
+                for event, frame in zip(events, frames):
+                    if mode == "queued" and "statusUpdate" in event:
+                        assert peer.release_terminal.wait(30), "Queued test never released its first terminal"
+                        with peer.lock:
+                            peer.tasks[task_id]["status"]["state"] = "TASK_STATE_COMPLETED"
                     self.wfile.write(frame)
                     self.wfile.flush()
                     time.sleep(0.02)
@@ -356,13 +363,46 @@ class A2aStory(Story):
                 time.sleep(0.1)
             else:
                 raise AssertionError("A2A output did not reach visible history: " + mode)
-        assert len(self.peer.requests) == 9, "Recovery must not resubmit a message"
+        self.queued_rounds(session)
+        assert len(self.peer.requests) == 11, "Recovery must not resubmit a message"
         assert self.peer.legacy_requests == 0, "A2A Bot used the legacy Provider webhook"
-        assert len({request["message"]["messageId"] for request in self.peer.requests}) == 9
+        assert len({request["message"]["messageId"] for request in self.peer.requests}) == 11
         assert all(request["message"].get("contextId") == "peer-context" for request in self.peer.requests[1:])
         assert self.peer.cancels == ["peer-task-6", "peer-task-8"], "Cancellation widened beyond the active Task"
         assert all(request["message"]["messageId"] not in self.peer.cancels for request in self.peer.requests)
-        print(f"A2A story: {self.checks} live boundary assertions and nine protocol deliveries passed")
+        print(f"A2A story: {self.checks} live boundary assertions and eleven protocol deliveries passed")
+
+    def queued_rounds(self, session):
+        with self.peer.lock:
+            self.peer.mode = "queued"
+        self.request("POST", "/sessions/" + session + "/chat", {"message": "A2A question 10"})
+        deadline = time.monotonic() + 20
+        try:
+            while time.monotonic() < deadline:
+                with self.peer.lock:
+                    started = len(self.peer.requests) == 10
+                if started:
+                    break
+                time.sleep(0.05)
+            else:
+                raise AssertionError("First queued request did not reach the peer")
+            # The peer holds the first Task open until the second chat is admitted.
+            self.request("POST", "/sessions/" + session + "/chat", {"message": "A2A question 11"})
+            with self.peer.lock:
+                assert len(self.peer.requests) == 10, "Second Send bypassed the occupied queue lane"
+                self.checks += 1
+        finally:
+            self.peer.release_terminal.set()
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            messages = self.history(session)
+            counts = [sum(visible_text(message.get("content", "")) == "A2A-ANSWER-" + str(sequence)
+                          for message in messages) for sequence in (10, 11)]
+            if counts == [1, 1]:
+                return
+            assert all(count <= 1 for count in counts), "Queued terminal text was duplicated"
+            time.sleep(0.1)
+        raise AssertionError("Queued Send did not progress after the first Task completed")
 
     def history(self, session):
         history = self.request("GET", "/sessions/" + session + "/messages?limit=100")
