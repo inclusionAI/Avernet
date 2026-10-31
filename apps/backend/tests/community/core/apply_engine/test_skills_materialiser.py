@@ -445,6 +445,23 @@ def test_skills_empty_physically_deletes_inactive_local_assets():
     assert uploads.uploads == []
 
 
+def test_a_local_package_an_inactive_set_references_is_neither_cleaned_up_nor_deleted():
+    """A set holds the package (an inactive set too), so deleting it would break that set: cleanup leaves it, and
+    a Direct installation of it, when omitted, is removed without deleting the package."""
+    referenced = skill_asset(22, "in-a-draft-set")
+    materialiser, uploads, activation, _reader, _, _ = skill_rig(
+        assets=[], local_assets=[referenced], member_ids={22}
+    )
+    _, plan, _ = _run(_apply(materialiser, _ctx(), []))
+    assert plan.removals == () and uploads.deleted == [] and activation.skill_deactivations == []
+
+    installed = skill_asset(23, "direct-and-in-a-draft-set")
+    materialiser, uploads, activation, _reader, _, _ = skill_rig(assets=[installed], member_ids={23})
+    _, plan, _ = _run(_apply(materialiser, _ctx(), []))
+    assert plan.removals == ("direct-and-in-a-draft-set",)
+    assert activation.skill_deactivations == [23] and uploads.deleted == []
+
+
 def test_local_cleanup_is_sorted_and_stops_on_first_failure():
     materialiser, uploads, activation, _reader, _, _ = skill_rig(
         assets=[],
