@@ -342,7 +342,9 @@
         "mode": "DUAL",
         "preprod_verdict": "NOT_RUN",
         "gates": [],
-        "notes": []
+        "notes": [
+          "AUTHORITY_DENSITY_42_OBLIGATIONS_20261031"
+        ]
       }
     },
     {
