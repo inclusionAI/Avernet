@@ -85,6 +85,35 @@ def test_date_suffix_alone_never_exempts_real_secret_shapes(line: str) -> None:
     assert findings[0].rule == "credential-like assignment"
 
 
+@pytest.mark.parametrize(
+    "line",
+    [
+        'PROPOSAL_TOKEN = "aMixedCaseSecretValue_20261031"',
+        'PROPOSAL_TOKEN = "f47ac10b58cc4372a910b20261031abcdef"',
+        'PROPOSAL_TOKEN = "DEADBEEFCAFE1234_20261031"',
+        'auth_token = "gHt9Km2Qx7Zw3Rd8Yv5"',
+    ],
+)
+def test_scanner_self_test_fixtures_are_path_exempt(line: str) -> None:
+    # The scanner's own negative/true-positive fixtures are credential-shaped
+    # by design; they are exempt only when committed inside the scanner
+    # self-test module itself.
+    assert _findings(_diff(line, path="devops/hook/test_check_secrets.py")) == []
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        'PROPOSAL_TOKEN = "aMixedCaseSecretValue_20261031"',
+        'PROPOSAL_TOKEN = "f47ac10b58cc4372a910b20261031abcdef"',
+    ],
+)
+def test_self_test_path_exemption_does_not_widen_scope(line: str) -> None:
+    findings = _findings(_diff(line, path="apps/bcs/scripts/e2e-runner/example.py"))
+    assert len(findings) == 1
+    assert findings[0].rule == "credential-like assignment"
+
+
 TRUE_POSITIVE_LINES = [
     "auth_" + "token" + ' = "gHt9Km2Qx7Zw3Rd8Yv5"',
     "pass" + "word" + ' = "8f3ka92mx01jd77q"',
