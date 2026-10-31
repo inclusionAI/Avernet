@@ -39,6 +39,16 @@ A desired Center skill is found by name and a shared-repository skill by
 path through `SharedSkillPort` (`core/ports`), then claimed Direct like any
 skill.
 
+The skills and MCP materialisers speak only for the bot's Direct entries:
+what the bot's skill sets supply — an active ordinary set, the Default less
+its exclusions, the platform's default MCP servers — is never counted as
+current and never removed, for every compiler alike. Declaring a
+set-supplied entry is a conflict: before writing anything, the orchestrator
+asks each such materialiser (`ChecksSetSupply.set_conflicts`) and, on any
+conflict, refuses the whole apply — every declared category aborted, nothing
+written. The repository's claims refuse the same entries under their own
+lock, so Direct and set supply never share an Installation row.
+
 Extracted from `core/bot_config_manifest/apply/` by
 `apps/backend/specs/2026-10-23-apply-engine-desired-state/`, which also
 records the resources-root rule (the workspace root minus

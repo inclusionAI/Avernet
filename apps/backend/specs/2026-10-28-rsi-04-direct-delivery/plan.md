@@ -248,7 +248,9 @@ Repository (`core/repository/{protocols,implementations}/bot/genome.py`):
 - Skill Center claim: `apply_claim_commands.claim_apply_skill`
   accepts a target whose locator is `center://…` or `git://…` (shared, no
   bot ownership check — access was established by `_resolve_skill`) besides
-  the bot's own `local://…`. Same same-name Set/Default detach logic. The
+  the bot's own `local://…`. (Review: claims no longer detach Set/Default
+  supply; a set-supplied name is refused and the orchestrator checks it
+  before any write.) The
   `skill_center/AGENTS.md` passages on these claims and its contract test
   are updated.
 - `MaterialiserPorts` / both delivery bundles carry the `SharedSkillPort`;

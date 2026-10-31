@@ -166,8 +166,10 @@ latest published version (ADR 0002), and a new Center version is not drift.
 - [ ] Delivering a shared-repository skill finds the asset by its `git://`
       path; none → the entry fails. No commit is recorded or checked.
 - [ ] A found asset becomes a Direct claim on the bot (the same claim
-      semantics a local package gets: same-name Set/Default supply detached),
-      and is reported `created`/`updated`. Removing an undeclared shared asset
+      semantics a local package gets), and is reported `created`/`updated`.
+      (Review decision: an apply speaks only for Direct skills and MCP
+      servers; a name a skill set supplies is never counted or removed, and
+      declaring one refuses the whole apply before any write.) Removing an undeclared shared asset
       deactivates it and never deletes it (unchanged).
 - [ ] #3103 is closed by this item; nothing is skipped any more.
 

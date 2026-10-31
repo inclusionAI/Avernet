@@ -49,7 +49,7 @@
 - **Goal:** `claim_apply_skill` accepts `center://` and `git://` targets.
 - **Files:** `repository/implementations/skill_center/apply_claim_commands.py`, `skill_center/AGENTS.md`; the claim command tests
 - **Done when:**
-  - [x] A shared target is claimed with the same-name Set/Default detach a local one gets; a foreign bot's `local://` target is still refused.
+  - [x] A shared target is claimed Direct like a local one; a foreign bot's `local://` target is still refused. (Review: a claim no longer detaches Set/Default supply; it refuses a set-supplied name.)
   - [x] Removal of a shared asset deactivates and never deletes (existing behaviour, pinned by a test).
 - **Depends on:** Tasks 3, 4a
 
@@ -112,7 +112,7 @@
   - [x] A worker crash mid-apply: the same task payload run again re-applies and the promotion settles once; run again after the terminal write, it only publishes; given up, it settles `apply_failed`.
   - [x] `PendingDeliveryApplier` deleted; `RevisionApplier` binds `DirectApplier`; no DI cycle.
 - **Depends on:** Tasks 6, 6b, 8
-- **Notes:** a stale `pending` row is one older than `STALE_PENDING_SECONDS` (300). A revision's MCP list names no platform default MCP server (capture leaves them out) and the apply declines to remove one, so a delivery ends `applied_partial` until the planned `desiredSkillSet` carries the defaults (owner decision in review: no stop-gap flag). The crash/re-run/give-up paths are covered in `test_apply_completion.py` with the settler as the subscriber covered in `test_promotion_service.py`.
+- **Notes:** a stale `pending` row is one older than `STALE_PENDING_SECONDS` (300). The skills and MCP materialisers speak only for Direct entries (owner decision in review, Manifest and genome alike): what the bot's skill sets supply, platform default MCP servers included, is never counted or removed; declaring it refuses the whole apply before any write, and capture leaves it out. The give-up publish is not retried (accepted: it needs a settle failure at the moment the queue gives up). The crash/re-run/give-up paths are covered in `test_apply_completion.py` with the settler as the subscriber covered in `test_promotion_service.py`.
 
 ### Task 10: HTTP surface `[x]`
 - **Goal:** The genome API shows the lifecycle and the partial marker.
@@ -127,10 +127,10 @@
 - **Goal:** Prove promote → apply → settle → drift with real services over fakes.
 - **Files:** new `tests/community/core/bot_genome/test_promotion_delivers.py`
 - **Done when:**
-  - [x] Promote r2 → `applied_partial` (only the platform default MCP removals are declined), `active`=r2, labels `["partial"]`; promote r1 back → `applied_partial`, `active`=r1, `previous`=r2 (real app). `applied_partial` with labels `["partial"]`, `apply_failed` with refs untouched, and a missing Center skill failing its entry while neighbours deliver are covered over fakes (`test_promotion_service.py`, `test_skills_materialiser.py`), not in the real-app flow.
+  - [x] Promote r2 → `applied`, `active`=r2, labels `[]`; promote r1 back → `applied`, `active`=r1, `previous`=r2 (real app). `applied_partial` with labels `["partial"]`, `apply_failed` with refs untouched, and a missing Center skill failing its entry while neighbours deliver are covered over fakes (`test_promotion_service.py`, `test_skills_materialiser.py`), not in the real-app flow.
   - [x] No drift after each promotion: a recapture returns the active id with `created: false`.
 - **Depends on:** Tasks 5, 9
-- **Notes:** proven on the real app instead of a new in-process file: `e2e/test_genome_flows.py` captures, patches, promotes (`applying`, refs unmoved), runs the queued apply task, reads `applied_partial` (the platform default MCP servers, see Task 9), `active` = r2 with labels `["partial"]`, the patched SOUL.md on the bot, and a recapture that returns the same id (`created: false`, so no drift); then goes back to r1 the same way. Partial, failed, CAS-lost and busy outcomes are covered over fakes in `test_promotion_service.py`.
+- **Notes:** proven on the real app instead of a new in-process file: `e2e/test_genome_flows.py` captures, patches, promotes (`applying`, refs unmoved), runs the queued apply task, reads `applied`, `active` = r2 with labels `[]`, the patched SOUL.md on the bot, and a recapture that returns the same id (`created: false`, so no drift); then goes back to r1 the same way. Partial, failed, CAS-lost and busy outcomes are covered over fakes in `test_promotion_service.py`.
 
 ## Group 5 — Docs, singlebox, closure
 

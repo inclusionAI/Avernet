@@ -53,10 +53,10 @@ over `PromotionSettler` (`promotion/settle.py`), which in one transaction moves
 status: `applied`, `applied_partial` (the refs move and `active` is labelled
 `partial`), or `apply_failed` (nothing moves; also when `active` moved while
 the apply ran). An automated actor's apply runs with the bot owner as its
-principal; the row records the actor. Capture records no platform default
-MCP server, and the apply declines to remove one, so a revision's delivery is
-`applied_partial` until the desired state carries the platform defaults (the
-planned `desiredSkillSet`). A Center skill is delivered by name and a
+principal; the row records the actor. A revision, like an apply, speaks only
+for the bot's Direct skills and MCP servers: capture leaves out what the bot's
+skill sets supply (the platform's default MCP servers included), and the apply
+neither counts nor removes it. A Center skill is delivered by name and a
 shared-repository skill by path (`SharedSkillPort`). No Manifest document is
 written by anything in this package; the `/config-manifest` endpoints keep
 working as before and are unrelated. Promoting a service bot's verify or
