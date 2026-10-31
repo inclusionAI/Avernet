@@ -243,6 +243,42 @@ def test_a_failed_publish_is_retried_by_the_queue_and_the_rerun_only_publishes(r
     assert not _lock_held(locks), "a publish that lands unlocks"
 
 
+def test_a_terminal_report_that_fails_to_store_keeps_the_bot_locked_and_the_rerun_applies_again(
+    rig, monkeypatch
+) -> None:
+    """The report stays ``RUNNING``, so the queue's re-run applies again: under the same lock, never beside a
+    second apply that took the bot in between."""
+    service, compiler, recorder, queue, locks, _ = rig
+    payload = _start(service, queue)
+    finish = service._applies.finish
+    with monkeypatch.context() as down:
+
+        def _fails(**kwargs):
+            raise RuntimeError("database blip")
+
+        down.setattr(service._applies, "finish", _fails)
+        with pytest.raises(RuntimeError, match="database blip"):
+            service.run_apply_task(payload)
+    assert _lock_held(locks) and recorder.notices == []
+    assert service._applies.finish == finish
+    service.run_apply_task(payload)  # the retry
+    assert compiler.compiles == 2 and [n[1].status for n in recorder.notices] == [ApplyStatus.SUCCEEDED]
+    assert not _lock_held(locks)
+
+
+def test_an_unstartable_apply_whose_report_fails_to_store_keeps_the_bot_locked(rig, monkeypatch) -> None:
+    service, _, recorder, queue, locks, bots = rig
+    payload = _start(service, queue)
+    bots.record = None
+    with monkeypatch.context() as down:
+        down.setattr(service._applies, "finish", lambda **_: (_ for _ in ()).throw(RuntimeError("database blip")))
+        with pytest.raises(RuntimeError, match="database blip"):
+            service.run_apply_task(payload)
+    assert _lock_held(locks) and recorder.notices == []
+    service.run_apply_task(payload)
+    assert not _lock_held(locks) and [n[1].status for n in recorder.notices] == [ApplyStatus.FAILED]
+
+
 def test_a_publish_that_fails_again_on_the_rerun_keeps_the_bot_locked_until_the_queue_gives_up(rig) -> None:
     service, _, recorder, queue, locks, _ = rig
     payload = _start(service, queue)

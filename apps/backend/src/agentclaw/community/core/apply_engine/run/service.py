@@ -454,6 +454,7 @@ class ApplyRunService(ApplyRunServiceProtocol):
             )
         finally:
             publish_error: Exception | None = None
+            heard = False
             try:
                 if report is not None:
                     self._applies.finish(
@@ -469,10 +470,13 @@ class ApplyRunService(ApplyRunServiceProtocol):
                     publish_error = self._completion.publish(
                         env=ctx.env, entity_id=ctx.entity_id, bot_id=ctx.bot_id, state=state, report=report
                     )
+                    heard = publish_error is None
             finally:
-                # The lock is held until the producer has heard: a subscriber that has not settled yet
-                # (a genome promotion moving ``active``) must not see the bot's next apply start first.
-                if publish_error is None:
+                # The lock is held until the terminal report is stored and the producer has heard: a subscriber
+                # that has not settled yet (a genome promotion moving ``active``) must not see the bot's next apply
+                # start first, and a report still ``RUNNING`` means the queue's re-run applies again, under this
+                # same lock. Anything that raised before then reaches the queue with the lock still held.
+                if heard:
                     self._locks.release(
                         env=ctx.env,
                         entity_id=ctx.entity_id,

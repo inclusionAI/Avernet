@@ -25,8 +25,10 @@ second map keyed by state kind, beside the compilers. Every terminal path of
 an apply publishes its `ApplyOutcome` to the kind's subscriber — a finished
 run, a refused compile, an engine exception, a task that could not be
 rebuilt, and the task queue giving up on the apply task (its give-up hook) —
-and the apply lock is released only once that publish has landed, so the
-bot's next apply cannot start before the subscriber has settled. A re-run of
+and the apply lock is released only once the terminal report is stored and
+that publish has landed, so the bot's next apply cannot start before the
+subscriber has settled, nor beside a re-run of an apply whose report is still
+`RUNNING`. A re-run of
 an apply whose report is already terminal applies nothing and only publishes
 again (then unlocks), so a failed publish is retried by the queue with the
 bot still locked. The one exception is the give-up hook: the queue has

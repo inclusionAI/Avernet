@@ -101,7 +101,7 @@ def terminate_unstartable(
         state=state_of_payload(payload),
     )
     record_engine_failure(report, exc)
-    publish_error: Exception | None = None
+    heard = False
     try:
         applies.finish(
             env=env,
@@ -114,9 +114,11 @@ def terminate_unstartable(
         publish_error = publisher.publish(
             env=env, entity_id=entity_id, bot_id=bot_id, state=report.state, report=report
         )
+        heard = publish_error is None
         return publish_error
     finally:
-        if publish_error is None:
+        # Unlocked only once the FAILED report is stored and published; otherwise the queue's re-run does both.
+        if heard:
             locks.release(
                 env=env,
                 entity_id=entity_id,
