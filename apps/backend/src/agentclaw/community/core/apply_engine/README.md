@@ -37,9 +37,7 @@ raises there is logged and not retried. The genome subscribes; the Manifest does
 
 A desired Center skill is found by name and a shared-repository skill by
 path through `SharedSkillPort` (`core/ports`), then claimed Direct like any
-skill. A declaration with `keeps_platform_defaults` (a compiled revision's
-MCP list, which never records the platform's default MCP servers) leaves
-those defaults in place instead of removing what it does not list.
+skill.
 
 Extracted from `core/bot_config_manifest/apply/` by
 `apps/backend/specs/2026-10-23-apply-engine-desired-state/`, which also

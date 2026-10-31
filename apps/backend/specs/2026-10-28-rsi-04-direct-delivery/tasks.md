@@ -112,7 +112,7 @@
   - [x] A worker crash mid-apply: the same task payload run again re-applies and the promotion settles once; run again after the terminal write, it only publishes; given up, it settles `apply_failed`.
   - [x] `PendingDeliveryApplier` deleted; `RevisionApplier` binds `DirectApplier`; no DI cycle.
 - **Depends on:** Tasks 6, 6b, 8
-- **Notes:** a stale `pending` row is one older than `STALE_PENDING_SECONDS` (300). A revision's MCP list keeps the platform's default MCP servers (`Declaration.keeps_platform_defaults`, owner decision): capture records them nowhere, so applying a captured list must not remove them. The crash/re-run/give-up paths are covered in `test_apply_completion.py` with the settler as the subscriber covered in `test_promotion_service.py`.
+- **Notes:** a stale `pending` row is one older than `STALE_PENDING_SECONDS` (300). A revision's MCP list names no platform default MCP server (capture leaves them out) and the apply declines to remove one, so a delivery ends `applied_partial` until the planned `desiredSkillSet` carries the defaults (owner decision in review: no stop-gap flag). The crash/re-run/give-up paths are covered in `test_apply_completion.py` with the settler as the subscriber covered in `test_promotion_service.py`.
 
 ### Task 10: HTTP surface `[x]`
 - **Goal:** The genome API shows the lifecycle and the partial marker.
@@ -127,10 +127,10 @@
 - **Goal:** Prove promote → apply → settle → drift with real services over fakes.
 - **Files:** new `tests/community/core/bot_genome/test_promotion_delivers.py`
 - **Done when:**
-  - [x] Promote r2 → apply SUCCEEDED → `applied`, `active`=r2, labels `[]`; promote r1 back → `applied`, `active`=r1, `previous`=r2 (real app). `applied_partial` with labels `["partial"]`, `apply_failed` with refs untouched, and a missing Center skill failing its entry while neighbours deliver are covered over fakes (`test_promotion_service.py`, `test_skills_materialiser.py`), not in the real-app flow.
+  - [x] Promote r2 → `applied_partial` (only the platform default MCP removals are declined), `active`=r2, labels `["partial"]`; promote r1 back → `applied_partial`, `active`=r1, `previous`=r2 (real app). `applied_partial` with labels `["partial"]`, `apply_failed` with refs untouched, and a missing Center skill failing its entry while neighbours deliver are covered over fakes (`test_promotion_service.py`, `test_skills_materialiser.py`), not in the real-app flow.
   - [x] No drift after each promotion: a recapture returns the active id with `created: false`.
 - **Depends on:** Tasks 5, 9
-- **Notes:** proven on the real app instead of a new in-process file: `e2e/test_genome_flows.py` captures, patches, promotes (`applying`, refs unmoved), runs the queued apply task, reads `applied`, `active` = r2 with labels `[]`, the patched SOUL.md on the bot, and a recapture that returns the same id (`created: false`, so no drift); then goes back to r1 the same way. Partial, failed, CAS-lost and busy outcomes are covered over fakes in `test_promotion_service.py`.
+- **Notes:** proven on the real app instead of a new in-process file: `e2e/test_genome_flows.py` captures, patches, promotes (`applying`, refs unmoved), runs the queued apply task, reads `applied_partial` (the platform default MCP servers, see Task 9), `active` = r2 with labels `["partial"]`, the patched SOUL.md on the bot, and a recapture that returns the same id (`created: false`, so no drift); then goes back to r1 the same way. Partial, failed, CAS-lost and busy outcomes are covered over fakes in `test_promotion_service.py`.
 
 ## Group 5 — Docs, singlebox, closure
 

@@ -119,9 +119,6 @@ class ApplyContext:
     #: per fetch and rides the materialiser's call instead.
     apply_id: Optional[str] = None
     capability_state: CapabilityApplyState = field(default_factory=CapabilityApplyState)
-    #: The construct being applied leaves platform-supplied entries alone (``Declaration.keeps_platform_defaults``);
-    #: set per construct by the orchestrator, on a copy of this context, so a materialiser reads it here.
-    keeps_platform_defaults: bool = False
 
 
 __all__ = ["ApplyContext", "CapabilityApplyState"]

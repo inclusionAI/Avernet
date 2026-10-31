@@ -927,28 +927,6 @@ async def test_a_platform_default_is_excluded_when_omitted():
 
 
 @pytest.mark.asyncio
-async def test_a_declaration_that_keeps_platform_defaults_never_removes_one():
-    """A revision's MCP list is the bot's own servers (capture leaves the platform defaults out), so
-    delivering it keeps the defaults; the same list read as the whole area (the Manifest's) removes them."""
-    from agentclaw.community.core.apply_engine.desired_state import Declaration, DesiredMcpServer, DesiredState
-
-    activations = FakeActivationService(installed={"keep", "a-default"}, platform_defaults={"a-default"})
-    engine = _engine(activations=activations)
-    revision_state = DesiredState(mcp=Declaration((DesiredMcpServer("keep"),), keeps_platform_defaults=True))
-    report = await engine.orchestrator.apply(
-        make_context(), revision_state, apply_id="a1", trigger="genome_promotion", started_at=datetime.now()
-    )
-    assert report.categories[0].aborted is False and report.categories[0].removals == ()
-    assert activations.deactivated == [] and "a-default" in activations.installed
-
-    whole_area = DesiredState(mcp=Declaration((DesiredMcpServer("keep"),)))
-    report = await engine.orchestrator.apply(
-        make_context(), whole_area, apply_id="a2", trigger="explicit", started_at=datetime.now()
-    )
-    assert report.categories[0].removals == ("a-default",) and activations.deactivated == ["a-default"]
-
-
-@pytest.mark.asyncio
 async def test_an_unanswerable_platform_default_lookup_writes_nothing():
     """Fail-closed, in the direction that keeps the manifest's reach narrow.
 

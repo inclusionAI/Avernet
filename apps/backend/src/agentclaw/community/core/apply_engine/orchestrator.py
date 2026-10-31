@@ -20,7 +20,6 @@ adds "just one" special case.
 
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import datetime
 from typing import Any, Callable, Mapping, Sequence
 
@@ -169,9 +168,6 @@ class ApplyOrchestrator:
         if compile_failures:
             return self._aborted(construct, identities, cause=ResolveResult(failures=compile_failures), reason=None)
 
-        # The declaration's scope travels with the context the three stages share; ``capability_state`` is the same
-        # object on the copy, so what one construct hands the next is unaffected.
-        ctx = replace(ctx, keeps_platform_defaults=declaration.keeps_platform_defaults)
         try:
             resolved = await materialiser.resolve(ctx, declaration.entries)
         except Exception as exc:  # noqa: BLE001 - one category must not kill the apply
