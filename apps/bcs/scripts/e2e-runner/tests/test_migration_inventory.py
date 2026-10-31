@@ -36,6 +36,10 @@ from bcs_e2e.local_story_commands import CASES
 from bcs_e2e.migration_inventory import SOURCES, migration_plan, validate_contract
 from bcs_e2e.profile import load
 from bcs_e2e.run_state import RunStateError
+from bcs_e2e.draft_group_density.registration_proposal import (  # noqa: E402
+    NOTE as DRAFT_GROUP_DENSITY_NOTE)
+from bcs_e2e.result_queue_density.registration_proposal import (  # noqa: E402
+    NOTE as RESULT_QUEUE_DENSITY_NOTE)
 
 
 class MigrationInventoryTests(unittest.TestCase):
@@ -806,3 +810,34 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
         self.assertEqual(
             row['notes'],
             ['PROVIDER_PUBLISHES_DENSITY_98_OBLIGATIONS_20261031'])
+
+
+    def test_result_queue_density_locks_row_20_face_note(self):
+        statuses = load_executor_migration()
+        face = json.loads(
+            (ROOT / 'executor-migration.json').read_text(encoding='utf-8'))
+        face_by_id = {row['id']: row['executor_migration']
+                      for row in face['rows']}
+        row = statuses['story_state_machine_result_queue']
+        self.assertEqual(row['mode'], 'DUAL')
+        self.assertEqual(row['preprod_verdict'], 'BLOCKED_INVENTORIED')
+        self.assertEqual(row['gates'], [])
+        self.assertEqual(row['notes'], [RESULT_QUEUE_DENSITY_NOTE])
+        self.assertEqual(
+            face_by_id['story_state_machine_result_queue']['notes'],
+            [RESULT_QUEUE_DENSITY_NOTE])
+
+    def test_draft_group_launch_density_locks_row_40_face_note(self):
+        statuses = load_executor_migration()
+        face = json.loads(
+            (ROOT / 'executor-migration.json').read_text(encoding='utf-8'))
+        face_by_id = {row['id']: row['executor_migration']
+                      for row in face['rows']}
+        row = statuses['story_collaboration_draft_group_launch']
+        self.assertEqual(row['mode'], 'DUAL')
+        self.assertEqual(row['preprod_verdict'], 'BLOCKED_INVENTORIED')
+        self.assertEqual(row['gates'], [])
+        self.assertEqual(row['notes'], [DRAFT_GROUP_DENSITY_NOTE])
+        self.assertEqual(
+            face_by_id['story_collaboration_draft_group_launch']['notes'],
+            [DRAFT_GROUP_DENSITY_NOTE])

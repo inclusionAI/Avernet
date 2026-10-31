@@ -218,7 +218,9 @@
         "mode": "DUAL",
         "preprod_verdict": "BLOCKED_INVENTORIED",
         "gates": [],
-        "notes": []
+        "notes": [
+            "row #20 story_state_machine_result_queue: register 34 source-anchored density obligations under the retained RESULT-QUEUE.* parent envelope (52 parsed = 18 legacy parents + 34 atoms; residual_count_gap=0); the owned-local executor catalog ASSERTION_IDS (34 ordered sites) equals the independent AST rebuild verbatim and every site keeps exactly one frozen parent owner; RESULT-QUEUE.delivery-policy-replacement stays the disclosed zero-atom parent (story lines 41-46 only mutate the in-memory policy dict; enforcement is observed by the scheduled-result-delivery atoms RQ.F21..RQ.F23); the seven dynamic wait predicates and the terminal marker print stay parent-charged, not leaf-charged; notes-only integration, the dual-result-queue-run envelope and its LOCAL_RESULT_QUEUE_PASS owned-local conclusion stay untouched; committed verdict stays DUAL/BLOCKED_INVENTORIED with notes 0 to 1; preprod keeps the four named PREPROD_* gaps on file; remote_validation=NOT_RUN and grants_release_credit=false"
+          ]
       }
     },
     {
@@ -433,7 +435,9 @@
         "mode": "DUAL",
         "preprod_verdict": "BLOCKED_INVENTORIED",
         "gates": [],
-        "notes": []
+        "notes": [
+            "row #40 story_collaboration_draft_group_launch: register 75 source-anchored density obligations under the retained LOCAL-DRAFT-GROUP.* parent envelope (92 parsed = 17 legacy parents + 75 weighted atoms; residual_count_gap=0); the owned-local executor catalog ASSERTION_IDS (75 ordered weighted sites) equals the independent AST rebuild verbatim and every site keeps exactly one frozen parent owner; LOCAL-DRAFT-GROUP.group-launch-input stays the disclosed zero-atom parent (story lines 162-172 only build the launch body dict; enforcement is observed by the browser-context-submission-guards atoms DGL.F49..DGL.F51 and the group-launch-binding atoms DGL.F56..DGL.F64); the terminal marker print stays parent-charged; notes-only integration, the dual-draft-group-run envelope and its LOCAL_DRAFT_GROUP_PASS owned-local conclusion stay untouched; committed verdict stays DUAL/BLOCKED_INVENTORIED with notes 0 to 1; preprod keeps the four named PREPROD_* gaps on file; remote_validation=NOT_RUN and grants_release_credit=false"
+          ]
       }
     }
   ]
