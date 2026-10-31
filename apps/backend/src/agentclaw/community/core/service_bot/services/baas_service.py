@@ -3127,7 +3127,10 @@ class BaasService:  # pragma: no cover
             return True
 
         except httpx.HTTPStatusError as e:
-            logger.error(
+            # WARNING, not ERROR: this method keeps the HTTP failure as a
+            # BaasServiceError and the durable TeclawPublishTaskHandler caller
+            # decides recovery/retry; avoid duplicating it into CDO errors.
+            logger.warning(
                 f"[BaasService.update_device_outbound_rule] HTTP error: "
                 f"{e.response.status_code} - {e.response.text}"
             )
