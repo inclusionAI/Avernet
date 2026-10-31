@@ -236,6 +236,29 @@ mod tests {
     }
 
     #[test]
+    fn a_live_capture_probe_never_consumes_and_never_evicts() {
+        // The unraced readiness surface the chat-final claim channel gates
+        // on: true while the window is live, false once expired — and the
+        // probe neither spends a redeem nor removes a dead entry (the
+        // next record/redeem lazily cleans those).
+        let ledger = CallerRelayLedger::new(8);
+        assert!(!ledger.has_live_capture("prod", "s-1", NOW));
+        assert!(ledger.record("prod", "s-1", "turn-1", ingress("human_a"), NOW, 300_000));
+        assert!(ledger.has_live_capture("prod", "s-1", NOW + 1));
+        // The probe is non-consuming: the full redeem budget is intact.
+        let mut redeemed = 0;
+        while ledger.redeem("prod", "s-1", NOW + 1).is_some() {
+            redeemed += 1;
+        }
+        assert_eq!(redeemed, RELAY_PER_TURN);
+        assert!(!ledger.has_live_capture("prod", "s-1", NOW + 300_000));
+        // An expired entry is still probe-visible-late-but-untouched: the
+        // probe answers false and leaves reaping to record/redeem.
+        assert!(ledger.seal_term() >= 1);
+        assert!(!ledger.has_live_capture("prod", "s-1", NOW));
+    }
+
+    #[test]
     fn a_full_ledger_of_live_captures_refuses_new_records() {
         let ledger = CallerRelayLedger::new(1);
         assert!(ledger.record("prod", "s-1", "turn-1", ingress("human_a"), NOW, 300_000));
