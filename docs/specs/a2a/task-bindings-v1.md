@@ -16,13 +16,15 @@ model. This is an internal repository/storage contract, not an A2A extension.
   bot_id, session_id (unbounded TEXT), provider_id, provider_bot_ref,
   interface_url, tenant, route_fingerprint; plus indexed scope_key.
   Explicit immutable request columns: group_id, protocol_version, binding,
-  update_mode, credential_kind, message_id, request_digest, request_context_id.
+  update_mode, credential_kind, message_id and request_digest.
+  request_context_id starts with the submitted context; a taskless Message may
+  establish it once when absent, but cannot replace an existing value.
   extensions_json is the negotiated URI array. Mutable run columns: state,
   version, deadline_ms, updated_at_ms and six nullable budget columns:
   budget_remaining_ms, budget_total_deadline_ms, budget_input_wait_ms,
   budget_phase, budget_phase_started_ms, budget_phase_deadline_ms.
 - `bcs_a2a_contexts`: unique `(env, scope_key)`, with the seven explicit scope
-  fields and context_id. This is the current cross-task continuation mapping,
+  fields and context_id. This is the current cross-round continuation mapping,
   not task history. No scope_json or duplicate updated_at_ms.
 - MySQL opaque run/message/task/context identifiers use binary collation;
   identifiers differing only in case must not compare equal.
@@ -47,7 +49,7 @@ version; `None` on run or Task revision conflict, and an error on durable
 write failure/invalid identity. It atomically:
 
 1. Creates/adopts or revision-fences the shared Task input snapshot.
-2. On first association only, establishes the context mapping; the same
+2. On first Task association, establishes the context mapping; the same
    context ID causes no context row write or audit timestamp change.
 3. CAS-updates the run binding. Existing task identity cannot be replaced or
    detached. A bound writer must supply the current task_version.
@@ -58,6 +60,14 @@ an unversioned new binding cannot overwrite a prior shared input snapshot.
 Task CAS prevents a stale run from overwriting receipts accepted by another
 run. All intermediate task/context writes roll back if the binding CAS fails.
 Completing a local run does not complete other bindings.
+
+Standalone Message completion skips Task storage. Its optional nonempty
+contextId is validated against the submitted context before text publication;
+omission retains the existing context. The terminal transaction CAS-updates
+request_context_id and the Completed run, and conditionally upserts the scoped
+context mapping. A failed run CAS rolls back the mapping too. No remote_task_id
+or task_version is synthesized. Final is published after this commit, so an
+immediately dispatched next Send can use the established context.
 
 `has_other_active_task_run` is a bounded indexed existence query. A run-scoped
 abort and failed-tracking cleanup reject before calling CancelTask if it would
@@ -82,6 +92,7 @@ operations. SQLite uses a local connection. No transaction spans remote IO.
 | create | 1 INSERT, one binding row |
 | first remote identity / adoption | 1 Task lookup, then transaction: 1 Task INSERT/CAS, 1 conditional context INSERT/upsert, 1 run CAS, 1 joined SELECT |
 | later state/input update | transaction: 1 Task CAS, 1 run CAS, 1 joined SELECT; no context operation |
+| standalone Message completion with context | transaction: 1 conditional context INSERT/upsert, 1 run CAS, 1 joined SELECT; no Task row |
 | unbound failure/unknown update | transaction: 1 run CAS, 1 joined SELECT |
 | run-scoped cancel safety | 1 additional existence SELECT with LIMIT 1, using the Task binding index |
 | text delta | no association write |
