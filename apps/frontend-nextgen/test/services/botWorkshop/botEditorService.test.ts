@@ -446,8 +446,8 @@ it('新建能力集后立即启用', async () => {
 
   await botEditorService.createSkillSet('bot-1', '研发能力集');
 
-  expect(controller.createSkillSet).toHaveBeenCalledWith('bot-1', { name: '研发能力集' });
-  expect(controller.setSkillSetActive).toHaveBeenCalledWith('bot-1', 'set-1', true);
+  expect(controller.createSkillSet).toHaveBeenCalledWith('bot-1', { name: '研发能力集' }, undefined);
+  expect(controller.setSkillSetActive).toHaveBeenCalledWith('bot-1', 'set-1', true, undefined);
 });
 
 it('启停能力集按服务端 is_active 返回最终状态，业务失败不得视为成功', async () => {

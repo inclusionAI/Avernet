@@ -68,3 +68,43 @@ it('能力集停用只更新对应状态，不触发整页配置重载', async (
   expect(result.current.loading).toBe(false);
   expect(mockedLoad).toHaveBeenCalledTimes(1);
 });
+
+it('Skill 添加、能力集写入和上传透传当前页 Owner，切换 Owner 后使用新上下文', async () => {
+  mockedLoad.mockRejectedValue(new Error('stop unrelated load'));
+  const methods = [
+    'setSkillSetSkill',
+    'addSkillCenterReferences',
+    'createSkillSet',
+    'updateSkillSet',
+    'deleteSkillSet',
+    'uploadSkill',
+    'uploadSkillFolder',
+    'toggleSkill',
+    'deleteSkill',
+  ] as const;
+  for (const method of methods)
+    Object.assign(botEditorService, { [method]: jest.fn().mockResolvedValue({ id: 'local-1' }) });
+  const { result, rerender } = renderHook(({ owner }) => useBotEditor('bot-1', true, 'space-1', true, owner), {
+    initialProps: { owner: 'owner-1' },
+  });
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  await act(async () => {
+    await result.current.setSkillSetSkill('set-1', 'skill-1', true);
+    await result.current.addSkillCenterReferences('set-1', ['code-1']);
+    await result.current.createSkillSet('test');
+    await result.current.updateSkillSet('set-1', 'renamed');
+    await result.current.deleteSkillSet('set-1');
+    await result.current.uploadSkillFolder([]);
+  });
+  expect(botEditorService.setSkillSetSkill).toHaveBeenCalledWith('bot-1', 'set-1', 'skill-1', true, 'owner-1');
+  expect(botEditorService.addSkillCenterReferences).toHaveBeenCalledWith('bot-1', 'set-1', ['code-1'], 'owner-1');
+  expect(botEditorService.createSkillSet).toHaveBeenCalledWith('bot-1', 'test', 'owner-1');
+  expect(botEditorService.updateSkillSet).toHaveBeenCalledWith('bot-1', 'set-1', 'renamed', 'owner-1');
+  expect(botEditorService.deleteSkillSet).toHaveBeenCalledWith('bot-1', 'set-1', 'owner-1');
+  expect(botEditorService.uploadSkillFolder).toHaveBeenCalledWith('bot-1', [], 'owner-1');
+  rerender({ owner: 'owner-2' });
+  await act(async () => {
+    await result.current.setSkillSetSkill('set-1', 'skill-1', false);
+  });
+  expect(botEditorService.setSkillSetSkill).toHaveBeenLastCalledWith('bot-1', 'set-1', 'skill-1', false, 'owner-2');
+});
