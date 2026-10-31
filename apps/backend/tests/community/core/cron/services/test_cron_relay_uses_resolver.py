@@ -425,16 +425,18 @@ class TestListAllCronsOwnerId:
 
 class TestListServiceBotRuntimeStages:
     @pytest.mark.parametrize(
-        ("verify_status", "expected_stages"),
+        ("verify_status", "device_provider_value", "expected_stages"),
         [
-            (DeviceBindingStatus.ACTIVE, ["draft", "verify", "online"]),
-            (DeviceBindingStatus.RELEASED, ["draft", "online"]),
+            (DeviceBindingStatus.ACTIVE, "teclaw", ["draft", "verify", "online"]),
+            (DeviceBindingStatus.ACTIVE, "baas", ["draft", "online"]),
+            (DeviceBindingStatus.RELEASED, "teclaw", ["draft", "online"]),
         ],
-        ids=["active-verify", "released-verify"],
+        ids=["teclaw-active-verify", "baas-stale-verify", "teclaw-released-verify"],
     )
-    def test_success_record_only_exposes_active_retained_verify(
+    def test_success_record_only_exposes_provider_retained_verify(
         self,
         verify_status,
+        device_provider_value,
         expected_stages,
     ):
         publish_record = _make_publish_record_with_bindings(
@@ -449,7 +451,10 @@ class TestListServiceBotRuntimeStages:
             )
         )
         device_provider = MagicMock()
-        device_provider.get_device.return_value = _make_device(status=verify_status)
+        device_provider.get_device.return_value = _make_device(
+            status=verify_status,
+            device_provider=device_provider_value,
+        )
         svc = _make_service(
             device_provider=device_provider,
             publish_repo=publish_repo,
@@ -468,13 +473,61 @@ class TestListServiceBotRuntimeStages:
 
         assert [target.runtime_stage for target in targets] == expected_stages
         assert failed_targets == []
-        if verify_status == DeviceBindingStatus.ACTIVE:
+        if verify_status == DeviceBindingStatus.ACTIVE and device_provider_value == "teclaw":
             verify_target = next(
                 target for target in targets if target.runtime_stage == "verify"
             )
             assert verify_target.binding_id == 20
             assert verify_target.publish_id == 202
             assert verify_target.publish_status == PublishStatus.SUCCESS.value
+
+    @pytest.mark.parametrize(
+        ("device_provider_value", "publish_id"),
+        [("baas", None), ("teclaw", 202)],
+    )
+    def test_resolve_verify_targets_tracks_retention_provider(
+        self,
+        device_provider_value,
+        publish_id,
+    ):
+        publish_record = _make_publish_record_with_bindings(
+            publish_id=202,
+            status=PublishStatus.SUCCESS.value,
+            bindings={"verify": 20, "online": 30},
+        )
+        publish_repo = MagicMock()
+        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.side_effect = (
+            lambda source_bot_id, owner_id, status, env: (
+                publish_record if status == PublishStatus.SUCCESS.value else None
+            )
+        )
+        device_provider = MagicMock()
+        device_provider.get_device.return_value = _make_device(
+            status=DeviceBindingStatus.ACTIVE,
+            device_provider=device_provider_value,
+        )
+        svc = _make_service(
+            device_provider=device_provider,
+            publish_repo=publish_repo,
+        )
+        bot = {
+            "bot_id": "service-bot",
+            "owner_id": "owner-1",
+            "bot_name": "Service Bot",
+            "bot_type": "service",
+        }
+
+        if publish_id is None:
+            with pytest.raises(CronRelayError) as excinfo:
+                svc._resolve_published_runtime_target(bot, "owner-1", "verify")
+            assert excinfo.value.error_code == 404
+            return
+
+        target = svc._resolve_published_runtime_target(bot, "owner-1", "verify")
+        assert isinstance(target, CronRuntimeTarget)
+        assert target.binding_id == 20
+        assert target.publish_id == publish_id
+        assert target.publish_status == PublishStatus.SUCCESS.value
 
     def test_validating_verify_takes_priority_over_success_verify(self):
         validating_record = _make_publish_record(
@@ -533,7 +586,8 @@ class TestListServiceBotRuntimeStages:
         )
         device_provider = MagicMock()
         device_provider.get_device.return_value = _make_device(
-            status=DeviceBindingStatus.ACTIVE
+            status=DeviceBindingStatus.ACTIVE,
+            device_provider="teclaw",
         )
         svc = _make_service(
             device_provider=device_provider,

@@ -45,6 +45,7 @@ from agentclaw.community.core.cron.services.cron_runtime_targets import (
     RUNTIME_STAGE_ONLINE,
     RUNTIME_STAGE_VERIFY,
     RUNTIME_QUERY_PREPARE_CONCURRENCY,
+    RETAINED_VERIFY_DEVICE_PROVIDERS,
     VALID_RUNTIME_STAGES,
 )
 from agentclaw.community.core.cron.services.cron_runtime_operations import (
@@ -632,8 +633,10 @@ class CronRelayService(CronTargetedOperationsMixin, CronRuntimeOperationsMixin, 
         """返回生产发布单中仍可使用的 verify 运行态。
 
         当 Vn+1 处于 VALIDATING 时，调用方优先使用 Vn+1 的 verify binding。
-        只有不存在 VALIDATING 发布单时，才检查 Vn 的 SUCCESS 发布单；其中的
-        verify binding 仍为 ACTIVE，表示该预发运行态在生产发布后仍被保留。
+        只有不存在 VALIDATING 发布单时，才检查 Vn 的 SUCCESS 发布单。
+        Promotion 后保留 verify 是 teclaw 行为；default/arca/baas 在 online
+        success 会销毁 verify bot，SUCCESS record 上的 ACTIVE verify binding
+        属于 stale data，不能再次作为调用目标。
         """
         publish_record = (
             self._publish_repo.get_latest_by_source_bot_id_and_owner_and_status(
@@ -663,6 +666,20 @@ class CronRelayService(CronTargetedOperationsMixin, CronRuntimeOperationsMixin, 
 
         if self._read_field(device, "status") != DeviceBindingStatus.ACTIVE:
             return None
+
+        provider = self._read_field(device, "device_provider")
+        provider = provider.lower() if isinstance(provider, str) else ""
+        if provider not in RETAINED_VERIFY_DEVICE_PROVIDERS:
+            logger.info(
+                "Skipping retainable verify binding for bot=%s publish_id=%s "
+                "binding_id=%s device_provider=%s",
+                bot_id,
+                getattr(publish_record, "id", None),
+                verify_binding_id,
+                provider,
+            )
+            return None
+
         return publish_record
 
     def _build_runtime_targets(
