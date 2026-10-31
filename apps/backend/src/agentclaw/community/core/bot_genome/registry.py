@@ -287,7 +287,7 @@ class GenomeRegistryService(GenomeRegistryProtocol):
         candidate = None
         if run is not None:
             candidate = CandidateRefRequest(
-                run_id=run.run_id, moved_kind=created_by.kind.value, moved_actor=created_by.audit, moved_at=_now()
+                run_id=run.run_id, moved_kind=created_by.kind, moved_actor=created_by.audit, moved_at=_now()
             )
         row, created, ref = self._revisions.record(
             GenomeRevisionRow(
@@ -589,7 +589,7 @@ class GenomeRegistryService(GenomeRegistryProtocol):
             name=update.name,
             revision_id=update.revision,
             expected_revision_id=update.expected_revision,
-            moved_kind=actor.kind.value,
+            moved_kind=actor.kind,
             moved_actor=actor.audit,
             run_id=actor.run_id,
             reason=update.reason,
@@ -716,7 +716,7 @@ def _ref(row) -> GenomeRef:
         name=row.name,
         revision=row.revision_id,
         moved_at=row.moved_at,
-        moved_by=Provenance(ProvenanceKind(row.moved_kind), row.moved_actor, run_id=row.run_id),
+        moved_by=Provenance(row.moved_kind, row.moved_actor, run_id=row.run_id),
         reason=row.reason,
         labels=tuple(json.loads(row.labels)),
     )

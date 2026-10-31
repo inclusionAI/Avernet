@@ -46,6 +46,7 @@ from sqlalchemy.sql import func
 
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.bot_genome.limits import MAX_AUDIT_ACTOR_CHARS
+from agentclaw.community.core.bot_genome.models import ProvenanceKind  # re-exported: what a ref move's `moved_kind` is
 from agentclaw.community.utils.avernet_tenant_guard import (
     register_avernet_tenant_guard,
 )
@@ -100,7 +101,7 @@ class GenomeRefRow(BaseModel):
     revision_id: str
     version: int = 1
     moved_at: datetime
-    moved_kind: str
+    moved_kind: ProvenanceKind
     moved_actor: str
     run_id: Optional[str] = None
     reason: Optional[str] = None
@@ -126,7 +127,7 @@ class GenomeRefEventRow(BaseModel):
     name: str
     from_revision_id: Optional[str]
     to_revision_id: str
-    moved_kind: str
+    moved_kind: ProvenanceKind
     moved_actor: str
     run_id: Optional[str] = None
     reason: Optional[str] = None
@@ -150,7 +151,7 @@ class CandidateRefRequest(BaseModel):
     """What ``GenomeRevisionRepositoryProtocol.record`` needs to name a run's candidate ref in the same transaction."""
 
     run_id: str
-    moved_kind: str
+    moved_kind: ProvenanceKind
     moved_actor: str
     moved_at: datetime
 
