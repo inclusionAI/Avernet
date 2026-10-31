@@ -269,6 +269,35 @@ class ExchangeTests(unittest.TestCase):
         self.assertEqual(exchange.attempts,1);self.assertEqual(exchange.forwarded,1)
         self.assertIsNone(exchange.failure)
 
+    def test_group_creation_passes_an_explicit_notify_mode_through_unchanged(self):
+        event=dict(self.event,method='POST',path='/groups',operation='create-group',submitted_request_id='test-group-explicit')
+        declared={'name':'owned-local-group','human_mention_notify_mode':'none'}
+        wire=dict(declared)
+        with LocalCliExchange(self.case,event,token='local-test',body=declared) as exchange:
+            status,_=self.request(exchange,path='/groups',body=json.dumps(wire).encode())
+        self.assertEqual(status,201,repr(exchange.failure))
+        self.assertEqual(self.received,[('/groups','test-group-explicit',json.dumps(wire).encode())])
+
+    def test_non_group_post_body_is_never_materialized(self):
+        event=dict(self.event,method='POST',path='/friends/request',operation='request',submitted_request_id='test-non-group')
+        declared={'to_bot':'pm'}
+        with LocalCliExchange(self.case,event,token='local-test',body=declared) as exchange:
+            status,_=self.request(exchange,path='/friends/request',body=json.dumps(declared).encode())
+        self.assertEqual(status,201,repr(exchange.failure))
+        self.assertEqual(self.received,[('/friends/request','test-non-group',json.dumps(declared).encode())])
+
+    def test_admitted_wire_body_materializes_only_the_missing_create_group_default(self):
+        self.assertEqual(
+            LocalCliExchange._admitted_wire_body('/groups','POST',{'name':'g'}),
+            {'name':'g','human_mention_notify_mode':'all'})
+        self.assertEqual(
+            LocalCliExchange._admitted_wire_body('/groups','POST',
+                                                {'name':'g','human_mention_notify_mode':'none'}),
+            {'name':'g','human_mention_notify_mode':'none'})
+        self.assertEqual(LocalCliExchange._admitted_wire_body('/groups','POST',None),None)
+        self.assertEqual(LocalCliExchange._admitted_wire_body('/friends/request','POST',{'to_bot':'pm'}),{'to_bot':'pm'})
+        self.assertEqual(LocalCliExchange._admitted_wire_body('/groups','PUT',{'name':'g'}),{'name':'g'})
+
     def test_absent_ingress_pair_stays_admitted(self):
         with LocalCliExchange(self.case,self.event,token='local-test',body={'to_bot':'pm'}) as exchange:
             status,_=self.request(exchange)

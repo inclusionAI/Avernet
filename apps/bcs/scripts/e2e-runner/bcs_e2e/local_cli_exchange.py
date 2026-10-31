@@ -5,7 +5,41 @@ request is forwarded once to the live owned BCS with its original body and
 authentication. Explicit legacy local fuse and Group-get contracts preserve absent auth;
 it never strips or invents a credential. Only a runner correlation header and the bounded workstation Origin/Referer ingress pair are forwarded. No route/auth fallback,
 redirect, retry, arbitrary destination, raw log or response persistence exists.
+
+Admitted operations form a CLOSED taxonomy. Every future CLI story lands as a new
+bounded ``auth_contract`` (or an explicit operation body on the default contract),
+never as a loosened exchange:
+
+* ``owned-local-legacy-fuse-no-auth-v1`` — one exact POST to ``/groups/{id}/fuse``
+  with the two-participant ``how to align?`` body; Authorization absent by design;
+  any other path, method, participant shape or token injection is refused.
+* ``owned-local-legacy-group-get-no-auth-v1`` — the five exact Group reads
+  (get-primary, get-after-add, get-after-status, get-before-terminate,
+  get-termination) with Authorization absent and no list-escape path.
+* ``owned-bot-bearer`` (default) — one exact method+path+body pair forwarded with
+  ``Authorization: Bearer <owned-bot-token>``. Material admitted operations today:
+  session-message creation (``/friends/request`` shape routed by the event's own
+  path/method), Group status/terminate/complete conversations, Group creation
+  (``POST /groups``), and the single admitted DELETE channel-unbind no-op against
+  a missing binding.
+
+Per-request bounds: exactly one dispatch attempt (sticky refusal afterwards);
+method and path equality; Authorization header-list equality; forbidden headers
+(Cookie, X-BCS-Service-Key, X-BCS-Bot-Token, X-Avernet-Principal,
+Transfer-Encoding, X-Request-ID) must be absent; Content-Length single, numeric,
+<= 8192 bytes; JSON body deep-equality against the admitted pair/decision;
+upstream loopback only; response budget 65536 bytes; absolute 12s deadline with
+cancellation fencing.
+
+Wire-default rule: the product CLI's explicit Group-creation default
+(``human_mention_notify_mode: "all"``) is materialized ONLY by
+``_admitted_wire_body``; no other code path may mutate a request or decision body.
+Any NEW product-CLI wire default MUST be added to ``_admitted_wire_body`` together
+with a dedicated loopback test proving (a) the default is filled exactly when
+absent, (b) an explicit producer-declared value passes through byte-identical,
+and (c) an unrelated body addition is still refused.
 """
+
 from __future__ import annotations
 
 from http.server import BaseHTTPRequestHandler, HTTPServer
