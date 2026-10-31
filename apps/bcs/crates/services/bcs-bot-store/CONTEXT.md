@@ -175,8 +175,8 @@ count and pagination share the same predicate. SQL flavor is explicitly injected
 SQLite uses JSON extraction and MySQL uses JSON_SEARCH with a literal escape
 character and bound values. See the
 [MySQL JSON search contract](https://dev.mysql.com/doc/refman/8.0/en/json-search-functions.html).
-Provider database implementations and their unit tests remain in provider.rs;
-the existing Provider behavior remains covered by its suite.
+Provider database implementations and tests are separated into provider_db.rs
+and provider_tests.rs; the existing Provider behavior remains covered by its suite.
 
 
 A2A strict registration extends the existing ownership composite with a checked

@@ -1,5 +1,3 @@
-> 当前发布保留既有源文件组织，仓库协作规范中的源文件行数上限已移除；下文行数检查仅记录历史状态。
-
 > 2026-10-31 发布范围说明：本次 PR 只提交 Avernet。Harness SDK 单独保留本地改动，已改为官方内存 TaskStore/QueueManager 加宿主注入点，移除 H2 和持久化提交去重。下文 Harness 持久化/重启验收为历史证据，不代表默认内存版本。同步最新 dev 后的 A2A 迁移尾号为两种方言的 039（发布前合并未提交的草稿）；当前发布验证另见 pr-validation.json。
 
 # Implementation evidence

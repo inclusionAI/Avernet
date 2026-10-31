@@ -1,8 +1,5 @@
 # Waiver request: retain the BaaS service layout for the image-update fix
 
-> Historical record: the repository-wide source-file line-count limit was removed on 2026-10-31. Its file-size ceilings and mandatory splitting conditions no longer apply. Other scope and correctness constraints remain unchanged.
-
-
 - Status: proposed; maintainer approval required before merge
 - Owner: `@iParadox-ant` (PR author)
 - Reviewer: `@ws121200` (scope decision)
