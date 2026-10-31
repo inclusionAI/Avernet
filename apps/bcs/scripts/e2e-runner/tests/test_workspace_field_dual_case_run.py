@@ -628,6 +628,73 @@ class WorkspaceFieldWrapperSeamTests(unittest.TestCase):
 
 
 
+class TestCliWorkspaceFieldReturnWiring(unittest.TestCase):
+    """cli wiring guard: the handler owns its stdout receipt and flat rc.
+
+    Regression for the 2026-11-01 r18 finding: the ``dual-workspace-field-run``
+    branch did not return the handler rc, so main() fell through to the JSON
+    tail print with ``report`` still bound to the line-234 argparse
+    subparser (ArgumentParser) - TypeError on stdout serialization and rc=1
+    masked the honest receipt rc (0 local PASS / 2 fail-close).  Socket-free:
+    the local leg replays the owned fake transport and the preprod leg
+    fail-closes with zero network requests.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.env_keys = ("BCS_E2E_DRIVER_TOKEN", "BCS_E2E_HUMAN_COOKIE")
+        self._saved = {key: os.environ.get(key) for key in self.env_keys}
+        dummy = "local-replay-only-not-a-real-credential"
+        for key in self.env_keys:
+            os.environ[key] = dummy
+        self.addCleanup(self._restore_env)
+
+    def _restore_env(self) -> None:
+        for key, prior in self._saved.items():
+            if prior is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = prior
+
+    def _profile_file(self, tier: str) -> Path:
+        from bcs_e2e.workspace_field.profile import default_workspace_field_profile
+        target = self.root / f"workspace-field-{tier}.json"
+        target.write_text(json.dumps(default_workspace_field_profile(tier=tier)), encoding="utf-8")
+        return target
+
+    def _invoke(self, profile: Path, run_id: str):
+        from bcs_e2e.cli import main
+        out, err = io.StringIO(), io.StringIO()
+        # Single-level fresh state leaf: the case runner's fresh-private-
+        # directory gate requires the state directory's parent to exist.
+        argv = ["dual-workspace-field-run", "--profile", str(profile),
+                "--state-dir", str(self.root / f"{run_id}-state"),
+                "--run-id", run_id, "--confirm-run-id", run_id, "--allow-write"]
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = main(argv)
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_local_leg_returns_zero_with_single_json_receipt(self):
+        rc, out, err = self._invoke(self._profile_file("local"), "cli-wiring-local-20261101")
+        self.assertEqual(rc, 0, f"receipt: {out[-1500:]} stderr tail: {err[-500:]}")
+        self.assertEqual(err, "")
+        report = json.loads(out)  # one JSON document: no tail double-print
+        self.assertEqual(report["status"], "PASS")
+        self.assertEqual(report["case_id"], "DUAL-WORKSPACE-FIELD-01")
+        self.assertEqual(report.get("network_requests"), 0)
+
+    def test_preprod_leg_fail_closes_with_two_and_named_gap(self):
+        rc, out, err = self._invoke(self._profile_file("preprod"), "cli-wiring-preprod-20261101")
+        self.assertEqual(rc, 2, f"receipt: {out[-1500:]} stderr tail: {err[-500:]}")
+        self.assertEqual(err, "")
+        report = json.loads(out)
+        self.assertEqual(report["status"], "BLOCKED_INVENTORIED")
+        self.assertIn("PREPROD_GROUP_WORKSPACE_FIELD_FACES_NOT_INVENTORIED", out)
+        self.assertEqual(report.get("network_requests"), 0)
+
+
 def _remove_tree(path: Path) -> None:
     import shutil
     shutil.rmtree(path, ignore_errors=True)

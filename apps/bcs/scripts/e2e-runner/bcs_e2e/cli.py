@@ -680,7 +680,14 @@ def main(argv: list[str] | None = None) -> int:
             )
             rc = 0 if report["status"] == "PASS" else 2
         elif args.command == "dual-workspace-field-run":
+            # The handler prints its own receipt (including the fail-closed
+            # payload on ConfigError/RunStateError) and owns the flat runner
+            # rc semantics; returning here keeps the JSON tail from printing
+            # this command's fall-through ``report`` binding, which is still
+            # the line-234 argparse subparser (ArgumentParser) - the tail
+            # print had been crashing with TypeError and masking the real rc.
             rc = dual_workspace_field_command_handler(args)
+            return rc
         elif args.command == "dual-delivery-policy-density-run":
             report = dual_delivery_policy_density_case_run(
                 profile_path=args.profile,
