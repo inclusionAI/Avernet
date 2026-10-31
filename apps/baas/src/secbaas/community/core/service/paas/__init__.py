@@ -11,8 +11,8 @@ from secbaas.community.api.device_manage import (
 )
 from secbaas.community.spi.sandbox import PaasSandboxPlugins
 
-from ._arca_paas_service import ArcaPaasService
 from ._callback_handler import DeviceCallbackHandler
+from ._creation_scoped_arca import ArcaPaasService
 from ._facade import PaasServiceFacade
 from ._factory import (
     PaasServiceFactory,

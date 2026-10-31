@@ -222,7 +222,9 @@ class TestLegacyEngineAssembly:
         set_container(container)
 
         svc = container.services().device_service()
-        assert type(svc).__name__ == "DefaultDeviceService"
+        from secbaas.community.core.service.device_manage import DefaultDeviceService
+
+        assert type(svc) is DefaultDeviceService
         assert not isinstance(svc, ArcaScheduleAwareDeviceService)
         # Community de-hook: no schedule repository residue on the default
         assert "_schedule_repo" not in type(svc).__dict__
