@@ -5,7 +5,7 @@ preprod leg fail-closes honestly instead of statically refusing:
 
 - a sealed v1 profile is a blocked-no-network seal without gateway material,
   so no probe can be constructed and the disclosed upgrade path is contract v2;
-- a v2 gateway profile first admits every declared credential reference by
+- a v2 gateway/bcs-direct profile first admits every declared credential reference by
   NAME (presence plus bounded ASCII shape only; values never stored), then
   probes the frozen gateway faces read-only through the shared ReadClient
   (environment.read, identity.read and the driver Bot bot.read);
@@ -109,7 +109,7 @@ def _validate_sealed_profile(raw):
 
 
 def _validate_admission_profile(raw):
-    """Validate the additive v2 preprod gateway admission profile."""
+    """Validate the additive v2 preprod admission profile (gateway or station face)."""
     profile = object_keys(raw, {'schema_version', 'contract', 'environment', 'entrypoint',
                                 'auth', 'actors', 'policy'}, 'S04 preprod profile')
     if type(profile['schema_version']) is not int or profile['schema_version'] != 2:
@@ -125,8 +125,8 @@ def _validate_admission_profile(raw):
         raise ConfigError('S04 preprod environment: expected_bcs_env binding mismatch')
     entrypoint = object_keys(profile['entrypoint'], {'kind', 'origin', 'manifest_face'},
                              'S04 preprod entrypoint')
-    if entrypoint['kind'] != 'gateway':
-        raise ConfigError('S04 preprod entrypoint: contract v2 admits gateway only')
+    if entrypoint['kind'] not in ('gateway', 'bcs-direct'):
+        raise ConfigError('S04 preprod entrypoint: contract v2 admits gateway or bcs-direct only')
     origin(entrypoint['origin'], 'preprod')
     if entrypoint['manifest_face'] not in MANIFEST_FACES:
         raise ConfigError('S04 preprod entrypoint: manifest_face must be legacy or internal-v1')
@@ -229,7 +229,7 @@ def _project_evidence(record):
 def _preprod_leg(profile, *, client=None):
     """Preprod admission: named credential gate plus one live read-only probe.
 
-    The probe drives the shared ReadClient over the frozen gateway faces
+    The probe drives the shared ReadClient over the frozen gateway or station-native faces
     (environment.read, identity.read and the driver Bot bot.read) and records
     sanitized evidence projections only. Every failure is disclosed with a
     machine-readable reason class; the unpublished journey seam is disclosed

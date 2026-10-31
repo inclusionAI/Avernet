@@ -71,9 +71,17 @@ class FakeReadClient:
 
     def read(self, operation, bot_id='', **kwargs):
         self.reads.append((operation, bot_id))
-        path = {'environment.read': '/manifest',
-                'identity.read': '/openapi/v1/auth/user',
-                'bot.read': '/openapi/v1/collaboration/bots/' + bot_id}.get(operation)
+        ep = (self.profile.get('entrypoint') or {})
+        if ep.get('kind') == 'bcs-direct':
+            env_path = ('/api/v1/collaboration/manifest'
+                        if ep.get('manifest_face') == 'internal-v1' else '/manifest')
+            path = {'environment.read': env_path,
+                    'identity.read': '/auth/user',
+                    'bot.read': '/bots/' + bot_id}.get(operation)
+        else:
+            path = {'environment.read': '/manifest',
+                    'identity.read': '/openapi/v1/auth/user',
+                    'bot.read': '/openapi/v1/collaboration/bots/' + bot_id}.get(operation)
         record = {'operation': operation, 'method': 'GET', 'path': path,
                   'submitted_request_id': 'e2e-check-fixture', 'http_status': None,
                   'request_id_echoed': False, 'elapsed_ms': 1.0}
@@ -149,10 +157,11 @@ class V2LoaderMatrixTests(unittest.TestCase):
         return dual.load_profile(path)
 
     def test_valid_v2_shapes_load(self):
-        for face in ('legacy', 'internal-v1'):
-            with self.subTest(manifest_face=face):
-                body = admission_profile(entrypoint={'manifest_face': face})
-                self.assertEqual(self.load(body), body)
+        for kind in ('gateway', 'bcs-direct'):
+            for face in ('legacy', 'internal-v1'):
+                with self.subTest(kind=kind, manifest_face=face):
+                    body = admission_profile(entrypoint={'kind': kind, 'manifest_face': face})
+                    self.assertEqual(self.load(body), body)
         self.assertEqual(
             self.load(admission_profile(policy={'timeout_seconds': 1,
                                                 'max_response_bytes': 1})),
@@ -170,7 +179,8 @@ class V2LoaderMatrixTests(unittest.TestCase):
             'origin with userinfo': admission_profile(
                 entrypoint={'origin': 'https://user:pass@bcs.example.invalid'}),
             'unknown manifest face': admission_profile(entrypoint={'manifest_face': 'preview'}),
-            'bcs-direct kind': admission_profile(entrypoint={'kind': 'bcs-direct'}),
+            'owned-local kind': admission_profile(entrypoint={'kind': 'owned-local'}),
+            'unknown kind': admission_profile(entrypoint={'kind': 'community-gateway'}),
             'missing auth block': {k: v for k, v in admission_profile().items() if k != 'auth'},
             'auth with kind on v2': admission_profile(auth={'header_env': {
                 'Authorization': DRIVER_ENV, 'Cookie': COOKIE_ENV}, 'kind': 'preprod-bearer'}),
@@ -426,6 +436,80 @@ class PreprodLegTests(unittest.TestCase):
         self.run_case(fake=fake)
         self.assertEqual(len(FakeReadClient.constructed), 0)
         self.assertEqual(len(fake.reads), 3)
+
+
+
+class BcsDirectStationFaceTests(unittest.TestCase):
+    """The v2 contract admits the station-native bcs-direct face end to end.
+
+    The live station face probes (environment.read manifest internal-v1,
+    native identity.read, un-prefixed bot.read) are exercised with the fake
+    ReadClient only; no socket is opened and no credential value stored.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name).resolve()
+        self.profile_path = self.root / 'profile.json'
+        self.profile = admission_profile(
+            entrypoint={'kind': 'bcs-direct', 'manifest_face': 'internal-v1'})
+        self.profile_path.write_text(json.dumps(self.profile))
+        self.loaded_profile = dual.load_profile(self.profile_path)
+        self.state = self.root / 'fresh-state'
+        self.kw = dict(profile_path=self.profile_path,
+                       binary=self.root / 'bcs', binary_sha256=SERVER_SHA256,
+                       cli_binary=self.root / 'bcs-cli', cli_binary_sha256=CLI_SHA256,
+                       state_dir=self.state, run_id=RUN_ID, confirm_run_id=RUN_ID,
+                       allow_write=True)
+        FakeReadClient.reset()
+
+    def tearDown(self):
+        FakeReadClient.reset()
+
+    def test_station_face_admits_and_probes_native_routes_at_the_seam(self):
+        fake = FakeReadClient(self.loaded_profile)
+        patches = [patch.object(dual, 'validate_binary', side_effect=lambda p, *_: p),
+                   patch.object(dual, 'ReadClient', lambda profile: fake)]
+        with patch.dict(os.environ, PRESENT_ENV, clear=True):
+            for context in patches:
+                context.start()
+                self.addCleanup(context.stop)
+            result = dual.dual_provider_publishes_case_run(**self.kw)
+        self.assertEqual(result['status'], 'BLOCKED')
+        self.assertEqual(result['reason_class'], dual.PREPROD_JOURNEY_SEAM_PENDING)
+        self.assertEqual(result['remote_entry_status'],
+                         'PROBE_ADMITTED_JOURNEY_SEAM_PENDING')
+        self.assertEqual(fake.reads, [('environment.read', ''), ('identity.read', ''),
+                                      ('bot.read', DRIVER_BOT_ID)])
+        paths = {row['operation']: row['path'] for row in fake.evidence}
+        self.assertEqual(paths['environment.read'], '/api/v1/collaboration/manifest')
+        self.assertEqual(paths['identity.read'], '/auth/user')
+        self.assertEqual(paths['bot.read'], '/bots/' + DRIVER_BOT_ID)
+        probe = result['preprod_admission']['probe']
+        self.assertEqual(probe['status'], 'PASS')
+        self.assertEqual([row['http_status'] for row in probe['operations']], [200, 200, 200])
+        self.assertEqual(result['obligation_summary']['not_run'], 98)
+        self.assertFalse(result['grants_release_credit'])
+        verdict = json.loads((self.state / 'verdict.json').read_text())
+        self.assertEqual(verdict['status'], 'BLOCKED')
+        self.assertEqual(verdict['reason_class'], dual.PREPROD_JOURNEY_SEAM_PENDING)
+
+    def test_gateway_face_still_probes_gateway_routes(self):
+        fake = FakeReadClient(admission_profile())
+        patches = [patch.object(dual, 'validate_binary', side_effect=lambda p, *_: p),
+                   patch.object(dual, 'ReadClient', lambda profile: fake)]
+        with patch.dict(os.environ, PRESENT_ENV, clear=True):
+            for context in patches:
+                context.start()
+                self.addCleanup(context.stop)
+            result = dual.dual_provider_publishes_case_run(**self.kw)
+        self.assertEqual(result['status'], 'BLOCKED')
+        self.assertEqual(result['reason_class'], dual.PREPROD_JOURNEY_SEAM_PENDING)
+        paths = {row['operation']: row['path'] for row in fake.evidence}
+        self.assertEqual(paths['identity.read'], '/openapi/v1/auth/user')
+        self.assertEqual(paths['bot.read'],
+                         '/openapi/v1/collaboration/bots/' + DRIVER_BOT_ID)
 
 
 if __name__ == '__main__':
