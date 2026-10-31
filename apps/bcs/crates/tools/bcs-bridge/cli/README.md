@@ -75,9 +75,11 @@ bcs-bridge stop
   plugin Bots get a generated `bridge-<uuid>` reference when it is omitted.
   Resolver selection changes local identity acquisition; it never changes the
   server Provider configuration or adds an authentication-mode request parameter.
-- `--engine claude-code|codex` (default `claude-code`) looks up `claude` / `codex`
-  on `PATH` unless `--engine-bin` is given; `--model` and `--cwd` (default
-  `~/workspace`, or `~/.bcn-bridge/bots/<bot_uuid>` for subbots) are optional.
+- `--engine claude-code|codex|pi|omp` (default `claude-code`) looks up `claude`
+  / `codex` / `pi` / `omp` on `PATH` unless `--engine-bin` is given; `--model`
+  and `--cwd` (default `~/workspace`, or `~/.bcn-bridge/bots/<bot_uuid>` for
+  subbots) are optional. `pi` and `omp` resolve their model through the
+  engine's own provider configuration, so `--model` is usually omitted.
 - Configuration is written atomically to `~/.bcn-bridge/bridge.toml` (0600), or to
   `--config` / `BRIDGE_CONFIG`. Gateway webhook tokens are never written to it;
   `start` reads them from `BCS_BRIDGE_PROVIDER_TOKENS` (a JSON object of Provider
@@ -237,6 +239,43 @@ process cannot take over a Bridge-held thread. Stop Bridge before handing it
 over; if another process already holds the thread, Bridge reports the error
 without stealing the lock or silently creating a different thread.
 
+## Pi and omp engines (RPC mode)
+
+`engine = "pi"` runs the [pi coding agent](https://pi.dev) and `engine = "omp"`
+its fork omp through `--mode rpc`: one JSONL subprocess per turn, spawned in
+the Bot's `cwd` with the environment inherited from the bridge. Both ids share
+one driver; the flavor switches the protocol differences:
+
+| | `pi` | `omp` |
+| --- | --- | --- |
+| startup handshake | `get_state` response | `ready` frame, then `open_session` |
+| session binding | pi's own storage, resumed with `--session-id <id>` | bridge-owned `<cwd>/.bcs-bridge/omp-sessions/<id>` directory, resumed with `open_session` |
+| turn terminal | `agent_settled` event | `prompt_result` frame, then `session_settled` when background work remains |
+
+Sessions persist in the engine's own session storage and resume across bridge
+restarts. Model credentials come from the engine's provider configuration
+(`pi auth`, `~/.pi/agent/settings.json`, or environment variables); the bridge
+passes its own environment through to the engine process.
+
+Neither engine requests per-tool-call approvals in RPC mode, so
+`permission_mode` is ignored (registration warns) and there is no HITL
+interaction: narrow tool reach with `engine_options` instead:
+
+```toml
+[[bot]]
+engine = "pi"
+# engine_options = { tools = "read,grep,find,ls", no_extensions = true, approve = false }
+# engine_options = { thinking = "high" }                    # either flavor
+# engine_options = { session_dir = "/var/pi-sessions" }     # pi only
+# engine_options = { no_ui = true }                         # omp only
+```
+
+`approve` decides project trust explicitly because RPC mode cannot prompt:
+absent a saved decision, `ask` skips protected project resources (the safe
+unattended default). Prompts consumed locally by an extension or builtin
+command (pi `disposition: "handled"`, omp `agentInvoked: false`) complete with
+an empty final text; their side-channel output is not bridged.
+
 ## Extending: plugins
 
 For `--engine qwenwork`, no executable or Python service is needed. Configure
@@ -266,7 +305,7 @@ fn main() -> std::process::ExitCode {
 
 | Interface | Crate | Default | Purpose |
 | --- | --- | --- | --- |
-| `engine::EngineFactory` | core | `claude-code`, `codex` | Create the engine for `engine = "<id>"`; validate `engine_options` |
+| `engine::EngineFactory` | core | `claude-code`, `codex`, `pi`, `omp` | Create the engine for `engine = "<id>"`; validate `engine_options` |
 | `profile::DeployProfile` | app | `ExplicitProfile` (no built-in endpoints) | Default registration API and Bot WebSocket endpoints |
 | `credentials::CredentialSource` | app | `EnvCredentials` | Webhook Bearer token per Provider (gateway mode) |
 | `identity::IdentityResolver` | app | `StaticBearer` | `provider_bot_ref` for the Token-selected Provider mode, with an optional preflight |
@@ -277,9 +316,9 @@ Bots using that engine. Engines without an entry omit this field; existing
 runtime configurations are unaffected. The open-source defaults have no entries.
 
 The built-in drivers can be reused for launchers that speak the same protocol:
-`ClaudeCodeFactory::custom(id, default_bin, prefix_args)` and
-`CodexAppServerFactory::custom(...)` insert `prefix_args` before the protocol
-arguments.
+`ClaudeCodeFactory::custom(id, default_bin, prefix_args)`,
+`CodexAppServerFactory::custom(...)` and `PiFactory::custom(..., flavor)` insert
+`prefix_args` before the protocol arguments.
 
 ### Engine contract
 

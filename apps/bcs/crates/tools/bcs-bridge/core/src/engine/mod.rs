@@ -5,8 +5,9 @@
 //! [`EngineFactory`] registered under a string id in the [`EngineRegistry`];
 //! `[[bot]] engine = "<id>"` selects one.
 //! The built-in factories are [`claude_code::ClaudeCodeFactory`] (`claude-code`)
-//! [`codex_app_server::CodexAppServerFactory`] (`codex`) and
-//! [`codex_desktop::CodexDesktopFactory`] (`codex-desktop`). Distributions add
+//! [`codex_app_server::CodexAppServerFactory`] (`codex`),
+//! [`codex_desktop::CodexDesktopFactory`] (`codex-desktop`) and
+//! [`pi::PiFactory`] (`pi` and `omp`). Distributions add
 //! engines or override a built-in by registering a factory under the same id.
 //!
 //! Engine contract:
@@ -30,6 +31,7 @@ mod codex_transport;
 mod codex_factory;
 mod codex_owned;
 mod codex_persistent;
+pub mod pi;
 pub mod trace;
 
 use std::collections::BTreeMap;
@@ -176,12 +178,15 @@ pub struct EngineRegistry {
 impl EngineRegistry {
     pub fn new() -> Self { Self::default() }
 
-    /// Registry with the built-in `claude-code` and `codex` engines.
+    /// Registry with the built-in `claude-code`, `codex`, `codex-desktop`,
+    /// `pi` and `omp` engines.
     pub fn builtin() -> Self {
         let mut registry = Self::new();
         registry.register(claude_code::ClaudeCodeFactory::default());
         registry.register(codex_app_server::CodexAppServerFactory::default());
         registry.register(codex_desktop::CodexDesktopFactory::default());
+        registry.register(pi::PiFactory::default());
+        registry.register(pi::PiFactory::omp());
         registry
     }
 
@@ -306,13 +311,18 @@ mod tests {
     }
 
     #[test]
-    fn builtin_registry_builds_claude_code_and_codex() {
+    fn builtin_registry_builds_all_builtin_engines() {
         let registry = EngineRegistry::builtin();
-        assert_eq!(registry.ids().collect::<Vec<_>>(), ["claude-code", "codex", "codex-desktop"]);
+        assert_eq!(registry.ids().collect::<Vec<_>>(),
+            ["claude-code", "codex", "codex-desktop", "omp", "pi"]);
         assert_eq!(registry.get("claude-code").unwrap().default_bin(), "claude");
         assert_eq!(registry.get("codex").unwrap().default_bin(), "codex");
+        assert_eq!(registry.get("pi").unwrap().default_bin(), "pi");
+        assert_eq!(registry.get("omp").unwrap().default_bin(), "omp");
         assert!(registry.build(&bot("claude-code")).is_ok());
         assert!(registry.build(&bot("codex")).is_ok());
+        assert!(registry.build(&bot("pi")).is_ok());
+        assert!(registry.build(&bot("omp")).is_ok());
         let mut desktop = bot("codex-desktop");
         desktop.engine_bin = None;
         desktop.engine_options.insert("socket".into(), "/tmp/desktop.sock".into());
@@ -338,7 +348,8 @@ mod tests {
         let mut registry = EngineRegistry::builtin();
         registry.register(FakeFactory { id: "codex" }).register(FakeFactory { id: "custom" });
         assert_eq!(registry.get("codex").unwrap().default_bin(), "fake-engine");
-        assert_eq!(registry.ids().collect::<Vec<_>>(), ["claude-code", "codex", "codex-desktop", "custom"]);
+        assert_eq!(registry.ids().collect::<Vec<_>>(),
+            ["claude-code", "codex", "codex-desktop", "custom", "omp", "pi"]);
         assert!(registry.build(&bot("custom")).is_ok());
     }
 
