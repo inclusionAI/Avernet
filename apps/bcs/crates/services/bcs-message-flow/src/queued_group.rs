@@ -48,6 +48,8 @@ pub struct QueuedGroupProjection {
     caller_execution: Option<crate::caller_execution::ExecutionRef>,
     version: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    state_machine_run_result: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     task: Option<crate::queued_task::TaskIntent>,
     /// Initialization context must survive ordinary history TTL/count limits.
     #[serde(default)]
@@ -432,7 +434,7 @@ impl QueuedGroupProjection {
         let snapshot = crate::protocol_context::group_context_input(group);
         Ok(Self {
             caller_execution: None,
-            version: 1, task: None, required_context, drain_context: false, policy_version: None,
+            version: 1, state_machine_run_result: None, task: None, required_context, drain_context: false, policy_version: None,
             driver_bot: snapshot.driver_bot, originator: snapshot.originator,
             participants: snapshot.participants.into_iter().map(|p| ParticipantProjection {
                 id: p.id, name: p.name, role: p.role, is_bot: p.is_bot,
@@ -497,6 +499,7 @@ impl QueuedGroupProjection {
             provider_route_headers,
             admission_rejection,
             version: 1,
+            state_machine_run_result: None,
             reply_context: None,
             forward_hop: None,
             driver_bot: snapshot.driver_bot,
@@ -607,6 +610,9 @@ async fn prepare_queued_group_bounded(
     if session.status != bcs_service_api::SessionStatus::Running {
         return Err(invalid("queue session is no longer running"));
     }
+    if projection.state_machine_run_result.is_some() && session.session_kind != bcs_service_api::SessionKind::Chat {
+        return Err(invalid("Run result requires a Chat session"));
+    }
     let mut group = flow
         .group
         .get(&row.group_id)
@@ -634,6 +640,10 @@ async fn prepare_queued_group_bounded(
         if !group.participants.iter().any(|p| &p.bot_uuid == actor) {
             return Err(invalid("queue participant no longer has session access"));
         }
+    }
+    if projection.state_machine_run_result.is_some() && !group.participants.iter().any(|p|
+        p.bot_uuid == row.target_bot_id && p.actor_kind == bcs_domain::ActorKind::Bot) {
+        return Err(invalid("Run result recipient is no longer a Bot participant"));
     }
     let bot = flow
         .registry

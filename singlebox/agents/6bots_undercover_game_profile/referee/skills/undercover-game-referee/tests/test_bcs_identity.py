@@ -90,10 +90,10 @@ class BcsIdentityTest(unittest.TestCase):
         self.assertFalse(uc.state_path("group:game").exists())
 
     def test_failed_cli_cannot_grant_permission_from_stdout(self):
-        with patch.object(uc, "bcs_cli", return_value=(1, '{"allowed":true}', "failed")) as cli:
-            result = self.invoke("open-round", "--session", "group:game", "--retry")
+        with patch.object(uc, "bcs_cli", side_effect=[(0, json.dumps(self.session), ""), (1, '{"allowed":true}', "failed")]) as cli:
+            result = self.invoke("init", "--session", "group:game", "--referee-uuid", "host-id", "--human", "human-id", "--bot", "主持人=player-id")
         self.assertEqual(result["error"], "PERMISSION_UNREADABLE")
-        self.assertEqual(cli.call_count, 1)
+        self.assertEqual(cli.call_count, 2)
 
     def test_init_rejects_host_in_roster_before_writing(self):
         with patch.object(uc, "bcs_cli", side_effect=self.cli):
@@ -103,13 +103,14 @@ class BcsIdentityTest(unittest.TestCase):
 
     def test_cli_preserves_runtime_configuration_and_classifies_auth(self):
         for status, expected in ((401, "BCS_AUTH_FAILED"), (403, "BCS_FORBIDDEN")):
-            response = subprocess.CompletedProcess([], 1, "", f"HTTP {status}: private diagnostic")
-            with patch.object(uc.subprocess, "run", return_value=response) as run:
-                result = self.invoke("open-round", "--session", "group:game", "--retry")
+            responses = [subprocess.CompletedProcess([], 0, json.dumps(self.session), ""),
+                         subprocess.CompletedProcess([], 1, "", f"HTTP {status}: private diagnostic")]
+            with patch.object(uc.subprocess, "run", side_effect=responses) as run:
+                result = self.invoke("init", "--session", "group:game", "--referee-uuid", "host-id", "--human", "human-id", "--bot", "主持人=player-id")
             self.assertEqual(run.call_args.args[0][:3], ["bcs-cli", "collaborate", "permission"])
             self.assertEqual(result["error"], expected)
             self.assertNotIn("private diagnostic", json.dumps(result))
-            self.assertEqual(run.call_count, 1)
+            self.assertEqual(run.call_count, 2)
 
     def test_auth_failure_prevents_dealing(self):
         def response(command, **kwargs):

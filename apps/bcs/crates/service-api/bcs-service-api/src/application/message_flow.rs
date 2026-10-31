@@ -357,6 +357,10 @@ pub struct ConflictPosition {
 
 #[async_trait]
 pub trait MessageFlowService: Send + Sync {
+    async fn prepare_state_machine_run_result(&self, _cmd: crate::StateMachineResultPublishCommand)
+        -> ServiceResult<Option<crate::port::repo::message_delivery::AdmitMessageDeliveries>> {
+        Err(service_not_configured("StateMachine result preparation"))
+    }
     async fn get_delivery_policy(&self, _caller: CallerContext) -> ServiceResult<bcs_config_api::message_delivery::DeliveryPolicyRecord> {
         Err(service_not_configured("delivery policy management"))
     }

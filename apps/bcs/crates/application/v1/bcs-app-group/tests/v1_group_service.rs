@@ -614,6 +614,7 @@ impl CollaborationRuntimeService for RecordingRuntime {
         }
         Ok(StartStateMachineRunOutcome {
             view: StateMachineRunView {
+                terminal_result: None,
                 run: StateMachineRun {
                     run_id: "run-1".into(),
                     root_run_id: Some("run-1".into()),

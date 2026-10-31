@@ -26,7 +26,7 @@ pub(super) async fn dispatch_contract(store: &dyn StateMachineRunRepoPort) {
         assert_eq!(store.get_node_dispatch(&run.run_id, id, 0).await.unwrap().unwrap().payload, payload);
     }
     let r = run.run_id.as_str();
-    let expiry = |id: &str, at| FailStateMachineNodeAttempt { run_id: r.into(), node_id: id.into(), attempt: 0,
+    let expiry = |id: &str, at| FailStateMachineNodeAttempt { reason_category: bcs_service_api::port::repo::StateMachineRunReason::NodeFailed, run_id: r.into(), node_id: id.into(), attempt: 0,
         error: "original dispatch deadline".into(), completed_at_ms: at, action: StateMachineFailureAction::Retry };
     assert!(!store.expire_node_dispatch(expiry("missing", 1100)).await.unwrap());
     let (a, b) = tokio::join!(store.claim_node_dispatch(r, "accepted", 0, "a".into(), 110, 150),
@@ -78,7 +78,7 @@ pub(super) async fn dispatch_contract(store: &dyn StateMachineRunRepoPort) {
     assert!(!store.expire_node_dispatch(expiry("rejected", 1100)).await.unwrap());
 
     let stale = store.claim_node_dispatch(r, "retry", 0, "old".into(), 110, 150).await.unwrap().unwrap();
-    assert!(store.fail_node_attempt_with_action(FailStateMachineNodeAttempt { run_id: r.into(), node_id: "retry".into(), attempt: 0,
+    assert!(store.fail_node_attempt_with_action(FailStateMachineNodeAttempt { reason_category: bcs_service_api::port::repo::StateMachineRunReason::NodeFailed, run_id: r.into(), node_id: "retry".into(), attempt: 0,
         error: "timeout".into(), completed_at_ms: 111, action: StateMachineFailureAction::Retry }).await.unwrap());
     assert!(store.schedule_node_retry(r, "retry", 0, 1).await.unwrap());
     assert!(!store.begin_node_dispatch_send(&stale, 112).await.unwrap());
@@ -166,7 +166,7 @@ async fn sqlite_dispatch_expiry_rolls_back_node_failure_when_checkpoint_write_fa
         target: StateMachineDispatchTarget::WebSocket, request: json!({"id": request_id}), started_at_ms: 100, deadline_ms: 120100 }).await.unwrap());
     let claim = store.claim_node_dispatch(&run.run_id, &node.node_id, 0, "owner".into(), 110, 500).await.unwrap().unwrap();
     assert!(store.begin_node_dispatch_send(&claim, 111).await.unwrap());
-    let expiry = FailStateMachineNodeAttempt { run_id: run.run_id.clone(), node_id: node.node_id.clone(), attempt: 0,
+    let expiry = FailStateMachineNodeAttempt { reason_category: bcs_service_api::port::repo::StateMachineRunReason::NodeFailed, run_id: run.run_id.clone(), node_id: node.node_id.clone(), attempt: 0,
         error: "original timeout".into(), completed_at_ms: 120100, action: StateMachineFailureAction::Retry };
     db.execute(DbStatement::new("CREATE TRIGGER fail_dispatch_expiry BEFORE UPDATE ON bcs_collaboration_delivery_checkpoints WHEN NEW.status = 'superseded' BEGIN SELECT RAISE(ABORT, 'expiry failure'); END")).await.unwrap();
     assert!(store.expire_node_dispatch(expiry.clone()).await.is_err());

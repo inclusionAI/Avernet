@@ -37,7 +37,10 @@ mod opening;
 mod dispatch;
 mod publication;
 mod terminal_im;
+mod terminal_result;
+mod failure_metadata;
 mod recovery_gap;
+mod disconnect;
 mod terminal_cleanup;
 mod branch_skip;
 
@@ -97,9 +100,11 @@ struct StoreInner {
     openings: BTreeMap<String, bcs_service_api::StateMachineOpeningCheckpoint>,
     dispatches: BTreeMap<String, StateMachineDispatchCheckpoint>,
     publications: BTreeMap<String, bcs_service_api::StateMachineChatResultCheckpoint>,
+    terminal_results: BTreeMap<String, bcs_service_api::port::repo::StateMachineRunResultV1>,
     startup_failures: BTreeMap<String, bcs_service_api::StateMachineStartupFailure>,
     terminal_notifications: BTreeMap<String, bcs_service_api::StateMachineTerminalImCheckpoint>,
     judge_leases: BTreeMap<(String, String), judge::JudgeLease>,
+    failure_reasons: BTreeMap<(String, String, i32), bcs_service_api::port::repo::StateMachineRunReason>,
     node_failure_actions: BTreeMap<(String, String), StateMachineFailureAction>,
     correlations: BTreeMap<String, StateMachineDeliveryCorrelation>,
     correlation_aliases: BTreeMap<String, String>,
@@ -118,6 +123,7 @@ pub struct MemoryCollaborationStore {
     inner: Arc<RwLock<StoreInner>>,
     event_store: Option<Arc<MemoryEventStore>>,
     session_repo: Option<Arc<dyn SessionRepoPort>>,
+    message_store: Option<Arc<bcs_message_store::MemoryMessageRepo>>,
 }
 
 impl MemoryCollaborationStore {
@@ -128,6 +134,10 @@ impl MemoryCollaborationStore {
     pub fn with_event_store(mut self, event_store: Arc<MemoryEventStore>) -> Self {
         self.event_store = Some(event_store);
         self
+    }
+
+    pub fn with_message_store(mut self, store: Arc<bcs_message_store::MemoryMessageRepo>) -> Self {
+        self.message_store = Some(store); self
     }
 
     pub fn with_session_repo(mut self, session_repo: Arc<dyn SessionRepoPort>) -> Self {
@@ -369,6 +379,13 @@ impl GroupRuntimeBindingRepoPort for MemoryCollaborationStore {
 
 #[async_trait]
 impl StateMachineRunRepoPort for MemoryCollaborationStore {
+    async fn disconnected_bot_nodes(&self, bot: &str, at: u64, after: Option<(&str, &str)>, limit: usize) -> ServiceResult<Vec<StateMachineNodeRun>> { self.disconnect_candidates(bot, at, after, limit).await }
+    async fn fail_disconnected_bot_node(&self, node: &StateMachineNodeRun, at: u64) -> ServiceResult<bool> { self.disconnect_fail(node, at).await }
+    async fn completed_node_ids(&self, run: &str) -> ServiceResult<Vec<String>> {
+        Ok(self.inner.read().await.nodes.iter().filter(|((r, _), n)| r == run && n.status == StateMachineNodeStatus::Completed).map(|((_, id), _)| id.clone()).collect())
+    }
+    async fn commit_terminal(&self, command: bcs_service_api::port::repo::CommitStateMachineTerminal) -> ServiceResult<bool> { self.commit_run_terminal(command).await }
+    async fn get_terminal_result(&self, run: &str) -> ServiceResult<Option<bcs_service_api::port::repo::StateMachineRunResultV1>> { self.terminal_result(run).await }
     async fn get_node_statuses(&self, run: &str, nodes: &[String]) -> ServiceResult<BTreeMap<String, StateMachineNodeStatus>> {
         self.branch_node_statuses(run, nodes).await
     }
@@ -900,6 +917,7 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
         node.error = Some(command.error);
         node.completed_at = Some(command.completed_at_ms);
         node.timeout_deadline_ms = None;
+        inner.failure_reasons.insert((command.run_id.clone(), command.node_id.clone(), command.attempt), command.reason_category);
         inner.node_failure_actions.insert((command.run_id, command.node_id), command.action);
         Ok(true)
     }
@@ -908,7 +926,7 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
         let inner = self.inner.read().await;
         let key = (run_id.to_string(), node_id.to_string());
         Ok(inner.nodes.get(&key).filter(|node| node.status == StateMachineNodeStatus::Failed && node.attempt == attempt)
-            .map(|node| StateMachineNodeAttemptFailure { node: node.clone(), action: inner.node_failure_actions.get(&key).copied() }))
+            .map(|node| StateMachineNodeAttemptFailure { reason_category: inner.failure_reasons.get(&(run_id.into(), node_id.into(), attempt)).copied(), node: node.clone(), action: inner.node_failure_actions.get(&key).copied() }))
     }
 
     async fn schedule_node_retry(
@@ -1303,11 +1321,16 @@ pub struct MySqlCollaborationStore {
     db: Arc<dyn DbPlugin>,
     env: String,
     flavor: DbSqlFlavor,
+    message_store: Arc<bcs_message_store::MySqlMessageStore>,
 }
 
 impl MySqlCollaborationStore {
+    pub fn with_message_store(mut self, store: Arc<bcs_message_store::MySqlMessageStore>) -> Self {
+        self.message_store = store; self
+    }
     pub fn new(db: Arc<dyn DbPlugin>, env: String) -> Self {
         Self {
+            message_store: Arc::new(bcs_message_store::MySqlMessageStore::new(db.clone(), env.clone())),
             db,
             env,
             flavor: DbSqlFlavor::Mysql,
@@ -1316,6 +1339,7 @@ impl MySqlCollaborationStore {
 
     pub fn sqlite(db: Arc<dyn DbPlugin>, env: String) -> Self {
         Self {
+            message_store: Arc::new(bcs_message_store::MySqlMessageStore::sqlite(db.clone(), env.clone())),
             db,
             env,
             flavor: DbSqlFlavor::Sqlite,
@@ -2002,6 +2026,14 @@ impl GroupRuntimeBindingRepoPort for MySqlCollaborationStore {
 
 #[async_trait]
 impl StateMachineRunRepoPort for MySqlCollaborationStore {
+    async fn disconnected_bot_nodes(&self, bot: &str, at: u64, after: Option<(&str, &str)>, limit: usize) -> ServiceResult<Vec<StateMachineNodeRun>> { self.disconnect_candidates(bot, at, after, limit).await }
+    async fn fail_disconnected_bot_node(&self, node: &StateMachineNodeRun, at: u64) -> ServiceResult<bool> { self.disconnect_fail(node, at).await }
+    async fn completed_node_ids(&self, run: &str) -> ServiceResult<Vec<String>> {
+        self.db.query(DbStatement::with_params("SELECT node_id FROM bcs_state_machine_node_runs WHERE env = ? AND run_id = ? AND status = 'completed' AND record_status = 'active' ORDER BY node_id", vec![self.env.as_str().into(), run.into()])).await
+            .map_err(|e| ServiceError::InternalError(e.to_string()))?.iter().map(|r| db_get_column(r, "node_id").map_err(|e| ServiceError::InternalError(e.to_string()))).collect()
+    }
+    async fn commit_terminal(&self, command: bcs_service_api::port::repo::CommitStateMachineTerminal) -> ServiceResult<bool> { self.commit_run_terminal(command).await }
+    async fn get_terminal_result(&self, run: &str) -> ServiceResult<Option<bcs_service_api::port::repo::StateMachineRunResultV1>> { self.terminal_result(run).await }
     async fn get_node_statuses(&self, run: &str, nodes: &[String]) -> ServiceResult<BTreeMap<String, StateMachineNodeStatus>> {
         self.branch_node_statuses(run, nodes).await
     }
@@ -3158,12 +3190,13 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                    AND r.status = 'running' AND r.record_status = 'active')",
             self.flavor.set_modified_now(),
         );
-        let result = self.db.execute(DbStatement::with_params(sql, vec![
+        let metadata = failure_metadata::step(&self.env, &command.run_id, &command.node_id, command.attempt, command.reason_category, command.completed_at_ms)?;
+        let result = self.db.transaction(vec![DbTransactionStep::ExecuteChecked { statement: DbStatement::with_params(sql, vec![
             DbValue::from(command.error), DbValue::from(command.completed_at_ms), DbValue::from(action),
             DbValue::from(self.env.as_str()), DbValue::from(command.run_id), DbValue::from(command.node_id),
             DbValue::from(command.attempt), DbValue::from(action),
-        ])).await.map_err(|error| ServiceError::InternalError(format!("state machine node failure action: {error}")))?;
-        Ok(result.affected_rows > 0)
+        ]), expected_affected_rows: 1 }, metadata]).await;
+        match result { Ok(_) => Ok(true), Err(DbError::ConditionFailed { expected: 1, actual: 0 }) => Ok(false), Err(e) => Err(ServiceError::InternalError(e.to_string())) }
     }
 
     async fn get_node_attempt_failure(&self, run_id: &str, node_id: &str, attempt: i32) -> ServiceResult<Option<StateMachineNodeAttemptFailure>> {
@@ -3172,6 +3205,7 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
         let rows = self.db.query(DbStatement::with_params(sql, vec![DbValue::from(self.env.as_str()),
             DbValue::from(run_id), DbValue::from(node_id), DbValue::from(attempt),
         ])).await.map_err(|error| ServiceError::InternalError(format!("state machine node failure read: {error}")))?;
+        let reason_category = self.node_failure_reason(run_id, node_id, attempt).await?;
         rows.into_iter().next().map(|row| {
             let action = match db_get_column_opt::<String>(&row, "failure_action")
                 .map_err(|error| ServiceError::InternalError(error.to_string()))?.as_deref()
@@ -3181,7 +3215,7 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                 Some("fail_run") => Some(StateMachineFailureAction::FailRun),
                 Some(_) => return Err(ServiceError::InternalError("unknown persisted node failure action".into())),
             };
-            Ok(StateMachineNodeAttemptFailure { node: row_to_state_machine_node_run(row)?, action })
+            Ok(StateMachineNodeAttemptFailure { reason_category, node: row_to_state_machine_node_run(row)?, action })
         }).transpose()
     }
 

@@ -58,6 +58,9 @@ async fn chat_publication_lost_ack_does_not_resend_and_fails_at_original_deadlin
     let failed = h.store.get_run(&run.run_id).await.unwrap().unwrap();
     assert_eq!(failed.status, StateMachineRunStatus::Failed);
     assert!(failed.error.unwrap().contains("delivery may be unknown"));
+    let summary = h.store.get_terminal_result(&run.run_id).await.unwrap().unwrap();
+    assert_eq!(summary.reason_category, Some(bcs_service_api::port::repo::StateMachineRunReason::PublicationFailed));
+    assert!(summary.failed_node_id.is_none());
     assert_eq!(publisher.commands.lock().await.len(), 1);
     assert_eq!(h.sessions.get(&run.session_id).await.unwrap().unwrap().status, SessionStatus::Running);
 }
@@ -117,4 +120,34 @@ async fn chat_publication_two_recoverers_send_pending_result_once() {
     assert!(a.unwrap().failures.is_empty()); assert!(b.unwrap().failures.is_empty());
     assert_eq!(publisher.commands.lock().await.len(), 1);
     assert_eq!(h.store.get_run(&run.run_id).await.unwrap().unwrap().status, StateMachineRunStatus::Completed);
+}
+
+#[tokio::test]
+async fn bot_result_query_authorizes_only_creator_and_excludes_private_run_data() {
+    let (h, _) = harness(&[]).await;
+    let run = start_chat(&h, single_node_yaml()).await;
+    let error = h.runtime.get_state_machine_run_result_for_bot(&run.run_id, "not-creator").await.unwrap_err();
+    assert!(matches!(error, CollaborationRuntimeError::Forbidden(_)));
+    let before = h.runtime.get_state_machine_run_result_for_bot(&run.run_id, "driver-bot").await.unwrap().unwrap();
+    assert_eq!(before.status, StateMachineRunStatus::Running);
+    assert!(before.terminal_result.is_none());
+    h.runtime.cancel_state_machine_run(CancelStateMachineRunCommand { run_id: run.run_id.clone(),
+        reason: Some("SECRET_WORD sensitive diagnostic".into()) }).await.unwrap();
+    let result = h.runtime.get_state_machine_run_result_for_bot(&run.run_id, "driver-bot").await.unwrap().unwrap();
+    assert_eq!(result.status, StateMachineRunStatus::Aborted);
+    let wire = serde_json::to_string(&result).unwrap();
+    assert_eq!(result.terminal_result.unwrap().reason_category, Some(bcs_service_api::port::repo::StateMachineRunReason::UserAborted));
+    assert!(!wire.contains("SECRET_WORD"));
+    assert!(!wire.contains("artifact"));
+    assert!(!wire.contains("input"));
+}
+
+#[tokio::test]
+async fn session_cleanup_is_not_a_user_abort_even_before_session_is_deleted() {
+    let (h, _) = harness(&[]).await;
+    let run = start_chat(&h, single_node_yaml()).await;
+    h.runtime.cancel_session_runs(&run.session_id, "session_deleted").await.unwrap();
+    let saved = h.store.get_terminal_result(&run.run_id).await.unwrap().unwrap();
+    assert_eq!(saved.status, StateMachineRunStatus::Aborted);
+    assert_eq!(saved.reason_category, None);
 }

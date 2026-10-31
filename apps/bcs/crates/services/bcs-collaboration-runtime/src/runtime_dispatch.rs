@@ -113,6 +113,7 @@ impl CollaborationRuntime {
             let error = format!("state-machine node '{node_id}' dispatch reached its original deadline {}", p.deadline_ms);
             let retry = attempt >= 0 && attempt.checked_add(1).is_some_and(|next| next < node.max_attempts.max(1));
             if self.runs.expire_node_dispatch(FailStateMachineNodeAttempt {
+            reason_category: bcs_service_api::port::repo::StateMachineRunReason::NodeFailed,
                 run_id: run.run_id.clone(), node_id: node_id.into(), attempt, error, completed_at_ms: now,
                 action: if retry { StateMachineFailureAction::Retry } else { StateMachineFailureAction::FailRun },
             }).await? {

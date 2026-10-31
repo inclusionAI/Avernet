@@ -172,8 +172,16 @@ class PromptContractsTest(unittest.TestCase):
                     ) if kind == "speak" else "AWAIT_VOTE_START"
                     if kind == "vote" and retry:
                         state["phase"] = "VOTE_RUNNING"
+                    if retry:
+                        scope = undercover._recovery.scope(state, kind)
+                        state["recovery"] = {"current": {"state": "submitted", "run_id": "failed-run", "kind": kind,
+                                                       "scope": scope, "attempt": 1, "correlation": {}}, "retries": {}}
                     undercover.save_state(state)
-                    with patch.object(undercover, "require_run_slot"), \
+                    run = {"run_id": "failed-run", "session_id": state["session_id"], "group_id": state["group_id"],
+                           "created_by": state["referee_uuid"], "status": "failed"}
+                    terminal = {"run_id": "failed-run", "status": "failed", "schema_version": 1, "reason_category": "node_failed"}
+                    with patch.object(undercover, "bcs_cli", return_value=(0, json.dumps({**run, "terminal_result": terminal}), "")), \
+                         patch.object(undercover, "require_run_slot"), \
                          patch.object(undercover, "self_lock_hint", return_value=None), \
                          patch.object(undercover, "submit_run", return_value={"run_id": "test-run"}) as submit, \
                          patch.object(undercover, "emit") as emit:
@@ -245,18 +253,20 @@ class PromptContractsTest(unittest.TestCase):
                             self.assertNotIn(secret, blocks["vote_start"])
 
     def test_failed_submission_does_not_emit_success_handoff(self) -> None:
-        for command, prepare in ((undercover.cmd_open_round, "prepare_speak_run"),
-                                 (undercover.cmd_open_vote, "prepare_vote_run")):
+        for command, phase in ((undercover.cmd_open_round, "AWAIT_NEXT_ROUND"),
+                               (undercover.cmd_open_vote, "AWAIT_VOTE_START")):
             with self.subTest(command=command.__name__):
-                payload = dict.fromkeys(("yaml_path", "input_path", "panel_params_path", "panel_tab", "bindings"))
+                state = copy.deepcopy(self.fixtures[0]["state"])
+                state["phase"] = phase
+                undercover.save_state(state)
                 with patch.object(undercover, "require_run_slot"), \
                      patch.object(undercover, "self_lock_hint", return_value=None), \
-                     patch.object(undercover, prepare, return_value=payload), \
                      patch.object(undercover, "submit_run", side_effect=RuntimeError("delivery failed")), \
                      patch.object(undercover, "emit") as emit:
                     with self.assertRaisesRegex(RuntimeError, "delivery failed"):
-                        command(argparse.Namespace(session="test-session", retry=False))
+                        command(argparse.Namespace(session=state["session_id"], retry=False))
                 emit.assert_not_called()
+                self.assertEqual(undercover.load_state(state["session_id"])["recovery"]["current"]["state"], "uncertain")
 
     def test_player_common_instructions_are_consistent(self) -> None:
         players = sorted(PROFILES.glob("player-*"))

@@ -670,6 +670,20 @@ impl MemoryMessageRepo {
         admission: Vec<bcs_service_api::port::repo::message_delivery::AdmitMessageDeliveries>,
     ) -> Result<Vec<bcs_service_api::port::repo::message_delivery::DeliveryAdmissionResult>,
         bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError> {
+        self.compose_delivery_transaction(changes, admission, Vec::new(), false, || Ok(())).await
+    }
+
+    /// Validate/stage everything before committing the caller's business CAS,
+    /// messages and events under their shared writer guards.
+    pub async fn compose_delivery_transaction<F>(&self,
+        changes: Vec<bcs_service_api::port::repo::message_delivery::DeliveryCompareAndSet>,
+        admission: Vec<bcs_service_api::port::repo::message_delivery::AdmitMessageDeliveries>,
+        mut events: Vec<bcs_service_api::port::repo::AppendEventRecord>,
+        has_business: bool,
+        commit: F,
+    ) -> Result<Vec<bcs_service_api::port::repo::message_delivery::DeliveryAdmissionResult>,
+        bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError>
+    where F: FnOnce() -> Result<(), bcs_service_api::port::repo::EventRepoError> + Send {
         use bcs_service_api::port::repo::message_delivery::{DeliveryAdmissionResult, MessageDeliveryRepoError as Error};
         if admission.windows(2).any(|w| w[0].message.session_id != w[1].message.session_id || (w[0].flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a) != (w[1].flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a)) { return Err(Error::Invalid("batch must share a session".into())); }
         let mut registry = match &self.registry { Some(registry) => Some(registry.entries.lock().await), None => None };
@@ -681,13 +695,12 @@ impl MemoryMessageRepo {
         if changes.iter().any(|c| c.delivery.env != env) { return Err(Error::Invalid("environment mismatch".into())); }
         super::delivery::apply_changes(&mut rows, &changes)?;
         let mut result = Vec::new();
-        let mut events = Vec::new();
         for command in admission {
             super::delivery::validate_admission(&command)?;
             let entry = staged.entry(command.message.session_id.clone()).or_default();
             if let Some(id) = command.message.client_msg_id.as_deref() {
                 if let Some(message) = entry.messages.iter().find(|m| m.sender_id == command.message.sender_id && m.client_msg_id.as_deref() == Some(id)) {
-                    if !changes.is_empty() { return Err(Error::Conflict); }
+                    if has_business || !changes.is_empty() { return Err(Error::Conflict); }
                     result.push(DeliveryAdmissionResult { message: message.clone(),
                         deliveries: rows.iter().filter(|d| d.source_message_id == message.message_id).cloned().collect(), duplicate: true });
                     continue;
@@ -737,11 +750,13 @@ impl MemoryMessageRepo {
         if !events.is_empty() {
             let store = self.event_store.as_ref().ok_or_else(|| Error::Storage("event store is not configured".into()))?;
             store.commit_business_mutations(&events, || {
+                commit()?;
                 *sessions = staged;
                 if let (Some(current), Some(staged)) = (registry.as_deref_mut(), registry_staged) { *current = staged; }
                 Ok(())
             }).await.map_err(|e| Error::Storage(e.to_string()))?;
         } else {
+            commit().map_err(|e| Error::Storage(e.to_string()))?;
             *sessions = staged;
             if let (Some(current), Some(staged)) = (registry.as_deref_mut(), registry_staged) { *current = staged; }
         }
