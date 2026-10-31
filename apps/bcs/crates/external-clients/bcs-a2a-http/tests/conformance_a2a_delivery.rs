@@ -20,11 +20,11 @@ use bcs_service_api::types::a2a_bot::{A2aBinding, A2aInterface, A2aUpdateMode};
 use serde_json::{json, Value};
 
 #[derive(Clone, Copy)]
-enum Mode { Complete, Wait, MissingInitialTask, RecoverGet, DedupRetry, HttpError(u16), Terminal(&'static str), Message, CancelDenied, RecoverState, UnspecifiedFlood }
+enum Mode { Complete, Wait, MissingInitialTask, RecoverGet, DedupRetry, HttpError(u16), Terminal(&'static str), Message, CancelDenied, RecoverState, UnspecifiedFlood, Flapping, EmptyRecoveries }
 struct Agent {
     mode: Mode, sequence: AtomicUsize, requests: Mutex<Vec<Value>>, tasks: Mutex<HashMap<String, Value>>,
     cancels: Mutex<Vec<String>>,
-    queries: AtomicUsize,
+    queries: AtomicUsize, subscriptions: AtomicUsize,
 }
 
 async fn send(State(agent): State<Arc<Agent>>, headers: HeaderMap, Json(body): Json<Value>) -> Response {
@@ -103,6 +103,23 @@ async fn cancel(State(agent): State<Arc<Agent>>, Path(id): Path<String>) -> Resp
     task["status"]["state"] = json!("TASK_STATE_CANCELED"); Json(task.clone()).into_response()
 }
 
+async fn task_post(State(agent): State<Arc<Agent>>, Path(id): Path<String>, headers:HeaderMap) -> Response {
+    if let Some(task_id)=id.strip_suffix(":subscribe") {
+        assert_eq!(headers["authorization"],"Bearer test-a2a-bearer");
+        assert_eq!(headers["a2a-version"],"1.0");
+        let subscription=agent.subscriptions.fetch_add(1,Ordering::SeqCst)+1;
+        let events=if matches!(agent.mode,Mode::EmptyRecoveries) {vec![]} else {
+            assert!(matches!(agent.mode,Mode::Flapping));
+            let state=if subscription>=5 {"TASK_STATE_COMPLETED"} else {"TASK_STATE_WORKING"};
+            agent.tasks.lock().unwrap().get_mut(task_id).unwrap()["status"]["state"]=json!(state);
+            vec![json!({"statusUpdate":{"taskId":task_id,"contextId":"remote-context","status":{"state":state}}})]
+        };
+        Sse::new(stream::iter(events.into_iter().map(|event|Ok::<_,Infallible>(Event::default().data(event.to_string()))))).into_response()
+    } else if id.ends_with(":cancel") {
+        cancel(State(agent),Path(id)).await
+    } else { StatusCode::NOT_FOUND.into_response() }
+}
+
 #[derive(Default)]
 struct Ingest { events: Mutex<Vec<BotEventCommand>> }
 #[async_trait]
@@ -122,11 +139,11 @@ struct Fixture {
 impl Drop for Fixture { fn drop(&mut self) { self.server.abort(); } }
 fn now() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64 }
 async fn fixture(mode: Mode) -> Fixture {
-    let agent = Arc::new(Agent { mode, sequence: AtomicUsize::new(0), requests: Mutex::new(vec![]), tasks: Mutex::new(HashMap::new()), cancels: Mutex::new(vec![]), queries:AtomicUsize::new(0) });
+    let agent = Arc::new(Agent { mode, sequence: AtomicUsize::new(0), requests: Mutex::new(vec![]), tasks: Mutex::new(HashMap::new()), cancels: Mutex::new(vec![]), queries:AtomicUsize::new(0), subscriptions:AtomicUsize::new(0) });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}/a2a/bots/demo", listener.local_addr().unwrap());
     let router = Router::new().route("/a2a/bots/demo/message:stream", post(send))
-        .route("/a2a/bots/demo/tasks/{id}", get(task).post(cancel)).with_state(agent.clone());
+        .route("/a2a/bots/demo/tasks/{id}", get(task).post(task_post)).with_state(agent.clone());
     let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap(); });
     let db = Arc::new(LocalSqliteDbPlugin::new().unwrap());
     db.execute(DbStatement::new("CREATE TABLE bcs_bots (bot_uuid TEXT, env TEXT, is_deleted INTEGER DEFAULT 0, gmt_modified TEXT DEFAULT CURRENT_TIMESTAMP)")).await.unwrap();
@@ -185,13 +202,17 @@ async fn repeated_unspecified_status_cannot_create_unbounded_queries() {
     f.transport.deliver(command(&f,"state-flood").await).await.unwrap();
     tokio::time::timeout(Duration::from_secs(4),async {
         loop {
-            if f.ingest.events.lock().unwrap().iter().any(|event|event.state==ChatEventState::Error) {break;}
+            let emitted=f.ingest.events.lock().unwrap().iter().any(|event|event.state==ChatEventState::Error);
+            if emitted && f.contexts.get_provider_transport("state-flood").await
+                ==Some(bcs_service_api::ProviderRunTransport::Terminal) {break;}
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     }).await.unwrap();
     assert_eq!(f.agent.queries.load(Ordering::SeqCst),3);
     assert_eq!(f.agent.cancels.lock().unwrap().as_slice(),["remote-1"]);
     assert_eq!(f.runs.get("state-flood").await.unwrap().unwrap().state,A2aRunState::Canceled);
+    assert_eq!(f.contexts.get_provider_transport("state-flood").await,
+        Some(bcs_service_api::ProviderRunTransport::Terminal));
     assert!(!f.ingest.events.lock().unwrap().iter().any(|event|event.state==ChatEventState::Final));
 }
 
@@ -435,4 +456,35 @@ async fn run_abort_does_not_cancel_another_active_binding_of_the_same_task() {
     assert!(error.to_string().contains("another active Run"));
     assert!(f.agent.cancels.lock().unwrap().is_empty());
     for run in [&first.run_id,&second.run_id] {assert_eq!(f.runs.get(run).await.unwrap().unwrap().state,A2aRunState::Running);}
+}
+
+#[tokio::test]
+async fn valid_recovered_events_reset_disconnect_budget_for_long_tasks() {
+    let f=fixture(Mode::Flapping).await;
+    f.transport.deliver(command(&f,"flapping").await).await.unwrap();
+    completed(&f,"flapping").await;
+    assert_eq!(f.agent.subscriptions.load(Ordering::SeqCst),5);
+    assert_eq!(f.agent.sequence.load(Ordering::SeqCst),1,"recovery never resubmits work");
+    assert!(f.agent.cancels.lock().unwrap().is_empty());
+    let events=f.ingest.events.lock().unwrap();
+    let text:String=events.iter().filter_map(|e|e.event_payload["delta_text"].as_str()).collect();
+    assert_eq!(text,"你好世界");
+    assert_eq!(events.iter().filter(|e|e.state==ChatEventState::Final).count(),1);
+}
+
+#[tokio::test]
+async fn empty_successful_subscriptions_do_not_reset_consecutive_failure_budget() {
+    let f=fixture(Mode::EmptyRecoveries).await;
+    f.transport.deliver(command(&f,"empty-recoveries").await).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5),async {
+        while f.contexts.get_provider_transport("empty-recoveries").await
+            !=Some(bcs_service_api::ProviderRunTransport::Terminal) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }).await.unwrap();
+    assert_eq!(f.agent.subscriptions.load(Ordering::SeqCst),3);
+    assert_eq!(f.agent.sequence.load(Ordering::SeqCst),1);
+    assert_eq!(f.agent.cancels.lock().unwrap().as_slice(),["remote-1"]);
+    assert_eq!(f.runs.get("empty-recoveries").await.unwrap().unwrap().state,A2aRunState::Canceled);
+    assert_eq!(f.ingest.events.lock().unwrap().iter().filter(|e|e.state==ChatEventState::Error).count(),1);
 }

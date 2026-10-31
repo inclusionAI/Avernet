@@ -68,7 +68,10 @@ error and must be updated by PUT. CAS prevents an earlier URL request from
 replacing a newer inline Card. Failure preserves Card, URL and revision; there
 is no failure write. New sends may use the last good snapshot, subject to current
 Provider/Bot/credential and egress policy checks. In-flight cancellation remains
-based on its frozen task/run binding.
+based on its frozen task/run binding. A validated refresh with identical raw
+Card and source URL rechecks the current binding/revision and returns the saved
+snapshot without a write or revision increment. A changed Card still uses CAS;
+explicit PUT keeps its existing versioned-update semantics.
 
 The trusted background loop ticks every 10 seconds and keeps one in-process round
 cursor. The first round starts after 300 seconds. At round end, the next due
@@ -96,13 +99,15 @@ statement counts are not network round-trip measurements:
   guards and revision fencing remain. Registration keeps its existing composite.
 - Refresh page: one SELECT, at most 16 complete Cards (up to 16 MiB raw JSON;
   decoded allocations add overhead). No separate per-ID Card lookup. Each Bot
-  still needs two uncached Bot-binding SELECTs and one CAS write on success,
-  plus one fixed-kind credential lookup. The existing Provider credential cache
+  still needs two uncached Bot-binding SELECTs, one current Card SELECT and
+  one fixed-kind credential lookup. A changed Card additionally uses one CAS
+  write; an identical Card has no write and keeps its revision. The existing Provider credential cache
   has a 30-second TTL, environment/provider/kind keys and local invalidation on
   credential writes: a hit adds no SQL; a miss adds one SELECT. No new cache is
   added. Background page upper bounds derived from these implementations are
-  65 SQL statements for 16 successful cold-cache items (49 with all credential
-  hits), or 33 for 16 fetch failures before commit with cold credentials. Shared
+  81 SQL statements for 16 changed cold-cache items (65 with all credential
+  hits), 65 for 16 unchanged cold-cache items (49 with credential hits), or
+  33 for 16 fetch failures before commit with cold credentials. Shared
   Providers can reuse cached credentials; slow fetches can cross the TTL. Manual
   configuration/refresh additionally performs its Provider-admin authorization;
   manual refresh also checks affiliation once before reading the old snapshot. These are source-traced bounds, not

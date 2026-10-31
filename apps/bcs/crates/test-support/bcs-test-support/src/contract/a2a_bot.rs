@@ -47,7 +47,7 @@ pub async fn a2a_bot_management_service_contract_tests(service: &dyn A2aBotManag
     assert!(record.agent_card_url.is_some());
     let refreshed = service.refresh(&command.provider_id, &command.provider_admin_token, &command.bot_uuid, command.now_ms + 1000).await.unwrap();
     assert_eq!(refreshed.agent_card, record.agent_card);
-    assert_eq!(refreshed.revision, record.revision + 1);
+    assert_eq!(refreshed, record, "identical refresh must preserve Card and revision");
     assert!(service.configure(command).await.is_err());
 }
 

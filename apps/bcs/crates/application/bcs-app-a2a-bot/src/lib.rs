@@ -34,9 +34,24 @@ impl A2aBotManagement {
             A2aCardSource::Inline(raw)=>Ok((None,self.fetcher.validate(raw,true).await?)),
         }
     }
-    async fn commit(&self,provider_id:String,bot_uuid:String,source:A2aCardSource,expected:u64)->ServiceResult<A2aBotRecord> {
+    async fn commit(&self,provider_id:String,bot_uuid:String,source:A2aCardSource,expected:u64,skip_unchanged:bool)->ServiceResult<A2aBotRecord> {
         let binding=self.core.provider_binding(&provider_id,&bot_uuid).await?;
         let (agent_card_url,card)=self.load_card(&provider_id,source).await?;
+        if skip_unchanged {
+            if let Some(current)=self.core.get_card(&bot_uuid).await? {
+                if current.revision==expected && current.provider_id==provider_id
+                    && current.provider_bot_ref==binding.provider_bot_ref
+                    && current.agent_card_url==agent_card_url && current.agent_card==card.raw {
+                    // A no-op refresh still validates affiliation after the network wait.
+                    // Concurrent configuration changes must not be acknowledged as this refresh.
+                    let latest=self.core.provider_binding(&provider_id,&bot_uuid).await?;
+                    if latest.provider_bot_ref!=binding.provider_bot_ref {
+                        return Err(ServiceError::Conflict("A2A Bot binding changed".into()));
+                    }
+                    return Ok(current);
+                }
+            }
+        }
         let revision=expected.checked_add(1).ok_or_else(||ServiceError::Conflict("A2A revision exhausted".into()))?;
         self.core.commit_card(A2aBotRecord {bot_uuid,provider_id,provider_bot_ref:binding.provider_bot_ref,
             agent_card_url,agent_card:card.raw,revision},expected).await
@@ -44,7 +59,7 @@ impl A2aBotManagement {
     async fn refresh_card(&self,old:A2aBotRecord)->ServiceResult<A2aBotRecord> {
         let url=old.agent_card_url.ok_or_else(||ServiceError::InvalidOperation {message:"inline Card has no source URL; submit an explicit update".into(),request_id:None})?;
         // Failure never rewrites the last validated snapshot or increments revision.
-        self.commit(old.provider_id,old.bot_uuid,A2aCardSource::Url(url),old.revision).await
+        self.commit(old.provider_id,old.bot_uuid,A2aCardSource::Url(url),old.revision,true).await
     }
 }
 #[async_trait]
@@ -56,7 +71,7 @@ impl A2aBotManagementService for A2aBotManagement {
     }
     async fn configure(&self,command:ConfigureA2aBotCommand)->ServiceResult<A2aBotRecord> {
         self.authorize(&command.provider_id,&command.provider_admin_token).await?;
-        self.commit(command.provider_id,command.bot_uuid,command.source,command.expected_revision).await
+        self.commit(command.provider_id,command.bot_uuid,command.source,command.expected_revision,false).await
     }
     async fn refresh(&self,provider_id:&str,token:&str,bot_uuid:&str,_now_ms:i64)->ServiceResult<A2aBotRecord> {
         self.authorize(provider_id,token).await?;self.core.provider_binding(provider_id,bot_uuid).await?;

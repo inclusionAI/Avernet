@@ -19,7 +19,7 @@ async fn refresh_round_preserves_last_good_snapshot_and_retries_next_round() {
     assert_eq!(f.service.refresh_due(1000).await.unwrap(),0);
     assert_eq!(f.service.refresh_due(300_999).await.unwrap(),0);
     assert_eq!(f.service.refresh_due(301_000).await.unwrap(),1);
-    assert_eq!(f.cards.get("bot").await.unwrap().unwrap().revision,2);
+    assert_eq!(f.cards.get("bot").await.unwrap().unwrap().revision,configured.revision);
     f.fetcher.fail.store(true,Ordering::SeqCst);
     let previous=f.cards.get("bot").await.unwrap().unwrap();
     assert!(f.service.refresh_due(601_000).await.is_err());
@@ -27,7 +27,7 @@ async fn refresh_round_preserves_last_good_snapshot_and_retries_next_round() {
     assert_eq!(f.service.refresh_due(601_001).await.unwrap(),0);
     f.fetcher.fail.store(false,Ordering::SeqCst);
     assert_eq!(f.service.refresh_due(901_000).await.unwrap(),1);
-    assert_eq!(f.cards.get("bot").await.unwrap().unwrap().revision,configured.revision+2);
+    assert_eq!(f.cards.get("bot").await.unwrap().unwrap().revision,configured.revision);
 }
 
 #[async_trait]
@@ -191,8 +191,25 @@ async fn failing_refresh_pages_are_bounded_and_advance_without_starving_later_bo
 #[tokio::test]
 async fn scheduled_card_write_failure_is_returned_and_snapshot_remains_unchanged() {
     let f=fixture().await;let before=f.service.configure(f.command.clone()).await.unwrap();
+    f.fetcher.change_route.store(true,Ordering::SeqCst);
     f.db.execute(DbStatement::new("CREATE TRIGGER reject_card_update BEFORE UPDATE ON bcs_bots BEGIN SELECT RAISE(ABORT,'test write failure'); END")).await.unwrap();
     assert_eq!(f.service.refresh_due(1000).await.unwrap(),0);
     assert!(f.service.refresh_due(301000).await.is_err());
     assert_eq!(f.cards.get("bot").await.unwrap(),Some(before));
+}
+
+#[tokio::test]
+async fn unchanged_manual_and_periodic_refreshes_do_not_write_or_invalidate_admin_revision() {
+    let f=fixture().await;
+    let before=f.service.configure(f.command.clone()).await.unwrap();
+    f.db.execute(DbStatement::new("CREATE TRIGGER reject_unchanged_update BEFORE UPDATE ON bcs_bots BEGIN SELECT RAISE(ABORT,'unexpected refresh write'); END")).await.unwrap();
+    let refreshed=f.service.refresh(&f.command.provider_id,&f.command.provider_admin_token,"bot",2000).await.unwrap();
+    assert_eq!(refreshed,before);
+    assert_eq!(f.service.refresh_due(1000).await.unwrap(),0);
+    assert_eq!(f.service.refresh_due(301000).await.unwrap(),1);
+    assert_eq!(f.cards.get("bot").await.unwrap(),Some(before.clone()));
+    f.db.execute(DbStatement::new("DROP TRIGGER reject_unchanged_update")).await.unwrap();
+    let mut edit=f.command.clone();edit.expected_revision=before.revision;
+    f.fetcher.change_route.store(true,Ordering::SeqCst);
+    assert_eq!(f.service.configure(edit).await.unwrap().revision,before.revision+1);
 }

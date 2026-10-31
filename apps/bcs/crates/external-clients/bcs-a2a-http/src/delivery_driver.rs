@@ -107,6 +107,11 @@ impl A2aHttpTransport {
                     // local execution slot after observation/conversion failed.
                     if self.emit(record, ChatEventState::Error, None, Some("tracking_failed")).await.is_err() {
                         tracing::error!(run_id = %record.run_id, "A2A tracking failure could not publish its error terminal");
+                        return;
+                    }
+                    match self.runtime() {
+                        Ok(runtime) => runtime.contexts.mark_provider_transport_terminal(&record.run_id).await,
+                        Err(_) => tracing::error!(run_id = %record.run_id, "A2A tracking failure could not mark its transport terminal"),
                     }
                     return;
                 }
@@ -177,6 +182,9 @@ impl A2aHttpTransport {
                     } else { Some(event) };
                     if let Some(event) = event {
                         if self.apply(record, projection, event).await? { return Ok(()); }
+                        // Only an accepted event from the stream proves recovery.
+                        // A successful HTTP subscribe followed by EOF does not.
+                        recoveries = 0;
                         continue;
                     }
             }

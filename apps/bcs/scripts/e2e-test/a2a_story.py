@@ -181,6 +181,8 @@ class A2aStory(Story):
         assert card["skills"][0]["description"] == "Full skill description"
         assert card["skills"][0]["futureField"] == {"keep": True}
         assert not self.peer.requests, "Registration must not submit a probe task"
+        unchanged = self.request("POST", control + "/card:refresh", {}, token=admin)
+        assert unchanged == record, "Unchanged refresh must preserve the admin revision"
         with self.peer.lock:
             self.peer.card["description"] = "Refreshed description"
         record = self.request("POST", control + "/card:refresh", {}, token=admin)

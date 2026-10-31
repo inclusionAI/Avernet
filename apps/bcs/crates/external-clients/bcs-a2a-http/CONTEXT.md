@@ -48,6 +48,21 @@ per live projection/Run; repeated unspecified frames cannot trigger unbounded
 network or credential-store reads. Normal text tokens add none. This is separate
 from the bounded disconnect/subscription recovery budget and has no DB cursor.
 
+Disconnect recovery allows three consecutive failed recovery rounds, within the
+Run deadline. Only a validated, successfully ingested event from the resumed
+stream resets the count; HTTP subscribe success or GetTask success alone does
+not reset it. Repeated healthy disconnections therefore do not consume a single
+lifetime quota. Confirmed cleanup terminals also mark the local transport Terminal
+only after their error terminal is accepted by event ingestion.
+
+Phase one requires a single BCS instance and an enabled, serialized Bot/Session
+queue. The active-scope read plus Run insert is not a cross-instance atomic
+admission primitive; direct parallel sends are outside that deployment contract.
+Unknown outcomes keep the scope blocked without deadline-based auto-expiry.
+Restart does not automatically recreate stream owners. Existing exact cancellation
+can confirm a known Task's terminal outcome; unknown Task IDs or unconfirmed
+outcomes have no dedicated manual-unlock endpoint in phase one.
+
 Text projection tracks each Artifact independently across BCS tool boundaries.
 Projection updates must be committed only after event ingestion succeeds.
 The module implements Card validation/fetch, SDK event projection and the
