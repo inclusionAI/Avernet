@@ -40,6 +40,8 @@ from bcs_e2e.draft_group_density.registration_proposal import (  # noqa: E402
     NOTE as DRAFT_GROUP_DENSITY_NOTE)
 from bcs_e2e.result_queue_density.registration_proposal import (  # noqa: E402
     NOTE as RESULT_QUEUE_DENSITY_NOTE)
+from bcs_e2e.operator_cli_density.registration_proposal import (  # noqa: E402
+    NOTE as OPERATOR_CLI_DENSITY_NOTE)
 
 
 OWNER_ISOLATION_PROVIDER_NOTE = "row #35 story_provider_owner_isolation: register the 24 source-anchored obligation roster (PROVIDER-OWNER.*; contract provider_owner_contract.py; upstream provider_scope_story.py frozen at f181ba448a8bd5844c9517d8543ff3b6bb9d66bb with story_checks=45; shell step map provider-owner-isolation-migration-contract.json; known-unmapped backlog parent outside the reviewed release denominator); r2 owned-local live leg rid 20261031-owner-isolation-local-live-r2-provider-owner receipt ~/.codex/bcs-e2e/20261031-owner-isolation-local-live-r2/provider-owner-stdout.json status=BLOCKED completed 0/24 error_type=LOCAL_PROVIDER_OWNER_BLOCKED (tier=local entrypoint=owned-local credential_kind=owned_local_ephemeral_principal case DUAL-PROVIDER-OWNER-01 contract dual-provider-owner-case-run-v1 all 24 steps NOT_RUN): the story child registers provider prv_59ca9519 and bot bot_e38133ac, bootstraps the foreign Human, POST /providers/{id}/bots answers 200, then story request 8 PUT /bots/bot_09741ff7/visibility expects 200 and receives 403, the child raises AssertionError at provider_scope_story.py L117 and exits 1, the executor fail-closes at 0/24, and the full stderr traceback is retained as bounded evidence while the receipt error_detail stays null by design; this is the contract-frozen drift gap OWNED_LOCAL_PROVIDER_BOT_OWNER_EDGE_DRIFT (provider registration records created_by but mints no bcs-edge-permission authority edges on the owned-local runtime; the story frozen at f181ba44 predates the bot-authority model c6f001209 #2625; poolab preprod green there because the preprod runtime seeds the edges; story source apps/bcs/scripts/e2e-test/provider_scope_story.py exists locally and not on upstream dev; the BLOCKED receipt is the contract expectation, not a regression); preprod stays REMOTE_UNSUPPORTED by design (PREPROD_PROVIDER_ADMIN_FACE_ABSENT, WORKBENCH_WS_MOCK_ADMISSION) and the wp2 preprod disclosure verdict ~/.codex/bcs-e2e/20261031-migration-wp2-owner-isolation-preprod/provider-owner/20261031-migration-wp2-provider-owner-preprod-disclosure-verdict.json stays BLOCKED (PREPROD_PROVIDER_OWNER_FULL_STORY_NOT_EXECUTED, credential_admission BLOCKED PREPROD_PROVIDER_OWNER_CREDENTIALS_UNAVAILABLE); the r1 root holds no provider-owner local leg receipt; notes-only integration, the dual-provider-owner-run envelope stays untouched; committed verdict stays DUAL/NOT_RUN with notes 0 to 1; remote_validation=NOT_RUN and grants_release_credit=false"
@@ -845,6 +847,31 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
         self.assertEqual(
             face_by_id['story_collaboration_draft_group_launch']['notes'],
             [DRAFT_GROUP_DENSITY_NOTE])
+
+
+    def test_operator_cli_density_locks_row_9_face_note(self):
+        statuses = load_executor_migration()
+        face = json.loads(
+            (ROOT / 'executor-migration.json').read_text(encoding='utf-8'))
+        face_by_id = {row['id']: row['executor_migration']
+                      for row in face['rows']}
+        row = statuses['story_operator_coordinates_with_cli']
+        self.assertEqual(row['mode'], 'DUAL')
+        self.assertEqual(row['preprod_verdict'], 'BLOCKED_INVENTORIED')
+        self.assertEqual(row['gates'], [])
+        self.assertEqual(row['notes'], [OPERATOR_CLI_DENSITY_NOTE])
+        self.assertEqual(
+            face_by_id['story_operator_coordinates_with_cli']['notes'],
+            [OPERATOR_CLI_DENSITY_NOTE])
+
+    def test_operator_cli_density_note_closes_the_inventory_fail_close_fence(self):
+        from bcs_e2e import inventory as inventory_module
+        live_counts = inventory_module._EXPECTED_EXECUTOR_MIGRATION_NOTE_COUNTS
+        self.assertIn(OPERATOR_CLI_DENSITY_NOTE,
+                      inventory_module.EXECUTOR_MIGRATION_NOTES)
+        self.assertEqual(live_counts[OPERATOR_CLI_DENSITY_NOTE], 1)
+        self.assertEqual(len(inventory_module.EXECUTOR_MIGRATION_NOTES),
+                         sum(live_counts.values()))
 
 
     def test_owner_isolation_face_notes_lock_rows_35_and_36_loader_and_face(self):
