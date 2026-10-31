@@ -207,7 +207,6 @@ pub async fn patch_provider(
             admin_callback_url: req.admin_callback_url,
             protocol_version: req.protocol_version,
             coordination: req.coordination.map(coordination_from_wire),
-            caller_capabilities: req.caller_capabilities,
             organization_management: req
                 .organization_management
                 .map(organization_management_from_wire),
