@@ -51,3 +51,11 @@ class BotCombinationUnsupportedError(BotCreateError):
 
 class ApplicationCodingUnavailableError(BotCreateError):
     """Application Coding requires a Workspace Hosting capability."""
+
+
+class BotServiceError(Exception):
+    """Base exception for bot service errors."""
+
+
+class BotNotFoundError(BotServiceError):
+    """No Bot matches the lookup address."""

@@ -21,7 +21,7 @@ class BotServiceProtocol(Protocol):
     def get_bot(self, *args: Any, **kwargs: Any) -> Any: ...
 
     def get_bot_by_address(self, bot_id: str, user_id: str) -> Any:
-        """Internal resource lookup by legacy locator; does not authorize an actor."""
+        """Resolve a legacy locator without authorizing; raise BotNotFoundError if absent."""
         ...
 
     def validate_delete_bot(self, bot_id: str, user_id: str) -> Any:

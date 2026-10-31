@@ -4275,6 +4275,50 @@ def test_restart_bot_not_found_returns_failure():
     assert result["success"] is False
 
 
+def test_bot_service_error_legacy_imports_preserve_identity():
+    from agentclaw.community.core.bot_management import errors
+    from agentclaw.community.core.bot_management.services import bot_service
+
+    assert bot_service.BotNotFoundError is errors.BotNotFoundError
+    assert bot_service.BotServiceError is errors.BotServiceError
+    assert issubclass(errors.BotNotFoundError, errors.BotServiceError)
+
+
+def test_restart_bot_missing_source_bot_exception_does_not_enqueue():
+    from agentclaw.community.core.bot_management.errors import BotNotFoundError
+
+    record = _make_publish_record(status=PublishStatus.SUCCESS.value, ext={"binding": {"online": 42}, "migration_path": "/m"})
+    svc, publish_service = _svc_with_record(record)
+    publish_service.get_device_binding_by_id.return_value = Mock(device_id="BOT-x")
+    svc._bot_service.get_bot_by_address.side_effect = BotNotFoundError("missing")
+    result = svc.restart_bot(publish_id=1, operator="op")
+    assert result == {"success": False, "message": "Bot not found: bot-source"}
+    svc._task_queue_service.enqueue.assert_not_called()
+
+
+def test_restart_bot_unexpected_lookup_error_is_not_hidden():
+    record = _make_publish_record(status=PublishStatus.SUCCESS.value, ext={"binding": {"online": 42}, "migration_path": "/m"})
+    svc, publish_service = _svc_with_record(record)
+    publish_service.get_device_binding_by_id.return_value = Mock(device_id="BOT-x")
+    svc._bot_service.get_bot_by_address.side_effect = RuntimeError("database unavailable")
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        svc.restart_bot(publish_id=1, operator="op")
+    svc._task_queue_service.enqueue.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_execute_restart_missing_source_bot_does_not_mutate():
+    from agentclaw.community.core.bot_management.errors import BotNotFoundError
+
+    record = _make_publish_record(status=PublishStatus.SUCCESS.value, ext={"binding": {"online": 42}, "migration_path": "/m"})
+    svc, _ = _svc_with_record(record)
+    _setup_restart(svc, record)
+    svc._bot_service.get_bot_by_address.side_effect = BotNotFoundError("missing")
+    result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+    assert result == {"success": False, "message": "Bot not found: bot-source"}
+    svc._mutate_and_update_ext.assert_not_called()
+
+
 def test_restart_bot_unsupported_status_returns_failure():
     record = _make_publish_record(status=PublishStatus.DRAFT.value)
     svc, _ = _svc_with_record(record)

@@ -16,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional, Dict, Any, List, Literal, Tuple, TYPE_CHECKING
 
+from agentclaw.community.core.bot_management.errors import BotNotFoundError, BotServiceError
 from agentclaw.community.core.common_config.bot_config_protocol import BotStoragePolicyProtocol
 from agentclaw.community.core.bot_management.capabilities import (
     is_template_factory_config,
@@ -179,11 +180,6 @@ def _compose_operator_context(user_id: str, nick_name: str) -> OperatorContext:
     )
 
 
-class BotServiceError(Exception):
-    """Base exception for bot service errors."""
-    pass
-
-
 class BotInvalidLifecycleStateError(BotServiceError):
     """The requested operation is not allowed in the bot's current state."""
 
@@ -201,11 +197,6 @@ class BotOperationNotAllowedError(BotServiceError):
     Distinct from a transient failure: retrying cannot help, so delivery
     surfaces should report it as a client error rather than a server fault.
     """
-    pass
-
-
-class BotNotFoundError(BotServiceError):
-    """Bot not found error."""
     pass
 
 

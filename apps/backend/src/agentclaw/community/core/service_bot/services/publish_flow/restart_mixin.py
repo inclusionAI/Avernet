@@ -231,9 +231,14 @@ class RestartMixin:
                 "message": f"Device binding record has no device_id: binding_id={binding_id}",
             }, None, None
 
-        bot = self._bot_service.get_bot_by_address(
-            bot_id=publish_record.source_bot_id, user_id=publish_record.owner_id
-        )
+        from agentclaw.community.core.bot_management.errors import BotNotFoundError
+
+        try:
+            bot = self._bot_service.get_bot_by_address(
+                bot_id=publish_record.source_bot_id, user_id=publish_record.owner_id
+            )
+        except BotNotFoundError:
+            bot = None
         if not bot:
             logger.warning(
                 f"[PublishFlowService.restart_bot] Bot not found: bot_id={publish_record.source_bot_id}"
@@ -293,9 +298,14 @@ class RestartMixin:
             return {"success": False, "message": f"Device binding missing device_id: {binding_id}"}
         bot_uuid = binding.device_id
 
-        bot = self._bot_service.get_bot_by_address(
-            bot_id=publish_record.source_bot_id, user_id=publish_record.owner_id
-        )
+        from agentclaw.community.core.bot_management.errors import BotNotFoundError
+
+        try:
+            bot = self._bot_service.get_bot_by_address(
+                bot_id=publish_record.source_bot_id, user_id=publish_record.owner_id
+            )
+        except BotNotFoundError:
+            bot = None
         if not bot:
             return {"success": False, "message": f"Bot not found: {publish_record.source_bot_id}"}
 
