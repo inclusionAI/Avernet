@@ -28,6 +28,9 @@ use std::collections::BTreeMap;
 use async_trait::async_trait;
 use thiserror::Error;
 
+mod sql_script;
+pub use sql_script::split_sql_statements;
+
 mod transaction;
 pub use transaction::{
     DbExecuteResult, DbStatement, DbTransactionOptions, DbTransactionParam,

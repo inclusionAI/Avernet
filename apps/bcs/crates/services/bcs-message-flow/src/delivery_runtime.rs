@@ -320,7 +320,14 @@ impl DeliveryRuntime {
                             } else if row.abort_request_id.is_none() && abort_work.len() < self.config.max_abort_tasks {
                                 let mut cmd = match tokio::time::timeout(self.config.io_timeout, self.preparation.prepare_abort(row)).await {
                                     Ok(Ok(cmd)) => cmd,
-                                    _ => { storage!(self.transition(event(row, Event::AbortUnconfirmed))); continue; }
+                                    Ok(Err(error)) => {
+                                        tracing::warn!(delivery_id=%row.delivery_id, error_kind=error.as_ref(), reason=abort_reason(&error), "delivery abort preparation failed");
+                                        storage!(self.transition(event(row, Event::AbortUnconfirmed))); continue;
+                                    }
+                                    Err(_) => {
+                                        tracing::warn!(delivery_id=%row.delivery_id, "delivery abort preparation timed out");
+                                        storage!(self.transition(event(row, Event::AbortUnconfirmed))); continue;
+                                    }
                                 };
                                 let mut start = event(row, Event::StartAbort);
                                 start.deadline_at_ms = Some(now_ms().saturating_add(self.config.cancel_timeout.as_millis() as i64));
@@ -701,6 +708,9 @@ impl DeliveryRuntime {
                 Some(result) = abort_work.join_next(), if !abort_work.is_empty() => {
                     let (id, abort_request_id, downstream_run_id, result) = result.map_err(|_| ManagedDeliveryError::Conflict)?;
                     aborting.remove(&id);
+                    if let Some(Err(error)) = &result {
+                        tracing::warn!(delivery_id=%id, error_kind=error.as_ref(), reason=abort_reason(error), "delivery abort transport failed");
+                    }
                     if let Some(row) = storage!(self.get(&id)) {
                         if row.abort_request_id.as_ref() != Some(&abort_request_id) { continue; }
                         let acknowledged = matches!(result, Some(Ok(ref r)) if r.target_bot_id == row.target_bot_id
@@ -728,3 +738,28 @@ impl DeliveryRuntime {
 mod caller_delegate;
 
 mod caller_dispatch;
+
+// Only fixed, locally defined diagnostics are safe to log here. Remote error
+// bodies, command payloads and credential-bearing target Debug values stay out.
+fn abort_reason(error: &bcs_service_api::ServiceError) -> &'static str {
+    use bcs_service_api::ServiceError;
+    let message = match error {
+        ServiceError::InternalError(message) | ServiceError::InvalidOperation { message, .. } => message.as_str(),
+        _ => return "see_error_kind",
+    };
+    match message {
+        "queue original transport is unknown" => "original_transport_missing",
+        "invalid queue transport metadata" => "transport_metadata_invalid",
+        "unsupported queue transport version" => "transport_version_unsupported",
+        "queue run identity missing" => "run_identity_missing",
+        "queue original A2A owner changed" => "a2a_owner_changed",
+        "A2A: cancel scope mismatch" => "a2a_scope_mismatch",
+        "A2A: cancel Run not found" => "a2a_run_missing",
+        "A2A: cancel rejected or unconfirmed" => "a2a_remote_unconfirmed",
+        "A2A: cancel outcome unknown" => "a2a_remote_timeout",
+        "A2A: cancel response identity mismatch" => "a2a_remote_identity_mismatch",
+        "A2A: credential unavailable" => "a2a_credential_unavailable",
+        "A2A: cancel persistence unconfirmed" => "a2a_persistence_unconfirmed",
+        _ => "see_error_kind",
+    }
+}

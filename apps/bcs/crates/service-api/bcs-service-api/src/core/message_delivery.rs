@@ -9,6 +9,9 @@ pub enum DeliveryLifecycleEvent {
     StartSend,
     /// Transport submission is not proof of Bot receipt.
     Submitted,
+    /// Trusted execution/wait budgeting updates the deadline while retaining
+    /// the same live attempt and execution slot. Never revives uncertain work.
+    RunDeadlineAdjusted,
     Accepted,
     /// Typed caller dispatch commit (spec §7.5.1/wire contract): persists the
     /// canonical request digest / effective deadline / control revision into the

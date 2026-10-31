@@ -557,3 +557,24 @@ requires a reviewed alias-projection reconciliation before resuming the worker.
 Migrations are forward-only. If a production migration must be reverted, author
 a reviewed paired revert migration or DBA change plan. Automatic rollback is not
 provided.
+
+## A2A Card and task bindings (MySQL/SQLite 039)
+
+`039_bot_a2a.sql` is the first published A2A migration. It adds only
+`agent_card`, nullable `agent_card_url` and `agent_card_revision` to `bcs_bots`,
+and creates `bcs_a2a_tasks`, `bcs_a2a_run_bindings` and `bcs_a2a_contexts`.
+Every new table has an auto-increment `id`, `gmt_create` and `gmt_modified`.
+Remote Task identity is unique in tasks; multiple Run bindings may reference it
+through a foreign key. Context scope fields are explicit, not opaque JSON.
+
+The feature's uncommitted drafts were consolidated after upstream reserved
+versions through 038. Existing upstream migration bodies and identifiers are
+unchanged. Fresh databases create the final schema directly, with no temporary
+A2A tables, discarded columns or destructive replacement step.
+The requester permits discarding old local A2A draft data: rebuild those
+disposable databases rather than editing migration history. This does not supply
+an upgrade or downgrade path for retained draft data. Trial services have not
+been migrated by this source change.
+
+See repository-root `docs/specs/a2a/task-bindings-v1.md` for query/write costs and
+`docs/specs/a2a/minimal-card-registration-v1.md` for Card registration/refresh.

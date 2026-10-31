@@ -1,4 +1,5 @@
 pub mod a2a_chat;
+pub mod a2a_bot;
 pub mod collaboration_draft;
 pub mod actor_directory;
 pub mod admission;
@@ -22,6 +23,7 @@ pub mod interaction;
 pub mod invite;
 pub mod message_flow;
 pub mod message_delivery;
+pub mod run_budget;
 pub mod message_log;
 pub mod organization;
 pub mod principal;

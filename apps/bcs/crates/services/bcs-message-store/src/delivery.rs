@@ -590,6 +590,10 @@ impl MessageDeliveryRepoPort for MySqlMessageStore {
             }
             DeliveryLookup::Id(id) => { params.push(id.into()); "delivery_id = ?" }
             DeliveryLookup::Request(id) => { params.push(id.into()); "request_id = ?" }
+            DeliveryLookup::CanonicalRun { bot, session, run } => {
+                params.extend([bot.into(),session.into(),run.into()]);
+                "target_bot_id = ? AND session_id = ? AND run_id = ? LIMIT 2"
+            }
             DeliveryLookup::Run { bot, alias } => {
                 let mut params = Vec::new();
                 for _ in 0..3 { params.extend([DbValue::from(self.env.as_str()), DbValue::from(bot.as_str()), DbValue::from(alias.as_str())]); }

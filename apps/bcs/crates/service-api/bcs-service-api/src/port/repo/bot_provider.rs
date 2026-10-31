@@ -62,6 +62,30 @@ pub trait BotProviderRepoPort: Send + Sync {
         ))
     }
 
+    /// Strict create with Bot, ownership, gateway projection and validated
+    /// A2A Card in one transaction. Card identities must equal the new Bot.
+    async fn create_a2a_provider_bot_with_ownership(
+        &self, _record: BotProviderRecord, _capabilities: BotCapabilities,
+        _owner: &str, _token: &str,
+        _initialization: crate::types::bot_authority::OwnershipInitialization,
+        _card: crate::port::repo::a2a_bot::A2aBotRecord,
+    ) -> ServiceResult<()> {
+        Err(crate::ServiceError::InternalError("atomic A2A registration is not configured".into()))
+    }
+
+    /// Provider-admin delegation is a separate trusted operation. The Core has
+    /// verified the management credential; the store requires a Provider audit
+    /// actor matching record.provider_id. The Human-token operation above stays
+    /// Human-only. Both commit Bot/ownership/Card in one transaction.
+    async fn create_provider_admin_a2a_bot_with_ownership(
+        &self, _record: BotProviderRecord, _capabilities: BotCapabilities,
+        _owner: &str, _token: &str,
+        _initialization: crate::types::bot_authority::OwnershipInitialization,
+        _card: crate::port::repo::a2a_bot::A2aBotRecord,
+    ) -> ServiceResult<()> {
+        Err(crate::ServiceError::InternalError("atomic Provider-admin A2A registration is not configured".into()))
+    }
+
     /// Atomic Provider retirement (bot authority spec §7.1):
     /// ONE command commits the Bot tombstone, the Provider/ref
     /// tombstone, the necessary binding disable, the owner/

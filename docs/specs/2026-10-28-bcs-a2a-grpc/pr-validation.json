@@ -1,0 +1,207 @@
+{
+  "recorded_at": "2026-10-31T16:04:00.285520+00:00",
+  "scope": "Frozen pre-publication evidence; use current PR checks for the final CI status.",
+  "ci_results_url": "https://github.com/inclusionAI/Avernet/pull/3390/checks",
+  "harness_sdk_included": false,
+  "validated_baseline_commit": "6186224ba5f58908b0a14f01510eee105bb963e6",
+  "baseline_passed": {
+    "bcs_server_build": {
+      "command": "cargo build --manifest-path apps/bcs/Cargo.toml -j 6 -p bcs --bin bcs",
+      "result": "passed"
+    },
+    "sqlite_startup": {
+      "result": "isolated latest BCS started healthy from an empty SQLite database, including migration 039"
+    },
+    "sql_script_regression": {
+      "command": "cargo test --manifest-path apps/bcs/Cargo.toml -j 6 -p bcs-db-api --lib sql_script",
+      "tests_passed": 2
+    },
+    "http_acceptance": {
+      "script": "apps/bcs/scripts/e2e-test/a2a_story.py",
+      "script_sha256": "0c37126525c220581bbd6f7d7106e1df66f6118f71c1acec04a4ec38464a393b",
+      "http_assertions": 32,
+      "user_deliveries": 4,
+      "cases": [
+        "URL registration without name",
+        "inline registration without name",
+        "full skill/unknown-field preservation",
+        "Provider admin authentication",
+        "manual Card refresh",
+        "CAS update and stale revision rejection",
+        "inline source clearing",
+        "no work submitted during Card management",
+        "two streaming rounds",
+        "standalone Message",
+        "GetTask recovery without resubmission",
+        "context reuse",
+        "unique final text",
+        "legacy webhook not used"
+      ]
+    },
+    "frontend": {
+      "jest_tests_passed": 5,
+      "targeted_eslint": "passed",
+      "prettier": "passed",
+      "builds": [
+        "npm run build:oss",
+        "PRESET=local npm run build:oss"
+      ]
+    },
+    "mysql_ddl": {
+      "version_count": 39,
+      "bot_card_columns": 3,
+      "a2a_tables": 3,
+      "required_audit_columns": 9,
+      "result": "all committed migrations applied to isolated MySQL; Rust repository contract pending"
+    },
+    "static_checks": [
+      "git diff --check",
+      "plaintext credential scanner",
+      "modified source file <= 1000 lines",
+      "store boundaries",
+      "port purity",
+      "forbidden symbols"
+    ]
+  },
+  "provider_admin_registration_tests": {
+    "passed": 10,
+    "failed": 0,
+    "includes": "URL registration without name, alias preservation, atomic Card/owner creation, duplicate rejection, late revocation, Card/profile write rollback"
+  },
+  "review_repairs": {
+    "Card_refresh": "Unchanged raw Card/source revalidates the saved revision and current binding; no write or revision bump. Changed Cards and explicit PUT keep CAS and write-error propagation.",
+    "cleanup": "Confirmed cleanup marks transport Terminal only after its local error terminal is accepted.",
+    "recovery": "Three consecutive recovery failures; only a successfully processed resumed-stream event resets the budget. Empty HTTP 200 subscriptions/GetTask success alone do not reset it; Run deadline remains authoritative.",
+    "scope": "Single instance and serialized Bot/Session queues required; no cross-instance atomic admission claim.",
+    "unknown_outcomes": "Maintainer deferred restart ownership recovery and manual-unlock management; uncertain outcomes remain blocked and never auto-expire solely from the local deadline."
+  },
+  "local_repair_regressions": {
+    "current_status": "Card configuration 12, delivery recovery 17 and native MySQL storage 1 all passed; full mandatory MySQL and latest-head CI remain pending.",
+    "targets": [
+      "conformance_a2a_configuration",
+      "conformance_a2a_delivery",
+      "a2a_mysql"
+    ],
+    "Card_configuration": {
+      "passed": 12,
+      "failed": 0
+    },
+    "Delivery_recovery": {
+      "passed": 17,
+      "failed": 0
+    },
+    "native_MySQL": {
+      "passed": 1,
+      "failed": 0,
+      "migrations": 39,
+      "covers": "Shared Card/Run contracts, JSON search, many Runs per Task, audit columns, CHECK rejection and transactional rollback"
+    }
+  },
+  "ci_fixture_repairs": {
+    "observed_head": "bf95d0d122af9ef69423379658b182e4a7921633",
+    "observed_job_url": "https://github.com/inclusionAI/Avernet/actions/runs/41214202636/job/124575216325",
+    "observed_unit_result": {
+      "run": 8411,
+      "passed": 8384,
+      "failed": 27,
+      "skipped": 63
+    },
+    "causes": [
+      "26 repeated retirement restart fixtures initialized only through schema 38",
+      "human-input version list expected 38",
+      "real MySQL full-chain fixture expected 38 despite successfully applying all 39 migrations"
+    ],
+    "fix": "Initialize current schema before restart-stability assertions and expect all 39 migrations. Retain schema/history/legacy-data and frozen archive checks.",
+    "current_ci_result": "Refer to current PR checks; not frozen into this record.",
+    "additional_fix": "The v20-to-v39 suffix applies 19 migrations, not 18."
+  },
+  "static_checks": {
+    "changed_source_files": 231,
+    "largest_source_lines": 1000,
+    "rust_parser": "all changed Rust sources accepted; stdout only, no source formatted",
+    "frozen_sql": "existing SQL unchanged; only two new 039 SQL files added",
+    "diff_check": "passed"
+  },
+  "repair_source_sha256": {
+    "apps/bcs/crates/application/bcs-app-a2a-bot/src/lib.rs": "96e35ce7ecf3e82f171e667588615c7d124c983019897a070eb94f93ba7fdf85",
+    "apps/bcs/crates/application/bcs-app-a2a-bot/tests/conformance_a2a_configuration.rs": "b81a580dacd168b66327f8189c6ef9168da7ded158cf9d0a3e159d2767576851",
+    "apps/bcs/crates/bootstrap/bcs/src/migrations/tests/retired_service_policy.rs": "a62464f4a631462962c6f8a2194e35ee3fc7b13e5e1c92afa1b8619682adeb65",
+    "apps/bcs/crates/external-clients/bcs-a2a-http/src/delivery_driver.rs": "b32419d918bb76bdf1ab081999e98a35664400b00dac6e876d18186ca64dcc9c",
+    "apps/bcs/crates/external-clients/bcs-a2a-http/tests/conformance_a2a_delivery.rs": "24bacddb6b6f255d7b30bad301228bf51e2872dbddedfc0f924f8fd65ad18c78",
+    "apps/bcs/crates/test-support/bcs-test-support/src/contract/a2a_bot.rs": "bff70cb957fed62148ec891e40c685db1035039a0cfd266a76166ec2fc294104",
+    "apps/bcs/crates/tools/bcs-admin/src/migrate_human_input_index_tests.rs": "4fbddacb020ee96d3a85e88cd669425ba47d50e695ee664a81946cbe31319a17",
+    "apps/bcs/crates/tools/bcs-admin/src/migrate_mysql_chain_tests.rs": "ba752d91352075b1c48d8c2ba62416ef0e6154538b9d21403f0546b3ba999bf0",
+    "apps/bcs/scripts/e2e-test/a2a_story.py": "d9fd88f17a9dcb99343d13d352366b2b0732f31438dad0e494d75d7e851a11a8",
+    "apps/bcs/crates/services/bcs-bot-store/tests/a2a_mysql.rs": "9d6c99ccfe8a622f6ea60be38da913d117f2d23cbe93f9b42964df699da6c61d",
+    "apps/bcs/crates/services/bcs-bot-store/tests/support/a2a_mysql_cases.rs": "3cc6248ec04fcb48a365257b14c2a954a7c0e5662c99881a85e71523ee283e1a",
+    "apps/bcs/crates/services/bcs-bot-store/src/provider.rs": "f16f8d06d4bc952303ec163eb0b2fe52f3589c3e5bf26ad5b6916a40e300ac7d",
+    "apps/bcs/crates/services/bcs-bot-store/src/provider_db.rs": "f21818a9398d9249493920497a90549c73662b09589b17d135d8749957c81beb",
+    "apps/bcs/crates/services/bcs-bot-store/tests/support/a2a_provider_alias.rs": "207c5121d5e0a9c6e34eb59fc60f9dfe248fb70b3845dc197d9c4e456d7434cc"
+  },
+  "limits": [
+    "frontend standalone typecheck blocked by installed @types/d3-dispatch syntax",
+    "architecture dependency/import gates have documented target-branch failures; full architecture gate not green",
+    "live model and MOSN/gRPC evidence is historical and does not certify this commit",
+    "no persistent monitor tool available in this session; CI monitored in active turn"
+  ],
+  "native_mysql_ci": "Existing mandatory full-chain gate invokes the shared A2A storage cases on its migrated disposable schema; no extra MySQL service required.",
+  "native_mysql_failure_injection_probe": "Temporary CHECK rejection and transactional rollback verified with schema-only privileges on isolated native MySQL; no SUPER grant.",
+  "ci_latest_completed": {
+    "head": "c4cf50125cf89785d03c037769aeed90c9d250cd",
+    "unit": {
+      "passed": 8414,
+      "failed": 0,
+      "skipped": 63,
+      "overall_line_percent": 86.14,
+      "changed_line_percent": 88.59
+    },
+    "mandatory_mysql": "Passed all existing gates including the shared A2A Card/Run cases and v20 suffix upgrade.",
+    "singlebox": {
+      "job_url": "https://github.com/inclusionAI/Avernet/actions/runs/41219378986/job/124590544967",
+      "runtime_line_percent": 52.15,
+      "method_percent": 46.33,
+      "http_endpoints": "173/173",
+      "cli_leaves": "66/66",
+      "changed_line_percent": 60.3,
+      "changed_covered": 2910,
+      "changed_instrumentable": 4826,
+      "required_changed_line_percent": ">60",
+      "A2A_checks": 68,
+      "A2A_deliveries": 9,
+      "artifact_verifier": "passed"
+    },
+    "bridge_distribution": "ARM and Intel passed"
+  },
+  "expanded_live_acceptance": {
+    "result": "Nine deliveries passed against baseline binary with only unchanged-refresh assertion omitted from temporary local probe; tracked story retains that assertion for current CI.",
+    "cases": [
+      "negotiated tool start/result duplicates collapse to one history record",
+      "text before and after tool joins without replay",
+      "Workbench chat.abort cancels exact remote Task",
+      "unsupported replacement cancels exact remote Task",
+      "normal sends succeed after cancellation and cleanup"
+    ],
+    "latest_head_ci": "pending",
+    "boundary_checks": 64,
+    "synchronization": "Cancellation waits for persisted text at a completed tool boundary; no fixed sleep assumes remote identity has been saved."
+  },
+  "alias_review_repair": {
+    "comment_id": 4432434875,
+    "cause": "Candidate SQL and batched Card SQL both omitted the local BCS display alias for Card-backed Bots.",
+    "fix": "Match local name/ID or Card text in the same queries; retain Card-only skill predicates, caller visibility and pagination.",
+    "regressions": [
+      "actual Core/application/SQLite discovery and search pages",
+      "SQLite Card store alias/literal/skill filtering",
+      "native MySQL shared alias/literal/skill filtering",
+      "live HTTP alias search and discovery with positive/negative Card skill selectors"
+    ],
+    "status": "Local Core5, SQLite store9 and native MySQL1 passed; 2aac23fd CI passed 8415 units and native MySQL, but live discovery exposed the additional Provider selector path."
+  },
+  "alias_provider_followup": {
+    "failed_job": "https://github.com/inclusionAI/Avernet/actions/runs/41221634720/job/124597224165",
+    "cause": "Offline Gateway discovery obtains candidates through the Provider binding selector, which also excluded local names for Card rows. The earlier Memory registry fixture bypassed this source.",
+    "fix": "Match local names in Provider discovery and organization candidate SQL; retain Card-only legacy exclusion and skill selectors.",
+    "test": "One shared actual SQL Provider contract on SQLite and native MySQL, including offline Gateway aliases, Card query text, legacy isolation and organization count/paging; live HTTP alias assertion retained.",
+    "status": "Focused checks running; follow-up CI pending; no gate lowered."
+  }
+}

@@ -288,7 +288,7 @@ impl ProviderBotEventService for ProviderBotEvents {
             .get_provider_transport(&command.run_id)
             .await
         {
-            Some(ProviderRunTransport::Sse | ProviderRunTransport::Negotiating) => {
+            Some(ProviderRunTransport::Sse | ProviderRunTransport::Negotiating | ProviderRunTransport::A2a { .. }) => {
                 return Err(ProviderBotEventError::TransportConflict(
                     "transport_conflict".to_string(),
                 ));

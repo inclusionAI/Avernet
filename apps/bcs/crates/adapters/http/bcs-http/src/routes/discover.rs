@@ -147,6 +147,7 @@ fn discover_bot_to_json(bot: BotDiscoveryEntry) -> Value {
         "capabilities": to_wire_capabilities(bot.capabilities),
         "visibility": bot.visibility,
     });
+    if let Some(card) = bot.agent_card { entry["agent_card"] = card; }
     if let Some(is_friend) = bot.is_friend {
         entry
             .as_object_mut()

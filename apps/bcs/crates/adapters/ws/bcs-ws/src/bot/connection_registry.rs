@@ -467,7 +467,7 @@ impl BotDeliveryPort for BotConnectionRegistry {
             BotDeliveryTarget::WebSocket { bot_id } => {
                 self.connections.read().await.contains_key(bot_id)
             }
-            BotDeliveryTarget::HttpProvider { .. } => false,
+            BotDeliveryTarget::HttpProvider { .. } | BotDeliveryTarget::A2a { .. } => false,
         }
     }
 

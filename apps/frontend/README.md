@@ -38,6 +38,11 @@ npm run build
 
 启动后按终端提示的地址访问。
 
+本地 BCN 群聊可用 `BCS_PORT=21082 npm run devs:local:oss` 连接指定的 BCS。
+HTTP 和 WebSocket 均通过前端同源 `/bcnproxy` 代理，SSH 访问只需转发前端端口
+（默认 8000）。`local` 预设使用 Webpack，避免当前 Mako 热更新代理接管业务
+WebSocket 的升级请求；BCS 地址和端口由开发服务器读取。
+
 ### 配置后端地址
 
 所有环境的服务端地址统一在 **`config/servers.config.ts`** 配置（唯一配置源），修改后重启生效：

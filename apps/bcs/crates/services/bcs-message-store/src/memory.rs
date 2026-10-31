@@ -586,12 +586,22 @@ impl bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoPort for 
             return crate::task_lookup::memory(&self.list_deliveries(None).await?, prefix, retained_after_ms, legacy_intents);
         }
         if matches!(&scope, Q::Ids(ids) if ids.len() > 8) { return Err(bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError::Invalid("delivery recovery batch too large".into())); }
+        if let Q::CanonicalRun {bot, session, run} = &scope {
+            let sessions = self.sessions.read().await;
+            return Ok(sessions.get(session).into_iter().flat_map(|entry|&entry.deliveries)
+                .filter(|row|row.target_bot_id == *bot && row.run_id.as_ref() == Some(run)).take(2).cloned().collect());
+        }
+        if let Q::Id(id) = &scope {
+            return Ok(self.sessions.read().await.values().flat_map(|entry|&entry.deliveries)
+                .find(|row|row.delivery_id == *id).cloned().into_iter().collect());
+        }
         let rows = self.list_deliveries(None).await?;
         Ok(rows.into_iter().filter(|d| match &scope {
             Q::Ids(ids) => ids.contains(&d.delivery_id),
             Q::TaskPrefix { .. } | Q::TaskPrefixes { .. } => unreachable!(),
             Q::Id(id) => d.delivery_id == *id,
             Q::Request(id) => d.request_id.as_ref() == Some(id),
+            Q::CanonicalRun {bot,session,run} => d.target_bot_id == *bot && d.session_id == *session && d.run_id.as_ref() == Some(run),
             Q::Run { bot, alias } => d.target_bot_id == *bot && (d.run_id.as_ref() == Some(alias) || d.request_id.as_ref() == Some(alias) || d.transport_context_json.as_ref().and_then(|v| v.get("downstream_run_id")).and_then(|v| v.as_str()) == Some(alias.as_str())),
             Q::Bound(id) => d.bound_to_delivery_id.as_ref() == Some(id) && d.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::Bound,
             Q::Lane { bot, session } | Q::LanePending { bot, session } => d.target_bot_id == *bot && d.session_id == *session && d.state.kind == bcs_domain::DeliveryType::Send && super::delivery::unfinished(d),

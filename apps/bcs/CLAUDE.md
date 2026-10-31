@@ -217,14 +217,18 @@ Messages sent from the frontend workbench represent a bot (identified by `bot_id
 
 | Message Type | @mentions | Delivery |
 |--------------|-----------|----------|
-| No @mention | None | `chat.send` to coordinator, `chat.inject` to others (except sender) |
-| @mention | @Bot1 | `chat.send` to @mentioned bots, `chat.inject` to others |
+| No @mention | None | `chat.send` to coordinator; observer context follows the current queue/context delivery path |
+| @mention | @Bot1 | `chat.send` to @mentioned bots; observer context follows the current queue/context delivery path |
 | @ALL | All | `chat.send` to everyone |
 
 **Key Insight**:
 - All messages ARE broadcast to all participants
 - `chat.send` = "you should respond"
-- `chat.inject` = "observe silently"
+- `chat.inject` and downstream `chat.history` are deprecated. New integrations,
+  including A2A adapters, must not be required to implement them. Legacy
+  `chat.inject` compatibility means "observe silently"; retained types/helpers
+  do not make it an active integration requirement. BCS conversation history
+  APIs remain available.
 - Sender is always excluded from delivery
 - Bot messages are prefixed with `[from:botName]` when forwarded to other bots
 

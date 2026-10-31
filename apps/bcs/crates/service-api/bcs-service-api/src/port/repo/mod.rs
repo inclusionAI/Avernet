@@ -8,6 +8,8 @@ pub use collaboration_terminal_im::{StateMachineTerminalImPayload, StateMachineT
 pub mod collaboration_publication;
 pub use collaboration_publication::{StateMachineChatResultPayload, StateMachineChatResultCheckpoint, StateMachineChatResultStatus, StateMachineChatResultClaim, StateMachineChatResultOutcome};
 pub mod bot;
+pub mod a2a_bot;
+pub mod a2a_run;
 pub mod bot_authority;
 pub mod bot_provider;
 pub mod bot_actor_config;

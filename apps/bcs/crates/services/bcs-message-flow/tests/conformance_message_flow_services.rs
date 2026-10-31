@@ -3,6 +3,7 @@ use std::sync::Arc;
 use bcs_message_flow::a2a_chat::ChatRunStore;
 use bcs_message_flow::{
     A2aChat, BcsGroupFusion, BcsGroupMessageHistory, BcsMessageFlow, MemoryBotRunContextStore,
+    RedisBotRunContextStore,TrackedBotRunContext,
 };
 use bcs_test_support::{
     NoopBotDeliveryPort, NoopBotRegistryCoreService, NoopFriendCoreService,
@@ -68,4 +69,16 @@ async fn memory_bot_run_context_passes_port_contract() {
         "memory-contract",
     )
     .await;
+}
+
+#[tokio::test]
+async fn redis_bot_run_context_passes_port_contract() {
+    let store=RedisBotRunContextStore::new(Arc::new(bcs_cache_local::InMemoryCachePlugin::default()),"redis-conformance:".into(),500);
+    bcs_test_support::contract::port::bot_run_context_port_contract_tests(&store,"redis-contract").await;
+}
+
+#[tokio::test]
+async fn tracked_bot_run_context_passes_port_contract() {
+    let store=TrackedBotRunContext::new(Arc::new(MemoryBotRunContextStore::new()));
+    bcs_test_support::contract::port::bot_run_context_port_contract_tests(&store,"tracked-contract").await;
 }

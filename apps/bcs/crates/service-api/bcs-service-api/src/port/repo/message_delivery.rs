@@ -23,6 +23,9 @@ pub enum DeliveryLookup {
     Ids(Vec<String>),
     Request(String),
     Run { bot: String, alias: String },
+    /// Exact internal Run in one Bot/Session, at most two rows to detect
+    /// ambiguity. Does not interpret transport/request aliases.
+    CanonicalRun { bot: String, session: String, run: String },
     Bound(String),
     Lane { bot: String, session: String },
     /// At most one unfinished Send; Inject must not block legacy drain.

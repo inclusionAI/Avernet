@@ -24,10 +24,14 @@ use bcs_service_api::{
     ServiceError, ServiceResult,
 };
 
+#[path = "run_context_redis_deadline.rs"]
+mod deadline;
+
 const CLAIM_TTL_MS: u64 = 60_000;
 
 /// Redis/cache-backed provider run context store.
 pub struct RedisBotRunContextStore {
+    lifecycle: crate::run_deadline::RunLifecycleLocks,
     cache: Arc<dyn CachePlugin>,
     key_prefix: String,
     /// Grace past `deadline_ms` that context/transport/term keys are retained,
@@ -42,6 +46,7 @@ pub struct RedisBotRunContextStore {
 impl RedisBotRunContextStore {
     pub fn new(cache: Arc<dyn CachePlugin>, key_prefix: String, retention_ms: u64) -> Self {
         Self {
+            lifecycle: Default::default(),
             cache,
             key_prefix,
             retention_ms: retention_ms.max(1),
@@ -165,16 +170,21 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
-fn transport_str(transport: ProviderRunTransport) -> &'static str {
+fn transport_str(transport: ProviderRunTransport) -> String {
     match transport {
-        ProviderRunTransport::Negotiating => "negotiating",
-        ProviderRunTransport::Sse => "sse",
-        ProviderRunTransport::Callback => "callback",
-        ProviderRunTransport::Terminal => "terminal",
+        ProviderRunTransport::A2a { binding, update_mode } => format!("a2a:{}", serde_json::json!([binding, update_mode])),
+        ProviderRunTransport::Negotiating => "negotiating".into(),
+        ProviderRunTransport::Sse => "sse".into(),
+        ProviderRunTransport::Callback => "callback".into(),
+        ProviderRunTransport::Terminal => "terminal".into(),
     }
 }
 
 fn parse_transport(value: &str) -> Option<ProviderRunTransport> {
+    if let Some(json) = value.strip_prefix("a2a:") {
+        let (binding, update_mode) = serde_json::from_str(json).ok()?;
+        return Some(ProviderRunTransport::A2a { binding, update_mode });
+    }
     match value {
         "negotiating" => Some(ProviderRunTransport::Negotiating),
         "sse" => Some(ProviderRunTransport::Sse),
@@ -196,6 +206,10 @@ impl BotRunContextPort for RedisBotRunContextStore {
         self.write_context(&context).await;
     }
 
+    async fn reschedule_deadline(&self, scope: &BotRunScope, run_id: &str, expected: u64, deadline: u64) -> ServiceResult<bool> {
+        self.reschedule_a2a_deadline(scope, run_id, expected, deadline).await
+    }
+
     async fn get_context(&self, run_id: &str) -> Option<BotRunContext> {
         if let Some(context) = self.read_context(run_id).await { return Some(context); }
         let active = self.find_active_run(run_id).await.ok()??;
@@ -203,6 +217,7 @@ impl BotRunContextPort for RedisBotRunContextStore {
     }
 
     async fn try_begin_terminal(&self, run_id: &str) -> bool {
+        let _lifecycle = self.lifecycle.acquire(run_id).await;
         let Some(context) = self.read_context(run_id).await else {
             return false;
         };
@@ -224,6 +239,7 @@ impl BotRunContextPort for RedisBotRunContextStore {
     }
 
     async fn mark_terminal(&self, run_id: &str) -> bool {
+        let _lifecycle = self.lifecycle.acquire(run_id).await;
         let Some(context) = self.read_context(run_id).await else {
             return false;
         };
@@ -412,6 +428,7 @@ impl BotRunContextPort for RedisBotRunContextStore {
         scope: &BotRunScope,
         canonical_run_id: &str,
     ) -> ServiceResult<bool> {
+        let _lifecycle = self.lifecycle.acquire(canonical_run_id).await;
         // Read the raw active context rather than `find_active_run`: terminal
         // CAS happens before cleanup, and the filtered lookup intentionally
         // hides terminal runs.
@@ -459,9 +476,10 @@ impl BotRunContextPort for RedisBotRunContextStore {
     }
 
     async fn bind_provider_transport(&self, run_id: &str, transport: ProviderRunTransport) -> bool {
+        let _lifecycle = self.lifecycle.acquire(run_id).await;
         if !matches!(
             transport,
-            ProviderRunTransport::Sse | ProviderRunTransport::Callback
+            ProviderRunTransport::Sse | ProviderRunTransport::Callback | ProviderRunTransport::A2a { .. }
         ) {
             return false;
         }
@@ -513,6 +531,7 @@ impl BotRunContextPort for RedisBotRunContextStore {
     }
 
     async fn mark_provider_transport_terminal(&self, run_id: &str) {
+        let _lifecycle = self.lifecycle.acquire(run_id).await;
         if let Some(bytes) = self
             .cache
             .get_value(&self.transport_key(run_id))

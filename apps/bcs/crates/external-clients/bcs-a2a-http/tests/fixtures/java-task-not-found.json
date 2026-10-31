@@ -1,0 +1,15 @@
+{
+  "error": {
+    "code": 404,
+    "status": "NOT_FOUND",
+    "message": "Task not found",
+    "details": [
+      {
+        "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+        "reason": "TASK_NOT_FOUND",
+        "domain": "a2a-protocol.org",
+        "metadata": {}
+      }
+    ]
+  }
+}

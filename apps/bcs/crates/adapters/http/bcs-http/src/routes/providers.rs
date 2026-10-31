@@ -36,6 +36,9 @@ use tracing::{info, warn};
 use crate::mapping::capabilities::{to_core_skill, to_wire_skill};
 use crate::state::{HttpAppState, VisibilitySyncRequest};
 
+mod registration;
+pub use registration::{register_provider, get_provider_by_slug, get_provider, patch_provider, register_provider_bot, list_provider_bots};
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PatchProviderBotAttributesRequest {
@@ -104,215 +107,17 @@ impl IntoResponse for ProviderRouteError {
     }
 }
 
-pub async fn register_provider(
-    State(state): State<HttpAppState>,
-    headers: HeaderMap,
-    uri: Uri,
-    Json(req): Json<RegisterProviderRequest>,
-) -> Result<Json<RegisterProviderResponse>, ProviderRouteError> {
-    let created_by = require_staff_no(&state, &headers, &uri).await?;
-    let outcome = state
-        .services
-        .provider_management
-        .register_provider(RegisterProviderCommand {
-            collaboration_scope: parse_collaboration_scope(req.collaboration_scope.as_deref())?,
-            name: req.name,
-            slug: req.slug,
-            webhook_url: req.webhook_url,
-            admin_callback_url: req.admin_callback_url,
-            auth_mode: auth_mode_from_wire(req.auth.mode),
-            created_by,
-            protocol_version: req.protocol_version,
-            coordination: req.coordination.map(coordination_from_wire),
-            caller_capabilities: req.caller_capabilities,
-        })
-        .await
-        .map_err(provider_error)?;
 
-    Ok(Json(RegisterProviderResponse {
-        provider_id: outcome.provider_id,
-        provider_admin_token: outcome.provider_admin_token,
-        bcs_to_provider_token: outcome.bcs_to_provider_token,
-    }))
-}
 
-pub async fn get_provider_by_slug(
-    State(state): State<HttpAppState>,
-    Path(slug): Path<String>,
-) -> Result<Json<ProviderBasicInfoResponse>, ProviderRouteError> {
-    let info = state.services.provider_management.get_provider_by_slug(&slug).await
-        .map_err(provider_error)?
-        .ok_or_else(|| ProviderRouteError {
-            status: StatusCode::NOT_FOUND, message: format!("provider slug '{slug}' not found"),
-        })?;
-    Ok(Json(ProviderBasicInfoResponse {
-        provider_id: info.provider_id,
-        slug: info.slug,
-        name: info.name,
-        auth_mode: match info.auth_mode {
-            ProviderAuthMode::StaticBearer => ProviderAuthModeDto::StaticBearer,
-            ProviderAuthMode::AgentPass => ProviderAuthModeDto::AgentPass,
-            ProviderAuthMode::AgentPassSubbots => ProviderAuthModeDto::AgentPassSubbots,
-            ProviderAuthMode::ProviderAdmin => ProviderAuthModeDto::ProviderAdmin,
-        },
-        enabled: info.enabled,
-        protocol_version: info.protocol_version,
-        created_at: info.created_at,
-        updated_at: info.updated_at,
-    }))
-}
 
-pub async fn get_provider(
-    State(state): State<HttpAppState>,
-    Path(provider_id): Path<String>,
-    headers: HeaderMap,
-) -> Result<Json<ProviderInfoResponse>, ProviderRouteError> {
-    let provider_admin_token = bearer_token(&headers)?;
-    let provider = state
-        .services
-        .provider_management
-        .get_provider(&provider_id, &provider_admin_token)
-        .await
-        .map_err(provider_error)?;
-    Ok(Json(
-        provider_to_response(provider).map_err(provider_error)?,
-    ))
-}
 
-pub async fn patch_provider(
-    State(state): State<HttpAppState>,
-    Path(provider_id): Path<String>,
-    headers: HeaderMap,
-    uri: Uri,
-    Json(req): Json<PatchProviderRequest>,
-) -> Result<Json<ProviderInfoResponse>, ProviderRouteError> {
-    let provider_admin_token = bearer_token(&headers)?;
-    let authenticated_staff_id = require_staff_no(&state, &headers, &uri).await?;
-    let provider = state
-        .services
-        .provider_management
-        .update_provider(UpdateProviderCommand {
-            collaboration_scope: parse_collaboration_scope(req.collaboration_scope.as_deref())?,
-            provider_id,
-            provider_admin_token,
-            authenticated_staff_id,
-            name: req.name,
-            slug: req.slug,
-            webhook_url: req.webhook_url,
-            admin_callback_url: req.admin_callback_url,
-            protocol_version: req.protocol_version,
-            coordination: req.coordination.map(coordination_from_wire),
-            organization_management: req
-                .organization_management
-                .map(organization_management_from_wire),
-            caller_capabilities: req.caller_capabilities,
-        })
-        .await
-        .map_err(provider_error)?;
-    Ok(Json(
-        provider_to_response(provider).map_err(provider_error)?,
-    ))
-}
 
-pub async fn register_provider_bot(
-    State(state): State<HttpAppState>,
-    Path(provider_id): Path<String>,
-    headers: HeaderMap,
-    Json(req): Json<RegisterProviderBotRequest>,
-) -> Result<Json<RegisterProviderBotResponse>, ProviderRouteError> {
-    let provider_admin_token = bearer_token(&headers)?;
-    let allowed_switch_provider = state.allowed_switch_provider_ids.contains(&provider_id);
-    let connection_mode = req
-        .connection_mode
-        .unwrap_or(ProviderBotConnectionModeDto::Gateway);
-    // plugin mode is accepted only for allow-listed providers (§3.0 admission gate).
-    if matches!(connection_mode, ProviderBotConnectionModeDto::Plugin) && !allowed_switch_provider {
-        return Err(ProviderRouteError::bad_request(
-            "connection_mode plugin requires an allow-listed provider",
-        ));
-    }
-    let plugin_mode = matches!(connection_mode, ProviderBotConnectionModeDto::Plugin);
-    let bot_uuid = allowed_switch_provider.then(|| req.provider_bot_ref.clone());
-    let outcome = state
-        .services
-        .provider_management
-        .register_provider_bot(RegisterProviderBotCommand {
-            webhook_url: req.webhook_url,
-            provider_id,
-            provider_admin_token,
-            name: req.name,
-            summary: req.summary,
-            owners: req.owners,
-            provider_bot_ref: req.provider_bot_ref,
-            domains: req.domains,
-            skills: req.skills.into_iter().map(to_core_skill).collect(),
-            scopes: req.scopes,
-            bot_uuid,
-            // Gateway mode over an allow-listed provider rejects a collision where
-            // provider_bot_ref is already used as a bot_uuid; plugin mode relaxes
-            // this so W-before-P /补注册 over an existing real-token bot proceeds to
-            // the token-preserving soft-merge path.
-            reject_existing_bot_uuid: allowed_switch_provider && !plugin_mode,
-            connection_mode,
-        })
-        .await
-        .map_err(provider_error)?;
 
-    if allowed_switch_provider && outcome.created && outcome.actor_kind == ActorKind::Bot {
-        match outcome.capabilities.clone() {
-            Some(capabilities) => {
-                state.dispatch_visibility_sync(VisibilitySyncRequest {
-                    bot_uuid: outcome.bot_uuid.clone(),
-                    visibility: capabilities.visibility.clone(),
-                    capabilities,
-                    actor_kind: outcome.actor_kind,
-                });
-            }
-            None => {
-                warn!(
-                    request_id = %bcs_observability::CurrentRequestId,
-                    provider_id = %outcome.provider_id,
-                    bot_uuid = %outcome.bot_uuid,
-                    "register_provider_bot: allowlisted provider but capabilities missing; \
-                     skipping bcs-fuse sync"
-                );
-            }
-        }
-    }
 
-    Ok(Json(RegisterProviderBotResponse {
-        auth_mode: match outcome.auth_mode {
-            ProviderAuthMode::StaticBearer => ProviderAuthModeDto::StaticBearer,
-            ProviderAuthMode::ProviderAdmin => ProviderAuthModeDto::ProviderAdmin,
-            ProviderAuthMode::AgentPass => ProviderAuthModeDto::AgentPass,
-            ProviderAuthMode::AgentPassSubbots => ProviderAuthModeDto::AgentPassSubbots,
-        },
-        agent_code: outcome.identity.agent_code,
-        bot_slug: outcome.identity.bot_slug,
-        webhook_url: outcome.webhook_url,
-        bot_uuid: outcome.bot_uuid,
-        provider_id: outcome.provider_id,
-        provider_bot_ref: outcome.provider_bot_ref,
-        bot_runtime_token: outcome.bot_runtime_token,
-        message: outcome.message,
-    }))
-}
 
-pub async fn list_provider_bots(
-    State(state): State<HttpAppState>,
-    Path(provider_id): Path<String>,
-    headers: HeaderMap,
-) -> Result<Json<Value>, ProviderRouteError> {
-    let provider_admin_token = bearer_token(&headers)?;
-    let bindings = state
-        .services
-        .provider_management
-        .list_provider_bots(&provider_id, &provider_admin_token)
-        .await
-        .map_err(provider_error)?;
-    let items: Vec<Value> = bindings.into_iter().map(binding_to_json).collect();
-    Ok(Json(json!({ "items": items })))
-}
+
+
+
 
 /// `GET /providers/{provider_id}/bots/by-task-modes` — internal (non-OpenAPI)
 /// roster consumed by backend task discovery/dispatch. Admission mirrors
@@ -797,126 +602,8 @@ where
     T::deserialize(deserializer).map(Some)
 }
 
-/// GET `/providers/{provider_id}/bots/{provider_bot_ref}/caller`.
-/// Read-back of the authoritative Bot caller configuration behind Provider
-/// admin auth. `snapshot: null` means "existing, never configured".
-pub async fn get_provider_bot_caller_config(
-    State(state): State<HttpAppState>,
-    Path((provider_id, provider_bot_ref)): Path<(String, String)>,
-    headers: HeaderMap,
-) -> Result<Json<ProviderBotCallerConfigResponse>, ProviderRouteError> {
-    let provider_admin_token = bearer_token(&headers)?;
-    let bot_uuid = state
-        .services
-        .provider_management
-        .resolve_provider_bot_uuid_for_caller_config(&provider_id, &provider_bot_ref, &provider_admin_token)
-        .await
-        .map_err(provider_error)?;
-    let config = state
-        .services
-        .provider_management
-        .get_provider_bot_caller_configuration(
-            &provider_id,
-            &bot_uuid,
-            &bcs_config::resolve_env_str(),
-            &provider_admin_token,
-        )
-        .await
-        .map_err(provider_error)?;
-    info!(
-        provider_id,
-        provider_bot_ref,
-        configured = config.snapshot.is_some(),
-        "Provider Bot caller configuration read completed"
-    );
-    Ok(Json(ProviderBotCallerConfigResponse {
-        snapshot: config.snapshot.map(caller_snapshot_to_dto),
-    }))
-}
-
-/// PATCH `/providers/{provider_id}/bots/{provider_bot_ref}/caller`.
-/// Full-snapshot sync behind Provider admin auth. The response confirms the
-/// storage linearization only — never readiness or execution authorization.
-pub async fn patch_provider_bot_caller_config(
-    State(state): State<HttpAppState>,
-    Path((provider_id, provider_bot_ref)): Path<(String, String)>,
-    headers: HeaderMap,
-    body: Result<Json<PatchProviderBotCallerConfigRequest>, JsonRejection>,
-) -> Result<Json<SyncProviderBotCallerConfigResponse>, ProviderRouteError> {
-    let provider_admin_token = bearer_token(&headers)?;
-    let Json(body) = body.map_err(|_| {
-        warn!(
-            request_id = %bcs_observability::CurrentRequestId,
-            provider_id,
-            failure = "invalid_json_body",
-            "Provider Bot caller configuration patch rejected"
-        );
-        ProviderRouteError::bad_request("request body is invalid")
-    })?;
-    let bot_uuid = state
-        .services
-        .provider_management
-        .resolve_provider_bot_uuid_for_caller_config(&provider_id, &provider_bot_ref, &provider_admin_token)
-        .await
-        .map_err(provider_error)?;
-    let command = SyncProviderBotCallerConfigurationCommand::new(
-        provider_id.clone(),
-        bot_uuid,
-        bcs_config::resolve_env_str(),
-        bcs_domain::caller_identity::CallerIdentitySnapshot {
-            source_revision: body.snapshot.source_revision,
-            caller_identity: bcs_domain::caller_identity::CallerIdentityConfig {
-                enabled: body.snapshot.caller_identity.enabled,
-                minimum_isolation: bcs_domain::caller_identity::CallerMinimumIsolation::CallerContainer,
-            },
-        },
-    );
-    let (snapshot, sync_status) = match state
-        .services
-        .provider_management
-        .sync_provider_bot_caller_configuration(command, &provider_admin_token)
-        .await
-    {
-        Ok(bcs_service_api::port::repo::CallerConfigurationSync::Applied { snapshot }) => {
-            (Some(snapshot), CallerConfigSyncStatusDto::Applied)
-        }
-        Ok(bcs_service_api::port::repo::CallerConfigurationSync::Unchanged { snapshot }) => {
-            (Some(snapshot), CallerConfigSyncStatusDto::Unchanged)
-        }
-        Ok(bcs_service_api::port::repo::CallerConfigurationSync::Stale { snapshot }) => {
-            (Some(snapshot), CallerConfigSyncStatusDto::Stale)
-        }
-        Ok(bcs_service_api::port::repo::CallerConfigurationSync::Conflict { .. }) => {
-            return Err(ProviderRouteError {
-                status: StatusCode::CONFLICT,
-                message: "caller_configuration_revision_conflict".to_string(),
-            });
-        }
-        Err(error) => return Err(provider_error(error)),
-    };
-    info!(
-        provider_id,
-        provider_bot_ref,
-        sync_status = ?sync_status,
-        "Provider Bot caller configuration sync completed"
-    );
-    Ok(Json(SyncProviderBotCallerConfigResponse {
-        snapshot: snapshot.map(caller_snapshot_to_dto),
-        sync_status,
-    }))
-}
-
-fn caller_snapshot_to_dto(
-    snapshot: bcs_domain::caller_identity::CallerIdentitySnapshot,
-) -> bcs_protocol::http::provider::CallerIdentitySnapshotDto {
-    bcs_protocol::http::provider::CallerIdentitySnapshotDto {
-        source_revision: snapshot.source_revision,
-        caller_identity: bcs_protocol::http::provider::CallerIdentityConfigDto {
-            enabled: snapshot.caller_identity.enabled,
-            minimum_isolation: bcs_protocol::http::provider::CallerMinimumIsolationDto::CallerContainer,
-        },
-    }
-}
+mod caller;
+pub use caller::{get_provider_bot_caller_config, patch_provider_bot_caller_config};
 
 fn bearer_token(headers: &HeaderMap) -> Result<String, ProviderRouteError> {
     bearer_token_with_message(headers, "valid provider admin token is required")
@@ -1252,66 +939,8 @@ fn switch_delivery_error(error: BotUseCaseError) -> ProviderRouteError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn internal_attribute_application_errors_keep_their_http_status() {
-        let cases = vec![
-            (
-                ApplicationError::invalid("invalid", "invalid"),
-                StatusCode::BAD_REQUEST,
-            ),
-            (ApplicationError::Unauthenticated, StatusCode::UNAUTHORIZED),
-            (
-                ApplicationError::forbidden("forbidden"),
-                StatusCode::FORBIDDEN,
-            ),
-            (
-                ApplicationError::not_found("missing", "missing"),
-                StatusCode::NOT_FOUND,
-            ),
-            (
-                ApplicationError::conflict("conflict", "conflict"),
-                StatusCode::CONFLICT,
-            ),
-            (
-                ApplicationError::Gone {
-                    code: "gone".into(),
-                    message: "gone".into(),
-                },
-                StatusCode::GONE,
-            ),
-            (
-                ApplicationError::QuotaExceeded {
-                    code: "quota".into(),
-                    message: "quota".into(),
-                },
-                StatusCode::TOO_MANY_REQUESTS,
-            ),
-            (
-                ApplicationError::payload_too_large("large", "large"),
-                StatusCode::PAYLOAD_TOO_LARGE,
-            ),
-            (
-                ApplicationError::unprocessable("unprocessable", "unprocessable"),
-                StatusCode::UNPROCESSABLE_ENTITY,
-            ),
-            (
-                ApplicationError::bad_gateway("upstream", "upstream"),
-                StatusCode::BAD_GATEWAY,
-            ),
-            (
-                ApplicationError::internal("internal"),
-                StatusCode::INTERNAL_SERVER_ERROR,
-            ),
-        ];
-
-        for (error, expected_status) in cases {
-            assert_eq!(internal_attributes_error(error).status, expected_status);
-        }
-    }
-}
+#[path = "providers/tests.rs"]
+mod tests;
 
 #[cfg(test)]
 #[path = "../../tests/unit/provider_scope.rs"]

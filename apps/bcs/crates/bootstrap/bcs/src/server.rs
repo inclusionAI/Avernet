@@ -176,6 +176,8 @@ use bcs_ws::web::{WorkbenchConnectionRegistry, WorkbenchFrontendDelivery};
 use secrecy::{ExposeSecret, Secret};
 
 mod channel_wiring;
+mod a2a_wiring;
+mod infrastructure_helpers;
 mod http_middleware;
 mod lifecycle_wiring;
 mod output_admission_wiring;

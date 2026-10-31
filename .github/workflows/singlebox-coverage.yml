@@ -46,10 +46,10 @@ jobs:
       # push/dispatch: compare against dev (repo default branch) instead.
       SINGLEBOX_BASE_REF: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'origin/dev' }}
       # Same base for BCS E2E changed-line coverage, which e2e_coverage.sh
-      # reads from these variables: > 50% once a change has >= 20
+      # reads from these variables: > 60% once a change has >= 20
       # instrumentable lines in the e2e scope.
       BCS_E2E_CHANGED_BASE_REF: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'origin/dev' }}
-      BCS_E2E_CHANGED_LINE_MIN: "50"
+      BCS_E2E_CHANGED_LINE_MIN: "60"
 
     defaults:
       run:
