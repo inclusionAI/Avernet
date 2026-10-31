@@ -130,7 +130,7 @@ async fn fixture(mode: Mode) -> Fixture {
     let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap(); });
     let db = Arc::new(LocalSqliteDbPlugin::new().unwrap());
     db.execute(DbStatement::new("CREATE TABLE bcs_bots (bot_uuid TEXT, env TEXT, is_deleted INTEGER DEFAULT 0, gmt_modified TEXT DEFAULT CURRENT_TIMESTAMP)")).await.unwrap();
-    for sql in include_str!("../../../../migrations/sqlite/039_bot_a2a.sql").split(';').map(str::trim).filter(|v|!v.is_empty()) {
+    for sql in bcs_db_api::split_sql_statements(include_str!("../../../../migrations/sqlite/039_bot_a2a.sql")).into_iter() {
         db.execute(DbStatement::new(sql)).await.unwrap();
     }
     let runs = Arc::new(DbA2aRunStore::new(db, "test".into(), DbSqlFlavor::Sqlite));

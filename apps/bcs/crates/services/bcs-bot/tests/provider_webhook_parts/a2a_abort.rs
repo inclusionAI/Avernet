@@ -10,7 +10,7 @@ async fn retained_card_remains_usable_and_abort_preserves_provider_authority_che
     let f=fixture().await;let bound=bot(&f,"stale-card").await;
     let db=Arc::new(LocalSqliteDbPlugin::new().unwrap());
     db.execute(DbStatement::new("CREATE TABLE bcs_bots (bot_uuid TEXT,provider_id TEXT,provider_bot_ref TEXT,env TEXT,connection_mode TEXT,is_deleted INTEGER DEFAULT 0, gmt_modified TEXT DEFAULT CURRENT_TIMESTAMP)")).await.unwrap();
-    for sql in include_str!("../../../../../migrations/sqlite/039_bot_a2a.sql").split(';').map(str::trim).filter(|s|!s.is_empty()) {
+    for sql in bcs_db_api::split_sql_statements(include_str!("../../../../../migrations/sqlite/039_bot_a2a.sql")).into_iter() {
         db.execute(DbStatement::new(sql)).await.unwrap();
     }
     db.execute(DbStatement::with_params("INSERT INTO bcs_bots (bot_uuid,provider_id,provider_bot_ref,env,connection_mode) VALUES (?,?,?,?,?)",
@@ -42,7 +42,7 @@ async fn interfaces_are_derived_from_card_and_current_grpc_policy_without_saved_
     let f=fixture().await;let bound=bot(&f,"derived-route").await;
     let db=Arc::new(LocalSqliteDbPlugin::new().unwrap());
     db.execute(DbStatement::new("CREATE TABLE bcs_bots (bot_uuid TEXT,provider_id TEXT,provider_bot_ref TEXT,env TEXT,connection_mode TEXT,is_deleted INTEGER DEFAULT 0,gmt_modified TEXT DEFAULT CURRENT_TIMESTAMP)")).await.unwrap();
-    for sql in include_str!("../../../../../migrations/sqlite/039_bot_a2a.sql").split(';').map(str::trim).filter(|s|!s.is_empty()) {db.execute(DbStatement::new(sql)).await.unwrap();}
+    for sql in bcs_db_api::split_sql_statements(include_str!("../../../../../migrations/sqlite/039_bot_a2a.sql")).into_iter() {db.execute(DbStatement::new(sql)).await.unwrap();}
     db.execute(DbStatement::with_params("INSERT INTO bcs_bots (bot_uuid,provider_id,provider_bot_ref,env,connection_mode) VALUES (?,?,?,?,?)",
         vec![bound.bot_uuid.clone().into(),f.provider_id.clone().into(),bound.provider_bot_ref.clone().into(),"test".into(),"gateway".into()])).await.unwrap();
     let cards=Arc::new(DbA2aBotStore::sqlite(db,"test".into()));

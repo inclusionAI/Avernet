@@ -10,8 +10,7 @@ async fn database() -> Arc<LocalSqliteDbPlugin> {
     let db = Arc::new(LocalSqliteDbPlugin::new().unwrap());
     db.execute(DbStatement::new("CREATE TABLE bcs_bots (bot_uuid TEXT NOT NULL, env TEXT NOT NULL, provider_id TEXT, provider_bot_ref TEXT, connection_mode TEXT, is_deleted INTEGER NOT NULL DEFAULT 0, gmt_modified TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (bot_uuid, env))")).await.unwrap();
     db.execute(DbStatement::new("INSERT INTO bcs_bots (bot_uuid,env,provider_id,provider_bot_ref,connection_mode,is_deleted) VALUES ('bot', 'test', 'provider', 'remote', 'gateway', 0), ('bot', 'other', 'provider', 'remote', 'gateway', 0), ('plugin', 'test', 'provider', 'plugin', 'plugin', 0)")).await.unwrap();
-    for sql in include_str!("../../../../migrations/sqlite/039_bot_a2a.sql")
-        .split(';').map(str::trim).filter(|s| !s.is_empty()) {
+    for sql in bcs_db_api::split_sql_statements(include_str!("../../../../migrations/sqlite/039_bot_a2a.sql")).into_iter() {
         db.execute(DbStatement::new(sql)).await.unwrap();
     }
     db

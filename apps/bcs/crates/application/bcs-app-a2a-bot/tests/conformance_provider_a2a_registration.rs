@@ -48,7 +48,7 @@ fn command() -> RegisterProviderBotCommand {
 }
 async fn fixture() -> (RegistrationChain,A2aBotManagement,Arc<Fetcher>,Arc<A2aProviderRegistrationCore>) {
     let chain=registration_chain().await;
-    for sql in include_str!("../../../../migrations/sqlite/039_bot_a2a.sql").split(';').map(str::trim).filter(|s|!s.is_empty()) {
+    for sql in bcs_db_api::split_sql_statements(include_str!("../../../../migrations/sqlite/039_bot_a2a.sql")).into_iter() {
         chain.db.execute(DbStatement::new(sql)).await.unwrap();
     }
     chain.db.execute(DbStatement::with_params("UPDATE bcs_providers SET config=? WHERE provider_id='provider-a'",
@@ -143,7 +143,7 @@ async fn provider_a2a_registration_core_conformance() {
     let card=A2aRegistrationCard {agent_card_url:Some("https://example.org/card.json".into()),agent_card:fetched.raw,interface:fetched.interface,
         registered_at_ms:1000,};
     let params=RegisterProviderBotParams {webhook_url:None,bot_name:c.name,summary:c.summary,owners:c.owners,
-        provider_bot_ref:c.provider_bot_ref,domains:c.domains,skills:c.skills,scopes:c.scopes,bot_uuid:None,connection_mode:c.connection_mode};
+        provider_bot_ref:c.provider_bot_ref,domains:c.domains,skills:c.skills,scopes:c.scopes,bot_uuid:None,connection_mode:c.connection_mode,initial_caller:None};
     let created=bcs_test_support::contract::a2a_bot::a2a_provider_registration_core_service_contract_tests(
         core.as_ref(),&c.provider_id,&c.provider_admin_token,params,card).await;
     assert_delegated_owner(&chain,&created.binding.bot_uuid).await;

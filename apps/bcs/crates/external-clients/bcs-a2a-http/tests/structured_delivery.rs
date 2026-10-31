@@ -142,7 +142,7 @@ async fn fixture_with_identity_failure(batch:usize,confirm:bool,wait_ms:u64,fail
     let server=tokio::spawn(async move {axum::serve(listener,router).await.unwrap();});
     let db=Arc::new(LocalSqliteDbPlugin::new().unwrap());
     db.execute(DbStatement::new("CREATE TABLE bcs_bots (bot_uuid TEXT,env TEXT,is_deleted INTEGER DEFAULT 0, gmt_modified TEXT DEFAULT CURRENT_TIMESTAMP)")).await.unwrap();
-    for sql in include_str!("../../../../migrations/sqlite/039_bot_a2a.sql").split(';').map(str::trim).filter(|s|!s.is_empty()) {db.execute(DbStatement::new(sql)).await.unwrap();}
+    for sql in bcs_db_api::split_sql_statements(include_str!("../../../../migrations/sqlite/039_bot_a2a.sql")).into_iter() {db.execute(DbStatement::new(sql)).await.unwrap();}
     if fail_identity {
         db.execute(DbStatement::new("CREATE TRIGGER reject_identity BEFORE INSERT ON bcs_a2a_contexts BEGIN SELECT RAISE(ABORT,'fixture identity write failure'); END")).await.unwrap();
     }

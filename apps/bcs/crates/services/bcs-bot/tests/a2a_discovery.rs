@@ -26,7 +26,7 @@ async fn fixture() -> Fixture {
         friend_ext JSON, friend_check_in_strategy TEXT DEFAULT 'APPROVAL',
         gmt_create TEXT DEFAULT CURRENT_TIMESTAMP,gmt_modified TEXT DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY(bot_uuid,env))")).await.unwrap();
-    for sql in include_str!("../../../../migrations/sqlite/039_bot_a2a.sql").split(';').map(str::trim).filter(|s|!s.is_empty()) {
+    for sql in bcs_db_api::split_sql_statements(include_str!("../../../../migrations/sqlite/039_bot_a2a.sql")).into_iter() {
         db.execute(DbStatement::new(sql)).await.unwrap();
     }
     let env=bcs_config::resolve_env_str();

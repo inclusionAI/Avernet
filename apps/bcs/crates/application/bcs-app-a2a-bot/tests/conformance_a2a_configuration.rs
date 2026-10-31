@@ -66,7 +66,7 @@ async fn fixture() -> Fixture {
     db.execute(DbStatement::new("CREATE TABLE bcs_bots (bot_uuid TEXT NOT NULL, env TEXT NOT NULL, provider_id TEXT, provider_bot_ref TEXT, connection_mode TEXT, webhook_url TEXT, is_deleted INTEGER NOT NULL DEFAULT 0, gmt_modified TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (bot_uuid, env))")).await.unwrap();
     let env = bcs_config::resolve_env_str();
     db.execute(DbStatement::with_params("INSERT INTO bcs_bots (bot_uuid, env, provider_id, provider_bot_ref, connection_mode) VALUES ('bot', ?, ?, 'remote', 'gateway')", vec![env.clone().into(), registered.provider.provider_id.clone().into()])).await.unwrap();
-    for sql in include_str!("../../../../migrations/sqlite/039_bot_a2a.sql").split(';').map(str::trim).filter(|s|!s.is_empty()) {
+    for sql in bcs_db_api::split_sql_statements(include_str!("../../../../migrations/sqlite/039_bot_a2a.sql")).into_iter() {
         db.execute(DbStatement::new(sql)).await.unwrap();
     }
     let cards = Arc::new(DbA2aBotStore::sqlite(db.clone(), env));

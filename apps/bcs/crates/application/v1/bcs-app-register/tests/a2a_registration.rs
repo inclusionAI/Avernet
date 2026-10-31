@@ -30,7 +30,7 @@ impl A2aCardPort for Fetcher {
 
 async fn fixture() -> (RegistrationChain, RegisterServiceImpl, Arc<Fetcher>) {
     let chain=registration_chain().await;
-    for sql in include_str!("../../../../../migrations/sqlite/039_bot_a2a.sql").split(';').map(str::trim).filter(|s|!s.is_empty()) {
+    for sql in bcs_db_api::split_sql_statements(include_str!("../../../../../migrations/sqlite/039_bot_a2a.sql")).into_iter() {
         chain.db.execute(DbStatement::new(sql)).await.unwrap();
     }
     chain.db.execute(DbStatement::with_params("UPDATE bcs_providers SET config=? WHERE provider_id='provider-a'",

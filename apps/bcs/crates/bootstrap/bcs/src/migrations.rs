@@ -521,8 +521,8 @@ async fn apply_sqlite_migration_body(
         37 => add_sqlite_bot_authority_schema(db).await,
         38 => add_sqlite_task_handle_lookup(db).await,
         39 => {
-            let steps = include_str!("../../../../migrations/sqlite/039_bot_a2a.sql")
-                .split(';').map(str::trim).filter(|sql| !sql.is_empty())
+            let steps = bcs_db_api::split_sql_statements(include_str!("../../../../migrations/sqlite/039_bot_a2a.sql"))
+                .into_iter()
                 .map(|sql| DbTransactionStep::Execute(DbStatement::new(sql))).collect();
             db.transaction(steps).await?;
             Ok(())
