@@ -62,4 +62,4 @@ def test_the_promotion_settler_is_the_completion_maps_genome_row() -> None:
     injector = build_injector(profile=DeployProfile.TEST)
     handlers = injector.get(StateCompletionHandlers)
     assert isinstance(handlers[GENOME_STATE_KIND], GenomeCompletionHandler)
-    assert injector.get(ApplyRunServiceProtocol)._completion[GENOME_STATE_KIND] is handlers[GENOME_STATE_KIND]
+    assert injector.get(ApplyRunServiceProtocol)._completion._handlers[GENOME_STATE_KIND] is handlers[GENOME_STATE_KIND]

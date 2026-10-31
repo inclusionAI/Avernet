@@ -24,8 +24,17 @@ from typing import Dict, Protocol, runtime_checkable
 
 from agentclaw.community.core.apply_engine.compiler import StateRef
 from agentclaw.community.core.apply_engine.outcomes import ApplyReport, ApplyStatus, EntryOutcome
+from agentclaw.community.log import get_logger
 
-__all__ = ["ApplyCompletionHandler", "ApplyOutcome", "StateCompletionHandlers", "outcome_of"]
+__all__ = [
+    "ApplyCompletionHandler",
+    "ApplyOutcome",
+    "CompletionPublisher",
+    "StateCompletionHandlers",
+    "outcome_of",
+]
+
+logger = get_logger()
 
 #: How many undelivered entries a summary names before it counts the rest.
 _NAMED = 3
@@ -87,3 +96,31 @@ class ApplyCompletionHandler(Protocol):
 #: The run service's subscribers: one per state kind. A map multibinding, so each producer's module contributes its
 #: own row; a kind with no row is told nothing.
 StateCompletionHandlers = Dict[str, ApplyCompletionHandler]
+
+
+class CompletionPublisher:
+    """Tells the subscriber registered for an apply's state kind how that apply ended.
+
+    The one place the run service and the unstartable-task path publish through. ``publish`` answers what
+    the subscriber raised instead of raising it, because every caller has to decide about the apply lock
+    first: it keeps the lock and re-raises, so the task queue runs the task again and the re-run publishes.
+    """
+
+    def __init__(self, handlers: StateCompletionHandlers) -> None:
+        self._handlers = dict(handlers)
+
+    def publish(
+        self, *, env: str, entity_id: str, bot_id: str, state: StateRef, report: ApplyReport
+    ) -> Exception | None:
+        """Hand ``report``'s outcome to the kind's subscriber; ``None`` when it took it or the kind has none."""
+        handler = self._handlers.get(state.kind)
+        if handler is None:
+            return None
+        try:
+            handler.on_finished(env=env, entity_id=entity_id, bot_id=bot_id, state=state, outcome=outcome_of(report))
+        except Exception as exc:  # noqa: BLE001 - answered to the caller, which keeps the lock and re-raises
+            logger.exception(
+                "[manifest_apply] completion handler raised, apply_id=%s, kind=%s", report.apply_id, state.kind
+            )
+            return exc
+        return None
