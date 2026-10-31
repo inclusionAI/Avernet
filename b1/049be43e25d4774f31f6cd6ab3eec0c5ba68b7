@@ -1,0 +1,23 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/inventory.py
+  s_cecdc98e721f4b::t_50bf2183c90895 88-92,122-126
+apps/bcs/scripts/e2e-runner/executor-migration.json
+  s_cecdc98e721f4b::t_f1c6d9c74fdde2 227-229,238-240,285-287,305-307,316-318
+apps/bcs/scripts/e2e-runner/tests/test_migration_inventory.py
+  s_cecdc98e721f4b::t_5799c149220b07 680-684
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b1049be43e25d4774f31f6cd6ab3eec0c5ba68b7",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
