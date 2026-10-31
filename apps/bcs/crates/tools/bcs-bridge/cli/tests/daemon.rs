@@ -83,6 +83,25 @@ fn diagnostic(output: &Output) -> String {
 fn success(output: &Output) { assert!(output.status.success(), "{}", diagnostic(output)); }
 
 #[tokio::test]
+async fn daemon_start_discovers_a_unique_profile_and_retains_it_in_status() {
+    let fixture = Fixture::new();
+    let directory = fixture.home.path().join(".bcn-bridge/profiles/codex-prod");
+    fs::create_dir_all(&directory).unwrap();
+    let config = directory.join("bridge.toml");
+    fs::rename(&fixture.config, &config).unwrap();
+    let output = fixture.output(&["start", "--daemon"]).await;
+    success(&output);
+    assert!(diagnostic(&output).contains("Using bridge profile: codex-prod"));
+    assert!(fixture.ping().await);
+    assert_eq!(Path::new(fixture.record()["config"].as_str().unwrap()), config.canonicalize().unwrap());
+    assert!(directory.join("state.sqlite3").exists());
+    let status = fixture.output(&["status"]).await;
+    success(&status);
+    assert!(diagnostic(&status).contains(config.canonicalize().unwrap().to_str().unwrap()));
+    success(&fixture.output(&["stop"]).await);
+}
+
+#[tokio::test]
 async fn lifecycle_help_and_stopped_commands_need_no_config_or_credentials() {
     let fixture = Fixture::new();
     let help = fixture.output(&["start", "--help"]).await;
