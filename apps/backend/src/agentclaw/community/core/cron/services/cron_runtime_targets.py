@@ -33,6 +33,27 @@ CRON_READ_TIMEOUT_SECONDS = 10.0
 RUNTIME_DEVICE_QUERY_TIMEOUT_SECONDS = 10.0
 RUNTIME_DEVICE_QUERY_CONCURRENCY = 8
 RUNTIME_QUERY_PREPARE_CONCURRENCY = 8
+# 生产 corp tracing hook 会把底层 httpx 传输异常包装成 opaque send-hook 异常。
+# 只读 cron 聚合对这一类瞬时失败重试一次；保留其它失败/超时的原分类。
+MAX_HTTPX_SEND_HOOK_RETRIES = 1
+HTTPX_SEND_HOOK_FAILURE = "Error in httpx send hook"
+
+
+def _is_httpx_send_hook_failure(e: BaseException) -> bool:
+    """Detect an opaque send-hook failure surfaced by the Baas HTTP path.
+
+    The corp tracing hook hides the underlying ``httpx.RequestError``. For cron
+    listing these are read-only control-plane calls and exactly one idempotent
+    retry can avoid a spurious missing-bot status in the aggregate response.
+    """
+    current: BaseException | None = e
+    visited: set[int] = set()
+    while current is not None and id(current) not in visited:
+        if isinstance(current, Exception) and str(current).endswith(HTTPX_SEND_HOOK_FAILURE):
+            return True
+        visited.add(id(current))
+        current = current.__cause__ or current.__context__
+    return False
 
 
 @dataclass(frozen=True)
@@ -325,33 +346,55 @@ class CronRuntimeTargetMixin:
             return failure
         assert ctx is not None
 
-        # 下游异常统一转换成可聚合的失败原因。
-        try:
-            result = await self._invoke_transport(
-                ctx.conn_info,
-                method="GET",
-                path=path,
-                body=None,
-                params=None,
-            )
-        except CronApiTimeoutError as e:
-            logger.warning(
-                "[_fetch_runtime_target_crons] Adapter request timed out for "
-                "bot=%s stage=%s: %s",
-                target.bot_id,
-                target.runtime_stage,
-                e,
-            )
-            return {"success": False, "reason": "cron_api_timeout", "error": str(e)}
-        except Exception as e:
+        # 下游异常统一转换成可聚合的失败原因。生产 corp tracing hook 会把
+        # 底层 httpx 传输异常包装成 opaque send-hook 异常；这类只读 GET
+        # 可有一次幂等重试，其他失败/超时保持原分类。
+        last_error: BaseException | None = None
+        result: dict[str, Any] | None = None
+        for attempt in range(1 + MAX_HTTPX_SEND_HOOK_RETRIES):
+            try:
+                result = await self._invoke_transport(
+                    ctx.conn_info,
+                    method="GET",
+                    path=path,
+                    body=None,
+                    params=None,
+                )
+                break
+            except CronApiTimeoutError as e:
+                logger.warning(
+                    "[_fetch_runtime_target_crons] Adapter request timed out for "
+                    "bot=%s stage=%s: %s",
+                    target.bot_id,
+                    target.runtime_stage,
+                    e,
+                )
+                return {"success": False, "reason": "cron_api_timeout", "error": str(e)}
+            except Exception as e:
+                last_error = e
+                if not _is_httpx_send_hook_failure(e) or attempt >= MAX_HTTPX_SEND_HOOK_RETRIES:
+                    break
+                logger.warning(
+                    "[_fetch_runtime_target_crons] Transient httpx send hook "
+                    "failure for bot=%s stage=%s; retrying (%d/%d)",
+                    target.bot_id,
+                    target.runtime_stage,
+                    attempt + 1,
+                    MAX_HTTPX_SEND_HOOK_RETRIES,
+                    exc_info=e,
+                )
+
+        assert result is not None or last_error is not None
+        if result is None:
+            error = last_error if last_error is not None else RuntimeError("no cron api result")
             logger.error(
                 "[_fetch_runtime_target_crons] Adapter request failed for "
                 "bot=%s stage=%s: %s",
                 target.bot_id,
                 target.runtime_stage,
-                e,
+                error,
             )
-            return {"success": False, "reason": "cron_api_failed", "error": str(e)}
+            return {"success": False, "reason": "cron_api_failed", "error": str(error)}
 
         if not result.get("success", True):
             return {
