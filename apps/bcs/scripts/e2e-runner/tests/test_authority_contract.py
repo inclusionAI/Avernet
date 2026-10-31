@@ -169,7 +169,8 @@ class AuthorityContractTests(unittest.TestCase):
         self.assertNotIn(contract.PARENT, KNOWN_UNMAPPED_LEGACY_IDS)
         self.assertEqual(load_executor_migration()[contract.PARENT],
                          {'mode': 'DUAL', 'preprod_verdict': 'NOT_RUN',
-                          'gates': [], 'notes': []})
+                          'gates': [],
+                          'notes': ['AUTHORITY_DENSITY_42_OBLIGATIONS_20261031']})
         legacy_ids = [row['id'] for row in current_manifest()['legacy_inventory']]
         self.assertEqual(legacy_ids.count(contract.PARENT), 1)
 
