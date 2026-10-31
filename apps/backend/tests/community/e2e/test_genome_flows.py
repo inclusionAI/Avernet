@@ -185,14 +185,13 @@ def test_capture_patch_diff_draft_promote_deliver_and_go_back(app_with_testing_m
     assert "apply_kind" not in promoted
     assert client.get(f"{genome}/refs", params=query).json()["data"]["refs"] == refs_before
 
-    # 6. the apply runs: the promotion settles, active moves, and the bot reads as r2. A revision's MCP list
-    # never names the platform's default servers (capture leaves them out) and the apply declines to remove
-    # them, so the delivery is partial until the desired state carries the platform defaults (desiredSkillSet).
+    # 6. the apply runs: the promotion settles, active moves, and the bot reads as r2. The revision speaks only
+    # for Direct skills and MCP servers, so the platform's default servers are left as they are.
     _run_queued_apply(world, promoted["id"])
     settled = client.get(f"{genome}/promotions/{promoted['id']}", params=query).json()["data"]
-    assert settled["status"] == "applied_partial", settled["apply_detail"]
+    assert settled["status"] == "applied", settled["apply_detail"]
     refs = {ref["name"]: ref for ref in client.get(f"{genome}/refs", params=query).json()["data"]["refs"]}
-    assert (refs["active"]["revision"], refs["active"]["labels"]) == (second["id"], ["partial"])
+    assert (refs["active"]["revision"], refs["active"]["labels"]) == (second["id"], [])
     assert client.get(f"{genome}/revisions/r2", params=query).json()["data"]["revision"]["status"] == "promoted"
     soul = asyncio.run(identity.read_identity_file("staff", _OWNER, bot_id, "SOUL.md", _OWNER, engine_type="openclaw"))
     assert "Confirm the order id before quoting amounts." in soul, "the patched SOUL.md is on the bot"
@@ -208,7 +207,7 @@ def test_capture_patch_diff_draft_promote_deliver_and_go_back(app_with_testing_m
     assert r.status_code == 201, r.text
     back = r.json()["data"]
     _run_queued_apply(world, back["id"])
-    assert client.get(f"{genome}/promotions/{back['id']}", params=query).json()["data"]["status"] == "applied_partial"
+    assert client.get(f"{genome}/promotions/{back['id']}", params=query).json()["data"]["status"] == "applied"
     refs = {ref["name"]: ref["revision"] for ref in client.get(f"{genome}/refs", params=query).json()["data"]["refs"]}
     assert (refs["active"], refs["previous"]) == (first["id"], second["id"])
     recaptured = client.post(f"{genome}/revisions:capture", params=query).json()["data"]

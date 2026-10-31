@@ -1,10 +1,15 @@
-"""Materialise the desired skills as the bot's complete Skill and Bot-owned Local snapshot.
+"""Materialise the desired skills as the bot's complete Direct Skill and Bot-owned Local snapshot.
+
+The declaration speaks only for Direct skills: a runtime name the bot's skill
+sets supply (an active ordinary set, the Default less its exclusions) is
+outside it — never counted as current, never removed. Declaring such a name is
+a conflict (``set_conflicts``), which refuses the whole apply before anything
+is written, so a claim never has to touch a set.
 
 Every declared local package is validated and fully written through the normal
-Local package road, then converted to a Direct claim. Ordinary SkillSet
-memberships with the same runtime name are detached; Default supply is
-excluded. Existing effective names report ``updated`` and inactive or absent
-names report ``created``—package equality is deliberately not probed.
+Local package road, then claimed Direct. Existing Direct names report
+``updated`` and absent names report ``created``—package equality is
+deliberately not probed.
 
 A declared Skill Center skill (by its runtime name) or shared-repository
 skill (by its path) is found through ``SharedSkillPort`` — the Skill Center's
@@ -13,9 +18,9 @@ asset itself becomes the Direct claim; it is never copied into bot-owned
 storage. None found, or several Center skills of one name, fails that entry
 with the reason, which aborts the category the way any resolve failure does.
 
-When the section is present, every omitted effective Skill is removed and every
-omitted Bot-owned Local asset is additionally unreferenced, physically deleted,
-and removed from the catalog. Shared Repo/Center assets are never physically
+When the section is present, every omitted Direct Skill is removed and every
+omitted Bot-owned Local asset no set supplies is additionally physically
+deleted and removed from the catalog. Shared Repo/Center assets are never physically
 deleted. The complete Local catalog, not only active Installations, makes failed
 cleanup discoverable on a later Apply.
 """
@@ -39,6 +44,7 @@ from agentclaw.community.core.apply_engine.registry import (
     CategoryPlan,
     ConfirmedPartialWriteError,
     Intent,
+    ChecksSetSupply,
     Materialiser,
     PlannedEntry,
     ResolveFailure,
@@ -109,7 +115,12 @@ class _SkillPackage:
         self.note = note
 
 
-class SkillsMaterialiser(Materialiser):
+def _without(assets: dict[str, Any], supplied: frozenset[str]) -> dict[str, Any]:
+    """The assets by name, less the names a skill set supplies: the Direct ones."""
+    return {name: asset for name, asset in assets.items() if name not in supplied}
+
+
+class SkillsMaterialiser(Materialiser, ChecksSetSupply):
     """Converges the bot's active skills toward the declared package set.
 
     ``identity`` is the entry's ``name``, e.g. ``"quality-check"``, and
@@ -201,9 +212,10 @@ class SkillsMaterialiser(Materialiser):
     async def plan(
         self, ctx: ApplyContext, intents: Sequence[Intent]
     ) -> CategoryPlan:
-        """Classify against effective names and include inactive Local cleanup."""
-        area = self._area(ctx)
-        local_assets = self._local_assets(ctx)
+        """Classify against Direct names and include inactive Local cleanup."""
+        supplied = self._set_supplied(ctx)
+        area = _without(self._area(ctx), supplied)
+        local_assets = _without(self._local_assets(ctx), supplied)
         declared = {intent.identity for intent in intents}
 
         planned = [
@@ -275,7 +287,7 @@ class SkillsMaterialiser(Materialiser):
 
             # Re-read identities for removals; the plan deliberately carries
             # names rather than persistence ids.
-            area = self._assets_for_removal(ctx)
+            area = _without(self._assets_for_removal(ctx), self._set_supplied(ctx))
             for name in plan.removals:
                 asset = area.get(name)
                 if asset is None:
@@ -287,7 +299,6 @@ class SkillsMaterialiser(Materialiser):
                     owner_id=ctx.entity_id,
                     actor_id=ctx.actor_id,
                     apply_id=ctx.apply_id,
-                    remove_inactive_memberships=is_local,
                 )
                 confirmed_write = True
                 if is_local:
@@ -333,6 +344,25 @@ class SkillsMaterialiser(Materialiser):
                 bot_id=ctx.bot_id, owner_id=ctx.owner_id, bot=ctx.bot
             )
         }
+
+    def _set_supplied(self, ctx: ApplyContext) -> frozenset[str]:
+        """The runtime names the bot's skill sets supply; outside the declaration, whatever it says."""
+        names, _mcps = self._activation.set_supplied_capabilities(
+            bot_id=ctx.bot_id, owner_id=ctx.entity_id, actor_id=ctx.actor_id
+        )
+        return frozenset(names)
+
+    async def set_conflicts(self, ctx: ApplyContext, entries: Sequence[DesiredSkill]) -> tuple[ResolveFailure, ...]:
+        supplied = self._set_supplied(ctx)
+        return tuple(
+            ResolveFailure(
+                entry.name,
+                "a skill of this name is supplied by one of the bot's skill sets; declare it there or remove it "
+                "from the set",
+            )
+            for entry in entries
+            if entry.name in supplied
+        )
 
     def _assets_for_removal(self, ctx: ApplyContext) -> dict[str, Any]:
         return {**self._area(ctx), **self._local_assets(ctx)}

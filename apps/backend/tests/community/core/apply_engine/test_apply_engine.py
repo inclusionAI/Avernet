@@ -456,7 +456,9 @@ manifest:
 
 
 @pytest.mark.asyncio
-async def test_set_managed_mcp_is_converted_to_a_direct_claim():
+async def test_a_declared_set_supplied_mcp_refuses_the_whole_apply_before_any_write():
+    """An apply speaks only for Direct servers; declaring one a skill set supplies is a conflict, and the apply is
+    refused before anything is written — not converted, as a Manifest apply once did."""
     activations = FakeActivationService(installed={"owned"})
     activations.set_managed = {"owned"}
 
@@ -467,36 +469,16 @@ manifest:
   mcp:
     - server_code: new-first
     - server_code: owned
-      config:
-        headers:
-          X-Project: value
 """,
     )
 
-    assert report.status is ApplyStatus.SUCCEEDED
-    assert _outcomes(report) == {
-        "new-first": EntryOutcome.CREATED,
-        "owned": EntryOutcome.UPDATED,
-    }
-    assert activations.set_managed == set()
-    assert activations.installed == {"new-first", "owned"}
+    assert report.status is ApplyStatus.FAILED
+    assert _outcomes(report) == {"new-first": EntryOutcome.SKIPPED, "owned": EntryOutcome.FAILED}
+    assert "skill sets" in next(e.reason for e in report.categories[0].entries if e.identity == "owned")
+    assert activations.writes == 0 and activations.installed == {"owned"}
 
 
-@pytest.mark.asyncio
-async def test_source_only_mcp_conversion_reports_unchanged_but_writes():
-    activations = FakeActivationService(installed={"owned"})
-    activations.set_managed = {"owned"}
 
-    engine = _engine(activations=activations)
-    document = "schema_version: 1\nmanifest:\n  mcp:\n    - server_code: owned\n"
-    report = await _apply(engine, document)
-
-    assert _outcomes(report) == {"owned": EntryOutcome.UNCHANGED}
-    assert activations.configured == [("owned", None)]
-    assert activations.set_managed == set()
-    again = await _apply(engine, document)
-    assert _outcomes(again) == {"owned": EntryOutcome.UNCHANGED}
-    assert activations.configured == [("owned", None)]
 
 
 @pytest.mark.asyncio
@@ -541,7 +523,32 @@ async def test_explicit_dependency_becomes_direct_but_reports_unchanged():
 
 
 @pytest.mark.asyncio
-async def test_omitted_active_set_managed_mcp_is_removed_from_explicit_supply():
+async def test_a_set_conflict_refuses_every_category_not_only_its_own():
+    """The script category has no conflict of its own, but the apply is refused as a whole before any write."""
+    scripts = FakeStartupScriptService(body="before")
+    activations = FakeActivationService()
+    activations.set_managed = {"owned"}
+
+    report = await _apply(
+        _engine(scripts, activations),
+        """schema_version: 1
+manifest:
+  mcp:
+    - server_code: owned
+script:
+  body: "echo hi"
+""",
+    )
+
+    assert report.status is ApplyStatus.FAILED
+    assert all(category.aborted for category in report.categories)
+    script_entry = next(c for c in report.categories if c.construct is Section.SCRIPT).entries[0]
+    assert script_entry.outcome is EntryOutcome.FAILED and "skill sets" in (script_entry.reason or "")
+    assert scripts.body == "before" and scripts.writes == 0 and activations.writes == 0
+
+
+@pytest.mark.asyncio
+async def test_an_omitted_set_supplied_mcp_is_left_alone():
     activations = FakeActivationService(installed={"keep", "owned"})
     activations.set_managed = {"owned"}
 
@@ -551,9 +558,8 @@ async def test_omitted_active_set_managed_mcp_is_removed_from_explicit_supply():
     )
 
     assert report.status is ApplyStatus.SUCCEEDED
-    assert activations.deactivated == ["owned"]
-    assert activations.installed == {"keep"}
-    assert report.categories[0].removals == ("owned",)
+    assert activations.deactivated == [] and report.categories[0].removals == ()
+    assert activations.installed == {"keep", "owned"}
 
 
 # ── per-category area ───────────────────────────────────────────────────────
@@ -852,37 +858,20 @@ def test_a_stored_source_mode_outside_the_enum_reads_as_no_opinion_and_the_rest_
 
 
 @pytest.mark.asyncio
-async def test_a_platform_default_is_converted_to_a_direct_claim():
-    """The review finding, as its regression test.
-
-    ``activate_mcp`` refuses a code the bot's engine/template policy owns, from
-    a guard that runs *before* the permission check. Only asking about
-    permission meant a declaration of ``{ordinary, platform-default}`` passed
-    resolve, activated the ordinary one for real, and then raised — leaving the
-    category half-written and reported aborted.
-
-    The assertion that matters is ``writes == 0``: not "the apply failed", which
-    it did before the fix too, but that it failed *having written nothing*.
-    """
+async def test_a_declared_platform_default_refuses_the_whole_apply():
+    """A platform default MCP server is supplied, not the declaration's: declaring one refuses the apply, and
+    the ordinary server beside it is not written either."""
     activations = FakeActivationService(platform_defaults={"platform-owned"})
-    engine = _engine(activations=activations)
-    document = (
+    report = await _apply(
+        _engine(activations=activations),
         "schema_version: 1\nmanifest:\n  mcp:\n"
         "    - server_code: ordinary\n"
-        "    - server_code: platform-owned\n"
+        "    - server_code: platform-owned\n",
     )
-    report = await _apply(engine, document)
 
-    assert activations.writes == 2
-    assert activations.installed == {"ordinary", "platform-owned"}
-    assert report.categories[0].aborted is False
-    assert _outcomes(report) == {
-        "ordinary": EntryOutcome.CREATED,
-        "platform-owned": EntryOutcome.UNCHANGED,
-    }
-    configured = list(activations.configured)
-    await _apply(engine, document)
-    assert activations.configured == configured
+    assert report.status is ApplyStatus.FAILED
+    assert _outcomes(report) == {"ordinary": EntryOutcome.SKIPPED, "platform-owned": EntryOutcome.FAILED}
+    assert activations.writes == 0
 
 
 @pytest.mark.asyncio
@@ -900,43 +889,28 @@ async def test_the_ordinary_server_still_applies_when_no_default_is_declared():
 
 
 @pytest.mark.asyncio
-async def test_a_platform_default_is_excluded_when_omitted():
-    """The removal half of the same guard.
-
-    Overwrite reads an absent entry as "remove it", but a platform default is
-    one the manifest may not declare in the first place, so its absence cannot
-    be a request. Reachable because ``server_codes_for`` is keyed off
-    ``active_engine``/``template_type``: an ordinary installed server becomes a
-    default the moment a bot's engine changes. Left in the removal set, every
-    later apply would call ``deactivate_mcp`` on it and abort the category for
-    something no author could fix from the document.
-    """
+async def test_an_omitted_platform_default_is_left_alone():
+    """A captured revision never names the platform's default servers; applying it must not remove them."""
     activations = FakeActivationService(
-        installed={"keep", "became-a-default"},
-        platform_defaults={"became-a-default"},
+        installed={"keep", "a-default"},
+        platform_defaults={"a-default"},
     )
     report = await _apply(
         _engine(activations=activations),
         "schema_version: 1\nmanifest:\n  mcp:\n    - server_code: keep\n",
     )
 
-    assert report.categories[0].aborted is False
-    assert activations.deactivated == ["became-a-default"]
-    assert report.categories[0].removals == ("became-a-default",)
-    assert "became-a-default" not in activations.installed
+    assert report.status is ApplyStatus.SUCCEEDED
+    assert activations.deactivated == [] and report.categories[0].removals == ()
+    assert "a-default" in activations.installed
 
 
 @pytest.mark.asyncio
-async def test_an_unanswerable_platform_default_lookup_writes_nothing():
-    """Fail-closed, in the direction that keeps the manifest's reach narrow.
-
-    Returning an empty set when the policy cannot be reached would restore the
-    original bug exactly — every code would look un-owned and the write would
-    discover the truth mid-loop.
-    """
+async def test_an_unanswerable_set_supply_lookup_refuses_the_apply_and_writes_nothing():
+    """Fail-closed: a check that cannot say what the skill sets supply cannot let a claim through."""
 
     class Unreachable(FakeActivationService):
-        def platform_default_mcp_codes(self, **_kwargs):
+        def set_supplied_capabilities(self, **_kwargs):
             raise RuntimeError("policy lookup unavailable")
 
     activations = Unreachable()
@@ -946,7 +920,7 @@ async def test_an_unanswerable_platform_default_lookup_writes_nothing():
     )
 
     assert activations.writes == 0
-    assert report.categories[0].aborted is True
+    assert report.status is ApplyStatus.FAILED and report.categories[0].aborted is True
 
 
 # ── an aborted category must never read as success ──────────────────────────

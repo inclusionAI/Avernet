@@ -79,34 +79,11 @@ class _DelegatingActivation(ActivationPort):
             bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
         )
 
-    def apply_direct_mcp_codes(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        actor_id: str,
-        server_codes: set[str],
-    ) -> set[str]:
-        return self._inner.apply_direct_mcp_codes(
-            bot_id=bot_id,
-            owner_id=owner_id,
-            actor_id=actor_id,
-            server_codes=server_codes,
-        )
-
-    def set_managed_mcp_codes(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        actor_id: str,
-        server_codes: set[str],
-    ) -> set[str]:
-        return self._inner.set_managed_mcp_codes(
-            bot_id=bot_id,
-            owner_id=owner_id,
-            actor_id=actor_id,
-            server_codes=server_codes,
+    def set_supplied_capabilities(
+        self, *, bot_id: str, owner_id: str, actor_id: str
+    ) -> tuple[frozenset[str], frozenset[str]]:
+        return self._inner.set_supplied_capabilities(
+            bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
         )
 
     # ── writes, each pinned to this family's projection choice ───────────
@@ -187,7 +164,6 @@ class _DelegatingActivation(ActivationPort):
         owner_id: str,
         actor_id: str,
         apply_id: str | None,
-        remove_inactive_memberships: bool,
     ) -> dict[str, Any]:
         return await self._inner.remove_apply_skill(
             skill_id=skill_id,
@@ -195,7 +171,6 @@ class _DelegatingActivation(ActivationPort):
             owner_id=owner_id,
             actor_id=actor_id,
             apply_id=apply_id,
-            remove_inactive_memberships=remove_inactive_memberships,
             project=self._PROJECT,
         )
 

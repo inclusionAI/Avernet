@@ -784,6 +784,9 @@ class FakeActivationService:
     platform defaults would pass every test here while half-writing the category
     in production, which is exactly the gap this models. ``governed_skills``
     models the same refusal for skills: ids a Set or the default set supplies.
+
+    What the bot's Sets supply (``set_supplied_capabilities``) is ``set_managed`` plus ``platform_defaults``
+    for MCP, and ``set_skill_names`` for skills; the apply's claims refuse those, as the real repository does.
     """
 
     def __init__(
@@ -795,8 +798,8 @@ class FakeActivationService:
         self.installed = set(installed or ())
         self.platform_defaults = set(platform_defaults or ())
         self.set_managed: set[str] = set()
+        self.set_skill_names: set[str] = set()
         self.mcp_overrides: dict[str, dict] = {}
-        self.manifest_direct_mcps: set[str] = set()
         self.configured: list[tuple[str, dict | None]] = []
         self.governed_skills = set(governed_skills or ())
         self.activated: list[str] = []
@@ -823,21 +826,10 @@ class FakeActivationService:
     ) -> dict[str, dict]:
         return dict(self.mcp_overrides)
 
-    def apply_direct_mcp_codes(
-        self, *, bot_id: str, owner_id: str, actor_id: str,
-        server_codes: set[str],
-    ) -> set[str]:
-        return set(server_codes) & self.manifest_direct_mcps
-
-    def set_managed_mcp_codes(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        actor_id: str,
-        server_codes: set[str],
-    ) -> set[str]:
-        return set(server_codes) & self.set_managed
+    def set_supplied_capabilities(
+        self, *, bot_id: str, owner_id: str, actor_id: str
+    ) -> tuple[frozenset[str], frozenset[str]]:
+        return frozenset(self.set_skill_names), frozenset(self.set_managed | self.platform_defaults)
 
     async def activate_mcp(
         self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str,
@@ -877,7 +869,6 @@ class FakeActivationService:
         self._refuse_if_platform_owned(server_code)
         self.deactivated.append(server_code)
         self.installed.discard(server_code)
-        self.manifest_direct_mcps.discard(server_code)
         self.mcp_overrides.pop(server_code, None)
         return {}
 
@@ -906,19 +897,18 @@ class FakeActivationService:
         apply_id: str | None, project: bool = True,
     ) -> dict[str, Any]:
         self.projections.append(project)
-        self.governed_skills.discard(int(skill_id))
+        self._refuse_if_governed(skill_id)
         self.installed_skills.add(int(skill_id))
         self.skill_activations.append(int(skill_id))
         return {"id": skill_id, "changed": True}
 
     async def remove_apply_skill(
         self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
-        apply_id: str | None, remove_inactive_memberships: bool,
-        project: bool = True,
+        apply_id: str | None, project: bool = True,
     ) -> dict[str, Any]:
         self.projections.append(project)
+        self._refuse_if_governed(skill_id)
         self.installed_skills.discard(int(skill_id))
-        self.governed_skills.discard(int(skill_id))
         self.skill_deactivations.append(int(skill_id))
         return {"id": skill_id, "changed": True}
 
@@ -928,9 +918,8 @@ class FakeActivationService:
         project: bool = True,
     ) -> dict[str, Any]:
         self.projections.append(project)
-        self.set_managed.discard(server_code)
+        self._refuse_if_set_supplied(server_code)
         self.installed.add(server_code)
-        self.manifest_direct_mcps.add(server_code)
         self.configured.append((server_code, config))
         if config:
             self.mcp_overrides[server_code] = dict(config)
@@ -943,11 +932,15 @@ class FakeActivationService:
         apply_id: str | None, project: bool = True,
     ) -> dict[str, Any]:
         self.projections.append(project)
+        self._refuse_if_set_supplied(server_code)
         self.deactivated.append(server_code)
         self.installed.discard(server_code)
-        self.manifest_direct_mcps.discard(server_code)
         self.mcp_overrides.pop(server_code, None)
         return {}
+
+    def _refuse_if_set_supplied(self, server_code: str) -> None:
+        if server_code in self.set_managed | self.platform_defaults:
+            raise PlatformPolicyConflict("APPLY_SET_SUPPLIED")
 
     def _refuse_if_platform_owned(self, server_code: str) -> None:
         if server_code in self.platform_defaults:

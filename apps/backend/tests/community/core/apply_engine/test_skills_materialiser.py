@@ -595,6 +595,23 @@ def test_undeclared_members_of_the_area_are_removed_by_name():
     assert activation.skill_activations  # source is converted to Direct
 
 
+def test_a_set_supplied_skill_is_never_removed_and_is_a_conflict_when_declared():
+    """The declaration speaks only for Direct skills: a name a skill set supplies is neither current nor
+    removable, and declaring it is a conflict the orchestrator refuses the apply on."""
+    materialiser, _, activation, _, _, _ = skill_rig(
+        assets=[skill_asset(11, "from-a-set"), skill_asset(12, "quality-check")],
+        packages={QC_KEY: QZ},
+    )
+    activation.set_skill_names = {"from-a-set"}
+    _, plan, _ = _run(_apply(materialiser, _ctx(), [_declared()]))
+    assert plan.removals == () and activation.skill_deactivations == []
+
+    raw = materialiser.materialiser
+    conflicts = _run(raw.set_conflicts(_ctx(), [DesiredSkill("from-a-set", CenterSkillByName())]))
+    assert [(c.identity, "skill sets" in c.reason) for c in conflicts] == [("from-a-set", True)]
+    assert _run(raw.set_conflicts(_ctx(), [DesiredSkill("quality-check", CenterSkillByName())])) == ()
+
+
 # ── parity with the upload path, by construction ───────────────────────────
 
 

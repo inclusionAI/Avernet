@@ -140,7 +140,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
         apply_id: str | None,
         project: bool = True,
     ) -> dict[str, Any]:
-        """Manifest-only source conversion; ordinary activation stays guarded."""
+        """An apply's Direct claim; refused when a Set supplies the runtime name."""
         skill, bot = self._resolve_skill(
             skill_id=skill_id, bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
         )
@@ -191,7 +191,6 @@ class DirectActivationService(DirectActivationServiceProtocol):
         owner_id: str,
         actor_id: str,
         apply_id: str | None,
-        remove_inactive_memberships: bool,
         project: bool = True,
     ) -> dict[str, Any]:
         skill, bot = self._resolve_skill(
@@ -206,7 +205,6 @@ class DirectActivationService(DirectActivationServiceProtocol):
                 bot_id=bot_id,
                 owner_id=resource_owner_id,
                 skill_id=str(skill["id"]),
-                remove_inactive_memberships=remove_inactive_memberships,
                 engine_type=bot_engine_type(bot),
                 default_engine_types=bot_default_engine_types(bot),
             )
@@ -400,7 +398,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
         apply_id: str | None,
         project: bool = True,
     ) -> dict[str, Any]:
-        """Manifest-only conversion to Direct plus complete Bot override."""
+        """An apply's Direct MCP claim plus complete Bot override; refused when a Set supplies it."""
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
         self._require_mcp_permission(actor_id=actor_id, server_code=server_code)
         mutation_result = None
@@ -455,7 +453,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
         apply_id: str | None,
         project: bool = True,
     ) -> dict[str, Any]:
-        """Manifest full-replace removal without restoring inherited supply."""
+        """An apply's removal of one Direct MCP server; a Set-supplied one is refused."""
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
         mutation_result = None
 
@@ -545,42 +543,15 @@ class DirectActivationService(DirectActivationServiceProtocol):
             bot_id=bot_id, owner_id=stable_resource_owner_id(bot)
         )
 
-    def apply_direct_mcp_codes(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        actor_id: str,
-        server_codes: set[str],
-    ) -> set[str]:
+    def set_supplied_capabilities(
+        self, *, bot_id: str, owner_id: str, actor_id: str
+    ) -> tuple[frozenset[str], frozenset[str]]:
+        """The skill runtime names and MCP server codes the bot's Sets supply: what an apply may not claim."""
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
-        platform_codes = self._platform_default_mcp_policy.server_codes_for(bot)
-        return {
-            code
-            for code in server_codes
-            if self._repository.manifest_direct_mcp_exists(
-                bot_id=bot_id,
-                owner_id=stable_resource_owner_id(bot),
-                server_code=code,
-                platform_default_codes=platform_codes,
-                engine_type=bot_engine_type(bot),
-                default_engine_types=bot_default_engine_types(bot),
-            )
-        }
-
-    def set_managed_mcp_codes(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        actor_id: str,
-        server_codes: set[str],
-    ) -> set[str]:
-        bot = self._bot(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
-        return self._repository.set_managed_mcp_codes(
+        return self._repository.set_supplied_capabilities(
             bot_id=bot_id,
             owner_id=stable_resource_owner_id(bot),
-            server_codes=server_codes,
+            platform_default_codes=self._platform_default_mcp_policy.server_codes_for(bot),
             engine_type=bot_engine_type(bot),
             default_engine_types=bot_default_engine_types(bot),
         )
