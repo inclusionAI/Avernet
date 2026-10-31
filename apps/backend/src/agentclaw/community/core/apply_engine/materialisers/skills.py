@@ -19,8 +19,8 @@ storage. None found, or several Center skills of one name, fails that entry
 with the reason, which aborts the category the way any resolve failure does.
 
 When the section is present, every omitted Direct Skill is removed and every
-omitted Bot-owned Local asset no set supplies is additionally physically
-deleted and removed from the catalog. Shared Repo/Center assets are never physically
+omitted Bot-owned Local asset no set references (an inactive set included) is
+additionally physically deleted and removed from the catalog. Shared Repo/Center assets are never physically
 deleted. The complete Local catalog, not only active Installations, makes failed
 cleanup discoverable on a later Apply.
 """
@@ -215,7 +215,13 @@ class SkillsMaterialiser(Materialiser, ChecksSetSupply):
         """Classify against Direct names and include inactive Local cleanup."""
         supplied = self._set_supplied(ctx)
         area = _without(self._area(ctx), supplied)
-        local_assets = _without(self._local_assets(ctx), supplied)
+        # A package a set references — an inactive set's too — is that set's to keep: never cleaned up here.
+        referenced = self._set_referenced_ids(ctx)
+        local_assets = {
+            name: asset
+            for name, asset in _without(self._local_assets(ctx), supplied).items()
+            if int(asset.skill_id) not in referenced
+        }
         declared = {intent.identity for intent in intents}
 
         planned = [
@@ -288,6 +294,7 @@ class SkillsMaterialiser(Materialiser, ChecksSetSupply):
             # Re-read identities for removals; the plan deliberately carries
             # names rather than persistence ids.
             area = _without(self._assets_for_removal(ctx), self._set_supplied(ctx))
+            referenced = self._set_referenced_ids(ctx)
             for name in plan.removals:
                 asset = area.get(name)
                 if asset is None:
@@ -301,7 +308,8 @@ class SkillsMaterialiser(Materialiser, ChecksSetSupply):
                     apply_id=ctx.apply_id,
                 )
                 confirmed_write = True
-                if is_local:
+                # Its Direct installation is gone; a package a set still references is not deleted.
+                if is_local and int(asset.skill_id) not in referenced:
                     try:
                         await self._uploads.delete_local_skill(
                             skill_id=str(asset.skill_id),
@@ -351,6 +359,12 @@ class SkillsMaterialiser(Materialiser, ChecksSetSupply):
             bot_id=ctx.bot_id, owner_id=ctx.entity_id, actor_id=ctx.actor_id
         )
         return frozenset(names)
+
+    def _set_referenced_ids(self, ctx: ApplyContext) -> frozenset[int]:
+        """The skill ids any of the bot's sets holds, an inactive set's included; none before the bot exists."""
+        if ctx.bot is None:
+            return frozenset()
+        return frozenset(int(skill_id) for skill_id in self._reader.member_skill_ids(bot=ctx.bot))
 
     async def set_conflicts(self, ctx: ApplyContext, entries: Sequence[DesiredSkill]) -> tuple[ResolveFailure, ...]:
         supplied = self._set_supplied(ctx)
