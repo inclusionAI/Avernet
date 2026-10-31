@@ -258,7 +258,14 @@ class RemoteFileClient:
         """
         response = self._send('GET', self._shared_path('e2e-invalid-preflight'),
                               operation='file.anonymous_route_probe',
-                              expected=(404,), include_auth=False)
+                              expected=(200, 404), include_auth=False)
+        if (response.record["http_status"] == 200
+                and self._login_required_projection(response.body) == {
+                    "anonymous_route": "LOGIN_REQUIRED", "decision_by": "ACE",
+                }):
+            raise FileTransportError(
+                "anonymous file route was intercepted by the ACE ingress login wall "
+                "before BCS token validation").with_record(response.record)
         try:
             payload = self._envelope(response.body)
             if payload['code'] != 40400 or payload['data'].get('error_code') != 'shared_file_not_found':
@@ -291,25 +298,62 @@ class RemoteFileClient:
             result["decision_by"] = "ACE"
         return result
 
+    def _anonymous_redirect_origin(self, response: "_FileResponse") -> str:
+        """Classify an anonymous 303 as a login denial only on reviewed origins.
+
+        Station ingress intermittently answers the anonymous share-content GET
+        with 303 instead of the reviewed JSON/401/403 login denial. A redirect is
+        accepted as denial only when its Location stays on the configured product
+        origin (absolute or same-origin relative); a redirect to a storage origin
+        would expose a signed content URL to anonymous callers and is a security
+        anomaly, never a denial. Any other absolute origin fails closed. Only the
+        Location origin (scheme://netloc) is ever recorded; query strings, tokens
+        and bodies are never persisted.
+        """
+        if not response.location:
+            raise FileTransportError("anonymous share redirect is missing Location").with_record(response.record)
+        parts = urlsplit(response.location)
+        if not parts.hostname:
+            # Same-origin relative Location never leaves the product origin.
+            return self.base
+        key = self._origin_key(response.location)
+        if key in self.storage_origins:
+            error = FileTransportError("anonymous share redirect must not target storage")
+            record = {**response.record, "redirect_origin_attempt": parts.scheme + "://" + parts.netloc}
+            raise error.with_record(record)
+        if key == self._origin_key(self.base) or key in self.share_origins:
+            if key == self._origin_key(self.base):
+                return self.base
+            return parts.scheme + "://" + parts.netloc
+        error = FileTransportError("anonymous share redirect targets an unreviewed origin")
+        record = {**response.record, "redirect_origin_attempt": parts.scheme + "://" + parts.netloc}
+        raise error.with_record(record)
+
     def probe_share_login_required(self, token: str) -> tuple[dict, dict]:
         if not self._share_sso_required():
             raise FileTransportError("preprod shared file SSO requires a gateway Cookie profile")
         response = self._send(
             "GET", self._share_url(token),
             operation="file.share_login_required",
-            expected=(200, 401, 403), include_auth=False, share=True,
+            expected=(200, 303, 401, 403), include_auth=False, share=True,
         )
         status = response.record["http_status"]
-        if status == 200 and self._login_required_projection(response.body) != {
-            "anonymous_route": "LOGIN_REQUIRED", "decision_by": "ACE",
-        }:
-            raise FileTransportError("no-Cookie share request did not prove the reviewed login denial").with_record(response.record)
-        denial_kind = {200: "ACE_LOGIN", 401: "HTTP_401", 403: "HTTP_403"}[status]
-        response.record["response_projection"] = {
+        projection = {
             "share_access_contract": PREPROD_SHARE_SSO,
             "unauthenticated_access": "DENIED",
-            "denial_kind": denial_kind,
         }
+        if status == 200:
+            if self._login_required_projection(response.body) != {
+                "anonymous_route": "LOGIN_REQUIRED", "decision_by": "ACE",
+            }:
+                raise FileTransportError("no-Cookie share request did not prove the reviewed login denial").with_record(response.record)
+            projection["denial_kind"] = "ACE_LOGIN"
+        elif status == 303:
+            projection["denial_kind"] = "HTTP_303_PRODUCT_REDIRECT"
+            projection["redirect_origin"] = self._anonymous_redirect_origin(response)
+        else:
+            projection["denial_kind"] = {401: "HTTP_401", 403: "HTTP_403"}[status]
+        response.record["response_projection"] = projection
         return {"status": "EXPECTED_LOGIN_DENIAL", "file_access": "DENIED"}, response.record
 
     def shared_download_sso(self, token: str) -> tuple[bytes, dict]:

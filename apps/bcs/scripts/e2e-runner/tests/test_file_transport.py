@@ -213,6 +213,105 @@ class FileTransportTests(unittest.TestCase):
         self.assertNotIn("Cookie", calls[0].headers)
         self.assertEqual(calls[1].headers["Cookie"], "private-cookie")
 
+    def _preprod_share_profile(self):
+        profile = self.profile()
+        profile["environment"]["tier"] = "preprod"
+        profile["entrypoint"]["kind"] = "gateway"
+        profile["entrypoint"]["origin"] = "https://gateway.example.test"
+        profile["file_transfer"]["allowed_share_origins"] = ["https://bcn.example.test"]
+        return profile
+
+    def test_probe_share_login_required_classifies_303_product_redirect_as_denial(self):
+        absolute = Reply(b"", 303)
+        absolute.headers["Location"] = "https://bcn.example.test/sessions/login?next=private"
+        relative = Reply(b"", 303)
+        relative.headers["Location"] = "/sessions/login"
+        for label, reply, expected_origin in (
+            ("absolute-product", absolute, "https://bcn.example.test"),
+            ("same-origin-relative", relative, "https://gateway.example.test"),
+        ):
+            with self.subTest(label=label), \
+                    patch.dict(os.environ, {"BCS_E2E_LOCAL_COOKIE": "private-cookie"}):
+                opener = Mock(); opener.open.return_value = reply
+                with patch("bcs_e2e.file_transport.build_opener", return_value=opener):
+                    client = RemoteFileClient(self._preprod_share_profile())
+                    client.share_targets["issued-secret"] = client.base + client._shared_path("issued-secret")
+                    result, record = client.probe_share_login_required("issued-secret")
+                self.assertEqual(result, {"status": "EXPECTED_LOGIN_DENIAL", "file_access": "DENIED"})
+                projection = record["response_projection"]
+                self.assertEqual(projection["denial_kind"], "HTTP_303_PRODUCT_REDIRECT")
+                self.assertEqual(projection["redirect_origin"], expected_origin)
+                self.assertNotIn("private", json.dumps(record))
+                self.assertNotIn("issued-secret", json.dumps(record))
+
+    def test_probe_share_login_required_rejects_303_storage_foreign_and_missing_redirect(self):
+        cases = [
+            ("storage", "https://storage.example.test/object?signature=private", "must not target storage"),
+            ("foreign", "https://unreviewed.example.test/login", "unreviewed origin"),
+            ("missing", "", "missing Location"),
+        ]
+        for label, location, needle in cases:
+            with self.subTest(label=label), \
+                    patch.dict(os.environ, {"BCS_E2E_LOCAL_COOKIE": "private-cookie"}):
+                opener = Mock()
+                reply = Reply(b"", 303)
+                if location:
+                    reply.headers["Location"] = location
+                opener.open.return_value = reply
+                with patch("bcs_e2e.file_transport.build_opener", return_value=opener):
+                    client = RemoteFileClient(self._preprod_share_profile())
+                    client.share_targets["issued-secret"] = client.base + client._shared_path("issued-secret")
+                    with self.assertRaises(FileTransportError) as caught:
+                        client.probe_share_login_required("issued-secret")
+                self.assertIn(needle, str(caught.exception))
+                serialized = json.dumps(caught.exception.request_records)
+                self.assertNotIn("private", serialized)
+                self.assertNotIn("issued-secret", serialized)
+
+    def test_preprod_shared_download_303_chain_over_storage(self):
+        # Anonymous drift window: probe sees 303 to a reviewed product origin;
+        # authenticated hop 0 sees 303 to the allowlisted storage origin and the
+        # credential-free storage hop returns the exact fixture bytes.
+        profile = self._preprod_share_profile()
+        login = Reply(b"", 303)
+        login.headers["Location"] = "https://bcn.example.test/sessions/login"
+        redirect = Reply(b"", 303)
+        redirect.headers["Location"] = "https://storage.example.test/object?signature=private"
+        opener = Mock()
+        opener.open.side_effect = [login, redirect, Reply(b"payload", 200)]
+        with patch.dict(os.environ, {"BCS_E2E_LOCAL_COOKIE": "private-cookie"}), \
+                patch("bcs_e2e.file_transport.build_opener", return_value=opener):
+            client = RemoteFileClient(profile)
+            client.share_targets["issued-secret"] = client.base + client._shared_path("issued-secret")
+            body, record = client.shared_download("issued-secret")
+        self.assertEqual(body, b"payload")
+        self.assertEqual(record["http_status"], 200)
+        # hops journal only the download chain: probe denial lives in access_checks.
+        self.assertEqual([hop["http_status"] for hop in record["hops"]], [303, 200])
+        self.assertEqual(record["hops"][0]["target_kind"], "product")
+        self.assertEqual(record["hops"][1]["target_kind"], "storage")
+        access = record["access_checks"][0]
+        self.assertEqual(access["response_projection"]["denial_kind"], "HTTP_303_PRODUCT_REDIRECT")
+        self.assertEqual(access["response_projection"]["redirect_origin"], "https://bcn.example.test")
+        calls = [call.args[0] for call in opener.open.call_args_list]
+        self.assertNotIn("Cookie", calls[0].headers)
+        self.assertEqual(calls[1].headers["Cookie"], "private-cookie")
+        for header in ("Cookie", "Authorization", "Origin", "Referer"):
+            self.assertNotIn(header, calls[2].headers)
+        serialized = json.dumps(record)
+        self.assertNotIn("private", serialized)
+        self.assertNotIn("issued-secret", serialized)
+
+    def test_anonymous_route_probe_classifies_ace_login_wall_before_token_validation(self):
+        login = {"actionType": "LOGIN", "buserviceErrorCode": "USER_NOT_LOGIN", "decisionBy": "ACE"}
+        opener = Mock(); opener.open.return_value = Reply(login, 200)
+        with patch.dict(os.environ, {"BCS_E2E_LOCAL_COOKIE": "private-cookie"}), \
+                patch("bcs_e2e.file_transport.build_opener", return_value=opener):
+            with self.assertRaises(FileTransportError) as caught:
+                RemoteFileClient(self.profile()).probe_anonymous_route()
+        self.assertIn("ACE ingress login wall", str(caught.exception))
+        self.assertEqual(caught.exception.request_records[0]["http_status"], 200)
+
     def test_preprod_shared_deletion_verification_uses_cookie(self):
         profile = self.profile()
         profile["environment"]["tier"] = "preprod"

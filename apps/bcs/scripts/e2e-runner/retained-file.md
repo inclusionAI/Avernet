@@ -57,6 +57,38 @@ section below. Steps 3–4 are not enabled by passing step 2.
   one under the same guard, permits only the approved storage-origin addition,
   and checks all new dependencies before transferring scheduling authority.
   Identity, actors, gateway, database and pool may not change under that receipt.
+### PRE share-content redirect characterization and probe alignment — 2026-11-01
+
+Live PRE characterization (fresh share mint on the retained r20 fixture,
+evidence `20261101-session-file-303-characterization`): the authenticated share-content
+GET now answers 303 with a signed storage URL on the allowlisted OSS origin, and the
+credential-free storage hop returns the exact original bytes (29/29, sha256 match).
+Several share flows are therefore healthy through the bounded redirect chain. The same
+window showed station ACE ingress drift: anonymous share-content GET oscillates between
+the reviewed 200 JSON login projection (denial_kind ACE_LOGIN) and a 303 redirect, and
+the anonymous invalid-token route probe currently sees the 200 login wall instead of
+the reviewed 40400 not-found envelope.
+
+Runner contract alignment (fail-close preserved):
+
+- The anonymous share probe accepts a 303 only when Location resolves to the configured
+  product origin (absolute reviewed share origin, entrypoint origin, or same-origin
+  relative); it is recorded as denial_kind HTTP_303_PRODUCT_REDIRECT with the Location
+  origin only (query, tokens and bodies never persisted).
+- An anonymous 303 whose Location targets a storage origin is a security anomaly — a
+  signed content URL would be exposed without credentials — and remains a hard failure,
+  never a normalized denial. Any unreviewed absolute origin also fails closed.
+- The invalid-token anonymous route probe classifies the 200 ACE login wall explicitly
+  ("intercepted by the ACE ingress login wall before BCS token validation") and still
+  refuses it as route readiness; the reviewed 40400 envelope stays the required proof.
+- Authenticated downloads keep the existing hop semantics: hop 0 carries Cookie, storage
+  hops carry no credentials, only allowlisted storage origins are followed, and hops are
+  journaled in the receipt.
+
+Environment-owner items (not runner fixes): station ingress must stop oscillating the
+anonymous share GET between the JSON login projection and 303, and restore the reviewed
+40400 not-found envelope for invalid anonymous tokens. Cookie renewal is not a fix.
+
 - Admit the file observer projection explicitly. Group/Session observation
   receipts do not automatically authorize broader database queries. No bucket,
   prefix, Bot-wide or database cleanup is permitted.
