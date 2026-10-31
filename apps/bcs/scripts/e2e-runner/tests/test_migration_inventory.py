@@ -715,6 +715,20 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
             rows['story_cli_operator_validates_channel_management']['notes'],
             ['row #11 story_cli_operator_validates_channel_management: register 7 source-anchored density obligations under the retained CHANNEL-CLI.* parent envelope (16 parsed = 9 legacy parents + 7 atoms; residual_count_gap=0); preprod keeps BLOCKED_INVENTORIED with the disabled-bridge divergence registered as a true business judgment (not a defect) and the sim DingTalk design red disclosed; remote_validation=NOT_RUN and grants_release_credit=false'])
 
+    def test_density_closures_lock_rows_1_and_7_face_notes(self):
+        from bcs_e2e.delivery_density.registration_proposal import (
+            NOTE as delivery_density_note)
+        from bcs_e2e.workspace_density.registration_proposal import (
+            NOTE as workspace_density_note)
+        statuses = load_executor_migration()
+        self.assertEqual(
+            statuses['story_human_manages_delivery_policy']['notes'],
+            [delivery_density_note])
+        self.assertEqual(
+            statuses['story_user_operates_group_workspace']['notes'],
+            [workspace_density_note])
+
+
     def test_reviewed_view_keeps_status_join_and_roster_facts(self):
         reviewed = reviewed_release_inventory()
         self.assertEqual(len(reviewed), 31)

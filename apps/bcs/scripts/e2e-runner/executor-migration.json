@@ -7,7 +7,9 @@
         "mode": "DUAL",
         "preprod_verdict": "PASS",
         "gates": [],
-        "notes": []
+        "notes": [
+          "row #1 story_human_manages_delivery_policy: register the 26 field-anchored density obligations under the retained DELIVERY.* coarse parent envelope (36-point parsed projection = 10 legacy coarse parents + 26 field atoms projected from 13 anchored upstream field sites in stories.sh; residual_count_gap=0 on the projection caliber; the committed coverage-map snapshot caliber 22 and the migration-queue score 36 reconcile by explicit disclosure, never a silent rebase; shell probes without an assertion role stay NOT_CHARGED_SOURCE_PROBES and are never counted as coverage); field atoms carry status-envelope and value comparators with per-row stories.sh source anchors and live anchor-drift fail-close; density runner dual-delivery-policy-density-run (case DUAL-DELIVERY-POLICY-DENSITY-01, contract delivery-density-projection-v1) committed at 6be8d9363 with its focused family suite green; notes-only integration, the dual-delivery-policy-run envelope and its r5/r16 PASS receipts stay untouched; committed verdict stays DUAL/PASS with notes 0 to 1; standing-roster execution enrollment of the density command and its fresh dual receipts are the next regression round and are not claimed here; remote_validation=NOT_RUN and grants_release_credit=false"
+        ]
       }
     },
     {
@@ -38,7 +40,9 @@
         "mode": "DUAL",
         "preprod_verdict": "PASS",
         "gates": [],
-        "notes": []
+        "notes": [
+          "row #7 story_user_operates_group_workspace: register the workspace density closure (59 parsed = 17 retained Workspace.* parents + 42 charged leaves; 63 source-anchored atoms = 42 leaves + 21 disclosed exclusions; residual_count_gap=0 under both calibers: 59 = 17 + 42 and 63 = 42 + 21; atom families api26/cli11/tail26, charged leaf families api19/cli7/tail16, disclosed exclusion families api7/cli4/tail10, each family closing leaves+exclusions=atoms as 26=19+7, 11=7+4, 26=16+10); the 17 parents are the legacy WORKSPACE.* requirement roll-ups from migration-contracts S07 projected onto their verbatim story step calls at stories.sh L408-427 plus the group.sh and stories.sh tail L429-488 sources, SHA-256-frozen with live anchor-drift fail-close; the 42 charged field leaves are the content atoms carrying method, line range, verbatim quote, address and expectation; the 21 exclusions are 19 same-parent success-liveness riders (status_eq/exit_zero) charged once to the nearest following content leaf plus 2 deprecated /groups/{id}/workspace 404-envelope clauses charged to the WORKSPACE.workspace parent envelope, the retired face keeping its verbatim observed_form retired_410/legacy_service_spec and never a fabricated PASS leaf; the 44-entry plumbing register is disclosed outside every denominator; the frozen P0 determination is LANDED (63-atom density oracle seam 6114dbfbc, workspace-field runner 205715228, five-plane contract split 63c2a3a52); density executor face dual-workspace-field-run (case DUAL-WORKSPACE-DENSITY-01, contracts workspace-density-v1, group-workspace-density-v1 oracle, workspace-field-obligations-v1 field oracle, migration-contracts-v1) committed at 205715228 with its focused family suite green; honesty rules: missing or drifted inputs fail closed to NOT_RUN and the retired face observed_form is disclosed, never silently re-based to PASS; notes-only integration, the dual-workspace-run envelope family and its r5/r6 receipts stay untouched; committed verdict stays DUAL/PASS with notes 0 to 1; execution enrollment of the density command and its fresh dual receipts are the next regression round and are not claimed here; the live coverage-map-20261031 row 7 stays the parallel session's write domain with its snapshot parsed 59 - legacy 17 = 42 lens reconciled by this closure, never a silent rebase; remote_validation=NOT_RUN and grants_release_credit=false"
+        ]
       }
     },
     {
