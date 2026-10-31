@@ -685,6 +685,12 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
         self.assertEqual(
             rows['story_authority_user_journey']['notes'],
             ['AUTHORITY_DENSITY_42_OBLIGATIONS_20261031'])
+        self.assertEqual(
+            rows['story_user_validates_external_channel_setup']['notes'],
+            ['row #10 story_user_validates_external_channel_setup: register 7 source-anchored density obligations under the retained CHANNEL.* parent envelope (13 parsed = 6 legacy parents + 7 atoms; residual_count_gap=0); notes-only integration, the dual-channel-bindings-run envelope and its r8 conclusions stay untouched'])
+        self.assertEqual(
+            rows['story_cli_operator_validates_channel_management']['notes'],
+            ['row #11 story_cli_operator_validates_channel_management: register 7 source-anchored density obligations under the retained CHANNEL-CLI.* parent envelope (16 parsed = 9 legacy parents + 7 atoms; residual_count_gap=0); preprod keeps BLOCKED_INVENTORIED with the disabled-bridge divergence registered as a true business judgment (not a defect) and the sim DingTalk design red disclosed; remote_validation=NOT_RUN and grants_release_credit=false'])
 
     def test_reviewed_view_keeps_status_join_and_roster_facts(self):
         reviewed = reviewed_release_inventory()
