@@ -136,6 +136,14 @@ class AcliCliOperation(BaseModel):
     error_message: str | None = Field(description="The reason, for people.")
 
 
+class CliOperationConflict(BaseModel):
+    """The `409` payload when another add or remove is running in the runtime."""
+
+    operation: AcliCliOperation = Field(
+        description="The running operation; poll it, or cancel it, before trying again."
+    )
+
+
 class AddedBotCli(BaseModel):
     """The tool installed and granted."""
 
@@ -149,6 +157,7 @@ __all__ = [
     "AcliMarketPageResult",
     "AcliCliOperation",
     "CliOperationAction",
+    "CliOperationConflict",
     "CliOperationKind",
     "CliOperationStatus",
     "CliOperationStep",
