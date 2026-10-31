@@ -2,7 +2,7 @@
 """Exercise A2A registration, Card management and delivery through a live BCS.
 
 The local peer speaks public A2A HTTP+JSON/SSE. No model, Harness dependency,
-database writes or test-only calls into BCS domain code are used.
+direct database writes or test-only calls into BCS domain code are used.
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import threading
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from provider_scope_story import Story
 
@@ -38,7 +38,7 @@ class Peer:
             def json_response(self, status, body):
                 encoded = json.dumps(body, ensure_ascii=False).encode()
                 self.send_response(status)
-                self.send_header("Content-Type", "application/a2a+json")
+                self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(encoded)))
                 self.end_headers()
                 self.wfile.write(encoded)
@@ -59,7 +59,7 @@ class Peer:
                     self.json_response(200, card)
                 elif path.startswith("/a2a/tasks/") and self.authenticated():
                     with peer.lock:
-                        task = copy.deepcopy(peer.tasks.get(path.rsplit("/", 1)[-1]))
+                        task = copy.deepcopy(peer.tasks.get(unquote(path.rsplit("/", 1)[-1])))
                     self.json_response(200 if task else 404, task or {})
                 else:
                     self.json_response(404, {})
@@ -75,7 +75,12 @@ class Peer:
                     return
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 with peer.lock:
-                    peer.requests.append(body)
+                    # Group/session lifecycle notifications also use the real A2A link.
+                    # Acknowledge them separately from the four human request assertions.
+                    question = any("A2A question " in part.get("text", "")
+                                   for part in body["message"].get("parts", []))
+                    if question:
+                        peer.requests.append(body)
                     sequence = len(peer.requests)
                     context = body["message"].get("contextId") or "peer-context"
                     task_id = "peer-task-" + str(sequence)
@@ -84,7 +89,9 @@ class Peer:
                             "status": {"state": "TASK_STATE_COMPLETED"},
                             "artifacts": [{"artifactId": "answer", "parts": [{"text": text}]}]}
                     peer.tasks[task_id] = task
-                    mode = peer.mode
+                    mode = peer.mode if question else "message"
+                    if not question:
+                        text = "A2A setup acknowledged"
                 initial = {"task": {"id": task_id, "contextId": context,
                                     "status": {"state": "TASK_STATE_SUBMITTED"}}}
                 events = [initial]
@@ -115,6 +122,7 @@ class Peer:
                     time.sleep(0.02)
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server.daemon_threads = True
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.base = "http://127.0.0.1:" + str(self.server.server_port)
         self.card = {"name": "A2A public E2E", "description": "Initial description", "version": "1",
@@ -197,13 +205,13 @@ class A2aStory(Story):
         policy = self.request("GET", "/admin/message-delivery/policy")
         self.original_policy = copy.deepcopy(policy["policy"])
         updated = copy.deepcopy(self.original_policy)
-        updated["flow_enabled"]["group"] = True
+        updated["flow_enabled"].update(group=True, system=True)
         updated["bots"][bot_id] = {"mode": "enforce", "max_running": 1,
                                   "min_send_interval_ms": 1, "max_queued": 10}
         applied = self.request("PUT", "/admin/message-delivery/policy", {
             "expected_version": policy["version"], "policy": updated})
         self.policy_revision = applied["version"]
-        group = self.group(bot_id, [bot_id])
+        group = self.group(bot_id, [bot_id, "human_" + self.owner])
         session = self.request("POST", "/groups/" + group + "/sessions", {}, status=201)["session_id"]
         for sequence, mode in enumerate(["stream", "stream", "message", "recover"], start=1):
             with self.peer.lock:
