@@ -1,3 +1,5 @@
+> Historical design: resource ownership was superseded by [ADR 0022](../../../../docs/adr/0022-apply-engine-desired-state-and-observed-drift.md); declared resources replace all unprotected workspace entries.
+
 # Bot Config Manifest — Implementation Work Items
 
 > 当前身份合同增量：IDENTITY.md 在目标 engine 原白名单内按普通文件参与集合替换。

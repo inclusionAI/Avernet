@@ -302,6 +302,21 @@ async def test_rmtree_empty_path_raises_value_error(impl):
 
 
 @pytest.mark.asyncio
+async def test_list_dir_recursive_from_directory_symlink_and_unlink_preserves_target(impl, tmp_path):
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "file.txt").write_text("keep")
+    link = tmp_path / "link"
+    link.symlink_to(target, target_is_directory=True)
+
+    result = await impl.list_dir(str(link), recursive=True)
+    assert [(entry["relative_path"], entry["is_dir"]) for entry in result["files"]] == [("file.txt", False)]
+    await impl.rmtree(str(link))
+    assert not link.is_symlink()
+    assert (target / "file.txt").read_text() == "keep"
+
+
+@pytest.mark.asyncio
 async def test_rmtree_symlink_to_dir_unlinks_only_keeps_target(impl, tmp_path):
     """symlink → unlink (只删链不删源)。singlebox 移除 skill 软链 (TC-CAP-C016)
     走这条路径。原行为: shutil.rmtree(symlink) raise OSError → 500。"""

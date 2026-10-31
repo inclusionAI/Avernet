@@ -556,6 +556,40 @@ def test_nested_paths_abort_category():
 # --- plan: classification for the report (Task 4) ---
 
 
+def test_plan_skips_broken_links_in_protected_tree():
+    class BrokenProtectedTree(FakeResourceFileService):
+        async def list_entries(self, **kwargs):
+            if kwargs.get("recursive") and kwargs.get("prefix", "") in ("", "skills-pool"):
+                raise RuntimeError("broken symlink in skills-pool")
+            return await super().list_entries(**kwargs)
+
+    svc = BrokenProtectedTree()
+    svc.record_present("skills-pool/broken", "data/old.md")
+    m = _materialiser(svc, _StubDeclaredSourceResolver())
+    plan, _ = _write_through(m, make_context(), [{"path": "data/new.md", "content": "new"}])
+    assert plan.removals == ("data/old.md",)
+    assert svc.present == {"skills-pool/broken", "data/new.md"}
+
+
+def test_failed_subdirectory_listing_does_not_clear_or_replace_rows():
+    class FailedDirectory(FakeResourceFileService):
+        async def list_entries(self, **kwargs):
+            if kwargs.get("prefix") == "data":
+                raise RuntimeError("directory unavailable")
+            return await super().list_entries(**kwargs)
+
+    svc = FailedDirectory()
+    svc.record_present("data/old.md", "skills-pool/broken")
+    factory, rows = resource_rows_for()
+    m = _materialiser(svc, _StubDeclaredSourceResolver(), resource_rows=factory)
+    ctx = make_context()
+    resolved = _run(m.resolve(ctx, [{"path": "new.md", "content": "new"}]))
+    with pytest.raises(ResourcesRootNotListed):
+        _run(m.plan(ctx, resolved.intents))
+    assert svc.present == {"data/old.md", "skills-pool/broken"}
+    assert svc.deleted == [] and svc.writes == {} and rows.replacements == []
+
+
 def test_plan_classifies_present_as_updated_and_new_as_created():
     svc = FakeResourceFileService(exists_paths={"data/a.md"})
     m = _materialiser(svc, _StubDeclaredSourceResolver())
@@ -602,7 +636,7 @@ def test_plan_addresses_the_bot_owner_not_the_manifest_storage_key():
     )
     assert resolved.ok, [f.reason for f in resolved.failures]
     _run(m.plan(ctx, resolved.intents))
-    assert svc.listing_calls == [
+    assert svc.clear_calls == [
         {
             "entity_type": "staff",
             "entity_id": "u_owner",
@@ -613,9 +647,8 @@ def test_plan_addresses_the_bot_owner_not_the_manifest_storage_key():
     assert svc.exists_probes == []
 
 
-def test_plan_makes_one_root_listing_and_no_presence_probes():
-    """One listing classifies every member and yields the removals; per-member
-    ``exists`` probes are the N round trips the listing replaces."""
+def test_plan_lists_unprotected_directories_and_no_presence_probes():
+    """Root and directory listings classify members without per-member probes."""
     archive = _tgz({"a.txt": b"AAA", "sub/b.txt": b"BBB"})
     svc = FakeResourceFileService()
     svc.record_present("data/wrap/a.txt", "data/stale.md")
@@ -634,6 +667,7 @@ def test_plan_makes_one_root_listing_and_no_presence_probes():
     assert resolved.ok, [f.reason for f in resolved.failures]
     plan = _run(m.plan(ctx, resolved.intents))
     assert len(svc.listing_calls) == 1
+    assert [(c["prefix"], c["recursive"]) for c in svc.list_calls] == [("", False), ("data", True)]
     assert svc.exists_probes == []
     assert len(plan.entries) == 4
     assert plan.removals == ("data/stale.md",)
@@ -711,7 +745,7 @@ def test_write_clears_the_root_then_uploads_every_member():
     # including files the new archive no longer ships and hand-added ones
     # (the ownership rule). The uploads land *after* it, or they would not
     # be present now.
-    assert len(svc.clear_calls) == 1
+    assert len(svc.clear_calls) == 2
     assert svc.deleted == ["data"]  # the root entry, whole
     assert svc.writes == {
         ("data/wrap", "a.txt"): b"AAA",
@@ -882,7 +916,7 @@ def test_an_empty_root_is_already_clear():
     assert [r.outcome.value for r in results] == ["created"]
     assert svc.writes == {("data/tools", "a.md"): b"A"}
     assert plan.removals == ()
-    assert len(svc.listing_calls) == 1 and len(svc.clear_calls) == 1
+    assert len(svc.listing_calls) == 0 and len(svc.clear_calls) == 2
     assert svc.delete_dir_calls == [] and svc.delete_calls == []
 
 
@@ -935,7 +969,7 @@ def test_a_plan_whose_listing_fails_aborts_in_the_stages_words_with_the_cause_ch
         _run(m.plan(ctx, resolved.intents))
     assert str(caught.value) == ROOT_NOT_LISTED_REASON and "token" not in str(caught.value)
     assert "token" in str(caught.value.__cause__)
-    assert svc.clear_calls == [] and svc.writes == {}
+    assert len(svc.clear_calls) == 1 and svc.writes == {}
 
 
 def test_a_second_listing_that_fails_aborts_with_the_cause_chained_for_the_log():
@@ -992,14 +1026,8 @@ def test_write_addresses_the_bot_owner():
     _write_through(
         m, ctx, [{"path": "data/wrap/", "unpack": "tar.gz", "source": _src("t")}]
     )
-    assert svc.clear_calls == [
-        {
-            "entity_type": "staff",
-            "entity_id": "u_owner",
-            "bot_id": "b_1",
-            "engine_type": "claude_code",
-        }
-    ]
+    assert len(svc.clear_calls) == 2
+    assert all(c == {"entity_type": "staff", "entity_id": "u_owner", "bot_id": "b_1", "engine_type": "claude_code"} for c in svc.clear_calls)
     assert svc.upload_calls == [
         {
             "entity_type": "staff",
@@ -1035,7 +1063,7 @@ def test_write_is_player_setup_convergent():
     assert svc.present == {"data/wrap/a.txt"}
     # The first clear found an empty root; the second removed apply #1's directory whole.
     assert svc.deleted == ["data"]
-    assert len(svc.clear_calls) == 2
+    assert len(svc.clear_calls) == 4
     assert len(rows.replacements) == 2
     assert rows.rows == [WrittenFile("data/wrap/a.txt", 3)]
 
@@ -1365,8 +1393,14 @@ def test_dry_run_and_apply_report_the_same_resources_shape():
     writing nothing: no clear, no upload, no rows. The execution delivers.
     """
     archive = _tgz({"a.txt": b"AAA"})
-    svc = FakeResourceFileService()
-    svc.record_present("data/stale.md")
+    class BrokenProtectedTree(FakeResourceFileService):
+        async def list_entries(self, **kwargs):
+            if kwargs.get("recursive") and kwargs.get("prefix", "") in ("", "skills-pool"):
+                raise RuntimeError("broken symlink")
+            return await super().list_entries(**kwargs)
+
+    svc = BrokenProtectedTree()
+    svc.record_present("data/stale.md", "skills-pool/broken")
     factory, rows = resource_rows_for()
     engine = _resources_engine(svc, _StubDeclaredSourceResolver(archive), resource_rows=factory)
     ctx = make_context(engine_type="claude_code")
@@ -1378,8 +1412,8 @@ def test_dry_run_and_apply_report_the_same_resources_shape():
         )
     )
     # The preview wrote nothing: the root still holds the stale file.
-    assert svc.writes == {} and svc.deleted == [] and svc.clear_calls == []
-    assert svc.present == {"data/stale.md"}
+    assert svc.writes == {} and svc.deleted == [] and len(svc.clear_calls) == 1
+    assert svc.present == {"data/stale.md", "skills-pool/broken"}
     assert rows.replacements == []
 
     real = _run(
@@ -1401,8 +1435,26 @@ def test_dry_run_and_apply_report_the_same_resources_shape():
     # The execution delivered.
     assert svc.writes == {("data/notes", "r.md"): b"# rules", ("data/wrap", "a.txt"): b"AAA"}
     assert svc.deleted == ["data"]  # the root entry, whole
-    assert svc.present == {"data/notes/r.md", "data/wrap/a.txt"}
+    assert svc.present == {"data/notes/r.md", "data/wrap/a.txt", "skills-pool/broken"}
     assert rows.rows == [WrittenFile("data/wrap/a.txt", 3), WrittenFile("data/notes/r.md", 7)]
+
+
+def test_subdirectory_failure_aborts_apply_without_writes():
+    class FailedDirectory(FakeResourceFileService):
+        async def list_entries(self, **kwargs):
+            if kwargs.get("prefix") == "data":
+                raise RuntimeError("listing failed")
+            return await super().list_entries(**kwargs)
+
+    svc = FailedDirectory()
+    svc.record_present("data/stale.md")
+    factory, rows = resource_rows_for()
+    engine = _resources_engine(svc, _StubDeclaredSourceResolver(_tgz({"a.txt": b"A"})), resource_rows=factory)
+    report = _run(engine.apply(make_context(), _DOCUMENT, apply_id="a1", trigger="explicit",
+                               started_at=datetime.now(), dry_run=False))
+    assert _resources_category(report).aborted
+    assert svc.present == {"data/stale.md"}
+    assert svc.deleted == [] and svc.writes == {} and rows.replacements == []
 
 
 def test_a_declared_empty_category_clears_the_root_and_reports_every_removal():
@@ -1424,7 +1476,7 @@ def test_a_declared_empty_category_clears_the_root_and_reports_every_removal():
             started_at=datetime.now(), dry_run=True,
         )
     )
-    assert svc.deleted == [] and svc.clear_calls == [] and rows.replacements == []
+    assert svc.deleted == [] and len(svc.clear_calls) == 1 and rows.replacements == []
     real = _run(
         engine.apply(
             ctx, document, apply_id="a2", trigger="explicit",
