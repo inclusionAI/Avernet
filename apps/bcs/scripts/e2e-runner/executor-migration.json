@@ -204,7 +204,9 @@
         "mode": "DUAL",
         "preprod_verdict": "BLOCKED_INVENTORIED",
         "gates": [],
-        "notes": []
+        "notes": [
+          "FIXED_LOOP_DENSITY_34_OBLIGATIONS_20261031 | FIXED_LOOP_DENSITY_59_OBLIGATIONS_20261031: E2a fixed-Loop density recalibration for row #18 story_fixed_loop_human_editor_workflow - frozen executor ledger 66 sites (33 assert + 33 transport) + 1 shell facade = 67 parsed sites (face snapshot parsed 1 recalibrated and disclosed, never silently rebased); roster 8 FIXED_LOOP.* migration-contract parent envelopes reused verbatim + 34 charged leaves FLOOP.F01-F34 (F01 shell facade exit-0 leaf under the disclosed face-derived auxiliary gate FIXED_LOOP.story-gate, F02-F34 python assert atoms with frozen comparators and expected values) = 42 charged rows; 33 transport stations ride their owning parent envelopes as internal checkpoints (union equals the transport ledger, never double-charged); residual_count_gap=0 under both calibers (sites 67 = 34 leaves + 33 checkpoints; rows 42 = 8 parents + 34 leaves); owned-local offline replay is station-form only with frozen completion gates (judge revise/approved/revise/revise, receipt partitions 4/4 per arm, outputs 6 per arm, one-shot session running, chat publication 1, exact deletions groups 2 + provider_bot 1, non-target state 0); preprod leg honest NOT_RUN as named gap FIXED-LOOP-DENSITY-PREPROD-DYNAMIC-OWNED-LOCAL-GAP (dynamic owned-local runtime by design; the DUAL face mode is bookkeeping and never counts a dual preprod leg; FIXED-LOOP-DENSITY-DUAL-FACE-DIVERGENCE and FIXED-LOOP-DENSITY-FACE-PARSED-UNDERCOUNT registered); remote_validation=NOT_RUN; grants_release_credit=false; pending-landing"
+        ]
       }
     },
     {
@@ -213,7 +215,9 @@
         "mode": "DUAL",
         "preprod_verdict": "BLOCKED_INVENTORIED",
         "gates": [],
-        "notes": []
+        "notes": [
+          "NESTED_FIXED_LOOP_DENSITY_25_OBLIGATIONS_20261031 | FIXED_LOOP_DENSITY_59_OBLIGATIONS_20261031: E2a nested fixed-Loop density recalibration for row #19 story_nested_fixed_loop_workflows - frozen executor ledger 46 sites (24 assert + 22 transport) + 1 shell facade = 47 parsed sites (face snapshot parsed 1 recalibrated and disclosed, never silently rebased); roster 16 NESTED-LOOP.* migration-contract parent envelopes (story-span anchored) + 25 charged leaves NFLOOP.F01-F25 (F01 shell facade exit-0 leaf under the disclosed face-derived auxiliary gate NESTED-LOOP.story-gate, F02-F25 python assert atoms) = 41 charged rows; 22 transport stations ride their owning parent envelopes as internal checkpoints; residual_count_gap=0 under both calibers (sites 47 = 25 leaves + 22 checkpoints; rows 41 = 16 parents + 25 leaves); the nested child inherits the base finish_bot assert family and cleanup stations as a NON-additive cross-family annex (FLOOP finish_bot asserts 202/204-207/216 and cleanup stations 293/295/297) disclosed per owned-parent envelope; owned-local offline replay station-form only with frozen completion gates (both story markers true, observed marker checks 2, redaction gate clean, post-story zero traffic, child exit 0, mock child ready/exit 0/redaction clean); preprod leg honest NOT_RUN as REMOTE_UNSUPPORTED-by-design named gap NESTED-LOOP-DENSITY-PREPROD-REMOTE-UNSUPPORTED-GAP (nested-fixed-loop-migration-contract.json environment preprod REMOTE_UNSUPPORTED; dynamic owned-local runtime; never counted as a dual preprod leg; FIXED-LOOP-DENSITY-DUAL-FACE-DIVERGENCE and FIXED-LOOP-DENSITY-FACE-PARSED-UNDERCOUNT registered jointly with the fixed family under the shared family-scope registration ids); remote_validation=NOT_RUN; grants_release_credit=false; pending-landing"
+        ]
       }
     },
     {
