@@ -47,6 +47,7 @@ const tagAlter = 'ALTER TABLE `workflow_deploy_history`';
 function createDb(dbType: 'mysql' | 'zdas', options: {
   canDdl: boolean;
   current?: number;
+  linkMaxLength?: number;
   failure?: { sqlPrefix: string; error: Error };
 }) {
   const exec = vi.fn<IDatabase['exec']>(async sql => {
@@ -64,6 +65,13 @@ function createDb(dbType: 'mysql' | 'zdas', options: {
     if (sql === 'SELECT MAX(version) as v FROM schema_version') {
       if (!options.canDdl) throw new Error('Unexpected schema_version read');
       return [{ v: options.current ?? 0 }] as T[];
+    }
+    if (sql.includes('information_schema.COLUMNS') && sql.includes("'flow_run_links'")) {
+      return ['child_flow_id', 'parent_flow_id', 'parent_node_id', 'child_workflow_id'].map(column_name => ({ column_name, max_length: options.linkMaxLength ?? 255 })) as T[];
+    }
+    if (sql.includes('information_schema.STATISTICS') && sql.includes("'flow_run_links'")) {
+      return [{ index_name: 'PRIMARY', column_name: 'child_flow_id', sub_part: null, non_unique: 0, seq: 1 },
+        { index_name: 'idx_flow_run_links_parent', column_name: 'parent_flow_id', sub_part: null, non_unique: 1, seq: 1 }] as T[];
     }
     if (sql.includes('information_schema.TABLES')) return [] as T[];
     if (sql.includes('information_schema.COLUMNS')) return [{ IS_NULLABLE: 'NO' }] as T[];
@@ -117,7 +125,7 @@ describe.each(['mysql', 'zdas'] as const)('runMigrations on %s', dbType => {
     expect(query.mock.calls.some(([sql]) => sql.includes('schema_version'))).toBe(false);
   });
 
-  it.each([0, 1, 2, 145, 146, 200])('preserves version gating at %i when DDL is available', async current => {
+  it.each([0, 1, 2, 145, 146, 147, 148, 200])('preserves version gating at %i when DDL is available', async current => {
     const { db, exec, query } = createDb(dbType, { canDdl: true, current });
 
     await runMigrations(db, dbType);
@@ -135,7 +143,15 @@ describe.each(['mysql', 'zdas'] as const)('runMigrations on %s', dbType => {
     expect(exec).toHaveBeenCalledWith(probes.healingSql);
   });
 
+  it('does not record v148 when the post-DDL schema remains too narrow', async () => {
+    const { db, exec } = createDb(dbType, { canDdl: true, current: 147, linkMaxLength: 190 });
+    await expect(runMigrations(db, dbType)).rejects.toThrow('identifier columns are not fully provisioned');
+    expect(exec).toHaveBeenCalledWith(expect.stringContaining('ALTER TABLE flow_run_links'));
+    expect(exec).not.toHaveBeenCalledWith(ledgerInsert, [148, expect.any(String)]);
+  });
+
   it.each([
+    { canDdl: true, sqlPrefix: 'ALTER TABLE flow_run_links', version: 148 },
     { canDdl: true, sqlPrefix: probes.ordinaryCallback, version: 2 },
     { canDdl: true, sqlPrefix: probes.ordinarySql, version: 2 },
     { canDdl: false, sqlPrefix: probes.healingCallback, version: 145 },
@@ -148,7 +164,7 @@ describe.each(['mysql', 'zdas'] as const)('runMigrations on %s', dbType => {
 
     await expect(runMigrations(db, dbType)).rejects.toBe(error);
 
-    expect(exec).toHaveBeenCalledWith(sqlPrefix);
+    expect(exec).toHaveBeenCalledWith(expect.stringContaining(sqlPrefix));
     expect(exec).not.toHaveBeenCalledWith(ledgerInsert, [version, expect.any(String)]);
   });
 });
