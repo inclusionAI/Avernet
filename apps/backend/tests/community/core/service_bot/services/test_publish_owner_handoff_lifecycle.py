@@ -46,6 +46,10 @@ def lifecycle(publication):
     bot_service._template_service = Mock()
     bot_service._template_service.get_template.return_value = None
     bot_service._passport_plugin = Mock()
+    lock_mock = Mock()
+    lock_mock.lock_token = "publish-lifecycle-lock"
+    bot_service._manifest_apply_lock_repo = Mock()
+    bot_service._manifest_apply_lock_repo.acquire.return_value = lock_mock
     grants = Mock()
     grants.revoke_all_for_bot.return_value = 0
     bot_service._bot_app_grant_provider = lambda: grants

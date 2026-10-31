@@ -74,6 +74,7 @@ internal_dependencies:
   - agentclaw.community.core.engine_runtime.stage    # resolve_stage_bind_id / STAGE_* reused by codefuse runtime-target resolution
   - agentclaw.community.core.events
   - agentclaw.community.core.resources
+  - agentclaw.community.core.apply_engine.repository.apply_models
   - agentclaw.community.core.service_bot
   - agentclaw.community.core.bot_management.bot_space    # narrow cross-context Space membership contract
   - agentclaw.community.core.spaces.errors    # typed Space membership failures propagated by Bot Space assignment

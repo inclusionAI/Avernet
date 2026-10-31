@@ -11,9 +11,12 @@ tests all import them from here so there is one place to change a field.
 import asyncio
 from pathlib import Path
 
+
 import httpx
 from injector import inject
 from pydantic import BaseModel, Field
+
+from agentclaw.community.core.services.identity_publish_device import read_identity_from_publish_device
 
 from agentclaw.community.core.workspace.protected_entries import IDENTITY_FILE_NAMES
 from agentclaw.community.core.bot_config_surface.coords import BotConfigCoords
@@ -51,6 +54,11 @@ from agentclaw.community.di.modules.skill_center_module import (
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
+
+
+_TRANSIENT_STATUS_CODES = {502, 504}
+_TRANSIENT_HTTP_DELAY_SECONDS = 0.1
+_TRANSIENT_HTTP_ATTEMPTS = 1
 
 
 # HTML comment markers for reference files section in AGENTS.md
@@ -372,18 +380,46 @@ class IdentityService(IdentityFilePort):
         return await self._read_through(device_fs, file_type)
 
     @staticmethod
-    async def _read_through(device_fs, file_type: str) -> str:
+    def _is_transient_status(exc: httpx.HTTPStatusError) -> bool:
+        """Whether the response is an infra-gateway retry, not a domain answer.
+
+        ``502/504`` mean the gateway/device did not answer the request
+        correctly, so the same identity read or write may be repeated.
+        ``404`` is the file's absence — a final domain answer and never a
+        retry; other 5xx mean the health of a remote repository and are left
+        to the existing error handling.
+        """
+        return exc.response.status_code in _TRANSIENT_STATUS_CODES
+
+    @staticmethod
+    async def _read_through(device_fs, file_type: str, *, attempts: int = 0) -> str:
         """One identity file, through an **already-resolved** ``device_fs``.
 
         Split out of :meth:`_device_read` so a caller reading many files for one
         runtime resolves that runtime once — see :meth:`list_bot_files`. The 404
         contract is the one described there and is not repeated.
+        ``attempts`` is the zero-based retry transition already completed; the
+        public callers start with no retry and the recursion below is therefore
+        effectively bounded by ``_TRANSIENT_HTTP_ATTEMPTS``.
         """
         try:
             content_bytes = await device_fs.read_file(f"{IDENTITY_NS}/{file_type}")
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
                 return ""
+            if attempts < _TRANSIENT_HTTP_ATTEMPTS and IdentityService._is_transient_status(e):
+                logger.warning(
+                    "[identity.read_through] transient HTTPStatusError, "
+                    "file_type=%s, status=%s, retrying once",
+                    file_type,
+                    e.response.status_code,
+                )
+                await asyncio.sleep(_TRANSIENT_HTTP_DELAY_SECONDS)
+                return await IdentityService._read_through(
+                    device_fs,
+                    file_type,
+                    attempts=attempts + 1,
+                )
             raise
         return content_bytes.decode("utf-8") if content_bytes else ""
 
@@ -405,9 +441,23 @@ class IdentityService(IdentityFilePort):
             owner_id=owner_id,
             engine_type=engine_type,
         )
-        await device_fs.write_file(
-            f"{IDENTITY_NS}/{file_type}", content.encode("utf-8")
-        )
+        try:
+            await device_fs.write_file(
+                f"{IDENTITY_NS}/{file_type}", content.encode("utf-8")
+            )
+        except httpx.HTTPStatusError as e:
+            if not IdentityService._is_transient_status(e):
+                raise
+            logger.warning(
+                "[identity.write] transient HTTPStatusError, file_type=%s, "
+                "status=%s, retrying once",
+                file_type,
+                e.response.status_code,
+            )
+            await asyncio.sleep(_TRANSIENT_HTTP_DELAY_SECONDS)
+            await device_fs.write_file(
+                f"{IDENTITY_NS}/{file_type}", content.encode("utf-8")
+            )
 
     async def read_identity_file(
         self,
@@ -842,70 +892,19 @@ class IdentityService(IdentityFilePort):
         operator_id: str,
         engine_type: str,
     ) -> str | None:
-        """Read an identity file from a publish record's stage device binding.
-
-        Resolves the stage ``bind_id`` (``ext.binding`` online→verify) and reads
-        provider-blind via ``resolve_for_binding → dispatch_addressed →
-        device_fs.read_file("identity/<file>")`` — covering arca / baas / teclaw
-        uniformly (replaces the old ``ARCA_`` target string-sniff). Returns ``None``
-        when the publish record / stage binding can't be resolved.
-
-        Deliberately **not** ``engine_runtime.stage.resolve_stage_bind_id``,
-        which the stage-addressed read uses. The caller here named one publish
-        record, and that rule picks the newest record at a status — routing this
-        path through it would answer a question about release 7 from whichever
-        release is currently newest. Keyed by record, stay here; keyed by stage,
-        go there.
-        """
-        from agentclaw.community.core.service_bot.repository.models import (
-            select_stage_bind_id,
+        """Read an identity file from a publish record's stage device binding."""
+        return await read_identity_from_publish_device(
+            self._publish_repo,
+            self._resolver,
+            self._device_fs_dispatcher,
+            publish_id=publish_id,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            bot_id=bot_id,
+            file_type=file_type,
+            operator_id=operator_id,
+            engine_type=engine_type,
         )
-
-        try:
-            record = self._publish_repo.get_by_id(int(publish_id))
-            if not record:
-                logger.warning("[IdentityService] publish_id=%s not found", publish_id)
-                return None
-            ext = record.ext or {}
-            binding_info = ext.get("binding", {})
-            # Select by `record.status`; the final guard then treats a missing/0
-            # bind_id as "no stage binding" (binding PKs are ≥1, so 0 is never a
-            # real binding).
-            bind_id = select_stage_bind_id(binding_info, record.status)
-            if not bind_id:
-                logger.warning(
-                    "[IdentityService] publish_id=%s stage bind_id missing", publish_id
-                )
-                return None
-            try:
-                ctx = self._resolver.resolve_for_binding(
-                    int(bind_id), operator_id, bot_id=bot_id
-                )
-            except (DeviceNotBoundError, UnknownProviderError, ConnInfoBuildError) as e:
-                logger.warning(
-                    "[IdentityService] publish_id=%s bind_id=%s resolve failed: %s",
-                    publish_id,
-                    bind_id,
-                    e,
-                )
-                return None
-            device_fs = self._device_fs_dispatcher.dispatch_addressed(
-                ctx,
-                namespace=IDENTITY_NS,
-                entity_type=entity_type,
-                entity_id=entity_id,
-                bot_id=bot_id,
-                engine_type=engine_type,
-            )
-            content_bytes = await device_fs.read_file(f"{IDENTITY_NS}/{file_type}")
-            return content_bytes.decode("utf-8") if content_bytes else ""
-        except Exception as e:
-            logger.error(
-                "[IdentityService] publish read failed for publish_id=%s: %s",
-                publish_id,
-                e,
-            )
-            return None
 
     async def update_bot_file(
         self,
