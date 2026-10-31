@@ -81,6 +81,8 @@
     { "$ref": "#/$defs/TaskCompletedEvent" },
     { "$ref": "#/$defs/StateMachineRunCreatedEvent" },
     { "$ref": "#/$defs/StateMachineRunStartedEvent" },
+    { "$ref": "#/$defs/StateMachineRunFailedEvent" },
+    { "$ref": "#/$defs/StateMachineRunAbortedEvent" },
     { "$ref": "#/$defs/StateMachineRunCompletedEvent" },
     { "$ref": "#/$defs/StateMachineNodeStartedEvent" },
     { "$ref": "#/$defs/StateMachineNodeCompletedEvent" },
@@ -314,6 +316,8 @@
         "data": { "$ref": "#/$defs/StateMachineRunStartedData" }
       }
     },
+    "StateMachineRunFailedEvent": {"type": "object", "required": ["event_type", "data"], "properties": {"event_type": {"const": "state_machine.run.failed"}, "data": {"$ref": "#/$defs/StateMachineRunAbnormalData"}}},
+    "StateMachineRunAbortedEvent": {"type": "object", "required": ["event_type", "data"], "properties": {"event_type": {"const": "state_machine.run.aborted"}, "data": {"$ref": "#/$defs/StateMachineRunAbnormalData"}}},
     "StateMachineRunCompletedEvent": {
       "type": "object",
       "required": ["event_type", "data"],
@@ -482,6 +486,104 @@
         "run_mode": { "$ref": "#/$defs/RunMode" },
         "started_at": { "$ref": "#/$defs/Timestamp" },
         "input": { "$ref": "#/$defs/ContentProjection" }
+      }
+    },
+    "StateMachineRunAbnormalData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "result",
+        "completed_at",
+        "duration_ms",
+        "scope_invalid"
+      ],
+      "properties": {
+        "result": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schema_version",
+            "run_id",
+            "workflow_name",
+            "status",
+            "failed_node_id",
+            "attempt",
+            "reason_category",
+            "completed_node_ids"
+          ],
+          "properties": {
+            "schema_version": {
+              "const": 1
+            },
+            "run_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+            },
+            "workflow_name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+            },
+            "status": {
+              "enum": [
+                "failed",
+                "aborted"
+              ]
+            },
+            "failed_node_id": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "attempt": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "reason_category": {
+              "enum": [
+                "node_failed",
+                "human_timeout",
+                "startup_failed",
+                "publication_failed",
+                "user_aborted",
+                null
+              ]
+            },
+            "completed_node_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+              },
+              "uniqueItems": true
+            }
+          }
+        },
+        "completed_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "duration_ms": {
+          "$ref": "#/$defs/NonNegativeInteger"
+        },
+        "scope_invalid": {
+          "type": "boolean"
+        }
       }
     },
     "StateMachineRunCompletedData": {

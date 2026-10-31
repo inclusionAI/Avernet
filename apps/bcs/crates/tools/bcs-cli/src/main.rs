@@ -114,7 +114,8 @@ fn is_structured_mode(cli: &Cli) -> bool {
 }
 
 fn build_log_file_path() -> PathBuf {
-    let dir = std::env::var("HOME")
+    let dir = std::env::var("BOT_DATA_DIR")
+        .or_else(|_| std::env::var("HOME"))
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("."))
         .join(".bcs/logs");
@@ -1599,8 +1600,11 @@ enum CollaborationCommands {
     Query {
         #[arg(long)]
         run: String,
+        /// Minimal creator-only Run status and safe terminal result
+        #[arg(long, conflicts_with_all = ["node", "graph", "pending"])]
+        result: bool,
         /// Execution node ID copied from a Run or graph response
-        #[arg(long, conflicts_with_all = ["graph", "pending"])]
+        #[arg(long, conflicts_with_all = ["graph", "pending", "result"])]
         node: Option<String>,
         #[arg(long, conflicts_with = "pending")]
         graph: bool,
@@ -3484,6 +3488,7 @@ pub async fn run() -> Result<()> {
 
             CollaborationCommands::Query {
                 run,
+                result: result_only,
                 node,
                 graph,
                 pending,
@@ -3495,7 +3500,9 @@ pub async fn run() -> Result<()> {
                     bcs_cookie.as_deref(),
                     oauth_headers.as_ref(),
                 );
-                let suffix = if let Some(node) = node.as_deref() {
+                let suffix = if result_only {
+                    vec!["result"]
+                } else if let Some(node) = node.as_deref() {
                     vec!["nodes", node]
                 } else if graph {
                     vec!["graph"]

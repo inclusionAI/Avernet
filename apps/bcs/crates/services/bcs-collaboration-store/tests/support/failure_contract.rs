@@ -7,7 +7,7 @@ fn assert_cas_lost(result: bcs_service_api::ServiceResult<bool>) {
 }
 
 fn failure(node: &str, action: StateMachineFailureAction) -> FailStateMachineNodeAttempt {
-    FailStateMachineNodeAttempt { run_id: "failure-run".into(), node_id: node.into(), attempt: 0,
+    FailStateMachineNodeAttempt { reason_category: bcs_service_api::port::repo::StateMachineRunReason::NodeFailed, run_id: "failure-run".into(), node_id: node.into(), attempt: 0,
         error: "saved failure".into(), completed_at_ms: 100, action }
 }
 
@@ -85,8 +85,14 @@ async fn mysql_failure_action_write_is_one_cas_and_errors_propagate() {
     let db = Arc::new(RecordingDb::default());
     let store = MySqlCollaborationStore::new(db.clone(), "test".into());
     store.fail_node_attempt_with_action(failure("retry", StateMachineFailureAction::Retry)).await.unwrap();
-    let writes = db.executes.lock().await;
-    assert_eq!(writes.len(), 1);
+    let transactions = db.transactions.lock().await;
+    assert_eq!(transactions.len(), 1);
+    assert_eq!(transactions[0].len(), 2);
+    let writes = transactions[0].iter().map(|step| match step {
+        DbTransactionStep::ExecuteChecked { statement, expected_affected_rows: 1 } | DbTransactionStep::Execute(statement) => statement,
+        _ => panic!("expected atomic failure CAS and typed fact"),
+    }).collect::<Vec<_>>();
+    assert!(writes[1].sql().contains("node_failure"));
     assert!(writes[0].sql().contains("failure_action = ?"));
     assert!(writes[0].sql().contains("attempt = ? AND status = 'running'"));
     assert!(writes[0].sql().contains("r.status = 'running'"));

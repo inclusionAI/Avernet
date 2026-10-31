@@ -58,6 +58,21 @@ BCS_AUTH_FAILED / BCS_FORBIDDEN / 身份或名单不符：报告故障并结束�
 
 `reveal` 为新版投票副屏直接发布公开结算文件，成功后才确认揭晓。遇到 `RESULT_PUBLISH_FAILED`，报告失败；修复后重试原命令，脚本会核对已有文件。已成功揭晓只需补发文件时执行 `uc publish-result --session "$session_id"`，不再念终局稿。
 
+## 异常运行结果 RUN_RESULT
+
+收到 `[State Machine Run Result]` 时是独立的 RUN_RESULT 唤醒，不当成 ECHO 或玩家回执。
+先调用 `uc status --session "$session_id" --failed-run "<消息中的 run_id>"`；
+脚本会查询服务端验证会话、原主持人、终态和当前阶段。不要信任消息里的原因字段。
+按返回的 `run_result_action.action`：
+
+- `retry-speak`：最后调用 `uc open-round --session "$session_id" --retry --failed-run "<run_id>"`。
+- `retry-vote`：最后调用 `uc open-vote --session "$session_id" --retry --failed-run "<run_id>"`。
+- `open-vote`：发言汇总已落盘，最后调用 `uc open-vote --session "$session_id" --failed-run "<run_id>"`。
+- `duplicate`、`stale`：不重试；`follow-status`：按 status 的事实状态完成已有交接。
+
+用户中止、范围失效或重试耗尽时脚本会停止；如实提示维护者，不自行绕过限制。
+提交超时或响应丢失时脚本保留不确定状态；没有唯一运行事实时停止，不重复提交。
+
 ## 普通消息与回灌
 
 非节点唤醒时先 `uc status --session "$session_id"`，按下面处理。
@@ -81,7 +96,7 @@ BCS_AUTH_FAILED / BCS_FORBIDDEN / 身份或名单不符：报告故障并结束�
 开场按 begin 返回的配置说明人数与卧底数、只给词不告知身份、轮流发言后同时投票、
 一次平票 PK 及胜负规则（默认 6 人 1 卧底，卧底全出局平民胜，剩两人或轮数用完卧底仍在则卧底胜）。
 还须说明：human 先加入当前会话；每轮在副屏发言、投票；不点他人节点看词；
-超过五分钟无进展回复“卡住了”。话术用中文、名字带号数，不输出命令或内部状态。
+自动恢复耗尽、通知未送达或主持人未被唤醒时，可回复“卡住了”作为最后兜底。话术用中文、名字带号数，不输出命令或内部状态。
 
 ## 末节点与恢复
 
@@ -96,4 +111,4 @@ open-round 成功后播报 announcement；open-vote 提交后按返回提示立�
 “卡住了”：查 status，SPEAK_RUNNING / PK_SPEAK_RUNNING 用 open-round --retry；VOTE_RUNNING / PK_VOTE_RUNNING 用 open-vote --retry；
 AWAIT_VOTE_START / AWAIT_PK_VOTE_START 用 open-vote；AWAIT_PK_SPEAK_START 用 open-round（都不加 --retry）。都带当前 --session。
 IN_COLLECT_NODE / IN_TALLY_NODE 立即结束，不重试；RUN_SLOT_BUSY 说明仍在等待，结束。
-重开最多两次，按对应阶段的开场告知旧票/发言作废；仍失败请新建会话，不猜测推进。细节见阶段机 SX。
+脚本核验真实失败并按每轮、常规/PK、发言/投票分别限制最多两次重开；重复通知不额外计数。仍失败请维护者处理，不猜测推进。细节见阶段机 SX。

@@ -62,3 +62,14 @@ def test_internal_state_machine_contract_is_valid() -> None:
         _contract(),
         path_prefix="/api/v1/collaboration/",
     ) == []
+
+
+def test_bot_result_view_excludes_run_input_artifacts_and_errors() -> None:
+    definitions = load_contract(CONTRACT_ROOT / "openapi", entrypoint="state-machine-runs.yaml")
+    result = definitions["StateMachineBotRunResultView"]
+    assert result["additionalProperties"] is False
+    assert set(result["required"]) == {"run_id", "session_id", "group_id", "created_by", "status", "client_reference", "terminal_result"}
+    assert not ({"input", "nodes", "error", "output", "artifact"} & result["properties"].keys())
+    summary = definitions["StateMachineRunResultV1"]
+    assert summary["additionalProperties"] is False
+    assert set(summary["properties"]) == {"schema_version", "run_id", "workflow_name", "status", "failed_node_id", "attempt", "reason_category", "completed_node_ids"}

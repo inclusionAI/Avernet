@@ -3,10 +3,10 @@ use super::*;
 use bcs_service_api::{FailStateMachineStartup as Command, StateMachineMissingStartupFact as Missing,
     StateMachineStartupFailure as Failure, STATE_MACHINE_PREPARATION_GRACE_MS as GRACE};
 
-fn key(run: &str) -> String { format!("smrun:{run}:startup-failure") }
+pub(super) fn key(run: &str) -> String { format!("smrun:{run}:startup-failure") }
 fn dispatch_key(run: &str, node: &str, attempt: i32) -> String { format!("smnode:{run}:{node}:{attempt}:dispatch") }
 fn error(e: impl std::fmt::Display) -> ServiceError { ServiceError::InternalError(format!("missing facts recovery: {e}")) }
-fn failure(run: &StateMachineRun, c: &Command) -> ServiceResult<Failure> {
+pub(super) fn failure(run: &StateMachineRun, c: &Command) -> ServiceResult<Failure> {
     if c.failed_at_ms > i64::MAX as u64 || c.preparation_error.as_ref().is_some_and(|e| e.trim().is_empty()) {
         return Err(error("invalid startup failure"));
     }
@@ -45,6 +45,7 @@ impl MemoryCollaborationStore {
             || now < n.timeout_deadline_ms.unwrap_or_else(|| n.started_at.unwrap_or(created).saturating_add(GRACE)) { return Ok(false); }
         let retry = n.timeout_deadline_ms.is_some() && retry_is_within_limit(attempt, n.max_attempts);
         n.status = StateMachineNodeStatus::Failed; n.error = Some(DISPATCH_ERROR.into()); n.completed_at = Some(now); n.timeout_deadline_ms = None;
+        inner.failure_reasons.insert((run.into(), node.into(), attempt), bcs_service_api::port::repo::StateMachineRunReason::NodeFailed);
         inner.node_failure_actions.insert((run.into(), node.into()), if retry { StateMachineFailureAction::Retry } else { StateMachineFailureAction::FailRun });
         Ok(true)
     }
@@ -92,7 +93,7 @@ impl MySqlCollaborationStore {
         }).transpose()
     }
     pub(super) async fn fail_dispatch_gap(&self, run: &str, node: &str, attempt: i32, now: u64) -> ServiceResult<bool> {
-        let result = self.db.execute(DbStatement::with_params(format!(
+        let result = self.db.transaction(vec![DbTransactionStep::ExecuteChecked { statement: DbStatement::with_params(format!(
             "UPDATE bcs_state_machine_node_runs SET status = 'failed', error_message = ?, completed_at_ms = ?, \
              failure_action = CASE WHEN timeout_deadline_ms IS NOT NULL AND attempt >= 0 AND attempt < CASE WHEN max_attempts > 0 THEN max_attempts ELSE 1 END - 1 THEN 'retry' ELSE 'fail_run' END, \
              timeout_deadline_ms = NULL, runtime_phase = NULL, {} WHERE env = ? AND run_id = ? AND node_id = ? AND attempt = ? \
@@ -101,7 +102,9 @@ impl MySqlCollaborationStore {
              AND EXISTS (SELECT 1 FROM bcs_state_machine_runs r WHERE r.env = bcs_state_machine_node_runs.env AND r.run_id = bcs_state_machine_node_runs.run_id \
              AND r.status = 'running' AND r.record_status = 'active' AND COALESCE(bcs_state_machine_node_runs.timeout_deadline_ms, COALESCE(bcs_state_machine_node_runs.started_at_ms, r.created_at_ms) + {GRACE}) <= ?)", self.flavor.set_modified_now()),
             vec![DbValue::from(DISPATCH_ERROR), DbValue::from(now), DbValue::from(self.env.as_str()), DbValue::from(run), DbValue::from(node),
-                DbValue::from(attempt), DbValue::from(dispatch_key(run, node, attempt)), DbValue::from(now)])).await.map_err(error)?;
-        Ok(result.affected_rows > 0)
+                DbValue::from(attempt), DbValue::from(dispatch_key(run, node, attempt)), DbValue::from(now)]), expected_affected_rows: 1 },
+            failure_metadata::step(&self.env, run, node, attempt, bcs_service_api::port::repo::StateMachineRunReason::NodeFailed, now)?,
+        ]).await;
+        match result { Ok(_) => Ok(true), Err(DbError::ConditionFailed { expected: 1, actual: 0 }) => Ok(false), Err(e) => Err(error(e)) }
     }
 }

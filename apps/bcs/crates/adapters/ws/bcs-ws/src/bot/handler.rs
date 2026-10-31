@@ -264,7 +264,13 @@ pub async fn handle_connection(
         // Remove the old sender before releasing the runtime connection slot.
         // While the slot is occupied, reconnects are rejected; after it is
         // released, this handler must not remove a newly registered sender.
+        let disconnected_at_ms = bcs_protocol::now_ms();
         state.bot_connections.disconnect(bot_id).await;
+        if !leadership_shutdown.is_cancelled() {
+            if let Err(err) = state.collaboration_runtime.bot_websocket_disconnected(bot_id, disconnected_at_ms).await {
+                warn!(bot_id = %bot_id, error = %err, "Failed to handle StateMachine worker disconnect");
+            }
+        }
         if let Err(err) = state
             .bot_runtime
             .disconnect_streaming(BotRuntimeDisconnectCommand {

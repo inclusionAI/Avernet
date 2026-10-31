@@ -17,6 +17,8 @@ mod opening_recovery_tests;
 
 #[path = "dispatch_recovery.rs"]
 mod dispatch_recovery_tests;
+#[path = "disconnect_recovery.rs"]
+mod disconnect_recovery_tests;
 
 #[path = "recovery_sqlite.rs"]
 mod sqlite_restart_tests;
@@ -41,6 +43,7 @@ pub(super) struct FaultyRuns {
     fail_publication_finish: AtomicBool,
     inner: Arc<dyn StateMachineRunRepoPort>,
     fail_dispatch: AtomicBool,
+    dispatch_is_http: AtomicBool,
     fail_dispatch_save: AtomicBool,
     fail_dispatch_claim: AtomicBool,
     fail_send_marker: AtomicBool,
@@ -74,7 +77,7 @@ pub(super) struct FaultyRuns {
 
 impl FaultyRuns {
     fn new(inner: Arc<dyn StateMachineRunRepoPort>) -> Self {
-        Self { inner, fail_dispatch: AtomicBool::new(false),
+        Self { inner, fail_dispatch: AtomicBool::new(false), dispatch_is_http: AtomicBool::new(false),
             fail_im_save: AtomicBool::new(false), fail_im_claim: AtomicBool::new(false), fail_im_marker: AtomicBool::new(false), fail_im_ack: AtomicBool::new(false),
             fail_publication_save: AtomicBool::new(false), fail_publication_claim: AtomicBool::new(false),
             fail_publication_marker: AtomicBool::new(false), fail_publication_finish: AtomicBool::new(false),
@@ -105,6 +108,15 @@ fn injected() -> ServiceError { ServiceError::InternalError("injected progressio
 
 #[async_trait]
 impl StateMachineRunRepoPort for FaultyRuns {
+    async fn disconnected_bot_nodes(&self, bot: &str, at: u64, after: Option<(&str, &str)>, limit: usize) -> ServiceResult<Vec<StateMachineNodeRun>> { self.inner.disconnected_bot_nodes(bot, at, after, limit).await }
+    async fn fail_disconnected_bot_node(&self, node: &StateMachineNodeRun, at: u64) -> ServiceResult<bool> { self.inner.fail_disconnected_bot_node(node, at).await }
+    async fn completed_node_ids(&self, run: &str) -> ServiceResult<Vec<String>> { self.inner.completed_node_ids(run).await }
+    async fn get_terminal_result(&self, run: &str) -> ServiceResult<Option<bcs_service_api::port::repo::StateMachineRunResultV1>> { self.inner.get_terminal_result(run).await }
+    async fn commit_terminal(&self, command: bcs_service_api::port::repo::CommitStateMachineTerminal) -> ServiceResult<bool> {
+        if self.fail_run_failure.swap(false, Ordering::SeqCst) { return Err(injected()); }
+        self.inner.commit_terminal(command).await
+    }
+
     async fn fail_missing_startup(&self, command: bcs_service_api::FailStateMachineStartup) -> ServiceResult<bool> { self.inner.fail_missing_startup(command).await }
     async fn get_startup_failure(&self, run: &str) -> ServiceResult<Option<bcs_service_api::StateMachineStartupFailure>> { self.inner.get_startup_failure(run).await }
     async fn fail_missing_dispatch(&self, run: &str, node: &str, attempt: i32, now: u64) -> ServiceResult<bool> { self.inner.fail_missing_dispatch(run, node, attempt, now).await }
@@ -154,7 +166,15 @@ impl StateMachineRunRepoPort for FaultyRuns {
         if self.fail_dispatch_save.swap(false, Ordering::SeqCst) { return Err(injected()); }
         self.inner.save_node_dispatch(payload).await
     }
-    async fn get_node_dispatch(&self, run: &str, node: &str, attempt: i32) -> ServiceResult<Option<bcs_service_api::StateMachineDispatchCheckpoint>> { self.inner.get_node_dispatch(run, node, attempt).await }
+    async fn get_node_dispatch(&self, run: &str, node: &str, attempt: i32) -> ServiceResult<Option<bcs_service_api::StateMachineDispatchCheckpoint>> {
+        let mut saved = self.inner.get_node_dispatch(run, node, attempt).await?;
+        if self.dispatch_is_http.load(Ordering::SeqCst) {
+            if let Some(saved) = saved.as_mut() {
+                saved.payload.target = bcs_service_api::StateMachineDispatchTarget::HttpProvider { provider_id: "provider".into(), provider_bot_ref: "bot".into(), protocol_version: "1".into() };
+            }
+        }
+        Ok(saved)
+    }
     async fn claim_node_dispatch(&self, run: &str, node: &str, attempt: i32, owner: String, now: u64, until: u64) -> ServiceResult<Option<bcs_service_api::StateMachineDispatchClaim>> {
         if self.fail_dispatch_claim.swap(false, Ordering::SeqCst) { return Err(injected()); }
         self.inner.claim_node_dispatch(run, node, attempt, owner, now, until).await

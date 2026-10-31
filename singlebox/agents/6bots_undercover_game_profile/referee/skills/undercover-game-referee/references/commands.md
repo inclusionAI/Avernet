@@ -96,6 +96,12 @@ uc init --session S --referee-uuid R --human human_123 \
 
 ### `status`
 
+`uc status --session S --failed-run RUN_ID` 核验服务端异常终态并返回安全的
+`run_result_action`；`recovery` 显示当前提交、已处理 run 和每阶段重试次数。
+`open-round` / `open-vote` 可加 `--failed-run RUN_ID` 关联通知；重开必须同时加
+`--retry`。脚本持久化每阶段最多两次的限制，重复结果不再次提交。用户取消或提交结果
+不确定时停止，不通过重新渲染或底层命令绕过验证。
+
 默认返回压成一行的字段：`phase`、`round`（"1/6"）、`alive`、`pending_ping`、`next_action`、`referee_uuid`（已开局时）。
 **每次被唤醒的第一件事。**
 
