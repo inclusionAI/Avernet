@@ -89,6 +89,5 @@ OAuth goes through BCS `/auth/*` with an HttpOnly `bcs_session` cookie; JavaScri
 ## Conventions
 
 - Comments are largely Chinese; match the local style of the file you touch.
-- Source files must not exceed 1,000 lines (repo CI enforces; split by responsibility).
 - PR titles: `<type>(frontend-nextgen): <concise outcome>` (e.g. `fix(frontend-nextgen): remove external bot entry from identity selector`). Root `AGENTS.md` defines the full PR description format.
 - Do not add unrequested features or speculative abstraction; keep changes small and traceable.

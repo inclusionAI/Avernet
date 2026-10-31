@@ -300,10 +300,6 @@ Module gates selected from the committed diff:
 
 ## Editing discipline
 
-- **1,000-line file limit is CI-enforced.** Before finishing a change, check
-  line counts; split by responsibility and update callers/tests before CI.
-  Allowlist only when a file genuinely can't split, with a documented reason
-  and cleanup plan in the PR description.
 - Do **not** format existing code as a side effect of a focused change — no
   `cargo fmt`, `prettier`, `ruff format`, or IDE format-on-save unless asked.
   Keep whitespace/style edits to the lines that must change. If a formatter

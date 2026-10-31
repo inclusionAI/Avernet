@@ -128,7 +128,7 @@ Existing BCS visibility, ownership, organization and friendship gates run first.
 Core batches Card reads; discovery predicates identify nonmatching A2A Bots
 without loading their full payload or falling back to legacy capabilities.
 Cards are read from persistence, so refresh needs no duplicated query cache.
-Query/discovery orchestration is in application/bot_query.rs and bot_cards.rs.
+Query/discovery orchestration remains in application/bot.rs.
 Refresh failure preserves the last validated Card for new sends and cancellation.
 New delivery interfaces derive from current egress/gRPC policy, without a saved
 route projection; availability uses the same pure selector.

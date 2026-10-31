@@ -1,5 +1,8 @@
 # File-size exception record: BCS-AUTHORITY-SIZE-2026-10-10
 
+> Historical record: the repository-wide source-file line-count limit was removed on 2026-10-31. Its file-size ceilings and mandatory splitting conditions no longer apply. Other scope and correctness constraints remain unchanged.
+
+
 | Field | Value |
 | --- | --- |
 | Waiver ID | `BCS-AUTHORITY-SIZE-2026-10-10` |

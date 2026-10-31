@@ -5,7 +5,7 @@
 `POST /providers/{provider_id}/bots` accepts optional `agent_card_url` and
 dispatches that branch to A2aBotManagementService. Missing/null preserves the
 legacy Provider management path. Provider/Bot registration handlers live under
-routes/providers/registration.rs; HTTP does not fetch Cards or write stores.
+routes/providers.rs; HTTP does not fetch Cards or write stores.
 The request/atomicity/duplicate contract is documented in
 docs/specs/a2a/provider-admin-registration-v1.md at the repository root.
 
@@ -129,4 +129,4 @@ service. Memory-only test servers may omit this durable capability and return
 returns the registered source Card, or 404 for a legacy Bot. It does not advertise
 BCS as an A2A server. Detail, discovery, search and batched query views carry the
 full optional `agent_card` alongside existing fields; legacy responses omit it.
-Legacy Bot JSON projections are isolated in routes/bot_views.rs.
+Legacy Bot JSON projections remain in routes/bots.rs.
