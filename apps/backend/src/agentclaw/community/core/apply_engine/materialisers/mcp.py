@@ -226,9 +226,7 @@ class McpMaterialiser(Materialiser):
             )
             for intent in intents
         )
-        # A declaration that leaves platform defaults alone (a genome revision's) never removes one.
-        keep = platform_owned if ctx.keeps_platform_defaults else set()
-        removal_writes = tuple(sorted(current - declared - keep))
+        removal_writes = tuple(sorted(current - declared))
         removals = tuple(sorted(set(removal_writes) - set(dependency_codes)))
         retained = sorted(set(removal_writes) & set(dependency_codes))
         retained_entries = tuple(

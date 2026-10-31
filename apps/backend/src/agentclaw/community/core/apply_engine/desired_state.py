@@ -129,11 +129,6 @@ class Declaration(Generic[E]):
 
     entries: tuple[E, ...]
     failures: tuple[EntryFailure, ...] = ()
-    #: ``True`` when the declaration speaks only for the bot's own entries and leaves the ones the platform supplies
-    #: (an engine's default MCP servers) as they are; ``False``, the Manifest's reading, when it is the whole area.
-    #: Read by the materialisers whose area has platform-supplied entries — today MCP. A revision's MCP list is the
-    #: former: capture records a bot's MCP servers without the platform defaults, so delivering it must keep them.
-    keeps_platform_defaults: bool = False
 
     def __post_init__(self) -> None:
         seen: set[str] = set()
