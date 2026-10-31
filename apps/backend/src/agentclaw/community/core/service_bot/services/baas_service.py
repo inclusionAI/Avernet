@@ -1914,13 +1914,34 @@ class BaasService:  # pragma: no cover
             return result
 
         except httpx.HTTPStatusError as e:
+            # Progress polling is retry-safe. A temp 400/429/5xx from the
+            # BaaS fronting path (observed as an HTML 400, then 200 on the
+            # next poll) is not record failure; keep it distinguishable from
+            # a persistent 4xx or malformed request.
+            status_code = e.response.status_code
+            if status_code in (400, 429) or status_code >= 500:
+                logger.warning(
+                    f"[BaasService.get_publish_progress] "
+                    f"Transient HTTP error: {status_code} - {e.response.text}"
+                )
+                raise BaasTransientServiceError(
+                    f"BaaS API transient error: {status_code} - {e.response.text}"
+                ) from e
             logger.error(
                 f"[BaasService.get_publish_progress] "
-                f"HTTP error: {e.response.status_code} - {e.response.text}"
+                f"HTTP error: {status_code} - {e.response.text}"
             )
             raise BaasServiceError(
-                f"BaaS API error: {e.response.status_code} - {e.response.text}"
+                f"BaaS API error: {status_code} - {e.response.text}"
             )
+        except httpx.RequestError as e:
+            logger.warning(
+                f"[BaasService.get_publish_progress] "
+                f"Transport failure: {type(e).__name__}"
+            )
+            raise BaasTransientServiceError(
+                f"BaaS transport failure: {type(e).__name__}"
+            ) from e
         except Exception as e:
             logger.error(
                 f"[BaasService.get_publish_progress] "

@@ -25,6 +25,7 @@ from agentclaw.community.core.service_bot.services.arca_image_pin import (
     has_explicit_image_policy,
     image_policy_from_ext,
 )
+from agentclaw.community.core.service_bot.baas_service_errors import BaasTransientServiceError
 from agentclaw.community.core.service_bot.services.publish_flow_service import (
     PublishFlowService,
     PublishFlowServiceError,
@@ -3579,6 +3580,15 @@ def test_get_baas_publish_progress_raises_when_baas_fails_public_name():
         svc.get_baas_publish_progress(baas_publish_id="789")
 
 
+def test_get_baas_publish_progress_preserves_transient_error():
+    svc = _pf(Mock(), Mock(), Mock(), Mock(), Mock())
+    error = BaasTransientServiceError("BaaS API transient error: 400")
+    svc._baas_service.get_publish_progress.side_effect = error
+
+    with pytest.raises(BaasTransientServiceError):
+        svc.get_baas_publish_progress(baas_publish_id="789")
+
+
 @pytest.mark.unit
 def test_handle_sync_success_skips_destroy_verify_bot_for_teclaw_online_publish():
     publish_service = Mock()
@@ -4084,6 +4094,34 @@ def test_advance_publish_progress_other_status_reports_without_mutation():
     result = svc.advance_publish_progress(publish_id=1)
     assert "PENDING" in result.message
     publish_service.update_publish_status_with_ext.assert_not_called()
+
+
+def test_advance_publish_progress_transient_error_keeps_wait_state():
+    # Gate A: a transient exchange 400/502 is already handled by the durable
+    # poll task; it must not be escalated to terminal failure here.
+    record = _make_publish_record(
+        status=PublishStatus.VALIDATE_PUB.value, ext={"publish": {"verify": 500}}
+    )
+    publish_service = Mock()
+    publish_service.get_publish_by_id.return_value = record
+    build_service = Mock()
+    svc = _pf(
+        publish_service,
+        build_service,
+        Mock(),
+        Mock(),
+        _arca_router(build_service),
+    )
+    svc._baas_service.get_publish_progress.side_effect = BaasTransientServiceError(
+        "BaaS API transient error: 400 - fronting"
+    )
+
+    result = svc.advance_publish_progress(publish_id=1)
+
+    assert result.status == PublishStatus.VALIDATE_PUB
+    assert "transient error: 400" in result.message
+    publish_service.update_publish_status_with_ext.assert_not_called()
+    publish_service.update_publish_status.assert_not_called()
 
 
 # ---- sync_restart_progress() dispatch (previously zero coverage) -----------
