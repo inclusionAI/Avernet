@@ -94,6 +94,9 @@ EXECUTOR_MIGRATION_NOTES = frozenset({
     'AUTHORITY_DENSITY_42_OBLIGATIONS_20261031',
     'row #10 story_user_validates_external_channel_setup: register 7 source-anchored density obligations under the retained CHANNEL.* parent envelope (13 parsed = 6 legacy parents + 7 atoms; residual_count_gap=0); notes-only integration, the dual-channel-bindings-run envelope and its r8 conclusions stay untouched',
     'row #11 story_cli_operator_validates_channel_management: register 7 source-anchored density obligations under the retained CHANNEL-CLI.* parent envelope (16 parsed = 9 legacy parents + 7 atoms; residual_count_gap=0); preprod keeps BLOCKED_INVENTORIED with the disabled-bridge divergence registered as a true business judgment (not a defect) and the sim DingTalk design red disclosed; remote_validation=NOT_RUN and grants_release_credit=false',
+    'WPB_SESSION_SHARING_87_OBLIGATIONS_20261031',
+    'WPB_SESSION_SERVICE_44_OBLIGATIONS_20261031',
+    'WPB_SESSION_FILE_12_REQUIREMENTS_20261031',
 })
 _VALID_EXECUTOR_MIGRATION_STATES = frozenset({
     ('DUAL', 'PASS'),
@@ -132,6 +135,9 @@ _EXPECTED_EXECUTOR_MIGRATION_NOTE_COUNTS = {
     'AUTHORITY_DENSITY_42_OBLIGATIONS_20261031': 1,
     'row #10 story_user_validates_external_channel_setup: register 7 source-anchored density obligations under the retained CHANNEL.* parent envelope (13 parsed = 6 legacy parents + 7 atoms; residual_count_gap=0); notes-only integration, the dual-channel-bindings-run envelope and its r8 conclusions stay untouched': 1,
     'row #11 story_cli_operator_validates_channel_management: register 7 source-anchored density obligations under the retained CHANNEL-CLI.* parent envelope (16 parsed = 9 legacy parents + 7 atoms; residual_count_gap=0); preprod keeps BLOCKED_INVENTORIED with the disabled-bridge divergence registered as a true business judgment (not a defect) and the sim DingTalk design red disclosed; remote_validation=NOT_RUN and grants_release_credit=false': 1,
+    'WPB_SESSION_SHARING_87_OBLIGATIONS_20261031': 1,
+    'WPB_SESSION_SERVICE_44_OBLIGATIONS_20261031': 1,
+    'WPB_SESSION_FILE_12_REQUIREMENTS_20261031': 1,
 }
 
 

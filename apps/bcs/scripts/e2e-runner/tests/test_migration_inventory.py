@@ -751,3 +751,23 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
                 self.assertRaisesRegex(RunStateError, message),
             ):
                 legacy_inventory_with_executor_migration()
+
+
+    def test_wpb_density_closures_lock_face_notes_on_rows_4_12_15(self):
+        statuses = load_executor_migration()
+        locks = (
+            ('story_user_runs_and_shares_sessions',
+             'WPB_SESSION_SHARING_87_OBLIGATIONS_20261031'),
+            ('story_cli_operator_runs_sessions_and_services',
+             'WPB_SESSION_SERVICE_44_OBLIGATIONS_20261031'),
+            ('story_session_file_workspace',
+             'WPB_SESSION_FILE_12_REQUIREMENTS_20261031'),
+        )
+        for story_id, token in locks:
+            with self.subTest(story_id=story_id):
+                self.assertIn(story_id, statuses)
+                row = statuses[story_id]
+                self.assertEqual(row['mode'], 'DUAL')
+                self.assertEqual(row['preprod_verdict'], 'PASS')
+                self.assertIn(token, row['notes'])
+                self.assertEqual(len(row['notes']), 1)

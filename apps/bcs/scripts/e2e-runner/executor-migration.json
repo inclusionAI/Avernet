@@ -45,7 +45,9 @@
         "mode": "DUAL",
         "preprod_verdict": "PASS",
         "gates": [],
-        "notes": []
+        "notes": [
+            "WPB_SESSION_SHARING_87_OBLIGATIONS_20261031"
+          ]
       }
     },
     {
@@ -129,7 +131,9 @@
         "mode": "DUAL",
         "preprod_verdict": "PASS",
         "gates": [],
-        "notes": []
+        "notes": [
+            "WPB_SESSION_SERVICE_44_OBLIGATIONS_20261031"
+          ]
       }
     },
     {
@@ -161,7 +165,9 @@
         "mode": "DUAL",
         "preprod_verdict": "PASS",
         "gates": [],
-        "notes": []
+        "notes": [
+            "WPB_SESSION_FILE_12_REQUIREMENTS_20261031"
+          ]
       }
     },
     {
