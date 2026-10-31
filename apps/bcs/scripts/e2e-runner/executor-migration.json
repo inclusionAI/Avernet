@@ -387,7 +387,8 @@
         "preprod_verdict": "NOT_RUN",
         "gates": [],
         "notes": [
-          "SERVICE_POLICY_DENSITY_R1_PROJECTED_20261031"
+          "SERVICE_POLICY_DENSITY_R1_PROJECTED_20261031",
+          "SERVICE_POLICY_DENSITY_15_OBLIGATIONS_20261031"
         ]
       }
     },

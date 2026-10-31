@@ -671,6 +671,15 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
             'gates': [],
             'notes': ['DRAFT_DELIVERY_DENSITY_24_OBLIGATIONS_20261031'],
         })
+        self.assertEqual(rows['story_retired_service_policy'], {
+            'mode': 'DUAL',
+            'preprod_verdict': 'NOT_RUN',
+            'gates': [],
+            'notes': [
+                'SERVICE_POLICY_DENSITY_R1_PROJECTED_20261031',
+                'SERVICE_POLICY_DENSITY_15_OBLIGATIONS_20261031',
+            ],
+        })
         self.assertEqual(rows['story_cli_operator_builds_collaboration_team'], {
             'mode': 'DUAL',
             'preprod_verdict': 'BLOCKED_INVENTORIED',
