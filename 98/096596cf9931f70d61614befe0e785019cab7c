@@ -1,0 +1,27 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/inventory.py
+  s_cecdc98e721f4b::t_af3c1f9b0624ba 100-107,149-156
+apps/bcs/scripts/e2e-runner/executor-migration.json
+  s_cecdc98e721f4b::t_371a6ea188fd05 228-230,261-263,272-274,283-285,294-296,316-318,349-351,360-362
+apps/bcs/scripts/e2e-runner/tests/test_edge_red_edge_dual_registration.py
+  s_cecdc98e721f4b::t_6b96373d895042 60-61,65-72
+apps/bcs/scripts/e2e-runner/tests/test_local_backlog_story_commands.py
+  s_cecdc98e721f4b::t_efb5d1d7d23adf 402-409
+apps/bcs/scripts/e2e-runner/tests/test_migration_inventory.py
+  s_cecdc98e721f4b::t_2f8f617e5c5fec 660,774-798
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "98096596cf9931f70d61614befe0e785019cab7c",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
