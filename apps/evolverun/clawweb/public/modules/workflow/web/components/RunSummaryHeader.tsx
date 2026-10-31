@@ -11,11 +11,12 @@ interface RunSummaryHeaderProps {
   onAutoHeal?: (run: FlowRun) => void
   onApproval?: () => void
   pendingApprovalCount?: number
+  readOnly?: boolean
 }
 
 import { formatTime, formatDuration } from '@avernet/workflow/web/utils/time'
 
-export default function RunSummaryHeader({ run, nodeCount, succeededCount, failedCount, onAutoHeal, onApproval, pendingApprovalCount = 0 }: RunSummaryHeaderProps) {
+export default function RunSummaryHeader({ run, nodeCount, succeededCount, failedCount, onAutoHeal, onApproval, pendingApprovalCount = 0, readOnly = false }: RunSummaryHeaderProps) {
   const succeeded = succeededCount ?? run.succeeded_count
   const failed = failedCount ?? run.failed_count
   const succeededPct = nodeCount > 0 ? Math.round((succeeded / nodeCount) * 100) : 0
@@ -82,7 +83,7 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
         </div>
         <div className="flex items-center gap-2">
           <StatusBadge status={run.status} className="text-sm" />
-          {canRerun && (
+          {!readOnly && canRerun && (
             <button
               type="button"
               onClick={handleRerun}
@@ -93,7 +94,7 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
               {rerunMutation.isPending ? '⏳' : '🔄 重跑'}
             </button>
           )}
-          {isAbortable && (
+          {!readOnly && isAbortable && (
             confirmingAbort ? (
               <span className="inline-flex items-center gap-1">
                 <button
@@ -124,7 +125,7 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
               </button>
             )
           )}
-          {isAutoHealable && (
+          {!readOnly && isAutoHealable && (
             <button
               type="button"
               onClick={handleAutoHeal}
@@ -134,7 +135,7 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
               🩹 修复
             </button>
           )}
-          {run.status === 'waiting' && pendingApprovalCount > 0 && onApproval && (
+          {!readOnly && run.status === 'waiting' && pendingApprovalCount > 0 && onApproval && (
             <button
               type="button"
               onClick={onApproval}
@@ -147,7 +148,7 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
               )}
             </button>
           )}
-          {confirming ? (
+          {!readOnly && (confirming ? (
             <span className="inline-flex items-center gap-1">
               <button
                 type="button"
@@ -174,7 +175,7 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
             >
               🗑 删除
             </button>
-          )}
+          ))}
         </div>
       </div>
 

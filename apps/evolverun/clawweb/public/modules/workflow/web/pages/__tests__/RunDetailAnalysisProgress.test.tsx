@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -62,7 +62,7 @@ vi.mock('../../api/hooks', () => ({
 }))
 
 vi.mock('../../components/RunSummaryHeader', () => ({ default: () => <div>运行摘要</div> }))
-vi.mock('../../components/SubworkflowExecutionTree', () => ({ default: ({ flowId }: { flowId: string }) => <div>子运行树 {flowId}</div> }))
+vi.mock('../../components/SubworkflowLinks', () => ({ default: () => null, UnattributedSubworkflowLinks: () => null, SubworkflowProvider: ({ children }: { children: React.ReactNode }) => children }))
 vi.mock('../../components/NodeExecutionList', () => ({ default: () => <div>节点列表</div> }))
 vi.mock('../../components/RunDagView', () => ({ default: () => <div>DAG</div> }))
 vi.mock('../../components/ErrorState', () => ({ default: ({ message }: { message: string }) => <div>{message}</div> }))
@@ -77,15 +77,6 @@ vi.mock('@avernet/clawweb-shared/web/api/hooks', () => ({
 import RunDetail from '../RunDetail'
 
 describe('run detail managed-analysis progress', () => {
-  it('opens and closes the child execution tree for the current run', () => {
-    render(<MemoryRouter initialEntries={['/runs/flow-progress-detail']}><Routes><Route path="/runs/:flowId" element={<RunDetail />} /></Routes></MemoryRouter>)
-    expect(screen.queryByText('子运行树 flow-progress-detail')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '查看子工作流执行过程' }))
-    expect(screen.getByText('子运行树 flow-progress-detail')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '收起子工作流执行过程' }))
-    expect(screen.queryByText('子运行树 flow-progress-detail')).not.toBeInTheDocument()
-  })
-
   it('shows the reported phase, elapsed time, and safe input summary while analyzing', () => {
     render(
       <MemoryRouter initialEntries={['/runs/flow-progress-detail?from=workspace']}>
