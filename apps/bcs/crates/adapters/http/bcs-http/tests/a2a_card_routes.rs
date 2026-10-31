@@ -160,7 +160,7 @@ async fn scoped_register_accepts_inline_body_without_name() {
         .with_register_application(Arc::new(ScopedRegistration))
         .with_invite_config(REGISTER_SECRET.to_vec(),21600,None,None,None));
     let response=app.oneshot(Request::builder().method("POST")
-        .uri(format!(concat!("/register?token={token}", "&mode=gateway&provider_bot_ref=remote")))
+        .uri(format!(concat!("/register?token={token}", "&mode=gateway&provider_bot_ref=remote"), token = token))
         .header("content-type","application/json")
         .body(Body::from(json!({"agent_card":{"name":"Inline"}}).to_string())).unwrap()).await.unwrap();
     assert_eq!(response.status(),StatusCode::OK);
