@@ -49,7 +49,12 @@ def main():
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--base-url', default='http://127.0.0.1:21000')
     parser.add_argument('--wait-seconds', type=int, default=600)
+    parser.add_argument('--seed', type=int, help='random seed for reproducible player selection')
+    parser.add_argument('--min-candidates', type=int, default=1, help='minimum eligible nodes required before injection')
+    parser.add_argument('--queue-config', default='unverified', help='observed queue configuration label')
     args = parser.parse_args()
+    if args.min_candidates < 1:
+        parser.error('--min-candidates must be positive')
     if args.output.exists():
         raise ValueError('evidence output already exists')
     homes = [p.expanduser().resolve() for p in args.worker_home]
@@ -65,12 +70,16 @@ def main():
             run_id = rows[0][0]
             view = get(f'{args.base_url.rstrip("/")}/state-machine-runs/{run_id}')
             eligible = [n for n in view['nodes'] if n['status'] == 'running' and n.get('assignee_bot_id') in workers
+                        and n['node_id'] != 'vote_start'
                         and (n['node_id'].startswith('speak_') or n['node_id'].startswith('vote_'))]
-            if eligible:
-                print(f"Selected run {run_id}, node {eligible[0]['node_id']}; validating player and injecting now.", flush=True)
+            if len(eligible) >= args.min_candidates:
+                print(f"Selected run {run_id}; choosing randomly among {len(eligible)} eligible nodes.", flush=True)
                 cmd = [sys.executable, str(Path(__file__).with_name('inject_player.py')), '--base-url', args.base_url,
                        '--session', args.session, '--run', run_id, '--sqlite', str(args.sqlite),
-                       '--referee-state-dir', str(args.referee_state_dir), '--output', str(args.output)]
+                       '--referee-state-dir', str(args.referee_state_dir), '--output', str(args.output),
+                       '--queue-config', args.queue_config, '--min-candidates', str(args.min_candidates)]
+                if args.seed is not None:
+                    cmd.extend(['--seed', str(args.seed)])
                 for pid, home in workers.values():
                     cmd.extend(['--worker', f'{pid}={home}'])
                 child = subprocess.Popen(cmd, stdout=subprocess.DEVNULL)

@@ -43,3 +43,18 @@ async fn websocket_disconnect_does_not_fail_http_provider_attempt() {
     h.runtime.bot_websocket_disconnected(node.assignee_bot_id.as_deref().unwrap(), bcs_protocol::now_ms()).await.unwrap();
     assert_eq!(h.store.get_run(&run.run_id).await.unwrap().unwrap().status, StateMachineRunStatus::Running);
 }
+
+#[tokio::test]
+async fn disconnect_terminal_write_failure_is_recovered_by_progression_scanner() {
+    let (h, runs) = harness(&[]).await;
+    let started = h.start(loop_yaml(2, false, false, 1), false).await;
+    let run = started.view.run;
+    let node = h.store.list_node_runs(&run.run_id).await.unwrap().into_iter()
+        .find(|n| n.status == StateMachineNodeStatus::Running).unwrap();
+    runs.fail_run_failure.store(true, Ordering::SeqCst);
+    assert!(h.runtime.bot_websocket_disconnected(node.assignee_bot_id.as_deref().unwrap(), bcs_protocol::now_ms()).await.is_err());
+    assert_eq!(h.store.get_node_run(&run.run_id, &node.node_id).await.unwrap().unwrap().status, StateMachineNodeStatus::Failed);
+    assert_eq!(h.store.get_run(&run.run_id).await.unwrap().unwrap().status, StateMachineRunStatus::Running);
+    recover(&h).await;
+    assert_eq!(h.store.get_run(&run.run_id).await.unwrap().unwrap().status, StateMachineRunStatus::Failed);
+}
