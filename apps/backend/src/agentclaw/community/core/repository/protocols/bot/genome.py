@@ -21,6 +21,7 @@ if TYPE_CHECKING:
         GenomeRefEventRow,
         GenomeRefRow,
         GenomeRevisionRow,
+        ProvenanceKind,
         SettleResult,
     )
 
@@ -123,7 +124,7 @@ class GenomeRefRepositoryProtocol(Protocol):
         name: str,
         revision_id: str,
         expected_revision_id: Optional[str],
-        moved_kind: str,
+        moved_kind: ProvenanceKind,
         moved_actor: str,
         run_id: Optional[str],
         reason: Optional[str],
@@ -147,7 +148,7 @@ class GenomeRefRepositoryProtocol(Protocol):
         bot_id: str,
         revision_id: str,
         expected_active: Optional[str],
-        moved_kind: str,
+        moved_kind: ProvenanceKind,
         moved_actor: str,
         run_id: Optional[str],
         reason: Optional[str],
