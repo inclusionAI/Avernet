@@ -16,7 +16,9 @@
         "mode": "DUAL",
         "preprod_verdict": "PASS",
         "gates": [],
-        "notes": []
+        "notes": [
+          "row #1 story_user_prepares_agent_network: register 3 source-anchored density obligations under the retained NETWORK.* parent envelope (11 parsed = 8 legacy parents + 3 non-PASS snapshot atoms; residual_count_gap=0); the 8 leg-PASS snapshot records align verbatim onto the first eight platform statements (identical description literals at stories.sh:269-280) and are absorbed one per leg by NETWORK.platform under the leg-verdict proxy caliber that the committed assertion-gap matrix itself labels approximate; the FAIL record and the two WARN records are one upstream manifest-asset-404 abort event anchored as AN.F01..AN.F03 at stories.sh:295 (emit chain common.sh assert_status 104-107 > assert_eq 68 > fail print 74), stories.sh:37 (require_status failure-branch response warn) and e2e.sh:210 (runner stopped warn); the 33 unreached actor/register static statements and the 11 unreached platform statements stay parent-charged with no fabricated leaves; notes-only integration, the dual-network-read-run/register-run/status-run envelopes and the committed DUAL/PASS r7 face stay untouched; committed verdict stays DUAL/PASS with notes 0 to 1; preprod density tier keeps the three named PREPROD_* gaps on file; remote_validation=NOT_RUN and grants_release_credit=false"
+        ]
       }
     },
     {
