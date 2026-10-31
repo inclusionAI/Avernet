@@ -805,7 +805,9 @@ class TestRegistrationProposal(unittest.TestCase):
         self.assertEqual(row["id"], PARENT_STORY)
         self.assertEqual(row["executor_migration"]["mode"], "DUAL")
         self.assertEqual(row["executor_migration"]["preprod_verdict"], "PASS")
-        self.assertEqual(row["executor_migration"]["notes"], [])
+        self.assertEqual(
+            row["executor_migration"]["notes"],
+            [registration_proposal_module.WAVE_TOKEN])
 
     def test_describe_only_fragment_and_drop_dead_checks(self):
         fragment = describe_only_mainline_fragment()
