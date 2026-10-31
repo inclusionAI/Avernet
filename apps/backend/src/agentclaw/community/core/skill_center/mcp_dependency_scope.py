@@ -31,16 +31,25 @@ def mcp_dependency_codes(dependencies: Iterable[object]) -> tuple[str, ...]:
     Order is preserved and duplicates are kept — callers collect into a set.
     An unrecognised entry raises rather than being skipped: a silently dropped
     dependency is an MCP the Skill needs and the device never receives.
+
+    Tool names encoded as ``mcp__<domain>__<tool>`` are not server codes. The
+    Skill Center can still surface them in historical rows, so filter them out
+    as unconfigured tool identifiers instead of failing the whole projection.
+    A missing tool on a real server remains a caller-level business error, not
+    silently suppressed here.
     """
     codes: list[str] = []
     for dependency in dependencies:
         if isinstance(dependency, str):
-            codes.append(dependency)
+            if not dependency.startswith("mcp__"):
+                codes.append(dependency)
             continue
         if isinstance(dependency, dict):
             code = dependency.get("server_code") or dependency.get("code")
-            if isinstance(code, str):
+            if isinstance(code, str) and not code.startswith("mcp__"):
                 codes.append(code)
+                continue
+            if isinstance(code, str):
                 continue
         raise ValueError("invalid Skill MCP dependency")
     return tuple(codes)
@@ -58,4 +67,4 @@ def mcp_dependency_codes_from_version_metadata(metadata_json: object) -> tuple[s
     return mcp_dependency_codes(dependencies)
 
 
-__all__ = ["mcp_dependency_codes", "mcp_dependency_codes_from_version_metadata"]
+__all__ = ["mcp_dependency_codes", "mcp_dependency_codes_from_version_metadata"]\n

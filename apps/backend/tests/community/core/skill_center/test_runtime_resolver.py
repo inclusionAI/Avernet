@@ -105,6 +105,27 @@ def test_resolver_merges_explicit_and_skill_declared_mcp_dependencies() -> None:
     assert projection.mcp_server_codes == ("mcp.direct", "mcp.explicit", "mcp.object")
 
 
+def test_resolver_drops_tool_codes_instead_of_failing_projection() -> None:
+    projection = RuntimeProjectionResolver().resolve(
+        RuntimeDesiredState(
+            skills=(
+                RegisteredSkillAsset(
+                    skill_id=1,
+                    name="skill",
+                    git_path="git://team/skill",
+                    mcp_dependencies=(
+                        "mcp.explicit",
+                        {"code": "mcp__feature-search__searchProByFeatureName"},
+                    ),
+                ),
+            ),
+            installed_mcp_server_codes=frozenset({"mcp.explicit"}),
+        )
+    )
+
+    assert projection.mcp_server_codes == ("mcp.explicit",)
+
+
 def test_resolver_fails_closed_when_distinct_assets_have_same_runtime_name() -> None:
     with pytest.raises(RuntimeNameConflictError):
         RuntimeProjectionResolver().resolve(
