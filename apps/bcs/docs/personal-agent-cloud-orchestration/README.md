@@ -68,6 +68,8 @@ path when the cloud control plane is unreachable.
 
 ## 3. The approach — one page
 
+![System overview: the personal agent calls BCN over A2A with no standing connection; N BCN nodes behind a load balancer share one HA database holding sessions, runs, checkpoints, queues and task leases; supply agents connect by dial-in WebSocket or dial-out webhook+SSE and keep their own queryable task store; BCSFuse sits off the execution path.](assets/overview.svg)
+
 **Interface.** BCN is a server the personal agent calls (A2A 1.0 JSON-RPC +
 SSE, resumable Tasks). The months-long *logical* session is carried by durable
 identifiers, never by connections. No standing client connection exists, so

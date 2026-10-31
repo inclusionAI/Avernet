@@ -52,6 +52,8 @@ Consequences:
 
 ## Decision 2 — three conversation layers, with projection boundaries
 
+![The three conversation layers: L1 (user and personal agent, never enters BCN raw), L2 (the delegation thread between personal agent and BCN, retained for the task lifetime), L3 (the collaboration workspace between BCN and supply agents, compactable, with expert working context held provider-side). Projections cross the boundaries in both directions.](assets/conversation-layers.svg)
+
 | Layer | Conversation | Owner | BCN sees it? |
 | --- | --- | --- | --- |
 | **L1** | user ↔ personal agent | personal agent | **never, raw** — the personal agent decides what crosses down |
@@ -69,6 +71,8 @@ task-level messages; L3 is hundreds of step/message/event-level records per
 run.
 
 ## Decision 3 — three lifetimes: run, episode, task session
+
+![Timeline of one task: a durable task-session bar spans months in the shared DB; two short episodes sit on it, warm in memory on a node, each containing one or two workflow runs; between them the task is cold but durable, with GC evicting the warm copy and rehydration bringing it back — the same path failover uses.](assets/lifetimes.svg)
 
 | Unit | Lifetime | Scopes |
 | --- | --- | --- |

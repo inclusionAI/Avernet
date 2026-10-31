@@ -24,6 +24,8 @@ task-to-node assignment anywhere in the workspace.
 
 ## Design: four planes
 
+![The four availability planes: API (any node serves any request, write-before-ack), executor (hash placement as optimization, fenced DB leases as correctness), connection (node-pinned dial-in sockets plus per-dispatch dial-out streams, with a net-new connection-location registry), storage (one HA MySQL/Redis dependency, BCSFuse out of the execution path).](assets/availability-planes.svg)
+
 ### Plane 1 — API (stateless request handling)
 
 Any node serves any request. All durable effects are written to shared
@@ -72,6 +74,8 @@ pattern, generalized.
    dispatch record not in a terminal state, probe the supply agent by
    idempotency key / `GetTask` — never blind-resend.
 4. Resume the run from its checkpoint.
+
+![Takeover sequence: the old owner writes the dispatch intent then stalls; its lease expires; the new owner claims the lease with a higher fencing token, rehydrates, probes the supply agent by the recorded idempotency key, gets "unknown", and resends with the same key; the zombie's late original send deduplicates at the agent, and its stale checkpoint write is refused by the fencing token.](assets/takeover-sequence.svg)
 
 Failure detection: lease expiry is the ground truth; node heartbeats (to the
 DB or a membership view) only *accelerate* detection. Proposed starting

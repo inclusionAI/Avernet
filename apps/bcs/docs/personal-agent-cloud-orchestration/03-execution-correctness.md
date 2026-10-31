@@ -65,6 +65,8 @@ point leaves a durable record a successor can act on. This extends BCS's
 existing persist-before-dispatch discipline one hop outward: nothing in
 recovery depends on information that existed only in a dead node's memory.
 
+![Dispatch lifecycle: a durable SENDING intent precedes the send; DISPATCHED records the server task id; terminal states persist before ack. The two crash windows (id unknown, outcome limbo) are resolved by the takeover reconciliation sweep: probe by key from SENDING, GetTask from DISPATCHED — resending only with the same key, never re-executing a completed task.](assets/dispatch-lifecycle.svg)
+
 ### 2. Pull-based reconciliation: the agent holds queryable state
 
 Principle: **reads are idempotent; pushes are not.** The supply agent (the

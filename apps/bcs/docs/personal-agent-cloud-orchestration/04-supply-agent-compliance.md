@@ -20,6 +20,8 @@ Harness, …) never change.
 
 ## The categories
 
+![Supply-agent category map: dial-in adapters we own (bcs-bridge, the OpenClaw and DeepSeek Harness channel plugins, scripted bots) and dial-out providers (the in-house engine adapter and external platforms) around BCN's dispatch gate. The idempotency profile lives in each adapter; external platforms earn the side-effecting tier through the conformance suite and run read-only until then.](assets/supply-agent-categories.svg)
+
 | # | Category | Members | Transport | Adapter ownership | Durable storage today | Cost |
 | --- | --- | --- | --- | --- | --- | --- |
 | A1 | OpenClaw plugin bots | singlebox bots, agency-agent teams, local OpenClaw users | dial-in WS | ours — `plugins/openclaw-channel-bcn` (TS) | JSON files under the bot data dir | low–medium |
