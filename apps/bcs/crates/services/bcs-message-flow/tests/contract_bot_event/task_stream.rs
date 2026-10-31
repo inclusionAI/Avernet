@@ -280,11 +280,9 @@ async fn manager_worker_task_result_defaults_to_text_after_last_tool_call() {
 
     let frames = support.bot_delivery.frames().await;
     let params = request_params(frames.get(1).expect("expected task result frame"));
-    assert_eq!(
-        params["message"]["content"][0]["text"],
-        "[from:Worker] answer after tool"
-    );
-    assert_eq!(params["session_context"]["message"], "answer after tool");
+    let expected = format!("[任务完成] ref=T-{} | Worker：Worker | 任务：do work\n---\nanswer after tool", &dispatch.task_id[..8]);
+    assert_eq!(params["message"]["content"][0]["text"], expected);
+    assert_eq!(params["session_context"]["message"], expected);
 }
 
 #[tokio::test]
@@ -398,11 +396,9 @@ async fn manager_worker_task_result_uses_agent_tool_boundary_by_default() {
 
     let frames = support.bot_delivery.frames().await;
     let params = request_params(frames.get(1).expect("expected task result frame"));
-    assert_eq!(
-        params["message"]["content"][0]["text"],
-        "[from:Worker] answer after tool"
-    );
-    assert_eq!(params["session_context"]["message"], "answer after tool");
+    let expected = format!("[任务完成] ref=T-{} | Worker：Worker | 任务：do work\n---\nanswer after tool", &dispatch.task_id[..8]);
+    assert_eq!(params["message"]["content"][0]["text"], expected);
+    assert_eq!(params["session_context"]["message"], expected);
 }
 
 #[tokio::test]
@@ -499,11 +495,9 @@ async fn manager_worker_task_result_uses_final_when_agent_tool_has_no_followup_t
 
     let frames = support.bot_delivery.frames().await;
     let params = request_params(frames.get(1).expect("expected task result frame"));
-    assert_eq!(
-        params["message"]["content"][0]["text"],
-        "[from:Worker] analysis before tool."
-    );
-    assert_eq!(params["session_context"]["message"], "analysis before tool.");
+    let expected = format!("[任务完成] ref=T-{} | Worker：Worker | 任务：do work\n---\nanalysis before tool.", &dispatch.task_id[..8]);
+    assert_eq!(params["message"]["content"][0]["text"], expected);
+    assert_eq!(params["session_context"]["message"], expected);
 }
 
 #[tokio::test]

@@ -573,10 +573,23 @@ impl bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoPort for 
     }
     async fn lookup(&self, scope: bcs_service_api::port::repo::message_delivery::DeliveryLookup) -> Result<Vec<bcs_domain::message_delivery::PersistedMessageDelivery>, bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError> {
         use bcs_service_api::port::repo::message_delivery::DeliveryLookup as Q;
+        if let Q::TaskPrefixes { ref prefixes, retained_after_ms, ref legacy_intents } = scope {
+            if prefixes.is_empty() || prefixes.len() > 20 { return Err(bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError::Invalid("invalid task batch".into())); }
+            let rows = self.list_deliveries(None).await?;
+            let mut found = std::collections::BTreeMap::new();
+            for prefix in prefixes {
+                for row in crate::task_lookup::memory(&rows, prefix, retained_after_ms, legacy_intents)? { found.insert(row.delivery_id.clone(), row); }
+            }
+            return Ok(found.into_values().collect());
+        }
+        if let Q::TaskPrefix { ref prefix, retained_after_ms, ref legacy_intents } = scope {
+            return crate::task_lookup::memory(&self.list_deliveries(None).await?, prefix, retained_after_ms, legacy_intents);
+        }
         if matches!(&scope, Q::Ids(ids) if ids.len() > 8) { return Err(bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError::Invalid("delivery recovery batch too large".into())); }
         let rows = self.list_deliveries(None).await?;
         Ok(rows.into_iter().filter(|d| match &scope {
             Q::Ids(ids) => ids.contains(&d.delivery_id),
+            Q::TaskPrefix { .. } | Q::TaskPrefixes { .. } => unreachable!(),
             Q::Id(id) => d.delivery_id == *id,
             Q::Request(id) => d.request_id.as_ref() == Some(id),
             Q::Run { bot, alias } => d.target_bot_id == *bot && (d.run_id.as_ref() == Some(alias) || d.request_id.as_ref() == Some(alias) || d.transport_context_json.as_ref().and_then(|v| v.get("downstream_run_id")).and_then(|v| v.as_str()) == Some(alias.as_str())),

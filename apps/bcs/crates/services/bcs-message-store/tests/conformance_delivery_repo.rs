@@ -334,3 +334,82 @@ async fn sqlite_large_backlog_is_bounded_and_alias_reads_are_indexed() -> Result
     }
     Ok(())
 }
+
+#[tokio::test]
+async fn task_prefix_batch_is_indexed_deduplicates_and_retains_uncertain_expiry() -> Result<(), Box<dyn std::error::Error>> {
+    use bcs_service_api::port::repo::message_delivery::{DeliveryLookup, MessageDeliveryRepoPort};
+    let db = Arc::new(LocalSqliteDbPlugin::new()?);
+    migrations::run_sqlite_migrations(db.as_ref()).await?;
+    for (delivery, task, intent, status, terminal, sent) in [
+        ("first", "11111111-0000-0000-0000-000000000000", "abcdef12000000000000000000000000", "queued", None, false),
+        ("duplicate", "11111111-0000-0000-0000-000000000000", "abcdef12000000000000000000000000", "queued", None, false),
+        ("second", "22222222-0000-0000-0000-000000000000", "abcdef12ffffffffffffffffffffffff", "expired", Some(1_i64), true),
+        ("old", "33333333-0000-0000-0000-000000000000", "abcdef12333333333333333333333333", "completed", Some(1_i64), true),
+    ] {
+        let projection = serde_json::json!({"task":{"leg":"dispatch","task_id":task,"assignment_intent_id":format!("bcs_intent_{intent}")}}).to_string();
+        db.execute(DbStatement::with_params("INSERT INTO bcs_message_deliveries (delivery_id,env,source_message_id,target_bot_id,session_id,group_id,source_session_seq,flow_kind,kind,status,state_version,may_have_been_sent,available_at_ms,created_at_ms,updated_at_ms,attempt_no,semantic_projection_json,terminal_at_ms) VALUES (?,'dev',?,'worker','s','g',1,'task','send',?,1,?,1,1,1,0,?,?)",
+            vec![delivery.into(),delivery.into(),status.into(),sent.into(),projection.into(),terminal.map_or(bcs_db_api::DbValue::Null, Into::into)])).await?;
+    }
+    // Uncertain markers are superseded by actual assignments, even after expiry.
+    for (id, marker) in [("known-unknown", serde_json::json!({"task_uncertain_id":"abcdef12000000000000000000000000"})),
+        ("unknown-only", serde_json::json!({"task_uncertain_id":"f1234567000000000000000000000000"})),
+        ("old-rejection", serde_json::json!({"task_rejected_id":"abcdef12aaaaaaaaaaaaaaaaaaaaaaaa"}))] {
+        db.execute(DbStatement::with_params("INSERT INTO bcs_message_deliveries (delivery_id,env,source_message_id,target_bot_id,session_id,group_id,source_session_seq,flow_kind,kind,status,state_version,may_have_been_sent,available_at_ms,created_at_ms,updated_at_ms,attempt_no,semantic_projection_json) VALUES (?,'dev',?,'manager','s','g',1,'system','send','queued',1,0,1,1,1,0,?)",
+            vec![id.into(), id.into(), marker.to_string().into()])).await?;
+    }
+    let recording = Arc::new(RecordingQueries { inner: db.clone(), queries: Default::default() });
+    let repo = MySqlMessageStore::sqlite(recording.clone(), "dev".into());
+    let rows = repo.lookup(DeliveryLookup::TaskPrefixes { prefixes: vec!["abcdef12".into();20], retained_after_ms:100, legacy_intents:Vec::new() }).await?;
+    assert_eq!(rows.len(), 2, "dedup deliveries before collision limit; uncertain expiry remains");
+    assert!(rows.iter().all(|r| r.delivery_id != "old"));
+    let queries = recording.queries.lock().unwrap();
+    assert_eq!(queries.len(), 1, "a maximum batch is one query, not per-ref N+1");
+    let statement = queries[0].0.clone();
+    drop(queries);
+    // Same SQL/params with EXPLAIN proves all selector paths use their indexes.
+    let plan = db.query(DbStatement::with_params(format!("EXPLAIN QUERY PLAN {}", statement.sql()), statement.params().to_vec())).await?;
+    let plan = format!("{plan:?}");
+    assert!(plan.contains("idx_delivery_task_lookup_intent"), "{plan}");
+    assert!(plan.contains("idx_delivery_task_lookup_id"), "{plan}");
+    assert!(plan.contains("idx_delivery_task_lookup_uncertain"), "{plan}");
+    assert!(!plan.contains("SCAN known"), "uncertainty suppression must use indexed identity lookups: {plan}");
+    recording.queries.lock().unwrap().clear();
+    let prefixes = std::iter::once("abcdef12".to_string())
+        .chain((1..20).map(|n| format!("{n:08x}"))).collect();
+    let legacy_intents = (1..=256).map(|n| format!("{n:032x}")).collect();
+    let rows = repo.lookup(DeliveryLookup::TaskPrefixes { prefixes, retained_after_ms:100, legacy_intents }).await?;
+    assert_eq!(rows.len(), 2);
+    assert_eq!(recording.queries.lock().unwrap()[0].0.params().len(), 696, "bounded below SQLite's 999 bind limit");
+    assert_eq!(recording.queries.lock().unwrap().len(), 1, "20 DISTINCT selectors also use one query");
+    let rows = repo.lookup(DeliveryLookup::TaskPrefix { prefix:"abcdef120".into(), retained_after_ms:100, legacy_intents:Vec::new() }).await?;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].semantic_projection_json["task"]["task_id"], "11111111-0000-0000-0000-000000000000");
+    let rows = repo.lookup(DeliveryLookup::TaskPrefix { prefix:"f1234567".into(), retained_after_ms:100, legacy_intents:Vec::new() }).await?;
+    assert_eq!(rows.len(), 1, "unconfirmed requests remain discoverable");
+    assert_eq!(rows[0].delivery_id, "unknown-only");
+    Ok(())
+}
+
+#[tokio::test]
+async fn task_uncertainty_suppression_precedes_limit_and_reads_legacy_results() -> Result<(), Box<dyn std::error::Error>> {
+    use bcs_service_api::port::repo::message_delivery::{DeliveryLookup, MessageDeliveryRepoPort};
+    let db = Arc::new(LocalSqliteDbPlugin::new()?);
+    migrations::run_sqlite_migrations(db.as_ref()).await?;
+    let ids = (1..=4).map(|n| format!("aabbccdd{n:024x}")).collect::<Vec<_>>();
+    for (i, intent) in ids.iter().enumerate() {
+        db.execute(DbStatement::with_params("INSERT INTO bcs_message_deliveries (delivery_id,env,source_message_id,target_bot_id,session_id,group_id,source_session_seq,flow_kind,kind,status,state_version,may_have_been_sent,available_at_ms,created_at_ms,updated_at_ms,attempt_no,semantic_projection_json) VALUES (?,'dev',?,'manager','s','g',1,'system','send','queued',1,0,1,1,1,0,?)",
+            vec![format!("marker-{i}").into(),format!("source-{i}").into(),serde_json::json!({"task_uncertain_id":intent}).to_string().into()])).await?;
+    }
+    // Only a legacy result is durable: after restart it must still suppress its
+    // obsolete unknown notice, without becoming a cancellable Worker delivery.
+    db.execute(DbStatement::with_params("INSERT INTO bcs_message_deliveries (delivery_id,env,source_message_id,target_bot_id,session_id,group_id,source_session_seq,flow_kind,kind,status,state_version,may_have_been_sent,available_at_ms,created_at_ms,updated_at_ms,attempt_no,semantic_projection_json) VALUES ('result','dev','result','manager','s','g',1,'task','send','queued',1,0,1,1,1,0,?)",
+        vec![serde_json::json!({"task":{"leg":"result","task_id":"12345678-0000-0000-0000-000000000000","assignment_intent_id":format!("bcs_intent_{}",ids[3])}}).to_string().into()])).await?;
+    let recording = Arc::new(RecordingQueries { inner:db, queries:Default::default() });
+    let repo = MySqlMessageStore::sqlite(recording.clone(), "dev".into());
+    let rows = repo.lookup(DeliveryLookup::TaskPrefix { prefix:"aabbccdd".into(), retained_after_ms:100,
+        legacy_intents:ids[..2].to_vec() }).await?;
+    assert_eq!(rows.len(), 1, "suppression before LIMIT must expose the third unresolved identity");
+    assert_eq!(rows[0].semantic_projection_json["task_uncertain_id"], ids[2]);
+    assert_eq!(recording.queries.lock().unwrap().len(), 1);
+    Ok(())
+}

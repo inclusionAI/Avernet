@@ -154,6 +154,7 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
     SqliteMigration { version: 35, name: "group_context_owners" },
     SqliteMigration { version: 36, name: "collaboration_drafts" },
     SqliteMigration { version: 37, name: "bot_authority" },
+    SqliteMigration { version: 38, name: "task_handle_lookup" },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -517,6 +518,7 @@ async fn apply_sqlite_migration_body(
         // edge_grants unique-key swap + approved-owner partial
         // unique index, and the two authority tables/indexes.
         37 => add_sqlite_bot_authority_schema(db).await,
+        38 => add_sqlite_task_handle_lookup(db).await,
         _ => Ok(()),
     }
 }

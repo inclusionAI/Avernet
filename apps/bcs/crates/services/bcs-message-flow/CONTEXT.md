@@ -322,6 +322,23 @@ runtime stores no longer read or write those fields. This retirement adds no
 schema migration. Stop old binaries to prevent legacy scanners and callbacks
 from continuing to run. See `apps/bcs/specs/2026-10-27-retire-service-session-policies/spec.md`.
 
+## Manager-worker task presentation
+
+Task dispatches and results render Bot-only short-reference envelopes at delivery
+preparation (and on the legacy direct path). Canonical result bodies remain pure;
+exact pre-upgrade abnormal metadata prefixes remain readable. Human result
+projections are unchanged. Timeout-unknown System messages retain human text and
+persist separate task metadata for Bot rendering. These changes add no remote
+reads, repository operations, timers or retry policy. See
+`apps/bcs/docs/task-presentation.md` for the display contract.
+
+Task-handle controls additionally use indexed bounded-output repository reads;
+20 selectors share one SQL batch with request-level deduplication. Cancellation
+uses post-commit notifications with a 1s lookup fallback and retains legacy abort
+confirmation processing beyond HTTP wait expiry. Task deadlines add no soft
+reminders. See `apps/bcs/docs/task-presentation.md` for retention, legacy Provider
+exact-cancel limitations, migration order and the compatibility-release gate.
+
 ## Caller association ownership
 
 Caller coordination reuses Managed delivery parent/invocation metadata and the

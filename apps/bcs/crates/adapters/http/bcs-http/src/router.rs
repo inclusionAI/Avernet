@@ -44,6 +44,8 @@ fn channel_http_method_router(method: ChannelHttpMethod) -> MethodRouter<HttpApp
 fn build_api_routes() -> Router<HttpAppState> {
     Router::new()
         .merge(routes::collaboration_drafts::router())
+        .route("/tasks/status", post(routes::task_handle::status))
+        .route("/tasks/cancel", post(routes::task_handle::cancel))
         .route("/manifest", get(routes::manifest::get_manifest))
         .route(
             "/assets/{bundle_name}/{file_name}",

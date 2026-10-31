@@ -15,6 +15,7 @@ bcs-caller-identity-api = { workspace = true }
 thiserror = { workspace = true }
 
 bcs-observability = { workspace = true }
+metrics = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
 serde = { workspace = true }

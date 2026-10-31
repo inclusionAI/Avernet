@@ -149,7 +149,7 @@ pub struct BcsMessageFlow {
     /// target's handoff scope. None of it travels through the middle bot;
     /// `None` keeps every session fail-closed to today's behavior.
     pub caller_relay: Option<crate::caller_relay::CallerRelayState>,
-    terminal_owner: OnceLock<std::sync::Weak<BcsMessageFlow>>,
+    pub(crate) terminal_owner: OnceLock<std::sync::Weak<BcsMessageFlow>>,
     terminal_slots: Arc<tokio::sync::Semaphore>,
     system_queue: Arc<crate::queued_system::QueuedSystemAdmission>,
 }
@@ -447,7 +447,10 @@ impl BcsMessageFlow {
         if delivery_type != DeliveryType::Send {
             return Ok(());
         }
-        let deadline_ms = now_ms().saturating_add(self.provider_chat_run_timeout_ms);
+        let timeout_ms = self.task_store.get(run_id).await.and_then(|task| task.timeout_s)
+            .map(|seconds| seconds.saturating_mul(1000).saturating_add(300_000).max(self.provider_chat_run_timeout_ms))
+            .unwrap_or(self.provider_chat_run_timeout_ms);
+        let deadline_ms = now_ms().saturating_add(timeout_ms);
         if let Some(run_context) = &self.bot_run_context {
             let session_id = bcs_session_id.unwrap_or(group_id).to_string();
             run_context
@@ -595,6 +598,12 @@ impl MessageFlowService for BcsMessageFlow {
             }));
         }
         Ok(None)
+    }
+    async fn task_status(&self, refs: Vec<String>) -> ServiceResult<Vec<bcs_service_api::TaskHandleView>> {
+        crate::task_handle::status(self, refs).await
+    }
+    async fn cancel_task(&self, task_ref: String, reason: String) -> ServiceResult<bcs_service_api::TaskHandleView> {
+        crate::task_handle::cancel(self, task_ref, reason).await
     }
     async fn query_message_deliveries(&self, query: bcs_service_api::application::message_delivery::DeliveryStatusQuery) -> ServiceResult<Vec<bcs_service_api::application::message_delivery::DeliveryStatusView>> {
         crate::delivery_control::query(self, query).await

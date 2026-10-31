@@ -63,7 +63,7 @@ async fn sqlite_version_30_upgrade_adds_default_all_and_is_repeatable() -> DbRes
     );
     let history = db.query(DbStatement::new(history_sql)).await?;
     assert_eq!(&history[..30], old_history.as_slice());
-    assert_eq!(history.len(), 37);
+    assert_eq!(history.len(), 38);
     let record = applied_sqlite_migration(&db, 31)
         .await?
         .expect("version 31 must be recorded");

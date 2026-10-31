@@ -21,6 +21,17 @@ pub async fn handle_task_dispatch(
         ));
     }
 
+    if group.group_strategy == GroupStrategy::ManagerWorker {
+        if let (Some(sessions), Some(session_id)) = (&flow.session_management, manager_session_id.as_deref()) {
+            let session = sessions.get(session_id).await.map_err(|e| ServiceError::InternalError(e.to_string()))?.ok_or_else(|| ServiceError::SessionNotFound(session_id.into()))?;
+            if session.status != SessionStatus::Running {
+                return Err(crate::task_rejection::reject(flow, &cmd, ServiceError::InvalidOperation {
+                    message:"task Session is not running".into(), request_id:None,
+                }).await);
+            }
+        }
+    }
+
     // Resolve target bot: match by bot_uuid first, then bot_name.
     // If neither matches, fall back to registry capabilities.name.
     let mut target = group
@@ -42,24 +53,19 @@ pub async fn handle_task_dispatch(
         }
     }
     let Some(target) = target else {
-        emit_unknown_task_target_notice(
-            flow,
-            &group,
-            &group_id,
-            manager_session_id.as_deref(),
-            &cmd.target_bot_id,
-        )
-        .await;
-        return Err(ServiceError::BotNotFound(cmd.target_bot_id.clone()));
+        emit_unknown_task_target_notice(flow, &group, &group_id, manager_session_id.as_deref(), &cmd.target_bot_id).await;
+        return Err(crate::task_rejection::reject(flow, &cmd, ServiceError::BotNotFound(cmd.target_bot_id.clone())).await);
     };
+    if group.group_strategy == GroupStrategy::ManagerWorker && target.role != ParticipantRole::Worker {
+        return Err(crate::task_rejection::reject(flow, &cmd, ServiceError::InvalidOperation {
+            message:"target is not a Worker".into(), request_id:None,
+        }).await);
+    }
     let target_mode = target
         .mode
         .unwrap_or_else(|| ParticipantMode::default_for(target.actor_kind));
     if target_mode == ParticipantMode::Muted {
-        return Err(ServiceError::InvalidOperation {
-            message: "target bot is muted".to_string(),
-            request_id: None,
-        });
+        return Err(crate::task_rejection::reject(flow, &cmd, ServiceError::InvalidOperation { message:"target bot is muted".into(), request_id:None }).await);
     }
     let target_bot_id = target.bot_uuid.clone();
 
@@ -103,15 +109,22 @@ pub async fn handle_task_dispatch(
                 task = %task_id,
                 "task dispatch blocked by interceptor chain"
             );
-            return Err(ServiceError::Forbidden(if reason.user_visible {
-                reason.message
-            } else {
-                "task dispatch blocked by policy".to_string()
-            }));
+            return Err(crate::task_rejection::reject(flow, &cmd,
+                ServiceError::Forbidden(if reason.user_visible { reason.message } else { "task dispatch blocked by policy".into() })).await);
         }
     };
 
     let response_mode = task_response_mode(&group, &cmd.payload);
+    let timeout_s = if let Some(value) = cmd.payload.get("timeout_s") {
+        let requested = value.as_u64().filter(|v| *v > 0).ok_or_else(|| ServiceError::InvalidOperation {
+            message: "timeout_s must be a positive integer".into(), request_id: None,
+        })?;
+        let policy = match &flow.delivery_policy {
+            Some(live) => live.snapshot.read().await.policy.clone(),
+            None => bcs_config_api::message_delivery::DeliveryPolicy::default(),
+        };
+        Some(requested.clamp(policy.task_timeout_min_s, policy.task_timeout_max_s))
+    } else { None };
     if let Some(drain) = crate::queued_task::admission_mode(flow, &group, &manager_session_id, &target_bot_id).await? {
         let driver = group.participants.iter().find(|p| p.bot_uuid == cmd.driver_bot_id)
             .ok_or_else(|| crate::queued_task::error("task manager missing"))?;
@@ -120,7 +133,7 @@ pub async fn handle_task_dispatch(
             task_id:effective_task_id.clone(), manager:cmd.driver_bot_id.clone(), worker:target_bot_id.clone(),
             worker_name:target_bot_name, response_mode,
             assignment_intent_id:cmd.payload.get("assignment_intent_id").and_then(Value::as_str).map(str::to_owned),
-            summary:message.chars().take(80).collect() };
+            summary:message.chars().take(80).collect(), timeout_s };
         let mut admission = crate::queued_task::command(flow, &group, &manager_session_id, intent,
             &message, cmd.payload.get("attachments"), &name, drain).await?;
         // Existing admission owns the real task/run identity. Persist only
@@ -277,6 +290,7 @@ pub async fn handle_task_dispatch(
     );
     task_entry.assignment_intent_id = cmd.payload.get("assignment_intent_id").and_then(Value::as_str).map(str::to_owned);
     task_entry.summary = message.chars().take(80).collect();
+    task_entry.timeout_s = timeout_s;
     let mut assignment_data = BTreeMap::from([
         ("assignment_intent_id".into(), serde_json::json!(task_entry.assignment_intent_id)),
         (
@@ -367,7 +381,9 @@ pub async fn handle_task_dispatch(
                 Some("resolve_target"),
             );
             crate::task_failure::finish_legacy(flow, &effective_task_id, false, "未能连接到 Worker，任务尚未开始执行。").await?;
-            return Err(error);
+            return Err(if cmd.payload.get("assignment_intent_id").and_then(Value::as_str).is_some() {
+                crate::task_rejection::reported_failure(error.to_string())
+            } else { error });
         }
     };
     let provider_tags = if delivery_target.is_http_provider() {
@@ -375,7 +391,7 @@ pub async fn handle_task_dispatch(
     } else {
         &[]
     };
-    let frame = build_task_dispatch_frame(
+    let mut frame = build_task_dispatch_frame(
         &group,
         &cmd.driver_bot_id,
         &driver_name,
@@ -383,10 +399,21 @@ pub async fn handle_task_dispatch(
         &target_bot_name,
         &message,
         &effective_task_id,
+        cmd.payload.get("assignment_intent_id").and_then(Value::as_str),
         &manager_session_id,
         provider_tags,
         now,
     );
+    if delivery_target.is_http_provider() {
+        if let (Some(seconds), BcsFrame::Request(request)) = (timeout_s, &mut frame) {
+            if let Some(params) = request.params.as_mut() {
+                let budget_ms = seconds.saturating_mul(1000)
+                    .saturating_add(crate::delivery_runtime::TASK_ABORT_RESERVE.as_millis() as u64)
+                    .max(flow.provider_chat_run_timeout_ms);
+                params["timeout_ms"] = serde_json::json!(budget_ms);
+            }
+        }
+    }
     let delivery_kind = BotDeliveryKind::TaskDispatch;
     if let Err(error) = flow.register_send_context(
         DeliveryType::Send,
@@ -401,6 +428,9 @@ pub async fn handle_task_dispatch(
     .await {
         flow.release_output_runs(&operation_id, std::slice::from_ref(&effective_task_id)).await;
         return Err(error);
+    }
+    if group.group_strategy == GroupStrategy::ManagerWorker {
+        crate::task_handle::schedule_legacy_timeout(flow, effective_task_id.clone(), timeout_s.unwrap_or(crate::task_store::TASK_TTL_MS / 1000));
     }
     let result = match flow
         .bot_delivery
@@ -458,10 +488,11 @@ pub async fn handle_task_dispatch(
                 Some("deliver"),
             );
             crate::task_failure::finish_legacy(flow, &effective_task_id, false, "Worker 未接受本次任务，任务未完成。").await?;
-            return Err(ServiceError::InvalidOperation {
-                message: "target bot is not connected".to_string(),
-                request_id: Some(effective_task_id),
-            });
+            return Err(if cmd.payload.get("assignment_intent_id").and_then(Value::as_str).is_some() {
+                crate::task_rejection::reported_failure("target bot is not connected".into())
+            } else { ServiceError::InvalidOperation {
+                message:"target bot is not connected".into(), request_id:Some(effective_task_id),
+            } });
         }
         Err(error) => {
             // The Worker may have accepted the request. Keep BOTH output permit

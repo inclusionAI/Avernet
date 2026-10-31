@@ -256,6 +256,12 @@ pub async fn handle_chat_abort(
         bot_id: cmd.bot_id.clone(),
     };
     let mut active = run_context.list_active_runs(&scope).await?;
+    // Exact-task cancellation cannot be implemented by a Provider scope abort:
+    // a new run can enter after this snapshot, and old uncertain runs can outlive
+    // the context TTL. Scope-wide user abort remains available separately.
+    if cmd.run_id.is_some() && active.iter().any(|run| matches!(run.transport_owner, BotRunTransportOwner::HttpProvider { .. })) {
+        return Err(ServiceError::InvalidOperation { message:"exact_abort_not_supported: Provider requires scope abort".into(), request_id:cmd.run_id });
+    }
     let managed_abort = crate::delivery_abort::select(flow, &cmd, &mut active).await?;
     if let Some(requested_run_id) = cmd.run_id.as_deref() {
         active.retain(|context| {
@@ -450,10 +456,19 @@ pub async fn handle_chat_abort(
     for context in confirmed {
         if !managed_abort.owned.contains_key(&context.canonical_run_id) {
             if let Some(task_id) = flow.task_store.resolve_task_id(&context.canonical_run_id).await {
-                let reason = if matches!(&cmd.caller, CallerContext::Human(_)) {
+                let saved_reason = flow.task_store.get(&task_id).await.and_then(|entry| entry.cancel_reason);
+                let reason = if let Some(reason) = saved_reason.as_deref() { reason } else if matches!(&cmd.caller, CallerContext::Human(_)) {
                     "用户中断了本次执行。"
                 } else { "已按停止请求中断本次执行。" };
-                crate::task_failure::finish_legacy(flow, &task_id, true, reason).await?;
+                // Persist the soft legacy stop fact before fallible publication.
+                // Retry result processing only, never the already-confirmed abort.
+                {
+                    let _guard = crate::bot_event::lock_event(flow, format!("task:{task_id}")).await;
+                    flow.task_store.record_stopped(&task_id).await;
+                }
+                crate::storage_retry::retry(crate::storage_retry::shutdown(flow), "legacy_cancel_terminal",
+                    |error| matches!(error, ServiceError::InternalError(_)),
+                    || crate::task_failure::finish_legacy(flow, &task_id, true, reason)).await?;
             }
         }
         if commit_aborted_run(run_context.as_ref(), &context).await? && !managed_abort.owned.contains_key(&context.canonical_run_id) {
@@ -478,6 +493,7 @@ pub async fn handle_chat_abort(
 fn chat_abort_failure_code(error: &ServiceError) -> &'static str {
     match error {
         ServiceError::BotMethodUnsupported { .. } => "chat_abort_not_supported",
+        ServiceError::InvalidOperation { .. } => "chat_abort_rejected",
         _ => "chat_abort_failed",
     }
 }

@@ -221,6 +221,9 @@ async fn handle_request_frame(
             )
             .await?;
         }
+        "task.status" | "task.cancel" => {
+            tasks::handle_task_control(state, &req.id, &req.method, req.params.clone().unwrap_or(Value::Null), tx, registered_bot_id).await?;
+        }
         "task.dispatch" => {
             let params = req.params.clone().unwrap_or(Value::Null);
             handle_task_dispatch(state, &req.id, params, tx, registered_bot_id).await?;

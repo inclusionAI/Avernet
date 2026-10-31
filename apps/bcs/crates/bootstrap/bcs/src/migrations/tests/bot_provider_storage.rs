@@ -6,7 +6,7 @@ fn bot_provider_storage_uses_unique_versions_after_fixed_loop() {
         .iter()
         .map(|migration| migration.version)
         .collect::<Vec<_>>();
-    assert_eq!(sqlite, (1..=37).collect::<Vec<_>>());
+    assert_eq!(sqlite, (1..=38).collect::<Vec<_>>());
     assert_eq!(SQLITE_VERSIONED_MIGRATIONS[28].name, "fixed_loop_runtime");
     assert_eq!(SQLITE_VERSIONED_MIGRATIONS[29].name, "bot_provider_storage");
     // The new Group migration owns SQLite version 31 (Provider storage keeps
@@ -43,10 +43,9 @@ fn bot_provider_storage_uses_unique_versions_after_fixed_loop() {
         .collect::<Vec<_>>();
     // MySQL Provider storage remains version 029; the Group
     // human-mention migration is MySQL version 030, Group context
-    // owners is 034, collaboration drafts is 035, bot authority is
-    // MySQL version 036 and session speaking leases follow at 037
-    // (renumbered off the reserved 036 after the bot-authority take).
-    assert_eq!(versions, (1..=37).collect::<Vec<_>>());
+    // owners is 034, collaboration drafts is 035, bot authority is 036,
+    // session speaking leases is 037 and task-handle lookup is 038.
+    assert_eq!(versions, (1..=38).collect::<Vec<_>>());
     assert_eq!(mysql[27], "028_fixed_loop_runtime.sql");
     assert_eq!(mysql[28], "029_bot_provider_storage.sql");
     assert_eq!(mysql[29], "030_group_human_mention_notify_mode.sql");
@@ -57,6 +56,7 @@ fn bot_provider_storage_uses_unique_versions_after_fixed_loop() {
     assert_eq!(mysql[34], "035_collaboration_drafts.sql");
     assert_eq!(mysql[35], "036_bot_authority.sql");
     assert_eq!(mysql[36], "037_session_speaking_leases.sql");
+    assert_eq!(mysql[37], "038_task_handle_lookup.sql");
 }
 
 #[tokio::test]
@@ -85,7 +85,7 @@ async fn bot_provider_storage_upgrades_29_without_new_tables_or_rewriting_histor
             .iter()
             .map(|migration| migration.version)
             .collect::<Vec<_>>(),
-        vec![30, 31, 32, 33, 34, 35, 36, 37]
+        vec![30, 31, 32, 33, 34, 35, 36, 37, 38]
     );
 
     run_sqlite_migrations(&db).await?;

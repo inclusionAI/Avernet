@@ -24,6 +24,8 @@ mod migrations;
 mod queued_task_review;
 #[path = "support/task_status_notifications.rs"]
 mod task_status_notifications;
+#[path = "support/failing_delivery.rs"]
+mod failing_delivery;
 
 const SESSION: &str = "group-1:task";
 fn admin() -> CallerContext { CallerContext::Human(HumanActor { actor_id:"human_operator".into(), staff_no:"operator".into() }) }
@@ -146,6 +148,9 @@ async fn assignment_and_return_both_carry_system_context_and_duplicate_final_is_
     let row = f.start(&row).await;
     let wire = serde_json::to_value(&f.support.bot_delivery.frames().await[0]).unwrap();
     assert!(wire.to_string().contains("REQUIRED_CONTEXT_FOR_bot-observer"));
+    assert!(wire.to_string().contains(&format!("ref=T-{}", &task_id[..8])));
+    assert!(wire.to_string().contains("的任务 ref="));
+    assert!(wire["params"]["message"]["content"][0]["text"].as_str().unwrap().starts_with("[来自 "));
     assert_eq!(wire["params"]["task_id"], task_id);
     assert_eq!(wire["params"]["session_context"]["you_are_mentioned"], true);
     f.flow.handle_bot_event(final_event(&row)).await.unwrap();
@@ -161,6 +166,8 @@ async fn assignment_and_return_both_carry_system_context_and_duplicate_final_is_
     f.start(result).await;
     let wire = serde_json::to_value(&f.support.bot_delivery.frames().await[1]).unwrap().to_string();
     assert!(wire.contains("REQUIRED_CONTEXT_FOR_bot-driver") && wire.contains("WORKER_RESULT"));
+    assert!(wire.contains(&format!("[任务完成] ref=T-{}", &task_id[..8])));
+    assert_eq!(source.content["task_result_text"], "WORKER_RESULT");
 }
 
 #[tokio::test]
@@ -288,13 +295,13 @@ async fn running_abort_and_error_create_one_explicit_failure_result() {
         if state == ChatEventState::Error {
             assert_eq!(source.message_type, "run_reply");
             assert_eq!(source.content["task_state"], "failed");
-            assert!(source.content["task_result_text"].as_str().unwrap().starts_with("[任务失败]"));
+            assert!(source.content["task_result_text"].as_str().unwrap().starts_with("情况："));
         } else {
             assert_eq!(source.message_type, "run_reply");
             assert_eq!(source.content["task_state"], "cancelled");
-            assert!(source.content["task_result_text"].as_str().unwrap().starts_with("[任务中断]"));
+            assert!(source.content["task_result_text"].as_str().unwrap().starts_with("情况："));
         }
-        assert!(source.content["task_result_text"].as_str().unwrap().contains("bcs_intent_assignment"));
+        assert!(!source.content["task_result_text"].as_str().unwrap().contains("派发引用"));
         f.start(result).await;
     }
 }
@@ -407,6 +414,12 @@ async fn sqlite_task_roundtrip_rebuilds_from_durable_delivery_and_keeps_history_
         bcs_domain::MessageOwnerFilter::WorkerHistory("bot-observer".into()), None, None, None, 100).await.unwrap();
     assert!(worker_history.messages.iter().any(|m| m.client_msg_id.as_deref() == Some(format!("task-display:{task_id}").as_str())
         && m.content.as_str() == Some("WORKER_RESULT")));
+    // Recovery emits an uncertainty notice before the later authoritative result;
+    // drain that Manager-lane head before starting the result (FIFO).
+    for notice in rows.iter().filter(|r| r.flow_kind == DeliveryFlowKind::System && r.target_bot_id == "bot-driver") {
+        let sent = f.start(notice).await;
+        f.transition(&sent, Event::Completed).await;
+    }
     f.start(result).await;
 }
 
@@ -603,13 +616,16 @@ async fn assert_runtime_timeout_with_abort_ack(provider: bool) {
     let result = rows.iter().find(|row| row.source_message_id == format!("task-result:{task_id}")).unwrap();
     let source = f.repo.get_message_by_id(SESSION, &result.source_message_id).await.unwrap().unwrap();
     assert_eq!(source.content["task_state"], "timed_out");
-    assert!(source.content["task_result_text"].as_str().unwrap().contains("[任务超时]"));
+    assert!(source.content["task_result_text"].as_str().unwrap().contains("超时"));
     let aborts = f.support.bot_delivery.aborts().await;
     assert_eq!(aborts.len(), 1);
     assert_eq!(aborts[0].run_id.is_none(), provider);
     stop.send(true).unwrap();
     job.await.unwrap().unwrap();
 }
+
+#[path = "support/task_handles.rs"]
+mod task_handles;
 
 /// The ordinary task fixture with only the ephemeral Caller context.
 async fn delegate_fixture(

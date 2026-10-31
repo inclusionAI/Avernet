@@ -19,12 +19,21 @@ pub struct DeliveryPolicy {
     pub safe_retry: Option<SafeRetryConfig>,
     #[serde(default)]
     pub pause_dispatch: bool,
+    #[serde(default = "default_task_cancel_wait_ms")]
+    pub task_cancel_wait_ms: u64,
+    #[serde(default = "default_task_timeout_min_s")]
+    pub task_timeout_min_s: u64,
+    #[serde(default = "default_task_timeout_max_s")]
+    pub task_timeout_max_s: u64,
     #[serde(default = "default_context_messages")]
     pub max_context_messages: u32,
     #[serde(default = "default_context_bytes")]
     pub max_context_bytes: u64,
 }
 
+fn default_task_cancel_wait_ms() -> u64 { 5000 }
+fn default_task_timeout_min_s() -> u64 { 1 }
+fn default_task_timeout_max_s() -> u64 { 10500 }
 fn default_context_messages() -> u32 { 24 }
 fn default_context_bytes() -> u64 { 131072 }
 
@@ -33,6 +42,7 @@ impl Default for DeliveryPolicy {
         Self { flow_enabled: Default::default(), defaults: BotDeliveryConfig {
             mode: BotDeliveryMode::Off, max_running: 1, min_send_interval_ms: 1000, max_queued: 20,
         }, bots: BTreeMap::new(), queue_ttl_ms: None, safe_retry: None, pause_dispatch: false,
+            task_cancel_wait_ms: default_task_cancel_wait_ms(), task_timeout_min_s: default_task_timeout_min_s(), task_timeout_max_s: default_task_timeout_max_s(),
             max_context_messages: default_context_messages(), max_context_bytes: default_context_bytes() }
     }
 }
@@ -84,6 +94,10 @@ impl DeliveryPolicy {
     }
 
     pub fn validate(&self) -> Result<(), MessageDeliveryConfigError> {
+        if !(100..=15000).contains(&self.task_cancel_wait_ms) || self.task_timeout_min_s == 0
+            || self.task_timeout_max_s < self.task_timeout_min_s || self.task_timeout_max_s > 604800 {
+            return Err(MessageDeliveryConfigError::InvalidTaskPolicy);
+        }
         if self.flow_enabled.group != self.flow_enabled.system {
             return Err(MessageDeliveryConfigError::GroupSystemSwitchMismatch);
         }
@@ -203,6 +217,7 @@ pub enum MessageDeliveryConfigError {
     FlowNotReady(DeliveryFlowKey),
     InvalidBotPolicy,
     InvalidContextPolicy,
+    InvalidTaskPolicy,
 }
 
 impl std::fmt::Display for MessageDeliveryConfigError {
@@ -211,6 +226,7 @@ impl std::fmt::Display for MessageDeliveryConfigError {
             Self::GroupSystemSwitchMismatch => write!(f, "queue_group_system_switch_mismatch: group and system must be enabled or disabled together"),
             Self::FlowNotReady(flow) => write!(f, "queue_flow_not_ready: {flow:?}"),
             Self::InvalidBotPolicy => write!(f, "invalid message_delivery Bot policy"),
+            Self::InvalidTaskPolicy => write!(f, "task cancellation wait must be 100..=15000ms and timeout bounds 1 <= min <= max <= 604800s"),
             Self::InvalidContextPolicy => write!(f, "invalid context limits: messages must be 1..=1024 and bytes 512..=16777216"),
         }
     }

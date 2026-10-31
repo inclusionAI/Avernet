@@ -41,6 +41,10 @@ struct TaskDispatchParams {
     session_id: Option<String>,
     target_bot: String,
     message: String,
+    #[serde(default)]
+    response_mode: Option<String>,
+    #[serde(default)]
+    timeout_s: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -103,7 +107,9 @@ pub(super) async fn handle_task_dispatch(
         resolve_task_scope(&params.group_id, params.session_id.as_deref())?;
     let mut payload = serde_json::json!({
         "message": params.message,
+        "response_mode": params.response_mode,
     });
+    if let Some(timeout) = params.timeout_s { payload["timeout_s"] = serde_json::json!(timeout); }
     if let Some(session_id) = manager_session_id.as_deref() {
         payload["bcs_session_id"] = Value::String(session_id.to_string());
     }
@@ -280,4 +286,48 @@ pub(super) async fn handle_task_complete(
     }
 
     Ok(())
+}
+
+/// Native tools share the same application contract as the HTTP MCP adapter.
+pub(super) async fn handle_task_control(
+    state: &Arc<BotDispatchState>, req_id: &str, method: &str, params: Value,
+    tx: &mpsc::Sender<String>, registered_bot_id: &Option<String>,
+) -> Result<()> {
+    if registered_bot_id.is_none() { return send_error(tx, req_id, "not_registered", "Bot must register before task controls").await; }
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Status { task_refs: Vec<String> }
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Cancel { task_ref: String, reason: String }
+    let invalid = |e: serde_json::Error| BotWsDispatchError::InvalidFrameFormat(e.to_string());
+    let result = if method == "task.status" {
+        let input: Status = serde_json::from_value(params).map_err(invalid)?;
+        state.message_flow.task_status(input.task_refs).await.map(|tasks| serde_json::json!({"tasks":tasks}))
+    } else {
+        let input: Cancel = serde_json::from_value(params).map_err(invalid)?;
+        state.message_flow.cancel_task(input.task_ref, input.reason).await.map(|task| serde_json::json!(task))
+    };
+    match result {
+        Ok(result) => send_ok(tx, req_id, result).await,
+        Err(error) => send_service_error(tx, req_id, error).await,
+    }
+}
+
+#[cfg(test)]
+mod task_parameter_contract {
+    use super::*;
+    #[test]
+    fn native_assign_preserves_timeout_and_response_mode_without_requiring_them() {
+        let mut value = serde_json::json!({"group_id":"g:s", "target_bot":"worker", "message":"work"});
+        let old: TaskDispatchParams = serde_json::from_value(value.clone()).unwrap();
+        assert!(old.timeout_s.is_none()); assert!(old.response_mode.is_none());
+        value["timeout_s"] = serde_json::json!(60);
+        value["response_mode"] = serde_json::json!("full");
+        let current: TaskDispatchParams = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(current.timeout_s, Some(60));
+        assert_eq!(current.response_mode.as_deref(), Some("full"));
+        value["timeout_s"] = serde_json::json!(1.5);
+        assert!(serde_json::from_value::<TaskDispatchParams>(value).is_err());
+    }
 }

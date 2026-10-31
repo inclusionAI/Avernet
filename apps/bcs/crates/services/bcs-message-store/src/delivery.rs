@@ -207,7 +207,7 @@ pub(crate) fn apply_changes(
     Ok(())
 }
 
-fn row_to_delivery(row: DbRow) -> Result<PersistedMessageDelivery, MessageDeliveryRepoError> {
+pub(crate) fn row_to_delivery(row: DbRow) -> Result<PersistedMessageDelivery, MessageDeliveryRepoError> {
     let result = decode_delivery(&row);
     if result.is_err() {
         // Bounded, metadata-only diagnostics. Serde errors may contain input
@@ -572,8 +572,15 @@ impl MessageDeliveryRepoPort for MySqlMessageStore {
         Ok(BoundDeliveryContexts { rows, total: total as u64 })
     }
     async fn lookup(&self, scope: DeliveryLookup) -> Result<Vec<PersistedMessageDelivery>, MessageDeliveryRepoError> {
+        if let DeliveryLookup::TaskPrefixes { ref prefixes, retained_after_ms, ref legacy_intents } = scope {
+            return crate::task_lookup::lookup_batch(self, prefixes, retained_after_ms, legacy_intents).await;
+        }
+        if let DeliveryLookup::TaskPrefix { ref prefix, retained_after_ms, ref legacy_intents } = scope {
+            return crate::task_lookup::lookup(self, prefix, retained_after_ms, legacy_intents).await;
+        }
         let mut params = vec![self.env.as_str().into()];
         let predicate = match scope {
+            DeliveryLookup::TaskPrefix { .. } | DeliveryLookup::TaskPrefixes { .. } => unreachable!(),
             DeliveryLookup::Ids(ids) => {
                 if ids.len() > 8 { return Err(MessageDeliveryRepoError::Invalid("delivery recovery batch too large".into())); }
                 if ids.is_empty() { return Ok(Vec::new()); }

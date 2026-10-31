@@ -69,7 +69,17 @@ pub(super) async fn maybe_handle_coordination_echo(
         let lease = match port.resolve_and_claim(intent_id, &call.tool, &identity, context.deadline_ms).await? {
             CoordinationClaim::Acquired(lease) => lease,
             CoordinationClaim::Duplicate(Some(result)) if result.status == CoordinationStatus::Applied => return Ok(None),
-            CoordinationClaim::Duplicate(_) => return Err(ServiceError::Conflict("coordination_previous_outcome_unknown_or_failed".into())),
+            CoordinationClaim::Duplicate(Some(result)) if result.status == CoordinationStatus::Failed => return Ok(None),
+            CoordinationClaim::Duplicate(_) => {
+                if call.tool == TOOL_ASSIGN_TASK {
+                    crate::task_rejection::notice(flow, &TaskDispatchCommand {
+                        caller_delegation: None,
+                        driver_bot_id:cmd.bot_id.clone(), group_id:cmd.group_id.clone(), target_bot_id:String::new(), target_bot_name:None,
+                        payload:serde_json::json!({"assignment_intent_id":call.intent_id, "bcs_session_id":cmd.bcs_session_id}),
+                    }, None).await?;
+                }
+                return Err(ServiceError::Conflict("coordination_previous_outcome_unknown_or_failed".into()));
+            },
         };
         let active = match &flow.bot_run_context {
             Some(runs) => runs.get_context(&cmd.run_id).await,
@@ -90,6 +100,8 @@ pub(super) async fn maybe_handle_coordination_echo(
         let result = match &dispatched {
             Ok(Some(outcome)) => CoordinationResult { status: CoordinationStatus::Applied,
                 task_id: outcome.task_id.clone(), error_code: None },
+            Err(error) if crate::task_rejection::is_rejected(error) => CoordinationResult {
+                status: CoordinationStatus::Failed, task_id: None, error_code: Some("task_dispatch_rejected".into()) },
             _ => CoordinationResult { status: CoordinationStatus::Unknown,
                 task_id: None, error_code: Some("coordination_execution_not_confirmed".into()) },
         };
@@ -148,6 +160,7 @@ pub(super) async fn dispatch_coordination_call(
                 "message": message,
                 "assignment_intent_id": call.intent_id,
             });
+            if let Some(timeout) = call.arguments.get("timeout_s") { payload["timeout_s"] = timeout.clone(); }
             if let Some(response_mode) = coordination_argument_str(call, "response_mode") {
                 payload["response_mode"] = Value::String(response_mode.to_string());
             }
@@ -188,6 +201,14 @@ pub(super) async fn dispatch_coordination_call(
                         error = %error,
                         "Failed to dispatch bcs_assign_task coordination echo"
                     );
+                    if call.v == 2 && !crate::task_rejection::is_rejected(&error) {
+                        crate::task_rejection::notice(flow, &TaskDispatchCommand {
+                            caller_delegation: None,
+                            driver_bot_id:cmd.bot_id.clone(), group_id:cmd.group_id.clone(),
+                            target_bot_id:target_bot_id.into(), target_bot_name:None,
+                            payload:serde_json::json!({"assignment_intent_id":call.intent_id, "bcs_session_id":cmd.bcs_session_id}),
+                        }, None).await?;
+                    }
                     if call.v == 2 { Err(error) } else { Ok(None) }
                 }
             }

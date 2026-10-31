@@ -102,6 +102,12 @@ pub struct QueuedGroupProjection {
     caller_cancel: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     task: Option<crate::queued_task::TaskIntent>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    task_rejected_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    task_uncertain_id: Option<String>,
+    #[serde(default)]
+    task_control_notice: bool,
     /// Initialization context must survive ordinary history TTL/count limits.
     #[serde(default)]
     required_context: bool,
@@ -396,7 +402,7 @@ impl ManagedDeliveryPreparationService for QueuedGroupPreparation {
             if task.leg == crate::queued_task::TaskLeg::Dispatch) {
             delivery.send_started_at_ms.and_then(|started| u64::try_from(started).ok())
                 .ok_or_else(|| invalid("task send start missing"))?
-                .saturating_add(flow.provider_chat_run_timeout_ms)
+                .saturating_add(flow.provider_chat_run_timeout_ms).max(deadline_ms.saturating_add(crate::delivery_runtime::TASK_ABORT_RESERVE.as_millis() as u64))
         } else { deadline_ms };
         run_context
             .put_context(bcs_service_api::BotRunContext {
@@ -621,7 +627,7 @@ impl QueuedGroupProjection {
             caller_execution: None,
             version: 1, caller_required: false, caller_task: String::new(), caller_delegation: None, caller_lineage: None, caller_channel: None,
             caller_dispatch: None, caller_terminal: None, caller_cancel: None,
-            task: None, required_context, drain_context: false, policy_version: None,
+            task: None, task_rejected_id: None, task_uncertain_id: None, task_control_notice: false, required_context, drain_context: false, policy_version: None,
             driver_bot: snapshot.driver_bot, originator: snapshot.originator,
             participants: snapshot.participants.into_iter().map(|p| ParticipantProjection {
                 id: p.id, name: p.name, role: p.role, is_bot: p.is_bot,
@@ -687,7 +693,7 @@ impl QueuedGroupProjection {
             caller_dispatch: None,
             caller_terminal: None,
             caller_cancel: None,
-            task: None,
+            task: None, task_rejected_id: None, task_uncertain_id: None, task_control_notice: false,
             required_context: false,
             drain_context: false,
             policy_version: None,
@@ -739,6 +745,10 @@ impl QueuedGroupProjection {
     }
 
     fn project_text(&self, text: &str) -> Result<String, String> {
+        if let Some(task) = self.task.as_ref().filter(|task| task.leg == crate::queued_task::TaskLeg::Dispatch) {
+            return Ok(crate::task_presentation::dispatch(&self.sender_name,
+                task.assignment_intent_id.as_deref(), &task.task_id, text));
+        }
         let pattern = match self.text_projection {
             TextProjection::Original => return Ok(text.to_string()),
             TextProjection::RoutedMentions => r"@([-\w\p{Unified_Ideograph}:]+)",
@@ -806,7 +816,9 @@ pub(crate) async fn revalidate_queued_access(
     if session.group_id != row.group_id {
         return Err(invalid("queue session scope mismatch"));
     }
-    if session.status != bcs_service_api::SessionStatus::Running {
+    let rejection_notice = row.flow_kind == DeliveryFlowKind::System
+        && QueuedGroupProjection::decode(row).map_err(|error| invalid(&error))?.task_rejected_id.is_some();
+    if session.status != bcs_service_api::SessionStatus::Running && !rejection_notice {
         return Err(invalid("queue session is no longer running"));
     }
     let mut group = flow
@@ -864,8 +876,19 @@ async fn prepare_queued_group_bounded(
     let payload = read_bounded_queued_payload(repo.as_ref(), row, contexts, total, limits.max_context_messages, limits.max_context_bytes, |d, text| {
         let projection = QueuedGroupProjection::decode(d)?;
         if d.delivery_id == row.delivery_id && projection.task.as_ref().is_some_and(|t| t.leg == crate::queued_task::TaskLeg::Result) {
-            return source.content.get("task_result_text").and_then(|v| v.as_str()).map(str::to_owned)
-                .ok_or_else(|| "canonical task result missing".into());
+            let body = source.content.get("task_result_text").and_then(|v| v.as_str())
+                .ok_or_else(|| "canonical task result missing".to_string())?;
+            let task = projection.task.as_ref().expect("result task checked above");
+            let state = source.content.get("task_state").and_then(|v| v.as_str()).unwrap_or("completed");
+            return Ok(crate::task_presentation::result(task, state, body));
+        }
+        if d.delivery_id == row.delivery_id && d.flow_kind == DeliveryFlowKind::System {
+            if let Some(notice) = source.content.get("task_timeout_notice") {
+                let task: crate::queued_task::TaskIntent = serde_json::from_value(notice["task"].clone())
+                    .map_err(|_| "invalid task timeout notice".to_string())?;
+                let body = notice["body"].as_str().ok_or_else(|| "missing task timeout notice body".to_string())?;
+                return Ok(crate::task_presentation::result(&task, notice["state"].as_str().unwrap_or("timeout_unknown"), body));
+            }
         }
         projection.project_text(text)
     })
@@ -937,6 +960,15 @@ async fn prepare_queued_group_bounded(
         None => BotDeliveryKind::Send,
     };
     let task_id = projection.task.as_ref().map(|t| t.task_id.clone());
+    // Put the current task envelope first, before optional protocol/history text.
+    // Keep the authorized body intact; the matching embedded copy is removed once.
+    let task_heading = projection.task.as_ref().and_then(|task| match task.leg {
+        crate::queued_task::TaskLeg::Dispatch => Some(crate::task_presentation::dispatch(&projection.sender_name,
+            task.assignment_intent_id.as_deref(), &task.task_id, "").trim_end().to_string()),
+        crate::queued_task::TaskLeg::Result => Some(crate::task_presentation::result(task,
+            source.content["task_state"].as_str().unwrap_or("completed"), "").lines().next().unwrap_or("").to_string()),
+        _ => None,
+    });
     let mut frame = if let Some(mut context) = projection.reply_context {
         if !context.message.is_empty()
             || context.recipient.as_deref() != Some(row.target_bot_id.as_str())
@@ -1017,10 +1049,29 @@ async fn prepare_queued_group_bounded(
             Some(&row.session_id),
         )
     };
+    if let (Some(heading), bcs_protocol::BcsFrame::Request(request)) = (task_heading, &mut frame) {
+        if let Some(text) = request.params.as_mut().and_then(|params| params.get_mut("message"))
+            .and_then(|message| message.get_mut("content")).and_then(|blocks| blocks.get_mut(0))
+            .and_then(|block| block.get_mut("text")) {
+            if let Some(body) = text.as_str() {
+                *text = serde_json::Value::String(format!("{heading}\n{}", body.replacen(&format!("{heading}\n"), "", 1)));
+            }
+        }
+    }
     if let (Some(task_id), bcs_protocol::BcsFrame::Request(request)) = (task_id, &mut frame) {
         if let Some(params) = request.params.as_mut() {
             params["task_id"] = serde_json::json!(task_id);
             params["idempotency_key"] = serde_json::json!(row.idempotency_key);
+            if delivery_target.is_http_provider() {
+                if let Some(seconds) = projection.task.as_ref()
+                    .filter(|task| task.leg == crate::queued_task::TaskLeg::Dispatch)
+                    .and_then(|task| task.timeout_s) {
+                    let budget_ms = seconds.saturating_mul(1000)
+                        .saturating_add(crate::delivery_runtime::TASK_ABORT_RESERVE.as_millis() as u64)
+                        .max(flow.provider_chat_run_timeout_ms);
+                    params["timeout_ms"] = serde_json::json!(budget_ms);
+                }
+            }
         }
     }
     if let Some(identity) = source.content.get("channel_sender_identity") {
@@ -1209,6 +1260,7 @@ mod task_result_caller_marks_tests {
         row.semantic_projection_json = dispatch_committed_worker_projection();
         row.semantic_projection_json["task"]["leg"] = serde_json::json!("result");
         let task = crate::queued_task::TaskIntent {
+            timeout_s: None,
             leg: crate::queued_task::TaskLeg::Result,
             task_id: "t1".into(), manager: "bot-driver".into(), worker: "bot-worker".into(),
             worker_name: "Worker".into(),
@@ -1253,6 +1305,7 @@ mod task_result_caller_marks_tests {
         // result leg is never an association carrier.
         row.semantic_projection_json["caller_lineage"] = serde_json::json!("delegation_only");
         let task = crate::queued_task::TaskIntent {
+            timeout_s: None,
             leg: crate::queued_task::TaskLeg::Result,
             task_id: "t1".into(), manager: "bot-driver".into(), worker: "bot-worker".into(),
             worker_name: "Worker".into(),

@@ -145,7 +145,7 @@ impl ManagedMessageDelivery {
         if let Some(reply) = &command.reply { bots.extend(reply.targets.iter().map(|t| t.target_bot_id.clone())); }
         if command.reply.is_none() && matches!(command.event, Event::Failed | Event::Aborted | Event::AbortUnconfirmed | Event::CancelRequested
             | Event::PreparationFailed | Event::TransportRejected | Event::ResolveStopped | Event::ResolveNotSent
-            | Event::DefinitelyNotSent { .. }) {
+            | Event::DefinitelyNotSent { .. } | Event::TransportUnknown | Event::Recover) {
             if let Some(task) = crate::queued_task::intent(&initial).map_err(|e| MessageDeliveryRepoError::Storage(e.to_string()))? {
                 if task.leg == crate::queued_task::TaskLeg::Dispatch { bots.push(task.manager); }
             }
@@ -325,8 +325,18 @@ impl ManagedMessageDelivery {
         {
             primary.last_error_code = Some("unknown_ttl_expired".into());
         }
+        if event == Event::AbortUnconfirmed && command.transport_context_json.as_ref().and_then(|v| v.get("task_cancel_rejected")).and_then(|v| v.as_bool()) == Some(true) {
+            primary.last_error_code = Some("task_cancel_rejected".into());
+        }
         if event == Event::Failed {
             primary.last_error_code = Some(BOT_TERMINAL_ERROR_CODE.into());
+        }
+        if let Some(reply) = &command.reply {
+            let marker = if reply.message_id.starts_with("task-unknown:") { Some("task_uncertainty_notified") }
+                else if reply.message_id.starts_with("task-timeout-unknown:") { Some("task_timeout_notified") } else { None };
+            if let Some(marker) = marker {
+                primary.transport_context_json.get_or_insert_with(|| serde_json::json!({}))[marker] = serde_json::json!(true);
+            }
         }
         if manual {
             let metadata = primary.transport_context_json.get_or_insert_with(|| serde_json::json!({}));
@@ -518,6 +528,7 @@ impl ManagedMessageDelivery {
             event,
             Event::CancelRequested | Event::WithdrawBoundContext | Event::ScopeAbortRequested
         ) {
+            primary.cancel_reason = cancel_reason.clone().or(primary.cancel_reason);
             if let Some(reason) = cancel_reason {
                 primary.transport_context_json.get_or_insert_with(|| serde_json::json!({}))["cancel_reason"] = serde_json::json!(reason);
             }
@@ -682,6 +693,10 @@ impl ManagedMessageDelivery {
 
 #[async_trait]
 impl ManagedMessageDeliveryService for ManagedMessageDelivery {
+    fn subscribe_changes(&self) -> Option<tokio::sync::broadcast::Receiver<Vec<PersistedMessageDelivery>>> {
+        Some(self.subscribe())
+    }
+
     /// Typed caller dispatch commit (§7.5.1): the only legitimate producer of
     /// the `caller_dispatch` projection keys. Six-field association must match
     /// the committed row exactly (env/target/session/run/attempt/dispatch);
@@ -1136,7 +1151,15 @@ impl ManagedMessageDeliveryService for ManagedMessageDelivery {
                     bcs_domain::message_delivery::DeliveryFlowKind::Task => policy.policy.manages_task(&target.target_bot_id),
                     _ => policy.policy.manages_group(&target.target_bot_id),
                 };
-                if (!enabled && !drain)
+                // Task-control notices are server-produced outcomes, not ordinary
+                // chat/system admission. They must work with task-only policy and
+                // a Manager whose own task queue is off; the scheduler still owns
+                // their durable Send and enforces lane ordering/capacity.
+                let task_notice = command.flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::System
+                    && command.message.sender_id == "system" && command.message.sender_type == bcs_domain::SenderType::System
+                    && command.message.client_msg_id.as_deref().is_some_and(|key| key.starts_with("task-rejected:") || key.starts_with("task-dispatch-unknown:") || key.starts_with("task-unknown:") || key.starts_with("task-timeout-unknown:"))
+                    && target.semantic_projection_json.get("task_control_notice").and_then(|v| v.as_bool()) == Some(true);
+                if (!enabled && !drain && !task_notice)
                     || (drain && target.semantic_projection_json.get("policy_version").and_then(|v| v.as_u64()) != Some(policy.version))
                     || target.semantic_projection_json.get("policy_version").and_then(|v| v.as_u64()).is_some_and(|version| version != policy.version) {
                     return Err(ManagedDeliveryError::Conflict);

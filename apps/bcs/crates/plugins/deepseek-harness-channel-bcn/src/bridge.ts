@@ -28,7 +28,8 @@ import { createBcsRouteTool } from './route-tool.js';
 import { dshSessionIdForV2, resolveBcnSessionIdentity } from './session-identity.js';
 import {
   createBcsAssignTaskTool,
-  createBcsSendTaskMessageTool,
+  createBcsTaskStatusTool,
+  createBcsCancelTaskTool,
   createBcsTaskCompleteTool,
 } from './task-tools.js';
 import type { BcnWsClient } from './ws-client.js';
@@ -232,9 +233,13 @@ export class BcnBridge {
     message: string,
     responseMode: string | undefined,
     signal: AbortSignal,
+    timeoutS?: number,
   ): Promise<JsonValue> {
     const run = this.activeRunForTaskTool(agent, 'manager');
     if (!run) return taskToolUnavailable();
+    if (timeoutS !== undefined && (!Number.isSafeInteger(timeoutS) || timeoutS <= 0)) {
+      return taskToolInvalid("'timeout_s' must be a positive integer.");
+    }
     const normalizedTarget = targetBot.trim();
     const normalizedMessage = message.trim();
     if (!normalizedTarget || !normalizedMessage) {
@@ -251,6 +256,7 @@ export class BcnBridge {
       target_bot: normalizedTarget,
       message: normalizedMessage,
       ...(responseMode ? { response_mode: responseMode } : {}),
+      ...(timeoutS !== undefined ? { timeout_s: timeoutS } : {}),
     };
     const response = await this.sendTaskRequest('task.dispatch', params, signal);
     if (!response.ok) return taskRequestFailure(response, 'TASK_DISPATCH_FAILED');
@@ -259,9 +265,24 @@ export class BcnBridge {
     if (!taskId) return taskToolInvalidResponse('task.dispatch');
     return {
       ok: true,
-      task_id: taskId,
+      task_ref: `T-${taskId.replaceAll('-', '').slice(0, 8).toLowerCase()}`,
       status: asNonEmptyString(payload?.status) ?? 'dispatched',
     };
+  }
+
+  async taskControl(agent: Agent | undefined, method: 'task.status' | 'task.cancel', params: Record<string, unknown>, signal: AbortSignal): Promise<JsonValue> {
+    if (!this.activeRunForTaskTool(agent, 'manager')) return taskToolUnavailable();
+    try {
+      const response = await this.sendTaskRequest(method, params, signal);
+      if (!response.ok) {
+        if (method === 'task.cancel') return { ref: String(params.task_ref), status: 'unknown' };
+        return taskRequestFailure(response, 'TASK_CONTROL_FAILED');
+      }
+      return response.payload as JsonValue;
+    } catch (error) {
+      if (method === 'task.cancel') return { ref: String(params.task_ref), status: 'unknown' };
+      throw error;
+    }
   }
 
   async sendTaskMessage(
@@ -701,9 +722,10 @@ export class BcnBridge {
         agentCtx.tools.register(createBcsRouteTool(this));
       } else if (toolProfile === 'manager') {
         agentCtx.tools.register(createBcsAssignTaskTool(this));
+        agentCtx.tools.register(createBcsTaskStatusTool(this));
+        agentCtx.tools.register(createBcsCancelTaskTool(this));
         agentCtx.tools.register(createBcsTaskCompleteTool(this));
-      } else if (toolProfile === 'worker') {
-        agentCtx.tools.register(createBcsSendTaskMessageTool(this));
+
       }
     };
     const agentOptions = {
@@ -740,7 +762,7 @@ export class BcnBridge {
   }
 
   private async sendTaskRequest(
-    method: 'task.dispatch' | 'task.message' | 'task.complete',
+    method: 'task.dispatch' | 'task.message' | 'task.complete' | 'task.status' | 'task.cancel',
     params: Record<string, unknown>,
     signal: AbortSignal,
   ): Promise<ResponseFrame> {
