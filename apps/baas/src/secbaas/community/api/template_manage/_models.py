@@ -5,9 +5,9 @@ api/domain → api/{domain_name}/ refactoring.
 """
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from secbaas.community.api.device_manage import K8sOutboundProxyRule
 from secbaas.community.api.tenant_manage import ImagePullPolicy, TenantType
@@ -44,6 +44,21 @@ class ArcaTemplateConfig(BaseModel):
     api_key: str = Field(..., description="ARCA API 密钥")
     encrypt_api_key: bool = Field(
         default=False, description="api_key已是密文（由系统强制保证）"
+    )
+    arca_tenant_id: (
+        Annotated[
+            str,
+            StringConstraints(
+                strict=True,
+                min_length=1,
+                max_length=128,
+                pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$",
+            ),
+        ]
+        | None
+    ) = Field(
+        default=None,
+        description="Explicit ARCA platform routing tenant (not the BaaS tenant); None disables optional NAS recovery",
     )
     app_name: str = Field(default="secbaas", description="应用名称")
     arca_template_id: str | None = Field(
