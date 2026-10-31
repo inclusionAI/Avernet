@@ -33,6 +33,7 @@ from agentclaw.community.core.service_bot.services.baas_api_response import (
 from agentclaw.community.core.service_bot.baas_service_errors import (
     BaasBotNotFoundError,
     BaasNoActiveDevicesError,
+    BaasPublishConflictError,
     BaasServiceError,
     BaasTransientServiceError,
 )
@@ -1299,15 +1300,35 @@ class BaasService:  # pragma: no cover
             return result
 
         except httpx.HTTPStatusError as e:
+            try:
+                payload = e.response.json()
+            except ValueError:
+                payload = None
+            detail = payload.get("detail") if isinstance(payload, dict) else None
             if e.response.status_code == 404:
-                try:
-                    payload = e.response.json()
-                except ValueError:
-                    payload = None
-                detail = payload.get("detail") if isinstance(payload, dict) else None
                 if isinstance(detail, dict) and detail.get("error_code") == "BOT_NOT_FOUND":
                     logger.info("[BaasService.destroy_bot] Target already absent: bot_uuid=%s", bot_uuid)
                     raise BaasBotNotFoundError("BaaS target Bot does not exist") from e
+            if (
+                e.response.status_code == 409
+                and isinstance(detail, dict)
+                and detail.get("error_code") == "PUBLISH_CONFLICT"
+            ):
+                # A 409 PUBLISH_CONFLICT on destroy means the bot already has an
+                # active publish; it is a business conflict the caller can retry
+                # or expose to the user, not an internal failure. Keep the full
+                # BaaS payload visible for diagnostics.
+                message = detail.get("message") or e.response.text
+                logger.warning(
+                    "[BaasService.destroy_bot] Publish conflict detected: "
+                    "bot_uuid=%s status=%s detail=%s",
+                    bot_uuid,
+                    e.response.status_code,
+                    detail,
+                )
+                raise BaasPublishConflictError(
+                    status_code=e.response.status_code, message=message
+                ) from e
             logger.error(
                 f"[BaasService.destroy_bot] "
                 f"HTTP error: {e.response.status_code} - {e.response.text}"
