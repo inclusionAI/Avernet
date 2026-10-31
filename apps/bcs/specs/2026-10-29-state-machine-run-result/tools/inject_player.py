@@ -13,6 +13,8 @@ from pathlib import Path
 import signal
 import sqlite3
 import re
+import random
+import secrets
 import subprocess
 import time
 import urllib.error
@@ -53,6 +55,18 @@ def save(path, evidence):
     os.replace(tmp, path)
 
 
+def select_candidate(nodes, workers, seed, minimum=1):
+    candidates = sorted(
+        (n for n in nodes if n["status"] == "running" and n.get("assignee_bot_id") in workers
+         and n["node_id"] != "vote_start"
+         and (n["node_id"].startswith("speak_") or n["node_id"].startswith("vote_"))),
+        key=lambda n: (n["assignee_bot_id"], n["node_id"], n["attempt"]),
+    )
+    if len(candidates) < minimum:
+        raise ValueError(f"only {len(candidates)} eligible candidates; need {minimum}")
+    return random.Random(seed).choice(candidates), candidates
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="http://127.0.0.1:21000")
@@ -60,10 +74,15 @@ def main():
     parser.add_argument("--run", required=True)
     parser.add_argument("--worker", action="append", required=True, metavar="PID=DSH_HOME")
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--seed", type=int, help="random seed for reproducible player selection")
+    parser.add_argument("--min-candidates", type=int, default=1, help="minimum eligible nodes required before injection")
+    parser.add_argument("--queue-config", default="unverified", help="observed queue configuration label")
     parser.add_argument("--observation-seconds", type=int, default=720)
     parser.add_argument("--sqlite", required=True, type=Path, help="local SQLite database for delivery and manager trace times")
     parser.add_argument("--referee-state-dir", type=Path, help="referee undercover-game directory to verify successor scope")
     args = parser.parse_args()
+    if args.min_candidates < 1:
+        parser.error("--min-candidates must be positive")
     if args.output.exists():
         raise ValueError("evidence output already exists")
     workers = {}
@@ -81,10 +100,8 @@ def main():
     run = get(f"{url}/state-machine-runs/{args.run}")
     if run["run"]["session_id"] != args.session or run["run"]["status"] != "running":
         raise ValueError("Run is not active in the requested session")
-    candidates = [n for n in run["nodes"] if n["status"] == "running" and n.get("assignee_bot_id") in workers]
-    if not candidates:
-        raise ValueError("no selected player is executing a node")
-    node = candidates[0]
+    seed = args.seed if args.seed is not None else secrets.randbits(64)
+    node, eligible = select_candidate(run["nodes"], workers, seed, args.min_candidates)
     bot = node["assignee_bot_id"]
     if bot == run["run"].get("created_by"):
         raise ValueError("refusing to kill the Run creator")
@@ -118,12 +135,20 @@ def main():
         active = db.execute("SELECT COUNT(*) FROM bcs_state_machine_node_runs n JOIN bcs_state_machine_runs r ON r.run_id=n.run_id AND r.env=n.env WHERE n.assignee_bot_id=? AND n.status='running' AND r.status='running'", (bot,)).fetchone()[0]
     if active != 1:
         raise ValueError("selected worker is active in another Run")
+    try:
+        policy = get(f"{url}/admin/message-delivery/policy")
+        queue_policy = {"version": policy.get("version"),
+                        "flow_enabled": policy.get("policy", {}).get("flow_enabled"),
+                        "default_mode": policy.get("policy", {}).get("defaults", {}).get("mode")}
+    except (OSError, urllib.error.URLError, ValueError):
+        queue_policy = None
     pidfd = os.pidfd_open(pid)
     if process(pid, home)[0] != start:
         os.close(pidfd)
         raise ValueError("PID changed during verification")
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    evidence = {"session_id": args.session, "run_id": args.run, "node_id": node["node_id"],
+    evidence = {"selection_seed": seed, "eligible_count": len(eligible), "eligible_nodes": [{"node_id": n["node_id"], "worker_id": n["assignee_bot_id"], "attempt": n["attempt"]} for n in eligible], "queue_config": args.queue_config, "queue_policy": queue_policy,
+                "session_id": args.session, "run_id": args.run, "node_id": node["node_id"],
                 "node_attempt": node["attempt"], "worker_id": bot, "pid": pid,
                 "T0_kill_ms": None, "T1_terminal_ms": None, "T2_send_started_ms": None,
                 "T3_manager_started_ms": None, "T4_new_run_running_ms": None,

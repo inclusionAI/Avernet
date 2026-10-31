@@ -146,6 +146,19 @@ class RunRecoveryTest(unittest.TestCase):
         self.assertEqual(result["action"], "retry-speak")
         self.assertEqual(uc.load_state(self.session)["recovery"]["current"]["run_id"], "accepted-but-lost")
 
+    def test_lost_response_with_unrelated_nonce_cannot_be_reconciled(self):
+        self.prepare("speak")
+        def lost(session, yaml, input_path, *other):
+            self.record("unrelated-run", "failed", "node_failed", "different-reference")
+            raise RuntimeError("response lost")
+        with patch.object(uc, "bcs_cli", side_effect=self.cli), patch.object(uc, "require_run_slot"), \
+             patch.object(uc, "submit_run", side_effect=lost), self.assertRaises(RuntimeError):
+            uc.cmd_open_round(argparse.Namespace(session=self.session, retry=True, failed_run="old-run"))
+        with patch.object(uc, "bcs_cli", side_effect=self.cli), self.assertRaises(SystemExit):
+            uc.recovery().inspect(self.session, "unrelated-run")
+        self.assertEqual(uc.load_state(self.session)["recovery"]["current"]["state"], "uncertain")
+        self.assertEqual(self.submissions, [])
+
 
 if __name__ == "__main__":
     unittest.main()
