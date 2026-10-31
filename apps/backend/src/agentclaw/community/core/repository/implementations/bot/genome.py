@@ -484,9 +484,12 @@ def _move_pair(
 
     Re-promoting the revision ``active`` already points at (``revision_id == expected_active``) moves
     ``active`` onto itself (a logged, versioned move) and leaves ``previous`` as the one step back.
-    ``active_labels`` are ``active``'s new labels; ``previous`` takes none.
+    ``active_labels`` are ``active``'s new labels; ``previous`` takes the labels the old ``active`` had, so a
+    revision that was only partly delivered still says so when the bot goes back to it.
     """
     axes = dict(env=env, entity_id=entity_id, bot_id=bot_id)
+    old_active = _ref_row(session, **axes, name="active")
+    old_labels = old_active.labels if old_active is not None else "[]"
     active = _cas_move(
         session,
         **axes,
@@ -505,6 +508,7 @@ def _move_pair(
             name="previous",
             revision_id=expected_active,
             expected=current.revision_id if current is not None else None,
+            labels=old_labels,
             **stamp,
         )
     return active, previous

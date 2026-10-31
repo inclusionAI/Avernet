@@ -488,7 +488,9 @@ def test_settling_moves_the_pair_labels_active_and_marks_the_revision_in_one_tra
     assert _settle(promotions, "b" * 32) is SettleResult.SETTLED
     by_name = {r.name: r for r in refs.list(**BOT)}
     assert (by_name["active"].revision_id, by_name["active"].labels) == (R2, "[]"), "a complete move clears the label"
-    assert (by_name["previous"].revision_id, by_name["previous"].labels) == (R1, "[]")
+    assert (by_name["previous"].revision_id, by_name["previous"].labels) == (R1, '["partial"]'), (
+        "previous keeps the labels it had as active: going back to it says it was only partly delivered"
+    )
 
 
 def test_a_lost_compare_and_swap_moves_nothing_and_fails_the_promotion(db):

@@ -240,8 +240,9 @@ class GenomeRefPayload(BaseModel):
     reason: str | None = Field(default=None, description="Why, as the mover said.")
     labels: list[str] = Field(
         default_factory=list,
-        description="What its last move says about it. Today only `partial`, on `active`: the promotion that moved it "
-        "delivered only part of the revision (its apply ended `PARTIAL`). Empty otherwise.",
+        description="What its last move says about it. Today only `partial`: on `active`, the promotion that moved it "
+        "delivered only part of the revision (its apply ended `PARTIAL`); on `previous`, the label it had as `active`, "
+        "carried along when the next promotion moved it there. Empty otherwise.",
     )
 
 
