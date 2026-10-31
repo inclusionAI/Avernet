@@ -1,0 +1,35 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/edge_permission_backlog/density_case_run.py
+  s_cecdc98e721f4b::t_6d6467c25e9e05 1-360
+apps/bcs/scripts/e2e-runner/bcs_e2e/edge_permission_backlog/density_contract.py
+  s_cecdc98e721f4b::t_4ed474a09dc1ce 1-332
+apps/bcs/scripts/e2e-runner/bcs_e2e/edge_permission_backlog/density_eval.py
+  s_cecdc98e721f4b::t_bffbd201224a1d 1-495
+apps/bcs/scripts/e2e-runner/bcs_e2e/edge_permission_backlog/density_local_arm.py
+  s_cecdc98e721f4b::t_436a62b698fa3f 1-555
+apps/bcs/scripts/e2e-runner/bcs_e2e/edge_permission_backlog/density_obligations.py
+  s_cecdc98e721f4b::t_28ba7ed68e7a1b 1-828
+apps/bcs/scripts/e2e-runner/bcs_e2e/edge_permission_backlog/density_preprod_arm.py
+  s_cecdc98e721f4b::t_b8f5562d994f3d 1-491
+apps/bcs/scripts/e2e-runner/bcs_e2e/edge_permission_backlog/density_registration_proposal.py
+  s_cecdc98e721f4b::t_8b9608bcb26398 1-277
+apps/bcs/scripts/e2e-runner/bcs_e2e/edge_permission_backlog/density_reporting.py
+  s_cecdc98e721f4b::t_850727f4043bf2 1-227
+apps/bcs/scripts/e2e-runner/tests/test_edge_read_density.py
+  s_cecdc98e721f4b::t_183e0b133555dd 1-840
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "98d40e2548430a58ff62f6b506b5aaa2a29cb397",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
