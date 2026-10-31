@@ -629,6 +629,49 @@ async def test_legacy_mapping_contract_unavailable_is_not_retryable(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["publish_mappings", "verify_mappings"])
+@pytest.mark.parametrize("status_code", [500, 502, 503], ids=["500", "502", "503"])
+async def test_mapping_5xx_is_pending_and_logged_as_transient(
+    caplog,
+    operation: str,
+    status_code: int,
+) -> None:
+    transport = FakeTransport()
+
+    async def reject(*_args, **_kwargs):
+        raise DeviceAdapterHTTPStatusError(status_code, "runtime unavailable")
+
+    transport.invoke = reject
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=FakeResolver(),
+        adapter_transport=transport,
+        probe_service=FakeProbe(),
+    )
+    caplog.set_level(logging.INFO)
+
+    result = await getattr(runtime, operation)(
+        bot_id="bot-1",
+        user_id="owner-1",
+        mappings=[],
+    )
+
+    expected_evidence = {
+        "publish_mappings": "runtime_mapping_publish_unavailable",
+        "verify_mappings": "runtime_mapping_verify_unavailable",
+    }[operation]
+    assert result.status is MappingProjectionStatus.PENDING
+    assert result.evidence == {"reason": expected_evidence}
+    transient_records = [
+        record
+        for record in caplog.records
+        if "[skills_pool.runtime] mapping" in record.getMessage()
+    ]
+    assert transient_records[-1].levelno == logging.WARNING
+    assert transient_records[-1].exc_info is None
+    assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
+
+
+@pytest.mark.asyncio
 async def test_pool_runtime_logs_device_context_resolution_timing(caplog) -> None:
     runtime = OpenClawSkillsPoolRuntime(
         resolver=FakeResolver(),
