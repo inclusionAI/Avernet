@@ -82,6 +82,7 @@ from agentclaw.community.core.resources.service import FileTooLargeError
 from agentclaw.community.core.expert_chat.errors import (
     BotNotFoundError as ExpertBotNotFoundError,
     ConnectionError as ExpertConnectionError,
+    SessionCreateError,
 )
 from agentclaw.community.di import Injected
 router = APIRouter(
@@ -118,7 +119,7 @@ _MAX_HISTORY_DEPTH = 5000
 def _raise_expert_error(error: Exception) -> None:
     if isinstance(error, ExpertBotNotFoundError):
         raise EngineResourceNotFoundError("friend session not found") from error
-    if isinstance(error, ExpertConnectionError):
+    if isinstance(error, (ExpertConnectionError, SessionCreateError)):
         raise EngineDeviceNotReadyError("friend bot runtime is not ready") from error
     raise error
 
