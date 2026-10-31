@@ -657,7 +657,7 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
             'mode': 'EDGE_OBLIGATION_IN_FAMILY',
             'preprod_verdict': 'NOT_APPLICABLE',
             'gates': [],
-            'notes': [],
+            'notes': ['WP-B2 族内近似口径如实注：mode 维持 EDGE_OBLIGATION_IN_FAMILY 不变；owned-local 族内分派 per-case 义务 1，回放 LOCAL-EDGE-ENSURE-BOT-01 全绿（migration-coverage-matrix-20261030.tsv 记 REVIEWED-30-SLICED 全绿）；预发 r7 edge-read 家族 rc=0 PASS（admission 叶族内近似覆盖，非独立精确腿）；本行不增资、不改判、不从族近似冒领独立腿信用。'],
         })
         self.assertEqual(rows['story_provider_operator_manages_subbots'], {
             'mode': 'DUAL',
@@ -771,3 +771,28 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
                 self.assertEqual(row['preprod_verdict'], 'PASS')
                 self.assertIn(token, row['notes'])
                 self.assertEqual(len(row['notes']), 1)
+
+    def test_wpb2_edge_family_face_notes_lock_rows(self):
+        statuses = load_executor_migration()
+        face = json.loads(
+            (ROOT / 'executor-migration.json').read_text(encoding='utf-8'))
+        face_by_id = {row['id']: row['executor_migration']
+                      for row in face['rows']}
+        locks = (
+            ('test_ep_admission', 'DUAL', 'PASS'),
+            ('test_ep_friend_connections_friend_requests_list', 'DUAL', 'PASS'),
+            ('test_ep_bot_search', 'DUAL', 'PASS'),
+            ('test_ep_ensure_bot', 'EDGE_OBLIGATION_IN_FAMILY', 'NOT_APPLICABLE'),
+            ('test_ep_friend_connections_friend_revoke', 'DUAL', 'BLOCKED_INVENTORIED'),
+            ('test_ep_friend_connections_full_lifecycle', 'DUAL', 'BLOCKED_INVENTORIED'),
+            ('test_ep_tc_friend_auth_sync_readdressed_principal', 'DUAL', 'NOT_RUN'),
+            ('test_ep_dept_scope_parses_object_friend_ext_entries', 'DUAL', 'NOT_RUN'),
+        )
+        for case_id, mode, verdict in locks:
+            with self.subTest(case_id=case_id):
+                row = statuses[case_id]
+                self.assertEqual(row['mode'], mode)
+                self.assertEqual(row['preprod_verdict'], verdict)
+                self.assertEqual(row['gates'], [])
+                self.assertEqual(len(row['notes']), 1)
+                self.assertEqual(row['notes'], face_by_id[case_id]['notes'])

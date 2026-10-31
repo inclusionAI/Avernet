@@ -399,7 +399,14 @@ class DualEdgePermissionBacklogRegistrationTests(unittest.TestCase):
                 self.assertEqual(rows[case_id]['mode'], 'DUAL')
                 self.assertEqual(rows[case_id]['preprod_verdict'], 'NOT_RUN')
                 self.assertEqual(rows[case_id]['gates'], [])
-                self.assertEqual(rows[case_id]['notes'], [])
+                self.assertEqual(len(rows[case_id]['notes']), 1)
+                note = rows[case_id]['notes'][0]
+                self.assertTrue(
+                    note.startswith('WP-B2 backlog 密度闭合（契约层）：committed '))
+                fragment = ('tc-friend-auth-sync'
+                            if case_id == 'test_ep_tc_friend_auth_sync_readdressed_principal'
+                            else 'dept-scope-friend-ext')
+                self.assertIn(fragment, note)
 
 if __name__ == '__main__':
     unittest.main()

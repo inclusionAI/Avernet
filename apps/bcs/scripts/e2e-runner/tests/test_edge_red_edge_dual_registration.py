@@ -57,12 +57,19 @@ class EdgeRedEdgeDualRegistrationTests(unittest.TestCase):
                 "test_ep_dept_scope_parses_object_friend_ext_entries",
             }
         }
-        for status in by_legacy.values():
-            with self.subTest(status=status):
+        for case_id, status in by_legacy.items():
+            with self.subTest(case_id=case_id):
                 self.assertEqual(status["mode"], "DUAL")
                 self.assertEqual(status["preprod_verdict"], "NOT_RUN")
                 self.assertEqual(status["gates"], [])
-                self.assertEqual(status["notes"], [])
+                self.assertEqual(len(status["notes"]), 1)
+                note = status["notes"][0]
+                self.assertTrue(
+                    note.startswith("WP-B2 backlog 密度闭合（契约层）：committed "))
+                fragment = ("tc-friend-auth-sync"
+                            if case_id == "test_ep_tc_friend_auth_sync_readdressed_principal"
+                            else "dept-scope-friend-ext")
+                self.assertIn(fragment, note)
 
         parser = argparse.ArgumentParser()
         subparsers = parser.add_subparsers(dest="command", required=True)
